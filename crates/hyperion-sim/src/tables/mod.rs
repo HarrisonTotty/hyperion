@@ -26,6 +26,7 @@ pub mod period_correction;
 pub mod stellar_fates_high;
 pub mod stellar_fates_low;
 pub mod stellar_fates_mid;
+pub mod streams;
 pub mod stripping;
 pub mod wd_cooling;
 

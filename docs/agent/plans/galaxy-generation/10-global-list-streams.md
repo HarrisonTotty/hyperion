@@ -297,6 +297,9 @@ Risks. The step rule, T2.b's energy tests and T2.c's acceptance follow ruling 14
 
 ### P10.T3 Which debris gets a tube
 
+_T3.a–c built (lane `int10c`, 2026-09-30, on `62cbe2f` at `GENERATOR_VERSION` 15); see "T3.a–c as
+built" in Risks. T3.d waits for v16._
+
 - **P10.T3.a Living globulars.** For each record of `walk_process(Globular)`: pericentre from
   P09.T13; no tube if it lies inside the bar's corotation; T_s per design note 5; tube mass = the
   mass lost within T_s from the history of P09.T13. Tests: at Milky Way parameters about a fifth
@@ -637,6 +640,97 @@ OrbitState, steps: u32) -> OrbitSummary`, which leaves the state at the end. `Or
     which `wasm32-wasip1` lacks, and `planetary_rocky_properties`'s
     `rocky_core_mass_fractions_follow_plotnykov_and_valencia` hits a multiply overflow under
     wasm32 (not traced). For the owner. (c) The source scan passes.
+- **T3.a–c as built (lane `int10c`, 2026-09-30, on `62cbe2f` at `GENERATOR_VERSION` 15; T3.d
+  deferred until after v16).** No output moved: nothing reads the debris yet, and the one golden
+  touched, `rng/tags.golden`, gains only the five appended tags. **Every figure below is v15's and
+  moves with the potential, which pot02 revises for v16: the pins are provisional and are
+  re-measured on the v16 commit.**
+  - _Items._ `global_list::Debris` (new: `generate(&Galaxy)`, `streams()`, `cores()`,
+    `cores_beyond_limit()`), the numbered list P10.T4 builds from; `global_list::spec::{StreamSpec,
+DwarfCoreSpec, SphericalOrbit, MassLoss, ClusterStars, FREQUENCY_SPREAD}`, the five re-exported
+    from `global_list`; `orphans::{MASS_LAW, MassLaw, APOCENTRE_LIMIT_LY, ORBIT_ATTEMPTS,
+ORBIT_WORDS}`; `dwarfs::{STRIPPING_FRACTION, CORE_MIN_SYSTEMS, APOCENTRE_WINDOW_LY}`; plan 15's
+    `tables::streams::ORPHAN_STREAMS_PER_GLOBULAR`, provisional 1.5 with no manifest entry, for
+    P15.T11.a to take over; crate-visible `kinematics::draw_on_from`, plan 08's draw from a given
+    word (`draw_on` is it at word 0, bit for bit). Tags, all `Galaxy`-scoped:
+    `stream.orphan.{count, marks, orbit}`, `dwarf.{orbit, stripping}`. `Debris::generate` panics
+    without the kinematic tables. `DwarfCoreNumber`'s doc still says "0–3 cores"; see the cores below.
+  - _Orbits by quadrature, not integration._ A spec's orbit is `SphericalOrbit`: in the mid-plane
+    potential taken as spherical (P09.T13's approximation), the turning points, `E` and `L` from
+    them, and by a 16-panel, 32-point Gauss–Legendre quadrature of `dr ÷ v_r` in θ (`r = r̄ + ½ (r_a
+− r_p) sin θ`) the radial period and the angle swept in it, whose ratio is Ω̄. Reason: the
+    dwarfs' figures then need only the parameters, the seed (for `dwarf.orbit` and
+    `dwarf.stripping`) and the in-plane tables, as Design note 1 needs of P10.T3.d, and the
+    2,000-seed sweep needs no (R, z) grid. **So P10.T3.d's `discrete_share` must take the `Seed`
+    (or the `Galaxy`) as well as Provides' `(&GalaxyParams, &PotentialTables)`**: a dwarf's cold
+    mass depends on its drawn stripping fraction. The leapfrog integrates the specs
+    later (P10.T4, T5). **Cross-check** (slow test): every fourth spec of one Milky Way galaxy,
+    integrated at ruling 146's step for three radial periods, gives Ω̄ 0.866–1.000 of the
+    quadrature's (median 0.991) and a pericentre 1.000–1.148 of the spherical one (median 1.006),
+    none inside corotation (asserted).
+  - _Where the step rule's `v_p` comes from (int10b's open point)._ `SphericalOrbit::
+pericentre_speed()`, `|L| ÷ r_p` of the spherical approximation, which is `√(2 [E − Φ(r_p)])` with
+    the epoch state's `E`; `SphericalOrbit::fixed_step(span)` is `FixedStep::new(r_p, v_p, span)`.
+    P10.T4 and T5 take the step from the spec.
+  - _Design note 5._ η's constant `FREQUENCY_SPREAD` is 2, not 1: a star released at `r_p + r_t`
+    with the progenitor's angular speed differs in energy by `2 v_c² r_t ÷ r_p` in a flat curve
+    (science check of Johnston 1998, ApJ 495, 297, §2.2 eqs. 4, 8, 11, 13, and Johnston, Sackett and
+    Bullock 2001, ApJ 557, 137, eqs. 3 and 5). `T_s` also stops at the cluster's age. The living
+    globulars' median `T_s` on the fixture is the last major merger's 10 Gyr (the science check
+    puts a 10⁴–10⁵ M☉ cluster's wrap time at 30 kpc at 40–180 Gyr).
+  - _Keys, against Design note 14._ An orphan's draws are keyed by `galaxy_item` of its place among
+    the orphans and a dwarf's by its progenitor number `6 + j`, not by stream number, so that
+    neither moves when the count of streams before it changes. P10.T5's spray still keys by stream
+    number. Dwarf streams are numbered most recent first, ties by `j`.
+  - _T3.a._ `bulk_velocity`, `history` (P09.T13), then a tube if the pericentre lies outside
+    corotation (19,840 ly on the fixture); its mass is the history's rate × `T_s`. **Finding:
+    0.036 of globulars qualify** (46 of 1,264 over eight fixture seeds), against the plan's
+    0.12–0.30. The Baumgardt–Hilker catalogue in `features::testing` gives 0.18 of its 165
+    clusters above 6.08 kpc, and 0.10 of the 141 inside 20 kpc, so plan 09's globular orbits run
+    more radial than the Milky Way's (P09.T14's median pericentre of 1–2.5 kpc holds, but its tail
+    above corotation is thin). Pinned at 0.02–0.06: provisional; ruling deferred. Living tubes' median mass 1.8 ×
+    10⁴ M☉.
+  - _T3.b._ The mass law's 0.5 dex matches the known thin streams (Bonaca and Price-Whelan 2024,
+    arXiv:2405.19410, Table A.1: median 7 × 10³ M☉, 0.53 dex). Radii follow the metal-poor
+    globulars' cored law alone, since an orphan is an accreted cluster, out to 10⁶ ly and uncut at
+    plan 09's 65,000 ly placement cut, because a progenitor's apocentre may lie far beyond it
+    (the plan says only "the globular system's radial law"). Velocities follow the globular-born
+    debris law through `draw_on_from`, each attempt in its own 67-word block of the one stream.
+    After 256 failed attempts an orphan is dropped; none is at the fixture. Measured: 251–300
+    orphans per fixture galaxy, so 260–310 streams against P10.T4's "about 240", which P10.T4
+    checks. Median 10^4.002 M☉ over 2,136 orphans; the test allows
+    0.1 dex, about five times the sample median's error.
+  - _T3.c._ Plan 02's orbital phase is read as the radial phase since pericentre. The argument of
+    pericentre, which plan 02 does not draw, is drawn on `dwarf.orbit`. `r_t` is taken at the
+    stellar mass at accretion. **Finding (science check):** a dwarf's tidal radius is its total
+    bound mass's, 2–10 times larger for halo-to-stellar ratios of 10–1,000, which would shorten
+    its wrap time; plan 02 draws no halo mass; ruling deferred. Cores are
+    kept in the dwarfs' order up to plan 01's four, and the rest are counted in
+    `cores_beyond_limit`.
+  - _Finding: plan 02's recent-progenitor orbits fail the revalidation._ Their apocentres are
+    log-uniform on 20,000–200,000 ly (`ORBIT_APOCENTRE`, shared by all non-dominant progenitors),
+    against the plan's 100,000–500,000: 0.302 of 16,054 progenitors over 2,000 seeds lie in the
+    window, 0.492 have pericentres outside corotation, and all are bound. As drawn, a ≥ 10⁸ M☉
+    progenitor has a tube in 0.127 of galaxies, 0.017 have no core, and up to 12 cores meet the
+    conditions. Not patched here: plan 02's table is pot02's file set; provisional; ruling deferred.
+    The sweep pins these provisionally, and asserts the plan's windows on the same orbits with
+    their apocentres moved to the same quantile of 1–5 × 10⁵ ly. Those give a tube in 0.203 of
+    galaxies and no core in 0.337, both inside the windows, but **51 of 2,000 galaxies (0.026)
+    meet a core's conditions more than three times**, 9 of them more than four times. "0–3 cores"
+    is pinned at 3% above three: provisional; ruling deferred. The test's moved orbits (`revalidated`) assume plan
+    02's log-uniform 2 × 10⁴–2 × 10⁵ ly and must be revised with it. Whether "0–3" is the count or the number field's
+    range, and which cores to keep when more qualify, is for the orchestrator.
+  - _Tests._ Fast: `spec` (Kepler and harmonic orbits in closed form, the half-orbit time, the
+    stripping time), `orphans` (the mass law and the radial law by Kolmogorov–Smirnov, the count),
+    `dwarfs` (pericentre counting, the epoch state on its orbit, one drawn galaxy twice), and
+    `rng::tags`'s plan 10 registration, and a new unwired golden, `galaxy/global_list/dwarfs.golden`
+    (two drawn galaxies' dwarf debris and a Kepler orbit's quadrature, on in-plane tables; it
+    moves with the potential and is re-blessed then). Slow, run by name:
+    `tests/global_list_debris.rs`'s `milky_way_debris_is_numbered_bounded_and_measured` (T3.a–b,
+    the numbering, determinism, the leapfrog cross-check; about 40 s) and
+    `galaxy::global_list::dwarfs::tests::dwarf_tubes_and_cores_meet_plan_10_s_windows_on_revalidated_orbits`
+    (T3.c; about 8 minutes on the loaded lane machine, almost all of it the in-plane tables).
+    P10.T4 still owes the order-independence test of the specs.
 - **The second CI architecture is gone.** `.github/workflows/ci.yml`, with the `rust-aarch64` and
   `rust-wasm32` jobs of P01.T12, was deleted in `751bad8` ("checkpoint"), and no workflow exists at
   `941d80b`. P10.T2.c's "check that the job is still there" fails, and its acceptance, "both

@@ -19,7 +19,7 @@ const ESCAPE_CUT_SCALE: f64 = 0.99;
 
 /// Words per attempt: a `standard_normal_pair` and a `standard_normal`, two words each by plan
 /// 01's Box–Muller.
-const WORDS_PER_ATTEMPT: u64 = 4;
+pub(crate) const WORDS_PER_ATTEMPT: u64 = 4;
 
 /// Metres per second in a kilometre per second.
 const M_PER_KM: f64 = 1_000.0;
@@ -128,6 +128,24 @@ pub(crate) fn draw_on(
     position: &GalacticPosition,
     stream: &mut Stream,
 ) -> VelocityDraw {
+    draw_on_from(galaxy, component, position, stream, 0)
+}
+
+/// [`draw_on`] with its attempts from word `first_word` of `stream` rather than word 0: attempt
+/// `k` at word `first_word + 4k`. Plan 10's orphans redraw a progenitor's whole orbit on one
+/// stream, each attempt at its own block of words (P10.T3.b).
+///
+/// # Panics
+///
+/// As [`draw_velocity`].
+#[must_use]
+pub(crate) fn draw_on_from(
+    galaxy: &Galaxy,
+    component: ComponentId,
+    position: &GalacticPosition,
+    stream: &mut Stream,
+    first_word: u64,
+) -> VelocityDraw {
     let tables = galaxy
         .kinematics()
         .expect("velocities need the kinematic tables, which Galaxy::with_full_potential builds");
@@ -146,7 +164,7 @@ pub(crate) fn draw_on(
     };
     let mut last = [0.0; 3];
     for k in 0..ESCAPE_CUT_ATTEMPTS {
-        stream.seek(WORDS_PER_ATTEMPT * u64::from(k));
+        stream.seek(first_word + WORDS_PER_ATTEMPT * u64::from(k));
         let v = attempt(stream, &ellipsoid, &basis);
         let speed = norm(v);
         if speed < cut {

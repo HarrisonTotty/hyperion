@@ -715,6 +715,30 @@ domain_tags! {
     /// A centre member's primary's initial mass, and a remnant class's redraws: six words per
     /// attempt, the mass, a mark and a pair's systemic velocity, as `member.mass` (P09.T27).
     CENTRE_MASS: System = "centre.mass";
+
+    // Plan 10: the global list's streams and dwarf cores. Every tag has scope `Galaxy`. An
+    // orphan's draws are keyed by `ObjectKey::galaxy_item` of its place among the orphans, and a
+    // dwarf's by its progenitor number, `6 + j` (plan 02's `ProgenitorKind::number`), so that
+    // neither moves when the count of streams before it changes (P10.T3, as built).
+
+    /// The number of orphan streams: one Poisson draw on `ObjectKey::galaxy()` (P10.T3.b).
+    STREAM_ORPHAN_COUNT: Galaxy = "stream.orphan.count";
+
+    /// An orphan's marks: its mass, its dissolution time's share of the stripping time, its age
+    /// (one word each) and its [Fe/H] (two words) (P10.T3.b).
+    STREAM_ORPHAN_MARKS: Galaxy = "stream.orphan.marks";
+
+    /// An orphan progenitor's orbit, redrawn on the one stream: each attempt at its own fixed
+    /// block of words, its radius and direction (three words) then its velocity (P10.T3.b).
+    STREAM_ORPHAN_ORBIT: Galaxy = "stream.orphan.orbit";
+
+    /// A recent dwarf progenitor's argument of pericentre, which plan 02's orbit leaves undrawn:
+    /// one word (P10.T3.c).
+    DWARF_ORBIT: Galaxy = "dwarf.orbit";
+
+    /// A recent dwarf progenitor's share of its bound mass lost at each pericentre: one word
+    /// (P10.T3.c, Design note 11).
+    DWARF_STRIPPING: Galaxy = "dwarf.stripping";
 }
 
 #[cfg(test)]
@@ -954,6 +978,26 @@ mod tests {
         ] {
             assert_eq!(tag.scope(), scope, "{}", tag.name());
             assert!(tag.name().starts_with("class."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    #[test]
+    fn plan_10_registers_its_tags_with_galaxy_scope() {
+        let tags = [
+            STREAM_ORPHAN_COUNT,
+            STREAM_ORPHAN_MARKS,
+            STREAM_ORPHAN_ORBIT,
+            DWARF_ORBIT,
+            DWARF_STRIPPING,
+        ];
+        for tag in tags {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Galaxy, "{}", tag.name());
+            assert!(
+                tag.name().starts_with("stream.") || tag.name().starts_with("dwarf."),
+                "{}",
+                tag.name()
+            );
             assert!(ALL.contains(&tag));
         }
     }

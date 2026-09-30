@@ -14,7 +14,9 @@
 //! number is its progenitor's place among the progenitors that keep a core, in the same order.
 //! Both are pure functions of the seed, so an ID read back from a save names the same stream or
 //! core in every run. The list is built by P10.T4; this module so far holds the numbers, the
-//! kinds, the cache trait and the orbit integrator ([`orbit`]).
+//! kinds, the cache trait, the orbit integrator ([`orbit`]) and the debris the list is built from
+//! ([`Debris`]: which progenitors get a tube or a core, P10.T3, with [`spec`], [`orphans`] and
+//! [`dwarfs`]).
 //!
 //! # Caches
 //!
@@ -23,12 +25,18 @@
 //! [`resolve_with`](crate::galaxy::placement::resolve_with) reads a stream's or a core's member
 //! through it. The sim keeps nothing.
 
+mod debris;
+pub mod dwarfs;
 pub mod orbit;
+pub mod orphans;
+pub mod spec;
 pub mod tube;
 
 use std::error::Error;
 use std::fmt;
 
+pub use debris::Debris;
+pub use spec::{ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec};
 pub use tube::{TubeLookup, TubeTable};
 
 use crate::galaxy::features::{FeatureId, FeatureKind};

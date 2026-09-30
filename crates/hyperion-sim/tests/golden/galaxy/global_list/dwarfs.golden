@@ -1,0 +1,78 @@
+# generator_version = 15
+kepler radial period, yr = 0x41b2cb1f55c3728a  # 315301717.7634665
+kepler azimuthal advance = 0x401921fb5443ae99  # 6.283185307150824
+kepler after 10⁸ yr: r = 0x40ea88676d0783b1  # 54339.23205924722
+kepler after 10⁸ yr: v_r = 0x404e454956fd3be9  # 60.54130065312331
+kepler after 10⁸ yr: angle = 0x40071a0b548a2005  # 2.8877169232037
+seed 000000000a103c00 recent 0: window false corotation true bound true
+seed 000000000a103c00 recent 0 tube mass = 0x412e595a752924bc  # 994477.228829525
+seed 000000000a103c00 recent 0 tube stripping time = 0x41f006475c5c0c0e  # 4301551045.752943
+seed 000000000a103c00 recent 0 tube tidal radius = 0x40819988423b956c  # 563.1915325789428
+seed 000000000a103c00 recent 0 tube radial period = 0x41b74c22e8cd0f12  # 390865640.8010112
+seed 000000000a103c00 recent 0 tube mean angular frequency = 0x3e488e91360936e2  # 1.1435199177456215e-8
+seed 000000000a103c00 recent 0 tube position 0 = 0x442faa47de0edf4e  # 2.9205954307512382e20
+seed 000000000a103c00 recent 0 tube position 1 = 0x43f5b0f1d4e83f6c  # 2.5008239478870295e19
+seed 000000000a103c00 recent 0 tube position 2 = 0xc423b4214137f9fb  # -1.8173393235510647e20
+seed 000000000a103c00 recent 0 tube velocity 0 = 0x4103479bb7509477  # 157939.4645091628
+seed 000000000a103c00 recent 0 tube velocity 1 = 0xc1053da6a027065f  # -174004.82819943407
+seed 000000000a103c00 recent 0 tube velocity 2 = 0x40e955c96c2a71c7  # 51886.29445383284
+seed 000000000a103c00 recent 0 core mass = 0x40851fe99ca0dcf5  # 675.9890682761603
+seed 000000000a103c00 recent 0 core systems = 0x40917a4628d4ac8e  # 1118.5685151319808
+seed 000000000a103c00 recent 0 core stripping fraction = 0x3fdf0667f175a126  # 0.4847659929278215
+seed 000000000a103c00 recent 0 core pericentres 11
+seed 000000000a103c00 recent 1: window false corotation true bound true
+seed 000000000a103c00 recent 1 tube mass = 0x41074645ba985bf1  # 190664.7161109145
+seed 000000000a103c00 recent 1 tube stripping time = 0x419fa504339036aa  # 132727052.89083353
+seed 000000000a103c00 recent 1 tube tidal radius = 0x40746b347917f777  # 326.70031079637505
+seed 000000000a103c00 recent 1 tube radial period = 0x41b1209726136554  # 287348518.0757649
+seed 000000000a103c00 recent 1 tube mean angular frequency = 0x3e509d4530d3eebc  # 1.547330712602721e-8
+seed 000000000a103c00 recent 1 tube position 0 = 0xc4322ea5fdf4a4c4  # -3.35402765250852e20
+seed 000000000a103c00 recent 1 tube position 1 = 0xc40ae6eba3e63c85  # -6.203186492174399e19
+seed 000000000a103c00 recent 1 tube position 2 = 0xc42e98b7ef6335b6  # -2.8220342481758578e20
+seed 000000000a103c00 recent 1 tube velocity 0 = 0xc0f62538bbb0f942  # -90707.54582307211
+seed 000000000a103c00 recent 1 tube velocity 1 = 0x40fa0d0e48776048  # 106704.89269197092
+seed 000000000a103c00 recent 1 tube velocity 2 = 0xc0e8d43963ddda99  # -50849.79344074912
+seed 000000000a103c00 recent 1 core mass = 0x410d58b0ecb7c3e7  # 240406.1155848794
+seed 000000000a103c00 recent 1 core systems = 0x411847ad600f676f  # 397803.34380876174
+seed 000000000a103c00 recent 1 core stripping fraction = 0x3fdc4eb8f7d48e1a  # 0.4423048420160015
+seed 000000000a103c00 recent 1 core pericentres 1
+seed 000000000a103c00 recent 2: window false corotation false bound true
+seed 000000000a103c00 recent 2 core mass = 0x410dbb92396d5852  # 243570.2780405903
+seed 000000000a103c00 recent 2 core systems = 0x4118997c82801341  # 403039.12744169316
+seed 000000000a103c00 recent 2 core stripping fraction = 0x3fbc07fc12c72e2d  # 0.10949683626602598
+seed 000000000a103c00 recent 2 core pericentres 12
+seed 000000000a103c00 recent 3: window false corotation false bound true
+seed 000000000a103c00 recent 3 core mass = 0x409b73c8be87a130  # 1756.9460393135196
+seed 000000000a103c00 recent 3 core systems = 0x40a6b67c71631259  # 2907.243052574148
+seed 000000000a103c00 recent 3 core stripping fraction = 0x3fd5ab89baf0be3a  # 0.338594849165904
+seed 000000000a103c00 recent 3 core pericentres 17
+seed 000000000a103c01 recent 0: window false corotation false bound true
+seed 000000000a103c01 recent 0 core mass = 0x40e86599bb6eb1b0  # 49964.804129931494
+seed 000000000a103c01 recent 0 core systems = 0x40f435572695279b  # 82773.44691958877
+seed 000000000a103c01 recent 0 core stripping fraction = 0x3fc311fabf52e12d  # 0.14898619024257567
+seed 000000000a103c01 recent 0 core pericentres 19
+seed 000000000a103c01 recent 1: window false corotation false bound true
+seed 000000000a103c01 recent 1 core mass = 0x40f3934baca05a80  # 80180.72964511253
+seed 000000000a103c01 recent 1 core systems = 0x410036f1abc98e4c  # 132830.20888053102
+seed 000000000a103c01 recent 1 core stripping fraction = 0x3fd23842324240d1  # 0.28468375118337713
+seed 000000000a103c01 recent 1 core pericentres 14
+seed 000000000a103c01 recent 2: window false corotation false bound true
+seed 000000000a103c01 recent 3: window true corotation true bound true
+seed 000000000a103c01 recent 3 core mass = 0x4109a96f8406beaa  # 210221.93946598965
+seed 000000000a103c01 recent 3 core systems = 0x4115419426decadd  # 348261.0379592607
+seed 000000000a103c01 recent 3 core stripping fraction = 0x3fd9d92747f93f3a  # 0.403878994261493
+seed 000000000a103c01 recent 3 core pericentres 0
+seed 000000000a103c01 recent 4: window true corotation true bound true
+seed 000000000a103c01 recent 4 tube mass = 0x4115ecb86bbcf5d5  # 359214.10521301377
+seed 000000000a103c01 recent 4 tube stripping time = 0x41bf0fdd20736fdd  # 521133344.45092565
+seed 000000000a103c01 recent 4 tube tidal radius = 0x40881e5556d6d7d9  # 771.7916695389387
+seed 000000000a103c01 recent 4 tube radial period = 0x41c45b583d38dea4  # 683061370.4442945
+seed 000000000a103c01 recent 4 tube mean angular frequency = 0x3e3c84843373d656  # 6.639780995194706e-9
+seed 000000000a103c01 recent 4 tube position 0 = 0xc442b89c7babd349  # -6.906880734080639e20
+seed 000000000a103c01 recent 4 tube position 1 = 0x444c5d5a4386e720  # 1.046471194607962e21
+seed 000000000a103c01 recent 4 tube position 2 = 0x443caf5b7167824a  # 5.2914465193276696e20
+seed 000000000a103c01 recent 4 tube velocity 0 = 0xc0f46adb7a337f40  # -83629.71733426768
+seed 000000000a103c01 recent 4 tube velocity 1 = 0xc0fbfddb4485a73a  # -114653.70422902415
+seed 000000000a103c01 recent 4 tube velocity 2 = 0x40e8b4806c9800ee  # 50596.01325607473
+seed 000000000a103c01 recent 5: window true corotation false bound true
+seed 000000000a103c01 recent 6: window true corotation false bound true
