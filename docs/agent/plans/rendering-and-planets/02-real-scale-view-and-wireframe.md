@@ -1186,3 +1186,11 @@ bumped. It reserves no stream or tag. It adds the golden files `coords/body_fixe
   whole parent chains. The golden writes distances and Hill radii as Rust's shortest round-trip
   decimals, which `parseFloat` reads back exactly. `just test-wasm` is pending by hand: wasmtime
   is not installed on the lane's machine.
+- **Deviations in R02.T8.a, as built.** Built before T6 and T7, because R03.T13 waits on it and
+  it needs only T4's golden. `view/camera/frames.ts` exports `selectCameraFrame(candidates,
+current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (built by
+  `cameraFrameCandidate`, which refuses what `BodyFrameCandidate::new` refuses and stores −0 as
+  +0), `BODY_FRAME_ENTRY` and `FRAME_HYSTERESIS` mirrored as constants, and the tidal-radius clamp
+  as `clampToTidalRadius(positionM, tidalRadiusM)`. Eligible candidates are taken in ID order, as
+  the sim's `BTreeMap` iterates; the wire form's fixed-width hex sorts as `BodyId` does. The test
+  also runs every golden case with the candidates reversed.
