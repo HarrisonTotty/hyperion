@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { CommanderError } from "commander";
 import { app, BrowserWindow, shell } from "electron";
 
+import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { parseClientArgs, serverUrlOf, userArgs } from "./cli";
 import {
@@ -12,6 +13,7 @@ import {
   launchModeOf,
   SAFE_MODE_SWITCH,
 } from "./graphics/switches";
+import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
 
@@ -36,7 +38,7 @@ function resolveServerUrl(): string | undefined {
   }
 }
 
-function createWindow(serverUrl: string): void {
+function createWindow(serverUrl: string, graphics: GraphicsLaunch): void {
   const window = new BrowserWindow({
     width: 1600,
     height: 900,
@@ -50,8 +52,12 @@ function createWindow(serverUrl: string): void {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      // The sandboxed preload has no way to read the command line, so the URL rides in its argv.
-      additionalArguments: [serverUrlSwitch(serverUrl)],
+      // The sandboxed preload has no way to read the command line, so the URL and the graphics
+      // launch ride in its argv.
+      additionalArguments: [
+        serverUrlSwitch(serverUrl),
+        ...graphicsArguments(graphics.launchMode, graphics.gpuTiming),
+      ],
     },
   });
 
@@ -92,16 +98,16 @@ function createWindow(serverUrl: string): void {
  * Sets up the GPU before `ready`: relaunches a Wayland session through XWayland, or puts the
  * launch's graphics switches on the command line.
  *
- * @returns Whether the launch goes on; `false` once a relaunch has been asked for and this process
- * is exiting.
+ * @returns The launch's graphics set-up, or `undefined` once a relaunch has been asked for and this
+ * process is exiting.
  */
-function prepareGraphics(): boolean {
+function prepareGraphics(): GraphicsLaunch | undefined {
   // `process.argv.slice(1)`: Electron supplies the executable itself (R01 Design note 3).
   const relaunchArgs = x11RelaunchArgs(process.argv.slice(1), process.env, process.platform);
   if (relaunchArgs !== undefined) {
     app.relaunch({ args: [...relaunchArgs] });
     app.exit(0);
-    return false;
+    return undefined;
   }
   // Without it Chromium blocked WebGPU for the page after the second GPU-process crash, so the
   // client never got the chance to report and recover (R01 Design note 6).
@@ -112,7 +118,7 @@ function prepareGraphics(): boolean {
     app.commandLine,
     graphicsSwitches({ platform: process.platform, mode, gpuTiming }),
   );
-  return true;
+  return { launchMode: mode, gpuTiming };
 }
 
 async function main(): Promise<void> {
@@ -122,16 +128,28 @@ async function main(): Promise<void> {
     return;
   }
   // Also before `ready`: Chromium reads its switches when the GPU process starts.
-  if (!prepareGraphics()) {
+  const graphics = prepareGraphics();
+  if (graphics === undefined) {
     return;
   }
+  // Watching from before `ready`, so that no crash of the GPU process goes uncounted.
+  const gpuMonitor = new GpuProcessMonitor({
+    app,
+    windows: () => BrowserWindow.getAllWindows(),
+    mode: graphics.launchMode,
+    args: process.argv.slice(1),
+    nowMs: () => performance.now(),
+  });
+  app.once("will-quit", () => {
+    gpuMonitor.dispose();
+  });
 
   await app.whenReady();
-  createWindow(serverUrl);
+  createWindow(serverUrl, graphics);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(serverUrl);
+      createWindow(serverUrl, graphics);
     }
   });
 }
