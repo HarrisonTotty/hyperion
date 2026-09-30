@@ -8,7 +8,7 @@ import { cameraFrameCandidate, selectCameraFrame } from "./frames";
 import type { CameraFrame, CameraPose, CraftId, Quaternion } from "./pose";
 import { DEFAULT_FOV_DEG, FOV_STEPS_DEG } from "./projection";
 import { lookAlong, multiply, quaternionFromAxisAngle, rotate, slerp } from "./quaternion";
-import { type FrameChange, rebase } from "./rebase";
+import { type FrameChange, rebase, sameCameraFrame } from "./rebase";
 
 /**
  * Where a local view's camera is held: at the own ship's seat, chasing it, or detached (plan R02,
@@ -377,9 +377,13 @@ export interface CutOptions {
   readonly reducedMotion: boolean;
 }
 
-/** A cut's outcome: the new state, or why it was refused. */
+/**
+ * A cut's outcome: the new state, with the {@link FrameChange} it made where the pose is now in
+ * another frame than the one on screen (every cached camera-relative quantity is then dropped, as
+ * on a step's change), or why it was refused.
+ */
 export type CutResult =
-  | { readonly kind: "cut"; readonly state: CameraState }
+  | { readonly kind: "cut"; readonly state: CameraState; readonly change: FrameChange | null }
   | { readonly kind: "refused"; readonly reason: "no_own_ship" };
 
 /**
@@ -435,6 +439,9 @@ export function cutTo(
   const eased = options.easedMoves && !options.reducedMotion;
   return {
     kind: "cut",
+    change: sameCameraFrame(onScreen.frame, pose.frame)
+      ? null
+      : { from: onScreen.frame, to: pose.frame },
     state: {
       ...state,
       preset,
