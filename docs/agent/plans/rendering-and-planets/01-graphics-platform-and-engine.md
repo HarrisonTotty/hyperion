@@ -1883,3 +1883,20 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     Vulkan driver, Electron 44.4.3 under the client's switches with `DISPLAY=:0`) exposes
     `subgroups`, `timestamp-query`, `float32-filterable`, `float32-blendable`,
     `rg11b10ufloat-renderable` and `depth-clip-control`, and no `shader-f16`.
+- **Deviations in T8.b, as built.**
+  - "Reports to the status store" needed a status entry: `GraphicsFault` and `GraphicsEvent` gain
+    `shader-refused` (with `effectName`), a fault while it stands, cleared by a restore like the
+    others; it never replaces a standing fault, so the stub compiler's unnamed refusal that follows
+    the wrapper's named one keeps the name, and a device loss outranks it. Its words, drafted for
+    the owner with T5.c's: `GRAPHICS SHADER REFUSED: <effect> is not WGSL`
+    (`GRAPHICS_WORDS.shaderRefused`). A refused
+    shader is a bug of ours, not the operator's; the fault makes it visible on the `LINK` panel.
+  - `guardCreateEffect` takes any `EffectFactory` (the engine's `createEffect`, whatever its
+    arguments), reports before it throws, and reads the effect's name from a string or from its
+    shader path (`spectorName`, `vertex`, `fragment`, else `(inline source)`); the stubs' errors
+    say `(unnamed, at the compiler)`, since the compile is handed no name. The backstop listens on
+    `window` from creation to disposal and calls `preventDefault` on what it reports. Babylon's
+    `EffectWrapper` without the shader store (which the adapter does not use) makes its `Effect`
+    directly, past `createEffect`; the stubs still stop it. No unit test covers the engine's
+    releasing the backstop at disposal, since the engine needs a WebGPU device; T9 exercises it.
+  - Pending for T9: the offline run with the network refused is the integration check.

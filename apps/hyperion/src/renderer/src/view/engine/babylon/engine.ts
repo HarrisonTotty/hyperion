@@ -17,7 +17,8 @@
  * the device's, so a feature the smoke harness withholds reads as absent.
  */
 
-import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine.pure";
+import { type GlslangOptions, WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine.pure";
+import type { TwgslOptions } from "@babylonjs/core/Engines/WebGPU/webgpuTintWASM";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.pure";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import type { Effect } from "@babylonjs/core/Materials/effect.pure";
@@ -74,6 +75,12 @@ import { createShaderMaterial, setUniform, textureSamplerOf } from "./materials"
 import { MeshRecord } from "./meshes";
 import { babylonEngineOptions } from "./options";
 import { registerBabylonModules } from "./registrations";
+import {
+  GLSLANG_STUB,
+  guardCreateEffect,
+  listenForUnhandledRefusals,
+  TWGSL_STUB,
+} from "./wgslGuard";
 
 /** The error a member not yet built throws, naming the subtask that builds it. */
 function notBuilt(member: string, task: string): Error {
@@ -117,10 +124,16 @@ export class BabylonRenderEngine implements RenderEngine {
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
+  readonly #releases: ReadonlyArray<() => void>;
   #disposed = false;
 
-  constructor(engine: WebGPUEngine) {
+  /**
+   * @param releases - Run once at disposal: the guard's listener, and whatever else the creation
+   * started.
+   */
+  constructor(engine: WebGPUEngine, releases: ReadonlyArray<() => void> = []) {
     this.#engine = engine;
+    this.#releases = releases;
     this.#device = engineDevice(engine);
     this.capabilities = deviceCapabilities(this.#device);
     const scene = new Scene(engine, { useFloatingOrigin: false, virtual: true });
@@ -326,6 +339,9 @@ export class BabylonRenderEngine implements RenderEngine {
     this.#meshRecords.clear();
     this.#scene.dispose();
     this.#engine.dispose();
+    for (const release of this.#releases) {
+      release();
+    }
     this.#allocationListeners.clear();
     this.#faultListeners.clear();
     this.#passTimeListeners.clear();
@@ -459,14 +475,17 @@ export const createBabylonEngine: CreateBabylonEngine = async (
   canvas.height = 1;
   const engine = new WebGPUEngine(canvas, babylonEngineOptions(requested));
   let renderEngine: BabylonRenderEngine;
+  const stopListening = listenForUnhandledRefusals(window, status);
   try {
     const notEnabled = await initialiseOnAdapter(engine, gpu, outcome.adapter, requested);
     if (notEnabled.length > 0) {
       console.warn(`the device did not enable ${notEnabled.join(", ")}, which it was asked for`);
     }
     engine.useReverseDepthBuffer = true;
-    renderEngine = new BabylonRenderEngine(engine);
+    guardCreateEffect(engine, status);
+    renderEngine = new BabylonRenderEngine(engine, [stopListening]);
   } catch (error: unknown) {
+    stopListening();
     engine.dispose();
     throw error;
   }
@@ -478,7 +497,7 @@ export const createBabylonEngine: CreateBabylonEngine = async (
 
 /** What of a Babylon engine its initialisation needs. */
 export interface InitialisableEngine {
-  initAsync(): Promise<void>;
+  initAsync(glslangOptions: GlslangOptions, twgslOptions: TwgslOptions): Promise<void>;
   readonly enabledExtensions: ReadonlyArray<string>;
 }
 
@@ -493,6 +512,7 @@ export async function initialiseOnAdapter(
   adapter: GPUAdapter,
   requested: ReadonlyArray<GPUFeatureName>,
 ): Promise<ReadonlyArray<GPUFeatureName>> {
-  await withHandedAdapter(gpu, adapter, () => engine.initAsync());
+  // The stub compilers keep Babylon from ever fetching glslang or twgsl (Design note 12).
+  await withHandedAdapter(gpu, adapter, () => engine.initAsync(GLSLANG_STUB, TWGSL_STUB));
   return featuresNotEnabled(requested, new Set(engine.enabledExtensions));
 }

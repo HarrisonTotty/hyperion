@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO, SWIFTSHADER_INFO } from "../../../test/fakeGpu";
 import { initialiseOnAdapter, type InitialisableEngine, postProcessSamplers } from "./engine";
+import { GLSLANG_STUB, TWGSL_STUB } from "./wgslGuard";
 
 const SWIFTSHADER_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "subgroups",
@@ -24,7 +25,11 @@ class FakeEngine implements InitialisableEngine {
     this.#failure = failure;
   }
 
-  async initAsync(): Promise<void> {
+  /** The compilers `initAsync` was given. */
+  compilers: readonly [unknown, unknown] | null = null;
+
+  async initAsync(glslang: unknown, twgsl: unknown): Promise<void> {
+    this.compilers = [glslang, twgsl];
     this.handed = await this.#gpu.requestAdapter();
     if (this.#failure !== null) {
       throw this.#failure;
@@ -41,6 +46,18 @@ describe("the engine's creation", () => {
     expect(engine.handed).toBe(vetted);
     expect(Object.hasOwn(gpu, "requestAdapter")).toBe(false);
     expect(await gpu.requestAdapter()).toBeNull();
+  });
+
+  it("gives initAsync the stub compilers, so that no GLSL compiler is fetched", async () => {
+    const gpu = new FakeGpu([]);
+    const engine = new FakeEngine(gpu, []);
+    await initialiseOnAdapter(
+      engine,
+      gpu,
+      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
+      [],
+    );
+    expect(engine.compilers).toEqual([GLSLANG_STUB, TWGSL_STUB]);
   });
 
   it("restores the entry point when initAsync fails", async () => {
