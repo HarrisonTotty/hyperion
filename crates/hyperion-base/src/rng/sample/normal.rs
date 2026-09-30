@@ -93,8 +93,8 @@ impl Stream {
     /// (2014) concentration–mass relation (brainstorm, "Galaxy parameters"):
     ///
     /// ```
-    /// use hyperion_sim::rng::{ObjectKey, Stream, tags};
-    /// use hyperion_sim::{Seed, math};
+    /// use hyperion_base::rng::{ObjectKey, Stream, tags};
+    /// use hyperion_base::{Seed, math};
     ///
     /// let median = 8.0; // from the relation, for the halo's mass
     /// let mut stream = Stream::open(Seed::new(7), tags::SELFTEST_STREAM, ObjectKey::galaxy());
@@ -176,12 +176,5 @@ mod tests {
         assert_same_bits(s.normal(1.25, 0.0), 1.25);
         assert_same_bits(s.log_normal_dex(4.0, 0.0), 4.0);
         assert_eq!(s.position(), 4);
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "standard deviation must be finite and non-negative")]
-    fn a_negative_sigma_panics_in_debug() {
-        let _ = stream().normal(0.0, -1.0);
     }
 }

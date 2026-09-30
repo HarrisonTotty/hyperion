@@ -8,8 +8,11 @@ Compares crates/*/tests/golden/**/*.golden at HEAD (default: the working tree, u
 included) with BASE (default HEAD). To check one commit C, use `--base C^ --head C`. Every golden
 starts with `# generator_version = N`, so a GENERATOR_VERSION bump touches every file; this report
 hides that and shows only goldens whose content moved, with the first N changed labels of each
-(default 5). It also compares GENERATOR_VERSION in crates/hyperion-sim/src/version.rs, checks the
-header of every golden at HEAD against it, and states whether the pair is consistent:
+(default 5). A golden deleted in one place and added with the same content in another (a crate
+split moving it) is listed as renamed, not as deleted and new. It also compares GENERATOR_VERSION,
+read from crates/hyperion-base/src/version.rs or, at a ref before the crate split, from
+crates/hyperion-sim/src/version.rs, checks the header of every golden at HEAD against it, and
+states whether the pair is consistent:
 
 - content moved, version not bumped    -> bump required (or the change is a bug)
 - version bumped, goldens not blessed  -> run `just bless`
@@ -31,7 +34,9 @@ sys.dont_write_bytecode = True
 
 HEADER_RE = re.compile(r"^#\s*generator_version\s*=\s*(\d+)\s*$")
 VERSION_RE = re.compile(r"GeneratorVersion::new\((\d+)\)")
-VERSION_FILE = "crates/hyperion-sim/src/version.rs"
+# Where GENERATOR_VERSION lives, newest first: base's since the crate split (plan R04, T4.a), the
+# sim's before it. Each ref is read at the first path it has.
+VERSION_FILES = ("crates/hyperion-base/src/version.rs", "crates/hyperion-sim/src/version.rs")
 # Plain pathspecs match `*` literally at directory boundaries; `:(glob)` makes it one level.
 GOLDEN_SPEC = ":(glob)crates/*/tests/golden/**"
 GOLDEN_PATH_RE = re.compile(r"^crates/[^/]+/tests/golden/.+\.golden$")
@@ -146,8 +151,11 @@ def main() -> int:
         file = root / path
         return file.read_text(encoding="utf-8") if file.exists() else None
 
-    old_version = version_in(at_ref(root, args.base, VERSION_FILE))
-    new_version = version_in(read_head(VERSION_FILE))
+    def first_version(read) -> int | None:
+        return next((v for path in VERSION_FILES if (v := version_in(read(path))) is not None), None)
+
+    old_version = first_version(lambda path: at_ref(root, args.base, path))
+    new_version = first_version(read_head)
     print(f"GENERATOR_VERSION: {old_version} at {args.base} -> {new_version} in {head_name}")
 
     entries: list[tuple[str, str]] = []
@@ -187,6 +195,22 @@ def main() -> int:
         lost = [k for k in old_map if k not in new_map]
         (moved if changed or lost else extended).append((path, changed, gained, lost))
 
+    # A deleted golden whose content (below the header) reappears in exactly one added golden was
+    # renamed, as the crate split moves base's goldens; any header change shows in `stale_header`.
+    renamed: list[tuple[str, str]] = []
+    added_bodies: dict[tuple[str, ...], list[str]] = {}
+    for path in added:
+        text = read_head(path)
+        if text is not None:
+            added_bodies.setdefault(tuple(split_header(text)[1]), []).append(path)
+    for path in list(deleted):
+        text = at_ref(root, args.base, path)
+        targets = added_bodies.get(tuple(split_header(text)[1])) if text is not None else None
+        if targets and len(targets) == 1 and targets[0] in added:
+            renamed.append((path, targets[0]))
+            deleted.remove(path)
+            added.remove(targets[0])
+
     stale_header = []
     if new_version is not None:
         for path in sorted(every_golden):
@@ -195,7 +219,7 @@ def main() -> int:
             if header != new_version:
                 stale_header.append((path, header))
 
-    if not (header_only or moved or extended or added or deleted):
+    if not (header_only or moved or extended or added or deleted or renamed):
         print("No golden files changed.")
     if moved:
         print(f"\nPinned values changed ({len(moved)}): existing output moved; each must be explained by the change")
@@ -213,6 +237,10 @@ def main() -> int:
         print(f"\nDeleted goldens ({len(deleted)}):")
         for path in deleted:
             print(f"  {path}")
+    if renamed:
+        print(f"\nRenamed goldens ({len(renamed)}): moved to another path, output identical")
+        for old, new in renamed:
+            print(f"  {old} -> {new}")
     if header_only:
         print(f"\nHeader only ({len(header_only)}): version line changed, output identical")
 
@@ -221,7 +249,8 @@ def main() -> int:
     readable = old_version is not None and new_version is not None
     rise = new_version - old_version if old_version is not None and new_version is not None else 0
     if not readable:
-        problems.append(f"Could not read GENERATOR_VERSION from {VERSION_FILE} at both ends; compare by hand.")
+        problems.append(f"Could not read GENERATOR_VERSION from {' or '.join(VERSION_FILES)} at both ends; "
+                        "compare by hand.")
     if rise < 0:
         problems.append(f"GENERATOR_VERSION went down by {-rise}. A version number is never reused.")
     if moved and readable and rise == 0:
@@ -256,7 +285,7 @@ def main() -> int:
               + ". Now account for every changed value above against the task.")
     elif checks:
         print("  No inconsistency found; make the checks above.")
-    elif extended or added or header_only:
+    elif extended or added or header_only or renamed:
         print("  Consistent.")
     else:
         print("  Nothing to reconcile.")

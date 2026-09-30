@@ -732,14 +732,14 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
 13. **The tone-mapping pass encodes and dithers** (researched 2026-09-29; probes on the UHD 620).
     AgX's formed image spans 16.5 stops, −10 to +6.5 about 0.18, about 9.2 below and 7.3 above the
     metered average; the brainstorm's "roughly 25 stops" is AgX Log's encoding. The canvas is
-    `rgba8unorm`, `getPreferredCanvasFormat()` on this machine, written through a non-sRGB view with
-    the encoding in the pass, so that the dither is applied in the encoded domain: triangular
-    (TPDF) noise of ±1 LSB from a static blue-noise tile, never animated. Whether Filament's
-    `pow(v, 2.2)` then the sRGB curve or the sigmoid's output written directly is right near black
-    is settled by a dark ramp against Blender's AgX Base sRGB to one code (R07.T15), and whichever
-    is chosen applies to R02's wireframe sprites too, so that an isolated star on black is identical
-    in both styles before the dither and within one code after it. The pass also upscales from the
-    view's internal resolution.
+    `rgba8unorm`, `getPreferredCanvasFormat()` on the probed UHD 620, written through a non-sRGB
+    view with the encoding in the pass, so that the dither is applied in the encoded domain:
+    triangular (TPDF) noise of ±1 LSB from a static blue-noise tile, never animated. Whether
+    Filament's `pow(v, 2.2)` then the sRGB curve or the sigmoid's output written directly is right
+    near black is settled by a dark ramp against Blender's AgX Base sRGB to one code (R07.T15), and
+    whichever is chosen applies to R02's wireframe sprites too, so that an isolated star on black is
+    identical in both styles before the dither and within one code after it. The pass also upscales
+    from the view's internal resolution.
 14. **Per-view budgets are a pure policy** (researched 2026-09-29; probes on the UHD 620,
     provisional under load). The primary view renders at its internal scale; each secondary view at
     a lower scale or 30 Hz; on the low setting at most one view is photorealistic, and the style
@@ -848,13 +848,13 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
     label block, a phrase drafted for the owner in R07.T26. A discrete command shows `PENDING`
     within 100 ms (MIL-STD-1472H §5.1.2.1.6.4, Table V) and completes within 250 ms.
 23. **Main-screen text is sized for the room** (researched 2026-09-29; MIL-STD-1472H, read). Its
-    text is colour-coded, so it follows §5.17.25.14: at least 20′ at the longest anticipated
-    viewing distance, above §5.17.18.2's 10′ "shall" and 15′ "should", measured from the top of the
-    capitals to the bottom of the descenders (§3.2.28). The alert annunciator's text is at least 30′
-    and the newest emergency up to 60′ (§5.7.3.6, warning and caution signals). The height in
-    device pixels is 2 D tan(θ ÷ 2) × (width in pixels ÷ W), divided by `devicePixelRatio` for CSS
-    (this machine runs at 0.78125); at 4 m on a 55″ 1080p television that is 36.7 px at 20′ and
-    55.0 px at 30′. No web API gives a display's physical size, so the main-screen machine holds two
+    text is colour-coded, so it follows §5.17.25.14: at least 20′ at the longest anticipated viewing
+    distance, above §5.17.18.2's 10′ "shall" and 15′ "should", measured from the top of the capitals
+    to the bottom of the descenders (§3.2.28). The alert annunciator's text is at least 30′ and the
+    newest emergency up to 60′ (§5.7.3.6, warning and caution signals). The height in device pixels
+    is 2 D tan(θ ÷ 2) × (width in pixels ÷ W), divided by `devicePixelRatio` for CSS (the probed UHD
+    620 laptop runs at 0.78125); at 4 m on a 55″ 1080p television that is 36.7 px at 20′ and 55.0 px
+    at 30′. No web API gives a display's physical size, so the main-screen machine holds two
     settings, the screen diagonal and the furthest viewing distance, the diagonal pre-filled from
     EDID where it is plausible (non-zero and within 5% of the pixel aspect; Electron's main process
     reads `/sys/class/drm/card*-*/edid` on Linux, matching a connector to Electron's display by the
@@ -1145,11 +1145,11 @@ owner.
 
 Add Design note 18's settings as fields of R05's `ViewSettings`, with their high and low values in
 `SETTINGS`, and Design note 14's `internalScaleBounds`, [0.5, 1.0] on both; record the benchmarks of
-T12, T14 and T15 and the whole style's frame time on the UHD 620 at 720p on a quiet machine, and on
-a discrete part of the RTX 4060 class when one is borrowed or rented (the brainstorm's Testing
-section), under `--hyperion-gpu-timing`, in this plan as "as built" figures replacing the probes'
-provisional ones; R12 consolidates them. Acceptance: `just ci`; the figures recorded with their
-settings, flags, load and dates.
+T12, T14 and T15 and the whole style's frame time on the development machine's RTX 3080, which
+exceeds the RTX 4060 class of the brainstorm's Testing section, at 1080p, and, by the owner, on the
+UHD 620 at 720p, each on a quiet machine, under `--hyperion-gpu-timing`, in this plan as "as built"
+figures replacing the probes' provisional ones; R12 consolidates them. Acceptance: `just ci`; the
+figures recorded with their settings, flags, load and dates.
 
 ### Phase B: several views
 
@@ -1174,11 +1174,12 @@ reason; a wireframe instrument shows the source of its exposure. Acceptance: `pn
 
 #### R07.T20 Several views, by hand
 
-With the real styles on the UHD 620 on a quiet machine: a full-window photorealistic view and two
-wireframe instruments, each the right way up, no GPU time in copies, a resize of one leaving the
-others' attachments alone, the frame time with instruments open against the low setting's 33 ms
-(brainstorm, Testing), and the per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s
-provisional 0.3 ms. Recorded in this plan. Acceptance: the record.
+With the real styles on the development machine (RTX 3080) and, by the owner, on the UHD 620, each
+on a quiet machine: a full-window photorealistic view and two wireframe instruments, each the right
+way up, no GPU time in copies, a resize of one leaving the others' attachments alone, the frame time
+with instruments open against the low setting's 33 ms on the UHD 620 (brainstorm, Testing), and the
+per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. Recorded in this
+plan. Acceptance: the record.
 
 #### R07.T21 A child window on a second monitor
 
@@ -1301,7 +1302,8 @@ ms. Acceptance: the test passes; the record.
   smoothing; the loop about 60 ms typical and within 100 ms at the 95th percentile to the photon
   with a game-mode display, its worst case recorded (T22–T28).
 - **By eye, recorded:** the phase, occultation and eclipse scenes, a lit planet on black, a star and
-  planet in frame, the cockpit with instruments on the UHD 620 (T8–T10, T13.b, T15, T20), and the
+  planet in frame, the cockpit with instruments on the development machine and on the UHD 620
+  (T8–T10, T13.b, T15, T20), and the
   main screen across a room (T27.c).
 - **Benchmarks:** T12, T14, T15 and T17's timings on both GPUs on a quiet machine, handed to R12.
 
@@ -1364,8 +1366,9 @@ optional field and new commands in the sessions plan's envelope, none of which m
   and present term (25–33 ms, through the main screen's internal scale) and the animation-frame
   wait.
 - **A child window on a second monitor** is unproved until a second display is at hand (T21).
-- **HDR output.** An `rgba16float` canvas with extended tone mapping configures on this machine, but
-  the panel is not HDR; it would suit a main screen on an HDR television and is left open.
+- **HDR output.** An `rgba16float` canvas with extended tone mapping configures on the probed UHD
+  620, but its panel is not HDR, and the development machine's display is not yet checked; it would
+  suit a main screen on an HDR television and is left open.
 - **Asked by later plans.** R10's asks are built here as signatures with defaults (Design note 24)
   and completed by R10's own tasks in this plan's files, with the signatures unchanged: `body_brdf`
   with per-texel lunar-Lambert parameters (T4.c, completed by R10.T10.b); the disc sampling

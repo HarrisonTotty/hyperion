@@ -647,7 +647,8 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     nor a storage format, so the bake draws the baked stars as a `point-list` with additive blending
     into an `rgba32float` scratch face through R01's `createPointSplat` (it needs
     `float32-blendable`, which R01 requests when present and never requires, and which SwiftShader
-    and the development machine report). Where `GpuCapabilities.float32Blendable` is false the bake
+    and the UHD 620 report by probe; the development machine's RTX 3080 is read from R01's feature
+    report). Where `GpuCapabilities.float32Blendable` is false the bake
     worker splats on the CPU into a `Float32Array` per face and uploads it with `createTexture`, the
     same sums in another order (to 10⁻⁶ relative). Then a compute pass divides by each texel's solid
     angle, scales by a power of two chosen so the brightest texel lands near 2¹⁵ (exact, and kept
@@ -662,7 +663,10 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     filters 3 × 3. The bake also holds, one face at a time and only while it runs, an `rgba32float`
     scratch with its mips (3,072² × 16 B × 4/3 ≈ 201 MB on the high setting, 22 MB on the low) and
     the packed level's staging buffer (up to 38 MB); these transients count under `MemoryCategory`
-    `"sky-scratch"`, the cube under `"sky-cube"`, so R05's tally and R12 see them. Every shader of
+    `"sky-scratch"`, the cube under `"sky-cube"`, so R05's tally and R12 see them. For context only:
+    the high setting's peak during a bake, about 540 MB, is about a twentieth of the development
+    machine's 10 GiB of VRAM, while the low setting's comes from the UHD 620's shared system
+    memory. Every shader of
     the sky (splat, pack, band, disc) is registered in R01's `WGSL_CATALOGUE`, so `just test-render`
     renders it.
 22. **The low setting.** 1,024² faces, whose centre texel (2 ÷ 1,024 rad, 403″ = 6.7′) is larger
@@ -1023,8 +1027,8 @@ Acceptance for T13 as a whole: `pnpm test`, `just ci`, `just test-render`, and b
 in the plan: near the Sun the brightest stars the census lists match the brainstorm's statistics
 (some 15,000 visible to the eye, some 740 in a 60° view), no star flickers as the camera turns
 slowly, the band shows its dust lanes, and the Sun's disc is limb-darkened; the star field's GPU
-time on the UHD 620 at 720p (target under 0.5 ms) and, once one is available, on the discrete
-target at 1080p (under 0.2 ms), each recorded with its setting.
+time on the development machine's RTX 3080, the discrete target, at 1080p (under 0.2 ms) and, by
+the owner, on the UHD 620 at 720p (target under 0.5 ms), each recorded with its setting.
 
 ### R06.T14 Several views and the re-bake
 

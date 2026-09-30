@@ -22,7 +22,8 @@
 
 When this plan is done, every figure in the brainstorm's performance budget — the frame-time table
 on both columns, the memory table, the height workers' cost and the station wireframe's row — has a
-measured counterpart on the UHD 620 and on an RTX 4060-class discrete GPU, recorded with the
+measured counterpart on the UHD 620 and on a discrete GPU of at least the RTX 4060 class (the
+development machine's RTX 3080), recorded with the
 machine, the driver, the power and thermal state, the setting, the commit and the generator version
 that produced it, in a results file under version control, from which a generated table sets
 estimate beside measurement. The three performance runs the brainstorm's Testing section names exist
@@ -51,7 +52,8 @@ In scope:
 - The consolidated results record (`runs.v1.jsonl`), its validator and table writer, the generated
   budget table (`budget.md`), the fold of R05's and the other plans' own recorded runs into it, and
   a comparison tool that states a regression as a number.
-- The consolidated runs on the UHD 620 and on the discrete reference machine.
+- The consolidated runs on the UHD 620 (by the owner) and on the discrete reference machine (the
+  development machine).
 - The ladder's adjustment, by a rule, in the values of the settings the owning plans built; and a
   drafted revision of the brainstorm's budget tables for the owner.
 - The audit of every earlier plan's low setting against the budget's three rules, mechanical where
@@ -338,15 +340,22 @@ What exists today, checked against the tree on 2026-09-29: none of R01–R11's c
 `view/` directory, no WebGPU and no command-line switches (`apps/hyperion/src/main/index.ts` appends
 none); its command line (`src/main/cli.ts`, on `commander`) has `--address` and `--port` only. The
 repository records Criterion bench figures in doc comments and plan "as built" notes; there is no
-results file and no `docs/measurements/` directory. The development machine is a ThinkPad X1 Yoga
-4th generation: an i7-8665U (four cores, eight threads, 15 W, PL1 15 W with τ = 28 s from
-`intel-rapl-mmio:0`, PL2 51 W) with its UHD 620 (`8086:3ea0`, i915, `gt_RP0_freq_mhz` 1,150 MHz,
-`gt_RP1_freq_mhz` = `gt_RPn_freq_mhz` = 300 MHz), 16 GB, Linux 6.18, Mesa 26.2.3, Xorg with i3 and
-no compositor, TLP 1.10.2 in `performance/AC` mode with the `powersave` governor, the
-`balance_performance` energy preference and turbo on; `intel_gpu_top` is installed; the package
-energy counter is root-only. Under the owner's other work the package sat at 96–97 °C against a 100
-°C trip, and the thermal-throttle counters showed 17,010 s of package throttling in 35,900 s of
-uptime.
+results file and no `docs/measurements/` directory. The development machine, HYPERION's recommended
+specification and the discrete reference, is a desktop (checked 2026-09-30): an AMD Ryzen 7 3700X (8
+cores, 16 threads, 2.2–4.4 GHz, `acpi-cpufreq` with the `schedutil` governor), 32 GB of RAM, an
+NVIDIA GeForce RTX 3080 (GA102, 10 GiB, the open kernel module and driver 615.71.09, Vulkan 1.4
+ICD), one display over HDMI at 1920 × 1080 with a native 240 Hz and 120, 60 and 59.94 Hz modes, Arch
+Linux on kernel 7.2.7, Xorg with i3. It has no `Mains` power supply in `/sys`, no `thermal_throttle`
+directory and no i915 frequency files, and its RAPL zone is `intel-rapl:0`. The UHD 620 machine, the
+minimum specification and the low setting's target, which the owner runs by hand, is the owner's
+ThinkPad X1 Yoga 4th generation, as recorded on 2026-09-29: an i7-8665U (four cores, eight threads,
+15 W, PL1 15 W with τ = 28 s from `intel-rapl-mmio:0`, PL2 51 W) with its UHD 620 (`8086:3ea0`,
+i915, `gt_RP0_freq_mhz` 1,150 MHz, `gt_RP1_freq_mhz` = `gt_RPn_freq_mhz` = 300 MHz), 16 GB, Linux
+6.18, Mesa 26.2.3, Xorg with i3 and no compositor, TLP 1.10.2 in `performance/AC` mode with the
+`powersave` governor, the `balance_performance` energy preference and turbo on; `intel_gpu_top` is
+installed; the package energy counter is root-only. Under the owner's other work the package sat at
+96–97 °C against a 100 °C trip, and the thermal-throttle counters showed 17,010 s of package
+throttling in 35,900 s of uptime.
 
 ## Design notes
 
@@ -454,7 +463,7 @@ uptime.
 7. **A run, and what is compared** (researched 2026-09-29). The machine is measured as a player has
    it, at its default power profile, but in a known state, because unrecorded environment
    differences produce wrong data (Mytkowicz, Diwan, Hauswirth and Sweeney, ASPLOS 2009,
-   doi:10.1145/1508244.1508275) and this laptop throttles thermally under sustained load.
+   doi:10.1145/1508244.1508275) and the UHD 620 laptop throttles thermally under sustained load.
    Preconditions, checked by the runner, which refuses otherwise unless `--force` marks the record:
    on AC (the `online` file of the power supply whose `type` is `Mains`, here
    `/sys/class/power_supply/AC/online`; the USB-C sources' `online` files are ignored); a one-minute
@@ -554,10 +563,11 @@ uptime.
    - `arrival-memory`: R05's memory rows.
    - `nuclear-disc-sky`: `informative`, with the reason of Design note 8.
 
-   The discrete ceiling is stated as 2 to 3 GB; a resident peak above 2 GB is a
-   finding and one above 3 GB fails. Patches a second sustained are set against the demand at each
-   moment of the script, and the fraction of the descent spent under `TERRAIN: STREAMING` is
-   recorded beside them.
+   The discrete ceiling is stated as 2 to 3 GB; a resident peak above 2 GB is a finding and one
+   above 3 GB fails. For context only (the ceilings stand): the development machine's RTX 3080 has
+   10 GiB of VRAM beside 32 GB of system RAM, and the UHD 620 laptop's 16 GB is one pool shared by
+   the CPU and the GPU. Patches a second sustained are set against the demand at each moment of the
+   script, and the fraction of the descent spent under `TERRAIN: STREAMING` is recorded beside them.
 
 10. **The ladder's adjustment rule.** Adjusting is choosing values inside each ladder row's stated
     policy, never moving the policy. On the UHD 620, if a low-setting scene misses its criterion,
@@ -583,16 +593,20 @@ uptime.
     intervals: cloud parts (L4, A10G, T4) have no scanout, so frames are paced by Chromium's
     timer-driven begin-frame source or a virtual display rather than a panel's vertical blank; a
     container needs the NVIDIA graphics capability for the Vulkan ICD; and none is an RTX 4060.
-    The reference is a physical desktop with an RTX 4060-class card, a 1080p60 monitor and X11. A
-    cloud run may check the NVIDIA code paths — the `nvidia-smi -q -x` parser, the per-pass
+    The reference is a physical desktop with an RTX 4060-class card, a 1080p60 monitor and X11:
+    the development machine, whose RTX 3080 exceeds the class (8,704 CUDA cores at a 1.71 GHz boost,
+    29.8 TFLOP/s of FP32; 19 Gbps GDDR6X on 320 bits, 760 GB/s; NVIDIA's published figures, which
+    T9's `nvidia-smi -q` checks) and whose display runs at 60 Hz for the runs. Its figures are
+    therefore an upper reference for the class, and `budget.md` says so beside the discrete column.
+    A cloud run may check the NVIDIA code paths — the `nvidia-smi -q -x` parser, the per-pass
     timestamps — with `display: virtual`, and `@hyperion/perf`'s table writer excludes such records
     from the tables.
     The brainstorm's hardware figures, cited from memory, were checked: the UHD 620's 24 EUs (Mesa's
     `cfl_gt2`) at 1.15 GHz give 0.44 TFLOP/s of FP32; the RTX 4060's 3,072 CUDA cores at 2.46 GHz
     give 15.1 TFLOP/s, and 17 Gbps on 128 bits gives 272 GB/s (NVIDIA's product page; the memory
-    speed from memory, which T9's `nvidia-smi -q` settles); the PlayStation 4's 1.84 TFLOP/s holds
+    speed from memory, which T9's RTX 3080 cannot settle); the PlayStation 4's 1.84 TFLOP/s holds
     (Sony, 20 February 2013). Memory bandwidth (researched 2026-09-29): Intel ARK's 37.5 GB/s for
-    the i7-8665U is the part's ceiling with DDR4-2400, which this machine does not have. The X1 Yoga
+    the i7-8665U is the part's ceiling with DDR4-2400, which the laptop does not have. The X1 Yoga
     (4th Gen) has LPDDR3-2133 soldered to the board (Lenovo PSREF, ThinkPad X1 Yoga 4th Gen), in two
     64-bit channels (DMI: `ChannelA-DIMM0` and `ChannelB-DIMM0`, LPDDR3, 64-bit, 2,133 MT/s, 8 GiB
     each; the 8th-generation Core U datasheet, volume 1, two 64-bit channels with LPDDR3 to 2,133
@@ -739,8 +753,8 @@ unless the owner has made it group-readable (an optional udev rule, documented, 
 missing file is `null`, never a guess.
 
 Files: `apps/hyperion/src/main/perf/{machine,samplers,preconditions}.ts` and tests, with fixture
-files under `src/main/perf/fixtures/` copied from this machine's `/sys`, the USB-C supplies
-included.
+files under `src/main/perf/fixtures/` copied from the UHD 620 laptop's `/sys` (supplied by the
+owner), the USB-C supplies included, and from the development machine's.
 
 Tests: the parsers against the fixtures; a missing file gives `null`; the throttle fraction and the
 RP0 share on synthetic traces; `checkQuiet` refuses on battery, on a load average of 1.0 or more, or
@@ -771,13 +785,13 @@ battery. Acceptance: `pnpm test`, `just ci`.
   `process_info` entries filtered to the GPU process, and the device's `memory.used` less the
   baseline taken before launch; `app.getAppMetrics()` per process; the workers' reports of
   `WebAssembly.Memory.buffer.byteLength` and coarse-field bytes over R05's pool messages. Tests: the
-  fdinfo parser against the text captured on this machine (`drm-driver: i915`, the `system0` keys
-  `total`, `shared`, `resident`, `active` and `purgeable`, and the `stolen-system0` keys); two
+  fdinfo parser against the text captured on the UHD 620 laptop (`drm-driver: i915`, the `system0`
+  keys `total`, `shared`, `resident`, `active` and `purgeable`, and the `stolen-system0` keys); two
   descriptors with one client ID count once; the lower bound on a fixture with shared memory; an
   fdinfo of another driver is skipped; the XML parser against a `process_info` fixture of type `G`
-  and one of `C+G`; an unreadable fdinfo gives `null`. Acceptance: `pnpm test`, and by hand on this
-  machine a sample of the running client's GPU process shows a non-zero resident figure and Xorg's
-  line.
+  and one of `C+G`; an unreadable fdinfo gives `null`. Acceptance: `pnpm test`, and by hand on the
+  development machine a sample of the running client's GPU process shows a non-zero resident figure
+  (from `nvidia-smi`), and on the UHD 620, by the owner, the same from fdinfo with Xorg's line.
 
 Files: `apps/hyperion/src/renderer/src/view/perf/ledger.ts`, R01's `view/engine/memory.ts`, R05's
 tally call sites, `apps/hyperion/src/main/perf/samplers.ts`, R05's `main/fdinfo.ts`, tests and
@@ -813,8 +827,8 @@ fixtures.
   and the itemised tally, sent by `endRepetition`. The Vitest of Design note 4 over every pass label
   T0 listed. Tests: warm-up frames are absent from the percentiles; the patch cache is empty at each
   repetition's start; an unmapped pass fails. Acceptance: `pnpm test`, `just ci`, and by hand one
-  repetition of `cockpit-descent`'s script on this machine gives a record that `just perf-record`
-  accepts.
+  repetition of `cockpit-descent`'s script on the development machine gives a record that
+  `just perf-record` accepts.
 
 Files: `apps/hyperion/src/main/{cli,index}.ts`, `src/main/perf/`, `src/preload/{index,api}.ts`,
 `src/renderer/src/view/perf/runPerfScene.ts`, `justfile`, tests.
@@ -878,11 +892,12 @@ Files: `apps/hyperion/src/renderer/src/view/perf/ladder.test.ts`, R01's `src/smo
 
 ### R12.T8 The UHD 620 runs
 
-Every subtask is by hand and recorded, on AC at the default power profile, the display at 1080p60,
-with every build, lane and test on the machine stopped first: the owner's other work is the largest
-noise source seen here (load 21 at 97 °C). Each run is five repetitions and one control run
-(Design note 4); `just perf-record` follows each output and `just perf-table` each subtask. The
-figures are labelled as this chassis's throttled sustained state.
+Every subtask is by hand, by the owner on the UHD 620 laptop, and recorded, on AC at the default
+power profile, the display at 1080p60, with every build, lane and test on the machine stopped first:
+the owner's other work is the largest noise source seen here (load 21 at 97 °C). Each run is five
+repetitions and one control run (Design note 4); `just perf-record` follows each output and
+`just perf-table` each subtask. The figures are labelled as this chassis's throttled sustained
+state.
 
 - **R12.T8.a The folds.** Fold R05's spike results files and R01.T11's figures, and enter the other
   plans' recorded benchmarks as `plan-benchmark` records, each citing its plan and task.
@@ -908,8 +923,10 @@ Files: `docs/measurements/rendering/{runs.v1.jsonl,budget.md}`, this plan's Desi
 
 ### R12.T9 The discrete runs
 
-On a physical desktop with an RTX 4060-class GPU, a 1080p60 monitor, X11, the NVIDIA driver and the
-same switch set, with the same preconditions. By hand, and recorded.
+On the development machine: its RTX 3080, above the RTX 4060 class (Design note 11), its display
+set to 1920 × 1080 at 60 Hz, X11, the NVIDIA driver and the same switch set, with the same
+preconditions where the machine has the files (a desktop has no `Mains` supply to read). By hand,
+and recorded.
 
 - **R12.T9.a Probes and the cockpit.** First R01's timestamp probe page once, to confirm the
   quantum and the switch on the NVIDIA path (the Chromium source was read at main, not the 152
@@ -921,10 +938,10 @@ same switch set, with the same preconditions. By hand, and recorded.
   product with the bus width gives its bandwidth, and `display: physical`. Acceptance: as T8.b, for
   the discrete column.
 - **R12.T9.b The other scenes and the station's server.** Every other scene at the high setting,
-  five repetitions and a control; then this machine serves the station scene's server for a repeat
-  of T8.c's station run on the UHD 620 with placement `remote`, restarted per repetition by the
-  operator's script. Acceptance: as T8.c and T8.d, for the discrete column; the station
-  wireframe's figure on the UHD 620 with the server placement `remote`.
+  five repetitions and a control; then the development machine serves the station scene's server for
+  a repeat of T8.c's station run on the owner's UHD 620 with placement `remote`, restarted per
+  repetition by the operator's script. Acceptance: as T8.c and T8.d, for the discrete column; the
+  station wireframe's figure on the UHD 620 with the server placement `remote`.
 
 Files: as T8.
 
@@ -940,9 +957,9 @@ against the demand; the memory peaks against the ceilings, with their bounds. Th
 brainstorm revision: the frame-time and memory tables' "estimate, not a measurement" sentences
 replaced by a link to `budget.md` and the measured figures beside the estimates; every other figure
 the runs contradicted, each with its record ID; the hardware figures of Design note 11 (272 GB/s in
-both places, 1.15 GHz, and this machine's 34.1 GB/s theoretical peak shared with the CPU beside
-ARK's 37.5 GB/s ceiling for the part, so 8.0 times the bandwidth) with their sources in place of
-"cited from memory and not re-checked". The revision goes to the owner; the owner signs off.
+both places, 1.15 GHz, and the UHD 620 laptop's 34.1 GB/s theoretical peak shared with the CPU
+beside ARK's 37.5 GB/s ceiling for the part, so 8.0 times the bandwidth) with their sources in place
+of "cited from memory and not re-checked". The revision goes to the owner; the owner signs off.
 
 Files: `docs/measurements/rendering/budget.md`, a drafted revision of
 `docs/agent/brainstorming/rendering-and-planets.md`. Acceptance: `npx prettier --check` on both;
@@ -966,8 +983,9 @@ each after-record states the change with its verdict.
 
 ### R12.T12 Verification pass
 
-- **R12.T12.a The UHD 620 again.** Re-run every scene on the UHD 620 at the settings T11.a left, by
-  T8's procedure, record and regenerate the table. Acceptance: the records validate; `just ci`.
+- **R12.T12.a The UHD 620 again.** The owner re-runs every scene on the UHD 620 at the settings
+  T11.a left, by T8's procedure, record and regenerate the table. Acceptance: the records validate;
+  `just ci`.
 - **R12.T12.b The discrete machine again.** The same on the discrete machine at the settings T11.b
   left, where T9 has run; otherwise the reason is stated in `budget.md`. Acceptance: as T12.a.
 - **R12.T12.c Close.** Write the recommendations the sessions work needs (the single-player pool
@@ -989,8 +1007,8 @@ each after-record states the change with its verdict.
   change (T11).
 - **No low setting has rotted:** `just test-render` renders every catalogued shader at every
   setting, and the written audit covers every ladder row (T7).
-- **By eye:** during `cockpit-descent` on the UHD 620, the label block states the setting
-  throughout, and `TERRAIN: DETAIL LIMITED` and `TERRAIN: STREAMING` appear and clear as the
+- **By eye:** during `cockpit-descent` on the UHD 620 (the owner's), the label block states the
+  setting throughout, and `TERRAIN: DETAIL LIMITED` and `TERRAIN: STREAMING` appear and clear as the
   record's streaming fraction says (T8.b).
 
 ## Generator version
@@ -1002,9 +1020,13 @@ generator version it ran at. The plan reserves nothing in the generator.
 
 ## Risks and open points
 
-- **No discrete GPU.** The project has none, and T9 needs one borrowed; a rented cloud instance is
-  not a stand-in (Design note 11). Until one is found the discrete column stays estimates, and the
-  table says so.
+- **The discrete reference exceeds its class.** T9 runs on the development machine's RTX 3080,
+  above the RTX 4060 class the brainstorm names; a rented cloud instance is still not a stand-in
+  (Design note 11). A pass there does not show a pass on an RTX 4060, so `budget.md` labels the
+  discrete column with the card and its headroom. The runner's preconditions and samplers were
+  written for the UHD 620 laptop (a `Mains` supply, `thermal_throttle`, i915's frequency files); on
+  the desktop those read `null`, and how T2's `checkQuiet` treats a machine with no `Mains` supply
+  (refuse, or pass as always on AC) is open until T2 is built.
 - **The brainstorm's step 3 sentence** that the forced switches give per-pass GPU time uncoarsened
   is wrong, as R01 and R05 also found (Design note 4); T10's draft corrects it. Its Sources line
   crediting `--enable-unsafe-webgpu` with lifting the quantisation is right, but that flag is the
@@ -1041,18 +1063,19 @@ generator version it ran at. The plan reserves nothing in the generator.
   rendering plans"). Until R07 designs them, T5.a takes the sizes from R07's code as built. R07's
   stable pass labels (`PHOTOREAL_PASS_LABELS`, R07.T7) and the controller's bounds as a setting
   value (`ViewSettings.internalScaleBounds`, R07.T17 and T18), which T11.a moves, are met.
-- **This chassis throttles thermally under sustained load.** The X1 Yoga's figures are its throttled
-  sustained state and are labelled so; another UHD 620 laptop may do better or worse, which is why a
-  record names the machine and not only the GPU.
+- **The UHD 620 chassis throttles thermally under sustained load.** The X1 Yoga's figures are its
+  throttled sustained state and are labelled so; another UHD 620 laptop may do better or worse,
+  which is why a record names the machine and not only the GPU.
 - **Frame intervals are R05's.** Presentation times from the trace, with the `requestAnimationFrame`
   fallback; this plan inherits R05's definition and says so in `budget.md`.
 - **The station's server placement.** With one machine the station run is co-resident and does not
-  count (Design note 8); T9's machine removes that until the project has a second one of its own.
+  count (Design note 8); T9.b removes that by serving from the development machine to the owner's
+  UHD 620, which needs both machines at once.
 - **The main screen at 4K** waits on R07's main screen and so on the sessions, ship state and
   closed-loop commands, which have no plan. When it exists, a `main-screen-4k` scene joins the
   catalogue to measure the internal scale the brainstorm says it may render below native at.
-- **The RTX 4060's memory speed** (17 Gbps, so 272 GB/s) is from memory; T9's `nvidia-smi -q`
-  settles it.
+- **The RTX 4060's memory speed** (17 Gbps, so 272 GB/s) is from memory; T9 runs on an RTX 3080,
+  so its `nvidia-smi -q` cannot settle it, and it stays NVIDIA's published figure.
 - **`just test-render` is not in `just ci`** (R01.T9.e), so T7.a's anti-rot check runs where R01's
   gate runs it, on tasks that touch the engine or a shader; if the owner moves it into `ci`, the
   check moves with it.

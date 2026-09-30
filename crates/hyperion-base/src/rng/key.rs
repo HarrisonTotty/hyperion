@@ -5,24 +5,24 @@ use std::fmt;
 use std::str::FromStr;
 
 use super::TagScope;
-use crate::id::{HexFault, parse_lower_hex};
+use crate::hex::{HexFault, parse_lower_hex};
 
 /// A universe's seed: with [`GENERATOR_VERSION`](crate::GENERATOR_VERSION), what identifies a
 /// universe.
 ///
 /// It is the first key word of every stream. Its text form is exactly 16 lower-case hexadecimal
-/// digits, as a [`SystemId`](crate::id::SystemId)'s is, so that one seed has one string and a
+/// digits, as a `SystemId`'s is, so that one seed has one string and a
 /// JSON reader cannot round it.
 ///
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::Seed;
+/// use hyperion_base::Seed;
 ///
 /// let seed: Seed = "00000000deadbeef".parse()?;
 /// assert_eq!(seed.get(), 0xdead_beef);
 /// assert_eq!(seed.to_string(), "00000000deadbeef");
-/// # Ok::<(), hyperion_sim::rng::ParseSeedError>(())
+/// # Ok::<(), hyperion_base::rng::ParseSeedError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Seed(u64);
@@ -118,7 +118,7 @@ impl Error for ParseSeedError {}
 /// | [`TagScope::Galaxy`]       | 0 for the galaxy, or an item number of a list | 0                |
 /// | [`TagScope::Cell`]         | the cell word: a candidate ID, index zeroed   | 0                |
 /// | [`TagScope::Feature`]      | the feature's object word                     | 0                |
-/// | [`TagScope::System`]       | the [`SystemId`](crate::id::SystemId)'s raw value | 0            |
+/// | [`TagScope::System`]       | the `SystemId`'s raw value | 0            |
 /// | [`TagScope::Body`]         | the body's system's raw value                 | the body index   |
 ///
 /// The word becomes counter word 0 and `sub` the top 16 bits of counter word 1. Keys are built
@@ -157,17 +157,36 @@ impl ObjectKey {
     }
 
     /// A generation cell, by its word: the ID of the cell's candidate 0 with the index zeroed,
-    /// [`SystemId::cell_word`](crate::id::SystemId::cell_word).
+    /// `SystemId::cell_word`.
     #[must_use]
     pub const fn cell(word: u64) -> Self {
         Self::new(word, 0, TagScope::Cell)
     }
 
     /// A feature, by its object word, such as
-    /// [`FeatureRef::object_word`](crate::id::FeatureRef::object_word).
+    /// `FeatureRef::object_word`.
     #[must_use]
     pub const fn feature(word: u64) -> Self {
         Self::new(word, 0, TagScope::Feature)
+    }
+
+    /// A system, by its raw 64-bit ID: that word, `sub` 0, scope [`TagScope::System`].
+    ///
+    /// Callers with a `SystemId` convert it (`ObjectKey::from(id)`), which calls this; the raw
+    /// form exists so that the conversion can live beside the ID type, above this crate. A key is
+    /// only ever built from integers: never from float bits, pointers or a `usize`.
+    #[must_use]
+    pub const fn system(raw_system_id: u64) -> Self {
+        Self::new(raw_system_id, 0, TagScope::System)
+    }
+
+    /// A body, by its system's raw 64-bit ID and its body index: that word, `sub` the index, which
+    /// shares counter word 1 with the draw number, scope [`TagScope::Body`].
+    ///
+    /// Callers with a `BodyId` convert it (`ObjectKey::from(id)`), which calls this.
+    #[must_use]
+    pub const fn body(raw_system_id: u64, body_index: u16) -> Self {
+        Self::new(raw_system_id, body_index, TagScope::Body)
     }
 
     /// Counter word 0 of every stream opened for this object.
@@ -246,6 +265,16 @@ mod tests {
         assert_eq!(
             (feature.word(), feature.sub(), feature.scope()),
             (42, 0, TagScope::Feature)
+        );
+        let system = ObjectKey::system(0x0200_0800_2000_0007);
+        assert_eq!(
+            (system.word(), system.sub(), system.scope()),
+            (0x0200_0800_2000_0007, 0, TagScope::System)
+        );
+        let body = ObjectKey::body(0x0200_0800_2000_0007, 3);
+        assert_eq!(
+            (body.word(), body.sub(), body.scope()),
+            (0x0200_0800_2000_0007, 3, TagScope::Body)
         );
     }
 }

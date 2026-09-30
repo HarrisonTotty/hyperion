@@ -1,16 +1,16 @@
 //! Golden files of the determinism foundation.
 //!
-//! Every value pinned here is part of the generator version: the pinned `libm`'s function values,
-//! the position draw, the ID layouts, the domain-tag hashes, the stream keying, every sampler's
-//! output and word consumption, the decision thresholds and the event keys. (The designations
-//! printed beside the IDs are not, but a change to them shows up here too.) Each file's first line
+//! Every value pinned here is part of the generator version: the position draw, the ID layouts, the
+//! domain-tag hashes, the stream keying, every sampler's output and word consumption, the decision
+//! thresholds and the event keys. (The designations printed beside the IDs are not, but a change
+//! to them shows up here too.) Each file's first line
 //! is `# generator_version = <n>` from [`GENERATOR_VERSION`], so a version bump fails every test
 //! here until `just bless` regenerates the files in the same commit, and
 //! [`every_golden_file_carries_the_current_version`] holds every golden file of the crate to the
-//! same header, whichever test writes it.
+//! same header, whichever test writes it. The pinned `libm`'s function values, the samplers and
+//! the decisions moved with `math` and `rng` to `hyperion-base`, whose own `foundation_golden.rs`
+//! pins them (plan R04, T4.a and T4.d).
 
-use std::f64::consts::{FRAC_PI_4, LN_2, PI};
-use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
 use hyperion_sim::coords::{CellSize, GenCell};
@@ -19,11 +19,7 @@ use hyperion_sim::id::{
     EventSubject, EventWord, FeatureCell, FeatureMemberId, FeatureRef, Layer, MemberSlot, PinnedId,
     StreamMemberId, SystemId, event_tags,
 };
-use hyperion_sim::math;
-use hyperion_sim::rng::{
-    EventKey, ObjectKey, PiecewiseLinear, PiecewisePowerLaw, PowerLaw, Stream, TagScope, Threshold,
-    Thresholds, tags,
-};
+use hyperion_sim::rng::{EventKey, ObjectKey, Stream, TagScope, tags};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
@@ -36,14 +32,11 @@ fn writer() -> GoldenWriter {
 }
 
 /// The golden files this suite writes, by name.
-const FOUNDATION_GOLDENS: [&str; 8] = [
-    "math/functions",
+const FOUNDATION_GOLDENS: [&str; 5] = [
     "coords/positions",
     "id/layouts",
     "rng/tags",
     "rng/streams",
-    "rng/samplers",
-    "rng/decisions",
     "rng/events",
 ];
 
@@ -104,352 +97,6 @@ fn every_golden_file_carries_the_current_version() {
             "golden file {name} does not carry the current generator version"
         );
     }
-}
-
-type Unary = (&'static str, fn(f64) -> f64, &'static [f64]);
-type Binary = (&'static str, fn(f64, f64) -> f64, &'static [(f64, f64)]);
-
-/// Just under and just over 0.5 ln 2 and 1.5 ln 2, where `exp` and `exp_m1` change their
-/// argument reduction.
-const HALF_LN_2_BELOW: f64 = 0.5 * LN_2 - 1e-8;
-const HALF_LN_2_ABOVE: f64 = 0.5 * LN_2 + 1e-8;
-
-/// 1 ± 2⁻⁵², the neighbours of 1 where a logarithm's result is smallest.
-const ONE_PLUS_ULP: f64 = 1.0 + f64::EPSILON;
-const ONE_MINUS_ULP: f64 = 1.0 - f64::EPSILON;
-
-/// A subnormal argument.
-const SUBNORMAL: f64 = 1e-310;
-
-/// Arguments of the circular functions: tiny, inside π/4, the reduction's medium range up to
-/// 2²⁰ π/2, and the large-argument reduction.
-const CIRCULAR: &[f64] = &[
-    0.0,
-    1e-9,
-    1.0,
-    FRAC_PI_4,
-    3.0 * FRAC_PI_4,
-    PI,
-    -2.5,
-    100.0,
-    1e6,
-    1e22,
-];
-
-/// Arguments of the functions of `[−1, 1]`: tiny, below and above 0.5, the 0.975 branch of
-/// `asin`, and the ends.
-const UNIT_INTERVAL: &[f64] = &[0.0, 1e-10, 0.3, -0.49, 0.5, 0.7, 0.98, 0.999_999, 1.0, -1.0];
-
-/// Acklam's branch point of the normal quantile, and its mirror: 1 − 0.97575 lies just below
-/// 0.02425, so `NORMAL_QUANTILE_HIGH` takes the tail branch and the double below it the central one.
-const NORMAL_QUANTILE_LOW: f64 = 0.024_25;
-const NORMAL_QUANTILE_HIGH: f64 = 0.975_75;
-
-/// Arguments of the normal quantile: ½; both of Acklam's branch points crossed, 0.02425 ± 2⁻⁵⁵
-/// (eight ulps) and 0.97575 ± 2⁻⁵³ (one ulp); the switch from erfc to erf at 0.25; 10⁻³ and its
-/// mirror; the tail down to 10⁻¹⁰, the smallest normal and the smallest subnormal, where Φ
-/// underflows gradually; and the last double below 1.
-const NORMAL_QUANTILE: &[f64] = &[
-    0.5,
-    NORMAL_QUANTILE_LOW - f64::EPSILON / 8.0,
-    NORMAL_QUANTILE_LOW,
-    NORMAL_QUANTILE_LOW + f64::EPSILON / 8.0,
-    NORMAL_QUANTILE_HIGH - f64::EPSILON / 2.0,
-    NORMAL_QUANTILE_HIGH,
-    NORMAL_QUANTILE_HIGH + f64::EPSILON / 2.0,
-    0.25,
-    0.001,
-    0.999,
-    1e-10,
-    f64::MIN_POSITIVE,
-    5e-324,
-    1.0 - f64::EPSILON / 2.0,
-];
-
-const UNARY: &[Unary] = &[
-    ("sin", math::sin, CIRCULAR),
-    ("cos", math::cos, CIRCULAR),
-    ("tan", math::tan, CIRCULAR),
-    ("asin", math::asin, UNIT_INTERVAL),
-    ("acos", math::acos, UNIT_INTERVAL),
-    (
-        "atan",
-        math::atan,
-        &[0.0, 1e-10, 0.3, 0.5, 1.0, 1.5, 2.0, 10.0, 1e20, -3.0],
-    ),
-    (
-        "sinh",
-        math::sinh,
-        &[0.0, 1e-10, 0.5, 1.0, 3.0, 20.0, 22.0, 700.0, 710.0, -2.0],
-    ),
-    (
-        "cosh",
-        math::cosh,
-        &[0.0, 1e-10, 0.5, 1.0, 3.0, 20.0, 22.0, 700.0, 710.0, -2.0],
-    ),
-    (
-        "tanh",
-        math::tanh,
-        &[0.0, 1e-10, 0.5, 1.0, 3.0, 20.0, 22.0, 700.0, 710.0, -2.0],
-    ),
-    (
-        "asinh",
-        math::asinh,
-        &[0.0, 1e-10, 0.5, 1.5, 3.0, 1e5, 1e10, 1e300, -4.0, -1e-5],
-    ),
-    (
-        "acosh",
-        math::acosh,
-        &[1.0, 1.000_000_1, 1.5, 2.0, 2.5, 10.0, 1e5, 1e10, 1e300],
-    ),
-    (
-        "atanh",
-        math::atanh,
-        &[
-            0.0, 1e-10, 1e-300, 0.25, -0.4, 0.5, 0.75, 0.9, 0.999_999, -0.99,
-        ],
-    ),
-    (
-        "exp",
-        math::exp,
-        &[
-            0.0,
-            1e-10,
-            1.0,
-            -1.0,
-            HALF_LN_2_BELOW,
-            HALF_LN_2_ABOVE,
-            2.5,
-            709.0,
-            -708.5,
-            -745.0,
-        ],
-    ),
-    (
-        "exp2",
-        math::exp2,
-        &[
-            0.0, 1e-10, 0.5, 1.0, -1.5, 10.25, 1023.9, -1022.5, -1074.0, 1e-300,
-        ],
-    ),
-    (
-        "exp10",
-        math::exp10,
-        &[0.0, 1e-10, 0.5, 2.0, 15.0, 16.0, -3.0, -7.5, 308.0, -323.0],
-    ),
-    (
-        "exp_m1",
-        math::exp_m1,
-        &[
-            1e-20,
-            1e-10,
-            1e-5,
-            0.3,
-            HALF_LN_2_ABOVE,
-            1.0,
-            10.0,
-            57.0,
-            700.0,
-            -40.0,
-        ],
-    ),
-    (
-        "ln",
-        math::ln,
-        &[
-            1.0,
-            2.0,
-            10.0,
-            0.5,
-            SUBNORMAL,
-            ONE_PLUS_ULP,
-            ONE_MINUS_ULP,
-            1.414,
-            1.415,
-            1e300,
-        ],
-    ),
-    (
-        "log2",
-        math::log2,
-        &[
-            1.0,
-            2.0,
-            10.0,
-            1000.0,
-            0.5,
-            SUBNORMAL,
-            ONE_PLUS_ULP,
-            ONE_MINUS_ULP,
-            3.0,
-            1e300,
-        ],
-    ),
-    (
-        "log10",
-        math::log10,
-        &[
-            1.0,
-            2.0,
-            10.0,
-            1000.0,
-            0.5,
-            SUBNORMAL,
-            ONE_PLUS_ULP,
-            ONE_MINUS_ULP,
-            3.0,
-            1e300,
-        ],
-    ),
-    (
-        "ln_1p",
-        math::ln_1p,
-        &[
-            1e-20, 1e-10, 1e-5, 0.41, 0.42, -0.29, -0.3, 1.0, 1e18, -0.999_999,
-        ],
-    ),
-    (
-        "cbrt",
-        math::cbrt,
-        &[
-            0.0, 1.0, 27.0, -8.0, 2.0, 0.001, SUBNORMAL, 1e300, -3.0, 1e-5,
-        ],
-    ),
-    (
-        "erf",
-        math::erf,
-        &[0.0, 1e-10, 0.5, 0.843_75, 1.0, -1.2, 2.0, 3.5, 5.0, 7.0],
-    ),
-    (
-        "erfc",
-        math::erfc,
-        &[0.0, 1e-10, 0.5, 0.843_75, 1.0, -1.2, 2.0, 5.0, 10.0, 27.0],
-    ),
-    (
-        "ln_gamma",
-        math::ln_gamma,
-        &[1.0, 2.0, 0.5, 10.5, 3e5, 1e-10, -0.5, -2.5, 2.5, 7.9],
-    ),
-    (
-        "gamma",
-        math::gamma,
-        &[0.5, 1.0, 5.0, 10.5, 1e-10, 0.1, -0.5, -2.5, 171.0, 171.5],
-    ),
-    ("normal_quantile", math::normal_quantile, NORMAL_QUANTILE),
-];
-
-const BINARY: &[Binary] = &[
-    (
-        "atan2",
-        math::atan2,
-        &[
-            (1.0, 1.0),
-            (1.0, -1.0),
-            (-1.0, -1.0),
-            (-1.0, 1.0),
-            (0.0, -1.0),
-            (1.0, 0.0),
-            (1e-300, 1e10),
-            (3.0, 1.0),
-            (-2.0, 1e-20),
-            (0.5, 26_000.0),
-        ],
-    ),
-    // The mass-function exponents: 1 − α for the Kroupa slopes α = 0.3, 1.3, 2.3 and Salpeter's
-    // 2.35, then a negative base, a subnormal result and a large exponent.
-    (
-        "powf",
-        math::powf,
-        &[
-            (2.0, 0.5),
-            (10.0, -0.35),
-            (0.08, -1.3),
-            (150.0, -2.3),
-            (0.01, 0.7),
-            (0.5, -0.3),
-            (100.0, -1.35),
-            (-2.0, 3.0),
-            (2.0, -1074.0),
-            (1.000_001, 1e6),
-        ],
-    ),
-    (
-        "hypot",
-        math::hypot,
-        &[
-            (3.0, 4.0),
-            (5.0, 12.0),
-            (1e300, 1e300),
-            (SUBNORMAL, SUBNORMAL),
-            (1.0, 1e-20),
-            (-3.0, 0.0),
-            (1.5, 2.5),
-            (1e150, 1e-150),
-            (26_000.0, 100.0),
-        ],
-    ),
-];
-
-/// `mul_add` where fusing matters: a product's rounding error recovered, 1 − ε² that the unfused
-/// form loses, the light-year products of `coords`, a subnormal result, and exact cancellation.
-const MUL_ADD: &[(f64, f64, f64)] = &[
-    (0.1, 1e9, -100_000_000.0),
-    (1.0 + f64::EPSILON, 1.0 - f64::EPSILON, -1.0),
-    (-65_536.0, 9_460_730_472_580_800.0, 4.7e15),
-    (1_234_567.0, 9_460_730_472_580_800.0, -3.3),
-    (0.3, 3.0, -0.9),
-    (f64::MIN_POSITIVE, 0.25, 0.0),
-    (1e300, 1e10, -1e308),
-    (2.0, 3.0, 4.0),
-    (-1.5, 2.0, 3.0),
-];
-
-const POWI: &[(f64, i32)] = &[
-    (1.1, 7),
-    (2.0, 1023),
-    (2.0, -1022),
-    (-3.0, 5),
-    (0.5, -3),
-    (1.000_001, 1_000_000),
-    (10.0, 22),
-    (10.0, -5),
-    (7.0, 0),
-    (-1.5, -7),
-];
-
-#[test]
-fn math_function_values_are_pinned() {
-    let mut w = writer();
-    for (name, f, arguments) in UNARY {
-        w.line("");
-        for &x in *arguments {
-            w.f64(&format!("{name}({x:?})"), f(x));
-        }
-    }
-    w.line("");
-    for &x in CIRCULAR {
-        let (sin, cos) = math::sin_cos(x);
-        w.f64(&format!("sin_cos({x:?}).sin"), sin);
-        w.f64(&format!("sin_cos({x:?}).cos"), cos);
-    }
-    for (name, f, arguments) in BINARY {
-        w.line("");
-        for &(x, y) in *arguments {
-            w.f64(&format!("{name}({x:?}, {y:?})"), f(x, y));
-        }
-    }
-    w.line("");
-    for &(x, a, b) in MUL_ADD {
-        w.f64(
-            &format!("mul_add({x:?}, {a:?}, {b:?})"),
-            math::mul_add(x, a, b),
-        );
-    }
-    w.line("");
-    for &(x, n) in POWI {
-        w.f64(&format!("powi({x:?}, {n})"), math::powi(x, n));
-    }
-    golden!("math/functions", w.as_str());
 }
 
 /// Fixed position words: all zeros, all ones, single bits, alternating patterns and three odd
@@ -691,7 +338,9 @@ fn id_layouts_are_pinned() {
 #[test]
 fn domain_tags_are_pinned() {
     let mut w = writer();
-    for tag in tags::ALL {
+    // The foundation's registry, then the sim's (plan R04, Design note 4): today's order byte for
+    // byte, since `selftest.stream`, the foundation's one tag, was the single registry's first.
+    for tag in hyperion_base::rng::tags::ALL.iter().chain(tags::ALL) {
         w.u64_hex(&format!("{} ({:?})", tag.name(), tag.scope()), tag.hash());
     }
     golden!("rng/tags", w.as_str());
@@ -752,162 +401,6 @@ fn streams_are_pinned() {
     }
     assert_eq!(keys[15].1.scope(), TagScope::Body);
     golden!("rng/streams", w.as_str());
-}
-
-/// Sixteen values of each sampler from `selftest.stream`, and the words each consumed.
-#[test]
-fn samplers_are_pinned() {
-    fn section(
-        w: &mut GoldenWriter,
-        item: u64,
-        name: &str,
-        mut draw: impl FnMut(&mut Stream) -> Drawn,
-    ) {
-        let mut stream = Stream::open(
-            Seed::new(0x5a3f_1e00_601d_e000),
-            tags::SELFTEST_STREAM,
-            ObjectKey::galaxy_item(item),
-        );
-        w.line("");
-        w.line(name);
-        for n in 0..16 {
-            match draw(&mut stream) {
-                Drawn::Real(x) => w.f64(&format!("[{n}]"), x),
-                Drawn::Pair(x, y) => {
-                    w.f64(&format!("[{n}].0"), x);
-                    w.f64(&format!("[{n}].1"), y);
-                }
-                Drawn::Count(k) => w.line(&format!("[{n}] = {k}")),
-            }
-        }
-        w.line(&format!("words = {}", stream.position()));
-    }
-
-    let six = NonZeroU64::new(6).unwrap();
-    let huge = NonZeroU64::new((1 << 63) + 1).unwrap();
-    let massive = PowerLaw::new(2.3, 8.0, 150.0).unwrap();
-    let flat_log = PowerLaw::new(1.0, 1.0, 1_000.0).unwrap();
-    let rising = PowerLaw::new(-0.5, 1.0, 4.0).unwrap();
-    let kroupa =
-        PiecewisePowerLaw::continuous(&[0.01, 0.08, 0.5, 150.0], &[0.3, 1.3, 2.3]).unwrap();
-    let band_c = kroupa.truncated(0.75, 2.5).unwrap();
-    let triangle = PiecewiseLinear::new(&[0.0, 1.0, 3.0], &[0.0, 2.0, 0.0]).unwrap();
-
-    let mut w = writer();
-    let real = Drawn::Real;
-    section(&mut w, 0, "uniform", |s| real(s.uniform()));
-    section(&mut w, 1, "uniform_open_low", |s| {
-        real(s.uniform_open_low())
-    });
-    section(&mut w, 2, "uniform_open", |s| real(s.uniform_open()));
-    section(&mut w, 3, "uniform_in(-3, 5)", |s| {
-        real(s.uniform_in(-3.0, 5.0))
-    });
-    section(&mut w, 4, "below(6)", |s| Drawn::Count(s.below(six)));
-    section(&mut w, 5, "below(2^63 + 1)", |s| {
-        Drawn::Count(s.below(huge))
-    });
-    section(&mut w, 6, "standard_normal", |s| real(s.standard_normal()));
-    section(&mut w, 7, "standard_normal_pair", |s| {
-        let (x, y) = s.standard_normal_pair();
-        Drawn::Pair(x, y)
-    });
-    section(&mut w, 8, "normal(1.5, 0.25)", |s| {
-        real(s.normal(1.5, 0.25))
-    });
-    section(&mut w, 9, "log_normal(0.3, 0.5)", |s| {
-        real(s.log_normal(0.3, 0.5))
-    });
-    section(&mut w, 10, "log_normal_dex(8, 0.11)", |s| {
-        real(s.log_normal_dex(8.0, 0.11))
-    });
-    for (item, mean) in (11..).zip([0.3, 1.2, 9.99, 10.0, 1_000.0, 3e5]) {
-        section(&mut w, item, &format!("poisson({mean})"), |s| {
-            Drawn::Count(s.poisson(mean))
-        });
-    }
-    section(&mut w, 17, "power_law(2.3, 8, 150)", |s| {
-        real(s.power_law(&massive))
-    });
-    section(&mut w, 18, "power_law(1, 1, 1000)", |s| {
-        real(s.power_law(&flat_log))
-    });
-    section(&mut w, 19, "power_law(-0.5, 1, 4)", |s| {
-        real(s.power_law(&rising))
-    });
-    section(&mut w, 20, "Kroupa on [0.01, 150]", |s| {
-        real(kroupa.sample(s))
-    });
-    section(&mut w, 21, "Kroupa on [0.75, 2.5]", |s| {
-        real(band_c.sample(s))
-    });
-    section(&mut w, 22, "triangle (0, 0) (1, 2) (3, 0)", |s| {
-        real(triangle.sample(s))
-    });
-    golden!("rng/samplers", w.as_str());
-}
-
-/// One draw of a sampler, as the golden prints it.
-enum Drawn {
-    Real(f64),
-    Pair(f64, f64),
-    Count(u64),
-}
-
-/// The integer-threshold convention: thresholds of fixed probabilities and weights, and sixteen
-/// marks from `selftest.stream` with the decisions and picks they give.
-#[test]
-fn decisions_are_pinned() {
-    let mut w = writer();
-    let third = Threshold::from_probability(1.0 / 3.0);
-    for (label, threshold) in [
-        ("0.1", Threshold::from_probability(0.1)),
-        ("1/3", third),
-        ("4e-5", Threshold::from_probability(4e-5)),
-        (
-            "1 - 2^-53",
-            Threshold::from_probability(1.0 - f64::EPSILON / 2.0),
-        ),
-        ("1", Threshold::from_probability(1.0)),
-        ("0", Threshold::from_probability(0.0)),
-    ] {
-        w.u64_hex(&format!("from_probability({label})"), threshold.get());
-    }
-    w.u64_hex("from_ratio(3, 7)", Threshold::from_ratio(3.0, 7.0).get());
-    w.u64_hex(
-        "from_ratio(0.8, 2.5)",
-        Threshold::from_ratio(0.8, 2.5).get(),
-    );
-
-    // Four classes with shares 0.1, 0.25, 0.05 and 0.3 of a bound of 2.5; the rest is rejection.
-    let weights = [0.25, 0.625, 0.125, 0.75];
-    let bound = 2.5;
-    let thresholds = Thresholds::from_weights(&weights, bound);
-    w.line("");
-    w.line(&format!("from_weights({weights:?}, {bound})"));
-    for (i, threshold) in thresholds.as_slice().iter().enumerate() {
-        w.u64_hex(&format!("[{i}]"), threshold.get());
-    }
-
-    let mut stream = Stream::open(
-        Seed::new(0x5a3f_1e00_601d_e000),
-        tags::SELFTEST_STREAM,
-        ObjectKey::galaxy_item(23),
-    );
-    w.line("");
-    w.line("marks of selftest.stream, item 23");
-    for n in 0..16 {
-        let mark = stream.mark();
-        let pick = mark.pick(&thresholds);
-        assert_eq!(pick, mark.pick_weighted(&weights, bound));
-        w.line(&format!(
-            "[{n}] mark = 0x{:014x} below(1/3) = {} pick = {pick:?}",
-            mark.get(),
-            mark.is_below(third)
-        ));
-    }
-    w.line(&format!("words = {}", stream.position()));
-    golden!("rng/decisions", w.as_str());
 }
 
 /// A subject in its text form.
