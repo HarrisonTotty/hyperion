@@ -2,8 +2,8 @@
 //! engulfment reach, and the histories of bodies on young, evolved and exploding hosts.
 //!
 //! They pin the arithmetic, not only the draws: a moved word, a changed scan point or a reordered
-//! sum of host masses changes a line here, which is a generator-version change. CI checks the same
-//! file on 64-bit Arm and on wasm32.
+//! sum of host masses changes a line here, which is a generator-version change. The sim-determinism
+//! skill says which targets compare it.
 
 use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::id::{BodyId, Layer, SystemId};

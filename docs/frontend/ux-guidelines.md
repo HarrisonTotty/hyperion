@@ -73,6 +73,28 @@ never use them for decoration, branding, chart series or hover effects.
   Depth comes from the three surfaces and hairlines. The ban covers chrome: panels,
   controls, frames and backgrounds. A colour ramp that encodes data, such as a raster
   field under "Graphs, schematics and spatial displays", is not a gradient in this sense.
+- **The rendered image is data.** A view's photometric image (see "Views" under "Graphs,
+  schematics and spatial displays") is not chrome, and the ban on gradients, glows, blurs and
+  transparency does not govern it. This is its own exception, not the raster field's: the image is
+  full colour and may carry GPU decoration, detail the simulation did not compute. So it comes with
+  its own honesty rule: what the simulation did not compute is labelled, and the view states when
+  decoration is on (`DECORATION ON`), beside its survey coverage and its quality setting. The
+  status colours' reservation cannot apply to photons: a rusty planet may fill the window near
+  `--status-warning`. It applies to the symbology and chrome drawn over the image, which are told
+  from it by shape and outline first. The flash threshold still binds the image, since it limits
+  what reaches the eye rather than chrome: no content flashes more than three times a second and no
+  large area flashes, and strobe beacons, lightning, a tumbling hull's glint and aliasing stars are
+  all held to it. _Draft (plan R02, R02.T2.b, item 2): the owner signs off._
+- **Outlines for symbology, and only for symbology.** Every mark over a rendered image is stroked
+  twice, its `--surface-0` casing at the raster rule's widths beneath the thin coloured stroke, so
+  that it carries its own dark surface and keeps its contrast against any part of the image. The
+  casing is a solid outline, never a blur or a glow. Text over the image is DOM, never drawn into
+  the canvas, and sits on a `--surface-0` plate of its own, which is chrome and obeys this guide.
+  Dimming the image under the symbology is not allowed: it falsifies the image. _Draft (plan R02,
+  R02.T2.b, item 3): the owner signs off._
+- **Glare is a physical effect.** Bloom and veiling glare around a real light source are camera
+  optics and are allowed on the rendered image. They are never applied to symbology or chrome, so
+  the ban on glows stands. _Draft (plan R02, R02.T2.b, item 4): the owner signs off._
 - The interface is dark only. Do not add a light theme.
 
 ## Typography
@@ -203,6 +225,24 @@ Every console is built on the same fixed frame:
 - A simulation, training or replay mode must look unmistakably different from live
   operation, through a persistent labelled banner in the header strip.
 - Design for 1920×1080 first. Consoles must remain usable at 1280×720.
+- **The main screen** is the one display without console chrome: it has no header strip, work
+  area, navigation bar or input. In their place it always shows a **status line** along one edge
+  (the ship's name, the labelled ship time and the link state), the persistent **mode banner** for
+  simulation, training, replay or pause, an **alert annunciator** (the counts of active and
+  unacknowledged emergency, warning and caution alerts, and the newest unacknowledged emergency or
+  warning in full, under the flash and reverse-video rules and never as a flashing border or a
+  screen-wide overlay; alerts are acknowledged at the stations and mirrored here), and the view's
+  label block, including who commands the camera. On loss of the link the view holds its last
+  frame, the time goes stale with its `S`, and the status line reads `NO CARRIER`.
+  - Its text is sized for the room, not by the console scale, in minutes of arc at the furthest
+    stated viewing distance d, as a character height h = 2 d tan(θ ÷ 2) (MIL-STD-1472H, 15
+    September 2020). Since its text is colour-coded, θ is at least 20′ (5.8 mrad; §5.17.25.14, "when
+    accurate color perception is required"), and never below the general preferred 15′ (§5.17.18.2,
+    whose minimum is 10′); the alert annunciator's warning and caution text is 30′ to 60′, the
+    larger in adverse conditions (§5.7.3.6). Where the viewing distance can be chosen it is 3 to 6
+    screen diagonals (§5.2.2.12.3). The standard prefers dark text on a light ground
+    (§5.2.2.12.8.1); this guide keeps its dark theme on the main screen, for a night-adapted bridge.
+    _Draft (plan R02, R02.T2.e, item 9): the owner signs off._
 - A page too short for its layout may rearrange its parts, keeping them in the same order, so
   that its tab order does not change. A disclosure opened on such a page may take the place of
   controls whose settings the page shows elsewhere, and folding it brings them back. It never
@@ -231,6 +271,23 @@ A live value is always in exactly one of these states, and each looks the same e
   Loss of the server link makes every live value on the console stale at once.
 - Elements with states or modes always show the current one. Automation always shows its
   level (`AUTO`, `MAN`, `INHIBITED`) and who is in control of a system.
+- **Exposure is an instrument.** A view's camera exposure is a value with its unit, `EV100`, and
+  its automation level, shown together: `EV100 -1.0 MAN`. `AUTO` meters the image; `MAN` holds the
+  operator's value; `INHIBITED` means the automatic function is prevented from acting, the exposure
+  is held at its last metered value, and the display says who inhibited it and why:
+  `INHIBITED · OPERATOR`, or `INHIBITED · NO IMAGE TO METER` when the view it meters has closed or
+  faulted. A system-set inhibit returns to `AUTO` by itself when its cause clears; an
+  operator-set one does not. A view with nothing to meter offers `MAN` only and shows `AUTO`
+  unavailable with `NO IMAGE TO METER`. _Draft (plan R02, R02.T2.c, item 6): the owner signs off._
+- **Limited detail is an annunciation on the view, not a data state.** A view whose renderer is
+  not drawing the surface at the detail the camera's position warrants says so on its label
+  block's plate, in `--text`, steady, while the condition holds: `TERRAIN: STREAMING` while
+  patches have not arrived, which clears by itself, and `TERRAIN: DETAIL LIMITED` while the
+  quality setting holds the surface below that detail, which does not. It is not a data state,
+  since the view's readouts come from the server and keep their own states whatever is drawn, and
+  not an alert, since the console raises it about its own drawing. It uses no status colour and
+  never the word "degraded", which belongs to the Caution class. _Draft (plan R02, R02.T2.c, item
+  7): the owner signs off._
 - Historical data on a graph is labelled as such and is distinguishable from live data.
 - A readout's sections carry one of four states, which the server sets and the console never
   infers, and each looks the same everywhere:
@@ -299,6 +356,10 @@ Four classes, shared by the whole ship:
   selected, disabled, and pending. A disabled control says why on hover or focus.
 - Opposites come in congruent pairs in a consistent order: `ON`/`OFF`, `OPEN`/`CLOSE`,
   `ENABLE`/`INHIBIT`, `AUTO`/`MAN`. Command names must be hard to confuse with each other.
+- A view's exposure automation is commanded by the congruent pair `INHIBIT` and `ENABLE`, not by a
+  button named `AUTO`: `INHIBIT` holds the exposure at its last metered value and marks it
+  `INHIBITED · OPERATOR`, and `ENABLE` returns it to `AUTO`. _Draft (plan R02, R02.T2.c, item 6):
+  the owner signs off._
 - Commanding is closed-loop. After a command the control shows `PENDING`, and then the
   result as reported by the server: accepted, rejected with a reason, or timed out. Never
   update the display optimistically as if the ship had already obeyed.
@@ -416,6 +477,29 @@ Four classes, shared by the whole ship:
   - Bodies move only when the display time changes, never on their own, so a held map is still.
   - The zoom presets `INNER`, `ALL` and `BELTS` fit the outer limit of the habitable zone or the
     fifth body, the outermost planet, and the outermost belt. Zooming by hand releases a preset.
+- **Views.** A view (`VIEW`) is a perspective picture of the surroundings, redrawn every frame and
+  always labelled as a view. It is **not a spatial display**, and the three-dimensional spatial
+  display's conventions do not apply to it as a set: a perspective picture has no single scale,
+  its camera rolls with the ship or flies free, it has no reference plane or stalks, and physics
+  dims and shrinks what is far away. What it keeps is stated instead:
+  - the ship-wide contact symbol set with shape for type, the bracket reticle for the selection
+    and `--target` for a commanded destination, and predicted paths dashed;
+  - its frame name, its time, its style and its camera mode, always shown on its label block;
+  - whenever the camera is off the hull, `POSITIONS AS SEEN FROM SHIP`: positions are as seen from
+    the ship at its light-time, not from the camera;
+  - the canvas paired with a DOM list of what is in the view, contacts, bodies and the selection,
+    from which a mark is selected by keyboard.
+
+  The class covers both render styles. The wireframe style has no photometric image, so the
+  rendered image's exception under "Colour" does not reach it, and its marks, graticules and
+  contours included, follow this guide's ordinary rules for colour, stroke and contrast; it is
+  still a view and not a spatial display, since its perspective breaks the same conventions.
+  _Draft (plan R02, R02.T2.a, item 1): the owner signs off._
+
+- A view cannot carry the 1-2-5 scale bar, since a perspective picture has no single scale. In its
+  place the view states its horizontal field of view in degrees (`FOV 60°`) and its reference
+  frame, and every target in its list carries a range readout, from the own ship where there is
+  one, else labelled `FROM CAMERA`. _Draft (plan R02, R02.T2.a, item 5): the owner signs off._
 - The ship-wide symbol set. Every outline is closed, so that it can be filled above the reference
   plane and drawn open below it. The list and readout name every kind in words, so shape is never
   the only signal.
@@ -458,6 +542,15 @@ Four classes, shared by the whole ship:
   at frame rate.
 - Honour `prefers-reduced-motion`: drop transitions and replace flashing with steady
   reverse video.
+- **A view never stops.** A view redraws continuously, whenever the ship moves, with no control to
+  hold it. A move between camera presets and a slew to a target are cuts, as a display switch is:
+  the 80 to 150 ms transition would make a whip-pan. Single-player offers an eased move of 0.4 s as
+  a setting, `EASED CAMERA MOVES`, off by default; the main screen always cuts, since the people
+  watching it did not trigger the move. Under `prefers-reduced-motion` the world is not frozen, but
+  every non-physical motion stops: eased moves, idle drift, camera smoothing such as acceleration
+  ramps and damping, and any automatic camera motion. Camera flight itself is the operator's own
+  motion and is never suppressed. A view's readouts stay at about 4 Hz. _Draft (plan R02, R02.T2.d,
+  item 8): the owner signs off._
 - Sounds are short, dry and functional: control feedback, command results and the alert
   tones. Each alert class has one distinct tone. There is no interface music.
 
@@ -595,7 +688,7 @@ Four classes, shared by the whole ship:
 | `DUST LUMINOSITY`                                                          | Label                  | A belt's dust luminosity as a fraction of its host's (`× HOST`), or `NONE`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `COMETS OVER 1 km`, `COMET RATE`                                           | Label                  | The halo's comets over 1 km across; the long-period comets reaching perihelion near the host, in `/yr`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `SMALL BODIES`                                                             | Section                | A ring's, belt's or halo's readout section                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `GENERATOR INPUTS`                                                         | Section                | What later generators read of a body: its `SURFACE SEED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `GENERATOR INPUTS`                                                         | Section                | What later generators read of a body: its `DETAIL SEED` (draft for the owner, R04.T3.b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `NAME`                                                                     | Label                  | A universe's or a body's name                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `EQUATORIAL PLANE`                                                         | Reference plane        | The `BODY` frame's plane: the focused body's equator                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `POPULATION`                                                               | Stellar population     | A system's birth population, and the galaxy map's population switch: `YOUNG THIN DISC`, `OLD THIN DISC`, `THICK DISC`, `BULGE`, `LONG BAR`, `NUCLEAR DISC` or `HALO`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -626,7 +719,7 @@ Four classes, shared by the whole ship:
 | `FILLED ABOVE`, `OPEN BELOW`, `FILLED NORTH OF`, `OPEN SOUTH OF`           | Legend                 | The fill rule, followed by the plane's name                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `ORBIT`, `SELECTED ORBIT OR EDGES`                                         | Legend                 | An orbit's line; the selected orbit's wider line, which a selected belt's, ring's or halo's edges share                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `DRAWN`, `DERIVED`, `FIXED`                                                | Provenance             | A galaxy parameter drawn from the seed, derived from others, or fixed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `SEED`, `SEED VALUE`, `SURFACE SEED`                                       | Label                  | A universe's seed, the value entered for it, and a body's surface seed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `SEED`, `SEED VALUE`, `DETAIL SEED`                                        | Label                  | A universe's seed, the value entered for it, and a body's detail seed, the seed of the client's local terrain synthesis (draft for the owner, R04.T3.b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `RANDOM`, `ENTERED`, `DRAWN BY SERVER`                                     | Seed                   | Where a new universe's seed comes from                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `PROTOSTAR`, `PRE-MAIN SEQUENCE`, `MAIN SEQUENCE`, `HERTZSPRUNG GAP`       | Stellar phase          | A star's `PHASE` up to and after core hydrogen burning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `FIRST GIANT BRANCH`, `CORE HELIUM BURNING`                                | Stellar phase          | A giant's phases before the asymptotic giant branch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
