@@ -9,6 +9,7 @@ import {
   type FormattedSubstellarMass,
   formatListPosition,
   formatNumber,
+  formatSci,
   formatSigned,
   formatSubstellarMass,
   formatUniverseTimeYr,
@@ -27,6 +28,7 @@ import {
   toLocal,
 } from "../../spatial/frame";
 import { PrimaryReadings } from "./PrimaryReadings";
+import type { LineExtinction } from "./useExtinction";
 import { SystemReading as Reading } from "./SystemReading";
 
 /** Whether the selected system is within the drive range, in words; `null` with none selected. */
@@ -44,6 +46,9 @@ function massUnit(mass: FormattedSubstellarMass) {
 
 /** Decimals of a speed in km/s, as the guide writes one (`12.4 km/s`). */
 const SPEED_DECIMALS = 1;
+
+/** Decimals of an extinction or a reddening in magnitudes (plan 07, P07.T11.c). */
+const MAGNITUDE_DECIMALS = 2;
 
 /** Props of {@link SystemReadout}. */
 export interface SystemReadoutProps {
@@ -67,6 +72,12 @@ export interface SystemReadoutProps {
    * after the newer request failed; its readings are then muted and trail the guide's `S`.
    */
   readonly starsStale: boolean;
+  /**
+   * What lies between the chart's centre and the selected system at the chart's time, or `null`
+   * before the answer, without a selection, for a system the server names no such system and after
+   * a failed request (plan 07, P07.T11.c); where the request stands is said beside the readout.
+   */
+  readonly extinction: LineExtinction | null;
 }
 
 /**
@@ -92,6 +103,10 @@ export interface SystemReadoutProps {
  * `SPINWARD` and `NORTH` components, signed, in km/s, along the named directions at the system's
  * own position, where its rotation is spinward (plan 08, P08.T7.b); the system moves at it, and
  * the chart, which asks again when its time changes, shows it moved.
+ *
+ * Under `FROM CHART CENTRE`, the dust along the line from the chart's centre to the system at
+ * the chart's time (plan 07, P07.T11.c): `A(V)`, `E(B-V)` and `A(K)` in `mag` to two decimals and
+ * `N(H)`, the hydrogen column, in `/cm²` in E notation, each the em dash until the answer.
  *
  * With the stars' answer, the primary's mass now stands beside its initial mass and the system's
  * metallicity, `[Fe/H]` in `dex`, follows its population, each the em dash until then, so that no
@@ -122,6 +137,7 @@ export function SystemReadout({
   distanceDecimals,
   stars,
   starsStale,
+  extinction,
 }: SystemReadoutProps) {
   const local = system === null ? null : toLocal(frame, system.relLy);
   const velocity =
@@ -291,6 +307,40 @@ export function SystemReadout({
               label="HEIGHT"
               value={system === null ? null : formatSigned(system.positionLy.z, 1)}
               unit="ly"
+            />
+          </dl>
+          {/*
+           * The dust between the chart's centre and the system (plan 07, P07.T11.c): A(V), E(B-V)
+           * and A(K) in mag, N(H) in /cm² in E notation, the guide's parenthesised subscripts;
+           * each the em dash until the answer, never zero.
+           */}
+          <h3 className="system-readout__heading">FROM CHART CENTRE</h3>
+          <dl className="readout system-readout__values">
+            <Reading
+              label="A(V)"
+              value={
+                extinction === null ? null : formatNumber(extinction.aVMag, MAGNITUDE_DECIMALS)
+              }
+              unit="mag"
+            />
+            <Reading
+              label="E(B-V)"
+              value={
+                extinction === null ? null : formatNumber(extinction.eBVMag, MAGNITUDE_DECIMALS)
+              }
+              unit="mag"
+            />
+            <Reading
+              label="A(K)"
+              value={
+                extinction === null ? null : formatNumber(extinction.aKMag, MAGNITUDE_DECIMALS)
+              }
+              unit="mag"
+            />
+            <Reading
+              label="N(H)"
+              value={extinction === null ? null : formatSci(extinction.hydrogenColumnPerCm2)}
+              unit="/cm²"
             />
           </dl>
           {primary === null || formed === null ? null : (

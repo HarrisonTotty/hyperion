@@ -38,6 +38,17 @@ function unitSymbol(unit: Unit): ReactElement | null {
     case "per_ly3":
       symbol = <span className="unit">/ly³</span>;
       break;
+    // The gas's astronomers' units (plan 07, P07.T10.b), composed as `/ly³` is, since B612 has
+    // no superscript minus.
+    case "per_cm3":
+      symbol = <span className="unit">/cm³</span>;
+      break;
+    case "k_per_cm3":
+      symbol = <span className="unit">K/cm³</span>;
+      break;
+    case "mag":
+      symbol = <span className="unit">mag</span>;
+      break;
   }
   return symbol;
 }

@@ -19,6 +19,7 @@ import {
   type StarFilter,
   toScene,
 } from "./chartModel";
+import { type Extinction, useExtinction } from "./useExtinction";
 import { useRangeQuery } from "./useRangeQuery";
 
 /** Everything the `LOCAL CHART` panel and the panels beside it are drawn from. */
@@ -47,6 +48,13 @@ export interface LocalChartState {
   readonly bands: ReadonlyArray<LayerBand> | null;
   readonly selected: ChartSystem | null;
   readonly selectedId: SystemIdHex | null;
+  /**
+   * The extinction from the centre of the chart on show to the selected system, at the chart's
+   * time (plan 07, P07.T11.c): `idle` with nothing selected.
+   */
+  readonly extinction: Extinction;
+  /** Asks for the selection's extinction again, after a failure. */
+  readonly retryExtinction: () => void;
   /** The radius the operator chose, or `null` while it follows the drive range. */
   readonly radiusChoiceLy: number | null;
   readonly queryRadiusLy: number;
@@ -76,7 +84,9 @@ export interface LocalChartState {
  * operator chooses one. The `STARS` filter is the client's own and asks nothing of the server: it
  * picks from the answer on show the systems the chart, the list and the HR diagram show. The
  * selection is derived from those, so a new result or filter keeps it while its system is still
- * shown and hides it otherwise; choosing a filter that shows it again brings it back. The scene and the frame keep their
+ * shown and hides it otherwise; choosing a filter that shows it again brings it back. The selection's
+ * extinction is asked for from the centre of the chart on show at its time (plan 07, P07.T11.c).
+ * The scene and the frame keep their
  * identity while nothing they are built from changes, so that an idle chart paints nothing.
  *
  * @param centreLy - The chart centre, which `CENTRE CHART` publishes; `null` until it does.
@@ -91,6 +101,7 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const [chosenId, setChosenId] = useState<SystemIdHex | null>(null);
   const [starFilter, setStarFilter] = useState<StarFilter>("all");
   const [generation, setGeneration] = useState(0);
+  const [extinctionGeneration, setExtinctionGeneration] = useState(0);
 
   const queryRadiusLy = radiusChoiceLy ?? queryRadiusForDriveRange(driveRangeLy);
   const { state, shown: answered } = useRangeQuery({
@@ -115,6 +126,13 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
   const selected = systems.find((system) => system.id === chosenId) ?? null;
   const selectedId = selected?.id ?? null;
   const centre = shown?.centreLy ?? null;
+  const extinction = useExtinction({
+    universe: open?.id ?? null,
+    centreLy: centre,
+    system: selectedId,
+    timeYr: shown?.timeYr ?? timeYr,
+    generation: extinctionGeneration,
+  });
   const frame = useMemo(
     () => localFrameAt(centre === null ? vec3(0, 0, 0) : vec3(centre[0], centre[1], centre[2])),
     [centre],
@@ -143,6 +161,10 @@ export function useLocalChart(centreLy: CentreLy | null): LocalChartState {
     bands,
     selected,
     selectedId,
+    extinction,
+    retryExtinction: () => {
+      setExtinctionGeneration((count) => count + 1);
+    },
     radiusChoiceLy,
     queryRadiusLy,
     minLayer,

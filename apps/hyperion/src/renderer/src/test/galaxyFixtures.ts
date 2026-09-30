@@ -370,6 +370,29 @@ export function everyGalaxyParameter(
         },
       ],
     },
+    {
+      key: "gas",
+      parameters: [
+        aNumber("gas.scale_height", 700, "ly", "fixed"),
+        aNumber("gas.hole_scale", 17_609.3, "ly", "drawn"),
+        aNumber("gas.warm_density", 0.0335, "per_cm3", "drawn"),
+        aNumber("gas.warm_height", 3_122.6, "ly", "drawn"),
+        aNumber("gas.warm_fraction", 0.157, "none", "derived"),
+        aNumber("gas.molecular_mass", 2.5e6, "msun", "drawn"),
+        aNumber("gas.molecular_length", 290, "ly", "derived"),
+        aNumber("gas.molecular_height", 58, "ly", "drawn"),
+        aNumber("gas.molecular_fraction", 3.0e-4, "none", "derived"),
+        aNumber("gas.neutral_fraction", 0.843, "none", "derived"),
+        aNumber("gas.corona_density", 6.0e-4, "per_cm3", "drawn"),
+        aNumber("gas.pressure_floor", 400, "k_per_cm3", "drawn"),
+        aNumber("gas.pressure_height", 1_500, "ly", "fixed"),
+        aNumber("gas.pressure_speed", 5.15, "km_per_s", "fixed"),
+        aNumber("gas.sigma_ln", 1.2, "none", "drawn"),
+        aNumber("gas.lane_offset", 450, "ly", "drawn"),
+        aNumber("gas.lane_width", 200, "ly", "drawn"),
+        aNumber("gas.lane_fraction", 0.12, "none", "drawn"),
+      ],
+    },
   ];
   return { kind: "galaxy_parameters", universe, seed, generator_version: 2, groups };
 }
@@ -426,6 +449,90 @@ export function aDensityMap({
     floor_log10_per_ly2: floorLog10PerLy2,
     ceiling_log10_per_ly2: ceilingLog10PerLy2,
     data_base64: btoa(binary),
+  };
+}
+
+/** What {@link anExtinctionMap} builds. */
+export interface ExtinctionMapSpec {
+  /** One 8-bit code per pixel, row by row from the top. */
+  readonly codes: ReadonlyArray<number>;
+  readonly widthPx?: number;
+  readonly heightPx?: number;
+  readonly view?: MapView;
+  readonly floorLog10Mag?: number;
+  readonly ceilingLog10Mag?: number;
+  readonly universe?: UniverseIdHex;
+}
+
+/**
+ * The answer to `extinction_map`: a small 8-bit map, 8 × 4 pixels unless told otherwise, spanning
+ * the M1 extent of 131,072 ly across, from the floor of 0.01 mag to 10 mag unless told otherwise.
+ *
+ * @throws Error when the codes do not fill the map or one is not a byte.
+ */
+export function anExtinctionMap({
+  codes,
+  widthPx = 8,
+  heightPx = 4,
+  view = "face_on",
+  floorLog10Mag = -2,
+  ceilingLog10Mag = 1,
+  universe = UNIVERSE_ID,
+}: ExtinctionMapSpec): ResponseFor<"extinction_map"> {
+  const { data_base64: dataBase64 } = aDensityMap({ codes, widthPx, heightPx, view, universe });
+  return {
+    kind: "extinction_map",
+    universe,
+    view,
+    width_px: widthPx,
+    height_px: heightPx,
+    centre_ly: [0, 0],
+    ly_per_px: 131_072 / widthPx,
+    bits: 8,
+    floor_log10_mag: floorLog10Mag,
+    ceiling_log10_mag: ceilingLog10Mag,
+    data_base64: dataBase64,
+  };
+}
+
+/** What {@link anExtinctionResult} answers for its one target. */
+export interface ExtinctionReading {
+  readonly aVMag: number;
+  readonly eBVMag: number;
+  readonly aKMag: number;
+  readonly hydrogenColumnPerCm2: number;
+}
+
+/**
+ * The answer to an `extinction` request for one system target from the chart's centre at the
+ * epoch: the line's figures, or `no_such_system` for `null`.
+ */
+export function anExtinctionResult(
+  request: RequestOf<"extinction">,
+  reading: ExtinctionReading | null = {
+    aVMag: 0.84,
+    eBVMag: 0.27,
+    aKMag: 0.085,
+    hydrogenColumnPerCm2: 1.57e21,
+  },
+): ResponseFor<"extinction"> {
+  return {
+    kind: "extinction",
+    universe: request.universe,
+    origin: request.origin,
+    time: request.time,
+    targets: request.targets.map(() =>
+      reading === null
+        ? { status: "no_such_system" }
+        : {
+            status: "ok",
+            a_v_mag: reading.aVMag,
+            e_b_v_mag: reading.eBVMag,
+            a_k_mag: reading.aKMag,
+            hydrogen_column_per_cm2: reading.hydrogenColumnPerCm2,
+            neutral_hydrogen_column_per_cm2: 0.8 * reading.hydrogenColumnPerCm2,
+          },
+    ),
   };
 }
 

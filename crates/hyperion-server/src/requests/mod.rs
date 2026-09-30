@@ -57,7 +57,8 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 /// The server's handlers: every request kind, and the code that answers it.
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
-/// (P06.T34), and plan 14's `system_bodies` and `body_detail` (P14.T36). A later plan's kind that
+/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and plan 07's
+/// `extinction_map` and `extinction` (P07.T10). A later plan's kind that
 /// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
@@ -81,6 +82,10 @@ impl Handler for Handlers {
             RequestBody::SystemBodies(request) => Box::pin(system::bodies(state, request, token)),
             RequestBody::BodyDetail(request) => Box::pin(system::detail(state, request, token)),
             RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
+            RequestBody::ExtinctionMap(request) => {
+                Box::pin(galaxy::extinction_map(state, request, token))
+            }
+            RequestBody::Extinction(request) => Box::pin(galaxy::extinction(state, request, token)),
         }
     }
 }
@@ -109,6 +114,8 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::SystemBodies(_) => "system_bodies",
         RequestBody::BodyDetail(_) => "body_detail",
         RequestBody::BodyEvents(_) => "body_events",
+        RequestBody::ExtinctionMap(_) => "extinction_map",
+        RequestBody::Extinction(_) => "extinction",
     }
 }
 
@@ -117,10 +124,12 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 ///
 /// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
-/// record cannot.
+/// record cannot. An extinction map can, as a density map can; the extinction to at most 64
+/// targets cannot (plan 07, P07.T10).
 fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
+        | ResponseBody::ExtinctionMap(_)
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_) => true,
@@ -129,7 +138,8 @@ fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::OpenUniverse(_)
         | ResponseBody::GalaxyParameters(_)
         | ResponseBody::SystemSummary(_)
-        | ResponseBody::BodyDetail(_) => false,
+        | ResponseBody::BodyDetail(_)
+        | ResponseBody::Extinction(_) => false,
     }
 }
 
@@ -653,9 +663,10 @@ mod tests {
 
     use hyperion_protocol::{
         BodyDetailRequest, BodyEventsRequest, BodyIdHex, CreateUniverseRequest, DensityMap,
-        DensityMapRequest, DetailLevelDto, GalacticPosition, GalaxyParametersRequest,
-        MapPopulation, MapView, MassLayer, OpenUniverseRequest, SystemBodiesRequest, SystemIdHex,
-        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+        DensityMapRequest, DetailLevelDto, ExtinctionMapRequest, ExtinctionRequest,
+        ExtinctionTarget, GalacticPosition, GalaxyParametersRequest, MapPopulation, MapView,
+        MassLayer, OpenUniverseRequest, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
+        SystemsInRangeRequest, UniverseIdHex, UniverseTime,
     };
 
     use super::*;
@@ -711,10 +722,24 @@ mod tests {
                 detail: DetailLevelDto::Full,
             }),
             RequestBody::BodyEvents(BodyEventsRequest {
-                universe,
+                universe: universe.clone(),
                 system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 from: UniverseTime::default(),
                 to: UniverseTime::default(),
+            }),
+            RequestBody::ExtinctionMap(ExtinctionMapRequest {
+                universe: universe.clone(),
+                view: MapView::FaceOn,
+                resolution: 128,
+                bits: 8,
+            }),
+            RequestBody::Extinction(ExtinctionRequest {
+                universe,
+                origin: GalacticPosition::default(),
+                time: UniverseTime::default(),
+                targets: vec![ExtinctionTarget::System {
+                    id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                }],
             }),
         ]
     }

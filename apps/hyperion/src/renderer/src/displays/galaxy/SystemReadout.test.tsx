@@ -9,6 +9,7 @@ import { vec3 } from "../../spatial/vec3";
 import { formatSigned } from "../../lib/format";
 import { aSystemsInRange, ROGUE_PLANET_FE_H_DEX } from "../../test/galaxyFixtures";
 import { SystemReadout } from "./SystemReadout";
+import type { LineExtinction } from "./useExtinction";
 
 const CENTRE = [26_000, 0, 0] as const;
 const FRAME = localFrameAt(vec3(CENTRE[0], CENTRE[1], CENTRE[2]));
@@ -31,6 +32,7 @@ function renderReadout(
   system: ChartSystem | null,
   { timeYr = 0, driveRangeLy = 50 } = {},
   stars: SystemModel | null = null,
+  extinction: LineExtinction | null = null,
 ) {
   render(
     <SystemReadout
@@ -41,6 +43,7 @@ function renderReadout(
       distanceDecimals={2}
       stars={stars}
       starsStale={false}
+      extinction={extinction}
     />,
   );
   return screen.getByRole("status", { name: "Selected system" });
@@ -255,5 +258,30 @@ describe("SystemReadout's unformed planet (ruling 134.2)", () => {
     expect(valueOf(readout, "KIND")).toBe("PLANET");
     expect(valueOf(readout, "STATE")).toBe("NOT YET FORMED");
     expect(within(readout).queryByText("BULK")).toBeNull();
+  });
+
+  describe("the extinction from the chart's centre (plan 07, P07.T11.c)", () => {
+    it("reads A(V), E(B-V) and A(K) in mag to two decimals and N(H) in /cm² in E notation", () => {
+      const readout = renderReadout(aSystem([1, 0, 0]), {}, null, {
+        aVMag: 0.8449,
+        eBVMag: 0.2714,
+        aKMag: 0.0851,
+        hydrogenColumnPerCm2: 1.574e21,
+      });
+
+      expect(within(readout).getByText("FROM CHART CENTRE")).toBeInTheDocument();
+      expect(valueOf(readout, "A(V)")).toBe("0.84 mag");
+      expect(valueOf(readout, "E(B-V)")).toBe("0.27 mag");
+      expect(valueOf(readout, "A(K)")).toBe("0.09 mag");
+      expect(valueOf(readout, "N(H)")).toBe("1.57E21 /cm²");
+    });
+
+    it("shows the missing state, never zero, until the figures arrive", () => {
+      const readout = renderReadout(aSystem([1, 0, 0]));
+
+      for (const label of ["A(V)", "E(B-V)", "A(K)", "N(H)"]) {
+        expect(valueOf(readout, label)).toBe("—");
+      }
+    });
   });
 });

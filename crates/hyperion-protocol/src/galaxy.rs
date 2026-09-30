@@ -1,4 +1,5 @@
-//! Galaxy messages: the drawn parameters, the density map and the systems within range of a point.
+//! Galaxy messages: the drawn parameters, the density and extinction maps, the extinction along
+//! lines of sight, and the systems within range of a point.
 //!
 //! These are wire types only. The server converts the simulation's types to and from them and
 //! validates every field it receives; nothing here depends on the simulation crate. Quantities
@@ -96,8 +97,10 @@ pub enum ParameterValue {
 ///
 /// The wire carries only units that the bridge client displays, so it formats and never converts:
 /// lengths in light-years, masses in solar masses, times in megayears or gigayears, speeds in
-/// kilometres per second, angles in degrees and densities per cubic light-year. The kiloparsec is
-/// never sent.
+/// kilometres per second, angles in degrees and densities per cubic light-year, and for the gas
+/// the astronomers' units the console shows beside them (plan 07, P07.T10.b): hydrogen per cubic
+/// centimetre, pressure over Boltzmann's constant in kelvin per cubic centimetre, and magnitudes.
+/// The kiloparsec is never sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -122,6 +125,12 @@ pub enum Unit {
     Deg,
     /// Per cubic light-year, ly⁻³, for number densities.
     PerLy3,
+    /// Per cubic centimetre, cm⁻³, for the gas's hydrogen number densities.
+    PerCm3,
+    /// Kelvin per cubic centimetre, K cm⁻³, for a gas pressure over Boltzmann's constant.
+    KPerCm3,
+    /// Magnitudes, mag, for extinction.
+    Mag,
 }
 
 /// The direction from which a density map is seen.
@@ -226,6 +235,140 @@ pub struct DensityMap {
     pub ceiling_log10_per_ly2: f64,
     /// The codes, base64-encoded with the standard alphabet and padding.
     pub data_base64: String,
+}
+
+/// Asks for a map of the visual extinction through a universe's galaxy (`extinction_map`),
+/// answered with an [`ExtinctionMap`].
+///
+/// The raster is the density map's (the same views, resolutions and bit depths); only the quantity
+/// differs, so the two can be drawn one over the other.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionMapRequest {
+    /// The universe whose galaxy is mapped.
+    pub universe: UniverseIdHex,
+    /// The direction the map is seen from.
+    pub view: MapView,
+    /// The map's width in pixels: 128, 256, 512 or 1,024.
+    pub resolution: u16,
+    /// Bits per pixel code: 8 or 16.
+    pub bits: u8,
+}
+
+/// A map of the visual extinction A(V) through the whole galaxy along each pixel's line of sight,
+/// in magnitudes, from the mean gas field (lanes included, noise not), as quantised logarithms.
+///
+/// **Encoding, orientation and geometry** are those of [`DensityMap`]: the same base64 of 8- or
+/// 16-bit codes, row by row from the top, the same views and extents, and the same pixel-centre
+/// rule from `centre_ly` and `ly_per_px`.
+///
+/// **Codes.** With `max = 2^bits − 1`, code 0 means "at or below the floor", and codes 1 to `max`
+/// span `floor_log10_mag` to `ceiling_log10_mag` linearly in log₁₀ of magnitudes:
+///
+/// ```text
+/// log10_mag = floor + (code − 1) × (ceiling − floor) ÷ (max − 1)
+/// ```
+///
+/// The floor is fixed at 0.01 mag (`floor_log10_mag` = −2) and the ceiling is the largest value in
+/// the map. A map with nothing above the floor has its ceiling at the floor and every code 0.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionMap {
+    /// The universe mapped.
+    pub universe: UniverseIdHex,
+    /// The direction the map is seen from.
+    pub view: MapView,
+    /// Pixels per row.
+    pub width_px: u16,
+    /// Rows.
+    pub height_px: u16,
+    /// The centre of the raster in light-years: (x, y) face-on, (x, z) edge-on.
+    pub centre_ly: [f64; 2],
+    /// The width and height of one pixel in light-years.
+    pub ly_per_px: f64,
+    /// Bits per code: 8 or 16.
+    pub bits: u8,
+    /// log₁₀ of the visual extinction, in magnitudes, that code 1 stands for.
+    pub floor_log10_mag: f64,
+    /// log₁₀ of the visual extinction, in magnitudes, that code `2^bits − 1` stands for.
+    pub ceiling_log10_mag: f64,
+    /// The codes, base64-encoded with the standard alphabet and padding.
+    pub data_base64: String,
+}
+
+/// Asks for the extinction between one point and each of up to 64 targets at a time
+/// (`extinction`), answered with an [`ExtinctionResult`].
+///
+/// The gas is a snapshot at the epoch and does not move; the time places the system targets, which
+/// drift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionRequest {
+    /// The universe whose galaxy's gas is read.
+    pub universe: UniverseIdHex,
+    /// Where every line of sight starts, inside the galaxy's root cube.
+    pub origin: GalacticPosition,
+    /// The instant the system targets are placed at, inside the clock window.
+    pub time: UniverseTime,
+    /// Where each line ends: from 1 to 64 targets.
+    pub targets: Vec<ExtinctionTarget>,
+}
+
+/// Where one line of sight ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum ExtinctionTarget {
+    /// A system, placed where it is at the request's time.
+    System {
+        /// The system's ID.
+        id: SystemIdHex,
+    },
+    /// A point inside the galaxy's root cube.
+    Position {
+        /// The point.
+        position: GalacticPosition,
+    },
+}
+
+/// The extinction to each target of an [`ExtinctionRequest`], in the request's order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionResult {
+    /// The universe read.
+    pub universe: UniverseIdHex,
+    /// Where every line starts, as the request gave it.
+    pub origin: GalacticPosition,
+    /// The instant the system targets were placed at, as the request gave it.
+    pub time: UniverseTime,
+    /// One answer per target, in the request's order.
+    pub targets: Vec<TargetExtinction>,
+}
+
+/// What lies along one line of sight, or why there is no line.
+///
+/// Figures are the seed's own clumpy gas (not its mean), marched at a fixed budget of steps, and
+/// are the same whichever end the line is read from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export)]
+pub enum TargetExtinction {
+    /// The line's extinction and hydrogen columns.
+    Ok {
+        /// Visual extinction A(V), in magnitudes.
+        a_v_mag: f64,
+        /// Reddening E(B-V) = A(B) − A(V), in magnitudes.
+        e_b_v_mag: f64,
+        /// Extinction in the K band (2.2 µm), A(K), in magnitudes.
+        a_k_mag: f64,
+        /// Hydrogen column of every phase, the hot corona included, in atoms per cm².
+        hydrogen_column_per_cm2: f64,
+        /// Neutral hydrogen column, the 21 cm line's, in atoms per cm²; never above
+        /// `hydrogen_column_per_cm2`.
+        neutral_hydrogen_column_per_cm2: f64,
+    },
+    /// The target's ID names no system of this universe.
+    NoSuchSystem,
 }
 
 /// A mass layer of the placement grid: a band of primary initial mass with its own cell size, or
@@ -523,6 +666,9 @@ mod tests {
             (Unit::DegPerMyr, "deg_per_myr"),
             (Unit::Deg, "deg"),
             (Unit::PerLy3, "per_ly3"),
+            (Unit::PerCm3, "per_cm3"),
+            (Unit::KPerCm3, "k_per_cm3"),
+            (Unit::Mag, "mag"),
         ]);
     }
 
@@ -611,6 +757,138 @@ mod tests {
             seconds: 3_155_760_000,
             nanos: 0,
         }
+    }
+
+    #[test]
+    fn extinction_map_request_wire_form() {
+        assert_wire_form(
+            &RequestBody::ExtinctionMap(ExtinctionMapRequest {
+                universe: universe(),
+                view: MapView::EdgeOn,
+                resolution: 256,
+                bits: 16,
+            }),
+            json!({
+                "kind": "extinction_map",
+                "universe": "0123456789abcdef",
+                "view": "edge_on",
+                "resolution": 256,
+                "bits": 16,
+            }),
+        );
+    }
+
+    #[test]
+    fn extinction_map_response_wire_form() {
+        assert_wire_form(
+            &ResponseBody::ExtinctionMap(ExtinctionMap {
+                universe: universe(),
+                view: MapView::FaceOn,
+                width_px: 4,
+                height_px: 2,
+                centre_ly: [0.0, 0.0],
+                ly_per_px: 32_768.0,
+                bits: 8,
+                floor_log10_mag: -2.0,
+                ceiling_log10_mag: 1.5,
+                data_base64: "AAH/gAECAwQ=".to_owned(),
+            }),
+            json!({
+                "kind": "extinction_map",
+                "universe": "0123456789abcdef",
+                "view": "face_on",
+                "width_px": 4,
+                "height_px": 2,
+                "centre_ly": [0.0, 0.0],
+                "ly_per_px": 32_768.0,
+                "bits": 8,
+                "floor_log10_mag": -2.0,
+                "ceiling_log10_mag": 1.5,
+                "data_base64": "AAH/gAECAwQ=",
+            }),
+        );
+    }
+
+    #[test]
+    fn extinction_request_wire_form() {
+        assert_wire_form(
+            &RequestBody::Extinction(ExtinctionRequest {
+                universe: universe(),
+                origin: chart_centre(),
+                time: epoch_plus_a_century(),
+                targets: vec![
+                    ExtinctionTarget::System {
+                        id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                    },
+                    ExtinctionTarget::Position {
+                        position: GalacticPosition {
+                            cell_ly: [25_000, 100, 3],
+                            offset_m: [0.5, 0.0, 0.25],
+                        },
+                    },
+                ],
+            }),
+            json!({
+                "kind": "extinction",
+                "universe": "0123456789abcdef",
+                "origin": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "targets": [
+                    { "type": "system", "id": "0200080020000000" },
+                    {
+                        "type": "position",
+                        "position": {
+                            "cell_ly": [25_000, 100, 3],
+                            "offset_m": [0.5, 0.0, 0.25],
+                        },
+                    },
+                ],
+            }),
+        );
+    }
+
+    #[test]
+    fn extinction_response_wire_form() {
+        assert_wire_form(
+            &ResponseBody::Extinction(ExtinctionResult {
+                universe: universe(),
+                origin: chart_centre(),
+                time: epoch_plus_a_century(),
+                targets: vec![
+                    TargetExtinction::Ok {
+                        a_v_mag: 1.25,
+                        e_b_v_mag: 0.375,
+                        a_k_mag: 0.125,
+                        hydrogen_column_per_cm2: 2.5e21,
+                        neutral_hydrogen_column_per_cm2: 1.5e21,
+                    },
+                    TargetExtinction::NoSuchSystem,
+                ],
+            }),
+            json!({
+                "kind": "extinction",
+                "universe": "0123456789abcdef",
+                "origin": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "targets": [
+                    {
+                        "status": "ok",
+                        "a_v_mag": 1.25,
+                        "e_b_v_mag": 0.375,
+                        "a_k_mag": 0.125,
+                        "hydrogen_column_per_cm2": 2.5e21,
+                        "neutral_hydrogen_column_per_cm2": 1.5e21,
+                    },
+                    { "status": "no_such_system" },
+                ],
+            }),
+        );
     }
 
     #[test]

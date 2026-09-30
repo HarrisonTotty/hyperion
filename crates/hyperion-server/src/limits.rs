@@ -96,6 +96,14 @@ pub const MAX_QUERY_RADIUS_LY: f64 = 131_072.0;
 /// 2,000 ly in the outer halo expects a few thousand layer-A systems while visiting 10⁸ cells.
 pub const MAX_QUERY_CELLS: NonZeroU32 = NonZeroU32::new(262_144).expect("262,144 is not zero");
 
+/// Most targets one `extinction` request may name (plan 07, P07.T10.c).
+///
+/// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,
+/// stay well inside [`MAX_INBOUND_FRAME_BYTES`]; and 64 lines of at most
+/// [`SIGHTLINE_QUALITY`](crate::compute::SIGHTLINE_QUALITY)'s 256 steps each are one short pool job
+/// (plan 07's Risks, "Cost on long-range charts").
+pub const MAX_EXTINCTION_TARGETS: usize = 64;
+
 /// Galaxies the server keeps built at once (plan 04, design note 23).
 ///
 /// A `Galaxy` is fixed-size, about 1.4 MiB of heap (plan 02, Risks, R19), so bounding the entries
@@ -118,7 +126,8 @@ mod tests {
 
     /// Every limit holds the figure plan 04 gives it: design note 24's, T13.a's frame count, T15's
     /// byte budget and write timeout, design note 16's name length and design note 23's four
-    /// galaxies; `CLOSE_TIMEOUT` and the queue capacities are this server's own choice (T13, T8).
+    /// galaxies, and plan 07's P07.T10.c target count; `CLOSE_TIMEOUT` and the queue capacities
+    /// are this server's own choice (T13, T8).
     ///
     /// The tests that exercise a limit read its value from here, so that a frame one byte over the
     /// limit is over it whatever the limit is; this is the test that notices the limit itself move.
@@ -136,6 +145,7 @@ mod tests {
         assert_eq!(MAX_CENSUS_LIMIT, 20_000);
         assert_eq!(MAX_QUERY_RADIUS_LY.to_bits(), 131_072.0_f64.to_bits());
         assert_eq!(MAX_QUERY_CELLS.get(), 1 << 18);
+        assert_eq!(MAX_EXTINCTION_TARGETS, 64);
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);

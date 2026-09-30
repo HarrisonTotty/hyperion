@@ -69,7 +69,8 @@ function countText(count: number): string {
  * Masses and counts from 10⁷ up in E notation (`5.20E10`), whole and grouped from five digits
  * below that, and masses under 10⁴ as elsewhere on the ship; lengths grouped to one decimal;
  * angles and rates to two decimals; speeds to one; times, shares and other dimensionless values to
- * three significant figures; densities in E notation.
+ * three significant figures; densities in E notation; pressures to three significant figures;
+ * magnitudes to two decimals.
  */
 function numberText(value: number, unit: Unit): string {
   let text: string;
@@ -96,7 +97,14 @@ function numberText(value: number, unit: Unit): string {
       text = threeFigures(value);
       break;
     case "per_ly3":
+    case "per_cm3":
       text = formatSci(value);
+      break;
+    case "k_per_cm3":
+      text = threeFigures(value);
+      break;
+    case "mag":
+      text = formatNumber(value, 2);
       break;
   }
   return text;

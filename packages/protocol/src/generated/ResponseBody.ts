@@ -2,6 +2,8 @@
 import type { BodyDetailDto } from "./BodyDetailDto";
 import type { BodyEventsDto } from "./BodyEventsDto";
 import type { DensityMap } from "./DensityMap";
+import type { ExtinctionMap } from "./ExtinctionMap";
+import type { ExtinctionResult } from "./ExtinctionResult";
 import type { GalaxyParameters } from "./GalaxyParameters";
 import type { SystemBodiesDto } from "./SystemBodiesDto";
 import type { SystemSummaryDto } from "./SystemSummaryDto";
@@ -12,4 +14,4 @@ import type { UniverseList } from "./UniverseList";
 /**
  * The answer to a request, with the same `kind` as the request it answers.
  */
-export type ResponseBody = { "kind": "create_universe" } & UniverseInfo | { "kind": "list_universes" } & UniverseList | { "kind": "open_universe" } & UniverseInfo | { "kind": "galaxy_parameters" } & GalaxyParameters | { "kind": "density_map" } & DensityMap | { "kind": "systems_in_range" } & SystemsInRange | { "kind": "system_summary" } & SystemSummaryDto | { "kind": "system_bodies" } & SystemBodiesDto | { "kind": "body_detail" } & BodyDetailDto | { "kind": "body_events" } & BodyEventsDto;
+export type ResponseBody = { "kind": "create_universe" } & UniverseInfo | { "kind": "list_universes" } & UniverseList | { "kind": "open_universe" } & UniverseInfo | { "kind": "galaxy_parameters" } & GalaxyParameters | { "kind": "density_map" } & DensityMap | { "kind": "systems_in_range" } & SystemsInRange | { "kind": "system_summary" } & SystemSummaryDto | { "kind": "system_bodies" } & SystemBodiesDto | { "kind": "body_detail" } & BodyDetailDto | { "kind": "body_events" } & BodyEventsDto | { "kind": "extinction_map" } & ExtinctionMap | { "kind": "extinction" } & ExtinctionResult;

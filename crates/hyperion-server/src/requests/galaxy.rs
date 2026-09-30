@@ -1,5 +1,5 @@
 //! The galaxy's handlers: `galaxy_parameters`, `density_map` and `systems_in_range` (plan 04,
-//! P04.T14.b to T14.d).
+//! P04.T14.b to T14.d), and `extinction_map` and `extinction` (plan 07, P07.T10.a and T10.c).
 //!
 //! Each starts from [`openable_universe`](super::universe::openable_universe), so that a universe
 //! this server cannot run is refused before any other field is read, and then takes the universe's
@@ -9,19 +9,25 @@
 use std::sync::Arc;
 
 use hyperion_protocol::{
-    DensityMapRequest, GalaxyParametersRequest, RequestError, ResponseBody, StellarBriefDto,
-    SystemsInRange, SystemsInRangeRequest,
+    DensityMapRequest, ExtinctionMapRequest, ExtinctionRequest, GalaxyParametersRequest,
+    RequestError, ResponseBody, StellarBriefDto, SystemsInRange, SystemsInRangeRequest,
+    TargetExtinction,
 };
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::SystemKind;
-use hyperion_sim::galaxy::query::{RangeQuery, RangeResult, SystemHit, range_query};
+use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, resolve};
+use hyperion_sim::galaxy::query::{RangeQuery, RangeResult, SystemHit, position_at, range_query};
 use hyperion_sim::time::UniverseTime;
 
 use super::universe::openable_universe;
 use crate::AppState;
-use crate::compute::{CancelToken, GalaxyKey, JobError, Priority, SharedBriefCache, quantise_map};
+use crate::compute::{
+    CancelToken, EXTINCTION_FLOOR_LOG10_MAG, GalaxyKey, JobError, Priority, SharedBriefCache,
+    quantise_map, quantise_map_with_floor,
+};
 use crate::convert::{
-    MapRequest, RangeRequest, brief_dto, density_map, galaxy_parameters, systems_in_range,
+    ExtinctionMapQuery, ExtinctionQuery, LineEnd, MapRequest, RangeRequest, brief_dto, density_map,
+    extinction_map as extinction_map_answer, extinction_result, galaxy_parameters,
+    systems_in_range, target_extinction,
 };
 use crate::limits::BRIEF_CHUNK_ROWS;
 
@@ -84,6 +90,95 @@ pub(crate) async fn map(
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
     Ok(ResponseBody::DensityMap(answered))
+}
+
+/// A map of the visual extinction through the universe's galaxy, quantised to the depth asked for
+/// above the fixed floor of 0.01 mag (plan 07, P07.T10.a).
+///
+/// It is answered as [`map`] answers a density map: the raster is the
+/// [`ExtinctionMapService`](crate::compute::ExtinctionMapService)'s, computed in bulk bands and
+/// cached raw; quantising and encoding are an interactive job of their own; and the frame is
+/// serialised by a second job, since the response is large.
+///
+/// # Errors
+///
+/// Those of [`map`], in its order: the universe; `bad_request` naming `resolution` or `bits`; the
+/// map's computation; and `queue_full`, `internal` or `cancelled` from the quantising job.
+pub(crate) async fn extinction_map(
+    state: Arc<AppState>,
+    request: ExtinctionMapRequest,
+    token: CancelToken,
+) -> Result<ResponseBody, RequestError> {
+    let universe = openable_universe(&state, &request.universe)?;
+    let wanted = ExtinctionMapQuery::try_from(&request)?;
+    let raw = state
+        .extinction_maps
+        .get(wanted.key(universe.key()))
+        .await?;
+    let depth = wanted.depth();
+    let answer = move |_: &CancelToken| {
+        let quantised = quantise_map_with_floor(&raw, EXTINCTION_FLOOR_LOG10_MAG, depth);
+        extinction_map_answer(request, &raw, &quantised)
+    };
+    Ok(ResponseBody::ExtinctionMap(
+        run(&state, &token, answer).await?,
+    ))
+}
+
+/// The extinction from the request's origin to each of its targets, in its order (plan 07,
+/// P07.T10.c).
+///
+/// Every line is one interactive pool job's: each system target is resolved by plan 03's
+/// [`resolve`] and placed at the request's time by [`position_at`], as every ID from a client is,
+/// and each line is the [`SharedSightlineCache`](crate::compute::SharedSightlineCache)'s or is
+/// marched in the seed's own gas at a fixed budget of steps, through one noise cache the job owns.
+/// A target whose ID names no system, or one of a kind or layer this generator does not place yet,
+/// is answered `no_such_system`, and the rest are still answered.
+/// The answer is small, so its frame is serialised on the runtime.
+///
+/// # Errors
+///
+/// Those of [`openable_universe`] for a universe this server cannot serve; `bad_request` naming
+/// `time`, `origin` or `targets` for a field it cannot use; those of
+/// [`GalaxyCache::get`](crate::compute::GalaxyCache::get) if the galaxy cannot be built;
+/// `queue_full` if the interactive queue has no room for the job; `internal` if the pool is
+/// shutting down or the job panics; and `cancelled` if the client gave up before it ran.
+pub(crate) async fn extinction(
+    state: Arc<AppState>,
+    request: ExtinctionRequest,
+    token: CancelToken,
+) -> Result<ResponseBody, RequestError> {
+    let universe = openable_universe(&state, &request.universe)?;
+    let wanted = ExtinctionQuery::try_from(&request)?;
+    let key = universe.key();
+    let galaxy = state.galaxies.get(key).await?;
+    let shared = Arc::clone(&state);
+    let answer = move |_: &CancelToken| {
+        let mut lines = shared.sightlines.marcher(key, &galaxy);
+        let targets = wanted
+            .ends()
+            .iter()
+            .map(|end| {
+                let end = match *end {
+                    LineEnd::Position(position) => position,
+                    LineEnd::System(id) => match resolve(&galaxy, id) {
+                        Ok(record) => position_at(&galaxy, &record, wanted.time()),
+                        // A kind or layer this generator does not place yet has no position
+                        // either, so to a line of sight it is no system at all.
+                        Err(
+                            ResolveSystemError::NoSuchSystem
+                            | ResolveSystemError::KindNotGenerated
+                            | ResolveSystemError::LayerNotGenerated(_),
+                        ) => return TargetExtinction::NoSuchSystem,
+                    },
+                    LineEnd::NotASystem => return TargetExtinction::NoSuchSystem,
+                };
+                target_extinction(&lines.line(wanted.origin(), &end))
+            })
+            .collect();
+        extinction_result(request, targets)
+    };
+    Ok(ResponseBody::Extinction(run(&state, &token, answer).await?))
 }
 
 /// The systems within the request's radius of its centre at its time, with the census, and with

@@ -44,6 +44,8 @@ export const GROUP_LABELS: Readonly<Record<string, string>> = {
   // Plan 13, P13.T7: the free-floating objects per stellar system, since the chart counts them as
   // systems; the one heading over three words, as the orchestrator's ruling 134.3 names it.
   substellar: "FREE-FLOATING OBJECTS PER STAR SYSTEM",
+  // Plan 07, P07.T10.b: the interstellar gas and the dust it carries.
+  gas: "GAS AND DUST",
 };
 
 /** The populations, in the wire's order, whose share, mass and mean system mass are sent. */
@@ -150,6 +152,29 @@ export const PARAMETER_LABELS: Readonly<Record<string, string>> = {
   "substellar.rogue_planets_per_system": "PLANETS",
   "substellar.rogue_planet_cap_per_system": "SATURATION THRESHOLD",
   "substellar.rogue_planets_capped": "CENTRE SATURATED",
+
+  // Under `GAS AND DUST` (plan 07, P07.T10.b). The gas's mass and scale length are `GAS MASS` and
+  // `GAS SCALE LENGTH` above; here are its layers: the neutral disc, the warm ionised layer, the
+  // central molecular disc and the hot corona, with each layer's share of the gas's mass, the
+  // pressure that holds the phases, the log-normal clumping and the dust lanes.
+  "gas.scale_height": "NEUTRAL SCALE HEIGHT",
+  "gas.hole_scale": "CENTRAL HOLE SCALE",
+  "gas.warm_density": "WARM IONISED DENSITY",
+  "gas.warm_height": "WARM SCALE HEIGHT",
+  "gas.warm_fraction": "WARM IONISED SHARE",
+  "gas.molecular_mass": "MOLECULAR MASS",
+  "gas.molecular_length": "MOLECULAR SCALE LENGTH",
+  "gas.molecular_height": "MOLECULAR SCALE HEIGHT",
+  "gas.molecular_fraction": "MOLECULAR SHARE",
+  "gas.neutral_fraction": "NEUTRAL SHARE",
+  "gas.corona_density": "CORONA DENSITY",
+  "gas.pressure_floor": "PRESSURE FLOOR",
+  "gas.pressure_height": "PRESSURE SCALE HEIGHT",
+  "gas.pressure_speed": "PRESSURE DISPERSION",
+  "gas.sigma_ln": "LOG-NORMAL WIDTH",
+  "gas.lane_offset": "DUST LANE OFFSET",
+  "gas.lane_width": "DUST LANE WIDTH",
+  "gas.lane_fraction": "DUST LANE SHARE",
 };
 
 /** The label of a key in `labels`, or the key itself in upper case when the glossary lacks it. */

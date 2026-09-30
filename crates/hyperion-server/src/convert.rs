@@ -5,8 +5,10 @@
 //! cannot be used becomes a [`ConvertRequestError`], answered `bad_request` with the field named.
 //! Answers are built here too, by `From` from the server's types to the wire's, as are the request
 //! errors that the server's own errors become. The `system_summary` request and its answer are in
-//! [`stellar`], and plan 14's `system_bodies` and `body_detail` in [`planetary`].
+//! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], and plan 07's
+//! `extinction_map` and `extinction` in [`extinction`].
 
+mod extinction;
 mod planetary;
 mod stellar;
 
@@ -22,6 +24,7 @@ use hyperion_protocol::{
     Unit, UniverseInfo, UniverseList,
 };
 use hyperion_sim::coords::{GalacticPosition, LyCell};
+use hyperion_sim::galaxy::gas::params::GasParams;
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
     ArmParams, GalaxyParams, HaloComponentKind, HaloComponentParams, HaloParams,
@@ -43,6 +46,10 @@ use hyperion_sim::units::{
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
+pub(crate) use self::extinction::{
+    ExtinctionMapQuery, ExtinctionQuery, LineEnd, extinction_map, extinction_result,
+    target_extinction,
+};
 pub(crate) use self::planetary::{
     BodiesRequest, DetailRequest, body_detail, body_refusal, hosts_request, system_bodies,
 };
@@ -214,8 +221,8 @@ pub(crate) fn density_map(
         centre_ly: raw.centre_ly(),
         ly_per_px: raw.ly_per_px(),
         bits: quantised.depth().bits(),
-        floor_log10_per_ly2: quantised.floor_log10_per_ly2(),
-        ceiling_log10_per_ly2: quantised.ceiling_log10_per_ly2(),
+        floor_log10_per_ly2: quantised.floor_log10(),
+        ceiling_log10_per_ly2: quantised.ceiling_log10(),
         data_base64: quantised.to_base64(),
     }
 }
@@ -644,10 +651,6 @@ const EXCLUDED_PARAMETERS: &[(&str, &str)] = &[
         "r200 divided by c200, both of which are sent",
     ),
     (
-        "gas.scale_height",
-        "a constant of the generator, the same for every seed",
-    ),
-    (
         "nuclear_cluster.inner_slope",
         "a constant of the generator, as above",
     ),
@@ -679,7 +682,7 @@ const EXCLUDED_PARAMETERS: &[(&str, &str)] = &[
 ///
 /// Raised by whoever adds a parameter, which is what makes them decide whether it is sent.
 #[cfg(test)]
-const PARAMETERS_ACCOUNTED_FOR: usize = 99;
+const PARAMETERS_ACCOUNTED_FOR: usize = 116;
 
 /// The galaxy's parameters as the wire carries them: grouped, keyed, and in display units.
 ///
@@ -714,6 +717,7 @@ pub(crate) fn galaxy_parameters(universe: &Universe, galaxy: &Galaxy) -> GalaxyP
         group("history", history(params)),
         group("rotation", rotation(galaxy.potential())),
         group("substellar", substellar(galaxy.substellar())),
+        group("gas", gas(galaxy.gas().params())),
     ];
     GalaxyParameters {
         universe: universe.id().into(),
@@ -962,6 +966,48 @@ fn rotation(potential: &PotentialTables) -> Vec<Parameter> {
             Unit::KmPerS,
             km_per_s(potential.galactic_escape_speed_in_plane(ROTATION_RADIUS)),
         ),
+    ]
+}
+
+/// The `gas` group (plan 07, P07.T10.b): what the gas field draws, derives and fixes beyond plan
+/// 02's gas disc, whose mass and scale length are sent in `mass` and `discs` (its design note 3).
+///
+/// The neutral layer's height, `gas.scale_height`, is sent as `fixed`: it is a constant of the
+/// generator, and the gas field reads it.
+#[must_use]
+fn gas(gas: &GasParams) -> Vec<Parameter> {
+    let (molecular, lane) = (gas.molecular_disc(), gas.lane());
+    vec![
+        fixed("gas.scale_height", Unit::Ly, ly(gas.neutral_height())),
+        drawn("gas.hole_scale", Unit::Ly, ly(gas.hole_scale())),
+        drawn("gas.warm_density", Unit::PerCm3, gas.warm_density().value()),
+        drawn("gas.warm_height", Unit::Ly, ly(gas.warm_height())),
+        derived("gas.warm_fraction", Unit::None, gas.warm_fraction()),
+        drawn("gas.molecular_mass", Unit::Msun, msun(molecular.mass())),
+        derived("gas.molecular_length", Unit::Ly, ly(molecular.length())),
+        drawn("gas.molecular_height", Unit::Ly, ly(molecular.height())),
+        derived("gas.molecular_fraction", Unit::None, molecular.fraction()),
+        derived("gas.neutral_fraction", Unit::None, gas.neutral_fraction()),
+        drawn(
+            "gas.corona_density",
+            Unit::PerCm3,
+            gas.corona_density().value(),
+        ),
+        drawn(
+            "gas.pressure_floor",
+            Unit::KPerCm3,
+            gas.pressure_floor().value(),
+        ),
+        fixed("gas.pressure_height", Unit::Ly, ly(gas.pressure_height())),
+        fixed(
+            "gas.pressure_speed",
+            Unit::KmPerS,
+            km_per_s(gas.pressure_speed()),
+        ),
+        drawn("gas.sigma_ln", Unit::None, gas.sigma_ln()),
+        drawn("gas.lane_offset", Unit::Ly, ly(lane.offset())),
+        drawn("gas.lane_width", Unit::Ly, ly(lane.width())),
+        drawn("gas.lane_fraction", Unit::None, lane.fraction()),
     ]
 }
 
@@ -1431,7 +1477,7 @@ mod tests {
     /// independently of the builder. The parameters panel shows groups and keys in this order, so
     /// the order is part of the contract with plan 05's glossary (ruling 11 of 2026-09-22), and a
     /// golden blessed from the builder would not catch a key moved within its group.
-    const PLAN_TABLE: [(&str, &[&str]); 13] = [
+    const PLAN_TABLE: [(&str, &[&str]); 14] = [
         ("identity", &["seed", "generator_version", "mass_function"]),
         (
             "mass",
@@ -1572,7 +1618,154 @@ mod tests {
                 "substellar.rogue_planets_capped",
             ],
         ),
+        // Plan 07, P07.T10.b.
+        (
+            "gas",
+            &[
+                "gas.scale_height",
+                "gas.hole_scale",
+                "gas.warm_density",
+                "gas.warm_height",
+                "gas.warm_fraction",
+                "gas.molecular_mass",
+                "gas.molecular_length",
+                "gas.molecular_height",
+                "gas.molecular_fraction",
+                "gas.neutral_fraction",
+                "gas.corona_density",
+                "gas.pressure_floor",
+                "gas.pressure_height",
+                "gas.pressure_speed",
+                "gas.sigma_ln",
+                "gas.lane_offset",
+                "gas.lane_width",
+                "gas.lane_fraction",
+            ],
+        ),
     ];
+
+    /// The gas group's rows as design note 3 orders them, with each one's origin, unit and value.
+    fn gas_rows(gas: &GasParams) -> [(&'static str, ParameterOrigin, Unit, f64); 18] {
+        use ParameterOrigin::{Derived, Drawn, Fixed};
+
+        let (molecular, lane) = (gas.molecular_disc(), gas.lane());
+        [
+            (
+                "gas.scale_height",
+                Fixed,
+                Unit::Ly,
+                gas.neutral_height().value(),
+            ),
+            ("gas.hole_scale", Drawn, Unit::Ly, gas.hole_scale().value()),
+            (
+                "gas.warm_density",
+                Drawn,
+                Unit::PerCm3,
+                gas.warm_density().value(),
+            ),
+            (
+                "gas.warm_height",
+                Drawn,
+                Unit::Ly,
+                gas.warm_height().value(),
+            ),
+            (
+                "gas.warm_fraction",
+                Derived,
+                Unit::None,
+                gas.warm_fraction(),
+            ),
+            (
+                "gas.molecular_mass",
+                Drawn,
+                Unit::Msun,
+                molecular.mass().value(),
+            ),
+            (
+                "gas.molecular_length",
+                Derived,
+                Unit::Ly,
+                molecular.length().value(),
+            ),
+            (
+                "gas.molecular_height",
+                Drawn,
+                Unit::Ly,
+                molecular.height().value(),
+            ),
+            (
+                "gas.molecular_fraction",
+                Derived,
+                Unit::None,
+                molecular.fraction(),
+            ),
+            (
+                "gas.neutral_fraction",
+                Derived,
+                Unit::None,
+                gas.neutral_fraction(),
+            ),
+            (
+                "gas.corona_density",
+                Drawn,
+                Unit::PerCm3,
+                gas.corona_density().value(),
+            ),
+            (
+                "gas.pressure_floor",
+                Drawn,
+                Unit::KPerCm3,
+                gas.pressure_floor().value(),
+            ),
+            (
+                "gas.pressure_height",
+                Fixed,
+                Unit::Ly,
+                gas.pressure_height().value(),
+            ),
+            (
+                "gas.pressure_speed",
+                Fixed,
+                Unit::KmPerS,
+                gas.pressure_speed().value(),
+            ),
+            ("gas.sigma_ln", Drawn, Unit::None, gas.sigma_ln()),
+            ("gas.lane_offset", Drawn, Unit::Ly, lane.offset().value()),
+            ("gas.lane_width", Drawn, Unit::Ly, lane.width().value()),
+            ("gas.lane_fraction", Drawn, Unit::None, lane.fraction()),
+        ]
+    }
+
+    /// Plan 07, P07.T10.b: the gas group reads the gas field's own parameters, each with its unit
+    /// and its origin, in design note 3's order with each layer's derived share beside it.
+    #[test]
+    fn the_gas_group_is_the_gas_fields_parameters() {
+        let response = fixture();
+        let gas = milky_way().gas().params();
+        let molecular = gas.molecular_disc();
+        let group = response
+            .groups
+            .iter()
+            .find(|group| group.key == "gas")
+            .expect("the gas group is sent");
+        let expected = gas_rows(gas);
+        assert_eq!(group.parameters.len(), expected.len());
+        for (parameter, (key, origin, unit, value)) in group.parameters.iter().zip(expected) {
+            assert_eq!(
+                (parameter.key.as_str(), parameter.origin),
+                (key, origin),
+                "{key}"
+            );
+            assert_eq!(
+                parameter.value,
+                ParameterValue::Number { value, unit },
+                "{key}"
+            );
+        }
+        // The shares of the gas the three layers take add up to the whole.
+        let shares = gas.warm_fraction() + molecular.fraction() + gas.neutral_fraction();
+        assert!((shares - 1.0).abs() < 1e-12, "{shares}");
+    }
 
     /// Plan 13, P13.T7: the substellar group reads the galaxy's own abundances, as numbers with no
     /// unit, and says whether its densest cells saturate.

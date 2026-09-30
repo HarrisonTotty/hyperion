@@ -825,6 +825,173 @@
             }
           }
         ]
+      },
+      {
+        "key": "gas",
+        "parameters": [
+          {
+            "key": "gas.scale_height",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 700.0,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.hole_scale",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 17609.28073153903,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.warm_density",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.033532870289084554,
+              "unit": "per_cm3"
+            }
+          },
+          {
+            "key": "gas.warm_height",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 3122.5567573294757,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.warm_fraction",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.1565832095329299,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.molecular_mass",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 2164332.651213001,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "gas.molecular_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 382.38118583663413,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.molecular_height",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 92.93623737081914,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.molecular_fraction",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.0002386242484473437,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.neutral_fraction",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.8431781662186227,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.corona_density",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.0006815731476337032,
+              "unit": "per_cm3"
+            }
+          },
+          {
+            "key": "gas.pressure_floor",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 368.66067511997295,
+              "unit": "k_per_cm3"
+            }
+          },
+          {
+            "key": "gas.pressure_height",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 1500.0,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.pressure_speed",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 5.15,
+              "unit": "km_per_s"
+            }
+          },
+          {
+            "key": "gas.sigma_ln",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 1.0183771229887448,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.lane_offset",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 453.9411274978304,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.lane_width",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 239.41582452053348,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.lane_fraction",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.16238027577610648,
+              "unit": "none"
+            }
+          }
+        ]
       }
     ]
   }

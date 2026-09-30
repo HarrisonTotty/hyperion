@@ -15,6 +15,7 @@
 use std::error::Error;
 use std::fmt;
 use std::mem;
+use std::ops::Range;
 use std::sync::Arc;
 
 use base64::Engine;
@@ -263,12 +264,15 @@ impl fmt::Display for ParseCodeDepthError {
 
 impl Error for ParseCodeDepthError {}
 
-/// A density map quantised for the wire: its codes, and the floor and ceiling they span.
+/// A map quantised for the wire: its codes, and the floor and ceiling they span.
+///
+/// One type serves both rasters: a density map's floor and ceiling are log₁₀ of systems per square
+/// light-year, an extinction map's log₁₀ of magnitudes (plan 07, P07.T10.a).
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuantisedMap {
     depth: CodeDepth,
-    floor_log10_per_ly2: f64,
-    ceiling_log10_per_ly2: f64,
+    floor_log10: f64,
+    ceiling_log10: f64,
     bytes: Vec<u8>,
 }
 
@@ -279,17 +283,17 @@ impl QuantisedMap {
         self.depth
     }
 
-    /// log₁₀ of the column density, in systems per square light-year, that code 1 stands for.
+    /// log₁₀ of the value that code 1 stands for, in the map's own unit.
     #[must_use]
-    pub fn floor_log10_per_ly2(&self) -> f64 {
-        self.floor_log10_per_ly2
+    pub fn floor_log10(&self) -> f64 {
+        self.floor_log10
     }
 
-    /// log₁₀ of the column density, in systems per square light-year, that the largest code
-    /// stands for: the map's maximum.
+    /// log₁₀ of the value that the largest code stands for, in the map's own unit: the map's
+    /// maximum, or the floor if nothing lies above it.
     #[must_use]
-    pub fn ceiling_log10_per_ly2(&self) -> f64 {
-        self.ceiling_log10_per_ly2
+    pub fn ceiling_log10(&self) -> f64 {
+        self.ceiling_log10
     }
 
     /// The codes as bytes: one per code at 8 bits, two little-endian at 16, row by row from the
@@ -306,7 +310,7 @@ impl QuantisedMap {
     }
 }
 
-/// Quantises a raw map to codes of `depth` bits for `view`, by plan 04's design note 12.
+/// Quantises a raw density map to codes of `depth` bits for `view`, by plan 04's design note 12.
 ///
 /// The ceiling is the map's largest value and the floor lies 5 dex below it face-on and 7 dex
 /// edge-on. With `max = 2^bits − 1`, a pixel at or below the floor, an empty one included, gets
@@ -321,23 +325,35 @@ impl QuantisedMap {
 /// systems at all has floor and ceiling 0 and every code 0.
 #[must_use]
 pub fn quantise_map(map: &RawDensityMap, view: MapView, depth: CodeDepth) -> QuantisedMap {
+    let floor = ceiling_of(map).map_or(0.0, |ceiling| ceiling - span_dex(view));
+    quantise_map_with_floor(map, floor, depth)
+}
+
+/// Quantises a raw map to codes of `depth` bits above the fixed floor `floor_log10` (plan 07,
+/// P07.T10.a), by [`quantise_map`]'s rule.
+///
+/// The ceiling is the map's largest value, or the floor itself if no pixel lies above it, in which
+/// case every code is 0. An extinction map's floor is 0.01 mag (its design note 19), where a
+/// density map's lies a number of decades below its ceiling.
+#[must_use]
+pub fn quantise_map_with_floor(
+    map: &RawDensityMap,
+    floor_log10: f64,
+    depth: CodeDepth,
+) -> QuantisedMap {
     let len = map.log10.len() * depth.bytes_per_code();
-    let Some(ceiling) = map
-        .log10
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .max_by(f32::total_cmp)
-    else {
-        return QuantisedMap {
-            depth,
-            floor_log10_per_ly2: 0.0,
-            ceiling_log10_per_ly2: 0.0,
-            bytes: vec![0; len],
-        };
+    let ceiling = match ceiling_of(map) {
+        Some(ceiling) if ceiling > floor_log10 => ceiling,
+        Some(_) | None => {
+            return QuantisedMap {
+                depth,
+                floor_log10,
+                ceiling_log10: floor_log10,
+                bytes: vec![0; len],
+            };
+        }
     };
-    let ceiling = f64::from(ceiling);
-    let floor = ceiling - span_dex(view);
+    let floor = floor_log10;
     let span = ceiling - floor;
     let max = depth.max_code();
     let mut bytes = Vec::with_capacity(len);
@@ -351,10 +367,21 @@ pub fn quantise_map(map: &RawDensityMap, view: MapView, depth: CodeDepth) -> Qua
     }
     QuantisedMap {
         depth,
-        floor_log10_per_ly2: floor,
-        ceiling_log10_per_ly2: ceiling,
+        floor_log10: floor,
+        ceiling_log10: ceiling,
         bytes,
     }
+}
+
+/// The largest finite value of `map`, or `None` if every pixel is empty.
+#[must_use]
+fn ceiling_of(map: &RawDensityMap) -> Option<f64> {
+    map.log10
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .max_by(f32::total_cmp)
+        .map(f64::from)
 }
 
 /// How far the floor lies below the ceiling in `view`, in dex.
@@ -395,7 +422,7 @@ pub const MAP_WIDTH_LY: f64 = 131_072.0;
 /// A band is the unit of bulk work, so it is what bounds how long an interactive job can wait behind
 /// a map (design note 21) and how much of a cancelled map runs on. Sixteen rows of a 1,024-pixel
 /// edge-on map are some seconds; see the plan's Risks for the measured cost.
-const BAND_ROWS: u16 = 16;
+pub(crate) const BAND_ROWS: u16 = 16;
 
 /// How wide a map is, in pixels: the four resolutions a request may ask for.
 ///
@@ -559,7 +586,7 @@ impl MapKey {
 
 /// The view the sim renders, from the view the wire names.
 #[must_use]
-fn spec_view(view: MapView) -> SpecView {
+pub(super) fn spec_view(view: MapView) -> SpecView {
     match view {
         MapView::FaceOn => SpecView::FaceOn,
         MapView::EdgeOn => SpecView::EdgeOn,
@@ -657,20 +684,39 @@ impl fmt::Debug for DensityMapService {
 }
 
 /// Renders every band of `key`'s raster on the pool and assembles them in row order.
-///
-/// Each band is one bulk job over [`BAND_ROWS`] rows of the one [`MapSpec`], so the values do not
-/// depend on how the rows were split or on how many workers ran them (plan 02, P02.T10: the rasters
-/// of band sizes 1 to 13 are identical bit for bit).
 async fn render(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     key: MapKey,
 ) -> Result<RawDensityMap, ComputeError> {
-    let spec = key.spec();
-    let (width_px, height_px) = (
-        key.resolution().width_px(),
-        key.resolution().height_px(key.view()),
-    );
+    render_bands(
+        pool,
+        galaxy,
+        key.spec(),
+        key.resolution(),
+        key.view(),
+        |galaxy, spec, rows, values| render_rows(galaxy.fields(), spec, rows, values),
+    )
+    .await
+}
+
+/// Renders every band of `spec`'s raster on the pool with `render_band` and assembles the log₁₀ of
+/// its values in row order: the banding both map services share (plan 07, P07.T10.a).
+///
+/// Each band is one bulk job over [`BAND_ROWS`] rows of the one [`MapSpec`], so the values do not
+/// depend on how the rows were split or on how many workers ran them (plan 02, P02.T10: the rasters
+/// of band sizes 1 to 13 are identical bit for bit). `render_band` follows plan 02's `render_rows`
+/// contract: it clears its output and fills it with the band's values row by row, each 0 or more,
+/// 0 for an empty pixel.
+pub(super) async fn render_bands(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    spec: MapSpec,
+    resolution: MapResolution,
+    view: MapView,
+    render_band: fn(&Galaxy, &MapSpec, Range<u32>, &mut Vec<f64>),
+) -> Result<RawDensityMap, ComputeError> {
+    let (width_px, height_px) = (resolution.width_px(), resolution.height_px(view));
     let token = CancelToken::new();
     // Cancels the bands still queued once every waiter on this map has gone.
     let _cancel_on_drop = CancelOnDrop::new(token.clone());
@@ -686,7 +732,7 @@ async fn render(
                     return None;
                 }
                 let mut values = Vec::new();
-                render_rows(galaxy.fields(), &spec, rows, &mut values);
+                render_band(&galaxy, &spec, rows, &mut values);
                 Some(to_log10(&values))
             })
             .await?,
@@ -704,13 +750,13 @@ async fn render(
         width_px,
         height_px,
         [0.0, 0.0],
-        key.resolution().ly_per_px(),
+        resolution.ly_per_px(),
         log10,
     )
     .expect("a raster of the key's size, whose values are finite or −∞"))
 }
 
-/// log₁₀ of every pixel's column density, as `f32`: `−∞` where there are no systems at all.
+/// log₁₀ of every pixel's value, as `f32`: `−∞` where it is 0 (no systems, or no dust).
 ///
 /// The logarithm is the sim's ([`math::log10`]), not the platform's, so that a map's codes are the
 /// same on every machine, as the golden file that pins them assumes.
@@ -720,7 +766,7 @@ async fn render(
     reason = "a column density's logarithm lies well inside f32's range, and f32 is far finer than \
               the 16-bit codes it becomes (see RawDensityMap)"
 )]
-fn to_log10(values: &[f64]) -> Vec<f32> {
+pub(super) fn to_log10(values: &[f64]) -> Vec<f32> {
     values
         .iter()
         .map(|&density| {
@@ -1065,8 +1111,8 @@ mod tests {
             map.height_px(),
             map.ly_per_px()
         ));
-        golden.f64("floor_log10_per_ly2", quantised.floor_log10_per_ly2());
-        golden.f64("ceiling_log10_per_ly2", quantised.ceiling_log10_per_ly2());
+        golden.f64("floor_log10_per_ly2", quantised.floor_log10());
+        golden.f64("ceiling_log10_per_ly2", quantised.ceiling_log10());
         golden.line(&format!(
             "code_sum = {}",
             codes.iter().map(|&code| u64::from(code)).sum::<u64>()
@@ -1124,8 +1170,8 @@ mod tests {
         // Ceiling 0, floor −5; codes 1 + round((v + 5) ÷ 5 × 254).
         let map = raw(3, &[0.0, -2.5, -1.0, -4.0, -6.0, EMPTY]);
         let quantised = quantise_map(&map, MapView::FaceOn, CodeDepth::Eight);
-        assert_same_bits(quantised.ceiling_log10_per_ly2(), 0.0);
-        assert_same_bits(quantised.floor_log10_per_ly2(), -5.0);
+        assert_same_bits(quantised.ceiling_log10(), 0.0);
+        assert_same_bits(quantised.floor_log10(), -5.0);
         // 254 × 0.5 = 127; 254 × 0.8 = 203.2; 254 × 0.2 = 50.8.
         assert_eq!(quantised.bytes(), [255, 128, 204, 52, 0, 0]);
     }
@@ -1135,8 +1181,8 @@ mod tests {
         // Ceiling 3, floor −4; codes 1 + round((v + 4) ÷ 7 × 65,534).
         let map = raw(2, &[3.0, -0.5, -4.0, 1.0, EMPTY, -3.0]);
         let quantised = quantise_map(&map, MapView::EdgeOn, CodeDepth::Sixteen);
-        assert_same_bits(quantised.ceiling_log10_per_ly2(), 3.0);
-        assert_same_bits(quantised.floor_log10_per_ly2(), -4.0);
+        assert_same_bits(quantised.ceiling_log10(), 3.0);
+        assert_same_bits(quantised.floor_log10(), -4.0);
         // 65,534 × 3.5 ÷ 7 = 32,767; × 5 ÷ 7 = 46,810; × 1 ÷ 7 = 9,362.
         assert_eq!(codes(&quantised), [65_535, 32_768, 0, 46_811, 0, 9_363]);
     }
@@ -1148,7 +1194,7 @@ mod tests {
         for view in [MapView::FaceOn, MapView::EdgeOn] {
             for depth in [CodeDepth::Eight, CodeDepth::Sixteen] {
                 let quantised = quantise_map(&map, view, depth);
-                assert_same_bits(quantised.ceiling_log10_per_ly2(), f64::from(ceiling));
+                assert_same_bits(quantised.ceiling_log10(), f64::from(ceiling));
                 let codes = codes(&quantised);
                 assert_eq!(codes[1], depth.max_code(), "{view:?} at {depth:?}");
                 assert!(codes[0] < codes[3] && codes[3] < codes[1], "{codes:?}");
@@ -1165,7 +1211,7 @@ mod tests {
             let map = raw(3, &[ceiling, floor, floor.next_up()]);
             for depth in [CodeDepth::Eight, CodeDepth::Sixteen] {
                 let quantised = quantise_map(&map, view, depth);
-                assert_same_bits(quantised.floor_log10_per_ly2(), f64::from(floor));
+                assert_same_bits(quantised.floor_log10(), f64::from(floor));
                 assert_eq!(
                     codes(&quantised),
                     [depth.max_code(), 0, 1],
@@ -1191,8 +1237,8 @@ mod tests {
         let map = raw(2, &[EMPTY; 4]);
         for (depth, len) in [(CodeDepth::Eight, 4), (CodeDepth::Sixteen, 8)] {
             let quantised = quantise_map(&map, MapView::FaceOn, depth);
-            assert_same_bits(quantised.floor_log10_per_ly2(), 0.0);
-            assert_same_bits(quantised.ceiling_log10_per_ly2(), 0.0);
+            assert_same_bits(quantised.floor_log10(), 0.0);
+            assert_same_bits(quantised.ceiling_log10(), 0.0);
             assert_eq!(quantised.bytes(), vec![0; len]);
         }
     }
@@ -1201,8 +1247,8 @@ mod tests {
     fn codes_encode_as_standard_base64_with_padding() {
         let quantised = QuantisedMap {
             depth: CodeDepth::Eight,
-            floor_log10_per_ly2: 0.0,
-            ceiling_log10_per_ly2: 0.0,
+            floor_log10: 0.0,
+            ceiling_log10: 0.0,
             bytes: vec![0, 1, 2, 0xff],
         };
         assert_eq!(quantised.to_base64(), "AAEC/w==");
@@ -1250,8 +1296,8 @@ mod tests {
             centre_ly: raw.centre_ly(),
             ly_per_px: raw.ly_per_px(),
             bits: quantised.depth().bits(),
-            floor_log10_per_ly2: quantised.floor_log10_per_ly2(),
-            ceiling_log10_per_ly2: quantised.ceiling_log10_per_ly2(),
+            floor_log10_per_ly2: quantised.floor_log10(),
+            ceiling_log10_per_ly2: quantised.ceiling_log10(),
             data_base64: quantised.to_base64(),
         };
         assert_eq!(map, expected);

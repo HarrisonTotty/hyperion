@@ -1,15 +1,17 @@
 import type { MapPopulation } from "@hyperion/protocol";
-import { type CSSProperties, useId, useState } from "react";
+import { type CSSProperties, useEffect, useId, useState } from "react";
 
 import { formatScaleLength } from "../../lib/format";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { populationLabel } from "../../lib/galaxy/wire";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
+import { isTextEntry } from "../../lib/textEntry";
 import { useUniverse } from "../../lib/universe";
-import { type ElementSize, useElementSize } from "../../lib/useElementSize";
+import { useElementSize } from "../../lib/useElementSize";
 import { ScaleBar } from "../../spatial/ScaleBar";
-import { GalaxyMapView } from "./GalaxyMapView";
+import { DUST_OVERLAY_LABEL, GalaxyMapView, type MapQuantity } from "./GalaxyMapView";
 import { MAP_ACROSS_LY } from "./mapCursor";
+import { mapLayout, mapPictureWidth } from "./mapLayout";
 
 /**
  * The name of each population a map may count, in the order offered.
@@ -30,29 +32,28 @@ function isMapPopulation(key: string): key is MapPopulation {
 const POPULATIONS: ReadonlyArray<MapPopulation> =
   Object.keys(POPULATION_LABEL).filter(isMapPopulation);
 
-/*
- * The page's layout, as `styles.css` lays out `.galaxy-map__grid`: a column for the words, at
- * least SIDE_REM wide, the gutter for the vertical axes' labels, the pictures, and the gutter for
- * the horizontal axes' labels; face-on above edge-on, VIEW_GAP_REM apart.
- */
-const SIDE_REM = 24;
-const AXIS_BEFORE_REM = 3.75;
-const AXIS_AFTER_REM = 1.75;
-const VIEW_GAP_REM = 0.5;
+/** The name of each quantity the maps may show, in the order offered (plan 07, P07.T11.b). */
+const QUANTITY_LABEL: Readonly<Record<MapQuantity, string>> = {
+  systems: "SYSTEMS",
+  extinction: "EXTINCTION",
+};
+
+const QUANTITIES: ReadonlyArray<MapQuantity> = ["systems", "extinction"];
+
+/** The key that steps the quantity to the next one, from anywhere on the page but a text field. */
+export const QUANTITY_KEY = "Q";
+
+/** The key that puts the dust overlay on or takes it off, under `SYSTEMS`. */
+export const OVERLAY_KEY = "D";
+
+/** The quantity after `quantity` in the order offered, the first after the last. */
+function nextQuantity(quantity: MapQuantity): MapQuantity {
+  const next = QUANTITIES[(QUANTITIES.indexOf(quantity) + 1) % QUANTITIES.length];
+  return next ?? quantity;
+}
 
 /** The longest scale bar, as a share of the pictures' width. */
 const SCALE_BAR_SHARE = 0.25;
-
-/**
- * The pictures' width in CSS pixels for a page of `size`: as wide as the page leaves beside the
- * words and axes, and no taller together than the page, the edge-on picture being half the face-on
- * picture's height; even, so that the edge-on picture is a whole number of pixels tall.
- */
-function pictureWidthFor(size: ElementSize): number {
-  const acrossPx = size.widthPx - (SIDE_REM + AXIS_BEFORE_REM + AXIS_AFTER_REM) * size.remPx;
-  const downPx = ((size.heightPx - VIEW_GAP_REM * size.remPx) * 2) / 3;
-  return Math.max(0, 2 * Math.floor(Math.min(acrossPx, downPx) / 2));
-}
 
 interface GalaxyMapPanelProps {
   /** The map cursor, in the `GALACTIC` frame, shown on both views. */
@@ -76,19 +77,73 @@ interface GalaxyMapPanelProps {
  * every system; `YOUNG THIN DISC` the population where the arms show. The page owns the population;
  * changing it asks for both maps again. It needs the server, so while the link is down it is held
  * back, described by the link's reason, and the maps on show stay (plan 05, design note D4). The
- * map cursor and the chart's centre belong to the display, which reads the cursor out and enters it
- * in its `CURSOR` panel beside the map; both are marked on both maps.
+ * page owns the quantity too (plan 07, P07.T11.b): `SYSTEMS`, the column density, or `EXTINCTION`,
+ * the visual extinction through the galaxy, which `Q` steps through; and under `SYSTEMS` the
+ * `DUST OVERLAY`, which dims the density by the dust along each pixel's line of sight and which `D`
+ * puts on and takes off. Both keys are held back with the choices while the link is down. While
+ * the overlay is on, the page names it and its quantity once, beside its toggle,
+ * `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT`, as the guide requires. The map cursor and the chart's
+ * centre belong to the display, which reads the cursor out and enters it in its `CURSOR` panel
+ * beside the map; both are marked on both maps.
+ *
+ * A page shorter than the local chart's threshold, as at 1280 × 720, is laid out `compact`
+ * ({@link mapLayout}): the controls stand in a row across the page above the pictures, the words
+ * column is wider, so that each view's title and hint and each legend's floor take one line, the
+ * pictures narrower to match, each view's row as tall as its picture or its words, and under the
+ * overlay a view's two legends stand side by side. Stacked or compact, the pictures stand clear of
+ * the panel's page tabs, and the page's parts, and so its tab order, are in the same order.
  */
 export function GalaxyMapPanel({ cursorLy, onCursor, centreLy }: GalaxyMapPanelProps) {
   const populationName = useId();
+  const quantityName = useId();
+  const overlayReasonId = useId();
   const linkReasonId = useId();
   const { status } = useServerLink();
   const { open } = useUniverse();
   const [population, setPopulation] = useState<MapPopulation>("all");
+  const [quantity, setQuantity] = useState<MapQuantity>("systems");
+  const [overlay, setOverlay] = useState(false);
   const { ref, size } = useElementSize();
   const linkReason = linkDownReason(status);
   const inhibited = linkReason !== null;
-  const pictureWidthPx = size === null ? 0 : pictureWidthFor(size);
+  const overlayOffered = quantity === "systems";
+  // Why the overlay's toggle does not act, as the description of it, or `null` when it does.
+  let overlayHeldBy: string | null = null;
+  if (inhibited) {
+    overlayHeldBy = linkReasonId;
+  } else if (!overlayOffered) {
+    overlayHeldBy = overlayReasonId;
+  }
+
+  // The keys reach the choices from anywhere on the page but a text field; the page is under
+  // `Activity`, so the listener goes while another page is shown. Held back with the choices while
+  // the link is down.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const modified = event.ctrlKey || event.altKey || event.metaKey || event.shiftKey;
+      if (event.repeat || modified || isTextEntry(event.target)) {
+        return;
+      }
+      const key = event.key.toUpperCase();
+      if (key === QUANTITY_KEY) {
+        event.preventDefault();
+        if (!inhibited) {
+          setQuantity(nextQuantity);
+        }
+      } else if (key === OVERLAY_KEY && overlayOffered) {
+        event.preventDefault();
+        if (!inhibited) {
+          setOverlay((on) => !on);
+        }
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [inhibited, overlayOffered]);
+  const layout = mapLayout(size);
+  const pictureWidthPx = size === null ? 0 : mapPictureWidth(size, layout);
   const devicePixelRatio = size?.devicePixelRatio ?? 1;
   // The pictures' width, which the stylesheet lays the page out by.
   const gridStyle: CSSProperties & { readonly "--map-picture": string } = {
@@ -100,7 +155,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy }: GalaxyMapPanelP
       {open === null ? (
         <p className="panel__empty galaxy-map__empty">NO UNIVERSE OPEN</p>
       ) : (
-        <div className="galaxy-map__grid" style={gridStyle}>
+        <div className={`galaxy-map__grid galaxy-map__grid--${layout}`} style={gridStyle}>
           <div className="galaxy-map__controls">
             {linkReason === null ? null : (
               <p className="panel__inhibit" id={linkReasonId}>
@@ -131,6 +186,60 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy }: GalaxyMapPanelP
                 ))}
               </div>
             </fieldset>
+            <div className="galaxy-map__quantity">
+              <fieldset className="form-choice" aria-keyshortcuts={QUANTITY_KEY}>
+                <legend className="form-field__label">
+                  <span className="control__key">{QUANTITY_KEY}</span> QUANTITY
+                </legend>
+                <div className="form-choice__options">
+                  {QUANTITIES.map((value) => (
+                    <label key={value} className="form-choice__option">
+                      <input
+                        type="radio"
+                        name={quantityName}
+                        value={value}
+                        checked={quantity === value}
+                        aria-disabled={inhibited ? "true" : undefined}
+                        aria-describedby={inhibited ? linkReasonId : undefined}
+                        onChange={() => {
+                          if (!inhibited) {
+                            setQuantity(value);
+                          }
+                        }}
+                      />
+                      {QUANTITY_LABEL[value]}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {/*
+               * Held back under EXTINCTION rather than removed, so that it keeps its focus and says
+               * why; the choice is kept for SYSTEMS.
+               */}
+              <button
+                type="button"
+                className="control galaxy-map__overlay"
+                aria-pressed={overlay && overlayOffered}
+                aria-keyshortcuts={OVERLAY_KEY}
+                aria-disabled={overlayHeldBy === null ? undefined : "true"}
+                aria-describedby={overlayHeldBy ?? undefined}
+                onClick={() => {
+                  if (overlayHeldBy === null) {
+                    setOverlay((on) => !on);
+                  }
+                }}
+              >
+                <span className="control__key">{OVERLAY_KEY}</span> DUST OVERLAY
+              </button>
+              {overlayOffered ? null : (
+                <span className="galaxy-map__overlay-reason" id={overlayReasonId}>
+                  SYSTEMS ONLY
+                </span>
+              )}
+              {overlay && overlayOffered ? (
+                <p className="galaxy-map__overlay-name">{DUST_OVERLAY_LABEL}</p>
+              ) : null}
+            </div>
             <div className="galaxy-map__furniture">
               <p className="field">
                 <span className="field__label">FRAME</span> <span>GALACTIC</span>
@@ -148,6 +257,8 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy }: GalaxyMapPanelP
             universe={open.id}
             view="face_on"
             population={population}
+            quantity={quantity}
+            dustOverlay={overlay}
             pictureWidthPx={pictureWidthPx}
             devicePixelRatio={devicePixelRatio}
             cursorLy={cursorLy}
@@ -158,6 +269,8 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy }: GalaxyMapPanelP
             universe={open.id}
             view="edge_on"
             population={population}
+            quantity={quantity}
+            dustOverlay={overlay}
             pictureWidthPx={pictureWidthPx}
             devicePixelRatio={devicePixelRatio}
             cursorLy={cursorLy}

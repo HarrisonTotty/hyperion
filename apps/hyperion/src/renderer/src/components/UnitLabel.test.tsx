@@ -22,6 +22,9 @@ describe("UnitLabel", () => {
     ["deg_per_myr", "°/Myr"],
     ["deg", "°"],
     ["per_ly3", "/ly³"],
+    ["per_cm3", "/cm³"],
+    ["k_per_cm3", "K/cm³"],
+    ["mag", "mag"],
   ])("writes %s as %s", (unit, symbol) => {
     const { container } = render(<UnitLabel unit={unit} />);
 

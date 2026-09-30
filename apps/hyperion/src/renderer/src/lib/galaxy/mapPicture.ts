@@ -58,6 +58,75 @@ export function turnClockwise(decoded: DecodedCodes): DecodedCodes {
   return { widthPx: heightPx, heightPx: widthPx, codes: turned, maxCode: decoded.maxCode };
 }
 
+/** How much each magnitude of visual extinction dims a light: 0.4 dex, by Pogson's ratio. */
+const DEX_PER_MAG = 0.4;
+
+/**
+ * The density map's codes dimmed by the dust in front of each pixel: the dust overlay (plan 07,
+ * P07.T11.b).
+ *
+ * @remarks
+ * Each pixel's log₁₀ density is lowered by 0.4 A(V), the extinction along the pixel's whole line of
+ * sight, before the ramp is applied, and clamped to the ramp's floor. Since a density code is linear
+ * in log₁₀ of the density, that is a shift of the code by −0.4 A(V) × (maxCode − 1) ÷ span: a pixel
+ * the shift takes to or below the floor is code 0, the background, as the quantiser puts a value at
+ * or below its floor, and a pixel at or below the floor already stays there. An extinction code of
+ * 0, at or below 0.01 mag, dims nothing: its pixel keeps its code. It runs once, on the codes as the screen shows them, before
+ * either way of painting them, so that both paint the same picture; the two maps must be of one
+ * size and turned alike.
+ *
+ * @param density - The density map's codes.
+ * @param densitySpanLog10 - The density map's ceiling less its floor, in dex; a map with nothing
+ *   above its floor is returned unchanged.
+ * @param extinction - The extinction map's codes, of the same size.
+ * @param log10Mag - The extinction map's rule from a code to log₁₀ of A(V) in magnitudes, `null`
+ *   for code 0.
+ * @throws RangeError when the two maps are not of one size.
+ */
+export function dustOverlay(
+  density: DecodedCodes,
+  densitySpanLog10: number,
+  extinction: DecodedCodes,
+  log10Mag: (code: number) => number | null,
+): DecodedCodes {
+  const { widthPx, heightPx, codes, maxCode } = density;
+  if (
+    extinction.widthPx !== widthPx ||
+    extinction.heightPx !== heightPx ||
+    extinction.codes.length !== codes.length ||
+    codes.length !== widthPx * heightPx
+  ) {
+    throw new RangeError(
+      `a ${extinction.widthPx} × ${extinction.heightPx} extinction map cannot dim a ` +
+        `${widthPx} × ${heightPx} density map`,
+    );
+  }
+  if (!(densitySpanLog10 > 0)) {
+    return density;
+  }
+  const codesPerDex = (maxCode - 1) / densitySpanLog10;
+  // The shift of each extinction code, in density codes, worked out once per code.
+  const shifts = new Float64Array(extinction.maxCode + 1);
+  for (let code = 1; code <= extinction.maxCode; code += 1) {
+    const log10 = log10Mag(code);
+    shifts[code] = log10 === null ? 0 : DEX_PER_MAG * 10 ** log10 * codesPerDex;
+  }
+  const dimmed = new (codes instanceof Uint16Array ? Uint16Array : Uint8Array)(codes.length);
+  for (let pixel = 0; pixel < codes.length; pixel += 1) {
+    const code = codes[pixel] ?? 0;
+    const shift = shifts[extinction.codes[pixel] ?? 0] ?? 0;
+    if (code === 0 || shift === 0) {
+      dimmed[pixel] = code;
+      continue;
+    }
+    // How far above the floor, code 1, the dimmed value stands, in codes; at or below it is the
+    // background, as the quantiser has a value at or below its floor.
+    const aboveFloor = code - 1 - shift;
+    dimmed[pixel] = aboveFloor > 0 ? Math.min(maxCode, 1 + Math.round(aboveFloor)) : 0;
+  }
+  return { widthPx, heightPx, codes: dimmed, maxCode };
+}
+
 /**
  * For each pixel of a reduced axis, the first source pixel it covers and the share of its width
  * that each covered source pixel fills.

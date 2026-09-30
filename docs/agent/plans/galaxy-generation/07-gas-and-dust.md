@@ -1994,3 +1994,137 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
   n̄_w of 0.030 cm⁻³ is twice their 0.014, and the peak sits at 0.9 kpc rather than their 1.4–2
   (§4.5: 0.30 at 1.4 kpc). Not tuned. T12's test text (`tests/gas_statistics.rs`) says so; its
   windows are unchanged.
+- **P07.T10.a–c and T11.b–c, as built (lane `ext07`, round 9, 2026-09-30, at version 15).** No
+  generated value moved: `galaxy_parameters.golden` gained the `gas` group and nothing else, the
+  density map's golden is unchanged, and the one new golden is
+  `crates/hyperion-server/tests/golden/extinction_map_face_on_128.golden`, whose ceiling is 0.322
+  dex (2.1 mag face-on) and whose centre pixel (code 195) sits below the ring's (206): the hole
+  inside the bar.
+  - _T10.a, shared banding._ `compute/density_map.rs`'s band loop is now
+    `render_bands(pool, galaxy, spec, resolution, view, render_band)`, which both map services call;
+    `to_log10` and `spec_view` are `pub(super)`, `BAND_ROWS` `pub(crate)`. `quantise_map_with_floor`
+    gives a map with nothing above its floor a ceiling equal to the floor and every code 0; a
+    density map, whose floor is set from its ceiling, is bit-identical. The floor is
+    `compute::EXTINCTION_FLOOR_LOG10_MAG` (−2).
+  - _T10.a/c, conversions._ The checks and answer builders of both kinds are in a new
+    `convert/extinction.rs` (`ExtinctionMapQuery`, `ExtinctionQuery`, `LineEnd`, `extinction_map`,
+    `target_extinction`, `extinction_result`), a submodule as `stellar` and `planetary` are.
+  - _T10.c, the sightline cache_ is a new `compute/sightlines.rs`: `SharedSightlineCache`, whose
+    `marcher(key, galaxy)` gives a job's `SightlineMarcher` (it owns the job's `NoiseCache` of
+    4,096), and `SIGHTLINE_QUALITY` = `Budget(256)`. The key is the `GalaxyKey`, the two ends' cell
+    and offset bits in sorted order (design note 15) and the quality; the mode and modifiers are
+    fixed by the marcher, which takes neither.
+  - _T10.a/c, budgets._ `--extinction-map-cache` (`HYPERION_EXTINCTION_MAP_CACHE_MB`, 16 MiB) and
+    `--sightline-cache` (`HYPERION_SIGHTLINE_CACHE_MB`, 4 MiB); the plan named only the first.
+    `ServerStats` gains `extinction_maps()` and `sightlines()`.
+  - _T10.c, refusals._ Zero targets are refused `bad_request` naming `targets`, as 65 are. A system
+    ID whose bits are no `SystemId`, or one `resolve` refuses for any reason (a kind or layer not
+    placed yet included), answers that target `no_such_system`.
+  - _T10.c, tests._ The system target is compared with the sim's own line at the epoch only: the
+    server builds the full potential that `position_at` drifts a system by, which a debug test must
+    not build. The a→b and b→a test asks two servers, so the cache cannot hide an asymmetry. An
+    extra test takes the map over the socket (geometry, a refused resolution, the cache hit).
+    `universes.rs`'s refusals moved into `requests_naming()` for Clippy's line limit.
+  - _T10.b, the count._ `PARAMETERS_ACCOUNTED_FOR` is 99 → 116. The task's "95 … rises by the
+    group's size plus one" is wrong twice: the base was already 99, and moving `gas.scale_height`
+    from the exclusions to the sent keys leaves sent plus excluded unchanged, so the rise is the 17
+    new keys. The group's order is design note 3's, `gas.scale_height` first, with each derived share
+    beside its layer (`PLAN_TABLE` pins it). `Unit::Mag` exists but no parameter sends it yet. The
+    client writes `/cm³` in E notation, `K/cm³` to three figures and `mag` to two decimals; the
+    group is `GAS AND DUST`.
+  - _T11.b._ `GalaxyMapView.tsx` exports `MapQuantity` and `DUST_OVERLAY_LABEL`; the panel's keys
+    are `Q` (steps `QUANTITY`) and `D` (toggles `DUST OVERLAY`, a `.control` with `aria-pressed`,
+    held back with `SYSTEMS ONLY` under `EXTINCTION`). `RasterLegend.tsx` is extracted from
+    `DensityLegend.tsx` (whose output is unchanged); `ExtinctionLegend` builds on it with
+    plain-decimal ticks (`0.01`, `0.1`, `1`, `10`). A picture of two maps waits for both, and the
+    status names `EXTINCTION` when it is that map's. The view also reads `CURSOR A(V)` in `mag`;
+    under the overlay the undimmed density and A(V) share one live region. `dustOverlay` keeps a
+    pixel with no dust above 0.01 mag at its code, and sends one the shift takes to or below the
+    floor to code 0.
+  - _T11.c._ `SystemReadoutProps` gains only the reading (`extinction: LineExtinction | null`);
+    `SystemsPanel` shows the request's state after the summary's, outside the readout's live region
+    (rulings 13 and 14), through `RequestStatus`'s new `subject` prop (`EXTINCTION: PENDING`), and
+    `EXTINCTION: NO SUCH SYSTEM` for that answer. `RETRY` is `LocalChartState.retryExtinction`. The
+    rows stand under the heading `FROM CHART CENTRE`; the line runs from the centre of the chart on
+    show at its time.
+  - _By eye (T11.b's acceptance)._ Seed 0x4d2, face-on, `YOUNG THIN DISC` with the overlay: a thin
+    dark lane runs along the inner edge of each arm; the face-on dimming is slight (A(V) ≤ 2.1 mag
+    face-on), the edge-on dust lane plain (40 mag through the centre). Screenshots in the lane's
+    `target/ext07/shots/`.
+  - _Status at hand-off (2026-09-30)._ Done: T10.a, T10.b, T10.c, T11.c. T11.b done except its
+    1280 × 720 layout, which is **open** (next item); the orchestrator will not merge the overlap.
+    T11.a was done earlier; T12 is not this lane's. Nothing is committed; the tree gates green.
+  - _Open: the map page's compact layout (T11.b), not built._ Measured in headless Chromium at
+    1280 × 720 (pictures 326 px, words column 384 px): the face-on view's words overrun its picture
+    by 48 px under `SYSTEMS` and `EXTINCTION` and by 212 px under the overlay; the edge-on view's
+    fit (−17 px) alone and overrun by 147 px under the overlay. At 1920 × 1080 only the overlay's
+    edge-on words overrun, by 29 px, inside the panel. Moving the `QUANTITY` row alone cannot fix
+    the overlay: its four legends (about 84–102 px each) and readings need some 550 px beside
+    pictures 497 px tall. The likely design, following `chartLayout.ts` (compact below 44 rem):
+    a compact class on `.galaxy-map__grid` that puts the page's controls in a full-width row, lets
+    the words column widen to about 29 rem (so each head and floor line fits one line) with the
+    pictures narrowed to match, sizes the rows by their content (`align-self: start` on the
+    pictures), sets a view's two legends side by side under the overlay, and names the overlay
+    once for the page; then a `mapLayout(size)` test beside `chartLayout.test.ts` and headless
+    shots of all three states at both sizes. The lane's drive scripts are in its
+    `target/ext07/` (`drive.mjs`, `layout.mjs`, which measure each view's overrun).
+  - _Found, not this lane's:_ the page tabs' `HR DIAGRAM` is drawn over the face-on picture's
+    top-left corner at 1280 and at 1920 (the tabs share the grid's first row), before this change.
+  - _1280 × 720, deferred._ The `QUANTITY` row and the toggle take 76 px of the face-on row, which
+    at 1280 × 720 already held its words with 28 px to spare: the face-on view's words now run 44 px
+    past its picture into the edge-on view's under `SYSTEMS`, and under the overlay (two legends a
+    view) both views' words overflow. 1920 × 1080 fits. The page needs a compact arrangement
+    (ruling 149's rule allows one), which is a layout ruling left to the owner.
+  - _For the owner (UX, deferred)._ Names not on the nomenclature list: `QUANTITY`, `SYSTEMS` as a
+    map quantity (the legend says `COLUMN DENSITY`), `CURSOR A(V)`, `FROM CHART CENTRE`,
+    `GAS AND DUST` and the gas parameters' labels, `SYSTEMS ONLY`; whether the extinction legend
+    under the overlay needs a caption saying the dust darkens the density.
+- **P07.T11.b's compact layout, as built (lane `ext07b`, round 10, 2026-09-30, at version 16).** The
+  map page now changes layout where the local chart does. Re-gated on version 16, ext07's two new
+  pins moved with the base, and were re-blessed at 16 (nothing the branch already pinned moved):
+  `extinction_map_face_on_128.golden`'s ceiling from 0.32182 to 0.32188 dex (code sum 1,449,236 →
+  1,449,344), and five of `galaxy_parameters.golden`'s new `gas` entries by at most 1.2 × 10⁻⁴
+  relative (`gas.warm_fraction` 0.156600 → 0.156583, `gas.molecular_length` 382.362 → 382.381,
+  `gas.molecular_height` 92.932 → 92.936, `gas.molecular_fraction` and `gas.neutral_fraction`),
+  with version 16's base (not traced further; version 16 moved the density map's golden too, and its potential changed).
+  - _The rule._ A new `displays/galaxy/mapLayout.ts` beside `chartLayout.ts`: `mapLayout(size)` is
+    `compact` below `COMPACT_BELOW_REM` (44 rem, ruling 149.2), `stacked` otherwise and before the
+    page is measured; `mapPictureWidth(size, layout)` replaces the panel's `pictureWidthFor` and holds
+    the widths `styles.css` restates. The grid carries `galaxy-map__grid--stacked` or `--compact`.
+  - _Compact (1280 × 720)._ The controls stand in a row across the page, 7.5 rem tall with the tabs'
+    clearance (the population and quantity on one line, the toggle, `SYSTEMS ONLY` or the overlay's
+    name and the frame and scale on the next); the words column is at least 27 rem, not ext07's
+    29, so that the pictures keep 260 px at 1280 × 720 (29 rem would leave 246 and the edge-on
+    words 5 px past their picture): the face-on title and hint (26.7 rem) and each floor line take
+    one line. Each view's row is as tall as its picture or its words (`align-self: start` on the
+    picture), and under the overlay a view's two legends stand side by side, their captions
+    wrapping. Where the words are still taller than the page, the page scrolls, with its gutter kept,
+    rather than hide a legend (see the provisional pin below). While the link is down, its reason
+    stands in the tabs' row at its right, so that the controls' row keeps its height.
+  - _Both layouts._ The overlay is named once for the page, beside its toggle, while it is on:
+    `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT` no longer stands in each view (`DUST_OVERLAY_LABEL`
+    stays exported from `GalaxyMapView.tsx`) and carries no stale mark, since it names a setting.
+    Stacked, the pictures start 2.5 rem down, clear of the page tabs, which fixes ext07's found
+    overlap of `HR DIAGRAM` on the face-on picture at both sizes; that costs the stacked pictures
+    8 px at 1920 × 1080 (562 → 554).
+  - _Measured_ in headless Chromium by ext07's `layout.mjs` (a view's last line of words less its
+    picture's bottom; negative fits), before → after. 1280 × 720: `SYSTEMS` and `EXTINCTION` face-on
+    48 → −110, edge-on −17 → −2; overlay face-on 212 → −38, edge-on 147 → **70**. 1920 × 1080:
+    `SYSTEMS` −188/−135 → −238/−149, `EXTINCTION` −188/−135 → −220/−131, overlay −24/29 → −110/−25.
+    Tabs over the face-on picture: 94 and 92 px → 0. Shots in the lane's `target/r10/shots/`.
+  - _The overlay at 1280 × 720 cannot fit (provisional; ruling deferred)._ The edge-on picture is
+    130 px tall; its title, two readings and two legends side by side need about 200, and all the
+    page's words under the overlay (about 430 px) exceed the 404 px both pictures and the gap take.
+    The least overrun found is pinned: 70 px, the page scrolling 68 px. The scroll departs from the
+    guide's "Consoles fill the window and do not scroll" (Layout), chosen over clipping, which would
+    hide part of a legend. Remedies for the ruling: allow the scroll as an exception, or drop
+    `ROTATION COUNTER-CLOCKWISE` or a key hint under the overlay when compact (a rearrangement the
+    guide does not yet allow).
+  - _Supersedes_ ext07's "Open: the map page's compact layout", "Found, not this lane's" and
+    "1280 × 720, deferred" bullets above, and its status line's "T11.b done except its 1280 × 720
+    layout": T11.b is done, with the overlay's pin above. `GalaxyMapPanel.test.tsx` gains the two layouts, the
+    page's one overlay name and a tab-order test in both layouts (as ruling 149.3 asked of the
+    chart); `mapLayout.test.ts` is new.
+- **P07.T11.b, the overlay at 1280 × 720 (provisional; ruling deferred):** the edge-on view's words
+  overrun its 130 px picture by 70 px and the compact page scrolls 68 px, against the guide's
+  no-scroll rule; every other state at 1280 × 720 and 1920 × 1080 fits.

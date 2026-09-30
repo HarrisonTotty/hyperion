@@ -43,7 +43,9 @@ interface SystemsPanelProps {
  * drops an answer to a superseded one. Where that request stands is said between the readout and
  * `OPEN SYSTEM`, outside the live region, with `RETRY` after a failure; an answer the client cannot
  * read says `SYSTEM DATA INVALID` there. The answer on show while the chart's time has moved on, or
- * after the newer request failed, is read as stale.
+ * after the newer request failed, is read as stale. The selection's extinction from the chart's
+ * centre (plan 07, P07.T11.c) is asked for by the chart ({@link LocalChartState}), and where that
+ * request stands is said after the summary's, named `EXTINCTION`, so that two waits are told apart.
  */
 export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const titleId = useId();
@@ -113,6 +115,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         distanceDecimals={chart.distanceDecimals}
         stars={stars}
         starsStale={starsStale}
+        extinction={chart.extinction.reading}
       />
       {summary.shown?.kind === "fault" ? (
         <StatusLine
@@ -122,6 +125,16 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         />
       ) : (
         <RequestStatus state={summary.state} onRetry={retry} />
+      )}
+      {chart.extinction.state.kind === "ok" && chart.extinction.reading === null ? (
+        // Answered, but for an ID the server resolves to no system: its rows stay the em dash.
+        <StatusLine text="EXTINCTION: NO SUCH SYSTEM" standing="refused" />
+      ) : (
+        <RequestStatus
+          state={chart.extinction.state}
+          subject="EXTINCTION"
+          onRetry={chart.retryExtinction}
+        />
       )}
       <div className="systems-panel__actions">
         <button

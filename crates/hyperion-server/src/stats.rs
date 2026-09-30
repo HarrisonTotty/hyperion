@@ -24,6 +24,8 @@ pub struct ServerStats {
     systems: LruCounters,
     bodies: BodyCacheCounters,
     briefs: LruCounters,
+    extinction_maps: LruCounters,
+    sightlines: LruCounters,
 }
 
 impl ServerStats {
@@ -41,6 +43,8 @@ impl ServerStats {
             systems: state.systems.counters(),
             bodies: state.bodies.counters(),
             briefs: state.briefs.counters(),
+            extinction_maps: state.extinction_maps.counters(),
+            sightlines: state.sightlines.counters(),
         }
     }
 
@@ -109,6 +113,20 @@ impl ServerStats {
     #[must_use]
     pub fn briefs(&self) -> LruCounters {
         self.briefs
+    }
+
+    /// The extinction map cache's contents and use, including its byte budget: a repeated
+    /// `extinction_map` for one raster is a hit and computes nothing (plan 07, P07.T10.a).
+    #[must_use]
+    pub fn extinction_maps(&self) -> LruCounters {
+        self.extinction_maps
+    }
+
+    /// The sightline cache's contents and use, including its byte budget: a repeated
+    /// `extinction` to one target marches no step (plan 07, P07.T10.c).
+    #[must_use]
+    pub fn sightlines(&self) -> LruCounters {
+        self.sightlines
     }
 }
 

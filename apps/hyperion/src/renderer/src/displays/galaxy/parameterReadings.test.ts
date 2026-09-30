@@ -28,6 +28,9 @@ describe("toReading", () => {
     ["a share to three figures", 0.112, "none", "0.112"],
     ["a tiny share in E notation", 0.000_42, "none", "4.20E-4"],
     ["a density in E notation", 0.004, "per_ly3", "4.00E-3"],
+    ["a gas density in E notation", 0.0335, "per_cm3", "3.35E-2"],
+    ["a pressure to three figures", 412.5, "k_per_cm3", "413"],
+    ["an extinction to two decimals", 1.2345, "mag", "1.23"],
     ["a negative value with its sign", -0.25, "none", "-0.250"],
   ])("reads %s", (_, value, unit, text) => {
     const reading = toReading(aNumber(value, unit));

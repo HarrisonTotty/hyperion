@@ -106,6 +106,12 @@ describe("RequestStatus", () => {
     );
   });
 
+  it("names what the request is for before its state, where one is given", () => {
+    render(<RequestStatus state={{ kind: "pending" }} subject="EXTINCTION" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("EXTINCTION: PENDING");
+  });
+
   it("offers no RETRY when the caller cannot send again", () => {
     render(<RequestStatus state={{ kind: "timed_out" }} />);
 

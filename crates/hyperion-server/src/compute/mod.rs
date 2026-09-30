@@ -10,16 +10,21 @@
 //! generated cells a range query reads, [`SharedSystemCache`] the systems' stars a
 //! `system_summary` reads and [`SharedBodyCache`] the planetary systems `system_bodies` and
 //! `body_detail` read, each keyed by a [`GalaxyKey`]. A density map is computed and cached as a
-//! [`RawDensityMap`] and quantised for each response by [`quantise_map`].
+//! [`RawDensityMap`] and quantised for each response by [`quantise_map`]; an extinction map by
+//! [`ExtinctionMapService`] into the same raw type, quantised by [`quantise_map_with_floor`]
+//! (plan 07, P07.T10.a). [`SharedSightlineCache`] holds the lines of sight the `extinction`
+//! request marches (P07.T10.c).
 
 mod bodies;
 mod cancel;
 mod cells;
 mod density_map;
 mod error;
+mod extinction_map;
 mod galaxies;
 mod key;
 mod pool;
+mod sightlines;
 mod single_flight;
 mod systems;
 
@@ -29,14 +34,17 @@ pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
 pub use density_map::{
     BuildRawMapError, CodeDepth, DensityMapService, MAP_WIDTH_LY, MapKey, MapResolution,
     ParseCodeDepthError, ParseMapResolutionError, QuantisedMap, RawDensityMap, quantise_map,
+    quantise_map_with_floor,
 };
 pub use error::ComputeError;
+pub use extinction_map::{EXTINCTION_FLOOR_LOG10_MAG, ExtinctionMapKey, ExtinctionMapService};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
 pub use key::GalaxyKey;
 pub use pool::{
     CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError, StartPoolError,
     SubmitJobError,
 };
+pub use sightlines::{SIGHTLINE_QUALITY, SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};
 pub use systems::{SharedBriefCache, SharedSystemCache};
 

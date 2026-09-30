@@ -25,9 +25,11 @@ pub use envelope::{
     ServerMessage,
 };
 pub use galaxy::{
-    Census, DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, LayerCensus,
+    Census, DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
+    ExtinctionResult, ExtinctionTarget, GalaxyParameters, GalaxyParametersRequest, LayerCensus,
     LayerStatus, MapPopulation, MapView, MassLayer, Parameter, ParameterGroup, ParameterOrigin,
-    ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest, Unit,
+    ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest,
+    TargetExtinction, Unit,
 };
 pub use modelled::Modelled;
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};

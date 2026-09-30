@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::galaxy::{
-    DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
+    DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
+    ExtinctionResult, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
     SystemsInRangeRequest,
 };
 use crate::planetary::{
@@ -176,6 +177,10 @@ pub enum RequestBody {
     BodyDetail(BodyDetailRequest),
     /// The events on one system's bodies in a window of time.
     BodyEvents(BodyEventsRequest),
+    /// A map of the visual extinction through a universe's galaxy.
+    ExtinctionMap(ExtinctionMapRequest),
+    /// The extinction from one point to each of a list of targets.
+    Extinction(ExtinctionRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -205,6 +210,10 @@ pub enum ResponseBody {
     BodyDetail(Box<BodyDetailDto>),
     /// The events in the window.
     BodyEvents(BodyEventsDto),
+    /// The extinction map.
+    ExtinctionMap(ExtinctionMap),
+    /// The extinction to each target, in the request's order.
+    Extinction(ExtinctionResult),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -223,6 +232,8 @@ pub const REQUEST_KINDS: &[&str] = &[
     "system_bodies",
     "body_detail",
     "body_events",
+    "extinction_map",
+    "extinction",
 ];
 
 #[cfg(test)]
@@ -233,7 +244,8 @@ mod tests {
 
     use super::*;
     use crate::galaxy::{
-        Census, MapPopulation, MapView, MassLayer, ParameterGroup, SystemsInRange,
+        Census, ExtinctionTarget, MapPopulation, MapView, MassLayer, ParameterGroup,
+        SystemsInRange, TargetExtinction,
     };
     use crate::orbit::HierarchyDto;
     use crate::planetary::{
@@ -349,11 +361,31 @@ mod tests {
                     nanos: 0,
                 },
             })),
-            Some(RequestBody::BodyEvents(_)) => None,
+            Some(RequestBody::BodyEvents(_)) => {
+                Some(RequestBody::ExtinctionMap(ExtinctionMapRequest {
+                    universe,
+                    view: MapView::FaceOn,
+                    resolution: 128,
+                    bits: 8,
+                }))
+            }
+            Some(RequestBody::ExtinctionMap(_)) => {
+                Some(RequestBody::Extinction(ExtinctionRequest {
+                    universe,
+                    origin: GalacticPosition::default(),
+                    time: UniverseTime::default(),
+                    targets: vec![ExtinctionTarget::System { id: system() }],
+                }))
+            }
+            Some(RequestBody::Extinction(_)) => None,
         }
     }
 
     /// The response that follows `previous` in a walk over every variant, as for requests.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per variant, each a whole response, and the walk must name them all"
+    )]
     fn next_response(previous: Option<&ResponseBody>) -> Option<ResponseBody> {
         let universe = universe();
         match previous {
@@ -449,7 +481,27 @@ mod tests {
                 to: UniverseTime::default(),
                 events: Vec::new(),
             })),
-            Some(ResponseBody::BodyEvents(_)) => None,
+            Some(ResponseBody::BodyEvents(_)) => Some(ResponseBody::ExtinctionMap(ExtinctionMap {
+                universe,
+                view: MapView::EdgeOn,
+                width_px: 2,
+                height_px: 1,
+                centre_ly: [0.0, 0.0],
+                ly_per_px: 65_536.0,
+                bits: 8,
+                floor_log10_mag: -2.0,
+                ceiling_log10_mag: -2.0,
+                data_base64: "AAA=".to_owned(),
+            })),
+            Some(ResponseBody::ExtinctionMap(_)) => {
+                Some(ResponseBody::Extinction(ExtinctionResult {
+                    universe,
+                    origin: GalacticPosition::default(),
+                    time: UniverseTime::default(),
+                    targets: vec![TargetExtinction::NoSuchSystem],
+                }))
+            }
+            Some(ResponseBody::Extinction(_)) => None,
         }
     }
 
@@ -715,6 +767,8 @@ mod tests {
                 "system_bodies",
                 "body_detail",
                 "body_events",
+                "extinction_map",
+                "extinction",
             ]
         );
     }

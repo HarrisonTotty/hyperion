@@ -4,17 +4,19 @@
 //! can instead be set by an environment variable; one given on the command line wins. Tests and
 //! embedders build a [`ServerConfig`] with [`ServerConfig::builder`].
 //!
-//! | Option           | Variable                   | Default                                      |
-//! | ---------------- | -------------------------- | -------------------------------------------- |
-//! | `--address`      | `HYPERION_ADDR`            | `127.0.0.1`                                  |
-//! | `--port`         | `HYPERION_PORT`            | `7878`                                       |
-//! | `--data-dir`     | `HYPERION_DATA_DIR`        | `./hyperion-data`                            |
-//! | `--num-workers`  | `HYPERION_WORKERS`         | available parallelism less one, at least one |
-//! | `--cell-cache`   | `HYPERION_CELL_CACHE_MB`   | 256 (MiB)                                    |
-//! | `--map-cache`    | `HYPERION_MAP_CACHE_MB`    | 64 (MiB)                                     |
-//! | `--system-cache` | `HYPERION_SYSTEM_CACHE_MB` | 128 (MiB)                                    |
-//! | `--body-cache`   | `HYPERION_BODY_CACHE_MB`   | 128 (MiB)                                    |
-//! | `--brief-cache`  | `HYPERION_BRIEF_CACHE_MB`  | 64 (MiB)                                     |
+//! | Option                   | Variable                           | Default                                      |
+//! | ------------------------ | ---------------------------------- | -------------------------------------------- |
+//! | `--address`              | `HYPERION_ADDR`                    | `127.0.0.1`                                  |
+//! | `--port`                 | `HYPERION_PORT`                    | `7878`                                       |
+//! | `--data-dir`             | `HYPERION_DATA_DIR`                | `./hyperion-data`                            |
+//! | `--num-workers`          | `HYPERION_WORKERS`                 | available parallelism less one, at least one |
+//! | `--cell-cache`           | `HYPERION_CELL_CACHE_MB`           | 256 (MiB)                                    |
+//! | `--map-cache`            | `HYPERION_MAP_CACHE_MB`            | 64 (MiB)                                     |
+//! | `--system-cache`         | `HYPERION_SYSTEM_CACHE_MB`         | 128 (MiB)                                    |
+//! | `--body-cache`           | `HYPERION_BODY_CACHE_MB`           | 128 (MiB)                                    |
+//! | `--brief-cache`          | `HYPERION_BRIEF_CACHE_MB`          | 64 (MiB)                                     |
+//! | `--extinction-map-cache` | `HYPERION_EXTINCTION_MAP_CACHE_MB` | 16 (MiB)                                     |
+//! | `--sightline-cache`      | `HYPERION_SIGHTLINE_CACHE_MB`      | 4 (MiB)                                      |
 
 use std::error::Error;
 use std::fmt;
@@ -47,6 +49,10 @@ pub const ENV_SYSTEM_CACHE_MB: &str = "HYPERION_SYSTEM_CACHE_MB";
 pub const ENV_BODY_CACHE_MB: &str = "HYPERION_BODY_CACHE_MB";
 /// The variable giving the brief cache's budget in MiB, for `--brief-cache`.
 pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
+/// The variable giving the extinction map cache's budget in MiB, for `--extinction-map-cache`.
+pub const ENV_EXTINCTION_MAP_CACHE_MB: &str = "HYPERION_EXTINCTION_MAP_CACHE_MB";
+/// The variable giving the sightline cache's budget in MiB, for `--sightline-cache`.
+pub const ENV_SIGHTLINE_CACHE_MB: &str = "HYPERION_SIGHTLINE_CACHE_MB";
 
 /// The data directory when `--data-dir` is not given, relative to the working directory.
 pub const DEFAULT_DATA_DIR: &str = "./hyperion-data";
@@ -62,6 +68,14 @@ pub const DEFAULT_BODY_CACHE_MIB: usize = 128;
 /// 25,000 main-sequence rows at about 2.5 kB each, or 2,000–2,500 dead ones, whose model holds a
 /// full track, at 25–35 kB (P06.T38.e's measurement).
 pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
+/// The extinction map cache's budget when `--extinction-map-cache` is not given, in MiB (plan 07,
+/// P07.T10.a): every view at every resolution of one galaxy is some 8.4 MiB of `f32` pixels, so
+/// this holds two galaxies' worth, or one with room to spare.
+pub const DEFAULT_EXTINCTION_MAP_CACHE_MIB: usize = 16;
+/// The sightline cache's budget when `--sightline-cache` is not given, in MiB (plan 07,
+/// P07.T10.c): a line is charged some 200 bytes, so this holds some 20,000, a few hundred charts'
+/// selections.
+pub const DEFAULT_SIGHTLINE_CACHE_MIB: usize = 4;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -80,6 +94,12 @@ const DEFAULT_BODY_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_BRIEF_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_BRIEF_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_EXTINCTION_MAP_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_EXTINCTION_MAP_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_SIGHTLINE_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_SIGHTLINE_CACHE_MIB * BYTES_PER_MIB,
 };
 
 /// The server's command line.
@@ -124,6 +144,14 @@ pub struct ServerArgs {
     /// Budget of the cache of range briefs' star models, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
     brief_cache: CacheBudget,
+
+    /// Budget of the cache of galaxy extinction maps, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_EXTINCTION_MAP_CACHE_MB, default_value_t = DEFAULT_EXTINCTION_MAP_CACHE)]
+    extinction_map_cache: CacheBudget,
+
+    /// Budget of the cache of lines of sight through the gas, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_SIGHTLINE_CACHE_MB, default_value_t = DEFAULT_SIGHTLINE_CACHE)]
+    sightline_cache: CacheBudget,
 }
 
 impl From<ServerArgs> for ServerConfig {
@@ -138,6 +166,8 @@ impl From<ServerArgs> for ServerConfig {
             system_cache,
             body_cache,
             brief_cache,
+            extinction_map_cache,
+            sightline_cache,
         } = args;
         Self::builder()
             .addr(SocketAddr::new(address, port))
@@ -148,6 +178,8 @@ impl From<ServerArgs> for ServerConfig {
             .system_cache_bytes(system_cache.bytes)
             .body_cache_bytes(body_cache.bytes)
             .brief_cache_bytes(brief_cache.bytes)
+            .extinction_map_cache_bytes(extinction_map_cache.bytes)
+            .sightline_cache_bytes(sightline_cache.bytes)
             .build()
     }
 }
@@ -209,6 +241,8 @@ pub struct ServerConfig {
     system_cache_bytes: usize,
     body_cache_bytes: usize,
     brief_cache_bytes: usize,
+    extinction_map_cache_bytes: usize,
+    sightline_cache_bytes: usize,
     entropy: Arc<dyn Entropy>,
 }
 
@@ -267,6 +301,18 @@ impl ServerConfig {
         self.brief_cache_bytes
     }
 
+    /// The extinction map cache's budget, in bytes.
+    #[must_use]
+    pub fn extinction_map_cache_bytes(&self) -> usize {
+        self.extinction_map_cache_bytes
+    }
+
+    /// The sightline cache's budget, in bytes.
+    #[must_use]
+    pub fn sightline_cache_bytes(&self) -> usize {
+        self.sightline_cache_bytes
+    }
+
     /// Where seeds and universe IDs are drawn from.
     #[must_use]
     pub fn entropy(&self) -> &Arc<dyn Entropy> {
@@ -292,6 +338,8 @@ impl Default for ServerConfigBuilder {
                 system_cache_bytes: DEFAULT_SYSTEM_CACHE.bytes,
                 body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
+                extinction_map_cache_bytes: DEFAULT_EXTINCTION_MAP_CACHE.bytes,
+                sightline_cache_bytes: DEFAULT_SIGHTLINE_CACHE.bytes,
                 entropy: Arc::new(OsEntropy),
             },
         }
@@ -354,6 +402,20 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn brief_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.brief_cache_bytes = bytes;
+        self
+    }
+
+    /// The extinction map cache's budget, in bytes. Zero caches nothing.
+    #[must_use]
+    pub fn extinction_map_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.extinction_map_cache_bytes = bytes;
+        self
+    }
+
+    /// The sightline cache's budget, in bytes. Zero caches nothing: every line is marched.
+    #[must_use]
+    pub fn sightline_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.sightline_cache_bytes = bytes;
         self
     }
 
@@ -420,6 +482,8 @@ mod tests {
         usize,
         usize,
         usize,
+        usize,
+        usize,
     );
 
     fn fields(config: &ServerConfig) -> Fields<'_> {
@@ -432,6 +496,8 @@ mod tests {
             config.system_cache_bytes(),
             config.body_cache_bytes(),
             config.brief_cache_bytes(),
+            config.extinction_map_cache_bytes(),
+            config.sightline_cache_bytes(),
         )
     }
 
@@ -456,6 +522,8 @@ mod tests {
                 128 * 1024 * 1024,
                 128 * 1024 * 1024,
                 64 * 1024 * 1024,
+                16 * 1024 * 1024,
+                4 * 1024 * 1024,
             )
         );
     }
@@ -481,6 +549,10 @@ mod tests {
             "5",
             "--brief-cache",
             "7",
+            "--extinction-map-cache",
+            "11",
+            "--sightline-cache",
+            "13",
         ]);
         assert_eq!(
             fields(&config),
@@ -492,7 +564,9 @@ mod tests {
                 0,
                 2 << 20,
                 5 << 20,
-                7 << 20
+                7 << 20,
+                11 << 20,
+                13 << 20
             )
         );
     }
@@ -524,6 +598,11 @@ mod tests {
                 (Some("system-cache"), Some("HYPERION_SYSTEM_CACHE_MB")),
                 (Some("body-cache"), Some("HYPERION_BODY_CACHE_MB")),
                 (Some("brief-cache"), Some("HYPERION_BRIEF_CACHE_MB")),
+                (
+                    Some("extinction-map-cache"),
+                    Some("HYPERION_EXTINCTION_MAP_CACHE_MB")
+                ),
+                (Some("sightline-cache"), Some("HYPERION_SIGHTLINE_CACHE_MB")),
             ]
         );
     }
@@ -609,6 +688,8 @@ mod tests {
         assert_eq!(DEFAULT_SYSTEM_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
+        assert_eq!(DEFAULT_EXTINCTION_MAP_CACHE.to_string(), "16");
+        assert_eq!(DEFAULT_SIGHTLINE_CACHE.to_string(), "4");
     }
 
     #[test]
@@ -657,6 +738,8 @@ mod tests {
             .system_cache_bytes(30)
             .body_cache_bytes(40)
             .brief_cache_bytes(50)
+            .extinction_map_cache_bytes(60)
+            .sightline_cache_bytes(70)
             .build();
         assert_eq!(
             fields(&config),
@@ -668,7 +751,9 @@ mod tests {
                 20,
                 30,
                 40,
-                50
+                50,
+                60,
+                70
             )
         );
     }

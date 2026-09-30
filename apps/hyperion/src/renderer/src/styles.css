@@ -950,8 +950,9 @@ body {
 
 /*
  * The PARAMETERS and GALAXY MAP pages, sharing a panel. The page selector is the panel's title, at
- * its top left; the map's pictures run from the panel's top beside it, so the map page spans the
- * selector's row and keeps its first 2.5rem of words clear of the selector, which stands above it.
+ * its top left; the map page spans the selector's row, keeping its first 2.5rem clear of the
+ * selector, which stands above it: its words start under it, and its pictures too, since the
+ * selector is wider than the words column.
  */
 .galaxy__column > .galaxy-pages {
   display: grid;
@@ -1049,6 +1050,16 @@ body {
   min-height: 0;
 }
 
+/*
+ * Compact, a view's words may be taller than its picture, as under the overlay at 1280 × 720, and
+ * the page then scrolls rather than hide them; its gutter is kept, so that the words column does
+ * not narrow when the scroll bar comes.
+ */
+.galaxy-map:has(> .galaxy-map__grid--compact) {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .galaxy-map__empty {
   padding-top: 2.5rem;
 }
@@ -1056,16 +1067,27 @@ body {
 /*
  * The words beside the pictures, then the gutter for the vertical axes' labels, the pictures, and
  * the gutter for the horizontal axes' labels. Face-on above edge-on, 0.5rem apart: the face-on
- * picture spans the page's controls and its own words, the edge-on picture its words. The
- * pictures' width, --map-picture, is the page's to set (GalaxyMapPanel.tsx, which restates these
- * widths), even, and as large as the page allows.
+ * picture spans the page's controls and its own words, the edge-on picture its words, and the
+ * pictures start 2.5rem down, clear of the page tabs. The pictures' width, --map-picture, is the
+ * page's to set (mapLayout.ts, which restates these widths), even, and as large as the page allows.
  */
 .galaxy-map__grid {
   display: grid;
   grid-template-columns: minmax(24rem, 1fr) 3.75rem var(--map-picture) 1.75rem;
   grid-template-rows: auto minmax(0, 1fr) 0.5rem calc(var(--map-picture) / 2);
-  height: calc(var(--map-picture) * 1.5 + 0.5rem);
+  height: calc(var(--map-picture) * 1.5 + 3rem);
   font-size: 0.875rem;
+}
+
+/*
+ * A page too short for that (mapLayout.ts): the controls in a row across the page, 7.5rem tall
+ * with the tabs' clearance, then face-on above edge-on beside a wider words column, at least 27rem
+ * less the scroll bar's gutter, each row as tall as its picture or its words, whichever is taller.
+ */
+.galaxy-map__grid--compact {
+  grid-template-columns: minmax(0, 1fr) 3.75rem var(--map-picture) 1.75rem;
+  grid-template-rows: auto auto 0.5rem auto;
+  height: auto;
 }
 
 /* Above the face-on view's box, which spans this row too, so that its controls take the pointer. */
@@ -1076,8 +1098,74 @@ body {
   padding: 2.5rem 0 0.5rem;
 }
 
+/*
+ * Compact, the controls flow along the row in their order: the population and the quantity, then
+ * the overlay's toggle, why it is held back or its name, and the frame and scale.
+ */
+.galaxy-map__grid--compact > .galaxy-map__controls {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  align-items: center;
+  align-content: flex-start;
+  gap: 0.25rem 1.5rem;
+  box-sizing: border-box;
+  min-height: 7.5rem;
+}
+
+/* Why the choices are held back, in the tabs' row at its right, so that the row keeps its height. */
+.galaxy-map__grid--compact > .galaxy-map__controls > .panel__inhibit {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin: 0;
+  line-height: 2rem;
+}
+
+.galaxy-map__grid--compact :is(.galaxy-map__population, .galaxy-map__quantity, .form-choice) {
+  margin-bottom: 0;
+}
+
+.galaxy-map__grid--compact .galaxy-map__quantity {
+  display: contents;
+}
+
 .galaxy-map__population {
   margin-bottom: 0.25rem;
+}
+
+/* The quantity the maps show, and beside it the dust overlay's toggle, held back under EXTINCTION. */
+.galaxy-map__quantity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.25rem;
+}
+
+/* On, it is underlined in --accent, as the other toggles on the ship are. */
+.galaxy-map__overlay {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.galaxy-map__overlay[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+.galaxy-map__overlay-reason {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+/*
+ * The overlay's name and quantity, which the guide has the display show while it is applied: once
+ * for the page, beside its toggle, taking what the line leaves it.
+ */
+.galaxy-map__overlay-name {
+  flex: 1 1 12rem;
+  margin: 0;
+  letter-spacing: 0.15em;
 }
 
 /* The frame and the scale, which the two pictures share. */
@@ -1109,6 +1197,10 @@ body {
   grid-row: 4;
 }
 
+.galaxy-map__grid--compact > .map-view--face_on {
+  grid-row: 2;
+}
+
 .map-view__side {
   display: flex;
   grid-column: 1;
@@ -1122,7 +1214,8 @@ body {
   grid-row: 2;
 }
 
-.map-view--edge_on > .map-view__side {
+.map-view--edge_on > .map-view__side,
+.galaxy-map__grid--compact .map-view > .map-view__side {
   grid-row: 1;
 }
 
@@ -1130,6 +1223,15 @@ body {
   grid-column: 3;
   grid-row: 1 / -1;
   min-width: 0;
+}
+
+/* Stacked, the face-on picture starts clear of the page tabs, beside the controls. */
+.galaxy-map__grid--stacked .map-view--face_on > .map-view__area {
+  padding-top: 2.5rem;
+}
+
+.galaxy-map__grid--compact .map-view__area {
+  align-self: start;
 }
 
 .map-view__head {
@@ -1158,6 +1260,24 @@ body {
 
 .map-view__unit {
   color: var(--text-muted);
+}
+
+/* A view's legends, one under the other; compact, under the overlay, side by side. */
+.map-view__legends {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.galaxy-map__grid--compact .map-view__legends--pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 1rem;
+}
+
+.galaxy-map__grid--compact .map-view__legends--pair .density-legend__caption {
+  flex-wrap: wrap;
+  row-gap: 0;
 }
 
 /* Room for the longest reading, 4.89E-10, so that the unit never moves as the cursor does. */

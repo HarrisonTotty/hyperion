@@ -9,6 +9,11 @@ interface RequestStatusProps {
   readonly id?: string;
   /** Sends the request again; offered as `RETRY` after a rejection or a timeout. */
   readonly onRetry?: () => void;
+  /**
+   * What the request is for, in upper case, before its state (`EXTINCTION: PENDING`), where two
+   * requests' states stand together and must be told apart.
+   */
+  readonly subject?: string | undefined;
 }
 
 /**
@@ -85,14 +90,14 @@ export function annunciation(state: RequestState<RequestKind>): Annunciation | n
  * when the caller can send the request again, `RETRY` follows. Nothing is rendered for `ok` and
  * `idle`.
  */
-export function RequestStatus({ state, id, onRetry }: RequestStatusProps) {
+export function RequestStatus({ state, id, onRetry, subject }: RequestStatusProps) {
   const shown = annunciation(state);
   if (shown === null) {
     return null;
   }
   return (
     <StatusLine
-      text={shown.text}
+      text={subject === undefined ? shown.text : `${subject}: ${shown.text}`}
       standing={shown.standing}
       id={id}
       action={

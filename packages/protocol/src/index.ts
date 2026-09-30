@@ -39,6 +39,11 @@ import type { DensityMapRequest } from "./generated/DensityMapRequest";
 import type { DestructionCauseDto } from "./generated/DestructionCauseDto";
 import type { DetailLevelDto } from "./generated/DetailLevelDto";
 import type { ErrorCode } from "./generated/ErrorCode";
+import type { ExtinctionMap } from "./generated/ExtinctionMap";
+import type { ExtinctionMapRequest } from "./generated/ExtinctionMapRequest";
+import type { ExtinctionRequest } from "./generated/ExtinctionRequest";
+import type { ExtinctionResult } from "./generated/ExtinctionResult";
+import type { ExtinctionTarget } from "./generated/ExtinctionTarget";
 import type { GalacticPosition } from "./generated/GalacticPosition";
 import type { GalaxyParameters } from "./generated/GalaxyParameters";
 import type { GalaxyParametersRequest } from "./generated/GalaxyParametersRequest";
@@ -90,6 +95,7 @@ import type { SystemSummaryDto } from "./generated/SystemSummaryDto";
 import type { SystemSummaryRequest } from "./generated/SystemSummaryRequest";
 import type { SystemsInRange } from "./generated/SystemsInRange";
 import type { SystemsInRangeRequest } from "./generated/SystemsInRangeRequest";
+import type { TargetExtinction } from "./generated/TargetExtinction";
 import type { Unit } from "./generated/Unit";
 import type { UniverseIdHex } from "./generated/UniverseIdHex";
 import type { UniverseInfo } from "./generated/UniverseInfo";
@@ -138,6 +144,11 @@ export type {
   DestructionCauseDto,
   DetailLevelDto,
   ErrorCode,
+  ExtinctionMap,
+  ExtinctionMapRequest,
+  ExtinctionRequest,
+  ExtinctionResult,
+  ExtinctionTarget,
   GalacticPosition,
   GalaxyParameters,
   GalaxyParametersRequest,
@@ -190,6 +201,7 @@ export type {
   SystemSummaryRequest,
   SystemsInRange,
   SystemsInRangeRequest,
+  TargetExtinction,
   Unit,
   UniverseIdHex,
   UniverseInfo,
@@ -204,7 +216,12 @@ export type {
 
 export { PROTOCOL_VERSION } from "./generated/ProtocolVersion";
 
-export { decodeDensityMap, type DecodedDensityMap } from "./densityMap";
+export {
+  decodeDensityMap,
+  decodeExtinctionMap,
+  type DecodedDensityMap,
+  type DecodedExtinctionMap,
+} from "./densityMap";
 export {
   type BodyIdParts,
   formatBodyId,

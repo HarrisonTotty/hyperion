@@ -6,11 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CentreLy } from "../../lib/galaxy/model";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { aDensityMap, UNIVERSE_ID } from "../../test/galaxyFixtures";
+import { aDensityMap, anExtinctionMap, UNIVERSE_ID } from "../../test/galaxyFixtures";
 import { announcements } from "../../test/liveRegions";
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { GalaxyMapView } from "./GalaxyMapView";
+import { DUST_OVERLAY_LABEL, GalaxyMapView, type MapQuantity } from "./GalaxyMapView";
 
 /** An 8 × 8 face-on map: the background, then every code up to the ceiling. */
 const FACE_ON_CODES = Array.from({ length: 64 }, (_, pixel) => pixel * 4);
@@ -29,6 +29,8 @@ async function server(play: () => void): Promise<void> {
 interface ViewSpec {
   readonly view?: MapView;
   readonly population?: MapPopulation;
+  readonly quantity?: MapQuantity;
+  readonly dustOverlay?: boolean;
   readonly pictureWidthPx?: number;
   readonly devicePixelRatio?: number;
   readonly cursorLy?: CentreLy;
@@ -41,6 +43,8 @@ interface ViewSpec {
 function viewOf({
   view = "face_on",
   population = "all",
+  quantity = "systems",
+  dustOverlay = false,
   pictureWidthPx = 400,
   devicePixelRatio = 1,
   cursorLy = [0, 0, 0],
@@ -55,6 +59,8 @@ function viewOf({
           universe={UNIVERSE_ID}
           view={view}
           population={population}
+          quantity={quantity}
+          dustOverlay={dustOverlay}
           pictureWidthPx={pictureWidthPx}
           devicePixelRatio={devicePixelRatio}
           cursorLy={cursorLy}
@@ -835,5 +841,152 @@ describe("GalaxyMapView", () => {
     await answerFaceOn(socket);
 
     expect(within(faceOn()).queryByRole("img", { name: "Chart centre" })).not.toBeInTheDocument();
+  });
+
+  describe("with the extinction map (plan 07, P07.T11.b)", () => {
+    /** An 8 × 8 extinction map from 0.01 to 10 mag: code 1 at the floor, 255 at 10 mag. */
+    async function answerExtinction(socket: FakeWebSocket, codes: ReadonlyArray<number>) {
+      await server(() => {
+        socket.serverAnswers("extinction_map", () =>
+          anExtinctionMap({ codes, widthPx: 8, heightPx: 8 }),
+        );
+      });
+    }
+
+    it("asks for the extinction map alone under EXTINCTION, at the density map's resolution", () => {
+      const { socket } = renderView({ quantity: "extinction", view: "edge_on" });
+
+      expect(socket.requestsOfKind("density_map")).toEqual([]);
+      expect(socket.requestsOfKind("extinction_map").map(({ body }) => body)).toEqual([
+        {
+          kind: "extinction_map",
+          universe: UNIVERSE_ID,
+          view: "edge_on",
+          resolution: 512,
+          bits: 8,
+        },
+      ]);
+    });
+
+    it("shows the extinction with its own legend, unit and floor, and A(V) under the cursor", async () => {
+      const { socket } = renderView({ quantity: "extinction" });
+
+      await answerExtinction(socket, Array<number>(64).fill(255));
+
+      const view = faceOn();
+      expect(
+        within(view).getByRole("application", { name: "Galaxy map, face-on, extinction" }),
+      ).toBeInTheDocument();
+      expect(within(view).getByText("EXTINCTION A(V)")).toBeInTheDocument();
+      expect(
+        within(view).getByText("mag", { selector: ".density-legend__unit" }),
+      ).toBeInTheDocument();
+      expect(within(view).getByText("LOG SCALE")).toBeInTheDocument();
+      expect(
+        within(view).getByText("FLOOR 0.01 mag: AT OR BELOW SHOWN AS BACKGROUND"),
+      ).toBeInTheDocument();
+      expect(within(view).queryByText("COLUMN DENSITY")).not.toBeInTheDocument();
+      expect(within(view).getByText("CURSOR A(V)").parentElement).toHaveTextContent(
+        "CURSOR A(V) 10.00 mag",
+      );
+      expect(within(view).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+    });
+
+    it("waits for both maps under the overlay, then shows both legends", async () => {
+      const { socket } = renderView({ dustOverlay: true });
+
+      expect(socket.requestsOfKind("density_map")).toHaveLength(1);
+      expect(socket.requestsOfKind("extinction_map")).toHaveLength(1);
+      await answerFaceOn(socket);
+      expect(within(faceOn()).getByRole("status")).toHaveTextContent("EXTINCTION: PENDING");
+      expect(screen.queryByRole("application")).not.toBeInTheDocument();
+
+      await answerExtinction(socket, Array<number>(64).fill(0));
+
+      const view = faceOn();
+      expect(
+        within(view).getByRole("application", { name: "Galaxy map, face-on, dust overlay" }),
+      ).toBeInTheDocument();
+      // The page names the overlay, once for both views.
+      expect(within(view).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+      expect(within(view).getByText("COLUMN DENSITY")).toBeInTheDocument();
+      expect(within(view).getByText("EXTINCTION A(V)")).toBeInTheDocument();
+      expect(within(view).getByText("CURSOR DENSITY")).toBeInTheDocument();
+      expect(within(view).getByText("CURSOR A(V)").parentElement).toHaveTextContent(
+        "CURSOR A(V) BELOW FLOOR",
+      );
+    });
+
+    it("dims the density by the dust before painting it", async () => {
+      // Every density pixel at the ceiling; 10 mag of dust takes 4 dex, 4 × 254 ÷ 5 = 203.2 codes,
+      // off it, and no dust leaves it where it was.
+      const density = Array<number>(64).fill(255);
+      const dust = Array<number>(64).fill(0);
+      dust[0] = 255;
+      const { socket, recorder } = renderView({ dustOverlay: true });
+
+      await server(() => {
+        socket.serverAnswers("density_map", () =>
+          aDensityMap({ codes: density, widthPx: 8, heightPx: 8 }),
+        );
+      });
+      await answerExtinction(socket, dust);
+
+      // The raster's first pixel is the turned picture's top right, as in the undimmed test above.
+      const pixels = putPixels(recorder);
+      const red = (pixel: number): number => pixels[pixel * 4] ?? -1;
+      expect(red(7)).toBeLessThan(red(6));
+      expect(red(6)).toBe(0xc8);
+    });
+
+    it("reads MAP DATA INVALID when the two maps of the overlay do not cover the same pixels", async () => {
+      const { socket } = renderView({ dustOverlay: true });
+      await answerFaceOn(socket);
+
+      await server(() => {
+        socket.serverAnswers("extinction_map", () =>
+          anExtinctionMap({ codes: Array<number>(256).fill(1), widthPx: 16, heightPx: 16 }),
+        );
+      });
+
+      expect(
+        within(faceOn()).getByText("MAP DATA INVALID: density and extinction maps do not match"),
+      ).toBeInTheDocument();
+      expect(within(faceOn()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
+    });
+
+    it("reads MAP DATA INVALID for an extinction map whose range cannot be drawn", async () => {
+      const { socket } = renderView({ quantity: "extinction" });
+
+      await server(() => {
+        socket.serverAnswers("extinction_map", () =>
+          anExtinctionMap({
+            codes: Array<number>(64).fill(1),
+            widthPx: 8,
+            heightPx: 8,
+            floorLog10Mag: 1,
+            ceilingLog10Mag: -2,
+          }),
+        );
+      });
+
+      expect(
+        within(faceOn()).getByText("MAP DATA INVALID: extinction range unusable"),
+      ).toBeInTheDocument();
+    });
+
+    it("reads the density and A(V) under the cursor in one live region under the overlay", async () => {
+      const { socket, rerender } = renderView({ dustOverlay: true });
+      await answerFaceOn(socket);
+      await answerExtinction(socket, Array<number>(64).fill(128));
+      act(() => {
+        screen.getByRole("application", { name: "Galaxy map, face-on, dust overlay" }).focus();
+      });
+
+      const announced = await announcedOnMove(rerender, { dustOverlay: true });
+
+      expect(announced).toHaveLength(1);
+      expect(announced[0]).toHaveTextContent(/CURSOR DENSITY.*CURSOR A\(V\)/);
+    });
   });
 });
