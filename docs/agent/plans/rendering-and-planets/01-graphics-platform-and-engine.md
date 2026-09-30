@@ -27,8 +27,9 @@
 
 ## Goal
 
-When this plan is done the bridge client gets a hardware WebGPU adapter on this machine's UHD 620
-under Xorg, and on any Linux machine through X11 or XWayland, from switches its main process owns
+When this plan is done the bridge client gets a hardware WebGPU adapter on the development
+machine's RTX 3080 and the owner's UHD 620 under Xorg, and on any Linux machine through X11 or
+XWayland, from switches its main process owns
 and tests. It refuses to offer the photorealistic style on a software adapter, reports a lost device
 or a crashed GPU process in the guide's voice instead of freezing, and after a crash loop relaunches
 once into a declared safe mode. A `GRAPHICS` panel on the `LINK` display states the adapter, its
@@ -63,8 +64,8 @@ In scope:
 - Lazy loading as a dynamic import and a named chunk, and a check that the main bundle holds no
   engine code.
 - The headless SwiftShader smoke harness, the offline render test, and the subgroup-twin selection.
-- By-hand runs, recorded: the three-canvas proof on the UHD 620, the Vulkan soak, the child-window
-  prototype.
+- By-hand runs, recorded: the three-canvas proof on the development machine (RTX 3080) and, by the
+  owner, on the UHD 620; the Vulkan soak; the child-window prototype.
 - Draft nomenclature entries for the graphics annunciations, for the owner.
 
 Non-goals, each with its owner:
@@ -673,7 +674,7 @@ commands in their acceptance lines.
 
 5. **The safe mode has no WebGPU, and says so.** The brainstorm's declared mode is "without the
    photorealistic style", implying the wireframe survives. Researched 2026-09-29 by probe of eight
-   switch sets: every set that gives this machine a hardware adapter contains the `Vulkan` feature,
+   switch sets: every set that gives the UHD 620 a hardware adapter contains the `Vulkan` feature,
    which also moves Skia's compositing to Vulkan, and no set keeps Dawn on Vulkan with compositing
    on GL; without `Vulkan`, X11 gives no adapter at all, and the only other adapter is SwiftShader
    through the unsafe flag, which the client never sets. So the safe mode drops the Vulkan features
@@ -1114,7 +1115,9 @@ them as switches).
   plus `--ozone-platform=x11`, with no executable path at their head; with the flag already present,
   under `x11` or unset, and on other platforms, `undefined`; the relaunch never duplicates the flag.
 - By hand, recorded in this plan's as-built notes: on the development machine, `just client`, then
-  `navigator.gpu.requestAdapter()` in the devtools console gives `intel`/`gen-9` with `subgroups`;
+  `navigator.gpu.requestAdapter()` in the devtools console gives the RTX 3080's hardware adapter
+  (`nvidia`, `isFallbackAdapter` false), and on the UHD 620, by the owner, `intel`/`gen-9` with
+  `subgroups`;
   `chrome://gpu` is not reachable in the client, so the check is the adapter and
   `app.getGPUFeatureStatus()` logged after `gpu-info-update`.
 - Acceptance: the test file passes, and `just ci`.
@@ -1385,8 +1388,8 @@ draw and read after device creation and after each rebuild, its classification, 
 - Tests (logic project): the classifier on synthetic read-backs returns `nearest` for the upper
   neighbour, `toward-zero` for the lower and `unknown` otherwise; `rg11b10ufloat` is `unknown`
   without `rg11b10Renderable`; a failed read gives `unknown` and no fault.
-- Acceptance: the tests, `just ci`; T9.i reports SwiftShader's answer, and T11 records the UHD
-  620's.
+- Acceptance: the tests, `just ci`; T9.i reports SwiftShader's answer, and T11 records the RTX
+  3080's and the UHD 620's.
 
 ### R01.T9 The headless smoke harness
 
@@ -1514,20 +1517,23 @@ capability paths:
 - Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/engine/kernels.test.ts`
   and `just test-render`.
 
-### R01.T11 The three canvases on the UHD 620, by hand
+### R01.T11 The three canvases on real GPUs, by hand
 
 Run the T9.d scene in the client's graphics configuration (not SwiftShader) with
 `--hyperion-gpu-timing`, full-window cockpit and two instruments, for five minutes with resizes.
 Record: GPU time per view from `onPassTimes` (bracketed, Design note 19), that no copy pass exists
 (the frame's passes are the three views' own), the frame interval at the 50th and 95th percentiles,
-a screenshot by eye that each view is the right way up, and the UHD 620's
-`GraphicsStatus.targetRounding` (R07's probe expects `toward-zero` for both formats).
+a screenshot by eye that each view is the right way up, and `GraphicsStatus.targetRounding`. It
+runs on the development machine (RTX 3080), and again on the UHD 620 by the owner, whose run
+records the UHD 620's `targetRounding` (R07's probe expects `toward-zero` for both formats).
 
-- Acceptance: the figures recorded in this plan's as-built notes.
+- Acceptance: the figures recorded in this plan's as-built notes, the UHD 620's when the owner has
+  run it.
 
 ### R01.T12 The Vulkan soak (open question 14)
 
-Thirty minutes on the development machine with the chosen switches: a photorealistic stand-in (the
+Thirty minutes on the development machine (RTX 3080) with the chosen switches, and the same on the
+UHD 620 by the owner, since open question 14 asks it of Gen9.5: a photorealistic stand-in (the
 T9.d scene at full window with a post-process) and the consoles together, a looping `<video>`,
 window resizes in a loop (`xdotool windowsize`), a second window, and the display blanked and
 restored (`xset dpms force off`, a minute, `on`). A soak script under `src/smoke/soak/` logs every
@@ -1576,8 +1582,10 @@ the three-canvas figures.
   resizes, depth, culling, bias and a forced loss, blending, compute and the packed cube, offscreen
   targets, asynchronous pipelines, indirect work and pass timing, material state, instancing,
   storage buffers, post-process inputs and the point splat, and both toy kernel pairs across paths.
-- **By hand, recorded:** the adapter on the UHD 620 (T1.b); the crash-loop relaunch (T2.b); the
-  three canvases' GPU time with no copies (T11); the soak (T12); child windows (T13).
+- **By hand, recorded:** on the development machine (RTX 3080), the adapter (T1.b), the crash-loop
+  relaunch (T2.b), the three canvases' GPU time with no copies (T11), the soak (T12) and child
+  windows (T13); on the UHD 620, by the owner, the adapter, the three canvases with the rounding
+  probe, and the soak.
 - **By eye:** the `GRAPHICS` panel in each condition, and the header banner in safe mode (T5.b).
 
 ## Generator version
