@@ -1,0 +1,193 @@
+# generator_version = 16
+
+layer A: Stellar, 1 stars, 1 zones
+id = 0x0200bb2ca0000000
+fe_h = 0xbfbf50535c6869dc  # -0.12231942182589911
+age_at_epoch_yr = 0x41fcfd26ec5f6b52  # 7781641925.963701
+tidal_radius_m = 0x4357d383f34cd43d  # 2.6825952561680628e16
+strip_radius_m = 0x4347536cf4973f66  # 1.3131303778942668e16
+star 0 Star
+star 0 mass = 0x3fd0abd4b1eb0e88  # 0.26048772215674676
+star 0 zams_l = 0x3f851f0f680a0562  # 0.010313148844263768
+star 0 zams_r = 0x3fd175fd7520d804  # 0.272826542265989
+star 0 disc_rank = 0x3fe7468c93c7c275  # 0.7273619543394277
+star 0 inner none
+star 0 outer none
+
+layer A: Stellar, 1 stars, 1 zones
+id = 0x0200fb2ca0000000
+fe_h = 0xbfa99ac6ff692d86  # -0.05000898235138167
+age_at_epoch_yr = 0x42029c8b8ac07bf9  # 9991975256.060534
+tidal_radius_m = 0x43523ef100d5ab72  # 2.0543017611341256e16
+strip_radius_m = 0x4341dcda05ae5ddc  # 1.0055807120751544e16
+star 0 Star
+star 0 mass = 0x3fbdf4ebb532c0f2  # 0.11701844381127893
+star 0 zams_l = 0x3f58db5c6aa2ba88  # 0.0015171434884383734
+star 0 zams_r = 0x3fc34f9987ab5609  # 0.15086669086910856
+star 0 disc_rank = 0x3fe00dba84898c45  # 0.5016758526438784
+star 0 inner none
+star 0 outer none
+
+layer C: Stellar, 1 stars, 1 zones
+id = 0x42002cb200000000
+fe_h = 0xbfc2678227383ae8  # -0.14378382601758877
+age_at_epoch_yr = 0x42024946dc85c04f  # 9817349008.7189
+tidal_radius_m = 0x4363d48503b8cae6  # 4.465353852546846e16
+strip_radius_m = 0x435369e9a52dfffb  # 2.1857907108216812e16
+star 0 Star
+star 0 mass = 0x3ff33674725f6160  # 1.2007946460417642
+star 0 zams_l = 0x3ffee4b223a9d5d2  # 1.9308339493849087
+star 0 zams_r = 0x3ff24ecb6bc538a3  # 1.1442369661122391
+star 0 disc_rank = 0x3fefcdce512f7869  # 0.9938727937367392
+star 0 inner none
+star 0 outer none
+
+layer C: Stellar, 2 stars, 3 zones
+id = 0x42002cb200000001
+fe_h = 0xbf7d7055732e3410  # -0.007187207974209478
+age_at_epoch_yr = 0x41e2bf97a62581e4  # 2516368689.172106
+tidal_radius_m = 0x4364318dd413e50e  # 4.547187801949195e16
+strip_radius_m = 0x4353c4fe4e5815c0  # 2.225848429054131e16
+star 0 Star
+star 0 mass = 0x3fe809dcb42bf3ee  # 0.7512038725832306
+star 0 zams_l = 0x3fc6a75bca79134d  # 0.17698237787603902
+star 0 zams_r = 0x3fe6309c2ea1ebad  # 0.693433848456484
+star 0 disc_rank = 0x3fefc4f1d244ece3  # 0.9927910906621061
+star 1 Star
+star 1 mass = 0x3fe09f0b00f586b1  # 0.519414426682678
+star 1 zams_l = 0x3fa5a9cd07d2f826  # 0.042311103062715724
+star 1 zams_r = 0x3fde88c7af0896de  # 0.47709838955993955
+star 1 disc_rank = 0x3fc2a691cc368284  # 0.14570829840979027
+star 0 inner none
+star 0 outer_m = 0x42191938c9fd2008  # 26949333631.28128
+star 1 inner none
+star 1 outer_m = 0x4213885b307850fe  # 20973014046.079094
+barycentre inner_m = 0x424bda802fa31521  # 239259901766.16507
+barycentre outer none
+
+layer E: Stellar, 4 stars, 6 zones
+id = 0x8200b2e000000000
+fe_h = 0xbf889b1d181b72ca  # -0.0120146058065357
+age_at_epoch_yr = 0x41f2ea553584f047  # 5077554008.308661
+tidal_radius_m = 0x43767df8b800705b  # 1.0129530688051755e17
+strip_radius_m = 0x4366050ddd190174  # 4.958405271801334e16
+star 0 Star
+star 0 mass = 0x4020e59765b0dcce  # 8.448420694198287
+star 0 zams_l = 0x40a91be7ea9e8e6f  # 3213.9529618786687
+star 0 zams_r = 0x400c6f94751bedfa  # 3.5544823788784443
+star 0 disc_rank = 0x3fe2ba96a682e97f  # 0.5852769138503361
+star 1 Star
+star 1 mass = 0x3ff49eb88c033e06  # 1.288750216412042
+star 1 zams_l = 0x4002d572b8830ab1  # 2.3542227187147877
+star 1 zams_r = 0x3ff4211f807ba5f3  # 1.2580866831652855
+star 1 disc_rank = 0x3fe6baf34b8fca25  # 0.7103210902990368
+star 2 Star
+star 2 mass = 0x4007b03ebd13a904  # 2.961057164347155
+star 2 zams_l = 0x405322ce790b7e0d  # 76.54385210153869
+star 2 zams_r = 0x3fff51373caa369e  # 1.9573280687067505
+star 2 disc_rank = 0x3fdcfd921641979e  # 0.4529767243715187
+star 3 Star
+star 3 mass = 0x3ff515a654c765d4  # 1.317785578887528
+star 3 zams_l = 0x4004dd85a36019ac  # 2.6081650508596876
+star 3 zams_r = 0x3ff4abf9eb574cad  # 1.2919863884933804
+star 3 disc_rank = 0x3fd6712fa793b3e6  # 0.35065833439767713
+star 0 inner none
+star 0 outer_m = 0x41ea5a01da26444b  # 3536850641.1958365
+star 1 inner none
+star 1 outer_m = 0x41d11bb05c949a87  # 1148109170.3219316
+pair 1 inner_m = 0x42105efd6e3cf088  # 17578285967.234894
+pair 1 outer_m = 0x42426303403eba59  # 157941137533.45584
+star 2 inner none
+star 2 outer_m = 0x4234b8cb19696242  # 88999663977.38382
+star 3 inner none
+star 3 outer_m = 0x429e93bdd1738558  # 8404973411553.336
+barycentre inner_m = 0x43245bb34aa4fd56  # 2865162571906731.0
+barycentre outer none
+
+layer E: Stellar, 2 stars, 3 zones
+id = 0x8200b2e000000001
+fe_h = 0xbfaae1fcc9e011d9  # -0.05250539745614775
+age_at_epoch_yr = 0x420233b061987ba3  # 9772076083.06037
+tidal_radius_m = 0x437816833ad3f7b5  # 1.0848243719284206e17
+strip_radius_m = 0x436795040ed73240  # 5.310215300589619e16
+star 0 Star
+star 0 mass = 0x402bb9de8865c6f8  # 13.86302591555021
+star 0 zams_l = 0x40cd747ba4ea262a  # 15080.965970295558
+star 0 zams_r = 0x4012d481d2e1d281  # 4.707526488335703
+star 0 disc_rank = 0x3f8629743bd030c0  # 0.010821254802089064
+star 1 Star
+star 1 mass = 0x400b0aaf9648dba5  # 3.380217718218278
+star 1 zams_l = 0x40602503eed9b4d4  # 129.15673010369085
+star 1 zams_r = 0x40009fd9a7e89cb0  # 2.078051864420182
+star 1 disc_rank = 0x3fefd384e760f3a7  # 0.9945702094188292
+star 0 inner none
+star 0 outer_m = 0x42445d48fe49ff8e  # 174928821395.99652
+star 1 inner none
+star 1 outer_m = 0x4234c88abc5a7027  # 89263881306.4381
+barycentre inner_m = 0x42a12029f84279ae  # 9414920380732.84
+barycentre outer none
+
+median sun: Stellar, 1 stars, 1 zones
+id = 0x42002cb200000384
+fe_h = 0x0000000000000000  # 0.0
+age_at_epoch_yr = 0x41f1064aa8000000  # 4570000000.0
+tidal_radius_m = 0x4362cda5dc1e05e8  # 4.234129461635872e16
+strip_radius_m = 0x4352688fb053aa22  # 2.072606371470759e16
+star 0 Star
+star 0 mass = 0x3ff0000000000000  # 1.0
+star 0 zams_l = 0x3fe653b1b2cb624d  # 0.6977165691451518
+star 0 zams_r = 0x3fec6c8a1c76f827  # 0.8882494502975121
+star 0 disc_rank = 0x3fe0000000000000  # 0.5
+star 0 inner none
+star 0 outer none
+
+drawn metal-poor dwarf: Stellar, 1 stars, 1 zones
+id = 0x42002cb200000385
+fe_h = 0xbfe999999999999a  # -0.8
+age_at_epoch_yr = 0x42047d3570000000  # 11000000000.0
+tidal_radius_m = 0x43592cd43a587871  # 2.83446577653273e16
+strip_radius_m = 0x4348a57cd3be8c71  # 1.3874709976127714e16
+star 0 Star
+star 0 mass = 0x3fd3333333333333  # 0.3
+star 0 zams_l = 0x3f8f7ee635d775ee  # 0.015378759878269723
+star 0 zams_r = 0x3fd2f33bb8cf01b0  # 0.2960957817813563
+star 0 disc_rank = 0x3fd4d9d6992d1ef6  # 0.3257957931386807
+star 0 inner none
+star 0 outer none
+
+binary with a brown dwarf: Stellar, 2 stars, 3 zones
+id = 0x42002cb200000386
+fe_h = 0x3fc3333333333333  # 0.15
+age_at_epoch_yr = 0x41c7d78400000000  # 800000000.0
+tidal_radius_m = 0x4364415851e97af3  # 4.5610776971171736e16
+strip_radius_m = 0x4353d473e7be6ee5  # 2.2326475327388564e16
+star 0 Star
+star 0 mass = 0x3ff3333333333333  # 1.2
+star 0 zams_l = 0x3ff843190ec70bef  # 1.5163813187834838
+star 0 zams_r = 0x3ff224dcf4374990  # 1.133999780624979
+star 0 disc_rank = 0x3fd1a7a2e3dd7de6  # 0.27585670711957133
+star 1 BrownDwarf
+star 1 mass = 0x3fa999999999999a  # 0.05
+star 1 zams_l = 0x3f7123b0f7205d09  # 0.004184428473329457
+star 1 zams_r = 0x3fd150271ae7ac6d  # 0.2705171358817953
+star 1 disc_rank = 0x3fe246fc5e9edad1  # 0.5711652610833317
+star 0 inner none
+star 0 outer_m = 0x4250d4bb7be9c888  # 289154133927.1333
+star 1 inner none
+star 1 outer_m = 0x4230e4dc65528e0b  # 72559125842.55486
+barycentre inner_m = 0x428cfff33972e670  # 3985702858332.8047
+barycentre outer none
+
+late M dwarf below a tenth of a Sun: Stellar, 1 stars, 1 zones
+id = 0x42002cb200000387
+fe_h = 0xbfd3333333333333  # -0.3
+age_at_epoch_yr = 0x41f2a05f20000000  # 5000000000.0
+tidal_radius_m = 0x4350da6182b18fc4  # 1.897484786691253e16
+strip_radius_m = 0x43407fc76617d119  # 9288188030853682.0
+star 0 Star
+star 0 mass = 0x3fb70a3d70a3d70a  # 0.09
+star 0 zams_l = 0x3f412c743b93f5a1  # 0.0005240981619462523
+star 0 zams_r = 0x3fbe9289b79180c6  # 0.11942349177980124
+star 0 disc_rank = 0x3fe0000000000000  # 0.5
+star 0 inner none
+star 0 outer none

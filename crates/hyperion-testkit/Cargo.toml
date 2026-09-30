@@ -1,0 +1,17 @@
+[package]
+name = "hyperion-testkit"
+description = "Test helpers for HYPERION: golden files, order independence and statistical tests."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+# The library has no benchmarks, and libtest's harness rejects Criterion's arguments.
+bench = false
+
+[dependencies]
+libm.workspace = true
+
+[lints]
+workspace = true

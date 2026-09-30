@@ -1,0 +1,10 @@
+# The stripping table (plan 11, P11.T1.d): the stripped share and the stage radii of massive
+# primaries on the sim's grid of initial mass and metallicity, each node a full track and plan 11's
+# quadrature, validated at every cell's centre. The grid is the sim's; the task refuses a manifest
+# that disagrees with it.
+task = "stripping"
+
+[params]
+masses = 34
+metallicities = 11
+validate_every = 1

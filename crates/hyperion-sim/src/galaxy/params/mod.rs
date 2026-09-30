@@ -1,0 +1,1188 @@
+//! The galaxy's parameters: drawn from the seed, then derived and coupled (plan 02, P02.T5).
+//!
+//! The seed chooses the galaxy's gross properties from the ranges observed for large barred
+//! spirals (brainstorm, "Galaxy parameters" and "Populations"). Each is drawn from a stream of
+//! its own, `galaxy.params.<name>`, so that adding one moves no other. From those
+//! [`GalaxyParamsBuilder::build`] derives the rest: the populations' shares of the
+//! galaxy's systems and their age distributions, the mean present-day mass of a system in each
+//! population, the system count and the populations' masses, then the sizes, coupled to the masses
+//! they hold as mass^⅓, and the dark halo.
+//!
+//! Masses are in M☉, lengths in light-years and times in Julian years, each behind its
+//! [`units`](crate::units) newtype. Times of past events are positive durations before the epoch.
+//!
+//! # Examples
+//!
+//! ```
+//! use hyperion_sim::Seed;
+//! use hyperion_sim::galaxy::Population;
+//! use hyperion_sim::galaxy::imf::MassFunctionKind;
+//! use hyperion_sim::galaxy::params::GalaxyParams;
+//!
+//! let params = GalaxyParams::from_seed(Seed::new(42), MassFunctionKind::default());
+//! // The system count is derived, not drawn: about 0.5–1.7 × 10¹¹ over the parameter ranges.
+//! assert!((0.5e11..1.9e11).contains(&params.system_count()));
+//! // Shares are of systems; masses follow and add up to the stellar mass.
+//! let total: f64 = hyperion_sim::galaxy::POPULATIONS
+//!     .iter()
+//!     .map(|&p| params.population_mass(p).value())
+//!     .sum();
+//! assert!((total / params.stellar_mass().value() - 1.0).abs() < 1e-12);
+//! assert!(params.population_share(Population::YoungThinDisc) < 0.005);
+//! ```
+
+mod accretion;
+mod derive;
+mod draws;
+mod halo;
+mod inputs;
+mod milky_way;
+mod validate;
+
+use std::error::Error;
+use std::fmt;
+use std::sync::OnceLock;
+
+pub use accretion::{AccretionHistory, Orbit, Progenitor, ProgenitorKind};
+pub use halo::{HaloBreak, HaloComponentKind, HaloComponentParams, HaloParams};
+pub use inputs::{ArmCount, LesserProgenitorInput, RecentProgenitorInput};
+
+use self::inputs::Inputs;
+use super::Population;
+use super::fields::disc::THIN_DISC_HOLE_LENGTHS;
+use super::imf::MassFunctionKind;
+use crate::Seed;
+use crate::units::{
+    Degrees, Dex, DexPerKiloparsec, KilometresPerSecond, LightYears, Radians, SolarMasses, Years,
+};
+
+/// A disc's scale length and height: exponential in radius, cored in height, with the height the
+/// effective height `Σ ÷ 2ρ₀` of the vertical profile the fields solve for it (plan 02, Design
+/// note 9).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DiscParams {
+    length: LightYears,
+    height: LightYears,
+}
+
+impl DiscParams {
+    /// The radial scale length.
+    #[must_use]
+    pub fn length(&self) -> LightYears {
+        self.length
+    }
+
+    /// The effective height `Σ ÷ 2ρ₀`.
+    ///
+    /// For the old thin disc it is that of the five sub-discs together, the harmonic mean of their
+    /// own, which the fields meet by scaling their dispersions (plan 02, Design note 9).
+    #[must_use]
+    pub fn height(&self) -> LightYears {
+        self.height
+    }
+}
+
+/// The boxy bulge: `exp(−m)` with `m = {[(|x| ÷ a)² + (|y| ÷ b)²]^(c∥ ÷ 2) + (|z| ÷ c)^c∥}^(1 ÷ c∥)`
+/// (brainstorm, "Populations"; Wegg and Gerhard 2013).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BulgeParams {
+    scale_x: LightYears,
+    scale_y: LightYears,
+    scale_z: LightYears,
+    boxiness: f64,
+}
+
+impl BulgeParams {
+    /// `a`, the scale length along the bar, 1,700–3,000 ly.
+    #[must_use]
+    pub fn scale_x(&self) -> LightYears {
+        self.scale_x
+    }
+
+    /// `b`, the scale length across the bar in the plane, 0.5–0.7 of `a`.
+    #[must_use]
+    pub fn scale_y(&self) -> LightYears {
+        self.scale_y
+    }
+
+    /// `c`, the vertical scale length, 0.3–0.4 of `a`.
+    #[must_use]
+    pub fn scale_z(&self) -> LightYears {
+        self.scale_z
+    }
+
+    /// `c∥`, the vertical exponent that makes the bulge boxy, 3–4.
+    #[must_use]
+    pub fn boxiness(&self) -> f64 {
+        self.boxiness
+    }
+}
+
+/// The long bar along the x axis: level along most of its length with a Gaussian end, Gaussian
+/// across, exponential in height (brainstorm, "Populations"; Wegg, Gerhard and Portail 2015).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BarParams {
+    half_length: LightYears,
+    width: LightYears,
+    height: LightYears,
+    corotation_ratio: f64,
+}
+
+impl BarParams {
+    /// The half-length, 10,000–18,000 ly: the arms start at its ends.
+    #[must_use]
+    pub fn half_length(&self) -> LightYears {
+        self.half_length
+    }
+
+    /// The Gaussian width σ across the bar, 0.08–0.12 of the half-length.
+    #[must_use]
+    pub fn width(&self) -> LightYears {
+        self.width
+    }
+
+    /// The exponential scale height, 500–700 ly.
+    #[must_use]
+    pub fn height(&self) -> LightYears {
+        self.height
+    }
+
+    /// The corotation radius over the half-length, 1.0–1.4.
+    #[must_use]
+    pub fn corotation_ratio(&self) -> f64 {
+        self.corotation_ratio
+    }
+
+    /// The corotation radius: the ratio times the half-length.
+    #[must_use]
+    pub fn corotation_radius(&self) -> LightYears {
+        self.half_length * self.corotation_ratio
+    }
+}
+
+/// The nuclear disc at the centre: exponential in radius, cored in height (plan 02, Design note 9),
+/// with an inner part of its own (ruling 143.1 of 2026-09-22 with ruling 144's joint revision).
+///
+/// The disc is two double exponentials of the drawn mass together. The main part holds 1 −
+/// [`INNER_SHARE`](Self::INNER_SHARE) of it at the drawn length and height, Sormani et al. 2022's
+/// posterior (MNRAS 512, 1857: 88.6 pc and 28.4 pc for 1.05 × 10⁹ M☉). The inner part holds
+/// [`INNER_SHARE`](Self::INNER_SHARE) = 5.5% at [`INNER_LENGTH_RATIO`](Self::INNER_LENGTH_RATIO) =
+/// 0.158 of the length (46 ly, 14 pc, at Milky Way values), a height of
+/// [`INNER_HEIGHT_RATIO`](Self::INNER_HEIGHT_RATIO) = 0.8 of its own length, and the thin discs'
+/// central hole at [`THIN_DISC_HOLE_LENGTHS`] = 0.55 of its length, `Σ ∝ exp(−R_h ÷ R − R ÷ R_i)`,
+/// so that the thin discs' fitted Gaussian table serves its potential too. It carries the mass the
+/// model lacked between 3 and 30 pc: with the nuclear cluster and the black hole, 2.6 × 10⁷ M☉
+/// inside 10 pc and 7.7 × 10⁷ inside 30 pc, 100 km/s at 30 pc (Sofue 2013, PASJ 65, 118;
+/// Launhardt, Zylka and Mezger 2002, A&A 384, 112; the ACES cusp, Sofue et al., arXiv 2512.22751:
+/// 99 ± 13 km/s), where a single exponential gave 80.
+///
+/// The hole is the shape of what was missing: Sormani et al. (2020, MNRAS 499, 7; 2022) hold the
+/// region with Chatzopoulos et al.'s (2015) nuclear cluster of 6.1 × 10⁷ M☉, and that cluster less
+/// Schödel et al.'s (2014) is nothing at 2–3 pc, peaks near 5 pc and falls by 15 pc, all of it
+/// between the cluster and the disc; where the hole is, the cluster is 50–100 times denser, so the
+/// total density still falls steadily outward. It keeps the part's peak, a ring near 10 pc, at
+/// twice the main part's central density, which the ordinary grid's index holds for every draw: an
+/// unholed part of the same mass inside 30 pc peaked at eight times it and overflowed the finest
+/// layer at the Milky Way under Kroupa's function (ruling 144's "check the ordinary grid's index
+/// there"). The height ratio 0.8 is rounder than the disc's 0.37 (Gallego-Cano et al. 2020, A&A
+/// 634, A71), as Sormani et al. 2022's "separate, more spheroidal component" inside 30 pc suggests.
+/// The disc's own mass inside 100 pc is then 3.3 × 10⁸ M☉, in Sormani et al. 2020's 3.9 ± 1 × 10⁸.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NuclearDiscParams {
+    length: LightYears,
+    height: LightYears,
+}
+
+impl NuclearDiscParams {
+    /// The inner part's share of the nuclear disc's mass (and systems).
+    pub const INNER_SHARE: f64 = 0.055;
+
+    /// The inner part's scale length over the disc's.
+    pub const INNER_LENGTH_RATIO: f64 = 0.158;
+
+    /// The inner part's effective height over its own scale length.
+    pub const INNER_HEIGHT_RATIO: f64 = 0.8;
+
+    /// The radial scale length, 200–400 ly.
+    #[must_use]
+    pub fn length(&self) -> LightYears {
+        self.length
+    }
+
+    /// The effective height `Σ ÷ 2ρ₀`, 0.3–0.5 of the length.
+    #[must_use]
+    pub fn height(&self) -> LightYears {
+        self.height
+    }
+
+    /// The inner part's scale length, [`INNER_LENGTH_RATIO`](Self::INNER_LENGTH_RATIO) of the
+    /// length.
+    #[must_use]
+    pub fn inner_length(&self) -> LightYears {
+        self.length * Self::INNER_LENGTH_RATIO
+    }
+
+    /// The inner part's effective height, [`INNER_HEIGHT_RATIO`](Self::INNER_HEIGHT_RATIO) of its
+    /// scale length.
+    #[must_use]
+    pub fn inner_height(&self) -> LightYears {
+        self.inner_length() * Self::INNER_HEIGHT_RATIO
+    }
+
+    /// The inner part's central hole `R_h`, [`THIN_DISC_HOLE_LENGTHS`] of its scale length.
+    #[must_use]
+    pub fn inner_hole(&self) -> LightYears {
+        self.inner_length() * THIN_DISC_HOLE_LENGTHS
+    }
+}
+
+/// The nuclear star cluster, as the potential and the centre both hold it: a smooth broken power
+/// law outside the populations' budgets (plan 02, Design note 15; ruling 144 of 2026-09-22's joint
+/// revision).
+///
+/// Its mass is 0.024 of the nuclear disc's with 0.2 dex of scatter, the Milky Way's 2.5 × 10⁷ M☉
+/// (Schödel et al. 2014) against its nuclear disc's 1.05 × 10⁹ M☉ (Sormani et al. 2022), capped at
+/// [`mass_cap`](Self::mass_cap) (ruling 144.5b). The law is the 3D Nuker law `ρ ∝ r^−γ (1 + (r ÷
+/// r_b)^α)^(−(β − γ) ÷ α)` with inner slope γ = 1.3, break `r_b` = 10 ly, sharpness α = 10 and
+/// outer slope β = 3.5 (brainstorm, "Dense features"; α is the value Gallego-Cano et al. 2018, A&A
+/// 609, A26, §5.3, and Schödel et al. 2018, A&A 609, A27, §4.4, fix in their fits), times a taper
+/// `(1 + (r ÷ 100 ly)⁴)^(−½)` that steepens the slope to 5.5 near the centre's reach (ruling
+/// 144.3). The slope lies between Gallego-Cano et al.'s 1.43 ± 0.1 for the faint stars and Schödel
+/// et al.'s 1.13 ± 0.05 for the diffuse light.
+///
+/// **The mass is the mass inside the reach**, [`NORMALISATION_RADIUS`](Self::NORMALISATION_RADIUS)
+/// = 128 ly, not the whole law's: Schödel et al. 2014's 2.5 × 10⁷ M☉ is a Sérsic component's total
+/// with well under 1% of its light beyond 39 pc, and the untapered law put 22% of its mass beyond
+/// the reach, which left M(<3 pc) a third under Schödel et al. 2018's 7.8 ± 0.6 × 10⁶ M☉ (ruling
+/// 144.2–3). The tapered law holds 96.8% of its mass inside the reach.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NuclearClusterParams {
+    mass: SolarMasses,
+}
+
+impl NuclearClusterParams {
+    /// The inner logarithmic slope of the density.
+    pub const INNER_SLOPE: f64 = 1.3;
+
+    /// The break radius.
+    pub const BREAK_RADIUS: LightYears = LightYears::new(10.0);
+
+    /// The break's sharpness α (Gallego-Cano et al. 2018; Schödel et al. 2018; ruling 144.1).
+    pub const BREAK_SHARPNESS: f64 = 10.0;
+
+    /// The outer logarithmic slope of the density between the break and the taper.
+    pub const OUTER_SLOPE: f64 = 3.5;
+
+    /// The taper's radius, near the centre's reach (ruling 144.3: "about 100 ly").
+    pub const TAPER_RADIUS: LightYears = LightYears::new(100.0);
+
+    /// The taper's sharpness (ruling 144.3: at most 4).
+    pub const TAPER_SHARPNESS: f64 = 4.0;
+
+    /// The logarithmic slope beyond the taper (ruling 144.3: 5 or more).
+    pub const TAPERED_SLOPE: f64 = 5.5;
+
+    /// The radius the mass is normalised inside: the reach of the centre's grid (plan 09,
+    /// P09.T27), 128 ly.
+    pub const NORMALISATION_RADIUS: LightYears = LightYears::new(128.0);
+
+    /// The cluster's mass inside [`NORMALISATION_RADIUS`](Self::NORMALISATION_RADIUS).
+    #[must_use]
+    pub fn mass(&self) -> SolarMasses {
+        self.mass
+    }
+
+    /// The most a drawn cluster may hold under `mass_function`, M☉ inside the reach (ruling
+    /// 144.5b): the mass at which the centre's fullest cell expects
+    /// [`FULLEST_CELL_CAP`](Self::FULLEST_CELL_CAP) candidates, so that every galaxy's centre
+    /// passes the index's headroom check (plan 09's `CentrePlacement::check_index_headroom`).
+    ///
+    /// The fullest cell is linear in the cluster's mass at a fixed shape and mass function (the
+    /// bound is the density's), so the cap is a constant per mass function, pinned by plan 09's
+    /// test `the_cap_s_centre_fills_its_fullest_cell_to_the_limit`. Kroupa's mass function puts
+    /// more, lighter systems in the same mass, so its cap is lower. At about 2.6 times the Milky
+    /// Way's 2.5 × 10⁷ M☉ under the default mass function (1.9 under Kroupa's), it lies at the
+    /// high end of Milky Way-mass hosts' nuclear clusters (Neumayer, Seth and Böker 2020, A&ARv
+    /// 28, 4), whose relation's scatter is large.
+    #[must_use]
+    pub fn mass_cap(mass_function: MassFunctionKind) -> SolarMasses {
+        SolarMasses::new(match mass_function {
+            MassFunctionKind::Chabrier => Self::MASS_CAP_CHABRIER,
+            MassFunctionKind::Kroupa => Self::MASS_CAP_KROUPA,
+        })
+    }
+
+    /// The expected candidates the capped cluster's fullest cell may hold: `8,192 − 8 √8,192`,
+    /// eight standard deviations under the index's 8,192 (ruling 144.5b).
+    pub const FULLEST_CELL_CAP: f64 = 7_468.0;
+
+    /// [`mass_cap`](Self::mass_cap) under the default mass function (Chabrier's), M☉: the Milky
+    /// Way's fullest cell expects 2,896 candidates for 2.5 × 10⁷ M☉, so 7,468 is reached at 6.45
+    /// × 10⁷, rounded down.
+    const MASS_CAP_CHABRIER: f64 = 6.4e7;
+
+    /// [`mass_cap`](Self::mass_cap) under Kroupa's, M☉: 3,964 candidates for 2.5 × 10⁷ M☉, so
+    /// 4.71 × 10⁷, rounded down.
+    const MASS_CAP_KROUPA: f64 = 4.7e7;
+
+    /// The inner logarithmic slope, [`INNER_SLOPE`](Self::INNER_SLOPE).
+    #[must_use]
+    pub fn inner_slope(&self) -> f64 {
+        Self::INNER_SLOPE
+    }
+
+    /// The break radius, [`BREAK_RADIUS`](Self::BREAK_RADIUS).
+    #[must_use]
+    pub fn break_radius(&self) -> LightYears {
+        Self::BREAK_RADIUS
+    }
+
+    /// The outer logarithmic slope, [`OUTER_SLOPE`](Self::OUTER_SLOPE).
+    #[must_use]
+    pub fn outer_slope(&self) -> f64 {
+        Self::OUTER_SLOPE
+    }
+}
+
+/// The spiral arms: logarithmic spirals that modulate the discs' densities (plan 02, Design note
+/// 10).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArmParams {
+    count: ArmCount,
+    pitch: Radians,
+    young_width: LightYears,
+    young_fraction: f64,
+    old_amplitude: f64,
+}
+
+impl ArmParams {
+    /// Two arms or four.
+    #[must_use]
+    pub fn count(&self) -> ArmCount {
+        self.count
+    }
+
+    /// The pitch angle, 10–18°.
+    #[must_use]
+    pub fn pitch(&self) -> Radians {
+        self.pitch
+    }
+
+    /// The young disc's arm width `σ_w`, 250–500 ly.
+    #[must_use]
+    pub fn young_width(&self) -> LightYears {
+        self.young_width
+    }
+
+    /// The young disc's arm amplitude A, 0.7–0.9: the fraction of young stars bound to the arms.
+    #[must_use]
+    pub fn young_fraction(&self) -> f64 {
+        self.young_fraction
+    }
+
+    /// The old discs' cosine amplitude a, 0.10–0.30: the "10–30% ripple" of the brainstorm.
+    #[must_use]
+    pub fn old_amplitude(&self) -> f64 {
+        self.old_amplitude
+    }
+}
+
+/// The gas disc, as the potential needs it (plan 02, Design note 15; plan 07 owns the gas field).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GasDiscParams {
+    mass: SolarMasses,
+    length: LightYears,
+}
+
+impl GasDiscParams {
+    /// The gas disc's scale height, 700 ly.
+    ///
+    /// The brainstorm's 400 ly times 7 ÷ 4 (plan 02, ruling 1 of 2026-09-22): the column plan 07's
+    /// gas field needs at the Sun's radius, McKee, Parravano and Hollenbach's (2015, ApJ 814, 13)
+    /// 13.7 ± 1.6 M☉ pc⁻², is carried by thickening the neutral layer rather than densifying the
+    /// plane, whose density the in-plane extinction reads. A real neutral layer carries its column
+    /// well above 123 pc, which is what 400 ly is. With plan 07's warm ionised layer drawn by its
+    /// own density (its ruling 19) the fixture's 24% of gas gives 13.8 M☉ pc⁻² on this height, a
+    /// neutral mid-plane of 0.80 cm⁻³ and 1.06 mag per 3,000 ly; 700 ly (215 pc) is already 1.4
+    /// times the measured atomic layer's effective height, 156 pc (McKee et al., Table 2: 10.9 M☉
+    /// pc⁻² over a mid-plane 1.01 cm⁻³), so the height stays and the mass is what was tuned.
+    pub const HEIGHT: LightYears = LightYears::new(700.0);
+
+    /// Its mass, 17.5–35% of the thin disc's stellar mass ([`HEIGHT`](Self::HEIGHT)); 24% for the
+    /// Milky Way fixture.
+    #[must_use]
+    pub fn mass(&self) -> SolarMasses {
+        self.mass
+    }
+
+    /// Its scale length, 1.5–2 times the thin disc's.
+    #[must_use]
+    pub fn length(&self) -> LightYears {
+        self.length
+    }
+
+    /// Its scale height, [`HEIGHT`](Self::HEIGHT).
+    #[must_use]
+    pub fn height(&self) -> LightYears {
+        Self::HEIGHT
+    }
+}
+
+/// The NFW dark halo (brainstorm, "Galaxy parameters").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DarkHaloParams {
+    f_star: f64,
+    m200: SolarMasses,
+    concentration: f64,
+    r200: LightYears,
+}
+
+impl DarkHaloParams {
+    /// f★, the efficiency factor in `M₂₀₀ = M★ ÷ (0.157 f★)`, 0.12–0.45.
+    #[must_use]
+    pub fn f_star(&self) -> f64 {
+        self.f_star
+    }
+
+    /// The mass inside `r₂₀₀`.
+    #[must_use]
+    pub fn m200(&self) -> SolarMasses {
+        self.m200
+    }
+
+    /// The concentration `c₂₀₀ = r₂₀₀ ÷ r_s`.
+    #[must_use]
+    pub fn concentration(&self) -> f64 {
+        self.concentration
+    }
+
+    /// The radius inside which the mean density is 200 times the critical density.
+    #[must_use]
+    pub fn r200(&self) -> LightYears {
+        self.r200
+    }
+
+    /// The NFW scale radius, `r₂₀₀ ÷ c₂₀₀`.
+    #[must_use]
+    pub fn scale_radius(&self) -> LightYears {
+        self.r200 / self.concentration
+    }
+}
+
+/// The central black hole, whose mass follows the M–σ relation with scatter (brainstorm, "Galaxy
+/// parameters"; plan 02, P02.T6.e and Design note 8).
+///
+/// The build is in two phases: the mass model without the black hole and the nuclear cluster
+/// gives the bulge's dispersion ([`potential::sigma`](super::potential::sigma)), and McConnell
+/// and Ma's (2013) relation with the drawn scatter gives the mass, which the final model then
+/// holds.
+///
+/// The second phase is solved on first use: the dispersion is a Jeans solution of some hundred
+/// milliseconds, and most readers of a galaxy's parameters never read it. The first call of
+/// [`bulge_dispersion`](Self::bulge_dispersion) or [`mass`](Self::mass) (or of `Debug`) solves it
+/// from the parameters alone and keeps it, so every reader sees the same bits whichever reads first.
+/// [`scatter`](Self::scatter) is drawn and costs nothing.
+#[derive(Clone, Copy)]
+pub struct BlackHoleParams<'a> {
+    params: &'a GalaxyParams,
+}
+
+impl BlackHoleParams<'_> {
+    /// The black hole's offset from the M–σ relation, normal with 0.38 dex of scatter.
+    #[must_use]
+    pub fn scatter(&self) -> Dex {
+        self.params.black_hole.scatter
+    }
+
+    /// The bulge's projected velocity dispersion inside its effective radius, which the M–σ
+    /// relation reads ([`bulge_dispersion`](super::potential::sigma::bulge_dispersion)).
+    #[must_use]
+    pub fn bulge_dispersion(&self) -> KilometresPerSecond {
+        self.solved().bulge_dispersion
+    }
+
+    /// The black hole's mass: `10^(8.32 + 5.64 log₁₀(σ ÷ 200 km/s) + scatter)` M☉.
+    #[must_use]
+    pub fn mass(&self) -> SolarMasses {
+        self.solved().mass
+    }
+
+    /// The second phase, solved once.
+    fn solved(self) -> SolvedBlackHole {
+        *self
+            .params
+            .black_hole
+            .solved
+            .get_or_init(|| derive::solve_black_hole(self.params))
+    }
+}
+
+/// The three values, as the parameters' own `Debug` has always shown them.
+impl fmt::Debug for BlackHoleParams<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlackHoleParams")
+            .field("scatter", &self.scatter())
+            .field("bulge_dispersion", &self.bulge_dispersion())
+            .field("mass", &self.mass())
+            .finish()
+    }
+}
+
+/// Equal when the three values are.
+impl PartialEq for BlackHoleParams<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.scatter() == other.scatter()
+            && self.bulge_dispersion() == other.bulge_dispersion()
+            && self.mass() == other.mass()
+    }
+}
+
+/// The black hole's second phase (see [`BlackHoleParams`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SolvedBlackHole {
+    bulge_dispersion: KilometresPerSecond,
+    mass: SolarMasses,
+}
+
+/// The black hole as the parameters hold it: the drawn scatter, and the second phase once solved.
+#[derive(Debug, Clone)]
+struct BlackHoleCell {
+    scatter: Dex,
+    solved: OnceLock<SolvedBlackHole>,
+}
+
+impl BlackHoleCell {
+    /// A black hole of `scatter` whose second phase is not yet solved.
+    fn new(scatter: Dex) -> Self {
+        Self {
+            scatter,
+            solved: OnceLock::new(),
+        }
+    }
+}
+
+/// Equal when the scatters are. The second phase is a pure function of the other parameters,
+/// which [`GalaxyParams`]'s equality compares, so it is left out: comparing it would make two equal
+/// parameters unequal because only one of them had been read.
+impl PartialEq for BlackHoleCell {
+    fn eq(&self, other: &Self) -> bool {
+        self.scatter == other.scatter
+    }
+}
+
+/// A [`GalaxyParams`] could not be built: a parameter lies outside its range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildGalaxyParamsError {
+    /// `parameter` is `value`, outside `[min, max]` (or NaN).
+    OutOfRange {
+        /// The parameter, named as its tag without the `galaxy.params.` prefix, such as
+        /// `share.thick`; a fixed size is named by its length, such as `thin.length`.
+        parameter: &'static str,
+        /// The value given.
+        value: f64,
+        /// The lowest value allowed.
+        min: f64,
+        /// The highest value allowed.
+        max: f64,
+    },
+    /// The number of lesser old progenitors is not 2–5.
+    LesserProgenitorCount {
+        /// The number given.
+        count: usize,
+    },
+    /// The lesser progenitors' weights sum to zero.
+    LesserWeightsZero,
+}
+
+impl fmt::Display for BuildGalaxyParamsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutOfRange {
+                parameter,
+                value,
+                min,
+                max,
+            } => write!(f, "{parameter} = {value} lies outside [{min}, {max}]"),
+            Self::LesserProgenitorCount { count } => {
+                write!(f, "a halo has 2–5 lesser progenitors, not {count}")
+            }
+            Self::LesserWeightsZero => f.write_str("the lesser progenitors' weights sum to zero"),
+        }
+    }
+}
+
+impl Error for BuildGalaxyParamsError {}
+
+/// Everything the seed decides about a galaxy, drawn and derived.
+///
+/// Build one from a seed ([`from_seed`](Self::from_seed)), take the Milky Way fixture
+/// ([`milky_way_like`](Self::milky_way_like)), or set values by hand with
+/// [`GalaxyParamsBuilder`]. It is immutable, and a pure function of its inputs and the generator
+/// version.
+#[derive(Clone, PartialEq)]
+pub struct GalaxyParams {
+    mass_function: MassFunctionKind,
+    stellar_mass: SolarMasses,
+    sfh_timescale: Years,
+    bar_of_bulge: f64,
+    shares: [f64; 7],
+    mean_masses: [SolarMasses; 7],
+    masses: [SolarMasses; 7],
+    system_count: f64,
+    mean_formed_mass: SolarMasses,
+    mean_stars_per_system: f64,
+    thin_disc: DiscParams,
+    young_disc: DiscParams,
+    thick_disc: DiscParams,
+    bulge: BulgeParams,
+    bar: BarParams,
+    nuclear_disc: NuclearDiscParams,
+    nuclear_cluster: NuclearClusterParams,
+    arms: ArmParams,
+    gas_disc: GasDiscParams,
+    dark_halo: DarkHaloParams,
+    black_hole: BlackHoleCell,
+    metallicity_gradient: DexPerKiloparsec,
+    halo: HaloParams,
+    accretion: AccretionHistory,
+}
+
+/// Every field, as a derived `Debug` shows it, with the black hole's three values: formatting
+/// solves its second phase if nothing has yet.
+impl fmt::Debug for GalaxyParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Destructured, so that a new field fails to compile until it is shown here.
+        let Self {
+            mass_function,
+            stellar_mass,
+            sfh_timescale,
+            bar_of_bulge,
+            shares,
+            mean_masses,
+            masses,
+            system_count,
+            mean_formed_mass,
+            mean_stars_per_system,
+            thin_disc,
+            young_disc,
+            thick_disc,
+            bulge,
+            bar,
+            nuclear_disc,
+            nuclear_cluster,
+            arms,
+            gas_disc,
+            dark_halo,
+            black_hole: _,
+            metallicity_gradient,
+            halo,
+            accretion,
+        } = self;
+        f.debug_struct("GalaxyParams")
+            .field("mass_function", mass_function)
+            .field("stellar_mass", stellar_mass)
+            .field("sfh_timescale", sfh_timescale)
+            .field("bar_of_bulge", bar_of_bulge)
+            .field("shares", shares)
+            .field("mean_masses", mean_masses)
+            .field("masses", masses)
+            .field("system_count", system_count)
+            .field("mean_formed_mass", mean_formed_mass)
+            .field("mean_stars_per_system", mean_stars_per_system)
+            .field("thin_disc", thin_disc)
+            .field("young_disc", young_disc)
+            .field("thick_disc", thick_disc)
+            .field("bulge", bulge)
+            .field("bar", bar)
+            .field("nuclear_disc", nuclear_disc)
+            .field("nuclear_cluster", nuclear_cluster)
+            .field("arms", arms)
+            .field("gas_disc", gas_disc)
+            .field("dark_halo", dark_halo)
+            .field("black_hole", &self.black_hole())
+            .field("metallicity_gradient", metallicity_gradient)
+            .field("halo", halo)
+            .field("accretion", accretion)
+            .finish()
+    }
+}
+
+impl GalaxyParams {
+    /// The parameters the seed draws, with `mass_function` for the mean masses.
+    ///
+    /// Every parameter comes from its own stream, `Stream::open(seed, tag, key)` with the tag
+    /// `galaxy.params.<name>` and `ObjectKey::galaxy()`, or `ObjectKey::galaxy_item(n)` for a
+    /// list (plan 02, Design note 2).
+    ///
+    /// # Panics
+    ///
+    /// Never: every value is drawn inside the range the builder checks.
+    #[must_use]
+    pub fn from_seed(seed: Seed, mass_function: MassFunctionKind) -> Self {
+        derive::build(&draws::draw_inputs(seed, mass_function))
+            .expect("every drawn value lies inside the range it is drawn from")
+    }
+
+    /// The Milky Way fixture: the galaxy's measured values, without scatter but for the black
+    /// hole's, for the comparisons of plan 02's P02.T11.
+    ///
+    /// The default mass function, Chabrier's system function with its branch above 1 M☉ scaled;
+    /// M★ 5.12 × 10¹⁰ M☉ (Bland-Hawthorn and Gerhard 2016's 5 ± 1); shares thick 8%, bulge and bar
+    /// 35% with the bar 30% of that (Bland-Hawthorn and Gerhard 2016; Portail et al. 2017),
+    /// nuclear disc 2.06% (Launhardt et al. 2002; Sormani et al. 2022), halo 1%; timescale 7 Gyr;
+    /// thin disc 7,000 ly long with an effective height of 1,130 ly and the thin discs' central
+    /// hole (Bovy and Rix 2013; Bland-Hawthorn and Gerhard 2016; plan 02, rulings 8 and 32), thick
+    /// disc 0.9 and 2.7 times that, young disc 335 ly (ruling 3; P02.T12.d), gas 8.24 × 10⁹ M☉,
+    /// 29.3% of the thin disc's mass (rulings 1 and 19); bulge 2,280 × 1,440 × 730 ly, boxiness
+    /// 3.5 (Wegg and Gerhard 2013); bar half-length 16,000 ly, height 590 ly (Wegg, Gerhard and
+    /// Portail 2015), corotation ratio 1.24 (Portail et al. 2017); nuclear disc 290 ly by 93 ly
+    /// (Sormani et al. 2022); four arms at 12°; f★ 0.28, so M₂₀₀ lies near the 1.3 × 10¹² M☉ of
+    /// McMillan (2017); the black hole 0.388 dex below the M–σ relation, which makes it the 4.30 ×
+    /// 10⁶ M☉ of Sgr A* (GRAVITY Collaboration 2022; McConnell and Ma 2013); the halo's inner
+    /// slopes 2.5, and the dominant merger's break at 58,700 ly (18 kpc), steepening by 2.0
+    /// (Pila-Díez et al. 2015; Medina et al. 2024). Values without a measurement take the middle
+    /// of their ranges.
+    ///
+    /// # Panics
+    ///
+    /// Never: the fixture's values lie inside their ranges, which a test checks.
+    #[must_use]
+    pub fn milky_way_like() -> Self {
+        derive::build(&milky_way::inputs()).expect("the fixture's values lie inside their ranges")
+    }
+
+    /// Which mass function the mean masses use.
+    #[must_use]
+    pub fn mass_function(&self) -> MassFunctionKind {
+        self.mass_function
+    }
+
+    /// The galaxy's stellar mass, 3–10 × 10¹⁰ M☉, log-uniform.
+    #[must_use]
+    pub fn stellar_mass(&self) -> SolarMasses {
+        self.stellar_mass
+    }
+
+    /// The timescale τ of the thin disc's declining formation rate, 5–9 Gyr.
+    #[must_use]
+    pub fn sfh_timescale(&self) -> Years {
+        self.sfh_timescale
+    }
+
+    /// The long bar's part of the combined bulge-and-bar share, 30–40% (plan 02, Risks, R1).
+    #[must_use]
+    pub fn bar_share_of_bulge(&self) -> f64 {
+        self.bar_of_bulge
+    }
+
+    /// The population's share of the galaxy's systems (born at the epoch). The shares sum to 1.
+    ///
+    /// The thick disc, the bulge with its bar, the nuclear disc and the halo are drawn; the thin
+    /// disc takes the rest, and its young part is the share of the declining history in the last
+    /// 100 Myr (plan 02, Design note 3).
+    #[must_use]
+    pub fn population_share(&self, population: Population) -> f64 {
+        self.shares[population.index()]
+    }
+
+    /// The mean present-day mass of a system of the population, living stars, remnants and
+    /// companions together ([`fates::mean_present_mass`](super::fates::mean_present_mass)).
+    #[must_use]
+    pub fn mean_system_mass(&self, population: Population) -> SolarMasses {
+        self.mean_masses[population.index()]
+    }
+
+    /// The mean present-day mass of a system of each population, in
+    /// [`POPULATIONS`](super::POPULATIONS) order, with primaries drawn from `f` in place of the
+    /// galaxy's own mass function, and the same ages and fates: what plan 15's P15.T4.b fits
+    /// Chabrier's scale against, for mass functions the build cannot name.
+    #[must_use]
+    pub fn mean_system_masses_under(&self, f: &dyn super::imf::MassFunction) -> [SolarMasses; 7] {
+        derive::mean_masses_under(self, f)
+    }
+
+    /// The mean present-day mass of a system of each population, as a census counts it
+    /// (`counted`: every star and white dwarf, or the primary alone; no neutron star or black
+    /// hole), over the systems whose primary lies below `primary_below` M☉, with primaries drawn
+    /// from `f`: plan 15's P15.T4.b checks against the 20 pc census with it (ruling 138.4), which
+    /// holds no system with a primary of 8 M☉ or more.
+    #[must_use]
+    pub fn census_system_masses_under(
+        &self,
+        f: &dyn super::imf::MassFunction,
+        counted: super::fates::Counted,
+        primary_below: f64,
+    ) -> [SolarMasses; 7] {
+        derive::census_masses_under(self, f, counted, primary_below)
+    }
+
+    /// The population's stellar mass: `N × share × mean mass`. The masses sum to the stellar mass.
+    #[must_use]
+    pub fn population_mass(&self, population: Population) -> SolarMasses {
+        self.masses[population.index()]
+    }
+
+    /// The expected number of systems born at the epoch: the stellar mass over
+    /// `Σ share × mean mass`.
+    #[must_use]
+    pub fn system_count(&self) -> f64 {
+        self.system_count
+    }
+
+    /// The initial mass formed per system, with nothing dead
+    /// ([`fates::mean_formed_mass`](super::fates::mean_formed_mass)).
+    #[must_use]
+    pub fn mean_formed_mass(&self) -> SolarMasses {
+        self.mean_formed_mass
+    }
+
+    /// The mean number of stars per system, 1.33–1.45: 1 plus the mass-function average of the
+    /// fates' companions ([`fates::mean_stars_per_system`](super::fates::mean_stars_per_system)),
+    /// over the same fates as [`mean_formed_mass`](Self::mean_formed_mass). Plan 13 turns its
+    /// abundances per star into objects per system with it (its Design note 2).
+    #[must_use]
+    pub fn mean_stars_per_system(&self) -> f64 {
+        self.mean_stars_per_system
+    }
+
+    /// The old thin disc: its scale length and its effective height, 850–1,150 ly, the sub-discs'
+    /// harmonic mean.
+    #[must_use]
+    pub fn thin_disc(&self) -> &DiscParams {
+        &self.thin_disc
+    }
+
+    /// The young thin disc: the thin disc's scale length and an effective height of 225–345 ly.
+    #[must_use]
+    pub fn young_disc(&self) -> &DiscParams {
+        &self.young_disc
+    }
+
+    /// The thick disc: 0.7–0.9 of the thin disc's length and 2.7–3.3 of its effective height.
+    #[must_use]
+    pub fn thick_disc(&self) -> &DiscParams {
+        &self.thick_disc
+    }
+
+    /// The bulge.
+    #[must_use]
+    pub fn bulge(&self) -> &BulgeParams {
+        &self.bulge
+    }
+
+    /// The long bar.
+    #[must_use]
+    pub fn bar(&self) -> &BarParams {
+        &self.bar
+    }
+
+    /// The nuclear disc.
+    #[must_use]
+    pub fn nuclear_disc(&self) -> &NuclearDiscParams {
+        &self.nuclear_disc
+    }
+
+    /// The nuclear star cluster.
+    #[must_use]
+    pub fn nuclear_cluster(&self) -> &NuclearClusterParams {
+        &self.nuclear_cluster
+    }
+
+    /// The spiral arms.
+    #[must_use]
+    pub fn arms(&self) -> &ArmParams {
+        &self.arms
+    }
+
+    /// The gas disc.
+    #[must_use]
+    pub fn gas_disc(&self) -> &GasDiscParams {
+        &self.gas_disc
+    }
+
+    /// The dark halo.
+    #[must_use]
+    pub fn dark_halo(&self) -> &DarkHaloParams {
+        &self.dark_halo
+    }
+
+    /// The central black hole: its scatter at once, its dispersion and mass solved on first use.
+    #[must_use]
+    pub fn black_hole(&self) -> BlackHoleParams<'_> {
+        BlackHoleParams { params: self }
+    }
+
+    /// The discs' radial \[Fe/H\] gradient, −0.07 to −0.04 dex per kpc (the brainstorm's "about
+    /// −0.05 dex per kpc in the Milky Way disc").
+    #[must_use]
+    pub fn metallicity_gradient(&self) -> DexPerKiloparsec {
+        self.metallicity_gradient
+    }
+
+    /// The stellar halo's components.
+    #[must_use]
+    pub fn halo(&self) -> &HaloParams {
+        &self.halo
+    }
+
+    /// The accretion history.
+    #[must_use]
+    pub fn accretion(&self) -> &AccretionHistory {
+        &self.accretion
+    }
+
+    /// The bytes the parameters own on the heap: the halo's components with their ages, and the
+    /// progenitors.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        let halo = &self.halo.components;
+        halo.capacity() * size_of::<HaloComponentParams>()
+            + halo.iter().map(|c| c.ages.heap_bytes()).sum::<usize>()
+            + self.accretion.progenitors.capacity() * size_of::<Progenitor>()
+    }
+}
+
+/// Builds [`GalaxyParams`] from values set by hand, checking every one against its range.
+///
+/// A builder starts from the Milky Way fixture's values ([`GalaxyParams::milky_way_like`]), so a
+/// test sets only what it varies. The sizes that are coupled to masses can be fixed (as the
+/// fixture fixes them) or coupled with a scatter in dex (as a drawn galaxy couples them); the
+/// last setter called wins.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::params::{BuildGalaxyParamsError, GalaxyParamsBuilder};
+/// use hyperion_sim::units::{Dex, SolarMasses};
+///
+/// let heavier = GalaxyParamsBuilder::new()
+///     .stellar_mass(SolarMasses::new(9e10))
+///     .thin_length_scatter(Dex::new(0.0))
+///     .build()?;
+/// assert!(heavier.thin_disc().length().value() > 8_480.0);
+///
+/// let error = GalaxyParamsBuilder::new().thick_share(0.2).build().unwrap_err();
+/// assert!(matches!(
+///     error,
+///     BuildGalaxyParamsError::OutOfRange { parameter: "share.thick", .. }
+/// ));
+/// # Ok::<(), BuildGalaxyParamsError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct GalaxyParamsBuilder {
+    inputs: Inputs,
+}
+
+impl Default for GalaxyParamsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Setters that store one value, converted to working units, into the builder's inputs.
+macro_rules! setters {
+    ($( $(#[$meta:meta])* $name:ident($unit:ty) => $field:ident $(= $convert:expr)?; )*) => {
+        $(
+            $(#[$meta])*
+            #[must_use]
+            pub fn $name(mut self, value: $unit) -> Self {
+                self.inputs.$field = setters!(@convert value $(, $convert)?);
+                self
+            }
+        )*
+    };
+    (@convert $value:ident) => { $value };
+    (@convert $value:ident, $convert:expr) => { $convert($value) };
+}
+
+impl GalaxyParamsBuilder {
+    /// A builder holding the Milky Way fixture's values.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inputs: milky_way::inputs(),
+        }
+    }
+
+    setters! {
+        /// The mass function the mean masses use.
+        mass_function(MassFunctionKind) => mass_function;
+        /// The stellar mass, 3–10 × 10¹⁰ M☉.
+        stellar_mass(SolarMasses) => stellar_mass = SolarMasses::value;
+        /// The thick disc's share of systems, 8–14%.
+        thick_share(f64) => share_thick;
+        /// The bulge's and the long bar's share together, 20–35%.
+        bulge_bar_share(f64) => share_bulge_bar;
+        /// The long bar's part of the bulge-and-bar share, 30–40%.
+        bar_share_of_bulge(f64) => share_bar_of_bulge;
+        /// The nuclear disc's share of systems, 1–2.5%.
+        nuclear_disc_share(f64) => share_nuclear_disc;
+        /// The halo's share of systems, 0.7–1.4%.
+        halo_share(f64) => share_halo;
+        /// The thin disc's formation timescale, 5–9 Gyr.
+        sfh_timescale(Years) => sfh_timescale = Years::value;
+        /// The thin disc's scale length, fixed, 7,000–11,500 ly.
+        thin_length(LightYears) => thin_length = Inputs::fixed;
+        /// The thin disc's scale length coupled to its mass, with this scatter (within ±9 × 0.05
+        /// dex).
+        thin_length_scatter(Dex) => thin_length = Inputs::coupled;
+        /// The old thin disc's effective height, 850–1,150 ly.
+        thin_mean_height(LightYears) => thin_mean_height = LightYears::value;
+        /// The young disc's effective height, 225–345 ly.
+        young_height(LightYears) => young_height = LightYears::value;
+        /// The thick disc's length over the thin disc's, 0.7–0.9.
+        thick_length_ratio(f64) => thick_length_ratio;
+        /// The thick disc's height over the thin disc's mean, 2.7–3.3.
+        thick_height_ratio(f64) => thick_height_ratio;
+        /// The bulge's long scale length, fixed, 1,700–3,000 ly.
+        bulge_length(LightYears) => bulge_length = Inputs::fixed;
+        /// The bulge's long scale length coupled to its mass, with this scatter (within ±9 × 0.06
+        /// dex).
+        bulge_length_scatter(Dex) => bulge_length = Inputs::coupled;
+        /// The bulge's middle axis over its long axis, 0.5–0.7.
+        bulge_b_over_a(f64) => bulge_b_over_a;
+        /// The bulge's short axis over its long axis, 0.3–0.4.
+        bulge_c_over_a(f64) => bulge_c_over_a;
+        /// The bulge's vertical exponent, 3–4.
+        bulge_boxiness(f64) => bulge_boxiness;
+        /// The long bar's half-length, fixed, 10,000–18,000 ly.
+        bar_half_length(LightYears) => bar_length = Inputs::fixed;
+        /// The long bar's half-length coupled to its mass, with this scatter (within ±9 × 0.05
+        /// dex).
+        bar_length_scatter(Dex) => bar_length = Inputs::coupled;
+        /// The long bar's width over its half-length, 0.08–0.12.
+        bar_width_ratio(f64) => bar_width_ratio;
+        /// The long bar's scale height, 500–700 ly, of its exponential profile in height.
+        bar_height(LightYears) => bar_height = LightYears::value;
+        /// The bar's corotation radius over its half-length, 1.0–1.4.
+        bar_corotation_ratio(f64) => bar_corotation_ratio;
+        /// The nuclear disc's scale length, fixed, 200–400 ly.
+        nuclear_length(LightYears) => nuclear_length = Inputs::fixed;
+        /// The nuclear disc's scale length coupled to its mass, with this scatter (within ±9 ×
+        /// 0.04 dex).
+        nuclear_length_scatter(Dex) => nuclear_length = Inputs::coupled;
+        /// The nuclear disc's height over its length, 0.3–0.5.
+        nuclear_height_ratio(f64) => nuclear_height_ratio;
+        /// The nuclear cluster's mass scatter (within ±9 × 0.2 dex).
+        nuclear_cluster_mass_scatter(Dex) => nuclear_cluster_mass_scatter = Dex::value;
+        /// Two arms or four.
+        arm_count(ArmCount) => arm_count;
+        /// The arms' pitch angle, 10–18°.
+        arm_pitch(Degrees) => arm_pitch = Degrees::value;
+        /// The young disc's arm width `σ_w`, 250–500 ly.
+        arm_young_width(LightYears) => arm_young_width = LightYears::value;
+        /// The young disc's arm amplitude A, 0.7–0.9.
+        arm_young_fraction(f64) => arm_young_fraction;
+        /// The old discs' arm amplitude a, 0.10–0.30.
+        arm_old_amplitude(f64) => arm_old_amplitude;
+        /// The gas disc's mass over the thin disc's, 0.175–0.35.
+        gas_mass_fraction(f64) => gas_mass_fraction;
+        /// The gas disc's length over the thin disc's, 1.5–2.0.
+        gas_length_ratio(f64) => gas_length_ratio;
+        /// The dark halo's f★, 0.12–0.45.
+        dark_f_star(f64) => dark_f_star;
+        /// The dark halo's concentration scatter (within ±9 × 0.11 dex).
+        dark_concentration_scatter(Dex) => dark_concentration_scatter = Dex::value;
+        /// The black hole's scatter about M–σ (within ±9 × 0.38 dex).
+        black_hole_scatter(Dex) => bh_scatter = Dex::value;
+        /// The discs' metallicity gradient, −0.07 to −0.04 dex per kpc.
+        metallicity_gradient(DexPerKiloparsec) => metallicity_gradient = DexPerKiloparsec::value;
+        /// The dominant merger's break radius, 52,000–91,000 ly.
+        halo_dominant_break_radius(LightYears) => halo_dominant_break_radius = LightYears::value;
+        /// How much the dominant merger's slope steepens beyond its break, 1.5–2.5.
+        halo_dominant_break_steepening(f64) => halo_dominant_break_steepening;
+        /// The lesser progenitors' combined share of the halo before renormalising, 10–25%.
+        halo_lesser_share_total(f64) => halo_lesser_share_total;
+        /// The lesser old progenitors, 2–5 of them.
+        halo_lesser_progenitors(Vec<LesserProgenitorInput>) => halo_lesser;
+        /// The halo's discrete share, 2–15%.
+        halo_discrete_share(f64) => halo_discrete_share;
+        /// The last major merger, 6–11 Gyr before the epoch. The in-situ and dominant halo
+        /// components' stars must be at least as old.
+        last_major_merger(Years) => last_major_merger = Years::value;
+        /// The dominant merger's orbit, with an eccentricity of 0.85–0.95.
+        dominant_orbit(Orbit) => dominant_orbit;
+        /// The recent progenitors.
+        recent_progenitors(Vec<RecentProgenitorInput>) => recent;
+        /// The globular cluster count's scatter (within ±9 × 0.2 dex).
+        globular_count_scatter(Dex) => globular_count_scatter = Dex::value;
+    }
+
+    /// The in-situ halo: its share before renormalising (15–30%), axis ratio (0.45–0.55), core
+    /// (1,500–3,000 ly), slope (2.2–2.8) and the centre of its one-gigayear age range
+    /// (10.5–12.5 Gyr, and at least half a gigayear before the last major merger, which heated
+    /// it).
+    #[must_use]
+    pub fn halo_in_situ(
+        mut self,
+        share: f64,
+        flattening: f64,
+        core: LightYears,
+        slope: f64,
+        age_centre: Years,
+    ) -> Self {
+        self.inputs.halo_in_situ = inputs::HaloComponentInput {
+            share,
+            flattening,
+            core: core.value(),
+            slope,
+            age_centre: age_centre.value(),
+        };
+        self
+    }
+
+    /// The dominant merger's halo component: share before renormalising (35–60%), axis ratio
+    /// (0.6–0.8), core (2,000–5,000 ly), slope (2.2–2.8) and age centre (10.5–12.5 Gyr, and at
+    /// least half a gigayear before the last major merger, when its star formation stopped).
+    #[must_use]
+    pub fn halo_dominant(
+        mut self,
+        share: f64,
+        flattening: f64,
+        core: LightYears,
+        slope: f64,
+        age_centre: Years,
+    ) -> Self {
+        self.inputs.halo_dominant = inputs::HaloComponentInput {
+            share,
+            flattening,
+            core: core.value(),
+            slope,
+            age_centre: age_centre.value(),
+        };
+        self
+    }
+
+    /// The globular-born debris: share before renormalising (8–15%), core (3,000–5,000 ly),
+    /// slope (4.0–4.5) and age centre (10.5–12.5 Gyr). It is spherical.
+    #[must_use]
+    pub fn halo_debris(
+        mut self,
+        share: f64,
+        core: LightYears,
+        slope: f64,
+        age_centre: Years,
+    ) -> Self {
+        self.inputs.halo_debris = inputs::HaloComponentInput {
+            share,
+            flattening: draws::DEBRIS_FLATTENING,
+            core: core.value(),
+            slope,
+            age_centre: age_centre.value(),
+        };
+        self
+    }
+
+    /// Checks every value against its range and derives the rest.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildGalaxyParamsError::OutOfRange`] naming the first value outside its range, in the
+    /// order of plan 02's table but for the last major merger, which is checked before the halo
+    /// whose ages depend on it; [`BuildGalaxyParamsError::LesserProgenitorCount`] unless there
+    /// are 2–5 lesser progenitors; [`BuildGalaxyParamsError::LesserWeightsZero`] if their weights
+    /// sum to zero.
+    pub fn build(self) -> Result<GalaxyParams, BuildGalaxyParamsError> {
+        derive::build(&self.inputs)
+    }
+}

@@ -1,0 +1,5 @@
+# The cluster retention table (plan 09, P09.T9.b; ruling 139.5): the kick shares at the
+# retention quadrature's 16 mass nodes and 11 [Fe/H] of z_fit, 32 speeds. No parameters.
+task = "cluster_retention"
+
+[params]

@@ -1,0 +1,8 @@
+# The smoke run of the mass-segregation fit (plan 15, P15.T8.b): two central potentials at one
+# slope, a few seconds.
+task = "equipartition"
+
+[params]
+delta = 0.5
+central_potentials = [4.0, 8.0]
+slopes = [-0.5]

@@ -1,0 +1,3004 @@
+:root {
+  color-scheme: dark;
+  /* Tokens and their reserved meanings are defined in docs/frontend/ux-guidelines.md. */
+  --surface-0: #05080d;
+  --surface-1: #0b121c;
+  --surface-2: #131e2d;
+  --line: #1c2a3a;
+  --line-strong: #557190;
+  --text: #c8d6e5;
+  --text-muted: #8a9db3;
+  --accent: #5cc8e6;
+  --status-nominal: #4ade80;
+  --status-advisory: #60a5fa;
+  --status-caution: #fbbf24;
+  --status-warning: #f87171;
+  --target: #e879f9;
+  /* B612 is bundled through @fontsource in main.tsx; the rest are fallbacks. */
+  --font-sans: "B612", system-ui, sans-serif;
+  --font-mono: "B612 Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--surface-0);
+  color: var(--text);
+}
+
+/* The fixed console frame: header strip, work area, navigation bar. */
+.console {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.console__header,
+.console__identity,
+.console__status {
+  display: flex;
+  align-items: baseline;
+}
+
+.console__header {
+  justify-content: space-between;
+  gap: 2rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-1);
+  padding: 0.75rem 1rem;
+}
+
+.console__identity {
+  gap: 1rem;
+}
+
+.console__status {
+  gap: 2rem;
+}
+
+.console__ship {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+
+.console__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 1.125rem;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.console__work {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(24rem, 1fr));
+  align-content: start;
+  gap: 1rem;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+.console__nav {
+  border-top: 1px solid var(--line);
+  background: var(--surface-1);
+  padding: 0 1rem;
+}
+
+.console__nav ul {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A display tab changes only what the console shows, so it has no --line-strong control outline. */
+.console__tab {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-height: 2rem;
+  margin: 0;
+  border: 0;
+  border-top: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 0.5rem 1rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.console__tab:hover {
+  background: var(--surface-2);
+}
+
+.console__tab:active {
+  background: var(--surface-0);
+}
+
+/* Inset, so that the edge of the window never clips it. */
+.console__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The active tab's top rule is a shape as well as a colour; aria-current says it in words. */
+.console__tab[aria-current="page"] {
+  border-top-color: var(--accent);
+  color: var(--accent);
+}
+
+.console__key {
+  font-family: var(--font-mono);
+}
+
+/* A labelled value outside a readout list, such as the clock in the header strip. */
+.field {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.field__label {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.field__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  padding: 1rem 1.25rem;
+}
+
+.panel__title {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* What a panel says when it has nothing to show, such as NO UNIVERSE OPEN. */
+.panel__empty {
+  margin: 0;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
+/* Status annunciation. In-progress states stay neutral: see "Colour" in the UX guidelines. */
+.annunciator {
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
+.annunciator--connected {
+  color: var(--status-nominal);
+}
+
+.annunciator--disconnected {
+  color: var(--status-warning);
+}
+
+.annunciator--incompatible {
+  color: var(--status-warning);
+}
+
+.readout {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.5rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.readout dt {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.readout dd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.readout__missing {
+  color: var(--text-muted);
+}
+
+/* A unit symbol that is partly drawn, such as the solar mass; it keeps its parts together. */
+.unit {
+  white-space: nowrap;
+}
+
+/* A sign missing from B612, drawn as inline SVG sized to the text and set as a subscript. */
+.glyph {
+  width: 0.7em;
+  height: 0.7em;
+  vertical-align: sub;
+}
+
+/* The legend of a raster field: see "Graphs, schematics and spatial displays" in the guide. */
+.density-legend {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.density-legend__caption {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-muted);
+}
+
+.density-legend__title,
+.density-legend__scale-type {
+  letter-spacing: 0.15em;
+}
+
+/* Room for half of the outermost tick labels, which are centred on the bar's ends. */
+.density-legend__scale {
+  padding: 0 1.25rem;
+}
+
+.density-legend__bar {
+  display: block;
+  width: 100%;
+  height: 1rem;
+  color: var(--text-muted);
+}
+
+.density-legend__ticks {
+  position: relative;
+  height: 1.25rem;
+}
+
+.density-legend__tick {
+  position: absolute;
+  top: 0.125rem;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.density-legend__floor {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+}
+
+/* A display with a fixed layout of its own fills the work area as one cell. */
+.console__work--galaxy {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+}
+
+/*
+ * The GALAXY display, in two columns. The first holds UNIVERSE and, below it, the PARAMETERS and
+ * GALAXY MAP pages; the second the CURSOR panel and the local chart. The first column is wide
+ * enough for the map's pictures and the words beside them, 52rem at least, which leaves the second
+ * 25rem at 1280 px; wider, the two share the width 4:3, which lets the map fill the column's height
+ * at 1920 x 1080.
+ */
+.galaxy {
+  display: grid;
+  grid-template-columns: minmax(52rem, 4fr) minmax(20rem, 3fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.galaxy__column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.galaxy__column > .panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.5rem 1rem;
+}
+
+/* A panel that takes what its column leaves: the pages, SYSTEMS, UNIVERSE shown whole. */
+.galaxy__column > .galaxy__pages,
+.galaxy__column > .galaxy__systems,
+.galaxy__column > .galaxy__universe:not(.universe-panel--folded) {
+  flex: 1 1 auto;
+}
+
+.galaxy .panel__title {
+  margin-bottom: 0.5rem;
+}
+
+/*
+ * Why a panel's commands are held back, such as NO CARRIER; the controls are described by it. The
+ * header annunciates the link itself, so this is plain text.
+ */
+.panel__inhibit {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
+/* A request that has not answered: PENDING, the link's state, or a failure in words and RETRY. */
+.request-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+/* The state's words, where a status line shows them and where the census region carries them. */
+.request-status__text,
+.census-readout__state {
+  letter-spacing: 0.15em;
+}
+
+/* A failed or overloaded server, or no answer: a failed system, so caution. A refusal is plain. */
+.request-status__text--fault,
+.census-readout__state--fault {
+  color: var(--status-caution);
+}
+
+/*
+ * A control that changes only what the console shows or fetches, such as RETRY: --accent text, and
+ * none of the --line-strong outline that marks a command.
+ */
+.control {
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  padding: 0 0.5rem;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.control:hover {
+  background: var(--surface-2);
+}
+
+.control:active {
+  background: var(--surface-0);
+}
+
+.control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Held back: kept focusable so that it can say why, its text muted and the pointer refused. */
+.control[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.control[aria-disabled="true"]:hover,
+.control[aria-disabled="true"]:active {
+  background: none;
+}
+
+/* The rows of a scrolling list that are in view, and its total: 12-24 of 87. */
+.list-position {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/*
+ * A control that changes what the ship or the server holds. Display-only controls, such as the
+ * navigation tabs, have no --line-strong outline; commands do.
+ */
+.command {
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+  padding: 0 0.75rem;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.command:hover {
+  background: var(--surface-2);
+}
+
+.command:active {
+  background: var(--surface-0);
+}
+
+.command:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Held back: kept focusable, with its outline, so that it can say why; only its text is muted. */
+.command[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.command[aria-disabled="true"]:hover,
+.command[aria-disabled="true"]:active {
+  background: var(--surface-1);
+}
+
+/*
+ * The UNIVERSE panel. Its title is the control that shows it whole or folds it to one line, the
+ * open universe's name, seed and generator version beside the title: a header, so its padding is
+ * the least that keeps the control's 2rem target clear of the border.
+ */
+.universe-panel--folded {
+  padding-block: 0.25rem;
+}
+
+.universe-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 0 1.5rem;
+  min-width: 0;
+  min-height: 2rem;
+}
+
+.universe-panel__title {
+  flex: none;
+}
+
+/* Upper case as every panel title is; the text stays mixed case for the accessible name. */
+.universe-panel__title .control {
+  text-transform: inherit;
+}
+
+.universe-panel--folded .universe-panel__title,
+.universe-panel--folded .universe-summary {
+  margin: 0;
+}
+
+.universe-panel__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.universe-panel__body[hidden] {
+  display: none;
+}
+
+/* The open universe on one line: name, seed and generator version, labels before values. */
+.universe-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0 1.5rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.universe-summary__item {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+/* The name gives way first, to an ellipsis, since the seed and version identify the universe. */
+.universe-summary__item--name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.universe-summary dt {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.universe-summary dd {
+  margin: 0;
+}
+
+.universe-summary__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.universe-summary__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Its readout puts the name and generator version on one line. */
+.universe-panel__readout {
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  gap: 0.125rem 0.75rem;
+}
+
+.universe-panel__readout dd {
+  overflow-wrap: anywhere;
+}
+
+.universe-panel__readout .readout__wide {
+  grid-column: 2 / -1;
+}
+
+/* Why the OPEN pointed at or focused is held back, below the list so that nothing clips it. */
+.universe-panel__reason {
+  min-height: 1.25rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  letter-spacing: 0.1em;
+}
+
+/*
+ * A list, so it may scroll; the panel shows its position and total beneath it. Shown whole, the
+ * panel has its column, and the list takes what the rest leaves, down to its header and half a row
+ * (4.5rem), rather than let the panel clip CREATE.
+ */
+.universe-panel__list {
+  flex: 0 1 auto;
+  min-height: 4.5rem;
+  margin-top: 0.5rem;
+  overflow-y: auto;
+}
+
+/*
+ * Each universe takes two lines of a fixed height, so that the position readout can be worked out
+ * from the scroll offset: the name and the OPEN command, then the seed and generator version.
+ */
+.universe-table,
+.parameter-table {
+  display: block;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.universe-table thead,
+.universe-table tbody,
+.parameter-table tbody {
+  display: block;
+}
+
+/* The header has no command in it, so its first line needs no 2rem target. */
+.universe-table thead .universe-table__row {
+  grid-template-rows: 1.25rem 1.25rem;
+  height: 2.75rem;
+}
+
+.universe-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-1);
+}
+
+.universe-table__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem;
+  grid-template-rows: 2rem 1.25rem;
+  column-gap: 0.5rem;
+  align-items: center;
+  height: 3.5rem;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  padding: 0.125rem 0 0.125rem 0.5rem;
+}
+
+/*
+ * The open universe's row: a rule down its edge, a shape as well as a colour, as the active tab
+ * has; its marker reads OPEN in words, with aria-current.
+ */
+.universe-table__row--open {
+  border-left-color: var(--accent);
+}
+
+.universe-table th {
+  color: var(--text-muted);
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-align: left;
+}
+
+.universe-table td,
+.universe-table th {
+  padding: 0;
+}
+
+.universe-table__name {
+  grid-column: 1;
+  grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.universe-table__seed {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.universe-table__version {
+  grid-column: 2;
+  grid-row: 2;
+  text-align: right;
+}
+
+/* GEN VER is wider than the version column, so it reaches left over the free end of SEED's line. */
+.universe-table th.universe-table__version {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.universe-table td.universe-table__seed,
+.universe-table td.universe-table__version {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * OPEN fits its column; PENDING, while it lasts, reaches left over the free end of the name's line
+ * rather than past the list's edge, which would scroll it sideways.
+ */
+.universe-table__action {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  text-align: right;
+}
+
+/* A state, not a control: plain text without an outline, so it cannot be taken for RETRY or OPEN. */
+.universe-table__current {
+  padding-right: 0.75rem;
+  letter-spacing: 0.15em;
+}
+
+/* The NEW UNIVERSE form. */
+.universe-form {
+  margin-top: 0.5rem;
+}
+
+.universe-form__fieldset,
+.form-choice {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.universe-form__legend {
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+.universe-form__fields {
+  margin-top: 0.25rem;
+}
+
+/*
+ * A display control that shows or folds part of a panel, led by a chevron that says which. Its
+ * text starts at the panel's edge, as the other titles do.
+ */
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0;
+}
+
+.glyph--disclosure {
+  vertical-align: baseline;
+}
+
+.form-field {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/*
+ * A field's label and its format hint share a line, so that the input has the full width. Where
+ * both do not fit, the hint moves whole to a line of its own, still at the right.
+ */
+.form-field__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.form-field__head > * {
+  white-space: nowrap;
+}
+
+.form-field__head > .form-field__hint {
+  margin-left: auto;
+}
+
+.form-field__label {
+  padding: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.form-choice {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* Floated, so that the radio buttons sit beside the group's legend. */
+.form-choice > legend {
+  float: left;
+  margin-right: 0.5rem;
+  line-height: 2rem;
+}
+
+/* The options wrap under each other in the narrowest column rather than overflow it. */
+.form-choice__options {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.75rem;
+}
+
+.form-field__input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  padding: 0 0.5rem;
+  color: var(--text);
+  font: inherit;
+}
+
+.form-field__input--number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.form-field__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+ * Disabled: the outline keeps its 3:1, and the field reads as inert by its surface and text. A field
+ * held back with `aria-disabled`, which keeps its focus and is described by the visible reason,
+ * reads the same way, since the guide has every control show disabled distinctly.
+ */
+.form-field__input:disabled,
+.form-field__input[aria-disabled="true"] {
+  background: var(--surface-1);
+  color: var(--text-muted);
+}
+
+.form-field__input[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.form-field__hint {
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  text-align: right;
+}
+
+/*
+ * An entry refused, and what is valid, in words beneath the field it names. Plain text: an entry is
+ * neither an alert, a limit nor a failed system, which are what the guide keeps yellow for.
+ */
+.form-field__error {
+  margin: 0.25rem 0 0;
+}
+
+/* Spaced at the guide's least, 0.1em, so that both options fit beside SEED in a 16rem column. */
+.form-choice__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.form-choice__option input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* Held back while the link is down: its text muted and the pointer refused, as a held-back command's. */
+.form-choice__option:has(input[aria-disabled="true"]) {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.form-choice__option input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.universe-form__actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* The PARAMETERS panel. */
+.parameters__identity {
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* A list, so it may scroll; the panel shows its position and total beneath it. */
+.parameters__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Inset, so that the panel's edge never clips it. */
+.parameters__list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* A group heading is one layout unit, 1.5rem, and a parameter row two. */
+.parameters__group-title {
+  display: flex;
+  align-items: flex-end;
+  height: 1.5rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+.parameter-table tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3rem 4.5rem;
+  grid-template-rows: 1.25rem 1.25rem;
+  column-gap: 0.5rem;
+  align-items: baseline;
+  height: 3rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0;
+}
+
+.parameter-table th,
+.parameter-table td {
+  padding: 0;
+}
+
+.parameter-table__label {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  overflow: hidden;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parameter-table__value {
+  grid-column: 1;
+  grid-row: 2;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.parameter-table__unit {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--text-muted);
+}
+
+.parameter-table__origin {
+  grid-column: 3;
+  grid-row: 2;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+/*
+ * The PARAMETERS and GALAXY MAP pages, sharing a panel. The page selector is the panel's title, at
+ * its top left; the map's pictures run from the panel's top beside it, so the map page spans the
+ * selector's row and keeps its first 2.5rem of words clear of the selector, which stands above it.
+ */
+.galaxy__column > .galaxy-pages {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.galaxy__column > .galaxy-pages[hidden] {
+  display: none;
+}
+
+.galaxy-pages__tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: start;
+  gap: 0.25rem;
+}
+
+/*
+ * A page's name: a display control, so no --line-strong outline. The chosen page's name is --accent
+ * over a 2px --accent rule, a shape as well as a colour, as the active display tab's rule is.
+ */
+.galaxy-pages__tab {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 0 0.75rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.galaxy-pages__tab:first-child {
+  padding-left: 0;
+}
+
+.galaxy-pages__tab:hover {
+  background: var(--surface-2);
+}
+
+.galaxy-pages__tab:active {
+  background: var(--surface-0);
+}
+
+.galaxy-pages__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.galaxy-pages__tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+.galaxy-pages__page {
+  min-width: 0;
+  min-height: 0;
+}
+
+.galaxy-pages__page[hidden] {
+  display: none;
+}
+
+.galaxy-pages__page--parameters {
+  display: flex;
+  grid-area: 2 / 1;
+  flex-direction: column;
+  margin-top: 0.5rem;
+}
+
+.galaxy-pages__page--parameters > .parameters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.galaxy-pages__page--map {
+  grid-area: 1 / 1 / 3 / 2;
+}
+
+/* The GALAXY MAP page, measured for the size of its pictures. */
+.galaxy-map {
+  height: 100%;
+  min-height: 0;
+}
+
+.galaxy-map__empty {
+  padding-top: 2.5rem;
+}
+
+/*
+ * The words beside the pictures, then the gutter for the vertical axes' labels, the pictures, and
+ * the gutter for the horizontal axes' labels. Face-on above edge-on, 0.5rem apart: the face-on
+ * picture spans the page's controls and its own words, the edge-on picture its words. The
+ * pictures' width, --map-picture, is the page's to set (GalaxyMapPanel.tsx, which restates these
+ * widths), even, and as large as the page allows.
+ */
+.galaxy-map__grid {
+  display: grid;
+  grid-template-columns: minmax(24rem, 1fr) 3.75rem var(--map-picture) 1.75rem;
+  grid-template-rows: auto minmax(0, 1fr) 0.5rem calc(var(--map-picture) / 2);
+  height: calc(var(--map-picture) * 1.5 + 0.5rem);
+  font-size: 0.875rem;
+}
+
+/* Above the face-on view's box, which spans this row too, so that its controls take the pointer. */
+.galaxy-map__controls {
+  position: relative;
+  z-index: 1;
+  grid-area: 1 / 1;
+  padding: 2.5rem 0 0.5rem;
+}
+
+.galaxy-map__population {
+  margin-bottom: 0.25rem;
+}
+
+/* The frame and the scale, which the two pictures share. */
+.galaxy-map__furniture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.25rem 1.5rem;
+  min-height: 1.5rem;
+}
+
+/*
+ * One view of the galaxy map: its words in the first column, its picture in the third, each laid on
+ * the page's columns.
+ */
+.galaxy-map__grid > .map-view {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  grid-template-rows: subgrid;
+  min-height: 0;
+}
+
+.galaxy-map__grid > .map-view--face_on {
+  grid-row: 1 / 3;
+}
+
+.galaxy-map__grid > .map-view--edge_on {
+  grid-row: 4;
+}
+
+.map-view__side {
+  display: flex;
+  grid-column: 1;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.map-view--face_on > .map-view__side {
+  grid-row: 2;
+}
+
+.map-view--edge_on > .map-view__side {
+  grid-row: 1;
+}
+
+.map-view__area {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  min-width: 0;
+}
+
+.map-view__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0 1rem;
+}
+
+/* A sub-heading within a panel, as a parameter group's title is. */
+.map-view__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+.map-view__rotation,
+.map-view__hint {
+  margin: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.map-view__unit {
+  color: var(--text-muted);
+}
+
+/* Room for the longest reading, 4.89E-10, so that the unit never moves as the cursor does. */
+.map-view__density {
+  display: inline-block;
+  min-width: 8ch;
+  text-align: right;
+}
+
+/* The picture, at the width the page gives both, in its view's proportions. */
+.map-view__picture {
+  position: relative;
+  width: var(--map-picture);
+  outline: 1px solid var(--line);
+}
+
+.map-view--face_on .map-view__picture {
+  height: var(--map-picture);
+}
+
+.map-view--edge_on .map-view__picture {
+  height: calc(var(--map-picture) / 2);
+}
+
+/*
+ * Any rescaling the browser does, at a fractional device pixel ratio, repeats pixels, never blends.
+ * A pointer picks a point on it, so it takes the crosshair pointer.
+ */
+.map-view__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--surface-0);
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+
+.map-view__canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * A mark over a map, centred on its point and clear of the pointer: the cursor's upright cross in
+ * --accent and the chart centre's small diagonal cross in --text. The ramp runs up to --text, over
+ * which either colour falls below 6:1, so each stroke is cased in --surface-0 (10.4:1 against
+ * --accent, 13.6:1 against --text): a solid edge, not a glow.
+ */
+.map-view__mark {
+  position: absolute;
+  width: 1.5rem;
+  height: 1.5rem;
+  overflow: visible;
+  transform: translate(-50%, -50%);
+  fill: none;
+  pointer-events: none;
+}
+
+.map-view__mark path {
+  vector-effect: non-scaling-stroke;
+}
+
+.map-view__mark-casing {
+  stroke: var(--surface-0);
+  stroke-width: 3.5px;
+}
+
+.map-view__mark-line {
+  stroke-width: 1.5px;
+}
+
+.map-view__mark--cursor .map-view__mark-line {
+  stroke: var(--accent);
+}
+
+.map-view__mark--centre .map-view__mark-line {
+  stroke: var(--text);
+}
+
+/* A mark pegged to the picture's edge: the arrow beside it says which way its point lies. */
+.map-view__peg {
+  position: absolute;
+  padding-left: 1rem;
+  transform: translateY(-50%);
+  color: var(--text);
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* A stale value, as the guide's "Data states" has it: in --text-muted, with a trailing S. */
+.stale,
+.stale-mark {
+  color: var(--text-muted);
+}
+
+/*
+ * A chart the link no longer backs is a stale snapshot: every value read from the answer is muted,
+ * as the guide's "Data states" asks, and the trailing `S` in each block says so in a mark as well.
+ * The camera's own angles and the controls are live and are left alone.
+ */
+.spatial-view--stale :is(.spatial-view__readings, .spatial-view__labels),
+.census-readout--stale,
+.systems-panel--stale :is(.system-list, .system-readout) {
+  color: var(--text-muted);
+}
+
+/* The accent marking what is within the drive range is not live either once the answer is stale. */
+.systems-panel--stale .system-list__row--in-range {
+  color: var(--text-muted);
+}
+
+/* A stale picture's S, trailing it at the foot of the gutter to its right. */
+.map-view__stale {
+  position: absolute;
+  bottom: 0;
+  left: 100%;
+  padding-left: 0.25rem;
+  line-height: 1;
+}
+
+/* An axis label, outside the picture at the end of its axis, in a gutter of its own. */
+.map-view__axis {
+  position: absolute;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* The vertical axis's label beside its end: +Z NORTH at the top, on two lines, +X at the bottom. */
+.map-view__axis--top,
+.map-view__axis--bottom {
+  right: 100%;
+  width: 3.75rem;
+  padding-right: 0.25rem;
+  text-align: right;
+  white-space: normal;
+}
+
+.map-view__axis--top {
+  top: 0;
+}
+
+.map-view__axis--bottom {
+  bottom: 0;
+}
+
+.map-view__axis--across {
+  top: 50%;
+  left: 100%;
+  padding-left: 0.25rem;
+  transform: translateY(-50%);
+}
+
+/*
+ * The LOCAL CHART page: the chart itself, which takes the height the page leaves, then what it is
+ * asked for and the census of what came back.
+ */
+.galaxy-pages__page--chart {
+  display: flex;
+  grid-area: 2 / 1;
+  flex-direction: column;
+  margin-top: 0.5rem;
+}
+
+.local-chart {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  font-size: 0.875rem;
+}
+
+/*
+ * The chart keeps its stage: it grows into what the page leaves but never shrinks below its own
+ * floor, and the census gives way instead, so that a line appearing under the chart (the link's
+ * reason, a census hint, the axis note) can never make the view overlap what is below it.
+ */
+.local-chart > .spatial-view {
+  flex: 1 0 auto;
+}
+
+.local-chart > :is(.chart-controls, .symbol-legend) {
+  flex: none;
+}
+
+.local-chart > .census-readout {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+/*
+ * The chart's stage gives way to its controls, census and legend, which are fixed: at 1280 x 688 the
+ * page leaves it about 10rem, under the 12rem a spatial view keeps where it has the room, and less
+ * again while the census table is shown. It gives way rather than let the page clip.
+ */
+.local-chart .spatial-view__stage {
+  min-height: 4rem;
+}
+
+.local-chart__empty {
+  margin: 0;
+}
+
+/*
+ * A page too short to stack them (the orchestrator's rulings 134.9 and 149.1, at 1280 x 720): the
+ * preset views across the page; the chart, with the camera's angles and keys and what the chart is
+ * asked for in a column beside it; then, across the page, the chart's frame, centre, time and
+ * scale, the census line and its toggle, the census's hint, and the legend, which is on show in
+ * every state.
+ * Shown, the census table takes the place of the query controls in the column, which keeps one
+ * width, the table's, so that nothing but the two moves when the toggle is pressed. The spatial
+ * view, its row of controls and the census are no boxes of their own here, so that their parts take
+ * the page's grid; the parts keep their order, and so the tab order, of the stacked page.
+ */
+.local-chart--compact {
+  /*
+   * The table's columns in the compact layout, measured in B612 at 0.875rem: `LAYER`, the
+   * free-floating planets' `0.33 – 4132 M⊕`, eight figures of `EXP`, `20,000` of `RET`, and
+   * `BELOW MASS FLOOR`, each with its 0.5rem of padding, then the scroll bar's 1rem.
+   */
+  --census-layer-width: 3.625rem;
+  --census-band-width: 8.5rem;
+  --census-expected-width: 5.0625rem;
+  --census-returned-width: 3.9375rem;
+  --census-status-width: 10.75rem;
+  --census-table-width: calc(
+    var(--census-layer-width) + var(--census-band-width) + var(--census-expected-width) +
+      var(--census-returned-width) + var(--census-status-width) + 1rem
+  );
+
+  display: grid;
+  grid-template-areas:
+    "note    note"
+    "presets presets"
+    "stage   angles"
+    "stage   keys"
+    "stage   controls"
+    "furn    furn"
+    "census  census"
+    "hint    hint"
+    "legend  legend";
+  grid-template-columns: minmax(0, 1fr) max(24rem, var(--census-table-width));
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto auto auto;
+  gap: 0 1rem;
+}
+
+.local-chart--compact > :is(.local-chart__empty, .request-status) {
+  grid-area: note;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact > :is(.spatial-view, .census-readout),
+.local-chart--compact .spatial-view__controls {
+  display: contents;
+}
+
+.local-chart--compact .preset-buttons {
+  grid-area: presets;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact .spatial-view__angles {
+  grid-area: angles;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact .spatial-view__keys {
+  grid-area: keys;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact .spatial-view__stage {
+  grid-area: stage;
+}
+
+.local-chart--compact .spatial-view__furniture {
+  display: block;
+  grid-area: furn;
+  align-self: start;
+  margin-top: 0.25rem;
+}
+
+/* The frame, the centre, the time and the scale bar run on as one text, so that none waits a line. */
+.local-chart--compact .spatial-view__readings {
+  display: inline;
+}
+
+.local-chart--compact .spatial-view__readings > .spatial-reading {
+  display: inline-flex;
+  margin-right: 1.25rem;
+}
+
+.local-chart--compact .spatial-view__furniture > .scale-bar {
+  display: inline-flex;
+  vertical-align: bottom;
+}
+
+.local-chart--compact > .chart-controls {
+  grid-area: controls;
+  align-content: flex-start;
+  min-height: 0;
+}
+
+/* The mass floors' legend over its seven steps, so that they take one line of the column. */
+.local-chart--compact .chart-controls__floors > legend {
+  float: none;
+  line-height: 1.25;
+}
+
+/* Hidden while the census table stands in their place; their single keys stay live. */
+.local-chart--compact > .chart-controls[hidden] {
+  display: none;
+}
+
+.local-chart--compact .census-readout__row {
+  grid-area: census;
+  margin-top: 0.25rem;
+}
+
+.local-chart--compact .census-readout__hint {
+  grid-area: hint;
+  margin-top: 0.25rem;
+}
+
+/* Shown, the table takes the controls' area and its height, about nine rows at 1280 x 720. */
+.local-chart--compact .census-readout__by-layer {
+  grid-area: controls;
+  min-height: 0;
+}
+
+.local-chart--compact .census-readout__table {
+  min-height: 5rem;
+  max-height: none;
+}
+
+/*
+ * Tightened to their content, and their labels and states set at the guide's least letter spacing,
+ * 0.1em, so that the column leaves the chart as wide as it is tall at 1280 x 720 (ruling 149.1).
+ */
+.local-chart--compact .census-table :is(th, td):nth-child(1) {
+  width: var(--census-layer-width);
+}
+
+.local-chart--compact .census-table :is(th, td):nth-child(2) {
+  width: var(--census-band-width);
+}
+
+.local-chart--compact .census-table :is(th, td):nth-child(3) {
+  width: var(--census-expected-width);
+}
+
+.local-chart--compact .census-table :is(th, td):nth-child(4) {
+  width: var(--census-returned-width);
+}
+
+.local-chart--compact .census-table :is(thead th, .census-table__status) {
+  letter-spacing: 0.1em;
+}
+
+.local-chart--compact > .symbol-legend {
+  grid-area: legend;
+  margin-top: 0.25rem;
+}
+
+/*
+ * The HR DIAGRAM page: the title and the luminosity axis's label above the plot, which takes the
+ * height the page leaves, then the temperature axis's label, the counts and the legend.
+ */
+.galaxy-pages__page--hr {
+  display: flex;
+  grid-area: 2 / 1;
+  flex-direction: column;
+  margin-top: 0.5rem;
+}
+
+.hr-diagram {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.hr-diagram__title,
+.hr-diagram__axis-label {
+  flex: none;
+  margin: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.hr-diagram__title {
+  color: var(--text);
+}
+
+.hr-diagram__axis-label--x {
+  text-align: right;
+}
+
+.hr-diagram__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 8rem;
+  overflow: hidden;
+  background: var(--surface-0);
+}
+
+.hr-diagram__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* The tick values and class letters, DOM text placed over the canvas at the points they name. */
+.hr-diagram__labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hr-diagram__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Centred above the top axis, clear of the class boundaries' ticks. */
+.hr-diagram__label--class {
+  translate: -50% -110%;
+  color: var(--text);
+}
+
+/*
+ * The class letters' scale label: right-aligned against the left axis, level with the letters, and
+ * in their label's colour, since it names a scale as an axis label does (ruling 115.1).
+ */
+.hr-diagram__label--class-axis {
+  translate: calc(-100% - 0.25rem) -110%;
+  font-family: var(--font-sans);
+  letter-spacing: 0.15em;
+}
+
+/* Centred under the bottom axis. */
+.hr-diagram__label--x {
+  translate: -50% 0.125rem;
+}
+
+/* Right-aligned against the left axis, level with its grid line. */
+.hr-diagram__label--y {
+  translate: calc(-100% - 0.25rem) -50%;
+}
+
+.hr-diagram__counts {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  margin: 0;
+}
+
+.hr-diagram__count {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.hr-diagram__count dt {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.hr-diagram__counts--under {
+  padding-left: 1rem;
+}
+
+/* `NOT PLOTTED`, a heading over the counts it names, set as the readout's `STAR A` is. */
+.hr-diagram__counts-heading {
+  flex: none;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+.hr-diagram__count dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-diagram > .symbol-legend {
+  flex: none;
+}
+
+.hr-diagram--stale :is(.hr-diagram__labels, .hr-diagram__counts) {
+  color: var(--text-muted);
+}
+
+/* What the chart is asked for: the radius, the mass floor, the drive range and the time. */
+.chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 1rem;
+}
+
+.chart-controls > .panel__inhibit {
+  flex-basis: 100%;
+  margin-bottom: 0;
+}
+
+/* Label, value and unit on one line, with the format hint and any refusal after them. */
+.chart-controls__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
+  margin-bottom: 0;
+}
+
+.chart-controls__field > .form-field__label {
+  white-space: nowrap;
+}
+
+/* Room for the longest entry, -1000.00, in the field's own monospaced figures. */
+.chart-controls__input {
+  width: calc(8ch + 1rem + 2px);
+}
+
+.chart-controls__select {
+  width: auto;
+  min-width: 6rem;
+}
+
+.chart-controls__unit,
+.chart-controls__time-system {
+  color: var(--text-muted);
+}
+
+/* The format hint sits beside the unit, so that a field's line is the only line it takes. */
+.chart-controls__hint {
+  text-align: left;
+}
+
+.chart-controls__error {
+  flex-basis: 100%;
+}
+
+/* What the marks mean, under the chart: one wrapping row of drawn samples and words. */
+.symbol-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.symbol-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* An entry whose words may outrun the legend's row, such as a shape naming six kinds of star. */
+.symbol-legend__item--wraps {
+  white-space: normal;
+}
+
+/* A sample mark, drawn at the size class it stands for, its outline 1.5 px at every scale. */
+.symbol-legend__mark {
+  flex: none;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.symbol-legend__mark :is(circle, path) {
+  vector-effect: non-scaling-stroke;
+}
+
+.symbol-legend__mark--available {
+  color: var(--accent);
+}
+
+.symbol-legend__filled {
+  fill: currentColor;
+}
+
+.chart-controls__floors,
+.chart-controls__stars {
+  min-width: 0;
+}
+
+/*
+ * Seven floors since plan 13's two substellar steps: set closer than other choices, their edges
+ * without the labels' letter spacing (they are numbers, and `ALL` keeps it), so that at 1280 x 720
+ * the group still stands beside QUERY RADIUS and the chart keeps its height.
+ */
+.chart-controls__floors > .form-choice__options {
+  column-gap: 0.25rem;
+}
+
+.chart-controls__floors .form-choice__option {
+  letter-spacing: 0;
+}
+
+.chart-controls__all {
+  letter-spacing: 0.1em;
+}
+
+.chart-controls__floors > legend,
+.chart-controls__stars > legend {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+/*
+ * What the range query returned: the census line, the request's state and the counts, then RETRY
+ * after a failure and the control that shows the census layer by layer, all on one row, then the
+ * hint and the table on rows of their own. A column, so that the table is the part that gives way
+ * when the page is short.
+ */
+.census-readout {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.census-readout__row {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+}
+
+/*
+ * What the answer says, on one line with the control beside it. A box of its own because it is the
+ * announced region and the control is not, so it lays its own three parts out as the row would.
+ */
+.census-readout__summary {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+}
+
+.census-readout__line,
+.census-readout__hint {
+  margin: 0;
+  letter-spacing: 0.15em;
+}
+
+/* Nothing fitting the census limit is a limit reached, which the guide keeps yellow for. */
+.census-readout__line--caution {
+  color: var(--status-caution);
+}
+
+/*
+ * The request's state in words, in the announced region: PENDING, the link's state, or a failure.
+ * Its letter spacing and colours are `.request-status__text`'s, above, since it says what a status
+ * line would; RETRY stands outside the region, on the row beside it.
+ */
+.census-readout__state {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.census-readout__counts {
+  gap: 0.25rem 0.75rem;
+  grid-template-columns: repeat(2, max-content max-content);
+  margin: 0;
+}
+
+/* Aligned with the census line beside it; the guide's 2rem pointer target comes from `.control`. */
+.census-readout__toggle {
+  padding-left: 0;
+}
+
+.census-readout__hint {
+  flex: none;
+}
+
+/* The table gives way to the chart and scrolls in what is left; its position line never does. */
+.census-readout__by-layer {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.census-readout__by-layer > .list-position {
+  flex: none;
+}
+
+/*
+ * Shown, the table takes the chart's height; in the shortest window it scrolls instead of clipping.
+ * The cap leaves room for the position line under it, so that the whole block keeps the 6rem the
+ * page was measured with and the chart's stage keeps its floor.
+ */
+.census-readout__table {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 4.5rem;
+  overflow-y: auto;
+}
+
+.census-readout__by-layer[hidden] {
+  display: none;
+}
+
+/*
+ * Fixed columns, so that a new answer never moves them under the operator's eye, and fixed rows, so
+ * that the position beneath the table can be read from the offset.
+ */
+.census-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.census-table th,
+.census-table td {
+  padding: 0 0.5rem 0 0;
+  font-weight: 400;
+}
+
+.census-table tr {
+  height: 1.25rem;
+}
+
+/* Room for `LAYER`, the longest of the first column, so that it never meets `BAND M☉` beside it. */
+.census-table :is(th, td):nth-child(1) {
+  width: 7ch;
+}
+
+/* Room for the free-floating planets' `0.33 – 4132 M⊕` on one line, as a row's fixed height needs. */
+.census-table :is(th, td):nth-child(2) {
+  width: 14ch;
+  white-space: nowrap;
+}
+
+.census-table :is(th, td):nth-child(3),
+.census-table :is(th, td):nth-child(4) {
+  width: 9ch;
+}
+
+/* The column headers stay in view while the table scrolls, so no row is read without them. */
+.census-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.census-table tbody th,
+.census-table__band,
+.census-table__count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.census-table__count {
+  text-align: right;
+}
+
+.census-table__status {
+  letter-spacing: 0.15em;
+}
+
+/* The SYSTEMS panel: the chart's list and the readout of the system selected in it. */
+.systems-panel {
+  gap: 0.25rem;
+  font-size: 0.875rem;
+}
+
+/*
+ * The list and the readout share what the panel leaves, half each, and each scrolls inside itself
+ * with its position shown, so that at 1280 x 720 neither is cut off (plan 06, P06.T36). The list
+ * never shows fewer than four rows, its scrolling region's own minimum, the readout taking the
+ * rest: at 1280 x 720 half each left two.
+ */
+.system-list {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  container-type: inline-size;
+}
+
+/*
+ * Columns shared by the head and every row: designation, spectral class, star count, distance,
+ * mass, and range in words. The class is sized for the longest the server writes, seven characters
+ * (`B9.5Iab`, `esdM9.5`), in the monospaced figures, with room for their being wider than the row's
+ * own `ch`. The count takes its header's width with its letter spacing. The range, `IN` or `OUT`
+ * under a header that names the setting, wraps that header onto two lines as `INIT MASS` does and
+ * is as wide as its longer word, `RANGE`, with its letter spacing: ruling 115.5's 4ch holds `OUT`
+ * but not the header's words, which ran past the panel's edge at both sizes. A fixed width, since
+ * the head and each row are grids of their own and must share their columns. The mass holds a
+ * free-floating planet's `4132 M⊕` on one line, its unit drawn in the cell (plan 13, P13.T8.d).
+ */
+.system-list__head,
+.system-list__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8ch 6ch 6ch 8.5ch 6.5ch;
+  align-items: center;
+  gap: 0 0.375rem;
+}
+
+/*
+ * In a narrow list, as the SYSTEMS column is at 1280 x 720, six columns leave the designation too
+ * little room to read, so it takes a line of its own across the row and the other five share the
+ * second line under it, each row still 2 rem tall (the UX reviewer's should-fix, ruled by the
+ * orchestrator: the designation wraps onto its own line rather than being cut to `9G…`).
+ */
+@container (max-width: 30rem) {
+  .system-list__head,
+  .system-list__row {
+    grid-template-columns: minmax(0, 1fr) 6ch 6ch 8.5ch 6.5ch;
+  }
+
+  .system-list__row {
+    grid-template-rows: 1rem 1rem;
+    align-content: center;
+    line-height: 1rem;
+  }
+
+  .system-list__head > :first-child,
+  .system-list__designation {
+    grid-column: 1 / -1;
+  }
+
+  /* The second line set in under the designation, so that each two-line row reads as one. */
+  .system-list__head > :nth-child(2),
+  .system-list__row > :nth-child(2) {
+    padding-left: 1rem;
+  }
+}
+
+.system-list__head {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.system-list__scroll {
+  flex: 1 1 0;
+  min-height: 8rem;
+  overflow-y: auto;
+}
+
+.system-list__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* As tall as every row, so that the scrollbar measures the whole list, not the window rendered. */
+.system-list__rows {
+  position: relative;
+}
+
+.system-list__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2rem;
+  padding: 0 0.125rem;
+  cursor: pointer;
+}
+
+/* Within the drive range: --accent, as its symbol is, and the words beside it say so too. */
+.system-list__row--in-range {
+  color: var(--accent);
+}
+
+.system-list__row:hover {
+  background: var(--surface-2);
+}
+
+/* The selected row carries a rule down its edge, a shape as well as its surface. */
+.system-list__row[aria-selected="true"] {
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  padding-left: 0;
+}
+
+.system-list__designation {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-list__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.system-list__range {
+  letter-spacing: 0.1em;
+}
+
+.system-list__class {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/*
+ * The readings' own scrolling region; their offset parent, so that each is measured in it. Inset
+ * by the focus ring's width, so that the ring never covers a reading, and a container, so that a
+ * narrow column sets one reading to a line rather than scrolling sideways.
+ */
+/*
+ * The readout gives up one line, but no more, while `OPEN SYSTEM`'s held reason wraps under the
+ * button at 1280 x 720 (`BODIES NOT YET MODELLED`, the orchestrator's ruling 134.5), so that the
+ * reason is never pushed out of the panel.
+ */
+.system-readout__scroll {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 4rem;
+  overflow-y: auto;
+  padding: 0.125rem 0.25rem;
+  container-type: inline-size;
+}
+
+/* Inset, so that the panel's edge never clips it. */
+.system-readout__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.systems-panel > .list-position,
+.systems-panel > .request-status {
+  flex: none;
+}
+
+/* The primary's readings, under their own heading, as a panel's title is set. */
+.system-readout__heading,
+.cursor-readout__heading {
+  margin: 0.75rem 0 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+/* `[Fe/H]` is a symbol, and keeps its case. */
+.readout dt.system-readout__symbol {
+  text-transform: none;
+}
+
+/* Every star and orbit of the selected system, a table each, numbers right-aligned. */
+.star-list__table {
+  margin-top: 0.75rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.star-list__caption {
+  color: var(--text-muted);
+  letter-spacing: 0.2em;
+  text-align: left;
+}
+
+.star-list__table th {
+  color: var(--text-muted);
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-align: left;
+}
+
+.star-list__table :is(th, td) {
+  padding: 0.125rem 1.5rem 0.125rem 0;
+}
+
+.star-list__table td {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.star-list__table .star-list__number {
+  text-align: right;
+}
+
+.star-list__unit {
+  color: var(--text-muted);
+}
+
+/* The last column needs no gap after it: its room goes to the longest binary class (ruling 130.5). */
+.star-list__table :is(th, td):last-child {
+  padding-right: 0;
+}
+
+/* A hyphenated word is never split across lines (ruling 130.5). */
+.star-list__whole {
+  white-space: nowrap;
+}
+
+/* A section of the list that the server does not compute yet, said once. */
+.star-list__note {
+  margin: 0.75rem 0 0;
+  letter-spacing: 0.15em;
+}
+
+/* Everything known about the selected system, two labelled values to a line. */
+.system-readout__values {
+  grid-template-columns: repeat(2, max-content minmax(0, 1fr));
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.system-readout__wide {
+  grid-column: 2 / -1;
+}
+
+/*
+ * A wide reading starts a row of its own, its label in the first column, so that the label never
+ * stands at the end of one row with its value under the next (plan 13's `KIND`, `BULK` and
+ * `STATE`, and `STARS NOT YET FORMED`).
+ */
+.system-readout__values > dt:has(+ .system-readout__wide) {
+  grid-column: 1;
+}
+
+/* In a narrow column, one reading to a line; after the rules above, so that it overrides them. */
+@container (max-width: 30rem) {
+  .system-readout__values {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .system-readout__wide {
+    grid-column: 2;
+  }
+}
+
+.system-readout__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.system-readout__unit {
+  color: var(--text-muted);
+}
+
+.system-readout__beside {
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+/* The CURSOR panel: the cursor's coordinates to enter, CENTRE CHART, and its GALACTIC reading. */
+.centre-entry {
+  font-size: 0.875rem;
+}
+
+.centre-entry__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.75rem;
+}
+
+.galaxy .centre-entry__head > .panel__title {
+  margin: 0;
+}
+
+.centre-entry__head > .control {
+  margin-left: auto;
+}
+
+.centre-entry__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.centre-entry__field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Room for the longest entry, -65,535.9999, in the field's own monospaced figures. */
+.centre-entry__input {
+  width: calc(12ch + 1rem + 2px);
+}
+
+.centre-entry__unit {
+  color: var(--text-muted);
+}
+
+/* A control's single-key binding, shown on it as the guide asks. */
+.control__key {
+  font-family: var(--font-mono);
+}
+
+/* The cursor's galactic readings, under their frame's heading as the system readout's are. */
+.cursor-readout__heading {
+  margin: 0.5rem 0 0;
+}
+
+.cursor-readout__values {
+  grid-template-columns: repeat(2, max-content max-content);
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.cursor-readout__values dd {
+  white-space: nowrap;
+}
+
+/*
+ * A value right-aligned in room for the longest, -65,536.0, and its unit in a slot of its own, so
+ * that decimal points line up down each column, the degree sign's too.
+ */
+.cursor-readout__value {
+  display: inline-block;
+  min-width: 9ch;
+  text-align: right;
+}
+
+.cursor-readout__unit {
+  display: inline-block;
+  min-width: 1.25rem;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+/* Text for assistive technology alone, such as the cursor's position announced as a whole. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * The general 3D spatial view: its preset views, camera angles and key legend, then the canvas with
+ * DOM over it (labels and furniture, which take no pointer, so that the canvas gets every drag and
+ * pick), then its frame, centre and time. The canvas fills the stage, which the view's container
+ * sizes.
+ */
+.spatial-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  min-height: 0;
+  font-size: 0.875rem;
+}
+
+/*
+ * The preset buttons, the camera's angles and the key legend, above the view and outside its
+ * overlay, so that the buttons take a pointer.
+ */
+.spatial-view__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+}
+
+.preset-buttons {
+  display: flex;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+/*
+ * The preset the camera looks along carries a rule under it, a shape as well as its pressed state;
+ * the others keep room for it, so that nothing moves.
+ */
+.preset-buttons__button {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.preset-buttons__button[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+/*
+ * Each key and what it does stays on one line, and the legend wraps between them. Inline, so that
+ * the spaces between the keys are laid out and read out as spaces.
+ */
+.spatial-view__keys {
+  margin: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.spatial-view__key {
+  display: inline-block;
+  margin-right: 0.75rem;
+  white-space: nowrap;
+}
+
+.spatial-view__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 12rem;
+  outline: 1px solid var(--line);
+}
+
+/* Every drag and pinch on the canvas is the view's, never the page's. */
+.spatial-view__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--surface-0);
+  touch-action: none;
+}
+
+/* Inset, so that the panel around the view never clips it. */
+.spatial-view__canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.spatial-view__overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/*
+ * The labelled values around a spatial view, `AZM 030°` or `RADIUS 26,000.0 ly`, set as `.field`s:
+ * each value right-aligned in a slot of fixed width, its unit muted after it. The rows wrap between
+ * values.
+ */
+.spatial-view__angles,
+.spatial-view__readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0;
+}
+
+.spatial-reading {
+  white-space: nowrap;
+}
+
+.spatial-reading dd {
+  margin: 0;
+}
+
+.spatial-reading__value {
+  display: inline-block;
+  text-align: right;
+}
+
+.spatial-reading__unit {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+/*
+ * Below the view, in the same place on every spatial display: the frame, the centre and the time,
+ * the scale bar, and on the galactic axis why the directions are undefined.
+ */
+.spatial-view__furniture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.25rem 1.5rem;
+}
+
+/*
+ * Why the named directions are undefined, in the create form's plain-text voice: not an alert, a
+ * limit nor a failed system, and unspaced, since what follows the annunciated condition is a
+ * sentence in mixed case.
+ */
+.spatial-view__axis-note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* A 1-2-5 length: a bar with end ticks, and the length it stands for. */
+.scale-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.scale-bar__slot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.scale-bar__bar {
+  height: 0.5rem;
+  border: 1px solid var(--text);
+  border-top: 0;
+}
+
+/* Room for the longest length, `20,000 ly` or `0.05 ly`, so that the bar never moves. */
+.scale-bar__label {
+  min-width: 9ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Labels over the canvas, placed by the view from the draw list, each moved from the top left. */
+.spatial-view__labels {
+  position: absolute;
+  inset: 0;
+}
+
+/* A mark's label, its designation; no letter spacing, since its box is estimated from its length. */
+.spatial-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+/* A mark within the drive range is labelled in the colour of its symbol. */
+.spatial-label--available {
+  color: var(--accent);
+}
+
+/*
+ * The label of a sphere or a ring: a label, muted, spaced as labels are, its number in monospaced
+ * figures. `RANGE 50 ly SET` stays muted too: the range is an entered setting, never a reading.
+ */
+.spatial-label--curve {
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.spatial-label__figures,
+.core-arrow__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/*
+ * The axis triad, in the view's bottom left-hand corner, sized by the view: its axes about the
+ * centre of its box, drawn in user units of a sixteenth of a rem.
+ */
+.axis-triad {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  color: var(--text);
+}
+
+.axis-triad__axes,
+.core-arrow__mark {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+/*
+ * Every stroke of the triad and the arrow stays 1.5 CSS pixels at every interface scale, as the
+ * canvas's own lines do (design notes D13 and D14 give sizes in `rem` and line weights in pixels).
+ * The triad's user units are a sixteenth of a `rem`, so without this its axes would reach 2.25 px at
+ * 150% beside a 1.5 px range circle. `vector-effect` is not inherited, so it goes on the shapes.
+ */
+.axis-triad__axes :is(line, polyline, circle, path),
+.core-arrow__mark :is(line, polyline, circle, path) {
+  vector-effect: non-scaling-stroke;
+}
+
+.axis-triad__dot,
+.core-arrow__dot {
+  fill: currentColor;
+  stroke: none;
+}
+
+.axis-triad__label,
+.core-arrow__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.25;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* The core arrow at the rim of the view, drawn in the view's CSS pixels. */
+.core-arrow {
+  position: absolute;
+  inset: 0;
+  color: var(--text);
+}
+
+.core-arrow__value {
+  color: var(--text);
+}
+
+/*
+ * OPEN SYSTEM, after the selected system's readout and outside its live region, with why it is
+ * held back while nothing is selected.
+ */
+.systems-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.75rem;
+}
+
+.systems-panel__reason {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+/*
+ * The SYSTEM display, in two columns: the orbit map over the display time, and the bodies beside
+ * them. The bodies' column is wide enough for a designation, a kind and a semi-major axis to a row,
+ * 24rem at least; the map takes the rest.
+ */
+.console__work--system {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.system {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(24rem, 1fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.system--empty {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+}
+
+.system__column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.system .panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
+.system .panel__title {
+  margin-bottom: 0.25rem;
+}
+
+/* The map and the bodies take what their columns leave; the display time keeps its own height. */
+.system__map,
+.system__bodies {
+  flex: 1 1 auto;
+}
+
+/*
+ * The display time keeps its own height, as little of it as it can: its title and the time share
+ * the first line, as the map's title and its system do, and the controls take the lines under
+ * them, so that the map above keeps what it can at 1280 x 720.
+ */
+.system .system__time {
+  flex: none;
+  flex-flow: row wrap;
+  align-items: baseline;
+  gap: 0.25rem 2rem;
+}
+
+.system .system__time > .panel__title {
+  margin-bottom: 0;
+}
+
+.system__time > .time-control__controls {
+  flex: 1 0 100%;
+}
+
+/* The map's title, the system it shows, its zoom presets and a newer request's state, on one row. */
+.orbit-map__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+  min-height: 2rem;
+}
+
+.system .orbit-map__head > .panel__title {
+  margin: 0;
+}
+
+.orbit-map__system {
+  letter-spacing: 0.1em;
+}
+
+.orbit-map__zoom {
+  display: flex;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+/* The preset chosen carries a rule under it, as a view preset does, so that nothing moves. */
+.orbit-map__zoom-button {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.orbit-map__zoom-button[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+.orbit-map__head > .request-status {
+  margin: 0;
+}
+
+/* The map keeps its stage and gives way to nothing: the legend and the note are a line or two. */
+.orbit-map > .spatial-view {
+  flex: 1 1 auto;
+}
+
+.orbit-map > :is(.symbol-legend, .orbit-map__note) {
+  flex: none;
+}
+
+.orbit-map .spatial-view__stage {
+  min-height: 8rem;
+}
+
+.orbit-map__empty {
+  margin: 0.5rem 0 0;
+}
+
+/* What is not modelled, then what is withheld: each line a field label and its state (ruling 113.2). */
+.orbit-map__note {
+  margin: 0;
+  letter-spacing: 0.15em;
+}
+
+.orbit-map--stale .orbit-map__note {
+  color: var(--text-muted);
+}
+
+/* A path sample in the legend, 1 px for an orbit and 2 px for the selected one, as the map draws. */
+.orbit-legend__path {
+  width: 1rem;
+  height: 0.25rem;
+}
+
+.orbit-legend__path--reference path {
+  stroke-width: 1;
+}
+
+.orbit-legend__path--selected path {
+  stroke-width: 2;
+}
+
+/* The display time, and the controls that step it, on as few lines as they fit. */
+.time-control__time {
+  font-size: 1.125rem;
+}
+
+.time-control__value {
+  display: inline-block;
+  min-width: 21ch;
+  text-align: right;
+}
+
+.time-control__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+}
+
+.time-control__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.time-control__steps > .control {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.time-control__steps > .control[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+.time-control__moves {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.time-control__limit,
+.time-control__reason {
+  letter-spacing: 0.15em;
+}
+
+/* The mode in words, sized for its longest, RUN 10 d/s, so that the controls after it keep still. */
+.time-control__mode .field__value {
+  display: inline-block;
+  min-width: 10ch;
+}
+
+/* The system's name, age and metallicity above its bodies. */
+.bodies-panel__system {
+  grid-template-columns: repeat(2, max-content minmax(0, 1fr));
+  gap: 0.25rem 0.75rem;
+}
+
+.bodies-panel__wide {
+  grid-column: 2 / -1;
+}
+
+.bodies-panel__unit {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+/* [Fe/H] is a symbol, as a unit is, and keeps its case (the owner's draft of the guide's units). */
+.readout dt.bodies-panel__symbol {
+  text-transform: none;
+}
+
+/*
+ * The list and the readout share what the panel leaves, each from its own content's height, and
+ * give way in proportion to it, each scrolling inside itself: neither falls below three rows'
+ * height, so that at 1280 x 720 a planet's readout and a system of many bodies both stay usable.
+ */
+.body-list {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/*
+ * Columns shared by the head and every row: designation, kind, and semi-major axis, whose column
+ * holds the widest a wide binary's can read, `531,000 AU`, and the longest state that stands in
+ * for it, `NOT YET FORMED`.
+ */
+.body-list__head,
+.body-list__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 15ch;
+  align-items: center;
+  gap: 0 0.375rem;
+}
+
+.body-list__head {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.body-list__scroll {
+  flex: 1 1 auto;
+  min-height: 6rem;
+  overflow-y: auto;
+}
+
+.body-list__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.body-list__row {
+  height: 2rem;
+  padding: 0 0.125rem;
+  cursor: pointer;
+}
+
+.body-list__row:hover {
+  background: var(--surface-2);
+}
+
+/* The row the keys have reached, while the tree has the focus: an inset rule, not a colour. */
+.body-list__scroll:focus-visible .body-list__row--active {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The selected row carries a rule down its edge, a shape as well as its surface. */
+.body-list__row[aria-selected="true"] {
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  padding-left: 0;
+}
+
+.body-list__designation,
+.body-list__kind {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body-list__kind {
+  letter-spacing: 0.1em;
+}
+
+.body-list__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* A body's state in the axis's place: words, in the words' face. */
+.body-list__state {
+  font-family: var(--font-sans);
+}
+
+.body-list__head > .body-list__number {
+  font-family: var(--font-sans);
+}
+
+.body-list__unit {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+/*
+ * The readings scroll inside their own region, the offset parent their position is measured by,
+ * and a container, so that a narrow column sets one reading to a line rather than scrolling
+ * sideways, as the chart's readout does (the guide's § Layout: never scroll horizontally).
+ */
+.body-readout__scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 6rem;
+  overflow-y: auto;
+  container-type: inline-size;
+}
+
+/* Inset, so that the panel's edge never clips it. */
+.body-readout__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.bodies-panel > .list-position {
+  flex: none;
+}
+
+/* Everything known about the selected body, two labelled values to a line. */
+.body-readout__values {
+  grid-template-columns: repeat(2, max-content minmax(0, 1fr));
+  gap: 0.25rem 0.75rem;
+}
+
+.body-readout__wide {
+  grid-column: 2 / -1;
+}
+
+/*
+ * A value that takes the rest of its row starts a row of its own, its label at the left, however
+ * many readings came before it: a remnant's rows would otherwise leave a label in the third column.
+ */
+.body-readout__values > dt:has(+ .body-readout__wide) {
+  grid-column: 1;
+}
+
+/*
+ * In a narrow column, as the bodies column is at 1280 x 720, one reading to a line, at the chart's
+ * readout's width; after the rules above, so that it overrides them.
+ */
+@container (max-width: 30rem) {
+  .body-readout__values {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .body-readout__wide {
+    grid-column: 2;
+  }
+}
+
+.body-readout__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.body-readout__unit {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+/* Why a value is missing, in words after its em dash. */
+.body-readout__why {
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  letter-spacing: 0.1em;
+}
+
+/* An answer the link no longer backs: muted, as the chart's list and readout are, with its S. */
+.bodies-panel--stale :is(.bodies-panel__system, .body-list, .body-readout) {
+  color: var(--text-muted);
+}

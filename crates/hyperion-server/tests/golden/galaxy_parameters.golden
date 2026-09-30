@@ -1,0 +1,831 @@
+# generator_version = 16
+{
+  "type": "response",
+  "id": 3,
+  "body": {
+    "kind": "galaxy_parameters",
+    "universe": "5eed000000000001",
+    "seed": "00000000000004d2",
+    "generator_version": 16,
+    "groups": [
+      {
+        "key": "identity",
+        "parameters": [
+          {
+            "key": "seed",
+            "origin": "fixed",
+            "value": {
+              "type": "text",
+              "value": "00000000000004d2"
+            }
+          },
+          {
+            "key": "generator_version",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 16.0,
+              "unit": "count"
+            }
+          },
+          {
+            "key": "mass_function",
+            "origin": "fixed",
+            "value": {
+              "type": "text",
+              "value": "chabrier"
+            }
+          }
+        ]
+      },
+      {
+        "key": "mass",
+        "parameters": [
+          {
+            "key": "stellar_mass",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 63300018938.424225,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "system_count",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 105866012993.75874,
+              "unit": "count"
+            }
+          },
+          {
+            "key": "mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.5979257851351787,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "mean_formed_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 1.0960630250705998,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "gas.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 9070044914.94751,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "black_hole.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 84173629.87499472,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "nuclear_cluster.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 38040514.463783935,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "dark_halo.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 1552715745935.7178,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "dark_halo.concentration",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 8.897978484307282,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "dark_halo.virial_radius",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 801361.6292829361,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "dark_halo.f_star",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.2596642914571138,
+              "unit": "none"
+            }
+          }
+        ]
+      },
+      {
+        "key": "populations",
+        "parameters": [
+          {
+            "key": "population.young_thin_disc.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.001964116846385917,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "population.old_thin_disc.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.5628415170329383,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "population.thick_disc.share",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.13866731013161998,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "population.bulge.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.17525560525864653,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "population.long_bar.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.08430137882126902,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "population.nuclear_disc.share",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.024054494271168278,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "population.halo.share",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.012915577637972022,
+              "unit": "none"
+            }
+          }
+        ]
+      },
+      {
+        "key": "population_masses",
+        "parameters": [
+          {
+            "key": "population.young_thin_disc.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 181551660.22225544,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.old_thin_disc.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 36033059816.70992,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.thick_disc.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 8732703080.102425,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.bulge.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 10775943933.253616,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.long_bar.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 5258444521.796525,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.nuclear_disc.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 1489967270.6235836,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.halo.mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 828348655.715912,
+              "unit": "msun"
+            }
+          }
+        ]
+      },
+      {
+        "key": "population_mean_masses",
+        "parameters": [
+          {
+            "key": "population.young_thin_disc.mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.8731248455071842,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.old_thin_disc.mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.6047257477969993,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.thick_disc.mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.5948644907152525,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.bulge.mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.5808003221503708,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.long_bar.mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.5892045079338087,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.nuclear_disc.mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.5850917042727128,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "population.halo.mean_system_mass",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.6058188467646275,
+              "unit": "msun"
+            }
+          }
+        ]
+      },
+      {
+        "key": "discs",
+        "parameters": [
+          {
+            "key": "disc.thin.scale_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 7111.735994710872,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "disc.thin.scale_height",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 903.2471538973209,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "disc.young.scale_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 7111.735994710872,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "disc.young.scale_height",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 293.6017940405874,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "disc.thick.scale_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 5016.145462011137,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "disc.thick.scale_height",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 2971.145446370232,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "disc.gas.scale_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 13295.057480216623,
+              "unit": "ly"
+            }
+          }
+        ]
+      },
+      {
+        "key": "bulge_and_bar",
+        "parameters": [
+          {
+            "key": "bulge.scale_x",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 2002.1520724910022,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "bulge.scale_y",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 1197.2955861243324,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "bulge.scale_z",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 716.2025157092925,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "bulge.boxiness",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 3.746208490412897,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "bar.share_of_bulge",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.3247894835891347,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "bar.half_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 18000.0,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "bar.width",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 2079.2719190741927,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "bar.height",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 680.6074203570358,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "bar.corotation_ratio",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 1.1579607917961416,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "bar.corotation_radius",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 20843.29425233055,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "bar.pattern_speed",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 2.2632458557052706,
+              "unit": "deg_per_myr"
+            }
+          }
+        ]
+      },
+      {
+        "key": "nuclear_disc",
+        "parameters": [
+          {
+            "key": "nuclear_disc.scale_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 382.38118583663413,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "nuclear_disc.scale_height",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 162.08160148708285,
+              "unit": "ly"
+            }
+          }
+        ]
+      },
+      {
+        "key": "halo",
+        "parameters": [
+          {
+            "key": "halo.in_situ.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.2466024485489938,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.dominant_merger.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.5121312251243375,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.lesser.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.11887416977802226,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.globular_debris.share",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.12239215654864648,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.in_situ.slope",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 2.613405178465104,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.dominant_merger.slope",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 2.3479116461297487,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.globular_debris.slope",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 4.2320794140834925,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.in_situ.core",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 2043.4999245711215,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "halo.dominant_merger.core",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 3772.9177409081876,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "halo.globular_debris.core",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 4778.793664900837,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "halo.in_situ.flattening",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.47050958543844945,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.dominant_merger.flattening",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.6851910154103342,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.dominant_merger.break_radius",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 73142.72611002231,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "halo.dominant_merger.break_steepening",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 2.332083405000017,
+              "unit": "none"
+            }
+          }
+        ]
+      },
+      {
+        "key": "arms",
+        "parameters": [
+          {
+            "key": "arms.count",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 4.0,
+              "unit": "count"
+            }
+          },
+          {
+            "key": "arms.pitch",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 12.880827357368378,
+              "unit": "deg"
+            }
+          },
+          {
+            "key": "arms.young_width",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 495.0537927342212,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "arms.young_fraction",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.8652021753187439,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "arms.old_amplitude",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.21970534296686434,
+              "unit": "none"
+            }
+          }
+        ]
+      },
+      {
+        "key": "history",
+        "parameters": [
+          {
+            "key": "history.formation_timescale",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 5.397267313797671,
+              "unit": "gyr"
+            }
+          },
+          {
+            "key": "history.last_major_merger",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 7.765511392372883,
+              "unit": "gyr"
+            }
+          },
+          {
+            "key": "history.globular_clusters",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 159.0,
+              "unit": "count"
+            }
+          }
+        ]
+      },
+      {
+        "key": "rotation",
+        "parameters": [
+          {
+            "key": "rotation.radius",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 26000.0,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "rotation.circular_speed",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 242.28723775014856,
+              "unit": "km_per_s"
+            }
+          },
+          {
+            "key": "rotation.escape_speed",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 574.0160483642111,
+              "unit": "km_per_s"
+            }
+          }
+        ]
+      },
+      {
+        "key": "substellar",
+        "parameters": [
+          {
+            "key": "substellar.brown_dwarfs_per_system",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.2613276418812181,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "substellar.rogue_planets_per_system",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 30.18334263728069,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "substellar.rogue_planet_cap_per_system",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 23.00860934135971,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "substellar.rogue_planets_capped",
+            "origin": "derived",
+            "value": {
+              "type": "text",
+              "value": "yes"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

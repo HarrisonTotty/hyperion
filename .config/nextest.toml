@@ -1,0 +1,51 @@
+# cargo-nextest, which `just test-slow` runs the slow tests under. Unlike `cargo test`, which runs
+# its test binaries one after another and so leaves most cores idle while a binary with one long
+# test finishes, nextest schedules every test of every binary on one pool of `num-cpus` slots.
+#
+# Each test runs in its own process, so a `OnceLock` shared between tests is built once per test,
+# not once per binary: slow tests that would share expensive data are written as one test instead.
+
+[profile.slow]
+# Report every failure of a 20-minute run, not only the first.
+fail-fast = false
+# A slow test is flagged after 2 minutes; none is ever killed.
+slow-timeout = "120s"
+
+# The budget of the 512-pixel density maps is stated in `math::exp` calls timed at the pool's
+# width, and the test asserts that the pool is seen running a band on every worker at once. It
+# takes every slot, so it runs alone rather than contending with the other slow tests.
+[[profile.slow.overrides]]
+filter = "package(hyperion-server) & binary(density_map) & test(=density_map_512_builds_within_budget)"
+threads-required = "num-cpus"
+
+# Nextest starts tests in binary order, so without priorities the longest ones could start ten
+# minutes in and then run alone for the last quarter of an hour. Higher priorities start sooner
+# (-100 to 100); the order follows each test's slot time in the slow-test audit of 2026-09-27,
+# longest first. The flared hunt is four shards of about a quarter of its old time each.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(galaxy_sweeps) & test(=the_rotation_curve_over_four_thousand_seeds)"
+priority = 100
+
+# The million-system satellite check shares its cells among its own threads: it takes four slots
+# rather than a nominal one, so its threads do not slow the tests beside it, and it is capped at
+# four threads to match (`check_all` in `planetary_properties.rs`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(planetary_properties) & test(=satellites::moons_inside_hill_spheres_and_rings_inside_roche_limits_slow)"
+threads-required = 4
+priority = 90
+
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(galaxy_sweeps) & (test(=the_fields_over_a_thousand_seeds) | test(=the_densities_over_a_thousand_seeds))"
+priority = 80
+
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(galaxy_displaced_bounds) & test(/^hunt_flared_violations_in_the_inner_galaxy/)"
+priority = 70
+
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(galaxy_sweeps) & test(=every_getter_lies_in_its_range_and_sizes_follow_the_cube_root_over_ten_thousand_seeds)"
+priority = 60
+
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(gas_statistics) & test(=the_neutral_disc_holds_most_of_the_gas_over_2000_galaxies)"
+priority = 60

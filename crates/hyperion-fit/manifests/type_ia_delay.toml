@@ -1,0 +1,9 @@
+# The Type Ia delay-first samplers (plan 15, P15.T9.a): the delay-time distribution, lifetimes,
+# the mass function and the pair model are the sim's own (plan 09's `type_ia`, plan 06's tracks,
+# plan 02's Chabrier function), read through its public API and pinned by the fingerprint. The
+# seed is the Milky Way fixture's, for the mass function and the acceptance's rate and ancient
+# shares.
+task = "type_ia_delay"
+
+[params]
+seed = 0x0918_0001

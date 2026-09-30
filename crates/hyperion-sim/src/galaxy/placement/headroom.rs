@@ -1,0 +1,462 @@
+//! The index-headroom check: no cell of any layer may draw more candidates than its layer's index
+//! field can number (plan 03, Design note 6), the substellar layers included since plan 13.
+//!
+//! A cell's candidate count is a Poisson draw ([`candidate_count`](super::candidate_count)), so
+//! nothing but a bound on its mean keeps it inside the layer's index capacity. A count above the
+//! capacity would be clamped, and a clamped cell is silently short of systems in release builds,
+//! which is exactly the failure mode the brainstorm's bound discussion warns about. So a galaxy is
+//! checked once, when it is built for play, and refused if any layer's densest possible cell comes
+//! within eight standard deviations of its capacity.
+//!
+//! The largest mean is [`Fields::layer_bound`] over the boxes of a partition of the root cube,
+//! times the layer's cell volume ([`partition`]): in each octant, the 8 × 8 × 8 cells of the layer
+//! about the origin, then shells of seven boxes each of twice the last edge, out to the cube's
+//! faces. Every box is a power of two aligned on its own edge, so every cell of the layer lies
+//! inside exactly one of them, and a bound is monotone in its box (a larger box has a nearer
+//! corner, a larger radius and a wider range of arm phase), so the largest of their bounds is at
+//! least every cell's (plan 02, R17). One root octant, whose nearest corner is the origin, was
+//! enough while every envelope but the thin discs' peaked there; the nuclear disc's inner part has
+//! a central hole of scale 25 ly at Milky Way values, and a holed disc's bound takes the
+//! exponential at the box's nearest radius and the hole's factor at its largest (plan 02,
+//! P02.T12.b), which over the octant is the part's amplitude at the centre, four and a half times
+//! its greatest density, a ring near 33 ly (plan 02, R26). It is not the sum of the components'
+//! density peaks, because plan 02's bound multiplies each envelope by an arm factor's bound over
+//! the cell.
+//!
+//! The rogue planets' 16-bit index is the tightest of all. By ruling 125 their density and bound
+//! saturate at [`rogue_planet_saturation_density`], the largest mean this check allows over a 4 ly
+//! cell's volume, so the check passes for them by construction, for every galaxy and every
+//! abundance (plan 13, Design note 8).
+
+use super::cell::CellKey;
+use super::layers::{STELLAR_LAYERS, SUBSTELLAR_LAYERS};
+use super::{ExceedIndexCapacityError, LayerSpec};
+use crate::coords::ROOT_HALF_WIDTH_LY;
+use crate::galaxy::Galaxy;
+use crate::galaxy::bounds::CellBox;
+#[cfg(doc)]
+use crate::galaxy::fields::Fields;
+use crate::galaxy::imf::MassBand;
+use crate::id::Layer;
+
+/// How many standard deviations of a cell's Poisson draw must fit between the largest mean and the
+/// index capacity: eight, about one chance in 10¹⁵ of a draw above the capacity per cell (plan 03,
+/// Design note 6).
+const HEADROOM_SIGMAS: f64 = 8.0;
+
+/// Checks that no cell of `galaxy` can draw more candidates than its layer's IDs can number.
+///
+/// Whoever builds a [`Galaxy`] for play calls this once (plan 04's `GalaxyCache`, in
+/// `compute/galaxies.rs`; the universe registry never builds one). Nothing on
+/// the hot path calls it: [`candidate_count`](super::candidate_count) clamps instead, and this check
+/// exists so that no galaxy which could reach the clamp is ever played.
+///
+/// # Errors
+///
+/// [`ExceedIndexCapacityError::LayerTooDense`] naming the first layer, the stellar layers coarsest
+/// to finest and then the brown dwarfs and the rogue planets, whose largest possible candidate
+/// count plus eight standard deviations reaches its index capacity. A bound that is not finite
+/// fails the same way.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::check_index_headroom;
+///
+/// // Every galaxy a seed can draw has room; the fullest layer-A cell expects some 6,000
+/// // candidates of 65,536.
+/// check_index_headroom(&Galaxy::new(Seed::new(1)))?;
+/// # Ok::<(), hyperion_sim::galaxy::placement::ExceedIndexCapacityError>(())
+/// ```
+pub fn check_index_headroom(galaxy: &Galaxy) -> Result<(), ExceedIndexCapacityError> {
+    for spec in STELLAR_LAYERS.into_iter().chain(SUBSTELLAR_LAYERS) {
+        let largest_mean = largest_cell_mean(galaxy, spec);
+        let capacity = capacity_of(spec);
+        if !fits_capacity(largest_mean, capacity) {
+            return Err(ExceedIndexCapacityError::LayerTooDense {
+                layer: spec.layer(),
+                largest_mean,
+                capacity,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// One octant of the root cube, which the tests' sweeps check the partition against.
+///
+/// # Panics
+///
+/// Never: the edge is a power of two, the box is the octant `[0, 65_536]³` of the root cube, and it
+/// touches the axis planes without crossing one.
+#[cfg(test)]
+#[must_use]
+fn root_octant() -> CellBox {
+    CellBox::new([0, 0, 0], ROOT_HALF_WIDTH_LY.unsigned_abs())
+        .expect("a root octant is a power-of-two box inside the cube that straddles no plane")
+}
+
+/// The largest number of candidates any cell of the layer can expect: the greatest bound over the
+/// [`partition`] times the layer's cell volume.
+#[must_use]
+fn largest_cell_mean(galaxy: &Galaxy, spec: LayerSpec) -> f64 {
+    let (fields, shares) = (galaxy.fields(), galaxy.shares());
+    let bound = partition(spec.layer().cell_size_ly())
+        .iter()
+        .map(|cell| fields.layer_bound(shares, spec.band(), cell))
+        .fold(0.0, f64::max);
+    saturated(spec.band(), bound) * cell_of(spec).volume_ly3()
+}
+
+/// The partition of the root cube the largest mean is taken over, for cells of `cell` ly (module
+/// documentation): in each octant, the 8 × 8 × 8 cells about the origin, then shells of the 7
+/// boxes of the doubled edge that the cube of twice the last shell's extent holds besides it, to
+/// the cube's faces; 4,656 boxes for layer A's 8 ly cells.
+///
+/// # Panics
+///
+/// Never for a layer's cell size, a power of two from 4 to 128 ly: every box is a power of two
+/// aligned on its edge inside one octant.
+#[must_use]
+pub(crate) fn partition(cell: u32) -> Vec<CellBox> {
+    let half = ROOT_HALF_WIDTH_LY.unsigned_abs();
+    let mut octant = Vec::new();
+    for i in 0..8_u32 {
+        for j in 0..8_u32 {
+            for k in 0..8_u32 {
+                octant.push(([i, j, k], cell));
+            }
+        }
+    }
+    // The shell of edge e is [0, 2e]³ less [0, e]³: seven boxes.
+    let mut edge = 8 * cell;
+    while edge < half {
+        for [i, j, k] in [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 1, 0],
+            [1, 0, 1],
+            [0, 1, 1],
+            [1, 1, 1],
+        ] {
+            octant.push(([i, j, k], edge));
+        }
+        edge *= 2;
+    }
+    let mut boxes = Vec::with_capacity(8 * octant.len());
+    for (index, edge) in octant {
+        let e = i32::try_from(edge).expect("an edge inside the root cube fits an i32");
+        for signs in 0..8_u8 {
+            // Index n on the positive side and −n − 1 on the negative.
+            let at = |axis: usize| {
+                let n = i32::try_from(index[axis]).expect("an index under 8");
+                if signs >> axis & 1 == 0 {
+                    n * e
+                } else {
+                    -(n + 1) * e
+                }
+            };
+            boxes.push(
+                CellBox::new([at(0), at(1), at(2)], edge)
+                    .expect("an aligned power-of-two box in one octant"),
+            );
+        }
+    }
+    boxes
+}
+
+/// The rogue planets' saturation density, per cubic light-year: 992.5, the largest mean a 4 ly
+/// cell's 16-bit index keeps plan 03's headroom for, `largest_headroom_mean(2¹⁶) × (1 − 10⁻⁹) ÷
+/// 64` (ruling 125).
+///
+/// The 64-bit ID layout gives the rogue planets 2⁶¹ ÷ 2⁵¹ = 1,024 IDs per cubic light-year at any
+/// cell size, so no layout gains more. A rogue-planet cell's density is min(a × ρ, C) and its bound
+/// min(a × B, C). The 10⁻⁹ keeps a bound of exactly C inside the check, whose sum of products can
+/// differ from C in its last bits.
+///
+/// P13.T4's census counts the saturated density, as the thinning does.
+#[must_use]
+pub fn rogue_planet_saturation_density() -> f64 {
+    let capacity = 1_u32 << Layer::RoguePlanet.index_bits();
+    let edge = f64::from(Layer::RoguePlanet.cell_size_ly());
+    largest_headroom_mean(capacity) * (1.0 - 1e-9) / (edge * edge * edge)
+}
+
+/// A layer's density or bound, per cubic light-year, after the rogue planets' saturation: `value`
+/// itself for every other band, and bit for bit below the saturation density (ruling 125).
+#[must_use]
+pub(crate) fn saturated(band: MassBand, value: f64) -> f64 {
+    match band {
+        MassBand::RoguePlanet => {
+            // `min` would turn a NaN bound into a full cell; keep the candidate count's panic.
+            debug_assert!(!value.is_nan(), "a rogue-planet density or bound is NaN");
+            value.min(rogue_planet_saturation_density())
+        }
+        MassBand::A
+        | MassBand::B
+        | MassBand::C
+        | MassBand::D
+        | MassBand::E
+        | MassBand::BrownDwarf => value,
+    }
+}
+
+/// The layer's index capacity.
+#[must_use]
+fn capacity_of(spec: LayerSpec) -> u32 {
+    cell_of(spec).index_capacity()
+}
+
+/// A cell of the layer, for its volume and its index capacity, which every cell of a layer shares.
+///
+/// # Panics
+///
+/// Never: cell `(0, 0, 0)` lies in the root cube at every size.
+#[must_use]
+fn cell_of(spec: LayerSpec) -> CellKey {
+    CellKey::new(spec.layer(), [0, 0, 0]).expect("cell (0, 0, 0) of every layer is a key")
+}
+
+/// The largest mean that keeps eight standard deviations of headroom below `capacity`: the root of
+/// `m + 8√m = capacity`, `(√(16 + capacity) − 4)²`, about 63,520 for a 16-bit index.
+///
+/// Plan 13 caps the rogue planets' abundance with it (its Design note 8). A mean at or a hair
+/// below it passes [`fits_capacity`], which a test checks.
+#[must_use]
+pub(crate) fn largest_headroom_mean(capacity: u32) -> f64 {
+    let half_sigmas = 0.5 * HEADROOM_SIGMAS;
+    let root = (half_sigmas * half_sigmas + f64::from(capacity)).sqrt() - half_sigmas;
+    root * root
+}
+
+/// Whether a layer whose densest cell expects `largest_mean` candidates keeps eight standard
+/// deviations of headroom below `capacity`.
+///
+/// A mean that is NaN or infinite fits nothing, so a galaxy whose bound is not finite is refused.
+#[must_use]
+fn fits_capacity(largest_mean: f64, capacity: u32) -> bool {
+    largest_mean + HEADROOM_SIGMAS * largest_mean.sqrt() <= f64::from(capacity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::galaxy::imf::MassFunctionKind;
+    use crate::galaxy::params::{GalaxyParams, GalaxyParamsBuilder};
+    use crate::galaxy::placement::cell::layer_bound;
+    use crate::id::Layer;
+    use crate::rng::Seed;
+    use crate::units::{LightYears, SolarMasses};
+
+    /// The seed of the fixture galaxy, and the base of the sweep's seeds.
+    const SEED: u64 = 0x0300_11ea_0000_0000;
+
+    fn milky_way() -> Galaxy {
+        Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral")
+    }
+
+    #[test]
+    fn headroom_holds_for_the_milky_way_fixture() {
+        assert_eq!(check_index_headroom(&milky_way()), Ok(()));
+    }
+
+    #[test]
+    fn headroom_holds_under_both_mass_functions() {
+        for kind in [MassFunctionKind::Kroupa, MassFunctionKind::Chabrier] {
+            let galaxy = Galaxy::with_mass_function(Seed::new(SEED | 1), kind);
+            assert_eq!(check_index_headroom(&galaxy), Ok(()), "{kind:?}");
+        }
+    }
+
+    /// The fullest layer-A cell expects about 6,000 candidates of 65,536 at Milky Way values (plan
+    /// 03, Design note 6), and every layer keeps a wide margin. Since the nuclear disc's inner part
+    /// (plan 02, R26) the fullest is in its ring near 33 ly and expects about 20,600.
+    #[test]
+    fn the_fullest_cell_of_each_layer_stays_well_inside_its_capacity() {
+        let galaxy = milky_way();
+        for spec in STELLAR_LAYERS {
+            let mean = largest_cell_mean(&galaxy, spec);
+            let capacity = f64::from(capacity_of(spec));
+            assert!(
+                mean > 0.0 && mean < 0.5 * capacity,
+                "layer {} expects {mean} candidates of {capacity}",
+                spec.layer().letter()
+            );
+        }
+        let layer_a = STELLAR_LAYERS
+            .into_iter()
+            .find(|spec| spec.layer() == Layer::A)
+            .expect("the table has layer A");
+        let mean = largest_cell_mean(&galaxy, layer_a);
+        eprintln!("the fullest layer-A cell expects {mean:.0} candidates");
+        assert!(
+            (15_000.0..26_000.0).contains(&mean),
+            "the fullest layer-A cell expects {mean} candidates, not about 20,600"
+        );
+    }
+
+    /// The partition's greatest bound is at least every cell's, in every layer and every octant
+    /// (module documentation), and it is a cell's own: the densest cells lie within eight cells of
+    /// the origin, which the partition takes cell by cell. The sweep reaches out geometrically to
+    /// the cube's faces along every axis and diagonal.
+    #[test]
+    fn the_partition_bounds_every_cell_in_every_layer() {
+        let galaxy = milky_way();
+        let octant = root_octant();
+        assert_eq!((octant.min_corner(), octant.edge()), ([0, 0, 0], 65_536));
+        for spec in STELLAR_LAYERS {
+            let layer = spec.layer();
+            let largest_mean = largest_cell_mean(&galaxy, spec);
+            let edge = 65_536 / i32::try_from(layer.cell_size_ly()).unwrap();
+            // 0 to 7, then doubling to the last cell before the face.
+            let mut steps = vec![0, 1, 2, 3, 4, 5, 6, 7];
+            while let Some(&last) = steps.last().filter(|&&last| last < edge - 1) {
+                steps.push((2 * last + 1).min(edge - 1));
+            }
+            let mut densest = 0.0_f64;
+            for &sx in &steps {
+                for &sy in &steps {
+                    for &sz in &steps {
+                        for signs in 0..8_u8 {
+                            // A step of s is cell s on the positive side and cell −s − 1 on the
+                            // negative, so the eight cells touching the origin are all visited.
+                            let side =
+                                |s: i32, bit: u8| if signs >> bit & 1 == 0 { s } else { -s - 1 };
+                            let key = CellKey::new(layer, [side(sx, 0), side(sy, 1), side(sz, 2)])
+                                .unwrap();
+                            let mean = layer_bound(&galaxy, key) * key.volume_ly3();
+                            assert!(
+                                mean <= largest_mean,
+                                "layer {} cell {:?} expects {mean}, above the partition's \
+                                 {largest_mean}",
+                                layer.letter(),
+                                key.gen_cell().to_array()
+                            );
+                            densest = densest.max(mean);
+                        }
+                    }
+                }
+            }
+            // The sweep reached the densest cells, or it would prove little.
+            assert!(
+                densest > 0.99 * largest_mean,
+                "layer {}: the densest cell swept expects {densest} of the partition's \
+                 {largest_mean}",
+                layer.letter()
+            );
+        }
+    }
+
+    #[test]
+    fn the_comparison_keeps_eight_standard_deviations_of_headroom() {
+        // m + 8√m = 65,536 at m ≈ 63,519.5, so that is where layer A's headroom runs out.
+        assert!(fits_capacity(63_519.0, 65_536));
+        assert!(!fits_capacity(63_520.0, 65_536));
+        assert!(fits_capacity(0.0, 1));
+        assert!(!fits_capacity(1.0, 1));
+        assert!(!fits_capacity(f64::from(u32::MAX), 65_536));
+    }
+
+    /// The nuclear disc at its densest: the check refuses a galaxy whose layer-A cells could draw
+    /// more candidates than an ID can number (plan 03, Design note 6).
+    ///
+    /// The parameters are the densest the builder allows at the centre — the heaviest galaxy, the
+    /// nuclear disc's largest share in its smallest and flattest form, and Kroupa's function, which
+    /// makes the most systems per solar mass. No seed draws them all together, which is what the
+    /// sweep over 200 seeds below shows.
+    #[test]
+    fn headroom_fails_for_the_densest_centre_the_builder_allows() {
+        let params = GalaxyParamsBuilder::new()
+            .mass_function(MassFunctionKind::Kroupa)
+            .stellar_mass(SolarMasses::new(1.0e11))
+            .nuclear_disc_share(0.025)
+            .nuclear_length(LightYears::new(200.0))
+            .nuclear_height_ratio(0.3)
+            .build()
+            .expect("every value is inside its range");
+        let galaxy = Galaxy::from_params(Seed::new(SEED | 2), params)
+            .expect("this galaxy's gas is mostly neutral");
+        let error = check_index_headroom(&galaxy).unwrap_err();
+        let ExceedIndexCapacityError::LayerTooDense {
+            layer,
+            largest_mean,
+            capacity,
+        } = error;
+        assert_eq!(layer, Layer::A, "{error}");
+        assert_eq!(capacity, 65_536);
+        assert!(largest_mean > 0.0, "{error}");
+    }
+
+    #[test]
+    fn the_largest_headroom_mean_is_where_the_headroom_runs_out() {
+        for capacity in [65_536_u32, 1 << 19, 1 << 28] {
+            let m = largest_headroom_mean(capacity);
+            assert!(fits_capacity(m * (1.0 - 1e-9), capacity), "{capacity}");
+            assert!(!fits_capacity(m * (1.0 + 1e-9), capacity), "{capacity}");
+        }
+        assert!((63_519.0..63_520.0).contains(&largest_headroom_mean(65_536)));
+    }
+
+    /// The substellar layers are checked too, and at the default abundances the fullest cell of
+    /// each keeps a wide margin: some 20,000 of the brown dwarfs' 2¹⁹ and about half the rogue
+    /// planets' 2¹⁶ (plan 13, Design note 8). Provisional (plan 02, R26): the nuclear disc's inner
+    /// part puts some 50 systems per ly³ in its ring near 33 ly, which raises the brown dwarfs' to
+    /// some 74,000, still a seventh of theirs, and takes the Milky Way's rogue planets there to
+    /// the saturation density, so that their fullest cell holds its limit, the largest headroom
+    /// mean of 2¹⁶, by ruling 125's construction.
+    #[test]
+    fn the_substellar_layers_keep_their_headroom() {
+        let galaxy = milky_way();
+        for spec in SUBSTELLAR_LAYERS {
+            let mean = largest_cell_mean(&galaxy, spec);
+            let capacity = capacity_of(spec);
+            eprintln!(
+                "layer {} expects {mean:.0} candidates of {capacity}",
+                spec.layer().letter()
+            );
+            let most = match spec.layer() {
+                Layer::RoguePlanet => largest_headroom_mean(capacity),
+                _ => 0.7 * f64::from(capacity),
+            };
+            assert!(
+                mean > 0.0 && mean <= most,
+                "layer {} expects {mean} candidates of {capacity}",
+                spec.layer().letter()
+            );
+        }
+    }
+
+    #[test]
+    fn a_mean_that_is_not_finite_fits_nothing() {
+        for mean in [f64::NAN, f64::INFINITY] {
+            assert!(!fits_capacity(mean, 1 << 28), "{mean}");
+        }
+    }
+
+    #[test]
+    fn a_layer_over_its_capacity_is_named_with_its_mean() {
+        let error = ExceedIndexCapacityError::LayerTooDense {
+            layer: Layer::A,
+            largest_mean: 64_000.0,
+            capacity: 65_536,
+        };
+        assert_eq!(
+            error.to_string(),
+            "layer A's densest cell expects 64000 candidates, within eight standard deviations of \
+             its index capacity of 65536"
+        );
+    }
+
+    #[test]
+    #[ignore = "slow: builds the fields of 200 galaxies"]
+    fn headroom_holds_over_two_hundred_seeds() {
+        for n in 0..200_u64 {
+            let galaxy = Galaxy::new(Seed::new(SEED | n));
+            assert_eq!(check_index_headroom(&galaxy), Ok(()), "seed {n}");
+        }
+    }
+}

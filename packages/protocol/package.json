@@ -1,0 +1,17 @@
+{
+  "name": "@hyperion/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript bindings for the HYPERION wire protocol, generated from the hyperion-protocol crate.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.1"
+  }
+}

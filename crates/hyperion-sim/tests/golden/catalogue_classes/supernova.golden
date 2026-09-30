@@ -1,0 +1,158 @@
+# generator_version = 16
+window n=1e-3 = 0x411ab045b66fb180  # 437265.42816045135
+window n=1e-3 radius at 0.01 = 0x4057632de823cd70  # 93.54967692848527
+window n=1e-3 speed at 0.01 = 0x40b138d1352a33c7  # 4408.817217481271
+window n=1e-3 radius at 0.3 = 0x407d9aef49f10058  # 473.68342012540006
+window n=1e-3 speed at 0.3 = 0x407e5cd0596a54a8  # 485.80086652312684
+window n=1e-3 radius at 0.99 = 0x408a338e62183401  # 838.4445230379935
+window n=1e-3 speed at 0.99 = 0x4072d0c700745d2a  # 301.0485844178644
+window n=1e-2 = 0x412019315ca5c640  # 527512.6809522584
+window n=1e-2 radius at 0.01 = 0x40527c3e55202947  # 73.94130447521921
+window n=1e-2 speed at 0.01 = 0x409f80c08c7c6284  # 2016.1880359110955
+window n=1e-2 radius at 0.3 = 0x4073a81852b3a490  # 314.5059382455156
+window n=1e-2 speed at 0.3 = 0x406f411868b40b3b  # 250.0342296139223
+window n=1e-2 radius at 0.99 = 0x407ebc1ce1477a66  # 491.75705078049793
+window n=1e-2 speed at 0.99 = 0x4057964aeedf47bc  # 94.34832355313023
+window n=1e-1 = 0x4129cb38471591c4  # 845212.1388364364
+window n=1e-1 radius at 0.01 = 0x404dae0bd244e70f  # 59.35973575939544
+window n=1e-1 speed at 0.01 = 0x408ba96d68fe58f8  # 885.1784229155446
+window n=1e-1 radius at 0.3 = 0x406af1ab706f172b  # 215.5521776361214
+window n=1e-1 speed at 0.3 = 0x40542295d618d3d7  # 80.54039528297959
+window n=1e-1 radius at 0.99 = 0x40737cbc04e20395  # 311.795903094165
+window n=1e-1 speed at 0.99 = 0x4041049b798569b8  # 34.03599471105866
+window n=1e0 = 0x4129aa506d921bf5  # 841000.2140053498
+window n=1e0 radius at 0.01 = 0x4042e25d4c474e53  # 37.76847222787605
+window n=1e0 speed at 0.01 = 0x408137bd538033f3  # 550.9674444213728
+window n=1e0 radius at 0.3 = 0x405e00d54e1d2892  # 120.01301911208637
+window n=1e0 speed at 0.3 = 0x4045b05921b5d612  # 43.377720083033765
+window n=1e0 radius at 0.99 = 0x406586851accd5bd  # 172.20374813086337
+window n=1e0 speed at 0.99 = 0x4032adf82da16643  # 18.679568149475255
+window n=1e1 = 0x411a9070a9849730  # 435228.1655448554
+window n=1e1 radius at 0.01 = 0x403247e67d79471a  # 18.280860750302146
+window n=1e1 speed at 0.01 = 0x407e44f0649e8300  # 484.3086897079338
+window n=1e1 radius at 0.3 = 0x404b425fc9ecc83b  # 54.518548241249356
+window n=1e1 speed at 0.3 = 0x4042ea54871b31c5  # 37.830704582479974
+window n=1e1 radius at 0.99 = 0x405387bdc29f13b3  # 78.12095704588755
+window n=1e1 speed at 0.99 = 0x403057ba5461fb04  # 16.342686914368656
+window n=1e2 = 0x41074a906dc67781  # 190802.05360120165
+window n=1e2 radius at 0.01 = 0x40203949f1cc2499  # 8.111892276925845
+window n=1e2 speed at 0.01 = 0x407bd4c64f5b1870  # 445.298415523378
+window n=1e2 radius at 0.3 = 0x403785e932f5f84d  # 23.523089585353137
+window n=1e2 speed at 0.3 = 0x40429145ac0ddad3  # 37.13493872334006
+window n=1e2 radius at 0.99 = 0x4040d8167e41d7bf  # 33.68818643774966
+window n=1e2 speed at 0.99 = 0x40301014de192844  # 16.062818413869778
+window n=1e3 = 0x40f4073e1d762ae3  # 82035.88219277146
+window n=1e3 radius at 0.01 = 0x400c36a50a851c80  # 3.5266819784042696
+window n=1e3 speed at 0.01 = 0x407ab6cc5bbf68a1  # 427.4248921849158
+window n=1e3 radius at 0.3 = 0x4024255233e7ffd0  # 10.072892782278274
+window n=1e3 speed at 0.3 = 0x404276c59f58a533  # 36.92790595844635
+window n=1e3 radius at 0.99 = 0x402cd79802e00fa7  # 14.421081628657545
+window n=1e3 speed at 0.99 = 0x402ff8734bcdb044  # 15.98525463949057
+window n=1e4 = 0x40e130da81b16204  # 35206.82833165306
+window n=1e4 radius at 0.01 = 0x3ff84b8037fffdb2  # 1.5184328258036257
+window n=1e4 speed at 0.01 = 0x4079ff6e324c96ca  # 415.96440343778215
+window n=1e4 radius at 0.3 = 0x401131eb876c5eff  # 4.29875003432221
+window n=1e4 speed at 0.3 = 0x404257f4d298b77f  # 36.6871588941276
+window n=1e4 radius at 0.99 = 0x4018454db13e2d01  # 6.067679185314092
+window n=1e4 speed at 0.99 = 0x402c37a530730734  # 14.108682169000168
+cap Field = 0x414b17ecdcc43b03  # 3551193.72473848
+cap TypeIa = 0x414b17ecdcc43b03  # 3551193.72473848
+cap Bubble = 0x412166ee85fdb5b2  # 570231.2617012768
+type ia rate per year = 0x3f72eb30582a9c50  # 0.004618824811280467
+ancient share YoungThinDisc = 0x3f628f9836b5ebe5  # 0.00226573685875796
+ancient share OldThinDisc = 0x3fa2732171214e45  # 0.03603462701780961
+ancient share ThickDisc = 0x3fa4b670da3c7275  # 0.04045441307082324
+ancient share Bulge = 0x3fa46dc1703755a9  # 0.03989986891580639
+ancient share LongBar = 0x3fa3c7bc1757ea12  # 0.03863323006585885
+ancient share NuclearDisc = 0x3fa3bd30cb8aa1e0  # 0.03855278477323387
+ancient share Halo = 0x3fa4d6f64ad4fb78  # 0.040702530512581825
+progenitor 0: YoungThinDisc Iax explodes T-66797589785418.000000000 s delay 2704865986194598 s component 0 lifetimes 2666725818637009 None leftover PartlyBurntDwarf
+progenitor 0 primary = 0x40175feaaa51c17b  # 5.843668614616372
+progenitor 0 secondary = 0x3ffb93c160eaa3ce  # 1.7235730920603944
+progenitor 1: OldThinDisc DoubleDetonation explodes T-133790945517588.000000000 s delay 3260024594094476 s component 1 lifetimes 1540679182928723 Some(2560602605642052) leftover SurvivingDonor { speed: KilometresPerSecond(1221.7813950786153) }
+progenitor 1 primary = 0x401e0e3647a872d0  # 7.513878936439781
+progenitor 1 secondary = 0x4017ca07bfe2db84  # 5.947295187207491
+progenitor 1 separation = 0x41c0b2bd40e4addb  # 560298625.7865556
+progenitor 2: ThickDisc Merger explodes T-76272915955926.000000000 s delay 338670045204764672 s component 6 lifetimes 19569943770412796 Some(25510030495606304) leftover Nothing
+progenitor 2 primary = 0x4005ee8921f71bd3  # 2.7414724973236644
+progenitor 2 secondary = 0x4003f7fd92fc790a  # 2.4960891230867945
+progenitor 2 separation = 0x41da4d022ac3363e  # 1765017771.0501857
+progenitor 3: Bulge Iax explodes T-72983938233399.000000000 s delay 320899973877962048 s component 7 lifetimes 2360689112346398 None leftover PartlyBurntDwarf
+progenitor 3 primary = 0x4018a87342a1c96e  # 6.164502183079419
+progenitor 3 secondary = 0x3feed484765a28d7  # 0.9634420692030073
+progenitor 4: LongBar Merger explodes T-45009071088941.000000000 s delay 269893234138773120 s component 8 lifetimes 2860155603684712 Some(12173292569107470) leftover Nothing
+progenitor 4 primary = 0x4016ad6e85984197  # 5.669366919916135
+progenitor 4 secondary = 0x4009eedd99246338  # 3.2416336025457007
+progenitor 4 separation = 0x41de3bc2d9721235  # 2028931941.7823613
+progenitor 5: NuclearDisc Merger explodes T-72371513811695.000000000 s delay 4801536152009899 s component 9 lifetimes 3439657898031930 Some(4380939667776088) leftover Nothing
+progenitor 5 primary = 0x4014fba5647d6a49  # 5.245748109965072
+progenitor 5 secondary = 0x401303de4c88b21a  # 4.753777690737957
+progenitor 5 separation = 0x41b9aad75fe7f519  # 430626655.90608364
+progenitor 6: Halo DoubleDetonation explodes T-24562431997238.000000000 s delay 358440524624456384 s component 12 lifetimes 2729599721943659 Some(11369432597163072) leftover SurvivingDonor { speed: KilometresPerSecond(1161.7203420411035) }
+progenitor 6 primary = 0x401723dc24a5fe0e  # 5.78501946700227
+progenitor 6 secondary = 0x400a92480df42254  # 3.3214264955643475
+progenitor 6 separation = 0x41e06e83cfec08ac  # 2205425279.3760586
+progenitor 7: YoungThinDisc DoubleDetonation explodes T-9860607974324.000000000 s delay 2610142086417050 s component 0 lifetimes 2559915463380946 Some(2590002620215102) leftover SurvivingDonor { speed: KilometresPerSecond(1280.7002871299778) }
+progenitor 7 primary = 0x4017cabce1237ca6  # 5.947986142912816
+progenitor 7 secondary = 0x4017ac029421af23  # 5.917978586727062
+progenitor 7 separation = 0x41a9f1d27d5cc67b  # 217639230.6812018
+progenitor 8: OldThinDisc Iax explodes T-88798210384591.000000000 s delay 7968291677473653 s component 1 lifetimes 1842868365963724 None leftover PartlyBurntDwarf
+progenitor 8 primary = 0x401b9840d844d336  # 6.898684863281963
+progenitor 8 secondary = 0x4004de2a63c1b5fc  # 2.6084792893877857
+progenitor 9: ThickDisc DoubleDetonation explodes T-16567164538357.000000000 s delay 316716857115400832 s component 6 lifetimes 4618183725352162 Some(27842612814715716) leftover SurvivingDonor { speed: KilometresPerSecond(1301.7451879581693) }
+progenitor 9 primary = 0x40129e5bc1140213  # 4.654646889539907
+progenitor 9 secondary = 0x40035b06c67a382a  # 2.4194465166138075
+progenitor 9 separation = 0x41dc667e0080aff8  # 1905915906.0107403
+progenitor 10: Bulge Merger explodes T-78791901634881.000000000 s delay 331805810710472512 s component 7 lifetimes 8973887104773898 Some(15555329718479454) leftover Nothing
+progenitor 10 primary = 0x400cf06985429516  # 3.6173887644714666
+progenitor 10 secondary = 0x4007c71ffdcfc226  # 2.9722289876010732
+progenitor 10 separation = 0x41dc7829af6a6926  # 1910548157.6626678
+progenitor 11: LongBar Merger explodes T-31819319152072.000000000 s delay 313282686091587456 s component 8 lifetimes 3924311654194022 Some(70622397087015064) leftover Nothing
+progenitor 11 primary = 0x4013e08d703ac62b  # 4.969289544665609
+progenitor 11 secondary = 0x3ffabb312c6c2008  # 1.6707011924027046
+progenitor 11 separation = 0x41da58a8fa253cd2  # 1768072168.5818372
+CoreCollapse(IIP) at 0.01 d = 0x47c86bb4f8dd9188  # 6.492143642717258e37
+CoreCollapse(IIP) at 10 d = 0x4733aac2733b0684  # 1.021170558704438e35
+CoreCollapse(IIP) at 50 d = 0x4735ffd47f1b5661  # 1.1422708418626074e35
+CoreCollapse(IIP) at 150 d = 0x47015e0f52a58968  # 1.1272100887270686e34
+CoreCollapse(IIP) at 400 d = 0x46c2fb7130a49023  # 7.70009344536973e32
+CoreCollapse(IIL) at 0.01 d = 0x47c86bb9149d6d34  # 6.49216030835246e37
+CoreCollapse(IIL) at 10 d = 0x473ee8c901932f3d  # 1.6049035013217757e35
+CoreCollapse(IIL) at 50 d = 0x473237d6210d2e4e  # 9.459384103754582e34
+CoreCollapse(IIL) at 150 d = 0x470c828ebe0bd259  # 1.8504041812871288e34
+CoreCollapse(IIL) at 400 d = 0x46c608bcdeb46807  # 8.938105779915483e32
+CoreCollapse(IIb) at 0.01 d = 0x47aaba6b1a76af5a  # 1.7763933710293162e37
+CoreCollapse(IIb) at 10 d = 0x4737777af72b32e7  # 1.2184617681998394e35
+CoreCollapse(IIb) at 50 d = 0x47323da6039d1882  # 9.471172343279914e34
+CoreCollapse(IIb) at 150 d = 0x4712b050738a35a2  # 2.4259355388682975e34
+CoreCollapse(IIb) at 400 d = 0x46bf3f24093d5d4b  # 6.337572245820717e32
+CoreCollapse(Ib) at 0.01 d = 0x46d5cf4bc3626a9a  # 1.7694171155926704e33
+CoreCollapse(Ib) at 10 d = 0x47405f02f5f9a5d1  # 1.7000762646172432e35
+CoreCollapse(Ib) at 50 d = 0x473230051a4575a5  # 9.443530338599645e34
+CoreCollapse(Ib) at 150 d = 0x470c6b76bb690625  # 1.8445492098800706e34
+CoreCollapse(Ib) at 400 d = 0x46b6a9d7e6ae2f68  # 4.596693888978638e32
+CoreCollapse(Ic) at 0.01 d = 0x46d5cf4bc3626a9a  # 1.7694171155926704e33
+CoreCollapse(Ic) at 10 d = 0x47405f02f5f9a5d1  # 1.7000762646172432e35
+CoreCollapse(Ic) at 50 d = 0x473230051a4575a5  # 9.443530338599645e34
+CoreCollapse(Ic) at 150 d = 0x470c6b76bb690625  # 1.8445492098800706e34
+CoreCollapse(Ic) at 400 d = 0x46b6a9d7e6ae2f68  # 4.596693888978638e32
+TypeIa(Merger) at 0.01 d = 0x4641af0392f6cfb0  # 2.802085920514118e30
+TypeIa(Merger) at 10 d = 0x4765e81c61d0a56e  # 9.099680137449017e35
+TypeIa(Merger) at 50 d = 0x47463fb8423dee74  # 2.3104584235116015e35
+TypeIa(Merger) at 150 d = 0x470d02b872f1579e  # 1.8828973408959491e34
+TypeIa(Merger) at 400 d = 0x46c7387167518504  # 9.419345893904437e32
+TypeIa(DoubleDetonation) at 0.01 d = 0x4641af0392f6cfb0  # 2.802085920514118e30
+TypeIa(DoubleDetonation) at 10 d = 0x4765e81c61d0a56e  # 9.099680137449017e35
+TypeIa(DoubleDetonation) at 50 d = 0x47463fb8423dee74  # 2.3104584235116015e35
+TypeIa(DoubleDetonation) at 150 d = 0x470d02b872f1579e  # 1.8828973408959491e34
+TypeIa(DoubleDetonation) at 400 d = 0x46c7387167518504  # 9.419345893904437e32
+TypeIa(HydrogenDonor) at 0.01 d = 0x4641af0392f6cfb0  # 2.802085920514118e30
+TypeIa(HydrogenDonor) at 10 d = 0x4765e81c61d0a56e  # 9.099680137449017e35
+TypeIa(HydrogenDonor) at 50 d = 0x47463fb8423dee74  # 2.3104584235116015e35
+TypeIa(HydrogenDonor) at 150 d = 0x470d02b872f1579e  # 1.8828973408959491e34
+TypeIa(HydrogenDonor) at 400 d = 0x46c7387167518504  # 9.419345893904437e32
+TypeIa(Iax) at 0.01 d = 0x461f216d4d357621  # 6.166045451972614e29
+TypeIa(Iax) at 10 d = 0x4739d7abea43d01d  # 1.3418176004541885e35
+TypeIa(Iax) at 50 d = 0x4707a721c2a09d5b  # 1.535158311421712e34
+TypeIa(Iax) at 150 d = 0x46d03e56e0c13bd8  # 1.31783034862824e33
+TypeIa(Iax) at 400 d = 0x468d6cd4761d1e95  # 7.4601534208785075e31

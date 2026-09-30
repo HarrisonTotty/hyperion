@@ -1,0 +1,8 @@
+# The stripping table's smoke run: the whole grid, which the task cannot shrink, validated at one
+# cell in fifty; a few seconds on four threads.
+task = "stripping"
+
+[params]
+masses = 34
+metallicities = 11
+validate_every = 50

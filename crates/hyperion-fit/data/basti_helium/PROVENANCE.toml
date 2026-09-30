@@ -1,0 +1,366 @@
+# BaSTI's alpha-enhanced helium-enhanced stellar models (plan 15, P15.T7.a; Design note 12), the
+# source of `tables::helium`. A fetched dataset: the 88 files come to 38.4 MB, and the site states
+# no licence (it asks only that use of its web tools be acknowledged), so only this file, the
+# reduction script and its reduced output are committed. The raw files are downloaded into
+# `crates/hyperion-fit/data/cache/basti_helium/` (git-ignored), keeping the site's paths below
+# `basti-old/BASTI/`. Tracks and HB files are the theoretical-plane "c04ae" sets (UBVRIJKL colours,
+# Castelli 2004 transformations); only log age, mass, log L and log Teff are read.
+dataset = "basti_helium"
+class = "fetched"
+citation = "Pietrinferni, Cassisi, Salaris and Castelli (2006), ApJ 642, 797: the BaSTI alpha-enhanced canonical models (eta = 0.2), with the database's helium-enhanced alpha-enhanced extension (Y = 0.30, 0.35, 0.40; files computed 2009, some renormalised 2011 and 2014); the helium-enhanced readme names no paper of its own beyond Pietrinferni et al. (2004, ApJ 612, 168; 2006) and Cassisi et al. (2004, ApJ 616, 498)"
+url = "http://basti-iac.oa-abruzzo.inaf.it/basti-old/BASTI/DATA_AE_S/HE_EN/aes_hems_c.php"
+retrieved = "2026-09-30"
+release = "BaSTI Ver. 5.0.1 (the previous release, kept at basti-old/ beside BaSTI-IAC): canonical alpha-enhanced Z = 0.0001, 0.0003, 0.001, 0.002, 0.004, 0.008, 0.0198 (tracks eta = 0.2, HB, ZAHB, summary tables) and helium-enhanced Y = 0.30, 0.35, 0.40 at the same [M/H] (Y = 0.35, 0.40 only at Z = 0.0198), as the site served them on that date"
+licence = "none stated; the site's acknowledgement page asks: \"We would appreciate if, whenever one of the BaSTI web tools is employed in comparisons with models and data, the following sentence is included in the acknowledgements: 'This work has made use of BaSTI web tools.'\""
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/HB/hbz13y300aes_c04ae.tar.gz"
+sha256 = "9cbafab9cdeba41f79a9e49db0d1102c079d0149b4568adbd9f9702594572a3a"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/HB/hbz13y350aes_c04ae.tar.gz"
+sha256 = "33944bea284b890d398c56e37a95556c5dfaefa2c35e2edb84ccba303462172f"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/HB/hbz13y400aes_c04ae.tar.gz"
+sha256 = "eb79a31b979b79301609c316e6119df23f1465b75b9b63d1c01d8dedff18076a"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/HB/zahbz13y300aes_c04ae"
+sha256 = "a559cea7d566c72777cb06f774dc6499712076a81eff6d2f37967e3e50413642"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/HB/zahbz13y350aes_c04ae"
+sha256 = "68ed742a3a3ceb91ff4fdf9aa6f1304792c1e6a267430cac2415c5970d9d91ff"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/HB/zahbz13y400aes_c04ae"
+sha256 = "2e20e2c83a1ca8109c3b08c4055d5038649f6b829f9f747021c1fee35a745399"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/msz13y300aes_c04ae.tar.gz"
+sha256 = "456615051a1f64d86df51df2cf6d4efcb8c482ace47926e288913dbb5d265ec5"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/msz13y350aes_c04ae.tar.gz"
+sha256 = "bd33ec02e0c203f862188b3a5a5d1a583cfe3a97e63df1e4bddda109d00f7752"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z13/msz13y400aes_c04ae.tar.gz"
+sha256 = "b18319c044c82ed3d819f0e665dd285046b09161d22d20dfe41d43502373732c"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/HB/hbz14y300aes_c04ae.tar.gz"
+sha256 = "b1d273aede400f4536c1d43a3c0535a3bde34168d2272da8b55fe6336ce6a1b7"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/HB/hbz14y350aes_c04ae.tar.gz"
+sha256 = "f3106a95e4a78653629523a34b0fadb4fbe29bfdd7cfaf71de33ab9ed4a3c694"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/HB/hbz14y400aes_c04ae.tar.gz"
+sha256 = "17c24edbac61faa53e4d344c36cd12ecff00254856560add803821145c487f26"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/HB/zahbz14y300aes_c04ae"
+sha256 = "7de4ede22454a8f3e752f4346a2a1301895204702053357eab8f74afd947f90b"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/HB/zahbz14y350aes_c04ae"
+sha256 = "be477f85afa8a3f89fe937365a3122d0041daa3882a13c979d872652096271e9"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/HB/zahbz14y400aes_c04ae"
+sha256 = "cd8ad6167f7751cd8a60398accd0740ba1711e4309bbc1cab375421237ffca0b"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/msz14y300aes_c04ae.tar.gz"
+sha256 = "8b774ccfb5513045bc99d050bb7cfeaf76e4b09c864412ef7713b464d61823c8"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/msz14y350aes_c04ae.tar.gz"
+sha256 = "c76c3d1baf1641b627604db7062d580f33c2da7764ff5ee905d4d889f294cd44"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z14/msz14y400aes_c04ae.tar.gz"
+sha256 = "e1f778d6056d5d2fad846adac8eee1d66da1709263f101a521557c9807c78dca"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/HB/hbz23y300aes_c04ae.tar.gz"
+sha256 = "be68f394c7ee5bd0f2487b2787733b07119ec628dd9619ceec1ca449ed3e910d"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/HB/hbz23y350aes_c04ae.tar.gz"
+sha256 = "eeaa42e22f1aed8a18d90e13439ce2c5696d3d29c5869482292f49936b618489"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/HB/hbz23y400aes_c04ae.tar.gz"
+sha256 = "2ad08875e0b7084024d29f181df2024e46ead469bfcc5157b895a80d62e50cb5"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/HB/zahbz23y300aes_c04ae"
+sha256 = "2bc556fe53de5ee4edf4bf7c2386231f4fa965c034d393b4acade67c5a29b7ad"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/HB/zahbz23y350aes_c04ae"
+sha256 = "6225e65f8182174464abbe8553d706429b27e85eccc403d7baf0f91f89c4b162"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/HB/zahbz23y400aes_c04ae"
+sha256 = "8eadfae4f78588e3943ea4efb7ab97ea1273f0bc38e7619a5dc793f10d92d6ec"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/msz23y300aes_c04ae.tar.gz"
+sha256 = "b9dfbe0be3d3b0bba977dffcef82c771d26550e3ad0f807f741724d32834f072"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/msz23y350aes_c04ae.tar.gz"
+sha256 = "bfe5e4ebdb11e3defa362ab90f2d2131dc014d22db8c9f204652c4d2a3ab958e"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z23/msz23y400aes_c04ae.tar.gz"
+sha256 = "8e586ce19b6b09fc7875ba4f1b05a8405b0427a86fb35bc29938ba021e1dffa4"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/HB/hbz34y300aes_c04ae.tar.gz"
+sha256 = "d9b38e2c0e3db30e54a7ef5a74e5c538c4757ca586283632960ed18dc2b0e70e"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/HB/hbz34y350aes_c04ae.tar.gz"
+sha256 = "8c4c43d653fbb172c1abecb96bdeacd7263791fd6551df0da40b806affd45ecd"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/HB/hbz34y400aes_c04ae.tar.gz"
+sha256 = "122af864afaf13b1e3a31074e54f5669196035f6b4613149007f32a031b8e13b"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/HB/zahbz34y300aes_c04ae"
+sha256 = "ab70b06860151640c1d339a69a10e34af48943c413cbde7d3e6e0b8bf819d9cc"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/HB/zahbz34y350aes_c04ae"
+sha256 = "4a102c049bcebe641cf10049f3b242d30c0d3a17a8bfb6eab3a62bd89a555804"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/HB/zahbz34y400aes_c04ae"
+sha256 = "b44090d16c7cc6da300b9c9c10ba56d97d1cc1212167b51c2db9c2ae4747fffe"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/msz34y300aes_c04ae.tar.gz"
+sha256 = "8382f22a09d47cb766507c45476ef4ade100b6b3ca5435a0779cb94f46867949"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/msz34y350aes_c04ae.tar.gz"
+sha256 = "0a76e8f3f3ddff851042f12d5c30fd411cd7afb8e5c98d87a41852e77231b4c1"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z34/msz34y400aes_c04ae.tar.gz"
+sha256 = "5107cdaa5e39fb36cc5b97f68ff788f9a944bd97f35002f486791d766df7d568"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/HB/hbz43y300aes_c04ae.tar.gz"
+sha256 = "b7dd9c9017f91ee3845b432ae35c345cdd9be984736c6a31f4c9b9013d49ca3e"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/HB/hbz43y350aes_c04ae.tar.gz"
+sha256 = "1863f934141c88f5d213bb979f24183851bf8b24a183adad1205f0fc7a507914"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/HB/hbz43y400aes_c04ae.tar.gz"
+sha256 = "5e28d853685a474c4092c1ab89708663a144b83e3413796e033429f263e6df19"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/HB/zahbz43y300aes_c04ae"
+sha256 = "c2727d3644cb4631f4dedcebc34716eaeebf286f7536fe8afd6a0f988659b8ea"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/HB/zahbz43y350aes_c04ae"
+sha256 = "ae1a00b06ed20baf90c98c12fb547b4115d8f452bf308bc5e87f1ee815b8e6bb"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/HB/zahbz43y400aes_c04ae"
+sha256 = "b27d66f5940d21549f4ae1f7609b697099540d729b672456e4cd6531f158b086"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/msz43y300aes_c04ae.tar.gz"
+sha256 = "56565daa6206ac5cdc696ebee9e36d7100898a8c4e2aca2d5f417fee354584ed"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/msz43y350aes_c04ae.tar.gz"
+sha256 = "4ff6b66057df9f2140944cf15c28fb344a4e6a54818ad79e33603ddc5dcd8032"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z43/msz43y400aes_c04ae.tar.gz"
+sha256 = "210fb35e4553a812ade24fa1a53bf157c5b2d610588c248ef416a32e8e8192ae"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/HB/hbz83y300aes_c04ae.tar.gz"
+sha256 = "ab91747923ed5733b3cd8698ae6b89e86cfc7c7a4c4fbfda4bf249cd07427bf6"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/HB/hbz83y350aes_c04ae.tar.gz"
+sha256 = "6cad1d06eaddd7877c88501dd10c8ab0c3b4fb82ea17e2444c16f428c7616500"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/HB/hbz83y400aes_c04ae.tar.gz"
+sha256 = "096737d8521f3017414f8e4aca5c4b9becb2832f4d30409afe7186701cd34983"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/HB/zahbz83y300aes_c04ae"
+sha256 = "7f012b28a3471292ed3d83448cb4e7a0fb5021c72876644390e04439befad648"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/HB/zahbz83y350aes_c04ae"
+sha256 = "6db76bb6d19907ff19a5067b3a84a23c65f780619389f149674ada0e09221152"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/HB/zahbz83y400aes_c04ae"
+sha256 = "2b7614312a9a0d3403abfa4388a2ebe3a41feef4bf6b4385a72d70d26a7ae816"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/msz83y300aes_c04ae.tar.gz"
+sha256 = "df6e21f046864138ec99f01c3976512adf0d8a4adf8f0b478f5990b2f3600747"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/msz83y350aes_c04ae.tar.gz"
+sha256 = "7156f338f8949524907d5e8a5d42ae23dd971074f4c51b29e5b38460a4b99a0c"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/Z83/msz83y400aes_c04ae.tar.gz"
+sha256 = "6e86ed83e000511acf145bfaabd99f1f6a4360bd2e4c88671af1952fc66d6771"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/ZSUN/HB/hbz22y350aes_c04ae.tar.gz"
+sha256 = "55acd37f1396e40fd78fb8445aa3b124e8c639f9e44e6368f134dc749a780d84"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/ZSUN/HB/hbz22y400aes_c04ae.tar.gz"
+sha256 = "4f6834b6ab89be2b627b4c811da62547b4869cd95b8b2aff17b27b4b17abcbb0"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/ZSUN/HB/zahbz22y350aes_c04ae"
+sha256 = "ea51580b96ccc1d5518be23c751bd35f836e53129cdead9b19cf12aeacf7a5ed"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/ZSUN/HB/zahbz22y400aes_c04ae"
+sha256 = "3c7d1012498c5feea20c8ea298388f0e104848b5bb5c1d20e7c0c5dbb0cd480f"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/ZSUN/msz22y350aes_c04ae.tar.gz"
+sha256 = "3939f53465939d9fe2af757f30c931b4096d70309a190a055f297f60addb7d72"
+
+[[files]]
+name = "DATA_AE_S/HE_EN/ZSUN/msz22y400aes_c04ae.tar.gz"
+sha256 = "6d35c98e78705c3559e37a2aec669d426248208761a28b2a58d1d64e0235173b"
+
+[[files]]
+name = "DATA_AE_S/Z13/HB/hbz13aes_c04ae.tar.gz"
+sha256 = "e22b9a25daf06bf1e73ff8ab1564a02595ab377cc4f582377fd21a96a7c84baa"
+
+[[files]]
+name = "DATA_AE_S/Z13/HB/zahbz103y246aes_c04ae"
+sha256 = "e73f002d0a24bd7ee8f3db4cb66f43c096826877d1d6d2a8b4a35a224c3d9773"
+
+[[files]]
+name = "DATA_AE_S/Z13/msz13aes_eta02_c04ae.tar.gz"
+sha256 = "1098de4732d895cc7ade76e8173ab38aab4345ac7a66760c691795ebccae80a2"
+
+[[files]]
+name = "DATA_AE_S/Z14/HB/hbz14aes_c04ae.tar.gz"
+sha256 = "dd79c87663fcf394c722cbf65380a6d437b9fc92c447f34ebc33aaca8a4c5b66"
+
+[[files]]
+name = "DATA_AE_S/Z14/HB/zahbz104y245aes_c04ae"
+sha256 = "31a69a14301978ed4ffc5511f1b0550775585eefe418102fd468b75b63d482e7"
+
+[[files]]
+name = "DATA_AE_S/Z14/msz14aes_eta02_c04ae.tar.gz"
+sha256 = "b6a0c3344eb90a4d4c8fa0e0d5a0728e4f489a929d80faa93b132e43632004dc"
+
+[[files]]
+name = "DATA_AE_S/Z23/HB/hbz23aes_c04ae.tar.gz"
+sha256 = "6fa89035ce59b68120e6198e9e74f6d9216bf16b019e3c336c9a22365d401465"
+
+[[files]]
+name = "DATA_AE_S/Z23/HB/zahbz203y248aes_c04ae"
+sha256 = "bf9c1d47c51c1fd88ea4f4b378194cd56d82f527dfbd66e87b337be7a7e108ae"
+
+[[files]]
+name = "DATA_AE_S/Z23/msz23aes_eta02_c04ae.tar.gz"
+sha256 = "d19d69be8170cac1f1b599657af0c3962a98522265e401d867f70f5800711d9c"
+
+[[files]]
+name = "DATA_AE_S/Z34/HB/hbz34aes_c04ae.tar.gz"
+sha256 = "852d9fb672e77cab432cde45b2c654f6b731cf4695e3e6ca0684a8140bfeea2a"
+
+[[files]]
+name = "DATA_AE_S/Z34/HB/zahbz304y245aes_c04ae"
+sha256 = "366b8ec5878d7315fb712f2f578b3659c8ce47f9a972fca44d4f77995115aa1a"
+
+[[files]]
+name = "DATA_AE_S/Z34/msz34aes_eta02_c04ae.tar.gz"
+sha256 = "ea67493dd62dda7b2bad0306253a7550233e674f5b7bb5ad541c2ef0746701de"
+
+[[files]]
+name = "DATA_AE_S/Z43/HB/hbz43aes_c04ae.tar.gz"
+sha256 = "54ff1304621bc13fdb6fbe8db8eb33914f22d11997d548c3cf5a8878a9987342"
+
+[[files]]
+name = "DATA_AE_S/Z43/HB/zahbz403y251aes_c04ae"
+sha256 = "8db59aca49eb5c984d44f77fe1d95c677d556b79b3e8a5ed031a1ff1faaf2de3"
+
+[[files]]
+name = "DATA_AE_S/Z43/msz43aes_eta02_c04ae.tar.gz"
+sha256 = "930d3325a5cc0757bbed30214dab189df8d2403605f691c068029ceeba795433"
+
+[[files]]
+name = "DATA_AE_S/Z83/HB/hbz83aes_c04ae.tar.gz"
+sha256 = "32c559c7e9c77f6a4aebdf6e6ff4995d109db3e83523b1d9f88b77938c45b329"
+
+[[files]]
+name = "DATA_AE_S/Z83/HB/zahbz803y256aes_c04ae"
+sha256 = "71e7042e7ade902209ebc9fcfe195e40750c60d48989f47c6015b5c6403e7a71"
+
+[[files]]
+name = "DATA_AE_S/Z83/msz83aes_eta02_c04ae.tar.gz"
+sha256 = "60d526d0226d992d96ba9f362d9ce95fd9fc4daf3fa36b7d688a572ab7a263da"
+
+[[files]]
+name = "DATA_AE_S/ZSUN/HB/hbz22aes_c04ae.tar.gz"
+sha256 = "c37b74ea3460f7b98da852f3e7f10795b3f08f2b74b4ece3278ecc689af71ddb"
+
+[[files]]
+name = "DATA_AE_S/ZSUN/HB/zahbzsunysunaes_c04ae"
+sha256 = "30be46f8758e0050545de1f17095d712c6c325ef405d79cd89113da733db5bac"
+
+[[files]]
+name = "DATA_AE_S/ZSUN/msz22aes_eta02_c04ae.tar.gz"
+sha256 = "b8bc8ccea65cc567c4acff3bc2c52035b86b98a3ce9ea899104e87fff836c522"
+
+[[files]]
+name = "DATA_AE_S/newtablowz13aes_eta02.dat"
+sha256 = "39c919456400946e0de68575c7733ddb06274af0f306e4d92017950023f757bc"
+
+[[files]]
+name = "DATA_AE_S/newtablowz14aes_eta02.dat"
+sha256 = "b0857521416856ddebe183d67043b39752f1573518950e7208e96458cc9ab799"
+
+[[files]]
+name = "DATA_AE_S/newtablowz22aes_eta02.dat"
+sha256 = "ea96351c340d4865cd349556b87eddc6a7e524283c9b0d21a473b18d446e2c87"
+
+[[files]]
+name = "DATA_AE_S/newtablowz23aes_eta02.dat"
+sha256 = "dbbcc9f6a89dfe73478f3f263f4b1e650efffb53896e1844bca2437ee471c50a"
+
+[[files]]
+name = "DATA_AE_S/newtablowz34aes_eta02.dat"
+sha256 = "c03fcc8b664f49230078a0a37762699db05e68574d5d5dac1fe58af5d331a2e3"
+
+[[files]]
+name = "DATA_AE_S/newtablowz43aes_eta02.dat"
+sha256 = "20a19c822a2639e9540c4f46dc191f71da76cb225cf0cfc652182b4f2fea7a98"
+
+[[files]]
+name = "DATA_AE_S/newtablowz83aes_eta02.dat"
+sha256 = "9ce334e54b921086c17c428c5d3f534fe99df2e1b29abb95ac192e3cae922557"

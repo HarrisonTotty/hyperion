@@ -1,0 +1,16 @@
+# P15.T6.b's smoke orbit run: the histograms of `manifests/displaced_orbits.smoke.toml`, which the
+# provisional displaced form table is fitted to. Generated, not downloaded: only this file is
+# committed, and the histograms are made again in seconds into the git-ignored
+# `crates/hyperion-fit/data/cache/displaced_smoke/` by
+# `cargo run -p hyperion-fit -- orbits --smoke --out crates/hyperion-fit/data/cache/displaced_smoke`.
+dataset = "displaced_smoke"
+class = "fetched"
+citation = "hyperion-fit orbits (plan 15, P15.T6.a–b): orbits in the Milky Way fixture's own potential"
+url = "generated: hyperion-fit orbits --smoke"
+retrieved = "2026-09-30"
+release = "the smoke manifest displaced_orbits.smoke.toml, manifest-sha256 6a8b4fc39d9a0a5772d6dfedaf3d8ccffe25e1dcd919347a986e6a2aa7c82413, at GENERATOR_VERSION 15, rerun in the potential of the version-15 batch (P06.T30 and P11.T1.d's mean masses, ruling 138's Chabrier scale), rerun again in the potential of P06.T39's Eddington wind, whose fate table moves the mean masses, and rerun at GENERATOR_VERSION 16 in the version-16 potential (rulings 143.1 and 144's nuclear cluster and inner nuclear disc) with ruling 147.2's kick table"
+licence = "HYPERION's own output"
+
+[[files]]
+name = "displaced_orbits.txt"
+sha256 = "7fbfd48f1bfd689889245dcfa2f0b0a3e8e5fbf50601f83a172517ae5d08a3ea"

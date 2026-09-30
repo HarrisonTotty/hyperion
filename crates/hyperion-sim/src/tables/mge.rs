@@ -1,0 +1,86 @@
+//! Gaussian expansions of the profiles the galaxy's potential is built from (plan 02, Design
+//! note 6).
+//!
+//! @provisional by hyperion-fit 0.1.0, task `mge` revision 1 (P02.T6.a). Do not edit.
+//! inputs-sha256: 74e52180fba4ca14be6a2ad32f71fa447ed13e8c96a830856c3068daca748140
+//! manifest: crates/hyperion-fit/manifests/mge.toml
+//! data: none
+//! sim-fingerprint: 91020ca6a195b8bd9ee8aa610a702c9a96cad856a5b5827e5a6998a639587027
+//! since-generator-version: 11
+//! source: the profiles of plan 02's mass model (Design note 6), expanded as sums of Gaussians
+//!   after Emsellem, Monnet and Bacon (1994, A&A 285, 723)
+//! acceptance: `MGE_EXP` within 1.289% of e^(−s) over s = 0.05–10; `MGE_BAR` within 2.88% of its
+//!   central value over u = 0–2 and its mass within 0.212%
+//!
+//! Provisional: plan 15's P15.T3 refits them with free widths and replaces them.
+//!
+//! Each table is `[(weight, width); 14]`, widths ascending, and stands for the profile
+//! `Σ weight × exp(−x² ÷ 2 width²)`. The widths are fixed and log-spaced; the weights are the
+//! non-negative least-squares solution by projected coordinate descent on the normal equations,
+//! 50,000 sweeps from zero. Inputs:
+//!
+//! - [`MGE_EXP`]: `e^(−s)` at 300 log-spaced `s` from 0.02 to 12, each row weighted by
+//!   `1 ÷ e^(−s)` so that the relative error is what is fitted. Widths from 0.04 to 3.5.
+//! - [`MGE_HOLED_EXP`]: `e^(−x ÷ s − s)` with `x = 0.55`, the thin disc's central hole in scale
+//!   lengths: [`MGE_EXP`]'s weights less those of the deficit `e^(−s) (1 − e^(−x ÷ s))`, fitted
+//!   on the same widths and samples in the same weighting, so its weights are signed.
+//! - [`MGE_BAR`]: the azimuthal average of the long bar's surface density `L(|x|) exp(−y² ÷ 2w²)`,
+//!   with `w = 0.1` and `L` level to 0.85 with a Gaussian end of width 0.15, all in half-lengths.
+//!   At 321 evenly spaced `u` from 0 to 2, in absolute error, with one more row for
+//!   the total mass, weighted 5. Widths from 0.04 to 0.8.
+
+/// `e^(−s) ≈ Σ weight × exp(−s² ÷ 2 width²)` for `s ≥ 0`.
+pub const MGE_EXP: [(f64, f64); 14] = [
+    (0.036_205_951_277_046_386, 0.04),
+    (0.0, 0.056_421_577_717_888_64),
+    (0.014_718_825_048_988_386, 0.079_584_860_804_393_68),
+    (0.046_705_195_409_883_375, 0.112_257_585_226_061_18),
+    (0.035_057_591_065_239_27, 0.158_343_751_731_367_97),
+    (0.052_276_071_331_381_67, 0.223_350_107_361_336),
+    (0.102_568_284_258_554_62, 0.315_044_136_019_659_8),
+    (0.084_978_612_797_855_54, 0.444_382_180_124_957_8),
+    (0.164_161_543_067_118_53, 0.626_818_592_809_127_2),
+    (0.148_867_023_901_886_28, 0.884_152_348_729_944_1),
+    (0.164_678_829_494_633_78, 1.247_131_761_458_007_7),
+    (0.100_417_378_479_465_94, 1.759_128_540_088_758_2),
+    (0.031_695_877_324_746_095, 2.481_320_191_009_347),
+    (0.002_115_157_658_180_449_3, 3.5),
+];
+
+/// `e^(−x ÷ s − s) ≈ Σ weight × exp(−s² ÷ 2 width²)` for `s ≥ 0`, with `x` the thin disc's
+/// hole in scale lengths; the weights are signed.
+pub const MGE_HOLED_EXP: [(f64, f64); 14] = [
+    (0.008_176_775_279_532_96, 0.04),
+    (0.0, 0.056_421_577_717_888_64),
+    (0.014_718_825_048_988_386, 0.079_584_860_804_393_68),
+    (0.046_705_195_409_883_375, 0.112_257_585_226_061_18),
+    (-0.108_515_320_392_295_01, 0.158_343_751_731_367_97),
+    (-0.086_953_863_074_323_68, 0.223_350_107_361_336),
+    (-0.098_522_479_693_988_38, 0.315_044_136_019_659_8),
+    (-0.083_414_943_553_599_66, 0.444_382_180_124_957_8),
+    (0.022_939_150_319_017_22, 0.626_818_592_809_127_2),
+    (0.056_603_028_904_271_88, 0.884_152_348_729_944_1),
+    (0.115_469_871_371_021_94, 1.247_131_761_458_007_7),
+    (0.083_459_464_165_471_22, 1.759_128_540_088_758_2),
+    (0.029_004_174_283_505_327, 2.481_320_191_009_347),
+    (0.002_021_187_339_132_636_3, 3.5),
+];
+
+/// The long bar's azimuthally averaged surface density, 1 at the centre: at `u`
+/// half-lengths it is `≈ Σ weight × exp(−u² ÷ 2 width²)`, the widths in half-lengths.
+pub const MGE_BAR: [(f64, f64); 14] = [
+    (0.0, 0.04),
+    (0.0, 0.050_366_204_183_062_924),
+    (0.042_311_180_866_795_396, 0.063_418_863_095_249_58),
+    (0.003_244_497_542_679_272_4, 0.079_854_185_192_826_33),
+    (0.0, 0.100_548_804_907_350_26),
+    (0.595_030_316_479_452_9, 0.126_606_540_958_164),
+    (0.082_990_966_776_132_53, 0.159_417_272_320_255_13),
+    (0.0, 0.200_731_072_199_722_78),
+    (0.0, 0.252_751_554_207_409_5),
+    (0.0, 0.318_253_409_669_922_05),
+    (0.0, 0.400_730_405_334_781_55),
+    (0.274_492_137_220_343_6, 0.504_581_735_436_329),
+    (0.003_150_760_031_098_019_4, 0.635_346_667_850_759_4),
+    (0.0, 0.8),
+];
