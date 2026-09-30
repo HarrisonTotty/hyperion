@@ -23,8 +23,8 @@ git -C ${CLAUDE_PROJECT_DIR} diff --stat HEAD
 
 Arguments: `$ARGUMENTS`.
 
-- A token like `P02.T5.a` is the plan task under review, and `--feature <plan-set>` names its plan
-  set when plan numbers repeat across sets. If there is no task ID, take the task from the
+- A token like `P02.T5.a` (a galaxy plan) or `R04.T3.c` (a rendering plan) is the plan task under
+  review, and `--feature <plan-set>` names its plan set if the prefix alone does not. If there is no task ID, take the task from the
   conversation, or, when the scope is a commit, from that commit's subject. If there is still none,
   skip the plan-conformance reviewer.
 - Any other token is a git ref or range. The default is uncommitted work against `HEAD`,
