@@ -5323,3 +5323,14 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   - _Not done._ T33.a (bench; (iii) rogue planets waits for T27 anyway); goldens for T14/T23;
     moons and rings are still referred to the planet's orbital plane, not T14's equator (moving
     them is an output change for T22.a's owner).
+- **Added by rendering plan R03's R03.T3, by agreement (R03 Design note 8).**
+  `PlanetarySystem::state_at(ctx, index, t) -> Result<Option<(SystemPosition, SystemVelocity)>,
+ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bit (it calls it),
+  with the body's velocity relative to the barycentre, from the private `Epoch::centre_velocity`
+  and `Epoch::velocity` on `centre`'s walk (bit for bit plan 11's `star_states_at` for a star's
+  zone, tested), plus the Kepler velocity about the host and, for a moon, its own. The velocity is
+  the Kepler state's at the elements then, leaving out the elements' slow drift (tidal migration,
+  mass loss). The position path is untouched and every planetary golden unchanged; tests in
+  `planetary/system/tests.rs` (`a_state_s_position_is_position_at_s_bit_for_bit`,
+  `a_body_s_velocity_is_the_derivative_of_its_position`,
+  `a_star_s_zone_moves_with_star_states_at_bit_for_bit`).

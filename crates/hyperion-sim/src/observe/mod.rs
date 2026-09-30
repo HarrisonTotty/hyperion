@@ -28,7 +28,8 @@
 //!   ([`NoStarsCache`] keeps none).
 //! - [`retarded_in_system`]: what an observer inside a system ([`SystemObserver`]) sees of a body
 //!   or star on a [`SystemTrajectory`], light time and aberration together, iterated to a
-//!   nanosecond (rendering plan R03, Design note 7; [`InSystemRetardation`]).
+//!   nanosecond (rendering plan R03, Design note 7; [`InSystemRetardation`]), with the tracks of a
+//!   system's bodies ([`BodyTrack`]) and stars ([`StarTrack`]).
 //!
 //! Spatial searches are untouched: they find systems on their present positions, and observed
 //! mode changes what is reported, never what is found (plan 12, Design note 4). Retarded
@@ -49,8 +50,9 @@ pub use crate::galaxy::query::QueryMode;
 pub use bearing::{AXIS_FRAME_RADIUS_LY, Bearing, BearingFrame, bearing};
 pub use error::{CurvatureError, curvature_error};
 pub use in_system::{
-    BuildSystemObserverError, IN_SYSTEM_LIGHT_TIME_TOLERANCE, IN_SYSTEM_MAX_CORRECTIONS,
-    InSystemRetardation, SystemObserver, SystemTrajectory, TraceInSystemError, retarded_in_system,
+    BodyTrack, BuildSystemObserverError, IN_SYSTEM_LIGHT_TIME_TOLERANCE, IN_SYSTEM_MAX_CORRECTIONS,
+    InSystemRetardation, StarTrack, SystemObserver, SystemTrajectory, TraceInSystemError,
+    retarded_in_system,
 };
 pub use retarded::{
     BuildObserverError, Drift, Motion, Observer, Retardation, TraceMotionError, Trajectory,

@@ -663,6 +663,117 @@ fn a_body_is_at_its_host_s_position_plus_its_orbit() {
     assert!(pairs > 10, "{pairs} pair zones");
 }
 
+/// R03.T3: `state_at`'s position is `position_at`'s bit for bit, and it is `None` exactly where
+/// `position_at` is.
+#[test]
+fn a_state_s_position_is_position_at_s_bit_for_bit() {
+    let mut states = 0;
+    for (ctx, system) in whole().iter().take(200) {
+        for t in window() {
+            for index in system
+                .bodies()
+                .iter()
+                .map(Body::index)
+                .chain(system.belts().iter().map(Belt::index))
+            {
+                let position = system.position_at(ctx, index, t).unwrap();
+                let state = system.state_at(ctx, index, t).unwrap();
+                assert_eq!(position.is_some(), state.is_some());
+                if let (Some(position), Some((same, _))) = (position, state) {
+                    for (x, y) in position.metres().into_iter().zip(same.metres()) {
+                        assert_same_bits(x, y);
+                    }
+                    states += 1;
+                }
+            }
+        }
+    }
+    assert!(states > 1_000, "{states} states");
+}
+
+/// R03.T3: the host's velocity on `state_at`'s walk is `star_states_at`'s bit for bit for a
+/// single star's zone, as `centre` is `star_positions_at`'s: the two copies of the walk agree.
+#[test]
+fn a_star_s_zone_moves_with_star_states_at_bit_for_bit() {
+    let mut states = Vec::new();
+    let mut stars = 0;
+    for (ctx, system) in generated() {
+        for t in window() {
+            let epoch = Epoch::new(system, ctx, t);
+            crate::stellar::multiplicity::star_states_at(ctx.hierarchy(), t, &mut states);
+            for (n, (_, _, velocity)) in states.iter().enumerate() {
+                let centre = epoch.centre_velocity(1 << n);
+                for (x, y) in centre
+                    .metres_per_second()
+                    .into_iter()
+                    .zip(velocity.metres_per_second())
+                {
+                    assert_same_bits(x, y);
+                }
+                stars += 1;
+            }
+        }
+    }
+    assert!(stars > 1_000, "{stars} stars");
+}
+
+/// R03.T3: a body's velocity is the time derivative of its position, by central differences over
+/// a second, to 10⁻⁶ relative, with a floor for the positions' own rounding, a few ε of the widest
+/// orbit on its path (the host's pairs' and its own apocentres, and its distance), which a
+/// difference over 2 s carries into the velocity.
+#[test]
+fn a_body_s_velocity_is_the_derivative_of_its_position() {
+    let second = Span::from_seconds(1);
+    let mut checked = 0;
+    for (ctx, system) in whole().iter().take(200) {
+        let pairs = ctx
+            .hierarchy()
+            .pairs()
+            .map(|(_, orbit)| orbit.apoapsis().value())
+            .fold(0.0, f64::max);
+        for t in [
+            ClockWindow::START.checked_add(second).unwrap(),
+            UniverseTime::EPOCH,
+            ClockWindow::END.checked_sub(second).unwrap(),
+        ] {
+            for body in system.bodies() {
+                let Some((at, velocity)) = system.state_at(ctx, body.index(), t).unwrap() else {
+                    continue;
+                };
+                let (Some(early), Some(late)) = (
+                    system
+                        .position_at(ctx, body.index(), t.checked_sub(second).unwrap())
+                        .unwrap(),
+                    system
+                        .position_at(ctx, body.index(), t.checked_add(second).unwrap())
+                        .unwrap(),
+                ) else {
+                    continue;
+                };
+                let record = system.body_at(ctx, body.index(), t).unwrap();
+                let own = record
+                    .orbit()
+                    .ok()
+                    .map_or(0.0, |orbit| orbit.elements().apoapsis().value());
+                let reach = pairs.max(own).max(at.distance_from_origin().value());
+                let floor = 4.0 * f64::EPSILON * reach;
+                let v = velocity.metres_per_second();
+                let speed = velocity.speed().value();
+                for (axis, v_axis) in v.into_iter().enumerate() {
+                    let derivative = (late.metres()[axis] - early.metres()[axis]) / 2.0;
+                    assert!(
+                        (derivative - v_axis).abs() <= 1e-6 * speed + floor,
+                        "{:?} axis {axis} at {t}: {derivative} m/s by differences against {v_axis} m/s",
+                        body.index()
+                    );
+                }
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 1_000, "{checked} bodies checked");
+}
+
 #[test]
 fn a_single_star_s_habitable_zone_is_kopparapu_s_of_its_state() {
     let ctx = sun(7);
