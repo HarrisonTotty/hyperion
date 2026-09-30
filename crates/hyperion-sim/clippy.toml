@@ -11,6 +11,12 @@ doc-valid-idents = ["McMillan", "McConnell", "McKee", "McDonald", "McElroy", "Mc
 # a saved universe must survive being moved to another machine. That includes `mul_add`, which
 # calls the platform's `fma` where the CPU has none. Float bits are never hashed, whether as an
 # integer or as bytes, and the golden writer that prints them lives in `hyperion-testkit`.
+#
+# The `algebraic_*` methods (`algebraic_add`, `_sub`, `_mul`, `_div` and `_rem`, on `f64` and `f32`)
+# license the compiler to fuse, reassociate and otherwise rewrite float arithmetic as if it were
+# real arithmetic. Rust's documentation of them ("Algebraic operators", `core`'s
+# `primitive_docs.rs`, rustc 1.98.1) warns that "the same inputs may produce different results even
+# within a single program run", so no crate of the workspace calls them, generator or not.
 disallowed-methods = [
     { path = "f64::sin", reason = "use hyperion_sim::math::sin: platform maths is not reproducible" },
     { path = "f64::cos", reason = "use hyperion_sim::math::cos: platform maths is not reproducible" },
@@ -74,4 +80,14 @@ disallowed-methods = [
     { path = "f32::to_le_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
     { path = "f32::to_be_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
     { path = "f32::to_ne_bytes", reason = "float bits are never hashed; print bits through the testkit only" },
+    { path = "f64::algebraic_add", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_sub", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_mul", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_div", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_rem", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_add", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_sub", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_mul", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_div", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_rem", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
 ]
