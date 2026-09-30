@@ -145,8 +145,9 @@ pub mod derive { pub fn radius_chen_kipping(..); pub fn radius_zeng(..); pub fn 
     pub fn jeans_parameter(..) -> f64; pub fn tidal_locking_time(..) -> Seconds;
     pub fn roche_limit_fluid(..) -> Metres; pub fn roche_limit_rigid(..) -> Metres;
     pub fn hill_radius(..) -> Metres; pub fn satellite_stability_limit(..) -> Metres; }
-pub mod hooks { pub struct BodyHooks { /* surface_seed, bulk, surface, habitability, resources,
-    figures */ } pub struct BulkComposition; pub struct SurfaceConditions;
+pub mod hooks { pub struct BodyHooks { /* surface_seed (server-only, never in a DTO:
+    amended by R04.T3.a (rendering plans), drafted for plan 14's owner), bulk, surface,
+    habitability, resources, figures */ } pub struct BulkComposition; pub struct SurfaceConditions;
     pub struct HabitabilityAssessment; pub struct ResourceAbundances; pub struct GlobalFigures; }
 pub mod fate { pub enum BodyState { NotYetFormed, Present, Destroyed { cause: DestructionCause,
     at: UniverseTime }, Unbound { at: UniverseTime } } }
@@ -212,7 +213,10 @@ In plan 04's envelope (`ClientMessage::Request { id, body }`), with the `Dto` na
   `DetailLevelDto`, `BodyOrbitDto` (plan 11's `OrbitDto` plus `parent` and `valid_until`; by ruling
   33 of 2026-09-22 `OrbitDto` itself carries the whole element set and μ, `mu_m3_s2`, so this plan
   adds no element of its own), `BodySummaryDto`, `BeltDto`, `ZoneDto`, `HabitableZoneDto`,
-  `BodyHooksDto`, `BodyEventDto`, `BodyStateDto`, `BodyKindDto`.
+  `BodyHooksDto` (whose seed is `detail_seed: SectionDto<DetailSeedHex>`, never the surface seed:
+  amended by R04.T3.a (rendering plans), drafted for plan 14's owner, per
+  [R04, Design note 17](../rendering-and-planets/04-cross-target-determinism.md#design-notes)),
+  `BodyEventDto`, `BodyStateDto`, `BodyKindDto`.
 - `ErrorCode::UnknownBody` (`unknown_body`), beside plan 06's `ErrorCode::UnknownSystem` (P06.T33;
   neither exists at `9d8e775`). The client's exhaustive `switch` over error codes, `settledState` in
   `apps/hyperion/src/renderer/src/lib/useServerRequest.ts`, gains its case in the same task, so that
@@ -1880,7 +1884,14 @@ through quantities already in the parent's or host's record.
 #### P14.T23 Surface seed and bulk composition
 
 `hooks/mod.rs`. `surface_seed` is one block output of (universe seed, `body.surface`; `BodyId`) and
-depends on nothing else, so no later change to derivation can alter a map's seed. `BulkComposition`
+depends on nothing else, so no later change to derivation can alter a map's seed. The surface seed
+is the server's alone: it is computed for the server's own use and never put in a DTO, since a
+client holding it could synthesise a surface the ship has not seen. The hooks section's wire form
+carries a `detail_seed` in its place, `not_modelled` until the rendering plans' R09 registers
+`body.surface.detail` and computes it (amended by R04.T3.a (rendering plans), drafted for plan 14's
+owner; see
+[R04, Design note 17](../rendering-and-planets/04-cross-target-determinism.md#design-notes)).
+`BulkComposition`
 is T11's fractions plus the atmosphere's inventory from T13 and the host's [Fe/H] and [α/Fe], which
 the resource model and later generators need.
 
@@ -4054,8 +4065,12 @@ record: BodyRecordDto }`. `ResponseBody::SystemBodies` and `BodyDetail` hold the
     the last digits. **For the orchestrator:** the alternative is `mass_mearth`, the sim's own unit.
   - _No value yet._ `BodySurfaceDto` and `BodyEventDto` are uninhabited enums, TypeScript's
     `never`, as the sim's `Surface` and `Hooks` are, so no `ok` surface and no event parses.
-    `BodyHooksDto { surface_seed: SurfaceSeedHex }` holds the one hook whose form the plan fixes,
-    in a new 16-hex-digit newtype; T23–T26 add the others, as `Modelled` fields where a hook lands
+    `BodyHooksDto { detail_seed: SectionDto<DetailSeedHex> }` holds the one hook whose form the
+    plan fixes, in a 16-hex-digit newtype, `not_modelled` until R09 fills it; the surface seed
+    itself never reaches the wire (amended by R04.T3.a (rendering plans), drafted for plan 14's
+    owner; see
+    [R04, Design note 17](../rendering-and-planets/04-cross-target-determinism.md#design-notes));
+    T23–T26 add the others, as `Modelled` fields where a hook lands
     before its section's others. **For the orchestrator:** an uninhabited `BodyHooksDto` would
     mirror the sim exactly.
   - _Zones._ `ZoneDto { host, inner_m, outer_m, snow_line_m, plane: SystemPlaneDto, architecture:

@@ -1303,6 +1303,31 @@ It reserves, so that later plans need not:
   pre-push hook runs neither.
 - **AArch64 stays unchecked.** The claims are corrected, not made true; if a server is ever run on
   Arm, a run there is the check to add.
+- **Deviations in T1, as built.** `clippy_bans.rs` finds the crates' own files by listing
+  `crates/` rather than naming them, so base's and the surface crate's files (T4.a, T5) are held to
+  the list with no edit; it reads only the `disallowed-methods` array and ignores comments, and a
+  fourth test, `a_commented_out_ban_does_not_count`, pins that. The `reason` strings are the plan's
+  paraphrase; the header comments quote rustc 1.98.1's `primitive_docs.rs` (lines 1336–1337) word
+  for word. The hand check ran `cargo clippy -p <crate> --lib -- -D warnings` (a subset of
+  `just lint`) on `hyperion-sim`, `hyperion-fit` and `hyperion-server`, each failing with "use of a
+  disallowed method `f64::algebraic_add`".
+- **T3.a and T3.b, as drafted (2026-09-30).** Plan 14's amendment is drafted at four places, each
+  marked "amended by R04.T3.a": P14.T23's text, the `hooks::BodyHooks` Provides sketch, the DTO
+  list and the note on `BodyHooksDto`. P14.T23 had already landed, built to this amendment (its
+  as-built note: the surface seed kept off the wire, `BodyHooksDto.surface_seed` left for T3.c),
+  so the draft records what the code does. The guide's two rows read `DETAIL SEED`, each marked
+  "(draft for the owner, R04.T3.b)". **Awaiting the owners:** plan 14's owner's acceptance of
+  T3.a and the guide owner's sign-off of T3.b, neither yet recorded. T3.c was built treating T3.a
+  as provisionally accepted (the orchestrator's instruction for this lane) and to T3.b's draft.
+- **Deviations in T3.c, as built.** `SectionDto`'s wire form is `{"state":"ok","value":…}`, so
+  `body_hooks_wire_form` pins `{"detail_seed":{"state":"not_modelled"}}` and
+  `{"detail_seed":{"state":"ok","value":"0123456789abcdef"}}`. The client's `BodyHooks.detailSeed`
+  is a `Section<string>`. The readout's `DETAIL SEED` row shows the guide's Missing state, the em
+  dash alone, for `not_modelled` and `not_resolved` (a single value inside a hooks section that is
+  shown), and is left out for `not_applicable`; `ok` shows the seed in upper case, as the surface
+  seed did. `DetailLevelDto::Full`'s doc now names the detail seed. For the owner with T3.b: the
+  UX review noted that `DETAIL SEED` sits under the readout's `DETAIL` row (the granted detail
+  level), two meanings of "detail" in one readout; `TERRAIN SEED` was suggested as an alternative.
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so

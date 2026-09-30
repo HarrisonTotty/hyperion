@@ -147,10 +147,13 @@ hex64_newtype!(
 );
 
 hex64_newtype!(
-    /// The seed of a body's surface map: one block output of the universe's seed on `body.surface`,
-    /// keyed by the body's ID, which depends on nothing else about the body (plan 14, P14.T23).
-    SurfaceSeedHex,
-    "a surface seed"
+    /// A body's detail seed, the seed of the client's local terrain synthesis, which the rendering
+    /// plans' R09 derives on `body.surface.detail` (rendering plan R04, Design note 17).
+    ///
+    /// It replaced the surface seed on the wire: the surface seed (plan 14, P14.T23) stays on the
+    /// server, since a client holding it could synthesise a surface the ship has not seen.
+    DetailSeedHex,
+    "a detail seed"
 );
 
 hex64_newtype!(
@@ -337,11 +340,11 @@ mod tests {
     }
 
     #[test]
-    fn a_surface_seed_is_sixteen_hex_digits() {
-        let seed = SurfaceSeedHex::from_u64(u64::MAX - 1);
+    fn a_detail_seed_is_sixteen_hex_digits() {
+        let seed = DetailSeedHex::from_u64(u64::MAX - 1);
         assert_wire_form(&seed, json!("fffffffffffffffe"));
         assert_eq!(
-            SurfaceSeedHex::try_from("FFFFFFFFFFFFFFFE".to_owned()),
+            DetailSeedHex::try_from("FFFFFFFFFFFFFFFE".to_owned()),
             Err(ParseHex64Error::InvalidDigit)
         );
     }

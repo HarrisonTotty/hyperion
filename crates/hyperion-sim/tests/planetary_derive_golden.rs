@@ -4,7 +4,7 @@
 //!
 //! Nothing generated reads these yet; they pin the arithmetic, so that a reordered sum, a changed
 //! table entry or a moved interpolation changes a line here, which is a generator-version change
-//! once P14.T16 calls them. CI checks the same file on 64-bit Arm and on wasm32.
+//! once P14.T16 calls them. The sim-determinism skill says which targets compare it.
 
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::planetary::derive::composition::{SnowLineSide, composition};

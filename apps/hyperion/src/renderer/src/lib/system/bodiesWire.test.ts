@@ -1,3 +1,4 @@
+import type { SectionDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -32,6 +33,19 @@ function bodiesOf(response = sliceBodies()) {
 function faultOf(response = sliceBodies()): string {
   const result = toSystemBodiesModel(response, DESIGNATION);
   return result.kind === "fault" ? result.fault : "no fault";
+}
+
+/** The fixture's Earth with a hooks section that is `ok` and carries `detailSeed`, read. */
+function earthWithDetailSeed(detailSeed: SectionDto<string>) {
+  const detail = earthDetail();
+  return toBodyDetail(
+    {
+      ...detail,
+      record: { ...detail.record, hooks: { state: "ok", value: { detail_seed: detailSeed } } },
+    },
+    FIXTURE_SYSTEM,
+    DESIGNATION,
+  );
 }
 
 /** The slice's answer with its giant's effective temperature set to `effectiveK`. */
@@ -268,6 +282,31 @@ describe("toBodyDetail", () => {
     expect(massAndOrbit.detail.record.orbit.state).toBe("ok");
     expect(contact.detail.record.kind).toEqual({ kind: "unresolved" });
     expect(contact.detail.record.orbit).toEqual({ state: "not_resolved" });
+  });
+
+  it("reads a hooks section with its detail seed", () => {
+    const result = earthWithDetailSeed({ state: "ok", value: "0123456789abcdef" });
+
+    expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
+      state: "ok",
+      value: { detailSeed: { state: "ok", value: "0123456789abcdef" } },
+    });
+  });
+
+  it("reads a hooks section whose detail seed is not modelled", () => {
+    const result = earthWithDetailSeed({ state: "not_modelled" });
+
+    expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
+      state: "ok",
+      value: { detailSeed: { state: "not_modelled" } },
+    });
+  });
+
+  it("refuses a detail seed that is not 16 lower-case hexadecimal digits", () => {
+    expect(earthWithDetailSeed({ state: "ok", value: "0123456789ABCDEF" })).toEqual({
+      kind: "fault",
+      fault: "detail seed malformed",
+    });
   });
 
   it("refuses a record of another system", () => {

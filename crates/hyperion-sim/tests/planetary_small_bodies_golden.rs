@@ -2,10 +2,10 @@
 //! giants, the belts and members of a Solar System input and of a compact system, and a halo
 //! before and after its host's mass loss.
 //!
-//! They pin the arithmetic and the words drawn: a reordered sum, a changed constant or a moved
-//! draw number changes a line here, which is a generator-version change. CI checks the same file
-//! on 64-bit Arm and on wasm32. Nothing generated reads these stages until P14.T22.a and T30.a
-//! call them.
+//! They pin the arithmetic and the words drawn: a reordered sum, a changed constant or a moved draw
+//! number changes a line here, which is a generator-version change. The sim-determinism skill says
+//! which targets compare it. Nothing generated reads these stages until P14.T22.a and T30.a call
+//! them.
 
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::belts::{BeltHost, FIRST_BELT_SLOT, host_belts};
