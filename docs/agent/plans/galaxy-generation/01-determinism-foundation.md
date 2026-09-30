@@ -1075,7 +1075,9 @@ Acceptance: `just ci` green; deleting any golden file makes `just test` fail wit
 message; changing one Threefry rotation constant fails the known-answer test and every `rng` golden
 (check by hand once).
 
-### P01.T12 A second architecture in CI
+### P01.T12 A second architecture in CI (dropped)
+
+Dropped by the owner on 2026-09-30: the project runs no CI jobs. See the as-built note.
 
 Build: a CI job `rust-aarch64` on `ubuntu-24.04-arm` that runs
 `cargo test -p hyperion-sim -p hyperion-testkit` and `just test-slow`. The goldens, which include
@@ -1090,7 +1092,8 @@ Acceptance: both Rust jobs green on a pull request.
 
 The plan is done when:
 
-- `just ci` is green, including `just test-slow`, on both CI architectures.
+- `just ci` is green, including `just test-slow`, and `just test-wasm` passes by hand (T12's CI
+  jobs were dropped).
 - Each claim is pinned by a named test:
 
 | Claim                                                   | Pinned by                                                   |
@@ -1230,17 +1233,16 @@ The designation format and the text forms are not part of the generator version.
   file in the crate, whichever plan's test writes it. Changing a Threefry rotation fails the
   known-answer tests and every golden drawn through Threefry (`streams`, `samplers`, `decisions`,
   `events`). `rng/tags.golden` pins only FNV hashes, so it rightly still passes.
-- **T12 is verified locally only; acceptance on a pull request is still pending.** The repository
-  has no remote. `ci.yml` has both jobs: `rust-aarch64` on `ubuntu-24.04-arm` (whose image ships
-  rustup), and `rust-wasm32`, which is the `wasm32-wasip1` fallback running `just test-wasm`. Both
-  are kept because they catch different things. AArch64 catches FMA contraction and differences in
-  platform code paths; wasm32 catches output that depends on a 32-bit `usize`. On an x86-64 host
-  (Rust 1.98.1, wasmtime 48.0.2 from its release tarball), `just test-wasm` ran the tests,
-  doctests and slow tests of `hyperion-sim` and `hyperion-testkit` under wasmtime, and all nine
-  goldens passed bit for bit. libtest cannot unwind on wasm, so it reports every
-  `#[should_panic]` test as ignored there; the x86-64 and AArch64 jobs run them. Goldens are read
-  at host paths fixed at compile time, so the runner preopens the repository at that same path
-  with `--dir`. Nothing has been run on AArch64 yet.
+- **T12 is dropped (the owner, 2026-09-30).** The project runs no CI jobs and this plan does not
+  need them; `ci.yml` was deleted in `751bad8` and is not coming back. What stays is the local
+  check: `just test-wasm` runs the tests, doctests and slow tests of `hyperion-sim` and
+  `hyperion-testkit` under wasmtime on an x86-64 host, which catches output that depends on a
+  32-bit `usize`. libtest cannot unwind on wasm, so it reports every `#[should_panic]` test as
+  ignored there; the x86-64 run covers them. Goldens are read at host paths fixed at compile time,
+  so the runner preopens the repository at that same path with `--dir`. Nothing checks AArch64
+  (FMA contraction, platform code paths); the goldens' portability across architectures is
+  argued, not tested. Acceptance that other plans tie to "both CI architectures" means x86-64
+  `just ci` plus `just test-wasm` run by hand (as ruling 146.5 already set for P10.T2.c).
 - **Statistical thresholds.** α = 10⁻³ over a few dozen fixed-seed tests gives a few per cent chance
   that some seed needs changing at the first run. Design note 28 says how that is handled without
   weakening a test.
