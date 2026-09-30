@@ -1732,3 +1732,36 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     (`.console__banner`); `ConsoleFrame` now needs a `GraphicsStatusContext` provider above it.
   - By eye, pending: the `GRAPHICS` panel in each condition and the header banner in safe mode on
     `just client`, with the store driven from the devtools console, beside the guide's banner rule.
+- **T5.c, the nomenclature draft for the owner (not applied to the guide).** R02.T2.f absorbs and
+  re-checks it in its single pass over `docs/frontend/ux-guidelines.md`. The code is built to it
+  meanwhile: every string is one constant, `GRAPHICS_WORDS` in `view/engine/status.ts`, and the
+  panel's `MODE_WORDS` and `TIMER_WORDS` in `components/GraphicsPanel.tsx`. Awaiting the owner's
+  sign-off or amendment; the constants then change in one commit.
+
+  ```diff
+  @@ Layout @@
+   - A simulation, training or replay mode must look unmistakably different from live
+     operation, through a persistent labelled banner in the header strip.
+  +- The same banner states a graphics mode that lasts until a relaunch, `GRAPHICS SAFE MODE` or
+  +  `GRAPHICS DISABLED`, in `--text`, beside the link status; it is never counted among the
+  +  alerts.
+  @@ Alerts @@
+   - Alerts are raised by the server from simulation state. A console never invents one.
+  +- A console's report on its own graphics is a Fault (`StatusLine`'s fault standing, while the
+  +  fault lasts) or a status in plain text, never an alert: it takes no tone, no flash and no
+  +  place in the header's alert counts.
+  @@ Nomenclature list @@
+  +| `GRAPHICS` | System | The console's own graphics: adapter, features, mode, GPU timer and faults; the `LINK` display's `GRAPHICS` panel |
+  +| `GRAPHICS SOFTWARE ADAPTER`, `GRAPHICS NOT AVAILABLE`, `GRAPHICS NO ADAPTER`, `GRAPHICS SAFE MODE`, `GRAPHICS DISABLED` | Status | The graphics' standing condition, with its cause or remedy after a colon: `GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE`, `GRAPHICS NOT AVAILABLE: no WebGPU`, `GRAPHICS NO ADAPTER: views unavailable`, `GRAPHICS SAFE MODE: views unavailable, relaunch to retry`, `GRAPHICS DISABLED: <n> DEVICE LOSSES, relaunch to retry` or `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` |
+  +| `GRAPHICS DEVICE LOST`, `GRAPHICS PROCESS RESTARTED` | Fault | The GPU device was lost and is being re-created (`GRAPHICS DEVICE LOST: re-creating`); the GPU process crashed and was restarted |
+  +| `UNAVAILABLE` | Label | Not offered on this adapter or in this mode (the owner may prefer `NOT AVAILABLE`, which `GRAPHICS NOT AVAILABLE` already uses) |
+  +| `DEFAULT`, `VULKAN`, `SAFE` | Mode | The launch's graphics mode: the platform's own path, the forced Vulkan path on Linux, the declared safe mode without WebGPU |
+  +| `QUANTIZED`, `FULL`, `ABSENT` | State | The GPU timer: timestamps in 65,536 ns steps, at the device's own resolution, or no timestamps |
+  ```
+
+  `PHOTOREALISTIC` and `WIREFRAME` wait for R02's view class, though the `GRAPHICS` panel's
+  `Styles` row and `GRAPHICS SOFTWARE ADAPTER` already use them (T5 as built). The panel's row
+  labels (`Adapter`, `Software Adapter`, `Features`, `Styles`, `Mode`, `GPU Timer`,
+  `Device Losses`, `Process Restarts`) are ordinary words, and `GPU` and `WebGPU` are proper names
+  of the hardware and the API rather than ship abbreviations; the owner may want `GPU` on the list.
+  `NONE`, `YES` and `NO` are the readings' plain words.
