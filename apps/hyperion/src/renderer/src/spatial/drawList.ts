@@ -17,7 +17,7 @@ import {
 } from "./marks";
 import { gridLines, ringPolyline } from "./plane";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "./symbols";
-import { add, dot, norm, scale, sub, type Vec3 } from "./vec3";
+import { add, dot, norm, scale, sub, type Vec3 } from "../geometry/vec3";
 
 /**
  * A colour token an op is drawn in, named after its CSS custom property in camel case (`text` for

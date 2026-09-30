@@ -22,7 +22,7 @@ import {
   universeTimeToYears,
 } from "@hyperion/protocol";
 
-import type { Vec3 } from "../../spatial/vec3";
+import type { Vec3 } from "../../geometry/vec3";
 import {
   type CentreLy,
   type ChartKind,

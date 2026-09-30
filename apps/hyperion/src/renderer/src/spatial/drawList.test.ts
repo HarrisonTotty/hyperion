@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { between, seededRandom } from "../test/seededRandom";
 import { type Camera, project, viewBasis, type Viewport } from "./camera";
 import { buildDrawList, type DrawOp, type PolylineOp, type TicksOp } from "./drawList";
-import { fromLocal, localFrameAt, planeFrame, toLocal } from "./frame";
+import { fromLocal, localFrameAt, planeFrame, toLocal } from "../geometry/frame";
 import type {
   AnnulusMark,
   PathMark,
@@ -14,7 +14,7 @@ import type {
 } from "./marks";
 import { pick } from "./pick";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "./symbols";
-import { add, dot, scale, vec3, type Vec3 } from "./vec3";
+import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 const VIEWPORT: Viewport = { widthPx: 800, heightPx: 600, remPx: 16 };

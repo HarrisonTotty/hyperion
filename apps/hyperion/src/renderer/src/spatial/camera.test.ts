@@ -15,8 +15,8 @@ import {
   zoomCamera,
   zoomLimits,
 } from "./camera";
-import { localFrameAt } from "./frame";
-import { cross, dot, norm, scale, sub, vec3, type Vec3 } from "./vec3";
+import { localFrameAt } from "../geometry/frame";
+import { cross, dot, norm, scale, sub, vec3, type Vec3 } from "../geometry/vec3";
 
 // A frame off the x axis, so that nothing passes by lining up with x and y.
 const FRAME = localFrameAt(vec3(15_600, 20_800, 0));

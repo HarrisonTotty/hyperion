@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import { type CameraAngles, PRESETS, type Viewport } from "./camera";
 import { CoreArrow } from "./CoreArrow";
-import { localFrameAt } from "./frame";
+import { localFrameAt } from "../geometry/frame";
 import { coreArrowLayout, coreLabelText } from "./furniture";
-import { vec3 } from "./vec3";
+import { vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 const VIEWPORT: Viewport = { widthPx: 400, heightPx: 300, remPx: 16 };
