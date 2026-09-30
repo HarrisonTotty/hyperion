@@ -125,6 +125,56 @@ describe("the device's capabilities", () => {
   });
 });
 
+describe("a refused shader", () => {
+  it("is a fault naming the effect", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "standard" },
+    );
+    expect(status.fault).toEqual({ kind: "shader-refused", effectName: "standard" });
+    expect(graphicsAnnunciation(status)).toEqual({
+      text: "GRAPHICS SHADER REFUSED: standard is not WGSL",
+      standing: "fault",
+    });
+  });
+
+  it("keeps the first refusal's name when the compiler's unnamed one follows", async () => {
+    const outcome = await adapterOutcome();
+    const once = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "standard" },
+    );
+    expect(reduce(once, { kind: "shader-refused", effectName: "(unnamed, at the compiler)" })).toBe(
+      once,
+    );
+  });
+
+  it("does not hide a lost device", async () => {
+    const outcome = await adapterOutcome();
+    const lost = reduce(launched(), { kind: "adapter-outcome", outcome }, LOST);
+    expect(reduce(lost, { kind: "shader-refused", effectName: "standard" })).toBe(lost);
+  });
+
+  it("is cleared by a restore", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "standard" },
+      { kind: "device-restored", outcome },
+    );
+    expect(status.fault).toBeNull();
+  });
+
+  it("changes nothing in a settled condition", () => {
+    const safe = launched("safe");
+    expect(reduce(safe, { kind: "shader-refused", effectName: "standard" })).toBe(safe);
+  });
+});
+
 describe("device loss", () => {
   it("sets the fault and counts", async () => {
     const outcome = await adapterOutcome();
