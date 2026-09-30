@@ -1234,3 +1234,20 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   its `INHIBIT`/`ENABLE` pair in "Controls and commanding", and item 7 in "Data states"; item 8 in
   "Motion and sound"; item 9 in "Layout". R02.T2.f, the nomenclature list, waits on R01.T5.c's
   drafts and is not yet done.
+- **Deviations in R02.T7.a, as built.** `Quaternion` operations are in `view/camera/quaternion.ts`
+  (`quaternion`, `IDENTITY_QUATERNION`, `quaternionFromAxisAngle`, `multiply`, `conjugate`,
+  `rotate`, `rotationRows`). Matrices are `Float32Array`s in WGSL's column-major order:
+  `viewRotation` (3 × 3, Rᵀ) and `viewRotation4`, the 4 × 4 with a zero translation column that
+  R01's `FrameSubmission.viewRotation` takes (its layout is assumed column-major, to be confirmed
+  against R01's adapter in R02.T14). `project` and `pixelSolidAngle` take a
+  `ProjectionCamera { orientation, fovXRad }` and a `Viewport { widthPx, heightPx }`; `project`
+  returns `{ xPx, yPx, depth, inFront }` with y down; `toViewAxes` and `DEFAULT_FOV_DEG` = 60 are
+  exported. The corner pixel's ratio is cos³ 33.5° = 0.5794, which the plan rounds to 0.580; the
+  test holds it to 0.2%.
+- **Deviations in R02.T7.b, as built.** `view/depth/depth.ts` also exports `OCCLUDER_MARGIN`
+  (4 × 10⁻⁶), `DepthLayer` (`opaque`, `shell` with `radiusM`, `plane`, each with an `id`) and
+  `LayerCamera { bodyDistanceM(body) }`. `separable` is `|a − b| ≥ 10⁻⁶ d`. Ties: bodies at equal
+  distance go by the lower ID, a shell whose radius equals the camera's distance counts as above,
+  and equal places go by `id`. The occluder test measures the gap along each ray as a fraction of
+  the graticule point's own distance (at the sub-camera point it is 4 × 10⁻⁶ d exactly).
+  "Transparent layers write no depth" stays a documented rule for the pipelines (R02.T14).
