@@ -1202,3 +1202,16 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   4 × 10⁶ years, and the client checks it arithmetically. `Copy` is derived only on types holding
   no `String` or `Vec`. Plan 14's protocol test fixtures are re-exported under `#[cfg(test)]` from
   `planetary.rs` (`record_fixtures`, `requests_fixtures`) for the scene's wire-form tests.
+- **Deviations in T5.a, as built.** The owner's acceptance of R03.T1's plan 04 rows is treated as
+  provisionally given (the RM1 lane rule). `ResponseBody::Subscribe` holds a `Box<Subscribed>`, as
+  `BodyDetail` does, since a scene's state holds a whole `SystemBodiesDto`; the wire form is
+  unchanged. `SubscriptionTopic`, `SubscriptionState` and `NotificationBody` are internally tagged
+  by `topic` in snake case (`"scene"`), so a request reads `"topic": {"topic": "scene", …}` and
+  P12.T9's variants take `alerts` (noted in P12.T9); `type` would match the other tagged DTOs and
+  is cheap to switch to before R03.T5.c's client reads it. The four kinds answer `unsupported`
+  through `not_served_yet` until R03.T5.b (`subscribe`, `unsubscribe`), R03.T6 (`scene_ship`) and
+  R03.T8 (the scene topic, `scene_cameras`). `RequestClient::handleServerMessage`
+  (`packages/protocol/src/requests.ts`) and the link's switch
+  (`apps/hyperion/src/renderer/src/lib/connection.ts`) gain a `notification` case, which the
+  type-aware exhaustiveness lint requires; until R03.T5.c routes it, the client consumes and drops
+  a notification.

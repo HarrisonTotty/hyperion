@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
     ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    ServerMessage,
+    ServerMessage, SubscriptionState,
 };
 use serde_json::Value;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
@@ -81,6 +81,12 @@ impl Handler for Handlers {
             RequestBody::SystemBodies(request) => Box::pin(system::bodies(state, request, token)),
             RequestBody::BodyDetail(request) => Box::pin(system::detail(state, request, token)),
             RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
+            // Rendering plan R03's kinds: served by R03.T5.b (the envelope), T6 (`scene_ship`) and
+            // T8 (the scene topic and `scene_cameras`).
+            RequestBody::Subscribe(_) => Box::pin(ready(Err(not_served_yet("subscribe")))),
+            RequestBody::Unsubscribe(_) => Box::pin(ready(Err(not_served_yet("unsubscribe")))),
+            RequestBody::SceneShip(_) => Box::pin(ready(Err(not_served_yet("scene_ship")))),
+            RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
         }
     }
 }
@@ -109,6 +115,10 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::SystemBodies(_) => "system_bodies",
         RequestBody::BodyDetail(_) => "body_detail",
         RequestBody::BodyEvents(_) => "body_events",
+        RequestBody::Subscribe(_) => "subscribe",
+        RequestBody::Unsubscribe(_) => "unsubscribe",
+        RequestBody::SceneShip(_) => "scene_ship",
+        RequestBody::SceneCameras(_) => "scene_cameras",
     }
 }
 
@@ -117,19 +127,27 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 ///
 /// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
-/// record cannot.
-fn is_large(body: &ResponseBody) -> bool {
+/// record cannot. A subscription's answer is as large as its topic's state: the scene's holds a
+/// whole system's bodies (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and
+/// `unsubscribe` are small.
+pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_) => true,
+        ResponseBody::Subscribe(subscribed) => match subscribed.state {
+            SubscriptionState::Scene(_) => true,
+        },
         ResponseBody::CreateUniverse(_)
         | ResponseBody::ListUniverses(_)
         | ResponseBody::OpenUniverse(_)
         | ResponseBody::GalaxyParameters(_)
         | ResponseBody::SystemSummary(_)
-        | ResponseBody::BodyDetail(_) => false,
+        | ResponseBody::BodyDetail(_)
+        | ResponseBody::Unsubscribe
+        | ResponseBody::SceneShip(_)
+        | ResponseBody::SceneCameras => false,
     }
 }
 
@@ -653,9 +671,12 @@ mod tests {
 
     use hyperion_protocol::{
         BodyDetailRequest, BodyEventsRequest, BodyIdHex, CreateUniverseRequest, DensityMap,
-        DensityMapRequest, DetailLevelDto, GalacticPosition, GalaxyParametersRequest,
-        MapPopulation, MapView, MassLayer, OpenUniverseRequest, SystemBodiesRequest, SystemIdHex,
-        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+        DensityMapRequest, DetailLevelDto, FramePositionDto, GalacticPosition,
+        GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
+        OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
+        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SubscribeRequest,
+        Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
+        SystemsInRangeRequest, UniverseIdHex, UniverseTime, UnsubscribeRequest,
     };
 
     use super::*;
@@ -711,12 +732,40 @@ mod tests {
                 detail: DetailLevelDto::Full,
             }),
             RequestBody::BodyEvents(BodyEventsRequest {
-                universe,
+                universe: universe.clone(),
                 system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 from: UniverseTime::default(),
                 to: UniverseTime::default(),
             }),
+            RequestBody::Subscribe(SubscribeRequest {
+                universe: universe.clone(),
+                topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                    detail: DetailLevelDto::Full,
+                    cameras: Vec::new(),
+                }),
+            }),
+            RequestBody::Unsubscribe(UnsubscribeRequest { subscription: 1 }),
+            RequestBody::SceneShip(SceneShipRequest {
+                universe,
+                ship: galactic_pose(),
+                time_rate: 1,
+            }),
+            RequestBody::SceneCameras(SceneCamerasRequest {
+                subscription: 1,
+                cameras: Vec::new(),
+            }),
         ]
+    }
+
+    /// A pose at the galactic origin, at rest, at the epoch.
+    fn galactic_pose() -> KinematicsDto {
+        KinematicsDto {
+            position: FramePositionDto::Galactic {
+                position: GalacticPosition::default(),
+            },
+            velocity_m_s: [0.0; 3],
+            time: UniverseTime::default(),
+        }
     }
 
     fn density_map() -> ResponseBody {
@@ -869,15 +918,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn body_events_is_unsupported_until_its_handler_lands() {
+    async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
-        // answer it as an older server would until P14.T31 serves it.
+        // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
+        // four until its tasks serve them.
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
-            .filter(|body| matches!(body, RequestBody::BodyEvents(_)))
+            .filter(|body| {
+                matches!(
+                    body,
+                    RequestBody::BodyEvents(_)
+                        | RequestBody::Subscribe(_)
+                        | RequestBody::Unsubscribe(_)
+                        | RequestBody::SceneShip(_)
+                        | RequestBody::SceneCameras(_)
+                )
+            })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 5);
         for body in events {
             let name = kind(&body);
             let answer = Handlers
@@ -886,6 +945,40 @@ mod tests {
             assert_eq!(answer, Err(not_served_yet(name)), "{name}");
         }
         harness.stop().await;
+    }
+
+    /// Rendering plan R03, Design note 14: a scene's `subscribed` holds a whole system's bodies
+    /// and is serialised on the pool; the scene's small answers are not.
+    #[test]
+    fn a_scene_subscribed_is_large_and_the_scene_s_small_answers_are_not() {
+        let subscribed = ResponseBody::Subscribe(Box::new(Subscribed {
+            subscription: 1,
+            state: SubscriptionState::Scene(SceneStateDto {
+                sequence: 0,
+                clock: SceneClockDto {
+                    time: UniverseTime::default(),
+                    time_rate: 1,
+                    state: SceneClockStateDto::Running,
+                },
+                ship: galactic_pose(),
+                system: None,
+                craft: Vec::new(),
+            }),
+        }));
+        assert!(is_large(&subscribed));
+        for small in [
+            ResponseBody::Unsubscribe,
+            ResponseBody::SceneCameras,
+            ResponseBody::SceneShip(SceneShipSet {
+                clock: SceneClockDto {
+                    time: UniverseTime::default(),
+                    time_rate: 0,
+                    state: SceneClockStateDto::Paused,
+                },
+            }),
+        ] {
+            assert!(!is_large(&small), "{small:?}");
+        }
     }
 
     #[test]
