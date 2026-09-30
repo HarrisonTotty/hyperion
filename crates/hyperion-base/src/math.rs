@@ -1,8 +1,9 @@
 //! Transcendental functions over `f64`, every one a thin wrapper of the exactly pinned `libm`.
 //!
-//! The rule: no code in `hyperion-sim` calls a transcendental method of `f64` or `f32`. It calls
-//! the free function here instead. Clippy enforces it through the `disallowed-methods` list in
-//! this crate's `clippy.toml`.
+//! The rule: no code in the determinism crates (`hyperion-base`, `hyperion-surface`,
+//! `hyperion-sim` and `hyperion-fit`) calls a transcendental method of `f64` or `f32`. It calls the
+//! free function here instead. Clippy enforces it through the `disallowed-methods` list in each
+//! crate's own `clippy.toml`.
 //!
 //! The reason (brainstorm, "Floating point"): Rust's `+ - * /` and `sqrt` are IEEE-exact and
 //! identical on every target, and the compiler never fuses a multiply and an add on its own. `sin`,
@@ -221,7 +222,7 @@ pub fn powf(x: f64, y: f64) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::{ln, powf, powf_positive};
+/// use hyperion_base::math::{ln, powf, powf_positive};
 ///
 /// // A 5 M☉ star's M^3.8, within the bound plus `powf`'s own ulp.
 /// let (m, e) = (5.0, 3.8);
@@ -293,7 +294,7 @@ pub fn gamma(x: f64) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::fmod;
+/// use hyperion_base::math::fmod;
 ///
 /// assert_eq!(fmod(7.5, 2.0), 1.5);
 /// assert_eq!(fmod(-7.5, 2.0), -1.5);
@@ -316,7 +317,7 @@ pub fn fmod(x: f64, y: f64) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::mul_add;
+/// use hyperion_base::math::mul_add;
 ///
 /// let one_plus_eps = 1.0 + f64::EPSILON;
 /// let one_minus_eps = 1.0 - f64::EPSILON;
@@ -365,7 +366,7 @@ const TWO_PRODUCT_PRODUCT_MAX: f64 = f64::from_bits((1023 + 1021) << 52);
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::{mul_add, two_product};
+/// use hyperion_base::math::{mul_add, two_product};
 ///
 /// let (product, error) = two_product(0.1, 1e9);
 /// assert_eq!(product, 0.1 * 1e9);
@@ -418,7 +419,7 @@ fn veltkamp_split(a: f64) -> (f64, f64) {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::powi;
+/// use hyperion_base::math::powi;
 ///
 /// assert_eq!(powi(2.0, 10), 1024.0);
 /// assert_eq!(powi(2.0, -2), 0.25);
@@ -536,14 +537,13 @@ fn horner(c: &[f64], x: f64) -> f64 {
 ///
 /// In debug builds, if `p` is not strictly between 0 and 1 (NaN included). Release builds return
 /// −∞ for `p ≤ 0`, +∞ for `p ≥ 1` and a NaN `p` unchanged, the same bits on every target. To
-/// invert a uniform draw, take it from [`Stream::uniform_open`](crate::rng::Stream::uniform_open),
-/// whose range lies inside the domain; [`Stream::uniform`](crate::rng::Stream::uniform) can return
-/// 0.
+/// invert a uniform draw, take it from `Stream::uniform_open`, whose range lies inside the domain;
+/// `Stream::uniform` can return 0.
 ///
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::normal_quantile;
+/// use hyperion_base::math::normal_quantile;
 ///
 /// // The half-width of the two-sided 95% interval, in standard deviations.
 /// let z = normal_quantile(0.975);

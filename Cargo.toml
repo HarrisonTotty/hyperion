@@ -9,6 +9,7 @@ rust-version = "1.98"
 publish = false
 
 [workspace.dependencies]
+hyperion-base = { path = "crates/hyperion-base" }
 hyperion-protocol = { path = "crates/hyperion-protocol" }
 hyperion-sim = { path = "crates/hyperion-sim" }
 hyperion-testkit = { path = "crates/hyperion-testkit" }
@@ -86,6 +87,12 @@ incremental = true
 # the sim's bound checks still fire. Generated output does not change: the whole fast suite, golden
 # files included, passes bit for bit at opt-level 3 with thin LTO, which optimises harder still.
 [profile.dev.package.hyperion-sim]
+opt-level = 2
+
+# The sim's `math` and `units` live in `hyperion-base` (plan R04), and `"*"` below covers no
+# workspace member, so base needs its own entry, or the fast suite would run the sim's maths at
+# `opt-level = 0`, for the same reason and with the same guarantee as the sim's.
+[profile.dev.package.hyperion-base]
 opt-level = 2
 
 # The fitting crate solves least squares and the testkit runs the statistics, for the same reason.
