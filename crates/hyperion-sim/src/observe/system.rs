@@ -43,7 +43,8 @@ impl ObservedSystem {
         self.existence_then
     }
 
-    /// Its brief when the light left it, or `None` if it was not yet born.
+    /// Its brief when the light left it, or `None` if it was not yet born, or if it is a rogue
+    /// planet, which has no stars.
     #[must_use]
     pub const fn brief_then(&self) -> Option<StellarBrief> {
         self.brief_then
@@ -109,20 +110,37 @@ pub fn observe_hit(
     observer: &Observer,
 ) -> Result<ObservedSystem, TraceMotionError> {
     let line = Drift::of_record(galaxy, hit.record())?;
-    debug_assert_eq!(
-        stars.record().id(),
-        hit.id(),
+    Ok(observe_on_line(galaxy, hit, &line, Some(stars), observer))
+}
+
+/// [`observe_hit`] for a hit whose line the caller has traced already, as the observed range
+/// query does with its interior cache (P12.T3). `stars` is `None` for a system that has none, a
+/// rogue planet, which then has no brief at the emitted time either.
+///
+/// # Panics
+///
+/// In debug builds, if `stars` are not `hit`'s system's.
+#[must_use]
+pub(crate) fn observe_on_line(
+    galaxy: &Galaxy,
+    hit: &SystemHit,
+    line: &Drift,
+    stars: Option<&SystemStars>,
+    observer: &Observer,
+) -> ObservedSystem {
+    debug_assert!(
+        stars.is_none_or(|stars| stars.record().id() == hit.id()),
         "the stars given are not the hit's system's"
     );
-    let retardation = retarded(observer, &line);
+    let retardation = retarded(observer, line);
     let emitted = retardation.emitted();
-    Ok(ObservedSystem {
+    ObservedSystem {
         hit: *hit,
         retardation,
         existence_then: SystemExistence::from(hit.record().existence_at(emitted)),
-        brief_then: stars.brief_at(emitted),
+        brief_then: stars.and_then(|stars| stars.brief_at(emitted)),
         error: curvature_error(galaxy, observer.position(), &retardation),
-    })
+    }
 }
 
 /// The summary of `record`'s system, whose stars are `stars`, as `observer` sees it: at the

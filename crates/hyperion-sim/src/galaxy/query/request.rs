@@ -3,6 +3,7 @@
 use std::num::NonZeroU32;
 
 use super::BuildRangeQueryError;
+use super::mode::QueryMode;
 use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::id::Layer;
 use crate::time::{ClockWindow, UniverseTime};
@@ -157,12 +158,13 @@ pub struct RangeQuery {
     mass_floor: MassFloor,
     substellar: SubstellarRequest,
     cell_budget: NonZeroU32,
+    mode: QueryMode,
 }
 
 impl RangeQuery {
     /// A builder for a query of the sphere of `radius` about `centre`, with every other setting
     /// at its default: at the epoch, [`DEFAULT_CENSUS_LIMIT`], [`MassFloor::LayerA`], no
-    /// substellar layers and [`DEFAULT_CELL_BUDGET`].
+    /// substellar layers, [`DEFAULT_CELL_BUDGET`] and [`QueryMode::Now`].
     pub fn builder(centre: GalacticPosition, radius: LightYears) -> RangeQueryBuilder {
         RangeQueryBuilder {
             query: Self {
@@ -173,6 +175,7 @@ impl RangeQuery {
                 mass_floor: MassFloor::default(),
                 substellar: SubstellarRequest::default(),
                 cell_budget: DEFAULT_CELL_BUDGET,
+                mode: QueryMode::Now,
             },
         }
     }
@@ -218,6 +221,13 @@ impl RangeQuery {
     #[must_use]
     pub const fn cell_budget(&self) -> NonZeroU32 {
         self.cell_budget
+    }
+
+    /// What the answer reports: the present alone, or also what an observer's sensors receive
+    /// (plan 12, P12.T3). The systems found and the census do not depend on it (Design note 4).
+    #[must_use]
+    pub const fn mode(&self) -> QueryMode {
+        self.mode
     }
 }
 
@@ -272,6 +282,17 @@ impl RangeQueryBuilder {
         self
     }
 
+    /// What the answer reports ([`QueryMode`]). Only
+    /// [`range_query_observed`](super::range_query_observed) reads it;
+    /// [`range_query`](super::range_query) finds the same systems in either mode and reports the
+    /// present.
+    ///
+    /// Default: [`QueryMode::Now`].
+    pub const fn mode(mut self, mode: QueryMode) -> Self {
+        self.query.mode = mode;
+        self
+    }
+
     /// The validated query.
     ///
     /// # Errors
@@ -291,6 +312,8 @@ impl RangeQueryBuilder {
     /// - [`BuildRangeQueryError::SubstellarBelowFloor`] for a substellar request with a floor that
     ///   would cut its layers off: above layer A, or the brown dwarfs' step with the rogue planets
     ///   asked for.
+    /// - [`BuildRangeQueryError::ObserverOutsideRootCube`] for an observed mode whose observer lies
+    ///   outside the root cube.
     ///
     /// With a floor of [`MassFloor::LayerA`] and substellar layers asked for, the built query's
     /// floor is the request's step.
@@ -313,6 +336,11 @@ impl RangeQueryBuilder {
             return Err(BuildRangeQueryError::TimeOutsideClockWindow(query.time));
         }
         query.mass_floor = tie_floor(query.mass_floor, query.substellar)?;
+        if let QueryMode::ObservedFrom(observer) = query.mode
+            && !observer.in_root_cube()
+        {
+            return Err(BuildRangeQueryError::ObserverOutsideRootCube);
+        }
         Ok(query)
     }
 }

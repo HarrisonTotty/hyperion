@@ -16,6 +16,7 @@
 
 mod census;
 mod expected;
+mod mode;
 mod motion;
 mod request;
 mod result;
@@ -28,6 +29,7 @@ use std::fmt;
 
 pub use census::decide_census;
 pub use expected::expected_counts;
+pub use mode::{QueryMode, range_query_observed};
 pub use motion::{
     PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, hit_at, pad_for, pad_speed, position_at,
 };
@@ -309,6 +311,9 @@ pub enum BuildRangeQueryError {
     /// above layer A, or the brown dwarfs' step with the rogue planets asked for (plan 13, Design
     /// note 9).
     SubstellarBelowFloor,
+    /// The observer of an observed mode ([`QueryMode::ObservedFrom`]) lies outside the root cube
+    /// (plan 12, P12.T3).
+    ObserverOutsideRootCube,
 }
 
 impl fmt::Display for BuildRangeQueryError {
@@ -330,6 +335,9 @@ impl fmt::Display for BuildRangeQueryError {
             }
             Self::SubstellarBelowFloor => {
                 f.write_str("the requested substellar layers lie below the mass floor")
+            }
+            Self::ObserverOutsideRootCube => {
+                f.write_str("the query's observer lies outside the root cube")
             }
         }
     }
@@ -558,6 +566,7 @@ mod tests {
             BuildRangeQueryError::TimeOutsideClockWindow(t),
             BuildRangeQueryError::SubstellarNotRequested,
             BuildRangeQueryError::SubstellarBelowFloor,
+            BuildRangeQueryError::ObserverOutsideRootCube,
         ] {
             let message = error.to_string();
             let first = message.chars().next().unwrap();

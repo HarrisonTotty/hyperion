@@ -94,6 +94,15 @@
 //!   systems to 71).
 //! - Version 15's refit of Chabrier's high-mass scale, 0.68 to 0.92 (P15.T4.b, ruling 138), raised
 //!   bands D and E's share of systems by 30%, 0.0335 to 0.0437, and the walk's count by 23%.
+//!
+//! # Observed mode (plan 12, P12.T3)
+//!
+//! `range_observed_50ly` is the 50 ly query observed from its own centre with its cells and its
+//! 917 systems' stars warm, so it measures the observation alone against `range_50ly_warm`:
+//! 4.19–4.79 ms against 1.13 ms on 2026-09-30 at load 9–11, about 4 µs a system, of which the
+//! brief at the emitted time is 44%, the stated curvature error 27% and the retarded step 18%.
+//! `range_observed_50ly_cold` builds every system's stars as well: 240 ms against
+//! `range_50ly_cold`'s 9.45 ms. Plan 12's Risks record the figures for ruling 143.4.
 use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::num::NonZeroU32;
@@ -106,9 +115,12 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellCache, CellKey, NoCache, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{
-    MassFloor, RangeQuery, SubstellarRequest, expected_counts, range_query,
+    MassFloor, QueryMode, RangeQuery, SubstellarRequest, expected_counts, range_query,
+    range_query_observed,
 };
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::observe::{NoStarsCache, StarsCache};
+use hyperion_sim::stellar::system::SystemStars;
 use hyperion_sim::units::LightYears;
 
 /// The seed every query here runs in.
@@ -146,6 +158,26 @@ impl CellCache for Warm {
             systems
         });
         f(cell)
+    }
+}
+
+/// A stars cache holding every system it has been asked for: the warm case of the observed query.
+#[derive(Debug, Default)]
+struct WarmStars {
+    stars: BTreeMap<SystemId, SystemStars>,
+}
+
+impl StarsCache for WarmStars {
+    fn with_stars<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        f: impl FnOnce(&SystemStars) -> R,
+    ) -> R {
+        f(self
+            .stars
+            .entry(record.id())
+            .or_insert_with(|| SystemStars::generate(galaxy, record)))
     }
 }
 
@@ -227,5 +259,50 @@ fn long_range(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(query, expected, local, long_range);
+/// The brainstorm's local query in observed mode (plan 12, P12.T3), seen by a sensor at the
+/// query's centre: warm, against `range_50ly_warm`, so that the difference is the observation of
+/// each system (the retarded step, the brief at the emitted time and the stated error) with no
+/// generation; and cold, against `range_50ly_cold`, where every system's stars are built as well.
+fn observed(c: &mut Criterion) {
+    let galaxy = galaxy();
+    let query = RangeQuery::builder(sunlike_point(), LightYears::new(50.0))
+        .mode(QueryMode::ObservedFrom(sunlike_point()))
+        .build()
+        .expect("50 ly at the Sun-like point is a query");
+    let mut cells = Warm::default();
+    let mut stars = WarmStars::default();
+    let filled = range_query_observed(&galaxy, &mut cells, &mut stars, &[], &query)
+        .expect("the Sun-like point holds no centre member");
+    assert_eq!(filled.observed().len(), filled.systems().len());
+    assert_eq!(stars.stars.len(), filled.systems().len());
+    let mut group = c.benchmark_group("query");
+    group.bench_function("range_observed_50ly", |b| {
+        b.iter(|| {
+            range_query_observed(
+                black_box(&galaxy),
+                &mut cells,
+                &mut stars,
+                &[],
+                black_box(&query),
+            )
+        });
+    });
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(30));
+    group.bench_function("range_observed_50ly_cold", |b| {
+        let mut cold = NoCache::new();
+        b.iter(|| {
+            range_query_observed(
+                black_box(&galaxy),
+                &mut cold,
+                &mut NoStarsCache,
+                &[],
+                black_box(&query),
+            )
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(query, expected, local, long_range, observed);
 criterion_main!(query);

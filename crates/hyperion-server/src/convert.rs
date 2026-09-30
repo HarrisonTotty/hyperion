@@ -358,6 +358,8 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
         BuildRangeQueryError::TimeOutsideClockWindow(_) => "time",
         BuildRangeQueryError::SubstellarNotRequested
         | BuildRangeQueryError::SubstellarBelowFloor => "min_layer",
+        // No request sets an observed mode until plan 12's P12.T6 adds the wire's `mode`.
+        BuildRangeQueryError::ObserverOutsideRootCube => "mode",
     };
     ConvertRequestError::new(field, error)
 }
@@ -2352,6 +2354,7 @@ mod tests {
             ),
             (BuildRangeQueryError::SubstellarNotRequested, "min_layer"),
             (BuildRangeQueryError::SubstellarBelowFloor, "min_layer"),
+            (BuildRangeQueryError::ObserverOutsideRootCube, "mode"),
         ] {
             let converted = RequestError::from(refused_query(error));
             assert_eq!(converted.code, ErrorCode::BadRequest);

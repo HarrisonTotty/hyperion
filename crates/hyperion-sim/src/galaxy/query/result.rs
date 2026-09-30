@@ -6,6 +6,7 @@ use std::ops::Add;
 use crate::coords::GalacticPosition;
 use crate::galaxy::placement::{STELLAR_LAYERS, SystemRecord, layer_spec};
 use crate::id::{Layer, SystemId};
+use crate::observe::ObservedSystem;
 use crate::units::{LightYears, SolarMasses};
 
 /// An expected number of systems per layer, indexed by [`Layer::value`]: the five stellar layers
@@ -296,11 +297,16 @@ impl SystemHit {
 /// is not bounded by the query's limit: the limit bounds the expected count of a layer, and the
 /// realised count fluctuates around it and is never truncated, because truncation would break the
 /// census (Design note 9).
+///
+/// In observed mode ([`range_query_observed`](super::range_query_observed) with
+/// [`QueryMode::ObservedFrom`](super::QueryMode::ObservedFrom)) it also holds what the observer's
+/// sensors receive from each system, parallel to the systems (plan 12, P12.T3).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeResult {
     systems: Vec<SystemHit>,
     census: Census,
     stats: QueryStats,
+    observed: Vec<ObservedSystem>,
 }
 
 impl RangeResult {
@@ -311,7 +317,27 @@ impl RangeResult {
             systems,
             census,
             stats,
+            observed: Vec::new(),
         }
+    }
+
+    /// This result with `observed`, one entry per system in the systems' order. Only the observed
+    /// query builds one.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `observed` is not parallel to the systems.
+    #[must_use]
+    pub(super) fn with_observed(self, observed: Vec<ObservedSystem>) -> Self {
+        debug_assert!(
+            observed.len() == self.systems.len()
+                && observed
+                    .iter()
+                    .zip(&self.systems)
+                    .all(|(seen, hit)| seen.hit() == hit),
+            "the observed systems are not parallel to the systems found"
+        );
+        Self { observed, ..self }
     }
 
     /// The systems found, nearest first at the query's time and by ID on a tie.
@@ -336,6 +362,14 @@ impl RangeResult {
     #[must_use]
     pub const fn stats(&self) -> &QueryStats {
         &self.stats
+    }
+
+    /// What the observer receives from each system, `observed()[i]` from `systems()[i]`, in
+    /// observed mode; empty in [`QueryMode::Now`](super::QueryMode::Now) and from
+    /// [`range_query`](super::range_query), which reports the present alone.
+    #[must_use]
+    pub fn observed(&self) -> &[ObservedSystem] {
+        &self.observed
     }
 }
 

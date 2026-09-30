@@ -6,7 +6,9 @@ use std::fmt;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity, LyCell};
 use crate::galaxy::Galaxy;
-use crate::galaxy::features::members::{MemberRecord, NoInteriorCache, resolve_member};
+use crate::galaxy::features::members::{
+    FeatureInteriorCache, MemberRecord, NoInteriorCache, resolve_member,
+};
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::query::epoch_velocity;
 use crate::id::{SystemId, SystemIdKind};
@@ -226,13 +228,32 @@ impl Drift {
     /// If `record` is a feature member that does not resolve in `galaxy`, which only a record of
     /// another galaxy can be.
     pub fn of_record(galaxy: &Galaxy, record: &SystemRecord) -> Result<Self, TraceMotionError> {
+        Self::of_record_in(galaxy, &NoInteriorCache, record)
+    }
+
+    /// [`of_record`](Self::of_record) with a feature member's interior from `interiors`, so that a
+    /// caller tracing many members of one feature builds its interior once (P12.T3 as built). The
+    /// line is the same whatever the cache holds.
+    ///
+    /// # Errors
+    ///
+    /// As [`of_record`](Self::of_record).
+    ///
+    /// # Panics
+    ///
+    /// As [`of_record`](Self::of_record).
+    pub(crate) fn of_record_in(
+        galaxy: &Galaxy,
+        interiors: &dyn FeatureInteriorCache,
+        record: &SystemRecord,
+    ) -> Result<Self, TraceMotionError> {
         let velocity = match record.origin() {
             SystemOrigin::Grid(_) => epoch_velocity(galaxy, record),
             SystemOrigin::FeatureMember { .. } => {
                 let SystemIdKind::FeatureMember(id) = record.id().kind() else {
                     unreachable!("a feature member's record is built with a member ID")
                 };
-                resolve_member(galaxy, &NoInteriorCache, id)
+                resolve_member(galaxy, interiors, id)
                     .expect("a feature member's record resolves in the galaxy that placed it")
                     .velocity()
             }

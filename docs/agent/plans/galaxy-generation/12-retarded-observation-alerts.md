@@ -900,3 +900,92 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `observe/retarded` at the epoch 0.62 µs, at +300 years 0.93 µs, `retarded_from` 0.56 µs,
     against 1.12 µs before at load 12. At low load the ruling's 0.7 and 0.5 µs are likely met but
     not measured here.
+- **T3 and T7.a–b as built (lane `obs12c`, 2026-09-30, at `GENERATOR_VERSION` 15).** No generated
+  output moves and no golden changes: the observed query only reads, and Knowledge is the server's.
+  - _T3._ `QueryMode` lives in `galaxy/query/mode.rs` beside `range_query_observed` (the builder
+    takes it) and is re-exported as `observe::QueryMode`; `RangeQuery::mode()` and
+    `RangeQueryBuilder::mode(QueryMode)`, default `Now`. `build` refuses an observer outside the
+    root cube with a new `BuildRangeQueryError::ObserverOutsideRootCube`, so the query carries a
+    valid observer; the server's `refused_query` maps it to the field `mode` until T6 names the
+    wire's field. `RangeResult::observed() -> &[ObservedSystem]`, empty in `Now` and from
+    `range_query`. `observe::{StarsCache, NoStarsCache, stars_of}` in the new
+    `observe/stars_cache.rs`: a cache must lend what `stars_of(galaxy, interiors, record)` builds,
+    which for a feature member is `MemberRecord::stars` at its cluster's composition, not plan 06's
+    `SystemStars::generate` (that reads the record's density component, which a member lacks: a
+    debug assertion, and a wrong composition in release). A rogue planet has no stars, so its row is
+    observed without them and has no brief then; the cache is never asked for it.
+    `range_query_observed` returns `Result<RangeResult, TraceMotionError>`: a centre member found
+    refuses the whole answer with obs12a's `CentreOrbitNotBuilt` until P09.T28, before any stars are
+    asked for (none is found yet, since no centre `SystemSource` exists; the test hands the black
+    hole in through a test source). It reads each row through `SystemStars::brief_at`, as T0
+    required. The hit carries no velocity, so a feature member's line is traced with
+    `Drift::of_record_in` (crate-private, over plan 09's `FeatureInteriorCache`) and one
+    `KeepInteriors` per call: each feature's interior is built once more per query, not once a
+    member (the source that found the members built it too). A server wanting its long-lived
+    interior cache there needs a variant that takes it (T6). Tests: `query::mode` (100 random grid
+    queries over the disc, radii 1–8 ly, times over ±H, observers anywhere in the cube: the same
+    systems, census and statistics as `range_query`, and every row its own `observe_hit`; one in ten
+    with the substellar layers; 2 s in a debug build) and, slow,
+    `tests/observe_query.rs::observed_query_agrees_with_now_among_feature_members` (20 queries
+    inside the first feature with members within 3,000 ly of the Sun, in a full-potential galaxy
+    with plan 09's member source).
+  - _T3, bench (finding for ruling 143.4; provisional; ruling deferred)._
+    `query/range_observed_50ly` (the 50 ly Sun-like query observed from its centre, cells and stars
+    warm; 917 systems) **4.19–4.79 ms** in two runs against `range_50ly_warm` 1.13 ms and
+    `range_50ly_cold` 9.45 ms (2026-09-30, load 9–11): the observation costs 3.1–3.7 ms, about 4 µs
+    a system, which is **over 20%** of the plain query however it is compared (32–39% of the cold
+    query, three to four times the warm one). Measured apart over the same 917 systems (a scratch
+    bench, not kept): `brief_at` at the emitted time 1.62 ms (44%), `curvature_error` 0.98 ms (27%),
+    `retarded` 0.65 ms (18%), the line and the existence test under 0.02 ms. Plan 03's single
+    rounding for the step's intermediate evaluation, cutting about a third of `retarded`, would save
+    about 0.2 ms, some 5% of the observed query; the brief and the stated error are the larger
+    costs. `range_observed_50ly_cold` (no cell or stars cache) is **240 ms**, nearly all of it
+    building every system's `SystemStars`: without a stars cache observed mode is 25 times the plain
+    query, so T6's server must hand it its `SystemStars` cache. Ruling 143.4's condition (observed
+    mode more than 20% over the plain 50 ly query) is met, so its single-rounding decision falls due
+    here, before T13's goldens; the lane's brief was to report it and leave the step alone, which it
+    does. The measurement argues against taking it: the step is 18% of the observation, the saving
+    about 5% of the query, and the brief and the stated error are the costs worth a lever.
+  - _T5.a, ahead of it._ Only `alerts::AlertBand { Photometric(Band), XRay }` exists, in the new
+    `sim/alerts/mod.rs` (`Band` is `galaxy::gas::ccm::Band`), because `Sighting` records its band;
+    nothing else of T5.a is built.
+  - _T7.a._ `knowledge::{KnowledgeStore, ContactId, ContactRecord, KnowledgeLevel, Sighting}`, the
+    views `ContactView`, `BearingContact` and `ResolvedContact`, `Acknowledgement` and
+    `AcknowledgeContactError`. `ContactId` wraps a `NonZeroU32` from 1.
+    `KnowledgeStore::record_sighting(event, sighting) -> ContactId`,
+    `acknowledge(contact) -> Result<bool, _>` (whether it changed; acknowledgement is sticky and
+    never hides the contact), `contacts()` in number order and
+    `view(contact) -> Option<ContactView>`. The host is not stored apart: it is the `EventId`'s
+    subject, so `ContactRecord` holds the event, the sightings in the order recorded, the level and
+    the acknowledgement, and exposes nothing outside the crate.
+    `Sighting::new(observer, retardation, band, flux, level)`: the sighting says which level it
+    supports (`Resolved` when its flux reaches the sensor's resolve limit, which T8.c decides from
+    T5.a's `SensorHorizon`), and it keeps the apparent position and the position extrapolated to the
+    observer's time (`extrapolate_to_present`), which only a resolved view shows; its bearing is
+    `bearing(observer, apparent position)` and is `None` only for coincident points. A view's
+    bearing, flux, band, light age and positions are the latest sighting's (the greatest observer
+    time, the last recorded on a tie); `first_seen` and `last_seen` are observer times. `kind`,
+    `phase` and `designation` of T9's `ContactDto` are not in the view yet: they need T5.a's types.
+    `ContactRecord` is `pub(crate)`, not public as Provides lists it: nothing outside the store
+    takes one, and its `Debug` form (and `KnowledgeStore`'s) leaves the event out so that a log line
+    cannot name an unresolved host. The tests' fixtures are in `knowledge/testing.rs`.
+  - _T7.b._
+    `knowledge::{PersistedKnowledge, LoadKnowledgeError, SaveKnowledgeError, KNOWLEDGE_FORMAT}` and
+    `UniverseStore::knowledge_dir(id)`. `PersistedKnowledge::open(store, universe)` loads on a
+    blocking task; `record_sighting` and `acknowledge` run on one that takes the file's lock,
+    appends and syncs the line, and only then applies the change, so memory never runs ahead of the
+    disk and a dropped future leaves both in step; `read(|store| ..)` lends the store for its views.
+    The file's first line is `{"format":1}`, then one line per change (`{"kind":"sighting",..}` with
+    the event's text form, exact positions and times, `flux_w_m2`, `band`, `level`;
+    `{"kind":"acknowledged","contact":n}`), replayed in order and checked to fit (a new contact must
+    be the next number). A header of a later format, or a `contacts.vN.jsonl` with N > 1 beside the
+    file, is `UnsupportedFormat` (a header of format 0 is `MalformedLine`); an unterminated last
+    line is dropped with a `tracing::warn!` and the next append truncates it; any other bad line is
+    `MalformedLine`. The `knowledge/` directory is created on the first change and never the
+    universe's own, so a universe with no save gets no directory. A change that panics holding the
+    file's lock poisons it, and later changes are `SaveKnowledgeError::Poisoned` until the
+    universe's Knowledge is opened again, since the file may then hold a change the store does not.
+    A universe's file has one writer: two `PersistedKnowledge`s opened on it would cut each other's
+    lines, so the owner (T8) keeps one per universe and clones it. Nothing wires the store into
+    `AppState` yet. Every sighting is kept in memory and on disk; T8 should decide whether a
+    long-lived recurrent contact needs its sightings thinned.

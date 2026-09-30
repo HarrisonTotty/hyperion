@@ -22,6 +22,10 @@
 //!   ([`ObservedSystem`]), and [`bearing`], the local direction from one point to another. A
 //!   member of the galactic centre is refused ([`TraceMotionError`]) until plan 09's P09.T28
 //!   builds its orbit.
+//! - [`QueryMode`] and [`StarsCache`]: a range query asked in observed mode
+//!   ([`range_query_observed`](crate::galaxy::query::range_query_observed)) reports each system
+//!   found as its light shows it, taking the systems' stars from the caller's cache
+//!   ([`NoStarsCache`] keeps none).
 //!
 //! Spatial searches are untouched: they find systems on their present positions, and observed
 //! mode changes what is reported, never what is found (plan 12, Design note 4). Retarded
@@ -34,12 +38,16 @@
 mod bearing;
 mod error;
 mod retarded;
+mod stars_cache;
 mod system;
 
+pub use crate::galaxy::query::QueryMode;
 pub use bearing::{AXIS_FRAME_RADIUS_LY, Bearing, BearingFrame, bearing};
 pub use error::{CurvatureError, curvature_error};
 pub use retarded::{
     BuildObserverError, Drift, Motion, Observer, Retardation, TraceMotionError, Trajectory,
     extrapolate_to_present, light_time, retarded, retarded_exact_linear, retarded_from,
 };
+pub use stars_cache::{NoStarsCache, StarsCache, stars_of};
+pub(crate) use system::observe_on_line;
 pub use system::{ObservedSystem, observe_hit, summary_observed};

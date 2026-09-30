@@ -7,7 +7,9 @@
 //! some; a format above 1 is refused.
 //!
 //! The directory is also the home of the overlays of later plans. The names `pinned/`, `deltas/`,
-//! `enrichment/`, `knowledge/` and `session.json` are reserved for them and not created here.
+//! `enrichment/`, `knowledge/` and `session.json` are reserved for them and not created here;
+//! [`UniverseStore::knowledge_dir`] names the Knowledge overlay's (plan 12, P12.T7.b), which
+//! [`crate::knowledge`] creates when it first writes.
 //!
 //! Everything here is blocking file I/O. The registry calls it through
 //! [`tokio::task::spawn_blocking`], never on the async runtime.
@@ -31,6 +33,9 @@ const UNIVERSES_DIR: &str = "universes";
 
 /// The identity file inside a universe's directory.
 const SAVE_FILE: &str = "universe.json";
+
+/// The Knowledge overlay's directory inside a universe's (plan 12, P12.T7.b).
+const KNOWLEDGE_DIR: &str = "knowledge";
 
 /// Where the identity file is written before it is renamed into place.
 const TEMP_FILE: &str = "universe.json.tmp";
@@ -159,6 +164,13 @@ impl UniverseStore {
     #[must_use]
     pub fn save_path(&self, id: UniverseId) -> PathBuf {
         self.universe_dir(id).join(SAVE_FILE)
+    }
+
+    /// Where the Knowledge overlay of universe `id` lives: its reserved `knowledge/` directory,
+    /// which this store never creates (plan 12, P12.T7.b).
+    #[must_use]
+    pub fn knowledge_dir(&self, id: UniverseId) -> PathBuf {
+        self.universe_dir(id).join(KNOWLEDGE_DIR)
     }
 
     /// Reads every save under the data directory.

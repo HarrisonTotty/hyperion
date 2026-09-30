@@ -44,6 +44,7 @@
 //! - [`observe`]: readings at the retarded time, the apparent position and the light's age, the
 //!   stated error from neglected curvature, and bearings.
 //! - [`lensing`]: microlensing along one monitored line of sight.
+//! - [`alerts`]: transients seen from a distance; so far only the bands a detection is made in.
 //!
 //! Planetary systems (plan 14):
 //!
@@ -52,6 +53,7 @@
 //!
 //! The crate's only runtime dependency is `libm`.
 
+pub mod alerts;
 pub mod coords;
 pub mod events;
 pub mod galaxy;

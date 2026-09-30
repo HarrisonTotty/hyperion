@@ -3,7 +3,8 @@
 //! The server owns everything the sim may not: universes and their saves ([`universe`]), the CPU
 //! pool that runs generation off the async runtime and the caches of galaxies, maps, cells and
 //! systems ([`compute`]), the byte-bounded cache they are built on ([`cache`]), and the WebSocket
-//! clients speak `hyperion-protocol` over. Every limit it enforces is in [`limits`].
+//! clients speak `hyperion-protocol` over. What the crew has detected is in [`knowledge`]. Every
+//! limit it enforces is in [`limits`].
 //!
 //! [`Server::start`] builds the shared state from a [`ServerConfig`], [`Server::router`] serves
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
@@ -14,6 +15,7 @@ pub mod compute;
 pub mod config;
 mod connections;
 mod convert;
+pub mod knowledge;
 pub mod limits;
 mod outbound;
 mod requests;
