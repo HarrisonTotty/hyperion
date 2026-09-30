@@ -295,16 +295,20 @@ export interface RenderEngine {
   /**
    * An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat).
    *
-   * @throws Float32BlendUnavailable without `float32-blendable`; the caller falls back to a
+   * @throws {@link Float32BlendUnavailable} without `float32-blendable`; the caller falls back to a
    * compute splat (R01 Design note 21).
    */
   createPointSplat(spec: PointSplatSpec): PointSplatHandle;
+  /**
+   * Dispatches a kernel.
+   *
+   * @param workgroups - Workgroup counts, or GPU-written ones (an indirect dispatch).
+   * @param pass - The timed pass it belongs to; `compute` when absent.
+   */
   dispatch(
     kernel: ComputeHandle,
     bindings: ComputeBindings,
-    /** Workgroup counts, or GPU-written ones. */
     workgroups: readonly [number, number, number] | IndirectArgs,
-    /** The timed pass it belongs to; `compute` when absent. */
     pass?: string,
   ): void;
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void;
@@ -320,13 +324,13 @@ export interface RenderEngine {
    *
    * @param access - `tolerance` lifts the refusal for the smoke harness's tolerance checks; the
    * boundary test fails on it anywhere else.
-   * @throws PresentationOnlyReadback for a buffer last written by a `presentation-only` kernel.
+   * @throws {@link PresentationOnlyReadback} for a buffer last written by a `presentation-only` kernel.
    */
   readBuffer(buffer: BufferHandle, access?: "cpu" | "tolerance"): Promise<ArrayBuffer>;
   /**
    * CPU readback of a texture level or a region of it, colour or depth.
    *
-   * @throws PresentationOnlyReadback as {@link RenderEngine.readBuffer} does.
+   * @throws {@link PresentationOnlyReadback} as {@link RenderEngine.readBuffer} does.
    */
   readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer>;
   /** Per-pass GPU time for each frame, once its query set resolves; silent without the feature. */

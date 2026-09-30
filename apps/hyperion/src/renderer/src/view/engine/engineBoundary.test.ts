@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 /**
  * The boundary around the engine, checked by reading every renderer source file (R01 Design note
  * 1): a test rather than a lint override, since the TypeScript rules forbid changing a rule's scope
- * in `.oxlintrc.json` without asking. The fixture strings are assembled at run time, so that this
+ * in `.oxlintrc.json` without asking. The rules are a textual tripwire, matching how a call is
+ * spelled rather than following values: a `"tolerance"` held in a variable passes them. The fixture strings are assembled at run time, so that this
  * file's own text never matches its rules, and the file skips itself all the same.
  */
 
@@ -32,7 +33,7 @@ const ENGINE_IMPORT = new RegExp(
   String.raw`(?:from\s+|import\s*\(\s*|import\s+)["']${ENGINE_PACKAGE}`,
 );
 const TOLERANCE_READ = new RegExp(String.raw`\.read(?:Buffer|Texture)\([^)]*["']${TOLERANCE}["']`);
-const RAW_DEVICE_ALLOCATION = /\bdevice\.create(?:Buffer|Texture)\(/;
+const RAW_DEVICE_ALLOCATION = /\b\w*[dD]evice\.create(?:Buffer|Texture)\(/;
 
 /** Whether `path` lies in the one directory that may import the engine. */
 function inEngineAdapter(path: string): boolean {
@@ -106,5 +107,7 @@ describe("the engine boundary", () => {
     const text = "const buffer = device.createBuffer({ size: 4, usage: 1 });";
     expect(violations({ path: "view/scene.ts", text })).toHaveLength(1);
     expect(violations({ path: "view/engine/babylon/resources.ts", text })).toEqual([]);
+    const named = "this.gpuDevice.createTexture({ size: [1, 1], format: 'r8unorm', usage: 4 });";
+    expect(violations({ path: "view/scene.ts", text: named })).toHaveLength(1);
   });
 });

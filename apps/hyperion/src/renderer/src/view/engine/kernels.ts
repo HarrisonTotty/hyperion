@@ -43,10 +43,17 @@ export function selectKernel(pair: KernelPair, capabilities: GpuCapabilities): K
   return { path: "reference", wgsl: pair.reference };
 }
 
-/** Whether `wgsl` holds an `enable` directive naming `extension`. */
+/** `wgsl` without its comments, line and block, so that a directive reads as the compiler reads it. */
+function withoutComments(wgsl: string): string {
+  return wgsl.replaceAll(/\/\*[\s\S]*?\*\//gu, " ").replaceAll(/\/\/[^\n]*/gu, " ");
+}
+
+/**
+ * Whether `wgsl` holds an `enable` directive naming `extension`, wherever the directive stands:
+ * WGSL allows several on a line and comments inside one, and `enable` is a reserved word.
+ */
 function enables(wgsl: string, extension: string): boolean {
-  const directive = /^\s*enable\s+([^;]+);/gmu;
-  for (const match of wgsl.matchAll(directive)) {
+  for (const match of withoutComments(wgsl).matchAll(/\benable\s+([^;]+);/gu)) {
     const names = (match[1] ?? "").split(",").map((name) => name.trim());
     if (names.includes(extension)) {
       return true;
