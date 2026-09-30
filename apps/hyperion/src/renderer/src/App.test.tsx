@@ -7,7 +7,7 @@ import { App } from "./App";
 import { FakeWebSocket } from "./test/FakeWebSocket";
 import { aDensityMap, anOpenedUniverse, aUniverseList } from "./test/galaxyFixtures";
 import { stubCanvas } from "./test/RecordingContext2D";
-import { stubHyperionApi } from "./test/stubHyperionApi";
+import { stubHyperionApi, TEST_GRAPHICS, TEST_SERVER_URL } from "./test/stubHyperionApi";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function answer(play: () => void): Promise<void> {
@@ -47,10 +47,31 @@ describe("App", () => {
     expect(screen.getByText("ws://10.0.0.5:9100/ws")).toBeInTheDocument();
   });
 
+  it("shows the graphics panel on the link display, without WebGPU in jsdom", async () => {
+    render(<App />);
+
+    const panel = screen.getByRole("region", { name: "Graphics" });
+    expect(within(panel).getByText("VULKAN")).toBeInTheDocument();
+    expect(await within(panel).findByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
+  });
+
+  it("shows a safe launch in the graphics panel and the header strip", () => {
+    stubHyperionApi(TEST_SERVER_URL, { ...TEST_GRAPHICS, launchMode: "safe" });
+    render(<App />);
+
+    const panel = screen.getByRole("region", { name: "Graphics" });
+    expect(within(panel).getByText("SAFE")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("banner")).getByRole("status", { name: "Graphics mode" }),
+    ).toHaveTextContent("GRAPHICS SAFE MODE");
+  });
+
   it("shows the link being established on launch", () => {
     render(<App />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("ESTABLISHING LINK");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent(
+      "ESTABLISHING LINK",
+    );
   });
 
   it("greets the server and reports a nominal link once welcomed", () => {
@@ -70,7 +91,7 @@ describe("App", () => {
         generator_version: 2,
       });
     });
-    expect(screen.getByRole("status")).toHaveTextContent("LINK NOMINAL");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent("LINK NOMINAL");
     expect(screen.getByText("9.9.9")).toBeInTheDocument();
   });
 
@@ -88,7 +109,9 @@ describe("App", () => {
       });
     });
 
-    expect(screen.getByRole("status")).toHaveTextContent("LINK INCOMPATIBLE");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent(
+      "LINK INCOMPATIBLE",
+    );
   });
 
   it("reports loss of carrier when the socket closes", () => {
@@ -99,7 +122,7 @@ describe("App", () => {
       socket.close();
     });
 
-    expect(screen.getByRole("status")).toHaveTextContent("NO CARRIER");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent("NO CARRIER");
   });
 
   it("switches to the galaxy display when its tab is clicked", async () => {

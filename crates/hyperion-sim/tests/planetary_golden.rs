@@ -5,8 +5,8 @@
 //! by ID, each with its `snapshot_at` at the epoch and at +H.
 //!
 //! They pin the arithmetic, not only the draws: a reordered sum, a changed power or a moved word
-//! changes a line here, which is a generator-version change. CI checks the same file on 64-bit Arm
-//! and on wasm32.
+//! changes a line here, which is a generator-version change. The sim-determinism skill says which
+//! targets compare it.
 
 #[expect(
     dead_code,
