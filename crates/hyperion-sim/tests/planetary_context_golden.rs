@@ -3,8 +3,8 @@
 //!
 //! They pin how the context joins the stages above: the stars' masses and zero-age states, the
 //! abundance, the age, the sphere of influence and the zones. A moved line is a change in one of
-//! those stages or in the joining, which is a generator-version change. CI checks the same file on
-//! 64-bit Arm and on wasm32.
+//! those stages or in the joining, which is a generator-version change. The sim-determinism skill
+//! says which targets compare it.
 
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;

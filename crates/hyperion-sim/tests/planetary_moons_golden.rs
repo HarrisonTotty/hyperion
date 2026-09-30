@@ -1,9 +1,9 @@
 //! Golden values of plan 14's moons (P14.T17–T19): the regular moons, giant-impact moons and
 //! captures of chosen synthetic parents.
 //!
-//! They pin the arithmetic and the words drawn: a reordered sum, a changed constant or a moved
-//! draw number changes a line here, which is a generator-version change. CI checks the same file
-//! on 64-bit Arm and on wasm32.
+//! They pin the arithmetic and the words drawn: a reordered sum, a changed constant or a moved draw
+//! number changes a line here, which is a generator-version change. The sim-determinism skill says
+//! which targets compare it.
 
 use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::id::{BodyId, Layer, SystemId};

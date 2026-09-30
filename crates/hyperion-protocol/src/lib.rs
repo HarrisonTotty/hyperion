@@ -41,7 +41,7 @@ pub use planetary::{
     SystemBodiesRequest, SystemPlaneDto, ZoneDto,
 };
 pub use primitives::{
-    BodyIdHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex, SurfaceSeedHex,
+    BodyIdHex, DetailSeedHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex,
     SystemIdHex, UniverseIdHex, UniverseTime,
 };
 pub use stellar::{

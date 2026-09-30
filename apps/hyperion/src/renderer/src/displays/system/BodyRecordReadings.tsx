@@ -39,7 +39,7 @@ import type {
 } from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
 import { BodyIdRow } from "./BodyIdRow";
-import { ReadoutRow, shown as value } from "./ReadoutRow";
+import { MISSING, ReadoutRow, type Shown, shown as value } from "./ReadoutRow";
 
 /** Kilometres in a metre. */
 const KM_PER_M = 1e-3;
@@ -81,6 +81,27 @@ function sectionRows<T>(
       break;
   }
   return result;
+}
+
+/**
+ * The `DETAIL SEED` row: the seed in upper case; the guide's Missing state, the em dash, while the
+ * server does not send it, since it is a single value inside a hooks section that is shown (until
+ * rendering plan R09 derives it); and no row where it does not apply.
+ */
+function detailSeedRow(seed: Section<string>): ReactNode {
+  let reading: Shown;
+  switch (seed.state) {
+    case "ok":
+      reading = value(seed.value.toUpperCase());
+      break;
+    case "not_resolved":
+    case "not_modelled":
+      reading = MISSING;
+      break;
+    case "not_applicable":
+      return null;
+  }
+  return <ReadoutRow label="DETAIL SEED" shown={reading} wide />;
 }
 
 /** A count of bodies, or `NONE` for an empty list, which is data. */
@@ -277,9 +298,9 @@ export interface BodyRecordReadingsProps {
  * period, eccentricity and inclination, and the distance from what it orbits now; the bulk's class,
  * radius in `km`, density, gravity, equilibrium temperature and composition by mass; its moons and
  * rings, counted; for a ring, a belt or the cometary halo, what the population is and where it
- * lies; and, from the whole record only, its surface and its hooks, whose surface seed is
- * the one hook the wire carries. A section withheld or not modelled reads so, once, in place of its
- * rows; one that does not apply is left out.
+ * lies; and, from the whole record only, its surface and its hooks, whose detail seed is the one
+ * hook the wire carries, the em dash until the server derives it. A section withheld or not
+ * modelled reads so, once, in place of its rows; one that does not apply is left out.
  *
  * The distance is the one reading the display derives: from the server's elements at the display
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
@@ -370,9 +391,7 @@ export function BodyRecordReadings({
       {whole === null ? null : (
         <>
           {sectionRows("SURFACE", whole.surface, () => null)}
-          {sectionRows("GENERATOR INPUTS", whole.hooks, (hooks) => (
-            <ReadoutRow label="SURFACE SEED" shown={value(hooks.surfaceSeed.toUpperCase())} wide />
-          ))}
+          {sectionRows("GENERATOR INPUTS", whole.hooks, (hooks) => detailSeedRow(hooks.detailSeed))}
         </>
       )}
     </>
