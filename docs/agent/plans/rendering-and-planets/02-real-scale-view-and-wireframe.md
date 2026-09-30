@@ -1287,3 +1287,34 @@ reducedMotion, scene)` returns `{ state, change }`: it integrates whole ticks of
 - **R02.T8.b's `rebase` built early, with R02.T9.** T9.b re-selects the frame every step, so
   `view/camera/rebase.ts` (`rebase`, `FrameChange { from, to }`, `sameCameraFrame`) landed with T9;
   `change` is `null` where the frame is unchanged. T8.b adds its scene tests.
+- **Deviations in R02.T10, as built.** `Rgb` (and `Rows3`, `applyRows`) live in
+  `view/photometry/toneCurve.ts`. `magnitude.ts` also exports `PARSEC_M`, `PSF_SIGMA_PX` = 0.64,
+  `PSF_QUAD_PX` = 7, `SubpixelOffset { xPx, yPx }` (offsets from the pixel's centre) and its own
+  `erf` (series below 2.5, continued fraction above, about 10⁻¹⁴); `psfPixelWeights` returns a
+  row-major `Float64Array` of 49, normalised over the quad (the tails beyond ±3.5 px hold up to
+  2.8 × 10⁻⁶). `exposure.ts` also exports `METER_CALIBRATION_K`, `LENS_ATTENUATION_Q`,
+  `SATURATION_CONSTANT`, `DEFAULT_MAN_TRIPLE` (f/1, 2 s, ISO 100: EV100 −1) and
+  `DEFAULT_EXPOSURE`; `ExposureControl` is `manual { triple }` | `auto { ev100 }` |
+  `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`, discriminated on `kind`; the
+  commands are functions returning `ExposureCommandResult` (`setManual`, refused with
+  `invalid_triple`; `setAuto`, refused with `no_image_to_meter`; `inhibit`, refused under `MAN`
+  with `not_automatic`; `enable`, refused outside `INHIBITED`), and `onMetering(control, ev100 |
+null)` applies a source's report. An operator's `INHIBIT` also takes over a system inhibit, which
+  then no longer resumes by itself (Design note 11 does not cover the case; the lean is the
+  operator's intent). `controlEv100` and `exposureLevelReading` go with them. `ExposureTriple` keeps
+  the Provides' `aperture` (the f-number). `toneCurve.ts` also exports `spriteToneCurve` (the
+  sprite path), `TONE_CURVE_BLACK`, `agxSigmoid`, `AGX_MIN_EV`, `AGX_MAX_EV`, the four matrices as
+  rows (the Rec. 709 ↔ 2020 products multiplied out in `f64` from Filament's `ColorSpaceUtils.h`),
+  `XYZ_TO_SRGB` and `HALF_FLOAT_MAX`; `preExpose`'s second parameter is
+  `previousExposureScale`. `toneCurve.wgsl` carries the matrices as literals, held to the port
+  within 10⁻⁹ by a test that reads the file, and adds `agxSprite`; no WGSL compiler runs in
+  `just ci`, so the file is first compiled, and compared at 64 points, by R02.T14.c on SwiftShader.
+  The flash test sums the sprite path (what is displayed) at V 6.5, 6, 5, …, −1, −1.46 and EV100
+  −1, 0, +1, +2, and passes the task's 0.90–1.05 (Design note 10's researched 0.92–1.03 is
+  tighter; the task's bracket is the test's). Beyond Provides, `starColour.ts`
+  (`starColour(tEffK | null)`, `planckianChromaticity`), because Design note 12 takes a sprite's
+  colour from T_eff: Kang et al.'s (2002) Planckian-locus fit held to 1,667–25,000 K, Filament's
+  `XYZ_to_sRGB`, normalised to unit luminance by the matrix's own Y row; no T_eff is white; R06's
+  spectral colours replace it. `NOTICE` at the root is new, holding the Apache-2.0 attribution.
+  A science check confirmed every figure; the Allen section number (§15) is as the plan cites it
+  and was not seen at source.
