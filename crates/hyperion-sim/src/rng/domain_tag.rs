@@ -189,6 +189,54 @@ pub const fn assert_tag_names(names: &[&str]) {
     }
 }
 
+/// Panics if two registries share a tag name or a tag hash.
+///
+/// Each registry asserts its own names with [`assert_tag_names`]; this covers the pairs across
+/// them, so that tags declared in different registries (the foundation's, the surface crate's and
+/// the sim's) still never alias a stream. Called in a `const`, a clash fails compilation:
+///
+/// ```
+/// use hyperion_sim::rng::{assert_registries_disjoint, tags};
+/// const _: () = assert_registries_disjoint(&[&[tags::SELFTEST_STREAM], &[]]);
+/// ```
+///
+/// ```compile_fail,E0080
+/// use hyperion_sim::rng::{assert_registries_disjoint, tags};
+/// const _: () = assert_registries_disjoint(&[&[tags::SELFTEST_STREAM], &[tags::SELFTEST_STREAM]]);
+/// ```
+///
+/// # Panics
+///
+/// On the first name or hash found in two registries.
+pub const fn assert_registries_disjoint(registries: &[&[DomainTag]]) {
+    let mut a = 0;
+    while a < registries.len() {
+        let mut b = a + 1;
+        while b < registries.len() {
+            let mut i = 0;
+            while i < registries[a].len() {
+                let tag = registries[a][i];
+                let mut j = 0;
+                while j < registries[b].len() {
+                    let other = registries[b][j];
+                    assert!(
+                        !same_str(tag.name, other.name),
+                        "a domain tag name is in two registries"
+                    );
+                    assert!(
+                        tag.hash != other.hash,
+                        "domain tag hash collision across registries"
+                    );
+                    j += 1;
+                }
+                i += 1;
+            }
+            b += 1;
+        }
+        a += 1;
+    }
+}
+
 /// Declares the registry of domain tags. Used once, in `rng/tags.rs`.
 ///
 /// Each entry reads `CONST_NAME: Scope = "tag.name";` and becomes a `pub const` [`DomainTag`].
@@ -263,5 +311,20 @@ mod tests {
     #[should_panic(expected = "must match")]
     fn a_malformed_name_panics() {
         assert_tag_names(&["star.mass", "Moon.count"]);
+    }
+
+    #[test]
+    fn disjoint_registries_pass() {
+        let a = DomainTag::registered("selftest.a", TagScope::SelfTest);
+        let b = DomainTag::registered("selftest.b", TagScope::SelfTest);
+        assert_registries_disjoint(&[&[a], &[b], &[]]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a domain tag name is in two registries")]
+    fn a_name_in_two_registries_panics() {
+        let a = DomainTag::registered("selftest.a", TagScope::SelfTest);
+        let b = DomainTag::registered("selftest.b", TagScope::SelfTest);
+        assert_registries_disjoint(&[&[a], &[b], &[a]]);
     }
 }

@@ -1343,6 +1343,18 @@ It reserves, so that later plans need not:
   `math/functions.golden` under "Renamed goldens (1)" and "Consistent."; a rename does not
   silence the "version bumped but no pinned value moved" check. **Pending:** `just bench -- math`
   before and after, since the machine was never quiet (other lanes building; load averages 5–24).
+- **Deviations in T4.b, as built.** `HexFault` and `parse_lower_hex` moved from `id/text.rs` to a
+  new private `crates/hyperion-sim/src/hex.rs` (T4.d makes it base's public `hex`); `HexFault`
+  gained `Hash` and variant docs. `RawEventKey` is in `rng/raw_event.rs`, with its three tests;
+  `EventKey` wraps it and keeps its API and, through a hand-written `Debug`, its `Debug` text
+  (`EventKey([k0, k1])`, pinned by `debug_prints_the_two_key_words`). `event.rs`'s one use of
+  `Stream::from_words` in a test became `RawEventKey::stream`. Of `stream.rs`'s tests, the
+  structured `streams_differing_in_any_one_input_share_no_word` (real cells, candidates and bodies)
+  moved to `rng/mod.rs`'s new test module; the rest now key by raw words through
+  `ObjectKey::system` and `body`, and the event-tag refusal uses a tag minted in the test. The
+  `assert_registries_disjoint` doctests use `tags::SELFTEST_STREAM` against an empty registry
+  (passing) and against itself (`compile_fail,E0080`), so they carry over to base unchanged but
+  for the crate path; two unit tests beside them. `tests/foundation_order.rs` needed no change.
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so

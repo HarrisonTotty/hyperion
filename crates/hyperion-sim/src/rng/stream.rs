@@ -47,36 +47,8 @@ const SUB_SHIFT: u32 = 48;
 /// assert_eq!(stream.position(), 3);
 /// ```
 ///
-/// The central promise: drawing a new property under a new tag leaves an existing property's
-/// values unchanged. A later version of a generator adds a star's flares under their own event
-/// tag and draws them first; the star's mass, drawn from its own stream, does not move. Drawn from
-/// the mass's stream instead, as one random sequence would, the flares would have moved it.
-///
-/// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::id::{EventBin, SystemId, event_tags};
-/// use hyperion_sim::rng::{EventKey, PowerLaw, Stream, tags};
-///
-/// let (seed, star) = (Seed::new(42), SystemId::from_raw(0x0200_0800_2000_0007)?);
-/// let masses = PowerLaw::new(2.3, 0.5, 150.0)?;
-/// let mass_stream = || Stream::open(seed, tags::SELFTEST_STREAM, star.into());
-///
-/// // Version 1 draws the mass.
-/// let mass_v1 = mass_stream().power_law(&masses);
-///
-/// // Version 2 draws flares under a new tag first, then the mass.
-/// let flare_key = EventKey::derive(seed, event_tags::SELF_TEST, star.into());
-/// let flares = flare_key.bin_stream(EventBin::new(0)?).poisson(0.7);
-/// let mass_v2 = mass_stream().power_law(&masses);
-/// assert!(mass_v2.total_cmp(&mass_v1).is_eq());
-/// assert!(flares < 10);
-///
-/// // One sequence for both would have moved the mass.
-/// let mut sequence = mass_stream();
-/// sequence.poisson(0.7);
-/// assert!(sequence.power_law(&masses).total_cmp(&mass_v1).is_ne());
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// The central promise, that a new property under a new tag moves nothing already drawn, is shown
+/// in the sim's `rng` module docs, since it needs an event key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Stream {
     /// `(seed, tag hash)`.
@@ -122,7 +94,8 @@ impl Stream {
     /// A stream from its raw key words, counter word 0 and `sub`, at word 0.
     ///
     /// [`open`](Self::open) keys a stream by seed and domain tag; an event's streams are keyed by
-    /// its subject's event key instead ([`EventKey`](super::EventKey)), which is why this exists.
+    /// its subject's event key instead (the sim's `EventKey`, through `RawEventKey`), which is why
+    /// this exists.
     #[must_use]
     pub(super) fn from_words(key: [u64; 2], object: u64, sub: u16) -> Self {
         Self {
@@ -217,18 +190,10 @@ impl Stream {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use super::*;
-    use crate::coords::{CellSize, GenCell};
-    use crate::id::{BodyId, Layer, SystemId};
     use crate::rng::tags;
 
     const SEED: Seed = Seed::new(0x5eed_0000_0000_0001);
-
-    /// A second self-test tag, minted here for the tests that vary the tag. It is not in the
-    /// registry because nothing outside these tests opens it.
-    const OTHER_TAG: DomainTag = DomainTag::registered("selftest.other", TagScope::SelfTest);
 
     fn first_words(stream: &Stream, n: u64) -> Vec<u64> {
         let mut stream = stream.clone();
@@ -239,9 +204,8 @@ mod tests {
         Stream::open(SEED, tags::SELFTEST_STREAM, object)
     }
 
-    fn grid_id(cell: [i32; 3], index: u32) -> SystemId {
-        SystemId::from_parts(Layer::A, GenCell::new(CellSize::Ly8, cell).unwrap(), index).unwrap()
-    }
+    /// A system's raw ID, standing in for one: the stream sees only the word.
+    const SYSTEM: u64 = 0x0200_0800_2000_0000;
 
     #[test]
     fn word_at_equals_the_sequential_draws() {
@@ -291,50 +255,16 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    /// Asserts that no word of `streams`' first 1,000 appears in two of them.
-    fn assert_disjoint(what: &str, streams: &[Stream]) {
-        let mut seen = BTreeSet::new();
-        for (i, stream) in streams.iter().enumerate() {
-            for word in first_words(stream, 1_000) {
-                assert!(seen.insert(word), "{what}: stream {i} repeats a word");
-            }
-        }
-    }
-
-    /// The structured inputs the brainstorm names: adjacent cells, consecutive candidates and
-    /// consecutive body indices, and one-bit changes of seed and tag.
-    #[test]
-    fn streams_differing_in_any_one_input_share_no_word() {
-        assert_disjoint(
-            "seeds",
-            &[0, 1, 2, 1 << 63]
-                .map(|s| Stream::open(Seed::new(s), tags::SELFTEST_STREAM, ObjectKey::galaxy())),
-        );
-        assert_disjoint(
-            "tags",
-            &[tags::SELFTEST_STREAM, OTHER_TAG].map(|t| Stream::open(SEED, t, ObjectKey::galaxy())),
-        );
-        let adjacent_cells = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [-1, 0, 0]]
-            .map(|c| open(ObjectKey::cell(grid_id(c, 0).cell_word())));
-        assert_disjoint("adjacent cells", &adjacent_cells);
-        let candidates = [0, 1, 2, 3].map(|i| open(grid_id([5, -2, 7], i).into()));
-        assert_disjoint("consecutive candidates", &candidates);
-        let system = grid_id([5, -2, 7], 1);
-        let bodies = [0, 1, 2, 3].map(|b| open(BodyId::new(system, b).into()));
-        assert_disjoint("consecutive bodies", &bodies);
-    }
-
     /// Body 1's first block and body 0's last block are neighbours in counter word 1, one apart;
     /// they are different counters, and body 0 cannot draw past its last block into body 1's.
     #[test]
     fn sub_and_block_do_not_alias() {
-        let system = grid_id([0, 0, 0], 0);
-        let body0 = open(BodyId::new(system, 0).into());
-        let body1 = open(BodyId::new(system, 1).into());
+        let body0 = open(ObjectKey::body(SYSTEM, 0));
+        let body1 = open(ObjectKey::body(SYSTEM, 1));
         let last = body0.counter(BLOCKS - 1);
         let first = body1.counter(0);
-        assert_eq!(last, [system.raw(), 0x0000_ffff_ffff_ffff]);
-        assert_eq!(first, [system.raw(), 0x0001_0000_0000_0000]);
+        assert_eq!(last, [SYSTEM, 0x0000_ffff_ffff_ffff]);
+        assert_eq!(first, [SYSTEM, 0x0001_0000_0000_0000]);
         assert_ne!(last, first);
         assert_ne!(
             body0.word_at(Stream::WORDS - 1),
@@ -360,12 +290,10 @@ mod tests {
 
     #[test]
     fn keys_hold_seed_and_tag_and_counters_hold_the_object() {
-        let system = grid_id([3, 4, 5], 6);
-        let body = BodyId::new(system, 0x0102);
-        let stream = open(body.into());
+        let stream = open(ObjectKey::body(SYSTEM, 0x0102));
         assert_eq!(stream.key, [SEED.get(), tags::SELFTEST_STREAM.hash()]);
-        assert_eq!(stream.counter(7), [system.raw(), (0x0102 << 48) | 7]);
-        assert_eq!(open(system.into()).counter(7), [system.raw(), 7]);
+        assert_eq!(stream.counter(7), [SYSTEM, (0x0102 << 48) | 7]);
+        assert_eq!(open(ObjectKey::system(SYSTEM)).counter(7), [SYSTEM, 7]);
     }
 
     #[test]
@@ -378,7 +306,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "scope")]
     fn an_event_tag_is_never_opened_as_a_stream() {
-        let _ = Stream::open(SEED, tags::EVENT_SELFTEST, ObjectKey::galaxy());
+        const EVENT_TAG: DomainTag = DomainTag::registered("selftest.event_tag", TagScope::Event);
+        let _ = Stream::open(SEED, EVENT_TAG, ObjectKey::galaxy());
     }
 
     #[test]
