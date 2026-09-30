@@ -7,7 +7,7 @@ import {
   aTripleSummary,
   PIN_SYSTEM,
 } from "../../test/systemFixtures";
-import { add, dot, norm, scale, sub } from "../../spatial/vec3";
+import { add, dot, norm, scale, sub } from "../../geometry/vec3";
 import { composePosition, positionAt } from "../orbit";
 import { layoutHierarchy, orbitNormal } from "./hierarchy";
 import type { SystemModel } from "./model";

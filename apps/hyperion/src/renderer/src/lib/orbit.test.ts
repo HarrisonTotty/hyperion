@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 // The server's fixture (plan 14, P14.T39), read from the repository, so that a re-blessed golden
 // moves this test with it.
 import fixture from "../../../../../../crates/hyperion-sim/tests/golden/orbit/states.golden?raw";
-import { add, cross, dot, norm, scale, sub, type Vec3 } from "../spatial/vec3";
+import { add, cross, dot, norm, scale, sub, type Vec3 } from "../geometry/vec3";
 import {
   type BodyPlacement,
   composePosition,

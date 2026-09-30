@@ -34,7 +34,7 @@ import {
   type ZoneDto,
 } from "@hyperion/protocol";
 
-import { vec3 } from "../../spatial/vec3";
+import { vec3 } from "../../geometry/vec3";
 import { NEAR_PARABOLIC_ECCENTRICITY } from "../orbit";
 import type {
   BodyDetail,

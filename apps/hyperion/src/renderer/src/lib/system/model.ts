@@ -33,7 +33,7 @@ import type {
   VariableKindDto,
 } from "@hyperion/protocol";
 
-import type { Vec3 } from "../../spatial/vec3";
+import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../orbit";
 
 /**

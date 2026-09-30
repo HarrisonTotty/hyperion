@@ -1157,3 +1157,40 @@ bumped. It reserves no stream or tag. It adds the golden files `coords/body_fixe
 - **Asked by R07, not yet a task here.** An oblate graticule for the giants R07 draws oblate from
   plan 14's flattening (R07 Design note 19, whose non-goals name it R02's). Until it exists a
   graticule is a sphere of the equatorial radius. The roadmap's asks table carries it.
+- **Deviations in R02.T3, as built.** `BodyFixedRotation` also has `rows()` (the golden writes it
+  and R02.T6.a reads it) and `vector_to_body_fixed`, the inverse of `vector_to_body`.
+  `BuildRotationError` has a third variant, `NotFinite`, so that a NaN matrix is refused by name
+  rather than slipping through the tolerance comparisons; the 10⁻¹² limit is the public
+  `ROTATION_ORTHONORMAL_TOLERANCE`, applied to every entry of R Rᵀ. Following `SystemPosition` and
+  `SystemVector`, `BodyFixedPosition` has `ORIGIN`, `translated`, `displacement_to` and
+  `distance_from_origin`, both vector types `ZERO`, `length` and vector arithmetic, and all four
+  types `Default`. The round-trip test samples 1,000 seeded points on the 6,371 km sphere about a
+  pole tilted 23.44°. **Found:** P14.T14.c has landed as `planetary::frames::body_fixed_at`,
+  returning its own `FrameRotation` in the transposed direction (rows are the fixed axes, inertial
+  → fixed). The ask that it return `BodyFixedRotation` stays open; the module documentation names
+  the conversion meanwhile (`from_rows` of the transpose), and Design note 14's
+  `ROTATION NOT YET MODELLED` may be revisited when R02.T17 wires real bodies.
+- **Deviations in R02.T4, as built.** The exit follows the text literally: while the camera is
+  inside its current frame's sphere, that frame and its candidate ancestors form a chain whose
+  members keep the exit at 1 and the incumbent's `FRAME_HYSTERESIS`; once it has left (ratio
+  above 1), or the current frame is not among the candidates, the chain is empty and the whole
+  rule re-runs with no current frame, so a camera leaving the Moon's sphere at 0.95 of the
+  Earth's falls to the system frame. A review read Design note 6's "a Schmitt band on each
+  sphere's own boundary" as keeping the ancestors' band; the difference matters only where a
+  moon's sphere reaches its planet's band, which real nesting rules out, and is a question for
+  the owner (the golden and the twin follow the literal rule). `BodyFrameCandidate::new` returns
+  `BuildBodyFrameCandidateError` with a third variant, `OwnParent`; −0 is stored as +0; the
+  candidate exposes `id`, `parent`, `distance`, `hill_radius` and `ratio`; a repeated ID keeps
+  its smallest-ratio entry. Depth counts `parent` links among the candidates only and every body
+  at one depth competes (cousins as well as siblings), so callers (R02.T17, R03's `sceneAt`) pass
+  whole parent chains. The golden writes distances and Hill radii as Rust's shortest round-trip
+  decimals, which `parseFloat` reads back exactly. `just test-wasm` is pending by hand: wasmtime
+  is not installed on the lane's machine.
+- **Deviations in R02.T8.a, as built.** Built before T6 and T7, because R03.T13 waits on it and
+  it needs only T4's golden. `view/camera/frames.ts` exports `selectCameraFrame(candidates,
+current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (built by
+  `cameraFrameCandidate`, which refuses what `BodyFrameCandidate::new` refuses and stores −0 as
+  +0), `BODY_FRAME_ENTRY` and `FRAME_HYSTERESIS` mirrored as constants, and the tidal-radius clamp
+  as `clampToTidalRadius(positionM, tidalRadiusM)`. Eligible candidates are taken in ID order, as
+  the sim's `BTreeMap` iterates; the wire form's fixed-width hex sorts as `BodyId` does. The test
+  also runs every golden case with the candidates reversed.
