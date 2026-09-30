@@ -1,6 +1,6 @@
 ---
 name: implement-task
-description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5 or P05.T1.a, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan. Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
+description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5, P05.T1.a or R04.T3.c, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan. Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
 argument-hint: "<task-id> [--feature <plan-set>]"
 ---
 
@@ -44,8 +44,9 @@ python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --acceptance
 python3 .claude/skills/implement-task/scripts/plan_task.py --list P02             # IDs and titles; [commit] if a subject names one
 ```
 
-When more than one plan set exists, plan numbers repeat: add `--feature <plan-set>` to every call,
-and pass it on to `validate` and `review-changes`.
+Plan numbers repeat across plan sets, and the ID's prefix picks the set: `P` for
+`galaxy-generation`, `R` for `rendering-and-planets`. For any other set, add
+`--feature <plan-set>` to every call, and pass it on to `validate` and `review-changes`.
 
 Then read:
 

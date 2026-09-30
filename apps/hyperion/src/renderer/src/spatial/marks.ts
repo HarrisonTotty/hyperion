@@ -1,5 +1,5 @@
-import type { LocalFrame } from "./frame";
-import { dot, type Vec3 } from "./vec3";
+import type { LocalFrame } from "../geometry/frame";
+import { dot, type Vec3 } from "../geometry/vec3";
 
 /**
  * The outline of a mark, which encodes its type.

@@ -1303,3 +1303,12 @@ It reserves, so that later plans need not:
   pre-push hook runs neither.
 - **AArch64 stays unchecked.** The claims are corrected, not made true; if a server is ever run on
   Arm, a run there is the check to add.
+- **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
+  timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
+  `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so
+  `--feature` is needed only for another set, and the `implement-task`, `review-changes` and
+  plan-conformance docs say so. A cross-plan citation resolves "plan NN" and "galaxy plan NN" to
+  the galaxy plan in either set, and "RNN", "RNN's", "RNN (Design note N)", "RNN (its Design note
+  N)" and "plan RNN" to the rendering plan; a task ID such as `R10.T3` names no plan. The label of
+  a note from another plan now names its plan set's directory beside the file name; otherwise the
+  output for all 795 galaxy tasks is unchanged (compared before and after).

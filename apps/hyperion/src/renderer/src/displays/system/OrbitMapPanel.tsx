@@ -10,7 +10,7 @@ import {
   formatUniverseTimeDhms,
 } from "../../lib/format";
 import { isTextEntry } from "../../lib/textEntry";
-import { AXIS_TOLERANCE_LY, cylindrical, localFrameAt } from "../../spatial/frame";
+import { AXIS_TOLERANCE_LY, cylindrical, localFrameAt } from "../../geometry/frame";
 import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
 import { SpatialView } from "../../spatial/SpatialView";
 import { bodySymbol } from "../../lib/system/bodySymbols";

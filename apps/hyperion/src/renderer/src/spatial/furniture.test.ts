@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { type CameraAngles, PRESETS, type Viewport } from "./camera";
 import type { CircleLabel, CurveLabel, RingLabel } from "./drawList";
-import { localFrameAt } from "./frame";
+import { localFrameAt } from "../geometry/frame";
 import {
   type BoxPx,
   boxesOverlap,
@@ -16,7 +16,7 @@ import {
   triadLayout,
 } from "./furniture";
 import { textSizeRem } from "./labels";
-import { vec3 } from "./vec3";
+import { vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 /** A chart 22.5 rem wide, as the local chart's column is at 1280 × 720. */

@@ -1,5 +1,5 @@
-import type { LocalFrame } from "./frame";
-import { add, dot, scale, type Vec3 } from "./vec3";
+import type { LocalFrame } from "../geometry/frame";
+import { add, dot, scale, type Vec3 } from "../geometry/vec3";
 
 /** The direction a spatial view is seen from, without its zoom. */
 export interface CameraAngles {

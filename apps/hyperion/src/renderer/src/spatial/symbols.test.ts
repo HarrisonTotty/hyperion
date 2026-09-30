@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { localFrameAt } from "./frame";
+import { localFrameAt } from "../geometry/frame";
 import { isAbovePlane, type SizeClass, type SymbolShape } from "./marks";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX, symbolOutline } from "./symbols";
-import { vec3 } from "./vec3";
+import { vec3 } from "../geometry/vec3";
 
 const POLYGONS: ReadonlyArray<SymbolShape> = ["diamond", "square", "triangle"];
 const SIZE_CLASSES: ReadonlyArray<SizeClass> = [0, 1, 2, 3, 4];
