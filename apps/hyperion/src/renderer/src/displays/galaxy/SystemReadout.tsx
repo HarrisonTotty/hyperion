@@ -25,7 +25,7 @@ import {
   type LocalFrame,
   localFrameAt,
   toLocal,
-} from "../../spatial/frame";
+} from "../../geometry/frame";
 import { PrimaryReadings } from "./PrimaryReadings";
 import { SystemReading as Reading } from "./SystemReading";
 

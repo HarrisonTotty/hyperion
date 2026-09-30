@@ -29,7 +29,7 @@
  */
 import type { UniverseTime } from "@hyperion/protocol";
 
-import { add, scale, type Vec3 } from "../spatial/vec3";
+import { add, scale, type Vec3 } from "../geometry/vec3";
 
 /**
  * The number of Halley iterations {@link solveKepler} runs from Mikkola's starter: always this

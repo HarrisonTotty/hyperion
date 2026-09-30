@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import { AxisTriad } from "./AxisTriad";
 import { type CameraAngles, PRESETS } from "./camera";
-import { localFrameAt } from "./frame";
+import { localFrameAt } from "../geometry/frame";
 import { TRIAD_BOX_REM, type TriadBoxRem } from "./furniture";
-import { vec3 } from "./vec3";
+import { vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 

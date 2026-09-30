@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { localFrameAt } from "./frame";
+import { localFrameAt } from "../geometry/frame";
 import type { PlaneSpec } from "./marks";
 import { gridLines, ringPolyline, type Segment } from "./plane";
-import { cross, dot, norm, sub, vec3 } from "./vec3";
+import { cross, dot, norm, sub, vec3 } from "../geometry/vec3";
 
 const PLANE: PlaneSpec = { spacing: 20, extent: 50, rings: [] };
 // Off the x axis, so that coreward is not along x.

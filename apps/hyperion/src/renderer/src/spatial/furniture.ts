@@ -11,9 +11,9 @@
 
 import { type CameraAngles, viewBasis, type ViewBasis, type Viewport } from "./camera";
 import type { CircleLabel, CurveLabel, RingLabel, ScreenPoint } from "./drawList";
-import type { LocalFrame } from "./frame";
+import type { LocalFrame } from "../geometry/frame";
 import { type BoxPx, halfExtentRem, type TextSizeRem, textSizeRem } from "./labels";
-import { dot, type Vec3 } from "./vec3";
+import { dot, type Vec3 } from "../geometry/vec3";
 
 /** The letter spacing of every label over a view, in `em`, as the stylesheet sets it. */
 export const OVERLAY_LETTER_SPACING_EM = 0.1;

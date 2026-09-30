@@ -18,7 +18,7 @@ import {
 import type { ChartCensus, ChartResult, ChartSystem, LayerIndex } from "../../lib/galaxy/model";
 import { chartSymbol, starSizeClass } from "../../lib/galaxy/starSymbols";
 import { layerIndex, layerRank } from "../../lib/galaxy/wire";
-import type { LocalFrame } from "../../spatial/frame";
+import type { LocalFrame } from "../../geometry/frame";
 import type { PlaneRing, PointMark, SpatialScene, SphereMark } from "../../spatial/marks";
 import { ceil125, gridSpacing, RADIUS_STEPS_LY } from "../../spatial/scale";
 

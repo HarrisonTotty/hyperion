@@ -2,8 +2,8 @@ import type { ObjectKindDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { toChartResult } from "../../lib/galaxy/wire";
-import { localFrameAt } from "../../spatial/frame";
-import { vec3 } from "../../spatial/vec3";
+import { localFrameAt } from "../../geometry/frame";
+import { vec3 } from "../../geometry/vec3";
 import {
   aCensus,
   aStellarBrief,
