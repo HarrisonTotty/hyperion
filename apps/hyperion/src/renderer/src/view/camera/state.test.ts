@@ -173,6 +173,25 @@ describe("cuts and eased moves", () => {
     }).toEqual({ startsOnScreen: true, halfwayBetween: true, runningAt99: true, doneAt04: true });
   });
 
+  it("reports the frame change a cut makes, and none where the frame stays", () => {
+    const scene = aCameraScene();
+    const free = cut(newCameraState(scene, "camera"), { kind: "preset", preset: "free" });
+    const toChase = cutTo(free, { kind: "preset", preset: "chase" }, scene, CUT);
+    const toSeat = cutTo(
+      newCameraState(scene, "camera"),
+      { kind: "preset", preset: "chase" },
+      scene,
+      CUT,
+    );
+    expect([
+      toChase.kind === "cut" ? toChase.change : "refused",
+      toSeat.kind === "cut" ? toSeat.change : "refused",
+    ]).toEqual([
+      { from: { kind: "body", body: FIXTURE_PLANET }, to: { kind: "craft", craft: FIXTURE_SHIP } },
+      null,
+    ]);
+  });
+
   it("makes an eased move a cut under reduced motion", () => {
     const seat = newCameraState(aCameraScene(), "camera");
     const chase = cut(

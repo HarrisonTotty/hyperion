@@ -1352,3 +1352,20 @@ durationS, sceneAt(tS), cameraAt(tS) }` from `view/scenes/kept.ts` (not in the t
   vertical, nose east). The fixtures add `aBody`, `aViewCraft`, `aViewStar` and `aViewScene`;
   `aStarRow` is left to R02.T16, which uses it. T11.c's own tests (the paths cross both spheres
   both ways, the lander is upright) are in `view/scenes/frameChange.test.ts`; T8.b's run on it.
+- **Deviations in R02.T8.b, as built.** `rebase` landed with T9 (above). The scene tests are in
+  `view/camera/rebase.scene.test.ts`, stepped every 0.25 s over T11.c's scene; the acceptance
+  command is `pnpm --filter hyperion exec vitest run src/renderer/src/view/camera/rebase`, since
+  T8.a's `frames.test.ts` filter does not select them. A seat or chase camera is held in the own
+  ship's `craft` frame (Design note 22), so on the ship's path it is the ship's position that
+  changes frame: that half re-expresses the ship's position (`expressIn`) in its old and new body
+  frames, chosen by the rule as the flight model will, and compares a chase camera's view of the
+  landmark in each at the same instant; the free camera's half calls `sceneFrameFor` and `rebase`
+  on the scripted camera, whose changes fall at other moments from the ship's. Continuity is the
+  same-instant jump, below 1 mm and 1 px at every change (four each: planet, moon, planet,
+  system). The hysteresis is asserted: each entry falls at a ratio of at most 0.9 and each exit
+  above 1, within one step of its threshold. The ω × r check is a central difference over ±0.5 s at
+  100 s, held to 10⁻⁶ relative (the task gives no tolerance). Beyond the task, `cutTo`'s `cut`
+  result now carries `change: FrameChange | null` too, so that a cut that moves the camera to
+  another frame (free to seat or chase) invalidates as a step's change does; `onSystemChange`
+  resets the pose outright, and a consumer that caches camera-relative quantities compares frames
+  with `sameCameraFrame` there.
