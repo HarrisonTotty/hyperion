@@ -17,12 +17,12 @@ use crate::hex::{HexFault, parse_lower_hex};
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::Seed;
+/// use hyperion_base::Seed;
 ///
 /// let seed: Seed = "00000000deadbeef".parse()?;
 /// assert_eq!(seed.get(), 0xdead_beef);
 /// assert_eq!(seed.to_string(), "00000000deadbeef");
-/// # Ok::<(), hyperion_sim::rng::ParseSeedError>(())
+/// # Ok::<(), hyperion_base::rng::ParseSeedError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Seed(u64);

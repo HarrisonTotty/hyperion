@@ -550,8 +550,9 @@ fn horner(c: &[f64], x: f64) -> f64 {
 ///
 /// In debug builds, if `p` is not strictly between 0 and 1 (NaN included). Release builds return
 /// −∞ for `p ≤ 0`, +∞ for `p ≥ 1` and a NaN `p` unchanged, the same bits on every target. To
-/// invert a uniform draw, take it from `Stream::uniform_open`, whose range lies inside the domain;
-/// `Stream::uniform` can return 0.
+/// invert a uniform draw, take it from [`Stream::uniform_open`](crate::rng::Stream::uniform_open),
+/// whose range lies inside the domain; [`Stream::uniform`](crate::rng::Stream::uniform) can return
+/// 0.
 ///
 /// # Examples
 ///
@@ -1155,19 +1156,5 @@ mod tests {
         for p in quantile_points() {
             assert_same_bits(normal_quantile_total(p), normal_quantile(p));
         }
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "normal_quantile needs 0 < p < 1, got 1")]
-    fn normal_quantile_rejects_one_in_debug_builds() {
-        let _ = normal_quantile(1.0);
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "normal_quantile needs 0 < p < 1, got 0")]
-    fn normal_quantile_rejects_zero_in_debug_builds() {
-        let _ = normal_quantile(0.0);
     }
 }

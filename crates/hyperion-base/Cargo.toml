@@ -1,6 +1,6 @@
 [package]
 name = "hyperion-base"
-description = "HYPERION's determinism foundation beneath the sim: maths, units, the generator version."
+description = "HYPERION's determinism foundation beneath the sim: maths, units, random streams, the generator version."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
