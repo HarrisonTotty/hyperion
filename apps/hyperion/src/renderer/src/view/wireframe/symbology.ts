@@ -1,0 +1,320 @@
+import { norm, normalise, scale, type Vec3 } from "../../geometry/vec3";
+import type { ColourToken } from "../../spatial/drawList";
+import { SIZE_CLASS_REM, symbolOutline } from "../../spatial/symbols";
+import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
+import type { CameraTarget } from "../camera/state";
+import type { BodyMarkSymbol } from "../scene/model";
+import { bodyRegime } from "./bodies";
+
+/** A point on the view, px from the top left. */
+export interface ScreenPx {
+  readonly xPx: number;
+  readonly yPx: number;
+}
+
+/** A straight stroke on the view, between two points, px. */
+export type ScreenSegment = readonly [ScreenPx, ScreenPx];
+
+/**
+ * A mark of the symbology drawn over the view: its strokes in screen pixels, the colour token they
+ * take, what it marks and where (for picking and the DOM labels; no text is drawn into the canvas).
+ */
+export interface ScreenMark {
+  /** What the mark is. */
+  readonly kind: "selection" | "destination" | "target" | "flight_path" | "body_symbol";
+  /** The body or craft it marks, or `null` for the flight path marker. */
+  readonly target: CameraTarget | null;
+  /** The token its strokes are drawn in (plan 05's `readTokens` names). */
+  readonly token: ColourToken;
+  /** Its strokes, each drawn at the symbols' `SYMBOL_STROKE_PX`. */
+  readonly segments: ReadonlyArray<ScreenSegment>;
+  /** The point it marks. */
+  readonly anchor: ScreenPx;
+}
+
+/** How much of each side of its square a bracket's corner arm covers: a third, as the spatial view's. */
+const BRACKET_ARM_SHARE = 1 / 3;
+
+/**
+ * The margin between a mark and the brackets about it, and between the selection's brackets and
+ * the destination's outside them, rem: 0.25 each, as the spatial view's reticles are placed
+ * (`spatial/drawList.ts`, half of its 0.5 rem margin).
+ */
+export const BRACKET_MARGIN_REM = 0.25;
+
+/**
+ * The flight path marker's circle radius, wing length and fin height, rem. A choice of this plan,
+ * after the head-up display's marker: a circle about the size of a class-4 symbol, with wings of
+ * twice its radius.
+ */
+export const FLIGHT_PATH_MARKER_REM = { radius: 0.375, wing: 0.5, fin: 0.3125 } as const;
+
+/** Four corner brackets of the square of half-width `halfPx` about `at`. */
+function corners(at: ScreenPx, halfPx: number): ScreenSegment[] {
+  const arm = 2 * halfPx * BRACKET_ARM_SHARE;
+  const segments: ScreenSegment[] = [];
+  for (const sx of [-1, 1] as const) {
+    for (const sy of [-1, 1] as const) {
+      const corner = { xPx: at.xPx + sx * halfPx, yPx: at.yPx + sy * halfPx };
+      segments.push([corner, { xPx: corner.xPx - sx * arm, yPx: corner.yPx }]);
+      segments.push([corner, { xPx: corner.xPx, yPx: corner.yPx - sy * arm }]);
+    }
+  }
+  return segments;
+}
+
+/**
+ * The bracket reticle about the selection, in `--accent`, as the spatial view's: its half-size the
+ * marked symbol's radius and a margin.
+ *
+ * @param markRadiusPx - The radius of the mark it encloses, px.
+ */
+export function bracketReticle(
+  target: CameraTarget,
+  at: ScreenPx,
+  markRadiusPx: number,
+  remPx: number,
+): ScreenMark {
+  return {
+    kind: "selection",
+    target,
+    token: "accent",
+    segments: corners(at, markRadiusPx + BRACKET_MARGIN_REM * remPx),
+    anchor: at,
+  };
+}
+
+/**
+ * The destination reticle, in `--target`, a margin outside the selection's brackets, so that both
+ * show where the destination is also the selection.
+ */
+export function destinationReticle(
+  target: CameraTarget,
+  at: ScreenPx,
+  markRadiusPx: number,
+  remPx: number,
+): ScreenMark {
+  return {
+    kind: "destination",
+    target,
+    token: "target",
+    segments: corners(at, markRadiusPx + 2 * BRACKET_MARGIN_REM * remPx),
+    anchor: at,
+  };
+}
+
+/** A target's brackets, with its range and closure rate for the DOM label beside them. */
+export interface TargetBracket extends ScreenMark {
+  /** The target's range, m, from the own ship or, with none, from the camera. */
+  readonly rangeM: number;
+  /** Its closure rate, m/s, positive closing; `null` where there is no own ship to close on. */
+  readonly closureMPerS: number | null;
+}
+
+/**
+ * A target's brackets in `--text`, inside the selection's, with its range and closure rate (plan
+ * R02, R02.T12.c).
+ *
+ * @param relativeM - The target from the range's origin (the own ship, or the camera), m.
+ * @param relativeVelocityMPerS - The target's velocity relative to the own ship, m/s, or `null`.
+ */
+export function targetBracket(
+  target: CameraTarget,
+  at: ScreenPx,
+  markRadiusPx: number,
+  relativeM: Vec3,
+  relativeVelocityMPerS: Vec3 | null,
+): TargetBracket {
+  const rangeM = norm(relativeM);
+  const closureMPerS =
+    relativeVelocityMPerS === null || !(rangeM > 0)
+      ? null
+      : -(
+          relativeM.x * relativeVelocityMPerS.x +
+          relativeM.y * relativeVelocityMPerS.y +
+          relativeM.z * relativeVelocityMPerS.z
+        ) / rangeM;
+  return {
+    kind: "target",
+    target,
+    token: "text",
+    segments: corners(at, markRadiusPx),
+    anchor: at,
+    rangeM,
+    closureMPerS,
+  };
+}
+
+/** A regular polygon of `sides` about `at` of circumradius `radiusPx`, as segments. */
+function polygon(at: ScreenPx, radiusPx: number, sides: number): ScreenSegment[] {
+  const points = Array.from({ length: sides + 1 }, (_, i) => {
+    const angle = (2 * Math.PI * i) / sides;
+    return { xPx: at.xPx + radiusPx * Math.cos(angle), yPx: at.yPx + radiusPx * Math.sin(angle) };
+  });
+  return points.slice(1).map((p, i): ScreenSegment => [points[i] ?? p, p]);
+}
+
+/**
+ * The own ship's flight path marker: a circle with wings and a fin where its velocity against the
+ * frame's reference points on the view, in `--text` (plan R02, R02.T12.c).
+ *
+ * @param velocityMPerS - The own ship's velocity, m/s along the camera frame's axes; only its
+ * direction is used, so a slow ship's marker shows as surely as a fast one's.
+ * @returns `null` with no own ship or no velocity, or where the velocity points behind the camera.
+ */
+export function flightPathMarker(
+  velocityMPerS: Vec3 | null,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+  remPx: number,
+): ScreenMark | null {
+  if (velocityMPerS === null || !(norm(velocityMPerS) > 0)) {
+    return null;
+  }
+  // A point a kilometre along the direction, well beyond the near plane.
+  const projected = project(scale(normalise(velocityMPerS), 1e3), camera, viewport);
+  if (!projected.inFront) {
+    return null;
+  }
+  const at = { xPx: projected.xPx, yPx: projected.yPx };
+  const radius = FLIGHT_PATH_MARKER_REM.radius * remPx;
+  const wing = FLIGHT_PATH_MARKER_REM.wing * remPx;
+  const fin = FLIGHT_PATH_MARKER_REM.fin * remPx;
+  const wings: ScreenSegment[] = [
+    [
+      { xPx: at.xPx - radius, yPx: at.yPx },
+      { xPx: at.xPx - radius - wing, yPx: at.yPx },
+    ],
+    [
+      { xPx: at.xPx + radius, yPx: at.yPx },
+      { xPx: at.xPx + radius + wing, yPx: at.yPx },
+    ],
+    [
+      { xPx: at.xPx, yPx: at.yPx - radius },
+      { xPx: at.xPx, yPx: at.yPx - radius - fin },
+    ],
+  ];
+  return {
+    kind: "flight_path",
+    target: null,
+    token: "text",
+    segments: [...polygon(at, radius, 24), ...wings],
+    anchor: at,
+  };
+}
+
+/** A body symbol's radius on the view, px: half its size class's diameter. */
+export function symbolRadiusPx(symbol: BodyMarkSymbol, remPx: number): number {
+  return (SIZE_CLASS_REM[symbol.sizeClass] * remPx) / 2;
+}
+
+/**
+ * A body's mark from the ship-wide set where it is under 3 px across (Design note 13), in `--text`,
+ * or `null` where it is drawn as a sphere.
+ *
+ * @param remPx - The interface's rem, px, which the symbol sizes follow.
+ */
+export function bodySymbolMark(
+  target: CameraTarget,
+  symbol: BodyMarkSymbol,
+  at: ScreenPx,
+  diameterPx: number,
+  remPx: number,
+): ScreenMark | null {
+  if (bodyRegime(diameterPx) !== "symbol") {
+    return null;
+  }
+  const radiusPx = symbolRadiusPx(symbol, remPx);
+  const outline = symbolOutline(symbol.shape);
+  let segments: ScreenSegment[];
+  switch (outline.kind) {
+    case "circle":
+      segments = polygon(at, radiusPx, 24);
+      break;
+    case "ringed-circle":
+      // The ring at the unit radius and the disc inside it, both outlined.
+      segments = [...polygon(at, radiusPx, 24), ...polygon(at, radiusPx * outline.discRadius, 16)];
+      break;
+    case "polygon": {
+      const points = outline.points.map((p) => ({
+        xPx: at.xPx + p.x * radiusPx,
+        yPx: at.yPx + p.y * radiusPx,
+      }));
+      segments = points.slice(1).map((p, i): ScreenSegment => [points[i] ?? p, p]);
+      break;
+    }
+  }
+  return { kind: "body_symbol", target, token: "text", segments, anchor: at };
+}
+
+/** A pickable mark as the symbology sees it: what it is, where, and its symbol if a body. */
+export interface SymbologyAnchor {
+  /** The body or craft. */
+  readonly target: CameraTarget;
+  /** Where it falls on the view. */
+  readonly at: ScreenPx;
+  /** A body's symbol and apparent diameter, px; `null` for a craft. */
+  readonly body: { readonly symbol: BodyMarkSymbol; readonly diameterPx: number } | null;
+}
+
+/** What the symbology marks beyond the anchors themselves. */
+export interface SymbologyInput {
+  /** The marks in sight, each once. */
+  readonly anchors: ReadonlyArray<SymbologyAnchor>;
+  /** The selected target, or `null`. */
+  readonly selection: CameraTarget | null;
+  /** The commanded destination, or `null`. */
+  readonly destination: CameraTarget | null;
+  /** The own ship's velocity along the camera frame's axes, m/s, or `null`. */
+  readonly ownVelocityMPerS: Vec3 | null;
+  /** The interface's rem, px. */
+  readonly remPx: number;
+}
+
+function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
+  if (a === null) {
+    return false;
+  }
+  return a.kind === "body"
+    ? b.kind === "body" && a.body === b.body
+    : b.kind === "craft" && a.craft === b.craft;
+}
+
+/**
+ * The view's symbology (plan R02, R02.T12.c): each body under 3 px its symbol, the selection's
+ * bracket reticle in `--accent`, the destination's in `--target` outside it, and the own ship's
+ * flight path marker, in that order.
+ */
+export function symbologyMarks(
+  input: SymbologyInput,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): ScreenMark[] {
+  const marks: ScreenMark[] = [];
+  for (const anchor of input.anchors) {
+    const markRadiusPx = anchor.body === null ? 0 : symbolRadiusPx(anchor.body.symbol, input.remPx);
+    if (anchor.body !== null) {
+      const symbol = bodySymbolMark(
+        anchor.target,
+        anchor.body.symbol,
+        anchor.at,
+        anchor.body.diameterPx,
+        input.remPx,
+      );
+      if (symbol !== null) {
+        marks.push(symbol);
+      }
+    }
+    if (sameTarget(input.selection, anchor.target)) {
+      marks.push(bracketReticle(anchor.target, anchor.at, markRadiusPx, input.remPx));
+    }
+    if (sameTarget(input.destination, anchor.target)) {
+      marks.push(destinationReticle(anchor.target, anchor.at, markRadiusPx, input.remPx));
+    }
+  }
+  const marker = flightPathMarker(input.ownVelocityMPerS, camera, viewport, input.remPx);
+  if (marker !== null) {
+    marks.push(marker);
+  }
+  return marks;
+}

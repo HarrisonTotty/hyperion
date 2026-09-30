@@ -2,7 +2,7 @@ import { add, vec3, type Vec3 } from "../../geometry/vec3";
 import type { CameraPose } from "../camera/pose";
 import { IDENTITY_QUATERNION, multiply, quaternionFromAxisAngle } from "../camera/quaternion";
 import { TEST_HULL } from "../scene/hull";
-import type { ViewScene } from "../scene/model";
+import { bodyKindSymbol, type ViewScene } from "../scene/model";
 import {
   AU_M,
   KEPT_BARYCENTRE,
@@ -84,6 +84,8 @@ function precisionSceneAt(tS: number): ViewScene {
         hillRadiusM: null,
         centreM: add(PRECISION_SHIP_M, PLANET_OFFSET_M),
         rotation: null,
+        symbol: bodyKindSymbol("planet"),
+        orbitNormal: null,
       },
       {
         id: PRECISION_MOON,
@@ -95,6 +97,8 @@ function precisionSceneAt(tS: number): ViewScene {
         hillRadiusM: null,
         centreM: add(PRECISION_SHIP_M, MOON_OFFSET_M),
         rotation: null,
+        symbol: bodyKindSymbol("moon"),
+        orbitNormal: null,
       },
     ],
     rings: [],

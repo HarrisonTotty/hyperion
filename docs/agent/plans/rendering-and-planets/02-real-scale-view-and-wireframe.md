@@ -1369,3 +1369,37 @@ durationS, sceneAt(tS), cameraAt(tS) }` from `view/scenes/kept.ts` (not in the t
   another frame (free to seat or chase) invalidates as a step's change does; `onSystemChange`
   resets the pose outright, and a consumer that caches camera-relative quantities compares frames
   with `sameCameraFrame` there.
+- **Deviations in R02.T12, as built.** The subdivision is shared in `view/wireframe/curve.ts` (not
+  in the task's files): `sampleCurve(spec, camera, viewport)` over a `CurveSpec { point, windows,
+initialSpans }` returns `Polyline`s (camera-relative `f64` `Vec3`s); each window is cut into
+  even spans and a span halved while its midpoint or quarter points project 0.25 px
+  (`SAGITTA_TOLERANCE_PX`) or more from its projected chord, to a depth of 24; a span wholly 64 px
+  beyond one edge is not refined; where the curve passes behind the near plane the run ends at a
+  bisected boundary and starts again after it. A graticule line's facing arc is found in closed
+  form by `cosineWindows` (the facing test −n · c > r is linear in cos u and sin u along a circle
+  of the sphere), so a short arc near the limb from low altitude is never missed; a test at 400 km
+  and 10 km draws every meridian that has one. `graticule(body, camera, viewport, lowSetting)`
+  takes a camera-relative `GraticuleBody { centreM, radiusM, rotation, unmodelledPole }` and
+  returns `BodyWireframe { regime, diameterPx, lines }` of `GraticuleLine { kind: limb | meridian
+| parallel, major, runs }`; only the equator and prime meridian are `major`. A body whose
+  rotation is not modelled is drawn about its orbit normal (`graticuleRotation`, Design note 14),
+  for which `ViewBody` gains `orbitNormal: Vec3 | null` (the frame's +z where `null`) and, for its
+  mark, `symbol: BodyMarkSymbol` (`bodyKindSymbol(kind)` gives the kind's default; R02.T17 gives a
+  giant or a host its own). `angularDiameterPx`, `perpendicularPair`, `GRATICULE_STEP_DEG` and the
+  regime thresholds are exported. `ringEllipse` takes `RingGeometry { centreM, innerRadiusM,
+outerRadiusM, normal }`; its ticks go through the sampler so that one crossing the near plane is
+  cut. `orbitPath(orbit, parentM, camera, viewport)` samples the eccentric anomaly of
+  `ellipseOf(orbit)`, whose P and Q are taken from `orbitPolyline`'s points at E = 0 and π/2 (held
+  to it within 10⁻¹² a). `hullEdges(hull, attitude)` returns `HullSegment` offsets from the craft
+  (Design note 2); `hullFaces` goes with it. Culling: `sphereInFrustum` tests the four side planes
+  and the near plane and keeps a sphere holding the camera; `behindLimb` is the horizon test, with
+  `SURFACE_TOLERANCE` = 10⁻⁹ so that a mark on the near surface is not hidden. Symbology: every
+  `ScreenMark` names its `target`; `symbologyMarks(input, camera, viewport)` composes the body
+  symbols (a ringed circle with its disc), `bracketReticle` (`--accent`), `destinationReticle`
+  (`--target`, a margin outside) and `flightPathMarker` (from the velocity's direction, so it shows
+  at docking speeds); reticles are sized from the mark's radius plus 0.25 rem margins, as the
+  spatial view's, and the marker in rem (`FLIGHT_PATH_MARKER_REM`, a choice); `targetBracket`
+  (`--text`, with `rangeM` and `closureMPerS`) is built and tested but drawn by T15 with its DOM
+  label. **For the owner:** target brackets share the selection's corner-bracket shape, told
+  apart by colour and size; should they take another shape so that the selection is not carried
+  mainly by colour?

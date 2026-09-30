@@ -2,6 +2,8 @@ import type { BodyIdHex, GalacticPosition, SystemIdHex, UniverseTime } from "@hy
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
+import { MOON_SIZE_CLASS, PLANET_SIZE_CLASSES } from "../../lib/system/bodySymbols";
+import type { SizeClass, SymbolShape } from "../../spatial/marks";
 import type { CameraPose, CraftId, Quaternion } from "../camera/pose";
 import type { CameraScene, CameraTarget } from "../camera/state";
 import type { ViewPosition } from "../coords/position";
@@ -37,6 +39,44 @@ export interface ViewBody {
   readonly centreM: Vec3;
   /** Its rotation from body-fixed to body axes, or `null` where rotation is not modelled. */
   readonly rotation: Rotation3 | null;
+  /**
+   * The unit normal of its orbit, along the galactic axes, which stands for its pole while its
+   * rotation is not modelled (Design note 14); `null` where it has no orbit drawn from elements,
+   * when the frame's +z stands in.
+   */
+  readonly orbitNormal: Vec3 | null;
+  /** Its mark from the ship-wide symbol set, drawn below 3 px (`lib/system/bodySymbols.ts`). */
+  readonly symbol: BodyMarkSymbol;
+}
+
+/** A body's mark in the ship-wide symbol set: its shape and its size class. */
+export interface BodyMarkSymbol {
+  /** The shape, which encodes the kind. */
+  readonly shape: SymbolShape;
+  /** The size class. */
+  readonly sizeClass: SizeClass;
+}
+
+/**
+ * The ship-wide symbol of each kind with no more known of the body (`lib/system/bodySymbols.ts`): a
+ * planet the inverted triangle at a smaller planet's size, a moon the pentagon, a star the circle
+ * at size class 2. A server scene gives each body its own (R02.T17: a giant's larger triangle, a
+ * host's own symbol).
+ */
+export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
+  let symbol: BodyMarkSymbol;
+  switch (kind) {
+    case "planet":
+      symbol = { shape: "triangle-down", sizeClass: PLANET_SIZE_CLASSES.planet };
+      break;
+    case "moon":
+      symbol = { shape: "pentagon", sizeClass: MOON_SIZE_CLASS };
+      break;
+    case "star":
+      symbol = { shape: "circle", sizeClass: 2 };
+      break;
+  }
+  return symbol;
 }
 
 /** A body's rings: an annulus in the body's equatorial plane. */
