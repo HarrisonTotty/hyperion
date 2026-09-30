@@ -12,6 +12,9 @@
 //! | System   | [`SystemPosition`]: `f64` metres from the system barycentre        | about 1 mm at 50 au |
 //! | Body     | [`BodyPosition`]: `f64` metres from the body's centre              | sub-micrometre      |
 //!
+//! A body's rotating axes are not a frame: a point fixed to a body's surface is a
+//! [`BodyFixedPosition`], turned into a [`BodyPosition`] by the body's [`BodyFixedRotation`].
+//!
 //! The system and body frames are translations of the galactic frame: their axes are parallel to
 //! the galactic axes and only the origin moves. No conversion between frames exists without an
 //! explicit origin, so the types cannot be mixed by accident. [`Frame`] names a frame and its
@@ -37,12 +40,17 @@
 //! generation cell are drawn as integer light-years plus an offset
 //! ([`GenCell::position_from_words`]), never as one `f64` across a whole cell.
 
+mod body_fixed;
 mod cell;
 mod directions;
 mod frames;
 mod galactic;
 mod vec3;
 
+pub use body_fixed::{
+    BodyFixedPosition, BodyFixedRotation, BodyFixedVector, BodyVector, BuildRotationError,
+    ROTATION_ORTHONORMAL_TOLERANCE,
+};
 pub use cell::{BuildGenCellError, CellSize, GenCell, LyCell};
 pub use directions::{Cylindrical, Directions, UnitVector};
 pub use frames::{BodyPosition, Frame, SystemPosition, SystemVector, SystemVelocity};

@@ -1157,3 +1157,16 @@ bumped. It reserves no stream or tag. It adds the golden files `coords/body_fixe
 - **Asked by R07, not yet a task here.** An oblate graticule for the giants R07 draws oblate from
   plan 14's flattening (R07 Design note 19, whose non-goals name it R02's). Until it exists a
   graticule is a sphere of the equatorial radius. The roadmap's asks table carries it.
+- **Deviations in R02.T3, as built.** `BodyFixedRotation` also has `rows()` (the golden writes it
+  and R02.T6.a reads it) and `vector_to_body_fixed`, the inverse of `vector_to_body`.
+  `BuildRotationError` has a third variant, `NotFinite`, so that a NaN matrix is refused by name
+  rather than slipping through the tolerance comparisons; the 10⁻¹² limit is the public
+  `ROTATION_ORTHONORMAL_TOLERANCE`, applied to every entry of R Rᵀ. Following `SystemPosition` and
+  `SystemVector`, `BodyFixedPosition` has `ORIGIN`, `translated`, `displacement_to` and
+  `distance_from_origin`, both vector types `ZERO`, `length` and vector arithmetic, and all four
+  types `Default`. The round-trip test samples 1,000 seeded points on the 6,371 km sphere about a
+  pole tilted 23.44°. **Found:** P14.T14.c has landed as `planetary::frames::body_fixed_at`,
+  returning its own `FrameRotation` in the transposed direction (rows are the fixed axes, inertial
+  → fixed). The ask that it return `BodyFixedRotation` stays open; the module documentation names
+  the conversion meanwhile (`from_rows` of the transpose), and Design note 14's
+  `ROTATION NOT YET MODELLED` may be revisited when R02.T17 wires real bodies.
