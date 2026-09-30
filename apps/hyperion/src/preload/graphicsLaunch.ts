@@ -67,6 +67,7 @@ export function graphicsArguments(mode: GraphicsLaunchMode, gpuTiming: boolean):
 /** The launch's graphics set-up, as the preload reads it back. */
 export interface GraphicsLaunch {
   readonly launchMode: GraphicsLaunchMode;
+  /** Whether timestamps are unquantized: only ever true in `vulkan` mode. */
   readonly gpuTiming: boolean;
 }
 
@@ -79,10 +80,10 @@ export function graphicsLaunchFromArgv(
   argv: readonly string[],
   platform: NodeJS.Platform,
 ): GraphicsLaunch {
-  return {
-    launchMode: launchModeOf(platform, argv.includes(`--${SAFE_MODE_SWITCH}`)),
-    gpuTiming: argv.includes(`--${GPU_TIMING_SWITCH}`),
-  };
+  const launchMode = launchModeOf(platform, argv.includes(`--${SAFE_MODE_SWITCH}`));
+  // Only the forced path carries the timing toggle, so no other mode has full timestamps.
+  const gpuTiming = launchMode === "vulkan" && argv.includes(`--${GPU_TIMING_SWITCH}`);
+  return { launchMode, gpuTiming };
 }
 
 /**
@@ -101,4 +102,33 @@ export function readGpuProcessGoneReport(message: unknown): GpuProcessGoneReport
     return undefined;
   }
   return { reason, count };
+}
+
+/** The part of `ipcRenderer` a crash subscription uses. */
+export interface GpuProcessGoneSource {
+  on(channel: string, listener: (event: unknown, message: unknown) => void): unknown;
+  removeListener(channel: string, listener: (event: unknown, message: unknown) => void): unknown;
+}
+
+/**
+ * Registers `listener` for the crash reports arriving on {@link GPU_PROCESS_GONE_CHANNEL}, passing on
+ * only well-formed ones.
+ *
+ * @param source - `ipcRenderer`.
+ * @returns The listener's removal.
+ */
+export function subscribeGpuProcessGone(
+  source: GpuProcessGoneSource,
+  listener: (report: GpuProcessGoneReport) => void,
+): () => void {
+  const handler = (_event: unknown, message: unknown): void => {
+    const report = readGpuProcessGoneReport(message);
+    if (report !== undefined) {
+      listener(report);
+    }
+  };
+  source.on(GPU_PROCESS_GONE_CHANNEL, handler);
+  return () => {
+    source.removeListener(GPU_PROCESS_GONE_CHANNEL, handler);
+  };
 }

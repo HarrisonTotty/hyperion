@@ -9,9 +9,10 @@
  */
 
 import type { GpuProcessGoneReport, GraphicsLaunchMode } from "../../preload/api";
-import { GPU_PROCESS_GONE_CHANNEL, SAFE_MODE_SWITCH } from "../../preload/graphicsLaunch";
+import { GPU_PROCESS_GONE_CHANNEL } from "../../preload/graphicsLaunch";
 import { crashLoopDecision, type GpuProcessEvent } from "./crashLoop";
 import { readFeatureStatus } from "./featureStatus";
+import { SAFE_MODE_SWITCH } from "./switches";
 
 /** The part of Electron's `child-process-gone` details the monitor reads. */
 export interface ChildProcessGoneDetails {

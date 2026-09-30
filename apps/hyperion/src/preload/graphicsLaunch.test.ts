@@ -1,9 +1,14 @@
+import { EventEmitter } from "node:events";
+
 import { describe, expect, it } from "vitest";
 
+import type { GpuProcessGoneReport } from "./api";
 import {
   graphicsArguments,
+  GPU_PROCESS_GONE_CHANNEL,
   graphicsLaunchFromArgv,
   readGpuProcessGoneReport,
+  subscribeGpuProcessGone,
 } from "./graphicsLaunch";
 
 const RENDERER_ARGV: readonly string[] = ["/opt/hyperion/hyperion", "--type=renderer"];
@@ -27,6 +32,13 @@ describe("the graphics launch hand-off", () => {
     expect(graphicsLaunchFromArgv(RENDERER_ARGV, "linux").gpuTiming).toBe(false);
   });
 
+  it("reports no timing outside the forced path, whatever the switch", () => {
+    const timedSafe = [...RENDERER_ARGV, ...graphicsArguments("safe", true)];
+    expect(graphicsLaunchFromArgv(timedSafe, "linux").gpuTiming).toBe(false);
+    const timed = [...RENDERER_ARGV, ...graphicsArguments("vulkan", true)];
+    expect(graphicsLaunchFromArgv(timed, "win32").gpuTiming).toBe(false);
+  });
+
   it("carries nothing for a plain Vulkan launch", () => {
     expect(graphicsArguments("vulkan", false)).toEqual([]);
   });
@@ -44,5 +56,25 @@ describe("reading a crash report", () => {
     for (const message of [undefined, null, "killed", { reason: "killed" }, { count: 1.5 }]) {
       expect(readGpuProcessGoneReport(message)).toBeUndefined();
     }
+  });
+});
+
+describe("the crash subscription", () => {
+  it("passes on well-formed reports only", () => {
+    const source = new EventEmitter();
+    const received: GpuProcessGoneReport[] = [];
+    subscribeGpuProcessGone(source, (report) => {
+      received.push(report);
+    });
+    source.emit(GPU_PROCESS_GONE_CHANNEL, {}, { reason: "killed", count: 1 });
+    source.emit(GPU_PROCESS_GONE_CHANNEL, {}, "not a report");
+    expect(received).toEqual([{ reason: "killed", count: 1 }]);
+  });
+
+  it("removes its listener when asked", () => {
+    const source = new EventEmitter();
+    const unsubscribe = subscribeGpuProcessGone(source, () => undefined);
+    unsubscribe();
+    expect(source.listenerCount(GPU_PROCESS_GONE_CHANNEL)).toBe(0);
   });
 });

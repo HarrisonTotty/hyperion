@@ -1648,3 +1648,39 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   on the order in which `Mesh.render` sets the alpha mode and then binds. An upgrade that moves it
   would show in T9.i's alpha check, and the fallback is the adapter's own raw pass (Design note 19)
   with its own blend state.
+- **Deviations in T1, as built.**
+  - `GraphicsLaunchMode` is declared in `preload/api.ts`, and `launchModeOf`, `SAFE_MODE_SWITCH` and
+    `GPU_TIMING_SWITCH` in the dependency-free `preload/graphicsLaunch.ts`; `main/graphics/switches.ts`
+    re-exports all four under the plan's names. The sandboxed preload needs them too, and neither it
+    nor the renderer may import main-process code (the `serverUrl.ts` pattern).
+  - `applyGraphicsSwitches` takes `Pick<CommandLine, "appendSwitch" | "getSwitchValue">`, which
+    `app.commandLine` satisfies, so that a fake stands in for it.
+  - The merge covers all four list switches (`enable-features`, `disable-features`,
+    `enable-dawn-features`, `disable-dawn-features`), since the timing toggle's
+    `disable-dawn-features` is last-writer-wins like the others; `mergeSwitchValue` trims items.
+  - `x11RelaunchArgs` recognises only the exact `--ozone-platform=x11` spelling, as Design note 3
+    words it. The X11 check runs after the command line is parsed, so `--help` and a usage error
+    answer without a relaunch. `OZONE_X11_FLAG` is exported.
+  - By hand, pending: the adapter from the devtools console on the UHD 620 under `just client`, and
+    `app.getGPUFeatureStatus()` after `gpu-info-update` (the monitor reads it but does not log it;
+    the check needs a devtools step or a temporary log line).
+- **Deviations in T2, as built.**
+  - The window's `additionalArguments` carry only `--hyperion-graphics-safe` (safe mode) and
+    `--hyperion-gpu-timing`; the preload works the mode out with `launchModeOf(process.platform, …)`
+    (`graphicsArguments`, `graphicsLaunchFromArgv`). `gpuTiming` is true only in `vulkan` mode, in
+    the main process and the preload alike, since only the forced path carries the Dawn toggle.
+  - `readFeatureStatus` returns a named `FeatureStatusReading`; an absent entry is recorded in a
+    `status` event as `""`. Two statuses stamped alike decide nothing between them: a drop counts
+    only strictly after a status that held the value, which keeps the decision independent of
+    arrival order.
+  - `GpuProcessMonitor` takes `{ app, windows, mode, args, nowMs }` over narrow `MonitoredApp` and
+    `MonitoredWindow` interfaces, exposes `history` and `dispose()` (called on `will-quit`), and
+    starts before `ready`. Only exits other than `clean-exit` are sent to windows, and
+    `GpuProcessGoneReport.count` counts them over the launch, not within the window.
+  - The preload's crash subscription is `subscribeGpuProcessGone(ipcRenderer, listener)` in
+    `graphicsLaunch.ts`, which passes on only reports `readGpuProcessGoneReport` accepts; the channel
+    is `GPU_PROCESS_GONE_CHANNEL`. `HyperionApi.graphics` is typed as `GraphicsApi`.
+    `stubHyperionApi(serverUrl?, graphics?)` takes the graphics fields, `TEST_GRAPHICS` by default.
+  - By hand, pending: `kill -9` of the GPU process three times within a minute on a built client
+    relaunches once into safe mode, whose adapter request is null and whose consoles work; a fourth
+    crash does not relaunch.

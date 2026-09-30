@@ -113,7 +113,8 @@ function prepareGraphics(): GraphicsLaunch | undefined {
   // client never got the chance to report and recover (R01 Design note 6).
   app.disableDomainBlockingFor3DAPIs();
   const mode = launchModeOf(process.platform, app.commandLine.hasSwitch(SAFE_MODE_SWITCH));
-  const gpuTiming = app.commandLine.hasSwitch(GPU_TIMING_SWITCH);
+  // The timing toggle is one of the forced path's switches: nothing else lifts the quantization.
+  const gpuTiming = mode === "vulkan" && app.commandLine.hasSwitch(GPU_TIMING_SWITCH);
   applyGraphicsSwitches(
     app.commandLine,
     graphicsSwitches({ platform: process.platform, mode, gpuTiming }),

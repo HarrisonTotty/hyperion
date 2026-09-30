@@ -90,6 +90,16 @@ describe("the GPU-process monitor", () => {
     }
   });
 
+  it("neither counts nor sends a clean exit", () => {
+    const window = new FakeWindow();
+    const { app } = monitor("vulkan", [window]);
+    app.gone("GPU", "clean-exit");
+    app.gone("GPU", "crashed");
+    expect(window.sent).toEqual([
+      { channel: GPU_PROCESS_GONE_CHANNEL, report: { reason: "crashed", count: 1 } },
+    ]);
+  });
+
   it("ignores every process but the GPU's", () => {
     const window = new FakeWindow();
     const { app, monitor: watched } = monitor("vulkan", [window]);

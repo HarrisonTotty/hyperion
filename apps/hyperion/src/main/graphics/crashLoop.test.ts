@@ -71,8 +71,11 @@ describe("the crash-loop policy", () => {
       crash(2_000),
       crash(3_000),
     ];
-    const reversed = events.toReversed();
-    expect(crashLoopDecision(reversed, "vulkan")).toBe(crashLoopDecision(events, "vulkan"));
+    expect(crashLoopDecision(events, "vulkan")).toBe("relaunch-safe");
+    expect(crashLoopDecision(events.toReversed(), "vulkan")).toBe("relaunch-safe");
+  });
+
+  it("decides nothing between two statuses stamped alike", () => {
     const sameInstant = [status(1_000, "disabled_off"), status(1_000, "enabled_on")];
     expect(crashLoopDecision(sameInstant, "vulkan")).toBe("none");
     expect(crashLoopDecision(sameInstant.toReversed(), "vulkan")).toBe("none");
