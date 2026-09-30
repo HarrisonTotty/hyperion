@@ -579,10 +579,12 @@ function toRecord(record: BodyRecordDto, system: SystemIdHex, designation: strin
     ...toBody(record, system, designation),
     // `BodySurfaceDto` has no value yet, so no `ok` surface can parse; its value passes as it is.
     surface: toSection(record.surface, (surface) => surface),
-    hooks: toSection(record.hooks, (hooks) => {
-      check(/^[0-9a-f]{16}$/.test(hooks.surface_seed), "surface seed malformed");
-      return { surfaceSeed: hooks.surface_seed };
-    }),
+    hooks: toSection(record.hooks, (hooks) => ({
+      detailSeed: toSection(hooks.detail_seed, (seed) => {
+        check(/^[0-9a-f]{16}$/.test(seed), "detail seed malformed");
+        return seed;
+      }),
+    })),
   };
 }
 
