@@ -13,6 +13,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
     ClientMessage, RequestBody, RequestError, RequestId, ResponseBody, ServerMessage,
+    SubscribeRequest, SubscriptionState,
 };
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
@@ -23,8 +24,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::compute::CancelToken;
-use crate::requests::{Handler, HandlerFuture, to_frame};
+use crate::requests::{Handler, HandlerFuture, SubscribeFuture, to_frame};
 use crate::stats::{OutboundCounters, RequestCounters};
+use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
 use crate::{AppState, Server, ServerConfig, ServerStats};
 
@@ -416,13 +418,37 @@ impl Client {
 #[derive(Debug)]
 pub(crate) struct Scripted {
     calls: mpsc::Sender<Call>,
+    /// Where subscriptions' openings go, if the test takes them.
+    openings: Option<mpsc::Sender<Opening>>,
 }
 
 impl Scripted {
-    /// The handler, and the calls it receives.
+    /// The handler, and the calls it receives. It answers every `subscribe` `unsupported`.
     pub(crate) fn new() -> (Self, Calls) {
         let (calls, received) = mpsc::channel(64);
-        (Self { calls }, Calls(received))
+        (
+            Self {
+                calls,
+                openings: None,
+            },
+            Calls(received),
+        )
+    }
+
+    /// The handler, the calls it receives, and the subscriptions it is asked to open: an
+    /// injected topic that pushes whatever the test hands its [`Pusher`] (rendering plan R03,
+    /// R03.T5.b).
+    pub(crate) fn with_openings() -> (Self, Calls, Openings) {
+        let (handler, calls) = Self::new();
+        let (openings, received) = mpsc::channel(16);
+        (
+            Self {
+                openings: Some(openings),
+                ..handler
+            },
+            calls,
+            Openings(received),
+        )
     }
 }
 
@@ -447,6 +473,77 @@ impl Handler for Scripted {
                 Err(_) => std::future::pending().await,
             }
         })
+    }
+
+    fn subscribe(
+        &self,
+        _state: Arc<AppState>,
+        request: SubscribeRequest,
+        pusher: Pusher,
+        _token: CancelToken,
+    ) -> SubscribeFuture {
+        let Some(openings) = self.openings.clone() else {
+            return Box::pin(std::future::ready(Err(RequestError {
+                code: hyperion_protocol::ErrorCode::Unsupported,
+                message: "this handler opens no topic".to_owned(),
+                field: None,
+            })));
+        };
+        Box::pin(async move {
+            let (reply, answer) = oneshot::channel();
+            openings
+                .send(Opening {
+                    request,
+                    pusher,
+                    reply,
+                })
+                .await
+                .expect("the test is taking openings");
+            match answer.await {
+                Ok(answer) => answer,
+                Err(_) => std::future::pending().await,
+            }
+        })
+    }
+}
+
+/// The subscriptions a [`Scripted`] handler has been asked to open.
+#[derive(Debug)]
+pub(crate) struct Openings(mpsc::Receiver<Opening>);
+
+impl Openings {
+    /// The next opening.
+    pub(crate) async fn next(&mut self) -> Opening {
+        timeout(WAIT, self.0.recv())
+            .await
+            .expect("timed out waiting for a subscription to open")
+            .expect("the handler lives as long as the server")
+    }
+}
+
+/// One `subscribe`, as the handler received it.
+#[derive(Debug)]
+pub(crate) struct Opening {
+    /// What was asked.
+    pub(crate) request: SubscribeRequest,
+    /// The topic's end of the subscription, which may push before the opening is answered.
+    pub(crate) pusher: Pusher,
+    reply: oneshot::Sender<Result<SubscriptionState, RequestError>>,
+}
+
+impl Opening {
+    /// Opens the subscription with `state`, and returns the topic's end of it.
+    pub(crate) fn open(self, state: SubscriptionState) -> Pusher {
+        // The request may have been cancelled meanwhile; the pusher then says it has ended.
+        let _ = self.reply.send(Ok(state));
+        self.pusher
+    }
+
+    /// Refuses the subscription with `error`, and returns the topic's end of it.
+    pub(crate) fn fail(self, error: RequestError) -> Pusher {
+        // As for `open`.
+        let _ = self.reply.send(Err(error));
+        self.pusher
     }
 }
 

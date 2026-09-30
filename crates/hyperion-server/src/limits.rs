@@ -68,6 +68,14 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// a shutdown.
 pub const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// Subscriptions one connection may hold at once, those still opening included (rendering plan
+/// R03, R03.T5.b).
+///
+/// Room for the scene, plan 12's alerts and two more topics on one connection: one scene
+/// subscription already carries every view's camera, so a client needs one per topic. A fifth
+/// `subscribe` is refused with `bad_request` naming `topic`.
+pub const MAX_SUBSCRIPTIONS: usize = 4;
+
 /// Universes the server holds, counting those on disk and those being created.
 pub const MAX_UNIVERSES: usize = 256;
 
@@ -139,5 +147,9 @@ mod tests {
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);
+        assert_eq!(
+            MAX_SUBSCRIPTIONS, 4,
+            "the scene, the alerts and two more topics"
+        );
     }
 }

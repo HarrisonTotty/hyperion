@@ -20,6 +20,7 @@ pub mod limits;
 mod outbound;
 mod requests;
 mod stats;
+mod subscriptions;
 #[cfg(test)]
 mod testing;
 pub mod universe;
