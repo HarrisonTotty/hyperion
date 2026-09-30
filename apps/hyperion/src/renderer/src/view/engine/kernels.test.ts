@@ -58,6 +58,21 @@ describe("the f16 and subgroups guard", () => {
     }).toThrow("mixed");
   });
 
+  it("throws for both on one line", () => {
+    expect(() => {
+      assertNoF16Subgroups("same-line", "enable f16; enable subgroups;\n");
+    }).toThrow("same-line");
+  });
+
+  it("throws for both after a requires directive and with a comment inside one", () => {
+    expect(() => {
+      assertNoF16Subgroups(
+        "commented",
+        "requires readonly_and_readwrite_storage_textures; enable subgroups;\nenable /* c */ f16;\n",
+      );
+    }).toThrow("commented");
+  });
+
   it("passes a module enabling one of them", () => {
     expect(() => {
       assertNoF16Subgroups("f16-only", "enable f16;\n");
@@ -74,6 +89,10 @@ describe("the Higham bound", () => {
 
   it("is zero for a single term", () => {
     expect(highamBound(1, 5)).toBe(0);
+  });
+
+  it("refuses a count at which the bound fails", () => {
+    expect(() => highamBound(2 ** 24 + 1, 1)).toThrow("does not hold");
   });
 
   it("refuses a count that is not a positive integer", () => {

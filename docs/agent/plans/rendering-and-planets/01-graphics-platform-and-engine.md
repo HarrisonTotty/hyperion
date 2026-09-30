@@ -1778,3 +1778,21 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   `Device Losses`, `Process Restarts`) are ordinary words, and `GPU` and `WebGPU` are proper names
   of the hardware and the API rather than ship abbreviations; the owner may want `GPU` on the list.
   `NONE`, `YES` and `NO` are the readings' plain words.
+
+- **Deviations in T6, as built.**
+  - The opaque handles are `readonly` interfaces with a literal `kind` and a `name`; `ComputeHandle`
+    also carries its chosen `path` and `BufferHandle` its `bytes`. They are structural, not
+    branded, so T8's adapter checks that a handle is its own when it looks one up.
+  - `Float32BlendUnavailable`, `DepthSelfSample` and `PresentationOnlyReadback` are defined in
+    `types.ts` now; `GlslShaderRefused` waits for T8's `wgslGuard.ts`. Named types were added for
+    shapes Provides writes inline: `VertexAttribute`, `TexelRect` (`readTexture`'s region) and
+    `KernelSelection` (`selectKernel`'s result).
+  - `engineBoundary.test.ts` reads the sources through `import.meta.glob` (`?raw`, eager, from the
+    app's Vite root), since the web project has no Node types. Besides T6's three rules it fails on
+    a raw `…device.createBuffer(` or `…device.createTexture(` outside `view/engine/babylon/`
+    (Design note 18). Its rules are a textual tripwire: a `"tolerance"` held in a variable passes.
+  - `CatalogueEntry` carries an optional `settings` of `CatalogueSetting`, only `"default"` until
+    R12.T7.a; absent means `default` alone.
+  - `assertNoF16Subgroups` strips comments and reads every `enable` directive, comma lists and
+    several on a line included; `highamBound` throws on a count that is not a positive integer or
+    where (n − 1)u ≥ 1.
