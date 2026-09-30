@@ -136,6 +136,7 @@ pub fn draw_with(
     hierarchy::draw_hierarchy_with(
         galaxy,
         record,
+        None,
         MultiplicityContext::Free,
         RedrawAttempt::FIRST,
         correction,

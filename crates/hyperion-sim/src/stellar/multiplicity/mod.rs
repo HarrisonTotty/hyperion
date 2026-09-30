@@ -46,7 +46,8 @@ pub(crate) use hierarchy::hand_built;
 pub use hierarchy::{
     DRAWS_PER_ATTEMPT, HierarchyNode, MAX_REDRAWS, MAX_STABILITY_REDRAWS, MultiplicityContext,
     NodeIndex, RedrawAttempt, STAR_BODY_INDEX_END, SlotKind, StarIndex, StarSlot, SystemHierarchy,
-    draw_hierarchy, draw_star_count, stripped_mark_min_mass,
+    draw_hierarchy, draw_hierarchy_of_composition, draw_star_count, draw_star_count_of_composition,
+    stripped_mark_min_mass,
 };
 pub use model::{MAX_COMPANIONS, MultiplicityModel};
 pub use positions::star_positions_at;

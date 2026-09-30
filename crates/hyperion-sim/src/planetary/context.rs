@@ -44,13 +44,15 @@ use std::fmt;
 use super::params::SATELLITE_STABILITY_FRACTION;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
+use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::galaxy::imf::MASS_LIMIT_LO;
 use crate::galaxy::placement::{
     Existence, ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
 };
 use crate::galaxy::{Galaxy, PointLy, Population};
-use crate::id::SystemId;
+use crate::id::{SystemId, SystemIdKind};
 use crate::math;
+use crate::observe::stars_of;
 use crate::orbit::{BuildOrbitError, Eccentricity, OpenOrbit};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{
@@ -553,7 +555,10 @@ impl SystemContext {
     /// The context of the system `id` of `galaxy`, resolved through plan 03.
     ///
     /// [`from_record`](Self::from_record) of the record [`resolve`] returns, so a system that
-    /// resolves always has a context, whether it is born at the epoch or not.
+    /// resolves always has a context, whether it is born at the epoch or not. A catalogue
+    /// feature's member takes its
+    /// [`MemberRecord::stars`](crate::galaxy::features::members::MemberRecord::stars), at its
+    /// cluster's composition, and its feature's interior is built once.
     ///
     /// # Errors
     ///
@@ -563,7 +568,18 @@ impl SystemContext {
     /// does not model yet (P13.T5.a), so their IDs return
     /// [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) here.
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
-        let record = resolve(galaxy, id)?;
+        // A feature member is resolved once, here, rather than through `resolve` and again for
+        // its stars: its interior is the costly part.
+        let member = match id.kind() {
+            SystemIdKind::FeatureMember(member) => {
+                Some(resolve_member(galaxy, &NoInteriorCache, member)?)
+            }
+            _ => None,
+        };
+        let record = match &member {
+            Some(member) => *member.record(),
+            None => resolve(galaxy, id)?,
+        };
         // The galactic centre's members resolve since plan 09's P09.T27, but their stars take
         // the centre's own composition and its black hole is no star: their system stage is not
         // generated yet.
@@ -573,14 +589,23 @@ impl SystemContext {
         if record.kind() != SystemKind::Stellar {
             return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
         }
-        Ok(Self::from_record(galaxy, &record))
+        let stars = match member {
+            Some(member) => member.stars(galaxy),
+            None => SystemStars::generate(galaxy, &record),
+        };
+        Ok(Self::from_stars(galaxy, &stars))
     }
 
-    /// The context of the grid system `record` of `galaxy`, for a caller that holds the record
-    /// already (a cell, a range query's hit).
+    /// The context of the system `record` of `galaxy`, for a caller that holds the record already
+    /// (a cell, a range query's hit).
     ///
-    /// - The stars are [`SystemStars::generate`]'s, primary first, and the composition theirs:
-    ///   [`draw_metallicity`](crate::stellar::system::draw_metallicity) of the record.
+    /// - The stars are [`stars_of`]'s, primary first, and the composition theirs: for a grid
+    ///   system [`SystemStars::generate`]'s, at
+    ///   [`draw_metallicity`](crate::stellar::system::draw_metallicity) of the record, and for a
+    ///   catalogue feature's member its
+    ///   [`MemberRecord::stars`](crate::galaxy::features::members::MemberRecord::stars), at its
+    ///   cluster's composition (its feature's interior is built again: a caller that has the
+    ///   member's stars already passes them to [`from_stars`](Self::from_stars)).
     /// - The hierarchy is [`SystemStars`]' own, the one
     ///   [`draw_hierarchy`](crate::stellar::multiplicity::draw_hierarchy) draws for a grid system
     ///   under [`MultiplicityContext::Free`](crate::stellar::multiplicity::MultiplicityContext::Free)
@@ -596,13 +621,14 @@ impl SystemContext {
     ///
     /// # Panics
     ///
-    /// As [`SystemStars::generate`] does, for a record of another galaxy.
+    /// As [`stars_of`] does: for a record of another galaxy, a rogue planet, and a member of the
+    /// galactic centre, whose system stage is not generated yet.
     #[must_use]
     pub fn from_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
-        Self::from_stars(galaxy, &SystemStars::generate(galaxy, record))
+        Self::from_stars(galaxy, &stars_of(galaxy, &NoInteriorCache, record))
     }
 
-    /// The context of the grid system whose stars `stars` are, for a caller that holds them
+    /// The context of the system whose stars `stars` are, for a caller that holds them
     /// already, such as a server's cache of [`SystemStars`]: [`from_record`](Self::from_record)
     /// without generating the stars again.
     ///
@@ -1422,6 +1448,50 @@ mod tests {
             SystemContext::for_system(&galaxy, unplaced),
             Err(ResolveSystemError::NoSuchSystem)
         );
+    }
+
+    /// A catalogue feature's member, one of each stellar band a feature near the Sun has, takes
+    /// the context of its member record's stars, at its cluster's composition, through
+    /// `for_system` and `from_record` alike, not a grid system's (whose metallicity draw a
+    /// member, with no density component, trips in debug builds).
+    #[test]
+    #[ignore = "slow: a full-potential galaxy and a feature interior"]
+    fn a_feature_member_s_context_is_its_member_stars() {
+        use crate::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
+        use crate::galaxy::features::members::FeatureInterior;
+        use crate::galaxy::imf::MassBand;
+        let galaxy = Galaxy::from_params(
+            Seed::new(0x1203_7000_0000_0000),
+            GalaxyParams::milky_way_like(),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        let interior =
+            FeatureCatalogue::near(&galaxy, &sun, LightYears::new(3_000.0), &NoFeatureCache)
+                .find_map(|f| FeatureInterior::of(&galaxy, &f))
+                .expect("a feature with members lies within 3,000 ly of the Sun");
+        let mut members = Vec::new();
+        let mut checked = 0;
+        for band in [MassBand::A, MassBand::C, MassBand::E] {
+            let found = interior.grid().owned_cells().find_map(|c| {
+                interior.members_in_cell(&galaxy, band, c, &mut members);
+                members.first().map(|(m, _)| *m)
+            });
+            let Some(member) = found else { continue };
+            let expected = SystemContext::from_stars(&galaxy, &member.stars(&galaxy));
+            assert_eq!(expected.composition(), member.composition());
+            assert_eq!(
+                SystemContext::for_system(&galaxy, member.record().id()),
+                Ok(expected.clone())
+            );
+            assert_eq!(
+                SystemContext::from_record(&galaxy, member.record()),
+                expected
+            );
+            checked += 1;
+        }
+        assert!(checked >= 1, "the feature has no member in bands A, C or E");
     }
 
     #[test]

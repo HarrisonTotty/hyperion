@@ -117,17 +117,28 @@ impl MemberRecord {
         }
     }
 
-    /// Its stars: [`SystemStars::generate_with`] at its composition, forced multiple for a binary
-    /// class and single otherwise.
+    /// The multiplicity context its stars are drawn under: forced multiple for a binary class and
+    /// single otherwise.
     #[must_use]
-    pub fn stars(&self, galaxy: &Galaxy) -> SystemStars {
-        let ctx = match self.class.multiplicity {
+    pub const fn multiplicity_context(&self) -> MultiplicityContext {
+        match self.class.multiplicity {
             Multiplicity::Single => MultiplicityContext::ForcedSingle,
             Multiplicity::Binary => MultiplicityContext::ForcedMultiple {
                 max_separation: None,
             },
-        };
-        SystemStars::generate_with(galaxy, &self.record, &self.composition, ctx)
+        }
+    }
+
+    /// Its stars: [`SystemStars::generate_with`] at its composition, under its
+    /// [`multiplicity_context`](Self::multiplicity_context).
+    #[must_use]
+    pub fn stars(&self, galaxy: &Galaxy) -> SystemStars {
+        SystemStars::generate_with(
+            galaxy,
+            &self.record,
+            &self.composition,
+            self.multiplicity_context(),
+        )
     }
 }
 
@@ -587,6 +598,69 @@ mod tests {
             (class.initial_mass_range.0.value()..=class.initial_mass_range.1.value())
                 .contains(&m.record().primary_initial_mass().value())
         );
+    }
+
+    /// A binary neutron-star member, a primary of 8 M☉ or more forced multiple, judges its
+    /// primary's stripped mark at its own composition and draws, not a grid system's metallicity
+    /// draw (whose debug assertion a member, with no density component, trips), and its brief
+    /// model routes it the same way (`BriefModel::of_member`).
+    #[test]
+    fn a_massive_binary_member_is_drawn_at_its_own_composition() {
+        use crate::stellar::brief::{BriefModel, BriefRoute};
+        use crate::stellar::multiplicity::draw_hierarchy_of_composition;
+        use crate::stellar::system::GRID_ATTEMPT;
+        use crate::time::UniverseTime;
+        let galaxy = galaxy();
+        let (feature, model, table) = cluster(&galaxy);
+        let class = *table
+            .classes(MassBand::E)
+            .find(|(c, _)| {
+                c.kind == ClassKind::NeutronStar && c.multiplicity == Multiplicity::Binary
+            })
+            .expect("a globular has binary neutron stars")
+            .0;
+        let position = at(&feature, [1.0, 0.0, 0.0]);
+        let mut multiple = 0;
+        for i in 0..8 {
+            let member = draw_member(
+                &galaxy,
+                &feature,
+                &model,
+                &class,
+                &position,
+                member_id(&feature, MassBand::E, i),
+                GalacticVelocity::new([0.0; 3]),
+            )
+            .expect("a neutron star is retained within the attempts");
+            let stars = member.stars(&galaxy);
+            assert_eq!(stars.primary().composition(), member.composition());
+            assert_eq!(
+                stars.hierarchy(),
+                &draw_hierarchy_of_composition(
+                    &galaxy,
+                    member.record(),
+                    member.composition(),
+                    member.multiplicity_context(),
+                    GRID_ATTEMPT,
+                )
+            );
+            multiple += usize::from(stars.star_count() > 1);
+            let brief = BriefModel::of_member(&galaxy, &member);
+            assert_eq!(brief.star_count(), stars.star_count());
+            let (fitted, exact) = (
+                brief.brief_at(UniverseTime::EPOCH).expect("formed"),
+                stars.brief_at(UniverseTime::EPOCH).expect("formed"),
+            );
+            if brief.route() == BriefRoute::Table {
+                assert_eq!(
+                    (fitted.kind(), fitted.class().to_string()),
+                    (exact.kind(), exact.class().to_string())
+                );
+            } else {
+                assert_eq!(fitted, exact);
+            }
+        }
+        assert!(multiple > 0, "no binary member kept a companion");
     }
 
     #[test]

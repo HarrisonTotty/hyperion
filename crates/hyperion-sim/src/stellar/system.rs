@@ -31,7 +31,7 @@ use crate::rng::{Mark, ObjectKey, Stream, tags};
 use crate::stellar::classify::{ClassExtras, Classification, LuminosityClass, classify};
 use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
-    MultiplicityContext, RedrawAttempt, SystemHierarchy, draw_hierarchy,
+    MultiplicityContext, RedrawAttempt, SystemHierarchy, draw_hierarchy_of_composition,
 };
 use crate::stellar::nebula::{self, PlanetaryNebula};
 use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
@@ -974,10 +974,11 @@ pub(crate) const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
 /// repeats only the last: the primary's draws ([`StarDraws::for_star`] of body 0; plan 08 makes it
 /// `for_attempt` of the record's mark attempt), its track, and the remnant stage on that track
 /// ([`StarModel`]). With no kick constraint, which is every record of this generator version, the
-/// last runs once. The companions and their orbits are plan 11's [`draw_hierarchy`], and each
-/// companion is a [`StarModel`] of its slot's initial mass, on its own body's draws, with the
-/// system's composition and age. The primary never depends on the companions: its model is plan
-/// 06's, bit for bit, whatever the hierarchy.
+/// last runs once. The companions and their orbits are plan 11's
+/// [`draw_hierarchy`](crate::stellar::multiplicity::draw_hierarchy), and each companion is a
+/// [`StarModel`] of its slot's initial mass, on its own body's draws, with the system's
+/// composition and age. The primary never depends on the companions: its model is plan 06's, bit
+/// for bit, whatever the hierarchy.
 ///
 /// Until plan 11's binary engine (P11.T4) a pair is two single stars on an orbit (ruling 33 of
 /// 2026-09-22): each star evolves alone, and no star's evolution reads its companion.
@@ -1035,7 +1036,8 @@ impl SystemStars {
     }
 
     /// The stars of the system `record` in `galaxy` under the multiplicity context `ctx` (plan 11,
-    /// P11.T2.c): its [`draw_metallicity`], the hierarchy [`draw_hierarchy`] draws for `ctx`, the
+    /// P11.T2.c): its [`draw_metallicity`], the hierarchy
+    /// [`draw_hierarchy`](crate::stellar::multiplicity::draw_hierarchy) draws for `ctx`, the
     /// primary's [`StarModel`] at the record's initial mass and age on its own draws, and each
     /// companion's at its slot's initial mass and the same age, on the draws of its own body
     /// ([`StarDraws::for_attempt`] at the system's attempt, 0 for every grid record).
@@ -1056,7 +1058,9 @@ impl SystemStars {
     /// `ctx`: [`generate_in`](Self::generate_in) without its metallicity draw, which reads the
     /// record's density component. A feature member has none and brings its cluster's
     /// composition instead (plan 09, P09.T10); its primary is read at the attempt its origin
-    /// carries. For a grid record with its own drawn composition it is `generate_in`, bit for bit.
+    /// carries, and its hierarchy judges the primary's stripped mark at `composition`
+    /// ([`draw_hierarchy_of_composition`]). For a grid record with its own drawn composition it is
+    /// `generate_in`, bit for bit.
     ///
     /// # Panics
     ///
@@ -1070,7 +1074,8 @@ impl SystemStars {
         ctx: MultiplicityContext,
     ) -> Self {
         let composition = *composition;
-        let hierarchy = draw_hierarchy(galaxy, record, ctx, GRID_ATTEMPT);
+        let hierarchy =
+            draw_hierarchy_of_composition(galaxy, record, &composition, ctx, GRID_ATTEMPT);
         let age = record.age_at_epoch();
         let mut stars = Vec::with_capacity(hierarchy.stars().len());
         stars.push(

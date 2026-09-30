@@ -35,14 +35,16 @@
 //! system.
 
 use crate::galaxy::Galaxy;
-use crate::galaxy::placement::SystemRecord;
+use crate::galaxy::features::members::{FeatureInteriorCache, MemberRecord, resolve_member};
+use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::id::SystemIdKind;
 use crate::math;
 use crate::rng::Mark;
 use crate::stellar::Composition;
 use crate::stellar::classify::ClassExtras;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts, UnitUniform};
 use crate::stellar::fates::{FateRoute, FittedFate, FittedFates, stripped_mark_matters};
-use crate::stellar::multiplicity::draw_star_count;
+use crate::stellar::multiplicity::{draw_star_count, draw_star_count_of_composition};
 use crate::stellar::remnant::NeutronStar;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::wd_spectral::white_dwarf_type;
@@ -224,6 +226,83 @@ impl BriefModel {
     pub fn with_fates(galaxy: &Galaxy, record: &SystemRecord, fates: &FittedFates<'_>) -> Self {
         let composition = draw_metallicity(galaxy, record);
         let star_count = draw_star_count(galaxy, record, grid_multiplicity(record), GRID_ATTEMPT);
+        Self::build(galaxy, record, composition, star_count, fates)
+    }
+
+    /// The brief model of the feature member `member` in `galaxy` (plan 09, P09.T10): its
+    /// [`MemberRecord::stars`]' brief by the module's routes, at the member's composition and under
+    /// its [`multiplicity_context`](MemberRecord::multiplicity_context), where
+    /// [`BriefModel::new`] would read a grid system's metallicity draw, which a member has no
+    /// density component for.
+    ///
+    /// # Panics
+    ///
+    /// As [`MemberRecord::stars`] does.
+    #[must_use]
+    pub fn of_member(galaxy: &Galaxy, member: &MemberRecord) -> Self {
+        let record = member.record();
+        let composition = *member.composition();
+        let star_count = draw_star_count_of_composition(
+            galaxy,
+            record,
+            &composition,
+            member.multiplicity_context(),
+            GRID_ATTEMPT,
+        );
+        Self::build(
+            galaxy,
+            record,
+            composition,
+            star_count,
+            &FittedFates::generator(),
+        )
+    }
+
+    /// The brief model of `record`'s system in `galaxy`, whatever placed it, as
+    /// [`stars_of`](crate::observe::stars_of) builds its stars: a grid system's
+    /// [`BriefModel::new`], a feature member's [`BriefModel::of_member`], its feature's interior
+    /// taken from `interiors`.
+    ///
+    /// # Panics
+    ///
+    /// - For a rogue planet, as [`BriefModel::new`], and for a member of the galactic centre,
+    ///   whose stars wait for plan 09's centre composition.
+    /// - If `record` is a feature member that does not resolve in `galaxy`, which only a record of
+    ///   another galaxy can be.
+    #[must_use]
+    pub fn of_record(
+        galaxy: &Galaxy,
+        interiors: &dyn FeatureInteriorCache,
+        record: &SystemRecord,
+    ) -> Self {
+        match record.origin() {
+            SystemOrigin::Grid(_) => Self::new(galaxy, record),
+            SystemOrigin::FeatureMember { .. } => {
+                let SystemIdKind::FeatureMember(id) = record.id().kind() else {
+                    unreachable!("a feature member's record is built with a member ID")
+                };
+                let member = resolve_member(galaxy, interiors, id)
+                    .expect("a feature member's record resolves in the galaxy that placed it");
+                Self::of_member(galaxy, &member)
+            }
+            SystemOrigin::CentreMember { .. } => {
+                panic!(
+                    "a galactic-centre member's stars are not generated yet: {:?}",
+                    record.id()
+                )
+            }
+        }
+    }
+
+    /// The model of `record` at `composition` with `star_count` stars, its primary by the
+    /// cheapest route `fates` allows.
+    fn build(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        composition: Composition,
+        star_count: u8,
+        fates: &FittedFates<'_>,
+    ) -> Self {
         let m0 = record.primary_initial_mass();
         let age_at_epoch = record.age_at_epoch();
         // The main sequence reads η alone of the primary's draws: its one stream, not all of
