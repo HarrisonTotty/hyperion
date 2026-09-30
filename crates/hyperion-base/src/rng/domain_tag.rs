@@ -26,9 +26,13 @@ pub enum TagScope {
 
 /// A domain tag: a registered name, its 64-bit hash, and the scope of the objects it keys.
 ///
-/// Tags exist only as the constants of the single registry, [`tags`](super::tags); there is no
-/// public constructor, so every tag in use is in [`tags::ALL`](super::tags::ALL) and the collision
-/// check covers it.
+/// Tags exist only as the constants of a registry declared with
+/// [`domain_tags!`](crate::domain_tags): this crate's [`tags`](super::tags), the surface crate's
+/// and the sim's. The constructor is for that macro alone (it is public, and hidden, only because
+/// the macro expands in other crates), so every tag a generator opens is in one registry's `ALL`,
+/// and the sim's assertion that the three are disjoint ([`assert_registries_disjoint`]) covers it.
+/// The one exception is a test that needs a tag outside every registry, to vary the tag, which
+/// mints one directly and never opens a generator's stream with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DomainTag {
     name: &'static str,
@@ -37,10 +41,15 @@ pub struct DomainTag {
 }
 
 impl DomainTag {
-    /// A registry entry. Only `domain_tags!` calls this, and it is visible only inside `rng`, so
-    /// no other module of the crate can mint a tag that bypasses the registry.
+    /// A registry entry. Only [`domain_tags!`](crate::domain_tags) calls this.
+    ///
+    /// It is public because the macro's expansion calls it from the crates that declare a
+    /// registry, and hidden from the documentation because nothing else may: a tag minted outside
+    /// a registry would escape the collision checks. Tests that need a tag outside every registry,
+    /// to vary it, are the one exception, and never open a generator's stream with it.
+    #[doc(hidden)]
     #[must_use]
-    pub(super) const fn registered(name: &'static str, scope: TagScope) -> Self {
+    pub const fn registered(name: &'static str, scope: TagScope) -> Self {
         Self {
             name,
             hash: hash_tag_name(name),
@@ -82,7 +91,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::rng::hash_tag_name;
+/// use hyperion_base::rng::hash_tag_name;
 ///
 /// assert_eq!(hash_tag_name("star.mass"), 0x76f0_46fe_b1fe_aee9);
 /// ```
@@ -150,22 +159,22 @@ const fn same_str(a: &str, b: &str) -> bool {
 /// compilation:
 ///
 /// ```
-/// const _: () = hyperion_sim::rng::assert_tag_names(&["star.mass", "planet.orbits"]);
+/// const _: () = hyperion_base::rng::assert_tag_names(&["star.mass", "planet.orbits"]);
 /// ```
 ///
 /// ```compile_fail,E0080
 /// // A duplicate name.
-/// const _: () = hyperion_sim::rng::assert_tag_names(&["star.mass", "star.mass"]);
+/// const _: () = hyperion_base::rng::assert_tag_names(&["star.mass", "star.mass"]);
 /// ```
 ///
 /// ```compile_fail,E0080
 /// // A malformed name: upper case.
-/// const _: () = hyperion_sim::rng::assert_tag_names(&["Star.mass"]);
+/// const _: () = hyperion_base::rng::assert_tag_names(&["Star.mass"]);
 /// ```
 ///
 /// ```compile_fail,E0080
 /// // A malformed name: one segment.
-/// const _: () = hyperion_sim::rng::assert_tag_names(&["mass"]);
+/// const _: () = hyperion_base::rng::assert_tag_names(&["mass"]);
 /// ```
 ///
 /// # Panics
@@ -189,11 +198,63 @@ pub const fn assert_tag_names(names: &[&str]) {
     }
 }
 
-/// Declares the registry of domain tags. Used once, in `rng/tags.rs`.
+/// Panics if two registries share a tag name or a tag hash.
+///
+/// Each registry asserts its own names with [`assert_tag_names`]; this covers the pairs across
+/// them, so that tags declared in different registries (the foundation's, the surface crate's and
+/// the sim's) still never alias a stream. Called in a `const`, a clash fails compilation:
+///
+/// ```
+/// use hyperion_base::rng::{assert_registries_disjoint, tags};
+/// const _: () = assert_registries_disjoint(&[&[tags::SELFTEST_STREAM], &[]]);
+/// ```
+///
+/// ```compile_fail,E0080
+/// use hyperion_base::rng::{assert_registries_disjoint, tags};
+/// const _: () = assert_registries_disjoint(&[&[tags::SELFTEST_STREAM], &[tags::SELFTEST_STREAM]]);
+/// ```
+///
+/// # Panics
+///
+/// On the first name or hash found in two registries.
+pub const fn assert_registries_disjoint(registries: &[&[DomainTag]]) {
+    let mut a = 0;
+    while a < registries.len() {
+        let mut b = a + 1;
+        while b < registries.len() {
+            let mut i = 0;
+            while i < registries[a].len() {
+                let tag = registries[a][i];
+                let mut j = 0;
+                while j < registries[b].len() {
+                    let other = registries[b][j];
+                    assert!(
+                        !same_str(tag.name, other.name),
+                        "a domain tag name is in two registries"
+                    );
+                    assert!(
+                        tag.hash != other.hash,
+                        "domain tag hash collision across registries"
+                    );
+                    j += 1;
+                }
+                i += 1;
+            }
+            b += 1;
+        }
+        a += 1;
+    }
+}
+
+/// Declares a registry of domain tags, inside a module of its own.
 ///
 /// Each entry reads `CONST_NAME: Scope = "tag.name";` and becomes a `pub const` [`DomainTag`].
 /// The macro also emits `ALL`, every tag in registry order, and a `const` assertion that fails
-/// compilation on a malformed name, a duplicate name or a hash collision.
+/// compilation on a malformed name, a duplicate name or a hash collision within it. There are
+/// three registries, one per crate that opens streams: `hyperion_base::rng::tags`,
+/// `hyperion_surface::tags` and the sim's `rng::tags`; the sim asserts them disjoint with
+/// [`assert_registries_disjoint`](crate::rng::assert_registries_disjoint).
+#[macro_export]
 macro_rules! domain_tags {
     ($( $(#[$meta:meta])* $name:ident : $scope:ident = $text:literal ; )*) => {
         $(
@@ -208,8 +269,6 @@ macro_rules! domain_tags {
         const _: () = $crate::rng::assert_tag_names(&[$($text),*]);
     };
 }
-
-pub(super) use domain_tags;
 
 #[cfg(test)]
 mod tests {
@@ -254,14 +313,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "duplicate domain tag name")]
-    fn a_duplicate_name_panics() {
-        assert_tag_names(&["star.mass", "moon.count", "star.mass"]);
-    }
-
-    #[test]
-    #[should_panic(expected = "must match")]
-    fn a_malformed_name_panics() {
-        assert_tag_names(&["star.mass", "Moon.count"]);
+    fn disjoint_registries_pass() {
+        let a = DomainTag::registered("selftest.a", TagScope::SelfTest);
+        let b = DomainTag::registered("selftest.b", TagScope::SelfTest);
+        assert_registries_disjoint(&[&[a], &[b], &[]]);
     }
 }

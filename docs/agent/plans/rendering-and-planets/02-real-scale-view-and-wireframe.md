@@ -71,7 +71,8 @@ In scope:
 - The kept precision and frame-change scenes, their automatic tests and their by-hand records.
 - Drafts of all nine items of "What the guide must gain" and their nomenclature entries.
 - The move of `vec3`, `frame` and the direction conventions out of `spatial/`.
-- The wireframe's own low setting and its benchmark at 1080p on the UHD 620.
+- The wireframe's own low setting and its benchmark at 1080p on the development machine (RTX 3080)
+  and, by the owner, on the UHD 620.
 
 Non-goals:
 
@@ -571,7 +572,8 @@ the call sites here change.
     9 ms of GPU time once terrain arrives (brainstorm, "Two deployments, one scene"); without
     terrain this plan's wireframe must stay under 4 ms there, the lower end of the budget's "Station
     wireframe view" row (brainstorm, "Performance budget": under 3 ms at 1080p on the discrete GPU,
-    4–9 ms on the UHD 620), and under 3 ms on a discrete GPU when one is measured. Its low setting
+    4–9 ms on the UHD 620), and under 3 ms on a discrete GPU, measured on the development machine's
+    RTX 3080. Its low setting
     caps star sprites at 2,000 by flux, draws graticules at 30° only, and analytic line coverage
     stays on, since MSAA would cost more than the lines. Both settings are measured and recorded
     (R02.T18).
@@ -1085,7 +1087,8 @@ selector gains the server's scene for the open system, and each local view's pos
 
 ### R02.T18 Recorded runs, by hand
 
-On the UHD 620 (and on a discrete GPU when one is available), with the settings recorded:
+On the development machine (RTX 3080), and on the UHD 620 by the owner, with the settings recorded
+(the 4 ms target of Design note 21 is the UHD 620's, the 3 ms the discrete GPU's):
 
 - **The precision scene.** The camera translates and rotates along its path: no depth fighting
   between plate, moon and planet, no visible jitter at 1 m, 10⁸ m and 1 au. Recorded as pass or fail
