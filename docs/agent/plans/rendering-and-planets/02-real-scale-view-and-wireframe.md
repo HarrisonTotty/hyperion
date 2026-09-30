@@ -1251,3 +1251,39 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   and equal places go by `id`. The occluder test measures the gap along each ray as a fraction of
   the graticule point's own distance (at the sub-camera point it is 4 × 10⁻⁶ d exactly).
   "Transparent layers write no depth" stays a documented rule for the pipelines (R02.T14).
+- **Deviations in R02.T9, as built.** `CameraState` also carries `look` (`SeatLook`: `forward`,
+  `aft`, `target`), `fovDeg` (on `FOV_STEPS_DEG`, stepped by `stepFov`), `free` (`FreeFlight`: rates
+  in camera axes, `rateStep`, the time left after the last whole tick) and `move` (`EasedMove`,
+  blended by `displayPose`, run out by `advanceEasedMove`). `free` and `move` are a local view's
+  integration state; whether R07's server-held main-screen camera should carry them, or they move
+  to a local wrapper, is left to R07 (the brainstorm's "one shape in both deployments"). The camera
+  reads the scene through `CameraScene` (`system`, `tidalRadiusM`, `origins`, `frameBodies`,
+  `targets`, `ownShip: OwnShip | null`, `defaultPose`), which T11's `ViewScene` and T17 supply;
+  `OwnShip` holds its hull in the camera's axes (+x starboard, +y dorsal, −z forward), and the chase
+  offset is `CHASE_OFFSET_HULL_LENGTHS` (0, 0.5, 3) hull lengths. `cutTo(state, to, scene,
+{ easedMoves, reducedMotion })` takes a `CutDestination` (`preset`, `target` or `look`) and
+  returns a `CutResult` whose `refused` reason is `no_own_ship`; a target makes the seat look at it
+  and turns a free camera in place, and a craft target holds a free camera in that craft's frame.
+  `presetPose`, `followPreset` (seat and chase recomputed from the ship's attitude each frame),
+  `sceneFrameFor`, `offeredPresets`, `nextTarget`, `targetPosition`, `rebaseState` and
+  `onSystemChange` are exported. `onSystemChange` returns only a **free** camera to chase (or to the
+  default pose), as the brainstorm has it; seat and chase, held in the ship's `craft` frame, stay,
+  where Design note 7's shorter wording would move them too. `stepFreeCamera(state, input, dtS,
+reducedMotion, scene)` returns `{ state, change }`: it integrates whole ticks of
+  `FREE_CAMERA_TICK_S` = 1/1440 s (which divides the 60 Hz and 144 Hz frames, so the two paths are
+  the same ticks), carries the remainder, caps a frame at 0.25 s, ramps and damps by one exponential
+  approach with τ = 0.25 s (removed under reduced motion), rests below 10⁻⁶ of the rate, clamps once
+  per frame in the system frame and re-selects the frame by `sceneFrameFor` (a camera held about a
+  craft keeps that frame; detaching from a craft seeds the rule's hysteresis with the craft's body
+  frame). The rate is 10^(step ÷ 2) m/s from step 0 (1 m/s), starting at step 6, up to a tenth of
+  the tidal diameter a second (0.1 ly/s in a galactic scene); rotation is 45°/s per axis. These
+  figures are choices of this plan. Keys (`keys.ts`): `1` `2` `3` seat, chase, free; `]` and `[`
+  targets; `+`/`=` narrower and `-` wider; on the focused canvas W/S, A/D, R/F translate, the arrows
+  pitch and yaw, Q/E roll, PageUp/PageDown step the rate; `flightKeyReleased` honours a release
+  whatever the modifiers, and the display clears the held set on blur (T15). Beyond the task's
+  files: `quaternion.ts` gains `quaternionFromRows`, `lookAlong` and `slerp`; `relative.ts` exports
+  `frameOrigin`; `test/viewFixtures.ts` starts with the camera fixtures (`aCameraScene`,
+  `aCameraPose`, `anOwnShip`); `vitest.config.mts` lists `keys.test.ts` as a DOM test.
+- **R02.T8.b's `rebase` built early, with R02.T9.** T9.b re-selects the frame every step, so
+  `view/camera/rebase.ts` (`rebase`, `FrameChange { from, to }`, `sameCameraFrame`) landed with T9;
+  `change` is `null` where the frame is unchanged. T8.b adds its scene tests.

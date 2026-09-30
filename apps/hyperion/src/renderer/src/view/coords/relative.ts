@@ -10,7 +10,7 @@ export interface CameraOrigins extends FrameOrigins {
 }
 
 /** The position of `frame`'s origin: the point a camera's `positionM` is measured from. */
-function frameOrigin(frame: CameraFrame, origins: CameraOrigins): ViewPosition {
+export function frameOrigin(frame: CameraFrame, origins: CameraOrigins): ViewPosition {
   const zero = { x: 0, y: 0, z: 0 };
   let origin: ViewPosition;
   switch (frame.kind) {
