@@ -278,7 +278,7 @@ otherwise.
    a stream holds 2⁴⁹ words. The generator version is not folded into the key, so a version bump
    moves only what its code change moves.
 3. **A tag fixes what its counter word names.** Every tag is declared with a `TagScope`, and
-   `Stream::open` debug-asserts that the `ObjectKey`'s scope matches. This is what makes it safe for
+   `Stream::open` asserts, in release builds too, that the `ObjectKey`'s scope matches. This is what makes it safe for
    a cell's word (an ID with the index zeroed) to equal the ID of that cell's candidate 0, and for
    body index 0 to share `sub = 0` with its system: the two are never opened under the same tag.
 4. **One tag registry.** The interface sketch names a free-standing `domain_tag!`. The collision
@@ -879,8 +879,8 @@ Tests: `word_at(n)` equals the n-th `next_u64` for n up to 1,000; two streams th
 of seed, tag, object word or `sub` share no word among their first 1,000 (checked for adjacent
 cells, consecutive candidates, consecutive body indices: the structured inputs the brainstorm
 names); `sub` and `block` do not alias (body 1, block 0 differs from body 0, block 2⁴⁸ − 1's
-neighbour: assert on the counter words through a private accessor); a scope mismatch panics in debug
-(`#[should_panic(expected = "scope")]`, under `cfg(debug_assertions)`); golden
+neighbour: assert on the counter words through a private accessor); a scope mismatch panics, in
+release builds too (`#[should_panic(expected = "scope")]`); golden
 `tests/golden/rng/streams.golden`: the first eight words for twenty (seed, tag, key) triples.
 Benchmark: open a stream and draw four words (a thinning candidate's budget), target under 50 ns.
 
@@ -1075,7 +1075,9 @@ Acceptance: `just ci` green; deleting any golden file makes `just test` fail wit
 message; changing one Threefry rotation constant fails the known-answer test and every `rng` golden
 (check by hand once).
 
-### P01.T12 A second architecture in CI
+### P01.T12 A second architecture in CI (dropped)
+
+Dropped by the owner on 2026-09-30: the project runs no CI jobs. See the as-built note.
 
 Build: a CI job `rust-aarch64` on `ubuntu-24.04-arm` that runs
 `cargo test -p hyperion-sim -p hyperion-testkit` and `just test-slow`. The goldens, which include
@@ -1090,7 +1092,8 @@ Acceptance: both Rust jobs green on a pull request.
 
 The plan is done when:
 
-- `just ci` is green, including `just test-slow`, on both CI architectures.
+- `just ci` is green, including `just test-slow`, and `just test-wasm` passes by hand (T12's CI
+  jobs were dropped).
 - Each claim is pinned by a named test:
 
 | Claim                                                   | Pinned by                                                   |
@@ -1182,6 +1185,86 @@ The designation format and the text forms are not part of the generator version.
   plan 06's concern (evolution is slow; fast phenomena take the clock time directly), recorded here
   because `Span::as_seconds_f64` invites the mistake.
 - **The AArch64 runner** may not be available to a private repository; T12 names the fallback.
+- **Deviations in T1–T5, as built.** `coords::Frame` needs `SystemId` and `BodyId`, so it lands with
+  P01.T6.e, not T5.b; `powi` equals repeated multiplication bit for bit only where the powers are
+  exact (squaring rounds differently from x⁴ on), so its fixed order is pinned instead; the T5.a
+  4 m round trip holds for points reached by a translation, while for unrelated points the `f64`
+  displacement adds its own rounding at the separation (128 m spacing at 100 ly); fused
+  multiply-adds go through `math::mul_add` (`libm::fma`), and `f64::mul_add` is disallowed, because
+  without hardware FMA it calls the platform's `fma`; T3's acceptance command is
+  `cargo test -p hyperion-sim -- units version`. `math` holds two hand-written functions besides
+  the wrappers:
+  - `normal_quantile`;
+  - since ruling 77.1 of 2026-09-22, `powf_positive(x, y)`, which is exp(y · ln x) on the pinned
+    `libm`, for finite positive x only, within 2⁻⁵² (1 + 1.5 |y ln x|) of `powf`. Its use is
+    limited to `stellar::sse`'s positive-base powers (plan 06, T10's speed note), because its error
+    grows with |y ln x| and no other caller has been checked against that.
+- **Deviations in T6 and T7.b, as built.** `id/reserved.rs` is split into `reserved`, `nested`,
+  `global`, `catalogue` and `system`; the builders and parsers need
+  `BuildSystemIdError::FieldOutOfRange` and `NotCanonical`, `DecodeSystemIdError::BandOutOfRange`
+  (a stream's band 7), `BuildEventBinError`, `ParseEventWordError` and `ConvertDesignationError`,
+  because `Designation` also names bodies (the ` /<n>` suffix) and so
+  `SystemId::try_from(&Designation)` can fail; `cell_word` zeroes `[27:0]` (index and member) of a
+  catalogue system and returns a pinned ID unchanged; `domain_tags!` is private to `rng`, so the
+  `compile_fail` doctests call `rng::assert_tag_names`, which it expands to.
+- **Deviations in T7 and T8, as built.** Tags of scope `SelfTest` accept a key of any scope,
+  because the goldens and T11 open `selftest.stream` with every kind of key; the Poisson inversion
+  has no 256-term cap and stops instead at the first term too small to move the running sum (the
+  cap was reachable: rounding leaves the sum at 1 − 3 × 2⁻⁵³ at a mean of 9.99, so the largest
+  uniforms ran to 256; now they stop at 47, moving at most a few × 2⁻⁵³ of probability), and it sums
+  its first three terms before comparing, which gives the same answer and meets the 40 ns target;
+  PTRS tests k's sign before the squeeze, which changes no result because the squeeze region has k
+  ≥ 4 at a mean of 10; `uniform_in` lies in the closed `[lo, hi]` (the largest uniforms round to `hi`
+  whenever `(hi − lo) × 2⁻⁵³` is at most half a unit in the last place of `hi`, not only for
+  narrow ranges), which plan 02's closed parameter ranges accept; the piecewise samplers pick
+  segments with a private copy of Design note 7's rule, which T9 replaces with `Thresholds` without
+  moving a draw; `PiecewiseLinear` takes its second word through `uniform_open`, so a zero density
+  at a knot never gives 0 ÷ 0; `POISSON_MAX_MEAN` (2³¹) is exported.
+- **Deviations in T9–T11, as built.** A body's event key is block 1 of its step-1 counter and a
+  system's is block 0. With `(system's raw ID, sub << 48)` alone, body 0 got its system's key under
+  the same event tag, because event tags, unlike domain tags, carry no subject scope, and the
+  brainstorm gives different IDs different streams. Added beyond the sketch: `Mark::from_word`, the
+  getters `Mark::get`, `Threshold::get`, `Thresholds::{as_slice, len, is_empty}` and
+  `EventKey::words`. `pick_weighted` debug-checks the whole total even after an early pick, and
+  weights are debug-checked as non-negative. In release `from_probability` clamps, and a NaN gives
+  `NEVER`. The decision golden is its own file, `rng/decisions.golden`, so `rng/samplers.golden`
+  stayed byte-identical through the piecewise samplers' swap to `Thresholds`, which shows the swap
+  moved nothing. `every_golden_file_carries_the_current_version` checks the header of every golden
+  file in the crate, whichever plan's test writes it. Changing a Threefry rotation fails the
+  known-answer tests and every golden drawn through Threefry (`streams`, `samplers`, `decisions`,
+  `events`). `rng/tags.golden` pins only FNV hashes, so it rightly still passes.
+- **T12 is dropped (the owner, 2026-09-30).** The project runs no CI jobs and this plan does not
+  need them; `ci.yml` was deleted in `751bad8` and is not coming back. What stays is the local
+  check: `just test-wasm` runs the tests, doctests and slow tests of `hyperion-sim` and
+  `hyperion-testkit` under wasmtime on an x86-64 host, which catches output that depends on a
+  32-bit `usize`. libtest cannot unwind on wasm, so it reports every `#[should_panic]` test as
+  ignored there; the x86-64 run covers them. Goldens are read at host paths fixed at compile time,
+  so the runner preopens the repository at that same path with `--dir`. Nothing checks AArch64
+  (FMA contraction, platform code paths); the goldens' portability across architectures is
+  argued, not tested. Acceptance that other plans tie to "both CI architectures" means x86-64
+  `just ci` plus `just test-wasm` run by hand (as ruling 146.5 already set for P10.T2.c).
+- **wasm: not pursued this round (2026-09-30, at v15).** At b56395b `just test-wasm` failed: a
+  `catch_unwind` test aborted the sim's lib tests, three test files and one doctest spawned threads,
+  and a test's quantile helper overflowed a 32-bit `usize` (in the test, not in generation). All of
+  these are fixed. The fast pass, the lib's slow tests and the slow tests of `binary_classes` through
+  `galaxy_potential` then passed under wasmtime, all goldens bit for bit. The later slow binaries,
+  from `galaxy_sweeps` on through the testkit's, were not run and still need a verdict.
 - **Statistical thresholds.** α = 10⁻³ over a few dozen fixed-seed tests gives a few per cent chance
   that some seed needs changing at the first run. Design note 28 says how that is handled without
   weakening a test.
+- **T1.e's CI wiring, changed since it was built (2026-09-22).** `ci.yml` is removed: the
+  repository still has no remote, so nothing ran it, and the three-architecture claim above rests on
+  local runs either way. `ci` therefore no longer gains `test-slow`. It is the commit gate
+  (`fmt-check check lint test gen-protocol-check`, about 3 minutes) and the new `ci-slow` is
+  `ci test-slow`, because by plan 02's tasks `test-slow` had reached 19 minutes of the 22 that `ci`
+  took, and it is not what a commit needs to wait for. Measured warm: `test-slow` 1,118 s, of which
+  `galaxy_sweeps` 423 s, `galaxy_bounds` 370 s, `sampler_statistics` 158 s and the monotone-phase
+  roots 91 s. Restoring a workflow means running `just ci-slow`, `just test-wasm` and the AArch64
+  tests as its steps.
+- **The sim is built at `opt-level = 2` for tests (2026-09-22).** Unoptimised, the fast suite spent
+  about 120 s in its test binaries, most of `just test`'s 175 s; the same tests take about 65 s at
+  `opt-level = 2`, for about 18 s more on a build from scratch and no measurable change to an
+  incremental one. The whole fast suite, all 16 goldens included, passes bit for bit under
+  `slow-test` (opt-level 3, thin LTO), which is what makes the change safe: the pinned `libm` and
+  `math`'s fixed evaluation orders leave generated output independent of the optimiser. Debug
+  assertions and overflow checks stay on, so the bound checks still fire.

@@ -1,0 +1,14 @@
+# Stellar encounter rates of the Galaxy's globular clusters (plan 15, P15.T8.c; Design note 12),
+# reduced by `reduce.py` from VizieR's export of the catalogue (git-ignored,
+# `data/cache/bahramian_2013/J_ApJ_766_136.tsv`) and committed with the citation.
+dataset = "bahramian_2013"
+class = "committed"
+citation = "Bahramian, Heinke, Sivakoff and Gladstone (2013), ApJ 766, 136: Stellar Encounter Rate in Galactic Globular Clusters, the table of Γ normalised to 47 Tucanae's 1,000 (VizieR J/ApJ/766/136), 144 clusters"
+url = "https://vizier.cds.unistra.fr/viz-bin/asu-tsv?-source=J/ApJ/766/136&-out.max=unlimited&-out.all"
+retrieved = "2026-09-30"
+release = "VizieR J/ApJ/766/136 as exported on the retrieval date (sha256 e5cd8574a667ce54e0395544081b3d8a2141eb56c141fb30461f5fa29c76bbeb; the export embeds its request date), reduced by reduce.py"
+licence = "VizieR's rules of usage (cds.unistra.fr/vizier-org/licences_vizier.html): \"The data retrieved with VizieR are free of usage in a scientific context; however, ... the original authors and publication references including the publisher have to be explicitely cited\"; commercial use depends on the data's origin (here an AAS journal). The reduced numbers are committed as facts with the citation (doi:10.26093/cds/vizier.17660136)"
+
+[[files]]
+name = "gamma.csv"
+sha256 = "c5610ceffc0bdd883a63cb54e65cceb464b63e911065ae0bfe928857e7d891ca"

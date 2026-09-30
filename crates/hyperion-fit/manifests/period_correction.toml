@@ -1,0 +1,7 @@
+# The direct companions' period correction (plan 11, ruling 81.3): twelve iterations over 20,000
+# systems at each row's mass, the fit the sim's committed table is made by.
+task = "period_correction"
+
+[params]
+iterations = 12
+sample = 20_000

@@ -1,0 +1,9 @@
+# The black holes' loss from clusters (plan 15, P15.T8.a): Breen and Heggie's (2013) law as
+# parametrised by Antonini and Gieles (2020), fitted to the CMC Cluster Catalog's models at 14 Gyr
+# (Kremer et al. 2020, Table A1), each placed in the sim's `ClusterModel` in the Milky Way of the
+# seed; the Baumgardt–Hilker catalogue is plan 09's test copy.
+task = "cluster_bh"
+datasets = ["cmc"]
+
+[params]
+seed = 0x0918_0001

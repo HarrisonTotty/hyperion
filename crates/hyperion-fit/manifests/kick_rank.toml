@@ -1,0 +1,9 @@
+# The kick law's rank table as committed (plan 06, P06.T19.b): 10⁶ reference scores. Its
+# acceptance figures come from 10⁵ fresh scores of another seed.
+task = "kick_rank"
+
+[params]
+draws = 1_000_000
+seed = 0x0619_b000_0000_0000
+acceptance_draws = 100_000
+acceptance_seed = 0x0619_b000_0000_0001

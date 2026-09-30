@@ -1,0 +1,10 @@
+# The mass-segregation exponent η (plan 15, P15.T8.b; ruling 139.2): multimass King models at the
+# velocity-scale exponent δ, over central potentials W₀ (of the turn-off's class) that span
+# concentrations 0.7–2.3 and the depleted slopes over 0.2–0.8 M☉ of the Baumgardt–Hilker
+# catalogue's range (−0.46 − 0.79 (log₁₀ t_rh − 9) for t_rh 10⁸–10¹⁰ yr, held at or above −1.5).
+task = "equipartition"
+
+[params]
+delta = 0.5
+central_potentials = [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+slopes = [-1.5, -1.0, -0.5, 0.0, 0.5]

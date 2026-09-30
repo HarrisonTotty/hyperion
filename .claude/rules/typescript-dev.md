@@ -168,12 +168,3 @@ never hand-format or argue with its output.
 - Tests are deterministic and independent: no real network, no real clock, no shared mutable
   module state, no dependence on order.
 - Do not use snapshot tests for components. Assert on specific roles and text.
-
-## Sources
-
-Distilled from the [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html),
-the [React documentation](https://react.dev/reference/rules), the
-[Electron security guide](https://www.electronjs.org/docs/latest/tutorial/security),
-[TSDoc](https://tsdoc.org/), [Vitest](https://vitest.dev/guide/mocking.html) and
-[Testing Library](https://testing-library.com/docs/queries/about/). Consult them when a case is
-not covered here.

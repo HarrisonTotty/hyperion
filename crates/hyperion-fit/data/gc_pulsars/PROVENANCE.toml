@@ -1,0 +1,15 @@
+# The census of pulsars in globular clusters (plan 15, P15.T8.c; Design note 12): the clusters
+# with a known pulsar, their distance and count, reduced by `reduce.py` from Freire's page
+# (git-ignored, `data/cache/gc_pulsars/GCpsr.html`) and committed as facts with the citation. A
+# cluster not listed has no known pulsar.
+dataset = "gc_pulsars"
+class = "committed"
+citation = "P. C. C. Freire, Pulsars in globular clusters (MPIfR Bonn), the globular cluster table: 46 clusters and 369 pulsars on the retrieval date; distances from Harris (1996, 2010 edition), as the page gives them"
+url = "https://www3.mpifr-bonn.mpg.de/staff/pfreire/GCpsr.html"
+retrieved = "2026-09-30"
+release = "the page as served on the retrieval date (sha256 1f5eb9ecd2c1d4c79047e622415640831282909773d24acbacceababca601514), reduced by reduce.py"
+licence = "none stated; the page asks that the references it gives for each pulsar be cited. Only counts and distances, facts, are committed"
+
+[[files]]
+name = "counts.csv"
+sha256 = "9e85fe7d2f6529cd9eff6abdd31c9d5254e739b39c836a386f94976b25c3437c"

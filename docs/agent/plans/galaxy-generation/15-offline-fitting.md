@@ -147,9 +147,9 @@ must fill. P15.T2 checks each against the code as built, and the owner's code wi
 
 - `just fit <task>`: `cargo run --release -p hyperion-fit -- run <task> --since <current>`, writing
   into the sim's `tables/` and updating `crates/hyperion-fit/tables.lock`.
-- `just fit-check`: `cargo run -p hyperion-fit -- check`. Part of `just ci`, and a step of the
-  `rust` job in `.github/workflows/ci.yml`. It reruns no fit. Its cost is the fingerprints' probes,
-  a few seconds at most, since the displaced table's probes build plan 02's full potential once.
+- `just fit-check`: `cargo run -p hyperion-fit -- check`. Part of `just ci`. It reruns no fit. Its
+  cost is the fingerprints' probes, a few seconds at most, since the displaced table's probes build
+  plan 02's full potential once.
 - `just test-slow` additionally runs `hyperion-fit check --rerun-fast`.
 
 ## Consumes
@@ -327,6 +327,45 @@ with `toml`); `list_prints_registered_tasks`.
 **Acceptance.** `just ci` green; `cargo run -p hyperion-fit -- list` prints one row, `mge`;
 `tables/mge.rs` is untouched (`git diff --exit-code` on it).
 
+**As built (round 9, lane `fit15`).**
+
+- `main.rs` parses with `clap` (`cli::Cli`) and calls `cli::run`. Plan 02's hand-written
+  `Command` enum and `Command::parse` are gone. `RunFitError` is a `thiserror` enum in `lib.rs`
+  with the variants `UnknownTask`, `Manifest`, `Task(RunTaskError)`, `Emit(EmitTableError)`,
+  `Check(CheckReport)`, `OtherManifestNeedsOut`, `DataNeedsOneDataset` and `Output`. Command-line
+  errors exit with 2, everything else with 1.
+- `FitTask` has the sketched methods plus `items()`, the item names the smoke run checks, and
+  the supertraits `Sync + Debug`. `registry()` returns `&'static [&'static dyn FitTask]`, the
+  static `task::REGISTRY` in name order, and `task::find(name)` looks one up. Five tasks are
+  registered, so `list` prints five rows: `chabrier` (fast, provisional, P15.T4.a),
+  `giant_cooling` (fast), `kick_rank` (slow, provisional), `mge` (fast, provisional) and
+  `wd_cooling` (fast).
+- `mge` is registered at revision 1, not the plan's 0, which keeps the "version 1" that P02.T12.b's
+  refit gave its header. Its `fit()` is unchanged. Its `render()` now returns the table's contents, a
+  `RustTable`, and no longer a `String`. `mge_table_is_reproduced` compares
+  `pipeline::rerender`, the bytes `run mge --since <current>` would write, with the committed
+  file.
+- `run` has two options beyond the sketch. `--data DIR` keeps `wd_cooling`'s option: it reads
+  the task's one dataset from DIR. `--manifest PATH` runs another manifest and, like `--smoke`,
+  needs `--out`: a committed table is always made from `manifests/<task>.toml`. P15.T5.a's
+  production run uses it.
+- `parallel::map_reduce_chunks(n_items, chunk, threads, map, reduce)`: `map` receives a chunk's
+  item range, and `reduce` is an `FnMut(T)` called in index order. Chunks are mapped in waves of
+  eight per thread. It returns `Result<(), BuildThreadPoolError>`.
+- `pipeline.rs` (not in the plan) holds what `cli` and `check` share: `prepare` runs a task and
+  builds its header, `rerender` works out what a run would write without writing, and the
+  manifest paths.
+- Dependencies added: `rayon` 1.11, `sha2` 0.10, `thiserror` 2 and `toml` 1.1; `clap` and
+  `serde` were already there. `serde_json` and `csv` are not added, because nothing reads JSON
+  or CSV yet.
+- **Adding a task** (plan 06's `stellar_fates`, which the `briefs` lane adds, for one) touches none of the
+  toolchain. Add `tasks/<name>.rs` with a unit struct implementing `FitTask`, whose `run` reads
+  its manifest's `[params]` and returns `TableItem`s. Add its `pub mod` line and one
+  `task::REGISTRY` entry, in name order, and `manifests/<name>.toml`, plus `<name>.smoke.toml`
+  if the task is slow. Then `just fit <name>` writes the table, its lock entry and its
+  `MANIFEST` row, and you add the table's `pub mod` line to the sim's `tables/mod.rs`.
+  `task.rs`'s module documentation says the same.
+
 ### P15.T2 Emitter, manifests, lock file and the staleness check
 
 **Build.**
@@ -349,11 +388,11 @@ with `toml`); `list_prints_registered_tasks`.
   so that `mge_table_is_reproduced` keeps passing. Each table's items are checked against the format
   its task group states here, and a difference is settled before any fit.
 - `check` with every rule of Design note 8, and `--rerun-fast`.
-- `justfile`: `fit-check`, added to `ci`; `test-slow` gains `--rerun-fast`. `ci.yml`: a
-  `just fit-check` step in the `rust` job. `.gitignore`: `crates/hyperion-fit/data/cache/`.
+- `justfile`: `fit-check`, added to `ci`; `test-slow` gains `--rerun-fast`. `.gitignore`:
+  `crates/hyperion-fit/data/cache/`.
 
 **Files.** `crates/hyperion-fit/src/{emit,manifest,cli}.rs`, `crates/hyperion-fit/tables.lock`,
-`crates/hyperion-sim/src/tables/mod.rs`, `justfile`, `.github/workflows/ci.yml`, `.gitignore`.
+`crates/hyperion-sim/src/tables/mod.rs`, `justfile`, `.gitignore`.
 
 **Tests.** `emitted_literals_round_trip` (strip separators, parse, compare bits, over 10⁴ values
 including subnormals and powers of ten); `emitted_file_passes_header_grammar`;
@@ -365,6 +404,72 @@ temporary directory with a toy task; `emitter_refuses_changed_body_without_new_s
 **Acceptance.** `just ci` green including `just fit-check`. The first real table (P15.T3) is the
 proof that emitted source passes `cargo fmt --check` and Clippy pedantic; until then a toy table is
 checked once by hand in the pull request.
+
+**As built (round 9, lane `fit15`).**
+
+- **The header** follows Design note 5, with three details.
+  - `data` entries are in backticks (`` `montreal_cooling@66d339259a79` ``), because Clippy's
+    `doc_markdown` rejects a bare snake-case identifier in a doc comment.
+  - A long value continues on lines indented by two more spaces.
+  - A provisional table made by a task keeps every line and says both who made it and why it is
+    provisional: `@provisional by hyperion-fit 0.1.0, task `mge` revision 1 (P02.T6.a)`.
+- **The body** is everything after the leading `//!` lines. Its SHA-256 is the lock file's body
+  hash, so rewriting a header to the grammar leaves the body, and the table, unchanged.
+- **Tables written before the emitter.** `mge`, `giant_cooling`, `wd_cooling` and `kick_rank` keep
+  their bodies verbatim as `TableItem::Source`. Their rustfmt-shaped layout (no
+  `#[rustfmt::skip]`, and `MASS_NODES` packed several to a line) cannot come out of the generic
+  items without changing bytes. New tables use the structured items. `chabrier` is the first: a
+  scalar, so it needs no `#[rustfmt::skip]`.
+- **The toy check by hand.** A toy table of every item kind passed `rustfmt --check` and Clippy
+  pedantic at `-D warnings`.
+- **Shared files** use the markers `// @begin-table <name>` and `// @end-table <name>`, with the
+  block's header in `//` comments. A task gets a block when another registered task has the same
+  `table_path()`.
+- **Hashes.**
+  - `inputs-sha256`: SHA-256 over the name, the revision (`u32`, little-endian), the manifest's
+    bytes and each dataset's recorded hash, each field prefixed by its length as a
+    little-endian `u64`.
+  - A dataset's recorded hash: the SHA-256 of its `PROVENANCE.toml` file list, as
+    `<name> <sha256>` lines.
+  - `sim-fingerprint`: the SHA-256 of the probe values written as shortest round-trip decimals,
+    one per line. The crate's `clippy.toml` forbids hashing float bits.
+- **Manifests** hold `task`, `datasets` and `[params]`.
+  - `mge`, `giant_cooling` and `wd_cooling` take their parameters from constants in their code.
+    Their manifests record those constants, and `Manifest::expect_params` refuses a manifest that
+    disagrees.
+  - `kick_rank` and `chabrier` read their parameters from the manifest.
+- **Fingerprints.** Every task but `chabrier` reads constants of the sim, so each has probes (the
+  sketch had none for a task using only `math`):
+  - `mge`: `THIN_DISC_HOLE_LENGTHS`;
+  - `giant_cooling`: `JUPITER_MASS_KG`, `SOLAR_LUMINOSITY_W` and `SOLAR_RADIUS_M`;
+  - `wd_cooling`: the last two;
+  - `kick_rank`: the carbon–oxygen core and remnant masses at 8, 10, 12, 15, 20, 30, 50 and
+    100 M☉, on `Track::full` with the median draws at Z = 0.02, and the score's scatter.
+- **Data.** The `data` module (`Dataset`, `Provenance`, `load_dataset`, `LoadDatasetError`) is
+  built here, because the inputs hash needs the recorded hashes. Two datasets are registered:
+  - `data/giant_cooling/PROVENANCE.toml`: committed, under CC BY 4.0;
+  - `data/montreal_cooling/PROVENANCE.toml`: fetched, its 23 files' SHA-256 recorded. The raw
+    files move from `target/data/montreal_cooling/` to the ignored
+    `data/cache/montreal_cooling/`, and `wd_cooling::DEFAULT_DATA_DIR` follows them. Plan 06's
+    P06.T20.a text still names the old path.
+- **`check`** has every rule of Design note 8, and also fails in three more cases:
+  - the lock file and the header disagree (on `since`, provisional, inputs hash, task, revision
+    or fingerprint hash);
+  - a registered task has no lock entry;
+  - a lock entry names a task that is not registered.
+- **`--rerun-fast`** reruns each fast task in memory (`pipeline::rerender`) rather than into a
+  temporary directory, and compares the same bytes. A fast task whose fetched dataset is absent
+  is skipped with a warning; this is `wd_cooling` on any machine without the Montreal files.
+- **Today's tables.** The five tables have `since-generator-version` 11: every body last changed
+  while the generator was at 11. The headers of `mge`, `giant_cooling`, `wd_cooling` and
+  `kick_rank` are rewritten, and their bodies are byte-identical to HEAD's (the SHA-256 of each
+  body is unchanged). `giant_cooling` and `wd_cooling` are registered as generated, being real
+  fits. `mge` and `kick_rank` are provisional.
+- **Recipes.** `just fit <task>` reads `GENERATOR_VERSION` from `version.rs` with `sed`.
+  `fit-check` is part of `ci`, after `test`. `test-slow` ends with `check --rerun-fast`.
+- **Output of `just fit-check`** on today's tables:
+  `fresh giant_cooling`, `fresh wd_cooling`, warnings for the provisional `chabrier`, `kick_rank`
+  and `mge`, and `2 fresh, 3 warnings, 0 failures`.
 
 ### P15.T3 Gaussian-sum coefficients of each density profile
 
@@ -395,9 +500,13 @@ pub const MGE_BOXY: [(f64, [BoxyTerm; 16]); 3];            // boxiness c = 3.0, 
   0.5% of Freeman's Bessel-function form over 0.2–8 scale lengths (Bessel functions by series and
   asymptotic forms in the task's test module, through `math`); the bar profile (plan 02's: the
   azimuthal average of the long bar's surface density at width ratio 0.1, level to 0.85 of the
-  half-length with a Gaussian end of 0.15 half-lengths) to 2% and its mass to 0.3%; plan 02's own
-  table tests (1%, 0.1%, 3%, 0.5%) still pass, and `mge_table_is_reproduced` passes against the new
-  file.
+  half-length with a Gaussian end of 0.15 half-lengths) to 3% of its central value and its mass to
+  0.3%, and its cumulative mass within 5% everywhere; plan 02's own table tests (1%, 0.1%, 3%, 0.5%,
+  and the 7% cumulative check) still pass, and `mge_table_is_reproduced` passes against the new
+  file. A local 2% is out of reach: plan 02's R14 shows by linear programming that no non-negative
+  sum of centred Gaussians fits the profile's flat top and sharp end better than 12% locally inside
+  one half-length, and that the best possible cumulative-mass error is 4.4%. Beating that needs
+  another basis (off-centre or negative terms), which plan 02's potential code does not support.
 - **P15.T3.b The boxy bulge in two dimensions.** For each boxiness c, fit 16 terms with free width
   and q on a polar grid of 48 × 12 points by Levenberg–Marquardt from the one-dimensional solution,
   weights kept non-negative by a projected step. Plan 02 then drops its equal-second-moments
@@ -420,9 +529,13 @@ rerun by `--rerun-fast`.
 
 ### P15.T4 Chabrier high-mass branch scale
 
-**Source.** The observed single-star mass function (Kroupa 2001; Chabrier 2003) and the observed
-multiplicity (Duchêne and Kraus 2013; Raghavan et al. 2010), as "Sizing the layers" uses them: of
-all stars, companions included, 75.9% lie below 0.5 M☉.
+**Source.** The volume-complete census, as "Sizing the layers" uses it since the 2026-09-21 density
+rulings: within 20 pc (Kirkpatrick et al. 2024, table 4) 66.5% of primaries lie below 0.5 M☉, with
+12.9, 17.8 and 2.9% in the bands above, and 68.8% of all stars, companions and white-dwarf
+progenitors included; the 10 pc sample (Reylé et al. 2021) agrees. The mean present-day mass per
+system with a star or white dwarf is 0.55–0.59 M☉. The former target, 75.9% of all stars, was
+Kroupa's function itself. The observed multiplicity is plan 11's (Duchêne and Kraus 2013; Raghavan
+et al. 2010).
 
 **Consumer.** Plan 02, `imf::Chabrier`. **Format** (`tables::chabrier`):
 `pub const HIGH_MASS_BRANCH_SCALE: f64;` multiplying the branch above 1 M☉.
@@ -430,13 +543,91 @@ all stars, companions included, 75.9% lie below 0.5 M☉.
 - **P15.T4.a Move the constant.** Plan 02's 0.68 becomes the table, provisional, same value.
 - **P15.T4.b Fit (M4, after plan 11).** With plan 11's multiplicity model and its all-stars
   quadrature, solve for the scale s by bisection on the fraction below 0.5 M☉. The quadrature is
-  deterministic, so no sampling is needed. **Acceptance:** fraction below 0.5 M☉ within 0.3 points
-  of 75.9%; s inside 0.6–0.75 (otherwise the task fails and the discrepancy is reported, never
-  clamped); mean present-day mass per system under the scaled function within 0.53–0.57 M☉ by plan
-  02's `mean_present_mass`. Bumps the version.
+  deterministic, so no sampling is needed. **Acceptance:** fraction below 0.5 M☉ within 1 point of
+  the census's 68.8%; primary band shares within the census's Poisson errors; s inside 0.6–1.0 (0.68
+  gives about 71% with plan 02's stand-in companions and 1.0 about 67%; otherwise the task fails and
+  the discrepancy is reported, never clamped); the local mid-plane mean present-day mass per system
+  under the scaled function within 0.55–0.59 M☉ by plan 02's `mean_present_mass`. If no s meets all
+  three with plan 11's companions, the task reports which one fails. Bumps the version.
 
 **Files.** `src/tasks/chabrier.rs`, `manifests/chabrier.toml`, `tables/chabrier.rs`,
 `galaxy/imf.rs`.
+
+**As built, P15.T4.a (round 9, lane `fit15`).**
+
+- The move is registered as task `chabrier` (fast, revision 0). It emits its manifest's
+  `scratch_scale`, 0.68, as a provisional `TableItem::Scalar`.
+- `Chabrier::PROVISIONAL_HIGH_MASS_SCALE` keeps its name, which plan 11 uses, and now reads
+  `tables::chabrier::HIGH_MASS_BRANCH_SCALE`.
+- The move is bit-identical: `imf`'s test `assert_same_bits(Chabrier::default().high_mass_scale(),
+0.68)` still passes, and no golden moves.
+- P15.T4.b replaces the run with the bisection, bumps the revision, and drops `scratch_scale` from
+  the manifest.
+
+**As built, P15.T4.b (round 9b, lane `fates`, with P11.T1.d; ruling 138).**
+
+- Task `chabrier` revision 1 (fast): the multinomial maximum-likelihood s on the 20 pc census's
+  primary counts, 1,491 / 288 / 400 / 64 in bands A–D of 2,243 (our tally of Kirkpatrick et al.
+  2024, Table 4, in the manifest), the model's band shares renormalised over 0.08–8 M☉; a fixed
+  72-step golden-section search of 0.3–1.6 and 60 bisections for each 1σ end. **s = 0.9201** (1σ
+  0.8507–0.9927; 0.8957 and 0.9352 under Cummings's and El-Badry's IFMRs). The scratch 0.68 is
+  retired and the table is no longer provisional.
+- The checks, over systems whose primary lies below 8 M☉ (`imf::Truncated`, `fates::CensusFates`
+  and `GalaxyParams::census_system_masses_under`, new), all pass: band shares 67.7 / 12.0 / 16.8 /
+  3.45%, misses −0.73, +1.19, +1.15, −1.53 Poisson errors, χ² 5.62 on 2 dof (≤ 9.21, each ≤ 2);
+  all stars below 0.5 M☉ 69.84% (67.8–71.0%); the local mid-plane mean in stars and white dwarfs
+  0.5517 M☉ (0.54–0.60). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars
+  and black holes 0.0530 M☉; the primaries' mean present mass 0.4027 M☉ against the census's
+  0.437. The first attempt's bisection on the all-stars share (s = 0.9015, failing two unlike
+  comparisons) is superseded.
+- **For the owner (ruling 138.6):** Chabrier's (2005) system function (m_c 0.25 M☉, x 1.35) fits
+  the census's primaries better, χ² 4.4 as published and 1.7 at s = 0.88; it is not adopted,
+  because it also moves plan 13's substellar branch.
+- **Consequences, as built.** The all-inclusive windows are re-derived at the fitted s: the Milky
+  Way fixture's mean 0.59–0.61 M☉ (0.5985 galaxy-wide, `derive::tests`; `tests/galaxy_params.rs`)
+  and 0.60–0.62 locally (0.6115, `tests/galaxy_fields.rs`, which also asserts the census-like
+  0.5517 in 0.54–0.60); the seeds' old populations 0.57–0.62 and young disc 0.85–0.90
+  (`tests/common`, 0.581–0.611 and 0.873 over 3,000 seeds). The system count is 8.55 × 10¹⁰ for
+  the fixture. P02.T11's benchmark is unchanged at the new N: 0.00201 systems per ly³ in the plane
+  and 0.00198 at the Sun's height (0.0018–0.0021), 0.0426 M☉ pc⁻³ (0.0415 ± 0.004). Ruling 137.7's
+  nuclear-disc bracket, re-derived: Kroupa's 13.5–22.5 × 0.816 = **11.0–18.4 per ly³**, measured
+  17.93. The fixture's black-hole offset is set again to −0.3800 dex (σ_e about 117.3 km/s) to keep
+  Sgr A*'s mass. `ProvisionalFates`' tests and the brainstorm's band-share table rows keep the
+  scratch 0.68 explicitly (`Chabrier::new(0.68)`), since those figures are the stand-in's; the
+  table's default row awaits the owner's edit (fitted A–E 67.1 / 11.9 / 16.7 / 3.4 / 0.95%; 16.68, so 16.7, ruling 140.10).
+- **Findings held provisionally (ruling 138's consequences, windows stated at 0.68):** bound
+  clusters born 373 per Myr (240–360), 158,664 associations (10,000–150,000), one ionising star
+  per 270 M☉ formed (400–600), M4's 396 neutron stars (100–350, also ruling 137's w), the rogue
+  planets' saturation threshold 37.49 per star (35.9 ± 3%), the barred orbits' Jacobi drift
+  1.09 × 10⁻⁴ (10⁻⁴), the old thin disc's dead primaries under the default 10.7% (the T30 window
+  is Kroupa's and holds). The spine construction's stars per system under the default is 1.457,
+  above 1.45; T1.d's bracket holds on the drawn companions (1.437). _Ruled (ruling 140, lane
+  `win140`; tests and text only, no output moves):_ every window but the Jacobi drift was derived
+  through 0.68, and each is re-derived at the fitted scale and asserted, the holds removed: bound
+  clusters 300–480 per Myr, associations 1.2–2.1 × 10⁵, ionising stars 3.0–4.8 per 10³ M☉ formed,
+  M4 170–600 neutron stars (Ye et al. 2019's 150–225 recorded as a tension for P11.T6/T11), the
+  rogue planets' threshold 37.5 per star ± 3% (the 2,000-seed windows hold, see plan 13's P13.T2),
+  and the brainstorm's default row 67 / 12 / 17 / 3.4 / 0.95%. The Jacobi drift was numerical:
+  T6.a's fast test now runs its 20 barred orbits through `integrate_checked(…, 1e-4, 6)` and
+  asserts 10⁻⁴ (ruling 140.7). The 1.457 joins plan 11's Risks (ruling 140.8). Ruling 141 does
+  the same for T18.a's Type Ia rate: 0.42–0.53 a century (0.462 measured) and the ancient shares
+  3.3–4.5%.
+
+**Round 9b, lane `fates` (with P06.T30 and P11.T1.d), for the tables it touches.** `stripping`
+(slow, revision 0; `tables::stripping`, plan 11's stripping table) and `period_correction` (slow;
+`tables::period_correction`, plan 11's refit) join the registry. `kick_rank` gains two fingerprint
+probes, a 7.7 M☉ star with its stripped mark set, since the reference population's tracks now read
+plan 11's share; its rerun kept the body. The mean masses move the fixture's potential (v_c
+224.018 to 223.961 km/s), so `displaced_smoke` was regenerated (`hyperion-fit orbits --smoke`,
+PROVENANCE sha256 updated) and `displaced_forms` refitted: mean misplaced share 0.9700 (from
+0.9742), the neutron stars' half-density height 173 pc (from 223, against 110–130), bar
+elongation 0.34 (from −1.12). The new and refitted tables say `since 14`; the orchestrator's bump
+to 15 restamps them.
+
+**Ruling 137.6.** The neutron stars' half-density height, 173 pc against P15.T6.e's 110–130, is
+a smoke-fit finding held for ruling 120.3's orbit production run, not a consequence of the
+stripped share (more low-mode stars lower it). The window's source is owed, and it must be stated
+at a low-mode share w (the fixture's is now 0.2675).
 
 ### P15.T5 Kick-law rank table and its four defaults
 
@@ -475,14 +666,41 @@ fields of `KickLawParams::default` and the fourth is plan 11's `CLUSTER_MERGED_B
   observables of P06.T19.d pass; for each default the harness reports the interval over which they
   keep passing, and the default lies inside it and not within a tenth of its width from an edge.
 - **P15.T5.c Fate of merged binaries in clusters (M4).** With plan 09's cluster retention and plan
-  11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 13–19% at 50,
-  8–12% at 20, and under 1% in the most massive open clusters, under plan 11 (the merged object
-  stays a member and is judged on the pair's velocity) and under the alternative. **Acceptance:**
+  11's engine: neutron-star retention of 18–26% at a birth escape speed of 100 km/s, 15–25% at 50
+  and 5–17% at 20 (ruling 126.3, amending 106.4 and 96.3 for clusters: the low mode is judged on
+  its pair's systemic speed, σ 12 km/s), and under 1% in the most massive open clusters, under plan
+  11 (the merged object stays a member and is judged on the pair's velocity) and under the
+  alternative. **Acceptance:**
   the default passes all four bands; if only the alternative does, the finding goes to plan 11.
 
 **Files.** `src/tasks/kick_rank.rs`, `src/tasks/kick_defaults.rs`, `manifests/kick_*.toml` with
 their smoke manifests, `tables/kick_rank.rs`. All three are `Slow`: 10⁷ tracks are tens of minutes
 on one core, so CI never reruns them and relies on the hash, the fingerprint and the smoke run.
+
+**As built, P15.T5.a (round 9, lane `fit15`).**
+
+- `tasks::kick_rank::KickRankTask` (slow, provisional P06.T19.b) runs `fit_parallel`. Its
+  `scores_parallel` scores the sample stars in rounds, each of twice the members still wanted,
+  in chunks of 1,024 through `map_reduce_chunks`. It joins the chunks in index order and cuts
+  at the n-th member. That gives exactly the scores `score_quantiles` sorts, and a test checks
+  the quantiles bit for bit on one thread and on four.
+- Plan 06's module was not touched. It already exposes the per-chunk scorer
+  (`ReferencePopulation::scores`) and the quantile step (`quantiles_of`).
+- The quantiles come from one sort of all the scores (80 MB at 10⁷), not from chunk histograms
+  merged on a fine grid. The sort is exact and independent of the chunking.
+- **Manifests:**
+  - `kick_rank.toml`: the committed table's 10⁶ scores, with 10⁵ fresh ones for the acceptance
+    figures;
+  - `kick_rank.production.toml`: 10⁷ scores, with 10⁶ fresh ones, not the plan's 10⁷, because
+    ±0.01 on the moments needs far fewer and the second 10⁷ tracks would double the run;
+  - `kick_rank.smoke.toml`: 300 scores.
+- **Acceptance figures.** Fresh scores go through the new table; ln(v ÷ km/s) is taken with the
+  rank clamped to 0.001–0.999 and without the truncation at 1,000 km/s. The report also gives
+  the largest shift of a knot's rank from the committed table. The lane reads "before the clamp" as before the truncation, which ruling 96.2 added after the plan was written. The rank clamp alone narrows the spread by a few thousandths (0.6758 over 10⁵ fresh scores of the committed table), inside the ±0.01. This reading is the orchestrator's to confirm. The committed header's `source` was corrected afterwards ("ApJL", which Clippy's `doc_markdown` rejects, became "ApJ Letters") by re-rendering it from the committed quantiles and the recorded acceptance figures, which is what a rerun writes, rather than by a second half-hour run.
+- **The hand-over to P06.T19.e.** A committed table is always made from `kick_rank.toml`. So
+  P06.T19.e moves the production parameters into `kick_rank.toml` (its inputs hash changes with
+  them, as it should), bumps the generator version, and either reruns `just fit kick_rank` or
+  commits the scratch file after correcting its `manifest:` line.
 
 ### P15.T6 Displaced-population form table
 
@@ -592,15 +810,200 @@ ignores `layer`; the fitted values are kept for the record, and `kinematics`, `i
   complete by τ of 8–30 (the last age bin's form at τ of 8–30 and beyond 30 agree within the noise
   floor).
 - **P15.T6.f Hypervelocity row.** The density of unbound survivors on straight lines: the old
-  populations' density convolved with 1 ÷ (4π r² v), fitted by one `CoredPowerLaw`. **Acceptance:**
-  misplaced share under 10%; at Milky Way rates and the brainstorm's 30% channel share the number
-  inside the cube is some tens of thousands (10⁴–10⁵).
+  populations' density convolved with 1 ÷ (4π r² v), fitted by one `CoredPowerLaw`; its shape does
+  not depend on v, so it serves both survivor populations of ruling 128.1 (0.26 at 1,000–1,500
+  km/s, 0.04 at 2,000–2,500). **Acceptance:** misplaced share under 10%; at Milky Way rates the
+  number inside the cube is 10⁴–10⁵, of them 1,500–3,500 fast and 1.5–4.5 × 10⁴ slow; the
+  rate-weighted share of slow launches below 1.5 times the local escape speed, where the straight
+  line is poor, is reported as a finding.
 
 **Files.** `src/tasks/displaced/{mod,orbits,births,histogram,fit_disc,fit_old,kinematics}.rs`,
 `manifests/displaced.toml`, `manifests/displaced.smoke.toml`, `tables/displaced_forms.rs`.
 
 No scratch stand-in exists for this table. It is the long pole of M3 and starts as soon as plan 02's
 potential is numerically stable, in parallel with M2.
+
+**T6.a–b as built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no table yet).**
+
+- **Files and names.** `src/tasks/displaced_forms/{mod,orbits,births,histogram}.rs` (the task is
+  named for its table, `displaced_forms`), `manifests/displaced_forms.toml` and
+  `displaced_forms.smoke.toml`. The task is not in the registry: a `FitTask` returns a table, which
+  T6.c–f fit. Until then `hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out
+DIR]` runs the orbits and writes `displaced_orbits.txt` (text, integer counts and shortest
+  round-trip floats) to `data/cache/displaced/` or `--out`, printing its SHA-256 for
+  `tables.lock`.
+- **The force (ruling 101.4).** Plan 02's potential gained `PotentialTables::force` (the exact
+  gradient of the (R, |z|) grid's bicubic Hermite interpolant, so the field is conservative) and the
+  direct `MassModel::force`, returning `CylindricalForce { radial, vertical }`. The integrator
+  steps with the tables' force, not bilinear force interpolation, which is not a gradient.
+- **T6.a, the bar and the splitting.** The bar is Dehnen's (2000) quadrupole in Monari et al.'s
+  (2016) three-dimensional form, `A U(r ÷ R_b)(x′² − y′²) ÷ r²`, `A = bar_strength × v_c(R_b)²`,
+  `R_b` the fixture's half-length, `Ω_p` the sim's pattern speed (or the manifest's
+  `corotation_ratio`). Inside `R_b`, Dehnen's `s³ − 2` is direction-dependent at the centre (a force
+  growing as `1 ÷ r`, which threw test orbits by 20% in the Jacobi integral), so `U(s) = 5s³ − 6s²`,
+  the cubic meeting `−s⁻³` with value and slope at `s = 1`: HYPERION's regularisation, a finding for
+  the owner only if T6.d's shares depend on it. The rotating frame's step is `K(h ÷ 2) R(h) D(h)
+K(h ÷ 2)`: the kinetic and rotation terms commute, so their joint flow (drift, then rotation by
+  `−Ω_p h`) is exact, and the Strang splitting is symplectic with one force a step. Each orbit's
+  fixed step is 1 ÷ 200 of the circular period at its pericentre (from its energy and angular
+  momentum in the plane's potential), at least `min_step_years`: "the local circular period" read
+  as the orbit's, since a step that followed the radius would not be symplectic.
+- **T6.a's acceptance.** The test orbits run from 200 ly to 40,000 ly, every fourth in the
+  nuclear disc, bulge and bar. Without the bar the energy holds to 4.7 × 10⁻⁵ over 10 Gyr for all
+  1,000 (slow; 20 in the fast suite). With the bar (strength 0.05) the fixed step of the first pass
+  holds 982 of 1,000, but one inner orbit torqued onto the black hole lost 79% of its Jacobi
+  integral: so each orbit is integrated through `integrate_checked`, again from its start at half
+  the step while its Jacobi integral has drifted by more than `drift_tolerance` (10⁻⁴), up to
+  `max_halvings` (6) times. 18 of 1,000 needed it and the worst kept is 8.7 × 10⁻⁵ (at version 15's
+  potential, ruling 140.7: 17 refined, the worst kept 9.93 × 10⁻⁵, the first pass's worst 0.377;
+  the fast suite's 20 barred orbits are checked the same way, not on the first pass). Circular orbits
+  at 3,000–50,000 ly stay circular to 10⁻³ over 10 Gyr; one and four threads give the same bits.
+- **T6.b's births** follow the text, with one change: the halo, bulge and bar draw their velocities
+  from plan 08's velocity ellipsoid of the component they were born in, not an isotropic Jeans
+  dispersion, since plan 08's laws exist (so T6.e's "plan 08's births" is this run). Old sources
+  are born by exact rejection on logarithmic cells of the cube's octant (each envelope never rises
+  with |x|, |y|, |z|); the thin source in the thin birth layer (holed thin radial profile, the young
+  disc's vertical profile), its time since death from the thin history restricted to the age bin;
+  the old sources' from their populations' histories. Kicks are log-uniform within each speed bin
+  (0.02–6 over the eight). An unkicked control per barred source serves T6.d. An orbit is bound if
+  its epoch energy cannot reach the sim's escape boundary, twice `r₂₀₀` (ruling 91).
+- **T6.b's histograms**: per class, the bound and the unbound inside the cube on 48 × 40 log cells
+  in R (16 ly to 2¹⁸) and |z| (1 ly to 2¹⁶), counts inside and outside, the bound members'
+  velocity moments in `v_c` (`v_φ` spinward) and outbound count, a 24 × 24 × 20 bar-frame histogram
+  for the barred sources, and the steps taken. The smoke run twice, and on one and three threads,
+  gives the same bytes. The smoke manifest holds 1–3 orbits a class on coarse steps, not the
+  plan's 1% (about 40 minutes on three threads), so that the fast suite can run it three times;
+  the 1% run is the production manifest with its counts divided by 100.
+- **T6.e's baseline.** With plan 08's velocity laws already in T6.b's births, T6.e's check that the
+  table "changes by under 1 point with plan 08's births" needs the other run: a tenth-size run
+  with isotropic Jeans births for the halo, bulge and bar, which T6.e adds.
+- **The production run is not run: about 100 hours on three threads.** A reduced run of 50 orbits
+  per class (4,950 orbits, the production manifest with the counts cut) took 98 s on three threads
+  (niced, under the heavy-test lock, 2.8–3.3 GHz, load 5–10): 5.6 × 10⁸ steps, 526 ns a step and
+  thread. Scaled by class to the manifest's counts the run is 2.1 × 10¹² steps, about 103 hours:
+  the nuclear disc 71.5% (a few × 10⁵ steps an orbit, its periods being a few Myr over 10 Gyr, and
+  its barred orbits refining most), the bulge 12.0%, the bar 6.3%, the halo 4.2%, the thick disc
+  4.1%, the thin disc 1.9%. The production manifest keeps a Jacobi drift of 10⁻³ and three
+  halvings: T6.a's 10⁻⁴ and six halvings put a 200-per-class run at 5.2 × 10⁹ steps against 1.2 ×
+  10⁹ without refinement. Command: `nice -n 19 cargo run --profile slow-test -p hyperion-fit --
+orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_orbits.txt`, whose
+  SHA-256 it prints for `tables.lock`). Each class's record counts its orbits integrated again at
+  a smaller step, those kept still over the tolerance after the last halving, and the worst drift
+  kept, so that T6.c–e can judge the histograms by them (**for T6.c**: the nuclear disc's classes
+  refine most); whether 10⁻³ is acceptable for production is the owner's call. A lever, for the owner: the nuclear disc's classes at a
+  tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours.
+
+**Ruling 120.3–4 as built (lane `disp08`, 2026-09-27; the production run not started).**
+
+- **The manifest.** The nuclear disc takes `nuclear_orbits_per_class` = 10⁵ (other sources keep
+  their counts), drift tolerance 10⁻³ with three halvings, and each class's record counts the
+  orbits refined and those still over the tolerance, with the worst drift. `nuclear_step_fraction`
+  stays 1 ÷ 200: a reduced run of 150 orbits in each of the nuclear disc's eight classes refined
+  15.2% of them at 1 ÷ 200 and 22.3% at 1 ÷ 100 (47% more, against the ruling's 10%; read as
+  7.1 points it would pass), and kept 13 against 24 over the tolerance, for 0.65 of the steps.
+- **Resumable parts.** The run is cut into parts of `part_orbits` (4,096; 4,703 parts), each
+  computed in the manifest's chunks and written whole (to `part-NNNNNN.txt.partial`, then renamed)
+  under the output directory's `parts/`, headed by the part's number and the manifest's SHA-256; a
+  later invocation reads the finished parts back (exact: counts, and floats in shortest round-trip
+  form) and computes the rest, and the totals are merged in part order, so the bytes do not depend
+  on restarts, threads or `--max-parts`. A part of another manifest is refused. The smoke test
+  stops after one part, then after two more, then finishes, and compares bytes with the
+  uninterrupted run.
+- **Estimate: about 61 hours on three threads.** The nuclear disc's 8 × 10⁵ orbits take 8.4 × 10⁵
+  steps each (the reduced run: 1.0 × 10⁹ steps for 1,200 orbits in 171 s, about 510 ns a step and
+  thread, niced, load 6–11): 32 hours. The other sources' 6.1 × 10¹¹ steps at 526 ns: 29 hours. At 1
+  ÷ 100 the nuclear disc would take 21 hours, 50 in all. Command, run under nice from the
+  repository root and restartable at any point:
+  `nice -n 19 cargo run --profile slow-test -p hyperion-fit -- orbits --threads 3`; add
+  `--max-parts N` to stop after N parts, and run the same command again to resume. It writes
+  `crates/hyperion-fit/data/cache/displaced/displaced_orbits.txt` and prints its SHA-256 for
+  `tables.lock`.
+
+**T6.c–f as built (lane `disp08b`, 2026-09-27, at `GENERATOR_VERSION` 13; the table is
+provisional, fitted to the smoke histograms; no output moves).**
+
+- **The task.** `tasks::displaced_forms::DisplacedFormsTask` (slow, registered), modules
+  `displaced_forms/{table,fit_disc,fit_old,kinematics,hypervelocity,cells,nelder_mead}.rs`; the
+  plan's `orbits`, `births` and `histogram` are T6.a–b's. The orbit run's manifests are renamed,
+  bytes unchanged (so the production run's parts and header hash still match):
+  `manifests/displaced_orbits.toml`, `displaced_orbits.smoke.toml`, and a new
+  `displaced_orbits.one_percent.toml` (the production counts over 100). `displaced_forms.toml` and
+  `displaced_forms.smoke.toml` are now the **fit's** manifests: one dataset, an orbit run's
+  histograms, declared `fetched` with a `PROVENANCE.toml` (`data/displaced_smoke/` now; the
+  production run's `data/displaced/` when it lands, whose default directory is the orbits
+  command's own `crates/hyperion-fit/data/cache/displaced/`), and `orbit_manifest`, whose SHA-256 the histograms'
+  header must carry. `histograms = "smoke" | "one_percent" | "production"` decides `@provisional`.
+  The Nelder–Mead, the cell quadrature and the misplaced share live in the task's modules, not in
+  the plan's `hyperion_fit::{optimise, stats}` (nothing else uses them yet).
+- **Table shape.** As the format above, with names from the sim: rows are
+  `forms::{FlaredLayerParams, CoredPowerLawParams, ClassKinematics, DiscBornRow, OldBornRow}`
+  (`DiscBornForm` is taken by P08.T10's density), and `forms::ESCAPE_RATIO_NODES` and `at_nodes`
+  are the node arrays' reading. **`OldBornRow` gains `unbound_in_cube`**, which Design note 23 of
+  plan 08 needs for every source. A sim test holds the table's edges and nodes to the module's.
+- **T6.c.** Each class's bound in-cube (R, |z|) histogram is fitted (the fastest speed bin's
+  with every speed bin's unbound-in-cube members of its age bin added, where plan 08 puts them; so
+  too the thick disc's and halo's fastest; the barred sources' bar-frame histograms record only
+  the bound, so theirs are fitted without) by the total-variation
+  distance to the forms' cell integrals over the cube (Gauss–Legendre in ln of each cell's
+  coordinate, the corner annulus beyond L in the arc's angle; cells tile the cube to 10⁻⁶). The
+  boxes are the plan's, with `h_r` in [0.05, 50] and `h_0` in [10⁻⁴, 20] `R_d` added; the
+  parameters move as `lo + (hi − lo)(1 + sin t) ÷ 2` (log scale where positive) so an edge is
+  reachable and detectable; a spheroid under 0.05 is dropped and the layer refitted alone; the
+  row penalty is λ Σ (ln θ − ln θ′)² in Gauss–Seidel sweeps, the largest λ of the manifest's
+  ladder (10⁻⁴–10⁻¹) whose weighted mean rises ≤ 0.3 points. **Weights** of the weighted mean are
+  the neutron stars' band-averaged speed-bin shares (P08.T8.b as built, in the manifest) × the
+  thin history's share of each age bin × the class's in-cube share. **The noise floor** is the
+  expected misplaced share of Poisson counts from the fitted model (`E|X − λ|` exactly), since
+  the summed histograms have no half-samples; the table's notes list misplaced ÷ floor per class.
+  The smoothness check is reported as a count of second-difference sign changes.
+- **T6.d.** Thick disc and halo: one spheroid a speed bin, boxes a [0.005, 20] `R_d`, q [0.02,
+  1], γ [0.5, 10] (the nuclear disc's core is a few hundredths of `R_d`). Bulge, bar, nuclear
+  disc: `s ×` the field population's own density (plan 08 places the retained share with it)
+  plus a spheroid, on the 24 × 24 × 20 bar-frame histogram (the bar lies along x in the fields
+  and in the orbits' frame at the epoch). Elongation is `1 − √(⟨y²⟩ ÷ ⟨x²⟩)` within two bar
+  half-lengths, over the control's. **One run, one corotation ratio (the fixture's 1.24) and one
+  bar mass: the measured share fills all three nodes**; the runs at 1.0 and 1.4 and a second bar
+  mass need the orbit command to run the barred sources alone, which it cannot yet.
+- **T6.e.** Kinematics and in-cube shares straight from each record; **one halo mass, so the
+  measured value fills all three escape-ratio nodes.** Not built: the four universality
+  potentials, the isotropic-Jeans baseline, the other halo masses; the kick-law reweighting of
+  "13–14% unbound" cannot be read from the histograms, which count the unbound only inside the
+  cube (so plan 08's class table offers only `unbound_in_cube_share`; the total is P08.T14.4's, from the kick law against the escape speed), and "phase mixing by τ 8–30" needs the
+  last age bin split at 30. These are for the production follow-up.
+- **T6.f.** The sources are every field component weighted by its mean `t^−1.1` from 40 Myr over
+  its age distribution (Maoz and Graur 2017), a reading of "the old populations' density" that
+  gives each population its ancient events; the azimuthal kernel is closed (`2π ÷ √(A² − B²)`),
+  softened at 1% of the source's distance. Rate 0.54 per century (Li et al. 2011), channel 0.3,
+  2,200 km/s: 17,365 inside the cube, 10.7 Myr each; misplaced 5.3% (acceptance 10⁴–10⁵ and
+  under 10%). **Under ruling 128.1** (lane `disp08b`, 2026-09-28): the two populations and the
+  rate are the sim's `class_table::{SURVIVOR_POPULATIONS, MILKY_WAY_IA_RATE_PER_YEAR}`, held by
+  the fingerprint, not manifest parameters; the table gains `HYPERVELOCITY_MEAN_EXIT_LY`, the
+  rate-weighted mean path to the cube's face (**78,662 ly**), from which the class table computes
+  each population's count. **29,123 inside: 26,849 slow (1.5–4.5 × 10⁴) and 2,273 fast
+  (1,500–3,500)**; misplaced still 5.3%; **0.017** of slow launches leave below 1.5 times the
+  local escape speed (the full potential's), a finding: straight lines serve all but a fiftieth.
+- **The 1% run as a check** (`displaced_orbits.one_percent.toml`, 192,608 orbits, 1.8 CPU-hours;
+  fitted with `displaced_forms.one_percent.toml` to a scratch file, never committed). At this size
+  every fit sits at its noise floor (misplaced ÷ floor 1.0–1.7), so the figures are preliminary
+  **findings for the production run to confirm, not rulings**: disc-born weighted mean misplaced
+  0.202 (floor-limited, against ≤ 0.07; λ 10⁻³); 6 classes over 10⁻⁴ of the weight with a
+  parameter on a box edge; worst old-source misplaced thick 0.84, halo 0.81, bulge 0.89, bar 0.93,
+  nuclear 0.61 (bar-frame cells of 2,000 orbits); **own-form shares at the fixture's ratio 1.24:
+  bar 0.15, 0.11, 0.04, 0.00 against the brainstorm's 0.95, 0.61, 0.20, 0.05; bulge 0.30, 0.34,
+  0.05, 0.00 against 0.91, 0.76, 0.55, 0.25; nuclear disc 0.62, 1.00, 0.00 against 0.88, 0.67,
+  0.43** (outside ±0.08 in every bin but noise-limited: the fit trades a noisy own form for a smooth
+  spheroid at no cost in misplaced share); bar elongation over the control 0.75, 0.59, 0.61, 0.26
+  over the first four bins (plan 0.99, 0.79, 0.5, 0.25 within 0.05), 0.16, −0.00, −0.04, 1.28
+  beyond (plan < 0.05), length within 0.68 of the control's (plan 10%); the slowest thin class's
+  mean rotation 0.947 `v_c` (plan above 0.95), the fastest's −0.599 (below zero, as planned); **the
+  neutron stars' half-density height at 26,000 ly 155 pc against 110–130**.
+- **Cost.** The provisional fit is 3.6 CPU-minutes (2.6–5.3 minutes wall on three threads under
+  load 13–18); the 1% fit 7.4 CPU-minutes; the production fit costs the same per evaluation, so
+  about as long.
+- **Rerunning on the production histograms:** the steps are in `table.rs`'s module documentation
+  (copy the file, add `data/displaced/PROVENANCE.toml`, point the manifest's three lines at
+  production, `just fit displaced_forms`, rerun plan 08's form, bound and class-table tests and
+  re-bless the class table's golden).
 
 ### P15.T7 Helium correction
 
@@ -632,30 +1035,35 @@ the version when it lands, although no grid star changes, because members with a
 ### P15.T8 Cluster dynamics constants
 
 **Consumer.** Plan 09 (M3). **Format** (`tables::cluster_dynamics`): `BH_LOSS_BETA`,
-`BH_LOSS_PSI_SLOPE`, `BH_RELAXATION_PREFACTOR`; `EQUIPARTITION_EXPONENT`; `PULSARS_AT_47_TUC_GAMMA`,
+`BH_LOSS_PSI_SLOPE`, `BH_CLOCK_FACTOR` (ruling 126.4: 2.5, on age ÷ t★ in the black-hole law
+only), `BH_RELAXATION_PREFACTOR`; `EQUIPARTITION_EXPONENT`; `PULSARS_AT_47_TUC_GAMMA`,
 `PULSAR_GAMMA_EXPONENT`, `PULSAR_CORE_COLLAPSE_CAP`. T8.a first moves plan 09's scratch constants
-here unchanged (2.8 × 10⁻³, 147, 0.138; full equipartition; 40, 0.7, and a cap equal to the count at
-47 Tucanae's Γ), whatever plan 09 has called them.
+here unchanged (2.8 × 10⁻³, 147, 2.5, 0.138; η = 1, δ = ½ mass segregation; 40, 0.7, and a cap equal to the
+count at 47 Tucanae's Γ), whatever plan 09 has called them.
 
 - **P15.T8.a Black-hole loss against the CMC Cluster Catalog** (Kremer et al. 2020). Dataset:
   _fetched_; a reduction script extracts, per model and snapshot, mass, half-mass radius, number and
   mass of black holes and age. Fit the closed form of Breen and Heggie (2013) as parametrised by
   Antonini and Gieles (2020), f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ t ÷ t★) − 1] ÷ ψ₁ floored at zero, with
   t★ = c √(M r_h³ ÷ G) ÷ (⟨m⟩ ln Λ), for β (`BH_LOSS_BETA`), ψ₁ (`BH_LOSS_PSI_SLOPE`) and c
-  (`BH_RELAXATION_PREFACTOR`), exactly the three constants plan 09's P09.T9.c reads; the decay rate
+  (`BH_RELAXATION_PREFACTOR`), with the clock factor `BH_CLOCK_FACTOR` on t ÷ t★ (ruling 126.4), the
+  four constants plan 09's P09.T9.c reads; the decay rate
   β ψ₁ (0.41 at the scratch values) is derived and is not emitted. **Acceptance:** rms error in
   log₁₀ of the retained black-hole number under 0.3 dex over models that retain any at 12 Gyr; at
   least 85% of models predicted empty are empty; applied to the Baumgardt–Hilker catalogue at 12
   Gyr: none in dynamically old clusters, tens to a few hundred in a typical massive one, thousands
   in ω Centauri, and about a fifth of the catalogue (15–25%) beyond the core-collapse line of 14
   relaxation times with no black holes (Trager et al. 1995).
-- **P15.T8.b Partial-equipartition exponent against multimass King models.** The tool integrates the
+- **P15.T8.b Mass-segregation exponent against multimass King models.** The tool integrates the
   models itself (Poisson's equation with one lowered-Maxwellian component per mass class, in the
   manner of Gunn and Griffin 1979 and Da Costa and Freeman 1976; neither is in the brainstorm's
   list, so re-check) over concentrations 0.7–2.3 and the mass-function slopes of "What is inside a
   cluster today", and fits η in the class profile (1 + r² ÷ r_c²)^(−3 q^η ÷ 2) for q below 1, with η
-  = 1 above. **Acceptance:** half-mass radius of each class below the turn-off reproduced to 10%; η
-  between 0.3 and 1.
+  = 1 above. η = 2δ, δ the models' velocity-scale exponent (Gieles and Zocchi 2015, MNRAS 454,
+  576, eqs. 24–29), and η = 1 is δ = ½, not velocity equipartition (ruling 139.2). **Acceptance:**
+  half-mass radius of each class below the turn-off reproduced to 10%; η between 0.8 and 1.0
+  (ruling 139.2: Peuten et al. 2017 find δ ≃ 0.5 in N-body models, Hénault-Brunet et al. 2019 fit
+  0.44 at 47 Tucanae).
 - **P15.T8.c Pulsars against encounter rate.** Datasets: Bahramian et al. (2013) for Γ, the
   Baumgardt–Hilker tables for ρ_c and r_c, and a census of pulsars per cluster (the brainstorm cites
   none; the task records the one it uses). Poisson regression of count on Γ with a completeness term
@@ -803,6 +1211,15 @@ plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator 
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** Chabrier's system function is now the default, and
+  P15.T4 fits its scale to the 20 pc census instead of the 75.9% that was Kroupa's function itself,
+  so the scale may land well above the old 0.6–0.75 window. The halo's smooth components now have
+  inner slopes of 2.2–2.8, which makes the smooth halo at 15–18 kpc three to four times denser, so a
+  typical globular stream stands at roughly 7–15 times it, not 25–45. P15.T11.b's tenfold
+  detectability cut then removes more model streams, and the fitted multiplier k moves with it. The
+  cut is a manifest parameter, and its value is checked against how the known streams were found
+  before the fit runs. If plan 02 puts the discs' cored vertical profiles into the potential, P15.T3
+  gains a one-dimensional expansion of those profiles beside `MGE_EXP`.
 - **The roadmap's "M2 onward" hides an M1 dependency.** Resolved as the roadmap says: P02.T6.a
   creates the crate with the first-cut MGE task, and this plan extends both after M1. The crate plan
   02 leaves has no registry, emitter or lock file, so between M1 and P15.T2 the only guard on
@@ -833,3 +1250,50 @@ plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator 
 - **Build cost.** The crate adds `rayon`, `clap` and the rest to every `cargo clippy --workspace`.
   If CI time suffers, exclude the crate from the workspace's default members and lint it in the
   `just fit-check` step.
+- **For the owner: Chabrier's 2005 system function (ruling 138.6).** P15.T4.b fits the 2003 system
+  function's branch above 1 M☉ (s = 0.920). Chabrier's (2005) revision, m_c 0.25 M☉ and x 1.35,
+  fits the 20 pc census's primary counts better: χ² 4.4 as published and 1.7 at s = 0.88, against
+  5.6 for the fitted 2003 form. It is noted and not adopted, because it also moves plan 13's
+  substellar branch; adopting it is a change to plan 02's mass function and a version bump.
+- **T7.a, T8.a–c, T9.a as built (lane `fit15a`, 2026-09-30, at `GENERATOR_VERSION` 15; no
+  bump, no wired output moved).**
+  - **T9.a done.** Task `type_ia_delay` (fast, 1.4 s release), `tables/type_ia_delay.rs`, test
+    `tests/type_ia_delay.rs`. `DELAY_EDGES` start at plan 06's 42.55 Myr (`type_ia::MIN_DELAY`,
+    ruling 136.7), not 40 Myr. Pair model: the galaxy's mass function × the share of mass ratios
+    on 0.1–1 left open by the channel's window (new `type_ia::{primary_range, secondary_window}`;
+    `MIN_MASS_RATIO`, `DONOR_MAX` made public; a living donor's window now also respects q ≥ 0.1).
+    `PRIMARY_MASS_CDF` holds quantiles at ranks k/16 of the primary's place in `ln m` on its range
+    at the drawn delay, not masses; `SECONDARY_MASS_CDF` quantiles of the place in the window
+    (the identity: flat q). `CHANNEL_SHARE` is ruling 136.9's in every bin (lifetimes and the IFMR
+    carry no channel information; left to T9.b). `LAYER_SHARE` C is 0 by construction (primary ≥
+    2.5 M☉). Acceptance passes: yield 1.000000, 0.187 under 0.1 Gyr, 0.617 under 1 Gyr, 0.462 a
+    century, ancient share 3.60–4.07%, quantiles within 0.0155. Swapped into
+    `IaProgenitor::draw` (new `type_ia::delay_bin`); `supernova.golden` (unwired) re-blessed:
+    masses move, channels do not.
+  - **T7.a done.** Source: old BaSTI α-enhanced with its helium-enhanced extension (Y 0.30, 0.35,
+    0.40; [Fe/H] −2.62 to −0.29; tracks and ZAHB), fetched: `data/basti_helium/PROVENANCE.toml`
+    (88 files, 38.4 MB) and `urls.txt`; raw in `data/cache/basti_helium/`. Research notes with the
+    survey and the columns T7.b reads: `target/lanes/srvbodies/target/fit15a/helium/NOTES.md` (not
+    committed). T7.b not started.
+  - **T8 file moved.** `tables/cluster_dynamics.rs` is now three blocks (`cluster_bh`,
+    `equipartition`, `pulsars`), each `@provisional` holding plan 09's scratch values bit for
+    bit; the fitted values and misses are in each block's acceptance. New `optimise.rs`
+    (golden section, Nelder–Mead). `hyperion-fit` enables the sim's `testing` feature for the
+    Baumgardt–Hilker copy. New committed datasets (reduced facts + `reduce.py`): `cmc` (Kremer et
+    al. 2020 Table A1 from the arXiv source), `bahramian_2013` (VizieR), `gc_pulsars` (Freire).
+  - **T8.a built, acceptance missed (provisional; ruling deferred).** β and c enter only as β ÷ c,
+    so c stays 0.138 and k 2.5; the best fit runs to ψ₁ → ∞ (a pure exponential, βψ₁ 0.101) at
+    0.476 dex (scratch 1.716 dex); 19 of 34 predicted empty are empty; on the catalogue ω Cen
+    12,100 and 0.6% core-collapsed. Scratch kept.
+  - **T8.b built, acceptance missed (provisional; ruling deferred).** Multimass King models (δ ½,
+    40 models, c 0.81–2.08): best η 0.17 with radii within 28%; η = 1 gives 92%. Light classes'
+    half-mass radii saturate in King models; the class profile's form cannot match to 10% at any
+    η. Task is `Slow` (31 s release); its smoke manifest `equipartition.smoke.toml` exists but
+    the smoke-run test is not written yet.
+  - **T8.c built, acceptance partly missed (provisional; ruling deferred).** γ 0.632 and A 38.0
+    pass; the implied total 1,539 misses 2,000–8,000. Scratch kept.
+  - **Pulsar-cap test fixed** (`interior/checks.rs`): asserts `held == min(law, NS)`, counts the
+    clusters where the law exceeds the neutron stars (3), and pins the cap's removal at ≤ 1,400
+    (measured 1,299, all NGC 5694, Γ 334 × 47 Tuc from its 0.02 pc catalogue core; provisional).
+  - **Not done:** T7.b; a reproduction/smoke test for the three T8 blocks beyond `just
+fit-check`; review-changes on this lane's diff.

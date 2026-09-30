@@ -1,0 +1,7 @@
+# The millisecond pulsars' encounter-rate law (plan 15, P15.T8.c): Poisson regression of the census
+# of pulsars per globular cluster (Freire's table) on Bahramian et al.'s (2013) Γ, with a
+# completeness term in distance. No parameters.
+task = "pulsars"
+datasets = ["bahramian_2013", "gc_pulsars"]
+
+[params]

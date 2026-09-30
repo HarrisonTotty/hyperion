@@ -1,0 +1,2835 @@
+//! A system's stars as a hierarchy of pairs: the types, and the draw of its companions and their
+//! orbits (plan 11, P11.T2.a–b, Design notes 1, 4, 5 and 9).
+//!
+//! [`draw_hierarchy`] documents the draw: its steps, the numbering of the stars and the keys of
+//! their streams (Design note 5), where each companion goes, the laws it is drawn from, and the
+//! draw numbers of each attempt (Design note 9).
+
+use std::cmp::Ordering;
+use std::f64::consts::TAU;
+
+use super::direct::{
+    DirectPeriods, PERIOD_CORRECTION, direct_count_pmf, direct_mass_ratio_law,
+    direct_multiple_fraction, direct_weight,
+};
+use super::dist::{MIN_COMPANION_MASS, PeriodDistribution};
+use super::model::{MAX_COMPANIONS, MultiplicityModel};
+use super::stability::{Innermost, Limits, MAX_ECCENTRICITY, NECESSARY_AXIS_RATIO};
+use super::substellar;
+use crate::Seed;
+use crate::galaxy::displaced::binarity;
+use crate::galaxy::placement::SystemRecord;
+use crate::galaxy::{Galaxy, PointLy};
+use crate::id::{BodyId, SystemId};
+use crate::math;
+use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+use crate::rng::{DomainTag, Mark, ObjectKey, Stream, Threshold, Thresholds, tags};
+use crate::stellar::Composition;
+use crate::stellar::draws::ATTEMPT_WORDS;
+#[cfg(test)]
+use crate::stellar::draws::StarDraws;
+use crate::stellar::remnant::collapse::ElectronCaptureWindows;
+use crate::stellar::sse::ZCoeffs;
+use crate::stellar::system::{draw_metallicity, primary_draws};
+use crate::units::consts::GM_SUN;
+use crate::units::{Days, GravitationalParameter, Metres, Radians, Seconds, SolarMasses};
+
+/// The number of redraw attempts of a system's binaries: attempts 0 to 7 (plan 11, Design note
+/// 9).
+///
+/// The grid redraws a system whose binary falls into a catalogue class or explodes as a Type Ia
+/// (P11.T6–T8), and keeps the last attempt, with its innermost period moved out of the
+/// interacting range, after this many.
+pub const MAX_REDRAWS: u8 = 8;
+
+/// The words of each stream that one redraw attempt owns: attempt n reads words 64n to 64n + 63.
+///
+/// Design note 9 sets it. It equals plan 06's block for a star's draws,
+/// [`ATTEMPT_WORDS`](crate::stellar::draws::ATTEMPT_WORDS), so that a companion's own
+/// [`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt) and its orbit are
+/// redrawn in step. Changing it is a generator-version change.
+pub const DRAWS_PER_ATTEMPT: u64 = 64;
+
+const _: () = assert!(
+    DRAWS_PER_ATTEMPT == ATTEMPT_WORDS,
+    "an attempt's block is plan 06's"
+);
+
+/// The end of the stars' body indices: stars take indices 0 to 15, plan 14's slot `0x00`
+/// (Design note 5), so that no planet, moon or ring ever shares an index with a star.
+pub const STAR_BODY_INDEX_END: u16 = 16;
+
+/// Redraws of a new orbit that fails the stability test or the tidal cut before its companion is
+/// dropped (P11.T2.b): tries 0 to 16, on consecutive draw numbers of the attempt's block.
+pub const MAX_STABILITY_REDRAWS: u64 = 16;
+
+/// Words of `binary.orbit` and of `binary.orientation` that one try of an orbit reads.
+const WORDS_PER_TRY: u64 = 3;
+
+/// Tries of a direct companion in one attempt's block of one stream: 21, the most the block holds
+/// at three words a try.
+const DIRECT_TRIES_PER_KEY: u64 = DRAWS_PER_ATTEMPT / WORDS_PER_TRY;
+
+/// Redraws of a direct companion that fails the whole test before it is dropped (ruling 81 as
+/// amended): tries 0 to 41, the first 21 keyed by the companion's draw slot k and the next 21 by
+/// slot k + [`DIRECT_OVERFLOW_SLOT`]. With a quarter to three fifths of all tries rejected
+/// (A/late-B to O stars), 21 tries leave 1.3% of O stars' direct companions dropped; 42 keep every
+/// mass bin under the 1% the ruling sets.
+const DIRECT_REDRAWS: u64 = 2 * DIRECT_TRIES_PER_KEY - 1;
+
+/// The offset of the draw slot that keys a direct companion's tries beyond the first
+/// [`DIRECT_TRIES_PER_KEY`]: slots 9–11, inside the stellar body indices (Design note 5),
+/// which no star of these systems takes, since a system holds at most four stars.
+const DIRECT_OVERFLOW_SLOT: u8 = 8;
+
+const _: () = assert!(
+    (MAX_STABILITY_REDRAWS + 1) * WORDS_PER_TRY <= DRAWS_PER_ATTEMPT,
+    "every try of an orbit fits its attempt's block"
+);
+
+const _: () = assert!(
+    (MAX_COMPANIONS as u64) < STAR_BODY_INDEX_END as u64,
+    "every star fits the stellar slot of body indices"
+);
+
+/// The relative margin by which a new orbit's period window is widened on each side, so that
+/// rounding in the window's arithmetic never excludes a period the full test would admit. The
+/// window only bounds a rejection loop, so a wider one costs nothing but a rare extra try.
+pub(super) const WINDOW_MARGIN: f64 = 1e-6;
+
+/// The primary mass from which plan 06's companion-stripped mark applies at `composition`:
+/// `m_cc(Z)` − 1 M☉, the lower end of the companion-stripped electron-capture window, from which
+/// the track reads the same mark (ruling 93.3 of 2026-09-22, after ruling 45.2; plan 11, Design
+/// note 1). It is 7.2 M☉ at Z = 0.02 and never below 5.72 M☉, the lowest `m_cc` of the fits
+/// ([`STRIPPED_MARK_FLOOR`]).
+///
+/// The track tests its window in the mass its early AGB's `m_c_bagb` reads, a little below the
+/// initial mass after the main sequence's winds (ruling 45.1); this compares the initial mass,
+/// so a primary within about 0.1 M☉ above the bound is marked here and dies as a white dwarf.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::stellar::Composition;
+/// use hyperion_sim::stellar::multiplicity::stripped_mark_min_mass;
+///
+/// let solar = stripped_mark_min_mass(&Composition::SOLAR);
+/// assert!((solar.value() - 7.203).abs() < 1e-3);
+/// ```
+#[must_use]
+pub fn stripped_mark_min_mass(composition: &Composition) -> SolarMasses {
+    ElectronCaptureWindows::new(&ZCoeffs::new(composition.z_fit()))
+        .companion_stripped()
+        .lower()
+}
+
+/// A bound below [`stripped_mark_min_mass`] at every metallicity, 5.7 M☉ (the fits' lowest `m_cc`,
+/// 6.72 M☉ near Z = 3 × 10⁻⁴, less 1 M☉ and a margin), below which no primary's mark is read and
+/// no root is found.
+const STRIPPED_MARK_FLOOR: SolarMasses = SolarMasses::new(5.7);
+
+/// One attempt of a conditional redraw of a system's binaries, 0 to [`MAX_REDRAWS`] − 1 (plan
+/// 11, Design note 9): which block of [`DRAWS_PER_ATTEMPT`] words of each stream it reads.
+///
+/// Plan 06's [`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt) takes the
+/// same number for each companion's own draws.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::stellar::multiplicity::{MAX_REDRAWS, RedrawAttempt};
+///
+/// let second = RedrawAttempt::FIRST.next().expect("there are eight attempts");
+/// assert_eq!(second.get(), 1);
+/// assert_eq!(second.first_draw(), 64);
+/// assert_eq!(RedrawAttempt::new(MAX_REDRAWS), None);
+/// assert_eq!(RedrawAttempt::all().count(), usize::from(MAX_REDRAWS));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RedrawAttempt(u8);
+
+impl RedrawAttempt {
+    /// Attempt 0, the only one a system that is never redrawn reads.
+    pub const FIRST: Self = Self(0);
+
+    /// Attempt `n`, or `None` unless `n` < [`MAX_REDRAWS`].
+    #[must_use]
+    pub const fn new(n: u8) -> Option<Self> {
+        if n < MAX_REDRAWS { Some(Self(n)) } else { None }
+    }
+
+    /// The attempt's number, 0 to [`MAX_REDRAWS`] − 1.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// The number of the first word the attempt reads on each stream: n × [`DRAWS_PER_ATTEMPT`].
+    #[must_use]
+    pub fn first_draw(self) -> u64 {
+        u64::from(self.0) * DRAWS_PER_ATTEMPT
+    }
+
+    /// The attempt after this one, or `None` after the last.
+    #[must_use]
+    pub const fn next(self) -> Option<Self> {
+        Self::new(self.0 + 1)
+    }
+
+    /// Every attempt, in order.
+    pub fn all() -> impl Iterator<Item = Self> {
+        (0..MAX_REDRAWS).map(Self)
+    }
+}
+
+/// What a system's context asks of its multiplicity (plan 11, P11.T2.a–b).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum MultiplicityContext {
+    /// The model's own multiplicity: every grid system.
+    #[default]
+    Free,
+    /// A single star whatever the model says: a system whose context rules companions out.
+    ForcedSingle,
+    /// At least one companion, the count drawn from the model given that there is one.
+    ///
+    /// With `max_separation`, no orbit's semi-major axis exceeds it: plan 09's cluster members,
+    /// truncated at the cluster's hard–soft boundary, which P11.T8.f supplies. No caller passes
+    /// this context before then. If every companion is dropped by the stability test the system
+    /// comes out single; [`SystemHierarchy::dropped_companions`] says so.
+    ForcedMultiple {
+        /// The widest semi-major axis any orbit of the system may have, m.
+        max_separation: Option<Metres>,
+    },
+}
+
+/// The index of a star in a [`SystemHierarchy`], which is also its body index: 0 is the primary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StarIndex(u8);
+
+impl StarIndex {
+    /// The primary, star 0.
+    pub const PRIMARY: Self = Self(0);
+
+    /// The index, 0 to [`STAR_BODY_INDEX_END`] − 1.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+/// The index of a node in a [`SystemHierarchy`]'s depth-first list: 0 is the root.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeIndex(u8);
+
+impl NodeIndex {
+    /// The root, node 0: the whole system.
+    pub const ROOT: Self = Self(0);
+
+    /// The index.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+/// What kind of object a [`StarSlot`] holds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SlotKind {
+    /// A star, of at least [`MIN_COMPANION_MASS`](super::MIN_COMPANION_MASS).
+    #[default]
+    Star,
+    /// A brown-dwarf companion, below that mass (P11.T2.d, Design note 15); none before T2.d.
+    BrownDwarf,
+}
+
+/// One star of a hierarchy: its body, its initial mass and its kind.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StarSlot {
+    body: BodyId,
+    initial_mass: SolarMasses,
+    kind: SlotKind,
+}
+
+impl StarSlot {
+    /// The star's body ID; its body index is its [`StarIndex`].
+    #[must_use]
+    pub const fn body(&self) -> BodyId {
+        self.body
+    }
+
+    /// The initial mass, M☉: the primary's is its record's
+    /// [`primary_initial_mass`](SystemRecord::primary_initial_mass), bit for bit.
+    #[must_use]
+    pub const fn initial_mass(&self) -> SolarMasses {
+        self.initial_mass
+    }
+
+    /// The kind of object.
+    #[must_use]
+    pub const fn kind(&self) -> SlotKind {
+        self.kind
+    }
+}
+
+/// A node of a hierarchy: one star, or a pair of nodes on a relative orbit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HierarchyNode {
+    /// A star.
+    Star(StarIndex),
+    /// Two nodes on a relative orbit: the outer member's barycentre about the inner member's.
+    Pair {
+        /// The inner member, which holds the pair's lower-indexed stars.
+        inner: NodeIndex,
+        /// The outer member, whose first star is the one the orbit brought in.
+        outer: NodeIndex,
+        /// The relative orbit, with the pair's gravitational parameter `G (M_inner + M_outer)`.
+        orbit: KeplerElements,
+    },
+}
+
+/// A system's stars and the orbits that hold them together (plan 11, P11.T2.a).
+///
+/// The nodes are listed depth first from the root, node 0, each pair's inner member before its
+/// outer one; the stars are listed by body index, which is the order in which that list meets
+/// them. A single star is one node.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::stellar::multiplicity::{
+///     HierarchyNode, MultiplicityContext, RedrawAttempt, draw_hierarchy,
+/// };
+///
+/// let galaxy = Galaxy::new(Seed::new(11));
+/// let key = CellKey::new(Layer::C, [0, 812, 0])?;
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, key, &mut cell);
+/// let record = cell.first().expect("layer C is not empty at the solar circle");
+/// let context = MultiplicityContext::ForcedMultiple { max_separation: None };
+/// let stars = draw_hierarchy(&galaxy, record, context, RedrawAttempt::FIRST);
+/// // The primary is star 0 and no companion outweighs it.
+/// let primary = stars.stars()[0].initial_mass();
+/// assert_eq!(primary, record.primary_initial_mass());
+/// assert!(stars.stars().iter().all(|s| s.initial_mass() <= primary));
+/// if stars.star_count() > 1 {
+///     assert!(matches!(stars.node(stars.root()), HierarchyNode::Pair { .. }));
+/// }
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemHierarchy {
+    nodes: Vec<HierarchyNode>,
+    stars: Vec<StarSlot>,
+    /// The total initial mass of each node, by node index: a star's own, a pair's its inner
+    /// member's plus its outer member's.
+    node_masses: Vec<SolarMasses>,
+    dropped: u8,
+}
+
+impl SystemHierarchy {
+    /// The root, the whole system: [`NodeIndex::ROOT`].
+    #[must_use]
+    pub const fn root(&self) -> NodeIndex {
+        NodeIndex::ROOT
+    }
+
+    /// Every node, depth first from the root.
+    #[must_use]
+    pub fn nodes(&self) -> &[HierarchyNode] {
+        &self.nodes
+    }
+
+    /// The node `index`.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not a node of this hierarchy.
+    #[must_use]
+    pub fn node(&self, index: NodeIndex) -> &HierarchyNode {
+        &self.nodes[usize::from(index.0)]
+    }
+
+    /// Every star, by body index: the primary first.
+    #[must_use]
+    pub fn stars(&self) -> &[StarSlot] {
+        &self.stars
+    }
+
+    /// The star `index`.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not a star of this hierarchy.
+    #[must_use]
+    pub fn star(&self, index: StarIndex) -> &StarSlot {
+        &self.stars[usize::from(index.0)]
+    }
+
+    /// The number of stars, 1 to 2 + [`MAX_COMPANIONS`](super::MAX_COMPANIONS).
+    ///
+    /// A brown-dwarf companion (P11.T2.d) is counted with the stars: it is one of
+    /// [`stars`](Self::stars), with [`SlotKind::BrownDwarf`], and one of the system's bodies at the
+    /// stellar level.
+    ///
+    /// # Panics
+    ///
+    /// Never: a hierarchy holds at most four stars and a brown dwarf.
+    #[must_use]
+    pub fn star_count(&self) -> u8 {
+        u8::try_from(self.stars.len()).expect("a hierarchy holds at most five bodies")
+    }
+
+    /// The total initial mass of the stars under `index`, M☉.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not a node of this hierarchy.
+    #[must_use]
+    pub fn node_mass(&self, index: NodeIndex) -> SolarMasses {
+        self.node_masses[usize::from(index.0)]
+    }
+
+    /// The total initial mass of the system's stars, M☉: the root's
+    /// [`node_mass`](Self::node_mass).
+    ///
+    /// It is summed down the tree, each pair's inner member and then its outer one, and it is the
+    /// mass the tidal cut was tested at. Read it here rather than summing
+    /// [`stars`](Self::stars) in body order, which can differ in the last bit.
+    #[must_use]
+    pub fn system_mass(&self) -> SolarMasses {
+        self.node_masses[0]
+    }
+
+    /// Every pair with its orbit, depth first.
+    pub fn pairs(&self) -> impl Iterator<Item = (NodeIndex, &KeplerElements)> {
+        self.nodes
+            .iter()
+            .zip(0_u8..)
+            .filter_map(|(node, i)| match node {
+                HierarchyNode::Pair { orbit, .. } => Some((NodeIndex(i), orbit)),
+                HierarchyNode::Star(_) => None,
+            })
+    }
+
+    /// The first star of node `index` in depth-first order: the node's own primary, its
+    /// lowest-indexed and heaviest star.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not a node of this hierarchy.
+    #[must_use]
+    pub fn first_star(&self, index: NodeIndex) -> StarIndex {
+        let mut node = index;
+        loop {
+            match self.node(node) {
+                HierarchyNode::Star(star) => return *star,
+                HierarchyNode::Pair { inner, .. } => node = *inner,
+            }
+        }
+    }
+
+    /// The body whose ID keys the `binary.*` streams of pair `index`: the lowest-indexed star of
+    /// its outer member, the star the orbit brought in (Design note 5); `None` for a star.
+    ///
+    /// For a primary drawn by the direct construction ([`draw_hierarchy`], "Massive primaries"),
+    /// the streams are keyed by draw slot instead, and this is only a distinct body of the pair
+    /// (ruling 81).
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not a node of this hierarchy.
+    #[must_use]
+    pub fn pair_key(&self, index: NodeIndex) -> Option<BodyId> {
+        match self.node(index) {
+            HierarchyNode::Pair { outer, .. } => Some(self.star(self.first_star(*outer)).body),
+            HierarchyNode::Star(_) => None,
+        }
+    }
+
+    /// How many companions the multiplicity draw asked for that the stability test could not
+    /// place (P11.T2.b): 0 for nearly every system.
+    #[must_use]
+    pub const fn dropped_companions(&self) -> u8 {
+        self.dropped
+    }
+
+    /// The bytes the hierarchy owns on the heap, beyond `size_of::<SystemHierarchy>()`: its lists
+    /// of nodes, stars and node masses, by capacity. For the server's byte-bounded system cache
+    /// (plan 06, P06.T34); nothing generated reads it.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.nodes.capacity() * size_of::<HierarchyNode>()
+            + self.stars.capacity() * size_of::<StarSlot>()
+            + self.node_masses.capacity() * size_of::<SolarMasses>()
+    }
+}
+
+/// Draws the stars of the system `record` and the orbits that bind them (plan 11, P11.T2.a–b).
+///
+/// The primary is the record's own star, body 0, with its
+/// [`primary_initial_mass`](SystemRecord::primary_initial_mass), placement's `system.primary_mass`
+/// draw: plan 06's per-star draws ([`StarDraws`](crate::stellar::draws::StarDraws)) hold no mass,
+/// and its star model takes the same accessor. Companions, their masses and every orbit are
+/// drawn as the sections below describe, on the words of `attempt`. The model is
+/// [`MultiplicityModel::default_v1`]; the tidal radius is plan 02's
+/// [`tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) at the record's
+/// epoch position; the context is `ctx`.
+///
+/// For a primary of [`stripped_mark_min_mass`] or more (except under
+/// [`ForcedSingle`](MultiplicityContext::ForcedSingle)), plan 06's companion-stripped mark,
+/// [`StarDraws::stripped`](crate::stellar::draws::StarDraws::stripped) of the primary at its
+/// record's attempt (0 for a grid record), is read first against the primary's stripped share s
+/// at the record's [`draw_metallicity`], plan 08's seam
+/// ([`binarity::stripped_share`](crate::galaxy::displaced::binarity::stripped_share); P11.T1.d,
+/// Design note 1). When it is set the system is multiple and the primary's own orbit has its
+/// periastron in the primary's stripping band for the orbit's mass ratio
+/// ([`binarity::stripping_band`](crate::galaxy::displaced::binarity::stripping_band)); when it is
+/// not, the system is multiple with probability `(MF − s) ÷ (1 − s)` and that orbit's periastron
+/// lies outside the band, in the merger band, beyond it (Case C) or wide (ruling 123.5). Both are
+/// conditional draws, the orbit's by rejection among its tries, and they keep the share of
+/// stripped primaries at the mark's. The mark is the primary's own draws' (the system stage's
+/// `primary_draws`): attempt 0 for a grid record until plan 08's `SystemRecord::mark_attempt`
+/// exists (P11.T2.c's second seam), and a feature member's conditional-draw attempt.
+/// [`draw_hierarchy_of_composition`] judges the mark at a feature member's own composition.
+///
+/// P11.T2.c wires it into the system stage:
+/// [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) calls
+/// `draw_hierarchy(galaxy, record, MultiplicityContext::Free, RedrawAttempt::FIRST)` for grid
+/// systems, and [`SystemStars::generate_in`](crate::stellar::system::SystemStars::generate_in)
+/// passes any other context.
+///
+/// A system at the galactic centre itself has a tidal radius of zero, so it has no room for any
+/// companion and comes out single.
+///
+/// # The draw
+///
+/// [`draw_hierarchy`] makes a system's stars from its record, as a pure function of the seed, the
+/// system's ID, the context and the redraw attempt:
+///
+/// 1. **Multiplicity.** One mark on `system.multiplicity` decides whether the primary has
+///    companions, with probability [`MultiplicityModel::multiple_fraction`], and one more picks
+///    how many from [`MultiplicityModel::companion_count_pmf`] given that it has.
+/// 2. **Companions, one at a time.** Each companion joins one node of the hierarchy's outer spine:
+///    the whole system (a new outermost orbit), or the outer member at any level down to its last
+///    star (a new orbit inside that member). Each try of its orbit picks the node afresh, together
+///    with the period (see "Where a companion goes").
+/// 3. **The orbit.** Its node and period, mass ratio and eccentricity come from the model's
+///    distributions on `binary.orbit`, its isotropic orientation on `binary.orientation` and its
+///    mean anomaly at the epoch on `binary.phase`, all three keyed by the companion's own body ID.
+/// 4. **Stability.** The whole hierarchy with the new orbit must pass the whole test: Mardling and
+///    Aarseth's criterion for every pair ([`mardling_aarseth_limit`](super::mardling_aarseth_limit)),
+///    every apocentre inside half the tidal radius ([`TIDAL_CUT_SHARE`](super::TIDAL_CUT_SHARE)),
+///    every semi-major axis inside a forced multiple's widest separation, and the primary's
+///    companion-stripped mark. If it does not, the new orbit alone is redrawn, on the next draw
+///    numbers of the same attempt, up to [`MAX_STABILITY_REDRAWS`] times; then the companion, and
+///    every later one, is dropped. No orbit already placed is ever redrawn.
+///
+/// # Massive primaries: direct companions as Moe and Di Stefano count them (ruling 81)
+///
+/// From 3 M☉ up, and for a share of primaries of 1.5–3 M☉ rising linearly in ln M₁ from 0 to 1
+/// (one mark, word 64n + 2 of `system.multiplicity`), the draw is not the spine construction
+/// below. The number n of direct companions, 0–3, is drawn from Moe and Di Stefano's (2017)
+/// Table 13 (`direct_count_pmf`, on words 64n and 64n + 1 as the spine construction's count).
+/// Each of draw slots 1 to n draws its companion independently, its period from their
+/// `f_logP;q>0.1` with a fitted correction (`PERIOD_CORRECTION`) and its mass ratio on q = 0.1–1
+/// from their laws at that period. The companions are kept sorted by period, each an outer orbit
+/// about everything inside it. Slot by slot, the newest companion is inserted and the whole
+/// hierarchy must pass the whole test; if it fails, that companion alone is drawn again on its
+/// slot's next try, up to 41 redraws (the last 21 keyed by draw slot k + 8), and then it is
+/// dropped and counted (ruling 81 as amended). Then each direct companion may gain one
+/// subsystem companion of its own, at its own mass's rate times Tokovinin's ε, on the words of
+/// draw slot 3 + k, kept only if it passes the whole test (Tokovinin's dynamical truncation; see
+/// `Draw::place_subsystem`), while the system holds fewer than four stars.
+///
+/// Draws are keyed by the draw slot, and body indices are given after sorting, depth first, so
+/// the paragraph below does not hold for these systems: companion k is not body k, and a pair's
+/// streams are keyed by its draw slot, not by [`SystemHierarchy::pair_key`].
+///
+/// # Numbering and keys (Design note 5)
+///
+/// The primary is star 0. A companion only ever joins the outer spine, and the new star becomes
+/// the outer member of the pair it forms, so it comes last in the hierarchy's depth-first order
+/// (inner member before outer). The order of drawing is therefore the depth-first order, and
+/// companion k is star k, body index k, known when its orbit is drawn. That orbit's pair has the
+/// new star as its outer member, and later companions only join the new star or pairs outside
+/// it, so the new star stays the lowest-indexed star of the pair's outer member: "the star the
+/// orbit brings in", whose [`BodyId`] keys the pair's `binary.*` streams. No two pairs share a
+/// key, and no pair is keyed by the primary.
+///
+/// # Where a companion goes
+///
+/// Every hierarchy shape can be built this way, in some order of drawing: a triple with its
+/// inner pair about the primary, one with a pair as its outer member (Tokovinin 2014, AJ 147, 87,
+/// finds these "almost as frequent" among solar-type stars), 3 + 1 and 2 + 2 quadruples, and so
+/// on. For each candidate node the necessary conditions of the stability test bound the new
+/// orbit's semi-major axis, and with the range of its mass, its period: the criterion's smallest
+/// axis ratio, 1.96 (C = 2.8 times the smallest inclination factor, 0.7), against the orbit the
+/// new one encloses; against the orbit that encloses it, the criterion with that orbit's own
+/// eccentricity, which is known; and the tidal cut for a new outermost orbit. Each node's window
+/// has a weight, its period distribution's share inside the window, times Tokovinin's (2014)
+/// correlation of subsystems for a node inside a secondary component ([`SUBSYSTEM_WEIGHT_SINGLE`]
+/// and [`SUBSYSTEM_WEIGHT_PAIRED`], ruling 74). One mark then picks both the
+/// node, by integer thresholds on the weights, and the period, by inverse transform inside that
+/// node's window of the mark's residual, and the whole test accepts or rejects the try.
+///
+/// That is rejection sampling of the pair (node, orbit), so it is exact: a companion joins a node
+/// with probability proportional to the node's correlation weight times the chance that an orbit
+/// drawn for that node from the model's distributions passes the test, and its orbit is the
+/// model's, conditioned on passing. The
+/// windows only make it cheap, because every period outside them would fail. The one inexact
+/// case is the cap of 17 tries, after which the companion is dropped.
+///
+/// # The laws a companion is drawn from
+///
+/// Moe and Di Stefano (2017, ApJS 230, 15, §2 and §5) define a tertiary's period and mass ratio
+/// "with respect to the solar-type primary": "We do not define the mass ratio of the wide system
+/// to be q = `M_B ÷ (M_Aa + M_Ab)` as done in Raghavan et al. (2010)". Tokovinin (2014, §4.3)
+/// draws the periods of outer and inner pairs "recursively from the same log-normal
+/// distribution". So a companion's period and mass-ratio laws are the model's at the mass of the
+/// first star of the node it joins, the node's own primary (the system's primary for the whole
+/// system), and its mass is that star's mass times the ratio. Every star is therefore at most as
+/// heavy as the primary, and at least [`MIN_COMPANION_MASS`].
+///
+/// # Orbits
+///
+/// A pair's period, eccentricity, orientation and phase are drawn when it forms; its orbit is an
+/// [`orbit::KeplerElements`](KeplerElements) built from the period with the pair's own
+/// gravitational parameter, `G (M_inner + M_outer)`, of its members' total initial masses. A
+/// companion that later joins one of its members changes that μ and so the pair's semi-major
+/// axis, at the same period, which is why every test runs on the whole hierarchy as it stands.
+///
+/// # Draw numbers (Design note 9)
+///
+/// Attempt n reads words 64n to 64n + 63 of every stream here ([`DRAWS_PER_ATTEMPT`]):
+///
+/// | Stream                | Key          | Words of attempt n                                    |
+/// | --------------------- | ------------ | ----------------------------------------------------- |
+/// | `system.multiplicity` | the system   | 64n: multiple or not; 64n + 1: the companion count    |
+/// | `binary.orbit`        | companion k  | 64n + 3r: try r's node and period (one mark); + 1, + 2: its mass ratio and eccentricity |
+/// | `binary.orientation`  | companion k  | 64n + 3r, + 1, + 2: try r's cos i, ascending node, argument of periapsis |
+/// | `binary.phase`        | companion k  | 64n + r: try r's mean anomaly at the epoch            |
+///
+/// Try r runs from 0 to [`MAX_STABILITY_REDRAWS`], so the orbit streams use 51 of their 64 words.
+/// Every word is read by its number, so an attempt drawn alone equals the same attempt drawn after
+/// any others, and a redraw never touches another attempt's words. The primary's own draws
+/// (plan 06's `StarDraws`) are never redrawn here.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::stellar::multiplicity::{MultiplicityContext, RedrawAttempt, draw_hierarchy};
+///
+/// let galaxy = Galaxy::new(Seed::new(11));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// let record = cell.first().expect("layer C is not empty at the solar circle");
+/// let stars = draw_hierarchy(&galaxy, record, MultiplicityContext::Free, RedrawAttempt::FIRST);
+/// // A pure function of the ID and the attempt.
+/// assert_eq!(stars, draw_hierarchy(&galaxy, record, MultiplicityContext::Free, RedrawAttempt::FIRST));
+/// let single = draw_hierarchy(&galaxy, record, MultiplicityContext::ForcedSingle, RedrawAttempt::FIRST);
+/// assert_eq!(single.star_count(), 1);
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
+#[must_use]
+pub fn draw_hierarchy(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> SystemHierarchy {
+    let stars = draw_hierarchy_with(galaxy, record, None, ctx, attempt, &PERIOD_CORRECTION);
+    substellar::with_companion(galaxy, record, ctx, attempt, stars)
+}
+
+/// [`draw_hierarchy`] of a system whose composition is `composition` rather than the grid's
+/// [`draw_metallicity`] of its record: a feature member's, which carries no density component and
+/// takes its cluster's composition (plan 09, P09.T10). The primary's stripped mark is judged at
+/// that composition. For a grid record and its own drawn composition it is `draw_hierarchy`, bit
+/// for bit.
+///
+/// # Panics
+///
+/// As [`draw_hierarchy`].
+#[must_use]
+pub fn draw_hierarchy_of_composition(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> SystemHierarchy {
+    let stars = draw_hierarchy_with(
+        galaxy,
+        record,
+        Some(composition),
+        ctx,
+        attempt,
+        &PERIOD_CORRECTION,
+    );
+    substellar::with_companion(galaxy, record, ctx, attempt, stars)
+}
+
+/// [`draw_hierarchy`]'s stars, without the brown-dwarf companion, with the direct companions'
+/// period law corrected by `correction`, at `composition` if given and otherwise at the record's
+/// [`draw_metallicity`]: for the fit of [`PERIOD_CORRECTION`], which counts stars only, and for
+/// the draw itself, which adds the companion after.
+#[must_use]
+pub(super) fn draw_hierarchy_with(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Option<&Composition>,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+    correction: &[[f64; 8]; 4],
+) -> SystemHierarchy {
+    let model = MultiplicityModel::default_v1();
+    let draw = Draw {
+        model: &model,
+        streams: Streams::new(galaxy, record.id(), attempt),
+        limits: Limits::new(
+            galaxy.potential(),
+            PointLy::from(record.epoch_position()),
+            match ctx {
+                MultiplicityContext::ForcedMultiple { max_separation } => max_separation,
+                MultiplicityContext::Free | MultiplicityContext::ForcedSingle => None,
+            },
+            innermost(galaxy, record, composition, ctx),
+        ),
+        correction,
+    };
+    let m0 = record.primary_initial_mass();
+    if draw.is_direct(m0) {
+        return draw.direct(m0, ctx);
+    }
+    let count = draw.companion_count(&model.companion_count_pmf(m0), ctx);
+    let mut draft = Draft::single(m0);
+    let mut placed = 0;
+    for k in 1..=count {
+        match draw.place(&draft, k) {
+            Some(next) => {
+                draft = next;
+                placed = k;
+            }
+            None => break,
+        }
+    }
+    draft.build(record.id(), count - placed)
+}
+
+/// Whether the primary of `m0` has its direct companions drawn as Moe and Di Stefano count them,
+/// read from the attempt's `streams`: what [`Draw::is_direct`] decides, for [`draw_star_count`] too.
+#[must_use]
+fn is_direct(streams: &Streams, m0: SolarMasses) -> bool {
+    let weight = direct_weight(m0);
+    if weight <= 0.0 {
+        false
+    } else if weight >= 1.0 {
+        true
+    } else {
+        streams
+            .system_mark(tags::SYSTEM_MULTIPLICITY, BLEND_WORD)
+            .is_below(Threshold::from_probability(weight))
+    }
+}
+
+/// How many stars the hierarchy [`draw_hierarchy`] draws for `record` under `ctx` at `attempt`
+/// holds: its [`SystemHierarchy::star_count`], always, at the cost of the count alone for a system
+/// drawn single (plan 06, P06.T38.e; ruling 90).
+///
+/// A range query's brief needs a system's star count and nothing else of its hierarchy. The draw
+/// decides first how many companions to try (the words `system.multiplicity` 0–2 and, above
+/// 8 M☉, the primary's stripped mark), and only then builds the tidal limit, the period laws and
+/// the orbits that the stability test keeps or drops. A system drawn with no companion to try is
+/// single whatever follows, so its count is read from those words alone; one with companions is
+/// drawn in full, since which of them survive depends on their orbits. The words read are the
+/// full draw's, so no stream is consumed differently.
+///
+/// # Panics
+///
+/// As [`draw_hierarchy`].
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::stellar::multiplicity::{
+///     MultiplicityContext, RedrawAttempt, draw_hierarchy, draw_star_count,
+/// };
+///
+/// let galaxy = Galaxy::new(Seed::new(11));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// for record in &cell {
+///     let (ctx, attempt) = (MultiplicityContext::Free, RedrawAttempt::FIRST);
+///     assert_eq!(
+///         draw_star_count(&galaxy, record, ctx, attempt),
+///         draw_hierarchy(&galaxy, record, ctx, attempt).star_count(),
+///     );
+/// }
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
+#[must_use]
+pub fn draw_star_count(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> u8 {
+    star_count_with(galaxy, record, None, ctx, attempt)
+}
+
+/// [`draw_star_count`] of a system whose composition is `composition`, as
+/// [`draw_hierarchy_of_composition`]: its hierarchy's star count, always.
+///
+/// # Panics
+///
+/// As [`draw_hierarchy`].
+#[must_use]
+pub fn draw_star_count_of_composition(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> u8 {
+    star_count_with(galaxy, record, Some(composition), ctx, attempt)
+}
+
+/// [`draw_star_count`] at `composition` if given, and otherwise at the record's
+/// [`draw_metallicity`].
+#[must_use]
+fn star_count_with(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Option<&Composition>,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> u8 {
+    let model = MultiplicityModel::default_v1();
+    let streams = Streams::new(galaxy, record.id(), attempt);
+    let m0 = record.primary_initial_mass();
+    let pmf = if is_direct(&streams, m0) {
+        direct_count_pmf(m0)
+    } else {
+        model.companion_count_pmf(m0)
+    };
+    if companion_count(
+        &streams,
+        innermost(galaxy, record, composition, ctx),
+        &pmf,
+        ctx,
+    ) == 0
+        && !substellar::wants_companion(galaxy.seed(), record.id(), m0, ctx, attempt)
+    {
+        return 1;
+    }
+    let stars = draw_hierarchy_with(
+        galaxy,
+        record,
+        composition,
+        ctx,
+        attempt,
+        &PERIOD_CORRECTION,
+    );
+    substellar::with_companion(galaxy, record, ctx, attempt, stars).star_count()
+}
+
+/// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1; ruling 123.5),
+/// at `composition` if given and otherwise at the record's [`draw_metallicity`], which is a grid
+/// record's alone. The mark is the primary's own, read at the attempt its record carries (0 for a
+/// grid record, a feature member's conditional-draw attempt otherwise), as
+/// [`SystemStars`](crate::stellar::system::SystemStars) reads its draws.
+#[must_use]
+fn innermost(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Option<&Composition>,
+    ctx: MultiplicityContext,
+) -> Innermost {
+    match ctx {
+        MultiplicityContext::ForcedSingle => return Innermost::Free,
+        MultiplicityContext::Free | MultiplicityContext::ForcedMultiple { .. } => {}
+    }
+    let m1 = record.primary_initial_mass();
+    if m1 < STRIPPED_MARK_FLOOR {
+        return Innermost::Free;
+    }
+    let comp = composition.map_or_else(|| draw_metallicity(galaxy, record), |c| *c);
+    if m1 < stripped_mark_min_mass(&comp) {
+        return Innermost::Free;
+    }
+    let mark = primary_draws(galaxy, record).stripped();
+    // One reading of the seam for the share and the radii: `binarity::is_stripped`'s comparison
+    // on the share it would read.
+    let node = binarity::stripping_node(m1, &comp);
+    let (radii, share) = (node.radii(), node.share());
+    if mark != binarity::NEVER_STRIPPED && binarity::is_stripped_at(mark, share) {
+        Innermost::Stripped(radii)
+    } else {
+        Innermost::Unstripped { radii, share }
+    }
+}
+
+/// The streams of one system's attempt: where each draw is read.
+#[derive(Debug, Clone, Copy)]
+struct Streams {
+    seed: Seed,
+    system: SystemId,
+    base: u64,
+}
+
+impl Streams {
+    #[must_use]
+    fn new(galaxy: &Galaxy, system: SystemId, attempt: RedrawAttempt) -> Self {
+        Self {
+            seed: galaxy.seed(),
+            system,
+            base: attempt.first_draw(),
+        }
+    }
+
+    /// Word `offset` of the attempt's block of the system's stream `tag`, as a mark.
+    #[must_use]
+    fn system_mark(&self, tag: DomainTag, offset: u64) -> Mark {
+        let stream = Stream::open(self.seed, tag, ObjectKey::from(self.system));
+        Mark::from_word(stream.word_at(self.base + offset))
+    }
+
+    /// Companion `body`'s stream `tag`.
+    #[must_use]
+    fn body_stream(&self, tag: DomainTag, body: u8) -> Stream {
+        let key = ObjectKey::from(BodyId::new(self.system, u16::from(body)));
+        Stream::open(self.seed, tag, key)
+    }
+}
+
+/// One system's draw: the model, the streams and the limits.
+#[derive(Clone, Copy)]
+struct Draw<'a> {
+    model: &'a MultiplicityModel,
+    streams: Streams,
+    limits: Limits<'a>,
+    /// The correction of the direct companions' period law ([`PERIOD_CORRECTION`]).
+    correction: &'a [[f64; 8]; 4],
+}
+
+/// A node the next companion may join, with its period window and the window's weight.
+#[derive(Debug, Clone)]
+struct Host {
+    /// The node, in the draft's arena.
+    node: usize,
+    /// The initial mass of the node's first star, at which the companion's laws are taken.
+    first_mass: SolarMasses,
+    periods: PeriodDistribution,
+    /// The window's limits.
+    lo: Days,
+    hi: Days,
+    /// The period distribution's share inside the window.
+    weight: f64,
+}
+
+impl Draw<'_> {
+    /// How many companions a primary whose count distribution is `pmf` has under `ctx`, before
+    /// stability: 0 to [`MAX_COMPANIONS`].
+    #[must_use]
+    fn companion_count(&self, pmf: &[f64; MAX_COMPANIONS + 1], ctx: MultiplicityContext) -> u8 {
+        companion_count(&self.streams, self.limits.innermost(), pmf, ctx)
+    }
+}
+
+/// How many companions a primary whose count distribution is `pmf` and whose innermost orbit is
+/// held to `innermost` has under `ctx`, before stability, read from the attempt's `streams`: what
+/// [`Draw::companion_count`] draws, for [`draw_star_count`] too.
+#[must_use]
+fn companion_count(
+    streams: &Streams,
+    innermost: Innermost,
+    pmf: &[f64; MAX_COMPANIONS + 1],
+    ctx: MultiplicityContext,
+) -> u8 {
+    let multiples = &pmf[1..];
+    let multiple_share = multiples.iter().fold(0.0, |sum, &p| sum + p);
+    let multiple = match (ctx, innermost) {
+        (MultiplicityContext::ForcedSingle, _) => false,
+        (MultiplicityContext::ForcedMultiple { .. }, _)
+        | (MultiplicityContext::Free, Innermost::Stripped(_)) => true,
+        (MultiplicityContext::Free, Innermost::Free) => streams
+            .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
+            .is_below(Threshold::from_probability(multiple_share.clamp(0.0, 1.0))),
+        (MultiplicityContext::Free, Innermost::Unstripped { share: s, .. }) => {
+            let p = ((multiple_share - s) / (1.0 - s)).clamp(0.0, 1.0);
+            streams
+                .system_mark(tags::SYSTEM_MULTIPLICITY, 0)
+                .is_below(Threshold::from_probability(p))
+        }
+    };
+    if !multiple {
+        return 0;
+    }
+    let extra = streams
+        .system_mark(tags::SYSTEM_MULTIPLICITY, 1)
+        .pick_weighted(multiples, multiple_share)
+        .expect("the last count's threshold is the whole share, which every mark lies below");
+    u8::try_from(1 + extra).expect("at most three companions")
+}
+
+impl Draw<'_> {
+    /// The draft with companion `k` placed, or `None` if it cannot be.
+    #[must_use]
+    fn place(&self, draft: &Draft, k: u8) -> Option<Draft> {
+        let hosts = self.hosts(draft);
+        let weights: Vec<f64> = hosts.iter().map(|h| h.weight).collect();
+        let total = weights.iter().fold(0.0, |sum, &w| sum + w);
+        if total <= 0.0 {
+            return None;
+        }
+        let windows = Thresholds::from_weights(&weights, total);
+        let mut orbits = self.streams.body_stream(tags::BINARY_ORBIT, k);
+        let mut orientations = self.streams.body_stream(tags::BINARY_ORIENTATION, k);
+        let mut phases = self.streams.body_stream(tags::BINARY_PHASE, k);
+        let base = self.streams.base;
+        (0..=MAX_STABILITY_REDRAWS).find_map(|r| {
+            orbits.seek(base + WORDS_PER_TRY * r);
+            orientations.seek(base + WORDS_PER_TRY * r);
+            phases.seek(base + r);
+            let (index, u) = pick_window(&windows, orbits.mark());
+            let host = &hosts[index];
+            let (mass, orbit) =
+                self.try_orbit(host, u, &mut orbits, &mut orientations, &mut phases)?;
+            let next = draft.joined(host.node, mass, orbit);
+            self.limits
+                .admits(&next.build(self.streams.system, 0))
+                .then_some(next)
+        })
+    }
+
+    /// One try of a companion's initial mass and orbit about `host`, its period the share `u` of
+    /// the way through the host's window, or `None` for an eccentricity an open orbit would have
+    /// to carry.
+    #[must_use]
+    fn try_orbit(
+        &self,
+        host: &Host,
+        u: f64,
+        orbits: &mut Stream,
+        orientations: &mut Stream,
+        phases: &mut Stream,
+    ) -> Option<(SolarMasses, DraftOrbit)> {
+        let period = host.periods.quantile_in(u, host.lo, host.hi);
+        let q = self
+            .model
+            .mass_ratio_distribution(host.first_mass, period)
+            .sample(orbits);
+        let e = self
+            .model
+            .eccentricity_distribution(host.first_mass, period)
+            .sample(orbits);
+        let orbit = draft_orbit(period, e, orientations, phases)?;
+        Some((host.first_mass * q, orbit))
+    }
+
+    /// Every node of the draft's outer spine, from the root to its last star, with the window
+    /// the necessary conditions leave for a new orbit about it ([`draw_hierarchy`], "Where a
+    /// companion goes").
+    #[must_use]
+    fn hosts(&self, draft: &Draft) -> Vec<Host> {
+        let spine = draft.spine();
+        let system_mass = draft.mass(draft.root);
+        spine
+            .iter()
+            .enumerate()
+            .map(|(level, &node)| {
+                let first_mass = draft.masses[usize::from(draft.first_star(node))];
+                let node_mass = draft.mass(node);
+                let lightest = SolarMasses::new(MIN_COMPANION_MASS.value().min(first_mass.value()));
+                // The new orbit encloses this node's own orbit, if it has one.
+                let a_lo = match draft.nodes[node] {
+                    DraftNode::Pair { orbit, .. } => {
+                        semi_major_axis(orbit.period, node_mass) * NECESSARY_AXIS_RATIO
+                    }
+                    DraftNode::Star(_) => Metres::ZERO,
+                };
+                // A new outermost orbit must fit the tidal cut; any other must fit inside the
+                // orbit of the pair whose outer member it joins, with the new mass added.
+                let a_hi = match level.checked_sub(1).map(|up| spine[up]) {
+                    None => self.limits.widest_axis(system_mass + first_mass),
+                    Some(parent) => widest_inside(draft, parent, node_mass + first_mass),
+                };
+                let p_lo = period_of(a_lo, node_mass + first_mass) * (1.0 - WINDOW_MARGIN);
+                let p_hi = period_of(a_hi, node_mass + lightest) * (1.0 + WINDOW_MARGIN);
+                let periods = self.model.period_distribution(first_mass);
+                let shortest = math::exp10(periods.support().0);
+                let lo = Days::new(Days::from(p_lo).value().max(shortest));
+                let hi = Days::from(p_hi);
+                let placement = match level.checked_sub(1).map(|up| spine[up]) {
+                    None => 1.0,
+                    Some(parent) => subsystem_weight(draft, parent),
+                };
+                let weight = if hi > lo {
+                    placement * periods.share_in(lo, hi)
+                } else {
+                    0.0
+                };
+                Host {
+                    node,
+                    first_mass,
+                    periods,
+                    lo,
+                    hi,
+                    weight,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Tokovinin's (2014, AJ 147, 87, §4.1) factor on a direct companion's own subsystem rate when the
+/// primary has no inner pair inside that companion's orbit: ε₋ = 0.5.
+const SUBSYSTEM_EPSILON_WITHOUT_INNER: f64 = 0.5;
+
+/// Tokovinin's (2014, §4.1) factor on a direct companion's own subsystem rate when the primary
+/// already has an inner pair inside that companion's orbit: ε₊ = 1.2.
+const SUBSYSTEM_EPSILON_WITH_INNER: f64 = 1.2;
+
+/// The word of `system.multiplicity`, within an attempt's block, that picks the construction of a
+/// primary in the blend (1.5–3 M☉).
+const BLEND_WORD: u64 = 2;
+
+/// The first word of `system.multiplicity`, within an attempt's block, that decides the
+/// subsystem of direct companion k: word `SUBSYSTEM_WORD + k`, k = 1–3.
+const SUBSYSTEM_WORD: u64 = 3;
+
+/// One direct companion as drawn: its draw slot, initial mass and orbit.
+#[derive(Debug, Clone, Copy)]
+struct DirectCompanion {
+    slot: u8,
+    mass: SolarMasses,
+    orbit: DraftOrbit,
+}
+
+/// The rate at which a direct companion of initial mass `m` has a companion of its own, before
+/// Tokovinin's ε: the share of primaries of that mass with a direct companion, Moe and Di
+/// Stefano's Table 13 from 2 M☉ up and Duchêne and Kraus's multiple fraction below (ruling 81).
+#[must_use]
+fn subsystem_rate(model: &MultiplicityModel, m: SolarMasses) -> f64 {
+    if m.value() >= 2.0 {
+        direct_multiple_fraction(m)
+    } else {
+        model.multiple_fraction(m)
+    }
+}
+
+/// A draft of the primary of `m0` and its direct companions, each an outer orbit about all that
+/// lies inside it, in period order, with the subsystem of each if it has one: the nodes laid out
+/// so that body indices run depth first (Design note 5). Also the arena index of the pair each
+/// direct companion's orbit forms.
+#[must_use]
+fn assemble(
+    m0: SolarMasses,
+    companions: &[DirectCompanion],
+    subsystems: &[Option<(SolarMasses, DraftOrbit)>],
+) -> (Draft, Vec<usize>) {
+    let mut draft = Draft::single(m0);
+    let mut pairs = Vec::with_capacity(companions.len());
+    for (j, companion) in companions.iter().enumerate() {
+        let body = u8::try_from(draft.masses.len()).expect("at most four stars");
+        draft.masses.push(companion.mass);
+        let star = draft.nodes.len();
+        draft.nodes.push(DraftNode::Star(body));
+        let outer = match subsystems.get(j).copied().flatten() {
+            Some((mass, orbit)) => {
+                let body = u8::try_from(draft.masses.len()).expect("at most four stars");
+                draft.masses.push(mass);
+                let sub = draft.nodes.len();
+                draft.nodes.push(DraftNode::Star(body));
+                draft.nodes.push(DraftNode::Pair {
+                    inner: star,
+                    outer: sub,
+                    orbit,
+                });
+                draft.nodes.len() - 1
+            }
+            None => star,
+        };
+        draft.nodes.push(DraftNode::Pair {
+            inner: draft.root,
+            outer,
+            orbit: companion.orbit,
+        });
+        draft.root = draft.nodes.len() - 1;
+        pairs.push(draft.root);
+    }
+    (draft, pairs)
+}
+
+impl Draw<'_> {
+    /// Whether the primary of `m0` has its direct companions drawn as Moe and Di Stefano count
+    /// them: always from 3 M☉, never up to 1.5 M☉, and between by a mark on `system.multiplicity`
+    /// with the weight [`direct_weight`].
+    #[must_use]
+    fn is_direct(&self, m0: SolarMasses) -> bool {
+        is_direct(&self.streams, m0)
+    }
+
+    /// The `binary.orbit`, `binary.orientation` and `binary.phase` streams of draw slot `slot`,
+    /// at try `try_index` of the direct construction: tries 0–20 on the slot's own key, tries
+    /// 21–41 on slot + [`DIRECT_OVERFLOW_SLOT`], each three words of the first two streams and one
+    /// of the third within the attempt's block.
+    #[must_use]
+    fn try_streams(&self, slot: u8, try_index: u64) -> [Stream; 3] {
+        let (key, local) = if try_index < DIRECT_TRIES_PER_KEY {
+            (slot, try_index)
+        } else {
+            (
+                slot + DIRECT_OVERFLOW_SLOT,
+                try_index - DIRECT_TRIES_PER_KEY,
+            )
+        };
+        let base = self.streams.base;
+        let mut orbits = self.streams.body_stream(tags::BINARY_ORBIT, key);
+        let mut orientations = self.streams.body_stream(tags::BINARY_ORIENTATION, key);
+        let mut phases = self.streams.body_stream(tags::BINARY_PHASE, key);
+        orbits.seek(base + WORDS_PER_TRY * local);
+        orientations.seek(base + WORDS_PER_TRY * local);
+        phases.seek(base + local);
+        [orbits, orientations, phases]
+    }
+
+    /// One draw of direct companion slot `k`, on try `r` of the attempt's block: its period from
+    /// the corrected law, its mass ratio from Moe and Di Stefano's law at that period, its
+    /// eccentricity, orientation and phase; `None` for an eccentricity an open orbit would carry.
+    #[must_use]
+    fn direct_try(
+        &self,
+        m0: SolarMasses,
+        periods: &DirectPeriods,
+        slot: u8,
+        try_index: u64,
+    ) -> Option<DirectCompanion> {
+        let [mut orbits, mut orientations, mut phases] = self.try_streams(slot, try_index);
+        let log_period = periods.quantile(orbits.uniform_open());
+        let period = Days::new(math::exp10(log_period));
+        let q = direct_mass_ratio_law(m0, log_period).sample(&mut orbits);
+        let e = self
+            .model
+            .eccentricity_distribution(m0, period)
+            .sample(&mut orbits);
+        let orbit = draft_orbit(period, e, &mut orientations, &mut phases)?;
+        Some(DirectCompanion {
+            slot,
+            mass: m0 * q,
+            orbit,
+        })
+    }
+
+    /// The hierarchy of a primary of `m0` drawn by the direct construction (ruling 81).
+    ///
+    /// The number of direct companions n comes from [`direct_count_pmf`] on the words that pick
+    /// the spine construction's count. Slot by slot, each companion is drawn independently
+    /// ([`Draw::direct_try`]), inserted by period as a nested outer orbit about the primary, and
+    /// the whole hierarchy must pass the whole test; a companion that fails is drawn again on its
+    /// slot's next try, up to [`DIRECT_REDRAWS`] times, and then dropped and counted. Each
+    /// direct companion then may gain one subsystem companion (`place_subsystem`) while the
+    /// system holds fewer than four stars.
+    #[must_use]
+    fn direct(&self, m0: SolarMasses, ctx: MultiplicityContext) -> SystemHierarchy {
+        // The stripped share is this construction's own (P11.T1.d), so a set mark holds the
+        // innermost orbit in the stripping band and an unset one outside it (ruling 123.5), and
+        // the count reads the mark as the spine construction does, (MF − s) ÷ (1 − s) for an
+        // unset one, so that the multiple share stays Table 13's.
+        let n = self.companion_count(&direct_count_pmf(m0), ctx);
+        self.direct_under_limits(m0, n)
+    }
+
+    /// [`Draw::direct`] for `n` direct companions under this draw's own limits.
+    #[must_use]
+    fn direct_under_limits(&self, m0: SolarMasses, n: u8) -> SystemHierarchy {
+        let periods = DirectPeriods::new(m0, self.correction);
+        let system = self.streams.system;
+        let (chosen, dropped, _) = self.direct_set(m0, n, &periods);
+        // Subsystems come on top while the system holds fewer than four stars (ruling 74.2).
+        let mut subsystems: Vec<Option<(SolarMasses, DraftOrbit)>> = vec![None; chosen.len()];
+        for j in 0..chosen.len() {
+            let stars = 1 + chosen.len() + subsystems.iter().flatten().count();
+            if stars > MAX_COMPANIONS {
+                break;
+            }
+            subsystems[j] = self.place_subsystem(m0, &chosen, &subsystems, j);
+        }
+        let (draft, _) = assemble(m0, &chosen, &subsystems);
+        draft.build(system, dropped)
+    }
+
+    /// The `n` direct companions of a primary of `m0`, sorted by period, with the number dropped
+    /// and the number of tries drawn. The newest companion alone is redrawn (ruling 81 as
+    /// amended): slot k's tries run until one, inserted into the set by period, passes the whole
+    /// test, and after [`DIRECT_REDRAWS`] redraws it is dropped.
+    #[must_use]
+    fn direct_set(
+        &self,
+        m0: SolarMasses,
+        n: u8,
+        periods: &DirectPeriods,
+    ) -> (Vec<DirectCompanion>, u8, u64) {
+        let system = self.streams.system;
+        let mut chosen: Vec<DirectCompanion> = Vec::with_capacity(usize::from(n));
+        let (mut dropped, mut tries) = (0_u8, 0_u64);
+        for k in 1..=n {
+            let placed = (0..=DIRECT_REDRAWS).find_map(|r| {
+                tries += 1;
+                let companion = self.direct_try(m0, periods, k, r)?;
+                let mut set = chosen.clone();
+                let at = set.partition_point(|c| {
+                    c.orbit
+                        .period
+                        .value()
+                        .total_cmp(&companion.orbit.period.value())
+                        != Ordering::Greater
+                });
+                set.insert(at, companion);
+                let (draft, _) = assemble(m0, &set, &[]);
+                self.limits.admits(&draft.build(system, 0)).then_some(set)
+            });
+            match placed {
+                Some(set) => chosen = set,
+                None => dropped += 1,
+            }
+        }
+        (chosen, dropped, tries)
+    }
+
+    /// The subsystem of direct companion `j` of `chosen`, given the subsystems placed so far, or
+    /// `None`.
+    ///
+    /// The companion is offered one with probability its own rate ([`subsystem_rate`]) times
+    /// Tokovinin's (2014, §4.1) ε: ε₋ = 0.5 for the innermost companion, about the primary alone,
+    /// and ε₊ = 1.2 for any other, about a primary that already has an inner pair. As in
+    /// Tokovinin's simulation (§4.3), the subsystem's period is drawn once from the companion's
+    /// own period law, its mass ratio and eccentricity from its laws at its mass, and it is kept
+    /// only if the whole hierarchy with it passes the whole test: dynamical truncation, not a
+    /// dropped companion, since his ε were fitted before that truncation. This rests on
+    /// Tokovinin's solar-type sample; the subsystem rate of the companions of O and B stars is
+    /// unconstrained (Sana et al. 2014, §4.3; Moe and Di Stefano 2017, §11). It is decided on word
+    /// [`SUBSYSTEM_WORD`] + k of `system.multiplicity` and drawn on try 0 of draw slot 3 + k, k
+    /// being the companion's own slot, so neither depends on the order the set was sorted in.
+    /// Subsystems never count towards the anchors.
+    #[must_use]
+    fn place_subsystem(
+        &self,
+        m0: SolarMasses,
+        chosen: &[DirectCompanion],
+        placed: &[Option<(SolarMasses, DraftOrbit)>],
+        j: usize,
+    ) -> Option<(SolarMasses, DraftOrbit)> {
+        let companion = chosen[j];
+        let epsilon = if j == 0 {
+            SUBSYSTEM_EPSILON_WITHOUT_INNER
+        } else {
+            SUBSYSTEM_EPSILON_WITH_INNER
+        };
+        let p = (subsystem_rate(self.model, companion.mass) * epsilon).clamp(0.0, 1.0);
+        let wanted = self
+            .streams
+            .system_mark(
+                tags::SYSTEM_MULTIPLICITY,
+                SUBSYSTEM_WORD + u64::from(companion.slot),
+            )
+            .is_below(Threshold::from_probability(p));
+        if !wanted {
+            return None;
+        }
+        let first_mass = companion.mass;
+        let periods = self.model.period_distribution(first_mass);
+        let (lo, hi) = periods.support();
+        let host = Host {
+            node: 0,
+            first_mass,
+            periods,
+            lo: Days::new(math::exp10(lo)),
+            hi: Days::new(math::exp10(hi)),
+            weight: 1.0,
+        };
+        let slot = companion.slot + u8::try_from(MAX_COMPANIONS).expect("three");
+        let [mut orbits, mut orientations, mut phases] = self.try_streams(slot, 0);
+        let u = orbits.uniform_open();
+        let (mass, orbit) =
+            self.try_orbit(&host, u, &mut orbits, &mut orientations, &mut phases)?;
+        let mut trial = placed.to_vec();
+        trial[j] = Some((mass, orbit));
+        let (candidate, _) = assemble(m0, chosen, &trial);
+        self.limits
+            .admits(&candidate.build(self.streams.system, 0))
+            .then_some((mass, orbit))
+    }
+}
+
+/// Tokovinin's (2014, AJ 147, 87, §4.3) correlation of subsystems: the weight of a new orbit
+/// inside the secondary component of a pair, relative to a new outermost orbit, when that pair's
+/// primary component is a single star; it multiplies the host's window weight, and so costs no
+/// word (ruling 74).
+///
+/// Fitted, with [`SUBSYSTEM_WEIGHT_PAIRED`], to his completeness-corrected counts (his Table 3,
+/// last column). This one sets the share of Sun-like triples with their inner pair about the
+/// primary against those with it in the outer member, 478 − 196 = 282 against 348 − 196 = 152,
+/// 1.86: 0.275 gives 1.86 in 20,000 hierarchies of 0.8–1.2 M☉ (1,294 against 696). A generator
+/// choice, defended by that data. Tokovinin's own simulation multiplies the frequency of
+/// secondary subsystems by ε₋ = 0.5 without a primary one and ε₊ = 1.2 with one; in this draw,
+/// which places a known number of companions one at a time, those give 1.40 and 51%.
+const SUBSYSTEM_WEIGHT_SINGLE: f64 = 0.275;
+
+/// Tokovinin's (2014, §4.3) correlation of subsystems: the weight of a new orbit inside the
+/// secondary component of a pair whose primary component is itself a pair (a 2 + 2 in the
+/// making), relative to a new outermost orbit (ruling 74; see [`SUBSYSTEM_WEIGHT_SINGLE`]).
+///
+/// His corrected counts make 151 of 204 quadruples 2 + 2, 74%. That share is out of this draw's
+/// reach: companions join the outer spine only, so a 2 + 2 forms only from a triple whose inner
+/// pair is about the primary, and with triples split 1.86 : 1 those are 65% of the triples a
+/// fourth star can join. The weight takes the share to its reach, 65% (572 of 878 Sun-like
+/// quadruples), where it no longer moves: 1.2 gives 59%, 4 gives 63% and 1,000 gives 66%.
+const SUBSYSTEM_WEIGHT_PAIRED: f64 = 20.0;
+
+/// The placement weight of a new orbit inside the outer member of the pair `parent`:
+/// [`SUBSYSTEM_WEIGHT_PAIRED`] if the pair's inner member is a pair, and
+/// [`SUBSYSTEM_WEIGHT_SINGLE`] if it is a star.
+#[must_use]
+fn subsystem_weight(draft: &Draft, parent: usize) -> f64 {
+    let DraftNode::Pair { inner, .. } = draft.nodes[parent] else {
+        unreachable!("a spine node's parent is a pair");
+    };
+    match draft.nodes[inner] {
+        DraftNode::Pair { .. } => SUBSYSTEM_WEIGHT_PAIRED,
+        DraftNode::Star(_) => SUBSYSTEM_WEIGHT_SINGLE,
+    }
+}
+
+/// For the period correction's fit ([`period_fit`](super::period_fit)): the direct companions a
+/// record's draw places, the tries it draws and the companions it drops, under `correction`, or
+/// `None` for a primary the spine construction draws.
+#[must_use]
+pub(super) fn direct_tries(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    correction: &[[f64; 8]; 4],
+) -> Option<(usize, u64, u8)> {
+    let model = MultiplicityModel::default_v1();
+    let ctx = MultiplicityContext::Free;
+    let draw = Draw {
+        model: &model,
+        streams: Streams::new(galaxy, record.id(), RedrawAttempt::FIRST),
+        limits: Limits::new(
+            galaxy.potential(),
+            PointLy::from(record.epoch_position()),
+            None,
+            innermost(galaxy, record, None, ctx),
+        ),
+        correction,
+    };
+    let m0 = record.primary_initial_mass();
+    if !draw.is_direct(m0) {
+        return None;
+    }
+    let n = draw.companion_count(&direct_count_pmf(m0), ctx);
+    let (set, dropped, tries) = draw.direct_set(m0, n, &DirectPeriods::new(m0, correction));
+    Some((set.len(), tries, dropped))
+}
+
+/// The widest semi-major axis that a new pair can have as the outer member of the pair `parent`,
+/// with a total initial mass of at most `heaviest`, by the necessary conditions of Mardling and
+/// Aarseth's test of `parent`'s orbit.
+///
+/// That orbit's eccentricity is known, its semi-major axis grows with the new mass at its fixed
+/// period, the inclination factor is at least 0.7 and the mass ratio of the other member to the
+/// new pair is at least the other's mass over `heaviest`. If the other member is itself a pair,
+/// the new pair may be as wide as it, for then the other member is the inner binary of the test.
+#[must_use]
+fn widest_inside(draft: &Draft, parent: usize, heaviest: SolarMasses) -> Metres {
+    let DraftNode::Pair { inner, orbit, .. } = draft.nodes[parent] else {
+        unreachable!("a spine node's parent is a pair");
+    };
+    let other_mass = draft.mass(inner);
+    let axis = semi_major_axis(orbit.period, other_mass + heaviest);
+    let e = orbit.eccentricity.value();
+    let bracket = (1.0 + other_mass / heaviest) * (1.0 + e) / (1.0 - e).sqrt();
+    let inside = axis * (1.0 - e) / (NECESSARY_AXIS_RATIO * math::powf(bracket, 0.4));
+    match draft.nodes[inner] {
+        DraftNode::Pair { orbit: other, .. } => {
+            let other_axis = semi_major_axis(other.period, other_mass);
+            if other_axis > inside {
+                other_axis
+            } else {
+                inside
+            }
+        }
+        DraftNode::Star(_) => inside,
+    }
+}
+
+/// The semi-major axis of an orbit of `period` about a total mass of `mass`: the form
+/// [`KeplerElements::from_period`] uses, ∛(μ (P ÷ 2π)²).
+#[must_use]
+fn semi_major_axis(period: Seconds, mass: SolarMasses) -> Metres {
+    let per_radian = period.value() / TAU;
+    Metres::new(math::cbrt(GM_SUN * mass.value() * per_radian * per_radian))
+}
+
+/// The period of an orbit of semi-major axis `a` about a total mass of `mass`: 2π a √(a ÷ μ).
+#[must_use]
+pub(super) fn period_of(a: Metres, mass: SolarMasses) -> Seconds {
+    let a = a.value();
+    Seconds::new(TAU * (a * (a / (GM_SUN * mass.value())).sqrt()))
+}
+
+/// The window of `windows` that `mark` falls in, and where in it, as a share strictly inside
+/// (0, 1).
+///
+/// This is the integer-threshold pick of a mixture's component, whose residual is a uniform on
+/// the component's own range. The window is the first whose threshold lies above the mark, so it
+/// is picked with its weight's share of the total. The residual is `(offset + ½) ÷ width`, the
+/// offset of the mark above the window's lower threshold and the window's width counted in
+/// marks. A window wider than 2⁵² marks is counted in pairs of marks, as
+/// [`Stream::uniform_open`] counts a word's top 52 bits, so that `offset + ½` stays exact and the
+/// share stays below 1.
+#[must_use]
+pub(super) fn pick_window(windows: &Thresholds, mark: Mark) -> (usize, f64) {
+    let index = mark
+        .pick(windows)
+        .expect("the last threshold is 2⁵³, above every mark");
+    let upper = windows.as_slice()[index].get();
+    let lower = index
+        .checked_sub(1)
+        .map_or(0, |below| windows.as_slice()[below].get());
+    let (mut offset, mut width) = (mark.get() - lower, upper - lower);
+    if width > 1 << 52 {
+        offset >>= 1;
+        width = width.div_ceil(2);
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "both are integers of at most 2⁵², all of which an f64 represents exactly"
+    )]
+    let (offset, width) = (offset as f64, width as f64);
+    (index, (offset + 0.5) / width)
+}
+
+/// The orbit of `period` and eccentricity `e` with an isotropic orientation, three words of
+/// `orientations`, and a mean anomaly at the epoch, one word of `phases`; `None` for an
+/// eccentricity an open orbit would have to carry, after the words are read.
+#[must_use]
+pub(super) fn draft_orbit(
+    period: Days,
+    e: f64,
+    orientations: &mut Stream,
+    phases: &mut Stream,
+) -> Option<DraftOrbit> {
+    let cos_i = 1.0 - 2.0 * orientations.uniform();
+    let node = TAU * orientations.uniform();
+    let argument = TAU * orientations.uniform();
+    let mean_anomaly = TAU * phases.uniform();
+    if e >= MAX_ECCENTRICITY {
+        return None;
+    }
+    Some(DraftOrbit {
+        period: Seconds::from(period),
+        eccentricity: Eccentricity::new(e).expect("an eccentricity drawn in [0, e_max) is bound"),
+        orientation: Orientation::new(
+            Radians::new(math::acos(cos_i)),
+            Radians::new(node),
+            Radians::new(argument),
+        )
+        .expect("an inclination from acos lies in [0, π]"),
+        mean_anomaly: Radians::new(mean_anomaly),
+    })
+}
+
+/// An orbit as drawn, before its semi-major axis is fixed by its members' masses.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DraftOrbit {
+    period: Seconds,
+    eccentricity: Eccentricity,
+    orientation: Orientation,
+    mean_anomaly: Radians,
+}
+
+/// A node of a draft, in an arena.
+#[derive(Debug, Clone, Copy)]
+enum DraftNode {
+    /// A star, by body index.
+    Star(u8),
+    /// A pair of arena nodes.
+    Pair {
+        inner: usize,
+        outer: usize,
+        orbit: DraftOrbit,
+    },
+}
+
+/// A hierarchy while it is drawn: star initial masses by body index and nodes in an arena, the
+/// root wherever the last companion put it.
+#[derive(Debug, Clone)]
+struct Draft {
+    masses: Vec<SolarMasses>,
+    nodes: Vec<DraftNode>,
+    root: usize,
+}
+
+impl Draft {
+    /// The primary alone, of initial mass `m0`.
+    #[must_use]
+    fn single(m0: SolarMasses) -> Self {
+        Self {
+            masses: vec![m0],
+            nodes: vec![DraftNode::Star(0)],
+            root: 0,
+        }
+    }
+
+    /// The outer spine: the root, its outer member, that member's outer member and so on, down to
+    /// a star.
+    #[must_use]
+    fn spine(&self) -> Vec<usize> {
+        let mut spine = Vec::with_capacity(MAX_COMPANIONS + 1);
+        let mut node = self.root;
+        loop {
+            spine.push(node);
+            match self.nodes[node] {
+                DraftNode::Star(_) => return spine,
+                DraftNode::Pair { outer, .. } => node = outer,
+            }
+        }
+    }
+
+    /// The body index of `node`'s first star in depth-first order.
+    #[must_use]
+    fn first_star(&self, node: usize) -> u8 {
+        let mut node = node;
+        loop {
+            match self.nodes[node] {
+                DraftNode::Star(body) => return body,
+                DraftNode::Pair { inner, .. } => node = inner,
+            }
+        }
+    }
+
+    /// The total initial mass of `node`'s stars, summed as the finished hierarchy sums it: inner
+    /// member, then outer.
+    #[must_use]
+    fn mass(&self, node: usize) -> SolarMasses {
+        match self.nodes[node] {
+            DraftNode::Star(body) => self.masses[usize::from(body)],
+            DraftNode::Pair { inner, outer, .. } => self.mass(inner) + self.mass(outer),
+        }
+    }
+
+    /// This draft with a new star of initial mass `mass` as the outer member of a new pair whose
+    /// inner member is `host`, on `orbit`. `host` must be on the outer spine.
+    #[must_use]
+    fn joined(&self, host: usize, mass: SolarMasses, orbit: DraftOrbit) -> Self {
+        let mut next = self.clone();
+        let body = u8::try_from(next.masses.len()).expect("at most four stars");
+        next.masses.push(mass);
+        let star = next.nodes.len();
+        next.nodes.push(DraftNode::Star(body));
+        let pair = next.nodes.len();
+        next.nodes.push(DraftNode::Pair {
+            inner: host,
+            outer: star,
+            orbit,
+        });
+        if host == self.root {
+            next.root = pair;
+        } else {
+            let parent = self
+                .nodes
+                .iter()
+                .position(|n| matches!(n, DraftNode::Pair { outer, .. } if *outer == host))
+                .expect("a spine node other than the root is its parent's outer member");
+            if let DraftNode::Pair { outer, .. } = &mut next.nodes[parent] {
+                *outer = pair;
+            }
+        }
+        next
+    }
+
+    /// The finished hierarchy of system `system`, with `dropped` companions left out: nodes
+    /// depth first from the root, each pair's orbit built from its period with its members'
+    /// total mass.
+    #[must_use]
+    fn build(&self, system: SystemId, dropped: u8) -> SystemHierarchy {
+        let mut hierarchy = SystemHierarchy {
+            nodes: Vec::with_capacity(self.nodes.len()),
+            stars: (0_u16..)
+                .zip(&self.masses)
+                .map(|(index, &initial_mass)| StarSlot {
+                    body: BodyId::new(system, index),
+                    initial_mass,
+                    kind: SlotKind::Star,
+                })
+                .collect(),
+            node_masses: Vec::with_capacity(self.nodes.len()),
+            dropped,
+        };
+        self.emit(self.root, &mut hierarchy);
+        hierarchy
+    }
+
+    /// Appends `node` and its subtree to `out` depth first; its index and total initial mass.
+    fn emit(&self, node: usize, out: &mut SystemHierarchy) -> (NodeIndex, SolarMasses) {
+        let index = NodeIndex(u8::try_from(out.nodes.len()).expect("at most seven nodes"));
+        match self.nodes[node] {
+            DraftNode::Star(body) => {
+                let mass = self.masses[usize::from(body)];
+                out.nodes.push(HierarchyNode::Star(StarIndex(body)));
+                out.node_masses.push(mass);
+                (index, mass)
+            }
+            DraftNode::Pair {
+                inner,
+                outer,
+                orbit,
+            } => {
+                out.nodes.push(HierarchyNode::Star(StarIndex::PRIMARY));
+                out.node_masses.push(SolarMasses::ZERO);
+                let (inner, inner_mass) = self.emit(inner, out);
+                let (outer, outer_mass) = self.emit(outer, out);
+                let mass = inner_mass + outer_mass;
+                let orbit = KeplerElements::from_period(
+                    orbit.period,
+                    GravitationalParameter::from_solar_masses(mass),
+                    orbit.eccentricity,
+                    orbit.orientation,
+                    orbit.mean_anomaly,
+                )
+                .expect("a period of 0.1 d to 10¹¹ d about a stellar mass gives a finite orbit");
+                let slot = usize::from(index.0);
+                out.nodes[slot] = HierarchyNode::Pair {
+                    inner,
+                    outer,
+                    orbit,
+                };
+                out.node_masses[slot] = mass;
+                (index, mass)
+            }
+        }
+    }
+}
+
+impl SystemHierarchy {
+    /// This hierarchy with a brown-dwarf companion of initial mass `mass` (P11.T2.d) as the outer
+    /// member of a new root, on `orbit` about the whole system, built from its period with the
+    /// gravitational parameter of the system's mass plus `mass`.
+    ///
+    /// The companion is the last body, and every node of this hierarchy follows the new root in
+    /// the same depth-first order, one index further on, with its orbit unchanged: no star, mass
+    /// or stellar orbit moves.
+    #[must_use]
+    pub(super) fn with_outer_brown_dwarf(&self, mass: SolarMasses, orbit: &DraftOrbit) -> Self {
+        let shifted = |n: NodeIndex| NodeIndex(n.0 + 1);
+        let index =
+            u8::try_from(self.stars.len()).expect("at most four stars before the companion");
+        let mut nodes = Vec::with_capacity(self.nodes.len() + 2);
+        nodes.push(HierarchyNode::Star(StarIndex::PRIMARY));
+        nodes.extend(self.nodes.iter().map(|node| match *node {
+            HierarchyNode::Star(star) => HierarchyNode::Star(star),
+            HierarchyNode::Pair {
+                inner,
+                outer,
+                orbit,
+            } => HierarchyNode::Pair {
+                inner: shifted(inner),
+                outer: shifted(outer),
+                orbit,
+            },
+        }));
+        let companion = NodeIndex(u8::try_from(nodes.len()).expect("at most nine nodes"));
+        nodes.push(HierarchyNode::Star(StarIndex(index)));
+        let total = self.system_mass() + mass;
+        nodes[0] = HierarchyNode::Pair {
+            inner: NodeIndex(1),
+            outer: companion,
+            orbit: KeplerElements::from_period(
+                orbit.period,
+                GravitationalParameter::from_solar_masses(total),
+                orbit.eccentricity,
+                orbit.orientation,
+                orbit.mean_anomaly,
+            )
+            .expect("a period of 0.1 d to 10¹¹ d about a stellar mass gives a finite orbit"),
+        };
+        let mut node_masses = Vec::with_capacity(self.node_masses.len() + 2);
+        node_masses.push(total);
+        node_masses.extend_from_slice(&self.node_masses);
+        node_masses.push(mass);
+        let mut stars = self.stars.clone();
+        stars.push(StarSlot {
+            body: BodyId::new(self.stars[0].body.system(), u16::from(index)),
+            initial_mass: mass,
+            kind: SlotKind::BrownDwarf,
+        });
+        Self {
+            nodes,
+            stars,
+            node_masses,
+            dropped: self.dropped,
+        }
+    }
+}
+
+// Plan 14's synthetic hosts (P14.T1.d): hierarchies of one and two stars built from their parts,
+// for `planetary::context`'s builder.
+impl SystemHierarchy {
+    /// One star of initial mass `mass`, M☉, and kind `kind`, body 0 of `system`: the hierarchy a
+    /// draw gives a single star.
+    ///
+    /// A single star passes every test of the draw, so the hierarchy is one a draw could give.
+    #[must_use]
+    pub(crate) fn single(system: SystemId, mass: SolarMasses, kind: SlotKind) -> Self {
+        Self {
+            nodes: vec![HierarchyNode::Star(StarIndex::PRIMARY)],
+            stars: vec![StarSlot {
+                body: BodyId::new(system, 0),
+                initial_mass: mass,
+                kind,
+            }],
+            node_masses: vec![mass],
+            dropped: 0,
+        }
+    }
+
+    /// Two stars of `system` on a relative orbit: the primary, star 0, of initial mass `m0` M☉, and
+    /// the companion, star 1, of `m1` M☉ and kind `kind`, with semi-major axis `a` and
+    /// eccentricity `e` about their total mass, in the reference plane and at periapsis at the
+    /// epoch, as the tests' `hand_built` makes its pairs.
+    ///
+    /// The nodes are laid out as the draw lays out a binary: the pair, then the primary, then the
+    /// companion. A pair with no third body passes Mardling and Aarseth's criterion whatever its
+    /// orbit, so the draw's other tests are left to the caller, which holds them: the companion
+    /// no heavier than the primary, the period inside the draw's range, the eccentricity inside
+    /// its envelope at that period, and the apocentre inside
+    /// [`TIDAL_CUT_SHARE`](super::TIDAL_CUT_SHARE) of the system's tidal radius. A brown-dwarf
+    /// companion is one the draw makes only from P11.T2.d.
+    ///
+    /// # Errors
+    ///
+    /// What [`KeplerElements::from_semi_major_axis`] refuses: a semi-major axis that is not
+    /// positive and finite, masses whose parameter is not, or a period that overflows or
+    /// underflows.
+    pub(crate) fn binary(
+        system: SystemId,
+        m0: SolarMasses,
+        (m1, kind): (SolarMasses, SlotKind),
+        a: Metres,
+        e: Eccentricity,
+    ) -> Result<Self, crate::orbit::BuildOrbitError> {
+        let mass = m0 + m1;
+        let flat = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)
+            .expect("zero angles are an orientation");
+        let orbit = KeplerElements::from_semi_major_axis(
+            a,
+            GravitationalParameter::from_solar_masses(mass),
+            e,
+            flat,
+            Radians::ZERO,
+        )?;
+        Ok(Self {
+            nodes: vec![
+                HierarchyNode::Pair {
+                    inner: NodeIndex(1),
+                    outer: NodeIndex(2),
+                    orbit,
+                },
+                HierarchyNode::Star(StarIndex::PRIMARY),
+                HierarchyNode::Star(StarIndex(1)),
+            ],
+            stars: vec![
+                StarSlot {
+                    body: BodyId::new(system, 0),
+                    initial_mass: m0,
+                    kind: SlotKind::Star,
+                },
+                StarSlot {
+                    body: BodyId::new(system, 1),
+                    initial_mass: m1,
+                    kind,
+                },
+            ],
+            node_masses: vec![mass, m0, m1],
+            dropped: 0,
+        })
+    }
+}
+
+/// Hierarchies built by hand, for the tests of what reads a hierarchy (plan 14's stable zones):
+/// named masses and orbits, and brown-dwarf slots, which no draw makes before P11.T2.d.
+///
+/// Nothing here checks stability or the tidal cut, so a hand-built hierarchy need not be one the
+/// draw could give. That is why it is test-only: [`SystemHierarchy`] is stable by construction
+/// everywhere else.
+#[cfg(test)]
+pub(crate) mod hand_built {
+    use super::{
+        BodyId, HierarchyNode, NodeIndex, STAR_BODY_INDEX_END, SlotKind, SolarMasses, StarIndex,
+        StarSlot, SystemHierarchy, SystemId,
+    };
+    use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+    use crate::units::{GravitationalParameter, Metres, Radians};
+
+    /// A node of a hand-built hierarchy.
+    #[derive(Debug, Clone)]
+    pub(crate) enum Node {
+        /// A star, or a brown dwarf, of initial mass `mass`.
+        Star { mass: SolarMasses, kind: SlotKind },
+        /// Two nodes on a relative orbit of semi-major axis `a` and eccentricity `e` about their
+        /// total mass, in the reference plane, at periapsis at the epoch.
+        Pair {
+            inner: Box<Node>,
+            outer: Box<Node>,
+            a: Metres,
+            e: Eccentricity,
+        },
+    }
+
+    /// The hierarchy of `system` under `root`, its stars numbered depth first, inner member
+    /// before outer, as the draw numbers them; each orbit is built from its semi-major axis, so
+    /// that [`KeplerElements::semi_major_axis`] returns `a` bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// For an orbit [`KeplerElements::from_semi_major_axis`] rejects, or more than 16 stars.
+    pub(crate) fn build(system: SystemId, root: &Node) -> SystemHierarchy {
+        let mut h = SystemHierarchy {
+            nodes: Vec::new(),
+            stars: Vec::new(),
+            node_masses: Vec::new(),
+            dropped: 0,
+        };
+        emit(system, root, &mut h);
+        h
+    }
+
+    /// Appends `node` and its subtree depth first, as `Draft::emit` does; its total mass.
+    fn emit(system: SystemId, node: &Node, out: &mut SystemHierarchy) -> SolarMasses {
+        let slot = out.nodes.len();
+        match node {
+            Node::Star { mass, kind } => {
+                assert!(
+                    out.stars.len() < usize::from(STAR_BODY_INDEX_END),
+                    "a hierarchy holds at most 16 stars"
+                );
+                let index = u8::try_from(out.stars.len()).expect("fewer than 16 stars");
+                out.stars.push(StarSlot {
+                    body: BodyId::new(system, u16::from(index)),
+                    initial_mass: *mass,
+                    kind: *kind,
+                });
+                out.nodes.push(HierarchyNode::Star(StarIndex(index)));
+                out.node_masses.push(*mass);
+                *mass
+            }
+            Node::Pair { inner, outer, a, e } => {
+                out.nodes.push(HierarchyNode::Star(StarIndex::PRIMARY));
+                out.node_masses.push(SolarMasses::ZERO);
+                let inner_index = NodeIndex(u8::try_from(out.nodes.len()).expect("few nodes"));
+                let inner_mass = emit(system, inner, out);
+                let outer_index = NodeIndex(u8::try_from(out.nodes.len()).expect("few nodes"));
+                let outer_mass = emit(system, outer, out);
+                let mass = inner_mass + outer_mass;
+                let flat = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)
+                    .expect("zero angles are an orientation");
+                let orbit = KeplerElements::from_semi_major_axis(
+                    *a,
+                    GravitationalParameter::from_solar_masses(mass),
+                    *e,
+                    flat,
+                    Radians::ZERO,
+                )
+                .expect("a hand-built orbit is valid");
+                out.nodes[slot] = HierarchyNode::Pair {
+                    inner: inner_index,
+                    outer: outer_index,
+                    orbit,
+                };
+                out.node_masses[slot] = mass;
+                mass
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::f64::consts::PI;
+
+    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::order::assert_order_independent;
+
+    use super::super::period_fit::direct_log_periods;
+    use super::super::testing::{
+        SAMPLE, galaxy, imf_records, inner_disc, log_uniform_records, records_of_mass, sunlike,
+    };
+    use super::*;
+    use crate::galaxy::imf::MassBand;
+    use crate::units::consts::METRES_PER_AU;
+
+    /// The stars the draw makes for `record`, free and at the first attempt: without the
+    /// brown-dwarf companion, which `substellar.rs`'s tests take (P11.T2.d).
+    fn free(galaxy: &Galaxy, record: &SystemRecord) -> SystemHierarchy {
+        draw_hierarchy_with(
+            galaxy,
+            record,
+            None,
+            MultiplicityContext::Free,
+            RedrawAttempt::FIRST,
+            &PERIOD_CORRECTION,
+        )
+    }
+
+    /// Mardling and Aarseth's (2001) eq. 90 and their two factors, written out again from the
+    /// paper with the inclination in degrees, independently of the module's own code: whether the
+    /// pair `pair` of `h` is stable, to a relative margin of 10⁻¹².
+    fn satisfies_mardling_aarseth(h: &SystemHierarchy, pair: NodeIndex) -> bool {
+        let HierarchyNode::Pair {
+            inner,
+            outer,
+            orbit,
+        } = *h.node(pair)
+        else {
+            unreachable!("a pair");
+        };
+        let orbit_of = |n: NodeIndex| match *h.node(n) {
+            HierarchyNode::Pair { orbit, .. } => Some(orbit),
+            HierarchyNode::Star(_) => None,
+        };
+        // (inner binary, its orbit, the third body, f₁)
+        let (binary, binary_orbit, third, f1) = match (orbit_of(inner), orbit_of(outer)) {
+            (None, None) => return true,
+            (Some(o), None) => (inner, o, outer, 1.0),
+            (None, Some(o)) => (outer, o, inner, 1.0),
+            (Some(a), Some(b)) => {
+                let (wide, tight) = (a.semi_major_axis().value(), b.semi_major_axis().value());
+                let f1 = 1.0 + 0.1 * (wide / tight).min(tight / wide);
+                if wide >= tight {
+                    (inner, a, outer, f1)
+                } else {
+                    (outer, b, inner, f1)
+                }
+            }
+        };
+        let q_out = h.node_mass(third).value() / h.node_mass(binary).value();
+        let e_out = orbit.eccentricity().value();
+        let [ax, ay, az] = binary_orbit.orientation().normal();
+        let [bx, by, bz] = orbit.orientation().normal();
+        let degrees = math::acos((ax * bx + ay * by + az * bz).clamp(-1.0, 1.0)) * 180.0 / PI;
+        let f = 1.0 - 0.3 * degrees / 180.0;
+        let bracket = (1.0 + q_out) * (1.0 + e_out) / math::powf(1.0 - e_out, 0.5);
+        let critical =
+            f1 * f * 2.8 * math::powf(bracket, 0.4) * binary_orbit.semi_major_axis().value();
+        let periastron = orbit.semi_major_axis().value() * (1.0 - e_out);
+        periastron > critical * (1.0 - 1e-12)
+    }
+
+    /// The pairs of `h` with the node indices of their members.
+    fn pairs(h: &SystemHierarchy) -> Vec<(NodeIndex, NodeIndex, NodeIndex, KeplerElements)> {
+        h.nodes()
+            .iter()
+            .zip(0_u8..)
+            .filter_map(|(node, i)| match *node {
+                HierarchyNode::Pair {
+                    inner,
+                    outer,
+                    orbit,
+                } => Some((NodeIndex(i), inner, outer, orbit)),
+                HierarchyNode::Star(_) => None,
+            })
+            .collect()
+    }
+
+    /// The stars under `node` in depth-first order, inner members first.
+    fn depth_first(h: &SystemHierarchy, node: NodeIndex, out: &mut Vec<u8>) {
+        match *h.node(node) {
+            HierarchyNode::Star(star) => out.push(star.get()),
+            HierarchyNode::Pair { inner, outer, .. } => {
+                depth_first(h, inner, out);
+                depth_first(h, outer, out);
+            }
+        }
+    }
+
+    #[test]
+    fn the_same_system_draws_the_same_hierarchy_twice() {
+        let galaxy = galaxy();
+        for record in imf_records(&galaxy, 500, &sunlike(), 1) {
+            assert_eq!(free(&galaxy, &record), free(&galaxy, &record));
+        }
+    }
+
+    /// P11.T2.a: attempt n drawn alone equals attempt n drawn after attempts 0 to n − 1, and the
+    /// attempts differ from one another.
+    #[test]
+    fn an_attempt_drawn_alone_equals_it_drawn_after_the_earlier_ones() {
+        let galaxy = galaxy();
+        let records = imf_records(&galaxy, 400, &sunlike(), 2);
+        let draw = |record: &SystemRecord, attempt| {
+            draw_hierarchy(&galaxy, record, MultiplicityContext::Free, attempt)
+        };
+        let mut differ = 0;
+        for record in &records {
+            let in_turn: Vec<SystemHierarchy> =
+                RedrawAttempt::all().map(|a| draw(record, a)).collect();
+            for attempt in RedrawAttempt::all().collect::<Vec<_>>().into_iter().rev() {
+                assert_eq!(draw(record, attempt), in_turn[usize::from(attempt.get())]);
+            }
+            if in_turn[1..].iter().any(|h| *h != in_turn[0]) {
+                differ += 1;
+            }
+        }
+        // About half of these primaries are multiple, and a multiple's attempts all differ.
+        assert!(
+            differ > 100,
+            "only {differ} of 400 systems changed between attempts"
+        );
+    }
+
+    /// P11.T2: the draw is order independent, through the testkit's helper, over the mass
+    /// function and massive primaries (whose stripped mark is a second stream read), every
+    /// context and two attempts.
+    #[test]
+    fn a_hierarchy_does_not_depend_on_what_was_drawn_before() {
+        let galaxy = galaxy();
+        let mut records = imf_records(&galaxy, 150, &sunlike(), 3);
+        records.extend(log_uniform_records(
+            &galaxy,
+            150,
+            &sunlike(),
+            (8.0, 120.0),
+            15,
+        ));
+        let contexts = [
+            MultiplicityContext::Free,
+            MultiplicityContext::ForcedSingle,
+            MultiplicityContext::ForcedMultiple {
+                max_separation: None,
+            },
+            MultiplicityContext::ForcedMultiple {
+                max_separation: Some(Metres::from(crate::units::AstronomicalUnits::new(300.0))),
+            },
+        ];
+        let second = RedrawAttempt::FIRST.next().expect("eight attempts");
+        let keys: Vec<(usize, MultiplicityContext, RedrawAttempt)> = (0..records.len())
+            .flat_map(|i| {
+                contexts
+                    .iter()
+                    .flat_map(move |&c| [(i, c, RedrawAttempt::FIRST), (i, c, second)])
+            })
+            .collect();
+        assert_order_independent(&keys, |&(i, context, attempt)| {
+            draw_hierarchy(&galaxy, &records[i], context, attempt)
+        });
+    }
+
+    /// The node and period pick: the window is the one `Mark::pick` gives, and the share inside it
+    /// stays strictly inside (0, 1) at both ends of every window, the widest included.
+    #[test]
+    fn a_window_pick_agrees_with_the_thresholds_and_stays_inside_the_window() {
+        let cases: [&[f64]; 4] = [&[1.0], &[0.3, 0.0, 0.7], &[0.999_999, 1e-6], &[0.2; 5]];
+        for weights in cases {
+            let total = weights.iter().fold(0.0, |sum, &w| sum + w);
+            let windows = Thresholds::from_weights(weights, total);
+            let edges: Vec<u64> = windows.as_slice().iter().map(|t| t.get()).collect();
+            let mut marks = vec![0, 1, (1 << 53) - 2, (1 << 53) - 1];
+            for &edge in &edges {
+                marks.extend([edge.saturating_sub(1), edge.min((1 << 53) - 1)]);
+            }
+            for word in marks {
+                let mark = Mark::from_word(word << 11);
+                let (index, u) = pick_window(&windows, mark);
+                assert_eq!(Some(index), mark.pick(&windows));
+                assert!(
+                    u > 0.0 && u < 1.0,
+                    "a share of {u} for mark {word} in {weights:?}"
+                );
+                assert!(weights[index] > 0.0, "an empty window picked");
+            }
+        }
+    }
+
+    /// A system at the galactic centre has a tidal radius of zero, so every companion it asks for
+    /// is dropped and it comes out single.
+    #[test]
+    fn a_system_at_the_galactic_centre_comes_out_single() {
+        let galaxy = galaxy();
+        let centre = crate::coords::GalacticPosition::from_light_years([0.0; 3])
+            .expect("the centre is inside the root cube");
+        let context = MultiplicityContext::ForcedMultiple {
+            max_separation: None,
+        };
+        for record in log_uniform_records(&galaxy, 200, &centre, (0.08, 150.0), 16) {
+            let h = draw_hierarchy(&galaxy, &record, context, RedrawAttempt::FIRST);
+            assert_eq!(h.star_count(), 1);
+            assert!(h.dropped_companions() >= 1);
+        }
+    }
+
+    /// P11.T2.a (Design note 5): every pair of 10⁴ hierarchies has a key of its own, the lowest
+    /// star of its outer member, and no pair is keyed by the primary.
+    #[test]
+    fn every_pair_of_ten_thousand_hierarchies_has_a_key_of_its_own() {
+        let galaxy = galaxy();
+        let mut keys = BTreeSet::new();
+        let mut count = 0;
+        for record in imf_records(&galaxy, SAMPLE, &sunlike(), 4) {
+            let h = free(&galaxy, &record);
+            for (pair, _, outer, _) in pairs(&h) {
+                let key = h.pair_key(pair).expect("a pair has a key");
+                let mut under = Vec::new();
+                depth_first(&h, outer, &mut under);
+                assert_eq!(key.body_index(), u16::from(under[0]));
+                assert_ne!(key.body_index(), 0, "a pair keyed by the primary");
+                assert_eq!(key.system(), record.id());
+                keys.insert(key);
+                count += 1;
+            }
+        }
+        assert!(count > 4_000, "only {count} pairs");
+        assert_eq!(keys.len(), count, "two pairs share a key");
+    }
+
+    /// Design note 5: the primary is star 0 and the stars are numbered depth first, inner member
+    /// before outer, each with its body ID; nodes are listed depth first from the root.
+    #[test]
+    fn stars_are_numbered_depth_first_from_the_primary() {
+        let galaxy = galaxy();
+        for record in imf_records(&galaxy, 2_000, &sunlike(), 5) {
+            let h = free(&galaxy, &record);
+            let mut order = Vec::new();
+            depth_first(&h, h.root(), &mut order);
+            let expected: Vec<u8> = (0..h.star_count()).collect();
+            assert_eq!(order, expected);
+            for (slot, index) in h.stars().iter().zip(0_u16..) {
+                assert_eq!(slot.body(), BodyId::new(record.id(), index));
+                assert_eq!(slot.kind(), SlotKind::Star);
+            }
+            assert_eq!(h.nodes().len(), 2 * h.stars().len() - 1);
+            for (pair, inner, outer, _) in pairs(&h) {
+                assert_eq!(
+                    inner.get(),
+                    pair.get() + 1,
+                    "pre-order puts the inner member next"
+                );
+                assert!(outer > inner);
+            }
+            assert!(u16::from(h.star_count()) <= STAR_BODY_INDEX_END);
+        }
+    }
+
+    /// P11.T2.a: every orbit is built with its own pair's gravitational parameter, the members'
+    /// total initial mass, and keeps its drawn period.
+    #[test]
+    fn every_orbit_carries_its_pairs_gravitational_parameter() {
+        let galaxy = galaxy();
+        for record in imf_records(&galaxy, 2_000, &sunlike(), 6) {
+            let h = free(&galaxy, &record);
+            for (pair, inner, outer, orbit) in pairs(&h) {
+                let mass = h.node_mass(inner).value() + h.node_mass(outer).value();
+                assert_same_bits(h.node_mass(pair).value(), mass);
+                let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(mass));
+                assert_same_bits(orbit.gravitational_parameter().value(), mu.value());
+                let days = Days::from(orbit.period()).value();
+                assert!((0.099..1.01e11).contains(&days), "a period of {days} d");
+            }
+        }
+    }
+
+    /// P11.T2.b's properties over 10⁴ hierarchies: every pair satisfies Mardling and Aarseth's
+    /// criterion, every apocentre lies inside half the tidal radius, no star outweighs the primary
+    /// or falls below the stellar floor, and the primary is its record's.
+    #[test]
+    fn ten_thousand_hierarchies_are_stable_inside_the_cut_and_under_the_primary() {
+        let galaxy = galaxy();
+        for (at, salt) in [(sunlike(), 7), (inner_disc(), 8)] {
+            let point = PointLy::from(&at);
+            let (mut triples, mut higher) = (0, 0);
+            for record in imf_records(&galaxy, SAMPLE, &at, salt) {
+                let h = free(&galaxy, &record);
+                let m0 = record.primary_initial_mass();
+                assert_same_bits(h.stars()[0].initial_mass().value(), m0.value());
+                assert_eq!(h.stars()[0].body(), BodyId::new(record.id(), 0));
+                for star in h.stars() {
+                    let m = star.initial_mass();
+                    assert!(m <= m0, "a star of {m:?} outweighs its primary of {m0:?}");
+                    assert!(m.value() >= MIN_COMPANION_MASS.value() * (1.0 - 1e-15));
+                }
+                let total = h
+                    .stars()
+                    .iter()
+                    .fold(0.0, |sum, s| sum + s.initial_mass().value());
+                let tidal = galaxy
+                    .potential()
+                    .tidal_radius(SolarMasses::new(total), &point);
+                for (pair, _, _, orbit) in pairs(&h) {
+                    assert!(
+                        orbit.apoapsis().value() <= 0.5 * tidal.value() * (1.0 + 1e-12),
+                        "an apocentre of {:?} outside half of {tidal:?}",
+                        orbit.apoapsis()
+                    );
+                    assert!(
+                        satisfies_mardling_aarseth(&h, pair),
+                        "an unstable pair in {h:#?}"
+                    );
+                    assert!(orbit.eccentricity().value() < MAX_ECCENTRICITY);
+                }
+                match h.star_count() {
+                    3 => triples += 1,
+                    4.. => higher += 1,
+                    _ => {}
+                }
+            }
+            println!("at {at:?}: {triples} triples and {higher} higher multiples in {SAMPLE}");
+            assert!(triples > 100 && higher > 10);
+        }
+    }
+
+    /// P11.T2.b: fewer than 1% of companions are dropped after 16 redraws, over the galaxy's mass
+    /// function at the Sun-like point and in the inner disc, and over every mass range equally.
+    #[test]
+    fn fewer_than_one_companion_in_a_hundred_is_dropped() {
+        let galaxy = galaxy();
+        let samples = [
+            (
+                "mass function, Sun-like point",
+                imf_records(&galaxy, SAMPLE, &sunlike(), 9),
+            ),
+            (
+                "mass function, inner disc",
+                imf_records(&galaxy, SAMPLE, &inner_disc(), 10),
+            ),
+            (
+                "log-uniform 0.08–150 M☉, Sun-like point",
+                log_uniform_records(&galaxy, SAMPLE, &sunlike(), (0.08, 150.0), 11),
+            ),
+        ];
+        for (what, records) in samples {
+            let mut kept = [0_u32; 5];
+            let mut dropped = [0_u32; 5];
+            for record in &records {
+                let h = free(&galaxy, record);
+                let band = MassBand::ALL
+                    .iter()
+                    .position(|b| record.primary_initial_mass().value() <= b.hi())
+                    .expect("inside the stellar range");
+                kept[band] += u32::from(h.star_count() - 1);
+                dropped[band] += u32::from(h.dropped_companions());
+            }
+            let (all_kept, all_dropped) = (kept.iter().sum::<u32>(), dropped.iter().sum::<u32>());
+            let share = f64::from(all_dropped) / f64::from(all_kept + all_dropped);
+            println!(
+                "{what}: {all_dropped} of {} companions dropped ({:.3}%); by band A–E kept \
+                 {kept:?}, dropped {dropped:?}",
+                all_kept + all_dropped,
+                100.0 * share
+            );
+            assert!(share < 0.01, "{what}: {:.3}% dropped", 100.0 * share);
+        }
+    }
+
+    /// The decisions follow the model: at 1 M☉ the multiple share is 44% and the companions
+    /// asked for average 0.62 per system, each within 3.29 standard errors (α = 10⁻³). The masses
+    /// lie below the direct construction's blend (ruling 81), which its own test covers.
+    #[test]
+    fn multiplicity_follows_the_model() {
+        let galaxy = galaxy();
+        let model = MultiplicityModel::default_v1();
+        for mass in [0.3, 1.0, 1.4] {
+            let m1 = SolarMasses::new(mass);
+            let records = records_of_mass(&galaxy, SAMPLE, &sunlike(), mass);
+            let (mut multiples, mut asked, mut asked_sq) = (0_u32, 0.0, 0.0);
+            for record in &records {
+                let h = free(&galaxy, record);
+                let n = f64::from(h.star_count() - 1 + h.dropped_companions());
+                if n > 0.0 {
+                    multiples += 1;
+                }
+                asked += n;
+                asked_sq += n * n;
+            }
+            let n = f64::from(SAMPLE);
+            let share = f64::from(multiples) / n;
+            let mf = model.multiple_fraction(m1);
+            let sigma = (mf * (1.0 - mf) / n).sqrt();
+            let mean = asked / n;
+            let cf = model.companion_frequency(m1);
+            let sigma_mean = ((asked_sq / n - mean * mean) / n).sqrt();
+            println!(
+                "{mass} M☉: multiple {share:.4} (MF {mf:.4}), companions {mean:.4} (CF {cf:.4})"
+            );
+            assert!((share - mf).abs() < 3.29 * sigma, "{share} against {mf}");
+            assert!((mean - cf).abs() < 3.29 * sigma_mean, "{mean} against {cf}");
+        }
+    }
+
+    /// Ruling 81: from 3 M☉ up the direct companions number Moe and Di Stefano's Table 13 counts.
+    /// At each row mass the share of systems with n direct companions, those dropped included,
+    /// is the count distribution's within 3.29 standard errors (α = 10⁻³), and no system holds
+    /// more than four stars. Under 1% of direct companions are dropped per mass bin (ruling 81.8
+    /// as ruling 137.4 reads it, per companion); the systems that lose one are reported and held
+    /// under 2%.
+    #[test]
+    fn direct_companions_of_massive_primaries_follow_table_13() {
+        let galaxy = galaxy();
+        for mass in [3.5, 12.0, 28.0] {
+            let pmf = direct_count_pmf(SolarMasses::new(mass));
+            let (mut counts, mut with_drops) = ([0_u32; 4], 0_u32);
+            let (mut kept, mut lost) = (0_u32, 0_u32);
+            for record in records_of_mass(&galaxy, SAMPLE, &sunlike(), mass) {
+                let h = free(&galaxy, &record);
+                assert!(h.star_count() <= 4, "{} stars", h.star_count());
+                let direct = u8::try_from(direct_log_periods(&h).len()).expect("few");
+                counts[usize::from(direct)] += 1;
+                with_drops += u32::from(h.dropped_companions() > 0);
+                kept += u32::from(direct);
+                lost += u32::from(h.dropped_companions());
+            }
+            let total = f64::from(SAMPLE);
+            // A system that lost a companion may sit one count low; it widens the bracket.
+            let dropped = f64::from(with_drops) / total;
+            for (n, (&count, &p)) in counts.iter().zip(&pmf).enumerate() {
+                let share = f64::from(count) / total;
+                let sigma = (p * (1.0 - p) / total).sqrt();
+                println!(
+                    "{mass} M☉: {n} direct companions {share:.4} against {p:.4} ({dropped:.4} \
+                     of systems lost one)"
+                );
+                assert!(
+                    (share - p).abs() < 3.29 * sigma + dropped,
+                    "{n} at {mass} M☉"
+                );
+            }
+            let lost_share = f64::from(lost) / f64::from(kept + lost);
+            println!(
+                "{mass} M☉: {lost_share:.4} of direct companions dropped, {dropped:.4} of systems lost one"
+            );
+            assert!(
+                lost_share < 0.01,
+                "{lost_share} of direct companions dropped at {mass} M☉"
+            );
+            assert!(
+                dropped < 0.02,
+                "{dropped} of systems lost a companion at {mass} M☉"
+            );
+        }
+    }
+
+    /// Ruling 81.5's cross-check that the two conventions fit together: counted as Moe and Di
+    /// Stefano count (direct companions of q > 0.1 and log P < 8), Sun-like primaries drawn by the
+    /// spine construction give their `f_mult;q>0.1` = 0.50 ± 0.04 and Table 13's single, binary and
+    /// triple-plus fractions (0.60 ± 0.04, 0.30 ± 0.04, 0.10 ± 0.02), each within 2σ. Their §9.4
+    /// count of Raghavan's sample, 0.63 : 0.27 : 0.09 : 0.010, is printed beside it.
+    #[test]
+    fn sun_like_direct_companions_meet_moe_and_di_stefanos_counts() {
+        let galaxy = galaxy();
+        let mut counts = [0_u32; 4];
+        for record in records_of_mass(&galaxy, SAMPLE, &sunlike(), 1.0) {
+            let h = free(&galaxy, &record);
+            let m0 = h.stars()[0].initial_mass().value();
+            let counted = h
+                .pairs()
+                .filter(|(pair, orbit)| {
+                    let HierarchyNode::Pair { inner, outer, .. } = *h.node(*pair) else {
+                        unreachable!("pairs are pairs")
+                    };
+                    let q = h.star(h.first_star(outer)).initial_mass().value() / m0;
+                    h.first_star(inner) == StarIndex::PRIMARY
+                        && q > 0.1
+                        && Days::from(orbit.period()).value() < 1e8
+                })
+                .count();
+            counts[counted.min(3)] += 1;
+        }
+        let share = counts.map(|c| f64::from(c) / f64::from(SAMPLE));
+        let frequency = share[1] + 2.0 * share[2] + 3.0 * share[3];
+        println!(
+            "Sun-like direct companions: {share:.3?}, f_mult {frequency:.3} (§9.4: 0.63 : 0.27 : \
+             0.09 : 0.010, 0.50 ± 0.04)"
+        );
+        assert!((frequency - 0.50).abs() < 2.0 * 0.04, "{frequency}");
+        assert!((share[0] - 0.60).abs() < 2.0 * 0.04, "{share:?}");
+        assert!((share[1] - 0.30).abs() < 2.0 * 0.04, "{share:?}");
+        assert!((share[2] + share[3] - 0.10).abs() < 2.0 * 0.02, "{share:?}");
+    }
+
+    /// What [`direct_companions_meet_table_13_counted_as_moe_and_di_stefano_count`] measures at
+    /// one mass: the shares of systems with 0–3 counted direct companions, the counted companions
+    /// per system in the decades about log P = 1, 3, 5 and 7, those below log P = 3.7, the share
+    /// of compact triples and the share of direct companions dropped.
+    struct Counted {
+        shares: [f64; 4],
+        decades: [f64; 4],
+        close: f64,
+        compact: f64,
+        lost: f64,
+    }
+
+    /// [`Counted`] over 10⁴ systems of primaries of `mass` at the Sun-like point.
+    fn count_direct_companions(galaxy: &Galaxy, mass: f64) -> Counted {
+        let n = f64::from(SAMPLE);
+        let (mut shares, mut decades, mut close) = ([0.0; 4], [0.0; 4], 0.0);
+        let (mut compact, mut kept, mut dropped) = (0.0, 0_u32, 0_u32);
+        for record in records_of_mass(galaxy, SAMPLE, &sunlike(), mass) {
+            let h = free(galaxy, &record);
+            let m0 = h.stars()[0].initial_mass().value();
+            let mut periods: Vec<f64> = h
+                .pairs()
+                .filter_map(|(pair, orbit)| {
+                    let HierarchyNode::Pair { inner, outer, .. } = *h.node(pair) else {
+                        unreachable!("pairs are pairs")
+                    };
+                    let q = h.star(h.first_star(outer)).initial_mass().value() / m0;
+                    let x = math::log10(Days::from(orbit.period()).value());
+                    (h.first_star(inner) == StarIndex::PRIMARY && q > 0.1 && x < 8.0).then_some(x)
+                })
+                .collect();
+            periods.sort_by(f64::total_cmp);
+            shares[periods.len().min(3)] += 1.0 / n;
+            for &x in &periods {
+                for (decade, centre) in decades.iter_mut().zip([1.0, 3.0, 5.0, 7.0]) {
+                    if (x - centre).abs() <= 0.5 {
+                        *decade += 1.0 / n;
+                    }
+                }
+                if x < 3.7 {
+                    close += 1.0 / n;
+                }
+            }
+            if periods.len() >= 2 && periods[1] < 3.7 {
+                compact += 1.0 / n;
+            }
+            kept += u32::try_from(periods.len()).expect("few");
+            dropped += u32::from(h.dropped_companions());
+        }
+        let lost = f64::from(dropped) / f64::from(kept + dropped);
+        Counted {
+            shares,
+            decades,
+            close,
+            compact,
+            lost,
+        }
+    }
+
+    /// Ruling 81.8's acceptance, at Moe and Di Stefano's mean mass of each interval (3.5, 7, 12
+    /// and 28 M☉), 10⁴ systems each at the Sun-like point, counted as they count (direct
+    /// companions of q > 0.1 and log P < 8): `f_mult`, F0, F1, F≥2, the frequencies per decade at
+    /// log P = 1, 3, 5 and 7 and the close frequency below log P = 3.7, each within 2σ of Table
+    /// 13; direct companions dropped under 1%. The compact triples (a second direct companion
+    /// inside log P = 3.7), which the ruling asks for as a check at 10–20% of O stars, are
+    /// printed.
+    #[test]
+    fn direct_companions_meet_table_13_counted_as_moe_and_di_stefano_count() {
+        // Mass; F0, F1, F≥2, f_mult and the close frequency; the four per-decade frequencies;
+        // each a Table 13 value and its 1σ.
+        type Measured = (f64, f64);
+        let rows: [(f64, [Measured; 5], [Measured; 4]); 4] = [
+            (
+                3.5,
+                [
+                    (0.41, 0.08),
+                    (0.37, 0.06),
+                    (0.22, 0.07),
+                    (0.84, 0.11),
+                    (0.37, 0.08),
+                ],
+                [(0.07, 0.02), (0.12, 0.04), (0.13, 0.03), (0.09, 0.02)],
+            ),
+            (
+                7.0,
+                [
+                    (0.24, 0.08),
+                    (0.36, 0.08),
+                    (0.40, 0.10),
+                    (1.3, 0.2),
+                    (0.63, 0.13),
+                ],
+                [(0.14, 0.04), (0.22, 0.07), (0.20, 0.06), (0.11, 0.03)],
+            ),
+            (
+                12.0,
+                [
+                    (0.16, 0.09),
+                    (0.32, 0.10),
+                    (0.52, 0.13),
+                    (1.6, 0.2),
+                    (0.8, 0.2),
+                ],
+                [(0.19, 0.06), (0.26, 0.09), (0.23, 0.07), (0.13, 0.04)],
+            ),
+            (
+                28.0,
+                [
+                    (0.06, 0.06),
+                    (0.21, 0.11),
+                    (0.73, 0.16),
+                    (2.1, 0.3),
+                    (1.0, 0.2),
+                ],
+                [(0.29, 0.08), (0.32, 0.11), (0.30, 0.09), (0.18, 0.05)],
+            ),
+        ];
+        let galaxy = galaxy();
+        for (mass, counts, per_decade) in rows {
+            let c = count_direct_companions(&galaxy, mass);
+            let s = c.shares;
+            let values = [
+                s[0],
+                s[1],
+                s[2] + s[3],
+                s[1] + 2.0 * s[2] + 3.0 * s[3],
+                c.close,
+            ];
+            println!(
+                "{mass} M☉: F0, F1, F≥2, f_mult, close {values:.3?}; per decade {:.3?}; compact \
+                 triples {:.3}; {:.2}% dropped",
+                c.decades,
+                c.compact,
+                100.0 * c.lost
+            );
+            let names = ["F0", "F1", "F≥2", "f_mult", "close"];
+            for ((name, value), (mean, sigma)) in names.iter().zip(values).zip(counts) {
+                assert!(
+                    (value - mean).abs() <= 2.0 * sigma,
+                    "{name} {value} at {mass} M☉"
+                );
+            }
+            for (value, (mean, sigma)) in c.decades.iter().zip(per_decade) {
+                assert!(
+                    (value - mean).abs() <= 2.0 * sigma,
+                    "per decade {value} at {mass} M☉"
+                );
+            }
+            assert!(c.lost < 0.01, "{} dropped at {mass} M☉", c.lost);
+        }
+    }
+
+    #[test]
+    fn forced_single_gives_one_star() {
+        let galaxy = galaxy();
+        for record in imf_records(&galaxy, 2_000, &sunlike(), 12) {
+            let h = draw_hierarchy(
+                &galaxy,
+                &record,
+                MultiplicityContext::ForcedSingle,
+                RedrawAttempt::FIRST,
+            );
+            assert_eq!(h.star_count(), 1);
+            assert_eq!(h.nodes(), &[HierarchyNode::Star(StarIndex::PRIMARY)]);
+            assert_same_bits(
+                h.system_mass().value(),
+                record.primary_initial_mass().value(),
+            );
+            assert_eq!(h.dropped_companions(), 0);
+        }
+    }
+
+    /// P11.T2.b's _Slice_: `ForcedMultiple` with an explicit widest separation gives at least one
+    /// companion to every system that keeps one, and no orbit wider than the separation.
+    #[test]
+    fn forced_multiple_keeps_every_orbit_inside_its_separation() {
+        let galaxy = galaxy();
+        let widest = Metres::from(crate::units::AstronomicalUnits::new(1_000.0));
+        let context = MultiplicityContext::ForcedMultiple {
+            max_separation: Some(widest),
+        };
+        let (mut singles, mut dropped, mut kept) = (0, 0_u32, 0_u32);
+        for record in imf_records(&galaxy, 5_000, &sunlike(), 13) {
+            let h = draw_hierarchy(&galaxy, &record, context, RedrawAttempt::FIRST);
+            if h.star_count() == 1 {
+                singles += 1;
+                assert!(
+                    h.dropped_companions() > 0,
+                    "a forced multiple drew no companion"
+                );
+            }
+            for (_, _, _, orbit) in pairs(&h) {
+                assert!(orbit.semi_major_axis() <= widest);
+            }
+            kept += u32::from(h.star_count() - 1);
+            dropped += u32::from(h.dropped_companions());
+            let unbounded = draw_hierarchy(
+                &galaxy,
+                &record,
+                MultiplicityContext::ForcedMultiple {
+                    max_separation: None,
+                },
+                RedrawAttempt::FIRST,
+            );
+            assert!(unbounded.star_count() + unbounded.dropped_companions() > 1);
+        }
+        println!(
+            "forced multiples inside 1,000 au: {singles} of 5000 came out single; {dropped} of \
+             {} companions dropped",
+            kept + dropped
+        );
+        assert!(f64::from(dropped) < 0.05 * f64::from(kept + dropped));
+    }
+
+    /// Design note 1 as ruling 123.5 amends it (P11.T1.d): a massive primary's stripped mark,
+    /// read against its stripped share, decides its own orbit, in its stripping band when set and
+    /// outside it when not, and the marked share is the mean share.
+    #[test]
+    fn a_massive_primarys_stripped_mark_decides_its_orbit() {
+        use crate::galaxy::displaced::binarity::{is_stripped, stripped_share, stripping_band};
+        let galaxy = galaxy();
+        let n = 4_000_u32;
+        let records = log_uniform_records(&galaxy, n, &sunlike(), (8.0, 120.0), 14);
+        let (mut stripped, mut lost) = (0_u32, 0_u32);
+        let (mut expected, mut variance) = (0.0, 0.0);
+        for record in &records {
+            let h = free(&galaxy, record);
+            let m1 = record.primary_initial_mass();
+            let comp = draw_metallicity(&galaxy, record);
+            let share = stripped_share(m1, &comp);
+            expected += share;
+            variance += share * (1.0 - share);
+            let mark = StarDraws::for_star(galaxy.seed(), BodyId::new(record.id(), 0)).stripped();
+            let in_band = super::super::stability::primary_orbit(&h).map(|o| {
+                let HierarchyNode::Pair { outer, .. } = pairs_of_primary(&h) else {
+                    unreachable!("a primary with an orbit is in a pair")
+                };
+                let q = h.node_mass(outer) / m1;
+                stripping_band(m1, q, &comp).contains(o.periapsis())
+            });
+            if is_stripped(mark, m1, &comp) {
+                stripped += 1;
+                if let Some(inside) = in_band {
+                    assert!(inside, "a marked primary's orbit is in its band");
+                } else {
+                    assert!(h.dropped_companions() > 0);
+                    lost += 1;
+                }
+            } else {
+                assert_ne!(
+                    in_band,
+                    Some(true),
+                    "an unmarked primary's orbit is outside its band"
+                );
+            }
+        }
+        let sigma = variance.sqrt();
+        println!(
+            "{stripped} of {n} massive primaries stripped, {expected:.1} expected; {lost} lost \
+             their companion"
+        );
+        assert!(
+            (f64::from(stripped) - expected).abs() < 3.29 * sigma,
+            "{stripped}"
+        );
+        assert!(lost < 4, "{lost} stripped primaries have no companion");
+    }
+
+    /// The pair whose inner member is the primary.
+    fn pairs_of_primary(h: &SystemHierarchy) -> HierarchyNode {
+        let mut node = h.root();
+        let mut found = *h.node(node);
+        while let HierarchyNode::Pair { inner, .. } = h.node(node) {
+            found = *h.node(node);
+            node = *inner;
+        }
+        found
+    }
+
+    /// The shapes the draw makes for Sun-like primaries: which member of a triple holds the inner
+    /// pair, and how many quadruples are 2 + 2, against Tokovinin's (2014, Table 3) corrected
+    /// 282 : 152 and 74% (ruling 74; the 2 + 2 share is held to this draw's reach).
+    #[test]
+    fn sun_like_hierarchies_take_every_shape() {
+        let galaxy = galaxy();
+        let (mut primary_side, mut secondary_side, mut two_two, mut three_one) = (0, 0, 0, 0);
+        for record in records_of_mass(&galaxy, 3 * SAMPLE, &sunlike(), 1.0) {
+            let h = free(&galaxy, &record);
+            let HierarchyNode::Pair { inner, outer, .. } = *h.node(h.root()) else {
+                continue;
+            };
+            let is_pair = |n| matches!(h.node(n), HierarchyNode::Pair { .. });
+            match (h.star_count(), is_pair(inner), is_pair(outer)) {
+                (3, true, false) => primary_side += 1,
+                (3, false, true) => secondary_side += 1,
+                (4, true, true) => two_two += 1,
+                (4, _, _) => three_one += 1,
+                _ => {}
+            }
+        }
+        let ratio = f64::from(primary_side) / f64::from(secondary_side);
+        let share = f64::from(two_two) / f64::from(two_two + three_one);
+        println!(
+            "Sun-like triples: inner pair about the primary {primary_side}, in the outer member \
+             {secondary_side} ({ratio:.2}; Tokovinin 1.86); quadruples 2 + 2 {two_two}, 3 + 1 \
+             {three_one} ({share:.3}; Tokovinin 0.74, this draw's reach 0.65)"
+        );
+        assert!(primary_side > 0 && secondary_side > 0 && two_two > 0 && three_one > 0);
+        // Tokovinin's correlation (ruling 74), each bracket about 4 standard errors wide.
+        assert!((1.55..=2.2).contains(&ratio), "{ratio}");
+        assert!((0.58..=0.72).contains(&share), "{share}");
+    }
+
+    /// P06.T38.e's count-only path: `draw_star_count` is the full draw's star count for every
+    /// context, over the mass function and over log-uniform masses to 150 M☉ (ruling 90).
+    #[test]
+    fn the_count_only_path_is_the_full_draws_star_count() {
+        let galaxy = galaxy();
+        let contexts = [
+            MultiplicityContext::Free,
+            MultiplicityContext::ForcedSingle,
+            MultiplicityContext::ForcedMultiple {
+                max_separation: None,
+            },
+            MultiplicityContext::ForcedMultiple {
+                max_separation: Some(Metres::new(100.0 * METRES_PER_AU)),
+            },
+        ];
+        let mut records = imf_records(&galaxy, 3_000, &sunlike(), 0x636f_756e);
+        records.extend(log_uniform_records(
+            &galaxy,
+            1_000,
+            &sunlike(),
+            (0.08, 150.0),
+            0x636f_756f,
+        ));
+        records.extend(log_uniform_records(
+            &galaxy,
+            500,
+            &inner_disc(),
+            (0.08, 150.0),
+            0x636f_7570,
+        ));
+        let mut counts = [0_u32; 6];
+        for record in &records {
+            for ctx in contexts {
+                for attempt in [
+                    RedrawAttempt::FIRST,
+                    RedrawAttempt::all().nth(1).expect("two"),
+                ] {
+                    let full = draw_hierarchy(&galaxy, record, ctx, attempt).star_count();
+                    assert_eq!(
+                        draw_star_count(&galaxy, record, ctx, attempt),
+                        full,
+                        "{record:?} under {ctx:?} at {attempt:?}"
+                    );
+                    counts[usize::from(full)] += 1;
+                }
+            }
+        }
+        // Singles, which take the short path, and every multiplicity are exercised; a fifth body
+        // is a brown dwarf beside four stars (P11.T2.d), which this sample need not meet.
+        assert!(counts[1..5].iter().all(|&c| c > 0), "{counts:?}");
+    }
+}

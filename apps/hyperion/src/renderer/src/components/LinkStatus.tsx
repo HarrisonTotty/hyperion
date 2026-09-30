@@ -1,10 +1,5 @@
 import type { ConnectionStatus } from "../lib/connection";
-
-const STATUS_LABEL = {
-  connecting: "ESTABLISHING LINK",
-  connected: "LINK NOMINAL",
-  disconnected: "NO CARRIER",
-} as const satisfies Record<ConnectionStatus, string>;
+import { LINK_STATUS_LABEL } from "../lib/serverLink";
 
 interface LinkStatusProps {
   readonly status: ConnectionStatus;
@@ -14,7 +9,7 @@ interface LinkStatusProps {
 export function LinkStatus({ status }: LinkStatusProps) {
   return (
     <output className={`annunciator annunciator--${status}`} aria-label="Server link">
-      {STATUS_LABEL[status]}
+      {LINK_STATUS_LABEL[status]}
     </output>
   );
 }

@@ -1,0 +1,14 @@
+# The fate table's mid panel (plan 06, P06.T38.c; rulings 89, 90 and 99): full
+# tracks from 2.3 to 9.1 M☉ at four Reimers η nodes, over the fitted metallicities with
+# HPT's calibration metallicities among the nodes, validated at two points a cell.
+task = "stellar_fates_mid"
+
+[params]
+fe_h_max_step = 0.125
+log_mass_start = 0.37
+log_mass_step = 0.01
+masses = 60
+etas = [-3.0, -1.0, 1.0, 3.0]
+safety = 3.0
+max_bound = 0.02
+max_bound_iron = 0.2

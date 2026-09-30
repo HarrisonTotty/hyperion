@@ -68,7 +68,8 @@ Not in scope:
 ```rust
 pub struct KinematicTables { /* discs, halo, spheroids; built from PotentialTables::full */ }
 impl KinematicTables {
-    pub fn new(params: &GalaxyParams, fields: &Fields, potential: &PotentialTables) -> Self;
+    pub fn new(seed: Seed, params: &GalaxyParams, fields: &Fields,
+               potential: &PotentialTables) -> Self;       // seed: halo.kinematics (T1)
     pub fn ellipsoid(&self, component: ComponentId, p: &PointLy) -> VelocityEllipsoid;
     pub fn bulge_projected_sigma(&self) -> KilometresPerSecond;   // of the final tables; for tests
     pub fn heap_bytes(&self) -> usize;
@@ -79,6 +80,7 @@ pub struct VelocityEllipsoid { /* axes: EllipsoidAxes, mean: [KilometresPerSecon
                                   sigma: [KilometresPerSecond; 3] */ }
 pub enum EllipsoidAxes { Cylindrical, Spherical }
 pub fn draw_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity;
+pub fn draw(galaxy: &Galaxy, record: &SystemRecord) -> VelocityDraw;   // with attempts and cut
 pub const ESCAPE_CUT_ATTEMPTS: u32 = 16;
 pub const YOUNG_DISC_SIGMA_FLOOR: KilometresPerSecond;    // 5 km/s
 pub mod discs   { pub struct DiscKinematics;
@@ -86,15 +88,19 @@ pub mod discs   { pub struct DiscKinematics;
 pub mod halo    { pub struct HaloKinematics; pub struct HaloComponentKinematics; }
 pub mod spheroid {
     pub struct JeansTable;
-    pub trait ForceSource;                 // K_z and v_c²; for PotentialTables and MassModel
+    pub trait ForceSource { fn forces_at(&self, r_cyl: f64, z: f64) -> Forces; }
+                                           // Forces { vertical: K_z, v_circ_sq: R ∂Φ/∂R };
+                                           // for PotentialTables and MassModel
     pub fn bar_streaming(..) -> [KilometresPerSecond; 2];
     /// The σ that M–σ reads, from a black-hole-free `MassModel` alone: what replaces plan 02's D8.
     pub fn bulge_projected_sigma(model: &MassModel, params: &GalaxyParams) -> KilometresPerSecond;
 }
 ```
 
-`Galaxy::kinematics() -> &KinematicTables` and `Galaxy::class_table() -> &ClassTable`, both built by
-`Galaxy::with_full_potential` (plan 02, D7), which this plan extends.
+`Galaxy::kinematics() -> Option<&KinematicTables>` and `Galaxy::class_table() -> &ClassTable`, both
+built by `Galaxy::with_full_potential` (plan 02, D7), which this plan extends. A galaxy built without
+it has no kinematic tables, and its systems keep their epoch positions (T1's reconcile, 2026-09-25:
+the grid costs 2 s, so `Galaxy::new` does not build it; the server builds every galaxy full).
 
 ### `hyperion_sim::galaxy::query` (plan 03's hooks, now filled)
 
@@ -146,9 +152,11 @@ pub mod marks { pub struct ConditionalMarks; pub struct DisplacedMarks; /* initi
                 death or ejection, birth component, origin speed bin, kick constraint */
                 pub struct LifetimeBracket; /* per mass node, bounds on plan 06's lifetime */ }
 pub mod runaway { pub struct RunawayModel; /* shares, speeds and ejection ages; constants */ }
-pub mod binarity { pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64; } // the seam
-pub mod kick_bins { pub fn speed_bin_shares(law: &impl KickLaw, m: SolarMasses, z: MetalFraction,
-                    scales: &GalaxyScales) -> KickBinShares; }   // by remnant kind and mode
+pub mod binarity { pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64; } // the seam:
+                  // plan 11's built stellar::multiplicity::stripped_share behind it (T8.a)
+pub mod kick_bins { pub fn speed_bin_shares(law: &StandardKickLaw, m: SolarMasses,
+                    comp: &Composition, scales: &GalaxyScales, source: BirthSource)
+                    -> KickBinShares; }   // by remnant kind and mode (as built, P08.T8.b)
 pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<ExplosionSite>;
 pub struct ExplosionSite { /* position: GalacticPosition, death: UniverseTime */ }
 ```
@@ -227,7 +235,7 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
 - **Plan 06:** `stellar::lifetime(m0, &Composition, &StarDraws)` (the re-export of
   `stellar::sse::lifetime`) and `Composition`; from `stellar::remnant`, the kick law, which is plan
   06's and is consumed under exactly these names: `KickLaw`, `StandardKickLaw`, `KickLawParams`
-  (with `stripped_share`), `KickDraws`, `NatalKick`, `KickMode`, `CompactRemnant`,
+  (whose `stripped_share` P08.T1 replaced with plan 11's, below), `KickDraws`, `NatalKick`, `KickMode`, `CompactRemnant`,
   `ProgenitorAtDeath`, `Stripping` and `CollapseChannel`;
   `StarDraws::{for_star, for_attempt, from_parts, median}` and `KickDraws::{of, from_parts}`, which
   let the quadrature drive the law from explicit variates;
@@ -238,6 +246,9 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
   `star.remnant.*`, `star.stripped` and `star.kick.*` fields of `StarDraws::for_attempt` at the
   attempts after `mark_attempt`) on one built track, so that an attempt costs a remnant and a kick
   and never a track (P08.T12.c makes that change).
+- **Plan 11 (P08.T1's reconcile):** `stellar::multiplicity::{stripped_share, MultiplicityModel}`,
+  `stripped_share(&model, m1, &composition, interacting_periastron)` with `interacting_periastron`
+  a closure of the primary's mass, the ratio and the composition (P11.T1.d), behind P08.T8.a's seam.
 - **Plan 07:** nothing directly. The gas is read by plan 09's test at the site this plan supplies.
 - **Plan 15:** `tables::displaced_forms` with the format given under P15.T6.
 - **Plans 04 and 05:** the `SystemsInRange` message and its `SystemRecord`, `MapPopulation` and
@@ -252,12 +263,14 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
 2. **Tables, not closed forms per call.** Each law is reduced once per galaxy to small tables on the
    potential's radial grid (and its (R, z) grid for the spheroids), about 2 MB in all, built in
    under a second after `PotentialTables::full`. A velocity draw is then a few interpolations.
-3. **The disc's vertical dispersion depends on height.** For a tracer exp(−|z| ÷ h) the vertical
-   Jeans equation gives σ_z²(R, z) = e^(|z| ÷ h) ∫ e^(−z′ ÷ h) K_z(R, z′) dz′, taken from |z| to
-   infinity, with K_z from `MassModel::vertical_force`. It is tabulated per disc component on 64
-   radii × 24 heights (heights in units of h, 0 to 8) with a 16-node Gauss–Laguerre rule. This is
-   the same integral plan 02 uses, density-weighted, to set the sub-disc heights, so age, height and
-   vertical speed agree by construction. A single σ_z(R) would be simpler but is not stationary.
+3. **The disc's vertical dispersion depends on height.** On the component's own vertical profile
+   ρ(z), which since the 2026-09-21 density rulings is plan 02's cored Jeans profile and not
+   exp(−|z| ÷ h), the vertical Jeans equation gives σ_z²(R, z) = (1 ÷ ρ(z)) ∫ ρ(z′) K_z(R, z′) dz′,
+   taken from |z| to infinity, with K_z from `MassModel::vertical_force`. It is tabulated per disc
+   component on 64 radii × 24 heights (heights in units of the effective height h, 0 to 8), by
+   quadrature over the profile's own table. This is the equation plan 02 solves to build each
+   sub-disc's profile, so age, height and vertical speed agree by construction. A single σ_z(R)
+   would be simpler but is not stationary.
 4. **σ_z ÷ σ_R runs from 0.5 for the youngest sub-disc to 0.6 for the oldest**, linear in log age,
    and 0.5 for the young disc. The brainstorm gives the range; Sharma et al. (2021) give σ_R a
    shallower age exponent than σ_z, which is the sign of this trend (re-check the exponents). The
@@ -290,8 +303,9 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
    and none; in situ 0.3 and prograde at 0.35 v_c; globular-born debris 0.5 and none; each lesser
    progenitor draws β uniform on 0.3–0.7 and a rotation uniform on ±0.25 v_c on the tag
    `halo.kinematics`, keyed by its component index. The mixture is tested to average an anisotropy
-   near 0.6 and a radial dispersion near 145 km/s. If plan 02's `HaloComponentParams` already
-   carries these, its values are used and the tag is not registered.
+   near 0.6 and a radial dispersion near 145 km/s, a figure worked on the r^−3.5 halo (see Risks).
+   If plan 02's `HaloComponentParams` already carries these, its values are used and the tag is not
+   registered.
 10. **Bulge, bar and nuclear disc share one Jeans solver.** Axisymmetric, cylindrically aligned,
     with a constant β_z = 1 − σ_z² ÷ σ_R²: ν σ_z²(R, z) = ∫ ν K_z dz′ from |z| to infinity; σ_R² =
     σ_z² ÷ (1 − β_z); ν ⟨v_φ²⟩ = ν σ_R² + R ∂(ν σ_R²) ÷ ∂R + ν R ∂Φ ÷ ∂R. The tracer ν is the
@@ -309,7 +323,8 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
     ω(m) = (v̄_φ − Ω_p R) ÷ (R (a ÷ b + b ÷ a) ÷ 2), floored at zero. The long bar uses its
     half-length and width for a and b.
 12. **Scales.** R_d is the thin disc's scale length; v_c is the circular speed at 3 R_d; the time
-    unit is R_d ÷ v_c (11 Myr for the Milky Way); the escape ratio is v_esc ÷ v_c at 3 R_d in the
+    unit is R_d ÷ v_c (9.4 Myr for the fixture's 2.15 kpc disc, ruling 32's; 11 at 2.6 kpc; ruling
+    105.4); the escape ratio is v_esc ÷ v_c at 3 R_d in the
     plane; the nuclear disc's speeds are taken against the circular speed at 1.5 of its scale
     lengths (about 130 km/s). These match P15.T6.
 13. **Retained, and the lowest speed bin.** The brainstorm says both that a disc-born remnant is
@@ -418,18 +433,32 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
     neutron stars and 99% of black holes inside the cube, and a few hundred thousand unbound still
     inside, since at 500 km/s a remnant leaves within about 50 Myr.
 24. **Runaways and walkaways** are a closed-form model whose constants belong to the generator
-    version: runaway share 0.03 below 8 M☉, rising linearly in log mass from 0.05 at 8 to 0.20 at 20
-    M☉ and flat above (Hoogerwerf et al. 2001); walkaway share 0.10 above 2.5 M☉ (Renzo et al.
-    2019); runaway speed 30 km/s plus an exponential of mean 20, cut at half the circular speed;
-    walkaway speed Rayleigh with a mode of 10 km/s, cut at 30; ejection at an age uniform on 0–3 Myr
-    for half the runaways (encounters) and, for the rest and all walkaways, at the lifetime of a
+    version (as amended by ruling 128.2–3). The shares are **lifetime** shares, the probability of
+    ever being ejected; a star counts as displaced once its ejection age has passed, so present-day
+    fractions come out lower. Runaway share 0.03 below 8 M☉, rising linearly in log mass from 0.05
+    at 8 to 0.30 at 20 M☉ and flat above, set so that living O stars are about a fifth runaways
+    today (Hoogerwerf et al. 2001: 10–30%; Carretero-Castrillo et al. 2023: 25–30%); walkaway share
+    `W × r(m)` above 2.5 M☉, `r(m) = min(1, ((m ÷ 8)^2.3 − 0.1^2.3) ÷ (1 − 0.1^2.3))` (released
+    secondaries of core-collapse primaries under a 2.3 slope, q uniform on 0.1–1), W solved per
+    galaxy so that living stars above 15 M☉ are 0.10 walkaways today (Renzo et al. 2019, measured
+    only there); runaway speed 30 km/s plus an exponential of mean 20, cut at half the circular
+    speed; walkaway speed Rayleigh of σ 10 km/s, cut at 30, whose mean, median and 90th percentile
+    (12.5, 11.7, 21.5 km/s) match Renzo's 12.4, 10.4 and about 20; ejection at an age uniform on
+    0–3 Myr for nine runaways in ten (encounters; Renzo's binary-supernova channel alone gives 0.5
+    (+1.0, −0.4)% runaways above 15 M☉) and, for the rest and all walkaways, at the lifetime of a
     primary of mass max(8 M☉, m ÷ q) with q uniform on 0.3–1 (supernova release). Sources are the
     thin disc and the nuclear disc's young part. A runaway that has died feeds the remnant classes
     by its kick alone, since 30–100 km/s is small against the kick and the offset is inside the
     forms' error. Plan 09 applies the cluster-side factor; plan 11 must reproduce these shares.
 25. **The hypervelocity class is registered with zero weight** in layer D, with plan 15's
-    `HYPERVELOCITY` form and straight-line motion at 1,900–2,500 km/s, so that turning it on in plan
-    09 or 11 adds no class and no tag.
+    `HYPERVELOCITY` form and straight-line motion, so that turning it on in plan 09 or 11 adds no
+    class and no tag. The survivors come in two populations (ruling 128.1; El-Badry et al. 2023
+    §8.2 for the split, Shen et al. 2018 for the D6 mechanism): 0.26 of Type Ia supernovae at
+    1,000–1,500 km/s and 0.04 at 2,000–2,500 km/s, uniform in each, the channel's 0.30 kept. The
+    class weight, once given, is the Type Ia rate (0.54 per century, Li et al. 2011) × Σ shareᵢ ×
+    residenceᵢ, the residence the table's `HYPERVELOCITY_MEAN_EXIT_LY` over `1 ÷ ⟨1 ÷ v⟩ᵢ`; the
+    speed mark picks a population with odds shareᵢ ÷ v_eff,ᵢ and draws the speed in its band with
+    density ∝ 1 ÷ v. Design note 27's 3,000 km/s padding stands.
 26. **Normalisation over the cube.** Each form component (layer, spheroid, own form) is normalised
     to unit integral over the root cube by a fixed quadrature once per galaxy (one octant, 24
     logarithmic panels per axis of 8 Gauss–Legendre nodes), and the table's `in_cube` share scales
@@ -483,7 +512,7 @@ with module docs and the public types as stubs that compile. Add what is missing
 
 **Tests.** `age_cdf_inverts_on_an_interval` (each component, 1,000 quantiles, 10⁻⁹ relative);
 `sharp_arm_mean_is_one_at_any_width` (widths of 100 to 3,000 ly, azimuthal quadrature, 10⁻⁶);
-`galaxy_scales_at_milky_way_values` (R_d ÷ v_c within 10.5–11.5 Myr, escape ratio within 2.3–2.6);
+`galaxy_scales_at_milky_way_values` (R_d ÷ v_c within 9.0–10.0 Myr, ruling 105.4; escape ratio within 2.3–2.6);
 plan 01's tag-collision test covers the new tags.
 
 **Acceptance.** `just ci` green; no golden changes.
@@ -493,10 +522,12 @@ plan 01's tag-collision test covers the new tags.
 - **P08.T2.a Vertical Jeans tables.** `DiscKinematics::new` per disc component (young, each
   sub-disc, thick): σ_z²(R, z) per Design note 3. Tests: for an isothermal sheet in a test potential
   with K_z = 2π G Σ tanh-form the routine returns the analytic σ_z to 0.5%; σ_z at z = 0 falls
-  outward with an e-folding length within 1.7–2.3 R_d between 1 and 4 R_d; the density-weighted mean
-  at plan 02's reference radius reproduces 22 km/s × (age ÷ 10 Gyr)^0.44 for each sub-disc's mean
-  age to 5% (Sharma et al. 2021), which is the check that this table and plan 02's heights use one
-  integral.
+  outward with an e-folding length within 1.7–2.3 R_d between 1 and 4 R_d; at plan 02's reference
+  radius, at the heights each sub-disc's profile has, σ_z reproduces Sharma et al.'s (2021) law
+  exactly as plan 02 applies it, 21.1 km/s × ((τ ÷ Gyr + 0.1) ÷ 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc)
+  times the galaxy's dispersion scale, with the rise capped at |z| = 2.0 kpc where Sharma et al.'s
+  binned data end (orchestrator's ruling 4 of 2026-09-22, built in P02.T11; it was 2.4), to 5%, not its rounding 22 km/s × (age ÷ 10 Gyr)^0.44. That
+  is the check that this table and plan 02's profiles solve one equation.
 - **P08.T2.b In-plane dispersions and mean rotation.** σ_R from Design note 4, σ_φ² = σ_R² κ² ÷ 4Ω²,
   `asymmetric_drift` from note 5. Tests at Milky Way values and `sunlike_point`: old-disc
   mass-weighted σ_R within 30–40 km/s; σ_φ ÷ σ_R within 0.6–0.75; v_a × 80 km/s ÷ σ_R² within
@@ -550,6 +581,15 @@ speed ÷ 2. **Acceptance.** Tests pass.
   plan 02's seed-sweep tests still pass; they are slow tests already (P02.T11), and the fast suite's
   32-seed versions stay within a few seconds. Bench: under 100 ms per parameter set (a finding if
   not; the lever is a coarser grid, which belongs to the version).
+  - _As built (slow-test audit, 2026-09-27; no output moves):_ the second phase is solved on first
+    use, not in the build. `GalaxyParams` holds the drawn scatter and a `OnceLock` of σ and the
+    mass; `black_hole()` returns a `BlackHoleParams<'_>` view whose `scatter()` is free and whose
+    `bulge_dispersion()` and `mass()` solve it from the parameters alone (which never read the
+    black hole) and keep it. `MassModel::new`, and so every `Galaxy`, reads the mass, so a built
+    galaxy pays as before; the parameter sweeps that never read σ (`every_getter`, the neutral-disc
+    sweep, the gas tests) no longer pay about 100–150 ms a seed. Equality compares the scatter
+    alone, since the rest is a function of the other fields, and `Debug` solves and prints the
+    three values as before.
 
 **Files.** `galaxy/kinematics/spheroid.rs`, `galaxy/potential/sigma.rs`, `galaxy/mod.rs`,
 `tests/galaxy_kinematics_spheroid.rs`, regenerated goldens for T4.d. **Acceptance.** Tests pass;
@@ -620,9 +660,13 @@ ly chart.
 
 ### P08.T8 Binarity seam and kick-bin shares
 
-- **P08.T8.a `binarity::stripped_share`.** Returns `KickLawParams::stripped_share` today. It is the
-  one function the class quadrature and plan 06's provisional mark both read, so plan 11 repoints
-  one place. Test: equal to plan 06's constant; used by `ClassTable` (asserted through
+- **P08.T8.a `binarity::stripped_share`.** Returns plan 11's built
+  `stellar::multiplicity::stripped_share(model, m1, composition, threshold)` (P11.T1.d, in
+  `stellar/multiplicity/quadrature.rs`), with plan 11's model (`MultiplicityModel::default_v1()`)
+  and its interacting-periastron closure, re-targeted by P08.T1 (2026-09-25) from `KickLawParams::
+stripped_share`, the provisional constant it named before plan 11 existed. It is the one function
+  the class quadrature and plan 11's systems both read, so a later change repoints one place. Test:
+  equal to plan 11's function at 33 masses; used by `ClassTable` (asserted through
   `stripped_share_used`).
 - **P08.T8.b `kick_bins::speed_bin_shares`.** Per Design note 18: for a mass and metallicity, the
   probability of each of the eight speed bins, split by remnant kind (neutron star, black hole) and
@@ -633,7 +677,50 @@ ly chart.
   0.18, 0.125, 0.08, 0.07, 0.08 (the mean of the research's two stripped mixes) and the black holes'
   first bin holds 0.78–0.88.
 
+- **The kick loop keeps attempt 0's companion-stripped mark** (ruling 93.2 of 2026-09-22). The
+  mark (`star.stripped`) changes the track in the wide electron-capture window (plan 06, design
+  note 11 as amended by ruling 93.1), so a later attempt reusing the one built track must not
+  redraw it: every attempt reads the mark of attempt 0, and redraws only `star.remnant.*` and
+  `star.kick.*`.
+
 **Files.** `galaxy/displaced/{binarity,kick_bins}.rs`. **Acceptance.** Tests pass.
+
+**As built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+
+- **T8.a.** `binarity::stripped_share(m, &Composition)` is plan 11's `stripped_share` with
+  `MultiplicityModel::default_v1()` and `binarity::interacting_periastron`, which returns plan 11's
+  `PROVISIONAL_INTERACTING_PERIASTRON` (10 au) until P11.T1.d supplies P11.T4.a's threshold there.
+  The test holds it bit for bit against plan 11's function at 33 masses of layer E's band and three
+  metallicities. No `ClassTable` exists yet (T9), so "used by `ClassTable`" waits for T9;
+  `KickBinShares::stripped_share` records the share the quadrature used, and a test holds it to the
+  seam's.
+- **T8.b.** `kick_bins::speed_bin_shares(law: &StandardKickLaw, m, comp: &Composition, scales,
+source: BirthSource)`, and `speed_bin_shares_against(law, m, comp, v_ref)`. The law is the
+  concrete `StandardKickLaw`, not `&impl KickLaw`: the exact branch weights read its parameters and
+  rank table. The composition is a `Composition`, which the track takes; `source` chooses `v_c` or
+  the nuclear disc's own. `KickBinShares` holds `[kind][mode][bin]` for the white dwarf, neutron
+  star and black hole (8–8.3 M☉ stars below `m_cc` leave white dwarfs) and the modes `Ordinary`,
+  `Low`, `FallbackNone` and `WhiteDwarf`, and `no_remnant()`. `SPEED_EDGES`, `AGE_EDGES`,
+  `SpeedBin::of` and `SpeedBin::all` are in `displaced/mod.rs`.
+- **Two quadrature deviations from Design note 18, both for T8.b's own 3σ test.** A midpoint rule
+  on a step function errs by up to half a cell at each edge, 1 ÷ 128 for 64 nodes, where the test's
+  σ is about 3 × 10⁻⁴. So the score factor ξ is integrated exactly: the law's speed is monotone in
+  the score `c ξ`, each edge is one score threshold (bisected once on the law's rank table and speed
+  map) and each branch's share is the truncated normal's tail. And the remnant mass normal takes
+  1,024 quantile midpoints, not 16: with 16 the lightest partial-fallback black holes, whose scores
+  are the largest, put a 16 M☉ star's bin 5 at 2.1 × 10⁻⁴ against 10⁶ direct draws' 3.0 × 10⁻⁴
+  (σ 1.5 × 10⁻⁵).
+- **Results.** Sums hold to 10⁻¹² at 33 masses and two metallicities; every bin of every kind at
+  8.5, 11, 16, 24 and 38 M☉ lies within 3σ of 10⁶ direct draws of the law on the built tracks
+  (`Track::fate_with`, `with_stripped_mark`, `natal_kick`). **Finding:** over layer E's band at the
+  fixture (`v_c` 224 km/s, solar metallicity) the neutron stars' bins are 0.331, 0.044, 0.116,
+  0.152, 0.120, 0.090, 0.070, 0.079 against the research's 0.20, 0.10, 0.155, 0.18, 0.125, 0.08,
+  0.07, 0.08: the first three miss the ±0.03 window. Plan 11's stripped share at 10 au (about half
+  of massive primaries) sends more cores under 3 M☉ to the low mode; at plan 06's provisional 0.25
+  the bins are 0.184, 0.059, 0.155, 0.195, 0.149, 0.106, 0.072, 0.081 (bins 1 and 5 still miss).
+  The test holds the measured values to 0.005, the plan's figures beside them, and bins 3–7 to the
+  plan's window. The black holes' first bin is 0.785 (0.78–0.88).
+- **Ruling 93.2** is recorded above; the kick loop that honours it is P08.T12.c's.
 
 ### P08.T9 The class table
 
@@ -650,10 +737,14 @@ ly chart.
   galaxy's corotation ratio, and `in_cube` at its escape ratio.
 - **P08.T9.c Runaways and walkaways.** `RunawayModel` per Design note 24; weights per (source, speed
   bin, age bin) for layers D and E, with time since ejection capped by remaining life, and the
-  matching reduction of `stay_share` for the living. Tests: at Milky Way values 10–25% of living O
-  stars (above 16 M☉) and 2–5% of living B stars of layer D are runaways; no runaway class has an
-  age bin beyond the star's possible life (layer E: τ under 4); after 10 Myr the implied layer is
-  600–800 ly tall (from the form, not the table of weights).
+  matching reduction of `stay_share` for the living. Tests (ruling 128.2–4), at Milky Way values,
+  present-day fractions of the living: runaways 0.15–0.30 of O stars (above 16 M☉), 0.05–0.12 of
+  early B stars (8–16 M☉, Hoogerwerf's B stars) and 0.02–0.05 of layer D, and those released by a
+  supernova 0.001–0.015 of O stars; walkaways 0.10 ± 0.005 of stars above 15 M☉ with W in
+  0.25–0.45 (the ratio of walkaways to supernova-released runaways is reported); no runaway class
+  has an age bin beyond the star's possible life (layer E: τ under 4); the runaways' **mean |z|
+  10 Myr after ejection is 600–800 ly**, a quadrature of Design note 24's law, isotropic, in the
+  galaxy's own vertical force at `sunlike_point`, reading no form.
 - **P08.T9.d Conditional mark tables.** Per class: kind odds, the mass density on the 33 nodes, per
   node the component shares, and the origin-bin odds of the fastest classes. Per field component,
   `stay_marks` for layer E (Design note 17): the odds of alive and of retained by speed bin, and
@@ -674,6 +765,127 @@ and non-negative. Build time under 150 ms (bench, a finding).
 
 **Acceptance.** Tests pass. No generated output changes yet.
 
+**As built (lane `disp08b`, 2026-09-27, at `GENERATOR_VERSION` 13; no output moves).**
+
+- **API.** `class_table::{ClassTable, FormTable, FormRows, BuildFormTableError, ClassEntry,
+ClassKey, OldSource}`. `FormTable::new(FormRows)` validates the rows once (a share outside 0–1,
+  or bound and unbound in-cube shares summing past 1); `FormTable::committed()` reads P15.T6's
+  `tables::displaced_forms` through it; `ClassTable::build(&Galaxy, &FormTable) -> Self` (the
+  galaxy with its full potential) is then infallible. `ClassKey::{Thin { speed, age }, Old {
+source, speed }, Hypervelocity}` with `id()`. Getters: `stay_share`, `alive_share`,
+  `class_weight`, `class_count`, `source_budget`, `gone_share`, `unbound_in_cube_share`,
+  `in_cube_share`, `retained_share`, `stripped_share_used`, `reference_lifetime`, `marks`,
+  `stay_marks` and `closure`. Signatures that differ from Provides: `stripped_share_used(source,
+m)` (each source has its own reference composition), `marks(band, id)` (per band, D and E) and
+  `stay_marks(c) -> &StayMarks` (with `StayCategory::{Alive, Retained(SpeedBin)}`).
+  **`unbound_share` is not built**: the table gives only the unbound still inside the cube
+  (`unbound_in_cube_share`), and P08.T14.4's 13–14% of all neutron stars needs the kick law against
+  the escape speed at the birth sites, which T14 owns. `marks::{MassNodes, ConditionalMarks,
+StayMarks, LifetimeBracket}`, `ConditionalMarks::component_at(kind, m, mark)` picking by
+  `Mark::pick_weighted`; `runaway::{RunawayModel, Ejected}` with unit-typed constants.
+  "Identical in `--release`": the golden matches in the dev and slow-test profiles.
+- **Deviations.** `Galaxy::class_table()` is not wired in (P08.T12 does it with its bump).
+  Weights and marks are kept per band, D and E. Runaways and walkaways are further kinds of the
+  thin and nuclear discs' classes of their speed and age bin, not classes of their own; the
+  hypervelocity class is class 96 at zero weight. A source's reference metallicity is the
+  count-weighted mean [Fe/H] of its components at their mean ages, at 3 `R_d` in the plane for
+  the discs and halo and at the centre for bulge, bar and nuclear disc. The 33 mass nodes take
+  Simpson's rule in ln m; `⟨uτ⟩` is the bin's log-mean u (0.02 and 6 at the open ends) times its
+  mean time since death. In layer D only the thin and nuclear discs split (their living stars lose
+  the runaways and walkaways); its dead stay in the field as white dwarfs. Bulge and bar share one
+  kick quadrature (same composition and `v_c`). "The young disc feeds only age bins below 9 time
+  units" was written for an 11 Myr unit; at the fixture's 9.4 Myr the young disc reaches 10.67
+  units, so the test holds it to its own age range. The 200-seed sweep is 20 seeds, slow.
+- **Golden** `tests/golden/galaxy_class_table.golden` is blessed on the **provisional** table
+  (P15.T6's smoke fit) and is re-blessed when the production table lands.
+- **Findings (measured values held, the plan's figure in the test's comment).** Build time 42–45
+  s in the dev profile against 150 ms, nearly all `kick_bins::speed_bin_shares` (about 166 ms a
+  mass node, from its 1,024 remnant-mass nodes); lifetimes cost about 0.8 ms each. T9.c's
+  runaway layer after 10 Myr is 1,815 ly tall from the ballistic form at the runaways' `⟨u⟩` of
+  0.217 `v_c` (48.6 km/s), against 600–800 ly (the brainstorm's 700 is nearer mean `|v_z|` × t).
+  Runaways are 0.1014 of living O stars (0.10–0.25, at the edge) and 0.0283 of layer D's B stars
+  (0.02–0.05). On the brainstorm's test-only table the thin disc's neutron stars are 0.186
+  retained and 0.798 inside the cube, its black holes 0.747 retained and 0.994 inside, 0.130
+  gone; the provisional table's figures are smoke noise.
+- **Ruling 128, as built (lane `disp08b`, 2026-09-28, at `GENERATOR_VERSION` 13; no output
+  moves; the class table's golden re-blessed at 14 after the rebase onto P06.T14's 100–150 M☉
+  tracks, the provisional form table unchanged).** Figures at 13, then at 14 where they moved: O
+  stars 0.2146 → 0.2150, supernova-released 0.0073 → 0.0076, W 0.3506 → 0.3403, walkaways at 8–15
+  M☉ 0.162 → 0.158 and in layer D 0.038 → 0.037; every window still holds.
+  - _Runaways_: `ENCOUNTER_SHARE` 0.9, `RUNAWAY_SHARE_HIGH` 0.30. Present-day, at the fixture:
+    O stars above 16 M☉ **0.2146** (0.15–0.30), of them released by supernovae **0.0073**
+    (0.001–0.015); early B stars of 8–16 M☉ **0.1072** (0.05–0.12); layer D **0.0296** (0.02–0.05).
+    `ClassTable::present_ejected_share(galaxy, band, mass, kind, EjectionChannel)` measures them.
+  - _Walkaways_: `W × walkaway_ramp(m)`, W solved in the build (`solve_walkaway_scale`, the present
+    share being linear in W): **W 0.3506** (0.25–0.45), living stars above 15 M☉ **0.1000**
+    walkaways, 8–15 M☉ 0.162, layer D 0.038; 25.9 walkaways per supernova-released runaway above
+    8 M☉ (reported; Renzo's 13, variations 7–59). `RunawayModel` now carries W
+    (`RunawayModel::new`, `ClassTable::runaway_model`).
+  - _Height_: `RunawayModel::mean_height_after(v_ref, after, k_z)`, a quadrature (32 speeds × 16
+    directions, leapfrog in 2,000 steps) launched from the midplane; in `MassModel::vertical_force`
+    at 26,000 ly, tabulated every 20 ly: **761 ly** at 10 Myr (600–800; ballistic 811). The
+    1,700–1,950 ly hold on the ballistic `height()` is gone.
+  - _Survivors_ (Design note 25): `class_table::{SurvivorPopulation, SURVIVOR_POPULATIONS,
+MILKY_WAY_IA_RATE_PER_YEAR, survivor_odds, survivors_inside}` and
+    `ClassTable::hypervelocity_count(&FormTable)`, reading the form table's new
+    `HYPERVELOCITY_MEAN_EXIT_LY` through `FormRows::hypervelocity_mean_exit_ly`. The class keeps
+    zero weight. Measured in the next bullet's P15.T6.f note.
+  - _Build time_ (bench `benches/class_table.rs`, release, load 10–18): `ClassTable::build` 43 s
+    (29–60); per band-E node `speed_bin_shares` 0.21 s at 8.2 M☉, 0.32 at 15, 0.11 at 40, of which
+    `binarity::stripped_share` (plan 11's `multiplicity_share` twice) is 0.21, 0.28 and 0.11 s,
+    while a full track is 1–2 ms and `lifetime` 0.6–1.6 ms; `LifetimeBracket::new` 0.83 s. **The
+    seam's quadrature is over 95% of the build**: about 5 compositions × 33 nodes of it. After
+    the wins, at load 6–8: `ClassTable::build` 27 s (21–33), `speed_bin_shares` 0.14, 0.13 and
+    0.18 s at 8.2, 15 and 40 M☉; the gap from the first run is the load, since the wins remove about
+    two 1–2 ms tracks a node, some 0.3 s a build. The ruling's exact wins are taken and change no bit (tests
+    `the_shared_track_gives_the_direct_shares_bit_for_bit`, `the_shared_bracket_is_new_bit_for_bit`):
+    the unmarked fate is read off the seam's own track, the marked branch reuses it for an iron
+    core's star, and `LifetimeBracket::shared()` computes the bracket once a process. They save a
+    few milliseconds a node; the build stays far over P08.T16's 1 s, **a finding**. The lever is
+    the seam, not the kick law: `stripped_share` is galaxy-independent per composition, so a
+    tabulated seam (or a faster plan-11 quadrature) would take the build near a second; ruling
+    128.5's offline `tables::kick_bins` would carry the seam's share in it.
+- **The class table's build time, as built (lane `perf08`, 2026-09-29, at `GENERATOR_VERSION` 15;
+  gates P08.T12; no output moves, no bump, the class-table golden unchanged).** Version 15's
+  offline `StrippingTable` (P11.T1.d's seam tabulated in `hyperion-fit`) had already taken the
+  seam's quadrature out: `stripped_share` is some 200 ns a node, and the build was **0.71–1.20 s**
+  (load 6 and 20) against 27–45 s at version 14. What remained was the kick law's quadrature
+  (165 `speed_bin_shares`, 3–10 ms each) and about 230 lifetimes of 0.9 ms. The lane took only
+  exact wins, each a pure function computed once instead of many times, so every bit stays:
+  - _Per speed scale_ (`kick_bins::KickThresholds`): the score thresholds, 21 bisections of the
+    law's rank table, depend on the law and `v_ref` alone. `KickSet` finds them once for its 33
+    nodes (`speed_bin_shares_at`); `speed_bin_shares_against` and `shares_on` build them per call
+    as before.
+  - _Per process_: the 1,024 normal quantiles of the remnant-mass nodes (`mass_node_normals`, a
+    `OnceLock`, as `LifetimeBracket::shared` is).
+  - _Per call_: the score factor's tail at its floor (`ScoreTail`), which `xi_above` evaluated
+    beside every one of its seven tails a branch.
+  - _Per fate_: the marked pass of an iron core's star reuses the unmarked fate already, so it now
+    reuses that pass's branches and each branch's seven tails as well (the mark changes the
+    progenitor's stripping, which neither reads), and `with_stripped_mark`'s reading of the seam's
+    share is taken once per death kind, not once per branch.
+  - _Lifetimes_: a band-E node's reference lifetime is its kick track's `Track::lifetime` wherever
+    the median draws' stripped mark is clear (`median_is_stripped`), since the two draws differ
+    only in that mark and the track reads it only as `is_companion_stripped`; and a band-D source
+    reuses the lifetimes of an ejecting source of the same composition. Inside the stripped window,
+    where the median mark can be set, the lifetime is found afresh.
+  - Measured with the two builds' benches interleaved at load 6 (`benches/class_table.rs`):
+    `ClassTable::build` **713 and 891 ms before, 382 and 485 ms after** (−46%);
+    `speed_bin_shares` at 15 M☉ 6.6–7.6 ms → 2.6–2.8, at 40 M☉ 4.6–5.5 → 1.8–2.3, at 8.2 M☉
+    unchanged at 2.3–3.0 (no iron core, so two tracks and one branch each). What remains is mostly
+    the 165 unmarked tracks (1–1.5 ms each) and layer D's lifetimes, which no exact reuse removes.
+    Ruling 128.5's offline `tables::kick_bins` is not needed for P08.T16's 1 s: the build is under
+    half of it, which leaves the normalisations their share.
+  - Bit for bit: `the_shared_track_gives_the_direct_shares_bit_for_bit` (the memoised pass against
+    fresh builds of every branch), `the_kick_tracks_give_the_reference_lifetimes` (new, 33 nodes at
+    two metallicities), the class-table golden unchanged, and a comparison of the `Debug` of three
+    seeds' tables and 360 kick-share sets (five metallicities, three speed scales, 24 masses from 2
+    to 150 M☉) before and after.
+  - _Finding_: `Galaxy::from_params(..).with_full_potential()` took 5.8–8.6 s at the fixture in
+    this lane's timings (load 9–20), against the "about 2 s" its documentation gives for the grid
+    (plan 02, R15), and over ten times the class table. It is not the class table's to fix, but
+    P08.T16's `kinematic_tables_build` should say whether it counts it.
+
 ### P08.T10 Forms and normalisation
 
 - **P08.T10.a `FlaredLayer` and `CoredPowerLaw`** as densities in light-years from the table's
@@ -692,6 +904,36 @@ and non-negative. Build time under 150 ms (bench, a finding).
 
 **Files.** `galaxy/displaced/forms.rs`, `tests/galaxy_displaced_forms.rs`. **Acceptance.** Tests
 pass.
+
+**As built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+
+- **Names.** `FlaredLayerParams` and `CoredPowerLawParams` are one row of plan 15's table each
+  (P15.T6's `FlaredLayer` and `CoredPowerLaw`: its emitted table will hold numbers, and these are
+  the types its rows become). The densities in light-years are `forms::{FlaredLayer,
+CoredPowerLaw, BallisticLayer, OwnFormMixture, FlareFactor}`, as Provides has them, with
+  `DiscBornForm` (one disc-born class: `Ballistic` or `Fitted { layer, arm, spheroid }`),
+  `keeps_arm`, `blurred_arm`, `young_disc(&Fields)`, `cube_integral` and `BuildFormError`.
+- **The cube's normalisation is reduced to (R, z).** Every form is axisymmetric, so the octant's
+  integral is exactly one over R and z with the arc length of the circle of radius R inside the
+  square (`π R ÷ 2` in a quadrant to L, `R (π ÷ 2 − 2 arccos(L ÷ R))` to `√2 L`, the corner
+  annulus run in the arc's angle). The 24 doubling panels of 8 nodes stand in R and z; the third
+  axis goes, at a two-hundredth of the cost. It is exact to 10⁻¹² for a uniform density and a radial
+  ramp and to 10⁻⁹ for a Gaussian.
+- **The ballistic form is the whole class** in the two youngest age bins (P15.T6: `layer` is
+  ignored, and the spheroid is not used either); its height is Design note 21's and its vertical
+  profile the young disc's own, stretched at the same column. **The arm factor multiplies the layer
+  only**, not the spheroid, in the fitted bins that keep it.
+- **The table is test-only** (`tests/displaced_support/mod.rs`, from the brainstorm's figures, as
+  Risks allows): 56 disc-born rows, eight speed bins for each old source, and the brainstorm's
+  own-form shares at a corotation ratio of 1.2 with placeholders at 1.0 and 1.4. T10.c's test of
+  the brainstorm's figures is therefore of the interpolation, until P15.T6.d's shares exist.
+- **Results.** Columns match `exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to 10⁻⁶ in every row at four radii;
+  three spheroids' normalisations agree with a 10⁷-point importance-sampled Monte Carlo to 0.5%;
+  the ballistic form at `⟨uτ⟩` of 0 and 10⁻⁹ equals the young disc's normalised density to 10⁻⁶,
+  arm included; the arm is present exactly for τ < 1 and `⟨uτ⟩ ≤ 0.4`, and leaves the in-plane
+  integral unchanged to 10⁻⁴ for a ballistic and a fitted class. The 200-seed sweep of all 96
+  forms is slow (`every_form_normalises_for_200_seeds`: 200 mass models, fields and 96 cube
+  integrals each); the fast suite builds them at the fixture.
 
 ### P08.T11 Bounds for flared classes
 
@@ -714,6 +956,44 @@ ascent from 27 starts, over 20 seeds: no violation beyond 10⁻¹² relative. Th
 arm-ridge hunt, which is extended to the blurred arms of the young classes.
 
 **Acceptance.** Tests pass under `just test-slow`.
+
+**As built (lane `disp08`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+
+- **What is built.** `forms::FlareFactor` implements plan 02's `UnimodalFactor` over the cell's
+  radii, as specified. `displaced::bound::{layer_bound, spheroid_bound, arm_bound, ballistic_bound,
+form_bound}` bound one class's normalised form over a cell: the layer's radial envelope at the
+  nearest corner times the flare factor's supremum (times plan 02's `SharpArm::sup` at the blurred
+  width for a class that keeps the arm), plus the spheroid's nearest-corner value; the ballistic
+  layer takes the young disc's own envelope bound (its hole's factor at the farthest radius) at the
+  stretched height. Every bound carries `BOUND_SLACK` (1 + 4 × plan 02's `BOUND_MARGIN`), since the
+  forms' radius is `hypot(x, y)` and the cells' `√(x² + y²)`.
+- **Deferred to P08.T12**, which builds `DisplacedFields`: `DisplacedFields::bound` (the class's
+  weight and in-cube share times `form_bound`) and the `debug_assert!` in candidate evaluation,
+  since no displaced class is evaluated in placement before T12.
+- **Both tests read the test-only table** (T10's `tests/displaced_support`), so the tightness is
+  measured on made-up forms; they are to be rerun on P15.T6's table. `flare_bound_is_tight_and_safe`:
+  no violation in 10⁵ pairs of 512 points; the bound is 1.008 times the sampled maximum on
+  average (plan: at most 1.6).
+- **The hunt is narrower than the plan's.** Every inner cell of layers D and E on a stride of three,
+  with 56 classes, 27 starts and 20 seeds, is about 10⁴ times the work of a slow test. It walks
+  the cells on that stride in R and z along four azimuths (0°, 45°, 90°, 135°, which cross the arms
+  at every phase the pitch gives), every disc-born class (flared, ballistic and blurred-arm), 27
+  coordinate-ascent starts per cell and 20 seeds, every 384 ly (a stride of three layer-E cells)
+  in both layers: no violation; the worst density is 0.999 999 999 991 of its bound (the nearest
+  corner, where the bound is attained). It takes 755 s in the slow-test profile under load 11–16.
+- **As built (slow-test audit, 2026-09-27; no output moves).** The hunt is four slow tests of five
+  seeds each, `hunt_flared_violations_in_the_inner_galaxy_seeds_0_to_4` to `_15_to_19`, so that
+  nextest runs them side by side (threads would not run under `wasm32-wasip1`). A class without an
+  arm is exactly axisymmetric: its density reads x and y only through libm's `hypot`, which drops
+  both signs and orders its arguments, and its bound only through the cell's `√(x² + y²)` range and
+  least |z|, so a negation or swap of x and y moves neither by a bit. At 90° and 135° such a class
+  is therefore hunted only in a cell that no symmetry of the square maps onto a cell hunted at 0°
+  or 45°; for the others the shard checks that the bound and the densities at the 27 starts equal
+  the image's, bit for bit, and a fast test (`the_armless_classes_are_exactly_symmetric_about_the_axis`)
+  checks the symmetry at 200 random cells of the fixture. The classes with an arm keep all four
+  azimuths. What the shortcut gives up is the second coordinate ascent of the same function, run
+  with the axes in another order; the cells, classes, starts, seeds and the 10⁻¹² window are
+  unchanged.
 
 ### P08.T12 Displaced classes in placement
 
@@ -810,8 +1090,10 @@ All at `GalaxyParams::milky_way_like()`, fixed seeds, under `just test-slow`:
    to 7 R_d (the flare).
 6. Budgets by sampling: in a wedge of the galaxy, counted layer-E systems by placement class match
    budget × (stay, class weights) by Poisson interval.
-7. Runaway shares as under T9.c, by sampling living stars; runaways 10 Myr after ejection form a
-   layer 600–800 ly tall whose arm blur is at least 1,000 ly.
+7. Runaway shares as under T9.c, by sampling living stars; the sampled runaways of the age bin
+   holding 10 Myr have a mean |z| near R☉ within 20% of T9.c's quadrature over that class's own
+   time distribution, on the production table (ruling 128.4), and a class with τ below 1 keeps an
+   arm blur of at least 1,000 ly.
 
 **Files.** `tests/galaxy_milky_way_kinematics.rs`, `tests/galaxy_milky_way_displaced.rs`.
 **Acceptance.** All pass, or a miss is recorded as a finding against the table (plan 15) or the
@@ -821,7 +1103,7 @@ constants of Design notes 9, 10 and 24, with the figure.
 
 - **P08.T15.a Placement in the record.** `SystemRecord.placement: PlacementKind`, `snake_case` on
   the wire, with a pinned wire-form test and `just gen-protocol`; the readout's `ORIGIN` line
-  (`THIN DISC · DISPLACED REMNANT`); the list's text repeats it; the UX guide's nomenclature table
+  (`OLD THIN DISC · DISPLACED REMNANT`); the list's text repeats it; the UX guide's nomenclature table
   gains the five terms. Files: `crates/hyperion-protocol/src/**`, `crates/hyperion-server/src/**`,
   `packages/protocol/src/generated/**`, `displays/galaxy/{SystemReadout,SystemList}.tsx` and their
   tests, `docs/frontend/ux-guidelines.md`.
@@ -875,6 +1157,14 @@ Provides.
 
 ## Risks and open points
 
+- **Updated for the 2026-09-21 density rulings.** The discs are cored in height, so Design note 3
+  integrates over each component's own profile and P08.T2.a tests Sharma et al.'s exact law. Design
+  note 4's σ_z ÷ σ_R of 0.5 to 0.6 must be checked against Sharma et al.'s own exponents (0.441
+  vertical, 0.251 radial), which make the ratio grow as age^0.19, about 1.6 times across the
+  sub-discs; take σ_R from their radial law if the check fails, and report it to the owner. The
+  halo's inner slopes are now 2.2–2.8, not near 3.5. A spherical Jeans estimate at β 0.6–0.7 in a
+  flat 230 km/s curve then gives σ_r of about 155–185 km/s at the Sun's radius, not 145, so P08.T3's
+  135–155 km/s may fail. A miss is a finding for the owner, never a reason to steepen the slopes.
 - **Contradiction: "retained" against "56 classes", and own-form shares below 1 in the lowest bin.**
   Resolved in Design note 13. If the owner prefers the literal reading of either sentence, only the
   class table's assignment of the lowest row changes.
@@ -921,3 +1211,181 @@ Provides.
   plan 07 is done.
 - **Expected counts in the young disc**, flagged by plan 03, now matter slightly more for layer E;
   T12.a's 1% test covers it at one point, and a miss means a finer rule for bands D and E only.
+- **The young disc's floor binds (ruling 32 of 2026-09-22, copied here at re-validation).** Plan
+  02's P02.T11 left the young disc's drawn heights below what the 5 km/s floor implies: the floor
+  binds for 95% of seeds at 225 ly and 51% at their own heights. P08.T2.c holds it by its clamp,
+  which is what binds, and the clamp is applied again after interpolation so that no reading falls
+  a bit under it.
+- **T1–T7, as built (lane `kin08`, 2026-09-25, at `GENERATOR_VERSION` 11).** Names that differ
+  from the sketches: `KinematicTables::new` takes the seed, for the lesser progenitors'
+  `halo.kinematics` draws (keyed by `HaloComponentKind::item`); `Galaxy::kinematics` returns an
+  `Option`, and `query::epoch_velocity` is zero for a galaxy built without its full potential;
+  `ForceSource::forces_at` returns `Forces { vertical, v_circ_sq }` in one pass, since a mass-model
+  point costs about a millisecond; `draw` returns a `VelocityDraw` with the attempts and the cut;
+  `SharpArm::with_width(&self, width)`, since `SharpArm::new` already took a width;
+  `MassModel::without_centre` is public for T4.d; `PotentialTables::forces` (crate-private) reads
+  `R ∂Φ ÷ ∂R` and `K_z` off the grid's interpolant. T1's `displaced` modules hold the class indices,
+  kinds, `PlacementClass`, `GalaxyScales` and `marks::age_between`; the rest are module
+  documentation naming their tasks, with no stub types. The server builds every galaxy with its
+  full potential (about 2 s more per universe).
+- **Findings of T1–T7 against the plan's figures (for the owner, after research).** Each was built
+  as the plan says and the test holds the measured value, with the plan's figure in its comment:
+  - T1: `R_d ÷ v_c` is 9.4 Myr against 10.5–11.5 (the window is the 2.6 kpc disc; ruling 32's 2.15
+    kpc fixture gives 9.4). The escape ratio, 2.57, is in 2.3–2.6.
+  - T2.a: σ_z e-folds in 2.28–2.38 scale lengths for the sub-discs (plan 1.7–2.3) and 2.8 for the
+    thick disc.
+  - T2.b: Design note 4's σ_z ÷ σ_R of 0.5–0.6 fails against Sharma et al.'s (2021, Table 2)
+    exponents, 0.441 vertical and 0.251 radial (radial σ₀ 39.4 km/s, γ_z 0.12 per kpc), which give
+    0.31–0.52 across the sub-discs; so, as this section asked, the sub-discs take σ_R from their
+    radial law (`RadialRatio::Sharma`). The young disc keeps 0.5 and the thick disc 0.54. At the
+    Sun: old-disc σ_R 33.7 km/s, σ_φ ÷ σ_R 0.66, thick disc (64.9, 42.8, 35.0) lagging 58.4.
+  - T2.c: with Design note 8's phases the arm streaming's density-weighted rotation shift is 7.8
+    km/s at A = 10 km/s (plan: under 3). A linear density-wave solution puts the inward radial
+    motion in phase with the ridge and the along-arm part in quadrature, which gives no shift.
+  - T3: the halo mixture's σ_r over 15,000–65,000 ly is 159.7 km/s (plan 135–155; Bond et al.
+    2010: 141 ± 5), with β 0.686, as the first bullet of this section expected. The in-situ
+    component's 0.35 `v_c` rotation is about 80 km/s against the Splash's 25 (Belokurov et al.
+    2020).
+  - T4.b: Design note 11's ω(m), set on the ellipse through R = m √(ab), gives an azimuthal mean
+    tangential speed 1–8% off the table where the table outruns the pattern (plan: 1%); inside
+    1,000 ly the bulge's table does not rotate (`⟨v_φ²⟩ < σ_R²`) and the bulge turns with the
+    pattern, 37.0 km/s per kpc.
+  - T4.c: the nuclear disc's σ_R is 71 km/s at 65 ly but 19 at 1,000 ly (plan 25–40; Sormani et
+    al. 2022's fit is near-flat to its 200 pc edge), and β_z = 0 contradicts plan 02's ruling 5
+    (σ_z about half σ_R). Rotation 82–105 km/s at 300–500 ly passes.
+  - T4.d: the face-on σ is 97.2 km/s at Milky Way values (plan 105–115, accepting 100–120;
+    McConnell and Ma 2013 list 103 ± 20, measured edge-on), 11% under plan 02's spherical 109.5.
+    The fixture's M–σ offset is re-set to +0.0806 dex to keep Sgr A*'s 4.30 × 10⁶ M☉; plan 02's
+    offset bracket becomes the relation's ±0.38 dex, and its 32-seed floor 60 km/s. The reduced
+    solution (64 forces) and the final table agree to 0.2%; it costs 60–120 ms under load.
+  - T6: the century's curvature exceeds 10⁻⁴ of a solar mass's tidal radius out to about 38 ly
+    (the brainstorm says "the central few light-years", the plan 10 ly); the drift test's "to a
+    metre" is 4 m, the last bits of a light-year's offset in metres. Since plan 02's joint
+    revision of the centre (R26, lane `pot02`) it is 43.9 ly, and the test holds 50 ly
+    (provisional; ruling deferred).
+- **T4 and T6 deviations, as built.** `AZIMUTHAL_FLOOR`: where the Jeans equation's `⟨v_φ²⟩` falls
+  below zero, where the tracer falls faster than the potential holds it, it is floored at 0.05
+  σ_R² (never inside the three bodies at Milky Way values). T4.d integrates the face-on projection
+  `2 ∫ z ν K_z dz` over the aperture at 64 force points of the black-hole-free mass model, not a
+  reduced 24 × 24 grid: a mass-model point costs about a millisecond, so a grid with its panels
+  would take hundreds; it agrees with the final table to 0.2%. T4.b's divergence test holds 10⁻⁶ of
+  `|u| ÷ a`, not 10⁻⁹, for the finite differences' rounding and the bilinear table's slope changes;
+  the flow is divergence-free analytically. T6's curvature test holds the bound beyond 40 ly. The
+  server draws a returned system's velocity twice, once to move it and once for the wire, which
+  costs microseconds a row. Plan 02's own brackets that T4.d moved (`tests/galaxy_potential.rs`:
+  the fixture's M–σ offset, now ±0.38 dex; the 32-seed σ floor, now 60 km/s) are changed in its
+  tests only; plan 02's text still has the old figures. A planetary test's Hill-gap check
+  (`planetary/system/tests.rs`) gained the 10⁻¹² tolerance its companion assertion has: the moved
+  sample holds a pair placed exactly on the limit, which rounding put a bit under it.
+- **T2–T6 timings, as built** (the test profile, under the heavy-test lock, 3.0 GHz, load 9–10;
+  `math::exp` 9.0 ns there against 7.4–7.9 idle): `KinematicTables::new` 129 ms for all seven disc
+  tables, the three Jeans tables and the halo (targets 200 ms for the discs, 300 ms a table);
+  `bulge_projected_sigma` 79 ms a parameter set (target 100); the (R, z) grid itself 4.8 s; the 50
+  ly cold query 10.8 ms with velocities against 12.5 without, no regression within the noise;
+  `draw_velocity` 0.72 µs, against P08.T16's 200 ns, a finding for that task.
+- **Findings of the slow suite, as built** (superseded by the ruling 105 bullet below for T3's
+  escape check and T4.d's sweep). T3's 200-seed check holds from 10,000 ly out: a constant
+  β of 0.9 in a cored profile cannot hold near the core (An and Evans 2006, ApJ 642, 752: β(0) ≤
+  γ(0) ÷ 2, and a core has γ(0) = 0), and the dominant merger's σ_r reaches 356 km/s at 2,000 ly
+  for seed 0, above half its 587 km/s escape speed. T4.d's σ over plan 02's 10³ seeds: 5th
+  percentile 75.5, median 96.0, 95th 118.7 km/s, 639 in plan 02's 90–135 band; plan 02's sweep
+  now checks 80–125 km/s for 80%, the median at 90–110 and the tails at 70–90 and 110–140. The
+  reduced solution's 60–80 ms per parameter set makes plan 02's 10⁴-seed sweep take 18 minutes.
+- **Ruling 105, as built (lane `kin08`, 2026-09-25, at `GENERATOR_VERSION` 11).** (1) M–σ reads
+  `σ_e`: the line-of-sight `V² + σ²`, `I(r) dr`-weighted along the major axis inside `R_e`, a third
+  face-on and two thirds edge-on; the reduced solution tabulates `∫ z ν K_z dz`, `∫ ν K_z dz` and
+  `v_c²` at nine radii (108 forces, about 100–170 ms a parameter set under load). The fixture reads
+  117.7 km/s (final table 118.4), above 105–115 but inside 100–120; the offset re-derived for Sgr
+  A*'s 4.30 × 10⁶ M☉ is −0.3876 dex, 0.008 beyond the relation's 0.38 dex scatter (a finding;
+  plan 02's offset bracket is ±0.40). (2) The nuclear disc's `σ_R² = max(σ_z², 67.7² e^(−2R ÷
+R_σ))`, `R_σ` = 10^3.7 pc (`RadialLaw::Floored`, `JeansTable::with_radial_law`); at 200 pc σ_R is
+  65.0 km/s and σ_z 28.7 (0.44); Satoh's k re-tuned 0.9 → 0.95, rotation 83.8, 90.6, 93.6 km/s at
+  300, 400, 500 ly. (3) Arm streaming `v_φ = A f sin ψ`, `v_R = ∓(A f ÷ 2)(cos ψ − c̄)` with `c̄ =
+f A_arm I₁(k) ÷ I₀(k)` exactly, so both density-weighted shifts are under 10⁻¹⁴ km/s (bound 0.5);
+  `ArmStreaming::new` takes the young disc's `SharpArm`. (4) The time-unit window is 9.0–10.0 Myr
+  and Design note 12 reads 9.4 Myr. (5) The halo reads the monopole `G M(<r) ÷ r` (the Gaussians'
+  enclosed mass at the 64 table radii, `HaloKinematics::new` and `KinematicTables::new` take the
+  mass model), with `β(r) = β∞ r² ÷ (r² + a²)`, the in-situ rotation 0.11 `v_c`, and the mixture
+  measured in Bond et al.'s volume: σ_r 165.4 km/s, β 0.672 — above 135–155, held at the measured
+  value as provisional (a finding); the escape check starts at 2,000 ly again. (6) σ_z ÷ σ_R's
+  window is 0.30–0.54; Sharma et al.'s change of the ratio with radius (×1.12 at 4 kpc, ×1.34 at
+  12 kpc) is not modelled. Over plan 02's 10³ seeds σ_e's 5th percentile is 91.1 km/s, its
+  median 114.9 and its 95th percentile 141.1, and plan 02's sweep keeps its original bands.
+- **Ruling 105's task criteria, which amend the task texts above:** T2.b's σ_z ÷ σ_R is 0.30–0.54;
+  T2.c's density-weighted shifts of v_φ and v_R are each under 0.5 km/s; T4.c checks σ_R 55–75 km/s
+  and σ_z ÷ σ_R 0.3–0.6 at 200 pc in place of the 65 ly and 1,000 ly windows; T4.d reads σ_e (the
+  line-of-sight V² + σ², a third face-on and two thirds edge-on), not a face-on σ. Plan 02's
+  bounds test (`tests/galaxy_bounds.rs`) lets a holed disc's bound sit one subnormal unit below
+  its reconstructed corner, which rounds its factors in another order; its probes still hold the
+  bound against the envelope exactly. The output these move belongs to the version-12 batch
+  (ruling 105), re-blessed at 11 in the lane.
+- **Ruling 111 as built (lane `win111`, 2026-09-26, at `GENERATOR_VERSION` 12; no output moves).**
+  It amends T3's, T4.d's and Verification's windows above. (1) T4.d's `σ_e` of 117.7 km/s is
+  accepted, 0.6–0.7σ from the Milky Way's 103 ± 20 (McConnell and Ma 2013, Table A1) and 105 ± 20
+  (Gültekin et al. 2009; Kormendy and Ho 2013): the window is **100–120 km/s**, no longer "105–115,
+  accepting 100–120" (`tests/galaxy_kinematics_spheroid.rs`). The fixture's M–σ offset of −0.3876
+  dex is held to plan 02's ±0.40, not to the relation's 0.38 dex scatter, since the Galaxy is a
+  pseudobulge and pseudobulges lie below the relation (Kormendy and Ho 2013 §6; their eq. 7 puts it
+  0.63 dex under even at 105 km/s); `tests/galaxy_potential.rs` and `params/milky_way.rs` say so.
+  (2) T3's halo mixture in Bond et al.'s volume, σ_r 165.4 km/s, is accepted and **no longer
+  provisional**: the window is **140–180 km/s** in place of 135–155 (Bond et al.'s 141 ± 5 and
+  Smith et al. 2009's 143 ± 2 at the bottom; Bird et al. 2021's 179 and the Sausage's 175 ± 26,
+  Belokurov et al. 2020, at the top). `MIXTURE_SIGMA_R` is that window, not the measured value's
+  ±5 (`tests/galaxy_kinematics_halo.rs`, `kinematics/halo.rs`'s module text).
+- **Findings of T8, T10 and T11 (lane `disp08`, 2026-09-26), for the owner after research.** T8.b's
+  band-averaged neutron-star bins miss the research's first three (0.331, 0.044, 0.116 against
+  0.20, 0.10, 0.155) with plan 11's stripped share behind the seam (0.46–0.51 across layer E at 10
+  au); at plan 06's provisional 0.25 bins 1 and 5 still miss (0.059, 0.106). Held as measured and
+  provisional in the test. T10 and T11 are tested on a table assembled from the brainstorm's
+  figures, and are to be rerun when P15.T6.c–e's table lands (P08.T9 or T12's lane).
+- **Ruling 120, as built (lane `disp08`, 2026-09-27, at `GENERATOR_VERSION` 13; no output moves).**
+  (1) The seam's threshold is P11.T4.a's `can_interact` read as a periastron:
+  `binarity::interacting_periastron(m1, q, comp)` is `max_i R_max,i ÷ f(m_i ÷ m_j)`, each star's
+  largest radius up to the primary's death over Eggleton's lobe fraction; a test holds `can_interact`
+  true at 0.999 of it and false at 1.001 for three pairs. It is 5.2 au at 8 M☉ (q 0.5), 15.9 at 16.6,
+  20.3 at 34.6, 29.3 at 72 and 40.8 at 150 M☉, and the seam's share averaged over layer E is
+  **0.485** (0.40 at 8 M☉, 0.52–0.56 above 16 M☉), against ruling 120.1's 0.25–0.33 — a finding:
+  plan 11's share counts every pair that interacts, and Sana et al.'s 71% that interact include the
+  20–30% that merge. Held as provisional in `the_band_averaged_stripped_share`. (2) T8.b's windows
+  are `w + (1 − w) ×` the truncated DM25 bin share (the `w` term in the first bin): with the measured
+  `w` of 0.300 the targets are 0.308, 0.063, 0.148, 0.173, 0.118, 0.075, 0.058, 0.058 and the
+  neutron stars' bins 0.306, 0.047, 0.124, 0.158, 0.123, 0.092, 0.070, 0.079, all within 0.03 (the
+  widest 0.024 in bin 2); the black holes' first bin is 0.785. `w` itself is 0.300 against 1/6–1/4, a
+  finding that follows from (1): at a stripped share of 0.25 and 0.33 it is 0.177 and 0.231, which
+  the test asserts inside the window, holding the measured 0.300 as provisional.
+- **Ruling 123, as built (lane `disp08`, 2026-09-27, at `GENERATOR_VERSION` 13; no output moves).**
+  The seam's share is stripping, not interaction: `binarity::stripped_share` is `S(a_B) −
+S(a_merge)`, two calls of plan 11's quadrature, with `a_B` the primary's largest radius to the end
+  of core helium burning over Eggleton's lobe fraction and `a_merge` its reach to the end of the
+  Hertzsprung gap below q = 1/4 (`1 ÷ GAP_Q`), to the end of the main sequence below 1/3 (`1 ÷
+CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q, CODE_Q}`, now
+  crate-visible). `binarity::stripping_band(m1, q, comp)` returns `StrippingBand { merge, strip }`,
+  `binarity::interacting_share` is the old `can_interact` share, and `Track::stage_end(Stage)` is
+  the crate-private phase-end accessor (core helium burning includes a naked helium star's main
+  sequence). Measured: stripped share **0.287** over neutron-star progenitors (window 0.25–0.33),
+  0.295 over layer E (P11.T1.d's 0.20–0.33), 0.24 at 8 M☉ and 0.35 at 16.6 M☉; stripped ÷
+  interacting **0.619** over neutron-star progenitors (0.5–0.75); the low-mode share `w` **0.181**
+  (1/6–1/4). T8.b's targets from that `w` are 0.189, 0.073, 0.173, 0.203, 0.138, 0.087, 0.068, 0.068
+  against the neutron stars' 0.188, 0.059, 0.155, 0.193, 0.147, 0.105, 0.072, 0.081 (widest 0.019);
+  the black holes' first bin is 0.783. The provisional holds at 0.485 and 0.300 are removed: each
+  test asserts its window. **P11.T1.d and T2.c draw a marked innermost orbit from the stripping
+  band and an unmarked one from its complement** (ruling 123.5).
+- **The seam after P11.T1.d (round 9b, `fates`; version left at 14 for the batch of 15).**
+  `binarity::stripped_share` is now plan 11's quadrature of the companions the hierarchy draw
+  gives (`band_share_as_drawn`, ruling 81's direct construction from 3 M☉), read from the offline
+  `tables::stripping` inside 5.5–150 M☉ (`StrippingTable`; `exact_stripped_share` is the
+  quadrature itself), and `stripping_band` from the same table's radii (`StageRadii`). Plan 06's
+  mark reads it through `binarity::is_stripped`, and `StandardKickLaw::with_stripped_mark` takes
+  the progenitor's initial mass and composition. **Finding (with plan 11's):** the share is 0.455
+  over layer E and 0.433 over neutron-star progenitors, above ruling 123.3's windows; stripped ÷
+  interacting is 0.700. Downstream, the low-mode share `w` is 0.2675 (window 1/6–1/4) and the thin
+  disc's retained neutron stars 0.271 (window 1/6–1/4); both tests hold the measured values
+  provisionally until the finding is ruled on. The T8.b bins' targets follow `w` as ruling 120.2
+  says.
+- **Ruling 137, as applied (round 9b, `fates`; tests only).** The seam's share is per primary and
+  stands (0.433 over neutron-star progenitors, window 0.33–0.47; 0.455 over layer E, 0.35–0.52).
+  The windows on neutron stars are per primary-born neutron star while the class table holds no
+  companion's remnant: `w` and the thin disc's retained share assert 0.18–0.30 (measured 0.2675
+  and 0.271), the provisional holds removed. **The brainstorm's 1/6–1/4 is re-asserted on the
+  whole population once P11.T6/T11 count the companions' remnants.** T8.b's bins follow the
+  measured `w`, as ruling 120.2 says.

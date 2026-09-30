@@ -1,0 +1,14 @@
+# The cooling of white dwarfs (plan 06, P06.T20.a, ruling 57.2), fitted to the Montreal sequences.
+# The parameters are constants of `src/tasks/wd_cooling.rs`, recorded here so that the inputs hash
+# covers them; the task refuses a manifest that disagrees with its code.
+task = "wd_cooling"
+datasets = ["montreal_cooling"]
+
+[params]
+sequences = 23
+luminosities = 96
+log_luminosity_range = [-7.5, 2.5]
+clock_offset_yr = 100000.0
+smoothing = 0.000001
+faint_exponent = 1.4
+hold_out_every = 5

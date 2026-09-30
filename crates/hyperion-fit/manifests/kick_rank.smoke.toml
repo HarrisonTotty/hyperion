@@ -1,0 +1,8 @@
+# The rank table's smoke run: a few seconds, for the crate's tests.
+task = "kick_rank"
+
+[params]
+draws = 300
+seed = 0x0619_b000_0000_0000
+acceptance_draws = 300
+acceptance_seed = 0x0619_b000_0000_0001

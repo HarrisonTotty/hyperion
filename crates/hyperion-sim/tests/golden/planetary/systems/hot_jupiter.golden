@@ -1,0 +1,584 @@
+# generator_version = 16
+hot_jupiter 0x41fcecba00000006: OldThinDisc, 1 stars
+fe_h = 0x3fd0561a147a08fb  # 0.25525524139096917
+age_at_epoch_yr = 0x41dcf22eac798392  # 1942534833.8986554
+star 0: Some(MainSequence) at the epoch
+initial_mass_msun = 0x3ff04d667c30e1bf  # 1.0188965655525946
+mass_msun = 0x3ff04d667c30e1bf  # 1.0188965655525946
+luminosity_lsun = 0x3fe902277a22163f  # 0.781512964764893
+teff_k = 0x40b5e7b0ca35847a  # 5607.690585465281
+host Star(0): drawn HotJupiter, placed HotJupiter
+
+epoch: 11 bodies at UniverseTime { seconds: 0, nanos: 0 }
+belts: [e100]
+halo: none
+body 0100 A b: Planet about Some(Star(0)), Present
+mass_mearth = 0x40713baa6f714ead  # 275.7291101862018
+a_m = 0x42063b3ed156c3a6  # 11935406634.845531
+e = 0x3fd8daad1730f11a  # 0.38834693207515303
+i_rad = 0x400665b2d333bdac  # 2.799657487885005
+node_rad = 0x400d16dc874640a2  # 3.6361628120722154
+periapsis_rad = 0x400f28d39146d8e7  # 3.894934782957637
+mean_anomaly_at_epoch_rad = 0x40101af1542b0d07  # 4.026311221244447
+period_s = 0x41257e1977e34659  # 704268.7341558441
+mu_m3_s2 = 0x441d58552c0d9a18  # 1.3533015505571663e20
+valid_until: None
+x_m = 0xc2058af4092fb436  # -11565695269.962994
+y_m = 0x4201578c2da1ec73  # 9310406068.240454
+z_m = 0x41f224e288b5f9ad  # 4870514827.373456
+radius_rearth = 0x4026d702a463536b  # 11.419942032932985
+density_kg_m3 = 0x408fe5da0acef9ad  # 1020.7314659280725
+gravity_m_s2 = 0x4034c32bfa609544  # 20.76238980157838
+class: GasGiant
+iron = 0x3f9d8ff6d1db3225  # 0.028869492109878565
+rock = 0x3faeb30a28b2654d  # 0.059959714382055475
+water = 0x3fba8db7145e3259  # 0.10372490165009064
+envelope = 0x3fe9d698c45a39cf  # 0.8074458918579753
+t_eq_k = 0x408aa27f0091cb78  # 852.3120128050059
+moons: []
+rings: [0180]
+population: NotApplicable
+surface: NotApplicable
+hooks: NotModelled
+body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
+mass_mearth = 0x3c912e65df4b7a7d  # 5.960940750416032e-17
+orbit: NotApplicable
+x_m = 0xc2058af4092fb436  # -11565695269.962994
+y_m = 0x4201578c2da1ec73  # 9310406068.240454
+z_m = 0x41f224e288b5f9ad  # 4870514827.373456
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+ring: Dusty of Rock
+inner_m = 0x419314c57f0b42f8  # 80032095.76099765
+outer_m = 0x419be2eed14170f4  # 116964276.31390744
+optical_depth = 0x3e94e7997c7001e0  # 3.115040922430344e-7
+surface: NotApplicable
+hooks: NotApplicable
+body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
+mass_mearth = 0x3f972e1dbbae0488  # 0.022636856632293006
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+belt: OuterDisc about Star(0), Icy
+main_inner_m = 0x42969a73ecc09533  # 6213156417573.3
+main_outer_m = 0x42a0f10ceb71bb66  # 9313744959709.7
+size_slope = 0x400bf7e9a1bebd46  # 3.496051086076167
+largest_diameter_m = 0x4142fc41d1b3ec8d  # 2488451.6383033455
+fractional_luminosity = 0x3e83fe1ab06e85da  # 1.4895643848677139e-7
+members: [e101, e102, e103, e104, e105, e106, e107, e108]
+surface: NotApplicable
+hooks: NotApplicable
+body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f66227d77cc8c98  # 0.002701993040675154
+a_m = 0x4297cef385d015a5  # 6544404083717.411
+e = 0x3fc3d6e114e2eeec  # 0.15499509353491392
+i_rad = 0x4005fa7046f89df7  # 2.7472844643232253
+node_rad = 0x400b962fe99a6bc1  # 3.4483335733652614
+periapsis_rad = 0x400026d1865e9b36  # 2.0189543244954633
+mean_anomaly_at_epoch_rad = 0x401823eafb9f0808  # 6.03507607610846
+period_s = 0x4200d98b5052e56e  # 9046157834.362026
+mu_m3_s2 = 0x441d523b553ddbbf  # 1.3522025039912028e20
+valid_until: None
+x_m = 0xc26c7fed22856de6  # -979242652715.4343
+y_m = 0x429265633f5ce949  # 5056666523450.321
+z_m = 0x427efac6425c7f8f  # 2128901055943.9724
+radius_rearth = 0x3fca9d14266055da  # 0.20791866182177793
+density_kg_m3 = 0x4099e58e1be2db0a  # 1657.3887782522384
+gravity_m_s2 = 0x3fe3a42ae932270e  # 0.6137899927718722
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe35e2d6d1630c4  # 0.6052462702368975
+water = 0x3fd943a525d39e79  # 0.3947537297631026
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x404345fff2f2ac53  # 38.546873444073434
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f4be35485ddfb13  # 0.00085107447715402
+a_m = 0x4297a8be1bcea72d  # 6503377859497.794
+e = 0x3fc46c13d85246c4  # 0.15954826414649947
+i_rad = 0x40087caa0c450ed8  # 3.060871215684397
+node_rad = 0x400326b9a54a6600  # 2.3939087785081483
+periapsis_rad = 0x40096dd0724a1a4d  # 3.1786202362884866
+mean_anomaly_at_epoch_rad = 0x40153051b7a84ac3  # 5.2971867271869
+period_s = 0x4200b10bcb0a9bf9  # 8961227105.326159
+mu_m3_s2 = 0x441d523b528ec008  # 1.352202496613434e20
+valid_until: None
+x_m = 0x429359686cc6837a  # 5318681244064.869
+y_m = 0x4284e07be240f252  # 2869297956894.29
+z_m = 0x425aefac14a7e416  # 462760727199.56384
+radius_rearth = 0x3fc21b054d2b6a47  # 0.14144960659071357
+density_kg_m3 = 0x4099e7f9b574f8a3  # 1657.9938562657123
+gravity_m_s2 = 0x3fdabbf207d41316  # 0.41772127880567334
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe3608c642ab5e5  # 0.6055356937774233
+water = 0x3fd93ee737aa9436  # 0.39446430622257667
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4041e069d1eb51f8  # 35.753229370024144
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f3c60702af95fea  # 0.000432994255765261
+a_m = 0x4299ccc016e6fff5  # 7091796687295.989
+e = 0x3fc0e57965845d3f  # 0.13200299698721982
+i_rad = 0x40058df0477b778a  # 2.6943059525064585
+node_rad = 0x40086d64218e6750  # 3.05341364112693
+periapsis_rad = 0x40002391f93c2b60  # 2.0173682662474874
+mean_anomaly_at_epoch_rad = 0x40064cbc992c39d6  # 2.787469097768944
+period_s = 0x420301e7576347bf  # 10204539628.410032
+mu_m3_s2 = 0x441d523b51f38c4d  # 1.3522024949469644e20
+valid_until: None
+x_m = 0xc27cd85af703db7a  # -1982222790717.7173
+y_m = 0xc29942e4f8b2bc98  # -6943775009967.148
+z_m = 0xc288c0613b9a20ff  # -3401818010436.1245
+radius_rearth = 0x3fbddcc699d36faf  # 0.11665002112880417
+density_kg_m3 = 0x4097800178f99d39  # 1504.0014380457126
+gravity_m_s2 = 0x3fd3ffd2b2ebf7f5  # 0.3124891993792283
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0c7999de7dba4  # 0.5243652423949823
+water = 0x3fde70ccc43048b8  # 0.4756347576050177
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x404119f3eb970ff4  # 34.20275635601129
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e104 BELT 1-4: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f31917f05aa2748  # 0.00026807166219865565
+a_m = 0x42979a468c984808  # 6487844005394.008
+e = 0x3fb91abb0317153f  # 0.09806412530368379
+i_rad = 0x40064ee02e9b5331  # 2.788513530841009
+node_rad = 0x40051087e7f91d44  # 2.6330717203997285
+periapsis_rad = 0x40155e83adc420a6  # 5.342299189658808
+mean_anomaly_at_epoch_rad = 0x40141eeed4c2538a  # 5.030207943306673
+period_s = 0x4200a1bed4a5ada2  # 8929139348.709782
+mu_m3_s2 = 0x441d523b51b65317  # 1.3522024942895823e20
+valid_until: None
+x_m = 0x427dd23f82480286  # 2049302865024.1577
+y_m = 0xc29528ddcf98872a  # -5816316061217.791
+z_m = 0xc275e4c4581234ed  # -1504518177059.3079
+radius_rearth = 0x3fb8bfff2031ccc5  # 0.09667963539122855
+density_kg_m3 = 0x40998e3d6d894b4b  # 1635.5599881603437
+gravity_m_s2 = 0x3fd2067c7ca70a37  # 0.28164589093299547
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe3077835fec92e  # 0.5946618132204884
+water = 0x3fd9f10f94026da3  # 0.40533818677951156
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4041dcaa1011b53b  # 35.72393990387578
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e105 BELT 1-5: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f283951cdb1826d  # 0.00018481372430569372
+a_m = 0x429b2c69cb52edc4  # 7469391860923.441
+e = 0x3fa0b7bdcb0525df  # 0.032651835472801365
+i_rad = 0x4007a70a334b122d  # 2.956562424400792
+node_rad = 0x3ff174b520e75b2f  # 1.0909930501272347
+periapsis_rad = 0x4007b4cfa14b7dd0  # 2.963286647907559
+mean_anomaly_at_epoch_rad = 0x4003f9816020bf4e  # 2.4968287954324415
+period_s = 0x42048ba6c0ddd97a  # 11030288411.73119
+mu_m3_s2 = 0x441d523b51976ac7  # 1.3522024939577159e20
+valid_until: None
+x_m = 0xc2802b4f84b75c02  # -2222275466987.501
+y_m = 0x429a72a011ad22d4  # 7269903526728.707
+z_m = 0xc26d04eafdea274b  # -997092486993.2279
+radius_rearth = 0x3fb6640141e3b7e3  # 0.08746345385199521
+density_kg_m3 = 0x4097cba653cf55a7  # 1522.912429084399
+gravity_m_s2 = 0x3fce5e28be5c53ae  # 0.23724850935891822
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe120807e1bc348  # 0.5352175200515399
+water = 0x3fddbeff03c87970  # 0.4647824799484601
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4040a1108060e61d  # 33.25831608516112
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e106 BELT 1-6: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f21e04f2c954487  # 0.0001363846443305542
+a_m = 0x42990bc008e3fc3b  # 6884564285695.058
+e = 0x3fc16ab93ee7cf5b  # 0.1360694462924766
+i_rad = 0x40085106480969d2  # 3.0395627620575647
+node_rad = 0x401032ab2ed4c757  # 4.0494811360711855
+periapsis_rad = 0x4011d3e786322ebe  # 4.45693788224497
+mean_anomaly_at_epoch_rad = 0x3ff470f5796b1466  # 1.27757785252586
+period_s = 0x42022e2fbec045f0  # 9760536536.03415
+mu_m3_s2 = 0x441d523b51857062  # 1.3522024937646775e20
+valid_until: None
+x_m = 0xc282749a2f74a611  # -2536501538452.7583
+y_m = 0xc296b158a795569f  # -6237738100053.655
+z_m = 0xc245ece087147168  # -188336901672.886
+radius_rearth = 0x3fb4492bcbc97bb8  # 0.07924150204915648
+density_kg_m3 = 0x40979ce23ba91229  # 1511.220930711492
+gravity_m_s2 = 0x3fcb4d481014a28f  # 0.2132959440725881
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0e9cd4d773292  # 0.5285402787208844
+water = 0x3fde2c6565119adc  # 0.4714597212791156
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x40415bf8a75b4b9b  # 34.71852580983906
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e107 BELT 1-7: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f1ba6ed167072d1  # 0.0001054842192477854
+a_m = 0x4298115f75f86298  # 6615723769368.648
+e = 0x3fc336f075558528  # 0.15011411408617303
+i_rad = 0x400867e90ac102b7  # 3.050737461104599
+node_rad = 0x400a86ed18adbcfa  # 3.3158819129963577
+periapsis_rad = 0x4000758f5f1c2dc2  # 2.057402365729758
+mean_anomaly_at_epoch_rad = 0x4004cd96649ce0e7  # 2.6003845081687476
+period_s = 0x4201203f8e17a161  # 9194435010.953798
+mu_m3_s2 = 0x441d523b5179f7cc  # 1.3522024936415081e20
+valid_until: None
+x_m = 0x4264cb2235ee7204  # 714458902387.563
+y_m = 0xc29b0c44acd9ae46  # -7434876434027.568
+z_m = 0xc263be612d827554  # -678387346451.6665
+radius_rearth = 0x3fb20e321ab5f386  # 0.07052910949819421
+density_kg_m3 = 0x4099e6c0d2cfdf92  # 1657.6883041839797
+gravity_m_s2 = 0x3fcaa7c028a67f54  # 0.2082443426597772
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe35f59f10d399a  # 0.6053895671882856
+water = 0x3fd9414c1de58ccd  # 0.39461043281171443
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4041b7b12cc84354  # 35.43509444979159
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e108 BELT 1-8: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f16227d77cc8c94  # 8.443728252109851e-5
+a_m = 0x429a8ad7a174ea8b  # 7295906372922.636
+e = 0x3fcf5f1649a0a39f  # 0.24508932681172
+i_rad = 0x40070021c06287ac  # 2.875064375883957
+node_rad = 0x4009472611d4fe3d  # 3.1597405808568326
+periapsis_rad = 0x3ff68519ddb90a09  # 1.4074953709647409
+mean_anomaly_at_epoch_rad = 0x4014ff522cc031a1  # 5.249336909514029
+period_s = 0x4203d57a21b406cd  # 10648241206.50332
+mu_m3_s2 = 0x441d523b517227a1  # 1.352202493557615e20
+valid_until: None
+x_m = 0xc2986a0b4ccd7c45  # -6710933795679.067
+y_m = 0xc26796470a4208f6  # -810443887120.28
+z_m = 0xc245e260b0e65e62  # -187984601548.73737
+radius_rearth = 0x3fb13527d9697733  # 0.06721734102162884
+density_kg_m3 = 0x4097f38ed3d37c6f  # 1532.889479927511
+gravity_m_s2 = 0x3fc77dbb4e0516dc  # 0.18352452573360878
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe14e85541f6622  # 0.540835060407691
+water = 0x3fdd62f557c133bc  # 0.459164939592309
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4040f4491ab1968e  # 33.90848096534056
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+
++H: 11 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
+belts: [e100]
+halo: none
+body 0100 A b: Planet about Some(Star(0)), Present
+mass_mearth = 0x40713baa6f714ead  # 275.7291101862018
+a_m = 0x42063b3ec6e8e0f4  # 11935406301.10984
+e = 0x3fd8daacf65d791d  # 0.388346901503512
+i_rad = 0x400665b2d333bdac  # 2.799657487885005
+node_rad = 0x400d16dc874640a2  # 3.6361628120722154
+periapsis_rad = 0x400f28d39146d8e7  # 3.894934782957637
+mean_anomaly_at_epoch_rad = 0x40101af1542b0d07  # 4.026311221244447
+period_s = 0x41257e1968c38b8f  # 704268.7046168911
+mu_m3_s2 = 0x441d58552c0d9a18  # 1.3533015505571663e20
+valid_until: None
+x_m = 0xc2028e95ad2788a7  # -9962698148.941725
+y_m = 0x42031ec2ab5b86de  # 10265056619.440853
+z_m = 0x41f23fd4f69bf557  # 4898770793.747397
+radius_rearth = 0x4026d7029d808f3f  # 11.41994182771998
+density_kg_m3 = 0x408fe5da27a889f0  # 1020.7315209548087
+gravity_m_s2 = 0x4034c32c06e56fc7  # 20.762390547766497
+class: GasGiant
+iron = 0x3f9d8ff6d1db3225  # 0.028869492109878565
+rock = 0x3faeb30a28b2654d  # 0.059959714382055475
+water = 0x3fba8db7145e3259  # 0.10372490165009064
+envelope = 0x3fe9d698c45a39cf  # 0.8074458918579753
+t_eq_k = 0x408aa27f0d005129  # 852.3120365166443
+moons: []
+rings: [0180]
+population: NotApplicable
+surface: NotApplicable
+hooks: NotModelled
+body 0180 A b RING 1: Ring about Some(Body(BodyIndex(256))), Present
+mass_mearth = 0x3c912e65df4b7a7d  # 5.960940750416032e-17
+orbit: NotApplicable
+x_m = 0xc2028e95ad2788a7  # -9962698148.941725
+y_m = 0x42031ec2ab5b86de  # 10265056619.440853
+z_m = 0x41f23fd4f69bf557  # 4898770793.747397
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+ring: Dusty of Rock
+inner_m = 0x419314c57f0b42f8  # 80032095.76099765
+outer_m = 0x419be2eed14170f4  # 116964276.31390744
+optical_depth = 0x3e94e7997c7001e0  # 3.115040922430344e-7
+surface: NotApplicable
+hooks: NotApplicable
+body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
+mass_mearth = 0x3f972e1dbb9ff012  # 0.022636856629091602
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+belt: OuterDisc about Star(0), Icy
+main_inner_m = 0x42969a73ecc09533  # 6213156417573.3
+main_outer_m = 0x42a0f10ceb71bb66  # 9313744959709.7
+size_slope = 0x400bf7e9a1bebd46  # 3.496051086076167
+largest_diameter_m = 0x4142fc41d1b3ec8d  # 2488451.6383033455
+fractional_luminosity = 0x3e83fe1aa4be2aaa  # 1.4895643329586084e-7
+members: [e101, e102, e103, e104, e105, e106, e107, e108]
+surface: NotApplicable
+hooks: NotApplicable
+body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f66227d77cc8c98  # 0.002701993040675154
+a_m = 0x4297cef385d015a5  # 6544404083717.411
+e = 0x3fc3d6e114e2eeec  # 0.15499509353491392
+i_rad = 0x4005fa7046f89df7  # 2.7472844643232253
+node_rad = 0x400b962fe99a6bc1  # 3.4483335733652614
+periapsis_rad = 0x400026d1865e9b36  # 2.0189543244954633
+mean_anomaly_at_epoch_rad = 0x401823eafb9f0808  # 6.03507607610846
+period_s = 0x4200d98b5052e56e  # 9046157834.362026
+mu_m3_s2 = 0x441d523b553ddbbf  # 1.3522025039912028e20
+valid_until: None
+x_m = 0x426026c3aa84dbba  # 554958672934.8665
+y_m = 0xc29945b10d8cffee  # -6946778473279.982
+z_m = 0xc2848ea3a1bea418  # -2825357899732.5117
+radius_rearth = 0x3fca9d14266055da  # 0.20791866182177793
+density_kg_m3 = 0x4099e58e1be2db0a  # 1657.3887782522384
+gravity_m_s2 = 0x3fe3a42ae932270e  # 0.6137899927718722
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe35e2d6d1630c4  # 0.6052462702368975
+water = 0x3fd943a525d39e79  # 0.3947537297631026
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x404345fff88d9e21  # 38.54687411227156
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f4be35485ddfb13  # 0.00085107447715402
+a_m = 0x4297a8be1bcea72d  # 6503377859497.794
+e = 0x3fc46c13d85246c4  # 0.15954826414649947
+i_rad = 0x40087caa0c450ed8  # 3.060871215684397
+node_rad = 0x400326b9a54a6600  # 2.3939087785081483
+periapsis_rad = 0x40096dd0724a1a4d  # 3.1786202362884866
+mean_anomaly_at_epoch_rad = 0x40153051b7a84ac3  # 5.2971867271869
+period_s = 0x4200b10bcb0a9bf9  # 8961227105.326159
+mu_m3_s2 = 0x441d523b528ec008  # 1.352202496613434e20
+valid_until: None
+x_m = 0xc29a219274a334a6  # -7182873340109.162
+y_m = 0x426ec1f96563ec48  # 1056826927903.3838
+z_m = 0xc253594027383e3b  # -332407020768.97235
+radius_rearth = 0x3fc21b054d2b6a47  # 0.14144960659071357
+density_kg_m3 = 0x4099e7f9b574f8a3  # 1657.9938562657123
+gravity_m_s2 = 0x3fdabbf207d41316  # 0.41772127880567334
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe3608c642ab5e5  # 0.6055356937774233
+water = 0x3fd93ee737aa9436  # 0.39446430622257667
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4041e069d71e44c6  # 35.753229989795315
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f3c60702af95fea  # 0.000432994255765261
+a_m = 0x4299ccc016e6fff5  # 7091796687295.989
+e = 0x3fc0e57965845d3f  # 0.13200299698721982
+i_rad = 0x40058df0477b778a  # 2.6943059525064585
+node_rad = 0x40086d64218e6750  # 3.05341364112693
+periapsis_rad = 0x40002391f93c2b60  # 2.0173682662474874
+mean_anomaly_at_epoch_rad = 0x40064cbc992c39d6  # 2.787469097768944
+period_s = 0x420301e7576347bf  # 10204539628.410032
+mu_m3_s2 = 0x441d523b51f38c4d  # 1.3522024949469644e20
+valid_until: None
+x_m = 0xc292cd930382af20  # -5168536019115.781
+y_m = 0xc293c36d19f5c0d3  # -5432517492080.206
+z_m = 0xc28479fe0c6d87a8  # -2814273228208.957
+radius_rearth = 0x3fbddcc699d36faf  # 0.11665002112880417
+density_kg_m3 = 0x4097800178f99d39  # 1504.0014380457126
+gravity_m_s2 = 0x3fd3ffd2b2ebf7f5  # 0.3124891993792283
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0c7999de7dba4  # 0.5243652423949823
+water = 0x3fde70ccc43048b8  # 0.4756347576050177
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x404119f3f0904afc  # 34.20275694890549
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e104 BELT 1-4: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f31917f05aa2748  # 0.00026807166219865565
+a_m = 0x42979a468c984808  # 6487844005394.008
+e = 0x3fb91abb0317153f  # 0.09806412530368379
+i_rad = 0x40064ee02e9b5331  # 2.788513530841009
+node_rad = 0x40051087e7f91d44  # 2.6330717203997285
+periapsis_rad = 0x40155e83adc420a6  # 5.342299189658808
+mean_anomaly_at_epoch_rad = 0x40141eeed4c2538a  # 5.030207943306673
+period_s = 0x4200a1bed4a5ada2  # 8929139348.709782
+mu_m3_s2 = 0x441d523b51b65317  # 1.3522024942895823e20
+valid_until: None
+x_m = 0x4276a0b2888e483a  # 1554965367012.5142
+y_m = 0x4296cd43907f93ea  # 6267714412516.979
+z_m = 0x4280b59d086adeae  # 2296526212443.835
+radius_rearth = 0x3fb8bfff2031ccc5  # 0.09667963539122855
+density_kg_m3 = 0x40998e3d6d894b4b  # 1635.5599881603437
+gravity_m_s2 = 0x3fd2067c7ca70a37  # 0.28164589093299547
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe3077835fec92e  # 0.5946618132204884
+water = 0x3fd9f10f94026da3  # 0.40533818677951156
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4041dcaa154390e8  # 35.72394052313922
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e105 BELT 1-5: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f283951cdb1826d  # 0.00018481372430569372
+a_m = 0x429b2c69cb52edc4  # 7469391860923.441
+e = 0x3fa0b7bdcb0525df  # 0.032651835472801365
+i_rad = 0x4007a70a334b122d  # 2.956562424400792
+node_rad = 0x3ff174b520e75b2f  # 1.0909930501272347
+periapsis_rad = 0x4007b4cfa14b7dd0  # 2.963286647907559
+mean_anomaly_at_epoch_rad = 0x4003f9816020bf4e  # 2.4968287954324415
+period_s = 0x42048ba6c0ddd97a  # 11030288411.73119
+mu_m3_s2 = 0x441d523b51976ac7  # 1.3522024939577159e20
+valid_until: None
+x_m = 0xc2987a69c43f2b23  # -6728509886410.784
+y_m = 0x4285c0788cde08d4  # 2989550050241.1035
+z_m = 0xc274040b0ce8dd64  # -1375474863757.837
+radius_rearth = 0x3fb6640141e3b7e3  # 0.08746345385199521
+density_kg_m3 = 0x4097cba653cf55a7  # 1522.912429084399
+gravity_m_s2 = 0x3fce5e28be5c53ae  # 0.23724850935891822
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe120807e1bc348  # 0.5352175200515399
+water = 0x3fddbeff03c87970  # 0.4647824799484601
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4040a1108536f8c6  # 33.258316661683736
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e106 BELT 1-6: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f21e04f2c954487  # 0.0001363846443305542
+a_m = 0x42990bc008e3fc3b  # 6884564285695.058
+e = 0x3fc16ab93ee7cf5b  # 0.1360694462924766
+i_rad = 0x40085106480969d2  # 3.0395627620575647
+node_rad = 0x401032ab2ed4c757  # 4.0494811360711855
+periapsis_rad = 0x4011d3e786322ebe  # 4.45693788224497
+mean_anomaly_at_epoch_rad = 0x3ff470f5796b1466  # 1.27757785252586
+period_s = 0x42022e2fbec045f0  # 9760536536.03415
+mu_m3_s2 = 0x441d523b51857062  # 1.3522024937646775e20
+valid_until: None
+x_m = 0xc29c01b127bcb314  # -7698398179116.77
+y_m = 0x4265e4cb2287ef7e  # 752262648895.4841
+z_m = 0x426375f3e6013a4f  # 668666376201.8221
+radius_rearth = 0x3fb4492bcbc97bb8  # 0.07924150204915648
+density_kg_m3 = 0x40979ce23ba91229  # 1511.220930711492
+gravity_m_s2 = 0x3fcb4d481014a28f  # 0.2132959440725881
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe0e9cd4d773292  # 0.5285402787208844
+water = 0x3fde2c6565119adc  # 0.4714597212791156
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x40415bf8ac67b9d8  # 34.71852641167396
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e107 BELT 1-7: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f1ba6ed167072d1  # 0.0001054842192477854
+a_m = 0x4298115f75f86298  # 6615723769368.648
+e = 0x3fc336f075558528  # 0.15011411408617303
+i_rad = 0x400867e90ac102b7  # 3.050737461104599
+node_rad = 0x400a86ed18adbcfa  # 3.3158819129963577
+periapsis_rad = 0x4000758f5f1c2dc2  # 2.057402365729758
+mean_anomaly_at_epoch_rad = 0x4004cd96649ce0e7  # 2.6003845081687476
+period_s = 0x4201203f8e17a161  # 9194435010.953798
+mu_m3_s2 = 0x441d523b5179f7cc  # 1.3522024936415081e20
+valid_until: None
+x_m = 0xc291efcf1f637c1e  # -4930417449183.029
+y_m = 0x428ac69be1f135ae  # 3680040140326.71
+z_m = 0x4257c0fb3c5438ca  # 408087753040.8873
+radius_rearth = 0x3fb20e321ab5f386  # 0.07052910949819421
+density_kg_m3 = 0x4099e6c0d2cfdf92  # 1657.6883041839797
+gravity_m_s2 = 0x3fcaa7c028a67f54  # 0.2082443426597772
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe35f59f10d399a  # 0.6053895671882856
+water = 0x3fd9414c1de58ccd  # 0.39461043281171443
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4041b7b131ef5e5a  # 35.435095064047985
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled
+body e108 BELT 1-8: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
+mass_mearth = 0x3f16227d77cc8c94  # 8.443728252109851e-5
+a_m = 0x429a8ad7a174ea8b  # 7295906372922.636
+e = 0x3fcf5f1649a0a39f  # 0.24508932681172
+i_rad = 0x40070021c06287ac  # 2.875064375883957
+node_rad = 0x4009472611d4fe3d  # 3.1597405808568326
+periapsis_rad = 0x3ff68519ddb90a09  # 1.4074953709647409
+mean_anomaly_at_epoch_rad = 0x4014ff522cc031a1  # 5.249336909514029
+period_s = 0x4203d57a21b406cd  # 10648241206.50332
+mu_m3_s2 = 0x441d523b517227a1  # 1.352202493557615e20
+valid_until: None
+x_m = 0xc298657fb63fe3c4  # -6706053353464.941
+y_m = 0xc282197ecf9bbf5b  # -2487588877175.9194
+z_m = 0xc262cbd73a10e3bc  # -645834330247.1167
+radius_rearth = 0x3fb13527d9697733  # 0.06721734102162884
+density_kg_m3 = 0x4097f38ed3d37c6f  # 1532.889479927511
+gravity_m_s2 = 0x3fc77dbb4e0516dc  # 0.18352452573360878
+class: Icy
+iron = 0x0000000000000000  # 0.0
+rock = 0x3fe14e85541f6622  # 0.540835060407691
+water = 0x3fdd62f557c133bc  # 0.459164939592309
+envelope = 0x0000000000000000  # 0.0
+t_eq_k = 0x4040f4491f9fdd2f  # 33.908481553133576
+moons: []
+rings: NotModelled
+population: NotApplicable
+surface: NotModelled
+hooks: NotModelled

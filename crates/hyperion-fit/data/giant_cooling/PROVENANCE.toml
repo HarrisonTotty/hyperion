@@ -1,0 +1,13 @@
+# Sonora Bobcat's evolution rows for giant planets (plan 13, P13.T5.b; plan 15, Design note 12). A
+# committed dataset: its licence allows redistribution, and the file's own header gives its source.
+dataset = "giant_cooling"
+class = "committed"
+citation = "Marley, Saumon, Visscher et al. (2021), ApJ 920, 85: the Sonora Bobcat evolution tables, cloudless, [M/H] = 0, solar C/O; the first 16 mass blocks, 0.0005 to 0.011 Msun"
+url = "https://doi.org/10.5281/zenodo.5063476"
+retrieved = "2026-09-23"
+release = "Zenodo record 5063476, evolution_and_photometery.tar.gz (sha256 2198426d1ca0e410fda7b63c3b7f45f3890a8d9f2fcf0a3a1e36e14185283ca5), evolution_tables/evo_tables+0.0/nc+0.0_co1.0_mass"
+licence = "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+
+[[files]]
+name = "sonora_bobcat_nc+0.0_co1.0_mass.txt"
+sha256 = "7846e4761039229d10ad34eb3c7596dfc429bee379b472923f77b5659fe5edd7"

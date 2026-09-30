@@ -1,0 +1,18 @@
+# The 1% orbit run: the histograms of `manifests/displaced_orbits.one_percent.toml` (the production
+# counts over 100), which `manifests/displaced_forms.one_percent.toml` fits as a check of the fits
+# on real statistics. Generated: only this file is committed; the histograms are made again (1.8
+# CPU-hours, 2.6 hours on three threads under load) into
+# `crates/hyperion-fit/data/cache/displaced_one_percent/` (git-ignored) by
+# `hyperion-fit orbits --manifest crates/hyperion-fit/manifests/displaced_orbits.one_percent.toml
+# --out crates/hyperion-fit/data/cache/displaced_one_percent`.
+dataset = "displaced_one_percent"
+class = "fetched"
+citation = "hyperion-fit orbits (plan 15, P15.T6.a–b): orbits in the Milky Way fixture's own potential"
+url = "generated: hyperion-fit orbits --manifest crates/hyperion-fit/manifests/displaced_orbits.one_percent.toml"
+retrieved = "2026-09-27"
+release = "the 1% manifest displaced_orbits.one_percent.toml, manifest-sha256 ba5fcd359d086f2ce1f15ffca41221d562993175439bce420acc22e4f26bda44, at GENERATOR_VERSION 13 (1.8 CPU-hours)"
+licence = "HYPERION's own output"
+
+[[files]]
+name = "displaced_orbits.txt"
+sha256 = "c7b6d1f6f2df0e74bb71bc051881b08dbe13d6ad0dc2b0c9124c3e6b77340ea7"

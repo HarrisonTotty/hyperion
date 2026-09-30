@@ -1,26 +1,47 @@
+use std::net::SocketAddr;
+
 use anyhow::Context;
+use clap::Parser;
+use hyperion_server::{Server, ServerArgs, ServerConfig};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Parsing exits with the help, the version or a usage error before anything starts.
+    let config = ServerConfig::from(ServerArgs::parse());
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
-    let addr =
-        std::env::var("HYPERION_ADDR").unwrap_or_else(|_| hyperion_server::DEFAULT_ADDR.to_owned());
-    let listener = TcpListener::bind(&addr)
+    // Bind first, so that nothing needs tearing down when the address is taken.
+    let listener = TcpListener::bind(config.addr())
         .await
-        .with_context(|| format!("failed to bind {addr}"))?;
-    tracing::info!("listening on {}", listener.local_addr()?);
+        .with_context(|| format!("failed to bind {}", config.addr()))?;
+    let addr = listener.local_addr()?;
+    let server = Server::start(config)
+        .await
+        .context("failed to start the server")?;
+    tracing::info!(%addr, "listening");
 
-    axum::serve(listener, hyperion_server::app())
-        .with_graceful_shutdown(shutdown_signal())
+    // Graceful shutdown stops accepting and drains HTTP requests; `Server::shutdown` then closes
+    // the WebSockets, which axum leaves running.
+    let serve_result = axum::serve(
+        listener,
+        server
+            .router()
+            .into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("server error");
+    server
+        .shutdown()
         .await
-        .context("server error")
+        .context("failed to shut down cleanly")?;
+    serve_result
 }
 
 async fn shutdown_signal() {

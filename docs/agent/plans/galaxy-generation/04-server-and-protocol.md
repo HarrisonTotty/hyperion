@@ -865,16 +865,47 @@ give `generator_version_mismatch`.
 **P04.T14.b Galaxy parameters** (`requests/galaxy.rs`, `convert.rs`). Build the groups from
 `GalaxyParams`: `identity` (seed, generator version, mass function), `mass` (stellar mass, system
 count, mean mass per system, dark halo mass and concentration, gas mass, black hole mass),
-`populations` (each share), `discs`, `bulge_and_bar` (including pattern speed), `nuclear_disc`,
+`populations` (each share), `population_masses` and `population_mean_masses` (each population's
+mass and mean system mass), `discs`, `bulge_and_bar` (including pattern speed), `nuclear_disc`,
 `halo`, `arms` (number, pitch), `history` (formation timescale, last major merger) and `rotation`
-(circular speed at 26,000 ly, escape speed there). Units are those of design note 11: the pattern
-speed is converted from Plan 02's radians per Julian year to degrees per Myr (× 180 ÷ π × 10⁶), and
-nothing is sent per kiloparsec. Every structural getter Plan 02 provides appears once. Not sent in
-M1, and listed with the reason in a constant `EXCLUDED_PARAMETERS` beside the builder: the
-metallicity gradient, the scatter draws (they are already folded into the sizes and masses shown)
-and the per-progenitor accretion list (Plan 10 displays it). A unit test counts sent plus excluded
-parameters against a constant that a new getter's author must raise, and asserts keys are unique and
-match `^[a-z0-9_]+(\.[a-z0-9_]+)*$`.
+(circular speed at 26,000 ly, escape speed there). The groups, their keys and their order are
+exactly the table below, which Plan 05's glossary (`parameterLabels.ts`) and its fixture
+(`everyGalaxyParameter` in `test/galaxyFixtures.ts`) copy and a client test holds them to. Units
+are those of design note 11: the pattern speed is converted from Plan 02's radians per Julian year
+to degrees per Myr (× 180 ÷ π × 10⁶), times from years to Gyr, and nothing is sent per kiloparsec.
+Every structural getter Plan 02 provides appears once. Not sent in M1, and listed with the reason
+in a constant `EXCLUDED_PARAMETERS` beside the builder: the metallicity gradient and each halo
+component's mean [Fe/H] (no `dex` unit until a plan displays a metallicity); the scatter draws
+(they are already folded into the sizes and masses shown; `BlackHoleParams::scatter` is the one
+with a getter); the per-progenitor accretion list (Plan 10 displays it), which includes the lesser
+progenitors' own halo components, whose total share is sent; the halo components' age
+distributions (the `history` group stands for them); `HaloParams::discrete_share` (held at zero
+until Plan 10, which sends it); the dark halo's scale radius (r₂₀₀ ÷ c₂₀₀, both sent); the
+generator's constants, the same for every seed (the gas disc's scale height, the nuclear cluster's
+slopes and break radius, the halo components' cut radii, the globular-born debris's flattening);
+and the potential's radial profiles, of which only the `rotation` group's radius is sent
+(`PotentialTables::bar_corotation` is `bar.corotation_radius`). A unit test counts sent plus
+excluded parameters against a constant that a new getter's author must raise, and asserts keys are
+unique and match `^[a-z0-9_]+(\.[a-z0-9_]+)*$`.
+
+Keys by group, each with its `Unit` (or `text`) and origin (drawn, derived or fixed). `<p>` stands
+for each `Population` in wire order (`young_thin_disc`, `old_thin_disc`, `thick_disc`, `bulge`,
+`long_bar`, `nuclear_disc`, `halo`):
+
+| Group                    | Keys, unit, origin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`               | `seed` (text, the wire's hex; fixed), `generator_version` (`count`, fixed), `mass_function` (text, `kroupa` or `chabrier`; fixed)                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `mass`                   | `stellar_mass` (`msun`, drawn), `system_count` (`count`, derived), `mean_system_mass` (M★ ÷ N; `msun`, derived), `mean_formed_mass`, `gas.mass`, `black_hole.mass`, `nuclear_cluster.mass` (`msun`, derived), `dark_halo.mass` (M₂₀₀; `msun`, derived), `dark_halo.concentration` (`none`, derived), `dark_halo.virial_radius` (r₂₀₀; `ly`, derived), `dark_halo.f_star` (`none`, drawn)                                                                                                                                                           |
+| `populations`            | `population.<p>.share` (`none`; drawn for `thick_disc`, `nuclear_disc` and `halo`, derived for the rest)                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `population_masses`      | `population.<p>.mass` (`msun`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `population_mean_masses` | `population.<p>.mean_system_mass` (`msun`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `discs`                  | `disc.thin.scale_length` (`ly`, derived), `disc.thin.scale_height` (the mean; `ly`, drawn), `disc.young.scale_length` (`ly`, derived), `disc.young.scale_height` (`ly`, drawn), `disc.thick.scale_length`, `disc.thick.scale_height`, `disc.gas.scale_length` (`ly`, derived)                                                                                                                                                                                                                                                                      |
+| `bulge_and_bar`          | `bulge.scale_x`, `bulge.scale_y`, `bulge.scale_z` (`ly`, derived), `bulge.boxiness` (`none`, drawn), `bar.share_of_bulge` (`none`, drawn), `bar.half_length`, `bar.width` (`ly`, derived), `bar.height` (`ly`, drawn), `bar.corotation_ratio` (`none`, drawn), `bar.corotation_radius` (`ly`, derived), `bar.pattern_speed` (`deg_per_myr`, derived)                                                                                                                                                                                               |
+| `nuclear_disc`           | `nuclear_disc.scale_length`, `nuclear_disc.scale_height` (`ly`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `halo`                   | `halo.in_situ.share`, `halo.dominant_merger.share`, `halo.lesser.share` (all lesser progenitors together), `halo.globular_debris.share` (`none`, derived); `halo.in_situ.slope`, `halo.dominant_merger.slope`, `halo.globular_debris.slope` (`none`, drawn); `halo.in_situ.core`, `halo.dominant_merger.core`, `halo.globular_debris.core` (`ly`, drawn); `halo.in_situ.flattening`, `halo.dominant_merger.flattening` (`none`, drawn); `halo.dominant_merger.break_radius` (`ly`, drawn), `halo.dominant_merger.break_steepening` (`none`, drawn) |
+| `arms`                   | `arms.count` (`count`, drawn), `arms.pitch` (`deg`, drawn), `arms.young_width` (`ly`, drawn), `arms.young_fraction`, `arms.old_amplitude` (`none`, drawn)                                                                                                                                                                                                                                                                                                                                                                                          |
+| `history`                | `history.formation_timescale` (`gyr`, drawn), `history.last_major_merger` (`gyr`, drawn), `history.globular_clusters` (`count`, derived)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `rotation`               | `rotation.radius` (26,000 ly; `ly`, fixed), `rotation.circular_speed`, `rotation.escape_speed` (`km_per_s`, derived)                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 Tests (`tests/galaxy_parameters.rs`): the response for a fixed seed equals a golden JSON file under
 `crates/hyperion-server/tests/golden/` (regenerated on a generator bump); two universes with one
@@ -1026,3 +1057,501 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   longer than one ping round trip on one worker. That is a safe margin of several orders of
   magnitude, but it is a margin and not a proof; the unit test of queue priority in T8.a is the
   proof.
+- **Deviations in T1–T5, as built.** `nextFreeRequestId`, `MAX_REQUEST_ID` and the test-only
+  `setLastRequestId` are exported from `requests.ts` but not from the package index, so the ID
+  wrap-around can be tested without 2³² requests. A cancelled ID stays reserved until the server's
+  late reply arrives or the link drops. oxlint rejects reading a ref during render, so the socket
+  that requests use lives in a small `RequestLink` class held in `useState`; only the socket that
+  requests are sent on settles them as `link_lost` when it closes. `serverGeneratorVersion` stays
+  `null` when the server speaks another protocol version. The Protocol row reads
+  `SERVER n / CLIENT m`, because `SRV` and `CLT` are not on the nomenclature list. ts-rs's
+  `no-serde-warnings` feature is on in the root `Cargo.toml`; `packages/protocol` gained vitest.
+  Until T13, `ws.rs` answers every request with `request_error` code `unsupported` and ignores
+  `cancel`.
+- **Deviations in T6–T10, as built.** `UniverseStore::scan()` returns `StoreScan` (loaded saves
+  plus later-format ones), so `open` can answer `UnsupportedSaveFormat` and a create never reuses a
+  later-format save's ID. `write` only creates: it fails with `AlreadyExists`, the registry then
+  draws another ID, and a failed write removes what it wrote. Creates in progress count against
+  `MAX_UNIVERSES` from the moment their name is reserved. An empty `HYPERION_DATA_DIR` is refused.
+  `CpuPool::new` takes three `NonZeroUsize` and returns `Result`; jobs are
+  `FnOnce(&CancelToken) -> T`; `shutdown(&self)` is safe to cancel and to call twice; `counters()`
+  is added; a panic in a job's drop code is caught too. `SingleFlight::run` registers the caller
+  at once and returns a `Flight` future whose `make_future` runs lazily on first poll, outside the
+  lock (hence its `Send + 'static` bound); if the computation panics, every waiter panics with the
+  original message and the key is freed, so T13 must answer `internal` when a request task
+  panics. `ByteLru::insert` returns `Insertion` (stored or refused) and uses checked arithmetic;
+  `SharedByteLru` drops evicted values after releasing its lock. `Server::start` is async and
+  fails if the data directory is not a directory. For T13: `universe::Compatibility` stands in for
+  `UniverseStatus`, the server's own `ParseHex64Error` in `universe/id.rs` should give way to the
+  protocol's hex type, `TestClient::request` is still to add, and axum's WebSocket tasks are not
+  joined by graceful shutdown, so `Server::shutdown` needs a task tracker.
+- **Deviations in T13, as built.** The connection task alone sends terminal messages: a request's
+  task returns its finished frame through the `JoinSet`, and `cancel` aborts the task and answers
+  `cancelled` at once, dropping any later frame, so "already queued" (design note 3) means already
+  pushed to the writer. The seam is `requests::Handler`
+  (`handle(&self, Arc<AppState>, RequestBody, CancelToken) -> HandlerFuture`, a `BoxFuture`), held
+  in `AppState` as `Arc<dyn Handler>`; `requests::Handlers` matches every kind and answers
+  `unsupported` until T14 replaces each arm, and the crate-private `Server::start_with_handler`
+  injects test doubles. Maps and range results are serialised by `pool.submit(Interactive, …)`,
+  which waits for a place rather than refusing a finished response; since a handler returns a
+  `ResponseBody`, T14.c's quantising and encoding is a job of its own before that one, unless T14
+  widens the seam. A missing or non-string `kind` is `bad_request`. A request that does not parse
+  still gets the duplicate-ID `error` and `hello_required` before its own error.
+  `From<SubmitJobError>` and `From<JobError>` for `RequestError` give T13.b's codes, plus
+  `JobError::Cancelled` → `cancelled`. A kind not in `REQUEST_KINDS` neither counts towards nor
+  resets the malformed-frame limit, since a newer client sends one in good faith; a binary frame
+  counts. T13.a's queue of 32 is `limits::OUTBOUND_QUEUE_FRAMES`, and `limits::CLOSE_TIMEOUT`
+  (1 s, this task's choice, not the plan's) bounds each close and so `Server::shutdown`. A
+  server-initiated close (1008 for malformed frames, 1001 for shutdown) reads on until the client's
+  close, so that the socket is not reset. The task tracker is `connections::Connections`: a guard
+  is taken before the upgrade (a server shutting down answers 503), and `Server::shutdown` closes
+  every connection, waits for the guards, then stops the pool. `ServerStats` has `connections()`,
+  `requests()` (`RequestCounters`: in flight, accepted, refused, responded, failed, cancelled,
+  abandoned) and `pool()`. `ShutDownServerError` is an enum (`CpuPool`); `StartServerError` gains
+  `StartPool`. `Universe::compatibility()` is now `status() -> UniverseStatus`,
+  `universe::ParseHex64Error` is gone, and `UniverseId` converts to and from `UniverseIdHex`. The
+  fake-handler tests are unit tests over real sockets (`src/testing.rs`), because integration tests
+  cannot inject a handler. `main.rs` serves with connect info so that peers are logged. `TestClient`
+  gains `request`, `send_request`, `cancel` and `close`, and `closed()` returns the close code.
+- **Slow readers, for T15 (ruled after T13).** T13's outbound queue is bounded by frame count (32
+  queued plus up to 8 finished), with no write timeout, so a client that stops reading can pin about
+  160 MB of 4 MB range results until shutdown. T15 adds a per-frame write timeout
+  (`limits::WRITE_TIMEOUT`, 10 s: a frame that cannot be written in that time closes the connection
+  with 1008) and a per-connection byte budget on the outbound queue (`limits::OUTBOUND_BYTES`, 16
+  MiB: the reader stops dispatching finished requests while the queue holds more), each with a test
+  in the abuse suite. An oversized inbound frame still closes without 1009, since sending one needs
+  a direct tungstenite dependency pinned to axum's; the plan only requires the close.
+- **Deviations in T15's slow-reader part, as built.** `src/outbound.rs` holds the queue
+  (`Outbound`), the `Writer` and `Held`. Each frame is charged its payload bytes (no WebSocket
+  header) from being queued until it is written or dropped. The budget rule is stricter than
+  "while the queue holds more": a finished request's frame is queued only if nothing is held before
+  it and the queue is empty or stays within `OUTBOUND_BYTES`, else it waits in `Held`, oldest first.
+  A held request stays in flight, so it keeps its slot, `cancel` ends it and drops its frame, and a
+  close abandons it; the connection's own answers (`pong`, `welcome`, refusals, `cancelled`) are
+  never held, and the 32-frame bound is unchanged. After a write timeout the writer drops every
+  queued frame but the close, so the 1008 close follows the rest of the stuck frame if the client
+  reads again, and otherwise the socket is dropped after `CLOSE_TIMEOUT`. `Requests::finish` is
+  split into `settle` and `end`. `ServerStats::outbound()` returns `OutboundCounters`
+  (`queued_bytes`, `largest_queue_bytes`, `held_requests`, `write_timeouts`), and
+  `Harness::stop` checks that the first and third are zero. The crate-private
+  `ws::ConnectionLimits` (outbound bytes, write and close timeouts; defaults from `limits`) sits in
+  `AppState`, and `Server::start_with_handler` takes it; `testing.rs` gains
+  `Harness::start_with_limits`, `outbound_until`, `stick_writer`, `response_frame_len` and
+  `CLOGGING_BYTES`. The tests are unit tests in `outbound.rs`, not in `tests/abuse.rs`, because
+  they need a scripted handler and test-only limits; T15's ten-run loop should also run
+  `cargo test -p hyperion-server --lib outbound::`. The writer's own tests use a paused clock, so
+  the server's tokio dev-dependency gains `test-util`.
+- **Slow-reader limits, accepted residue (validated).** Two bounded imprecisions stay, by ruling:
+  after a write timeout a held reply released in the instant between the writer's stop signal and
+  its byte release is counted `responded` rather than `abandoned` (stats only; the client sees the
+  same close), and the outbound queue may exceed `OUTBOUND_BYTES` by the connection's own small
+  answers, at most about 34 of them under the 16 KiB inbound limit (about 0.55 MiB).
+- **Deviations in T11.b, as built.** `quantise_map(&RawDensityMap, MapView, CodeDepth)` takes the
+  protocol's `MapView`, since plan 02's `galaxy::map` was not yet in the tree; only the floor's span
+  depends on it, so T11.c's `MapKey` may hold either view type. The depth is `CodeDepth`
+  (`Eight`, `Sixteen`; `bits()`, `max_code()`), read from the wire by `TryFrom<u8>` with
+  `ParseCodeDepthError`, which is T14.c's `bits` check; plan 07's `quantise_map_with_floor` should
+  take a `CodeDepth` too, and can reuse the private `code_of(value, floor, span, max)`.
+  `RawDensityMap`'s fields are private with getters of the same names, and
+  `RawDensityMap::new(width_px, height_px, centre_ly, ly_per_px, log10)` returns
+  `BuildRawMapError` for a zero size, a value count other than width × height, a pixel size not
+  finite and positive or a centre not finite, and a NaN or +∞ value; `HeapBytes` charges the
+  grid's capacity. `QuantisedMap` carries its depth and has `depth()`, `floor_log10_per_ly2()`,
+  `ceiling_log10_per_ly2()`, `bytes()` and `to_base64()`. The ceiling is the largest finite `f32`
+  widened to `f64`, the span is `ceiling − floor` as the decoder has it, and ties round away from
+  zero. T11's acceptance command runs as `cargo test -p hyperion-server -- density_map galaxies`
+  (cargo takes one filter before `--`).
+- **Deviations in T14.a, as built.** Plan 02's `Galaxy::new` (P02.T9) was not yet in the tree, so
+  by the orchestrator's ruling `open_universe` checks and answers but does not warm the galaxy:
+  T11.a makes `requests::universe::open` async (taking `Arc<AppState>` and the request by value)
+  and awaits `GalaxyCache::get(universe.key())` between the lookup and the answer. The lookup is
+  `requests::universe::openable_universe(&AppState, &UniverseIdHex)`, giving `unknown_universe`
+  (naming `universe`), `generator_version_mismatch` (both versions in the message) or
+  `unsupported_save_format`; T14.b–d call it before converting any other field, add their kind to
+  `tests/universes.rs`'s mismatch test, which covers `open` alone until then, and remove it from
+  `the_handlers_refuse_every_kind_until_its_handler_exists`. `convert.rs` has
+  `ConvertRequestError::new(field, reason)` (message `invalid <field>: <reason>`), `NewUniverse`
+  (`TryFrom<CreateUniverseRequest>`, `into_parts()`), `From<&Universe> for UniverseInfo`,
+  `universe_list`, and `From<CreateUniverseError>` and `From<OpenUniverseError>` for `RequestError`:
+  `name_taken` names `name`, a failed write is `storage_failed`, and a failed draw, no free ID or
+  an interrupted create is `internal`. T7's `UniverseRegistry::create` now takes a `UniverseName`,
+  so the name is checked once, in `convert.rs`, and `CreateUniverseError::InvalidName` is gone. A
+  create outlives a cancelled request, so the registry's blocking task logs it: `info` with ID,
+  name, seed and version, a server fault at `error` with its causes. `StartServerError` gains
+  `LoadRegistry`. `TestServer::restart()` starts another server on the data directory with the
+  default test configuration and a fresh `test_entropy`. `tests/universes.rs` also covers a
+  later-format save; `tests/websocket.rs` now uses `list_universes` as a served request.
+- **Deviations in T11.a, as built.** `AppState::pool` is an `Arc<CpuPool>`, because a `SingleFlight`
+  computation is `Send + 'static` and must own its handle on the pool; `GalaxyCache::new` takes one.
+  `GalaxyCache::get(GalaxyKey) -> Result<Arc<Galaxy>, ComputeError>` is as sketched, and
+  `ComputeError` (`compute/error.rs`) is `Submit(SubmitJobError)` or `Job(JobError)`, `Copy`, with
+  `From<ComputeError> for RequestError` giving each cause the code it has as a job's; T11.c's map
+  service and T12's cells fail the same way. The four-entry bound is `limits::GALAXY_CACHE_ENTRIES`,
+  and the cache is a `Vec` of at most four entries behind one `std::sync::Mutex`, not a `ByteLru`:
+  bounding entries bounds bytes. It reports `GalaxyCache::counters() -> GalaxyCounters` (entries,
+  bytes, hits, misses, builds, evictions), which `ServerStats::galaxies()` carries, so
+  `ServerStats::new` gained a parameter (T13.c). The test-only builder hook is
+  `GalaxyCache::with_builder`, `#[cfg(test)]`; the tests that exercise the cache and not the model
+  clone one galaxy built once, because `Galaxy::new` costs 129 ms optimised (plan 02, R19) and
+  several times that unoptimised or on a loaded machine. The build is logged at `info`
+  with the seed, the version, `build_ms` and `heap_kib` from inside the job. A build carries a
+  `CancelOnDrop`, so design note 5's rule for maps holds for galaxies: a build every waiter has given
+  up on is skipped while queued, which a test pins through the pool's `cancelled` counter. The flight
+  looks in the cache once more before building, without counting the lookup, since a caller can reach
+  the registry just after another flight has left it; an insert that replaces an entry still counts as
+  a build, and `bytes` is recomputed from `Galaxy::heap_bytes` on each insert. `Debug` is
+  hand-written, because the cache holds a boxed builder. `open_universe` is now
+  `requests::universe::open(Arc<AppState>, OpenUniverseRequest)`, async, and awaits
+  `GalaxyCache::get` between the lookup and the answer, so opening a universe costs one build;
+  `tests/common/mod.rs`'s `NETWORK_TIMEOUT` is 20 s for that reason.
+- **Deviations in T14.b, as built.** The builder is `convert::galaxy_parameters(&Universe, &Galaxy)`,
+  with `EXCLUDED_PARAMETERS` and `PARAMETERS_ACCOUNTED_FOR` (95 = 80 sent + 15 excluded) beside it;
+  both are `#[cfg(test)]`, since the counting test is what enforces them and Clippy's `-D warnings`
+  refuses a constant nothing else reads. The exclusions name one getter this task's list does not:
+  `BlackHoleParams::bulge_dispersion`, an intermediate of the M–σ relation whose mass is sent. The
+  handler (`requests/galaxy.rs`) builds the response on the runtime rather than as the interactive
+  pool job design note 21 implies: it is eighty numbers read off a galaxy, and the job that can cost
+  anything is the galaxy build, which `GalaxyCache::get` still submits as interactive work and which
+  still answers `queue_full`. `galaxy_parameters` panics if a halo has no in-situ, dominant-merger or
+  globular-debris component, or its dominant merger no break (documented under `# Panics`): plan 02
+  draws all four for every seed, so it is a bug path, and T13 answers it `internal` at the cost of
+  that request alone. The unit conversions go through the sim's typed conversions
+  (`Degrees::from(Radians)`, `Gigayears::from(Years)`), which are themselves defined from
+  `units::consts`, rather than through bare constants as design note 11 words it.
+  `bar.corotation_radius` is read from `PotentialTables::bar_corotation`, which holds
+  `BarParams::corotation_radius()` itself, and `rotation.radius` is `convert::ROTATION_RADIUS`
+  (26,000 ly = 7.97 kpc, the round 8 kpc at which the brainstorm quotes "210–270 km/s"; the unit test
+  holds the Milky Way fixture to that band and to the brainstorm's 500–580 km/s escape speed). The
+  golden is
+  `crates/hyperion-server/tests/golden/galaxy_parameters.golden`: plan 01's `GoldenWriter` header,
+  `# generator_version = <n>`, followed by the response's pretty-printed JSON, rather than a bare
+  `.json` file, so that a generator bump forces `just bless` rather than a silent diff;
+  `hyperion-testkit` is therefore a dev-dependency of `hyperion-server`. `tests/galaxy_parameters.rs`
+  also covers `open` warming the galaxy (no build for the parameters that follow), two saves of one
+  seed sharing one build, and an unknown universe refused before any build.
+- **Deviations in T12, as built.** `CachedCell::new` shrinks the records it is given to fit, because
+  `generate_cell` reserves for every candidate and plan 03's `cell_heap_bytes` charges the records
+  alone; `CachedCell::systems()` lends them and the field stays private. `SharedCellCache::new` takes
+  the budget in bytes and `counters()` returns plan 04's `LruCounters`, so T13.c's snapshot needs no
+  new type. `CellCacheHandle<'_>` borrows the cache rather than sharing it by `Arc`, as the plan's
+  `handle(&self, GalaxyKey)` implies: plan 03's `CellCache::with_cell` takes `impl FnOnce`, so the
+  trait is not dyn-compatible and every caller is generic, and T14.d makes its handle **inside** the
+  pool job, from the `Arc<AppState>` the job owns. The handle asserts that the galaxy it is handed is
+  the one its key names, since lending one galaxy's cells under another's key would break every
+  guarantee the range query makes; a handle is built per query from that query's universe, so a
+  mismatch is a bug. A cell the budget cannot hold is lent and not stored, and its buffer comes back
+  to the handle for the next cell. The cache is **not** in `AppState` yet: nothing reads it until
+  T14.d runs a query, and an unread field is a Clippy failure, so T14.d adds it (from
+  `ServerConfig::cell_cache_bytes`) with its own `ServerStats` accessor. The tests walk the cells of a
+  sphere with plan 03's `cells_in_sphere` and compare cell by cell against `NoCache`, cold, warm,
+  under a 1 KiB budget and with a budget below one record: plan 03's `range_query` (P03.T7–T8) is not
+  in the tree yet, and a walk is what the cache sees of a query.
+- **Where `check_index_headroom` is handled (T11.a, amended in T12).** Plan 03's headroom check is
+  documented as "plan 04's universe registry" calling it once for a galaxy built for play, and
+  `generate_cell` **panics** for a galaxy that would fail it, which T12's `with_cell` can reach. The
+  registry never builds a galaxy, so the check belongs where one is built: `GalaxyCache`'s pool job
+  runs `check_index_headroom` after `Galaxy::new` and, on failure, logs at `error` and answers
+  `ComputeError::UnplayableGalaxy(ExceedIndexCapacityError)` without holding the galaxy, so every
+  request naming that universe is refused rather than panicking. It becomes `internal` with the
+  layer and its counts in the message, because no `ErrorCode` stands for "this universe is
+  unplayable" and design note 15 keeps the codes fixed; a code of its own is the first release's
+  business. `ComputeError` therefore loses `Eq` and `Hash` (the error carries an `f64` mean). No seed
+  is known to fail: the check costs microseconds against a 130 ms build, and a galaxy that fails it is
+  built once and refused. A unit test builds one with plan 03's own recipe (Kroupa, 10¹¹ M☉ and the
+  smallest, flattest, largest-share nuclear disc) through the test-only builder hook.
+- **Deviations in T11.c, as built.** `DensityMapService` and `MapKey` live in
+  `compute/density_map.rs` beside the quantiser rather than in a file of their own, so that T11's
+  acceptance filter (`density_map`) reaches their tests and one module owns one concept. The service
+  holds the `GalaxyCache` (`AppState::galaxies` is now an `Arc<GalaxyCache>`) and fetches the galaxy
+  of each map itself, which is what lets `get(key)` have the plan's signature; a `SingleFlight`
+  computation is `'static`, so nothing else could have passed the galaxy in. `MapKey` takes a
+  `MapResolution` (`Px128`, `Px256`, `Px512`, `Px1024`; `TryFrom<u16>` with
+  `ParseMapResolutionError`, `width_px`, `height_px(view)`, `ly_per_px`), which is T14.c's
+  `resolution` check and makes an unserved raster unrepresentable, as `CodeDepth` does for `bits`.
+  The extent is the constant `MAP_WIDTH_LY` (131,072 ly) and the centre is the origin, so `MapKey`'s
+  `MapSpec` cannot fail. A band's pixels are converted to `f32` by the sim's `math::log10`, not the
+  platform's, so the golden codes hold on every machine; a pixel of zero density becomes `−∞`, which
+  also keeps a NaN out of `RawDensityMap`. The service's `counters()` are the cache's `LruCounters`,
+  reported by `ServerStats::maps()`; because those carry the byte budget, which is configuration
+  rather than a counter, `ServerStats::default()` is no longer a fresh server's snapshot and T13.c's
+  counter test compares the counters instead. The flight looks in the cache once more before
+  computing, as `GalaxyCache` does, and `SharedByteLru` counts that look, so two concurrent `get`s
+  of one key show three misses.
+- **Measured map costs (T11.c), which put two of T16's targets out of reach.** Release build, this
+  machine, one thread, seed `00000000000004d2`: a 512-pixel face-on raster is 5.3 s (the plan's
+  target is under 1 s on eight workers: **met**, about 0.7 s); a 128-pixel edge-on raster is 7.5 s;
+  a 1,024-pixel edge-on raster is 422 s, or about 53 s on eight workers. Edge-on costs about 0.85 ms
+  a pixel against face-on's 0.02 ms, because every spheroid component integrates along its own line
+  of sight per pixel (plan 02's `EdgeOnPlan::pixel`), so a 512-pixel edge-on map is 8–13 s on eight
+  workers against the plan's 3 s target: **not met, by 3–4×**, and no server-side change can meet it
+  without plan 02 changing its algorithm. What the server does guarantee is that nothing waits for a
+  map: bands are bulk work, `ping` and `cancel` are answered on the runtime, and a cancelled map
+  stops after the band in hand, which for a 1,024-pixel edge-on map is one band of 16 rows, 13 s
+  here. `BAND_ROWS` is the knob if that tail ever matters: the cost is nearly proportional to a
+  band's pixels, so halving the rows halves the tail for a few percent more total work.
+- **Deviations in T14.c, as built.** `convert.rs` gains `MapRequest` (`TryFrom<&DensityMapRequest>`,
+  checking `resolution` then `bits`, each naming its own field) and `density_map`, which builds the
+  response from the raw map's geometry and the quantiser's floor and ceiling. The handler is
+  `requests::galaxy::map`, and it takes the request's `CancelToken`, so `Handlers::handle` now passes
+  the token on. One interactive pool job builds the whole answer — quantising up to a million pixels
+  and the base64 of up to 2.8 MiB of it, neither of which may touch the runtime — and the response
+  frame is a second job in `requests::respond`, as T13's note foresaw; `convert::density_map`
+  therefore takes the request by value, so the job owns it and moves the universe's ID into the
+  answer. A cancelled request skips a quantising job that is still queued. `tests/common/mod.rs` gains
+  `SHUTDOWN_TIMEOUT` (300 s) for `TestServer::stop`, because a teardown waits for the band in hand
+  and that is not a network wait; `NETWORK_TIMEOUT` still bounds every message. `tests/density_map.rs`
+  covers both views at both depths from one raster each, the geometry, the centre pixel's ceiling
+  code, `young` against `all`, the cache counter, both bad fields, an unknown universe, and the
+  stall: with one worker, a 1,024-pixel edge-on map in flight answers `ping` and then `cancel`
+  without waiting for the map. `tests/universes.rs`'s mismatch test gains `density_map`.
+- **Validation of T11.c and T14.c, as fixed.** The stall test cancelled its map while the _galaxy_
+  was still building (`galaxies.builds` 0 and `pool.queued_bulk` 0 at the `cancel`), so no band was
+  ever queued and it proved only that pool work does not stall the socket. It now warms the galaxy
+  with `open_universe` first and reads the pool's counters before the `ping`, so it fails rather than
+  quietly passes if the map never reaches the pool; the band in hand then costs about 5.5 s of
+  teardown in the dev profile, measured, which is what `SHUTDOWN_TIMEOUT` has to exceed. The
+  worker-count test compares one, two, three, five and eight workers against the raster
+  `render_rows` renders in one unbanded call, which pins the row order of the assembly as well as
+  the band independence, and a new test pins that a map every waiter gave up on leaves its key free.
+  Measured while checking the symmetry tolerance: every mirror pair of both views is bit-identical
+  (16,384 face-on, 8,192 edge-on), so the relative 10⁻⁹ is never reached, while neighbouring columns
+  differ by up to 0.65 dex face-on and 1.43 dex edge-on, eight orders above it, so the test does
+  catch a half-pixel offset in `pixel_centre`.
+- **T14.d and T14.e, as built.** `convert.rs` gains `RangeRequest` (`TryFrom<&SystemsInRangeRequest>`),
+  which checks time, centre, radius and limit in design note 24's order, each failure a `bad_request`
+  naming its field, and builds the query with the `MassFloor` from `min_layer` and
+  `limits::MAX_QUERY_CELLS`; then `systems_in_range`, `census`, `galactic_position`, `mass_layer` and
+  `wire_population`. `requests::galaxy::systems` is `openable_universe` → validate → `galaxies.get` →
+  **one** interactive job that owns the state, builds the `CellCacheHandle` inside itself, runs
+  `range_query(&galaxy, &mut cells, &[], &query)` and converts in the same job, because the handle
+  borrows the cache and cannot cross an await. Validation runs **before** `galaxies.get`, as T14.c
+  does, so a bad field costs no galaxy build. `AppState` gains `cells` from
+  `ServerConfig::cell_cache_bytes` and `ServerStats::new` now takes seven arguments (`maps` then
+  `cells`). `the_handlers_refuse_every_kind_until_its_handler_exists` is deleted: T14.d was the last
+  handler, so no kind was left for it to list. `SHUTDOWN_TIMEOUT` in `tests/common/mod.rs` is **60 s**,
+  not 300 s, bounded by the longest job the server cannot abort — one band of a 1,024-pixel edge-on
+  map, measured at about 5.5 s of teardown in the dev profile — plus the join.
+  - `1e999` yields the connection-level `error` rather than `bad_request`: `serde_json` rejects the
+    number before the envelope is read, so design note 4's probe cannot recover the request ID either.
+    Pinned as such, with `f64::MAX` covering the intent the plan's test describes.
+  - Test tolerances, with reasons: masses to a relative 10⁻¹⁵, because `serde_json`'s parser is exact
+    only with `float_roundtrip`; positions to 10 m, because `position_at` re-normalises through
+    `translated` and that costs about 2 m of ULP.
+  - `below_mass_floor` compares `MassFloor`s rather than `Layer`s: `Layer`'s derived order would
+    mis-report every layer once plan 13 adds finer floors.
+  - **Measured**, 50 ly at 26,000 ly returning 2,045 records: release cold 35.7 ms and warm 12.3 ms end
+    to end, with the cell cache holding 1,732 cells in 516 KB; under `cargo test` 201 ms and 122 ms.
+    **T16's "under 15 ms end to end" is met warm but not cold** — a finding for T16 to record, not a
+    failure here. `tests/galaxy_creation.rs` takes 1.2 s idle and 7.5 s under concurrent load.
+    **Corrected in the validation below: the cold figure was the machine's load; idle it is about 11
+    to 14 ms, and met narrowly.**
+- **T15, as built.** `tests/abuse.rs` covers all seven listed cases; `tests/common/mod.rs` gained
+  `STATS_POLL`, `TestServer::stats_until`, `stats_until_within` and `stop_within`, so that no test in
+  the suite guesses at timing and the shutdown bound _is_ the assertion rather than a clock reading.
+  Acceptance met: `cargo test -p hyperion-server --test abuse` ten times in a row, 10/10, 9–16 s a run
+  at load average 5–11, plus `--lib outbound::` 16/16 in each and three concurrent copies of the suite
+  for three rounds, 9/9.
+  - Two cases were **made less timing-sensitive on purpose**, after one failure in ten at load 19: the
+    shutdown case's queued work is now 50 ly range queries (about a second of queue) instead of
+    light-year ones whose queues emptied inside about 40 ms, with a second assertion that both queues
+    still hold work as the shutdown begins; and the two-client map case renders 256 pixels rather than
+    128 so its flight lasts about a second. Both windows are now roughly 25 times the work that
+    follows them. A test whose window is comparable to a scheduler delay is not measuring the server.
+  - Measured behaviour worth keeping: **192 of 200** flooded queries are refused `too_many_requests`
+    and all 8 admitted are answered; an oversized frame closes the connection with **no close frame**
+    at all (`closed() == None`), which is what this plan's "without 1009" note means, now pinned by a
+    test; closing a socket with a 1,024-pixel edge-on map in flight skips **31 of 32** bands, runs only
+    the galaxy build and the band in hand, and caches nothing; `Server::shutdown()` with both queues
+    loaded and two non-reading clients returns in about 1.0 s, nearly all of it their `CLOSE_TIMEOUT`.
+  - The 17 KiB-frame and sixteen-malformed-frame cases duplicate `tests/websocket.rs`'s close checks,
+    kept because the abuse angle differs: work already in flight is abandoned and the server is
+    unharmed. Follow-up not taken, for whoever next touches the file: `tests/density_map.rs`'s
+    `bulk_work_under_way` is now a duplicate of `stats_until`.
+- **T16, as built, and the `disallowed_methods` gap it closed.** Before the benches: `crates/hyperion-server`
+  was not reached by any Clippy configuration, so nothing enforced that transcendentals go through
+  `hyperion_sim::math` even though the density map's golden codes depend on `math::log10`. A new
+  workspace-root `clippy.toml` now carries the f64/f32 transcendental bans and binds in
+  `hyperion-server`, `hyperion-protocol` and `hyperion-testkit` (Clippy takes the nearest file walking
+  up from the manifest). It deliberately omits the float-**bit** bans, because the testkit is the
+  sanctioned bit printer (`float.rs`, `golden.rs`) and the server's tests compare `f64` by bits, `==` on
+  floats being forbidden. `crates/hyperion-sim/clippy.toml` and `hyperion-fit`'s still shadow the root
+  file and must stay self-contained; the sim's comment now says so. **Proved binding** by swapping
+  `math::log10` for `f64::log10` in `compute/density_map.rs` and watching `just lint` fail with the
+  note, then reverting.
+  - **The slow test's 20 s budget is unreachable and is now 180 s**, documented in the test: one
+    512-pixel pair is about 61 core-seconds of raster, measured at 19.8 s on eight loaded workers
+    (load 21–29), 12.5 s inside the gate, and an estimated 60 s on CI's two cores. It guards against a
+    banding or caching regression, not against plan 02's per-pixel cost. **Deviation.** **Corrected
+    in the validation below: the pair is about 40 core-seconds, not 61; 180 s could not catch any of
+    the regressions named; the budget is now in `math::exp` calls.**
+  - Measured, with load average beside each (8 cores): 512 face-on on eight workers **1.07 s** at load
+    8–17 against the 1 s target — met when idle (0.7 s, T11.c) and just missed under load; 512 edge-on
+    **12.8 s** against 3 s, and 52.6 s on one worker (0.40 ms a pixel), which is plan 02's raster cost
+    and not this crate's; young-only 34 ms and 856 ms; quantise plus base64 1.96/2.11 ms at 512 and
+    7.00/7.96 ms at 1024; a **cached** 512 request 4.86 ms end to end against the 5 ms target, met with
+    no margin; `pong` while a 1,024-pixel map builds **114 µs** against 50 ms, met comfortably; a 50 ly
+    query cold **36.3 ms** against the brainstorm's 5 ms, warm 3.79 ms, and 25.1 ms uncached — so the
+    cache costs about 44% on a miss against the plan's "under 10%" and saves 85% on a hit; 5,000
+    records serialise in 5.03 ms to 1.29 MB. **Corrected in the validation below: none of these was
+    normalised, and the query's three were the machine's load.**
+  - That query touches 1,732 cells for 2,045 systems, so **14.5 µs a cell against the brainstorm's
+    1–2 µs** — and the brainstorm says the per-cell and the 5 ms targets stand or fall together, so they
+    have fallen together. See plan 02's R16/R17, whose recorded per-call costs also do not reproduce.
+    **Corrected in the validation below: 5.8 µs a visited cell idle, and 3.8 µs a layer-A cell — the
+    1–2 µs is missed by 2 to 4 times, not 7 to 14.**
+  - Other deviations: the quantise benches use face-on rasters as an upper bound per resolution; the two
+    end-to-end figures came from a throwaway test, now deleted, with the figures recorded in
+    `tests/density_map.rs`'s doc comment.
+- **Validation of T14.d, T14.e, T15 and T16 (val04 lane), as fixed.** Every test of the four tasks
+  was broken on purpose: 34 mutations of the server, each run against the tests that should catch
+  it. Against the tests as built, 16 stayed green; now two do, neither a defect: a warm cell that
+  reverses its records, which cannot change an answer, and four times the work per map band, which
+  the slow test's budget is too wide to see (below).
+  - _T14.d's validation order was never tested._ The handler checks design note 24's order, but
+    reversing it (limit, radius, centre, time), swapping time and centre, reading the fields before
+    the universe, or dropping the server's time check so that the sim's `build`, which checks the
+    time last, answers it all passed, because each test had one fault. `tests/systems_in_range.rs`
+    gains a test that sends every pair of the five faults (universe, time, centre, radius, limit)
+    and then all five, mended one at a time from the front, and checks which refusal comes back;
+    `tests/universes.rs`'s mismatch test gains a `systems_in_range` and a `density_map` wrong in
+    every other field too, still refused `generator_version_mismatch`. Another new test pins the
+    edges: a non-canonical offset names `centre`, radii of 0, −0 and −1 name `radius_ly`, 131,072 ly
+    is served while the next float up is refused, ±H is inside the window and a nanosecond beyond
+    it outside, and a limit of 1 is served.
+  - _The census and the records were barely tested._ Always sending `returned` as 0, swapping
+    layers A and B or two populations on the wire, sending layer E's band or layer A's expected
+    count for every layer, and reversing the records (so that "nearest first" was never checked)
+    all passed; the age, the echoes, the floor and the stop reasons were already caught. The
+    fixed-seed tests now hold the wire's answer to the sim's own: `range_query` run in the test over
+    the same galaxy with `NoCache`, compared record by record in order (ID, designation, layer,
+    population, mass, age at the query's time, position) and census line by line (plan 02's bands
+    written out in the test, plan 03's expected counts, `returned` counted from the answer,
+    `included` exactly for the layers the census admits).
+  - _The "less exactly those not yet born" clause of T14.d's test cannot fire._ At the solar circle
+    the youngest system in 50 ly is 0.71 Myr old and in 200 ly 0.32 Myr (generator version 8), so a
+    system under the clock window's 1,000 years would need about a million in the sphere, fifty
+    times the largest census: no wire answer can hold one. The test now says so and asserts that
+    nothing is dropped; the drop is plan 03's, pinned by `motion_drops_a_system_that_is_not_born_yet`.
+  - _T14.e's byte-identity is real and now pinned as such._ The restarted server is a new `Server`
+    with fresh caches, so the re-answer is computed from the save, not served from a cache; the test
+    now asserts one galaxy build and no cells before the re-query, and cells generated with no hit
+    by it. A mutation that makes the answer drift between calls turns it red. It compares a cold
+    answer with a cold one, and so catches answers that depend on process state; an answer that
+    moves the same way on every run (a seam that changes deterministically) is caught by
+    `tests/systems_in_range.rs`'s comparison with the sim and by the sim's goldens, not by T14.e. A
+    wire golden of this query would close that and belongs to the next generator bump. Note for
+    plan 05: at 128 pixels no edge-on row is centred on the plane, so "the row nearest the plane"
+    puts the chart's centre at z = −512 ly, half a pixel below it.
+  - _T15's figures reproduce exactly._ Three runs idle and twelve under load (four and six copies of
+    the suite at once, one round against eight CPU hogs that stretched a run from 9 s to 45 s): 192 of
+    200 refused and 8 answered every time; the oversized frame closes with no close frame; 31 bands
+    queued at the close and 31 skipped, 2 jobs completed and no map cached; the shutdown 1.002 to
+    1.007 s. The shutdown test's "both queues still hold work" held in all fifteen, with 1 or 7
+    queries and 7 or 8 bands queued. The acceptance loop passed 10 of 10, with `--lib outbound::` 16
+    of 16 each time.
+  - _T15's gaps, fixed._ A closing connection that cancelled nothing still passed, because a map's
+    bands stop by another route (their flight is dropped with its last waiter); the closing test now
+    queues four range queries behind the band in hand, which only the cancelled tokens skip, and
+    counts them. No test pinned a limit's value, since every test reads its limit from `limits`: a
+    frame limit of 64 KiB or seventeen malformed frames passed. `limits.rs` gains
+    `every_limit_is_the_plans`. Not defects: the shutdown test cannot see the pool keeping or
+    draining its queue, because `Server::shutdown` closes the connections, which cancel their jobs,
+    before it stops the pool; the pool's own unit test catches both. A warm cell that reverses its
+    records changes no answer, since hits are sorted nearest first; one that loses a record is
+    caught by the interleaved test.
+  - _The slow test could not fail for what it guarded._ At 180 s it passed bands run one at a time
+    (serial is two to five times the parallel build, well inside), and it had one waiter per map
+    and one request per key, so it could not see a flight rebuilding a map or a cache that no longer
+    held one. `density_map_512_builds_within_budget` now checks that the pool is seen running
+    `min(workers, 16)` bands at once, which fails for serial bands on any host, and holds the build to
+    3 × max(W ÷ workers, the face-on share ÷ workers + the dearest band), where W = 5.6 × 10⁹ calls of
+    `math::exp` (measured below) and a call is timed on the pool's width of threads, each timing its
+    own, before and after the build, the slower taken. Builds came to 0.27 to 0.95 of the expected
+    work at loads of 9 to 17 on eight and two workers; four times the work per band still passed on
+    this laptop's eight hyperthreads, where it fails at about five. A thread-by-thread calibration is
+    needed: timing a pass by its slowest thread read 110–130 ns a call at load 20 against a build
+    that ran as though at 25. The constants are version-8 figures; a generator bump that moves plan
+    02's raster cost by more than half should re-measure them.
+  - _The timing figures of T14.d and T16 were the machine, not the code._ This laptop is an i7-8665U,
+    four cores and eight hyperthreads (not eight cores), whose clock read 2.2–4.2 GHz across these
+    runs. Every figure is quoted with the sim's `math::exp` timed in the same process, as plan 02's
+    R21 does. Idle (load 1.6, `exp` 7.4–7.9 ns), best of 15 in three runs, the 50 ly query at 26,000 ly
+    is **10.0 ms uncached, 10.8–11.8 ms through a cold cache, 1.10–1.73 ms warm**, against the 25.1,
+    36.3 and 3.79 ms recorded: 5.8 µs a visited cell, not 14.5, and the cache costs +8% to +18% on a
+    miss (the plan's under 10%: **met**, where +44% was recorded) and saves 84–90% on a hit. By
+    layer, placing a cell costs A 3.8–4.2 µs (500–555 `exp`), B 5.3–5.7, C and D 30–32, E 69–73 µs.
+    So **the brainstorm's 1–2 µs for a sparse fine cell is missed by 2 to 4 times and its 5 ms by 2**
+    — both fall, but by far less than recorded, and R21's reading of plan 02 ("119 `exp`, inside the
+    1–2 µs") undercounts a real layer-A cell about four times, since it sums the bound and one
+    candidate's densities only. And they do not stand or fall together: the coarse layers are 3.9 of
+    the 9.3 ms of placing, so layer-A cells at 1–2 µs would still leave the query at 5.3–6.7 ms.
+    End to end over loopback: cold 18.1–20.2 ms and warm 6.4–7.4 ms at load 10 with `exp` at 12.3 ns,
+    1.6 times idle, so about 11–14 ms cold idle against T16's under 15 ms (**met, narrowly**; 52–72 ms
+    at load 22); a cached 512-pixel map 3.4 / 4.2 ms at 8 / 16 bits at load 10 (**met**; 5.7–7.5 ms
+    at load 22); `pong` during a 1,024-pixel edge-on map 44 µs (**met**). The rasters, counted band by
+    band in `exp` calls with each band timed against calls either side of it: 512 face-on 4.1–4.6 ×
+    10⁸, 512 edge-on 4.8–5.2 × 10⁹, its dearest band 4.4–5.5 × 10⁸ — at the idle 7.5 ns, 3.1–3.4,
+    36–39 and 3.3–4.1 core-seconds, so **the pair is about 40 core-seconds, not 61**. Face-on under
+    1 s on eight workers is met idle (0.7 s, T11.c); edge-on under 3 s is missed by about 2 times,
+    structurally, since one band alone is longer and four cores cannot do 36 core-seconds in 3; and
+    the plan's 20 s on CI's two cores is **just out of reach, not far out**: 22.4 s was measured on
+    two workers at load 10, against the estimated 60 s that set 180 s. The bench files' module docs
+    now carry these figures; the Criterion medians first recorded stay there, labelled as the spread
+    under load (a validation run at load 13–15 read quantising three to five times slower than they
+    do, and the query's cold path faster than its uncached one).
+- **The `systems_in_range` wire golden (generator version 11).** This closes the gap the validation
+  of T14.e left: T14.e compares a cold answer with a cold one, which cannot see an answer that moves
+  the same way on every run. `tests/systems_in_range.rs`'s
+  `the_answer_to_a_fixed_query_is_the_golden_response` writes `tests/golden/systems_in_range.golden`
+  under the version header, so every bump re-blesses it.
+  - _The query._ Seed `0x4d2`, 40 ly of the Sun-like point (0, 26,000, 0), 250 years before the
+    epoch, every layer wanted, a limit of 100. The limit, not the floor, stops the census: E and D
+    are expected to hold 7.3 and 26.3 systems and fit, while C's 146.1 would not, so the census pins
+    both kinds of line with all five expected counts. The answer is 33 systems, 5 of layer E and 28
+    of D, from the young and old thin discs and the halo, in 734 lines. Their ages are taken at a
+    time that is not the epoch. The other tests' 50 ly sphere at the default limit holds about
+    2,000 systems, too many to review, and at a limit of 100 it still returns 76.
+  - _It pins the frame as it arrived, not a parse of it._ `galaxy_parameters.golden` is written
+    from the parsed response, printed again, and that is lossy: `serde_json` without
+    `float_roundtrip` reads some floats a last bit out. Of this answer's 185 floats, 16 (13 offsets
+    and 3 ages) do not survive a parse and a print, so a golden of the parse would miss a one-ulp
+    move of any of them. The test reads the raw frame (`next_text`) and lays it out as pretty JSON
+    with every string and number copied byte for byte (`common::pretty_json_frame`). It first checks
+    that the re-indenter reproduces `to_string_pretty` exactly on the same message. The golden holds
+    the envelope too (`"type": "response"`, the request ID).
+  - _Before writing, the test asserts what the golden is for._ Exactly D and E are included and C is
+    over the limit, 20–60 systems come back with both layers among them, and the answer is the
+    sim's own for the same terms (`assert_answer_is_the_sims`).
+  - _Perturbed on purpose in the server's conversion (`convert.rs`), it goes red each time._ First,
+    one record's y offset moved by one ulp, `4154989895682880.5` → `…881.0` at line 83. A golden of
+    the parse would have missed that one, since the parse already read `…880.5` as `…881.0`.
+    Second, two neighbouring records swapped, with the comparison with the sim taken out, since
+    that comparison catches the order first: line 293, the ID. Third, layer A's expected count moved
+    by one ulp, at line 33.
+  - _For the orchestrator, not changed here._ `galaxy_parameters.golden` has the same flaw. 8 of
+    its 790 lines hold a parse a last bit off the wire, for example `0.9572388262874673` sent and
+    `…671` pinned. Writing it from `pretty_json_frame` of the raw frame would move those 8 lines and
+    nothing the server sends. **Done at the version-11 merge (orchestrator):** the test now pins the
+    whole frame as it arrived, including its `type`, `id` and `body` envelope, and checks that its
+    parse equals the parsed response. Re-blessed in the same window, the file differs from its
+    version-10 form only in the envelope, the indentation, the version and nine last-bit values.
+- **Validation of T11.a, T11.b, T12, T14.a and T14.b (`val07`, round 9, 2026-09-25).** T11.a,
+  T11.b, T12 and T14.a conform, with the deviations recorded above. T14.b has gaps, from ruling 11:
+  - _Fixed._ `convert.rs`'s test now holds every group's keys in the table's order, written out
+    independently of the builder. Before, it held only the group order and the populations group,
+    and the golden, blessed from the builder, could not catch a key moved within its group.
+  - _Not fixed._ The client's `parameterLabels.test.ts` still compares sorted key sets, which is the
+    client lane's to change. `population.<p>.share` is a share of systems
+    (`GalaxyParams::population_share`), but neither the table above nor the client's label says so.
+    `rotation.escape_speed` is still the untruncated √(−2Φ): 622.9 km/s for the golden's seed,
+    against 500–580. Ruling 11 asks for the halo truncated at r₂₀₀, which is plan 02's potential and
+    moves `galaxy_parameters.golden`.
+  - _Fixed later (`ui10`, round 9)._ `parameterLabels.test.ts` compares the glossary's keys and
+    groups with the fixture's in the table's order, and the glossary's population labels follow it
+    (every share, then every mass, then every mean system mass). The `populations` group reads
+    `SHARE OF SYSTEMS`. `rotation.escape_speed` is still open.
+  - Also fixed: T12 gains a query-level test (`range_query` through the handle equals `NoCache`,
+    cold and warm, and under a 1 KiB budget), since the reason recorded for testing walks only no
+    longer holds. The test that a map every waiter gave up on frees its key now queues its bands
+    behind a held worker and checks that the pool skipped them, where it used to rely on a 1 ms
+    timeout. `open`'s documentation no longer promises a `cancelled` it cannot give.

@@ -11,17 +11,46 @@ publish = false
 [workspace.dependencies]
 hyperion-protocol = { path = "crates/hyperion-protocol" }
 hyperion-sim = { path = "crates/hyperion-sim" }
+hyperion-testkit = { path = "crates/hyperion-testkit" }
 
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws"] }
+base64 = "0.22.1"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+criterion = { version = "0.8.2", default-features = false }
 futures-util = "0.3.34"
+# `OsEntropy` is the only user; nothing else sees its API, which changed between 0.3 and 0.4.
+getrandom = "0.4.3"
+# Pinned exactly: libm is reproducible across platforms but not across its own versions, so a bump
+# is a generator-version change. `arch` is off so that there is one code path to reason about.
+libm = { version = "=0.2.16", default-features = false }
+# `hyperion-fit` only (plan 15, Design note 3): its deterministic parallel map-reduce.
+rayon = "1.11.0"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+# `float_roundtrip` (ruling 64.7): the default parser can read a 17-digit float one ulp off, so a
+# client's coordinates would reach the server a bit away from what it sent. Writing is exact either
+# way, so no server output moves.
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+# `hyperion-fit` only: the tables' input and lock-file hashes (plan 15, Design notes 6 and 8).
+sha2 = "0.10.9"
+tempfile = "3.27.0"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = [
+    "macros",
+    "net",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
 tokio-tungstenite = "0.30.0"
+# `hyperion-fit` only: its manifests, datasets' provenance and lock file.
+toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-ts-rs = "12.0.1"
+# ts-rs cannot read `#[serde(try_from)]` or `#[serde(transparent)]` and warns at every build; the
+# types that use them carry a `#[ts(type)]` override or are newtypes, which already say the binding.
+ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -33,3 +62,46 @@ pedantic = { level = "warn", priority = -1 }
 
 [profile.release]
 lto = "thin"
+
+# Slow statistical tests (`just test-slow`): release speed, but with the debug assertions and
+# overflow checks that the sim's bound checks rely on. Without the release build's thin LTO: the
+# slow tests check statistics, not speed, and LTO links each of some 55 test binaries in a build
+# that took over ten minutes with it. Generated output does not move, for the reasons given under
+# the dev profile's `opt-level` below. The one timed slow test, the density map's budget, is stated
+# in `math::exp` calls timed in the same binary, so it scales with the build. Incremental, unlike
+# release: after an edit to the sim a rebuild took 1m12s instead of 10m03s, the workspace crates
+# being 87% of the build, and the slow tests ran 2% faster to 14% slower (measured 2026-09-24, on a
+# busy machine). Generated output does not move, for the same reasons.
+[profile.slow-test]
+inherits = "release"
+lto = false
+debug-assertions = true
+overflow-checks = true
+incremental = true
+
+# The sim's arithmetic dominates `just test`, and an unoptimised build pays for all of it: the fast
+# suite spends about 120 s in its test binaries at `opt-level = 0` and about 65 s at
+# `opt-level = 2`, against about 18 s more on a build from scratch and no measurable change to an
+# incremental one (measured 2026-09-22 on 8 cores). Debug assertions and overflow checks stay on, so
+# the sim's bound checks still fire. Generated output does not change: the whole fast suite, golden
+# files included, passes bit for bit at opt-level 3 with thin LTO, which optimises harder still.
+[profile.dev.package.hyperion-sim]
+opt-level = 2
+
+# The fitting crate solves least squares and the testkit runs the statistics, for the same reason.
+[profile.dev.package.hyperion-fit]
+opt-level = 2
+
+[profile.dev.package.hyperion-testkit]
+opt-level = 2
+
+# Dependencies, for the same reason and at almost no ongoing cost, since they rarely rebuild. `"*"`
+# is every dependency and no workspace member. It is `libm` that matters: the sim's only runtime
+# dependency, which every transcendental reaches through `hyperion_sim::math`, so an unoptimised
+# `libm` was undoing part of the sim's own `opt-level = 2` above. It also covers `serde_json`, which
+# is most of the work in the protocol's and the server's golden tests. Generated output is
+# unaffected: Rust neither contracts float operations nor enables fast-math, so IEEE results are
+# identical at every optimisation level, `libm` is pinned with `=`, and the whole fast suite, golden
+# files included, already passes bit for bit at opt-level 3 with thin LTO.
+[profile.dev.package."*"]
+opt-level = 2

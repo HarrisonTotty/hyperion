@@ -1,0 +1,37 @@
+# The displaced form table's fit (plan 15, P15.T6.c–f): the forms, own-form shares, kinematics and
+# in-cube shares of every displaced class, fitted to an orbit run's histograms, and the
+# hypervelocity row. A committed table is always made from this file.
+#
+# **Provisional**: it fits P15.T6.b's smoke histograms (`displaced_orbits.smoke.toml`, a few orbits
+# a class, dataset `displaced_smoke`), so the table's shape and every downstream consumer can be
+# built before the production run lands. When it lands, `histograms` becomes "production",
+# `orbit_manifest` "displaced_orbits.toml" and `datasets` ["displaced"] (see the task's module
+# documentation, "Rerunning on the production histograms").
+task = "displaced_forms"
+datasets = ["displaced_smoke"]
+
+[params]
+histograms = "smoke"
+orbit_manifest = "displaced_orbits.smoke.toml"
+# Gauss–Legendre nodes per cell and axis of the histograms' cells.
+cell_nodes = 3
+# Nelder–Mead: evaluations of a class's first fit (and of every old fit), of a regularised refit,
+# and the simplex's tolerance in misplaced share.
+evaluations = 3_000
+refit_evaluations = 600
+tolerance = 1e-7
+# P15.T6.c: a spheroid under 5% of the weight is dropped; the age bins of a speed row are tied by
+# the largest penalty of the ladder that raises the weighted mean misplaced share by 0.3 points at
+# most, in Gauss–Seidel sweeps along the row.
+drop_weight = 0.05
+lambdas = [1e-4, 1e-3, 1e-2, 1e-1]
+rise_limit = 0.003
+sweeps = 2
+# The neutron stars' band-averaged speed-bin shares at the fixture (P08.T8.b as built under ruling
+# 123), which weight the classes' misplaced shares and heights.
+speed_weights = [0.188, 0.059, 0.155, 0.193, 0.147, 0.105, 0.072, 0.081]
+# P15.T6.f: the survivors' two populations and the Type Ia rate are the sim's
+# (`class_table::SURVIVOR_POPULATIONS`, `MILKY_WAY_IA_RATE_PER_YEAR`; ruling 128.1), held by the
+# fingerprint; these set the quadrature.
+hypervelocity_panel_nodes = 8
+hypervelocity_directions = 256
