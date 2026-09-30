@@ -1363,6 +1363,167 @@ body {
 }
 
 /*
+ * A page too short to stack them (the orchestrator's rulings 134.9 and 149.1, at 1280 x 720): the
+ * preset views across the page; the chart, with the camera's angles and keys and what the chart is
+ * asked for in a column beside it; then, across the page, the chart's frame, centre, time and
+ * scale, the census line and its toggle, the census's hint, and the legend, which is on show in
+ * every state.
+ * Shown, the census table takes the place of the query controls in the column, which keeps one
+ * width, the table's, so that nothing but the two moves when the toggle is pressed. The spatial
+ * view, its row of controls and the census are no boxes of their own here, so that their parts take
+ * the page's grid; the parts keep their order, and so the tab order, of the stacked page.
+ */
+.local-chart--compact {
+  /*
+   * The table's columns in the compact layout, measured in B612 at 0.875rem: `LAYER`, the
+   * free-floating planets' `0.33 – 4132 M⊕`, eight figures of `EXP`, `20,000` of `RET`, and
+   * `BELOW MASS FLOOR`, each with its 0.5rem of padding, then the scroll bar's 1rem.
+   */
+  --census-layer-width: 3.625rem;
+  --census-band-width: 8.5rem;
+  --census-expected-width: 5.0625rem;
+  --census-returned-width: 3.9375rem;
+  --census-status-width: 10.75rem;
+  --census-table-width: calc(
+    var(--census-layer-width) + var(--census-band-width) + var(--census-expected-width) +
+      var(--census-returned-width) + var(--census-status-width) + 1rem
+  );
+
+  display: grid;
+  grid-template-areas:
+    "note    note"
+    "presets presets"
+    "stage   angles"
+    "stage   keys"
+    "stage   controls"
+    "furn    furn"
+    "census  census"
+    "hint    hint"
+    "legend  legend";
+  grid-template-columns: minmax(0, 1fr) max(24rem, var(--census-table-width));
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto auto auto;
+  gap: 0 1rem;
+}
+
+.local-chart--compact > :is(.local-chart__empty, .request-status) {
+  grid-area: note;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact > :is(.spatial-view, .census-readout),
+.local-chart--compact .spatial-view__controls {
+  display: contents;
+}
+
+.local-chart--compact .preset-buttons {
+  grid-area: presets;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact .spatial-view__angles {
+  grid-area: angles;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact .spatial-view__keys {
+  grid-area: keys;
+  margin-bottom: 0.25rem;
+}
+
+.local-chart--compact .spatial-view__stage {
+  grid-area: stage;
+}
+
+.local-chart--compact .spatial-view__furniture {
+  display: block;
+  grid-area: furn;
+  align-self: start;
+  margin-top: 0.25rem;
+}
+
+/* The frame, the centre, the time and the scale bar run on as one text, so that none waits a line. */
+.local-chart--compact .spatial-view__readings {
+  display: inline;
+}
+
+.local-chart--compact .spatial-view__readings > .spatial-reading {
+  display: inline-flex;
+  margin-right: 1.25rem;
+}
+
+.local-chart--compact .spatial-view__furniture > .scale-bar {
+  display: inline-flex;
+  vertical-align: bottom;
+}
+
+.local-chart--compact > .chart-controls {
+  grid-area: controls;
+  align-content: flex-start;
+  min-height: 0;
+}
+
+/* The mass floors' legend over its seven steps, so that they take one line of the column. */
+.local-chart--compact .chart-controls__floors > legend {
+  float: none;
+  line-height: 1.25;
+}
+
+/* Hidden while the census table stands in their place; their single keys stay live. */
+.local-chart--compact > .chart-controls[hidden] {
+  display: none;
+}
+
+.local-chart--compact .census-readout__row {
+  grid-area: census;
+  margin-top: 0.25rem;
+}
+
+.local-chart--compact .census-readout__hint {
+  grid-area: hint;
+  margin-top: 0.25rem;
+}
+
+/* Shown, the table takes the controls' area and its height, about nine rows at 1280 x 720. */
+.local-chart--compact .census-readout__by-layer {
+  grid-area: controls;
+  min-height: 0;
+}
+
+.local-chart--compact .census-readout__table {
+  min-height: 5rem;
+  max-height: none;
+}
+
+/*
+ * Tightened to their content, and their labels and states set at the guide's least letter spacing,
+ * 0.1em, so that the column leaves the chart as wide as it is tall at 1280 x 720 (ruling 149.1).
+ */
+.local-chart--compact .census-table :is(th, td):nth-child(1) {
+  width: var(--census-layer-width);
+}
+
+.local-chart--compact .census-table :is(th, td):nth-child(2) {
+  width: var(--census-band-width);
+}
+
+.local-chart--compact .census-table :is(th, td):nth-child(3) {
+  width: var(--census-expected-width);
+}
+
+.local-chart--compact .census-table :is(th, td):nth-child(4) {
+  width: var(--census-returned-width);
+}
+
+.local-chart--compact .census-table :is(thead th, .census-table__status) {
+  letter-spacing: 0.1em;
+}
+
+.local-chart--compact > .symbol-legend {
+  grid-area: legend;
+  margin-top: 0.25rem;
+}
+
+/*
  * The HR DIAGRAM page: the title and the luminosity axis's label above the plot, which takes the
  * height the page leaves, then the temperature axis's label, the counts and the legend.
  */

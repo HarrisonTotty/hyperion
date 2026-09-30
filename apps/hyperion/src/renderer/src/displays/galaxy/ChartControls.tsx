@@ -197,6 +197,11 @@ interface ChartControlsProps {
    * `null` when they act. The `STARS` filter asks nothing of the server and is never held back.
    */
   readonly heldBack: string | null;
+  /**
+   * Whether the controls are out of view, as while the census table stands in their place on a
+   * compact page (the orchestrator's ruling 149.1). `K` still steps the `STARS` filter.
+   */
+  readonly hidden?: boolean;
 }
 
 /** The five stellar layers, lightest first, for the mass floors before the first census arrives. */
@@ -272,6 +277,7 @@ export function ChartControls({
   starFilter,
   onStarFilter,
   heldBack,
+  hidden = false,
 }: ChartControlsProps) {
   const radiusId = useId();
   const floorName = useId();
@@ -300,7 +306,7 @@ export function ChartControls({
   }, [starFilter, onStarFilter]);
 
   return (
-    <div className="chart-controls">
+    <div className="chart-controls" hidden={hidden}>
       {heldBack === null ? null : (
         <p className="panel__inhibit" id={heldBackId}>
           {heldBack}

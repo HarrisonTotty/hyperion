@@ -29,7 +29,7 @@ use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::stellar::ObjectKind;
 use hyperion_sim::stellar::brief::BriefModel;
-use hyperion_sim::stellar::system::SystemStars;
+use hyperion_sim::stellar::system::{SystemStars, draw_metallicity};
 use hyperion_sim::units::consts::{
     EARTH_MASS_KG, JUPITER_MASS_KG, METRES_PER_LIGHT_YEAR, SOLAR_MASS_KG,
 };
@@ -697,8 +697,9 @@ async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so() {
 }
 
 /// Plan 13, P13.T7: the default request returns no free-floating object, and a lowered
-/// `min_layer` returns them: the brown dwarfs with their briefs, the rogue planets with none, and
-/// the census's substellar lines, all as the sim answers the same terms.
+/// `min_layer` returns them: the brown dwarfs with their briefs, the rogue planets with none but
+/// with their metallicity (P13.T5.d), and the census's substellar lines, all as the sim answers the
+/// same terms.
 #[tokio::test]
 async fn a_lowered_min_layer_returns_the_free_floating_objects() {
     let server = TestServer::start().await;
@@ -729,6 +730,22 @@ async fn a_lowered_min_layer_returns_the_free_floating_objects() {
     assert!(of(MassLayer::RoguePlanet).count() > 100);
     assert!(of(MassLayer::RoguePlanet).all(|record| record.stellar.is_none()));
     assert!(of(MassLayer::BrownDwarf).all(|record| record.stellar.is_some()));
+    // A rogue planet's metallicity is the one the sim draws for its record, and only a rogue
+    // planet's row carries one.
+    for record in &answer.systems {
+        if record.layer == MassLayer::RoguePlanet {
+            let id = SystemId::from_raw(record.id.to_u64()).expect("a system ID");
+            let sim = resolve(galaxy(), id).expect("a system of the galaxy");
+            let drawn = draw_metallicity(galaxy(), &sim).fe_h().value();
+            assert_eq!(
+                record.fe_h_dex.map(f64::to_bits),
+                Some(drawn.to_bits()),
+                "{record:?}"
+            );
+        } else {
+            assert_eq!(record.fe_h_dex, None, "{record:?}");
+        }
+    }
     // The stars are the default request's, row for row.
     let stellar: Vec<&SystemRecord> = answer
         .systems
@@ -1106,6 +1123,7 @@ fn assert_briefs_are_the_sims(
         assert_eq!(
             SystemRecord {
                 stellar: None,
+                fe_h_dex: None,
                 ..row.clone()
             },
             *plain

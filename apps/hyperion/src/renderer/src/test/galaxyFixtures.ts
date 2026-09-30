@@ -516,7 +516,15 @@ export interface SystemRecordSpec {
   readonly stellar?: StellarBriefDto | null;
   /** Velocity along the `GALACTIC` axes, km/s; a disc star's near the Sun by default. */
   readonly velocityKmS?: readonly [number, number, number];
+  /**
+   * A free-floating planet's metallicity, dex, which its row alone carries: {@link
+   * ROGUE_PLANET_FE_H_DEX} when absent, and none when `null`. Other layers' rows never carry one.
+   */
+  readonly feHDex?: number | null;
 }
+
+/** The metallicity a free-floating planet's row carries unless a test gives another, dex. */
+export const ROGUE_PLANET_FE_H_DEX = -0.25;
 
 /** One system of a range query's answer, as a query with `include_stellar` returns it. */
 export function aSystemRecord({
@@ -528,6 +536,7 @@ export function aSystemRecord({
   population = "old_thin_disc",
   stellar,
   velocityKmS = [-231.25, 12.5, -7],
+  feHDex,
 }: SystemRecordSpec): SystemRecord {
   const [low, high] = BANDS_MSUN[layer];
   const record: SystemRecord = {
@@ -541,9 +550,11 @@ export function aSystemRecord({
     velocity_km_s: [...velocityKmS],
   };
   // A row without a brief leaves the key out, as the server writes it; a free-floating planet's
-  // never has one unless a test gives it.
+  // never has one unless a test gives it, and carries its metallicity instead.
   if (layer === "rogue_planet") {
-    return stellar === undefined || stellar === null ? record : { ...record, stellar };
+    const planet: SystemRecord =
+      feHDex === null ? record : { ...record, fe_h_dex: feHDex ?? ROGUE_PLANET_FE_H_DEX };
+    return stellar === undefined || stellar === null ? planet : { ...planet, stellar };
   }
   return stellar === null ? record : { ...record, stellar: stellar ?? aStellarBrief(layer) };
 }
@@ -663,6 +674,8 @@ export interface RelativeSystemSpec {
   readonly stellar?: StellarBriefDto | null;
   /** Velocity along the `GALACTIC` axes, km/s; {@link aSystemRecord}'s default if absent. */
   readonly velocityKmS?: readonly [number, number, number];
+  /** A free-floating planet's metallicity, as {@link SystemRecordSpec.feHDex} has it. */
+  readonly feHDex?: number | null;
 }
 
 /** What {@link aSystemsInRange} builds. */
@@ -697,7 +710,7 @@ export function aSystemsInRange({
   universe = UNIVERSE_ID,
 }: SystemsInRangeSpec = {}): ResponseFor<"systems_in_range"> {
   const returned: Partial<Record<MassLayer, number>> = {};
-  const records = systems.map(({ relLy, layer, stellar, velocityKmS }, position) => {
+  const records = systems.map(({ relLy, layer, stellar, velocityKmS, feHDex }, position) => {
     returned[layer] = (returned[layer] ?? 0) + 1;
     return aSystemRecord({
       positionLy: [centreLy[0] + relLy[0], centreLy[1] + relLy[1], centreLy[2] + relLy[2]],
@@ -705,6 +718,7 @@ export function aSystemsInRange({
       index: position + 1,
       ...(stellar === undefined ? {} : { stellar }),
       ...(velocityKmS === undefined ? {} : { velocityKmS }),
+      ...(feHDex === undefined ? {} : { feHDex }),
     });
   });
   return {

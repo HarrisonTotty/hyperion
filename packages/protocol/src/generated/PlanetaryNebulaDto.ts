@@ -5,7 +5,7 @@
  */
 export type PlanetaryNebulaDto = { 
 /**
- * The shell's radius, light-years: positive, and under 2.7 ly (0.8 pc).
+ * The shell's radius, light-years: positive, and under 2.94 ly (0.9 pc, ruling 124.5).
  */
 radius_ly: number, 
 /**
@@ -13,8 +13,8 @@ radius_ly: number,
  */
 expansion_speed_km_s: number, 
 /**
- * The time since it was ejected, years: non-negative, and under its visibility time of some
- * 20,000–40,000 years.
+ * The time since it was ejected, years: non-negative, and under its visibility time of
+ * 16,900–33,900 years (ruling 124.5).
  */
 age_yr: number, 
 /**
@@ -22,7 +22,7 @@ age_yr: number,
  */
 ionised_mass_msun: number, 
 /**
- * Its excitation class, which rises with its central star's temperature, on the scale
- * P06.T16.b adopts and records with its source.
+ * Its excitation class, 0–12, which rises with its central star's temperature: Reid and
+ * Parker's (2010) scale, as P06.T16.b adopts it.
  */
 excitation_class: number, };

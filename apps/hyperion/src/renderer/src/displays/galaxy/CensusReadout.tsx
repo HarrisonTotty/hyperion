@@ -1,5 +1,5 @@
 import type { LayerCensus, LayerStatus } from "@hyperion/protocol";
-import { type ReactNode, useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { annunciation } from "../../components/RequestStatus";
@@ -215,6 +215,13 @@ interface CensusReadoutProps {
   readonly stale: boolean;
   /** Sends the query again after a failure; the readout moves the focus off `RETRY` first. */
   readonly onRetry: () => void;
+  /**
+   * Whether the census table is shown, which the page owns, since in its compact layout the table
+   * takes the query controls' place (the orchestrator's ruling 149.1).
+   */
+  readonly tableShown: boolean;
+  /** Called with the table's new state as `CENSUS BY LAYER` is pressed. */
+  readonly onTableShown: (shown: boolean) => void;
 }
 
 /**
@@ -249,10 +256,11 @@ export function CensusReadout({
   driveRangeLy,
   stale,
   onRetry,
+  tableShown,
+  onTableShown,
 }: CensusReadoutProps) {
   const tableId = useId();
   const stateId = useId();
-  const [tableShown, setTableShown] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const focusPageTab = usePageTabFocus();
   const line = result === null ? null : censusLine(result.census);
@@ -360,8 +368,10 @@ export function CensusReadout({
             className="control disclosure census-readout__toggle"
             aria-expanded={tableShown}
             aria-controls={tableId}
-            onClick={() => {
-              setTableShown((wasShown) => !wasShown);
+            onClick={(event) => {
+              // The toggle keeps the focus, whatever the table's opening hides (ruling 149.1).
+              event.currentTarget.focus();
+              onTableShown(!tableShown);
             }}
           >
             <DisclosureGlyph expanded={tableShown} />

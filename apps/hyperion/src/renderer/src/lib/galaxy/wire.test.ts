@@ -231,6 +231,24 @@ describe("the substellar layers (plan 13, P13.T7)", () => {
     ]);
   });
 
+  it("carries a free-floating planet's metallicity from its row, and none for any other row", () => {
+    const answer = aSystemsInRange({
+      minLayer: "rogue_planet",
+      systems: [
+        { relLy: [1, 0, 0], layer: "c" },
+        { relLy: [2, 0, 0], layer: "brown_dwarf" },
+        { relLy: [3, 0, 0], layer: "rogue_planet", feHDex: -0.375 },
+        { relLy: [4, 0, 0], layer: "rogue_planet", feHDex: null },
+      ],
+    });
+    // A star system's row that carried one anyway: its metallicity is its summary's.
+    const systems = answer.systems.map((row) =>
+      row.layer === "rogue_planet" ? row : { ...row, fe_h_dex: 0.125 },
+    );
+    const result = toChartResult({ ...answer, systems });
+    expect(result.systems.map((system) => system.feHDex)).toEqual([null, null, -0.375, null]);
+  });
+
   it("names the census's lightest included layer, a substellar one where it reaches there", () => {
     const planets = toChartResult(aSystemsInRange({ minLayer: "rogue_planet" }));
     expect(planets.census).toMatchObject({ kind: "complete", layer: "rogue_planet" });

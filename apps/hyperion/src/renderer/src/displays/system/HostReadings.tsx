@@ -25,12 +25,15 @@ import type {
   HostRemnant,
   Modelled,
   Pending,
+  PlanetaryNebula,
+  StarEvent,
   Zone,
 } from "../../lib/system/model";
 import {
   objectKindLabel,
   phaseLabel,
   remnantLabel,
+  starEventLabel,
   variableKindLabel,
 } from "../../lib/system/words";
 import { formatBodyIdHex } from "../../lib/seed";
@@ -73,6 +76,53 @@ function radiusInKm(host: HostBody): boolean {
 
 function kick(reading: Pending<{ readonly speedKmS: number }>): Shown {
   return pending(reading, (natal) => value(formatSignificant(natal.speedKmS), "km/s"));
+}
+
+/** Decimals of the nebula's expansion speed, as a speed in km/s is read (`VEL`). */
+const EXPANSION_DECIMALS = 1;
+
+/**
+ * The planetary nebula's rows (the orchestrator's ruling 149.4): `NEBULA RADIUS` always, the em dash
+ * where it is not modelled and `NONE` where the star lights none; with a nebula, its age, expansion
+ * speed, ionised mass and excitation class, which a class on a scale reads bare, as a spectral
+ * class does.
+ */
+function nebulaReadings(nebula: Modelled<PlanetaryNebula>): ReactNode {
+  return (
+    <>
+      <ReadoutRow
+        label="NEBULA RADIUS"
+        shown={modelled(nebula, (shell) => value(formatSignificant(shell.radiusLy), "ly"))}
+      />
+      {nebula.kind === "value" ? (
+        <>
+          <ReadoutRow
+            label="NEBULA AGE"
+            shown={value(formatSignificant(nebula.value.ageYr), "yr")}
+          />
+          <ReadoutRow
+            label="NEBULA EXPANSION"
+            shown={value(formatNumber(nebula.value.expansionSpeedKmS, EXPANSION_DECIMALS), "km/s")}
+          />
+          <ReadoutRow
+            label="IONISED MASS"
+            shown={value(formatSignificant(nebula.value.ionisedMassMsun), <SolarMassUnit />)}
+          />
+          <ReadoutRow
+            label="EXCITATION CLASS"
+            shown={value(formatNumber(nebula.value.excitationClass, 0))}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** The events in progress, in the `GALAXY` readout's words: `FLARE, THERMAL PULSE`, or `NONE`. */
+function eventsShown(events: Pending<ReadonlyArray<StarEvent>>): Shown {
+  return pending(events, (list) =>
+    value(list.length === 0 ? "NONE" : list.map((event) => starEventLabel(event.kind)).join(", ")),
+  );
 }
 
 /** The rows only a dead star has: what it left and what is known of it. */
@@ -296,8 +346,10 @@ export interface HostReadingsProps {
  * its mass now in `M☉`; its luminosity in `L☉` and radius in `R☉`, or in `km` for a neutron star or
  * a black hole (ruling 36); its effective temperature in `K`; and, dead, what it left, a white
  * dwarf's cooling age, and each remnant's spin and kick. What this generator version does not model
- * yet (rotation, activity, variability, a pulsar's spin, a black hole's spin, kicks) is the guide's
- * em dash; what is modelled as none reads `NONE`. An object with no light, as a black hole, has the
+ * yet (rotation, activity, variability, the nebula, the events in progress, a pulsar's spin, a black
+ * hole's spin, kicks) is the guide's em dash; what is modelled as none reads `NONE`. After
+ * `VARIABILITY` stand the planetary nebula's rows, its radius always and the rest only with a
+ * nebula, and `EVENTS` (ruling 149.4). An object with no light, as a black hole, has the
  * em dash for its luminosity and temperature with the reason, `NO LIGHT`. A star that left no
  * remnant has nothing whose mass, light or size could be read, so those rows are left out, as a
  * section that does not apply is (ruling 34). Then each zone that holds it, its own first: what the
@@ -382,6 +434,8 @@ export function HostReadings({ host, zones }: HostReadingsProps) {
             )}
             wide
           />
+          {nebulaReadings(host.planetaryNebula)}
+          <ReadoutRow label="EVENTS" shown={eventsShown(host.activeEvents)} wide />
         </>
       )}
       {zones.map((zone) => (

@@ -100,7 +100,7 @@ activity_log_lx_lbol?: number | null,
  */
 variability?: VariabilityDto | null, 
 /**
- * The planetary nebula it lights; `null` when it lights none. Absent until plan 06's T16.
+ * The planetary nebula it lights (plan 06, P06.T16.b); `null` when it lights none.
  */
 planetary_nebula?: PlanetaryNebulaDto | null, 
 /**

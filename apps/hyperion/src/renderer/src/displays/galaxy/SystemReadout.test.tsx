@@ -6,7 +6,8 @@ import type { SystemModel } from "../../lib/system/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../spatial/frame";
 import { vec3 } from "../../spatial/vec3";
-import { aSystemsInRange } from "../../test/galaxyFixtures";
+import { formatSigned } from "../../lib/format";
+import { aSystemsInRange, ROGUE_PLANET_FE_H_DEX } from "../../test/galaxyFixtures";
 import { SystemReadout } from "./SystemReadout";
 
 const CENTRE = [26_000, 0, 0] as const;
@@ -212,10 +213,27 @@ describe("SystemReadout's free-floating objects (plan 13, P13.T8.d)", () => {
     expect(valueOf(readout, "KIND")).toBe("PLANET");
     expect(valueOf(readout, "BULK")).toBe("NOT YET MODELLED");
     expect(within(readout).queryByText("STATE")).toBeNull();
-    // No answer carries its metallicity yet: the em dash, never a zero.
-    expect(valueOf(readout, "[Fe/H]")).toBe("—");
+    // Its row carries its metallicity, since no summary describes it (P13.T5.d).
+    expect(valueOf(readout, "[Fe/H]")).toBe(`${formatSigned(ROGUE_PLANET_FE_H_DEX, 2)} dex`);
     expect(valueOf(readout, "AGE")).not.toBe("—");
     expect(valueOf(readout, "POPULATION")).toBe("OLD THIN DISC");
+  });
+
+  it("reads a free-floating planet's metallicity as the em dash when its row carries none", () => {
+    const [planet] = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        radiusLy: 10,
+        minLayer: "rogue_planet",
+        systems: [{ relLy: [1, 0, 0], layer: "rogue_planet", feHDex: null }],
+      }),
+    ).systems;
+    if (planet === undefined) {
+      throw new Error("the fixture built no planet");
+    }
+    const readout = renderReadout(planet);
+
+    expect(valueOf(readout, "[Fe/H]")).toBe("—");
   });
 });
 

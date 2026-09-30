@@ -102,7 +102,7 @@ export interface SystemReadoutProps {
  * A free-floating brown dwarf reads as a system of one star: its masses in M☉ to three decimals
  * (`0.052`), and, once `system_summary` answers, its kind, class and temperature under `STAR A`. A
  * free-floating planet asks nothing of the server: its mass is in Earth masses, its `KIND` is
- * `PLANET`, its metallicity the em dash, since no answer carries it yet, and `BULK` reads
+ * `PLANET`, its metallicity the one its row carries (P13.T5.d), and `BULK` reads
  * `NOT YET MODELLED`, or `STATE` `NOT YET FORMED` before it forms (ruling 134.2) (plan 13, design notes 12 and 14; P13.T8.d). Where the
  * request stands, pending, refused, timed out or cut off, is said beside the readout and not in it,
  * since its `RETRY` is a control (rulings 13 and 14); until the answer the rows it fills are
@@ -149,6 +149,13 @@ export function SystemReadout({
     planetRow = isFormedPlanet(system)
       ? { label: "BULK", value: "NOT YET MODELLED" }
       : { label: "STATE", value: "NOT YET FORMED" };
+  }
+  // A free-floating planet's metallicity comes with its row, a star system's with its summary.
+  let feHDex: number | null = null;
+  if (system?.kind === "rogue_planet") {
+    feHDex = system.feHDex;
+  } else if (stars !== null) {
+    feHDex = stars.feHDex;
   }
   const selectedKey = system?.id ?? "none";
   const { ref, range } = useItemsInView(
@@ -228,9 +235,9 @@ export function SystemReadout({
             <Reading
               label="[Fe/H]"
               symbol
-              value={stars === null ? null : formatSigned(stars.feHDex, 2)}
+              value={feHDex === null ? null : formatSigned(feHDex, 2)}
               unit="dex"
-              stale={starsStale}
+              stale={system?.kind !== "rogue_planet" && starsStale}
             />
             {stars === null || formed !== null ? null : (
               <Reading label="STARS" value="NOT YET FORMED" wide stale={starsStale} />

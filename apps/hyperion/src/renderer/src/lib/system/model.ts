@@ -97,11 +97,16 @@ export interface Variability {
   readonly amplitudeMag: number;
 }
 
-/** The planetary nebula a star lights. */
+/** The planetary nebula a star lights (plan 06, P06.T16.b). */
 export interface PlanetaryNebula {
   readonly radiusLy: number;
   readonly expansionSpeedKmS: number;
+  /** The time since the shell was ejected. */
   readonly ageYr: number;
+  /** The mass of its ionised gas. */
+  readonly ionisedMassMsun: number;
+  /** Its excitation class, 0–12 on Reid and Parker's (2010) scale. */
+  readonly excitationClass: number;
 }
 
 /** An event in progress on a star at the answer's time. */

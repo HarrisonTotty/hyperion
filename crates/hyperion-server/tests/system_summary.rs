@@ -319,6 +319,26 @@ fn assert_details_are_the_sims(
         (Modelled::Null, None) => {}
         (wire, sim) => panic!("the wire's variability {wire:?} is not the sim's {sim:?}"),
     }
+    // P06.T16.b: the planetary nebula, a value or `null`, never absent.
+    match (&wire.planetary_nebula, sim.planetary_nebula()) {
+        (Modelled::Value(wire), Some(sim)) => {
+            assert_bits("nebula radius", wire.radius_ly, sim.radius().value());
+            assert_bits(
+                "expansion speed",
+                wire.expansion_speed_km_s,
+                sim.expansion_speed().value(),
+            );
+            assert_bits("nebula age", wire.age_yr, sim.age().value());
+            assert_bits(
+                "ionised mass",
+                wire.ionised_mass_msun,
+                sim.ionised_mass().value(),
+            );
+            assert_eq!(wire.excitation_class, sim.excitation_class());
+        }
+        (Modelled::Null, None) => {}
+        (wire, sim) => panic!("the wire's nebula {wire:?} is not the sim's {sim:?}"),
+    }
     // P06.T25: a living star's rotation and a cool dwarf's activity are the sim's.
     if let Some(spin) = sim.rotation() {
         let Modelled::Value(period) = wire.rotation_period_d else {

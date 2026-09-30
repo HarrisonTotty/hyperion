@@ -154,3 +154,66 @@ describe("HostReadings' ID row", () => {
     expect(value?.innerHTML).toBe("42002CB20000000D.<wbr>0000");
   });
 });
+
+/** One host's readings with no zone about it. */
+function renderStar(host: HostBody) {
+  render(
+    <dl>
+      <HostReadings host={host} zones={[]} />
+    </dl>,
+  );
+}
+
+describe("HostReadings' planetary nebula and events (ruling 149.4)", () => {
+  it("reads the nebula's radius and EVENTS as the em dash where they are not modelled", () => {
+    renderStar(SUN);
+
+    expect(reading("NEBULA RADIUS").text).toBe("—");
+    expect(reading("EVENTS").text).toBe("—");
+    expect(screen.queryByText("NEBULA AGE")).toBeNull();
+  });
+
+  it("reads NONE for a star that lights no nebula and has no event in progress", () => {
+    renderStar({
+      ...SUN,
+      planetaryNebula: { kind: "none" },
+      activeEvents: { kind: "value", value: [] },
+    });
+
+    expect(reading("NEBULA RADIUS").text).toBe("NONE");
+    expect(reading("EVENTS").text).toBe("NONE");
+    expect(screen.queryByText("IONISED MASS")).toBeNull();
+  });
+
+  it("reads a nebula's radius, age, expansion, ionised mass and excitation class", () => {
+    renderStar({
+      ...SUN,
+      kind: "white_dwarf",
+      planetaryNebula: {
+        kind: "value",
+        value: {
+          radiusLy: 0.412,
+          ageYr: 13_720,
+          expansionSpeedKmS: 28.44,
+          ionisedMassMsun: 0.00501,
+          excitationClass: 6,
+        },
+      },
+    });
+
+    expect(reading("NEBULA RADIUS")).toEqual({ text: "0.412 ly", unit: "ly" });
+    expect(reading("NEBULA AGE")).toEqual({ text: "13,700 yr", unit: "yr" });
+    expect(reading("NEBULA EXPANSION")).toEqual({ text: "28.4 km/s", unit: "km/s" });
+    expect(reading("IONISED MASS").text).toMatch(/^0\.00501 M/u);
+    const mass = screen.getByText("IONISED MASS", { selector: "dt" }).nextElementSibling;
+    expect(mass?.querySelector('[role="img"][aria-label="solar masses"]')).not.toBeNull();
+    expect(reading("EXCITATION CLASS")).toEqual({ text: "6", unit: null });
+  });
+
+  it("leaves the nebula and the events out for a star that left no remnant", () => {
+    renderStar({ ...SUN, kind: "no_remnant", planetaryNebula: { kind: "none" } });
+
+    expect(screen.queryByText("NEBULA RADIUS")).toBeNull();
+    expect(screen.queryByText("EVENTS")).toBeNull();
+  });
+});

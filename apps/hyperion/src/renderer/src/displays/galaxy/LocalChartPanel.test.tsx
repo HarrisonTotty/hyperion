@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { hrXPx, hrYPx } from "../../lib/galaxy/hrProjection";
+import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
@@ -221,6 +222,74 @@ describe("LocalChartPanel", () => {
     expect(within(page).getByText("UT", { selector: "dt" }).nextElementSibling).toHaveTextContent(
       "+0.00 yr",
     );
+  });
+
+  it("lays a short page out compact and a tall one stacked, its controls in one order", async () => {
+    await renderChart();
+    // Every element is measured 300 px tall, a page of 18.75 rem: under ruling 134.9's layout.
+    const chart = chartPage().querySelector(".local-chart");
+    // Every control and the canvas, in the document's order, which is the tab order.
+    const controls = (): string[] =>
+      [...chartPage().querySelectorAll("button, input, select, canvas")].map(
+        (control) => control.getAttribute("aria-label") ?? control.textContent,
+      );
+    expect(chart).toHaveClass("local-chart--compact");
+    const compactOrder = controls();
+
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 1036, height: 840 }),
+    );
+    act(() => {
+      FakeResizeObserver.resizeAll();
+    });
+
+    expect(chart).toHaveClass("local-chart--stacked");
+    expect(controls()).toEqual(compactOrder);
+  });
+
+  it("tabs from the presets to the chart, then its controls, on a compact page", async () => {
+    const { user } = await renderChart();
+    expect(chartPage().querySelector(".local-chart")).toHaveClass("local-chart--compact");
+
+    within(chartPage())
+      .getByRole("button", { name: /OBLIQUE/u })
+      .focus();
+    await user.tab();
+    expect(canvas()).toHaveFocus();
+    await user.tab();
+    expect(within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" })).toHaveFocus();
+  });
+
+  it("puts the census table in the controls' place on a compact page, the legend kept", async () => {
+    const { user } = await renderChart();
+    const toggle = within(chartPage()).getByRole("button", { name: /CENSUS BY LAYER/u });
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveFocus();
+    expect(within(chartPage()).queryByRole("combobox", { name: "QUERY RADIUS" })).toBeNull();
+    expect(within(chartPage()).getByText("SYMBOLS NOT TO SCALE")).toBeVisible();
+    within(chartPage())
+      .getByRole("button", { name: /OBLIQUE/u })
+      .focus();
+    await user.tab();
+    expect(canvas()).toHaveFocus();
+    await user.tab();
+    expect(toggle).toHaveFocus();
+
+    await user.click(toggle);
+
+    expect(within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" })).toBeVisible();
+  });
+
+  it("keeps K live while the census table hides the STARS selector", async () => {
+    const { user } = await renderChart();
+    await user.click(within(chartPage()).getByRole("button", { name: /CENSUS BY LAYER/u }));
+
+    await user.keyboard("k");
+    await user.click(within(chartPage()).getByRole("button", { name: /CENSUS BY LAYER/u }));
+
+    expect(within(chartPage()).getByRole("radio", { name: "LIVING" })).toBeChecked();
   });
 
   it("lists every system the query returned, nearest first", async () => {

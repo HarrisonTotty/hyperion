@@ -33,6 +33,7 @@ use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
     MultiplicityContext, RedrawAttempt, SystemHierarchy, draw_hierarchy,
 };
+use crate::stellar::nebula::{self, PlanetaryNebula};
 use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{
@@ -498,6 +499,20 @@ impl StarModel {
         Some(clock.phase_at(t))
     }
 
+    /// The planetary nebula the star lights at `t` (P06.T16.b), or `None` if it has not formed
+    /// then, lights none, or is below 0.1 M☉, which never reaches the asymptotic giant branch.
+    #[must_use]
+    pub fn planetary_nebula_at(&self, t: UniverseTime) -> Option<PlanetaryNebula> {
+        let age = self.age_at(t);
+        if age.value() <= 0.0 {
+            return None;
+        }
+        match &self.evolution {
+            Evolution::Track(track) => nebula::planetary_nebula(track, age),
+            Evolution::Cooling => None,
+        }
+    }
+
     /// The star's rotation at `t` (P06.T25), or `None` if it has not formed then or its phase is
     /// not one [`rotation::rotation`] models. An evolved star reads its state at the end of its
     /// main sequence from its track.
@@ -627,10 +642,10 @@ pub enum ClockDeath {
 /// state, what kind of object it is, its class and absolute magnitudes, its remnant once it is
 /// dead, and its death if that falls inside the clock window.
 ///
-/// A remnant's detail (a neutron star's pulsar state, P06.T21; a black hole's spin, T22) and a
-/// living star's rotation, magnetism and activity (T25) and its variability (T26.a–c) are here.
-/// A planetary nebula (T16), the active events (T28) and plan 11's binary class (P11.T5) are
-/// added by their tasks.
+/// A remnant's detail (a neutron star's pulsar state, P06.T21; a black hole's spin, T22), a
+/// living star's rotation, magnetism and activity (T25), its variability (T26.a–c) and the
+/// planetary nebula it lights (T16.b) are here. The active events (T28) and plan 11's binary class
+/// (P11.T5) are added by their tasks.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarSummary {
     body: BodyId,
@@ -645,6 +660,7 @@ pub struct StarSummary {
     magnetism: Option<Magnetism>,
     activity: Option<Activity>,
     variability: Option<Variability>,
+    planetary_nebula: Option<PlanetaryNebula>,
     death_in_window: Option<(UniverseTime, DeathKind)>,
 }
 
@@ -734,6 +750,12 @@ impl StarSummary {
     #[must_use]
     pub const fn variability(&self) -> Option<Variability> {
         self.variability
+    }
+
+    /// The planetary nebula the star lights (P06.T16.b), or `None` if it lights none.
+    #[must_use]
+    pub const fn planetary_nebula(&self) -> Option<PlanetaryNebula> {
+        self.planetary_nebula
     }
 
     /// The star's death, its clock time and kind, if it falls inside the clock window [−H, +H]
@@ -1330,6 +1352,7 @@ fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarS
             rotation: spin.as_ref(),
             activity: activity.as_ref(),
         }),
+        planetary_nebula: star.planetary_nebula_at(t),
         death_in_window,
         state,
     })
@@ -1616,6 +1639,49 @@ mod tests {
         assert_eq!(
             brown.state_at(UniverseTime::EPOCH).unwrap().phase(),
             Phase::Substellar
+        );
+    }
+
+    /// A white dwarf a century past the AGB lights its nebula, and its summary carries the same
+    /// one; long after, and before the star forms, and below 0.1 M☉, it lights none (P06.T16.b).
+    #[test]
+    fn a_young_white_dwarf_lights_its_nebula_and_its_summary_carries_it() {
+        let at = |age: f64, m: f64| {
+            StarModel::new(
+                SolarMasses::new(m),
+                Composition::SOLAR,
+                StarDraws::median(),
+                Years::new(age),
+            )
+            .unwrap()
+        };
+        let died = at(3.0e9, 2.0)
+            .lifetime()
+            .expect("a star of 2 M☉ dies")
+            .value();
+        let young = at(died + 100.0, 2.0);
+        let shell = young
+            .planetary_nebula_at(UniverseTime::EPOCH)
+            .expect("a white dwarf a century old lights its nebula");
+        assert!(shell.age().value() > 100.0, "{shell:?}");
+        assert!(
+            shell.radius().value() > 0.0 && shell.radius() < nebula::MAX_RADIUS,
+            "{shell:?}"
+        );
+        let summary = star_summary(&young, BodyId::new(test_system(), 0), UniverseTime::EPOCH)
+            .expect("the white dwarf exists");
+        assert_eq!(summary.planetary_nebula(), Some(shell));
+        assert_eq!(
+            at(died + 1.0e6, 2.0).planetary_nebula_at(UniverseTime::EPOCH),
+            None
+        );
+        assert_eq!(
+            at(-500.0, 2.0).planetary_nebula_at(UniverseTime::EPOCH),
+            None
+        );
+        assert_eq!(
+            at(5.0e9, 0.05).planetary_nebula_at(UniverseTime::EPOCH),
+            None
         );
     }
 

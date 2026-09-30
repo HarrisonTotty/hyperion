@@ -115,6 +115,14 @@ function overlaps(a: BoxPx, b: BoxPx): boolean {
   );
 }
 
+/**
+ * `startPx` moved as little as it takes for a box `sizePx` long to lie inside `0`–`extentPx`, or
+ * to `0` where the box is longer than that.
+ */
+function clampInto(startPx: number, sizePx: number, extentPx: number): number {
+  return Math.max(0, Math.min(startPx, extentPx - sizePx));
+}
+
 function inView(anchor: Anchor, viewport: Viewport): boolean {
   return (
     anchor.xPx >= 0 &&
@@ -128,7 +136,8 @@ function inView(anchor: Anchor, viewport: Viewport): boolean {
  * Places the chosen labels beside their symbols, dropping those that would collide.
  *
  * @remarks
- * Each label goes to the right of its symbol and flips to the left at the right edge of the view.
+ * Each label goes to the right of its symbol and flips to the left at the right edge of the view;
+ * where it has room on neither side, or at the top or bottom edge, it is moved just inside the view.
  * Labels are placed in the order given; one whose box overlaps a label already placed or other
  * furniture, or whose mark is out of view, is dropped. The selection's and the destination's
  * labels, which {@link chooseLabels} puts first, are never dropped.
@@ -157,11 +166,14 @@ export function placeLabels(
     const heightPx = size.heightRem * viewport.remPx;
     const rightLeftPx = anchor.xPx + anchor.radiusPx + gapPx;
     const flips = rightLeftPx + widthPx > viewport.widthPx;
+    const sideLeftPx = flips ? anchor.xPx - anchor.radiusPx - gapPx - widthPx : rightLeftPx;
     const label: PlacedLabel = {
       id: mark.id,
       text: mark.label,
-      leftPx: flips ? anchor.xPx - anchor.radiusPx - gapPx - widthPx : rightLeftPx,
-      topPx: anchor.yPx - heightPx / 2,
+      // Where neither side has the room, as in a narrow view, the label is held inside the view
+      // rather than cut off by its edge (the orchestrator's ruling 149.1).
+      leftPx: clampInto(sideLeftPx, widthPx, viewport.widthPx),
+      topPx: clampInto(anchor.yPx - heightPx / 2, heightPx, viewport.heightPx),
       widthPx,
       heightPx,
       side: flips ? "left" : "right",

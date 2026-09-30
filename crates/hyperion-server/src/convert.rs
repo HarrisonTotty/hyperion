@@ -26,7 +26,7 @@ use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
     ArmParams, GalaxyParams, HaloComponentKind, HaloComponentParams, HaloParams,
 };
-use hyperion_sim::galaxy::placement::layer_spec;
+use hyperion_sim::galaxy::placement::{SystemKind, layer_spec};
 use hyperion_sim::galaxy::potential::PotentialTables;
 use hyperion_sim::galaxy::query::{
     BuildRangeQueryError, Census, CensusStop, MassFloor, RangeQuery, RangeResult,
@@ -35,6 +35,7 @@ use hyperion_sim::galaxy::query::{
 use hyperion_sim::galaxy::substellar::SubstellarAbundance;
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
 use hyperion_sim::id::Layer;
+use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
 use hyperion_sim::units::{
     Degrees, Gigayears, KilometresPerSecond, LightYears, Megayears, MetresPerSecond, PerYear,
@@ -367,7 +368,8 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
 /// the job that ran the query owns it and moves them into the answer. The records are in
 /// [`RangeResult`]'s order, nearest first, and each is the system at the query's time. With
 /// `briefs`, which the handler builds when the request sets `include_stellar`, row k carries brief
-/// k; without, no row carries one, and every row is plan 04's.
+/// k, and a rogue planet's row its metallicity; without, no row carries either, and every row is
+/// plan 04's.
 ///
 /// # Panics
 ///
@@ -386,12 +388,14 @@ pub(crate) fn systems_in_range(
             assert_eq!(briefs.len(), hits.len(), "one brief per system found");
             hits.iter()
                 .zip(briefs)
-                .map(|(hit, brief)| system_record(galaxy, hit, query.time(), brief))
+                .map(|(hit, brief)| {
+                    system_record(galaxy, hit, query.time(), RowStellar::Asked(brief))
+                })
                 .collect()
         }
         None => hits
             .iter()
-            .map(|hit| system_record(galaxy, hit, query.time(), None))
+            .map(|hit| system_record(galaxy, hit, query.time(), RowStellar::NotAsked))
             .collect(),
     };
     SystemsInRange {
@@ -404,23 +408,44 @@ pub(crate) fn systems_in_range(
     }
 }
 
+/// What a range row carries of its system's stars: nothing when the request did not set
+/// `include_stellar`, and otherwise its primary's brief, if one was built.
+#[derive(Debug, Clone, PartialEq)]
+enum RowStellar {
+    /// The request did not ask for the briefs: the row is plan 04's.
+    NotAsked,
+    /// The request asked for them, and this is the row's: `None` for a system not yet formed at
+    /// the query's time and for a rogue planet, which has no star to describe.
+    Asked(Option<StellarBriefDto>),
+}
+
 /// One system found, as the wire carries it: the state at the epoch but for the position and the
-/// age, which are at the query's time, and its primary's `brief` at that time if one was built.
-/// The velocity is the epoch's, from `galaxy`'s kinematic tables (plan 08, P08.T7.a), and is what
-/// moved the system to its position.
+/// age, which are at the query's time, and, when the request set `include_stellar`, its primary's
+/// brief at that time if one was built. The velocity is the epoch's, from
+/// `galaxy`'s kinematic tables (plan 08, P08.T7.a), and is what moved the system to its position.
 ///
 /// A row without a brief is plan 04's, with no `stellar` key; the client reads it as no brief
 /// sent. A brief of a system not yet formed at the query's time is `None` too, and such a row has
-/// none either: it has no star to describe.
+/// none either: it has no star to describe. With `include_stellar`, a rogue planet's row, which
+/// never has a brief, carries its metallicity instead, the one [`draw_metallicity`] gives it and
+/// its stars would share (plan 13, P13.T5.d); `system_summary` refuses it, so no other answer does.
 #[must_use]
 fn system_record(
     galaxy: &Galaxy,
     hit: &SystemHit,
     time: UniverseTime,
-    brief: Option<StellarBriefDto>,
+    stellar: RowStellar,
 ) -> hyperion_protocol::SystemRecord {
     let record = hit.record();
     let velocity = epoch_velocity(galaxy, record).metres_per_second();
+    let (brief, fe_h_dex) = match stellar {
+        RowStellar::NotAsked => (None, None),
+        RowStellar::Asked(brief) => (
+            brief,
+            (record.kind() == SystemKind::RoguePlanet)
+                .then(|| draw_metallicity(galaxy, record).fe_h().value()),
+        ),
+    };
     hyperion_protocol::SystemRecord {
         id: SystemIdHex::from_u64(record.id().raw()),
         designation: record.id().designation().to_string(),
@@ -431,6 +456,7 @@ fn system_record(
         population: wire_population(record.population()),
         velocity_km_s: velocity.map(|v| KilometresPerSecond::from(MetresPerSecond::new(v)).value()),
         stellar: brief,
+        fe_h_dex,
     }
 }
 
@@ -1883,6 +1909,7 @@ mod tests {
             assert_eq!(
                 hyperion_protocol::SystemRecord {
                     stellar: None,
+                    fe_h_dex: None,
                     ..row.clone()
                 },
                 *bare
@@ -2252,6 +2279,49 @@ mod tests {
         );
         let returned: u32 = answer.census.layers.iter().map(|line| line.returned).sum();
         assert_eq!(usize::try_from(returned).unwrap(), answer.systems.len());
+    }
+
+    /// Plan 13, P13.T5.d: with `include_stellar` a rogue planet's row carries the metallicity the
+    /// sim draws for it, which no summary carries, and no other row carries one; without the flag
+    /// no row does, and the rows are otherwise the same.
+    #[test]
+    fn a_rogue_planets_row_carries_its_metallicity_with_the_briefs() {
+        let mut request = sunlike(10.0, MAX_CENSUS_LIMIT, MassLayer::RoguePlanet);
+        let plain = answer(&request);
+        request.include_stellar = true;
+        let answer = answer(&request);
+        let query = RangeRequest::try_from(&request).unwrap().into_query();
+        let result = range_query(milky_way(), &mut NoCache::new(), &[], &query);
+        let mut planets = 0;
+        for ((row, bare), hit) in answer
+            .systems
+            .iter()
+            .zip(&plain.systems)
+            .zip(result.systems())
+        {
+            if hit.record().kind() == SystemKind::RoguePlanet {
+                planets += 1;
+                let drawn = draw_metallicity(milky_way(), hit.record()).fe_h().value();
+                assert_same_bits(row.fe_h_dex.expect("a rogue planet's metallicity"), drawn);
+                let json = serde_json::to_value(row).unwrap();
+                assert!(
+                    json.get("fe_h_dex")
+                        .is_some_and(serde_json::Value::is_number)
+                );
+            } else {
+                assert_eq!(row.fe_h_dex, None, "{}", row.designation);
+            }
+            assert_eq!(bare.fe_h_dex, None);
+            assert_eq!(
+                hyperion_protocol::SystemRecord {
+                    stellar: None,
+                    fe_h_dex: None,
+                    ..row.clone()
+                },
+                *bare
+            );
+        }
+        assert!(planets > 100, "{planets} rogue planets");
     }
 
     /// With `brown_dwarf` the census stops at the brown dwarfs' line and no rogue planet comes back.

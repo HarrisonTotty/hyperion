@@ -214,6 +214,7 @@ fn systems_in_range(records: usize) -> SystemsInRange {
                     20.0 - along * 40.0,
                 ],
                 stellar: None,
+                fe_h_dex: None,
             }
         })
         .collect();

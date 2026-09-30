@@ -415,6 +415,17 @@ pub struct SystemRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub stellar: Option<StellarBriefDto>,
+    /// The metallicity \[Fe/H\], in dex, of a system with no star, when the request set
+    /// `include_stellar`: a rogue planet's, which no other answer carries, since `system_summary`
+    /// describes a system's stars and a rogue planet has none (plan 13, P13.T5.d).
+    ///
+    /// It is drawn as a star system's is, once and fixed at birth: its density component's normal
+    /// distribution at its place and age (plan 02, P02.T7.e), so it has no hard bounds. Absent
+    /// from every other row, as `stellar` is without the flag: a star system's and a brown dwarf's
+    /// metallicity is their summary's `fe_h_dex`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fe_h_dex: Option<f64>,
 }
 
 #[cfg(test)]
@@ -700,6 +711,7 @@ mod tests {
                 population: Population::OldThinDisc,
                 velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: None,
+                fe_h_dex: None,
             },
             SystemRecord {
                 id: SystemIdHex::from_u64(0x6000_0000_0000_0001),
@@ -714,6 +726,7 @@ mod tests {
                 population: Population::YoungThinDisc,
                 velocity_km_s: [3.5, -228.0, -0.75],
                 stellar: None,
+                fe_h_dex: None,
             },
         ]
     }
@@ -921,6 +934,7 @@ mod tests {
                     teff_k: Some(250_000.0),
                     star_count: 3,
                 }),
+                fe_h_dex: None,
             },
             json!({
                 "id": "0200080020000000",
@@ -1023,6 +1037,7 @@ mod tests {
                 teff_k: Some(3_200.0),
                 star_count: 1,
             }),
+            fe_h_dex: None,
             ..two_rows().remove(1)
         };
         let brown_dwarf = SystemRecord {
@@ -1044,6 +1059,7 @@ mod tests {
                 teff_k: Some(1_100.0),
                 star_count: 1,
             }),
+            fe_h_dex: None,
         };
         let rogue_planet = SystemRecord {
             id: SystemIdHex::from_u64(0xc1ff_3657_7ff8_0005),
@@ -1058,6 +1074,7 @@ mod tests {
             population: Population::ThickDisc,
             velocity_km_s: [-40.0, 190.0, 22.5],
             stellar: None,
+            fe_h_dex: Some(-0.375),
         };
         vec![star, brown_dwarf, rogue_planet]
     }
@@ -1108,12 +1125,14 @@ mod tests {
                         "age_myr": 8_125.0,
                         "population": "thick_disc",
                         "velocity_km_s": [-40.0, 190.0, 22.5],
+                        "fe_h_dex": -0.375,
                     },
         ])
     }
 
     /// Plan 13, P13.T7: a result holding one of each kind. The brown dwarf carries its brief, the
-    /// rogue planet no `stellar` key at all, and the census has the two substellar lines after E.
+    /// rogue planet no `stellar` key at all but its metallicity (P13.T5.d), and the census has the
+    /// two substellar lines after E.
     #[test]
     fn systems_in_range_response_wire_form_with_one_of_each_kind() {
         // Every layer included, each with its band, expected and returned counts.

@@ -175,6 +175,8 @@ function toHost(system: SystemIdHex, designation: string, star: StarSummaryDto):
       radiusLy: nebula.radius_ly,
       expansionSpeedKmS: nebula.expansion_speed_km_s,
       ageYr: nebula.age_yr,
+      ionisedMassMsun: nebula.ionised_mass_msun,
+      excitationClass: nebula.excitation_class,
     })),
     activeEvents: pending(star.active_events, (events) =>
       events.map((event) => ({

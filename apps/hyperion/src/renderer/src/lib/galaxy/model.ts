@@ -110,6 +110,12 @@ export interface ChartSystem {
    * server sends without a brief, and for a free-floating planet, which has none.
    */
   readonly star: StarBrief | null;
+  /**
+   * The metallicity [Fe/H], in dex, of a free-floating planet, which only its row carries, since
+   * `system_summary` describes stars and it has none (plan 13, P13.T5.d); `null` for every other
+   * system, whose metallicity is its summary's, and for a row the server sent without one.
+   */
+  readonly feHDex: number | null;
   /** Velocity at the epoch along the `GALACTIC` axes, in km/s (plan 08, P08.T7.a). */
   readonly velocityKmS: Vec3;
 }

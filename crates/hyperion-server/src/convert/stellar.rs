@@ -5,23 +5,24 @@
 //! The answer follows the three states of `hyperion_protocol`'s stellar module (ruling 54 of
 //! 2026-09-22): a field this generator version does not compute is absent, one computed that the
 //! object lacks is `null`, and the rest carry their values. A pulsar's detail (plan 06's T21), a
-//! black hole's spin (T22), rotation and activity (T25) and variability (T26.a–c) are sent where the
-//! sim computes them; a planetary nebula and the active events are absent for every star (T16,
-//! T28).
+//! black hole's spin (T22), rotation and activity (T25), variability (T26.a–c) and the planetary
+//! nebula (T16.b) are sent where the sim computes them; the active events are absent for every star
+//! (T28).
 //! A remnant's natal kick is P06.T19's ([`StarModel::natal_kick`]), `null` where the model holds
 //! none.
 
 use hyperion_protocol::{
     BinaryClassDto, CataclysmicKindDto, ErrorCode, HierarchyDto, HierarchyNodeDto,
     HighMassXrayBinaryKindDto, KickModeDto, Modelled, NatalKickDto, ObjectKindDto, OrbitDto,
-    PhaseDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto, StellarBriefDto,
-    SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest, VariabilityDto,
-    VariableKindDto, XrayBinaryKindDto,
+    PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto, RequestError, StarSummaryDto,
+    StellarBriefDto, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
+    VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
 use hyperion_sim::id::SystemId;
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::stellar::binary::{BinaryClass, CvKind, HmxbKind, XrbKind};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
+use hyperion_sim::stellar::nebula::PlanetaryNebula;
 use hyperion_sim::stellar::remnant::{
     CompactRemnant, KickMode, NatalKick, PulsarState, RemnantKind,
 };
@@ -152,7 +153,9 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
         variability: star
             .variability()
             .map_or(Modelled::Null, |v| Modelled::Value(variability_dto(&v))),
-        planetary_nebula: Modelled::NotModelled,
+        planetary_nebula: star.planetary_nebula().map_or(Modelled::Null, |nebula| {
+            Modelled::Value(nebula_dto(&nebula))
+        }),
         active_events: None,
         // Plan 11's P11.T11 runs the binary engine for each pair and gives each star its pair's
         // class (`binary_class_dto`); until then no class is computed.
@@ -267,6 +270,18 @@ fn remnant_dto(
             natal_kick,
         },
         RemnantKind::None => RemnantDto::NoRemnant,
+    }
+}
+
+/// A planetary nebula as the wire carries it (plan 06, P06.T16.b).
+#[must_use]
+fn nebula_dto(nebula: &PlanetaryNebula) -> PlanetaryNebulaDto {
+    PlanetaryNebulaDto {
+        radius_ly: nebula.radius().value(),
+        expansion_speed_km_s: nebula.expansion_speed().value(),
+        age_yr: nebula.age().value(),
+        ionised_mass_msun: nebula.ionised_mass().value(),
+        excitation_class: nebula.excitation_class(),
     }
 }
 
@@ -652,8 +667,10 @@ mod tests {
         let living = answer(&system(1.0, 4.6e9), 0);
         let wire = serde_json::to_value(&living.stars[0]).expect("a summary serialises");
         let fields = wire.as_object().expect("a star is an object");
-        assert_eq!(fields.get("variability"), Some(&serde_json::Value::Null));
-        for absent in ["planetary_nebula", "active_events", "binary_class"] {
+        for null in ["variability", "planetary_nebula"] {
+            assert_eq!(fields.get(null), Some(&serde_json::Value::Null), "{null}");
+        }
+        for absent in ["active_events", "binary_class"] {
             assert!(!fields.contains_key(absent), "{absent} is sent: {wire}");
         }
         for value in ["rotation_period_d", "activity_log_lx_lbol"] {
@@ -672,6 +689,44 @@ mod tests {
             assert_eq!(fields.get(null), Some(&serde_json::Value::Null), "{null}");
         }
         assert_eq!(fields.get("body_index"), Some(&serde_json::json!(0)));
+    }
+
+    /// A white dwarf just born from the AGB lights the nebula the sim gives it, field for field, and
+    /// one whose shell has dispersed lights none (P06.T16.b).
+    #[test]
+    fn a_young_white_dwarf_lights_the_sims_nebula_and_an_old_one_none() {
+        // The metallicity is read at the age, so the lifetime moves with it: settle the two.
+        let mut died = 1.0e9;
+        for _ in 0..4 {
+            died = system(2.0, died + 100.0)
+                .primary()
+                .lifetime()
+                .expect("a star of 2 M☉ dies")
+                .value();
+        }
+        let young = system(2.0, died + 100.0);
+        let star = &answer(&young, 0).stars[0];
+        assert_eq!(star.kind, ObjectKindDto::WhiteDwarf);
+        let sim = young
+            .primary()
+            .planetary_nebula_at(years(0))
+            .expect("a white dwarf a century old lights its nebula");
+        let Modelled::Value(nebula) = star.planetary_nebula else {
+            panic!("{:?}", star.planetary_nebula);
+        };
+        for (wire, sim) in [
+            (nebula.radius_ly, sim.radius().value()),
+            (nebula.expansion_speed_km_s, sim.expansion_speed().value()),
+            (nebula.age_yr, sim.age().value()),
+            (nebula.ionised_mass_msun, sim.ionised_mass().value()),
+        ] {
+            assert_eq!(wire.to_bits(), sim.to_bits());
+        }
+        assert_eq!(nebula.excitation_class, sim.excitation_class());
+        assert!(nebula.radius_ly > 0.0 && nebula.age_yr > 0.0, "{nebula:?}");
+        let old = &answer(&system(2.0, died + 1.0e6), 0).stars[0];
+        assert_eq!(old.kind, ObjectKindDto::WhiteDwarf);
+        assert_eq!(old.planetary_nebula, Modelled::Null);
     }
 
     #[test]

@@ -67,6 +67,9 @@ function toChartSystem(centre: GalacticPosition, record: SystemRecord): ChartSys
     // Every chart query asks for the briefs, so a row without one is a system not yet formed, or
     // a free-floating planet, which never has one.
     star: record.stellar === undefined ? null : toStarBrief(record.stellar),
+    // Only a free-floating planet's row carries its metallicity (plan 13, P13.T5.d); any other
+    // system's is its summary's.
+    feHDex: record.layer === "rogue_planet" ? (record.fe_h_dex ?? null) : null,
     velocityKmS: toVec3(record.velocity_km_s),
   };
 }

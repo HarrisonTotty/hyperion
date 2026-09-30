@@ -11,12 +11,12 @@
 //! A star's optional fields take one of three states on the wire, and the server is the authority
 //! on which:
 //!
-//! - **Absent**: this generator version does not compute the quantity at all (planetary nebulae
-//!   and active events until plan 06's T16 and T28 land; rotation and activity for the objects
-//!   plan 06's T25 does not model). The client shows the style guide's "Missing"
-//!   state, the em dash, and never takes it for "none" (ruling 34 of 2026-09-22, for a single value
-//!   the generator does not compute). Such a field is `#[serde(default)]`, skipped when `None`, and
-//!   optional in TypeScript, so that it can be filled later without changing any wire form.
+//! - **Absent**: this generator version does not compute the quantity at all (active events until
+//!   plan 06's T28 lands; rotation and activity for the objects plan 06's T25 does not model). The
+//!   client shows the style guide's "Missing" state, the em dash, and never takes it for "none"
+//!   (ruling 34 of 2026-09-22, for a single value the generator does not compute). Such a field
+//!   is `#[serde(default)]`, skipped when `None`, and optional in TypeScript, so that it can be
+//!   filled later without changing any wire form.
 //! - **`null`**: the quantity is computed and this object has none: no absolute magnitude for a
 //!   black hole, no remnant for a living star, no death within the clock window. This is plan 04's
 //!   convention for an `Option`, whose key is always present.
@@ -249,7 +249,7 @@ pub struct StarSummaryDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<VariabilityDto>>", optional)]
     pub variability: Modelled<VariabilityDto>,
-    /// The planetary nebula it lights; `null` when it lights none. Absent until plan 06's T16.
+    /// The planetary nebula it lights (plan 06, P06.T16.b); `null` when it lights none.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<PlanetaryNebulaDto>>", optional)]
     pub planetary_nebula: Modelled<PlanetaryNebulaDto>,
@@ -509,17 +509,17 @@ pub enum VariableKindDto {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct PlanetaryNebulaDto {
-    /// The shell's radius, light-years: positive, and under 2.7 ly (0.8 pc).
+    /// The shell's radius, light-years: positive, and under 2.94 ly (0.9 pc, ruling 124.5).
     pub radius_ly: f64,
     /// The speed at which it expands, km/s: 20–40 km/s.
     pub expansion_speed_km_s: f64,
-    /// The time since it was ejected, years: non-negative, and under its visibility time of some
-    /// 20,000–40,000 years.
+    /// The time since it was ejected, years: non-negative, and under its visibility time of
+    /// 16,900–33,900 years (ruling 124.5).
     pub age_yr: f64,
     /// The mass of its ionised gas, M☉: positive.
     pub ionised_mass_msun: f64,
-    /// Its excitation class, which rises with its central star's temperature, on the scale
-    /// P06.T16.b adopts and records with its source.
+    /// Its excitation class, 0–12, which rises with its central star's temperature: Reid and
+    /// Parker's (2010) scale, as P06.T16.b adopts it.
     pub excitation_class: u8,
 }
 

@@ -98,7 +98,13 @@ describe("toSystemModel", () => {
 
     expect(dwarf?.planetaryNebula).toEqual({
       kind: "value",
-      value: { radiusLy: 0.25, expansionSpeedKmS: 20, ageYr: 5_000 },
+      value: {
+        radiusLy: 0.25,
+        expansionSpeedKmS: 20,
+        ageYr: 5_000,
+        ionisedMassMsun: 0.1,
+        excitationClass: 5,
+      },
     });
     expect(dwarf?.activeEvents).toEqual({
       kind: "value",

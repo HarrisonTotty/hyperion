@@ -85,6 +85,15 @@ describe("placeLabels", () => {
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(380 - 6 - 4, 9);
   });
 
+  it("keeps a label whole inside a view too narrow for it on either side of its mark", () => {
+    const narrow: Viewport = { widthPx: 160, heightPx: 100, remPx: 16 };
+    const [label] = placeLabels([mark("a", 1, "9FG 567Z04 B-3")], [anchor("a", 80, 4)], narrow);
+
+    expect(label?.leftPx).toBeGreaterThanOrEqual(0);
+    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeLessThanOrEqual(160);
+    expect(label?.topPx).toBe(0);
+  });
+
   it("drops a lesser label that overlaps one already placed", () => {
     const chosen = [mark("big", 9), mark("small", 1), mark("apart", 0)];
     const anchors = [anchor("big", 100, 100), anchor("small", 104, 104), anchor("apart", 100, 200)];

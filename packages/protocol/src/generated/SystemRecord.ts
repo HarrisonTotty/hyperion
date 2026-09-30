@@ -52,4 +52,15 @@ velocity_km_s: [number, number, number],
  * brief is exactly plan 04's. A brown dwarf's brief is its own; a rogue planet has none, and
  * its row never carries the key (plan 13, P13.T7).
  */
-stellar?: StellarBriefDto, };
+stellar?: StellarBriefDto, 
+/**
+ * The metallicity \[Fe/H\], in dex, of a system with no star, when the request set
+ * `include_stellar`: a rogue planet's, which no other answer carries, since `system_summary`
+ * describes a system's stars and a rogue planet has none (plan 13, P13.T5.d).
+ *
+ * It is drawn as a star system's is, once and fixed at birth: its density component's normal
+ * distribution at its place and age (plan 02, P02.T7.e), so it has no hard bounds. Absent
+ * from every other row, as `stellar` is without the flag: a star system's and a brown dwarf's
+ * metallicity is their summary's `fe_h_dex`.
+ */
+fe_h_dex?: number, };

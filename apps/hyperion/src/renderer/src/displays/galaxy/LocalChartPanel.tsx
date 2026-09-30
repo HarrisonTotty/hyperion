@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   AU_PER_LY,
@@ -11,12 +11,14 @@ import {
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
 import { StatusLine } from "../../components/StatusLine";
+import { useElementSize } from "../../lib/useElementSize";
 import { AXIS_TOLERANCE_LY, cylindrical } from "../../spatial/frame";
 import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
 import type { ScaleUnit } from "../../spatial/scale";
 import { SpatialView } from "../../spatial/SpatialView";
 import { vec3 } from "../../spatial/vec3";
 import { CensusReadout } from "./CensusReadout";
+import { chartLayout, controlsGiveWay } from "./chartLayout";
 import { ChartControls } from "./ChartControls";
 import { usePageTabFocus } from "./pageTabFocus";
 import { SymbolLegend } from "./SymbolLegend";
@@ -62,10 +64,22 @@ interface LocalChartPanelProps {
  * the query it sends is pending and goes once an answer the chart can use arrives; the focus it
  * held then goes to the page's tab. An answer the link no longer backs is drawn and read as stale,
  * in `--text-muted` with a trailing `S`.
+ *
+ * A page too short for all that, as at 1280 × 720, is laid out `compact` (the orchestrator's ruling
+ * 134.9): the camera's angles and keys and what the chart is asked for stand in a column beside the
+ * chart, the census line beside the chart's frame, centre, time and scale, and the legend across
+ * the page under both, on show in every state, so that the chart keeps 15 rem of height. The census
+ * table, shown, takes the query controls' place in the column, whose settings the page shows
+ * elsewhere (`QUERY EDGE`, the census line, the count line, `UT`, the range label); their single
+ * keys stay live, and folding the table brings them back (ruling 149.1). The page's parts, and so
+ * its tab order, are in the same order in both layouts.
  */
 export function LocalChartPanel({ chart }: LocalChartPanelProps) {
   const { result, scene, bands, state, hasCentre, driveRangeLy, heldBack, fault, stale } = chart;
   const focusPageTab = usePageTabFocus();
+  const { ref: pageRef, size: pageSize } = useElementSize();
+  const layout = chartLayout(pageSize);
+  const [censusShown, setCensusShown] = useState(false);
   // The fault is the last answer's, so its RETRY stays on show while the query it sends is pending,
   // and goes with the fault once an answer the chart can use arrives. Had it the focus then, the
   // focus is left on nothing; before paint it goes to the page's tab (the orchestrator's ruling
@@ -109,7 +123,14 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
   const coreDistance: SpatialQuantity = { value: radiusText ?? "", unit: "ly" };
 
   return (
-    <div className={stale ? "local-chart local-chart--stale" : "local-chart"}>
+    <div
+      ref={pageRef}
+      className={[
+        "local-chart",
+        `local-chart--${layout}`,
+        ...(stale ? ["local-chart--stale"] : []),
+      ].join(" ")}
+    >
       {hasCentre ? null : (
         <p className="panel__empty local-chart__empty">NO CENTRE: pick on the map and press C</p>
       )}
@@ -149,6 +170,7 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         starFilter={chart.starFilter}
         onStarFilter={chart.chooseStarFilter}
         heldBack={heldBack}
+        hidden={controlsGiveWay(layout, censusShown, result !== null)}
       />
       <CensusReadout
         result={result}
@@ -158,6 +180,8 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         driveRangeLy={driveRangeLy}
         stale={stale}
         onRetry={chart.retry}
+        tableShown={censusShown}
+        onTableShown={setCensusShown}
       />
       <SymbolLegend
         bands={bands}

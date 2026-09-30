@@ -1,6 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 
 import type { ChartResult } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
@@ -24,6 +25,14 @@ const TWO_SYSTEMS = aChart({
   radiusLy: 80,
 });
 
+/** The readout with the table's state held as the page holds it. */
+function ShownCensus(
+  props: Omit<Parameters<typeof CensusReadout>[0], "tableShown" | "onTableShown">,
+) {
+  const [tableShown, setTableShown] = useState(false);
+  return <CensusReadout {...props} tableShown={tableShown} onTableShown={setTableShown} />;
+}
+
 function renderReadout(
   result: ChartResult | null,
   state: RequestState<"systems_in_range"> = { kind: "ok", response: aSystemsInRange() },
@@ -34,7 +43,7 @@ function renderReadout(
     shownResult: ChartResult | null,
     shownState: RequestState<"systems_in_range">,
   ) => (
-    <CensusReadout
+    <ShownCensus
       result={shownResult}
       systems={shownResult === null ? [] : filterSystems(shownResult.systems, starFilter)}
       starFilter={starFilter}
