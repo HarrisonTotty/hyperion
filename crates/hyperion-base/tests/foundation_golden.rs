@@ -22,7 +22,7 @@ fn writer() -> GoldenWriter {
 }
 
 /// The golden files this suite writes, by name.
-const FOUNDATION_GOLDENS: [&str; 1] = ["math/functions"];
+const FOUNDATION_GOLDENS: [&str; 2] = ["math/functions", "math/bessel"];
 
 /// The crate's golden directory.
 fn golden_root() -> PathBuf {
@@ -426,4 +426,40 @@ fn math_function_values_are_pinned() {
         w.f64(&format!("powi({x:?}, {n})"), math::powi(x, n));
     }
     golden!("math/functions", w.as_str());
+}
+
+/// Arguments of J₀: zero, points around its first zero near 2.404 8, negative ones (it is even)
+/// and large ones, where `libm` switches to its asymptotic form.
+const J0: &[f64] = &[
+    0.0,
+    -0.0,
+    1e-10,
+    0.5,
+    1.0,
+    2.0,
+    2.404_825_557_695_773,
+    2.5,
+    -1.0,
+    -2.404_825_557_695_773,
+    -7.5,
+    5.520_078_110_286_311,
+    8.0,
+    10.0,
+    25.0,
+    100.0,
+    1e4,
+    1e8,
+    -1e8,
+    1e300,
+];
+
+/// `math::j0`, in a golden of its own so that `math/functions` stays byte for byte what it was
+/// (plan R04, T4.c).
+#[test]
+fn j0_values_are_pinned() {
+    let mut w = writer();
+    for &x in J0 {
+        w.f64(&format!("j0({x:?})"), math::j0(x));
+    }
+    golden!("math/bessel", w.as_str());
 }

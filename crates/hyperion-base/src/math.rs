@@ -28,7 +28,9 @@
 //! hand-written functions are [`powi`], [`powf_positive`] (`libm`'s `exp` of `libm`'s `log`, for
 //! the stellar formulae alone), [`normal_quantile`], which uses only the wrappers, the four
 //! operators and `sqrt`, and [`two_product`], Dekker's exact product error, which is bit for bit
-//! [`mul_add`]'s and falls back to it outside the range where Dekker's is exact.
+//! [`mul_add`]'s and falls back to it outside the range where Dekker's is exact. Some wrappers
+//! have no `f64` method to stand in for, such as [`erf`] and [`j0`], the Bessel function the
+//! rendering plans' terrain uncertainty needs.
 
 /// The sine of `x` radians.
 #[inline]
@@ -253,6 +255,17 @@ pub fn cbrt(x: f64) -> f64 {
 #[must_use]
 pub fn hypot(x: f64, y: f64) -> f64 {
     libm::hypot(x, y)
+}
+
+/// The Bessel function of the first kind of order zero, J₀(x), for any finite `x`.
+///
+/// J₀ is even, J₀(0) = 1 exactly, and its first zero lies near 2.404 8. It is exactly the pinned
+/// `libm`'s `j0`, so the same bits on every target; `f64` has no such method, so no Clippy ban is
+/// needed. The rendering plans' R10 reads it for a terrain slope's uncertainty (its Design note 7).
+#[inline]
+#[must_use]
+pub fn j0(x: f64) -> f64 {
+    libm::j0(x)
 }
 
 /// The error function of `x`.
@@ -634,6 +647,37 @@ mod tests {
     use hyperion_testkit::float::{assert_same_bits, bits, ulps_apart};
 
     use super::*;
+
+    #[test]
+    fn j0_of_zero_is_exactly_one() {
+        assert_same_bits(j0(0.0), 1.0);
+        assert_same_bits(j0(-0.0), 1.0);
+    }
+
+    #[test]
+    fn j0_is_even() {
+        for x in [
+            1e-300,
+            1e-8,
+            0.5,
+            1.0,
+            2.404_825_557_695_773,
+            3.0,
+            7.5,
+            40.0,
+            1e3,
+            1e10,
+        ] {
+            assert_same_bits(j0(-x), j0(x));
+        }
+    }
+
+    /// The first zero, j₀,₁ = 2.404 825 557 695 773 (Abramowitz and Stegun, table 9.5).
+    #[test]
+    fn j0_vanishes_at_its_first_zero() {
+        assert!(j0(2.404_825_557_695_773).abs() < 1e-15);
+        assert!(j0(2.3) > 0.0 && j0(2.5) < 0.0);
+    }
 
     /// Reference bits of e, ln 2, sin 1 and cos 1, each the correctly rounded `f64`.
     #[test]
