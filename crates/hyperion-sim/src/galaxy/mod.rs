@@ -414,8 +414,8 @@ impl Galaxy {
 
     /// The expected number of systems born at the epoch, with the feature share φ at 0.
     ///
-    /// 0.5–1.8 × 10¹¹ under the default mass function and 0.5–2.1 × 10¹¹ under Kroupa's; the Milky
-    /// Way fixture has 1.06 × 10¹¹ (plan 02, Risks, R18).
+    /// About 0.5–1.7 × 10¹¹ under the default mass function (ruling 147.1) and 0.5–2.1 × 10¹¹ under
+    /// Kroupa's; the Milky Way fixture has 1.06 × 10¹¹ (plan 02, Risks, R18).
     #[must_use]
     pub fn system_count(&self) -> f64 {
         self.params.system_count()

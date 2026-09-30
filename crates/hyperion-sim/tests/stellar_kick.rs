@@ -104,6 +104,12 @@ fn observables() -> KickObservables {
 /// own (single and wind-stripped iron-core progenitors), whose speeds the table maps onto the
 /// measurement; the whole ordinary mode, companion-stripped stars above the ramp included, is
 /// reported beside it.
+///
+/// It fails at generator version 15 (K–S p ≈ 10⁻⁸, mean ln v 5.514): plan 11's mass-dependent
+/// stripped share (P11.T1.d) leaves the unstripped reference stars lighter than the population the
+/// rank table was built on. Ruling 147.2 moves the test to every ordinary-mode star, with the mark
+/// applied, and rebuilds the rank table on them; that moves output and lands in the version 16
+/// batch, so the test is left failing until then.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
 fn ordinary_neutron_star_speeds_follow_the_log_normal() {
@@ -165,18 +171,31 @@ fn the_low_mode_is_a_fifth_of_neutron_stars() {
     assert!((0.10..=0.30).contains(&share), "{share}");
 }
 
-/// Test 4: retention, judging low-mode neutron stars on a pair recoil of a third of their kick:
-/// at least a tenth under 50 km/s, and 15–25% under 20 km/s (ruling 96.3: with σ = 5 km/s every
-/// low-mode star is retained there, so the share cannot fall below the low mode's); the share
-/// under 100 km/s is reported against the brainstorm's 18–26%. It pins the low mode's σ and the
-/// ramp.
+/// Test 4: retention, judging low-mode neutron stars on a pair recoil of a third of their kick
+/// (ruling 147.3, after ruling 137.3's translation to neutron stars of primaries at the measured
+/// low-mode share): 18–30% under 20 km/s, where with σ = 5 km/s every low-mode star is retained and
+/// no ordinary one is, so the share equals the low mode's to within 0.002 (ruling 96.3); 18–31%
+/// under 50 km/s; and 24–35% under 100 km/s. It pins the low mode's σ and the ramp.
+///
+/// Measured at generator version 15: 0.2740 / 0.2781 / 0.3184, with a low-mode share of 0.2740.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
-fn a_tenth_of_neutron_stars_is_retained_by_a_cluster() {
-    let [under_20, under_50, under_100] = observables().retention;
-    eprintln!("retained under 20 / 50 / 100 km/s: {under_20:.4} / {under_50:.4} / {under_100:.4}");
-    assert!(under_50 >= 0.10, "{under_50}");
-    assert!((0.15..=0.25).contains(&under_20), "{under_20}");
+fn a_fifth_to_a_third_of_neutron_stars_is_retained_by_a_cluster() {
+    let o = observables();
+    let [under_20, under_50, under_100] = o.retention;
+    eprintln!(
+        "retained under 20 / 50 / 100 km/s: {under_20:.4} / {under_50:.4} / {under_100:.4}; \
+         low-mode share {:.4}",
+        o.low_mode_share
+    );
+    assert!((0.18..=0.30).contains(&under_20), "{under_20}");
+    assert!(
+        (under_20 - o.low_mode_share).abs() <= 0.002,
+        "under 20 km/s {under_20} against the low mode's {}",
+        o.low_mode_share
+    );
+    assert!((0.18..=0.31).contains(&under_50), "{under_50}");
+    assert!((0.24..=0.35).contains(&under_100), "{under_100}");
 }
 
 /// Test 5: the toy double neutron stars (Hills 1983; Brandt and Podsiadlowski 1995), whose

@@ -20,7 +20,7 @@
 //! use hyperion_sim::galaxy::params::GalaxyParams;
 //!
 //! let params = GalaxyParams::from_seed(Seed::new(42), MassFunctionKind::default());
-//! // The system count is derived, not drawn: 0.5–1.8 × 10¹¹ over the parameter ranges.
+//! // The system count is derived, not drawn: about 0.5–1.7 × 10¹¹ over the parameter ranges.
 //! assert!((0.5e11..1.9e11).contains(&params.system_count()));
 //! // Shares are of systems; masses follow and add up to the stellar mass.
 //! let total: f64 = hyperion_sim::galaxy::POPULATIONS

@@ -352,13 +352,18 @@ pub fn assert_derived_consistent(p: &GalaxyParams) {
         stellar / per_system,
         1e-12,
     );
-    // M★'s 3–10 × 10¹⁰ M☉ over the default's 0.55–0.58 M☉ per system (brainstorm, "Galaxy
-    // parameters": 0.5–1.8 × 10¹¹); Kroupa's lighter systems reach 2.1 × 10¹¹.
-    let most = match p.mass_function() {
-        MassFunctionKind::Chabrier => 1.8e11,
-        MassFunctionKind::Kroupa => 2.1e11,
+    // M★'s 3–10 × 10¹⁰ M☉ over the default's 0.596–0.605 M☉ per system, every remnant included
+    // (over 10⁴ seeds at generator version 15: plan 11's companions and ruling 138's fitted
+    // scale), is 4.99 × 10¹⁰ to 1.67 × 10¹¹ (brainstorm, "Galaxy parameters": about 0.5–1.7 ×
+    // 10¹¹; ruling 147.1). Kroupa's lighter systems stay in 0.5–2.1 × 10¹¹.
+    let (least, most) = match p.mass_function() {
+        MassFunctionKind::Chabrier => {
+            assert_within("M★ per system", stellar / p.system_count(), 0.59, 0.61);
+            (4.9e10, 1.7e11)
+        }
+        MassFunctionKind::Kroupa => (5.0e10, 2.1e11),
     };
-    assert_within("system count", p.system_count(), 0.5e11, most);
+    assert_within("system count", p.system_count(), least, most);
     let m200 = p.dark_halo().m200().value();
     // Plan 02's "1.4–5.3 × 10¹²" is this range rounded: 10¹¹ M☉ ÷ (0.157 f★) at the ends of f★'s
     // range, 0.45 and 0.12, is 1.415 and 5.308 × 10¹², so the exact ends are checked.

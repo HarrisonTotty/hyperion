@@ -281,7 +281,8 @@ The seed chooses the galaxy's gross properties from the observed ranges for larg
   to about 0.55–0.59 M☉ under the default, Chabrier's system function (0.48 under Kroupa's), living
   stars, white dwarfs and companions together; neutron stars and black holes, which no census
   holds, add a few hundredths to the mean the system count divides by. It varies by only 3% between
-  the old populations. So a galaxy holds 0.5–1.8 × 10¹¹ systems, and one of the Milky Way's mass about
+  the old populations. So a galaxy holds about 0.5–1.7 × 10¹¹ systems (3–10 × 10¹⁰ M☉ over about 0.60 M☉ per system,
+  remnants included), and one of the Milky Way's mass about
   10¹¹.
 - **Shares and sizes** of the [populations](#populations): disc scale length (the Milky Way's is
   2.15–2.6 kpc: 2.15 ± 0.14 mass-weighted from Bovy and Rix 2013, 2.6 ± 0.5 from Bland-Hawthorn and
@@ -2361,6 +2362,15 @@ stops at 15 M☉, while the galaxy's own function and fates leave about 0.46 at 
 globulars' initial masses are then about 1.5 times too low, and a revision is queued (ruling 145.5).
 The model also reads every depleted slope as dwarfs lost from the canonical −1.5, where Baumgardt et
 al. read the same slope in dynamically young globulars as a mass function born light at the bottom.
+
+**2026-09-29: the orchestrator's ruling 147.** Ruling 147 of the same file was made on research
+into four slow-test failures after version 15 (`research/r-slowfail/NOTE.md`). Only tests and text
+change here. The text has been brought into line:
+
+1. **A galaxy holds about 0.5–1.7 × 10¹¹ systems**, not 0.5–1.8 (ruling 147.1). Reason: with plan
+   11's companions and the fitted Chabrier scale a system averages about 0.60 M☉, remnants
+   included, and 3–10 × 10¹⁰ M☉ over that is 0.50–1.67 × 10¹¹. See [Galaxy
+   parameters](#galaxy-parameters).
 
 ## Open questions
 

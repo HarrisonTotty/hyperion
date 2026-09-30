@@ -1154,12 +1154,17 @@ fn galaxy_bounds_are_pinned() {
 
 /// The hunt's five seeds (P02.T8.c), found by scanning the first 1,500 seeds of the family
 /// `0x0208_4a47_0000_0000 | n`, with the property each was chosen for.
+///
+/// Generator version 15's mean masses (plan 11's companions and ruling 138's fitted Chabrier
+/// scale) moved the populations' masses and so the coupled sizes: the first tightest four-armed
+/// seed, `0x…_0086`, kept its 10.02° pitch but its bar fell to 17,986 ly, off the clamp. Re-scanned
+/// at version 15, `0x…_04c4` is the four-armed seed of least pitch (10.02°) with the 18,000 ly bar.
 const HUNT_SEEDS: [(&str, u64); 5] = [
     ("sharpest_arms", 0x0208_4a47_0000_0368),
     ("sharpest_four_arms", 0x0208_4a47_0000_00f0),
     ("longest_bar", 0x0208_4a47_0000_05ce),
     ("shortest_bar", 0x0208_4a47_0000_05bb),
-    ("tightest_four_arms", 0x0208_4a47_0000_0086),
+    ("tightest_four_arms", 0x0208_4a47_0000_04c4),
 ];
 
 /// The seed's parameters, checked to still have the property it was chosen for: a change to the

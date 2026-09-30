@@ -27,8 +27,9 @@ fn sweep() -> impl Iterator<Item = GalaxyParams> {
 
 /// Two checks over the same 10⁴ seeds, in one test so that the parameters are built once.
 ///
-/// P02.T5.a and P02.T5.b: every getter within its range, N within 0.5–1.8 × 10¹¹
-/// (0.528–1.775 × 10¹¹), the population masses summing to M★, M₂₀₀ within its bracket.
+/// P02.T5.a and P02.T5.b: every getter within its range, N within 4.9 × 10¹⁰ – 1.7 × 10¹¹ and M★
+/// per system within 0.59–0.61 M☉ (ruling 147.1; measured 4.986 × 10¹⁰ – 1.675 × 10¹¹ and
+/// 0.596–0.605 M☉ at version 15), the population masses summing to M★, M₂₀₀ within its bracket.
 ///
 /// And sizes follow their masses as mass^⅓ (P02.T5.b). The scatter spreads sizes about the law and
 /// the clamp cuts them off, so a least-squares fit over the clamped points would be biased towards
