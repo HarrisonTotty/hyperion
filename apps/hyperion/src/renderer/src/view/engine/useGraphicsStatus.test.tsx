@@ -28,19 +28,9 @@ describe("useGraphicsStatus", () => {
 
   it("unsubscribes on unmount", () => {
     const store = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
-    let subscribed = 0;
-    const subscribe = store.subscribe;
-    store.subscribe = (listener) => {
-      subscribed += 1;
-      const unsubscribe = subscribe(listener);
-      return () => {
-        subscribed -= 1;
-        unsubscribe();
-      };
-    };
     const { unmount } = renderHook(() => useGraphicsStatus(), { wrapper: wrapperFor(store) });
-    expect(subscribed).toBe(1);
+    expect(store.listenerCount).toBe(1);
     unmount();
-    expect(subscribed).toBe(0);
+    expect(store.listenerCount).toBe(0);
   });
 });

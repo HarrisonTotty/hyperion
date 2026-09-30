@@ -124,7 +124,7 @@ export function styleAvailability(summary: AdapterSummary): StyleAvailability {
 /**
  * Asks for a high-performance adapter and vets it.
  *
- * @param gpu - `navigator.gpu`, absent where WebGPU is.
+ * @param gpu - `navigator.gpu`, or `undefined` where WebGPU is absent.
  * @remarks
  * `powerPreference: "high-performance"` changed nothing on the one-GPU probe machine but picks the
  * discrete part on a machine with two.

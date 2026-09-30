@@ -371,15 +371,20 @@ export class GraphicsStatusStore {
    *
    * @returns Its removal.
    */
-  subscribe = (listener: () => void): (() => void) => {
+  readonly subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
     return () => {
       this.#listeners.delete(listener);
     };
   };
 
+  /** Subscribers registered now. */
+  get listenerCount(): number {
+    return this.#listeners.size;
+  }
+
   /** The current status; the same object until it changes. */
-  getSnapshot = (): GraphicsStatus => this.#status;
+  readonly getSnapshot = (): GraphicsStatus => this.#status;
 
   /** Applies `event` and tells the subscribers if the status changed. */
   dispatch(event: GraphicsEvent): void {
@@ -435,7 +440,7 @@ export function feedGraphicsStatus(
     store.dispatch({ kind: "gpu-process-gone", count });
   });
   if (graphics.launchMode !== "safe") {
-    requestAdapterOutcome(gpu)
+    void requestAdapterOutcome(gpu)
       .then((outcome): void => {
         if (!ended) {
           store.dispatch({ kind: "adapter-outcome", outcome });

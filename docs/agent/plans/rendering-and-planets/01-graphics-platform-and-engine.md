@@ -1684,3 +1684,51 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   - By hand, pending: `kill -9` of the GPU process three times within a minute on a built client
     relaunches once into safe mode, whose adapter request is null and whose consoles work; a fourth
     crash does not relaunch.
+- **Deviations in T3, as built.**
+  - `StyleAvailability` is an `interface` (object shapes are interfaces under the TypeScript rules).
+  - `test/fakeGpu.ts` also exports `INTEL_UHD_620_INFO` and `SWIFTSHADER_INFO` (their subgroup sizes
+    are illustrative, not probed); `FakeGpu.requests` records each `requestAdapter`'s options;
+    `FakeAdapter` takes `maxTextureDimension2D` in place of a limits object, and its
+    `requestDevice` rejects a required feature the adapter lacks; every `FakeDevice` member not
+    faked throws, naming itself.
+- **Deviations in T4, as built.**
+  - `GraphicsStatus` gains `gpuTiming`, the preload's flag, from which the reducer derives `timer`
+    when an adapter answers; R12 may read it. `initialGraphicsStatus(launchMode, gpuTiming)` builds
+    the start (`safe-mode` in a safe launch, else `acquiring`; `timer` `absent`). The rounding
+    record's key type is `ProbedTargetFormat`.
+  - `GraphicsEvent` is `adapter-outcome`, `device-lost`, `device-restored` (carrying the fresh vetted
+    outcome), `adapter-withdrawn`, `gpu-process-gone` and `target-rounding` (T8.j's probe result).
+    `safe-mode` and `disabled` are final for the launch: later outcomes and restores leave them, while
+    losses and crashes still count. The disabling loss clears `fault`, since the `disabled` statement
+    replaces it; `gpuProcessCrashes` keeps the highest count reported.
+  - Precedence of the annunciation: the safe or disabled statement, then a current fault, then the
+    adapter's condition. `graphicsModeAnnunciation` gives the first tier alone (T5.b's banner); the
+    words are the one constant `GRAPHICS_WORDS`, and the result type is `GraphicsAnnunciation`.
+  - `feedGraphicsStatus(store, graphics, gpu)` subscribes to the crash reports and makes the first
+    `requestAdapterOutcome`, so that the `LINK` panel knows the adapter before any view loads the
+    engine; not in safe mode (Design note 5); a rejected request reads as `no-adapter`. The vetted
+    adapter is not kept: `loadRenderEngine` requests its own (Design note 7).
+  - `useGraphicsStatus()` reads the store from `GraphicsStatusContext` and throws outside a
+    provider; `GraphicsStatusProvider` (`view/engine/GraphicsStatusProvider.tsx`) owns the one store
+    and its feed, and `App` mounts it. `navigatorGpu()` narrows `navigator.gpu` from `unknown`, since
+    `lib.dom` types it as always present. The store has a `listenerCount` for tests.
+  - `capabilities`, and so `timer`, come from the adapter's summary. They equal the device's unless
+    the harness withholds a feature; T8 should dispatch the device-read capabilities with the
+    engine's first creation and each `device-restored`, so that a withheld feature reads as absent
+    in the status too (Design note 7).
+  - Open, for the owner or R02: a `GRAPHICS PROCESS RESTARTED` fault clears only on
+    `device-restored`, so until a view owns a device (R02), or under `no-adapter`, one GPU-process
+    crash leaves the fault standing on the `LINK` panel for the rest of the launch. Candidates: keep
+    it for the launch, clear it on the next successful adapter request, or clear it after a set time.
+- **Deviations in T5, as built.**
+  - The `Features` row lists the wanted features present by their WebGPU names, comma-separated, or
+    `NONE`; `Styles` reads `WIREFRAME, PHOTOREALISTIC`, `WIREFRAME`, `NONE` (no views: no WebGPU, no
+    adapter, safe or disabled) or the em dash while acquiring. `WIREFRAME` and `PHOTOREALISTIC` are
+    used here before R02's view class names them; T5.c lists them for the owner. `GPU Timer` is the
+    em dash until an adapter answers. `Adapter` is `vendor · architecture` as the adapter reports
+    them (lower case, e.g. `intel · gen-9`).
+  - The header banner is its own component, `GraphicsModeBanner`, in `ConsoleFrame`'s status area
+    before the clock, an `output` labelled `Graphics mode` in `--text` inside a `--line` rule
+    (`.console__banner`); `ConsoleFrame` now needs a `GraphicsStatusContext` provider above it.
+  - By eye, pending: the `GRAPHICS` panel in each condition and the header banner in safe mode on
+    `just client`, with the store driven from the devtools console, beside the guide's banner rule.
