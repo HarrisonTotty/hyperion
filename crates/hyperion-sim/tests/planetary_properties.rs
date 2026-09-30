@@ -582,6 +582,7 @@ mod satellites {
     //! hosts of layer C cells near the solar circle (P14.T22.b, as ruling 83.8 amends it).
 
     use hyperion_sim::Seed;
+    use hyperion_sim::galaxy::Galaxy;
     use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
     use hyperion_sim::id::Layer;
     use hyperion_sim::orbit::KeplerElements;
@@ -841,32 +842,37 @@ mod satellites {
     pub(super) fn check_all(seed: Seed, count: usize) -> Counts {
         let galaxy = galaxy(seed);
         let plan = plan(&galaxy, count);
-        // The cells are shared out among threads, each counting its own; the checks are per
-        // system and the counts are summed, so the result is the same on any number of threads.
-        // At most four, the slots `.config/nextest.toml` gives the slow run.
+        check_shares(&galaxy, &plan)
+    }
+
+    /// Checks the systems of the `k`th of `shares` shares of `plan`, every `shares`th cell.
+    fn check_share(galaxy: &Galaxy, plan: &[(CellKey, usize)], k: usize, shares: usize) -> Counts {
+        let mut counts = Counts::default();
+        let mut records: Vec<SystemRecord> = Vec::new();
+        for &(key, take) in plan.iter().skip(k).step_by(shares) {
+            generate_cell(galaxy, key, &mut records);
+            for record in records.iter().take(take) {
+                let ctx = SystemContext::from_record(galaxy, record);
+                let system = generate(galaxy.seed(), &ctx);
+                for found in system.satellites() {
+                    for t in window() {
+                        check(&ctx, &system, found, t, &mut counts);
+                    }
+                }
+            }
+        }
+        counts
+    }
+
+    /// The cells are shared out among threads, each counting its own; the checks are per system
+    /// and the counts are summed, so the result is the same on any number of threads. At most
+    /// four, the slots `.config/nextest.toml` gives the slow run.
+    #[cfg(not(target_family = "wasm"))]
+    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)]) -> Counts {
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(4));
-        let (galaxy, plan) = (&galaxy, &plan);
         std::thread::scope(|scope| {
             let workers: Vec<_> = (0..threads)
-                .map(|k| {
-                    scope.spawn(move || {
-                        let mut counts = Counts::default();
-                        let mut records: Vec<SystemRecord> = Vec::new();
-                        for &(key, take) in plan.iter().skip(k).step_by(threads) {
-                            generate_cell(galaxy, key, &mut records);
-                            for record in records.iter().take(take) {
-                                let ctx = SystemContext::from_record(galaxy, record);
-                                let system = generate(galaxy.seed(), &ctx);
-                                for found in system.satellites() {
-                                    for t in window() {
-                                        check(&ctx, &system, found, t, &mut counts);
-                                    }
-                                }
-                            }
-                        }
-                        counts
-                    })
-                })
+                .map(|k| scope.spawn(move || check_share(galaxy, plan, k, threads)))
                 .collect();
             workers.into_iter().fold(Counts::default(), |sum, worker| {
                 let part = worker.join().expect("a worker's checks hold");
@@ -878,6 +884,12 @@ mod satellites {
                 }
             })
         })
+    }
+
+    /// wasm32-wasip1 has no threads, so the whole plan is one share on this thread.
+    #[cfg(target_family = "wasm")]
+    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)]) -> Counts {
+        check_share(galaxy, plan, 0, 1)
     }
 
     /// The Solar-like golden system of `planetary_golden` (P14.T32), in its own universe.

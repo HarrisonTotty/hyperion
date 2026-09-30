@@ -1243,6 +1243,12 @@ The designation format and the text forms are not part of the generator version.
   (FMA contraction, platform code paths); the goldens' portability across architectures is
   argued, not tested. Acceptance that other plans tie to "both CI architectures" means x86-64
   `just ci` plus `just test-wasm` run by hand (as ruling 146.5 already set for P10.T2.c).
+- **wasm: not pursued this round (2026-09-30, at v15).** At b56395b `just test-wasm` failed: a
+  `catch_unwind` test aborted the sim's lib tests, three test files and one doctest spawned threads,
+  and a test's quantile helper overflowed a 32-bit `usize` (in the test, not in generation). All of
+  these are fixed. The fast pass, the lib's slow tests and the slow tests of `binary_classes` through
+  `galaxy_potential` then passed under wasmtime, all goldens bit for bit. The later slow binaries,
+  from `galaxy_sweeps` on through the testkit's, were not run and still need a verdict.
 - **Statistical thresholds.** α = 10⁻³ over a few dozen fixed-seed tests gives a few per cent chance
   that some seed needs changing at the first run. Design note 28 says how that is handled without
   weakening a test.

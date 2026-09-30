@@ -67,8 +67,13 @@ fn placed(mass: f64, a_au: f64, rank: f64) -> PlacedBody {
 }
 
 /// The value at quantile `ppm` parts per million of the sorted `values`, the nearest rank.
-fn quantile(values: &[f64], ppm: usize) -> f64 {
-    values[((values.len() - 1) * ppm + 500_000) / 1_000_000]
+///
+/// The rank is worked in `u64`: the product of some 35,000 values and a ppm passes `u32::MAX`, a
+/// 32-bit `usize`'s bound on wasm32.
+fn quantile(values: &[f64], ppm: u32) -> f64 {
+    let last = u64::try_from(values.len() - 1).unwrap();
+    let rank = (last * u64::from(ppm) + 500_000) / 1_000_000;
+    values[usize::try_from(rank).unwrap()]
 }
 
 #[test]

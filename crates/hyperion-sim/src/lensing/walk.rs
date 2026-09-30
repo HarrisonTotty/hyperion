@@ -846,6 +846,14 @@ impl LensCandidateChunk {
 /// let query = LensQuery::builder(LensSightline::new(sun, source.id()), window).build()?;
 /// let plan = LensWalkPlan::new(&galaxy, &query)?;
 /// let quarter = plan.cells().len().div_ceil(4);
+/// # // wasm32-wasip1 has no threads: there the quarters are walked in turn on this one.
+/// # #[cfg(target_family = "wasm")]
+/// # let chunks: Vec<_> = plan
+/// #     .cells()
+/// #     .chunks(quarter)
+/// #     .map(|cells| plan.walk(&galaxy, &mut NoCache::new(), cells))
+/// #     .collect();
+/// # #[cfg(not(target_family = "wasm"))]
 /// let chunks = std::thread::scope(|scope| {
 ///     let handles: Vec<_> = plan
 ///         .cells()

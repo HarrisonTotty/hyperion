@@ -92,6 +92,7 @@ fn lensing_optical_depth_towards_the_bulge() {
         (lenses, cells)
     };
     // Four threads of a quarter each; the sums are integers, so their order does not matter.
+    #[cfg(not(target_family = "wasm"))]
     let (lenses, cells) = std::thread::scope(|scope| {
         let handles: Vec<_> = picked
             .chunks(SIGHTLINES / 4)
@@ -102,6 +103,9 @@ fn lensing_optical_depth_towards_the_bulge() {
             .map(|h| h.join().unwrap())
             .fold((0, 0), |(l, c), (dl, dc)| (l + dl, c + dc))
     });
+    // wasm32-wasip1 has no threads, so all of them on this one.
+    #[cfg(target_family = "wasm")]
+    let (lenses, cells) = count(&picked);
     let tau = f64::from(u32::try_from(lenses).unwrap())
         / (f64::from(u32::try_from(SIGHTLINES).unwrap()) * REACH * REACH);
     // The figure the plan records (P12.T4.b as built).

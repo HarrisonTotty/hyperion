@@ -154,40 +154,63 @@ fn classes_of(timeline: &BinaryTimeline) -> Vec<BinaryClass> {
         .collect()
 }
 
+/// `each` run on every one of `jobs`, which are shared out among threads, every `threads`th to a
+/// thread, each collecting into a `C` of its own; the collections come back in share order. Every
+/// caller only unions, counts or sorts them, so the result is the same on any number of threads.
+/// On wasm32-wasip1, which has no threads, the jobs are one share on this thread.
+fn shared_out<J: Sync, C: Default + Send>(jobs: &[J], each: impl Fn(&J, &mut C) + Sync) -> Vec<C> {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+        let each = &each;
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..threads)
+                .map(|k| {
+                    scope.spawn(move || {
+                        let mut found = C::default();
+                        for job in jobs.iter().skip(k).step_by(threads) {
+                            each(job, &mut found);
+                        }
+                        found
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|w| w.join().expect("a worker finishes"))
+                .collect()
+        })
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        let mut found = C::default();
+        for job in jobs {
+            each(job, &mut found);
+        }
+        vec![found]
+    }
+}
+
 #[test]
 #[ignore = "slow: 360,000 prior-sampled binaries, the interacting ones run through the engine"]
 fn every_class_is_reached_by_prior_sampled_binaries_of_mixed_populations() {
-    let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
     let jobs: Vec<(usize, u64)> = LAYERS
         .iter()
         .enumerate()
         .flat_map(|(band, &(_, _, n))| (0..n).map(move |i| (band, i)))
         .collect();
-    let jobs = &jobs;
-    // The pairs are shared out among threads; each collects the classes it sees, and the union is
-    // the same on any number of threads.
-    let reached: BTreeSet<BinaryClass> = std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..threads)
-            .map(|k| {
-                scope.spawn(move || {
-                    let mut seen = BTreeSet::new();
-                    for &(band, index) in jobs.iter().skip(k).step_by(threads) {
-                        let (lo, hi, _) = LAYERS[band];
-                        let input = prior_pair(band, index, (lo, hi));
-                        if !can_interact(&input, AGE_OF_UNIVERSE) {
-                            continue;
-                        }
-                        seen.extend(classes_of(&evolve(&input, AGE_OF_UNIVERSE)));
-                    }
-                    seen
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|w| w.join().expect("a worker finishes"))
-            .collect()
-    });
+    // Each share collects the classes it sees; the union is the same however they are shared.
+    let reached: BTreeSet<BinaryClass> =
+        shared_out(&jobs, |&(band, index), seen: &mut BTreeSet<BinaryClass>| {
+            let (lo, hi, _) = LAYERS[band];
+            let input = prior_pair(band, index, (lo, hi));
+            if can_interact(&input, AGE_OF_UNIVERSE) {
+                seen.extend(classes_of(&evolve(&input, AGE_OF_UNIVERSE)));
+            }
+        })
+        .into_iter()
+        .flatten()
+        .collect();
     let missing: Vec<BinaryClass> = BinaryClass::ALL
         .into_iter()
         .filter(|class| !reached.contains(class))
@@ -243,30 +266,18 @@ fn two_neutron_stars(timeline: &BinaryTimeline) -> Option<TwoNeutronStars> {
 fn layer_e_prior_pairs_leave_bound_double_neutron_stars_in_the_window() {
     const BAND: usize = 4;
     let (lo, hi, _) = LAYERS[BAND];
-    let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
-    // Each thread collects its share of the pairs; the totals are the same on any number of
-    // threads.
-    let outcomes: Vec<TwoNeutronStars> = std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..threads)
-            .map(|k| {
-                scope.spawn(move || {
-                    let mut found = Vec::new();
-                    for index in (0..DNS_PAIRS).skip(k).step_by(threads) {
-                        let input = prior_pair(BAND, index, (lo, hi));
-                        if !can_interact(&input, AGE_OF_UNIVERSE) {
-                            continue;
-                        }
-                        found.extend(two_neutron_stars(&evolve(&input, AGE_OF_UNIVERSE)));
-                    }
-                    found
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|w| w.join().expect("a worker finishes"))
-            .collect()
-    });
+    let pairs: Vec<u64> = (0..DNS_PAIRS).collect();
+    // Each share collects its pairs' outcomes; the totals are the same however they are shared.
+    let outcomes: Vec<TwoNeutronStars> =
+        shared_out(&pairs, |&index, found: &mut Vec<TwoNeutronStars>| {
+            let input = prior_pair(BAND, index, (lo, hi));
+            if can_interact(&input, AGE_OF_UNIVERSE) {
+                found.extend(two_neutron_stars(&evolve(&input, AGE_OF_UNIVERSE)));
+            }
+        })
+        .into_iter()
+        .flatten()
+        .collect();
     let bound: Vec<(f64, bool)> = outcomes
         .iter()
         .filter_map(|o| match *o {
@@ -387,34 +398,20 @@ fn quartiles(values: &mut [f64]) -> [f64; 3] {
 #[test]
 #[ignore = "slow: 22,000 layer-D and layer-E prior pairs, the interacting ones run through the engine"]
 fn pulsars_recycled_beside_heavy_companions_are_mildly_recycled() {
-    let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
     let jobs: Vec<(usize, u64)> = (0..LAYERS[3].2)
         .map(|i| (3, i))
         .chain((0..DNS_PAIRS).map(|i| (4, i)))
         .collect();
-    let jobs = &jobs;
-    let found: Vec<Recycled> = std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..threads)
-            .map(|k| {
-                scope.spawn(move || {
-                    let mut found = Vec::new();
-                    for &(band, index) in jobs.iter().skip(k).step_by(threads) {
-                        let (lo, hi, _) = LAYERS[band];
-                        let input = prior_pair(band, index, (lo, hi));
-                        if !can_interact(&input, AGE_OF_UNIVERSE) {
-                            continue;
-                        }
-                        found.extend(recycled_pulsars(&evolve(&input, AGE_OF_UNIVERSE)));
-                    }
-                    found
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|w| w.join().expect("a worker finishes"))
-            .collect()
-    });
+    let found: Vec<Recycled> = shared_out(&jobs, |&(band, index), found: &mut Vec<Recycled>| {
+        let (lo, hi, _) = LAYERS[band];
+        let input = prior_pair(band, index, (lo, hi));
+        if can_interact(&input, AGE_OF_UNIVERSE) {
+            found.extend(recycled_pulsars(&evolve(&input, AGE_OF_UNIVERSE)));
+        }
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     let stats = |pick: &dyn Fn(Companion) -> bool| {
         let set: Vec<&Recycled> = found.iter().filter(|r| pick(r.companion)).collect();
         let mut fields: Vec<f64> = set.iter().map(|r| r.field).collect();

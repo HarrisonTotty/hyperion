@@ -298,23 +298,42 @@ mod tests {
         let _ = WindowCaps::at_floor(KelvinPerCm3::new(30.0));
     }
 
-    #[test]
-    fn cut_ends_a_window_at_its_cap() {
+    /// A Field window of mid-disc gas, and caps whose bubble cap of 10⁵ yr it exceeds.
+    fn window_and_short_bubble_cap() -> (ShellWindow, WindowCaps) {
         let caps = WindowCaps::from_gas_params(&GasParams::milky_way_like());
         let site = SiteGas::uniform(HydrogenPerCm3::new(0.03), KelvinPerCm3::new(400.0)).unwrap();
         let window = shell_window(&site, ExplosionEnergy::MEDIAN, Dex::new(0.0));
-        let cut = caps.cut(ShellEnvironment::Field, window);
-        assert_eq!(cut, window);
         let bubble = WindowCaps {
             bubble: Years::new(1e5),
             ..caps
         };
-        let cut = std::panic::catch_unwind(|| bubble.cut(ShellEnvironment::Bubble, window));
-        if cfg!(debug_assertions) {
-            assert!(cut.is_err());
-        } else {
-            assert_eq!(cut.unwrap().duration(), Years::new(1e5));
-        }
+        (window, bubble)
+    }
+
+    #[test]
+    fn cut_leaves_a_window_within_its_cap() {
+        let (window, caps) = window_and_short_bubble_cap();
+        assert_eq!(caps.cut(ShellEnvironment::Field, window), window);
+    }
+
+    /// Release builds end an over-long window at its cap. Debug builds panic instead, which
+    /// `an_over_long_window_panics_in_debug` checks: a `should_panic` test rather than
+    /// `catch_unwind`, which aborts the whole test binary on wasm32-wasip1 (panic = abort).
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn cut_ends_an_over_long_window_at_its_cap() {
+        let (window, caps) = window_and_short_bubble_cap();
+        let cut = caps.cut(ShellEnvironment::Bubble, window);
+        assert_eq!(cut.duration(), Years::new(1e5));
+    }
+
+    /// Skipped, not failed, where panics abort (wasm32-wasip1); the other CI architectures run it.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "exceeds its cap of 100000 yr")]
+    fn an_over_long_window_panics_in_debug() {
+        let (window, caps) = window_and_short_bubble_cap();
+        let _ = caps.cut(ShellEnvironment::Bubble, window);
     }
 
     /// Slow, P09.T15.b: no window of 10⁶ random sites in a galaxy exceeds its cap, for random
