@@ -43,8 +43,8 @@ const TWO_POW_53: f64 = 9_007_199_254_740_992.0;
 /// duty cycle that grows with age, and the same mark answers at every age.
 ///
 /// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::rng::{ObjectKey, Stream, Threshold, tags};
+/// use hyperion_base::Seed;
+/// use hyperion_base::rng::{ObjectKey, Stream, Threshold, tags};
 ///
 /// let mut stream = Stream::open(Seed::new(5), tags::SELFTEST_STREAM, ObjectKey::galaxy());
 /// let mark = stream.mark();
@@ -110,8 +110,8 @@ impl Mark {
     /// otherwise takes a component with odds 1 : 6 : 2.
     ///
     /// ```
-    /// use hyperion_sim::Seed;
-    /// use hyperion_sim::rng::{ObjectKey, Stream, Thresholds, tags};
+    /// use hyperion_base::Seed;
+    /// use hyperion_base::rng::{ObjectKey, Stream, Thresholds, tags};
     ///
     /// let densities = [0.25, 1.5, 0.5];
     /// let mut stream = Stream::open(Seed::new(8), tags::SELFTEST_STREAM, ObjectKey::galaxy());
@@ -184,8 +184,8 @@ impl Threshold {
     /// Two stars in five have a companion:
     ///
     /// ```
-    /// use hyperion_sim::Seed;
-    /// use hyperion_sim::rng::{ObjectKey, Stream, Threshold, tags};
+    /// use hyperion_base::Seed;
+    /// use hyperion_base::rng::{ObjectKey, Stream, Threshold, tags};
     ///
     /// let binary = Threshold::from_probability(0.4);
     /// let mut stream = Stream::open(Seed::new(2), tags::SELFTEST_STREAM, ObjectKey::galaxy());
@@ -258,7 +258,7 @@ impl Threshold {
 /// so a pick never fails.
 ///
 /// ```
-/// use hyperion_sim::rng::{Mark, Threshold, Thresholds};
+/// use hyperion_base::rng::{Mark, Threshold, Thresholds};
 ///
 /// let integrals = [0.62, 0.3, 0.08];
 /// let segments = Thresholds::from_weights(&integrals, 0.62 + 0.3 + 0.08);
@@ -584,41 +584,5 @@ mod tests {
             }
             assert_eq!(s.position(), n + 1);
         }
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "exceeds its thinning bound")]
-    fn a_ratio_above_its_bound_panics_in_debug() {
-        let _ = Threshold::from_ratio(1.5, 1.0);
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "exceeds its thinning bound")]
-    fn weights_above_their_bound_panic_in_debug() {
-        let _ = Thresholds::from_weights(&[0.5, 0.7], 1.0);
-    }
-
-    /// Mark 0 picks class 0 at once; the total is still checked.
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "exceeds its thinning bound")]
-    fn pick_weighted_checks_the_total_after_an_early_pick() {
-        let _ = Mark::from_word(0).pick_weighted(&[0.5, 0.7], 1.0);
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "must lie in [0, 1]")]
-    fn a_probability_above_one_panics_in_debug() {
-        let _ = Threshold::from_probability(1.0 + f64::EPSILON);
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic(expected = "not a density")]
-    fn a_negative_weight_panics_in_debug() {
-        let _ = Mark::from_word(u64::MAX).pick_weighted(&[0.5, -0.1], 1.0);
     }
 }

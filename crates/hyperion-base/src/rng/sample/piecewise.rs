@@ -190,8 +190,8 @@ impl PowerSegment {
 /// from 0.01 to 150 M☉; the share of stellar systems in layer A's band:
 ///
 /// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::rng::{ObjectKey, PiecewisePowerLaw, Stream, tags};
+/// use hyperion_base::Seed;
+/// use hyperion_base::rng::{ObjectKey, PiecewisePowerLaw, Stream, tags};
 ///
 /// let kroupa = PiecewisePowerLaw::continuous(&[0.01, 0.08, 0.5, 150.0], &[0.3, 1.3, 2.3])?;
 /// let share = kroupa.integral(0.08, 0.5) / kroupa.integral(0.08, 150.0);
@@ -200,7 +200,7 @@ impl PowerSegment {
 /// let mut stream = Stream::open(Seed::new(9), tags::SELFTEST_STREAM, ObjectKey::galaxy());
 /// let mass = kroupa.truncated(0.08, 0.5)?.sample(&mut stream);
 /// assert!((0.08..=0.5).contains(&mass));
-/// # Ok::<(), hyperion_sim::rng::BuildPiecewiseError>(())
+/// # Ok::<(), hyperion_base::rng::BuildPiecewiseError>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PiecewisePowerLaw {
@@ -410,15 +410,15 @@ impl PiecewisePowerLaw {
 /// A star-formation history that rises and then declines, sampled for an age in Gyr:
 ///
 /// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::rng::{ObjectKey, PiecewiseLinear, Stream, tags};
+/// use hyperion_base::Seed;
+/// use hyperion_base::rng::{ObjectKey, PiecewiseLinear, Stream, tags};
 ///
 /// let history = PiecewiseLinear::new(&[0.0, 2.0, 13.0], &[0.2, 1.0, 0.0])?;
 /// let mut stream = Stream::open(Seed::new(4), tags::SELFTEST_STREAM, ObjectKey::galaxy());
 /// let age = history.sample(&mut stream);
 /// assert!((0.0..=13.0).contains(&age));
 /// assert!((history.cdf(2.0) - 1.2 / 6.7).abs() < 1e-12);
-/// # Ok::<(), hyperion_sim::rng::BuildPiecewiseError>(())
+/// # Ok::<(), hyperion_base::rng::BuildPiecewiseError>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PiecewiseLinear {

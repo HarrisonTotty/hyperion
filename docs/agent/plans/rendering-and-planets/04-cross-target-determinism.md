@@ -1328,6 +1328,55 @@ It reserves, so that later plans need not:
   seed did. `DetailLevelDto::Full`'s doc now names the detail seed. For the owner with T3.b: the
   UX review noted that `DETAIL SEED` sits under the readout's `DETAIL` row (the granted detail
   level), two meanings of "detail" in one readout; `TERRAIN SEED` was suggested as an alternative.
+- **Deviations in T4.a, as built.** Moved by `git mv`: `math.rs`, `units.rs` and `version.rs` from
+  `crates/hyperion-sim/src/` to `crates/hyperion-base/src/`, and `math/functions.golden` from the
+  sim's `tests/golden/` to base's (a 100% rename). `math_function_values_are_pinned` and its tables moved from the sim's `foundation_golden.rs` to
+  base's new one, whose `every_golden_file_carries_the_current_version` carries its own copy of the
+  golden walker; the sim's `FOUNDATION_GOLDENS` lost `math/functions`. The sim re-exports
+  `hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math, units, version}` at the crate root.
+  The `reason` strings of the root's, the sim's and the fitting crate's `clippy.toml` now read
+  "`hyperion_sim::math::f` (`hyperion_base::math::f`)" (Design note 3), their headers likewise.
+  `just test-wasm` gained `-p hyperion-base`, so that `math/functions` stays checked on wasip1
+  between now and T7.b (a determinism review finding). `golden_diff.py` has no test file: its two
+  cases were run by hand, the default run (base `HEAD`, before the split, so the sim's version
+  path) and `--base` at the commit before T4.a, each printing "GENERATOR_VERSION: 16 … -> 16",
+  `math/functions.golden` under "Renamed goldens (1)" and "Consistent."; a rename does not
+  silence the "version bumped but no pinned value moved" check. **Pending:** `just bench -- math`
+  before and after, since the machine was never quiet (other lanes building; load averages 5–24).
+- **Deviations in T4.b, as built.** `HexFault` and `parse_lower_hex` moved from `id/text.rs` to a
+  new private `crates/hyperion-sim/src/hex.rs` (T4.d makes it base's public `hex`); `HexFault`
+  gained `Hash` and variant docs. `RawEventKey` is in `rng/raw_event.rs`, with its three tests;
+  `EventKey` wraps it and keeps its API and, through a hand-written `Debug`, its `Debug` text
+  (`EventKey([k0, k1])`, pinned by `debug_prints_the_two_key_words`). `event.rs`'s one use of
+  `Stream::from_words` in a test became `RawEventKey::stream`. Of `stream.rs`'s tests, the
+  structured `streams_differing_in_any_one_input_share_no_word` (real cells, candidates and bodies)
+  moved to `rng/mod.rs`'s new test module; the rest now key by raw words through
+  `ObjectKey::system` and `body`, and the event-tag refusal uses a tag minted in the test. The
+  `assert_registries_disjoint` doctests use `tags::SELFTEST_STREAM` against an empty registry
+  (passing) and against itself (`compile_fail,E0080`), so they carry over to base unchanged but
+  for the crate path; two unit tests beside them. `tests/foundation_order.rs` needed no change.
+- **Deviations in T4.d, as built.** Moved by `git mv` from `crates/hyperion-sim/src/` to
+  `crates/hyperion-base/src/`: `rng/mod.rs`, `rng/stream.rs`, `rng/key.rs`, `rng/domain_tag.rs`,
+  `rng/decide.rs`, `rng/threefry.rs`, `rng/raw_event.rs`, `rng/sample/` (six files) and `hex.rs`;
+  and `rng/samplers.golden` and `rng/decisions.golden` from the sim's `tests/golden/` to base's
+  (100% renames), with `samplers_are_pinned` and `decisions_are_pinned`. New files: base's
+  `rng/tags.rs` (`selftest.stream` alone), base's `tests/panics.rs` and the sim's `rng/mod.rs`.
+  The sim's registry stays at `crates/hyperion-sim/src/rng/tags.rs`, less `selftest.stream`, which
+  it re-exports; the sim's old `rng/mod.rs` shows as the rename to base's, its Events section,
+  central-promise doctest and structured stream test going to the sim's new one, which is
+  `pub use hyperion_base::rng::*` plus `event` and `tags` (local items shadow the glob, so
+  `hyperion_sim::rng::tags` is the sim's registry). All 19 of base's `should_panic` tests, the two
+  of `math` (moved in T4.a) among them, are in `tests/panics.rs`, each with `expected`.
+  `HexFault`, now public, gained `Display`, `Error` and base's own unit tests. `DomainTag`'s docs
+  name the one exception to "only through the macro": tests that mint a tag outside every registry
+  to vary it (base's `panics.rs` and `domain_tag.rs`, the sim's `rng/mod.rs`); a source check that
+  no non-test code calls `DomainTag::registered` is not built (a determinism-review suggestion,
+  left open). The compile_fail doctests were checked by hand: with each error removed (the
+  duplicate, the upper-case and one-segment names, the doubled registry) all four compiled and
+  rustdoc failed them as "compiled successfully", so each fails for its own reason (on stable,
+  rustdoc does not check the `E0080` code). The disjointness `const` covers base's and the sim's
+  registries until T5. **Pending:** `just bench -- rng` and `-- samplers` before and after (never a
+  quiet machine), and `just test-wasm` (no wasmtime here; T7).
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so

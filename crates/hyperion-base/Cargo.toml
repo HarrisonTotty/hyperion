@@ -1,0 +1,23 @@
+[package]
+name = "hyperion-base"
+description = "HYPERION's determinism foundation beneath the sim: maths, units, random streams, the generator version."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+# The library has no benchmarks (the foundation benches stay in `hyperion-sim`), and libtest's
+# harness rejects Criterion's arguments.
+bench = false
+
+[dependencies]
+# The only runtime dependency, of this crate and so of the sim and the surface crate above it.
+# See `hyperion_base::math`.
+libm.workspace = true
+
+[dev-dependencies]
+hyperion-testkit.workspace = true
+
+[lints]
+workspace = true

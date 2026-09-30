@@ -70,8 +70,8 @@ impl Error for BuildPowerLawError {}
 /// The high-mass end of Kroupa's (2001) initial mass function, α = 2.3 from 8 to 150 M☉:
 ///
 /// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::rng::{ObjectKey, PowerLaw, Stream, tags};
+/// use hyperion_base::Seed;
+/// use hyperion_base::rng::{ObjectKey, PowerLaw, Stream, tags};
 ///
 /// let massive = PowerLaw::new(2.3, 8.0, 150.0)?;
 /// let mut stream = Stream::open(Seed::new(5), tags::SELFTEST_STREAM, ObjectKey::galaxy());
@@ -80,7 +80,7 @@ impl Error for BuildPowerLawError {}
 /// // Half of such stars lie below the median.
 /// let median = massive.quantile(0.5);
 /// assert!((massive.cdf(median) - 0.5).abs() < 1e-12);
-/// # Ok::<(), hyperion_sim::rng::BuildPowerLawError>(())
+/// # Ok::<(), hyperion_base::rng::BuildPowerLawError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PowerLaw {

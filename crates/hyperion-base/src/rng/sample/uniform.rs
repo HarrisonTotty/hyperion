@@ -122,8 +122,8 @@ impl Stream {
     /// ```
     /// use std::num::NonZeroU64;
     ///
-    /// use hyperion_sim::Seed;
-    /// use hyperion_sim::rng::{ObjectKey, Stream, tags};
+    /// use hyperion_base::Seed;
+    /// use hyperion_base::rng::{ObjectKey, Stream, tags};
     ///
     /// let mut stream = Stream::open(Seed::new(1), tags::SELFTEST_STREAM, ObjectKey::galaxy());
     /// let six = NonZeroU64::new(6).expect("6 is not zero");
