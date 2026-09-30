@@ -1318,3 +1318,37 @@ null)` applies a source's report. An operator's `INHIBIT` also takes over a syst
   spectral colours replace it. `NOTICE` at the root is new, holding the Apache-2.0 attribution.
   A science check confirmed every figure; the Allen section number (§15) is as the plan cites it
   and was not seen at source.
+- **Deviations in R02.T11, as built.** `HullOutline` also has `name` (the view's label), `eyePointM`
+  and `lengthM` (which the camera's `OwnShip` reads), and is built by `hullOutline()`, which refuses
+  a non-finite vertex or an index that is not an integer within the vertices. `TEST_HULL` (in
+  `view/scene/hull.ts`) is a 20 m wedge with its eye point above the forward section, outside the
+  faces as an open cockpit's is, so that the hull's occluder never encloses the seat camera; its
+  1 m plate is a windscreen `TEST_PLATE_DISTANCE_M` = 1 m forward of the eye, facing it. In
+  `view/scene/model.ts`: `ViewBody` also carries `kind` (`star`, `planet`, `moon`, for Design note
+  13's symbol), `designation` and `centreM` (system-frame metres); `ViewRing` carries its plane's
+  `normal`, so that a ring does not hang on a rotation that may be `null`; `ViewOrbit` is
+  `{ body, parent, orbit: KeplerOrbit }`; `ViewCraft` has `designation`, `pose: CraftPose
+{ position, attitude }`, `predictedPath` and `velocityMPerS` (the own ship's flight path marker,
+  T12.c); `ViewStar` has `tEffK` for its colour (T10). `ViewScene` also has `system`,
+  `barycentre`, `tidalRadiusM` and `defaultPose`, and its provenance is a union carrying a kept
+  scene's name (`{ kind: "kept", name }` | `{ kind: "server" }`) in place of a separate `name`.
+  `sceneOrigins(scene)` gives its `CameraOrigins` and `cameraSceneOf(scene)` T9's `CameraScene`
+  (frame bodies: planets and moons with a Hill radius; targets: bodies, then craft but the own
+  ship; it refuses an own ship not among the craft). The kept scenes are `KeptScene { name,
+durationS, sceneAt(tS), cameraAt(tS) }` from `view/scenes/kept.ts` (not in the task's files),
+  which also holds the kept system's ID, `keptBody`, `keptTime`, the barycentre (Design note 19's
+  Sun-like point) and the tidal radius (2.7 × 10⁵ au). The precision scene's ship is some 2.4 au
+  out; its bodies have no Hill radius, so everything is in the system frame; the seat camera
+  sways by up to 0.3 m and turns by up to 6° in yaw and 3° in pitch; the smoothness test emulates
+  the GPU's `f32` path (narrowing, the rotation-only matrix, the projection) at 60 Hz, and the
+  separability test is taken at the path's start. "The plate's hidden edges are hidden by its
+  faces" is read as: from the seat, sampled points of every other hull edge are hidden by the
+  plate's faces, pushed back by either end of Design note 5's bias (7.6 × 10⁻⁶ and 1.5 × 10⁻⁵ of
+  the distance), exactly where an analytic test puts them behind the plate, and the plate's own
+  edges stay in front of their biased faces. The frame-change scene's planet has Earth's radius,
+  Hill radius, sidereal rate and a 23.44° tilt; its moon the Moon's Hill radius; the own ship
+  flies three corners (ratios 1.2, 0.34 of the moon's, 1.35) and the scripted free camera the same
+  path displaced by (0, −3 × 10⁷, 1.5 × 10⁷) m; the lander stands upright (dorsal along the local
+  vertical, nose east). The fixtures add `aBody`, `aViewCraft`, `aViewStar` and `aViewScene`;
+  `aStarRow` is left to R02.T16, which uses it. T11.c's own tests (the paths cross both spheres
+  both ways, the lander is upright) are in `view/scenes/frameChange.test.ts`; T8.b's run on it.
