@@ -60,6 +60,14 @@ pub use universe::{
 /// an optional field does not bump it, since an older server answers the new kind with
 /// `unsupported`; removing or changing a message, a field or a string does. Version 2 added the
 /// request convention, which a version 1 server cannot serve at all.
+///
+/// The first `notification` and the first binary frames are additions of the same kind and leave
+/// it at 2 (the rendering brainstorm's open question 21, ruled in plan R03's Design note 12): the
+/// server sends a notification only on a subscription the client opened, and binary frames only in
+/// answer to a request whose kind asks for bulk, so a version 2 client that sends neither receives
+/// neither, and a newer client asking an older server gets `unsupported`. The ruling holds only
+/// while neither is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
+/// `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` pins it.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[cfg(test)]

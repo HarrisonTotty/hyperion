@@ -570,6 +570,20 @@ and, only when resolved, `host`, `designation`, `light_age_yr`, `apparent_positi
 Files: `crates/hyperion-protocol/src/alerts.rs`, server handlers, generated bindings,
 `packages/protocol/src/index.ts` (`NotificationOf`, a subscription helper on `RequestClient`).
 
+Note (drafted by rendering plan R03's R03.T1 for this plan's owner): the scene subscription needs
+the envelope first, so R03.T5 builds `subscribe`, `unsubscribe`, `Subscribed`,
+`SubscriptionTopic`, `SubscriptionState`, `ServerMessage::Notification`, `NotificationBody` and the
+unknown-subscription refusal to this task's design, in `crates/hyperion-protocol/src/envelope.rs`
+beside `ServerMessage`, with `Scene` as the only topic, and `TestClient::next_notification()` (in
+`crates/hyperion-server/tests/common/mod.rs`), `NotificationOf<T>` and the subscription helper on
+`RequestClient` (R03.T5.c).
+This task then adds only the `Alerts` topic, state and notification body, `alerts_observer` and
+`alerts_acknowledge`, and `alerts.rs` holds only the `Alerts` payloads. One departure (R03 Design
+note 1): the subscription helper lives on `RequestClient` itself
+(`packages/protocol/src/subscriptions.ts`), so `handleServerMessage` routes a `notification` to its
+subscription and consumes it (returns `true`), dropping one for an unknown subscription, rather than
+leaving it unconsumed for a helper outside.
+
 Tests: wire forms; an integration test subscribes near a pinned recurrent nova, advances the
 observer's time past an arrival and receives one contact at `bearing`, then moves the observer close
 and receives the same `contact` at `resolved` with the pinned host; a JSON-level assertion that no
