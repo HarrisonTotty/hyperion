@@ -25,8 +25,9 @@
 //!
 //! Every function here is `#[inline]` and, for the wrappers, exactly `libm`'s result. The
 //! hand-written functions are [`powi`], [`powf_positive`] (`libm`'s `exp` of `libm`'s `log`, for
-//! the stellar formulae alone) and [`normal_quantile`], which uses only the wrappers, the four
-//! operators and `sqrt`.
+//! the stellar formulae alone), [`normal_quantile`], which uses only the wrappers, the four
+//! operators and `sqrt`, and [`two_product`], Dekker's exact product error, which is bit for bit
+//! [`mul_add`]'s and falls back to it outside the range where Dekker's is exact.
 
 /// The sine of `x` radians.
 #[inline]
@@ -329,6 +330,81 @@ pub fn mul_add(x: f64, a: f64, b: f64) -> f64 {
     libm::fma(x, a, b)
 }
 
+/// Veltkamp's splitting constant for binary64, 2²⁷ + 1.
+const VELTKAMP_SPLIT: f64 = 134_217_729.0;
+
+/// 2⁹⁹⁵: below it, a factor's split cannot overflow (`VELTKAMP_SPLIT × a` stays under 2¹⁰²³).
+const TWO_PRODUCT_FACTOR_MAX: f64 = f64::from_bits((1023 + 995) << 52);
+
+/// 2⁻⁹⁶⁸: from here up, a product of normal factors has `e_a + e_b ≥ −970`, where no partial
+/// product of the split factors underflows and the error is representable exactly.
+const TWO_PRODUCT_PRODUCT_MIN: f64 = f64::from_bits((1023 - 968) << 52);
+
+/// 2¹⁰²¹: below it, the product of the split factors' high parts cannot overflow.
+const TWO_PRODUCT_PRODUCT_MAX: f64 = f64::from_bits((1023 + 1021) << 52);
+
+/// `a × b` rounded, and the exact error of that rounding: bit for bit
+/// `(a × b, mul_add(a, b, −(a × b)))` for every pair of inputs, with the error found by Dekker's
+/// product where that is exact, which is ten times cheaper than [`mul_add`]'s software `fma`.
+///
+/// Dekker's product (Dekker 1971, Numer. Math. 18, 224) splits each factor by Veltkamp's method
+/// into halves of 26 bits, whose four partial products are exact, and sums them against the
+/// rounded product in a fixed order. The error it returns is the exact error whenever the factors
+/// are normal, their split cannot overflow (|a|, |b| < 2⁹⁹⁵), and the product lies within
+/// [2⁻⁹⁶⁸, 2¹⁰²¹) in magnitude, so that no partial product underflows (`e_a + e_b ≥ e_min + p −
+/// 1 = −970`; Muller et al., Handbook of Floating-Point Arithmetic, 2nd ed., §4.4.2). The
+/// correctly rounded fused multiply-add returns that same exact error, so the two agree bit for bit
+/// there, signed zeros included: an exact product gives +0 from both. A zero factor with a finite
+/// other gives +0 too, as the `fma` does. Everything else (subnormal factors, a product at the
+/// edges of the range, infinities and NaN) falls back to [`mul_add`].
+///
+/// Only IEEE multiplications and subtractions are used, which are exact on every target, and Rust
+/// never contracts them into a fused operation, so this is as reproducible as [`mul_add`] (ruling
+/// 143.4; the fallback's agreement is pinned by a test over the whole exponent range).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::math::{mul_add, two_product};
+///
+/// let (product, error) = two_product(0.1, 1e9);
+/// assert_eq!(product, 0.1 * 1e9);
+/// assert_eq!(error, mul_add(0.1, 1e9, -product));
+/// assert_ne!(error, 0.0);
+/// // An exact product has no error, and a zero factor gives +0 as the fused multiply-add does.
+/// assert_eq!(two_product(3.0, 0.5), (1.5, 0.0));
+/// assert!(two_product(-0.0, 5.0).1.is_sign_positive());
+/// ```
+#[inline]
+#[must_use]
+pub fn two_product(a: f64, b: f64) -> (f64, f64) {
+    let product = a * b;
+    let (size_a, size_b) = (a.abs(), b.abs());
+    if (f64::MIN_POSITIVE..TWO_PRODUCT_FACTOR_MAX).contains(&size_a)
+        && (f64::MIN_POSITIVE..TWO_PRODUCT_FACTOR_MAX).contains(&size_b)
+        && (TWO_PRODUCT_PRODUCT_MIN..TWO_PRODUCT_PRODUCT_MAX).contains(&product.abs())
+    {
+        let (a_high, a_low) = veltkamp_split(a);
+        let (b_high, b_low) = veltkamp_split(b);
+        let error =
+            (((a_high * b_high - product) + a_high * b_low) + a_low * b_high) + a_low * b_low;
+        (product, error)
+    } else if (size_a == 0.0 && size_b.is_finite()) || (size_b == 0.0 && size_a.is_finite()) {
+        // The exact product is the rounded one, a signed zero, and x + (−x) is +0.
+        (product, 0.0)
+    } else {
+        (product, mul_add(a, b, -product))
+    }
+}
+
+/// Veltkamp's split of `a` into a high half of 26 bits and the exact rest, of 26 bits and a sign.
+#[inline]
+fn veltkamp_split(a: f64) -> (f64, f64) {
+    let scaled = VELTKAMP_SPLIT * a;
+    let high = scaled - (scaled - a);
+    (high, a - high)
+}
+
 /// `x` raised to the integer power `n`, by exponentiation by squaring in a fixed order.
 ///
 /// The bits of `|n|` are consumed from the lowest upwards, the accumulator is multiplied by the
@@ -615,6 +691,117 @@ mod tests {
             )]
             let host = x.mul_add(a, b);
             assert_same_bits(mul_add(x, a, b), host);
+        }
+    }
+
+    /// `two_product`'s error against the `fma` it stands in for, bit for bit.
+    fn assert_two_product_is_the_fmas(a: f64, b: f64) {
+        let (product, error) = two_product(a, b);
+        let fused = libm::fma(a, b, -(a * b));
+        if product.is_nan() {
+            assert!(error.is_nan() && fused.is_nan(), "{a:e} × {b:e}");
+            return;
+        }
+        assert_same_bits(product, a * b);
+        if error.is_nan() || fused.is_nan() {
+            assert!(
+                error.is_nan() && fused.is_nan(),
+                "two_product({a:e}, {b:e}) gives {error:e}, the fma {fused:e}"
+            );
+            return;
+        }
+        assert!(
+            bits(error) == bits(fused),
+            "two_product({a:e}, {b:e}) gives {error:e} (0x{:016x}), the fma {fused:e} (0x{:016x})",
+            bits(error),
+            bits(fused)
+        );
+    }
+
+    /// Ruling 143.4: `two_product` is bit for bit `libm::fma`'s product error over the drift's
+    /// ranges (plan 12's `Drift`: velocities up to 3,000 km/s of either sign and down by seven
+    /// decades, times whole seconds up to the source horizon's 2.3 × 10⁵ years and beyond; whole
+    /// light-years times the metres in one), signed zeros included.
+    #[test]
+    fn two_product_is_the_fmas_error_over_the_drifts_ranges() {
+        let mut g = hyperion_testkit::lcg::Lcg::new(0x143_4001);
+        let metres_per_light_year = crate::units::consts::METRES_PER_LIGHT_YEAR;
+        for i in 0..200_000_u32 {
+            let decade = i32::try_from(i % 7).unwrap();
+            let v = (2.0 * g.next_f64() - 1.0) * 3.0e6 * powi(10.0, -decade);
+            let whole_seconds = (g.next_f64() * 7.3e12).floor();
+            assert_two_product_is_the_fmas(v, whole_seconds);
+            let whole = (v * whole_seconds / metres_per_light_year).floor();
+            assert_two_product_is_the_fmas(whole, metres_per_light_year);
+            // The span's sign and whole light-years of either sign.
+            assert_two_product_is_the_fmas(-v, whole_seconds);
+            assert_two_product_is_the_fmas(-whole, metres_per_light_year);
+        }
+        for v in [0.0, -0.0, 1.0, -1.0, 3.0e6, -3.0e6] {
+            for s in [0.0, -0.0, 1.0, 31_557_600.0, 7.3e12] {
+                assert_two_product_is_the_fmas(v, s);
+            }
+        }
+    }
+
+    /// Ruling 143.4: the same over the whole exponent range, subnormals, the edges of Dekker's
+    /// range, ±0, infinities and NaN: where Dekker's product is not exact the fallback is taken, so
+    /// the two agree everywhere.
+    #[test]
+    fn two_product_is_the_fmas_error_over_the_whole_exponent_range() {
+        let mut g = hyperion_testkit::lcg::Lcg::new(0x143_4002);
+        let draw = |g: &mut hyperion_testkit::lcg::Lcg| {
+            // A random significand and sign at a random binary exponent from −1,080 to 1,030, which
+            // reaches the subnormals and overflows to infinity at the top.
+            let exponent = i32::try_from(g.next_below(2_111)).unwrap() - 1_080;
+            let significand = 1.0 + g.next_f64();
+            let sign = if g.next_u64() & 1 == 0 { 1.0 } else { -1.0 };
+            let half = exponent / 2;
+            sign * significand * powi(2.0, half) * powi(2.0, exponent - half)
+        };
+        for _ in 0..200_000 {
+            let (a, b) = (draw(&mut g), draw(&mut g));
+            assert_two_product_is_the_fmas(a, b);
+        }
+        // Pairs whose product straddles the range's edges, where the fallback takes over.
+        for _ in 0..50_000 {
+            let a = draw(&mut g);
+            if a == 0.0 || !a.is_finite() {
+                continue;
+            }
+            for edge in [
+                TWO_PRODUCT_PRODUCT_MIN,
+                TWO_PRODUCT_PRODUCT_MAX,
+                f64::MIN_POSITIVE,
+                f64::MAX,
+            ] {
+                let b = edge / a * (0.5 + g.next_f64());
+                assert_two_product_is_the_fmas(a, b);
+            }
+        }
+        let specials = [
+            0.0,
+            -0.0,
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE,
+            f64::MIN_POSITIVE / 3.0,
+            5e-324,
+            f64::MAX,
+            -f64::MAX,
+            TWO_PRODUCT_FACTOR_MAX,
+            TWO_PRODUCT_FACTOR_MAX.next_down(),
+            TWO_PRODUCT_PRODUCT_MIN,
+            TWO_PRODUCT_PRODUCT_MAX,
+            1.0 + f64::EPSILON,
+            1.0 - f64::EPSILON / 2.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        for a in specials {
+            for b in specials {
+                assert_two_product_is_the_fmas(a, b);
+            }
         }
     }
 

@@ -270,10 +270,13 @@ where a name has changed by the time this plan runs only the call sites here cha
 2. **Light time in seconds from metres.** d ÷ c is computed from the displacement in metres (integer
    cells first, as plan 01 requires) and rounded to nanoseconds. At 50,000 ly an `f64` of seconds
    resolves 0.2 ms, far below anything observable.
-3. **The stated error.** `curvature_error` returns min(½ a s², 2R), with a = v_c² ÷ R from the
-   potential tables at the source's galactocentric radius R, as a length and as an angle at the
-   observer; the cap is the orbit's own size, which the quadratic passes where an orbit is short
-   against the light time. It is zero for a member in plan 09's Kepler regime, whose orbit is
+3. **The stated error.** `curvature_error` returns min(½ a Δ², |v| Δ + 2 r_apo), with Δ =
+   |t_emitted − epoch|, a = |∇Φ| ≈ v_c²(R) ÷ R and R taken at the epoch position, v the source's
+   speed and r_apo its apocentre from the energy in the spherical potential, as a length and as an
+   angle at the observer. The quadratic bounds the gap while the orbit's phase over Δ is short,
+   and the linear term bounds it after, because the orbit stays within r_apo of the centre while
+   the line leaves at |v| (ruling 143.2, which replaced the cap of 2R; where it is only an
+   estimate is recorded under Risks). It is zero for a member in plan 09's Kepler regime, whose orbit is
    followed and not neglected. It must reproduce the brainstorm's figures at Milky Way values: under
    0.5″ for a disc star from across the cube (0.53 ly at 227,000 years), up to 13″ for the nuclear
    disc (its inner edge near 100 ly, at 100 km/s, seen from a corner of the cube at 113,500 ly). It
@@ -340,7 +343,8 @@ where a name has changed by the time this plan runs only the call sites here cha
     runs from +x instead and the wire says so (`frame: "galactic_x"`).
 13. **A lens is a point mass** of the system's mass at the time the light passes it, and the lens's
     position is taken at that time, t − D_l ÷ c. The tube's radius is `max_impact` times the largest
-    Einstein radius possible on the sightline, plus `PAD_SPEED` times the window.
+    Einstein radius possible on the sightline, plus `PAD_SPEED` times the window. _As built
+    (P12.T4.b and ruling 143.3):_ a cone, padded by the local escape speed; see Risks.
 14. **X-rays are absorbed by metals, so the X-ray band reads A_V.** Plan 07's `Band` runs from U to
     radio through the Cardelli law, which stops at 0.1 µm, and plan 07 is right to leave X-rays out
     of it. X-ray transients and bursts still need a horizon. Photoelectric absorption at a few keV
@@ -395,9 +399,10 @@ to 1 m; the curvature figures of Design note 3 at Milky Way parameters, within 2
 brainstorm's figures are rounded and the potential is the model's own: 0.53 ly and under 0.5″ for a
 disc star at 26,000 ly after 227,000 years; 0.026 ly for the same star after 50,000 years; the
 maximum over the nuclear disc from a corner of the cube within 10–16″; zero for a Kepler member; and
-the cap, which never lets the error pass 2R. Acceptance:
-`cargo test -p hyperion-sim observe::retarded`, and the `retarded` bench reports tens of nanoseconds
-for drift.
+the bound, which is never above min(½ a Δ², |v| Δ + 2 r_apo) and never below the exact error of a
+circular orbit (ruling 143.2). Acceptance:
+`cargo test -p hyperion-sim observe::retarded`, and the `retarded` bench reports at most 0.7 µs
+for drift at low load, 0.5 µs from a known present position (ruling 143.4).
 
 ### P12.T2 Observed state
 
@@ -644,9 +649,10 @@ complete.
 - **Honesty:** curvature error figures match the brainstorm's; an unresolved contact leaks no host
   at the JSON level; present state is never shown in observed mode.
 - **Time:** the source-horizon sweep; dead supergiants seen alive.
-- **Benches:** `retarded` (tens of nanoseconds), `range_observed_50ly`, `alerts_interactive`
+- **Benches:** `retarded` (≤ 0.7 µs; `retarded_from` ≤ 0.5 µs; ruling 143.4), `range_observed_50ly`, `alerts_interactive`
   (galaxy-wide, all interactive classes; target under 200 ms), `awd_scan_cold` (seconds),
-  `lens_walk_26kly`.
+  `lens_walk_26kly` (cold, ≤ 15 s on one thread and ≤ 5 s wall on the pool), `lens_renew_26kly`
+  (≤ 10 ms) and `lens_walk_disc_5kly` (≤ 1 s) (ruling 143.3).
 - **By eye:** the pinned nova on the `GALAXY` display, as a bearing and then as a host.
 
 ## Generator version
@@ -737,7 +743,8 @@ r)`: the position is the observer's, and the angle is the length over the distan
     about 2.5 radians over the light's age the gap grows as v s + 2R (at 10 ly after 10⁵ years
     about 36 ly against the stated 20). It touches only sources within a few tens of light-years
     of the centre outside the Kepler regime. Built as the note says;
-    min(½ a s², `v_c` s + 2R) would bound it, for the owner's ruling.
+    min(½ a s², `v_c` s + 2R) would bound it, for the owner's ruling. _Resolved by ruling 143.2
+    (lane `obs12b`, below)._
   - _T1, provisional (finding)._ **The nuclear-disc curvature figure misses its window**: the
     model's potential gives `v_c` = 76 km/s at 100 ly (94 at 30 ly, 93 at 200 ly), against the
     brainstorm's 100 km/s, so the maximum from a corner of the cube is 7.5″, not 10–16″. The
@@ -801,7 +808,8 @@ DEFAULT_LENS_CELL_BUDGET}`. The query is built (`LensQuery::builder`) and takes 
     thin tube is exact: **τ = 8.1 × 10⁻⁷** (81 lenses, ±11%) towards 3–5° south of the centre from
     10⁴ sightlines (U = 100), inside the window and at the low end of Mróz et al. 2019's 0.6–1.4 ×
     10⁻⁶ for that field. The test walks 6.9 × 10⁷ cells in 24 minutes on four threads at load 12. The
-    owner's ruling is needed on whether retarded lensing is worth the cone's cost.
+    owner's ruling is needed on whether retarded lensing is worth the cone's cost. _Ruled by 143.3:
+    the cone is kept (lane `obs12b`, below)._
   - _Centre members (after the rebase onto `d5330c7`, which added P09.T24–T27)._
     `Drift::of_record` returns `Result<Drift, TraceMotionError>` and refuses a member of the
     galactic centre (`SystemOrigin::CentreMember`) with `TraceMotionError::CentreOrbitNotBuilt`:
@@ -816,3 +824,79 @@ DEFAULT_LENS_CELL_BUDGET}`. The query is built (`LensQuery::builder`) and takes 
   - _For P12.T13._ Its goldens should also pin one sightline's lens events (peak, impact, `t_E`,
     closest approach), one segment walk's keys and a few bearings, whose angles pass through
     `math::atan2` (determinism audit).
+- **Ruling 143's points 2–4 as built (lane `obs12b`, 2026-09-29, at `GENERATOR_VERSION` 15).** No
+  generated output moves and no golden changes: the curvature bound is text and a stated figure,
+  the lens walk finds the same lenses faster, and the drift's product error is the same bits.
+  Timings are at load averages of 5–12 on the 8-core development machine, so they read high.
+  - _143.2, the curvature bound._ `curvature_error` states min(½ a Δ², |v| Δ + 2 `r_apo`) with
+    Δ = |t_emitted − epoch|, R and a = `v_c²` ÷ R at the epoch position (`Retardation`'s line
+    carried to the epoch, `line_at_epoch`, crate-private), |v| the source's own speed, and
+    `r_apo` the largest r with Φ(r, 0) ≤ E by bisection, found only where the linear term can win
+    (the quadratic is compared with |v| Δ + 2R first). E is Φ(R, z) + ½ |v|² from the (R, z) grid,
+    or Φ(|x|, 0) + ½ |v|² without it; E ≥ 0 states the quadratic alone. Where it is an estimate,
+    as the doc comment records: the quadratic takes a at the anchor, not the orbit's largest pull
+    (an eccentric orbit's pericentre pulls harder); a is the in-plane `v_c²` ÷ R at the spherical
+    radius, not |∇Φ|; Φ(r, 0) as the least potential on each sphere holds for an oblate galaxy,
+    and without the grid the energy above the plane is low. Tests: never above the bound (with
+    `r_apo` from an independent outward scan) and never below the exact circular gap, for ten
+    radii from 0.5 to 60,000 ly and seven spans to the source horizon; the disc and nuclear-disc
+    figures are unchanged (the quadratic governs); an unbound source states the quadratic; a star
+    4 ly away seen at +1,000 years is stated over Δ = 996 years. The science check's case, 10 ly
+    after 10⁵ years, is 49.6 ly of true gap at the model's `v_c` (it took 150 km/s and 61 ly) and
+    73.4 ly stated, against the old cap's 20.
+  - _143.3, lensing._ `lensing::{LensWalkPlan, LensCandidates, LensCandidateChunk,
+lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `lenses_along` is
+    `lens_candidates` for its own window then `lenses_among`, with the same events and census as
+    before. The cold walk is planned (`LensWalkPlan::new`: source, geometry, cells, budget), walked
+    in chunks of cells (`walk`, a pure function; the sim spawns no thread) and merged (`finish`:
+    candidates by ID, each once), so the result does not depend on the split or the order. The
+    candidates of one (observer position, source) serve any window inside the query they were
+    walked for: a grid system is kept if its line passes within `max_impact` times the largest
+    Einstein radius on the sightline plus 0.05 ly and a twentieth of the lens's and the source's
+    motion over the span; sources (features) are asked again for each window, since their lines
+    are read from each window's spheres. The pad of layers A–D and the substellar layers is a
+    bound on the escape speed beyond each spherical radius, from a table of the potential's
+    escape speed at 177 radii (eight an octave, 2⁻⁴ to 2¹⁸ ly) by 13 polar angles, maximised
+    outward and raised by 2%, and capped at `PAD_SPEED`; a piece takes it at the least radius its
+    lenses' epoch positions can have, and layer E keeps `UNBOUND_PAD_SPEED`. The cone's radius
+    also now counts the lens's distance growing with its motion (δ ≤ β (|t| + far + reach) ÷
+    (1 − β)) and the source's shift over the window, both of which it had left out, by parts in a
+    thousand. Prefilter: the epoch position against the cone at its own distance with its own
+    speed bound, then a two-step `f64` estimate of the retarded position against the kept reach
+    with a margin of 0.01 ly plus the estimate's error, then the exact step. Figures (Sun to
+    Baade's window, a year): **300,746 cells** against 4.6 × 10⁵ at 1,000 km/s, 3.3 × 10⁶
+    systems examined; cold walk **15.2 s** on one thread (load 6–11), of which generating the
+    cells alone is 9.3 s (`lens_cells_26kly`); **3.2 s** wall on seven threads (the pool's
+    default, cores less one); renewal of a year from two centuries' candidates (5 of them)
+    **3.4 µs**; the thin tube in a still galaxy 0.47 s; a cold disc sightline of 5,000 ly
+    **31.5 ms**. The cone's floor is cell generation, which is plan 03's; the remaining 6 s are the
+    examination of 3.3 × 10⁶ systems, about 1.8 µs each, most of it presumably the velocity draws
+    of those inside the cone at their own distance (not profiled: no profiler on the machine). Tests: the renewal
+    equals a fresh walk for random windows (still galaxy, pinned moving lenses); chunks in any
+    split and order merge to one walk; the kept reach holds every lens that any window inside the
+    span finds, for 3,000 lenses at up to 1,000 km/s past a moving source; and, slow
+    (`lensing_cone_equals_a_brute_force_walk_in_a_moving_galaxy`, 53 s), the cone's 73 lenses of
+    a 1,500 ly sightline at +500 years with a reach of 3 × 10⁵ equal a brute-force walk of every
+    system in a box about it (44,642), the escape-speed cone walks 2,551 cells against 3,113 at
+    1,000 km/s, and renewals from two centuries' candidates equal fresh walks and the brute force;
+    slow (`lensing_escape_envelope_bounds_the_draws_cut`, 7 s), the table bounds the draw's cut at
+    10⁵ random points, by at least 2.4 × 10⁻⁵ of it. "Interactive" is dropped for the bulge.
+    **Not built: the background subscription.** Plan 12 has no server task for lensing (it is
+    "API and tests only" in the sim); the subscription that walks a monitored sightline on the
+    `CpuPool` in chunks, keeps its candidates in a `ByteLru` keyed by (universe, observer
+    position, source, reach, layers) and renews them each window, rescanning after a jump, belongs
+    to the task that brings lensing to the server (the sensor consoles), which should take this
+    API as its core.
+  - _143.4, the retarded step._ `math::two_product(a, b) -> (product, error)`, Dekker's product
+    with Veltkamp's split, bit for bit `(a × b, mul_add(a, b, −(a × b)))` for every input: Dekker
+    where it is exact (normal factors under 2⁹⁹⁵, the product in [2⁻⁹⁶⁸, 2¹⁰²¹)), +0 for a zero
+    factor, and `libm::fma` for the rest. Pinned against `libm::fma` over the drift's ranges (8 ×
+    10⁵ pairs) and the whole exponent range with subnormals, the range's edges, ±0, infinities
+    and NaN (4 × 10⁵ pairs and every pair of 17 special values), on x86-64 and under wasmtime on
+    `wasm32-wasip1` (those tests and `observe::retarded`, `observe::error`). The drift takes it
+    for both of its products. `observe::retarded_from(observer, source, present)` is public, bit
+    for bit `retarded` given the present. Plan 03's single rounding is not taken (P12.T3 decides).
+    Bench (load 9–12, noisy): a drift evaluation 188 ns against 295 ns with `libm::fma`;
+    `observe/retarded` at the epoch 0.62 µs, at +300 years 0.93 µs, `retarded_from` 0.56 µs,
+    against 1.12 µs before at load 12. At low load the ruling's 0.7 and 0.5 µs are likely met but
+    not measured here.

@@ -10,7 +10,8 @@
 //!   straight line every system follows outside the central black hole's Kepler regime.
 //! - [`retarded`]: one fixed-point step on the light cone (Design note 1), giving a
 //!   [`Retardation`]: the emitted time, the light's age, the apparent position and the velocity
-//!   then. [`retarded_exact_linear`] is the drift's closed form, the step's test oracle.
+//!   then. [`retarded_from`] is the same step from a present position the caller already has.
+//!   [`retarded_exact_linear`] is the drift's closed form, the step's test oracle.
 //! - [`curvature_error`]: the stated bound on the error from treating the source's path as
 //!   straight over the light's age (Design note 3).
 //! - [`extrapolate_to_present`]: the observed position and velocity carried forward to the
@@ -39,6 +40,6 @@ pub use bearing::{AXIS_FRAME_RADIUS_LY, Bearing, BearingFrame, bearing};
 pub use error::{CurvatureError, curvature_error};
 pub use retarded::{
     BuildObserverError, Drift, Motion, Observer, Retardation, TraceMotionError, Trajectory,
-    extrapolate_to_present, light_time, retarded, retarded_exact_linear,
+    extrapolate_to_present, light_time, retarded, retarded_exact_linear, retarded_from,
 };
 pub use system::{ObservedSystem, observe_hit, summary_observed};

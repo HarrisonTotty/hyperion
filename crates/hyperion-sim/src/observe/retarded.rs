@@ -411,6 +411,30 @@ impl Retardation {
     pub const fn motion(&self) -> Motion {
         self.motion
     }
+
+    /// Where the line this reading shows passes at the epoch: the apparent position carried to
+    /// the epoch at the velocity then. For a drifting source that is its epoch position, to about a
+    /// metre, the point at which plan 08 draws its velocity and where the line and the true orbit
+    /// agree (ruling 143.2).
+    ///
+    /// # Panics
+    ///
+    /// If the line leaves the addressable range at the epoch, which nothing slower than light can
+    /// from a position in the cube within the universe clock's range near the source horizon.
+    #[must_use]
+    pub(crate) fn line_at_epoch(&self) -> GalacticPosition {
+        let span = UniverseTime::EPOCH
+            .checked_since(self.emitted)
+            .expect("two times on the clock differ by a span the clock holds");
+        drift(
+            &self.apparent_position,
+            self.apparent_residual.metres(),
+            &self.velocity_then,
+            span,
+        )
+        .expect("a line slower than light through the cube is addressable at the epoch")
+        .0
+    }
 }
 
 /// What `observer` sees of `source`: one fixed-point step on the light cone (Design note 1).
@@ -454,9 +478,39 @@ pub fn retarded(observer: &Observer, source: &impl Trajectory) -> Retardation {
     retarded_from(observer, source, &present)
 }
 
-/// [`retarded`] from the present position.
+/// [`retarded`] from the source's present position, which a caller that searched on present
+/// positions already has: it saves one of the step's three evaluations of the trajectory (ruling
+/// 143.4).
+///
+/// `present` must be `source.position_at(observer.time())`; given that, the result is bit for bit
+/// [`retarded`]'s. Given anything else, the first light time is taken from it, which moves the
+/// step's starting guess and so, by up to the step's residual, the answer.
+///
+/// # Panics
+///
+/// As [`retarded`].
+///
+/// # Examples
+///
+/// A range query has found a star on its present position; its light is read from there.
+///
+/// ```
+/// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
+/// use hyperion_sim::observe::{Drift, Observer, Trajectory, retarded, retarded_from};
+/// use hyperion_sim::time::UniverseTime;
+///
+/// let here = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).ok_or("in range")?;
+/// let star = Drift::new(
+///     GalacticPosition::from_light_years([40.0, 25_990.0, 3.0]).ok_or("in range")?,
+///     GalacticVelocity::new([12e3, -30e3, 4e3]),
+/// );
+/// let observer = Observer::new(here, UniverseTime::from_julian_years(300).ok_or("in range")?)?;
+/// let present = star.position_at(observer.time());
+/// assert_eq!(retarded_from(&observer, &star, &present), retarded(&observer, &star));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[must_use]
-fn retarded_from(
+pub fn retarded_from(
     observer: &Observer,
     source: &impl Trajectory,
     present: &GalacticPosition,
@@ -599,7 +653,8 @@ pub fn extrapolate_to_present(r: &Retardation, now: UniverseTime) -> GalacticPos
 /// finite.
 ///
 /// The error does not grow with the span. Per axis the product v × Δt is carried as an exact pair
-/// (the rounded product and its error, by a fused multiply-add), the whole light-years k are split
+/// (the rounded product and its error, by [`math::two_product`], which is bit for bit the fused
+/// multiply-add's error), the whole light-years k are split
 /// off with k × 1 ly also an exact pair, and every sum is a two-sum whose error is kept, so the
 /// offset is rounded once, at the end, and what that rounding dropped is returned. Its arithmetic
 /// is fixed, so the result is the same on every platform.
@@ -626,11 +681,11 @@ fn drift(
         if !(v[axis].is_finite() && residual[axis].is_finite()) {
             return None;
         }
-        let product = v[axis] * whole_seconds;
-        let product_error = math::mul_add(v[axis], whole_seconds, -product);
+        // Dekker's product, bit for bit the fused multiply-add's error at a tenth of the cost of
+        // `libm`'s software `fma` (ruling 143.4: 7 against 34 ns an operation, six an evaluation).
+        let (product, product_error) = math::two_product(v[axis], whole_seconds);
         let mut whole = (product / METRES_PER_LIGHT_YEAR).floor();
-        let whole_high = whole * METRES_PER_LIGHT_YEAR;
-        let whole_low = math::mul_add(whole, METRES_PER_LIGHT_YEAR, -whole_high);
+        let (whole_high, whole_low) = math::two_product(whole, METRES_PER_LIGHT_YEAR);
         let (rest, rest_error) = two_sum(product, -whole_high);
         let (mut high, sum_error) = two_sum(offsets[axis], rest);
         let mut low = (((rest_error + sum_error) - whole_low) + product_error)
