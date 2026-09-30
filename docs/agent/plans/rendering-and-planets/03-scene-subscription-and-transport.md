@@ -1194,3 +1194,11 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   unit tests instead. Plans 14 and 11 carry as-built notes of the two additions. The star tests
   run under `cargo test -p hyperion-sim --lib stellar::multiplicity::positions`, beside the task's
   acceptance commands.
+- **Deviations in T4, as built.** `SceneArrivalDto` is tagged by `type` in snake case (`system`,
+  `no_system`). `SceneNotificationDto`'s `ship`, `arrival` and `craft` are omitted when `None`, so
+  a heartbeat is `{sequence, clock, bodies: []}`; `SceneStateDto.system` is an explicit `null` in
+  the galactic frame, since the state is always whole. `sequence` is a JSON number (`number` in
+  TypeScript), not the crate's hexadecimal for a `u64`: at 64 Hz it passes 2⁵³ only after some
+  4 × 10⁶ years, and the client checks it arithmetically. `Copy` is derived only on types holding
+  no `String` or `Vec`. Plan 14's protocol test fixtures are re-exported under `#[cfg(test)]` from
+  `planetary.rs` (`record_fixtures`, `requests_fixtures`) for the scene's wire-form tests.
