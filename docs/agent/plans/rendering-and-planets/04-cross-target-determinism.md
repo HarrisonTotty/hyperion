@@ -1328,6 +1328,21 @@ It reserves, so that later plans need not:
   seed did. `DetailLevelDto::Full`'s doc now names the detail seed. For the owner with T3.b: the
   UX review noted that `DETAIL SEED` sits under the readout's `DETAIL` row (the granted detail
   level), two meanings of "detail" in one readout; `TERRAIN SEED` was suggested as an alternative.
+- **Deviations in T4.a, as built.** Moved by `git mv`: `math.rs`, `units.rs` and `version.rs` from
+  `crates/hyperion-sim/src/` to `crates/hyperion-base/src/`, and `math/functions.golden` from the
+  sim's `tests/golden/` to base's (a 100% rename). `math_function_values_are_pinned` and its tables moved from the sim's `foundation_golden.rs` to
+  base's new one, whose `every_golden_file_carries_the_current_version` carries its own copy of the
+  golden walker; the sim's `FOUNDATION_GOLDENS` lost `math/functions`. The sim re-exports
+  `hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math, units, version}` at the crate root.
+  The `reason` strings of the root's, the sim's and the fitting crate's `clippy.toml` now read
+  "`hyperion_sim::math::f` (`hyperion_base::math::f`)" (Design note 3), their headers likewise.
+  `just test-wasm` gained `-p hyperion-base`, so that `math/functions` stays checked on wasip1
+  between now and T7.b (a determinism review finding). `golden_diff.py` has no test file: its two
+  cases were run by hand, the default run (base `HEAD`, before the split, so the sim's version
+  path) and `--base` at the commit before T4.a, each printing "GENERATOR_VERSION: 16 … -> 16",
+  `math/functions.golden` under "Renamed goldens (1)" and "Consistent."; a rename does not
+  silence the "version bumped but no pinned value moved" check. **Pending:** `just bench -- math`
+  before and after, since the machine was never quiet (other lanes building; load averages 5–24).
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so
