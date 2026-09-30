@@ -1214,3 +1214,16 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   pose's offset is along the galactic axes. The hull test's system-frame half asserts an error
   above 0.1 m (f64 at 1 ly is spaced at 2 m, so the rounding is up to a metre, 0.37 m in the
   test), where the plan says "by metres".
+- **Deviations in R02.T5, as built.** Plan 06 had not added the field, so R02.T5 built it:
+  `StellarBriefDto.absolute_v_mag` (`Option<f32>`, skipped when `None`), filled by `brief_dto`
+  through `brief_absolute_v`, which gates on the brief's `ObjectKind` being a living star (the
+  kinds `object_kind` gives only to remnant phases are refused, which is `phase().is_living()`)
+  and then computes `absolute_v_from(log L, T_eff)` with plan 06's `absolute_bolometric_magnitude`
+  and `bolometric_correction_v`. The Sun-like figure (4.83 ± 0.01) is tested on
+  `absolute_v_from(0 dex, 5,772 K)`, since the server cannot build a `StellarBrief` by hand; a real
+  1 M☉ brief is compared with its state's M_V and a white dwarf's brief has no key. "On every row
+  with a brief" is checked per row against plan 06's formula in `assert_briefs_are_the_sims`,
+  plus an `any`: most rows of the fixture are remnants (the briefs golden gained the field on 3
+  of its rows). Beyond the task's files, `hyperion-protocol/src/galaxy.rs`'s test
+  constructions, `hyperion-server/tests/systems_in_range.rs` and its
+  `systems_in_range_briefs.golden` changed with the field. `PROTOCOL_VERSION` stays 2.
