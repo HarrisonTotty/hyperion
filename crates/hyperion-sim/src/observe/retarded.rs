@@ -561,7 +561,7 @@ pub fn retarded_from(
 ///
 /// If the difference leaves the clock, which a light time across the addressable range cannot
 /// take a time inside the clock window to.
-fn before(t: UniverseTime, span: Span) -> UniverseTime {
+pub(super) fn before(t: UniverseTime, span: Span) -> UniverseTime {
     t.checked_sub(span)
         .expect("a light time across the addressable range keeps a time on the clock")
 }

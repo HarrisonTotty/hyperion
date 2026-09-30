@@ -1159,3 +1159,21 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   version 2 client that sends neither receives neither, and a newer client asking an older server
   gets `unsupported`. `PROTOCOL_VERSION` stays 2 while neither is ever sent unasked; a test pins it
   (plan R03, Design note 12)." The owner signs off.
+- **Deviations in T2, as built.** `BuildSystemObserverError` gains `NotSlowerThanLight`: the
+  Lorentz factor needs |v_o| < c. `InSystemRetardation::residual` is the last correction's change
+  |τₖ − τₖ₋₁|: at most 1 ns when converged, above it only where the noise rule stopped the
+  iteration. A source absent at the observer's present is `NotPresentThen { emitted }` with the
+  observed time, since τ₀ needs the present distance. In the 100 au, 100 km/s test δ₁ ÷ τ₀ and
+  δ₂ ÷ δ₁ are held to β within 10⁻⁶ relative, but δ₃ only to β δ₂ ± 1 ns: δ₃ = 1,852 ns is formed
+  from light times each rounded to the nanosecond, so 10⁻⁶ cannot hold at k = 3. The
+  no-fixed-point test alternates 5 ns apart (1 ns would meet the inclusive tolerance). The
+  accelerated-observer test also holds the angle to 1% of the exact circular-orbit offset, since
+  at ω τ ≈ 1.13 rad a τ ÷ 2c is only the small-angle limit (0.965 of it here). The Explanatory
+  Supplement is cited as §7.2.3 "Aberration", pp. 263–269, from its printed contents (a research
+  agent's check; the book's text not seen), for the aberration only; where it treats the light
+  time is not confirmed. For R03.T13, from the determinism audit: `light_time` floors through
+  `Span::from_seconds_f64`, whose `floor_nanos` uses `math::mul_add`, so the client must port that
+  floor exactly (an exact two-product or `BigInt`, never a naive `Math.floor(x * 1e9)`), or a 1 ns
+  difference can change `corrections` and the emitted time; `Span` and `UniverseTime` stay as whole
+  seconds and nanoseconds; and `aberrated`'s grouping, documented on it, is copied operation for
+  operation.
