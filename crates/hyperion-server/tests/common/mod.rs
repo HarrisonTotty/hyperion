@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
-    ClientMessage, CreateUniverseRequest, RequestBody, RequestError, RequestId, ResponseBody,
-    SeedHex, ServerMessage, UniverseInfo,
+    ClientMessage, CreateUniverseRequest, NotificationBody, RequestBody, RequestError, RequestId,
+    ResponseBody, SeedHex, ServerMessage, UniverseInfo,
 };
 use hyperion_server::universe::SequenceEntropy;
 use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats};
@@ -409,6 +409,16 @@ impl TestClient {
                 Message::Ping(_) | Message::Pong(_) => {}
                 other => panic!("unexpected frame {other:?}"),
             }
+        }
+    }
+
+    /// The next message from the server, which must be a `notification`: its subscription and
+    /// body (plan 12's P12.T9, built by rendering plan R03's R03.T5.b). Panics on any other
+    /// message, since a test that expects one should read it itself.
+    pub async fn next_notification(&mut self) -> (u32, NotificationBody) {
+        match self.next_message().await {
+            ServerMessage::Notification { subscription, body } => (subscription, body),
+            other => panic!("expected a notification, got {other:?}"),
         }
     }
 

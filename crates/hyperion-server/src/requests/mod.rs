@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
     ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    ServerMessage, SubscriptionState,
+    ServerMessage, SubscribeRequest, Subscribed, SubscriptionState, UnsubscribeRequest,
 };
 use serde_json::Value;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
@@ -39,9 +39,13 @@ use crate::compute::{
 };
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
+use crate::subscriptions::{Pusher, Subscriptions};
 
 /// What a handler returns: the response's body, or why there is none.
 pub(crate) type HandlerFuture = BoxFuture<'static, Result<ResponseBody, RequestError>>;
+
+/// What a topic's opening returns: the topic's whole state, or why the subscription failed.
+pub(crate) type SubscribeFuture = BoxFuture<'static, Result<SubscriptionState, RequestError>>;
 
 /// Answers requests.
 pub(crate) trait Handler: fmt::Debug + Send + Sync {
@@ -50,8 +54,26 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
     /// The future runs on a task of its own and is dropped at an `.await` if the client cancels
     /// the request or its connection closes; `token` is cancelled first. Work handed to the CPU
     /// pool should carry `token`, so that a job still queued when the request is cancelled is
-    /// skipped. A panic costs this request alone, which is answered `internal`.
+    /// skipped. A panic costs this request alone, which is answered `internal`. `subscribe` and
+    /// `unsubscribe` never reach it: the connection routes them ([`Handler::subscribe`]).
     fn handle(&self, state: Arc<AppState>, body: RequestBody, token: CancelToken) -> HandlerFuture;
+
+    /// Opens a subscription to `request`'s topic (rendering plan R03, R03.T5.b): the topic's
+    /// whole state, which answers `subscribe`, with every later change merged into `pusher`.
+    ///
+    /// The connection has reserved the subscription already and numbers the answer. The future
+    /// runs as a request's does; a topic that keeps pushing spawns a task of its own and hands it
+    /// to [`Pusher::attach`], so that it ends with the subscription. Until a topic is served, it
+    /// is answered `unsupported`.
+    fn subscribe(
+        &self,
+        _state: Arc<AppState>,
+        _request: SubscribeRequest,
+        _pusher: Pusher,
+        _token: CancelToken,
+    ) -> SubscribeFuture {
+        Box::pin(ready(Err(not_served_yet("subscribe"))))
+    }
 }
 
 /// The server's handlers: every request kind, and the code that answers it.
@@ -81,10 +103,12 @@ impl Handler for Handlers {
             RequestBody::SystemBodies(request) => Box::pin(system::bodies(state, request, token)),
             RequestBody::BodyDetail(request) => Box::pin(system::detail(state, request, token)),
             RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
-            // Rendering plan R03's kinds: served by R03.T5.b (the envelope), T6 (`scene_ship`) and
-            // T8 (the scene topic and `scene_cameras`).
+            // The connection answers `subscribe` through `Handler::subscribe` and `unsubscribe`
+            // itself (rendering plan R03, R03.T5.b), so neither reaches here; the arms keep the
+            // match exhaustive for a caller that bypasses the connection.
             RequestBody::Subscribe(_) => Box::pin(ready(Err(not_served_yet("subscribe")))),
             RequestBody::Unsubscribe(_) => Box::pin(ready(Err(not_served_yet("unsubscribe")))),
+            // Served by R03.T6 (`scene_ship`) and R03.T8 (`scene_cameras`).
             RequestBody::SceneShip(_) => Box::pin(ready(Err(not_served_yet("scene_ship")))),
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
         }
@@ -344,6 +368,18 @@ impl Settled {
     pub(crate) fn frame_len(&self) -> usize {
         self.frame.len()
     }
+
+    /// The request's ID.
+    #[must_use]
+    pub(crate) fn id(&self) -> RequestId {
+        self.id
+    }
+
+    /// Whether the request is answered with a `response`, rather than a `request_error`.
+    #[must_use]
+    pub(crate) fn responded(&self) -> bool {
+        self.ending == Ending::Responded
+    }
 }
 
 /// One request in flight.
@@ -387,26 +423,122 @@ impl Requests {
         handshake: Handshake,
     ) -> Option<String> {
         let kind = kind(&body);
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let token = CancelToken::new();
+        let handled = self
+            .state
+            .handler
+            .handle(Arc::clone(&self.state), body, token.clone());
+        self.start(id, kind, token, handled);
+        None
+    }
+
+    /// Accepts a `subscribe` and starts its topic's opening as a request, or refuses it and
+    /// returns the answer: as [`Requests::submit`] refuses, and `bad_request` naming `topic` once
+    /// the connection holds [`MAX_SUBSCRIPTIONS`](crate::limits::MAX_SUBSCRIPTIONS). The
+    /// subscription is reserved in `subscriptions` until the request ends
+    /// ([`Subscriptions::opened`]).
+    pub(crate) fn submit_subscribe(
+        &mut self,
+        id: RequestId,
+        request: SubscribeRequest,
+        handshake: Handshake,
+        subscriptions: &mut Subscriptions,
+    ) -> Option<String> {
+        let kind = "subscribe";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let (subscription, pusher) = match subscriptions.reserve(id) {
+            Ok(reserved) => reserved,
+            Err(error) => return Some(self.refuse(id, kind, error)),
+        };
+        let token = CancelToken::new();
+        let opening =
+            self.state
+                .handler
+                .subscribe(Arc::clone(&self.state), request, pusher, token.clone());
+        let handled: HandlerFuture = Box::pin(async move {
+            let mut state = opening.await?;
+            // The state is sequence 0, whatever the topic set: the first notification is 1.
+            match &mut state {
+                SubscriptionState::Scene(scene) => scene.sequence = 0,
+            }
+            Ok(ResponseBody::Subscribe(Box::new(Subscribed {
+                subscription: subscription.get(),
+                state,
+            })))
+        });
+        self.start(id, kind, token, handled);
+        None
+    }
+
+    /// Answers an `unsubscribe` at once: ends the subscription and returns the empty answer, or
+    /// the refusal: as [`Requests::submit`] refuses, and `bad_request` naming `subscription` for a
+    /// subscription the connection does not have.
+    pub(crate) fn unsubscribe(
+        &mut self,
+        id: RequestId,
+        request: UnsubscribeRequest,
+        handshake: Handshake,
+        subscriptions: &mut Subscriptions,
+    ) -> String {
+        let kind = "unsubscribe";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return refusal;
+        }
+        match subscriptions.end(request.subscription) {
+            Ok(()) => {
+                self.state.request_stats.accepted();
+                self.state.request_stats.ended(Ending::Responded);
+                tracing::debug!(
+                    id = id.0,
+                    subscription = request.subscription,
+                    "subscription ended"
+                );
+                to_frame(&ServerMessage::Response {
+                    id,
+                    body: ResponseBody::Unsubscribe,
+                })
+            }
+            Err(error) => self.refuse(id, kind, error),
+        }
+    }
+
+    /// The refusal of a request on arrival, if it is refused: an ID in flight, before `hello`, or
+    /// beyond [`MAX_IN_FLIGHT_REQUESTS`] (design notes 2, 7 and 24).
+    fn admit(&self, id: RequestId, kind: &str, handshake: Handshake) -> Option<String> {
         if let Some(refusal) = self.refuse_early(id, kind, handshake) {
             return Some(refusal);
         }
-        if self.in_flight.len() >= MAX_IN_FLIGHT_REQUESTS {
-            return Some(self.refuse(
+        (self.in_flight.len() >= MAX_IN_FLIGHT_REQUESTS).then(|| {
+            self.refuse(
                 id,
                 kind,
                 request_error(
                     ErrorCode::TooManyRequests,
                     format!("at most {MAX_IN_FLIGHT_REQUESTS} requests may be in flight at once"),
                 ),
-            ));
-        }
-        let token = CancelToken::new();
+            )
+        })
+    }
+
+    /// Starts an accepted request's task, which awaits `handled` and makes its terminal frame.
+    fn start(
+        &mut self,
+        id: RequestId,
+        kind: &'static str,
+        token: CancelToken,
+        handled: HandlerFuture,
+    ) {
         // Counted before the task starts, so that a handler sees its request counted.
         self.state.request_stats.accepted();
         let span = tracing::debug_span!("request", id = id.0, kind);
         let task = self
             .tasks
-            .spawn(run(Arc::clone(&self.state), id, body, token.clone()).instrument(span));
+            .spawn(run(Arc::clone(&self.state), id, handled, token.clone()).instrument(span));
         self.in_flight.insert(
             id,
             InFlight {
@@ -416,7 +548,6 @@ impl Requests {
                 accepted: Instant::now(),
             },
         );
-        None
     }
 
     /// Answers a request that did not parse, with `error` unless it is refused as a request that
@@ -600,14 +731,11 @@ impl Drop for Requests {
 async fn run(
     state: Arc<AppState>,
     id: RequestId,
-    body: RequestBody,
+    handled: HandlerFuture,
     token: CancelToken,
 ) -> Finished {
     let started = Instant::now();
-    let handled = state
-        .handler
-        .handle(Arc::clone(&state), body, token.clone())
-        .await;
+    let handled = handled.await;
     let answered = match handled {
         Ok(body) => respond(&state, id, body, token).await,
         Err(error) => Err(error),

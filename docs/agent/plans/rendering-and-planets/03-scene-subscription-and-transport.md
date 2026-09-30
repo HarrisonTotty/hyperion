@@ -1215,3 +1215,27 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   (`apps/hyperion/src/renderer/src/lib/connection.ts`) gain a `notification` case, which the
   type-aware exhaustiveness lint requires; until R03.T5.c routes it, the client consumes and drops
   a notification.
+- **Deviations in T5.b, as built.** A topic is served through a new
+  `Handler::subscribe(state, SubscribeRequest, Pusher, token) -> SubscribeFuture`, `unsupported` by
+  default. The connection intercepts `subscribe`, reserves the subscription (openings count toward
+  `MAX_SUBSCRIPTIONS`) and runs the opening as an ordinary request under the same admission and
+  cancellation rules; the subscription goes live, and its pushes are sent, only once its
+  `subscribed` answer is queued, so notifications never precede it (tested, the answer held for
+  want of room included); a failed or cancelled opening ends it and its number is not reused; the
+  state's `sequence` is set to 0 whatever the topic wrote. A topic hands its task to
+  `Pusher::attach`, aborted when the subscription ends, under one lock with the end
+  (`TaskSlot`). `unsubscribe` is answered at once by the connection, after the same admission
+  checks; unsubscribing a subscription still opening is `bad_request` naming `subscription`. The
+  fifth `subscribe` is `bad_request` naming `topic`. Across an arrival a pending `ship` or `craft`
+  survives unless the arrival brings its own, since no change is dropped (Design note 5's
+  "everything before it" read as the system and its bodies). The connection's `select!` takes
+  pushes after reading frames, so a topic pushing fast cannot keep `ping`, `cancel` or the close
+  from being read. All the tests are in `subscriptions.rs`, end to end through the unit `Harness`
+  with `Scripted::with_openings` as the injected topic, none in `outbound.rs`; the stuck-writer
+  tests use an outbound budget of 1 MiB, below the 8 MiB clogging frame, so that nothing fits once
+  it is queued. `Pusher`, `ScenePush::heartbeat` and `Shared::merge` carry
+  `cfg_attr(not(test), expect(dead_code))` until R03.T8 pushes. For R03.T8: requests that name a
+  subscription (`scene_cameras`, and P12.T9's `alerts_observer` and `alerts_acknowledge`) cannot
+  reach it through `Handler::handle`; the connection must route them, as it does `unsubscribe`
+  (an inbox per subscription is the likely shape). A held answer near the budget can be crowded by
+  pushes that each fit; if R03.T8.b sees it, pushes should wait while a held frame has no room.

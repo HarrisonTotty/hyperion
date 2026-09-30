@@ -584,7 +584,11 @@ note 1): the subscription helper lives on `RequestClient` itself
 subscription and consumes it (returns `true`), dropping one for an unknown subscription, rather than
 leaving it unconsumed for a helper outside. As built (R03.T5.a): the envelope's three enums,
 `SubscriptionTopic`, `SubscriptionState` and `NotificationBody`, are tagged by `topic` in snake
-case, and `ResponseBody::Subscribe` holds a `Box<Subscribed>`; the `Alerts` variants follow both.
+case, and `ResponseBody::Subscribe` holds a `Box<Subscribed>`; the `Alerts` variants follow both. As built
+(R03.T5.b): a topic implements `Handler::subscribe` in the server and merges its changes into its
+`Pusher` as a `PendingPush` variant with its own `Merge`; requests that name a subscription
+(`alerts_observer`, `alerts_acknowledge`) are routed by the connection, on the path R03.T8 builds
+for `scene_cameras`.
 
 Tests: wire forms; an integration test subscribes near a pinned recurrent nova, advances the
 observer's time past an arrival and receives one contact at `bearing`, then moves the observer close
