@@ -417,7 +417,8 @@ pub const fn moment_of_inertia_factor(class: PlanetClass) -> f64 {
 ///
 /// # Examples
 ///
-/// The Moon, from a 15-hour day at its present distance, locks within a million years:
+/// The Moon, from a 15-hour day at its present distance, locks within a few million years (2.6
+/// Myr with a rocky body's k₂ and Q):
 ///
 /// ```
 /// use hyperion_sim::planetary::derive::PlanetClass;
@@ -427,7 +428,7 @@ pub const fn moment_of_inertia_factor(class: PlanetClass) -> f64 {
 ///
 /// let moon = SpinningBody::of_class(Kilograms::new(7.346e22), Metres::new(1.7374e6), PlanetClass::Rocky)?;
 /// let tau = tidal_locking_time(&moon, Seconds::new(54_000.0), Metres::new(3.844e8), Kilograms::new(EARTH_MASS_KG));
-/// assert!(tau.value() < 1e6 * 3.156e7);
+/// assert!(tau.value() < 1e7 * 3.156e7);
 /// # Ok::<(), hyperion_sim::planetary::derive::rotation::BuildSpinningBodyError>(())
 /// ```
 #[must_use]

@@ -183,6 +183,10 @@ pub struct KingModel {
 
 /// Integrates the model with central potential `w0` and normalisations `a` once: the tidal
 /// radius, and each class's cumulative mass along the radii.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the King model's usual symbols"
+)]
 fn integrate(w0: f64, exponents: &[f64], a: &[f64]) -> (Vec<f64>, Vec<Vec<f64>>) {
     let rho = |w: f64| -> f64 {
         exponents
@@ -340,14 +344,14 @@ pub fn profile_half_mass(q: f64, eta: f64, core: f64, half_mass: f64, tidal: f64
 fn matched_core(target: f64, half_mass: f64, tidal: f64) -> f64 {
     let (mut lo, mut hi) = (math::ln(target * 1e-4), math::ln(target));
     for _ in 0..80 {
-        let mid = 0.5 * (lo + hi);
+        let mid = f64::midpoint(lo, hi);
         if profile_half_mass(1.0, 1.0, math::exp(mid), half_mass, tidal) < target {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    math::exp(0.5 * (lo + hi))
+    math::exp(f64::midpoint(lo, hi))
 }
 
 /// One model of the grid, reduced to what the fit reads.
@@ -634,7 +638,7 @@ mod tests {
         }
     }
 
-    /// A one-class model is King's: at W₀ = 6 the concentration log₁₀(r_t ÷ r₀) is about 1.25
+    /// A one-class model is King's: at W₀ = 6 the concentration `log₁₀(r_t ÷ r₀)` is about 1.25
     /// (King 1966's table), and the class holds all the mass.
     #[test]
     fn a_single_class_model_is_kings() {

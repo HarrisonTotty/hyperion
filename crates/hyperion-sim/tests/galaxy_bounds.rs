@@ -259,10 +259,14 @@ fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
             // holed disc's supremum rounds its four factors in another order than the bound does,
             // so the two may differ by a subnormal unit either way (plan 08 moved the discs'
             // profiles by bits and exposed it at 4 × 10⁻³¹⁸); the probes below hold the bound
-            // against the envelope itself, exactly.
+            // against the envelope itself, exactly. The nuclear disc's holed inner part (plan 02,
+            // R26) goes subnormal before its amplitude of some thousands per ly³ multiplies it, so
+            // a rounding of one unit in its exponential becomes tens: the two differed by nine
+            // units at 3 × 10⁻³¹¹ and by 32 at 4 × 10⁻³²⁰. Sixty-four units are allowed either way.
             let unit = f64::MIN_POSITIVE * f64::EPSILON;
+            let slack = 64.0 * unit;
             assert!(
-                corner <= bound + unit && bound - corner <= 1e-12 * corner + unit,
+                corner <= bound + slack && bound - corner <= 1e-12 * corner + slack,
                 "component {i} in {cell:?}: bound {bound:e} against the subnormal corner's \
                  {corner:e}"
             );

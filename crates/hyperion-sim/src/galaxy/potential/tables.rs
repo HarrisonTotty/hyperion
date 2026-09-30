@@ -2,7 +2,7 @@
 
 use super::model::MassModel;
 use super::nfw::Nfw;
-use super::spherical::{BrokenPowerLaw, PointMass, SphericalMass};
+use super::spherical::{NuclearCluster, PointMass, SphericalMass};
 use crate::galaxy::PointLy;
 use crate::galaxy::consts::{G, LIGHT_YEARS_PER_YEAR_PER_KM_S};
 use crate::math;
@@ -233,10 +233,10 @@ fn hermite_slope(t: f64) -> [f64; 4] {
 /// Both grids have 64 points per axis, log-spaced from 2⁻⁴ to 2¹⁸ ly, and hold the Gaussian
 /// components alone, interpolated by cubic Hermite in `ln R` (bicubic in `ln R` and `ln |z|` on
 /// the (R, z) grid) from exact derivatives. The dark halo, the nuclear cluster and the black hole
-/// are added in closed form at lookup. Below 2⁻⁴ ly the Gaussians' part is taken as solid-body,
-/// where the black hole dominates anyway; beyond 2¹⁸ ly as a point mass; on the (R, z) grid,
-/// below 2⁻⁴ ly in R it is taken at 2⁻⁴ ly, and below 2⁻⁴ ly in |z| it is blended quadratically
-/// into the plane's value.
+/// are added at lookup, in closed form or from the cluster's shared table. Below 2⁻⁴ ly the
+/// Gaussians' part is taken as solid-body, where the black hole dominates anyway; beyond 2¹⁸ ly as
+/// a point mass; on the (R, z) grid, below 2⁻⁴ ly in R it is taken at 2⁻⁴ ly, and below 2⁻⁴ ly in
+/// |z| it is blended quadratically into the plane's value.
 ///
 /// Ω and κ are in radians per year, speeds in km/s, potentials in (km/s)² with zero at infinity.
 ///
@@ -261,7 +261,7 @@ pub struct PotentialTables {
     in_plane: InPlaneTable,
     grid: Option<Grid>,
     dark_halo: Nfw,
-    nuclear_cluster: BrokenPowerLaw,
+    nuclear_cluster: NuclearCluster,
     black_hole: PointMass,
     bar_corotation: LightYears,
 }
@@ -468,7 +468,7 @@ impl PotentialTables {
     }
 
     /// The spherical components' potential and `v_c²`, both (km/s)², at spherical radius `r > 0`
-    /// (ly): the dark halo, the nuclear cluster and the black hole in closed form, which every
+    /// (ly): the dark halo, the nuclear cluster and the black hole, which every
     /// lookup adds to the Gaussians' part. Plan 10's orbit integrator reads them to continue the
     /// galaxy beyond the grid as a conservative field of its own.
     #[must_use]
@@ -665,7 +665,7 @@ mod tests {
             in_plane: table,
             grid: None,
             dark_halo: Nfw::new(zero, 10.0, LightYears::new(1e5)).unwrap(),
-            nuclear_cluster: BrokenPowerLaw::new(zero, LightYears::new(10.0), 1.3, 3.5).unwrap(),
+            nuclear_cluster: NuclearCluster::new(zero).unwrap(),
             black_hole: PointMass::new(zero).unwrap(),
             bar_corotation: LightYears::new(10_000.0),
         };
@@ -700,7 +700,7 @@ mod tests {
             },
             grid: None,
             dark_halo: Nfw::new(zero, 10.0, LightYears::new(1e5)).unwrap(),
-            nuclear_cluster: BrokenPowerLaw::new(zero, LightYears::new(10.0), 1.3, 3.5).unwrap(),
+            nuclear_cluster: NuclearCluster::new(zero).unwrap(),
             black_hole: PointMass::new(SolarMasses::new(mass)).unwrap(),
             bar_corotation: LightYears::new(10_000.0),
         };

@@ -28,7 +28,7 @@ mod hg;
 mod ms;
 #[cfg(test)]
 mod reference;
-mod wind;
+pub(crate) mod wind;
 pub mod zams;
 
 // Very massive stars, 100–150 M☉ (P06.T14).
@@ -49,7 +49,9 @@ pub(crate) use track::{
     Fate, RemnantModel, Stage, bridged_origin, fate_of, is_companion_stripped, remnant_of,
 };
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
-pub use track::{Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track, TrackOptions};
+pub use track::{
+    AgeInterval, Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, PhasePredicate, Track, TrackOptions,
+};
 pub(crate) use track::{
     CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
     giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,

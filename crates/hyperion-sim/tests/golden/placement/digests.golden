@@ -1,4 +1,4 @@
-# generator_version = 15
+# generator_version = 16
 # galaxy mw, 0308d00000000000
 mw.sun.E.systems = 28
 mw.sun.E.digest = 0x8ecdd63f78962ba5
@@ -12,8 +12,8 @@ mw.sun.A.systems = 0
 mw.sun.A.digest = 0xcbf29ce484222325
 mw.bulge.A.systems = 26
 mw.bulge.A.digest = 0xc11552439f5eefa4
-mw.bulge.E.systems = 1631
-mw.bulge.E.digest = 0xd47b2c3a5bf16f07
+mw.bulge.E.systems = 1632
+mw.bulge.E.digest = 0x06bde9770358014c
 mw.arm.E.systems = 170
 mw.arm.E.digest = 0x715dbcfaca063d98
 # galaxy drawn, 0308d0005eed0001
@@ -30,6 +30,6 @@ drawn.sun.A.digest = 0xcbf29ce484222325
 drawn.bulge.A.systems = 16
 drawn.bulge.A.digest = 0x3da7e7f2497e261d
 drawn.bulge.E.systems = 872
-drawn.bulge.E.digest = 0xf9eee841880ae3b4
+drawn.bulge.E.digest = 0xcf7b8f49a16c4f48
 drawn.arm.E.systems = 244
-drawn.arm.E.digest = 0x526ee4b69e87a0b1
+drawn.arm.E.digest = 0x09740c417a983319

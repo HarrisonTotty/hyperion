@@ -24,27 +24,26 @@
 //! profiles satisfy one Jeans equation together (brainstorm, Decisions, "2026-09-21: local density
 //! rulings", 1).
 //!
-//! The other discs are cored the same way, their dispersions rising with height by the same
-//! 0.20 per kpc, as Sharma et al. find the high-α stars' do too ("no special provision is needed to
+//! The other discs are cored the same way, their dispersions rising with height by the same 0.20
+//! per kpc, as Sharma et al. find the high-α stars' do too ("no special provision is needed to
 //! accommodate the thick disc stars", in their summary and conclusions), each with a mid-plane
-//! dispersion of its own that meets its drawn effective height:
-//! the young disc (225–345 ly, drawn apart from the old disc's) and the thick disc at the same
-//! reference radius, and the nuclear disc at two of its own scale lengths, the mass-weighted mean
-//! radius of an exponential disc. An isothermal thick disc, as mono-abundance populations are
-//! measured to be over 0.5–2 kpc ("nearly isothermal", Bovy et al. 2012, ApJ 755, 115) and as the
-//! brainstorm's single dispersion for it might be read, falls off too fast far from the plane: at
-//! a given effective height a cored profile e-folds faster far out than an exponential (sech²
-//! in half its effective height), and in the model's potential `K_z` keeps rising above the thin
-//! disc. 1.5 kpc up the Milky Way fixture's discs then e-fold in 420 pc, and a double exponential
-//! fitted to them at the Sun's radius finds its thick disc at the fit's floor of 500 pc, against
-//! Bland-Hawthorn and Gerhard's (2016, ARA&A 54, 529, §5.1.3) 900 ± 180 pc, an exponential fit's
-//! far-field height; with the gradient it finds 985 pc (plan 02, P02.T7.b). For the
-//! nuclear disc, a hundred light-years thick, the gradient changes its dispersion by under 1%
-//! across it.
+//! dispersion of its own that meets its drawn effective height: the young disc (225–345 ly, drawn
+//! apart from the old disc's) and the thick disc at the same reference radius, and the nuclear
+//! disc's main and inner parts each at two of its own scale lengths, the mass-weighted mean radius
+//! of an exponential disc. An isothermal thick disc, as mono-abundance populations are measured to
+//! be over 0.5–2 kpc ("nearly isothermal", Bovy et al. 2012, ApJ 755, 115) and as the brainstorm's
+//! single dispersion for it might be read, falls off too fast far from the plane: at a given
+//! effective height a cored profile e-folds faster far out than an exponential (sech² in half its
+//! effective height), and in the model's potential `K_z` keeps rising above the thin disc. 1.5 kpc
+//! up the Milky Way fixture's discs then e-fold in 420 pc, and a double exponential fitted to them
+//! at the Sun's radius finds its thick disc at the fit's floor of 500 pc, against Bland-Hawthorn
+//! and Gerhard's (2016, ARA&A 54, 529, §5.1.3) 900 ± 180 pc, an exponential fit's far-field height;
+//! with the gradient it finds 985 pc (plan 02, P02.T7.b). For the nuclear disc, a hundred
+//! light-years thick, the gradient changes its dispersion by under 1% across it.
 //!
-//! Solving costs two tables of `K_z`, 48 evaluations of the mass model each, at the two reference
-//! radii, which is most of the fields' build; then bisections of the dispersion, each a pass over
-//! the profiles' knots. All of it is part of the generator version.
+//! Solving costs three tables of `K_z`, 48 evaluations of the mass model each, at the three
+//! reference radii, which is most of the fields' build; then bisections of the dispersion, each a
+//! pass over the profiles' knots. All of it is part of the generator version.
 
 use super::SOLAR_RADIUS_LENGTHS;
 use super::vertical::{BISECTIONS, JeansIntegral, VerticalForce, VerticalProfile};
@@ -221,6 +220,8 @@ pub(crate) struct DiscProfiles {
     pub sub_discs: [VerticalProfile; 5],
     pub thick: VerticalProfile,
     pub nuclear: VerticalProfile,
+    /// The nuclear disc's inner part's.
+    pub inner_nuclear: VerticalProfile,
     pub summary: SubDiscHeights,
 }
 
@@ -283,20 +284,25 @@ impl DiscProfiles {
 
         let young = heated.solve(params.young_disc().height());
         let thick = heated.solve(params.thick_disc().height());
-        let nuclear_reference =
-            NUCLEAR_REFERENCE_RADIUS_LENGTHS * params.nuclear_disc().length().value();
-        let nuclear = JeansIntegral::new(
-            &force_at(nuclear_reference),
-            gamma,
-            reach,
-            LightYears::new(nuclear_reference),
-        )
-        .solve(params.nuclear_disc().height());
+        let nuclear_disc = params.nuclear_disc();
+        let solve_at = |length: LightYears, height: LightYears| {
+            let reference = NUCLEAR_REFERENCE_RADIUS_LENGTHS * length.value();
+            JeansIntegral::new(
+                &force_at(reference),
+                gamma,
+                reach,
+                LightYears::new(reference),
+            )
+            .solve(height)
+        };
+        let nuclear = solve_at(nuclear_disc.length(), nuclear_disc.height());
+        let inner_nuclear = solve_at(nuclear_disc.inner_length(), nuclear_disc.inner_height());
         Self {
             young,
             sub_discs,
             thick,
             nuclear,
+            inner_nuclear,
             summary,
         }
     }
@@ -343,6 +349,12 @@ mod tests {
                 params.nuclear_disc().height()
             ) < 1e-12
         );
+        assert!(
+            relative(
+                profiles.inner_nuclear.effective_height(),
+                params.nuclear_disc().inner_height()
+            ) < 1e-12
+        );
         let summary = profiles.summary;
         assert!(relative(summary.mean_height(), params.thin_disc().height()) < 1e-12);
         let gamma = DISPERSION_HEIGHT_GRADIENT_PER_KPC;
@@ -350,7 +362,12 @@ mod tests {
             assert!((profile.dispersion().value() / sigma.value() - 1.0).abs() < 1e-15);
             assert!((profile.gradient_per_kpc() / gamma - 1.0).abs() < 1e-15);
         }
-        for profile in [&profiles.young, &profiles.thick, &profiles.nuclear] {
+        for profile in [
+            &profiles.young,
+            &profiles.thick,
+            &profiles.nuclear,
+            &profiles.inner_nuclear,
+        ] {
             assert!((profile.gradient_per_kpc() / gamma - 1.0).abs() < 1e-15);
             let reach = profile.gradient_reach().value();
             assert!((reach / (2.0 * LIGHT_YEARS_PER_KILOPARSEC) - 1.0).abs() < 1e-15);

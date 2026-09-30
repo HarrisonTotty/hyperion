@@ -48,6 +48,7 @@ use hyperion_sim::planetary::record::{
 use hyperion_sim::planetary::{self, Body, BodyIndex, PlanetarySystem, SystemContext};
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::draws::UnitUniform;
+use hyperion_sim::stellar::multiplicity::SlotKind;
 use hyperion_sim::stellar::premain::disc_lifetime;
 use hyperion_sim::stellar::remnant::DeathKind;
 use hyperion_sim::stellar::sse::{ZCoeffs, zams};
@@ -537,7 +538,7 @@ fn placed(b: &Body) -> &PlacedPlanet {
 /// A single star on the main sequence at the epoch, of initial mass `lo`–`hi` M☉.
 fn single_dwarf(c: &Candidate<'_>, lo: f64, hi: f64) -> bool {
     (lo..=hi).contains(&c.record().primary_initial_mass().value())
-        && c.context().stars().len() == 1
+        && star_count(c) == 1
         && phase_of(c, 0) == Some(Phase::MainSequence)
 }
 
@@ -549,16 +550,40 @@ fn g_dwarf(c: &Candidate<'_>) -> bool {
             .is_some_and(|s| (5_300.0..=6_000.0).contains(&s.effective_temperature().value()))
 }
 
-/// Whether every star of `c` is on the main sequence at the epoch.
-fn all_dwarfs(c: &Candidate<'_>) -> bool {
-    (0..c.context().stars().len()).all(|n| phase_of(c, n) == Some(Phase::MainSequence))
+/// Whether slot `n` of `c`'s hierarchy is a star, not a bound brown dwarf (P11.T2.d).
+fn is_star(c: &Candidate<'_>, n: usize) -> bool {
+    c.context().hierarchy().stars()[n].kind() == SlotKind::Star
 }
 
-/// The pairs of `c`'s hierarchy, by semi-major axis in au.
+/// The number of stars in `c`'s system: its hierarchy's slots less any bound brown dwarf, which
+/// the golden systems' predicates do not count as a star (P11.T2.d).
+fn star_count(c: &Candidate<'_>) -> usize {
+    (0..c.context().stars().len())
+        .filter(|&n| is_star(c, n))
+        .count()
+}
+
+/// Whether every star of `c` is on the main sequence at the epoch; a bound brown dwarf is no star.
+fn all_dwarfs(c: &Candidate<'_>) -> bool {
+    (0..c.context().stars().len())
+        .filter(|&n| is_star(c, n))
+        .all(|n| phase_of(c, n) == Some(Phase::MainSequence))
+}
+
+/// The pairs of `c`'s hierarchy whose outer member is a star, by semi-major axis in au: a bound
+/// brown dwarf's orbit about the system is no stellar pair (P11.T2.d).
 fn pair_separations_au(c: &Candidate<'_>) -> Vec<f64> {
-    c.context()
-        .hierarchy()
+    let hierarchy = c.context().hierarchy();
+    hierarchy
         .pairs()
+        .filter(|&(node, _)| {
+            hierarchy.pair_key(node).is_some_and(|body| {
+                hierarchy
+                    .stars()
+                    .iter()
+                    .any(|slot| slot.body() == body && slot.kind() == SlotKind::Star)
+            })
+        })
         .map(|(_, orbit)| orbit.semi_major_axis().value() / METRES_PER_AU)
         .collect()
 }
@@ -612,7 +637,7 @@ fn eccentric_giant(c: &Candidate<'_>) -> bool {
 /// epoch.
 fn halo_star(c: &Candidate<'_>) -> bool {
     c.record().population() == Population::Halo
-        && c.context().stars().len() == 1
+        && star_count(c) == 1
         && all_dwarfs(c)
         && !present(c).is_empty()
 }
@@ -620,7 +645,7 @@ fn halo_star(c: &Candidate<'_>) -> bool {
 /// A close binary with a circumbinary planet: two main-sequence stars under 47 au apart (Kraus
 /// et al. 2016's cut) with a planet about the pair present at the epoch.
 fn close_binary_with_a_circumbinary_planet(c: &Candidate<'_>) -> bool {
-    c.context().stars().len() == 2
+    star_count(c) == 2
         && all_dwarfs(c)
         && pair_separations_au(c)
             .iter()
@@ -633,7 +658,7 @@ fn close_binary_with_a_circumbinary_planet(c: &Candidate<'_>) -> bool {
 /// A wide binary with planets about both stars: two main-sequence stars 47 au or more apart,
 /// each with a planet of its own present at the epoch.
 fn wide_binary_with_planets_about_both(c: &Candidate<'_>) -> bool {
-    c.context().stars().len() == 2
+    star_count(c) == 2
         && all_dwarfs(c)
         && pair_separations_au(c)
             .iter()
@@ -648,7 +673,7 @@ fn wide_binary_with_planets_about_both(c: &Candidate<'_>) -> bool {
 
 /// A hierarchical triple: three main-sequence stars, with a planet present at the epoch.
 fn hierarchical_triple(c: &Candidate<'_>) -> bool {
-    c.context().stars().len() == 3 && all_dwarfs(c) && !present(c).is_empty()
+    star_count(c) == 3 && all_dwarfs(c) && !present(c).is_empty()
 }
 
 /// A T Tauri star with its disc: a single pre-main-sequence star of 0.1–2 M☉ younger than its
@@ -656,7 +681,7 @@ fn hierarchical_triple(c: &Candidate<'_>) -> bool {
 fn t_tauri_star(c: &Candidate<'_>) -> bool {
     (0.1..=2.0).contains(&c.record().primary_initial_mass().value())
         && c.record().age_at_epoch().value() < 5.0e7
-        && c.context().stars().len() == 1
+        && star_count(c) == 1
         && phase_of(c, 0) == Some(Phase::PreMainSequence)
         && c.system()
             .disc(OrbitHost::Star(0))
@@ -668,7 +693,7 @@ fn t_tauri_star(c: &Candidate<'_>) -> bool {
 /// A subgiant: a single star crossing the Hertzsprung gap at the epoch, with a planet present.
 fn subgiant(c: &Candidate<'_>) -> bool {
     c.record().age_at_epoch().value() > 1.0e8
-        && c.context().stars().len() == 1
+        && star_count(c) == 1
         && phase_of(c, 0) == Some(Phase::HertzsprungGap)
         && !present(c).is_empty()
 }
@@ -677,7 +702,7 @@ fn subgiant(c: &Candidate<'_>) -> bool {
 /// engulfed a planet and still has one.
 fn red_giant_mid_engulfment(c: &Candidate<'_>) -> bool {
     c.record().age_at_epoch().value() > 1.0e8
-        && c.context().stars().len() == 1
+        && star_count(c) == 1
         && phase_of(c, 0) == Some(Phase::FirstGiantBranch)
         && {
             let states = states(c);
@@ -697,7 +722,7 @@ fn red_giant_mid_engulfment(c: &Candidate<'_>) -> bool {
 /// A fallback black hole with survivors: a single star dead at the epoch by direct collapse, a
 /// black hole of complete fallback with no kick (P06.T18), with a planet present.
 fn fallback_black_hole_with_survivors(c: &Candidate<'_>) -> bool {
-    c.context().stars().len() == 1
+    star_count(c) == 1
         && phase_of(c, 0) == Some(Phase::BlackHole)
         && c.context().stars()[0]
             .death()
@@ -707,9 +732,7 @@ fn fallback_black_hole_with_survivors(c: &Candidate<'_>) -> bool {
 
 /// An ordinary filler: a single main-sequence star with a planet present at the epoch.
 fn filler(c: &Candidate<'_>) -> bool {
-    c.context().stars().len() == 1
-        && phase_of(c, 0) == Some(Phase::MainSequence)
-        && !present(c).is_empty()
+    star_count(c) == 1 && phase_of(c, 0) == Some(Phase::MainSequence) && !present(c).is_empty()
 }
 
 /// The fifteen of P14.T32's twenty-four that the slice can make (its _Slice:_ line), in the order
@@ -806,7 +829,10 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [
         // sub-Neptunes of 6.0 and 8.5 M⊕ inside 0.14 au about A, three rocky planets of 1.1–4.0 M⊕
         // inside 0.06 au about B, and eight of 2.6–16 M⊕ at 0.033–4.3 au about C, three of them
         // sub-Neptunes and the outer three ice giants with five to seven moons and a dust ring
-        // each. A belt beyond each star's planets; no halo.
+        // each. A belt beyond each star's planets; no halo. Since P11.T2.d (version 16) the
+        // system also holds a bound 0.040 M☉ brown dwarf about the whole triple,
+        // `SubstellarCompact` with ten planets of 0.10–1.9 M⊕ at 0.014–12.9 au; the predicate
+        // counts stars only.
         name: "hierarchical_triple",
         layer: Layer::C,
         budget: 200_000,
@@ -841,16 +867,18 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [
         id: 0x4200_ecd2_0000_0003,
     },
     GoldenSystem {
-        // A 7.98 M☉ black hole of a 22.7 M☉ star that died by direct collapse, [Fe/H] −0.04, 7.9
-        // Gyr old: three rocky survivors of 0.61–1.9 M⊕ at 517–853 au, their orbits widened by the
-        // progenitor's mass loss, two with moons, rocky belts in their gaps at 530–583 and 711–809
-        // au, and a rocky belt of 0.11 M⊕ at 1,117–1,332 au. Re-pinned after plan 11's ruling 81:
-        // the first pin, 0x8200_b2e0_0000_000d, no longer satisfies the predicate.
+        // A 5.71 M☉ black hole of a 17.5 M☉ star of the old thin disc that died by direct
+        // collapse, [Fe/H] +0.08, 437 Myr old: two rocky survivors of 1.9 M⊕ at 316 and 659 au,
+        // their orbits widened by the progenitor's mass loss, a third planet unbound by it, and
+        // rocky belts at 434–461 and 543–568 au. Re-pinned by the search at version 16 (the
+        // pin before, 0x8201_b2a0_0000_001a, still satisfies the predicate, but the search now
+        // finds this system first); after plan 11's ruling 81 the first pin,
+        // 0x8200_b2e0_0000_000d, had stopped satisfying it.
         name: "fallback_black_hole",
         layer: Layer::E,
         budget: 200_000,
         predicate: fallback_black_hole_with_survivors,
-        id: 0x8201_b2a0_0000_001a,
+        id: 0x8200_b2e0_0000_000a,
     },
     GoldenSystem {
         // A 0.335 M☉ M dwarf of 3,600 K, [Fe/H] 0.00, `CompactMulti`: one rocky planet of 1.02 M⊕

@@ -20,10 +20,10 @@ task = "cluster_bh"
 revision = 0
 inputs_sha256 = "4efee92684d31ad81aac4f53fdfc763c4b5d402a75211fe60edac1bf384906d6"
 body_sha256 = "964586543142493ab4b88be0dd39b88e609d69f935c3e231310b7227bbdc8b20"
-fingerprint = [0.5859340259539524, 0.04856964674204547, 7.98070989792187]
+fingerprint = [0.5859340259539524, 0.04870347946249036, 7.98070989792187]
 since_generator_version = 15
 provisional = true
-acceptance = "fitted β = 3.8937e-21, ψ₁ = 25949798996716978176.00 (β ψ₁ = 0.1010) at k = 2.5 and c = 0.138 (β and c enter only as β ÷ c) over 124 CMC models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any: rms 0.476 dex in log₁₀(1 + N) over those (under 0.3; FAILS; 1.716 at the scratch constants); 19 of 34 predicted empty are empty (FAILS); on the Baumgardt–Hilker catalogue at 12 Gyr, the most in a cluster past 14 t★ 25.86 (FAILS), the median over 3 × 10⁵ M☉ 693 (tens to a few hundred; FAILS), ω Centauri 12100 (thousands; FAILS), 0.006 past the core-collapse line with none (0.15–0.25; FAILS); the table keeps plan 09's scratch β 0.0028, ψ₁ 147 until a ruling"
+acceptance = "fitted β = 1.5623e-21, ψ₁ = 64780543383733190656.00 (β ψ₁ = 0.1012) at k = 2.5 and c = 0.138 (β and c enter only as β ÷ c) over 124 CMC models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any: rms 0.476 dex in log₁₀(1 + N) over those (under 0.3; FAILS; 1.716 at the scratch constants); 19 of 34 predicted empty are empty (FAILS); on the Baumgardt–Hilker catalogue at 12 Gyr, the most in a cluster past 14 t★ 25.88 (FAILS), the median over 3 × 10⁵ M☉ 694 (tens to a few hundred; FAILS), ω Centauri 12167 (thousands; FAILS), 0.006 past the core-collapse line with none (0.15–0.25; FAILS); the table keeps plan 09's scratch β 0.0028, ψ₁ 147 until a ruling"
 
 [[table]]
 name = "cluster_retention"
@@ -31,9 +31,9 @@ path = "cluster_retention.rs"
 task = "cluster_retention"
 revision = 0
 inputs_sha256 = "b23c1c962b071a17cf39dd5aabc161d29b71e684795831b4b0f0d7d64f66f2d7"
-body_sha256 = "a15d66e63c285699fa8f7db29f7ce5ece0c9724d5950b08d27e8733731c9dfe9"
-fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.02068010290444081, 0.3634885305986848, 0.6167941399325176, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.0016249031329971537, 0.010966672628571109, 0.07878816235167267, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.09798233061183895, 0.2681171358620811, 0.298925606888743, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-since_generator_version = 15
+body_sha256 = "65ecdd71d874b61205cc20026918e47b7b8c7d793f51082432b9448b30133ec9"
+fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.02276411725143112, 0.416991557056143, 0.616794632124647, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.001737317651571491, 0.012566721104308134, 0.12534630987471304, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.10462624428328901, 0.27664812006638173, 0.2989380580986681, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+since_generator_version = 16
 provisional = false
 acceptance = "at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0, 120.0] km/s, Chabrier and Kroupa), the tabulated neutron-star and black-hole retention within 0.00002 absolute of the exact quadrature where it is 0.05 or less and 0.0195 relative where it exceeds 0.05 (ruling 139.5: 0.005 and 3%; met); largest absolute 0.01299"
 
@@ -42,12 +42,12 @@ name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"
 revision = 0
-inputs_sha256 = "326fa9f63be5fdb518fac2d54910f805d39a42a6937824e07e363d3a6e7a76bb"
-body_sha256 = "785e919e4b1e1dfd761f2aab988866a374c3c43285f34773243e590661f7292b"
-fingerprint = [7000.0, 223.95985845020357, 2.574589608928813, 125.6529076974953, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
-since_generator_version = 15
+inputs_sha256 = "349d91b7c28bb56bf4dfad997f2cae86b5e316603f32d341bc337021432a3bd8"
+body_sha256 = "c0f23cfb3ade5d3851ff58f45cf810967d4e828c5698f2880853a2fab448f9a0"
+fingerprint = [7000.0, 223.96085201572214, 2.5745808582515446, 130.6894785661944, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
+since_generator_version = 16
 provisional = true
-acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9670 (unregularised 0.9641, λ 0.01); 51 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 65 second-difference sign changes along the rows; worst misplaced share thick disc 0.984, halo 0.989, bulge 0.998, bar 0.996, nuclear disc 0.998; own-form shares at the fixture's corotation ratio 1.24, bar 0.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 1.00, 0.00, nuclear disc 1.00, 0.00, 1.00, 0.00; bar elongation over the control 0.67, -2.00, 0.67, 0.67, -, -, -, - and length within 0.76 of it; slowest thin class's mean rotation 0.889 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 254 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9661 (unregularised 0.9641, λ 0.01); 52 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 66 second-difference sign changes along the rows; worst misplaced share thick disc 0.986, halo 0.983, bulge 0.998, bar 1.000, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 1.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 0.00, 0.00; bar elongation over the control 0.80, -2.04, 1.04, 0.80, -, -, -, - and length within 0.76 of it; slowest thin class's mean rotation 0.889 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 238 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
 
 [[table]]
 name = "equipartition"
@@ -77,13 +77,13 @@ acceptance = "over the 455 rows, fit minus grid, log₁₀ L within 0.046 dex (r
 name = "kick_rank"
 path = "kick_rank.rs"
 task = "kick_rank"
-revision = 0
-inputs_sha256 = "fa8f39b842a7e1923a9f272d9d935285e2c52f2959fec5b98179bd5edcc44541"
-body_sha256 = "0e9c24a7934ea71594f748d129231ff380bf0c74f277e35b5c0209290be22cf2"
-fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.931168472446736, 15.696775699185423, 0.45, 1.26, 46428852.83850509]
-since_generator_version = 13
+revision = 1
+inputs_sha256 = "997c5f8c2bc05e7533413420e12f3bd12c1ebf068117256ea67d4f3369a01a04"
+body_sha256 = "46c38ec84d72ea4686dad6f34231e7a62831bbc4a22d1798e02aa604bef2ee73"
+fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322]
+since_generator_version = 16
 provisional = true
-acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5993 and standard deviation 0.6758, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.00000"
+acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.6000 and standard deviation 0.6774, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.06227"
 
 [[table]]
 name = "mge"
@@ -126,11 +126,11 @@ path = "stellar_fates_high.rs"
 task = "stellar_fates_high"
 revision = 0
 inputs_sha256 = "ab3cd3282dbb1d3cafa85ebb8470c9790bd70e78c1a05feb65903bce1bcf0eea"
-body_sha256 = "c6b889a605b3731e7393988229a65fc8acfd12bba03f734b8fdb037993f3b0ef"
-fingerprint = [6.9943222296256256, 5.0077445862515795, 6.6652970242215455, 18.733439476181278]
-since_generator_version = 13
+body_sha256 = "0bcd17130b9317fce32dbd74cf0645de9f8bd67bbd8fd2088e6e22b10e4602fd"
+fingerprint = [6.9943222296256256, 5.0077445862515795, 6.665239455001237, 18.647754626514384]
+since_generator_version = 16
 provisional = false
-acceptance = "8260 full tracks; 103 of 1633 cells (6.3%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 7.3e-3, a 8.4e-4 and 1.1e-1, b 1.5e-4 and 4.1e-2"
+acceptance = "8260 full tracks; 99 of 1633 cells (6.1%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 6.8e-3, a 5.7e-4 and 9.0e-2, b 1.3e-4 and 4.0e-2"
 
 [[table]]
 name = "stellar_fates_low"
@@ -162,11 +162,11 @@ path = "stripping.rs"
 task = "stripping"
 revision = 0
 inputs_sha256 = "865b5a384d01768752dcab8474e86208635c9decfce206c839ce5a8a455dac54"
-body_sha256 = "ed6c47a8c0eb4911c87f0c83fd285165fb3b59fdf7ba5bc55c53c4fb87a63e97"
+body_sha256 = "688d35dc29459779a4569d5ce8125458fc04afe54e7bc4826de8092d2cb712b3"
 fingerprint = [0.3460343735586854, 0.5343901251039018, 0.4818157115990379, 1.183367218815104, 1.9333278054314231, 2.8904931250733537]
-since_generator_version = 14
+since_generator_version = 16
 provisional = false
-acceptance = "at the centres of 330 cells, the share within 0.0729 of the exact (median 6.4e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (61 cells spread more)"
+acceptance = "at the centres of 330 cells, the share within 0.0688 of the exact (median 6.5e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (62 cells spread more)"
 
 [[table]]
 name = "type_ia_delay"

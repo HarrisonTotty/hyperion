@@ -63,6 +63,20 @@
 //!   and the Wolf-Rayet-like rate of small envelopes, combined by the largest as HPT combine
 //!   them, without HPT's luminous-blue-variable term.
 //!
+//! - Near the Eddington limit every one of these rates steepens (plan 06, P06.T39, ruling 124.1):
+//!   above an electron-scattering Eddington factor Γₑ of 0.7, the kink of Vink et al. (2011,
+//!   A&A 531, A132), the rate is the larger of the recipe's own and the recipe's rate at Γₑ = 0.7
+//!   raised as Γₑ^3.99, Vink et al.'s Ṁ ∝ M^0.78 Γₑ^4.77 at fixed L, which Gräfener et al.
+//!   (2011, A&A 535, A56, equation 7) quote as 3.99 log Γₑ + 0.78 log L ([`eddington_boosted`]).
+//!   Γₑ is read at X = 0, the least opacity a photosphere can have, since the tracks do not
+//!   follow the surface hydrogen ([`eddington_factor`]). It strips the envelopes that HPT's
+//!   formulae leave above the limit after the main sequence, at the stripping instant and in
+//!   metal-poor very massive red supergiants, and hands the star over to the helium-star laws
+//!   (Yusof et al. 2013's endpoint); below Z ≈ 0.006 the star still spends 10⁴ years or more
+//!   just above the limit while it does (a finding, plan 06's Risks). The thermally pulsing and early AGB
+//!   keep their own rates: their superwind is dust-driven, not line-driven, and strips the
+//!   envelope on its own as Γₑ nears 0.8 at its end.
+//!
 //! The recipe is continuous in effective temperature: the bi-stability jump and the hand-over
 //! from the cool rate to Vink's are linear blends across a band (see [`vink`] and
 //! [`hot_or_cool`]). The one step left is the Humphreys–Davidson limit, where Belczynski et al.'s
@@ -75,6 +89,7 @@
 use crate::math;
 use crate::stellar::composition::Z_SOLAR;
 use crate::stellar::{Composition, Phase, StarState};
+use crate::units::consts::{GM_SUN, SOLAR_LUMINOSITY_W, SPEED_OF_LIGHT};
 use crate::units::{SolarLuminosities, SolarMasses, SolarMassesPerYear};
 
 /// Which set of wind prescriptions a track integrates (plan 06, design note 6).
@@ -153,6 +168,32 @@ pub(crate) fn rate(
         WindRecipe::Modern => modern(regime, &s, eta),
     })
 }
+
+/// The electron-scattering Eddington factor at X = 0 of a star of `luminosity` and `mass`,
+/// Γₑ = κₑ L ÷ (4π c G M) with κₑ = 0.02 m² kg⁻¹, the Thomson opacity of fully ionised
+/// hydrogen-free gas, 0.2 (1 + X) cm² g⁻¹: the least a photosphere can have (plan 06, ruling
+/// 124.1). Dimensionless, non-negative; 1 at L ÷ M = 65,304 L☉ per M☉.
+///
+/// # Panics
+///
+/// In debug builds, if `mass` is not positive.
+#[must_use]
+pub(crate) fn eddington_factor(luminosity: SolarLuminosities, mass: SolarMasses) -> f64 {
+    debug_assert!(mass.value() > 0.0, "Γ_e needs a positive mass: {mass:?}");
+    EDDINGTON_PER_LIGHT_TO_MASS * luminosity.value() / mass.value()
+}
+
+/// κₑ L☉ ÷ (4π c G M☉) at X = 0, κₑ = 0.02 m² kg⁻¹: Γₑ per L☉ per M☉ ([`eddington_factor`]).
+const EDDINGTON_PER_LIGHT_TO_MASS: f64 =
+    0.02 * SOLAR_LUMINOSITY_W / (4.0 * core::f64::consts::PI * SPEED_OF_LIGHT * GM_SUN);
+
+/// The Eddington factor above which the wind steepens: Vink et al.'s (2011) kink at Γₑ ≈ 0.7,
+/// where optically thin winds turn optically thick (plan 06, P06.T39).
+pub(crate) const EDDINGTON_KINK: f64 = 0.7;
+
+/// The power of Γₑ ÷ 0.7 at fixed luminosity above [`EDDINGTON_KINK`]: Vink et al.'s (2011)
+/// Ṁ ∝ M^0.78 Γₑ^4.77, which is Γₑ^3.99 L^0.78 (Gräfener et al. 2011, equation 7).
+const EDDINGTON_POWER: f64 = 3.99;
 
 /// μ of HPT equation 97: ((M − Mc) ÷ M) × min(5, max(1.2, (L ÷ L₀)^κ)), with L₀ = 7 × 10⁴ L☉
 /// and κ = −0.5, a measure of how small a giant's envelope is. Below 1 the envelope is small
@@ -377,6 +418,7 @@ impl Regime {
 }
 
 /// The quantities the terms read, in the units of the module documentation.
+#[derive(Debug, Clone, Copy)]
 struct Surface {
     /// L, L☉.
     l: f64,
@@ -433,9 +475,52 @@ fn hurley_evolved(s: &Surface, eta: ReimersEta, agb: bool) -> f64 {
         .max(small_envelope_wolf_rayet(s))
 }
 
-/// Design note 6's modern recipe (module documentation).
+/// Design note 6's modern recipe with P06.T39's steepening near the Eddington limit (module
+/// documentation).
 #[must_use]
 fn modern(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
+    let recipe = |surface: &Surface| modern_below_kink(regime, surface, eta);
+    match regime {
+        // The AGB's own endpoint is its dust-driven superwind, capped at 1.36 × 10⁻⁹ L, which
+        // Vink et al.'s line-driven kink does not describe; its last envelope reaches Γₑ ≈ 0.8
+        // as the superwind strips it, and is left to the superwind.
+        Regime::Evolved { agb: true } | Regime::Windless => recipe(s),
+        Regime::MainSequence | Regime::Evolved { agb: false } | Regime::NakedHelium => {
+            eddington_boosted(s, recipe)
+        }
+    }
+}
+
+/// The rate `recipe` gives a star at `s`, steepened near the Eddington limit (P06.T39, ruling
+/// 124.1): `recipe`(s) while Γₑ(X = 0) ≤ 0.7, and above it the larger of `recipe`(s) and
+/// `recipe`(s₀.₇) × (Γₑ ÷ 0.7)^3.99, where s₀.₇ is the star at its own luminosity, radius,
+/// temperature and core with the mass M Γₑ ÷ 0.7 at which Γₑ would be 0.7.
+///
+/// So at a fixed luminosity log Ṁ rises as 3.99 log Γₑ above the kink (Vink et al. 2011, as
+/// Gräfener et al. 2011, equation 7, quote it), from the recipe's own rate at the kink, and the
+/// rate is continuous there. The luminosity dependence at a fixed Γₑ is the recipe's at the kink,
+/// not Vink et al.'s L^0.78: for Vink et al.'s (2001) fits it is L^0.88, and pinning the kink to
+/// the recipe allows no other. The larger of the two keeps a term that falls with mass, such as
+/// the small-envelope rate at its twin's larger envelope, from lowering the star's rate.
+#[must_use]
+fn eddington_boosted(s: &Surface, recipe: impl Fn(&Surface) -> f64) -> f64 {
+    let own = recipe(s);
+    let gamma = eddington_factor(SolarLuminosities::new(s.l), SolarMasses::new(s.m));
+    if gamma <= EDDINGTON_KINK {
+        return own;
+    }
+    let ratio = gamma / EDDINGTON_KINK;
+    let at_kink = Surface {
+        m: s.m * ratio,
+        ..*s
+    };
+    own.max(recipe(&at_kink) * math::powf_positive(ratio, EDDINGTON_POWER))
+}
+
+/// Design note 6's modern recipe below the Eddington kink: every term of the module
+/// documentation but P06.T39's.
+#[must_use]
+fn modern_below_kink(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
     match regime {
         Regime::Windless => 0.0,
         Regime::MainSequence => hot_or_cool(s, nieuwenhuijzen_de_jager(s)),
@@ -1068,6 +1153,88 @@ mod tests {
             let f = |x: f64| modern_rate(&faint(math::exp10(x)), z) / unit;
             assert_continuous_over(&format!("5 M☉ MS, Z = {z}"), f, &log_t, 0.005, 1e-9);
         }
+    }
+
+    /// Γₑ at X = 0 is 1 at L ÷ M = 65,304 L☉ per M☉ (κₑ = 0.02 m² kg⁻¹, L☉ = 3.828 × 10²⁶ W,
+    /// GM☉ = 1.327 × 10²⁰ m³ s⁻²; Python's double-precision arithmetic gives 65,304.07).
+    #[test]
+    fn the_eddington_factor_is_one_at_65_thousand_solar_luminosities_per_solar_mass() {
+        let g = eddington_factor(
+            SolarLuminosities::new(65_304.074_087_612_89),
+            SolarMasses::new(1.0),
+        );
+        assert!((g - 1.0).abs() < 1e-12, "{g}");
+        let g = eddington_factor(SolarLuminosities::new(4e6), SolarMasses::new(100.0));
+        assert!((g - 0.612_519_211_991_818_8).abs() < 1e-12, "{g}");
+    }
+
+    /// P06.T39: the modern rate is continuous where Γₑ passes 0.7, for a hot main-sequence star
+    /// (Vink's fit), a hot stripped giant, a cool supergiant beyond the Humphreys–Davidson limit
+    /// and a naked helium star, swept in mass at a fixed luminosity and temperature; and the
+    /// published SSE recipe has no such term.
+    #[test]
+    fn the_eddington_term_is_continuous_at_the_kink() {
+        let l = 4e6;
+        // Γₑ = 0.7 at 87.5 M☉ for 4 × 10⁶ L☉: masses from 60 to 120 M☉.
+        let log_m: Vec<f64> = (0..=2_000)
+            .map(|i| math::log10(60.0) + f64::from(i) * math::log10(2.0) / 2_000.0)
+            .collect();
+        let kink = l * EDDINGTON_PER_LIGHT_TO_MASS / EDDINGTON_KINK;
+        assert!((kink - 87.5).abs() < 0.1, "{kink}");
+        for (phase, core, t) in [
+            (Phase::MainSequence, 0.0, 45_000.0),
+            (Phase::CoreHeliumBurning, 0.97, 30_000.0),
+            (Phase::CoreHeliumBurning, 0.5, 5_000.0),
+            (Phase::HeliumMainSequence, 0.0, 120_000.0),
+        ] {
+            for z in [1e-4, 0.02] {
+                let f = |x: f64| {
+                    let m = math::exp10(x);
+                    math::log10(modern_rate(&star_at(phase, m, core * m, l, t), z))
+                };
+                assert_continuous_over(&format!("{phase:?} at Z = {z}"), f, &log_m, 0.005, 1e-6);
+            }
+        }
+        let below = star_at(Phase::MainSequence, 100.0, 0.0, l, 45_000.0);
+        let above = star_at(Phase::MainSequence, 60.0, 0.0, l, 45_000.0);
+        for s in [below, above] {
+            let sse = hurley_rate(&s, 0.02);
+            let own = nieuwenhuijzen_de_jager(&surface(&s, 0.02));
+            assert_same_bits(sse, own);
+        }
+    }
+
+    /// Above the kink the rate at a fixed luminosity rises as (Γₑ ÷ 0.7)^3.99 from the recipe's at
+    /// the kink: exactly so for the constant luminous-blue-variable rate beyond the
+    /// Humphreys–Davidson limit, and, for Vink's fits, which fall as M^−1.313 at fixed L, 3.99 dex
+    /// per dex of Γₑ measured from the kink's own rate.
+    #[test]
+    fn above_the_kink_the_rate_rises_as_gamma_to_the_3_99() {
+        let l = 4e6;
+        let kink = l * EDDINGTON_PER_LIGHT_TO_MASS / EDDINGTON_KINK;
+        for gamma in [0.8, 1.0, 1.5, 3.0] {
+            let m = kink * EDDINGTON_KINK / gamma;
+            let cool = star_at(Phase::CoreHeliumBurning, m, 0.5 * m, l, 5_000.0);
+            assert!(beyond_humphreys_davidson(&surface(&cool, 0.02)));
+            let expected = MODERN_LBV * math::powf(gamma / EDDINGTON_KINK, 3.99);
+            assert_close("LBV", modern_rate(&cool, 0.02), expected, 1e-9);
+            let hot = star_at(Phase::MainSequence, m, 0.0, l, 45_000.0);
+            let at_kink = star_at(Phase::MainSequence, kink, 0.0, l, 45_000.0);
+            assert_close(
+                "Vink",
+                modern_rate(&hot, 0.02),
+                modern_rate(&at_kink, 0.02) * math::powf(gamma / EDDINGTON_KINK, 3.99),
+                1e-9,
+            );
+        }
+        // Below the kink nothing changes.
+        let faint = star_at(Phase::MainSequence, 40.0, 0.0, math::exp10(5.7), 40_000.0);
+        let s = surface(&faint, 0.02);
+        assert!(eddington_factor(SolarLuminosities::new(s.l), SolarMasses::new(s.m)) < 0.7);
+        assert_same_bits(
+            modern_rate(&faint, 0.02),
+            hot_or_cool(&s, nieuwenhuijzen_de_jager(&s)),
+        );
     }
 
     /// Where only Vink's fits act, the blends reproduce each fit at the edges of their bands.

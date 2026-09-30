@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use hyperion_fit::check::{CheckInputs, CheckReport, Problem, Rerun, check};
 use hyperion_fit::emit::{
-    Destination, EmitTableError, RustTable, TableItem, Workspace, write_table,
+    Destination, EmitTableError, Placement, RustTable, TableItem, Workspace, write_table,
 };
 use hyperion_fit::manifest::{LockFile, Manifest, SimFingerprint};
 use hyperion_fit::pipeline::{ManifestKind, manifest_path, prepare};
@@ -420,13 +420,22 @@ fn the_committed_tables_are_fresh() {
     );
 }
 
-/// Every committed table declares its task's items, in order.
+/// Every committed table declares its task's items, in order: a file's, or its block's where
+/// tasks share the file.
 #[test]
 fn every_committed_table_declares_its_tasks_items() {
     let ws = Workspace::repository();
     for task in registry() {
         let text = fs::read_to_string(ws.tables_dir.join(task.table_path())).unwrap();
-        let body = hyperion_fit::emit::TableText::of_file(&text).body;
+        let body = match hyperion_fit::pipeline::placement(*task) {
+            Placement::File => hyperion_fit::emit::TableText::of_file(&text).body,
+            Placement::Block => {
+                hyperion_fit::emit::TableText::of_block(&text, task.name())
+                    .expect("a shared file's blocks parse")
+                    .expect("a shared file holds a block of each of its tasks")
+                    .body
+            }
+        };
         let declared: Vec<&str> = body
             .lines()
             .filter_map(|l| {

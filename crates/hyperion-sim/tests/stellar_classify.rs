@@ -73,7 +73,10 @@ fn write(w: &mut GoldenWriter, label: &str, s: &StarState, fe_h: f64, draws: &St
                 w.f64(&format!("{label}.index"), index);
             }
         }
-        SpectralType::NeutronStar(_) | SpectralType::BlackHole | SpectralType::NoRemnant => {}
+        SpectralType::NeutronStar(_)
+        | SpectralType::WolfRayet(_)
+        | SpectralType::BlackHole
+        | SpectralType::NoRemnant => {}
     }
     let teff = s.effective_temperature();
     if let Some(bc) = bolometric_correction_v(teff) {

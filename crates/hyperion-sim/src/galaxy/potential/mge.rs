@@ -497,6 +497,78 @@ impl Gaussian {
         };
         SolarMasses::new(m * fraction)
     }
+
+    /// The mass inside the sphere of radius `r` (ly) and the mean density over that sphere, M☉ per
+    /// cubic light-year: the Gaussian's monopole, which the galactic centre's potential takes
+    /// ([`SphericalAverage`](super::SphericalAverage)).
+    ///
+    /// The mass is [`enclosed_mass`](Self::enclosed_mass)'s quadrature; the density is its
+    /// derivative `dM ÷ dr ÷ 4πr²` by the same rules, with `g′(u) = u² e^(−u²÷2)`: `dM ÷ dr = (M ÷
+    /// σ) √(2 ÷ π) × ∫₀¹ (x² ÷ q) e^(−x²k÷2) dμ`, which is `∫ (x ÷ cos ψ)² e^(−x²÷2cos²ψ) dψ ÷ √ε`
+    /// oblate and `∫ x² (1 + t²)^(−3÷2) e^(−x²÷2(1 + t²)) dt ÷ √−ε` prolate. Two limits skip the
+    /// quadrature: beyond nine of its longest widths the Gaussian is all inside (to `e^(−40)`), and
+    /// within a hundredth of its shortest its density is the centre's less its first term in `r²`,
+    /// `ρ₀ (1 − r² (1 + (q⁻² − 1) ÷ 3) ÷ 2σ²)`, whose next term is under 10⁻⁸ of it there.
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the Gaussian's symbols, as in `enclosed_mass`"
+    )]
+    pub(crate) fn mass_and_shell_density(&self, r: f64) -> (f64, f64) {
+        let s = self.sigma.value();
+        let m = self.mass.value();
+        let (shortest, longest) = (s * self.q.min(1.0), s * self.q.max(1.0));
+        if r >= CUT * longest {
+            return (m, 0.0);
+        }
+        let four_pi = 4.0 * core::f64::consts::PI;
+        if r <= 0.01 * shortest {
+            let two_pi = 2.0 * core::f64::consts::PI;
+            let rho0 = m / (two_pi * two_pi.sqrt() * s * s * s * self.q);
+            let k = (1.0 + (1.0 / (self.q * self.q) - 1.0) / 3.0) * self.a;
+            let r2 = r * r;
+            let mass = four_pi * rho0 * r2 * r * (1.0 / 3.0 - k * r2 / 5.0);
+            return (mass, rho0 * (1.0 - k * r2));
+        }
+        let x = r / s;
+        let x2 = x * x;
+        let root_two_over_pi = (2.0 / core::f64::consts::PI).sqrt();
+        let slope = match self.shape {
+            Shape::NearSpherical { eps } => {
+                let q2 = self.q * self.q;
+                crate::galaxy::quad::gl32(
+                    |mu| math::exp(-0.5 * x2 * (1.0 + mu * mu * eps / q2)),
+                    0.0,
+                    1.0,
+                ) * x2
+                    / self.q
+            }
+            Shape::Oblate { root, .. } => {
+                crate::galaxy::quad::gl32(
+                    |psi| {
+                        let u = x / math::cos(psi);
+                        u * u * math::exp(-0.5 * u * u)
+                    },
+                    0.0,
+                    math::atan2(root, self.q),
+                ) / root
+            }
+            Shape::Prolate { root, .. } => {
+                let f = |t: f64| {
+                    let k = 1.0 + t * t;
+                    x2 / (k * k.sqrt()) * math::exp(-0.5 * x2 / k)
+                };
+                let inner = crate::galaxy::quad::gl32(f, 0.0, root.min(1.0));
+                let outer = if root > 1.0 {
+                    crate::galaxy::quad::gl32_log(f, 1.0, root)
+                } else {
+                    0.0
+                };
+                (inner + outer) / root
+            }
+        } * root_two_over_pi;
+        let mass = self.enclosed_mass(LightYears::new(r)).value();
+        (mass, m * slope / (s * four_pi * r * r))
+    }
 }
 
 /// `g(x) = ∫₀ˣ u² e^(−u²÷2) du = √(π ÷ 2) erf(x ÷ √2) − x e^(−x²÷2)`, by its series below
@@ -586,7 +658,8 @@ pub fn double_exponential(
 
 /// The thin disc with its central hole, `ρ ∝ e^(−R_h ÷ R − R ÷ length) e^(−|z| ÷ height)` with
 /// `R_h` the fixed [`THIN_DISC_HOLE_LENGTHS`](crate::galaxy::fields::disc::THIN_DISC_HOLE_LENGTHS)
-/// of `length`, as Gaussians of signed mass.
+/// of `length`, as Gaussians of signed mass; the nuclear disc's inner part takes the same form
+/// ([`NuclearDiscParams`](crate::galaxy::params::NuclearDiscParams)).
 ///
 /// The radial factor is [`MGE_HOLED_EXP`], whose weights are signed, and the vertical factor
 /// [`MGE_EXP`]; the terms are those of [`double_exponential`], radial terms the outer loop. The

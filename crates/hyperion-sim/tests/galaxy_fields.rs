@@ -1051,14 +1051,16 @@ fn the_components_add_up_to_the_galaxy() {
         let (params, fields) = seeded(seed);
         let components = fields.components();
         assert!(components.len() <= MAX_COMPONENTS);
-        assert_eq!(components.len(), 10 + params.halo().components().len());
+        assert_eq!(components.len(), 11 + params.halo().components().len());
         let order: Vec<Population> = components.iter().map(Component::population).collect();
         let mut expected = vec![Population::YoungThinDisc];
         expected.extend([Population::OldThinDisc; 5]);
+        // The nuclear disc's main and inner parts (plan 02, R26).
         expected.extend([
             Population::ThickDisc,
             Population::Bulge,
             Population::LongBar,
+            Population::NuclearDisc,
             Population::NuclearDisc,
         ]);
         expected.extend(std::iter::repeat_n(

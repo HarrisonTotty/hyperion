@@ -352,8 +352,10 @@ Decisions where the brainstorm is silent. None contradicts it.
    multiplies each envelope by an arm factor's bound over the cell, as built (plan 02, R17). It is
    at most `layer_bound` over a root octant, `CellBox::new([0, 0, 0], 65_536)`: that box's nearest
    corner is the origin, where every envelope peaks, and its ranges of radius and phase contain
-   every cell's, in any octant. The clamp is a pure function of the cell's own draw, so it
-   is deterministic, independent of order and cache, and the same in `resolve` as in
+   every cell's, in any octant. _Revised by plan 02's R26 (lane `pot02`):_ the largest bound over
+   a partition of the root cube (`placement::partition`), since the nuclear disc's holed inner part
+   no longer peaks at the origin; see Risks. The clamp is a pure function of the cell's own draw,
+   so it is deterministic, independent of order and cache, and the same in `resolve` as in
    `generate_cell`. It belongs to the generator version. It cannot make a census lopsided: a clamped
    cell would be short of candidates in every query alike, and the headroom check exists so that no
    galaxy that could reach the clamp is ever played. `check_index_headroom` is called by whoever
@@ -1103,3 +1105,14 @@ Reserved so that later plans move no star they need not:
     796 examined to 571).
   - Version 15's Chabrier high-mass scale, 0.68 to 0.92 (P15.T4.b, ruling 138), raised bands D and
     E's share of systems by 30% (0.0335 to 0.0437) and the walk by 23%.
+- **The partitioned headroom check (lane `pot02`, 2026-09-29, for version 16; plan 02, R26 and plan
+  09's "The joint revision as built").** The nuclear disc's inner part is holed, and a holed disc's
+  bound over one root octant is its amplitude at the centre, four and a half times its densest
+  ring's: the Milky Way fixture's layer A read 80,896 candidates under Kroupa's function against
+  65,536. `check_index_headroom` now takes the largest bound over a partition of the root cube, in
+  each octant the layer's 8 × 8 × 8 cells about the origin and then shells of seven boxes of
+  doubling edge (4,656 boxes for layer A, with their mirror images in every octant), which bounds
+  every cell as surely (each cell lies in one box, and a bound grows with its box). The fixture's
+  fullest layer-A cell now expects 20,608, in the ring near 33 ly (about 6,000 before, D6); the
+  check passes under both mass functions. No output moves through the check; the inner part itself
+  moves output.

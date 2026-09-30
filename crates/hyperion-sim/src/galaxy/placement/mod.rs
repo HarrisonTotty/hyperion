@@ -40,7 +40,7 @@ pub use generate::{cell_heap_bytes, generate_cell};
 #[cfg(test)]
 pub(crate) use headroom::largest_headroom_mean;
 pub use headroom::{check_index_headroom, rogue_planet_saturation_density};
-pub(crate) use headroom::{root_octant, saturated};
+pub(crate) use headroom::{partition, saturated};
 pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };

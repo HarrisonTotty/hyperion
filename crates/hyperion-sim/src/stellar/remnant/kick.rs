@@ -242,6 +242,19 @@ impl KickLawParams {
         ((hi - co_core.value()) / (hi - lo)).clamp(0.0, 1.0)
     }
 
+    /// Whether an iron core's collapse of `progenitor` takes the low mode, decided by the mark
+    /// `mode` (`star.kick.mode`): only a companion-stripped progenitor can, below the probability
+    /// [`KickLawParams::low_mode_probability`] of its carbon–oxygen core. The kick law reads it,
+    /// and so does the rank table's reference population, whose members are the collapses it
+    /// sends to the ordinary mode (ruling 147.2).
+    #[must_use]
+    pub fn takes_low_mode(&self, progenitor: &ProgenitorAtDeath, mode: Mark) -> bool {
+        progenitor.stripping() == Stripping::Companion
+            && mode.is_below(Threshold::from_probability(
+                self.low_mode_probability(progenitor.co_core_mass()),
+            ))
+    }
+
     /// The ordinary mode's speed, km/s, at the rank `rank`: the log-normal truncated at
     /// [`max_speed_km_s`](KickLawParams::max_speed_km_s), exp(μ + σ Φ⁻¹(r Φ(b))) with
     /// b = (ln `v_max` − μ) ÷ σ, the rank first held to [`KickLawParams::rank_clamp`].
@@ -574,25 +587,7 @@ impl StandardKickLaw {
         m0: SolarMasses,
         comp: &Composition,
     ) -> Death {
-        let collapse = matches!(
-            CollapseChannel::of(death.kind()),
-            Some(
-                CollapseChannel::IronCore
-                    | CollapseChannel::ElectronCapture
-                    | CollapseChannel::CompleteFallback
-            )
-        );
-        if !collapse || !binarity::is_stripped(draws.stripped(), m0, comp) {
-            return death;
-        }
-        let p = death.progenitor();
-        let progenitor = ProgenitorAtDeath::new(
-            p.co_core_mass(),
-            p.helium_core_mass(),
-            p.envelope_mass(),
-            Stripping::Companion,
-        );
-        Death::new(death.age(), death.kind(), progenitor)
+        stripped_mark_applied(death, draws, m0, comp)
     }
 
     /// The natal kick of a single star's `remnant` after `death`, from its `draws`: the law's kick
@@ -617,6 +612,37 @@ impl StandardKickLaw {
             }
         }
     }
+}
+
+/// [`StandardKickLaw::with_stripped_mark`]: `death` with the companion-stripped mark of `draws`
+/// applied, against plan 11's stripped share at initial mass `m0` and composition `comp`. The
+/// reference population reads it too (ruling 147.2).
+#[must_use]
+pub(crate) fn stripped_mark_applied(
+    death: Death,
+    draws: &StarDraws,
+    m0: SolarMasses,
+    comp: &Composition,
+) -> Death {
+    let collapse = matches!(
+        CollapseChannel::of(death.kind()),
+        Some(
+            CollapseChannel::IronCore
+                | CollapseChannel::ElectronCapture
+                | CollapseChannel::CompleteFallback
+        )
+    );
+    if !collapse || !binarity::is_stripped(draws.stripped(), m0, comp) {
+        return death;
+    }
+    let p = death.progenitor();
+    let progenitor = ProgenitorAtDeath::new(
+        p.co_core_mass(),
+        p.helium_core_mass(),
+        p.envelope_mass(),
+        Stripping::Companion,
+    );
+    Death::new(death.age(), death.kind(), progenitor)
 }
 
 impl KickLaw for StandardKickLaw {
@@ -648,14 +674,10 @@ impl KickLaw for StandardKickLaw {
                     ),
                     "an iron core leaves a neutron star or a black hole: {remnant:?}"
                 );
-                let co_core = progenitor.co_core_mass();
-                let low = progenitor.stripping() == Stripping::Companion
-                    && draws
-                        .mode
-                        .is_below(Threshold::from_probability(p.low_mode_probability(co_core)));
-                if low {
+                if p.takes_low_mode(progenitor, draws.mode) {
                     return maxwellian(p.low_sigma_km_s, draws, KickMode::Low);
                 }
+                let co_core = progenitor.co_core_mass();
                 let factor = match remnant.kind() {
                     RemnantKind::BlackHole => p.bh_factor,
                     RemnantKind::NeutronStar | RemnantKind::WhiteDwarf | RemnantKind::None => 1.0,

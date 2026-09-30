@@ -6,6 +6,10 @@
 /// The minimum of `f` on `[lo, hi]` by golden-section search over `iterations` steps: the midpoint
 /// of the last bracket. `f` should be unimodal on the interval.
 #[must_use]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the method's usual bracket symbols"
+)]
 pub fn golden_section(mut f: impl FnMut(f64) -> f64, lo: f64, hi: f64, iterations: u32) -> f64 {
     let g = 0.5 * (5.0_f64.sqrt() - 1.0);
     let (mut a, mut b) = (lo, hi);
@@ -27,7 +31,7 @@ pub fn golden_section(mut f: impl FnMut(f64) -> f64, lo: f64, hi: f64, iteration
             fd = f(d);
         }
     }
-    0.5 * (a + b)
+    f64::midpoint(a, b)
 }
 
 /// The minimum of `f` from `start` by Nelder and Mead's (1965) simplex, the initial simplex

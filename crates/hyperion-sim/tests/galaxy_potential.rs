@@ -405,7 +405,8 @@ fn the_tidal_radius_near_the_black_hole_is_the_point_mass_one() {
     );
 }
 
-/// The dark halo in the model is the parameters' NFW halo: M₂₀₀ inside r₂₀₀.
+/// The dark halo in the model is the parameters' NFW halo: M₂₀₀ inside r₂₀₀; the Gaussians hold
+/// the populations' and the gas's masses, and the nuclear cluster its mass inside the reach.
 #[test]
 fn the_model_holds_the_parameters_masses() {
     for (name, params) in models() {
@@ -432,11 +433,20 @@ fn the_model_holds_the_parameters_masses() {
             stars + params.gas_disc().mass().value(),
             1e-12,
         );
+        // The cluster's parameter is its mass inside the centre's reach, and the whole law
+        // holds a little more (plan 02, R26).
+        let cluster = model.nuclear_cluster();
+        assert_relative(
+            &name,
+            cluster.mass_within_reach().value(),
+            params.nuclear_cluster().mass().value(),
+            1e-12,
+        );
         assert_relative(
             &name,
             model.enclosed_mass(ly(1e12)).value(),
             model.dark_halo().enclosed_mass(ly(1e12)).value()
-                + params.nuclear_cluster().mass().value()
+                + cluster.mass().value()
                 + params.black_hole().mass().value(),
             1e-9,
         );
@@ -450,8 +460,9 @@ fn the_model_holds_the_parameters_masses() {
 /// The Milky Way fixture's bulge dispersion is 95–125 km/s, and its black hole lies within a
 /// factor of 2.5 of Sgr A*'s 4.3 × 10⁶ M☉ (plan 02, P02.T6.e).
 ///
-/// The fixture's scatter is the Milky Way's own offset from the relation, −0.3800 dex (−0.3876
-/// before ruling 138's fitted Chabrier scale moved `σ_e` to about 117.3 km/s), set so that
+/// The fixture's scatter is the Milky Way's own offset from the relation, −0.3840 dex (−0.3800
+/// before the nuclear disc's inner part, plan 02's R26; −0.3876 before ruling 138's fitted
+/// Chabrier scale moved `σ_e` to about 117.3 km/s), set so that
 /// plan 08's `σ_e` of 117.7 km/s (P08.T4.d with ruling 105.1) gives 4.30 × 10⁶ M☉ (plan 02, Risks,
 /// R13 and R22). Plan 02's spherical estimator read 109.5 km/s, for an offset of −0.210 dex; plan
 /// 08's first, face-on reading 97.2 km/s, for +0.081. Ruling 111.1 checks the offset against plan

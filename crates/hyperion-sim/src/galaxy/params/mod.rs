@@ -49,6 +49,7 @@ pub use inputs::{ArmCount, LesserProgenitorInput, RecentProgenitorInput};
 
 use self::inputs::Inputs;
 use super::Population;
+use super::fields::disc::THIN_DISC_HOLE_LENGTHS;
 use super::imf::MassFunctionKind;
 use crate::Seed;
 use crate::units::{
@@ -159,7 +160,33 @@ impl BarParams {
     }
 }
 
-/// The nuclear disc at the centre: exponential in radius, cored in height (plan 02, Design note 9).
+/// The nuclear disc at the centre: exponential in radius, cored in height (plan 02, Design note 9),
+/// with an inner part of its own (ruling 143.1 of 2026-09-22 with ruling 144's joint revision).
+///
+/// The disc is two double exponentials of the drawn mass together. The main part holds 1 −
+/// [`INNER_SHARE`](Self::INNER_SHARE) of it at the drawn length and height, Sormani et al. 2022's
+/// posterior (MNRAS 512, 1857: 88.6 pc and 28.4 pc for 1.05 × 10⁹ M☉). The inner part holds
+/// [`INNER_SHARE`](Self::INNER_SHARE) = 5.5% at [`INNER_LENGTH_RATIO`](Self::INNER_LENGTH_RATIO) =
+/// 0.158 of the length (46 ly, 14 pc, at Milky Way values), a height of
+/// [`INNER_HEIGHT_RATIO`](Self::INNER_HEIGHT_RATIO) = 0.8 of its own length, and the thin discs'
+/// central hole at [`THIN_DISC_HOLE_LENGTHS`] = 0.55 of its length, `Σ ∝ exp(−R_h ÷ R − R ÷ R_i)`,
+/// so that the thin discs' fitted Gaussian table serves its potential too. It carries the mass the
+/// model lacked between 3 and 30 pc: with the nuclear cluster and the black hole, 2.6 × 10⁷ M☉
+/// inside 10 pc and 7.7 × 10⁷ inside 30 pc, 100 km/s at 30 pc (Sofue 2013, PASJ 65, 118;
+/// Launhardt, Zylka and Mezger 2002, A&A 384, 112; the ACES cusp, Sofue et al., arXiv 2512.22751:
+/// 99 ± 13 km/s), where a single exponential gave 80.
+///
+/// The hole is the shape of what was missing: Sormani et al. (2020, MNRAS 499, 7; 2022) hold the
+/// region with Chatzopoulos et al.'s (2015) nuclear cluster of 6.1 × 10⁷ M☉, and that cluster less
+/// Schödel et al.'s (2014) is nothing at 2–3 pc, peaks near 5 pc and falls by 15 pc, all of it
+/// between the cluster and the disc; where the hole is, the cluster is 50–100 times denser, so the
+/// total density still falls steadily outward. It keeps the part's peak, a ring near 10 pc, at
+/// twice the main part's central density, which the ordinary grid's index holds for every draw: an
+/// unholed part of the same mass inside 30 pc peaked at eight times it and overflowed the finest
+/// layer at the Milky Way under Kroupa's function (ruling 144's "check the ordinary grid's index
+/// there"). The height ratio 0.8 is rounder than the disc's 0.37 (Gallego-Cano et al. 2020, A&A
+/// 634, A71), as Sormani et al. 2022's "separate, more spheroidal component" inside 30 pc suggests.
+/// The disc's own mass inside 100 pc is then 3.3 × 10⁸ M☉, in Sormani et al. 2020's 3.9 ± 1 × 10⁸.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NuclearDiscParams {
     length: LightYears,
@@ -167,6 +194,15 @@ pub struct NuclearDiscParams {
 }
 
 impl NuclearDiscParams {
+    /// The inner part's share of the nuclear disc's mass (and systems).
+    pub const INNER_SHARE: f64 = 0.055;
+
+    /// The inner part's scale length over the disc's.
+    pub const INNER_LENGTH_RATIO: f64 = 0.158;
+
+    /// The inner part's effective height over its own scale length.
+    pub const INNER_HEIGHT_RATIO: f64 = 0.8;
+
     /// The radial scale length, 200–400 ly.
     #[must_use]
     pub fn length(&self) -> LightYears {
@@ -178,16 +214,47 @@ impl NuclearDiscParams {
     pub fn height(&self) -> LightYears {
         self.height
     }
+
+    /// The inner part's scale length, [`INNER_LENGTH_RATIO`](Self::INNER_LENGTH_RATIO) of the
+    /// length.
+    #[must_use]
+    pub fn inner_length(&self) -> LightYears {
+        self.length * Self::INNER_LENGTH_RATIO
+    }
+
+    /// The inner part's effective height, [`INNER_HEIGHT_RATIO`](Self::INNER_HEIGHT_RATIO) of its
+    /// scale length.
+    #[must_use]
+    pub fn inner_height(&self) -> LightYears {
+        self.inner_length() * Self::INNER_HEIGHT_RATIO
+    }
+
+    /// The inner part's central hole `R_h`, [`THIN_DISC_HOLE_LENGTHS`] of its scale length.
+    #[must_use]
+    pub fn inner_hole(&self) -> LightYears {
+        self.inner_length() * THIN_DISC_HOLE_LENGTHS
+    }
 }
 
-/// The nuclear star cluster, as the potential needs it: a broken power law outside the
-/// populations' budgets (plan 02, Design note 15).
+/// The nuclear star cluster, as the potential and the centre both hold it: a smooth broken power
+/// law outside the populations' budgets (plan 02, Design note 15; ruling 144 of 2026-09-22's joint
+/// revision).
 ///
 /// Its mass is 0.024 of the nuclear disc's with 0.2 dex of scatter, the Milky Way's 2.5 × 10⁷ M☉
-/// (Schödel et al. 2014) against its nuclear disc's 1.05 × 10⁹ M☉ (Sormani et al. 2022); inner
-/// slope 1.3, break 10 ly, outer slope 3.5 (brainstorm, "Dense features"). The slope lies between
-/// Gallego-Cano et al.'s (2018) 1.43 ± 0.1 for the faint stars and Schödel et al.'s (2018) 1.13 ±
-/// 0.05 for the diffuse light.
+/// (Schödel et al. 2014) against its nuclear disc's 1.05 × 10⁹ M☉ (Sormani et al. 2022), capped at
+/// [`mass_cap`](Self::mass_cap) (ruling 144.5b). The law is the 3D Nuker law `ρ ∝ r^−γ (1 + (r ÷
+/// r_b)^α)^(−(β − γ) ÷ α)` with inner slope γ = 1.3, break `r_b` = 10 ly, sharpness α = 10 and
+/// outer slope β = 3.5 (brainstorm, "Dense features"; α is the value Gallego-Cano et al. 2018, A&A
+/// 609, A26, §5.3, and Schödel et al. 2018, A&A 609, A27, §4.4, fix in their fits), times a taper
+/// `(1 + (r ÷ 100 ly)⁴)^(−½)` that steepens the slope to 5.5 near the centre's reach (ruling
+/// 144.3). The slope lies between Gallego-Cano et al.'s 1.43 ± 0.1 for the faint stars and Schödel
+/// et al.'s 1.13 ± 0.05 for the diffuse light.
+///
+/// **The mass is the mass inside the reach**, [`NORMALISATION_RADIUS`](Self::NORMALISATION_RADIUS)
+/// = 128 ly, not the whole law's: Schödel et al. 2014's 2.5 × 10⁷ M☉ is a Sérsic component's total
+/// with well under 1% of its light beyond 39 pc, and the untapered law put 22% of its mass beyond
+/// the reach, which left M(<3 pc) a third under Schödel et al. 2018's 7.8 ± 0.6 × 10⁶ M☉ (ruling
+/// 144.2–3). The tapered law holds 96.8% of its mass inside the reach.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NuclearClusterParams {
     mass: SolarMasses,
@@ -200,14 +267,63 @@ impl NuclearClusterParams {
     /// The break radius.
     pub const BREAK_RADIUS: LightYears = LightYears::new(10.0);
 
-    /// The outer logarithmic slope of the density.
+    /// The break's sharpness α (Gallego-Cano et al. 2018; Schödel et al. 2018; ruling 144.1).
+    pub const BREAK_SHARPNESS: f64 = 10.0;
+
+    /// The outer logarithmic slope of the density between the break and the taper.
     pub const OUTER_SLOPE: f64 = 3.5;
 
-    /// The cluster's mass.
+    /// The taper's radius, near the centre's reach (ruling 144.3: "about 100 ly").
+    pub const TAPER_RADIUS: LightYears = LightYears::new(100.0);
+
+    /// The taper's sharpness (ruling 144.3: at most 4).
+    pub const TAPER_SHARPNESS: f64 = 4.0;
+
+    /// The logarithmic slope beyond the taper (ruling 144.3: 5 or more).
+    pub const TAPERED_SLOPE: f64 = 5.5;
+
+    /// The radius the mass is normalised inside: the reach of the centre's grid (plan 09,
+    /// P09.T27), 128 ly.
+    pub const NORMALISATION_RADIUS: LightYears = LightYears::new(128.0);
+
+    /// The cluster's mass inside [`NORMALISATION_RADIUS`](Self::NORMALISATION_RADIUS).
     #[must_use]
     pub fn mass(&self) -> SolarMasses {
         self.mass
     }
+
+    /// The most a drawn cluster may hold under `mass_function`, M☉ inside the reach (ruling
+    /// 144.5b): the mass at which the centre's fullest cell expects
+    /// [`FULLEST_CELL_CAP`](Self::FULLEST_CELL_CAP) candidates, so that every galaxy's centre
+    /// passes the index's headroom check (plan 09's `CentrePlacement::check_index_headroom`).
+    ///
+    /// The fullest cell is linear in the cluster's mass at a fixed shape and mass function (the
+    /// bound is the density's), so the cap is a constant per mass function, pinned by plan 09's
+    /// test `the_cap_s_centre_fills_its_fullest_cell_to_the_limit`. Kroupa's mass function puts
+    /// more, lighter systems in the same mass, so its cap is lower. At about 2.6 times the Milky
+    /// Way's 2.5 × 10⁷ M☉ under the default mass function (1.9 under Kroupa's), it lies at the
+    /// high end of Milky Way-mass hosts' nuclear clusters (Neumayer, Seth and Böker 2020, A&ARv
+    /// 28, 4), whose relation's scatter is large.
+    #[must_use]
+    pub fn mass_cap(mass_function: MassFunctionKind) -> SolarMasses {
+        SolarMasses::new(match mass_function {
+            MassFunctionKind::Chabrier => Self::MASS_CAP_CHABRIER,
+            MassFunctionKind::Kroupa => Self::MASS_CAP_KROUPA,
+        })
+    }
+
+    /// The expected candidates the capped cluster's fullest cell may hold: `8,192 − 8 √8,192`,
+    /// eight standard deviations under the index's 8,192 (ruling 144.5b).
+    pub const FULLEST_CELL_CAP: f64 = 7_468.0;
+
+    /// [`mass_cap`](Self::mass_cap) under the default mass function (Chabrier's), M☉: the Milky
+    /// Way's fullest cell expects 2,896 candidates for 2.5 × 10⁷ M☉, so 7,468 is reached at 6.45
+    /// × 10⁷, rounded down.
+    const MASS_CAP_CHABRIER: f64 = 6.4e7;
+
+    /// [`mass_cap`](Self::mass_cap) under Kroupa's, M☉: 3,964 candidates for 2.5 × 10⁷ M☉, so
+    /// 4.71 × 10⁷, rounded down.
+    const MASS_CAP_KROUPA: f64 = 4.7e7;
 
     /// The inner logarithmic slope, [`INNER_SLOPE`](Self::INNER_SLOPE).
     #[must_use]

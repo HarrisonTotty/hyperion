@@ -167,6 +167,14 @@ impl PotentialTables {
     pub fn bar_pattern_speed(&self) -> PerYear;
     pub fn bar_corotation(&self) -> LightYears;
 }
+// Added by the joint revision (R26): the cluster on the centre's law, and the monopole of the
+// Gaussians and the dark halo that plan 09's centre is inverted in.
+pub struct NuclearCluster { /* whole law's mass, &'static TracerProfile */ }   // spherical::
+pub struct SphericalAverage { /* ln M(<r) and Ψ at 73 knots, the dark halo */ }
+impl SphericalAverage {
+    pub fn of_extended(model: &MassModel) -> Self;
+    pub fn psi(&self, r: f64) -> f64;                            // (km/s)², r in ly
+}
 ```
 
 The range query's padding speed of 1,000 km/s is plan 03's (`query::PAD_SPEED`), not a constant of
@@ -436,7 +444,12 @@ unchanged; R22; the Milky Way fixture's 24%, once plan 07's ruling 19 drew its w
 by its own density) and the nuclear cluster (mass
 0.024 of the nuclear disc's with 0.2 dex of scatter, inner slope 1.3, break 10 ly, outer slope 3.5,
 outside the population budgets) enter the mass model so that the rotation curve and the
-enclosed-mass checks are right. Plans 07 and 09 own what they mean and may refine them.
+enclosed-mass checks are right. Plans 07 and 09 own what they mean and may refine them. _Revised by
+ruling 144's joint revision with ruling 143.1 (lane `pot02`; R26):_ the cluster is the centre's
+law, a Nuker break of sharpness α = 10 and a taper at 100 ly to a slope of 5.5, its mass the mass
+inside the centre's reach of 128 ly and capped per mass function where the centre's fullest cell
+reaches 7,468 candidates (6.4 × 10⁷ M☉, 4.7 × 10⁷ under Kroupa's); and the nuclear disc has an
+inner part, 5.5% of its mass on 0.158 of its length with the thin discs' hole.
 
 **D16. Coupled sizes are clamped.** A size is its Milky Way value times (mass ÷ Milky Way mass)^⅓
 times a log-normal scatter, clamped to the Populations table's range.
@@ -705,8 +718,10 @@ inside a few scale lengths; the derivative against a finite difference; Φ → �
 
 **P02.T6.c Spherical components.** `nfw::Nfw { m200, c, r200 }` with closed-form M(<r), Φ(r), v_c²
 and derivative; `PointMass`; `BrokenPowerLaw` for the nuclear cluster with M(<r) and Φ by radial
-quadrature tabulated at construction. Tests: NFW M(<r₂₀₀) = M₂₀₀; Φ finite at 0 and → 0 at infinity;
-escape speed from the halo alone is finite; nuclear cluster mass converges to its parameter.
+quadrature tabulated at construction (built in closed form for a sharp break, R15; replaced by
+`NuclearCluster` on the centre's tabulated law, R26). Tests: NFW M(<r₂₀₀) = M₂₀₀; Φ finite at 0 and
+→ 0 at infinity; escape speed from the halo alone is finite; nuclear cluster mass converges to its
+parameter.
 
 **P02.T6.d Mass model and tables.** `MassModel::new` assembles: thin-plus-young disc, thick disc,
 gas disc, nuclear disc, bar disc, bulge spheroid (moment-matched, D6, with the dimensionless moments
@@ -2300,3 +2315,73 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
   systems per ly³ at the Sun's height; 0.0426 M☉ pc⁻³). The nuclear-disc bracket becomes
   11.0–18.4 per ly³ (13.5–22.5 × 0.816; measured 17.93), and the black hole's offset is set again
   to −0.3800 dex so that it stays Sgr A*'s 4.30 × 10⁶ M☉ at σ_e ≈ 117.3 km/s.
+- **R26. The joint revision of the galactic centre and the potential (lane `pot02`, 2026-09-29, on
+  0500394 at `GENERATOR_VERSION` 15, for version 16's batch; ruling 143.1 with ruling 144's "Joint
+  revision").** Research: `research/r-obs12a/NOTE.md` (point 1), `research/r-centre09a/NOTE.md` and
+  the lane's research agent's two reports on the nuclear disc's inner part (its scripts in the lane's
+  `target/pot02/research/`). Moves the
+  potential and everything downstream; the goldens that move are re-blessed at 15 provisionally, and
+  the orchestrator bumps.
+  - _The nuclear cluster (144.1, 144.3)._ `BrokenPowerLaw` is gone. `spherical::NuclearCluster`
+    holds plan 09's law, the Nuker break of α = 10 at 10 ly to 3.5 and a taper at 100 ly of
+    sharpness 4 to 5.5 (`BREAK_SHARPNESS`, `TAPER_RADIUS`, `TAPER_SHARPNESS` and `TAPERED_SLOPE` of
+    `NuclearClusterParams`), on the centre's `TracerProfile` of that shape, tabulated once for every
+    galaxy (a `OnceLock`, since only the mass differs; 32 knots a decade, within 10⁻⁷ of a direct
+    quadrature), and `Copy` as before. `NuclearClusterParams::mass` is now the **mass inside
+    `NORMALISATION_RADIUS` = 128 ly**, the centre's reach; the whole law holds 1 ÷ 0.9680 of it
+    (2.556 × 10⁷ M☉ at the fixture). The taper's sharpness 4 and slope 5.5 are inside the ruling's
+    "at most 4" and "5 or more"; f stays positive (plan 09's sweep).
+  - _The nuclear disc's inner part (143.1)._ The nuclear disc is two components now, in the mass
+    model (a `double_exponential` of 1 − 5.5% of its mass, then a `holed_double_exponential` of
+    5.5%) and in the fields (two `Population::NuclearDisc` components after the long bar, 16 to 19
+    in all): the inner part has `NuclearDiscParams::inner_length()` = 0.158 of the length,
+    `inner_height()` = 0.8 of that and the thin discs' hole at 0.55 of it (`inner_hole()`), so
+    `MGE_HOLED_EXP` serves it and no table is refitted. Its vertical profile is solved like the main
+    part's, at two of its own lengths (`DiscProfiles::inner_nuclear`), and plan 08's kinematics give
+    each part a Jeans table of its own density (`KinematicTables::nuclear_discs`,
+    `Law::Nuclear(i)`). The research's first form, unholed (3.5%, 0.135 of the length, 0.6 tall),
+    met every target but peaked at 136 systems per ly³ at the centre, and the fixture's finest layer
+    then expected 73,851 candidates under Kroupa's function against its 65,536: the hole moves the
+    part's mass out of the cluster's region, where the cluster is 50–100 times denser, and its peak
+    to a ring near 10 pc at 34.3 per ly³. At the fixture, in the plane: v_c 128.0, 102.8, 99.7,
+    111.2, 122.8 and 139.3 km/s at 3, 10, 30, 60, 100 and 200 pc (the research's 127.8, 102.8,
+    100.0, 110.8, 120.9 and 131.9); M(<10 pc) 2.57 × 10⁷ and M(<30 pc) 7.65 × 10⁷ M☉ as spheres
+    (143.1: 2.5–3 × 10⁷ and 6–8 × 10⁷; v_c² r ÷ G at 30 pc 6.94 × 10⁷), the nuclear disc's own
+    M(<100 pc) 3.3 × 10⁸ (the research's; 3.9 ± 1 × 10⁸). Plan 03's headroom holds at the fixture
+    under both mass functions (layer A 20,608 candidates at most under the default mass function, in
+    the ring; plan 09's "The joint revision as built" for plan 03's partitioned check it needed).
+    The fixture's main part keeps the nuclear disc's central density at 16.94 per ly³, in 11.0–18.4
+    (the inner part is zero at the centre).
+  - _The cap (144.5b)._ `NuclearClusterParams::mass_cap(kind)`: 6.4 × 10⁷ M☉ under Chabrier's
+    function and 4.7 × 10⁷ under Kroupa's, where the centre's fullest cell (2,896 and 3,964
+    candidates for 2.5 × 10⁷ M☉, linear in the mass) reaches `FULLEST_CELL_CAP` = 7,468 = 8,192 −
+    8√8,192, rounded down; the draw takes `min(0.024 M_NSD 10^scatter, cap)`. Plan 09's
+    `the_cap_s_centre_fills_its_fullest_cell_to_the_limit` pins both.
+  - _The centre's potential (144's joint revision)._ `potential::SphericalAverage` is the model's
+    Gaussians' monopole (73 knots, 8 a decade from 10⁻³ to 10⁶ ly: `ln M(<r)` and its exact slope
+    from `Gaussian::mass_and_shell_density`, the density as the interpolant's own derivative, `W(r)`
+    by 16-node panels) plus the dark halo in closed form; plan 09's `CentreProfile` adds it (plan
+    09's side of this revision is its Risks' "The joint revision as built").
+  - _The fitted tables._ Only `displaced_forms` goes stale (`hyperion-fit check`: its probe
+    `GalaxyScales::v_c` moves with the potential), and it cannot be re-emitted without the bump:
+    `hyperion-fit run` refuses a changed body at the unchanged `--since 15`. At version 16 the smoke
+    orbits are run again in the revised potential (`hyperion-fit orbits --smoke` into the dataset's
+    git-ignored cache; the lane's run hashed its `displaced_orbits.txt` to `8397beb8…0b1a`, for
+    `data/displaced_smoke/PROVENANCE.toml`) and the table refitted at `--since 16`. The Gaussian
+    tables need no refit: the inner part reuses `MGE_HOLED_EXP`, and `mge` checks fresh.
+  - _The fixture's black hole._ The inner part deepens the black-hole-free model's bulge potential
+    a little (D8's σ is read in it), which raised the fixture's black hole to 4.340 × 10⁶ M☉ at the
+    offset −0.3800 dex; the offset is set again, to −0.3840, which puts it back at 4.30 × 10⁶.
+  - _Status at hand-off (2026-09-30)._ Done: every item of the joint revision but k(E);
+    goldens re-blessed at 15; `just ci` green but `displaced_forms`' staleness. Not done: (1) at the
+    version-16 bump, rerun the smoke orbits, refit `displaced_forms` at `--since 16`, update its
+    `PROVENANCE.toml` hash and re-bless; (2) 144.7's optional energy-dependent k(E), not started;
+    (3) the deferred findings below, for research.
+  - _Findings for the owner (pinned provisionally, not ruled)._ The inner part's ring holds some 50
+    systems per ly³ near 33 ly (the ACES's measured total there, with the cluster, is about 66 M☉
+    ly⁻³), which the ordinary grid's finest layer holds, but which takes the fixture's 30 rogue
+    planets per system past the rogue layer's 992.5 per ly³: plan 13's saturation threshold falls
+    from 37.5 to 10.09 per star (8.46 under Kroupa's), under the default 21, so the Milky Way's ring
+    saturates in place (ruling 125's device; plan 09's "The joint revision as built" for the
+    over-seed figures). The centre's projected isophote ratio still misses beyond 6 ly (144.7's
+    optional k(E) is not built), and under Kroupa's function 3.4 systems lie inside 10⁻³ ly.

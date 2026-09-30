@@ -1260,7 +1260,9 @@ Provides.
     solution (64 forces) and the final table agree to 0.2%; it costs 60–120 ms under load.
   - T6: the century's curvature exceeds 10⁻⁴ of a solar mass's tidal radius out to about 38 ly
     (the brainstorm says "the central few light-years", the plan 10 ly); the drift test's "to a
-    metre" is 4 m, the last bits of a light-year's offset in metres.
+    metre" is 4 m, the last bits of a light-year's offset in metres. Since plan 02's joint
+    revision of the centre (R26, lane `pot02`) it is 43.9 ly, and the test holds 50 ly
+    (provisional; ruling deferred).
 - **T4 and T6 deviations, as built.** `AZIMUTHAL_FLOOR`: where the Jeans equation's `⟨v_φ²⟩` falls
   below zero, where the tracer falls faster than the potential holds it, it is floored at 0.05
   σ_R² (never inside the three bodies at Milky Way values). T4.d integrates the face-on projection

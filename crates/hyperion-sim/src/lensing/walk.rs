@@ -24,7 +24,7 @@ use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::math;
 use crate::observe::{Drift, Observer, TraceMotionError, retarded};
 use crate::stellar::multiplicity::MAX_COMPANIONS;
-use crate::stellar::system::SystemStars;
+use crate::stellar::system::first_attempt_models;
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR, SPEED_OF_LIGHT};
 use crate::units::{
@@ -452,7 +452,15 @@ pub fn lens_mass_at(
         SystemKind::BrownDwarf | SystemKind::RoguePlanet => Some(record.primary_initial_mass()),
         SystemKind::Stellar => {
             let stars = match record.origin() {
-                SystemOrigin::Grid(_) => SystemStars::generate(galaxy, record),
+                // A range row's cost: the first attempt's single-star models, no binary engine
+                // (plan 11, P11.T11 as built).
+                SystemOrigin::Grid(_) => {
+                    let mass = first_attempt_models(galaxy, record)
+                        .iter()
+                        .filter_map(|star| star.state_at(t))
+                        .fold(0.0, |sum, state| sum + state.mass().value());
+                    return (mass > 0.0).then_some(SolarMasses::new(mass));
+                }
                 SystemOrigin::FeatureMember { .. } => {
                     let SystemIdKind::FeatureMember(id) = record.id().kind() else {
                         unreachable!("a feature member's record is built with a member ID")
@@ -478,8 +486,11 @@ fn layer_mass_bound(layer: Layer) -> SolarMasses {
     let hi = MassBand::of_layer(layer).hi();
     SolarMasses::new(match layer {
         Layer::BrownDwarf | Layer::RoguePlanet => hi,
+        // Every star is at most its primary's mass, and a bound brown dwarf (plan 11, P11.T2.d)
+        // is under the stellar floor.
         Layer::A | Layer::B | Layer::C | Layer::D | Layer::E => {
             hi * f64::from(u8::try_from(1 + MAX_COMPANIONS).expect("a handful of stars"))
+                + crate::stellar::multiplicity::MIN_COMPANION_MASS.value()
         }
     })
 }

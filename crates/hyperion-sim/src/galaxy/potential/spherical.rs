@@ -1,13 +1,16 @@
-//! Spherical mass components in closed form: the black hole and the nuclear cluster (plan 02,
-//! P02.T6.c), and the interface they share with the dark halo ([`Nfw`](super::nfw::Nfw)).
+//! Spherical mass components: the black hole in closed form and the nuclear cluster on its shared
+//! table (plan 02, P02.T6.c; ruling 144 of 2026-09-22), and the interface they share with the dark
+//! halo ([`Nfw`](super::nfw::Nfw)).
+
+use std::sync::OnceLock;
 
 use super::BuildComponentError;
 use crate::galaxy::consts::G;
+use crate::galaxy::features::centre::{TracerProfile, TracerShape};
 use crate::galaxy::params::NuclearClusterParams;
-use crate::math;
 use crate::units::{LightYears, SolarMasses};
 
-/// A spherical mass distribution with its enclosed mass and potential in closed form.
+/// A spherical mass distribution with its enclosed mass and potential at any radius.
 ///
 /// Radii are in light-years from the centre, potentials in (km/s)², zero at infinity. Every
 /// quantity is taken at `r > 0`; at the centre a point mass's potential is infinite.
@@ -81,58 +84,45 @@ impl SphericalMass for PointMass {
     }
 }
 
-/// A broken power law with a sharp break: `ρ = ρ_b (r ÷ r_b)^−γ₁` inside the break radius `r_b`
-/// and `ρ_b (r ÷ r_b)^−γ₂` outside, with `γ₁ < 2` so that the potential is finite at the centre
-/// and `γ₂ > 3` so that the mass is.
+/// The nuclear star cluster: plan 02's [`NuclearClusterParams`] law, which the centre holds too
+/// (plan 09's [`CentreProfile`](crate::galaxy::features::centre::CentreProfile); ruling 144 of
+/// 2026-09-22's joint revision).
 ///
-/// It stands for the nuclear star cluster: inner slope 1.3, break 10 ly and outer slope 3.5
-/// (brainstorm, "Dense features"). Re-checked, the slope lies between the 1.43 ± 0.1 that
-/// Gallego-Cano et al. (2018, A&A 609, A26) find for the faint stars and the 1.13 ± 0.05 of the
-/// diffuse light (Schödel et al. 2018, A&A 609, A27). The brainstorm gives the two slopes and the
-/// break and nothing of how sharp the break is; a sharp one needs no further parameter and has the
-/// enclosed mass and the potential in closed form. With `x = r ÷ r_b` and `A = 4π ρ_b r_b³`:
+/// The law is the 3D Nuker law with a smooth break of sharpness α = 10 at 10 ly and a taper near
+/// the centre's reach ([`NuclearClusterParams`]), whose mass and potential have no closed form:
+/// its shape is tabulated once, normalised to one ([`TracerProfile`], its integrals at 32 knots a
+/// decade by Gauss–Legendre panels, within 10⁻⁷ of a direct quadrature), and shared by every
+/// galaxy, since only the mass differs. The mass given is the mass inside
+/// [`NuclearClusterParams::NORMALISATION_RADIUS`]; the whole law holds that over the tabulated
+/// share inside it, 1 ÷ 0.968. With `F` the share inside `r` and `W` the outer moment `∫ᵣ^∞ 4πr′
+/// n dr′` of the normalised density `n`:
 ///
-/// - `M(<r) = A x^(3−γ₁) ÷ (3 − γ₁)` inside, `A [1 ÷ (3 − γ₁) + (1 − x^(3−γ₂)) ÷ (γ₂ − 3)]`
-///   outside, and in total `A [1 ÷ (3 − γ₁) + 1 ÷ (γ₂ − 3)]`;
-/// - `Φ(r) = −G M(<r) ÷ r − 4πG ∫_r^∞ ρ r′ dr′`, where the integral is `ρ_b r_b² [(1 −
-///   x^(2−γ₁)) ÷ (2 − γ₁) + 1 ÷ (γ₂ − 2)]` inside and `ρ_b r_b² x^(2−γ₂) ÷ (γ₂ − 2)` outside.
+/// - `M(<r) = M F(r)`, `ρ = M n(r)`;
+/// - `Φ(r) = −G M (F(r) ÷ r + W(r))`.
+///
+/// Until the joint revision the potential held a sharp broken power law of the whole mass in
+/// closed form, which disagreed with the centre's smooth one (ruling 144.1).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BrokenPowerLaw {
-    mass: SolarMasses,
-    break_radius: LightYears,
-    inner_slope: f64,
-    outer_slope: f64,
-    /// The density at the break, M☉ ly⁻³.
-    rho_break: f64,
+pub struct NuclearCluster {
+    /// The whole law's mass.
+    total: SolarMasses,
+    profile: &'static TracerProfile,
 }
 
-impl BrokenPowerLaw {
-    /// A broken power law of total `mass`, which may be zero, with the given break radius and
-    /// slopes.
+impl NuclearCluster {
+    /// The cluster holding `mass` inside [`NuclearClusterParams::NORMALISATION_RADIUS`], which may
+    /// be zero.
     ///
     /// # Errors
     ///
-    /// [`BuildComponentError`] if the mass is negative, the break radius not positive, the inner
-    /// slope outside `[0, 2)` or the outer slope not above 3.
-    pub fn new(
-        mass: SolarMasses,
-        break_radius: LightYears,
-        inner_slope: f64,
-        outer_slope: f64,
-    ) -> Result<Self, BuildComponentError> {
+    /// [`BuildComponentError`] if the mass is negative or not finite.
+    pub fn new(mass: SolarMasses) -> Result<Self, BuildComponentError> {
         BuildComponentError::check_non_negative("mass", mass.value())?;
-        BuildComponentError::check_positive("break radius", break_radius.value())?;
-        BuildComponentError::check_non_negative("inner slope", inner_slope)?;
-        BuildComponentError::check_positive("2 − inner slope", 2.0 - inner_slope)?;
-        BuildComponentError::check_positive("outer slope − 3", outer_slope - 3.0)?;
-        let rb = break_radius.value();
-        let shape = 1.0 / (3.0 - inner_slope) + 1.0 / (outer_slope - 3.0);
+        let profile = Self::shape();
+        let inside = profile.fraction_within(NuclearClusterParams::NORMALISATION_RADIUS.value());
         Ok(Self {
-            mass,
-            break_radius,
-            inner_slope,
-            outer_slope,
-            rho_break: mass.value() / (4.0 * core::f64::consts::PI * rb * rb * rb * shape),
+            total: SolarMasses::new(mass.value() / inside),
+            profile,
         })
     }
 
@@ -140,75 +130,50 @@ impl BrokenPowerLaw {
     ///
     /// # Panics
     ///
-    /// Never: the parameters' mass is non-negative and their slopes are fixed constants inside
-    /// the ranges [`new`](Self::new) accepts.
+    /// Never: the parameters' mass is non-negative and finite.
     #[must_use]
-    pub fn nuclear_cluster(params: &NuclearClusterParams) -> Self {
-        Self::new(
-            params.mass(),
-            params.break_radius(),
-            params.inner_slope(),
-            params.outer_slope(),
-        )
-        .expect("the nuclear cluster's parameters are valid")
+    pub fn of(params: &NuclearClusterParams) -> Self {
+        Self::new(params.mass()).expect("the nuclear cluster's mass is valid")
     }
 
-    /// The total mass.
+    /// The law's shape normalised to one, tabulated on first use and shared by every cluster.
+    #[must_use]
+    pub fn shape() -> &'static TracerProfile {
+        static SHAPE: OnceLock<TracerProfile> = OnceLock::new();
+        SHAPE.get_or_init(|| TracerProfile::new(TracerShape::nuclear_cluster()))
+    }
+
+    /// The whole law's mass, inside the reach and beyond it.
     #[must_use]
     pub fn mass(&self) -> SolarMasses {
-        self.mass
+        self.total
     }
 
-    /// The break radius.
+    /// The mass inside [`NuclearClusterParams::NORMALISATION_RADIUS`]: the parameter's.
     #[must_use]
-    pub fn break_radius(&self) -> LightYears {
-        self.break_radius
-    }
-
-    /// `A = 4π ρ_b r_b³`, M☉.
-    fn scale_mass(&self) -> f64 {
-        let rb = self.break_radius.value();
-        4.0 * core::f64::consts::PI * self.rho_break * rb * rb * rb
+    pub fn mass_within_reach(&self) -> SolarMasses {
+        self.enclosed_mass(NuclearClusterParams::NORMALISATION_RADIUS)
     }
 }
 
-impl SphericalMass for BrokenPowerLaw {
+impl SphericalMass for NuclearCluster {
     fn enclosed_mass(&self, r: LightYears) -> SolarMasses {
-        let x = r.value() / self.break_radius.value();
-        let (g1, g2) = (self.inner_slope, self.outer_slope);
-        let fraction = if x <= 1.0 {
-            math::powf(x, 3.0 - g1) / (3.0 - g1)
-        } else {
-            1.0 / (3.0 - g1) + (1.0 - math::powf(x, 3.0 - g2)) / (g2 - 3.0)
-        };
-        SolarMasses::new(self.scale_mass() * fraction)
+        SolarMasses::new(self.total.value() * self.profile.fraction_within(r.value()))
     }
 
     fn density(&self, r: LightYears) -> f64 {
-        let x = r.value() / self.break_radius.value();
-        let slope = if x <= 1.0 {
-            self.inner_slope
-        } else {
-            self.outer_slope
-        };
-        self.rho_break * math::powf(x, -slope)
+        self.total.value() * self.profile.density(r.value())
     }
 
     fn potential(&self, r: LightYears) -> f64 {
-        let rb = self.break_radius.value();
-        let x = r.value() / rb;
-        let (g1, g2) = (self.inner_slope, self.outer_slope);
-        let outside = if x <= 1.0 {
-            (1.0 - math::powf(x, 2.0 - g1)) / (2.0 - g1) + 1.0 / (g2 - 2.0)
+        let x = r.value();
+        let inner = if x > 0.0 {
+            self.profile.fraction_within(x) / x
         } else {
-            math::powf(x, 2.0 - g2) / (g2 - 2.0)
+            0.0
         };
-        let shell = 4.0 * core::f64::consts::PI * G * self.rho_break * rb * rb * outside;
-        if r.value() > 0.0 {
-            -G * self.enclosed_mass(r).value() / r.value() - shell
-        } else {
-            -shell
-        }
+        let outer = self.profile.outer_moment(x.max(f64::MIN_POSITIVE));
+        -G * self.total.value() * (inner + outer)
     }
 }
 
@@ -216,21 +181,23 @@ impl SphericalMass for BrokenPowerLaw {
 mod tests {
     use super::*;
     use crate::galaxy::quad::gl_log_panels;
+    use crate::math;
 
-    fn cluster() -> BrokenPowerLaw {
-        BrokenPowerLaw::new(SolarMasses::new(2.5e7), LightYears::new(10.0), 1.3, 3.5).unwrap()
+    fn cluster() -> NuclearCluster {
+        NuclearCluster::new(SolarMasses::new(2.5e7)).unwrap()
     }
 
-    /// The nuclear cluster's mass converges to its parameter, slowly, as the outer slope 3.5
-    /// gives: the mass outside r falls as r^−½.
+    /// The parameter is the mass inside the reach, the whole law's is 3.3% more, and the mass
+    /// rises to it: the taper's r^−5.5 leaves 6 × 10⁻³ beyond 256 ly (ruling 144.3).
     #[test]
-    fn the_cluster_mass_converges_to_its_parameter() {
+    fn the_cluster_holds_its_parameter_inside_the_reach() {
         let c = cluster();
-        let at = |r: f64| c.enclosed_mass(LightYears::new(r)).value() / 2.5e7;
-        assert!(at(1e12) > 1.0 - 1e-5 && at(1e12) <= 1.0 + 1e-12);
-        // At 1,000 break radii the mass outside is 2 × 1000^−½ of A, out of A (1 ÷ 1.7 + 2).
-        let outside = 2.0 / 1_000_f64.sqrt() / (1.0 / 1.7 + 2.0);
-        assert!((at(1e4) - (1.0 - outside)).abs() < 1e-12);
+        assert!((c.mass_within_reach().value() / 2.5e7 - 1.0).abs() < 1e-12);
+        let total = c.mass().value() / 2.5e7;
+        assert!((1.030..1.036).contains(&total), "{total}");
+        let at = |r: f64| c.enclosed_mass(LightYears::new(r)).value() / c.mass().value();
+        assert!((at(1e9) - 1.0).abs() < 1e-9);
+        assert!((0.990..0.996).contains(&at(256.0)), "{}", at(256.0));
         let mut previous = 0.0;
         for i in -40..=60 {
             let m = at(10.0 * math::exp(f64::from(i) * 0.1));
@@ -239,12 +206,11 @@ mod tests {
         }
     }
 
-    /// The closed forms agree with quadratures of the density.
+    /// The tabulated mass and potential agree with quadratures of the density.
     #[test]
     fn the_cluster_mass_and_potential_integrate_the_density() {
         let c = cluster();
-        for r in [0.1_f64, 3.0, 10.0, 30.0, 500.0] {
-            // Panels a decade wide from 10⁻⁹ ly, with one edge at the break.
+        for r in [0.1_f64, 3.0, 10.0, 30.0, 128.0, 500.0] {
             let edges: Vec<f64> = [1e-9, 1e-6, 1e-3, 0.01, 0.1, 1.0, 10.0, 100.0]
                 .into_iter()
                 .filter(|&e| e < r)
@@ -255,13 +221,13 @@ mod tests {
             let mass = gl_log_panels(shell, &edges);
             let closed = c.enclosed_mass(LightYears::new(r)).value();
             assert!(
-                (mass / closed - 1.0).abs() < 1e-8,
+                (mass / closed - 1.0).abs() < 1e-6,
                 "M({r}) {mass} against {closed}"
             );
             // Φ(r) = −∫_r^∞ G M(<x) ÷ x² dx.
             let mut outer: Vec<f64> = [r, 10.0 * r, 1e3 * r, 1e6 * r, 1e12 * r]
                 .into_iter()
-                .chain([10.0].into_iter().filter(|&b| b > r))
+                .chain([10.0, 100.0].into_iter().filter(|&b| b > r))
                 .collect();
             outer.sort_by(f64::total_cmp);
             let force = |x: f64| G * c.enclosed_mass(LightYears::new(x)).value() / (x * x);
@@ -295,14 +261,15 @@ mod tests {
     }
 
     #[test]
-    fn slopes_outside_their_ranges_are_rejected() {
-        let make =
-            |g1, g2| BrokenPowerLaw::new(SolarMasses::new(1.0), LightYears::new(1.0), g1, g2);
-        let quantity = |g1, g2| make(g1, g2).unwrap_err().quantity;
-        assert_eq!(quantity(2.0, 3.5), "2 − inner slope");
-        assert_eq!(quantity(1.3, 3.0), "outer slope − 3");
-        assert_eq!(quantity(-0.1, 3.5), "inner slope");
-        let accepted = make(0.0, 4.0).unwrap();
-        assert!(accepted.mass().value().total_cmp(&1.0).is_eq());
+    fn a_negative_cluster_mass_is_rejected() {
+        assert_eq!(
+            NuclearCluster::new(SolarMasses::new(-1.0)),
+            Err(BuildComponentError {
+                quantity: "mass",
+                value: -1.0
+            })
+        );
+        let empty = NuclearCluster::new(SolarMasses::ZERO).unwrap();
+        assert!(empty.potential(LightYears::new(3.0)).abs() < 1e-300);
     }
 }

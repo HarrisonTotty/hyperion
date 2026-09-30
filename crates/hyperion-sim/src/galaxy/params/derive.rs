@@ -127,7 +127,8 @@ const CONCENTRATION_INTERCEPT: f64 = 0.905;
 /// See [`CONCENTRATION_INTERCEPT`].
 const CONCENTRATION_SLOPE: f64 = -0.101;
 
-/// The nuclear cluster's mass over the nuclear disc's (plan 02, Design note 15).
+/// The nuclear cluster's mass inside the reach over the nuclear disc's (plan 02, Design note 15),
+/// before the cap ([`NuclearClusterParams::mass_cap`]; ruling 144.5b).
 const NUCLEAR_CLUSTER_MASS_RATIO: f64 = 0.024;
 
 /// Dark halo mass per globular cluster, M☉ (brainstorm, "What is inside a cluster today").
@@ -516,9 +517,10 @@ pub(super) fn build(i: &Inputs) -> Result<GalaxyParams, BuildGalaxyParamsError> 
         },
         nuclear_cluster: NuclearClusterParams {
             mass: SolarMasses::new(
-                NUCLEAR_CLUSTER_MASS_RATIO
+                (NUCLEAR_CLUSTER_MASS_RATIO
                     * nuclear_mass
-                    * math::exp10(i.nuclear_cluster_mass_scatter),
+                    * math::exp10(i.nuclear_cluster_mass_scatter))
+                .min(NuclearClusterParams::mass_cap(i.mass_function).value()),
             ),
         },
         arms: ArmParams {

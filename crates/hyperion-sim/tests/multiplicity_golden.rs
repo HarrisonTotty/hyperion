@@ -104,6 +104,8 @@ fn write_hierarchy(w: &mut GoldenWriter, label: &str, h: &SystemHierarchy) {
             &format!("{label}.star{index}.mass_msun"),
             star.initial_mass().value(),
         );
+        // P11.T2.d: which body is a brown dwarf.
+        w.line(&format!("{label}.star{index}.kind = {:?}", star.kind()));
     }
     for (node, i) in h.nodes().iter().zip(0_u32..) {
         let at = format!("{label}.node{i}");

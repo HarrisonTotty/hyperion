@@ -1433,6 +1433,10 @@ Runs before P06.T24.a, whose WNh class it feeds.
   of `post_main_sequence_eddington_excursions_are_pinned` replaced by this test.
 - **Accept:** tests pass. **Moves output** (the post-main-sequence evolution of stars above about
   80 M☉, low-Z remnants, the fate table's high panel and the kick rank table): its own bump.
+- **Done (round 9, `events06a`), provisionally at version 15 for the orchestrator's v16 batch.**
+  `sse::wind::{eddington_factor, EDDINGTON_KINK}` and the steepened modern rate; the test is
+  `the_eddington_wind_bounds_the_excursions_or_pins_them`, which misses its bound below Z ≈ 0.006
+  and pins those rows (see "P06.T39, T24.a, T26.d and T31, as built" under Risks).
 
 #### P06.T24 Classes beyond the MK grid
 
@@ -1469,6 +1473,8 @@ massive and stripped stars, T24.b the rest.
     by its disc draw, and a 4 M☉ one at 0.3 Myr is `HerbigAeBe`; count checks in T31.
 - **Files:** `stellar/classify/peculiar.rs`.
 - **Accept:** `cargo test -p hyperion-sim stellar::classify::peculiar` passes after each subtask.
+- **T24.a done (round 9, `events06a`).** The deviations and findings are under Risks ("P06.T39,
+  T24.a, T26.d and T31, as built"). T24.b waits on T28.f.
 
 #### P06.T25 Rotation and magnetism
 
@@ -1524,6 +1530,8 @@ massive and stripped stars, T24.b the rest.
   cycle number under the star's `star.var.cycle` event key. Regular pulsators use zero noise
   amplitude; Miras a few per cent of period jitter and 10–30% of amplitude scatter; semiregulars
   more.
+- **T26.d done (round 9, `events06a`)**: `variability::light_factor_at(star, cycles, t)`, with
+  the star's `star.var.cycle` series passed in beside it (see Risks).
 - **Files:** `stellar/variability.rs`.
 - **Tests:** a 5 M☉ blue-loop star gets a Cepheid period of 3–10 days, and the sample's Cepheids
   follow a period–luminosity slope within 15% of the observed one; RR Lyrae periods of 0.3–0.9 days;
@@ -1735,6 +1743,8 @@ Chabrier's (ruling 2 of 2026-09-21): as built, `MassFunctionKind`'s default and
 - **Files:** `stellar/testing.rs`, `crates/hyperion-sim/tests/stellar_statistics.rs`.
 - **Accept:** `just test-slow` passes; a band that fails is a finding to resolve in the model or to
   widen with a recorded reason, never silently.
+- **Done (round 9, `events06a`)**, with the slow tests in `stellar/testing.rs` itself rather than
+  `tests/stellar_statistics.rs` (see Risks for why and for the bands measured).
 
 #### P06.T32 Benchmarks
 
@@ -4112,3 +4122,164 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
   nebulae, and Kargaltsev and Pavlov's Chandra nebulae reach 10³⁵·⁴ erg/s at 10⁴–10⁵ yr. Plan 09's
   `snr::PulsarWindNebula` reads the same flag. The median nebula lasts 1.45 × 10⁴ yr; T21.e's test
   passes unchanged.
+- **P06.T39, T24.a, T26.d and T31, as built (round 9, `events06a`; provisional at version 15, for
+  the orchestrator's v16 batch).**
+  - _T39, the wind._ `sse::wind::eddington_factor(L, M)` is Γ_e at X = 0 (κ_e = 0.02 m² kg⁻¹, 1 at
+    L ÷ M = 65,304 L☉ per M☉). Under `WindRecipe::Modern`, above Γ_e = 0.7 the rate is the larger
+    of the recipe's own and the recipe's rate at the star's "kink twin" (its L, R, T and core, with
+    the mass M Γ_e ÷ 0.7 at which Γ_e is 0.7) times (Γ_e ÷ 0.7)^3.99. So at a fixed L log Ṁ rises as
+    3.99 log Γ_e from the recipe's own rate at the kink, continuously; the L dependence at a fixed
+    Γ_e is the recipe's at the kink (Vink et al. 2001's L^0.88), not Vink et al. 2011's L^0.78,
+    which a recipe-anchored kink cannot also have. `WindRecipe::Hurley2000` is untouched (SSE's
+    validation). _Deviation:_ the early and thermally pulsing AGB keep their own rates: the end of
+    the superwind reaches Γ_e ≈ 0.8 at intermediate masses (7 M☉, L ≈ 6 × 10⁴ L☉ at 1.2 M☉),
+    where the line-driven kink does not describe the dust-driven wind, and applying it there moved
+    every AGB death age by a little (the fate table's mid panel and, through T30's mean masses,
+    the whole galaxy).
+  - _T39, a finding (pinned, not tuned; for a ruling):_ the plan's bound, no living state over
+    10³ years at Γ_e(X = 0) > 1, holds from Z = 0.014, and at 100–110 M☉ at Z = 0.006, but not at
+    lower Z. The steepening removes the large excursions (the largest Γ_e after the main sequence
+    falls from 6.7–8.0 to 1.15–1.75 at Z ≤ 0.001), but a star then sits just above the limit while
+    it loses its envelope at the steepened rate, which at Γ_e ≈ 1–1.3 is only 4–12 times the
+    recipe's: Belczynski et al.'s 1.5 × 10⁻⁴ M☉ a year for a red supergiant beyond the
+    Humphreys–Davidson limit, with 15–60 M☉ of envelope, and, at the stripping instant, Vink's
+    rate at Z^0.85. Measured (years above 1, largest Γ_e): 15–38 kyr and 1.15–1.75 at Z = 10⁻⁴
+    (80–150 M☉), 11–29 kyr and 1.15–1.49 at Z = 0.001, 1.5–10 kyr and 1.01–1.12 at 120–150 M☉ and
+    Z = 0.006. The plan's "strips … in decades … in a few thousand years" needs rates of order
+    10⁻² M☉ a year at Γ_e just above 1, which the recipe-anchored law does not give; a
+    continuum-driven rate above Γ_e = 1 (up to the photon-tiring limit), or the kink read at the
+    surface hydrogen rather than X = 0, would. `the_eddington_wind_bounds_the_excursions_or_pins_them`
+    pins the rows over 10³ years (largest Γ_e within 10%, time within a factor of two).
+  - _T39, what moved:_ stars that reach Γ_e > 0.7 off the AGB, which is from about 40–60 M☉ at low
+    Z and about 100 M☉ at solar Z (not only "above about 80 M☉"): their post-main-sequence tracks,
+    remnants and fates. The fate table's high panel was re-emitted (`stellar_fates_high`, since
+    15: 99 of 1,633 cells left to the exact track, from 103), and so, through T30's `TrackFates`
+    nodes, the mean mass per system, the galaxy's scales and every system: the provisional
+    displaced-form table's fingerprint (`GalaxyScales::v_c`) moved, so its smoke histograms were
+    rerun in the new potential (PROVENANCE's SHA-256 updated) and the table refitted. The fit
+    tool refuses a changed table at an unchanged `since` (15), so it was written by removing the
+    old file first, the tool's own path for a new table: **the v16 bump must re-emit it** with
+    `--since 16`. The kick rank table's quantiles came out bit for bit the same (only its
+    fingerprint moved). The stripping table (P11.T1.d, since 14 → 15) was re-emitted too: its
+    fingerprint held, but `binarity::tests::the_table_follows_the_quadrature_and_the_tracks` found
+    its core-helium-burning radius 6.3% off the moved tracks (window 5%); after the rerun the
+    share is within 0.0688 of the exact at the cells' centres. `hyperion-fit check` is fresh.
+  - _T24.a._ `classify::peculiar` (`is_luminous_blue_variable`, `LBV_MIN_LUMINOSITY`,
+    `WolfRayetType`, `WolfRayetSequence`, `HeliumSurface`, `carbon_shows_after`,
+    `WOLF_RAYET_MIN_TEFF`); `SpectralType::WolfRayet`; `PeculiarClass`'s `WolfRayet`,
+    `HotSubdwarf` and `LuminousBlueVariable`; `ClassExtras::helium_star`; `sse::PhasePredicate`,
+    `sse::AgeInterval` and `Track::window_where`; `StarModel::lbv_window` and `SystemStars::lbv_window`. Written forms:
+    `WN6`, `WN7h`, `WC5`, `WO2`; `sdB0`, `sdO5` (the `sd` prefix on the letter the 40,000 K split
+    gives, the subtype from the dwarf scale held to that letter); `B2Ia+ LBV`. `object_kind` now
+    follows the classification: a WR type is `WolfRayet` (the WNh stars included), a hot subdwarf
+    `HotSubdwarf`, and any other naked helium star goes by its luminosity class. The S Doradus
+    cycles read `is_luminous_blue_variable`, which replaces variability's copy of the criterion,
+    unchanged.
+    - WNh: hot (≥ 30,000 K, the lane's choice below the WN9 stars' T* of 32–38 kK), above the
+      floor, hydrogen-rich (MS to TPAGB) and either an envelope under 10% of the mass or Γ_e at the
+      surface hydrogen, taken as X = 0.76 − 3Z, of 0.5 or more (Gräfener et al. 2011, section 2;
+      Vink et al.'s 0.7 the upper bracket; the lane's choice, provisional), which makes the most
+      massive main-sequence stars WNh, as R136's are.
+    - WN → WC: the mass lost as a helium star exceeds f × its entry mass, f = 1 ÷ (1 + (M ÷ 6.30
+      M☉)^0.855), fitted to Langer's (1989a, table 1) helium zero-age convective cores at 2–60 M☉
+      (within 0.021, rms 0.012; held at 60 M☉ above), the criterion of Langer (1989b, section 3.1);
+      it agrees within 0.03 with Woosley (2019) and Yoon (2017). The entry mass is the track's
+      (`Track::helium_star_entry_mass`) and reaches `classify` through `ClassExtras`; without it a
+      helium star is WN.
+    - Subtypes from T* tables: WN2–9 from Hamann et al. (2019, table 1) medians, WC4–9 from Sander
+      et al. (2019, table 5), WO1–4 after Tramper et al. (2015) (the lane's reading).
+    - Hot subdwarfs from 20,000 K (Heber 2016, section 2.2), sdO from 40,000 K (a convention: the
+      classes are spectroscopic).
+    - _Findings, pinned provisionally (for a ruling):_ (1) the floor 10⁴·⁹ L☉ × (Z ÷ 0.02)^−0.4 is
+      the plan's; Shenar et al. (2020, A&A 634, A79, section 3) give the observed single-WR floor
+      as log L = 4.9, 5.25 and 5.6 at Z = 0.014, 0.006 and 0.002, i.e. 10⁴·⁹ (Z ÷ 0.014)^−0.82, twice
+      the plan's floor at the SMC's Z. (2) WO from 10⁵ K is the plan's; on the stellar temperature
+      T* that hydrostatic models give, WO stars are 150–210 kK and WC4 already 117 kK (Tramper et
+      al. 2015, table 4; Sander et al. 2019), so 10⁵ K is the τ = 2/3 scale (Aadland et al. 2022).
+      (3) The backbone's helium stars are hydrostatically hot (100–150 kK), so almost every
+      WN star is WN2–3; observed WN5–9 stars have T* of 36–63 kK (Crowther 2007, section 3.3).
+      (4) The LBV criterion's 8,000 K is the plan's; Humphreys and Davidson (1994, section 2.4)
+      put eruptions at 7,000–8,000 K, and HPT's limit only admits stars cooler than
+      5,772 K (L ÷ 10⁵ L☉)^¼, 14–32 kK, cooler than many quiescent LBVs.
+    - `Track::window_where` returns the hull of the ages at which the predicate holds (257
+      samples a living segment, 60 bisections at each change), within the part of the track
+      that is built; the 60 M☉ star's window has no gap in the test.
+  - _T26.d._ `variability::light_factor_at(star, cycles, t)`: `StarModel` holds no seed or ID, so
+    the star's `star.var.cycle` series comes in beside it (a deviation from the plan's
+    `light_factor_at(star, t)`); `StarModel::variability_at(t)` is new. The clock's frequency is the
+    epoch's plus its first derivative from the period ±10 years about the epoch, held so that the
+    frequency stays above half the epoch's over the source horizon and constant in its drift
+    beyond it; a star whose kind at t is not its kind at the epoch takes the period at t with no
+    drift. The light curve is −(A ÷ 2) cos(π g), maximum light at the cycle's start, rising over
+    0.3 of the cycle for Cepheids, 0.15 for RR Lyrae, 0.4 for Miras and 0.5 otherwise; per-cycle
+    amplitude marks (uniform, standard deviation 20% for Miras, 30–50% for semiregulars and
+    irregulars) blend smoothly into the next cycle's; period jitter is the monotone phase's
+    amplitude, 0.03 cycles for Miras, 0.05–0.08 for the rest of the irregular kinds, 0 for the
+    regular pulsators; forty octaves on a one-cycle lattice for every irregular kind (the shortest
+    clock period over the source horizon), so the octave count never depends on the period. The
+    shares are the lane's, provisional.
+  - _T31._ `stellar::testing`'s `Sampling`, `SampledStar`, `SampleInputs`, `sample_population`,
+    `sample_population_star`, `sample_inputs`, `sample_star`, `sample_range`,
+    `reference_position` and `components_of`, under `cfg(test)` or the `testing` feature. The
+    draws of mass, age and [Fe/H] are a SplitMix64 sequence of the sample's
+    seed, key and index, opening no domain tag; each star's own draws are on a synthetic layer-A
+    body. _Deviation:_ the slow tests live in `stellar/testing.rs`'s own test module, not
+    `tests/stellar_statistics.rs`: an integration test cannot reach a module behind the `testing`
+    feature unless the build enables it, and no build does, so `required-features` would skip it
+    under `just test-slow`. Galaxy-wide counts sample each density component at its population's
+    reference position (the solar circle for the discs and halo, 3,000 ly along the bar for the
+    bulge and bar, 300 ly for the nuclear disc) in the bands that hold the counted objects; the
+    young disc's metallicity is the solar circle's. The galaxy-wide counts and the core-collapse
+    rates do not draw an age for their stars: each star's full track gives the ages at which it is
+    the counted object (sampled at 4,000 steps of its life, 400 of its nebula's span, 400
+    log-spaced remnant ages for a pulsar), and the component's age distribution weighs them, so
+    short phases are not left to chance (4,000 primaries a component and band). T28.e's
+    giant-eruption rate is not retuned here (T28 is not built).
+  - _T31, measured at Milky Way parameters_ (fixed seed; the slow tests print every figure):
+    - Thin disc at 26,000 ly, 10⁶ primaries: M 76.1%, K **15.5%**, G **4.71%**, F 2.98%, A 0.548%,
+      B 0.095%, O 1.2 × 10⁻⁶ of the main sequence; white dwarfs 8.61% and giants 0.436% of objects.
+    - Old populations: the heaviest living primary of 10⁵ in band C is **1.096** (thick disc),
+      **1.166** (bulge) and **1.064 M☉** (halo); 0.43%, 6.1% and 0.05% of those primaries live
+      above 1 M☉, at [Fe/H] up to +0.38, +1.75 (held at Z = 0.03 by the formulae) and +0.52 and
+      ages from 10.0, 8.0 and 11.0 Gyr. Giants and horizontal-branch stars 0.36%, 0.39% and 0.33%
+      of objects. Halo RR Lyrae **5.3 × 10⁻⁴** per M☉ of living primaries.
+    - Layer E: none of 2 × 10⁴ old-thin-disc primaries living; neutron stars 64.8% of the neutron
+      stars and black holes; 94% of the young disc's living layer-E stars under 30 Myr.
+    - Galaxy-wide: protostars 9.7 × 10⁵; stars above 100 M☉ 1,107; Wolf-Rayet stars 1,244; LBVs
+      181; classical Cepheids 44,500; planetary nebulae 6,200; AGB white-dwarf births **0.64 a
+      year**, with a nebula for **0.55** of them; living radio pulsars 6.3 × 10⁵, 11.3% of them
+      beamed along +x; core collapses 2.13 a century, and 1.77, 1.22, 1.09 and 2.73 at seeds 1–4.
+  - _T31, findings (the bold figures), pinned provisionally within 15% (for a ruling; the
+    windows are not widened):_
+    - The thin disc's K dwarfs (15.5% against 10–14%) and G dwarfs (4.7% against 5–8%): the
+      mass function's primaries of 0.5–1.0 M☉ against the census's.
+    - "Nothing living above the turn-off (0.8–1.0 M☉)": the populations' own ages and
+      metallicities keep stars of up to 1.1–1.17 M☉ alive (the bulge from 8 Gyr, and its [Fe/H]
+      field's tail above Z = 0.03). The window, or the populations' age and metallicity ranges,
+      is the question.
+    - Halo RR Lyrae at 5.3 × 10⁻⁴ per M☉ of living primaries, five times the observed 1 × 10⁻⁴
+      (Sesar et al. 2013 over Deason et al. 2019 and Mackereth and Bovy 2020; the window of a
+      factor of three is 3.3 × 10⁻⁵–3 × 10⁻⁴): the RR Lyrae strip's reach or the halo's
+      horizontal-branch morphology. Companions are not in the mass, which would lower it by a
+      quarter or so.
+    - AGB white-dwarf births at 0.64 a year against 1.2–3.0, and a nebula share of 0.55 against
+      0.6–0.95. By ruling 127.2 the light low-end cores of rulings 92 and 99 are to be examined
+      first. The planetary nebulae (6,200) sit inside the plan's window but under its expected
+      20,000–40,000, as the birth rate does.
+    - The core-collapse window "1–8 across seeds" is met with little margin at seed 3 (1.09).
+- **Ruling 147.2, as built (lane `kick147`, 2026-09-30; moves output, provisional bless at 15 for
+  the version 16 batch).** `ReferencePopulation::score`'s members are the iron-core neutron stars
+  that take the ordinary mode: the companion-stripped mark is applied (`binarity::is_stripped`,
+  through `kick::stripped_mark_applied`, which `StandardKickLaw::with_stripped_mark` now calls)
+  and the star's own mode draw is read by `KickLawParams::takes_low_mode`, which the law's kick
+  reads too. `tables::kick_rank` is task revision 1 (10⁶ members, fresh-score acceptance mean
+  5.6000, sd 0.6774; largest rank shift 0.062), its fingerprint gains the stripped share at 12, 20
+  and 40 M☉, and `cluster_retention` is re-emitted. Test 1 asserts on every ordinary-mode neutron
+  star: n 9,131, ln v mean 5.557 and sd 0.631, K–S p 0.87; reported, unstripped 6,979 at 5.436
+  and 0.607, companion-stripped 2,152 at 5.952 and 0.540. The fresh ranks are uniform (p 0.52).
+  Retention 0.2740 / 0.2783 / 0.3232, low mode 0.2740; test 5 0.771; test 6 0.711 unkicked,
+  light 0.670 and 0.136; under 100 km/s 0.0903.
+  - Isolated pulsars under 50 km/s on the sky 0.0708, against 3–7% (expected about 0.04): held at
+    the measured value (provisional; ruling deferred).
+  - Neutron stars above the escape speed 0.1159, against 12–20% (expected about 0.15): held at the
+    measured value (provisional; ruling deferred).

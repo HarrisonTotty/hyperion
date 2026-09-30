@@ -6,9 +6,9 @@ use super::mge::{
     spheroidal_exponential,
 };
 use super::nfw::Nfw;
-use super::spherical::{BrokenPowerLaw, PointMass, SphericalMass};
+use super::spherical::{NuclearCluster, PointMass, SphericalMass};
 use crate::galaxy::Population;
-use crate::galaxy::params::{BulgeParams, GalaxyParams};
+use crate::galaxy::params::{BulgeParams, GalaxyParams, NuclearDiscParams};
 use crate::math;
 use crate::units::{LightYears, SolarMasses};
 
@@ -67,9 +67,10 @@ pub(crate) fn bulge_spheroid(bulge: &BulgeParams) -> (LightYears, LightYears) {
 ///
 /// The Gaussians come in a fixed order, which is part of the generator version because every
 /// sum runs in it: the thin disc with the young disc, the thick disc, the gas disc, the nuclear
-/// disc, the bar and the bulge. Then the dark halo, the nuclear cluster and the black hole. The
-/// thin and young discs are one double exponential of their combined mass and the drawn mean
-/// height (Design note 6), with the thin discs' central hole
+/// disc's main and inner parts ([`NuclearDiscParams`]), the bar and the bulge. Then the dark
+/// halo, the nuclear cluster and the black hole. The thin and young discs are one double
+/// exponential of their combined mass and the drawn mean height (Design note 6), with the thin
+/// discs' central hole
 /// ([`mge::holed_double_exponential`](super::mge::holed_double_exponential); plan 02, P02.T12.b),
 /// whose Gaussians' masses are signed. The bar is an axisymmetric disc with its azimuthally averaged surface
 /// density ([`mge::bar_disc`](super::mge::bar_disc)); the boxy bulge is the spheroidal
@@ -104,7 +105,7 @@ pub(crate) fn bulge_spheroid(bulge: &BulgeParams) -> (LightYears, LightYears) {
 pub struct MassModel {
     gaussians: Vec<Gaussian>,
     dark_halo: Nfw,
-    nuclear_cluster: BrokenPowerLaw,
+    nuclear_cluster: NuclearCluster,
     black_hole: PointMass,
     bar_corotation: LightYears,
 }
@@ -140,9 +141,14 @@ impl MassModel {
             double_exponential(mass(Population::ThickDisc), thick.length(), thick.height()),
             double_exponential(gas.mass(), gas.length(), gas.height()),
             double_exponential(
-                mass(Population::NuclearDisc),
+                mass(Population::NuclearDisc) * (1.0 - NuclearDiscParams::INNER_SHARE),
                 nuclear.length(),
                 nuclear.height(),
+            ),
+            holed_double_exponential(
+                mass(Population::NuclearDisc) * NuclearDiscParams::INNER_SHARE,
+                nuclear.inner_length(),
+                nuclear.inner_height(),
             ),
             bar_disc(mass(Population::LongBar), bar.half_length(), bar.height()),
             spheroidal_exponential(mass(Population::Bulge), a_r, a_z),
@@ -153,20 +159,13 @@ impl MassModel {
             .collect();
         let (nuclear_cluster, black_hole) = match centre {
             Centre::Included => (
-                BrokenPowerLaw::nuclear_cluster(params.nuclear_cluster()),
+                NuclearCluster::of(params.nuclear_cluster()),
                 params.black_hole().mass(),
             ),
-            Centre::Excluded => {
-                let cluster = params.nuclear_cluster();
-                let empty = BrokenPowerLaw::new(
-                    SolarMasses::ZERO,
-                    cluster.break_radius(),
-                    cluster.inner_slope(),
-                    cluster.outer_slope(),
-                )
-                .expect("the nuclear cluster's shape is valid");
-                (empty, SolarMasses::ZERO)
-            }
+            Centre::Excluded => (
+                NuclearCluster::new(SolarMasses::ZERO).expect("zero is a valid mass"),
+                SolarMasses::ZERO,
+            ),
         };
         Self {
             gaussians,
@@ -191,7 +190,7 @@ impl MassModel {
 
     /// The nuclear star cluster.
     #[must_use]
-    pub fn nuclear_cluster(&self) -> &BrokenPowerLaw {
+    pub fn nuclear_cluster(&self) -> &NuclearCluster {
         &self.nuclear_cluster
     }
 

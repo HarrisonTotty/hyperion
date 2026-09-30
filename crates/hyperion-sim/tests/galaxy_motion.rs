@@ -2,8 +2,8 @@
 //!
 //! The propagator is, with the Eddington inversion, the piece of the centre most exposed to a
 //! platform difference (plan 09, "Verification"), so its states are pinned as bits and checked on
-//! every CI target, x86-64, AArch64 and wasm32. Nothing generated reads it until P09.T28.b wires it into the drift hook:
-//! this golden pins the propagator alone and moves no system.
+//! every CI target, x86-64, `AArch64` and wasm32. Nothing generated reads it until P09.T28.b wires
+//! it into the drift hook: this golden pins the propagator alone and moves no system.
 
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::coords::GalacticVelocity;

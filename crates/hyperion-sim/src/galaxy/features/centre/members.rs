@@ -36,7 +36,8 @@
 //! initial mass from the galaxy's mass function in the class's range below the turn-off at that
 //! age for a living star and above it for a white dwarf, and for a remnant class the redraws,
 //! attempt after attempt on `centre.mass` (six words each, as `member.mass`), until its remnant is
-//! of the class's kind with a kick below the local escape speed `√(2Ψ)`, a low-mode neutron star
+//! of the class's kind with a kick below the local escape speed from the cluster `√(2Ψ_cluster)`
+//! (retained means bound to the cluster, not to the galaxy), a low-mode neutron star
 //! judged on its pair's systemic speed. Composition: the centre's [`CENTRE_FE_H`], no helium
 //! excess.
 //!
@@ -501,8 +502,12 @@ impl<'a> CentrePlacement<'a> {
             velocity,
             &mut marks,
         )?;
-        let (primary, attempt, age) =
-            draw_star(galaxy, &class, system, profile.escape_speed(r).value())?;
+        let (primary, attempt, age) = draw_star(
+            galaxy,
+            &class,
+            system,
+            profile.cluster_escape_speed(r).value(),
+        )?;
         let record = SystemRecord::from_parts(
             system,
             galactic(&p),
@@ -793,10 +798,10 @@ mod tests {
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
 
-    /// The fullest cell's expected candidates at Milky Way values (ruling 144.5a), under the
-    /// default mass function and Kroupa's.
-    const FULLEST_CHABRIER: f64 = 2_199.0;
-    const FULLEST_KROUPA: f64 = 3_008.0;
+    /// The fullest cell's expected candidates at Milky Way values (ruling 144.5a, on the joint
+    /// revision's law), under the default mass function and Kroupa's.
+    const FULLEST_CHABRIER: f64 = 2_896.0;
+    const FULLEST_KROUPA: f64 = 3_964.0;
 
     fn innermost(placement: &CentrePlacement<'_>) -> NestedCell {
         placement.grid().cell(0, [16, 16, 16]).unwrap()
@@ -840,6 +845,37 @@ mod tests {
                 (peak / want - 1.0).abs() < 0.02,
                 "{kind:?}: {peak} against {want}"
             );
+        }
+    }
+
+    /// Ruling 144.5b: a cluster at plan 02's cap fills its fullest cell to 7,468 candidates or just
+    /// under (within 3%), and passes the headroom check, under either mass function; the cap is
+    /// reached by a scatter far above any draw's.
+    #[test]
+    fn the_cap_s_centre_fills_its_fullest_cell_to_the_limit() {
+        use crate::galaxy::params::NuclearClusterParams;
+        use crate::units::Dex;
+        for kind in [MassFunctionKind::Chabrier, MassFunctionKind::Kroupa] {
+            let params = GalaxyParamsBuilder::new()
+                .mass_function(kind)
+                .nuclear_cluster_mass_scatter(Dex::new(1.0))
+                .build()
+                .unwrap();
+            let cap = NuclearClusterParams::mass_cap(kind);
+            assert_eq!(params.nuclear_cluster().mass(), cap);
+            let model = CentreModel::from_params(&params).unwrap();
+            let placement = CentrePlacement::new(&model);
+            let (peak, band, cell) = placement.peak_candidates();
+            eprintln!(
+                "{kind:?}: the cap's {:.3e} M☉ fills band {band:?}, level {}, to {peak:.1} \
+                 (+8σ {:.1})",
+                cap.value(),
+                cell.level(),
+                peak + 8.0 * peak.sqrt()
+            );
+            let limit = NuclearClusterParams::FULLEST_CELL_CAP;
+            assert!((0.97 * limit..=limit).contains(&peak), "{kind:?}: {peak}");
+            assert_eq!(placement.check_index_headroom(), Ok(()));
         }
     }
 
@@ -927,7 +963,7 @@ mod tests {
     /// (plus eight standard deviations) and how many would clamp (the expectation itself at or
     /// past 8,192).
     fn sweep_fullest_cells(seeds: impl IntoIterator<Item = u64>) -> (u32, u32, u32) {
-        let (mut n, mut failing, mut clamping) = (0, 0, 0);
+        let (mut n, mut failing, mut clamping, mut capped) = (0, 0, 0, 0);
         let mut worst = (0.0_f64, 0);
         for s in seeds {
             let params = GalaxyParams::from_seed(
@@ -935,6 +971,8 @@ mod tests {
                 MassFunctionKind::default(),
             );
             let cluster = params.nuclear_cluster().mass().value();
+            let cap = crate::galaxy::params::NuclearClusterParams::mass_cap(params.mass_function());
+            capped += u32::from(cluster >= cap.value());
             let model = CentreModel::from_params(&params).unwrap();
             let placement = CentrePlacement::new(&model);
             let (peak, band, cell) = placement.peak_candidates();
@@ -954,37 +992,28 @@ mod tests {
             }
         }
         eprintln!(
-            "{failing} of {n} seeds fail the headroom check, {clamping} expect 8,192 or more; \
-             worst {worst:?}"
+            "{failing} of {n} seeds fail the headroom check, {clamping} expect 8,192 or more, \
+             {capped} at the cluster's cap; worst {worst:?}"
         );
         (n, failing, clamping)
     }
 
-    /// P09.T27 and ruling 144.5a: the headroom check over 16 drawn seeds. None of these fails at
-    /// `GENERATOR_VERSION` 15 under the flattened bound; the slow sweep counts the share.
+    /// P09.T27 and ruling 144.5: the headroom check over 16 drawn seeds, none of which fails under
+    /// plan 02's cap; the slow sweep takes 512.
     #[test]
     fn no_seed_s_centre_overflows_its_index() {
         let (_, failing, clamping) = sweep_fullest_cells(0..16);
         assert_eq!((failing, clamping), (0, 0));
     }
 
-    /// Ruling 144.5a: the share of 512 drawn seeds whose centres fail the headroom check, which the
-    /// joint revision's cap on the cluster's mass (144.5b) takes to zero. Provisional: at most 2%,
-    /// the research's estimate before the flattened bound (8 of 512 at `GENERATOR_VERSION` 15),
-    /// and at most 1% whose fullest cell expects 8,192 or more itself (4 of 512, clusters of 1.0–1.5
-    /// × 10⁸ M☉, which clamp).
+    /// Ruling 144.5: no centre of 512 drawn seeds fails the headroom check under plan 02's cap on
+    /// the cluster's mass (144.5b), where 8 did at `GENERATOR_VERSION` 15 without it (clusters of
+    /// 8.6 × 10⁷–1.5 × 10⁸ M☉, 4 of them clamping). The share of seeds at the cap is printed.
     #[test]
     #[ignore = "slow: 512 centres, three minutes in the slow-test profile"]
-    fn few_seeds_centres_overflow_their_index() {
+    fn no_seed_of_512_overflows_its_centre_s_index() {
         let (n, failing, clamping) = sweep_fullest_cells(16..528);
-        assert!(
-            f64::from(failing) <= 0.02 * f64::from(n),
-            "{failing} of {n}"
-        );
-        assert!(
-            f64::from(clamping) <= 0.01 * f64::from(n),
-            "{clamping} of {n}"
-        );
+        assert_eq!((failing, clamping), (0, 0), "of {n}");
     }
 
     /// P09.T27: every member's ID round-trips through plan 01's decode, at every level; a

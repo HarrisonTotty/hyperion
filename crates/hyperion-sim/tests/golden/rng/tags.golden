@@ -1,4 +1,4 @@
-# generator_version = 15
+# generator_version = 16
 selftest.stream (SelfTest) = 0xe8e7b5915e249927
 event.selftest (Event) = 0x9442133d71ca154d
 galaxy.params.stellar_mass (Galaxy) = 0x7d41a975d717b0a1
@@ -174,3 +174,4 @@ dwarf.orbit (Galaxy) = 0x2c734abc8cd37961
 dwarf.stripping (Galaxy) = 0xb55303e32a6c3d4b
 planet.spin (Body) = 0xd357a5404f8ed15b
 body.surface (Body) = 0x0407f6b5493047d8
+system.substellar (System) = 0xd4a850fadf345491

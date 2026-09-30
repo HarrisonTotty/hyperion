@@ -169,7 +169,10 @@ pub(super) fn inputs() -> Inputs {
         // scatter, since the Galaxy is a pseudobulge and pseudobulges lie below the relation
         // (Kormendy and Ho 2013, ARA&A 51, 511, §6). Ruling 138's fitted Chabrier scale (P15.T4.b)
         // moved σ_e to about 117.3 km/s, and the offset is set again to −0.3800 (−0.3876 before).
-        bh_scatter: -0.3800,
+        // The joint revision's inner part of the nuclear disc (plan 02, R26) deepens the bulge's
+        // potential a little and raised the black hole to 4.340 × 10⁶ M☉ at −0.3800; −0.3840
+        // puts it back at 4.30 × 10⁶.
+        bh_scatter: -0.3840,
         // "About −0.05 dex per kpc in the Milky Way disc" (brainstorm, "Fields").
         metallicity_gradient: -0.05,
         // The halo's components and the accretion history at the middle of their ranges but for

@@ -48,7 +48,19 @@
 //! clusters and nurseries are young enough that their tables deplete nothing, and keep one φ in
 //! every band. A band below the five stellar ones, which plan 13 adds, takes band A's value
 //! through one private mapping, so plan 13 changes nothing here.
+//!
+//! # The carved binary classes (plan 11, P11.T7)
+//!
+//! The grid redraws every binary that falls into one of plan 11's carved classes (accreting white
+//! dwarfs, X-ray binaries, stellar and neutron-star mergers), so no host is in the field, and the
+//! catalogue holds them (P11.T8). Each class's share of a population's band leaves its field
+//! through [`set_class_shares`](FeatureShares::set_class_shares): the class's hosts per solar
+//! mass formed times the mass formed per system, times the share of its hosts whose primary lies
+//! in the band, over the band's share of the systems. [`field_factor`](FeatureShares::field_factor)
+//! is `1 − φ` less those shares, so that field, features and catalogue add up to each population's
+//! budget.
 
+use crate::galaxy::POPULATIONS;
 use crate::galaxy::Population;
 use crate::galaxy::ages::{SubDisc, YOUNG_AGE_LIMIT};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
@@ -61,6 +73,7 @@ use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::sse::lifetime;
+use crate::tables::binary::ClassShareTable;
 use crate::units::{LightYears, SolarMasses, Years};
 
 use super::cluster::relaxation_time;
@@ -219,6 +232,14 @@ pub struct FeatureShares {
     globular_phi: [f64; 3],
     /// The globulars' band weights `s_b ÷ S_b`.
     globular_band_weights: [f64; 5],
+    /// The mass formed per system, M☉, which turns the class shares' rates per solar mass formed
+    /// into shares of systems.
+    formed_mass: f64,
+    /// The field's share of the systems in each stellar band, A–E.
+    band_shares: [f64; 5],
+    /// The carved binary classes' share of each population's band, by population in
+    /// [`POPULATIONS`] order (P11.T7): zero until [`FeatureShares::set_class_shares`].
+    class_shares: [[f64; 5]; 7],
 }
 
 impl FeatureShares {
@@ -302,6 +323,10 @@ impl FeatureShares {
             share(halo, Population::Halo),
         ];
         let globular_band_weights = globular_band_weights(&globulars, mass_function);
+        let band_total = mass_function.integral(MASS_BAND_EDGES[0], MASS_BAND_EDGES[5]);
+        let band_shares: [f64; 5] = std::array::from_fn(|b| {
+            mass_function.integral(MASS_BAND_EDGES[b], MASS_BAND_EDGES[b + 1]) / band_total
+        });
         Self {
             nurseries,
             young_mean_phi,
@@ -317,7 +342,60 @@ impl FeatureShares {
             globulars,
             globular_phi,
             globular_band_weights,
+            formed_mass: mean_formed_mass.value(),
+            band_shares,
+            class_shares: [[0.0; 5]; 7],
         }
+    }
+
+    /// Plan 11's setter for the carved binary classes' shares (P11.T7; module documentation,
+    /// "The carved binary classes"): each population's band gives up `r m̄_f w_b ÷ S_b` of its
+    /// systems for each class, `r` the class's hosts per solar mass formed in the population, `m̄_f`
+    /// the mass formed per system, `w_b` the share of the hosts whose primary lies in band b and
+    /// `S_b` the band's share of the systems. [`Galaxy`](crate::galaxy::Galaxy) sets
+    /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) when it builds these shares.
+    ///
+    /// # Panics
+    ///
+    /// If a band's share comes out negative or not finite, or a population's shares of a band sum
+    /// to 1 or more.
+    pub fn set_class_shares(&mut self, table: &ClassShareTable) {
+        for (column, &population) in self.class_shares.iter_mut().zip(POPULATIONS.iter()) {
+            for (b, share) in column.iter_mut().enumerate() {
+                let band = MassBand::ALL[b];
+                let per_system = table.rows().iter().fold(0.0, |sum, row| {
+                    sum + row.hosts_per_formed_mass(population) * row.layer_share(band)
+                });
+                let value = if self.band_shares[b] > 0.0 {
+                    per_system * self.formed_mass / self.band_shares[b]
+                } else {
+                    0.0
+                };
+                assert!(
+                    value.is_finite() && (0.0..1.0).contains(&value),
+                    "the carved classes' share of {population:?} in {band:?} is {value}"
+                );
+                *share = value;
+            }
+        }
+    }
+
+    /// The carved binary classes' share of `population`'s systems of `band` (P11.T7): what the
+    /// grid's redraw gives up to plan 11's catalogue classes. A substellar band gives up none.
+    ///
+    /// # Panics
+    ///
+    /// Never: every population is in [`POPULATIONS`].
+    #[must_use]
+    pub fn class_share(&self, population: Population, band: MassBand) -> f64 {
+        if !band.is_stellar() {
+            return 0.0;
+        }
+        let column = POPULATIONS
+            .iter()
+            .position(|&p| p == population)
+            .expect("every population is in POPULATIONS");
+        self.class_shares[column][band.index()]
     }
 
     /// The globulars' band weights `s_b ÷ S_b` (module documentation, "Bands").
@@ -385,10 +463,11 @@ impl FeatureShares {
         own + self.phi_globular(population, band)
     }
 
-    /// `1 − φ`: what `population`'s field density keeps of its budget in `band`.
+    /// `1 − φ` less the carved binary classes' share ([`class_share`](Self::class_share)): what
+    /// `population`'s field density keeps of its budget in `band`.
     #[must_use]
     pub fn field_factor(&self, population: Population, band: MassBand) -> f64 {
-        1.0 - self.phi(population, band)
+        1.0 - self.phi(population, band) - self.class_share(population, band)
     }
 
     /// Plan 10's setter for the halo's discrete share of streams and dwarf cores.
@@ -575,7 +654,8 @@ mod tests {
                 let phi = shares.phi(population, band);
                 assert!((phi - shares.phi_globular(population, band) - own).abs() < 1e-15);
                 let f = shares.field_factor(population, band);
-                assert!((f + phi - 1.0).abs() < 1e-15);
+                let carved = shares.class_share(population, band);
+                assert!((f + phi + carved - 1.0).abs() < 1e-15);
             }
         }
         // The globulars' depleted lowest bands hold less than their field's share, the rest
@@ -586,13 +666,62 @@ mod tests {
         assert!((1e-3..0.2).contains(&halo), "{halo}");
     }
 
+    /// Plan 11's P11.T7: the field factor, the feature share and the carved binary classes' share
+    /// return each population's budget in every band, and the classes' shares, summed over the
+    /// fixture's systems, hold the hosts the scratch table scales to.
+    #[test]
+    fn the_field_features_and_carved_classes_add_up_to_the_budget() {
+        let galaxy = milky_way();
+        let shares = galaxy.feature_shares();
+        for population in crate::galaxy::POPULATIONS {
+            for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
+                let total = shares.field_factor(population, band)
+                    + shares.phi(population, band)
+                    + shares.class_share(population, band);
+                assert!(
+                    (total - 1.0).abs() < 1e-9,
+                    "{population:?} {band:?}: {total}"
+                );
+            }
+            for band in MassBand::SUBSTELLAR {
+                assert!(shares.class_share(population, band).abs() < 1e-300);
+            }
+        }
+        let mut hosts = 0.0;
+        for component in galaxy.fields().components() {
+            for band in MassBand::ALL {
+                hosts += component.count()
+                    * galaxy.shares().share(band, component.population())
+                    * shares.class_share(component.population(), band);
+            }
+        }
+        let expected: f64 = crate::tables::binary::CLASS_SHARES
+            .rows()
+            .iter()
+            .map(|row| row.hosts_per_formed_mass(Population::Halo))
+            .sum::<f64>()
+            * crate::tables::binary::MILKY_WAY_FORMED_MASS;
+        assert!(
+            (hosts / expected - 1.0).abs() < 1e-6,
+            "{hosts:e} against {expected:e}"
+        );
+        let largest = MassBand::ALL
+            .iter()
+            .map(|&band| shares.class_share(Population::OldThinDisc, band))
+            .fold(0.0, f64::max);
+        assert!(largest < 1e-3, "{largest}");
+    }
+
     #[test]
     fn the_halo_takes_plan_ten_s_discrete_share() {
         let mut shares = milky_way().feature_shares().clone();
         shares.set_halo_discrete(0.05);
         let globulars = shares.phi_globular(Population::Halo, MassBand::A);
+        let carved = shares.class_share(Population::Halo, MassBand::A);
         assert!(
-            (shares.field_factor(Population::Halo, MassBand::A) - (0.95 - globulars)).abs() < 1e-15
+            (shares.field_factor(Population::Halo, MassBand::A) - (0.95 - globulars - carved))
+                .abs()
+                < 1e-15
         );
     }
 }

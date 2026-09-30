@@ -755,6 +755,18 @@ domain_tags! {
     /// (`planetary::hooks::seed`). Server-only: no wire type carries it (the rendering plans'
     /// R04, "a detail seed on the wire, the surface seed off it").
     BODY_SURFACE: Body = "body.surface";
+
+    // Plan 11, P11.T2.d: brown-dwarf companions, under the name and scope the "Plan 11" heading
+    // above reserves. Appended here, after plan 14's entries, because the macro's order fixes
+    // `ALL`.
+
+    /// A system's bound brown-dwarf companion (Design note 15), keyed by the system: whether it has
+    /// one, one mark at word 64n of attempt n; then try r of its orbit, r = 0–8, at words 64n + 1 +
+    /// 7r to 64n + 7 + 7r: the period window and period (one mark), the mass ratio, the
+    /// eccentricity, the cosine of the inclination, the ascending node, the argument of periapsis
+    /// and the mean anomaly at the epoch, one uniform each
+    /// (`stellar::multiplicity::draw_hierarchy`).
+    SYSTEM_SUBSTELLAR: System = "system.substellar";
 }
 
 #[cfg(test)]

@@ -263,12 +263,13 @@ impl Galaxy {
             ShareMatrix::uniform(&BandShares::of(mass_function.as_dyn())),
             &substellar,
         );
-        let feature_shares = FeatureShares::new(
+        let mut feature_shares = FeatureShares::new(
             &params,
             &fields,
             mass_function.as_dyn(),
             params.mean_formed_mass(),
         );
+        feature_shares.set_class_shares(&crate::tables::binary::CLASS_SHARES);
         Ok(Self {
             seed,
             params,

@@ -130,8 +130,9 @@ pub struct StellarBriefDto {
     pub log_luminosity_lsun: Option<f32>,
     /// Its effective temperature, K; `null` for an object with no luminosity.
     pub teff_k: Option<f32>,
-    /// How many stars the system has, the primary included: 1 to 4, since a primary has at most
-    /// three companions, direct or in subsystems (plan 11, P11.T13; rulings 74 and 81).
+    /// How many stars the system has, the primary included: 1 to 5, since a primary has at most
+    /// three stellar companions, direct or in subsystems (plan 11, P11.T13; rulings 74 and 81),
+    /// and one bound brown dwarf, which the count includes (P11.T2.d).
     pub star_count: u8,
 }
 

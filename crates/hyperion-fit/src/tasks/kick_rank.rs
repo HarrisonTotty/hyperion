@@ -21,6 +21,7 @@ use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 
 use hyperion_sim::Seed;
+use hyperion_sim::galaxy::displaced::binarity::stripped_share;
 use hyperion_sim::math;
 use hyperion_sim::rng::Mark;
 use hyperion_sim::stellar::Composition;
@@ -39,8 +40,9 @@ use crate::manifest::{Manifest, SimFingerprint};
 use crate::parallel::{BuildThreadPoolError, map_reduce_chunks};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 
-/// The task's revision.
-pub const VERSION: u32 = 0;
+/// The task's revision: 1 since ruling 147.2, whose reference population is the ordinary-mode
+/// neutron stars with the companion-stripped mark applied.
+pub const VERSION: u32 = 1;
 
 /// The scores the committed table is made from: 10⁶ (P06.T19.b).
 pub const DRAWS: u64 = 1_000_000;
@@ -54,6 +56,10 @@ pub const CHUNK: u64 = 1_024;
 /// The initial masses, M☉, of the fingerprint's probes: the reference population's range, from the
 /// lightest core collapses to the heaviest track the generator builds.
 pub const FINGERPRINT_MASSES: [f64; 8] = [8.0, 10.0, 12.0, 15.0, 20.0, 30.0, 50.0, 100.0];
+
+/// The initial masses, M☉, at which the fingerprint probes plan 11's stripped share, which decides
+/// whether a member's mode draw is read (ruling 147.2).
+pub const STRIPPED_SHARE_MASSES: [f64; 3] = [12.0, 20.0, 40.0];
 
 /// The fitted table: the quantiles and what they were made from.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,11 +97,11 @@ pub fn fit_with(draws: u64, seed: u64) -> KickRankFit {
 /// The scores of the first `n` members of `population` under `seed`, in sample order, scored in
 /// chunks of [`CHUNK`] sample stars on `threads` threads.
 ///
-/// Sample stars are taken in rounds, each of twice the members still wanted (about three sample
-/// stars in five are members), so the last round overshoots by little; each round's chunks are
-/// scored in parallel and joined in index order, and the scores are cut at the n-th. So the result
-/// is the first `n` members in order whatever the chunking and threads: exactly the scores
-/// [`score_quantiles`] sorts.
+/// Sample stars are taken in rounds, each of twice the members still wanted (a little under half
+/// the sample stars are members since ruling 147.2), so no round overshoots by much; each round's
+/// chunks are scored in parallel and joined in index order, and the scores are cut at the n-th. So
+/// the result is the first `n` members in order whatever the chunking and threads: exactly the
+/// scores [`score_quantiles`] sorts.
 ///
 /// # Errors
 ///
@@ -233,9 +239,10 @@ scores and takes the file over, with a generator-version bump (P06.T19.e).
 
 Inputs: `stellar::remnant::reference::score_quantiles` over {draws} scores of seed
 {seed:#018x}: Kroupa primaries of {lo}–{hi} M☉ (slope {slope}) at Z = 0.02 on the
-generator's tracks, the iron-core collapses of single and wind-stripped progenitors that
-leave a neutron star, each scored (`M_CO` − `M_rem`) ÷ `M_rem` × ξ with ξ normal about 1 of
-relative scatter {scatter} redrawn until positive.",
+generator's tracks, the iron-core collapses to a neutron star that take the ordinary mode,
+the companion-stripped mark applied against plan 11's stripped share and the star's own mode
+draw read as the kick law reads it (ruling 147.2), each scored (`M_CO` − `M_rem`) ÷ `M_rem` × ξ
+with ξ normal about 1 of relative scatter {scatter} redrawn until positive.",
         draws = fit.draws,
         seed = fit.seed,
         lo = MASS_RANGE.0,
@@ -319,10 +326,12 @@ impl FitTask for KickRankTask {
     }
 
     /// Core and remnant masses at eight initial masses on the generator's tracks (Design note
-    /// 7), with the median draws at Z = 0.02, the score's scatter, and the fate of a 7.7 M☉ star
-    /// whose companion-stripped mark is set, which reads plan 11's stripped share.
+    /// 7), with the median draws at Z = 0.02, the score's scatter, the fate of a 7.7 M☉ star
+    /// whose companion-stripped mark is set, which reads plan 11's stripped share, and that share
+    /// at [`STRIPPED_SHARE_MASSES`], which decides a member's mode (ruling 147.2).
     fn fingerprint(&self) -> SimFingerprint {
-        let mut probes = Vec::with_capacity(2 * FINGERPRINT_MASSES.len() + 1);
+        let mut probes =
+            Vec::with_capacity(2 * FINGERPRINT_MASSES.len() + 3 + STRIPPED_SHARE_MASSES.len());
         for m0 in FINGERPRINT_MASSES {
             let track = Track::full(
                 SolarMasses::new(m0),
@@ -355,6 +364,12 @@ impl FitTask for KickRankTask {
             "death_age(7.7 M☉, stripped mark set)".to_owned(),
             track.death().map_or(0.0, |d| d.age().value()),
         ));
+        for m0 in STRIPPED_SHARE_MASSES {
+            probes.push((
+                format!("stripped_share({m0} M☉)"),
+                stripped_share(SolarMasses::new(m0), &Composition::SOLAR),
+            ));
+        }
         SimFingerprint::new(probes)
     }
 

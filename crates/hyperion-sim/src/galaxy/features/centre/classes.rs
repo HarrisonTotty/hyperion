@@ -32,12 +32,13 @@
 //! the clusters' classes), and the neutron stars and black holes of plan 06's kick law **that stay
 //! bound**. Every class is then scaled by one factor so that the classes' present mass is the
 //! cluster's ([`CentreProfile::mass`]). The retained neutron stars and black holes are the
-//! share of each progenitor's remnants kicked below the local escape speed `√(2Ψ(r))` (1,100
-//! km/s at 0.1 ly, 210 at 10 ly), averaged over the stars' profile inside the reach, each
-//! progenitor's share read from the clusters' retention table (ruling 139.5), which ends at 500
-//! km/s and is held there above it: the 2% of the stars inside about 1 ly, where the escape speed
-//! is higher, keep a little too few (about 0.01 on the neutron stars' share; the test holds the
-//! table to plan 08's quadrature within 0.02). The low mode is judged on its pair's systemic
+//! share of each progenitor's remnants kicked below the local escape speed from the cluster and
+//! the black hole, `√(2Ψ_cluster(r))` (1,140 km/s at 0.1 ly, 236 at 10 ly; not the galaxy's,
+//! since retained means bound to the cluster), averaged over the stars' profile inside the reach,
+//! each progenitor's share read from the clusters' retention table (ruling 139.5), which ends at
+//! 500 km/s and is held there above it: the 2% of the stars inside about 1 ly, where the escape
+//! speed is higher, keep a little too few (about 0.01 on the neutron stars' share; the test holds
+//! the table to plan 08's quadrature within 0.02). The low mode is judged on its pair's systemic
 //! speed (ruling 126.3). About a third of the neutron stars and nine tenths of the black holes
 //! stay (ruling 144.9): under Disberg and Mandel's (2025) log-normal ordinary kicks of plan 06,
 //! Φ((ln v − 5.60) ÷ 0.68) keeps 0.36 at 210 km/s, and the low mode's pairs are all kept, where
@@ -47,14 +48,15 @@
 //! # Profiles
 //!
 //! Four distribution functions (Design note 14 had three; ruling 144.6 splits the young), in the
-//! one potential of the black hole and the stars:
+//! one potential of the black hole, the stars and the rest of the galaxy:
 //!
 //! - **Stars** ([`CentreTracer::Stars`]): the cluster's profile, which the old, intermediate,
 //!   recent and continuous stars, the white dwarfs and the neutron stars follow. The plan's
 //!   "neutron stars on the stellar profile, widened" is built unwidened: a retained neutron star
 //!   is heavier than the mean star, which segregation would narrow (a finding).
 //! - **Black holes** ([`CentreTracer::BlackHoles`]): Bahcall and Wolf's (1976) 7⁄4 inside a break
-//!   at half the stars' (5 ly), 3.5 outside ([`black_hole_shape`]).
+//!   at half the stars' (5 ly), 3.5 outside, and the stars' taper near the reach
+//!   ([`black_hole_shape`]), so that the grid holds the same share of them as of the stars.
 //! - **The young disc** ([`CentreTracer::YoungDisc`], [`young_disc_shape`]): n ∝ r⁻³, the disc
 //!   plane's Σ ∝ R⁻² for a thickness in proportion to radius (Paumard et al. 2006; Bartko et al.
 //!   2009's r^−1.95±0.25; Lu et al. 2009), with a sharp inner edge at 0.1 ly (0.8–1″, Paumard et
@@ -76,6 +78,7 @@ use crate::galaxy::features::interior::retention::{
     fe_h_nodes, mass_nodes, maxwell_cdf, monotone_cubic, table_row,
 };
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
+use crate::galaxy::params::NuclearClusterParams;
 use crate::galaxy::quad::gl_log_panels;
 use crate::math;
 use crate::stellar::Composition;
@@ -235,22 +238,31 @@ pub fn age_components() -> [AgeComponent; 6] {
     ]
 }
 
-/// The black holes' shape: 7⁄4 inside 5 ly, 3.5 outside (module documentation).
+/// The black holes' shape: 7⁄4 inside 5 ly, 3.5 outside, and the stars' taper at 100 ly to 5.5
+/// (module documentation).
 ///
 /// # Panics
 ///
 /// Never: the slopes are constants inside the ranges.
 #[must_use]
 pub fn black_hole_shape() -> TracerShape {
+    type P = NuclearClusterParams;
     TracerShape::new(
         1.75,
-        [SlopeBreak {
-            radius: 5.0,
-            sharpness: BREAK_SHARPNESS,
-            rise: 1.75,
-        }],
+        [
+            SlopeBreak {
+                radius: 5.0,
+                sharpness: BREAK_SHARPNESS,
+                rise: 1.75,
+            },
+            SlopeBreak {
+                radius: P::TAPER_RADIUS.value(),
+                sharpness: P::TAPER_SHARPNESS,
+                rise: P::TAPERED_SLOPE - P::OUTER_SLOPE,
+            },
+        ],
     )
-    .expect("7/4 inside and 3.5 outside")
+    .expect("7/4 inside, 3.5 outside and 5.5 beyond the taper")
 }
 
 /// The young disc's shape: r⁻³ from its inner edge, a smooth break at 0.5 ly to r⁻⁵ (module
@@ -382,8 +394,10 @@ fn profile_average(profile: &CentreProfile, kept: &dyn Fn(f64) -> f64) -> f64 {
     edges.push(reach);
     let four_pi = 4.0 * core::f64::consts::PI;
     let w = |r: f64| four_pi * r * r * r * profile.stars().density(r);
-    gl_log_panels(|r| w(r) * kept(profile.escape_speed(r).value()), &edges)
-        / gl_log_panels(w, &edges)
+    gl_log_panels(
+        |r| w(r) * kept(profile.cluster_escape_speed(r).value()),
+        &edges,
+    ) / gl_log_panels(w, &edges)
 }
 
 /// The retained shares over the progenitor nodes.

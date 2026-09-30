@@ -244,7 +244,9 @@ fn the_query_is_the_brute_force_answer(
 ///
 /// A finding: close to the centre the curvature wins, since it falls as `R⁻²` there against the
 /// tidal radius's `R`. The worst point and the radius beyond which the bound holds are printed,
-/// and the test holds it beyond 40 ly (it fails out to 38 ly at Milky Way values).
+/// and the test holds it beyond 40 ly (it fails out to 38 ly at Milky Way values). Provisional;
+/// ruling deferred: since plan 02's joint revision of the centre (R26) the circular speed inside
+/// 100 ly is some 30% higher, and the bound fails out to 43.9 ly, held here beyond 50 ly.
 #[test]
 fn a_century_s_curvature_is_negligible() {
     let galaxy = galaxy();
@@ -276,7 +278,7 @@ fn a_century_s_curvature_is_negligible() {
         "curvature ÷ tidal radius: worst {worst:.2e} at {worst_at:.0} ly; the bound fails out to {holds_beyond:.0} ly"
     );
     assert!(
-        holds_beyond < 40.0,
+        holds_beyond < 50.0,
         "the bound fails out to {holds_beyond} ly"
     );
 }

@@ -44,6 +44,13 @@ pub enum MassFloor {
     /// Down to layer D: 2.5 M☉ and up.
     LayerD,
     /// Down to layer C: 0.75 M☉ and up, every layer that can hold an evolved star.
+    ///
+    /// The floor reads the primary's initial mass, not the system's light. The rare bright
+    /// exception, a layer-A or -B system whose binary has made it brighter than ten 0.75 M☉ stars
+    /// of its age (a merger's blue straggler, an accretor), is held under 10⁻³ of those layers'
+    /// systems near the solar circle by population (plan 11, P11.T11): the slow test
+    /// `binary_system_bright_exception_and_contact_binaries` measures it over 9 × 10⁴ of them, and
+    /// plan 11's Risks record the figure.
     LayerC,
     /// Down to layer B: 0.5 M☉ and up.
     LayerB,

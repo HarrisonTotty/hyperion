@@ -1,4 +1,4 @@
-# generator_version = 15
+# generator_version = 16
 
 an ordinary-mode neutron star = 0x8200b2e000000000
 initial mass = 0x4028512fa4298b62  # 12.158566598960252
@@ -6,7 +6,7 @@ CoreCollapse { supernova: IIP }, None, NeutronStar
 co core = 0x40035cedcfb0d626  # 2.42037546404278
 remnant mass = 0x3ff9dc17684f290e  # 1.6162332605914034
 mode Ordinary
-speed m/s = 0x41120dee77810f8c  # 295803.6167032651
+speed m/s = 0x41106ace7c375ed2  # 268979.6213049713
 direction x = 0x3feede27a279b680  # 0.9646185086582619
 direction y = 0x3fcf967fb8648e01  # 0.24678036216310775
 direction z = 0x3fb7c14c400ff1b0  # 0.09279324115772769
@@ -28,7 +28,7 @@ CoreCollapse { supernova: IIb }, Companion, BlackHole
 co core = 0x400e885f16b3c969  # 3.8165876172653737
 remnant mass = 0x4009afd8257bac0e  # 3.210861485325501
 mode Ordinary
-speed m/s = 0x40f6b24292434b4b  # 92964.16070870792
+speed m/s = 0x40f596ed5dde0a59  # 88430.83541683237
 direction x = 0x3fa61a41f5525eb0  # 0.04316907996797903
 direction y = 0xbfca8aae57091935  # -0.20735720872671384
 direction z = 0x3fef462489a61b36  # 0.9773123444036631

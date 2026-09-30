@@ -92,6 +92,19 @@ pub fn can_interact(input: &BinaryInput, until_age: Years) -> bool {
     interacts(input, &members, until)
 }
 
+/// [`can_interact`] with the stars' own tracks where the caller holds them, as
+/// [`evolve_with_tracks`] takes them: the same answer, without building them again.
+#[must_use]
+pub(crate) fn can_interact_with_tracks(
+    input: &BinaryInput,
+    until_age: Years,
+    tracks: [Option<Arc<Track>>; 2],
+) -> bool {
+    let until = until_age.value().max(0.0);
+    let members = own_members_with(input, until, tracks);
+    interacts(input, &members, until)
+}
+
 /// Runs the pair of `input` forward once from zero age to `until_age`, into its timeline (plan
 /// 11, design note 6).
 ///
@@ -138,11 +151,34 @@ pub fn can_interact(input: &BinaryInput, until_age: Years) -> bool {
 /// ```
 #[must_use]
 pub fn evolve(input: &BinaryInput, until_age: Years) -> BinaryTimeline {
+    evolve_with_tracks(input, until_age, [None, None])
+}
+
+/// [`evolve`] with the stars' own tracks, where the caller holds them: each `Some` must be the
+/// track [`evolve`] would build for that star, [`Track::to_age`] of its mass, the pair's
+/// composition and its draws at `until_age` (or past it, built in full), so that the timeline is
+/// [`evolve`]'s bit for bit (a test holds it). A pinned primary's full track (design note 16) is
+/// taken from its own only when that is built in full.
+///
+/// This is how plan 06's [`SystemStars`](crate::stellar::system::SystemStars) runs its pairs
+/// (P11.T11, ruling 111.5): its `StarModel`s already hold the tracks, which saves their builds,
+/// about 1 ms a pair.
+#[must_use]
+pub(crate) fn evolve_with_tracks(
+    input: &BinaryInput,
+    until_age: Years,
+    tracks: [Option<Arc<Track>>; 2],
+) -> BinaryTimeline {
     let until = until_age.value().max(0.0);
     let ctx = Arc::new(Context::of(input));
-    let pin = pinned_death(input);
-    let primary_track = pin.as_ref().map(|p| Arc::clone(&p.track));
-    let members = own_members(input, until, primary_track);
+    let [own_primary, own_secondary] = tracks;
+    let full_primary = own_primary
+        .as_ref()
+        .filter(|track| track.built_until().value().is_infinite())
+        .map(Arc::clone);
+    let pin = pinned_death(input, full_primary);
+    let primary_track = pin.as_ref().map(|p| Arc::clone(&p.track)).or(own_primary);
+    let members = own_members_with(input, until, [primary_track, own_secondary]);
     let orbit = LiveOrbit::of(input);
     if !interacts(input, &members, until) {
         let segment = Segment::new(
@@ -189,7 +225,17 @@ pub(super) fn arrival(members: &[Member; 2], until: f64) -> f64 {
 /// primary's may be given, built in full), or the cooling fits below 0.1 M☉.
 #[must_use]
 fn own_members(input: &BinaryInput, until: f64, primary: Option<Arc<Track>>) -> [Member; 2] {
-    let mut primary = primary;
+    own_members_with(input, until, [primary, None])
+}
+
+/// [`own_members`] with any of the stars' tracks given.
+#[must_use]
+fn own_members_with(
+    input: &BinaryInput,
+    until: f64,
+    tracks: [Option<Arc<Track>>; 2],
+) -> [Member; 2] {
+    let mut tracks = tracks;
     core::array::from_fn(|i| {
         let m = input.masses()[i];
         if m < sse::MIN_INITIAL_MASS {
@@ -198,15 +244,14 @@ fn own_members(input: &BinaryInput, until: f64, primary: Option<Arc<Track>>) -> 
                 mass: Path::starting(0.0, m.value()),
             };
         }
-        let track = match (i, primary.take()) {
-            (0, Some(track)) => track,
-            _ => Arc::new(Track::to_age(
+        let track = tracks[i].take().unwrap_or_else(|| {
+            Arc::new(Track::to_age(
                 track_mass(m),
                 input.composition(),
                 &input.draws()[i],
                 Years::new(until),
-            )),
-        };
+            ))
+        });
         Member::Track { track, offset: 0.0 }
     })
 }
@@ -266,13 +311,14 @@ pub(super) struct Pin {
 /// 06's `StarModel` reads it (`Track::fate_with` its remnant draws, the companion-stripped mark,
 /// and the kick law).
 #[must_use]
-fn pinned_death(input: &BinaryInput) -> Option<PinnedTrack> {
+fn pinned_death(input: &BinaryInput, full: Option<Arc<Track>>) -> Option<PinnedTrack> {
     let m1 = input.masses()[0];
     if m1 < stripped_mark_min_mass(input.composition()) {
         return None;
     }
     let draws = &input.draws()[0];
-    let track = Arc::new(Track::full(track_mass(m1), input.composition(), draws));
+    let track =
+        full.unwrap_or_else(|| Arc::new(Track::full(track_mass(m1), input.composition(), draws)));
     let fate = track.fate_with(RemnantDraws::of(draws))?;
     if !fate.death.kind().is_sudden() {
         return None;

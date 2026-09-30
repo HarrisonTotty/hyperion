@@ -3,12 +3,14 @@
 //! The brainstorm builds the potential from sums of Gaussians whose dimensionless coefficients
 //! are fitted offline, so that each Gaussian's potential and forces are one-dimensional
 //! quadratures ("Galaxy parameters"). [`MassModel`] assembles the galaxy from such expansions
-//! ([`mge`]) and from spherical components in closed form ([`nfw`], [`spherical`]), and
+//! ([`mge`]) and from spherical components ([`nfw`], [`spherical`]), and
 //! evaluates the potential, the circular speed and the vertical force directly.
 //! [`PotentialTables`] reduces it once per galaxy to tables in the plane, and on request on an
 //! (R, z) grid, from which the circular speed, Ω, κ, the escape speed, the tidal radius and the
 //! bar's pattern speed are read. [`sigma`] estimates the bulge's velocity dispersion, which sets
-//! the central black hole's mass through the M–σ relation.
+//! the central black hole's mass through the M–σ relation. [`SphericalAverage`] is the model's
+//! monopole about the centre, the potential the galactic centre's distribution functions are
+//! inverted in.
 //!
 //! Working units (plan 02, Design note 1): light-years, solar masses, (km/s)² for potentials,
 //! (km/s)² per light-year for forces.
@@ -16,6 +18,7 @@
 mod force;
 pub mod mge;
 mod model;
+mod monopole;
 pub mod nfw;
 pub mod sigma;
 pub mod spherical;
@@ -27,6 +30,7 @@ use std::fmt;
 pub use force::CylindricalForce;
 pub use model::MassModel;
 pub(crate) use model::bulge_spheroid;
+pub use monopole::SphericalAverage;
 pub(crate) use tables::GRID_EDGE_LY;
 pub use tables::PotentialTables;
 

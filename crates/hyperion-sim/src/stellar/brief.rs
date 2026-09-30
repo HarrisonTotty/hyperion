@@ -23,8 +23,12 @@
 //!   [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) builds it.
 //!
 //! The star count comes from [`draw_star_count`], plan 11's count-only draw, which equals the
-//! hierarchy's count for every system and builds no orbit for a single one. The composition and
-//! the primary's draws are the ones
+//! hierarchy's count at the first redraw attempt for every system and builds no orbit for a
+//! single one. It runs no binary engine, so for the grid systems that
+//! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) redraws because a pair
+//! fell into a carved class (P11.T7, about 10⁻⁴ of them) it is the first attempt's count, which
+//! may differ from the kept attempt's (plan 11's Risks, "Deviations in P11.T7, as built"). The
+//! composition and the primary's draws are the ones
 //! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) reads, from the same
 //! streams; a main-sequence primary reads η alone, the one draw its state and class depend on.
 //!

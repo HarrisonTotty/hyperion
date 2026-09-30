@@ -13,6 +13,7 @@
 //!
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
+pub mod binary;
 pub mod chabrier;
 pub mod cluster_dynamics;
 pub mod cluster_retention;
@@ -63,13 +64,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "cluster_retention",
         revision: 0,
-        since_generator_version: 15,
+        since_generator_version: 16,
         provisional: false,
     },
     TableInfo {
         name: "displaced_forms",
         revision: 0,
-        since_generator_version: 15,
+        since_generator_version: 16,
         provisional: true,
     },
     TableInfo {
@@ -86,8 +87,8 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "kick_rank",
-        revision: 0,
-        since_generator_version: 13,
+        revision: 1,
+        since_generator_version: 16,
         provisional: true,
     },
     TableInfo {
@@ -111,7 +112,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "stellar_fates_high",
         revision: 0,
-        since_generator_version: 13,
+        since_generator_version: 16,
         provisional: false,
     },
     TableInfo {
@@ -129,7 +130,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "stripping",
         revision: 0,
-        since_generator_version: 14,
+        since_generator_version: 16,
         provisional: false,
     },
     TableInfo {

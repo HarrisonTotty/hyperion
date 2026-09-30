@@ -679,6 +679,8 @@ Files: `units.rs`, `stellar/multiplicity/{mod,model,dist,quadrature,fates}.rs`, 
   0.02–0.06 per star over a weighted sample of all layers, which with plan 13's free-floating one
   per five or six gives the brainstorm's one per four or five; fewer than 1% of Sun-like primaries
   have one inside 10³ days; `all_stars_fraction_below` is unchanged to the last bit.
+  _As built (round 9c, `bin5b`; output moves, its bump batched into version 16): see Risks,
+  "Deviations in P11.T2.d, as built"._
 
 Files: `stellar/multiplicity/{hierarchy,stability,substellar}.rs`, `stellar/system.rs`.
 
@@ -847,6 +849,9 @@ system reaches `MAX_REDRAWS`; `field_factor` summed with the class shares return
 budget to 10⁻⁹; `check_index_headroom` still passes. Acceptance:
 `cargo test -p hyperion-sim binary::carve`.
 
+_As built (round 9c, `bin5b`; output moves, its bump batched into version 16): see Risks,
+"Deviations in P11.T7, as built"._
+
 ### P11.T8 The catalogue side
 
 Each subtask implements plan 09's `ClassProcess`: a bound over a cell from the class's row of
@@ -993,6 +998,9 @@ Tests: `state_at` continuous in t across ±H except at listed events; a full `Sy
 call stays under the brainstorm's millisecond in the `system_full` bench (finding, not failure).
 Acceptance: `cargo test -p hyperion-sim stellar::system`.
 
+_As built (round 9c, `bin5b`; output moves, its bump batched into version 16): see Risks,
+"Deviations in P11.T11, as built"._
+
 ### P11.T12 Statistical suite
 
 Slow tests, fixed seeds, Milky Way parameters unless stated: multiplicity by primary mass in six
@@ -1093,10 +1101,12 @@ passes its four retention bands, change the default here with the bump. Acceptan
 ## Generator version
 
 This plan changes generated output in T1.d, T2.c, T2.d, T6, T7, T8, T10 and T15, each with its own
-bump and regenerated goldens. T1.d moves every star once, because the mean mass per system changes
+bump and regenerated goldens. T11 moves output too, as built: a paired star's summary is its pair's
+state (round 9c, `bin5b`, whose T2.d, T7 and T11 take one bump in the orchestrator's version 16
+batch). T1.d moves every star once, because the mean mass per system changes
 the system count (plan 02 lists it among its known future bumps). After that no primary moves: IDs,
 positions, primary masses, ages, primary draws, death times and kicks are untouched, except that T7
-removes about 10⁻⁴ of grid systems. It reserves: body indices 0–15 for the stellar level, which is
+redraws about 10⁻⁴ of grid systems (as built it removes none). It reserves: body indices 0–15 for the stellar level, which is
 plan 14's slot `0x00`; the domain tags and the event tags 0x0300–0x0306 listed under Provides, with
 the rest of 0x0300–0x03FF free for later binary kinds; 64 draw numbers per redraw attempt; the five
 `ClassId` values plan 09's registry holds for this plan (2, 3, 5, 6 and 8); `system.substellar`, so
@@ -2149,3 +2159,198 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   about 2 pc companions wider than about 10 au are ionised, and outside most survive; the eventual
   count lies between 4.2 and 5.8 × 10⁷, nearer the lower by mass. The brainstorm's figure is now
   "4–6 × 10⁷" to cover both.
+- **Re-test the kick law on the isolated neutron stars once this plan decides bound and unbound
+  (ruling 147.2's risk; lane `kick147`, 2026-09-29; recorded, nothing changed).** Since ruling
+  147.2 the kick law's rank table is built on every ordinary-mode neutron star with the
+  companion-stripped mark applied (`ReferencePopulation::score`), and test 1 of
+  `tests/stellar_kick.rs` asserts Disberg and Mandel's (2025) log-normal on the same set, because
+  their young isolated pulsars are the single, merged and widely bound neutron stars and the
+  stripped ones whose ordinary kick unbound the pair. The stripped ordinary-mode stars sit high (ln
+  v about 6.0 against the whole mode's 5.56) only because the low mode's ramp takes the light
+  stripped cores, and Müller et al. (2018) and Willcox et al. (2021), as Disberg and Mandel's §6
+  reports them, argue that stripping may itself lower kicks. **At P11.T6 and T11**, when the
+  engine decides which pairs a kick unbinds, re-test the log-normal on the unbound and single
+  neutron stars only, and rule on the table's population again if they miss it.
+- **Deviations in P11.T2.d, as built** (round 9c, `bin5b`, 2026-09-29; output moves, the bump
+  batched into version 16). The code is a new `stellar/multiplicity/substellar.rs`, with
+  `SystemHierarchy::with_outer_brown_dwarf` in `hierarchy.rs`,
+  `MultiplicityModel::substellar_mass_ratio_slope` in `dist.rs` and the tag `system.substellar`
+  (scope `System`) appended at the end of `domain_tags!`. `draw_hierarchy` draws the stars as
+  before (`draw_hierarchy_with`, which the period correction's fit keeps reading, stars only) and
+  then the companion.
+  - _Where it goes._ Design note 15 says it "joins the hierarchy under the same stability test".
+    It joins only as a new outermost orbit about the whole system: for a single primary, an orbit
+    about the primary. Joining an outer member would raise that member's pair's μ, and so move a
+    stellar orbit's semi-major axis at its drawn period, and joining inside the primary's pair
+    would break the depth-first numbering (Design note 5's "a brown-dwarf companion last"). As
+    built, every star, node mass and stellar orbit is the stellar draw's bit for bit, one node
+    further on (a test over 10⁴ systems). The price is that a brown dwarf of a multiple system is
+    circum-multiple, never about one component. **For the orchestrator to rule** whether it
+    should also join an outer member.
+  - _The decision_ is one mark at word 64n of attempt n against `substellar_companion_probability`
+    (`SUBSTELLAR_ANCHORS`, linear in ln m, constant outside): 0.035 at 0.3 M☉ (Dieterich et al.
+    2012, AJ 144, 64), 0.06 at 1 M☉ (Metchev and Hillenbrand 2009, ApJS 181, 62; Kiefer et al.
+    2019, A&A 631, A125), 0.03 at 2.5 M☉ (Nielsen et al. 2019, AJ 158, 13) and 0.02 at 8 M☉ (no
+    measurement). A research agent read the surveys; only the Sun-like anchor is measured over
+    most separations, and the others are extrapolated. **Provisional.**
+  - _The desert._ `SUBSTELLAR_DESERT_FACTOR` = 0.3 below `SUBSTELLAR_DESERT_PERIOD` = 10³ d, derived
+    against the Sun-like period law from Grether and Lineweaver's (2006) < 1% inside five years
+    (f < 0.75), Sahlmann et al.'s (2011, A&A 525, A95) 0.6% (f ≲ 0.45) and Kiefer et al.'s ≥ 2%
+    inside 10 au (f ≈ 1 beyond 10³ d); defensible 0.2–0.5. **Provisional.** The thinning is a
+    conditional draw, not a rejection: one mark picks the window below or above 10³ d by weights
+    `f × share` and `share` of the period law inside the necessary conditions (outside the stellar
+    root orbit by the criterion's smallest axis ratio, inside the tidal cut), and the period inside
+    it by the mark's residual, so the decision's probability is the companion frequency.
+  - _Tries._ Nine tries of seven words (the mark, the mass ratio, the eccentricity, three angles,
+    the mean anomaly) on `system.substellar`, then the companion is dropped. The mass ratio is the
+    stellar law's lowest segment, `q^γ` with Duchêne and Kraus's γ below 0.8 M☉ and
+    `max(γ_smallq, 0)` above, on 13 M_J ÷ m₁ to 0.08 M☉ ÷ m₁; the eccentricity is the stellar law's at the period.
+    The stripped mark does not bind it (`Innermost::Free`), and `ForcedMultiple`'s widest
+    separation does.
+  - _Counted as a star._ `SystemHierarchy::star_count`, `SystemStars::star_count` and the wire's
+    `star_count` include the brown dwarf, so every body at the stellar level is counted and the
+    summary's list of stars keeps its length: 1 to 5. `draw_star_count` reads the decision word for
+    a system with no stellar companion, so a single star stays one word. The protocol's and the
+    client's doc comments say 1 to 5. **For the owner:** the `GALAXY` list's `3 stars` and the
+    `SYSTEM` readout then count a brown dwarf with the stars.
+  - _Measured_ (10⁴ systems over the mass function at the Sun-like point): 404 brown dwarfs over
+    14,400 stars, 0.0281 per star (the test's 0.02–0.06); of 10⁴ Sun-like primaries 570 have one
+    (5.7%, against the anchor's 6%, the rest dropped by the test), 12 of them inside 10³ d (0.12%,
+    under 1%). `all_stars_fraction_below` and its as-drawn form are pinned to the last bit at 0.5
+    and 1 M☉ under Kroupa's function (0.766 322 810 095 879 and 0.767 809 616 117 806 below
+    0.5 M☉).
+  - _Tests._ `hierarchy.rs`'s T2.a–b property tests keep to the stars (`draw_hierarchy_with`);
+    `substellar.rs`'s run the whole draw: the companion moves no star, the counts, the desert,
+    the whole stability test and order independence with the companion, and the count-only draw.
+    Acceptance also takes `cargo test -p hyperion-sim multiplicity::substellar`.
+- **Deviations in P11.T7, as built** (round 9c, `bin5b`, 2026-09-29; output moves, the bump batched
+  into version 16).
+  - _The redraw_ is in `SystemStars::generate_with`: for a grid record under `Free`
+    (`stellar::binary::carve::grid_redraws`; a feature member's binaries are plan 09's and
+    P11.T8.f's), attempt n draws the hierarchy and each companion's `StarDraws::for_attempt(n)`
+    (`SystemStars::at_attempt`), runs its pairs (P11.T11), and the first attempt whose pairs all
+    pass `carved_class` is kept. `SystemStars::attempt` and `carved_pair` expose it. The primary's
+    model is built once and never redrawn. The Type Ia carve (P11.T6) is not built, so only the
+    four binary classes redraw.
+  - _After eight carved attempts_ the system keeps its primary alone, at attempt 7, where Design
+    note 9 keeps the last hierarchy with its innermost period moved out of the interacting range. A
+    single star is never in a class, so the grid half of complementarity stays exact, and moving
+    one period would need the engine run again with no guarantee. Unreachable in expectation
+    (below 10⁻²⁸ a system at the measured carve rates).
+  - _The brief's count._ The range brief (`draw_star_count`, P06.T38.e) runs no engine and reads
+    attempt 0, and `SystemStars::brief_at` reports the same first attempt's count, so that a row is
+    the same whichever built it. For a redrawn system whose kept attempt has another star count the
+    row then disagrees with the summary and `SystemStars::star_count`, about half of the redrawn
+    systems. **For the orchestrator to rule:** accept, or have the brief evolve the pairs of a
+    multiple system (the engine for every multiple row).
+  - _`tables/binary.rs`_ holds `ClassShareTable`, `ClassShareRow` and the scratch `CLASS_SHARES`
+    (Design note 13): the same hosts per solar mass formed in every population, scaled to the Milky
+    Way fixture's formed mass, `MILKY_WAY_FORMED_MASS` = 9.376 × 10¹⁰ M☉ (its components' born
+    systems times 0.957 M☉), for 4.5 × 10⁶ fast and 4.5 × 10⁶ slow accreting white dwarfs, 10⁴
+    X-ray binaries, 9 × 10⁴ stellar mergers in the source horizon and 10 neutron-star mergers.
+    Layer shares are a guess from the stars that make each class: accreting white dwarfs C 0.75, D
+    0.25; X-ray binaries and neutron-star mergers E; stellar mergers A 0.1, B 0.2, C 0.5, D 0.15, E
+    0.05. The header says provisional; it is not in `tables::MANIFEST`, which `hyperion-fit` writes
+    from its lock file, until plan 15 has a task for it.
+  - _The share matrix._ `FeatureShares::set_class_shares` stores, per population and stellar band,
+    `Σ r m̄_f w_b ÷ S_b` (`class_share`), and `field_factor` is `1 − φ − class_share`; `Galaxy` sets
+    `CLASS_SHARES` when it builds. The shares are about 4 × 10⁻⁴ of band C and 7 × 10⁻⁴ of band D,
+    the largest (the accreting white dwarfs). Nothing reads `field_factor` into the fields until
+    P09.T2.c, so the share matrix moves no output yet; the bump is the redraw's.
+  - _Tests._ `binary::carve` holds a pinned carved system (candidate 21 of the test cell, 12 M☉ at
+    30 Myr, an X-ray binary at attempt 0) and the forced contexts. The budget and the table are
+    `galaxy::features::shares` and `tables::binary`, and the slow grid half is
+    `tests/binary_carve.rs` (`--run-ignored`), so the acceptance takes those filters too.
+  - _Measured_ (slow, `tests/binary_carve.rs`, 10⁵ grid systems stratified by layer; 2026-09-30):
+    no kept system is carved, and none needs more than 3 attempts (attempts kept 99,756 / 238 / 6).
+    Redrawn: A 0 of 30,000, B 0 of 20,000, C 22 of 20,000 (1.1 × 10⁻³), D 186 of 20,000 (9.3 ×
+    10⁻³), E 36 of 10,000 (3.6 × 10⁻³). **A finding (provisional; ruling deferred):** the engine
+    carves layers C–E some 3–13 times the scratch `CLASS_SHARES` give up (4 × 10⁻⁴ of C, 7 × 10⁻⁴
+    of D), and about 5 × 10⁻⁴ of all systems against Design note 8's 10⁻⁴, nearly all of it X-ray
+    binaries and accreting white dwarfs. The redraw is exact whatever the rate, but the budgets
+    close only when the shares match what the grid refuses (P15.T10.b's fit, or P11.T8's counts).
+- **Deviations in P11.T11, as built** (round 9c, `bin5b`, 2026-09-29; output moves, the bump
+  batched into version 16).
+  - _Which pairs run._ A pair of two stars (a `Pair` of two `Star` nodes, neither a brown dwarf) is
+    run through the engine, from zero age to the pair's age at +H, and kept as a `PairTimeline`
+    (`SystemStars::pairs`), only if it can interact by +H (`can_interact`, on the models' tracks)
+    or a member has a remnant by then. Any other pair is two single stars on their orbit (Design
+    note 7) in no class, whose timeline would be one detached segment of its models (a test holds
+    that `evolve` gives it that): it keeps its drawn orbit, and skipping it keeps the engine off the
+    great majority of pairs. A pair with a member that is itself a pair (a triple's outer orbit) is
+    not run: its drawn orbit stands and its members follow their own timelines.
+    The inner star is the engine's primary, so design note 16's pinned death also holds a massive
+    inner star of a companion's subsystem at its single-star death, not only the system's primary.
+  - _Tracks passed in_ (ruling 111.5). `StarModel` now holds its track as an `Arc<Track>`, and
+    `evolve_with_tracks` (crate-private) takes the models' tracks; a pinned primary's full track is
+    taken from its model only when that is built in full. A test holds every timeline equal to
+    `evolve`'s, bit for bit. `stellar/binary_timelines` does not move.
+  - _`SystemStars::state_at`_ returns a `SystemState`: each star's state from its pair's timeline
+    or its own model, each pair's `PairState` (the engine's orbit, `None` once merged or unbound,
+    or the drawn orbit; the pair's `BinaryClass`), the combined luminosity and the system's mass,
+    summed in body order. Also `binary_state_at`, `system_mass_at` and `recoil` (the primary's
+    pair's). A time past a timeline's end reads the star's own model.
+  - _The summary._ `StarSummary::binary_class` is the pair's class, `None` for a star merged into
+    its companion. A star its pair has changed is summarised from the pair's state: its remnant
+    from its phase and mass, a neutron star's recycled pulsar from the timeline, its rotation
+    without the terminal main-sequence state (the model's track is not the star's), and no
+    `death_in_window` unless the timeline explodes it at its model's death age (a pinned primary's, design note 16), since the engine records a death without its kind. A merged-away star stays
+    in the list as plan 06's `NoRemnant`, so the list keeps its length. The hierarchy in the
+    summary is the drawn one; `state_at` has the orbits then. The server sends `binary_class`
+    (`null` for none); the client's `BINARY CLASSES: NOT YET MODELLED` state gives way to `NONE`.
+  - _The brief_ (`brief_at`, and the range brief) keeps the primary's single-star state, so that a
+    range row is the same whichever built it and the range brief stays free of the engine. A
+    primary that its pair has changed (an Algol's donor, a merger product) reads so in the summary
+    only. **For the orchestrator to rule.**
+  - _The tidal radius and census fields._ `planetary::context` already reads the tidal radius at
+    the hierarchy's system mass; plan 03's frame rule keeps the primary's mass, as it must before
+    any hierarchy is drawn, which the tidal cut's half share covers. The bright exception is
+    recorded in `MassFloor`'s doc (`galaxy/query/request.rs`).
+  - _Plan 12's lens mass_ (`lensing::lens_mass_at`) reads a grid system's first-attempt single-star
+    models (`stellar::system::first_attempt_models`), the range row's cost, not `SystemStars`: with
+    the engine a lensing test that sums thousands of lenses ran for minutes. Its layer bound adds a
+    brown dwarf's 0.08 M☉. **For the orchestrator to rule** whether lenses should take the engine's
+    masses.
+  - _Bench._ `benches/stellar.rs` gains `stellar/system_full`: `generate` over every system of the
+    50 ly query about the Sun-like point, and over one system with an interacting pair. Not run in
+    this lane (the machine is shared; `just bench` takes the heavy-test lock), so the figure is
+    open.
+  - _An engine case found here_ (`stellar/binary/star.rs`, `shaped_track_age`): a mass-changed
+    (`Shaped`) accretor, 7.9 M☉ and 21.7 Myr younger than its pair, was read 46,000 years past its
+    own track's death, which tripped the track's range check in debug builds. Release builds held it
+    at the track's last age already; the hold is now explicit for `Shaped` members, so debug and
+    release agree and no golden moves. **A finding (provisional; ruling deferred):** the engine's
+    detached step does not always end a segment at a shaped star's own death.
+  - _Measured_ (slow, `tests/binary_system.rs`, 2026-09-30; every figure provisional, rulings
+    deferred):
+    - The bright exception: 4 of 86,185 old-thin-disc layer-A and -B systems (4.6 × 10⁻⁵), none of
+      the young disc's 310, the thick disc's 3,403 or the halo's 102: under 10⁻³ (asserted).
+    - Rucinski's contact binaries (ruling 114): 1.1 × 10⁻⁴ contact pairs per main-sequence star
+      fainter than M_V = +1.5, against 1/1,000–1/250, **ten times low** (0 in layer A, 5 in B, 23 in
+      C, 16 in D).
+    - Massive stars with their companions (ruling 140.9): 8 M☉ and up rise ×1.52 (0.00866 → 0.0132
+      per M☉ formed), 15 M☉ and up ×1.52 (0.00371 → 0.00565), at the top of the ruling's ×1.3–1.5:
+      the tracer-terms star formation rate and the core-collapse rate it re-checks are then about
+      ×1.5 their primaries-only values.
+    - 2.5–8 M☉ stars with their companions (ruling 141.7): 0.0447 per M☉ formed against Kroupa's
+      0.0409, +9.2%, inside the ruling's 10%: the delay-time distribution stays per M☉ formed.
+    - The stripped mark (ruling 123.5), 4,000 primaries of 8 M☉ and up at 60 Myr: of 1,753 marked,
+      1,408 (80%) are stripped by transfer or an envelope and not merged before their deaths, and
+      294 (17%) merge; of 986 unmarked with the innermost orbit in the merger band, 783 (79%) merge.
+    - The stripped share per exploding star (ruling 137), companions' collapses included: 2,595 of
+      5,071 hydrogen-poor (0.51, counted as a naked helium star just before the supernova or an
+      envelope under 0.1 M☉), against 0.28–0.40.
+    - Not measured here: ruling 140.5's M4 (a cluster's members, P11.T8.f) and ruling 147.2's
+      re-test on unbound and single neutron stars (the kick law's reference population, not the
+      system stage).
+- **Status of `bin5b` at the 2026-09-30 wrap-up (uncommitted, in `target/lanes/integ` on 872704e).**
+  - P11.T2.d, T7 and T11: code and tests built; the new slow tests (`tests/binary_carve.rs`,
+    `tests/binary_system.rs`) pass on the current code. `GENERATOR_VERSION` not bumped (the v16
+    batch). Goldens partly blessed at 15: `rng/tags`, `stellar/hierarchies`, `stellar/summaries`,
+    `planetary/systems/hierarchical_triple` and the server's `systems_in_range_briefs` moved; the
+    second bless pass (`every_golden_file_carries_the_current_version`) was not re-run.
+  - P14.T32's `hierarchical_triple` (`0x4200_2cb2_0000_0003`) now has a bound brown dwarf (4
+    bodies), which failed `pinned_ids_satisfy_their_own_predicates`. Resolved at the version-16
+    integration: the golden systems' predicates count only `SlotKind::Star` slots as stars, and a
+    brown dwarf's orbit about the system is no stellar pair in their separations.
+  - Open: the `system_full` bench is written but not run; `just ci` not run (single combined gate).

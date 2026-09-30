@@ -37,7 +37,7 @@ use self::spheroid::{
 };
 use crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
 use crate::galaxy::fields::arms::SharpArm;
-use crate::galaxy::fields::disc::ExponentialDisc;
+use crate::galaxy::fields::disc::{ExponentialDisc, radial_exponent};
 use crate::galaxy::fields::{Component, ComponentId, Fields, Shape};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::potential::{MassModel, PotentialTables};
@@ -140,7 +140,7 @@ enum Law {
     Disc(usize),
     Bulge,
     Bar,
-    Nuclear,
+    Nuclear(usize),
     Halo(usize),
 }
 
@@ -180,7 +180,8 @@ pub struct KinematicTables {
     halo: HaloKinematics,
     bulge: JeansTable,
     bar: JeansTable,
-    nuclear: JeansTable,
+    /// The nuclear disc's main and inner parts', in component order.
+    nuclear: Vec<JeansTable>,
     bulge_streaming: Streaming,
     bar_streaming: Streaming,
     bulge_axes: (f64, f64),
@@ -216,7 +217,7 @@ impl KinematicTables {
             potential,
             halo: &halo,
             discs: Vec::new(),
-            nuclear: None,
+            nuclear: Vec::new(),
         };
         let laws = fields
             .components()
@@ -252,7 +253,7 @@ impl KinematicTables {
             halo,
             bulge,
             bar,
-            nuclear: nuclear.expect("every galaxy has a nuclear disc"),
+            nuclear,
             bulge_streaming: Streaming {
                 axes: (
                     bulge_params.scale_x().value(),
@@ -281,8 +282,8 @@ impl KinematicTables {
                 let (mean, sigma) = self.discs[i].at(p);
                 VelocityEllipsoid::from_raw(EllipsoidAxes::Cylindrical, mean, sigma)
             }
-            Law::Nuclear => {
-                let [sr, sp, sz, mean] = self.nuclear.moments(r_cyl, p.z);
+            Law::Nuclear(i) => {
+                let [sr, sp, sz, mean] = self.nuclear[i].moments(r_cyl, p.z);
                 VelocityEllipsoid::from_raw(
                     EllipsoidAxes::Cylindrical,
                     [0.0, mean, 0.0],
@@ -336,7 +337,7 @@ impl KinematicTables {
     pub fn disc(&self, component: ComponentId) -> Option<&DiscKinematics> {
         match self.laws[component.index()] {
             Law::Disc(i) => Some(&self.discs[i]),
-            Law::Bulge | Law::Bar | Law::Nuclear | Law::Halo(_) => None,
+            Law::Bulge | Law::Bar | Law::Nuclear(_) | Law::Halo(_) => None,
         }
     }
 
@@ -358,9 +359,15 @@ impl KinematicTables {
         &self.bar
     }
 
-    /// The nuclear disc's Jeans table.
+    /// The nuclear disc's main part's Jeans table.
     #[must_use]
     pub fn nuclear_disc(&self) -> &JeansTable {
+        &self.nuclear[0]
+    }
+
+    /// The Jeans tables of the nuclear disc's main and inner parts, in that order.
+    #[must_use]
+    pub fn nuclear_discs(&self) -> &[JeansTable] {
         &self.nuclear
     }
 
@@ -393,7 +400,12 @@ impl KinematicTables {
             + self.halo.heap_bytes()
             + self.bulge.heap_bytes()
             + self.bar.heap_bytes()
-            + self.nuclear.heap_bytes()
+            + self.nuclear.capacity() * size_of::<JeansTable>()
+            + self
+                .nuclear
+                .iter()
+                .map(JeansTable::heap_bytes)
+                .sum::<usize>()
     }
 }
 
@@ -404,7 +416,7 @@ struct Build<'a> {
     potential: &'a PotentialTables,
     halo: &'a HaloKinematics,
     discs: Vec<DiscKinematics>,
-    nuclear: Option<JeansTable>,
+    nuclear: Vec<JeansTable>,
 }
 
 impl Build<'_> {
@@ -456,14 +468,15 @@ impl Build<'_> {
             (Population::Bulge, _) => Law::Bulge,
             (Population::LongBar, _) => Law::Bar,
             (Population::NuclearDisc, Shape::Disc(disc)) => {
-                let (length, profile) = (disc.length().value(), disc.profile());
-                self.nuclear = Some(JeansTable::with_radial_law(
-                    |r, z| -r / length - profile.exponent(z),
+                let (inv_length, hole, profile) =
+                    (1.0 / disc.length().value(), disc.hole_ly(), disc.profile());
+                self.nuclear.push(JeansTable::with_radial_law(
+                    |r, z| -radial_exponent(r, inv_length, hole) - profile.exponent(z),
                     NUCLEAR_RADIAL_LAW,
                     NUCLEAR_SATOH_K,
                     potential,
                 ));
-                Law::Nuclear
+                Law::Nuclear(self.nuclear.len() - 1)
             }
             (Population::Halo, _) => {
                 let kind = component

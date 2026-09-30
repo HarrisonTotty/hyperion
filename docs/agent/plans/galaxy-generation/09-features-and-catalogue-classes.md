@@ -237,7 +237,7 @@ change, the owning plan wins and only call sites here change.
   `imf::{MassFunction, BandShares}`, the mean mass per system (`Galaxy::mean_system_mass`) and the
   mass formed per system (`Galaxy::mean_formed_mass`), `potential::PotentialTables` (`v_circ`,
   `omega`, `kappa`, `potential(r, z) -> Option`, `escape_speed(r, z) -> Option`,
-  `tidal_radius(m, &PointLy) -> Metres`), the nuclear cluster's `BrokenPowerLaw`, `fields` (population
+  `tidal_radius(m, &PointLy) -> Metres`), the nuclear cluster's `NuclearCluster`, `fields` (population
   densities, sub-discs, age distributions, metallicity) with the `FeatureShare` hook of
   `galaxy::ages` held at φ = 0, `bounds`, `ShareMatrix`, `map`. There is no formation-rate
   function: a population's rate is its count times its age distribution's density times the mass
@@ -349,7 +349,9 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
    take 2–5% of that population, which the brainstorm nowhere asks for. The budget test treats it as
    an eighth budget, its mass ÷ the centre's own mean system mass. P09.T27 asserts that the fullest
    cell stays under the 8,192 index for every seed; if a heavy cluster breaks that, the parameter's
-   range is narrowed in plan 02, not the grid here.
+   range is narrowed in plan 02, not the grid here. _Revised by ruling 144's joint revision (lane
+   `pot02`):_ plan 02's mass is the mass inside the reach, which the grid then holds, and its draw
+   is capped where the fullest cell expects 7,468 (Risks, "The joint revision as built").
 6. **Index space of a feature cell.** Each process draws its own Poisson candidate count in a cell,
    and the 14-bit index is the candidate number plus the counts of the processes before it, in the
    fixed order globular, old open clusters (one process per sub-disc, youngest first), nursery,
@@ -392,7 +394,10 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
     young disc has no inner hole, because a hole has no isotropic equilibrium. _Revised by ruling
     144.6:_ four inversions, the young split into the clockwise disc and the isotropic young; the
     disc's inner edge at 0.1 ly is its distribution function's energy cut, as the stars' r^−½ core
-    is, which leaves an r^−½ tail inside it and is an equilibrium.
+    is, which leaves an r^−½ tail inside it and is an equilibrium. _Revised by ruling 144's joint
+    revision (lane `pot02`):_ the potential is the black hole's, the cluster's and the galaxy's
+    spherical average, not the black hole's and the cluster's alone, and retention keeps the
+    cluster's own escape speed.
 15. **`CentreModel` and `FeatureShares` are built with `Galaxy`.** Both are small and every query
     near the centre needs them. The build is benchmarked and must stay under 100 ms.
 16. **Feature-level lists are ordered by class.** Index 0 is member zero. From 1 upward come the
@@ -967,7 +972,9 @@ _Status (lane `centre09a`, 2026-09-29): T24.a–c, T25, T26 and T27 are built; s
 T24–T27 as built", and the provisional findings after it. `resolve` now answers a centre ID;
 nothing else reads the centre until T28.b. Lane `centre09b` (2026-09-29) applied ruling 144's
 points 1, 2, 4, 5a and 6–10 to the centre's own goldens; see Risks, "Ruling 144 as built". The
-windows below are ruling 144's._
+windows below are ruling 144's. Lane `pot02` (2026-09-29, for version 16) built the joint revision
+with plan 02: the law normalised inside the reach and tapered, the full potential's monopole, the
+cap; see Risks, "The joint revision as built"._
 
 #### P09.T24 Profile and distribution function
 
@@ -975,11 +982,12 @@ windows below are ruling 144's._
   break near 10 ly and outer slope 3.5 (Schödel et al. 2014; Gallego-Cano et al. 2018), continued
   inward to 10⁻³ ly, then r^−½, truncated at the grid's reach of 128 ly; mass and break from
   `NuclearClusterParams`; enclosed mass in closed form by pieces; potential of the black hole plus
-  the cluster. Tests at Milky Way values (ruling 144.2 and 144.4): ρ(1 pc) 1.2–1.8 × 10⁵ M☉ pc⁻³,
-  M(<1 pc) 0.8–1.2 × 10⁶ M☉, M(<3 pc) 6–10 × 10⁶ and M(<3.9 pc) 7–11 × 10⁶ (Schödel et al. 2018;
-  Chatzopoulos et al. 2015), 4–6 × 10⁷ systems at T27's own mean system mass, fewer than three
-  inside 10⁻³ ly, the stars outweigh the black hole near 10 ly; systems per cubic light-year at 3
-  ly printed.
+  the cluster. _As built with the joint revision:_ the law tapered at 100 ly and its mass the mass
+  inside the reach; the potential the black hole's, the cluster's and the galaxy's monopole. Tests
+  at Milky Way values (ruling 144.2 and 144.4): ρ(1 pc) 1.2–1.8 × 10⁵ M☉ pc⁻³, M(<1 pc) 0.8–1.2 ×
+  10⁶ M☉, M(<3 pc) 6–10 × 10⁶ and M(<3.9 pc) 7–11 × 10⁶ (Schödel et al. 2018; Chatzopoulos et al.
+  2015), 4–6 × 10⁷ systems at T27's own mean system mass, fewer than three inside 10⁻³ ly, the stars
+  outweigh the black hole near 10 ly; systems per cubic light-year at 3 ly printed.
 - **P09.T24.b Eddington inversion.** `DistributionFunction::invert(profile, potential)` on a
   logarithmic grid of 256 radii, with the substitution that removes the square-root singularity
   (Binney and Tremaine 2008, eq. 4.46). f must be non-negative everywhere: a returned error, not a
@@ -990,6 +998,9 @@ windows below are ruling 144's._
   design note 14 together under 50 ms.
 - **P09.T24.c Velocity sampler.** Speed at radius r from v² f(Ψ − v² ⁄ 2) by rejection under a
   Beta(3⁄2, γ − ½) proposal in v² ÷ v_esc², direction isotropic, on the member's velocity stream.
+  _As built with the joint revision:_ under a piecewise-constant envelope of v f(E) over the energy
+  grid's panels instead, which the galaxy's potential needs (Risks, "The joint revision as
+  built").
   Tests: speed distributions at five radii (Kolmogorov–Smirnov against the numerical density in v);
   no speed above escape.
 
@@ -2344,15 +2355,15 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `galaxy/motion/kepler.golden` (twelve states from circular to e = 5.8, 0.001–9.5 ly, at six times
   over ±1,000 yr), unwired. Files: `galaxy/motion.rs` (new), `galaxy/mod.rs`,
   `tests/galaxy_motion.rs`.
-  - _Signatures._ `KeplerOrbit::from_state(PointLy, GalacticVelocity, GravitationalParameter) ->
-    Result<KeplerOrbit, BuildKeplerOrbitError>`: position relative to the black hole in ly (what
-    `CentreMemberRecord::local_position` gives), velocity and μ in SI; refuses non-finite values,
+  - _Signatures._
+    `KeplerOrbit::from_state(PointLy, GalacticVelocity, GravitationalParameter) -> Result<KeplerOrbit, BuildKeplerOrbitError>`:
+    position relative to the black hole in ly (what `CentreMemberRecord::local_position` gives), velocity and μ in SI; refuses non-finite values,
     μ ≤ 0, a position at the black hole (`AtCentre`) and exactly zero angular momentum (`Radial`,
     which includes a galaxy without kinematic tables: T28.b must keep such a system on its epoch
     position). `propagate(Seconds) -> KeplerOrbit`, the state `dt` on as an orbit in its own
     right. Getters `position`, `velocity`, `distance`, `gravitational_parameter`,
-    `specific_energy_j_per_kg`, `angular_momentum_m2_per_s`, `eccentricity`, `pericentre() ->
-    LightYears`, `semi_major_axis`, `period` (the last two `None` unless bound). `schwarzschild_rate`
+    `specific_energy_j_per_kg`, `angular_momentum_m2_per_s`, `eccentricity`,
+    `pericentre() -> LightYears`, `semi_major_axis`, `period` (the last two `None` unless bound). `schwarzschild_rate`
     and `mass_precession_rate` are T28.d's.
   - _Method._ Universal variables with the Lagrange coefficients (Battin 1999, §4.5; Vallado 2013,
     algorithm 8), solved by Laguerre–Conway (n = 5) for a fixed `UNIVERSAL_ITERATIONS` = 10
@@ -2383,3 +2394,86 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     bump), T28.c (tidal radius at pericentre), T28.d (`schwarzschild_rate`,
     `mass_precession_rate`, the direct integration in the true potential, bump), T29–T31. All wait
     for `pot02`'s centre potential (v16).
+- **The joint revision as built (lane `pot02`, 2026-09-29, on 0500394 at `GENERATOR_VERSION` 15,
+  for version 16's batch; ruling 143.1 with ruling 144's "Joint revision").** Plan 02's side is its
+  R26 (the cluster's law and mass in the potential, the nuclear disc's inner part, the cap); this
+  plan's side is below. Files: `features/centre/{mod,profile,df,marks,classes,members,testing}.rs`,
+  `benches/centre.rs`, and plan 03's `placement/headroom.rs` with plan 13's
+  `substellar/abundance.rs` (the partition below).
+  - _The law and its mass (144.1, 144.3)._ `TracerShape::nuclear_cluster()` (no parameters now:
+    plan 02's constants) is the α = 10 break at 10 ly to 3.5 and the taper at 100 ly, sharpness 4,
+    to 5.5; `nuclear_cluster_with` is gone. `CentreProfile::mass()` is the whole law's, the
+    parameter over its 0.9680 inside the reach (2.556 × 10⁷ M☉ at the fixture), and
+    `mass_within_reach()` the parameter's; `from_shape`'s mass is the mass inside the reach too.
+    The black holes' shape takes the same taper, so that the grid holds the same share of them.
+    **T24.a at the ruled windows, all met:** ρ(1 pc) 1.515 × 10⁵ M☉ pc⁻³, M(<1 pc) 1.120 × 10⁶,
+    M(<3 pc) 7.097 × 10⁶, M(<3.9 pc) 1.004 × 10⁷; the provisional pins of "Ruling 144 as built"
+    (1.1 × 10⁵ and 4.5–6 × 10⁶) are gone. 5.83 × 10⁷ systems inside the reach at the classes'
+    mean of 0.424 M☉ (6.03 × 10⁷ in the whole law; 7.03 × 10⁷ inside under Kroupa's at 0.352),
+    tested inside the reach; 11,471 systems per ly³ at 3 ly (13,820 under Kroupa's), printed.
+    **A miss, pinned provisionally:** under Kroupa's function 3.39 systems lie inside 10⁻³ ly,
+    over the brainstorm's "fewer than three" (2.81 under the default), since the normalisation
+    raised the cusp by 28%; held under 3.5 for Kroupa's.
+  - _The potential (the joint revision's last item)._ `CentreProfile` holds the galaxy's monopole,
+    plan 02's `SphericalAverage` of the discs, bar, bulge and dark halo, when built for a galaxy
+    (`from_params`, which builds the mass model, or `new(..).in_galaxy(model)`, which
+    `CentreModel::new` uses with the galaxy's own); `from_shape` and `new` alone stay the black
+    hole and the cluster, for tests of other laws. `psi`, `psi_slope` and `psi_curvature` are the
+    whole potential's; `cluster_psi` and `cluster_escape_speed` the black hole's and the cluster's,
+    which the retention quadrature and the members' remnant draws read (144's "retention keeps
+    cluster-only escape"). The escape speed from the cluster is 1,136 km/s at 0.1 ly and 236 at 10
+    ly at the fixture (the brainstorm's 1,100 and 210, on the heavier cusp), and from the galaxy
+    1,378 and 815. Members at 30 and 100 ly now move with σ 57.5 and 48.5 km/s, where the cluster's
+    potential alone gave 49.3 and 26.4.
+  - _Two devices the full potential needed (engineering)._ **An outer energy cut:** in the
+    galaxy's well the members' energies are a thin slice just under Ψ at the centre, so f is also
+    zero below `Ψ(r_out)`, `r_out` the last grid radius inside `df::OUTER_CUT` = 8,192 ly (64
+    reaches); f is found and must be positive from the core cut down to it only, and the realised
+    density is tabulated to it and zero beyond. At 1,024 ly the cut's renormalisation moved the
+    density inside the reach by 5 × 10⁻⁴, over T24.b's 10⁻⁴; at 8,192 ly the integral of f returns
+    the profile to 4.8 × 10⁻⁵ (4.2 × 10⁻⁵ in the cluster's potential alone). **A new velocity
+    sampler:** the Beta proposal in `v² ÷ v_esc²` failed 4,096 times at 30 ly in the galaxy's
+    potential and took 15.8 µs a draw at 3 ly; it is now a piecewise-constant envelope of `v f(E)`
+    over the energy grid's panels (each panel's greatest f, its cubic's extrema, times the greatest
+    v on it), picked and placed by one uniform and accepted by one mark: 1.2–1.9 µs a draw at
+    10⁻²–100 ly in either potential, two words an attempt as before. The plan's Beta proposal is
+    retired (T24.c's text).
+  - _Headroom (144.5b)._ The fullest cell expects 2,896 candidates under the default mass function
+    and 3,964 under Kroupa's at Milky Way values (band A, level 9, 16 ly out; ×1.32 from 2,199 and
+    3,008, the normalisation); `the_fullest_cell_stays_under_the_index` pins them to 2%. Plan 02's
+    cap puts the capped cluster's fullest cell at 7,418 under the default and 7,458 under Kroupa's
+    (`the_cap_s_centre_fills_its_fullest_cell_to_the_limit`, new, 97–100% of 7,468, headroom
+    passed). The fast sweep of 16 seeds passes; the slow sweep, renamed
+    `no_seed_of_512_overflows_its_centre_s_index`, finds no seed failing and none clamping, where 8
+    failed and 4 clamped at version 15; 21 of the 512 (4.1%) are at the cap, whose fullest cell
+    expects 7,417.
+  - _Re-measured (144.6–9)._ The projected isophote ratio is 0.720, 0.721, 0.724, 0.729, 0.736,
+    0.746, 0.761 and 0.782 at 1–8 ly, as before (the taper at 100 ly moves nothing inside 8 ly):
+    **still a miss beyond 6 ly, pinned provisionally** as "Ruling 144 as built" held it (0.76 to 5
+    ly, 0.80 beyond), since 144.7's optional k(E) is not built. The slit's rotation is 44.0 km/s
+    (40.2 before; the members move faster in the galaxy's potential), in 30–50. Neutron-star
+    retention is 0.380 (0.354 before; the heavier cusp raises the cluster's escape speed), in
+    0.30–0.40; black holes 0.880, 2.91 × 10⁴ inside 1 pc (2.34 × 10⁴), in 1–4 × 10⁴. The innermost
+    cell proposes 48.7 candidates against the model's expected 17.1 (42.5 and 15.4 before), within
+    the test's four times.
+  - _Plan 03's headroom check, and the rogue planets' threshold (a consequence)._ The nuclear disc's
+    inner part is holed (plan 02, R26), and a holed disc's bound over plan 03's single root octant
+    is its amplitude at the centre, four and a half times its densest ring's: the fixture's layer A
+    then read 80,896 candidates under Kroupa's function against 65,536 for cells that expect far
+    fewer. `check_index_headroom` now takes the largest bound over a partition of the root cube, in
+    each octant the layer's 8 × 8 × 8 cells about the origin and then shells of seven boxes of
+    doubling edge (`placement::partition`, 4,656 boxes for layer A), which bounds every cell just as
+    surely (every cell lies in one box, and a bound grows with its box) and is the densest cell's
+    own bound where it matters: the fixture's fullest layer-A cell expects 20,608 (about 6,000
+    before the inner part; Design note 6 of plan 03), in its ring, and the check passes under both
+    mass functions and for 48 drawn seeds under each (a lane sweep, not a committed test; the
+    densest ring 108 systems per ly³, under Kroupa's function at a 238 ly nuclear disc). Plan 13's
+    saturation threshold is C over the same partition's greatest total bound. **A finding for the
+    owner:** the inner part's ring holds some 50 systems per ly³ near 30 ly (the ACES's measured
+    total there, with the cluster, is about 66 M☉ ly⁻³), so the fixture's 30 rogue planets per
+    system pass the rogue layer's 992.5 per ly³ there: the partition's greatest bound on the systems
+    is 68.5 per ly³ (84.2 under Kroupa's), so the saturation threshold falls from 37.5 to 10.09 per
+    star (31.8 to 8.46 under Kroupa's), under the default 21, and the fixture's ring saturates; the
+    brown dwarfs' fullest cell rises from some 20,000 to 74,036 of 2¹⁹. By ruling 125 those cells
+    saturate in place and nothing else moves, but the brainstorm's "the Milky Way's does not reach
+    it" no longer holds; the tests are pinned provisionally to the measured state.

@@ -18,7 +18,9 @@
 //! The model, the distributions and the quadratures open no stream. The hierarchy draw opens
 //! `system.multiplicity` under the system's ID and `binary.orbit`,
 //! `binary.orientation` and `binary.phase` under each companion's body ID, and reads plan 06's
-//! companion-stripped mark of a massive primary. Plan 06's
+//! companion-stripped mark of a massive primary. A bound brown-dwarf companion (P11.T2.d, Design
+//! note 15) comes last, on `system.substellar` under the system's ID
+//! ([`substellar_companion_probability`]), and is left out of every quadrature. Plan 06's
 //! [`SystemStars`](crate::stellar::system::SystemStars) calls it for every system (P11.T2.c).
 //! Periods are in [`Days`](crate::units::Days) and, for densities and cumulative
 //! distributions, in x = log₁₀(P ÷ 1 d); masses in [`SolarMasses`](crate::units::SolarMasses).
@@ -32,6 +34,7 @@ pub mod period_fit;
 mod positions;
 mod quadrature;
 mod stability;
+mod substellar;
 #[cfg(test)]
 pub(crate) mod testing;
 
@@ -57,4 +60,8 @@ pub use quadrature::{
 };
 pub use stability::{
     MARDLING_AARSETH_C, TIDAL_CUT_SHARE, mardling_aarseth_limit, mutual_inclination,
+};
+pub use substellar::{
+    MAX_SUBSTELLAR_TRIES, SUBSTELLAR_ANCHORS, SUBSTELLAR_DESERT_FACTOR, SUBSTELLAR_DESERT_PERIOD,
+    substellar_companion_probability,
 };

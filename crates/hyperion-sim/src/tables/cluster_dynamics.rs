@@ -33,17 +33,17 @@
 // inputs-sha256: 4efee92684d31ad81aac4f53fdfc763c4b5d402a75211fe60edac1bf384906d6
 // manifest: crates/hyperion-fit/manifests/cluster_bh.toml
 // data: `cmc@cc49168e45c3`
-// sim-fingerprint: 5ce8c09fc8aef170dd77d9c55908f7a3290284a190a7dc8977abd18d714ffe11
+// sim-fingerprint: 7f0e8692d3102caf2afbf5e23f1ae0d1e60f17dbe1de324b911fb5a0fbc8b615
 // since-generator-version: 15
 // source: Kremer et al. (2020, ApJS 247, 48), Table A1; Breen and Heggie (2013, MNRAS 432,
 //   2779); Antonini and Gieles (2020, MNRAS 492, 2936); Spitzer (1987); Kroupa (2001); the
 //   Baumgardt–Hilker catalogue as plan 09's tests hold it
-// acceptance: fitted β = 3.8937e-21, ψ₁ = 25949798996716978176.00 (β ψ₁ = 0.1010) at k = 2.5 and
+// acceptance: fitted β = 1.5623e-21, ψ₁ = 64780543383733190656.00 (β ψ₁ = 0.1012) at k = 2.5 and
 //   c = 0.138 (β and c enter only as β ÷ c) over 124 CMC models at 14 Gyr (1 of them dissolved
 //   to under 500 M☉ and left out), 97 retaining any: rms 0.476 dex in log₁₀(1 + N) over those
 //   (under 0.3; FAILS; 1.716 at the scratch constants); 19 of 34 predicted empty are empty
-//   (FAILS); on the Baumgardt–Hilker catalogue at 12 Gyr, the most in a cluster past 14 t★ 25.86
-//   (FAILS), the median over 3 × 10⁵ M☉ 693 (tens to a few hundred; FAILS), ω Centauri 12100
+//   (FAILS); on the Baumgardt–Hilker catalogue at 12 Gyr, the most in a cluster past 14 t★ 25.88
+//   (FAILS), the median over 3 × 10⁵ M☉ 694 (tens to a few hundred; FAILS), ω Centauri 12167
 //   (thousands; FAILS), 0.006 past the core-collapse line with none (0.15–0.25; FAILS); the
 //   table keeps plan 09's scratch β 0.0028, ψ₁ 147 until a ruling
 

@@ -2,9 +2,10 @@
 //! black hole, its distribution functions, the marks that flatten and turn it, and its classes
 //! (plan 09, phase 6, P09.T24–T26).
 //!
-//! The cluster is a budget of its own (Design note 5): its mass and break are plan 02's
-//! [`NuclearClusterParams`](crate::galaxy::params::NuclearClusterParams), and its black hole is
-//! the galaxy's. [`CentreProfile`] holds the stars' profile and the potential of the two
+//! The cluster is a budget of its own (Design note 5): its law and its mass inside the reach are
+//! plan 02's [`NuclearClusterParams`](crate::galaxy::params::NuclearClusterParams), and its black
+//! hole is the galaxy's. [`CentreProfile`] holds the stars' profile and the potential the members
+//! move in, the black hole's, the cluster's and the rest of the galaxy's spherical average
 //! ([`profile`]); one [`DistributionFunction`] per distinct profile (stars, black holes, the young
 //! clockwise disc and the isotropic young stars: Design note 14's three and ruling 144.6's split
 //! of the young) is found by Eddington inversion in that potential ([`df`]);
@@ -71,26 +72,28 @@ impl CentreModel {
     /// has no isotropic distribution function in the potential (P09.T24.b), which no galaxy the
     /// builder allows does (`no_drawn_centre_fails_its_inversion`).
     pub fn new(galaxy: &Galaxy) -> Result<Self, BuildCentreError> {
-        Self::from_parts(galaxy.params(), galaxy.mass_function())
+        let params = galaxy.params();
+        let profile = CentreProfile::new(params.nuclear_cluster(), params.black_hole().mass())?
+            .in_galaxy(galaxy.mass_model());
+        Self::from_parts(profile, galaxy.mass_function())
     }
 
     /// The centre of a galaxy of `params`, without building the galaxy: what [`new`](Self::new)
     /// builds for a galaxy of these parameters, bit for bit, since both read the parameters' mass
-    /// function.
+    /// function and build the same mass model (which this builds, and no potential tables).
     ///
     /// # Errors
     ///
     /// As [`new`](Self::new).
     pub fn from_params(params: &GalaxyParams) -> Result<Self, BuildCentreError> {
         let imf = params.mass_function().to_mass_function();
-        Self::from_parts(params, imf.as_ref())
+        Self::from_parts(CentreProfile::from_params(params)?, imf.as_ref())
     }
 
     fn from_parts(
-        params: &GalaxyParams,
+        profile: CentreProfile,
         mass_function: &dyn MassFunction,
     ) -> Result<Self, BuildCentreError> {
-        let profile = CentreProfile::from_params(params)?;
         let tracers = Self::tracers(&profile);
         let distributions = Self::invert_tracers(&profile, &tracers)?;
         let loss_cone = LossCone::new(profile.black_hole());
@@ -189,7 +192,7 @@ impl CentreModel {
         &self.classes
     }
 
-    /// The mass inside `r` ly, the black hole's and the stars'.
+    /// The mass inside `r` ly, the black hole's and the stars' (not the rest of the galaxy's).
     #[must_use]
     pub fn enclosed_mass(&self, r: LightYears) -> SolarMasses {
         self.profile.enclosed_mass(r.value())
@@ -230,8 +233,8 @@ mod tests {
         w.f64("loss cone", model.loss_cone_radius().value());
         for tracer in CentreTracer::ALL {
             let df = model.distribution(tracer);
-            let last = df.values().len() - 1;
-            for j in [0, 32, 64, 128, 192, last] {
+            let n = df.values().len();
+            for j in [0, n / 5, 2 * n / 5, 3 * n / 5, 4 * n / 5, n - 1] {
                 w.f64(&format!("{tracer:?} f[{j}]"), df.values()[j]);
             }
             for r in [1e-5, 0.01, 1.0, 30.0] {
@@ -269,32 +272,34 @@ mod tests {
 
     /// P09.T24.b and ruling 144.1: no drawn galaxy's centre fails its inversions (f positive at
     /// every node, for every tracer), over 64 seeds; nor does a centre at the extreme black hole
-    /// to cluster ratios the draws allow in practice: black holes 1.5 dex either side of the
-    /// Milky Way's (±4σ of the M–σ scatter's 0.38 dex), about clusters from 10⁶ M☉ to the 6 ×
-    /// 10⁷ M☉ of the cap the joint revision puts on plan 02's draw (ruling 144.5b).
+    /// to cluster ratios the draws allow in practice, in the Milky Way's potential: black holes
+    /// 1.5 dex either side of the Milky Way's (±4σ of the M–σ scatter's 0.38 dex), about clusters
+    /// from 10⁶ M☉ to plan 02's cap (ruling 144.5b).
     #[test]
     fn no_drawn_centre_fails_its_inversion() {
+        use crate::galaxy::imf::MassFunctionKind;
+        use crate::galaxy::params::NuclearClusterParams;
+        use crate::galaxy::potential::MassModel;
         for n in 0..64_u64 {
-            let params = GalaxyParams::from_seed(
-                Seed::new(0x0924_0000 | n),
-                crate::galaxy::imf::MassFunctionKind::default(),
-            );
+            let params =
+                GalaxyParams::from_seed(Seed::new(0x0924_0000 | n), MassFunctionKind::default());
             let profile = CentreProfile::from_params(&params).unwrap();
             if let Err(e) = CentreModel::invert(&profile) {
                 panic!("seed {n}: {e}");
             }
         }
-        let params = GalaxyParams::milky_way_like();
-        let shape = TracerShape::nuclear_cluster(params.nuclear_cluster());
-        for cluster in [1e6, 2.5e7, 6e7] {
+        let model = MassModel::new(&GalaxyParams::milky_way_like());
+        let cap = NuclearClusterParams::mass_cap(MassFunctionKind::Chabrier).value();
+        for cluster in [1e6, 2.5e7, cap] {
             for dex in [-1.5, -0.76, 0.76, 1.5] {
                 let black_hole = 4.3e6 * crate::math::exp10(dex);
                 let profile = CentreProfile::from_shape(
-                    shape.clone(),
+                    TracerShape::nuclear_cluster(),
                     SolarMasses::new(cluster),
                     SolarMasses::new(black_hole),
                 )
-                .unwrap();
+                .unwrap()
+                .in_galaxy(&model);
                 if let Err(e) = CentreModel::invert(&profile) {
                     panic!("cluster {cluster:e}, black hole {black_hole:e}: {e}");
                 }

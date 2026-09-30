@@ -366,7 +366,7 @@ impl Member {
         match self {
             Self::Track { track, offset } => track.own_structure_at((age - offset).max(0.0)),
             Self::Shaped { track, offset, .. } => {
-                Some(track.structure_at((age - offset).max(0.0), mass.max(1e-6)))
+                Some(track.structure_at(shaped_track_age(track, age, *offset), mass.max(1e-6)))
             }
             Self::MainSequence { helium, .. } => {
                 let (structure, _) = sse::main_sequence_structure(
@@ -423,7 +423,7 @@ impl Member {
     ) -> Option<f64> {
         match self {
             Self::Shaped { track, offset, .. } => {
-                Some(track.radius_at((age - offset).max(0.0), mass.max(1e-6)))
+                Some(track.radius_at(shaped_track_age(track, age, *offset), mass.max(1e-6)))
             }
             Self::MainSequence { helium, .. } => {
                 Some(sse::main_sequence_radius(ctx.coeffs(), *helium, mass, tau))
@@ -710,4 +710,18 @@ pub(crate) fn cooling_origin(
             ctx.composition().z_fit(),
         )
     })
+}
+
+/// The track age at which a star whose mass the binary sets (`Member::Shaped`) is read at the
+/// engine's age `age`: `age − offset`, from zero, and held at the track's last built age.
+///
+/// A star rejuvenated by accretion can be read a little past its own track's death, where the
+/// track holds no living segment: the engine's step does not always end the segment at that death
+/// (a 7.9 M☉ accretor 21.7 Myr younger than its pair was read 46,000 years past it, plan 11's
+/// P11.T11 as built). Release builds held it there already, through the track's own clamp; this
+/// makes the hold explicit, so that debug builds give the same state and do not trip the track's
+/// range check. Plan 11's Risks record it for the engine.
+#[must_use]
+fn shaped_track_age(track: &Track, age: f64, offset: f64) -> f64 {
+    (age - offset).max(0.0).min(track.built_until().value())
 }

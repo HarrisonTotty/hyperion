@@ -1563,6 +1563,23 @@ impl MultiplicityModel {
         )
     }
 
+    /// The slope γ of the lowest segment of the smooth mass-ratio law of a primary of `m1` at x =
+    /// `log_period` = log₁₀(P ÷ 1 d): the `q^γ` that a brown-dwarf companion's mass ratio
+    /// continues below [`MIN_COMPANION_MASS`] ÷ m₁ (P11.T2.d, Design note 15). It is Duchêne and
+    /// Kraus's γ below [`MOE_DI_STEFANO_MIN_MASS`] and `max(γ_smallq, 0)` from it up, the
+    /// segments [`smooth_mass_ratio`](Self::smooth_mass_ratio) starts with.
+    #[must_use]
+    pub(super) fn substellar_mass_ratio_slope(&self, m1: SolarMasses, log_period: f64) -> f64 {
+        let m = m1.value();
+        if m < MOE_DI_STEFANO_MIN_MASS {
+            let anchors = self.mass_ratio_anchors();
+            let (i, t) = blend(anchors, |a| a.mass, m);
+            lerp(anchors[i].gamma, anchors[i + 1].gamma, t)
+        } else {
+            gamma_small(m, log_period).max(0.0)
+        }
+    }
+
     /// The mass-ratio law with its twins at x = log₁₀(P ÷ 1 d).
     #[must_use]
     pub(super) fn mass_ratio_at(&self, m1: SolarMasses, log_period: f64) -> MassRatioDistribution {

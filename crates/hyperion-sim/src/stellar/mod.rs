@@ -34,8 +34,8 @@ pub mod sse;
 pub mod state;
 pub mod substellar;
 pub mod system;
-#[cfg(test)]
-pub(crate) mod testing;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod variability;
 
 pub use composition::Composition;

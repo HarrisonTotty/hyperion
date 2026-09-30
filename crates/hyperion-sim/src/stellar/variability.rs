@@ -18,14 +18,24 @@
 //!   and activity.
 //!
 //! A star is one kind at a time: the first region that holds it in the order of [`variability`].
-//! The light factor at a clock time, with cycle-keyed irregularity (P06.T26.d), needs the event
-//! machinery's monotone phase and is not built here.
+//!
+//! - **The light factor** (P06.T26.d): [`light_factor_at`] gives a star's light at a clock time
+//!   over its track's, from a pulsation phase on a clock whose frequency is the epoch's plus its
+//!   first derivative from the track, through the event machinery's monotone phase, with each
+//!   cycle's amplitude and shape marks drawn from the stream keyed by its cycle number under the
+//!   star's `star.var.cycle` key: none for the regular pulsators, a few per cent of period jitter
+//!   and 20% of amplitude scatter for Miras, more for the semiregular and irregular kinds.
 
+use crate::events::{EventBin, EventSeries, MonotonePhase, Phase as CyclePhase, PhaseClock};
 use crate::math;
-use crate::stellar::classify::{Classification, LuminosityClass, PeculiarClass, SpectralType};
+use crate::stellar::classify::{
+    Classification, LuminosityClass, PeculiarClass, SpectralType, is_luminous_blue_variable,
+};
 use crate::stellar::remnant::wd_spectral::WhiteDwarfAtmosphere;
 use crate::stellar::rotation::{Activity, ActivityLevel, Rotation};
+use crate::stellar::system::StarModel;
 use crate::stellar::{Composition, Phase, StarState};
+use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, Span, UniverseTime};
 use crate::units::consts::{SECONDS_PER_DAY, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{Days, Magnitudes, SolarMasses};
 
@@ -68,7 +78,8 @@ pub enum VariableKind {
     GwVirginis,
     /// An α Cygni variable: a pulsating B or A supergiant.
     AlphaCygni,
-    /// The S Doradus cycles of a luminous blue variable.
+    /// The S Doradus cycles of a luminous blue variable, as P06.T24.a's criterion
+    /// ([`is_luminous_blue_variable`], [`PhasePredicate::Lbv`](crate::stellar::sse::PhasePredicate)) names one.
     SDoradus,
     /// A BY Draconis variable: spots on an active cool dwarf, turning with it.
     ByDraconis,
@@ -293,12 +304,6 @@ const WHITE_DWARF_AMPLITUDE: f64 = 0.3;
 /// density with Q = 0.04 d (the lane's).
 const ALPHA_CYGNI: ((f64, f64), f64, f64) = ((8_000.0, 25_000.0), 0.04, 0.1);
 
-/// The luminous blue variables' region, after Hurley et al. (2000, section 7.1, the
-/// Humphreys–Davidson limit: L above 6 × 10⁵ L☉ and 10⁻⁵ R L^½ above 1) and hotter than 8,000 K
-/// (plan 06, P06.T24.a). P06.T24.a's `PhasePredicate::Lbv`, when it lands, is to replace this
-/// copy of its criterion.
-const LBV: (f64, f64) = (6.0e5, 8_000.0);
-
 /// The S Doradus cycles, years: 10 × (R ÷ 100 R☉), held to 3–40, so that the cycles last years to
 /// decades (Humphreys and Davidson 1994, PASP 106, 1025) and lengthen as the star swells to its
 /// cool phase; the full amplitude 1.5 mag, of the catalogue's 1–7 (the lane's rule; provisional).
@@ -456,6 +461,7 @@ fn white_dwarf_pulsator(inputs: &VariabilityInputs<'_>) -> Option<Variability> {
         SpectralType::WhiteDwarf(wd) => Some(wd.atmosphere()),
         SpectralType::Sequence(_)
         | SpectralType::NeutronStar(_)
+        | SpectralType::WolfRayet(_)
         | SpectralType::BlackHole
         | SpectralType::NoRemnant => None,
     };
@@ -489,18 +495,15 @@ fn white_dwarf_pulsator(inputs: &VariabilityInputs<'_>) -> Option<Variability> {
     ))
 }
 
-/// The S Doradus cycles of a luminous blue variable.
+/// The S Doradus cycles of a luminous blue variable, as P06.T24.a's criterion names one
+/// ([`is_luminous_blue_variable`], which [`PhasePredicate::Lbv`](crate::stellar::sse::PhasePredicate)
+/// reads too).
 #[must_use]
 fn s_doradus(state: &StarState) -> Option<Variability> {
-    let (l, r) = (state.luminosity().value(), state.radius().value());
-    let (min_l, min_teff) = LBV;
-    let lbv = state.phase().is_living()
-        && l > min_l
-        && 1e-5 * r * l.sqrt() > 1.0
-        && state.effective_temperature().value() > min_teff;
-    if !lbv {
+    if !is_luminous_blue_variable(state) {
         return None;
     }
+    let r = state.radius().value();
     let (scale, (low, high), amplitude) = S_DORADUS;
     let years = (scale * r / 100.0).clamp(low, high);
     Some(variable(
@@ -729,6 +732,274 @@ fn by_draconis(inputs: &VariabilityInputs<'_>) -> Option<Variability> {
         spin.period().value(),
         amplitude,
     ))
+}
+
+// --- The light factor (P06.T26.d) ----------------------------------------------------------
+
+/// How a kind's light curve varies from cycle to cycle: the monotone phase's jitter a, cycles at
+/// the smallest octave; the scatter of each cycle's amplitude, as its standard deviation over the
+/// mean; the rise's share of the cycle, from minimum to maximum light; and the jitter of that
+/// share, ± per cycle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Irregularity {
+    jitter: f64,
+    amplitude_scatter: f64,
+    rise: f64,
+    rise_jitter: f64,
+}
+
+impl Irregularity {
+    /// A strictly periodic curve rising over `rise` of the cycle.
+    const fn regular(rise: f64) -> Self {
+        Self {
+            jitter: 0.0,
+            amplitude_scatter: 0.0,
+            rise,
+            rise_jitter: 0.0,
+        }
+    }
+
+    /// A curve with period jitter `jitter`, amplitude scatter `scatter`, rising over `rise` of the
+    /// cycle ± `rise_jitter`.
+    const fn irregular(jitter: f64, scatter: f64, rise: f64, rise_jitter: f64) -> Self {
+        Self {
+            jitter,
+            amplitude_scatter: scatter,
+            rise,
+            rise_jitter,
+        }
+    }
+
+    /// The light curve of `kind` (P06.T26.d; the shares are the lane's, provisional). The regular
+    /// pulsators have no noise: classical Cepheids rise over 0.3 of the cycle and RR Lyrae stars
+    /// over 0.15, as their light curves' steep rises do (Samus et al. 2017, the GCVS's
+    /// asymmetries M − m), the rest are symmetric. Miras have 3% of period jitter and 20% of
+    /// amplitude scatter, within the plan's "a few per cent" and "10–30%", and rise over 0.4;
+    /// the semiregulars and irregulars more, up to the 0.08 cycles that the monotone phase's
+    /// slope bound allows (10.3 a below 0.9).
+    const fn of(kind: VariableKind) -> Self {
+        match kind {
+            VariableKind::ClassicalCepheid | VariableKind::BlHerculis | VariableKind::WVirginis => {
+                Self::regular(0.3)
+            }
+            VariableKind::RrLyrae => Self::regular(0.15),
+            VariableKind::DeltaScuti
+            | VariableKind::BetaCephei
+            | VariableKind::SlowlyPulsatingB
+            | VariableKind::GammaDoradus
+            | VariableKind::ZzCeti
+            | VariableKind::V777Herculis
+            | VariableKind::GwVirginis
+            | VariableKind::Alpha2CanumVenaticorum => Self::regular(0.5),
+            VariableKind::RvTauri => Self::irregular(0.05, 0.3, 0.5, 0.05),
+            VariableKind::Mira => Self::irregular(0.03, 0.2, 0.4, 0.03),
+            VariableKind::SemiregularA => Self::irregular(0.05, 0.3, 0.45, 0.05),
+            VariableKind::SemiregularB
+            | VariableKind::SemiregularC
+            | VariableKind::AlphaCygni
+            | VariableKind::ByDraconis => Self::irregular(0.08, 0.4, 0.5, 0.1),
+            VariableKind::SlowIrregular | VariableKind::SDoradus => {
+                Self::irregular(0.08, 0.5, 0.5, 0.1)
+            }
+        }
+    }
+}
+
+/// The years either side of the epoch over which the pulsation clock's frequency derivative is
+/// measured on the track.
+const DERIVATIVE_YEARS: f64 = 10.0;
+
+/// The octaves of every irregular kind's monotone phase: enough, on a one-cycle lattice, to span
+/// the source horizon at the shortest period a clock takes, 16 s (the event word's 40 bits; plan
+/// 06, design note 15), so the count never depends on the star's period.
+const IRREGULAR_OCTAVES: u32 = 40;
+
+/// A pulsation clock whose frequency drifts linearly from the epoch: φ(x) = ν₀ x + ½ ν̇ x² at x
+/// seconds from the epoch, the drift held at its value at ±X beyond the source horizon's reach X,
+/// and ν̇ held to ν₀ ÷ 2X in size so that the frequency stays above ν₀ ÷ 2 (design note 23: the
+/// phase is formed from the clock time, never from ages).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DriftingClock {
+    /// ν₀, cycles per second at the epoch.
+    frequency: f64,
+    /// ν̇, cycles per second per second.
+    drift: f64,
+    /// X, seconds: the source horizon's reach back from the epoch, H + L.
+    reach: f64,
+}
+
+impl DriftingClock {
+    /// The clock of frequency `frequency` at the epoch drifting at `drift`, held as the type says.
+    fn new(frequency: f64, drift: f64) -> Self {
+        let reach = (CLOCK_WINDOW_H.as_seconds_f64() + LIGHT_CROSSING_L.as_seconds_f64()).max(1.0);
+        let bound = 0.5 * frequency / reach;
+        Self {
+            frequency,
+            drift: drift.clamp(-bound, bound),
+            reach,
+        }
+    }
+
+    /// The phase at `x` seconds from the epoch, cycles.
+    fn phase_at_seconds(&self, x: f64) -> f64 {
+        let (nu, dnu, reach) = (self.frequency, self.drift, self.reach);
+        if x > reach {
+            nu * x + 0.5 * dnu * reach * reach + dnu * reach * (x - reach)
+        } else if x < -reach {
+            nu * x + 0.5 * dnu * reach * reach - dnu * reach * (x + reach)
+        } else {
+            nu * x + 0.5 * dnu * x * x
+        }
+    }
+}
+
+impl PhaseClock for DriftingClock {
+    fn base_phase(&self, t: UniverseTime) -> CyclePhase {
+        CyclePhase::new(0, self.phase_at_seconds(t.since_epoch().as_seconds_f64()))
+    }
+
+    fn time_at(&self, phase: CyclePhase) -> UniverseTime {
+        let (nu, dnu, reach) = (self.frequency, self.drift, self.reach);
+        let phi = phase.to_f64();
+        let x = if phi > self.phase_at_seconds(reach) {
+            (phi + 0.5 * dnu * reach * reach) / (nu + dnu * reach)
+        } else if phi < self.phase_at_seconds(-reach) {
+            (phi + 0.5 * dnu * reach * reach) / (nu - dnu * reach)
+        } else {
+            // The root of ½ ν̇ x² + ν₀ x − φ = 0 nearer zero, in the form that stays exact as ν̇
+            // vanishes.
+            2.0 * phi / (nu + (nu * nu + 2.0 * dnu * phi).max(0.0).sqrt())
+        };
+        let span = Span::from_seconds_f64(x).unwrap_or(if x > 0.0 {
+            Span::from_seconds(i64::MAX)
+        } else {
+            Span::from_seconds(i64::MIN)
+        });
+        UniverseTime::EPOCH.checked_add(span).unwrap_or(if x > 0.0 {
+            ClockEnd::LATEST
+        } else {
+            ClockEnd::EARLIEST
+        })
+    }
+}
+
+/// The clock's ends, for an inverse that falls beyond them.
+struct ClockEnd;
+
+impl ClockEnd {
+    const EARLIEST: UniverseTime = match UniverseTime::new(i64::MIN, 0) {
+        Ok(t) => t,
+        Err(_) => UniverseTime::EPOCH,
+    };
+    const LATEST: UniverseTime = match UniverseTime::new(i64::MAX, 0) {
+        Ok(t) => t,
+        Err(_) => UniverseTime::EPOCH,
+    };
+}
+
+/// The frequency of a variable of period `period`, cycles per second.
+fn frequency_of(period: Days) -> f64 {
+    1.0 / (period.value() * SECONDS_PER_DAY)
+}
+
+/// A star's light at `t` over the light its track gives it, as a flux ratio, positive: 1 for a
+/// star that does not vary at `t` or has not formed (plan 06, P06.T26.d).
+///
+/// The star's kind, period and full amplitude A at `t` are [`StarModel::variability_at`]'s. The
+/// pulsation phase is Φ(t) of a [`MonotonePhase`] of `cycles`, the star's `star.var.cycle` series
+/// (`EventSeries::new(seed, tags::STAR_VARIABILITY_CYCLE, star)`), on a clock whose frequency is
+/// the epoch's, 1 ÷ P, plus its first derivative from the track (the period ±10 years about the
+/// epoch), so that evolution changes the period and the phase stays continuous. A star whose kind
+/// at `t` is not its kind at the epoch (one that crosses into a region within the horizon) takes
+/// the period at `t` with no drift. The light curve in magnitudes is −(A ÷ 2) cos(π g), with g
+/// running from 0 at maximum light, the cycle's start, to 1 at minimum and 2 at the next maximum,
+/// the rise taking its kind's share of the cycle; each cycle's amplitude and rise are marks of the
+/// stream of its cycle number, and the amplitude passes smoothly from one cycle's to the next's.
+/// The light factor is 10^(−0.4 Δm). It is a pure function of the star, the series and `t`,
+/// continuous in `t` within a region, whatever order times are asked in.
+///
+/// `StarModel` holds no seed or ID, so the series comes in beside it (a deviation from the plan's
+/// `light_factor_at(star, t)`).
+///
+/// # Panics
+///
+/// In debug builds, as [`StarModel::state_at`] for a `t` after the clock window's end.
+#[must_use]
+pub fn light_factor_at(star: &StarModel, cycles: &EventSeries, t: UniverseTime) -> f64 {
+    let Some(now) = star.variability_at(t) else {
+        return 1.0;
+    };
+    let amplitude = now.amplitude().value();
+    if !(amplitude > 0.0 && now.period().value() > 0.0) {
+        return 1.0;
+    }
+    let clock = pulsation_clock(star, &now);
+    let curve = Irregularity::of(now.kind());
+    let phase = if curve.jitter > 0.0 {
+        MonotonePhase::new(curve.jitter, 1, IRREGULAR_OCTAVES).ok()
+    } else {
+        None
+    };
+    let (cycle, fraction) = phase.map_or_else(
+        || {
+            let base = clock.base_phase(t);
+            (base.cycles(), base.fraction())
+        },
+        |phase| phase.cycle_at(cycles, &clock, t),
+    );
+    let marks = |n: i64| -> (f64, f64) {
+        if curve.amplitude_scatter <= 0.0 && curve.rise_jitter <= 0.0 {
+            return (1.0, curve.rise);
+        }
+        let Ok(bin) = EventBin::new(n) else {
+            return (1.0, curve.rise);
+        };
+        let mut stream = cycles.key().event_stream(bin, 0);
+        let (u_amplitude, u_rise) = (stream.uniform(), stream.uniform());
+        (
+            1.0 + curve.amplitude_scatter * SQRT_3 * (2.0 * u_amplitude - 1.0),
+            curve.rise + curve.rise_jitter * (2.0 * u_rise - 1.0),
+        )
+    };
+    let (this, rise) = marks(cycle);
+    let (next, _) = marks(cycle.saturating_add(1));
+    let w = fraction * fraction * (3.0 - 2.0 * fraction);
+    let cycle_amplitude = amplitude * ((1.0 - w) * this + w * next);
+    let decline = 1.0 - rise;
+    let g = if fraction <= decline {
+        fraction / decline
+    } else {
+        1.0 + (fraction - decline) / rise
+    };
+    let delta_m = -0.5 * cycle_amplitude * math::cos(core::f64::consts::PI * g);
+    math::exp10(-0.4 * delta_m)
+}
+
+/// √3, which makes a uniform scatter of half-width √3 σ have standard deviation σ.
+const SQRT_3: f64 = 1.732_050_807_568_877_2;
+
+/// The pulsation clock of `star`, which varies as `now` at the time asked: the epoch's frequency
+/// and its drift where the star is the same kind of variable at the epoch and ±10 years about it,
+/// else `now`'s frequency with no drift.
+fn pulsation_clock(star: &StarModel, now: &Variability) -> DriftingClock {
+    let years = |y: f64| {
+        Span::from_seconds_f64(y * SECONDS_PER_JULIAN_YEAR)
+            .and_then(|span| UniverseTime::EPOCH.checked_add(span))
+    };
+    let same_kind = |v: Option<Variability>| v.filter(|v| v.kind() == now.kind());
+    let Some(epoch) = same_kind(star.variability_at(UniverseTime::EPOCH)) else {
+        return DriftingClock::new(frequency_of(now.period()), 0.0);
+    };
+    let at = |y: f64| years(y).and_then(|t| same_kind(star.variability_at(t)));
+    let nu = frequency_of(epoch.period());
+    let drift = match (at(-DERIVATIVE_YEARS), at(DERIVATIVE_YEARS)) {
+        (Some(before), Some(after)) => {
+            (frequency_of(after.period()) - frequency_of(before.period()))
+                / (2.0 * DERIVATIVE_YEARS * SECONDS_PER_JULIAN_YEAR)
+        }
+        _ => 0.0,
+    };
+    DriftingClock::new(nu, drift)
 }
 
 #[cfg(test)]
@@ -1108,6 +1379,229 @@ mod tests {
             "{:?}",
             &miras[..miras.len().min(5)]
         );
+    }
+
+    // --- P06.T26.d -------------------------------------------------------------------------
+
+    /// The first age of `track`'s star, from `from` in `steps` steps of `step` years, at which it
+    /// is a variable of `kind`.
+    fn first_age_of(
+        track: &Track,
+        m0: f64,
+        composition: &Composition,
+        kind: VariableKind,
+        (from, step, steps): (f64, f64, u32),
+    ) -> f64 {
+        (0..steps)
+            .map(|i| from + step * f64::from(i))
+            .find(|&age| {
+                let state = track.state_at(Years::new(age));
+                vary(&state, m0, composition).is_some_and(|v| v.kind() == kind)
+            })
+            .unwrap_or_else(|| panic!("no {kind:?} on the {m0} M☉ track"))
+    }
+
+    /// A Cepheid a century into its crossing of the strip at the epoch, and a Mira a few thousand
+    /// years into its pulses, with their `star.var.cycle` series.
+    fn cepheid_and_mira() -> [(StarModel, EventSeries); 2] {
+        use crate::id::{BodyId, SystemId};
+        let lmc = Composition::from_fe_h(
+            crate::units::Dex::new(-0.5),
+            crate::units::HeliumExcess::ZERO,
+        );
+        let cepheid = Track::full(SolarMasses::new(5.0), &lmc, &StarDraws::median());
+        let cepheid_age = first_age_of(
+            &cepheid,
+            5.0,
+            &lmc,
+            VariableKind::ClassicalCepheid,
+            (9.5e7, 1.0e3, 20_000),
+        ) + 100.0;
+        let mira = Track::full(
+            SolarMasses::new(1.5),
+            &Composition::SOLAR,
+            &StarDraws::median(),
+        );
+        let end = mira.lifetime().unwrap().value();
+        let mira_age = first_age_of(
+            &mira,
+            1.5,
+            &Composition::SOLAR,
+            VariableKind::Mira,
+            (0.95 * end, 1.0e3, 200_000),
+        ) + 3_000.0;
+        let series = |n: u64| {
+            let system = SystemId::from_raw(0x0200_0800_2000_0000 + n).unwrap();
+            EventSeries::new(
+                crate::Seed::new(7),
+                crate::events::tags::STAR_VARIABILITY_CYCLE,
+                BodyId::new(system, 0).into(),
+            )
+        };
+        [
+            (
+                StarModel::new(
+                    SolarMasses::new(5.0),
+                    lmc,
+                    StarDraws::median(),
+                    Years::new(cepheid_age),
+                )
+                .unwrap(),
+                series(1),
+            ),
+            (
+                StarModel::new(
+                    SolarMasses::new(1.5),
+                    Composition::SOLAR,
+                    StarDraws::median(),
+                    Years::new(mira_age),
+                )
+                .unwrap(),
+                series(2),
+            ),
+        ]
+    }
+
+    fn at_days(days: f64) -> UniverseTime {
+        UniverseTime::EPOCH
+            .checked_add(Span::from_seconds_f64(days * SECONDS_PER_DAY).unwrap())
+            .unwrap()
+    }
+
+    /// P06.T26.d's test: `light_factor_at` is continuous in t, for a regular Cepheid and an
+    /// irregular Mira, over ten cycles sampled at 1/2,000 of a cycle, where the largest step
+    /// between neighbours stays within what the curve's own slope allows; and it swings through
+    /// its full amplitude, 10^(0.4 A) from faintest to brightest, give or take the Mira's scatter.
+    #[test]
+    fn the_light_factor_is_continuous_and_spans_the_amplitude() {
+        for (star, series) in cepheid_and_mira() {
+            let v = star
+                .variability_at(UniverseTime::EPOCH)
+                .expect("varies at the epoch");
+            let period = v.period().value();
+            let n = 20_000;
+            let lights: Vec<f64> = (0..=n)
+                .map(|i| {
+                    light_factor_at(
+                        &star,
+                        &series,
+                        at_days(10.0 * period * f64::from(i) / f64::from(n)),
+                    )
+                })
+                .collect();
+            let steepest = lights
+                .windows(2)
+                .map(|w| (math::log10(w[1]) - math::log10(w[0])).abs())
+                .fold(0.0, f64::max);
+            // The curve's own steepest step: the full amplitude in magnitudes over the rise's
+            // share of 2,000 steps, times π ÷ 2 for the cosine's slope, with the scatter's margin.
+            let bound =
+                0.4 * 2.0 * v.amplitude().value() * core::f64::consts::FRAC_PI_2 / (0.1 * 2_000.0);
+            assert!(
+                steepest < bound,
+                "{v:?}: step {steepest} dex against {bound}"
+            );
+            let (low, high) = lights
+                .iter()
+                .fold((f64::INFINITY, 0.0_f64), |(a, b), &l| (a.min(l), b.max(l)));
+            let swing = 2.5 * math::log10(high / low);
+            let a = v.amplitude().value();
+            assert!(
+                (0.6 * a..1.4 * a).contains(&swing),
+                "{v:?}: {swing} mag against {a}"
+            );
+        }
+    }
+
+    /// The light factor is the same whatever order times are asked in and in isolation, and the
+    /// regular Cepheid repeats with its period while the Mira's cycles differ from one another.
+    #[test]
+    fn the_light_factor_is_order_independent_and_only_the_mira_is_irregular() {
+        let [(cepheid, c_series), (mira, m_series)] = cepheid_and_mira();
+        let days: Vec<f64> = (0..64).map(|i| f64::from(i) * 37.3 - 900.0).collect();
+        for (star, series) in [(&cepheid, &c_series), (&mira, &m_series)] {
+            hyperion_testkit::order::assert_order_independent(&days, |&d| {
+                hyperion_testkit::float::bits(light_factor_at(star, series, at_days(d)))
+            });
+        }
+        let period = cepheid
+            .variability_at(UniverseTime::EPOCH)
+            .unwrap()
+            .period()
+            .value();
+        for k in 0..20 {
+            let d = 0.1 * period * f64::from(k);
+            let (a, b) = (
+                light_factor_at(&cepheid, &c_series, at_days(d)),
+                light_factor_at(&cepheid, &c_series, at_days(d + period)),
+            );
+            assert!((a / b - 1.0).abs() < 1e-3, "{a} and {b} a period apart");
+        }
+        let period = mira
+            .variability_at(UniverseTime::EPOCH)
+            .unwrap()
+            .period()
+            .value();
+        let peaks: Vec<f64> = (0..20)
+            .map(|c| {
+                (0..400)
+                    .map(|i| {
+                        let d = period * (f64::from(c) + f64::from(i) / 400.0);
+                        light_factor_at(&mira, &m_series, at_days(d))
+                    })
+                    .fold(0.0, f64::max)
+            })
+            .collect();
+        let mean = peaks.iter().sum::<f64>() / 20.0;
+        let spread = peaks
+            .iter()
+            .map(|p| (p / mean - 1.0).abs())
+            .fold(0.0, f64::max);
+        assert!(spread > 0.02, "the Mira's maxima {peaks:?}");
+    }
+
+    /// A star that does not vary, or has not formed, has a light factor of exactly 1.
+    #[test]
+    fn a_steady_star_has_a_light_factor_of_one() {
+        let sun = StarModel::new(
+            SolarMasses::new(1.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(4.57e9),
+        )
+        .unwrap();
+        let unborn = StarModel::new(
+            SolarMasses::new(1.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(-10.0),
+        )
+        .unwrap();
+        let [(_, series), _] = cepheid_and_mira();
+        for t in [UniverseTime::EPOCH, at_days(1e4)] {
+            assert!(sun.variability_at(t).is_none());
+            hyperion_testkit::float::assert_same_bits(light_factor_at(&sun, &series, t), 1.0);
+            hyperion_testkit::float::assert_same_bits(light_factor_at(&unborn, &series, t), 1.0);
+        }
+    }
+
+    /// The pulsation clock's inverse returns an instant whose phase is within a millionth of a
+    /// cycle of the one asked, with and without drift and beyond the source horizon's reach.
+    #[test]
+    fn the_pulsation_clock_inverts_its_phase() {
+        let nu = 1.0 / (5.0 * SECONDS_PER_DAY);
+        for drift in [0.0, 1e-20, -1e-20, 1.0] {
+            let clock = DriftingClock::new(nu, drift);
+            for x in [-1e13, -3e11, -1e5, 0.0, 2e4, 3e10, 5e12] {
+                let phase = CyclePhase::new(0, clock.phase_at_seconds(x));
+                let back = clock.base_phase(clock.time_at(phase));
+                let miss = (back.to_f64() - phase.to_f64()).abs();
+                assert!(
+                    miss < 1e-3 * phase.to_f64().abs().max(1.0) * 1e-3,
+                    "{drift} at {x}: {miss}"
+                );
+            }
+        }
     }
 
     /// The other strips: β Cephei, SPB and γ Doradus stars on the main sequence, ZZ Ceti and V777

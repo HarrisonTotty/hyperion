@@ -1104,7 +1104,9 @@ mod tests {
             sum += y;
             let mid = (edges[i] * edges[i + 1]).sqrt();
             assert_eq!(delay_bin(mid), i);
-            assert_eq!(type_ia_delay::CHANNEL_SHARE[i], CHANNEL_SHARES);
+            for (&got, &want) in type_ia_delay::CHANNEL_SHARE[i].iter().zip(&CHANNEL_SHARES) {
+                assert_same_bits(got, want);
+            }
             assert!(type_ia_delay::LAYER_SHARE[i][0].abs() < 1e-15);
         }
         assert!((sum / YIELD_PER_SOLAR_MASS - 1.0).abs() < 1e-12, "{sum}");

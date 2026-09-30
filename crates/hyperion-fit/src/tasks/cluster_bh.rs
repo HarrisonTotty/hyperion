@@ -166,6 +166,10 @@ impl LawInput {
 
 /// The mean mass, M☉, of Kroupa's (2001) function over 0.08–150 M☉.
 #[must_use]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the quadrature's usual symbols"
+)]
 pub fn kroupa_mean_mass() -> f64 {
     let imf = Kroupa;
     let edges = [0.08, 0.5, 1.0, 8.0, 150.0];

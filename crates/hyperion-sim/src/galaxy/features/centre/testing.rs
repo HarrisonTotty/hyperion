@@ -6,7 +6,7 @@ use crate::Seed;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 
-use super::CentreModel;
+use super::{CentreModel, CentreProfile};
 
 /// The Milky Way fixture (`GalaxyParams::milky_way_like`) at seed `0x0926_0000`, built on first
 /// use.
@@ -33,4 +33,19 @@ pub fn milky_way_centre() -> &'static CentreModel {
     static CENTRE: OnceLock<CentreModel> = OnceLock::new();
     CENTRE
         .get_or_init(|| CentreModel::new(milky_way_galaxy()).expect("the fixture's centre inverts"))
+}
+
+/// The Milky Way fixture's centre profile in its galaxy's potential
+/// (`CentreProfile::from_params`), built on first use: what [`milky_way_centre`]'s profile is,
+/// bit for bit, without building the galaxy.
+///
+/// # Panics
+///
+/// Never: the fixture's profile builds.
+#[must_use]
+pub fn milky_way_profile() -> &'static CentreProfile {
+    static PROFILE: OnceLock<CentreProfile> = OnceLock::new();
+    PROFILE.get_or_init(|| {
+        CentreProfile::from_params(&GalaxyParams::milky_way_like()).expect("the fixture's profile")
+    })
 }

@@ -424,11 +424,10 @@ pub fn mean_acceptance(
 mod tests {
     use super::*;
     use crate::Seed;
-    use crate::galaxy::params::GalaxyParams;
     use crate::rng::{ObjectKey, tags};
 
     fn fixture() -> (CentreProfile, DistributionFunction) {
-        let profile = CentreProfile::from_params(&GalaxyParams::milky_way_like()).unwrap();
+        let profile = super::super::testing::milky_way_profile().clone();
         let df = DistributionFunction::invert(profile.stars(), &profile).unwrap();
         (profile, df)
     }

@@ -96,6 +96,8 @@ fn write_star(w: &mut GoldenWriter, lead: &str, star: &StarSummary) {
         Some((t, kind)) => w.line(&format!("{lead}dies in the window at {t} by {kind:?}")),
         None => w.line(&format!("{lead}no death in the window")),
     }
+    // P11.T11: the class of the pair the binary engine ran the star in.
+    w.line(&format!("{lead}binary class {:?}", star.binary_class()));
     // P06.T21–T22: a neutron star's pulsar state, a black hole's spin.
     match star.remnant_detail() {
         Some(RemnantDetail::NeutronStar(pulsar)) => {
@@ -227,8 +229,9 @@ fn summaries_are_pinned() {
 }
 
 /// Plan 11's companions move no primary (P11.T2.c): the primary of each system the summaries golden
-/// pins is plan 06's model, built from the record alone, and its summaries at the pinned times are
-/// the same, bit for bit, as those of the system with its companions ruled out.
+/// pins is plan 06's model, built from the record alone, with plan 06's death, and its brief and,
+/// unless the binary engine ran it in a pair (P11.T11), its summaries at the pinned times are the
+/// same, bit for bit, as those of the system with its companions ruled out.
 #[test]
 fn companions_move_no_primary() {
     let galaxy = milky_way();
@@ -255,12 +258,15 @@ fn companions_move_no_primary() {
                 assert!(with.stars().is_empty() && without.stars().is_empty());
                 continue;
             };
-            assert_eq!(a, b, "{:?} at {y} yr", record.id());
-            // Every field the golden writes, by its bits.
-            let (mut wa, mut wb) = (GoldenWriter::new(), GoldenWriter::new());
-            write_star(&mut wa, "  ", a);
-            write_star(&mut wb, "  ", b);
-            assert_eq!(wa.as_str(), wb.as_str(), "{:?} at {y} yr", record.id());
+            let paired = stars.pairs().iter().any(|p| p.stars()[0].get() == 0);
+            if !paired {
+                assert_eq!(a, b, "{:?} at {y} yr", record.id());
+                // Every field the golden writes, by its bits.
+                let (mut wa, mut wb) = (GoldenWriter::new(), GoldenWriter::new());
+                write_star(&mut wa, "  ", a);
+                write_star(&mut wb, "  ", b);
+                assert_eq!(wa.as_str(), wb.as_str(), "{:?} at {y} yr", record.id());
+            }
             let brief = |s: &SystemStars| {
                 let mut w = GoldenWriter::new();
                 if let Some(b) = s.brief_at(years(y)) {
@@ -336,17 +342,18 @@ fn every_companion_is_its_slots_star_with_the_systems_composition_and_age() {
     assert!(companions > 0, "sixty systems and not one companion");
 }
 
-/// The star count the wire documents as 1 to 4 (`StellarBriefDto::star_count`) is the sampler's
-/// range: 1 to 1 + [`MAX_COMPANIONS`], three companions at most (rulings 74 and 81). Checked where
-/// the capped count's mean is highest, over layer E's O and B primaries, which also reach the cap,
-/// so that the documented upper end is a count the sampler draws, not only a bound.
+/// The star count the wire documents as 1 to 5 (`StellarBriefDto::star_count`) is the sampler's
+/// range: 1 to 2 + [`MAX_COMPANIONS`], three stellar companions at most (rulings 74 and 81) and a
+/// bound brown dwarf (P11.T2.d). Checked where the capped count's mean is highest, over layer E's O
+/// and B primaries, which also reach the stellar cap, so that four stars is a count the sampler
+/// draws, not only a bound; five needs a brown dwarf beside them, which this sample need not meet.
 #[test]
-fn star_counts_run_from_one_to_four_even_in_layer_e() {
+fn star_counts_run_from_one_to_five_even_in_layer_e() {
     const RECORDS: usize = 400;
     let galaxy = milky_way();
-    let most = u8::try_from(1 + MAX_COMPANIONS).expect("a small cap");
-    assert_eq!(most, 4, "the wire's doc says 1 to 4");
-    let mut by_count = [0_usize; 5];
+    let most = u8::try_from(2 + MAX_COMPANIONS).expect("a small cap");
+    assert_eq!(most, 5, "the wire's doc says 1 to 5");
+    let mut by_count = [0_usize; 6];
     for record in records_of(&galaxy, Layer::E, RECORDS) {
         let count = draw_star_count(
             &galaxy,
@@ -362,7 +369,7 @@ fn star_counts_run_from_one_to_four_even_in_layer_e() {
         by_count[usize::from(count)] += 1;
     }
     assert!(
-        by_count[4] > 0,
+        by_count[4] + by_count[5] > 0,
         "no quadruple in {RECORDS} layer-E systems: {by_count:?}"
     );
 }
@@ -440,7 +447,13 @@ fn systems_are_the_same_whatever_the_order() {
     }
     hyperion_testkit::order::assert_order_independent(&records, |r| {
         let stars = SystemStars::generate(&galaxy, r);
-        (stars.summary_at(years(-250)), stars.brief_at(years(250)))
+        (
+            stars.summary_at(years(-250)),
+            stars.brief_at(years(250)),
+            stars.state_at(years(600)),
+            stars.attempt(),
+            stars.pairs().to_vec(),
+        )
     });
     for record in &records {
         assert_eq!(
@@ -548,10 +561,15 @@ fn check_life_and_death(seed: u64, n: usize) {
                 continue;
             }
             let age = record.age_at(t).value();
-            // Every star of the system, companions included (P11.T2.c).
+            // Every star of the system, companions included (P11.T2.c). A star its pair has
+            // changed (P11.T11: an accretor, a merged-away star) lives and dies by the pair, not
+            // its own model's lifetime.
             for (star, model) in summary.stars().iter().zip(stars.stars()) {
                 let state = star.state();
                 let what = format!("{:?} at {t}: {state:?}", star.body());
+                if model.state_at(t).as_ref() != Some(state) {
+                    continue;
+                }
                 match model.lifetime() {
                     Some(life) if state.phase().is_living() => {
                         assert!(age < life.value(), "{what} outlives {life:?}");

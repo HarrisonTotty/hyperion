@@ -301,12 +301,13 @@ mod tests {
     /// edge near 100 ly at 100 km/s. The plan asks for the maximum over the nuclear disc within
     /// 10–16″.
     ///
-    /// **Acceptance: the formula at the model's `v_c`** (ruling 143.1). The model's potential gives
-    /// `v_c` = 76 km/s at 100 ly (94 at 30 ly, 93 at 200 ly), not the brainstorm's 100 km/s, so
-    /// the maximum is pinned at the model's 7.5″ ± 10%; the brainstorm's 13″ is `v_c` = 100 km/s
-    /// in the same formula, which the second half checks. Plan 02's nuclear potential is to be
-    /// raised in its next revision, which moves this pin. The quadratic governs throughout, so
-    /// ruling 143.2's linear term leaves the figure where it was.
+    /// **Acceptance: the formula at the model's `v_c`** (ruling 143.1), which since plan 02's
+    /// joint revision with ruling 144 (the nuclear cluster normalised inside the centre's reach,
+    /// the nuclear disc's inner part) is about 100 km/s at 100 ly, as observed (Sofue 2013; the
+    /// ACES's 99 ± 13 km/s), where it was 76 km/s and the maximum 7.5″. The maximum is held to
+    /// the plan's 10–16″, and the brainstorm's 13″ is `v_c` = 100 km/s in the same formula, which
+    /// the second half checks. The quadratic governs throughout, so ruling 143.2's linear term
+    /// leaves the figure where it was.
     #[test]
     fn curvature_error_of_the_nuclear_disc_follows_the_models_circular_speed() {
         let half = f64::from(ROOT_HALF_WIDTH_LY) - 1.0;
@@ -324,10 +325,11 @@ mod tests {
                 worst = worst.max(error.angle().value());
             }
         }
-        assert!(
-            (worst - 7.5).abs() <= 0.75,
-            "the worst is {worst}\" (provisional pin)"
+        eprintln!(
+            "the worst is {worst:.2}\" at v_c(100 ly) = {:.1} km/s",
+            v_circ(100.0).value() / 1e3
         );
+        assert!((10.0..=16.0).contains(&worst), "the worst is {worst}\"");
         // The brainstorm's figure is the same formula at 100 km/s and 100 ly: 13″.
         let star = at_ly([100.0, 0.0, 0.0]);
         let path = corner.distance_to(&star);

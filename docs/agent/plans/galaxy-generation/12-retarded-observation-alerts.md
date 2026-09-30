@@ -750,7 +750,12 @@ r)`: the position is the observer's, and the angle is the length over the distan
     brainstorm's 100 km/s, so the maximum from a corner of the cube is 7.5″, not 10–16″. The
     test pins 7.5″ ± 10% and checks that the formula gives the brainstorm's 13″ at 100 km/s.
     Ruling 143.1: the acceptance is "the formula at the model's `v_c`"; plan 02's nuclear
-    potential is raised in its next revision (its own bump), which moves the pin.
+    potential is raised in its next revision (its own bump), which moves the pin. _Closed by the
+    joint revision (lane `pot02`, for version 16; plan 02, R26):_ the nuclear cluster normalised
+    inside the centre's reach and the nuclear disc's inner part bring `v_c` at 100 ly to
+    100.1 km/s, and the maximum to 13.05″; the test now holds the plan's 10–16″
+    (`curvature_error_of_the_nuclear_disc_follows_the_models_circular_speed`) and still checks the
+    brainstorm's 13″ at 100 km/s.
   - _T2._ `observe::{ObservedSystem, observe_hit, summary_observed, bearing, Bearing,
 BearingFrame, AXIS_FRAME_RADIUS_LY}`. `bearing(from, to) -> Option<Bearing>` takes no galaxy
     (the directions are geometry) and is `None` for coincident points; `Bearing::frame()` says

@@ -21,17 +21,29 @@
 
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
+use crate::coords::SystemVelocity;
 use crate::galaxy::fields::Component;
 use crate::galaxy::placement::{Existence, SystemKind, SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::BodyId;
 use crate::math;
+use crate::orbit::KeplerElements;
 use crate::rng::{Mark, ObjectKey, Stream, tags};
-use crate::stellar::classify::{ClassExtras, Classification, LuminosityClass, classify};
+use crate::stellar::binary::Component as PairComponent;
+use crate::stellar::binary::{
+    BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, can_interact_with_tracks,
+    carved_class, evolve_with_tracks,
+};
+use crate::stellar::classify::{
+    ClassExtras, Classification, HeliumSurface, LuminosityClass, PeculiarClass, SpectralType,
+    classify,
+};
 use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::multiplicity::{
-    MultiplicityContext, RedrawAttempt, SystemHierarchy, draw_hierarchy_of_composition,
+    HierarchyNode, MultiplicityContext, NodeIndex, RedrawAttempt, SlotKind, StarIndex,
+    SystemHierarchy, draw_hierarchy_of_composition,
 };
 use crate::stellar::nebula::{self, PlanetaryNebula};
 use crate::stellar::photometry::{absolute_magnitude_v, colour_b_v};
@@ -41,7 +53,7 @@ use crate::stellar::remnant::{
     StandardKickLaw,
 };
 use crate::stellar::rotation::{self, Activity, Magnetism, Rotation};
-use crate::stellar::sse::{self, Track, TrackOptions};
+use crate::stellar::sse::{self, PhasePredicate, Track, TrackOptions};
 use crate::stellar::variability::{Variability, VariabilityInputs, variability};
 use crate::stellar::{Composition, ObjectKind, Phase, StarState, substellar};
 use crate::time::{ClockWindow, Span, UniverseTime};
@@ -236,8 +248,9 @@ pub struct StarModel {
 /// How a [`StarModel`] evolves.
 #[derive(Debug, Clone, PartialEq)]
 enum Evolution {
-    /// From 0.1 M☉: the track, to the end of the clock window or the star's death.
-    Track(Box<Track>),
+    /// From 0.1 M☉: the track, to the end of the clock window or the star's death, shared with the
+    /// binary engine's timeline of the star's pair (P11.T11), which reads the same track.
+    Track(Arc<Track>),
     /// Below 0.1 M☉: P06.T13's cooling fits.
     Cooling,
 }
@@ -324,7 +337,7 @@ impl StarModel {
                 Years::new(if end > 0.0 { end } else { 0.0 }),
             );
             model.remnant = remnant_stage(&track, &model.draws);
-            model.evolution = Evolution::Track(Box::new(track));
+            model.evolution = Evolution::Track(Arc::new(track));
         }
         Ok(model)
     }
@@ -535,17 +548,86 @@ impl StarModel {
         rotation::rotation(state, &self.composition, &self.draws, terminal.as_ref())
     }
 
+    /// How the star varies at `t` (P06.T26), as its summary gives it, or `None` if it does not vary
+    /// then or has not formed.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`StarModel::state_at`].
+    #[must_use]
+    pub fn variability_at(&self, t: UniverseTime) -> Option<Variability> {
+        let state = self.state_at(t)?;
+        let classification = classify(
+            &state,
+            &self.composition,
+            &self.draws,
+            &self.class_extras_at(&state, t),
+        );
+        let spin = self.rotation_of(&state);
+        let activity = rotation::activity(&state, spin.as_ref());
+        variability(&VariabilityInputs {
+            state: &state,
+            initial_mass: self.initial_mass,
+            composition: &self.composition,
+            classification: &classification,
+            rotation: spin.as_ref(),
+            activity: activity.as_ref(),
+        })
+    }
+
     /// What [`classify`] reads of the star's history in `state`, its state at `t`: a neutron
-    /// star's class from its pulsar state (P06.T21.c).
+    /// star's class from its pulsar state (P06.T21.c), and a naked helium star's surface from the
+    /// mass it has lost since it became one (P06.T24.a).
     #[must_use]
     pub(crate) fn class_extras_at(&self, state: &StarState, t: UniverseTime) -> ClassExtras {
-        if state.phase() == Phase::NeutronStar {
-            self.pulsar_at(t).map_or(ClassExtras::NONE, |pulsar| {
+        match state.phase() {
+            Phase::NeutronStar => self.pulsar_at(t).map_or(ClassExtras::NONE, |pulsar| {
                 ClassExtras::neutron_star(pulsar.class())
-            })
-        } else {
-            ClassExtras::NONE
+            }),
+            Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch => {
+                match &self.evolution {
+                    Evolution::Track(track) => track
+                        .helium_star_entry_mass()
+                        .map_or(ClassExtras::NONE, |entry| {
+                            ClassExtras::helium_star(HeliumSurface::of(entry, state.mass()))
+                        }),
+                    Evolution::Cooling => ClassExtras::NONE,
+                }
+            }
+            Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::PostAgb
+            | Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf
+            | Phase::BlackHole
+            | Phase::NoRemnant
+            | Phase::Substellar => ClassExtras::NONE,
         }
+    }
+
+    /// The clock interval in which the star is a luminous blue variable
+    /// ([`Track::window_where`] with [`PhasePredicate::Lbv`], P06.T24.a), within the part of its
+    /// life its track is built for (to +H, or its death), or `None` if it is not one there or the
+    /// interval lies beyond the clock's range.
+    #[must_use]
+    pub fn lbv_window(&self) -> Option<(UniverseTime, UniverseTime)> {
+        let Evolution::Track(track) = &self.evolution else {
+            return None;
+        };
+        let window = track.window_where(PhasePredicate::Lbv)?;
+        let at = |age: Years| {
+            let years = age.value() - self.age_at_epoch.value();
+            Span::from_seconds_f64(years * SECONDS_PER_JULIAN_YEAR)
+                .and_then(|span| UniverseTime::EPOCH.checked_add(span))
+        };
+        Some((at(window.start())?, at(window.end())?))
     }
 
     /// The bytes the model owns on the heap, beyond `size_of::<StarModel>()`: its boxed track and
@@ -555,6 +637,16 @@ impl StarModel {
         match &self.evolution {
             Evolution::Track(track) => size_of::<Track>() + track.heap_bytes(),
             Evolution::Cooling => 0,
+        }
+    }
+
+    /// The star's track, shared, or `None` below 0.1 M☉: what the binary engine takes instead of
+    /// building it again (P11.T11, ruling 111.5).
+    #[must_use]
+    pub(crate) fn shared_track(&self) -> Option<Arc<Track>> {
+        match &self.evolution {
+            Evolution::Track(track) => Some(Arc::clone(track)),
+            Evolution::Cooling => None,
         }
     }
 
@@ -644,8 +736,9 @@ pub enum ClockDeath {
 ///
 /// A remnant's detail (a neutron star's pulsar state, P06.T21; a black hole's spin, T22), a
 /// living star's rotation, magnetism and activity (T25), its variability (T26.a–c) and the
-/// planetary nebula it lights (T16.b) are here. The active events (T28) and plan 11's binary class
-/// (P11.T5) are added by their tasks.
+/// planetary nebula it lights (T16.b) are here. Plan 11's binary class (P11.T5) is the class of
+/// the pair the binary engine ran the star in (P11.T11). The active events (T28) are added by
+/// their task.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarSummary {
     body: BodyId,
@@ -662,6 +755,7 @@ pub struct StarSummary {
     variability: Option<Variability>,
     planetary_nebula: Option<PlanetaryNebula>,
     death_in_window: Option<(UniverseTime, DeathKind)>,
+    binary_class: BinaryClass,
 }
 
 /// What a remnant's summary says beyond its kind and mass: a neutron star's pulsar state
@@ -760,9 +854,22 @@ impl StarSummary {
 
     /// The star's death, its clock time and kind, if it falls inside the clock window [−H, +H]
     /// (the client's `DIES IN 312 yr`).
+    ///
+    /// It is the star's own death ([`StarModel::death`]) where the star is its single-star self at
+    /// the time summarised, and `None` for a star whose pair has changed it (P11.T11), whose death
+    /// the binary engine decides and records without its kind, unless its pair explodes it at the
+    /// model's own death age (a massive primary, whose death design note 16 pins).
     #[must_use]
     pub const fn death_in_window(&self) -> Option<(UniverseTime, DeathKind)> {
         self.death_in_window
+    }
+
+    /// The class of the pair the binary engine ran the star in, at the time summarised (plan 11,
+    /// P11.T5 and T11): [`BinaryClass::None`] for a star in no such pair, a brown dwarf, and a
+    /// star merged into its companion.
+    #[must_use]
+    pub const fn binary_class(&self) -> BinaryClass {
+        self.binary_class
     }
 }
 
@@ -852,8 +959,8 @@ impl StellarBrief {
         }
     }
 
-    /// How many stars the system has, the primary included: 1 to 1 +
-    /// [`MAX_COMPANIONS`](crate::stellar::multiplicity::MAX_COMPANIONS).
+    /// How many stars the system has, the primary included, with a bound brown dwarf (plan 11,
+    /// P11.T2.d): 1 to 2 + [`MAX_COMPANIONS`](crate::stellar::multiplicity::MAX_COMPANIONS).
     #[must_use]
     pub const fn star_count(&self) -> u8 {
         self.star_count
@@ -891,10 +998,11 @@ impl StellarBrief {
 ///
 /// - V and the subdwarf classes are dwarfs, IV subgiants, III and II giants, and Ib to Ia⁺
 ///   supergiants;
-/// - a naked helium star (HPT types 7–9) is a Wolf-Rayet star above P06.T24.a's luminosity floor
-///   of 10⁴·⁹ L☉ × (Z ÷ 0.02)^−0.4, where Z is the metal fraction the formulae see, and a hot
-///   subdwarf below it; the Wolf-Rayet rule's other half, a hydrogen-rich star nearly stripped
-///   (`WNh`), and the floor's recorded source are T24.a's;
+/// - a star classified as a Wolf-Rayet star (P06.T24.a: hot, above the luminosity floor of
+///   10⁴·⁹ L☉ × (Z ÷ 0.02)^−0.4, and a naked helium star or a nearly stripped or near-Eddington
+///   hydrogen-rich one, `WNh`) is a Wolf-Rayet star, and a hot subdwarf (a naked helium star below
+///   the floor, from 20,000 K) a hot subdwarf; any other naked helium star goes by its luminosity
+///   class;
 /// - an object on P06.T13's cooling fits is substellar below the hydrogen-burning limit
 ///   ([`substellar::hydrogen_burning_limit`]) and a dwarf above it;
 /// - protostars, pre-main-sequence stars and the remnants are their phases, and a post-AGB star is
@@ -914,14 +1022,11 @@ pub fn object_kind(
         Phase::NeutronStar => ObjectKind::NeutronStar,
         Phase::BlackHole => ObjectKind::BlackHole,
         Phase::NoRemnant => ObjectKind::NoRemnant,
-        Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch => {
-            let floor = WOLF_RAYET_FLOOR_L_SUN
-                * math::powf(composition.z_fit().value() / 0.02, WOLF_RAYET_FLOOR_Z_SLOPE);
-            if state.luminosity().value() > floor {
-                ObjectKind::WolfRayet
-            } else {
-                ObjectKind::HotSubdwarf
-            }
+        _ if matches!(classification.spectral_type(), SpectralType::WolfRayet(_)) => {
+            ObjectKind::WolfRayet
+        }
+        _ if classification.peculiar_class() == Some(PeculiarClass::HotSubdwarf) => {
+            ObjectKind::HotSubdwarf
         }
         Phase::Substellar if state.mass() < substellar::hydrogen_burning_limit(composition) => {
             ObjectKind::Substellar
@@ -933,6 +1038,9 @@ pub fn object_kind(
         | Phase::CoreHeliumBurning
         | Phase::EarlyAgb
         | Phase::ThermallyPulsingAgb
+        | Phase::HeliumMainSequence
+        | Phase::HeliumHertzsprungGap
+        | Phase::HeliumGiantBranch
         | Phase::PostAgb => match classification.luminosity_class() {
             Some(
                 LuminosityClass::Dwarf
@@ -952,20 +1060,133 @@ pub fn object_kind(
     }
 }
 
-/// P06.T24.a's luminosity floor of a Wolf-Rayet star at Z = 0.02, 10⁴·⁹ L☉.
-const WOLF_RAYET_FLOOR_L_SUN: f64 = 79_432.823_472_428_15;
-
-/// The floor's slope in Z ÷ 0.02, −0.4 (P06.T24.a).
-const WOLF_RAYET_FLOOR_Z_SLOPE: f64 = -0.4;
-
-/// The redraw attempt a grid system's companions are drawn at: the first, [`RedrawAttempt::FIRST`].
+/// The redraw attempt a grid system's companions are first drawn at: [`RedrawAttempt::FIRST`].
 ///
-/// **A named seam** (plan 11, P11.T2.c). The grid redraws a system whose binary falls into a
-/// catalogue class or explodes as a Type Ia (P11.T6–T8, plan 08's `SystemRecord::mark_attempt`),
-/// and then reads a later attempt here, for the hierarchy and for each companion's own draws alike
-/// ([`StarDraws::for_attempt`]), since both are blocks of [`ATTEMPT_WORDS`](crate::stellar::draws::ATTEMPT_WORDS)
-/// words. No record of this generator version is redrawn.
+/// **A named seam** (plan 11, P11.T2.c and T7). [`SystemStars::generate`] redraws a grid system
+/// one of whose pairs falls into a carved catalogue class ([`carved_class`], P11.T7; exploding as
+/// a Type Ia is P11.T6's) and reads the later attempt it keeps for the hierarchy and for each
+/// companion's own draws alike ([`StarDraws::for_attempt`]), since both are blocks of
+/// [`ATTEMPT_WORDS`](crate::stellar::draws::ATTEMPT_WORDS) words
+/// ([`SystemStars::attempt`]). The range brief's count-only draw
+/// ([`draw_star_count`](crate::stellar::multiplicity::draw_star_count)), which runs no engine,
+/// reads this one, so for the few redrawn systems, about 10⁻⁴, its count is attempt 0's (plan 11's
+/// Risks, "Deviations in P11.T7, as built").
 pub(crate) const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
+
+/// One pair of two stars of a system that the binary engine ran (plan 11, P11.T11): its node in
+/// the hierarchy, its two stars, inner member first, and its timeline from zero age to the
+/// system's age at +H ([`evolve`](crate::stellar::binary::evolve)).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairTimeline {
+    node: NodeIndex,
+    stars: [StarIndex; 2],
+    timeline: BinaryTimeline,
+}
+
+impl PairTimeline {
+    /// The pair's node in the system's hierarchy.
+    #[must_use]
+    pub const fn node(&self) -> NodeIndex {
+        self.node
+    }
+
+    /// Its two stars: the inner member, the engine's primary, then the outer member.
+    #[must_use]
+    pub const fn stars(&self) -> [StarIndex; 2] {
+        self.stars
+    }
+
+    /// Its timeline.
+    #[must_use]
+    pub const fn timeline(&self) -> &BinaryTimeline {
+        &self.timeline
+    }
+
+    /// Which of the engine's components `star` is, if it is one of the pair's.
+    #[must_use]
+    fn component_of(&self, star: StarIndex) -> Option<PairComponent> {
+        self.stars
+            .iter()
+            .position(|&s| s == star)
+            .map(PairComponent::of_index)
+    }
+}
+
+/// A pair's state at one clock time (plan 11, P11.T11): its node, its orbit then, and its class.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PairState {
+    node: NodeIndex,
+    orbit: Option<KeplerElements>,
+    class: BinaryClass,
+}
+
+impl PairState {
+    /// The pair's node in the system's hierarchy.
+    #[must_use]
+    pub const fn node(&self) -> NodeIndex {
+        self.node
+    }
+
+    /// The pair's relative orbit then: the binary engine's for a pair it ran, `None` once that
+    /// pair has merged or been unbound, and the drawn orbit for every other pair, whose members
+    /// the engine does not touch.
+    #[must_use]
+    pub const fn orbit(&self) -> Option<&KeplerElements> {
+        self.orbit.as_ref()
+    }
+
+    /// The pair's binary class then ([`BinaryTimeline::class_at`]): [`BinaryClass::None`] for a
+    /// pair the engine did not run.
+    #[must_use]
+    pub const fn class(&self) -> BinaryClass {
+        self.class
+    }
+}
+
+/// A system's state at one clock time (plan 11, P11.T11; [`SystemStars::state_at`]): every star's,
+/// every pair's, and the whole system's luminosity and mass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemState {
+    time: UniverseTime,
+    stars: Vec<StarState>,
+    pairs: Vec<PairState>,
+    luminosity: SolarLuminosities,
+    mass: SolarMasses,
+}
+
+impl SystemState {
+    /// The clock time.
+    #[must_use]
+    pub const fn time(&self) -> UniverseTime {
+        self.time
+    }
+
+    /// Every star's state, by body index, primary first: from its pair's timeline where the
+    /// engine ran one, and otherwise its own ([`StarModel::state_at`]). A star merged into its
+    /// companion is plan 06's `NoRemnant`.
+    #[must_use]
+    pub fn stars(&self) -> &[StarState] {
+        &self.stars
+    }
+
+    /// Every pair's state, depth first.
+    #[must_use]
+    pub fn pairs(&self) -> &[PairState] {
+        &self.pairs
+    }
+
+    /// The combined luminosity of the stars, L☉, summed in body order.
+    #[must_use]
+    pub const fn luminosity(&self) -> SolarLuminosities {
+        self.luminosity
+    }
+
+    /// The system's mass, M☉: its stars' and remnants' masses then, summed in body order.
+    #[must_use]
+    pub const fn mass(&self) -> SolarMasses {
+        self.mass
+    }
+}
 
 /// A grid system's stars from its record (plan 06, P06.T29.b, with plan 11's P11.T2.c): its
 /// primary, body 0 of the system, its companions, and the hierarchy of orbits that holds them.
@@ -980,8 +1201,20 @@ pub(crate) const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
 /// composition and age. The primary never depends on the companions: its model is plan 06's, bit
 /// for bit, whatever the hierarchy.
 ///
-/// Until plan 11's binary engine (P11.T4) a pair is two single stars on an orbit (ruling 33 of
-/// 2026-09-22): each star evolves alone, and no star's evolution reads its companion.
+/// Every pair of two stars that can interact by +H or holds a remnant by then is run through plan
+/// 11's binary engine once, from zero age to the system's age at +H (P11.T11,
+/// [`evolve`](crate::stellar::binary::evolve)), on the tracks the star models hold (ruling
+/// 111.5), and its timeline is kept ([`SystemStars::pairs`]). Any other pair is two single stars
+/// on their orbit, in no class, and is not run. Each
+/// [`StarModel`] stays the star's single-star self, and [`SystemStars::state_at`] and
+/// [`SystemStars::summary_at`] read a paired star from its pair's timeline. A pair with a
+/// member that is itself a pair, and a brown dwarf, never enter the engine.
+///
+/// A grid system one of whose pairs falls into a carved catalogue class at any age of the source
+/// horizon ([`carved_class`], P11.T7) is redrawn, on the next [`RedrawAttempt`] of the hierarchy
+/// and of the companions' draws, so that the grid holds exactly the binaries of its marks
+/// conditioned on not being in a class (plan 11, design notes 8 and 9). The primary is never
+/// redrawn.
 ///
 /// # Examples
 ///
@@ -1014,6 +1247,10 @@ pub struct SystemStars {
     record: SystemRecord,
     hierarchy: SystemHierarchy,
     stars: Vec<StarModel>,
+    pairs: Vec<PairTimeline>,
+    attempt: RedrawAttempt,
+    /// The star count at the first attempt, which the brief reports (P11.T7).
+    first_star_count: u8,
 }
 
 impl SystemStars {
@@ -1074,30 +1311,107 @@ impl SystemStars {
         ctx: MultiplicityContext,
     ) -> Self {
         let composition = *composition;
-        let hierarchy =
-            draw_hierarchy_of_composition(galaxy, record, &composition, ctx, GRID_ATTEMPT);
         let age = record.age_at_epoch();
-        let mut stars = Vec::with_capacity(hierarchy.stars().len());
-        stars.push(
-            StarModel::new(
-                record.primary_initial_mass(),
-                composition,
-                primary_draws(galaxy, record),
-                age,
-            )
-            .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
-        );
-        stars.extend(hierarchy.stars().iter().skip(1).map(|slot| {
-            let draws =
-                StarDraws::for_attempt(galaxy.seed(), slot.body(), u32::from(GRID_ATTEMPT.get()));
-            StarModel::new(slot.initial_mass(), composition, draws, age)
-                .expect("a companion is of 0.08 M_sun up to its primary's mass, with a finite age")
-        }));
+        let primary = StarModel::new(
+            record.primary_initial_mass(),
+            composition,
+            primary_draws(galaxy, record),
+            age,
+        )
+        .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
+        let carves = crate::stellar::binary::carve::grid_redraws(record, ctx);
+        let mut attempt = GRID_ATTEMPT;
+        let mut first_star_count = None;
+        loop {
+            let mut drawn = Self::at_attempt(galaxy, record, &primary, ctx, attempt);
+            let first = *first_star_count.get_or_insert(drawn.first_star_count);
+            if !carves || drawn.carved_pair().is_none() {
+                drawn.first_star_count = first;
+                return drawn;
+            }
+            let Some(next) = attempt.next() else {
+                let mut kept = Self::after_last_attempt(record, primary, attempt);
+                kept.first_star_count = first;
+                return kept;
+            };
+            attempt = next;
+        }
+    }
+
+    /// The system at redraw attempt `attempt`: `primary`, the hierarchy
+    /// [`draw_hierarchy_of_composition`] draws then at the primary's composition, each companion's
+    /// model on its own body's draws of that attempt, and each pair of two stars run through the
+    /// engine.
+    #[must_use]
+    pub(crate) fn at_attempt(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        primary: &StarModel,
+        ctx: MultiplicityContext,
+        attempt: RedrawAttempt,
+    ) -> Self {
+        let (hierarchy, stars) = models_at(galaxy, record, primary, ctx, attempt);
+        let pairs = run_pairs(&hierarchy, &stars);
         Self {
             record: *record,
+            first_star_count: hierarchy.star_count(),
             hierarchy,
             stars,
+            pairs,
+            attempt,
         }
+    }
+
+    /// What the grid keeps of a system whose [`MAX_REDRAWS`](crate::stellar::multiplicity::MAX_REDRAWS)
+    /// attempts all carve: the primary alone, at the last attempt.
+    ///
+    /// Design note 9 keeps the last hierarchy with its innermost period moved out of the
+    /// interacting range; a single star is never in a binary class, so the grid's half of the
+    /// complementarity holds exactly here too. At a carve probability of 10⁻⁴ a system would need
+    /// eight carved attempts in a row, which none of the galaxy's 10¹¹ does in expectation (plan
+    /// 11's Risks, "Deviations in P11.T7, as built").
+    #[must_use]
+    fn after_last_attempt(
+        record: &SystemRecord,
+        primary: StarModel,
+        attempt: RedrawAttempt,
+    ) -> Self {
+        Self {
+            record: *record,
+            hierarchy: SystemHierarchy::single(
+                record.id(),
+                record.primary_initial_mass(),
+                SlotKind::Star,
+            ),
+            stars: vec![primary],
+            pairs: Vec::new(),
+            attempt,
+            first_star_count: 1,
+        }
+    }
+
+    /// The first pair, depth first, whose timeline falls into a carved class at any age of the
+    /// source horizon, with that class.
+    #[must_use]
+    pub fn carved_pair(&self) -> Option<(NodeIndex, CarvedClass)> {
+        let age = self.record.age_at_epoch();
+        self.pairs
+            .iter()
+            .find_map(|pair| carved_class(&pair.timeline, age).map(|class| (pair.node, class)))
+    }
+
+    /// The redraw attempt the system's companions were drawn at (plan 11, design note 9): the
+    /// first for nearly every system, a later one for a grid system whose earlier attempts fell
+    /// into a carved class.
+    #[must_use]
+    pub const fn attempt(&self) -> RedrawAttempt {
+        self.attempt
+    }
+
+    /// The pairs of two stars the binary engine ran, depth first (P11.T11).
+    #[must_use]
+    pub fn pairs(&self) -> &[PairTimeline] {
+        &self.pairs
     }
 
     /// The system's record.
@@ -1125,30 +1439,39 @@ impl SystemStars {
         &self.hierarchy
     }
 
-    /// How many stars the system has, the primary included: 1 to 1 +
-    /// [`MAX_COMPANIONS`](crate::stellar::multiplicity::MAX_COMPANIONS).
+    /// How many stars the system has, the primary included, with a bound brown dwarf (plan 11,
+    /// P11.T2.d): 1 to 2 + [`MAX_COMPANIONS`](crate::stellar::multiplicity::MAX_COMPANIONS).
     #[must_use]
     pub fn star_count(&self) -> u8 {
         self.hierarchy.star_count()
     }
 
     /// The bytes the system's stars own on the heap, beyond `size_of::<SystemStars>()`: each
-    /// star's model and track and the hierarchy's lists, by capacity.
+    /// star's model and track, the hierarchy's lists and each pair's timeline, by capacity. A
+    /// track the star's pair shares is counted once, with the star.
     ///
     /// It is what the server charges a cached system against its byte budget (plan 06, P06.T34;
     /// plan 04, design note 23), as [`Galaxy::heap_bytes`] is for a galaxy. A system of one living
     /// dwarf owns a few kilobytes; nothing generated reads it.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        self.stars.iter().fold(
+        let stars = self.stars.iter().fold(
             self.stars.capacity() * size_of::<StarModel>() + self.hierarchy.heap_bytes(),
             |bytes, star| bytes + star.heap_bytes(),
+        );
+        self.pairs.iter().fold(
+            stars + self.pairs.capacity() * size_of::<PairTimeline>(),
+            |bytes, pair| bytes + pair.timeline.heap_bytes(),
         )
     }
 
     /// The system at `t`: whether it exists ([`SystemRecord::existence_at`]), its composition,
     /// each star's [`StarSummary`] at its age then ([`SystemRecord::age_at`]), and its hierarchy;
     /// no star and no hierarchy before the system is born.
+    ///
+    /// A star of a pair the engine ran is summarised from its pair's state then, with the pair's
+    /// class ([`StarSummary::binary_class`]); the hierarchy is the drawn one, and
+    /// [`SystemStars::state_at`] gives the pairs' orbits then.
     ///
     /// # Panics
     ///
@@ -1159,10 +1482,12 @@ impl SystemStars {
         let (stars, hierarchy) = match existence {
             SystemExistence::NotYetBorn => (Vec::new(), None),
             SystemExistence::Exists => (
-                self.stars
-                    .iter()
-                    .zip(self.hierarchy.stars())
-                    .filter_map(|(star, slot)| star_summary(star, slot.body(), t))
+                (0_u8..)
+                    .zip(self.stars.iter().zip(self.hierarchy.stars()))
+                    .filter_map(|(index, (star, slot))| {
+                        let paired = self.paired_state(index, t);
+                        star_summary_with(star, slot.body(), t, paired)
+                    })
                     .collect(),
                 Some(self.hierarchy.clone()),
             ),
@@ -1180,6 +1505,13 @@ impl SystemStars {
     /// its primary's kind, class, luminosity and temperature, with no photometry and no death, and
     /// how many stars it has.
     ///
+    /// The primary is its single-star self here, and the star count the first redraw attempt's, as
+    /// the range brief builds them without the binary engine ([`crate::stellar::brief`]), so that a
+    /// row is the same whichever built it. A primary that its pair has changed reads so in
+    /// [`SystemStars::summary_at`], and a redrawn system's kept count in
+    /// [`SystemStars::star_count`] (plan 11's Risks, "Deviations in P11.T7, as built" and
+    /// "Deviations in P11.T11, as built").
+    ///
     /// # Panics
     ///
     /// In debug builds, as [`StarModel::state_at`].
@@ -1192,7 +1524,7 @@ impl SystemStars {
             primary.composition(),
             primary.draws(),
             primary.class_extras_at(&state, t),
-            self.star_count(),
+            self.first_star_count,
         ))
     }
 
@@ -1215,13 +1547,293 @@ impl SystemStars {
         self.primary().natal_kick()
     }
 
-    /// The clock interval in which the primary is a luminous blue variable: `None` until
-    /// P06.T24.a builds the criterion and `Track::window_where` (plan 09's catalogue class reads
-    /// it).
+    /// The clock interval in which the primary is a luminous blue variable
+    /// ([`StarModel::lbv_window`], P06.T24.a), which plan 09's catalogue class reads.
     #[must_use]
     pub fn lbv_window(&self) -> Option<(UniverseTime, UniverseTime)> {
-        None
+        self.primary().lbv_window()
     }
+
+    /// The system at `t` (plan 11, P11.T11), or `None` before it is born: every star's state, from
+    /// its pair's timeline where the engine ran one and otherwise from its own model, every pair's
+    /// orbit and class then, and the system's combined luminosity and mass.
+    ///
+    /// Continuous in `t` across the clock window except where a star changes phase, a pair
+    /// begins a new segment of its timeline, or a star dies.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`StarModel::state_at`], for a `t` after the clock window's end.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::stellar::system::SystemStars;
+    /// use hyperion_sim::time::UniverseTime;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(11));
+    /// let mut cell = Vec::new();
+    /// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+    /// let stars = SystemStars::generate(&galaxy, cell.first().ok_or("the cell has systems")?);
+    /// if let Some(now) = stars.state_at(UniverseTime::EPOCH) {
+    ///     // The system's light is at least its primary's.
+    ///     assert!(now.luminosity() >= now.stars()[0].luminosity());
+    ///     assert_eq!(now.stars().len(), usize::from(stars.star_count()));
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn state_at(&self, t: UniverseTime) -> Option<SystemState> {
+        if SystemExistence::from(self.record.existence_at(t)) == SystemExistence::NotYetBorn {
+            return None;
+        }
+        let stars: Vec<StarState> = (0_u8..)
+            .zip(&self.stars)
+            .filter_map(|(index, star)| {
+                self.paired_state(index, t)
+                    .map(|paired| paired.state)
+                    .or_else(|| star.state_at(t))
+            })
+            .collect();
+        let pairs = self
+            .hierarchy
+            .pairs()
+            .map(|(node, orbit)| {
+                match self
+                    .pair_timeline(node)
+                    .and_then(|pair| self.pair_state_at(pair, t))
+                {
+                    Some(state) => PairState {
+                        node,
+                        orbit: state.0.orbit().copied(),
+                        class: state.1,
+                    },
+                    None => PairState {
+                        node,
+                        orbit: Some(*orbit),
+                        class: BinaryClass::None,
+                    },
+                }
+            })
+            .collect();
+        let luminosity = stars
+            .iter()
+            .fold(0.0, |sum, s| sum + s.luminosity().value());
+        let mass = stars.iter().fold(0.0, |sum, s| sum + s.mass().value());
+        Some(SystemState {
+            time: t,
+            stars,
+            pairs,
+            luminosity: SolarLuminosities::new(luminosity),
+            mass: SolarMasses::new(mass),
+        })
+    }
+
+    /// The state at `t` of the pair `pair` if the engine ran it and the system exists then, or
+    /// `None`.
+    #[must_use]
+    pub fn binary_state_at(&self, pair: NodeIndex, t: UniverseTime) -> Option<BinaryState> {
+        let timeline = self.pair_timeline(pair)?;
+        self.pair_state_at(timeline, t).map(|(state, _)| state)
+    }
+
+    /// The system's mass at `t`, M☉ ([`SystemState::mass`]); zero before it is born.
+    #[must_use]
+    pub fn system_mass_at(&self, t: UniverseTime) -> SolarMasses {
+        self.state_at(t)
+            .map_or(SolarMasses::ZERO, |state| state.mass())
+    }
+
+    /// The recoil of the pair holding the primary after its supernovae, while the pair stays bound
+    /// ([`BinaryTimeline::recoil`]): `None` for a primary in no pair the engine ran, or one whose
+    /// pair had no supernova or was unbound.
+    #[must_use]
+    pub fn recoil(&self) -> Option<SystemVelocity> {
+        self.pairs
+            .iter()
+            .find(|pair| pair.stars[0] == StarIndex::PRIMARY)
+            .and_then(|pair| pair.timeline.recoil())
+    }
+
+    /// The timeline of the pair at node `node`, if the engine ran it.
+    #[must_use]
+    fn pair_timeline(&self, node: NodeIndex) -> Option<&PairTimeline> {
+        self.pairs.iter().find(|pair| pair.node == node)
+    }
+
+    /// The state and class at `t` of `pair`, or `None` if the system is not born then or `t`
+    /// lies beyond the ages its timeline was run to.
+    #[must_use]
+    fn pair_state_at(
+        &self,
+        pair: &PairTimeline,
+        t: UniverseTime,
+    ) -> Option<(BinaryState, BinaryClass)> {
+        let age = self.stars[usize::from(pair.stars[0].get())].age_at(t);
+        if age.value() <= 0.0 || age > pair.timeline.until() {
+            return None;
+        }
+        Some((pair.timeline.state_at(age), pair.timeline.class_at(age)))
+    }
+
+    /// Star `index`'s state and class at `t` from its pair's timeline, if the engine ran it in a
+    /// pair and `t` lies inside that timeline.
+    #[must_use]
+    fn paired_state(&self, index: u8, t: UniverseTime) -> Option<PairedStar> {
+        let (pair, component) = self.pairs.iter().find_map(|pair| {
+            let star = pair.stars.iter().copied().find(|s| s.get() == index)?;
+            pair.component_of(star).map(|c| (pair, c))
+        })?;
+        let (state, class) = self.pair_state_at(pair, t)?;
+        let own = state.stars()[component.index()];
+        let gone = own.phase() == Phase::NoRemnant && pair.timeline.merger_age().is_some();
+        let pulsar = (own.phase() == Phase::NeutronStar)
+            .then(|| {
+                let age = self.stars[usize::from(index)].age_at(t);
+                pair.timeline
+                    .class_context(age)
+                    .pulsar(component)
+                    .map(|p| *p.state())
+            })
+            .flatten();
+        let model = &self.stars[usize::from(index)];
+        let own_death = model.remnant.is_some_and(|stage| {
+            let at = stage.death.age().value();
+            pair.timeline
+                .supernovae()
+                .iter()
+                .any(|sn| sn.component() == component && (sn.age().value() - at).abs() <= 1e-9 * at)
+        });
+        Some(PairedStar {
+            state: own,
+            class: if gone { BinaryClass::None } else { class },
+            pulsar,
+            own_death,
+        })
+    }
+}
+
+/// The hierarchy `record`'s system draws under `ctx` at `attempt`, with `primary` and each
+/// companion's single-star model on its own body's draws of that attempt, and no binary engine.
+#[must_use]
+fn models_at(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    primary: &StarModel,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> (SystemHierarchy, Vec<StarModel>) {
+    let composition = *primary.composition();
+    let hierarchy = draw_hierarchy_of_composition(galaxy, record, &composition, ctx, attempt);
+    let age = record.age_at_epoch();
+    let mut stars = Vec::with_capacity(hierarchy.stars().len());
+    stars.push(primary.clone());
+    stars.extend(hierarchy.stars().iter().skip(1).map(|slot| {
+        let draws = StarDraws::for_attempt(galaxy.seed(), slot.body(), u32::from(attempt.get()));
+        StarModel::new(slot.initial_mass(), composition, draws, age).expect(
+            "a companion is of 13 Jupiter masses up to its primary's mass, with a finite age",
+        )
+    }));
+    (hierarchy, stars)
+}
+
+/// The single-star models of the grid system `record`'s stars at the first redraw attempt,
+/// primary first, without the binary engine: what a range row's brief reads (its first attempt's
+/// star count), at a range row's cost, for plan 12's lens masses (P12.T4). For the few systems
+/// the grid redraws (P11.T7) they are the first attempt's stars, and a pair's mass transfer is
+/// not in them (plan 11's Risks, "Deviations in P11.T11, as built").
+///
+/// # Panics
+///
+/// As [`SystemStars::generate`].
+#[must_use]
+pub(crate) fn first_attempt_models(galaxy: &Galaxy, record: &SystemRecord) -> Vec<StarModel> {
+    let primary = StarModel::new(
+        record.primary_initial_mass(),
+        draw_metallicity(galaxy, record),
+        primary_draws(galaxy, record),
+        record.age_at_epoch(),
+    )
+    .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
+    models_at(
+        galaxy,
+        record,
+        &primary,
+        grid_multiplicity(record),
+        GRID_ATTEMPT,
+    )
+    .1
+}
+
+/// What a star's pair says of it at one time: its state, its pair's class, and a neutron star's
+/// pulsar, recycled by what it accreted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PairedStar {
+    state: StarState,
+    class: BinaryClass,
+    pulsar: Option<PulsarState>,
+    /// Whether the pair's timeline explodes the star at its own model's death age, as design note
+    /// 16 pins a massive primary's death, so that the model's death stands.
+    own_death: bool,
+}
+
+/// Every pair of two stars of `hierarchy` that can interact by +H or holds a remnant by then, run
+/// through the binary engine on the tracks of `stars` (P11.T11): from zero age to the pair's age at
+/// the end of the clock window, +H, so that its timeline covers the source horizon. Any other pair
+/// is two single stars on their orbit, in no class, whose timeline would be one detached segment of
+/// its models, so it is not run. A pair with a brown dwarf, or with a member that is itself a pair,
+/// is not run either.
+#[must_use]
+fn run_pairs(hierarchy: &SystemHierarchy, stars: &[StarModel]) -> Vec<PairTimeline> {
+    hierarchy
+        .pairs()
+        .filter_map(|(node, orbit)| {
+            let HierarchyNode::Pair { inner, outer, .. } = *hierarchy.node(node) else {
+                unreachable!("pairs are pairs");
+            };
+            let (HierarchyNode::Star(a), HierarchyNode::Star(b)) =
+                (*hierarchy.node(inner), *hierarchy.node(outer))
+            else {
+                return None;
+            };
+            if [a, b]
+                .iter()
+                .any(|&s| hierarchy.star(s).kind() == SlotKind::BrownDwarf)
+            {
+                return None;
+            }
+            let [first, second] = [a, b].map(|s| &stars[usize::from(s.get())]);
+            let input = BinaryInput::new(
+                first.initial_mass(),
+                second.initial_mass(),
+                *first.composition(),
+                *orbit,
+                [first.draws().clone(), second.draws().clone()],
+                first.age_at_epoch(),
+            )
+            .expect("a pair's stars are of 0.08-150 M_sun with a finite age");
+            let until = Years::new(first.age_at(ClockWindow::END).value().max(0.0));
+            let tracks = [first.shared_track(), second.shared_track()];
+            // A pair that cannot interact by +H is two single stars on their orbit, and with no
+            // remnant by then it can be in no class: its timeline would be its models'.
+            let dead = [first, second]
+                .iter()
+                .any(|s| s.remnant_age_at(ClockWindow::END).is_some());
+            if !dead && !can_interact_with_tracks(&input, until, tracks.clone()) {
+                return None;
+            }
+            let timeline = evolve_with_tracks(&input, until, tracks);
+            Some(PairTimeline {
+                node,
+                stars: [a, b],
+                timeline,
+            })
+        })
+        .collect()
 }
 
 /// The multiplicity context of the grid record `record`: [`MultiplicityContext::Free`] for a
@@ -1304,9 +1916,129 @@ fn clock_death(age_at_epoch: Years, death: Death) -> ClockDeath {
     }
 }
 
+/// The summary of `star`, the system's body `body`, at `t`, or `None` if it has not formed by then:
+/// from `paired`, its pair's word on it, where the engine ran it in a pair and its pair has changed
+/// it, and otherwise [`star_summary`] with the pair's class.
+#[must_use]
+fn star_summary_with(
+    star: &StarModel,
+    body: BodyId,
+    t: UniverseTime,
+    paired: Option<PairedStar>,
+) -> Option<StarSummary> {
+    let Some(paired) = paired else {
+        return star_summary(star, body, t);
+    };
+    let own = star.state_at(t)?;
+    if own == paired.state {
+        return star_summary(star, body, t).map(|summary| StarSummary {
+            binary_class: paired.class,
+            ..summary
+        });
+    }
+    let state = paired.state;
+    let extras = match paired.pulsar {
+        Some(pulsar) if state.phase() == Phase::NeutronStar => {
+            ClassExtras::neutron_star(pulsar.class())
+        }
+        Some(_) | None => ClassExtras::NONE,
+    };
+    let classification = classify(&state, star.composition(), star.draws(), &extras);
+    let spin = rotation::rotation(&state, star.composition(), star.draws(), None);
+    let activity = rotation::activity(&state, spin.as_ref());
+    let remnant = remnant_kind(state.phase()).map(|kind| {
+        let mass = if kind == RemnantKind::None {
+            SolarMasses::ZERO
+        } else {
+            state.mass()
+        };
+        CompactRemnant::new(kind, mass)
+    });
+    Some(StarSummary {
+        body,
+        kind: object_kind(&state, &classification, star.composition()),
+        classification,
+        absolute_magnitude_v: absolute_magnitude_v(&state),
+        colour_b_v: colour_b_v(state.effective_temperature()),
+        remnant,
+        remnant_detail: if state.phase() == Phase::NeutronStar {
+            paired.pulsar.map(RemnantDetail::NeutronStar)
+        } else if state.phase() == Phase::BlackHole {
+            Some(RemnantDetail::BlackHole(BlackHole::from_draws(
+                state.mass(),
+                star.draws(),
+            )))
+        } else {
+            None
+        },
+        rotation: spin,
+        magnetism: rotation::magnetism(&state, star.draws(), spin.as_ref()),
+        activity,
+        variability: variability(&VariabilityInputs {
+            state: &state,
+            initial_mass: star.initial_mass(),
+            composition: star.composition(),
+            classification: &classification,
+            rotation: spin.as_ref(),
+            activity: activity.as_ref(),
+        }),
+        // The star's own track's nebula (P06.T16.b) is not the one a pair that has changed its
+        // evolution would light, and the engine models none: none until it does.
+        planetary_nebula: None,
+        death_in_window: if paired.own_death {
+            own_death_in_window(star)
+        } else {
+            None
+        },
+        binary_class: paired.class,
+        state,
+    })
+}
+
+/// `star`'s own death, its clock time and kind, if it falls inside the clock window. A death inside
+/// the window is always one the model holds, because its track is built to the window's end:
+/// nothing further is built for it.
+#[must_use]
+fn own_death_in_window(star: &StarModel) -> Option<(UniverseTime, DeathKind)> {
+    star.remnant.and_then(
+        |stage| match clock_death(star.age_at_epoch(), stage.death) {
+            ClockDeath::At(when, kind) if ClockWindow::contains(when) => Some((when, kind)),
+            ClockDeath::At(..)
+            | ClockDeath::BeyondClockRange
+            | ClockDeath::AlreadyRemnantAtBirth => None,
+        },
+    )
+}
+
+/// The kind of remnant a star in `phase` is, or `None` for a living star.
+#[must_use]
+const fn remnant_kind(phase: Phase) -> Option<RemnantKind> {
+    match phase {
+        Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
+            Some(RemnantKind::WhiteDwarf)
+        }
+        Phase::NeutronStar => Some(RemnantKind::NeutronStar),
+        Phase::BlackHole => Some(RemnantKind::BlackHole),
+        Phase::NoRemnant => Some(RemnantKind::None),
+        Phase::Protostar
+        | Phase::PreMainSequence
+        | Phase::MainSequence
+        | Phase::HertzsprungGap
+        | Phase::FirstGiantBranch
+        | Phase::CoreHeliumBurning
+        | Phase::EarlyAgb
+        | Phase::ThermallyPulsingAgb
+        | Phase::HeliumMainSequence
+        | Phase::HeliumHertzsprungGap
+        | Phase::HeliumGiantBranch
+        | Phase::PostAgb
+        | Phase::Substellar => None,
+    }
+}
+
 /// The summary of `star`, the system's body `body`, at `t`, or `None` if it has not formed by then.
 #[must_use]
-fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarSummary> {
+pub(crate) fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarSummary> {
     let state = star.state_at(t)?;
     let classification = classify(
         &state,
@@ -1321,17 +2053,7 @@ fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarS
     } else {
         None
     };
-    // A death inside the window is always one the model holds, because its track is built to
-    // the window's end: nothing further is built for it.
-    let death_in_window =
-        star.remnant.and_then(
-            |stage| match clock_death(star.age_at_epoch(), stage.death) {
-                ClockDeath::At(when, kind) if ClockWindow::contains(when) => Some((when, kind)),
-                ClockDeath::At(..)
-                | ClockDeath::BeyondClockRange
-                | ClockDeath::AlreadyRemnantAtBirth => None,
-            },
-        );
+    let death_in_window = own_death_in_window(star);
     Some(StarSummary {
         body,
         kind: object_kind(&state, &classification, star.composition()),
@@ -1359,6 +2081,7 @@ fn star_summary(star: &StarModel, body: BodyId, t: UniverseTime) -> Option<StarS
         }),
         planetary_nebula: star.planetary_nebula_at(t),
         death_in_window,
+        binary_class: BinaryClass::None,
         state,
     })
 }
@@ -2082,6 +2805,260 @@ mod tests {
             StarDraws::for_star(galaxy.seed(), primary).stripped(),
             "the mark `draw_hierarchy` conditions on is the primary's own"
         );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // P11.T11: the binary engine in the system stage.
+
+    use crate::stellar::binary::{SegmentKind, evolve};
+
+    /// A grid record of the young thin disc at the Sun-like point, candidate `index`, with a
+    /// primary of `mass` M☉ formed `age` years ago.
+    fn record_of(galaxy: &Galaxy, index: u32, mass: f64, age: f64) -> SystemRecord {
+        SystemRecord::from_parts(
+            young_disc_record(galaxy, index, age).id(),
+            GalacticPosition::from_light_years([0.0, 26_000.0, 30.0]).unwrap(),
+            SystemOrigin::Grid(galaxy.fields().component_id(0).unwrap()),
+            Population::YoungThinDisc,
+            SolarMasses::new(mass),
+            Years::new(age),
+        )
+    }
+
+    /// Systems of 5 M☉ primaries 120 Myr old, past their main sequence, many of whose pairs
+    /// interact.
+    fn evolved_systems(galaxy: &Galaxy, n: u32) -> Vec<SystemStars> {
+        (0..n)
+            .map(|i| SystemStars::generate(galaxy, &record_of(galaxy, i, 5.0, 1.2e8)))
+            .collect()
+    }
+
+    /// The input the engine takes for the pair at `node` of `stars`, and the age it runs to, or
+    /// `None` for a node that is not a pair of two stars.
+    fn pair_input(stars: &SystemStars, node: NodeIndex) -> Option<(BinaryInput, Years)> {
+        let tree = stars.hierarchy();
+        let HierarchyNode::Pair {
+            inner,
+            outer,
+            orbit,
+        } = *tree.node(node)
+        else {
+            return None;
+        };
+        let (HierarchyNode::Star(first), HierarchyNode::Star(second)) =
+            (*tree.node(inner), *tree.node(outer))
+        else {
+            return None;
+        };
+        if [first, second]
+            .iter()
+            .any(|&s| tree.star(s).kind() != SlotKind::Star)
+        {
+            return None;
+        }
+        let [x, y] = [first, second].map(|s| &stars.stars()[usize::from(s.get())]);
+        let input = BinaryInput::new(
+            x.initial_mass(),
+            y.initial_mass(),
+            *x.composition(),
+            orbit,
+            [x.draws().clone(), y.draws().clone()],
+            x.age_at_epoch(),
+        )
+        .unwrap();
+        Some((input, x.age_at(ClockWindow::END)))
+    }
+
+    /// Checks that every pair of two stars of `stars` that can interact by +H or holds a remnant
+    /// then, and no other, is run, with `evolve`'s timeline bit for bit, and that every other is
+    /// one detached segment in no class; the pairs run and those that interacted.
+    fn check_pairs(stars: &SystemStars) -> (usize, usize) {
+        let (mut run, mut changed) = (0, 0);
+        for (node, _) in stars.hierarchy().pairs() {
+            let Some((input, until)) = pair_input(stars, node) else {
+                assert!(stars.pairs().iter().all(|p| p.node() != node));
+                continue;
+            };
+            let expected = evolve(&input, until);
+            if let Some(pair) = stars.pairs().iter().find(|p| p.node() == node) {
+                assert_same_bits(pair.timeline().until().value(), until.value());
+                assert_eq!(pair.timeline(), &expected);
+                run += 1;
+                changed += usize::from(expected.segments().len() > 1);
+            } else {
+                {
+                    assert_eq!(expected.segments().len(), 1, "{node:?}");
+                    assert_eq!(expected.segments()[0].kind(), SegmentKind::Detached);
+                    assert!(!crate::stellar::binary::can_interact(&input, until));
+                    let age = stars.record().age_at_epoch();
+                    if age.value() > 0.0 {
+                        assert_eq!(
+                            expected.class_at(age),
+                            crate::stellar::binary::BinaryClass::None
+                        );
+                    }
+                }
+            }
+        }
+        (run, changed)
+    }
+
+    /// Every pair of two stars that can interact by +H or holds a remnant then, and no other, is
+    /// run through the engine on its stars' own tracks, from zero age to its age at +H, and the
+    /// timeline is `evolve`'s bit for bit: the tracks handed in save their builds and change
+    /// nothing (ruling 111.5). The rest are two single stars on an orbit.
+    #[test]
+    fn every_pair_of_two_stars_is_run_on_its_stars_own_tracks() {
+        let galaxy = galaxy();
+        let (mut run, mut changed) = (0, 0);
+        for stars in evolved_systems(&galaxy, 48) {
+            let (r, c) = check_pairs(&stars);
+            run += r;
+            changed += c;
+        }
+        assert!(
+            run > 10 && changed > 3,
+            "{run} pairs run, {changed} interacting"
+        );
+    }
+
+    /// The same for massive primaries, whose death design note 16 pins: alive at +H, so that the
+    /// engine builds the full track itself, and dead by then, so that it takes the model's.
+    #[test]
+    fn massive_pairs_are_run_as_evolve_runs_them() {
+        let galaxy = galaxy();
+        let mut run = 0;
+        for (mass, age) in [(12.0, 5.0e6), (12.0, 3.0e7), (30.0, 2.0e6), (30.0, 1.2e7)] {
+            for i in 0..6 {
+                let stars = SystemStars::generate(&galaxy, &record_of(&galaxy, 40 + i, mass, age));
+                run += check_pairs(&stars).0;
+            }
+        }
+        assert!(run > 4, "{run} massive pairs run");
+    }
+
+    /// `state_at` reads a paired star from its pair's timeline and any other from its own model,
+    /// gives each pair its orbit and class then, and sums the stars' light and mass; the summary
+    /// agrees star for star and gives each paired star its pair's class.
+    #[test]
+    fn the_state_reads_paired_stars_from_their_timeline_and_sums_the_system() {
+        let galaxy = galaxy();
+        let t = UniverseTime::EPOCH;
+        let mut touched = 0;
+        for stars in evolved_systems(&galaxy, 48) {
+            let state = stars.state_at(t).expect("born 120 Myr ago");
+            assert_eq!(state.stars().len(), usize::from(stars.star_count()));
+            let summary = stars.summary_at(t);
+            for (k, (model, now)) in stars.stars().iter().zip(state.stars()).enumerate() {
+                let pair = stars
+                    .pairs()
+                    .iter()
+                    .find(|p| p.stars().iter().any(|s| usize::from(s.get()) == k));
+                let expected = if let Some(pair) = pair {
+                    let c = pair
+                        .stars()
+                        .iter()
+                        .position(|s| usize::from(s.get()) == k)
+                        .unwrap();
+                    let binary = stars.binary_state_at(pair.node(), t).unwrap();
+                    assert_eq!(
+                        summary.stars()[k].binary_class(),
+                        if now.phase() == Phase::NoRemnant && pair.timeline().merger_age().is_some()
+                        {
+                            crate::stellar::binary::BinaryClass::None
+                        } else {
+                            pair.timeline().class_at(model.age_at(t))
+                        }
+                    );
+                    binary.stars()[c]
+                } else {
+                    assert_eq!(
+                        summary.stars()[k].binary_class(),
+                        crate::stellar::binary::BinaryClass::None
+                    );
+                    model.state_at(t).unwrap()
+                };
+                assert_eq!(*now, expected);
+                assert_eq!(summary.stars()[k].state(), now);
+                touched += usize::from(model.state_at(t).unwrap() != *now);
+            }
+            let light = state
+                .stars()
+                .iter()
+                .fold(0.0, |sum, s| sum + s.luminosity().value());
+            assert_same_bits(state.luminosity().value(), light);
+            assert_same_bits(stars.system_mass_at(t).value(), state.mass().value());
+            for (pair_state, (node, orbit)) in state.pairs().iter().zip(stars.hierarchy().pairs()) {
+                assert_eq!(pair_state.node(), node);
+                match stars.binary_state_at(node, t) {
+                    Some(binary) => assert_eq!(pair_state.orbit(), binary.orbit()),
+                    None => assert_eq!(pair_state.orbit(), Some(orbit)),
+                }
+            }
+        }
+        assert!(touched > 0, "no star of 48 systems was changed by its pair");
+        let unborn = SystemStars::generate(&galaxy, &record_of(&galaxy, 3, 1.0, -200.0));
+        assert_eq!(unborn.state_at(t), None);
+        assert_eq!(unborn.system_mass_at(t), SolarMasses::ZERO);
+    }
+
+    /// `state_at` is continuous in time across the clock window: between two times a second apart
+    /// no star's luminosity or mass jumps by more than 1% unless its phase or its pair's segment
+    /// changes between them (the listed events).
+    #[test]
+    fn the_state_is_continuous_across_the_window_except_at_listed_events() {
+        let galaxy = galaxy();
+        let second = Span::new(1, 0).unwrap();
+        let window = 2_000_i64;
+        for stars in evolved_systems(&galaxy, 16) {
+            let kinds = |t: UniverseTime| -> Vec<Option<SegmentKind>> {
+                stars
+                    .pairs()
+                    .iter()
+                    .map(|p| stars.binary_state_at(p.node(), t).map(|s| s.kind()))
+                    .collect()
+            };
+            for k in 0..=40 {
+                let t = years(-1_000 + window * k / 41);
+                let later = t.checked_add(second).unwrap();
+                if kinds(t) != kinds(later) {
+                    continue;
+                }
+                let (a, b) = (stars.state_at(t).unwrap(), stars.state_at(later).unwrap());
+                for (x, y) in a.stars().iter().zip(b.stars()) {
+                    if x.phase() != y.phase() {
+                        continue;
+                    }
+                    for (p, q) in [
+                        (x.luminosity().value(), y.luminosity().value()),
+                        (x.mass().value(), y.mass().value()),
+                    ] {
+                        assert!(
+                            (p - q).abs() <= 1e-2 * p.abs().max(1e-30),
+                            "{p} then {q} at {t:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The primary's recoil is its pair's, and none for a single star.
+    #[test]
+    fn the_recoil_is_the_primarys_pairs() {
+        let galaxy = galaxy();
+        for stars in evolved_systems(&galaxy, 16) {
+            let expected = stars
+                .pairs()
+                .iter()
+                .find(|p| p.stars()[0] == StarIndex::PRIMARY)
+                .and_then(|p| p.timeline().recoil());
+            assert_eq!(stars.recoil(), expected);
+        }
+        let record = young_disc_record(&galaxy, 4, 1.0e9);
+        let single = SystemStars::generate_in(&galaxy, &record, MultiplicityContext::ForcedSingle);
+        assert_eq!(single.recoil(), None);
+        assert!(single.pairs().is_empty());
     }
 
     /// `age_at` is `SystemRecord::age_at`'s arithmetic.

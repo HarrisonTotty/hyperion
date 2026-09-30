@@ -614,8 +614,9 @@ position and on its own independent draws, and the parts are independent Poisson
 The nuclear cluster and the cores of globular clusters are too dense for the grid. The fine layer's
 index overflows at about 180 systems per cubic light-year, and long before that a cell-wide bound
 makes the candidate counts absurd. The field itself stays finite at the centre, at about 0.26 per
-cubic light-year for the bulge and about 16 for the nuclear disc of [Populations](#populations), so
-it needs no cap and still knows nothing about the features. What was left unsolved was how the range
+cubic light-year for the bulge and about 16 for the nuclear disc of [Populations](#populations), and
+some 50 in all in the ring of the nuclear disc's inner part near 30 ly, so it needs no cap and still
+knows nothing about the features. What was left unsolved was how the range
 query finds the members near a ship without generating a million of them. **Lean:** each feature
 with members carries a small nested grid of its own, in its own frame:
 
@@ -672,33 +673,41 @@ The galactic centre is the first entry of the global list. Its central black hol
 
 Its nuclear cluster was the tight case, so it was worked through with the Milky Way's measured
 profile: 2.5 × 10⁷ M☉ (Schödel et al. 2014), which is 4–6 × 10⁷ systems, on a broken power law with
-an inner slope of 1.3 (Gallego-Cano et al. 2018), a break near 10 ly and an outer slope of 3.5. It
-is held to the measured masses: 1.2–1.8 × 10⁵ M☉ per cubic parsec at 1 pc across Schödel et al.'s
-(2018) normalisations, and about 10⁶, 7.8 × 10⁶ and 8.9 × 10⁶ M☉ inside 1, 3 and 3.9 pc (Schödel et
-al. 2018; Chatzopoulos et al. 2015). At the centre's own mean system mass, 0.42 M☉ while its members
-have no companions, that is some 9,000 systems per cubic light-year at 3 ly from the black hole.
-On a slope that shallow the count per cell rises with each level as far as the break, and the
-16-cell grid above fails: its fullest cell in the M dwarf band expects about 11,000 candidates
-(14,000 under Kroupa's) against an index of 8,192. Halving the cells fixes it. With 32 cells per axis the fullest cell expects about 2,200
-candidates at that mean mass (3,000 under Kroupa's function, whose mean there is 0.35 M☉), under
-the flattened bound below.
+an inner slope of 1.3 (Gallego-Cano et al. 2018), a break near 10 ly and an outer slope of 3.5. The
+mass is the mass inside the grid's reach of 128 ly, and near 100 ly a second, gentler break steepens
+the slope to 5.5, so that the grid holds the cluster: the law is fitted within about 20 pc (Schödel
+et al. 2018), and continued to infinity its r^−3.5 tail held a fifth of the mass beyond the reach.
+The galaxy's potential holds the same law. It is held to the measured masses: 1.2–1.8 × 10⁵ M☉ per
+cubic parsec at 1 pc across Schödel et al.'s (2018) normalisations, and about 10⁶, 7.8 × 10⁶ and 8.9
+× 10⁶ M☉ inside 1, 3 and 3.9 pc (Schödel et al. 2018; Chatzopoulos et al. 2015); the law gives 1.5 ×
+10⁵, 1.1 × 10⁶, 7.1 × 10⁶ and 1.0 × 10⁷. At the centre's own mean system mass, 0.42 M☉ while its
+members have no companions, that is some 11,000 systems per cubic light-year at 3 ly from the black
+hole. On a slope that shallow the count per cell rises with each level as far as the break, and the
+16-cell grid above fails: its fullest cell in the M dwarf band expected about 11,000 candidates
+(14,000 under Kroupa's) against an index of 8,192 on the law before its normalisation inside the
+reach, and more after it. Halving the cells fixes it. With 32 cells per
+axis the fullest cell expects about 2,900 candidates at that mean mass (4,000 under Kroupa's
+function, whose mean there is 0.35 M☉), under the flattened bound below. The fullest cell grows with
+the cluster's mass, and a drawn mass has a long tail, so the draw is capped where the fullest cell
+expects 7,470, eight standard deviations under the index: about 6.4 × 10⁷ M☉ (4.7 × 10⁷ under
+Kroupa's), at the top of what Milky Way-mass galaxies hold (Neumayer et al. 2020).
 
 An earlier draft softened the cusp into a core of 0.03 ly. That cannot stand. The cluster's
 velocities must come from somewhere, and the only consistent source is a distribution function f(E),
-found once per galaxy by Eddington inversion of the profile in the potential of the black hole and
-the cluster. For a softened core that inversion goes negative inside 0.035 ly: no isotropic cluster
-around a point mass can be shallower than r^−½, as An and Evans's (2006) cusp-slope theorem
-requires of an isotropic cusp. So the cusp continues inward to 10⁻³ ly, inside which fewer than
-three systems are expected, then falls as r^−½, and ends at the loss cone. The r^−½ core is the
-distribution function's energy cut at Ψ(10⁻³ ly), not a turn in the profile, which would itself make
-the inversion negative; the same holds of a sharp break, so the break near 10 ly is a smooth (Nuker)
-one of sharpness α = 10 (Gallego-Cano et al. 2018; Schödel et al. 2018). A member whose pericentre
-would pass within about 2 au of the black hole is thinned out, which removes 4 × 10⁻⁵ of the
-cluster. The density is defined as the integral of f, so positions and velocities agree by
-construction. The grid becomes twelve levels, from cells of 1 ÷ 256 ly, a binary fraction so that
-cell edges are exact, up to 8 ly and a reach of 128 ly, where the cluster has fallen well below the
-nuclear disc around it. The innermost cell expects some forty candidates across the bands, of
-which its density keeps some fifteen.
+found once per galaxy by Eddington inversion of the profile in the potential of the black hole, the
+cluster and the rest of the galaxy, taken spherical about the centre. For a softened core that
+inversion goes negative inside 0.035 ly: no isotropic cluster around a point mass can be shallower
+than r^−½, as An and Evans's (2006) cusp-slope theorem requires of an isotropic cusp. So the cusp
+continues inward to 10⁻³ ly, inside which fewer than three systems are expected, then falls as r^−½,
+and ends at the loss cone. The r^−½ core is the distribution function's energy cut at Ψ(10⁻³ ly),
+not a turn in the profile, which would itself make the inversion negative; the same holds of a sharp
+break, so the break near 10 ly is a smooth (Nuker) one of sharpness α = 10 (Gallego-Cano et al.
+2018; Schödel et al. 2018). A member whose pericentre would pass within about 2 au of the black hole
+is thinned out, which removes 4 × 10⁻⁵ of the cluster. The density is defined as the integral of f,
+so positions and velocities agree by construction. The grid becomes twelve levels, from cells of 1 ÷
+256 ly, a binary fraction so that cell edges are exact, up to 8 ly and a reach of 128 ly, where the
+cluster has fallen well below the nuclear disc around it. The innermost cell expects some forty
+candidates across the bands, of which its density keeps some fifteen.
 
 Three more things are true of the real cluster and copied:
 
@@ -722,9 +731,10 @@ Three more things are true of the real cluster and copied:
   [What is inside a cluster today](#what-is-inside-a-cluster-today). Black holes sink: a slope of
   1.75–2 with a break about half the stars' (Bahcall and Wolf 1976), which puts ten to forty
   thousand of them in the central parsec, as the X-ray sources there imply (Hailey et al. 2018).
-  Retention is far from total: the escape speed is 1,100 km/s at 0.1 ly but only 210 at 10 ly, so
-  the cluster keeps about a third of its neutron stars under the adopted kick law and about nine
-  tenths of its black holes. The
+  Retention is far from total: the escape speed from the cluster is 1,100 km/s at 0.1 ly but only
+  about 230 at 10 ly (retained means bound to the cluster, not to the galaxy, whose well is several
+  times deeper), so the cluster keeps about a third of its neutron stars under the adopted kick law
+  and about nine tenths of its black holes. The
   rest stay bound to the inner galaxy among the bulge's displaced remnants.
 
 Two consequences for play. At 3 ly from the black hole the mean distance between systems is about
@@ -834,10 +844,11 @@ Near the Sun there are about 0.0019 systems with a star or white dwarf per cubic
 counting individual stars and white dwarfs; 0.0023 and 0.0031 with brown dwarfs; Kirkpatrick et al.
 2024), so an 8 ly cube holds about one. At the centre of the bulge the density is over a hundred
 times higher, about 0.26 per cubic light-year, and the nuclear disc adds about 16 more in the
-innermost few hundred light-years. The index absorbs that at every layer (see
-[Identifiers](#identifiers)). The nuclear cluster does not fit: it averages some 10⁵ stars per cubic
-parsec over its central few parsecs and passes 10⁶ in the innermost half parsec. It is a feature
-with a grid of its own; see [Dense features](#dense-features-clusters-and-the-galactic-centre).
+innermost few hundred light-years, and its inner part some 35 more in a ring near 30 ly. The index
+absorbs that at every layer (see [Identifiers](#identifiers)). The nuclear cluster does not fit: it
+averages some 10⁵ stars per cubic parsec over its central few parsecs and passes 10⁶ in the
+innermost half parsec. It is a feature with a grid of its own; see [Dense
+features](#dense-features-clusters-and-the-galactic-centre).
 
 ### Systems and stars
 
@@ -1378,7 +1389,13 @@ et al. 2002; Sormani et al. 2022), which comes to about 16 systems per cubic lig
 centre, and 8–23 over our ranges. Most of it is over 8 Gyr old and a few per cent formed in the last
 gigayear. It surrounds the nuclear cluster of
 [Dense features](#dense-features-clusters-and-the-galactic-centre), and being exponential in radius
-and cored in height, never rising with either, it keeps the corner bound exact. The halo is a
+and cored in height, never rising with either, it keeps the corner bound exact. An inner part holds
+5.5% of it on a scale of 0.158 of its length and a height of 0.8 of that, with the thin discs'
+central hole: the mass between the cluster and the disc that a single exponential leaves out, which
+brings the circular speed at 30 pc to the observed 100 km/s (Sofue 2013; the ACES's 99 ± 13) with
+7.7 × 10⁷ M☉ inside that radius and 2.6 × 10⁷ inside 10 pc. The hole puts it where it is missing,
+between 3 and 30 pc, and keeps its densest ring, near 10 pc, at about twice the disc's own centre,
+which the fine layer's index absorbs. The halo is a
 mixture of components chosen by marking, most of them the debris of accreted galaxies; see
 [Streams and accreted structure](#streams-and-accreted-structure). It stops at 65,000 ly so that it
 fits inside the root cube, which also drops about 15% of the globular clusters. The discs' tails
@@ -2432,6 +2449,37 @@ change here. The text has been brought into line:
    11's companions and the fitted Chabrier scale a system averages about 0.60 M☉, remnants
    included, and 3–10 × 10¹⁰ M☉ over that is 0.50–1.67 × 10¹¹. See [Galaxy
    parameters](#galaxy-parameters).
+
+**2026-09-29: the orchestrator's ruling 143.1 and ruling 144's joint revision.** Ruling 143.1 and
+the joint revision of ruling 144 of the same file were made on research that read the sources' own
+text (`research/r-obs12a/NOTE.md` and `research/r-centre09a/NOTE.md`: Sofue 2013, Launhardt et al.
+2002, Sormani et al. 2020 and 2022, the ACES cusp, Schödel et al. 2014 and 2018, Gallego-Cano et
+al. 2018 and 2020, Chatzopoulos et al. 2015), and lane `pot02`'s own research on the nuclear disc's
+inner part. They move the potential and everything downstream, in version 16's batch. The text has
+been brought into line:
+
+1. **The galaxy's potential holds the centre's cluster**: the Nuker law of sharpness α = 10, with a
+   taper near 100 ly that steepens it to 5.5, and a mass that is the mass inside the grid's reach
+   of 128 ly. Reason: the potential held a sharp break the centre could not, and continued to
+   infinity the law put a fifth of its mass beyond the reach, which left M(<3 pc) a third under
+   Schödel et al.'s (2018) 7.8 × 10⁶ M☉; normalised inside the reach it holds 7.1 × 10⁶, and 1.5 ×
+   10⁵ M☉ pc⁻³ at 1 pc. See [Dense features](#dense-features-clusters-and-the-galactic-centre).
+2. **The nuclear disc has an inner part**, 5.5% of its mass on 0.158 of its scale length, 0.8 as
+   tall as it is wide, with the thin discs' central hole. Reason: the model turned at 80 km/s at 30
+   pc against the observed 100 (Sofue 2013; the ACES's 99 ± 13), for want of 1.5–3 × 10⁷ M☉
+   between 3 and 30 pc, and that mass cannot go into the cluster, whose fullest cell would pass its
+   index. The hole is the shape of the difference between the heavier cluster Sormani et al. use
+   (Chatzopoulos et al. 2015) and Schödel et al.'s, and keeps the fine layer's densest cell inside
+   its index. See [Populations](#populations).
+3. **A drawn cluster is capped** at about 6.4 × 10⁷ M☉ (4.7 × 10⁷ under Kroupa's function), where
+   its fullest cell expects 7,470 candidates, eight standard deviations under the index of 8,192.
+   Reason: the drawn mass has a long tail, and about 2% of galaxies passed the index; about 4%
+   are now capped.
+4. **The centre's orbits are the whole galaxy's**: its distribution functions are inverted in the
+   potential of the black hole, the cluster and the galaxy's spherical average, and a remnant is
+   retained if its kick stays under the cluster's own escape speed. Reason: at 30–128 ly the black
+   hole and the cluster give only part of the circular speed, and the members moved a quarter too
+   slow; "retained" means bound to the cluster.
 
 ## Open questions
 

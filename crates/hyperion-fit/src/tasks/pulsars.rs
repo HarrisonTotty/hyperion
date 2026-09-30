@@ -80,13 +80,9 @@ pub fn hosts(gamma_csv: &str, counts_csv: &str) -> Result<(Vec<Host>, usize), St
             .parse()
             .map_err(|_| format!("gamma line {}: Γ", i + 1))?;
         let known = counts.get(c[0]).copied();
-        let distance = match (c[1].parse::<f64>(), known) {
-            (Ok(d), _) => d,
-            (Err(_), Some((d, _))) => d,
-            (Err(_), None) => {
-                dropped += 1;
-                continue;
-            }
+        let Some(distance) = c[1].parse::<f64>().ok().or_else(|| known.map(|(d, _)| d)) else {
+            dropped += 1;
+            continue;
         };
         out.push(Host {
             gamma: gamma / 1000.0,

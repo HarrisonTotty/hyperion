@@ -77,8 +77,9 @@ export interface StarBrief {
   /** Its effective temperature; `null` where the luminosity is. */
   readonly teffK: number | null;
   /**
-   * How many stars the system has, the primary included: 1 to 4, since a primary has at most three
-   * companions (plan 11, rulings 74 and 81), so one digit holds it.
+   * How many stars the system has, the primary included: 1 to 5, since a primary has at most three
+   * stellar companions (plan 11, rulings 74 and 81) and one bound brown dwarf, which the count
+   * includes (P11.T2.d), so one digit holds it.
    */
   readonly starCount: number;
 }

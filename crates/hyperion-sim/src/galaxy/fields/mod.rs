@@ -5,8 +5,9 @@
 //! each density is exactly its closed form, in systems per cubic light-year of every mass band
 //! together, at the epoch, with the feature share φ held at 0 (plan 02, Design note 12):
 //!
-//! - the young thin disc, the old thin disc's five sub-discs, the thick disc and the nuclear disc,
-//!   each exponential in radius and cored in height ([`disc`]): its vertical profile is the
+//! - the young thin disc, the old thin disc's five sub-discs, the thick disc and the nuclear disc's
+//!   main and inner parts (plan 02's `NuclearDiscParams`; ruling 143.1 of 2026-09-22), each
+//!   exponential in radius and cored in height ([`disc`]): its vertical profile is the
 //!   vertical Jeans equation's in the galaxy's potential, tabulated once ([`vertical`]); the young
 //!   disc carries the sharp arm and the sub-discs the gentle one ([`arms`]);
 //! - the boxy bulge `exp(−m)` ([`bulge`]) and the long bar ([`bar`]);
@@ -30,9 +31,10 @@
 //!
 //! The components come in a fixed order, which is part of the generator version because every sum
 //! over them runs in it (Design note 18): the young thin disc, the old thin disc's sub-discs from
-//! youngest to oldest, the thick disc, the bulge, the long bar, the nuclear disc, then the halo's
-//! components in their own order (in situ, the dominant merger, the lesser progenitors by number,
-//! the globular-born debris). That is 15 to 18 components, under [`MAX_COMPONENTS`].
+//! youngest to oldest, the thick disc, the bulge, the long bar, the nuclear disc's main and inner
+//! parts, then the halo's components in their own order (in situ, the dominant merger, the lesser
+//! progenitors by number, the globular-born debris). That is 16 to 19 components, under
+//! [`MAX_COMPONENTS`].
 //!
 //! # Examples
 //!
@@ -81,7 +83,7 @@ use super::ages::{
     AgeDistribution, BULGE_AGES, FeatureShare, LONG_BAR_AGES, SubDisc, THICK_DISC_AGES,
 };
 use super::imf::MassBand;
-use super::params::{GalaxyParams, HaloComponentKind};
+use super::params::{GalaxyParams, HaloComponentKind, NuclearDiscParams};
 use super::potential::MassModel;
 use super::shares::ShareMatrix;
 use super::{PointLy, Population};
@@ -105,7 +107,7 @@ use crate::units::Years;
 pub const SOLAR_RADIUS_LENGTHS: f64 = 3.8;
 
 /// The most components a galaxy's fields hold: the size of the buffer
-/// [`Fields::densities`] fills. A galaxy has 15 to 18 today; the rest is room for later plans.
+/// [`Fields::densities`] fills. A galaxy has 16 to 19 today; the rest is room for later plans.
 pub const MAX_COMPONENTS: usize = 24;
 
 /// A density component could not be built: `quantity` is `value`, which is not finite or lies
@@ -398,11 +400,12 @@ impl Fields {
             sub_discs,
             thick,
             nuclear,
+            inner_nuclear,
             summary,
         } = DiscProfiles::solve(params, model);
-        let mut components = Vec::with_capacity(10 + params.halo().components().len());
+        let mut components = Vec::with_capacity(11 + params.halo().components().len());
         push_thin_discs(params, young, sub_discs, &summary, &mut components);
-        push_inner_populations(params, thick, nuclear, &mut components);
+        push_inner_populations(params, thick, [nuclear, inner_nuclear], &mut components);
         push_halo(params, &mut components);
         assert!(
             components.len() <= MAX_COMPONENTS,
@@ -611,11 +614,12 @@ fn push_thin_discs(
     }
 }
 
-/// The thick disc, the bulge, the long bar and the nuclear disc, in that order.
+/// The thick disc, the bulge, the long bar and the nuclear disc's main and inner parts, in that
+/// order.
 fn push_inner_populations(
     params: &GalaxyParams,
     thick_profile: VerticalProfile,
-    nuclear_profile: VerticalProfile,
+    [nuclear_profile, inner_profile]: [VerticalProfile; 2],
     components: &mut Vec<Component>,
 ) {
     let n = params.system_count();
@@ -661,24 +665,36 @@ fn push_inner_populations(
         uniform(LONG_BAR_AGES),
         Metallicity::Fixed(metallicity::LONG_BAR),
     );
-    // Still forming: the unborn sliver is extra (plan 02, Design note 13).
+    // Still forming: the unborn sliver is extra (plan 02, Design note 13). The two parts share
+    // the disc's systems as they share its mass (`NuclearDiscParams`).
     let nuclear_ages = AgeDistribution::nuclear_disc();
     let nuclear = params.nuclear_disc();
-    push(
-        Population::NuclearDisc,
-        Shape::Disc(
-            ExponentialDisc::new(
-                count(Population::NuclearDisc) / nuclear_ages.born_fraction(),
-                nuclear.length(),
-                RadialProfile::Exponential,
-                nuclear_profile,
-                None,
-            )
-            .expect(VALID),
+    let born = count(Population::NuclearDisc) / nuclear_ages.born_fraction();
+    let inner = NuclearDiscParams::INNER_SHARE;
+    let inner_radial = RadialProfile::Holed {
+        hole: nuclear.inner_hole(),
+    };
+    for (share, length, radial, profile) in [
+        (
+            1.0 - inner,
+            nuclear.length(),
+            RadialProfile::Exponential,
+            nuclear_profile,
         ),
-        nuclear_ages,
-        Metallicity::Fixed(metallicity::NUCLEAR_DISC),
-    );
+        (inner, nuclear.inner_length(), inner_radial, inner_profile),
+    ] {
+        components.push(Component {
+            population: Population::NuclearDisc,
+            shape: Shape::Disc(
+                ExponentialDisc::new(born * share, length, radial, profile, None).expect(VALID),
+            ),
+            count: n * params.population_share(Population::NuclearDisc) * share,
+            ages: nuclear_ages.clone(),
+            metallicity: Metallicity::Fixed(metallicity::NUCLEAR_DISC),
+            sub_disc: None,
+            halo: None,
+        });
+    }
 }
 
 /// One component per smooth halo component, in the halo's order.

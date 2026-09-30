@@ -1670,10 +1670,10 @@ mod tests {
             .iter()
             .filter(|c| matches!(c.shape(), Shape::Disc(_)))
             .count();
-        // Young, the five sub-discs, thick and nuclear: eight discs over four lines of sight,
-        // plus the bar's.
-        assert_eq!(discs, 8);
-        assert_eq!(plan.lines.len(), 5);
+        // Young, the five sub-discs, thick and the nuclear disc's two parts (plan 02, R26): nine
+        // discs over five lines of sight, plus the bar's.
+        assert_eq!(discs, 9);
+        assert_eq!(plan.lines.len(), 6);
         // A shared line gives each disc that reads it the same bits as its own line would: the
         // deduplication stands in for the direct computation. The fixture and the three seeds the
         // goldens pin, so that a galaxy whose discs do not share a scale length is covered too.

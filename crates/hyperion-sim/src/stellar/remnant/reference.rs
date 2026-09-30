@@ -6,8 +6,11 @@
 //! Kroupa sample of 8–150 M☉ primaries at Z = 0.02 (slope 2.3 above 1 M☉; Kroupa 2001, MNRAS 322,
 //! 231), each built into a star with no ID ([`StarDraws::from_parts`]) from the stream
 //! `stellar.reference` of its sample number ([`tags::STELLAR_REFERENCE`]) and evolved to its death
-//! on the generator's own track. The iron-core collapses of single and wind-stripped progenitors
-//! that leave a neutron star are its members, and [`score_quantiles`] sorts their scores into the
+//! on the generator's own track. The iron-core collapses to a neutron star that the kick law sends
+//! to the ordinary mode are its members: the star's companion-stripped mark is applied against
+//! plan 11's stripped share and a companion-stripped star's own mode draw decides its mode, as the
+//! law decides them (ruling 147.2), so that the ordinary-mode neutron stars follow Disberg and
+//! Mandel's (2025) log-normal. [`score_quantiles`] sorts the members' scores into the
 //! 257 quantiles at ranks i ÷ 256 of [`tables::kick_rank`](crate::tables::kick_rank). The scorer
 //! works on any range of sample numbers ([`ReferencePopulation::scores`]) and the quantile step on
 //! any list of scores ([`quantiles_of`]), so that plan 15's P15.T5.a can run it in chunks.
@@ -20,6 +23,7 @@
 
 use core::ops::Range;
 
+use super::kick::stripped_mark_applied;
 use super::{
     CompactRemnant, Death, DeathKind, KickDraws, KickLaw, KickLawParams, KickMode, KickRankTable,
     NatalKick, ProgenitorAtDeath, RemnantKind, StandardKickLaw, Stripping, ordinary_score,
@@ -89,7 +93,7 @@ impl ReferenceStar {
 }
 
 /// The population `F_x` is tabulated over (P06.T19.b): Kroupa primaries of 8–150 M☉ at Z = 0.02,
-/// whose iron-core collapses of single and wind-stripped progenitors leave a neutron star.
+/// whose iron-core collapses leave a neutron star that takes the ordinary mode (ruling 147.2).
 ///
 /// # Examples
 ///
@@ -205,23 +209,39 @@ impl ReferencePopulation {
     }
 
     /// The ordinary score of sample star `i`, or `None` unless it is a member: an iron core's
-    /// collapse to a neutron star. Its envelope is a single star's or wind-stripped: the track
-    /// reads the companion-stripped mark only for the width of its electron-capture window, against
-    /// plan 11's stripped share (P11.T1.d), and the score does not read it.
+    /// collapse to a neutron star that takes the ordinary mode (ruling 147.2). The star's
+    /// companion-stripped mark is applied against plan 11's stripped share at its initial mass
+    /// ([`binarity::is_stripped`](crate::galaxy::displaced::binarity::is_stripped), P11.T1.d), as
+    /// [`StandardKickLaw::with_stripped_mark`] applies it, and a companion-stripped star whose own
+    /// `star.kick.mode` draw sends it to the low mode ([`KickLawParams::takes_low_mode`]), as
+    /// [`StandardKickLaw`]'s kick decides it, is not a member. So the table is the distribution of
+    /// the scores of the ordinary-mode neutron stars the law draws, which is the population
+    /// Disberg and Mandel's (2025) isolated pulsars sample. The score itself reads neither the mark
+    /// nor the mode draw.
     #[must_use]
     pub fn score(&self, seed: Seed, i: u64) -> Option<f64> {
         let star = self.star(seed, i);
         let (death, remnant) = self.fate(&star);
-        let member = matches!(death.kind(), DeathKind::CoreCollapse { .. })
+        let iron_core = matches!(death.kind(), DeathKind::CoreCollapse { .. })
             && remnant.kind() == RemnantKind::NeutronStar;
-        member.then(|| {
-            let params = KickLawParams {
-                score_scatter: self.score_scatter,
-                ..KickLawParams::default()
-            };
-            let xi = params.score_factor(star.draws.kick_score());
-            ordinary_score(death.progenitor().co_core_mass(), remnant.mass(), xi)
-        })
+        if !iron_core {
+            return None;
+        }
+        let params = KickLawParams {
+            score_scatter: self.score_scatter,
+            ..KickLawParams::default()
+        };
+        let death =
+            stripped_mark_applied(death, &star.draws, star.initial_mass, &self.composition());
+        if params.takes_low_mode(&death.progenitor(), star.draws.kick_mode()) {
+            return None;
+        }
+        let xi = params.score_factor(star.draws.kick_score());
+        Some(ordinary_score(
+            death.progenitor().co_core_mass(),
+            remnant.mass(),
+            xi,
+        ))
     }
 
     /// The scores of the members among sample stars `items`, in sample order: the per-chunk
@@ -290,7 +310,7 @@ pub fn quantiles_of(scores: &mut [f64]) -> [f64; QUANTILES] {
 ///
 /// The committed table, [`tables::kick_rank`](crate::tables::kick_rank), is this with n = 10⁶;
 /// plan 15's P15.T5.a calls it with 10⁷. Each member costs one full track of a massive star, about
-/// a millisecond, and about three sample stars in five are members.
+/// a millisecond, and a little under half the sample stars are members (ruling 147.2).
 ///
 /// # Panics
 ///
@@ -302,8 +322,8 @@ pub fn score_quantiles(pop: &ReferencePopulation, n: u64, seed: Seed) -> [f64; Q
     let mut scores = Vec::with_capacity(n);
     let mut start = 0;
     while scores.len() < n {
-        // About three sample stars in five are members, so twice the scores still wanted, within
-        // one chunk; the result is the first n members whatever the chunks.
+        // A little under half the sample stars are members, so twice the scores still wanted, in
+        // one chunk at most; the result is the first n members whatever the chunks.
         let wanted = u64::try_from(n - scores.len()).expect("a usize fits in 64 bits");
         let chunk = (2 * wanted).clamp(16, CHUNK);
         scores.extend(pop.scores(seed, start..start + chunk));
@@ -380,16 +400,17 @@ pub fn sampled_kick(law: &StandardKickLaw, seed: Seed, i: u64) -> SampledKick {
 /// Shares are fractions in [0, 1]; each test names the default it pins in its own documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KickObservables {
-    /// Test 1: ln(v ÷ km s⁻¹) of every ordinary-mode neutron star of a single or wind-stripped
-    /// iron-core progenitor, the reference population's own, sorted ascending.
-    pub reference_ln_speeds: Vec<f64>,
+    /// Test 1: ln(v ÷ km s⁻¹) of every ordinary-mode neutron star, the companion-stripped mark
+    /// applied, sorted ascending: the reference population's own (ruling 147.2).
+    pub ordinary_ln_speeds: Vec<f64>,
     /// Test 1: the mean and standard deviation of ln(v ÷ km s⁻¹) over
-    /// [`KickObservables::reference_ln_speeds`].
-    pub reference_ln_moments: (f64, f64),
-    /// Test 1, reported: the mean and standard deviation of ln(v ÷ km s⁻¹) over every
-    /// ordinary-mode neutron star, those of companion-stripped progenitors above the ramp
-    /// included, and their number.
-    pub ordinary_ln_moments: (f64, f64, u64),
+    /// [`KickObservables::ordinary_ln_speeds`].
+    pub ordinary_ln_moments: (f64, f64),
+    /// Test 1, reported: the mean and standard deviation of ln(v ÷ km s⁻¹) over the ordinary-mode
+    /// neutron stars of single and wind-stripped progenitors, and their number.
+    pub unstripped_ln_moments: (f64, f64, u64),
+    /// Test 1, reported: the same over those of companion-stripped progenitors, and their number.
+    pub stripped_ln_moments: (f64, f64, u64),
     /// Test 2: the share of isolated pulsars whose speed projected on the sky is under 50 km/s,
     /// averaged over isotropic viewing directions: every ordinary-mode neutron star, and the
     /// low-mode ones of progenitors no companion stripped (the electron captures of the single
@@ -459,7 +480,7 @@ pub const LIGHT_BLACK_HOLE: SolarMasses = SolarMasses::new(12.0);
 ///
 /// # Panics
 ///
-/// If the sample holds no neutron star of a single or wind-stripped iron-core progenitor.
+/// If the sample holds no ordinary-mode neutron star.
 #[must_use]
 pub fn kick_observables(
     params: &KickLawParams,
@@ -468,8 +489,8 @@ pub fn kick_observables(
     seed: Seed,
 ) -> KickObservables {
     let law = StandardKickLaw::new(*params, table.clone());
-    let mut reference = Vec::new();
     let mut ordinary = Vec::new();
+    let (mut unstripped, mut stripped_ordinary) = (Vec::new(), Vec::new());
     let mut isolated = Tally::default();
     let mut isolated_slow = Tally::default();
     let mut escaping = Tally::default();
@@ -491,8 +512,10 @@ pub fn kick_observables(
                 low += u64::from(is_low);
                 if kick.mode() == KickMode::Ordinary {
                     ordinary.push(math::ln(v));
-                    if !stripped {
-                        reference.push(math::ln(v));
+                    if stripped {
+                        stripped_ordinary.push(math::ln(v));
+                    } else {
+                        unstripped.push(math::ln(v));
                     }
                 }
                 if kick.mode() == KickMode::Ordinary || (is_low && !stripped) {
@@ -528,15 +551,20 @@ pub fn kick_observables(
         }
     }
     assert!(
-        !reference.is_empty(),
-        "the sample of {n} stars holds no reference neutron star"
+        !ordinary.is_empty(),
+        "the sample of {n} stars holds no ordinary-mode neutron star"
     );
-    reference.sort_by(f64::total_cmp);
-    let (om, os) = moments(&ordinary);
+    let with_count = |xs: &[f64]| {
+        let (mean, sd) = moments(xs);
+        (mean, sd, count(xs.len()))
+    };
+    let ordinary_ln_moments = moments(&ordinary);
+    ordinary.sort_by(f64::total_cmp);
     KickObservables {
-        reference_ln_moments: moments(&reference),
-        reference_ln_speeds: reference,
-        ordinary_ln_moments: (om, os, count(ordinary.len())),
+        ordinary_ln_speeds: ordinary,
+        ordinary_ln_moments,
+        unstripped_ln_moments: with_count(&unstripped),
+        stripped_ln_moments: with_count(&stripped_ordinary),
         isolated_slow_share: isolated.mean(),
         isolated_under_100_share: isolated_slow.mean(),
         escape_share: escaping.mean(),

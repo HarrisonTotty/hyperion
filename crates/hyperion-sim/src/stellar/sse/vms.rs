@@ -34,12 +34,12 @@
 //! 63.7 M☉), so the lifetime factor folds their winds into the constant-mass lifetime the
 //! formulae give; the tracks integrate their own winds on top.
 //!
-//! The Eddington factor `Γ_e` = `κ_e` L ÷ (4π c G M), electron scattering alone, read at X = 0 (the
+//! The Eddington factor `Γₑ` = `κₑ` L ÷ (4π c G M), electron scattering alone, read at X = 0 (the
 //! least opacity a photosphere can have; ruling 124.1), stays below 0.75 on the main sequence at
 //! every metallicity (at most 0.65, under Sanyal et al.'s 2015 0.7; Yusof et al.'s end-of-hydrogen
 //! Γ is 0.63–0.72). At the initial X it reaches 1.14 late on the main sequence at 150 M☉ and
 //! Z = 10⁻⁴: a helium-enriched photosphere, which the tracks do not model. After the main sequence
-//! HPT's formulae pass `Γ_e`(X = 0) = 1 (a finding, pinned in the tests), which P06.T39's wind is to
+//! HPT's formulae pass `Γₑ`(X = 0) = 1 (a finding, pinned in the tests), which P06.T39's wind is to
 //! remove.
 
 use crate::math;

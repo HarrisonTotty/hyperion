@@ -22,6 +22,7 @@
 //! (design note 14). Nothing generated calls the engine yet: plan 11's P11.T6–T11 wire it into the
 //! system stage.
 
+pub(crate) mod carve;
 mod classify;
 mod common_envelope;
 mod detached;
@@ -46,6 +47,7 @@ pub use classify::{
     carved_class, classify,
 };
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
+pub(crate) use evolve::{can_interact_with_tracks, evolve_with_tracks};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};
 pub use params::{BinaryParams, WindSpeedFactor};
 pub use recycling::{MILLISECOND_PULSAR_MAX_PERIOD, PulsarAt, is_millisecond_pulsar};

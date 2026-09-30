@@ -389,7 +389,50 @@ fn routed(c: &mut Criterion) {
     group.finish();
 }
 
+/// A full `SystemStars::generate`, binary engine included (plan 11, P11.T11's `system_full`):
+/// every system of the 50 ly query about the Sun-like point in turn, a whole neighbourhood's mix,
+/// and one system with an interacting pair, against the brainstorm's millisecond a system.
+fn system_full(c: &mut Criterion) {
+    let Fixture { galaxy, local, .. } = fixture();
+    let heavy = records_near_sun(&galaxy, 150.0, MassFloor::LayerD);
+    let interacting = local
+        .iter()
+        .chain(&heavy)
+        .copied()
+        .find(|record| {
+            SystemStars::generate(&galaxy, record)
+                .pairs()
+                .iter()
+                .any(|pair| pair.timeline().segments().len() > 1)
+        })
+        .expect("the Sun's neighbourhood holds an interacting pair");
+    let mut group = c.benchmark_group("stellar/system_full");
+    group.sample_size(10);
+    group.bench_function(
+        format!("generate, 50 ly query, {} systems", local.len()),
+        |b| {
+            b.iter(|| {
+                for record in &local {
+                    black_box(SystemStars::generate(&galaxy, black_box(record)));
+                }
+            });
+        },
+    );
+    group.bench_function("generate (an interacting pair)", |b| {
+        b.iter(|| SystemStars::generate(&galaxy, black_box(&interacting)));
+    });
+    group.finish();
+}
+
 criterion_group!(
-    stellar, exp_before, powers, backbone, tracks, systems, routed, exp_after
+    stellar,
+    exp_before,
+    powers,
+    backbone,
+    tracks,
+    systems,
+    system_full,
+    routed,
+    exp_after
 );
 criterion_main!(stellar);

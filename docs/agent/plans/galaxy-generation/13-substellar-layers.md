@@ -1063,3 +1063,16 @@ Result<CoolingState, EvaluateGiantCoolingError>`, as P06.T13 returned a `Result`
     cells' 0.7; the 248 brown-dwarf cells' bounds alone (2.3 µs each) are half the 1 ms. Only a
     cheaper density model or a query that does not generate whole cells would meet them, and both
     move output or the pinned statistics.
+- **The saturation threshold after the nuclear disc's inner part (lane `pot02`, 2026-09-29, for
+  version 16; plan 02, R26; a finding for the owner, pinned provisionally).** The threshold is C
+  over the greatest total bound of plan 03's partitioned headroom check (the root octant's bound is
+  the holed inner part's central amplitude, which no cell holds). The inner part's ring near 33 ly
+  holds some 50 systems per ly³, and the partition's greatest bound is 68.5 per ly³ (84.2 under
+  Kroupa's), so the threshold falls from 37.5 to 10.09 per star (31.8 to 8.46), under the default
+  21: the Milky Way fixture's ring saturates in place, as ruling 125 allows, and the brown dwarfs'
+  fullest cell rises from some 20,000 to 74,036 of 2¹⁹. Over 2,000 seeds the default now saturates
+  the centre of 1,989 (from 12), the smallest threshold is 4.23 per star (13.52) and the median
+  10.64 (45.26), and the brown dwarfs' fullest cell expects 174,919 (54,688), a third of 2¹⁹; the
+  loss box of `the_default_saturates_few_galaxies_and_loses_almost_nothing` grows to 768 ly, since
+  the worst seed's centre saturates past 128 ly. The brainstorm's "the Milky Way's does not reach
+  it" no longer holds; the tests hold the measured state until the owner rules.

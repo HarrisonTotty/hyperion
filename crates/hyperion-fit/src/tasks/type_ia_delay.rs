@@ -123,7 +123,7 @@ fn place_cdf_at(
     let step = 1.0 / index_f64(PLACE_SEGMENTS);
     for k in 0..PLACE_SEGMENTS {
         let (a, b) = (index_f64(k) * step, index_f64(k + 1) * step);
-        let (half, mid) = (0.5 * (b - a), 0.5 * (a + b));
+        let (half, mid) = (0.5 * (b - a), f64::midpoint(a, b));
         let panel = GL4_NODES
             .iter()
             .zip(GL4_WEIGHTS)
@@ -163,6 +163,10 @@ fn quantiles(cdf: &[f64; PLACE_SEGMENTS + 1]) -> [f64; RANKS] {
 }
 
 /// The largest distance between `cdf` and the CDF the 17 quantiles give by linear interpolation.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the interpolation's usual symbols"
+)]
 fn quantile_error(cdf: &[f64; PLACE_SEGMENTS + 1], q: &[f64; RANKS]) -> f64 {
     let step = 1.0 / index_f64(PLACE_SEGMENTS);
     let mut worst = 0.0_f64;
@@ -208,7 +212,7 @@ pub fn fit(galaxy: &Galaxy) -> TypeIaDelayFit {
     let band_d = MassBand::D.lo();
     for i in 0..BINS {
         let (a, b) = (math::ln(edges[i]), math::ln(edges[i + 1]));
-        let (half, mid) = (0.5 * (b - a), 0.5 * (a + b));
+        let (half, mid) = (0.5 * (b - a), f64::midpoint(a, b));
         // Each channel's mixture of the delays' laws, and the share of primaries below layer D.
         let mut mixed = [[0.0; PLACE_SEGMENTS + 1]; CHANNELS];
         let (mut below_d, mut weight) = (0.0, 0.0);
@@ -488,6 +492,8 @@ impl FitTask for TypeIaDelayTask {
             "DELAY_EDGES",
             "YIELD_PER_SOLAR_MASS",
             "CHANNEL_SHARE",
+            "PRIMARY_MASS_CDF",
+            "SECONDARY_MASS_CDF",
             "LAYER_SHARE",
             "ANCIENT_LOSS_PER_SOLAR_MASS",
         ]

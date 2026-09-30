@@ -1,4 +1,4 @@
-# generator_version = 15
+# generator_version = 16
 window n=1e-3 = 0x411ab045b66fb180  # 437265.42816045135
 window n=1e-3 radius at 0.01 = 0x4057632de823cd70  # 93.54967692848527
 window n=1e-3 speed at 0.01 = 0x40b138d1352a33c7  # 4408.817217481271
@@ -58,14 +58,14 @@ window n=1e4 speed at 0.99 = 0x402c37a530730734  # 14.108682169000168
 cap Field = 0x414b17ecdcc43b03  # 3551193.72473848
 cap TypeIa = 0x414b17ecdcc43b03  # 3551193.72473848
 cap Bubble = 0x412166ee85fdb5b2  # 570231.2617012768
-type ia rate per year = 0x3f72eabc11a00412  # 0.004618391651093583
+type ia rate per year = 0x3f72eb30582a9c50  # 0.004618824811280467
 ancient share YoungThinDisc = 0x3f628f9836b5ebe5  # 0.00226573685875796
 ancient share OldThinDisc = 0x3fa2732171214e45  # 0.03603462701780961
 ancient share ThickDisc = 0x3fa4b670da3c7275  # 0.04045441307082324
 ancient share Bulge = 0x3fa46dc1703755a9  # 0.03989986891580639
 ancient share LongBar = 0x3fa3c7bc1757ea12  # 0.03863323006585885
-ancient share NuclearDisc = 0x3fa3bd30cb8aa1e1  # 0.03855278477323388
-ancient share Halo = 0x3fa4d6f64ad4fb76  # 0.04070253051258181
+ancient share NuclearDisc = 0x3fa3bd30cb8aa1e0  # 0.03855278477323387
+ancient share Halo = 0x3fa4d6f64ad4fb78  # 0.040702530512581825
 progenitor 0: YoungThinDisc Iax explodes T-66797589785418.000000000 s delay 2704865986194598 s component 0 lifetimes 2666725818637009 None leftover PartlyBurntDwarf
 progenitor 0 primary = 0x40175feaaa51c17b  # 5.843668614616372
 progenitor 0 secondary = 0x3ffb93c160eaa3ce  # 1.7235730920603944
@@ -88,7 +88,7 @@ progenitor 5: NuclearDisc Merger explodes T-72371513811695.000000000 s delay 480
 progenitor 5 primary = 0x4014fba5647d6a49  # 5.245748109965072
 progenitor 5 secondary = 0x401303de4c88b21a  # 4.753777690737957
 progenitor 5 separation = 0x41b9aad75fe7f519  # 430626655.90608364
-progenitor 6: Halo DoubleDetonation explodes T-24562431997238.000000000 s delay 358440524624456384 s component 11 lifetimes 2729599721943659 Some(11369432597163072) leftover SurvivingDonor { speed: KilometresPerSecond(1161.7203420411035) }
+progenitor 6: Halo DoubleDetonation explodes T-24562431997238.000000000 s delay 358440524624456384 s component 12 lifetimes 2729599721943659 Some(11369432597163072) leftover SurvivingDonor { speed: KilometresPerSecond(1161.7203420411035) }
 progenitor 6 primary = 0x401723dc24a5fe0e  # 5.78501946700227
 progenitor 6 secondary = 0x400a92480df42254  # 3.3214264955643475
 progenitor 6 separation = 0x41e06e83cfec08ac  # 2205425279.3760586

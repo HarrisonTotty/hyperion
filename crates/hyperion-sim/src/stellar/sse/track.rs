@@ -262,6 +262,67 @@ pub struct Track {
     nebula: UnitUniform,
 }
 
+/// Samples per living segment in [`Track::window_where`], both ends included.
+const WINDOW_SAMPLES: u32 = 257;
+
+/// Bisections of each change of a predicate between samples in [`Track::window_where`]: 60 halve
+/// any segment's span to below a second of age.
+const WINDOW_BISECTIONS: u32 = 60;
+
+/// A condition on a star's state for [`Track::window_where`] (plan 06, P06.T24.a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum PhasePredicate {
+    /// A luminous blue variable: [`is_luminous_blue_variable`](crate::stellar::classify::is_luminous_blue_variable),
+    /// beyond the Humphreys–Davidson limit and hotter than 8,000 K.
+    Lbv,
+}
+
+impl PhasePredicate {
+    /// Whether a living star in `state` satisfies the predicate.
+    #[must_use]
+    pub fn holds(self, state: &StarState) -> bool {
+        match self {
+            Self::Lbv => crate::stellar::classify::is_luminous_blue_variable(state),
+        }
+    }
+
+    /// Whether a star that is never brighter than `max_luminosity` can satisfy it.
+    #[must_use]
+    fn can_hold_below(self, max_luminosity: SolarLuminosities) -> bool {
+        match self {
+            Self::Lbv => max_luminosity > crate::stellar::classify::LBV_MIN_LUMINOSITY,
+        }
+    }
+}
+
+/// A closed interval of a star's age, years since its onset of collapse.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct AgeInterval {
+    start: Years,
+    end: Years,
+}
+
+impl AgeInterval {
+    /// The first age of the interval.
+    #[must_use]
+    pub const fn start(&self) -> Years {
+        self.start
+    }
+
+    /// The last age of the interval.
+    #[must_use]
+    pub const fn end(&self) -> Years {
+        self.end
+    }
+
+    /// Whether `age` lies in the interval, its ends included.
+    #[must_use]
+    pub fn contains(&self, age: Years) -> bool {
+        self.start <= age && age <= self.end
+    }
+}
+
 /// A stage of a star's life that a mass-transfer case is named for (Kippenhahn and Weigert
 /// 1967): Case A from the main sequence, Case B from the Hertzsprung gap to the end of core
 /// helium burning, Case C after it.
@@ -551,6 +612,109 @@ impl Track {
     #[must_use]
     pub fn max_luminosity_until(&self, age: Years) -> SolarLuminosities {
         SolarLuminosities::new(self.max_until(age, Sampled::Luminosity))
+    }
+
+    /// The interval of ages in which the star's state satisfies `predicate`, within the part of
+    /// its life the track is built for, or `None` if it never does there (plan 06, P06.T24.a).
+    ///
+    /// [`PhasePredicate::Lbv`] gives the window in which the star is a luminous blue variable,
+    /// which plan 09's catalogue class tests against the source horizon. The interval runs from
+    /// the first age at which the predicate holds to the last: each living segment is sampled at
+    /// [`WINDOW_SAMPLES`] even ages, both ends included, and each change of the predicate between
+    /// neighbours is bisected to [`WINDOW_BISECTIONS`] steps. Where a track leaves and re-enters
+    /// the region, the interval spans the gap; the LBV window of the generator's tracks has none
+    /// in the plan's test.
+    ///
+    /// A predicate that no living state of the track can meet is answered without sampling: an
+    /// LBV needs 6 × 10⁵ L☉, above the track's largest luminosity for every star below about
+    /// 40 M☉.
+    #[must_use]
+    pub fn window_where(&self, predicate: PhasePredicate) -> Option<AgeInterval> {
+        let end = if self.built_until.is_finite() {
+            self.built_until
+        } else {
+            self.lifetime()?.value()
+        };
+        if !predicate.can_hold_below(self.max_luminosity_until(Years::new(end))) {
+            return None;
+        }
+        let holds = |age: f64| {
+            let state = self.state_at(Years::new(age));
+            state.phase().is_living() && predicate.holds(&state)
+        };
+        let bisect = |mut outside: f64, mut inside: f64| {
+            for _ in 0..WINDOW_BISECTIONS {
+                let mid = f64::midpoint(outside, inside);
+                if holds(mid) {
+                    inside = mid;
+                } else {
+                    outside = mid;
+                }
+            }
+            inside
+        };
+        let mut window: Option<(f64, f64)> = None;
+        for segment in &self.segments {
+            if matches!(segment.model, Model::Remnant { .. }) || segment.start >= end {
+                continue;
+            }
+            // The last age of the segment that is still its own: the next segment starts at its
+            // end.
+            let stop = segment.end.min(end);
+            let last = if stop > segment.start {
+                segment.start + (stop - segment.start) * (1.0 - f64::EPSILON)
+            } else {
+                continue;
+            };
+            let n = WINDOW_SAMPLES - 1;
+            let age_at = |k: u32| {
+                if k == n {
+                    last
+                } else {
+                    segment.start + (last - segment.start) * f64::from(k) / f64::from(n)
+                }
+            };
+            let mut previous = (age_at(0), holds(age_at(0)));
+            if previous.1 {
+                window = Some(window.map_or((previous.0, previous.0), |(a, _)| (a, previous.0)));
+            }
+            for k in 1..=n {
+                let age = age_at(k);
+                let inside = holds(age);
+                match (previous.1, inside) {
+                    (false, true) => {
+                        let entry = bisect(previous.0, age);
+                        window = Some(window.map_or((entry, age), |(a, _)| (a, age)));
+                    }
+                    (true, false) => {
+                        let exit = bisect(age, previous.0);
+                        window = window.map(|(a, _)| (a, exit));
+                    }
+                    (true, true) => window = window.map(|(a, _)| (a, age)),
+                    (false, false) => {}
+                }
+                previous = (age, inside);
+            }
+        }
+        window.map(|(start, end)| AgeInterval {
+            start: Years::new(start),
+            end: Years::new(end),
+        })
+    }
+
+    /// The mass the star had when it became a naked helium star, M☉, if the track has been built
+    /// past that: the entry mass of its first helium-star segment (P06.T24.a's WN and WC stars).
+    #[must_use]
+    pub(crate) fn helium_star_entry_mass(&self) -> Option<SolarMasses> {
+        self.segments
+            .iter()
+            .find(|segment| {
+                matches!(
+                    segment.model,
+                    Model::HeliumMainSequence { .. } | Model::HeliumShellBurning { .. }
+                )
+            })
+            .map(|segment| SolarMasses::new(segment.mass))
     }
 
     /// The age from which the track holds the star: zero for every track but the one-segment

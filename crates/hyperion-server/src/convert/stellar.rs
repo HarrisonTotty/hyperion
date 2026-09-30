@@ -157,21 +157,14 @@ fn star_summary(model: &StarModel, star: &StarSummary) -> StarSummaryDto {
             Modelled::Value(nebula_dto(&nebula))
         }),
         active_events: None,
-        // Plan 11's P11.T11 runs the binary engine for each pair and gives each star its pair's
-        // class (`binary_class_dto`); until then no class is computed.
-        binary_class: Modelled::NotModelled,
+        // Plan 11's P11.T11 runs the binary engine for each pair of two stars and gives each of
+        // them its pair's class: `null` for a star in no class.
+        binary_class: binary_class_dto(star.binary_class()),
     }
 }
 
 /// A binary class as the wire carries it (plan 11, P11.T5 and T13): `null` for a star in none.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "P11.T11 calls it once each pair's timeline is evolved; the wire tests call it now"
-    )
-)]
 fn binary_class_dto(class: BinaryClass) -> Modelled<BinaryClassDto> {
     Modelled::Value(match class {
         BinaryClass::None => return Modelled::Null,
@@ -667,12 +660,14 @@ mod tests {
         let living = answer(&system(1.0, 4.6e9), 0);
         let wire = serde_json::to_value(&living.stars[0]).expect("a summary serialises");
         let fields = wire.as_object().expect("a star is an object");
-        for null in ["variability", "planetary_nebula"] {
+        // A single star is in no binary class (P11.T11).
+        for null in ["variability", "planetary_nebula", "binary_class"] {
             assert_eq!(fields.get(null), Some(&serde_json::Value::Null), "{null}");
         }
-        for absent in ["active_events", "binary_class"] {
-            assert!(!fields.contains_key(absent), "{absent} is sent: {wire}");
-        }
+        assert!(
+            !fields.contains_key("active_events"),
+            "active_events is sent: {wire}"
+        );
         for value in ["rotation_period_d", "activity_log_lx_lbol"] {
             assert!(
                 fields.get(value).is_some_and(serde_json::Value::is_number),

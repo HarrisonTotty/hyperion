@@ -15,6 +15,7 @@ use super::direct::{
 use super::dist::{MIN_COMPANION_MASS, PeriodDistribution};
 use super::model::{MAX_COMPANIONS, MultiplicityModel};
 use super::stability::{Innermost, Limits, MAX_ECCENTRICITY, NECESSARY_AXIS_RATIO};
+use super::substellar;
 use crate::Seed;
 use crate::galaxy::displaced::binarity;
 use crate::galaxy::placement::SystemRecord;
@@ -94,7 +95,7 @@ const _: () = assert!(
 /// The relative margin by which a new orbit's period window is widened on each side, so that
 /// rounding in the window's arithmetic never excludes a period the full test would admit. The
 /// window only bounds a rejection loop, so a wider one costs nothing but a rare extra try.
-const WINDOW_MARGIN: f64 = 1e-6;
+pub(super) const WINDOW_MARGIN: f64 = 1e-6;
 
 /// The primary mass from which plan 06's companion-stripped mark applies at `composition`:
 /// `m_cc(Z)` − 1 M☉, the lower end of the companion-stripped electron-capture window, from which
@@ -368,14 +369,18 @@ impl SystemHierarchy {
         &self.stars[usize::from(index.0)]
     }
 
-    /// The number of stars, 1 to 1 + [`MAX_COMPANIONS`](super::MAX_COMPANIONS).
+    /// The number of stars, 1 to 2 + [`MAX_COMPANIONS`](super::MAX_COMPANIONS).
+    ///
+    /// A brown-dwarf companion (P11.T2.d) is counted with the stars: it is one of
+    /// [`stars`](Self::stars), with [`SlotKind::BrownDwarf`], and one of the system's bodies at the
+    /// stellar level.
     ///
     /// # Panics
     ///
-    /// Never: a hierarchy holds at most four stars.
+    /// Never: a hierarchy holds at most four stars and a brown dwarf.
     #[must_use]
     pub fn star_count(&self) -> u8 {
-        u8::try_from(self.stars.len()).expect("a hierarchy holds at most four stars")
+        u8::try_from(self.stars.len()).expect("a hierarchy holds at most five bodies")
     }
 
     /// The total initial mass of the stars under `index`, M☉.
@@ -640,7 +645,8 @@ pub fn draw_hierarchy(
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
 ) -> SystemHierarchy {
-    draw_hierarchy_with(galaxy, record, None, ctx, attempt, &PERIOD_CORRECTION)
+    let stars = draw_hierarchy_with(galaxy, record, None, ctx, attempt, &PERIOD_CORRECTION);
+    substellar::with_companion(galaxy, record, ctx, attempt, stars)
 }
 
 /// [`draw_hierarchy`] of a system whose composition is `composition` rather than the grid's
@@ -660,19 +666,21 @@ pub fn draw_hierarchy_of_composition(
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
 ) -> SystemHierarchy {
-    draw_hierarchy_with(
+    let stars = draw_hierarchy_with(
         galaxy,
         record,
         Some(composition),
         ctx,
         attempt,
         &PERIOD_CORRECTION,
-    )
+    );
+    substellar::with_companion(galaxy, record, ctx, attempt, stars)
 }
 
-/// [`draw_hierarchy`] with the direct companions' period law corrected by `correction`, for the
-/// fit of [`PERIOD_CORRECTION`], at `composition` if given and otherwise at the record's
-/// [`draw_metallicity`].
+/// [`draw_hierarchy`]'s stars, without the brown-dwarf companion, with the direct companions'
+/// period law corrected by `correction`, at `composition` if given and otherwise at the record's
+/// [`draw_metallicity`]: for the fit of [`PERIOD_CORRECTION`], which counts stars only, and for
+/// the draw itself, which adds the companion after.
 #[must_use]
 pub(super) fn draw_hierarchy_with(
     galaxy: &Galaxy,
@@ -822,18 +830,19 @@ fn star_count_with(
         &pmf,
         ctx,
     ) == 0
+        && !substellar::wants_companion(galaxy.seed(), record.id(), m0, ctx, attempt)
     {
         return 1;
     }
-    draw_hierarchy_with(
+    let stars = draw_hierarchy_with(
         galaxy,
         record,
         composition,
         ctx,
         attempt,
         &PERIOD_CORRECTION,
-    )
-    .star_count()
+    );
+    substellar::with_companion(galaxy, record, ctx, attempt, stars).star_count()
 }
 
 /// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1; ruling 123.5),
@@ -1476,7 +1485,7 @@ fn semi_major_axis(period: Seconds, mass: SolarMasses) -> Metres {
 
 /// The period of an orbit of semi-major axis `a` about a total mass of `mass`: 2π a √(a ÷ μ).
 #[must_use]
-fn period_of(a: Metres, mass: SolarMasses) -> Seconds {
+pub(super) fn period_of(a: Metres, mass: SolarMasses) -> Seconds {
     let a = a.value();
     Seconds::new(TAU * (a * (a / (GM_SUN * mass.value())).sqrt()))
 }
@@ -1492,7 +1501,7 @@ fn period_of(a: Metres, mass: SolarMasses) -> Seconds {
 /// [`Stream::uniform_open`] counts a word's top 52 bits, so that `offset + ½` stays exact and the
 /// share stays below 1.
 #[must_use]
-fn pick_window(windows: &Thresholds, mark: Mark) -> (usize, f64) {
+pub(super) fn pick_window(windows: &Thresholds, mark: Mark) -> (usize, f64) {
     let index = mark
         .pick(windows)
         .expect("the last threshold is 2⁵³, above every mark");
@@ -1517,7 +1526,7 @@ fn pick_window(windows: &Thresholds, mark: Mark) -> (usize, f64) {
 /// `orientations`, and a mean anomaly at the epoch, one word of `phases`; `None` for an
 /// eccentricity an open orbit would have to carry, after the words are read.
 #[must_use]
-fn draft_orbit(
+pub(super) fn draft_orbit(
     period: Days,
     e: f64,
     orientations: &mut Stream,
@@ -1545,7 +1554,7 @@ fn draft_orbit(
 
 /// An orbit as drawn, before its semi-major axis is fixed by its members' masses.
 #[derive(Debug, Clone, Copy)]
-struct DraftOrbit {
+pub(super) struct DraftOrbit {
     period: Seconds,
     eccentricity: Eccentricity,
     orientation: Orientation,
@@ -1711,6 +1720,67 @@ impl Draft {
                 out.node_masses[slot] = mass;
                 (index, mass)
             }
+        }
+    }
+}
+
+impl SystemHierarchy {
+    /// This hierarchy with a brown-dwarf companion of initial mass `mass` (P11.T2.d) as the outer
+    /// member of a new root, on `orbit` about the whole system, built from its period with the
+    /// gravitational parameter of the system's mass plus `mass`.
+    ///
+    /// The companion is the last body, and every node of this hierarchy follows the new root in
+    /// the same depth-first order, one index further on, with its orbit unchanged: no star, mass
+    /// or stellar orbit moves.
+    #[must_use]
+    pub(super) fn with_outer_brown_dwarf(&self, mass: SolarMasses, orbit: &DraftOrbit) -> Self {
+        let shifted = |n: NodeIndex| NodeIndex(n.0 + 1);
+        let index =
+            u8::try_from(self.stars.len()).expect("at most four stars before the companion");
+        let mut nodes = Vec::with_capacity(self.nodes.len() + 2);
+        nodes.push(HierarchyNode::Star(StarIndex::PRIMARY));
+        nodes.extend(self.nodes.iter().map(|node| match *node {
+            HierarchyNode::Star(star) => HierarchyNode::Star(star),
+            HierarchyNode::Pair {
+                inner,
+                outer,
+                orbit,
+            } => HierarchyNode::Pair {
+                inner: shifted(inner),
+                outer: shifted(outer),
+                orbit,
+            },
+        }));
+        let companion = NodeIndex(u8::try_from(nodes.len()).expect("at most nine nodes"));
+        nodes.push(HierarchyNode::Star(StarIndex(index)));
+        let total = self.system_mass() + mass;
+        nodes[0] = HierarchyNode::Pair {
+            inner: NodeIndex(1),
+            outer: companion,
+            orbit: KeplerElements::from_period(
+                orbit.period,
+                GravitationalParameter::from_solar_masses(total),
+                orbit.eccentricity,
+                orbit.orientation,
+                orbit.mean_anomaly,
+            )
+            .expect("a period of 0.1 d to 10¹¹ d about a stellar mass gives a finite orbit"),
+        };
+        let mut node_masses = Vec::with_capacity(self.node_masses.len() + 2);
+        node_masses.push(total);
+        node_masses.extend_from_slice(&self.node_masses);
+        node_masses.push(mass);
+        let mut stars = self.stars.clone();
+        stars.push(StarSlot {
+            body: BodyId::new(self.stars[0].body.system(), u16::from(index)),
+            initial_mass: mass,
+            kind: SlotKind::BrownDwarf,
+        });
+        Self {
+            nodes,
+            stars,
+            node_masses,
+            dropped: self.dropped,
         }
     }
 }
@@ -1912,12 +1982,16 @@ mod tests {
     use crate::galaxy::imf::MassBand;
     use crate::units::consts::METRES_PER_AU;
 
+    /// The stars the draw makes for `record`, free and at the first attempt: without the
+    /// brown-dwarf companion, which `substellar.rs`'s tests take (P11.T2.d).
     fn free(galaxy: &Galaxy, record: &SystemRecord) -> SystemHierarchy {
-        draw_hierarchy(
+        draw_hierarchy_with(
             galaxy,
             record,
+            None,
             MultiplicityContext::Free,
             RedrawAttempt::FIRST,
+            &PERIOD_CORRECTION,
         )
     }
 
@@ -2737,7 +2811,7 @@ mod tests {
             (0.08, 150.0),
             0x636f_7570,
         ));
-        let mut counts = [0_u32; 5];
+        let mut counts = [0_u32; 6];
         for record in &records {
             for ctx in contexts {
                 for attempt in [
@@ -2754,7 +2828,8 @@ mod tests {
                 }
             }
         }
-        // Singles, which take the short path, and every multiplicity are exercised.
-        assert!(counts[1..].iter().all(|&c| c > 0), "{counts:?}");
+        // Singles, which take the short path, and every multiplicity are exercised; a fifth body
+        // is a brown dwarf beside four stars (P11.T2.d), which this sample need not meet.
+        assert!(counts[1..5].iter().all(|&c| c > 0), "{counts:?}");
     }
 }

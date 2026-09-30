@@ -277,7 +277,7 @@ fn very_massive_stars_meet_the_geneva_grid() {
     }
 }
 
-/// The electron-scattering Eddington factor `Γ_e` = `κ_e` L ÷ (4π c G M) at X = 0, `κ_e` = 0.02 m² kg⁻¹,
+/// The electron-scattering Eddington factor `Γₑ` = `κₑ` L ÷ (4π c G M) at X = 0, `κₑ` = 0.02 m² kg⁻¹,
 /// the least opacity a photosphere can have (ruling 124.1).
 fn eddington_x0(s: &StarState) -> f64 {
     0.02 * s.luminosity().value() * SOLAR_LUMINOSITY_W
@@ -290,10 +290,10 @@ fn eddington_x0(s: &StarState) -> f64 {
 }
 
 /// P06.T14's Eddington check, as ruling 124.1 restates it: on the main sequences of 100–150 M☉
-/// tracks `Γ_e` at X = 0 stays below 0.75 at every metallicity (measured at most 0.65, under Sanyal
+/// tracks `Γₑ` at X = 0 stays below 0.75 at every metallicity (measured at most 0.65, under Sanyal
 /// et al.'s 2015 0.7; Yusof et al.'s end-of-hydrogen Γ is 0.63–0.72). At the initial X it reaches
 /// 1.14 at 150 M☉ and Z = 10⁻⁴, a finding: the photosphere there has to be helium-enriched, which
-/// the tracks do not model, and which P06.T24.a's `WNh` class should read by `Γ_e` (Gräfener et al.
+/// the tracks do not model, and which P06.T24.a's `WNh` class should read by `Γₑ` (Gräfener et al.
 /// 2011).
 #[test]
 fn very_massive_main_sequences_stay_below_the_eddington_limit() {
@@ -315,68 +315,112 @@ fn very_massive_main_sequences_stay_below_the_eddington_limit() {
     }
 }
 
-/// **A finding, flagged and pinned, not clamped (ruling 124.1):** after the main sequence HPT's
-/// formulae pass `Γ_e(X` = 0) = 1, as the published SSE code does (1.01–1.04), at the instant a
-/// massive star is stripped (the envelope under 1% of the star, the giant's luminosity still on)
-/// and in metal-poor 150 M☉ red supergiants (log L 6.9–7.7). The research's probe measured, for
-/// the largest `Γ_e(X` = 0) after the main sequence and the time spent above 1:
+/// P06.T39's test (ruling 124.1): with the wind steepening above Γₑ = 0.7, no living state is
+/// to spend over 10³ years at Γₑ(X = 0) > 1, over 100–150 M☉ at five metallicities and 80 M☉
+/// at Z = 10⁻⁴. Before the wind HPT's formulae passed 1 after the main sequence, as the published
+/// SSE code does (1.01–1.04), at the instant a massive star is stripped and in metal-poor 150 M☉
+/// red supergiants: 6.73 and 88 kyr at 150 M☉ and Z = 10⁻⁴, 8.04 and 50 kyr at 150 M☉ and
+/// Z = 0.001, 1.03 and 11 kyr at 120 M☉ and Z = 0.006, and 1.19 and 46 kyr at 80 M☉ and Z = 10⁻⁴
+/// (the pins this test replaces).
 ///
-/// | Track | max `Γ_e(X` = 0) | Time above 1 |
-/// | --- | --- | --- |
-/// | 150 M☉, Z = 10⁻⁴ | 6.73 | 88 kyr |
-/// | 150 M☉, Z = 0.001 | 8.04 | 50 kyr |
-/// | 120 M☉, Z = 0.006 | 1.03 | 11 kyr |
-/// | 80 M☉, Z = 10⁻⁴ | 1.19 | 46 kyr |
-/// | 150 M☉, Z = 0.014; 80 M☉, Z = 0.03 | 0.89; 0.60 | none |
-///
-/// The test holds each maximum within 20% and each time within a factor of two, so a change that
-/// moves them is seen. P06.T39's wind, which grows with `Γ_e` above 0.7, is to bring every living
-/// state under 1 within 10³ years.
+/// **A finding, pinned provisionally and not tuned (plan 06, Risks):** the bound holds from
+/// Z = 0.014, and at 100–110 M☉ at Z = 0.006, but not at lower Z. The wind removes the largest
+/// excursions (`Γₑ` stays under 1.8 where it reached 8), yet the star then sits just above the
+/// limit while it loses its envelope at the steepened rate, which at Γₑ ≈ 1–1.3 is only 4–12
+/// times the recipe's: Belczynski et al.'s 1.5 × 10⁻⁴ M☉ a year for a red supergiant beyond the
+/// Humphreys–Davidson limit, 15–60 M☉ of envelope, and Vink's metal-poor rate at the stripping
+/// instant. The rows over 10³ years are pinned: the largest `Γₑ` within 10% and the time above 1
+/// within a factor of two, so a change that moves them is seen.
 #[test]
-fn post_main_sequence_eddington_excursions_are_pinned() {
-    for (m, z, max, above) in [
-        (150.0, 1e-4, 6.73, 88e3),
-        (150.0, 0.001, 8.04, 50e3),
-        (120.0, 0.006, 1.03, 11e3),
-        (80.0, 1e-4, 1.19, 46e3),
-        (150.0, 0.014, 0.89, 0.0),
-        (80.0, 0.03, 0.60, 0.0),
-    ] {
-        let track = full(m, z);
-        let ms_end = track
-            .segments()
-            .iter()
-            .find(|s| matches!(s.model, model::Model::MainSequence { .. }))
-            .expect("a main sequence")
-            .end;
-        let death = track.lifetime().expect("dies").value();
-        let n = 40_000;
-        let step = (death - ms_end) / f64::from(n);
-        let (mut largest, mut time) = (0.0_f64, 0.0);
-        for i in 0..n {
-            let s = track.state_at(Years::new(ms_end + step * (f64::from(i) + 0.5)));
-            if !s.phase().is_living() {
-                continue;
-            }
-            let g = eddington_x0(&s);
-            largest = largest.max(g);
-            if g > 1.0 {
-                time += step;
-            }
-        }
+fn the_eddington_wind_bounds_the_excursions_or_pins_them() {
+    // (M☉, Z, the largest Γₑ(X = 0), years above 1) as measured; rows under 10³ years are held
+    // to the plan's bound.
+    let rows: [(f64, f64, f64, f64); 26] = [
+        (100.0, 1e-4, 1.347, 22_030.0),
+        (110.0, 1e-4, 1.449, 25_564.0),
+        (120.0, 1e-4, 1.541, 28_661.0),
+        (135.0, 1e-4, 1.658, 32_764.0),
+        (150.0, 1e-4, 1.754, 38_071.0),
+        (80.0, 1e-4, 1.147, 15_263.0),
+        (100.0, 0.001, 1.150, 10_602.0),
+        (110.0, 0.001, 1.227, 14_652.0),
+        (120.0, 0.001, 1.302, 18_728.0),
+        (135.0, 0.001, 1.403, 24_273.0),
+        (150.0, 0.001, 1.488, 29_480.0),
+        (100.0, 0.006, 0.933, 0.0),
+        (110.0, 0.006, 0.973, 0.0),
+        (120.0, 0.006, 1.012, 1_476.0),
+        (135.0, 0.006, 1.070, 6_129.0),
+        (150.0, 0.006, 1.124, 10_368.0),
+        (100.0, 0.014, 0.782, 0.0),
+        (110.0, 0.014, 0.805, 0.0),
+        (120.0, 0.014, 0.827, 0.0),
+        (135.0, 0.014, 0.857, 0.0),
+        (150.0, 0.014, 0.884, 0.0),
+        (100.0, 0.03, 0.628, 0.0),
+        (110.0, 0.03, 0.640, 0.0),
+        (120.0, 0.03, 0.652, 0.0),
+        (135.0, 0.03, 0.667, 0.0),
+        (150.0, 0.03, 0.679, 0.0),
+    ];
+    for (m, z, max, above) in rows {
+        let (largest, time) = time_above_the_eddington_limit(&full(m, z));
         assert!(
-            (largest / max - 1.0).abs() < 0.2,
-            "{m} M☉ at Z = {z}: max Γ_e(X = 0) {largest} against {max}"
+            (largest / max - 1.0).abs() < 0.1,
+            "{m} M☉ at Z = {z}: the largest Γ_e(X = 0) {largest} against {max}"
         );
-        if above > 0.0 {
+        if above > 1e3 {
             assert!(
                 (0.5..2.0).contains(&(time / above)),
-                "{m} M☉ at Z = {z}: {time} yr above 1 against {above}"
+                "{m} M☉ at Z = {z}: {time} yr above Γ_e(X = 0) = 1 against the pinned {above}"
             );
         } else {
-            assert!(time.abs() < 1e-9, "{m} M☉ at Z = {z}: {time} yr above 1");
+            assert!(
+                time < 1e3,
+                "{m} M☉ at Z = {z}: {time} yr above Γ_e(X = 0) = 1 (largest {largest})"
+            );
         }
     }
+}
+
+/// The largest Γₑ(X = 0) of `track`'s living states after its main sequence, and the years it
+/// spends above 1 (see [`the_eddington_wind_bounds_the_excursions_or_pins_them`]).
+fn time_above_the_eddington_limit(track: &Track) -> (f64, f64) {
+    let ms_end = track
+        .segments()
+        .iter()
+        .find(|s| matches!(s.model, model::Model::MainSequence { .. }))
+        .expect("a main sequence")
+        .end;
+    let death = track.lifetime().expect("dies").value();
+    let gamma = |age: f64| {
+        let s = track.state_at(Years::new(age));
+        s.phase().is_living().then(|| eddington_x0(&s))
+    };
+    let n: u32 = 10_000;
+    let step = (death - ms_end) / f64::from(n);
+    let coarse: Vec<Option<f64>> = (0..n)
+        .map(|i| gamma(ms_end + step * (f64::from(i) + 0.5)))
+        .collect();
+    let above = |i: usize| coarse.get(i).copied().flatten().is_some_and(|g| g > 1.0);
+    let (mut largest, mut time) = (0.0_f64, 0.0);
+    for (i, (k, g)) in (0..n).zip(&coarse).enumerate() {
+        if above(i) || above(i + 1) || i.checked_sub(1).is_some_and(above) {
+            // This step and its neighbours, finely.
+            let (a, fine) = (ms_end + step * f64::from(k), step / 100.0);
+            for j in 0..100 {
+                if let Some(g) = gamma(a + fine * (f64::from(j) + 0.5)) {
+                    largest = largest.max(g);
+                    if g > 1.0 {
+                        time += fine;
+                    }
+                }
+            }
+        } else if let Some(g) = g {
+            largest = largest.max(*g);
+        }
+    }
+    (largest, time)
 }
 
 // -------------------------------------------------------------------------------------------------

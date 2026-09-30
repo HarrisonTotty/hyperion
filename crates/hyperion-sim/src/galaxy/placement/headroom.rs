@@ -8,14 +8,20 @@
 //! checked once, when it is built for play, and refused if any layer's densest possible cell comes
 //! within eight standard deviations of its capacity.
 //!
-//! The largest mean needs no search. It is [`Fields::layer_bound`] over one root octant,
-//! `CellBox::new([0, 0, 0], 65_536)`, times the layer's cell volume: that box's nearest corner is
-//! the origin, where every envelope but the holed thin discs' peaks, and its ranges of radius and
-//! of arm phase contain every cell's, in any octant, so its bound is at least every cell's bound
-//! (plan 02, R17); a holed disc's bound takes its hole's factor at the range's largest radius,
-//! which is the octant's too (plan 02, P02.T12.b). It is not the
-//! sum of the components' density peaks, because plan 02's bound multiplies each envelope by an arm
-//! factor's bound over the cell.
+//! The largest mean is [`Fields::layer_bound`] over the boxes of a partition of the root cube,
+//! times the layer's cell volume ([`partition`]): in each octant, the 8 × 8 × 8 cells of the layer
+//! about the origin, then shells of seven boxes each of twice the last edge, out to the cube's
+//! faces. Every box is a power of two aligned on its own edge, so every cell of the layer lies
+//! inside exactly one of them, and a bound is monotone in its box (a larger box has a nearer
+//! corner, a larger radius and a wider range of arm phase), so the largest of their bounds is at
+//! least every cell's (plan 02, R17). One root octant, whose nearest corner is the origin, was
+//! enough while every envelope but the thin discs' peaked there; the nuclear disc's inner part has
+//! a central hole of scale 25 ly at Milky Way values, and a holed disc's bound takes the
+//! exponential at the box's nearest radius and the hole's factor at its largest (plan 02,
+//! P02.T12.b), which over the octant is the part's amplitude at the centre, four and a half times
+//! its greatest density, a ring near 33 ly (plan 02, R26). It is not the sum of the components'
+//! density peaks, because plan 02's bound multiplies each envelope by an arm factor's bound over
+//! the cell.
 //!
 //! The rogue planets' 16-bit index is the tightest of all. By ruling 125 their density and bound
 //! saturate at [`rogue_planet_saturation_density`], the largest mean this check allows over a 4 ly
@@ -65,9 +71,8 @@ const HEADROOM_SIGMAS: f64 = 8.0;
 /// # Ok::<(), hyperion_sim::galaxy::placement::ExceedIndexCapacityError>(())
 /// ```
 pub fn check_index_headroom(galaxy: &Galaxy) -> Result<(), ExceedIndexCapacityError> {
-    let octant = root_octant();
     for spec in STELLAR_LAYERS.into_iter().chain(SUBSTELLAR_LAYERS) {
-        let largest_mean = largest_cell_mean(galaxy, spec, &octant);
+        let largest_mean = largest_cell_mean(galaxy, spec);
         let capacity = capacity_of(spec);
         if !fits_capacity(largest_mean, capacity) {
             return Err(ExceedIndexCapacityError::LayerTooDense {
@@ -80,27 +85,87 @@ pub fn check_index_headroom(galaxy: &Galaxy) -> Result<(), ExceedIndexCapacityEr
     Ok(())
 }
 
-/// One octant of the root cube, the box whose bound is at least every cell's (module
-/// documentation).
+/// One octant of the root cube, which the tests' sweeps check the partition against.
 ///
 /// # Panics
 ///
 /// Never: the edge is a power of two, the box is the octant `[0, 65_536]³` of the root cube, and it
 /// touches the axis planes without crossing one.
+#[cfg(test)]
 #[must_use]
-pub(crate) fn root_octant() -> CellBox {
+fn root_octant() -> CellBox {
     CellBox::new([0, 0, 0], ROOT_HALF_WIDTH_LY.unsigned_abs())
         .expect("a root octant is a power-of-two box inside the cube that straddles no plane")
 }
 
-/// The largest number of candidates any cell of the layer can expect: the bound over `octant` times
-/// the layer's cell volume.
+/// The largest number of candidates any cell of the layer can expect: the greatest bound over the
+/// [`partition`] times the layer's cell volume.
 #[must_use]
-fn largest_cell_mean(galaxy: &Galaxy, spec: LayerSpec, octant: &CellBox) -> f64 {
-    let bound = galaxy
-        .fields()
-        .layer_bound(galaxy.shares(), spec.band(), octant);
+fn largest_cell_mean(galaxy: &Galaxy, spec: LayerSpec) -> f64 {
+    let (fields, shares) = (galaxy.fields(), galaxy.shares());
+    let bound = partition(spec.layer().cell_size_ly())
+        .iter()
+        .map(|cell| fields.layer_bound(shares, spec.band(), cell))
+        .fold(0.0, f64::max);
     saturated(spec.band(), bound) * cell_of(spec).volume_ly3()
+}
+
+/// The partition of the root cube the largest mean is taken over, for cells of `cell` ly (module
+/// documentation): in each octant, the 8 × 8 × 8 cells about the origin, then shells of the 7
+/// boxes of the doubled edge that the cube of twice the last shell's extent holds besides it, to
+/// the cube's faces; 4,656 boxes for layer A's 8 ly cells.
+///
+/// # Panics
+///
+/// Never for a layer's cell size, a power of two from 4 to 128 ly: every box is a power of two
+/// aligned on its edge inside one octant.
+#[must_use]
+pub(crate) fn partition(cell: u32) -> Vec<CellBox> {
+    let half = ROOT_HALF_WIDTH_LY.unsigned_abs();
+    let mut octant = Vec::new();
+    for i in 0..8_u32 {
+        for j in 0..8_u32 {
+            for k in 0..8_u32 {
+                octant.push(([i, j, k], cell));
+            }
+        }
+    }
+    // The shell of edge e is [0, 2e]³ less [0, e]³: seven boxes.
+    let mut edge = 8 * cell;
+    while edge < half {
+        for [i, j, k] in [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 1, 0],
+            [1, 0, 1],
+            [0, 1, 1],
+            [1, 1, 1],
+        ] {
+            octant.push(([i, j, k], edge));
+        }
+        edge *= 2;
+    }
+    let mut boxes = Vec::with_capacity(8 * octant.len());
+    for (index, edge) in octant {
+        let e = i32::try_from(edge).expect("an edge inside the root cube fits an i32");
+        for signs in 0..8_u8 {
+            // Index n on the positive side and −n − 1 on the negative.
+            let at = |axis: usize| {
+                let n = i32::try_from(index[axis]).expect("an index under 8");
+                if signs >> axis & 1 == 0 {
+                    n * e
+                } else {
+                    -(n + 1) * e
+                }
+            };
+            boxes.push(
+                CellBox::new([at(0), at(1), at(2)], edge)
+                    .expect("an aligned power-of-two box in one octant"),
+            );
+        }
+    }
+    boxes
 }
 
 /// The rogue planets' saturation density, per cubic light-year: 992.5, the largest mean a 4 ly
@@ -208,13 +273,13 @@ mod tests {
     }
 
     /// The fullest layer-A cell expects about 6,000 candidates of 65,536 at Milky Way values (plan
-    /// 03, Design note 6), and every layer keeps a wide margin.
+    /// 03, Design note 6), and every layer keeps a wide margin. Since the nuclear disc's inner part
+    /// (plan 02, R26) the fullest is in its ring near 33 ly and expects about 20,600.
     #[test]
     fn the_fullest_cell_of_each_layer_stays_well_inside_its_capacity() {
         let galaxy = milky_way();
-        let octant = root_octant();
         for spec in STELLAR_LAYERS {
-            let mean = largest_cell_mean(&galaxy, spec, &octant);
+            let mean = largest_cell_mean(&galaxy, spec);
             let capacity = f64::from(capacity_of(spec));
             assert!(
                 mean > 0.0 && mean < 0.5 * capacity,
@@ -226,28 +291,29 @@ mod tests {
             .into_iter()
             .find(|spec| spec.layer() == Layer::A)
             .expect("the table has layer A");
-        let mean = largest_cell_mean(&galaxy, layer_a, &octant);
+        let mean = largest_cell_mean(&galaxy, layer_a);
+        eprintln!("the fullest layer-A cell expects {mean:.0} candidates");
         assert!(
-            (3_000.0..12_000.0).contains(&mean),
-            "the fullest layer-A cell expects {mean} candidates, not about 6,000"
+            (15_000.0..26_000.0).contains(&mean),
+            "the fullest layer-A cell expects {mean} candidates, not about 20,600"
         );
     }
 
-    /// The octant's bound is at least every cell's, in every layer and every octant (module
-    /// documentation): the claim that lets the check skip a search. The densest cells are the eight
-    /// that touch the origin, whose bounds come within 0.4% of the octant's; the sweep reaches out
-    /// geometrically to the cube's faces along every axis and diagonal.
+    /// The partition's greatest bound is at least every cell's, in every layer and every octant
+    /// (module documentation), and it is a cell's own: the densest cells lie within eight cells of
+    /// the origin, which the partition takes cell by cell. The sweep reaches out geometrically to
+    /// the cube's faces along every axis and diagonal.
     #[test]
-    fn the_octant_bounds_every_cell_in_every_layer() {
+    fn the_partition_bounds_every_cell_in_every_layer() {
         let galaxy = milky_way();
         let octant = root_octant();
         assert_eq!((octant.min_corner(), octant.edge()), ([0, 0, 0], 65_536));
         for spec in STELLAR_LAYERS {
             let layer = spec.layer();
-            let largest_mean = largest_cell_mean(&galaxy, spec, &octant);
+            let largest_mean = largest_cell_mean(&galaxy, spec);
             let edge = 65_536 / i32::try_from(layer.cell_size_ly()).unwrap();
-            // 0 to 3, then doubling to the last cell before the face.
-            let mut steps = vec![0, 1, 2, 3];
+            // 0 to 7, then doubling to the last cell before the face.
+            let mut steps = vec![0, 1, 2, 3, 4, 5, 6, 7];
             while let Some(&last) = steps.last().filter(|&&last| last < edge - 1) {
                 steps.push((2 * last + 1).min(edge - 1));
             }
@@ -265,7 +331,8 @@ mod tests {
                             let mean = layer_bound(&galaxy, key) * key.volume_ly3();
                             assert!(
                                 mean <= largest_mean,
-                                "layer {} cell {:?} expects {mean}, above the octant's {largest_mean}",
+                                "layer {} cell {:?} expects {mean}, above the partition's \
+                                 {largest_mean}",
                                 layer.letter(),
                                 key.gen_cell().to_array()
                             );
@@ -277,7 +344,8 @@ mod tests {
             // The sweep reached the densest cells, or it would prove little.
             assert!(
                 densest > 0.99 * largest_mean,
-                "layer {}: the densest cell swept expects {densest} of the octant's {largest_mean}",
+                "layer {}: the densest cell swept expects {densest} of the partition's \
+                 {largest_mean}",
                 layer.letter()
             );
         }
@@ -335,16 +403,27 @@ mod tests {
 
     /// The substellar layers are checked too, and at the default abundances the fullest cell of
     /// each keeps a wide margin: some 20,000 of the brown dwarfs' 2¹⁹ and about half the rogue
-    /// planets' 2¹⁶ (plan 13, Design note 8).
+    /// planets' 2¹⁶ (plan 13, Design note 8). Provisional (plan 02, R26): the nuclear disc's inner
+    /// part puts some 50 systems per ly³ in its ring near 33 ly, which raises the brown dwarfs' to
+    /// some 74,000, still a seventh of theirs, and takes the Milky Way's rogue planets there to
+    /// the saturation density, so that their fullest cell holds its limit, the largest headroom
+    /// mean of 2¹⁶, by ruling 125's construction.
     #[test]
     fn the_substellar_layers_keep_their_headroom() {
         let galaxy = milky_way();
-        let octant = root_octant();
         for spec in SUBSTELLAR_LAYERS {
-            let mean = largest_cell_mean(&galaxy, spec, &octant);
-            let capacity = f64::from(capacity_of(spec));
+            let mean = largest_cell_mean(&galaxy, spec);
+            let capacity = capacity_of(spec);
+            eprintln!(
+                "layer {} expects {mean:.0} candidates of {capacity}",
+                spec.layer().letter()
+            );
+            let most = match spec.layer() {
+                Layer::RoguePlanet => largest_headroom_mean(capacity),
+                _ => 0.7 * f64::from(capacity),
+            };
             assert!(
-                mean > 0.0 && mean < 0.7 * capacity,
+                mean > 0.0 && mean <= most,
                 "layer {} expects {mean} candidates of {capacity}",
                 spec.layer().letter()
             );
