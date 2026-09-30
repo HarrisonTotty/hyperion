@@ -18,15 +18,16 @@ mod common;
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
-use common::{NETWORK_TIMEOUT, SHUTDOWN_TIMEOUT, TestClient, TestServer};
+use common::{TestClient, TestServer};
 use hyperion_protocol::{
     ClientMessage, DensityMapRequest, ErrorCode, GalacticPosition, MapPopulation, MapView,
     MassLayer, OpenUniverseRequest, RequestBody, ResponseBody, ServerMessage, SystemsInRange,
     SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::limits::{
-    MAX_CENSUS_LIMIT, MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_IN_FLIGHT_REQUESTS,
+    CLOSE_TIMEOUT, MAX_CENSUS_LIMIT, MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_IN_FLIGHT_REQUESTS,
     MAX_INBOUND_FRAME_BYTES,
 };
 
@@ -183,7 +184,7 @@ fn json(body: &ResponseBody) -> String {
 /// most of them `too_many_requests`, and the connection answers `ping` throughout.
 ///
 /// The universe is left cold, so the eight queries the in-flight cap admits are all still waiting for
-/// their galaxy to be built — some 0.9 s under `cargo test` (`tests/common`'s `NETWORK_TIMEOUT`) —
+/// their galaxy to be built — some 0.9 s under `cargo test` (`tests/common`'s `DEFAULT_PATIENCE`) —
 /// while the remaining frames arrive in a few milliseconds. Every refusal is therefore the cap's,
 /// which is asserted rather than assumed: no other code may appear. Measured here, 192 of the 200
 /// are refused and the 8 the cap admits are answered. The `ping` goes out with the flood, before a
@@ -296,8 +297,8 @@ async fn two_hundred_queries_fired_at_once_end_in_exactly_two_hundred_terminal_m
 /// because the closing connection cancels its request's token. After the close every job still
 /// queued is skipped rather than computed, which the pool's `cancelled` counter shows — the 31
 /// bands and the 4 queries, measured, against two jobs run: the galaxy and the band in hand. That
-/// band runs to its end, which is a CPU wait and not a network one, so the drain is given
-/// [`SHUTDOWN_TIMEOUT`].
+/// band runs to its end, which is a CPU wait of some seconds and not a network one; the harness's
+/// [`patience`](common::patience) is sized for it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
     /// Range queries queued behind the map's band in hand when the socket closes.
@@ -354,8 +355,7 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
         .min(queued + u64::try_from(QUERIES).expect("four"));
     client.close().await;
     let idle = server
-        .stats_until_within(
-            SHUTDOWN_TIMEOUT,
+        .stats_until(
             "the connection has gone and the pool's queues are empty",
             |stats| {
                 stats.connections() == 0
@@ -679,15 +679,34 @@ async fn one_answer(
         .expect("the answer to the query just asked")
 }
 
-/// `Server::shutdown` returns within [`NETWORK_TIMEOUT`] with work queued and clients not reading.
+/// What `Server::shutdown` may take with work queued and clients not reading, which is the P04.T15
+/// bound: "returns within `NETWORK_TIMEOUT`", the 20 s the harness's every wait had when the plan
+/// was written.
+///
+/// It is the server's timing contract and not the harness's patience, so it stays 20 s however long
+/// the harness is told to wait for everything else. The shutdown's own cost is each connection's
+/// [`CLOSE_TIMEOUT`], a timer and so the same on a busy machine, and the one job in the worker's
+/// hand, one of this test's 50 ly queries: some 120 to 200 ms of a worker under `cargo test` (plan
+/// 04, the T14.d measurements), measured at 1.0 s in all on an idle machine. The 19 s left beyond
+/// the close timeout let that query run a hundred times slower than on an idle machine before the
+/// bound is missed, where the load that failed the suite's harness waits (`tests/common`'s
+/// `DEFAULT_PATIENCE`) slowed its work some twenty times.
+const SHUTDOWN_WITH_WORK_QUEUED: Duration = Duration::from_secs(20);
+
+// A bound inside the close timeout could never be met by a shutdown whose clients do not read.
+const _: () = assert!(SHUTDOWN_WITH_WORK_QUEUED.as_nanos() > CLOSE_TIMEOUT.as_nanos());
+
+/// `Server::shutdown` returns within [`SHUTDOWN_WITH_WORK_QUEUED`] with work queued and clients not
+/// reading.
 ///
 /// One worker, so that a map's bands wait in the bulk queue and a second connection's eight queries
 /// wait in the interactive one; both queues are read before the shutdown, and again as it starts, so
 /// a run that queued nothing fails instead of proving nothing. Neither client reads or closes, so the
-/// shutdown also pays each connection's
-/// [`CLOSE_TIMEOUT`](hyperion_server::limits::CLOSE_TIMEOUT) before dropping its socket. What it may
+/// shutdown also pays each connection's [`CLOSE_TIMEOUT`] before dropping its socket. What it may
 /// not do is wait for the queues: it drops what is queued and joins the worker over the one job in
 /// hand. Measured at 1.0 s against the 20 s bound, nearly all of it the two clients' close timeout.
+/// Only the shutdown is timed against that bound: everything before it, the galaxy build included,
+/// waits under the harness's [`patience`](common::patience), which is no part of the contract.
 ///
 /// The queries are the 50 ly one, some 120 to 200 ms of a worker each under `cargo test` (plan 04,
 /// the T14.d measurements), because the state this test needs must not be a transient: eight of them
@@ -697,8 +716,8 @@ async fn one_answer(
 /// rest.
 ///
 /// A 1,024-pixel edge-on map would instead leave a band of some seconds in the worker's hands, which
-/// is the case `SHUTDOWN_TIMEOUT` is sized for (plan 04, T14.d) and not the queued work this case is
-/// about.
+/// is the teardown the harness's patience is sized for (plan 04, T14.d) and not the queued work this
+/// case is about.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_returns_within_the_network_timeout_with_work_queued() {
     let data_dir = tempfile::tempdir().expect("a temporary directory");
@@ -740,6 +759,6 @@ async fn shutdown_returns_within_the_network_timeout_with_work_queued() {
     );
     // The clients are still connected, and still not reading, while the shutdown runs. The bound is
     // the assertion: `stop_within` panics if the shutdown does not finish inside it.
-    server.stop_within(NETWORK_TIMEOUT).await;
+    server.stop_within(SHUTDOWN_WITH_WORK_QUEUED).await;
     drop((client, other));
 }

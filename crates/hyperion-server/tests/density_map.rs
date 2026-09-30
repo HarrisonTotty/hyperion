@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use common::{NETWORK_TIMEOUT, TestClient, TestServer};
+use common::{TestClient, TestServer, patiently};
 use hyperion_protocol::{
     ClientMessage, CreateUniverseRequest, DensityMap, DensityMapRequest, ErrorCode, MapPopulation,
     MapView, OpenUniverseRequest, RequestBody, RequestError, ResponseBody, SeedHex, ServerMessage,
@@ -22,7 +22,7 @@ use hyperion_server::compute::{
 };
 use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use hyperion_sim::{GENERATOR_VERSION, math};
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 
 /// The seed of every universe these tests create.
 const SEED: u64 = 0x4d2;
@@ -66,10 +66,10 @@ async fn open(client: &mut TestClient, universe: &UniverseIdHex) {
 ///
 /// The plan has the integration tests read [`ServerStats`](hyperion_server::ServerStats) rather than
 /// guess at timing (P04.T13.c); the pool's counters are a snapshot and not a watch, so this polls
-/// them, bounded by [`NETWORK_TIMEOUT`] so that a map that never reaches the pool fails the test
-/// instead of hanging the suite.
+/// them, bounded by [`patience`](common::patience) so that a map that never reaches the pool fails
+/// the test instead of hanging the suite.
 async fn bulk_work_under_way(server: &TestServer) -> PoolCounters {
-    timeout(NETWORK_TIMEOUT, async {
+    patiently("waiting for the map's bands to reach the pool", async {
         loop {
             let pool = server.stats().pool();
             if pool.running() > 0 && pool.queued_bulk() > 0 {
@@ -79,7 +79,6 @@ async fn bulk_work_under_way(server: &TestServer) -> PoolCounters {
         }
     })
     .await
-    .expect("the map's bands never reached the pool")
 }
 
 fn request(
@@ -437,7 +436,7 @@ async fn a_map_in_flight_blocks_neither_ping_nor_cancel() {
 
     client.close().await;
     // The bands still queued were skipped when the last waiter went; the band in hand runs to its
-    // end, which is what `SHUTDOWN_TIMEOUT` allows for.
+    // end, which is what the harness's patience allows for.
     server.stop().await;
 }
 
