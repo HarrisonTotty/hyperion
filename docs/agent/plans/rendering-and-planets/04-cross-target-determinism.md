@@ -31,8 +31,10 @@ the recipe that installs it, never a skip. `just ci-slow` adds the slow suite un
 testkit compares embedded golden files on the browser target, blessed natively. The sim-determinism
 skill carries the terrain hazards, reaches the new crates and routes their changes to the
 determinism auditor. The server probes every compute thread for flushed subnormals and refuses to
-generate on one that flushes, and a test proves the refusal. Plan 14 is amended so that no surface
-seed ever reaches a client, whose wire and parser carry a detail seed instead. And the client's
+generate on one that flushes, and a test proves the refusal. Plan 14's amendment, that no surface
+seed ever reaches a client, is drafted for its owner, with the guide's renamed readout drafted for
+the owner of the guide; once the amendment is accepted, the wire and the parser carry a detail seed
+instead. And the client's
 first WebAssembly module, built from the surface crate, loads in a worker, once the owner has ruled
 on the Content Security Policy question, which research reframed (Design note 16). No height
 function exists yet: that is [R05](05-terrain-geometry-and-descent-spike.md)'s provisional one and
@@ -42,8 +44,9 @@ function exists yet: that is [R05](05-terrain-geometry-and-descent-spike.md)'s p
 
 In scope:
 
-- The three things the brainstorm has done now: plan 14's amendment and the wire and client change
-  that go with it, the `algebraic_*` bans, and the false Arm and wasm32 CI claims.
+- The three things the brainstorm has done now: plan 14's amendment, drafted for its owner, and the
+  wire and client change that go with it, with the guide's `SURFACE SEED` entries drafted as
+  `DETAIL SEED` for the owner; the `algebraic_*` bans; and the false Arm and wasm32 CI claims.
 - The crate split: `hyperion-base` (`math`, `units`, `version`, `rng` with the part of `id` it needs
   and its share of the split tag registry) and the `hyperion-surface` skeleton, five `clippy.toml`
   files in all. Done here, before the descent spike, as a ruling of this plan set, so that spike
@@ -156,13 +159,16 @@ pub mod compute {
 - `hyperion_testkit::golden!` gains its embedded arm on `wasm32-unknown-unknown`, and
   `golden::check_embedded(name, expected, actual)`.
 - `crates/hyperion-testkit/tests/clippy_bans.rs`, the test that holds every `clippy.toml` to one ban
-  list.
+  list and both client crates to their relaxed-SIMD `compile_error!`.
+- The `native_only` convention (Design note 12): a test that cannot run on
+  `wasm32-unknown-unknown` sits in a module named `native_only`, which the browser recipe's count
+  comparison subtracts.
 
 ### Protocol and client
 
 - `BodyHooksDto { detail_seed: SectionDto<DetailSeedHex> }` in place of `surface_seed`, and
   `DetailSeedHex` in place of `SurfaceSeedHex`; in the client, `BodyHooks.detailSeed`.
-- `apps/hyperion/src/renderer/src/wasm/` (T10.b): the module loader and the probe worker, which
+- `apps/hyperion/src/renderer/src/wasm/` (T10.c): the module loader and the probe worker, which
   R05's height workers extend.
 
 ## Consumes
@@ -173,8 +179,8 @@ pub mod compute {
   `GoldenWriter` and `golden::check`, and `foundation_golden.rs` with its eight goldens. These are
   what move or change.
 - **Galaxy plan 04** ([04](../galaxy-generation/04-server-and-protocol.md)): the CPU pool,
-  `compute::pool::{CpuPool, JobError, SubmitJobError, StartPoolError}`, and the protocol envelope's
-  `ErrorCode`.
+  `hyperion_server::compute::{CpuPool, JobError, SubmitJobError, StartPoolError}` (defined in the
+  private `compute/pool.rs`), and the protocol envelope's `ErrorCode`.
 - **Galaxy plan 14** ([14](../galaxy-generation/14-planetary-systems.md)): `BodyHooksDto` and
   `SurfaceSeedHex` in `crates/hyperion-protocol/src/planetary/record.rs` and `primitives.rs`; the
   client's `bodiesWire.ts`, `model.ts` and `BodyRecordReadings.tsx`; P14.T23 as specified, which
@@ -182,7 +188,8 @@ pub mod compute {
 - **Galaxy plan 15** ([15](../galaxy-generation/15-offline-fitting.md)): `hyperion-fit`'s use of
   `hyperion_sim::math` and its `clippy.toml`.
 - **The owner:** the ruling on the renderer's CSP (T10.a), which the brainstorm lists under
-  "Awaiting the owner" and `.claude/rules/typescript-dev.md` requires.
+  "Awaiting the owner" and `.claude/rules/typescript-dev.md` requires; the acceptance of plan 14's
+  amendment (T3.a); and the sign-off on the guide's `DETAIL SEED` rows (T3.b).
 
 ## Design notes
 
@@ -202,19 +209,29 @@ pub mod compute {
     golden height files in the surface crate must write it, and neither crate may depend on the sim,
     which would make a cycle. The version is also what the `libm` pin, now in base, belongs to.
     `coords`, `time`, the rest of `id`, the galaxy, the stars and the planets stay in the sim; R02's
-    `BodyFixedPosition` goes into the sim's `coords`, and anything the surface crate needs of
-    positions R09 defines there. Three files name `crates/hyperion-sim/src/version.rs` and follow
-    it: the justfile's `generator_version` variable, `golden_diff.py`'s `VERSION_FILE` and step 2 of
-    the sim-determinism skill. The galaxy plans' many references to `version.rs` stay as history;
-    the README's "Code shape" convention, that the sim holds these modules and has one runtime
-    dependency, is the roadmap's to restate (notes).
+    `BodyFixedPosition` goes into the sim's `coords` and stays there, so the surface crate, which
+    cannot see the sim, takes body-fixed positions as plain `[f64; 3]` in metres, as R05's and R11's
+    surface-crate functions do (R11 names the alias `BodyFixed`). Three files name
+    `crates/hyperion-sim/src/version.rs` and follow it: the justfile's `generator_version` variable,
+    `golden_diff.py`'s `VERSION_FILE` and step 2 of the sim-determinism skill. The galaxy plans'
+    many references to `version.rs` stay as history; the galaxy README's "Code shape" convention,
+    that the sim holds these modules and has one runtime dependency, is restated by the rendering
+    roadmap's [Conventions](README.md#conventions) ("Two crates join the workspace"). Its "Tests"
+    convention, that golden files live in `crates/hyperion-sim/tests/golden/`, is not yet restated
+    there, and this plan asks for it (Risks).
 
 3.  **Every existing path survives by re-export.** `hyperion_sim::math`, `units`, `version`,
     `GENERATOR_VERSION`, `GeneratorVersion`, `Seed` and all of `hyperion_sim::rng` stay valid,
     through `pub use hyperion_base::…`. Some 235 files of the sim, 19 of the fitting crate and 15 of
     the server name these paths, and rewriting them would move no output and add a diff nobody could
     review for what matters. Code in `hyperion-base` and `hyperion-surface` names `hyperion_base`
-    paths, since those crates cannot see the sim. The Clippy bans are paths to the banned methods
+    paths, since those crates cannot see the sim. That includes the doctests: the moved files carry
+    some 37 doctest lines that `use hyperion_sim::…`, and a doctest of base runs against base
+    alone. Most need only a path rewritten; one needs sim types, `Stream`'s "central promise"
+    example (`rng/stream.rs`), which uses `EventKey`, `SystemId` and `event_tags`, and it moves to
+    the docs of the sim's `rng` module. A `compile_fail` doctest left naming `hyperion_sim` in base
+    would fail on the unresolved crate and pass without testing anything, so each is checked to fail
+    for its own reason (T4.b, T4.d). The Clippy bans are paths to the banned methods
     (`f64::sin`, `f64::algebraic_add`), and they do not change; the brainstorm's "every ban's path
     changes" is true only of the `reason` strings, which name `hyperion_base::math` in base and the
     surface crate and "`hyperion_sim::math` (`hyperion_base::math`)" in the other three files.
@@ -222,8 +239,9 @@ pub mod compute {
 4.  **The registry splits in three, and one assertion still covers them.** The brainstorm says the
     registry splits, since `rng/tags.rs` registers every stage's tags and the mechanism moves to
     base. Base's registry holds the tags base itself opens, today `selftest.stream` alone. The
-    surface crate's holds the `surface.*` tags, none until R09 (`surface.channel`, `surface.crater`,
-    `surface.scatter`, the ones the brainstorm names), and `selftest.surface.*` tags of `SelfTest`
+    surface crate's holds the `surface.*` tags, none until R09's `surface.*` tags (its
+    `surface.coarse.*`, `surface.channel` and `surface.crater`) and R11's `surface.scatter`, which
+    R09 reserves, and `selftest.surface.*` tags of `SelfTest`
     scope, such as R05's provisional test planet's. The sim's holds the rest, with `event.selftest`,
     plan 14's `body.surface` and R09's `body.surface.detail`, both of which the server derives in
     the sim. `domain_tags!` moves to base and is exported, and `DomainTag::registered`, which its
@@ -247,16 +265,21 @@ pub mod compute {
     `stream(bin_word, slot)`. The sim's `EventKey` becomes a newtype over it with today's API, so
     its 13 call sites and the `rng/events` golden, which prints `words()`, do not change.
     `Stream::from_words` stays private to base, and the key discipline is no wider than it is now:
-    only a registered `Event` tag opens an event stream.
+    only a registered `Event` tag opens an event stream. Base's registry holds no `Event` tag
+    (`event.selftest` stays in the sim), so base tests only the refusal; the positive path, `derive`
+    and `stream`, is covered in the sim by the unchanged `rng/events` golden and `event.rs`'s unit
+    tests, which stay there (T4.b).
 
 6.  **`ObjectKey` gains public `system` and `body` constructors.** `From<SystemId>` and
     `From<BodyId>` for `ObjectKey` stay in the sim, which the orphan rule allows for a foreign type
     converted from a local one, but `ObjectKey::new` is crate-private in base. The conversions call
     two new constructors, `ObjectKey::system(raw)` and `ObjectKey::body(raw, index)`, with today's
-    word, `sub` and scope. This lets code build a key from a raw word that is no valid ID; the
-    hazard the key rules guard against is a key from floats, pointers or `usize`, which a `u64`
-    argument does not admit, and `Stream::open`'s scope check is unchanged. Their docs send callers
-    to the conversions, and the skill's key rule names them.
+    word, `sub` and scope. They join the public constructors `ObjectKey` already has, `galaxy()`,
+    `galaxy_item(n)`, `cell(word)` and `feature(word)` (`rng/key.rs`), three of which already take
+    a raw `u64`; so the pair widens nothing in kind. The hazard the key rules guard against is a key
+    from floats, pointers or `usize`, which a `u64` argument does not admit, and `Stream::open`'s
+    scope check is unchanged. Their docs send callers to the conversions, and the skill's key rule
+    names them.
 
 7.  **Goldens move by rename, byte for byte.** A golden whose inputs are all base types moves to
     `crates/hyperion-base/tests/golden/` with `git mv` and its test with it: `math/functions`,
@@ -264,9 +287,16 @@ pub mod compute {
     `id/layouts`, `rng/streams` (keys from IDs and cells), `rng/events` (event subjects) and
     `rng/tags` (all three registries). Base gains its own test that every golden it holds carries
     the current version, as `foundation_golden.rs` has for the sim. `golden_diff.py` compares with
-    `--no-renames` today, so it would report a moved golden as one removed and one added; T4.a
-    teaches it to pair a deleted golden with an added one of identical content and report it as
-    moved, so that its verdict stays "consistent" across the split.
+    `--no-renames` today, so it would report a relocated golden as one deleted and one added, and
+    its "Deleted goldens" check would keep the verdict from "Consistent". T4.a teaches it to pair a
+    deleted golden with an added one of identical content and list the pair under a new heading,
+    "Renamed goldens", so that its verdict stays "Consistent" across the split. The word is
+    "renamed", not "moved": the script's existing `moved` list is "Pinned values changed ...:
+    existing output moved", the opposite case. The script also reads `GENERATOR_VERSION` from one
+    fixed path at both ends (`VERSION_FILE`, read at the base ref and at the head), so T4.a makes it
+    try `crates/hyperion-base/src/version.rs` and fall back to `crates/hyperion-sim/src/version.rs`
+    at each ref, or a `--base` before the split could not read the version and would answer
+    "Inconsistent".
 
 8.  **Profiles, inlining and the benches.** `[profile.dev.package."*"]` optimises dependencies that
     are not workspace members, so `hyperion-base` and `hyperion-surface` each get an `opt-level = 2`
@@ -275,7 +305,7 @@ pub mod compute {
     `#[inline]`; the `units` operators and the small `rng` methods rely on rustc's cross-crate
     inlining of small functions. The foundation benches
     (`crates/hyperion-sim/benches/foundation.rs`: `math`, streams, samplers, decisions) are run
-    before and after T4.a and T4.b, and a function that loses more than a few per cent gains
+    before and after T4.a and T4.d, and a function that loses more than a few per cent gains
     `#[inline]`, which moves no bits since Rust neither contracts nor reassociates floats. A
     regression is a finding, as the galaxy README's test conventions say, not a failure.
 
@@ -301,9 +331,50 @@ pub mod compute {
     it, so the surface crate's line already stops any client bundle; base carries the same line so
     that its own test builds for the browser target cannot be made that way either. On rustc 1.98.1
     the feature name is recognised for wasm32 and the error fires (checked on 2026-09-29 in a
-    scratch crate built for `wasm32-wasip1` with and without the flag). Fixed-width `simd128` stays
-    allowed, as the brainstorm says, provided no sum is reassociated; the skill's hazard section
-    says so, since no lint can.
+    scratch crate built for `wasm32-wasip1` with and without the flag). Each crate's message names
+    the crate. Base compiles first, so a flagged build of the surface crate stops on base's line and
+    never reaches its own; the surface crate's line is the second guard, for the day base's is
+    removed, and a text test (`clippy_bans.rs`) holds both lines in place, since no build can reach
+    the second while the first stands. Fixed-width `simd128` stays allowed, as the brainstorm says,
+    provided no sum is reassociated; the skill's hazard section says so, since no lint can.
+
+    The `compile_error!` alone is not the ban (researched 2026-09-29, on rustc 1.98.1 with LLVM
+    22.1.8, in `#![forbid(unsafe_code)]` scratch crates built for `wasm32-unknown-unknown` and
+    `wasm32-wasip1` with no `-C target-feature`; sources: `core::arch::wasm32`'s
+    `relaxed_simd.rs` in the 1.98.1 standard library source, lines 71–355, stable since 1.82 under
+    `stdarch_wasm_relaxed_simd`, and Clippy's `disallowed-methods` run for that target). The
+    guard's `cfg` stays false unless the whole build enables the feature, yet three routes emit
+    relaxed instructions with no `unsafe`: the relaxed intrinsics are safe functions and can be
+    called directly from ordinary code; a function marked
+    `#[target_feature(enable = "relaxed-simd")]` is safe to define and to call on wasm; and plain
+    scalar code inside such a function is auto-vectorised into relaxed instructions with no
+    intrinsic in sight (a select-the-lesser loop became sixteen `f32x4.relaxed_min`, whose NaN
+    and ±0 results the wasm specification leaves to the implementation). So base and the surface
+    crate carry three mechanical bans:
+
+    - **A source test** in `clippy_bans.rs` (required, since Clippy has no lint over attributes)
+      that rejects any `.rs` file of base, the surface crate and the sim matching
+      `target_feature\s*\(\s*enable` or `target_feature\s*=\s*"[^"]*relaxed`, inside a
+      `cfg_attr(...)` as well, while allowing the guard's own `cfg(target_feature =
+"relaxed-simd")`. It closes the attribute and the auto-vectorisation routes.
+    - **`disallowed-methods` entries** in base's and the surface crate's `clippy.toml` for the 20
+      relaxed intrinsics, each `core::arch::wasm32::` followed by `i8x16_relaxed_swizzle`,
+      `i32x4_relaxed_trunc_f32x4`, `u32x4_relaxed_trunc_f32x4`, `i32x4_relaxed_trunc_f64x2_zero`,
+      `u32x4_relaxed_trunc_f64x2_zero`, `f32x4_relaxed_madd`, `f32x4_relaxed_nmadd`,
+      `f64x2_relaxed_madd`, `f64x2_relaxed_nmadd`, `i8x16_relaxed_laneselect`,
+      `i16x8_relaxed_laneselect`, `i32x4_relaxed_laneselect`, `i64x2_relaxed_laneselect`,
+      `f32x4_relaxed_min`, `f32x4_relaxed_max`, `f64x2_relaxed_min`, `f64x2_relaxed_max`,
+      `i16x8_relaxed_q15mulr`, `i16x8_relaxed_dot_i8x16_i7x16` and
+      `i32x4_relaxed_dot_i8x16_i7x16_add`, each with `allow-invalid = true`, since the host's
+      Clippy cannot resolve the paths. They were seen to fire, for that target, on direct calls,
+      glob imports, `std::arch` paths, `use … as` renames, function-pointer coercions and the
+      `u*` aliases, which resolve to the `i*` entries. They bind only under T8.c's Clippy run for
+      `wasm32-unknown-unknown`, and they are a second layer, since the source test already stops
+      any function that could call them legally.
+    - **The crate-level `compile_error!`**, for a whole build flagged `+relaxed-simd`.
+
+    A dependency could still enable the feature inside its own code; base's only one is `libm`,
+    pinned exactly, and a new dependency of either crate is a reviewed change (Risks).
 
 11. **Which suites run where, and failing rather than skipping.** Under wasip1, `just ci` runs the
     fast suites of `hyperion-base`, `hyperion-surface`, `hyperion-testkit` and `hyperion-sim`, and
@@ -317,8 +388,12 @@ pub mod compute {
     `just ci-slow`. The measurement and the choice go in the plan's "as built" notes. Under the
     browser target, `just ci` runs the fast suites of base, the surface crate and the testkit, the
     crates the client ships or tests with, and not the sim's: the sim is never loaded by a browser,
-    and its 56 golden-writing test files would each need the attribute change of Design note 12 for
-    no parity the brainstorm asks. Every recipe first checks its tools (wasmtime;
+    and its some fifty golden-writing test files (38 under `tests/`, 15 unit-test modules under
+    `src/`, on 2026-09-29) would each need the attribute change of Design note 12 for no parity the
+    client needs. The brainstorm's "Both wasm targets' fast goldens join `just ci`" (Decisions) and
+    the roadmap's "all run their fast goldens" are read here as the goldens of the crates the
+    client ships; the roadmap is asked to record that reading (Risks). Every recipe first checks its
+    tools (wasmtime;
     `wasm-bindgen-test-runner` at the version `Cargo.lock` names; both rustup targets; Electron's
     binary) and, if one is missing, fails with a message that names `just wasm-tools`, never skips,
     since a gate that passes by skipping is not a gate. `rust-toolchain.toml` lists both targets, so
@@ -336,18 +411,41 @@ pub mod compute {
     generated. Second, a plain `#[test]` compiles on that target and is then silently dropped,
     neither run nor counted, so each test module or file that runs there opens with the import
     below, which leaves the bodies unchanged, and the recipe asserts that the browser run's `--list`
-    count equals the native one's for each crate, so a file that forgets the line fails the gate.
+    count equals the native one's for each crate, less the native tests whose path contains
+    `native_only::`, so a file that forgets the line fails the gate. Some tests cannot run there
+    and are compiled out: those that read files (`clippy_bans.rs`, the testkit's own
+    `tests/golden.rs`, base's `every_golden_file_carries_the_current_version`). Each sits in a
+    module named `native_only`, gated by the `cfg` below negated, so the subtraction is exact and
+    a test compiled out by accident, outside such a module, still fails the count.
+    `#[should_panic]` is supported there (researched 2026-09-29, from `wasm-bindgen-test-macro`
+    0.3.79's `src/lib.rs`, lines 42–55 and 87–126, and `wasm-bindgen-test` 0.3.79's `src/rt/mod.rs`,
+    lines 672–700 and 803–856, with a scratch crate checked for the target), bare, with `expected`
+    and through the `as test` import. But a panic there is a trap: the bare form passes on any trap,
+    even an out-of-bounds access, and only `expected = "…"` proves that the intended Rust panic
+    happened; and every test of a binary runs in one instance, which carries on after a trap as
+    "best effort", the crate's own words, with the shadow stack leaked, `std::thread::panicking()`
+    left true (so a later dropped `Mutex` guard poisons its mutex) and any `RefCell` borrow or lock
+    held at the trap still held. So every `should_panic` test in the crates that run there states
+    `expected`, and lives in a test binary of its own (`tests/panics.rs` in base and the surface
+    crate), where nothing it leaves behind can reach a golden test; the moved unit tests with
+    `should_panic` go there in T4.d.
     Third, Node is the runner's default mode, so no `wasm_bindgen_test_configure!` is written; it
     has no timeout in that mode, so the recipe wraps each run in `timeout`. Fourth, `-- --ignored`
     runs nothing there (the runner forwards only `--include-ignored`), only one name filter is
     accepted, and doctests do not run on the target (wasm-bindgen issue 4921), so the recipe runs
     `--lib --tests` and the browser target has no slow suite, which the brainstorm does not ask for.
     `wasm-bindgen-test` pins its own `wasm-bindgen` exactly, so the workspace pins
-    `wasm-bindgen-test = "=0.3.79"` (or the version current when T8 lands), as a target-specific
-    dev-dependency of the three crates, and `just wasm-tools` installs `wasm-bindgen-cli` at the
+    `wasm-bindgen-test = "=0.3.79"` (or the version current when T8 lands), as a dev-dependency of
+    the three crates under
+    `[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]`, never
+    plain `cfg(target_arch = "wasm32")`, which would build it into the wasip1 runs as well, and
+    `just wasm-tools` installs `wasm-bindgen-cli` at the
     version `Cargo.lock` names, which the runner requires. On that target `std::env` reads nothing,
     `std::fs` returns `Unsupported`, `println!` is discarded and `Instant::now()` panics; the
-    testkit uses none of the last, and tests that time themselves stay native.
+    testkit uses none of the last, and tests that time themselves stay native. Code compiled only
+    for that target (the embedded arm, `src/wasm.rs`) is invisible to `just lint`, which runs Clippy
+    on the host, so `test-wasm-fast` also runs Clippy for `wasm32-unknown-unknown` over the three
+    crates (T8.c).
 
     ```rust
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -376,7 +474,10 @@ pub mod compute {
     `check_embedded` shares the header, commit-hook and line-diff checks with `check` and never
     blesses: a bless request there panics with "golden files are blessed natively", and a golden
     that does not exist yet fails to compile on that target, so new goldens are blessed natively
-    first, as the brainstorm says.
+    first, as the brainstorm says. R05's surface goldens write their own `TEST_PLANET_VERSION` into
+    the same `generator_version` header (R05 Design note 13), which both arms compare with the
+    version the test itself writes, so they need nothing more of this arm; R05.T5 also adds
+    `golden::f32_digest` to the testkit, which the arm does not touch.
 
 15. **The flush-to-zero probe reads bits, lives in the server, and is proved by a preloaded
     library** (researched 2026-09-29; sources: Intel SDM vol. 1 §10.2.3 for MXCSR's FTZ bit 15 and
@@ -434,19 +535,24 @@ pub mod compute {
     `file://` fetch works there), and Electron's checklist prefers it. So the question for the owner
     is no longer one change but three options (T10.a), and this plan does not pick among them.
     Whatever the ruling, the loading path is the same: the surface crate is also a `cdylib` with
-    `wasm-bindgen` as a dependency on the wasm target only, exporting from `src/wasm.rs` (which
-    compiles under `forbid(unsafe_code)`, Design note 12, where a raw `#[unsafe(no_mangle)]` export
-    does not); `just gen-surface` builds it for `wasm32-unknown-unknown` in release and runs
-    `wasm-bindgen --target web` into `apps/hyperion/src/renderer/src/generated/surface/`, which is
-    ignored by git, Prettier and oxlint, since a machine-built binary is not source, and which
-    `just check`, `lint`, `test`, `client` and `build` make first, as the TypeScript side needs its
-    `.d.ts`; the renderer's Vite config sets `worker.format: "es"`; a module worker created with
+    `wasm-bindgen` as a dependency under
+    `[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]`, so that the
+    sim's wasip1 builds, which link the surface crate, never compile it, exporting from
+    `src/wasm.rs` (which compiles under `forbid(unsafe_code)`, Design note 12, where a raw
+    `#[unsafe(no_mangle)]` export does not); `just gen-surface` builds it for
+    `wasm32-unknown-unknown` in release and runs `wasm-bindgen --target web` into
+    `apps/hyperion/src/renderer/src/generated/surface/`, which is ignored by git, Prettier and
+    oxlint, since a machine-built binary is not source, and which `just check`, `lint`, `test`,
+    `client` and `build` make first, as the TypeScript side needs its `.d.ts`. The git hooks call
+    `pnpm typecheck`, `pnpm lint` and `pnpm test` directly (`.pre-commit-config.yaml`), and a fresh
+    worktree has no generated directory, so those hook entries make it first too (T10.b); the
+    renderer's Vite config sets `worker.format: "es"`; a module worker created with
     `new Worker(new URL("./surface.worker.ts", import.meta.url), { type: "module" })` awaits the
     glue's `init()`, which Vite rewrites to a hashed asset that Electron serves from `file://` as
     `application/wasm`, so streaming compilation works; and the worker's logic sits in a pure
     `handleRequest` module that a Node-environment vitest test drives after `initSync` from the
     bytes on disk (jsdom refuses the file URL). The worker needs `lib: ["webworker"]` for its
-    `postMessage` with transfers, through a `tsconfig.worker.json` or a typed wrapper, which T10.b
+    `postMessage` with transfers, through a `tsconfig.worker.json` or a typed wrapper, which T10.c
     settles under TypeScript 7. `nodeIntegrationInWorker` stays off: with the sandbox on, the worker
     was seen to have no `require` or `process`. The first module's one job is to report
     `generator_version()`, and the loader compares it with the server's `server_generator_version`,
@@ -462,15 +568,22 @@ pub mod compute {
     16-hex-digit form. No client has ever parsed a hooks value, since every hooks section is
     `not_modelled` today, so the rename breaks no deployed reader and `PROTOCOL_VERSION` stays at 2,
     as adding or reshaping a field no one sends does under plan 04's rules. The `SYSTEM` readout's
-    `SURFACE SEED` row becomes `DETAIL SEED`, which shows the guide's em dash until R09 fills it; it
-    is the same row, renamed, so no new display string needs the owner. The surface seed stays in
-    the sim and the server, where P14.T23 computes it on `body.surface`, and no DTO carries it.
+    `SURFACE SEED` row becomes `DETAIL SEED`, which shows the guide's em dash until R09 fills it.
+    The label is the guide's: its nomenclature lists `SURFACE SEED` twice, in the `GENERATOR INPUTS`
+    section row ("its `SURFACE SEED`") and in the `SEED`, `SEED VALUE`, `SURFACE SEED` label row
+    ("a body's surface seed"). So the rename is a guide edit, drafted for the owner (T3.b), and the
+    client is built to the draft meanwhile, as the roadmap's convention allows. The surface seed
+    stays in the sim and the server, where P14.T23 computes it on `body.surface`, and no DTO carries
+    it.
 
 ## Tasks
 
-Each task leaves `just ci` passing. T1–T3 are independent of each other and of the rest. T4.a
-precedes every task after it; T7 and T8 need T4 and T5; T9 needs T4.a; T10.b needs T5, T8 and the
-owner's ruling in T10.a.
+Each task leaves `just ci` passing. T1–T3 are independent of each other and of the rest; within
+T3, T3.c waits for the owner's acceptance in T3.a and is built to T3.b's draft. T4.a precedes every
+task after it; T4.b precedes T4.d; T6 needs T4.d and T5, whose crates it routes; T7 and T8 need T4
+and T5, except T7.c's task-ID patterns, which need nothing and land before R01's first task; T9
+needs nothing of this plan; T10.b needs T5 and T8; T10.c needs T10.b and the owner's
+ruling in T10.a.
 
 ### R04.T1 Ban the `algebraic_*` float methods, and hold the `clippy.toml` files to one list
 
@@ -480,8 +593,9 @@ fuse or reassociate: the same inputs may give different results even within one 
 Rust documentation of the methods (`library/core/src/primitive_docs.rs`; re-check the quotation
 against rustc 1.98.1's documentation, as the galaxy README's Figures rule asks of any cited source).
 Extend each file's header comment to say why. Write `crates/hyperion-testkit/tests/clippy_bans.rs`
-(Design note 9), with `#![cfg(not(all(target_family = "wasm", target_os = "unknown")))]`, since it
-reads files.
+(Design note 9), its tests in a `native_only` module gated with
+`#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]`, since it reads files (Design
+note 12).
 
 - _Files:_ the three `clippy.toml` files; `crates/hyperion-testkit/tests/clippy_bans.rs`.
 - _Tests:_ `every_clippy_toml_bans_the_shared_list`, `crate_files_also_ban_float_bits`,
@@ -500,29 +614,62 @@ of the nine `crates/hyperion-sim/tests/planetary_*golden.rs` files (`planetary_g
 checks the same file on 64-bit Arm and on wasm32". Each is made to say what runs: `just ci` checks
 native x86-64, `just test-wasm` checks `wasm32-wasip1` by hand, and nothing checks AArch64. The
 skill's step 5 says to report `just test-wasm` as not run when wasmtime is missing, never that CI
-will run it. T7 and T8 change the same sentences again when the wasm targets join `just ci`, so the
-words are chosen to be edited in one place: the skill states the targets, and each golden header
-points to the skill rather than repeating the list.
+will run it. The root `README.md`'s `test-wasm` paragraph makes the same claim without the word
+"CI" ("Run it, and the same tests on AArch64, to check generated output bit for bit on three
+architectures"), and is corrected in the same words. T7 and T8 change the same sentences again when
+the wasm targets join `just ci`, so the words are chosen to be edited in one place: the skill
+states the targets, and each golden header points to the skill rather than repeating the list.
 
-- _Files:_ `.claude/skills/sim-determinism/SKILL.md`; the nine planetary golden test files.
-- _Accept:_ `grep -rn "CI checks\|CI will run" crates .claude` prints nothing; `cargo fmt --check`;
+- _Files:_ `.claude/skills/sim-determinism/SKILL.md`; the nine planetary golden test files;
+  `README.md`.
+- _Accept:_ `grep -rn "CI checks\|CI will run\|on AArch64" crates .claude README.md` prints
+  nothing; `cargo fmt --check`;
   `cargo test -p hyperion-sim --test planetary_golden` (headers are comments; nothing moves).
 
 ### R04.T3 Amend plan 14: a detail seed on the wire, the surface seed off it
 
 The brainstorm's lean under
 [Knowledge, and the surface seed](../../brainstorming/rendering-and-planets.md#knowledge-and-the-surface-seed):
-plan 14 is amended before P14.T23 lands. Edit
-[galaxy plan 14](../galaxy-generation/14-planetary-systems.md): P14.T23 computes `surface_seed` on
-`body.surface` for the server's own use and never puts it in a DTO; the hooks section's wire form
-carries `detail_seed` (Design note 17), `not_modelled` until R09 registers `body.surface.detail` and
-computes it; the Provides sketch of `hooks::BodyHooks`, the DTO list and the note on `BodyHooksDto`
-say the same; each edit is marked "amended by R04.T3 (rendering plans)" with a link to this plan.
-Then make the wire and the client match: rename `SurfaceSeedHex` to `DetailSeedHex`, reshape
-`BodyHooksDto`, regenerate the bindings, and follow it in the client's parser, model and readout.
+plan 14 is amended before P14.T23 lands. The roadmap lists the amendment under "Awaiting the
+owner", for plan 14's owner to accept, and the readout's label is the guide's, so the task is three
+subtasks: two drafts that end in a sign-off, and the change they allow.
 
-- _Files:_ `docs/agent/plans/galaxy-generation/14-planetary-systems.md`;
-  `crates/hyperion-protocol/src/{primitives.rs, lib.rs, planetary/record.rs}`;
+#### R04.T3.a Draft plan 14's amendment, for its owner
+
+Edit [galaxy plan 14](../galaxy-generation/14-planetary-systems.md) as a draft: P14.T23 computes
+`surface_seed` on `body.surface` for the server's own use and never puts it in a DTO; the hooks
+section's wire form carries `detail_seed` (Design note 17), `not_modelled` until R09 registers
+`body.surface.detail` and computes it; the Provides sketch of `hooks::BodyHooks`, the DTO list and
+the note on `BodyHooksDto` say the same; each edit is marked "amended by R04.T3.a (rendering plans),
+drafted for plan 14's owner" with a link to this plan. Put the draft to plan 14's owner with the
+brainstorm's reasoning. The task ends when the owner accepts it, or rules otherwise, and the ruling
+is recorded with its date in both plans.
+
+- _Files:_ `docs/agent/plans/galaxy-generation/14-planetary-systems.md`; this plan.
+- _Accept:_ `grep -n "amended by R04.T3.a"` on plan 14's file
+  (`docs/agent/plans/galaxy-generation/14-planetary-systems.md`) finds every edit;
+  `npx prettier --check` on the plan; the owner's acceptance is recorded, dated.
+
+#### R04.T3.b Draft the guide's `DETAIL SEED` entries, for the owner
+
+Draft the edit of `docs/frontend/ux-guidelines.md`'s nomenclature (Design note 17): the
+`GENERATOR INPUTS` section row reads "its `DETAIL SEED`", and the label row `SEED`, `SEED VALUE`,
+`SURFACE SEED` becomes `SEED`, `SEED VALUE`, `DETAIL SEED`, "a body's detail seed, the seed of the
+client's local terrain synthesis". Mark it as a draft for the owner, as the roadmap's "Guide edits
+are drafts" convention has it. The task ends when the owner signs off.
+
+- _Files:_ `docs/frontend/ux-guidelines.md`.
+- _Accept:_ `npx prettier --check docs/frontend/ux-guidelines.md`;
+  `grep -n "DETAIL SEED" docs/frontend/ux-guidelines.md` finds both rows; the owner's sign-off is
+  recorded, dated, in this plan.
+
+#### R04.T3.c The wire and the client
+
+Blocked on T3.a's acceptance; built to T3.b's draft while it awaits sign-off. Make the wire and the
+client match the amendment: rename `SurfaceSeedHex` to `DetailSeedHex`, reshape `BodyHooksDto` and
+its doc comment, regenerate the bindings, and follow it in the client's parser, model and readout.
+
+- _Files:_ `crates/hyperion-protocol/src/{primitives.rs, lib.rs, planetary/record.rs}`;
   `packages/protocol/src/index.ts` and `packages/protocol/src/generated/` (by `just gen-protocol`);
   `apps/hyperion/src/renderer/src/lib/system/{bodiesWire.ts, model.ts}` and their tests;
   `apps/hyperion/src/renderer/src/displays/system/BodyRecordReadings.tsx` and its test.
@@ -548,9 +695,12 @@ Then make the wire and the client match: rename `SurfaceSeedHex` to `DetailSeedH
 Create `crates/hyperion-base` (`Cargo.toml` with `libm.workspace = true` as its only dependency,
 `[lints] workspace = true`, `bench = false`, `hyperion-testkit` as a dev-dependency) and its
 `clippy.toml`, the sim's list with base's reasons (Design note 3) and the `algebraic_*` entries.
-Move `math.rs`, `units.rs` and `version.rs` with `git mv`, rewrite their `crate::` paths and their
-module docs (the rule "no code in `hyperion-sim` calls a transcendental method" becomes "no code in
-the determinism crates"), and add the relaxed-SIMD `compile_error!` (Design note 10) to base's
+Move `math.rs`, `units.rs` and `version.rs` with `git mv`, rewrite their `crate::` paths, their
+doctests' `hyperion_sim::` paths to `hyperion_base::` (Design note 3), and their module docs (the
+rule "no code in `hyperion-sim` calls a transcendental method" becomes "no code in the determinism
+crates"); `math`'s two doc links to `crate::rng::Stream` become plain code text until T4.d brings
+`rng` beside it. Add the relaxed-SIMD `compile_error!` (Design note 10), its message naming
+`hyperion-base`, to base's
 `lib.rs`, whose `//!` docs state its boundary: no I/O, clocks, threads or caches, `libm` its only
 runtime dependency. In the sim, `pub use hyperion_base::{math, units, version}` and the crate-root
 re-exports; the sim's `Cargo.toml` depends on `hyperion-base` and drops its direct `libm`. Add
@@ -559,49 +709,60 @@ re-exports; the sim's `Cargo.toml` depends on `hyperion-base` and drops its dire
 and `math_function_values_are_pinned` into `crates/hyperion-base/tests/foundation_golden.rs`, with
 base's own `every_golden_file_carries_the_current_version`. Point the justfile's
 `generator_version`, `golden_diff.py`'s `VERSION_FILE` and the skill's step 2 at
-`crates/hyperion-base/src/version.rs`, and teach `golden_diff.py` to report moves (Design note 7).
-Add both new crates' rows to the README's crate table here and in T5.
+`crates/hyperion-base/src/version.rs`, and teach `golden_diff.py` to list renamed goldens and to
+read the version from either path at each ref (Design note 7). Add base's row to the README's crate
+table here; T5 adds the surface crate's.
 
 - _Files:_ `crates/hyperion-base/{Cargo.toml, clippy.toml, src/lib.rs, src/math.rs, src/units.rs}`,
   `crates/hyperion-base/{src/version.rs, tests/foundation_golden.rs}`,
   `crates/hyperion-base/tests/golden/math/functions.golden`;
   `crates/hyperion-sim/{Cargo.toml, src/lib.rs, tests/foundation_golden.rs}`; root `Cargo.toml`;
   `justfile`; `.claude/skills/sim-determinism/{SKILL.md, scripts/golden_diff.py}`; `README.md`.
-- _Tests:_ everything that passed before passes unchanged; `golden_diff.py` gains a case for a moved
-  golden (its own test, if the script has one, or a documented manual run).
+- _Tests:_ everything that passed before passes unchanged; `golden_diff.py` gains a case for a
+  renamed golden and one for a `--base` before the split (its own test, if the script has one, or a
+  documented manual run).
 - _Accept:_ `just ci`; `git diff -M --stat HEAD` lists `math/functions.golden` as a rename at 100%;
-  `python3 .claude/skills/sim-determinism/scripts/golden_diff.py` ends "consistent", with no changed
-  value and the golden reported as moved; `cargo tree -p hyperion-base -e normal` lists only `libm`;
-  `cargo test -p hyperion-testkit --test clippy_bans`; `just bench -- math` before and after,
-  recorded in the task's commit message.
+  `python3 .claude/skills/sim-determinism/scripts/golden_diff.py` ends "Consistent.", with no
+  changed value and the golden listed under "Renamed goldens"; the same with `--base` set to the
+  commit before this task, which reads the old version path there;
+  `cargo tree -p hyperion-base -e normal` lists only `libm`;
+  `cargo test -p hyperion-testkit --test clippy_bans`;
+  `just bench -- math` before and after, each on a quiet machine as the roadmap's "Measurements on
+  a quiet machine" convention defines it, with the load averages, recorded in the task's commit
+  message (a run under load is marked provisional and repeated).
 
-#### R04.T4.b Move `rng`, split the registry, and move the hex parsing
+#### R04.T4.b Make `rng` self-contained inside the sim
 
-Move `rng/` with `git mv` into base, less the sim's registry and `EventKey`: `stream.rs`, `key.rs`,
-`domain_tag.rs`, `decide.rs`, `threefry.rs`, `sample/`, and `tags.rs` reduced to base's registry
-(Design note 4). Move `HexFault` and `parse_lower_hex` from `id/text.rs` to `hyperion_base::hex`,
-public and documented as the parser behind every 16-digit text form; `id` imports them. Build
-`RawEventKey` (Design note 5), `ObjectKey::system` and `ObjectKey::body` (Design note 6),
-`assert_registries_disjoint`, and export `domain_tags!`. In the sim, `rng/mod.rs` becomes the
-re-export of `hyperion_base::rng::*` with `event.rs` (`EventKey` over `RawEventKey`) and `tags.rs`
-(the sim's registry, `SELFTEST_STREAM` re-exported from base so every `tags::SELFTEST_STREAM` path
-holds, and the disjointness assertion, over base's registry and its own until T5 adds the surface
-crate's). Unit tests that read sim types (`stream.rs`'s keys from `GenCell` and `SystemId`,
-`event.rs`'s) stay in the sim, in `rng/mod.rs`'s test module or `tests/foundation_order.rs`; those
-that read only base types move. Move `rng/samplers.golden` and `rng/decisions.golden` with their
-tests into base's `foundation_golden.rs`. `domain_tags_are_pinned` iterates base's registry, then
-the sim's.
+The crate move of `rng` must compile as one step, so this subtask first cuts every tie the moving
+files have to the rest of the sim, inside the sim, where each change can be checked on its own.
+Move `HexFault` and `parse_lower_hex` from `id/text.rs` to a new `crates/hyperion-sim/src/hex.rs`,
+documented as the parser behind every 16-digit text form; `id` and `rng/key.rs` import them. Build
+`RawEventKey` (Design note 5) in a new `rng/raw_event.rs`, and make `EventKey` a newtype over it
+with today's API. Build `ObjectKey::system` and `ObjectKey::body` (Design note 6), and make `id`'s
+`From` conversions call them, so that nothing outside `rng` calls `ObjectKey::new`. Build
+`assert_registries_disjoint` beside `assert_tag_names`. Move the unit tests of the moving files
+that read sim types (`stream.rs`'s keys from `GenCell` and `SystemId`, `event.rs`'s) to
+`rng/mod.rs`'s test module or `tests/foundation_order.rs`. Rewrite the moving files' doctests so
+that none needs a type outside `rng`, `math`, `units`, `version` and `hex` (Design note 3), moving
+`Stream`'s "central promise" example to `rng/mod.rs`'s module docs, and turn their doc links to
+sim types (`SystemId`, `FeatureRef`, `EventId`) into plain code text. No output moves.
 
-- _Files:_ `crates/hyperion-base/src/{rng/, hex.rs, lib.rs}`, `crates/hyperion-base/tests/`;
-  `crates/hyperion-sim/src/{rng/mod.rs, rng/event.rs, rng/tags.rs, id/mod.rs, id/text.rs}`,
-  `crates/hyperion-sim/tests/foundation_golden.rs`, and any test whose imports moved.
-- _Tests:_ `registries_are_disjoint` (a `const` assertion, plus a runtime test naming the registries
-  so a failure reads well); `a_raw_event_key_refuses_a_tag_of_another_scope` (`should_panic`);
-  `event_keys_match_before_and_after` is the unchanged `rng/events` golden; the `compile_fail`
-  doctests of `assert_tag_names` move with it, and one is added for `assert_registries_disjoint`.
-- _Accept:_ `just ci`; `golden_diff.py` consistent with two more moves and no changed value;
-  `git diff -M --stat` shows the moved sources as renames; `cargo tree -p hyperion-base -e normal`
-  still lists only `libm`; `just bench -- rng` and `-- samplers` before and after, recorded.
+- _Files:_ `crates/hyperion-sim/src/{hex.rs, lib.rs, id/mod.rs, id/text.rs}`,
+  `crates/hyperion-sim/src/rng/{mod.rs, key.rs, stream.rs, event.rs, raw_event.rs, domain_tag.rs}`,
+  `crates/hyperion-sim/src/rng/{decide.rs, sample/}` (doctests),
+  `crates/hyperion-sim/tests/foundation_order.rs`.
+- _Tests:_ `a_raw_event_key_refuses_a_tag_of_another_scope` (`should_panic`, with `expected`); a
+  `compile_fail` doctest for `assert_registries_disjoint`, beside a passing twin that differs only
+  in the duplicate, so the failure is the one intended; the `rng/events` golden unchanged.
+- _Accept:_ `just ci`; `golden_diff.py` prints "No golden files changed."; and this prints nothing
+  (the files T4.d moves name nothing of the sim outside them):
+
+  ```sh
+  sim='crate::(id|coords|galaxy|stellar|planetary|events|time|observe|orbit)'
+  grep -rnE "$sim|hyperion_sim::(id|coords|galaxy|stellar|planetary)" \
+    crates/hyperion-sim/src/rng/{stream,key,domain_tag,decide,threefry,raw_event}.rs \
+    crates/hyperion-sim/src/rng/sample crates/hyperion-sim/src/hex.rs
+  ```
 
 #### R04.T4.c A `j0` wrapper in base's `math`
 
@@ -616,8 +777,48 @@ zero near 2.404 8, negative arguments (it is even) and large ones; a new file, s
 - _Files:_ `crates/hyperion-base/src/math.rs`, `crates/hyperion-base/tests/foundation_golden.rs`,
   `crates/hyperion-base/tests/golden/math/bessel.golden` (by `just bless`, as a new file).
 - _Tests:_ `j0_values_are_pinned`; `j0_is_even` on a sample; `j0(0) == 1` exactly.
-- _Accept:_ `cargo test -p hyperion-base`; `golden_diff.py` reports one extension and no changed
-  value; later, T8.c compares the new golden on all three targets.
+- _Accept:_ `cargo test -p hyperion-base`; `golden_diff.py` lists `math/bessel.golden` under "New
+  goldens", no Problem and no changed value (its verdict asks the usual check of a new golden,
+  which holds, since no `j0` value existed before); later, T8.c compares the new golden on all
+  three targets.
+
+#### R04.T4.d Move `rng` and `hex` into base, and split the registry
+
+With T4.b done, the move is mechanical. Move `rng/` with `git mv` into base, less the sim's
+registry and `EventKey`: `stream.rs`, `key.rs`, `domain_tag.rs`, `decide.rs`, `threefry.rs`,
+`raw_event.rs`, `sample/`, and `tags.rs` reduced to base's registry (Design note 4). Move `hex.rs`
+to `hyperion_base::hex`, now public. Export `domain_tags!`, and make `DomainTag::registered`
+`#[doc(hidden)] pub`, documented as reachable only through the macro; rewrite `domain_tag.rs`'s
+"Tags exist only as the constants of the single registry ... there is no public constructor" to
+say so, and the three registries. Rewrite the moved doctests' `hyperion_sim::` paths to
+`hyperion_base::` (Design note 3), and turn `math`'s plain-text `Stream` references back into doc
+links. In the sim, `rng/mod.rs` becomes the re-export of `hyperion_base::rng::*` with `event.rs`
+(`EventKey` over `RawEventKey`) and `tags.rs` (the sim's registry, `SELFTEST_STREAM` re-exported
+from base so every `tags::SELFTEST_STREAM` path holds, and the disjointness assertion, over base's
+registry and its own until T5 adds the surface crate's). Unit tests that read only base types move
+with their files. Move `rng/samplers.golden` and `rng/decisions.golden` with their tests into
+base's `foundation_golden.rs`. `domain_tags_are_pinned` iterates base's registry, then the sim's.
+Base's `should_panic` tests (`a_raw_event_key_refuses_a_tag_of_another_scope`, `Stream::open`'s
+scope refusal and any other that moves) state `expected = "…"` and go to base's own
+`tests/panics.rs`, a test binary of their own (Design note 12).
+Update the root `Cargo.toml`'s profile comments, which call `libm` "the sim's only runtime
+dependency" reached "through `hyperion_sim::math`".
+
+- _Files:_ `crates/hyperion-base/src/{rng/, hex.rs, lib.rs}`, `crates/hyperion-base/tests/`;
+  `crates/hyperion-sim/src/{lib.rs, rng/mod.rs, rng/event.rs, rng/tags.rs, id/mod.rs, id/text.rs}`,
+  `crates/hyperion-sim/tests/foundation_golden.rs`, root `Cargo.toml` (comments), and any test
+  whose imports moved.
+- _Tests:_ `registries_are_disjoint` (a `const` assertion, plus a runtime test naming the registries
+  so a failure reads well); `event_keys_match_before_and_after` is the unchanged `rng/events`
+  golden; the `compile_fail` doctests of `assert_tag_names` and `assert_registries_disjoint` move
+  with their functions, now naming `hyperion_base`, and each is run once with its error removed to
+  show that it then compiles, so that it fails for its own reason and not for an unresolved path
+  (recorded in the commit message).
+- _Accept:_ `just ci`; `golden_diff.py` "Consistent." with two more renamed goldens and no changed
+  value; `git diff -M --stat` shows the moved sources as renames;
+  `cargo tree -p hyperion-base -e normal` still lists only `libm`;
+  `grep -rn "hyperion_sim" crates/hyperion-base` prints nothing; `just bench -- rng` and
+  `-- samplers` before and after, on a quiet machine with the load averages, recorded.
 
 ### R04.T5 The `hyperion-surface` skeleton
 
@@ -630,22 +831,41 @@ authoritative path, and no dependency on the sim), the relaxed-SIMD `compile_err
 `generator_version()`; and `src/tags.rs`, an empty `domain_tags!` registry whose docs reserve the
 `surface.` prefix, and `selftest.surface.` for `SelfTest` tags. Make the sim depend on it and add
 its registry to the disjointness assertion. Add
-`[profile.dev.package.hyperion-surface] opt-level = 2`.
+`[profile.dev.package.hyperion-surface] opt-level = 2`. Each crate's `compile_error!` message names
+its crate (Design note 10).
+
+Add the rest of Design note 10's relaxed-SIMD ban: the 20 `disallowed-methods` entries, with
+`allow-invalid = true`, to the surface crate's `clippy.toml` and to base's, and the source test
+`no_target_feature_attributes` to `clippy_bans.rs`, over the `.rs` files of base, the surface crate
+and the sim. The entries bind from T8.c's Clippy run for the browser target.
 
 - _Files:_ `crates/hyperion-surface/{Cargo.toml, clippy.toml, src/lib.rs, src/tags.rs}`; root
-  `Cargo.toml`; `crates/hyperion-sim/{Cargo.toml, src/rng/tags.rs}`; `README.md`.
+  `Cargo.toml`; `crates/hyperion-sim/{Cargo.toml, src/rng/tags.rs}`;
+  `crates/hyperion-testkit/tests/clippy_bans.rs`; `crates/hyperion-base/clippy.toml`;
+  `README.md`.
 - _Tests:_ `surface_tags_carry_the_surface_prefix`: every name in the surface registry begins
   `surface.`, or `selftest.surface.` for a tag of `SelfTest` scope such as R05's test planet's
   (vacuous until R05, and then binding); `the_generator_version_is_the_sims` (in the sim's tests:
-  `hyperion_surface::generator_version()` equals `GENERATOR_VERSION.get()`).
+  `hyperion_surface::generator_version()` equals `GENERATOR_VERSION.get()`);
+  `both_client_crates_refuse_relaxed_simd`, in `clippy_bans.rs`'s `native_only` module, which reads
+  both crates' `src/lib.rs` as text and asserts each carries its guard;
+  `no_target_feature_attributes`, which also fails on an in-memory file carrying
+  `#[target_feature(enable = "relaxed-simd")]` or the same inside `cfg_attr`, and passes on the
+  guard's own `cfg`; `relaxed_intrinsics_are_banned`, which asserts the 20 entries in both crate
+  files.
 - _Accept:_ `just ci`; `cargo test -p hyperion-testkit --test clippy_bans` now sees five files; the
-  build below fails with the `compile_error!`'s message, and so does the same for `-p hyperion-base`
-  (T7.b makes this a recipe step):
+  build below fails, and prints base's `compile_error!` message, since base compiles first; the same
+  for `-p hyperion-base` (T7.b makes this a recipe step):
 
   ```sh
   RUSTFLAGS="-C target-feature=+relaxed-simd" cargo build -p hyperion-surface \
     --target wasm32-wasip1 --target-dir target/relaxed-simd-check
   ```
+
+  And, by hand and recorded, a scratch call of `core::arch::wasm32::f32x4_relaxed_madd` in the
+  surface crate fails
+  `cargo clippy --target wasm32-unknown-unknown -p hyperion-surface -- -D warnings`, reverted
+  after.
 
 ### R04.T6 The terrain hazards in the skill, and the routing to the auditor
 
@@ -665,7 +885,10 @@ integer seed derivation and counter-based noise on `Stream`, with `u64` cell and
 `usize`; no `f32` in the authoritative path. Re-check each cited source when writing it (the Rust
 documentation of `min`, `max`, `total_cmp` and the `algebraic_*` methods; GCC 13's release notes and
 llvm-project pull request 80475 on `crtfastmath.o`), as the Figures rule asks. Extend the skill's
-`paths:` and description to `crates/hyperion-base/**` and `crates/hyperion-surface/**`. Route their
+`paths:` and description to `crates/hyperion-base/**` and `crates/hyperion-surface/**`, and
+rewrite its "Streams and draws" bullet, which declares every tag "inside `domain_tags!` in
+`crates/hyperion-sim/src/rng/tags.rs`", to name the three registries and which tags each takes
+(Design note 4), and its opening's `hyperion_sim::math` to name base's `math`. Route their
 changes to the determinism auditor: `.claude/skills/review-changes/SKILL.md`'s routing list,
 `.claude/agents/determinism-auditor.md` (its description, and step 1's list of `clippy.toml` files
 to diff, which becomes all five), `.claude/skills/validate/scripts/select_checks.py`'s
@@ -673,8 +896,9 @@ to diff, which becomes all five), `.claude/skills/validate/scripts/select_checks
 `.claude/rules/rust-dev.md`, the numeric-safety section gains one bullet pointing to the skill's new
 section, and the crate-boundaries section gains entries for `hyperion-base` (beneath the sim, the
 fitting crate and the surface crate; no I/O, clocks, threads, caches; `libm` its only runtime
-dependency) and `hyperion-surface` (depends on base alone, and from T10.b on `wasm-bindgen` on the
-wasm target only; compiles to `wasm32-unknown-unknown`; never depends on the sim);
+dependency) and `hyperion-surface` (depends on base alone, and from T10.b on `wasm-bindgen` under
+`cfg(all(target_arch = "wasm32", target_os = "unknown"))` only; compiles to
+`wasm32-unknown-unknown`; never depends on the sim);
 `.claude/agents/rust-reviewer.md`'s crate-boundary check follows.
 
 - _Files:_ `.claude/skills/sim-determinism/SKILL.md`; `.claude/skills/review-changes/SKILL.md`;
@@ -711,32 +935,35 @@ a panic on `wasm32-wasip1` aborts the process and hides every later test in it:
    in `u64` and convert with `usize::try_from`, and grep the other test helpers for the same pattern
    (`* ppm`, `len() *`), fixing any found.
 
-Then rerun the whole fast suite under wasip1 (and the slow suite, whose results the measurement had
-not reached) and fix whatever else surfaces in the same way, since a binary that aborted early hid
-its later tests. None of these touches generated output.
+Then rerun the whole fast suite under wasip1 and fix whatever else surfaces in the same way, since
+a binary that aborted early hid its later tests. The slow suite, whose results the measurement had
+not reached, is not this task's: T7.b runs it, and each failure it finds is fixed in a subtask
+added then, `R04.T7.d` onward, recorded in the "as built" notes, so that this task stays bounded.
+None of these touches generated output.
 
 - _Files:_ `crates/hyperion-sim/src/galaxy/snr/caps.rs`,
   `crates/hyperion-sim/tests/{planetary_properties.rs, planetary_rocky_properties.rs}`, and whatever
-  the rerun finds.
-- _Accept:_ `just test-wasm` passes in full (needs T7.b's tools, or wasmtime installed by hand);
-  `cargo test -p hyperion-sim` unchanged natively; `golden_diff.py` reports nothing.
+  the fast rerun finds.
+- _Accept:_ the fast half of `just test-wasm` (its first `cargo test`, of the sim and the testkit)
+  passes in full (needs T7.b's tools, or wasmtime installed by hand); `cargo test -p hyperion-sim`
+  unchanged natively; `golden_diff.py` prints "No golden files changed."
 
 #### R04.T7.b The tools, and a check that fails rather than skips
 
 Add `targets = ["wasm32-wasip1", "wasm32-unknown-unknown"]` to `rust-toolchain.toml`. Write
-`just wasm-tools`: `rustup target add` for both targets, `cargo install wasmtime-cli --locked` at a
-version pinned in the justfile, and `cargo install wasm-bindgen-cli --locked` at the version read
-from `Cargo.lock` (T8.b makes that entry exist; until then this step is a no-op with a message).
-Write `_wasm-preflight`, which checks each tool the recipe that calls it needs and exits non-zero
-naming `just wasm-tools` for the first one missing. Split `test-wasm` into `test-wasm-fast` and
-`test-wasm-slow`, each adding `-p hyperion-base -p hyperion-surface`, keeping `test-wasm` as both,
-and put each run under `_locked`, as `test` is. Update the README's `test-wasm` paragraph and its
-prerequisites. Make the relaxed-SIMD negative build of T5 a step of `test-wasm-fast`, which fails if
-the build succeeds.
+`just wasm-tools`: `rustup target add` for both targets and `cargo install wasmtime-cli --locked`
+at a version pinned in the justfile; T8.b adds `wasm-bindgen-cli`, once T8.a's dependency has put
+`wasm-bindgen` into `Cargo.lock`. Write `_wasm-preflight`, which checks each tool the recipe that
+calls it needs and exits non-zero naming `just wasm-tools` for the first one missing. Split
+`test-wasm` into `test-wasm-fast` and `test-wasm-slow`, each adding
+`-p hyperion-base -p hyperion-surface`, keeping `test-wasm` as both, and put each run under
+`_locked`, as `test` is. Update the README's `test-wasm` paragraph and its prerequisites. Make the
+relaxed-SIMD negative build of T5 a step of `test-wasm-fast`, which fails if the build succeeds.
 
 - _Files:_ `rust-toolchain.toml`, `justfile`, `README.md`.
 - _Accept:_ `just wasm-tools` then `just test-wasm-fast` passes; with `WASMTIME=/nonexistent`,
-  `just test-wasm-fast` fails and prints `just wasm-tools`; `just test-wasm-slow` passes.
+  `just test-wasm-fast` fails and prints `just wasm-tools`; `just test-wasm-slow` passes, or each
+  failure it finds has its own subtask (T7.a).
 
 #### R04.T7.c Measure, then join `just ci` and `just ci-slow`
 
@@ -749,21 +976,30 @@ applied to. Apply Design note 11's rule, to the quiet figures alone, to choose t
 wire `test-wasm-fast` into `ci` and `test-wasm-slow` into `ci-slow`. Update the skill's opening
 paragraph and step 5, and the README's check list, to say what now runs (T2's sentences), and the
 `validate` skill's `select_checks.py`, whose separate `just test-wasm` gate step and its skip when
-wasmtime is missing are replaced by `just ci`'s own check. In the same edit, teach the skills'
-task-ID patterns the rendering plans' `R` prefix, since today they match only `P..` and would not
-pick up this plan set's tasks: `select_checks.py`'s `TASK_RE` and its normaliser, and
-`plan_task.py`'s `ID_RE`, `LOOSE_ID_RE`, `HEADING_TASK_RE`, `INLINE_TASK_RE`, its normaliser and its
-`--list` hint (`.claude/skills/implement-task/scripts/plan_task.py`, lines 43–46, 107, 286 and 644
-on 2026-09-29), with the plan directory chosen by the prefix (`galaxy-generation/` for `P`,
-`rendering-and-planets/` for `R`). A grep of `.claude/skills/` and `.claude/agents/` for `P\d{2}\.T`
-and `P(\d` finds no other pattern today; it is rerun then.
+wasmtime is missing are replaced by `just ci`'s own check. Separately, and first, teach the skills'
+task-ID patterns the rendering plans' `R` prefix. That part needs nothing of T7's wasm work and
+lands as its own commit before R01's first task goes through the `implement-task` or `validate`
+skill, as R01's Consumes asks; it is coordinated with R01.T9.e, which adds `just test-render`
+routing to the same `select_checks.py`, so whichever lands second rebases onto the first. The
+patterns need the `R` prefix since today they match only `P..` and would not pick up this plan set's
+tasks: `select_checks.py`'s `TASK_RE` and its normaliser, and `plan_task.py`'s `ID_RE`,
+`LOOSE_ID_RE`, `HEADING_TASK_RE`, `INLINE_TASK_RE`, its normaliser and its `--list` hint
+(`.claude/skills/implement-task/scripts/plan_task.py`, lines 43–46, 107, 286 and 644 on 2026-09-29),
+with the plan directory chosen by the prefix (`galaxy-generation/` for `P`, `rendering-and-planets/`
+for `R`). The same script resolves design-note citations to other plans by number within one plan
+set (`PLAN_BEFORE_RE`, `PLAN_AFTER_RE`, `PLAN_NAME_RE`, lines 64–67, used at 212–218): it does not
+recognise "R10's Design note 7", and in the rendering set "plan 04" means galaxy plan 04 while R04
+shares its number. Teach those patterns `R<nn>` as a rendering plan and "galaxy plan <nn>" as a
+galaxy one. A grep of `.claude/skills/` and `.claude/agents/` for `P\d{2}\.T`, `P(\d` and
+`[Pp]lan\s` finds no other pattern today; it is rerun then.
 
 - _Files:_ `justfile`, `README.md`, `.claude/skills/sim-determinism/SKILL.md`,
   `.claude/skills/validate/scripts/select_checks.py`,
   `.claude/skills/implement-task/scripts/plan_task.py`, `.claude/agents/validator.md`; this plan's
   "as built" notes (the timings).
 - _Accept:_ `just ci` and `just ci-slow` pass and run the wasip1 suites; the quiet timings are
-  recorded with their load averages; `plan_task.py R04.T7.c` prints this task and
+  recorded with their load averages; `plan_task.py R04.T7.c` prints this task, and
+  `plan_task.py R04.T4.c` resolves that task's "R10 (its Design note 7)" to R10's note;
   `select_checks.py R04.T7.c` accepts its ID; `grep -n "test-wasm" justfile` shows both in the
   gates.
 
@@ -773,9 +1009,14 @@ and `P(\d` finds no other pattern today; it is rerun then.
 
 Build `golden::check_embedded` and `golden!`'s two arms (Design note 14), sharing the existing
 checks with `check`. Add the target-specific dev-dependency on `wasm-bindgen-test` (pinned in
-`[workspace.dependencies]`) and the `as test` import to the testkit's test modules.
+`[workspace.dependencies]`, under the `cfg` of Design note 12) and the `as test` import to the
+testkit's test modules, and move the tests that read or write files (`tests/golden.rs`'s scratch
+directories; `clippy_bans.rs` already is) into `native_only` modules. Any `should_panic` test of
+the testkit that runs there states `expected` and moves to its own `tests/panics.rs` (Design note
+12).
 
-- _Files:_ `crates/hyperion-testkit/{Cargo.toml, src/golden.rs}`, root `Cargo.toml`.
+- _Files:_ `crates/hyperion-testkit/{Cargo.toml, src/golden.rs, tests/golden.rs}`, and
+  `tests/panics.rs` if the crate has such a test; root `Cargo.toml`.
 - _Tests:_ natively, `check_embedded` accepts equal text, reports the first differing line, rejects
   a header mismatch and refuses to bless; `golden!` with a computed name still compiles natively.
 - _Accept:_ `cargo test -p hyperion-testkit`;
@@ -785,25 +1026,41 @@ checks with `check`. Add the target-specific dev-dependency on `wasm-bindgen-tes
 
 Write `tools/electron-node/node` and `just test-wasm-browser` (Design note 13), with the runner
 variable set in the recipe, `timeout` around each run, `--lib --tests` under the `slow-test` profile
-(debug wasm is slow, and the goldens need no debug assertions to compare), the preflight, and the
-`--list` count comparison of Design note 12. Extend `just wasm-tools` to install `wasm-bindgen-cli`
-at the locked version.
+(debug wasm is slow; the profile keeps release speed, and the debug assertions and overflow checks
+it also keeps are wanted here too), the preflight, and the `--list` count comparison of Design note
+12, less the native tests under `native_only::`. Extend `just wasm-tools` to install
+`wasm-bindgen-cli` at the version `Cargo.lock` names for `wasm-bindgen`, which T8.a's dependency put
+there.
 
 - _Files:_ `tools/electron-node/node`, `justfile`, `README.md`.
 - _Accept:_ `just test-wasm-browser` prints Electron's version first and passes on the testkit; with
   the shim's directory left off `PATH`, it fails at the version check; with one test file's
-  `as test` line removed, it fails at the count comparison.
+  `as test` line removed, it fails at the count comparison; with one test moved out of its
+  `native_only` module and compiled out by its own `cfg`, it fails at the count comparison too.
 
 #### R04.T8.c Base and the surface crate on the browser target, and into `just ci`
 
 Add the dev-dependency and the `as test` import to every test module and file of `hyperion-base` and
-`hyperion-surface`; put `test-wasm-browser` for the three crates into `test-wasm-fast`, and so into
-`just ci`. The moved goldens of T4 (`math/functions`, `rng/samplers`, `rng/decisions`) are then
-compared on all three targets. Update the skill's opening paragraph to name the browser target.
+`hyperion-surface`, with base's `every_golden_file_carries_the_current_version` in a `native_only`
+module; put `test-wasm-browser` for the three crates into `test-wasm-fast`, and so into `just ci`.
+Add to `test-wasm-fast`, behind the preflight, a Clippy run for the browser target, so that the code
+compiled only there, the embedded arm now and `src/wasm.rs` from T10.b, is linted under the crates'
+own `clippy.toml` files (Design note 12):
+
+```sh
+cargo clippy --target wasm32-unknown-unknown -p hyperion-base -p hyperion-surface \
+  -p hyperion-testkit --all-targets -- -D warnings
+```
+
+The goldens T4 relocated (`math/functions`, `rng/samplers`, `rng/decisions`) and T4.c's
+`math/bessel` are then compared on all three targets. Update the skill's opening paragraph to name
+the browser target.
 
 - _Files:_ the two crates' `Cargo.toml` and test files; `justfile`;
   `.claude/skills/sim-determinism/SKILL.md`.
-- _Accept:_ `just ci` runs and passes the browser target's suites; changing one character of
+- _Accept:_ `just ci` runs and passes the browser target's suites and its Clippy run; an
+  `f64::sin` call added under `#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]` in base
+  fails `just test-wasm-fast` (checked by hand, reverted, recorded); changing one character of
   `math/functions.golden` makes the native, wasip1 and browser runs all fail (checked by hand,
   reverted, recorded); its time is added to T7.c's record.
 
@@ -819,7 +1076,7 @@ for tests. Each worker probes before its first job and reports to the constructo
 every report and returns `StartPoolError::FloatingPointMode { worker, probe }` on the first failure,
 after stopping the workers. After every job, before the reply, the worker probes again; on a failure
 the reply is `JobError::FloatingPointMode`, a pool-wide flag is set, the fault is logged once with
-the thread's name, and every later `try_submit` and bulk submission returns
+the thread's name, and every later `try_submit` and `submit`, of either priority, returns
 `SubmitJobError::Faulted`, while queued jobs answer `JobError::FloatingPointMode` as workers take
 them. Map both to `ErrorCode::Internal` in `requests/mod.rs` with the message "the server's
 floating-point mode flushes subnormals, so it refuses to generate". Document on `CpuPool` that code
@@ -832,7 +1089,8 @@ loading a native library must probe the loading thread and then every worker.
   `a_job_after_which_the_probe_fails_answers_floating_point_mode_and_faults_the_pool` (a probe that
   fails from its Nth call); `a_faulted_pool_refuses_submissions`; the request mapping answers
   `internal` with the message.
-- _Accept:_ `cargo test -p hyperion-server compute::float_mode compute::pool`; `just ci`.
+- _Accept:_ `cargo test -p hyperion-server compute::float_mode` and
+  `cargo test -p hyperion-server compute::pool`, one filter each; `just ci`.
 
 #### R04.T9.b The probe fails under a flushing thread
 
@@ -850,8 +1108,9 @@ is never skipped.
 - _Files:_ `crates/hyperion-server/tests/flush_to_zero.rs`.
 - _Tests:_ as above; plus one run by hand, recorded, in which the child's expectation is inverted
   and the parent is seen to fail, so the test is shown able to fail.
-- _Accept:_ `cargo test -p hyperion-server --test flush_to_zero` passes in about a second and a
-  half; `just ci`.
+- _Accept:_ `cargo test -p hyperion-server --test flush_to_zero` passes; `just ci`. Its run time is
+  recorded on a quiet machine; research measured about 1.3 s for three variants under shared load
+  (provisional), so a quiet run well above a few seconds is a finding, not a failure.
 
 ### R04.T10 The client's first WebAssembly load
 
@@ -884,29 +1143,45 @@ The task ends when the owner signs off on one. Nothing is changed before then, a
 - _Files:_ this plan; the brainstorm's "Awaiting the owner" item, once ruled.
 - _Accept:_ the ruling is recorded, with its date, in both.
 
-#### R04.T10.b The surface module in a worker
+#### R04.T10.b The surface crate's module and `just gen-surface`
 
-Blocked on T10.a. Build what Design note 16 describes, under the chosen option: `wasm-bindgen` as a
-wasm-only dependency of `hyperion-surface` and its `crate-type`, `src/wasm.rs` exporting
-`generator_version`; `just gen-surface` and the recipe dependencies; the ignore entries; the Vite
-worker format;
-`apps/hyperion/src/renderer/src/wasm/{surface.worker.ts, handleRequest.ts, loadSurfaceModule.ts}`
-and their tests; the generator-version comparison and its fault; and, if the owner chose option 1 or
-3, the CSP change itself. Update the crate-boundary entry of `rust-dev.md` (T6) to say that the
-surface crate's one non-base dependency is `wasm-bindgen`, on the wasm target only.
+Needs T5 and T8, not the ruling: it builds a module that nothing loads yet and changes no policy.
+Make `hyperion-surface` also a `cdylib`, with `wasm-bindgen` under the `cfg` of Design note 16 and
+`src/wasm.rs` exporting `generator_version`; write `just gen-surface` and make `check`, `lint`,
+`test`, `client` and `build` depend on it; add the ignore entries; and make the git hooks' `pnpm`
+entries (`typecheck`, `oxlint`, `vitest`) produce the module first, so that a fresh worktree's
+hooks pass (Design note 16). Update the crate-boundary entry of `rust-dev.md` (T6) to say that the
+surface crate's one non-base dependency is `wasm-bindgen`, on the browser target only.
 
-- _Files:_ `crates/hyperion-surface/{Cargo.toml, src/wasm.rs}`; `justfile`; `.gitignore`,
-  `.prettierignore`, `.oxlintrc.json`; `apps/hyperion/electron.vite.config.mts`;
-  `apps/hyperion/src/renderer/src/wasm/`; `apps/hyperion/vitest.config.mts` if the test needs the
-  Node project; `apps/hyperion/src/renderer/index.html` under options 1 and 3;
+- _Files:_ `crates/hyperion-surface/{Cargo.toml, src/wasm.rs}`; `justfile`;
+  `.pre-commit-config.yaml`; `.gitignore`, `.prettierignore`, `.oxlintrc.json`;
   `.claude/rules/rust-dev.md`.
+- _Tests:_ `cargo test -p hyperion-surface` natively and on the browser target; T8.c's Clippy run
+  now covers `src/wasm.rs`.
+- _Accept:_ `just ci`; `just gen-surface` writes the module, the glue and its `.d.ts`, and
+  `git status --porcelain` then shows nothing new; in a fresh `git worktree`, the commit hooks pass
+  on a trivial commit (checked by hand, the worktree removed after);
+  `cargo tree -p hyperion-sim --target wasm32-wasip1 -e normal` lists no `wasm-bindgen`.
+
+#### R04.T10.c The surface module in a worker
+
+Blocked on T10.a and T10.b. Build the rest of what Design note 16 describes, under the chosen
+option: the Vite worker format;
+`apps/hyperion/src/renderer/src/wasm/{surface.worker.ts, handleRequest.ts, loadSurfaceModule.ts}`
+and their tests; the worker's `webworker` typing, through a `tsconfig.worker.json` or a typed
+wrapper; the generator-version comparison and its fault; and, if the owner chose option 1 or 3, the
+CSP change itself.
+
+- _Files:_ `apps/hyperion/electron.vite.config.mts`; `apps/hyperion/src/renderer/src/wasm/`;
+  `apps/hyperion/tsconfig.worker.json` and `apps/hyperion/tsconfig.web.json`, if the typing takes a
+  config of its own; `apps/hyperion/vitest.config.mts` if the test needs the Node project;
+  `apps/hyperion/src/renderer/index.html` under options 1 and 3.
 - _Tests:_ in Node, `handleRequest` after `initSync` answers the generator version, and equals the
   sim's (through a constant the test reads from `gen-surface`'s output or from the protocol); the
-  loader reports a fault when the server's version differs; `cargo test -p hyperion-surface`
-  natively and on the browser target.
-- _Accept:_ `just ci`; by hand and recorded, `just client` and the built app from
-  `pnpm --filter hyperion build` each log the module's generator version from its worker with no CSP
-  violation in the console.
+  loader reports a fault when the server's version differs.
+- _Accept:_ `just ci`; by hand and recorded, `just client` and the built app from `just build`
+  (which runs `gen-surface` first) each log the module's generator version from its worker with no
+  CSP violation in the console.
 
 ### R04.T11 Verification pass
 
@@ -922,14 +1197,16 @@ to their final form.
 The plan is done when, on the development machine, with the tools `just wasm-tools` installs:
 
 - `just ci` passes and runs, besides what it ran before, the fast suites under `wasm32-wasip1` and
-  `wasm32-unknown-unknown` (T7, T8), the ban-list test (T1), the flush-to-zero tests (T9) and the
-  client's module test (T10.b); and with wasmtime, `wasm-bindgen-test-runner` or the target removed
-  from `PATH` or the toolchain, it fails with a message naming `just wasm-tools`, never passing by
-  skipping.
+  `wasm32-unknown-unknown` (T7, T8), the browser target's Clippy run (T8.c), the ban-list test
+  (T1), the flush-to-zero tests (T9) and the client's module test (T10.c); and with wasmtime,
+  `wasm-bindgen-test-runner` or the target removed from `PATH` or the toolchain, it fails with a
+  message naming `just wasm-tools`, never passing by skipping.
 - `just ci-slow` passes, the slow suite under wasip1 included.
-- Every golden file is byte for byte what it was before T4.a, which
+- Every golden file that existed before T4.a is byte for byte what it was, which
   `python3 .claude/skills/sim-determinism/scripts/golden_diff.py --base <commit before T4.a>`
-  confirms with its "consistent" verdict and the moves it reports; `GENERATOR_VERSION` is unchanged.
+  confirms: no Problem, no changed value, the three relocated goldens under "Renamed goldens", and
+  one new golden, T4.c's `math/bessel`, whose check the verdict then asks for;
+  `GENERATOR_VERSION` is unchanged.
 - The same golden files are compared on native, wasip1 and the browser target: the base crate's on
   all three, the sim's on native and wasip1, which is the parity the brainstorm's height-function
   item needs, ready for R09's files.
@@ -943,28 +1220,34 @@ The plan is done when, on the development machine, with the tools `just wasm-too
   quiet machine with their load averages, are recorded in the plan's "as built" notes (open question
   12 asks what the extra runs add).
 - The client's first module loads in its worker in `just client` (dev) and in the built app
-  (`pnpm --filter hyperion build`, then run from `out/`), checked by hand and recorded, once the
-  owner has ruled on the CSP.
+  (`just build`, then run from `out/`), checked by hand and recorded, once the owner has ruled on
+  the CSP.
+- The owner's acceptance of plan 14's amendment (T3.a), sign-off on the guide's `DETAIL SEED` rows
+  (T3.b) and CSP ruling (T10.a) are each recorded with their dates.
 
 ## Generator version
 
 This plan changes no generated output and does not bump `GENERATOR_VERSION`. The crate split moves
-code, not arithmetic: every golden file is byte for byte what it was, the moved ones by rename, and
-`golden_diff.py` must report "consistent" with no changed value after each of T4.a, T4.b and T5. A
-task that finds a golden moved has broken the move and is not done. The `algebraic_*` bans, the
-probes, the recipes and the documentation touch no generator. The detail seed's rename changes a
-wire field that no body fills.
+code, not arithmetic: every golden file is byte for byte what it was, the relocated ones by
+rename, and `golden_diff.py` must report no Problem and no changed value after each of T4.a, T4.b,
+T4.d and T5 (T4.c adds one new golden, `math/bessel`, and changes none). A task after which the
+script lists any golden under "Pinned values changed" has broken the move and is not done. The
+`algebraic_*` bans, the probes, the recipes and the documentation touch no generator. The detail
+seed's rename changes a wire field that no body fills.
 
 It reserves, so that later plans need not:
 
-- **Registries.** The surface crate's registry, for `surface.*` tags only (R09's `surface.channel`,
-  `surface.crater`, `surface.scatter` and whatever else its synthesis opens). In the sim's registry,
+- **Registries.** The surface crate's registry, for `surface.*` tags only (R09's
+  `surface.coarse.*`, `surface.channel` and `surface.crater`, R11's `surface.scatter`, which R09
+  reserves, and whatever else their synthesis opens). In the sim's registry,
   the names `body.surface` (P14.T23, for the server-only surface seed) and `body.surface.detail`
   (R09, for the detail seed), each of `Body` scope, both named here so that neither is taken for
   anything else before its task.
-- **Key constructors.** `ObjectKey::system` and `ObjectKey::body` are the only raw constructors in
-  base; R09's body–face–level–cell key is a new constructor beside them, with a new `TagScope` if
-  its word layout needs one, added by R09 in base.
+- **Key constructors.** `ObjectKey::system` and `ObjectKey::body` join base's existing public
+  constructors (`galaxy`, `galaxy_item`, `cell`, `feature`). R09 adds its own beside them in base,
+  `ObjectKey::surface_cell(face, level, i, j, instance)` and `ObjectKey::surface_item(n)`, with the
+  body carried by the surface or detail seed rather than the key, and new `TagScope`s
+  (`SurfaceCoarse`, `SurfaceDetail`) for them (R09's Provides and Design note 2).
 - **The wire.** `BodyHooksDto.detail_seed` and `DetailSeedHex`, for R09 to fill.
 - **Checks.** R09's golden height files live in `crates/hyperion-surface/tests/golden/` and are
   compared on all three targets by this plan's recipes with no further wiring, since
@@ -972,10 +1255,29 @@ It reserves, so that later plans need not:
 
 ## Risks and open points
 
-- **The owner's CSP ruling gates T10.b**, and through it R05's height workers. Research found that
+- **The owner's CSP ruling gates T10.c**, and through it R05's height workers. Research found that
   workers compile under today's policy (Design note 16), so no option leaves the client without
   WebAssembly; the risk is delay, not feasibility. If the owner picks option 3, the custom scheme
-  becomes its own task before T10.b.
+  becomes its own task before T10.c.
+- **Two more sign-offs gate T3.** Plan 14's owner accepts the amendment (T3.a) before the wire
+  changes (T3.c), which must land before P14.T23; the guide's owner signs off the `DETAIL SEED`
+  rows (T3.b), and the client is built to the draft meanwhile.
+- **Relaxed SIMD from a dependency.** Design note 10's source test covers the workspace's own
+  files only; a dependency could enable the feature inside its own code. Base's one dependency is
+  `libm`, pinned exactly, and any new dependency of base or the surface crate is reviewed for it.
+  Which scalar patterns LLVM will auto-vectorise into relaxed instructions is known only in part
+  (research, medium confidence), which is why the attribute itself is banned.
+- **Tests after a trap on the browser target** run in the same instance, as best effort (Design
+  note 12). Keeping every `should_panic` test in its own `tests/panics.rs` binary keeps the goldens
+  clear of it; a wasm-bindgen upgrade that starts a fresh instance per test would let the rule
+  relax.
+- **The golden location convention.** The galaxy README's "Tests" convention says golden files live
+  in `crates/hyperion-sim/tests/golden/`; after T4 base and the surface crate hold theirs under
+  their own `tests/golden/`. The rendering roadmap restates the code-shape and registry conventions
+  but not this one, and is asked to.
+- **The browser target runs no sim goldens** (Design note 11), a narrower reading of the
+  brainstorm's "Both wasm targets' fast goldens join `just ci`" and the roadmap's "all run their
+  fast goldens", which the roadmap is asked to record among its corrections.
 - **A flushing mode switched on and off within one job** is invisible to probes run between jobs;
   only reading MXCSR could see it, and that needs `unsafe`. The brainstorm's mitigation, the LLM out
   of process, is what closes it; the skill says so.
@@ -986,16 +1288,15 @@ It reserves, so that later plans need not:
   not inline their small functions across the crate boundary; T4's bench comparisons catch it, and
   `#[inline]` is the cure (Design note 8).
 - **Paths that name `hyperion-sim` for moved files.** Galaxy plans, the skill and scripts name
-  `crates/hyperion-sim/src/{math, units, version, rng/tags}.rs`. T4 fixes the live tooling; the
-  plans are history, and the roadmap's conventions are asked to follow (notes).
-- **The validation and implementation skills know only `P..` task IDs**, so they will not find this
-  plan's `R04.T…` tasks until their scripts learn the prefix. Not this plan's to fix; recorded for
-  the roadmap.
-
+  `crates/hyperion-sim/src/{math, units, version, rng/tags}.rs`. T4 and T6 fix the live tooling; the
+  plans are history, and the roadmap's [Conventions](README.md#conventions) already restate the
+  code shape and the registries.
+- **The validation and implementation skills know only `P..` task IDs** until T7.c teaches them the
+  `R` prefix, so T1–T7.b are selected and validated by hand, naming their checks explicitly.
 - **The browser harness's quirks** (Design note 12): a plain `#[test]` silently dropped, `--ignored`
-  running nothing, one filter per run, no timeout. The count comparison and `timeout` guard the
-  first and last; a `wasm-bindgen-test` upgrade that changes any of them is caught by the recipe
-  failing, and the pins move together.
+  running nothing, one filter per run, no timeout. The count comparison, less the `native_only`
+  tests, and `timeout` guard the first and last; a `wasm-bindgen-test` upgrade that changes any of
+  them is caught by the recipe failing, and the pins move together.
 - **Time.** Each wasm target adds a build and a run to `just ci`, and the slow wasip1 suite may add
   far more to `just ci-slow` than the native slow suite's twenty minutes. Design note 11's rule
   bounds the first; the second is recorded and accepted, since `ci-slow` is the full gate. The

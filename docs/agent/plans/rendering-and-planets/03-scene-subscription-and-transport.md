@@ -7,13 +7,17 @@
   [12](../galaxy-generation/12-retarded-observation-alerts.md) (P12.T0–T2 and T4 built:
   `hyperion_sim::observe`; its subscription envelope, P12.T9, is not built and is built here if it
   still is not, Design note 1) and [14](../galaxy-generation/14-planetary-systems.md) (in progress:
-  bodies, orbits, `system_bodies`, `body_detail` and the body cache are built). No R-plan: R02
-  consumes this plan for generated scenes, and R06 and R09 put their payloads on its binary frames.
+  bodies, orbits, `system_bodies`, `body_detail` and the body cache are built), and the built galaxy
+  plans 01, 03 and 11 (coordinates, frame selection, the star hierarchy). Of the R-plans, only
+  R03.T13 waits, on R02.T8.a's `selectCameraFrame`, the one rule for which body is local (Design
+  note 7); everything else needs no R-plan. R02 consumes this plan for generated scenes, and R06
+  and R09 put their payloads on its binary frames.
 - **Brainstorm sections covered** (in
   [the rendering brainstorm](../../brainstorming/rendering-and-planets.md)): the retarded-position
   paragraphs and leans of
   [The floating origin is already in the simulation](../../brainstorming/rendering-and-planets.md#the-floating-origin-is-already-in-the-simulation)
-  (drawn positions as light-time plus aberration, the ship's local body geometric, `SystemTrajectory` and
+  (drawn positions as light-time plus aberration, the ship's local body geometric,
+  `SystemTrajectory` and
   `retarded_in_system`); the one-scene lean of
   [Two deployments, one scene](../../brainstorming/rendering-and-planets.md#two-deployments-one-scene)
   (time and time rate on every push, client extrapolation); the local camera's report to the scene
@@ -35,8 +39,9 @@
 ## Goal
 
 When this plan is done a client can subscribe to the scene of a universe and receive, in JSON, the
-bodies of the system its ship stand-in is in, as plan 14's records with their orbital elements, at
-the detail level granted, with the system's stars and the time and time rate on every push; the
+bodies of the system its ship stand-in is in, as plan 14's records with their orbital elements, each
+at the detail level granted for it, with the system's stars and the time and time rate on every
+push; the
 server re-sends a body when its `valid_until` passes or what the ship knows of it changes, sends a
 whole system on arrival, a heartbeat each second, and craft at the 64 Hz tick once anything supplies
 craft. Each client renders at the pushed time extrapolated by its own elapsed time times the rate,
@@ -82,7 +87,13 @@ Non-goals:
 - Sessions, ship state, the 64 Hz loop and craft. The craft list is empty until a session supplies
   it; the push path for it is built and tested with a test source.
 - The Knowledge overlay beyond a seam: until the sensors plan, the server grants the level asked,
-  as plan 14's handlers do.
+  as plan 14's handlers do. The seam grants a level per body, and the wire carries it (Design
+  note 13).
+- Flight prediction. A craft's planned path is a draft field that the sessions plan and the flight
+  model fill; this plan carries it and extrapolates in a straight line when it is absent (Design
+  note 4). Until a flight model fills it, R11 sweeps along this plan's `predictedPath` and widens
+  the sweep along a straight-line extrapolation by ½ g t² (its `extrapolationMargin`, R11 Design
+  note 7), which bounds an unpowered arc.
 - Inbound binary frames, which stay refused (`crates/hyperion-server/src/ws.rs`).
 - Body rotation and orientation for drawing (plan 14's P14.T14, consumed by R02 and R07).
 - Latency compensation beyond what the heartbeat gives, and client-side prediction of craft.
@@ -113,7 +124,7 @@ pub enum TraceInSystemError { NotPresentThen { emitted: UniverseTime },
 pub fn retarded_in_system(observer: &SystemObserver, source: &impl SystemTrajectory)
     -> Result<InSystemRetardation, TraceInSystemError>;
 pub const IN_SYSTEM_LIGHT_TIME_TOLERANCE: Span;      // 1 ns, inclusive
-pub const IN_SYSTEM_MAX_CORRECTIONS: u8;             // 10; typically 2–3 (Design note 7)
+pub const IN_SYSTEM_MAX_CORRECTIONS: u8;             // 10; typically 2–4, 7 at a system's reach
 
 // observe/in_system/tracks.rs
 pub struct BodyTrack<'a> { /* system: &PlanetarySystem, ctx: &SystemContext, index: BodyIndex */ }
@@ -152,15 +163,31 @@ pub struct CameraReportDto { view: u8, pose: KinematicsDto }
 pub struct SceneSubscribeRequest { detail: DetailLevelDto, cameras: Vec<CameraReportDto> }
 pub struct SceneShipRequest { universe, ship: KinematicsDto, time_rate: u32 }   // `scene_ship`
 pub struct SceneCamerasRequest { subscription: u32, cameras: Vec<CameraReportDto> } // `scene_cameras`
+pub struct SceneShipSet { clock: SceneClockDto }                    // `scene_ship`'s answer
+// `scene_cameras` answers with an empty body, as `unsubscribe` does
+pub struct SeenPositionDto { apparent_m: [f64; 3], emitted: UniverseTime }  // a body with no orbit
+pub struct BodyGrantDto { body: BodyIdHex, level: DetailLevelDto,
+    seen: Option<SeenPositionDto> }                                   // Design note 13
+pub struct SceneSystemDto { system: SystemBodiesDto,   // `granted`: the level asked; each record
+    grants: Vec<BodyGrantDto> }                        // degraded to its own grant, index order
+pub struct SceneBodyDto { level: DetailLevelDto, record: BodySummaryDto,
+    seen: Option<SeenPositionDto> }                                   // a re-sent body
 pub struct SceneStateDto { sequence: u64, clock: SceneClockDto, ship: KinematicsDto,
-    system: Option<SystemBodiesDto>, craft: Vec<SceneCraftDto> }
+    system: Option<SceneSystemDto>, craft: Vec<SceneCraftDto> }
 pub struct SceneNotificationDto { sequence: u64, clock: SceneClockDto,
     ship: Option<KinematicsDto>, arrival: Option<SceneArrivalDto>,
-    bodies: Vec<BodySummaryDto>, craft: Option<Vec<SceneCraftDto>> }
+    bodies: Vec<SceneBodyDto>, craft: Option<Vec<SceneCraftDto>> }
 // later optional fields: R07's `main_screen`, R09's `surface_revisions` (Design note 4)
-pub enum SceneArrivalDto { System(Box<SystemBodiesDto>), NoSystem }
+pub enum SceneArrivalDto { System { system: Box<SceneSystemDto>, tidal_radius_m: f64 }, NoSystem }
+// tidal_radius_m: the system's FrameCandidate::tidal_radius at the arrival time (R02's ask)
 pub struct SceneCraftDto { craft: String, hull: String, state: KinematicsDto,
-    attitude: [f64; 4], angular_velocity_rad_s: [f64; 3] }            // a draft; Design note 4
+    attitude: [f64; 4], angular_velocity_rad_s: [f64; 3],
+    planned_path: Option<Vec<KinematicsDto>> }                        // a draft; Design note 4
+```
+
+In `crates/hyperion-protocol/src/bulk.rs`, built by R03.T10.a:
+
+```rust
 pub struct BulkManifestDto { chunks: u32, bytes: u64 }               // for R06's and R09's kinds
 ```
 
@@ -172,8 +199,12 @@ no type (the crate holds wire types, and a binary frame is not JSON).
 ```rust
 pub(crate) mod subscriptions { Subscriptions, SubscriptionId, PendingPush, Merge }
 pub(crate) mod scene { SceneService, SceneClock, ShipStandIn, SceneCore, SceneDelta,
-    SceneKnowledge, GrantAsked, CraftSource, NoCraft, CraftState }
+    SceneKnowledge, GrantAsked, CraftSource, NoCraft, CraftState,
+    Clock, Ship,                                // the traits sessions implement (Design note 2)
+    is_large_notification }                     // Design note 14
+pub(crate) const SCENE_FRAME_ENTRY: f64;       // 0.9: enter a system's frame at ratio ≤ 0.9
 pub(crate) mod bulk { encode_header, BinaryFrameHeader, chunk, Answer, BulkPayload }
+pub fn tap_socket(tcp: &tokio::net::TcpStream); // the low-water mark, for every serve site
 // limits.rs
 pub const MAX_BINARY_FRAME_BYTES: usize;        // 262_144, header included (Design note 11)
 pub const BULK_QUEUED_BYTES: usize;             // 262_144: one chunk in the queue at a time
@@ -184,8 +215,13 @@ pub const SCENE_HEARTBEAT: Duration;            // 1 s
 pub const CRAFT_PUSH_INTERVAL: Duration;        // 15.625 ms, the 64 Hz tick
 ```
 
-`TestClient::next_notification()` and `TestClient::next_binary()` in
+`TestClient::next_notification()` (R03.T5.b) and `TestClient::next_binary()` (R03.T10.b) in
 `crates/hyperion-server/tests/common/mod.rs`.
+
+In the sim, added by agreement in plan 03's file (R03.T7):
+`galaxy::frame::candidate_at(galaxy, record: &SystemRecord, ship: &GalacticPosition, t) ->
+Option<FrameCandidate>`, the candidate `frame_at` forms for one system, so that a caller can read
+its ratio.
 
 ### Client
 
@@ -197,11 +233,15 @@ chunks).
 
 In `apps/hyperion/src/renderer/src/lib/scene/`: `sceneWire.ts` (`toSceneModel`,
 `applySceneNotification`, over `lib/system/bodiesWire.ts`'s `toSystemBodiesModel`), `sceneClock.ts`
-(`renderTime(clock, receivedMs, nowMs): UniverseTime`), `apparent.ts` (`apparentPosition`,
-`sceneAt(model, observer, time) -> SceneFrame` with each body's and star's `geometricM`,
-`apparentM`, `emitted` and, for bodies, `hillRadiusM`, and the ship's local body named),
-`cameraReports.ts` (`CameraReporter`, at most 4 Hz and on a frame change), `useScene.ts`
-(`useScene(requests, universe, cameras) -> SceneView`, stale on link loss).
+(`renderTime(clock, receivedMs, nowMs): UniverseTime`), `craft.ts`
+(`predictedPath(craft, untilS) -> ReadonlyArray<CraftPose>`: the planned path when the craft has
+one, else its pose extrapolated in a straight line), `apparent.ts` (`apparentPosition`,
+`sceneAt(model, observer, time, previousLocal?) -> SceneFrame` with each body's and star's
+`geometricM`, `apparentM` and `emitted`, and for bodies `level` (its `DetailLevelDto`), `seen`
+(true for a body placed by the server's `SeenPositionDto`) and `hillRadiusM` (`null` below
+`mass_and_orbit`), and the ship's local body named), `cameraReports.ts` (`CameraReporter`, at most
+4 Hz and on a frame change), `useScene.ts` (`useScene(requests, universe, cameras) -> SceneView`,
+whose `frameAt(nowMs)` calls `sceneAt` at the render time; stale on link loss).
 
 ## Consumes
 
@@ -209,7 +249,8 @@ In `apps/hyperion/src/renderer/src/lib/scene/`: `sceneWire.ts` (`toSceneModel`,
   `RequestError`, `ErrorCode::BadRequest` with `field`), its reservation of `notification`, of
   `response_part`'s rule that parts precede the terminal `response`, and of binary frames for bulk;
   its table of reserved kinds, which a new kind enters first; `requests::{Handler, Handlers,
-kind, is_large}` and the connection task in `ws.rs`; `outbound::{Outbound, Held, Writer}` and
+kind, is_large}` (`is_large` is private today and becomes `pub(crate)` in R03.T5.a) and the
+  connection task in `ws.rs`; `outbound::{Outbound, Held, Writer}` and
   `limits::{OUTBOUND_BYTES, OUTBOUND_QUEUE_FRAMES, WRITE_TIMEOUT, MAX_IN_FLIGHT_REQUESTS,
 MAX_INBOUND_FRAME_BYTES}`; `compute::{CpuPool, Priority, CancelToken}`; `testing::Harness`;
   `TestClient`; `RequestClient` in `@hyperion/protocol`; `PROTOCOL_VERSION` and its rule
@@ -222,21 +263,34 @@ MAX_INBOUND_FRAME_BYTES}`; `compute::{CpuPool, Priority, CancelToken}`; `testing
 - **Galaxy plan 14:** `PlanetarySystem::{position_at, body_at, snapshot_at}`, `SystemContext`,
   `BodyIndex`, `BodyOrbit::valid_until`; on the wire `SystemBodiesDto`, `BodySummaryDto`,
   `BodyOrbitDto`, `DetailLevelDto`, `SectionDto`; the server's body cache (`AppState::bodies`,
-  `requests::system::bodies_of`) and converter (`convert::planetary::system_bodies`); the client's
-  `toSystemBodiesModel` (`lib/system/bodiesWire.ts`) and `composePosition` and `positionAt`
-  (`lib/orbit.ts`). **Asked of plan 14** (Design note 8): `PlanetarySystem::state_at(ctx, index,
-t) -> Result<Option<(SystemPosition, SystemVelocity)>, ResolveBodyError>`, a body's velocity
+  `requests::system::bodies_of`, private today and made `pub(crate)` by R03.T8.a) and converter
+  (`convert::planetary::system_bodies`), with `BodyRecord::degrade(level)` for a body's own grant;
+  `hill_radius` (`planetary/derive/limits.rs`); the client's `toSystemBodiesModel`
+  (`lib/system/bodiesWire.ts`), `layoutHierarchy` (`lib/system/hierarchy.ts`) and
+  `composePosition`, `positionAt` and `stateAt` (`lib/orbit.ts`). **Asked of plan 14** (Design
+  note 8): `PlanetarySystem::state_at(ctx, index, t) -> Result<Option<(SystemPosition,
+SystemVelocity)>, ResolveBodyError>`, a body's velocity
   beside the position `position_at` already gives, sharing its arithmetic.
 - **Galaxy plan 11:** `stellar::multiplicity::{SystemHierarchy, star_positions_at}`. **Asked of
   plan 11**: `star_states_at(h, t, out)`, the same walk with each star's velocity.
 - **Galaxy plans 01 and 03:** `coords::{Frame, SystemPosition, SystemVector, SystemVelocity,
 BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
-  `galaxy::frame::{frame_at, FRAME_HYSTERESIS}`.
-- **R02:** nothing at build time. R02 consumes `useScene` and `sceneAt`, and owns the camera whose
-  poses `CameraReporter` sends. Asked of R02 (and of R07 and R08, which read the same rule): only
-  the ship's local body is drawn geometrically; a free camera's other local body is drawn at its
-  apparent position like every other body (Design note 7). R02 still chooses the camera's frame,
-  for which `sceneAt` gives each body's Hill radius, as R02 asks.
+  `galaxy::frame::{frame_at, FrameCandidate, FRAME_HYSTERESIS}`, the galactic centre's
+  `galaxy.potential().tidal_radius(m, p)`, and `units::consts::GRAVITATIONAL_CONSTANT`. **Asked of
+  plan 03**: `galaxy::frame::candidate_at` (under Provides), added by R03.T7 in `frame.rs` by
+  agreement, with the existing rule untouched. `observe::retarded`'s private `before` becomes
+  `pub(super)` for the in-system sibling (R03.T2).
+- **R02:** `selectCameraFrame` (R02.T8.a), the TypeScript twin of `select_body_frame`, by which
+  `sceneAt` names the ship's local body (R03.T13 only). R02 consumes `useScene` and `sceneAt`, and
+  owns the camera whose poses `CameraReporter` sends. Asked of R02, which applies it in its Consumes
+  of this plan (and of R07 and R08, which read the same rule): only the ship's local body is drawn
+  geometrically; a free camera's other local body is drawn at its apparent position like every other
+  body (Design note 7). R02 still chooses the camera's frame, for which `sceneAt` gives each body's
+  Hill radius, as R02 asks. Asked by R02 and provided here: `tidal_radius_m` on
+  `SceneArrivalDto::System`, which R02.T17 reads for the free camera's clamp.
+- **R08 and R11** read two things `sceneAt` and the scene model give for them: each body's granted
+  `DetailLevelDto` (R08's rebuilds on a level change) and `predictedPath` of a craft (R11's
+  `couldTouch`).
 
 ## Design notes
 
@@ -247,7 +301,18 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    it, with `Scene` as the only topic, and records in plan 12 that P12.T9 then adds only its
    `Alerts` topic, state and notification body, `alerts_observer` and `alerts_acknowledge`. If
    P12.T9 has landed first, R03.T5 shrinks to adding the `Scene` variants. Either way the kind
-   strings stay plan 12's in plan 04's table; this plan adds its own two (R03.T1).
+   strings stay plan 12's in plan 04's table; this plan adds its own two (R03.T1). The Rust types
+   go in `crates/hyperion-protocol/src/envelope.rs` beside `ServerMessage`, not in plan 12's
+   `alerts.rs`, which then holds only the `Alerts` payloads.
+
+   One departure from P12.T9, recorded in R03.T1's note there: P12.T9 says
+   `RequestClient::handleServerMessage` must leave a `notification` unconsumed so that a
+   subscription helper outside it sees it. Here the helper lives on `RequestClient` itself
+   (`packages/protocol/src/subscriptions.ts`, re-exported from `index.ts`), so
+   `handleServerMessage` routes the notification to its subscription and returns `true`, and the
+   link's own switch never sees one. One owner for routing is simpler than two, and a notification
+   for an unknown subscription is consumed and dropped in one place.
+
 2. **A ship stand-in and a scene clock, per universe, until sessions exist.** The brainstorm's scene
    is about the ship, and its time is the session's; neither exists. Plan 12's Design note 9 met the
    same gap with an observer the client sets. Here the stand-in must be shared, because two clients
@@ -259,23 +324,38 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    subscription of the universe is pushed the change. The clock runs on the server's monotonic
    clock and stops at the clock window's edge in state `window_limit`. None of this is saved. When
    sessions exist the session's clock and ship replace it, `scene_ship` answers `bad_request` for a
-   universe with a session, and the service's core, which takes a `Clock` and a `Ship` by trait,
-   does not change.
+   universe with a session, and the service's core, which takes a `Clock` and a `Ship` by trait
+   (`scene::{Clock, Ship}`, which `SceneClock` and `ShipStandIn` implement), does not change.
 3. **What the scene holds.** The scene's system is the ship's frame by plan 03's `frame_at`, with
-   the previous scene system as `current`, so that plan 03's `FRAME_HYSTERESIS` stops it flickering
-   at a sphere of influence. In a system the scene holds plan 14's `SystemBodiesDto` for it at the
-   scene time and the granted level: every body, with its orbit as `BodyOrbitDto` (parent, elements,
-   `valid_until`), and the system's stars and hierarchy in `hosts`, which the local star's disc
-   needs (R06). A system's bodies are some tens to about a hundred, so the whole system is sent,
-   and the cameras do not thin it. In the galactic frame the scene holds no system. The star field
+   the previous scene system as `current`. That rule's `FRAME_HYSTERESIS` acts only between rival
+   systems: a ship that leaves its current system's sphere (distance ÷ tidal radius above 1) is
+   re-ranked as if it had no frame, so a stand-in drifting across one sphere's own boundary would
+   flicker in and out (`crates/hyperion-sim/src/galaxy/frame.rs`, `select_frame`; the README's
+   brainstorm correction for "The frame-change scene"). The scene core adds a Schmitt band at the
+   boundary, as R02's Design note 6 does for body frames: the scene enters a system that `frame_at`
+   names only once the ship's ratio to that system's sphere is at most `SCENE_FRAME_ENTRY` = 0.9,
+   R02's `BODY_FRAME_ENTRY`, and leaves it only when `frame_at` no longer names it (a ratio above
+   1). The ratio comes from `galaxy::frame::candidate_at`, the candidate `frame_at` forms for one
+   system, which R03.T7 exposes in plan 03's file; the arrival states that candidate's tidal
+   radius at the arrival time as `tidal_radius_m`, to which R02's free camera is clamped (R02
+   Design note 7). In a system the scene holds plan 14's
+   `SystemBodiesDto` for it at the scene time, built at the level asked, and each body's record
+   degraded to its own grant (Design note 13): every body, with its orbit as `BodyOrbitDto`
+   (parent, elements, `valid_until`) where its grant reaches `mass_and_orbit`, and the system's
+   stars and hierarchy in `hosts`, which the local star's disc needs (R06). A system's bodies are
+   some tens to about a hundred, so the whole system is sent, and the cameras do not thin it. In the
+   galactic frame the scene holds no system. The star field
    is not in it: the sky is R06's request. Craft are the ship's contacts in the scene's reach,
    none until sessions and sensors.
 4. **The state and its pushes.** A subscription is answered with the whole state; each notification
-   carries only what changed, and always the clock (time, rate, state) and a `sequence` that grows
-   by one per notification, so that the client can tell a lost frame from a conflated one (Design
-   note 5). What changes, and when: the system, on arrival and on leaving (`arrival`); a body, when
-   the scene time passes its `valid_until` or what the ship knows of it changes (`bodies`, whole
-   `BodySummaryDto`s, latest wins); the ship stand-in and the clock, when `scene_ship` changes them;
+   carries only what changed, and always the clock (time, rate, state) and a `sequence`. The
+   sequence is numbered when a notification is sent, not when a change is merged, so it grows by
+   exactly one per notification sent, conflated or not (Design note 5); since the socket loses
+   nothing, a gap or a step back is a server bug, which the client reports as an error and then
+   resubscribes. What changes, and when: the system, on arrival and on leaving (`arrival`); a body,
+   when the scene time passes its `valid_until` or what the ship knows of it changes, and a body
+   placed by a seen position at every heartbeat (Design note 13) (`bodies`, whole `SceneBodyDto`s,
+   latest wins); the ship stand-in and the clock, when `scene_ship` changes them;
    craft, at every tick while any are in the scene (`craft`, the whole list); and a heartbeat of the
    clock alone every `SCENE_HEARTBEAT`, 1 s. The brainstorm's figures, 250–300 bytes a body and 400
    a craft, about 0.25 MB/s for 100 bodies and 10 craft (Runtime and code shape), are re-measured by
@@ -285,7 +365,12 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    `surface_revisions` (a revision per body), each an optional field added by its plan, which moves
    no version. `SceneCraftDto` is a draft, the least a renderer needs of a craft (a hull
    definition's key, a pose and its rates), and belongs to the sessions plan, which may reshape it
-   freely while nothing sends it.
+   freely while nothing sends it. Its optional `planned_path` is the flight computer's predicted
+   path as poses at stated times, which the sessions plan and the flight model fill; R11's
+   `couldTouch` sweeps a descending craft's footprint along it. The client's
+   `predictedPath(craft, untilS)` returns it where present and otherwise extrapolates the pose in a
+   straight line at its velocity, which is exact for nothing but is the only honest guess without
+   the flight model; R11 widens its sweep for that case.
 5. **A slow reader gets the latest scene, not a backlog.** Pushes at 64 Hz to a client that has
    stopped reading would fill plan 04's queue and then its byte budget. Each subscription therefore
    keeps one pending push, into which every new change is merged before it is queued: the clock, the
@@ -304,7 +389,8 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    (`bad_request` naming `cameras`: in a system, a position outside the system's sphere of influence
    or in a frame of another system or of a body not in the scene; in the galactic frame, one in any
    system's frame, since the ship is in none), and will use them to bound what cannot all be sent,
-   which from R09 on is the coarse field's cells and later the contacts drawn as hulls. Poses are
+   which will be the contacts drawn as hulls; R09 sends every surveyed cell (at most about 12 MB)
+   and does not bound them by camera (R09 Design note 19). Poses are
    neither saved nor echoed to other subscriptions.
 7. **Drawn positions are the ship's apparent positions, computed on the client from the elements**
    (researched 2026-09-29). The observer enters only at reception: τ solves |x_B(t − τ) − x_o(t)| =
@@ -328,20 +414,53 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    never the camera, as the free camera's label says; each view then differences A_B against its own
    camera, the camera's own velocity and light time never entering.
 
-   The iteration starts from the present distance and corrects until the light time changes by at
-   most 1 ns (inclusive: τ is rounded to the nanosecond by plan 12's `light_time`, and a strict test
-   could cycle between two adjacent nanoseconds), with a cap of 10 corrections past which it returns
-   `NotConverged`. The contraction factor is the source's radial speed over c, and the observer's
-   velocity does not enter. Typically two or three corrections are needed, but not always: at 100 au
-   and 250 km/s (a hot Jupiter) four; at 10⁴ au and 300–800 km/s (a wide companion, a close compact
-   pair) five or six; at a system's reach, some 2.7 × 10⁵ au, at 800 km/s six. The brainstorm's "at
-   most three, as SPICE's CN does" fails in the game's own systems (SPICE's three iterations are for
-   Solar System speeds, `spkezr_c`). A fixed point is kept rather than Newton's method, which fails
-   when τ spans many orbits of a close pair.
+   The iteration (researched 2026-09-29) starts from τ₀ = `light_time`(|x_B(t) − x_o(t)|), the
+   present distance. Correction k ≥ 1 evaluates the source again, τ_k = `light_time`(|x_B(t −
+   τ_{k−1}) − x_o(t)|), and δ_k = |τ_k − τ_{k−1}| on the rounded values. It stops at the first k
+   with δ_k ≤ 1 ns (inclusive: τ is rounded to the nanosecond by plan 12's `light_time`, and a
+   strict test could cycle between two adjacent nanoseconds), or, from k = 2, at the first δ_k ≥
+   δ_{k−1}, and returns τ_k with `corrections` = k, the confirming correction counted; past a cap of
+   10 it returns `NotConverged`. The second rule is needed far out: beyond about 10⁴ au an `f64` τ
+   steps by 15–30 ns (its ulp is 2.2 × 10⁻¹⁶ τ; the distance's ulp at 2.7 × 10⁵ au is 8 m, 27 ns),
+   and for an approaching source the rounded map has, with a probability of about β_r, no fixed
+   point and alternates between two values; a true contraction strictly shrinks, so a change that
+   stops shrinking is rounding noise. For uniform radial motion the map is linear and δ_k = τ₀ β_r^k,
+   β_r the source's radial speed over c; the observer's velocity does not enter. Purely transverse
+   motion contracts by about β_t² and needs about two. The worst, radial, cases:
 
-   Only the ship's local body, the body in whose Hill sphere the ship is or whose terrain is streamed
-   for the ship, where τ is milliseconds, is drawn geometrically at the present, in its own frame, so
-   that terrain and collision agree; its time-varying states are still drawn at their emitted times.
+   | Source                 | τ₀           | Last change above 1 ns | Corrections   |
+   | ---------------------- | ------------ | ---------------------- | ------------- |
+   | 10 au, 30 km/s         | 4,990 s      | δ₃ = 5 ns              | 4             |
+   | 100 au, 250 km/s       | 4.99 × 10⁴ s | δ₄ = 24 ns             | 5             |
+   | 10⁴ au, 300 km/s       | 4.99 × 10⁶ s | δ₅ = 5.0 ns            | 6             |
+   | 10⁴ au, 800 km/s       | 4.99 × 10⁶ s | δ₆ = 1.8 ns            | 7, at times 6 |
+   | 2.7 × 10⁵ au, 800 km/s | 1.35 × 10⁸ s | δ₆ = 49 ns             | 7 (or 8)      |
+
+   So two to four corrections are typical within a system's planets, a hot Jupiter at 100 au needs
+   five, and a system's reach seven, all within the cap. The brainstorm's "at most three, as SPICE's
+   CN does" fails in the game's own systems (SPICE's three iterations are for Solar System speeds,
+   `spkezr_c`). A fixed point is kept rather than Newton's method, which fails when τ spans many
+   orbits of a close pair. Sources: Banach's fixed-point analysis of τ ↦ |x_B(t − τ) − x_o| ÷ c, whose
+   Lipschitz constant is |v_B · r̂| ÷ c; `light_time` in `crates/hyperion-sim/src/observe/retarded.rs`,
+   which adds 0.5 ns and floors.
+
+   For a source and an observer moving together at a common velocity u, the Newtonian light-time
+   solve and the Lorentz aberration combine exactly: with r = r₀ − u τ and κ u² = γ − 1 for
+   κ = γ² ÷ (c² (γ + 1)), the τ terms cancel and r′ = r₀ + (γ − 1)(r₀ · û) û, the rest-frame
+   separation, independent of τ and so of its rounding (the Lorentz boost of Jackson, _Classical
+   Electrodynamics_, 3rd ed., eq. 11.19). Its angle to the present vector is at most (γ − 1) ÷ 2 ≈
+   β² ÷ 4: 2.5 × 10⁻⁹ rad at 30 km/s, 2.5 × 10⁻⁵ rad at 3,000 km/s. The brainstorm's "equals the
+   present relative position" for a comoving camera holds to that.
+
+   Only the ship's local body, where τ is milliseconds, is drawn geometrically at the present, in its
+   own frame, so that terrain and collision agree; its time-varying states are still drawn at their
+   emitted times. Which body that is follows one rule for the camera and the ship alike, R02's
+   (its Design note 6): the innermost body whose Hill sphere, at pericentre, holds the ship, entered
+   at a ratio of at most `BODY_FRAME_ENTRY` = 0.9 and left above 1, with the galaxy's rank among
+   overlapping siblings. `sceneAt` applies it through R02.T8.a's `selectCameraFrame` to the ship
+   stand-in's geometric present position, taking the previous frame's local body as current, so a
+   body whose terrain is streamed for a landing ship is its local body by the same rule, and the
+   scene and the view can never name different bodies.
    A free camera's local body, if it is another, is drawn apparent like every other body, with its
    orientation at the emitted time: drawn geometrically among apparent neighbours it would sit, for a
    camera at Jupiter with the ship at Earth, some 80,000 km off its moons' frame, about a fifth of
@@ -362,13 +481,30 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    orbits. A warm start from the previous frame's τ brings it to about one correction, and a few
    hundred bodies cost a few thousand Kepler solves, well under a millisecond. The client mirrors the
    sim exactly where it matters: τ rounded to the nanosecond, the emitted time formed in
-   `UniverseTime` as t less a `Span`, the same stop rule and cap. The sim's `retarded_in_system` is
-   the reference, and its golden vectors pin the client to |A_client − A_sim| ≤ 1 mm + 10⁻¹²
-   (|x_B(t − τ)| + |x_o(t)|) in system-frame magnitudes, with the emitted times equal as integer
-   nanoseconds: an `f64`'s step is about 1 mm at 30–60 au and 2 mm at 60–120 au, so a bound on the
-   apparent vector alone could not be met far out, and 30 mm at 100 au seen from 10⁵ km is a
-   three-thousandth of a telescopic pixel. R03.T13 first measures the agreement and pins at the larger
-   of this bound and ten times what it measures.
+   `UniverseTime` as t less a `Span`, the same stop rules and cap, norms as a sum of squares and a
+   square root (never `Math.hypot`). The sim's `retarded_in_system` is the reference, and its golden
+   vectors pin the client (researched 2026-09-29). The two sides agree far better than the orbit
+   golden's 10⁻⁹ (`lib/orbit.test.ts`): the mean anomaly is reduced by an exact remainder on both
+   (`fractionOfPeriod` and `reduceToHalfTurn` in `lib/orbit.ts`, bit for bit with the sim's), the
+   basic operations and the square root are correctly rounded on both (IEEE 754-2019; ECMAScript
+   §6.1.6.1), and V8's `Math.sin`, `Math.cos` and `Math.cbrt` and the `libm` crate are ports of the
+   same fdlibm, at worst about 1 ulp apart, which Kepler's equation amplifies by 1 ÷ (1 − e cos E).
+   Some 10⁻¹⁶ to 10⁻¹⁵ of the magnitudes is expected, perhaps 10⁻¹⁴ near e = 0.99. With
+   Σ = |x_B(t − τ)| + |x_o(t)| in system-frame magnitudes, the bound is
+
+   |A_client − A_sim| ≤ 1 mm + 10⁻¹⁴ Σ + (|v_B| + γ |v_o|) |Δemitted|,
+
+   about 0.3 m at 100 au (Σ ≈ 3 × 10¹³ m), 3 × 10⁻⁹ rad seen from 10⁵ km, a three-hundredth of a
+   telescopic pixel; the 1 mm floor covers an `f64`'s step, about 1 mm at 30–60 au and 2 mm at
+   60–120 au, so a bound on the apparent vector alone could not be met far out. The emitted times
+   are not required equal: a difference δ in |r| moves τ by δ ÷ c, and the sides may round to
+   adjacent nanoseconds, so |Δemitted| ≤ 1 ns + ⌈(1 mm + 10⁻¹⁴ Σ) ÷ c⌉ ns, which also covers τ's
+   own `f64` step far out. Absolute system-frame coordinates step by 8 m at a system's reach, so an
+   observer within 10⁵ km of a source there sees about 10⁻⁷ rad of noise in the sim itself, which
+   no client bound can beat. R03.T13 first measures the agreement and pins at the larger of this
+   bound and ten times what it measures, and fails if the measurement exceeds 10⁻¹² Σ, which would
+   be a bug to fix rather than a bound to widen. The coefficient 10⁻¹⁴ is of medium confidence and
+   that measurement settles it.
 
 8. **The in-system functions are built here, in plan 12's module; velocities are asked of plans 14
    and 11.** Plan 12 has no task for `SystemTrajectory` or `retarded_in_system`, and plan 14 none
@@ -381,8 +517,11 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    by agreement, with the position half left as the existing code path, and records it in that
    plan's as-built notes, and the owning plan's goldens prove its output unchanged. A body not
    present at the emitted time (not yet formed, or destroyed within the light time) is
-   `NotPresentThen`; one destroyed less than a light time ago is still seen, since its light is
-   still arriving, and the scene keeps its last elements until then (Risks).
+   `NotPresentThen`. Physically, a body destroyed less than a light time ago is still seen, since
+   its light is still arriving; the scene does not model that. It sends each body's current record
+   only, so the client leaves such a body out as soon as its record says it is gone, and draws a
+   body whose elements changed at a `valid_until` with its new elements at the emitted time. The
+   error lasts at most one light time and is accepted under Risks, with the fallback there.
 9. **Time on the client.** Every push states the scene time and rate. The client keeps the latest
    with the `performance.now()` at which it arrived and renders at t + (now − received) × rate, as a
    `UniverseTime` of whole seconds and nanoseconds so that a thousand years of seconds keep their
@@ -419,7 +558,9 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     rest of the chunk being written, the unsent bytes of the kernel's send buffer, which Linux
     autotunes up to `tcp_wmem`'s maximum of up to 4 MB, and the bytes in flight. Three bounds follow.
     Chunks are `MAX_BINARY_FRAME_BYTES`, 262,144 bytes with the header, well within the brainstorm's
-    "at most 1 MB" (a 15 MB field is 60 of them). They are queued one at a time, the next only once
+    "at most 1 MB". Each carries 262,120 payload bytes after the 24-byte header, so a payload of
+    L bytes is ⌈L ÷ 262,120⌉ chunks: 58 for a field of 15 × 10⁶ bytes, 61 for one of 15 MiB
+    (15,728,640 bytes). They are queued one at a time, the next only once
     the bulk bytes queued fall under `BULK_QUEUED_BYTES`, one chunk, while text frames queue as
     before. And on Linux every accepted socket gets `TCP_NOTSENT_LOWAT` of 65,536 bytes
     (`TCP_NOTSENT_LOWAT_BYTES`), under which the kernel adds no new buffers once that much is unsent
@@ -427,8 +568,11 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     2018, "HTTP/2 Prioritization with NGINX"). It is set without `unsafe` in this workspace: socket2
     0.6.5, already in the tree through tokio and added as a direct dependency with its `all` feature,
     has `Socket::set_tcp_notsent_lowat` for Linux and Android, reached through
-    `socket2::SockRef::from(&tcp)` in axum 0.8.9's `ListenerExt::tap_io`, in `main.rs` and in the test
-    server; a failure is logged at `warn` and the connection goes on. socket2 does not expose it on
+    `socket2::SockRef::from(&tcp)` in axum 0.8.9's `ListenerExt::tap_io`. One library function,
+    `hyperion_server::tap_socket`, does it, and all three places that call `axum::serve` use it:
+    `main.rs`, the unit-test `Harness` in `src/testing.rs` and the integration harness in
+    `tests/common/mod.rs`, so every scene and bulk test runs with the option set. A failure is
+    logged at `warn` and the connection goes on. socket2 does not expose it on
     macOS, and Windows has none, so there the chunk bound alone holds. At 40 Mbit/s of Wi-Fi a push
     then waits about 52 ms behind a chunk and 13 ms behind the kernel, plus the bytes in flight, under
     the main screen's 100 ms loop; at 1 Gbit/s about 2 ms. With 1 MB chunks it would be over 200 ms
@@ -449,33 +593,65 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     and `RequestClient::handleServerMessage` has no case for an unknown `type`. The version stays 2,
     and R03.T1 pins it with a test that a connection which subscribes to nothing and asks for no bulk
     receives only text frames of the existing types. This is the plan's ruling on a question the
-    brainstorm left open; it reverses if either message is ever sent unasked.
-13. **Knowledge as a seam.** The scene is built through a `SceneKnowledge` trait: the level granted
-    for each body and the craft that are contacts. Production uses `GrantAsked`, the level asked and
-    no craft, as plan 14's handlers grant today; the sensors plan replaces it. The Knowledge-bound
-    test drives the scene with a restrictive fake and places cameras anywhere, so that the rule is
-    tested before anything restricts it.
+    brainstorm left open; it reverses if either message is ever sent unasked. The ruling is a
+    brainstorm revision like the README's corrections, drafted for the owner's revision pass by
+    R03.T1.
+13. **Knowledge as a seam, a level per body.** The scene is built through a `SceneKnowledge`
+    trait: the level granted for each body and the craft that are contacts. Production uses
+    `GrantAsked`, the level asked for every body and no craft, as plan 14's handlers grant today;
+    the sensors plan replaces it. Plan 14's `SystemBodiesDto` has one `granted` for the whole list,
+    and its converter degrades the whole snapshot to it
+    (`crates/hyperion-server/src/convert/planetary.rs`, `system_bodies`), so a mixed grant cannot
+    ride that field. The scene therefore builds the system at the level asked, degrades each body's
+    record to its own grant with plan 14's `BodyRecord::degrade`, which never adds detail, and
+    carries the grants beside it: `SceneSystemDto { system, grants }`, one `BodyGrantDto` per body
+    in index order, and every re-sent body as a `SceneBodyDto` with its `level`. The system's own
+    `granted` then states the level asked, the most any record holds, and nothing in plan 14's DTO
+    changes.
+
+    A body granted only `contact` has no orbit and no mass on the wire, only its position at the
+    record's time (plan 14's `BodySummaryDto`), so the client can neither propagate nor retard it.
+    For such a body the server evaluates it itself: the core runs `retarded_in_system` from the
+    ship stand-in at the push's time over the body's `BodyTrack` and sends the result as
+    `seen: SeenPositionDto { apparent_m, emitted }`, which is what a sensor contact is, a direction
+    and range as seen. It re-sends such bodies at every heartbeat, so a contact is at most 1 s of
+    scene time stale, which at 100,000× is a day of motion and is labelled as a contact by the
+    view. The client draws a seen body at `apparent_m` without extrapolation, gives it no Hill
+    radius (`null`), and never computes a geometric position for it. Hill radii need the body's mass
+    and its orbit, so they are `null` below `mass_and_orbit` as well. The Knowledge-bound test
+    drives the scene with a restrictive fake and places cameras anywhere, so that the rule is tested
+    before anything restricts it.
+
 14. **Size classes and serialisation.** A scene state or an arrival holds a whole `SystemBodiesDto`,
-    so `Subscribed` for the scene is a large body (`requests::is_large`) and is serialised on the
-    pool, and so is a notification carrying an arrival; the rest are small and serialised on the
-    runtime. `scene_ship`, `scene_cameras` and `unsubscribe` are small.
+    so `Subscribed` for the scene is a large body (`requests::is_large`, which inspects the
+    subscription's state) and is serialised on the pool. A notification is not a `ResponseBody`, so
+    it has its own rule, `scene::is_large_notification`: one carrying an `arrival` is serialised on
+    the pool, the rest on the runtime. `scene_ship`, `scene_cameras` and `unsubscribe` are small.
 
 ## Tasks
 
-T1 comes first. T2 and T3 are a chain in the sim and can run beside everything on the protocol.
-T4 precedes T5, whose subtasks run in order; T6 follows T5.a; T7 follows T6; T8 follows T5.b and
-T7; T9 follows T8. T10 (binary frames) can start after T1 and runs beside T4–T9; T11 follows T10.a.
-T12 follows T5.c; T13 follows T3 and T12; T14 follows T8, T11 and T13. T15 closes.
+T1 comes first, and T5.a waits for the owner's sign-off that T1 asks for. T2 and T3 are a chain in
+the sim and can run beside everything on the protocol. T4 precedes T5, whose subtasks run in
+order; T6 follows T5.a; T7 follows T3 and T6, since it evaluates contacts with `BodyTrack`; T8
+follows T5.b and T7; T9 follows T8. T10.a (binary frames) can start after T1 and runs beside
+T4–T9; T10.b follows T5.b and T10.a, and its heartbeat measurement follows T8.a; T11 follows
+T10.a. T12 follows T5.c; T13 follows T3, T12 and R02.T8.a; T14 follows T8, T11 and T13. T15
+closes.
 
 ### R03.T1 Reconcile, reserve the kinds, rule question 21
 
 Check what exists: whether P12.T9 has landed (`SubscribeRequest`, `ServerMessage::Notification` in
 `crates/hyperion-protocol/src/envelope.rs`), whether plan 14's `state_at` and plan 11's
 `star_states_at` exist, and the names under Consumes against the tree; record the findings in this
-plan. Edit plan 04's table of reserved kinds (`docs/agent/plans/galaxy-generation/04-server-and-protocol.md`,
+plan. Edit plan 04's table of reserved kinds
+(`docs/agent/plans/galaxy-generation/04-server-and-protocol.md`,
 "Extending the convention") with a row for this plan, `scene_ship` and `scene_cameras`, and a note
 that `subscribe` and `unsubscribe` stay plan 12's and may be built by R03 to plan 12's design; add
-the matching note to plan 12's P12.T9. Add the test of Design note 12 to
+the matching note to plan 12's P12.T9, which also records Design note 1's departure (the helper on
+`RequestClient` consumes notifications). Both edits are amendments of galaxy plans, drafted for
+their owner: the README lists them under "Awaiting the owner", and R03.T5.a, which adds the two
+kinds, does not start until they are accepted. Draft for the brainstorm's revision pass the
+closure of open question 21 by Design note 12. Add the test of Design note 12 to
 `crates/hyperion-server/tests/websocket.rs`: a client that sends `hello`, a range query and a ping
 receives only text frames that parse as today's `ServerMessage`. Extend the doc comment of
 `PROTOCOL_VERSION` with the ruling and its condition.
@@ -484,32 +660,38 @@ Files: the two plan documents, `crates/hyperion-server/tests/websocket.rs`,
 `crates/hyperion-protocol/src/lib.rs`. Acceptance: `npx prettier --check` on both plans;
 `grep -n scene_ship docs/agent/plans/galaxy-generation/04-server-and-protocol.md`;
 `cargo test -p hyperion-server --test websocket`; `cargo test -p hyperion-protocol
-protocol_version_is_two`.
+protocol_version_is_two`; the owner signs off the two galaxy-plan amendments and the question 21
+draft.
 
 ### R03.T2 In-system retarded evaluation
 
 Build `SystemObserver`, `BuildSystemObserverError`, `SystemTrajectory`, `InSystemRetardation`,
 `TraceInSystemError` (with `NotConverged`), `retarded_in_system` and the two constants (Design note
 7), in the manner of plan 12's `retarded` (`light_time` for metres to a `Span` rounded to the
-nanosecond; `before` for the subtraction): the light time by the fixed point, stopping when a
-correction changes it by at most 1 ns and refusing after 10; the apparent point by the Lorentz form
-of Design note 7, in its stable arrangement with no division by |v_o|. The doc comments cite Design
+nanosecond; `before` for the subtraction, made `pub(super)` in `observe/retarded.rs`): the light
+time by the fixed point, stopping when a correction changes it by at most 1 ns, or from the second
+correction on when a change is no smaller than the one before, and refusing after 10; the apparent
+point by the Lorentz form of Design note 7, in its stable arrangement with no division by |v_o|. The
+doc comments cite Design
 note 7's sources: NAIF's `spkezr_c`, `spkaps_c` and `stelab_c` and the Aberration Corrections
 Required Reading, the NOVAS C3.1 guide, and the Explanatory Supplement, whose section numbers are
 re-checked against the book first, as the Figures rule requires.
 
-Files: `crates/hyperion-sim/src/observe/{mod.rs,in_system.rs}`.
+Files: `crates/hyperion-sim/src/observe/{mod.rs,in_system.rs,retarded.rs}`.
 
 Tests:
 
 - A source at rest is seen at its own position, with τ = d ÷ c to the nanosecond; a source in
   uniform motion against the closed-form root of the light-cone quadratic in the system frame, to
   1 ns.
-- A source 100 au from the observer on a 100 km/s orbit converges to at most 1 ns in three
-  corrections, and one 2.7 × 10⁵ au away at 800 km/s within the cap; each correction's change is at
-  most β_r times the one before, β_r the source's radial speed over c; a source rigged to sit on a
-  rounding boundary between two nanoseconds stops rather than cycling; a source faster than the cap
-  allows returns `NotConverged`.
+- Counts, on uniform radial tracks (an orbit bends within τ and gives no exact count): a source
+  receding radially at 100 km/s from a stationary observer 100 au away (τ₀ = 49,900.478 s,
+  β = 3.33564 × 10⁻⁴; δ₁ = 16.645 s, δ₂ = 5.552 ms, δ₃ = 1,852 ns, δ₄ = 0.62 ns) stops after
+  exactly 4 corrections, with δ_k ÷ δ_{k−1} = β to 10⁻⁶ relative for k ≤ 3; the same at 5 km/s
+  stops after 3 (δ₃ = 0.23 ns); one 2.7 × 10⁵ au away approaching at 800 km/s stops within the cap,
+  at 7 or 8 (Design note 7's table); a source rigged so that the rounded map has no fixed point,
+  alternating between two adjacent values, stops by the non-shrinking rule rather than running to
+  the cap; a source faster than the cap allows (β_r near 1) returns `NotConverged`.
 - An observer at β = 0.01 sees a fixed source at an angle θ from its velocity at the relativistic θ′,
   cos θ′ = (cos θ + β) ÷ (1 + β cos θ), to 10⁻¹²; at 30 km/s the result equals the first-order
   r + v_o τ to within β² ÷ 4 in direction.
@@ -519,8 +701,12 @@ Tests:
   at 7.7 km/s across the line of sight: the light-time point is not displaced and the apparent point
   is displaced 10.27 ± 0.01 m along the observer's velocity; adding the same 30 km/s to both leaves
   the apparent displacement unchanged to 1 mm while the light-time point moves about 40 m.
-- For an observer and source moving together the apparent vector equals the present one to
-  |Δv⊥| ÷ c; a source absent at the emitted time is `NotPresentThen`; determinism across two runs.
+- An observer and source moving together at u on uniform tracks: the apparent vector is the
+  rest-frame separation r₀ + (γ − 1)(r₀ · û) û of the present one r₀ (Design note 7), to 1 mm +
+  10⁻¹⁴ (|x_B| + |x_o| + |u| τ), and its angle to r₀ is at most β² ÷ 4, at 30 km/s and at
+  3,000 km/s; for uniform tracks with a relative velocity Δv the angle to the present vector is at
+  most |Δv⊥| ÷ c + β_o² ÷ 4 plus |Δv| × 0.5 ns ÷ (c τ); a source absent at the emitted time is
+  `NotPresentThen`; determinism across two runs.
 
 Acceptance: `cargo test -p hyperion-sim observe::in_system`.
 
@@ -546,16 +732,19 @@ Files: `crates/hyperion-sim/src/observe/in_system/tracks.rs`,
 
 Tests: `BodyTrack::position_at` equals `position_at` bit for bit at 1,000 random times in the clock
 window; a moon's track is its planet's plus its offset; every existing planetary golden is unchanged.
-Acceptance: `cargo test -p hyperion-sim observe::in_system planetary::system`;
+Acceptance: `cargo test -p hyperion-sim --lib observe::in_system`;
+`cargo test -p hyperion-sim --lib planetary::system`;
 `cargo test -p hyperion-sim --test observe_in_system_golden`; `just ci`.
 
 ### R03.T4 Wire types of the scene
 
-Add `crates/hyperion-protocol/src/scene.rs` with every type of this plan's own under Provides, each
-with a wire-form test as `rust-dev.md` requires: `FramePositionDto` tagged by `frame` in snake case;
-`time_rate` as a `u32`; `SceneClockStateDto` in snake case; `SceneCraftDto` documented as a draft
-(Design note 4). Export them from `lib.rs`, run `just gen-protocol`, re-export from
-`packages/protocol/src/index.ts`. No kind is added yet.
+Add `crates/hyperion-protocol/src/scene.rs` with every type of the `scene.rs` block under Provides,
+each with a wire-form test as `rust-dev.md` requires: `FramePositionDto` tagged by `frame` in snake
+case; `time_rate` as a `u32`; `SceneClockStateDto` in snake case; `BodyGrantDto`, `SceneBodyDto`
+and `SeenPositionDto` with `seen` omitted when `None`; `SceneCraftDto` documented as a draft with
+`planned_path` omitted when `None` (Design note 4). `BulkManifestDto` is R03.T10.a's. Export them
+from `lib.rs`, run `just gen-protocol`, re-export from `packages/protocol/src/index.ts`. No kind is
+added yet.
 
 Files: `crates/hyperion-protocol/src/{scene.rs,lib.rs}`, `packages/protocol/src/generated/*`,
 `packages/protocol/src/index.ts`. Acceptance: `cargo test -p hyperion-protocol scene`;
@@ -563,16 +752,21 @@ Files: `crates/hyperion-protocol/src/{scene.rs,lib.rs}`, `packages/protocol/src/
 
 ### R03.T5 The subscription envelope
 
-- **R03.T5.a Protocol.** If P12.T9 has not landed: `SubscribeRequest`, `UnsubscribeRequest`,
-  `Subscribed`, `SubscriptionTopic::Scene`, `SubscriptionState::Scene`,
+- **R03.T5.a Protocol.** Waits on the owner's acceptance of R03.T1's plan 04 rows. In
+  `crates/hyperion-protocol/src/envelope.rs` (Design note 1), if P12.T9 has not landed:
+  `SubscribeRequest`, `UnsubscribeRequest`, `Subscribed`, `SubscriptionTopic::Scene`,
+  `SubscriptionState::Scene`,
   `ServerMessage::Notification`, `NotificationBody::Scene`, the kinds `subscribe` and `unsubscribe`,
   and this plan's `scene_ship` (`SceneShipRequest`) and `scene_cameras` (`SceneCamerasRequest`) in
   `RequestBody`, `ResponseBody` and `REQUEST_KINDS`, as plan 04's "Extending the convention" says;
-  if it has, the `Scene` variants and the two kinds only. The server's exhaustive matches
+  if it has, the `Scene` variants and the two kinds only; `ResponseBody::SceneShip(SceneShipSet)`
+  and an empty `ResponseBody::SceneCameras`. The server's exhaustive matches
   (`requests::{kind, is_large}`, `Handlers`, the `every_body` walk) gain them, answering
-  `unsupported` until R03.T6 and R03.T8. Run `just gen-protocol`. Tests: wire forms of every new
-  type and of `notification`; `REQUEST_KINDS` holds the new strings; `is_large` marks the scene's
-  `Subscribed` large (Design note 14). Acceptance: `cargo test -p hyperion-protocol`;
+  `unsupported` until R03.T6 and R03.T8, and `is_large` becomes `pub(crate)`. Run
+  `just gen-protocol`. Tests: wire forms of every new type and of `notification`; `REQUEST_KINDS`
+  holds the new strings; `is_large` marks the scene's `Subscribed` large (Design note 14). Files:
+  `crates/hyperion-protocol/src/{envelope.rs,lib.rs}`, `crates/hyperion-server/src/requests/mod.rs`,
+  the generated bindings. Acceptance: `cargo test -p hyperion-protocol`;
   `cargo test -p hyperion-server requests::`; `just ci`.
 - **R03.T5.b Subscriptions in the connection.** `crates/hyperion-server/src/subscriptions.rs`: a
   table owned by the connection task, at most `MAX_SUBSCRIPTIONS` (4) a connection, numbered from
@@ -580,18 +774,25 @@ Files: `crates/hyperion-protocol/src/{scene.rs,lib.rs}`, `packages/protocol/src/
   `Subscribed`, `unsubscribe` ends it, a request naming an unknown subscription is `bad_request`
   with `field: "subscription"`, and every subscription ends with its socket. Each subscription has
   a `PendingPush` whose `Merge` implementation follows Design note 5, and the connection's loop
-  queues it when `Outbound::has_room_for` allows and otherwise leaves it pending. Add the limits
-  and their figures to `limits.rs` and its test. `TestClient::next_notification()`. Tests (unit, in
+  queues it when `Outbound::has_room_for` allows and otherwise leaves it pending, numbering it with
+  the subscription's next `sequence` only then (Design note 4). Add `MAX_SUBSCRIPTIONS` with its
+  figure and reason to `limits.rs` and its test: 4, room for the scene, plan 12's alerts and two
+  more topics on one connection, where one scene subscription already carries every view's camera.
+  `TestClient::next_notification()` in `crates/hyperion-server/tests/common/mod.rs`. Tests (unit, in
   `subscriptions.rs` and `outbound.rs`, with an injected topic that pushes on demand and a stuck
   writer from `testing.rs`): ten pushes into a stuck writer leave one pending push holding all ten
   changes merged; bodies merged by ID with the latest winning; an arrival clears earlier bodies;
-  the fifth subscription is refused; unknown subscription; nothing pending survives the socket.
-  Acceptance: `cargo test -p hyperion-server subscriptions:: outbound::`; `just ci`.
+  the fifth subscription is refused; unknown subscription; nothing pending survives the socket;
+  sequences rise by one per notification sent, however many changes each merged.
+  Acceptance: `cargo test -p hyperion-server --lib subscriptions::`;
+  `cargo test -p hyperion-server --lib outbound::`; `just ci`.
 - **R03.T5.c The client's helper.** `packages/protocol/src/subscriptions.ts`:
   `RequestClient::subscribe(topic)` returning a `Subscription` with its initial state,
   `onNotification(listener)` and `unsubscribe()`; `handleServerMessage` routes `notification` to
   its subscription and returns `true`, drops one for an unknown subscription, and ends every
-  subscription on `linkLost()`; `NotificationOf<T>`. Tests (Vitest): routing by subscription; a
+  subscription on `linkLost()`; `NotificationOf<T>`; re-exported from `index.ts`. Tests (Vitest,
+  driving `RequestClient` directly, since the app's `FakeWebSocket` is not importable from the
+  package): routing by subscription; a
   notification after `unsubscribe` is dropped; link loss ends subscriptions; a notification for an
   unknown subscription is consumed and ignored. Acceptance:
   `pnpm --filter @hyperion/protocol test`; `just ci`.
@@ -604,13 +805,15 @@ Files: `crates/hyperion-protocol/src/{scene.rs,lib.rs}`, `packages/protocol/src/
 universe in a `SceneService` held by `AppState`, behind a `watch` channel so that subscriptions see
 changes (Design note 2). The `scene_ship` handler validates the rate (0 or a power of ten to
 100,000), the time (±H) and the pose (finite; a system or body frame resolved through the sim's
-`resolve`, as plan 04 requires of IDs read from a client), and answers with the clock it set. The
-clock reaches the window's edge in state `window_limit` and holds there.
+`resolve`, as plan 04 requires of IDs read from a client), and answers `SceneShipSet` with the
+clock it set. The `Clock` and `Ship` traits of Design note 2, which `SceneClock` and `ShipStandIn`
+implement. The clock reaches the window's edge in state `window_limit` and holds there.
 
 Tests (paused tokio clock): the clock advances at its rate and not while paused; `instant_of` inverts
 `at_instant` to the nanosecond at 1× and 100,000×; the window's edge; a bad rate, time or frame is
-`bad_request` naming its field; a second `scene_ship` supersedes the first for every subscription of
-the universe. Acceptance: `cargo test -p hyperion-server scene::clock`; `just ci`.
+`bad_request` naming its field; a second `scene_ship` supersedes the first, seen by two receivers of
+the universe's `watch` channel (the push to subscriptions is R03.T8.a's test). Acceptance:
+`cargo test -p hyperion-server scene::clock`; `just ci`.
 
 ### R03.T7 The scene's core
 
@@ -618,18 +821,35 @@ the universe. Acceptance: `cargo test -p hyperion-server scene::clock`; `just ci
 SceneStateDto` and `SceneCore::advance(&mut self, inputs) -> SceneDelta`, where the inputs are the
 clock reading, the stand-in's pose, the cameras, a `SceneKnowledge` and a `CraftSource`, and the
 system comes from plan 14's body cache through a caller-supplied closure (the core does no I/O).
-It selects the system by `frame_at` with hysteresis, builds `SystemBodiesDto` by plan 14's
-converter at the granted level, finds the next `valid_until` among the scene's bodies (a scene time
-at which `advance` must be called), re-evaluates each body whose `valid_until` has passed, and
-compares what `SceneKnowledge` grants with what was sent. `GrantAsked`, `NoCraft` and the
-`CraftState` it maps to `SceneCraftDto`. Camera validation as Design note 6.
 
-Tests: arrival and leaving across a sphere of influence, with no flicker inside the hysteresis band
-(a stand-in moved back and forth across the boundary by less than it); a body whose `valid_until`
-passes is re-sent once with its new elements; a knowledge change re-sends exactly the bodies it
-touched; advancing in one step or ten gives the same merged delta; the galactic frame has no system;
-a camera in another system's frame is refused; the scene holds the system's stars in `hosts`.
-Acceptance: `cargo test -p hyperion-server scene::core`; `just ci`.
+- **R03.T7.a The system and its grants.** Add `galaxy::frame::candidate_at` in plan 03's
+  `crates/hyperion-sim/src/galaxy/frame.rs` by agreement, the candidate `frame_at` already forms
+  for one system, with the rule untouched and a test that `frame_at`'s answers are unchanged over
+  its existing cases; record it in plan 03's as-built notes. The core selects the system by
+  `frame_at` with the previous system as current and the Schmitt band of Design note 3
+  (`SCENE_FRAME_ENTRY` = 0.9), builds `SystemBodiesDto` by plan 14's converter at the level asked,
+  degrades each record to its own grant (`BodyRecord::degrade`) and writes the `grants` (Design
+  note 13). A body granted `contact` gets its `seen` position from `retarded_in_system` over its
+  `BodyTrack`, observed from the stand-in at the scene time. `GrantAsked`, `NoCraft` and the
+  `CraftState` it maps to `SceneCraftDto`. Tests: arrival and leaving across a sphere of
+  influence, a stand-in moved back and forth across the boundary between ratios 0.95 and 1.05
+  arriving once, at 0.9, and leaving once, above 1; the galactic frame has no system; the scene
+  holds the system's stars in `hosts`; the arrival's `tidal_radius_m` equals `candidate_at`'s
+  `tidal_radius()` at the arrival time; under a fake granting `contact` to half the bodies, each
+  record equals `system_bodies` at its own level for that body and every contact carries `seen`
+  equal to `retarded_in_system`'s apparent point. Files: `scene/core.rs`, `galaxy/frame.rs`.
+  Acceptance: `cargo test -p hyperion-sim galaxy::frame`; `cargo test -p hyperion-server
+scene::core`; `just ci`.
+- **R03.T7.b Advancing.** Find the next `valid_until` among the scene's bodies (a scene time at
+  which `advance` must be called), re-evaluate each body whose `valid_until` has passed, compare
+  what `SceneKnowledge` grants with what was sent, and refresh every `seen` body at each heartbeat.
+  Camera validation as Design note 6, with `MAX_SCENE_CAMERAS` (8, one per view of the largest
+  layout R07 draws on one client, with room) and `scene::is_large_notification` (Design note 14).
+  Tests: a body whose `valid_until` passes is re-sent once with its new elements; a knowledge
+  change re-sends exactly the bodies it touched, with their new `level`; a heartbeat re-sends every
+  `seen` body and only those; advancing in one step or ten gives the same merged delta; a camera in
+  another system's frame, and a ninth camera, are refused. Acceptance: `cargo test -p
+hyperion-server scene::core`; `just ci`.
 
 ### R03.T8 The scene subscription, live
 
@@ -638,15 +858,18 @@ Acceptance: `cargo test -p hyperion-server scene::core`; `just ci`.
   owned by the connection's subscription table and ended with it, waits on the clock's `watch`, the
   next `valid_until` deadline mapped to an instant by `instant_of`, camera reports and the heartbeat,
   and merges each delta into the pending push. `scene_cameras` replaces a subscription's cameras.
-  Tests (integration, `crates/hyperion-server/tests/scene.rs`): subscribe in a pinned system and
-  receive every body of `system_bodies` for the same time and level, in the same form; a heartbeat
+  `SCENE_HEARTBEAT` (1 s) joins `limits.rs`, and `requests::system::bodies_of` becomes
+  `pub(crate)` for the core's closure. Tests (integration, `crates/hyperion-server/tests/scene.rs`):
+  subscribe in a pinned system and receive every body of `system_bodies` for the same time and
+  level, in the same form, with every grant at that level; a heartbeat
   each second with `sequence` rising by one (paused clock); a `scene_ship` rate change is pushed at
   once to two subscriptions; a body's `valid_until` passing at 100,000× is pushed; moving the
   stand-in out of the system pushes `no_system`; an unknown subscription and a camera out of reach
   are refused naming their fields. Acceptance: `cargo test -p hyperion-server --test scene`.
 - **R03.T8.b Craft at the tick, and a slow reader.** While the scene holds craft, the task pushes
   them every `CRAFT_PUSH_INTERVAL`, 15.625 ms (64 Hz, which is exactly 15,625,000 ns: the
-  single-player brainstorm's The clock, re-checked there), with missed ticks skipped. A test
+  single-player brainstorm's The clock, re-checked there), with missed ticks skipped;
+  `CRAFT_PUSH_INTERVAL` joins `limits.rs` as `Duration::from_nanos(15_625_000)`. A test
   `CraftSource` injected through `AppState` supplies ten craft in the tests. Tests: 64 pushes a
   second of scene time at 1×, each stating its time; with the writer stuck for a second the client
   then receives one notification holding the latest craft and every body change of that second,
@@ -662,15 +885,19 @@ subscriptions::`; `just ci`.
   craft as contacts. For 200 camera placements drawn from a fixed seed, in the system frame and in
   body frames, beside hidden craft and inside hidden bodies' Hill spheres, and through a sequence of
   `scene_cameras` and `scene_ship` moves, no state or notification contains a craft that is not a
-  contact or a section above its body's granted level: asserted on the JSON, as plan 12 asserts that
-  no bearing contact has a `host` key. R09 extends this test to surveyed cells.
+  contact or a section above its body's granted level, every body's `level` on the wire equals the
+  fake's grant, and no `contact` body carries an orbit, a mass or a Hill radius's inputs: asserted
+  on the JSON, as plan 12 asserts that no bearing contact has a `host` key. R09 extends this test
+  to surveyed cells.
 - **Two clients agree.** Two `TestClient`s subscribed to one universe's scene, one of them joining a
   second later, receive notifications whose bodies, clock and ship are equal apart from
   `sequence` after the second's arrival, for a minute of scene time at 10× with a `valid_until`
   crossing and a stand-in move; both states equal `system_bodies` answered for the same time.
 
-Files: `crates/hyperion-server/tests/scene_knowledge.rs`, `crates/hyperion-server/tests/scene_agree.rs`.
-Acceptance: `cargo test -p hyperion-server --test scene_knowledge --test scene_agree`; `just ci`.
+Files: `crates/hyperion-server/tests/scene_knowledge.rs`,
+`crates/hyperion-server/tests/scene_agree.rs`.
+Acceptance: `cargo test -p hyperion-server --test scene_knowledge`;
+`cargo test -p hyperion-server --test scene_agree`; `just ci`.
 
 ### R03.T10 Outbound binary frames
 
@@ -679,16 +906,23 @@ Acceptance: `cargo test -p hyperion-server --test scene_knowledge --test scene_a
   `MAX_BINARY_FRAME_BYTES`, header included (Design note 10). The handler seam's output becomes
   `Answer { body: ResponseBody, bulk: Option<BulkPayload> }` with `From<ResponseBody>`, so every
   existing handler changes by one `.map(Answer::from)`; `BulkManifestDto` in the protocol with its
-  wire-form test. Document the header in `crates/hyperion-protocol/src/lib.rs`'s module docs. Add
-  the three limits with their figures and citations to `limits.rs` (Design note 11), and set
-  `TCP_NOTSENT_LOWAT_BYTES` on every accepted socket on Linux through `socket2::SockRef` in axum's
-  `ListenerExt::tap_io`, in `main.rs` and `testing.rs`, with socket2 (feature `all`) added to
-  `[workspace.dependencies]`; a failure is logged at `warn`. Tests: the header's bytes for a pinned
-  request, byte for byte, which R03.T11 repeats in TypeScript; a payload of 0, 1, exactly one
-  frame's and 15 MB splits into the right count (60 for 15 MB) with every frame at most 262,144
-  bytes and the payload rejoined equal; on Linux, `SockRef::tcp_notsent_lowat()` of an accepted
-  connection reads back 65,536. Acceptance: `cargo test -p hyperion-server bulk:: limits::`;
-  `cargo test -p hyperion-protocol bulk`; `just ci`.
+  wire-form test, in `crates/hyperion-protocol/src/bulk.rs`. Document the header in
+  `crates/hyperion-protocol/src/lib.rs`'s module docs. Add the three limits with their figures and
+  citations to `limits.rs` (Design note 11), and set `TCP_NOTSENT_LOWAT_BYTES` on every accepted
+  socket on Linux through `socket2::SockRef` in `hyperion_server::tap_socket`, which axum's
+  `ListenerExt::tap_io` calls at all three serve sites, with socket2 (feature `all`) added to
+  `[workspace.dependencies]`; a failure is logged at `warn`. Files: `crates/hyperion-server/src/
+{bulk.rs,lib.rs,limits.rs,main.rs,testing.rs,requests/*.rs}`,
+  `crates/hyperion-server/tests/common/mod.rs`, `crates/hyperion-protocol/src/{bulk.rs,lib.rs}`,
+  `Cargo.toml`, `crates/hyperion-server/Cargo.toml`. Tests: the header's bytes for a pinned
+  request, byte for byte, which R03.T11 repeats in TypeScript; payloads of 0, 1, 262,120 (exactly
+  one frame's), 262,121, 15 × 10⁶ and 15,728,640 bytes split into ⌈L ÷ 262,120⌉ chunks (none for
+  an empty payload, whose manifest says 0; 1, 1, 2, 58 and 61 for the rest), every frame at
+  most 262,144 bytes and the payload rejoined equal; on Linux, `SockRef::tcp_notsent_lowat()` of a
+  connection accepted by the unit and the integration harnesses reads back 65,536. Acceptance:
+  `cargo test -p hyperion-server --lib bulk::`; `cargo test -p hyperion-server --lib limits::`;
+  `cargo test -p hyperion-protocol bulk`;
+  `just ci`.
 - **R03.T10.b Streaming under the budget.** The connection sends a bulk answer's chunks in order,
   each queued only once the bulk bytes queued are under `BULK_QUEUED_BYTES`, then the terminal
   response (Design note 11); the request stays in flight until then; `cancel` stops the chunks and
@@ -697,11 +931,17 @@ Acceptance: `cargo test -p hyperion-server --test scene_knowledge --test scene_a
   module): every chunk precedes the terminal response, in order; the server's queued bulk bytes
   never exceed one chunk; a scene push issued mid-transfer arrives before the transfer ends;
   `cancel` after the third chunk gets `cancelled` and no further chunk; a stuck reader is closed by
-  the write timeout with nothing held. Measure the added latency of a heartbeat push during a 15 MB
-  transfer, from the server's send to the client's receipt, over an emulated 40 Mbit/s link (Design
-  note 11: a reader with a fixed 64 KiB `SO_RCVBUF` reading through a 5 MB/s token bucket), with the
-  low-water mark on and off, and record both in Design note 11 (a finding over 100 ms with it on).
-  Acceptance: `cargo test -p hyperion-server --lib bulk:: outbound::`; `just ci`.
+  the write timeout with nothing held. The push comes from R03.T5.b's injected topic, so these tests
+  need no scene. `TestClient::next_binary()` in `crates/hyperion-server/tests/common/mod.rs`,
+  returning the header parsed and the payload, with an integration test in
+  `crates/hyperion-server/tests/bulk.rs` that an injected bulk handler's chunks arrive through it
+  in order before the response. Once R03.T8.a has landed, measure the added latency of a heartbeat
+  push during a 15 MB transfer, from the server's send to the client's receipt, over an emulated
+  40 Mbit/s link (Design note 11: a reader with a fixed 64 KiB `SO_RCVBUF` reading through a 5 MB/s
+  token bucket), with the low-water mark on and off, and record both in Design note 11 (a finding
+  over 100 ms with it on). Acceptance: `cargo test -p hyperion-server --lib bulk::`;
+  `cargo test -p hyperion-server --lib outbound::`;
+  `cargo test -p hyperion-server --test bulk`; `just ci`.
 
 ### R03.T11 The client receives bulk
 
@@ -712,8 +952,10 @@ as `ArrayBuffer`s and handed over whole, never parsed on arrival (Design note 11
 `packages/protocol/src/bulk.ts`: `parseBinaryFrameHeader` (refusing a bad magic, format or length,
 which the link reports as `error` and does not close on), `BulkAssembler` keyed by request ID, and a
 request outcome that resolves with the response and its chunks once the terminal response's manifest
-matches what arrived (a mismatch fails the request as `internal`). Tests (Vitest, `FakeWebSocket`
-gaining `serverSendsBinary`): the pinned header of R03.T10.a parses; chunks out of order or missing
+matches what arrived (a mismatch fails the request as `internal`). Tests (Vitest: the protocol
+package's own suite drives `RequestClient::handleBinaryFrame` directly; the app's `connection`
+suite uses its `FakeWebSocket`, which gains `serverSendsBinary`): the pinned header of R03.T10.a
+parses; chunks out of order or missing
 fail the request; `cancel` discards partial chunks; link loss discards everything. Acceptance:
 `pnpm --filter @hyperion/protocol test`;
 `pnpm --filter hyperion exec vitest run src/renderer/src/lib/connection`; `just ci`.
@@ -721,41 +963,58 @@ fail the request; `cancel` discards partial chunks; link loss discards everythin
 ### R03.T12 The client's scene store and clock
 
 `lib/scene/sceneWire.ts`: `toSceneModel(state)` over `toSystemBodiesModel`, and
-`applySceneNotification(model, notification)` (arrival replaces, bodies merge by ID, craft and clock
-replace; a `sequence` gap is accepted, since the server conflates, and a sequence that goes back is
-an error). `lib/scene/sceneClock.ts`: `renderTime(clock, receivedMs, nowMs)` in `UniverseTime` of
-whole seconds and nanoseconds (Design note 9), still when paused or at the limit. Tests: applying
-every notification of a recorded sequence equals the state of a fresh subscription at its end;
-`renderTime` at 1× and 100,000× from a time 999 years out keeps nanoseconds; paused holds.
+`applySceneNotification(model, notification)` (arrival replaces, keeping its `tidal_radius_m` in
+the model, bodies merge by ID with their
+`level` and `seen`, craft and clock replace; the `sequence` must be the previous plus one, and a gap
+or a step back is an error that makes `useScene` resubscribe, Design note 4).
+`lib/scene/sceneClock.ts`: `renderTime(clock, receivedMs, nowMs)` in `UniverseTime` of whole
+seconds and nanoseconds (Design note 9), still when paused or at the limit. `lib/scene/craft.ts`:
+`predictedPath(craft, untilS)` (Design note 4). Tests: applying every notification of a
+hand-built fixture sequence (an arrival, a body re-sent at a new level, a heartbeat, a leaving)
+equals the state built directly for its end; a gap and a step back are errors; `renderTime` at 1×
+and 100,000× from a time 999 years out keeps nanoseconds; paused holds; `predictedPath` returns a
+planned path unchanged and otherwise the straight line at the pose's velocity.
 Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`; `just ci`.
 
 ### R03.T13 Apparent positions on the client
 
 `lib/scene/apparent.ts`: `apparentPosition(track, observer, time, previousTau?)` mirroring
 `retarded_in_system` (Design note 7): τ rounded to the nanosecond, the emitted time formed as a
-`UniverseTime` less a span, the same stop rule of at most 1 ns inclusive with a cap of 10, a warm
-start from the previous frame's τ allowed, and the same Lorentz form for the apparent point; a
-body's track from `composePosition`, a star's from the hosts' hierarchy. `sceneAt(model, observer,
-time)` returns each present body's and star's `geometricM`, `apparentM` and `emitted`, each body's
-`hillRadiusM` (plan 14's a(1 − e)(m ÷ 3M)^⅓, M from the orbit's μ), and the ship's local body, the
-one whose Hill sphere holds the ship stand-in. The observer is the scene's ship stand-in at the
-render time.
+`UniverseTime` less a span, the same stop rules (a change of at most 1 ns, or one no smaller than
+the one before) with a cap of 10, a warm start from the previous frame's τ allowed, and the same
+Lorentz form for the apparent point, with norms as a sum of squares and `Math.sqrt`, never
+`Math.hypot`; a body's track from `composePosition` and `stateAt`, a star's from `layoutHierarchy`
+over the hosts. `sceneAt(model, observer, time, previousLocal?)` returns each present body's and
+star's `geometricM`, `apparentM` and `emitted`, each body's `level` and `seen`, and its
+`hillRadiusM`: plan 14's a(1 − e)(m ÷ 3M)^⅓ with m the body's `mass_kg` and M = μ ÷ G − m, from
+the orbit's μ = G (M + m) (`OrbitDto.mu_m3_s2`) and the sim's G, 6.674 30 × 10⁻¹¹ m³ kg⁻¹ s⁻²
+(`units::consts::GRAVITATIONAL_CONSTANT`, CODATA 2018), `null` below `mass_and_orbit`. A body with
+`seen` is placed at its `apparent_m` and gets no geometric position. The ship's local body is named
+by R02.T8.a's `selectCameraFrame` over the stand-in's geometric present position with
+`previousLocal` as current (Design note 7). The observer is the scene's ship stand-in at the render
+time.
 
 Tests: first log the largest discrepancy against R03.T3's golden (read with `?raw` as
-`lib/orbit.test.ts` reads plan 14's), then pin every vector within the larger of 1 mm + 10⁻¹²
-(|x_B(t − τ)| + |x_o(t)|) and ten times that measured value, and every emitted time equal to the
-nanosecond; Hill radii to 10⁻¹² relative of the golden's; two frames 16 ms apart with a warm start
-agree with a cold start within the same bound; a camera placed at a far body sees that body and its
-moons shifted together, their relative vectors within |Δv_moon| τ of the geometric ones; only the
-ship's local body is named local; a body not present at its emitted time is left out; a comoving
-observer's apparent vectors equal the present ones to |Δv⊥| ÷ c. Acceptance:
+`lib/orbit.test.ts` reads plan 14's), then pin every vector within the larger of Design note 7's
+bound and ten times that measured value, failing outright if the measurement exceeds 10⁻¹²
+(|x_B(t − τ)| + |x_o(t)|); every emitted time within Design note 7's allowance of the golden's;
+Hill radii to 10⁻¹² relative of the golden's; two frames 16 ms apart with a warm start agree with a
+cold start within the same bound; a camera placed at a far body sees that body and its moons
+shifted together, their relative vectors within |Δv_moon| τ of the geometric ones; the local body
+named equals `selectCameraFrame`'s answer, and a stand-in held at a ratio of 0.95 of a moon's
+sphere keeps whichever body it had; a body not present at its emitted time is left out; a seen
+body sits at its `apparent_m`; an observer whose velocity equals a body's at t sees it within
+β² ÷ 4 + |a_B| τ ÷ (2c) + 10⁻¹⁴ relative of the present direction. Acceptance:
 `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene/apparent`; `just ci`.
 
 ### R03.T14 `useScene` and the camera reports
 
 `lib/scene/useScene.ts`: subscribes on mount through R03.T5.c's helper, keeps the model and the
-receipt time, exposes `sceneAt(nowMs)` for R02, reports cameras through `CameraReporter` (at most
-4 Hz, and at once when a camera's frame changes), resubscribes after a reconnection, and marks the
+receipt time, exposes `frameAt(nowMs)` for R02 (`sceneAt` at the render time, carrying the previous
+local body), reports cameras through `CameraReporter` in `lib/scene/cameraReports.ts` (at most
+4 Hz, which keeps a report within a quarter-second of a camera's pose while costing a few hundred
+bytes a second, and at once when a camera's frame changes), resubscribes after a reconnection and
+after a sequence error (R03.T12), and marks the
 scene stale while the link is down, as plan 12's `useAlerts` is to. Tests (Vitest with
 `FakeWebSocket` gaining `serverNotifies(subscription, body)` if plan 12 has not added it): subscribe,
 receive, render at an extrapolated time; the reporter never exceeds 4 Hz under 60 pose changes a
@@ -771,20 +1030,22 @@ pinned systems, of a `BodySummaryDto` and of a craft push, against the brainstor
 bytes (Design note 4); the push rate with ten test craft; the added latency of a push during a 15 MB
 bulk transfer on loopback and, by hand, between two machines on gigabit Ethernet and on Wi-Fi
 (Design note 11), with the link rates; a smoke check in the real Electron renderer that one bulk
-transfer of 60 chunks and its terminal response arrives whole and in order, since every unit test
+transfer of 15 MiB (61 chunks) and its terminal response arrives whole and in order, since every
+unit test
 uses `FakeWebSocket` (run by hand, or in R01's headless harness if it can open a socket, and
 recorded); the envelope's state against P12.T9 for plan 12's writer. Acceptance: `just ci`; the
 figures are in the plan.
 
 ## Verification
 
-- **Honest scene:** the Knowledge-bound test over 200 camera placements (T9); the unknown and
-  out-of-reach refusals (T8).
+- **Honest scene:** the Knowledge-bound test over 200 camera placements, with a level per body
+  (T9); the unknown and out-of-reach refusals (T8); contacts placed only by the server's seen
+  positions (T7.a, T13).
 - **One scene:** the two-clients tests on the server (T9) and the client (T14); every push states
   its time and rate (T8).
 - **Apparent positions:** the in-system tests and figures (T2), the tracks against plan 14's
-  positions bit for bit (T3), and the client within 1 mm + 10⁻¹² of the barycentric distances of the
-  golden (T13).
+  positions bit for bit (T3), and the client within the bound T13 pins, Design note 7's or ten times
+  the measured agreement, and never looser than 10⁻¹² of the barycentric distances (T13).
 - **Transport:** chunks in order before the terminal response, one chunk queued at most, a push
   overtaking a transfer, cancel mid-stream (T10.b); the client's reassembly (T11); no unasked
   notification or binary frame (T1).
@@ -804,7 +1065,9 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
 
 - **The research of 2026-09-29 came after the first draft.** Its rulings are in Design notes 7, 10
   and 11. Two points in it stay of medium confidence and are settled by measurement: the agreement
-  the client reaches with the sim's goldens (R03.T13 measures before pinning), and the low-water mark
+  the client reaches with the sim's goldens, whose 10⁻¹⁴ coefficient R03.T13 measures before
+  pinning (a second research pass the same day corrected the first's figure, which had put
+  10⁻¹² Σ at 30 mm at 100 au where it is some 30 m), and the low-water mark
   and in-flight window on real Wi-Fi (R03.T10.b, T15). The Explanatory Supplement was cited from
   memory and is re-read before R03.T2's doc comments cite it.
 - **Head-of-line blocking below the server.** The chunk size, the one-chunk queue and
@@ -830,15 +1093,27 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
   only, so for that interval the client draws the new elements at the emitted time. Events are
   formations, engulfments and supernova unbindings, rare against light times of hours; if a
   telescopic view ever shows the error, the server keeps the previous record alongside until the
-  scene's farthest observer has seen the change.
+  scene's farthest observer has seen the change. The same interval is a Knowledge gap: the client
+  holds the new record before the ship could have seen the event, against the single-player
+  brainstorm's "the client never holds truth that the ship has not seen" (The view outside). The
+  elements on the wire already carry present truth by the rendering brainstorm's design, and the
+  display draws only what is retarded, so nothing shown leaks; the sensors plan, which owns what
+  the ship has seen, should delay a record's change to its light time when it replaces
+  `GrantAsked`.
+- **Contacts are placed by the server once a second.** A body granted only `contact` is drawn at
+  the server's seen position, re-sent at each heartbeat (Design note 13), so at high rates it
+  steps: at 100,000× by a day of scene time between pushes. That is honest for a contact, which
+  the view labels as one; a finer cadence for contacts in view is the sensors plan's to set.
 - **Plan 12 and plan 14 coordination.** If P12.T9 and this plan run in parallel lanes, one builds the
   envelope and the other rebases onto it; R03.T1 records which. The velocity asks of plans 14 and 11
   are small, but land in their files; their writers should see them in R03.T1's note.
 - **The craft DTO is a draft** owned by the sessions plan (Design note 4). No production code sends
   it, so reshaping it moves no version.
-- **Cameras bound little until R09.** Within a system the whole system is sent, so a camera report
-  does not yet change what a client receives beyond refusals; it is built now so that R09's cells
-  and the sensors plan's contacts have their input, and so that the Knowledge-bound test covers it.
+- **Cameras bound little.** Within a system the whole system is sent, so a camera report does not
+  yet change what a client receives beyond refusals, and R09 sends every surveyed cell (at most
+  about 12 MB) without bounding them by camera (R09 Design note 19); it is built now so that the
+  sensors plan's contacts drawn as hulls have their input, and so that the Knowledge-bound test
+  covers it.
 - **Client clock and latency.** A client renders at the push's time plus its own elapsed time, so it
   lags the server by one delivery, which at 100,000× on a 10 ms link is 1,000 s of scene time. That
   is the brainstorm's bound ("differ only by the delivery of the latest push") and is not
