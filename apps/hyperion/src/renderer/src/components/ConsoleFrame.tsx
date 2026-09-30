@@ -2,6 +2,7 @@ import { type ReactNode, useId, useLayoutEffect, useRef } from "react";
 
 import type { ConnectionStatus } from "../lib/connection";
 import type { DisplayDefinition, DisplayId } from "../lib/displays";
+import { GraphicsModeBanner } from "./GraphicsModeBanner";
 import { LinkStatus } from "./LinkStatus";
 import { UtcClock } from "./UtcClock";
 
@@ -37,7 +38,9 @@ function hiddenWithin(element: HTMLElement, root: HTMLElement): boolean {
  * and titles the active display. The navigation bar is a row of display tabs, each a button
  * showing its key; the active one is marked by `aria-current` and a top rule, not by colour alone.
  * The work area carries a modifier class named after the active display, so that a display with a
- * fixed layout of its own, such as `GALAXY`, can replace the default grid of panels. A display left
+ * fixed layout of its own, such as `GALAXY`, can replace the default grid of panels. The status
+ * area carries the graphics safe or disabled mode while it holds, beside the link status and never
+ * among alerts (R01.T5.b); it reads the graphics status from its context. A display left
  * by its key while the focus is in it hands the focus to the navigation tab of the display shown.
  */
 export function ConsoleFrame({
@@ -77,6 +80,7 @@ export function ConsoleFrame({
           <h1 className="console__title">{active.title}</h1>
         </div>
         <div className="console__status">
+          <GraphicsModeBanner />
           <UtcClock />
           <LinkStatus status={linkStatus} />
         </div>

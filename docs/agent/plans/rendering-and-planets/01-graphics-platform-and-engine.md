@@ -1648,3 +1648,181 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   on the order in which `Mesh.render` sets the alpha mode and then binds. An upgrade that moves it
   would show in T9.i's alpha check, and the fallback is the adapter's own raw pass (Design note 19)
   with its own blend state.
+- **Deviations in T1, as built.**
+  - `GraphicsLaunchMode` is declared in `preload/api.ts`, and `launchModeOf`, `SAFE_MODE_SWITCH` and
+    `GPU_TIMING_SWITCH` in the dependency-free `preload/graphicsLaunch.ts`; `main/graphics/switches.ts`
+    re-exports all four under the plan's names. The sandboxed preload needs them too, and neither it
+    nor the renderer may import main-process code (the `serverUrl.ts` pattern).
+  - `applyGraphicsSwitches` takes `Pick<CommandLine, "appendSwitch" | "getSwitchValue">`, which
+    `app.commandLine` satisfies, so that a fake stands in for it.
+  - The merge covers all four list switches (`enable-features`, `disable-features`,
+    `enable-dawn-features`, `disable-dawn-features`), since the timing toggle's
+    `disable-dawn-features` is last-writer-wins like the others; `mergeSwitchValue` trims items.
+  - `x11RelaunchArgs` recognises only the exact `--ozone-platform=x11` spelling, as Design note 3
+    words it. The X11 check runs after the command line is parsed, so `--help` and a usage error
+    answer without a relaunch. `OZONE_X11_FLAG` is exported.
+  - By hand, pending: the adapter from the devtools console on the UHD 620 under `just client`, and
+    `app.getGPUFeatureStatus()` after `gpu-info-update` (the monitor reads it but does not log it;
+    the check needs a devtools step or a temporary log line).
+- **Deviations in T2, as built.**
+  - The window's `additionalArguments` carry only `--hyperion-graphics-safe` (safe mode) and
+    `--hyperion-gpu-timing`; the preload works the mode out with `launchModeOf(process.platform, …)`
+    (`graphicsArguments`, `graphicsLaunchFromArgv`). `gpuTiming` is true only in `vulkan` mode, in
+    the main process and the preload alike, since only the forced path carries the Dawn toggle.
+  - `readFeatureStatus` returns a named `FeatureStatusReading`; an absent entry is recorded in a
+    `status` event as `""`. Two statuses stamped alike decide nothing between them: a drop counts
+    only strictly after a status that held the value, which keeps the decision independent of
+    arrival order.
+  - `GpuProcessMonitor` takes `{ app, windows, mode, args, nowMs }` over narrow `MonitoredApp` and
+    `MonitoredWindow` interfaces, exposes `history` and `dispose()` (called on `will-quit`), and
+    starts before `ready`. Only exits other than `clean-exit` are sent to windows, and
+    `GpuProcessGoneReport.count` counts them over the launch, not within the window.
+  - The preload's crash subscription is `subscribeGpuProcessGone(ipcRenderer, listener)` in
+    `graphicsLaunch.ts`, which passes on only reports `readGpuProcessGoneReport` accepts; the channel
+    is `GPU_PROCESS_GONE_CHANNEL`. `HyperionApi.graphics` is typed as `GraphicsApi`.
+    `stubHyperionApi(serverUrl?, graphics?)` takes the graphics fields, `TEST_GRAPHICS` by default.
+  - By hand, pending: `kill -9` of the GPU process three times within a minute on a built client
+    relaunches once into safe mode, whose adapter request is null and whose consoles work; a fourth
+    crash does not relaunch.
+- **Deviations in T3, as built.**
+  - `StyleAvailability` is an `interface` (object shapes are interfaces under the TypeScript rules).
+  - `test/fakeGpu.ts` also exports `INTEL_UHD_620_INFO` and `SWIFTSHADER_INFO` (their subgroup sizes
+    are illustrative, not probed); `FakeGpu.requests` records each `requestAdapter`'s options;
+    `FakeAdapter` takes `maxTextureDimension2D` in place of a limits object, and its
+    `requestDevice` rejects a required feature the adapter lacks; every `FakeDevice` member not
+    faked throws, naming itself.
+- **Deviations in T4, as built.**
+  - `GraphicsStatus` gains `gpuTiming`, the preload's flag, from which the reducer derives `timer`
+    when an adapter answers; R12 may read it. `initialGraphicsStatus(launchMode, gpuTiming)` builds
+    the start (`safe-mode` in a safe launch, else `acquiring`; `timer` `absent`). The rounding
+    record's key type is `ProbedTargetFormat`.
+  - `GraphicsEvent` is `adapter-outcome`, `device-lost`, `device-restored` (carrying the fresh vetted
+    outcome), `adapter-withdrawn`, `gpu-process-gone` and `target-rounding` (T8.j's probe result).
+    `safe-mode` and `disabled` are final for the launch: later outcomes and restores leave them, while
+    losses and crashes still count. The disabling loss clears `fault`, since the `disabled` statement
+    replaces it; `gpuProcessCrashes` keeps the highest count reported.
+  - Precedence of the annunciation: the safe or disabled statement, then a current fault, then the
+    adapter's condition. `graphicsModeAnnunciation` gives the first tier alone (T5.b's banner); the
+    words are the one constant `GRAPHICS_WORDS`, and the result type is `GraphicsAnnunciation`.
+  - `feedGraphicsStatus(store, graphics, gpu)` subscribes to the crash reports and makes the first
+    `requestAdapterOutcome`, so that the `LINK` panel knows the adapter before any view loads the
+    engine; not in safe mode (Design note 5); a rejected request reads as `no-adapter`. The vetted
+    adapter is not kept: `loadRenderEngine` requests its own (Design note 7).
+  - `useGraphicsStatus()` reads the store from `GraphicsStatusContext` and throws outside a
+    provider; `GraphicsStatusProvider` (`view/engine/GraphicsStatusProvider.tsx`) owns the one store
+    and its feed, and `App` mounts it. `navigatorGpu()` narrows `navigator.gpu` from `unknown`, since
+    `lib.dom` types it as always present. The store has a `listenerCount` for tests.
+  - `capabilities`, and so `timer`, come from the adapter's summary. They equal the device's unless
+    the harness withholds a feature; T8 should dispatch the device-read capabilities with the
+    engine's first creation and each `device-restored`, so that a withheld feature reads as absent
+    in the status too (Design note 7).
+  - Open, for the owner or R02: a `GRAPHICS PROCESS RESTARTED` fault clears only on
+    `device-restored`, so until a view owns a device (R02), or under `no-adapter`, one GPU-process
+    crash leaves the fault standing on the `LINK` panel for the rest of the launch. Candidates: keep
+    it for the launch, clear it on the next successful adapter request, or clear it after a set time.
+- **Deviations in T5, as built.**
+  - The `Features` row lists the wanted features present by their WebGPU names, comma-separated, or
+    `NONE`; `Styles` reads `WIREFRAME, PHOTOREALISTIC`, `WIREFRAME`, `NONE` (no views: no WebGPU, no
+    adapter, safe or disabled) or the em dash while acquiring. `WIREFRAME` and `PHOTOREALISTIC` are
+    used here before R02's view class names them; T5.c lists them for the owner. `GPU Timer` is the
+    em dash until an adapter answers. `Adapter` is `vendor · architecture` as the adapter reports
+    them (lower case, e.g. `intel · gen-9`).
+  - The header banner is its own component, `GraphicsModeBanner`, in `ConsoleFrame`'s status area
+    before the clock, an `output` labelled `Graphics mode` in `--text` inside a `--line` rule
+    (`.console__banner`). It names the mode alone, `GRAPHICS SAFE MODE` or `GRAPHICS DISABLED`
+    (the words before the colon), so that the strip fits at 1280 × 720; the panel carries the
+    sentence. `ConsoleFrame` now needs a `GraphicsStatusContext` provider above it.
+  - The disabled statement's count is in mixed case (`GRAPHICS DISABLED: 3 device losses, …`),
+    since every other clause after a colon is a sentence (the guide's Typography); Design note 10
+    wrote `<n> DEVICE LOSSES`. The two counts are `output`s, live without an
+    annunciation once the mode is settled.
+  - Kept as drafted, for the owner (UX review of T5): `GRAPHICS NOT AVAILABLE: no WebGPU`,
+    `GRAPHICS NO ADAPTER: views unavailable` and `GRAPHICS PROCESS RESTARTED` name no operator
+    action (the guide's Voice asks for one where known; `relaunch to retry` is the candidate); the
+    `acquiring` condition shows only em dashes and no annunciation, which is momentary in practice
+    (a waiting `GRAPHICS ACQUIRING ADAPTER` would be a new word); whether the banner looks
+    "unmistakably different" enough in a `--line` rule; `GPU` and `WebGPU` on the list; one of
+    `UNAVAILABLE` and `NOT AVAILABLE`.
+  - By eye, pending: the `GRAPHICS` panel in each condition and the header banner in safe mode on
+    `just client`, with the store driven from the devtools console, beside the guide's banner rule.
+- **T5.c, the nomenclature draft for the owner (not applied to the guide).** R02.T2.f absorbs and
+  re-checks it in its single pass over `docs/frontend/ux-guidelines.md`. The code is built to it
+  meanwhile: every string is one constant, `GRAPHICS_WORDS` in `view/engine/status.ts`, and the
+  panel's `MODE_WORDS` and `TIMER_WORDS` in `components/GraphicsPanel.tsx`. Awaiting the owner's
+  sign-off or amendment; the constants then change in one commit.
+
+  ```diff
+  @@ Layout @@
+   - A simulation, training or replay mode must look unmistakably different from live
+     operation, through a persistent labelled banner in the header strip.
+  +- The same banner states a graphics mode that lasts until a relaunch, `GRAPHICS SAFE MODE` or
+  +  `GRAPHICS DISABLED`, in `--text`, beside the link status; it is never counted among the
+  +  alerts.
+  @@ Alerts @@
+   - Alerts are raised by the server from simulation state. A console never invents one.
+  +- A console's report on its own graphics is a Fault (`StatusLine`'s fault standing, while the
+  +  fault lasts) or a status in plain text, never an alert: it takes no tone, no flash and no
+  +  place in the header's alert counts.
+  @@ Nomenclature list @@
+  +| `GRAPHICS` | System | The console's own graphics: adapter, features, mode, GPU timer and faults; the `LINK` display's `GRAPHICS` panel |
+  +| `GRAPHICS SOFTWARE ADAPTER`, `GRAPHICS NOT AVAILABLE`, `GRAPHICS NO ADAPTER`, `GRAPHICS SAFE MODE`, `GRAPHICS DISABLED` | Status | The graphics' standing condition, with its cause or remedy after a colon: `GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE`, `GRAPHICS NOT AVAILABLE: no WebGPU`, `GRAPHICS NO ADAPTER: views unavailable`, `GRAPHICS SAFE MODE: views unavailable, relaunch to retry`, `GRAPHICS DISABLED: <n> device losses, relaunch to retry` or `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` |
+  +| `GRAPHICS DEVICE LOST`, `GRAPHICS PROCESS RESTARTED` | Fault | The GPU device was lost and is being re-created (`GRAPHICS DEVICE LOST: re-creating`); the GPU process crashed and was restarted |
+  +| `UNAVAILABLE` | Label | Not offered on this adapter or in this mode (the owner may prefer `NOT AVAILABLE`, which `GRAPHICS NOT AVAILABLE` already uses) |
+  +| `DEFAULT`, `VULKAN`, `SAFE` | Mode | The launch's graphics mode: the platform's own path, the forced Vulkan path on Linux, the declared safe mode without WebGPU |
+  +| `QUANTIZED`, `FULL`, `ABSENT` | State | The GPU timer: timestamps in 65,536 ns steps, at the device's own resolution, or no timestamps |
+  ```
+
+  `PHOTOREALISTIC` and `WIREFRAME` wait for R02's view class, though the `GRAPHICS` panel's
+  `Styles` row and `GRAPHICS SOFTWARE ADAPTER` already use them (T5 as built). The panel's row
+  labels (`Adapter`, `Software Adapter`, `Features`, `Styles`, `Mode`, `GPU Timer`,
+  `Device Losses`, `Process Restarts`) are ordinary words, and `GPU` and `WebGPU` are proper names
+  of the hardware and the API rather than ship abbreviations; the owner may want `GPU` on the list.
+  `NONE`, `YES` and `NO` are the readings' plain words.
+
+- **Deviations in T6, as built.**
+  - The opaque handles are `readonly` interfaces with a literal `kind` and a `name`; `ComputeHandle`
+    also carries its chosen `path` and `BufferHandle` its `bytes`. They are structural, not
+    branded, so T8's adapter checks that a handle is its own when it looks one up.
+  - `Float32BlendUnavailable`, `DepthSelfSample` and `PresentationOnlyReadback` are defined in
+    `types.ts` now; `GlslShaderRefused` waits for T8's `wgslGuard.ts`. Named types were added for
+    shapes Provides writes inline: `VertexAttribute`, `TexelRect` (`readTexture`'s region) and
+    `KernelSelection` (`selectKernel`'s result).
+  - `engineBoundary.test.ts` reads the sources through `import.meta.glob` (`?raw`, eager, from the
+    app's Vite root), since the web project has no Node types. Besides T6's three rules it fails on
+    a raw `…device.createBuffer(` or `…device.createTexture(` outside `view/engine/babylon/`
+    (Design note 18). Its rules are a textual tripwire: a `"tolerance"` held in a variable passes.
+  - `CatalogueEntry` carries an optional `settings` of `CatalogueSetting`, only `"default"` until
+    R12.T7.a; absent means `default` alone.
+  - `assertNoF16Subgroups` strips comments and reads every `enable` directive, comma lists and
+    several on a line included; `highamBound` throws on a count that is not a positive integer or
+    where (n − 1)u ≥ 1.
+- **Deviations in T7, as built.**
+  - `@babylonjs/core` is pinned at `9.28.0` exactly; the pin's reason is the module comment of
+    `view/engine/babylon/engine.ts`. The placeholder `createBabylonEngine` imports `WebGPUEngine`
+    from `Engines/webgpuEngine.pure` and rejects, naming T8, so that the chunk carries real Babylon
+    code until T8 replaces it.
+  - The renderer's `codeSplitting` has a second group, `preload-helper`, for Vite's
+    `vite/preload-helper` (priority 1): without it rolldown put the helper, shared by the entry and
+    every dynamic import, into the `babylon` chunk, and the entry imported that chunk eagerly for
+    the helper alone. `checkChunks.mjs` caught it.
+  - `scripts/checkChunks.mjs` reads the entry chunks from `out/renderer/index.html`, follows their
+    static imports, and fails (exit 1) if any holds Babylon code, recognised by the strings
+    `babylonjs` and `Babylon.js`, or if no `babylon-*.js` chunk holds it; exit 2 when there is no
+    build. It is not part of `just ci`.
+  - Nothing imports `loadEngine.ts` yet, so the build tree-shakes it and the `babylon` chunk is
+    absent: `checkChunks.mjs` fails on today's tree with "no `babylon` chunk" and passes once R02's
+    `VIEW` display or T9's smoke page imports `loadRenderEngine`. Checked by hand on 2026-09-30 with
+    a temporary dynamic import in `main.tsx`, not committed: the check passed (entry, the
+    preload helper and the rolldown runtime free of Babylon; `babylon-*.js` 1,255 kB minified, about
+    240 kB gzipped, the placeholder's `webgpuEngine.pure` closure alone); with a temporary static
+    import of `babylon/engine.ts` it failed, naming the entry. Timings and sizes are provisional
+    (a shared machine).
+  - `loadEngine.test.ts` fakes `importEngine` through `LoadEngineOptions` and follows the call by a
+    factory that rejects with a sentinel, so that no `RenderEngine` is built in the test.
+  - `just check-chunks` builds and runs the check; it is in neither `just ci` nor T14's acceptance,
+    so T9 (whose smoke page first imports `loadRenderEngine`) or T14 should name it, and the
+    Verification section's "the chunk check" under automatic holds only once one does. Laziness is
+    also guarded in `just ci` by `engineBoundary.test.ts`: no file outside `view/engine/babylon/`
+    imports `babylon/engine` statically, and only `loadEngine.ts` names it at all. The marker
+    strings are a heuristic; the build manifest (`build.manifest`) would test module membership
+    directly if a user-visible string ever carries `Babylon.js`.
