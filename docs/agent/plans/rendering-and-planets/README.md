@@ -28,7 +28,8 @@ style, anywhere the ship's knowledge reaches, with still images on request.
   quadtree, with authoritative materials and rocks, clouds, oceans and rings; what the ship has not
   surveyed stays undrawn as terrain, and every readout states its uncertainty.
 - **The record.** Every figure of the brainstorm's performance budget has a measured counterpart on
-  the UHD 620 and a discrete GPU of the RTX 4060 class, and the settings ladder follows them.
+  the UHD 620 and a discrete GPU of at least the RTX 4060 class (the development machine's RTX
+  3080), and the settings ladder follows them.
 
 The app works at the end of every milestone. No plan leaves `just ci` failing.
 
@@ -64,21 +65,47 @@ nothing else waits on Phase C except R12's main-screen run.
 
 ### Milestones
 
-| Milestone | Plans   | What the app gains                                                                                                                                                                                                                                                                                                                                                              |
-| --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| RM1       | R01–R04 | WebGPU on this machine's UHD 620, with graphics faults and a safe mode on a `GRAPHICS` panel; a `VIEW` display (`F4`) drawing a wireframe at real scale from the free camera, bodies as graticules, orbits, hulls, and stars at their true magnitudes from the range rows; generated scenes from the scene subscription; both WebAssembly targets in `just ci`, the crate split |
-| RM2       | R05     | A planet's terrain from orbit to a metre above the ground on a hand-made Earth-sized test planet, with Earth's atmosphere, in a scripted descent; `TERRAIN: STREAMING` and `TERRAIN: DETAIL LIMITED`; the gate's recorded verdict                                                                                                                                               |
-| RM3       | R06–R07 | The galaxy's own sky, each star at its retarded time, with the band and the host stars as limb-darkened discs; bodies lit at real scale; the photorealistic style and the style switch; instrument views beside it; once sessions exist, the main screen                                                                                                                        |
-| RM4       | R08     | Every atmosphere plan 14 gives a body, computed from its composition, seen from the ground, from orbit and across the system, thick ones checked against a path tracer                                                                                                                                                                                                          |
-| RM5       | R09–R10 | Generated worlds: the server's coarse field, surveyed coverage, the shared height function on three targets; surveyed terrain drawn in both styles with authoritative materials, horizon-map shadows and readouts that state their uncertainty                                                                                                                                  |
-| RM6       | R11–R12 | Decoration, authoritative rocks, clouds, oceans with glint, rings close to, still images; the budget measured on both GPUs, the ladder adjusted and every low setting audited                                                                                                                                                                                                   |
+| Milestone | Plans   | What the app gains                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RM1       | R01–R04 | WebGPU on the development machine's RTX 3080 and the owner's UHD 620, with graphics faults and a safe mode on a `GRAPHICS` panel; a `VIEW` display (`F4`) drawing a wireframe at real scale from the free camera, bodies as graticules, orbits, hulls, and stars at their true magnitudes from the range rows; generated scenes from the scene subscription; both WebAssembly targets in `just ci`, the crate split |
+| RM2       | R05     | A planet's terrain from orbit to a metre above the ground on a hand-made Earth-sized test planet, with Earth's atmosphere, in a scripted descent; `TERRAIN: STREAMING` and `TERRAIN: DETAIL LIMITED`; the gate's recorded verdict                                                                                                                                                                                   |
+| RM3       | R06–R07 | The galaxy's own sky, each star at its retarded time, with the band and the host stars as limb-darkened discs; bodies lit at real scale; the photorealistic style and the style switch; instrument views beside it; once sessions exist, the main screen                                                                                                                                                            |
+| RM4       | R08     | Every atmosphere plan 14 gives a body, computed from its composition, seen from the ground, from orbit and across the system, thick ones checked against a path tracer                                                                                                                                                                                                                                              |
+| RM5       | R09–R10 | Generated worlds: the server's coarse field, surveyed coverage, the shared height function on three targets; surveyed terrain drawn in both styles with authoritative materials, horizon-map shadows and readouts that state their uncertainty                                                                                                                                                                      |
+| RM6       | R11–R12 | Decoration, authoritative rocks, clouds, oceans with glint, rings close to, still images; the budget measured on both GPUs, the ladder adjusted and every low setting audited                                                                                                                                                                                                                                       |
+
+## Target hardware
+
+The owner ruled on 2026-09-30 that the development machine is HYPERION's recommended specification
+and the target, and that the UHD 620 laptop is the minimum specification and the low setting's
+target. The plans were first written as though the UHD 620 were the development machine and the
+project had no discrete GPU; both are corrected here and in the plans.
+
+- **The development machine** (recommended; checked 2026-09-30): an NVIDIA GeForce RTX 3080 (GA102,
+  Ampere, 10 GiB of VRAM, PCIe 4.0 × 16, 370 W) on the NVIDIA open kernel module and driver
+  615.71.09 with a Vulkan 1.4 ICD; an AMD Ryzen 7 3700X (8 cores, 16 threads, 2.2–4.4 GHz); 32 GB of
+  RAM; one display over HDMI, 1920 × 1080 at a native 240 Hz, with 120, 60 and 59.94 Hz modes; Arch
+  Linux on kernel 7.2.7, Xorg with i3. It exceeds the brainstorm's "RTX 4060 class" discrete target
+  (29.8 against 15.1 TFLOP/s of FP32, 760 against 272 GB/s), so a pass on it is a pass on a faster
+  part, and records say which card they ran on.
+- **The UHD 620 laptop** (minimum, the low setting at 720p30): the owner's ThinkPad X1 Yoga 4th
+  generation, an i7-8665U with its Intel UHD Graphics 620 (Whiskey Lake-U GT2, Gen9.5) and 16 GB of
+  LPDDR3 shared by the CPU and the GPU, on Mesa's ANV (R12 Design note 11 and "What exists today").
+  The owner tests it by hand, later.
+
+By-hand GPU checks (the three canvases, the soaks, the adapter, the benchmarks, the discrete
+descent and R12's discrete runs) run on the development machine wherever they are not specific to
+the UHD 620. Those that are (`intel`/`gen-9`, Gen9's toward-zero render-target rounding, the low
+setting's 720p30 criterion and every UHD 620 column of the budget) stay with the owner, and a plan's
+by-hand check names which machine each record comes from.
 
 ## The gate
 
 R05 is the gate: the brainstorm's descent spike (step 3), which decides whether the browser can
 carry the planets before anything depends on the answer. The scripted, seeded descent passes, on
 the criterion of [R05's Design note 21](05-terrain-geometry-and-descent-spike.md), at 1080p60 on a
-discrete GPU of the RTX 4060 class and at 30 fps at 720p on the UHD 620's low setting, each as frame
+discrete GPU of the RTX 4060 class (the development machine's RTX 3080, which exceeds it) and at 30
+fps at 720p on the UHD 620's low setting, each as frame
 intervals from presentation times over the whole descent and per segment, with headroom, the other
 budget rows and resident memory counted.
 
@@ -94,9 +121,11 @@ by R05.T19:
   before any later plan depends on the browser. Otherwise the failure is ours, and the verdict names
   the pass or the thread to fix.
 
-The project has no discrete GPU. R05.T17 and R12.T9.a need a physical desktop with a real monitor,
-borrowed or bought; a cloud GPU's figures are advisory and cannot sign off the gate. Until then the
-gate is half closed.
+R05.T17 and R12.T9.a need a physical desktop with a real monitor. The development machine is one:
+its RTX 3080 exceeds the RTX 4060 class and hosts those runs, its display set to its 60 Hz mode,
+under the quiet-machine rule below; a cloud GPU's figures remain advisory and cannot sign off the
+gate. The UHD 620 half, R05.T16, is the owner's by hand, and until it runs the gate is half
+closed.
 
 ## Three things done now
 
@@ -165,7 +194,9 @@ Figures rule. Only what differs is stated here.
   filter: one filter, or `--test <binary>` and one filter. `pnpm --filter hyperion test -- <filter>`
   ignores the filter, so a client test runs as
   `pnpm --filter hyperion exec vitest run <path>`.
-- **GPU checks are by hand and recorded.** No test in `just ci` needs a GPU. The headless
+- **GPU checks are by hand and recorded.** No test in `just ci` needs a GPU. By-hand checks run on
+  the development machine (RTX 3080) where they can, and those specific to the UHD 620 are the
+  owner's ([Target hardware](#target-hardware)). The headless
   SwiftShader harness (`just test-render`, R01) renders every shader registered in `WGSL_CATALOGUE`
   and asserts properties of the read-back frames; it stays outside `just ci`, so every task that
   adds or changes a catalogued shader, `view/engine/` or `src/smoke/` runs it as part of its own
@@ -173,13 +204,15 @@ Figures rule. Only what differs is stated here.
   run by hand and written into the plan's as-built notes or the results files.
 - **No golden images.** Neither in CI nor by hand: images are checked by asserted properties
   (finiteness, flux, positions, colours at pixels), never compared with a stored picture.
-- **Measurements on a quiet machine.** The development machine is shared with other agents' builds
-  and tests, which moved every timing taken while these plans were written (load averages of 14 to
-  21, the package at 96–97 °C). Every timing measured on 2026-09-29, in a plan or its research, is
-  provisional. A bench or recorded run counts only when taken with no other agent, lane or test
-  running, the load average under 1 at the start and recorded with the governor; a run under load is
-  marked provisional and repeated (R05's Design note 27, R12's Design note 7). A missed budget
-  target is a finding for R12, not a failure.
+- **Measurements on a quiet machine.** The development machine (a Ryzen 7 3700X, 16 threads, with
+  the RTX 3080) is shared with other agents' builds and tests. Shared load moved every timing taken
+  while these plans were written (load averages of 14 to 21, the package at 96–97 °C), on the
+  machine then taken for the development machine, which R12 records as the UHD 620 laptop; none of
+  those timings is a figure for the RTX 3080 desktop. Every timing measured on 2026-09-29, in a plan
+  or its research, is provisional. A bench or recorded run counts only when taken with no other
+  agent, lane or test running, the load average under 1 at the start and recorded with the governor;
+  a run under load is marked provisional and repeated (R05's Design note 27, R12's Design note 7). A
+  missed budget target is a finding for R12, not a failure.
 - **Results live under `docs/measurements/`.** R05's runs go to `docs/measurements/descent-spike/`,
   R12's consolidated record and generated budget table to `docs/measurements/rendering/`
   (`runs.v1.jsonl`, `budget.md`); every other plan records its benchmarks in its as-built notes,
@@ -365,8 +398,10 @@ and the code built meanwhile is confined to a label, a constant or a gated task.
   bump; R03 Design note 12); and the corrections [below](#brainstorm-corrections).
 - **The gate's verdict** (R05.T19): if open question 2's rule fires, the owner rules before any
   later plan depends on the browser.
-- **A discrete GPU** for R05.T17 and R12.T9.a: a physical desktop of the RTX 4060 class with a real
-  monitor.
+- **The UHD 620 runs**, by hand on the owner's laptop: R05.T16 (the gate's low half), R12.T8 and
+  R12.T12.a, and the UHD 620 half of every other plan's by-hand checks. The discrete runs (R05.T17,
+  R12.T9) no longer wait on hardware: they run on the development machine's RTX 3080, which
+  exceeds the RTX 4060 class.
 - **The documentation layout**: `docs/measurements/` in `.claude/CLAUDE.md`'s layout, drafted by
   R12.T1.c.
 - **Cloud shadows on the low setting** (R11 Design note 10, `cloudShadows`): built off by default,
@@ -528,8 +563,23 @@ plan whose design note or risk holds the source. None has been applied to the br
 | What the guide must gain, item 2     | The view states when decoration is on                                          | Whether clouds and Gerstner waves count is unsaid; R11 reads decoration as terrain micro-detail and decorative scatter only (for the owner)                                                                                                  | R11 Design note 2      |
 | Still images                         | Windows' `TdrDelay` and i915's 640 ms                                          | Both stand; Chromium's 15 s GPU watchdog, on the GPU process's main thread, is the realistic hazard for a still (a synchronous pipeline compile) and is not mentioned                                                                        | R11 Design note 17     |
 | Performance budget; Sources          | RTX 4060 "270 GB/s" (text) and "272 GB/s" (Sources)                            | 272 GB/s                                                                                                                                                                                                                                     | R12 Design note 11     |
-| Performance budget                   | UHD 620 "about 1.1 GHz", "a few tens" and "20 to 25 GB/s"                      | 1.15 GHz (0.44 TFLOP/s at 24 EU); 34.1 GB/s theoretical peak, shared with the CPU (dual-channel LPDDR3-2133 on this machine; ARK's 37.5 GB/s is the part's DDR4-2400 ceiling), so 8.0 times less than the RTX 4060's 272 GB/s                | R12 Design note 11     |
+| Performance budget                   | UHD 620 "about 1.1 GHz", "a few tens" and "20 to 25 GB/s"                      | 1.15 GHz (0.44 TFLOP/s at 24 EU); 34.1 GB/s theoretical peak, shared with the CPU (dual-channel LPDDR3-2133 on the owner's laptop; ARK's 37.5 GB/s is the part's DDR4-2400 ceiling), so 8.0 times less than the RTX 4060's 272 GB/s          | R12 Design note 11     |
 | Performance budget                   | A discrete memory ceiling of "2 to 3 GB"; "replace them with measured figures" | Read as a finding above 2 GB and a failure above 3 GB; the brainstorm does not say whether its own tables are edited (R12 keeps a results file and drafts a revision)                                                                        | R12 Design notes 2, 9  |
+
+### Target hardware
+
+From the owner's ruling of 2026-09-30 rather than the research: where the brainstorm states the
+development machine's hardware as fact.
+
+| Section                                    | The brainstorm says                                                                                                                             | Correct                                                                                                                                                                                                                              | Source                                                           |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Constraints that decide the design, item 4 | "The development machine has no discrete GPU": a UHD 620, so the renderer "can always be developed and tested locally"                          | The development machine is the RTX 3080 desktop, the recommended specification and the target; the UHD 620 laptop is the minimum specification, where every feature's low setting must stay playable, tested by the owner by hand    | Owner's ruling, 2026-09-30 ([Target hardware](#target-hardware)) |
+| The graphics API, and the Intel problem    | "This machine" runs Xorg with i3 on the Gen9.5 UHD 620; `enable_subgroups_intel_gen9` lets "the development machine" exercise the target's path | The probe's machine is the UHD 620 laptop. The development machine also runs Xorg with i3, on NVIDIA's driver 615.71.09, so the forced switches are its path too (not yet probed there); the Gen9 toggle matters only on the UHD 620 | Owner's ruling, 2026-09-30 ([Target hardware](#target-hardware)) |
+| Decisions ("The performance floor")        | The low setting stays playable "on the development machine's Intel UHD 620"                                                                     | On the UHD 620 laptop, the minimum specification; the development machine's RTX 3080 is the recommended one                                                                                                                          | Owner's ruling, 2026-09-30 ([Target hardware](#target-hardware)) |
+| Open question 14                           | "A 30-minute soak on the development machine" settles Vulkan compositing on the UHD 620                                                         | The development machine's soak (R01.T12) proves the switch set on NVIDIA; the question as asked, on Gen9.5, is answered by the owner's soak on the UHD 620                                                                           | Owner's ruling, 2026-09-30 ([Target hardware](#target-hardware)) |
+| Suggested order of attack, steps 1 and 3   | "The first WebGPU frame on this machine"; "the project has no discrete GPU today", so the discrete half is borrowed or rented                   | The development machine's RTX 3080 exceeds the RTX 4060 class and hosts the discrete half (R05.T17, R12.T9), a pass there being a pass on a faster part; the UHD 620 half is the owner's                                             | Owner's ruling, 2026-09-30 ([Target hardware](#target-hardware)) |
+| Performance budget (the consoles' share)   | A `drawImage` copy "measured about 4 to 5 ms a view on this machine"                                                                            | A UHD 620 figure, not the development machine's                                                                                                                                                                                      | Owner's ruling, 2026-09-30 ([Target hardware](#target-hardware)) |
+| Still images                               | A batch of about 6 ms "on the low setting of the development machine"                                                                           | On the UHD 620's low setting, as R11 Design note 17 reads it                                                                                                                                                                         | Owner's ruling, 2026-09-30 ([Target hardware](#target-hardware)) |
 
 ## Open across plans
 
