@@ -8,7 +8,10 @@
  * rendering fails loudly rather than passing on a stub.
  */
 
-/** The adapter info the probe of 2026-09-29 read on the development machine's UHD 620. */
+/**
+ * The UHD 620's adapter info: vendor, architecture, empty device and description and no fallback flag
+ * as the probe of 2026-09-29 read them (R01 Design note 8); the subgroup sizes are illustrative.
+ */
 export const INTEL_UHD_620_INFO: FakeAdapterInfo = {
   vendor: "intel",
   architecture: "gen-9",
@@ -19,7 +22,10 @@ export const INTEL_UHD_620_INFO: FakeAdapterInfo = {
   subgroupMaxSize: 32,
 };
 
-/** The adapter info SwiftShader reports under the smoke harness's switches. */
+/**
+ * SwiftShader's adapter info: vendor, architecture and fallback flag as the probe read them (R01
+ * Design note 17); the description and subgroup sizes are illustrative.
+ */
 export const SWIFTSHADER_INFO: FakeAdapterInfo = {
   vendor: "google",
   architecture: "swiftshader",

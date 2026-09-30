@@ -229,16 +229,60 @@ describe("the annunciation", () => {
 });
 
 describe("the status store", () => {
-  it("tells its subscribers of a change, and only of a change", () => {
+  it("notifies its subscribers of a change", () => {
     const store = new GraphicsStatusStore(launched());
     const listener = vi.fn<() => void>();
-    const unsubscribe = store.subscribe(listener);
+    store.subscribe(listener);
     store.dispatch({ kind: "gpu-process-gone", count: 1 });
     expect(listener).toHaveBeenCalledTimes(1);
     expect(store.getSnapshot().gpuProcessCrashes).toBe(1);
+  });
+
+  it("does not notify when an event changes nothing", async () => {
+    const store = new GraphicsStatusStore(launched("safe"));
+    const listener = vi.fn<() => void>();
+    store.subscribe(listener);
+    store.dispatch({ kind: "adapter-outcome", outcome: await adapterOutcome() });
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("stops notifying after its subscriber leaves", () => {
+    const store = new GraphicsStatusStore(launched());
+    const listener = vi.fn<() => void>();
+    const unsubscribe = store.subscribe(listener);
     unsubscribe();
-    store.dispatch({ kind: "gpu-process-gone", count: 2 });
-    expect(listener).toHaveBeenCalledTimes(1);
+    store.dispatch({ kind: "gpu-process-gone", count: 1 });
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe("a settled condition", () => {
+  it("counts a loss in safe mode without a fault", () => {
+    const status = reduce(launched("safe"), LOST);
+    expect(status.deviceLosses).toBe(1);
+    expect(status.fault).toBeNull();
+    expect(status.condition).toEqual({ kind: "safe-mode" });
+  });
+
+  it("counts a crash once disabled without a fault", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(launched(), { kind: "adapter-outcome", outcome }, LOST, LOST, LOST, {
+      kind: "gpu-process-gone",
+      count: 4,
+    });
+    expect(status.gpuProcessCrashes).toBe(4);
+    expect(status.fault).toBeNull();
+    expect(status.condition.kind).toBe("disabled");
+  });
+});
+
+describe("the target rounding", () => {
+  it("is unknown until probed, then the probe's", () => {
+    const rounding = { rgba16float: "toward-zero", rg11b10ufloat: "unknown" } as const;
+    expect(launched().targetRounding).toEqual({ rgba16float: "unknown", rg11b10ufloat: "unknown" });
+    expect(reduce(launched(), { kind: "target-rounding", rounding }).targetRounding).toEqual(
+      rounding,
+    );
   });
 });
 
@@ -273,10 +317,33 @@ describe("the status feed", () => {
   it("dispatches the first adapter's outcome", async () => {
     const store = new GraphicsStatusStore(launched());
     const gpu = new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] })]);
-    feedGraphicsStatus(store, fakeGraphics("vulkan").api, gpu);
+    const end = feedGraphicsStatus(store, fakeGraphics("vulkan").api, gpu);
     await vi.waitFor(() => {
       expect(store.getSnapshot().condition.kind).toBe("nominal");
     });
+    end();
+  });
+
+  it("drops an answer that arrives after it ends", async () => {
+    const store = new GraphicsStatusStore(launched());
+    const gpu = new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] })]);
+    const end = feedGraphicsStatus(store, fakeGraphics("vulkan").api, gpu);
+    end();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.getSnapshot().condition).toEqual({ kind: "acquiring" });
+  });
+
+  it("gives no-adapter when the request fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const store = new GraphicsStatusStore(launched());
+    const gpu = new FakeGpu([]);
+    vi.spyOn(gpu, "requestAdapter").mockRejectedValue(new Error("GPU process gone"));
+    const end = feedGraphicsStatus(store, fakeGraphics("vulkan").api, gpu);
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().condition).toEqual({ kind: "no-adapter" });
+    });
+    end();
   });
 
   it("asks for no adapter in safe mode", () => {
