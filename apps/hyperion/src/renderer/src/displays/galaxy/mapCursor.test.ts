@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { mapGeometry, pixelToLy } from "../../lib/galaxy/mapGeometry";
 import type { CentreLy } from "../../lib/galaxy/model";
-import { localFrameAt } from "../../spatial/frame";
-import { vec3 } from "../../spatial/vec3";
+import { localFrameAt } from "../../geometry/frame";
+import { vec3 } from "../../geometry/vec3";
 import {
   cursorInView,
   markOnPicture,

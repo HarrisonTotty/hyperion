@@ -8,7 +8,7 @@
  * barycentre, as `lib/orbit.ts` gives them.
  */
 import type { BodyPlacement, KeplerOrbit } from "../orbit";
-import { type Vec3, vec3 } from "../../spatial/vec3";
+import { type Vec3, vec3 } from "../../geometry/vec3";
 import type { HierarchyNode, HostBody } from "./model";
 
 /** The placement key of a hierarchy node: a star's body ID, or a pair's node index. */

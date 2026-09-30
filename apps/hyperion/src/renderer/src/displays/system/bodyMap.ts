@@ -18,7 +18,7 @@ import { bodyKindLabel, ringKindLabel } from "../../lib/system/bodyWords";
 import type { HierarchyLayout } from "../../lib/system/hierarchy";
 import type { BodyKind, OrbitHost, SystemBody, Zone } from "../../lib/system/model";
 import type { AnnulusMark, PathMark, PointMark } from "../../spatial/marks";
-import { add, norm, scale, type Vec3 } from "../../spatial/vec3";
+import { add, norm, scale, type Vec3 } from "../../geometry/vec3";
 import { METRES_PER_AU } from "./orbitScale";
 
 /** Points of a body's drawn orbit, every 2° of eccentric anomaly, as the stars' are. */

@@ -22,7 +22,7 @@ import type {
 
 import type { LayerBand } from "../displays/galaxy/chartModel";
 import type { SystemTarget } from "../displays/system/systemTarget";
-import { vec3 } from "../spatial/vec3";
+import { vec3 } from "../geometry/vec3";
 
 /** The universe of the pins, `UNIVERSE` in `stellar.rs`. */
 export const PIN_UNIVERSE = "0123456789abcdef";

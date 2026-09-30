@@ -4,7 +4,7 @@ import type { Viewport } from "./camera";
 import type { Anchor } from "./drawList";
 import { chooseLabels, placeLabels } from "./labels";
 import type { PointMark } from "./marks";
-import { vec3 } from "./vec3";
+import { vec3 } from "../geometry/vec3";
 
 const VIEWPORT: Viewport = { widthPx: 400, heightPx: 300, remPx: 16 };
 
