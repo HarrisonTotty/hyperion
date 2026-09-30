@@ -22,10 +22,21 @@ pre-commit:
 server *args:
     cargo run -p hyperion-server -- {{ args }}
 
-# The `--` tells electron-vite that the rest of the line is the client's own command line.
+# The `--` tells electron-vite that the rest of the line is the client's own command line, which
+# electron-vite hands to Electron without the separator, so Chromium sees a switch there as its own:
+# `--hyperion-gpu-timing` (lift timestamp quantization, for performance runs only) is given like any
+# other client option, `just client --hyperion-gpu-timing`. A Wayland session gets
+# `--ozone-platform=x11` here, because the client's own relaunch through XWayland would end
+# `electron-vite dev` and leave the new window on a dead dev server (R01 Design note 3).
 # Run the bridge client (Electron) with hot reload, e.g. `just client --port 9000`.
 client *args:
-    pnpm --filter hyperion exec electron-vite dev -- {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    x11=()
+    if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+        x11=(--ozone-platform=x11)
+    fi
+    pnpm --filter hyperion exec electron-vite dev -- "${x11[@]}" {{ args }}
 
 # Typecheck Rust and TypeScript.
 check:
