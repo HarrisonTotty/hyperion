@@ -20,6 +20,9 @@
 //!   and surface state (P14.T13).
 //! - [`limits`]: Roche limits, Hill radii, the stability limit of satellites and the heaviest moon
 //!   a close-in planet can keep (P14.T15).
+//! - [`rotation`]: the primordial spin, the tidal locking time and the rotation angle as a closed
+//!   form of time (P14.T14.a–b), which [`frames`](crate::planetary::frames) turns into a body-fixed
+//!   frame (P14.T14.c).
 //!
 //! and their assembly, [`derive_body`] (P14.T16.a), the one entry point through which the
 //! generator derives a body.
@@ -50,7 +53,11 @@
 //! 4. **The atmosphere** (T12 and T13, three passes, [`ATMOSPHERE_PASSES`]): the equilibrium
 //!    temperature at an albedo, from 0.3 on the first pass, gives the atmosphere its escape leaves
 //!    and its greenhouse holds, whose surface state sets the albedo of the next pass.
-//! 5. Rotation and tides (T14) will follow here.
+//! 5. **Rotation and tides** (T14) are not run here: a body's spin reads its drawn pole against
+//!    its orbit's normal and whether it had a giant impact, which only the generator knows (a moon
+//!    of its is a body of its system), so the generator derives it from this assembly's radius,
+//!    mass and class ([`PlanetarySystem::rotation_of`](crate::planetary::PlanetarySystem::rotation_of),
+//!    [`rotation`]).
 //! 6. **Limits** (T15): the Hill radius, the stability limits of satellites and the heaviest moon
 //!    that survives to the time.
 //!
@@ -75,6 +82,7 @@ pub mod limits;
 pub mod m_dwarfs;
 pub mod radius;
 pub mod rocky;
+pub mod rotation;
 
 use std::error::Error;
 use std::fmt;
@@ -96,11 +104,12 @@ pub use radius::{
     CoreComposition, DeriveGiantError, GiantRadius, chen_kipping_rank, giant_share,
     radius_chen_kipping, radius_giant, radius_zeng,
 };
+pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, SurfaceMaterial, VolatileDraws,
-    atmosphere, energy_limited_loss, volatile_inventory,
+    VolatileInventory, atmosphere, energy_limited_loss, volatile_inventory,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -447,6 +456,7 @@ pub struct DerivedBody {
     albedo: BondAlbedo,
     equilibrium_temperature: Kelvin,
     effective_temperature: Option<Kelvin>,
+    inventory: VolatileInventory,
     atmosphere: Atmosphere,
     internal_luminosity: Watts,
     radius: EarthRadii,
@@ -556,6 +566,13 @@ impl DerivedBody {
     #[must_use]
     pub const fn atmosphere(&self) -> &Atmosphere {
         &self.atmosphere
+    }
+
+    /// The volatile inventory the atmosphere was derived from (P14.T13.a), at the time: what
+    /// P14.T23's [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds.
+    #[must_use]
+    pub const fn inventory(&self) -> &VolatileInventory {
+        &self.inventory
     }
 
     /// The mean surface temperature: the atmosphere's (P14.T13.c).
@@ -968,6 +985,7 @@ pub fn derive_body(
         albedo,
         equilibrium_temperature: irradiated,
         effective_temperature: (internal_luminosity > Watts::ZERO).then_some(heated),
+        inventory,
         atmosphere: air,
         internal_luminosity,
         radius,

@@ -5278,3 +5278,48 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
   et al. 2024). It needs a sourced solubility law (Lebrun et al. 2013 or Bower et al. 2019, not
   read). Until then `atmosphere()` gives a `Crust::Molten` world its whole inventory in the air, and
   its surface can saturate at its host's temperature.
+- **Deviations in T14.a–c and T23, as built (`spin14`, round 9, stopped at the 2026-09-30
+  wrap-up).** Status: T14.a–c built and unit-tested; T23 built sim-side and unit-tested; T33.a
+  **not started** (no `benches/planetary.rs`); the golden systems do **not** yet pin rotation,
+  seeds or bulk composition, so no planetary golden moved (only `rng/tags.golden`, extended by the
+  two tags at 15). Resume: pin them in `golden_systems_are_pinned` (a bump), then build T33.a.
+  - _Files._ `planetary/derive/rotation.rs` (T14.a–b), `planetary/frames.rs` (T14.c),
+    `planetary/hooks/{mod,seed}.rs` (T23); `derive/mod.rs` (`pub mod rotation`, re-export
+    `tidal_locking_time`, `DerivedBody::inventory()`), `params.rs` (the spin constants),
+    `system.rs` (`PlanetarySystem` holds its `seed`; `surface_seed`, `hooks_at`, `rotation_of`;
+    `moon_bulk` split into `moon_derived` and `moon_bulk_of`), `moons/regular.rs` (`locking_time`
+    delegates to T14.b's formula at its own 0.35 and 15 h; `DerivedMoon::inventory()`),
+    `rng/tags.rs` (`planet.spin`, `body.surface`, appended after plan 10's tags).
+  - _T14.a._ `SpinDraws::for_body` on `planet.spin` (words 0–3: period rank, obliquity rank, pole
+    azimuth, phase; 4–7 reserved). The plan gives no width for the period law:
+    `PRIMORDIAL_PERIOD_SCATTER_DEX` = 0.2, **provisional; ruling deferred**. The drawn period is
+    floored at the break-up period (a giant at 10 h ± 0.2 dex would otherwise pass Jupiter's 2.9 h
+    in about 1% of draws). "Had a giant impact" is read as "has a giant-impact moon" (planets and
+    dwarf planets); moons are Rayleigh.
+  - _T14.b._ Moments of inertia by class: rocky 0.33, icy 0.34, sub-Neptunes and ice giants 0.23,
+    gas giants 0.25; the last two are below the plan's 0.33–0.4, which no enveloped body reaches
+    (Uranus 0.22, Jupiter 0.25–0.28), **provisional; for the science check**. Locking (τ over the
+    primordial period, e > 0.1 → 3:2) and the rotation angle are `RotationLaw`, anchored at the
+    epoch: locked, W = W_p + p M_q(t) from the orbit's exact phase; before a lock after the epoch,
+    the drawn phase plus the swept angle plus a capture phase δ ∈ [−π, π) spread as δ(Δ/d)², so
+    the angle is continuous at τ. A 3:2 body faces its primary at every other pericentre and away
+    at the rest (the plan's "faces its primary at every pericentre" holds for synchronous bodies).
+    The pole stays fixed: obliquity tides are not modelled, so a locked body keeps its drawn
+    obliquity (a deferred finding). The lock is to the body's orbit at the epoch (for a receding
+    impact moon or a host's mass loss, approximate).
+  - _T14.c._ `BodyFixedFrame { pole, w0, rate }` with `rate` the whole `RotationLaw` (the rate is
+    not constant); `body_fixed_at(&frame, t) -> FrameRotation` (rows: prime meridian, east, pole,
+    along the galactic axes); W is measured from the equator's ascending node on the orbital plane.
+    Rotation stays outside `derive_body` (it reads the pole against the orbit and the moons), and
+    `PlanetarySystem::rotation_of(ctx, index)` derives it from the record at `parent_time`.
+  - _T23 and the surface seed (the rendering plans' R04 amendment)._ `surface_seed(seed, BodyId)`
+    is word 0 of `body.surface`; `PlanetarySystem::surface_seed` and `hooks_at` return it with
+    `BulkComposition { fractions, inventory, fe_h, alpha_fe: Option<Dex> }`. **The seed is kept off
+    the wire:** `BodyHooks` is not put in `BodyRecord`, whose hooks section stays `NotModelled`
+    and uninhabited, and no DTO or protocol file was touched. The existing
+    `BodyHooksDto.surface_seed` (T35) still exists and is never filled; R04.T3.c reshapes it to
+    `detail_seed`. The "two template tables" test is two contexts of one system ID about different
+    hosts (the template table is a constant).
+  - _Not done._ T33.a (bench; (iii) rogue planets waits for T27 anyway); goldens for T14/T23;
+    moons and rings are still referred to the planet's orbital plane, not T14's equator (moving
+    them is an output change for T22.a's owner).

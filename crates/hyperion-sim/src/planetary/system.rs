@@ -96,7 +96,8 @@ use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
 use crate::planetary::context::{SystemContext, XuvHistory};
-use crate::planetary::derive::atmosphere::VolatileDraws;
+use crate::planetary::derive::atmosphere::{VolatileDraws, VolatileInventory};
+use crate::planetary::derive::rotation::{BodyRotation, ObliquityLaw, SpinDraws, SpinInputs};
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, HabitableZone, HostLight, Illumination, MassFractions, PlacedBody,
     PlanetClass, derive_body, habitable_zone_of, radius_chen_kipping,
@@ -107,14 +108,15 @@ use crate::planetary::fate::{BodyFate, BodyState, FateBody, FateHost, ScatterDra
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
+use crate::planetary::hooks::{self, BodyHooks, BulkComposition, SurfaceSeed};
 use crate::planetary::hosts::evolved::{Circularisation, EccentricityFloor};
 use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
-use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
 use crate::planetary::moons::regular::{
-    MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonNursery, MoonSky, derive_moon,
+    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonNursery, MoonSky, derive_moon,
 };
+use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
 use crate::planetary::moons::{
     BeltAdjacency, MoonParent, MoonParentParts, NearestBelt, ParentKind,
 };
@@ -132,7 +134,7 @@ use crate::planetary::placement::{
 };
 use crate::planetary::record::{
     BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, HaloRecord,
-    Population, Section, SystemSnapshot,
+    MoonOrigin, Population, Section, SystemSnapshot,
 };
 use crate::planetary::rings::{Ring, RingParent};
 use crate::planetary::satellites::{Satellite, SatelliteMoon, Satellites, satellites_of};
@@ -142,7 +144,9 @@ use crate::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
 use crate::stellar::system::StarModel;
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, Span, UniverseTime};
-use crate::units::consts::{GM_EARTH, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR};
+use crate::units::consts::{
+    GM_EARTH, GRAVITATIONAL_CONSTANT, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR,
+};
 use crate::units::{
     EarthMasses, EarthRadii, GravitationalParameter, Kilograms, KilogramsPerCubicMetre, Megayears,
     Metres, MetresPerSecondSquared, Radians, SolarLuminosities, SolarMasses, SolarMassesPerYear,
@@ -762,6 +766,7 @@ pub(crate) fn host_circularisations(
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlanetarySystem {
+    seed: Seed,
     system: SystemId,
     zones: Vec<OrbitZone>,
     hosts: Vec<PlanetaryHost>,
@@ -950,6 +955,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
     }
     bodies.sort_by_key(Body::index);
     PlanetarySystem {
+        seed,
         system: id,
         zones,
         hosts,
@@ -1679,6 +1685,159 @@ impl PlanetarySystem {
         Some(habitable_zone_of(&orbited, &companions))
     }
 
+    /// The surface seed of body `index` (P14.T23, [`hooks::surface_seed`]): a planet's, a
+    /// moon's or a dwarf planet's, whatever happens to it; `None` for a ring, a belt or the halo,
+    /// which have no surface. Server-only (the [`hooks`](crate::planetary::hooks) module
+    /// documentation).
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveBodyError::NoSuchBody`] if the system holds no body `index`.
+    pub fn surface_seed(&self, index: BodyIndex) -> Result<Option<SurfaceSeed>, ResolveBodyError> {
+        if self.belt(index).is_some() || self.halo().is_some_and(|halo| halo.index() == index) {
+            return Ok(None);
+        }
+        let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
+        Ok(match body.part {
+            Part::Planet(_) | Part::Moon(_) | Part::Member(_) => {
+                Some(hooks::surface_seed(self.seed, index.body_id(self.system)))
+            }
+            Part::Ring(_) => None,
+        })
+    }
+
+    /// The hooks of body `index` at `t` (P14.T23): its surface seed and its bulk composition,
+    /// the mass fractions its record gives with the volatile inventory of its derivation at `t`
+    /// and the system's \[Fe/H\] and \[α/Fe\]; `None` for a ring, a belt or the halo.
+    /// Server-only, and not part of the body's record (the [`hooks`](crate::planetary::hooks)
+    /// module documentation).
+    ///
+    /// # Errors
+    ///
+    /// As [`body_at`](Self::body_at).
+    ///
+    /// # Panics
+    ///
+    /// As [`snapshot_at`](Self::snapshot_at).
+    pub fn hooks_at(
+        &self,
+        ctx: &SystemContext,
+        index: BodyIndex,
+        t: UniverseTime,
+    ) -> Result<Option<BodyHooks>, ResolveBodyError> {
+        let Some(seed) = self.surface_seed(index)? else {
+            return Ok(None);
+        };
+        let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
+        let epoch = Epoch::new(self, ctx, t);
+        let primary = match body.host {
+            OrbitHost::Body(parent) => self
+                .body(parent)
+                .expect("a satellite's parent is a body of its system"),
+            OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => body,
+        };
+        let host = fate_host(ctx, self.zone_of(primary));
+        let fate = self.fate_of(primary, &host);
+        let label = label::label(self, primary.index).expect("every body of a system has a label");
+        let (_, now) = self.primary_record(&epoch, primary, label, &fate);
+        let composition = |fractions: MassFractions, inventory: VolatileInventory| {
+            Section::Ok(BulkComposition::new(
+                fractions,
+                inventory,
+                ctx.fe_h(),
+                ctx.alpha_fe(),
+            ))
+        };
+        let bulk = match &body.part {
+            Part::Planet(_) | Part::Member(_) => now.derived.map_or(Section::NotApplicable, |d| {
+                let fractions =
+                    icy_member_bulk(body, &d).map_or_else(|| d.fractions(), |b| b.fractions());
+                composition(fractions, *d.inventory())
+            }),
+            Part::Moon(moon) => {
+                let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
+                if state == BodyState::Present && now.position.is_some() {
+                    let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                    Self::moon_derived(&epoch, moon, &orbit, &now).map_or(
+                        Section::NotModelled,
+                        |derived| {
+                            let bulk = Self::moon_bulk_of(moon, &derived, &now);
+                            composition(bulk.fractions(), *derived.inventory())
+                        },
+                    )
+                } else {
+                    Section::NotApplicable
+                }
+            }
+            Part::Ring(_) => unreachable!("a ring has no surface seed"),
+        };
+        Ok(Some(BodyHooks::new(seed, bulk)))
+    }
+
+    /// The rotation of body `index` (P14.T14): its spin, drawn on its own `planet.spin` stream,
+    /// against its orbit, mass, radius and class at the epoch (or, for a system not yet born
+    /// then, at the end of the clock window), about its primary: its host's mass for a planet or a
+    /// dwarf planet, its planet's for a moon.
+    ///
+    /// A planet or dwarf planet with a giant-impact moon (P14.T18) takes the isotropic obliquity,
+    /// every other body the Rayleigh one. `None` for a ring, a belt or the halo, and for a body
+    /// not present at that time, such as one destroyed before the epoch.
+    ///
+    /// # Errors
+    ///
+    /// As [`body_at`](Self::body_at).
+    ///
+    /// # Panics
+    ///
+    /// As [`snapshot_at`](Self::snapshot_at).
+    pub fn rotation_of(
+        &self,
+        ctx: &SystemContext,
+        index: BodyIndex,
+    ) -> Result<Option<BodyRotation>, ResolveBodyError> {
+        let record = self.body_at(ctx, index, parent_time(ctx))?;
+        let Some(body) = self.body(index) else {
+            return Ok(None);
+        };
+        let obliquity_law = match body.part {
+            Part::Ring(_) => return Ok(None),
+            Part::Planet(_) | Part::Member(_) if self.had_giant_impact(index) => {
+                ObliquityLaw::Isotropic
+            }
+            Part::Planet(_) | Part::Member(_) | Part::Moon(_) => ObliquityLaw::Rayleigh,
+        };
+        let (Section::Ok(orbit), Section::Ok(bulk), Section::Ok(mass)) =
+            (record.orbit(), record.bulk(), record.mass())
+        else {
+            return Ok(None);
+        };
+        let elements = *orbit.elements();
+        let mass = Kilograms::from(*mass);
+        let primary =
+            elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value();
+        let inputs = SpinInputs {
+            draws: SpinDraws::for_body(self.seed, index.body_id(self.system)),
+            obliquity_law,
+            class: bulk.class(),
+            mass,
+            radius: Metres::from(bulk.radius()),
+            orbit: elements,
+            primary_mass: Kilograms::new(primary),
+            age_at_epoch: ctx.age_at_epoch(),
+        };
+        // A present body's record has a positive mass and radius and an orbit about a primary of
+        // positive mass, so the derivation refuses nothing the generator makes; a refusal would
+        // be a record without a rotation to give, which `None` says.
+        Ok(BodyRotation::derive(&inputs).ok())
+    }
+
+    /// Whether the planet or dwarf planet `index` has a giant-impact moon (P14.T18).
+    #[must_use]
+    fn had_giant_impact(&self, index: BodyIndex) -> bool {
+        self.children(index)
+            .any(|child| child.kind() == BodyKind::Moon(MoonOrigin::GiantImpact))
+    }
+
     /// The zone of `body`'s host: a planet's or a member's own, a satellite's parent's.
     #[must_use]
     fn zone_of(&self, body: &Body) -> &OrbitZone {
@@ -1912,14 +2071,30 @@ impl PlanetarySystem {
         orbit: &KeplerElements,
         parent: &ParentNow,
     ) -> Section<BulkProperties> {
+        Self::moon_derived(epoch, moon, orbit, parent).map_or(Section::NotModelled, |derived| {
+            Section::Ok(Self::moon_bulk_of(moon, &derived, parent))
+        })
+    }
+
+    /// The derivation of the present moon `moon` on `orbit` at the epoch's time, whose parent is
+    /// as `parent` says (P14.T17.b); `None` where this generator version does not compute it.
+    #[must_use]
+    fn moon_derived(
+        epoch: &Epoch<'_>,
+        moon: &MoonPart,
+        orbit: &KeplerElements,
+        parent: &ParentNow,
+    ) -> Option<DerivedMoon> {
         let (Some(nursery), Some(sky)) = (&parent.nursery, &parent.sky) else {
             // A parent whose satellites' nursery or sky cannot be built (a giant beyond the
             // cooling fit's 13 Jupiter masses, which placement never makes) has moons whose bulk
             // this generator version does not compute.
-            return Section::NotModelled;
+            return None;
         };
         let satellite = &moon.satellite;
-        let Ok(derived) = derive_moon(
+        // As above: the derivation refuses only inputs the generator never makes, so its error
+        // carries nothing a caller could act on.
+        derive_moon(
             satellite.mass(),
             orbit,
             &moon.parent,
@@ -1928,10 +2103,16 @@ impl PlanetarySystem {
             satellite.radius_rank(),
             epoch.ctx.age_at_epoch(),
             epoch.t,
-        ) else {
-            // As above: the derivation refuses only inputs the generator never makes.
-            return Section::NotModelled;
-        };
+        )
+        .ok()
+    }
+
+    /// The bulk of the moon `moon` derived as `derived`, whose parent is as `parent` says: a
+    /// regular moon's from its own derivation, a giant-impact moon's of its own density and a
+    /// capture's of its own radius, each with the flux and temperature of the derivation.
+    #[must_use]
+    fn moon_bulk_of(moon: &MoonPart, derived: &DerivedMoon, parent: &ParentNow) -> BulkProperties {
+        let satellite = &moon.satellite;
         let mass = satellite.mass();
         let (radius, density, fractions) = match satellite.moon() {
             SatelliteMoon::Regular(_) => (derived.radius(), derived.density(), derived.fractions()),
@@ -1958,14 +2139,14 @@ impl PlanetarySystem {
         };
         let r = radius.value();
         let gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
-        Section::Ok(BulkProperties::new(
+        BulkProperties::new(
             EarthRadii::from(radius),
             density,
             gravity,
             PlanetClass::of(mass, &fractions),
             fractions,
             derived.equilibrium_temperature(),
-        ))
+        )
     }
 
     /// The record of `belt` at the epoch's time, labelled `label` (P14.T21, P14.T30.b).

@@ -10,7 +10,9 @@
 
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::disc::{ROCK_MASS_FRACTION, WATER_ICE_MASS_FRACTION};
-use crate::units::{EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin, Megayears};
+use crate::units::{
+    Degrees, EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin, Megayears, Seconds,
+};
 
 /// How far out a prograde satellite on a circular orbit about a planet on a circular orbit stays
 /// bound: 0.4895 of the planet's Hill radius (design note 14).
@@ -253,3 +255,53 @@ pub const BRIGHT_KUIPER_EFFICIENCY_SIGMA_DEX: f64 = 0.5;
 /// The share of its solids a faint Kuiper-like belt keeps: 10⁻³, the Kuiper belt's loss of
 /// "nearly three orders of magnitude" (Sibthorpe et al. 2018, §5.3; ruling 84.1).
 pub const FAINT_KUIPER_EFFICIENCY: f64 = 1e-3;
+
+/// The median primordial rotation period of a rocky body: 15 hours (plan 14, P14.T14.a).
+///
+/// The plan's figure. Earth's day before the Moon-forming impact is unknown, and Mars's 24.6 hours
+/// and the few-hour spins of the giant-impact era (Kokubo and Genda 2010, `ApJL` 714, L21) bracket
+/// it; it is the median of [`primordial_period`](crate::planetary::derive::rotation::primordial_period)'s
+/// log-normal law.
+pub const ROCKY_PRIMORDIAL_PERIOD: Seconds = Seconds::new(54_000.0);
+
+/// The median primordial rotation period of a giant: 10 hours (P14.T14.a), about Jupiter's 9.93
+/// and Saturn's 10.6 hours, which tides have barely touched.
+pub const GIANT_PRIMORDIAL_PERIOD: Seconds = Seconds::new(36_000.0);
+
+/// The scatter of the primordial rotation period about its median, dex: 0.2, a factor of 1.6
+/// (P14.T14.a; provisional).
+///
+/// The plan gives the law's median and not its width. Planetary-mass companions' spins, which
+/// tides have not touched either, spread over about a factor of two about a tenth of break-up
+/// (Bryan et al. 2020, AJ 159, 181, not re-read), which 0.2 dex gives within ±1.5σ.
+pub const PRIMORDIAL_PERIOD_SCATTER_DEX: f64 = 0.2;
+
+/// The Rayleigh scale of the obliquity of a body that had no giant impact: 10° (P14.T14.a).
+pub const QUIET_OBLIQUITY_SCALE: Degrees = Degrees::new(10.0);
+
+/// The eccentricity above which a tidally locked body settles into the 3:2 spin–orbit resonance
+/// rather than into synchronous rotation: 0.1 (P14.T14.b, the plan's "about 0.1").
+///
+/// Mercury, at 0.206, is in 3:2; capture into it needs an eccentricity above about 0.1 for most
+/// histories, and synchronous rotation is the stable end state below (Correia and Laskar 2004,
+/// Nature 429, 848, not re-read).
+pub const SPIN_ORBIT_RESONANCE_ECCENTRICITY: f64 = 0.1;
+
+/// The moment of inertia of a rocky body in units of M R²: 0.33 (P14.T14.b), Earth's 0.3307
+/// (Williams 1994, AJ 108, 711), with Mercury's 0.346 and Mars's 0.3645 above it.
+pub const ROCKY_MOMENT_OF_INERTIA: f64 = 0.33;
+
+/// The moment of inertia of an icy body in units of M R²: 0.34 (P14.T14.b), between Ganymede's
+/// 0.311 and Callisto's 0.355, and Titan's 0.34 (Iess et al. 2010, Science 327, 1367).
+pub const ICY_MOMENT_OF_INERTIA: f64 = 0.34;
+
+/// The moment of inertia of a body under a hydrogen and helium envelope, sub-Neptunes and ice
+/// giants, in units of M R²: 0.23 (P14.T14.b), Uranus's 0.22 and Neptune's 0.24 (Helled, Anderson
+/// and Schubert 2010, Icarus 210, 446, not re-read). Below the plan's 0.33–0.4, which no body with
+/// an envelope reaches.
+pub const ENVELOPED_MOMENT_OF_INERTIA: f64 = 0.23;
+
+/// The moment of inertia of a gas giant in units of M R²: 0.25 (P14.T14.b), Jupiter's 0.254
+/// (Hubbard and Marley 1989, Icarus 78, 102; 0.2756 from Juno's field, Ni 2018, not re-read) with
+/// Saturn's 0.21 below. Below the plan's 0.33–0.4, as for [`ENVELOPED_MOMENT_OF_INERTIA`].
+pub const GAS_GIANT_MOMENT_OF_INERTIA: f64 = 0.25;

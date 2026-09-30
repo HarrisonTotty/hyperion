@@ -54,6 +54,7 @@ use std::fmt;
 use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
+use crate::planetary::derive::rotation::{SpinningBody, tidal_locking_time};
 use crate::planetary::derive::{
     BodyHosts, BuildBodyHostsError, BuildPlacedBodyError, DeriveBodyError, DerivedBody, HostLight,
     Illumination, MassFractions, PlacedBody, PlanetClass, derive_body,
@@ -888,6 +889,13 @@ pub struct DerivedMoon {
 }
 
 impl DerivedMoon {
+    /// The moon's volatile inventory at the time, from P14.T16's [`derive_body`] (P14.T13.a),
+    /// which P14.T23's [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds.
+    #[must_use]
+    pub const fn inventory(&self) -> &crate::planetary::derive::atmosphere::VolatileInventory {
+        self.body.inventory()
+    }
+
     /// The flux the moon receives from its planet and the stars, from P14.T16's [`derive_body`].
     #[must_use]
     pub const fn flux(&self) -> crate::units::EarthFluxes {
@@ -1123,18 +1131,28 @@ pub fn has_subsurface_ocean(
 
 /// The time a planet of mass `planet_mass` takes to lock the spin of a moon of mass `mass` and
 /// radius `radius` at semi-major axis `a`, from a period of [`MOON_PRIMORDIAL_PERIOD_HOURS`]:
-/// τ = ω a⁶ I Q ÷ (3 G `M_p`² k₂ R⁵), with I = 0.35 M R² and a rocky body's k₂ = 0.3 and Q = 100
-/// (P14.T14.b, after Gladman et al. 1996, Icarus 122, 166).
+/// P14.T14.b's [`tidal_locking_time`](crate::planetary::derive::rotation::tidal_locking_time),
+/// with I = 0.35 M R² and a rocky body's k₂ = 0.3 and Q = 100 (after Gladman et al. 1996, Icarus
+/// 122, 166), for P14.T17.b's "all regular moons lock".
 ///
-/// P14.T14.b's locking time, which T14 will own; here for P14.T17.b's "all regular moons lock".
+/// # Panics
+///
+/// If `mass` or `radius` is not positive and finite, which a derived moon's never is.
 #[must_use]
 pub fn locking_time(planet_mass: Kilograms, mass: Kilograms, radius: Metres, a: Metres) -> Seconds {
-    let omega = core::f64::consts::TAU / (MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0);
-    let (r, a, m_p) = (radius.value(), a.value(), planet_mass.value());
-    let inertia = MOON_MOMENT_OF_INERTIA * mass.value() * r * r;
-    Seconds::new(
-        omega * math::powi(a, 6) * inertia * ROCKY_TIDAL_Q
-            / (3.0 * GRAVITATIONAL_CONSTANT * m_p * m_p * ROCKY_LOVE_NUMBER * math::powi(r, 5)),
+    let moon = SpinningBody::new(
+        mass,
+        radius,
+        MOON_MOMENT_OF_INERTIA,
+        ROCKY_LOVE_NUMBER,
+        ROCKY_TIDAL_Q,
+    )
+    .expect("a moon's mass and radius are positive and finite");
+    tidal_locking_time(
+        &moon,
+        Seconds::new(MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0),
+        a,
+        planet_mass,
     )
 }
 

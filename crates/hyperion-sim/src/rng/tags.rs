@@ -739,6 +739,22 @@ domain_tags! {
     /// A recent dwarf progenitor's share of its bound mass lost at each pericentre: one word
     /// (P10.T3.c, Design note 11).
     DWARF_STRIPPING: Galaxy = "dwarf.stripping";
+
+    // Plan 14, phase C and E: rotation and the surface seed (P14.T14, T23), under the names and
+    // scopes of the "Plan 14" heading above. Appended here, after plan 10's entries, because the
+    // macro's order fixes `ALL`.
+
+    /// A planet's, moon's or dwarf planet's spin (P14.T14.a), keyed by the body: the ranks of its
+    /// primordial period and of its obliquity, words 0 and 1, one open uniform each, then its
+    /// pole's azimuth about its orbit's normal and its rotation phase at the epoch, words 2 and 3,
+    /// one uniform each; words 4–7 are reserved (`planetary::derive::rotation::SpinDraws`).
+    PLANET_SPIN: Body = "planet.spin";
+
+    /// A body's surface seed (P14.T23), keyed by the body: word 0, the seed itself, which no
+    /// other property reads, so that no change to the derivation moves a map
+    /// (`planetary::hooks::seed`). Server-only: no wire type carries it (the rendering plans'
+    /// R04, "a detail seed on the wire, the surface seed off it").
+    BODY_SURFACE: Body = "body.surface";
 }
 
 #[cfg(test)]
