@@ -1170,3 +1170,19 @@ bumped. It reserves no stream or tag. It adds the golden files `coords/body_fixe
   → fixed). The ask that it return `BodyFixedRotation` stays open; the module documentation names
   the conversion meanwhile (`from_rows` of the transpose), and Design note 14's
   `ROTATION NOT YET MODELLED` may be revisited when R02.T17 wires real bodies.
+- **Deviations in R02.T4, as built.** The exit follows the text literally: while the camera is
+  inside its current frame's sphere, that frame and its candidate ancestors form a chain whose
+  members keep the exit at 1 and the incumbent's `FRAME_HYSTERESIS`; once it has left (ratio
+  above 1), or the current frame is not among the candidates, the chain is empty and the whole
+  rule re-runs with no current frame, so a camera leaving the Moon's sphere at 0.95 of the
+  Earth's falls to the system frame. A review read Design note 6's "a Schmitt band on each
+  sphere's own boundary" as keeping the ancestors' band; the difference matters only where a
+  moon's sphere reaches its planet's band, which real nesting rules out, and is a question for
+  the owner (the golden and the twin follow the literal rule). `BodyFrameCandidate::new` returns
+  `BuildBodyFrameCandidateError` with a third variant, `OwnParent`; −0 is stored as +0; the
+  candidate exposes `id`, `parent`, `distance`, `hill_radius` and `ratio`; a repeated ID keeps
+  its smallest-ratio entry. Depth counts `parent` links among the candidates only and every body
+  at one depth competes (cousins as well as siblings), so callers (R02.T17, R03's `sceneAt`) pass
+  whole parent chains. The golden writes distances and Hill radii as Rust's shortest round-trip
+  decimals, which `parseFloat` reads back exactly. `just test-wasm` is pending by hand: wasmtime
+  is not installed on the lane's machine.
