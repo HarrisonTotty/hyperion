@@ -1511,3 +1511,24 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   stated the clock read when it was pushed rather than the reading the core evaluated at: the
   task now pushes the reading `delta` advanced to (`push_of`), so a push's clock is the time its
   records hold.
+- **T8 and T9 after review.** The tests of T8.a's `valid_until` and T8.b's slow reader are unit
+  tests in `scene/topic.rs`, so both tasks' acceptance gains
+  `cargo test -p hyperion-server --lib scene::topic`. The craft tick landed in T8.a's commit.
+  `CRAFT_PUSH_INTERVAL` is `Duration::from_micros(15_625)`, the plan's `from_nanos(15_625_000)`
+  (Clippy prefers the larger unit). A large notification the pool refuses is serialised by
+  `spawn_blocking`, never on the runtime. The craft test asserts each push states a later time and
+  at most 66 pushes a second; the measured rate is recorded in T8.b's note, not asserted. The
+  slow-reader test asserts that the merged notification carries every contact the ship sees and
+  craft stated within a second before its clock (a heartbeat merged after a craft push states a
+  later clock than the craft, which carry their own time). `keep_only` has its own test. The
+  knowledge test counts arrivals by reading until a system arrives. Its "inside a hidden body's
+  Hill sphere" placements are offsets within 10⁸ m on each axis of the body, not scaled to the
+  sphere (the wire hides the Hill radius of a contact). The two-clients test injects ten craft and
+  a knowledge with contacts: each craft list either client is told is the source's at its stated
+  time, the same contacts are placed by sight for both, and each later setting continues the
+  clock, so the minute is one run of scene time; records are compared by position, each degraded
+  to its own grant. Open for the owner: a slow reader's merged push states the latest clock while
+  an arrival merged into it holds records evaluated at an earlier time (Design note 5 keeps the
+  latest clock; the records' orbits are time-independent, a contact's `seen` is not); and a topic
+  whose pool job fails stops pushing with only a `warn`, which the client's sequence check cannot
+  see (an error notification would need a protocol addition).

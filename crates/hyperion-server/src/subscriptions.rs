@@ -368,9 +368,10 @@ impl Unsent {
         }
     }
 
-    /// Serialises it on `pool`, as a large one is, or here if the pool's interactive queue has no
-    /// room: the connection never waits for room, so that it goes on reading while the pool is
-    /// busy.
+    /// Serialises it on `pool`, as a large one is, or on a blocking thread if the pool refuses it
+    /// (its interactive queue full, or the pool shutting down): the connection never waits for
+    /// room in the pool, so that it goes on reading while the pool is busy, and never serialises
+    /// a whole system on the runtime.
     pub(crate) async fn serialise_on(self, pool: &CpuPool) -> Ready {
         let Self { id, body } = self;
         // Lent to the job through a slot, so that a job the queue refuses gives the body back.
@@ -390,7 +391,13 @@ impl Unsent {
                 .unwrap_or_else(PoisonError::into_inner)
                 .take()
                 .expect("a job the queue refused never ran");
-            return Self { id, body }.serialise();
+            return match tokio::task::spawn_blocking(move || Self { id, body }.serialise()).await {
+                Ok(ready) => ready,
+                Err(error) => {
+                    tracing::warn!(%error, "a notification could not be serialised");
+                    Ready::empty(id)
+                }
+            };
         };
         if let Ok(Ok((body, frame))) = receiver.await {
             Ready {
