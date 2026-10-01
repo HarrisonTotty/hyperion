@@ -1414,3 +1414,13 @@ warnings` with "use of a disallowed method", and was reverted.
   N)" and "plan RNN" to the rendering plan; a task ID such as `R10.T3` names no plan. The label of
   a note from another plan now names its plan set's directory beside the file name; otherwise the
   output for all 795 galaxy tasks is unchanged (compared before and after).
+- **Deviations in T7.a, as built (2026-09-30).** The three failures the plan names were already
+  fixed at the start of this task (plan 01's Risks, "wasm: not pursued this round": the
+  `catch_unwind` test became `an_over_long_window_panics_in_debug`, `check_shares` runs on one
+  thread under `cfg(target_family = "wasm")`, and `quantile` works in `u64`). The full fast rerun
+  under wasmtime 49.0.1 (`cargo test --target wasm32-wasip1 --no-fail-fast` over base, the surface
+  crate, the sim and the testkit, doctests included) found one more: `clippy_bans.rs`'s
+  `workspace_root` called `canonicalize`, which wasip1 does not support, and aborted the binary.
+  It now takes the root lexically (two `parent()`s). Nothing else failed; no golden changed. On
+  wasip1 a `should_panic` test is reported ignored by libtest (`panic = "abort"`), as plan 01's
+  Risks records; the native run covers them.
