@@ -1517,3 +1517,20 @@ warnings` with "use of a disallowed method", and was reverted.
   … (it printed 'undefined')"), at the comparison with `lcg.rs`'s `as test` line removed (it names
   `lcg::tests::floats_and_bounded_integers_stay_in_range`), and at the comparison with a test
   compiled out by its own `cfg` outside `native_only` (it names the test); each edit was reverted.
+- **Deviations in T8.c, as built (2026-09-30).** `test-wasm-fast` now runs, after the wasip1
+  suites, `_browser-clippy` (the plan's Clippy command, over `browser_crates`) and
+  `test-wasm-browser` over base, the surface crate and the testkit, each behind
+  `_wasm-preflight "browser"`. Base's version check, its helpers and `FOUNDATION_GOLDENS` moved
+  into a `native_only` module of `foundation_golden.rs`. Beyond the skill's opening paragraph, its
+  "Adding goldens" section gains the browser target's test conventions (the import,
+  `native_only`, `tests/panics.rs`, literal golden names), and the README's check list names the
+  browser run. The browser target runs 124 of base's tests (one, the version check, natively
+  only), the surface crate's one and the testkit's 52; its tests took under 1 s, so its cost in
+  `ci` is its builds (about 70 s cold for the testkit's harness, seconds warm; provisional, under
+  load). Checked by hand, 2026-09-30, and reverted: an `f64::sin` call in a function of base under
+  `#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]` passed host Clippy and failed
+  `_browser-clippy` ("use of a disallowed method `f64::sin`"); one character of
+  `math/functions.golden` changed (`sin(0.0)`'s last hex digit) failed `foundation_golden` natively,
+  under wasip1 (nextest) and on the browser target ("math/functions.golden (embedded) differs at
+  line 3"). These runs used a side target directory and, for the browser suite, the recipe without
+  its lock step, since the slow wasip1 suite held the heavy-test lock for its own timing.

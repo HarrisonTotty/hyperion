@@ -205,10 +205,18 @@ _relaxed-simd-refused:
     echo "the +relaxed-simd build is refused by its guard" >&2
 
 # Built first, then run under the heavy-test lock. The doctests wait for `test-wasm-slow`.
-# The fast WebAssembly checks, run by `ci`: relaxed SIMD refused, the fast suites under wasip1.
-test-wasm-fast: (_wasm-preflight "wasip1") _relaxed-simd-refused
+# The fast WebAssembly checks, run by `ci`: relaxed SIMD refused, wasip1, Clippy and the browser.
+test-wasm-fast: (_wasm-preflight "wasip1" "browser") _relaxed-simd-refused _browser-clippy
     just _wasip1 {{ wasip1_nextest }} --no-run
     just _locked just _wasip1 {{ wasip1_nextest }}
+    just test-wasm-browser
+
+# Clippy for the browser target over the crates that run there, so that code compiled only there
+# (the testkit's embedded golden arm, the surface crate's `src/wasm.rs`) is linted under the
+# crates' own `clippy.toml` files, which `just lint`, run on the host, never applies to it, and so
+# that the bans of the relaxed intrinsics bind (R04 Design notes 10 and 12).
+_browser-clippy: (_wasm-preflight "browser")
+    cargo clippy --target wasm32-unknown-unknown -p {{ replace(browser_crates, " ", " -p ") }} --all-targets -- -D warnings
 
 # Built first, then run under the heavy-test lock: the slow tests at the slow-test profile with
 # `test-slow`'s nextest profile, then the doctests, which nextest does not run and `cargo test` runs
@@ -225,7 +233,7 @@ test-wasm: test-wasm-fast test-wasm-slow
 
 # The crates whose suites run on wasm32-unknown-unknown, the client's target: those the client ships
 # or tests with. Not the sim, which no browser loads (R04 Design note 11).
-browser_crates := "hyperion-testkit"
+browser_crates := "hyperion-base hyperion-surface hyperion-testkit"
 
 # How long one test binary may run on the browser target, in seconds: wasm-bindgen-test's Node mode
 # has no timeout of its own.

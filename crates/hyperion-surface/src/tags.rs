@@ -16,6 +16,8 @@ hyperion_base::domain_tags! {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     /// Every name begins `surface.`, or `selftest.surface.` for a tag of `SelfTest` scope.
     /// Vacuous until R05's first tag, and then binding.

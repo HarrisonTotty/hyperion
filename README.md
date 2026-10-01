@@ -155,10 +155,13 @@ machine; they add about two more (measured under shared load, to be re-timed qui
   well as on native x86-64: it runs the fast tests of `hyperion-base`, `hyperion-surface`,
   `hyperion-sim` and `hyperion-testkit`, goldens included, as `wasm32-wasip1` under wasmtime, where
   `usize` is 32 bits, with cargo-nextest (one process per test, since wasip1 has no threads); and
-  it checks that a build with relaxed SIMD fails. `just test-wasm-slow`, part of `just ci-slow`,
+  it checks that a build with relaxed SIMD fails, runs Clippy for the browser target over the
+  crates that run there, and runs `just test-wasm-browser` (below), so that the same goldens are
+  compared natively, on wasip1 and in the browser. `just test-wasm-slow`, part of `just ci-slow`,
   runs their slow tests and doctests there; `just test-wasm` runs both. A missing tool fails them
   with a pointer to `just wasm-tools`; they never skip. Nothing checks AArch64.
-- `just test-wasm-browser` runs the tests of the crates the client ships or tests with as
+- `just test-wasm-browser` runs the tests of the crates the client ships or tests with
+  (`hyperion-base`, `hyperion-surface`, `hyperion-testkit`; not the sim, which no browser loads) as
   `wasm32-unknown-unknown`, the client's target, under `wasm-bindgen-test` on the V8 that Electron
   ships: `tools/electron-node/node` runs Electron as Node, and the recipe's first line shows the
   Electron and V8 versions it ran on. It fails if any test that runs natively, outside a

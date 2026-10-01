@@ -90,6 +90,8 @@ pub fn threefry2x64_20(key: [u64; 2], counter: [u64; 2]) -> [u64; 2] {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 

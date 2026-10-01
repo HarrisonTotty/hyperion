@@ -15,5 +15,10 @@ bench = false
 # sim, which depends on it, and a new dependency is a reviewed change (plan R04, Risks).
 hyperion-base.workspace = true
 
+# The browser target's harness, on that target alone, never on `cfg(target_arch = "wasm32")`, which
+# would build it into the wasip1 runs too (plan R04, Design note 12).
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test.workspace = true
+
 [lints]
 workspace = true
