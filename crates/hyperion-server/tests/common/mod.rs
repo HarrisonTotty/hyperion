@@ -6,6 +6,8 @@
     reason = "each test binary compiles this module and uses its own subset of the helpers"
 )]
 
+pub mod scene;
+
 use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -390,6 +392,48 @@ pub fn pretty_json_frame(compact: &str) -> String {
     out
 }
 
+/// A bulk frame's header (rendering plan R03, Design note 10): 24 bytes, little-endian, after the
+/// magic `HYPB`, format 1 and the header's own length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BinaryHeader {
+    /// The request the chunk answers.
+    pub request: u32,
+    /// The chunk's index, from 0.
+    pub index: u32,
+    /// The transfer's chunk count.
+    pub count: u32,
+    /// The payload's length in bytes.
+    pub payload_len: u32,
+}
+
+impl BinaryHeader {
+    /// The header of `frame`, checked, and its payload.
+    fn split(frame: &[u8]) -> (Self, Vec<u8>) {
+        assert!(frame.len() >= 24, "a bulk frame holds its 24-byte header");
+        assert_eq!(&frame[0..4], b"HYPB", "the magic");
+        assert_eq!((frame[4], frame[5]), (1, 0), "format 1, reserved 0");
+        assert_eq!(
+            u16::from_le_bytes([frame[6], frame[7]]),
+            24,
+            "the header's length"
+        );
+        let word = |at: usize| u32::from_le_bytes(frame[at..at + 4].try_into().expect("4 bytes"));
+        let header = Self {
+            request: word(8),
+            index: word(12),
+            count: word(16),
+            payload_len: word(20),
+        };
+        let payload = frame[24..].to_vec();
+        assert_eq!(
+            usize::try_from(header.payload_len).expect("a u32 fits a usize"),
+            payload.len(),
+            "the payload's stated length"
+        );
+        (header, payload)
+    }
+}
+
 /// A WebSocket client speaking `hyperion-protocol`.
 #[derive(Debug)]
 pub struct TestClient {
@@ -452,6 +496,23 @@ impl TestClient {
         }
     }
 
+    /// The next frame from the server, which must be a bulk frame (rendering plan R03, R03.T10.b):
+    /// its header, read and checked, and its payload. Panics on a text frame, since a test that
+    /// expects one should read it itself.
+    pub async fn next_binary(&mut self) -> (BinaryHeader, Vec<u8>) {
+        loop {
+            let frame = patiently("waiting for a binary frame", self.socket.next())
+                .await
+                .expect("the server closed the connection")
+                .expect("the connection is healthy");
+            match frame {
+                Message::Binary(bytes) => return BinaryHeader::split(&bytes),
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("expected a binary frame, got {other:?}"),
+            }
+        }
+    }
+
     /// Says hello and returns the server's answer.
     pub async fn hello(&mut self) -> ServerMessage {
         self.send(&ClientMessage::Hello {
@@ -496,6 +557,34 @@ impl TestClient {
                 error,
             } if answered == id => Err(error),
             other => panic!("expected the answer to request {}, got {other:?}", id.0),
+        }
+    }
+
+    /// Makes a request and waits for its terminal message as [`TestClient::request`] does, keeping
+    /// the notifications that arrive before it, in order, for a client with subscriptions open.
+    pub async fn request_among_notifications(
+        &mut self,
+        body: RequestBody,
+    ) -> (
+        Result<ResponseBody, RequestError>,
+        Vec<(u32, NotificationBody)>,
+    ) {
+        let id = self.send_request(body).await;
+        let mut notifications = Vec::new();
+        loop {
+            match self.next_message().await {
+                ServerMessage::Response { id: answered, body } if answered == id => {
+                    return (Ok(body), notifications);
+                }
+                ServerMessage::RequestError {
+                    id: answered,
+                    error,
+                } if answered == id => return (Err(error), notifications),
+                ServerMessage::Notification { subscription, body } => {
+                    notifications.push((subscription, body));
+                }
+                other => panic!("expected the answer to request {}, got {other:?}", id.0),
+            }
         }
     }
 

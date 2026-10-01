@@ -903,6 +903,7 @@ mod tests {
                 clock: scene_clock(),
                 ship: scene_pose(),
                 system: None,
+                tidal_radius_m: None,
                 craft: Vec::new(),
             }),
         }

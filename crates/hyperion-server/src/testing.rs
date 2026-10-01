@@ -30,7 +30,7 @@ use crate::requests::{Handler, HandlerFuture, SubscribeFuture, to_frame};
 use crate::stats::{OutboundCounters, RequestCounters};
 use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
-use crate::{AppState, Server, ServerConfig, ServerStats};
+use crate::{AppState, Server, ServerConfig, ServerConfigBuilder, ServerStats};
 
 /// Upper bound on any single wait.
 ///
@@ -83,11 +83,35 @@ impl Harness {
         handler: impl Handler + 'static,
         limits: ConnectionLimits,
     ) -> Self {
+        Self::start_configured(handler, limits, |config| config).await
+    }
+
+    /// [`Harness::start_with_limits`], with the configuration `configure` makes of the harness's,
+    /// as a test that injects the scene's knowledge or craft needs.
+    pub(crate) async fn start_configured(
+        handler: impl Handler + 'static,
+        limits: ConnectionLimits,
+        configure: impl FnOnce(ServerConfigBuilder) -> ServerConfigBuilder,
+    ) -> Self {
+        Self::start_tapped(handler, limits, configure, Tap::LowWaterMark).await
+    }
+
+    /// [`Harness::start_configured`], with accepted sockets prepared as `tap` says: by
+    /// [`tap_socket`](crate::tap_socket), as every server does, or left as the kernel makes them,
+    /// for a measurement of what the low-water mark buys (rendering plan R03, R03.T10.b).
+    pub(crate) async fn start_tapped(
+        handler: impl Handler + 'static,
+        limits: ConnectionLimits,
+        configure: impl FnOnce(ServerConfigBuilder) -> ServerConfigBuilder,
+        tap: Tap,
+    ) -> Self {
         let data_dir = tempfile::tempdir().expect("a temporary directory");
-        let config = ServerConfig::builder()
-            .data_dir(data_dir.path())
-            .workers(std::num::NonZeroUsize::MIN)
-            .build();
+        let config = configure(
+            ServerConfig::builder()
+                .data_dir(data_dir.path())
+                .workers(std::num::NonZeroUsize::MIN),
+        )
+        .build();
         let server = timeout(
             WAIT,
             Server::start_with_handler(config, Arc::new(handler), limits),
@@ -102,7 +126,10 @@ impl Harness {
         let lowat = Arc::new(AtomicU32::new(0));
         let tapped = Arc::clone(&lowat);
         let listener = listener.tap_io(move |tcp| {
-            crate::tap_socket(tcp);
+            match tap {
+                Tap::LowWaterMark => crate::tap_socket(tcp),
+                Tap::Kernel => {}
+            }
             tapped.store(read_lowat(tcp), Ordering::Release);
         });
         let (stop_serving, stopped) = oneshot::channel::<()>();
@@ -390,6 +417,28 @@ impl Client {
         }
     }
 
+    /// The next text or binary frame from the server, skipping WebSocket pings and pongs: a
+    /// message, or a bulk frame's bytes (rendering plan R03, R03.T10.b).
+    pub(crate) async fn next_frame(&mut self) -> Received {
+        loop {
+            let frame = timeout(WAIT, self.socket.next())
+                .await
+                .expect("timed out waiting for a frame")
+                .expect("the server closed the connection")
+                .expect("the connection is healthy");
+            match frame {
+                Message::Text(text) => {
+                    return Received::Message(
+                        serde_json::from_str(&text).expect("the server sends valid messages"),
+                    );
+                }
+                Message::Binary(bytes) => return Received::Binary(bytes.to_vec()),
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("unexpected frame {other:?}"),
+            }
+        }
+    }
+
     /// Sends a close frame, without reading.
     pub(crate) async fn send_close(&mut self) {
         timeout(WAIT, self.socket.close(None))
@@ -440,6 +489,24 @@ impl Client {
         .await
         .expect("timed out waiting for the connection to close")
     }
+}
+
+/// How a [`Harness`] prepares the sockets it accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tap {
+    /// As every server does: [`tap_socket`](crate::tap_socket) sets the low-water mark.
+    LowWaterMark,
+    /// As the kernel makes them.
+    Kernel,
+}
+
+/// A frame a [`Client`] received.
+#[derive(Debug)]
+pub(crate) enum Received {
+    /// A text frame: a message.
+    Message(ServerMessage),
+    /// A binary frame: a bulk chunk's header and payload.
+    Binary(Vec<u8>),
 }
 
 /// A handler that hands every call to the test, which answers each one by hand.
@@ -498,6 +565,10 @@ impl Handler for Scripted {
                 .expect("the test is taking calls");
             match answer.await {
                 Ok(Reply::Respond(body)) => Ok(body.into()),
+                Ok(Reply::RespondBulk(body, bulk)) => Ok(crate::bulk::Answer {
+                    body,
+                    bulk: Some(bulk),
+                }),
                 Ok(Reply::Fail(error)) => Err(error),
                 Ok(Reply::Panic) => panic!("a deliberate panic in a handler"),
                 Err(_) => std::future::pending().await,
@@ -609,6 +680,7 @@ pub(crate) struct Call {
 #[derive(Debug)]
 enum Reply {
     Respond(ResponseBody),
+    RespondBulk(ResponseBody, crate::bulk::BulkPayload),
     Fail(RequestError),
     Panic,
 }
@@ -627,6 +699,12 @@ impl Call {
     /// Answers with `body`. Returns whether the request's task was still waiting.
     pub(crate) fn respond(self, body: ResponseBody) -> bool {
         self.reply.send(Reply::Respond(body)).is_ok()
+    }
+
+    /// Answers with `body` and the bulk payload `bulk`, whose chunks precede it (rendering plan
+    /// R03, R03.T10.b).
+    pub(crate) fn respond_bulk(self, body: ResponseBody, bulk: crate::bulk::BulkPayload) -> bool {
+        self.reply.send(Reply::RespondBulk(body, bulk)).is_ok()
     }
 
     /// Answers with `error`.

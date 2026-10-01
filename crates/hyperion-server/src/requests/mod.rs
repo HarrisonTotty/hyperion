@@ -12,11 +12,16 @@
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
-//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], and the system's in [`system`].
+//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], and the
+//! scene's in [`scene`].
 
 mod galaxy;
+mod scene;
 mod system;
 mod universe;
+
+pub(crate) use self::system::bodies_of;
+pub(crate) use self::universe::openable_universe;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -28,20 +33,22 @@ use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
     ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    ServerMessage, SubscribeRequest, Subscribed, SubscriptionState, UnsubscribeRequest,
+    SceneCamerasRequest, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
+    SubscriptionTopic, UnsubscribeRequest,
 };
 use serde_json::Value;
+use tokio::sync::oneshot;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
 use tracing::Instrument;
 
 use crate::AppState;
-use crate::bulk::Answer;
+use crate::bulk::{Answer, BulkPayload};
 use crate::compute::{
     CancelToken, ComputeError, JobError, Priority, SubmitJobError, panic_message,
 };
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
-use crate::subscriptions::{Pusher, Subscriptions};
+use crate::subscriptions::{Pusher, SubscriptionCommand, Subscriptions};
 
 /// What a handler returns: its answer, the response's body with any bulk payload, or why there is
 /// none.
@@ -76,6 +83,21 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
         _token: CancelToken,
     ) -> SubscribeFuture {
         Box::pin(ready(Err(not_served_yet("subscribe"))))
+    }
+}
+
+/// Opens the topic a `subscribe` names: the scene's (rendering plan R03, R03.T8.a).
+fn open_topic(
+    state: Arc<AppState>,
+    request: SubscribeRequest,
+    pusher: Pusher,
+    token: CancelToken,
+) -> SubscribeFuture {
+    let SubscribeRequest { universe, topic } = request;
+    match topic {
+        SubscriptionTopic::Scene(scene) => {
+            Box::pin(crate::scene::open(state, universe, scene, pusher, token))
+        }
     }
 }
 
@@ -125,10 +147,23 @@ impl Handler for Handlers {
             // match exhaustive for a caller that bypasses the connection.
             RequestBody::Subscribe(_) => Box::pin(ready(Err(not_served_yet("subscribe")))),
             RequestBody::Unsubscribe(_) => Box::pin(ready(Err(not_served_yet("unsubscribe")))),
-            // Served by R03.T6 (`scene_ship`) and R03.T8 (`scene_cameras`).
-            RequestBody::SceneShip(_) => Box::pin(ready(Err(not_served_yet("scene_ship")))),
+            RequestBody::SceneShip(request) => {
+                Box::pin(scene::ship(state, request, token).map(answered))
+            }
+            // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
+            // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
         }
+    }
+
+    fn subscribe(
+        &self,
+        state: Arc<AppState>,
+        request: SubscribeRequest,
+        pusher: Pusher,
+        token: CancelToken,
+    ) -> SubscribeFuture {
+        open_topic(state, request, pusher, token)
     }
 }
 
@@ -383,6 +418,8 @@ pub(crate) enum Handshake {
 pub(crate) struct Finished {
     frame: String,
     ending: Ending,
+    /// The bulk payload streamed before the terminal frame, if the answer has one.
+    bulk: Option<BulkPayload>,
 }
 
 /// A request whose task has ended, with its terminal frame, not yet queued.
@@ -395,9 +432,16 @@ pub(crate) struct Settled {
     task: TaskId,
     frame: String,
     ending: Ending,
+    bulk: Option<BulkPayload>,
 }
 
 impl Settled {
+    /// The bulk payload whose chunks precede the terminal frame, taken to stream (rendering plan
+    /// R03, Design note 10); `None` for an answer in JSON alone.
+    pub(crate) fn take_bulk(&mut self) -> Option<BulkPayload> {
+        self.bulk.take()
+    }
+
     /// The payload bytes of the terminal frame.
     #[must_use]
     pub(crate) fn frame_len(&self) -> usize {
@@ -508,6 +552,42 @@ impl Requests {
             .into())
         });
         self.start(id, kind, token, handled);
+        None
+    }
+
+    /// Routes a `scene_cameras` to its subscription's topic and starts the request that waits for
+    /// the topic's answer (rendering plan R03, R03.T8.a), or refuses it and returns the answer: as
+    /// [`Requests::submit`] refuses, `bad_request` naming `subscription` for a subscription the
+    /// connection does not have live, and `queue_full` for one with too many waiting.
+    pub(crate) fn scene_cameras(
+        &mut self,
+        id: RequestId,
+        request: SceneCamerasRequest,
+        handshake: Handshake,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = "scene_cameras";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::SceneCameras {
+            cameras: request.cameras,
+            answer,
+        };
+        if let Err(error) = subscriptions.command(request.subscription, command) {
+            return Some(self.refuse(id, kind, error));
+        }
+        let handled: HandlerFuture = Box::pin(async move {
+            match answered.await {
+                Ok(checked) => checked.map(|()| ResponseBody::SceneCameras.into()),
+                Err(_) => Err(request_error(
+                    ErrorCode::Internal,
+                    "the subscription ended before it answered",
+                )),
+            }
+        });
+        self.start(id, kind, CancelToken::new(), handled);
         None
     }
 
@@ -654,8 +734,15 @@ impl Requests {
             .in_flight
             .iter()
             .find(|(_, entry)| entry.task.id() == task)?;
-        let (frame, ending) = match joined {
-            Ok((_, Finished { frame, ending })) => (frame, ending),
+        let (frame, ending, bulk) = match joined {
+            Ok((
+                _,
+                Finished {
+                    frame,
+                    ending,
+                    bulk,
+                },
+            )) => (frame, ending, bulk),
             Err(error) => {
                 let reason = match error.try_into_panic() {
                     Ok(payload) => panic_message(payload.as_ref()),
@@ -669,7 +756,7 @@ impl Requests {
                         "the server failed while answering this request",
                     ),
                 });
-                (frame, Ending::Failed)
+                (frame, Ending::Failed, None)
             }
         };
         Some(Settled {
@@ -677,6 +764,7 @@ impl Requests {
             task,
             frame,
             ending,
+            bulk,
         })
     }
 
@@ -772,31 +860,25 @@ async fn run(
 ) -> Finished {
     let started = Instant::now();
     let handled = handled.await;
-    let answered = match handled {
-        // Bulk answers are streamed by R03.T10.b; until then no handler gives one.
-        Ok(Answer {
-            bulk: Some(payload),
-            ..
-        }) => {
-            tracing::error!(
-                bytes = payload.manifest().bytes,
-                "a handler answered in bulk, which is not streamed yet"
-            );
-            Err(request_error(
-                ErrorCode::Internal,
-                "the server cannot send this answer yet",
-            ))
-        }
-        Ok(Answer { body, bulk: None }) => respond(&state, id, body, token).await,
-        Err(error) => Err(error),
+    // A bulk payload rides beside the terminal frame, which the connection queues after its
+    // chunks (rendering plan R03, R03.T10.b).
+    let (answered, bulk) = match handled {
+        Ok(Answer { body, bulk }) => (respond(&state, id, body, token).await, bulk),
+        Err(error) => (Err(error), None),
     };
     let elapsed_ms = millis(started.elapsed());
     match answered {
         Ok(frame) => {
-            tracing::debug!(outcome = "response", elapsed_ms, "request finished");
+            tracing::debug!(
+                outcome = "response",
+                elapsed_ms,
+                bulk_bytes = bulk.as_ref().map(|payload| payload.manifest().bytes),
+                "request finished"
+            );
             Finished {
                 frame,
                 ending: Ending::Responded,
+                bulk,
             }
         }
         Err(error) => {
@@ -809,6 +891,7 @@ async fn run(
             Finished {
                 frame: to_frame(&ServerMessage::RequestError { id, error }),
                 ending,
+                bulk: None,
             }
         }
     }
@@ -1099,7 +1182,7 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // four until its tasks serve them.
+        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it.
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
@@ -1109,12 +1192,11 @@ mod tests {
                     RequestBody::BodyEvents(_)
                         | RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
-                        | RequestBody::SceneShip(_)
                         | RequestBody::SceneCameras(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 4);
         for body in events {
             let name = kind(&body);
             let answer = Handlers
@@ -1140,6 +1222,7 @@ mod tests {
                 },
                 ship: galactic_pose(),
                 system: None,
+                tidal_radius_m: None,
                 craft: Vec::new(),
             }),
         }));

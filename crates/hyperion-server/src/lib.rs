@@ -20,6 +20,7 @@ pub mod knowledge;
 pub mod limits;
 mod outbound;
 mod requests;
+pub mod scene;
 mod stats;
 mod subscriptions;
 #[cfg(test)]
@@ -42,6 +43,7 @@ use crate::compute::{
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
+use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
 use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
@@ -104,6 +106,9 @@ pub(crate) struct AppState {
     pub(crate) outbound_stats: OutboundStats,
     /// The limits each connection enforces on writing to its client.
     pub(crate) connection_limits: ConnectionLimits,
+    /// Each open universe's scene clock and ship stand-in, which `scene_ship` sets (rendering
+    /// plan R03, Design note 2).
+    pub(crate) scene: SceneService,
 }
 
 impl Server {
@@ -184,6 +189,10 @@ impl Server {
                 request_stats: RequestStats::new(),
                 outbound_stats: OutboundStats::new(),
                 connection_limits,
+                scene: SceneService::new(
+                    Arc::clone(config.scene_knowledge()),
+                    Arc::clone(config.craft_source()),
+                ),
             }),
         })
     }
