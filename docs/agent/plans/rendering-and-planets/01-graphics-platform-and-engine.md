@@ -2431,6 +2431,32 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `DISPLAY=:0` in a hidden offscreen window, 2026-10-01): every check passes on both paths;
     NVIDIA's `subgroup_size` is 32 (the device's minimum is 32 too), both u32 twins equal the CPU
     total, and the f32 sum lies within the bound (equal to the `f64` sum again).
+- **T11, as built (2026-10-01, RTX 3080, Electron 44.4.3, the client's switches with
+  `--disable-dawn-features=timestamp_quantization`).** The scene is the harness's soak mode
+  (`--smoke-soak=<seconds>`, `src/smoke/soak.ts` and `src/renderer/src/smoke/soak.ts`): a
+  full-window cockpit and two instruments, each with a background, a marker in its top-left
+  quadrant and a one-pass post-process (an exposure-scaled tone curve), the instruments resized
+  between 320 × 240 and 400 × 300 every 10 s, a looping video and a DOM panel beside them. A first
+  run on screen was stopped by the owner; by the owner's ruling, the record is of a run **hidden
+  and offscreen**. Its frames are paced by offscreen rendering's 60 Hz, not by the projector's
+  vsync, and the window was not resized (T12's finding), so the on-screen pacing and window
+  resizes are **pending by hand for the owner**. The machine was loaded (`just ci` of another lane
+  alongside; load average 30 to 60), so every figure is provisional.
+  - `GraphicsStatus.timer` reads `full` under `--hyperion-gpu-timing`'s switch, and every recorded
+    pass time is off the 65,536 ns grid (11 of 11 passes in the hardware harness run); without it,
+    `quantized`, every time a multiple of 65,536 ns.
+  - `targetRounding` on the RTX 3080: **`toward-zero` for both `rgba16float` and
+    `rg11b10ufloat`**.
+  - GPU time per pass over 300 s (13,265 frames), median (p95), µs: cockpit at 1,606 × 906 DIP
+    (1,255 × 708 px at a device pixel ratio of 0.78125) 282 (467), its post-process 147 (313);
+    instruments 52 and 38 (74, 52), their post-processes 37 and 31 (67, 42). No pass is
+    bracketed.
+  - The frame's passes are the three views' own and their post-processes: no copy pass.
+  - Frame interval (offscreen, provisional): p50 16.7 ms, p95 50.0 ms, max 267 ms, no gap over
+    1 s; no loss, no fault; ten DOM captures matched.
+  - The capture at 150 s shows each view's marker in its top-left quadrant, the right way up.
+  - T10's twins on the 3080: see T10 as built (subgroup size 32, both u32 twins equal to the CPU
+    total, the f32 sum within the bound).
 - **T13, as built (2026-10-01, RTX 3080, Electron 44.4.3, a scratch prototype, not merged).** Run
   hidden and offscreen, by the owner's ruling that nothing takes the projector: an opener and a
   same-origin `window.open` child, the child's canvas a `RenderView` of the opener's engine,

@@ -41,6 +41,7 @@ const gpuTiming = argument("smoke-gpu-timing", "0");
 /** The soak's length in seconds (T11, T12); 0 runs the checks. */
 const soakSeconds = Number(argument("smoke-soak", "0"));
 const show = argument("smoke-show", "0") === "1";
+const resize = argument("smoke-resize", "1") === "1";
 const video = argument("smoke-video", "");
 const capturePath = argument("smoke-capture", "");
 const cancelled: CancelledRequest[] = [];
@@ -114,6 +115,7 @@ void app
             capturePath: capturePath === "" ? null : capturePath,
             seconds: soakSeconds,
             show,
+            resize,
           })
         : (): Promise<void> => Promise.resolve();
     ipcMain.handle(SMOKE_RESULT_CHANNEL, async (event, report: unknown) => {

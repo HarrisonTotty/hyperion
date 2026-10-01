@@ -21,6 +21,8 @@ export interface SoakOptions {
   readonly seconds: number;
   /** Whether the windows are shown and present, rather than hidden and offscreen. */
   readonly show: boolean;
+  /** Whether the window is resized every 7 s. */
+  readonly resize: boolean;
 }
 
 /** A line of the soak's log, with the time since it began. */
@@ -61,6 +63,9 @@ export function startSoak(options: SoakOptions): () => Promise<void> {
   ];
   let resizes = 0;
   const resize = setInterval(() => {
+    if (!options.resize) {
+      return;
+    }
     resizes += 1;
     const [width, height] = sizes[resizes % sizes.length] ?? [1280, 720];
     window.setContentSize(width, height);
