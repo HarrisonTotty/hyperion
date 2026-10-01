@@ -27,7 +27,7 @@ use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
 use crate::compute::{CancelToken, CpuPool, Priority};
-use crate::limits::MAX_SUBSCRIPTIONS;
+use crate::limits::{MAX_IN_FLIGHT_REQUESTS, MAX_SUBSCRIPTIONS};
 use crate::requests::to_frame;
 use crate::scene::is_large_notification;
 
@@ -172,9 +172,9 @@ struct Shared {
     commands: Mutex<Option<mpsc::Receiver<SubscriptionCommand>>>,
 }
 
-/// Commands a subscription's topic may queue: a client's in flight are at most
-/// [`MAX_IN_FLIGHT_REQUESTS`](crate::limits::MAX_IN_FLIGHT_REQUESTS).
-const COMMANDS: usize = 8;
+/// Commands a subscription's topic may queue: a client's requests in flight, at most
+/// [`MAX_IN_FLIGHT_REQUESTS`], so that only a topic that has stopped answering fills it.
+const COMMANDS: usize = MAX_IN_FLIGHT_REQUESTS;
 
 /// A request the connection routes to a subscription's topic, with where the topic answers it
 /// (rendering plan R03, R03.T8.a): requests that name a subscription cannot reach it through
@@ -337,7 +337,7 @@ impl Drop for Subscription {
 #[derive(Debug)]
 pub(crate) struct Unsent {
     id: SubscriptionId,
-    message: ServerMessage,
+    body: NotificationBody,
 }
 
 impl Unsent {
@@ -351,56 +351,74 @@ impl Unsent {
     /// Design note 14): a scene notification carrying an arrival holds a whole system.
     #[must_use]
     pub(crate) fn is_large(&self) -> bool {
-        match &self.message {
-            ServerMessage::Notification {
-                body: NotificationBody::Scene(notification),
-                ..
-            } => is_large_notification(notification),
-            _ => false,
+        match &self.body {
+            NotificationBody::Scene(notification) => is_large_notification(notification),
         }
     }
 
     /// Serialises it here.
     #[must_use]
     pub(crate) fn serialise(self) -> Ready {
-        let frame = to_frame(&self.message);
-        self.with_frame(frame)
-    }
-
-    /// Serialises it on `pool`, as a large one is; here if the pool is shutting down.
-    pub(crate) async fn serialise_on(self, pool: &CpuPool) -> Ready {
-        let Self { id, message } = self;
-        let job = pool
-            .submit(Priority::Interactive, CancelToken::new(), move |_| {
-                let frame = to_frame(&message);
-                (message, frame)
-            })
-            .await;
-        let Ok(receiver) = job else {
-            tracing::warn!("the pool is shutting down; a notification is not sent");
-            return Ready::empty(id);
-        };
-        if let Ok(Ok((message, frame))) = receiver.await {
-            Self { id, message }.with_frame(frame)
-        } else {
-            // The job held the message and is gone with it: a panic in serialising, which
-            // `to_frame` rules out, or the pool stopping, after which nothing is sent.
-            tracing::warn!("a notification could not be serialised on the pool");
-            Ready::empty(id)
-        }
-    }
-
-    /// The ready notification of `frame`, the message's serialisation.
-    fn with_frame(self, frame: String) -> Ready {
-        let ServerMessage::Notification { body, .. } = self.message else {
-            unreachable!("an unsent message is a notification");
-        };
+        let Self { id, body } = self;
+        let (body, frame) = notification_frame(id, body);
         Ready {
-            id: self.id,
+            id,
             frame,
             body: Some(body),
         }
     }
+
+    /// Serialises it on `pool`, as a large one is, or here if the pool's interactive queue has no
+    /// room: the connection never waits for room, so that it goes on reading while the pool is
+    /// busy.
+    pub(crate) async fn serialise_on(self, pool: &CpuPool) -> Ready {
+        let Self { id, body } = self;
+        // Lent to the job through a slot, so that a job the queue refuses gives the body back.
+        let slot = Arc::new(Mutex::new(Some(body)));
+        let lent = Arc::clone(&slot);
+        let submitted = pool.try_submit(Priority::Interactive, CancelToken::new(), move |_| {
+            let body = lent
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+                .expect("the body is lent to one job");
+            notification_frame(id, body)
+        });
+        let Ok(receiver) = submitted else {
+            let body = slot
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+                .expect("a job the queue refused never ran");
+            return Self { id, body }.serialise();
+        };
+        if let Ok(Ok((body, frame))) = receiver.await {
+            Ready {
+                id,
+                frame,
+                body: Some(body),
+            }
+        } else {
+            // The job held the body and is gone with it: a panic in serialising, which `to_frame`
+            // rules out, or the pool stopping with the server, after which nothing is sent.
+            tracing::warn!("a notification could not be serialised on the pool");
+            Ready::empty(id)
+        }
+    }
+}
+
+/// The frame of `body` as a notification on subscription `id`, and the body back.
+#[must_use]
+fn notification_frame(id: SubscriptionId, body: NotificationBody) -> (NotificationBody, String) {
+    let message = ServerMessage::Notification {
+        subscription: id.0,
+        body,
+    };
+    let frame = to_frame(&message);
+    let ServerMessage::Notification { body, .. } = message else {
+        unreachable!("built as a notification just above");
+    };
+    (body, frame)
 }
 
 /// A notification ready to queue, and what to do with it once it is or is not.
@@ -607,10 +625,7 @@ impl Subscriptions {
                 let next = subscription.sequence.saturating_add(1);
                 Some(Unsent {
                     id,
-                    message: ServerMessage::Notification {
-                        subscription: id.0,
-                        body: push.into_body(next),
-                    },
+                    body: push.into_body(next),
                 })
             })
     }
@@ -652,6 +667,8 @@ mod tests {
     };
 
     use super::*;
+    use tokio::time::timeout;
+
     use crate::testing::{Client, Harness, NEVER, Openings, Scripted, WAIT};
     use crate::ws::ConnectionLimits;
 
@@ -1103,5 +1120,69 @@ mod tests {
         }
         client.close().await;
         harness.stop().await;
+    }
+
+    fn cameras_command() -> (
+        SubscriptionCommand,
+        oneshot::Receiver<Result<(), RequestError>>,
+    ) {
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::SceneCameras {
+            cameras: Vec::new(),
+            answer,
+        };
+        (command, answered)
+    }
+
+    fn refusal(result: Result<(), RequestError>) -> (ErrorCode, Option<String>) {
+        let error = result.unwrap_err();
+        (error.code, error.field)
+    }
+
+    #[test]
+    fn a_command_is_refused_unless_its_subscription_is_live_and_its_topic_takes_commands() {
+        let mut subscriptions = Subscriptions::new();
+        let (id, pusher) = subscriptions.reserve(RequestId(1)).unwrap();
+        let named = (ErrorCode::BadRequest, Some("subscription".to_owned()));
+        // Still opening: no request may name it yet.
+        assert_eq!(
+            refusal(subscriptions.command(id.get(), cameras_command().0)),
+            named
+        );
+        subscriptions.went_live(RequestId(1));
+        // A topic that has stopped taking them fills its channel, then is refused for want of room.
+        for _ in 0..COMMANDS {
+            subscriptions
+                .command(id.get(), cameras_command().0)
+                .unwrap();
+        }
+        assert_eq!(
+            refusal(subscriptions.command(id.get(), cameras_command().0)),
+            (ErrorCode::QueueFull, None)
+        );
+        // A topic that dropped its end takes none.
+        drop(
+            pusher
+                .take_commands()
+                .expect("the commands are the topic's to take, once"),
+        );
+        assert!(pusher.take_commands().is_none());
+        assert_eq!(
+            refusal(subscriptions.command(id.get(), cameras_command().0)),
+            named
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_still_queued_when_its_subscription_ends_is_never_answered() {
+        let mut subscriptions = Subscriptions::new();
+        let (id, pusher) = subscriptions.reserve(RequestId(1)).unwrap();
+        subscriptions.went_live(RequestId(1));
+        let (command, answered) = cameras_command();
+        subscriptions.command(id.get(), command).unwrap();
+        subscriptions.end(id.get()).unwrap();
+        drop(pusher);
+        // The request awaiting it is then answered `internal` (`Requests::scene_cameras`).
+        assert!(timeout(WAIT, answered).await.unwrap().is_err());
     }
 }

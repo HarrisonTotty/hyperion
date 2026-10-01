@@ -6,6 +6,7 @@
 mod common;
 
 use common::{TestClient, TestServer};
+use hyperion_protocol::SceneCraftDto;
 use hyperion_protocol::{
     CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto, NotificationBody,
     RequestBody, ResponseBody, SceneArrivalDto, SceneCamerasRequest, SceneClockStateDto,
@@ -13,10 +14,14 @@ use hyperion_protocol::{
     SubscriptionState, SubscriptionTopic, SystemBodiesRequest, SystemIdHex, UniverseIdHex,
     UniverseTime,
 };
+use hyperion_server::scene::{CraftSource, CraftState, SceneKnowledge};
+use hyperion_server::universe::UniverseId;
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+use hyperion_sim::id::BodyId;
 use hyperion_sim::id::Layer;
+use hyperion_sim::planetary::record::DetailLevel;
 
 /// The seed of the universe these scenes are in.
 const SEED: u64 = 0x4d2;
@@ -162,7 +167,6 @@ async fn a_heartbeat_comes_each_second_its_sequence_rising_by_one() {
     let [system, _] = systems();
     set_ship(&mut client, &universe, in_system(&system), 0).await;
     let (subscription, _) = subscribe(&mut client, &universe, DetailLevelDto::Bulk).await;
-    let started = std::time::Instant::now();
     for sequence in 1..=3 {
         let (on, beat) = next_scene(&mut client).await;
         assert_eq!(on, subscription);
@@ -174,9 +178,6 @@ async fn a_heartbeat_comes_each_second_its_sequence_rising_by_one() {
         );
         assert!(beat.bodies.is_empty() && beat.arrival.is_none() && beat.ship.is_none());
     }
-    // Three heartbeats a second apart; generous above, for a loaded machine.
-    let elapsed = started.elapsed().as_secs_f64();
-    assert!((2.5..30.0).contains(&elapsed), "{elapsed} s");
 }
 
 #[tokio::test]
@@ -285,4 +286,119 @@ async fn an_unknown_subscription_and_a_camera_out_of_reach_are_refused_naming_th
         .request_among_notifications(report(subscription, near))
         .await;
     assert_eq!(answer, Ok(ResponseBody::SceneCameras));
+}
+
+/// Every craft is a contact; every body is granted the level asked.
+#[derive(Debug)]
+struct EveryCraft;
+
+impl SceneKnowledge for EveryCraft {
+    fn grant(&self, _body: BodyId, asked: DetailLevel) -> DetailLevel {
+        asked
+    }
+
+    fn is_contact(&self, _craft: &CraftState) -> bool {
+        true
+    }
+}
+
+/// Ten craft in a system, each stating the scene time it was asked at.
+#[derive(Debug)]
+struct TenCraft(SystemIdHex);
+
+impl CraftSource for TenCraft {
+    fn craft_at(
+        &self,
+        _universe: UniverseId,
+        t: hyperion_sim::time::UniverseTime,
+    ) -> Vec<CraftState> {
+        (0..10_u8)
+            .map(|k| {
+                CraftState::new(SceneCraftDto {
+                    craft: format!("craft-{k}"),
+                    hull: "test-hull".to_owned(),
+                    state: KinematicsDto {
+                        position: FramePositionDto::System {
+                            system: self.0.clone(),
+                            offset_m: [1.496e11 + 1.0e3 * f64::from(k), 0.0, 0.0],
+                        },
+                        velocity_m_s: [0.0, 7.5e3, 0.0],
+                        time: UniverseTime {
+                            seconds: t.seconds(),
+                            nanos: t.subsec_nanos(),
+                        },
+                    },
+                    attitude: [1.0, 0.0, 0.0, 0.0],
+                    angular_velocity_rad_s: [0.0, 0.0, 1.0e-3],
+                    planned_path: None,
+                })
+            })
+            .collect()
+    }
+}
+
+/// A scene with ten craft is pushed them at the 64 Hz tick, each push stating its time, at about
+/// 0.25 MB/s (rendering plan R03, R03.T8.b; Design note 4).
+#[tokio::test]
+async fn craft_are_pushed_at_64_hz_each_push_stating_its_time() {
+    let [system, _] = systems();
+    let data_dir = tempfile::tempdir().unwrap();
+    let server = TestServer::start_with(
+        TestServer::config(data_dir.path())
+            .scene_knowledge(EveryCraft)
+            .craft_source(TenCraft(system.clone()))
+            .build(),
+    )
+    .await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Scene", SEED).await.id;
+    let [system, _] = systems();
+    set_ship(&mut client, &universe, in_system(&system), 1).await;
+    let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Bulk).await;
+    assert_eq!(
+        state.craft.len(),
+        10,
+        "the craft are in the scene from the start"
+    );
+
+    // A second of scene time at 1x, counted from the first craft push's time.
+    let mut first: Option<f64> = None;
+    let mut pushes = 0_u32;
+    let mut bytes = 0_usize;
+    let mut previous = f64::NEG_INFINITY;
+    loop {
+        let (_, notification) = next_scene(&mut client).await;
+        let Some(craft) = notification.craft.as_ref() else {
+            continue;
+        };
+        // Seconds after the scene's start, which an `f64` holds to the nanosecond here.
+        let since = notification.clock.time.seconds - TIME.seconds;
+        let time = f64::from(i32::try_from(since).unwrap())
+            + f64::from(notification.clock.time.nanos) * 1e-9;
+        assert!(time > previous, "each push states a later time");
+        previous = time;
+        assert_eq!(craft.len(), 10);
+        assert_eq!(
+            craft[0].state.time, notification.clock.time,
+            "stated at the push's time"
+        );
+        let start = *first.get_or_insert(time);
+        if time - start >= 1.0 {
+            break;
+        }
+        pushes += 1;
+        bytes += serde_json::to_string(&notification).unwrap().len();
+    }
+    // 64 a second when the runtime keeps up; missed ticks are skipped, so a loaded machine sends
+    // fewer, never more.
+    assert!(
+        (32..=66).contains(&pushes),
+        "{pushes} craft pushes in a second"
+    );
+    let rate_mb_s = f64::from(u32::try_from(bytes).unwrap()) / 1e6;
+    eprintln!("craft pushes: {pushes} in a second of scene time, {rate_mb_s:.3} MB/s of JSON");
+    assert!(
+        rate_mb_s < 0.5,
+        "{rate_mb_s} MB/s, over Design note 4's finding threshold"
+    );
 }

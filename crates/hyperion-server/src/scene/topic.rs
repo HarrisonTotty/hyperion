@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval, interval_at, sleep_until};
 
 use super::core::{Beat, FetchSystemError, SceneCore, SceneDelta, SceneInputs, SceneWorld};
-use super::{Clock, SceneSetting, Ship};
+use super::{Clock, SceneSetting, Ship, ShipPosition};
 use crate::AppState;
 use crate::compute::{
     CancelOnDrop, CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Priority,
@@ -46,6 +46,13 @@ pub(crate) struct SceneSource {
 }
 
 impl SceneSource {
+    /// Drops every planetary system but those `keep` names.
+    fn keep_only(&mut self, keep: &[Option<SystemId>]) {
+        if self.systems.keys().any(|id| !keep.contains(&Some(*id))) {
+            Arc::make_mut(&mut self.systems).retain(|id, _| keep.contains(&Some(*id)));
+        }
+    }
+
     /// Runs `job` on the CPU pool over `core` and the scene's world, fetching from the body cache
     /// each planetary system it asks for and running it again, until it answers.
     ///
@@ -142,7 +149,7 @@ pub(crate) async fn open(
     let topic = Topic {
         source,
         guard: CancelOnDrop::new(CancelToken::new()),
-        core,
+        core: Some(core),
         setting,
         current,
         commands,
@@ -151,6 +158,15 @@ pub(crate) async fn open(
     let task = tokio::spawn(topic.run());
     pusher.attach(task.abort_handle());
     Ok(SubscriptionState::Scene(scene))
+}
+
+/// The system whose frame, or whose body's frame, a ship position is in.
+fn frame_system(position: &ShipPosition) -> Option<SystemId> {
+    match position {
+        ShipPosition::Galactic(_) => None,
+        ShipPosition::System { system, .. } => Some(*system),
+        ShipPosition::Body { body, .. } => Some(body.system()),
+    }
 }
 
 /// Builds a scene's core and its whole state, with `cameras` checked and set.
@@ -197,7 +213,9 @@ struct Topic {
     source: SceneSource,
     /// Cancels the task's pool jobs when the task ends, so that one still queued is skipped.
     guard: CancelOnDrop,
-    core: SceneCore,
+    /// The core, home between pool jobs; a job takes it and gives it back, and a task that stops
+    /// on a failed job ends without it.
+    core: Option<SceneCore>,
     setting: watch::Receiver<SceneSetting>,
     current: SceneSetting,
     commands: Option<mpsc::Receiver<SubscriptionCommand>>,
@@ -223,10 +241,10 @@ impl Topic {
         craft.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             let due = self
-                .core
+                .core()
                 .next_due()
                 .and_then(|time| Clock::instant_of(&self.current.clock, time));
-            let has_craft = self.core.has_craft();
+            let has_craft = self.core().has_craft();
             let commands = self.commands.as_mut();
             let wake = tokio::select! {
                 biased;
@@ -292,7 +310,7 @@ impl Topic {
         let delta = self.delta(Beat::Heartbeat).await?;
         let push = self.push(delta);
         self.pusher.push(PendingPush::Scene(push));
-        if !self.core.has_craft() {
+        if !self.core().has_craft() {
             self.push_craft();
         }
         Ok(())
@@ -300,16 +318,17 @@ impl Topic {
 
     /// Pushes the craft list, if the core has one to push.
     fn push_craft(&mut self) {
-        let time = self.current.clock.reading_at(Instant::now()).time();
+        let reading = self.current.clock.reading_at(Instant::now());
         let craft = self
             .source
             .state
             .scene
             .craft()
-            .craft_at(self.source.id, time);
+            .craft_at(self.source.id, reading.time());
         let knowledge = self.source.state.scene.knowledge();
-        if let Some(list) = self.core.craft(knowledge.as_ref(), craft) {
-            let mut push = ScenePush::heartbeat(self.clock());
+        if let Some(list) = self.core_mut().craft(knowledge.as_ref(), craft) {
+            // The clock read once, so that the craft are stated at the push's own time.
+            let mut push = ScenePush::heartbeat(SceneClockDto::from(reading));
             push.craft = Some(list);
             self.pusher.push(PendingPush::Scene(push));
         }
@@ -320,16 +339,15 @@ impl Topic {
         match command {
             SubscriptionCommand::SceneCameras { cameras, answer } => {
                 let time = self.current.clock.reading_at(Instant::now()).time();
-                let core = self.core.clone();
+                // A refusal leaves the cameras as they were, so nothing needs undoing.
+                let core = self.take_core();
                 let (core, checked) = self
                     .source
                     .run(self.guard.token(), core, move |core, world| {
                         Ok(core.set_cameras(cameras.clone(), time, world))
                     })
                     .await?;
-                if checked.is_ok() {
-                    self.core = core;
-                }
+                self.core = Some(core);
                 // The request may have been cancelled meanwhile; the answer then goes nowhere.
                 let _ = answer.send(checked);
                 Ok(())
@@ -342,7 +360,7 @@ impl Topic {
         let reading = self.current.clock.reading_at(Instant::now());
         let ship = self.current.ship.clone();
         let knowledge = self.source.state.scene.knowledge();
-        let core = self.core.clone();
+        let core = self.take_core();
         let (core, delta) = self
             .source
             .run(self.guard.token(), core, move |core, world| {
@@ -354,8 +372,36 @@ impl Topic {
                 core.advance(inputs, world, beat)
             })
             .await?;
-        self.core = core;
+        // Only the scene's system and the ship's frame's are kept: a stand-in moved from system
+        // to system would otherwise hold every one it visited, outside the body cache's budget.
+        let keep = [
+            core.system_id(),
+            frame_system(&self.current.ship.position_at(reading.time())),
+        ];
+        self.source.keep_only(&keep);
+        self.core = Some(core);
         Ok(delta)
+    }
+
+    /// The core, home between jobs.
+    fn core(&self) -> &SceneCore {
+        self.core
+            .as_ref()
+            .expect("the core is home between pool jobs")
+    }
+
+    /// The core, home between jobs, to change.
+    fn core_mut(&mut self) -> &mut SceneCore {
+        self.core
+            .as_mut()
+            .expect("the core is home between pool jobs")
+    }
+
+    /// The core, lent to a pool job.
+    fn take_core(&mut self) -> SceneCore {
+        self.core
+            .take()
+            .expect("the core is home between pool jobs")
     }
 
     /// A push of `delta` with the clock as it reads now.
@@ -382,10 +428,22 @@ mod tests {
     use crate::requests::Handlers;
     use crate::scene::{SceneClock, ShipPosition, ShipStandIn, TimeRate};
     use crate::subscriptions::Subscriptions;
-    use crate::testing::{Harness, WAIT};
+    use hyperion_protocol::{
+        DetailLevelDto, RequestBody, SceneCraftDto, SubscribeRequest, SubscriptionTopic,
+    };
+    use hyperion_sim::id::BodyId;
 
-    /// The stand-in 1 au from `system`'s barycentre at rest, the clock at `start` at 100,000x.
-    fn in_system(system: hyperion_sim::id::SystemId, start: UniverseTime) -> SceneSetting {
+    use crate::requests::{Handler, HandlerFuture, SubscribeFuture};
+    use crate::scene::{CraftSource, CraftState, SceneKnowledge};
+    use crate::testing::{Harness, NEVER, Scripted, WAIT};
+    use crate::ws::ConnectionLimits;
+
+    /// The stand-in 1 au from `system`'s barycentre at rest, the clock at `start` at `rate`.
+    fn in_system(
+        system: hyperion_sim::id::SystemId,
+        start: UniverseTime,
+        rate: u32,
+    ) -> SceneSetting {
         let wire = KinematicsDto {
             position: FramePositionDto::Galactic {
                 position: hyperion_protocol::GalacticPosition::default(),
@@ -397,7 +455,7 @@ mod tests {
             },
         };
         SceneSetting {
-            clock: SceneClock::new(start, Instant::now(), TimeRate::new(100_000).unwrap()).unwrap(),
+            clock: SceneClock::new(start, Instant::now(), TimeRate::new(rate).unwrap()).unwrap(),
             ship: ShipStandIn::new(
                 ShipPosition::System {
                     system,
@@ -431,7 +489,7 @@ mod tests {
         );
         let system = cell[0].id();
         let start = UniverseTime::new(3_600, 0).unwrap();
-        let setting = in_system(system, start);
+        let setting = in_system(system, start, 100_000);
         state.scene.set(universe.id(), setting.clone());
 
         let mut subscriptions = Subscriptions::new();
@@ -461,7 +519,7 @@ mod tests {
         let topic = Topic {
             source,
             guard: CancelOnDrop::new(CancelToken::new()),
-            core,
+            core: Some(core),
             setting: state.scene.watch(universe.id()),
             current: setting,
             commands: pusher.take_commands(),
@@ -508,6 +566,180 @@ mod tests {
             "pushed once the clock reached it: {reached}"
         );
         drop(subscriptions);
+        harness.stop().await;
+    }
+
+    /// Requests answered by a script, subscriptions by the server's own topics: a scene behind a
+    /// writer the test can stick.
+    #[derive(Debug)]
+    struct ScriptedRequests(Scripted);
+
+    impl Handler for ScriptedRequests {
+        fn handle(
+            &self,
+            state: Arc<AppState>,
+            body: RequestBody,
+            token: CancelToken,
+        ) -> HandlerFuture {
+            self.0.handle(state, body, token)
+        }
+
+        fn subscribe(
+            &self,
+            state: Arc<AppState>,
+            request: SubscribeRequest,
+            pusher: Pusher,
+            token: CancelToken,
+        ) -> SubscribeFuture {
+            Handlers.subscribe(state, request, pusher, token)
+        }
+    }
+
+    /// Every craft, and the bodies of odd slots, are contacts.
+    #[derive(Debug)]
+    struct Contacts;
+
+    impl SceneKnowledge for Contacts {
+        fn grant(&self, body: BodyId, asked: DetailLevel) -> DetailLevel {
+            if (body.body_index() >> 8) % 2 == 1 {
+                DetailLevel::Contact
+            } else {
+                asked
+            }
+        }
+
+        fn is_contact(&self, _craft: &CraftState) -> bool {
+            true
+        }
+    }
+
+    /// Ten craft, each stating the scene time it was asked at.
+    #[derive(Debug)]
+    struct TenCraft;
+
+    impl CraftSource for TenCraft {
+        fn craft_at(&self, _universe: UniverseId, t: UniverseTime) -> Vec<CraftState> {
+            (0..10_u8)
+                .map(|k| {
+                    CraftState::new(SceneCraftDto {
+                        craft: format!("craft-{k}"),
+                        hull: "test-hull".to_owned(),
+                        state: KinematicsDto {
+                            position: FramePositionDto::Galactic {
+                                position: hyperion_protocol::GalacticPosition::default(),
+                            },
+                            velocity_m_s: [f64::from(k), 0.0, 0.0],
+                            time: hyperion_protocol::UniverseTime {
+                                seconds: t.seconds(),
+                                nanos: t.subsec_nanos(),
+                            },
+                        },
+                        attitude: [1.0, 0.0, 0.0, 0.0],
+                        angular_velocity_rad_s: [0.0; 3],
+                        planned_path: None,
+                    })
+                })
+                .collect()
+        }
+    }
+
+    /// With the writer stuck for a second, the craft pushed at 64 Hz and the heartbeat's contacts
+    /// merge into one pending push, which the queue never holds; once the client reads, one
+    /// notification carries the latest craft and the contacts (R03.T8.b).
+    #[tokio::test]
+    async fn a_stuck_writer_gets_one_notification_with_the_latest_craft_and_the_second_s_changes() {
+        let (handler, mut calls) = Scripted::new();
+        let harness = Harness::start_configured(
+            ScriptedRequests(handler),
+            ConnectionLimits {
+                outbound_bytes: 1 << 20,
+                write_timeout: NEVER,
+                close_timeout: WAIT,
+            },
+            |config| config.scene_knowledge(Contacts).craft_source(TenCraft),
+        )
+        .await;
+        let state = Arc::clone(harness.state());
+        let universe = state
+            .registry
+            .create("Scene".parse().unwrap(), Some(0x4d2))
+            .await
+            .unwrap();
+        let galaxy = state.galaxies.get(universe.key()).await.unwrap();
+        let mut cell = Vec::new();
+        generate_cell(
+            &galaxy,
+            CellKey::new(Layer::C, [0, 812, 0]).unwrap(),
+            &mut cell,
+        );
+        let start = UniverseTime::new(3_600, 0).unwrap();
+        state
+            .scene
+            .set(universe.id(), in_system(cell[0].id(), start, 1));
+
+        let mut client = harness.connect_slow_reader().await;
+        client.hello().await;
+        let subscribe = RequestBody::Subscribe(SubscribeRequest {
+            universe: universe.id().into(),
+            topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                detail: DetailLevelDto::Bulk,
+                cameras: Vec::new(),
+            }),
+        });
+        client.request(1, subscribe).await;
+        let clogging = harness.stick_writer(&mut calls, &mut client, 2).await;
+        let stuck = harness
+            .outbound_until(|counters| counters.queued_bytes() >= clogging)
+            .await
+            .queued_bytes();
+        // The second the writer stays stuck: the scenario, not a wait for something to happen.
+        tokio::time::sleep(SCENE_HEARTBEAT + CRAFT_PUSH_INTERVAL * 8).await;
+        let still = harness.server().stats().outbound().queued_bytes();
+        assert!(
+            still <= stuck,
+            "nothing queued while stuck: {still} > {stuck} bytes"
+        );
+
+        let mut last = 0;
+        loop {
+            match client.next_message().await {
+                ServerMessage::Response {
+                    id: RequestId(2), ..
+                } => break,
+                ServerMessage::Response { .. } => {}
+                ServerMessage::Notification {
+                    body: NotificationBody::Scene(notification),
+                    ..
+                } => last = notification.sequence,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        let ServerMessage::Notification {
+            body: NotificationBody::Scene(merged),
+            ..
+        } = client.next_message().await
+        else {
+            panic!("a notification after the clogging response");
+        };
+        assert_eq!(
+            merged.sequence,
+            last + 1,
+            "one notification for the stuck second"
+        );
+        let craft = merged.craft.expect("the craft ride with the merged push");
+        assert_eq!(craft.len(), 10);
+        let clock = UniverseTime::new(merged.clock.time.seconds, merged.clock.time.nanos).unwrap();
+        let latest = &craft[0].state.time;
+        assert_eq!(
+            (latest.seconds, latest.nanos),
+            (clock.seconds(), clock.subsec_nanos()),
+            "the latest craft, stated at the push's time"
+        );
+        assert!(
+            merged.bodies.iter().any(|body| body.seen.is_some()),
+            "the heartbeat's contacts"
+        );
+        drop(client);
         harness.stop().await;
     }
 }

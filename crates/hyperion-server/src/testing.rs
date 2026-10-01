@@ -30,7 +30,7 @@ use crate::requests::{Handler, HandlerFuture, SubscribeFuture, to_frame};
 use crate::stats::{OutboundCounters, RequestCounters};
 use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
-use crate::{AppState, Server, ServerConfig, ServerStats};
+use crate::{AppState, Server, ServerConfig, ServerConfigBuilder, ServerStats};
 
 /// Upper bound on any single wait.
 ///
@@ -83,11 +83,23 @@ impl Harness {
         handler: impl Handler + 'static,
         limits: ConnectionLimits,
     ) -> Self {
+        Self::start_configured(handler, limits, |config| config).await
+    }
+
+    /// [`Harness::start_with_limits`], with the configuration `configure` makes of the harness's,
+    /// as a test that injects the scene's knowledge or craft needs.
+    pub(crate) async fn start_configured(
+        handler: impl Handler + 'static,
+        limits: ConnectionLimits,
+        configure: impl FnOnce(ServerConfigBuilder) -> ServerConfigBuilder,
+    ) -> Self {
         let data_dir = tempfile::tempdir().expect("a temporary directory");
-        let config = ServerConfig::builder()
-            .data_dir(data_dir.path())
-            .workers(std::num::NonZeroUsize::MIN)
-            .build();
+        let config = configure(
+            ServerConfig::builder()
+                .data_dir(data_dir.path())
+                .workers(std::num::NonZeroUsize::MIN),
+        )
+        .build();
         let server = timeout(
             WAIT,
             Server::start_with_handler(config, Arc::new(handler), limits),
