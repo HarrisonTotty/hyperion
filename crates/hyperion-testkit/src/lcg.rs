@@ -73,6 +73,8 @@ const TWO_POW_MINUS_53: f64 = 1.0 / 9_007_199_254_740_992.0;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     #[test]
     fn same_seed_gives_same_words_and_different_seeds_differ() {

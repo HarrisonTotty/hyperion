@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs Electron as Node, so that wasm-bindgen-test-runner, which calls `node`, runs the browser
+# target's tests on the V8 the client ships (plan R04, Design note 13). `just test-wasm-browser`
+# puts this directory first on PATH and sets HYPERION_ELECTRON to Electron's binary.
+: "${HYPERION_ELECTRON:?must name the Electron binary: run the tests through just test-wasm-browser}"
+ELECTRON_RUN_AS_NODE=1 exec "$HYPERION_ELECTRON" "$@"

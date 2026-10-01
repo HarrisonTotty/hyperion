@@ -17,12 +17,16 @@ const DOM_TESTS = [
   "src/renderer/src/spatial/useThrottledValue.test.ts",
   "src/renderer/src/view/camera/keys.test.ts",
   "src/renderer/src/view/engine/resilientEngine.test.ts",
+  "src/renderer/src/wasm/useSurfaceModuleCheck.test.ts",
 ];
 
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  // The surface module's test reads the built `.wasm` as an inlined asset (`?inline`), since
+  // renderer code, tests included, reads no files through `node:fs` (R04.T10.c).
+  assetsInclude: ["**/*.wasm"],
   test: {
     restoreMocks: true,
     unstubGlobals: true,

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsc/worker.tsbuildinfo",
+    "lib": ["es2023", "webworker"],
+    "types": ["vite/client"]
+  },
+  "include": [
+    "src/renderer/src/**/*.worker.ts",
+    "src/renderer/src/wasm/handleRequest.ts",
+    "src/renderer/src/generated/surface/*.d.ts"
+  ]
+}

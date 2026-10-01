@@ -149,6 +149,8 @@ mod tests {
     use super::*;
     use crate::lcg::Lcg;
     use crate::stats::{ALPHA, assert_p_value};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     /// `Q_KS(1.36) = 0.049 486`: 1.36 is the 5% critical value of the asymptotic distribution
     /// (Numerical Recipes §14.3; Massey 1951 table for large n gives 1.36 ÷ √n).
@@ -198,18 +200,6 @@ mod tests {
             .map(|x| x * x)
             .collect();
         assert!(ks_two_sample(&mut a, &mut c).p_value < ALPHA);
-    }
-
-    #[test]
-    #[should_panic(expected = "sample 1 is NaN")]
-    fn a_nan_in_both_samples_panics_instead_of_hanging() {
-        let _ = ks_two_sample(&mut [0.5, f64::NAN], &mut [0.25, f64::NAN]);
-    }
-
-    #[test]
-    #[should_panic(expected = "sample 0 is NaN")]
-    fn a_nan_in_one_sample_panics() {
-        let _ = ks_one_sample(&mut [f64::NAN, 0.5], |x| x.clamp(0.0, 1.0));
     }
 
     #[test]

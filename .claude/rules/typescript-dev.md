@@ -127,6 +127,11 @@ never hand-format or argue with its output.
   arguments as `unknown` until they are validated. Prefer `invoke`/`handle` to `send`/`on`.
 - Keep the Content Security Policy in `src/renderer/index.html` strict. Do not add
   `'unsafe-inline'`, `'unsafe-eval'` or a new origin without asking.
+- WebAssembly compiles only in same-origin module workers, files named `*.worker.ts` and started
+  with `new Worker(new URL("./x.worker.ts", import.meta.url), { type: "module" })`, never on the
+  render thread, whose policy refuses it, and never from a `blob:` worker, which the policy also
+  refuses. Only workers and tests import `generated/surface/` (`wasm/surfaceImports.test.ts`;
+  plan R04, T10.a's ruling).
 - Deny new windows with `setWindowOpenHandler` and block unexpected navigation in
   `will-navigate`. Pass a URL to `shell.openExternal` only after parsing it with `new URL` and
   checking that the protocol is `https:` or `http:`.

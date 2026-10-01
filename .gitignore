@@ -34,3 +34,6 @@ coverage/
 .env.*.local
 *.log
 .DS_Store
+
+# The client's WebAssembly module and glue, built by `just gen-surface` (plan R04, T10.b)
+apps/hyperion/src/renderer/src/generated/
