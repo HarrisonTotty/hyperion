@@ -8,6 +8,8 @@
 //! [`stellar`], and plan 14's `system_bodies` and `body_detail` in [`planetary`].
 
 mod planetary;
+#[cfg(test)]
+mod scene_fixture;
 mod stellar;
 
 use std::error::Error;
