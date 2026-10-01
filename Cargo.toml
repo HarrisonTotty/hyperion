@@ -55,6 +55,9 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # its own `wasm-bindgen` exactly, and `just wasm-tools` installs the `wasm-bindgen-cli` whose
 # runner must match that version in `Cargo.lock`.
 wasm-bindgen-test = "=0.3.79"
+# The surface crate's exports to the client's module (plan R04, T10.b), on the browser target only.
+# Pinned exactly, to the version wasm-bindgen-test pins, which `wasm-bindgen-cli` must match.
+wasm-bindgen = "=0.2.129"
 # ts-rs cannot read `#[serde(try_from)]` or `#[serde(transparent)]` and warns at every build; the
 # types that use them carry a `#[ts(type)]` override or are newtypes, which already say the binding.
 ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }

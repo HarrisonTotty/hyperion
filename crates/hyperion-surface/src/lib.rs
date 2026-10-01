@@ -22,7 +22,8 @@
 //!
 //! - No I/O, no clocks, no threads, and no caches of its own: a cache belongs to the caller.
 //! - It depends on `hyperion-base` alone (for `math`, `rng`, `units` and the generator version),
-//!   and never on the sim, which depends on it.
+//!   and never on the sim, which depends on it; on `wasm32-unknown-unknown` only, it also depends
+//!   on `wasm-bindgen`, for the client module's exports (`src/wasm.rs`).
 //! - Every transcendental goes through `hyperion_base::math`; this crate's own `clippy.toml` bans
 //!   the platform's methods, `mul_add`, the `algebraic_*` methods and reading float bits, and must
 //!   not fall back to the workspace root's, which allows the last.
@@ -41,6 +42,9 @@ compile_error!(
 );
 
 pub mod tags;
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+mod wasm;
 
 /// The generator version this build of the crate computes surfaces for.
 ///
