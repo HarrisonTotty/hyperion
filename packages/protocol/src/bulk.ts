@@ -12,7 +12,10 @@ export const BINARY_FRAME_FORMAT = 1;
 /** The binary frame header's length in bytes. */
 export const BINARY_FRAME_HEADER_BYTES = 24;
 
-/** The largest binary frame the server sends, 256 KiB with its header. */
+/**
+ * The largest binary frame the server sends, 256 KiB with its header: the server's
+ * `limits::MAX_BINARY_FRAME_BYTES` (rendering plan R03, Design note 11), restated here.
+ */
 export const MAX_BINARY_FRAME_BYTES = 262_144;
 
 /**
@@ -45,7 +48,8 @@ export type ParsedBinaryFrame =
  * @remarks
  * Only the 24 header bytes are read; the payload is returned as a view of `frame`, not copied or
  * parsed, since its decoding is the requesting kind's affair (R06's sky, R09's coarse field), off
- * the main thread. A frame is refused for a short frame, a bad magic, format or header length, a
+ * the main thread. A frame is refused for a short frame, a bad magic, format, reserved byte or
+ * header length, a
  * payload length that disagrees with the frame's, a frame over {@link MAX_BINARY_FRAME_BYTES}, or
  * an index outside its count: each a server bug, which the link reports and survives.
  */
@@ -65,6 +69,10 @@ export function parseBinaryFrameHeader(frame: ArrayBuffer): ParsedBinaryFrame {
   const format = view.getUint8(4);
   if (format !== BINARY_FRAME_FORMAT) {
     return refuse(`a binary frame is of format ${format}, not ${BINARY_FRAME_FORMAT}`);
+  }
+  const reserved = view.getUint8(5);
+  if (reserved !== 0) {
+    return refuse(`a binary frame's reserved byte is ${reserved}, not 0`);
   }
   const headerBytes = view.getUint16(6, true);
   if (headerBytes !== BINARY_FRAME_HEADER_BYTES) {
@@ -136,11 +144,6 @@ export class BulkAssembler {
   /** Waits for chunks answering `request`. */
   expect(request: RequestId): void {
     this.#collecting.set(request, { chunks: [], count: null, bytes: 0 });
-  }
-
-  /** Whether chunks answering `request` are awaited. */
-  isExpecting(request: RequestId): boolean {
-    return this.#collecting.has(request);
   }
 
   /**

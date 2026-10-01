@@ -30,7 +30,9 @@ export type ResponseFor<K extends RequestKind> = Extract<ResponseBody, { kind: K
  * Either the server's own {@link RequestError}, or one of four endings the client decides:
  * `link_lost` when the request could not be sent or the link dropped before its answer, `aborted`
  * when it was cancelled, `superseded` when a {@link RequestChannel} replaced it with a newer one,
- * and `protocol_violation` when the server answered with a response of another kind.
+ * and `protocol_violation` when the server answered with a response of another kind. A request
+ * answered in bulk whose chunks broke their order or disagreed with the response's manifest also
+ * fails as `internal`, which the client decides then, in the server's error's shape.
  */
 export type RequestFailure =
   | RequestError
@@ -267,9 +269,17 @@ export class RequestClient {
     const started: StartedRequest<K> = this[startRequest](body, {
       bulk: true,
       onAnswer: (response) => {
-        assembled = answers(body, response)
-          ? this.#bulk.finish(started.id, manifestOf(response))
-          : undefined;
+        try {
+          assembled = answers(body, response)
+            ? this.#bulk.finish(started.id, manifestOf(response))
+            : undefined;
+        } catch (error: unknown) {
+          // The outcome must still settle, and the socket's listener must not see the throw.
+          assembled = {
+            ok: false,
+            message: `the ${body.kind} response's manifest could not be read: ${String(error)}`,
+          };
+        }
         this.#bulk.discard(started.id);
       },
     });

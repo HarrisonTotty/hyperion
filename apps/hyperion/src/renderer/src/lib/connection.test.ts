@@ -264,7 +264,7 @@ describe("useServerConnection", () => {
       expect(result.current.status).toBe("connected");
     });
 
-    it("discards the chunks received when the link drops", async () => {
+    it("fails a bulk request in flight as link_lost when the socket closes", async () => {
       const { result, socket } = renderConnection();
       welcome(socket, PROTOCOL_VERSION);
       const pending = result.current.requests.requestBulk({ kind: "list_universes" }, () => ({

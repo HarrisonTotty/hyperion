@@ -102,6 +102,7 @@ describe("parseBinaryFrameHeader", () => {
   it.each([
     ["a bad magic", withByte(frame(7, 0, 1, [1]), 0, 0x58), /HYPB/],
     ["another format", withByte(frame(7, 0, 1, [1]), 4, 2), /format 2/],
+    ["a reserved byte that is not 0", withByte(frame(7, 0, 1, [1]), 5, 1), /reserved byte is 1/],
     ["another header length", withByte(frame(7, 0, 1, [1]), 6, 25), /25 bytes/],
     ["a payload length the frame does not hold", withByte(frame(7, 0, 1, [1]), 20, 2), /2 payload/],
     ["an index outside its count", frame(7, 3, 3, [1]), /chunk 3 of 3/],
@@ -274,11 +275,45 @@ describe("RequestClient with bulk answers", () => {
       error: { code: "internal", message: "the field failed", field: null },
     });
 
+    client[setLastRequestId](0);
+    const next = bulkRequest(client, { chunks: 1, bytes: 1 });
+    client.handleBinaryFrame(frame(1, 0, 1, [9]));
+    client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+
     await expect(failed.outcome).resolves.toMatchObject({
       ok: false,
       error: { code: "internal", message: "the field failed" },
     });
-    expect(client.handleBinaryFrame(frame(1, 1, 2, [2]))).toEqual({ ok: true });
+    const outcome = await next.outcome;
+    expect(outcome.ok ? bytesOf(outcome.chunks) : outcome.error).toEqual([[9]]);
+  });
+
+  it("fails the request when its chunks state more chunks than the manifest", async () => {
+    const { client } = recordingClient();
+    const pending = bulkRequest(client, { chunks: 2, bytes: 2 });
+
+    client.handleBinaryFrame(frame(1, 0, 3, [1]));
+    client.handleBinaryFrame(frame(1, 1, 3, [2]));
+    client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+
+    await expect(pending.outcome).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal", message: expect.stringMatching(/state 3 chunks .* states 2/) },
+    });
+  });
+
+  it("fails the request, and settles, when its manifest cannot be read", async () => {
+    const { client } = recordingClient();
+    const pending = client.requestBulk({ kind: "list_universes" }, () => {
+      throw new Error("no manifest");
+    });
+
+    client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+
+    await expect(pending.outcome).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal", message: expect.stringMatching(/no manifest/) },
+    });
   });
 
   it("drops a chunk for a request that asked for no bulk", async () => {
