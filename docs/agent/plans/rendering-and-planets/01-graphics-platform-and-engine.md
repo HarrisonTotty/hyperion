@@ -1944,3 +1944,47 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     of a farther one drawn after (reversed depth, greater-or-equal); two draws of one mesh and
     material with different offsets and tints each land. These are not T9's checks, which remain
     pending for T9.
+- **Deviations in T8.d, as built.**
+  - Buffers and textures, the packed cube included, are made on the engine's device directly
+    (`babylon/resources.ts`, `ResourceRegistry`), not through Babylon: the cube is a 2D texture of
+    six layers in `rgb9e5ufloat` with the named mips (`packedCubeSpec`), not a `RawCubeTexture`,
+    so each has exactly the usage, format and mips its specification names, and its bytes are
+    `textureBytes`'. `writePackedCubeLevel` is `queue.writeTexture` (rows tightly packed, six
+    faces in order); `writePackedCubeLevelFromBuffer` is `copyBufferToTexture` from a buffer whose
+    rows are padded to 256 bytes (`paddedBytesPerRow(size, 4)`), as the copy requires: R06's bake
+    kernel writes that layout. Neither write reaches the texture through `_hardwareTexture`.
+  - `RenderEngine` has no destroy for a buffer or texture, so `destroyed` events are raised at the
+    engine's disposal, one per resource. Every `writeBuffer`, `writeTexture` and
+    `writePackedCubeLevel` raises one `uploaded` event; a kernel's uniforms are written each
+    dispatch into a buffer of the kernel's own per uniform name, made once through the same path
+    (`<kernel>:<uniform>`, category `other`, 16-byte multiples), so their uploads are counted too.
+  - `textureBytes` (with `extentOf` and `bytesPerTexel`, in `memory.ts`) counts every mip and
+    layer; a 3D texture's depth halves with its mips, a cube is six faces at every level, and
+    depth-stencil formats count 4 + 1 bytes; a compressed format throws.
+  - A texture bound per draw (`DrawItem.textures`) is wrapped for Babylon once
+    (`wrapWebGPUTexture`) and given a view of all its mips through a fifth use of
+    `_hardwareTexture` (`setSampledView` in `internals.ts`): Babylon's own views have one mip or
+    the whole chain. A storage buffer bound per draw goes through `ExternalStorageBuffer`, a
+    subclass of Babylon's `StorageBuffer` that answers `getBuffer` with the engine's buffer. A
+    storage buffer's WGSL type must have no whitespace (`array<f32,4>`), since Babylon's
+    declaration pattern stops at a space (documented on `WgslMaterialSpec`).
+  - A dispatch is encoded in the adapter's own compute pass and submitted after
+    `flushEngine`, so it runs after what Babylon recorded before it; bindings are resolved by the
+    names the kernel declares (`kernelBindGroupEntries`), a storage texture bound at the named
+    level (a cube's as a `2d-array` view). `ComputeBindings` has no samplers, so a kernel cannot
+    declare one.
+  - `FakeDevice` gains a recording `queue` (`FakeQueue`), and `createBuffer` and `createTexture`
+    returning `FakeBuffer` and `FakeTexture`. The boundary rule on `device.createBuffer` and
+    `device.createTexture` outside `view/engine/babylon/` was already added by T6.
+  - From the review: a kernel must use every binding it declares (its layout is `auto`, which
+    drops unused ones); a layered 2D texture is sampled through a `2d-array` view; a kernel
+    uniform larger than its first value throws; `writePackedCubeLevelFromBuffer` refuses a buffer
+    smaller than the padded layout or without `COPY_SRC`; a `SamplerSpec`'s filter now applies
+    between mips too (`TEXTURE_LINEAR_LINEAR_MIPLINEAR`, `TEXTURE_NEAREST_NEAREST_MIPNEAREST`),
+    since Babylon's plain modes clamp the level of detail to 0. Queue writes take effect before
+    Babylon's pending frame, as WebGPU orders a write before later submissions; dispatches and
+    copies go after it (`flushEngine`).
+  - Checked by the scratch page on SwiftShader and the RTX 3080: a kernel writes a storage buffer
+    with a uniform's value, a texture is written from the CPU, and a draw reading both shows the
+    two values; the allocation events read `created`, `uploaded` and, at disposal, `destroyed`
+    once per resource. The packed cube's round trip is T9.g's, pending.

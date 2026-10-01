@@ -11,6 +11,7 @@
  */
 
 import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine.pure";
+import { WebGPUHardwareTexture } from "@babylonjs/core/Engines/WebGPU/webgpuHardwareTexture";
 import type { WebGPURenderTargetWrapper } from "@babylonjs/core/Engines/WebGPU/webgpuRenderTargetWrapper";
 import type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
 
@@ -85,10 +86,31 @@ export function setAttachmentFormat(texture: InternalTexture, format: GPUTexture
   // The hardware wrapper is internal to Babylon (Design note 18).
   // oxlint-disable-next-line no-underscore-dangle
   const hardware = texture._hardwareTexture;
-  if (hardware === null || !("format" in hardware)) {
+  if (!(hardware instanceof WebGPUHardwareTexture)) {
     throw new Error("a wrapped canvas texture has no hardware wrapper to give a view format");
   }
   hardware.format = format;
+}
+
+/**
+ * Gives a wrapped texture the view Babylon samples it through.
+ *
+ * @remarks
+ * `wrapWebGPUTexture` makes no view, and `updateWrappedWebGPUTexture`'s view has either one mip or
+ * the whole chain; a texture made by the engine has the mips its specification names, so its view
+ * is made here, through the hardware wrapper's `createView`.
+ */
+export function setSampledView(
+  texture: InternalTexture,
+  descriptor: GPUTextureViewDescriptor,
+): void {
+  // The hardware wrapper is internal to Babylon (Design note 18).
+  // oxlint-disable-next-line no-underscore-dangle
+  const hardware = texture._hardwareTexture;
+  if (!(hardware instanceof WebGPUHardwareTexture)) {
+    throw new Error("a wrapped texture has no hardware wrapper to give a view");
+  }
+  hardware.createView(descriptor);
 }
 
 /**
