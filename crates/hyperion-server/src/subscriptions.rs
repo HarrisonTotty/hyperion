@@ -170,6 +170,9 @@ struct Shared {
     task: Mutex<TaskSlot>,
     /// The commands the connection routes to the topic, until the topic takes them.
     commands: Mutex<Option<mpsc::Receiver<SubscriptionCommand>>>,
+    /// Why the topic can no longer serve the subscription, once it cannot: the connection ends it
+    /// with `subscription_ended` after its last pending push.
+    failure: Mutex<Option<RequestError>>,
 }
 
 /// Commands a subscription's topic may queue: a client's requests in flight, at most
@@ -242,10 +245,30 @@ impl Pusher {
     /// Merges `change` into the subscription's pending push and wakes the connection. Returns
     /// whether the subscription is still open; a push after it ended is dropped.
     pub(crate) fn push(&self, change: PendingPush) -> bool {
-        if self.is_ended() {
+        if self.is_ended() || self.has_failed() {
             return false;
         }
         self.shared.merge(change);
+        self.wake.notify_one();
+        true
+    }
+
+    /// Ends the subscription because its topic can no longer serve it: the connection sends what
+    /// is still pending, then `subscription_ended` with `error`, and frees its place. Nothing
+    /// pushed after this is sent. Returns whether the subscription was still open.
+    pub(crate) fn fail(&self, error: RequestError) -> bool {
+        if self.is_ended() {
+            return false;
+        }
+        let mut failure = self
+            .shared
+            .failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if failure.is_none() {
+            *failure = Some(error);
+        }
+        drop(failure);
         self.wake.notify_one();
         true
     }
@@ -279,6 +302,15 @@ impl Pusher {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
+    }
+
+    /// Whether the topic has given the subscription up with [`Pusher::fail`].
+    fn has_failed(&self) -> bool {
+        self.shared
+            .failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
     }
 
     /// Whether the subscription has ended: `unsubscribe`, a failed opening or the socket's close.
@@ -635,6 +667,44 @@ impl Subscriptions {
                     body: push.into_body(next),
                 })
             })
+    }
+
+    /// The next live subscription whose topic gave it up, with nothing left pending, as the
+    /// `subscription_ended` frame that ends it; `None` if there is none. The subscription stays
+    /// until [`Subscriptions::ended_by_topic`] removes it.
+    #[must_use]
+    pub(crate) fn next_failed(&self) -> Option<(SubscriptionId, String)> {
+        self.live
+            .iter()
+            .filter(|(_, subscription)| subscription.stage == Stage::Live)
+            .find_map(|(&id, subscription)| {
+                let pending = subscription
+                    .shared
+                    .pending
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .is_some();
+                if pending {
+                    return None;
+                }
+                let error = subscription
+                    .shared
+                    .failure
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone()?;
+                let frame = to_frame(&ServerMessage::SubscriptionEnded {
+                    subscription: id.0,
+                    error,
+                });
+                Some((id, frame))
+            })
+    }
+
+    /// Removes a subscription whose `subscription_ended` is queued, freeing its place; its number
+    /// is not reused.
+    pub(crate) fn ended_by_topic(&mut self, id: SubscriptionId) {
+        self.live.remove(&id);
     }
 
     /// Takes a ready notification's frame to queue, counting its sequence as sent.
@@ -995,6 +1065,47 @@ mod tests {
         ));
         assert!(pushers[1].is_ended());
         let (subscription, _) = subscribed(&mut client, &mut openings, 7).await;
+        assert_eq!(subscription, 5);
+        client.close().await;
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_topic_that_fails_ends_its_subscription_after_its_last_push_and_frees_its_place() {
+        let (handler, _calls, mut openings) = Scripted::with_openings();
+        let harness = Harness::start(handler).await;
+        let mut client = harness.connect().await;
+        client.hello().await;
+        let mut pushers = Vec::new();
+        for id in 1..=4 {
+            pushers.push(subscribed(&mut client, &mut openings, id).await.1);
+        }
+        let failing = &pushers[1];
+        let error = RequestError {
+            code: ErrorCode::Internal,
+            message: "the scene could not be advanced".to_owned(),
+            field: None,
+        };
+        // A push merged before the failure is still sent, first; one after it never is.
+        assert!(failing.push(push(1, vec![body(0x0100, 1.0)])));
+        assert!(failing.fail(error.clone()));
+        assert!(!failing.push(push(2, Vec::new())));
+        let last = notification(&mut client, 2).await;
+        assert_eq!(last.sequence, 1);
+        match client.next_message().await {
+            ServerMessage::SubscriptionEnded {
+                subscription,
+                error: ended,
+            } => {
+                assert_eq!(subscription, 2);
+                assert_eq!(ended, error);
+            }
+            other => panic!("expected `subscription_ended`, got {other:?}"),
+        }
+        assert!(failing.is_ended());
+        assert!(client.ping(1).await.is_empty(), "nothing follows the end");
+        // Its place is free, and its number is not reused.
+        let (subscription, _) = subscribed(&mut client, &mut openings, 5).await;
         assert_eq!(subscription, 5);
         client.close().await;
         harness.stop().await;

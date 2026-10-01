@@ -375,8 +375,8 @@ export class RequestClient {
    *
    * @remarks
    * An answer to an unknown or cancelled ID is dropped: a cancelled request has already settled.
-   * So is a notification for a subscription this client does not have, whether it has ended or
-   * was never opened (rendering plan R03, Design note 1).
+   * So is a notification or a `subscription_ended` for a subscription this client does not have,
+   * whether it has ended or was never opened (rendering plan R03, Design note 1).
    *
    * @returns `true` when the message belonged to a request or a subscription and was consumed,
    *   `false` for every other message, which the caller handles itself.
@@ -399,6 +399,9 @@ export class RequestClient {
         break;
       case "notification":
         this.#subscriptions.route(message);
+        break;
+      case "subscription_ended":
+        this.#subscriptions.endedByServer(message);
         break;
       case "welcome":
       case "pong":

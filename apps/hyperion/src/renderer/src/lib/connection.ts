@@ -8,7 +8,8 @@ import {
 import { useEffect, useState } from "react";
 
 const PING_INTERVAL_MS = 2_000;
-const RECONNECT_DELAY_MS = 2_000;
+/** How long the link waits before trying again after the socket closes, ms. */
+export const RECONNECT_DELAY_MS = 2_000;
 
 /**
  * Lifecycle of the server link.
@@ -184,6 +185,7 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
           case "response":
           case "request_error":
           case "notification":
+          case "subscription_ended":
             // The request client consumes every one of these above.
             break;
         }

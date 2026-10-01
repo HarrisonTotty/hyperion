@@ -284,6 +284,10 @@ impl Topic {
             };
             if let Err(error) = kept {
                 tracing::warn!(code = ?error.code, message = %error.message, "a scene subscription stopped");
+                // The core went with the failed job, so there is nothing to resume: the
+                // subscription ends, and the client is told why (a delegated decision of
+                // 2026-09-30).
+                self.pusher.fail(error);
                 return;
             }
         }

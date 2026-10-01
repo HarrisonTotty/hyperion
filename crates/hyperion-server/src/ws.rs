@@ -503,6 +503,16 @@ impl Connection {
                 self.push_waits_for = Some(self.push_waits_for.map_or(bytes, |w| w.min(bytes)));
             }
         }
+        // A subscription its topic gave up ends once its last push is queued.
+        while let Some((id, frame)) = self.subscriptions.next_failed() {
+            let bytes = frame.len();
+            if !self.outbound.has_room_for(bytes) {
+                self.push_waits_for = Some(self.push_waits_for.map_or(bytes, |w| w.min(bytes)));
+                break;
+            }
+            self.subscriptions.ended_by_topic(id);
+            self.push(Message::Text(frame.into())).await?;
+        }
         Ok(())
     }
 

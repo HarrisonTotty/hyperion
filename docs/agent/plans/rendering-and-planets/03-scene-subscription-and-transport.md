@@ -1696,3 +1696,24 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
     - transport: T10.b's streaming tests, T11's reassembly and T1's no-unasked-frames test.
 
     The by-eye item is R02's.
+- **`subscription_ended` and the scene's watchdog, decided 2026-09-30 (delegated decision, item
+  6), as built.** On the wire, `ServerMessage::SubscriptionEnded { subscription, error }` (type
+  `subscription_ended`). Like a notification, it is sent only on a subscription the client
+  opened, so `PROTOCOL_VERSION` stays 2; its doc comment now says so and records open question 21
+  as closed (item 3).
+
+  On the server, a topic whose pool job fails keeps its `warn` and calls `Pusher::fail(error)`.
+  The connection sends what is still pending, then `subscription_ended`, and frees the place, so
+  that it no longer counts against `MAX_SUBSCRIPTIONS`; the number is never reused. A push made
+  after the failure is dropped. There is no retry: the core went with the failed job.
+  `subscriptions::tests::a_topic_that_fails_ends_its_subscription_after_its_last_push_and_frees_its_place`
+  covers it.
+
+  On the client, `SubscriptionEnd` becomes a union, `{ kind: "unsubscribed" | "link_lost" }` or
+  `{ kind: "ended", error }`. `RequestClient` routes `subscription_ended` to its subscription and
+  sends no `unsubscribe` of its own; the link's switch gains the case. `useScene` reopens a scene
+  the server ended after the link's reconnection delay (`RECONNECT_DELAY_MS`, now exported, 2 s),
+  showing it `stale` (`resubscribing`) meanwhile. This counts toward the same three resubscriptions
+  in a row, after which it settles as `rejected` with the server's code. A watchdog marks the scene
+  `stale` (`silent`) once no push has arrived for `SCENE_SILENCE_MS`, 2 s (twice the heartbeat,
+  the guide's rule), holding its clock; the next push makes it `live` again.
