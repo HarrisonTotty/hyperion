@@ -767,21 +767,23 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     WebGPU or no adapter, the safe mode and the disabled state are the console stating its own
     condition in `--text`, in the `refused` standing (plain text), as the brainstorm's item 7 does
     for `TERRAIN: DETAIL LIMITED`. They are never promoted to a Caution. The wording, drafted in
-    T5.c for the owner, is:
-    - `GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE`;
+    T5.c and signed off with amendments on 2026-09-30 (delegated decision; Risks, "T5 follow-up"),
+    is:
+    - `GRAPHICS ACQUIRING ADAPTER` (`acquiring`, plain text, while the first request is pending);
+    - `GRAPHICS SOFTWARE ADAPTER: photorealistic style not available`;
     - `GRAPHICS NOT AVAILABLE: no WebGPU` (`no-webgpu`) and
-      `GRAPHICS NO ADAPTER: views unavailable` (`no-adapter`);
-    - `GRAPHICS DEVICE LOST: re-creating` and `GRAPHICS PROCESS RESTARTED` (faults);
-    - `GRAPHICS SAFE MODE: views unavailable, relaunch to retry`;
-    - `GRAPHICS DISABLED: <n> DEVICE LOSSES, relaunch to retry` (cause `device-losses`, n being the
+      `GRAPHICS NO ADAPTER: views not available, relaunch to retry` (`no-adapter`);
+    - `GRAPHICS DEVICE LOST: re-creating` and `GRAPHICS PROCESS RESTARTED: re-acquiring` (faults);
+    - `GRAPHICS SAFE MODE: views not available, relaunch to retry`;
+    - `GRAPHICS DISABLED: <n> device losses, relaunch to retry` (cause `device-losses`, n being the
       count) and `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` (cause
-      `adapter-withdrawn`).
+      `adapter-withdrawn`). The clause after the colon is a mixed-case sentence (decided
+      2026-09-30, as built).
 
     They show in a `GRAPHICS` panel on the `LINK` display. The safe and disabled states are also
     proposed for the header strip's status area. The guide reserves that banner for "A simulation,
     training or replay mode" (`docs/frontend/ux-guidelines.md`, Layout), so the use is part of
-    T5.c's draft for the owner, and T5.b builds it meanwhile, as the galaxy slice built to its
-    drafts. Every later view carries the current annunciation in its label block (R02).
+    T5.c's draft, signed off 2026-09-30, and the main screen's mode banner states it too. Every later view carries the current annunciation in its label block (R02).
 
 11. _Superseded by Design note 24 (2026-09-30)._ **Babylon options, fixed.**
     `new WebGPUEngine(canvas, { stencil: false, antialias: false, doNotHandleContextLost: true, useLargeWorldRendering: false, powerPreference: "high-performance" })`,
@@ -1228,7 +1230,7 @@ gives a device whose `lost` has already resolved.
 **R01.T5.a The panel.** `components/GraphicsPanel.tsx` on the `LINK` display after `Server Link`, in
 `ConnectionPanel`'s readout pattern: `Adapter` (vendor · architecture), `Software Adapter`
 (`YES`/`NO`), `Features` (the wanted ones present), `Styles`, `Mode` (`DEFAULT`, `VULKAN` or
-`SAFE`), `GPU Timer` (`QUANTIZED`, `FULL` or `ABSENT`, from `GraphicsStatus.timer`), `Device
+`SAFE MODE`), `GPU Timer` (`QUANTIZED`, `FULL` or `ABSENT`, from `GraphicsStatus.timer`), `Device
 Losses`, `Process Restarts`, and the current annunciation through `StatusLine`, with the standing
 `graphicsAnnunciation` gives. Missing values are the em dash.
 
@@ -1250,7 +1252,8 @@ the alert counts.
 - Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/components/ConsoleFrame.test.tsx`;
   the by-eye record.
 
-**R01.T5.c Nomenclature drafts, for the owner.** A draft of the guide's new entries: `GRAPHICS`
+**R01.T5.c Nomenclature drafts, for the owner.** Signed off with amendments 2026-09-30
+(delegated decision; the constants changed in the T5 follow-up, Risks). A draft of the guide's new entries: `GRAPHICS`
 (system); the statuses `GRAPHICS SOFTWARE ADAPTER`, `GRAPHICS NOT AVAILABLE`, `GRAPHICS NO ADAPTER`,
 `GRAPHICS SAFE MODE`, `GRAPHICS DISABLED` (with its two causes); the faults `GRAPHICS DEVICE LOST`
 and `GRAPHICS PROCESS RESTARTED`; `UNAVAILABLE` (the owner may prefer `NOT AVAILABLE`); `DEFAULT`,
@@ -1262,7 +1265,8 @@ class. Written as a proposed diff in the commit message and in this plan's as-bu
 applied: guide additions are the owner's call. R02's single pass absorbs and re-checks it. The code
 does not wait for the answer, since every string is one constant in `status.ts`.
 
-- Acceptance: the owner signs off, or amends; the constants then change in one commit.
+- Acceptance: the owner signs off, or amends; the constants then change in one commit. Done
+  2026-09-30 (delegated decision).
 
 ### R01.T6 The engine-agnostic interface
 
@@ -1708,7 +1712,8 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   `validate` routing is what keeps it from rotting. Headless Ozone is the fragile part: an Electron
   upgrade that breaks it falls back to a hidden X11 window, which needs a display. SwiftShader
   checks correctness only; a pass says nothing about the UHD 620's speed.
-- **The fault wording** is a draft for the owner (T5.c); only constants change if it is amended.
+- **The fault wording** was a draft for the owner (T5.c), signed off with amendments on 2026-09-30
+  (delegated decision); its constants changed in the T5 follow-up.
 - **The rounding probe reads one value a format.** Design note 22 tells round-to-nearest from
   truncation at one magnitude. An adapter that rounds some other way, or differently by magnitude,
   would still be classed by that one value. R07 reads anything but `nearest` as a reason to keep
@@ -1785,10 +1790,10 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     the harness withholds a feature; T8 should dispatch the device-read capabilities with the
     engine's first creation and each `device-restored`, so that a withheld feature reads as absent
     in the status too (Design note 7).
-  - Open, for the owner or R02: a `GRAPHICS PROCESS RESTARTED` fault clears only on
-    `device-restored`, so until a view owns a device (R02), or under `no-adapter`, one GPU-process
-    crash leaves the fault standing on the `LINK` panel for the rest of the launch. Candidates: keep
-    it for the launch, clear it on the next successful adapter request, or clear it after a set time.
+  - Decided 2026-09-30, delegated decision (was open): a `GRAPHICS PROCESS RESTARTED` fault clears
+    on the next successful adapter request, and the feed makes that request itself after each
+    crash (T5 follow-up). Before, it cleared only on `device-restored`, so until a view owned a
+    device (R02), or under `no-adapter`, one crash left the fault standing for the launch.
 - **Deviations in T5, as built.**
   - The `Features` row lists the wanted features present by their WebGPU names, comma-separated, or
     `NONE`; `Styles` reads `WIREFRAME, PHOTOREALISTIC`, `WIREFRAME`, `NONE` (no views: no WebGPU, no
@@ -1798,27 +1803,31 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     them (lower case, e.g. `intel · gen-9`).
   - The header banner is its own component, `GraphicsModeBanner`, in `ConsoleFrame`'s status area
     before the clock, an `output` labelled `Graphics mode` in `--text` inside a `--line` rule
-    (`.console__banner`). It names the mode alone, `GRAPHICS SAFE MODE` or `GRAPHICS DISABLED`
+    (`.console__banner`; the rule became `--text-muted` in the T5 follow-up, decided 2026-09-30). It names the mode alone, `GRAPHICS SAFE MODE` or `GRAPHICS DISABLED`
     (the words before the colon), so that the strip fits at 1280 × 720; the panel carries the
     sentence. `ConsoleFrame` now needs a `GraphicsStatusContext` provider above it.
   - The disabled statement's count is in mixed case (`GRAPHICS DISABLED: 3 device losses, …`),
     since every other clause after a colon is a sentence (the guide's Typography); Design note 10
-    wrote `<n> DEVICE LOSSES`. The two counts are `output`s, live without an
+    wrote `<n> DEVICE LOSSES`, and now reads `<n> device losses` (decided 2026-09-30, delegated
+    decision). The two counts are `output`s, live without an
     annunciation once the mode is settled.
-  - Kept as drafted, for the owner (UX review of T5): `GRAPHICS NOT AVAILABLE: no WebGPU`,
-    `GRAPHICS NO ADAPTER: views unavailable` and `GRAPHICS PROCESS RESTARTED` name no operator
-    action (the guide's Voice asks for one where known; `relaunch to retry` is the candidate); the
-    `acquiring` condition shows only em dashes and no annunciation, which is momentary in practice
-    (a waiting `GRAPHICS ACQUIRING ADAPTER` would be a new word); whether the banner looks
-    "unmistakably different" enough in a `--line` rule; `GPU` and `WebGPU` on the list; one of
-    `UNAVAILABLE` and `NOT AVAILABLE`.
+  - Superseded by the T5 follow-up below (decided 2026-09-30, delegated decision). These were kept
+    as drafted, for the owner (UX review of T5): `GRAPHICS NOT AVAILABLE: no WebGPU`,
+    `GRAPHICS NO ADAPTER: views unavailable` and `GRAPHICS PROCESS RESTARTED` named no operator
+    action; the `acquiring` condition showed only em dashes and no annunciation; whether the banner
+    looked "unmistakably different" enough in a `--line` rule; `GPU` and `WebGPU` on the list; one
+    of `UNAVAILABLE` and `NOT AVAILABLE`.
   - By eye, pending: the `GRAPHICS` panel in each condition and the header banner in safe mode on
     `just client`, with the store driven from the devtools console, beside the guide's banner rule.
 - **T5.c, the nomenclature draft for the owner (not applied to the guide).** R02.T2.f absorbs and
   re-checks it in its single pass over `docs/frontend/ux-guidelines.md`. The code is built to it
   meanwhile: every string is one constant, `GRAPHICS_WORDS` in `view/engine/status.ts`, and the
-  panel's `MODE_WORDS` and `TIMER_WORDS` in `components/GraphicsPanel.tsx`. Awaiting the owner's
-  sign-off or amendment; the constants then change in one commit.
+  panel's `MODE_WORDS` and `TIMER_WORDS` in `components/GraphicsPanel.tsx`. **Signed off with
+  amendments 2026-09-30 (delegated decision).** The draft below is kept as written; the accepted
+  text, which R02.T2.f applies to the guide, uses `NOT AVAILABLE` for `UNAVAILABLE`, `SAFE MODE`
+  for `SAFE`, the amended statuses of Design note 10, adds `GRAPHICS ACQUIRING ADAPTER`,
+  `GRAPHICS SHADER REFUSED`, `GPU`, `WebGPU` and `WGSL`, and words the Alerts sentence without
+  naming `StatusLine`. The constants changed in the T5 follow-up below.
 
   ```diff
   @@ Layout @@
@@ -1847,6 +1856,47 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   `Device Losses`, `Process Restarts`) are ordinary words, and `GPU` and `WebGPU` are proper names
   of the hardware and the API rather than ship abbreviations; the owner may want `GPU` on the list.
   `NONE`, `YES` and `NO` are the readings' plain words.
+
+- **T5 follow-up, as built (decided 2026-09-30, delegated decision).** Each change below applies
+  the delegated UX decisions on R01's words and banner; only constants, the banner's rule and the
+  feed changed.
+  - One word for "not offered": `NOT AVAILABLE` everywhere, never `UNAVAILABLE`.
+    `GRAPHICS_WORDS.softwareAdapter` is `GRAPHICS SOFTWARE ADAPTER: photorealistic style not
+available` (the clause after the colon in mixed case, like its siblings), and `safeMode` is
+    `GRAPHICS SAFE MODE: views not available, relaunch to retry`.
+  - The panel's `Mode` reads `SAFE MODE` (`MODE_WORDS.safe`), since `SAFE` is the guide's command
+    that disarms an `ARM`. `FULL` stays.
+  - `noAdapter` is `GRAPHICS NO ADAPTER: views not available, relaunch to retry`, since a relaunch
+    resets Chromium's per-session WebGPU state; `processRestarted` is `GRAPHICS PROCESS RESTARTED:
+re-acquiring`, stating what the console does. `GRAPHICS NOT AVAILABLE: no WebGPU` is kept: a
+    relaunch would not change it.
+  - The `acquiring` condition states `GRAPHICS ACQUIRING ADAPTER` (`GRAPHICS_WORDS.acquiring`),
+    steady plain text in the `refused` standing, on the pattern of `ESTABLISHING LINK`; the rows
+    keep their em dashes, since those values are missing until the adapter answers.
+  - `.console__banner` is ruled `1px solid var(--text-muted)` in place of `--line`, the style of
+    every mode banner (R07.T27.a's `ModeBanner` reuses the class); `--text-muted` passes 7.2:1 on
+    `--surface-0`.
+  - `GRAPHICS PROCESS RESTARTED` clears on the next granted adapter, and the count is kept.
+    `feedGraphicsStatus` follows each crash report outside safe mode with a fresh
+    `requestAdapterOutcome`. Its answer is a new event, `adapter-reacquired`, rather than a second
+    `adapter-outcome`. The reason is that a view's rebuild after the same crash reports the device's
+    own capabilities (`device-restored`, `device-capabilities`), and the two answers are not
+    ordered: where an adapter had been granted already, the re-acquired answer only clears the
+    fault and leaves condition, capabilities and timer as they are (Design note 7); where none had
+    been, it takes the new adapter's outcome. Only the latest request's answer is dispatched, so an
+    answer from before a crash cannot clear its fault. An `adapter-outcome` with an adapter also
+    clears the fault, as the decision words it; a `device-restored` still clears it, and a lost
+    device's fault is not cleared by either.
+  - A null (or rejected) re-acquired answer where an adapter had been granted is the adapter
+    withdrawn, as a rebuild handles one (Design note 9). **Deviation from the decision's "clears on
+    the next successful request":** where no adapter had been granted (`no-adapter`, `no-webgpu`),
+    a null answer restates the condition and clears the fault too. Otherwise `GRAPHICS PROCESS
+RESTARTED: re-acquiring` would stand in caution text for the launch while nothing is being
+    re-acquired, and, since a fault outranks the condition, it would hide the condition's own line
+    and its remedy (`relaunch to retry`). `Process Restarts` keeps the history (UX review of the
+    follow-up).
+  - Design note 10 reads `<n> device losses`, as built, and lists the signed-off words.
+  - The banner's by-eye record (T5.b) is still pending, by hand, now with the `--text-muted` rule.
 
 - **Deviations in T6, as built.**
   - The opaque handles are `readonly` interfaces with a literal `kind` and a `name`; `ComputeHandle`
