@@ -1424,3 +1424,21 @@ warnings` with "use of a disallowed method", and was reverted.
   It now takes the root lexically (two `parent()`s). Nothing else failed; no golden changed. On
   wasip1 a `should_panic` test is reported ignored by libtest (`panic = "abort"`), as plan 01's
   Risks records; the native run covers them.
+- **Deviations in T7.b, as built (2026-09-30).** The wasip1 suites run under cargo-nextest, not
+  `cargo test`: wasip1 has no threads, so libtest ran each binary's tests one at a time, and the
+  fast suite took 975 s under `cargo test` against 206 s under nextest (one wasmtime process per
+  test on every core; wasmtime's module cache compiles each binary once), both under shared load
+  (load averages 10–37), provisional. `_wasip1 <cargo args>` sets the runner; `test-wasm-fast` runs
+  `nextest run --target wasm32-wasip1` over the four crates, `test-wasm-slow` the same with
+  `--cargo-profile slow-test --profile slow --run-ignored only` (`test-slow`'s profiles) and then
+  the doctests with `cargo test --doc`, which nextest does not run (88 s, one at a time, so kept out
+  of `ci`). So `_wasm-preflight wasip1` also checks cargo-nextest, and `just wasm-tools` installs it
+  when missing. Under nextest a `should_panic` test on wasip1 shows as PASS: libtest in the child
+  reports it ignored (`panic = "abort"`) and exits 0, as `cargo test` reported it ignored before;
+  the native run is what checks them. The relaxed-SIMD negative build is `_relaxed-simd-refused`,
+  a dependency of `test-wasm-fast`, building the surface crate for wasip1 with
+  `-C target-feature=+relaxed-simd` in its own target directory (`target/relaxed-simd-check`), and
+  failing unless the build fails with a crate's "relaxed SIMD is banned in hyperion-" message.
+  wasmtime is pinned at 49.0.1 (`wasmtime_version`), the version the plan's research used. Checked:
+  `WASMTIME=/nonexistent just test-wasm-fast` fails with "wasmtime (/nonexistent) is missing: run
+  `just wasm-tools` …"; `just test-wasm-fast` passed (2,484 tests; 134 s of tests at load 7–12).

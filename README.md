@@ -73,6 +73,9 @@ The full design is in
 - Node.js ≥ 22.12 and pnpm 12
 - [`just`](https://github.com/casey/just)
 - [`uv`](https://docs.astral.sh/uv/) — runs [pre-commit](https://pre-commit.com) for the git hooks
+- For the WebAssembly checks: the `wasm32-wasip1` and `wasm32-unknown-unknown` targets
+  (listed in `rust-toolchain.toml`), [wasmtime](https://wasmtime.dev) at the version the justfile
+  pins, and [cargo-nextest](https://nexte.st). `just wasm-tools` installs them.
 
 ## Development
 
@@ -144,15 +147,17 @@ protocol bindings are up to date. It takes about three minutes.
   is a finding to raise, never a failure.
 - `just bless` rewrites the golden files under `crates/*/tests/golden/` after a deliberate
   `GENERATOR_VERSION` bump; it refuses to run under `CI`.
-- `just test-wasm` runs the sim's and the testkit's tests, goldens and slow tests included, as
-  `wasm32-wasip1` under wasmtime, where `usize` is 32 bits. It needs wasmtime and the target
-  (`rustup target add wasm32-wasip1`), so it is part of neither `ci` nor `ci-slow`. Run it by hand
-  to check generated output bit for bit on wasm32 as well as on native x86-64, which `just ci`
-  checks; nothing checks AArch64.
-- `just test`, `just test-slow` and `just bench` build first, then run under one lock shared by
-  every worktree of the clone (`.git/hyperion-heavy-tests.lock`). A second run waits for the first to
-  finish, and says so, because two suites at once each take twice as long, and the load fails the
-  timing-sensitive server tests.
+- `just test-wasm-fast` checks generated output bit for bit on WebAssembly as well as on native
+  x86-64: it runs the fast tests of `hyperion-base`, `hyperion-surface`, `hyperion-sim` and
+  `hyperion-testkit`, goldens included, as `wasm32-wasip1` under wasmtime, where `usize` is 32
+  bits, with cargo-nextest (one process per test, since wasip1 has no threads); and it checks that
+  a build with relaxed SIMD fails. `just test-wasm-slow` runs their slow tests and doctests there;
+  `just test-wasm` runs both. A missing tool fails them with a pointer to `just wasm-tools`; they
+  never skip. Nothing checks AArch64.
+- `just test`, `just test-slow`, `just bench` and the WebAssembly checks build first, then run
+  under one lock shared by every worktree of the clone (`.git/hyperion-heavy-tests.lock`). A second
+  run waits for the first to finish, and says so, because two suites at once each take twice as
+  long, and the load fails the timing-sensitive server tests.
 
 ### Git hooks
 
