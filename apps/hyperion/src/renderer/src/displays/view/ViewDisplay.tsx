@@ -151,7 +151,8 @@ function ViewStage({
   const [selection, setSelection] = useState<CameraTarget | null>(null);
   const reducedMotion = usePrefersReducedMotion();
   const engineState = useViewEngine(engineSource);
-  const annunciation = graphicsAnnunciation(useGraphicsStatus());
+  const graphics = useGraphicsStatus();
+  const annunciation = graphicsAnnunciation(graphics);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   const heldRef = useRef(new Set<string>());
@@ -320,7 +321,10 @@ function ViewStage({
       ? null
       : engineState.kind === "pending"
         ? ACQUIRING
-        : (annunciation ?? NOT_MADE);
+        : // Still acquiring by the status means the view's own request found nothing.
+          annunciation === null || graphics.condition.kind === "acquiring"
+          ? NOT_MADE
+          : annunciation;
   const fault = annunciation?.standing === "fault" ? annunciation.text : null;
 
   return (
