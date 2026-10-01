@@ -34,9 +34,11 @@
 //!
 //! [`EventId`]: crate::id::EventId
 //! [`TagScope::Event`]: super::TagScope::Event
+//! [`threefry2x64_20`]: super::threefry2x64_20
 
-use super::threefry::threefry2x64_20;
-use super::{Seed, Stream};
+use std::fmt;
+
+use super::{RawEventKey, Seed, Stream};
 use crate::id::{EventBin, EventSubject, EventTag};
 
 /// The block of step 1 that holds a body's event key; a system's is block 0.
@@ -70,8 +72,15 @@ const SUB_SHIFT: u32 = 48;
 /// assert!((0.0..1.0).contains(&when));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventKey([u64; 2]);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EventKey(RawEventKey);
+
+impl fmt::Debug for EventKey {
+    /// `EventKey([k0, k1])`, as it printed when it held the words itself.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("EventKey").field(&self.0.words()).finish()
+    }
+}
 
 impl EventKey {
     /// Step 1: the event key of `subject` under `tag` in the universe of `seed`.
@@ -88,29 +97,26 @@ impl EventKey {
                 (u64::from(body.body_index()) << SUB_SHIFT) | BODY_BLOCK,
             ],
         };
-        Self(threefry2x64_20(
-            [seed.get(), tag.domain_tag().hash()],
-            counter,
-        ))
+        Self(RawEventKey::derive(seed, tag.domain_tag(), counter))
     }
 
     /// The two key words.
     #[must_use]
     pub const fn words(self) -> [u64; 2] {
-        self.0
+        self.0.words()
     }
 
     /// Step 2, slot 0: the stream of bin (or cycle) `bin` itself, for its count, its times and its
     /// thinning, at word 0.
     #[must_use]
     pub fn bin_stream(&self, bin: EventBin) -> Stream {
-        Stream::from_words(self.0, bin.get().cast_unsigned(), 0)
+        self.0.stream(bin.get().cast_unsigned(), 0)
     }
 
     /// Step 2, slot `j + 1`: event `j`'s own stream in bin `bin`, at word 0.
     #[must_use]
     pub fn event_stream(&self, bin: EventBin, j: u8) -> Stream {
-        Stream::from_words(self.0, bin.get().cast_unsigned(), u16::from(j) + 1)
+        self.0.stream(bin.get().cast_unsigned(), u16::from(j) + 1)
     }
 }
 
@@ -121,7 +127,7 @@ mod tests {
     use super::*;
     use crate::coords::{CellSize, GenCell};
     use crate::id::{BodyId, Layer, SystemId, event_tags};
-    use crate::rng::tags;
+    use crate::rng::{tags, threefry2x64_20};
 
     const SEED: Seed = Seed::new(0x0e7e_0000_0000_0001);
 
@@ -220,12 +226,18 @@ mod tests {
             stream.word_at(0),
             threefry2x64_20(key.words(), [u64::MAX, 0])[0]
         );
-        let unextended = Stream::from_words(key.words(), (1 << 40) - 1, 0);
+        let unextended = key.0.stream((1 << 40) - 1, 0);
         assert_ne!(
             first_words(stream, 16),
             first_words(unextended, 16),
             "bin -1 must not alias counter word 2^40 - 1"
         );
+    }
+
+    #[test]
+    fn debug_prints_the_two_key_words() {
+        let key = key(star().into());
+        assert_eq!(format!("{key:?}"), format!("EventKey({:?})", key.words()));
     }
 
     #[test]

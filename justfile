@@ -105,7 +105,7 @@ test-slow *args:
 # check.
 slow_then_check := 'cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@" && start=$SECONDS && cargo run -q -p hyperion-fit -- check --rerun-fast && echo "hyperion-fit check --rerun-fast: $((SECONDS - start)) s" >&2'
 
-# Run the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
+# Run base's, the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
 test-wasm:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -118,17 +118,17 @@ test-wasm:
         dirs+=" --dir=$(realpath -m "$CARGO_TARGET_DIR")"
     fi
     export CARGO_TARGET_WASM32_WASIP1_RUNNER="${WASMTIME:-wasmtime} $dirs"
-    cargo test --target wasm32-wasip1 -p hyperion-sim -p hyperion-testkit
-    cargo test --target wasm32-wasip1 -p hyperion-sim -p hyperion-testkit --profile slow-test \
-        -- --ignored
+    cargo test --target wasm32-wasip1 -p hyperion-base -p hyperion-sim -p hyperion-testkit
+    cargo test --target wasm32-wasip1 -p hyperion-base -p hyperion-sim -p hyperion-testkit \
+        --profile slow-test -- --ignored
 
 # Run the Criterion benchmarks, e.g. `just bench -- samplers`.
 bench *args:
     cargo bench --workspace --no-run {{ args }}
     just _locked cargo bench --workspace {{ args }}
 
-# The sim's GENERATOR_VERSION, read from its source for `--since`.
-generator_version := `sed -n 's/^pub const GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new(\([0-9]*\));$/\1/p' crates/hyperion-sim/src/version.rs`
+# GENERATOR_VERSION, read from its source in `hyperion-base` (re-exported by the sim) for `--since`.
+generator_version := `sed -n 's/^pub const GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new(\([0-9]*\));$/\1/p' crates/hyperion-base/src/version.rs`
 
 # Run an offline fit into the sim's tables at the current generator version, updating
 # crates/hyperion-fit/tables.lock and tables::MANIFEST (plan 15), e.g. `just fit mge`.

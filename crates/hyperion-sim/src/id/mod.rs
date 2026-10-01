@@ -129,23 +129,23 @@ pub use layer::{Layer, RESERVED_LAYER_VALUE};
 pub use nested::MemberSlot;
 pub use reserved::{FeatureCell, FeatureMemberId, FeatureRef};
 pub use system::{BuildSystemIdError, DecodeSystemIdError, SystemId, SystemIdKind};
-pub(crate) use text::{HexFault, parse_lower_hex};
 pub use text::{ParseBodyIdError, ParseEventIdError, ParseEventWordError, ParseSystemIdError};
 
-use crate::rng::{ObjectKey, TagScope};
+use crate::rng::ObjectKey;
 
 impl From<SystemId> for ObjectKey {
-    /// A system's key: its raw ID as the counter word, `sub` 0, scope [`TagScope::System`].
+    /// A system's key, [`ObjectKey::system`]: its raw ID as the counter word, `sub` 0, scope
+    /// `System`.
     fn from(id: SystemId) -> Self {
-        Self::new(id.raw(), 0, TagScope::System)
+        Self::system(id.raw())
     }
 }
 
 impl From<BodyId> for ObjectKey {
-    /// A body's key: its system's raw ID as the counter word and its body index as `sub`, which
-    /// shares counter word 1 with the draw number; scope [`TagScope::Body`].
+    /// A body's key, [`ObjectKey::body`]: its system's raw ID as the counter word and its body
+    /// index as `sub`, which shares counter word 1 with the draw number; scope `Body`.
     fn from(id: BodyId) -> Self {
-        Self::new(id.system().raw(), id.body_index(), TagScope::Body)
+        Self::body(id.system().raw(), id.body_index())
     }
 }
 

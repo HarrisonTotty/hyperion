@@ -667,6 +667,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyperion-base"
+version = "0.1.0"
+dependencies = [
+ "hyperion-testkit",
+ "libm",
+]
+
+[[package]]
 name = "hyperion-fit"
 version = "0.1.0"
 dependencies = [
@@ -717,8 +725,8 @@ name = "hyperion-sim"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "hyperion-base",
  "hyperion-testkit",
- "libm",
 ]
 
 [[package]]

@@ -51,7 +51,9 @@
 //! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
 //!   the Roche, Hill and satellite-stability limits.
 //!
-//! The crate's only runtime dependency is `libm`.
+//! [`math`], [`units`], [`version`] and the mechanism of [`rng`] live in `hyperion-base`, beneath
+//! this crate, and are re-exported here at their old paths. That crate is this one's only runtime
+//! dependency, and `libm`, beneath it, the only external one.
 
 pub mod alerts;
 pub mod coords;
@@ -59,7 +61,6 @@ pub mod events;
 pub mod galaxy;
 pub mod id;
 pub mod lensing;
-pub mod math;
 pub mod observe;
 pub mod orbit;
 pub mod planetary;
@@ -67,11 +68,9 @@ pub mod rng;
 pub mod stellar;
 pub mod tables;
 pub mod time;
-pub mod units;
-pub mod version;
 
+pub use hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math, units, version};
 pub use rng::Seed;
-pub use version::{GENERATOR_VERSION, GeneratorVersion};
 
 use std::time::Duration;
 

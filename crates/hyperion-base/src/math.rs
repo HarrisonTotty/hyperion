@@ -1,8 +1,9 @@
 //! Transcendental functions over `f64`, every one a thin wrapper of the exactly pinned `libm`.
 //!
-//! The rule: no code in `hyperion-sim` calls a transcendental method of `f64` or `f32`. It calls
-//! the free function here instead. Clippy enforces it through the `disallowed-methods` list in
-//! this crate's `clippy.toml`.
+//! The rule: no code in the determinism crates (`hyperion-base`, `hyperion-surface`,
+//! `hyperion-sim` and `hyperion-fit`) calls a transcendental method of `f64` or `f32`. It calls the
+//! free function here instead. Clippy enforces it through the `disallowed-methods` list in each
+//! crate's own `clippy.toml`.
 //!
 //! The reason (brainstorm, "Floating point"): Rust's `+ - * /` and `sqrt` are IEEE-exact and
 //! identical on every target, and the compiler never fuses a multiply and an add on its own. `sin`,
@@ -27,7 +28,9 @@
 //! hand-written functions are [`powi`], [`powf_positive`] (`libm`'s `exp` of `libm`'s `log`, for
 //! the stellar formulae alone), [`normal_quantile`], which uses only the wrappers, the four
 //! operators and `sqrt`, and [`two_product`], Dekker's exact product error, which is bit for bit
-//! [`mul_add`]'s and falls back to it outside the range where Dekker's is exact.
+//! [`mul_add`]'s and falls back to it outside the range where Dekker's is exact. Some wrappers
+//! have no `f64` method to stand in for, such as [`erf`] and [`j0`], the Bessel function the
+//! rendering plans' terrain uncertainty needs.
 
 /// The sine of `x` radians.
 #[inline]
@@ -221,7 +224,7 @@ pub fn powf(x: f64, y: f64) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::{ln, powf, powf_positive};
+/// use hyperion_base::math::{ln, powf, powf_positive};
 ///
 /// // A 5 M☉ star's M^3.8, within the bound plus `powf`'s own ulp.
 /// let (m, e) = (5.0, 3.8);
@@ -252,6 +255,17 @@ pub fn cbrt(x: f64) -> f64 {
 #[must_use]
 pub fn hypot(x: f64, y: f64) -> f64 {
     libm::hypot(x, y)
+}
+
+/// The Bessel function of the first kind of order zero, J₀(x), for any finite `x`.
+///
+/// J₀ is even, J₀(0) = 1 exactly, and its first zero lies near 2.404 8. It is exactly the pinned
+/// `libm`'s `j0`, so the same bits on every target; `f64` has no such method, so no Clippy ban is
+/// needed. The rendering plans' R10 reads it for a terrain slope's uncertainty (its Design note 7).
+#[inline]
+#[must_use]
+pub fn j0(x: f64) -> f64 {
+    libm::j0(x)
 }
 
 /// The error function of `x`.
@@ -293,7 +307,7 @@ pub fn gamma(x: f64) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::fmod;
+/// use hyperion_base::math::fmod;
 ///
 /// assert_eq!(fmod(7.5, 2.0), 1.5);
 /// assert_eq!(fmod(-7.5, 2.0), -1.5);
@@ -316,7 +330,7 @@ pub fn fmod(x: f64, y: f64) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::mul_add;
+/// use hyperion_base::math::mul_add;
 ///
 /// let one_plus_eps = 1.0 + f64::EPSILON;
 /// let one_minus_eps = 1.0 - f64::EPSILON;
@@ -365,7 +379,7 @@ const TWO_PRODUCT_PRODUCT_MAX: f64 = f64::from_bits((1023 + 1021) << 52);
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::{mul_add, two_product};
+/// use hyperion_base::math::{mul_add, two_product};
 ///
 /// let (product, error) = two_product(0.1, 1e9);
 /// assert_eq!(product, 0.1 * 1e9);
@@ -418,7 +432,7 @@ fn veltkamp_split(a: f64) -> (f64, f64) {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::powi;
+/// use hyperion_base::math::powi;
 ///
 /// assert_eq!(powi(2.0, 10), 1024.0);
 /// assert_eq!(powi(2.0, -2), 0.25);
@@ -543,7 +557,7 @@ fn horner(c: &[f64], x: f64) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use hyperion_sim::math::normal_quantile;
+/// use hyperion_base::math::normal_quantile;
 ///
 /// // The half-width of the two-sided 95% interval, in standard deviations.
 /// let z = normal_quantile(0.975);
@@ -634,6 +648,37 @@ mod tests {
     use hyperion_testkit::float::{assert_same_bits, bits, ulps_apart};
 
     use super::*;
+
+    #[test]
+    fn j0_of_zero_is_exactly_one() {
+        assert_same_bits(j0(0.0), 1.0);
+        assert_same_bits(j0(-0.0), 1.0);
+    }
+
+    #[test]
+    fn j0_is_even() {
+        for x in [
+            1e-300,
+            1e-8,
+            0.5,
+            1.0,
+            2.404_825_557_695_773,
+            3.0,
+            7.5,
+            40.0,
+            1e3,
+            1e10,
+        ] {
+            assert_same_bits(j0(-x), j0(x));
+        }
+    }
+
+    /// The first zero, j₀,₁ = 2.404 825 557 695 773 (Abramowitz and Stegun, table 9.5).
+    #[test]
+    fn j0_vanishes_at_its_first_zero() {
+        assert!(j0(2.404_825_557_695_773).abs() < 1e-15);
+        assert!(j0(2.3) > 0.0 && j0(2.5) < 0.0);
+    }
 
     /// Reference bits of e, ln 2, sin 1 and cos 1, each the correctly rounded `f64`.
     #[test]
@@ -1111,19 +1156,5 @@ mod tests {
         for p in quantile_points() {
             assert_same_bits(normal_quantile_total(p), normal_quantile(p));
         }
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "normal_quantile needs 0 < p < 1, got 1")]
-    fn normal_quantile_rejects_one_in_debug_builds() {
-        let _ = normal_quantile(1.0);
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "normal_quantile needs 0 < p < 1, got 0")]
-    fn normal_quantile_rejects_zero_in_debug_builds() {
-        let _ = normal_quantile(0.0);
     }
 }

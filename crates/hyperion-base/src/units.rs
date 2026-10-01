@@ -12,7 +12,7 @@
 //! Mixing dimensions, or two units of one dimension, does not compile:
 //!
 //! ```compile_fail
-//! use hyperion_sim::units::{LightYears, Metres};
+//! use hyperion_base::units::{LightYears, Metres};
 //! let _ = Metres::new(1.0) + LightYears::new(1.0);
 //! ```
 
