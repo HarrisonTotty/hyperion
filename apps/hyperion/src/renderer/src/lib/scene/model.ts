@@ -78,6 +78,11 @@ export interface SceneSystem {
   /** Every body's grant, by ID. */
   readonly grants: ReadonlyMap<BodyIdHex, BodyGrant>;
   /**
+   * Every body's Hill radius at pericentre, m, by ID, where its record holds its mass and a bound
+   * orbit; R02's frame selection reads it (rendering plan R03, R03.T13).
+   */
+  readonly hillRadiiM: ReadonlyMap<BodyIdHex, number>;
+  /**
    * The system's tidal radius at the arrival, m (R02's free-camera clamp); `null` when the scene
    * was already in the system when the subscription opened, since the state does not carry it.
    */

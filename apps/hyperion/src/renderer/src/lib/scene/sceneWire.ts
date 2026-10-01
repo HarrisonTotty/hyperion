@@ -13,6 +13,8 @@
 import type {
   BodyGrantDto,
   BodyIdHex,
+  BodySummaryDto,
+  GalacticPosition,
   KinematicsDto,
   SceneBodyDto,
   SceneCraftDto,
@@ -21,7 +23,9 @@ import type {
   SceneSystemDto,
   SeenPositionDto,
   SystemIdHex,
+  UniverseTime,
 } from "@hyperion/protocol";
+import { METRES_PER_LIGHT_YEAR } from "@hyperion/protocol";
 
 import { vec3, type Vec3 } from "../../geometry/vec3";
 import { toSystemBodiesModel } from "../system/bodiesWire";
@@ -72,11 +76,36 @@ function check(condition: boolean, what: string): asserts condition {
   }
 }
 
+/** The rates a scene clock runs at: paused, or a power of ten from 1× to 100,000×. */
+const CLOCK_RATES: ReadonlySet<number> = new Set([0, 1, 10, 100, 1_000, 10_000, 100_000]);
+
+/** Checks a time is whole seconds and nanoseconds in `[0, 10⁹)`, as the wire's form requires. */
+function checkTime(time: UniverseTime, what: string): UniverseTime {
+  check(
+    Number.isSafeInteger(time.seconds) &&
+      Number.isInteger(time.nanos) &&
+      time.nanos >= 0 &&
+      time.nanos < 1_000_000_000,
+    `${what} time unusable`,
+  );
+  return time;
+}
+
+/** Checks a galactic position: whole cells, and offsets in `[0, 1 ly)`. */
+function checkGalactic(position: GalacticPosition): GalacticPosition {
+  check(
+    position.cell_ly.every((cell) => Number.isSafeInteger(cell)) &&
+      position.offset_m.every((offset) => offset >= 0 && offset < METRES_PER_LIGHT_YEAR),
+    "galactic position unusable",
+  );
+  return position;
+}
+
 function toPosition(position: KinematicsDto["position"]): ScenePosition {
   let result: ScenePosition;
   switch (position.frame) {
     case "galactic":
-      result = { kind: "galactic", position: position.position };
+      result = { kind: "galactic", position: checkGalactic(position.position) };
       break;
     case "system":
       check(allFinite(position.offset_m), "position unusable");
@@ -95,7 +124,7 @@ function toKinematics(kinematics: KinematicsDto): SceneKinematics {
   return {
     position: toPosition(kinematics.position),
     velocityMPerS: toVec3(kinematics.velocity_m_s),
-    time: kinematics.time,
+    time: checkTime(kinematics.time, "pose"),
   };
 }
 
@@ -114,7 +143,7 @@ function toCraft(craft: SceneCraftDto): SceneCraft {
 
 function toSeen(seen: SeenPositionDto): SeenPosition {
   check(allFinite(seen.apparent_m), "seen position unusable");
-  return { apparentM: toVec3(seen.apparent_m), emitted: seen.emitted };
+  return { apparentM: toVec3(seen.apparent_m), emitted: checkTime(seen.emitted, "seen") };
 }
 
 function toGrant(grant: BodyGrantDto): BodyGrant {
@@ -148,8 +177,41 @@ function toSystem(
     model: read.model,
     bodies: read.bodies,
     grants: new Map(wire.grants.map((grant) => [grant.body, toGrant(grant)])),
+    hillRadiiM: hillRadii(wire.system.bodies),
     tidalRadiusM,
   };
+}
+
+/**
+ * The simulation's constant of gravitation, m³ kg⁻¹ s⁻² (CODATA 2018,
+ * `units::consts::GRAVITATIONAL_CONSTANT`), by which a primary's mass is read from an orbit's μ.
+ */
+const GRAVITATIONAL_CONSTANT = 6.674_3e-11;
+
+/**
+ * Every body's Hill radius at pericentre, m, where its record holds its mass and a bound orbit:
+ * plan 14's `hill_radius`, a (1 − e) (m ÷ 3M)^⅓, operation for operation.
+ *
+ * @remarks
+ * The primary's mass M is the orbit's μ ÷ G less the body's own, since μ = G (M + m); the kilograms
+ * are the wire's, not the model's Earth masses, so that no conversion stands between the two sides.
+ * A body below `mass_and_orbit`, whose mass and orbit are withheld, has none.
+ */
+function hillRadii(bodies: ReadonlyArray<BodySummaryDto>): ReadonlyMap<BodyIdHex, number> {
+  const radii = new Map<BodyIdHex, number>();
+  for (const body of bodies) {
+    if (body.mass_kg.state !== "ok" || body.orbit.state !== "ok") {
+      continue;
+    }
+    const massKg = body.mass_kg.value;
+    const orbit = body.orbit.value.orbit;
+    const primaryKg = orbit.mu_m3_s2 / GRAVITATIONAL_CONSTANT - massKg;
+    const e = orbit.eccentricity;
+    if (massKg > 0 && primaryKg > 0 && e >= 0 && e < 1) {
+      radii.set(body.id, orbit.semi_major_axis_m * (1 - e) * Math.cbrt(massKg / (3 * primaryKg)));
+    }
+  }
+  return radii;
 }
 
 /** Builds the model of a scene the wire states whole. */
@@ -159,11 +221,17 @@ function build(
   designate: Designate,
 ): SceneModelResult {
   try {
+    check(Number.isSafeInteger(wire.sequence) && wire.sequence >= 0, "sequence unusable");
+    check(CLOCK_RATES.has(wire.clock.time_rate), "clock rate unusable");
     return {
       kind: "ok",
       model: {
         sequence: wire.sequence,
-        clock: { time: wire.clock.time, rate: wire.clock.time_rate, state: wire.clock.state },
+        clock: {
+          time: checkTime(wire.clock.time, "clock"),
+          rate: wire.clock.time_rate,
+          state: wire.clock.state,
+        },
         ship: toKinematics(wire.ship),
         system: wire.system === null ? null : toSystem(wire.system, tidalRadiusM, designate),
         craft: wire.craft.map(toCraft),
