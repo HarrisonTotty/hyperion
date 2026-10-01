@@ -1626,3 +1626,67 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   second client 20 ms after the first, and at every millisecond the second holds exactly the craft
   the first held 20 ms earlier; with 20 ms of delivery against a 15.625 ms tick, a literal "one
   push" could not hold. Under StrictMode the hook subscribes once.
+- **T15, the verification pass (lane D4, 2026-09-30).** Every figure below was taken on the shared
+  development machine (Ryzen 7 3700X, RTX 3080) while other lanes built and tested, at load
+  averages of 7 to 26. All of them are **provisional** and are to be taken again on a quiet machine
+  (README, Conventions).
+  - **Sizes** (`convert::scene_fixture::scene_message_sizes`, an ignored measurement, run by hand):
+    the frames for plan 14's three golden systems (`0x42006cba00000009`, `0x41ffecae00000004`,
+    `0x42002cb200000009`), whole `ServerMessage`s at 3,600 s.
+
+    | Level             | Bodies       | State                 | Arrival        |
+    | ----------------- | ------------ | --------------------- | -------------- |
+    | `contact`         | 16 / 18 / 16 | 9.8 / 12.4 / 11.0 kB  | the same + 1 B |
+    | `mass_and_orbit`  | 16 / 18 / 16 | 16.6 / 19.9 / 18.8 kB | the same + 1 B |
+    | `bulk` and `full` | 24 / 47 / 80 | 30.1 / 58.2 / 99.2 kB | the same + 1 B |
+
+    `bulk` lists more bodies (the moons and members listed from that level). A `BodySummaryDto`
+    averages 401–436 B at `contact`, 826–870 B at `mass_and_orbit` (largest 1,025 B) and
+    1,104–1,141 B at `bulk` (largest 1,373 B), against the brainstorm's 250–300 B. Design note 4
+    foresaw 700–900 B. Bodies are pushed only on change, so this sets the size of an arrival, not
+    the rate. A craft is 373 B against the brainstorm's 400 B, and a push of ten craft is 3,931 B,
+    0.252 MB/s at 64 Hz, the brainstorm's 0.25 MB/s.
+
+  - **Push rate with ten test craft** (`craft_are_pushed_at_64_hz_each_push_stating_its_time`,
+    which now prints its figures): 64, 64 and 44 pushes in a second of scene time, 0.193, 0.193
+    and 0.133 MB/s of notifications. The 44 is a loaded run (load average 26), whose missed ticks
+    are skipped, never bunched.
+  - **Added latency of a push during a 15 MB transfer, loopback**
+    (`bulk::tests::streaming::push_latency_on_loopback`, ignored, run by hand; ten craft at 64 Hz,
+    the low-water mark on). Each delay runs from the instant a push's clock states to its receipt.
+    With no transfer: median 0.56 ms, worst 40 ms (the load). During 40 transfers, each 4.5–13.7 ms
+    from first chunk to last: median 1.67 ms, worst 4.8 ms. On loopback a transfer adds about a
+    millisecond. The slow-link figures are T10.b's (Design note 11).
+  - **Pending, by hand:** the latency between two machines on gigabit Ethernet and on Wi-Fi, with
+    the link rates. This machine alone cannot take it.
+  - **Pending:** the smoke check of a 15 MiB (61-chunk) transfer and its terminal response in the
+    real Electron renderer. No kind is answered in bulk until R06 and R09, so neither the server
+    binary nor any page can ask for one yet. A stand-in kind would be test-only server code
+    reachable over the network, which this plan does not build. The check runs with R06's sky
+    request, the first real bulk kind, on this machine (RTX 3080) under the target-hardware rule.
+    Until then, the client's reassembly is held by T11's tests over `FakeWebSocket` and the
+    server's streaming by T10.b's tests over real sockets.
+  - **The envelope against P12.T9**, for plan 12's writer. As P12.T9 designs it: `subscribe`,
+    `unsubscribe`, `Subscribed { subscription, state }`, `SubscriptionTopic`, `SubscriptionState`,
+    `ServerMessage::Notification { subscription, body }`, `NotificationBody`, the unknown
+    subscription as `bad_request` naming `subscription`, and `TestClient::next_notification()`. It
+    departs from P12.T9 in these places, each recorded above and in P12.T9's note:
+    - the enums are tagged `topic`;
+    - `ResponseBody::Subscribe` boxes `Subscribed`;
+    - the helper on `RequestClient` consumes notifications (Design note 1);
+    - `RequestClient.subscribe(universe, topic)` takes the universe;
+    - a topic serves through `Handler::subscribe` and a `Pusher` with its own `Merge`;
+    - requests naming a subscription are routed by the connection;
+    - subscription numbers are never reused, and `MAX_SUBSCRIPTIONS` is 4.
+
+    P12.T9's "subscriptions end with the socket" gains `subscription_ended` (the delegated decisions
+    of 2026-09-30, item 6, built after this pass).
+
+  - **The Verification list.** Every automated item runs in `just ci`, which passed at this commit:
+    - honest scene: `scene_knowledge.rs`, T8's refusal tests, T7.a's and T13's seen positions;
+    - one scene: `scene_agree.rs`, made reliable by the T9 fix above, and T14's two client tests;
+    - every push stating its time and rate: T8;
+    - apparent positions: T2, T3 and T13;
+    - transport: T10.b's streaming tests, T11's reassembly and T1's no-unasked-frames test.
+
+    The by-eye item is R02's.
