@@ -90,11 +90,13 @@ mod native_only {
             .collect()
     }
 
+    /// Taken lexically, not by `canonicalize`, which `wasm32-wasip1` does not support.
     fn workspace_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
+            .parent()
+            .and_then(Path::parent)
             .expect("the testkit sits two levels below the workspace root")
+            .to_path_buf()
     }
 
     /// Every crate under `crates/`, by directory name, and whether it has its own `clippy.toml`.

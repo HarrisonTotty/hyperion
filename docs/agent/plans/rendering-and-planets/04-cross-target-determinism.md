@@ -1255,10 +1255,10 @@ It reserves, so that later plans need not:
 
 ## Risks and open points
 
-- **The owner's CSP ruling gates T10.c**, and through it R05's height workers. Research found that
+- **The owner's CSP ruling gated T10.c**, and through it R05's height workers. Research found that
   workers compile under today's policy (Design note 16), so no option leaves the client without
-  WebAssembly; the risk is delay, not feasibility. If the owner picks option 3, the custom scheme
-  becomes its own task before T10.c.
+  WebAssembly; the risk was delay, not feasibility. Ruled 2026-09-30: option 2, change nothing
+  (the T10.a record below).
 - **Two more sign-offs gate T3.** Plan 14's owner accepts the amendment (T3.a) before the wire
   changes (T3.c), which must land before P14.T23; the guide's owner signs off the `DETAIL SEED`
   rows (T3.b), and the client is built to the draft meanwhile.
@@ -1455,3 +1455,243 @@ warnings` with "use of a disallowed method", and was reverted.
   `PATH=/nonexistent` it failed with the "needs a C compiler named `cc`" message. Run time for the
   four variants: 0.15–0.22 s debug, 0.15 s release, under shared load (research: 1.3 s for three).
   **Pending:** the timing on a quiet machine.
+- **Deviations in T7.a, as built (2026-09-30).** The three failures the plan names were already
+  fixed at the start of this task (plan 01's Risks, "wasm: not pursued this round": the
+  `catch_unwind` test became `an_over_long_window_panics_in_debug`, `check_shares` runs on one
+  thread under `cfg(target_family = "wasm")`, and `quantile` works in `u64`). The full fast rerun
+  under wasmtime 49.0.1 (`cargo test --target wasm32-wasip1 --no-fail-fast` over base, the surface
+  crate, the sim and the testkit, doctests included) found one more: `clippy_bans.rs`'s
+  `workspace_root` called `canonicalize`, which wasip1 does not support, and aborted the binary.
+  It now takes the root lexically (two `parent()`s). Nothing else failed; no golden changed. On
+  wasip1 a `should_panic` test is reported ignored by libtest (`panic = "abort"`), as plan 01's
+  Risks records; the native run covers them.
+- **Deviations in T7.b, as built (2026-09-30).** The wasip1 suites run under cargo-nextest, not
+  `cargo test`: wasip1 has no threads, so libtest ran each binary's tests one at a time, and the
+  fast suite took 975 s under `cargo test` against 206 s under nextest (one wasmtime process per
+  test on every core; wasmtime's module cache compiles each binary once), both under shared load
+  (load averages 10–37), provisional. `_wasip1 <cargo args>` sets the runner; `test-wasm-fast` runs
+  `nextest run --target wasm32-wasip1` over the four crates, `test-wasm-slow` the same with
+  `--cargo-profile slow-test --profile slow --run-ignored only` (`test-slow`'s profiles) and then
+  the doctests with `cargo test --doc`, which nextest does not run (88 s, one at a time, so kept out
+  of `ci`). So `_wasm-preflight wasip1` also checks cargo-nextest, and `just wasm-tools` installs it
+  when missing. Under nextest a `should_panic` test on wasip1 shows as PASS: libtest in the child
+  reports it ignored (`panic = "abort"`) and exits 0, as `cargo test` reported it ignored before;
+  the native run is what checks them. The relaxed-SIMD negative build is `_relaxed-simd-refused`,
+  a dependency of `test-wasm-fast`, building the surface crate for wasip1 with
+  `-C target-feature=+relaxed-simd` in its own target directory (`target/relaxed-simd-check`), and
+  failing unless the build fails with a crate's "relaxed SIMD is banned in hyperion-" message.
+  wasmtime is pinned at 49.0.1 (`wasmtime_version`), the version the plan's research used. Checked:
+  `WASMTIME=/nonexistent just test-wasm-fast` fails with "wasmtime (/nonexistent) is missing: run
+  `just wasm-tools` …"; `just test-wasm-fast` passed (2,484 tests; 134 s of tests at load 7–12).
+  Also, as built (review): the doctests leave `ci` safely, since none pins generated output (the
+  sim's central-promise doctest compares draws with each other, not with fixed bits). T5's
+  separate `-p hyperion-base` flagged build is not a step: base compiles first, so the surface
+  build already runs exactly that compilation and stops on base's message; the surface crate's own
+  guard is held only by `both_client_crates_refuse_relaxed_simd`, as text. The preflight requires
+  `wasmtime --version` to name the pinned version (T7.c). `just wasm-tools` was run in its parts
+  (the two `rustup target add`s, `cargo install wasmtime-cli --version 49.0.1 --locked`).
+- **Deviations in T7.c (the wasm part), as built (2026-09-30). The timings are provisional:** the
+  machine was never quiet (other lanes building and testing; load averages 6–37), and runs waited
+  on the shared heavy-test lock, so each figure below is the run's wall time less its lock waits,
+  read from timestamped logs. The owner should re-time `just ci` and `just ci-slow` on a quiet
+  machine (load under 1, governor recorded) and re-apply Design note 11's rule.
+  - `just ci` before the wiring: 1,489 s wall, of which 860 s waiting for the lock, so about 630 s
+    of work, with a partly cold target directory (load 7.6 before, 15.4 after).
+  - `just ci` with `test-wasm-fast` (the `ci` half of the one permitted `just ci-slow` run, warm):
+    about 527 s of work (1,827 s wall less 1,300 s of lock waits; load 10.5 before). Of it, the
+    native part took about 384 s and `test-wasm-fast` about 143 s: 14 s for the relaxed-SIMD
+    refusal and the wasip1 build, 128 s of nextest (2,484 tests). By crate, summed per-test times
+    from the nextest log: the sim 1,700 s over 2,293 tests, base 4 s (125), the testkit 2 s (65),
+    the surface crate under 1 s (1), so the wasip1 suite is the sim's.
+  - **The rule, applied to these figures:** the sim's fast suite adds about 143 s to about 384 s,
+    37% of the new `ci`'s work and under half of the old one's under either reading, so the sim's
+    share stays its whole fast suite. Against the README's old "about three minutes" (a quiet
+    figure) the same 143 s would exceed half; the quiet re-timing decides, and should the rule
+    then narrow the sim's share, note that only 15 of the sim's 41 golden-writing test files match
+    `--test '*golden*'`, so the narrowing would need a nextest filter naming the golden-writing
+    binaries rather than the glob.
+  - Native slow suite (`test-slow`, same run): 1,580 s of tests, and **7 of 165 failed**, none in
+    code this plan touched: `hyperion-fit`'s
+    `energy_and_jacobi_hold_over_ten_gyr_for_a_thousand_orbits`; the sim's `galaxy_bounds`
+    `envelopes_never_exceed_their_bounds_over_many_cells_seed_0`, `_seed_1` and `_seed_2`;
+    `galaxy_features` `field_and_features_add_up_to_every_budget`; `planetary_placement`
+    `the_statistics_of_architecture_meet_their_surveys`; and `stellar_system`
+    `multiple_systems_follow_the_model_over_ten_thousand_systems`. All seven fail identically on
+    `main` (899db5e): they are pre-existing galaxy-plan failures, which the owner is handling, and
+    **`just ci-slow` currently fails on them, independently of the wasm suites**. Since `ci-slow`
+    stops at `test-slow`, the slow wasip1 suite was timed by its own run (`just test-wasm-slow`,
+    below).
+  - Beyond the listed files, `.claude/skills/implement-task/SKILL.md`'s example of a skipped check
+    is now the AArch64 run, since the wasm checks can no longer be skipped; the README's `just ci`
+    sentence now also names `fit-check`, which `ci` already ran.
+- **Deviations in T8.a, as built (2026-09-30).** `wasm-bindgen-test = "=0.3.79"` (current at T8),
+  which put `wasm-bindgen` 0.2.129 into `Cargo.lock`. The shared checks are factored out of
+  `check_in_mode` into private `checked_actual_version` (header and commit-hook checks) and
+  `compare` (header version and line diff); `check_embedded(name, expected, actual)` is
+  `check_embedded_in_mode(Mode::from_env(), …)`, a public twin of `check_in_mode` added so that the
+  refusal to bless is testable natively (any mode but `Compare` panics with "golden files are
+  blessed natively, then embedded"). A failure names the file as `<name>.golden (embedded)`.
+  `golden!` expands to a block of two `#[cfg]`-gated statements. The testkit had thirteen
+  `should_panic` unit tests (in `float`, `golden`, `order` and `stats`), all with `expected`; they
+  moved unchanged to `tests/panics.rs`, which also holds the embedded arm's five panic tests
+  (mismatch, header mismatch, bless refused in `Bless` and `BlessForbidden`, trailing space).
+  `tests/golden.rs` is wholly a `native_only` module, and holds the compile-only check that
+  `golden!` takes a computed name natively (`golden_takes_a_computed_name_natively`, never called,
+  under `#[expect(dead_code)]`). Every unit-test module carries the `as test` import.
+- **Deviations in T8.b, as built (2026-09-30).** The shim prints its own error when
+  `HYPERION_ELECTRON` is unset (`${…:?}`). `test-wasm-browser` resolves Electron's binary and its
+  package version through `pnpm --silent --filter hyperion exec node -p …`, and fails unless
+  `node -p process.versions.electron` through the shim prints that version; its first line of
+  output is "wasm-bindgen-test on Electron 44.4.3, V8 15.2.124.28-electron.0". The count
+  comparison is stricter than a count: each crate's sorted test names under `--list` on the
+  browser target must equal the native ones less those containing `native_only::`, and a
+  difference is printed as a diff. The native list is the dev profile's (the binaries `just test`
+  builds), the browser run the slow-test profile's. `cargo test -q` cannot be used for the browser
+  list, since cargo passes `--quiet` on to the runner, which rejects it. Each run is wrapped in
+  `timeout 600` through the runner variable (`browser_timeout`); `browser_crates` is the testkit
+  alone until T8.c. `_wasm-preflight browser` checks the target and that
+  `wasm-bindgen-test-runner --version` names the `wasm-bindgen` version of `Cargo.lock`
+  (`wasm_bindgen_version`, read from it), and `just wasm-tools` installs `wasm-bindgen-cli` at that
+  version. Checked 2026-09-30 (in a side target directory, since the main one was busy): the run
+  passes on the testkit (52 tests: 33 and one ignored in the lib, 18 in `panics`), and fails at the
+  version check with the shim's directory left off `PATH` ("`node` on PATH is not Electron 44.4.3
+  … (it printed 'undefined')"), at the comparison with `lcg.rs`'s `as test` line removed (it names
+  `lcg::tests::floats_and_bounded_integers_stay_in_range`), and at the comparison with a test
+  compiled out by its own `cfg` outside `native_only` (it names the test); each edit was reverted.
+- **Deviations in T8.c, as built (2026-09-30).** `test-wasm-fast` now depends on
+  `_browser-clippy` (the plan's Clippy command, over `browser_crates`), which runs with the
+  relaxed-SIMD refusal before the wasip1 suites, and after them runs `test-wasm-browser` over base,
+  the surface crate and the testkit, each behind `_wasm-preflight "browser"`. Base's version check, its helpers and `FOUNDATION_GOLDENS` moved
+  into a `native_only` module of `foundation_golden.rs`. Beyond the skill's opening paragraph, its
+  "Adding goldens" section gains the browser target's test conventions (the import,
+  `native_only`, `tests/panics.rs`, literal golden names), and the README's check list names the
+  browser run. The browser target runs 124 of base's tests (one, the version check, natively
+  only), the surface crate's one and the testkit's 52; its tests took under 1 s, so its cost in
+  `ci` is its builds (about 70 s cold for the testkit's harness, seconds warm; provisional, under
+  load). Checked by hand, 2026-09-30, and reverted: an `f64::sin` call in a function of base under
+  `#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]` passed host Clippy and failed
+  `_browser-clippy` ("use of a disallowed method `f64::sin`"); one character of
+  `math/functions.golden` changed (`sin(0.0)`'s last hex digit) failed `foundation_golden` natively,
+  under wasip1 (nextest) and on the browser target ("math/functions.golden (embedded) differs at
+  line 3"). These runs used a side target directory and, for the browser suite, the recipe without
+  its lock step, since the slow wasip1 suite held the heavy-test lock for its own timing.
+- **T10.a, the CSP ruling (2026-09-30): option 2, change nothing.** The owner authorised this lane
+  to make whatever change to the Content Security Policy was necessary; a research agent then
+  re-ran Design note 16's experiment on the repo's Electron 44.4.3 (sandboxed `BrowserWindow`,
+  today's meta-tag policy, `file://` and an HTTP server standing in for Vite's dev server): a
+  same-origin module worker created with `new Worker(new URL(…), { type: "module" })` has no policy
+  of its own and compiles WebAssembly there, by `WebAssembly.instantiate` and by
+  `compileStreaming`, while the page's own thread is refused with a `CompileError` citing
+  `script-src 'self'`; a `blob:` worker is refused at creation by `script-src 'self'`; and the
+  worker has no `require` or `process`. So no change is necessary, and option 2 is the ruling,
+  recorded here and in the brainstorm's "Awaiting the owner" item:
+  - `apps/hyperion/src/renderer/index.html` keeps its policy unchanged, and
+    `.claude/rules/typescript-dev.md`'s rule stands.
+  - Workers stay same-origin module files, created as above; no `blob:` or inline worker.
+  - The render thread never compiles WebAssembly. Two guards hold that: the loader reports a
+    `CompileError` that names the CSP as a fault of its own (`csp-refused`), so a module loaded
+    on the wrong thread, or a future policy on worker scripts, says what happened rather than
+    failing as a corrupt module; and a source test fails if any renderer file other than a
+    `*.worker.ts` (or a Node-side test) imports `generated/surface/` (T10.c).
+  - **Accepted exposure:** a worker loaded from `file://` has no policy, so it can `fetch` any
+    `file://` URL the user can read (the experiment read `/etc/hostname`). It runs only our own
+    bundled code; the custom-scheme route (option 3), which would end this, stays open for a later
+    task if the renderer ever loads third-party script.
+- **Deviations in T10.b, as built (2026-09-30).** `wasm-bindgen = "=0.2.129"` joins
+  `[workspace.dependencies]`, pinned to the version `wasm-bindgen-test` pins. The export is
+  `generatorVersion` in JavaScript (`js_name`), from a private `mod wasm` compiled on the browser
+  target only. `gen-surface` builds the crate's library for `wasm32-unknown-unknown` in release
+  (respecting `CARGO_TARGET_DIR`), empties `generated/surface/` and runs `wasm-bindgen --target web` into it (the module is 18.6 kB), behind
+  a new preflight group, `bindgen` (the target and `wasm-bindgen --version` at `Cargo.lock`'s
+  version). The hooks' pnpm entries call `just _with-surface pnpm …`, a private recipe that makes
+  the module first. `.oxlintrc.json` needed no entry: its `**/generated/**` pattern already
+  ignores the directory; `.gitignore` and `.prettierignore` gained it. The crate's docs and
+  `rust-dev.md`'s boundary entry name the browser-only `wasm-bindgen` dependency. Checked:
+  `cargo tree -p hyperion-sim --target wasm32-wasip1 -e normal` lists no `wasm-bindgen`;
+  `just gen-surface` leaves `git status --porcelain` unchanged; the surface crate's test passes
+  natively, under wasip1 and on the browser target, and `_browser-clippy` covers `src/wasm.rs`.
+- **T8 review fixes, as built (2026-09-30).** The review found that `just bless`
+  (`HYPERION_BLESS=1 cargo test`) failed on the testkit's new tests, since `check_embedded` reads
+  the environment natively: every test of the embedded arm now calls
+  `check_embedded_in_mode(Mode::Compare, …)`, and `check_embedded` itself is called only by
+  `golden!`'s browser arm, where the environment reads nothing (checked: the testkit's and base's
+  tests pass under `HYPERION_BLESS=1` and leave the tree unchanged). In
+  `test-wasm-browser`, each crate's two `--list` runs are now commands of their own, so a failed
+  build or runner stops the recipe with its own message rather than showing as a list
+  difference; `wasm_bindgen_version` takes the first match only. With T8.c's browser step, the
+  T7.c timing record gains: its tests take under 1 s and its builds about 70 s cold, seconds warm
+  (provisional, under load), which does not change Design note 11's outcome there.
+- **Deviations in T10.c, as built (2026-09-30).** Under the ruling (option 2) `index.html` is
+  unchanged.
+  - **Worker build and naming.** The renderer's Vite config sets `worker.format: "es"`.
+    `wasm/surface.worker.ts` loads the glue through `init({ module_or_path })` on a `?url` import
+    of the `.wasm` (an 18.6 kB hashed asset in `out/renderer/assets/`). A worker file is named
+    `*.worker.ts`: `tsconfig.web.json` excludes the pattern, and a new `tsconfig.worker.json`
+    (`lib: ["es2023", "webworker"]`, with `handleRequest.ts` and the generated `.d.ts`) types it,
+    joining `tsconfig.json`'s references and the app's `typecheck` script. **R05's height worker
+    takes the same suffix** (`height.worker.ts`, where R05.T10.b says `heightWorker.ts`), or the
+    import guard and the worker typing do not reach it; the orchestrator was told.
+  - **The module test.** `handleRequest.test.ts` (Node) gets the module's bytes as a `?inline`
+    data URL (`assetsInclude: ["**/*.wasm"]` in `vitest.config.mts`), since renderer code reads no
+    files through `node:*`, and compares the version with `GENERATOR_VERSION` parsed from
+    `crates/hyperion-base/src/version.rs` (`?raw`), the source the sim and the server report, so
+    that the module does not vouch for itself. Its CSP message is the one T10.a's experiment
+    captured.
+  - **Faults.** `load-failed` (with a `csp-refused` cause for a `CompileError` citing a Content
+    Security Policy), `worker-failed` (an `ErrorEvent`'s message, "its script did not load" for the
+    plain `Event` a module worker fires when its script fails, or an answer that threw in the
+    worker, which posts `answer-failed` at once rather than leaving the loader to time out),
+    `no-answer` after `SURFACE_ANSWER_TIMEOUT_MS` (10 s), and `version-mismatch` ("run just
+    gen-surface"). The loader terminates the worker once it has an answer, a failure, a timeout or
+    an abort. Worker messages are typed, not checked: both ends are our own same-origin code.
+  - **The guard.** `surfaceImports.test.ts` fails if a renderer file other than a `*.worker.ts` or
+    a test imports `generated/surface/`, or if any file imports a `*.worker` module (which would
+    run it on the importing thread). `typescript-dev.md` gains the rule beside the CSP's.
+  - **Reporting.** `useSurfaceModuleCheck(connection.serverGeneratorVersion)`, called by `App`,
+    runs the check once the server has said its version, writes the outcome line to the document
+    element's `data-surface-module` attribute (removed on teardown) and sends a fault to
+    `console.error`. A ready module is not logged, since the lint allows only `warn` and `error`
+    and a ready module is not a diagnostic; so "log the module's generator version" is read as
+    that attribute. Where there is no `Worker` (jsdom) it does nothing; its DOM test stubs
+    `Worker` with `test/FakeSurfaceWorker.ts`, which the loader's tests share.
+  - **`check-chunks`** also makes the module first now, since `pnpm build` bundles the worker.
+  - **Checked by hand, 2026-09-30, on the development machine (`DISPLAY=:0`).** Against a local
+    `hyperion-server` (port 7979), the built app (`pnpm build`, then Electron on `apps/hyperion`,
+    `file://`) and `just client` (dev server, `http://localhost:5173/`) each showed
+    `data-surface-module = "surface module ready: generator version 16"`, read over the DevTools
+    protocol, with no console error and no CSP violation in the page's log (the dev run logged
+    only Vite's and React's debug lines and the WebSocket warning that StrictMode's double mount
+    gives). No window or process was left running.
+  - The brainstorm's three other passages that said the policy must change are marked superseded
+    by the ruling (edited directly, not through a researching agent), and the roadmap's table row
+    for R04's loader says it is met. R05's and R12's own mentions of the pending ruling are left
+    to their lanes.
+- **T10.b, checked later (2026-09-30).** In a fresh `git worktree` at 7beb6ec (after
+  `pnpm install`), a trivial commit to a TypeScript file passed every commit hook, the oxlint and
+  `tsc` hooks building the module through `_with-surface`; the worktree was removed after.
+- **R04.T7.d, as built (2026-09-30): what the slow wasip1 suite found.** `just test-wasm-slow`
+  (run on its own, since `ci-slow` stops at the native failures above) took 3,291 s wall: 760 s
+  waiting for the heavy-test lock, about 70 s building, and 2,518 s of nextest (load 9.8 before,
+  8.9 after; provisional). 161 slow tests ran; 15 failed. Six are the pre-existing native failures
+  above (the sim's six; `hyperion-fit`'s does not run on wasip1), failing alike on wasip1, so the
+  two targets agree. The other nine aborted because they spawn threads, which wasip1 lacks:
+  `stellar::testing::tests`' five (`core_collapses_per_century_across_seeds`,
+  `galaxy_wide_counts_at_milky_way_values`, `layer_e_living_shares_and_the_remnant_ratio`,
+  `old_populations_have_nothing_living_above_the_turn_off`,
+  `thin_disc_class_fractions_near_the_solar_circle`), `binary_carve`'s
+  `no_grid_system_is_in_a_carved_class_and_none_uses_every_attempt` and `binary_system`'s three.
+  Each helper (`tally` in `stellar/testing.rs`, the share loop in `binary_carve.rs`, `par_fold` in
+  `binary_system.rs`) now takes the share's work as a closure, run on its own thread natively and,
+  under `cfg(target_family = "wasm")`, share after share on the one thread, with the same shares
+  and the same merge order, so `tally`'s float sums are the same bits. All nine then passed under
+  wasip1 (side target directory, slow-test profile, 1,603 s for the longest,
+  `old_populations_have_nothing_living_above_the_turn_off`, single-threaded). The suite's wall time
+  is bounded by its single-threaded longest tests: the satellites check (2,518 s, four threads
+  natively) and `lensing_optical_depth_towards_the_bulge` (1,777 s). The doctests, which
+  `test-wasm-slow` runs after the slow tests, did not run in that measurement because the slow
+  step failed; run alone they passed in 88 s (T7.b). No generated output moved.
+- **`just ci` with everything above (2026-09-30, at T10.c plus T7.d).** Passed: 1,820 s wall, of
+  which 1,047 s waiting for the heavy-test lock, so about 773 s of work under load 9 to 22
+  (provisional); the wasip1 suites took 136 s of nextest, and the browser target's three crates
+  (124, 1 and 52 tests, matching their native lists less `native_only`) under a second of tests
+  after their builds and listings. This is the full-`ci` record T8.c's acceptance asks for.

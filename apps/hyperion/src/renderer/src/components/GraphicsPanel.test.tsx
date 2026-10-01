@@ -49,14 +49,16 @@ function reading(label: string): HTMLElement {
 const LOST: GraphicsEvent = { kind: "device-lost", reason: "unknown", message: "gpu gone" };
 
 describe("GraphicsPanel", () => {
-  it("shows every reading missing while the adapter is asked for", () => {
+  it("states the wait for the adapter, with every reading missing", () => {
     renderPanel("vulkan");
     for (const label of ["Adapter", "Software Adapter", "Features", "Styles", "GPU Timer"]) {
       expect(reading(label)).toHaveTextContent("—");
     }
     expect(reading("Mode")).toHaveTextContent("VULKAN");
     expect(reading("Device Losses")).toHaveTextContent("0");
-    expect(screen.queryByText(/^GRAPHICS /)).not.toBeInTheDocument();
+    expect(screen.getByText("GRAPHICS ACQUIRING ADAPTER")).not.toHaveClass(
+      "request-status__text--fault",
+    );
   });
 
   it("reads a nominal hardware adapter with no status colour", async () => {
@@ -79,7 +81,7 @@ describe("GraphicsPanel", () => {
     expect(reading("Styles")).toHaveTextContent("WIREFRAME");
     expect(reading("GPU Timer")).toHaveTextContent("ABSENT");
     const statement = screen.getByText(
-      "GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE",
+      "GRAPHICS SOFTWARE ADAPTER: photorealistic style not available",
     );
     expect(statement).not.toHaveClass("request-status__text--fault");
   });
@@ -92,7 +94,9 @@ describe("GraphicsPanel", () => {
 
   it("states no adapter", () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: { kind: "no-adapter" } });
-    expect(screen.getByText("GRAPHICS NO ADAPTER: views unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText("GRAPHICS NO ADAPTER: views not available, relaunch to retry"),
+    ).toBeInTheDocument();
   });
 
   it("reports a lost device as a fault, with its count", async () => {
@@ -103,23 +107,29 @@ describe("GraphicsPanel", () => {
     expect(reading("Device Losses")).toHaveTextContent("1");
   });
 
-  it("reports a restarted GPU process as a fault, with its count", async () => {
-    const store = renderPanel("vulkan", { kind: "adapter-outcome", outcome: await adapter() });
+  it("reports a restarted GPU process as a fault until an adapter is granted", async () => {
+    const adapterOutcome = await adapter();
+    const store = renderPanel("vulkan", { kind: "adapter-outcome", outcome: adapterOutcome });
     act(() => {
       store.dispatch({ kind: "gpu-process-gone", count: 2 });
     });
-    expect(screen.getByText("GRAPHICS PROCESS RESTARTED")).toHaveClass(
+    expect(screen.getByText("GRAPHICS PROCESS RESTARTED: re-acquiring")).toHaveClass(
       "request-status__text--fault",
     );
+    expect(reading("Process Restarts")).toHaveTextContent("2");
+    act(() => {
+      store.dispatch({ kind: "adapter-reacquired", outcome: adapterOutcome });
+    });
+    expect(screen.queryByText(/^GRAPHICS PROCESS RESTARTED/)).not.toBeInTheDocument();
     expect(reading("Process Restarts")).toHaveTextContent("2");
   });
 
   it("states the safe mode", () => {
     renderPanel("safe");
-    expect(reading("Mode")).toHaveTextContent("SAFE");
+    expect(reading("Mode")).toHaveTextContent(/^SAFE MODE$/);
     expect(reading("Styles")).toHaveTextContent("NONE");
     expect(
-      screen.getByText("GRAPHICS SAFE MODE: views unavailable, relaunch to retry"),
+      screen.getByText("GRAPHICS SAFE MODE: views not available, relaunch to retry"),
     ).not.toHaveClass("request-status__text--fault");
   });
 

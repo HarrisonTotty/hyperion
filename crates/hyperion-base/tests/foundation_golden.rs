@@ -5,12 +5,14 @@
 //! `hyperion-sim` with `math` and `rng` (plan R04, T4.a and T4.d) byte for byte, and `j0`. Each
 //! file's first line is `# generator_version = <n>` from [`GENERATOR_VERSION`], so a version bump
 //! fails every test here until `just bless` regenerates the files in the same commit, and
-//! [`every_golden_file_carries_the_current_version`] holds every golden file of the crate to the
-//! same header, whichever test writes it.
+//! `every_golden_file_carries_the_current_version` (native only, since it reads the directory)
+//! holds every golden file of the crate to the same header, whichever test writes it.
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use std::f64::consts::{FRAC_PI_4, LN_2, PI};
 use std::num::NonZeroU64;
-use std::path::{Path, PathBuf};
 
 use hyperion_base::rng::{
     ObjectKey, PiecewiseLinear, PiecewisePowerLaw, PowerLaw, Stream, Threshold, Thresholds, tags,
@@ -26,69 +28,77 @@ fn writer() -> GoldenWriter {
     w
 }
 
-/// The golden files this suite writes, by name.
-const FOUNDATION_GOLDENS: [&str; 4] = [
-    "math/functions",
-    "math/bessel",
-    "rng/samplers",
-    "rng/decisions",
-];
+/// What reads the golden directory, which only a native run can (plan R04, Design note 12).
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod native_only {
+    use std::path::{Path, PathBuf};
 
-/// The crate's golden directory.
-fn golden_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("golden")
-}
+    use hyperion_base::GENERATOR_VERSION;
 
-/// Every `.golden` file under `dir`, by its name relative to `root` without the extension.
-fn golden_names(root: &Path, dir: &Path, names: &mut Vec<String>) {
-    let entries = std::fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("cannot list golden directory {}: {e}", dir.display()));
-    for entry in entries {
-        let path = entry.expect("a directory entry is readable").path();
-        if path.is_dir() {
-            golden_names(root, &path, names);
-        } else if path.extension().is_some_and(|e| e == "golden") {
-            let relative = path
-                .strip_prefix(root)
-                .expect("the file lies under the root");
-            let name: Vec<String> = relative
-                .with_extension("")
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                .collect();
-            names.push(name.join("/"));
+    /// The golden files this suite writes, by name.
+    const FOUNDATION_GOLDENS: [&str; 4] = [
+        "math/functions",
+        "math/bessel",
+        "rng/samplers",
+        "rng/decisions",
+    ];
+
+    /// The crate's golden directory.
+    fn golden_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("golden")
+    }
+
+    /// Every `.golden` file under `dir`, by its name relative to `root` without the extension.
+    fn golden_names(root: &Path, dir: &Path, names: &mut Vec<String>) {
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("cannot list golden directory {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry.expect("a directory entry is readable").path();
+            if path.is_dir() {
+                golden_names(root, &path, names);
+            } else if path.extension().is_some_and(|e| e == "golden") {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("the file lies under the root");
+                let name: Vec<String> = relative
+                    .with_extension("")
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                names.push(name.join("/"));
+            }
         }
     }
-}
 
-/// One header check over the whole crate: every golden file on disk begins with this build's
-/// `# generator_version`, so that a stale file left behind by a renamed test is caught as surely
-/// as one a test still reads; and every file this suite writes is there.
-#[test]
-fn every_golden_file_carries_the_current_version() {
-    let root = golden_root();
-    let mut names = Vec::new();
-    golden_names(&root, &root, &mut names);
-    names.sort();
-    for name in FOUNDATION_GOLDENS {
-        assert!(
-            names.iter().any(|n| n == name),
-            "golden file {name} is missing; if this change is intended, bump GENERATOR_VERSION \
-             and run `just bless`"
-        );
-    }
-    let header = format!("# generator_version = {}", GENERATOR_VERSION.get());
-    for name in &names {
-        let path = root.join(format!("{name}.golden"));
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("cannot read golden file {}: {e}", path.display()));
-        assert_eq!(
-            text.lines().next(),
-            Some(header.as_str()),
-            "golden file {name} does not carry the current generator version"
-        );
+    /// One header check over the whole crate: every golden file on disk begins with this build's
+    /// `# generator_version`, so that a stale file left behind by a renamed test is caught as
+    /// surely as one a test still reads; and every file this suite writes is there.
+    #[test]
+    fn every_golden_file_carries_the_current_version() {
+        let root = golden_root();
+        let mut names = Vec::new();
+        golden_names(&root, &root, &mut names);
+        names.sort();
+        for name in FOUNDATION_GOLDENS {
+            assert!(
+                names.iter().any(|n| n == name),
+                "golden file {name} is missing; if this change is intended, bump GENERATOR_VERSION \
+                 and run `just bless`"
+            );
+        }
+        let header = format!("# generator_version = {}", GENERATOR_VERSION.get());
+        for name in &names {
+            let path = root.join(format!("{name}.golden"));
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read golden file {}: {e}", path.display()));
+            assert_eq!(
+                text.lines().next(),
+                Some(header.as_str()),
+                "golden file {name} does not carry the current generator version"
+            );
+        }
     }
 }
 
