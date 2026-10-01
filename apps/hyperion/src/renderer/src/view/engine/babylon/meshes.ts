@@ -22,12 +22,20 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh.pure";
 import type { Scene } from "@babylonjs/core/scene.pure";
 
 import type { MeshSpec, VertexAttribute } from "../types";
+import { isGpuBuffer } from "./compute";
 
 /** Babylon's fill mode for each topology. */
 const FILL_MODES: Readonly<Record<MeshSpec["topology"], number>> = {
   "triangle-list": Constants.MATERIAL_TriangleFillMode,
   "line-list": Constants.MATERIAL_LineListDrawMode,
   "point-list": Constants.MATERIAL_PointListDrawMode,
+};
+
+/** The WebGPU topology of each Babylon fill mode the adapter uses, for its raw pass. */
+export const TOPOLOGIES: Readonly<Record<number, GPUPrimitiveTopology>> = {
+  [Constants.MATERIAL_TriangleFillMode]: "triangle-list",
+  [Constants.MATERIAL_LineListDrawMode]: "line-list",
+  [Constants.MATERIAL_PointListDrawMode]: "point-list",
 };
 
 /** The Babylon fill mode that draws `topology`. */
@@ -61,6 +69,8 @@ export class MeshRecord {
   readonly #unindexed: boolean;
   readonly #scene: Scene;
   readonly #pools = new Map<Material, Mesh[]>();
+  /** The meshes of indirect draws, kept apart: Babylon never renders them. */
+  readonly #rawPools = new Map<Material, Mesh[]>();
 
   constructor(engine: WebGPUEngine, scene: Scene, spec: MeshSpec) {
     if (spec.positions.length % 3 !== 0) {
@@ -97,10 +107,32 @@ export class MeshRecord {
    * @param use - Counted from 0 within the frame, per material.
    */
   meshFor(material: Material, use: number): Mesh {
-    let pool = this.#pools.get(material);
+    return this.#pooled(this.#pools, material, use);
+  }
+
+  /** The Babylon mesh for the `use`-th indirect draw, whose effect the raw pass compiles from. */
+  rawMeshFor(material: Material, use: number): Mesh {
+    return this.#pooled(this.#rawPools, material, use);
+  }
+
+  /** The mesh's index buffer for a raw pass, or `null` when it is drawn unindexed. */
+  indexBuffer(mesh: Mesh): { readonly buffer: GPUBuffer; readonly format: GPUIndexFormat } | null {
+    if (this.#unindexed) {
+      return null;
+    }
+    const indices = mesh.geometry?.getIndexBuffer() ?? null;
+    const resource: unknown = indices?.underlyingResource;
+    if (indices === null || !isGpuBuffer(resource)) {
+      throw new Error(`mesh ${this.name} has no index buffer for its raw pass`);
+    }
+    return { buffer: resource, format: indices.is32Bits ? "uint32" : "uint16" };
+  }
+
+  #pooled(pools: Map<Material, Mesh[]>, material: Material, use: number): Mesh {
+    let pool = pools.get(material);
     if (pool === undefined) {
       pool = [];
-      this.#pools.set(material, pool);
+      pools.set(material, pool);
     }
     let mesh = pool[use];
     if (mesh === undefined) {
@@ -118,12 +150,14 @@ export class MeshRecord {
 
   /** Releases every Babylon mesh and the geometry. */
   dispose(): void {
-    for (const pool of this.#pools.values()) {
-      for (const mesh of pool) {
-        mesh.dispose(true, false);
+    for (const pools of [this.#pools, this.#rawPools]) {
+      for (const pool of pools.values()) {
+        for (const mesh of pool) {
+          mesh.dispose(true, false);
+        }
       }
+      pools.clear();
     }
-    this.#pools.clear();
     this.#geometry.dispose();
   }
 }

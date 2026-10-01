@@ -42,16 +42,41 @@ export class MipGenerator {
     this.#device = device;
   }
 
-  /** Encodes levels 1 to `mips - 1` of `texture`, each from the one above. */
-  encode(encoder: GPUCommandEncoder, texture: GPUTexture, mips: number): void {
+  /**
+   * Encodes levels 1 to `mips - 1` of `texture`, each from the one above.
+   *
+   * @param writes - The timestamps of the whole chain: the first level's pass writes the
+   * beginning, the last level's the end.
+   */
+  encode(
+    encoder: GPUCommandEncoder,
+    texture: GPUTexture,
+    mips: number,
+    writes?: {
+      readonly querySet: GPUQuerySet;
+      readonly beginningOfPassWriteIndex: number;
+      readonly endOfPassWriteIndex: number;
+    },
+  ): void {
     const pipeline = this.#pipeline(texture.format);
     const sampler = this.#linearSampler();
     for (let level = 1; level < mips; level += 1) {
       const source = texture.createView({ baseMipLevel: level - 1, mipLevelCount: 1 });
       const destination = texture.createView({ baseMipLevel: level, mipLevelCount: 1 });
+      const timestampWrites =
+        writes === undefined
+          ? undefined
+          : {
+              querySet: writes.querySet,
+              ...(level === 1
+                ? { beginningOfPassWriteIndex: writes.beginningOfPassWriteIndex }
+                : {}),
+              ...(level === mips - 1 ? { endOfPassWriteIndex: writes.endOfPassWriteIndex } : {}),
+            };
       const pass = encoder.beginRenderPass({
         label: `${texture.label} mip ${level}`,
         colorAttachments: [{ view: destination, loadOp: "clear", storeOp: "store" }],
+        ...(timestampWrites === undefined ? {} : { timestampWrites }),
       });
       pass.setPipeline(pipeline);
       pass.setBindGroup(

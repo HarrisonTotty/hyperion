@@ -23,13 +23,13 @@ import type { InternalTexture } from "@babylonjs/core/Materials/Textures/interna
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture.pure";
 import { Color4 } from "@babylonjs/core/Maths/math.color.pure";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector.pure";
-import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.pure";
 import type { PostProcess } from "@babylonjs/core/PostProcesses/postProcess.pure";
 import type { Scene } from "@babylonjs/core/scene.pure";
 
 import { BUFFER_USAGE, MAP_MODE, TEXTURE_USAGE } from "../gpuFlags";
 import type { FrameSubmission, RenderView, ViewSize } from "../types";
-import { disableEngineYFlip, setAttachmentFormat } from "./internals";
+import { disableEngineYFlip, gpuTextureOf, setAttachmentFormat } from "./internals";
+import type { RawAttachments } from "./rawPass";
 import { paddedBytesPerRow } from "./readback";
 
 /** What a view needs of the engine that made it. */
@@ -37,12 +37,12 @@ export interface ViewHost {
   readonly babylonEngine: WebGPUEngine;
   readonly device: GPUDevice;
   readonly scene: Scene;
-  /** The Babylon meshes that draw `frame`, bound to their draws. */
-  meshesFor(frame: FrameSubmission): AbstractMesh[];
-  /** The Babylon post-processes of `frame`, the chain the next render runs. */
-  postProcessesFor(frame: FrameSubmission): ReadonlyArray<PostProcess>;
-  /** Runs `render` inside one Babylon frame and submits it. */
-  inFrame(render: () => void): void;
+  /** Renders `frame` into `target`, its indirect draws into `attachments` after. */
+  renderFrame(
+    frame: FrameSubmission,
+    target: RenderTargetTexture,
+    attachments: () => RawAttachments,
+  ): void;
   /** Forgets a view its caller disposed. */
   forgetView(view: RenderView): void;
 }
@@ -99,6 +99,13 @@ export function setChain(target: RenderTargetTexture, chain: ReadonlyArray<PostP
 
 /** The chain each target was last given. */
 const chains = new WeakMap<RenderTargetTexture, ReadonlyArray<PostProcess>>();
+
+/** A view of the depth Babylon made for `target`, for the raw pass to load and test against. */
+export function depthViewOf(target: RenderTargetTexture): GPUTextureView | null {
+  const depth = target.renderTarget?.depthStencilTexture ?? null;
+  const texture = depth === null ? null : gpuTextureOf(depth);
+  return texture === null ? null : texture.createView();
+}
 
 /** The colour a view clears to: black, opaque. */
 export const CLEAR_COLOUR = new Color4(0, 0, 0, 1);
@@ -163,11 +170,11 @@ export class BabylonView implements RenderView {
     Matrix.FromArrayToRef(frame.projection, 0, this.#projection);
     this.#camera.freezeProjectionMatrix(this.#projection);
     target.activeCamera = this.#camera;
-    this.#host.inFrame(() => {
-      target.renderList = this.#host.meshesFor(frame);
-      setChain(target, this.#host.postProcessesFor(frame));
-      target.render(false);
-    });
+    this.#host.renderFrame(frame, target, () => ({
+      colour: texture.createView({ format: srgbViewFormat(this.#format) }),
+      colourFormat: srgbViewFormat(this.#format),
+      depth: depthViewOf(target),
+    }));
     this.#lastTexture = texture;
   }
 
