@@ -1566,3 +1566,27 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   pinned at exactly one full chunk (`largest_bulk_queue_bytes` equals `MAX_BINARY_FRAME_BYTES`),
   in place of a separate `outbound::` unit test of the bulk lane. The hand-run measurement's reads
   are bounded by the harness's wait.
+- **T12 after T8.a: the state's tidal radius, as built.** R03.T8.a's optional
+  `SceneStateDto.tidal_radius_m` is read: `toSceneModel` takes it into `SceneSystem.tidalRadiusM`,
+  and `applySceneNotification` keeps it in the merged wire state (`model.wire.tidal_radius_m`) until
+  an arrival states another or the scene leaves, so applying a sequence still equals building its
+  end, the tidal radius included. A state in a system that omits it (an older server) still reads
+  `null` until the next arrival. This closes T12's open point on the tidal radius, and the README's
+  row for R02's ask is now met for a client subscribing inside a system.
+- **T9 after review: the two-clients test's flake (lane D4, 2026-09-30).**
+  `two_clients_of_one_scene_are_told_the_same_scene` failed about one run in three on the
+  integration branch, a returning arrival's `SystemSummaryDto.time` some 27–80 ms of scene time
+  (3–8 ms real at 10×) before the clock of the push that carried it. The cause, confirmed by a
+  probe (the failing push carried craft as well as the arrival): `on_setting` reads the clock, then
+  builds the arrival on the pool, which under load takes longer than a craft tick, so the skipped
+  tick fires as soon as the arrival is pushed and its craft push, stating the clock read then, is
+  merged into the pending arrival before the connection takes it. Design note 5's merge keeps the
+  latest clock, and each record states its own time (`hosts.time`, a contact's `seen.emitted`), so
+  the push is as designed and not a server bug; the test's expectation was too strict. The test
+  now compares each system with `system_bodies` at the time its records state, and holds that time
+  between the start of the push's changes and the push's clock: the previous push's clock, or,
+  for a push carrying a setting's ship, the ship's time, since a setting restarts the clock there
+  (the test's continued settings lie a few milliseconds of real time behind the server's line). No
+  server change. Run 15 times in a row and 40 times as 20 concurrent copies (load average over 20):
+  no failure. The owner's open point above, whether a merged arrival should state its own clock,
+  stands.
