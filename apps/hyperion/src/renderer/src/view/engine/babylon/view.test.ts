@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { paddedBytesPerRow, srgbViewFormat, unpadRows } from "./view";
+import { paddedBytesPerRow } from "./readback";
+import { srgbViewFormat, unpadRows } from "./view";
 
 describe("a view's canvas", () => {
   it("renders through the sRGB twin of its 8-bit format", () => {

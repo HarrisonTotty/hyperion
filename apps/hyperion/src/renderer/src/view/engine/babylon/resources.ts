@@ -23,7 +23,7 @@ import {
   type TextureSpec,
 } from "../memory";
 import type { BufferHandle, TextureHandle } from "../types";
-import { paddedBytesPerRow } from "./view";
+import { paddedBytesPerRow } from "./readback";
 
 /** A buffer the registry made. */
 export interface BufferRecord {
@@ -243,6 +243,14 @@ export class ResourceRegistry {
       { texture, mipLevel: level },
       [faceTexels, faceTexels, 6],
     );
+  }
+
+  /** Destroys one texture, raising its `destroyed` event. */
+  destroyTexture(handle: TextureHandle): void {
+    const { spec, texture, bytes } = this.textureOf(handle);
+    texture.destroy();
+    this.#textures.delete(handle);
+    this.#emit({ kind: "destroyed", name: handle.name, bytes, category: spec.category });
   }
 
   /** Destroys every buffer and texture, raising each one's `destroyed` event. */
