@@ -2,6 +2,7 @@ import { PROTOCOL_VERSION, type ResponseBody } from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { binaryFrame } from "../test/binaryFrames";
 import { FakeWebSocket } from "../test/FakeWebSocket";
 import { useServerConnection } from "./connection";
 
@@ -214,6 +215,74 @@ describe("useServerConnection", () => {
     await expect(pending.outcome).resolves.toMatchObject({
       ok: false,
       error: { code: "link_lost" },
+    });
+  });
+
+  describe("binary frames", () => {
+    it("asks for binary frames as ArrayBuffers before the socket opens", () => {
+      const { socket } = renderConnection();
+
+      expect(socket.binaryType).toBe("arraybuffer");
+    });
+
+    it("hands each chunk to the request answered in bulk, before its response", async () => {
+      const { result, socket } = renderConnection();
+      welcome(socket, PROTOCOL_VERSION);
+      const pending = result.current.requests.requestBulk({ kind: "list_universes" }, () => ({
+        chunks: 2,
+        bytes: 3,
+      }));
+
+      act(() => {
+        socket.serverSendsBinary(binaryFrame(1, 0, 2, [1, 2]));
+        socket.serverSendsBinary(binaryFrame(1, 1, 2, [3]));
+        socket.serverResponds(1, LIST);
+      });
+
+      const outcome = await pending.outcome;
+      expect(outcome.ok ? outcome.chunks.map((chunk) => [...chunk]) : outcome.error).toEqual([
+        [1, 2],
+        [3],
+      ]);
+    });
+
+    it("reports a malformed frame as an error and keeps the link up", () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const { result, socket } = renderConnection();
+      welcome(socket, PROTOCOL_VERSION);
+      const malformed = binaryFrame(1, 0, 1, [1]);
+      new DataView(malformed).setUint8(0, 0);
+
+      act(() => {
+        socket.serverSendsBinary(malformed);
+      });
+
+      expect(error).toHaveBeenCalledWith(
+        "server sent a malformed binary frame:",
+        expect.stringMatching(/HYPB/),
+      );
+      expect(result.current.status).toBe("connected");
+    });
+
+    it("discards the chunks received when the link drops", async () => {
+      const { result, socket } = renderConnection();
+      welcome(socket, PROTOCOL_VERSION);
+      const pending = result.current.requests.requestBulk({ kind: "list_universes" }, () => ({
+        chunks: 2,
+        bytes: 2,
+      }));
+      act(() => {
+        socket.serverSendsBinary(binaryFrame(1, 0, 2, [1]));
+      });
+
+      act(() => {
+        socket.close();
+      });
+
+      await expect(pending.outcome).resolves.toMatchObject({
+        ok: false,
+        error: { code: "link_lost" },
+      });
     });
   });
 });

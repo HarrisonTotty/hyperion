@@ -1268,3 +1268,22 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   well as Linux, where socket2 exposes it. Both harnesses read the mark back inside their `tap_io`
   closure (`accepted_lowat()`); the integration test, `an_accepted_socket_has_the_low_water_mark`,
   is in `tests/websocket.rs`, which only `just ci` runs among the acceptance commands.
+- **Deviations in T11, as built.** No kind is answered in bulk yet, and R06's and R09's carry the
+  manifest differently (R09's only in one variant of an enum), so the request is
+  `RequestClient.requestBulk(body, manifestOf)`, the caller reading the manifest from the response
+  (`null` for a response with no bulk, which must then have had no chunks); its outcome,
+  `BulkOutcome<K>`, is `{ ok, response, chunks }`. Each chunk is a `Uint8Array` view of its
+  frame's payload over the frame's own `ArrayBuffer`, neither copied nor parsed.
+  `parseBinaryFrameHeader` also refuses a frame over 262,144 bytes, a payload length that
+  disagrees with the frame's, and an index not below the count; a refused frame is reported by the
+  link through `console.error` and closes nothing (`handleBinaryFrame` returns
+  `BinaryFrameReceipt`). A chunk out of order, or stating another count than the request's earlier
+  ones, fails its request as `internal` at once and sends `cancel`, so that the server stops
+  streaming; the manifest is checked at the terminal response for the count of chunks, the count
+  the chunks stated, and the bytes. A chunk for a request that asked for no bulk, has ended or was
+  cancelled is dropped. `BulkAssembler` stays internal to the package; the header parser, its
+  constants and the outcome types are exported. The internal `startRequest` now takes an options
+  object (`onAnswer`, `onLateAnswer`, `bulk`). The app's `FakeWebSocket` gains `binaryType` and
+  `serverSendsBinary`, which delivers a `Blob` unless the client asked for `arraybuffer`, so the
+  connection test proves the setting; `test/binaryFrames.ts` builds frames as the server's
+  `encode_header` and `chunk` do.
