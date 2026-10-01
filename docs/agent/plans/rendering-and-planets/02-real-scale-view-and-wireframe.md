@@ -1433,12 +1433,12 @@ outerRadiusM, normal }`; its ticks go through the sampler so that one crossing t
   symbols (a ringed circle with its disc), `bracketReticle` (`--accent`), `destinationReticle`
   (`--target`, a margin outside) and `flightPathMarker` (from the velocity's direction, so it shows
   at docking speeds); reticles are sized from the mark's radius plus 0.25 rem margins, as the
-  spatial view's, and the marker in rem (`FLIGHT_PATH_MARKER_REM`, a choice); `targetBracket`
-  (`--text`, with `rangeM` and `closureMPerS`) is built and tested but drawn by T15 with its DOM
-  label. **For the owner:** target brackets share the selection's corner-bracket shape, told
-  apart by colour and size; should they take another shape so that the selection is not carried
-  mainly by colour? Decided 2026-09-30 (delegated decision): other craft take four open cardinal
-  ticks, and corner brackets mean the selection only (built under R02.T13).
+  spatial view's, and the marker in rem (`FLIGHT_PATH_MARKER_REM`, a choice); `targetMark` (first
+  built as `targetBracket`) (`--text`, with `rangeM` and `closureMPerS`) is built and tested but
+  drawn by T15 with its DOM label. **For the owner:** target brackets share the selection's
+  corner-bracket shape, told apart by colour and size; should they take another shape so that the
+  selection is not carried mainly by colour? Decided 2026-09-30 (delegated decision): other craft
+  take four open cardinal ticks, and corner brackets mean the selection only (built under R02.T13).
 - **Deviations in R02.T13, as built.** `buildWireframeDrawList(scene, camera, viewport, tokens,
 options)`: `camera` is `DrawCamera { pose, fovXRad }`, and a fifth argument, `DrawOptions {
 lowSetting, ev100, selection, destination, remPx }`, carries what the tests and the sprites need
@@ -1458,7 +1458,7 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   R07 cases them over its image with a slope scale of 3. Graticules are `--text-muted`, the equator
   and prime meridian a step heavier (1.5 px, a choice); hull edges `--text` at 1.5 px; a predicted
   path `--text` at 1 px dashed 6 on and 4 off (a choice), the only dashed batch. Craft other than
-  the own ship get `targetBracket`s (from the own ship, or from the camera with none) through
+  the own ship get `targetMark`s (from the own ship, or from the camera with none) through
   `symbologyMarks`, whose `SymbologyAnchor` gains `craft`; a craft behind a body's limb gets none. A
   sprite carries `directionF32`, its sub-pixel `xPx`/`yPx`, `exposedRgb` (E ÷ Ω ×
   `exposureScale(ev100)` × `starColour`, per unit of point-spread weight) and `illuminanceLx`;
@@ -1467,3 +1467,8 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts`. Bodies are culled by `sphereInFrustum` on
   their radius, orbits on a(1 + e) about their focus, craft on their hull's length. A ring counts as
   selected when its planet is (`ViewRing` has no identity of its own).
+- **R02.T13's follow-up, target marks (decided 2026-09-30, delegated decision 11).** Other craft's
+  marks are four open cardinal ticks, above, below, left and right of the mark, from its radius
+  outwards for a bracket's arm (two thirds of the radius), in `--text`; corner brackets now mean
+  the selection alone. `targetBracket` and `TargetBracket` are renamed `targetMark` and
+  `TargetMark`; range and closure are unchanged. The legend entry is `TICKS TARGET` (R02.T2.f).

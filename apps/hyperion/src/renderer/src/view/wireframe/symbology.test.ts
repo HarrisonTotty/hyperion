@@ -13,7 +13,7 @@ import {
   flightPathMarker,
   type ScreenMark,
   symbologyMarks,
-  targetBracket,
+  targetMark,
 } from "./symbology";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -70,21 +70,28 @@ describe("the destination reticle", () => {
   });
 });
 
-describe("a target's brackets", () => {
+describe("a target's mark", () => {
+  it("is four open ticks on the cardinal directions, outside the mark, unlike the brackets", () => {
+    const at = { xPx: 100, yPx: 100 };
+    const mark = targetMark(MOON, at, 6, vec3(0, 0, -1e3), null);
+    // Each tick is one axis-aligned stroke along a ray from the centre, starting at the radius.
+    const ticks = mark.segments.map(([a, b]) => {
+      const inner = Math.hypot(a.xPx - at.xPx, a.yPx - at.yPx);
+      const outer = Math.hypot(b.xPx - at.xPx, b.yPx - at.yPx);
+      const radial = (a.xPx === b.xPx && a.xPx === at.xPx) || (a.yPx === b.yPx && a.yPx === at.yPx);
+      return [radial, inner, outer > inner];
+    });
+    expect([mark.token, ticks]).toEqual(["text", Array.from({ length: 4 }, () => [true, 6, true])]);
+  });
+
   it("carry its range and closure rate, closing positive", () => {
-    const bracket = targetBracket(
-      MOON,
-      { xPx: 10, yPx: 10 },
-      5,
-      vec3(3e3, 4e3, 0),
-      vec3(-3, -4, 0),
-    );
+    const bracket = targetMark(MOON, { xPx: 10, yPx: 10 }, 5, vec3(3e3, 4e3, 0), vec3(-3, -4, 0));
     expect([bracket.rangeM, bracket.closureMPerS]).toEqual([5e3, 5]);
   });
 
   it("carry no closure rate with no own ship", () => {
     expect(
-      targetBracket(MOON, { xPx: 10, yPx: 10 }, 5, vec3(0, 0, -1e3), null).closureMPerS,
+      targetMark(MOON, { xPx: 10, yPx: 10 }, 5, vec3(0, 0, -1e3), null).closureMPerS,
     ).toBeNull();
   });
 });
