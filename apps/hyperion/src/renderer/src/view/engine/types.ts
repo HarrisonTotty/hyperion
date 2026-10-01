@@ -2,10 +2,10 @@
  * The engine-agnostic interface: the only rendering types the rest of the renderer sees.
  *
  * @remarks
- * No type from `@babylonjs/*` appears here or anywhere outside `view/engine/babylon/`, which the
- * boundary test enforces (R01 Design note 1). One `GPUDevice` drives any number of views, each
- * through its own canvas context at its own size (Design note 13). Every material is WGSL (Design
- * note 12); depth is reversed and `depth32float` (Design note 11).
+ * Only `view/engine/webgpu/` allocates on the device, which the boundary test enforces (R01
+ * Design note 1). One `GPUDevice` drives any number of views, each through its own canvas context
+ * at its own size. Every material is standard WGSL under {@link BIND_GROUPS}' convention (Design
+ * note 23); depth is reversed and `depth32float`.
  */
 
 import type { KernelPair } from "./kernels";
@@ -107,7 +107,7 @@ export interface PassTimes {
   readonly passes: ReadonlyArray<{
     readonly label: string;
     readonly ns: number;
-    /** Measured around a Babylon-encoded pass, queue gaps included: an upper bound. */
+    /** Always `false` now: every pass is the adapter's own and carries its timestamps. */
     readonly bracketed: boolean;
   }>;
 }
@@ -141,14 +141,67 @@ export interface MeshSpec {
   readonly instanceAttributes?: Readonly<Record<string, VertexAttribute>>;
 }
 
-/** A storage buffer a material reads, read-only in the vertex and fragment stages. */
+/**
+ * A storage buffer a material reads, read-only in the vertex and fragment stages, at
+ * `@group(2) @binding(binding)` (Design note 23).
+ */
 export interface StorageBufferSpec {
   readonly name: string;
   readonly binding: number;
 }
 
-/** An extra input of a post-process: the view's reversed-Z depth or its HDR colour. */
-export type PostProcessInput = "depth" | "hdr-colour";
+/**
+ * A sampled texture a material or post-process declares at `@group(2) @binding(binding)`, bound
+ * per draw from `DrawItem.textures` (or `PostProcessItem.textures`) by `name` (Design note 23).
+ */
+export interface TextureBindingSpec {
+  readonly name: string;
+  readonly binding: number;
+  /**
+   * `float` by default; `depth` for a `RenderTarget.depth` read as `texture_depth_2d` with
+   * `textureLoad` (R05); `unfilterable-float` for an `rgba32float` read without
+   * `float32-filterable`.
+   */
+  readonly sampleType?: "float" | "unfilterable-float" | "depth" | "uint" | "sint";
+  /** The texture's own dimension by default: `2d`, `2d-array` for layers, `3d` or `cube`. */
+  readonly viewDimension?: "2d" | "2d-array" | "3d" | "cube";
+}
+
+/** The pass's input of a post-process: the colour the chain has drawn so far. */
+export type PostProcessInput = "hdr-colour";
+
+/**
+ * The bind groups of the shader convention (Design note 23): every material and post-process is
+ * standard WGSL with these groups, under explicit pipeline layouts.
+ *
+ * @remarks
+ * - `@group(0) @binding(0) var<uniform> frame : Frame;`, the pass's {@link FrameSubmission}
+ *   matrices and viewport, declared once in `view/shaders/frame.wgsl`.
+ * - `@group(1) @binding(0) var<uniform> draw : Draw;`, the draw's uniforms: for a material,
+ *   `offsetFromCameraM : vec3f` first, then its {@link UniformSpec}s in order; for a post-process,
+ *   its uniforms alone. Laid out by WGSL's uniform rules, from a per-frame ring with dynamic
+ *   offsets. A source that declares `struct Draw` is checked against that layout at creation.
+ * - `@group(2)`: the textures, samplers and storage buffers at the bindings their specifications
+ *   declare. A post-process's input colour is fixed at {@link POST_PROCESS_BINDINGS}.
+ *
+ * Vertex attributes are `@location(n)` in the mesh's order: `position` 0, then
+ * `MeshSpec.attributes` in insertion order, then `instanceAttributes`. Entry points are
+ * `vertexMain` and `fragmentMain`.
+ */
+export const BIND_GROUPS = { frame: 0, draw: 1, resources: 2 } as const;
+
+/**
+ * The fixed `@group(2)` bindings of a post-process's input: the colour drawn so far as
+ * `texture_2d<f32>`, and a linear, clamped sampler for it. A specification's own textures and
+ * samplers take other bindings.
+ */
+export const POST_PROCESS_BINDINGS = { "hdr-colour": 0, "hdr-colour-sampler": 1 } as const;
+
+/**
+ * The full-screen vertex stage's output a post-process's `fragmentMain` reads: `@location(0) uv`,
+ * (0, 0) at the top left of the output.
+ */
+export const POST_PROCESS_VARYING = "uv";
 
 /** An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat). */
 export interface PointSplatSpec {
@@ -175,8 +228,11 @@ export interface UniformSpec {
 /** A sampler a material or post-process declares. */
 export interface SamplerSpec {
   readonly name: string;
+  /** `linear` binds as a filtering sampler, `nearest` as a non-filtering one. */
   readonly filter: "nearest" | "linear";
   readonly address: "clamp-to-edge" | "repeat";
+  /** Its `@group(2)` binding (Design note 23). */
+  readonly binding: number;
 }
 
 /** One view: a canvas with its own context and depth, drawn by the engine's one device. */
@@ -190,16 +246,40 @@ export interface RenderView {
   dispose(): void;
 }
 
-/** One frame of one view or target. */
+/**
+ * One frame of one view or target.
+ *
+ * @remarks
+ * Its draws are encoded in submission order, indirect ones among them, into one pass over the
+ * view's or target's colour and depth; with post-processes, that pass draws into an `rgba16float`
+ * intermediate of the same size, and each post-process is a full-screen pass reading the colour
+ * before it, the last writing the view's or target's colour.
+ */
 export interface FrameSubmission {
   /** The pass's label in {@link PassTimes}, stable across frames (R12 keys its records on it). */
   readonly label: string;
-  /** 4 × 4, translation zero, right-handed (R02 fills it). */
+  /**
+   * 4 × 4, translation zero, right-handed (R02 fills it), column-major: sixteen `f32` in WGSL's
+   * `mat4x4f` order, as R02's `viewRotation4` gives them. Reaches the shaders unchanged as
+   * `frame.viewRotation` ({@link BIND_GROUPS}).
+   */
   readonly viewRotation: Float32Array;
-  /** 4 × 4, reversed-Z, WebGPU clip space; passed to the shaders unchanged. */
+  /**
+   * 4 × 4, reversed-Z, WebGPU clip space, column-major like {@link FrameSubmission.viewRotation};
+   * reaches the shaders unchanged as `frame.clipProjection`.
+   */
   readonly projection: Float32Array;
   readonly draws: ReadonlyArray<DrawItem>;
-  readonly postProcesses: ReadonlyArray<PostProcessHandle>;
+  readonly postProcesses: ReadonlyArray<PostProcessItem>;
+}
+
+/** One post-process in a frame, with its per-frame values, shaped like a {@link DrawItem}. */
+export interface PostProcessItem {
+  readonly postProcess: PostProcessHandle;
+  /** By {@link WgslPostProcessSpec.uniforms} name; they fill its `@group(1)` `Draw`. */
+  readonly uniforms: Readonly<Record<string, Float32Array>>;
+  /** By {@link WgslPostProcessSpec.textures} name (R07's bloom levels). */
+  readonly textures?: Readonly<Record<string, TextureHandle>>;
 }
 
 /** One draw of a mesh with a material. */
@@ -219,14 +299,30 @@ export interface DrawItem {
   readonly indirect?: IndirectArgs;
 }
 
-/** A WGSL material to create. */
+/**
+ * A WGSL material to create.
+ *
+ * @remarks
+ * The sources are standard WGSL under {@link BIND_GROUPS}' convention (Design note 23): the vertex
+ * stage is `@vertex fn vertexMain`, the fragment stage `@fragment fn fragmentMain` writing
+ * `@location(0)`, each declaring the groups it reads with explicit `@group`/`@binding`, the
+ * `Frame` from `view/shaders/frame.wgsl` included by string concatenation. The two sources may be
+ * the same module. A texture bound per draw is a `DrawItem.textures` entry named in
+ * {@link WgslMaterialSpec.textures}.
+ */
 export interface WgslMaterialSpec {
   readonly name: string;
   readonly vertexWgsl: string;
   readonly fragmentWgsl: string;
+  /** The `Draw` struct's members after `offsetFromCameraM`, in order. */
   readonly uniforms: ReadonlyArray<UniformSpec>;
   readonly samplers: ReadonlyArray<SamplerSpec>;
-  /** Places the draw in the transparent queue, nothing more. */
+  /** The sampled textures it declares in `@group(2)`. */
+  readonly textures?: ReadonlyArray<TextureBindingSpec>;
+  /**
+   * Documents a blended draw; it does not reorder anything, since draws are encoded in submission
+   * order, so the caller submits its translucent draws after its opaque ones.
+   */
   readonly transparent: boolean;
   readonly cullMode: "none" | "back";
   /** `false` for R02's lines and sprites. */
@@ -246,14 +342,25 @@ export interface WgslMaterialSpec {
   readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
 }
 
-/** A WGSL post-process to create. */
+/**
+ * A WGSL post-process to create: a full-screen pass over the colour drawn before it.
+ *
+ * @remarks
+ * The fragment source is standard WGSL under {@link BIND_GROUPS}' convention, with
+ * `@fragment fn fragmentMain(@location(0) uv : vec2f) -> @location(0) vec4f`; the adapter supplies
+ * the full-screen vertex stage. The colour drawn so far is at {@link POST_PROCESS_BINDINGS}; a
+ * target's depth is read by a full-screen draw instead (R05), not here.
+ */
 export interface WgslPostProcessSpec {
   readonly name: string;
   readonly fragmentWgsl: string;
+  /** The `Draw` struct's members, in order, set per frame by `PostProcessItem.uniforms`. */
   readonly uniforms: ReadonlyArray<UniformSpec>;
-  /** Extra inputs: the view's reversed-Z depth and its HDR colour (R05's aerial perspective). */
+  /** `hdr-colour` is always bound; listing it changes nothing. */
   readonly inputs?: ReadonlyArray<PostProcessInput>;
   readonly samplers?: ReadonlyArray<SamplerSpec>;
+  /** Further textures, bound per frame from `PostProcessItem.textures`. */
+  readonly textures?: ReadonlyArray<TextureBindingSpec>;
 }
 
 /** A texture level's region, in texels. */
@@ -274,10 +381,20 @@ export interface RenderEngine {
   createRenderTarget(spec: RenderTargetSpec): RenderTarget;
   createMesh(spec: MeshSpec): MeshHandle;
   createMaterial(spec: WgslMaterialSpec): MaterialHandle;
-  /** Resolves once every pipeline the material needs is compiled; no frame waits on a compile. */
+  /**
+   * Resolves once the material's shaders are compiled and its pipelines for `meshes` into
+   * `targets` are made, by `createRenderPipelineAsync`, so that no frame waits on a compile.
+   *
+   * @remarks
+   * A pipeline depends on the mesh's vertex layout as well; a mesh not named here has its pipeline
+   * made asynchronously at its first draw, which is left out until it is ready.
+   *
+   * @throws Error, as a rejection, naming the material and the compiler's messages.
+   */
   createMaterialAsync(
     spec: WgslMaterialSpec,
     targets: ReadonlyArray<RenderTargetFormat>,
+    meshes?: ReadonlyArray<MeshHandle>,
   ): Promise<MaterialHandle>;
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle;
   /** The variant is chosen by `selectKernel` against {@link RenderEngine.capabilities}. */
@@ -337,12 +454,26 @@ export interface RenderEngine {
   onPassTimes(listener: (times: PassTimes) => void): () => void;
   /** Every creation, destruction and upload, with its byte size and category. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
+  /**
+   * Every fault, as it happens. The engine `loadRenderEngine` returns has already told the status
+   * store of a lost device; a listener does not dispatch it again.
+   */
   onFault(listener: (fault: GraphicsFault) => void): () => void;
+  /**
+   * Called once the device is re-created after a loss (R01 Design note 9).
+   *
+   * @remarks
+   * Views survive a rebuild, re-created at their sizes; every other handle belonged to the lost
+   * device and is made again by the caller here. Only the engine `loadRenderEngine` returns fires
+   * it. Between the loss and the restore, a creation throws `EngineUnavailable`
+   * (`resilientEngine.ts`), a view draws nothing, and writes and dispatches are dropped.
+   */
+  onRestored(listener: () => void): () => void;
   dispose(): void;
 }
 
-/** The Babylon module's one export, `createBabylonEngine`, which only `loadEngine.ts` imports. */
-export type CreateBabylonEngine = (
+/** The WebGPU module's one export, `createWebGpuEngine`, which only `loadEngine.ts` imports. */
+export type CreateWebGpuEngine = (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,
   overrides: CapabilityOverrides | undefined,
@@ -353,7 +484,9 @@ export interface LoadEngineOptions {
   /** The harness's withheld-feature runs. */
   readonly overrides?: CapabilityOverrides;
   /** The dynamic import, injectable so that a test fakes it without `vi.mock` of our module. */
-  readonly importEngine?: () => Promise<{ readonly createBabylonEngine: CreateBabylonEngine }>;
+  readonly importEngine?: () => Promise<{ readonly createWebGpuEngine: CreateWebGpuEngine }>;
+  /** `navigator.gpu`, from which a rebuild asks for a fresh adapter; a test passes a fake. */
+  readonly gpu?: GPU;
 }
 
 /** Thrown by `createPointSplat` when the device lacks `float32-blendable` (Design note 21). */

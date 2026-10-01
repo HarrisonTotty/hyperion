@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type {
   GpuProcessGoneReport,
@@ -103,6 +103,78 @@ describe("the timer", () => {
   });
 });
 
+describe("the device's capabilities", () => {
+  it("replace the adapter's, so that a withheld feature reads as absent", async () => {
+    const outcome = await adapterOutcome();
+    const capabilities = { ...outcome.capabilities, subgroups: false, timestampQuery: false };
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "device-capabilities", capabilities },
+    );
+    expect(status.capabilities).toEqual(capabilities);
+    expect(status.timer).toBe("absent");
+  });
+
+  it("leave a settled condition as it is", async () => {
+    const outcome = await adapterOutcome();
+    const safe = launched("safe");
+    expect(reduce(safe, { kind: "device-capabilities", capabilities: outcome.capabilities })).toBe(
+      safe,
+    );
+  });
+});
+
+describe("a refused shader", () => {
+  it("is a fault naming the effect", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "standard" },
+    );
+    expect(status.fault).toEqual({ kind: "shader-refused", effectName: "standard" });
+    expect(graphicsAnnunciation(status)).toEqual({
+      text: "GRAPHICS SHADER REFUSED: standard is not WGSL",
+      standing: "fault",
+    });
+  });
+
+  it("keeps the first refusal's name when the compiler's unnamed one follows", async () => {
+    const outcome = await adapterOutcome();
+    const once = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "standard" },
+    );
+    expect(reduce(once, { kind: "shader-refused", effectName: "(unnamed, at the compiler)" })).toBe(
+      once,
+    );
+  });
+
+  it("does not hide a lost device", async () => {
+    const outcome = await adapterOutcome();
+    const lost = reduce(launched(), { kind: "adapter-outcome", outcome }, LOST);
+    expect(reduce(lost, { kind: "shader-refused", effectName: "standard" })).toBe(lost);
+  });
+
+  it("is cleared by a restore", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "standard" },
+      { kind: "device-restored", outcome },
+    );
+    expect(status.fault).toBeNull();
+  });
+
+  it("changes nothing in a settled condition", () => {
+    const safe = launched("safe");
+    expect(reduce(safe, { kind: "shader-refused", effectName: "standard" })).toBe(safe);
+  });
+});
+
 describe("device loss", () => {
   it("sets the fault and counts", async () => {
     const outcome = await adapterOutcome();
@@ -165,18 +237,24 @@ describe("GPU-process crashes", () => {
 });
 
 describe("the annunciation", () => {
-  it("is nothing while nominal or acquiring", async () => {
+  it("is nothing while nominal", async () => {
     const outcome = await adapterOutcome();
-    expect(graphicsAnnunciation(launched())).toBeNull();
     expect(
       graphicsAnnunciation(reduce(launched(), { kind: "adapter-outcome", outcome })),
     ).toBeNull();
   });
 
+  it("states the wait for the adapter in plain text", () => {
+    expect(graphicsAnnunciation(launched())).toEqual({
+      text: "GRAPHICS ACQUIRING ADAPTER",
+      standing: "refused",
+    });
+  });
+
   it("states a software adapter", async () => {
     const outcome = await adapterOutcome(SWIFTSHADER_INFO);
     expect(graphicsAnnunciation(reduce(launched(), { kind: "adapter-outcome", outcome }))).toEqual({
-      text: "GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE",
+      text: "GRAPHICS SOFTWARE ADAPTER: photorealistic style not available",
       standing: "refused",
     });
   });
@@ -191,7 +269,10 @@ describe("the annunciation", () => {
       graphicsAnnunciation(
         reduce(launched(), { kind: "adapter-outcome", outcome: { kind: "no-adapter" } }),
       ),
-    ).toEqual({ text: "GRAPHICS NO ADAPTER: views unavailable", standing: "refused" });
+    ).toEqual({
+      text: "GRAPHICS NO ADAPTER: views not available, relaunch to retry",
+      standing: "refused",
+    });
   });
 
   it("reports a lost device and a restarted process as faults", async () => {
@@ -202,14 +283,14 @@ describe("the annunciation", () => {
       standing: "fault",
     });
     expect(graphicsAnnunciation(reduce(nominal, { kind: "gpu-process-gone", count: 1 }))).toEqual({
-      text: "GRAPHICS PROCESS RESTARTED",
+      text: "GRAPHICS PROCESS RESTARTED: re-acquiring",
       standing: "fault",
     });
   });
 
   it("states the safe mode", () => {
     expect(graphicsAnnunciation(launched("safe"))).toEqual({
-      text: "GRAPHICS SAFE MODE: views unavailable, relaunch to retry",
+      text: "GRAPHICS SAFE MODE: views not available, relaunch to retry",
       standing: "refused",
     });
   });
@@ -253,6 +334,81 @@ describe("the status store", () => {
     unsubscribe();
     store.dispatch({ kind: "gpu-process-gone", count: 1 });
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe("a restarted GPU process", () => {
+  const CRASH: GraphicsEvent = { kind: "gpu-process-gone", count: 1 };
+
+  it("clears on the next granted adapter and keeps its count", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(launched(), { kind: "adapter-outcome", outcome }, CRASH, {
+      kind: "adapter-reacquired",
+      outcome: await adapterOutcome(),
+    });
+    expect(status.fault).toBeNull();
+    expect(status.gpuProcessCrashes).toBe(1);
+    expect(status.condition.kind).toBe("nominal");
+  });
+
+  it("keeps the device's capabilities when the re-acquired adapter answers late", async () => {
+    const outcome = await adapterOutcome();
+    const deviceCapabilities = { ...outcome.capabilities, timestampQuery: false };
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      CRASH,
+      { kind: "device-restored", outcome: await adapterOutcome() },
+      { kind: "device-capabilities", capabilities: deviceCapabilities },
+      { kind: "adapter-reacquired", outcome: await adapterOutcome() },
+    );
+    expect(status.capabilities).toEqual(deviceCapabilities);
+    expect(status.timer).toBe("absent");
+    expect(status.fault).toBeNull();
+  });
+
+  it("takes the adapter where none had been granted", async () => {
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome: { kind: "no-adapter" } },
+      CRASH,
+      { kind: "adapter-reacquired", outcome: await adapterOutcome() },
+    );
+    expect(status.fault).toBeNull();
+    expect(status.condition.kind).toBe("nominal");
+  });
+
+  it("takes no adapter where one had been granted as the adapter withdrawn", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(launched(), { kind: "adapter-outcome", outcome }, CRASH, {
+      kind: "adapter-reacquired",
+      outcome: { kind: "no-adapter" },
+    });
+    expect(status.fault).toBeNull();
+    expect(status.condition).toEqual({ kind: "disabled", cause: "adapter-withdrawn", losses: 0 });
+  });
+
+  it("clears where none had been granted and none is, leaving the condition's remedy", () => {
+    const status = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome: { kind: "no-adapter" } },
+      CRASH,
+      { kind: "adapter-reacquired", outcome: { kind: "no-adapter" } },
+    );
+    expect(status.fault).toBeNull();
+    expect(status.gpuProcessCrashes).toBe(1);
+    expect(graphicsAnnunciation(status)?.text).toBe(
+      "GRAPHICS NO ADAPTER: views not available, relaunch to retry",
+    );
+  });
+
+  it("does not clear a lost device's fault", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(launched(), { kind: "adapter-outcome", outcome }, LOST, {
+      kind: "adapter-reacquired",
+      outcome: await adapterOutcome(),
+    });
+    expect(status.fault?.kind).toBe("device-lost");
   });
 });
 
@@ -350,6 +506,82 @@ describe("the status feed", () => {
     const gpu = new FakeGpu([]);
     feedGraphicsStatus(new GraphicsStatusStore(launched("safe")), fakeGraphics("safe").api, gpu);
     expect(gpu.requests).toEqual([]);
+  });
+
+  it("asks for an adapter again after a crash and clears the fault when it is granted", async () => {
+    const store = new GraphicsStatusStore(launched());
+    const graphics = fakeGraphics("vulkan");
+    const gpu = new FakeGpu([
+      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
+      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
+    ]);
+    const end = feedGraphicsStatus(store, graphics.api, gpu);
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().condition.kind).toBe("nominal");
+    });
+    graphics.crash({ reason: "crashed", count: 1 });
+    expect(store.getSnapshot().fault).toEqual({ kind: "gpu-process-gone", count: 1 });
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().fault).toBeNull();
+    });
+    expect(gpu.requests).toHaveLength(2);
+    expect(store.getSnapshot().gpuProcessCrashes).toBe(1);
+    end();
+  });
+
+  it("takes no adapter after a crash as the adapter withdrawn", async () => {
+    const store = new GraphicsStatusStore(launched());
+    const graphics = fakeGraphics("vulkan");
+    const gpu = new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }), null]);
+    const end = feedGraphicsStatus(store, graphics.api, gpu);
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().condition.kind).toBe("nominal");
+    });
+    graphics.crash({ reason: "crashed", count: 1 });
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().condition).toEqual({
+        kind: "disabled",
+        cause: "adapter-withdrawn",
+        losses: 0,
+      });
+    });
+    end();
+  });
+
+  it("asks for no adapter after a crash in safe mode", () => {
+    const gpu = new FakeGpu([]);
+    const graphics = fakeGraphics("safe");
+    const end = feedGraphicsStatus(new GraphicsStatusStore(launched("safe")), graphics.api, gpu);
+    onTestFinished(end);
+    graphics.crash({ reason: "crashed", count: 1 });
+    expect(gpu.requests).toEqual([]);
+  });
+
+  it("drops the first answer when a crash comes before it", async () => {
+    const store = new GraphicsStatusStore(launched());
+    const graphics = fakeGraphics("vulkan");
+    const gpu = new FakeGpu([]);
+    const grants: Array<(adapter: GPUAdapter | null) => void> = [];
+    vi.spyOn(gpu, "requestAdapter").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          grants.push(resolve);
+        }),
+    );
+    const end = feedGraphicsStatus(store, graphics.api, gpu);
+    onTestFinished(end);
+    graphics.crash({ reason: "crashed", count: 1 });
+    grants[0]?.(new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.getSnapshot().fault).toEqual({ kind: "gpu-process-gone", count: 1 });
+    expect(store.getSnapshot().condition).toEqual({ kind: "acquiring" });
+    expect(grants).toHaveLength(2);
+    grants[1]?.(new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }));
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().fault).toBeNull();
+    });
+    expect(store.getSnapshot().condition.kind).toBe("nominal");
   });
 
   it("passes on crash reports until it ends", () => {

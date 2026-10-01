@@ -4,9 +4,10 @@ import { defineConfig } from "vitest/config";
 import pkg from "./package.json" with { type: "json" };
 
 // The tests that need a DOM: every component test, and the logic tests that render a hook, paint a
-// real canvas or test key presses against DOM elements. Everything else is pure functions and runs
-// in Node, which costs nothing to create — a jsdom for every file was 45% of the suite's tracked time (measured 2026-09-22 on
-// 8 cores: 74.9 s across 56 files), and the half that needs no DOM now runs in about 1.3 s. A new
+// real canvas, test key presses against DOM elements or hand an engine a canvas. Everything else is
+// pure functions and runs in Node, which costs nothing to create — a jsdom for every file was 45% of
+// the suite's tracked time (measured 2026-09-22 on 8 cores: 74.9 s across 56 files), and the half
+// that needs no DOM now runs in about 1.3 s. A new
 // `.test.ts` that reaches for `document` or `renderHook` fails with "document is not defined";
 // list it here, or name it `.test.tsx` if it carries JSX.
 const DOM_TESTS = [
@@ -15,12 +16,17 @@ const DOM_TESTS = [
   "src/renderer/src/spatial/paint.test.ts",
   "src/renderer/src/spatial/useThrottledValue.test.ts",
   "src/renderer/src/view/camera/keys.test.ts",
+  "src/renderer/src/view/engine/resilientEngine.test.ts",
+  "src/renderer/src/wasm/useSurfaceModuleCheck.test.ts",
 ];
 
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  // The surface module's test reads the built `.wasm` as an inlined asset (`?inline`), since
+  // renderer code, tests included, reads no files through `node:fs` (R04.T10.c).
+  assetsInclude: ["**/*.wasm"],
   test: {
     restoreMocks: true,
     unstubGlobals: true,

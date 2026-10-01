@@ -160,7 +160,7 @@ holds.
 Tell the user briefly:
 
 - What exists now (files, public items) and the validation result, naming anything skipped and
-  why, such as `just test-wasm` when wasmtime is missing.
+  why, such as an AArch64 run, which nothing here can make.
 - The decisions you made (step 3) and the deviations you recorded (step 7).
 - What waits on the owner: confirmation items and open questions.
 - A commit message, or the commit itself if the user asked for commits. Make one commit per task

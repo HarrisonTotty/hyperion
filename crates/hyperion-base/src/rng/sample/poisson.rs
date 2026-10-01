@@ -179,6 +179,8 @@ fn count(k: f64) -> u64 {
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_two_sample};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
     use crate::Seed;

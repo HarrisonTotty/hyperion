@@ -33,10 +33,11 @@ XWayland, from switches its main process owns
 and tests. It refuses to offer the photorealistic style on a software adapter, reports a lost device
 or a crashed GPU process in the guide's voice instead of freezing, and after a crash loop relaunches
 once into a declared safe mode. A `GRAPHICS` panel on the `LINK` display states the adapter, its
-features, the mode and any fault. Babylon.js is a dependency loaded only by the displays that draw a
-scene, behind an engine-agnostic interface whose types are the only ones the rest of the renderer
-sees; the engine runs with its large-world feature off, reversed depth on and every GLSL compile an
-error that names the shader, so it never fetches a compiler. One `GPUDevice` drives any number of
+features, the mode and any fault. HYPERION's own WebGPU renderer (Design note 24; Babylon.js was
+dropped in T8.l) is loaded only by the displays that draw a scene, behind an engine-agnostic
+interface whose types are the only ones the rest of the renderer sees; every material and
+post-process is standard WGSL drawn through the adapter's own pipelines (Design note 23), with
+reversed depth, and a shader that fails to compile is reported by name. One `GPUDevice` drives any number of
 views, each through its own canvas context at its own size, with no copies, proved by a cockpit
 canvas and two instrument canvases. A headless harness renders every material and post-process on
 SwiftShader with the network disabled, reads frames back with `copyTextureToBuffer`, and asserts
@@ -708,7 +709,7 @@ commands in their acceptance lines.
    it the probe saw Chromium block WebGPU for the page after the second crash, so the client never
    got the chance to report and recover.
 
-7. **The client requests its own adapter, and Babylon is handed it.** Researched 2026-09-29 in
+7. _Superseded by Design note 24 (2026-09-30)._ **The client requests its own adapter, and Babylon is handed it.** Researched 2026-09-29 in
    `@babylonjs/core` 9.28.0: `WebGPUEngine.initAsync` always calls `navigator.gpu.requestAdapter`
    itself (`Engines/webgpuEngine.pure.js:413-417`), takes no adapter or device, and silently drops
    requested features the adapter lacks (`:430-438`). So each engine creation installs a wrapper on
@@ -766,23 +767,25 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     WebGPU or no adapter, the safe mode and the disabled state are the console stating its own
     condition in `--text`, in the `refused` standing (plain text), as the brainstorm's item 7 does
     for `TERRAIN: DETAIL LIMITED`. They are never promoted to a Caution. The wording, drafted in
-    T5.c for the owner, is:
-    - `GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE`;
+    T5.c and signed off with amendments on 2026-09-30 (delegated decision; Risks, "T5 follow-up"),
+    is:
+    - `GRAPHICS ACQUIRING ADAPTER` (`acquiring`, plain text, while the first request is pending);
+    - `GRAPHICS SOFTWARE ADAPTER: photorealistic style not available`;
     - `GRAPHICS NOT AVAILABLE: no WebGPU` (`no-webgpu`) and
-      `GRAPHICS NO ADAPTER: views unavailable` (`no-adapter`);
-    - `GRAPHICS DEVICE LOST: re-creating` and `GRAPHICS PROCESS RESTARTED` (faults);
-    - `GRAPHICS SAFE MODE: views unavailable, relaunch to retry`;
-    - `GRAPHICS DISABLED: <n> DEVICE LOSSES, relaunch to retry` (cause `device-losses`, n being the
+      `GRAPHICS NO ADAPTER: views not available, relaunch to retry` (`no-adapter`);
+    - `GRAPHICS DEVICE LOST: re-creating` and `GRAPHICS PROCESS RESTARTED: re-acquiring` (faults);
+    - `GRAPHICS SAFE MODE: views not available, relaunch to retry`;
+    - `GRAPHICS DISABLED: <n> device losses, relaunch to retry` (cause `device-losses`, n being the
       count) and `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` (cause
-      `adapter-withdrawn`).
+      `adapter-withdrawn`). The clause after the colon is a mixed-case sentence (decided
+      2026-09-30, as built).
 
     They show in a `GRAPHICS` panel on the `LINK` display. The safe and disabled states are also
     proposed for the header strip's status area. The guide reserves that banner for "A simulation,
     training or replay mode" (`docs/frontend/ux-guidelines.md`, Layout), so the use is part of
-    T5.c's draft for the owner, and T5.b builds it meanwhile, as the galaxy slice built to its
-    drafts. Every later view carries the current annunciation in its label block (R02).
+    T5.c's draft, signed off 2026-09-30, and the main screen's mode banner states it too. Every later view carries the current annunciation in its label block (R02).
 
-11. **Babylon options, fixed.**
+11. _Superseded by Design note 24 (2026-09-30)._ **Babylon options, fixed.**
     `new WebGPUEngine(canvas, { stencil: false, antialias: false, doNotHandleContextLost: true, useLargeWorldRendering: false, powerPreference: "high-performance" })`,
     then `engine.useReverseDepthBuffer = true`. Researched 2026-09-29 in 9.28.0:
     `useLargeWorldRendering` is a read-only constructor option, off by default
@@ -796,7 +799,7 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     canvas is a 1 × 1 canvas never shown; the views draw into their own. `DepthPolicy` has one value
     because the brainstorm allows one.
 
-12. **The WGSL-only guard, in three layers.** Researched 2026-09-29 in 9.28.0: GLSL reaches the
+12. _Superseded by Design note 24 (2026-09-30)._ **The WGSL-only guard, in three layers.** Researched 2026-09-29 in 9.28.0: GLSL reaches the
     engine at `_preparePipelineContextAsync` (`webgpuEngine.pure.js:1633-1637`), which fetches
     glslang and twgsl from `cdn.babylonjs.com` when first needed; the compile is handed only
     `(source, type)`, no name; and the effect's preparation is not awaited
@@ -814,7 +817,7 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     change here; its `Function(...)`, `importScripts` and blob-worker paths are confined to Babylon
     Native, workers and texture codecs this plan does not import.
 
-13. **One device, one canvas context per view, three internals pinned.** Researched 2026-09-29 in
+13. _Superseded by Design note 24 (2026-09-30)._ **One device, one canvas context per view, three internals pinned.** Researched 2026-09-29 in
     9.28.0: there is no public way to render a camera into an external canvas context. The route:
     each `RenderView` configures its own `GPUCanvasContext` against `engine._device` (declared `/**
 @internal */ _device: GPUDevice`, `webgpuEngine.pure.d.ts:216`) at the view's own size, with
@@ -834,7 +837,7 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     dangling underscores. The harness's orientation check (T9.d) pins the behaviour, which a name
     check cannot. Open question 15 stays open: its public hook does not exist.
 
-14. **Lazy loading.** Only `loadEngine.ts` imports the Babylon implementation, by a dynamic
+14. _Amended by Design note 24: the dynamic import stays; the named `babylon` chunk, its `codeSplitting` groups and `checkChunks.mjs` are retired._ **Lazy loading.** Only `loadEngine.ts` imports the Babylon implementation, by a dynamic
     `import()`, which already splits it into its own chunk; the renderer config names the chunk with
     `build.rolldownOptions.output.codeSplitting = { groups: [{ name: "babylon", test: /node_modules[\\/]@babylonjs/ }] }`.
     Researched 2026-09-29: in Vite 8 `rollupOptions` is a deprecated alias of `rolldownOptions`, and
@@ -845,7 +848,7 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     measured in the app's). `scripts/checkChunks.mjs` fails if the entry chunk contains Babylon code
     or if no `babylon` chunk exists.
 
-15. **The dependency is pinned exactly.** `@babylonjs/core` at `9.28.0`, with no range, because the
+15. _Superseded by Design note 24 (2026-09-30)._ **The dependency is pinned exactly.** `@babylonjs/core` at `9.28.0`, with no range, because the
     brainstorm's case for Babylon is that its visual changes are logged with a flag to restore the
     old look: an upgrade is a deliberate act that reads the breaking-changes log, sets any restoring
     flag, and runs `just test-render`. The pin's comment says so, as `libm`'s does.
@@ -1070,6 +1073,36 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     `GraphicsStatus.targetRounding`, dispatched once and again after each rebuild. The draw costs
     one pass and a 16-byte read, off the frame path, before the first view renders.
 
+23. **Shaders are standard WGSL, drawn by the adapter's own pipelines.** Decided by the agent on
+    the owner's delegation, 2026-09-30. Babylon 9.28's WGSL processor prefixes its own
+    `@group/@binding` to every resource declaration, requires `fn main`, generates its own I/O
+    structs and a y-flip, and rewrites `dpdy`, so shaders written for it run on no other host.
+    Every material and post-process is therefore standard WGSL: `@group(0)` the pass's `Frame`
+    (view rotation, clip projection, viewport), `@group(1)` the draw's `Draw` (offset from the
+    camera, then the spec's uniforms, in a per-frame ring with dynamic offsets), `@group(2)` the
+    resources at the bindings the spec declares, under explicit pipeline layouts, with entry points
+    `vertexMain` and `fragmentMain` and `view/shaders/frame.wgsl` as the shared declaration. The
+    adapter draws every `DrawItem` and full-screen pass in its own render passes on the engine's
+    device, generalizing T8.g's raw pass; Babylon's materials, meshes, render targets and
+    post-process chain are not used. This replaces T8.a's dialect, the `FRAME_UNIFORMS` and
+    whitespace rules, and T8.i's blend override, and reduces the pinned internals to `_device`.
+    Changing the engine now means changing who creates the device.
+
+24. **No engine: the adapter is HYPERION's own WebGPU renderer.** Decided by the agent on the
+    owner's delegation, 2026-09-30. After Design note 23, Babylon.js only created the device —
+    through a patched `requestAdapter` and an `initAsync` that is a plain `requestDevice`
+    (`webgpuEngine.pure.js:410-450`, 9.28.0) — at the cost of a 1.25 MB chunk, a pinned `_device`,
+    and query sets and buffers on our device that the allocation tally cannot see; its other duties
+    (canvas contexts and sRGB views, 13, 18; loss and rebuild, 9; resources, 21; mips, readback,
+    timing and indirect work, 19, 20) were already ours. The brainstorm hired it for visual
+    compatibility and for materials, shader compilation and submission; with our own WGSL and
+    pipelines none of those reach the screen through it. `@babylonjs/core` is removed in R01.T8.l,
+    before T9; the adapter requests its device on the vetted adapter, lives in
+    `view/engine/webgpu/`, and is still imported lazily. Design notes 7, 11, 12, 13 and 15 are
+    superseded; 14 keeps the dynamic import and drops the named chunk and `checkChunks.mjs`. A
+    change of engine now means a new adapter over portable WGSL, which the native wgpu replay of
+    open question 2 reads directly.
+
 ## Tasks
 
 T1 and T2 are the main process and can run in parallel. T3 needs nothing. T4 follows T2 (its
@@ -1197,7 +1230,7 @@ gives a device whose `lost` has already resolved.
 **R01.T5.a The panel.** `components/GraphicsPanel.tsx` on the `LINK` display after `Server Link`, in
 `ConnectionPanel`'s readout pattern: `Adapter` (vendor · architecture), `Software Adapter`
 (`YES`/`NO`), `Features` (the wanted ones present), `Styles`, `Mode` (`DEFAULT`, `VULKAN` or
-`SAFE`), `GPU Timer` (`QUANTIZED`, `FULL` or `ABSENT`, from `GraphicsStatus.timer`), `Device
+`SAFE MODE`), `GPU Timer` (`QUANTIZED`, `FULL` or `ABSENT`, from `GraphicsStatus.timer`), `Device
 Losses`, `Process Restarts`, and the current annunciation through `StatusLine`, with the standing
 `graphicsAnnunciation` gives. Missing values are the em dash.
 
@@ -1219,7 +1252,8 @@ the alert counts.
 - Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/components/ConsoleFrame.test.tsx`;
   the by-eye record.
 
-**R01.T5.c Nomenclature drafts, for the owner.** A draft of the guide's new entries: `GRAPHICS`
+**R01.T5.c Nomenclature drafts, for the owner.** Signed off with amendments 2026-09-30
+(delegated decision; the constants changed in the T5 follow-up, Risks). A draft of the guide's new entries: `GRAPHICS`
 (system); the statuses `GRAPHICS SOFTWARE ADAPTER`, `GRAPHICS NOT AVAILABLE`, `GRAPHICS NO ADAPTER`,
 `GRAPHICS SAFE MODE`, `GRAPHICS DISABLED` (with its two causes); the faults `GRAPHICS DEVICE LOST`
 and `GRAPHICS PROCESS RESTARTED`; `UNAVAILABLE` (the owner may prefer `NOT AVAILABLE`); `DEFAULT`,
@@ -1231,7 +1265,8 @@ class. Written as a proposed diff in the commit message and in this plan's as-bu
 applied: guide additions are the owner's call. R02's single pass absorbs and re-checks it. The code
 does not wait for the answer, since every string is one constant in `status.ts`.
 
-- Acceptance: the owner signs off, or amends; the constants then change in one commit.
+- Acceptance: the owner signs off, or amends; the constants then change in one commit. Done
+  2026-09-30 (delegated decision).
 
 ### R01.T6 The engine-agnostic interface
 
@@ -1390,6 +1425,36 @@ draw and read after device creation and after each rebuild, its classification, 
   without `rg11b10Renderable`; a failed read gives `unknown` and no fault.
 - Acceptance: the tests, `just ci`; T9.i reports SwiftShader's answer, and T11 records the RTX
   3080's and the UHD 620's.
+
+**R01.T8.k The adapter's own pipelines (Design note 23).** Added 2026-09-30 by the
+shader-convention decision. `view/engine/types.ts` (the convention's `BIND_GROUPS`,
+`TextureBindingSpec`, `SamplerSpec.binding`, `PostProcessItem` with per-frame uniforms and
+textures, `PostProcessInput` without `depth`, `createMaterialAsync`'s `meshes`),
+`view/shaders/frame.wgsl`, and in the engine directory `uniforms.ts` (the `Frame` and `Draw`
+layouts and the ring), `materials.ts` (pipeline descriptors, `@group(2)` layouts, blend states),
+`meshes.ts` (own vertex and index buffers), `drawing.ts` (the one draw path: draws, direct and
+indirect, in submission order, then post-processes as full-screen passes), `intermediates.ts`,
+`view.ts` and `target.ts` (own attachments, a view's own `depth32float`) and `engine.ts`. Babylon's
+materials, meshes, targets and post-process chain, and the files that served them, go.
+
+- Tests (logic project): pipeline descriptors (reversed depth, cull, bias negated on triangles
+  only, write masks, blend states keeping alpha), `@group(2)` layouts at declared bindings with
+  duplicates refused, the `Draw` layout by WGSL's rules and its check against a source's own
+  `struct Draw`, the `Frame` layout against `frame.wgsl`, the ring's aligned offsets, single upload
+  and growth.
+- Acceptance: the tests, `just ci`; T9's checks, all on this path. Lifts T8.g's refusal of a frame
+  with both indirect draws and post-processes.
+
+**R01.T8.l Drop Babylon.js (Design note 24).** Added 2026-09-30. Remove `@babylonjs/core`; the
+device is `adapter.requestDevice({ requiredFeatures, label })` on the vetted adapter; delete
+`adapterHandoff.ts`, `options.ts`, `registrations.ts`, `externalStorageBuffer.ts`, `wgslGuard.ts`
+and `internals.ts` with their tests (`shader-refused` now comes from `getCompilationInfo`, T8.k);
+rename `view/engine/babylon/` to `view/engine/webgpu/` and `createBabylonEngine` to
+`createWebGpuEngine`; declare the per-stage storage limits `lib.dom` lacks in a local `.d.ts`;
+retire `checkChunks.mjs`, `just check-chunks` and the renderer's `codeSplitting` groups, the
+boundary test guarding laziness; drop the pass timer's bracket.
+
+- Acceptance: `pnpm typecheck`, the tests, `just ci`; T9's harness runs with no Babylon code.
 
 ### R01.T9 The headless smoke harness
 
@@ -1577,7 +1642,7 @@ the three-canvas figures.
 - **Platform, automatic:** the switch builder's tests (no unsafe flag, merged values, safe mode),
   the crash-loop policy's tests, adapter acquisition against fakes, the status reducer and its
   words.
-- **Engine, automatic:** the boundary test; the chunk check; `just test-render` on SwiftShader:
+- **Engine, automatic:** the boundary test; `just test-render` on SwiftShader:
   every catalogued shader offline, both feature paths, three canvases right way up with independent
   resizes, depth, culling, bias and a forced loss, blending, compute and the packed cube, offscreen
   targets, asynchronous pipelines, indirect work and pass timing, material state, instancing,
@@ -1614,17 +1679,17 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
 - **Chromium's thresholds were observed, not read.** Three crashes to drop Vulkan and six to drop
   GPU compositing come from the probe, not from `gpu_process_host.cc`; the policy also watches the
   feature status, so it holds if the counts differ.
-- **Babylon's internals.** `_device`, `_disableEngineYFlip` and `_hardwareTexture` are `@internal`;
+- _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's internals.** `_device`, `_disableEngineYFlip` and `_hardwareTexture` are `@internal`;
   the typecheck, the orientation check and the cube round trip catch a rename or a change of
   meaning, and the fallback without the first two is a CSS flip with picking flipped to match,
   which still needs the device (open question 15). The raw indirect pass and the pass timing of
   Design note 19 lean on the same two, `_device` and `_hardwareTexture`, and add none.
-- **Bracketed pass times include queue gaps.** A Babylon-encoded pass is timed by empty compute
+- _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Bracketed pass times include queue gaps.** A Babylon-encoded pass is timed by empty compute
   passes before and after it (Design note 19), so its figure is an upper bound; R05's and R12's
   records state `bracketed`. If the bracket proves too loose on the UHD 620 (T11), the fallback is
   Babylon's internal `WebGPUTimestampQuery.startPass` hook (`webgpuTimestampQuery.d.ts:20`), which
   would be a fourth pinned internal.
-- **Babylon's generated depth texture may lack `COPY_SRC`.** Then an offscreen target makes its own
+- _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's generated depth texture may lack `COPY_SRC`.** Then an offscreen target makes its own
   `depth32float` (Design note 19, T8.f), and a canvas view's depth is not read back at all; the
   depth checks run on offscreen targets (T9.f).
 - **An `rgba32float` bake target.** R06's splat renders into `rgba32float` (Design note 21), which
@@ -1637,7 +1702,7 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   the command line itself.
 - **The skills do not yet read `R` task IDs.** Until R04.T7.c extends `plan_task.py` and
   `select_checks.py`, R01's tasks are built and validated by hand (Consumes).
-- **Babylon's unawaited effect preparation** means a WGSL compile error may also surface only as an
+- _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's unawaited effect preparation** means a WGSL compile error may also surface only as an
   unhandled rejection; the backstop reports it, and `onEffectErrorObservable` covers the ordinary
   case. If an upgrade awaits it, layer (c) becomes redundant, not wrong.
 - **The safe mode draws nothing.** A reading forced by the probe (Design note 5); if the owner wants
@@ -1647,12 +1712,13 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   `validate` routing is what keeps it from rotting. Headless Ozone is the fragile part: an Electron
   upgrade that breaks it falls back to a hidden X11 window, which needs a display. SwiftShader
   checks correctness only; a pass says nothing about the UHD 620's speed.
-- **The fault wording** is a draft for the owner (T5.c); only constants change if it is amended.
+- **The fault wording** was a draft for the owner (T5.c), signed off with amendments on 2026-09-30
+  (delegated decision); its constants changed in the T5 follow-up.
 - **The rounding probe reads one value a format.** Design note 22 tells round-to-nearest from
   truncation at one magnitude. An adapter that rounds some other way, or differently by magnitude,
   would still be classed by that one value. R07 reads anything but `nearest` as a reason to keep
   `rgba16float`, so a misclassification costs bandwidth, not accuracy.
-- **The premultiplied blend overrides Babylon's factors in `onBind`** (Design note 21). This leans
+- _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **The premultiplied blend overrides Babylon's factors in `onBind`** (Design note 21). This leans
   on the order in which `Mesh.render` sets the alpha mode and then binds. An upgrade that moves it
   would show in T9.i's alpha check, and the fallback is the adapter's own raw pass (Design note 19)
   with its own blend state.
@@ -1724,10 +1790,10 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     the harness withholds a feature; T8 should dispatch the device-read capabilities with the
     engine's first creation and each `device-restored`, so that a withheld feature reads as absent
     in the status too (Design note 7).
-  - Open, for the owner or R02: a `GRAPHICS PROCESS RESTARTED` fault clears only on
-    `device-restored`, so until a view owns a device (R02), or under `no-adapter`, one GPU-process
-    crash leaves the fault standing on the `LINK` panel for the rest of the launch. Candidates: keep
-    it for the launch, clear it on the next successful adapter request, or clear it after a set time.
+  - Decided 2026-09-30, delegated decision (was open): a `GRAPHICS PROCESS RESTARTED` fault clears
+    on the next successful adapter request, and the feed makes that request itself after each
+    crash (T5 follow-up). Before, it cleared only on `device-restored`, so until a view owned a
+    device (R02), or under `no-adapter`, one crash left the fault standing for the launch.
 - **Deviations in T5, as built.**
   - The `Features` row lists the wanted features present by their WebGPU names, comma-separated, or
     `NONE`; `Styles` reads `WIREFRAME, PHOTOREALISTIC`, `WIREFRAME`, `NONE` (no views: no WebGPU, no
@@ -1737,27 +1803,31 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     them (lower case, e.g. `intel · gen-9`).
   - The header banner is its own component, `GraphicsModeBanner`, in `ConsoleFrame`'s status area
     before the clock, an `output` labelled `Graphics mode` in `--text` inside a `--line` rule
-    (`.console__banner`). It names the mode alone, `GRAPHICS SAFE MODE` or `GRAPHICS DISABLED`
+    (`.console__banner`; the rule became `--text-muted` in the T5 follow-up, decided 2026-09-30). It names the mode alone, `GRAPHICS SAFE MODE` or `GRAPHICS DISABLED`
     (the words before the colon), so that the strip fits at 1280 × 720; the panel carries the
     sentence. `ConsoleFrame` now needs a `GraphicsStatusContext` provider above it.
   - The disabled statement's count is in mixed case (`GRAPHICS DISABLED: 3 device losses, …`),
     since every other clause after a colon is a sentence (the guide's Typography); Design note 10
-    wrote `<n> DEVICE LOSSES`. The two counts are `output`s, live without an
+    wrote `<n> DEVICE LOSSES`, and now reads `<n> device losses` (decided 2026-09-30, delegated
+    decision). The two counts are `output`s, live without an
     annunciation once the mode is settled.
-  - Kept as drafted, for the owner (UX review of T5): `GRAPHICS NOT AVAILABLE: no WebGPU`,
-    `GRAPHICS NO ADAPTER: views unavailable` and `GRAPHICS PROCESS RESTARTED` name no operator
-    action (the guide's Voice asks for one where known; `relaunch to retry` is the candidate); the
-    `acquiring` condition shows only em dashes and no annunciation, which is momentary in practice
-    (a waiting `GRAPHICS ACQUIRING ADAPTER` would be a new word); whether the banner looks
-    "unmistakably different" enough in a `--line` rule; `GPU` and `WebGPU` on the list; one of
-    `UNAVAILABLE` and `NOT AVAILABLE`.
+  - Superseded by the T5 follow-up below (decided 2026-09-30, delegated decision). These were kept
+    as drafted, for the owner (UX review of T5): `GRAPHICS NOT AVAILABLE: no WebGPU`,
+    `GRAPHICS NO ADAPTER: views unavailable` and `GRAPHICS PROCESS RESTARTED` named no operator
+    action; the `acquiring` condition showed only em dashes and no annunciation; whether the banner
+    looked "unmistakably different" enough in a `--line` rule; `GPU` and `WebGPU` on the list; one
+    of `UNAVAILABLE` and `NOT AVAILABLE`.
   - By eye, pending: the `GRAPHICS` panel in each condition and the header banner in safe mode on
     `just client`, with the store driven from the devtools console, beside the guide's banner rule.
 - **T5.c, the nomenclature draft for the owner (not applied to the guide).** R02.T2.f absorbs and
   re-checks it in its single pass over `docs/frontend/ux-guidelines.md`. The code is built to it
   meanwhile: every string is one constant, `GRAPHICS_WORDS` in `view/engine/status.ts`, and the
-  panel's `MODE_WORDS` and `TIMER_WORDS` in `components/GraphicsPanel.tsx`. Awaiting the owner's
-  sign-off or amendment; the constants then change in one commit.
+  panel's `MODE_WORDS` and `TIMER_WORDS` in `components/GraphicsPanel.tsx`. **Signed off with
+  amendments 2026-09-30 (delegated decision).** The draft below is kept as written; the accepted
+  text, which R02.T2.f applies to the guide, uses `NOT AVAILABLE` for `UNAVAILABLE`, `SAFE MODE`
+  for `SAFE`, the amended statuses of Design note 10, adds `GRAPHICS ACQUIRING ADAPTER`,
+  `GRAPHICS SHADER REFUSED`, `GPU`, `WebGPU` and `WGSL`, and words the Alerts sentence without
+  naming `StatusLine`. The constants changed in the T5 follow-up below.
 
   ```diff
   @@ Layout @@
@@ -1786,6 +1856,47 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   `Device Losses`, `Process Restarts`) are ordinary words, and `GPU` and `WebGPU` are proper names
   of the hardware and the API rather than ship abbreviations; the owner may want `GPU` on the list.
   `NONE`, `YES` and `NO` are the readings' plain words.
+
+- **T5 follow-up, as built (decided 2026-09-30, delegated decision).** Each change below applies
+  the delegated UX decisions on R01's words and banner; only constants, the banner's rule and the
+  feed changed.
+  - One word for "not offered": `NOT AVAILABLE` everywhere, never `UNAVAILABLE`.
+    `GRAPHICS_WORDS.softwareAdapter` is `GRAPHICS SOFTWARE ADAPTER: photorealistic style not
+available` (the clause after the colon in mixed case, like its siblings), and `safeMode` is
+    `GRAPHICS SAFE MODE: views not available, relaunch to retry`.
+  - The panel's `Mode` reads `SAFE MODE` (`MODE_WORDS.safe`), since `SAFE` is the guide's command
+    that disarms an `ARM`. `FULL` stays.
+  - `noAdapter` is `GRAPHICS NO ADAPTER: views not available, relaunch to retry`, since a relaunch
+    resets Chromium's per-session WebGPU state; `processRestarted` is `GRAPHICS PROCESS RESTARTED:
+re-acquiring`, stating what the console does. `GRAPHICS NOT AVAILABLE: no WebGPU` is kept: a
+    relaunch would not change it.
+  - The `acquiring` condition states `GRAPHICS ACQUIRING ADAPTER` (`GRAPHICS_WORDS.acquiring`),
+    steady plain text in the `refused` standing, on the pattern of `ESTABLISHING LINK`; the rows
+    keep their em dashes, since those values are missing until the adapter answers.
+  - `.console__banner` is ruled `1px solid var(--text-muted)` in place of `--line`, the style of
+    every mode banner (R07.T27.a's `ModeBanner` reuses the class); `--text-muted` passes 7.2:1 on
+    `--surface-0`.
+  - `GRAPHICS PROCESS RESTARTED` clears on the next granted adapter, and the count is kept.
+    `feedGraphicsStatus` follows each crash report outside safe mode with a fresh
+    `requestAdapterOutcome`. Its answer is a new event, `adapter-reacquired`, rather than a second
+    `adapter-outcome`. The reason is that a view's rebuild after the same crash reports the device's
+    own capabilities (`device-restored`, `device-capabilities`), and the two answers are not
+    ordered: where an adapter had been granted already, the re-acquired answer only clears the
+    fault and leaves condition, capabilities and timer as they are (Design note 7); where none had
+    been, it takes the new adapter's outcome. Only the latest request's answer is dispatched, so an
+    answer from before a crash cannot clear its fault. An `adapter-outcome` with an adapter also
+    clears the fault, as the decision words it; a `device-restored` still clears it, and a lost
+    device's fault is not cleared by either.
+  - A null (or rejected) re-acquired answer where an adapter had been granted is the adapter
+    withdrawn, as a rebuild handles one (Design note 9). **Deviation from the decision's "clears on
+    the next successful request":** where no adapter had been granted (`no-adapter`, `no-webgpu`),
+    a null answer restates the condition and clears the fault too. Otherwise `GRAPHICS PROCESS
+RESTARTED: re-acquiring` would stand in caution text for the launch while nothing is being
+    re-acquired, and, since a fault outranks the condition, it would hide the condition's own line
+    and its remedy (`relaunch to retry`). `Process Restarts` keeps the history (UX review of the
+    follow-up).
+  - Design note 10 reads `<n> device losses`, as built, and lists the signed-off words.
+  - The banner's by-eye record (T5.b) is still pending, by hand, now with the `--text-muted` rule.
 
 - **Deviations in T6, as built.**
   - The opaque handles are `readonly` interfaces with a literal `kind` and a `name`; `ComputeHandle`
@@ -1834,3 +1945,403 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     imports `babylon/engine` statically, and only `loadEngine.ts` names it at all. The marker
     strings are a heuristic; the build manifest (`build.manifest`) would test module membership
     directly if a user-visible string ever carries `Babylon.js`.
+- **Deviations in T8.a, as built.**
+  - Materials are WGSL in Babylon's dialect (`attribute`, `varying`, `uniform`, and `var` without
+    group or binding; `vertexInputs`, `vertexOutputs`, `fragmentOutputs`), documented on
+    `WgslMaterialSpec`; the attributes and textures a material binds are read from its
+    declarations. The engine sets three reserved uniforms in each material's `onBind` at every
+    draw, `FRAME_UNIFORMS` in `types.ts`: `viewRotation` and `clipProjection` (the submission's
+    matrices, column-major and unchanged, `Matrix.FromArrayToRef` then `setMatrix`, which matches
+    R02.T7.a's `viewRotation4`) and `offsetFromCameraM`. The names avoid those Babylon fills itself
+    (`view`, `projection`, `world`). `StorageBufferSpec.binding` is unused, since Babylon assigns
+    bindings. **Awaiting the owner:** shaders tied to Babylon's dialect make a change of engine a
+    rewrite of every material, against the brainstorm's "a re-implementation of one adapter";
+    the alternatives are standard WGSL with fixed `@group`/`@binding` that the adapter converts, or
+    a translator at the switch.
+  - Compute kernels are plain WGSL with explicit `@group`/`@binding` and entry point `main`,
+    compiled on the engine's device with `layout: "auto"` (`babylon/compute.ts`, bindings read by
+    name with `kernelBindings`), and will be dispatched on the adapter's own compute passes, not
+    through Babylon's `ComputeShader`: that cannot carry the adapter's `timestampWrites`, and its
+    `setStorageTexture` takes no mip level, which `ComputeBindings.storage` needs. Indirect
+    dispatch becomes `dispatchWorkgroupsIndirect` (Design note 19's _Indirect work_ and T8.g's
+    `ComputeShader.dispatchIndirect` read so).
+  - `createPostProcess` is a Babylon `PostProcess` whose fragment source is registered in the
+    shader store under a unique key; its inputs bind under `POST_PROCESS_INPUTS` (`types.ts`):
+    `hdr-colour` is Babylon's own `textureSampler`, `depth` is `depthTexture`
+    (`texture_depth_2d`); its samplers' filter and address are set in `onApply`. The textures are
+    bound when a view or target runs it (T8.c, T8.f).
+  - Instancing: `instanceAttributes` are instanced vertex buffers (divisor 1) on the mesh's shared
+    Babylon `Geometry`, and each draw sets `Mesh.forcedInstanceCount`, not `thinInstanceSetBuffer`:
+    thin-instance buffers belong to one Babylon mesh, and a `MeshHandle` is drawn through a pool of
+    Babylon meshes, one per (mesh, material, n-th use in the frame), sharing its geometry, each
+    with `alwaysSelectAsActiveMesh`. A draw of zero instances is left out. Every draw thus takes
+    Babylon's instanced path (`INSTANCES`/`THIN_INSTANCES` defines, harmless while no source
+    declares `world0`–`world3`).
+  - A `blend` other than `none` puts the material in Babylon's transparent queue whatever
+    `transparent` says, since `Mesh.render` sets the alpha mode only there
+    (`mesh.pure.js:2187`); within the queue `alphaIndex` is the draw's place in the submission.
+  - `premultiplied` throws "built by R01.T8.i" until T8.i overrides mode 7's factors.
+  - `createBabylonEngine` dispatches a new `GraphicsEvent`, `device-capabilities`, read from the
+    device (`deviceCapabilities` in `platform.ts`), so a withheld feature reads as absent in the
+    status; a settled condition ignores it. A rebuild's `device-restored` writes the adapter's
+    capabilities, so T8.e sends `device-capabilities` after it. A feature asked for and not
+    enabled (`featuresNotEnabled`) is logged with `console.warn`. A failed creation disposes the
+    Babylon engine.
+  - Registrations are explicit (`babylon/registrations.ts`): the `.pure` modules' register
+    functions and the clear-quad and post-process vertex shaders, since `.oxlintrc.json` forbids
+    side-effect imports.
+  - `internals.ts` holds, besides `_device`, `_disableEngineYFlip` and `_hardwareTexture`'s read,
+    two accesses built ahead for T8.c: `setAttachmentFormat`, which writes the hardware wrapper's
+    `format` so that Babylon renders a canvas texture through its `-srgb` view, and
+    `flushEngine`, over `flushFramebuffer`, declared `@internal` (`webgpuEngine.pure.d.ts:977`), a
+    fourth pinned internal: it submits what Babylon has recorded so that the adapter's own passes
+    run after it, and ends Babylon's current render pass.
+  - Checked by a scratch page (not committed) on SwiftShader: the engine is made on the handed
+    adapter, its capabilities read (no `shader-f16`, the rest present), and a material, a mesh, a
+    compute kernel and a post-process are created. The RTX 3080 (`ampere` architecture, NVIDIA's
+    Vulkan driver, Electron 44.4.3 under the client's switches with `DISPLAY=:0`) exposes
+    `subgroups`, `timestamp-query`, `float32-filterable`, `float32-blendable`,
+    `rg11b10ufloat-renderable` and `depth-clip-control`, and no `shader-f16`.
+- **Deviations in T8.b, as built.**
+  - "Reports to the status store" needed a status entry: `GraphicsFault` and `GraphicsEvent` gain
+    `shader-refused` (with `effectName`), a fault while it stands, cleared by a restore like the
+    others; it never replaces a standing fault, so the stub compiler's unnamed refusal that follows
+    the wrapper's named one keeps the name, and a device loss outranks it. Its words, drafted for
+    the owner with T5.c's: `GRAPHICS SHADER REFUSED: <effect> is not WGSL`
+    (`GRAPHICS_WORDS.shaderRefused`). A refused
+    shader is a bug of ours, not the operator's; the fault makes it visible on the `LINK` panel.
+  - `guardCreateEffect` takes any `EffectFactory` (the engine's `createEffect`, whatever its
+    arguments), reports before it throws, and reads the effect's name from a string or from its
+    shader path (`spectorName`, `vertex`, `fragment`, else `(inline source)`); the stubs' errors
+    say `(unnamed, at the compiler)`, since the compile is handed no name. The backstop listens on
+    `window` from creation to disposal and calls `preventDefault` on what it reports. Babylon's
+    `EffectWrapper` without the shader store (which the adapter does not use) makes its `Effect`
+    directly, past `createEffect`; the stubs still stop it. No unit test covers the engine's
+    releasing the backstop at disposal, since the engine needs a WebGPU device; T9 exercises it.
+  - Pending for T9: the offline run with the network refused is the integration check.
+- **Deviations in T8.c, as built.**
+  - A view draws through its `RenderTargetTexture` directly (`target.render()` with the view's
+    camera as `activeCamera` and the frame's meshes as `renderList`), inside one Babylon frame per
+    view render (`beginFrame`/`endFrame`), not through `camera.outputRenderTarget` and
+    `scene.render`: the frame's draws are the render list, and the canvas texture must be
+    submitted before the task yields. Each frame resets depth test, depth writes and colour
+    writes first, since a Babylon post-process leaves depth writes off and only a scene's own
+    render resets them. The camera is Babylon's base `Camera` at the origin (identity view), its
+    projection frozen to the submission's; no material reads Babylon's matrices anyway
+    (`FRAME_UNIFORMS`).
+  - The canvas is configured with `viewFormats: [<format>-srgb]`, and after each
+    `wrapWebGPUTexture` or `updateWrappedWebGPUTexture` the adapter sets the hardware wrapper's
+    `format` to the `-srgb` view (`setAttachmentFormat`, a write through `_hardwareTexture`), which
+    Babylon then uses for the attachment view and the pipeline: no `rgba16float` fallback was
+    needed. Checked on SwiftShader and the RTX 3080 by a scratch page (not committed): a linear
+    0.5 reads back 188.
+  - Winding: materials set `sideOrientation` to counter-clockwise explicitly; left to the mesh,
+    Babylon's default in the right-handed scene reversed it (the scratch page saw a clockwise
+    triangle drawn and a counter-clockwise one culled). With the view's `_disableEngineYFlip`,
+    counter-clockwise in WebGPU's framebuffer is front, as R02's matrices expect.
+  - `RenderView.readBack` returns RGBA bytes, sRGB-encoded, rows from the top, unpadded, whatever
+    the canvas's byte order (a `bgra8unorm` canvas is swizzled); it must be called in the task of
+    the `render` it reads. `gpuFlags.ts` (`BUFFER_USAGE`, `TEXTURE_USAGE`, `MAP_MODE`) holds
+    WebGPU's flag values, since TypeScript 7's `lib.dom` declares the flag types but not the
+    namespaces that hold them.
+  - `FrameSubmission.postProcesses` run as the view target's Babylon post-process chain
+    (`addPostProcess`), which draws the scene into the first pass's input and ends in the canvas.
+    Post-processes are made non-reusable (one input each, no ping-pong). The colour input works
+    (checked: an inverting pass on both adapters, and again after the view was resized, since a
+    view detaches the engine's shared post-processes before it disposes its target). The `depth`
+    input, bound to the first pass's input depth under `depthTexture`, got a texture of the view's
+    size that read zero on both adapters although the pass's depth test worked, so
+    `createPostProcess` with a `depth` input throws "built by R01.T8.f" for now: **open, carried to
+    T8.f/T8.i**, where the target's own `depth32float` made with `TEXTURE_BINDING` and `COPY_SRC`
+    is the candidate source.
+    Post-process uniform values have no path in `RenderEngine` (a `WgslPostProcessSpec` declares
+    uniforms, nothing sets them): **open, for the plan that first needs one (R05/R07)**.
+  - Checked by the scratch page on SwiftShader and on the RTX 3080 (`DISPLAY=:0`, the client's
+    switches): two canvases from one device at their own sizes (64 × 64, then a second resized to
+    32 × 16) draw the right way up (a triangle in the upper-right quadrant of view space lands in
+    the image's upper right); a back face is culled; a nearer triangle drawn first stays in front
+    of a farther one drawn after (reversed depth, greater-or-equal); two draws of one mesh and
+    material with different offsets and tints each land. These are not T9's checks, which remain
+    pending for T9.
+- **Deviations in T8.d, as built.**
+  - Buffers and textures, the packed cube included, are made on the engine's device directly
+    (`babylon/resources.ts`, `ResourceRegistry`), not through Babylon: the cube is a 2D texture of
+    six layers in `rgb9e5ufloat` with the named mips (`packedCubeSpec`), not a `RawCubeTexture`,
+    so each has exactly the usage, format and mips its specification names, and its bytes are
+    `textureBytes`'. `writePackedCubeLevel` is `queue.writeTexture` (rows tightly packed, six
+    faces in order); `writePackedCubeLevelFromBuffer` is `copyBufferToTexture` from a buffer whose
+    rows are padded to 256 bytes (`paddedBytesPerRow(size, 4)`), as the copy requires: R06's bake
+    kernel writes that layout. Neither write reaches the texture through `_hardwareTexture`.
+  - `RenderEngine` has no destroy for a buffer or texture, so `destroyed` events are raised at the
+    engine's disposal, one per resource. Every `writeBuffer`, `writeTexture` and
+    `writePackedCubeLevel` raises one `uploaded` event; a kernel's uniforms are written each
+    dispatch into a buffer of the kernel's own per uniform name, made once through the same path
+    (`<kernel>:<uniform>`, category `other`, 16-byte multiples), so their uploads are counted too.
+  - `textureBytes` (with `extentOf` and `bytesPerTexel`, in `memory.ts`) counts every mip and
+    layer; a 3D texture's depth halves with its mips, a cube is six faces at every level, and
+    depth-stencil formats count 4 + 1 bytes; a compressed format throws.
+  - A texture bound per draw (`DrawItem.textures`) is wrapped for Babylon once
+    (`wrapWebGPUTexture`) and given a view of all its mips through a fifth use of
+    `_hardwareTexture` (`setSampledView` in `internals.ts`): Babylon's own views have one mip or
+    the whole chain. A storage buffer bound per draw goes through `ExternalStorageBuffer`, a
+    subclass of Babylon's `StorageBuffer` that answers `getBuffer` with the engine's buffer. A
+    storage buffer's WGSL type must have no whitespace (`array<f32,4>`), since Babylon's
+    declaration pattern stops at a space (documented on `WgslMaterialSpec`).
+  - A dispatch is encoded in the adapter's own compute pass and submitted after
+    `flushEngine`, so it runs after what Babylon recorded before it; bindings are resolved by the
+    names the kernel declares (`kernelBindGroupEntries`), a storage texture bound at the named
+    level (a cube's as a `2d-array` view). `ComputeBindings` has no samplers, so a kernel cannot
+    declare one.
+  - `FakeDevice` gains a recording `queue` (`FakeQueue`), and `createBuffer` and `createTexture`
+    returning `FakeBuffer` and `FakeTexture`. The boundary rule on `device.createBuffer` and
+    `device.createTexture` outside `view/engine/babylon/` was already added by T6.
+  - From the review: a kernel must use every binding it declares (its layout is `auto`, which
+    drops unused ones); a layered 2D texture is sampled through a `2d-array` view; a kernel
+    uniform larger than its first value throws; `writePackedCubeLevelFromBuffer` refuses a buffer
+    smaller than the padded layout or without `COPY_SRC`; a `SamplerSpec`'s filter now applies
+    between mips too (`TEXTURE_LINEAR_LINEAR_MIPLINEAR`, `TEXTURE_NEAREST_NEAREST_MIPNEAREST`),
+    since Babylon's plain modes clamp the level of detail to 0. Queue writes take effect before
+    Babylon's pending frame, as WebGPU orders a write before later submissions; dispatches and
+    copies go after it (`flushEngine`).
+  - Checked by the scratch page on SwiftShader and the RTX 3080: a kernel writes a storage buffer
+    with a uniform's value, a texture is written from the CPU, and a draw reading both shows the
+    two values; the allocation events read `created`, `uploaded` and, at disposal, `destroyed`
+    once per resource. The packed cube's round trip is T9.g's, pending.
+- **Deviations in T8.e, as built.**
+  - The rebuild is not in `babylon/engine.ts` but in an engine-agnostic wrapper,
+    `view/engine/resilientEngine.ts` (`ResilientEngine`), which `loadRenderEngine` returns around
+    the Babylon engine: it re-creates the engine through the same import, so the test drives it
+    with a fake engine module through `importEngine`, as the task asks. The Babylon engine keeps
+    the device-level parts (`babylon/deviceLoss.ts`): it awaits `_device.lost` (`watchDeviceLoss`,
+    not reported after its own disposal or once the watch ends), logs `uncapturederror`s to
+    `console.error` (`logUncapturedErrors`), and reports the loss as a `device-lost` fault through
+    `onFault`. The wrapper then dispatches `device-lost`, disposes the engine and every view's
+    context and target, requests and vets a fresh adapter (`requestAdapterOutcome`), dispatches
+    `adapter-withdrawn` on a null one, stops at `DEVICE_LOSS_LIMIT`, and otherwise loads a new
+    engine, dispatches `device-restored` and then `device-capabilities` (the restore writes the
+    adapter's capabilities), and re-creates each view on its canvas at its size.
+  - `RenderEngine` gains `onRestored(listener)`: every handle but a view belonged to the lost
+    device, so the caller (R02's `VIEW` display) makes its meshes, materials, buffers and targets
+    again there. Only the wrapper fires it; the Babylon engine's never does. A call needing a
+    device while there is none throws `EngineUnavailable`; a view's `render` does nothing then.
+    Offscreen targets are not re-created (they are handles like the rest). `LoadEngineOptions`
+    gains `gpu`, the entry point a rebuild asks (a test's `FakeGpu`), `navigator.gpu` by default.
+  - From the review: a creation that fails during a rebuild counts as another loss and the next
+    fresh adapter is tried, so the limit bounds the retries and the status never stays at
+    `DEVICE LOST`; the limit is the store's (`disabled`), not a count of the wrapper's own, so a
+    second `loadRenderEngine` in the session respects it. The Babylon engine replays a loss
+    reported before anyone listened (a device lost while the engine was being made), so a dead
+    engine is never adopted. A view made during the outage is drawn from the restore on; writes
+    and dispatches are dropped then, and `device-restored` is sent after the views are re-created.
+  - Test fakes: `test/fakeRenderEngine.ts` (`FakeRenderEngine`, `FakeView`, `fakeEngineModule`,
+    whose `createBabylonEngine` requests the handed adapter's device, consuming it).
+    `resilientEngine.test.ts` runs in the `dom` project, since its views need a canvas.
+  - Checked by the scratch page on SwiftShader and the RTX 3080 (the T9.f integration check
+    stays T9's): `device.destroy()` on the engine's device is reported, the wrapper re-creates the
+    engine on a second device, the status reads one loss and no fault, the view's canvas keeps its
+    48 × 24, and a material and mesh made after `onRestored` draw into the re-created view.
+- **Deviations in T8.f, as built.**
+  - Babylon's generated depth texture does **not** carry `COPY_SRC`: `webgpuTextureManager.js`
+    (lines 834–838 in 9.28.0) gives a depth-stencil texture `TEXTURE_BINDING` and
+    `RENDER_ATTACHMENT` only. So a target makes its own `depth32float` (and its own colour) through
+    the one creation path, with `RENDER_ATTACHMENT`, `TEXTURE_BINDING` and `COPY_SRC`, raised as
+    allocations of the spec's category (`render-targets` for every target so far); the wrapped
+    depth is handed to the `RenderTargetTexture`'s wrapper with `setDepthStencilTexture`, after its
+    Babylon `format` and `type` are set to `DEPTH32_FLOAT` and `FLOAT` (left at their colour
+    defaults, Babylon built an `rgba8unorm` depth view). A view's depth stays Babylon's and is not
+    read back, as the Risks entry foresaw.
+  - Mips past the first are generated by the adapter's own downsampling pass (`mipmaps.ts`,
+    `MipGenerator`, a full-screen triangle sampling the level above through a linear sampler),
+    submitted after the frame: Babylon's `_generateMipmaps` always makes the full chain, while a
+    `RenderTargetSpec` names its mips. A resize destroys and re-makes the target's textures
+    (`ResourceRegistry.destroyTexture`, with `destroyed` events), so `RenderTarget.colour` and
+    `depth` are getters that may return new handles after a resize.
+  - `readback.ts` holds the staging path (`readGpuBuffer`, `readGpuTexture`, `stagingLayout`,
+    `unpad`, and `paddedBytesPerRow`, moved here from `view.ts`) and the last-writer record
+    (`WriterRecord`): a dispatch records its kernel against every `read_write` storage buffer
+    and every storage texture it binds (`KernelBinding.writable`), an upload or a draw clears the
+    record, and `readBuffer` and `readTexture` reject with `PresentationOnlyReadback` for a
+    `presentation-only` kernel's result unless `access` is `tolerance` (`readTexture` takes no
+    access, so it always refuses). A depth texture is read through its `depth-only` aspect, four
+    bytes a texel. Errors come back as rejected promises.
+  - From the review: a read the GPU would reject is refused first with a named error, since the
+    queue drops an invalid copy and the read would give zeros (`textureRead`,
+    `assertBufferReadable`: `COPY_SRC`, the level, the rect inside it, a depth level read whole,
+    a copyable depth format, a buffer size a multiple of 4). A read of a cube, a 2D array or a 3D
+    texture copies every face, layer or slice of the level, layer after layer (T9.g's cube round
+    trip reads the packed cube so). A target refuses `rg11b10ufloat` without
+    `rg11b10Renderable` and more mips than its size has (`assertTargetFits`), refuses a resize
+    once disposed, and destroys its textures through the engine, which drops their Babylon
+    wrappers. `writePackedCubeLevelFromBuffer` carries the buffer's writer to the cube
+    (`WriterRecord.copied`). A storage texture declared `read` is not recorded as written.
+  - The post-process `depth` input stays unbuilt (`createPostProcess` throws, T8.c as built): a
+    Babylon post-process chain draws the scene into its own input, not into the target's depth.
+    Design note 21 gives R05's aerial perspective a full-screen draw reading a target's depth
+    (T8.i), which is the path for it. **Open:** whether any plan still needs a post-process
+    `depth` input; if not, `PostProcessInput` loses `depth` at the owner's word.
+  - Checked by the scratch page on SwiftShader and the RTX 3080 (T9.h's checks remain T9's): an
+    8 × 8 `rgba16float` target with depth and three mips, drawn with a colour of (2, 0.25, 0, 1),
+    reads back that colour exactly at a covered texel (the HDR value above 1 kept) and (0, 0, 0, 1)
+    at an uncovered one; its depth reads 0.1 under the triangle (reversed-Z, near 0.1 m at 1 m)
+    and 0 at the clear; mip 1 holds 4 × 4 texels whose fully covered texel is 2; a one-texel
+    `rect` read gives the same colour; a `presentation-only` kernel's buffer is refused, and read
+    with `tolerance`.
+- **Deviations in T8.g, as built.**
+  - `createMaterialAsync` resolves once the material's shaders are compiled: its effect is made on
+    a Babylon mesh with no geometry through `forceCompilationAsync` with the instanced path's
+    defines (which every draw takes, T8.a), and Babylon's effect cache hands that compiled effect
+    to the real draws. Babylon keys its render pipelines by the mesh's vertex layout as well, which
+    `createMaterialAsync` does not know, so `engine.createRenderPipelineAsync` is not called and a
+    pipeline is still made at a mesh's first draw; `targets` is accepted and unused. If R11's
+    stills measure that first-draw stall against Chromium's watchdog, the fallback is to pre-warm
+    per (material, mesh) at the first submission. `createComputeAsync` is
+    `device.createComputePipelineAsync` (`createKernelAsync`).
+  - Dispatches are encoded by the adapter (T8.a), so an indirect dispatch is
+    `dispatchWorkgroupsIndirect`, not `ComputeShader.dispatchIndirect`.
+  - Indirect draws (`DrawItem.indirect`) are split from the frame (`partitionDraws`) and drawn in
+    the adapter's raw pass (`rawPass.ts`) right after Babylon's pass, with `loadOp: "load"` on the
+    same colour and depth (a view's canvas texture through its `-srgb` view and Babylon's depth,
+    reached through `_hardwareTexture`; a target's own textures). Its pipeline is built from the
+    compiled code of the material's Babylon effect (`effect.vertexSourceCode` and
+    `fragmentSourceCode`, public), made on a separate pool of Babylon meshes that Babylon never
+    renders; a draw whose effect is not compiled yet is left out of that frame, as Babylon leaves
+    out a draw that is not ready. The pass reads the bindings back from the compiled code by name:
+    Babylon's leftover block (`uniforms`, packed by WGSL's layout rules from the `LeftOver`
+    struct, `structLayout` and `packStruct`) and internals block (`yFactor_` 1, the output's
+    height) go in uniform buffers of the draw's own (made once per slot through the one creation
+    path), textures and storage buffers come from the `DrawItem`, a texture's automatic
+    `<name>Sampler` is linear and clamped, and a declared sampler follows its `SamplerSpec`.
+    Vertex buffers are the geometry's, at the locations the compiled `VertexInputs` give them
+    (`attributeLocations`); depth bias is negated (reversed depth), and zero off triangles; the
+    blend state comes from `BLEND_STATES` (T8.i's table, defined here for the raw pass).
+  - From the review: a raw pipeline is made by `createRenderPipelineAsync` the first time a draw
+    asks for it, and the draw waits for it (`RawPipelines`); its bind groups hold only the
+    bindings the compiled code uses (`usedBindings`), since an `auto` layout drops the rest and
+    Babylon declares a sampler for every texture; a frame with both indirect draws and
+    post-processes throws for now (Babylon has drawn the scene into the chain's own input, so the
+    raw pass would miss the chain and test the wrong depth): **open** until a plan needs both. No
+    `async.ts` was made: the asynchronous paths are a few lines in `engine.ts` and `compute.ts`.
+    A material whose compile fails rejects with an `Error` (the compiler's message as its cause)
+    and is released. The timer is disposed with the engine (listeners dropped, query set
+    destroyed), and a mip chain is timed as one pass.
+  - Pass timing (`timing.ts`, `PassTimer`): one `GPUQuerySet` of 128 timestamps (64 passes a
+    frame; more are left untimed with one warning). A view's or target's render is one frame: its
+    Babylon pass is bracketed (`bracketed: true`), its raw pass and every dispatch and mip pass
+    carry `timestampWrites`, and the frame's queries resolve at the end of the render into a
+    buffer read a frame or more later; a dispatch between renders is reported with the next
+    render's frame. `PassTimes.timer` is the engine's: `absent` without `timestamp-query`,
+    else `full` under `--hyperion-gpu-timing` (the status's `gpuTiming`) and `quantized`
+    otherwise. Without the feature no query set is made and `onPassTimes` never fires.
+  - Checked by the scratch page on SwiftShader and the RTX 3080 (T9.h's checks remain T9's): an
+    async material and an async kernel are made; the kernel writes `3, 1, 0, 0` into an
+    `INDIRECT` buffer; an indirect draw of a triangle with those counts lands where it should, in
+    a view, after Babylon's pass; the frame's times report the bracketed Babylon pass and the
+    indirect pass by label. On the RTX 3080 every figure is a multiple of 65,536 ns (`quantized`,
+    as Design note 4 says, without the timing switch).
+- **Deviations in T8.h, as built.**
+  - `PointSplatSpec`'s sources are plain WGSL with `main` entry points (not Babylon's dialect, as
+    for kernels): the vertex stage reads the points from a read-only storage buffer it declares at
+    `@group(0) @binding(0)`, indexed by `@builtin(vertex_index)`, and `PointSplatHandle.draw`
+    binds the `points` buffer there and draws `count` points. The pass loads the target, so draws
+    accumulate; a bake clears its face first (with `writeTexture` of zeros, say). The blend adds
+    every channel, alpha too (`SPLAT_BLEND`: one, one): a bake scratch has no meter class to keep.
+    The target is any 2D `rgba32float` texture the caller made with `createTexture` and
+    `RENDER_ATTACHMENT` (`splatTargetSpec` shows the usage), so its bytes are counted there; a
+    draw into another format, a target of several layers or without `RENDER_ATTACHMENT`, or
+    points without `STORAGE` throws (`assertSplatInputs`). The pass is timed under the splat's
+    name.
+  - Checked by the scratch page on SwiftShader and the RTX 3080 (T9.i's splat round trip remains
+    T9's): two points splatted onto one texel of a cleared 4 × 4 face read back as twice the
+    fragment's colour, alpha included, and an untouched texel reads zero.
+- **Deviations in T8.i, as built.**
+  - Built after the shader-convention decision of 2026-09-30 (Design note 23, T8.k), so the mode-7
+    `onBind` override of Design note 21 was **not** built: every blending draw goes through the
+    adapter's own pipelines in T8.k, whose blend state is `BLEND_STATES` (colour per mode, alpha
+    always (zero, one)), which the tests pin. Until T8.k lands, a `premultiplied` material still
+    throws, naming T8.k. (Babylon's `setAlphaMode` also turns depth writes off for every blending
+    material, another reason to leave its path.)
+  - `assertNoDepthSelfSample` (`target.ts`) refuses, before anything is encoded, a frame in which a
+    draw samples the depth of the target it renders into, with `DepthSelfSample` naming the target
+    and the material. A target's own `depth32float` already carried `TEXTURE_BINDING` (T8.f). On
+    Babylon's path a depth texture bound per draw is given Babylon's depth format and type and a
+    `depth-only` view, so that Babylon binds it as `texture_depth_2d`; T8.k supersedes this with
+    its own bind groups. The harness checks (T9.i) run on T8.k's path.
+- **Deviations in T8.j, as built.**
+  - The probe is a raw pipeline of the adapter's own (`drawAndReadProbe`, standard WGSL with
+    `vertexMain`/`fragmentMain`, already Design note 23's convention), into a 4 × 1 texture made
+    through the one creation path (category `other`, so its `created` and `destroyed` events are
+    raised), read with `readTexture` and destroyed. `BabylonRenderEngine.probeTargetRounding` runs
+    it, and `createBabylonEngine` awaits it and dispatches `target-rounding` before it returns the
+    engine, so it runs before any view renders and again on every rebuild (the resilient wrapper
+    creates through the same function). A format not probed, a failed pipeline or a failed read
+    is `unknown` with a `console.warn`, never a fault.
+  - Checked by a scratch page (T9.i's harness check is T9's): SwiftShader answers `nearest` for
+    `rgba16float` and `toward-zero` for `rg11b10ufloat`; **the RTX 3080 answers `toward-zero` for
+    both** (`nvidia`/`ampere`, Electron 44.4.3 under the client's switches, `DISPLAY=:0`), so
+    R07's reading that only Gen9 truncates does not hold: its bloom keeps `rgba16float` on the
+    recommended hardware too. The UHD 620's answer is the owner's (T11).
+- **Deviations in T8.k, as built.** It supersedes the T8.a–T8.g notes above wherever they describe
+  Babylon's material, mesh, target or post-process path, the raw pass's parsing of Babylon's
+  compiled code, `_disableEngineYFlip`, `setAttachmentFormat`, `flushEngine` and bracketing.
+  - The device is already requested by the adapter itself (`adapter.requestDevice` with
+    `requiredFeatures` and default limits, as Babylon requested them), since T8.l drops Babylon
+    next; no Babylon code is reached from `engine.ts` after this task.
+  - **`types.ts` changes (lane C3, R02.T14):** added `BIND_GROUPS`, `TextureBindingSpec`,
+    `WgslMaterialSpec.textures`, `WgslPostProcessSpec.textures`, `POST_PROCESS_BINDINGS`,
+    `POST_PROCESS_VARYING`, `PostProcessItem` and `createMaterialAsync`'s optional `meshes`;
+    `SamplerSpec.binding` is new and required; `FrameSubmission.postProcesses` is now
+    `ReadonlyArray<PostProcessItem>` (decision item 11); `PostProcessInput` is `"hdr-colour"` alone
+    (item 10); `FRAME_UNIFORMS` and `POST_PROCESS_INPUTS` are removed.
+  - A post-process's input colour is `@group(2) @binding(0)` (`texture_2d<f32>`) with a linear,
+    clamped sampler at binding 1; the adapter's full-screen vertex stage passes `@location(0) uv`,
+    (0, 0) at the top left. Its `Draw` is its uniforms alone (no offset). Chains ping-pong between
+    two `rgba16float` intermediates of the output's size, made lazily per view or target through
+    the one creation path (`render-targets`). A post-process whose shader failed is left out of the
+    chain. Indirect draws and post-processes now share a frame (decision item 12).
+  - Draws are encoded strictly in submission order, indirect ones in place; `transparent` no
+    longer reorders anything (Babylon's queue did), so the caller submits translucent draws after
+    opaque ones. A draw of zero instances is left out.
+  - A material's `Draw` is `offsetFromCameraM : vec3f` then its uniforms, packed by WGSL's
+    uniform rules (a scalar after the `vec3f` sits at byte 12); a source that declares
+    `struct Draw` is checked against it at creation and refused, naming the first differing
+    member. The ring is one uniform buffer made through the registry (category `other`, 64 KiB,
+    doubling), one upload a frame, slots aligned to `minUniformBufferOffsetAlignment`; the `Frame`
+    is one 144-byte buffer written each pass. Every frame's two uploads are counted as `uploaded`
+    events.
+  - Pipelines: a material made with `createMaterial` builds each (mesh layout, colour format,
+    depth) pipeline synchronously at its first draw, so it draws on its first frame; one made
+    with `createMaterialAsync` builds the pipelines for the given `meshes` × `targets` ahead with
+    `createRenderPipelineAsync` (a colour target with and without depth, a canvas with depth), and
+    any other at its first draw asynchronously, the draw left out until ready. Shader errors come
+    from `getCompilationInfo`: logged with line and column, `shader-refused` dispatched with the
+    material's name (the words "is not WGSL" are now wrong; the status-wording lane owns them),
+    the material's draws left out; `createMaterialAsync` rejects with the messages.
+  - A view now owns its `depth32float` (attachment only; a view's depth is still not read back).
+    Mesh attributes are one `float32` buffer each; `assertMeshData` refuses ragged data and indices
+    past the vertices.
+  - Checked by a scratch page on SwiftShader and the RTX 3080 (T9's checks remain T9's): a
+    triangle in view space's upper right lands in the canvas's upper right (no flip anywhere);
+    over a cleared (0.25, 0.5, 1, 2), an additive draw of (0.5, 0.5, 0.5, 0.5) reads
+    (0.5, 0.75, 1.25, 2) and a premultiplied one (0.625, 0.75, 1, 2), alpha kept; the target's
+    depth reads 0.1; a post-process with a `gain` uniform of 4 turns (0.25, 0.5, 1, 1) into
+    (1, 2, 4, 4); no fault.
+- **Deviations in T8.l, as built.** It supersedes the T8.a and T8.b notes above, and the T8.e,
+  T8.c and T8.f notes wherever they name Babylon.
+  - `@babylonjs/core` is gone from `apps/hyperion/package.json` and the lockfile; the directory is
+    `view/engine/webgpu/` and the module's export `createWebGpuEngine`, typed `CreateWebGpuEngine`
+    (`LoadEngineOptions.importEngine` resolves `{ createWebGpuEngine }`). The device is requested
+    with default limits, as Babylon requested it, and `GPUDevice.destroy()` at disposal.
+  - `src/renderer/src/webgpu.d.ts` declares the four per-stage storage limits and
+    `GPUTextureDescriptor.textureBindingViewDimension`, which Babylon's global types had supplied
+    and the test fakes use.
+  - The boundary test drops its engine-package rule (there is no package) and keeps the rest:
+    only `view/engine/webgpu/` allocates on the device, and only `loadEngine.ts` names
+    `webgpu/engine`, by a dynamic `import()`.
+  - `checkChunks.mjs`, `just check-chunks` and the renderer's `codeSplitting` groups are removed.
+    Whether Vite's preload helper still lands in the lazy chunk without its group (which would
+    make the entry import that chunk eagerly) is checked on T9's build, the first that imports
+    `loadRenderEngine`.
+  - The pass timer's `bracket` is removed; `PassTimes.bracketed` stays in the type, always
+    `false`, for R05's and R12's records.
+  - Pending for the status-wording lane: `GRAPHICS SHADER REFUSED: <name> is not WGSL` now reports
+    a compile error, and `GlslShaderRefused` no longer exists.

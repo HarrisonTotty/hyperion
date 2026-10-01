@@ -467,6 +467,23 @@ describe("SystemView with every kind of body", () => {
     expect(terms("ORBIT")).toHaveLength(0);
   });
 
+  it("reads an unbinding billions of years past in years (P14.T35.d)", async () => {
+    const { user, socket } = renderView();
+    // About -6.3 Gyr, past the 2^53 s that a JavaScript number holds exactly.
+    const longAgo = { seconds: -199_097_968_544_446_944, nanos: 0 };
+    await answer(
+      socket,
+      populatedBodiesWith((body) =>
+        body.state.type === "unbound" ? { ...body, state: { type: "unbound", at: longAgo } } : body,
+      ),
+    );
+
+    await selectRow(user, /\/1024,/);
+
+    expect(reading("STATE")).toBe("UNBOUND");
+    expect(reading("SINCE")).toBe("UT -6,309,033,910.83 yr");
+  });
+
   it("names only the moons and rings the tags leave unmodelled", async () => {
     const { socket } = renderView();
     await answer(socket, populatedBodies());

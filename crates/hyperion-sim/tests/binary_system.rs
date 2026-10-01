@@ -47,9 +47,10 @@ fn threads() -> usize {
     std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
 }
 
-/// `f` of every item of `items`, shared out among threads, each thread's results folded with
-/// `fold` from `T::default()`, and the threads' results folded again in thread order: the same on
-/// any number of threads for a fold that is a sum of counts.
+/// `f` of every item of `items`, in one share per thread (run one after another on
+/// wasm32-wasip1), each share's results folded with `fold` from `T::default()`, and the shares'
+/// results folded again in share order: the same on any number of shares for a fold that is a sum
+/// of counts.
 fn par_fold<I: Sync, T: Default + Send>(
     items: &[I],
     f: impl Fn(&I, &mut T) + Sync,
@@ -57,16 +58,19 @@ fn par_fold<I: Sync, T: Default + Send>(
 ) -> T {
     let n = threads();
     let f = &f;
+    let share = |k: usize| {
+        let mut acc = T::default();
+        for item in items.iter().skip(k).step_by(n) {
+            f(item, &mut acc);
+        }
+        acc
+    };
+    #[cfg(not(target_family = "wasm"))]
     let parts: Vec<T> = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..n)
             .map(|k| {
-                scope.spawn(move || {
-                    let mut acc = T::default();
-                    for item in items.iter().skip(k).step_by(n) {
-                        f(item, &mut acc);
-                    }
-                    acc
-                })
+                let share = &share;
+                scope.spawn(move || share(k))
             })
             .collect();
         workers
@@ -74,6 +78,9 @@ fn par_fold<I: Sync, T: Default + Send>(
             .map(|w| w.join().expect("a worker finishes"))
             .collect()
     });
+    // wasm32-wasip1 has no threads: the shares run one after another (plan R04, T7.d).
+    #[cfg(target_family = "wasm")]
+    let parts: Vec<T> = (0..n).map(share).collect();
     let mut total = T::default();
     for part in parts {
         merge(&mut total, part);

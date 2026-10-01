@@ -53,6 +53,8 @@ impl fmt::Display for GeneratorVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     #[test]
     fn the_current_version_is_supported_and_others_are_not() {

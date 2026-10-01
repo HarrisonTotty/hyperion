@@ -53,14 +53,14 @@ repos:
 
       - id: oxlint
         name: oxlint (type-aware)
-        entry: pnpm lint
+        entry: just _with-surface pnpm lint
         language: system
         types_or: [ts, tsx, javascript, jsx]
         pass_filenames: false
 
       - id: typecheck
         name: tsc
-        entry: pnpm typecheck
+        entry: just _with-surface pnpm typecheck
         language: system
         files: (\.(ts|tsx|mts|cts)|tsconfig.*\.json|package\.json|pnpm-lock\.yaml)$
         pass_filenames: false
@@ -82,7 +82,7 @@ repos:
 
       - id: vitest
         name: vitest
-        entry: pnpm test
+        entry: just _with-surface pnpm test
         language: system
         stages: [pre-push]
         pass_filenames: false

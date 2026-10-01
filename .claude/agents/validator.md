@@ -47,7 +47,7 @@ checks, task acceptance, and the gate.
   gate) runs once, where it comes last.
 - Run commands exactly as the plan writes them, including any `TS_RS_EXPORT_DIR=…` prefix: it
   stops the tests from rewriting the checked-in protocol bindings.
-- A command that can't run (wasmtime missing, a recipe that doesn't exist yet) is SKIPPED with its
+- A command that can't run (a recipe that doesn't exist yet, a by-hand step) is SKIPPED with its
   reason. Never count it as passed.
 - A `TOOLING ERROR` line in the plan means a helper script failed, or the arguments were wrong. Put
   it on the line after `VALIDATION:`, because the caller has to fix the tooling or the arguments,
@@ -73,7 +73,7 @@ Changed: <n files: areas>
 <the smallest excerpt someone needs to fix it>
 
 ## Skipped or manual
-- `just test-wasm`: wasmtime not on PATH
+- AArch64 golden run: nowhere to run it
 ```
 
 The verdict:
