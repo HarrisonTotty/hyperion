@@ -8,7 +8,7 @@
  * (additive), then each line batch, its `--surface-0` casing first and its stroke over it, both
  * premultiplied over what is beneath. Sprites go before the lines, where the draw list lists them
  * after, so that a mark's casing covers a star beneath it, as the guide's casing rule wants of every
- * mark over the image. The shaders are standard WGSL in R01's convention (its draft Design note 23):
+ * mark over the image. The shaders are standard WGSL in R01's convention (its Design note 23):
  * `frame.wgsl`'s `Frame` at `@group(0)`, each material's `Draw` at `@group(1)` (the draw's offset
  * from the camera, then the spec's uniforms in order), its storage buffer at `@group(2)`, and the
  * entry points `vertexMain` and `fragmentMain`. Every mesh's positions are the corners of the

@@ -67,6 +67,7 @@ fn fragmentMain(v: SpriteVarying) -> @location(0) vec4f {
   let at = sprites[v.sprite * 2u].xy;
   let rgb = sprites[v.sprite * 2u + 1u].xyz;
   let weight = pixelWeight(v.position.x, at.x) * pixelWeight(v.position.y, at.y);
-  // Alpha 0: the additive blend keeps the destination's alpha, R07's meter class.
-  return vec4f(agxSprite(rgb * weight), 0.0);
+  // Alpha 1: R01's additive blend scales the colour by the source alpha and keeps the
+  // destination's alpha (R07's meter class) whatever this writes.
+  return vec4f(agxSprite(rgb * weight), 1.0);
 }

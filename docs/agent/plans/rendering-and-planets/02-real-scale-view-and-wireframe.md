@@ -1472,3 +1472,65 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   outwards for a bracket's arm (two thirds of the radius), in `--text`; corner brackets now mean
   the selection alone. `targetBracket` and `TargetBracket` are renamed `targetMark` and
   `TargetMark`; range and closure are unchanged. The legend entry is `TICKS TARGET` (R02.T2.f).
+- **Deviations in R02.T14, as built.** The shaders follow R01's Design note 23 (decided
+  2026-09-30, standard WGSL, built as R01.T8.k): `frame.wgsl`'s `Frame` at `@group(0)` (R01's
+  file; its `viewport` is a `vec4f`), each shader's own `Draw` at `@group(1)` (`offsetFromCameraM`
+  then the spec's uniforms in order, held to the specs by a test that reads the sources), one
+  read-only `array<vec4f>` storage buffer at `@group(2) @binding(0)`, entry points `vertexMain`
+  and `fragmentMain`, and the meshes' positions used as corner parameters at `@location(0)`.
+  Every per-frame quantity goes through four storage buffers that `WireframeRenderer`
+  (`view/wireframe/submit.ts`) grows by doubling (the engine frees no buffer, so an outgrown one is
+  kept until the engine goes); the pure `packWireframe` packs them and is what the tests read.
+  Four materials, not three: the bodies' occluder spheres are `occluderSphere.wgsl`, each a
+  screen rectangle the CPU bounds (`sphereScreenRect`: a 16-gon circumscribing the silhouette
+  circle, the whole view where it reaches behind the near plane) in which each fragment intersects
+  its ray with the sphere and writes that depth through `frag_depth`, exact where a tessellated
+  sphere would fall inside its own limb; for that the draw list's `OccluderSphere` gains
+  `altitudeM` (distance less the occluder radius, differenced in `f64`), and the intersection is
+  t = altitude × (D + r) ÷ (b + √h²), free of cancellation near the body. Its written depth is then
+  pushed away by three pixels' worth of its own screen slope, taken in closed form from the tangent
+  plane at the hit point (a slope term like the hull faces', `SLOPE_SCALE` = 3 for a 1.5 px stroke
+  with its 1 px casings and fringe): the 4 × 10⁻⁶ margin of Design note 5 holds a graticule's
+  centreline in front of its occluder but not its width, and without the term the inner half of
+  every obliquely seen graticule stroke failed the depth test (found by the plan-conformance review;
+  checked on both adapters, the stroke's full value restored). **For the owner:** Design note 5
+  gains this term; within a few pixels of the limb it leaves the occluder further back, so a line
+  passing behind the limb can show there by about a stroke's width. The hulls' faces are
+  `occluder.wgsl`, with `firstTriangle` in its `Draw`. Provides' shader list and the Consumes'
+  `none`/`additive` are thus stale: the shaders are `frame.wgsl` (R01's), `lines.wgsl`,
+  `occluder.wgsl`, `occluderSphere.wgsl`, `starSprite.wgsl` and `toneCurve.wgsl`, and lines use
+  `premultiplied`. Lines take R01's `premultiplied` blend (the Consumes said `none`/`additive`): a
+  stroke's antialiased coverage must lie over what is beneath, and its casing must cover a star, so
+  the submission draws occluders, then sprites, then each batch's casing (width + 2 × casing,
+  `--surface-0`) and its stroke as two draws of one instance range, where T13's list has lines
+  before sprites. Screen-space symbology is drawn at depth 1 (the near plane's), which passes every
+  greater-equal test, since a material has no depth-test switch. A dashed batch's phase is the
+  screen length before each segment, restarting where a polyline breaks. Sprites write alpha 1,
+  since R01's `additive` is `src-alpha, one`; their erf is Abramowitz and Stegun 7.1.26. Token
+  colours are decoded from sRGB to linear (`linearColour`), so that the canvas's sRGB view encodes
+  them back. **`toneCurve.wgsl`'s sigmoid** is re-expanded exactly about x = 0.5 and evaluated by
+  Horner's rule: the monomial form lost 1.2 × 10⁻⁵ in `f32` (its terms reach 100 and cancel), which
+  put the 64-point comparison at 2.7 × 10⁻⁵ on SwiftShader and 5.4 × 10⁻⁵ on the RTX 3080; the new
+  form loses 1.5 × 10⁻⁷, tested in `f32` by `Math.fround`.
+- **R02.T14.c, checked by scratch pages (not committed); its registration waits.** B3's
+  `just test-render` (R01.T9) is not on the branch, so the smoke checks ran from scratch pages:
+  first on a raw-WebGPU host of the same convention, then through R01's own engine
+  (`createWebGpuEngine`, `WireframeRenderer.frame` into a 640 × 360 `createRenderTarget`, read back
+  by `readTexture`), on SwiftShader headless and on the RTX 3080 (`DISPLAY=:0`, NVIDIA 615.71.09),
+  with identical results: every texel of the first frame of both kept scenes finite (an
+  `rgba16float` target), the depth 0 at a corner where nothing was drawn; a cased 1 px stroke's
+  neighbouring rows exactly `--surface-0` and its own row `--text`; a face at the near plane reads
+  depth 0.99989 (its 1.0001 × n) in the upper half of the view and 0 in the lower (+y up, no
+  half-Z or flip); the AgX WGSL at 64 luminances from 10⁻⁶ to 10³ within 5.1 × 10⁻⁷ (SwiftShader)
+  and 4.5 × 10⁻⁷ (RTX 3080) of the TypeScript port, `agxSprite` likewise; a sprite at (320.3,
+  180.7) peaks in its own pixel and lights nothing outside its 7 × 7 quad; the sphere occluder's
+  depth equals the exact ray intersection to seven digits at 10⁷ m, 400 km altitude and 1 AU before
+  its slope term and lies behind it after, hides a line behind the body, and shows a cased line on
+  its near surface seen at an angle at full value with its casing on both sides. **Finding:** the
+  edge check as written ("a second edge 10⁻⁵ of the distance behind … hidden") holds at 1 m (the
+  bias moves the face by 9.5 × 10⁻⁶ there) but fails at 10⁸ m, where the face's depth, 10⁻⁹, sits
+  low in its binade and the bias of 128 moves it by 1.42 × 10⁻⁵ of the distance, which Design note 5
+  itself states as 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵; both adapters agree. At 2 × 10⁻⁵ and 3 × 10⁻⁵ the
+  second edge is hidden at both distances. The check is recorded at 3 × 10⁻⁵ (twice the bias's upper
+  bound) and the 10⁻⁵ wording is for the owner; the alternative is a constant near 67. Pending
+  R01.T9: the shaders' entries in `WGSL_CATALOGUE` and these checks as the harness's smoke test.
