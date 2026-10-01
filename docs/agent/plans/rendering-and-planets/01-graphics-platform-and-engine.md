@@ -1596,7 +1596,10 @@ runs on the development machine (RTX 3080), and again on the UHD 620 by the owne
 records the UHD 620's `targetRounding` (R07's probe expects `toward-zero` for both formats).
 
 - Acceptance: the figures recorded in this plan's as-built notes, the UHD 620's when the owner has
-  run it.
+  run it. Added by the owner-delegated hardware decision (item 7, 2026-09-30): on the RTX 3080 with
+  `--hyperion-gpu-timing`, `GraphicsStatus.timer` reads `full` and recorded pass times include
+  values that are not multiples of 65,536 ns; T10's twins run once there, the bit-exact pair equal
+  to the CPU total, with `subgroup_size` recorded; `targetRounding` is an explicit line.
 
 ### R01.T12 The Vulkan soak (open question 14)
 
@@ -1615,6 +1618,10 @@ catches `vkAcquireNextImageKHR` errors if the layer loads in the GPU sandbox. Re
 - Acceptance: the three runs recorded (restarts, hangs, DOM mismatches, validation messages); the
   switch set changed if the soak says `DefaultANGLEVulkan` is needed or harmful, in a commit that
   cites the record; open question 14 answered in the notes for the brainstorm's next revision.
+  Added by the hardware decision (item 7): the record states that the adapter is NVIDIA's
+  (`nvidia`/`ampere`, not llvmpipe or SwiftShader) and `getGPUFeatureStatus()`. By the owner's
+  ruling of 2026-10-01, nothing blanks, resizes or moves the owner's display: the soak runs hidden
+  and offscreen, and the display blank and `xdotool` resizes are the owner's, by hand.
 
 ### R01.T13 Same-origin child windows (open question 15, second half), by hand
 
@@ -1638,7 +1645,10 @@ and treat that one validation error from a closing child as expected, not as a f
 Run everything below and fill the as-built notes: the chunk sizes, the harness times, the soak and
 the three-canvas figures.
 
-- Acceptance: `just ci` and `just test-render` pass; the notes are complete.
+- Acceptance: `just ci` and `just test-render` pass; the notes are complete. Added by the hardware
+  decision (item 7): T2's crash-loop check (three `kill -9` of the GPU process relaunch once into
+  safe mode) on a built client on the RTX 3080, and the Risks entries that took the UHD 620 for
+  this machine rewritten from T11's and T12's records.
 
 ## Verification
 
@@ -2417,3 +2427,27 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     CPU's `wrapping_add` total (128 and 127 wraps past 2³²), so they equal each other. The f32 sum
     read with `tolerance` lay within `highamBound` on both paths on SwiftShader, and equal to the
     `f64` sum there (98,298.53125); the ordinary read throws `PresentationOnlyReadback`.
+  - On the RTX 3080 (the whole harness, run by hand under the client's switches and
+    `DISPLAY=:0` in a hidden offscreen window, 2026-10-01): every check passes on both paths;
+    NVIDIA's `subgroup_size` is 32 (the device's minimum is 32 too), both u32 twins equal the CPU
+    total, and the f32 sum lies within the bound (equal to the `f64` sum again).
+- **T13, as built (2026-10-01, RTX 3080, Electron 44.4.3, a scratch prototype, not merged).** Run
+  hidden and offscreen, by the owner's ruling that nothing takes the projector: an opener and a
+  same-origin `window.open` child, the child's canvas a `RenderView` of the opener's engine,
+  drawn from the opener's `requestAnimationFrame`.
+  - The child stays in the opener's renderer process: `app.getAppMetrics()` shows one `Tab`
+    process before and after each child opens.
+  - Pacing, offscreen: both windows' `requestAnimationFrame` at 16.7 ms (p50 and p95 16.7–16.8 ms).
+  - The rule holds. With the child's `RenderView` disposed on its `pagehide`, closing the child
+    raised no error and no loss. Without it, every later submit to the closed child's context
+    raised "context configuration is invalid", followed by the invalid texture, view and command
+    buffer it causes: 404 uncaptured errors in 2 s at 60 frames a second. The device was not lost
+    and the opener kept drawing. **The rule for R07.T21:** drop the child's `RenderView` in the
+    child window's `pagehide` listener, before the opener's next frame; treat a "context
+    configuration is invalid" error from a closing child as expected, never as a fault; and never
+    submit to a view whose window has closed.
+  - Under the Vulkan surface (the client's default switches), creating or resizing a hidden
+    offscreen child restarted the GPU process (`vkAcquireNextImageKHR` OUT_OF_DATE, T12's
+    finding), so the runs above used `--disable-vulkan-surface`. A hidden offscreen child also
+    reports a 0 × 0 inner size, so its resize and its pacing on a second display are **pending
+    by hand for the owner**, on screen.
