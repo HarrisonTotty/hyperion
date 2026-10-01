@@ -9,6 +9,7 @@
   "include": [
     "src/main",
     "src/preload",
+    "src/smoke",
     "electron.vite.config.mts",
     "vitest.config.mts",
     "package.json"
