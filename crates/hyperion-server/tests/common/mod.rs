@@ -6,6 +6,8 @@
     reason = "each test binary compiles this module and uses its own subset of the helpers"
 )]
 
+pub mod scene;
+
 use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
