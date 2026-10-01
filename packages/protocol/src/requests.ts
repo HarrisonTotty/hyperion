@@ -3,6 +3,14 @@ import type { RequestBody } from "./generated/RequestBody";
 import type { RequestError } from "./generated/RequestError";
 import type { ResponseBody } from "./generated/ResponseBody";
 import type { ServerMessage } from "./generated/ServerMessage";
+import type { SubscriptionTopic } from "./generated/SubscriptionTopic";
+import type { UniverseIdHex } from "./generated/UniverseIdHex";
+import {
+  type StateOf,
+  type Subscription,
+  SubscriptionTable,
+  type TopicName,
+} from "./subscriptions";
 
 /** The `kind` of every request the protocol defines. */
 export type RequestKind = RequestBody["kind"];
@@ -41,6 +49,22 @@ export interface PendingRequest<K extends RequestKind> {
   /**
    * Cancels the request: the server is told, and the outcome settles as `aborted` at once unless it
    * has already settled. Calling it again does nothing.
+   */
+  cancel(): void;
+}
+
+/** How a `subscribe` ended: the live subscription, or why there is none. */
+export type SubscribeOutcome<T extends TopicName> =
+  | { readonly ok: true; readonly subscription: Subscription<T> }
+  | { readonly ok: false; readonly error: RequestFailure };
+
+/** A `subscribe` in flight. */
+export interface PendingSubscription<T extends TopicName> {
+  /** Settles exactly once with the subscription or the failure, and never rejects. */
+  readonly outcome: Promise<SubscribeOutcome<T>>;
+  /**
+   * Cancels the `subscribe`, as {@link PendingRequest.cancel} does. A subscription that has opened
+   * is ended with its own `unsubscribe` instead.
    */
   cancel(): void;
 }
@@ -141,8 +165,13 @@ export const setLastRequestId = Symbol("setLastRequestId");
 export class RequestClient {
   readonly #send: (message: ClientMessage) => boolean;
   readonly #inFlight = new Map<number, InFlight>();
-  /** Cancelled requests whose terminal message the server still owes. */
-  readonly #cancelled = new Set<number>();
+  /** The live subscriptions, which notifications are routed to (rendering plan R03, R03.T5.c). */
+  readonly #subscriptions = new SubscriptionTable();
+  /**
+   * Cancelled requests whose terminal message the server still owes, each with what to do if that
+   * message is a response after all: a `subscribe` answered as it was cancelled must be ended.
+   */
+  readonly #cancelled = new Map<number, ((response: ResponseBody) => void) | undefined>();
   #lastId = 0;
 
   /**
@@ -170,21 +199,94 @@ export class RequestClient {
   }
 
   /**
-   * Settles the request a `response` or `request_error` ends.
+   * Opens a subscription to `topic` in `universe`: a `subscribe` request whose answer opens a
+   * {@link Subscription} that the server's notifications are routed to.
+   *
+   * @remarks
+   * The subscription is registered the moment its answer arrives, so that no notification after
+   * it is taken for one of an unknown subscription. When the link is down the outcome settles as
+   * `link_lost` straight away.
+   */
+  subscribe<T extends TopicName>(
+    universe: UniverseIdHex,
+    topic: Extract<SubscriptionTopic, { topic: T }>,
+  ): PendingSubscription<T> {
+    let opened: Subscription<T> | undefined;
+    const started = this[startRequest](
+      { kind: "subscribe", universe, topic },
+      (response) => {
+        if (response.kind !== "subscribe") {
+          return;
+        }
+        const id = response.subscription;
+        if (isStateOf(topic.topic, response.state)) {
+          opened = this.#subscriptions.open(id, response.state, () => {
+            this.#unsubscribe(id);
+          });
+        } else {
+          // Opened, but not as asked: the subscription is of no use and is ended at once.
+          this.#unsubscribe(id);
+        }
+      },
+      (late) => {
+        // Answered as it was cancelled: the server holds a subscription nobody will read.
+        if (late.kind === "subscribe") {
+          this.#unsubscribe(late.subscription);
+        }
+      },
+    );
+    const outcome = started.outcome.then((settled): SubscribeOutcome<T> => {
+      if (!settled.ok) {
+        return settled;
+      }
+      if (opened === undefined) {
+        return {
+          ok: false,
+          error: {
+            code: "protocol_violation",
+            message: `the server opened a subscription to another topic than ${topic.topic}`,
+          },
+        };
+      }
+      return { ok: true, subscription: opened };
+    });
+    return {
+      outcome,
+      cancel: () => {
+        started.cancel("aborted");
+      },
+    };
+  }
+
+  /**
+   * Settles the request a `response` or `request_error` ends, and routes a `notification` to its
+   * subscription.
    *
    * @remarks
    * An answer to an unknown or cancelled ID is dropped: a cancelled request has already settled.
+   * So is a notification for a subscription this client does not have, whether it has ended or
+   * was never opened (rendering plan R03, Design note 1).
    *
-   * @returns `true` when the message belonged to a request and was consumed, `false` for every
-   *   other message, which the caller handles itself.
+   * @returns `true` when the message belonged to a request or a subscription and was consumed,
+   *   `false` for every other message, which the caller handles itself.
    */
   handleServerMessage(message: ServerMessage): boolean {
     switch (message.type) {
-      case "response":
-        this.#take(message.id)?.respond(message.body);
+      case "response": {
+        const late = this.#cancelled.get(message.id);
+        const request = this.#take(message.id);
+        if (request === undefined) {
+          late?.(message.body);
+        } else {
+          request.respond(message.body);
+        }
         break;
+      }
       case "request_error":
         this.#take(message.id)?.fail(message.error);
+        break;
+      case "notification":
+        this.#subscriptions.route(message);
         break;
       case "welcome":
       case "pong":
@@ -194,7 +296,10 @@ export class RequestClient {
     return true;
   }
 
-  /** Settles every request in flight as `link_lost`, for when the socket has closed. */
+  /**
+   * Settles every request in flight as `link_lost` and ends every subscription, for when the
+   * socket has closed: the server ends a connection's subscriptions with its socket.
+   */
   linkLost(): void {
     const inFlight = [...this.#inFlight.values()];
     this.#inFlight.clear();
@@ -202,14 +307,24 @@ export class RequestClient {
     for (const request of inFlight) {
       request.fail(LINK_LOST);
     }
+    this.#subscriptions.linkLost();
   }
 
-  /** Starts a request; see {@link startRequest}. */
-  [startRequest]<K extends RequestKind>(body: RequestOf<K>): StartedRequest<K> {
+  /**
+   * Starts a request; see {@link startRequest}. `onAnswer`, if given, sees the response the moment
+   * it arrives, before the outcome settles; `onLateAnswer` sees a response that arrives after the
+   * request was cancelled.
+   */
+  [startRequest]<K extends RequestKind>(
+    body: RequestOf<K>,
+    onAnswer?: (response: ResponseBody) => void,
+    onLateAnswer?: (response: ResponseBody) => void,
+  ): StartedRequest<K> {
     const id = this.#allocateId();
     const outcome = new Promise<RequestOutcome<K>>((resolve) => {
       this.#inFlight.set(id, {
         respond: (response) => {
+          onAnswer?.(response);
           resolve(
             answers<K>(body, response)
               ? { ok: true, response }
@@ -242,7 +357,7 @@ export class RequestClient {
         this.#inFlight.delete(id);
         // With the link down the server has forgotten the request, so it owes no answer.
         if (this.#send({ type: "cancel", id })) {
-          this.#cancelled.add(id);
+          this.#cancelled.set(id, onLateAnswer);
         }
         request.fail(CANCEL_FAILURES[reason]);
       },
@@ -257,6 +372,13 @@ export class RequestClient {
    */
   [setLastRequestId](id: number): void {
     this.#lastId = id;
+  }
+
+  /** Ends subscription `id` on the server; its answer changes nothing here. */
+  #unsubscribe(id: number): void {
+    // Discarded without a `.catch`: a request's outcome never rejects (it settles every failure,
+    // `link_lost` included), and this package has no console to report on.
+    void this.request({ kind: "unsubscribe", subscription: id }).outcome;
   }
 
   /** Removes and returns the request that a terminal message with this ID ends. */
@@ -277,6 +399,13 @@ export class RequestClient {
     );
     return this.#lastId;
   }
+}
+
+/** Whether `state` is the state of a subscription to `topic`, which makes it a {@link StateOf}. */
+function isStateOf<T extends TopicName>(topic: T, state: StateOf<TopicName>): state is StateOf<T> {
+  // With the scene the only topic the comparison is always true; plan 12's alerts make it real.
+  // oxlint-disable-next-line typescript/no-unnecessary-condition
+  return state.topic === topic;
 }
 
 /**

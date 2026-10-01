@@ -29,6 +29,9 @@ libm = { version = "=0.2.16", default-features = false }
 # `hyperion-fit` only (plan 15, Design note 3): its deterministic parallel map-reduce.
 rayon = "1.11.0"
 serde = { version = "1.0.229", features = ["derive"] }
+# The server only (rendering plan R03, R03.T10.a): `TCP_NOTSENT_LOWAT` on accepted sockets without
+# `unsafe`, through `SockRef`; `all` for that option. Already in the tree through tokio.
+socket2 = { version = "0.6.5", features = ["all"] }
 # `float_roundtrip` (ruling 64.7): the default parser can read a 17-digit float one ulp off, so a
 # client's coordinates would reach the server a bit away from what it sent. Writing is exact either
 # way, so no server output moves.
