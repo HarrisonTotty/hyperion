@@ -1,8 +1,10 @@
 ---
 name: sim-determinism
-description: Keeps HYPERION's procedural generation bit-for-bit reproducible across runs, call orders and CPU architectures. It covers random streams and domain tags, word consumption, iteration and summation order, integer widths, golden files, GENERATOR_VERSION bumps and statistical-test seeds. Use whenever writing or changing generator code in crates/hyperion-sim or crates/hyperion-testkit, or fitted tables in crates/hyperion-fit, adding random draws, when a golden test fails, or before bumping the generator version.
+description: Keeps HYPERION's procedural generation bit-for-bit reproducible across runs, call orders, CPU architectures and WebAssembly. It covers random streams and domain tags, word consumption, iteration and summation order, integer widths, the hazards of code run natively and as WebAssembly (the shared terrain), golden files, GENERATOR_VERSION bumps and statistical-test seeds. Use whenever writing or changing generator code in crates/hyperion-sim, crates/hyperion-base, crates/hyperion-surface or crates/hyperion-testkit, or fitted tables in crates/hyperion-fit, adding random draws, when a golden test fails, or before bumping the generator version.
 paths:
   - "crates/hyperion-sim/**"
+  - "crates/hyperion-base/**"
+  - "crates/hyperion-surface/**"
   - "crates/hyperion-testkit/**"
   - "crates/hyperion-fit/**"
 ---
@@ -12,20 +14,26 @@ paths:
 A universe is `(seed, generator_version)`. The same pair must give the same bits on x86-64,
 AArch64 and wasm32, in any call order, for as long as saves exist. What checks it today: `just ci`
 runs the goldens natively on x86-64; `just test-wasm` runs them as `wasm32-wasip1` under wasmtime,
-by hand, outside every gate; and nothing checks AArch64. The sim's `clippy.toml` already bans platform maths (go through
-`hyperion_sim::math`), `f64::mul_add` and float `to_bits`, and `hyperion-fit`'s repeats the ban for
-fitted tables. The exact `libm` pin in the root `Cargo.toml` is part of the output too: changing it
-is a generator-version change. This skill covers what no lint can see.
+by hand, outside every gate; and nothing checks AArch64. Every determinism crate's own
+`clippy.toml` (the sim's, `hyperion-base`'s, `hyperion-surface`'s and `hyperion-fit`'s) already bans
+platform maths (go through `hyperion_base::math`, which the sim re-exports as
+`hyperion_sim::math`), `f64::mul_add`, the `algebraic_*` methods and float `to_bits`. The exact
+`libm` pin in the root `Cargo.toml` is part of the output too: changing it is a generator-version
+change. This skill covers what no lint can see.
 
 ## Streams and draws
 
 - Randomness comes only from `Stream::open(seed, TAG, key)`, or, for events, from
   `EventKey::derive(seed, EVENT_TAG, subject)` and its `bin_stream` / `event_stream`
   (`Stream::open` panics on an `Event`-scope tag). Each property group gets its own domain tag,
-  declared inside `domain_tags!` in `crates/hyperion-sim/src/rng/tags.rs` under the plan's heading,
-  as `NAME: <scope variant> = "a.b.c";` (for example
-  `GALAXY_PARAMS_STELLAR_MASS: Galaxy = "galaxy.params.stellar_mass";`), by the task that first
-  opens it. An event tag also takes a number in `crates/hyperion-sim/src/id/event_tags.rs`, backed
+  declared inside `domain_tags!` under the plan's heading, as `NAME: <scope variant> = "a.b.c";`
+  (for example `GALAXY_PARAMS_STELLAR_MASS: Galaxy = "galaxy.params.stellar_mass";`), by the task
+  that first opens it, in one of three registries: `crates/hyperion-sim/src/rng/tags.rs` for every
+  stage of the sim (event tags, `body.surface` and `body.surface.detail` included);
+  `crates/hyperion-surface/src/tags.rs` for the `surface.*` tags the surface crate opens, and
+  `selftest.surface.*` for its `SelfTest` tags; `crates/hyperion-base/src/rng/tags.rs` only for
+  what base itself opens (`selftest.stream`). The sim asserts the three disjoint at compile time.
+  An event tag also takes a number in `crates/hyperion-sim/src/id/event_tags.rs`, backed
   by an `Event`-scope domain tag.
 - A tag is never renamed or removed. Its name is hashed into every key it opens.
 - **The number and order of words drawn from a stream is part of the output.** Adding a draw,
@@ -33,8 +41,9 @@ is a generator-version change. This skill covers what no lint can see.
   property gets a new tag, not an extra draw on an existing stream. A rejection loop is fine as
   long as it consumes words deterministically.
 - Keys come from integers only, through the `ObjectKey` constructors or the `From<SystemId>` and
-  `From<BodyId>` conversions. Never derive a key from float bits, pointers, the index of an
-  unordered collection, or `std::hash` (`RandomState` is seeded per process).
+  `From<BodyId>` conversions (which call `ObjectKey::system` and `ObjectKey::body`). Never derive a
+  key from float bits, pointers, the index of an unordered collection, or `std::hash`
+  (`RandomState` is seeded per process).
 - Random decisions go through the integer thresholds `rng::{Threshold, Thresholds, Mark}`
   (`rng/decide.rs`), usually via `Stream::decide`, `Stream::pick` or `Stream::mark`. Don't compare a
   float uniform with a float probability.
@@ -81,6 +90,56 @@ For anything that may sit behind a cache, prove order independence with
 - Nothing that reaches output, a key or a hash may depend on `usize`, which has 32 bits on wasm.
   Use `u64` and `u32`. `as usize` on a `u64` truncates there.
 - A float-to-integer `as` saturates and turns NaN into 0. Handle NaN and the range explicitly.
+
+## Hazards across targets
+
+The shared terrain (`hyperion-surface`, with `hyperion-base` beneath it) runs natively on the
+server and as WebAssembly in the client, and both must produce the same `f64` for the same point,
+or the client draws ground the server does not collide with (the rendering brainstorm's
+"Determinism hazards specific to terrain"). Everything above holds there too; these hazards are
+specific to code that runs on more than one target:
+
+- **Transcendentals only through `hyperion_base::math`.** Base's and the surface crate's own
+  `clippy.toml` files ban the platform methods, and each is self-contained: the workspace root's
+  file allows reading float bits (the testkit prints them), so a crate that fell back to it could
+  hash a float in a noise function without a lint firing. A new determinism crate gets a file of
+  its own; `crates/hyperion-testkit/tests/clippy_bans.rs` fails if it has none.
+- **Fused multiply-add only where `math::mul_add` is written.** Rust never contracts `a * b + c`
+  on its own, so in hot noise code write the plain expression and it stays two roundings on every
+  target. The `algebraic_*` methods are banned everywhere: Rust's documentation says "the same
+  inputs may produce different results even within a single program run" (`primitive_docs.rs`,
+  "Algebraic operators", rustc 1.98.1).
+- **Octave sums in a fixed order.** Sum octaves, channels and contributions in their declared
+  order, never through an iterator adaptor that may split or reorder the work.
+- **No relaxed SIMD.** A build with `+relaxed-simd` fails in both client crates (a
+  `compile_error!`), any `target_feature(enable …)` attribute is rejected by a source test, and the
+  20 relaxed intrinsics of `core::arch::wasm32` are Clippy-banned for the browser target: their
+  NaN, signed-zero and rounding results are the engine's choice. Fixed-width `simd128` is allowed,
+  provided no sum is reassociated to fit the lanes; no lint can see that, so review for it.
+- **`min` and `max` are not exact at a signed zero.** Rust's documentation says that when the
+  inputs compare equal, such as `+0.0` and `-0.0`, "either input may be returned
+  non-deterministically" (`f64::max`, rustc 1.98.1); constant folding orders −0 below +0 while the
+  x86-64 instruction returns the second operand. The height path uses its own sign-fixing `min`
+  and `max` until `f64::minimum` and `maximum` are stable (rust-lang/rust issue 91079).
+- **A NaN's sign is not portable.** Rust does not guarantee a NaN's bit pattern across arithmetic,
+  so `total_cmp`, `is_sign_positive`, `is_sign_negative` and `copysign` can differ between targets
+  on a NaN (`f64::is_sign_positive`'s documentation). Assert heights finite before they are sorted,
+  compared or emitted.
+- **Flush-to-zero from outside.** WebAssembly keeps subnormals, but a native thread can be put in
+  a flushing mode by a library it loads: GCC before 13 linked `crtfastmath.o`, which sets FTZ and
+  DAZ at startup, into shared objects built with `-ffast-math` (GCC 13's release notes), and Clang
+  links it when `-mdaz-ftz` is given (llvm-project pull request 80475). The server probes every
+  compute thread before its first job and after each, and refuses to generate on one that
+  flushes (R04.T9); code that loads a native library probes the loading thread and every worker. A
+  mode switched on and off within one job is invisible to the probes; the brainstorm's answer is to
+  run the language model out of process.
+- **Integer seeds and counter-based noise.** Derive seeds with integer arithmetic, and draw noise
+  from `Stream` by counter (a lattice point's key, its word number), so that the value at a point
+  never depends on which points were computed first. Cell and cache keys are `u64`, never `usize`,
+  which is 32 bits on WebAssembly.
+- **No `f32` in the authoritative path.** The GPU draws in `f32`, but every height, normal or
+  material the server also computes is `f64` end to end; an `f32` rounding in the middle differs
+  from the GPU's and from nothing the server knows.
 
 ## When a golden test fails
 

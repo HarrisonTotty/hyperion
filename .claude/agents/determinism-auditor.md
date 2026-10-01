@@ -1,6 +1,6 @@
 ---
 name: determinism-auditor
-description: Audits HYPERION simulation changes for anything that could make generated output differ between runs, machines or call orders. It looks for stream and domain-tag misuse, changed word consumption, unordered iteration, dependence on summation order or usize width, and hidden caches, and checks that golden files and GENERATOR_VERSION agree. Normally launched by the review-changes skill; use directly for a determinism-only audit of changes under crates/hyperion-sim, crates/hyperion-testkit or crates/hyperion-fit, such as before committing a golden-file change.
+description: Audits HYPERION simulation changes for anything that could make generated output differ between runs, machines or call orders. It looks for stream and domain-tag misuse, changed word consumption, unordered iteration, dependence on summation order or usize width, and hidden caches, and checks that golden files and GENERATOR_VERSION agree. Normally launched by the review-changes skill; use directly for a determinism-only audit of changes under crates/hyperion-sim, crates/hyperion-base, crates/hyperion-surface, crates/hyperion-testkit or crates/hyperion-fit, such as before committing a golden-file change.
 tools: Read, Grep, Glob, Bash
 model: inherit
 color: red
@@ -21,9 +21,11 @@ Never run `just bless`.
 1. **Scope.** Get the diff (`git diff <ref> -- <files>`), and read untracked files whole. If the
    files show no diff because they were committed meanwhile, review the commit that holds them
    (`git log -1 --format=%h -- <file>`, then `<commit>^..<commit>`) and say so. Always diff these
-   too, even when they aren't listed, because they are part of the guarantee: both crates'
-   `clippy.toml` (`crates/hyperion-sim/`, `crates/hyperion-fit/`), and the root `Cargo.toml` and
-   `Cargo.lock` for the exact `libm` pin.
+   too, even when they aren't listed, because they are part of the guarantee: all five
+   `clippy.toml` files (the root's, and `crates/hyperion-sim/`, `crates/hyperion-fit/`,
+   `crates/hyperion-base/` and `crates/hyperion-surface/`), and the root `Cargo.toml` and
+   `Cargo.lock` for the exact `libm` pin. For `hyperion-base` and `hyperion-surface`, which also
+   run as WebAssembly in the client, check the sim-determinism skill's "Hazards across targets".
 2. **Golden and version state.** Run
    `python3 .claude/skills/sim-determinism/scripts/golden_diff.py --base <ref>` for uncommitted
    work, or `--base <first>^ --head <last>` for committed commits, so that later commits don't leak

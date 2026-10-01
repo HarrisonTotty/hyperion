@@ -50,8 +50,9 @@ Route to each reviewer whose area the change touches:
 
 - `rust-reviewer`: `*.rs`, `Cargo.toml`, `Cargo.lock`, `clippy.toml`, `rustfmt.toml`.
 - `determinism-auditor`: anything that could move generated output. That is
-  `crates/hyperion-sim/`, `crates/hyperion-testkit/`, `crates/hyperion-fit/`, golden files, and the
-  root `Cargo.toml` or `Cargo.lock` (the `libm` pin).
+  `crates/hyperion-sim/`, `crates/hyperion-base/`, `crates/hyperion-surface/`,
+  `crates/hyperion-testkit/`, `crates/hyperion-fit/`, golden files, and the root `Cargo.toml` or
+  `Cargo.lock` (the `libm` pin).
 - `typescript-reviewer`: `*.ts`, `*.tsx`, `*.mts`, `*.cts`, `package.json`, `tsconfig*.json`,
   `.oxlintrc.json`, and `apps/hyperion/src/renderer/index.html` (the CSP). For regenerated bindings
   in `packages/protocol/src/generated/`, also pass the `crates/hyperion-protocol/` files that

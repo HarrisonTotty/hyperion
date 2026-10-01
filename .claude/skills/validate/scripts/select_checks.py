@@ -40,7 +40,7 @@ INFRA = re.compile(r"^(justfile|\.github/|\.pre-commit-config\.yaml)")
 # A test marked slow runs only under `just test-slow`, so a change that touches one is gated with
 # `just ci-slow` rather than `just ci`.
 SLOW_MARK = re.compile(r'#\[ignore\s*=\s*"slow')
-DETERMINISM_CRATES = {"hyperion-sim", "hyperion-testkit", "hyperion-fit"}
+DETERMINISM_CRATES = {"hyperion-sim", "hyperion-base", "hyperion-surface", "hyperion-testkit", "hyperion-fit"}
 # `cargo test` runs ts-rs's export tests, which rewrite the checked-in bindings through
 # TS_RS_EXPORT_DIR (.cargo/config.toml). An environment value takes precedence over that config,
 # so pointing it at a scratch directory keeps the tree untouched and `gen-protocol-check` honest.
@@ -288,7 +288,7 @@ def main() -> None:
     slow_owned = slow_marked or determinism
     if slow_owned:
         why = "the fast gate plus the slow tests: "
-        why += f"{slow_marked[0]} marks one" if slow_marked else "sim, testkit or fit changed"
+        why += f"{slow_marked[0]} marks one" if slow_marked else "a determinism crate changed"
         gate: list[tuple[str, str]] = [(f"{NO_EXPORT}just ci-slow", why)]
     else:
         gate = [(f"{NO_EXPORT}just ci", "the commit gate: fmt-check, check, lint, test, gen-protocol-check")]
@@ -298,7 +298,7 @@ def main() -> None:
     if determinism:
         ok, reason = wasm_available()
         if ok:
-            gate.append(("just test-wasm", "sim, testkit or fit changed; goldens must hold bit for bit on wasm32"))
+            gate.append(("just test-wasm", "a determinism crate changed; goldens must hold bit for bit on wasm32"))
         else:
             skipped.append(f"`just test-wasm`: {reason}")
         skipped.append("AArch64 golden run: nowhere to run it (no remote, and the CI workflow was removed on "

@@ -1,7 +1,7 @@
 # Clippy configuration for every crate without one of its own: `hyperion-server`,
 # `hyperion-protocol` and `hyperion-testkit`. Clippy takes the nearest `clippy.toml` walking up from
 # the crate's manifest and does not merge, so the determinism crates' own files (the sim's, the
-# fitting crate's and base's) shadow this file entirely and stay self-contained;
+# fitting crate's, base's and the surface crate's) shadow this file entirely and stay self-contained;
 # `crates/hyperion-testkit/tests/clippy_bans.rs` holds them all to one ban list.
 #
 # Every transcendental function goes through `hyperion_sim::math` (`hyperion_base::math`), which
