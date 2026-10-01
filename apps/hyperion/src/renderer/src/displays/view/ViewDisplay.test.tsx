@@ -8,6 +8,17 @@ import { readTokens } from "../../spatial/paint";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import type { FakeView } from "../../test/fakeRenderEngine";
 import { FakeResizeObserver } from "../../test/FakeResizeObserver";
+import { FakeWebSocket } from "../../test/FakeWebSocket";
+import {
+  anOpenedUniverse,
+  aStellarBrief,
+  aSystemsInRange,
+  aUniverseList,
+} from "../../test/galaxyFixtures";
+import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { UniverseProvider } from "../../components/UniverseProvider";
+import { UniversePanel } from "../galaxy/UniversePanel";
+import { rotate } from "../../view/camera/quaternion";
 import { fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
 import { DEFAULT_FOV_DEG } from "../../view/camera/projection";
@@ -42,6 +53,7 @@ interface Setup {
   readonly views: () => FakeView[];
   readonly lastFrame: () => FrameSubmission | undefined;
   readonly engines: ReturnType<typeof fakeViewEngineSource>["engines"];
+  readonly socket: FakeWebSocket;
   readonly rerender: (mode: "visible" | "hidden") => void;
   readonly unmount: () => void;
 }
@@ -55,15 +67,25 @@ function setup(
   const fake = fakeViewEngineSource();
   const store = options.store ?? new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
   const source = options.source ?? fake.source;
+  vi.stubGlobal("WebSocket", FakeWebSocket);
   const tree = (mode: "visible" | "hidden") => (
-    <GraphicsStatusContext value={store}>
-      <Activity mode={mode}>
-        <ViewDisplay engineSource={source} />
-      </Activity>
-    </GraphicsStatusContext>
+    <ServerLinkHarness>
+      <UniverseProvider>
+        <GraphicsStatusContext value={store}>
+          <UniversePanel expanded onToggle={() => undefined} />
+          <Activity mode={mode}>
+            <ViewDisplay engineSource={source} />
+          </Activity>
+        </GraphicsStatusContext>
+      </UniverseProvider>
+    </ServerLinkHarness>
   );
   const user = userEvent.setup({ advanceTimers });
   const view = render(tree("visible"));
+  const socket = FakeWebSocket.latest();
+  act(() => {
+    socket.serverWelcomes();
+  });
   const views = (): FakeView[] => fake.engines.flatMap((engine) => engine.views);
   return {
     user,
@@ -76,6 +98,7 @@ function setup(
     views,
     lastFrame: () => views().at(-1)?.frames.at(-1),
     engines: fake.engines,
+    socket,
     rerender: (mode) => {
       view.rerender(tree(mode));
     },
@@ -336,6 +359,76 @@ describe("the VIEW display", () => {
     setup();
     await settle();
     expect(screen.getByText("AUTO NOT AVAILABLE: NO IMAGE TO METER")).toBeInTheDocument();
+  });
+});
+
+describe("the VIEW display's interim stars", () => {
+  it("draws the stars of the open universe's range queries, with their count line", async () => {
+    const { user, advance, lastFrame, socket } = setup();
+    await act(async () => {
+      socket.serverAnswers("list_universes", () => aUniverseList());
+      await Promise.resolve();
+    });
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+    await act(async () => {
+      socket.serverAnswers("open_universe", () => anOpenedUniverse());
+      await Promise.resolve();
+    });
+    // One star 100 ly straight ahead of the seat, in every answer (merged to one).
+    const run = startRun(precisionScene());
+    const ahead = rotate(runPose(run).orientation, vec3(0, 0, -1));
+    // The kept scenes' barycentre (`KEPT_BARYCENTRE`).
+    const centre = [0, 26_000, 0] as const;
+    for (let i = 0; i < 4; i += 1) {
+      // Each answer goes to the latest request not yet answered, so they are played in turn.
+      // oxlint-disable-next-line no-await-in-loop
+      await act(async () => {
+        socket.serverAnswers("systems_in_range", (body) =>
+          aSystemsInRange({
+            centreLy: centre,
+            radiusLy: body.radius_ly,
+            minLayer: body.min_layer,
+            limit: body.limit,
+            systems: [
+              {
+                relLy: [ahead.x * 100, ahead.y * 100, ahead.z * 100],
+                layer: "c",
+                stellar: { ...aStellarBrief("c"), absolute_v_mag: 1 },
+              },
+            ],
+          }),
+        );
+        await Promise.resolve();
+      });
+    }
+    advance(300);
+    expect([
+      lastFrame()?.draws.some((draw) => draw.material.name === "wireframe:starSprite"),
+      screen.getByText(/^STARS 1 DRAWN · 0 WITHOUT V · RADII 620\/360\/210\/60 ly$/),
+    ]).toEqual([true, expect.anything()]);
+  });
+});
+
+describe("the VIEW display's interim queries", () => {
+  it("are not asked again on a change of scene in the same system", async () => {
+    const { user, advance, socket } = setup();
+    await act(async () => {
+      socket.serverAnswers("list_universes", () => aUniverseList());
+      await Promise.resolve();
+    });
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+    await act(async () => {
+      socket.serverAnswers("open_universe", () => anOpenedUniverse());
+      await Promise.resolve();
+    });
+    const asked = socket.requestsOfKind("systems_in_range").length;
+    await user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
+    await settle();
+    expect([asked, socket.requestsOfKind("systems_in_range").length]).toEqual([4, 4]);
   });
 });
 

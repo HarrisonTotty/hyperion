@@ -1569,10 +1569,10 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   "Controls and commanding" commands automation by the pair), and `AUTO NOT AVAILABLE: NO IMAGE TO
 METER` stands while there is no image to meter. The triple is not editable yet, so a change of
   the default (R02.T18) is a change of `DEFAULT_MAN_TRIPLE`. `CameraControls` holds `SEAT`/`CHASE`
-  back with `NO OWN SHIP: SEAT and CHASE need one`, `NARROWER`/`WIDER` back at the ends of the steps,
-  and shows `EASED CAMERA MOVES` as a pressed toggle with its `ON`/`OFF` and, under reduced motion,
-  `NOT APPLIED: reduced motion`. The exposure and the setting belong to the display and outlive a
-  change of `SCENE`. The `TRAINING` banner is in the header strip: `ConsoleFrame` gains
+  back with `NO OWN SHIP: SEAT and CHASE need one`, `NARROWER`/`WIDER` back at the ends of the
+  steps, and shows `EASED CAMERA MOVES` as a pressed toggle with its `ON`/`OFF` and, under reduced
+  motion, `NOT APPLIED: reduced motion`. The exposure and the setting belong to the display and
+  outlive a change of `SCENE`. The `TRAINING` banner is in the header strip: `ConsoleFrame` gains
   `modeBanner`, which `App` sets while `VIEW` is the active display (it draws only kept scenes until
   R02.T17, which must make it follow the scene's provenance). The new words are nomenclature rows
   marked `_Draft (plan R02, R02.T15, nomenclature)…_`. `test/fakeViewEngine.ts` answers the
@@ -1583,5 +1583,29 @@ src/renderer/src/displays/view src/renderer/src/App.test.tsx`. By hand (scratch 
   `WireframeRenderer` and reads back 1,499 lit pixels on both SwiftShader and the RTX 3080.
   **Pending by eye:** the display in the running client at 1920 × 1080 and 1280 × 720, including
   whether the side column fits 720 high and the banners side by side (not run, since `DISPLAY=:0`
-  is the owner's own screen). **For the owner:** `.console__banner`'s rule is still `--line`
-  (decision 6 gives it `--text-muted`, an R01 follow-up).
+  is the owner's own screen).
+- **Deviations in R02.T16, as built.** `view/stars/interim.ts` holds the queries
+  (`INTERIM_QUERIES`, `interimRequest` with `limit` = `INTERIM_LIMIT` = 20,000 and
+  `include_stellar`), the retry (`retryRadiusLy`: only where the floor layer's census status is
+  `over_limit`, at r × (0.9 × limit ÷ Σ expected)^⅓ with the expected counts summed from E down to
+  the floor), the merge (`interimField`: one row per ID, the first answer's kept; the scene's own
+  system left out; a row without `absolute_v_mag` counted in `withoutV` and not drawn; a star by its
+  `galacticDeltaM` direction and distance from the barycentre, its colour from the brief's `teff_k`)
+  and the count line (`interimCountLine`, `STARS 1 DRAWN · 0 WITHOUT V · RADII 620/360/210/60 ly`,
+  the radii in whole light-years). `displays/view/useInterimStars.ts` runs four `useServerRequest`s
+  for the open universe (none without one); the arrival (system, centre and time) is held in state
+  and changes only with the system or the universe, so a camera moving or a scene's clock running
+  asks nothing again; a retry is adjusted during render once, flagged per query so that no second
+  one follows. The hook is called in `ViewPanels`, above the stage that a change of `SCENE`
+  remounts, from the scene's start, so that another kept scene in the same system asks nothing
+  again. The merged field is rebuilt at each render (4 Hz); memoising it on the four answers is left
+  until a profile shows it. The display draws the field into every frame's scene and adds the count
+  line under the label block's lines, the star-source reading staying in `STARS`. The plan's
+  `aStarRow` fixture is not added: the tests build rows with galaxy plan 05's `aSystemsInRange` and
+  `aStellarBrief`. The display's tests now render it inside `ServerLinkHarness`, `UniverseProvider`
+  and the `UNIVERSE` panel (to open a universe), and one answers the four queries with a star
+  straight ahead of the seat and finds a sprite draw and the count line. **Pending, on a quiet
+  machine:** re-measuring the four queries' census counts and server times on the Milky Way fixture
+  near the Sun (the `e` query's brief-building time included) and counting the rows at V ≤ 6.5, for
+  Verification; not run here, the machine being shared (the counts are exact and could be taken
+  under load, the times not), so Design note 19's figures stand as provisional.
