@@ -73,9 +73,9 @@ The full design is in
 - Node.js ≥ 22.12 and pnpm 12
 - [`just`](https://github.com/casey/just)
 - [`uv`](https://docs.astral.sh/uv/) — runs [pre-commit](https://pre-commit.com) for the git hooks
-- For the WebAssembly checks: the `wasm32-wasip1` and `wasm32-unknown-unknown` targets
-  (listed in `rust-toolchain.toml`), [wasmtime](https://wasmtime.dev) at the version the justfile
-  pins, and [cargo-nextest](https://nexte.st). `just wasm-tools` installs them.
+- For the WebAssembly checks in `just ci`: the `wasm32-wasip1` and `wasm32-unknown-unknown`
+  targets (listed in `rust-toolchain.toml`), [wasmtime](https://wasmtime.dev) at the version the
+  justfile pins, and [cargo-nextest](https://nexte.st). `just wasm-tools` installs them.
 
 ## Development
 
@@ -133,11 +133,14 @@ somewhere else, and the `LINK` display shows the endpoint in use.
 | `just fmt`   | `cargo fmt`               | `prettier`                    |
 | `just test`  | `cargo test`              | `vitest`                      |
 
-`just ci` is the gate before a commit: the four checks above plus a check that the generated
-protocol bindings are up to date. It takes about three minutes.
+`just ci` is the gate before a commit: the four checks above, a check that the fitted tables are
+fresh, a check that the generated protocol bindings are up to date, and `just test-wasm-fast`, the
+fast suites on WebAssembly. Without the WebAssembly suites it took about three minutes on a quiet
+machine; they add about two more (measured under shared load, to be re-timed quiet).
 
-- `just ci-slow` is `just ci` plus `just test-slow`. The slow tests take far longer than the rest,
-  so run it before a push that changes the sim, and after a `GENERATOR_VERSION` bump.
+- `just ci-slow` is `just ci` plus `just test-slow` and `just test-wasm-slow`. The slow tests take
+  far longer than the rest, so run it before a push that changes the sim, and after a
+  `GENERATOR_VERSION` bump.
 - `just test-slow` runs the slow statistical tests, marked `#[ignore = "slow: ..."]`, under the
   `slow-test` profile (release speed with debug assertions on). It uses
   [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`), which runs the tests
@@ -147,13 +150,13 @@ protocol bindings are up to date. It takes about three minutes.
   is a finding to raise, never a failure.
 - `just bless` rewrites the golden files under `crates/*/tests/golden/` after a deliberate
   `GENERATOR_VERSION` bump; it refuses to run under `CI`.
-- `just test-wasm-fast` checks generated output bit for bit on WebAssembly as well as on native
-  x86-64: it runs the fast tests of `hyperion-base`, `hyperion-surface`, `hyperion-sim` and
-  `hyperion-testkit`, goldens included, as `wasm32-wasip1` under wasmtime, where `usize` is 32
-  bits, with cargo-nextest (one process per test, since wasip1 has no threads); and it checks that
-  a build with relaxed SIMD fails. `just test-wasm-slow` runs their slow tests and doctests there;
-  `just test-wasm` runs both. A missing tool fails them with a pointer to `just wasm-tools`; they
-  never skip. Nothing checks AArch64.
+- `just test-wasm-fast`, part of `just ci`, checks generated output bit for bit on WebAssembly as
+  well as on native x86-64: it runs the fast tests of `hyperion-base`, `hyperion-surface`,
+  `hyperion-sim` and `hyperion-testkit`, goldens included, as `wasm32-wasip1` under wasmtime, where
+  `usize` is 32 bits, with cargo-nextest (one process per test, since wasip1 has no threads); and
+  it checks that a build with relaxed SIMD fails. `just test-wasm-slow`, part of `just ci-slow`,
+  runs their slow tests and doctests there; `just test-wasm` runs both. A missing tool fails them
+  with a pointer to `just wasm-tools`; they never skip. Nothing checks AArch64.
 - `just test`, `just test-slow`, `just bench` and the WebAssembly checks build first, then run
   under one lock shared by every worktree of the clone (`.git/hyperion-heavy-tests.lock`). A second
   run waits for the first to finish, and says so, because two suites at once each take twice as
