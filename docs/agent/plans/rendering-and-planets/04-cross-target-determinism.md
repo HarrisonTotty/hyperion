@@ -1328,6 +1328,10 @@ It reserves, so that later plans need not:
   seed did. `DetailLevelDto::Full`'s doc now names the detail seed. For the owner with T3.b: the
   UX review noted that `DETAIL SEED` sits under the readout's `DETAIL` row (the granted detail
   level), two meanings of "detail" in one readout; `TERRAIN SEED` was suggested as an alternative.
+- **T3.b signed off, 2026-09-30 (delegated decision).** `DETAIL SEED` is kept and `TERRAIN SEED`
+  rejected, since the seed also drives R11's clouds; the label row now reads "a body's detail
+  seed, the seed of the client's local synthesis of surface detail and clouds", and both "(draft
+  for the owner, R04.T3.b)" markers are removed (applied in R02.T2.f's pass over the guide).
 - **Deviations in T4.a, as built.** Moved by `git mv`: `math.rs`, `units.rs` and `version.rs` from
   `crates/hyperion-sim/src/` to `crates/hyperion-base/src/`, and `math/functions.golden` from the
   sim's `tests/golden/` to base's (a 100% rename). `math_function_values_are_pinned` and its tables moved from the sim's `foundation_golden.rs` to
