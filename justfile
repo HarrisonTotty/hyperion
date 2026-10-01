@@ -105,22 +105,110 @@ test-slow *args:
 # check.
 slow_then_check := 'cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@" && start=$SECONDS && cargo run -q -p hyperion-fit -- check --rerun-fast && echo "hyperion-fit check --rerun-fast: $((SECONDS - start)) s" >&2'
 
-# Run base's, the sim's and the testkit's tests, goldens and slow tests included, as wasm32-wasip1.
-test-wasm:
+# The WebAssembly checks (plan R04). Two targets: `wasm32-wasip1` under wasmtime, a second
+# architecture with a 32-bit `usize`, for base, the surface crate, the testkit and the sim; and
+# `wasm32-unknown-unknown`, the client's, under wasm-bindgen-test (R04.T8). `just wasm-tools`
+# installs what they need. Every recipe checks its tools first and fails, never skips, when one is
+# missing: a gate that passes by skipping is not a gate (R04 Design note 11).
+
+# wasmtime, as `just wasm-tools` installs it.
+wasmtime_version := "49.0.1"
+
+# The crates whose suites run under wasm32-wasip1.
+wasip1_crates := "-p hyperion-base -p hyperion-surface -p hyperion-sim -p hyperion-testkit"
+
+# cargo-nextest is installed only if missing; `test-slow` needs it as well.
+# Install the tools the WebAssembly checks need: both rustup targets, the pinned wasmtime, nextest.
+wasm-tools:
+    rustup target add wasm32-wasip1 wasm32-unknown-unknown
+    cargo install wasmtime-cli --version {{ wasmtime_version }} --locked
+    command -v cargo-nextest >/dev/null || cargo install cargo-nextest --locked
+
+# Fail, naming `just wasm-tools`, unless each tool group named is present. `wasip1`: the target,
+# wasmtime (or `WASMTIME` set to it) and cargo-nextest.
+[positional-arguments]
+_wasm-preflight +tools:
     #!/usr/bin/env bash
     set -euo pipefail
-    # A second architecture with a 32-bit `usize`, run under wasmtime. It needs
-    # `rustup target add wasm32-wasip1` and wasmtime on the PATH (or `WASMTIME` set to it), so it
-    # is not part of `ci`. Goldens are read at host paths fixed at compile time, so the guest is
-    # given the repository, and the target directory if it lies elsewhere, at those same paths.
+    missing() {
+        echo "error: $1 is missing: run \`just wasm-tools\` to install the WebAssembly checks' tools" >&2
+        exit 1
+    }
+    installed="$(rustup target list --installed)"
+    for tool in "$@"; do
+        case "$tool" in
+            wasip1)
+                grep -qx wasm32-wasip1 <<<"$installed" || missing "the rustup target wasm32-wasip1"
+                "${WASMTIME:-wasmtime}" --version >/dev/null 2>&1 \
+                    || missing "wasmtime (${WASMTIME:-wasmtime})"
+                cargo nextest --version >/dev/null 2>&1 || missing "cargo-nextest"
+                ;;
+            *)
+                echo "error: _wasm-preflight: unknown tool group $tool" >&2
+                exit 2
+                ;;
+        esac
+    done
+
+# `cargo <args>` with wasmtime as the runner for wasm32-wasip1. Goldens are read at host paths fixed
+# at compile time, so the guest is given the repository, and the target directory if it lies
+# elsewhere, at those same paths. The runner is set here, not in `.cargo/config.toml`, so that a bare
+# `cargo test --target wasm32-wasip1` names none.
+[positional-arguments]
+_wasip1 +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
     dirs="--dir={{ justfile_directory() }}"
     if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
         dirs+=" --dir=$(realpath -m "$CARGO_TARGET_DIR")"
     fi
     export CARGO_TARGET_WASM32_WASIP1_RUNNER="${WASMTIME:-wasmtime} $dirs"
-    cargo test --target wasm32-wasip1 -p hyperion-base -p hyperion-sim -p hyperion-testkit
-    cargo test --target wasm32-wasip1 -p hyperion-base -p hyperion-sim -p hyperion-testkit \
-        --profile slow-test -- --ignored
+    cargo "$@"
+
+# The wasip1 suites run under cargo-nextest, one wasmtime process per test across every core:
+# wasip1 has no threads, so `cargo test` ran each binary's tests one at a time, the fast suite in
+# 975 s against nextest's 206 s (R04.T7.c, under shared load). wasmtime caches compiled modules, so
+# a binary is compiled once, not once per test.
+wasip1_nextest := "nextest run --target wasm32-wasip1 " + wasip1_crates
+
+# Fail unless a build of the surface crate with relaxed SIMD stops on a crate's guard (R04 Design
+# note 10). Its own target directory keeps the flagged build from evicting the unflagged one.
+_relaxed-simd-refused:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    log="$(mktemp)"
+    trap 'rm -f "$log"' EXIT
+    if RUSTFLAGS="-C target-feature=+relaxed-simd" \
+        CARGO_TARGET_DIR="{{ justfile_directory() }}/target/relaxed-simd-check" \
+        cargo build --target wasm32-wasip1 -p hyperion-surface >"$log" 2>&1; then
+        echo "error: hyperion-surface built with +relaxed-simd: its compile_error! guard is gone" >&2
+        exit 1
+    fi
+    if ! grep -q "relaxed SIMD is banned in hyperion-" "$log"; then
+        cat "$log" >&2
+        echo "error: the +relaxed-simd build failed, but not on the relaxed-SIMD guard" >&2
+        exit 1
+    fi
+    echo "the +relaxed-simd build is refused by its guard" >&2
+
+# The suites are built first, then run under the heavy-test lock. Doctests wait for `test-wasm-slow`.
+# The fast WebAssembly checks, run by `ci`: relaxed SIMD refused, the fast suites under wasip1.
+test-wasm-fast: (_wasm-preflight "wasip1") _relaxed-simd-refused
+    just _wasip1 {{ wasip1_nextest }} --no-run
+    just _locked just _wasip1 {{ wasip1_nextest }}
+
+# Built first, then run under the heavy-test lock: the slow tests at the slow-test profile with
+# `test-slow`'s nextest profile, then the doctests, which nextest does not run and `cargo test` runs
+# one at a time (88 s under shared load, so not in `ci`; they are built in the locked step, since
+# cargo cannot build doctests without running them).
+# The slow WebAssembly checks, run by `ci-slow`: the slow suites and the doctests under wasip1.
+test-wasm-slow: (_wasm-preflight "wasip1")
+    just _wasip1 {{ wasip1_nextest }} --cargo-profile slow-test --profile slow --run-ignored only --no-run
+    just _locked just _wasip1 {{ wasip1_nextest }} --cargo-profile slow-test --profile slow --run-ignored only
+    just _locked just _wasip1 test --target wasm32-wasip1 {{ wasip1_crates }} --doc
+
+# Both the fast and the slow WebAssembly checks.
+test-wasm: test-wasm-fast test-wasm-slow
 
 # Run the Criterion benchmarks, e.g. `just bench -- samplers`.
 bench *args:
