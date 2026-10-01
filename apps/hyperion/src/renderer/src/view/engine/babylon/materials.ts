@@ -105,14 +105,22 @@ export function declaredTextures(wgsl: string): ReadonlyArray<string> {
   );
 }
 
-/** A Babylon sampler with the specification's filter and address mode. */
+/**
+ * A Babylon sampler with the specification's filter and address mode.
+ *
+ * @remarks
+ * The filter applies between mips too: Babylon's plain bilinear and nearest modes clamp the level
+ * of detail to 0, so a mipped texture would only ever be read at its first level.
+ */
 export function textureSamplerOf(spec: SamplerSpec): TextureSampler {
   const address =
     spec.address === "repeat"
       ? Constants.TEXTURE_WRAP_ADDRESSMODE
       : Constants.TEXTURE_CLAMP_ADDRESSMODE;
   const filter =
-    spec.filter === "linear" ? Constants.TEXTURE_LINEAR_LINEAR : Constants.TEXTURE_NEAREST_NEAREST;
+    spec.filter === "linear"
+      ? Constants.TEXTURE_LINEAR_LINEAR_MIPLINEAR
+      : Constants.TEXTURE_NEAREST_NEAREST_MIPNEAREST;
   return new TextureSampler().setParameters(address, address, address, 1, filter);
 }
 

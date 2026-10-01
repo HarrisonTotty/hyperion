@@ -26,6 +26,7 @@ import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import type { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial.pure";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess.pure";
+import { ThinTexture } from "@babylonjs/core/Materials/Textures/thinTexture";
 import { Scene } from "@babylonjs/core/scene.pure";
 
 import type { KernelPair } from "../kernels";
@@ -69,12 +70,15 @@ import {
   type WgslPostProcessSpec,
 } from "../types";
 import { withHandedAdapter } from "./adapterHandoff";
-import { createKernel, type KernelRecord } from "./compute";
-import { engineDevice } from "./internals";
+import { createKernel, encodeDispatch, type KernelRecord, type Workgroups } from "./compute";
+import { ExternalStorageBuffer } from "./externalStorageBuffer";
+import { resolveKernelResources } from "./kernelResources";
+import { engineDevice, flushEngine, setSampledView } from "./internals";
 import { createShaderMaterial, setUniform, textureSamplerOf } from "./materials";
 import { MeshRecord } from "./meshes";
 import { babylonEngineOptions } from "./options";
 import { registerBabylonModules } from "./registrations";
+import { packedCubeSpec, ResourceRegistry, viewDimensionOf } from "./resources";
 import { BabylonView, type ViewHost } from "./view";
 import {
   GLSLANG_STUB,
@@ -127,6 +131,13 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   readonly #releases: ReadonlyArray<() => void>;
+  readonly #resources: ResourceRegistry;
+  /** Each sampled texture's Babylon wrapper, made when it is first bound. */
+  readonly #sampled = new Map<TextureHandle, ThinTexture>();
+  /** Each storage buffer's Babylon wrapper, made when it is first bound. */
+  readonly #storage = new Map<BufferHandle, ExternalStorageBuffer>();
+  /** Each kernel's uniform buffers, by uniform name. */
+  readonly #kernelUniforms = new Map<KernelRecord, Map<string, BufferHandle>>();
   #disposed = false;
 
   /**
@@ -138,6 +149,11 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     this.#releases = releases;
     this.#device = engineDevice(engine);
     this.capabilities = deviceCapabilities(this.#device);
+    this.#resources = new ResourceRegistry(this.#device, (event) => {
+      for (const listener of this.#allocationListeners) {
+        listener(event);
+      }
+    });
     const scene = new Scene(engine, { useFloatingOrigin: false, virtual: true });
     scene.useRightHandedSystem = true;
     scene.autoClear = false;
@@ -302,28 +318,31 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     return Promise.reject(notBuilt("createComputeAsync", "R01.T8.g"));
   }
 
-  createBuffer(_spec: BufferSpec): BufferHandle {
-    throw notBuilt("createBuffer", "R01.T8.d");
+  createBuffer(spec: BufferSpec): BufferHandle {
+    this.#assertLive();
+    return this.#resources.createBuffer(spec);
   }
 
-  createTexture(_spec: TextureSpec): TextureHandle {
-    throw notBuilt("createTexture", "R01.T8.d");
+  createTexture(spec: TextureSpec): TextureHandle {
+    this.#assertLive();
+    return this.#resources.createTexture(spec);
   }
 
-  createPackedCube(_sizePx: number, _mips: number, _category: MemoryCategory): TextureHandle {
-    throw notBuilt("createPackedCube", "R01.T8.d");
+  createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle {
+    this.#assertLive();
+    return this.#resources.createTexture(packedCubeSpec(sizePx, mips, category));
   }
 
-  writePackedCubeLevel(_cube: TextureHandle, _level: number, _packed: Uint32Array): void {
-    throw notBuilt("writePackedCubeLevel", "R01.T8.d");
+  writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
+    this.#assertLive();
+    this.#resources.writePackedCubeLevel(cube, level, packed);
   }
 
-  writePackedCubeLevelFromBuffer(
-    _cube: TextureHandle,
-    _level: number,
-    _packed: BufferHandle,
-  ): void {
-    throw notBuilt("writePackedCubeLevelFromBuffer", "R01.T8.d");
+  writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void {
+    this.#assertLive();
+    this.#submit(`${cube.name} level ${level}`, (encoder) => {
+      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed);
+    });
   }
 
   createPointSplat(_spec: PointSplatSpec): PointSplatHandle {
@@ -331,25 +350,42 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
   }
 
   dispatch(
-    _kernel: ComputeHandle,
-    _bindings: ComputeBindings,
-    _workgroups: readonly [number, number, number] | IndirectArgs,
-    _pass?: string,
+    kernel: ComputeHandle,
+    bindings: ComputeBindings,
+    workgroups: readonly [number, number, number] | IndirectArgs,
+    pass = "compute",
   ): void {
-    throw notBuilt("dispatch", "R01.T8.d");
+    this.#assertLive();
+    const record = this.kernelOf(kernel);
+    const uniforms = this.#kernelUniforms.get(record) ?? new Map<string, BufferHandle>();
+    this.#kernelUniforms.set(record, uniforms);
+    const resources = resolveKernelResources(this.#resources, record, bindings, uniforms);
+    const counts: Workgroups =
+      "buffer" in workgroups
+        ? {
+            kind: "indirect",
+            buffer: this.#resources.bufferOf(workgroups.buffer).buffer,
+            offsetBytes: workgroups.offsetBytes,
+          }
+        : { kind: "direct", counts: workgroups };
+    this.#submit(pass, (encoder) => {
+      encodeDispatch(this.#device, encoder, record, resources, counts, { label: pass });
+    });
   }
 
-  writeBuffer(_buffer: BufferHandle, _offsetBytes: number, _data: ArrayBufferView): void {
-    throw notBuilt("writeBuffer", "R01.T8.d");
+  writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
+    this.#assertLive();
+    this.#resources.writeBuffer(buffer, offsetBytes, data);
   }
 
   writeTexture(
-    _texture: TextureHandle,
-    _origin: GPUOrigin3D,
-    _size: GPUExtent3D,
-    _data: ArrayBufferView,
+    texture: TextureHandle,
+    origin: GPUOrigin3D,
+    size: GPUExtent3D,
+    data: ArrayBufferView,
   ): void {
-    throw notBuilt("writeTexture", "R01.T8.d");
+    this.#assertLive();
+    this.#resources.writeTexture(texture, origin, size, data);
   }
 
   readBuffer(_buffer: BufferHandle, _access?: "cpu" | "tolerance"): Promise<ArrayBuffer> {
@@ -395,6 +431,10 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     }
     this.#meshRecords.clear();
     this.#scene.dispose();
+    this.#resources.dispose();
+    this.#sampled.clear();
+    this.#storage.clear();
+    this.#kernelUniforms.clear();
     this.#engine.dispose();
     for (const release of this.#releases) {
       release();
@@ -483,6 +523,12 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
       setUniform(effect, projection, frame.projection);
     }
     setUniform(effect, OFFSET_UNIFORM, draw.offsetFromCameraM);
+    for (const [name, texture] of Object.entries(draw.textures)) {
+      effect.setTexture(name, this.#sampledTexture(texture));
+    }
+    for (const [name, buffer] of Object.entries(draw.storageBuffers ?? {})) {
+      this.#engine.setStorageBuffer(name, this.#storageBuffer(buffer));
+    }
     for (const [name, value] of Object.entries(draw.uniforms)) {
       const uniform = uniforms.get(name);
       if (uniform === undefined) {
@@ -490,6 +536,49 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
       }
       setUniform(effect, uniform, value);
     }
+  }
+
+  /**
+   * Encodes work of the adapter's own and submits it after what Babylon has recorded so far, so
+   * that it runs in the order it was asked for.
+   */
+  #submit(label: string, encode: (encoder: GPUCommandEncoder) => void): void {
+    flushEngine(this.#engine);
+    const encoder = this.#device.createCommandEncoder({ label });
+    encode(encoder);
+    this.#device.queue.submit([encoder.finish()]);
+  }
+
+  /** A texture wrapped for Babylon to sample, through a view of all its mips. */
+  #sampledTexture(handle: TextureHandle): ThinTexture {
+    const existing = this.#sampled.get(handle);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const { texture, spec } = this.#resources.textureOf(handle);
+    const internal = this.#engine.wrapWebGPUTexture(texture);
+    internal.isCube = spec.dimension === "cube";
+    internal.is3D = spec.dimension === "3d";
+    setSampledView(internal, {
+      label: spec.name,
+      dimension: viewDimensionOf(spec),
+      mipLevelCount: spec.mips,
+    });
+    const wrapped = new ThinTexture(internal);
+    this.#sampled.set(handle, wrapped);
+    return wrapped;
+  }
+
+  /** A buffer wrapped as Babylon's storage buffer. */
+  #storageBuffer(handle: BufferHandle): ExternalStorageBuffer {
+    const existing = this.#storage.get(handle);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const { buffer } = this.#resources.bufferOf(handle);
+    const wrapped = new ExternalStorageBuffer(this.#engine, buffer, handle.bytes);
+    this.#storage.set(handle, wrapped);
+    return wrapped;
   }
 
   #assertLive(): void {

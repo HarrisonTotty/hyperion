@@ -269,7 +269,10 @@ export interface DrawItem {
  * `vertexInputs.position` and writing `vertexOutputs.position`; the fragment stage is
  * `@fragment fn main(input : FragmentInputs) -> FragmentOutputs`, writing
  * `fragmentOutputs.color`. `vertexInputs.instanceIndex` is `@builtin(instance_index)`. The frame's
- * matrices and the draw's offset arrive as {@link FRAME_UNIFORMS}.
+ * matrices and the draw's offset arrive as {@link FRAME_UNIFORMS}. A storage buffer's type has no
+ * whitespace (`array<f32,4>`, not `array<f32, 4>`), since Babylon recognises the declaration by a
+ * pattern that stops at the first space; a texture bound per draw is a `DrawItem.textures` entry
+ * of the same name.
  */
 export interface WgslMaterialSpec {
   readonly name: string;
