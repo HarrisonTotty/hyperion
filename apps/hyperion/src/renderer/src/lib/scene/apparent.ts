@@ -26,7 +26,11 @@ import {
 } from "@hyperion/protocol";
 
 import { add, type Vec3 } from "../../geometry/vec3";
-import { cameraFrameCandidate, selectCameraFrame } from "../../view/camera/frames";
+import {
+  type CameraFrameCandidate,
+  cameraFrameCandidate,
+  selectCameraFrame,
+} from "../../view/camera/frames";
 import { layoutBodies } from "../../displays/system/bodyMap";
 import { type BodyPlacement, composePosition, stateAt } from "../orbit";
 import { layoutHierarchy } from "../system/hierarchy";
@@ -40,6 +44,7 @@ import {
   spanDistance,
   spanSeconds,
   timeBefore,
+  ZERO_SPAN,
 } from "./lightTime";
 import type { SceneModel, SceneSystem } from "./model";
 
@@ -192,7 +197,7 @@ export function apparentPosition(
   return {
     kind: "not_converged",
     corrections: MAX_LIGHT_TIME_CORRECTIONS,
-    lastChange: previousChange ?? { seconds: 0, nanos: 0 },
+    lastChange: previousChange ?? ZERO_SPAN,
   };
 }
 
@@ -213,7 +218,8 @@ const placementsMemo = new WeakMap<SceneSystem, SystemPlacements>();
  * with an orbit on its orbit about what it orbits (the `SYSTEM` display's `layoutBodies`).
  *
  * @remarks
- * Kept for each system model, which a notification replaces, so a frame does not lay it out anew.
+ * Kept for each system model, which only a notification that changes the system replaces (the
+ * wire adapter keeps it across a heartbeat or a craft push), so a frame does not lay it out anew.
  */
 export function systemPlacements(system: SceneSystem): SystemPlacements {
   const known = placementsMemo.get(system);
@@ -231,7 +237,14 @@ export function systemPlacements(system: SceneSystem): SystemPlacements {
   return result;
 }
 
-/** The track of a placed body or a star: its composed position at any time. */
+/**
+ * The track of a placed body or a star: its composed position at any time.
+ *
+ * @remarks
+ * It is never absent: whether a body is in the scene is its record's state at the scene's time, and
+ * the scene draws a body whose record says it is gone not at all, even within a light time of its
+ * end (the plan's Risks, "Elements across an event within the light time").
+ */
 export function placedTrack(placements: SystemPlacements, id: string): SystemTrack {
   return { positionAt: (time) => composePosition(placements.placements, id, time) };
 }
@@ -242,7 +255,10 @@ function composedVelocity(placements: SystemPlacements, id: string, time: Univer
   let at = id;
   for (let steps = 0; steps <= placements.placements.size; steps += 1) {
     const placement = placements.placements.get(at);
-    if (placement === undefined || placement.kind === "origin") {
+    if (placement === undefined) {
+      throw new Error(`no body ${at} is placed, on the chain of ${id}`);
+    }
+    if (placement.kind === "origin") {
       return velocity;
     }
     const own = stateAt(placement.orbit, time).velocityMPerS;
@@ -299,24 +315,36 @@ export function shipObserver(model: SceneModel, time: UniverseTime): SceneObserv
   return observer;
 }
 
-/** A body of the scene as the ship sees it at a frame's time. */
-export interface SceneBodyFrame {
-  readonly id: BodyIdHex;
-  /** Where it is at the frame's time, m; `null` for a contact placed by its seen position. */
-  readonly geometricM: Vec3 | null;
-  /** Where the ship sees it, m. */
-  readonly apparentM: Vec3;
-  /** When the light seen left it. */
-  readonly emitted: UniverseTime;
-  /** The light time; `null` for a contact, whose light time the server found. */
-  readonly lightTime: Span | null;
-  /** The detail level granted for it. */
-  readonly level: DetailLevelDto;
-  /** Whether it is placed by the server's seen position, a contact. */
-  readonly seen: boolean;
-  /** Its Hill radius at pericentre, m; `null` below `mass_and_orbit` and for a contact. */
-  readonly hillRadiusM: number | null;
-}
+/**
+ * A body of the scene as the ship sees it at a frame's time: one the client places on its orbit,
+ * or a contact the server placed by its seen position (Design note 13).
+ */
+export type SceneBodyFrame =
+  | {
+      readonly kind: "placed";
+      readonly id: BodyIdHex;
+      /** Where it is at the frame's time, m. */
+      readonly geometricM: Vec3;
+      /** Where the ship sees it, m. */
+      readonly apparentM: Vec3;
+      /** When the light seen left it. */
+      readonly emitted: UniverseTime;
+      readonly lightTime: Span;
+      /** The detail level granted for it. */
+      readonly level: DetailLevelDto;
+      /** Its Hill radius at pericentre, m; `null` below `mass_and_orbit`. */
+      readonly hillRadiusM: number | null;
+    }
+  | {
+      readonly kind: "contact";
+      readonly id: BodyIdHex;
+      /** Where the ship sees it, m, as the server evaluated it; never extrapolated. */
+      readonly apparentM: Vec3;
+      /** When the light seen left it. */
+      readonly emitted: UniverseTime;
+      /** The detail level granted for it, `contact`. */
+      readonly level: DetailLevelDto;
+    };
 
 /** A star of the scene as the ship sees it at a frame's time. */
 export interface SceneStarFrame {
@@ -389,14 +417,15 @@ function framesBody(body: SystemBody): boolean {
  * radius, and the ship's local body.
  *
  * @remarks
- * A body not present by its record, or absent at its emitted time, is left out, as is a population
- * and a body with neither an orbit nor a seen position. A contact is placed at the server's
- * `apparent_m` with no geometric position (Design note 13). The ship's local body is chosen among
- * the planets, dwarf planets and moons with a Hill radius, by their present geometric distance from
- * the observer, with `previous`'s local body as the current one. With `previous` the light times
- * start warm from its own.
+ * A body not present by its record is left out, as is a population and a body with neither an
+ * orbit nor a seen position; one whose light time does not converge is left out of the drawing but
+ * not of the frame rule. A contact is placed at the server's `apparent_m` with no geometric position
+ * (Design note 13). The ship's local body is chosen among the planets, dwarf planets and moons with
+ * a Hill radius, by their present geometric distance from the observer, with `previous`'s local
+ * body as the current one. With `previous` the light times start warm from its own.
  *
- * @param previous - The frame before, or `null`.
+ * @param previous - The frame before, or `null` for none: required, so that a caller that has one
+ *   cannot forget it and lose the frame rule's hysteresis.
  * @returns The frame, or `null` when the scene has no system.
  */
 export function sceneAt(
@@ -411,14 +440,17 @@ export function sceneAt(
   }
   const placements = systemPlacements(system);
   const previousTaus = new Map<string, Span>();
-  for (const each of [...(previous?.bodies ?? []), ...(previous?.stars ?? [])]) {
-    if (each.lightTime !== null) {
-      previousTaus.set(each.id, each.lightTime);
+  for (const body of previous?.bodies ?? []) {
+    if (body.kind === "placed") {
+      previousTaus.set(body.id, body.lightTime);
     }
+  }
+  for (const star of previous?.stars ?? []) {
+    previousTaus.set(star.id, star.lightTime);
   }
 
   const bodies: SceneBodyFrame[] = [];
-  const candidates = [];
+  const candidates: CameraFrameCandidate[] = [];
   for (const body of system.bodies.bodies) {
     const grant = system.grants.get(body.id);
     if (body.state.kind !== "present" || grant === undefined) {
@@ -426,14 +458,11 @@ export function sceneAt(
     }
     if (grant.seen !== null) {
       bodies.push({
+        kind: "contact",
         id: body.id,
-        geometricM: null,
         apparentM: grant.seen.apparentM,
         emitted: grant.seen.emitted,
-        lightTime: null,
         level: grant.level,
-        seen: true,
-        hillRadiusM: null,
       });
       continue;
     }
@@ -441,22 +470,12 @@ export function sceneAt(
       continue;
     }
     const track = placedTrack(placements, body.id);
-    const seen = apparentPosition(track, observer, time, previousTaus.get(body.id) ?? null);
     const geometricM = track.positionAt(time);
-    if (seen.kind !== "seen" || geometricM === null) {
+    if (geometricM === null) {
       continue;
     }
     const hillRadiusM = system.hillRadiiM.get(body.id) ?? null;
-    bodies.push({
-      id: body.id,
-      geometricM,
-      apparentM: seen.apparentM,
-      emitted: seen.emitted,
-      lightTime: seen.lightTime,
-      level: grant.level,
-      seen: false,
-      hillRadiusM,
-    });
+    // The frame rule is geometric and present, whatever the light time does.
     if (hillRadiusM !== null && framesBody(body) && body.parent !== null) {
       candidates.push(
         cameraFrameCandidate(
@@ -467,13 +486,27 @@ export function sceneAt(
         ),
       );
     }
+    const seen = apparentPosition(track, observer, time, previousTaus.get(body.id) ?? null);
+    if (seen.kind !== "seen") {
+      continue;
+    }
+    bodies.push({
+      kind: "placed",
+      id: body.id,
+      geometricM,
+      apparentM: seen.apparentM,
+      emitted: seen.emitted,
+      lightTime: seen.lightTime,
+      level: grant.level,
+      hillRadiusM,
+    });
   }
 
   const stars: SceneStarFrame[] = [];
   for (const id of placements.stars) {
     const track = placedTrack(placements, id);
-    const seen = apparentPosition(track, observer, time, previousTaus.get(id) ?? null);
     const geometricM = track.positionAt(time);
+    const seen = apparentPosition(track, observer, time, previousTaus.get(id) ?? null);
     if (seen.kind !== "seen" || geometricM === null) {
       continue;
     }

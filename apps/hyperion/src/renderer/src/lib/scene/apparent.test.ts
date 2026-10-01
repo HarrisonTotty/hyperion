@@ -22,26 +22,53 @@ import {
   shipObserver,
   systemPlacements,
 } from "./apparent";
+import { cameraFrameCandidate, selectCameraFrame } from "../../view/camera/frames";
 import { SPEED_OF_LIGHT_M_PER_S } from "./lightTime";
 import type { SceneModel, SceneSystem } from "./model";
 import { toSceneModel } from "./sceneWire";
 
 /**
- * The largest discrepancy measured against the golden, as a fraction of Σ = |x_B(t − τ)| + |x_o(t)|
- * (R03.T13, 2026-09-30): 2.0 × 10⁻¹³, from two moons whose orbits evolve tidally, which the
- * simulation evaluates at the emitted time and the wire states at the record's; every other vector
- * agrees within 7 × 10⁻¹⁵ Σ.
+ * The largest discrepancy measured against the golden (R03.T13, 2026-09-30) for a body whose
+ * elements hold, as a fraction of Σ = |x_B(t − τ)| + |x_o(t)|: 5 × 10⁻¹⁵, inside Design note 7's
+ * 10⁻¹⁴.
  */
-const MEASURED_RATIO = 2.0e-13;
+const MEASURED_RATIO = 5e-15;
+
+/**
+ * The largest measured for a moon whose orbit evolves tidally while its `valid_until` is unset:
+ * 2.0 × 10⁻¹³ Σ, since the simulation evaluates its elements at the emitted time and the wire states
+ * them at the record's (a plan 14 matter, recorded in the plan's as-built notes).
+ */
+const MEASURED_EVOLVING_RATIO = 2.0e-13;
 
 /** Design note 7's ceiling: a measurement above it is a bug, not a bound to widen. */
 const CEILING_RATIO = 1e-12;
 
-/**
- * The pinned tolerance as a fraction of Σ: ten times the measurement, held to the ceiling, which
- * the plan's Verification says the client is never looser than.
- */
+/** The pinned tolerances as fractions of Σ: ten times each measurement, held to the ceiling. */
 const PINNED_RATIO = Math.min(10 * MEASURED_RATIO, CEILING_RATIO);
+const PINNED_EVOLVING_RATIO = Math.min(10 * MEASURED_EVOLVING_RATIO, CEILING_RATIO);
+
+/**
+ * The bodies of a golden system whose elements differ between the epoch's answer and a century
+ * on's while neither states a `valid_until`: the moons whose orbits evolve tidally.
+ */
+function evolving(system: GoldenReading["system"]): ReadonlySet<BodyIdHex> {
+  const orbitsOf = (when: GoldenReading["when"]): Map<BodyIdHex, number> => {
+    const orbits = new Map<BodyIdHex, number>();
+    for (const body of goldenSystemBodies(system, when).bodies) {
+      if (body.orbit.state === "ok" && body.orbit.value.valid_until === null) {
+        orbits.set(body.id, body.orbit.value.orbit.semi_major_axis_m);
+      }
+    }
+    return orbits;
+  };
+  const then = orbitsOf("plus_100_years");
+  return new Set(
+    [...orbitsOf("epoch")]
+      .filter(([id, a]) => then.has(id) && then.get(id) !== a)
+      .map(([id]) => id),
+  );
+}
 
 function norm(v: Vec3): number {
   return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -212,7 +239,9 @@ describe("apparentPosition against the simulation's golden vectors", () => {
   it("places every vector within the pinned bound, and measures under the ceiling", () => {
     const outside: string[] = [];
     let worstRatio = 0;
+    let worstEvolvingRatio = 0;
     for (const { golden, source, id, system } of sources) {
+      const drifting = evolving(golden.system).has(id);
       const track = placedTrack(systemPlacements(system), id);
       const seen = seenOrThrow(apparentPosition(track, observerOf(golden), golden.time, null));
       const sim = source.seen;
@@ -227,13 +256,18 @@ describe("apparentPosition against the simulation's golden vectors", () => {
         norm(golden.observerVelocityMPerS),
         nanosBetween(seen.emitted, sim.emitted),
       );
-      if (!(apartM <= Math.max(bound, PINNED_RATIO * sigma))) {
+      const pinned = drifting ? PINNED_EVOLVING_RATIO : PINNED_RATIO;
+      if (!(apartM <= Math.max(bound, pinned * sigma))) {
         outside.push(`${golden.system} ${golden.when} ${golden.who} ${id}: ${apartM} m`);
       }
-      worstRatio = Math.max(worstRatio, apartM / sigma);
+      if (drifting) {
+        worstEvolvingRatio = Math.max(worstEvolvingRatio, apartM / sigma);
+      } else {
+        worstRatio = Math.max(worstRatio, apartM / sigma);
+      }
     }
     expect(outside).toEqual([]);
-    expect(worstRatio).toBeLessThanOrEqual(CEILING_RATIO);
+    expect(Math.max(worstRatio, worstEvolvingRatio)).toBeLessThanOrEqual(CEILING_RATIO);
   });
 
   it("gives every emitted time within the allowance of the golden's", () => {
@@ -281,20 +315,20 @@ describe("apparentPosition against the simulation's golden vectors", () => {
 
   it("agrees between a warm start from a frame 16 ms before and a cold start", () => {
     const outside: string[] = [];
-    for (const { golden, id, system } of sources) {
+    for (const { golden, source, id, system } of sources) {
       const track = placedTrack(systemPlacements(system), id);
       const observer = observerOf(golden);
+      const sourceSpeed = source.velocityNowMPerS === null ? 0 : norm(source.velocityNowMPerS);
       const before = seenOrThrow(apparentPosition(track, observer, golden.time, null));
       const at = later(golden.time, 16_000_000);
       const cold = seenOrThrow(apparentPosition(track, observer, at, null));
       const warm = seenOrThrow(apparentPosition(track, observer, at, before.lightTime));
       const sigma = norm(cold.geometricThenM) + norm(observer.positionM);
       const apartNs = nanosBetween(warm.emitted, cold.emitted);
-      // 10⁵ m/s bounds every source's speed in these systems.
       const apartM = norm(minus(warm.apparentM, cold.apparentM));
       if (
         !(Math.abs(apartNs) <= emittedAllowanceNs(sigma)) ||
-        !(apartM <= noteSevenBound(sigma, 1e5, norm(observer.velocityMPerS), apartNs))
+        !(apartM <= noteSevenBound(sigma, sourceSpeed, norm(observer.velocityMPerS), apartNs))
       ) {
         outside.push(`${id}: ${apartNs} ns, ${apartM} m`);
       }
@@ -336,6 +370,8 @@ describe("apparentPosition", () => {
       const giantSpeed = norm(minus(giantAhead, giantNow));
       const sideways = (giantSpeed + norm(observer.velocityMPerS)) * tausApartS;
       const offM = norm(minus(seenApart, truly));
+      // A 1 s chord understates a moon's speed by a part in 10⁶ at most here; the factor and the
+      // metre cover that and the positions' own rounding (about a millimetre at 10 au).
       if (!(offM <= 1.01 * relativeSpeed * tauS + sideways + 1)) {
         outside.push(`${suffix}: ${offM} m`);
       }
@@ -395,10 +431,70 @@ describe("sceneAt", () => {
     const frame = sceneAt(model, observerOf(golden), golden.time, null);
 
     expect(frame?.localBody).toBe(idOf("0100"));
-    expect(frame?.stars.map((star) => star.id)).toEqual([idOf("0000")]);
-    expect(frame?.bodies.find((body) => body.id === idOf("0100"))?.hillRadiusM).toBe(
+  });
+
+  it("names the local body selectCameraFrame names over the scene's planets and moons", () => {
+    const observer = observerOf(golden);
+    const placements = systemPlacements(system);
+    const candidates = system.bodies.bodies.flatMap((body) => {
+      const hill = system.hillRadiiM.get(body.id);
+      const at = placements.placed.has(body.id)
+        ? placedTrack(placements, body.id).positionAt(golden.time)
+        : null;
+      if (hill === undefined || at === null || body.kind.kind === "ring" || body.parent === null) {
+        return [];
+      }
+      const parent =
+        body.parent.kind === "body"
+          ? body.parent.id
+          : body.parent.kind === "star"
+            ? formatBodyId({ system: system.model.system, bodyIndex: body.parent.bodyIndex })
+            : null;
+      return [cameraFrameCandidate(body.id, parent, norm(minus(observer.positionM, at)), hill)];
+    });
+
+    expect(sceneAt(model, observer, golden.time, null)?.localBody).toBe(
+      selectCameraFrame(candidates, null),
+    );
+  });
+
+  it("gives each placed body its Hill radius", () => {
+    const body = sceneAt(model, observerOf(golden), golden.time, null)?.bodies.find(
+      (each) => each.id === idOf("0100"),
+    );
+
+    expect(body?.kind === "placed" ? body.hillRadiusM : null).toBe(
       system.hillRadiiM.get(idOf("0100")),
     );
+  });
+
+  it("sees every star of the system", () => {
+    const frame = sceneAt(model, observerOf(golden), golden.time, null);
+
+    expect(frame?.stars.map((star) => star.id)).toEqual([idOf("0000")]);
+  });
+
+  it("starts a frame 16 ms on warm from the frame before, within the bound of a cold start", () => {
+    const observer = observerOf(golden);
+    const before = sceneAt(model, observer, golden.time, null);
+    const at = later(golden.time, 16_000_000);
+
+    const warm = sceneAt(model, observer, at, before);
+    const cold = sceneAt(model, observer, at, null);
+
+    const outside: string[] = [];
+    for (const [index, body] of (cold?.bodies ?? []).entries()) {
+      const other = warm?.bodies[index];
+      if (other === undefined || other.id !== body.id) {
+        outside.push(`${body.id} missing`);
+        continue;
+      }
+      const sigma = norm(body.apparentM) + norm(observer.positionM);
+      if (!(norm(minus(other.apparentM, body.apparentM)) <= noteSevenBound(sigma, 1e5, 0, 2))) {
+        outside.push(body.id);
+      }
+    }
+    expect(outside).toEqual([]);
   });
 
   it("keeps whichever body it had for a ship at 0.95 of a moon's sphere", () => {
@@ -450,11 +546,11 @@ describe("sceneAt", () => {
       (each) => each.id === idOf("0300"),
     );
 
-    expect(body).toMatchObject({
+    expect(body).toEqual({
+      kind: "contact",
+      id: idOf("0300"),
       apparentM: at,
-      geometricM: null,
-      seen: true,
-      hillRadiusM: null,
+      emitted: bodies.hosts.time,
       level: "contact",
     });
   });
@@ -480,5 +576,76 @@ describe("sceneAt", () => {
     expect(
       norm(minus(observer.positionM, plus(planetThen, { x: 7e6, y: 600, z: 0 }))),
     ).toBeLessThan(1e-3);
+  });
+
+  it("moves a body-frame ship at its body's barycentric velocity plus its own", () => {
+    const planet = idOf("0100");
+    const shipped: SceneModel = {
+      ...model,
+      ship: {
+        position: { kind: "body", body: planet, offsetM: { x: 7e6, y: 0, z: 0 } },
+        velocityMPerS: { x: 0, y: 10, z: 0 },
+        time: golden.time,
+      },
+    };
+    const track = placedTrack(systemPlacements(system), planet);
+    const ahead = track.positionAt(later(golden.time, 1e9));
+    const behind = track.positionAt(later(golden.time, -1e9));
+    if (ahead === null || behind === null) {
+      throw new Error("the planet is placed");
+    }
+    const planetVelocity = times(minus(ahead, behind), 0.5);
+
+    const observer = shipObserver(shipped, golden.time);
+
+    expect(
+      norm(
+        minus(
+          observer?.velocityMPerS ?? planetVelocity,
+          plus(planetVelocity, { x: 0, y: 10, z: 0 }),
+        ),
+      ),
+    ).toBeLessThan(1e-3);
+  });
+
+  it("carries a system-frame ship in a straight line", () => {
+    const shipped: SceneModel = {
+      ...model,
+      ship: {
+        position: { kind: "system", system: system.model.system, offsetM: { x: 1e11, y: 0, z: 0 } },
+        velocityMPerS: { x: 0, y: 2e4, z: 0 },
+        time: golden.time,
+      },
+    };
+
+    expect(shipObserver(shipped, later(golden.time, 10e9))).toEqual({
+      positionM: { x: 1e11, y: 2e5, z: 0 },
+      velocityMPerS: { x: 0, y: 2e4, z: 0 },
+    });
+  });
+
+  it("has no observer for a ship in the galactic frame or another system's", () => {
+    const galactic: SceneModel = {
+      ...model,
+      ship: {
+        ...model.ship,
+        position: {
+          kind: "galactic",
+          position: { cell_ly: [0, 0, 0], offset_m: [0, 0, 0] },
+        },
+      },
+    };
+    const elsewhere: SceneModel = {
+      ...model,
+      ship: {
+        ...model.ship,
+        position: { kind: "system", system: "0000000000000001", offsetM: { x: 0, y: 0, z: 0 } },
+      },
+    };
+
+    expect([shipObserver(galactic, golden.time), shipObserver(elsewhere, golden.time)]).toEqual([
+      null,
+      null,
+    ]);
   });
 });

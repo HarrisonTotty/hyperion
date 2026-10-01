@@ -1354,8 +1354,31 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   evolve tidally with age while their `valid_until` is `None`, so the sim evaluates the elements at
   the emitted time and the wire states them at the record's (about 8 m of semi-major axis a
   century; a finding for plan 14). Every other vector agrees within 5 × 10⁻¹⁵ Σ, which bears out
-  Design note 7's 10⁻¹⁴. Emitted times agree within 2 ns, Hill radii within 3 × 10⁻¹⁶. The vectors
-  are pinned at the larger of Design note 7's bound and min(10 × 2.0 × 10⁻¹³, 10⁻¹²) Σ, the
-  Verification's ceiling. The test of a far body and its moons widens |Δv_moon| τ by the giant's and
-  the observer's motion across the difference of the two light times, without which a moon's
-  measured offset exceeds the plan's bound by 0.3%.
+  Design note 7's 10⁻¹⁴. Emitted times agree within 2 ns, Hill radii within 3 × 10⁻¹⁶. The test
+  finds the drifting moons from the fixture itself (elements that differ between its two times with
+  no `valid_until`) and pins them apart: every other vector at the larger of Design note 7's bound
+  and 10 × 5 × 10⁻¹⁵ Σ, the drifting moons at min(10 × 2.0 × 10⁻¹³, 10⁻¹²) Σ, and fails on any
+  measurement above the Verification's ceiling of 10⁻¹² Σ. **Awaiting the owner:** whether plan 14
+  should give a tidally evolving orbit a `valid_until` (or the client bound those moons so), and the
+  unbinding times beyond 2⁵³ s; both are reported to the orchestrator for plan 14. **Tests, as
+  built.** The far body and its moons are held to 1.01 |Δv_moon| τ, plus the giant's and the
+  observer's motion across the difference of the two light times, plus 1 m: without the second term
+  a moon's measured offset exceeds the plan's bound by 0.3%; the factor and the metre cover a 1 s
+  chord's estimate of the moon's speed and the positions' rounding. The warm start is held to Design
+  note 7's bound with each source's own speed from the golden for `apparentPosition`, and, for
+  `sceneAt` given the frame before, with 10⁵ m/s bounding every source's speed in these systems. The local body is checked twice: the planet the golden's
+  low-orbit observer circles, and `selectCameraFrame`'s own answer over candidates built
+  independently. The client's placed tracks never report absence: a body is in the scene by its
+  record's state at the scene's time, so `not_present_then` is tested on a synthetic track and the
+  record's `destroyed` through `sceneAt` (the Risks' "Elements across an event within the light
+  time"). **Names, for R02, R07 and R08.** `previous` is required (`null` for none), so that a
+  caller cannot drop the frame rule's hysteresis; R08's sketch `sceneAt(model, observer, time)`
+  passes `null`. A body's entry is `SceneBodyFrame`, a union of `placed` (with `geometricM`,
+  `lightTime` and `hillRadiusM`) and `contact` (the server's `apparentM` and `emitted` only), which
+  R07's text calls `SceneFrameBody`. The candidates for the local body are formed from the present
+  geometry before the light time is solved, so a source whose light time does not converge is still
+  in the frame rule. The wire adapter keeps a scene's `SceneSystem` across a notification that does
+  not change the system (a heartbeat, a craft push), so `sceneAt`'s placements, kept per system
+  model, are laid out once per change and not once per push. The acceptance command should read
+  `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`, which also runs
+  `lightTime.test.ts`.

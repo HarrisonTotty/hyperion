@@ -9,10 +9,15 @@
 //! galaxy, through the same steps as the `system_bodies` handler (the stars, the context from them,
 //! the planetary system, the hosts' summary and the converter), at the `mass_and_orbit` level, all
 //! an apparent position and a Hill radius need, and pinned as the JSON frames a client receives.
+//!
+//! It is a module of its own rather than a test in `planetary.rs`, since it covers the hosts'
+//! summary (`stellar.rs`) and the bodies together, and it cannot be an integration test, since the
+//! converters are the crate's own. Its seed and systems are those of the sim's test; the client's
+//! test fails if the two goldens describe different systems.
 
 use hyperion_protocol::{
     DetailLevelDto, RequestId, ResponseBody, ServerMessage, SystemBodiesRequest, SystemIdHex,
-    SystemSummaryRequest, UniverseIdHex, UniverseTime,
+    UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
@@ -25,7 +30,7 @@ use hyperion_sim::version::GENERATOR_VERSION;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 
-use super::{BodiesRequest, system_bodies, system_summary};
+use super::{BodiesRequest, hosts_request, system_bodies, system_summary};
 
 /// The seed of the sim's in-system golden (`observe_in_system_golden.rs`): plan 14's golden
 /// systems' universe (P14.T32).
@@ -73,15 +78,7 @@ fn the_in_system_golden_systems_are_pinned_as_the_client_receives_them() {
                 detail: DetailLevelDto::MassAndOrbit,
             };
             let wanted = BodiesRequest::try_from(&request).expect("a time in the window");
-            let hosts = system_summary(
-                SystemSummaryRequest {
-                    universe: universe.clone(),
-                    system: request.system.clone(),
-                    time,
-                },
-                &stars,
-                wanted.time(),
-            );
+            let hosts = system_summary(hosts_request(&request), &stars, wanted.time());
             let bodies = system_bodies(wanted, hosts, &ctx, &planets, galaxy.seed());
             assert!(!bodies.bodies.is_empty(), "system {raw:#x} has bodies");
             id += 1;

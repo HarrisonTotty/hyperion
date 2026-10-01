@@ -40,9 +40,26 @@ describe("span arithmetic", () => {
   it("measures the distance between spans either way round", () => {
     const a = { seconds: 5, nanos: 1 };
     const b = { seconds: 4, nanos: 999_999_999 };
-    expect(spanDistance(a, b)).toEqual({ seconds: 0, nanos: 2 });
-    expect(spanDistance(b, a)).toEqual({ seconds: 0, nanos: 2 });
-    expect(compareSpans(a, b)).toBeGreaterThan(0);
-    expect(spanSeconds(b)).toBe(4 + 999_999_999 * 1e-9);
+    expect([spanDistance(a, b), spanDistance(b, a)]).toEqual([
+      { seconds: 0, nanos: 2 },
+      { seconds: 0, nanos: 2 },
+    ]);
+  });
+
+  it("measures whole seconds back as a positive span", () => {
+    expect(spanDistance({ seconds: 4, nanos: 0 }, { seconds: 5, nanos: 0 })).toEqual({
+      seconds: 1,
+      nanos: 0,
+    });
+  });
+
+  it("orders spans by value", () => {
+    expect(
+      compareSpans({ seconds: 5, nanos: 1 }, { seconds: 4, nanos: 999_999_999 }),
+    ).toBeGreaterThan(0);
+  });
+
+  it("gives a span as a float of seconds as the simulation does", () => {
+    expect(spanSeconds({ seconds: 4, nanos: 999_999_999 })).toBe(4 + 999_999_999 * 1e-9);
   });
 });

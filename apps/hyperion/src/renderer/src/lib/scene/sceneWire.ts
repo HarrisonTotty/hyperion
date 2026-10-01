@@ -214,11 +214,16 @@ function hillRadii(bodies: ReadonlyArray<BodySummaryDto>): ReadonlyMap<BodyIdHex
   return radii;
 }
 
-/** Builds the model of a scene the wire states whole. */
+/**
+ * Builds the model of a scene the wire states whole, keeping `kept`'s system where the wire's is
+ * the very one it was built from, so that a heartbeat or a craft push keeps the system model and
+ * everything a frame keeps for it.
+ */
 function build(
   wire: SceneStateDto,
   tidalRadiusM: number | null,
   designate: Designate,
+  kept: SceneModel | null,
 ): SceneModelResult {
   try {
     check(Number.isSafeInteger(wire.sequence) && wire.sequence >= 0, "sequence unusable");
@@ -233,7 +238,15 @@ function build(
           state: wire.clock.state,
         },
         ship: toKinematics(wire.ship),
-        system: wire.system === null ? null : toSystem(wire.system, tidalRadiusM, designate),
+        system:
+          wire.system === null
+            ? null
+            : kept !== null &&
+                kept.system !== null &&
+                kept.wire.system === wire.system &&
+                kept.system.tidalRadiusM === tidalRadiusM
+              ? kept.system
+              : toSystem(wire.system, tidalRadiusM, designate),
         craft: wire.craft.map(toCraft),
         wire,
       },
@@ -257,7 +270,7 @@ function build(
  * @param designate - Names a system, as the chart's answers carry its designation of record.
  */
 export function toSceneModel(state: SceneStateDto, designate: Designate): SceneModelResult {
-  return build(state, null, designate);
+  return build(state, null, designate, null);
 }
 
 /** Puts `entry` in place of the one with the same ID in a list kept in ID order, or inserts it. */
@@ -333,5 +346,5 @@ export function applySceneNotification(
     system,
     craft: notification.craft ?? model.wire.craft,
   };
-  return build(wire, tidalRadiusM, designate);
+  return build(wire, tidalRadiusM, designate, model);
 }
