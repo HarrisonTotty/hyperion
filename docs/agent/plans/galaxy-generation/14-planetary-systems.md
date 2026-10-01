@@ -2047,7 +2047,9 @@ planetary::system::tests::no_orbits_cross`.
   `0x42002cb200000009` body `.0201` gains about 8 m of semi-major axis a century. Such an orbit
   gets `valid_until` = the earlier of the segment's next change and `next_step(t)`, the first
   multiple of `EVOLVING_ORBIT_STEP` (1 Julian year, aligned to the epoch) after `t`, windowed by
-  `within` like every other `valid_until`. Whether the elements evolve is decided by comparing the
+  `within` like every other `valid_until`. **Pending re-decision (2026-10-01):** the decision's drift
+  bound does not hold (see "Risks and open points", the bullet on these two findings), and the
+  orchestrator has sent it back. Do not build it until the re-decision is recorded here. Whether the elements evolve is decided by comparing the
   elements at `t` and at the step: equal to the bit, the orbit is left with its segment's
   `valid_until`. The scene (R03 Design note 4) and the `SYSTEM` display (T44's `nextRequestTime`)
   already re-send or re-request on a `valid_until`, so nothing is built on the wire or the client.
@@ -5409,6 +5411,20 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     their segment stated no `valid_until`, against `BodyOrbit`'s meaning; a client holding such a
     record would drift as t² (some 100 m by the window's edge for close_binary's `.0201`). Decided:
     a `valid_until` on an aligned 1-year step, at one re-send per such body per year of scene time.
+    **Pending re-decision (G14, 2026-10-01): the decision's drift estimate does not hold.** For
+    `.0201`, a = 1.880 × 10⁸ m, P = 1.024 × 10⁶ s (n = 6.13 × 10⁻⁶ s⁻¹), and ȧ = 8.18 cm a year
+    (`scene_systems.golden`, epoch against +100 yr). T18's closed form keeps the mean anomaly at the
+    epoch and lets n follow a(t), so the phase at t is M₀ + n(a(t)) t. A record held from t₀ to
+    t₀ + Δt is then off along the orbit by about 1.5 n ȧ Δt (t₀ + Δt). R03.T13's 2 × 10⁻¹³ Σ (1.03
+    m from 30 au, 0.19 m from the low orbit, at +100 yr) is this formula with Δt the light time
+    (about 4 h): the client places the body with the elements at the record's time and the
+    simulation with those at the emitted time. A `valid_until` does not change that residual, so
+    R03.T13's separate pin cannot go. For a record held one 1-year step, the formula gives about
+    2.4 km at +100 yr and 24 km at the window's edge, not "well under a centimetre". With
+    phase-continuous elements (M = ∫ n dt), a held record is still off by ½ ṅ Δt² a = 0.75 n ȧ
+    Δt²: about 12 m for one year, and under 1 cm only for a step of about 10 days. The options sent
+    back: the ∫ n phase with a shorter step, ȧ on the wire, or accepting the drift. P14.T28.f is
+    not built.
   - _P14.T35.d, as built._ The state-time check in `bodiesWire.ts` is `displayableTime`, not
     `displayTime`, since `displays/system/displayTime.ts` has that name; it shares `validNanos`
     with `usableTime`. The `SINCE` text is `formatEventTime(time)` in `displays/system/displayTime.ts`,
