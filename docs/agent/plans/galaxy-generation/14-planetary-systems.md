@@ -2039,6 +2039,31 @@ elements into elements at a time.
     and no crossing among generated systems of primaries over 8 M☉.
   - _Accept:_ `cargo test -p hyperion-sim -- planetary::fate planetary::hosts
 planetary::system::tests::no_orbits_cross`.
+- **P14.T28.f Evolving orbits get a `valid_until`** (added 2026-09-30 from the rendering lanes
+  (R03.T13 findings); decided by a delegated decision, item 9). An orbit whose elements change
+  continuously inside their segment (T8.e's circularisation, a host's mass loss through
+  `host_mass(t)`, a giant-impact moon's recession of T18) carries `valid_until: None` today, though
+  `BodyOrbit::new`'s doc defines it as the next change of the body's state or elements; close_binary
+  `0x42002cb200000009` body `.0201` gains about 8 m of semi-major axis a century. Such an orbit
+  gets `valid_until` = the earlier of the segment's next change and `next_step(t)`, the first
+  multiple of `EVOLVING_ORBIT_STEP` (1 Julian year, aligned to the epoch) after `t`, windowed by
+  `within` like every other `valid_until`. Whether the elements evolve is decided by comparing the
+  elements at `t` and at the step: equal to the bit, the orbit is left with its segment's
+  `valid_until`. The scene (R03 Design note 4) and the `SYSTEM` display (T44's `nextRequestTime`)
+  already re-send or re-request on a `valid_until`, so nothing is built on the wire or the client.
+  - _Files:_ `planetary/fate.rs` (`FateAt` for `Present`), `planetary/params.rs`
+    (`EVOLVING_ORBIT_STEP`, with its drift bound in the doc comment), `planetary/system.rs` (a
+    moon's orbit section); the goldens that pin a `valid_until` (plan 14's
+    `tests/golden/planetary/`, the server's `scene_systems.golden`), with a `GENERATOR_VERSION`
+    bump per the sim-determinism skill.
+  - _Tests:_ a circularising planet, a planet of a host losing mass and a receding giant-impact moon
+    each carry a `valid_until` on the step grid, strictly after `t` and no later than a year on; a
+    body whose elements hold keeps its segment's `valid_until` (`None` where nothing changes); the
+    same record is given at any time inside one step (aligned, not relative); a step past the clock
+    window gives none; R03.T13's `apparent.test.ts` holds every body to the common bound.
+  - _Accept:_ `cargo test -p hyperion-sim -- planetary::fate planetary::system`; `cargo test -p
+hyperion-server scene`; `pnpm --filter hyperion exec vitest run
+src/renderer/src/lib/scene/apparent.test.ts`.
 
 #### P14.T29 Tidal and encounter stripping
 
@@ -2288,6 +2313,28 @@ convention": a variant of `RequestBody` and of `ResponseBody` per kind, the kind
     each in the subtask that adds the type; (a) `BodyIdHex` round trip and rejection of malformed
     strings; (c) `REQUEST_KINDS` holds the three new strings (two in the slice).
   - _Accept:_ `cargo test -p hyperion-protocol`; `just gen-protocol-check` passes.
+- **P14.T35.d Body-state times beyond 2⁵³ s** (added 2026-09-30 from the rendering lanes (R03.T13
+  findings); decided by a delegated decision, item 8). A body that was unbound or destroyed long
+  before the clock window carries a `BodyStateDto` `at` past what a JavaScript number holds exactly
+  (±(2⁵³ − 1) s, about ±285 Myr): in the RM1 fixture universe (`0x5eed000000140032`) `wide_binary`
+  and `close_binary` send `seconds: -199097968544446944` (about −6.3 Gyr), and the client's
+  `usableTime` faults the whole system. The wire is unchanged and the server does not clamp: a
+  state's `at` is display-only, and every time a client computes with lies inside the clock window.
+  The client accepts a state `at` of any whole number of seconds (`displayTime` in
+  `lib/system/bodiesWire.ts`, used for `destroyed` and `unbound`; `usableTime` stays everywhere
+  else), and T43.b's `SINCE` row reads `formatUniverseTimeDhms` inside the clock window (±1,000 yr)
+  and the years form (`formatUniverseTimeYr` with `yr`, as the galaxy map's time reads) outside it,
+  rather than seconds the client does not hold. The protocol documents the bound.
+  - _Files:_ `crates/hyperion-protocol/src/primitives.rs` (`UniverseTime`'s doc comment),
+    `BodyStateDto`'s `at` fields' doc comments, `just gen-protocol`;
+    `apps/hyperion/src/renderer/src/lib/system/bodiesWire.ts`,
+    `apps/hyperion/src/renderer/src/displays/system/BodyRecordReadings.tsx`.
+  - _Tests:_ every frame of the RM1 fixture's three golden systems (`scene_systems.golden`)
+    converts without a fault; a state `at` of `-199097968544446944` converts; a non-integral `at`
+    or bad nanoseconds is still a fault; a `valid_until` beyond 2⁵³ s is still a fault; the `SINCE`
+    row shows the `MET` form inside the window and `UT -6,309,033,910.83 yr` for that time.
+  - _Accept:_ `cargo test -p hyperion-protocol`; `just gen-protocol-check`; `pnpm --filter
+hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/system`.
 - _As built (`wireD`, round 9)._ `planetary/population.rs`: `PopulationDto` (tagged `ring`,
   `belt`, `cometary_halo`) of `RingDto`, `BeltDto` and `CometaryHaloDto`, carried as the
   `population` section of `BodySummaryDto` and `BodyRecordDto`; `SystemBodiesDto`'s `belts` and
@@ -5349,3 +5396,29 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   `planetary/system/tests.rs` (`a_state_s_position_is_position_at_s_bit_for_bit`,
   `a_body_s_velocity_is_the_derivative_of_its_position`,
   `a_star_s_zone_moves_with_star_states_at_bit_for_bit`).
+- **Two findings of the rendering lanes, added as P14.T35.d and P14.T28.f (2026-09-30, R03.T13;
+  decided by a delegated decision, items 8 and 9).**
+  - _Body-state times beyond 2⁵³ s (P14.T35.d)._ A `Destroyed { at }` or `Unbound { at }` from
+    before about −285 Myr is not a safe integer in JavaScript, and the client faulted the whole
+    system on it (`wide_binary` and `close_binary` of the RM1 fixture, `at` ≈ −6.3 Gyr). Decided:
+    no wire change and no clamp; the client takes any whole number of seconds for these
+    display-only times and shows them in years outside the clock window. At 6 Gyr a JavaScript
+    number holds the time to 32 s, a relative 2⁻⁵³, which no comparison against a time inside the
+    window can notice. Every other `UniverseTime` keeps the safe-integer check.
+  - _Evolving orbits with `valid_until: None` (P14.T28.f)._ Orbits whose elements change inside
+    their segment stated no `valid_until`, against `BodyOrbit`'s meaning; a client holding such a
+    record would drift as t² (some 100 m by the window's edge for close_binary's `.0201`). Decided:
+    a `valid_until` on an aligned 1-year step, at one re-send per such body per year of scene time.
+  - _P14.T35.d, as built._ The state-time check in `bodiesWire.ts` is `displayableTime`, not
+    `displayTime`, since `displays/system/displayTime.ts` has that name; it shares `validNanos`
+    with `usableTime`. The `SINCE` text is `formatEventTime(time)` in `displays/system/displayTime.ts`,
+    beside `CLOCK_WINDOW_S`: `formatUniverseTimeDhms` inside the window, its edges included, and
+    `formatUniverseTimeYr(seconds ÷ yr)` with ` yr` outside it (`UT -6,309,033,910.83 yr`). The
+    figure `-199097968544446944` is not in this branch's goldens: at generator version 16 the RM1
+    fixture's ended bodies are `wide_binary`'s giant-impact moons `.0401` (unbound at
+    `-67192088818403264` s, about −2.1 Gyr, past 2⁵³) and `.0501` (−185 Myr); `close_binary` has
+    none. The tests read every frame of the three golden systems and the decision's figure on the
+    slice fixture. R03.T13's `withSafeEventTime` in `test/inSystemGolden.ts`, which replaced such
+    times by `MIN_SAFE_INTEGER`, is removed. **For the owner:** the guide has no sentence for an
+    event time outside the clock window on a display that steps finer than 0.01 yr; the years form
+    is built to the decision and waits on the owner's confirmation.

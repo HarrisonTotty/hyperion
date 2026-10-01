@@ -214,6 +214,8 @@ impl Stream {
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::lcg::Lcg;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
     use crate::Seed;

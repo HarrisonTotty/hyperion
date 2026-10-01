@@ -1,3 +1,6 @@
 [toolchain]
 channel = "1.98.1"
 components = ["rustfmt", "clippy"]
+# The two WebAssembly targets the determinism checks run (`just test-wasm-fast`): wasm32-wasip1
+# under wasmtime, and wasm32-unknown-unknown, the client's, under wasm-bindgen-test.
+targets = ["wasm32-wasip1", "wasm32-unknown-unknown"]

@@ -646,6 +646,8 @@ fn halley(x: f64, u: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::{assert_same_bits, bits, ulps_apart};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 
