@@ -1,4 +1,5 @@
 import {
+  type NotificationBody,
   PROTOCOL_VERSION,
   type RequestBody,
   type RequestError,
@@ -119,6 +120,11 @@ export class FakeWebSocket extends EventTarget {
   /** Ends the request with this ID with an error. */
   serverRejects(id: RequestId, error: RequestError): void {
     this.serverSends({ type: "request_error", id, error });
+  }
+
+  /** Pushes a notification on subscription `subscription`. */
+  serverNotifies(subscription: number, body: NotificationBody): void {
+    this.serverSends({ type: "notification", subscription, body });
   }
 
   /** The `request` messages sent on this socket whose body has `kind`, oldest first. */

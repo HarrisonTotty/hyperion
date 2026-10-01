@@ -1590,3 +1590,39 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   server change. Run 15 times in a row and 40 times as 20 concurrent copies (load average over 20):
   no failure. The owner's open point above, whether a merged arrival should state its own clock,
   stands.
+- **Deviations in T14, as built.** `useScene(universe, { detail, designate })` reads the request
+  client and the link's status from `useServerLink()`, as the app's other server hooks do, rather
+  than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open
+  point, taken provisionally, awaiting the owner):** the smaller reversible option, a `designate`
+  callback on `useScene`, with no wire change; the latest one given is used from the next push on,
+  and a new one neither reopens the scene nor relabels what is held. No production caller yet
+  supplies a designation for a system the chart has not answered; R02.T17 must, by its chart's
+  answers or a lookup, unless the owner prefers the designation on `SceneSystemDto` (additive,
+  like the tidal radius). Cameras are not a parameter: a view hands its pose to
+  `SceneView.reportCamera(view, pose)` and stops with `removeCamera(view)`, which feed the
+  `CameraReporter` (`lib/scene/cameraReports.ts`) the hook owns; R02's and R07's "handed to
+  `CameraReporter`" means these. The reporter gives each `ViewId` a wire slot 0–7 for as long as it
+  reports (a ninth view is a `RangeError`), sends the whole set each time, since the server
+  replaces its set whole, and sends at once on a new view, a removed one or a change of frame,
+  otherwise at most every 250 ms with the latest poses. `subscribe` is sent with `cameras: []` and
+  the cameras held go by `scene_cameras` once it is open, since the server refuses a whole
+  subscription whose cameras are out of reach (T8.a) and cameras held from the previous scene may
+  be; one report is in flight at a time and the latest set waits for its answer, so a refusal
+  answered late is never lost to a newer report; it shows as `cameraRefusal` and leaves the
+  subscription live. `SceneStatus` is `idle`, `pending`, `live`, `stale` (`link_down` or
+  `resubscribing`, the last scene kept), `link_down` (none yet), `rejected` (the server's code, or
+  `unusable` for an opening state the adapter refuses or a fourth resubscription in a row with no
+  push applied between) and `timed_out` (`REQUEST_TIMEOUT_MS`). While stale, `frameAt` holds the
+  clock at the moment the scene went stale rather than extrapolating a rate the server may have
+  changed; the next state resumes it. `frameAt` drops its previous frame when the system changes.
+  Every applied push re-renders the hook's caller (64 Hz while craft are in the scene); a drawing
+  loop reads positions through `frameAt`, which needs no render, and an accepted camera report
+  re-renders nothing. `toKinematicsDto` (in `sceneWire.ts`) writes a `SceneKinematics` in the wire's
+  form; `FakeWebSocket.serverNotifies` is added here, plan 12 not having added it. **The tests,
+  as built.** The two-clients test bounds each body and star by its own speed, apparent and
+  geometric, read from the first client's frame a millisecond later (1.01 v × 20 ms × rate + 1 m),
+  and holds that the largest separation is over half its bound, so the test is not vacuous. "Craft
+  within one push" is held as "within one delivery": twelve craft pushes 16 ms apart reach the
+  second client 20 ms after the first, and at every millisecond the second holds exactly the craft
+  the first held 20 ms earlier; with 20 ms of delivery against a 15.625 ms tick, a literal "one
+  push" could not hold. Under StrictMode the hook subscribes once.

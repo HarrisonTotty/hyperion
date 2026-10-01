@@ -128,6 +128,35 @@ function toKinematics(kinematics: KinematicsDto): SceneKinematics {
   };
 }
 
+/**
+ * A pose of the scene as the wire states it: the inverse of the adapter's reading, for the camera
+ * reports a client sends (Design note 6).
+ */
+export function toKinematicsDto(kinematics: SceneKinematics): KinematicsDto {
+  const { position, velocityMPerS: v, time } = kinematics;
+  let wire: KinematicsDto["position"];
+  switch (position.kind) {
+    case "galactic":
+      wire = { frame: "galactic", position: position.position };
+      break;
+    case "system":
+      wire = {
+        frame: "system",
+        system: position.system,
+        offset_m: [position.offsetM.x, position.offsetM.y, position.offsetM.z],
+      };
+      break;
+    case "body":
+      wire = {
+        frame: "body",
+        body: position.body,
+        offset_m: [position.offsetM.x, position.offsetM.y, position.offsetM.z],
+      };
+      break;
+  }
+  return { position: wire, velocity_m_s: [v.x, v.y, v.z], time };
+}
+
 function toCraft(craft: SceneCraftDto): SceneCraft {
   const [x, y, z, w] = craft.attitude;
   check(allFinite(craft.attitude) && allFinite(craft.angular_velocity_rad_s), "craft unusable");
