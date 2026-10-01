@@ -380,7 +380,10 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    holds it as it holds a finished request, and otherwise leaves it pending, so a slow reader
    receives fewer, fuller notifications and the server holds one per subscription. A merge never
    drops a body change, which is what makes it safe: a body's latest record supersedes its earlier
-   ones. The write timeout still closes a reader that stops altogether.
+   ones. The write timeout still closes a reader that stops altogether. A merged push states the
+   latest clock; every record states its own time (`hosts.time`, `seen.emitted`, a craft's
+   `state.time`), and the client takes no record's time from the push (ruled 2026-09-30 by a
+   delegated decision).
 6. **Cameras bound the scene; they are never ship state.** Each view reports its camera, one
    subscription carrying up to `MAX_SCENE_CAMERAS` (8), through `scene_cameras` (and in the
    `subscribe` request), as plan 12's `alerts_observer` reports its observer. The client sends a
@@ -1212,8 +1215,9 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   `BodyDetail` does, since a scene's state holds a whole `SystemBodiesDto`; the wire form is
   unchanged. `SubscriptionTopic`, `SubscriptionState` and `NotificationBody` are internally tagged
   by `topic` in snake case (`"scene"`), so a request reads `"topic": {"topic": "scene", …}` and
-  P12.T9's variants take `alerts` (noted in P12.T9); `type` would match the other tagged DTOs and
-  is cheap to switch to before R03.T5.c's client reads it. The four kinds answer `unsupported`
+  P12.T9's variants take `alerts` (noted in P12.T9). Ruled 2026-09-30 (a delegated decision):
+  `topic` stays; a tag is named for what it discriminates (`kind`, `frame`, `state`, `topic`),
+  `type` being for message and state variants. The four kinds answer `unsupported`
   through `not_served_yet` until R03.T5.b (`subscribe`, `unsubscribe`), R03.T6 (`scene_ship`) and
   R03.T8 (the scene topic, `scene_cameras`). `RequestClient::handleServerMessage`
   (`packages/protocol/src/requests.ts`) and the link's switch
@@ -1326,9 +1330,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   that one advance or ten send the same record; a contact is evaluated at the scene time. A
   contact with no single position (a population) or absent then carries no `seen`; a heartbeat
   re-sends the contacts the ship sees, and one it saw at the last push and no longer does. A grant
-  that stops resolving a belt's member sends nothing, the wire having no withdrawal; the client
-  then keeps a record above the ship's new grant until the scene is rebuilt (for the sensors plan,
-  which first lowers a grant). The ship is placed in the scene's system directly when it is in
+  that stops resolving a body the client holds (a belt's member) re-sends the whole system as an
+  arrival of the same system at the current grants, the wire having no withdrawal (ruled
+  2026-09-30 by a delegated decision; see the note on it below). The ship is placed in the scene's system directly when it is in
   that system's or one of its bodies' frames, otherwise through the galactic frame with the
   systems' drifts (`epoch_velocity`); a body frame whose body is absent at a time falls back to
   the barycentre. A handover between overlapping spheres cannot leave the scene in no system while
@@ -1532,11 +1536,13 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   a knowledge with contacts: each craft list either client is told is the source's at its stated
   time, the same contacts are placed by sight for both, and each later setting continues the
   clock, so the minute is one run of scene time; records are compared by position, each degraded
-  to its own grant. Open for the owner: a slow reader's merged push states the latest clock while
-  an arrival merged into it holds records evaluated at an earlier time (Design note 5 keeps the
-  latest clock; the records' orbits are time-independent, a contact's `seen` is not); and a topic
-  whose pool job fails stops pushing with only a `warn`, which the client's sequence check cannot
-  see (an error notification would need a protocol addition).
+  to its own grant. Two points went to the owner and were decided on 2026-09-30 by a delegated
+  decision. The first: a slow reader's merged push states the latest clock while an arrival merged
+  into it holds records evaluated at an earlier time. This is confirmed as Design note 5 has it,
+  each record stating its own time, and the doc comments on `SeenPositionDto` and the
+  notification's `clock` now say so. The second: a topic whose pool job fails stopped pushing
+  with only a `warn`. It now ends with `subscription_ended`; see the note on that message
+  below.
 - **Deviations in T10.b, as built.** A request answered in bulk settles with its payload
   (`Finished` and `Settled` carry it; `run` serialises the response as before), and the
   connection keeps a queue of streams (`ws.rs`, `Stream`), the first sending one chunk at a time
@@ -1590,3 +1596,152 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   server change. Run 15 times in a row and 40 times as 20 concurrent copies (load average over 20):
   no failure. The owner's open point above, whether a merged arrival should state its own clock,
   stands.
+- **Deviations in T14, as built.** `useScene(universe, { detail, designate })` reads the request
+  client and the link's status from `useServerLink()`, as the app's other server hooks do, rather
+  than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open
+  point, taken provisionally, awaiting the owner):** the smaller reversible option, a `designate`
+  callback on `useScene`, with no wire change; the latest one given is used from the next push on,
+  and a new one neither reopens the scene nor relabels what is held. No production caller yet
+  supplies a designation for a system the chart has not answered; R02.T17 must, by its chart's
+  answers or a lookup, unless the owner prefers the designation on `SceneSystemDto` (additive,
+  like the tidal radius). Cameras are not a parameter: a view hands its pose to
+  `SceneView.reportCamera(view, pose)` and stops with `removeCamera(view)`, which feed the
+  `CameraReporter` (`lib/scene/cameraReports.ts`) the hook owns; R02's and R07's "handed to
+  `CameraReporter`" means these. The reporter gives each `ViewId` a wire slot 0–7 for as long as it
+  reports (a ninth view is a `RangeError`), sends the whole set each time, since the server
+  replaces its set whole, and sends at once on a new view, a removed one or a change of frame,
+  otherwise at most every 250 ms with the latest poses. `subscribe` is sent with `cameras: []` and
+  the cameras held go by `scene_cameras` once it is open, since the server refuses a whole
+  subscription whose cameras are out of reach (T8.a) and cameras held from the previous scene may
+  be; one report is in flight at a time and the latest set waits for its answer, so a refusal
+  answered late is never lost to a newer report; it shows as `cameraRefusal` and leaves the
+  subscription live. `SceneStatus` is `idle`, `pending`, `live`, `stale` (`link_down` or
+  `resubscribing`, the last scene kept), `link_down` (none yet), `rejected` (the server's code, or
+  `unusable` for an opening state the adapter refuses or a fourth resubscription in a row with no
+  push applied between) and `timed_out` (`REQUEST_TIMEOUT_MS`). While stale, `frameAt` holds the
+  clock at the moment the scene went stale rather than extrapolating a rate the server may have
+  changed; the next state resumes it. `frameAt` drops its previous frame when the system changes.
+  Every applied push re-renders the hook's caller (64 Hz while craft are in the scene); a drawing
+  loop reads positions through `frameAt`, which needs no render, and an accepted camera report
+  re-renders nothing. `toKinematicsDto` (in `sceneWire.ts`) writes a `SceneKinematics` in the wire's
+  form; `FakeWebSocket.serverNotifies` is added here, plan 12 not having added it. **The tests,
+  as built.** The two-clients test bounds each body and star by its own speed, apparent and
+  geometric, read from the first client's frame a millisecond later (1.01 v × 20 ms × rate + 1 m),
+  and holds that the largest separation is over half its bound, so the test is not vacuous. "Craft
+  within one push" is held as "within one delivery": twelve craft pushes 16 ms apart reach the
+  second client 20 ms after the first, and at every millisecond the second holds exactly the craft
+  the first held 20 ms earlier; with 20 ms of delivery against a 15.625 ms tick, a literal "one
+  push" could not hold. Under StrictMode the hook subscribes once.
+- **T15, the verification pass (lane D4, 2026-09-30).** Every figure below was taken on the shared
+  development machine (Ryzen 7 3700X, RTX 3080) while other lanes built and tested, at load
+  averages of 7 to 26. All of them are **provisional** and are to be taken again on a quiet machine
+  (README, Conventions).
+  - **Sizes** (`convert::scene_fixture::scene_message_sizes`, an ignored measurement, run by hand):
+    the frames for plan 14's three golden systems (`0x42006cba00000009`, `0x41ffecae00000004`,
+    `0x42002cb200000009`), whole `ServerMessage`s at 3,600 s.
+
+    | Level             | Bodies       | State                 | Arrival        |
+    | ----------------- | ------------ | --------------------- | -------------- |
+    | `contact`         | 16 / 18 / 16 | 9.8 / 12.4 / 11.0 kB  | the same + 1 B |
+    | `mass_and_orbit`  | 16 / 18 / 16 | 16.6 / 19.9 / 18.8 kB | the same + 1 B |
+    | `bulk` and `full` | 24 / 47 / 80 | 30.1 / 58.2 / 99.2 kB | the same + 1 B |
+
+    `bulk` lists more bodies (the moons and members listed from that level). A `BodySummaryDto`
+    averages 401–436 B at `contact`, 826–870 B at `mass_and_orbit` (largest 1,025 B) and
+    1,104–1,141 B at `bulk` (largest 1,373 B), against the brainstorm's 250–300 B. Design note 4
+    foresaw 700–900 B. Bodies are pushed only on change, so this sets the size of an arrival, not
+    the rate. A craft is 373 B against the brainstorm's 400 B, and a push of ten craft is 3,931 B,
+    0.252 MB/s at 64 Hz, the brainstorm's 0.25 MB/s.
+
+  - **Push rate with ten test craft** (`craft_are_pushed_at_64_hz_each_push_stating_its_time`,
+    which now prints its figures): 64, 64 and 44 pushes in a second of scene time, 0.193, 0.193
+    and 0.133 MB/s of notifications. The 44 is a loaded run (load average 26), whose missed ticks
+    are skipped, never bunched.
+  - **Added latency of a push during a 15 MB transfer, loopback**
+    (`bulk::tests::streaming::push_latency_on_loopback`, ignored, run by hand; ten craft at 64 Hz,
+    the low-water mark on). Each delay runs from the instant a push's clock states to its receipt.
+    With no transfer: median 0.56 ms, worst 40 ms (the load). During 40 transfers, each 4.5–13.7 ms
+    from first chunk to last: median 1.67 ms, worst 4.8 ms. On loopback a transfer adds about a
+    millisecond. The slow-link figures are T10.b's (Design note 11).
+  - **Pending, by hand:** the latency between two machines on gigabit Ethernet and on Wi-Fi, with
+    the link rates. This machine alone cannot take it.
+  - **Pending:** the smoke check of a 15 MiB (61-chunk) transfer and its terminal response in the
+    real Electron renderer. No kind is answered in bulk until R06 and R09, so neither the server
+    binary nor any page can ask for one yet. A stand-in kind would be test-only server code
+    reachable over the network, which this plan does not build. The check runs with R06's sky
+    request, the first real bulk kind, on this machine (RTX 3080) under the target-hardware rule.
+    Until then, the client's reassembly is held by T11's tests over `FakeWebSocket` and the
+    server's streaming by T10.b's tests over real sockets.
+  - **The envelope against P12.T9**, for plan 12's writer. As P12.T9 designs it: `subscribe`,
+    `unsubscribe`, `Subscribed { subscription, state }`, `SubscriptionTopic`, `SubscriptionState`,
+    `ServerMessage::Notification { subscription, body }`, `NotificationBody`, the unknown
+    subscription as `bad_request` naming `subscription`, and `TestClient::next_notification()`. It
+    departs from P12.T9 in these places, each recorded above and in P12.T9's note:
+    - the enums are tagged `topic`;
+    - `ResponseBody::Subscribe` boxes `Subscribed`;
+    - the helper on `RequestClient` consumes notifications (Design note 1);
+    - `RequestClient.subscribe(universe, topic)` takes the universe;
+    - a topic serves through `Handler::subscribe` and a `Pusher` with its own `Merge`;
+    - requests naming a subscription are routed by the connection;
+    - subscription numbers are never reused, and `MAX_SUBSCRIPTIONS` is 4.
+
+    P12.T9's "subscriptions end with the socket" gains `subscription_ended` (the delegated decisions
+    of 2026-09-30, item 6, built after this pass).
+
+  - **The Verification list.** Every automated item runs in `just ci`, which passed at this commit:
+    - honest scene: `scene_knowledge.rs`, T8's refusal tests, T7.a's and T13's seen positions;
+    - one scene: `scene_agree.rs`, made reliable by the T9 fix above, and T14's two client tests;
+    - every push stating its time and rate: T8;
+    - apparent positions: T2, T3 and T13;
+    - transport: T10.b's streaming tests, T11's reassembly and T1's no-unasked-frames test.
+
+    The by-eye item is R02's.
+- **`subscription_ended` and the scene's watchdog, decided 2026-09-30 (delegated decision, item
+  6), as built.** On the wire, `ServerMessage::SubscriptionEnded { subscription, error }` (type
+  `subscription_ended`). Like a notification, it is sent only on a subscription the client
+  opened, so `PROTOCOL_VERSION` stays 2; its doc comment now says so and records open question 21
+  as closed (item 3).
+
+  On the server, a topic whose pool job fails keeps its `warn` and calls `Pusher::fail(error)`.
+  The connection sends what is still pending, then `subscription_ended`, and frees the place, so
+  that it no longer counts against `MAX_SUBSCRIPTIONS`; the number is never reused. A push made
+  after the failure is dropped. There is no retry: the core went with the failed job.
+  `subscriptions::tests::a_topic_that_fails_ends_its_subscription_after_its_last_push_and_frees_its_place`
+  covers it.
+
+  On the client, `SubscriptionEnd` becomes a union, `{ kind: "unsubscribed" | "link_lost" }` or
+  `{ kind: "ended", error }`. `RequestClient` routes `subscription_ended` to its subscription and
+  sends no `unsubscribe` of its own; the link's switch gains the case. `useScene` reopens a scene
+  the server ended after the link's reconnection delay (`RECONNECT_DELAY_MS`, now exported, 2 s),
+  showing it `stale` (`resubscribing`) meanwhile. This counts toward the same three resubscriptions
+  in a row, after which it settles as `rejected` with the server's code. A watchdog marks the scene
+  `stale` (`silent`) once no push has arrived for `SCENE_SILENCE_MS`, 2 s (twice the heartbeat,
+  the guide's rule), holding its clock; the next push makes it `live` again.
+
+- **A withdrawn body re-sends the whole system, decided 2026-09-30 (delegated decision, item 7),
+  as built.** `SceneCore::refresh` now returns `None` when a body it had sent no longer resolves
+  at its new grant. `advance` then makes the same system arrive again through `arrival`, the
+  helper the first arrival also uses, at the scene time and the current grants, in place of
+  re-sent bodies. A body never sent that does not resolve is still just not sent. No change to the
+  protocol or the client: an arrival already replaces everything before it. Tests:
+  `a_grant_that_withdraws_a_body_sent_brings_the_whole_system_again_without_it` (a knowledge that
+  lowers every belt member to `contact`: the next delta is an arrival of the same system, with its
+  tidal radius and without those members, and the advance after it sends nothing).
+  `a_knowledge_change_re_sends_exactly_the_bodies_it_touched_with_their_new_level` now lowers only
+  bodies `contact` still resolves, so it stays a test of re-sent bodies. Nothing changes in
+  production until the sensors plan lowers a grant, since `GrantAsked` never does.
+
+  The client was checked. A same-system arrival rebuilds the model's `SceneSystem`, as any arrival
+  does, and `useScene.frameAt` keeps its previous frame, and with it the local body's hysteresis,
+  because it compares system IDs. No view consumes `useScene` yet. For R02.T17: decide whether to
+  reset the free camera or a selection by comparing the system's ID, never by the `SceneSystem`
+  object's identity, so that a same-system arrival resets neither.
+
+- **The follow-ups after review.** `Subscriptions::next_failed` reads the failure before the
+  pending push, so `subscription_ended` cannot overtake a push the topic made before failing. A
+  command routed to a subscription its topic gave up is refused with the topic's own error. On the
+  client, a stale reason other than `silent` stops the watchdog. New tests cover: the retry wait
+  surviving the silence period; a link drop or a change of universe during the wait, after which
+  the old scene is not reopened; and giving up with the server's code after four endings in a row.
+  Not tested: `subscription_ended` waiting behind a full queue, and a pool job's failure through
+  the scene topic itself. That branch shares `push_waits_for` with the pushes.

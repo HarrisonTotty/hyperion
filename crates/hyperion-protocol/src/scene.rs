@@ -141,7 +141,9 @@ pub struct SceneShipSet {
 }
 
 /// Where the ship sees a body it knows only as a contact, which the client cannot propagate: the
-/// apparent position the server evaluated from the ship at the push's time (R03, Design note 13).
+/// apparent position the server evaluated from the ship at the time its record was evaluated, which
+/// a merged notification (Design note 5) may place before the notification's clock; `emitted`
+/// states when the light left (R03, Design note 13).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SeenPositionDto {
@@ -268,7 +270,9 @@ pub struct SceneNotificationDto {
     /// server bug. A JSON number, as [`SceneStateDto::sequence`] is.
     #[ts(type = "number")]
     pub sequence: u64,
-    /// The scene clock.
+    /// The scene clock when the notification was sent. A merged notification's records may hold
+    /// earlier times, each stating its own (`hosts.time`, a contact's `seen.emitted`, a craft's
+    /// `state.time`); a client takes no record's time from this clock (Design note 5).
     pub clock: SceneClockDto,
     /// The ship, when it changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]

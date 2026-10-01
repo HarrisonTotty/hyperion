@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ClientMessage } from "./generated/ClientMessage";
+import type { RequestError } from "./generated/RequestError";
 import type { SceneNotificationDto } from "./generated/SceneNotificationDto";
 import type { SceneStateDto } from "./generated/SceneStateDto";
 import type { ServerMessage } from "./generated/ServerMessage";
@@ -149,7 +150,7 @@ describe("RequestClient.subscribe", () => {
     const ends: SubscriptionEnd[] = [];
     subscription.onEnd((end) => ends.push(end));
     subscription.unsubscribe();
-    expect(ends).toEqual(["unsubscribed"]);
+    expect(ends).toEqual([{ kind: "unsubscribed" }]);
     expect(subscription.ended).toBe(true);
   });
 
@@ -171,8 +172,8 @@ describe("RequestClient.subscribe", () => {
     setLinkUp(false);
     client.linkLost();
     expect(ends).toEqual([
-      [1, "link_lost"],
-      [2, "link_lost"],
+      [1, { kind: "link_lost" }],
+      [2, { kind: "link_lost" }],
     ]);
     expect(first.ended && second.ended).toBe(true);
   });
@@ -183,7 +184,38 @@ describe("RequestClient.subscribe", () => {
     client.linkLost();
     const late: SubscriptionEnd[] = [];
     subscription.onEnd((end) => late.push(end));
-    expect(late).toEqual(["link_lost"]);
+    expect(late).toEqual([{ kind: "link_lost" }]);
+  });
+
+  it("ends the subscription the server ends, with its reason, and no other", async () => {
+    const { client, sent } = recordingClient();
+    const first = await sceneSubscription(client, sent, 1);
+    const second = await sceneSubscription(client, sent, 2);
+    const ends: SubscriptionEnd[] = [];
+    first.onEnd((end) => ends.push(end));
+    const error: RequestError = {
+      code: "internal",
+      message: "the scene could not be advanced",
+      field: null,
+    };
+
+    expect(client.handleServerMessage({ type: "subscription_ended", subscription: 1, error })).toBe(
+      true,
+    );
+    expect(ends).toEqual([{ kind: "ended", error }]);
+    expect(first.ended).toBe(true);
+    expect(second.ended).toBe(false);
+    // The server already ended it: the client sends no unsubscribe of its own.
+    expect(sent.filter((message) => message.type === "request")).toHaveLength(2);
+  });
+
+  it("consumes and ignores a subscription_ended for a subscription it does not have", () => {
+    const { client } = recordingClient();
+    const error: RequestError = { code: "internal", message: "gone", field: null };
+
+    expect(client.handleServerMessage({ type: "subscription_ended", subscription: 9, error })).toBe(
+      true,
+    );
   });
 
   it("settles as link_lost at once when the link is down", async () => {

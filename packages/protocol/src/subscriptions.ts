@@ -1,4 +1,5 @@
 import type { NotificationBody } from "./generated/NotificationBody";
+import type { RequestError } from "./generated/RequestError";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { SubscriptionState } from "./generated/SubscriptionState";
 import type { SubscriptionTopic } from "./generated/SubscriptionTopic";
@@ -13,10 +14,17 @@ export type StateOf<T extends TopicName> = Extract<SubscriptionState, { topic: T
 export type NotificationOf<T extends TopicName> = Extract<NotificationBody, { topic: T }>;
 
 /**
- * Why a subscription ended: the client unsubscribed, or the link to the server dropped, which ends
- * every subscription (the server ends them with the socket).
+ * Why a subscription ended: the client unsubscribed; the link to the server dropped, which ends
+ * every subscription (the server ends them with the socket); or the server could no longer serve
+ * it and ended it with `subscription_ended`, saying why.
  */
-export type SubscriptionEnd = "unsubscribed" | "link_lost";
+export type SubscriptionEnd =
+  | { readonly kind: "unsubscribed" }
+  | { readonly kind: "link_lost" }
+  | { readonly kind: "ended"; readonly error: RequestError };
+
+const UNSUBSCRIBED: SubscriptionEnd = { kind: "unsubscribed" };
+const LINK_LOST: SubscriptionEnd = { kind: "link_lost" };
 
 /**
  * A live subscription to topic `T`, which the server pushes notifications on until it ends.
@@ -141,7 +149,7 @@ export class SubscriptionTable {
         if (ended !== undefined) {
           return;
         }
-        end("unsubscribed");
+        end(UNSUBSCRIBED);
         unsubscribe();
       },
       get ended() {
@@ -158,10 +166,18 @@ export class SubscriptionTable {
     this.#live.get(message.subscription)?.route(message.body);
   }
 
+  /**
+   * Ends the subscription a `subscription_ended` names, with the server's reason; one this
+   * connection does not have is ignored.
+   */
+  endedByServer(message: Extract<ServerMessage, { type: "subscription_ended" }>): void {
+    this.#live.get(message.subscription)?.end({ kind: "ended", error: message.error });
+  }
+
   /** Ends every subscription as `link_lost`, for when the socket has closed. */
   linkLost(): void {
     for (const entry of this.#live.values()) {
-      entry.end("link_lost");
+      entry.end(LINK_LOST);
     }
   }
 }

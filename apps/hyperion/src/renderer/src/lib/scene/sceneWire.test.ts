@@ -1,4 +1,5 @@
 import {
+  type KinematicsDto,
   METRES_PER_LIGHT_YEAR,
   type SceneNotificationDto,
   type SceneStateDto,
@@ -13,6 +14,7 @@ import {
   earthReSentAsContact,
   sceneClock,
   sceneSequence,
+  shipInSpace,
   shipInSystem,
   sliceSceneSystem,
   stateAfterHeartbeat,
@@ -20,7 +22,12 @@ import {
   stateInSpace,
 } from "../../test/sceneFixture";
 import type { SceneModel } from "./model";
-import { applySceneNotification, toSceneModel, type SceneUpdate } from "./sceneWire";
+import {
+  applySceneNotification,
+  toKinematicsDto,
+  toSceneModel,
+  type SceneUpdate,
+} from "./sceneWire";
 
 function modelOf(state: SceneStateDto): SceneModel {
   const result = toSceneModel(state, designateFixture);
@@ -122,6 +129,20 @@ describe("toSceneModel", () => {
 
     expect(model.craft[0]?.attitude).toEqual({ w: 0.5, x: 0.1, y: 0.2, z: 0.3 });
     expect(model.craft[0]?.plannedPath).toBeNull();
+  });
+});
+
+describe("toKinematicsDto", () => {
+  it("writes a pose in each frame back as the wire stated it", () => {
+    const inBody: KinematicsDto = {
+      position: { frame: "body", body: FIXTURE_EARTH, offset_m: [7e6, -2.5, 0.125] },
+      velocity_m_s: [1, 2, 3],
+      time: { seconds: 3_000, nanos: 17 },
+    };
+
+    for (const ship of [shipInSpace(3_000), shipInSystem(3_000), inBody]) {
+      expect(toKinematicsDto(modelOf({ ...stateInSpace(), ship }).ship)).toEqual(ship);
+    }
   });
 });
 
