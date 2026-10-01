@@ -582,7 +582,12 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     receive autotuning) reading through a 5 MB/s token bucket, with the low-water mark on and off.
     The renderer must not stall its own receive path either, since Chromium's backpressure reaches the
     TCP window: chunks are kept as `ArrayBuffer`s and parsed when complete, by R06 and R09 off the
-    main thread.
+    main thread. Measured by R03.T10.b on 2026-09-30, on the shared development machine (load
+    average 6–12, provisional; `bulk::tests::streaming::heartbeat_latency_behind_a_transfer_on_a_slow_link`,
+    run by hand): a heartbeat behind a 15 MB transfer, read at 5 MB/s through a 64 KiB receive
+    buffer, waited a median of 103–108 ms and at worst 150–156 ms with the low-water mark on, and
+    577–616 ms with it off. The worst case with it on is a finding over the 100 ms of this note,
+    for R12: the reader's own buffer and the chunk ahead of the push add to the kernel's share.
 12. **Open question 21: no version bump.** `lib.rs`'s rule bumps `PROTOCOL_VERSION` for a removed or
     changed message and not for an added kind or optional field, because an older peer refuses what
     it does not know. The first `notification` and the first binary frames are additions of the same
@@ -1268,6 +1273,72 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   well as Linux, where socket2 exposes it. Both harnesses read the mark back inside their `tap_io`
   closure (`accepted_lowat()`); the integration test, `an_accepted_socket_has_the_low_water_mark`,
   is in `tests/websocket.rs`, which only `just ci` runs among the acceptance commands.
+- **Deviations in T6, as built.** The stand-in is in `scene/ship.rs` (`ShipStandIn`,
+  `ShipPosition`) beside `scene/clock.rs` (`SceneClock`, `TimeRate`, `ClockReading`,
+  `ClockState`); `scene/mod.rs` holds the `Clock` and `Ship` traits, `SceneSetting` (the clock and
+  the stand-in) and `SceneService` (`watch(universe)`, `set(universe, setting)`, a `watch` sender per
+  `UniverseId`). A universe nobody has set reads as the stand-in at rest at the galactic centre at
+  the epoch, in the galactic frame, clock paused: the centre is in no system's frame, so a scene
+  subscribed before any `scene_ship` holds no system. `instant_of` rounds up (the first instant at
+  which the clock reads the time or later) and answers the anchor for a time already passed; the
+  test inverts `instant_of(at_instant(i)) = i` at 1× and 100,000×. The checks are
+  `convert/scene.rs` (`ShipRequest`) and the handler `requests/scene.rs`; fields are named
+  `time_rate`, `ship.time`, `ship.velocity_m_s` (also refused at or above c, which
+  `SystemObserver` needs) and `ship.position`. A frame whose system `resolve` refuses is
+  `unknown_system` and a body its system lacks, or that is absent at the pose's time,
+  `unknown_body`, both naming `ship.position`, as plan 04's codes for unknown IDs, rather than
+  `bad_request`; a system offset that leaves the galactic range is `bad_request`.
+  `requests::system::bodies_of` became `pub(super)` here for the body frame (R03.T8.a's
+  `pub(crate)` follows). The pose's velocity is relative to its own frame's origin, as
+  `KinematicsDto` documents, and the stand-in moves in a straight line in that frame. A body index
+  outside plan 14's layout is `bad_request` naming `ship.position`; a body-frame offset is checked,
+  as a system-frame one is, for a place in the galactic range at the pose's time. `SceneClock`
+  stores no state: `ClockState` is worked out from the rate and the time read (`ClockReading`
+  has getters, and `SceneClockDto: From<ClockReading>`); the `Clock` trait is
+  `reading_at(Instant)` and `instant_of(time)`; `SceneClock::new` refuses a time outside the
+  window (`BuildSceneClockError`); a stand-in is built from a checked `ShipRequest`
+  (`From<ShipRequest>`). The acceptance filter `scene::clock` runs the clock's tests only; the
+  handler's, the checks', the stand-in's and the service's run under
+  `cargo test -p hyperion-server --lib scene` and `just ci`.
+- **Deviations in T7, as built.** T7.a and T7.b are one commit. `candidate_at` is in plan 03's
+  `frame.rs`, recorded in plan 03's Risks; its test, `candidate_at_gives_the_candidate_frame_at_weighs`
+  (bit for bit the candidate the search forms from its hit), and the existing `frame_at` cases are
+  in `tests/frame.rs`, so they run under `cargo test -p hyperion-sim --test frame` and `just ci`;
+  the filter `galaxy::frame` runs the unit tests and the doctest only. The core's signatures:
+  `SceneCore::build(asked, inputs, craft: Vec<CraftState>, world) -> Result<(SceneCore,
+SceneStateDto), FetchSystemError>`, `advance(inputs, world, beat: Beat) -> Result<SceneDelta,
+FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>` (the cameras
+  are not an input; checked against the tidal radius at the scene time and replaced whole, the
+  latest per view; a camera's own time is not checked), `cameras()`, `next_due()` (the next
+  `valid_until`), `craft(knowledge, craft) -> Option<Vec<SceneCraftDto>>` (the contacts while
+  there are any, an empty list once when the last leaves) and `has_craft()`. The core never reads
+  a `CraftSource`: the caller calls `craft_at` and passes the list. `SceneInputs` holds the clock
+  reading, the `Ship` and the `SceneKnowledge`; `Beat::{Heartbeat, Change}`. The galaxy comes
+  through a `SceneWorld` struct (the universe, the galaxy, its key, the cell and stars caches, and
+  a map of the planetary systems the caller fetched) rather than a closure: a system the map lacks
+  is `FetchSystemError(id)`, with the core unchanged, and R03.T8.a fetches it from the body cache
+  and calls again. `SceneKnowledge` (whose `grant` takes a `BodyId` and the level asked),
+  `GrantAsked`, `CraftSource`, `NoCraft` and `CraftState` (a wrapper of the draft
+  `SceneCraftDto`) are in `scene/sensing.rs`, `pub(crate)` until R03.T8.b's injection. The
+  converter gains `scene_system`, `scene_body` and `ListedBody` (`convert/planetary.rs`, sharing
+  `system_bodies`' assembly) and `BodiesRequest::new`, which asserts the clock window. A body
+  re-sent because its `valid_until` passed is evaluated at that time, each change in turn, so
+  that one advance or ten send the same record; a contact is evaluated at the scene time. A
+  contact with no single position (a population) or absent then carries no `seen`; a heartbeat
+  re-sends the contacts the ship sees, and one it saw at the last push and no longer does. A grant
+  that stops resolving a belt's member sends nothing, the wire having no withdrawal; the client
+  then keeps a record above the ship's new grant until the scene is rebuilt (for the sensors plan,
+  which first lowers a grant). The ship is placed in the scene's system directly when it is in
+  that system's or one of its bodies' frames, otherwise through the galactic frame with the
+  systems' drifts (`epoch_velocity`); a body frame whose body is absent at a time falls back to
+  the barycentre. A handover between overlapping spheres cannot leave the scene in no system while
+  the ship is still inside its current one: `frame_at` takes the ship from a sphere that holds it
+  only for a rival whose ratio is at most 0.9 of the current one's, so at most 0.9. No body of the
+  pinned systems changes inside the clock window (plan 14's goldens hold no `valid_until`), so the
+  `valid_until` and one-or-ten tests plant one on the core's record of what it sent. The
+  frame-crossing test finds a direction from the system into interstellar space and steps the
+  stand-in through ratios 1.0, 0.95, 0.9(1 − 10⁻⁹), 0.95, 0.999, 1.05, 0.95, 1.05.
+  `MAX_SCENE_CAMERAS` is in `limits.rs`.
 - **Deviations in T11, as built.** No kind is answered in bulk yet, and R06's and R09's carry the
   manifest differently (R09's only in one variant of an enum), so the request is
   `RequestClient.requestBulk(body, manifestOf)`, the caller reading the manifest from the response
@@ -1382,3 +1453,116 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   model, are laid out once per change and not once per push. The acceptance command should read
   `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`, which also runs
   `lightTime.test.ts`.
+- **Deviations in T8.a, as built.** The topic is `scene/topic.rs`: `open` (reached through
+  `Handlers::subscribe`) builds the core on the pool at `Priority::Interactive`, re-running the
+  job after fetching each system it asks for (`FetchSystemError`) from the body cache, and spawns
+  the task, handed to the `Pusher` (`attach`) so that it ends with the subscription; its pool jobs
+  carry a token a `CancelOnDrop` cancels when the task ends. Cameras sent with `subscribe` out of
+  reach refuse the subscription (`bad_request` naming `cameras`). `scene_cameras` is routed by the
+  connection, as R03.T5.b foresaw: each subscription has a command channel of 8
+  (`SubscriptionCommand`, `Subscriptions::command`, `Pusher::take_commands`), and
+  `Requests::scene_cameras` starts a request that awaits the topic's answer; an unknown
+  subscription is `bad_request` naming `subscription`, a full channel `queue_full`. A notification
+  carrying an arrival is serialised on the pool (Design note 14): `Subscriptions::next_ready`
+  became `next_unsent`, whose `Unsent` is serialised here or by `serialise_on(pool)` in
+  `flush_pushes`. The frame is re-selected at each heartbeat, setting change and due
+  `valid_until`, so a stand-in drifting across a sphere is noticed within a second of real time.
+  A heartbeat is pushed each second whether or not anything changed. Requested by the
+  orchestrator for R02.T17 (lane D3): `SceneStateDto` gains an optional `tidal_radius_m`, present
+  whenever `system` is, so a client subscribing inside a system has the sphere; bindings
+  regenerated. `scene` is a public module for its seams only (`SceneKnowledge`, `GrantAsked`,
+  `CraftSource`, `NoCraft`, `CraftState`), injected through `ServerConfigBuilder::scene_knowledge`
+  and `craft_source` (as `entropy` is) and held by `SceneService`; everything else stays
+  `pub(crate)`. `requests::{bodies_of, openable_universe}` are re-exported `pub(crate)`.
+  `TestClient::request_among_notifications` answers a request on a connection with subscriptions
+  open. The heartbeat test runs in real time with the scene clock paused (the task's "paused
+  clock" read as the scene's). No generated body changes inside the clock window, so "a body's
+  `valid_until` passing at 100,000× is pushed" is a unit test in `scene/topic.rs` on a planted
+  `valid_until` (`SceneCore::plant_valid_until`, test-only).
+- **Deviations in T8.b, as built.** The craft tick runs in the topic's task (`MissedTickBehavior::Skip`)
+  while the core holds craft; the craft source is asked at each tick and at each heartbeat (which
+  starts the tick once craft appear), on the runtime, so a source must be cheap. The core is held
+  as an `Option` and lent to each pool job rather than cloned; the task keeps only the planetary
+  systems of the scene's system and the ship's frame. A large notification is serialised with
+  `try_submit` and on the runtime when the pool's queue is full, so that the connection never
+  waits for room and goes on reading (from the T8.a review). The slow-reader test is a unit test
+  (`scene/topic.rs`, through `Harness::start_configured` and a handler that answers requests by
+  script and subscriptions by the server's topic): with the writer stuck past a heartbeat, the
+  queue's bytes do not grow, and the next notification after the clogging response is numbered
+  one past the last and carries the latest ten craft, stated at its own time, and the
+  heartbeat's contacts. Recorded on this shared machine (provisional): 64 craft pushes in a second
+  of scene time at 1× with ten craft, 0.191 MB/s of JSON (the brainstorm's 0.25 MB/s, under the
+  0.5 finding threshold), `craft_are_pushed_at_64_hz_each_push_stating_its_time` in
+  `tests/scene.rs`, which allows 32 to 66 for a loaded machine. Not observed, so not built: a held
+  answer crowded by pushes that each fit (R03.T5.b's note). A topic whose pool job fails ends its
+  task with a `warn` and leaves its subscription silent until unsubscribed; the client's sequence
+  check does not see it (only a server shutting down reaches it today).
+- **Deviations in T9, as built.** The scene's integration helpers moved to
+  `tests/common/scene.rs`. `scene_knowledge.rs` drives 200 camera placements from a fixed seed (in
+  the system's frame within 40 au, beside the seven craft that are not contacts, inside a hidden
+  body's Hill sphere in its frame, and near any body in its frame, in turn) and, every fiftieth,
+  moves the stand-in out of the system and back to a drawn point in it, so that the whole system
+  arrives four times more; every state, notification and arrival is checked on its JSON (craft
+  only contacts; each grant and re-sent body's `level` the fake's; no section above a body's
+  level `ok`; a contact's `mass_kg` and `orbit` withheld and its kind `unresolved`). Camera time
+  is fixed at the stand-in's. `scene_agree.rs` cannot compare the two subscriptions' pushes byte
+  for byte: each task reads the clock when it pushes and their heartbeats are a second apart. It
+  holds instead that both are told the same ships in the same order and one departure each,
+  that every clock either is told lies on its setting's line (scene time less the rate times the
+  real time since the setting was answered) to within a second of real time at 10×, and that every
+  system either is given, the states and the return's arrival, equals `system_bodies` answered
+  for that push's own time. No generated body changes inside the clock window, so the minute has
+  no `valid_until` crossing (R03.T8.a's unit test covers it). That last check found that a push
+  stated the clock read when it was pushed rather than the reading the core evaluated at: the
+  task now pushes the reading `delta` advanced to (`push_of`), so a push's clock is the time its
+  records hold.
+- **T8 and T9 after review.** The tests of T8.a's `valid_until` and T8.b's slow reader are unit
+  tests in `scene/topic.rs`, so both tasks' acceptance gains
+  `cargo test -p hyperion-server --lib scene::topic`. The craft tick landed in T8.a's commit.
+  `CRAFT_PUSH_INTERVAL` is `Duration::from_micros(15_625)`, the plan's `from_nanos(15_625_000)`
+  (Clippy prefers the larger unit). A large notification the pool refuses is serialised by
+  `spawn_blocking`, never on the runtime. The craft test asserts each push states a later time and
+  at most 66 pushes a second; the measured rate is recorded in T8.b's note, not asserted. The
+  slow-reader test asserts that the merged notification carries every contact the ship sees and
+  craft stated within a second before its clock (a heartbeat merged after a craft push states a
+  later clock than the craft, which carry their own time). `keep_only` has its own test. The
+  knowledge test counts arrivals by reading until a system arrives. Its "inside a hidden body's
+  Hill sphere" placements are offsets within 10⁸ m on each axis of the body, not scaled to the
+  sphere (the wire hides the Hill radius of a contact). The two-clients test injects ten craft and
+  a knowledge with contacts: each craft list either client is told is the source's at its stated
+  time, the same contacts are placed by sight for both, and each later setting continues the
+  clock, so the minute is one run of scene time; records are compared by position, each degraded
+  to its own grant. Open for the owner: a slow reader's merged push states the latest clock while
+  an arrival merged into it holds records evaluated at an earlier time (Design note 5 keeps the
+  latest clock; the records' orbits are time-independent, a contact's `seen` is not); and a topic
+  whose pool job fails stops pushing with only a `warn`, which the client's sequence check cannot
+  see (an error notification would need a protocol addition).
+- **Deviations in T10.b, as built.** A request answered in bulk settles with its payload
+  (`Finished` and `Settled` carry it; `run` serialises the response as before), and the
+  connection keeps a queue of streams (`ws.rs`, `Stream`), the first sending one chunk at a time
+  whenever `Outbound::bulk_room_for` says the bulk bytes queued with it are at most
+  `BULK_QUEUED_BYTES`, then its terminal frame through `end`, which ends the request; the select
+  takes a chunk last, after frames, finished requests and pushes, so everything else overtakes
+  a transfer. `Outbound::send_bulk` counts a chunk in the queue's bytes and its bulk share
+  (`Lane::Bulk`), and `OutboundCounters::largest_bulk_queue_bytes` records the most one
+  connection queued. A `cancel` drops the stream with the request, so no chunk is queued after
+  `cancelled`; chunks already queued or in the socket still arrive before it. The tests are unit
+  tests over real sockets in `bulk.rs` (`bulk::tests::streaming`), through `Call::respond_bulk`
+  and `Client::next_frame`: 58 chunks in order before the response and the payload rejoined, the
+  bulk queue never above one chunk, a scene push issued after the first chunk arriving before the
+  transfer's end, `cancel` after the third chunk, and a stuck reader closed by a 500 ms write
+  timeout with nothing held or queued. `TestClient::next_binary` (with `BinaryHeader`) is in
+  `tests/common/mod.rs` for R06's and R09's integration tests, but `tests/bulk.rs` is not built:
+  an integration test cannot inject a handler, and no kind is answered in bulk until R06 and R09.
+  The heartbeat latency over the emulated link is an ignored test run by hand, through
+  `Harness::start_tapped` with `Tap::Kernel` for the mark off; its figures are in Design note 11.
+  `BulkPayload::new` stays `cfg_attr(not(test), expect(dead_code))` until R06 and R09 answer in
+  bulk.
+- **T10.b after review.** A stream's terminal frame joins the other finished requests'
+  (`queue_terminal`): queued at once only when nothing is held and the queue has room, held
+  otherwise, so it neither overruns the budget nor passes a frame held before it. A test streams
+  three answers in bulk while the second is cancelled: the first's chunks and response, then the
+  third's, nothing interleaved, and none of the second's after `cancelled`. The bulk bound is
+  pinned at exactly one full chunk (`largest_bulk_queue_bytes` equals `MAX_BINARY_FRAME_BYTES`),
+  in place of a separate `outbound::` unit test of the bulk lane. The hand-run measurement's reads
+  are bounded by the harness's wait.

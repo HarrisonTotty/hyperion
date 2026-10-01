@@ -29,6 +29,13 @@ ship: KinematicsDto,
  */
 system: SceneSystemDto | null, 
 /**
+ * The system's sphere of influence at the state's time, metres: its tidal radius, as an
+ * arrival's `tidal_radius_m` states it, to which R02's free camera is clamped. Present
+ * whenever `system` is, so that a client subscribing inside a system has it; omitted in the
+ * galactic frame.
+ */
+tidal_radius_m?: number, 
+/**
  * The craft that are the ship's contacts in the scene's reach.
  */
 craft: Array<SceneCraftDto>, };
