@@ -774,9 +774,13 @@ domain_tags! {
     SYSTEM_SUBSTELLAR: System = "system.substellar";
 }
 
-/// Fails compilation if a tag's name or hash is in two registries: the foundation's and this one,
-/// in that order, the order the `rng/tags` golden prints them in.
-const _: () = super::assert_registries_disjoint(&[hyperion_base::rng::tags::ALL, ALL]);
+/// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
+/// crate's and this one, in that order, the order the `rng/tags` golden prints them in.
+const _: () = super::assert_registries_disjoint(&[
+    hyperion_base::rng::tags::ALL,
+    hyperion_surface::tags::ALL,
+    ALL,
+]);
 
 #[cfg(test)]
 mod tests {
@@ -785,16 +789,25 @@ mod tests {
     /// The `const` assertion above, again at run time, so that a failure names the registries.
     #[test]
     fn registries_are_disjoint() {
-        let base = hyperion_base::rng::tags::ALL;
-        for tag in ALL {
-            assert!(
-                base.iter()
-                    .all(|b| b.name() != tag.name() && b.hash() != tag.hash()),
-                "{} is also in hyperion_base::rng::tags",
-                tag.name()
-            );
+        let registries = [
+            ("hyperion_base::rng::tags", hyperion_base::rng::tags::ALL),
+            ("hyperion_surface::tags", hyperion_surface::tags::ALL),
+            ("hyperion_sim::rng::tags", ALL),
+        ];
+        for (i, (name, registry)) in registries.iter().enumerate() {
+            for (other_name, other) in &registries[..i] {
+                for tag in *registry {
+                    assert!(
+                        other
+                            .iter()
+                            .all(|o| o.name() != tag.name() && o.hash() != tag.hash()),
+                        "{} of {name} is also in {other_name}",
+                        tag.name()
+                    );
+                }
+            }
         }
-        assert!(base.contains(&SELFTEST_STREAM));
+        assert!(hyperion_base::rng::tags::ALL.contains(&SELFTEST_STREAM));
     }
 
     #[test]

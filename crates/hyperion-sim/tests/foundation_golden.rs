@@ -338,9 +338,15 @@ fn id_layouts_are_pinned() {
 #[test]
 fn domain_tags_are_pinned() {
     let mut w = writer();
-    // The foundation's registry, then the sim's (plan R04, Design note 4): today's order byte for
-    // byte, since `selftest.stream`, the foundation's one tag, was the single registry's first.
-    for tag in hyperion_base::rng::tags::ALL.iter().chain(tags::ALL) {
+    // The foundation's registry, the surface crate's, then the sim's (plan R04, Design note 4):
+    // today's order byte for byte, since `selftest.stream`, the foundation's one tag, was the single
+    // registry's first, and the surface crate's registry is empty until R05 and R09.
+    let registries = [
+        hyperion_base::rng::tags::ALL,
+        hyperion_surface::tags::ALL,
+        tags::ALL,
+    ];
+    for tag in registries.into_iter().flatten() {
         w.u64_hex(&format!("{} ({:?})", tag.name(), tag.scope()), tag.hash());
     }
     golden!("rng/tags", w.as_str());

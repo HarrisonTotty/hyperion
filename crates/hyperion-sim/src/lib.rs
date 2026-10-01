@@ -168,6 +168,16 @@ mod tests {
         assert_eq!(sim.now(), time::UniverseTime::new(2, 150_000_000).unwrap());
     }
 
+    /// The surface crate reports the generator version the sim generates with, so that the client's
+    /// module and the server agree on which surfaces they compute (plan R04, T5).
+    #[test]
+    fn the_generator_version_is_the_sims() {
+        assert_eq!(
+            hyperion_surface::generator_version(),
+            GENERATOR_VERSION.get()
+        );
+    }
+
     #[test]
     fn identical_inputs_produce_identical_state() {
         let run = || {
