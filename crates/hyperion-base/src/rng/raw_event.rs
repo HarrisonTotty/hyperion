@@ -52,6 +52,8 @@ impl RawEventKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     const SEED: Seed = Seed::new(0x0e7e_0000_0000_0002);
 

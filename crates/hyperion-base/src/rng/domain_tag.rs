@@ -273,6 +273,8 @@ macro_rules! domain_tags {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     #[test]
     fn fnv_1a_matches_independent_values() {
