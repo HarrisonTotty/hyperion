@@ -1070,6 +1070,21 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     `GraphicsStatus.targetRounding`, dispatched once and again after each rebuild. The draw costs
     one pass and a 16-byte read, off the frame path, before the first view renders.
 
+23. **Shaders are standard WGSL, drawn by the adapter's own pipelines.** Decided by the agent on
+    the owner's delegation, 2026-09-30. Babylon 9.28's WGSL processor prefixes its own
+    `@group/@binding` to every resource declaration, requires `fn main`, generates its own I/O
+    structs and a y-flip, and rewrites `dpdy`, so shaders written for it run on no other host.
+    Every material and post-process is therefore standard WGSL: `@group(0)` the pass's `Frame`
+    (view rotation, clip projection, viewport), `@group(1)` the draw's `Draw` (offset from the
+    camera, then the spec's uniforms, in a per-frame ring with dynamic offsets), `@group(2)` the
+    resources at the bindings the spec declares, under explicit pipeline layouts, with entry points
+    `vertexMain` and `fragmentMain` and `view/shaders/frame.wgsl` as the shared declaration. The
+    adapter draws every `DrawItem` and full-screen pass in its own render passes on the engine's
+    device, generalizing T8.g's raw pass; Babylon's materials, meshes, render targets and
+    post-process chain are not used. This replaces T8.a's dialect, the `FRAME_UNIFORMS` and
+    whitespace rules, and T8.i's blend override, and reduces the pinned internals to `_device`.
+    Changing the engine now means changing who creates the device.
+
 ## Tasks
 
 T1 and T2 are the main process and can run in parallel. T3 needs nothing. T4 follows T2 (its
@@ -1390,6 +1405,25 @@ draw and read after device creation and after each rebuild, its classification, 
   without `rg11b10Renderable`; a failed read gives `unknown` and no fault.
 - Acceptance: the tests, `just ci`; T9.i reports SwiftShader's answer, and T11 records the RTX
   3080's and the UHD 620's.
+
+**R01.T8.k The adapter's own pipelines (Design note 23).** Added 2026-09-30 by the
+shader-convention decision. `view/engine/types.ts` (the convention's `BIND_GROUPS`,
+`TextureBindingSpec`, `SamplerSpec.binding`, `PostProcessItem` with per-frame uniforms and
+textures, `PostProcessInput` without `depth`, `createMaterialAsync`'s `meshes`),
+`view/shaders/frame.wgsl`, and in the engine directory `uniforms.ts` (the `Frame` and `Draw`
+layouts and the ring), `materials.ts` (pipeline descriptors, `@group(2)` layouts, blend states),
+`meshes.ts` (own vertex and index buffers), `drawing.ts` (the one draw path: draws, direct and
+indirect, in submission order, then post-processes as full-screen passes), `intermediates.ts`,
+`view.ts` and `target.ts` (own attachments, a view's own `depth32float`) and `engine.ts`. Babylon's
+materials, meshes, targets and post-process chain, and the files that served them, go.
+
+- Tests (logic project): pipeline descriptors (reversed depth, cull, bias negated on triangles
+  only, write masks, blend states keeping alpha), `@group(2)` layouts at declared bindings with
+  duplicates refused, the `Draw` layout by WGSL's rules and its check against a source's own
+  `struct Draw`, the `Frame` layout against `frame.wgsl`, the ring's aligned offsets, single upload
+  and growth.
+- Acceptance: the tests, `just ci`; T9's checks, all on this path. Lifts T8.g's refusal of a frame
+  with both indirect draws and post-processes.
 
 ### R01.T9 The headless smoke harness
 
@@ -2169,3 +2203,48 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     both** (`nvidia`/`ampere`, Electron 44.4.3 under the client's switches, `DISPLAY=:0`), so
     R07's reading that only Gen9 truncates does not hold: its bloom keeps `rgba16float` on the
     recommended hardware too. The UHD 620's answer is the owner's (T11).
+- **Deviations in T8.k, as built.** It supersedes the T8.a–T8.g notes above wherever they describe
+  Babylon's material, mesh, target or post-process path, the raw pass's parsing of Babylon's
+  compiled code, `_disableEngineYFlip`, `setAttachmentFormat`, `flushEngine` and bracketing.
+  - The device is already requested by the adapter itself (`adapter.requestDevice` with
+    `requiredFeatures` and default limits, as Babylon requested them), since T8.l drops Babylon
+    next; no Babylon code is reached from `engine.ts` after this task.
+  - **`types.ts` changes (lane C3, R02.T14):** added `BIND_GROUPS`, `TextureBindingSpec`,
+    `WgslMaterialSpec.textures`, `WgslPostProcessSpec.textures`, `POST_PROCESS_BINDINGS`,
+    `POST_PROCESS_VARYING`, `PostProcessItem` and `createMaterialAsync`'s optional `meshes`;
+    `SamplerSpec.binding` is new and required; `FrameSubmission.postProcesses` is now
+    `ReadonlyArray<PostProcessItem>` (decision item 11); `PostProcessInput` is `"hdr-colour"` alone
+    (item 10); `FRAME_UNIFORMS` and `POST_PROCESS_INPUTS` are removed.
+  - A post-process's input colour is `@group(2) @binding(0)` (`texture_2d<f32>`) with a linear,
+    clamped sampler at binding 1; the adapter's full-screen vertex stage passes `@location(0) uv`,
+    (0, 0) at the top left. Its `Draw` is its uniforms alone (no offset). Chains ping-pong between
+    two `rgba16float` intermediates of the output's size, made lazily per view or target through
+    the one creation path (`render-targets`). A post-process whose shader failed is left out of the
+    chain. Indirect draws and post-processes now share a frame (decision item 12).
+  - Draws are encoded strictly in submission order, indirect ones in place; `transparent` no
+    longer reorders anything (Babylon's queue did), so the caller submits translucent draws after
+    opaque ones. A draw of zero instances is left out.
+  - A material's `Draw` is `offsetFromCameraM : vec3f` then its uniforms, packed by WGSL's
+    uniform rules (a scalar after the `vec3f` sits at byte 12); a source that declares
+    `struct Draw` is checked against it at creation and refused, naming the first differing
+    member. The ring is one uniform buffer made through the registry (category `other`, 64 KiB,
+    doubling), one upload a frame, slots aligned to `minUniformBufferOffsetAlignment`; the `Frame`
+    is one 144-byte buffer written each pass. Every frame's two uploads are counted as `uploaded`
+    events.
+  - Pipelines: a material made with `createMaterial` builds each (mesh layout, colour format,
+    depth) pipeline synchronously at its first draw, so it draws on its first frame; one made
+    with `createMaterialAsync` builds the pipelines for the given `meshes` × `targets` ahead with
+    `createRenderPipelineAsync` (a colour target with and without depth, a canvas with depth), and
+    any other at its first draw asynchronously, the draw left out until ready. Shader errors come
+    from `getCompilationInfo`: logged with line and column, `shader-refused` dispatched with the
+    material's name (the words "is not WGSL" are now wrong; the status-wording lane owns them),
+    the material's draws left out; `createMaterialAsync` rejects with the messages.
+  - A view now owns its `depth32float` (attachment only; a view's depth is still not read back).
+    Mesh attributes are one `float32` buffer each; `assertMeshData` refuses ragged data and indices
+    past the vertices.
+  - Checked by a scratch page on SwiftShader and the RTX 3080 (T9's checks remain T9's): a
+    triangle in view space's upper right lands in the canvas's upper right (no flip anywhere);
+    over a cleared (0.25, 0.5, 1, 2), an additive draw of (0.5, 0.5, 0.5, 0.5) reads
+    (0.5, 0.75, 1.25, 2) and a premultiplied one (0.625, 0.75, 1, 2), alpha kept; the target's
+    depth reads 0.1; a post-process with a `gain` uniform of 4 turns (0.25, 0.5, 1, 1) into
+    (1, 2, 4, 4); no fault.

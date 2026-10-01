@@ -1,48 +1,30 @@
 /**
- * One view: a canvas with its own context, target, depth and camera, drawn by the engine's one
- * device (R01 Design note 13).
+ * One view: a canvas with its own context and depth, drawn by the engine's one device (R01 Design
+ * notes 13 and 23).
  *
  * @remarks
- * There is no public way to render a camera into an external canvas context. Each view configures
- * its own `GPUCanvasContext` against the engine's device at the view's own size, with `COPY_SRC`
- * so that the harness can read it back, wraps the context's current texture with
- * `wrapWebGPUTexture`, and draws through a `RenderTargetTexture` whose colour attachment is that
- * texture and whose depth is its own `depth32float`. The target renders in WebGPU's orientation
- * (`_disableEngineYFlip`), so R02's projection is used as given. Each frame the wrapper is pointed
- * at the context's new texture; a resize rebuilds this view's target and nothing else.
- *
- * The canvas is configured with its preferred 8-bit format and that format's `-srgb` twin among its
- * view formats, and Babylon renders through the sRGB view, so that blending happens in linear light
- * and the store encodes (Design note 18).
+ * Each view configures its own `GPUCanvasContext` against the engine's device at the view's own
+ * size, with `COPY_SRC` so that the harness can read it back, and draws each frame into the
+ * context's current texture and a `depth32float` of its own, in the adapter's own passes. The
+ * canvas is configured with its preferred 8-bit format and that format's `-srgb` twin among its
+ * view formats, and the pass renders through the sRGB view, so that blending happens in linear
+ * light and the store encodes (Design note 18). WebGPU's framebuffer has y down and its clip space
+ * y up, so R02's projection lands the right way up with no flip. A resize remakes this view's
+ * depth and nothing else.
  */
 
-import { Camera } from "@babylonjs/core/Cameras/camera.pure";
-import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine.pure";
-import { WebGPURenderTargetWrapper } from "@babylonjs/core/Engines/WebGPU/webgpuRenderTargetWrapper";
-import type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
-import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture.pure";
-import { Color4 } from "@babylonjs/core/Maths/math.color.pure";
-import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector.pure";
-import type { PostProcess } from "@babylonjs/core/PostProcesses/postProcess.pure";
-import type { Scene } from "@babylonjs/core/scene.pure";
-
 import { BUFFER_USAGE, MAP_MODE, TEXTURE_USAGE } from "../gpuFlags";
-import type { FrameSubmission, RenderView, ViewSize } from "../types";
-import { disableEngineYFlip, gpuTextureOf, setAttachmentFormat } from "./internals";
-import type { RawAttachments } from "./rawPass";
+import type { TextureSpec } from "../memory";
+import type { FrameSubmission, RenderView, TextureHandle, ViewSize } from "../types";
+import type { FrameOutput } from "./drawing";
+import { type IntermediateHost, Intermediates } from "./intermediates";
 import { paddedBytesPerRow } from "./readback";
 
 /** What a view needs of the engine that made it. */
-export interface ViewHost {
-  readonly babylonEngine: WebGPUEngine;
+export interface ViewHost extends IntermediateHost {
   readonly device: GPUDevice;
-  readonly scene: Scene;
-  /** Renders `frame` into `target`, its indirect draws into `attachments` after. */
-  renderFrame(
-    frame: FrameSubmission,
-    target: RenderTargetTexture,
-    attachments: () => RawAttachments,
-  ): void;
+  /** Draws `frame` into `output`, submitted before this returns. */
+  renderFrame(frame: FrameSubmission, output: FrameOutput): void;
   /** Forgets a view its caller disposed. */
   forgetView(view: RenderView): void;
 }
@@ -68,65 +50,32 @@ export function srgbViewFormat(format: GPUTextureFormat): GPUTextureFormat {
   throw new Error(`a canvas of format ${format} has no sRGB view`);
 }
 
-/** The camera a view renders with: at the origin, its projection frozen to the submission's. */
-export function frozenCamera(name: string, scene: Scene): Camera {
-  const camera = new Camera(`${name}:camera`, Vector3.Zero(), scene, false);
-  camera.freezeProjectionMatrix(Matrix.Identity());
-  return camera;
-}
-
-/**
- * Makes `chain` the target's post-processes, in order, changing nothing when it already is.
- *
- * @remarks
- * A target runs its post-processes itself: it draws the scene into the first one's input, with its
- * own depth, and the last one writes the target's colour.
- */
-export function setChain(target: RenderTargetTexture, chain: ReadonlyArray<PostProcess>): void {
-  // Babylon's `postProcesses` is undefined until one is added, though typed as an array.
-  const current = chains.get(target) ?? [];
-  if (current.length === chain.length && current.every((pass, index) => pass === chain[index])) {
-    return;
-  }
-  if (current.length > 0) {
-    target.clearPostProcesses(false);
-  }
-  for (const pass of chain) {
-    target.addPostProcess(pass);
-  }
-  chains.set(target, [...chain]);
-}
-
-/** The chain each target was last given. */
-const chains = new WeakMap<RenderTargetTexture, ReadonlyArray<PostProcess>>();
-
-/** A view of the depth Babylon made for `target`, for the raw pass to load and test against. */
-export function depthViewOf(target: RenderTargetTexture): GPUTextureView | null {
-  const depth = target.renderTarget?.depthStencilTexture ?? null;
-  const texture = depth === null ? null : gpuTextureOf(depth);
-  return texture === null ? null : texture.createView();
-}
-
-/** The colour a view clears to: black, opaque. */
-export const CLEAR_COLOUR = new Color4(0, 0, 0, 1);
-
-/** Babylon's objects for a view at one size. */
-interface Attachments {
-  readonly size: ViewSize;
-  readonly wrapped: InternalTexture;
-  readonly target: RenderTargetTexture;
+/** A view's depth at a size: `depth32float`, attached only. */
+export function viewDepthSpec(name: string, size: ViewSize): TextureSpec {
+  return {
+    name: `${name}:depth`,
+    size: [size.widthPx, size.heightPx],
+    dimension: "2d",
+    format: "depth32float",
+    mips: 1,
+    usage: TEXTURE_USAGE.RENDER_ATTACHMENT,
+    category: "render-targets",
+  };
 }
 
 /** A canvas drawn by the engine's device through its own context. */
-export class BabylonView implements RenderView {
+export class WebGpuView implements RenderView {
   readonly name: string;
   readonly #host: ViewHost;
   readonly #canvas: HTMLCanvasElement;
   readonly #context: GPUCanvasContext;
   readonly #format: GPUTextureFormat;
-  readonly #camera: Camera;
-  readonly #projection = new Matrix();
-  #attachments: Attachments | null = null;
+  readonly #intermediates: Intermediates;
+  #depth: {
+    readonly size: ViewSize;
+    readonly handle: TextureHandle;
+    readonly view: GPUTextureView;
+  } | null = null;
   #size: ViewSize;
   #lastTexture: GPUTexture | null = null;
   #disposed = false;
@@ -141,8 +90,8 @@ export class BabylonView implements RenderView {
     this.#canvas = canvas;
     this.#context = context;
     this.#format = format;
+    this.#intermediates = new Intermediates(host, name, "render-targets");
     this.#size = { widthPx: Math.max(1, canvas.width), heightPx: Math.max(1, canvas.height) };
-    this.#camera = frozenCamera(name, host.scene);
     this.#configure();
   }
 
@@ -158,7 +107,8 @@ export class BabylonView implements RenderView {
     this.#size = size;
     this.#canvas.width = size.widthPx;
     this.#canvas.height = size.heightPx;
-    this.#releaseAttachments();
+    this.#releaseDepth();
+    this.#intermediates.release();
   }
 
   render(frame: FrameSubmission): void {
@@ -166,15 +116,15 @@ export class BabylonView implements RenderView {
       return;
     }
     const texture = this.#context.getCurrentTexture();
-    const { target } = this.#attachmentsFor(texture);
-    Matrix.FromArrayToRef(frame.projection, 0, this.#projection);
-    this.#camera.freezeProjectionMatrix(this.#projection);
-    target.activeCamera = this.#camera;
-    this.#host.renderFrame(frame, target, () => ({
-      colour: texture.createView({ format: srgbViewFormat(this.#format) }),
-      colourFormat: srgbViewFormat(this.#format),
-      depth: depthViewOf(target),
-    }));
+    const size = { widthPx: texture.width, heightPx: texture.height };
+    const colourFormat = srgbViewFormat(this.#format);
+    this.#host.renderFrame(frame, {
+      size,
+      colour: texture.createView({ format: colourFormat }),
+      colourFormat,
+      depth: this.#depthAt(size),
+      intermediates: () => this.#intermediates.at(size),
+    });
     this.#lastTexture = texture;
   }
 
@@ -199,8 +149,8 @@ export class BabylonView implements RenderView {
       return;
     }
     this.#disposed = true;
-    this.#releaseAttachments();
-    this.#camera.dispose();
+    this.#releaseDepth();
+    this.#intermediates.release();
     this.#context.unconfigure();
     this.#host.forgetView(this);
   }
@@ -217,65 +167,28 @@ export class BabylonView implements RenderView {
     });
   }
 
-  #attachmentsFor(texture: GPUTexture): Attachments {
-    const engine = this.#host.babylonEngine;
-    const current = this.#attachments;
+  #depthAt(size: ViewSize): GPUTextureView {
+    const depth = this.#depth;
     if (
-      current !== null &&
-      current.size.widthPx === texture.width &&
-      current.size.heightPx === texture.height
+      depth !== null &&
+      depth.size.widthPx === size.widthPx &&
+      depth.size.heightPx === size.heightPx
     ) {
-      engine.updateWrappedWebGPUTexture(current.wrapped, texture);
-      setAttachmentFormat(current.wrapped, srgbViewFormat(this.#format));
-      return current;
+      return depth.view;
     }
-    this.#releaseAttachments();
-    const wrapped = engine.wrapWebGPUTexture(texture);
-    setAttachmentFormat(wrapped, srgbViewFormat(this.#format));
-    const size = { widthPx: texture.width, heightPx: texture.height };
-    const target = new RenderTargetTexture(
-      `${this.name}:target`,
-      { width: size.widthPx, height: size.heightPx },
-      this.#host.scene,
-      {
-        colorAttachment: wrapped,
-        generateDepthBuffer: true,
-        generateStencilBuffer: false,
-        generateMipMaps: false,
-      },
-    );
-    target.clearColor = CLEAR_COLOUR;
-    target.ignoreCameraViewport = true;
-    const wrapper = target.renderTarget;
-    if (!(wrapper instanceof WebGPURenderTargetWrapper)) {
-      throw new Error(`view ${this.name}'s target has no WebGPU render target`);
-    }
-    disableEngineYFlip(wrapper);
-    const attachments: Attachments = { size, wrapped, target };
-    this.#attachments = attachments;
-    return attachments;
+    this.#releaseDepth();
+    const handle = this.#host.createTexture(viewDepthSpec(this.name, size));
+    const view = this.#host.gpuTextureOf(handle).createView();
+    this.#depth = { size, handle, view };
+    return view;
   }
 
-  #releaseAttachments(): void {
-    const attachments = this.#attachments;
-    if (attachments === null) {
-      return;
+  #releaseDepth(): void {
+    if (this.#depth !== null) {
+      this.#host.destroyTexture(this.#depth.handle);
+      this.#depth = null;
     }
-    releaseTarget(attachments.target);
-    this.#attachments = null;
   }
-}
-
-/**
- * Disposes a Babylon target, detaching its post-processes first: a target disposes those it holds,
- * and they are the engine's, shared by handle.
- */
-export function releaseTarget(target: RenderTargetTexture): void {
-  if (chains.has(target)) {
-    target.clearPostProcesses(false);
-    chains.delete(target);
-  }
-  target.dispose();
 }
 
 /**
@@ -313,7 +226,7 @@ async function readCanvasTexture(
 ): Promise<Uint8Array> {
   const { width, height } = texture;
   const bytesPerRow = paddedBytesPerRow(width, 4);
-  // A staging buffer for this one read, which the harness alone makes.
+  // A transient staging buffer, not GPU memory a view keeps: made here, destroyed below.
   const staging = device.createBuffer({
     label: "view readback",
     size: bytesPerRow * height,
