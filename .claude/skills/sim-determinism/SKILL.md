@@ -13,8 +13,10 @@ paths:
 
 A universe is `(seed, generator_version)`. The same pair must give the same bits on x86-64,
 AArch64 and wasm32, in any call order, for as long as saves exist. What checks it today: `just ci`
-runs the goldens natively on x86-64; `just test-wasm` runs them as `wasm32-wasip1` under wasmtime,
-by hand, outside every gate; and nothing checks AArch64. Every determinism crate's own
+runs the goldens natively on x86-64 and, through `just test-wasm-fast`, the fast suites of base,
+the surface crate, the sim and the testkit as `wasm32-wasip1` under wasmtime; `just ci-slow` adds
+their slow suites there (`just test-wasm-slow`); a missing tool fails either gate, naming
+`just wasm-tools`; and nothing checks AArch64. Every determinism crate's own
 `clippy.toml` (the sim's, `hyperion-base`'s, `hyperion-surface`'s and `hyperion-fit`'s) already bans
 platform maths (go through `hyperion_base::math`, which the sim re-exports as
 `hyperion_sim::math`), `f64::mul_add`, the `algebraic_*` methods and float `to_bits`. The exact
@@ -171,8 +173,9 @@ moved.
    have, so go back to step 1 for it. An extension isn't automatically safe: if a
    new label pins a value the base already generated, and its computation changed, that is moved
    output too.
-5. Run `just test-wasm` if wasmtime is installed. If it isn't, report `just test-wasm` as not run:
-   no gate runs it for you.
+5. Run `just ci-slow`. Its `just ci` half compares the fast goldens as `wasm32-wasip1`
+   (`just test-wasm-fast`) and its slow half the slow suites there too (`just test-wasm-slow`).
+   Both fail, naming `just wasm-tools`, when a tool is missing; never report them as skipped.
 6. If the bump trips a statistical test, run that test under three other seeds. Two failures in
    three is a real defect. Otherwise change the seed in the same commit, with a note
    (galaxy-generation plan 01, design note 28). Never loosen α, shrink the sample, or widen a

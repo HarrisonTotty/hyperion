@@ -1442,3 +1442,44 @@ warnings` with "use of a disallowed method", and was reverted.
   wasmtime is pinned at 49.0.1 (`wasmtime_version`), the version the plan's research used. Checked:
   `WASMTIME=/nonexistent just test-wasm-fast` fails with "wasmtime (/nonexistent) is missing: run
   `just wasm-tools` …"; `just test-wasm-fast` passed (2,484 tests; 134 s of tests at load 7–12).
+  Also, as built (review): the doctests leave `ci` safely, since none pins generated output (the
+  sim's central-promise doctest compares draws with each other, not with fixed bits). T5's
+  separate `-p hyperion-base` flagged build is not a step: base compiles first, so the surface
+  build already runs exactly that compilation and stops on base's message; the surface crate's own
+  guard is held only by `both_client_crates_refuse_relaxed_simd`, as text. The preflight requires
+  `wasmtime --version` to name the pinned version (T7.c). `just wasm-tools` was run in its parts
+  (the two `rustup target add`s, `cargo install wasmtime-cli --version 49.0.1 --locked`).
+- **Deviations in T7.c (the wasm part), as built (2026-09-30). The timings are provisional:** the
+  machine was never quiet (other lanes building and testing; load averages 6–37), and runs waited
+  on the shared heavy-test lock, so each figure below is the run's wall time less its lock waits,
+  read from timestamped logs. The owner should re-time `just ci` and `just ci-slow` on a quiet
+  machine (load under 1, governor recorded) and re-apply Design note 11's rule.
+  - `just ci` before the wiring: 1,489 s wall, of which 860 s waiting for the lock, so about 630 s
+    of work, with a partly cold target directory (load 7.6 before, 15.4 after).
+  - `just ci` with `test-wasm-fast` (the `ci` half of the one permitted `just ci-slow` run, warm):
+    about 527 s of work (1,827 s wall less 1,300 s of lock waits; load 10.5 before). Of it, the
+    native part took about 384 s and `test-wasm-fast` about 143 s: 14 s for the relaxed-SIMD
+    refusal and the wasip1 build, 128 s of nextest (2,484 tests). By crate, summed per-test times
+    from the nextest log: the sim 1,700 s over 2,293 tests, base 4 s (125), the testkit 2 s (65),
+    the surface crate under 1 s (1), so the wasip1 suite is the sim's.
+  - **The rule, applied to these figures:** the sim's fast suite adds about 143 s to about 384 s,
+    37% of the new `ci`'s work and under half of the old one's under either reading, so the sim's
+    share stays its whole fast suite. Against the README's old "about three minutes" (a quiet
+    figure) the same 143 s would exceed half; the quiet re-timing decides, and should the rule
+    then narrow the sim's share, note that only 15 of the sim's 41 golden-writing test files match
+    `--test '*golden*'`, so the narrowing would need a nextest filter naming the golden-writing
+    binaries rather than the glob.
+  - Native slow suite (`test-slow`, same run): 1,580 s of tests, and **7 of 165 failed**, none in
+    code this plan touched: `hyperion-fit`'s
+    `energy_and_jacobi_hold_over_ten_gyr_for_a_thousand_orbits`; the sim's `galaxy_bounds`
+    `envelopes_never_exceed_their_bounds_over_many_cells_seed_0`, `_seed_1` and `_seed_2`;
+    `galaxy_features` `field_and_features_add_up_to_every_budget`; `planetary_placement`
+    `the_statistics_of_architecture_meet_their_surveys`; and `stellar_system`
+    `multiple_systems_follow_the_model_over_ten_thousand_systems`. All seven fail identically on
+    `main` (899db5e): they are pre-existing galaxy-plan failures, which the owner is handling, and
+    **`just ci-slow` currently fails on them, independently of the wasm suites**. Since `ci-slow`
+    stops at `test-slow`, the slow wasip1 suite was timed by its own run (`just test-wasm-slow`,
+    below).
+  - Beyond the listed files, `.claude/skills/implement-task/SKILL.md`'s example of a skipped check
+    is now the AArch64 run, since the wasm checks can no longer be skipped; the README's `just ci`
+    sentence now also names `fit-check`, which `ci` already ran.

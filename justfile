@@ -139,8 +139,9 @@ _wasm-preflight +tools:
         case "$tool" in
             wasip1)
                 grep -qx wasm32-wasip1 <<<"$installed" || missing "the rustup target wasm32-wasip1"
-                "${WASMTIME:-wasmtime}" --version >/dev/null 2>&1 \
-                    || missing "wasmtime (${WASMTIME:-wasmtime})"
+                found="$("${WASMTIME:-wasmtime}" --version 2>/dev/null || true)"
+                [[ "$found" == "wasmtime {{ wasmtime_version }}"* ]] \
+                    || missing "wasmtime {{ wasmtime_version }} (${WASMTIME:-wasmtime}: '${found:-none}')"
                 cargo nextest --version >/dev/null 2>&1 || missing "cargo-nextest"
                 ;;
             *)
@@ -152,8 +153,8 @@ _wasm-preflight +tools:
 
 # `cargo <args>` with wasmtime as the runner for wasm32-wasip1. Goldens are read at host paths fixed
 # at compile time, so the guest is given the repository, and the target directory if it lies
-# elsewhere, at those same paths. The runner is set here, not in `.cargo/config.toml`, so that a bare
-# `cargo test --target wasm32-wasip1` names none.
+# elsewhere, at those same paths. The runner is set here, not in `.cargo/config.toml`, so that a
+# bare `cargo test --target wasm32-wasip1` names none.
 [positional-arguments]
 _wasip1 +args:
     #!/usr/bin/env bash
@@ -181,7 +182,7 @@ _relaxed-simd-refused:
     if RUSTFLAGS="-C target-feature=+relaxed-simd" \
         CARGO_TARGET_DIR="{{ justfile_directory() }}/target/relaxed-simd-check" \
         cargo build --target wasm32-wasip1 -p hyperion-surface >"$log" 2>&1; then
-        echo "error: hyperion-surface built with +relaxed-simd: its compile_error! guard is gone" >&2
+        echo "error: built with +relaxed-simd: the guards of hyperion-base and hyperion-surface are gone" >&2
         exit 1
     fi
     if ! grep -q "relaxed SIMD is banned in hyperion-" "$log"; then
@@ -191,7 +192,7 @@ _relaxed-simd-refused:
     fi
     echo "the +relaxed-simd build is refused by its guard" >&2
 
-# The suites are built first, then run under the heavy-test lock. Doctests wait for `test-wasm-slow`.
+# Built first, then run under the heavy-test lock. The doctests wait for `test-wasm-slow`.
 # The fast WebAssembly checks, run by `ci`: relaxed SIMD refused, the fast suites under wasip1.
 test-wasm-fast: (_wasm-preflight "wasip1") _relaxed-simd-refused
     just _wasip1 {{ wasip1_nextest }} --no-run
@@ -251,8 +252,8 @@ build:
     cargo build --workspace --release
     pnpm build
 
-# The gate before a commit: everything but the slow tests and the other architectures.
-ci: fmt-check check lint test fit-check gen-protocol-check
+# The gate before a commit: everything but the slow tests, with the fast suites on WebAssembly.
+ci: fmt-check check lint test fit-check gen-protocol-check test-wasm-fast
 
-# `ci` plus the slow statistical tests: the full gate.
-ci-slow: ci test-slow
+# `ci` plus the slow statistical tests, natively and on WebAssembly: the full gate.
+ci-slow: ci test-slow test-wasm-slow
