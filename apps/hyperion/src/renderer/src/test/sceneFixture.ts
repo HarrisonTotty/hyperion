@@ -27,6 +27,9 @@ export function designateFixture(_system: SystemIdHex): string {
   return SCENE_DESIGNATION;
 }
 
+/** The fixture system's tidal radius as the scene states it, m. */
+export const SCENE_TIDAL_RADIUS_M = 2.1e16;
+
 /** The scene clock at `seconds`, running at `rate`. */
 export function sceneClock(seconds: number, rate = 1_000): SceneClockDto {
   return { time: { seconds, nanos: 0 }, time_rate: rate, state: "running" };
@@ -104,7 +107,7 @@ export function sceneSequence(): SceneNotificationDto[] {
       sequence: 1,
       clock: sceneClock(3_400),
       ship: shipInSystem(3_400),
-      arrival: { type: "system", system: sliceSceneSystem(), tidal_radius_m: 2.1e16 },
+      arrival: { type: "system", system: sliceSceneSystem(), tidal_radius_m: SCENE_TIDAL_RADIUS_M },
       bodies: [],
     },
     { sequence: 2, clock: sceneClock(3_600), bodies: [earthReSentAsContact()] },
@@ -140,6 +143,7 @@ export function stateAfterHeartbeat(): SceneStateDto {
           : grant,
       ),
     },
+    tidal_radius_m: SCENE_TIDAL_RADIUS_M,
     craft: [],
   };
 }

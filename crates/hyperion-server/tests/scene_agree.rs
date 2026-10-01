@@ -8,8 +8,9 @@
 //! line the stand-in's settings draw, to within the delivery of a push; the ship each is told is
 //! the same, in the same order; every craft either is told is the craft the source gives at the
 //! time the craft state; the contacts the server places are the same bodies for both; and every
-//! system either is given, in its state or an arrival, is `system_bodies` answered for that push's
-//! own time.
+//! system either is given, in its state or an arrival, is `system_bodies` answered for the time
+//! its records state, which is that push's own time, or a time since the push before when an
+//! arrival was merged with a later change before it was sent (Design note 5).
 
 mod common;
 
@@ -61,10 +62,23 @@ struct Heard {
     craft: Vec<Vec<SceneCraftDto>>,
     /// The bodies placed by a seen position.
     seen: BTreeSet<BodyIdHex>,
-    /// Each system given, with the time of the push that gave it.
-    systems: Vec<(UniverseTime, SceneSystemDto)>,
+    /// Each system given, with the clocks of the push that gave it and of the one before.
+    systems: Vec<Given>,
     /// Each departure.
     departures: usize,
+    /// The clock of the latest state or push, the time from which the next push's changes date.
+    latest: Option<UniverseTime>,
+}
+
+/// A system given in a state or an arrival.
+#[derive(Debug)]
+struct Given {
+    /// When the changes the push holds began: the clock of the state or push before it, or the
+    /// time a setting it carries restarted the clock at. Its records are evaluated no earlier.
+    since: UniverseTime,
+    /// The clock of the state or push that gave it.
+    clock: UniverseTime,
+    system: SceneSystemDto,
 }
 
 /// Nanoseconds from the epoch.
@@ -76,6 +90,16 @@ fn nanos(time: UniverseTime) -> i128 {
 async fn listen(client: &mut TestClient, heard: &mut Heard, deadline: Instant) {
     while Instant::now() < deadline {
         let (_, notification) = next_scene(client).await;
+        let previous = heard
+            .latest
+            .replace(notification.clock.time)
+            .expect("the state's clock is heard first");
+        // A setting, which always pushes its ship, restarts the clock at the ship's time, which may
+        // lie before the previous push's clock; without one the clock runs on from that push.
+        let since = notification
+            .ship
+            .as_ref()
+            .map_or(previous, |ship| ship.time);
         heard.clocks.push((Instant::now(), notification.clock));
         heard.ships.extend(notification.ship);
         heard.craft.extend(notification.craft);
@@ -88,7 +112,11 @@ async fn listen(client: &mut TestClient, heard: &mut Heard, deadline: Instant) {
         );
         match notification.arrival {
             Some(SceneArrivalDto::System { system, .. }) => {
-                heard.systems.push((notification.clock.time, *system));
+                heard.systems.push(Given {
+                    since,
+                    clock: notification.clock.time,
+                    system: *system,
+                });
             }
             Some(SceneArrivalDto::NoSystem) => heard.departures += 1,
             None => {}
@@ -155,6 +183,52 @@ fn assert_craft_are_the_source_s(heard: &Heard, system: &SystemIdHex) {
     }
 }
 
+/// Checks that each system `heard` was given is `system_bodies` answered for the time its records
+/// state. That is its push's own time, or, for an arrival merged with a later change before the
+/// connection took it (Design note 5: the merged push states the latest clock), a time since the
+/// push before.
+async fn assert_systems_are_system_bodies(
+    heard: &Heard,
+    asker: &mut TestClient,
+    universe: &UniverseIdHex,
+    system: &SystemIdHex,
+) {
+    assert_eq!(
+        heard.systems.len(),
+        2,
+        "the state's, and the return's arrival"
+    );
+    for Given {
+        since,
+        clock,
+        system: scene,
+    } in &heard.systems
+    {
+        let time = scene.system.hosts.time;
+        assert!(
+            nanos(*since) <= nanos(time) && nanos(time) <= nanos(*clock),
+            "records at {time:?}, outside the push's changes from {since:?} to {clock:?}"
+        );
+        let expected = system_bodies(asker, universe, system, time).await;
+        // Each body's record is degraded to its own grant; its place and the rest are the
+        // system's.
+        assert_eq!(scene.system.hosts, expected.hosts, "at {time:?}");
+        assert_eq!(scene.system.zones, expected.zones, "at {time:?}");
+        for record in &scene.system.bodies {
+            let full = expected
+                .bodies
+                .iter()
+                .find(|full| full.id == record.id)
+                .expect("every body the scene lists, system_bodies lists");
+            assert_eq!(
+                record.position_m, full.position_m,
+                "{:?} at {time:?}",
+                record.id
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn two_clients_of_one_scene_are_told_the_same_scene() {
     let [system, _] = systems();
@@ -173,7 +247,10 @@ async fn two_clients_of_one_scene_are_told_the_same_scene() {
 
     let mut first = server.connected().await;
     let (_, first_state) = subscribe(&mut first, &universe, DetailLevelDto::Bulk).await;
-    let mut heard_first = Heard::default();
+    let mut heard_first = Heard {
+        latest: Some(first_state.clock.time),
+        ..Heard::default()
+    };
     listen(
         &mut first,
         &mut heard_first,
@@ -182,14 +259,21 @@ async fn two_clients_of_one_scene_are_told_the_same_scene() {
     .await;
     let mut second = server.connected().await;
     let (_, second_state) = subscribe(&mut second, &universe, DetailLevelDto::Bulk).await;
-    let mut heard_second = Heard::default();
+    let mut heard_second = Heard {
+        latest: Some(second_state.clock.time),
+        ..Heard::default()
+    };
     for (state, heard) in [
         (&first_state, &mut heard_first),
         (&second_state, &mut heard_second),
     ] {
         assert_eq!(state.ship, in_system(&system));
         let scene = state.system.clone().expect("the stand-in is in the system");
-        heard.systems.push((state.clock.time, scene));
+        heard.systems.push(Given {
+            since: state.clock.time,
+            clock: state.clock.time,
+            system: scene,
+        });
         heard.craft.push(state.craft.clone());
     }
 
@@ -246,31 +330,6 @@ async fn two_clients_of_one_scene_are_told_the_same_scene() {
     assert!(!heard_first.seen.is_empty());
     assert_eq!(heard_first.seen, heard_second.seen);
 
-    // Each system given is system_bodies answered for its push's own time.
-    for heard in [&heard_first, &heard_second] {
-        assert_eq!(
-            heard.systems.len(),
-            2,
-            "the state's, and the return's arrival"
-        );
-        for (time, scene) in &heard.systems {
-            let expected = system_bodies(&mut asker, &universe, &system, *time).await;
-            // Each body's record is degraded to its own grant; its place and the rest are the
-            // system's.
-            assert_eq!(scene.system.hosts, expected.hosts, "at {time:?}");
-            assert_eq!(scene.system.zones, expected.zones, "at {time:?}");
-            for record in &scene.system.bodies {
-                let full = expected
-                    .bodies
-                    .iter()
-                    .find(|full| full.id == record.id)
-                    .expect("every body the scene lists, system_bodies lists");
-                assert_eq!(
-                    record.position_m, full.position_m,
-                    "{:?} at {time:?}",
-                    record.id
-                );
-            }
-        }
-    }
+    assert_systems_are_system_bodies(&heard_first, &mut asker, &universe, &system).await;
+    assert_systems_are_system_bodies(&heard_second, &mut asker, &universe, &system).await;
 }

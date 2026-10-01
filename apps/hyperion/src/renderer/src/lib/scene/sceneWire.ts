@@ -221,13 +221,13 @@ function hillRadii(bodies: ReadonlyArray<BodySummaryDto>): ReadonlyMap<BodyIdHex
  */
 function build(
   wire: SceneStateDto,
-  tidalRadiusM: number | null,
   designate: Designate,
   kept: SceneModel | null,
 ): SceneModelResult {
   try {
     check(Number.isSafeInteger(wire.sequence) && wire.sequence >= 0, "sequence unusable");
     check(CLOCK_RATES.has(wire.clock.time_rate), "clock rate unusable");
+    const tidalRadiusM = wire.tidal_radius_m ?? null;
     return {
       kind: "ok",
       model: {
@@ -264,13 +264,14 @@ function build(
  * cannot be shown.
  *
  * @remarks
- * The state carries no tidal radius for a system the scene is already in, so the model's
- * `tidalRadiusM` is `null` until an arrival states one.
+ * A state holding a system states its tidal radius too (R03.T8.a), which the model keeps until an
+ * arrival states another; a state that omits it leaves `tidalRadiusM` `null` until the next
+ * arrival.
  *
  * @param designate - Names a system, as the chart's answers carry its designation of record.
  */
 export function toSceneModel(state: SceneStateDto, designate: Designate): SceneModelResult {
-  return build(state, null, designate, null);
+  return build(state, designate, null);
 }
 
 /** Puts `entry` in place of the one with the same ID in a list kept in ID order, or inserts it. */
@@ -301,8 +302,8 @@ function withBody(system: SceneSystemDto, body: SceneBodyDto): SceneSystemDto {
  *
  * @remarks
  * The notification's `sequence` must be the model's plus one; anything else is a `sequence` error
- * and the model is unchanged. An arrival replaces the system and every body before it, and keeps
- * its tidal radius; leaving for the galactic frame clears both. Re-sent bodies replace their
+ * and the model is unchanged. An arrival replaces the system and every body before it, and its
+ * tidal radius replaces the one held; leaving for the galactic frame clears both. Re-sent bodies replace their
  * records and grants by ID, the latest winning. The clock always, and the ship and the craft when
  * sent, replace what was held. A body re-sent while the scene has no system is a fault.
  *
@@ -318,7 +319,7 @@ export function applySceneNotification(
     return { kind: "sequence", expected, received: notification.sequence };
   }
   let system = model.wire.system;
-  let tidalRadiusM = model.system?.tidalRadiusM ?? null;
+  let tidalRadiusM = model.wire.tidal_radius_m;
   if (notification.arrival !== undefined) {
     switch (notification.arrival.type) {
       case "system":
@@ -327,7 +328,7 @@ export function applySceneNotification(
         break;
       case "no_system":
         system = null;
-        tidalRadiusM = null;
+        tidalRadiusM = undefined;
         break;
     }
   }
@@ -344,7 +345,8 @@ export function applySceneNotification(
     clock: notification.clock,
     ship: notification.ship ?? model.wire.ship,
     system,
+    ...(system === null || tidalRadiusM === undefined ? {} : { tidal_radius_m: tidalRadiusM }),
     craft: notification.craft ?? model.wire.craft,
   };
-  return build(wire, tidalRadiusM, designate, model);
+  return build(wire, designate, model);
 }
