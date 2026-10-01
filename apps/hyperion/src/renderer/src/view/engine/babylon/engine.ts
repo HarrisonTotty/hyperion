@@ -75,6 +75,7 @@ import { createShaderMaterial, setUniform, textureSamplerOf } from "./materials"
 import { MeshRecord } from "./meshes";
 import { babylonEngineOptions } from "./options";
 import { registerBabylonModules } from "./registrations";
+import { BabylonView, type ViewHost } from "./view";
 import {
   GLSLANG_STUB,
   guardCreateEffect,
@@ -109,7 +110,7 @@ const OFFSET_UNIFORM: UniformSpec = { name: FRAME_UNIFORMS.offsetFromCamera, typ
 let postProcessKeys = 0;
 
 /** The engine over one Babylon `WebGPUEngine`, one device and one right-handed scene. */
-export class BabylonRenderEngine implements RenderEngine {
+export class BabylonRenderEngine implements RenderEngine, ViewHost {
   readonly capabilities: GpuCapabilities;
   readonly depthPolicy: DepthPolicy = "reversed-z-float";
   readonly #engine: WebGPUEngine;
@@ -117,6 +118,7 @@ export class BabylonRenderEngine implements RenderEngine {
   readonly #scene: Scene;
   readonly #meshes = new WeakMap<MeshHandle, MeshRecord>();
   readonly #meshRecords = new Set<MeshRecord>();
+  readonly #views = new Set<BabylonView>();
   readonly #materials = new WeakMap<MaterialHandle, MaterialRecord>();
   readonly #postProcesses = new WeakMap<PostProcessHandle, PostProcess>();
   readonly #kernels = new WeakMap<ComputeHandle, KernelRecord>();
@@ -153,8 +155,55 @@ export class BabylonRenderEngine implements RenderEngine {
     return this.#scene;
   }
 
-  createView(_canvas: HTMLCanvasElement, _name: string): RenderView {
-    throw notBuilt("createView", "R01.T8.c");
+  /** The engine's one device. */
+  get device(): GPUDevice {
+    return this.#device;
+  }
+
+  /**
+   * Runs `render` as one Babylon frame and submits it.
+   *
+   * @remarks
+   * Each view's render is its own frame: a canvas texture expires once the task yields, so its
+   * frame is submitted before `render` returns.
+   */
+  inFrame(render: () => void): void {
+    this.#engine.beginFrame();
+    try {
+      this.#scene.resetCachedMaterial();
+      // Babylon resets these at the start of a scene's own render, not of a target's; a
+      // post-process leaves depth writes off (`PostProcess.apply`), which would carry into the
+      // next frame's draws.
+      this.#engine.setDepthBuffer(true);
+      this.#engine.setDepthWrite(true);
+      this.#engine.setColorWrite(true);
+      render();
+    } finally {
+      this.#engine.endFrame();
+    }
+  }
+
+  /**
+   * The Babylon post-processes of `frame`, in order, as the chain the next render runs.
+   *
+   * @remarks
+   * The caller renders the frame before it asks for another's chain.
+   */
+  postProcessesFor(frame: FrameSubmission): ReadonlyArray<PostProcess> {
+    return frame.postProcesses.map((handle) => this.postProcessOf(handle));
+  }
+
+  forgetView(view: RenderView): void {
+    if (view instanceof BabylonView) {
+      this.#views.delete(view);
+    }
+  }
+
+  createView(canvas: HTMLCanvasElement, name: string): RenderView {
+    this.#assertLive();
+    const view = new BabylonView(this, canvas, name, navigator.gpu.getPreferredCanvasFormat());
+    this.#views.add(view);
+    return view;
   }
 
   createRenderTarget(_spec: RenderTargetSpec): RenderTarget {
@@ -206,6 +255,10 @@ export class BabylonRenderEngine implements RenderEngine {
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
     this.#assertLive();
+    if ((spec.inputs ?? []).includes("depth")) {
+      // Bound to the chain's first input, Babylon's scene depth read zero (T8.c as built).
+      throw notBuilt("createPostProcess with a depth input", "R01.T8.f");
+    }
     postProcessKeys += 1;
     const key = `hyperionPostProcess${postProcessKeys}`;
     ShaderStore.ShadersStoreWGSL[`${key}FragmentShader`] = spec.fragmentWgsl;
@@ -218,7 +271,7 @@ export class BabylonRenderEngine implements RenderEngine {
       size: 1,
       camera: null,
       engine: this.#engine,
-      reusable: true,
+      reusable: false,
       textureType: Constants.TEXTURETYPE_HALF_FLOAT,
       shaderLanguage: ShaderLanguage.WGSL,
     });
@@ -333,6 +386,10 @@ export class BabylonRenderEngine implements RenderEngine {
       return;
     }
     this.#disposed = true;
+    for (const view of this.#views) {
+      view.dispose();
+    }
+    this.#views.clear();
     for (const record of this.#meshRecords) {
       record.dispose();
     }

@@ -1900,3 +1900,47 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     directly, past `createEffect`; the stubs still stop it. No unit test covers the engine's
     releasing the backstop at disposal, since the engine needs a WebGPU device; T9 exercises it.
   - Pending for T9: the offline run with the network refused is the integration check.
+- **Deviations in T8.c, as built.**
+  - A view draws through its `RenderTargetTexture` directly (`target.render()` with the view's
+    camera as `activeCamera` and the frame's meshes as `renderList`), inside one Babylon frame per
+    view render (`beginFrame`/`endFrame`), not through `camera.outputRenderTarget` and
+    `scene.render`: the frame's draws are the render list, and the canvas texture must be
+    submitted before the task yields. Each frame resets depth test, depth writes and colour
+    writes first, since a Babylon post-process leaves depth writes off and only a scene's own
+    render resets them. The camera is Babylon's base `Camera` at the origin (identity view), its
+    projection frozen to the submission's; no material reads Babylon's matrices anyway
+    (`FRAME_UNIFORMS`).
+  - The canvas is configured with `viewFormats: [<format>-srgb]`, and after each
+    `wrapWebGPUTexture` or `updateWrappedWebGPUTexture` the adapter sets the hardware wrapper's
+    `format` to the `-srgb` view (`setAttachmentFormat`, a write through `_hardwareTexture`), which
+    Babylon then uses for the attachment view and the pipeline: no `rgba16float` fallback was
+    needed. Checked on SwiftShader and the RTX 3080 by a scratch page (not committed): a linear
+    0.5 reads back 188.
+  - Winding: materials set `sideOrientation` to counter-clockwise explicitly; left to the mesh,
+    Babylon's default in the right-handed scene reversed it (the scratch page saw a clockwise
+    triangle drawn and a counter-clockwise one culled). With the view's `_disableEngineYFlip`,
+    counter-clockwise in WebGPU's framebuffer is front, as R02's matrices expect.
+  - `RenderView.readBack` returns RGBA bytes, sRGB-encoded, rows from the top, unpadded, whatever
+    the canvas's byte order (a `bgra8unorm` canvas is swizzled); it must be called in the task of
+    the `render` it reads. `gpuFlags.ts` (`BUFFER_USAGE`, `TEXTURE_USAGE`, `MAP_MODE`) holds
+    WebGPU's flag values, since TypeScript 7's `lib.dom` declares the flag types but not the
+    namespaces that hold them.
+  - `FrameSubmission.postProcesses` run as the view target's Babylon post-process chain
+    (`addPostProcess`), which draws the scene into the first pass's input and ends in the canvas.
+    Post-processes are made non-reusable (one input each, no ping-pong). The colour input works
+    (checked: an inverting pass on both adapters, and again after the view was resized, since a
+    view detaches the engine's shared post-processes before it disposes its target). The `depth`
+    input, bound to the first pass's input depth under `depthTexture`, got a texture of the view's
+    size that read zero on both adapters although the pass's depth test worked, so
+    `createPostProcess` with a `depth` input throws "built by R01.T8.f" for now: **open, carried to
+    T8.f/T8.i**, where the target's own `depth32float` made with `TEXTURE_BINDING` and `COPY_SRC`
+    is the candidate source.
+    Post-process uniform values have no path in `RenderEngine` (a `WgslPostProcessSpec` declares
+    uniforms, nothing sets them): **open, for the plan that first needs one (R05/R07)**.
+  - Checked by the scratch page on SwiftShader and on the RTX 3080 (`DISPLAY=:0`, the client's
+    switches): two canvases from one device at their own sizes (64 × 64, then a second resized to
+    32 × 16) draw the right way up (a triangle in the upper-right quadrant of view space lands in
+    the image's upper right); a back face is culled; a nearer triangle drawn first stays in front
+    of a farther one drawn after (reversed depth, greater-or-equal); two draws of one mesh and
+    material with different offsets and tints each land. These are not T9's checks, which remain
+    pending for T9.

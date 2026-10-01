@@ -52,6 +52,24 @@ describe("a material's state", () => {
     expect(material.backFaceCulling).toBe(false);
   });
 
+  it("hands depthBiasAway to Babylon as the same positive values, unflipped", () => {
+    scene = new Scene(new NullEngine());
+    const material = new ShaderMaterial("bias", scene, { vertexSource: "", fragmentSource: "" });
+    applyMaterialState(
+      material,
+      materialState({ ...SPEC, depthBiasAway: { constant: 4, slopeScale: 1.5 } }),
+    );
+    expect(material.zOffsetUnits).toBe(4);
+    expect(material.zOffset).toBe(1.5);
+  });
+
+  it("winds front faces counter-clockwise", () => {
+    scene = new Scene(new NullEngine());
+    const material = new ShaderMaterial("winding", scene, { vertexSource: "", fragmentSource: "" });
+    applyMaterialState(material, materialState(SPEC));
+    expect(material.sideOrientation).toBe(Constants.MATERIAL_CounterClockWiseSideOrientation);
+  });
+
   it("puts a blending material in the transparent queue", () => {
     expect(materialState({ ...SPEC, blend: "additive" }).needAlphaBlending).toBe(true);
     expect(materialState({ ...SPEC, transparent: true }).needAlphaBlending).toBe(true);

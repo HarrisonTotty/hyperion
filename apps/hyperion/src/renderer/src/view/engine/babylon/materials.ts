@@ -79,6 +79,9 @@ export function applyMaterialState(material: Material, state: MaterialState): vo
   material.alphaMode = state.alphaMode;
   material.backFaceCulling = state.backFaceCulling;
   material.cullBackFaces = true;
+  // Front faces wind counter-clockwise in WebGPU's framebuffer, as R02's right-handed matrices
+  // expect; left to the mesh, Babylon's default orientation reverses it (checked on SwiftShader).
+  material.sideOrientation = Constants.MATERIAL_CounterClockWiseSideOrientation;
   material.zOffset = state.zOffset;
   material.zOffsetUnits = state.zOffsetUnits;
 }
