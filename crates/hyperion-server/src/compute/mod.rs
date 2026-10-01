@@ -46,6 +46,6 @@ pub use pool::{
 };
 pub use sightlines::{SIGHTLINE_QUALITY, SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};
-pub use systems::{SharedBriefCache, SharedSystemCache};
+pub use systems::{SharedBriefCache, SharedSystemCache, SystemStarsHandle};
 
 pub(crate) use pool::panic_message;

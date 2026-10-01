@@ -7,6 +7,7 @@ import type { ExtinctionMapRequest } from "./ExtinctionMapRequest";
 import type { ExtinctionRequest } from "./ExtinctionRequest";
 import type { GalaxyParametersRequest } from "./GalaxyParametersRequest";
 import type { OpenUniverseRequest } from "./OpenUniverseRequest";
+import type { ResolveSystemRequest } from "./ResolveSystemRequest";
 import type { SystemBodiesRequest } from "./SystemBodiesRequest";
 import type { SystemSummaryRequest } from "./SystemSummaryRequest";
 import type { SystemsInRangeRequest } from "./SystemsInRangeRequest";
@@ -14,4 +15,4 @@ import type { SystemsInRangeRequest } from "./SystemsInRangeRequest";
 /**
  * What a request asks for, discriminated by `kind`.
  */
-export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "extinction_map" } & ExtinctionMapRequest | { "kind": "extinction" } & ExtinctionRequest;
+export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "extinction_map" } & ExtinctionMapRequest | { "kind": "extinction" } & ExtinctionRequest | { "kind": "resolve_system" } & ResolveSystemRequest;

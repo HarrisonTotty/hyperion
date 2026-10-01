@@ -60,6 +60,7 @@ import type { MassLayer } from "./generated/MassLayer";
 import type { MoonOriginDto } from "./generated/MoonOriginDto";
 import type { NatalKickDto } from "./generated/NatalKickDto";
 import type { ObjectKindDto } from "./generated/ObjectKindDto";
+import type { ObservedDto } from "./generated/ObservedDto";
 import type { OpenUniverseRequest } from "./generated/OpenUniverseRequest";
 import type { OrbitDto } from "./generated/OrbitDto";
 import type { OrbitHostDto } from "./generated/OrbitHostDto";
@@ -72,10 +73,13 @@ import type { PlanetClassDto } from "./generated/PlanetClassDto";
 import type { PlanetaryNebulaDto } from "./generated/PlanetaryNebulaDto";
 import type { Population } from "./generated/Population";
 import type { PulsarDto } from "./generated/PulsarDto";
+import type { QueryModeDto } from "./generated/QueryModeDto";
 import type { RemnantDto } from "./generated/RemnantDto";
 import type { RequestBody } from "./generated/RequestBody";
 import type { RequestError } from "./generated/RequestError";
 import type { RequestId } from "./generated/RequestId";
+import type { ResolvedSystem } from "./generated/ResolvedSystem";
+import type { ResolveSystemRequest } from "./generated/ResolveSystemRequest";
 import type { ResponseBody } from "./generated/ResponseBody";
 import type { SectionDto } from "./generated/SectionDto";
 import type { SeedHex } from "./generated/SeedHex";
@@ -166,6 +170,7 @@ export type {
   MoonOriginDto,
   NatalKickDto,
   ObjectKindDto,
+  ObservedDto,
   OpenUniverseRequest,
   OrbitDto,
   OrbitHostDto,
@@ -178,10 +183,13 @@ export type {
   PlanetaryNebulaDto,
   Population,
   PulsarDto,
+  QueryModeDto,
   RemnantDto,
   RequestBody,
   RequestError,
   RequestId,
+  ResolvedSystem,
+  ResolveSystemRequest,
   ResponseBody,
   SectionDto,
   SeedHex,

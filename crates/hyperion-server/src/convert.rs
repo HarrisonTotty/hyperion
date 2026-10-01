@@ -5,10 +5,12 @@
 //! cannot be used becomes a [`ConvertRequestError`], answered `bad_request` with the field named.
 //! Answers are built here too, by `From` from the server's types to the wire's, as are the request
 //! errors that the server's own errors become. The `system_summary` request and its answer are in
-//! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], and plan 07's
-//! `extinction_map` and `extinction` in [`extinction`].
+//! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], plan 07's
+//! `extinction_map` and `extinction` in [`extinction`], and plan 12's query mode, observed rows and
+//! `resolve_system` in [`observe`].
 
 mod extinction;
+mod observe;
 mod planetary;
 mod stellar;
 
@@ -19,11 +21,11 @@ use std::sync::Arc;
 
 use hyperion_protocol::{
     CreateUniverseRequest, DensityMap, DensityMapRequest, ErrorCode, GalaxyParameters, LayerCensus,
-    LayerStatus, MassLayer, Parameter, ParameterGroup, ParameterOrigin, ParameterValue,
-    RequestError, SeedHex, StellarBriefDto, SystemIdHex, SystemsInRange, SystemsInRangeRequest,
-    Unit, UniverseInfo, UniverseList,
+    LayerStatus, MassLayer, ObservedDto, Parameter, ParameterGroup, ParameterOrigin,
+    ParameterValue, RequestError, SeedHex, StellarBriefDto, SystemIdHex, SystemsInRange,
+    SystemsInRangeRequest, Unit, UniverseInfo, UniverseList,
 };
-use hyperion_sim::coords::{GalacticPosition, LyCell};
+use hyperion_sim::coords::{GalacticPosition, GalacticVelocity, LyCell};
 use hyperion_sim::galaxy::gas::params::GasParams;
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
@@ -49,6 +51,9 @@ use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 pub(crate) use self::extinction::{
     ExtinctionMapQuery, ExtinctionQuery, LineEnd, extinction_map, extinction_result,
     target_extinction,
+};
+pub(crate) use self::observe::{
+    ResolveRequest, observed_dto, resolved_system, untraced, untraced_system,
 };
 pub(crate) use self::planetary::{
     BodiesRequest, DetailRequest, body_detail, body_refusal, hosts_request, system_bodies,
@@ -231,7 +236,9 @@ pub(crate) fn density_map(
 ///
 /// Every field is checked here, in design note 24's order, so that the answer names the first field
 /// at fault: the universe (by `requests::universe::openable_universe`, before this), then `time`,
-/// `centre`, `radius_ly` and `limit`. The query carries the server's cell budget,
+/// `centre`, `radius_ly` and `limit`, and last plan 12's `mode`, whose observer must lie in the root
+/// cube (P12.T6). The query's time is checked against the clock window and the light's emission
+/// time never is: it may lie back to the source horizon. The query carries the server's cell budget,
 /// [`MAX_QUERY_CELLS`], rather than plan 03's own default, which is sized for a caller with no
 /// clients to protect.
 #[derive(Debug, Clone, PartialEq)]
@@ -248,18 +255,21 @@ impl RangeRequest {
 impl TryFrom<&SystemsInRangeRequest> for RangeRequest {
     type Error = ConvertRequestError;
 
-    /// Checks `time`, `centre`, `radius_ly` and `limit`, in that order, and builds the query.
+    /// Checks `time`, `centre`, `radius_ly`, `limit` and `mode`, in that order, and builds the
+    /// query.
     fn try_from(request: &SystemsInRangeRequest) -> Result<Self, Self::Error> {
         let time = query_time(&request.time)?;
         let centre = query_centre(&request.centre)?;
         let radius = query_radius(request.radius_ly)?;
         let limit = query_limit(request.limit)?;
+        let mode = observe::query_mode(&request.mode)?;
         let (floor, substellar) = mass_floor(request.min_layer);
         let query = RangeQuery::builder(centre, radius)
             .time(time)
             .limit(limit)
             .mass_floor(floor)
             .substellar(substellar)
+            .mode(mode)
             .cell_budget(MAX_QUERY_CELLS)
             .build()
             .map_err(refused_query)?;
@@ -365,7 +375,7 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
         BuildRangeQueryError::TimeOutsideClockWindow(_) => "time",
         BuildRangeQueryError::SubstellarNotRequested
         | BuildRangeQueryError::SubstellarBelowFloor => "min_layer",
-        // No request sets an observed mode until plan 12's P12.T6 adds the wire's `mode`.
+        // The observer is the wire's `mode` (plan 12, P12.T6).
         BuildRangeQueryError::ObserverOutsideRootCube => "mode",
     };
     ConvertRequestError::new(field, error)
@@ -377,12 +387,14 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
 /// the job that ran the query owns it and moves them into the answer. The records are in
 /// [`RangeResult`]'s order, nearest first, and each is the system at the query's time. With
 /// `briefs`, which the handler builds when the request sets `include_stellar`, row k carries brief
-/// k, and a rogue planet's row its metallicity; without, no row carries either, and every row is
-/// plan 04's.
+/// k, and a rogue planet's row its metallicity; without, no row carries either. With `observed`,
+/// which the handler builds in observed mode (plan 12, P12.T6), row k carries observation k; the
+/// briefs are then each primary's when its light left it. Without either, every row is plan 04's.
 ///
 /// # Panics
 ///
-/// If `briefs` does not hold one brief per system found, which only a handler bug can cause.
+/// If `briefs` or `observed` does not hold one entry per system found, which only a handler bug
+/// can cause.
 #[must_use]
 pub(crate) fn systems_in_range(
     galaxy: &Galaxy,
@@ -390,23 +402,35 @@ pub(crate) fn systems_in_range(
     query: &RangeQuery,
     result: &RangeResult,
     briefs: Option<Vec<Option<StellarBriefDto>>>,
+    observed: Option<Vec<ObservedDto>>,
 ) -> SystemsInRange {
     let hits = result.systems();
-    let systems = match briefs {
+    let stellar: Vec<RowStellar> = match briefs {
         Some(briefs) => {
             assert_eq!(briefs.len(), hits.len(), "one brief per system found");
-            hits.iter()
-                .zip(briefs)
-                .map(|(hit, brief)| {
-                    system_record(galaxy, hit, query.time(), RowStellar::Asked(brief))
-                })
-                .collect()
+            briefs.into_iter().map(RowStellar::Asked).collect()
         }
-        None => hits
-            .iter()
-            .map(|hit| system_record(galaxy, hit, query.time(), RowStellar::NotAsked))
-            .collect(),
+        None => vec![RowStellar::NotAsked; hits.len()],
     };
+    let observed: Vec<Option<ObservedDto>> = match observed {
+        Some(observed) => {
+            assert_eq!(
+                observed.len(),
+                hits.len(),
+                "one observation per system found"
+            );
+            observed.into_iter().map(Some).collect()
+        }
+        None => vec![None; hits.len()],
+    };
+    let systems = hits
+        .iter()
+        .zip(stellar)
+        .zip(observed)
+        .map(|((hit, stellar), observed)| {
+            system_record(galaxy, hit, query.time(), stellar, observed)
+        })
+        .collect();
     SystemsInRange {
         universe: request.universe,
         centre: request.centre,
@@ -438,15 +462,37 @@ enum RowStellar {
 /// none either: it has no star to describe. With `include_stellar`, a rogue planet's row, which
 /// never has a brief, carries its metallicity instead, the one [`draw_metallicity`] gives it and
 /// its stars would share (plan 13, P13.T5.d); `system_summary` refuses it, so no other answer does.
+/// In observed mode the row carries `observed` (plan 12, P12.T6) and is otherwise the present's.
+///
+/// # Panics
+///
+/// If `hit` is not a grid system, whose velocity is plan 08's draw: [`system_record_moving`] takes
+/// another's.
 #[must_use]
 fn system_record(
     galaxy: &Galaxy,
     hit: &SystemHit,
     time: UniverseTime,
     stellar: RowStellar,
+    observed: Option<ObservedDto>,
+) -> hyperion_protocol::SystemRecord {
+    let velocity = epoch_velocity(galaxy, hit.record());
+    system_record_moving(galaxy, hit, velocity, time, stellar, observed)
+}
+
+/// [`system_record`] for a system whose epoch velocity the caller has: a feature member's is its
+/// cluster's and its own, which plan 08's draw is not (plan 12, P12.T6's `resolve_system`).
+#[must_use]
+fn system_record_moving(
+    galaxy: &Galaxy,
+    hit: &SystemHit,
+    velocity: GalacticVelocity,
+    time: UniverseTime,
+    stellar: RowStellar,
+    observed: Option<ObservedDto>,
 ) -> hyperion_protocol::SystemRecord {
     let record = hit.record();
-    let velocity = epoch_velocity(galaxy, record).metres_per_second();
+    let velocity = velocity.metres_per_second();
     let (brief, fe_h_dex) = match stellar {
         RowStellar::NotAsked => (None, None),
         RowStellar::Asked(brief) => (
@@ -466,6 +512,7 @@ fn system_record(
         velocity_km_s: velocity.map(|v| KilometresPerSecond::from(MetresPerSecond::new(v)).value()),
         stellar: brief,
         fe_h_dex,
+        observed,
     }
 }
 
@@ -2039,6 +2086,7 @@ mod tests {
             min_layer,
             limit,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }
     }
 
@@ -2066,7 +2114,7 @@ mod tests {
                 })
                 .collect()
         });
-        systems_in_range(milky_way(), request.clone(), &query, &result, briefs)
+        systems_in_range(milky_way(), request.clone(), &query, &result, briefs, None)
     }
 
     #[test]

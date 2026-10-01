@@ -12,6 +12,7 @@
 mod envelope;
 mod galaxy;
 mod modelled;
+mod observe;
 mod orbit;
 mod planetary;
 mod primitives;
@@ -32,6 +33,7 @@ pub use galaxy::{
     TargetExtinction, Unit,
 };
 pub use modelled::Modelled;
+pub use observe::{ObservedDto, QueryModeDto, ResolveSystemRequest, ResolvedSystem};
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
 pub use planetary::{
     ArchitectureClassDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto,

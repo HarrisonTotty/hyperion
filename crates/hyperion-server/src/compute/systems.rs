@@ -19,6 +19,11 @@
 //! count, under the same key and the same rules. It is a cache of its own because its entries are a
 //! few kilobytes where a system's stars can be tens, and a 20,000-row answer would otherwise evict
 //! every system the `SYSTEM` display is looking at.
+//!
+//! An observed range query reads each system's brief when its light left it, which needs the
+//! system's stars (plan 12, P12.T3): [`SharedSystemCache::handle`] lends the same cache to it as the
+//! sim's [`StarsCache`], so that an observed query asks for no stars the `SYSTEM` display has
+//! built, and builds none twice (P12.T6).
 
 use std::sync::Arc;
 
@@ -28,6 +33,7 @@ use hyperion_sim::galaxy::placement::{
     ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
 };
 use hyperion_sim::id::{SystemId, SystemIdKind};
+use hyperion_sim::observe::{StarsCache, stars_of};
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
 
@@ -132,11 +138,91 @@ impl SharedSystemCache {
         Ok(stars)
     }
 
+    /// The stars of `record`'s system in `galaxy`, the galaxy `key` names: the cache's, or built
+    /// by the sim's [`stars_of`] and stored.
+    ///
+    /// The record is a range query's hit, so it needs no resolving; the entry is the one
+    /// [`get_or_generate`](Self::get_or_generate) stores for its ID, since both build a grid
+    /// system through [`SystemStars::generate`] and a feature member through its member record.
+    ///
+    /// # Panics
+    ///
+    /// - If `galaxy`'s seed is not the seed of `key`, as [`get_or_generate`](Self::get_or_generate).
+    /// - For a rogue planet, which has no stars, and for a member of the galactic centre, whose
+    ///   stars are not generated yet, as [`stars_of`]: an observed query asks for neither.
+    pub fn get_or_build(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+    ) -> Arc<SystemStars> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a system cache entry is of one galaxy, and this is another's"
+        );
+        let entry_key = (key, record.id());
+        if let Some(stars) = self.systems.get(&entry_key) {
+            return stars;
+        }
+        let stars = Arc::new(stars_of(galaxy, &NoInteriorCache, record));
+        // A system larger than the whole budget is handed back and still answered from.
+        let _ = self.systems.insert(entry_key, Arc::clone(&stars));
+        stars
+    }
+
+    /// One query's view of the cache, as the sim's [`StarsCache`] for the galaxy `key` names
+    /// (plan 12, P12.T6).
+    #[must_use]
+    pub fn handle(&self, key: GalaxyKey) -> SystemStarsHandle<'_> {
+        SystemStarsHandle { cache: self, key }
+    }
+
     /// The systems held, the bytes they are charged, and the hits, misses, evictions and refusals
     /// so far.
     #[must_use]
     pub fn counters(&self) -> LruCounters {
         self.systems.counters()
+    }
+}
+
+/// One observed query's view of the [`SharedSystemCache`]: plan 12's [`StarsCache`], over the
+/// cache the `SYSTEM` display shares (P12.T6).
+///
+/// Without it an observed 50 ly query builds every system's stars, 25 times the plain query's cost
+/// (P12.T3 as built: 240 ms against 9.45 ms cold); with it a repeated query builds none.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemStarsHandle<'a> {
+    cache: &'a SharedSystemCache,
+    key: GalaxyKey,
+}
+
+impl SystemStarsHandle<'_> {
+    /// Which galaxy's systems this handle lends.
+    #[must_use]
+    pub fn galaxy(&self) -> GalaxyKey {
+        self.key
+    }
+}
+
+impl StarsCache for SystemStarsHandle<'_> {
+    /// Lends the stars of `record`'s system, building them if the cache has not got them
+    /// ([`SharedSystemCache::get_or_build`]).
+    ///
+    /// `f` runs with no lock held, on stars this call holds an `Arc` of, so the cache may evict
+    /// anything meanwhile without touching what `f` sees.
+    ///
+    /// # Panics
+    ///
+    /// As [`SharedSystemCache::get_or_build`]: if `galaxy` is not the handle's, and for a rogue
+    /// planet or a member of the galactic centre, which the observed query never asks for.
+    fn with_stars<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        f: impl FnOnce(&SystemStars) -> R,
+    ) -> R {
+        f(&self.cache.get_or_build(self.key, galaxy, record))
     }
 }
 
@@ -380,6 +466,30 @@ mod tests {
             (6, 6, 6)
         );
         assert_eq!(none.counters().entries(), 0);
+    }
+
+    /// The observed query's handle lends what the cache stores for the system's ID, and stores
+    /// what it builds under it, so that the handle and `system_summary` share every entry.
+    #[test]
+    fn the_stars_handle_shares_the_entries_of_the_systems_ids() {
+        let cache = SharedSystemCache::new(64 << 20);
+        let [first, second] = systems(2)[..] else {
+            unreachable!("two systems asked for")
+        };
+        let summarised = cache.get_or_generate(key(), galaxy(), first).unwrap();
+        let record = resolve(galaxy(), first).unwrap();
+        let mut handle = cache.handle(key());
+        assert_eq!(handle.galaxy(), key());
+        let lent = handle.with_stars(galaxy(), &record, SystemStars::clone);
+        assert_eq!(lent, *summarised);
+        assert_eq!(cache.counters().hits(), 1);
+
+        let other = resolve(galaxy(), second).unwrap();
+        let built = handle.with_stars(galaxy(), &other, SystemStars::clone);
+        assert_eq!(built, SystemStars::generate(galaxy(), &other));
+        let stored = cache.get_or_generate(key(), galaxy(), second).unwrap();
+        assert_eq!(*stored, built);
+        assert_eq!((cache.counters().hits(), cache.counters().misses()), (2, 2));
     }
 
     /// A catalogue feature's member, one of each stellar band a feature near the Sun has, is

@@ -994,3 +994,77 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     lines, so the owner (T8) keeps one per universe and clones it. Nothing wires the store into
     `AppState` yet. Every sighting is kept in memory and on disk; T8 should decide whether a
     long-lived recurrent contact needs its sightings thinned.
+- **T6 as built (lane `obs12d`, 2026-09-30, at `GENERATOR_VERSION` 16).** No generated output moves
+  and no golden changes: the modes are new optional wire fields and a new kind, and a request or row
+  without them is byte for byte the one before. `PROTOCOL_VERSION` stays 2 (plan 04, design note
+  15).
+  - _Protocol._ The new `hyperion_protocol` module `observe.rs` holds `QueryModeDto`
+    (`{"type":"now"}` or `{"type":"observed","observer":…}`), `ObservedDto` (`emitted`,
+    `light_age_yr`, `apparent_position`, `curvature_error_ly`, `curvature_error_arcsec`),
+    `ResolveSystemRequest { universe, system, time, mode }` and
+    `ResolvedSystem { universe, time, record }`, whose `record` is a range row. `mode` is
+    `#[serde(default)]` on `SystemsInRangeRequest` and `ResolveSystemRequest` and written only
+    when observed; `SystemRecord.observed` is written only in observed mode.
+    `ResponseBody::ResolveSystem` holds a `Box<ResolvedSystem>`, as `SystemBodies` is boxed, since
+    a row would otherwise make every message a third larger (`clippy::large_enum_variant`).
+    `resolve_system` joins `REQUEST_KINDS` and the server's exhaustive matches (`kind`,
+    `is_large`: not large). No error code is new, so the client's `settledState` switch is
+    unchanged.
+  - _Deviation: the refusal of an ID._ An ID `resolve` refuses, or whose bits are no system ID, is
+    `unknown_system` naming `system`, not `bad_request` as the task's text says: plan 06 added
+    `ErrorCode::UnknownSystem` after this plan was written, for exactly this case, and
+    `system_summary`, `system_bodies` and `body_detail` answer it so.
+  - _Deviation: the answer's shape._ `resolve_system` answers
+    `ResolvedSystem { universe, time, record }`, `record` a range row, not the bare row Provides
+    describes: it echoes the request's universe and time, as `system_summary` does, and is boxed
+    in `ResponseBody` for `clippy::large_enum_variant`.
+  - _Deviation: the summary's mode is not built._ Provides puts `mode` on `SystemSummaryRequest`
+    and `observed` on the summary; the task's text and files do not, so neither is on the wire yet
+    (`observe::summary_observed` is ready for it). A readout of one system as observed has
+    `resolve_system`'s row, and the brief then from a range query with `include_stellar`, but not
+    the stars as observed; no task owns it yet (for the owner: T11, whose readout shows
+    `AS OBSERVED`, or a T6 follow-up; pending).
+  - _Server._ `RangeRequest` checks `mode` after `limit`: an observer that is not a canonical
+    position inside the root cube is `bad_request` naming `mode`, as `refused_query` names the
+    sim's `ObserverOutsideRootCube`. Only the query's time is held to ±H; emitted times before −H
+    are reported as they are. The handler runs plan 03's `range_query` unchanged and then reads
+    each row through `observe_hit` over the system cache, lent as the sim's `StarsCache` by
+    `SharedSystemCache::handle(key)` (`compute::SystemStarsHandle`; a miss builds
+    `observe::stars_of` and stores it under the ID, `SharedSystemCache::get_or_build`, so it shares
+    every entry with `system_summary`). A rogue planet, and a centre member, which has no stars
+    generated, are read on their line alone, as `range_query_observed` reads a rogue planet. The
+    rows are built in the query's job up to `BRIEF_CHUNK_ROWS` and in chunks of that many beyond
+    it, as the briefs are; `range_query_observed` is not called because it observes every row in
+    one call, and a 20,000-row answer whose stars are cold (0.26 ms a system, T3's bench) would
+    hold one worker for about 5 s. The rows are `range_query_observed`'s, bit for bit (unit test
+    `observed_rows_do_not_depend_on_chunks_or_the_cache`, whole and chunked, over an empty, a warm
+    and no cache). With `include_stellar` in observed mode a row's `stellar` is its primary's
+    brief at the emitted time (`ObservedSystem::brief_then`, from the full system), absent when it
+    was not yet born then. `resolve_system` is one interactive job: `resolve` (refusals as above);
+    a grid system placed by `position_at` at `epoch_velocity`, bit for bit the range row, and any
+    other on its own `Drift::of_record` line (plan 08's draw, which `position_at` takes, panics for
+    a record without a density component); a hit at distance zero; and in observed mode the same
+    reading as a range row. Its row has no brief, since the request has no `include_stellar`.
+  - _Centre members._ `centre09c` had not landed in this tree. The central black hole is refused
+    in both modes as `unknown_system` naming `system` ("cannot be placed yet", with
+    `TraceMotionError`'s message), as
+    `system_summary` refuses it, never a panic (`now` would otherwise have panicked in plan 08's
+    draw); the server's range query places no centre member, and should a source ever hand it one
+    observed, the answer is `bad_request` naming `mode`. When P09.T28 traces the centre, the
+    member is placed and read on its orbit with no brief, and
+    `the_central_black_hole_is_refused_until_its_orbit_is_built` changes with it.
+  - _Tests._ Wire forms in `hyperion-protocol` (both modes, the observed row, the request and
+    response of `resolve_system`, a plan 04 request read as `now`); `convert::observe` unit tests
+    (the observer's checks and order, the DTO's exactness, the refusal);
+    `compute::systems::the_stars_handle_shares_the_entries_of_the_systems_ids`; and
+    `tests/observed.rs` over a socket: one 12 ly sphere asked in both modes has the same IDs,
+    census and present rows, `observed` only in the observed answer, each the sim's
+    `range_query_observed` row with its brief then, and a repeat builds no star; an observer
+    outside the cube or off the grid is `bad_request` naming `mode` for both kinds; `resolve_system`
+    gives the range row in either mode; an ID naming no system is `unknown_system`; the black hole
+    as above; and, slow, `resolve_system_places_a_feature_member_on_its_own_line` (a band-C member
+    of the first feature within 3,000 ly of the Sun, placed on its line and observed as
+    `observe_hit` reads it with its member record's stars).
+- **P12.T6: an observed row's `age_myr` and `velocity_km_s` are the present's**, as its `position`
+  is (Design note 4 keeps the row); T11's readout must show the age then as an em dash or derive it
+  from `emitted` (provisional; ruling deferred).

@@ -235,6 +235,7 @@ fn requests_naming(universe: &UniverseIdHex) -> Vec<RequestBody> {
             min_layer: MassLayer::A,
             limit: 1_000,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }),
         // The universe is checked before any other field (design note 24), so a request wrong in
         // every other way too is still refused for the universe.
@@ -252,6 +253,7 @@ fn requests_naming(universe: &UniverseIdHex) -> Vec<RequestBody> {
             min_layer: MassLayer::A,
             limit: 0,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }),
         RequestBody::DensityMap(DensityMapRequest {
             universe: universe.clone(),

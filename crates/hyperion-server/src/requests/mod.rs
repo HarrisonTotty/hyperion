@@ -12,9 +12,11 @@
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
-//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], and the system's in [`system`].
+//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], and
+//! plan 12's `resolve_system` in [`observe`].
 
 mod galaxy;
+mod observe;
 mod system;
 mod universe;
 
@@ -57,8 +59,8 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
 /// The server's handlers: every request kind, and the code that answers it.
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
-/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and plan 07's
-/// `extinction_map` and `extinction` (P07.T10). A later plan's kind that
+/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), plan 07's
+/// `extinction_map` and `extinction` (P07.T10), and plan 12's `resolve_system` (P12.T6). A later plan's kind that
 /// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
@@ -86,6 +88,9 @@ impl Handler for Handlers {
                 Box::pin(galaxy::extinction_map(state, request, token))
             }
             RequestBody::Extinction(request) => Box::pin(galaxy::extinction(state, request, token)),
+            RequestBody::ResolveSystem(request) => {
+                Box::pin(observe::resolve_system(state, request, token))
+            }
         }
     }
 }
@@ -116,6 +121,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::BodyEvents(_) => "body_events",
         RequestBody::ExtinctionMap(_) => "extinction_map",
         RequestBody::Extinction(_) => "extinction",
+        RequestBody::ResolveSystem(_) => "resolve_system",
     }
 }
 
@@ -125,7 +131,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
 /// record cannot. An extinction map can, as a density map can; the extinction to at most 64
-/// targets cannot (plan 07, P07.T10).
+/// targets cannot (plan 07, P07.T10), and neither can one system's row (plan 12, P12.T6).
 fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
@@ -139,7 +145,8 @@ fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::GalaxyParameters(_)
         | ResponseBody::SystemSummary(_)
         | ResponseBody::BodyDetail(_)
-        | ResponseBody::Extinction(_) => false,
+        | ResponseBody::Extinction(_)
+        | ResponseBody::ResolveSystem(_) => false,
     }
 }
 
@@ -703,6 +710,7 @@ mod tests {
                 min_layer: MassLayer::A,
                 limit: 5_000,
                 include_stellar: false,
+                mode: hyperion_protocol::QueryModeDto::Now,
             }),
             RequestBody::SystemSummary(SystemSummaryRequest {
                 universe: universe.clone(),
@@ -734,12 +742,18 @@ mod tests {
                 bits: 8,
             }),
             RequestBody::Extinction(ExtinctionRequest {
-                universe,
+                universe: universe.clone(),
                 origin: GalacticPosition::default(),
                 time: UniverseTime::default(),
                 targets: vec![ExtinctionTarget::System {
                     id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 }],
+            }),
+            RequestBody::ResolveSystem(hyperion_protocol::ResolveSystemRequest {
+                universe,
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
+                mode: hyperion_protocol::QueryModeDto::Now,
             }),
         ]
     }
