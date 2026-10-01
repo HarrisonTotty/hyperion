@@ -1393,6 +1393,18 @@ It reserves, so that later plans need not:
   `compile_error!` message and the unflagged one built; a scratch `f32x4_relaxed_madd` call in the
   surface crate failed `cargo clippy --target wasm32-unknown-unknown -p hyperion-surface -- -D
 warnings` with "use of a disallowed method", and was reverted.
+- **Deviations in T6, as built.** The sources were re-checked on 2026-09-30: `f64::max`'s
+  documentation in rustc 1.98.1's `library/core/src/num/f64.rs` ("either input may be returned
+  non-deterministically" for inputs that compare equal), `f64::minimum` still unstable under issue
+  91079, `is_sign_positive`'s note that a NaN's sign is not portable, the `algebraic_*` quotation
+  (T1), GCC 13's release notes (`-Ofast`, `-ffast-math` and `-funsafe-math-optimizations` "will no
+  longer add startup code to alter the floating-point environment when producing a shared object")
+  and llvm-project pull request 80475 ("Disable FTZ/DAZ when compiling shared libraries by
+  default", with `-mdaz-ftz`). The claim that rustc's constant folding orders −0 below +0 while
+  the x86-64 instruction returns the second operand is carried from the plan's research, not
+  re-run. Beyond the files listed, `select_checks.py`'s gate reasons now say "a determinism crate
+  changed", and the auditor is pointed at the new section for base and the surface crate. No
+  review agents were run on this documentation-only task.
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so
