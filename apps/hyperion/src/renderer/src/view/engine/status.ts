@@ -29,7 +29,9 @@ export type GraphicsFault =
       readonly reason: GPUDeviceLostReason;
       readonly message: string;
     }
-  | { readonly kind: "gpu-process-gone"; readonly count: number };
+  | { readonly kind: "gpu-process-gone"; readonly count: number }
+  /** A GLSL shader reached the engine and was refused, a bug the console reports (Design note 12). */
+  | { readonly kind: "shader-refused"; readonly effectName: string };
 
 /** The graphics' standing condition. */
 export type GraphicsCondition =
@@ -105,6 +107,13 @@ export type GraphicsEvent =
   | { readonly kind: "adapter-withdrawn" }
   /** The main process reported a GPU-process crash. */
   | { readonly kind: "gpu-process-gone"; readonly count: number }
+  /** The WGSL-only guard refused a GLSL effect (R01.T8.b). */
+  | { readonly kind: "shader-refused"; readonly effectName: string }
+  /**
+   * The engine made its device and read its capabilities, in which a feature the harness withheld
+   * reads as absent (R01 Design note 7). Sent at each creation, a rebuild's included.
+   */
+  | { readonly kind: "device-capabilities"; readonly capabilities: GpuCapabilities }
   /** The adapter's rounding probe answered (R01.T8.j). */
   | {
       readonly kind: "target-rounding";
@@ -212,6 +221,21 @@ function afterProcessGone(status: GraphicsStatus, count: number): GraphicsStatus
 }
 
 /**
+ * The status after a refused shader: its fault, unless a fault already stands.
+ *
+ * @remarks
+ * The first refusal names the effect; the stub compiler's own refusal of the same effect follows it
+ * unnamed, and must not replace it. A device loss or a crashed GPU process outranks a refusal,
+ * since the operator can act on those.
+ */
+function afterShaderRefused(status: GraphicsStatus, effectName: string): GraphicsStatus {
+  if (settled(status.condition) || status.fault !== null) {
+    return status;
+  }
+  return { ...status, fault: { kind: "shader-refused", effectName } };
+}
+
+/**
  * The status after `event`.
  *
  * @remarks
@@ -250,6 +274,18 @@ export function reduceGraphicsStatus(status: GraphicsStatus, event: GraphicsEven
     case "gpu-process-gone":
       next = afterProcessGone(status, event.count);
       break;
+    case "device-capabilities":
+      next = settled(status.condition)
+        ? status
+        : {
+            ...status,
+            capabilities: event.capabilities,
+            timer: timerOf(event.capabilities, status.gpuTiming),
+          };
+      break;
+    case "shader-refused":
+      next = afterShaderRefused(status, event.effectName);
+      break;
     case "target-rounding":
       next = { ...status, targetRounding: event.rounding };
       break;
@@ -276,6 +312,8 @@ export const GRAPHICS_WORDS = {
   noAdapter: "GRAPHICS NO ADAPTER: views unavailable",
   deviceLost: "GRAPHICS DEVICE LOST: re-creating",
   processRestarted: "GRAPHICS PROCESS RESTARTED",
+  shaderRefused: (effectName: string): string =>
+    `GRAPHICS SHADER REFUSED: ${effectName} is not WGSL`,
   safeMode: "GRAPHICS SAFE MODE: views unavailable, relaunch to retry",
   disabledByLosses: (losses: number): string =>
     `GRAPHICS DISABLED: ${losses} device losses, relaunch to retry`,
@@ -290,6 +328,9 @@ function faultAnnunciation(fault: GraphicsFault): GraphicsAnnunciation {
       break;
     case "gpu-process-gone":
       text = GRAPHICS_WORDS.processRestarted;
+      break;
+    case "shader-refused":
+      text = GRAPHICS_WORDS.shaderRefused(fault.effectName);
       break;
   }
   return { text, standing: "fault" };

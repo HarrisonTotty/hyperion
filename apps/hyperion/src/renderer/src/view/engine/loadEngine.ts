@@ -5,10 +5,14 @@
  * This is the one place that imports the Babylon implementation, by a dynamic `import()`, which
  * splits it into its own chunk; the renderer build names that chunk `babylon`, and
  * `scripts/checkChunks.mjs` fails if the entry chunk holds any Babylon code (R01 Design note 14).
+ *
+ * The engine it returns survives a lost device: it re-creates the Babylon engine on a fresh
+ * adapter through the same import, and its views with it (`ResilientEngine`, Design note 9).
  */
 
 import type { AdapterOutcome } from "./platform";
-import type { GraphicsStatusStore } from "./status";
+import { ResilientEngine } from "./resilientEngine";
+import { type GraphicsStatusStore, navigatorGpu } from "./status";
 import type { LoadEngineOptions, RenderEngine } from "./types";
 
 /**
@@ -25,5 +29,8 @@ export async function loadRenderEngine(
 ): Promise<RenderEngine> {
   const importEngine = options.importEngine ?? (() => import("./babylon/engine"));
   const { createBabylonEngine } = await importEngine();
-  return createBabylonEngine(outcome, status, options.overrides);
+  const create = (fresh: AdapterOutcome & { readonly kind: "adapter" }): Promise<RenderEngine> =>
+    createBabylonEngine(fresh, status, options.overrides);
+  const engine = await create(outcome);
+  return new ResilientEngine(engine, status, options.gpu ?? navigatorGpu(), create);
 }
