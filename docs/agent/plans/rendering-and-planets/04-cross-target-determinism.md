@@ -1556,3 +1556,16 @@ warnings` with "use of a disallowed method", and was reverted.
     `file://` URL the user can read (the experiment read `/etc/hostname`). It runs only our own
     bundled code; the custom-scheme route (option 3), which would end this, stays open for a later
     task if the renderer ever loads third-party script.
+- **Deviations in T10.b, as built (2026-09-30).** `wasm-bindgen = "=0.2.129"` joins
+  `[workspace.dependencies]`, pinned to the version `wasm-bindgen-test` pins. The export is
+  `generatorVersion` in JavaScript (`js_name`), from a private `mod wasm` compiled on the browser
+  target only. `gen-surface` builds the crate's library for `wasm32-unknown-unknown` in release
+  (respecting `CARGO_TARGET_DIR`), empties `generated/surface/` and runs `wasm-bindgen --target web` into it (the module is 18.6 kB), behind
+  a new preflight group, `bindgen` (the target and `wasm-bindgen --version` at `Cargo.lock`'s
+  version). The hooks' pnpm entries call `just _with-surface pnpm …`, a private recipe that makes
+  the module first. `.oxlintrc.json` needed no entry: its `**/generated/**` pattern already
+  ignores the directory; `.gitignore` and `.prettierignore` gained it. The crate's docs and
+  `rust-dev.md`'s boundary entry name the browser-only `wasm-bindgen` dependency. Checked:
+  `cargo tree -p hyperion-sim --target wasm32-wasip1 -e normal` lists no `wasm-bindgen`;
+  `just gen-surface` leaves `git status --porcelain` unchanged; the surface crate's test passes
+  natively, under wasip1 and on the browser target, and `_browser-clippy` covers `src/wasm.rs`.

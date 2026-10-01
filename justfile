@@ -29,7 +29,7 @@ server *args:
 # `--ozone-platform=x11` here, because the client's own relaunch through XWayland would end
 # `electron-vite dev` and leave the new window on a dead dev server (R01 Design note 3).
 # Run the bridge client (Electron) with hot reload, e.g. `just client --port 9000`.
-client *args:
+client *args: gen-surface
     #!/usr/bin/env bash
     set -euo pipefail
     x11=()
@@ -46,12 +46,12 @@ check-chunks:
     node apps/hyperion/scripts/checkChunks.mjs
 
 # Typecheck Rust and TypeScript.
-check:
+check: gen-surface
     cargo check --workspace --all-targets
     pnpm typecheck
 
 # Lint Rust (clippy) and TypeScript (oxlint, type-aware).
-lint:
+lint: gen-surface
     cargo clippy --workspace --all-targets -- -D warnings
     pnpm lint
 
@@ -85,7 +85,7 @@ _locked +cmd:
     "$@"
 
 # Run all tests (built first, then run under the heavy-test lock).
-test:
+test: gen-surface
     cargo test --workspace --no-run
     just _locked bash -c 'cargo test --workspace && pnpm test'
 
@@ -130,7 +130,9 @@ wasm-tools:
     command -v cargo-nextest >/dev/null || cargo install cargo-nextest --locked
 
 # Fail, naming `just wasm-tools`, unless each tool group named is present. `wasip1`: the target,
-# wasmtime (or `WASMTIME` set to it) and cargo-nextest.
+# wasmtime (or `WASMTIME` set to it) and cargo-nextest. `browser`: the target and
+# wasm-bindgen-test's runner; `bindgen`: the target and `wasm-bindgen`, each at `Cargo.lock`'s
+# version.
 [positional-arguments]
 _wasm-preflight +tools:
     #!/usr/bin/env bash
@@ -155,6 +157,13 @@ _wasm-preflight +tools:
                 runner="$(wasm-bindgen-test-runner --version 2>/dev/null || true)"
                 [[ "$runner" == "wasm-bindgen-test-runner {{ wasm_bindgen_version }}" ]] \
                     || missing "wasm-bindgen-test-runner {{ wasm_bindgen_version }} (found '${runner:-none}')"
+                ;;
+            bindgen)
+                grep -qx wasm32-unknown-unknown <<<"$installed" \
+                    || missing "the rustup target wasm32-unknown-unknown"
+                cli="$(wasm-bindgen --version 2>/dev/null || true)"
+                [[ "$cli" == "wasm-bindgen {{ wasm_bindgen_version }}" ]] \
+                    || missing "wasm-bindgen {{ wasm_bindgen_version }} (found '${cli:-none}')"
                 ;;
             *)
                 echo "error: _wasm-preflight: unknown tool group $tool" >&2
@@ -227,6 +236,28 @@ test-wasm-slow: (_wasm-preflight "wasip1")
     just _wasip1 {{ wasip1_nextest }} --cargo-profile slow-test --profile slow --run-ignored only --no-run
     just _locked just _wasip1 {{ wasip1_nextest }} --cargo-profile slow-test --profile slow --run-ignored only
     just _locked just _wasip1 test --target wasm32-wasip1 {{ wasip1_crates }} --doc
+
+# The client's surface module: the surface crate built for wasm32-unknown-unknown in release, then
+# `wasm-bindgen --target web` into the renderer's `generated/surface/`, which git, Prettier and
+# oxlint ignore (R04.T10.b). `check`, `lint`, `test`, `client` and `build` make it first, since the
+# client's TypeScript needs its `.d.ts`, and so do the git hooks that run pnpm (`_with-surface`).
+# Build the surface crate's WebAssembly module and its glue for the client.
+gen-surface: (_wasm-preflight "bindgen")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ justfile_directory() }}"
+    cargo build -q -p hyperion-surface --lib --target wasm32-unknown-unknown --release
+    target="${CARGO_TARGET_DIR:-target}"
+    out=apps/hyperion/src/renderer/src/generated/surface
+    rm -rf "$out"
+    wasm-bindgen --target web --out-dir "$out" \
+        "$target/wasm32-unknown-unknown/release/hyperion_surface.wasm"
+
+# Run a command once the surface module is built: the git hooks' pnpm entries, since a fresh
+# worktree has no generated module and the client's typecheck, lint and tests need it.
+[positional-arguments]
+_with-surface +cmd: gen-surface
+    "$@"
 
 # Both the fast and the slow WebAssembly checks.
 test-wasm: test-wasm-fast test-wasm-slow
@@ -320,7 +351,7 @@ gen-protocol-check:
         || { echo "protocol bindings are stale: run 'just gen-protocol'" >&2; exit 1; }
 
 # Build release artifacts.
-build:
+build: gen-surface
     cargo build --workspace --release
     pnpm build
 
