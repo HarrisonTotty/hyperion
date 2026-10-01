@@ -11,9 +11,12 @@ publish.workspace = true
 bench = false
 
 [dependencies]
-# The foundation beneath the sim (`math`, `units`, `version`), re-exported at their old paths; it
-# brings the pinned `libm`, the only external runtime dependency.
+# The foundation beneath the sim (`math`, `units`, `version`, `rng`), re-exported at their old
+# paths; it brings the pinned `libm`, the only external runtime dependency.
 hyperion-base.workspace = true
+# The shared height function; the sim reads its tag registry now, to assert the three registries
+# disjoint, and its height function once the flight model collides with terrain.
+hyperion-surface.workspace = true
 
 [features]
 # Test helpers (`events::testing`, `planetary::testing`, `stellar::testing`) for this crate's tests

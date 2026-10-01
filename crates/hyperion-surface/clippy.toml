@@ -1,7 +1,8 @@
-# Clippy configuration for `hyperion-base` alone, modelled on the sim's. Clippy takes the nearest
-# `clippy.toml` and does not merge, so this file shadows the workspace root's completely and has to
-# repeat everything this crate needs; `crates/hyperion-testkit/tests/clippy_bans.rs` holds it to
-# the shared ban list. Its float-bit bans are why it must not fall back to the root's file.
+# Clippy configuration for `hyperion-surface` alone, modelled on the sim's. Clippy takes the
+# nearest `clippy.toml` and does not merge, so this file shadows the workspace root's completely and
+# has to repeat everything this crate needs; `crates/hyperion-testkit/tests/clippy_bans.rs` holds it
+# to the shared ban list. It must never fall back to the root's file, which allows reading float
+# bits: that ban is exactly what stops a noise function hashing a float.
 
 # Author names, journal abbreviations and supernova types that `doc_markdown` would otherwise
 # take for code; ".." keeps Clippy's defaults.

@@ -101,7 +101,8 @@ matching files, and they override habits from other codebases. In addition:
 
 - Build the files, names and tests the task lists. Keep the names in Provides. If one must change,
   record why in step 7.
-- **Simulation code** (`crates/hyperion-sim`, `crates/hyperion-testkit`): load the
+- **Simulation code** (`crates/hyperion-sim`, `crates/hyperion-base`,
+  `crates/hyperion-surface`, `crates/hyperion-testkit`): load the
   `sim-determinism` skill before writing generators, random draws, or anything a golden file pins.
 - **Operator-facing UI** (`apps/hyperion/src/renderer`): load the `console-ux` skill before writing
   components, CSS, displayed strings or value formatting.

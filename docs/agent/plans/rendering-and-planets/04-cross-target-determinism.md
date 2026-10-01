@@ -1377,6 +1377,34 @@ It reserves, so that later plans need not:
   rustdoc does not check the `E0080` code). The disjointness `const` covers base's and the sim's
   registries until T5. **Pending:** `just bench -- rng` and `-- samplers` before and after (never a
   quiet machine), and `just test-wasm` (no wasmtime here; T7).
+- **Deviations in T5, as built.** `generator_version()` is a `const fn` returning
+  `hyperion_base::GENERATOR_VERSION.get()`; `the_generator_version_is_the_sims` sits in the sim's
+  crate-root tests. The crate docs describe the height function's input as a direction in the
+  body-fixed frame, with a detail level and a caller-owned cache, as R05's and R09's signatures
+  take it (not "a position in metres"). The surface registry is empty; the sim's `const`
+  assertion and `registries_are_disjoint` cover base, surface and sim in that order, and
+  `domain_tags_are_pinned` prints the three, its bytes unchanged. `no_target_feature_attributes`
+  scans every `.rs` file under the three crate directories (tests included) with whitespace
+  removed, so a split attribute is seen; it allows only the exact guard, rejects any
+  `target_feature(enable …)` (`simd128` included) and any `target_feature = "…relaxed…"`, and
+  does not skip comments. `relaxed_intrinsics_are_banned` also checks `allow-invalid = true` on
+  each of the 20 entries. By hand, 2026-09-30, after `rustup target add` of both wasm targets: the
+  flagged `wasm32-wasip1` build of the surface crate (and of base) failed on base's
+  `compile_error!` message and the unflagged one built; a scratch `f32x4_relaxed_madd` call in the
+  surface crate failed `cargo clippy --target wasm32-unknown-unknown -p hyperion-surface -- -D
+warnings` with "use of a disallowed method", and was reverted.
+- **Deviations in T6, as built.** The sources were re-checked on 2026-09-30: `f64::max`'s
+  documentation in rustc 1.98.1's `library/core/src/num/f64.rs` ("either input may be returned
+  non-deterministically" for inputs that compare equal), `f64::minimum` still unstable under issue
+  91079, `is_sign_positive`'s note that a NaN's sign is not portable, the `algebraic_*` quotation
+  (T1), GCC 13's release notes (`-Ofast`, `-ffast-math` and `-funsafe-math-optimizations` "will no
+  longer add startup code to alter the floating-point environment when producing a shared object")
+  and llvm-project pull request 80475 ("Disable FTZ/DAZ when compiling shared libraries by
+  default", with `-mdaz-ftz`). The claim that rustc's constant folding orders −0 below +0 while
+  the x86-64 instruction returns the second operand is carried from the plan's research, not
+  re-run. Beyond the files listed, `select_checks.py`'s gate reasons now say "a determinism crate
+  changed", and the auditor is pointed at the new section for base and the surface crate. No
+  review agents were run on this documentation-only task.
 - **Deviations in T7.c (the task-ID part), as built.** Landed first, in its own commit; the wasm
   timing and wiring of T7.c are still to do. The ID's prefix picks the plan set (`P` →
   `galaxy-generation/`, `R` → `rendering-and-planets/`, `PREFIX_SETS` in `plan_task.py`), so
