@@ -1274,15 +1274,18 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   (`null` for a response with no bulk, which must then have had no chunks); its outcome,
   `BulkOutcome<K>`, is `{ ok, response, chunks }`. Each chunk is a `Uint8Array` view of its
   frame's payload over the frame's own `ArrayBuffer`, neither copied nor parsed.
-  `parseBinaryFrameHeader` also refuses a frame over 262,144 bytes, a payload length that
-  disagrees with the frame's, and an index not below the count; a refused frame is reported by the
+  `requestBulk` and `handleBinaryFrame` are `RequestClient`'s methods, in `requests.ts`; `bulk.ts`
+  holds the parser, its constants and `BulkAssembler`, all exported, so R06.T12 can drive the
+  assembler directly or through `requestBulk` and `FakeWebSocket.serverSendsBinary`.
+  `parseBinaryFrameHeader` also refuses a frame over 262,144 bytes, a reserved byte other than 0, a
+  payload length that disagrees with the frame's, and an index not below the count; a refused frame is reported by the
   link through `console.error` and closes nothing (`handleBinaryFrame` returns
   `BinaryFrameReceipt`). A chunk out of order, or stating another count than the request's earlier
   ones, fails its request as `internal` at once and sends `cancel`, so that the server stops
   streaming; the manifest is checked at the terminal response for the count of chunks, the count
   the chunks stated, and the bytes. A chunk for a request that asked for no bulk, has ended or was
-  cancelled is dropped. `BulkAssembler` stays internal to the package; the header parser, its
-  constants and the outcome types are exported. The internal `startRequest` now takes an options
+  cancelled is dropped silently. A `manifestOf` that throws fails the request as `internal` rather
+  than leave it unsettled. The internal `startRequest` now takes an options
   object (`onAnswer`, `onLateAnswer`, `bulk`). The app's `FakeWebSocket` gains `binaryType` and
   `serverSendsBinary`, which delivers a `Blob` unless the client asked for `arraybuffer`, so the
   connection test proves the setting; `test/binaryFrames.ts` builds frames as the server's
