@@ -1255,10 +1255,10 @@ It reserves, so that later plans need not:
 
 ## Risks and open points
 
-- **The owner's CSP ruling gates T10.c**, and through it R05's height workers. Research found that
+- **The owner's CSP ruling gated T10.c**, and through it R05's height workers. Research found that
   workers compile under today's policy (Design note 16), so no option leaves the client without
-  WebAssembly; the risk is delay, not feasibility. If the owner picks option 3, the custom scheme
-  becomes its own task before T10.c.
+  WebAssembly; the risk was delay, not feasibility. Ruled 2026-09-30: option 2, change nothing
+  (the T10.a record below).
 - **Two more sign-offs gate T3.** Plan 14's owner accepts the amendment (T3.a) before the wire
   changes (T3.c), which must land before P14.T23; the guide's owner signs off the `DETAIL SEED`
   rows (T3.b), and the client is built to the draft meanwhile.
@@ -1534,3 +1534,25 @@ warnings` with "use of a disallowed method", and was reverted.
   under wasip1 (nextest) and on the browser target ("math/functions.golden (embedded) differs at
   line 3"). These runs used a side target directory and, for the browser suite, the recipe without
   its lock step, since the slow wasip1 suite held the heavy-test lock for its own timing.
+- **T10.a, the CSP ruling (2026-09-30): option 2, change nothing.** The owner authorised this lane
+  to make whatever change to the Content Security Policy was necessary; a research agent then
+  re-ran Design note 16's experiment on the repo's Electron 44.4.3 (sandboxed `BrowserWindow`,
+  today's meta-tag policy, `file://` and an HTTP server standing in for Vite's dev server): a
+  same-origin module worker created with `new Worker(new URL(…), { type: "module" })` has no policy
+  of its own and compiles WebAssembly there, by `WebAssembly.instantiate` and by
+  `compileStreaming`, while the page's own thread is refused with a `CompileError` citing
+  `script-src 'self'`; a `blob:` worker is refused at creation by `script-src 'self'`; and the
+  worker has no `require` or `process`. So no change is necessary, and option 2 is the ruling,
+  recorded here and in the brainstorm's "Awaiting the owner" item:
+  - `apps/hyperion/src/renderer/index.html` keeps its policy unchanged, and
+    `.claude/rules/typescript-dev.md`'s rule stands.
+  - Workers stay same-origin module files, created as above; no `blob:` or inline worker.
+  - The render thread never compiles WebAssembly. Two guards hold that: the loader reports a
+    `CompileError` that names the CSP as a fault of its own (`csp-refused`), so a module loaded
+    on the wrong thread, or a future policy on worker scripts, says what happened rather than
+    failing as a corrupt module; and a source test fails if any renderer file other than a
+    `*.worker.ts` (or a Node-side test) imports `generated/surface/` (T10.c).
+  - **Accepted exposure:** a worker loaded from `file://` has no policy, so it can `fetch` any
+    `file://` URL the user can read (the experiment read `/etc/hostname`). It runs only our own
+    bundled code; the custom-scheme route (option 3), which would end this, stays open for a later
+    task if the renderer ever loads third-party script.

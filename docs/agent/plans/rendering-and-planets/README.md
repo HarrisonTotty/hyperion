@@ -356,7 +356,9 @@ and the code built meanwhile is confined to a label, a constant or a gated task.
   page's own thread needs `'wasm-unsafe-eval'`. Three options go to the owner: add
   `'wasm-unsafe-eval'` (the brainstorm's lean), change nothing, or serve through a custom scheme
   with a header CSP on workers. R04.T10.c, and through it R05's height workers, wait on the ruling.
-  R04.T10.b, the module's build, does not wait.
+  R04.T10.b, the module's build, does not wait. **Ruled 2026-09-30: change nothing** (option 2,
+  decided by R04's lane on the owner's authority, after the experiment was re-run on Electron
+  44.4.3; recorded in R04's Risks and the brainstorm).
 - **The UX guide drafts.** R02.T2's nine items of "What the guide must gain", with R01.T5.c's
   `GRAPHICS` nomenclature absorbed (`GRAPHICS NOT AVAILABLE`, `GRAPHICS NO ADAPTER`,
   `GRAPHICS DISABLED`'s two causes, `DEFAULT`, `ABSENT`, and a Layout sentence extending the
