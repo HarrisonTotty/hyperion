@@ -1321,3 +1321,41 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   two ends, a galactic pose carried across its light-year cells with its offset kept below 1 ly;
   `CraftPose` is `SceneKinematics`, and R11 tells an extrapolated path by `plannedPath === null`; a craft's wire attitude (x, y, z, w) becomes R02's `Quaternion`. Hand-built
   fixtures are in `src/renderer/src/test/sceneFixture.ts`, on plan 14's shared wire fixture.
+- **Deviations in T13, as built.** `apparentPosition(track, observer, time, previousTau)` takes a
+  `SystemTrack` (`positionAt(time)`, `null` when absent) and `previousTau` as a `Span` or `null`,
+  and returns `seen` (emitted, light time, corrections, residual, geometric position then, apparent
+  position), `not_present_then` or `not_converged`. The sim's rounding is ported in
+  `lib/scene/lightTime.ts`: JavaScript has no fused multiply-add, so `floor_nanos` reads the exact
+  rounding error of the product by 10⁹ with Dekker's two-product, and the test pins a distance where
+  a naive floor gives a nanosecond more; spans and times stay whole seconds and nanoseconds.
+  `fractionOfPeriod` and `reduceToHalfTurn` are not exported: the tracks go through `positionAt`
+  and `composePosition`, which already reduce by them. `sceneAt(model, observer, time, previous)`
+  takes the previous `SceneFrame` (its local body is the current one, its light times start the
+  iteration warm) rather than `previousLocal`, and returns `null` when the scene has no system;
+  each body's and star's `geometricM` is its position at the frame's time (what R02 draws for the
+  local body), beside `apparentM`, `emitted` and `lightTime`. `shipObserver(model, time)` gives the
+  stand-in as the observer, in the system frame or carried with its body, `null` in the galactic
+  frame. Hill radii are computed in the wire adapter (`SceneSystem.hillRadiiM`) from the wire's
+  kilograms and μ, as plan 14's `hill_radius` does with `Math.cbrt` for `libm`'s. Bodies are placed
+  by the `SYSTEM` display's `layoutBodies` (`displays/system/bodyMap.ts`), so `lib/scene` imports
+  from `displays/`. The local body's candidates are the planets, dwarf planets and moons with a Hill
+  radius, each with its parent body or star (`null` for a pair or the barycentre). **The fixture.**
+  R03.T3's golden holds what is seen, not the elements a client propagates, and its galaxy, the
+  Milky Way fixture at its seed, is not one a server universe builds (a universe draws its
+  parameters from its seed). A server unit test, `crates/hyperion-server/src/convert/scene_fixture.rs`,
+  therefore writes `crates/hyperion-server/tests/golden/scene_systems.golden`: the `system_bodies`
+  frames of the three systems at both times, at `mass_and_orbit`, through the handler's own
+  converters on that galaxy. A belt's members, not yet on the wire, and rings, which have no single
+  position, are not compared: 140 vectors are, stars among them (at least 20, asserted). Two unbinding times in the frames
+  lie some 6 Gyr before the epoch, beyond 2⁵³ s, which plan 14's adapter refuses; the test holds
+  them to a safe integer and the issue is reported as galaxy work. **The measurement**
+  (2026-09-30): the largest discrepancy is 2.0 × 10⁻¹³ Σ (1.03 m, a moon of `close_binary` a
+  century on); it and the next (6.8 × 10⁻¹⁵ Σ, a moon of `solar_like`) come from moons whose orbits
+  evolve tidally with age while their `valid_until` is `None`, so the sim evaluates the elements at
+  the emitted time and the wire states them at the record's (about 8 m of semi-major axis a
+  century; a finding for plan 14). Every other vector agrees within 5 × 10⁻¹⁵ Σ, which bears out
+  Design note 7's 10⁻¹⁴. Emitted times agree within 2 ns, Hill radii within 3 × 10⁻¹⁶. The vectors
+  are pinned at the larger of Design note 7's bound and min(10 × 2.0 × 10⁻¹³, 10⁻¹²) Σ, the
+  Verification's ceiling. The test of a far body and its moons widens |Δv_moon| τ by the giant's and
+  the observer's motion across the difference of the two light times, without which a moon's
+  measured offset exceeds the plan's bound by 0.3%.
