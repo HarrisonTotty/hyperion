@@ -121,6 +121,12 @@ import {
   UNIFORM_BUFFER_USAGE,
   viewDimensionOf,
 } from "./resources";
+import {
+  assertSplatInputs,
+  assertSplatSupported,
+  encodeSplat,
+  pointSplatPipelineDescriptor,
+} from "./pointSplat";
 import { PassTimer } from "./timing";
 import {
   assertBufferReadable,
@@ -539,8 +545,46 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
     this.#writers.copied(packed, cube);
   }
 
-  createPointSplat(_spec: PointSplatSpec): PointSplatHandle {
-    throw notBuilt("createPointSplat", "R01.T8.h");
+  /**
+   * R06's additive point splat into an `rgba32float` bake target.
+   *
+   * @throws {@link Float32BlendUnavailable} without `float32-blendable`.
+   */
+  createPointSplat(spec: PointSplatSpec): PointSplatHandle {
+    this.#assertLive();
+    assertSplatSupported(this.capabilities);
+    const vertex = this.#device.createShaderModule({
+      label: `${spec.name} vertex`,
+      code: spec.vertexWgsl,
+    });
+    const fragment = this.#device.createShaderModule({
+      label: `${spec.name} fragment`,
+      code: spec.fragmentWgsl,
+    });
+    const pipeline = this.#device.createRenderPipeline(
+      pointSplatPipelineDescriptor(spec, vertex, fragment),
+    );
+    let disposed = false;
+    return {
+      draw: (target: TextureHandle, points: BufferHandle, count: number): void => {
+        if (disposed) {
+          throw new Error(`splat ${spec.name} is disposed`);
+        }
+        this.#assertLive();
+        const { texture, spec: targetSpec } = this.#resources.textureOf(target);
+        const { buffer, spec: pointsSpec } = this.#resources.bufferOf(points);
+        assertSplatInputs(spec, targetSpec, pointsSpec);
+        const writes = this.#timer.writesFor(spec.name);
+        this.#submit(spec.name, (encoder) => {
+          encodeSplat(this.#device, encoder, pipeline, texture, buffer, count, spec.name, writes);
+        });
+        this.#writers.wroteOtherwise(target);
+        this.#resolveTimes();
+      },
+      dispose: (): void => {
+        disposed = true;
+      },
+    };
   }
 
   dispatch(

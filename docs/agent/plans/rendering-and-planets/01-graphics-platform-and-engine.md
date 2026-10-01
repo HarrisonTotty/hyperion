@@ -2119,3 +2119,18 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     a view, after Babylon's pass; the frame's times report the bracketed Babylon pass and the
     indirect pass by label. On the RTX 3080 every figure is a multiple of 65,536 ns (`quantized`,
     as Design note 4 says, without the timing switch).
+- **Deviations in T8.h, as built.**
+  - `PointSplatSpec`'s sources are plain WGSL with `main` entry points (not Babylon's dialect, as
+    for kernels): the vertex stage reads the points from a read-only storage buffer it declares at
+    `@group(0) @binding(0)`, indexed by `@builtin(vertex_index)`, and `PointSplatHandle.draw`
+    binds the `points` buffer there and draws `count` points. The pass loads the target, so draws
+    accumulate; a bake clears its face first (with `writeTexture` of zeros, say). The blend adds
+    every channel, alpha too (`SPLAT_BLEND`: one, one): a bake scratch has no meter class to keep.
+    The target is any 2D `rgba32float` texture the caller made with `createTexture` and
+    `RENDER_ATTACHMENT` (`splatTargetSpec` shows the usage), so its bytes are counted there; a
+    draw into another format, a target of several layers or without `RENDER_ATTACHMENT`, or
+    points without `STORAGE` throws (`assertSplatInputs`). The pass is timed under the splat's
+    name.
+  - Checked by the scratch page on SwiftShader and the RTX 3080 (T9.i's splat round trip remains
+    T9's): two points splatted onto one texel of a cleared 4 × 4 face read back as twice the
+    fragment's colour, alpha included, and an untouched texel reads zero.
