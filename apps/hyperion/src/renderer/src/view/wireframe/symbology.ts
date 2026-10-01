@@ -1,5 +1,6 @@
 import { norm, normalise, scale, type Vec3 } from "../../geometry/vec3";
 import type { ColourToken } from "../../spatial/drawList";
+import { CONTACT_SIZE_CLASS } from "../../lib/system/bodySymbols";
 import { SIZE_CLASS_REM, symbolOutline } from "../../spatial/symbols";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
@@ -255,6 +256,19 @@ export interface SymbologyAnchor {
   readonly at: ScreenPx;
   /** A body's symbol and apparent diameter, px; `null` for a craft. */
   readonly body: { readonly symbol: BodyMarkSymbol; readonly diameterPx: number } | null;
+  /**
+   * A craft's place and motion for its target brackets: from the own ship where there is one, else
+   * from the camera (the range is then `FROM CAMERA`, Design note 17); `null` for a body.
+   */
+  readonly craft: {
+    readonly relativeM: Vec3;
+    readonly relativeVelocityMPerS: Vec3 | null;
+  } | null;
+}
+
+/** The radius of a craft's brackets, as an unresolved contact's symbol: size class 2. */
+export function contactRadiusPx(remPx: number): number {
+  return (SIZE_CLASS_REM[CONTACT_SIZE_CLASS] * remPx) / 2;
 }
 
 /** What the symbology marks beyond the anchors themselves. */
@@ -281,7 +295,8 @@ function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
 }
 
 /**
- * The view's symbology (plan R02, R02.T12.c): each body under 3 px its symbol, the selection's
+ * The view's symbology (plan R02, R02.T12.c): each body under 3 px its symbol, each craft its target
+ * brackets with range and closure (for the DOM label beside them), the selection's
  * bracket reticle in `--accent`, the destination's in `--target` outside it, and the own ship's
  * flight path marker, in that order.
  */
@@ -292,7 +307,21 @@ export function symbologyMarks(
 ): ScreenMark[] {
   const marks: ScreenMark[] = [];
   for (const anchor of input.anchors) {
-    const markRadiusPx = anchor.body === null ? 0 : symbolRadiusPx(anchor.body.symbol, input.remPx);
+    const markRadiusPx =
+      anchor.body === null
+        ? contactRadiusPx(input.remPx)
+        : symbolRadiusPx(anchor.body.symbol, input.remPx);
+    if (anchor.craft !== null) {
+      marks.push(
+        targetBracket(
+          anchor.target,
+          anchor.at,
+          markRadiusPx,
+          anchor.craft.relativeM,
+          anchor.craft.relativeVelocityMPerS,
+        ),
+      );
+    }
     if (anchor.body !== null) {
       const symbol = bodySymbolMark(
         anchor.target,

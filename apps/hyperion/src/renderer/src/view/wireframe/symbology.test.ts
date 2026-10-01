@@ -143,7 +143,7 @@ describe("a body's symbol", () => {
 });
 
 describe("symbologyMarks", () => {
-  it("marks a small body, brackets the selection and the destination, and adds the flight path marker", () => {
+  it("marks a small body, brackets the selection, the destination and a craft, and adds the flight path marker", () => {
     const marks = symbologyMarks(
       {
         anchors: [
@@ -151,6 +151,13 @@ describe("symbologyMarks", () => {
             target: MOON,
             at: { xPx: 300, yPx: 300 },
             body: { symbol: bodyKindSymbol("moon"), diameterPx: 1 },
+            craft: null,
+          },
+          {
+            target: { kind: "craft", craft: "other" },
+            at: { xPx: 500, yPx: 300 },
+            body: null,
+            craft: { relativeM: vec3(0, 0, -1e3), relativeVelocityMPerS: null },
           },
         ],
         selection: MOON,
@@ -165,6 +172,7 @@ describe("symbologyMarks", () => {
       ["body_symbol", "text"],
       ["selection", "accent"],
       ["destination", "target"],
+      ["target", "text"],
       ["flight_path", "text"],
     ]);
   });
