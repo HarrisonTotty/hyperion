@@ -14,7 +14,10 @@ paths:
 A universe is `(seed, generator_version)`. The same pair must give the same bits on x86-64,
 AArch64 and wasm32, in any call order, for as long as saves exist. What checks it today: `just ci`
 runs the goldens natively on x86-64 and, through `just test-wasm-fast`, the fast suites of base,
-the surface crate, the sim and the testkit as `wasm32-wasip1` under wasmtime; `just ci-slow` adds
+the surface crate, the sim and the testkit as `wasm32-wasip1` under wasmtime, and those of base,
+the surface crate and the testkit (not the sim, which no browser loads) as the client's
+`wasm32-unknown-unknown` under `wasm-bindgen-test` on Electron's V8, where `golden!` compares the
+golden files embedded at compile time (they are blessed natively); `just ci-slow` adds
 their slow suites there (`just test-wasm-slow`); a missing tool fails either gate, naming
 `just wasm-tools`; and nothing checks AArch64. Every determinism crate's own
 `clippy.toml` (the sim's, `hyperion-base`'s, `hyperion-surface`'s and `hyperion-fit`'s) already bans
@@ -192,3 +195,11 @@ moved.
 - Statistical tests use fixed seeds, α = 10⁻³, and the helpers in `hyperion_testkit::stats`.
   Anything slow gets `#[ignore = "slow: <what>"]` and runs under `just test-slow`.
 - Every generator keeps a test that the same seed gives the same result twice.
+- In `hyperion-base`, `hyperion-surface` and `hyperion-testkit`, whose tests also run on
+  `wasm32-unknown-unknown` (rendering plan R04, Design note 12): every test module and file opens
+  with `#[cfg(all(target_arch = "wasm32", target_os = "unknown"))] use
+  wasm_bindgen_test::wasm_bindgen_test as test;`, since a plain `#[test]` is silently dropped
+  there; a test that reads files goes in a module named `native_only`, compiled out there; every
+  `should_panic` test states `expected` and lives in the crate's `tests/panics.rs`; and a golden's
+  name in `golden!` is a string literal. `just test-wasm-browser` fails when a test is missing
+  there.

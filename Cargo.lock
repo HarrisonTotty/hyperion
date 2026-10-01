@@ -689,6 +689,7 @@ version = "0.1.0"
 dependencies = [
  "hyperion-testkit",
  "libm",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -752,6 +753,7 @@ name = "hyperion-surface"
 version = "0.1.0"
 dependencies = [
  "hyperion-base",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
