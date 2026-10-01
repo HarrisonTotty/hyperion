@@ -12,9 +12,11 @@
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
-//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], and the system's in [`system`].
+//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], and the
+//! scene's in [`scene`].
 
 mod galaxy;
+mod scene;
 mod system;
 mod universe;
 
@@ -125,8 +127,10 @@ impl Handler for Handlers {
             // match exhaustive for a caller that bypasses the connection.
             RequestBody::Subscribe(_) => Box::pin(ready(Err(not_served_yet("subscribe")))),
             RequestBody::Unsubscribe(_) => Box::pin(ready(Err(not_served_yet("unsubscribe")))),
-            // Served by R03.T6 (`scene_ship`) and R03.T8 (`scene_cameras`).
-            RequestBody::SceneShip(_) => Box::pin(ready(Err(not_served_yet("scene_ship")))),
+            RequestBody::SceneShip(request) => {
+                Box::pin(scene::ship(state, request, token).map(answered))
+            }
+            // Served by R03.T8.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
         }
     }
@@ -1087,7 +1091,7 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // four until its tasks serve them.
+        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it.
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
@@ -1097,12 +1101,11 @@ mod tests {
                     RequestBody::BodyEvents(_)
                         | RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
-                        | RequestBody::SceneShip(_)
                         | RequestBody::SceneCameras(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 4);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

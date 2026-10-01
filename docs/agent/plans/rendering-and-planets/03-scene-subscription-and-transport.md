@@ -1268,3 +1268,30 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   well as Linux, where socket2 exposes it. Both harnesses read the mark back inside their `tap_io`
   closure (`accepted_lowat()`); the integration test, `an_accepted_socket_has_the_low_water_mark`,
   is in `tests/websocket.rs`, which only `just ci` runs among the acceptance commands.
+- **Deviations in T6, as built.** The stand-in is in `scene/ship.rs` (`ShipStandIn`,
+  `ShipPosition`) beside `scene/clock.rs` (`SceneClock`, `TimeRate`, `ClockReading`,
+  `ClockState`); `scene/mod.rs` holds the `Clock` and `Ship` traits, `SceneSetting` (the clock and
+  the stand-in) and `SceneService` (`watch(universe)`, `set(universe, setting)`, a `watch` sender per
+  `UniverseId`). A universe nobody has set reads as the stand-in at rest at the galactic centre at
+  the epoch, in the galactic frame, clock paused: the centre is in no system's frame, so a scene
+  subscribed before any `scene_ship` holds no system. `instant_of` rounds up (the first instant at
+  which the clock reads the time or later) and answers the anchor for a time already passed; the
+  test inverts `instant_of(at_instant(i)) = i` at 1× and 100,000×. The checks are
+  `convert/scene.rs` (`ShipRequest`) and the handler `requests/scene.rs`; fields are named
+  `time_rate`, `ship.time`, `ship.velocity_m_s` (also refused at or above c, which
+  `SystemObserver` needs) and `ship.position`. A frame whose system `resolve` refuses is
+  `unknown_system` and a body its system lacks, or that is absent at the pose's time,
+  `unknown_body`, both naming `ship.position`, as plan 04's codes for unknown IDs, rather than
+  `bad_request`; a system offset that leaves the galactic range is `bad_request`.
+  `requests::system::bodies_of` became `pub(super)` here for the body frame (R03.T8.a's
+  `pub(crate)` follows). The pose's velocity is relative to its own frame's origin, as
+  `KinematicsDto` documents, and the stand-in moves in a straight line in that frame. A body index
+  outside plan 14's layout is `bad_request` naming `ship.position`; a body-frame offset is checked,
+  as a system-frame one is, for a place in the galactic range at the pose's time. `SceneClock`
+  stores no state: `ClockState` is worked out from the rate and the time read (`ClockReading`
+  has getters, and `SceneClockDto: From<ClockReading>`); the `Clock` trait is
+  `reading_at(Instant)` and `instant_of(time)`; `SceneClock::new` refuses a time outside the
+  window (`BuildSceneClockError`); a stand-in is built from a checked `ShipRequest`
+  (`From<ShipRequest>`). The acceptance filter `scene::clock` runs the clock's tests only; the
+  handler's, the checks', the stand-in's and the service's run under
+  `cargo test -p hyperion-server --lib scene` and `just ci`.
