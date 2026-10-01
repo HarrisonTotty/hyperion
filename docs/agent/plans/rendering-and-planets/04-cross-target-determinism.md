@@ -1580,3 +1580,51 @@ warnings` with "use of a disallowed method", and was reverted.
   difference; `wasm_bindgen_version` takes the first match only. With T8.c's browser step, the
   T7.c timing record gains: its tests take under 1 s and its builds about 70 s cold, seconds warm
   (provisional, under load), which does not change Design note 11's outcome there.
+- **Deviations in T10.c, as built (2026-09-30).** Under the ruling (option 2) `index.html` is
+  unchanged.
+  - **Worker build and naming.** The renderer's Vite config sets `worker.format: "es"`.
+    `wasm/surface.worker.ts` loads the glue through `init({ module_or_path })` on a `?url` import
+    of the `.wasm` (an 18.6 kB hashed asset in `out/renderer/assets/`). A worker file is named
+    `*.worker.ts`: `tsconfig.web.json` excludes the pattern, and a new `tsconfig.worker.json`
+    (`lib: ["es2023", "webworker"]`, with `handleRequest.ts` and the generated `.d.ts`) types it,
+    joining `tsconfig.json`'s references and the app's `typecheck` script. **R05's height worker
+    takes the same suffix** (`height.worker.ts`, where R05.T10.b says `heightWorker.ts`), or the
+    import guard and the worker typing do not reach it; the orchestrator was told.
+  - **The module test.** `handleRequest.test.ts` (Node) gets the module's bytes as a `?inline`
+    data URL (`assetsInclude: ["**/*.wasm"]` in `vitest.config.mts`), since renderer code reads no
+    files through `node:*`, and compares the version with `GENERATOR_VERSION` parsed from
+    `crates/hyperion-base/src/version.rs` (`?raw`), the source the sim and the server report, so
+    that the module does not vouch for itself. Its CSP message is the one T10.a's experiment
+    captured.
+  - **Faults.** `load-failed` (with a `csp-refused` cause for a `CompileError` citing a Content
+    Security Policy), `worker-failed` (an `ErrorEvent`'s message, "its script did not load" for the
+    plain `Event` a module worker fires when its script fails, or an answer that threw in the
+    worker, which posts `answer-failed` at once rather than leaving the loader to time out),
+    `no-answer` after `SURFACE_ANSWER_TIMEOUT_MS` (10 s), and `version-mismatch` ("run just
+    gen-surface"). The loader terminates the worker once it has an answer, a failure, a timeout or
+    an abort. Worker messages are typed, not checked: both ends are our own same-origin code.
+  - **The guard.** `surfaceImports.test.ts` fails if a renderer file other than a `*.worker.ts` or
+    a test imports `generated/surface/`, or if any file imports a `*.worker` module (which would
+    run it on the importing thread). `typescript-dev.md` gains the rule beside the CSP's.
+  - **Reporting.** `useSurfaceModuleCheck(connection.serverGeneratorVersion)`, called by `App`,
+    runs the check once the server has said its version, writes the outcome line to the document
+    element's `data-surface-module` attribute (removed on teardown) and sends a fault to
+    `console.error`. A ready module is not logged, since the lint allows only `warn` and `error`
+    and a ready module is not a diagnostic; so "log the module's generator version" is read as
+    that attribute. Where there is no `Worker` (jsdom) it does nothing; its DOM test stubs
+    `Worker` with `test/FakeSurfaceWorker.ts`, which the loader's tests share.
+  - **`check-chunks`** also makes the module first now, since `pnpm build` bundles the worker.
+  - **Checked by hand, 2026-09-30, on the development machine (`DISPLAY=:0`).** Against a local
+    `hyperion-server` (port 7979), the built app (`pnpm build`, then Electron on `apps/hyperion`,
+    `file://`) and `just client` (dev server, `http://localhost:5173/`) each showed
+    `data-surface-module = "surface module ready: generator version 16"`, read over the DevTools
+    protocol, with no console error and no CSP violation in the page's log (the dev run logged
+    only Vite's and React's debug lines and the WebSocket warning that StrictMode's double mount
+    gives). No window or process was left running.
+  - The brainstorm's three other passages that said the policy must change are marked superseded
+    by the ruling (edited directly, not through a researching agent), and the roadmap's table row
+    for R04's loader says it is met. R05's and R12's own mentions of the pending ruling are left
+    to their lanes.
+- **T10.b, checked later (2026-09-30).** In a fresh `git worktree` at 7beb6ec (after
+  `pnpm install`), a trivial commit to a TypeScript file passed every commit hook, the oxlint and
+  `tsc` hooks building the module through `_with-surface`; the worktree was removed after.
