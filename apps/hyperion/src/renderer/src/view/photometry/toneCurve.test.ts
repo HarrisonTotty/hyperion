@@ -52,6 +52,19 @@ function wgslMatrix(name: string): number[][] {
   return [0, 1, 2].map((row) => [0, 1, 2].map((column) => columns[column * 3 + row] ?? NaN));
 }
 
+/**
+ * The WGSL sigmoid's Horner steps, highest power first: the first literal, then the constant of
+ * each `p * t ± c` that follows.
+ */
+function wgslSigmoid(): { first: number; steps: number[] } {
+  const body = /fn agxSigmoid[^{]*\{([^}]*)\}/.exec(wgsl)?.[1] ?? "";
+  const first = Number(/var p = vec3f\((-?[\d.]+)\);/.exec(body)?.[1]);
+  const steps = [...body.matchAll(/p \* t ([+-]) ([\d.]+);/g)].map(
+    ([, sign, value]) => (sign === "-" ? -1 : 1) * Number(value),
+  );
+  return { first, steps };
+}
+
 describe("the AgX tone curve", () => {
   it("is monotone for grey above the toe's recovery at 3.4 × 10⁻⁴", () => {
     let previous = toneCurve(grey(3.4e-4))[1];
@@ -123,6 +136,28 @@ describe("the AgX tone curve", () => {
       ),
     );
     expect(Math.max(...gaps)).toBeLessThan(1e-9);
+  });
+
+  it("has the WGSL twin's sigmoid, re-expanded about 0.5, equal to the port's within 10⁻¹²", () => {
+    const { first, steps } = wgslSigmoid();
+    const sigmoid = (x: number): number => steps.reduce((p, c) => p * (x - 0.5) + c, first);
+    const gaps = Array.from({ length: 101 }, (_, i) => i / 100).map((x) =>
+      Math.abs(sigmoid(x) - agxSigmoid(x)),
+    );
+    expect([steps.length, Math.max(...gaps) < 1e-12]).toEqual([7, true]);
+  });
+
+  it("evaluates the WGSL twin's sigmoid in f32 within 10⁻⁶ of the port", () => {
+    const { first, steps } = wgslSigmoid();
+    const f = Math.fround;
+    const sigmoid = (x: number): number => {
+      const t = f(f(x) - 0.5);
+      return steps.reduce((p, c) => f(f(p * t) + f(c)), f(first));
+    };
+    const gaps = Array.from({ length: 1001 }, (_, i) => i / 1000).map((x) =>
+      Math.abs(sigmoid(x) - agxSigmoid(Math.fround(x))),
+    );
+    expect(Math.max(...gaps)).toBeLessThan(1e-6);
   });
 });
 

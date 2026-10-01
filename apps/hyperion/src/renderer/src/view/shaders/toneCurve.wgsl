@@ -58,19 +58,20 @@ const AGX_MIN_EV = -12.47393;
 const AGX_MAX_EV = 4.026069;
 
 // The seventh-order sigmoid after iolite-engine's minimal AgX (Filament's
-// agxDefaultContrastApprox).
+// agxDefaultContrastApprox), -17.86x^7 + 78.01x^6 - 126.7x^5 + 92.06x^4 - 28.72x^3 + 4.361x^2
+// - 0.1718x + 0.002857, re-expanded exactly about x = 0.5 and evaluated by Horner's rule: the
+// monomial form's terms reach 100 and cancel to under 1, which costs it 1.2e-5 in f32, and this
+// form 1.5e-7 (plan R02, R02.T14.c).
 fn agxSigmoid(x: vec3f) -> vec3f {
-  let x2 = x * x;
-  let x4 = x2 * x2;
-  let x6 = x4 * x2;
-  return -17.86 * x6 * x
-    + 78.01 * x6
-    - 126.7 * x4 * x
-    + 92.06 * x4
-    - 28.72 * x2 * x
-    + 4.361 * x2
-    - 0.1718 * x
-    + 0.002857;
+  let t = x - vec3f(0.5);
+  var p = vec3f(-17.86);
+  p = p * t + 15.5;
+  p = p * t + 13.565;
+  p = p * t - 10.29;
+  p = p * t - 5.39375;
+  p = p * t + 2.40975;
+  p = p * t + 1.7588875;
+  return p * t + 0.290957;
 }
 
 // The full AgX curve: a pre-exposed linear Rec. 709 colour to a display-linear one in [0, 1].

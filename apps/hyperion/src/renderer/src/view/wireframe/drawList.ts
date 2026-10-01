@@ -92,6 +92,11 @@ export interface OccluderSphere {
   readonly centreF32: Float32Array;
   /** Its radius, m: `occluderRadius`, a little inside the body. */
   readonly radiusM: number;
+  /**
+   * Its centre's distance from the camera less its radius, m, differenced in `f64`: the shader's
+   * intersection takes it rather than lose it to cancellation in `f32` near the body (R02.T14).
+   */
+  readonly altitudeM: number;
 }
 
 /** A hull's depth-only faces, two-sided, pushed away by the occluder pass's bias. */
@@ -300,10 +305,13 @@ export function buildWireframeDrawList(
     );
     if (wireframe.regime !== "symbol") {
       limbs.push({ id: body.id, centreM, radiusM: body.radiusM });
+      const distanceM = norm(centreM);
+      const radiusM = occluderRadius(body.radiusM, distanceM);
       occluderSpheres.push({
         id: body.id,
         centreF32: narrow(centreM),
-        radiusM: occluderRadius(body.radiusM, norm(centreM)),
+        radiusM,
+        altitudeM: distanceM - radiusM,
       });
     }
     const major = wireframe.lines.filter((line) => line.major).flatMap((line) => line.runs);

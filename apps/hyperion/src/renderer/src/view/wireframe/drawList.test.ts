@@ -16,6 +16,7 @@ import type { CameraPose } from "../camera/pose";
 import type { Viewport } from "../camera/projection";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
+import { occluderRadius } from "../depth/depth";
 import { type CraftPose, sceneOrigins, type ViewScene } from "../scene/model";
 import {
   buildWireframeDrawList,
@@ -189,6 +190,16 @@ describe("buildWireframeDrawList", () => {
         Math.max(...[...sphere.centreF32].map(Math.abs)) > Math.fround(reach.get(sphere.id) ?? 0),
     );
     expect({ over, occluders }).toEqual({ over: [], occluders: [] });
+  });
+
+  it("gives each occluder sphere its altitude above the occluder, differenced in f64", () => {
+    const origins = sceneOrigins(scene());
+    const gaps = build().occluderSpheres.map((sphere) => {
+      const distanceM = norm(relativeToCamera(centre(sphere.id), CAMERA.pose, origins));
+      const bodyRadiusM = scene().bodies.find((body) => body.id === sphere.id)?.radiusM ?? NaN;
+      return sphere.altitudeM - (distanceM - occluderRadius(bodyRadiusM, distanceM));
+    });
+    expect(gaps.length > 0 && gaps.every((gap) => Math.abs(gap) < 1e-6)).toBe(true);
   });
 
   it("brackets another craft in --text", () => {
