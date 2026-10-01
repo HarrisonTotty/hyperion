@@ -30,6 +30,7 @@ import type { Scene } from "@babylonjs/core/scene.pure";
 import { BUFFER_USAGE, MAP_MODE, TEXTURE_USAGE } from "../gpuFlags";
 import type { FrameSubmission, RenderView, ViewSize } from "../types";
 import { disableEngineYFlip, setAttachmentFormat } from "./internals";
+import { paddedBytesPerRow } from "./readback";
 
 /** What a view needs of the engine that made it. */
 export interface ViewHost {
@@ -68,7 +69,7 @@ export function srgbViewFormat(format: GPUTextureFormat): GPUTextureFormat {
 }
 
 /** The camera a view renders with: at the origin, its projection frozen to the submission's. */
-function frozenCamera(name: string, scene: Scene): Camera {
+export function frozenCamera(name: string, scene: Scene): Camera {
   const camera = new Camera(`${name}:camera`, Vector3.Zero(), scene, false);
   camera.freezeProjectionMatrix(Matrix.Identity());
   return camera;
@@ -100,7 +101,7 @@ export function setChain(target: RenderTargetTexture, chain: ReadonlyArray<PostP
 const chains = new WeakMap<RenderTargetTexture, ReadonlyArray<PostProcess>>();
 
 /** The colour a view clears to: black, opaque. */
-const CLEAR_COLOUR = new Color4(0, 0, 0, 1);
+export const CLEAR_COLOUR = new Color4(0, 0, 0, 1);
 
 /** Babylon's objects for a view at one size. */
 interface Attachments {
@@ -253,22 +254,21 @@ export class BabylonView implements RenderView {
     if (attachments === null) {
       return;
     }
-    // A target disposes the post-processes it holds, and those are the engine's, shared by handle.
-    if (chains.has(attachments.target)) {
-      attachments.target.clearPostProcesses(false);
-      chains.delete(attachments.target);
-    }
-    attachments.target.dispose();
+    releaseTarget(attachments.target);
     this.#attachments = null;
   }
 }
 
-/** Rows of a texel copy are 256-byte aligned in the buffer (WebGPU's `bytesPerRow` rule). */
-export const COPY_ROW_ALIGNMENT = 256;
-
-/** The padded row pitch of a copy of `widthTexels` texels of `bytesPerTexel` each. */
-export function paddedBytesPerRow(widthTexels: number, bytesPerTexel: number): number {
-  return Math.ceil((widthTexels * bytesPerTexel) / COPY_ROW_ALIGNMENT) * COPY_ROW_ALIGNMENT;
+/**
+ * Disposes a Babylon target, detaching its post-processes first: a target disposes those it holds,
+ * and they are the engine's, shared by handle.
+ */
+export function releaseTarget(target: RenderTargetTexture): void {
+  if (chains.has(target)) {
+    target.clearPostProcesses(false);
+    chains.delete(target);
+  }
+  target.dispose();
 }
 
 /**

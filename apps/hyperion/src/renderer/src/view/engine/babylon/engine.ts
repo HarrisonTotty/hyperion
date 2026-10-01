@@ -30,7 +30,12 @@ import { ThinTexture } from "@babylonjs/core/Materials/Textures/thinTexture";
 import { Scene } from "@babylonjs/core/scene.pure";
 
 import type { KernelPair } from "../kernels";
-import type { AllocationEvent, BufferSpec, MemoryCategory, TextureSpec } from "../memory";
+import {
+  type AllocationEvent,
+  type BufferSpec,
+  type MemoryCategory,
+  type TextureSpec,
+} from "../memory";
 import {
   type AdapterOutcome,
   type CapabilityOverrides,
@@ -80,6 +85,15 @@ import { MeshRecord } from "./meshes";
 import { babylonEngineOptions } from "./options";
 import { registerBabylonModules } from "./registrations";
 import { packedCubeSpec, ResourceRegistry, viewDimensionOf } from "./resources";
+import {
+  assertBufferReadable,
+  readGpuBuffer,
+  readGpuTexture,
+  textureRead,
+  WriterRecord,
+} from "./readback";
+import { MipGenerator } from "./mipmaps";
+import { BabylonRenderTarget, type TargetHost } from "./target";
 import { BabylonView, type ViewHost } from "./view";
 import {
   GLSLANG_STUB,
@@ -87,6 +101,11 @@ import {
   listenForUnhandledRefusals,
   TWGSL_STUB,
 } from "./wgslGuard";
+
+/** A caught value as an `Error`, keeping it as the cause when it is not one. */
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error), { cause: error });
+}
 
 /** The error a member not yet built throws, naming the subtask that builds it. */
 function notBuilt(member: string, task: string): Error {
@@ -115,7 +134,7 @@ const OFFSET_UNIFORM: UniformSpec = { name: FRAME_UNIFORMS.offsetFromCamera, typ
 let postProcessKeys = 0;
 
 /** The engine over one Babylon `WebGPUEngine`, one device and one right-handed scene. */
-export class BabylonRenderEngine implements RenderEngine, ViewHost {
+export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
   readonly capabilities: GpuCapabilities;
   readonly depthPolicy: DepthPolicy = "reversed-z-float";
   readonly #engine: WebGPUEngine;
@@ -124,6 +143,10 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
   readonly #meshes = new WeakMap<MeshHandle, MeshRecord>();
   readonly #meshRecords = new Set<MeshRecord>();
   readonly #views = new Set<BabylonView>();
+  readonly #targets = new Set<BabylonRenderTarget>();
+  /** The kernel that last wrote each buffer and texture (Design notes 16 and 20). */
+  readonly #writers = new WriterRecord();
+  #mipGenerator: MipGenerator | null = null;
   readonly #materials = new WeakMap<MaterialHandle, MaterialRecord>();
   readonly #postProcesses = new WeakMap<PostProcessHandle, PostProcess>();
   readonly #kernels = new WeakMap<ComputeHandle, KernelRecord>();
@@ -189,6 +212,11 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     return this.#scene;
   }
 
+  get #mips(): MipGenerator {
+    this.#mipGenerator ??= new MipGenerator(this.#device);
+    return this.#mipGenerator;
+  }
+
   /** The engine's one device. */
   get device(): GPUDevice {
     return this.#device;
@@ -240,8 +268,39 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     return view;
   }
 
-  createRenderTarget(_spec: RenderTargetSpec): RenderTarget {
-    throw notBuilt("createRenderTarget", "R01.T8.f");
+  createRenderTarget(spec: RenderTargetSpec): RenderTarget {
+    this.#assertLive();
+    const target = new BabylonRenderTarget(this, spec);
+    this.#targets.add(target);
+    return target;
+  }
+
+  /** The engine's buffers and textures, for its targets. */
+  get resources(): ResourceRegistry {
+    return this.#resources;
+  }
+
+  forgetTarget(target: RenderTarget): void {
+    if (target instanceof BabylonRenderTarget) {
+      this.#targets.delete(target);
+    }
+  }
+
+  destroyTexture(texture: TextureHandle): void {
+    this.#sampled.get(texture)?.dispose();
+    this.#sampled.delete(texture);
+    this.#resources.destroyTexture(texture);
+  }
+
+  wroteByDraw(texture: TextureHandle): void {
+    this.#writers.wroteOtherwise(texture);
+  }
+
+  generateMips(texture: TextureHandle): void {
+    const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
+    this.#submit(`${spec.name} mips`, (encoder) => {
+      this.#mips.encode(encoder, gpuTexture, spec.mips);
+    });
   }
 
   createMesh(spec: MeshSpec): MeshHandle {
@@ -361,6 +420,8 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     this.#submit(`${cube.name} level ${level}`, (encoder) => {
       this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed);
     });
+    // The cube carries the buffer's writer, so a presentation-only result stays refused.
+    this.#writers.copied(packed, cube);
   }
 
   createPointSplat(_spec: PointSplatSpec): PointSplatHandle {
@@ -389,11 +450,20 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     this.#submit(pass, (encoder) => {
       encodeDispatch(this.#device, encoder, record, resources, counts, { label: pass });
     });
+    for (const [name, handle] of Object.entries(bindings.buffers)) {
+      if (record.bindings.get(name)?.writable === true) {
+        this.#writers.wroteBy(handle, record.pair);
+      }
+    }
+    for (const { texture } of Object.values(bindings.storage)) {
+      this.#writers.wroteBy(texture, record.pair);
+    }
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     this.#assertLive();
     this.#resources.writeBuffer(buffer, offsetBytes, data);
+    this.#writers.wroteOtherwise(buffer);
   }
 
   writeTexture(
@@ -404,14 +474,34 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
   ): void {
     this.#assertLive();
     this.#resources.writeTexture(texture, origin, size, data);
+    this.#writers.wroteOtherwise(texture);
   }
 
-  readBuffer(_buffer: BufferHandle, _access?: "cpu" | "tolerance"): Promise<ArrayBuffer> {
-    return Promise.reject(notBuilt("readBuffer", "R01.T8.f"));
+  readBuffer(buffer: BufferHandle, access: "cpu" | "tolerance" = "cpu"): Promise<ArrayBuffer> {
+    try {
+      this.#assertLive();
+      this.#writers.assertReadable(buffer, access);
+      const { buffer: gpuBuffer, spec } = this.#resources.bufferOf(buffer);
+      assertBufferReadable(spec);
+      return readGpuBuffer(this.#device, gpuBuffer, spec.bytes, (encode) => {
+        this.#submit(`${buffer.name} readback`, encode);
+      });
+    } catch (error: unknown) {
+      return Promise.reject(asError(error));
+    }
   }
 
-  readTexture(_texture: TextureHandle, _level?: number, _rect?: TexelRect): Promise<ArrayBuffer> {
-    return Promise.reject(notBuilt("readTexture", "R01.T8.f"));
+  readTexture(texture: TextureHandle, level = 0, rect?: TexelRect): Promise<ArrayBuffer> {
+    try {
+      this.#assertLive();
+      this.#writers.assertReadable(texture, "cpu");
+      const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
+      return readGpuTexture(this.#device, gpuTexture, textureRead(spec, level, rect), (encode) => {
+        this.#submit(`${texture.name} readback`, encode);
+      });
+    } catch (error: unknown) {
+      return Promise.reject(asError(error));
+    }
   }
 
   onPassTimes(listener: (times: PassTimes) => void): () => void {
@@ -462,6 +552,10 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
       view.dispose();
     }
     this.#views.clear();
+    for (const target of this.#targets) {
+      target.dispose();
+    }
+    this.#targets.clear();
     for (const record of this.#meshRecords) {
       record.dispose();
     }

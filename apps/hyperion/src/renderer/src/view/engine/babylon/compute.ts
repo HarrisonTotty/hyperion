@@ -18,6 +18,8 @@ export interface KernelBinding {
   readonly binding: number;
   /** The declaration's address space or type: `uniform`, `storage`, a texture or a sampler. */
   readonly kind: "uniform" | "storage" | "texture" | "storage-texture" | "sampler";
+  /** Whether the kernel may write it: a `read_write` storage buffer, or a storage texture. */
+  readonly writable: boolean;
 }
 
 /** WGSL without its comments, so that a commented-out declaration is not read. */
@@ -26,7 +28,7 @@ function withoutComments(wgsl: string): string {
 }
 
 const DECLARATION =
-  /@group\(\s*(\d+)\s*\)\s*@binding\(\s*(\d+)\s*\)\s*var\s*(<[^>]*>)?\s*(\w+)\s*:\s*([\w]+)/gu;
+  /@group\(\s*(\d+)\s*\)\s*@binding\(\s*(\d+)\s*\)\s*var\s*(<[^>]*>)?\s*(\w+)\s*:\s*(\w+)(<[^;]*>)?/gu;
 
 function kindOf(addressSpace: string | undefined, type: string): KernelBinding["kind"] {
   if (addressSpace !== undefined) {
@@ -50,14 +52,18 @@ function kindOf(addressSpace: string | undefined, type: string): KernelBinding["
 export function kernelBindings(wgsl: string): ReadonlyMap<string, KernelBinding> {
   const bindings = new Map<string, KernelBinding>();
   for (const match of withoutComments(wgsl).matchAll(DECLARATION)) {
-    const [, group, binding, space, name, type] = match;
+    const [, group, binding, space, name, type, parameters] = match;
     if (group === undefined || binding === undefined || name === undefined || type === undefined) {
       continue;
     }
+    const kind = kindOf(space, type);
     bindings.set(name, {
       group: Number(group),
       binding: Number(binding),
-      kind: kindOf(space, type),
+      kind,
+      writable:
+        (kind === "storage-texture" && !/,\s*read\s*>/u.test(parameters ?? "")) ||
+        (kind === "storage" && (space ?? "").includes("read_write")),
     });
   }
   return bindings;

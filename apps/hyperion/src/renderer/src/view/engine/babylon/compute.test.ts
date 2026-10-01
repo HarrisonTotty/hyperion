@@ -20,6 +20,7 @@ const PAIR: KernelPair = {
     "@group(2) @binding(1) var table : texture_3d<f32>;",
     "@group(2) @binding(2) var target : texture_storage_2d<rgba16float, write>;",
     "@group(2) @binding(3) var linear : sampler;",
+    "@group(2) @binding(4) var lookup : texture_storage_2d<r32float, read>;",
   ].join("\n"),
   subgroup: "enable subgroups;\n@group(0) @binding(0) var<storage, read> values : array<u32>;",
   readback: "bit-exact",
@@ -35,12 +36,13 @@ describe("a kernel's bindings", () => {
   it("are read by name from the source's declarations", () => {
     const bindings = kernelBindings(PAIR.reference);
     expect(Object.fromEntries(bindings)).toEqual({
-      values: { group: 0, binding: 0, kind: "storage" },
-      total: { group: 0, binding: 1, kind: "storage" },
-      params: { group: 1, binding: 0, kind: "uniform" },
-      table: { group: 2, binding: 1, kind: "texture" },
-      target: { group: 2, binding: 2, kind: "storage-texture" },
-      linear: { group: 2, binding: 3, kind: "sampler" },
+      values: { group: 0, binding: 0, kind: "storage", writable: false },
+      total: { group: 0, binding: 1, kind: "storage", writable: true },
+      params: { group: 1, binding: 0, kind: "uniform", writable: false },
+      table: { group: 2, binding: 1, kind: "texture", writable: false },
+      target: { group: 2, binding: 2, kind: "storage-texture", writable: true },
+      linear: { group: 2, binding: 3, kind: "sampler", writable: false },
+      lookup: { group: 2, binding: 4, kind: "storage-texture", writable: false },
     });
   });
 });
