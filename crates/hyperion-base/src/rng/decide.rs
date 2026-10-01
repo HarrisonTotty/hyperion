@@ -344,6 +344,8 @@ impl Stream {
 mod tests {
     use hyperion_testkit::lcg::Lcg;
     use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
     use crate::Seed;

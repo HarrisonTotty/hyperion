@@ -211,6 +211,8 @@ impl ObjectKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     #[test]
     fn seed_text_is_sixteen_lower_case_digits() {

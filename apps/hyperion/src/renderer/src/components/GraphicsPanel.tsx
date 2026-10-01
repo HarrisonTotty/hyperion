@@ -17,14 +17,19 @@ function Reading({ value }: ReadingProps) {
   return value === null ? <dd className="readout__missing">—</dd> : <dd>{value}</dd>;
 }
 
-/** The launch modes' words, drafted for the owner (R01.T5.c). */
+/**
+ * The launch modes' words (R01.T5.c, signed off 2026-09-30).
+ *
+ * @remarks
+ * The safe mode reads `SAFE MODE`, since `SAFE` alone is the guide's command that disarms an `ARM`.
+ */
 const MODE_WORDS = {
   default: "DEFAULT",
   vulkan: "VULKAN",
-  safe: "SAFE",
+  safe: "SAFE MODE",
 } as const satisfies Record<GraphicsLaunchMode, string>;
 
-/** The timer's words, drafted for the owner (R01.T5.c). */
+/** The timer's words (R01.T5.c, signed off 2026-09-30). */
 const TIMER_WORDS = {
   quantized: "QUANTIZED",
   full: "FULL",

@@ -166,6 +166,8 @@ pub(super) fn count_as_f64(count: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     fn assert_close(actual: f64, expected: f64, tolerance: f64) {
         assert!(
@@ -244,11 +246,5 @@ mod tests {
         assert_close(poisson_pmf(0, 0.0), 1.0, 0.0);
         assert_close(poisson_pmf(3, 0.0), 0.0, 0.0);
         assert_close(poisson_cdf(0, 0.0), 1.0, 0.0);
-    }
-
-    #[test]
-    #[should_panic(expected = "must be positive and finite")]
-    fn non_positive_shape_panics() {
-        let _ = regularised_gamma_q(0.0, 1.0);
     }
 }

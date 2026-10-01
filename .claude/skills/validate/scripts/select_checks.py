@@ -16,10 +16,8 @@ are listed, so the caller can report them.
 
 from __future__ import annotations
 
-import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -145,21 +143,6 @@ def read_or_empty(path: Path) -> str:
 def crate_of(path: str) -> str | None:
     parts = path.split("/")
     return parts[1] if len(parts) > 2 and parts[0] == "crates" else None
-
-
-def wasm_available() -> tuple[bool, str]:
-    runner = os.environ.get("WASMTIME", "wasmtime")
-    if shutil.which(runner) is None:
-        return False, "wasmtime is not on PATH"
-    try:
-        targets = subprocess.run(
-            ["rustup", "target", "list", "--installed"], capture_output=True, text=True, check=True
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return False, "cannot query rustup targets"
-    if "wasm32-wasip1" not in targets:
-        return False, "target wasm32-wasip1 not installed (`rustup target add wasm32-wasip1`)"
-    return True, ""
 
 
 def changes(root: Path, base: str) -> tuple[list[str], set[str], str]:
@@ -297,7 +280,12 @@ def main() -> None:
         why += f"{slow_marked[0]} marks one" if slow_marked else "a determinism crate changed"
         gate: list[tuple[str, str]] = [(f"{NO_EXPORT}just ci-slow", why)]
     else:
-        gate = [(f"{NO_EXPORT}just ci", "the commit gate: fmt-check, check, lint, test, gen-protocol-check")]
+        gate = [
+            (
+                f"{NO_EXPORT}just ci",
+                "the commit gate: fmt-check, check, lint, test, fit-check, gen-protocol-check, test-wasm-fast",
+            )
+        ]
     skipped: list[str] = []
     if client or infra:
         gate.append(("pnpm build", "the client must still build"))
@@ -305,12 +293,10 @@ def main() -> None:
     if render:
         # The headless SwiftShader harness stays outside `just ci` (R01.T9.e); these paths run it.
         gate.append(("just test-render", f"{render[0]} touches the engine, the harness or a shader"))
+    # The WebAssembly checks are no separate step: `just ci` runs the fast suites on wasm32 and
+    # `just ci-slow` the slow ones, and each fails, naming `just wasm-tools`, when a tool is missing
+    # (plan R04, T7.c).
     if determinism:
-        ok, reason = wasm_available()
-        if ok:
-            gate.append(("just test-wasm", "a determinism crate changed; goldens must hold bit for bit on wasm32"))
-        else:
-            skipped.append(f"`just test-wasm`: {reason}")
         skipped.append("AArch64 golden run: nowhere to run it (no remote, and the CI workflow was removed on "
                        "2026-09-22; plan 01's Risks says how to restore one)")
     if manifests:

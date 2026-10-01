@@ -253,9 +253,10 @@ shader or post-process would draw the compilers in. The adapter therefore makes 
 error that names the shader, rather than a fetch, and a test renders every material and
 post-process with the network disabled. The game then runs offline and the Content Security Policy
 gains no external origin. Self-hosting the two compilers, some 1–2 MB of WebAssembly, is the
-fallback if a Babylon feature the renderer needs proves GLSL-only. The `'wasm-unsafe-eval'` that our
-own workers need (see [Runtime and code shape](#runtime-and-code-shape)) is a CSP change that awaits
-the owner's sign-off.
+fallback if a Babylon feature the renderer needs proves GLSL-only. ~~The `'wasm-unsafe-eval'` that
+our own workers need (see [Runtime and code shape](#runtime-and-code-shape)) is a CSP change that
+awaits the owner's sign-off.~~ Superseded 2026-09-30 (R04.T10.a): our same-origin module workers
+compile WebAssembly under today's policy, which does not change (see "Awaiting the owner").
 
 It does less for a native renderer than it might seem. A Rust renderer cannot implement a TypeScript
 interface, and would have to rewrite everything in the list above. What makes a native renderer
@@ -2249,11 +2250,14 @@ hosted CI and no recipe runs Arm at all.
   `SharedArrayBuffer` feature switch would lift the requirement. **Lean:** neither is adopted.
   `SharedArrayBuffer` would not remove the copies, because a WebAssembly instance without threads
   reads only its own linear memory, and Rust's WebAssembly threads need a nightly rebuild of the
-  standard library; the copies cost tens of megabytes. The renderer's Content Security Policy
+  standard library; the copies cost tens of megabytes. ~~The renderer's Content Security Policy
   (`apps/hyperion/src/renderer/index.html`) must change before the first height worker: its
   `script-src 'self'` blocks WebAssembly compilation without `'wasm-unsafe-eval'`. That change needs
   the owner's sign-off, since `.claude/rules/typescript-dev.md` keeps the policy strict and requires
-  asking before it is loosened. Bundling the workers as same-origin module files, as Vite does by
+  asking before it is loosened.~~ Superseded 2026-09-30 (R04.T10.a): the policy blocks compilation
+  on the page's own thread only; a same-origin module worker has no policy of its own under
+  `file://` or the dev server and compiles under today's, so the policy does not change (see
+  "Awaiting the owner"). Bundling the workers as same-origin module files, as Vite does by
   default, keeps `blob:` and a `worker-src` of their own out of it, and the WGSL-only adapter keeps
   Babylon's CDN out of it too ([The engine is kept at arm's length](#the-engine-is-kept-at-arms-length)).
 
@@ -2507,9 +2511,17 @@ Recommended here, as technical choices rather than rulings, each argued in the s
 
 Awaiting the owner:
 
-- **The Content Security Policy.** The renderer's policy must gain `'wasm-unsafe-eval'` before the
-  first height worker. `.claude/rules/typescript-dev.md` requires asking before the policy is
-  loosened, so the change is the owner's decision, not this document's.
+- **The Content Security Policy.** ~~The renderer's policy must gain `'wasm-unsafe-eval'` before
+  the first height worker.~~ **Ruled 2026-09-30 (R04.T10.a, by the owner's authority given to the
+  implementing lane): the policy does not change.** Tested on the repo's Electron 44.4.3, a
+  same-origin module worker loaded from `file://` or the dev server has no policy of its own and
+  compiles WebAssembly under today's `script-src 'self'`, while the page's own thread is refused
+  and a `blob:` worker is refused at creation (R04 Design note 16). So the workers stay same-origin
+  module files, the render thread never compiles WebAssembly (the loader names a policy refusal as
+  its own fault, and a source test keeps the generated module's imports in workers), and the
+  worker's `file://` reach over the disk is accepted while the renderer runs only its own code.
+  Serving through a custom scheme with a header policy remains open should that change.
+  `.claude/rules/typescript-dev.md`'s rule stands.
 - **The guide.** The edits this document asks of `docs/frontend/ux-guidelines.md`, collected under
   [What the guide must gain](#what-the-guide-must-gain), are proposals, since guide additions are the
   owner's call.
@@ -2794,8 +2806,8 @@ is made to say what runs.
 2. **The wasm targets in the determinism checks.** `wasm32-unknown-unknown` under `wasm-bindgen-test`,
    run by Electron through a `node` shim, with both wasm targets' fast goldens in `just ci` and the
    slow wasip1 suite in `just ci-slow`; the terrain hazards added to the sim-determinism skill, with a
-   pointer in `rust-dev.md`; and the client loading its first WebAssembly, which its Content Security
-   Policy allows only once the owner has signed off on `'wasm-unsafe-eval'`. Nothing terrain-shaped is
+   pointer in `rust-dev.md`; and the client loading its first WebAssembly, in a worker, under its
+   Content Security Policy unchanged (ruled 2026-09-30, R04.T10.a). Nothing terrain-shaped is
    built yet, but this is the check the shared terrain rests on, so it comes before the first line of
    terrain code, spike code included.
 3. **The descent spike, which is the gate.** An Earth-sized test planet with Earth's reference

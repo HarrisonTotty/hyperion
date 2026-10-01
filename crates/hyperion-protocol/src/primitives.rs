@@ -282,9 +282,11 @@ impl fmt::Display for BodyIdHex {
 ///
 /// Zero is the epoch, the instant the galaxy's fields describe. `seconds` may be negative, and
 /// `nanos` (0 to 999,999,999) always counts forward from it, so 1.5 s before the epoch is
-/// `{"seconds": -2, "nanos": 500000000}`. Every second of the source horizon, 8.3 × 10¹² s either
-/// side of the epoch, is far inside the 2⁵³ that a JavaScript number holds exactly, so `seconds` is
-/// a JSON number.
+/// `{"seconds": -2, "nanos": 500000000}`. `seconds` is a JSON number, exact in a JavaScript number
+/// within ±(2⁵³ − 1) s, about ±285 Myr, which holds the source horizon (8.3 × 10¹² s either side
+/// of the epoch). Every time a client computes with lies inside the clock window. Only a body
+/// state's `at` ([`BodyStateDto`](crate::BodyStateDto)) may lie further, and it is display-only:
+/// a client reads it to within a relative 2⁻⁵³, 32 s at 6 Gyr (plan 14, P14.T35.d).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS,
 )]
