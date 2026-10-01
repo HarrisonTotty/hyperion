@@ -1,3 +1,5 @@
+import { type AssembledBulk, BulkAssembler, parseBinaryFrameHeader } from "./bulk";
+import type { BulkManifestDto } from "./generated/BulkManifestDto";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { RequestBody } from "./generated/RequestBody";
 import type { RequestError } from "./generated/RequestError";
@@ -28,7 +30,9 @@ export type ResponseFor<K extends RequestKind> = Extract<ResponseBody, { kind: K
  * Either the server's own {@link RequestError}, or one of four endings the client decides:
  * `link_lost` when the request could not be sent or the link dropped before its answer, `aborted`
  * when it was cancelled, `superseded` when a {@link RequestChannel} replaced it with a newer one,
- * and `protocol_violation` when the server answered with a response of another kind.
+ * and `protocol_violation` when the server answered with a response of another kind. A request
+ * answered in bulk whose chunks broke their order or disagreed with the response's manifest also
+ * fails as `internal`, which the client decides then, in the server's error's shape.
  */
 export type RequestFailure =
   | RequestError
@@ -52,6 +56,35 @@ export interface PendingRequest<K extends RequestKind> {
    */
   cancel(): void;
 }
+
+/**
+ * How a request answered in bulk ended: its response with the payload's chunks in order, or why it
+ * failed.
+ *
+ * @remarks
+ * Each chunk is a view of the payload bytes of one binary frame, kept as it arrived and not
+ * parsed (rendering plan R03, Design note 11). A request whose chunks were missing, out of order, or
+ * disagreed with the response's manifest fails as `internal`.
+ */
+export type BulkOutcome<K extends RequestKind> =
+  | {
+      readonly ok: true;
+      readonly response: ResponseFor<K>;
+      readonly chunks: ReadonlyArray<Uint8Array>;
+    }
+  | { readonly ok: false; readonly error: RequestFailure };
+
+/** A request answered in bulk, in flight. */
+export interface PendingBulkRequest<K extends RequestKind> {
+  /** Settles exactly once with the request's outcome, and never rejects. */
+  readonly outcome: Promise<BulkOutcome<K>>;
+  /** Cancels the request as {@link PendingRequest.cancel} does, dropping any chunks received. */
+  cancel(): void;
+}
+
+/** What became of a binary frame: consumed, or refused as malformed, which the link reports. */
+export type BinaryFrameReceipt =
+  { readonly ok: true } | { readonly ok: false; readonly message: string };
 
 /** How a `subscribe` ended: the live subscription, or why there is none. */
 export type SubscribeOutcome<T extends TopicName> =
@@ -95,10 +128,23 @@ interface InFlight {
   readonly respond: (response: ResponseBody) => void;
   /** Settles the outcome with a failure. */
   readonly fail: (failure: RequestFailure) => void;
+  /** What to do with a response that arrives after the request was cancelled. */
+  readonly onLateAnswer: ((response: ResponseBody) => void) | undefined;
+}
+
+/** How {@link startRequest} starts a request. */
+interface StartOptions {
+  /** Sees the response the moment it arrives, before the outcome settles. */
+  readonly onAnswer?: (response: ResponseBody) => void;
+  /** Sees a response that arrives after the request was cancelled. */
+  readonly onLateAnswer?: (response: ResponseBody) => void;
+  /** Whether binary chunks answering the request are collected until its response. */
+  readonly bulk?: boolean;
 }
 
 /** A started request whose cancellation can report either reason. */
 interface StartedRequest<K extends RequestKind> {
+  readonly id: number;
   readonly outcome: Promise<RequestOutcome<K>>;
   readonly cancel: (reason: CancelReason) => void;
 }
@@ -172,6 +218,8 @@ export class RequestClient {
    * message is a response after all: a `subscribe` answered as it was cancelled must be ended.
    */
   readonly #cancelled = new Map<number, ((response: ResponseBody) => void) | undefined>();
+  /** The chunks of the requests answered in bulk (rendering plan R03, R03.T11). */
+  readonly #bulk = new BulkAssembler();
   #lastId = 0;
 
   /**
@@ -199,6 +247,67 @@ export class RequestClient {
   }
 
   /**
+   * Sends a request whose answer comes in bulk: binary chunks, then the terminal response whose
+   * manifest states what they held (rendering plan R03, Design note 10).
+   *
+   * @remarks
+   * The chunks are collected by request ID as they arrive through
+   * {@link RequestClient.handleBinaryFrame}, and the outcome settles once the response's manifest
+   * matches them. A chunk out of order, or one that disagrees with the earlier ones, fails the
+   * request as `internal` at once and cancels it on the server, so that its other chunks stop; a
+   * manifest that disagrees with what arrived fails it as `internal` too. A failure or
+   * cancellation drops every chunk the request had.
+   *
+   * @param manifestOf - Reads the manifest from the response, or `null` for a response that
+   *   carries no bulk (such as R09's `not_modelled`), which must then have had no chunks.
+   */
+  requestBulk<K extends RequestKind>(
+    body: RequestOf<K>,
+    manifestOf: (response: ResponseFor<K>) => BulkManifestDto | null,
+  ): PendingBulkRequest<K> {
+    let assembled: AssembledBulk | undefined;
+    const started: StartedRequest<K> = this[startRequest](body, {
+      bulk: true,
+      onAnswer: (response) => {
+        try {
+          assembled = answers(body, response)
+            ? this.#bulk.finish(started.id, manifestOf(response))
+            : undefined;
+        } catch (error: unknown) {
+          // The outcome must still settle, and the socket's listener must not see the throw.
+          assembled = {
+            ok: false,
+            message: `the ${body.kind} response's manifest could not be read: ${String(error)}`,
+          };
+        }
+        this.#bulk.discard(started.id);
+      },
+    });
+    const outcome = started.outcome.then((settled): BulkOutcome<K> => {
+      if (!settled.ok) {
+        return settled;
+      }
+      if (assembled === undefined || !assembled.ok) {
+        return {
+          ok: false,
+          error: {
+            code: "internal",
+            message: assembled?.message ?? `the ${body.kind} response arrived without its chunks`,
+            field: null,
+          },
+        };
+      }
+      return { ok: true, response: settled.response, chunks: assembled.chunks };
+    });
+    return {
+      outcome,
+      cancel: () => {
+        started.cancel("aborted");
+      },
+    };
+  }
+
+  /**
    * Opens a subscription to `topic` in `universe`: a `subscribe` request whose answer opens a
    * {@link Subscription} that the server's notifications are routed to.
    *
@@ -214,25 +323,27 @@ export class RequestClient {
     let opened: Subscription<T> | undefined;
     const started = this[startRequest](
       { kind: "subscribe", universe, topic },
-      (response) => {
-        if (response.kind !== "subscribe") {
-          return;
-        }
-        const id = response.subscription;
-        if (isStateOf(topic.topic, response.state)) {
-          opened = this.#subscriptions.open(id, response.state, () => {
+      {
+        onAnswer: (response) => {
+          if (response.kind !== "subscribe") {
+            return;
+          }
+          const id = response.subscription;
+          if (isStateOf(topic.topic, response.state)) {
+            opened = this.#subscriptions.open(id, response.state, () => {
+              this.#unsubscribe(id);
+            });
+          } else {
+            // Opened, but not as asked: the subscription is of no use and is ended at once.
             this.#unsubscribe(id);
-          });
-        } else {
-          // Opened, but not as asked: the subscription is of no use and is ended at once.
-          this.#unsubscribe(id);
-        }
-      },
-      (late) => {
-        // Answered as it was cancelled: the server holds a subscription nobody will read.
-        if (late.kind === "subscribe") {
-          this.#unsubscribe(late.subscription);
-        }
+          }
+        },
+        onLateAnswer: (late) => {
+          // Answered as it was cancelled: the server holds a subscription nobody will read.
+          if (late.kind === "subscribe") {
+            this.#unsubscribe(late.subscription);
+          }
+        },
       },
     );
     const outcome = started.outcome.then((settled): SubscribeOutcome<T> => {
@@ -283,6 +394,7 @@ export class RequestClient {
         break;
       }
       case "request_error":
+        this.#bulk.discard(message.id);
         this.#take(message.id)?.fail(message.error);
         break;
       case "notification":
@@ -297,6 +409,34 @@ export class RequestClient {
   }
 
   /**
+   * Takes one binary frame from the server: a chunk of a request answered in bulk.
+   *
+   * @remarks
+   * The connection hands over every binary frame whole, as an `ArrayBuffer`, without reading it.
+   * Only the header is read here. A chunk for a request that asked for no bulk, or that has ended,
+   * is dropped; one that breaks its request's order fails that request (see
+   * {@link RequestClient.requestBulk}).
+   *
+   * @returns Whether the frame was consumed, or the reason a malformed one was refused, which the
+   *   link reports as an error without closing.
+   */
+  handleBinaryFrame(frame: ArrayBuffer): BinaryFrameReceipt {
+    const parsed = parseBinaryFrameHeader(frame);
+    if (!parsed.ok) {
+      return parsed;
+    }
+    const receipt = this.#bulk.add(parsed.header, parsed.payload);
+    if (!receipt.ok && receipt.reason === "broken") {
+      this.#abandon(parsed.header.request, {
+        code: "internal",
+        message: receipt.message,
+        field: null,
+      });
+    }
+    return { ok: true };
+  }
+
+  /**
    * Settles every request in flight as `link_lost` and ends every subscription, for when the
    * socket has closed: the server ends a connection's subscriptions with its socket.
    */
@@ -304,6 +444,7 @@ export class RequestClient {
     const inFlight = [...this.#inFlight.values()];
     this.#inFlight.clear();
     this.#cancelled.clear();
+    this.#bulk.clear();
     for (const request of inFlight) {
       request.fail(LINK_LOST);
     }
@@ -311,16 +452,17 @@ export class RequestClient {
   }
 
   /**
-   * Starts a request; see {@link startRequest}. `onAnswer`, if given, sees the response the moment
-   * it arrives, before the outcome settles; `onLateAnswer` sees a response that arrives after the
-   * request was cancelled.
+   * Starts a request; see {@link startRequest} and {@link StartOptions}.
    */
   [startRequest]<K extends RequestKind>(
     body: RequestOf<K>,
-    onAnswer?: (response: ResponseBody) => void,
-    onLateAnswer?: (response: ResponseBody) => void,
+    options: StartOptions = {},
   ): StartedRequest<K> {
+    const { onAnswer, onLateAnswer, bulk = false } = options;
     const id = this.#allocateId();
+    if (bulk) {
+      this.#bulk.expect(id);
+    }
     const outcome = new Promise<RequestOutcome<K>>((resolve) => {
       this.#inFlight.set(id, {
         respond: (response) => {
@@ -340,28 +482,41 @@ export class RequestClient {
         fail: (error) => {
           resolve({ ok: false, error });
         },
+        onLateAnswer,
       });
     });
     if (!this.#send({ type: "request", id, body })) {
+      this.#bulk.discard(id);
       this.#take(id)?.fail(LINK_LOST);
     }
     return {
+      id,
       outcome,
       cancel: (reason) => {
-        // Only the pending entry is removed: a request cancelled once already, or settled, must
-        // stay in `#cancelled` until the server's terminal message for it arrives.
-        const request = this.#inFlight.get(id);
-        if (request === undefined) {
-          return;
-        }
-        this.#inFlight.delete(id);
-        // With the link down the server has forgotten the request, so it owes no answer.
-        if (this.#send({ type: "cancel", id })) {
-          this.#cancelled.set(id, onLateAnswer);
-        }
-        request.fail(CANCEL_FAILURES[reason]);
+        this.#abandon(id, CANCEL_FAILURES[reason]);
       },
     };
+  }
+
+  /**
+   * Ends request `id` here with `failure` and tells the server to drop it.
+   *
+   * @remarks
+   * Only the pending entry is removed: a request cancelled once already, or settled, must stay in
+   * `#cancelled` until the server's terminal message for it arrives.
+   */
+  #abandon(id: number, failure: RequestFailure): void {
+    const request = this.#inFlight.get(id);
+    if (request === undefined) {
+      return;
+    }
+    this.#inFlight.delete(id);
+    this.#bulk.discard(id);
+    // With the link down the server has forgotten the request, so it owes no answer.
+    if (this.#send({ type: "cancel", id })) {
+      this.#cancelled.set(id, request.onLateAnswer);
+    }
+    request.fail(failure);
   }
 
   /**

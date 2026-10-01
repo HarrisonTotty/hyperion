@@ -117,6 +117,9 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
     const connect = (): void => {
       setState((previous) => ({ ...previous, status: "connecting" }));
       const current = new WebSocket(url);
+      // Before any message can arrive: a binary frame is then one `ArrayBuffer`, handed over whole,
+      // where the default `blob` would need an asynchronous read per chunk (R03, Design note 10).
+      current.binaryType = "arraybuffer";
       socket = current;
 
       current.addEventListener("open", () => {
@@ -124,6 +127,13 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
       });
 
       current.addEventListener("message", (event: MessageEvent<unknown>) => {
+        if (event.data instanceof ArrayBuffer) {
+          const receipt = link.requests.handleBinaryFrame(event.data);
+          if (!receipt.ok) {
+            console.error("server sent a malformed binary frame:", receipt.message);
+          }
+          return;
+        }
         if (typeof event.data !== "string") {
           return;
         }
