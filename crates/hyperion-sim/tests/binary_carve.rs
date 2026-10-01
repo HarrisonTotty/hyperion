@@ -75,23 +75,27 @@ fn no_grid_system_is_in_a_carved_class_and_none_uses_every_attempt() {
     for (salt, &(layer, n)) in (0_u64..).zip(&STRATA) {
         let records = records_of(&galaxy, layer, n, salt);
         let (records, galaxy) = (&records, &galaxy);
-        // Each thread tallies its share; the sums are the same on any number of threads.
+        // Each share is tallied on its own thread (or in turn, on wasm32-wasip1); the sums are
+        // counts, the same on any number of shares.
+        let share = |k: usize| {
+            let mut tally = Tally::default();
+            for record in records.iter().skip(k).step_by(threads) {
+                let stars = SystemStars::generate(galaxy, record);
+                tally.attempts[usize::from(stars.attempt().get())] += 1;
+                tally.with_pairs += u64::from(!stars.pairs().is_empty());
+                if let Some(carved) = stars.carved_pair() {
+                    eprintln!("{:?} keeps a carved pair: {carved:?}", record.id());
+                    tally.carved += 1;
+                }
+            }
+            tally
+        };
+        #[cfg(not(target_family = "wasm"))]
         let tallies: Vec<Tally> = std::thread::scope(|scope| {
             let workers: Vec<_> = (0..threads)
                 .map(|k| {
-                    scope.spawn(move || {
-                        let mut tally = Tally::default();
-                        for record in records.iter().skip(k).step_by(threads) {
-                            let stars = SystemStars::generate(galaxy, record);
-                            tally.attempts[usize::from(stars.attempt().get())] += 1;
-                            tally.with_pairs += u64::from(!stars.pairs().is_empty());
-                            if let Some(carved) = stars.carved_pair() {
-                                eprintln!("{:?} keeps a carved pair: {carved:?}", record.id());
-                                tally.carved += 1;
-                            }
-                        }
-                        tally
-                    })
+                    let share = &share;
+                    scope.spawn(move || share(k))
                 })
                 .collect();
             workers
@@ -99,6 +103,9 @@ fn no_grid_system_is_in_a_carved_class_and_none_uses_every_attempt() {
                 .map(|w| w.join().expect("a worker finishes"))
                 .collect()
         });
+        // wasm32-wasip1 has no threads: the shares run one after another (plan R04, T7.d).
+        #[cfg(target_family = "wasm")]
+        let tallies: Vec<Tally> = (0..threads).map(share).collect();
         let mut layer_tally = Tally::default();
         for t in &tallies {
             for (sum, a) in layer_tally.attempts.iter_mut().zip(t.attempts) {

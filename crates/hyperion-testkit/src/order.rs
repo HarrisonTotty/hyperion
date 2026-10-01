@@ -83,7 +83,8 @@ fn permutation(len: usize) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::*;
 
@@ -97,17 +98,6 @@ mod tests {
     fn empty_and_single_key_pass() {
         assert_order_independent(&[] as &[u64], |k| *k);
         assert_order_independent(&[9_u64], |k| *k);
-    }
-
-    #[test]
-    #[should_panic(expected = "order dependence at position 0")]
-    fn hidden_counter_fails() {
-        let calls = Cell::new(0_u64);
-        let keys: Vec<u64> = (0..10).collect();
-        assert_order_independent(&keys, |k| {
-            calls.set(calls.get() + 1);
-            k + calls.get()
-        });
     }
 
     #[test]

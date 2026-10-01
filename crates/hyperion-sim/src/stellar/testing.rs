@@ -288,8 +288,9 @@ mod tests {
     //! P06.T31's statistical tests: class fractions by population and the galaxy's expected
     //! counts, at Milky Way parameters, each window with its source (slow).
     //!
-    //! Each test tallies its samples on [`THREADS`] threads, each star evaluated and dropped at
-    //! once, and merges the tallies in thread order.
+    //! Each test tallies its samples in [`THREADS`] shares, one thread each (one after another on
+    //! wasm32-wasip1), each star evaluated and dropped at once, and merges the tallies in share
+    //! order.
 
     use std::collections::BTreeMap;
 
@@ -310,7 +311,7 @@ mod tests {
     use crate::stellar::variability::{VariabilityInputs, variability};
     use crate::stellar::{ObjectKind, Phase};
 
-    /// Threads a tally runs on.
+    /// The shares a tally is split into, each on a thread of its own where there are threads.
     const THREADS: u64 = 4;
 
     /// The seed of every sample.
@@ -363,27 +364,31 @@ mod tests {
         }
     }
 
-    /// The tally of `n` samples drawn by `sample`(index), observed by `observe`, on [`THREADS`]
-    /// threads: thread k takes the indices k, k + THREADS, …, and the tallies merge in thread
-    /// order.
+    /// The tally of `n` samples drawn by `sample`(index), observed by `observe`, in [`THREADS`]
+    /// shares: share k takes the indices k, k + THREADS, …, and the tallies merge in share
+    /// order. Each share runs on its own thread, or, on wasm32-wasip1, which has no threads, one
+    /// after another on this one, with the same shares and the same merge, so the sums are the
+    /// same bits (plan R04, T7.d).
     fn tally<S>(
         n: u64,
         sample: impl Fn(u64) -> S + Sync,
         observe: impl Fn(&S, &mut Tally) + Sync,
     ) -> Tally {
+        let share = |k: u64| {
+            let mut part = Tally::default();
+            let mut i = k;
+            while i < n {
+                observe(&sample(i), &mut part);
+                i += THREADS;
+            }
+            part
+        };
+        #[cfg(not(target_family = "wasm"))]
         let parts: Vec<Tally> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..THREADS)
                 .map(|k| {
-                    let (sample, observe) = (&sample, &observe);
-                    scope.spawn(move || {
-                        let mut part = Tally::default();
-                        let mut i = k;
-                        while i < n {
-                            observe(&sample(i), &mut part);
-                            i += THREADS;
-                        }
-                        part
-                    })
+                    let share = &share;
+                    scope.spawn(move || share(k))
                 })
                 .collect();
             handles
@@ -391,6 +396,8 @@ mod tests {
                 .map(|h| h.join().expect("a sampling thread"))
                 .collect()
         });
+        #[cfg(target_family = "wasm")]
+        let parts: Vec<Tally> = (0..THREADS).map(share).collect();
         let mut total = Tally::default();
         for part in &parts {
             total.merge(part);

@@ -70,6 +70,8 @@ impl Error for HexFault {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     #[test]
     fn exactly_the_lower_case_form_parses() {

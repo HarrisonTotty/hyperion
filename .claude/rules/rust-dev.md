@@ -33,9 +33,10 @@ argue with its output.
   `rng` and the generator version. It does no I/O, reads no clocks, spawns no threads and holds no
   caches, and `libm` is its only runtime dependency.
 - `hyperion-surface` holds the shared height function the server and the client both run. It
-  depends on `hyperion-base` alone (and, from R04.T10.b, on `wasm-bindgen` under
-  `cfg(all(target_arch = "wasm32", target_os = "unknown"))` only), compiles to
-  `wasm32-unknown-unknown`, and never depends on the sim, which depends on it.
+  depends on `hyperion-base` alone, and on `wasm-bindgen` under
+  `cfg(all(target_arch = "wasm32", target_os = "unknown"))` only, for the client module's exports
+  in `src/wasm.rs`; it compiles to `wasm32-unknown-unknown`, where `just gen-surface` builds it into
+  the client's module, and never depends on the sim, which depends on it.
 - `hyperion-protocol` holds only wire types and their serde/ts-rs derives, with no behaviour.
 - Binaries stay thin: `main.rs` parses configuration and calls into `lib.rs`, so integration tests
   can reach the logic.

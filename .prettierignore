@@ -6,3 +6,6 @@ pnpm-lock.yaml
 Cargo.lock
 /target/
 /.claude/
+
+# Built by `just gen-surface` from crates/hyperion-surface
+apps/hyperion/src/renderer/src/generated/

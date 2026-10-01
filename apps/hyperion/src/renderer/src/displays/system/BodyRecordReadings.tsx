@@ -14,7 +14,6 @@ import {
   formatSci,
   formatSignificant,
   formatTemperatureK,
-  formatUniverseTimeDhms,
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
 import {
@@ -39,6 +38,7 @@ import type {
 } from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
 import { BodyIdRow } from "./BodyIdRow";
+import { formatEventTime } from "./displayTime";
 import { MISSING, ReadoutRow, type Shown, shown as value } from "./ReadoutRow";
 
 /** Kilometres in a metre. */
@@ -345,7 +345,7 @@ export function BodyRecordReadings({
       {state.kind === "destroyed" || state.kind === "unbound" ? (
         <ReadoutRow
           label="SINCE"
-          shown={value(`${TIME_SYSTEM_LABEL} ${formatUniverseTimeDhms(state.at)}`)}
+          shown={value(`${TIME_SYSTEM_LABEL} ${formatEventTime(state.at)}`)}
           wide
         />
       ) : null}

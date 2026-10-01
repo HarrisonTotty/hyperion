@@ -7,5 +7,6 @@
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/src", "src/preload/api.ts"]
+  "include": ["src/renderer/src", "src/preload/api.ts"],
+  "exclude": ["src/renderer/src/**/*.worker.ts"]
 }

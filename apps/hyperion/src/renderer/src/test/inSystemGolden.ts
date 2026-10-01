@@ -220,26 +220,5 @@ export function goldenSystemBodies(
     throw new Error(`the frame for ${system} at ${when} is not a system's bodies`);
   }
   const { kind: _kind, ...bodies } = message.body;
-  return { ...bodies, bodies: bodies.bodies.map(withSafeEventTime) };
-}
-
-/**
- * A body whose event time is held to a safe integer of seconds.
- *
- * @remarks
- * The server states some bodies' unbinding billions of years before the epoch, beyond 2⁵³ s, which
- * a JSON number cannot carry exactly and plan 14's adapter refuses (reported as galaxy work). Only
- * the time of an event long past changes; no position or orbit does.
- */
-function withSafeEventTime(
-  body: SystemBodiesDto["bodies"][number],
-): SystemBodiesDto["bodies"][number] {
-  const state = body.state;
-  if (
-    (state.type === "unbound" || state.type === "destroyed") &&
-    !Number.isSafeInteger(state.at.seconds)
-  ) {
-    return { ...body, state: { ...state, at: { seconds: Number.MIN_SAFE_INTEGER, nanos: 0 } } };
-  }
-  return body;
+  return bodies;
 }

@@ -7,6 +7,9 @@
 //! here from the unit tests of `rng` when it moved from the sim (R04.T4.d), unchanged but for
 //! reaching the crate through its public API.
 
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::wasm_bindgen_test as test;
+
 use hyperion_base::Seed;
 use hyperion_base::math::normal_quantile;
 use hyperion_base::rng::{
