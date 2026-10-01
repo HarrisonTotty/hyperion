@@ -367,16 +367,31 @@ the call sites here change.
    strokes up to 2 px, with no `depthBiasClamp` (it must be 0 in compatibility mode). For
    `depth32float` the constant's unit is 2^(e − 23) of the primitive's largest depth, so −128 moves
    a face by 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵ of its distance, twice the 67 the 4 × 10⁻⁶ margin needs, since
-   backends may differ by 2×; the slope term covers a stroke's half-width and its one-pixel
-   antialiasing fringe. Bias is valid only on triangle topologies and is never set on a line pass.
-   The adapter carries it as `depthBiasAway { constant: 128, slopeScale: 2 }`, positive meaning
-   away, in one place, because Babylon's `zOffset` and `zOffsetUnits` are already negated under
-   `useReverseDepthBuffer` and a double negation is the likely bug. The occluder is drawn two-sided,
-   so that a winding flip between our right-handed matrix and a left-handed engine cannot unhide
-   every hidden line. The bias is local to the occluder pass, not the global bias the brainstorm
-   rejects. Sources: W3C WebGPU, "GPUDepthStencilState" and "biased fragment depth"; Babylon.js
-   main, `Engines/WebGPU/webgpuCacheRenderPipeline.ts` and `Engines/abstractEngine.pure.ts`
-   (`setZOffset`, `setZOffsetUnits`).
+   backends may differ by 2×. The price is the other end: a line up to 128 × 2⁻²³ = 1.5 × 10⁻⁵ of
+   the distance behind a hull face, 2⁻¹⁵ ≈ 3.05 × 10⁻⁵ on a backend at twice the unit, may show
+   through it, which at hull sizes reaches only the face's own edges. The slope term covers a
+   stroke's half-width and its one-pixel antialiasing fringe. Bias is valid only on triangle
+   topologies and is never set on a line pass. The adapter carries it as
+   `depthBiasAway { constant: 128, slopeScale: 2 }`, positive meaning away, in one place, because
+   Babylon's `zOffset` and `zOffsetUnits` are already negated under `useReverseDepthBuffer` and a
+   double negation is the likely bug. The occluder is drawn two-sided, so that a winding flip
+   between our right-handed matrix and a left-handed engine cannot unhide every hidden line. The
+   bias is local to the occluder pass, not the global bias the brainstorm rejects. Sources: W3C
+   WebGPU, "GPUDepthStencilState" and "biased fragment depth"; Babylon.js main,
+   `Engines/WebGPU/webgpuCacheRenderPipeline.ts` and `Engines/abstractEngine.pure.ts` (`setZOffset`,
+   `setZOffsetUnits`).
+
+   A body's occluder sphere, which writes its own depth (`occluderSphere.wgsl`), takes the same
+   slope term in the fragment: its exact ray-sphere depth is pushed away by `SLOPE_SCALE` = 3 px
+   (w_max ÷ 2 + 1 for a 1.5 px stroke with 1 px casings, rounded up) of the depth's screen slope,
+   taken from the tangent plane at the hit point. The 4 × 10⁻⁶ margin alone keeps only a graticule
+   stroke's centreline in front. Near the limb the slope, and with it the push, grows without
+   bound, but a line behind the body lies at least the sphere's chord 2R cos θ behind the front
+   surface. The push exceeds that chord only within `SLOPE_SCALE` ÷ 4 = 0.75 px of the limb (for
+   small discs; less for large ones, 0.38 px for a disc filling the view), where a line passing
+   behind the body may overrun the limb by less than a pixel. That is inside the antialiasing
+   fringe, and is accepted (decided 2026-10-01, delegated decision).
+
 6. **The body-frame rule** (researched 2026-09-29; a physics ruling). The frame boundary is a
    precision device, not a dynamical one: with every body's gravity integrated, the choice of frame
    changes only rounding, so the larger, already-computed Hill sphere is kept rather than the
@@ -1007,8 +1022,9 @@ scene, the precision scene and the frame-change scene, and read each back: every
 depth buffer holds 0 where nothing was drawn; the casing texels around a line are `--surface-0`; the
 tone curve's WGSL output at 64 luminances equals its twin within 10⁻⁵; a texel at the near plane
 reads depth 1 and +y is up on screen (no half-Z conversion or Y flip was added over the frozen
-projection); a face with its own edge and a second edge 10⁻⁵ of the distance behind it, at 1 m and
-at 10⁸ m, shows the first edge and hides the second. Properties only, never a stored image.
+projection); a face with its own edge, and a second edge 4 × 10⁻⁵ of the distance behind it
+(beyond the bias's worst case, 2 × 128 × 2⁻²³ = 2⁻¹⁵ ≈ 3.05 × 10⁻⁵, Design note 5), at 1 m and at
+10⁸ m, shows the first edge and hides the second. Properties only, never a stored image.
 
 - Files: `view/shaders/*.wgsl`, `view/wireframe/submit.ts` (the only file that calls R01's adapter),
   the smoke test in R01's harness directory.
@@ -1473,45 +1489,44 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   the selection alone. `targetBracket` and `TargetBracket` are renamed `targetMark` and
   `TargetMark`; range and closure are unchanged. The legend entry is `TICKS TARGET` (R02.T2.f).
 - **Deviations in R02.T14, as built.** The shaders follow R01's Design note 23 (decided
-  2026-09-30, standard WGSL, built as R01.T8.k): `frame.wgsl`'s `Frame` at `@group(0)` (R01's
-  file; its `viewport` is a `vec4f`), each shader's own `Draw` at `@group(1)` (`offsetFromCameraM`
-  then the spec's uniforms in order, held to the specs by a test that reads the sources), one
-  read-only `array<vec4f>` storage buffer at `@group(2) @binding(0)`, entry points `vertexMain`
-  and `fragmentMain`, and the meshes' positions used as corner parameters at `@location(0)`.
-  Every per-frame quantity goes through four storage buffers that `WireframeRenderer`
+  2026-09-30, standard WGSL, built as R01.T8.k): `frame.wgsl`'s `Frame` at `@group(0)` (R01's file;
+  its `viewport` is a `vec4f`), each shader's own `Draw` at `@group(1)` (`offsetFromCameraM` then
+  the spec's uniforms in order, held to the specs by a test that reads the sources), one read-only
+  `array<vec4f>` storage buffer at `@group(2) @binding(0)`, entry points `vertexMain` and
+  `fragmentMain`, and the meshes' positions used as corner parameters at `@location(0)`. Every
+  per-frame quantity goes through four storage buffers that `WireframeRenderer`
   (`view/wireframe/submit.ts`) grows by doubling (the engine frees no buffer, so an outgrown one is
-  kept until the engine goes); the pure `packWireframe` packs them and is what the tests read.
-  Four materials, not three: the bodies' occluder spheres are `occluderSphere.wgsl`, each a
-  screen rectangle the CPU bounds (`sphereScreenRect`: a 16-gon circumscribing the silhouette
-  circle, the whole view where it reaches behind the near plane) in which each fragment intersects
-  its ray with the sphere and writes that depth through `frag_depth`, exact where a tessellated
-  sphere would fall inside its own limb; for that the draw list's `OccluderSphere` gains
-  `altitudeM` (distance less the occluder radius, differenced in `f64`), and the intersection is
-  t = altitude × (D + r) ÷ (b + √h²), free of cancellation near the body. Its written depth is then
-  pushed away by three pixels' worth of its own screen slope, taken in closed form from the tangent
-  plane at the hit point (a slope term like the hull faces', `SLOPE_SCALE` = 3 for a 1.5 px stroke
-  with its 1 px casings and fringe): the 4 × 10⁻⁶ margin of Design note 5 holds a graticule's
-  centreline in front of its occluder but not its width, and without the term the inner half of
-  every obliquely seen graticule stroke failed the depth test (found by the plan-conformance review;
-  checked on both adapters, the stroke's full value restored). **For the owner:** Design note 5
-  gains this term; within a few pixels of the limb it leaves the occluder further back, so a line
-  passing behind the limb can show there by about a stroke's width. The hulls' faces are
-  `occluder.wgsl`, with `firstTriangle` in its `Draw`. Provides' shader list and the Consumes'
-  `none`/`additive` are thus stale: the shaders are `frame.wgsl` (R01's), `lines.wgsl`,
-  `occluder.wgsl`, `occluderSphere.wgsl`, `starSprite.wgsl` and `toneCurve.wgsl`, and lines use
-  `premultiplied`. Lines take R01's `premultiplied` blend (the Consumes said `none`/`additive`): a
-  stroke's antialiased coverage must lie over what is beneath, and its casing must cover a star, so
-  the submission draws occluders, then sprites, then each batch's casing (width + 2 × casing,
-  `--surface-0`) and its stroke as two draws of one instance range, where T13's list has lines
-  before sprites. Screen-space symbology is drawn at depth 1 (the near plane's), which passes every
-  greater-equal test, since a material has no depth-test switch. A dashed batch's phase is the
-  screen length before each segment, restarting where a polyline breaks. Sprites write alpha 1,
-  since R01's `additive` is `src-alpha, one`; their erf is Abramowitz and Stegun 7.1.26. Token
-  colours are decoded from sRGB to linear (`linearColour`), so that the canvas's sRGB view encodes
-  them back. **`toneCurve.wgsl`'s sigmoid** is re-expanded exactly about x = 0.5 and evaluated by
-  Horner's rule: the monomial form lost 1.2 × 10⁻⁵ in `f32` (its terms reach 100 and cancel), which
-  put the 64-point comparison at 2.7 × 10⁻⁵ on SwiftShader and 5.4 × 10⁻⁵ on the RTX 3080; the new
-  form loses 1.5 × 10⁻⁷, tested in `f32` by `Math.fround`.
+  kept until the engine goes); the pure `packWireframe` packs them and is what the tests read. Four
+  materials, not three: the bodies' occluder spheres are `occluderSphere.wgsl`, each a screen
+  rectangle the CPU bounds (`sphereScreenRect`: a 16-gon circumscribing the silhouette circle, the
+  whole view where it reaches behind the near plane) in which each fragment intersects its ray with
+  the sphere and writes that depth through `frag_depth`, exact where a tessellated sphere would fall
+  inside its own limb; for that the draw list's `OccluderSphere` gains `altitudeM` (distance less
+  the occluder radius, differenced in `f64`), and the intersection is t = altitude × (D + r) ÷ (b +
+  √h²), free of cancellation near the body. Its written depth is then pushed away by three pixels'
+  worth of its own screen slope, taken in closed form from the tangent plane at the hit point (a
+  slope term like the hull faces', `SLOPE_SCALE` = 3 for a 1.5 px stroke with its 1 px casings and
+  fringe): the 4 × 10⁻⁶ margin of Design note 5 holds a graticule's centreline in front of its
+  occluder but not its width, and without the term the inner half of every obliquely seen graticule
+  stroke failed the depth test (found by the plan-conformance review; checked on both adapters, the
+  stroke's full value restored). Design note 5 now states the term and its bound (under 0.75 px at
+  the limb; decided 2026-10-01, delegated decision). The hulls' faces are `occluder.wgsl`, with
+  `firstTriangle` in its `Draw`. Provides' shader list and the Consumes' `none`/`additive` are thus
+  stale: the shaders are `frame.wgsl` (R01's), `lines.wgsl`, `occluder.wgsl`, `occluderSphere.wgsl`,
+  `starSprite.wgsl` and `toneCurve.wgsl`, and lines use `premultiplied`. Lines take R01's
+  `premultiplied` blend (the Consumes said `none`/`additive`): a stroke's antialiased coverage must
+  lie over what is beneath, and its casing must cover a star, so the submission draws occluders,
+  then sprites, then each batch's casing (width + 2 × casing, `--surface-0`) and its stroke as two
+  draws of one instance range, where T13's list has lines before sprites. Screen-space symbology is
+  drawn at depth 1 (the near plane's), which passes every greater-equal test, since a material has
+  no depth-test switch. A dashed batch's phase is the screen length before each segment, restarting
+  where a polyline breaks. Sprites write alpha 1, since R01's `additive` is `src-alpha, one`; their
+  erf is Abramowitz and Stegun 7.1.26. Token colours are decoded from sRGB to linear
+  (`linearColour`), so that the canvas's sRGB view encodes them back. **`toneCurve.wgsl`'s sigmoid**
+  is re-expanded exactly about x = 0.5 and evaluated by Horner's rule: the monomial form lost 1.2 ×
+  10⁻⁵ in `f32` (its terms reach 100 and cancel), which put the 64-point comparison at 2.7 × 10⁻⁵ on
+  SwiftShader and 5.4 × 10⁻⁵ on the RTX 3080; the new form loses 1.5 × 10⁻⁷, tested in `f32` by
+  `Math.fround`.
 - **R02.T14.c, checked by scratch pages (not committed); its registration waits.** B3's
   `just test-render` (R01.T9) is not on the branch, so the smoke checks ran from scratch pages:
   first on a raw-WebGPU host of the same convention, then through R01's own engine
@@ -1531,9 +1546,13 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   bias moves the face by 9.5 × 10⁻⁶ there) but fails at 10⁸ m, where the face's depth, 10⁻⁹, sits
   low in its binade and the bias of 128 moves it by 1.42 × 10⁻⁵ of the distance, which Design note 5
   itself states as 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵; both adapters agree. At 2 × 10⁻⁵ and 3 × 10⁻⁵ the
-  second edge is hidden at both distances. The check is recorded at 3 × 10⁻⁵ (twice the bias's upper
-  bound) and the 10⁻⁵ wording is for the owner; the alternative is a constant near 67. Pending
-  R01.T9: the shaders' entries in `WGSL_CATALOGUE` and these checks as the harness's smoke test.
+  second edge is hidden at both distances. Decided 2026-10-01 (delegated decision): the
+  criterion was the plan's error; the check is at 4 × 10⁻⁵ and the bias stays 128. Re-run at
+  4 × 10⁻⁵ on 2026-10-01 through the same scratch page on both adapters (SwiftShader headless;
+  the RTX 3080, NVIDIA 615.71.09, in a hidden offscreen window): at 1 m and at 10⁸ m the own edge
+  reads its full value (red 147) and the edge behind reads 0, and every other check above
+  repeats. Pending R01.T9: the shaders' entries in `WGSL_CATALOGUE` and these checks as the
+  harness's smoke test.
 - **Deviations in R02.T15, as built.** `DisplayId` gains `view` (`View`, `F4`). The display's
   logic is pure in `displays/view/viewRun.ts`: `ViewRun { kept, tS, scene, camera }`, `startRun`,
   `stepRun` (the script in real time, run again from its start at its end; `followPreset`,
