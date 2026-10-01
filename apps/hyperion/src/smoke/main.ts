@@ -7,12 +7,15 @@
  * @remarks
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
- * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=` and reach it in
- * the query string. The main process makes no request itself (Node's `fetch` would bypass
- * Chromium's `webRequest`).
+ * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`;
+ * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
+ * and `--smoke-soak=<seconds>` runs T11's and T12's soak scene instead of the checks, hidden and
+ * offscreen unless `--smoke-show=1`. They reach the page in the query string. The main process
+ * makes no request itself (Node's `fetch` would bypass Chromium's `webRequest`).
  */
 
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { app, BrowserWindow, ipcMain, session } from "electron";
 
@@ -22,13 +25,9 @@ import {
   judgeSmokeRun,
   readSmokeResult,
   SMOKE_EXIT,
+  SMOKE_RESULT_CHANNEL,
 } from "./result";
-
-/** The one channel the page reports on. */
-export const SMOKE_RESULT_CHANNEL = "smoke:result";
-
-/** How long a run may take before the watchdog ends it. */
-const WATCHDOG_MS = 180_000;
+import { startSoak } from "./soak";
 
 /** The value of `--<name>=value` on the command line, or `fallback`. */
 function argument(name: string, fallback: string): string {
@@ -38,7 +37,15 @@ function argument(name: string, fallback: string): string {
 
 const variant = argument("smoke-variant", "default");
 const fixture = argument("smoke-fixture", "none");
+const gpuTiming = argument("smoke-gpu-timing", "0");
+/** The soak's length in seconds (T11, T12); 0 runs the checks. */
+const soakSeconds = Number(argument("smoke-soak", "0"));
+const show = argument("smoke-show", "0") === "1";
+const video = argument("smoke-video", "");
+const capturePath = argument("smoke-capture", "");
 const cancelled: CancelledRequest[] = [];
+/** The page's own URL, without its query: the only frame allowed to report. */
+const PAGE_URL = pathToFileURL(join(__dirname, "../renderer/smoke.html")).href;
 
 function finish(lines: ReadonlyArray<string>, exitCode: number): void {
   for (const line of lines) {
@@ -47,9 +54,24 @@ function finish(lines: ReadonlyArray<string>, exitCode: number): void {
   app.exit(exitCode);
 }
 
+/** A harness window refuses every other window and every navigation. */
+function lockDown(window: BrowserWindow): void {
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event) => {
+    event.preventDefault();
+  });
+}
+
 app.on("window-all-closed", () => {
   // The run ends by its report or the watchdog, never by a closed window.
 });
+
+if (!Number.isFinite(soakSeconds) || soakSeconds < 0) {
+  finish([`SETUP --smoke-soak must be a number of seconds, not ${soakSeconds}`], SMOKE_EXIT.setup);
+}
+
+/** How long a run may take before the watchdog ends it. */
+const WATCHDOG_MS = 180_000 + soakSeconds * 1000;
 
 void app
   .whenReady()
@@ -57,6 +79,9 @@ void app
     const watchdog = setTimeout(() => {
       finish([`WATCHDOG no report after ${WATCHDOG_MS} ms`], SMOKE_EXIT.watchdog);
     }, WATCHDOG_MS);
+    session.defaultSession.setPermissionRequestHandler((_contents, _permission, decide) => {
+      decide(false);
+    });
     session.defaultSession.webRequest.onBeforeRequest(
       { urls: ["<all_urls>"] },
       (details, reply) => {
@@ -69,28 +94,47 @@ void app
       },
     );
     const window = new BrowserWindow({
-      show: false,
+      show,
+      width: 1600,
+      height: 900,
       webPreferences: {
         // Headless Ozone segfaults without offscreen rendering (Design note 17).
-        offscreen: true,
+        offscreen: !show,
         preload: join(__dirname, "../preload/smoke.js"),
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
       },
     });
-    ipcMain.handle(SMOKE_RESULT_CHANNEL, (event, report: unknown) => {
-      if (event.senderFrame?.url.startsWith("file:") !== true) {
+    lockDown(window);
+    const stopSoak =
+      soakSeconds > 0
+        ? startSoak({
+            window,
+            capturePath: capturePath === "" ? null : capturePath,
+            seconds: soakSeconds,
+            show,
+          })
+        : (): Promise<void> => Promise.resolve();
+    ipcMain.handle(SMOKE_RESULT_CHANNEL, async (event, report: unknown) => {
+      const url = event.senderFrame?.url.split("?")[0];
+      if (url !== PAGE_URL) {
         return;
       }
-      clearTimeout(watchdog);
-      const result = readSmokeResult(report);
-      if (result === null) {
-        finish(["SETUP the page's report is malformed"], SMOKE_EXIT.setup);
-        return;
+      try {
+        await stopSoak();
+        const result = readSmokeResult(report);
+        if (result === null) {
+          finish(["SETUP the page's report is malformed"], SMOKE_EXIT.setup);
+          return;
+        }
+        const { lines, exitCode } = judgeSmokeRun(result, cancelled);
+        finish(lines, exitCode);
+      } catch (error: unknown) {
+        finish([`SETUP the report could not be judged: ${String(error)}`], SMOKE_EXIT.setup);
+      } finally {
+        clearTimeout(watchdog);
       }
-      const { lines, exitCode } = judgeSmokeRun(result, cancelled);
-      finish(lines, exitCode);
     });
     window.webContents.on("console-message", (details) => {
       if (details.level === "error" || details.level === "warning") {
@@ -98,7 +142,13 @@ void app
       }
     });
     await window.loadFile(join(__dirname, "../renderer/smoke.html"), {
-      query: { variant, fixture },
+      query: {
+        variant,
+        fixture,
+        gpuTiming,
+        soak: String(soakSeconds),
+        ...(video === "" ? {} : { video: pathToFileURL(video).href }),
+      },
     });
     return undefined;
   })

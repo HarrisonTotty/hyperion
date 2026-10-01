@@ -29,8 +29,10 @@ export const SUM_U32_RAGGED_COUNT = 65_533;
 /** The f32 inputs' count. */
 export const SUM_F32_COUNT = 65_536;
 
-/** The u32 kernels' workgroup sizes. */
+/** The u32 sum's workgroup size. */
 export const SUM_U32_WORKGROUP = 64;
+
+/** The ragged u32 sum's workgroup size, which no subgroup size divides. */
 export const SUM_U32_RAGGED_WORKGROUP = 37;
 
 /** The u32 inputs: 24-bit values by a multiplicative hash, so that the sum wraps many times. */

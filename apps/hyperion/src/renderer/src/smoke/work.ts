@@ -20,6 +20,12 @@ import {
   texel,
 } from "./harness";
 
+/** The labels of `wanted` not in `seen`, or `none`. */
+function missingText(wanted: ReadonlyArray<string>, seen: ReadonlySet<string>): string {
+  const missing = wanted.filter((label) => !seen.has(label));
+  return missing.length > 0 ? missing.join(", ") : "none";
+}
+
 /** T9.h: a two-target chain, an asynchronous material, GPU-written counts and per-pass time. */
 export async function checkTargetsAsyncIndirectTiming(
   engine: RenderEngine,
@@ -198,7 +204,7 @@ export async function checkTargetsAsyncIndirectTiming(
     }
     const passes = times.flatMap((frame) => frame.passes);
     const labels = new Set(passes.map((pass) => pass.label));
-    const wanted = [
+    const wanted: ReadonlyArray<string> = [
       "chain first",
       "chain second",
       "write args",
@@ -211,7 +217,7 @@ export async function checkTargetsAsyncIndirectTiming(
       "T9.h onPassTimes reports one entry per labelled pass, none bracketed, finite and non-negative",
       wanted.every((label) => labels.has(label)) &&
         passes.every((pass) => !pass.bracketed && Number.isFinite(pass.ns) && pass.ns >= 0),
-      `${passes.length} passes; timer ${times[0]?.timer ?? "none"}; missing ${wanted.filter((label) => !labels.has(label)).join(", ") || "none"}`,
+      `${passes.length} passes; timer ${times[0]?.timer ?? "none"}; ${passes.filter((pass) => pass.ns % 65_536 !== 0).length} not multiples of 65,536 ns; missing ${missingText(wanted, labels)}`,
     );
   } else {
     checks.check(

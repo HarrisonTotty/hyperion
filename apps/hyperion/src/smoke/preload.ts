@@ -4,6 +4,8 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 
+import { SMOKE_RESULT_CHANNEL } from "./result";
+
 /** The page's view of the bridge, `window.smoke`. */
 export interface SmokeApi {
   report(result: unknown): Promise<void>;
@@ -11,8 +13,8 @@ export interface SmokeApi {
 
 const api: SmokeApi = {
   async report(result: unknown): Promise<void> {
-    // The channel's name is fixed here; none crosses the bridge.
-    await ipcRenderer.invoke("smoke:result", result);
+    // The channel's name is fixed; none crosses the bridge.
+    await ipcRenderer.invoke(SMOKE_RESULT_CHANNEL, result);
   },
 };
 
