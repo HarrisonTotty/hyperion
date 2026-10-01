@@ -71,6 +71,7 @@ import {
 } from "../types";
 import { withHandedAdapter } from "./adapterHandoff";
 import { createKernel, encodeDispatch, type KernelRecord, type Workgroups } from "./compute";
+import { logUncapturedErrors, watchDeviceLoss } from "./deviceLoss";
 import { ExternalStorageBuffer } from "./externalStorageBuffer";
 import { resolveKernelResources } from "./kernelResources";
 import { engineDevice, flushEngine, setSampledView } from "./internals";
@@ -131,6 +132,8 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   readonly #releases: ReadonlyArray<() => void>;
+  /** The device's loss and error watches, ended at disposal. */
+  readonly #watches: ReadonlyArray<() => void>;
   readonly #resources: ResourceRegistry;
   /** Each sampled texture's Babylon wrapper, made when it is first bound. */
   readonly #sampled = new Map<TextureHandle, ThinTexture>();
@@ -138,6 +141,8 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
   readonly #storage = new Map<BufferHandle, ExternalStorageBuffer>();
   /** Each kernel's uniform buffers, by uniform name. */
   readonly #kernelUniforms = new Map<KernelRecord, Map<string, BufferHandle>>();
+  /** The device's loss, once reported. */
+  #lost: GraphicsFault | null = null;
   #disposed = false;
 
   /**
@@ -159,6 +164,19 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     scene.autoClear = false;
     scene.skipPointerMovePicking = true;
     this.#scene = scene;
+    this.#watches = [
+      watchDeviceLoss(
+        this.#device,
+        () => this.#disposed,
+        (fault) => {
+          this.#lost = fault;
+          for (const listener of this.#faultListeners) {
+            listener(fault);
+          }
+        },
+      ),
+      logUncapturedErrors(this.#device),
+    ];
   }
 
   /** The Babylon engine, for the adapter's own modules. */
@@ -410,8 +428,23 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
     };
   }
 
+  /** Never fires here: the engine `loadRenderEngine` returns re-creates this one after a loss. */
+  onRestored(_listener: () => void): () => void {
+    return () => undefined;
+  }
+
   onFault(listener: (fault: GraphicsFault) => void): () => void {
     this.#faultListeners.add(listener);
+    // A loss reported before anyone listened (the device lost while the engine was being made) is
+    // replayed, so that the engine is never adopted dead.
+    const lost = this.#lost;
+    if (lost !== null) {
+      queueMicrotask(() => {
+        if (this.#faultListeners.has(listener)) {
+          listener(lost);
+        }
+      });
+    }
     return () => {
       this.#faultListeners.delete(listener);
     };
@@ -422,6 +455,9 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost {
       return;
     }
     this.#disposed = true;
+    for (const stop of this.#watches) {
+      stop();
+    }
     for (const view of this.#views) {
       view.dispose();
     }

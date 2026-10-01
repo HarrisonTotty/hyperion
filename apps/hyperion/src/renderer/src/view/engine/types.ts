@@ -397,7 +397,21 @@ export interface RenderEngine {
   onPassTimes(listener: (times: PassTimes) => void): () => void;
   /** Every creation, destruction and upload, with its byte size and category. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
+  /**
+   * Every fault, as it happens. The engine `loadRenderEngine` returns has already told the status
+   * store of a lost device; a listener does not dispatch it again.
+   */
   onFault(listener: (fault: GraphicsFault) => void): () => void;
+  /**
+   * Called once the device is re-created after a loss (R01 Design note 9).
+   *
+   * @remarks
+   * Views survive a rebuild, re-created at their sizes; every other handle belonged to the lost
+   * device and is made again by the caller here. Only the engine `loadRenderEngine` returns fires
+   * it. Between the loss and the restore, a creation throws `EngineUnavailable`
+   * (`resilientEngine.ts`), a view draws nothing, and writes and dispatches are dropped.
+   */
+  onRestored(listener: () => void): () => void;
   dispose(): void;
 }
 
@@ -414,6 +428,8 @@ export interface LoadEngineOptions {
   readonly overrides?: CapabilityOverrides;
   /** The dynamic import, injectable so that a test fakes it without `vi.mock` of our module. */
   readonly importEngine?: () => Promise<{ readonly createBabylonEngine: CreateBabylonEngine }>;
+  /** `navigator.gpu`, from which a rebuild asks for a fresh adapter; a test passes a fake. */
+  readonly gpu?: GPU;
 }
 
 /** Thrown by `createPointSplat` when the device lacks `float32-blendable` (Design note 21). */
