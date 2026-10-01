@@ -122,11 +122,16 @@ export async function runSoak(
   const markers = new Map<number, ReturnType<RenderEngine["createMesh"]>>();
   let tone = makeTone(engine);
   const stopRestores = engine.onRestored(() => {
-    material = engine.createMaterial(flatSpec("soak marker"));
-    background = engine.createMaterial(flatSpec("soak background"));
-    full = fullScreenMesh(engine, "soak full", -3);
-    markers.clear();
-    tone = makeTone(engine);
+    try {
+      material = engine.createMaterial(flatSpec("soak marker"));
+      background = engine.createMaterial(flatSpec("soak background"));
+      full = fullScreenMesh(engine, "soak full", -3);
+      markers.clear();
+      tone = makeTone(engine);
+    } catch (error: unknown) {
+      // Lost again before the handles were remade: the next restore remakes them.
+      console.warn("the soak's handles were not remade after a restore:", error);
+    }
   });
   const markerFor = (aspect: number): ReturnType<RenderEngine["createMesh"]> => {
     const key = Math.round(aspect * 1000);
