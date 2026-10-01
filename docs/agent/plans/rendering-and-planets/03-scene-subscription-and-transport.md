@@ -582,7 +582,12 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     receive autotuning) reading through a 5 MB/s token bucket, with the low-water mark on and off.
     The renderer must not stall its own receive path either, since Chromium's backpressure reaches the
     TCP window: chunks are kept as `ArrayBuffer`s and parsed when complete, by R06 and R09 off the
-    main thread.
+    main thread. Measured by R03.T10.b on 2026-09-30, on the shared development machine (load
+    average 6–12, provisional; `bulk::tests::streaming::heartbeat_latency_behind_a_transfer_on_a_slow_link`,
+    run by hand): a heartbeat behind a 15 MB transfer, read at 5 MB/s through a 64 KiB receive
+    buffer, waited a median of 103–108 ms and at worst 150–156 ms with the low-water mark on, and
+    577–616 ms with it off. The worst case with it on is a finding over the 100 ms of this note,
+    for R12: the reader's own buffer and the chunk ahead of the push add to the kernel's share.
 12. **Open question 21: no version bump.** `lib.rs`'s rule bumps `PROTOCOL_VERSION` for a removed or
     changed message and not for an added kind or optional field, because an older peer refuses what
     it does not know. The first `notification` and the first binary frames are additions of the same
@@ -1532,3 +1537,24 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   latest clock; the records' orbits are time-independent, a contact's `seen` is not); and a topic
   whose pool job fails stops pushing with only a `warn`, which the client's sequence check cannot
   see (an error notification would need a protocol addition).
+- **Deviations in T10.b, as built.** A request answered in bulk settles with its payload
+  (`Finished` and `Settled` carry it; `run` serialises the response as before), and the
+  connection keeps a queue of streams (`ws.rs`, `Stream`), the first sending one chunk at a time
+  whenever `Outbound::bulk_room_for` says the bulk bytes queued with it are at most
+  `BULK_QUEUED_BYTES`, then its terminal frame through `end`, which ends the request; the select
+  takes a chunk last, after frames, finished requests and pushes, so everything else overtakes
+  a transfer. `Outbound::send_bulk` counts a chunk in the queue's bytes and its bulk share
+  (`Lane::Bulk`), and `OutboundCounters::largest_bulk_queue_bytes` records the most one
+  connection queued. A `cancel` drops the stream with the request, so no chunk is queued after
+  `cancelled`; chunks already queued or in the socket still arrive before it. The tests are unit
+  tests over real sockets in `bulk.rs` (`bulk::tests::streaming`), through `Call::respond_bulk`
+  and `Client::next_frame`: 58 chunks in order before the response and the payload rejoined, the
+  bulk queue never above one chunk, a scene push issued after the first chunk arriving before the
+  transfer's end, `cancel` after the third chunk, and a stuck reader closed by a 500 ms write
+  timeout with nothing held or queued. `TestClient::next_binary` (with `BinaryHeader`) is in
+  `tests/common/mod.rs` for R06's and R09's integration tests, but `tests/bulk.rs` is not built:
+  an integration test cannot inject a handler, and no kind is answered in bulk until R06 and R09.
+  The heartbeat latency over the emulated link is an ignored test run by hand, through
+  `Harness::start_tapped` with `Tap::Kernel` for the mark off; its figures are in Design note 11.
+  `BulkPayload::new` stays `cfg_attr(not(test), expect(dead_code))` until R06 and R09 answer in
+  bulk.

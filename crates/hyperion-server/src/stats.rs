@@ -248,6 +248,7 @@ impl RequestStats {
 pub struct OutboundCounters {
     queued_bytes: usize,
     largest_queue_bytes: usize,
+    largest_bulk_queue_bytes: usize,
     held_requests: usize,
     write_timeouts: u64,
 }
@@ -263,6 +264,14 @@ impl OutboundCounters {
     #[must_use]
     pub fn largest_queue_bytes(&self) -> usize {
         self.largest_queue_bytes
+    }
+
+    /// The most bulk frame bytes, headers included, one connection has had queued at once so far:
+    /// at most [`BULK_QUEUED_BYTES`](crate::limits::BULK_QUEUED_BYTES), one chunk (rendering plan
+    /// R03, Design note 11).
+    #[must_use]
+    pub fn largest_bulk_queue_bytes(&self) -> usize {
+        self.largest_bulk_queue_bytes
     }
 
     /// Finished requests held back now, because their connection's queue has no room for their
@@ -316,6 +325,15 @@ impl OutboundStats {
         self.counters.send_modify(|counters| {
             counters.queued_bytes = counters.queued_bytes.saturating_add(bytes);
             counters.largest_queue_bytes = counters.largest_queue_bytes.max(connection_bytes);
+        });
+    }
+
+    /// A bulk frame was queued on a connection, whose queue now holds `connection_bulk_bytes` of
+    /// them.
+    pub(crate) fn queued_bulk(&self, connection_bulk_bytes: usize) {
+        self.counters.send_modify(|counters| {
+            counters.largest_bulk_queue_bytes =
+                counters.largest_bulk_queue_bytes.max(connection_bulk_bytes);
         });
     }
 
@@ -407,6 +425,7 @@ mod tests {
             OutboundCounters {
                 queued_bytes: 900,
                 largest_queue_bytes: 800,
+                largest_bulk_queue_bytes: 0,
                 held_requests: 2,
                 write_timeouts: 1,
             }
@@ -421,6 +440,7 @@ mod tests {
             OutboundCounters {
                 queued_bytes: 0,
                 largest_queue_bytes: 800,
+                largest_bulk_queue_bytes: 0,
                 held_requests: 0,
                 write_timeouts: 1,
             }
