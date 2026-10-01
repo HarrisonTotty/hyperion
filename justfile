@@ -116,7 +116,7 @@ wasmtime_version := "49.0.1"
 
 # wasm-bindgen-cli, as `just wasm-tools` installs it: the version of `wasm-bindgen` that
 # `Cargo.lock` names, which wasm-bindgen-test's runner must match exactly.
-wasm_bindgen_version := `sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock`
+wasm_bindgen_version := `sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock | head -n 1`
 
 # The crates whose suites run under wasm32-wasip1.
 wasip1_crates := "-p hyperion-base -p hyperion-surface -p hyperion-sim -p hyperion-testkit"
@@ -300,10 +300,15 @@ test-wasm-browser: (_wasm-preflight "browser")
     browser=(--target wasm32-unknown-unknown --profile slow-test --lib --tests)
     cargo test "${browser[@]}" "${packages[@]}" --no-run
     cargo test --lib --tests "${packages[@]}" --no-run
-    tests() { grep -E ': test$' | sed -e 's/: test$//' | sort; }
+    # The names of the tests in a `--list` output, sorted; `grep` finding none is not an error.
+    tests() { { grep -E ': test$' || true; } | sed -e 's/: test$//' | sort; }
     for crate in {{ browser_crates }}; do
-        native="$(cargo test -q --lib --tests -p "$crate" -- --list 2>/dev/null | tests | grep -v 'native_only::' || true)"
-        on_browser="$(cargo test "${browser[@]}" -p "$crate" -- --list 2>/dev/null | tests || true)"
+        # Each listing runs on its own, so that a failed build or runner stops the recipe here with
+        # its own message rather than showing as a difference between the lists.
+        native_list="$(cargo test -q --lib --tests -p "$crate" -- --list)"
+        browser_list="$(cargo test "${browser[@]}" -p "$crate" -- --list)"
+        native="$(tests <<<"$native_list" | { grep -v 'native_only::' || true; })"
+        on_browser="$(tests <<<"$browser_list")"
         if [[ "$native" != "$on_browser" ]]; then
             echo "error: $crate's tests on wasm32-unknown-unknown differ from its native ones less native_only::" >&2
             echo "(a test file or module without the \`wasm_bindgen_test as test\` import, or a test compiled out outside a native_only module):" >&2
