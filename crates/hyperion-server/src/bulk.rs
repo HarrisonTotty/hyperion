@@ -295,7 +295,7 @@ mod tests {
         use super::*;
         use crate::limits::OUTBOUND_BYTES;
         use crate::subscriptions::{PendingPush, ScenePush};
-        use crate::testing::{Client, Received, Scripted, Tap, body, small_response};
+        use crate::testing::{Client, Received, Scripted, Tap, WAIT, body, small_response};
         use crate::ws::ConnectionLimits;
 
         /// A field-sized payload: 15 × 10⁶ bytes, 58 chunks.
@@ -325,18 +325,17 @@ mod tests {
                 match client.next_frame().await {
                     Received::Binary(frame) => chunks.push(frame),
                     Received::Message(
-                        message @ (ServerMessage::Response { .. }
-                        | ServerMessage::RequestError { .. }),
-                    ) if terminal_id(&message) == id => return (chunks, message),
+                        message @ (ServerMessage::Response {
+                            id: RequestId(answered),
+                            ..
+                        }
+                        | ServerMessage::RequestError {
+                            id: RequestId(answered),
+                            ..
+                        }),
+                    ) if answered == id => return (chunks, message),
                     Received::Message(_) => {}
                 }
-            }
-        }
-
-        fn terminal_id(message: &ServerMessage) -> u32 {
-            match message {
-                ServerMessage::Response { id, .. } | ServerMessage::RequestError { id, .. } => id.0,
-                _ => u32::MAX,
             }
         }
 
@@ -372,12 +371,64 @@ mod tests {
             }
             assert_eq!(rejoined, sent.to_vec());
             let outbound = harness.server().stats().outbound();
-            assert!(
-                outbound.largest_bulk_queue_bytes() <= BULK_QUEUED_BYTES,
-                "{} bulk bytes queued at once",
-                outbound.largest_bulk_queue_bytes()
-            );
+            // One full chunk at a time, every chunk but the last being full.
+            assert_eq!(outbound.largest_bulk_queue_bytes(), MAX_BINARY_FRAME_BYTES);
+            const { assert!(MAX_BINARY_FRAME_BYTES <= BULK_QUEUED_BYTES) };
             assert_eq!(harness.server().stats().requests().in_flight(), 0);
+            client.close().await;
+            harness.stop().await;
+        }
+
+        /// Two answers in bulk: the second's chunks follow the first's terminal response, and a
+        /// cancel of the second, while the first streams, drops the second alone.
+        #[tokio::test]
+        async fn two_bulk_answers_stream_one_after_the_other_and_a_cancel_drops_only_its_own() {
+            let (handler, mut calls) = Scripted::new();
+            let harness = Harness::start(handler).await;
+            let mut client = harness.connect_slow_reader().await;
+            client.hello().await;
+            for id in 1..=3 {
+                client.request(id, body(id)).await;
+            }
+            // Three chunks each, answered in the order asked.
+            for _ in 1..=3 {
+                let call = calls.next().await;
+                let bulk = BulkPayload::new(payload(3 * CHUNK_PAYLOAD_BYTES)).unwrap();
+                assert!(call.respond_bulk(small_response(), bulk));
+            }
+            harness
+                .requests_until(|counters| counters.in_flight() == 3)
+                .await;
+            client.cancel(2).await;
+            let mut order = Vec::new();
+            let mut ended = Vec::new();
+            while ended.len() < 3 {
+                match client.next_frame().await {
+                    Received::Binary(frame) => order.push(header(&frame).request.0),
+                    Received::Message(ServerMessage::Response { id, .. }) => {
+                        ended.push((id.0, None));
+                        order.push(100 + id.0);
+                    }
+                    Received::Message(ServerMessage::RequestError { id, error }) => {
+                        ended.push((id.0, Some(error.code)));
+                    }
+                    Received::Message(other) => panic!("unexpected {other:?}"),
+                }
+            }
+            assert!(
+                ended.contains(&(2, Some(ErrorCode::Cancelled))),
+                "{ended:?}"
+            );
+            // The first's chunks and response, then the third's: nothing interleaved, and none of
+            // the second's after its own chunks stopped.
+            let first_end = order.iter().position(|&tag| tag == 101).unwrap();
+            assert!(order[..first_end].iter().all(|&tag| tag == 1), "{order:?}");
+            let rest: Vec<u32> = order[first_end + 1..]
+                .iter()
+                .copied()
+                .filter(|&tag| tag != 2)
+                .collect();
+            assert_eq!(rest, vec![3, 3, 3, 103], "{order:?}");
             client.close().await;
             harness.stop().await;
         }
@@ -625,7 +676,9 @@ mod tests {
                 .await
                 .unwrap();
             // The subscription live first: its opening builds the galaxy.
-            while let Some(Ok(frame)) = futures_util::StreamExt::next(&mut socket).await {
+            while let Ok(Some(Ok(frame))) =
+                tokio::time::timeout(WAIT, futures_util::StreamExt::next(&mut socket)).await
+            {
                 if let Message::Text(text) = frame
                     && let Ok(ServerMessage::Response {
                         id: RequestId(1), ..
@@ -673,7 +726,11 @@ mod tests {
             let mut chunks = 0;
             let mut latencies = Vec::new();
             while chunks < 58 {
-                let frame = socket.next().await.unwrap().unwrap();
+                let frame = tokio::time::timeout(WAIT, socket.next())
+                    .await
+                    .expect("a frame within the wait")
+                    .unwrap()
+                    .unwrap();
                 read += frame.len();
                 let due = Duration::from_secs_f64(
                     f64::from(u32::try_from(read).unwrap()) / BYTES_PER_SECOND,

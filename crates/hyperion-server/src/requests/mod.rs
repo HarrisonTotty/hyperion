@@ -424,12 +424,6 @@ pub(crate) struct Settled {
 }
 
 impl Settled {
-    /// Whether the answer has a bulk payload to stream before its terminal frame.
-    #[must_use]
-    pub(crate) fn has_bulk(&self) -> bool {
-        self.bulk.is_some()
-    }
-
     /// The bulk payload whose chunks precede the terminal frame, taken to stream (rendering plan
     /// R03, Design note 10); `None` for an answer in JSON alone.
     pub(crate) fn take_bulk(&mut self) -> Option<BulkPayload> {

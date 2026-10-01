@@ -1558,3 +1558,11 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   `Harness::start_tapped` with `Tap::Kernel` for the mark off; its figures are in Design note 11.
   `BulkPayload::new` stays `cfg_attr(not(test), expect(dead_code))` until R06 and R09 answer in
   bulk.
+- **T10.b after review.** A stream's terminal frame joins the other finished requests'
+  (`queue_terminal`): queued at once only when nothing is held and the queue has room, held
+  otherwise, so it neither overruns the budget nor passes a frame held before it. A test streams
+  three answers in bulk while the second is cancelled: the first's chunks and response, then the
+  third's, nothing interleaved, and none of the second's after `cancelled`. The bulk bound is
+  pinned at exactly one full chunk (`largest_bulk_queue_bytes` equals `MAX_BINARY_FRAME_BYTES`),
+  in place of a separate `outbound::` unit test of the bulk lane. The hand-run measurement's reads
+  are bounded by the harness's wait.
