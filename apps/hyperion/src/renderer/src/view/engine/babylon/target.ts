@@ -24,12 +24,14 @@ import type { Scene } from "@babylonjs/core/scene.pure";
 import { TEXTURE_USAGE } from "../gpuFlags";
 import type { TextureSpec } from "../memory";
 import type { GpuCapabilities } from "../platform";
-import type {
-  FrameSubmission,
-  RenderTarget,
-  RenderTargetSpec,
-  TextureHandle,
-  ViewSize,
+import {
+  DepthSelfSample,
+  type DrawItem,
+  type FrameSubmission,
+  type RenderTarget,
+  type RenderTargetSpec,
+  type TextureHandle,
+  type ViewSize,
 } from "../types";
 import { disableEngineYFlip } from "./internals";
 import type { ResourceRegistry } from "./resources";
@@ -107,6 +109,27 @@ export function assertTargetFits(
   }
 }
 
+/**
+ * Refuses a draw that samples the depth of the target it renders into: WebGPU forbids a texture as
+ * an attachment and a binding in one pass (Design note 21).
+ *
+ * @throws {@link DepthSelfSample} naming the target and the draw's material.
+ */
+export function assertNoDepthSelfSample(
+  targetName: string,
+  depth: TextureHandle | null,
+  draws: ReadonlyArray<DrawItem>,
+): void {
+  if (depth === null) {
+    return;
+  }
+  for (const draw of draws) {
+    if (Object.values(draw.textures).includes(depth)) {
+      throw new DepthSelfSample(targetName, draw.material.name);
+    }
+  }
+}
+
 /** Babylon's objects and the engine's textures for a target at one size. */
 interface Attachments {
   readonly colour: TextureHandle;
@@ -148,10 +171,16 @@ export class BabylonRenderTarget implements RenderTarget {
     this.#attachments = this.#attach(size);
   }
 
+  /**
+   * Renders `frame` into the target.
+   *
+   * @throws {@link DepthSelfSample} when a draw samples this target's own depth.
+   */
   render(frame: FrameSubmission): void {
     if (this.#disposed) {
       return;
     }
+    assertNoDepthSelfSample(this.name, this.depth, frame.draws);
     const { target, colour, depth } = this.#attachments;
     Matrix.FromArrayToRef(frame.projection, 0, this.#projection);
     this.#camera.freezeProjectionMatrix(this.#projection);

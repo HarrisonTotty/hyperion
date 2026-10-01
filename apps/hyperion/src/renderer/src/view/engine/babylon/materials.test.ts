@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { WgslMaterialSpec } from "../types";
 import {
   applyMaterialState,
+  BLEND_STATES,
   declaredAttributes,
   declaredTextures,
   materialState,
@@ -81,5 +82,31 @@ describe("a material's declarations", () => {
   it("give the attributes and textures a source declares, comments aside", () => {
     expect(declaredAttributes(SPEC.vertexWgsl)).toEqual(["position", "normal"]);
     expect(declaredTextures(SPEC.fragmentWgsl)).toEqual(["depthTexture", "lut"]);
+  });
+});
+
+describe("the blend table", () => {
+  it("keeps the destination alpha in every blending mode: (zero, one)", () => {
+    for (const mode of ["additive", "premultiplied"] as const) {
+      expect(BLEND_STATES[mode]?.alpha).toEqual({
+        srcFactor: "zero",
+        dstFactor: "one",
+        operation: "add",
+      });
+    }
+    expect(BLEND_STATES.none).toBeUndefined();
+  });
+
+  it("adds source-alpha-weighted colour, or composites premultiplied colour", () => {
+    expect(BLEND_STATES.additive?.color).toEqual({
+      srcFactor: "src-alpha",
+      dstFactor: "one",
+      operation: "add",
+    });
+    expect(BLEND_STATES.premultiplied?.color).toEqual({
+      srcFactor: "one",
+      dstFactor: "one-minus-src-alpha",
+      operation: "add",
+    });
   });
 });
