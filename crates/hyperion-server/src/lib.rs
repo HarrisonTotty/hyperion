@@ -10,6 +10,7 @@
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
 //! serving has stopped.
 
+pub(crate) mod bulk;
 pub mod cache;
 pub mod compute;
 pub mod config;
@@ -226,6 +227,36 @@ impl Server {
     pub(crate) fn state(&self) -> &Arc<AppState> {
         &self.state
     }
+}
+
+/// Prepares a socket the server has accepted: sets `TCP_NOTSENT_LOWAT` to
+/// [`TCP_NOTSENT_LOWAT_BYTES`](limits::TCP_NOTSENT_LOWAT_BYTES) on Linux and Android, so that the
+/// kernel holds little unsent behind a scene push (rendering plan R03, Design note 11).
+///
+/// Every place that serves the router calls it, through axum's `ListenerExt::tap_io`, so that every
+/// connection is prepared alike. A failure is logged at `warn` and the connection goes on; elsewhere
+/// it does nothing, since socket2 does not expose the option there.
+///
+/// # Examples
+///
+/// ```no_run
+/// use axum::serve::ListenerExt;
+/// use tokio::net::TcpListener;
+///
+/// # async fn serve(router: axum::Router) -> std::io::Result<()> {
+/// let listener = TcpListener::bind("127.0.0.1:0").await?;
+/// axum::serve(listener.tap_io(|tcp| hyperion_server::tap_socket(tcp)), router).await
+/// # }
+/// ```
+pub fn tap_socket(tcp: &tokio::net::TcpStream) {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Err(error) =
+        socket2::SockRef::from(tcp).set_tcp_notsent_lowat(limits::TCP_NOTSENT_LOWAT_BYTES)
+    {
+        tracing::warn!(%error, "could not set TCP_NOTSENT_LOWAT on an accepted socket");
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let _ = tcp;
 }
 
 async fn healthz() -> &'static str {

@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
+use axum::serve::ListenerExt;
 use clap::Parser;
 use hyperion_server::{Server, ServerArgs, ServerConfig};
 use tokio::net::TcpListener;
@@ -29,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     // Graceful shutdown stops accepting and drains HTTP requests; `Server::shutdown` then closes
     // the WebSockets, which axum leaves running.
     let serve_result = axum::serve(
-        listener,
+        listener.tap_io(|tcp| hyperion_server::tap_socket(tcp)),
         server
             .router()
             .into_make_service_with_connect_info::<SocketAddr>(),

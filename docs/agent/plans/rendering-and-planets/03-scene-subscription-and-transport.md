@@ -1255,3 +1255,16 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   two single-topic type guards (`isStateOf`, `isNotificationOf`) each disable
   `typescript/no-unnecessary-condition` for one line until plan 12's `alerts` topic makes the
   comparison real.
+- **Deviations in T10.a, as built.** `chunk` takes `axum::body::Bytes` (the `bytes` crate's type,
+  re-exported), so no `bytes` dependency is added. `BulkPayload::new(bytes)` returns
+  `Result<_, BuildBulkPayloadError>`, refusing a payload whose chunk count does not fit the
+  header's `u32` (about a petabyte); `chunk` documents the same panic. `BulkPayload::manifest()`
+  gives the `BulkManifestDto` and `frames(request)` the chunks. `BulkManifestDto.bytes` is a JSON
+  number (`number` in TypeScript), a payload being megabytes. The handlers meet the seam through
+  one private `answered(result) = result.map(Answer::from)` applied with `FutureExt::map`, and the
+  unit harness's private `Answer` enum is renamed `Reply`. Until R03.T10.b streams a bulk answer,
+  `run` answers one `internal` and logs at `error`; `bulk.rs` carries
+  `cfg_attr(not(test), expect(dead_code))` until then. `tap_socket` sets the mark on Android as
+  well as Linux, where socket2 exposes it. Both harnesses read the mark back inside their `tap_io`
+  closure (`accepted_lowat()`); the integration test, `an_accepted_socket_has_the_low_water_mark`,
+  is in `tests/websocket.rs`, which only `just ci` runs among the acceptance commands.

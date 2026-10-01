@@ -8,8 +8,10 @@ use std::future::IntoFuture;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use axum::serve::ListenerExt;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
     ClientMessage, RequestBody, RequestError, RequestId, ResponseBody, ServerMessage,
@@ -52,7 +54,22 @@ pub(crate) struct Harness {
     server: Server,
     stop_serving: oneshot::Sender<()>,
     serving: JoinHandle<io::Result<()>>,
+    /// The low-water mark of the socket accepted last.
+    lowat: Arc<AtomicU32>,
     _data_dir: TempDir,
+}
+
+/// A socket's `TCP_NOTSENT_LOWAT`, 0 where the option does not exist.
+fn read_lowat(tcp: &TcpStream) -> u32 {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    return socket2::SockRef::from(tcp)
+        .tcp_notsent_lowat()
+        .expect("the option can be read");
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = tcp;
+        0
+    }
 }
 
 impl Harness {
@@ -82,6 +99,12 @@ impl Harness {
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        let lowat = Arc::new(AtomicU32::new(0));
+        let tapped = Arc::clone(&lowat);
+        let listener = listener.tap_io(move |tcp| {
+            crate::tap_socket(tcp);
+            tapped.store(read_lowat(tcp), Ordering::Release);
+        });
         let (stop_serving, stopped) = oneshot::channel::<()>();
         let serving = tokio::spawn(
             axum::serve(
@@ -102,8 +125,15 @@ impl Harness {
             server,
             stop_serving,
             serving,
+            lowat,
             _data_dir: data_dir,
         }
+    }
+
+    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any
+    /// or where the option does not exist (rendering plan R03, R03.T10.a).
+    pub(crate) fn accepted_lowat(&self) -> u32 {
+        self.lowat.load(Ordering::Acquire)
     }
 
     /// The server's shared state.
@@ -467,9 +497,9 @@ impl Handler for Scripted {
                 .await
                 .expect("the test is taking calls");
             match answer.await {
-                Ok(Answer::Respond(body)) => Ok(body),
-                Ok(Answer::Fail(error)) => Err(error),
-                Ok(Answer::Panic) => panic!("a deliberate panic in a handler"),
+                Ok(Reply::Respond(body)) => Ok(body.into()),
+                Ok(Reply::Fail(error)) => Err(error),
+                Ok(Reply::Panic) => panic!("a deliberate panic in a handler"),
                 Err(_) => std::future::pending().await,
             }
         })
@@ -573,11 +603,11 @@ pub(crate) struct Call {
     pub(crate) body: RequestBody,
     /// The request's cancellation token.
     pub(crate) token: CancelToken,
-    reply: oneshot::Sender<Answer>,
+    reply: oneshot::Sender<Reply>,
 }
 
 #[derive(Debug)]
-enum Answer {
+enum Reply {
     Respond(ResponseBody),
     Fail(RequestError),
     Panic,
@@ -596,17 +626,17 @@ impl Call {
 
     /// Answers with `body`. Returns whether the request's task was still waiting.
     pub(crate) fn respond(self, body: ResponseBody) -> bool {
-        self.reply.send(Answer::Respond(body)).is_ok()
+        self.reply.send(Reply::Respond(body)).is_ok()
     }
 
     /// Answers with `error`.
     pub(crate) fn fail(self, error: RequestError) -> bool {
-        self.reply.send(Answer::Fail(error)).is_ok()
+        self.reply.send(Reply::Fail(error)).is_ok()
     }
 
     /// Makes the handler panic.
     pub(crate) fn panic(self) -> bool {
-        self.reply.send(Answer::Panic).is_ok()
+        self.reply.send(Reply::Panic).is_ok()
     }
 
     /// Waits until the request's task has let go of the call: it was cancelled, or its
