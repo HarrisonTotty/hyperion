@@ -133,7 +133,7 @@ impl Outbound {
     pub(crate) fn bulk_room_for(&self, bytes: usize) -> impl Future<Output = ()> + use<> {
         let mut room = self.bulk_room.clone();
         async move {
-            // The sender lives as long as the queue's backlog; a closed one never makes room.
+            // The sender lives in the backlog, which this queue keeps while the connection waits.
             let _ = room
                 .wait_for(|&queued| fits(queued, bytes, BULK_QUEUED_BYTES))
                 .await;

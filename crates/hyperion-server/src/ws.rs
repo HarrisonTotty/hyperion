@@ -310,24 +310,15 @@ impl Connection {
                 Event::Pushes => self.flush_pushes().await,
                 Event::Chunk => self.stream_chunk().await,
                 Event::Finished(joined) => match self.requests.settle(joined) {
-                    // An answer in bulk streams its chunks first, after any streaming before it.
-                    Some(mut settled) if settled.has_bulk() => {
-                        let bulk = settled.take_bulk().expect("checked just above");
-                        self.streams.push_back(Stream::new(settled, &bulk));
-                        Ok(())
-                    }
-                    // Queued at once only if nothing is held before it, so that terminal frames
-                    // are queued in the order their requests finished.
-                    Some(settled)
-                        if self.held.is_empty()
-                            && self.outbound.has_room_for(settled.frame_len()) =>
-                    {
-                        self.end(settled).await
-                    }
-                    Some(settled) => {
-                        self.held.push(settled);
-                        Ok(())
-                    }
+                    Some(mut settled) => match settled.take_bulk() {
+                        // An answer in bulk streams its chunks first, after any streaming before
+                        // it, and its terminal frame then joins the others.
+                        Some(bulk) => {
+                            self.streams.push_back(Stream::new(settled, &bulk));
+                            Ok(())
+                        }
+                        None => self.queue_terminal(settled).await,
+                    },
                     None => Ok(()),
                 },
                 Event::Frame(None | Some(Ok(Message::Close(_)))) => Err(End::ClientClosed),
@@ -462,7 +453,19 @@ impl Connection {
             .streams
             .pop_front()
             .expect("the front stream was read just above");
-        self.end(stream.settled).await
+        self.queue_terminal(stream.settled).await
+    }
+
+    /// Queues a finished request's terminal frame at once if nothing is held before it and the
+    /// queue has room for it, so that terminal frames are queued in the order their requests
+    /// finished; holds it otherwise.
+    async fn queue_terminal(&mut self, settled: Settled) -> Result<(), End> {
+        if self.held.is_empty() && self.outbound.has_room_for(settled.frame_len()) {
+            self.end(settled).await
+        } else {
+            self.held.push(settled);
+            Ok(())
+        }
     }
 
     /// Queues a bulk frame, waiting while the queue holds its full count of frames, unless the
