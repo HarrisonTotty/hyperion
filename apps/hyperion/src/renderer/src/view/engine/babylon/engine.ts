@@ -46,7 +46,13 @@ import {
   type GpuCapabilities,
   requiredFeatures,
 } from "../platform";
-import { type GraphicsFault, type GraphicsStatusStore, navigatorGpu } from "../status";
+import {
+  type GraphicsFault,
+  type GraphicsStatusStore,
+  navigatorGpu,
+  type ProbedTargetFormat,
+  type TargetRounding,
+} from "../status";
 import {
   type BufferHandle,
   type ComputeBindings,
@@ -136,6 +142,12 @@ import {
   WriterRecord,
 } from "./readback";
 import { MipGenerator } from "./mipmaps";
+import {
+  drawAndReadProbe,
+  type ProbeHost,
+  probedFormats,
+  probeTargetRounding,
+} from "./roundingProbe";
 import { BabylonRenderTarget, type TargetHost } from "./target";
 import { BabylonView, setChain, type ViewHost } from "./view";
 import {
@@ -369,6 +381,29 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
     if (target instanceof BabylonRenderTarget) {
       this.#targets.delete(target);
     }
+  }
+
+  /**
+   * Probes how the device rounds a colour write into each format it can render (Design note 22).
+   *
+   * @returns Each format's rounding; a failed probe reads `unknown` and is no fault.
+   */
+  probeTargetRounding(): Promise<Readonly<Record<ProbedTargetFormat, TargetRounding>>> {
+    const host: ProbeHost = {
+      device: this.#device,
+      createTexture: (spec) => this.#resources.createTexture(spec),
+      gpuTextureOf: (handle) => this.#resources.textureOf(handle).texture,
+      submit: (label, encode) => {
+        this.#submit(label, encode);
+      },
+      readTexture: (handle) => this.readTexture(handle),
+      destroyTexture: (handle) => {
+        this.destroyTexture(handle);
+      },
+    };
+    return probeTargetRounding(probedFormats(this.capabilities), (format) =>
+      drawAndReadProbe(host, format),
+    );
   }
 
   destroyTexture(texture: TextureHandle): void {
@@ -1164,6 +1199,8 @@ export const createBabylonEngine: CreateBabylonEngine = async (
   // The device's features, not the adapter's, so that a withheld feature reads as absent in the
   // status too (Design note 7).
   status.dispatch({ kind: "device-capabilities", capabilities: renderEngine.capabilities });
+  // Once a device, before any view renders: a rebuild comes through here too (Design note 22).
+  status.dispatch({ kind: "target-rounding", rounding: await renderEngine.probeTargetRounding() });
   return renderEngine;
 };
 
