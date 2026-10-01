@@ -5,8 +5,8 @@
 //! `hyperion-sim` with `math` and `rng` (plan R04, T4.a and T4.d) byte for byte, and `j0`. Each
 //! file's first line is `# generator_version = <n>` from [`GENERATOR_VERSION`], so a version bump
 //! fails every test here until `just bless` regenerates the files in the same commit, and
-//! [`native_only::every_golden_file_carries_the_current_version`] holds every golden file of the crate to the
-//! same header, whichever test writes it.
+//! `every_golden_file_carries_the_current_version` (native only, since it reads the directory)
+//! holds every golden file of the crate to the same header, whichever test writes it.
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -73,8 +73,8 @@ mod native_only {
     }
 
     /// One header check over the whole crate: every golden file on disk begins with this build's
-    /// `# generator_version`, so that a stale file left behind by a renamed test is caught as surely
-    /// as one a test still reads; and every file this suite writes is there.
+    /// `# generator_version`, so that a stale file left behind by a renamed test is caught as
+    /// surely as one a test still reads; and every file this suite writes is there.
     #[test]
     fn every_golden_file_carries_the_current_version() {
         let root = golden_root();

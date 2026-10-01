@@ -412,7 +412,6 @@ mod tests {
     #[test]
     fn check_embedded_accepts_equal_text() {
         let text = "# generator_version = 3\na = 0x0000000000000001\n";
-        check_embedded("equal", text, text);
         check_embedded_in_mode(Mode::Compare, "equal", text, text);
     }
 

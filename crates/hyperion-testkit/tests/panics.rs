@@ -12,9 +12,7 @@ use std::cell::Cell;
 use std::path::Path;
 
 use hyperion_testkit::float::{assert_same_bits, bits};
-use hyperion_testkit::golden::{
-    GoldenWriter, Mode, check_embedded, check_embedded_in_mode, check_in_mode,
-};
+use hyperion_testkit::golden::{GoldenWriter, Mode, check_embedded_in_mode, check_in_mode};
 use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{
     ALPHA, assert_p_value, assert_poisson_count, chi_square_gof, ks_one_sample, ks_two_sample,
@@ -76,7 +74,8 @@ fn check_refuses_a_trailing_space() {
     expected = "e.golden (embedded) differs at line 3\n  golden: b = 2\n  actual: b = 9"
 )]
 fn embedded_mismatch_names_the_first_differing_line() {
-    check_embedded(
+    check_embedded_in_mode(
+        Mode::Compare,
         "e",
         &text(1, &["a = 1", "b = 2", "c = 3"]),
         &text(1, &["a = 1", "b = 9", "c = 3"]),
@@ -88,7 +87,12 @@ fn embedded_mismatch_names_the_first_differing_line() {
     expected = "has header generator_version = 1, but the test expects generator_version = 2"
 )]
 fn embedded_header_version_mismatch_is_its_own_failure() {
-    check_embedded("h", &text(1, &["a = 1"]), &text(2, &["a = 1"]));
+    check_embedded_in_mode(
+        Mode::Compare,
+        "h",
+        &text(1, &["a = 1"]),
+        &text(2, &["a = 1"]),
+    );
 }
 
 #[test]
@@ -109,7 +113,7 @@ fn embedded_check_refuses_to_bless_under_ci_too() {
 #[should_panic(expected = "has trailing whitespace on line 2")]
 fn embedded_check_refuses_a_trailing_space() {
     let bad = "# generator_version = 1\nx \n";
-    check_embedded("x", bad, bad);
+    check_embedded_in_mode(Mode::Compare, "x", bad, bad);
 }
 
 // order

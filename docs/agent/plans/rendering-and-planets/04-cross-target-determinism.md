@@ -1490,7 +1490,7 @@ warnings` with "use of a disallowed method", and was reverted.
   `check_embedded_in_mode(Mode::from_env(), …)`, a public twin of `check_in_mode` added so that the
   refusal to bless is testable natively (any mode but `Compare` panics with "golden files are
   blessed natively, then embedded"). A failure names the file as `<name>.golden (embedded)`.
-  `golden!` expands to a block of two `#[cfg]`-gated statements. The testkit had twelve
+  `golden!` expands to a block of two `#[cfg]`-gated statements. The testkit had thirteen
   `should_panic` unit tests (in `float`, `golden`, `order` and `stats`), all with `expected`; they
   moved unchanged to `tests/panics.rs`, which also holds the embedded arm's five panic tests
   (mismatch, header mismatch, bless refused in `Bless` and `BlessForbidden`, trailing space).
@@ -1517,10 +1517,10 @@ warnings` with "use of a disallowed method", and was reverted.
   … (it printed 'undefined')"), at the comparison with `lcg.rs`'s `as test` line removed (it names
   `lcg::tests::floats_and_bounded_integers_stay_in_range`), and at the comparison with a test
   compiled out by its own `cfg` outside `native_only` (it names the test); each edit was reverted.
-- **Deviations in T8.c, as built (2026-09-30).** `test-wasm-fast` now runs, after the wasip1
-  suites, `_browser-clippy` (the plan's Clippy command, over `browser_crates`) and
-  `test-wasm-browser` over base, the surface crate and the testkit, each behind
-  `_wasm-preflight "browser"`. Base's version check, its helpers and `FOUNDATION_GOLDENS` moved
+- **Deviations in T8.c, as built (2026-09-30).** `test-wasm-fast` now depends on
+  `_browser-clippy` (the plan's Clippy command, over `browser_crates`), which runs with the
+  relaxed-SIMD refusal before the wasip1 suites, and after them runs `test-wasm-browser` over base,
+  the surface crate and the testkit, each behind `_wasm-preflight "browser"`. Base's version check, its helpers and `FOUNDATION_GOLDENS` moved
   into a `native_only` module of `foundation_golden.rs`. Beyond the skill's opening paragraph, its
   "Adding goldens" section gains the browser target's test conventions (the import,
   `native_only`, `tests/panics.rs`, literal golden names), and the README's check list names the
@@ -1569,3 +1569,14 @@ warnings` with "use of a disallowed method", and was reverted.
   `cargo tree -p hyperion-sim --target wasm32-wasip1 -e normal` lists no `wasm-bindgen`;
   `just gen-surface` leaves `git status --porcelain` unchanged; the surface crate's test passes
   natively, under wasip1 and on the browser target, and `_browser-clippy` covers `src/wasm.rs`.
+- **T8 review fixes, as built (2026-09-30).** The review found that `just bless`
+  (`HYPERION_BLESS=1 cargo test`) failed on the testkit's new tests, since `check_embedded` reads
+  the environment natively: every test of the embedded arm now calls
+  `check_embedded_in_mode(Mode::Compare, …)`, and `check_embedded` itself is called only by
+  `golden!`'s browser arm, where the environment reads nothing (checked: the testkit's and base's
+  tests pass under `HYPERION_BLESS=1` and leave the tree unchanged). In
+  `test-wasm-browser`, each crate's two `--list` runs are now commands of their own, so a failed
+  build or runner stops the recipe with its own message rather than showing as a list
+  difference; `wasm_bindgen_version` takes the first match only. With T8.c's browser step, the
+  T7.c timing record gains: its tests take under 1 s and its builds about 70 s cold, seconds warm
+  (provisional, under load), which does not change Design note 11's outcome there.
