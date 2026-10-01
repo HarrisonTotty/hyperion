@@ -41,7 +41,7 @@ client *args: gen-surface
 # Build the client and check that the engine is loaded lazily: no Babylon code in the entry chunk,
 # and a `babylon` chunk (R01.T7). The chunk exists once something imports
 # `view/engine/loadEngine.ts` (R02's VIEW display or R01.T9's smoke page); until then it fails.
-check-chunks:
+check-chunks: gen-surface
     pnpm build
     node apps/hyperion/scripts/checkChunks.mjs
 
