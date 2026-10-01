@@ -1435,3 +1435,23 @@ warnings` with "use of a disallowed method", and was reverted.
   Extra tests: `the_probe_passes_on_a_spawned_thread`,
   `the_scale_factors_take_the_smallest_subnormal_to_the_smallest_normal`,
   `each_mode_says_what_it_flushes` and `the_real_probe_lets_the_pool_start`.
+- **Deviations in T9.b, as built.** The gate adds `target_env = "gnu"`, since a static musl test
+  binary ignores `LD_PRELOAD`. The parent, `the_probes_fail_on_threads_whose_mode_flushes_subnormals`,
+  builds all four shared objects first, refuses a temporary path holding a space or a colon (which
+  `LD_PRELOAD` cannot carry), re-runs the binary with `--exact`, `--nocapture` and
+  `--test-threads=1` naming the child, and requires both a zero exit and "test result: ok. 1
+  passed", so a child
+  that ran nothing fails. The child, `under_a_preloaded_mode_the_probes_fail_and_the_pool_refuses_to_start`,
+  takes its mode from `HYPERION_FLUSH_TO_ZERO_CHILD` (`ftz`, `daz`, `ftz-daz`, `crtfastmath`) and
+  expects `FLUSHES_OUTPUTS`, `FLUSHES_INPUTS`, `FLUSHES_BOTH` and `FLUSHES_BOTH`, and from the pool
+  `StartPoolError::FloatingPointMode { worker: 0, .. }`. "Its main thread" is libtest's test
+  thread, which inherits the mode from the process's main thread, where the constructor ran. It
+  checks the combined probe, not each width apart. The `-mdaz-ftz` case needs GCC 13+ or Clang
+  19+ and a `crtfastmath.o` that sets both bits; this machine's GCC 16.2.1 ORs in `0x8040`, and an
+  older `cc` fails the whole test with a message naming the version. No deadline on the child (a
+  rust-review suggestion, not taken: the child does nothing that can wait). By hand, 2026-09-30:
+  with the child's expectation inverted to `KEEPS_SUBNORMALS` the parent failed ("the child failed
+  under ftz", left `FLUSHES_OUTPUTS`, right `KEEPS_SUBNORMALS`), and was reverted; with
+  `PATH=/nonexistent` it failed with the "needs a C compiler named `cc`" message. Run time for the
+  four variants: 0.15–0.22 s debug, 0.15 s release, under shared load (research: 1.3 s for three).
+  **Pending:** the timing on a quiet machine.
