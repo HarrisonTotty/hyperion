@@ -5,9 +5,10 @@
  * @remarks
  * A lost device and a crashed GPU process are faults while they last, in `StatusLine`'s `fault`
  * standing; a refused software adapter, no WebGPU or no adapter, the safe mode and the disabled
- * state are the console stating its own condition, in the `refused` standing (plain text). None is
- * an alert: the guide says alerts are raised by the server and a console never invents one (R01
- * Design note 10). The words are drafts for the owner (R01.T5.c); each is one constant here.
+ * state, and the wait for the adapter, are the console stating its own condition, in the `refused`
+ * standing (plain text). None is an alert: the guide says alerts are raised by the server and a
+ * console never invents one (R01 Design note 10). The words were signed off on 2026-09-30
+ * (R01.T5.c); each is one constant here.
  */
 
 import { createContext, useContext, useSyncExternalStore } from "react";
@@ -91,8 +92,10 @@ export interface GraphicsStatus {
 
 /** Something that changes the graphics status. */
 export type GraphicsEvent =
-  /** The first adapter request answered. */
+  /** The feed's first adapter request answered. */
   | { readonly kind: "adapter-outcome"; readonly outcome: AdapterOutcome }
+  /** The feed's adapter request after a GPU-process crash answered (the "re-acquiring"). */
+  | { readonly kind: "adapter-reacquired"; readonly outcome: AdapterOutcome }
   | {
       readonly kind: "device-lost";
       readonly reason: GPUDeviceLostReason;
@@ -235,6 +238,46 @@ function afterShaderRefused(status: GraphicsStatus, effectName: string): Graphic
   return { ...status, fault: { kind: "shader-refused", effectName } };
 }
 
+function afterAdapterOutcome(status: GraphicsStatus, outcome: AdapterOutcome): GraphicsStatus {
+  const next = withOutcome(status, outcome);
+  return outcome.kind === "adapter" ? withoutProcessFault(next) : next;
+}
+
+/** Whether the condition is one an adapter answered with. */
+function hasAdapter(condition: GraphicsCondition): boolean {
+  return condition.kind === "nominal" || condition.kind === "software-adapter";
+}
+
+/** The status with a crashed GPU process's fault cleared, and any other fault kept. */
+function withoutProcessFault(status: GraphicsStatus): GraphicsStatus {
+  return status.fault?.kind === "gpu-process-gone" ? { ...status, fault: null } : status;
+}
+
+/**
+ * The status after the request that follows a GPU-process crash answers.
+ *
+ * @remarks
+ * A granted adapter clears the crash's fault. Where an adapter had been granted already, the
+ * condition, capabilities and timer are left as they are: a view's rebuild after the same crash
+ * reports the device's own (`device-restored`, `device-capabilities`), which hold (Design note 7),
+ * and the two answers are not ordered. Where none had been, the new adapter's outcome is taken.
+ * No adapter where one had been granted is the adapter withdrawn, as a rebuild handles it (Design
+ * note 9). No adapter where none had been restates the condition and clears the fault: nothing is
+ * being re-acquired any more, the condition's own line carries the remedy, and `Process Restarts`
+ * keeps the count.
+ */
+function afterReacquired(status: GraphicsStatus, outcome: AdapterOutcome): GraphicsStatus {
+  if (outcome.kind === "adapter") {
+    return withoutProcessFault(
+      hasAdapter(status.condition) ? status : withOutcome(status, outcome),
+    );
+  }
+  if (hasAdapter(status.condition)) {
+    return reduceGraphicsStatus(status, { kind: "adapter-withdrawn" });
+  }
+  return withoutProcessFault(withOutcome(status, outcome));
+}
+
 /**
  * The status after `event`.
  *
@@ -242,13 +285,18 @@ function afterShaderRefused(status: GraphicsStatus, effectName: string): Graphic
  * The safe mode holds whatever the adapter, and `disabled` holds whatever follows: both end only
  * with a relaunch. A device loss is a fault and counts; the {@link DEVICE_LOSS_LIMIT}th disables
  * WebGPU for the session. A restore clears the fault and keeps the count. An adapter withdrawn on a
- * rebuild disables WebGPU whatever the count (R01 Design note 9).
+ * rebuild disables WebGPU whatever the count (R01 Design note 9). A granted adapter clears a
+ * crashed GPU process's fault and keeps its count: it is the evidence that the graphics work again
+ * (decided 2026-09-30).
  */
 export function reduceGraphicsStatus(status: GraphicsStatus, event: GraphicsEvent): GraphicsStatus {
   let next: GraphicsStatus;
   switch (event.kind) {
     case "adapter-outcome":
-      next = settled(status.condition) ? status : withOutcome(status, event.outcome);
+      next = settled(status.condition) ? status : afterAdapterOutcome(status, event.outcome);
+      break;
+    case "adapter-reacquired":
+      next = settled(status.condition) ? status : afterReacquired(status, event.outcome);
       break;
     case "device-lost":
       next = afterDeviceLoss(status, event);
@@ -300,21 +348,24 @@ export interface GraphicsAnnunciation {
 }
 
 /**
- * The graphics annunciations' words, drafted for the owner (R01 Design note 10, R01.T5.c).
+ * The graphics annunciations' words (R01 Design note 10, R01.T5.c, signed off 2026-09-30).
  *
  * @remarks
- * Upper case is the guide's nomenclature; the lower-case clause after the colon is the cause or
- * the operator's remedy, as `MAP DATA INVALID: <cause>` has it.
+ * Upper case is the guide's nomenclature; the mixed-case clause after the colon is a sentence
+ * giving the cause, the operator's remedy or what the console is doing about it, as
+ * `MAP DATA INVALID: <cause>` has it. "Not offered" is always `not available`, never
+ * `unavailable`.
  */
 export const GRAPHICS_WORDS = {
-  softwareAdapter: "GRAPHICS SOFTWARE ADAPTER: PHOTOREALISTIC STYLE UNAVAILABLE",
+  acquiring: "GRAPHICS ACQUIRING ADAPTER",
+  softwareAdapter: "GRAPHICS SOFTWARE ADAPTER: photorealistic style not available",
   noWebGpu: "GRAPHICS NOT AVAILABLE: no WebGPU",
-  noAdapter: "GRAPHICS NO ADAPTER: views unavailable",
+  noAdapter: "GRAPHICS NO ADAPTER: views not available, relaunch to retry",
   deviceLost: "GRAPHICS DEVICE LOST: re-creating",
-  processRestarted: "GRAPHICS PROCESS RESTARTED",
+  processRestarted: "GRAPHICS PROCESS RESTARTED: re-acquiring",
   shaderRefused: (effectName: string): string =>
     `GRAPHICS SHADER REFUSED: ${effectName} is not WGSL`,
-  safeMode: "GRAPHICS SAFE MODE: views unavailable, relaunch to retry",
+  safeMode: "GRAPHICS SAFE MODE: views not available, relaunch to retry",
   disabledByLosses: (losses: number): string =>
     `GRAPHICS DISABLED: ${losses} device losses, relaunch to retry`,
   disabledWithdrawn: "GRAPHICS DISABLED: adapter withdrawn, relaunch to retry",
@@ -361,6 +412,9 @@ export function graphicsModeAnnunciation(status: GraphicsStatus): GraphicsAnnunc
 function conditionAnnunciation(condition: GraphicsCondition): GraphicsAnnunciation | null {
   let text: string | null;
   switch (condition.kind) {
+    case "acquiring":
+      text = GRAPHICS_WORDS.acquiring;
+      break;
     case "software-adapter":
       text = GRAPHICS_WORDS.softwareAdapter;
       break;
@@ -370,7 +424,6 @@ function conditionAnnunciation(condition: GraphicsCondition): GraphicsAnnunciati
     case "no-adapter":
       text = GRAPHICS_WORDS.noAdapter;
       break;
-    case "acquiring":
     case "nominal":
     case "safe-mode":
     case "disabled":
@@ -463,13 +516,16 @@ export function navigatorGpu(): GPU | undefined {
 }
 
 /**
- * Feeds the store from the preload and the first adapter request.
+ * Feeds the store from the preload and the feed's own adapter requests: one at start, and one
+ * after each GPU-process crash.
  *
  * @param graphics - `window.hyperion.graphics`.
  * @param gpu - `navigator.gpu`, or `undefined` where WebGPU is absent.
  * @returns The feed's end: it stops listening for crash reports and drops a pending answer.
  * @remarks
- * The safe mode asks for no adapter: it has no WebGPU (R01 Design note 5).
+ * The safe mode asks for no adapter: it has no WebGPU (R01 Design note 5). The request after a
+ * crash is the "re-acquiring" its fault states, answered as `adapter-reacquired`; only the latest
+ * request's answer is dispatched, so an answer from before a crash cannot clear its fault.
  */
 export function feedGraphicsStatus(
   store: GraphicsStatusStore,
@@ -477,23 +533,38 @@ export function feedGraphicsStatus(
   gpu: GPU | undefined,
 ): () => void {
   let ended = false;
-  const unsubscribe = graphics.onGpuProcessGone(({ count }) => {
-    store.dispatch({ kind: "gpu-process-gone", count });
-  });
-  if (graphics.launchMode !== "safe") {
+  /** The latest request's number: an answer to an earlier one is dropped. */
+  let latest = 0;
+  const request = (afterCrash: boolean): void => {
+    latest += 1;
+    const id = latest;
+    const answer = (outcome: AdapterOutcome): void => {
+      if (ended || id !== latest) {
+        return;
+      }
+      store.dispatch(
+        afterCrash ? { kind: "adapter-reacquired", outcome } : { kind: "adapter-outcome", outcome },
+      );
+    };
     void requestAdapterOutcome(gpu)
       .then((outcome): void => {
-        if (!ended) {
-          store.dispatch({ kind: "adapter-outcome", outcome });
-        }
+        answer(outcome);
         return undefined;
       })
       .catch((error: unknown) => {
         console.error("the adapter request failed:", error);
-        if (!ended) {
-          store.dispatch({ kind: "adapter-outcome", outcome: { kind: "no-adapter" } });
-        }
+        answer({ kind: "no-adapter" });
       });
+  };
+  const safe = graphics.launchMode === "safe";
+  const unsubscribe = graphics.onGpuProcessGone(({ count }) => {
+    store.dispatch({ kind: "gpu-process-gone", count });
+    if (!safe) {
+      request(true);
+    }
+  });
+  if (!safe) {
+    request(false);
   }
   return () => {
     ended = true;

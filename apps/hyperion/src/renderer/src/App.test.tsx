@@ -60,7 +60,7 @@ describe("App", () => {
     render(<App />);
 
     const panel = screen.getByRole("region", { name: "Graphics" });
-    expect(within(panel).getByText("SAFE")).toBeInTheDocument();
+    expect(within(panel).getByText("SAFE MODE")).toBeInTheDocument();
     expect(
       within(screen.getByRole("banner")).getByRole("status", { name: "Graphics mode" }),
     ).toHaveTextContent("GRAPHICS SAFE MODE");
