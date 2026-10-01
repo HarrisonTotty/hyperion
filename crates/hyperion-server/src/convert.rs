@@ -46,7 +46,8 @@ use hyperion_sim::units::{
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
 pub(crate) use self::planetary::{
-    BodiesRequest, DetailRequest, body_detail, body_refusal, hosts_request, system_bodies,
+    BodiesRequest, DetailRequest, ListedBody, body_detail, body_refusal, hosts_request, scene_body,
+    scene_system, system_bodies,
 };
 pub(crate) use self::scene::{ShipRequest, unknown_frame_body, unknown_frame_system};
 pub(crate) use self::stellar::{SummaryRequest, brief_dto, system_summary, unknown_system};

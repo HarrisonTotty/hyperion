@@ -1295,3 +1295,42 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   (`From<ShipRequest>`). The acceptance filter `scene::clock` runs the clock's tests only; the
   handler's, the checks', the stand-in's and the service's run under
   `cargo test -p hyperion-server --lib scene` and `just ci`.
+- **Deviations in T7, as built.** T7.a and T7.b are one commit. `candidate_at` is in plan 03's
+  `frame.rs`, recorded in plan 03's Risks; its test, `candidate_at_gives_the_candidate_frame_at_weighs`
+  (bit for bit the candidate the search forms from its hit), and the existing `frame_at` cases are
+  in `tests/frame.rs`, so they run under `cargo test -p hyperion-sim --test frame` and `just ci`;
+  the filter `galaxy::frame` runs the unit tests and the doctest only. The core's signatures:
+  `SceneCore::build(asked, inputs, craft: Vec<CraftState>, world) -> Result<(SceneCore,
+SceneStateDto), FetchSystemError>`, `advance(inputs, world, beat: Beat) -> Result<SceneDelta,
+FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>` (the cameras
+  are not an input; checked against the tidal radius at the scene time and replaced whole, the
+  latest per view; a camera's own time is not checked), `cameras()`, `next_due()` (the next
+  `valid_until`), `craft(knowledge, craft) -> Option<Vec<SceneCraftDto>>` (the contacts while
+  there are any, an empty list once when the last leaves) and `has_craft()`. The core never reads
+  a `CraftSource`: the caller calls `craft_at` and passes the list. `SceneInputs` holds the clock
+  reading, the `Ship` and the `SceneKnowledge`; `Beat::{Heartbeat, Change}`. The galaxy comes
+  through a `SceneWorld` struct (the universe, the galaxy, its key, the cell and stars caches, and
+  a map of the planetary systems the caller fetched) rather than a closure: a system the map lacks
+  is `FetchSystemError(id)`, with the core unchanged, and R03.T8.a fetches it from the body cache
+  and calls again. `SceneKnowledge` (whose `grant` takes a `BodyId` and the level asked),
+  `GrantAsked`, `CraftSource`, `NoCraft` and `CraftState` (a wrapper of the draft
+  `SceneCraftDto`) are in `scene/sensing.rs`, `pub(crate)` until R03.T8.b's injection. The
+  converter gains `scene_system`, `scene_body` and `ListedBody` (`convert/planetary.rs`, sharing
+  `system_bodies`' assembly) and `BodiesRequest::new`, which asserts the clock window. A body
+  re-sent because its `valid_until` passed is evaluated at that time, each change in turn, so
+  that one advance or ten send the same record; a contact is evaluated at the scene time. A
+  contact with no single position (a population) or absent then carries no `seen`; a heartbeat
+  re-sends the contacts the ship sees, and one it saw at the last push and no longer does. A grant
+  that stops resolving a belt's member sends nothing, the wire having no withdrawal; the client
+  then keeps a record above the ship's new grant until the scene is rebuilt (for the sensors plan,
+  which first lowers a grant). The ship is placed in the scene's system directly when it is in
+  that system's or one of its bodies' frames, otherwise through the galactic frame with the
+  systems' drifts (`epoch_velocity`); a body frame whose body is absent at a time falls back to
+  the barycentre. A handover between overlapping spheres cannot leave the scene in no system while
+  the ship is still inside its current one: `frame_at` takes the ship from a sphere that holds it
+  only for a rival whose ratio is at most 0.9 of the current one's, so at most 0.9. No body of the
+  pinned systems changes inside the clock window (plan 14's goldens hold no `valid_until`), so the
+  `valid_until` and one-or-ten tests plant one on the core's record of what it sent. The
+  frame-crossing test finds a direction from the system into interstellar space and steps the
+  stand-in through ratios 1.0, 0.95, 0.9(1 − 10⁻⁹), 0.95, 0.999, 1.05, 0.95, 1.05.
+  `MAX_SCENE_CAMERAS` is in `limits.rs`.

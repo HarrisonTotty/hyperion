@@ -9,6 +9,19 @@
 //! session will implement in their place.
 
 mod clock;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the scene subscription (R03.T8) is the first to read it"
+    )
+)]
+mod core;
+#[expect(
+    dead_code,
+    reason = "the scene subscription (R03.T8) is the first to read it"
+)]
+mod sensing;
 mod ship;
 
 use std::collections::HashMap;
@@ -22,6 +35,19 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 pub(crate) use self::clock::{ClockReading, SceneClock, TimeRate};
+#[expect(
+    unused_imports,
+    reason = "the scene subscription (R03.T8) is the first to read it"
+)]
+pub(crate) use self::core::{
+    Beat, FetchSystemError, SCENE_FRAME_ENTRY, SceneCore, SceneDelta, SceneInputs, SceneWorld,
+    is_large_notification,
+};
+#[expect(
+    unused_imports,
+    reason = "the scene subscription (R03.T8) is the first to read it"
+)]
+pub(crate) use self::sensing::{CraftSource, CraftState, GrantAsked, NoCraft, SceneKnowledge};
 pub(crate) use self::ship::{ShipPosition, ShipStandIn};
 use crate::universe::UniverseId;
 
