@@ -50,6 +50,13 @@ describe("renderTime", () => {
     });
   });
 
+  it("holds a pushed time below the window's lower edge at the edge", () => {
+    expect(renderTime(clock(1, "running", { seconds: -EDGE_S - 5, nanos: 7 }), 0, 1)).toEqual({
+      seconds: -EDGE_S,
+      nanos: 0,
+    });
+  });
+
   it("never runs backwards for a frame stamped before the push", () => {
     expect(renderTime(clock(1_000), 500, 400)).toEqual(FAR);
   });

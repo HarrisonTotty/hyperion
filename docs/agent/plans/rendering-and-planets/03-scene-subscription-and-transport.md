@@ -1301,12 +1301,23 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   the scene as the wire states it with every notification merged in (`wire`) and is rebuilt from
   it, so that applying a sequence equals building its end. A re-sent body absent from the list is
   inserted in ID order; the grants must name the bodies in order, or the scene is a fault; a body
-  re-sent with no system is a fault. **Open, for R02.T17 and R03.T14:** `tidal_radius_m` comes only
-  with an arrival, and `SceneStateDto` has none, so a client that subscribes while the scene is
-  already in a system has `tidalRadiusM: null` until the next arrival; the state (or
-  `SceneSystemDto`) needs the field, a server-side addition. `renderTime` holds the time at the
+  re-sent with no system is a fault. The adapter also refuses, as a fault, a clock rate other than 0
+  or a power of ten to 100,000, a time that is not whole seconds and nanoseconds in `[0, 10⁹)`, a
+  `sequence` that is not a whole number, and a galactic position whose offsets leave `[0, 1 ly)`. A
+  fault, like a sequence error, leaves the model as it was; `useScene` (R03.T14) resubscribes on
+  either. **Open, pending the owner (no task owns it yet):** `tidal_radius_m` comes only with an
+  arrival, and `SceneStateDto` has none, so a client that subscribes while the scene is already in
+  a system has `tidalRadiusM: null` until the next arrival, and R02.T17's clamp has nothing to read;
+  the README's row for R02's ask reads "met" but is only partly met. The likely fix is an optional
+  `tidal_radius_m` on `SceneStateDto` (the README puts it "not on `SceneSystemDto`"), added on the
+  server with R03.T8.a. **Open, likewise:** the scene's messages carry no system designation, so
+  `useScene` needs a designation source for any system the scene arrives in, which its planned
+  signature `useScene(requests, universe, cameras)` lacks; the alternatives are a `designate`
+  parameter on `useScene` (asking the server for an unknown system's designation) or the
+  designation on `SceneSystemDto`, an additive server change like the tidal radius. `renderTime` holds the time at the
   clock window's edge, ±H, as the server's clock stops there, and never runs back for a frame
   stamped before its push. `predictedPath(craft, untilS)` takes `untilS` as scene seconds after the
-  pose's time and returns the straight line as its two ends, a galactic pose carried across its
-  light-year cells; a craft's wire attitude (x, y, z, w) becomes R02's `Quaternion`. Hand-built
+  pose's time (a `RangeError` for one negative or not finite) and returns the straight line as its
+  two ends, a galactic pose carried across its light-year cells with its offset kept below 1 ly;
+  `CraftPose` is `SceneKinematics`, and R11 tells an extrapolated path by `plannedPath === null`; a craft's wire attitude (x, y, z, w) becomes R02's `Quaternion`. Hand-built
   fixtures are in `src/renderer/src/test/sceneFixture.ts`, on plan 14's shared wire fixture.

@@ -67,6 +67,21 @@ describe("predictedPath", () => {
     });
   });
 
+  it("keeps a galactic offset below a light-year just below a cell's lower face", () => {
+    const start: SceneKinematics = {
+      position: { kind: "galactic", position: { cell_ly: [0, 0, 0], offset_m: [0.5, 0, 0] } },
+      velocityMPerS: { x: -1, y: 0, z: 0 },
+      time: AT,
+    };
+
+    const [, end] = predictedPath(craft(start), 1);
+
+    expect(end?.position).toEqual({
+      kind: "galactic",
+      position: { cell_ly: [0, 0, 0], offset_m: [0, 0, 0] },
+    });
+  });
+
   it("refuses a negative horizon", () => {
     expect(() => predictedPath(craft(IN_SYSTEM), -1)).toThrow(RangeError);
   });

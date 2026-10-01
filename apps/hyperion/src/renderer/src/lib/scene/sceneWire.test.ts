@@ -1,4 +1,8 @@
-import type { SceneNotificationDto, SceneStateDto } from "@hyperion/protocol";
+import {
+  METRES_PER_LIGHT_YEAR,
+  type SceneNotificationDto,
+  type SceneStateDto,
+} from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { FIXTURE_EARTH, FIXTURE_JUPITER } from "../../test/planetaryFixture";
@@ -143,6 +147,79 @@ describe("applySceneNotification", () => {
     const model = applyAll(stateInSpace(), [arrival, resent, { ...arrival, sequence: 3 }]);
 
     expect(model.system?.grants.get(FIXTURE_EARTH)).toEqual({ level: "full", seen: null });
+  });
+
+  it("inserts a re-sent body absent from the list in index order, with its grant", () => {
+    const full = sliceSceneSystem();
+    const withoutEarth = {
+      system: {
+        ...full.system,
+        bodies: full.system.bodies.filter((body) => body.id !== FIXTURE_EARTH),
+      },
+      grants: full.grants.filter((grant) => grant.body !== FIXTURE_EARTH),
+    };
+    const earth = full.system.bodies.find((body) => body.id === FIXTURE_EARTH);
+    if (earth === undefined) {
+      throw new Error("the slice lists its Earth");
+    }
+    const model = applyAll(stateInSpace(), [
+      {
+        sequence: 1,
+        clock: sceneClock(3_400),
+        ship: shipInSystem(3_400),
+        arrival: { type: "system", system: withoutEarth, tidal_radius_m: 2.1e16 },
+        bodies: [],
+      },
+      { sequence: 2, clock: sceneClock(3_500), bodies: [{ level: "full", record: earth }] },
+    ]);
+
+    expect(withoutTidalRadius(model)).toEqual(
+      modelOf({
+        sequence: 2,
+        clock: sceneClock(3_500),
+        ship: shipInSystem(3_400),
+        system: full,
+        craft: [],
+      }),
+    );
+  });
+
+  it("merges bodies re-sent with an arrival into the arriving system", () => {
+    const [arrival] = sceneSequence();
+    if (arrival === undefined) {
+      throw new Error("the sequence has an arrival");
+    }
+    const model = applyAll(stateInSpace(), [{ ...arrival, bodies: [earthReSentAsContact()] }]);
+
+    expect(model.system?.grants.get(FIXTURE_EARTH)?.level).toBe("contact");
+  });
+
+  it("refuses a clock rate that is not 0 or a power of ten to 100,000", () => {
+    const result = toSceneModel(
+      { ...stateInSpace(), clock: { ...sceneClock(3_000), time_rate: 50 } },
+      designateFixture,
+    );
+
+    expect(result).toEqual({ kind: "fault", fault: "clock rate unusable" });
+  });
+
+  it("refuses a galactic offset of a whole light-year", () => {
+    const state = stateInSpace();
+    const result = toSceneModel(
+      {
+        ...state,
+        ship: {
+          ...state.ship,
+          position: {
+            frame: "galactic",
+            position: { cell_ly: [0, 0, 0], offset_m: [METRES_PER_LIGHT_YEAR, 0, 0] },
+          },
+        },
+      },
+      designateFixture,
+    );
+
+    expect(result).toEqual({ kind: "fault", fault: "galactic position unusable" });
   });
 
   it("refuses a gap in the sequence and leaves the model as it was", () => {

@@ -28,7 +28,10 @@ function later(time: UniverseTime, seconds: number): UniverseTime {
 function moveAxis(cellLy: number, offsetM: number, deltaM: number): readonly [number, number] {
   const movedM = offsetM + deltaM;
   const cells = Math.floor(movedM / METRES_PER_LIGHT_YEAR);
-  return [cellLy + cells, movedM - cells * METRES_PER_LIGHT_YEAR];
+  const carriedM = movedM - cells * METRES_PER_LIGHT_YEAR;
+  // A light-year is above 2⁵³ m, where floats are 2 m apart: a step just below a cell's lower
+  // face can round up to the whole light-year, which belongs to the next cell.
+  return carriedM >= METRES_PER_LIGHT_YEAR ? [cellLy + cells + 1, 0] : [cellLy + cells, carriedM];
 }
 
 function moveGalactic(position: GalacticPosition, deltaM: Vec3): GalacticPosition {
