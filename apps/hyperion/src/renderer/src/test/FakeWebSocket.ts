@@ -52,6 +52,9 @@ export class FakeWebSocket extends EventTarget {
 
   readonly sent: unknown[] = [];
 
+  /** How binary frames are delivered, which the client sets as a browser's socket allows. */
+  binaryType: BinaryType = "blob";
+
   /** IDs of the requests the server has ended, with a response or an error. */
   readonly #answered = new Set<RequestId>();
 
@@ -86,6 +89,15 @@ export class FakeWebSocket extends EventTarget {
       this.#answered.add(message.id);
     }
     this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) }));
+  }
+
+  /**
+   * Sends one binary frame, as an `ArrayBuffer` if the client has asked for that and otherwise as
+   * the browser's default `Blob`.
+   */
+  serverSendsBinary(data: ArrayBuffer): void {
+    const delivered = this.binaryType === "arraybuffer" ? data : new Blob([data]);
+    this.dispatchEvent(new MessageEvent("message", { data: delivered }));
   }
 
   /** Opens the socket and welcomes the client at this client's protocol version. */

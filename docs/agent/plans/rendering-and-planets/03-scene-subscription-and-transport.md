@@ -1334,3 +1334,117 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   frame-crossing test finds a direction from the system into interstellar space and steps the
   stand-in through ratios 1.0, 0.95, 0.9(1 − 10⁻⁹), 0.95, 0.999, 1.05, 0.95, 1.05.
   `MAX_SCENE_CAMERAS` is in `limits.rs`.
+- **Deviations in T11, as built.** No kind is answered in bulk yet, and R06's and R09's carry the
+  manifest differently (R09's only in one variant of an enum), so the request is
+  `RequestClient.requestBulk(body, manifestOf)`, the caller reading the manifest from the response
+  (`null` for a response with no bulk, which must then have had no chunks); its outcome,
+  `BulkOutcome<K>`, is `{ ok, response, chunks }`. Each chunk is a `Uint8Array` view of its
+  frame's payload over the frame's own `ArrayBuffer`, neither copied nor parsed.
+  `requestBulk` and `handleBinaryFrame` are `RequestClient`'s methods, in `requests.ts`; `bulk.ts`
+  holds the parser, its constants and `BulkAssembler`, all exported, so R06.T12 can drive the
+  assembler directly or through `requestBulk` and `FakeWebSocket.serverSendsBinary`.
+  `parseBinaryFrameHeader` also refuses a frame over 262,144 bytes, a reserved byte other than 0, a
+  payload length that disagrees with the frame's, and an index not below the count; a refused frame is reported by the
+  link through `console.error` and closes nothing (`handleBinaryFrame` returns
+  `BinaryFrameReceipt`). A chunk out of order, or stating another count than the request's earlier
+  ones, fails its request as `internal` at once and sends `cancel`, so that the server stops
+  streaming; the manifest is checked at the terminal response for the count of chunks, the count
+  the chunks stated, and the bytes. A chunk for a request that asked for no bulk, has ended or was
+  cancelled is dropped silently. A `manifestOf` that throws fails the request as `internal` rather
+  than leave it unsettled. The internal `startRequest` now takes an options
+  object (`onAnswer`, `onLateAnswer`, `bulk`). The app's `FakeWebSocket` gains `binaryType` and
+  `serverSendsBinary`, which delivers a `Blob` unless the client asked for `arraybuffer`, so the
+  connection test proves the setting; `test/binaryFrames.ts` builds frames as the server's
+  `encode_header` and `chunk` do.
+- **Deviations in T12, as built.** The scene's messages carry no designation, which plan 14's
+  `toSystemBodiesModel` needs for its labels, so `toSceneModel(state, designate)` and
+  `applySceneNotification(model, notification, designate)` take a `designate(system)` callback,
+  which `useScene` (R03.T14) supplies from the chart's answers. Both return results rather than
+  throw: `{ kind: "ok", model }` or `{ kind: "fault", fault }`, and the update also
+  `{ kind: "sequence", expected, received }` for a gap or a step back, the model unchanged. The
+  model's types are in `lib/scene/model.ts` (`SceneModel`, `SceneSystem`, `SceneClock`,
+  `SceneKinematics`, `ScenePosition`, `SceneCraft`, `BodyGrant`, `SeenPosition`); the model keeps
+  the scene as the wire states it with every notification merged in (`wire`) and is rebuilt from
+  it, so that applying a sequence equals building its end. A re-sent body absent from the list is
+  inserted in ID order; the grants must name the bodies in order, or the scene is a fault; a body
+  re-sent with no system is a fault. The adapter also refuses, as a fault, a clock rate other than 0
+  or a power of ten to 100,000, a time that is not whole seconds and nanoseconds in `[0, 10⁹)`, a
+  `sequence` that is not a whole number, and a galactic position whose offsets leave `[0, 1 ly)`. A
+  fault, like a sequence error, leaves the model as it was; `useScene` (R03.T14) resubscribes on
+  either. **Open, pending the owner (no task owns it yet):** `tidal_radius_m` comes only with an
+  arrival, and `SceneStateDto` has none, so a client that subscribes while the scene is already in
+  a system has `tidalRadiusM: null` until the next arrival, and R02.T17's clamp has nothing to read;
+  the README's row for R02's ask reads "met" but is only partly met. The likely fix is an optional
+  `tidal_radius_m` on `SceneStateDto` (the README puts it "not on `SceneSystemDto`"), added on the
+  server with R03.T8.a. **Open, likewise:** the scene's messages carry no system designation, so
+  `useScene` needs a designation source for any system the scene arrives in, which its planned
+  signature `useScene(requests, universe, cameras)` lacks; the alternatives are a `designate`
+  parameter on `useScene` (asking the server for an unknown system's designation) or the
+  designation on `SceneSystemDto`, an additive server change like the tidal radius. `renderTime` holds the time at the
+  clock window's edge, ±H, as the server's clock stops there, and never runs back for a frame
+  stamped before its push. `predictedPath(craft, untilS)` takes `untilS` as scene seconds after the
+  pose's time (a `RangeError` for one negative or not finite) and returns the straight line as its
+  two ends, a galactic pose carried across its light-year cells with its offset kept below 1 ly;
+  `CraftPose` is `SceneKinematics`, and R11 tells an extrapolated path by `plannedPath === null`; a craft's wire attitude (x, y, z, w) becomes R02's `Quaternion`. Hand-built
+  fixtures are in `src/renderer/src/test/sceneFixture.ts`, on plan 14's shared wire fixture.
+- **Deviations in T13, as built.** `apparentPosition(track, observer, time, previousTau)` takes a
+  `SystemTrack` (`positionAt(time)`, `null` when absent) and `previousTau` as a `Span` or `null`,
+  and returns `seen` (emitted, light time, corrections, residual, geometric position then, apparent
+  position), `not_present_then` or `not_converged`. The sim's rounding is ported in
+  `lib/scene/lightTime.ts`: JavaScript has no fused multiply-add, so `floor_nanos` reads the exact
+  rounding error of the product by 10⁹ with Dekker's two-product, and the test pins a distance where
+  a naive floor gives a nanosecond more; spans and times stay whole seconds and nanoseconds.
+  `fractionOfPeriod` and `reduceToHalfTurn` are not exported: the tracks go through `positionAt`
+  and `composePosition`, which already reduce by them. `sceneAt(model, observer, time, previous)`
+  takes the previous `SceneFrame` (its local body is the current one, its light times start the
+  iteration warm) rather than `previousLocal`, and returns `null` when the scene has no system;
+  each body's and star's `geometricM` is its position at the frame's time (what R02 draws for the
+  local body), beside `apparentM`, `emitted` and `lightTime`. `shipObserver(model, time)` gives the
+  stand-in as the observer, in the system frame or carried with its body, `null` in the galactic
+  frame. Hill radii are computed in the wire adapter (`SceneSystem.hillRadiiM`) from the wire's
+  kilograms and μ, as plan 14's `hill_radius` does with `Math.cbrt` for `libm`'s. Bodies are placed
+  by the `SYSTEM` display's `layoutBodies` (`displays/system/bodyMap.ts`), so `lib/scene` imports
+  from `displays/`. The local body's candidates are the planets, dwarf planets and moons with a Hill
+  radius, each with its parent body or star (`null` for a pair or the barycentre). **The fixture.**
+  R03.T3's golden holds what is seen, not the elements a client propagates, and its galaxy, the
+  Milky Way fixture at its seed, is not one a server universe builds (a universe draws its
+  parameters from its seed). A server unit test, `crates/hyperion-server/src/convert/scene_fixture.rs`,
+  therefore writes `crates/hyperion-server/tests/golden/scene_systems.golden`: the `system_bodies`
+  frames of the three systems at both times, at `mass_and_orbit`, through the handler's own
+  converters on that galaxy. A belt's members, not yet on the wire, and rings, which have no single
+  position, are not compared: 140 vectors are, stars among them (at least 20, asserted). Two unbinding times in the frames
+  lie some 6 Gyr before the epoch, beyond 2⁵³ s, which plan 14's adapter refuses; the test holds
+  them to a safe integer and the issue is reported as galaxy work. **The measurement**
+  (2026-09-30): the largest discrepancy is 2.0 × 10⁻¹³ Σ (1.03 m, a moon of `close_binary` a
+  century on); it and the next (6.8 × 10⁻¹⁵ Σ, a moon of `solar_like`) come from moons whose orbits
+  evolve tidally with age while their `valid_until` is `None`, so the sim evaluates the elements at
+  the emitted time and the wire states them at the record's (about 8 m of semi-major axis a
+  century; a finding for plan 14). Every other vector agrees within 5 × 10⁻¹⁵ Σ, which bears out
+  Design note 7's 10⁻¹⁴. Emitted times agree within 2 ns, Hill radii within 3 × 10⁻¹⁶. The test
+  finds the drifting moons from the fixture itself (elements that differ between its two times with
+  no `valid_until`) and pins them apart: every other vector at the larger of Design note 7's bound
+  and 10 × 5 × 10⁻¹⁵ Σ, the drifting moons at min(10 × 2.0 × 10⁻¹³, 10⁻¹²) Σ, and fails on any
+  measurement above the Verification's ceiling of 10⁻¹² Σ. **Awaiting the owner:** whether plan 14
+  should give a tidally evolving orbit a `valid_until` (or the client bound those moons so), and the
+  unbinding times beyond 2⁵³ s; both are reported to the orchestrator for plan 14. **Tests, as
+  built.** The far body and its moons are held to 1.01 |Δv_moon| τ, plus the giant's and the
+  observer's motion across the difference of the two light times, plus 1 m: without the second term
+  a moon's measured offset exceeds the plan's bound by 0.3%; the factor and the metre cover a 1 s
+  chord's estimate of the moon's speed and the positions' rounding. The warm start is held to Design
+  note 7's bound with each source's own speed from the golden for `apparentPosition`, and, for
+  `sceneAt` given the frame before, with 10⁵ m/s bounding every source's speed in these systems. The local body is checked twice: the planet the golden's
+  low-orbit observer circles, and `selectCameraFrame`'s own answer over candidates built
+  independently. The client's placed tracks never report absence: a body is in the scene by its
+  record's state at the scene's time, so `not_present_then` is tested on a synthetic track and the
+  record's `destroyed` through `sceneAt` (the Risks' "Elements across an event within the light
+  time"). **Names, for R02, R07 and R08.** `previous` is required (`null` for none), so that a
+  caller cannot drop the frame rule's hysteresis; R08's sketch `sceneAt(model, observer, time)`
+  passes `null`. A body's entry is `SceneBodyFrame`, a union of `placed` (with `geometricM`,
+  `lightTime` and `hillRadiusM`) and `contact` (the server's `apparentM` and `emitted` only), which
+  R07's text calls `SceneFrameBody`. The candidates for the local body are formed from the present
+  geometry before the light time is solved, so a source whose light time does not converge is still
+  in the frame rule. The wire adapter keeps a scene's `SceneSystem` across a notification that does
+  not change the system (a heartbeat, a craft push), so `sceneAt`'s placements, kept per system
+  model, are laid out once per change and not once per push. The acceptance command should read
+  `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`, which also runs
+  `lightTime.test.ts`.
