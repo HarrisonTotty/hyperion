@@ -47,8 +47,8 @@ export type SceneStaleReason = "link_down" | "resubscribing" | "silent";
  *
  * @remarks
  * `stale` keeps the last scene on show, for one of {@link SceneStaleReason}'s reasons, and holds
- * its clock at the moment it went stale; the next push makes it `live` again. `link_down` is the link being down before any scene arrived.
- * `rejected` and `timed_out` (a subscription unanswered in {@link REQUEST_TIMEOUT_MS}) stay until
+ * its clock at the moment it went stale; the next push makes it `live` again. `link_down` is the
+ * link being down before any scene arrived. `rejected` and `timed_out` (a subscription unanswered in {@link REQUEST_TIMEOUT_MS}) stay until
  * the link comes back or the scene asked for changes.
  */
 export type SceneStatus =
@@ -299,7 +299,7 @@ class SceneStore {
       return;
     }
     this.#subscription = subscription;
-    this.#receive(opened.model, { kind: "live" });
+    this.#receive(opened.model);
     subscription.onNotification((notification) => {
       this.#apply(notification);
     });
@@ -375,7 +375,7 @@ class SceneStore {
     switch (update.kind) {
       case "ok":
         this.#resubscriptions = 0;
-        this.#receive(update.model, { kind: "live" });
+        this.#receive(update.model);
         break;
       case "sequence":
         this.#resubscribe(
@@ -391,10 +391,10 @@ class SceneStore {
   }
 
   /** Takes `model` as the scene, its clock stated as of now, and restarts the watchdog. */
-  #receive(model: SceneModel, status: SceneStatus): void {
+  #receive(model: SceneModel): void {
     this.#receivedMs = performance.now();
     this.#staleSinceMs = null;
-    this.#snapshot = { ...this.#snapshot, model, status };
+    this.#snapshot = { ...this.#snapshot, model, status: { kind: "live" } };
     clearTimeout(this.#silence);
     this.#silence = setTimeout(() => {
       this.#silence = undefined;
@@ -430,6 +430,11 @@ class SceneStore {
 
   /** Marks the scene held as stale, or the link as down with none held. */
   #goStale(reason: SceneStaleReason): void {
+    if (reason !== "silent") {
+      // The scene is stale for a reason of its own now; silence must not relabel it.
+      clearTimeout(this.#silence);
+      this.#silence = undefined;
+    }
     if (this.#snapshot.model === null) {
       this.#set({ status: reason === "link_down" ? { kind: "link_down" } : { kind: "pending" } });
       return;
@@ -483,9 +488,11 @@ class SceneStore {
  *
  * @remarks
  * Subscribes when the link is up, and again when it returns, after a gap or a step back in the
- * pushes' numbering, and after a push the client cannot use (Design note 4), giving up as
- * `rejected` after {@link MAX_RESUBSCRIPTIONS} in a row. While the link is down the last scene
- * stays on show as `stale`, its clock held. A camera report goes out at most at 4 Hz and at once on
+ * pushes' numbering, after a push the client cannot use (Design note 4), and
+ * {@link RECONNECT_DELAY_MS} after the server ends the scene with `subscription_ended`, giving up
+ * as `rejected` after {@link MAX_RESUBSCRIPTIONS} in a row with no push applied between. While the
+ * link is down, or once no push has arrived for {@link SCENE_SILENCE_MS}, the last scene stays on
+ * show as `stale`, its clock held. A camera report goes out at most at 4 Hz and at once on
  * a change of frame, through `scene_cameras` once the subscription is open, one in flight at a
  * time. Every push re-renders the caller; a drawing loop reads positions through
  * {@link SceneView.frameAt}, which needs no render.
