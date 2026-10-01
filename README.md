@@ -75,7 +75,8 @@ The full design is in
 - [`uv`](https://docs.astral.sh/uv/) — runs [pre-commit](https://pre-commit.com) for the git hooks
 - For the WebAssembly checks in `just ci`: the `wasm32-wasip1` and `wasm32-unknown-unknown`
   targets (listed in `rust-toolchain.toml`), [wasmtime](https://wasmtime.dev) at the version the
-  justfile pins, and [cargo-nextest](https://nexte.st). `just wasm-tools` installs them.
+  justfile pins, `wasm-bindgen-cli` at the version of `wasm-bindgen` that `Cargo.lock` names, and
+  [cargo-nextest](https://nexte.st). `just wasm-tools` installs them.
 
 ## Development
 
@@ -157,6 +158,12 @@ machine; they add about two more (measured under shared load, to be re-timed qui
   it checks that a build with relaxed SIMD fails. `just test-wasm-slow`, part of `just ci-slow`,
   runs their slow tests and doctests there; `just test-wasm` runs both. A missing tool fails them
   with a pointer to `just wasm-tools`; they never skip. Nothing checks AArch64.
+- `just test-wasm-browser` runs the tests of the crates the client ships or tests with as
+  `wasm32-unknown-unknown`, the client's target, under `wasm-bindgen-test` on the V8 that Electron
+  ships: `tools/electron-node/node` runs Electron as Node, and the recipe's first line shows the
+  Electron and V8 versions it ran on. It fails if any test that runs natively, outside a
+  `native_only` module, is missing there, since a plain `#[test]` is silently dropped on that
+  target (each test module imports `wasm_bindgen_test::wasm_bindgen_test as test` instead).
 - `just test`, `just test-slow`, `just bench` and the WebAssembly checks build first, then run
   under one lock shared by every worktree of the clone (`.git/hyperion-heavy-tests.lock`). A second
   run waits for the first to finish, and says so, because two suites at once each take twice as

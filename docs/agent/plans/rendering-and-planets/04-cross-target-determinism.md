@@ -1497,3 +1497,23 @@ warnings` with "use of a disallowed method", and was reverted.
   `tests/golden.rs` is wholly a `native_only` module, and holds the compile-only check that
   `golden!` takes a computed name natively (`golden_takes_a_computed_name_natively`, never called,
   under `#[expect(dead_code)]`). Every unit-test module carries the `as test` import.
+- **Deviations in T8.b, as built (2026-09-30).** The shim prints its own error when
+  `HYPERION_ELECTRON` is unset (`${…:?}`). `test-wasm-browser` resolves Electron's binary and its
+  package version through `pnpm --silent --filter hyperion exec node -p …`, and fails unless
+  `node -p process.versions.electron` through the shim prints that version; its first line of
+  output is "wasm-bindgen-test on Electron 44.4.3, V8 15.2.124.28-electron.0". The count
+  comparison is stricter than a count: each crate's sorted test names under `--list` on the
+  browser target must equal the native ones less those containing `native_only::`, and a
+  difference is printed as a diff. The native list is the dev profile's (the binaries `just test`
+  builds), the browser run the slow-test profile's. `cargo test -q` cannot be used for the browser
+  list, since cargo passes `--quiet` on to the runner, which rejects it. Each run is wrapped in
+  `timeout 600` through the runner variable (`browser_timeout`); `browser_crates` is the testkit
+  alone until T8.c. `_wasm-preflight browser` checks the target and that
+  `wasm-bindgen-test-runner --version` names the `wasm-bindgen` version of `Cargo.lock`
+  (`wasm_bindgen_version`, read from it), and `just wasm-tools` installs `wasm-bindgen-cli` at that
+  version. Checked 2026-09-30 (in a side target directory, since the main one was busy): the run
+  passes on the testkit (52 tests: 33 and one ignored in the lib, 18 in `panics`), and fails at the
+  version check with the shim's directory left off `PATH` ("`node` on PATH is not Electron 44.4.3
+  … (it printed 'undefined')"), at the comparison with `lcg.rs`'s `as test` line removed (it names
+  `lcg::tests::floats_and_bounded_integers_stay_in_range`), and at the comparison with a test
+  compiled out by its own `cfg` outside `native_only` (it names the test); each edit was reverted.
