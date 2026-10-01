@@ -1406,3 +1406,29 @@ outerRadiusM, normal }`; its ticks go through the sampler so that one crossing t
   label. **For the owner:** target brackets share the selection's corner-bracket shape, told
   apart by colour and size; should they take another shape so that the selection is not carried
   mainly by colour?
+- **Deviations in R02.T13, as built.** `buildWireframeDrawList(scene, camera, viewport, tokens,
+options)`: `camera` is `DrawCamera { pose, fovXRad }`, and a fifth argument, `DrawOptions {
+lowSetting, ev100, selection, destination, remPx }`, carries what the tests and the sprites need
+  (the low setting, the exposure, the selection whose orbit, or planet's rings, is drawn at 2 px
+  `--text`, the destination's `--target` reticle, the rem symbols follow); the list is a function
+  of these five. `WireframeDrawList { occluderSpheres, occluderMeshes, lines, sprites, anchors }`
+  in draw order, with `anchors` (`DrawAnchor { target, xPx, yPx, distanceM }`) for T15's pick and
+  labels. A `LineBatch` has a stable `id`, a `space` and an `originF32`: `view` batches are `f32`
+  metres from `originF32` (zero but for a hull's, whose origin is `originMinusCamera` of the
+  craft's pose, Design notes 2 and 22), depth-tested; `screen` batches are the symbology in pixels
+  (z 0), placed after the CPU's horizon test, with no view matrix and no depth test (their packing
+  is of pixels, not positions). Segments are six `f32` per instance. Every batch is cased 1 px each
+  side in `--surface-0` (`CASING_PX`) except hull edges: a casing would widen a 1.5 px edge past
+  the 2 px the occluder's slope bias of Design note 5 covers, and the hull's own faces hide the
+  stars behind it (**for the owner:** keep hull edges uncased, or raise the slope scale to about 3
+  so that the casing is covered). Graticules are `--text-muted`, the equator and prime meridian a
+  step heavier (1.5 px, a choice); hull edges `--text` at 1.5 px; a predicted path `--text` at
+  1 px dashed 6 on and 4 off (a choice), the only dashed batch. Craft other than the own ship get
+  `targetBracket`s (from the own ship, or from the camera with none) through `symbologyMarks`,
+  whose `SymbologyAnchor` gains `craft`; a craft behind a body's limb gets none. A sprite carries
+  `directionF32`, its sub-pixel `xPx`/`yPx`, `exposedRgb` (E ÷ Ω × `exposureScale(ev100)` ×
+  `starColour`, per unit of point-spread weight) and `illuminanceLx`; sprites are sorted by flux
+  (ties by ID), culled half a quad outside the view and capped at 2,000 at the low setting;
+  `preExpose` is not used, the wireframe having no half-float target. `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts`. Bodies are culled by `sphereInFrustum` on their radius, orbits on
+  a(1 + e) about their focus, craft on their hull's length. A ring counts as selected when its
+  planet is (`ViewRing` has no identity of its own).
