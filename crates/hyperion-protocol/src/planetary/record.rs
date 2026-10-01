@@ -103,12 +103,14 @@ pub enum BodyStateDto {
     Destroyed {
         /// What destroyed it.
         cause: DestructionCauseDto,
-        /// When.
+        /// When. It may lie beyond the ±(2⁵³ − 1) s that a JavaScript number holds exactly, as a
+        /// disc dispersed billions of years ago does, and is for display only (P14.T35.d).
         at: UniverseTime,
     },
     /// The body was unbound from its system, and is no longer tracked.
     Unbound {
-        /// When.
+        /// When. It may lie beyond the ±(2⁵³ − 1) s that a JavaScript number holds exactly, as an
+        /// unbinding billions of years ago does, and is for display only (P14.T35.d).
         at: UniverseTime,
     },
 }

@@ -1,4 +1,4 @@
-import type { SectionDto } from "@hyperion/protocol";
+import type { BodyStateDto, SectionDto, UniverseTime } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,6 +12,7 @@ import {
   sliceBodies,
   sliceBodiesWith,
 } from "../../test/planetaryFixture";
+import { GOLDEN_SYSTEMS, GOLDEN_TIMES, goldenSystemBodies } from "../../test/inSystemGolden";
 import {
   EARTH_MASS_KG,
   toBodiesRequest,
@@ -33,6 +34,26 @@ function bodiesOf(response = sliceBodies()) {
 function faultOf(response = sliceBodies()): string {
   const result = toSystemBodiesModel(response, DESIGNATION);
   return result.kind === "fault" ? result.fault : "no fault";
+}
+
+/** The slice's answer with its first body in `state`, and so with no orbit. */
+function withFirstState(state: BodyStateDto) {
+  const first = sliceBodies().bodies[0]?.id;
+  if (first === undefined) {
+    throw new Error("the slice's answer has a body");
+  }
+  return sliceBodiesWith((body) =>
+    body.id === first ? { ...body, state, orbit: { state: "not_applicable" } } : body,
+  );
+}
+
+/** The slice's answer with every orbit's `valid_until` set to `validUntil`. */
+function withValidUntil(validUntil: UniverseTime) {
+  return sliceBodiesWith((body) =>
+    body.orbit.state === "ok"
+      ? { ...body, orbit: { state: "ok", value: { ...body.orbit.value, valid_until: validUntil } } }
+      : body,
+  );
 }
 
 /** The fixture's Earth with a hooks section that is `ok` and carries `detailSeed`, read. */
@@ -314,5 +335,56 @@ describe("toBodyDetail", () => {
       kind: "fault",
       fault: `body ${FIXTURE_EARTH} of another system`,
     });
+  });
+});
+
+/** A golden system's `system_bodies` answer as the server sent it, with its kind. */
+function goldenAnswer(
+  system: (typeof GOLDEN_SYSTEMS)[number],
+  when: (typeof GOLDEN_TIMES)[number],
+) {
+  return { kind: "system_bodies" as const, ...goldenSystemBodies(system, when) };
+}
+
+describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
+  // About -6.3 Gyr, which a JavaScript number holds to 32 s.
+  const LONG_AGO_S = -199_097_968_544_446_944;
+
+  it("reads every frame of the RM1 fixture's three golden systems", () => {
+    for (const system of GOLDEN_SYSTEMS) {
+      for (const when of GOLDEN_TIMES) {
+        expect(faultOf(goldenAnswer(system, when)), `${system} ${when}`).toBe("no fault");
+      }
+    }
+  });
+
+  it("keeps the wide binary's moon unbound 2.1 Gyr before the epoch", () => {
+    const { bodies } = bodiesOf(goldenAnswer("wide_binary", "epoch"));
+    const moon = bodies.bodies.find((body) => body.id === "41ffecae00000004.0401");
+
+    expect(moon?.state).toEqual({
+      kind: "unbound",
+      at: { seconds: -67_192_088_818_403_264, nanos: 0 },
+    });
+  });
+
+  it("reads an unbinding or a destruction at any whole number of seconds", () => {
+    const at = { seconds: LONG_AGO_S, nanos: 0 };
+
+    expect(faultOf(withFirstState({ type: "unbound", at }))).toBe("no fault");
+    expect(faultOf(withFirstState({ type: "destroyed", cause: "engulfed", at }))).toBe("no fault");
+  });
+
+  it("refuses a state time that is not whole seconds and nanoseconds", () => {
+    expect(faultOf(withFirstState({ type: "unbound", at: { seconds: 0.5, nanos: 0 } }))).toBe(
+      "state time unusable",
+    );
+    expect(faultOf(withFirstState({ type: "unbound", at: { seconds: 0, nanos: 1e9 } }))).toBe(
+      "state time unusable",
+    );
+  });
+
+  it("still refuses an orbit's valid_until beyond 2^53 s, which the client computes with", () => {
+    expect(faultOf(withValidUntil({ seconds: -LONG_AGO_S, nanos: 0 }))).toBe("orbit time unusable");
   });
 });

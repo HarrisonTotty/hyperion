@@ -173,13 +173,26 @@ function toKind(kind: BodyKindDto): BodyKind {
   return result;
 }
 
+function validNanos(nanos: number): boolean {
+  return Number.isInteger(nanos) && nanos >= 0 && nanos < 1_000_000_000;
+}
+
+/** A time the client computes with: whole seconds that a JavaScript number holds exactly. */
 function usableTime(time: UniverseTime): boolean {
-  return (
-    Number.isSafeInteger(time.seconds) &&
-    Number.isInteger(time.nanos) &&
-    time.nanos >= 0 &&
-    time.nanos < 1_000_000_000
-  );
+  return Number.isSafeInteger(time.seconds) && validNanos(time.nanos);
+}
+
+/**
+ * A body state's time, which is only displayed: any whole number of seconds (plan 14, P14.T35.d).
+ *
+ * @remarks
+ * A body unbound or destroyed long before the clock window carries a time past ±(2⁵³ − 1) s,
+ * about ±285 Myr, which `JSON.parse` rounds: at 6 Gyr to 32 s, a relative 2⁻⁵³ that the years it
+ * is shown in cannot reveal. Every time the client computes with lies inside the clock window and
+ * is held to {@link usableTime}.
+ */
+function displayableTime(time: UniverseTime): boolean {
+  return Number.isInteger(time.seconds) && validNanos(time.nanos);
 }
 
 function toState(state: BodyStateDto): BodyState {
@@ -190,11 +203,11 @@ function toState(state: BodyStateDto): BodyState {
       result = { kind: state.type };
       break;
     case "destroyed":
-      check(usableTime(state.at), "state time unusable");
+      check(displayableTime(state.at), "state time unusable");
       result = { kind: "destroyed", cause: state.cause, at: state.at };
       break;
     case "unbound":
-      check(usableTime(state.at), "state time unusable");
+      check(displayableTime(state.at), "state time unusable");
       result = { kind: "unbound", at: state.at };
       break;
   }
