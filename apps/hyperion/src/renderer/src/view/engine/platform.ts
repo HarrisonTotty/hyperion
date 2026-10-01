@@ -138,9 +138,9 @@ export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
  * The features asked of a device that it does not have.
  *
  * @remarks
- * Babylon drops a requested feature the adapter lacks without a word
- * (`webgpuEngine.pure.js:430-438` in 9.28.0), so the engine compares what it asked with what the
- * device enabled and reports the difference (R01 Design note 7).
+ * The engine compares what it asked for with what the device enabled and reports the
+ * difference (R01 Design note 7), so that a feature quietly missing is never mistaken for one
+ * present.
  */
 export function featuresNotEnabled(
   requested: ReadonlyArray<GPUFeatureName>,

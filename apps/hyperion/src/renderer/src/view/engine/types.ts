@@ -2,7 +2,7 @@
  * The engine-agnostic interface: the only rendering types the rest of the renderer sees.
  *
  * @remarks
- * Only `view/engine/babylon/` allocates on the device, which the boundary test enforces (R01
+ * Only `view/engine/webgpu/` allocates on the device, which the boundary test enforces (R01
  * Design note 1). One `GPUDevice` drives any number of views, each through its own canvas context
  * at its own size. Every material is standard WGSL under {@link BIND_GROUPS}' convention (Design
  * note 23); depth is reversed and `depth32float`.
@@ -472,8 +472,8 @@ export interface RenderEngine {
   dispose(): void;
 }
 
-/** The Babylon module's one export, `createBabylonEngine`, which only `loadEngine.ts` imports. */
-export type CreateBabylonEngine = (
+/** The WebGPU module's one export, `createWebGpuEngine`, which only `loadEngine.ts` imports. */
+export type CreateWebGpuEngine = (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,
   overrides: CapabilityOverrides | undefined,
@@ -484,7 +484,7 @@ export interface LoadEngineOptions {
   /** The harness's withheld-feature runs. */
   readonly overrides?: CapabilityOverrides;
   /** The dynamic import, injectable so that a test fakes it without `vi.mock` of our module. */
-  readonly importEngine?: () => Promise<{ readonly createBabylonEngine: CreateBabylonEngine }>;
+  readonly importEngine?: () => Promise<{ readonly createWebGpuEngine: CreateWebGpuEngine }>;
   /** `navigator.gpu`, from which a rebuild asks for a fresh adapter; a test passes a fake. */
   readonly gpu?: GPU;
 }

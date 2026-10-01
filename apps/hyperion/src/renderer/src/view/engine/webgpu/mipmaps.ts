@@ -2,9 +2,7 @@
  * Mip generation for an offscreen target's colour, after it is rendered.
  *
  * @remarks
- * Babylon's own generator makes the whole chain down to one texel (`_generateMipmaps` computes the
- * count from the size), while a `RenderTargetSpec` names its mips, so the adapter generates them
- * itself: each level is a full-screen triangle sampling the level above through a linear sampler,
+ * A `RenderTargetSpec` names its mips, and the adapter generates them itself: each level is a full-screen triangle sampling the level above through a linear sampler,
  * which averages the four texels a texel of the smaller level covers when the size is even.
  */
 

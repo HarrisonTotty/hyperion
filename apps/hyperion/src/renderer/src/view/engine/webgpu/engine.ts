@@ -31,7 +31,7 @@ import type {
   BufferHandle,
   ComputeBindings,
   ComputeHandle,
-  CreateBabylonEngine,
+  CreateWebGpuEngine,
   DepthPolicy,
   FrameSubmission,
   IndirectArgs,
@@ -737,7 +737,7 @@ async function compilationErrorsOf(modules: MaterialModules): Promise<ReadonlyAr
  * Creates the engine on the vetted adapter: its device, with the features `requiredFeatures` asks
  * for, then the rounding probe (Design note 22) before any view renders.
  */
-export const createBabylonEngine: CreateBabylonEngine = async (
+export const createWebGpuEngine: CreateWebGpuEngine = async (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,
   overrides: CapabilityOverrides | undefined,
