@@ -1628,3 +1628,29 @@ warnings` with "use of a disallowed method", and was reverted.
 - **T10.b, checked later (2026-09-30).** In a fresh `git worktree` at 7beb6ec (after
   `pnpm install`), a trivial commit to a TypeScript file passed every commit hook, the oxlint and
   `tsc` hooks building the module through `_with-surface`; the worktree was removed after.
+- **R04.T7.d, as built (2026-09-30): what the slow wasip1 suite found.** `just test-wasm-slow`
+  (run on its own, since `ci-slow` stops at the native failures above) took 3,291 s wall: 760 s
+  waiting for the heavy-test lock, about 70 s building, and 2,518 s of nextest (load 9.8 before,
+  8.9 after; provisional). 161 slow tests ran; 15 failed. Six are the pre-existing native failures
+  above (the sim's six; `hyperion-fit`'s does not run on wasip1), failing alike on wasip1, so the
+  two targets agree. The other nine aborted because they spawn threads, which wasip1 lacks:
+  `stellar::testing::tests`' five (`core_collapses_per_century_across_seeds`,
+  `galaxy_wide_counts_at_milky_way_values`, `layer_e_living_shares_and_the_remnant_ratio`,
+  `old_populations_have_nothing_living_above_the_turn_off`,
+  `thin_disc_class_fractions_near_the_solar_circle`), `binary_carve`'s
+  `no_grid_system_is_in_a_carved_class_and_none_uses_every_attempt` and `binary_system`'s three.
+  Each helper (`tally` in `stellar/testing.rs`, the share loop in `binary_carve.rs`, `par_fold` in
+  `binary_system.rs`) now takes the share's work as a closure, run on its own thread natively and,
+  under `cfg(target_family = "wasm")`, share after share on the one thread, with the same shares
+  and the same merge order, so `tally`'s float sums are the same bits. All nine then passed under
+  wasip1 (side target directory, slow-test profile, 1,603 s for the longest,
+  `old_populations_have_nothing_living_above_the_turn_off`, single-threaded). The suite's wall time
+  is bounded by its single-threaded longest tests: the satellites check (2,518 s, four threads
+  natively) and `lensing_optical_depth_towards_the_bulge` (1,777 s). The doctests, which
+  `test-wasm-slow` runs after the slow tests, did not run in that measurement because the slow
+  step failed; run alone they passed in 88 s (T7.b). No generated output moved.
+- **`just ci` with everything above (2026-09-30, at T10.c plus T7.d).** Passed: 1,820 s wall, of
+  which 1,047 s waiting for the heavy-test lock, so about 773 s of work under load 9 to 22
+  (provisional); the wasip1 suites took 136 s of nextest, and the browser target's three crates
+  (124, 1 and 52 tests, matching their native lists less `native_only`) under a second of tests
+  after their builds and listings. This is the full-`ci` record T8.c's acceptance asks for.
