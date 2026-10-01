@@ -35,8 +35,10 @@ section headings; cite them exactly.
 - **Workflow**: `#[allow]` without a reason; crate-wide suppressions; an `#[expect]` reason that
   doesn't justify the suppression; a dependency not in `[workspace.dependencies]`; a crate without
   `[lints] workspace = true`; protocol types changed without regenerated bindings.
-- **Crate boundaries**: I/O, clocks, threads or async in `hyperion-sim`; behaviour in
-  `hyperion-protocol`; logic in a `main.rs`.
+- **Crate boundaries**: I/O, clocks, threads or async in `hyperion-sim`, `hyperion-base` or
+  `hyperion-surface`; a runtime dependency of `hyperion-base` other than `libm`, or of
+  `hyperion-surface` other than `hyperion-base` (and `wasm-bindgen` on the browser target only);
+  `hyperion-surface` depending on the sim; behaviour in `hyperion-protocol`; logic in a `main.rs`.
 - **Errors and panics**: `unwrap()` outside tests; an `expect` whose message doesn't say why
   failure is impossible; `()` or `String` as an error type, or `anyhow` below the server binary's
   top level; error names that aren't verb-object-error; `Display` text that is capitalised or ends
