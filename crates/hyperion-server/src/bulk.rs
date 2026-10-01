@@ -608,6 +608,240 @@ mod tests {
             }
         }
 
+        /// The added latency of a push during a 15 MB transfer on loopback (rendering plan R03,
+        /// R03.T15; Design note 11): ten craft pushed at 64 Hz, each push's delay from the instant
+        /// its clock states to its receipt, for a second with no transfer and then during forty
+        /// transfers read as fast as loopback carries them. Measured by hand, in real time; the
+        /// figures go in the plan's notes, provisional on a shared machine.
+        #[tokio::test]
+        #[ignore = "measurement on loopback, run by hand: cargo test -p hyperion-server --lib bulk::tests::streaming::push_latency_on_loopback -- --ignored --nocapture"]
+        #[expect(
+            clippy::too_many_lines,
+            reason = "a measurement run by hand, read top to bottom as one procedure"
+        )]
+        async fn push_latency_on_loopback() {
+            use futures_util::{SinkExt, StreamExt};
+            use tokio::time::Instant;
+            use tokio_tungstenite::tungstenite::Message;
+
+            let (handler, mut calls) = Scripted::new();
+            let harness = Harness::start_tapped(
+                SceneThenScripted(handler),
+                ConnectionLimits::default(),
+                |config| config.scene_knowledge(CraftSeen).craft_source(TenCraft),
+                Tap::LowWaterMark,
+            )
+            .await;
+            let state = std::sync::Arc::clone(harness.state());
+            let universe = state
+                .registry
+                .create("Bulk".parse().unwrap(), Some(0x4d2))
+                .await
+                .unwrap();
+            let start = hyperion_sim::time::UniverseTime::new(3_600, 0).unwrap();
+            let anchor = Instant::now();
+            let mut setting = state.scene.watch(universe.id()).borrow().clone();
+            setting.clock = crate::scene::SceneClock::new(
+                start,
+                anchor,
+                crate::scene::TimeRate::new(1).unwrap(),
+            )
+            .unwrap();
+            state.scene.set(universe.id(), setting);
+
+            let (mut socket, _) = tokio_tungstenite::connect_async(harness.url())
+                .await
+                .unwrap();
+            let send = |message: &hyperion_protocol::ClientMessage| {
+                Message::text(serde_json::to_string(message).unwrap())
+            };
+            socket
+                .send(send(&hyperion_protocol::ClientMessage::Hello {
+                    client_version: "measure".to_owned(),
+                }))
+                .await
+                .unwrap();
+            socket
+                .send(send(&hyperion_protocol::ClientMessage::Request {
+                    id: RequestId(1),
+                    body: hyperion_protocol::RequestBody::Subscribe(
+                        hyperion_protocol::SubscribeRequest {
+                            universe: universe.id().into(),
+                            topic: hyperion_protocol::SubscriptionTopic::Scene(
+                                hyperion_protocol::SceneSubscribeRequest {
+                                    detail: hyperion_protocol::DetailLevelDto::Contact,
+                                    cameras: Vec::new(),
+                                },
+                            ),
+                        },
+                    ),
+                }))
+                .await
+                .unwrap();
+            // The delay of a push from the instant its clock states (1× from `start` at
+            // `anchor`), or `None` for any other frame.
+            let delay = |text: &str| match serde_json::from_str::<ServerMessage>(text) {
+                Ok(ServerMessage::Notification {
+                    body: hyperion_protocol::NotificationBody::Scene(notification),
+                    ..
+                }) => {
+                    let at = hyperion_sim::time::UniverseTime::new(
+                        notification.clock.time.seconds,
+                        notification.clock.time.nanos,
+                    )
+                    .unwrap();
+                    let since = at.checked_since(start).unwrap().as_seconds_f64();
+                    Some(
+                        Instant::now()
+                            .saturating_duration_since(anchor + Duration::from_secs_f64(since)),
+                    )
+                }
+                _ => None,
+            };
+
+            // The subscription live first: its opening builds the galaxy.
+            while let Ok(Some(Ok(frame))) = tokio::time::timeout(WAIT, socket.next()).await {
+                if let Message::Text(text) = frame
+                    && let Ok(ServerMessage::Response {
+                        id: RequestId(1), ..
+                    }) = serde_json::from_str::<ServerMessage>(&text)
+                {
+                    break;
+                }
+            }
+            // A second with no transfer.
+            let mut idle = Vec::new();
+            let quiet_until = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < quiet_until {
+                let frame = tokio::time::timeout(WAIT, socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                if let Message::Text(text) = frame
+                    && let Some(delay) = delay(&text)
+                {
+                    idle.push(delay);
+                }
+            }
+
+            // Forty transfers, each push received between a transfer's first chunk and its last.
+            let mut busy = Vec::new();
+            let mut transfer_ms = Vec::new();
+            for transfer in 0..40_u32 {
+                let id = 2 + transfer;
+                socket
+                    .send(send(&hyperion_protocol::ClientMessage::Request {
+                        id: RequestId(id),
+                        body: body(id),
+                    }))
+                    .await
+                    .unwrap();
+                let bulk = BulkPayload::new(payload(FIELD_BYTES)).unwrap();
+                assert!(calls.next().await.respond_bulk(small_response(), bulk));
+                let mut chunks = 0;
+                let mut first = None;
+                while chunks < 58 {
+                    let frame = tokio::time::timeout(WAIT, socket.next())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap();
+                    match frame {
+                        Message::Binary(_) => {
+                            chunks += 1;
+                            first.get_or_insert_with(Instant::now);
+                        }
+                        Message::Text(text) => {
+                            if let Some(delay) = delay(&text)
+                                && chunks > 0
+                            {
+                                busy.push(delay);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(first) = first {
+                    transfer_ms.push(first.elapsed().as_secs_f64() * 1e3);
+                }
+            }
+            drop(socket);
+            harness.stop().await;
+
+            let summary = |mut delays: Vec<Duration>| {
+                delays.sort_unstable();
+                let median = delays.get(delays.len() / 2).copied().unwrap_or_default();
+                let worst = delays.last().copied().unwrap_or_default();
+                format!(
+                    "{} pushes, median {median:?}, worst {worst:?}",
+                    delays.len()
+                )
+            };
+            // A measurement's report, read by hand: there is no other channel for it.
+            #[expect(
+                clippy::print_stderr,
+                reason = "a measurement run by hand reports its figures"
+            )]
+            {
+                eprintln!("idle: {}", summary(idle));
+                eprintln!("during transfers: {}", summary(busy));
+                eprintln!("transfers took {transfer_ms:.1?} ms from first chunk to last");
+            }
+        }
+
+        /// Every craft is a contact; every body is granted what was asked.
+        #[derive(Debug)]
+        struct CraftSeen;
+
+        impl crate::scene::SceneKnowledge for CraftSeen {
+            fn grant(
+                &self,
+                _body: hyperion_sim::id::BodyId,
+                asked: hyperion_sim::planetary::record::DetailLevel,
+            ) -> hyperion_sim::planetary::record::DetailLevel {
+                asked
+            }
+
+            fn is_contact(&self, _craft: &crate::scene::CraftState) -> bool {
+                true
+            }
+        }
+
+        /// Ten craft at rest at the galactic origin, each stating the scene time it was asked at.
+        #[derive(Debug)]
+        struct TenCraft;
+
+        impl crate::scene::CraftSource for TenCraft {
+            fn craft_at(
+                &self,
+                _universe: crate::universe::UniverseId,
+                t: hyperion_sim::time::UniverseTime,
+            ) -> Vec<crate::scene::CraftState> {
+                (0..10_u8)
+                    .map(|k| {
+                        crate::scene::CraftState::new(hyperion_protocol::SceneCraftDto {
+                            craft: format!("craft-{k}"),
+                            hull: "test-hull".to_owned(),
+                            state: hyperion_protocol::KinematicsDto {
+                                position: hyperion_protocol::FramePositionDto::Galactic {
+                                    position: hyperion_protocol::GalacticPosition::default(),
+                                },
+                                velocity_m_s: [f64::from(k), 0.0, 0.0],
+                                time: UniverseTime {
+                                    seconds: t.seconds(),
+                                    nanos: t.subsec_nanos(),
+                                },
+                            },
+                            attitude: [1.0, 0.0, 0.0, 0.0],
+                            angular_velocity_rad_s: [0.0; 3],
+                            planned_path: None,
+                        })
+                    })
+                    .collect()
+            }
+        }
+
         /// The delay of each heartbeat received during one 15 MB transfer, from the instant the
         /// server's clock stated to the client's receipt.
         async fn heartbeat_latencies(tap: Tap) -> Vec<Duration> {

@@ -113,6 +113,16 @@ pub enum ServerMessage {
         /// What changed, by topic.
         body: NotificationBody,
     },
+    /// The end of a subscription the server can no longer serve, as when its topic's work fails
+    /// (rendering plan R03; a delegated decision of 2026-09-30). It follows the subscription's
+    /// last notification, nothing follows it on the subscription, and its number is not reused.
+    /// Like a notification it is sent only on a subscription the client opened.
+    SubscriptionEnded {
+        /// The subscription, as its `subscribed` answer numbered it.
+        subscription: u32,
+        /// Why it ended.
+        error: RequestError,
+    },
 }
 
 /// What a subscription watches, tagged by `topic`: the topic's own request fields.
@@ -1032,6 +1042,29 @@ mod tests {
                     "sequence": 1,
                     "clock": scene_clock_json(),
                     "bodies": [],
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn subscription_ended_wire_form() {
+        assert_wire_form(
+            &ServerMessage::SubscriptionEnded {
+                subscription: 3,
+                error: RequestError {
+                    code: ErrorCode::Internal,
+                    message: "the scene could not be advanced".to_owned(),
+                    field: None,
+                },
+            },
+            json!({
+                "type": "subscription_ended",
+                "subscription": 3,
+                "error": {
+                    "code": "internal",
+                    "message": "the scene could not be advanced",
+                    "field": null,
                 },
             }),
         );

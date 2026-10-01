@@ -52,4 +52,12 @@ subscription: number,
 /**
  * What changed, by topic.
  */
-body: NotificationBody, };
+body: NotificationBody, } | { "type": "subscription_ended", 
+/**
+ * The subscription, as its `subscribed` answer numbered it.
+ */
+subscription: number, 
+/**
+ * Why it ended.
+ */
+error: RequestError, };

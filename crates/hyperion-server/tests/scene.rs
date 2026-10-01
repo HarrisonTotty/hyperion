@@ -257,6 +257,14 @@ async fn craft_are_pushed_at_64_hz_each_push_stating_its_time() {
         "{pushes} craft pushes in a second"
     );
     let rate_mb_s = f64::from(u32::try_from(bytes).unwrap()) / 1e6;
+    // The figures R03.T15 records, read with `--nocapture`.
+    #[expect(
+        clippy::print_stderr,
+        reason = "the measured rate is reported for the plan"
+    )]
+    {
+        eprintln!("{pushes} craft pushes in a second of scene time, {rate_mb_s:.3} MB/s");
+    }
     assert!(
         rate_mb_s < 0.5,
         "{rate_mb_s} MB/s, over Design note 4's finding threshold"
