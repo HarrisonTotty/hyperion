@@ -25,23 +25,19 @@ interface SourceFile {
   readonly text: string;
 }
 
-const ENGINE_PACKAGE = ["@babylonjs", "/"].join("");
 const REGISTER_VIEW = ["register", "View"].join("");
 const TOLERANCE = ["toler", "ance"].join("");
 
-const ENGINE_IMPORT = new RegExp(
-  String.raw`(?:from\s+|import\s*\(\s*|import\s+)["']${ENGINE_PACKAGE}`,
-);
 const TOLERANCE_READ = new RegExp(String.raw`\.read(?:Buffer|Texture)\([^)]*["']${TOLERANCE}["']`);
-const ENGINE_MODULE = ["babylon", "/", "engine"].join("");
+const ENGINE_MODULE = ["webgpu", "/", "engine"].join("");
 const STATIC_ENGINE_IMPORT = new RegExp(
   String.raw`(?:from\s+|import\s+)["'][^"']*${ENGINE_MODULE}["']`,
 );
 const RAW_DEVICE_ALLOCATION = /\b\w*[dD]evice\.create(?:Buffer|Texture)\(/;
 
-/** Whether `path` lies in the one directory that may import the engine. */
+/** Whether `path` lies in the adapter, the one directory that may allocate on the device. */
 function inEngineAdapter(path: string): boolean {
-  return path.startsWith("view/engine/babylon/");
+  return path.startsWith("view/engine/webgpu/");
 }
 
 /** Whether `path` is part of the smoke harness's page. */
@@ -52,9 +48,6 @@ function inSmokePage(path: string): boolean {
 /** Each rule `file` breaks, in words. */
 function violations(file: SourceFile): string[] {
   const found: string[] = [];
-  if (!inEngineAdapter(file.path) && ENGINE_IMPORT.test(file.text)) {
-    found.push(`${file.path} imports the engine outside view/engine/babylon/`);
-  }
   if (file.text.includes(REGISTER_VIEW)) {
     found.push(`${file.path} names ${REGISTER_VIEW}, whose drawImage copy the brainstorm rejects`);
   }
@@ -62,15 +55,13 @@ function violations(file: SourceFile): string[] {
     found.push(`${file.path} reads back with ${TOLERANCE} access outside the smoke page`);
   }
   if (!inEngineAdapter(file.path) && STATIC_ENGINE_IMPORT.test(file.text)) {
-    found.push(
-      `${file.path} imports the Babylon module eagerly, not through loadEngine's import()`,
-    );
+    found.push(`${file.path} imports the engine module eagerly, not through loadEngine's import()`);
   } else if (
     !inEngineAdapter(file.path) &&
     file.path !== "view/engine/loadEngine.ts" &&
     file.text.includes(ENGINE_MODULE)
   ) {
-    found.push(`${file.path} names the Babylon module, which only loadEngine.ts may load`);
+    found.push(`${file.path} names the engine module, which only loadEngine.ts may load`);
   }
   if (!inEngineAdapter(file.path) && RAW_DEVICE_ALLOCATION.test(file.text)) {
     found.push(`${file.path} allocates GPU memory outside the engine's one creation path`);
@@ -96,20 +87,9 @@ describe("the engine boundary", () => {
     expect(sourceFiles().flatMap(violations)).toEqual([]);
   });
 
-  it("refuses an engine import outside the adapter", () => {
-    const text = `import { Engine } from "${ENGINE_PACKAGE}core";`;
-    expect(violations({ path: "view/scene.ts", text })).toHaveLength(1);
-    expect(violations({ path: "view/engine/babylon/engine.ts", text })).toEqual([]);
-  });
-
-  it("refuses a dynamic engine import outside the adapter", () => {
-    const text = `const core = await import("${ENGINE_PACKAGE}core");`;
-    expect(violations({ path: "view/scene.ts", text })).toHaveLength(1);
-  });
-
   it("refuses the view-registering copy anywhere", () => {
     const text = `engine.${REGISTER_VIEW}(canvas);`;
-    expect(violations({ path: "view/engine/babylon/engine.ts", text })).toHaveLength(1);
+    expect(violations({ path: "view/engine/webgpu/engine.ts", text })).toHaveLength(1);
   });
 
   it("refuses a tolerance readback outside the smoke page", () => {
@@ -118,12 +98,12 @@ describe("the engine boundary", () => {
     expect(violations({ path: "smoke/kernels.ts", text })).toEqual([]);
   });
 
-  it("refuses a static import of the Babylon module, even in the loader", () => {
-    const text = `import { createBabylonEngine } from "./${ENGINE_MODULE}";`;
+  it("refuses a static import of the engine module, even in the loader", () => {
+    const text = `import { createWebGpuEngine } from "./${ENGINE_MODULE}";`;
     expect(violations({ path: "view/engine/loadEngine.ts", text })).toHaveLength(1);
   });
 
-  it("lets only the loader import the Babylon module dynamically", () => {
+  it("lets only the loader import the engine module dynamically", () => {
     const text = `const engine = await import("./${ENGINE_MODULE}");`;
     expect(violations({ path: "view/engine/loadEngine.ts", text })).toEqual([]);
     expect(violations({ path: "view/scene.ts", text })).toHaveLength(1);
@@ -132,7 +112,7 @@ describe("the engine boundary", () => {
   it("refuses a raw device allocation outside the adapter", () => {
     const text = "const buffer = device.createBuffer({ size: 4, usage: 1 });";
     expect(violations({ path: "view/scene.ts", text })).toHaveLength(1);
-    expect(violations({ path: "view/engine/babylon/resources.ts", text })).toEqual([]);
+    expect(violations({ path: "view/engine/webgpu/resources.ts", text })).toEqual([]);
     const named = "this.gpuDevice.createTexture({ size: [1, 1], format: 'r8unorm', usage: 4 });";
     expect(violations({ path: "view/scene.ts", text: named })).toHaveLength(1);
   });

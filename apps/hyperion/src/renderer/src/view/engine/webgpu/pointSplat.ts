@@ -4,7 +4,7 @@
  *
  * @remarks
  * Encoded by the adapter like its other raw passes, on the engine's device. The sources are plain
- * WGSL with `main` entry points, not Babylon's dialect: the vertex stage reads the points from a
+ * WGSL with `main` entry points, ahead of Design note 23's convention: the vertex stage reads the points from a
  * read-only storage buffer the source declares as `@group(0) @binding(0) var<storage, read>
  * points`, indexed by `@builtin(vertex_index)`, and each point adds its colour to the target, alpha
  * included. The pass loads the target, so successive draws accumulate; the caller clears it by
