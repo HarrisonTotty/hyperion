@@ -19,13 +19,14 @@ import { viewId } from "../../view/camera/state";
 import type { SceneFrame } from "./apparent";
 import { CAMERA_REPORT_INTERVAL_MS } from "./cameraReports";
 import type { SceneKinematics } from "./model";
+import { RECONNECT_DELAY_MS } from "../connection";
 import { REQUEST_TIMEOUT_MS } from "../useServerRequest";
-import { type SceneOptions, useScene } from "./useScene";
+import { SCENE_SILENCE_MS, type SceneOptions, useScene } from "./useScene";
 
 const UNIVERSE: UniverseIdHex = "00000000000000a1";
 const OTHER_UNIVERSE: UniverseIdHex = "00000000000000b2";
 const SOME_UNIVERSE: { readonly universe: UniverseIdHex | null } = { universe: UNIVERSE };
-const RECONNECT_DELAY_MS = 2_000;
+
 const OPTIONS: SceneOptions = { detail: "full", designate: designateFixture };
 const RATE = 1_000;
 
@@ -241,6 +242,63 @@ describe("useScene", () => {
 
     expect(result.current.status).toEqual({ kind: "live" });
     expect(result.current.model?.clock.time.seconds).toBe(4_000);
+  });
+
+  it("reopens the scene the server ended, after the link's reconnection delay", async () => {
+    const { result, socket } = renderScene();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 3);
+
+    act(() => {
+      socket.serverSends({
+        type: "subscription_ended",
+        subscription: 3,
+        error: { code: "internal", message: "the scene could not be advanced", field: null },
+      });
+    });
+
+    expect(result.current.status).toEqual({ kind: "stale", reason: "resubscribing" });
+    expect(errors).toHaveBeenCalledOnce();
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(1);
+    expect(socket.requestsOfKind("unsubscribe")).toHaveLength(0);
+
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(2);
+
+    await opens(socket, 4);
+
+    expect(result.current.status).toEqual({ kind: "live" });
+  });
+
+  it("shows the scene stale after two seconds without a push, and live at the next", async () => {
+    const { result, socket } = renderScene();
+    await opens(socket, 3);
+
+    act(() => {
+      vi.advanceTimersByTime(SCENE_SILENCE_MS - 1);
+    });
+
+    expect(result.current.status).toEqual({ kind: "live" });
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    const heldAt = framed(result.current.frameAt(performance.now())).time;
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(result.current.status).toEqual({ kind: "stale", reason: "silent" });
+    expect(framed(result.current.frameAt(performance.now())).time).toEqual(heldAt);
+
+    act(() => {
+      socket.serverNotifies(3, heartbeat(1, 5_600));
+    });
+
+    expect(result.current.status).toEqual({ kind: "live" });
   });
 
   it("reports the scene's refusal of the subscription", async () => {

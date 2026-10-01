@@ -19,6 +19,7 @@ import type {
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import type { ViewId } from "../../view/camera/state";
+import { RECONNECT_DELAY_MS } from "../connection";
 import { useServerLink } from "../serverLink";
 import { followRequest, REQUEST_TIMEOUT_MS } from "../useServerRequest";
 import { type SceneFrame, sceneAt, shipObserver } from "./apparent";
@@ -35,12 +36,18 @@ export type SceneRefusalCode =
   Exclude<RequestFailure["code"], "aborted" | "superseded" | "link_lost"> | "unusable";
 
 /**
+ * Why the scene on show is stale: the link is down; the scene is being opened again after a
+ * numbering error, an unusable push or the server's ending it; or nothing has arrived for twice
+ * the heartbeat.
+ */
+export type SceneStaleReason = "link_down" | "resubscribing" | "silent";
+
+/**
  * Where a display's scene subscription stands.
  *
  * @remarks
- * `stale` keeps the last scene on show while the link is down (`link_down`) or while the scene is
- * being opened again after a numbering error or an unusable push (`resubscribing`), and holds its
- * clock at the moment it went stale. `link_down` is the link being down before any scene arrived.
+ * `stale` keeps the last scene on show, for one of {@link SceneStaleReason}'s reasons, and holds
+ * its clock at the moment it went stale; the next push makes it `live` again. `link_down` is the link being down before any scene arrived.
  * `rejected` and `timed_out` (a subscription unanswered in {@link REQUEST_TIMEOUT_MS}) stay until
  * the link comes back or the scene asked for changes.
  */
@@ -48,7 +55,7 @@ export type SceneStatus =
   | { readonly kind: "idle" }
   | { readonly kind: "pending" }
   | { readonly kind: "live" }
-  | { readonly kind: "stale"; readonly reason: "link_down" | "resubscribing" }
+  | { readonly kind: "stale"; readonly reason: SceneStaleReason }
   | { readonly kind: "link_down" }
   | { readonly kind: "rejected"; readonly code: SceneRefusalCode; readonly reason: string }
   | { readonly kind: "timed_out" };
@@ -96,6 +103,12 @@ export interface SceneOptions {
 
 /** Resubscriptions in a row, with no push applied between them, after which the scene gives up. */
 const MAX_RESUBSCRIPTIONS = 3;
+
+/**
+ * How long the scene may go without a push before it is shown stale, ms: twice the server's 1 s
+ * heartbeat (`SCENE_HEARTBEAT`), the guide's "twice its expected period".
+ */
+export const SCENE_SILENCE_MS = 2_000;
 
 const IDLE: SceneSnapshot = { status: { kind: "idle" }, model: null, cameraRefusal: null };
 
@@ -147,6 +160,10 @@ class SceneStore {
   #stopCameraReport: (() => void) | null = null;
   /** The latest set of cameras handed over while a report was in flight, sent once it settles. */
   #waitingCameras: ReadonlyArray<CameraReportDto> | null = null;
+  /** The watchdog that marks the scene stale when no push has arrived for a while. */
+  #silence: ReturnType<typeof setTimeout> | undefined;
+  /** The wait before opening the scene again after the server ended it. */
+  #retry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     readonly requests: RequestClient,
@@ -287,10 +304,25 @@ class SceneStore {
       this.#apply(notification);
     });
     subscription.onEnd((end) => {
-      if (end === "link_lost" && generation === this.#generation) {
-        this.#subscription = null;
-        this.#reporter.detach();
-        this.#goStale("link_down");
+      if (generation !== this.#generation) {
+        return;
+      }
+      switch (end.kind) {
+        case "link_lost":
+          this.#subscription = null;
+          this.#reporter.detach();
+          this.#goStale("link_down");
+          break;
+        case "ended":
+          this.#subscription = null;
+          this.#resubscribe(
+            `the server ended the scene (${end.error.code}: ${end.error.message})`,
+            end.error.code,
+            RECONNECT_DELAY_MS,
+          );
+          break;
+        case "unsubscribed":
+          break;
       }
     });
     this.#reporter.attach((cameras) => {
@@ -343,43 +375,61 @@ class SceneStore {
     switch (update.kind) {
       case "ok":
         this.#resubscriptions = 0;
-        this.#receive(update.model, this.#snapshot.status);
+        this.#receive(update.model, { kind: "live" });
         break;
       case "sequence":
         this.#resubscribe(
           `scene notification ${update.received} arrived where ${update.expected} was due`,
+          "unusable",
+          0,
         );
         break;
       case "fault":
-        this.#resubscribe(`scene notification unusable (${update.fault})`);
+        this.#resubscribe(`scene notification unusable (${update.fault})`, "unusable", 0);
         break;
     }
   }
 
-  /** Takes `model` as the scene, its clock stated as of now. */
+  /** Takes `model` as the scene, its clock stated as of now, and restarts the watchdog. */
   #receive(model: SceneModel, status: SceneStatus): void {
     this.#receivedMs = performance.now();
     this.#staleSinceMs = null;
     this.#snapshot = { ...this.#snapshot, model, status };
+    clearTimeout(this.#silence);
+    this.#silence = setTimeout(() => {
+      this.#silence = undefined;
+      this.#goStale("silent");
+    }, SCENE_SILENCE_MS);
     this.#notify();
   }
 
-  /** Opens the scene again after a push it could not apply, unless that keeps happening. */
-  #resubscribe(why: string): void {
+  /**
+   * Opens the scene again, after `delayMs`, once it could not go on: a push it could not apply or
+   * the server's ending it. After {@link MAX_RESUBSCRIPTIONS} in a row with no push applied
+   * between, it gives up as `rejected` with `code`.
+   */
+  #resubscribe(why: string, code: SceneRefusalCode, delayMs: number): void {
     this.#stop();
     this.#resubscriptions += 1;
     if (this.#resubscriptions > MAX_RESUBSCRIPTIONS) {
       console.error(`${why}; giving up after ${MAX_RESUBSCRIPTIONS} resubscriptions`);
-      this.#set({ status: { kind: "rejected", code: "unusable", reason: why } });
+      this.#set({ status: { kind: "rejected", code, reason: why } });
       return;
     }
     console.error(`${why}; resubscribing`);
     this.#goStale("resubscribing");
-    this.open();
+    if (delayMs <= 0) {
+      this.open();
+      return;
+    }
+    this.#retry = setTimeout(() => {
+      this.#retry = undefined;
+      this.open();
+    }, delayMs);
   }
 
   /** Marks the scene held as stale, or the link as down with none held. */
-  #goStale(reason: "link_down" | "resubscribing"): void {
+  #goStale(reason: SceneStaleReason): void {
     if (this.#snapshot.model === null) {
       this.#set({ status: reason === "link_down" ? { kind: "link_down" } : { kind: "pending" } });
       return;
@@ -401,6 +451,10 @@ class SceneStore {
     this.#stopCameraReport?.();
     this.#stopCameraReport = null;
     this.#waitingCameras = null;
+    clearTimeout(this.#silence);
+    this.#silence = undefined;
+    clearTimeout(this.#retry);
+    this.#retry = undefined;
   }
 
   /** Changes the snapshot's status or camera refusal, notifying only for a real change. */

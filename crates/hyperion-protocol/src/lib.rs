@@ -100,9 +100,11 @@ pub use universe::{
 /// it at 2 (the rendering brainstorm's open question 21, ruled in plan R03's Design note 12): the
 /// server sends a notification only on a subscription the client opened, and binary frames only in
 /// answer to a request whose kind asks for bulk, so a version 2 client that sends neither receives
-/// neither, and a newer client asking an older server gets `unsupported`. The ruling holds only
-/// while neither is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
-/// `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` pins it.
+/// neither, and a newer client asking an older server gets `unsupported`. The same holds for
+/// `subscription_ended`, sent only on a subscription the client opened. The ruling holds only
+/// while none of them is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
+/// `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` pins it (open
+/// question 21, closed 2026-09-30 by a delegated decision).
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[cfg(test)]
