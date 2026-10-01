@@ -229,4 +229,165 @@ mod native_only {
                     disallowed-types = [\n    { path = \"f64::exp\", reason = \"x\" },\n]\n";
         assert_eq!(banned_paths(text), BTreeSet::from(["f64::cos".to_owned()]));
     }
+
+    /// The crates the client ships as WebAssembly, which ban relaxed SIMD (Design note 10).
+    const CLIENT_CRATES: [&str; 2] = ["hyperion-base", "hyperion-surface"];
+
+    /// The crates whose sources may carry no `target_feature` attribute: the client's two and the
+    /// sim, which links the surface crate.
+    const NO_TARGET_FEATURE_CRATES: [&str; 3] =
+        ["hyperion-base", "hyperion-surface", "hyperion-sim"];
+
+    /// The relaxed-SIMD intrinsics of `core::arch::wasm32` on rustc 1.98.1: safe functions, so
+    /// callable without `unsafe`, whose NaN, signed-zero and rounding results the engine decides.
+    const RELAXED_INTRINSICS: [&str; 20] = [
+        "i8x16_relaxed_swizzle",
+        "i32x4_relaxed_trunc_f32x4",
+        "u32x4_relaxed_trunc_f32x4",
+        "i32x4_relaxed_trunc_f64x2_zero",
+        "u32x4_relaxed_trunc_f64x2_zero",
+        "f32x4_relaxed_madd",
+        "f32x4_relaxed_nmadd",
+        "f64x2_relaxed_madd",
+        "f64x2_relaxed_nmadd",
+        "i8x16_relaxed_laneselect",
+        "i16x8_relaxed_laneselect",
+        "i32x4_relaxed_laneselect",
+        "i64x2_relaxed_laneselect",
+        "f32x4_relaxed_min",
+        "f32x4_relaxed_max",
+        "f64x2_relaxed_min",
+        "f64x2_relaxed_max",
+        "i16x8_relaxed_q15mulr",
+        "i16x8_relaxed_dot_i8x16_i7x16",
+        "i32x4_relaxed_dot_i8x16_i7x16_add",
+    ];
+
+    /// The crate-level guard, with every space removed.
+    const GUARD: &str = "#[cfg(target_feature=\"relaxed-simd\")]";
+
+    fn read(rel: &str) -> String {
+        std::fs::read_to_string(workspace_root().join(rel))
+            .unwrap_or_else(|e| panic!("{rel} is readable: {e}"))
+    }
+
+    fn relaxed_list() -> Vec<String> {
+        RELAXED_INTRINSICS
+            .iter()
+            .map(|name| format!("core::arch::wasm32::{name}"))
+            .collect()
+    }
+
+    /// Whether a source text enables a target feature for a function, or names relaxed SIMD in a
+    /// `target_feature` other than the crate-level guard: `target_feature(enable …)`, inside a
+    /// `cfg_attr` as well, or `target_feature = "…relaxed…"`. Whitespace, line breaks included, is
+    /// ignored, so an attribute split over lines is still seen.
+    fn enables_a_target_feature(text: &str) -> bool {
+        let squashed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        let squashed = squashed.replace(GUARD, "");
+        squashed.contains("target_feature(enable")
+            || squashed.split("target_feature=\"").skip(1).any(|rest| {
+                rest.split('"')
+                    .next()
+                    .is_some_and(|v| v.contains("relaxed"))
+            })
+    }
+
+    /// Every `.rs` file under `dir`, recursively.
+    fn rust_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        let entries =
+            std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot list {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry.expect("a directory entry is readable").path();
+            if path.is_dir() {
+                rust_files(&path, files);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn relaxed_intrinsics_are_banned() {
+        let relaxed = relaxed_list();
+        for name in CLIENT_CRATES {
+            let rel = format!("crates/{name}/clippy.toml");
+            let text = read(&rel);
+            assert_eq!(
+                missing(&text, &relaxed),
+                Vec::<String>::new(),
+                "{rel} bans them"
+            );
+            for path in &relaxed {
+                let entry = format!("path = \"{path}\"");
+                let line = text
+                    .lines()
+                    .find(|line| line.contains(&entry))
+                    .expect("each entry is on a line");
+                assert!(
+                    line.contains("allow-invalid = true"),
+                    "{rel}: {path} needs allow-invalid, since the host cannot resolve it"
+                );
+            }
+            assert_each_deletion_is_caught(&rel, &text, &relaxed);
+        }
+    }
+
+    #[test]
+    fn both_client_crates_refuse_relaxed_simd() {
+        for name in CLIENT_CRATES {
+            let rel = format!("crates/{name}/src/lib.rs");
+            let squashed: String = read(&rel).chars().filter(|c| !c.is_whitespace()).collect();
+            let Some((_, after)) = squashed.split_once(GUARD) else {
+                panic!("{rel} carries no relaxed-SIMD guard");
+            };
+            assert!(
+                after.starts_with("compile_error!(\"relaxedSIMDisbannedin")
+                    && after
+                        .split_once(')')
+                        .is_some_and(|(message, _)| message.contains(name)),
+                "{rel}'s guard is a compile_error! naming {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_target_feature_attributes() {
+        let mut offending = Vec::new();
+        for name in NO_TARGET_FEATURE_CRATES {
+            let mut files = Vec::new();
+            rust_files(&workspace_root().join("crates").join(name), &mut files);
+            assert!(!files.is_empty(), "{name} has sources");
+            for path in files {
+                let text = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("{} is readable: {e}", path.display()));
+                if enables_a_target_feature(&text) {
+                    offending.push(path.display().to_string());
+                }
+            }
+        }
+        assert_eq!(
+            offending,
+            Vec::<String>::new(),
+            "files enabling a target feature"
+        );
+        // The check itself: it catches the attribute, inside `cfg_attr` and over lines, and passes
+        // on the guard.
+        for bad in [
+            "#[target_feature(enable = \"relaxed-simd\")]\nfn f() {}",
+            "#[target_feature(enable = \"simd128\")]\nfn f() {}",
+            "#[cfg_attr(target_arch = \"wasm32\", target_feature(enable = \"relaxed-simd\"))]",
+            "#[target_feature(\n    enable = \"relaxed-simd\",\n)]",
+            "#[cfg(target_feature = \"relaxed-simd\")]\n#[cfg_attr(x, target_feature = \"relaxed-simd\")]",
+        ] {
+            assert!(enables_a_target_feature(bad), "{bad:?} is caught");
+        }
+        for good in [
+            "#[cfg(target_feature = \"relaxed-simd\")]\ncompile_error!(\"relaxed SIMD is banned\");",
+            "#[cfg(target_feature = \"simd128\")]\nfn f() {}",
+            "// The `target_feature` attributes are rejected by a source test.",
+        ] {
+            assert!(!enables_a_target_feature(good), "{good:?} passes");
+        }
+    }
 }

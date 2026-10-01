@@ -1,0 +1,19 @@
+[package]
+name = "hyperion-surface"
+description = "HYPERION's shared height function, run bit for bit alike by the server and the client."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+# The library has no benchmarks, and libtest's harness rejects Criterion's arguments.
+bench = false
+
+[dependencies]
+# Its only dependency: `math`, `rng`, `units` and the generator version. It never depends on the
+# sim, which depends on it, and a new dependency is a reviewed change (plan R04, Risks).
+hyperion-base.workspace = true
+
+[lints]
+workspace = true
