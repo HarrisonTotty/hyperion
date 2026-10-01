@@ -1988,3 +1988,36 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     with a uniform's value, a texture is written from the CPU, and a draw reading both shows the
     two values; the allocation events read `created`, `uploaded` and, at disposal, `destroyed`
     once per resource. The packed cube's round trip is T9.g's, pending.
+- **Deviations in T8.e, as built.**
+  - The rebuild is not in `babylon/engine.ts` but in an engine-agnostic wrapper,
+    `view/engine/resilientEngine.ts` (`ResilientEngine`), which `loadRenderEngine` returns around
+    the Babylon engine: it re-creates the engine through the same import, so the test drives it
+    with a fake engine module through `importEngine`, as the task asks. The Babylon engine keeps
+    the device-level parts (`babylon/deviceLoss.ts`): it awaits `_device.lost` (`watchDeviceLoss`,
+    not reported after its own disposal or once the watch ends), logs `uncapturederror`s to
+    `console.error` (`logUncapturedErrors`), and reports the loss as a `device-lost` fault through
+    `onFault`. The wrapper then dispatches `device-lost`, disposes the engine and every view's
+    context and target, requests and vets a fresh adapter (`requestAdapterOutcome`), dispatches
+    `adapter-withdrawn` on a null one, stops at `DEVICE_LOSS_LIMIT`, and otherwise loads a new
+    engine, dispatches `device-restored` and then `device-capabilities` (the restore writes the
+    adapter's capabilities), and re-creates each view on its canvas at its size.
+  - `RenderEngine` gains `onRestored(listener)`: every handle but a view belonged to the lost
+    device, so the caller (R02's `VIEW` display) makes its meshes, materials, buffers and targets
+    again there. Only the wrapper fires it; the Babylon engine's never does. A call needing a
+    device while there is none throws `EngineUnavailable`; a view's `render` does nothing then.
+    Offscreen targets are not re-created (they are handles like the rest). `LoadEngineOptions`
+    gains `gpu`, the entry point a rebuild asks (a test's `FakeGpu`), `navigator.gpu` by default.
+  - From the review: a creation that fails during a rebuild counts as another loss and the next
+    fresh adapter is tried, so the limit bounds the retries and the status never stays at
+    `DEVICE LOST`; the limit is the store's (`disabled`), not a count of the wrapper's own, so a
+    second `loadRenderEngine` in the session respects it. The Babylon engine replays a loss
+    reported before anyone listened (a device lost while the engine was being made), so a dead
+    engine is never adopted. A view made during the outage is drawn from the restore on; writes
+    and dispatches are dropped then, and `device-restored` is sent after the views are re-created.
+  - Test fakes: `test/fakeRenderEngine.ts` (`FakeRenderEngine`, `FakeView`, `fakeEngineModule`,
+    whose `createBabylonEngine` requests the handed adapter's device, consuming it).
+    `resilientEngine.test.ts` runs in the `dom` project, since its views need a canvas.
+  - Checked by the scratch page on SwiftShader and the RTX 3080 (the T9.f integration check
+    stays T9's): `device.destroy()` on the engine's device is reported, the wrapper re-creates the
+    engine on a second device, the status reads one loss and no fault, the view's canvas keeps its
+    48 × 24, and a material and mesh made after `onRestored` draw into the re-created view.
