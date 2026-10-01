@@ -267,12 +267,21 @@ export {
   RequestChannel,
   RequestClient,
   type PendingRequest,
+  type PendingSubscription,
   type RequestFailure,
   type RequestKind,
   type RequestOf,
   type RequestOutcome,
   type ResponseFor,
+  type SubscribeOutcome,
 } from "./requests";
+export type {
+  NotificationOf,
+  StateOf,
+  Subscription,
+  SubscriptionEnd,
+  TopicName,
+} from "./subscriptions";
 export { SECONDS_PER_JULIAN_YEAR, universeTimeFromYears, universeTimeToYears } from "./time";
 
 /** Serializes `message` into the JSON text frame the server expects. */
