@@ -245,6 +245,19 @@ export class ResourceRegistry {
     );
   }
 
+  /** Destroys one buffer, raising its `destroyed` event. */
+  destroyBuffer(handle: BufferHandle): void {
+    const { spec, buffer } = this.bufferOf(handle);
+    buffer.destroy();
+    this.#buffers.delete(handle);
+    this.#emit({
+      kind: "destroyed",
+      name: handle.name,
+      bytes: spec.bytes,
+      category: spec.category,
+    });
+  }
+
   /** Destroys one texture, raising its `destroyed` event. */
   destroyTexture(handle: TextureHandle): void {
     const { spec, texture, bytes } = this.textureOf(handle);

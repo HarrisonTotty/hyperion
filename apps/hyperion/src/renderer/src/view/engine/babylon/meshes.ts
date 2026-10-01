@@ -1,163 +1,163 @@
 /**
- * Meshes over Babylon's geometry, drawn through one Babylon mesh per use in a frame.
+ * Meshes: their vertex and index buffers on the engine's device, and the vertex layout a pipeline
+ * reads them through (R01 Design note 23).
  *
  * @remarks
- * A `MeshHandle` is geometry: its vertex and index buffers are made once, in a Babylon `Geometry`.
- * A frame may draw it several times, with several materials and offsets, so each draw is given a
- * Babylon mesh of its own that shares the geometry, pooled by material: the n-th draw of a mesh
- * with a material in a frame reuses the n-th mesh of that pair, and keeps its effect and bindings
- * from frame to frame. Every such mesh has `alwaysSelectAsActiveMesh`, since culling is R02's and
- * R05's, not the engine's (R01 Design note 18). Per-instance attributes are instanced vertex
- * buffers on the shared geometry, and every draw goes through Babylon's instanced path with its
- * `forcedInstanceCount`, so that `@builtin(instance_index)` counts the draw's instances (Design
- * note 21).
+ * Every attribute is its own tightly packed `float32` buffer, at the `@location` of its place in
+ * the mesh: `position` at 0, then `MeshSpec.attributes` in insertion order, then
+ * `instanceAttributes`, stepped once per instance. The buffers are made through the engine's one
+ * creation path, category `other`, so their bytes and uploads are counted.
  */
 
-import { VertexBuffer } from "@babylonjs/core/Buffers/buffer.pure";
-import { Constants } from "@babylonjs/core/Engines/constants";
-import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine.pure";
-import type { Material } from "@babylonjs/core/Materials/material.pure";
-import { Geometry } from "@babylonjs/core/Meshes/geometry";
-import { Mesh } from "@babylonjs/core/Meshes/mesh.pure";
-import type { Scene } from "@babylonjs/core/scene.pure";
+import { BUFFER_USAGE } from "../gpuFlags";
+import type { BufferSpec } from "../memory";
+import type { BufferHandle, MeshSpec, VertexAttribute } from "../types";
 
-import type { MeshSpec, VertexAttribute } from "../types";
-import { isGpuBuffer } from "./compute";
-
-/** Babylon's fill mode for each topology. */
-const FILL_MODES: Readonly<Record<MeshSpec["topology"], number>> = {
-  "triangle-list": Constants.MATERIAL_TriangleFillMode,
-  "line-list": Constants.MATERIAL_LineListDrawMode,
-  "point-list": Constants.MATERIAL_PointListDrawMode,
-};
-
-/** The WebGPU topology of each Babylon fill mode the adapter uses, for its raw pass. */
-export const TOPOLOGIES: Readonly<Record<number, GPUPrimitiveTopology>> = {
-  [Constants.MATERIAL_TriangleFillMode]: "triangle-list",
-  [Constants.MATERIAL_LineListDrawMode]: "line-list",
-  [Constants.MATERIAL_PointListDrawMode]: "point-list",
-};
-
-/** The Babylon fill mode that draws `topology`. */
-export function fillModeOf(topology: MeshSpec["topology"]): number {
-  return FILL_MODES[topology];
+/** The `GPUVertexFormat` of a float attribute of `components`. */
+export function floatVertexFormat(components: number): GPUVertexFormat {
+  switch (components) {
+    case 1:
+      return "float32";
+    case 2:
+      return "float32x2";
+    case 3:
+      return "float32x3";
+    case 4:
+      return "float32x4";
+    default:
+      throw new Error(`a float attribute has 1 to 4 components, not ${components}`);
+  }
 }
 
-/** The name of Babylon's position attribute, which a source declares as `attribute position`. */
-export const POSITION_ATTRIBUTE = VertexBuffer.PositionKind;
-
-function vertexBuffer(
-  engine: WebGPUEngine,
-  kind: string,
-  attribute: VertexAttribute,
-  instanced: boolean,
-): VertexBuffer {
-  return new VertexBuffer(engine, attribute.data, kind, {
-    updatable: false,
-    stride: attribute.size,
-    size: attribute.size,
-    instanced,
-    divisor: instanced ? 1 : 0,
-  });
-}
-
-/** One mesh's geometry and the Babylon meshes that draw it. */
-export class MeshRecord {
+/** One attribute of a mesh, at its location. */
+export interface MeshAttribute {
   readonly name: string;
-  readonly fillMode: number;
-  readonly #geometry: Geometry;
-  readonly #unindexed: boolean;
-  readonly #scene: Scene;
-  readonly #pools = new Map<Material, Mesh[]>();
-  /** The meshes of indirect draws, kept apart: Babylon never renders them. */
-  readonly #rawPools = new Map<Material, Mesh[]>();
+  readonly location: number;
+  readonly attribute: VertexAttribute;
+  readonly instanced: boolean;
+}
 
-  constructor(engine: WebGPUEngine, scene: Scene, spec: MeshSpec) {
-    if (spec.positions.length % 3 !== 0) {
-      throw new Error(`mesh ${spec.name} has ${spec.positions.length} position components`);
+/** A mesh's attributes in location order: position, its attributes, its instance attributes. */
+export function meshAttributes(spec: MeshSpec): ReadonlyArray<MeshAttribute> {
+  const attributes: MeshAttribute[] = [
+    {
+      name: "position",
+      location: 0,
+      attribute: { data: spec.positions, size: 3 },
+      instanced: false,
+    },
+  ];
+  for (const [name, attribute] of Object.entries(spec.attributes)) {
+    attributes.push({ name, location: attributes.length, attribute, instanced: false });
+  }
+  for (const [name, attribute] of Object.entries(spec.instanceAttributes ?? {})) {
+    attributes.push({ name, location: attributes.length, attribute, instanced: true });
+  }
+  return attributes;
+}
+
+/** The vertex buffers a pipeline reads a mesh's attributes through, one a slot. */
+export function vertexBufferLayouts(
+  attributes: ReadonlyArray<MeshAttribute>,
+): ReadonlyArray<GPUVertexBufferLayout> {
+  return attributes.map(({ location, attribute, instanced }) => ({
+    arrayStride: attribute.size * 4,
+    stepMode: instanced ? "instance" : "vertex",
+    attributes: [
+      { shaderLocation: location, offset: 0, format: floatVertexFormat(attribute.size) },
+    ],
+  }));
+}
+
+/**
+ * Checks a mesh's data: whole vertices and instances, attributes as long as the positions, and
+ * indices inside them.
+ *
+ * @throws Error naming the mesh and what is wrong.
+ */
+export function assertMeshData(spec: MeshSpec): void {
+  const vertices = spec.positions.length / 3;
+  if (!Number.isInteger(vertices)) {
+    throw new Error(`mesh ${spec.name}'s positions are not whole xyz triples`);
+  }
+  for (const [name, { data, size }] of Object.entries(spec.attributes)) {
+    if (data.length !== vertices * size) {
+      throw new Error(`mesh ${spec.name}'s attribute ${name} does not give each vertex ${size}`);
     }
-    const vertices = spec.positions.length / 3;
-    this.name = spec.name;
-    this.fillMode = fillModeOf(spec.topology);
-    this.#scene = scene;
-    this.#unindexed = spec.indices === null;
-    const geometry = new Geometry(`${spec.name}:geometry`, scene);
-    geometry.setVerticesBuffer(
-      vertexBuffer(engine, POSITION_ATTRIBUTE, { data: spec.positions, size: 3 }, false),
-      vertices,
+  }
+  for (const [name, { data, size }] of Object.entries(spec.instanceAttributes ?? {})) {
+    if (data.length % size !== 0) {
+      throw new Error(`mesh ${spec.name}'s instance attribute ${name} is not whole instances`);
+    }
+  }
+  for (const index of spec.indices ?? []) {
+    if (index >= vertices) {
+      throw new Error(`mesh ${spec.name} has an index, ${index}, past its ${vertices} vertices`);
+    }
+  }
+}
+
+/** What a mesh needs of the engine: its one creation path for buffers. */
+export interface MeshHost {
+  createBuffer(spec: BufferSpec): BufferHandle;
+  writeBuffer(handle: BufferHandle, offsetBytes: number, data: ArrayBufferView): void;
+  gpuBufferOf(handle: BufferHandle): GPUBuffer;
+}
+
+/** Bytes rounded up to a multiple of 4, as a buffer's size and a write's length must be. */
+function wholeWords(bytes: number): number {
+  return Math.max(4, Math.ceil(bytes / 4) * 4);
+}
+
+/** A mesh's buffers on the device, and what a draw of it needs. */
+export class MeshRecord {
+  readonly spec: MeshSpec;
+  readonly attributes: ReadonlyArray<MeshAttribute>;
+  readonly layouts: ReadonlyArray<GPUVertexBufferLayout>;
+  /** The layout's identity, part of a pipeline's key. */
+  readonly layoutKey: string;
+  readonly vertexCount: number;
+  readonly vertexBuffers: ReadonlyArray<GPUBuffer>;
+  readonly index: { readonly buffer: GPUBuffer; readonly count: number } | null;
+
+  constructor(host: MeshHost, spec: MeshSpec) {
+    assertMeshData(spec);
+    this.spec = spec;
+    this.attributes = meshAttributes(spec);
+    this.layouts = vertexBufferLayouts(this.attributes);
+    this.layoutKey = JSON.stringify([
+      spec.topology,
+      this.attributes.map(({ attribute, instanced }) => [attribute.size, instanced]),
+    ]);
+    this.vertexCount = spec.positions.length / 3;
+    this.vertexBuffers = this.attributes.map(({ name, attribute }) =>
+      upload(host, `${spec.name}:${name}`, BUFFER_USAGE.VERTEX, attribute.data),
     );
-    for (const [kind, attribute] of Object.entries(spec.attributes)) {
-      if (attribute.data.length !== vertices * attribute.size) {
-        throw new Error(`mesh ${spec.name}'s ${kind} does not have one value per vertex`);
-      }
-      geometry.setVerticesBuffer(vertexBuffer(engine, kind, attribute, false), vertices);
-    }
-    for (const [kind, attribute] of Object.entries(spec.instanceAttributes ?? {})) {
-      geometry.setVerticesBuffer(vertexBuffer(engine, kind, attribute, true), vertices);
-    }
-    if (spec.indices !== null) {
-      geometry.setIndices(spec.indices, vertices);
-    }
-    this.#geometry = geometry;
+    this.index =
+      spec.indices === null
+        ? null
+        : {
+            buffer: upload(host, `${spec.name}:indices`, BUFFER_USAGE.INDEX, spec.indices),
+            count: spec.indices.length,
+          };
   }
+}
 
-  /**
-   * The Babylon mesh for the `use`-th draw of this mesh with `material` in a frame.
-   *
-   * @param use - Counted from 0 within the frame, per material.
-   */
-  meshFor(material: Material, use: number): Mesh {
-    return this.#pooled(this.#pools, material, use);
+/** A buffer of `usage` holding `data`, made and written through the host. */
+function upload(
+  host: MeshHost,
+  name: string,
+  usage: number,
+  data: Float32Array | Uint32Array,
+): GPUBuffer {
+  const handle = host.createBuffer({
+    name,
+    bytes: wholeWords(data.byteLength),
+    usage: usage | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  if (data.byteLength > 0) {
+    host.writeBuffer(handle, 0, data);
   }
-
-  /** The Babylon mesh for the `use`-th indirect draw, whose effect the raw pass compiles from. */
-  rawMeshFor(material: Material, use: number): Mesh {
-    return this.#pooled(this.#rawPools, material, use);
-  }
-
-  /** The mesh's index buffer for a raw pass, or `null` when it is drawn unindexed. */
-  indexBuffer(mesh: Mesh): { readonly buffer: GPUBuffer; readonly format: GPUIndexFormat } | null {
-    if (this.#unindexed) {
-      return null;
-    }
-    const indices = mesh.geometry?.getIndexBuffer() ?? null;
-    const resource: unknown = indices?.underlyingResource;
-    if (indices === null || !isGpuBuffer(resource)) {
-      throw new Error(`mesh ${this.name} has no index buffer for its raw pass`);
-    }
-    return { buffer: resource, format: indices.is32Bits ? "uint32" : "uint16" };
-  }
-
-  #pooled(pools: Map<Material, Mesh[]>, material: Material, use: number): Mesh {
-    let pool = pools.get(material);
-    if (pool === undefined) {
-      pool = [];
-      pools.set(material, pool);
-    }
-    let mesh = pool[use];
-    if (mesh === undefined) {
-      mesh = new Mesh(`${this.name}:${material.name}:${use}`, this.#scene);
-      this.#geometry.applyToMesh(mesh);
-      mesh.isUnIndexed = this.#unindexed;
-      mesh.overrideRenderingFillMode = this.fillMode;
-      mesh.alwaysSelectAsActiveMesh = true;
-      mesh.doNotSyncBoundingInfo = true;
-      mesh.material = material;
-      pool.push(mesh);
-    }
-    return mesh;
-  }
-
-  /** Releases every Babylon mesh and the geometry. */
-  dispose(): void {
-    for (const pools of [this.#pools, this.#rawPools]) {
-      for (const pool of pools.values()) {
-        for (const mesh of pool) {
-          mesh.dispose(true, false);
-        }
-      }
-      pools.clear();
-    }
-    this.#geometry.dispose();
-  }
+  return host.gpuBufferOf(handle);
 }

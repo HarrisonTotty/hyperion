@@ -1,24 +1,28 @@
-import { Constants } from "@babylonjs/core/Engines/constants";
-import { NullEngine } from "@babylonjs/core/Engines/nullEngine.pure";
-import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial.pure";
-import { Scene } from "@babylonjs/core/scene.pure";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { WgslMaterialSpec } from "../types";
+import { POST_PROCESS_BINDINGS, type WgslMaterialSpec, type WgslPostProcessSpec } from "../types";
 import {
-  applyMaterialState,
   BLEND_STATES,
-  declaredAttributes,
-  declaredTextures,
-  materialState,
+  depthBiasOf,
+  materialBindings,
+  materialPipelineDescriptor,
+  postProcessBindings,
+  postProcessPipelineDescriptor,
+  resourceLayoutEntries,
+  samplerDescriptor,
 } from "./materials";
 
 const SPEC: WgslMaterialSpec = {
   name: "hull",
-  vertexWgsl: "attribute position : vec3f;\n// attribute ghost : vec2f;\nattribute normal:vec3f;",
-  fragmentWgsl: "var depthTexture : texture_depth_2d;\nvar lut: texture_3d<f32>;",
-  uniforms: [],
-  samplers: [],
+  vertexWgsl: "vertex",
+  fragmentWgsl: "fragment",
+  uniforms: [{ name: "tint", type: "vec4f" }],
+  samplers: [{ name: "lutSampler", filter: "linear", address: "clamp-to-edge", binding: 1 }],
+  textures: [
+    { name: "lut", binding: 0, viewDimension: "3d" },
+    { name: "sceneDepth", binding: 3, sampleType: "depth" },
+  ],
+  storageBuffers: [{ name: "instances", binding: 2 }],
   transparent: false,
   cullMode: "back",
   depthWrite: true,
@@ -26,62 +30,133 @@ const SPEC: WgslMaterialSpec = {
   blend: "none",
 };
 
-describe("a material's state", () => {
-  let scene: Scene | null = null;
+/** Stand-ins for the GPU objects a descriptor only carries. */
+const MODULE: GPUShaderModule = {
+  label: "module",
+  getCompilationInfo: () => Promise.resolve({ messages: [] }),
+};
+const LAYOUT: GPUPipelineLayout = { label: "layout" };
+const BUFFERS: ReadonlyArray<GPUVertexBufferLayout> = [
+  { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
+];
 
-  afterEach(() => {
-    scene?.getEngine().dispose();
-    scene = null;
-  });
-
-  it("sets each flag on Babylon's own property", () => {
-    scene = new Scene(new NullEngine());
-    const material = new ShaderMaterial("flags", scene, { vertexSource: "", fragmentSource: "" });
-    applyMaterialState(
-      material,
-      materialState({ ...SPEC, depthWrite: false, colourWrites: false, blend: "additive" }),
+describe("a material's pipeline", () => {
+  it("tests reversed depth greater-or-equal, with the material's own state", () => {
+    const descriptor = materialPipelineDescriptor(
+      { ...SPEC, depthWrite: false, colourWrites: false, blend: "additive" },
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "triangle-list",
+      "rgba16float",
+      true,
     );
-    expect(material.disableDepthWrite).toBe(true);
-    expect(material.disableColorWrite).toBe(true);
-    expect(material.alphaMode).toBe(Constants.ALPHA_ADD);
-    expect(material.backFaceCulling).toBe(true);
-
-    applyMaterialState(material, materialState({ ...SPEC, cullMode: "none" }));
-    expect(material.disableDepthWrite).toBe(false);
-    expect(material.disableColorWrite).toBe(false);
-    expect(material.alphaMode).toBe(Constants.ALPHA_DISABLE);
-    expect(material.backFaceCulling).toBe(false);
+    expect(descriptor.layout).toBe(LAYOUT);
+    expect(descriptor.vertex.entryPoint).toBe("vertexMain");
+    expect(descriptor.fragment?.entryPoint).toBe("fragmentMain");
+    expect(descriptor.primitive).toEqual({
+      topology: "triangle-list",
+      cullMode: "back",
+      frontFace: "ccw",
+    });
+    expect(descriptor.depthStencil).toEqual({
+      format: "depth32float",
+      depthWriteEnabled: false,
+      depthCompare: "greater-equal",
+      depthBias: 0,
+      depthBiasSlopeScale: 0,
+    });
+    expect([...(descriptor.fragment?.targets ?? [])]).toEqual([
+      { format: "rgba16float", blend: BLEND_STATES.additive, writeMask: 0 },
+    ]);
   });
 
-  it("hands depthBiasAway to Babylon as the same positive values, unflipped", () => {
-    scene = new Scene(new NullEngine());
-    const material = new ShaderMaterial("bias", scene, { vertexSource: "", fragmentSource: "" });
-    applyMaterialState(
-      material,
-      materialState({ ...SPEC, depthBiasAway: { constant: 4, slopeScale: 1.5 } }),
+  it("has no depth state into a target without depth", () => {
+    const descriptor = materialPipelineDescriptor(
+      SPEC,
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "line-list",
+      "rgba8unorm",
+      false,
     );
-    expect(material.zOffsetUnits).toBe(4);
-    expect(material.zOffset).toBe(1.5);
+    expect(descriptor.depthStencil).toBeUndefined();
   });
 
-  it("winds front faces counter-clockwise", () => {
-    scene = new Scene(new NullEngine());
-    const material = new ShaderMaterial("winding", scene, { vertexSource: "", fragmentSource: "" });
-    applyMaterialState(material, materialState(SPEC));
-    expect(material.sideOrientation).toBe(Constants.MATERIAL_CounterClockWiseSideOrientation);
-  });
-
-  it("puts a blending material in the transparent queue", () => {
-    expect(materialState({ ...SPEC, blend: "additive" }).needAlphaBlending).toBe(true);
-    expect(materialState({ ...SPEC, transparent: true }).needAlphaBlending).toBe(true);
-    expect(materialState(SPEC).needAlphaBlending).toBe(false);
+  it("negates a bias away from the camera, and gives lines none", () => {
+    const bias = { constant: 4, slopeScale: 1.5 };
+    expect(depthBiasOf(bias, "triangle-list")).toEqual({
+      depthBias: -4,
+      depthBiasSlopeScale: -1.5,
+    });
+    expect(depthBiasOf(bias, "line-list")).toEqual({ depthBias: 0, depthBiasSlopeScale: 0 });
   });
 });
 
-describe("a material's declarations", () => {
-  it("give the attributes and textures a source declares, comments aside", () => {
-    expect(declaredAttributes(SPEC.vertexWgsl)).toEqual(["position", "normal"]);
-    expect(declaredTextures(SPEC.fragmentWgsl)).toEqual(["depthTexture", "lut"]);
+describe("a material's resources", () => {
+  it("are laid out at their declared bindings, in both stages", () => {
+    expect(resourceLayoutEntries(materialBindings(SPEC))).toEqual([
+      { binding: 0, visibility: 3, texture: { sampleType: "float", viewDimension: "3d" } },
+      { binding: 1, visibility: 3, sampler: { type: "filtering" } },
+      { binding: 2, visibility: 3, buffer: { type: "read-only-storage" } },
+      { binding: 3, visibility: 3, texture: { sampleType: "depth", viewDimension: "2d" } },
+    ]);
+  });
+
+  it("refuse two resources at one binding, naming the material", () => {
+    expect(() =>
+      resourceLayoutEntries(
+        materialBindings({ ...SPEC, storageBuffers: [{ name: "instances", binding: 1 }] }),
+      ),
+    ).toThrow("material hull declares @group(2) @binding(1) twice");
+  });
+
+  it("take a nearest sampler as non-filtering, and filter between mips too", () => {
+    const nearest = { name: "s", filter: "nearest", address: "repeat", binding: 0 } as const;
+    expect(
+      resourceLayoutEntries({ owner: "m", textures: [], samplers: [nearest], storageBuffers: [] }),
+    ).toEqual([{ binding: 0, visibility: 3, sampler: { type: "non-filtering" } }]);
+    expect(samplerDescriptor(nearest)).toMatchObject({
+      magFilter: "nearest",
+      minFilter: "nearest",
+      mipmapFilter: "nearest",
+      addressModeU: "repeat",
+      addressModeW: "repeat",
+    });
+  });
+});
+
+describe("a post-process", () => {
+  const POST: WgslPostProcessSpec = {
+    name: "tonemap",
+    fragmentWgsl: "fragment",
+    uniforms: [],
+    textures: [{ name: "bloom", binding: 2 }],
+  };
+
+  it("reads its input colour at the fixed bindings, then its own textures", () => {
+    const bindings = postProcessBindings(POST);
+    expect(bindings.textures.map(({ name, binding }) => [name, binding])).toEqual([
+      ["hdr-colour", POST_PROCESS_BINDINGS["hdr-colour"]],
+      ["bloom", 2],
+    ]);
+    expect(bindings.samplers.map(({ binding }) => binding)).toEqual([
+      POST_PROCESS_BINDINGS["hdr-colour-sampler"],
+    ]);
+  });
+
+  it("is a full-screen triangle list with no depth", () => {
+    const descriptor = postProcessPipelineDescriptor(
+      POST,
+      MODULE,
+      MODULE,
+      LAYOUT,
+      "bgra8unorm-srgb",
+    );
+    expect(descriptor.primitive).toEqual({ topology: "triangle-list", cullMode: "none" });
+    expect(descriptor.depthStencil).toBeUndefined();
+    expect(descriptor.fragment?.entryPoint).toBe("fragmentMain");
   });
 });
 
