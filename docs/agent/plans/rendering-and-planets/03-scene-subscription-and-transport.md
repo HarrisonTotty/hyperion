@@ -380,7 +380,10 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    holds it as it holds a finished request, and otherwise leaves it pending, so a slow reader
    receives fewer, fuller notifications and the server holds one per subscription. A merge never
    drops a body change, which is what makes it safe: a body's latest record supersedes its earlier
-   ones. The write timeout still closes a reader that stops altogether.
+   ones. The write timeout still closes a reader that stops altogether. A merged push states the
+   latest clock; every record states its own time (`hosts.time`, `seen.emitted`, a craft's
+   `state.time`), and the client takes no record's time from the push (ruled 2026-09-30 by a
+   delegated decision).
 6. **Cameras bound the scene; they are never ship state.** Each view reports its camera, one
    subscription carrying up to `MAX_SCENE_CAMERAS` (8), through `scene_cameras` (and in the
    `subscribe` request), as plan 12's `alerts_observer` reports its observer. The client sends a
@@ -1212,8 +1215,9 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   `BodyDetail` does, since a scene's state holds a whole `SystemBodiesDto`; the wire form is
   unchanged. `SubscriptionTopic`, `SubscriptionState` and `NotificationBody` are internally tagged
   by `topic` in snake case (`"scene"`), so a request reads `"topic": {"topic": "scene", …}` and
-  P12.T9's variants take `alerts` (noted in P12.T9); `type` would match the other tagged DTOs and
-  is cheap to switch to before R03.T5.c's client reads it. The four kinds answer `unsupported`
+  P12.T9's variants take `alerts` (noted in P12.T9). Ruled 2026-09-30 (a delegated decision):
+  `topic` stays; a tag is named for what it discriminates (`kind`, `frame`, `state`, `topic`),
+  `type` being for message and state variants. The four kinds answer `unsupported`
   through `not_served_yet` until R03.T5.b (`subscribe`, `unsubscribe`), R03.T6 (`scene_ship`) and
   R03.T8 (the scene topic, `scene_cameras`). `RequestClient::handleServerMessage`
   (`packages/protocol/src/requests.ts`) and the link's switch
@@ -1532,11 +1536,13 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   a knowledge with contacts: each craft list either client is told is the source's at its stated
   time, the same contacts are placed by sight for both, and each later setting continues the
   clock, so the minute is one run of scene time; records are compared by position, each degraded
-  to its own grant. Open for the owner: a slow reader's merged push states the latest clock while
-  an arrival merged into it holds records evaluated at an earlier time (Design note 5 keeps the
-  latest clock; the records' orbits are time-independent, a contact's `seen` is not); and a topic
-  whose pool job fails stops pushing with only a `warn`, which the client's sequence check cannot
-  see (an error notification would need a protocol addition).
+  to its own grant. Two points went to the owner and were decided on 2026-09-30 by a delegated
+  decision. The first: a slow reader's merged push states the latest clock while an arrival merged
+  into it holds records evaluated at an earlier time. This is confirmed as Design note 5 has it,
+  each record stating its own time, and the doc comments on `SeenPositionDto` and the
+  notification's `clock` now say so. The second: a topic whose pool job fails stopped pushing
+  with only a `warn`. It now ends with `subscription_ended`; see the note on that message
+  below.
 - **Deviations in T10.b, as built.** A request answered in bulk settles with its payload
   (`Finished` and `Settled` carry it; `run` serialises the response as before), and the
   connection keeps a queue of streams (`ws.rs`, `Stream`), the first sending one chunk at a time

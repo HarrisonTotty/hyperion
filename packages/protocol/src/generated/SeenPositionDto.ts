@@ -3,7 +3,9 @@ import type { UniverseTime } from "./UniverseTime";
 
 /**
  * Where the ship sees a body it knows only as a contact, which the client cannot propagate: the
- * apparent position the server evaluated from the ship at the push's time (R03, Design note 13).
+ * apparent position the server evaluated from the ship at the time its record was evaluated, which
+ * a merged notification (Design note 5) may place before the notification's clock; `emitted`
+ * states when the light left (R03, Design note 13).
  */
 export type SeenPositionDto = { 
 /**
