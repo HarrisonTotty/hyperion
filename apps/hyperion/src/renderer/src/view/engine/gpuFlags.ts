@@ -37,3 +37,6 @@ export const MAP_MODE = {
   READ: 0x0001,
   WRITE: 0x0002,
 } as const;
+
+/** `GPUColorWrite.ALL`: every channel of a colour target written. */
+export const COLOUR_WRITE_ALL = 0xf;

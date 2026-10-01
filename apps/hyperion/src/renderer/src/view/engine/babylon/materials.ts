@@ -106,6 +106,30 @@ export function declaredTextures(wgsl: string): ReadonlyArray<string> {
 }
 
 /**
+ * The blend state of each mode in a raw pass, colour and alpha factors: every mode keeps the
+ * destination's alpha, R07's meter class (Design note 21).
+ */
+export const BLEND_STATES: Readonly<Record<WgslMaterialSpec["blend"], GPUBlendState | undefined>> =
+  {
+    none: undefined,
+    additive: {
+      color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+      alpha: { srcFactor: "zero", dstFactor: "one", operation: "add" },
+    },
+    premultiplied: {
+      color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+      alpha: { srcFactor: "zero", dstFactor: "one", operation: "add" },
+    },
+  };
+
+/** The sampler a texture's automatic `<name>Sampler` gets in a raw pass: linear, clamped. */
+export const DEFAULT_SAMPLER: SamplerSpec = {
+  name: "default",
+  filter: "linear",
+  address: "clamp-to-edge",
+};
+
+/**
  * A Babylon sampler with the specification's filter and address mode.
  *
  * @remarks

@@ -2067,3 +2067,55 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     and 0 at the clear; mip 1 holds 4 × 4 texels whose fully covered texel is 2; a one-texel
     `rect` read gives the same colour; a `presentation-only` kernel's buffer is refused, and read
     with `tolerance`.
+- **Deviations in T8.g, as built.**
+  - `createMaterialAsync` resolves once the material's shaders are compiled: its effect is made on
+    a Babylon mesh with no geometry through `forceCompilationAsync` with the instanced path's
+    defines (which every draw takes, T8.a), and Babylon's effect cache hands that compiled effect
+    to the real draws. Babylon keys its render pipelines by the mesh's vertex layout as well, which
+    `createMaterialAsync` does not know, so `engine.createRenderPipelineAsync` is not called and a
+    pipeline is still made at a mesh's first draw; `targets` is accepted and unused. If R11's
+    stills measure that first-draw stall against Chromium's watchdog, the fallback is to pre-warm
+    per (material, mesh) at the first submission. `createComputeAsync` is
+    `device.createComputePipelineAsync` (`createKernelAsync`).
+  - Dispatches are encoded by the adapter (T8.a), so an indirect dispatch is
+    `dispatchWorkgroupsIndirect`, not `ComputeShader.dispatchIndirect`.
+  - Indirect draws (`DrawItem.indirect`) are split from the frame (`partitionDraws`) and drawn in
+    the adapter's raw pass (`rawPass.ts`) right after Babylon's pass, with `loadOp: "load"` on the
+    same colour and depth (a view's canvas texture through its `-srgb` view and Babylon's depth,
+    reached through `_hardwareTexture`; a target's own textures). Its pipeline is built from the
+    compiled code of the material's Babylon effect (`effect.vertexSourceCode` and
+    `fragmentSourceCode`, public), made on a separate pool of Babylon meshes that Babylon never
+    renders; a draw whose effect is not compiled yet is left out of that frame, as Babylon leaves
+    out a draw that is not ready. The pass reads the bindings back from the compiled code by name:
+    Babylon's leftover block (`uniforms`, packed by WGSL's layout rules from the `LeftOver`
+    struct, `structLayout` and `packStruct`) and internals block (`yFactor_` 1, the output's
+    height) go in uniform buffers of the draw's own (made once per slot through the one creation
+    path), textures and storage buffers come from the `DrawItem`, a texture's automatic
+    `<name>Sampler` is linear and clamped, and a declared sampler follows its `SamplerSpec`.
+    Vertex buffers are the geometry's, at the locations the compiled `VertexInputs` give them
+    (`attributeLocations`); depth bias is negated (reversed depth), and zero off triangles; the
+    blend state comes from `BLEND_STATES` (T8.i's table, defined here for the raw pass).
+  - From the review: a raw pipeline is made by `createRenderPipelineAsync` the first time a draw
+    asks for it, and the draw waits for it (`RawPipelines`); its bind groups hold only the
+    bindings the compiled code uses (`usedBindings`), since an `auto` layout drops the rest and
+    Babylon declares a sampler for every texture; a frame with both indirect draws and
+    post-processes throws for now (Babylon has drawn the scene into the chain's own input, so the
+    raw pass would miss the chain and test the wrong depth): **open** until a plan needs both. No
+    `async.ts` was made: the asynchronous paths are a few lines in `engine.ts` and `compute.ts`.
+    A material whose compile fails rejects with an `Error` (the compiler's message as its cause)
+    and is released. The timer is disposed with the engine (listeners dropped, query set
+    destroyed), and a mip chain is timed as one pass.
+  - Pass timing (`timing.ts`, `PassTimer`): one `GPUQuerySet` of 128 timestamps (64 passes a
+    frame; more are left untimed with one warning). A view's or target's render is one frame: its
+    Babylon pass is bracketed (`bracketed: true`), its raw pass and every dispatch and mip pass
+    carry `timestampWrites`, and the frame's queries resolve at the end of the render into a
+    buffer read a frame or more later; a dispatch between renders is reported with the next
+    render's frame. `PassTimes.timer` is the engine's: `absent` without `timestamp-query`,
+    else `full` under `--hyperion-gpu-timing` (the status's `gpuTiming`) and `quantized`
+    otherwise. Without the feature no query set is made and `onPassTimes` never fires.
+  - Checked by the scratch page on SwiftShader and the RTX 3080 (T9.h's checks remain T9's): an
+    async material and an async kernel are made; the kernel writes `3, 1, 0, 0` into an
+    `INDIRECT` buffer; an indirect draw of a triangle with those counts lands where it should, in
+    a view, after Babylon's pass; the frame's times report the bracketed Babylon pass and the
+    indirect pass by label. On the RTX 3080 every figure is a multiple of 65,536 ns (`quantized`,
+    as Design note 4 says, without the timing switch).

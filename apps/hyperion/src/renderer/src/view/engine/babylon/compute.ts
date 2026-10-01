@@ -106,10 +106,26 @@ export function createKernel(
   return { pair, path, pipeline, bindings: kernelBindings(module.code) };
 }
 
+/** Compiles `pair`'s variant on `device` off the queue's timeline. */
+export async function createKernelAsync(
+  device: GPUDevice,
+  pair: KernelPair,
+  capabilities: GpuCapabilities,
+): Promise<KernelRecord> {
+  const { path, module } = prepareKernel(pair, capabilities);
+  const pipeline = await device.createComputePipelineAsync({
+    label: module.label ?? pair.name,
+    layout: "auto",
+    compute: { module: device.createShaderModule(module), entryPoint: "main" },
+  });
+  return { pair, path, pipeline, bindings: kernelBindings(module.code) };
+}
+
 /** A resource bound to one of a kernel's declarations, resolved to the GPU object it is. */
 export type BoundResource =
   | { readonly kind: "buffer"; readonly buffer: GPUBuffer }
-  | { readonly kind: "texture-view"; readonly view: GPUTextureView };
+  | { readonly kind: "texture-view"; readonly view: GPUTextureView }
+  | { readonly kind: "sampler"; readonly sampler: GPUSampler };
 
 /**
  * The bind-group entries of one dispatch, by group, from its resources by name.
@@ -118,7 +134,7 @@ export type BoundResource =
  * resource is given for a name the kernel does not declare.
  */
 export function kernelBindGroupEntries(
-  kernel: Pick<KernelRecord, "pair" | "bindings">,
+  kernel: { readonly pair: { readonly name: string }; readonly bindings: KernelRecord["bindings"] },
   resources: ReadonlyMap<string, BoundResource>,
 ): ReadonlyMap<number, ReadonlyArray<GPUBindGroupEntry>> {
   for (const name of resources.keys()) {
@@ -135,11 +151,33 @@ export function kernelBindGroupEntries(
     const entries = groups.get(group) ?? [];
     entries.push({
       binding,
-      resource: resource.kind === "buffer" ? { buffer: resource.buffer } : resource.view,
+      resource: bindingResource(resource),
     });
     groups.set(group, entries);
   }
   return new Map([...groups.entries()].toSorted(([a], [b]) => a - b));
+}
+
+/** The bind-group resource of a bound resource. */
+function bindingResource(resource: BoundResource): GPUBindingResource {
+  let bound: GPUBindingResource;
+  switch (resource.kind) {
+    case "buffer":
+      bound = { buffer: resource.buffer };
+      break;
+    case "texture-view":
+      bound = resource.view;
+      break;
+    case "sampler":
+      bound = resource.sampler;
+      break;
+  }
+  return bound;
+}
+
+/** Whether `value` is a `GPUBuffer`, by the members a buffer has and a texture lacks. */
+export function isGpuBuffer(value: unknown): value is GPUBuffer {
+  return typeof value === "object" && value !== null && "mapAsync" in value && "size" in value;
 }
 
 /** Workgroup counts, given on the CPU or written by the GPU. */

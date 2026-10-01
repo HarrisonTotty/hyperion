@@ -19,8 +19,6 @@ import type { Camera } from "@babylonjs/core/Cameras/camera.pure";
 import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine.pure";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture.pure";
 import { Matrix } from "@babylonjs/core/Maths/math.vector.pure";
-import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.pure";
-import type { PostProcess } from "@babylonjs/core/PostProcesses/postProcess.pure";
 import type { Scene } from "@babylonjs/core/scene.pure";
 
 import { TEXTURE_USAGE } from "../gpuFlags";
@@ -35,17 +33,20 @@ import type {
 } from "../types";
 import { disableEngineYFlip } from "./internals";
 import type { ResourceRegistry } from "./resources";
-import { CLEAR_COLOUR, frozenCamera, releaseTarget, setChain } from "./view";
+import type { RawAttachments } from "./rawPass";
+import { CLEAR_COLOUR, frozenCamera, releaseTarget } from "./view";
 
 /** What a target needs of the engine that made it. */
 export interface TargetHost {
   readonly babylonEngine: WebGPUEngine;
   readonly scene: Scene;
   readonly resources: ResourceRegistry;
-  meshesFor(frame: FrameSubmission): AbstractMesh[];
-  postProcessesFor(frame: FrameSubmission): ReadonlyArray<PostProcess>;
-  /** Runs `render` inside one Babylon frame and submits it. */
-  inFrame(render: () => void): void;
+  /** Renders `frame` into `target`, its indirect draws into `attachments` after. */
+  renderFrame(
+    frame: FrameSubmission,
+    target: RenderTargetTexture,
+    attachments: () => RawAttachments,
+  ): void;
   /** Encodes the mips of a texture past its first, submitted after the frame. */
   generateMips(texture: TextureHandle): void;
   /** Destroys a texture and whatever wrapped it for Babylon. */
@@ -155,11 +156,12 @@ export class BabylonRenderTarget implements RenderTarget {
     Matrix.FromArrayToRef(frame.projection, 0, this.#projection);
     this.#camera.freezeProjectionMatrix(this.#projection);
     target.activeCamera = this.#camera;
-    this.#host.inFrame(() => {
-      target.renderList = this.#host.meshesFor(frame);
-      setChain(target, this.#host.postProcessesFor(frame));
-      target.render(false);
-    });
+    const { resources } = this.#host;
+    this.#host.renderFrame(frame, target, () => ({
+      colour: resources.textureOf(colour).texture.createView({ baseMipLevel: 0, mipLevelCount: 1 }),
+      colourFormat: this.#spec.format,
+      depth: depth === null ? null : resources.textureOf(depth).texture.createView(),
+    }));
     this.#host.wroteByDraw(colour);
     if (depth !== null) {
       this.#host.wroteByDraw(depth);

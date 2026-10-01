@@ -20,6 +20,8 @@
 import { type GlslangOptions, WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine.pure";
 import type { TwgslOptions } from "@babylonjs/core/Engines/WebGPU/webgpuTintWASM";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.pure";
+import { Mesh } from "@babylonjs/core/Meshes/mesh.pure";
+import type { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture.pure";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import type { Effect } from "@babylonjs/core/Materials/effect.pure";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
@@ -68,6 +70,7 @@ import {
   type RenderTargetFormat,
   type RenderTargetSpec,
   type RenderView,
+  type SamplerSpec,
   type TexelRect,
   type TextureHandle,
   type UniformSpec,
@@ -75,16 +78,50 @@ import {
   type WgslPostProcessSpec,
 } from "../types";
 import { withHandedAdapter } from "./adapterHandoff";
-import { createKernel, encodeDispatch, type KernelRecord, type Workgroups } from "./compute";
+import {
+  type BoundResource,
+  createKernel,
+  createKernelAsync,
+  encodeDispatch,
+  isGpuBuffer,
+  type KernelBinding,
+  type KernelRecord,
+  type Workgroups,
+} from "./compute";
 import { logUncapturedErrors, watchDeviceLoss } from "./deviceLoss";
 import { ExternalStorageBuffer } from "./externalStorageBuffer";
-import { resolveKernelResources } from "./kernelResources";
+import { resolveKernelResources, uniformBufferBytes } from "./kernelResources";
 import { engineDevice, flushEngine, setSampledView } from "./internals";
-import { createShaderMaterial, setUniform, textureSamplerOf } from "./materials";
-import { MeshRecord } from "./meshes";
+import {
+  BLEND_STATES,
+  createShaderMaterial,
+  DEFAULT_SAMPLER,
+  setUniform,
+  textureSamplerOf,
+} from "./materials";
+import { MeshRecord, TOPOLOGIES } from "./meshes";
 import { babylonEngineOptions } from "./options";
 import { registerBabylonModules } from "./registrations";
-import { packedCubeSpec, ResourceRegistry, viewDimensionOf } from "./resources";
+import {
+  attributeLocations,
+  compiledBindings,
+  encodeRawPass,
+  floatVertexFormat,
+  packStruct,
+  partitionDraws,
+  type RawAttachments,
+  type RawDraw,
+  RawPipelines,
+  type RawVertexBuffer,
+  structLayout,
+} from "./rawPass";
+import {
+  packedCubeSpec,
+  ResourceRegistry,
+  UNIFORM_BUFFER_USAGE,
+  viewDimensionOf,
+} from "./resources";
+import { PassTimer } from "./timing";
 import {
   assertBufferReadable,
   readGpuBuffer,
@@ -94,7 +131,7 @@ import {
 } from "./readback";
 import { MipGenerator } from "./mipmaps";
 import { BabylonRenderTarget, type TargetHost } from "./target";
-import { BabylonView, type ViewHost } from "./view";
+import { BabylonView, setChain, type ViewHost } from "./view";
 import {
   GLSLANG_STUB,
   guardCreateEffect,
@@ -147,13 +184,17 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
   /** The kernel that last wrote each buffer and texture (Design notes 16 and 20). */
   readonly #writers = new WriterRecord();
   #mipGenerator: MipGenerator | null = null;
+  readonly #timer: PassTimer;
+  readonly #rawPipelines: RawPipelines;
+  /** Each raw draw slot's uniform buffers, by slot and block. */
+  readonly #rawUniforms = new Map<string, BufferHandle>();
+  readonly #rawSamplers = new Map<string, GPUSampler>();
   readonly #materials = new WeakMap<MaterialHandle, MaterialRecord>();
   readonly #postProcesses = new WeakMap<PostProcessHandle, PostProcess>();
   readonly #kernels = new WeakMap<ComputeHandle, KernelRecord>();
   readonly #drawBindings = new WeakMap<AbstractMesh, DrawBinding>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
-  readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   readonly #releases: ReadonlyArray<() => void>;
   /** The device's loss and error watches, ended at disposal. */
   readonly #watches: ReadonlyArray<() => void>;
@@ -169,14 +210,23 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
   #disposed = false;
 
   /**
+   * Wraps a Babylon engine that `initAsync` has made.
+   *
    * @param releases - Run once at disposal: the guard's listener, and whatever else the creation
    * started.
+   * @param gpuTiming - Whether `--hyperion-gpu-timing` lifted timestamp quantization this launch,
+   * which `PassTimes.timer` states.
    */
-  constructor(engine: WebGPUEngine, releases: ReadonlyArray<() => void> = []) {
+  constructor(engine: WebGPUEngine, releases: ReadonlyArray<() => void> = [], gpuTiming = false) {
     this.#engine = engine;
     this.#releases = releases;
     this.#device = engineDevice(engine);
     this.capabilities = deviceCapabilities(this.#device);
+    this.#timer = new PassTimer(
+      this.#device,
+      this.capabilities.timestampQuery ? (gpuTiming ? "full" : "quantized") : "absent",
+    );
+    this.#rawPipelines = new RawPipelines(this.#device);
     this.#resources = new ResourceRegistry(this.#device, (event) => {
       for (const listener of this.#allocationListeners) {
         listener(event);
@@ -223,13 +273,28 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
   }
 
   /**
-   * Runs `render` as one Babylon frame and submits it.
+   * Renders `frame` into `target`: Babylon's pass, then the adapter's raw pass of the frame's
+   * indirect draws over the same attachments, each timed, and the frame's times resolved.
    *
    * @remarks
-   * Each view's render is its own frame: a canvas texture expires once the task yields, so its
-   * frame is submitted before `render` returns.
+   * Each view's render is its own Babylon frame: a canvas texture expires once the task yields, so
+   * the frame is submitted before this returns. Babylon's pass is bracketed by two empty compute
+   * passes with timestamps, since the adapter does not encode it (Design note 19).
+   *
+   * @param attachments - The attachments the raw pass draws into, asked for only when the frame
+   * has indirect draws.
    */
-  inFrame(render: () => void): void {
+  renderFrame(
+    frame: FrameSubmission,
+    target: RenderTargetTexture,
+    attachments: () => RawAttachments,
+  ): void {
+    const bracket = this.#timer.bracket(frame.label);
+    if (bracket !== undefined) {
+      this.#submit(`${frame.label} begins`, (encoder) => {
+        encoder.beginComputePass({ timestampWrites: bracket.before }).end();
+      });
+    }
     this.#engine.beginFrame();
     try {
       this.#scene.resetCachedMaterial();
@@ -239,20 +304,34 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
       this.#engine.setDepthBuffer(true);
       this.#engine.setDepthWrite(true);
       this.#engine.setColorWrite(true);
-      render();
+      target.renderList = this.meshesFor(frame);
+      setChain(
+        target,
+        frame.postProcesses.map((handle) => this.postProcessOf(handle)),
+      );
+      target.render(false);
     } finally {
       this.#engine.endFrame();
     }
-  }
-
-  /**
-   * The Babylon post-processes of `frame`, in order, as the chain the next render runs.
-   *
-   * @remarks
-   * The caller renders the frame before it asks for another's chain.
-   */
-  postProcessesFor(frame: FrameSubmission): ReadonlyArray<PostProcess> {
-    return frame.postProcesses.map((handle) => this.postProcessOf(handle));
+    if (bracket !== undefined) {
+      this.#submit(`${frame.label} ends`, (encoder) => {
+        encoder.beginComputePass({ timestampWrites: bracket.after }).end();
+      });
+    }
+    const raw = this.#rawDrawsFor(frame, target.getRenderHeight());
+    if (raw.length > 0 && frame.postProcesses.length > 0) {
+      // Babylon drew the scene into the chain's first input and post-processed it already, so
+      // the raw pass would land on the finished colour, past the chain, against the wrong depth.
+      throw new Error(`frame ${frame.label} has indirect draws and post-processes, not yet both`);
+    }
+    if (raw.length > 0) {
+      const label = `${frame.label} indirect`;
+      const writes = this.#timer.writesFor(label);
+      this.#submit(label, (encoder) => {
+        encodeRawPass(this.#device, encoder, this.#rawPipelines, raw, attachments(), label, writes);
+      });
+    }
+    this.#resolveTimes();
   }
 
   forgetView(view: RenderView): void {
@@ -298,9 +377,11 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
 
   generateMips(texture: TextureHandle): void {
     const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
+    const writes = this.#timer.writesFor(`${spec.name} mips`);
     this.#submit(`${spec.name} mips`, (encoder) => {
-      this.#mips.encode(encoder, gpuTexture, spec.mips);
+      this.#mips.encode(encoder, gpuTexture, spec.mips, writes);
     });
+    this.#resolveTimes();
   }
 
   createMesh(spec: MeshSpec): MeshHandle {
@@ -339,11 +420,36 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
     return handle;
   }
 
-  createMaterialAsync(
-    _spec: WgslMaterialSpec,
+  /**
+   * A material whose shaders have been compiled before it resolves.
+   *
+   * @remarks
+   * Babylon compiles a material's shaders when its effect is first made; here the effect is made
+   * at once on a mesh with no geometry, with the defines of the instanced path every draw takes, and
+   * awaited, so that no frame
+   * waits on the compile. Babylon keys its render pipelines by the mesh's vertex layout too, which
+   * is not known here, so a pipeline is still made at the first draw of each mesh and target;
+   * `targets` is accepted for the day Babylon can pre-warm without a mesh.
+   */
+  async createMaterialAsync(
+    spec: WgslMaterialSpec,
     _targets: ReadonlyArray<RenderTargetFormat>,
   ): Promise<MaterialHandle> {
-    return Promise.reject(notBuilt("createMaterialAsync", "R01.T8.g"));
+    const handle = this.createMaterial(spec);
+    const { material } = this.materialOf(handle);
+    // A mesh with no geometry: its effect has the defines of the instanced path every draw takes.
+    const warm = new Mesh(`${spec.name}:warm`, this.#scene);
+    try {
+      await material.forceCompilationAsync(warm, { useInstances: true });
+    } catch (error: unknown) {
+      // Babylon rejects with the compiler's message, a string; the material is released.
+      this.#materials.delete(handle);
+      material.dispose();
+      throw new Error(`material ${spec.name} failed to compile`, { cause: error });
+    } finally {
+      warm.dispose();
+    }
+    return handle;
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
@@ -391,8 +497,17 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
     return handle;
   }
 
-  createComputeAsync(_pair: KernelPair): Promise<ComputeHandle> {
-    return Promise.reject(notBuilt("createComputeAsync", "R01.T8.g"));
+  /** A kernel whose pipeline is made by `createComputePipelineAsync`, off the frame path. */
+  async createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
+    this.#assertLive();
+    const record = await createKernelAsync(this.#device, pair, this.capabilities);
+    const handle: ComputeHandle = Object.freeze({
+      kind: "compute",
+      name: pair.name,
+      path: record.path,
+    });
+    this.#kernels.set(handle, record);
+    return handle;
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -447,8 +562,12 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
             offsetBytes: workgroups.offsetBytes,
           }
         : { kind: "direct", counts: workgroups };
+    const timestampWrites = this.#timer.writesFor(pass);
     this.#submit(pass, (encoder) => {
-      encodeDispatch(this.#device, encoder, record, resources, counts, { label: pass });
+      encodeDispatch(this.#device, encoder, record, resources, counts, {
+        label: pass,
+        ...(timestampWrites === undefined ? {} : { timestampWrites }),
+      });
     });
     for (const [name, handle] of Object.entries(bindings.buffers)) {
       if (record.bindings.get(name)?.writable === true) {
@@ -505,10 +624,7 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
   }
 
   onPassTimes(listener: (times: PassTimes) => void): () => void {
-    this.#passTimeListeners.add(listener);
-    return () => {
-      this.#passTimeListeners.delete(listener);
-    };
+    return this.#timer.listen(listener);
   }
 
   onAllocation(listener: (event: AllocationEvent) => void): () => void {
@@ -560,6 +676,7 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
       record.dispose();
     }
     this.#meshRecords.clear();
+    this.#timer.dispose();
     this.#scene.dispose();
     this.#resources.dispose();
     this.#sampled.clear();
@@ -571,7 +688,6 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
     }
     this.#allocationListeners.clear();
     this.#faultListeners.clear();
-    this.#passTimeListeners.clear();
   }
 
   /** The material record behind `handle`, which must be this engine's. */
@@ -622,7 +738,8 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
   meshesFor(frame: FrameSubmission): AbstractMesh[] {
     const uses = new Map<MeshRecord, Map<ShaderMaterial, number>>();
     const meshes: AbstractMesh[] = [];
-    frame.draws.forEach((draw, index) => {
+    // An indirect draw's counts are the GPU's, and the raw pass draws it (Design note 19).
+    partitionDraws(frame.draws).babylon.forEach((draw, index) => {
       const instances = draw.instanceCount ?? 1;
       if (instances === 0) {
         return;
@@ -711,6 +828,232 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
     return wrapped;
   }
 
+  /** Resolves the frame's pass times, which the timer reports once they are read. */
+  #resolveTimes(): void {
+    if (this.#timer.pending.length === 0) {
+      return;
+    }
+    flushEngine(this.#engine);
+    const encoder = this.#device.createCommandEncoder({ label: "pass times" });
+    const read = this.#timer.resolve(encoder);
+    this.#device.queue.submit([encoder.finish()]);
+    read?.();
+  }
+
+  /**
+   * The frame's indirect draws, resolved for the raw pass; a draw whose shaders Babylon has not
+   * compiled yet is left out of this frame, as Babylon leaves out a draw that is not ready.
+   *
+   * @param outputHeightPx - The attachments' height, which Babylon's internals block carries.
+   */
+  #rawDrawsFor(frame: FrameSubmission, outputHeightPx: number): RawDraw[] {
+    const uses = new Map<string, number>();
+    const draws: RawDraw[] = [];
+    for (const draw of partitionDraws(frame.draws).raw) {
+      const { indirect } = draw;
+      const record = this.meshOf(draw.mesh);
+      const { material, spec, uniforms } = this.materialOf(draw.material);
+      const key = `${material.uniqueId}:${record.name}`;
+      const use = uses.get(key) ?? 0;
+      uses.set(key, use + 1);
+      const mesh = record.rawMeshFor(material, use);
+      mesh.forcedInstanceCount = 1;
+      const subMesh = mesh.subMeshes.at(0);
+      if (subMesh === undefined || !material.isReady(mesh, true, subMesh)) {
+        continue;
+      }
+      const effect = subMesh.effect;
+      if (effect === null || !effect.isReady()) {
+        continue;
+      }
+      const vertexWgsl = effect.vertexSourceCode;
+      const fragmentWgsl = effect.fragmentSourceCode;
+      const values = new Map<string, Float32Array>([
+        [FRAME_UNIFORMS.viewRotation, frame.viewRotation],
+        [FRAME_UNIFORMS.projection, frame.projection],
+        [FRAME_UNIFORMS.offsetFromCamera, draw.offsetFromCameraM],
+      ]);
+      for (const [name, value] of Object.entries(draw.uniforms)) {
+        if (!uniforms.has(name)) {
+          throw new Error(`a draw sets uniform ${name}, which its material does not declare`);
+        }
+        values.set(name, value);
+      }
+      draws.push({
+        name: spec.name,
+        vertexWgsl,
+        fragmentWgsl,
+        topology: TOPOLOGIES[record.fillMode] ?? "triangle-list",
+        vertexBuffers: this.#rawVertexBuffers(mesh, vertexWgsl),
+        index: record.indexBuffer(mesh),
+        resources: this.#rawResources(
+          `${key}:${use}`,
+          spec,
+          draw,
+          compiledBindings(vertexWgsl, fragmentWgsl),
+          packStruct(structLayout(vertexWgsl, "LeftOver"), values),
+          outputHeightPx,
+        ),
+        state: {
+          cullMode: spec.cullMode,
+          depthWrite: spec.depthWrite,
+          colourWrites: spec.colourWrites,
+          blend: BLEND_STATES[spec.blend],
+          depthBias: spec.depthBiasAway,
+        },
+        indirect: {
+          buffer: this.#resources.bufferOf(indirect.buffer).buffer,
+          offsetBytes: indirect.offsetBytes,
+        },
+      });
+    }
+    return draws;
+  }
+
+  /** The vertex buffers a raw draw binds, at the locations its compiled code gives them. */
+  #rawVertexBuffers(mesh: Mesh, vertexWgsl: string): RawVertexBuffer[] {
+    const buffers: RawVertexBuffer[] = [];
+    for (const [name, location] of attributeLocations(vertexWgsl)) {
+      const vertexBuffer = mesh.getVertexBuffer(name);
+      const resource: unknown = vertexBuffer?.getBuffer()?.underlyingResource;
+      if (vertexBuffer === null || !isGpuBuffer(resource)) {
+        throw new Error(`mesh ${mesh.name} has no buffer for attribute ${name}`);
+      }
+      buffers.push({
+        location,
+        buffer: resource,
+        offsetBytes: vertexBuffer.byteOffset,
+        strideBytes: vertexBuffer.byteStride,
+        format: floatVertexFormat(vertexBuffer.getSize()),
+        instanced: vertexBuffer.getIsInstanced(),
+      });
+    }
+    return buffers;
+  }
+
+  /**
+   * The resources a raw draw binds, by the names its compiled code declares: Babylon's leftover
+   * and internals blocks in buffers of the draw's own, the draw's textures and storage buffers,
+   * and samplers.
+   */
+  #rawResources(
+    slot: string,
+    spec: WgslMaterialSpec,
+    draw: DrawItem,
+    bindings: ReadonlyMap<string, KernelBinding>,
+    leftOver: ArrayBuffer,
+    outputHeightPx: number,
+  ): ReadonlyMap<string, BoundResource> {
+    const resources = new Map<string, BoundResource>();
+    const samplers = new Map(spec.samplers.map((sampler) => [sampler.name, sampler]));
+    for (const [name, binding] of bindings) {
+      resources.set(
+        name,
+        this.#rawResource(slot, spec, draw, name, binding, samplers, leftOver, outputHeightPx),
+      );
+    }
+    return resources;
+  }
+
+  /**
+   * One resource of a raw draw.
+   *
+   * @throws Error naming the draw and the binding when the draw does not give it, or the
+   * compiled code declares a kind of binding a material cannot have.
+   */
+  #rawResource(
+    slot: string,
+    spec: WgslMaterialSpec,
+    draw: DrawItem,
+    name: string,
+    binding: KernelBinding,
+    samplers: ReadonlyMap<string, SamplerSpec>,
+    leftOver: ArrayBuffer,
+    outputHeightPx: number,
+  ): BoundResource {
+    let resource: BoundResource;
+    switch (binding.kind) {
+      case "uniform": {
+        if (name === "uniforms") {
+          resource = this.#rawUniformBuffer(`${slot}:uniforms`, leftOver);
+        } else if (name === "internals") {
+          // An unflipped target: Babylon's `yFactor_` of 1, and the output's height.
+          const internals = new Float32Array([1, outputHeightPx, 0, 0]);
+          resource = this.#rawUniformBuffer(`${slot}:internals`, internals.buffer);
+        } else {
+          throw new Error(`the compiled ${spec.name} declares a uniform block ${name} of its own`);
+        }
+        break;
+      }
+      case "texture": {
+        const texture = draw.textures[name];
+        if (texture === undefined) {
+          throw new Error(`draw of ${spec.name} binds no texture ${name}`);
+        }
+        const { texture: gpuTexture, spec: textureSpec } = this.#resources.textureOf(texture);
+        resource = {
+          kind: "texture-view",
+          view: gpuTexture.createView({ dimension: viewDimensionOf(textureSpec) }),
+        };
+        break;
+      }
+      case "sampler":
+        resource = {
+          kind: "sampler",
+          sampler: this.#rawSampler(samplers.get(name) ?? DEFAULT_SAMPLER),
+        };
+        break;
+      case "storage": {
+        const buffer = draw.storageBuffers?.[name];
+        if (buffer === undefined) {
+          throw new Error(`draw of ${spec.name} binds no storage buffer ${name}`);
+        }
+        resource = { kind: "buffer", buffer: this.#resources.bufferOf(buffer).buffer };
+        break;
+      }
+      case "storage-texture":
+        throw new Error(
+          `material ${spec.name} declares storage texture ${name}, which no draw binds`,
+        );
+    }
+    return resource;
+  }
+
+  /** A uniform buffer of a raw draw's own, made once per slot and written each frame. */
+  #rawUniformBuffer(name: string, bytes: ArrayBuffer): BoundResource {
+    let handle = this.#rawUniforms.get(name);
+    if (handle === undefined || handle.bytes < bytes.byteLength) {
+      handle = this.#resources.createBuffer({
+        name,
+        bytes: uniformBufferBytes(bytes.byteLength),
+        usage: UNIFORM_BUFFER_USAGE,
+        category: "other",
+      });
+      this.#rawUniforms.set(name, handle);
+    }
+    this.#resources.writeBuffer(handle, 0, new Uint8Array(bytes));
+    return { kind: "buffer", buffer: this.#resources.bufferOf(handle).buffer };
+  }
+
+  /** The raw pass's sampler for a sampler specification, made once each. */
+  #rawSampler(spec: SamplerSpec): GPUSampler {
+    const key = `${spec.filter}:${spec.address}`;
+    let sampler = this.#rawSamplers.get(key);
+    if (sampler === undefined) {
+      sampler = this.#device.createSampler({
+        label: key,
+        magFilter: spec.filter,
+        minFilter: spec.filter,
+        mipmapFilter: spec.filter,
+        addressModeU: spec.address,
+        addressModeV: spec.address,
+        addressModeW: spec.address,
+      });
+      this.#rawSamplers.set(key, sampler);
+    }
+    return sampler;
+  }
+
   #assertLive(): void {
     if (this.#disposed) {
       throw new Error("the engine has been disposed");
@@ -759,7 +1102,7 @@ export const createBabylonEngine: CreateBabylonEngine = async (
     }
     engine.useReverseDepthBuffer = true;
     guardCreateEffect(engine, status);
-    renderEngine = new BabylonRenderEngine(engine, [stopListening]);
+    renderEngine = new BabylonRenderEngine(engine, [stopListening], status.getSnapshot().gpuTiming);
   } catch (error: unknown) {
     stopListening();
     engine.dispose();
