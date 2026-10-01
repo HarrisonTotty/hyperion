@@ -161,6 +161,7 @@ pub(crate) async fn open(
 }
 
 /// A push of `delta`, stating the clock `reading` it was evaluated at.
+#[must_use]
 fn push_of(reading: ClockReading, delta: SceneDelta) -> ScenePush {
     let mut push = ScenePush::heartbeat(SceneClockDto::from(reading));
     push.arrival = delta.arrival;
@@ -169,6 +170,7 @@ fn push_of(reading: ClockReading, delta: SceneDelta) -> ScenePush {
 }
 
 /// The system whose frame, or whose body's frame, a ship position is in.
+#[must_use]
 fn frame_system(position: &ShipPosition) -> Option<SystemId> {
     match position {
         ShipPosition::Galactic(_) => None,
@@ -389,6 +391,7 @@ impl Topic {
     }
 
     /// The core, home between jobs.
+    #[must_use]
     fn core(&self) -> &SceneCore {
         self.core
             .as_ref()
@@ -396,6 +399,7 @@ impl Topic {
     }
 
     /// The core, home between jobs, to change.
+    #[must_use]
     fn core_mut(&mut self) -> &mut SceneCore {
         self.core
             .as_mut()
@@ -426,7 +430,8 @@ mod tests {
     use crate::scene::{SceneClock, ShipPosition, ShipStandIn, TimeRate};
     use crate::subscriptions::Subscriptions;
     use hyperion_protocol::{
-        DetailLevelDto, RequestBody, SceneCraftDto, SubscribeRequest, SubscriptionTopic,
+        DetailLevelDto, RequestBody, ResponseBody, SceneCraftDto, SubscribeRequest,
+        SubscriptionState, SubscriptionTopic,
     };
     use hyperion_sim::id::BodyId;
 
@@ -566,6 +571,28 @@ mod tests {
         harness.stop().await;
     }
 
+    /// A universe of the tests' seed and the systems of its layer-C cell at the solar circle.
+    async fn universe_and_cell(
+        state: &Arc<AppState>,
+    ) -> (
+        Arc<crate::universe::Universe>,
+        Vec<hyperion_sim::galaxy::placement::SystemRecord>,
+    ) {
+        let universe = state
+            .registry
+            .create("Scene".parse().unwrap(), Some(0x4d2))
+            .await
+            .unwrap();
+        let galaxy = state.galaxies.get(universe.key()).await.unwrap();
+        let mut cell = Vec::new();
+        generate_cell(
+            &galaxy,
+            CellKey::new(Layer::C, [0, 812, 0]).unwrap(),
+            &mut cell,
+        );
+        (universe, cell)
+    }
+
     /// Requests answered by a script, subscriptions by the server's own topics: a scene behind a
     /// writer the test can stick.
     #[derive(Debug)]
@@ -657,18 +684,7 @@ mod tests {
         )
         .await;
         let state = Arc::clone(harness.state());
-        let universe = state
-            .registry
-            .create("Scene".parse().unwrap(), Some(0x4d2))
-            .await
-            .unwrap();
-        let galaxy = state.galaxies.get(universe.key()).await.unwrap();
-        let mut cell = Vec::new();
-        generate_cell(
-            &galaxy,
-            CellKey::new(Layer::C, [0, 812, 0]).unwrap(),
-            &mut cell,
-        );
+        let (universe, cell) = universe_and_cell(&state).await;
         let start = UniverseTime::new(3_600, 0).unwrap();
         state
             .scene
@@ -698,11 +714,25 @@ mod tests {
         );
 
         let mut last = 0;
+        let mut seen = std::collections::BTreeSet::new();
         loop {
             match client.next_message().await {
                 ServerMessage::Response {
                     id: RequestId(2), ..
                 } => break,
+                ServerMessage::Response {
+                    body: ResponseBody::Subscribe(subscribed),
+                    ..
+                } => {
+                    let SubscriptionState::Scene(state) = subscribed.state;
+                    let system = state.system.expect("the stand-in is in the system");
+                    seen = system
+                        .grants
+                        .iter()
+                        .filter(|grant| grant.seen.is_some())
+                        .map(|grant| grant.body.clone())
+                        .collect();
+                }
                 ServerMessage::Response { .. } => {}
                 ServerMessage::Notification {
                     body: NotificationBody::Scene(notification),
@@ -718,25 +748,76 @@ mod tests {
         else {
             panic!("a notification after the clogging response");
         };
-        assert_eq!(
-            merged.sequence,
-            last + 1,
-            "one notification for the stuck second"
-        );
+        assert_eq!(merged.sequence, last + 1, "numbered on from the last sent");
+        // The latest craft: stated within a tick or two of the push's time, which a heartbeat
+        // merged in after them may pass.
         let craft = merged.craft.expect("the craft ride with the merged push");
         assert_eq!(craft.len(), 10);
         let clock = UniverseTime::new(merged.clock.time.seconds, merged.clock.time.nanos).unwrap();
-        let latest = &craft[0].state.time;
-        assert_eq!(
-            (latest.seconds, latest.nanos),
-            (clock.seconds(), clock.subsec_nanos()),
-            "the latest craft, stated at the push's time"
-        );
+        let stated =
+            UniverseTime::new(craft[0].state.time.seconds, craft[0].state.time.nanos).unwrap();
+        let behind = clock.checked_since(stated).unwrap();
         assert!(
-            merged.bodies.iter().any(|body| body.seen.is_some()),
-            "the heartbeat's contacts"
+            !behind.is_negative() && behind < Span::from_seconds(1),
+            "craft stated {behind} before the push"
+        );
+        // Every body the heartbeat moved in that second: each contact the ship sees.
+        let moved: std::collections::BTreeSet<_> = merged
+            .bodies
+            .iter()
+            .filter(|body| body.seen.is_some())
+            .map(|body| body.record.id.clone())
+            .collect();
+        assert!(!seen.is_empty());
+        assert!(
+            seen.is_subset(&moved),
+            "the heartbeat's contacts: {seen:?} in {moved:?}"
         );
         drop(client);
+        harness.stop().await;
+    }
+
+    /// The task keeps only the systems it names, so that a stand-in moved from system to system
+    /// does not hold each one it visited.
+    #[tokio::test]
+    async fn the_task_keeps_only_the_systems_it_names() {
+        let harness = Harness::start(Handlers).await;
+        let state = Arc::clone(harness.state());
+        let universe = state
+            .registry
+            .create("Scene".parse().unwrap(), Some(0x4d2))
+            .await
+            .unwrap();
+        let galaxy = state.galaxies.get(universe.key()).await.unwrap();
+        let mut cell = Vec::new();
+        generate_cell(
+            &galaxy,
+            CellKey::new(Layer::C, [0, 812, 0]).unwrap(),
+            &mut cell,
+        );
+        let mut systems = BTreeMap::new();
+        for record in cell.iter().take(3) {
+            let generated = bodies_of(&state, universe.key(), &galaxy, record.id())
+                .await
+                .unwrap();
+            systems.insert(record.id(), generated);
+        }
+        let ids: Vec<SystemId> = systems.keys().copied().collect();
+        let mut source = SceneSource {
+            state: Arc::clone(&state),
+            universe: universe.id().into(),
+            id: universe.id(),
+            key: universe.key(),
+            galaxy,
+            systems: Arc::new(systems),
+        };
+        source.keep_only(&[Some(ids[2]), None]);
+        assert_eq!(
+            source.systems.keys().copied().collect::<Vec<_>>(),
+            vec![ids[2]]
+        );
+        source.keep_only(&[None, None]);
+        assert!(source.systems.is_empty());
         harness.stop().await;
     }
 }

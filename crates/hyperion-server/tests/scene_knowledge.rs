@@ -12,13 +12,14 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::TestServer;
-use common::scene::{SEED, TIME, in_system, in_the_halo, subscribe, systems};
+use common::scene::{
+    SEED, TIME, TenCraft, craft_offset, in_system, in_the_halo, subscribe, systems,
+};
 use hyperion_protocol::{
     BodyIdHex, CameraReportDto, DetailLevelDto, FramePositionDto, KinematicsDto, RequestBody,
-    ResponseBody, SceneCamerasRequest, SceneCraftDto, SceneShipRequest, ServerMessage, SystemIdHex,
+    ResponseBody, SceneCamerasRequest, SceneShipRequest, ServerMessage, SystemIdHex,
 };
-use hyperion_server::scene::{CraftSource, CraftState, SceneKnowledge};
-use hyperion_server::universe::UniverseId;
+use hyperion_server::scene::{CraftState, SceneKnowledge};
 use hyperion_sim::id::BodyId;
 use hyperion_sim::planetary::record::{DetailLevel, RecordSection};
 use hyperion_testkit::lcg::Lcg;
@@ -48,46 +49,6 @@ impl SceneKnowledge for Restrictive {
 
     fn is_contact(&self, craft: &CraftState) -> bool {
         CONTACTS.contains(&craft.id())
-    }
-}
-
-/// Where craft `k` is: 10⁹ m apart along a line 1 au out.
-fn craft_offset(k: u8) -> [f64; 3] {
-    [1.496e11, 1.0e9 * f64::from(k), 0.0]
-}
-
-/// Ten craft in a system.
-#[derive(Debug)]
-struct TenCraft(SystemIdHex);
-
-impl CraftSource for TenCraft {
-    fn craft_at(
-        &self,
-        _universe: UniverseId,
-        t: hyperion_sim::time::UniverseTime,
-    ) -> Vec<CraftState> {
-        (0..10_u8)
-            .map(|k| {
-                CraftState::new(SceneCraftDto {
-                    craft: format!("craft-{k}"),
-                    hull: "test-hull".to_owned(),
-                    state: KinematicsDto {
-                        position: FramePositionDto::System {
-                            system: self.0.clone(),
-                            offset_m: craft_offset(k),
-                        },
-                        velocity_m_s: [0.0; 3],
-                        time: hyperion_protocol::UniverseTime {
-                            seconds: t.seconds(),
-                            nanos: t.subsec_nanos(),
-                        },
-                    },
-                    attitude: [1.0, 0.0, 0.0, 0.0],
-                    angular_velocity_rad_s: [0.0; 3],
-                    planned_path: None,
-                })
-            })
-            .collect()
     }
 }
 
@@ -193,6 +154,55 @@ fn check_all(messages: &[(u32, hyperion_protocol::NotificationBody)], checked: &
 fn pick<'a, T>(lcg: &mut Lcg, items: &'a [T]) -> &'a T {
     let n = u64::try_from(items.len()).expect("a short list");
     &items[usize::try_from(lcg.next_below(n)).expect("an index of the list")]
+}
+
+/// Whether a notification brings a whole system.
+fn is_arrival((_, body): &(u32, hyperion_protocol::NotificationBody)) -> bool {
+    match body {
+        hyperion_protocol::NotificationBody::Scene(notification) => matches!(
+            notification.arrival,
+            Some(hyperion_protocol::SceneArrivalDto::System { .. })
+        ),
+    }
+}
+
+/// Reads and checks notifications until one brings a whole system; whether one did within a
+/// bounded number of reads.
+async fn next_arrival(client: &mut common::TestClient, checked: &mut usize) -> bool {
+    for _ in 0..1_000 {
+        let notification = client.next_notification().await;
+        let arrived = is_arrival(&notification);
+        check_all(&[notification], checked);
+        if arrived {
+            return true;
+        }
+    }
+    false
+}
+
+/// Moves the stand-in to interstellar space and back to `back`, checking everything pushed, until
+/// the system arrives again; whether it did within a bounded number of reads.
+async fn leave_and_return(
+    client: &mut common::TestClient,
+    universe: &hyperion_protocol::UniverseIdHex,
+    back: KinematicsDto,
+    checked: &mut usize,
+) -> bool {
+    let mut last = Vec::new();
+    for pose in [in_the_halo(), back] {
+        let (answer, notifications) = client
+            .request_among_notifications(RequestBody::SceneShip(SceneShipRequest {
+                universe: universe.clone(),
+                ship: pose,
+                time_rate: 10_000,
+            }))
+            .await;
+        assert!(answer.is_ok(), "{answer:?}");
+        check_all(&notifications, checked);
+        last = notifications;
+    }
+    // The arrival, if it did not come before the answer.
+    last.iter().any(is_arrival) || next_arrival(client, checked).await
 }
 
 /// A uniform draw in `[-1, 1)`.
@@ -324,33 +334,25 @@ async fn no_scene_holds_what_the_ship_does_not_know_wherever_the_cameras_are() {
         // somewhere else in it, so that the whole system arrives again.
         if placement % 50 == 49 {
             let offset = [0, 1, 2].map(|_| 20.0 * au * unit(&mut lcg));
-            for (pose, time_rate) in [(in_the_halo(), 10_000), (ship_at(offset), 10_000)] {
-                let (answer, notifications) = client
-                    .request_among_notifications(RequestBody::SceneShip(SceneShipRequest {
-                        universe: universe.clone(),
-                        ship: pose,
-                        time_rate,
-                    }))
-                    .await;
-                assert!(answer.is_ok(), "{answer:?}");
-                check_all(&notifications, &mut checked);
-            }
-            // The arrival, which follows the answer.
-            let (_, body) = client.next_notification().await;
-            check_all(&[(1, body)], &mut checked);
-            arrivals += 1;
+            arrivals += usize::from(
+                leave_and_return(&mut client, &universe, ship_at(offset), &mut checked).await,
+            );
         }
     }
     // A last heartbeat or two, with the contacts the server places.
-    let (_, notifications) = client
+    let (answer, notifications) = client
         .request_among_notifications(ship([au, 0.0, 0.0], 0))
         .await;
+    assert!(answer.is_ok(), "{answer:?}");
     check_all(&notifications, &mut checked);
     for _ in 0..2 {
         let (_, body) = client.next_notification().await;
         check_all(&[(1, body)], &mut checked);
     }
-    assert_eq!(arrivals, 4);
+    assert_eq!(
+        arrivals, 4,
+        "four arrivals of the whole system, each checked"
+    );
     assert!(
         checked >= 5 * bodies.len(),
         "{checked} records checked: the state's and four arrivals'"

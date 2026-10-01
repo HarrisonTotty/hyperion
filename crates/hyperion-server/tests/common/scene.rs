@@ -3,9 +3,12 @@
 
 use hyperion_protocol::{
     DetailLevelDto, FramePositionDto, KinematicsDto, NotificationBody, RequestBody, ResponseBody,
-    SceneNotificationDto, SceneShipRequest, SceneStateDto, SceneSubscribeRequest, SubscribeRequest,
-    SubscriptionState, SubscriptionTopic, SystemIdHex, UniverseIdHex, UniverseTime,
+    SceneCraftDto, SceneNotificationDto, SceneShipRequest, SceneStateDto, SceneSubscribeRequest,
+    SubscribeRequest, SubscriptionState, SubscriptionTopic, SystemIdHex, UniverseIdHex,
+    UniverseTime,
 };
+use hyperion_server::scene::{CraftSource, CraftState};
+use hyperion_server::universe::UniverseId;
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
@@ -116,5 +119,53 @@ pub async fn subscribe(
 pub async fn next_scene(client: &mut TestClient) -> (u32, SceneNotificationDto) {
     match client.next_notification().await {
         (subscription, NotificationBody::Scene(notification)) => (subscription, notification),
+    }
+}
+
+/// Where craft `k` of [`TenCraft`] is in its system: 10⁹ m apart along a line 1 au out.
+pub fn craft_offset(k: u8) -> [f64; 3] {
+    [1.496e11, 1.0e9 * f64::from(k), 0.0]
+}
+
+/// Ten craft at rest in a system, `craft-0` to `craft-9`, each stating the scene time it was
+/// asked at.
+#[derive(Debug)]
+pub struct TenCraft(pub SystemIdHex);
+
+impl CraftSource for TenCraft {
+    fn craft_at(
+        &self,
+        _universe: UniverseId,
+        t: hyperion_sim::time::UniverseTime,
+    ) -> Vec<CraftState> {
+        (0..10_u8)
+            .map(|k| CraftState::new(ten_craft_record(&self.0, k, t)))
+            .collect()
+    }
+}
+
+/// Craft `k` of [`TenCraft`] in `system` at `t`, as the wire carries it.
+pub fn ten_craft_record(
+    system: &SystemIdHex,
+    k: u8,
+    t: hyperion_sim::time::UniverseTime,
+) -> SceneCraftDto {
+    SceneCraftDto {
+        craft: format!("craft-{k}"),
+        hull: "test-hull".to_owned(),
+        state: KinematicsDto {
+            position: FramePositionDto::System {
+                system: system.clone(),
+                offset_m: craft_offset(k),
+            },
+            velocity_m_s: [0.0; 3],
+            time: UniverseTime {
+                seconds: t.seconds(),
+                nanos: t.subsec_nanos(),
+            },
+        },
+        attitude: [1.0, 0.0, 0.0, 0.0],
+        angular_velocity_rad_s: [0.0; 3],
+        planned_path: None,
     }
 }
