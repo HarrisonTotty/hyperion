@@ -2,11 +2,9 @@
  * Per-pass GPU time, from one `GPUQuerySet` the adapter owns (R01 Design note 19).
  *
  * @remarks
- * Babylon measures only its main pass and each compute shader, which is not enough. So, where the
- * device has `timestamp-query`, every pass the adapter encodes itself (dispatches, raw indirect
- * passes, mip passes) carries `timestampWrites`, and each Babylon-encoded pass for a view or target
- * is bracketed by two empty compute passes submitted just before and just after it, marked
- * `bracketed` because the bracket also holds the queue's gaps. A frame's queries resolve into a
+ Where the device has `timestamp-query`, every pass the adapter encodes (a frame's draws, each
+ * post-process, dispatches, splats, mip passes) carries `timestampWrites`; since every pass is the
+ * adapter's own (Design note 24), none is `bracketed`. A frame's queries resolve into a
  * buffer that is mapped a frame or more later, and the listeners get each pass by its label.
  * Without the feature there is no query set and nothing is ever reported.
  */
@@ -34,12 +32,6 @@ export interface PassWrites {
   readonly querySet: GPUQuerySet;
   readonly beginningOfPassWriteIndex: number;
   readonly endOfPassWriteIndex: number;
-}
-
-/** A bracket around a pass the adapter does not encode: an empty pass before it and one after. */
-export interface Bracket {
-  readonly before: { readonly querySet: GPUQuerySet; readonly beginningOfPassWriteIndex: number };
-  readonly after: { readonly querySet: GPUQuerySet; readonly endOfPassWriteIndex: number };
 }
 
 /** Allocates a frame's timestamps and reports them once resolved. */
@@ -104,17 +96,6 @@ export class PassTimer {
           querySet: this.#querySet,
           beginningOfPassWriteIndex: pass.begin,
           endOfPassWriteIndex: pass.end,
-        };
-  }
-
-  /** The bracket around a Babylon-encoded pass, or `undefined` when untimed. */
-  bracket(label: string): Bracket | undefined {
-    const pass = this.#allocate(label, true);
-    return pass === undefined || this.#querySet === null
-      ? undefined
-      : {
-          before: { querySet: this.#querySet, beginningOfPassWriteIndex: pass.begin },
-          after: { querySet: this.#querySet, endOfPassWriteIndex: pass.end },
         };
   }
 

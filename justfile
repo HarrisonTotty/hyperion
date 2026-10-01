@@ -38,13 +38,6 @@ client *args:
     fi
     pnpm --filter hyperion exec electron-vite dev -- "${x11[@]}" {{ args }}
 
-# Build the client and check that the engine is loaded lazily: no Babylon code in the entry chunk,
-# and a `babylon` chunk (R01.T7). The chunk exists once something imports
-# `view/engine/loadEngine.ts` (R02's VIEW display or R01.T9's smoke page); until then it fails.
-check-chunks:
-    pnpm build
-    node apps/hyperion/scripts/checkChunks.mjs
-
 # Typecheck Rust and TypeScript.
 check:
     cargo check --workspace --all-targets

@@ -9,7 +9,7 @@
 import { deviceCapabilities } from "../view/engine/platform";
 import type { GraphicsFault } from "../view/engine/status";
 import type {
-  CreateBabylonEngine,
+  CreateWebGpuEngine,
   FrameSubmission,
   RenderEngine,
   RenderView,
@@ -60,7 +60,7 @@ export class FakeRenderEngine implements RenderEngine {
     this.capabilities = deviceCapabilities(device);
   }
 
-  /** Raises a device loss, as the Babylon engine reports one. */
+  /** Raises a device loss, as the WebGPU engine reports one. */
   loseDevice(reason: GPUDeviceLostReason = "unknown"): void {
     const fault: GraphicsFault = { kind: "device-lost", reason, message: "fake loss" };
     this.#lost = fault;
@@ -74,7 +74,7 @@ export class FakeRenderEngine implements RenderEngine {
     this.views.push(view);
     return view;
   }
-  /** Replays a loss raised before the listener came, as the Babylon engine does. */
+  /** Replays a loss raised before the listener came, as the WebGPU engine does. */
   onFault(listener: (fault: GraphicsFault) => void): () => void {
     this.#faultListeners.add(listener);
     const lost = this.#lost;
@@ -165,17 +165,17 @@ export interface FakeEngineScript {
 
 /** A fake engine module and the engines it has made, first first. */
 export interface FakeEngineModule {
-  readonly createBabylonEngine: CreateBabylonEngine;
+  readonly createWebGpuEngine: CreateWebGpuEngine;
   readonly engines: FakeRenderEngine[];
   /** The adapter each creation was handed. */
   readonly adapters: GPUAdapter[];
 }
 
-/** A module whose `createBabylonEngine` requests a device from the handed adapter, as Babylon's does. */
+/** A module whose `createWebGpuEngine` requests a device from the handed adapter, as the real one does. */
 export function fakeEngineModule(script: FakeEngineScript = {}): FakeEngineModule {
   const engines: FakeRenderEngine[] = [];
   const adapters: GPUAdapter[] = [];
-  const createBabylonEngine: CreateBabylonEngine = async (outcome) => {
+  const createWebGpuEngine: CreateWebGpuEngine = async (outcome) => {
     const index = adapters.length;
     adapters.push(outcome.adapter);
     const device = await outcome.adapter.requestDevice();
@@ -189,5 +189,5 @@ export function fakeEngineModule(script: FakeEngineScript = {}): FakeEngineModul
     }
     return engine;
   };
-  return { createBabylonEngine, engines, adapters };
+  return { createWebGpuEngine, engines, adapters };
 }

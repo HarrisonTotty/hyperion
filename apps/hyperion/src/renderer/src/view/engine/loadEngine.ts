@@ -2,11 +2,11 @@
  * Loads the engine only when a display draws a scene.
  *
  * @remarks
- * This is the one place that imports the Babylon implementation, by a dynamic `import()`, which
- * splits it into its own chunk; the renderer build names that chunk `babylon`, and
- * `scripts/checkChunks.mjs` fails if the entry chunk holds any Babylon code (R01 Design note 14).
+ * This is the one place that imports the WebGPU implementation, by a dynamic `import()`, which
+ * splits it into a chunk of its own, loaded only when a display draws (R01 Design notes 14 and 24);
+ * `engineBoundary.test.ts` refuses a static import of it anywhere.
  *
- * The engine it returns survives a lost device: it re-creates the Babylon engine on a fresh
+ * The engine it returns survives a lost device: it re-creates the engine on a fresh
  * adapter through the same import, and its views with it (`ResilientEngine`, Design note 9).
  */
 
@@ -27,10 +27,10 @@ export async function loadRenderEngine(
   status: GraphicsStatusStore,
   options: LoadEngineOptions = {},
 ): Promise<RenderEngine> {
-  const importEngine = options.importEngine ?? (() => import("./babylon/engine"));
-  const { createBabylonEngine } = await importEngine();
+  const importEngine = options.importEngine ?? (() => import("./webgpu/engine"));
+  const { createWebGpuEngine } = await importEngine();
   const create = (fresh: AdapterOutcome & { readonly kind: "adapter" }): Promise<RenderEngine> =>
-    createBabylonEngine(fresh, status, options.overrides);
+    createWebGpuEngine(fresh, status, options.overrides);
   const engine = await create(outcome);
   return new ResilientEngine(engine, status, options.gpu ?? navigatorGpu(), create);
 }

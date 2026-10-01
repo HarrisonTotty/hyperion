@@ -46,7 +46,7 @@ import type {
   WgslPostProcessSpec,
 } from "./types";
 
-/** Makes an engine on a vetted adapter: `createBabylonEngine` through the dynamic import. */
+/** Makes an engine on a vetted adapter: `createWebGpuEngine` through the dynamic import. */
 export type EngineFactory = (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
 ) => Promise<RenderEngine>;

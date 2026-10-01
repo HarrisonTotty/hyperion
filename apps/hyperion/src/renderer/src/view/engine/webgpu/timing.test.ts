@@ -56,13 +56,12 @@ describe("the pass timer", () => {
   it("allocates two queries a labelled pass, in order", () => {
     const timer = new PassTimer(timerDevice([]), "quantized");
     const compute = timer.writesFor("histogram");
-    const bracket = timer.bracket("cockpit");
+    const cockpit = timer.writesFor("cockpit");
     expect(compute).toMatchObject({ beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 });
-    expect(bracket?.before.beginningOfPassWriteIndex).toBe(2);
-    expect(bracket?.after.endOfPassWriteIndex).toBe(3);
+    expect(cockpit).toMatchObject({ beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 });
     expect(timer.pending).toEqual([
       { label: "histogram", bracketed: false, begin: 0, end: 1 },
-      { label: "cockpit", bracketed: true, begin: 2, end: 3 },
+      { label: "cockpit", bracketed: false, begin: 2, end: 3 },
     ]);
   });
 
@@ -71,7 +70,7 @@ describe("the pass timer", () => {
     const listener = vi.fn<(times: PassTimes) => void>();
     timer.listen(listener);
     timer.writesFor("histogram");
-    timer.bracket("cockpit");
+    timer.writesFor("cockpit");
     const encoder = recordingEncoder();
     timer.resolve(encoder)?.();
     expect(encoder.calls).toEqual(["resolve 0..4", "copy"]);
@@ -81,7 +80,7 @@ describe("the pass timer", () => {
         timer: "full",
         passes: [
           { label: "histogram", ns: 250, bracketed: false },
-          { label: "cockpit", ns: 3_000, bracketed: true },
+          { label: "cockpit", ns: 3_000, bracketed: false },
         ],
       });
     });
@@ -94,7 +93,6 @@ describe("the pass timer", () => {
     const listener = vi.fn<(times: PassTimes) => void>();
     timer.listen(listener);
     expect(timer.writesFor("histogram")).toBeUndefined();
-    expect(timer.bracket("cockpit")).toBeUndefined();
     expect(timer.resolve(recordingEncoder())).toBeNull();
     expect(device.querySets).toEqual([]);
     expect(listener).not.toHaveBeenCalled();

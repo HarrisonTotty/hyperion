@@ -195,7 +195,7 @@ export function probeTargetSpec(format: ProbedTargetFormat): TextureSpec {
  *
  * @remarks
  * A raw pipeline of the adapter's own, encoded like Design note 19's raw passes: the probe needs
- * no mesh or material of Babylon's.
+ * no mesh or material.
  */
 export async function drawAndReadProbe(
   host: ProbeHost,
