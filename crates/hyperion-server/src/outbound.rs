@@ -23,13 +23,14 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Bytes;
 use axum::extract::ws::Message;
 use futures_util::{Sink, SinkExt};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::timeout;
 
-use crate::limits::{MAX_IN_FLIGHT_REQUESTS, OUTBOUND_QUEUE_FRAMES};
+use crate::limits::{BULK_QUEUED_BYTES, MAX_IN_FLIGHT_REQUESTS, OUTBOUND_QUEUE_FRAMES};
 use crate::requests::Settled;
 use crate::stats::OutboundStats;
 
@@ -46,11 +47,13 @@ pub(crate) fn open(
 ) -> (Outbound, Writer) {
     let (frames, queue) = mpsc::channel(OUTBOUND_QUEUE_FRAMES);
     let (bytes, room) = watch::channel(0);
+    let (bulk, bulk_room) = watch::channel(0);
     let (stopped, writer_stopped) = oneshot::channel();
     let outbound = Outbound {
         frames,
-        backlog: Arc::new(Backlog { bytes, stats }),
+        backlog: Arc::new(Backlog { bytes, bulk, stats }),
         room,
+        bulk_room,
         budget_bytes,
         writer_stopped: Some(writer_stopped),
     };
@@ -88,6 +91,8 @@ pub(crate) struct Outbound {
     backlog: Arc<Backlog>,
     /// The payload bytes queued now, for waiting on room.
     room: watch::Receiver<usize>,
+    /// The bulk frame bytes queued now, headers included (rendering plan R03, Design note 11).
+    bulk_room: watch::Receiver<usize>,
     budget_bytes: usize,
     /// `None` once the writer's stop has been reported.
     writer_stopped: Option<oneshot::Receiver<WriterStopped>>,
@@ -105,8 +110,34 @@ impl Outbound {
     /// Gives the frame back once the writer's task has ended: a write failed, or the task
     /// panicked or was aborted.
     pub(crate) async fn send(&self, message: Message) -> Result<(), SendError<Queued>> {
-        let charge = self.backlog.charge(payload_len(&message));
+        let charge = self.backlog.charge(payload_len(&message), Lane::Frames);
         self.frames.send(Queued { message, charge }).await
+    }
+
+    /// Queues one bulk frame, `frame`, as a binary message, counted in the queue's bytes and in
+    /// its bulk bytes until it has been written (rendering plan R03, R03.T10.b). Waits while the
+    /// queue holds its full count of frames, as [`Outbound::send`] does.
+    ///
+    /// # Errors
+    ///
+    /// As [`Outbound::send`].
+    pub(crate) async fn send_bulk(&self, frame: Bytes) -> Result<(), SendError<Queued>> {
+        let message = Message::Binary(frame);
+        let charge = self.backlog.charge(payload_len(&message), Lane::Bulk);
+        self.frames.send(Queued { message, charge }).await
+    }
+
+    /// Completes once a bulk frame of `bytes` may be queued: the bulk bytes queued, with it, are
+    /// at most [`BULK_QUEUED_BYTES`], or none are queued, so that a chunk at most waits behind one
+    /// other (Design note 11). Cancellation-safe.
+    pub(crate) fn bulk_room_for(&self, bytes: usize) -> impl Future<Output = ()> + use<> {
+        let mut room = self.bulk_room.clone();
+        async move {
+            // The sender lives as long as the queue's backlog; a closed one never makes room.
+            let _ = room
+                .wait_for(|&queued| fits(queued, bytes, BULK_QUEUED_BYTES))
+                .await;
+        }
     }
 
     /// Whether a frame of `bytes` fits the budget now.
@@ -153,21 +184,41 @@ impl Outbound {
 #[derive(Debug)]
 struct Backlog {
     bytes: watch::Sender<usize>,
+    /// The bulk frames' share of `bytes`.
+    bulk: watch::Sender<usize>,
     stats: OutboundStats,
+}
+
+/// Which share of the queue a frame is counted in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Lane {
+    /// Text frames and the WebSocket's own.
+    Frames,
+    /// A bulk payload's binary chunks, which are also counted in [`Backlog::bulk`].
+    Bulk,
 }
 
 impl Backlog {
     /// Charges a frame of `bytes` to the connection and to the server's totals.
     #[must_use]
-    fn charge(self: &Arc<Self>, bytes: usize) -> Charge {
+    fn charge(self: &Arc<Self>, bytes: usize, lane: Lane) -> Charge {
         let mut connection_bytes = 0;
         self.bytes.send_modify(|queued| {
             *queued = queued.saturating_add(bytes);
             connection_bytes = *queued;
         });
         self.stats.queued(bytes, connection_bytes);
+        if lane == Lane::Bulk {
+            let mut bulk_bytes = 0;
+            self.bulk.send_modify(|queued| {
+                *queued = queued.saturating_add(bytes);
+                bulk_bytes = *queued;
+            });
+            self.stats.queued_bulk(bulk_bytes);
+        }
         Charge {
             bytes,
+            lane,
             backlog: Arc::clone(self),
         }
     }
@@ -179,6 +230,7 @@ impl Backlog {
 #[derive(Debug)]
 struct Charge {
     bytes: usize,
+    lane: Lane,
     backlog: Arc<Backlog>,
 }
 
@@ -188,6 +240,11 @@ impl Drop for Charge {
         self.backlog
             .bytes
             .send_modify(|queued| *queued = queued.saturating_sub(bytes));
+        if self.lane == Lane::Bulk {
+            self.backlog
+                .bulk
+                .send_modify(|queued| *queued = queued.saturating_sub(bytes));
+        }
         self.backlog.stats.dequeued(bytes);
     }
 }

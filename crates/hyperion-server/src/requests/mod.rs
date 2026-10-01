@@ -42,7 +42,7 @@ use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
 use tracing::Instrument;
 
 use crate::AppState;
-use crate::bulk::Answer;
+use crate::bulk::{Answer, BulkPayload};
 use crate::compute::{
     CancelToken, ComputeError, JobError, Priority, SubmitJobError, panic_message,
 };
@@ -406,6 +406,8 @@ pub(crate) enum Handshake {
 pub(crate) struct Finished {
     frame: String,
     ending: Ending,
+    /// The bulk payload streamed before the terminal frame, if the answer has one.
+    bulk: Option<BulkPayload>,
 }
 
 /// A request whose task has ended, with its terminal frame, not yet queued.
@@ -418,9 +420,22 @@ pub(crate) struct Settled {
     task: TaskId,
     frame: String,
     ending: Ending,
+    bulk: Option<BulkPayload>,
 }
 
 impl Settled {
+    /// Whether the answer has a bulk payload to stream before its terminal frame.
+    #[must_use]
+    pub(crate) fn has_bulk(&self) -> bool {
+        self.bulk.is_some()
+    }
+
+    /// The bulk payload whose chunks precede the terminal frame, taken to stream (rendering plan
+    /// R03, Design note 10); `None` for an answer in JSON alone.
+    pub(crate) fn take_bulk(&mut self) -> Option<BulkPayload> {
+        self.bulk.take()
+    }
+
     /// The payload bytes of the terminal frame.
     #[must_use]
     pub(crate) fn frame_len(&self) -> usize {
@@ -713,8 +728,15 @@ impl Requests {
             .in_flight
             .iter()
             .find(|(_, entry)| entry.task.id() == task)?;
-        let (frame, ending) = match joined {
-            Ok((_, Finished { frame, ending })) => (frame, ending),
+        let (frame, ending, bulk) = match joined {
+            Ok((
+                _,
+                Finished {
+                    frame,
+                    ending,
+                    bulk,
+                },
+            )) => (frame, ending, bulk),
             Err(error) => {
                 let reason = match error.try_into_panic() {
                     Ok(payload) => panic_message(payload.as_ref()),
@@ -728,7 +750,7 @@ impl Requests {
                         "the server failed while answering this request",
                     ),
                 });
-                (frame, Ending::Failed)
+                (frame, Ending::Failed, None)
             }
         };
         Some(Settled {
@@ -736,6 +758,7 @@ impl Requests {
             task,
             frame,
             ending,
+            bulk,
         })
     }
 
@@ -831,31 +854,25 @@ async fn run(
 ) -> Finished {
     let started = Instant::now();
     let handled = handled.await;
-    let answered = match handled {
-        // Bulk answers are streamed by R03.T10.b; until then no handler gives one.
-        Ok(Answer {
-            bulk: Some(payload),
-            ..
-        }) => {
-            tracing::error!(
-                bytes = payload.manifest().bytes,
-                "a handler answered in bulk, which is not streamed yet"
-            );
-            Err(request_error(
-                ErrorCode::Internal,
-                "the server cannot send this answer yet",
-            ))
-        }
-        Ok(Answer { body, bulk: None }) => respond(&state, id, body, token).await,
-        Err(error) => Err(error),
+    // A bulk payload rides beside the terminal frame, which the connection queues after its
+    // chunks (rendering plan R03, R03.T10.b).
+    let (answered, bulk) = match handled {
+        Ok(Answer { body, bulk }) => (respond(&state, id, body, token).await, bulk),
+        Err(error) => (Err(error), None),
     };
     let elapsed_ms = millis(started.elapsed());
     match answered {
         Ok(frame) => {
-            tracing::debug!(outcome = "response", elapsed_ms, "request finished");
+            tracing::debug!(
+                outcome = "response",
+                elapsed_ms,
+                bulk_bytes = bulk.as_ref().map(|payload| payload.manifest().bytes),
+                "request finished"
+            );
             Finished {
                 frame,
                 ending: Ending::Responded,
+                bulk,
             }
         }
         Err(error) => {
@@ -868,6 +885,7 @@ async fn run(
             Finished {
                 frame: to_frame(&ServerMessage::RequestError { id, error }),
                 ending,
+                bulk: None,
             }
         }
     }
