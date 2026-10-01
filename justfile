@@ -114,14 +114,19 @@ slow_then_check := 'cargo nextest run --workspace --cargo-profile slow-test --pr
 # wasmtime, as `just wasm-tools` installs it.
 wasmtime_version := "49.0.1"
 
+# wasm-bindgen-cli, as `just wasm-tools` installs it: the version of `wasm-bindgen` that
+# `Cargo.lock` names, which wasm-bindgen-test's runner must match exactly.
+wasm_bindgen_version := `sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock`
+
 # The crates whose suites run under wasm32-wasip1.
 wasip1_crates := "-p hyperion-base -p hyperion-surface -p hyperion-sim -p hyperion-testkit"
 
 # cargo-nextest is installed only if missing; `test-slow` needs it as well.
-# Install the tools the WebAssembly checks need: both rustup targets, the pinned wasmtime, nextest.
+# Install the WebAssembly checks' tools: both targets, wasmtime, wasm-bindgen-cli and nextest.
 wasm-tools:
     rustup target add wasm32-wasip1 wasm32-unknown-unknown
     cargo install wasmtime-cli --version {{ wasmtime_version }} --locked
+    cargo install wasm-bindgen-cli --version {{ wasm_bindgen_version }} --locked
     command -v cargo-nextest >/dev/null || cargo install cargo-nextest --locked
 
 # Fail, naming `just wasm-tools`, unless each tool group named is present. `wasip1`: the target,
@@ -143,6 +148,13 @@ _wasm-preflight +tools:
                 [[ "$found" == "wasmtime {{ wasmtime_version }}"* ]] \
                     || missing "wasmtime {{ wasmtime_version }} (${WASMTIME:-wasmtime}: '${found:-none}')"
                 cargo nextest --version >/dev/null 2>&1 || missing "cargo-nextest"
+                ;;
+            browser)
+                grep -qx wasm32-unknown-unknown <<<"$installed" \
+                    || missing "the rustup target wasm32-unknown-unknown"
+                runner="$(wasm-bindgen-test-runner --version 2>/dev/null || true)"
+                [[ "$runner" == "wasm-bindgen-test-runner {{ wasm_bindgen_version }}" ]] \
+                    || missing "wasm-bindgen-test-runner {{ wasm_bindgen_version }} (found '${runner:-none}')"
                 ;;
             *)
                 echo "error: _wasm-preflight: unknown tool group $tool" >&2
@@ -210,6 +222,58 @@ test-wasm-slow: (_wasm-preflight "wasip1")
 
 # Both the fast and the slow WebAssembly checks.
 test-wasm: test-wasm-fast test-wasm-slow
+
+# The crates whose suites run on wasm32-unknown-unknown, the client's target: those the client ships
+# or tests with. Not the sim, which no browser loads (R04 Design note 11).
+browser_crates := "hyperion-testkit"
+
+# How long one test binary may run on the browser target, in seconds: wasm-bindgen-test's Node mode
+# has no timeout of its own.
+browser_timeout := "600"
+
+# Run the browser target's suites (`--lib --tests`, at the slow-test profile, since debug wasm is
+# slow) on the V8 that Electron ships, through `tools/electron-node/node` (R04 Design note 13).
+# First it proves, through the shim, that `node` is Electron; then it builds, compares each crate's
+# test list with the native one less its `native_only` tests, since a plain `#[test]` compiles there
+# and is silently dropped (Design note 12); then it runs the tests under the heavy-test lock.
+# The browser target's suites, on Electron's V8: base, the surface crate, the testkit.
+test-wasm-browser: (_wasm-preflight "browser")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ justfile_directory() }}"
+    electron="$(pnpm --silent --filter hyperion exec node -p "require('electron')" | tail -n 1)"
+    expected="$(pnpm --silent --filter hyperion exec node -p "require('electron/package.json').version" | tail -n 1)"
+    if [[ ! -x "$electron" ]]; then
+        echo "error: Electron's binary ($electron) is missing: run \`just install\`" >&2
+        exit 1
+    fi
+    export HYPERION_ELECTRON="$electron"
+    export PATH="{{ justfile_directory() }}/tools/electron-node:$PATH"
+    version="$(node -p process.versions.electron 2>/dev/null || true)"
+    if [[ "$version" != "$expected" ]]; then
+        echo "error: \`node\` on PATH is not Electron $expected through tools/electron-node (it printed '$version')" >&2
+        exit 1
+    fi
+    echo "wasm-bindgen-test on Electron $version, V8 $(node -p process.versions.v8)"
+    export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="timeout {{ browser_timeout }} wasm-bindgen-test-runner"
+    packages=()
+    for crate in {{ browser_crates }}; do packages+=(-p "$crate"); done
+    browser=(--target wasm32-unknown-unknown --profile slow-test --lib --tests)
+    cargo test "${browser[@]}" "${packages[@]}" --no-run
+    cargo test --lib --tests "${packages[@]}" --no-run
+    tests() { grep -E ': test$' | sed -e 's/: test$//' | sort; }
+    for crate in {{ browser_crates }}; do
+        native="$(cargo test -q --lib --tests -p "$crate" -- --list 2>/dev/null | tests | grep -v 'native_only::' || true)"
+        on_browser="$(cargo test "${browser[@]}" -p "$crate" -- --list 2>/dev/null | tests || true)"
+        if [[ "$native" != "$on_browser" ]]; then
+            echo "error: $crate's tests on wasm32-unknown-unknown differ from its native ones less native_only::" >&2
+            echo "(a test file or module without the \`wasm_bindgen_test as test\` import, or a test compiled out outside a native_only module):" >&2
+            diff <(echo "$native") <(echo "$on_browser") >&2 || true
+            exit 1
+        fi
+        echo "$crate: $(grep -c . <<<"$native") tests on the browser target, as natively less native_only"
+    done
+    just _locked cargo test "${browser[@]}" "${packages[@]}"
 
 # Run the Criterion benchmarks, e.g. `just bench -- samplers`.
 bench *args:
