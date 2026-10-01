@@ -16,7 +16,9 @@ export type SceneNotificationDto = {
  */
 sequence: number, 
 /**
- * The scene clock.
+ * The scene clock when the notification was sent. A merged notification's records may hold
+ * earlier times, each stating its own (`hosts.time`, a contact's `seen.emitted`, a craft's
+ * `state.time`); a client takes no record's time from this clock (Design note 5).
  */
 clock: SceneClockDto, 
 /**
