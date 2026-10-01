@@ -1492,3 +1492,22 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   answer crowded by pushes that each fit (R03.T5.b's note). A topic whose pool job fails ends its
   task with a `warn` and leaves its subscription silent until unsubscribed; the client's sequence
   check does not see it (only a server shutting down reaches it today).
+- **Deviations in T9, as built.** The scene's integration helpers moved to
+  `tests/common/scene.rs`. `scene_knowledge.rs` drives 200 camera placements from a fixed seed (in
+  the system's frame within 40 au, beside the seven craft that are not contacts, inside a hidden
+  body's Hill sphere in its frame, and near any body in its frame, in turn) and, every fiftieth,
+  moves the stand-in out of the system and back to a drawn point in it, so that the whole system
+  arrives four times more; every state, notification and arrival is checked on its JSON (craft
+  only contacts; each grant and re-sent body's `level` the fake's; no section above a body's
+  level `ok`; a contact's `mass_kg` and `orbit` withheld and its kind `unresolved`). Camera time
+  is fixed at the stand-in's. `scene_agree.rs` cannot compare the two subscriptions' pushes byte
+  for byte: each task reads the clock when it pushes and their heartbeats are a second apart. It
+  holds instead that both are told the same ships in the same order and one departure each,
+  that every clock either is told lies on its setting's line (scene time less the rate times the
+  real time since the setting was answered) to within a second of real time at 10×, and that every
+  system either is given, the states and the return's arrival, equals `system_bodies` answered
+  for that push's own time. No generated body changes inside the clock window, so the minute has
+  no `valid_until` crossing (R03.T8.a's unit test covers it). That last check found that a push
+  stated the clock read when it was pushed rather than the reading the core evaluated at: the
+  task now pushes the reading `delta` advanced to (`push_of`), so a push's clock is the time its
+  records hold.

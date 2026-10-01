@@ -5,129 +5,19 @@
 
 mod common;
 
-use common::{TestClient, TestServer};
-use hyperion_protocol::SceneCraftDto;
+use common::TestServer;
+use common::scene::{
+    SEED, TIME, in_system, in_the_halo, next_scene, set_ship, subscribe, systems, universe,
+};
 use hyperion_protocol::{
     CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto, NotificationBody,
     RequestBody, ResponseBody, SceneArrivalDto, SceneCamerasRequest, SceneClockStateDto,
-    SceneNotificationDto, SceneShipRequest, SceneStateDto, SceneSubscribeRequest, SubscribeRequest,
-    SubscriptionState, SubscriptionTopic, SystemBodiesRequest, SystemIdHex, UniverseIdHex,
-    UniverseTime,
+    SceneCraftDto, SystemBodiesRequest, SystemIdHex, UniverseTime,
 };
 use hyperion_server::scene::{CraftSource, CraftState, SceneKnowledge};
 use hyperion_server::universe::UniverseId;
-use hyperion_sim::Seed;
-use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
 use hyperion_sim::id::BodyId;
-use hyperion_sim::id::Layer;
 use hyperion_sim::planetary::record::DetailLevel;
-
-/// The seed of the universe these scenes are in.
-const SEED: u64 = 0x4d2;
-
-/// The scene time the tests set, an hour after the epoch.
-const TIME: UniverseTime = UniverseTime {
-    seconds: 3_600,
-    nanos: 0,
-};
-
-/// The first two systems of the layer-C cell at the solar circle, as the server generates them.
-fn systems() -> [SystemIdHex; 2] {
-    let galaxy = Galaxy::new(Seed::new(SEED));
-    let mut cell = Vec::new();
-    generate_cell(
-        &galaxy,
-        CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the grid"),
-        &mut cell,
-    );
-    [0, 1].map(|n| SystemIdHex::from_u64(cell[n].id().raw()))
-}
-
-/// A pose 1 au from `system`'s barycentre, in its frame, at rest, at [`TIME`].
-fn in_system(system: &SystemIdHex) -> KinematicsDto {
-    KinematicsDto {
-        position: FramePositionDto::System {
-            system: system.clone(),
-            offset_m: [1.496e11, 0.0, 0.0],
-        },
-        velocity_m_s: [0.0; 3],
-        time: TIME,
-    }
-}
-
-/// A pose far above the disc, in no system's sphere.
-fn in_the_halo() -> KinematicsDto {
-    KinematicsDto {
-        position: FramePositionDto::Galactic {
-            position: hyperion_protocol::GalacticPosition {
-                cell_ly: [0, 0, 60_000],
-                offset_m: [0.0; 3],
-            },
-        },
-        velocity_m_s: [0.0; 3],
-        time: TIME,
-    }
-}
-
-/// A server, a client said hello, and a universe of [`SEED`].
-async fn universe() -> (TestServer, TestClient, UniverseIdHex) {
-    let server = TestServer::start().await;
-    let mut client = server.connected().await;
-    let universe = client.create_universe("Scene", SEED).await.id;
-    (server, client, universe)
-}
-
-/// Sets the universe's ship stand-in and clock, keeping the notifications that arrive meanwhile.
-async fn set_ship(
-    client: &mut TestClient,
-    universe: &UniverseIdHex,
-    ship: KinematicsDto,
-    time_rate: u32,
-) -> Vec<(u32, NotificationBody)> {
-    let (answer, notifications) = client
-        .request_among_notifications(RequestBody::SceneShip(SceneShipRequest {
-            universe: universe.clone(),
-            ship,
-            time_rate,
-        }))
-        .await;
-    assert!(
-        matches!(answer, Ok(ResponseBody::SceneShip(_))),
-        "{answer:?}"
-    );
-    notifications
-}
-
-/// Subscribes to the universe's scene at `detail` and returns the subscription and its state.
-async fn subscribe(
-    client: &mut TestClient,
-    universe: &UniverseIdHex,
-    detail: DetailLevelDto,
-) -> (u32, SceneStateDto) {
-    let (answer, _) = client
-        .request_among_notifications(RequestBody::Subscribe(SubscribeRequest {
-            universe: universe.clone(),
-            topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
-                detail,
-                cameras: Vec::new(),
-            }),
-        }))
-        .await;
-    match answer {
-        Ok(ResponseBody::Subscribe(subscribed)) => match subscribed.state {
-            SubscriptionState::Scene(state) => (subscribed.subscription, state),
-        },
-        other => panic!("expected the scene's state, got {other:?}"),
-    }
-}
-
-/// The next scene notification on the client.
-async fn next_scene(client: &mut TestClient) -> (u32, SceneNotificationDto) {
-    match client.next_notification().await {
-        (subscription, NotificationBody::Scene(notification)) => (subscription, notification),
-    }
-}
 
 #[tokio::test]
 async fn a_scene_in_a_pinned_system_holds_every_body_as_system_bodies_answers_them() {

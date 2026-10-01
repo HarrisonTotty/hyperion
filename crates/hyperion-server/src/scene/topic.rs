@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval, interval_at, sleep_until};
 
 use super::core::{Beat, FetchSystemError, SceneCore, SceneDelta, SceneInputs, SceneWorld};
-use super::{Clock, SceneSetting, Ship, ShipPosition};
+use super::{Clock, ClockReading, SceneSetting, Ship, ShipPosition};
 use crate::AppState;
 use crate::compute::{
     CancelOnDrop, CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Priority,
@@ -160,6 +160,14 @@ pub(crate) async fn open(
     Ok(SubscriptionState::Scene(scene))
 }
 
+/// A push of `delta`, stating the clock `reading` it was evaluated at.
+fn push_of(reading: ClockReading, delta: SceneDelta) -> ScenePush {
+    let mut push = ScenePush::heartbeat(SceneClockDto::from(reading));
+    push.arrival = delta.arrival;
+    push.bodies = delta.bodies;
+    push
+}
+
 /// The system whose frame, or whose body's frame, a ship position is in.
 fn frame_system(position: &ShipPosition) -> Option<SystemId> {
     match position {
@@ -279,16 +287,11 @@ impl Topic {
         }
     }
 
-    /// The clock as it reads now.
-    fn clock(&self) -> SceneClockDto {
-        SceneClockDto::from(self.current.clock.reading_at(Instant::now()))
-    }
-
     /// Takes a new scene setting: pushes the clock and the ship, and what moving the ship changed.
     async fn on_setting(&mut self) -> Result<(), RequestError> {
         self.current = self.setting.borrow_and_update().clone();
-        let delta = self.delta(Beat::Change).await?;
-        let mut push = self.push(delta);
+        let (reading, delta) = self.delta(Beat::Change).await?;
+        let mut push = push_of(reading, delta);
         push.ship = Some(self.current.ship.kinematics());
         self.pusher.push(PendingPush::Scene(push));
         Ok(())
@@ -296,9 +299,9 @@ impl Topic {
 
     /// Advances the core and pushes what changed, if anything did.
     async fn advance(&mut self, beat: Beat) -> Result<(), RequestError> {
-        let delta = self.delta(beat).await?;
+        let (reading, delta) = self.delta(beat).await?;
         if delta != SceneDelta::default() {
-            let push = self.push(delta);
+            let push = push_of(reading, delta);
             self.pusher.push(PendingPush::Scene(push));
         }
         Ok(())
@@ -307,8 +310,8 @@ impl Topic {
     /// The heartbeat: the clock, the contacts refreshed and anything else that changed, and the
     /// craft once some appear.
     async fn on_heartbeat(&mut self) -> Result<(), RequestError> {
-        let delta = self.delta(Beat::Heartbeat).await?;
-        let push = self.push(delta);
+        let (reading, delta) = self.delta(Beat::Heartbeat).await?;
+        let push = push_of(reading, delta);
         self.pusher.push(PendingPush::Scene(push));
         if !self.core().has_craft() {
             self.push_craft();
@@ -356,7 +359,9 @@ impl Topic {
     }
 
     /// Advances the core on the pool at the clock's present reading.
-    async fn delta(&mut self, beat: Beat) -> Result<SceneDelta, RequestError> {
+    /// Returns the reading it advanced to with what changed, so that the push states the time the
+    /// changes were evaluated at.
+    async fn delta(&mut self, beat: Beat) -> Result<(ClockReading, SceneDelta), RequestError> {
         let reading = self.current.clock.reading_at(Instant::now());
         let ship = self.current.ship.clone();
         let knowledge = self.source.state.scene.knowledge();
@@ -380,7 +385,7 @@ impl Topic {
         ];
         self.source.keep_only(&keep);
         self.core = Some(core);
-        Ok(delta)
+        Ok((reading, delta))
     }
 
     /// The core, home between jobs.
@@ -402,14 +407,6 @@ impl Topic {
         self.core
             .take()
             .expect("the core is home between pool jobs")
-    }
-
-    /// A push of `delta` with the clock as it reads now.
-    fn push(&self, delta: SceneDelta) -> ScenePush {
-        let mut push = ScenePush::heartbeat(self.clock());
-        push.arrival = delta.arrival;
-        push.bodies = delta.bodies;
-        push
     }
 }
 
