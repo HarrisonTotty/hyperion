@@ -1,16 +1,14 @@
-// The pass's uniforms, shared by every material (R01's draft Design note 23, 2026-09-30): written
-// once per pass at @group(0) @binding(0). Each material declares its own `Draw` at @group(1)
-// @binding(0) (the draw's offset from the camera, then the spec's uniforms in order) and its
-// resources at @group(2), and is composed after this file by string concatenation.
+// The pass's frame, `@group(0)` of every material and post-process (plan R01, Design note 23).
+// Included by string concatenation of this file's `?raw` import ahead of a shader's own source.
+// The engine writes it once a pass, packed by WGSL's uniform layout: two mat4x4f, then a vec4f.
+
 struct Frame {
-  // The camera's rotation alone, column-major, its translation column zero (plan R02, Design
-  // note 3).
-  viewRotation: mat4x4f,
-  // Reversed-Z, infinite far, WebGPU clip space, column-major (plan R02, Design note 4): s at
-  // [0][0], s * aspect at [1][1], -1 at [2][3] and the near plane at [3][2].
-  clipProjection: mat4x4f,
-  // The target's size, px: width, height.
-  viewport: vec2f,
+  // FrameSubmission.viewRotation: column-major, translation zero, right-handed.
+  viewRotation : mat4x4f,
+  // FrameSubmission.projection: reversed-Z, WebGPU clip space, column-major.
+  clipProjection : mat4x4f,
+  // The output's width and height in pixels, then their reciprocals.
+  viewport : vec4f,
 }
 
-@group(0) @binding(0) var<uniform> frame: Frame;
+@group(0) @binding(0) var<uniform> frame : Frame;

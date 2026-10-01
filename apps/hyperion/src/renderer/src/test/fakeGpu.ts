@@ -59,8 +59,8 @@ const DEFAULT_LIMITS = {
   maxSampledTexturesPerShaderStage: 16,
   maxSamplersPerShaderStage: 16,
   maxStorageBufferBindingSize: 134_217_728,
-  // The four per-stage storage limits default to the per-shader-stage ones; lib.dom lacks them, but
-  // `@babylonjs/core` declares them on the global `GPUSupportedLimits`.
+  // The four per-stage storage limits default to the per-shader-stage ones; lib.dom lacks them, and
+  // `webgpu.d.ts` declares them on the global `GPUSupportedLimits`.
   maxStorageBuffersInFragmentStage: 8,
   maxStorageBuffersInVertexStage: 8,
   maxStorageBuffersPerShaderStage: 8,

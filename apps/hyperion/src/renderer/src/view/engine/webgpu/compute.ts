@@ -2,11 +2,11 @@
  * Compute kernels, compiled and dispatched on the engine's device.
  *
  * @remarks
- * A kernel is plain WGSL with its own `@group` and `@binding` attributes, not Babylon's dialect:
+ * A kernel is plain WGSL with its own `@group` and `@binding` attributes and entry point `main`:
  * the adapter encodes its dispatches itself, so that each carries its pass's timestamps (R01 Design
  * note 19), binds a storage texture at the mip level `ComputeBindings` names, and takes GPU-written
- * workgroup counts through `dispatchWorkgroupsIndirect`. Babylon's `ComputeShader` offers none of
- * the first two. Bindings are found by the names the source declares.
+ * workgroup counts through `dispatchWorkgroupsIndirect`. Bindings are found by the names the source
+ * declares.
  */
 
 import { assertNoF16Subgroups, type KernelPair, selectKernel } from "../kernels";

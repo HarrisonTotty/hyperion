@@ -4,9 +4,9 @@
  * 18).
  *
  * @remarks
- * Buffers and textures are made on the engine's device directly, not through Babylon, so that each
- * has exactly the usage, format and mips its specification names, and so that their bytes are
- * known. A texture a material samples is wrapped for Babylon when it is first bound. R06's packed
+ * Buffers and textures are made on the engine's device here and nowhere else, so that each has
+ * exactly the usage, format and mips its specification names, and so that their bytes are known.
+ * R06's packed
  * star cube is an `rgb9e5ufloat` cube made the same way, its levels written by
  * `queue.writeTexture` from the CPU or `copyBufferToTexture` from a kernel's buffer (Design note
  * 21).
@@ -155,8 +155,7 @@ export class ResourceRegistry {
    * Writes `data` into a buffer at `offsetBytes`, through the queue.
    *
    * @remarks
-   * A queue write takes effect before any command submitted after it, Babylon's pending frame
-   * included, as WebGPU orders them.
+   * A queue write takes effect before any command submitted after it, as WebGPU orders them.
    */
   writeBuffer(handle: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     const { buffer } = this.bufferOf(handle);
@@ -243,6 +242,19 @@ export class ResourceRegistry {
       { texture, mipLevel: level },
       [faceTexels, faceTexels, 6],
     );
+  }
+
+  /** Destroys one buffer, raising its `destroyed` event. */
+  destroyBuffer(handle: BufferHandle): void {
+    const { spec, buffer } = this.bufferOf(handle);
+    buffer.destroy();
+    this.#buffers.delete(handle);
+    this.#emit({
+      kind: "destroyed",
+      name: handle.name,
+      bytes: spec.bytes,
+      category: spec.category,
+    });
   }
 
   /** Destroys one texture, raising its `destroyed` event. */

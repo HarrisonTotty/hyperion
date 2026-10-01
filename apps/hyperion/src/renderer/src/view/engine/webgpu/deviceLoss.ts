@@ -2,9 +2,8 @@
  * Watching the engine's device for loss and for errors nothing captured.
  *
  * @remarks
- * Babylon's own restore after `device.lost` runs its rebuild unawaited, so it can run against the
- * lost device, and skips wrapped external textures, which every view is; the engine is made with
- * `doNotHandleContextLost: true` and the adapter handles loss itself (R01 Design note 9). A
+ * The adapter handles loss itself (R01 Design note 9): the engine watches its device's `lost`
+ * promise and the wrapper `loadRenderEngine` returns rebuilds on a fresh adapter. A
  * GPU-process crash reaches the page as `device.lost` with reason `unknown` and no
  * `uncapturederror` (probe of 2026-09-29), so the loss is the signal; an uncaptured error is
  * reported for diagnosis only.
