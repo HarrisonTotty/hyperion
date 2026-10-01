@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -12,6 +13,7 @@ import {
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { BodyDistanceUnit } from "../../lib/format";
 import { type ElementSize, useElementSize } from "../../lib/useElementSize";
+import { useUniverse } from "../../lib/universe";
 import { usePrefersReducedMotion } from "../../lib/usePrefersReducedMotion";
 import type { Anchor } from "../../spatial/drawList";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
@@ -36,11 +38,12 @@ import {
   DEFAULT_EXPOSURE,
   type ExposureControl,
 } from "../../view/photometry/exposure";
-import { cameraSceneOf } from "../../view/scene/model";
+import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
 import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
 import { WireframeRenderer } from "../../view/wireframe/submit";
 import { CameraControls } from "./CameraControls";
 import { ExposurePanel } from "./ExposurePanel";
+import { useInterimStars } from "./useInterimStars";
 import { DEFAULT_ENGINE_SOURCE, useViewEngine, type ViewEngineSource } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
@@ -67,6 +70,9 @@ const READOUT_INTERVAL_MS = 250;
 
 /** The keys of the canvas, shown beside it and describing it. */
 const KEY_LEGEND = "W/S A/D R/F MOVE · ARROWS Q/E TURN · PAGE UP/DOWN RATE";
+
+/** No stars, one array for every frame without an answer. */
+const NO_STARS: ReadonlyArray<ViewStar> = [];
 
 /** The pointer's reach to a mark, rem: half the guide's 2 rem target, as plan 05's pick has it. */
 const PICK_REM = 1;
@@ -96,6 +102,9 @@ interface ViewStageProps {
   readonly onExposureChange: (exposure: ExposureControl) => void;
   readonly easedMoves: boolean;
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
+  /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
+  readonly stars: ReadonlyArray<ViewStar>;
+  readonly countLine: string | null;
 }
 
 /** What the drawing loop reads of the display, kept current by an effect. */
@@ -105,6 +114,8 @@ interface LoopInputs {
   readonly reducedMotion: boolean;
   readonly size: ElementSize | null;
   readonly tokens: ColourTokens | null;
+  /** The interim stars (R02.T16), drawn into every frame's scene. */
+  readonly stars: ReadonlyArray<ViewStar>;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -142,6 +153,8 @@ function ViewStage({
   onExposureChange,
   easedMoves,
   onEasedMovesChange,
+  stars,
+  countLine,
 }: ViewStageProps) {
   const legendId = useId();
   const [initial] = useState(() => startRun(option.make()));
@@ -162,6 +175,7 @@ function ViewStage({
     reducedMotion,
     size,
     tokens: null,
+    stars: [],
   });
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
@@ -185,8 +199,9 @@ function ViewStage({
       reducedMotion,
       size,
       tokens: canvas === null ? null : readTokens(canvas),
+      stars,
     };
-  }, [exposure, selection, reducedMotion, size, canvas]);
+  }, [exposure, selection, reducedMotion, size, canvas, stars]);
 
   // The redraw loop: every frame while the display is shown; `Activity` tears it down when hidden.
   useEffect(() => {
@@ -222,7 +237,8 @@ function ViewStage({
           sized = viewport;
         }
         const camera = { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
-        const list = buildWireframeDrawList(run.scene, camera, viewport, inputs.tokens, {
+        const scene = { ...run.scene, stars: inputs.stars };
+        const list = buildWireframeDrawList(scene, camera, viewport, inputs.tokens, {
           lowSetting: false,
           ev100: controlEv100(inputs.exposure),
           selection: inputs.selection,
@@ -345,7 +361,11 @@ function ViewStage({
               <ViewMarkLabels anchors={shown.anchors} devicePixelRatio={ratio} rows={rows} />
               <ViewLabelBlock
                 lines={labelLines(shown.run, exposure)}
-                statements={labelStatements(shown.run)}
+                statements={
+                  countLine === null
+                    ? labelStatements(shown.run)
+                    : [...labelStatements(shown.run), countLine]
+                }
                 fault={fault}
               />
             </ViewCanvas>
@@ -395,6 +415,17 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
   if (option === undefined) {
     throw new Error(`no kept scene named ${sceneName}`);
   }
+  // Where the scene starts, kept for its identity: the interim stars are asked about its system
+  // from here, above the stage that a new scene remounts, so that a scene in the same system asks
+  // nothing again (Design note 19).
+  const start = useMemo(() => option.make().sceneAt(0), [option]);
+  const universe = useUniverse().open?.id ?? null;
+  const interim = useInterimStars({
+    universe,
+    system: start.system,
+    centre: start.barycentre,
+    time: start.time,
+  });
   return (
     <div className="view-display">
       <div className="view-display__bar">
@@ -423,6 +454,8 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
         onExposureChange={setExposure}
         easedMoves={easedMoves}
         onEasedMovesChange={setEasedMoves}
+        stars={interim.field?.stars ?? NO_STARS}
+        countLine={interim.countLine}
       />
     </div>
   );
@@ -448,7 +481,8 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
  * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `]` and `[` the
  * next and previous target, `+` and `-` the field of view; on the focused canvas the flight keys
  * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown). A click on the canvas, or the list, selects a
- * mark, whose bracket reticle the view then draws; another craft's mark carries its range and
+ * mark, whose bracket reticle the view then draws. Its stars are the interim field of the open
+ * universe's range queries about the scene's system (R02.T16), with their count line; another craft's mark carries its range and
  * closure rate, and a body drawn as its symbol its designation, as DOM labels over the canvas.
  */
 export const ViewDisplay = memo(ViewPanels);
