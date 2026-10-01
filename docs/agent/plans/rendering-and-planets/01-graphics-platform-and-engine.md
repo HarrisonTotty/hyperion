@@ -2155,3 +2155,17 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     Babylon's path a depth texture bound per draw is given Babylon's depth format and type and a
     `depth-only` view, so that Babylon binds it as `texture_depth_2d`; T8.k supersedes this with
     its own bind groups. The harness checks (T9.i) run on T8.k's path.
+- **Deviations in T8.j, as built.**
+  - The probe is a raw pipeline of the adapter's own (`drawAndReadProbe`, standard WGSL with
+    `vertexMain`/`fragmentMain`, already Design note 23's convention), into a 4 × 1 texture made
+    through the one creation path (category `other`, so its `created` and `destroyed` events are
+    raised), read with `readTexture` and destroyed. `BabylonRenderEngine.probeTargetRounding` runs
+    it, and `createBabylonEngine` awaits it and dispatches `target-rounding` before it returns the
+    engine, so it runs before any view renders and again on every rebuild (the resilient wrapper
+    creates through the same function). A format not probed, a failed pipeline or a failed read
+    is `unknown` with a `console.warn`, never a fault.
+  - Checked by a scratch page (T9.i's harness check is T9's): SwiftShader answers `nearest` for
+    `rgba16float` and `toward-zero` for `rg11b10ufloat`; **the RTX 3080 answers `toward-zero` for
+    both** (`nvidia`/`ampere`, Electron 44.4.3 under the client's switches, `DISPLAY=:0`), so
+    R07's reading that only Gen9 truncates does not hold: its bloom keeps `rgba16float` on the
+    recommended hardware too. The UHD 620's answer is the owner's (T11).
