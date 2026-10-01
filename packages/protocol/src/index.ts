@@ -255,6 +255,15 @@ export type {
 
 export { PROTOCOL_VERSION } from "./generated/ProtocolVersion";
 
+export {
+  BINARY_FRAME_FORMAT,
+  BINARY_FRAME_HEADER_BYTES,
+  BINARY_FRAME_MAGIC,
+  type BinaryFrameHeader,
+  MAX_BINARY_FRAME_BYTES,
+  type ParsedBinaryFrame,
+  parseBinaryFrameHeader,
+} from "./bulk";
 export { decodeDensityMap, type DecodedDensityMap } from "./densityMap";
 export {
   type BodyIdParts,
@@ -269,6 +278,9 @@ export { galacticDeltaLy, galacticPositionFromLy, METRES_PER_LIGHT_YEAR } from "
 export {
   RequestChannel,
   RequestClient,
+  type BinaryFrameReceipt,
+  type BulkOutcome,
+  type PendingBulkRequest,
   type PendingRequest,
   type PendingSubscription,
   type RequestFailure,
