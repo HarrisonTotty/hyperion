@@ -187,9 +187,10 @@ export class ResilientEngine implements RenderEngine {
   createMaterialAsync(
     spec: WgslMaterialSpec,
     targets: ReadonlyArray<RenderTargetFormat>,
+    meshes: ReadonlyArray<MeshHandle> = [],
   ): Promise<MaterialHandle> {
     return this.#currentAsync("createMaterialAsync", (inner) =>
-      inner.createMaterialAsync(spec, targets),
+      inner.createMaterialAsync(spec, targets, meshes),
     );
   }
 
