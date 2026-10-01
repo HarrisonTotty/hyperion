@@ -24,6 +24,7 @@ use std::future::ready;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
     ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
@@ -34,6 +35,7 @@ use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
 use tracing::Instrument;
 
 use crate::AppState;
+use crate::bulk::Answer;
 use crate::compute::{
     CancelToken, ComputeError, JobError, Priority, SubmitJobError, panic_message,
 };
@@ -41,8 +43,9 @@ use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
 use crate::subscriptions::{Pusher, Subscriptions};
 
-/// What a handler returns: the response's body, or why there is none.
-pub(crate) type HandlerFuture = BoxFuture<'static, Result<ResponseBody, RequestError>>;
+/// What a handler returns: its answer, the response's body with any bulk payload, or why there is
+/// none.
+pub(crate) type HandlerFuture = BoxFuture<'static, Result<Answer, RequestError>>;
 
 /// What a topic's opening returns: the topic's whole state, or why the subscription failed.
 pub(crate) type SubscribeFuture = BoxFuture<'static, Result<SubscriptionState, RequestError>>;
@@ -91,17 +94,31 @@ pub(crate) struct Handlers;
 impl Handler for Handlers {
     fn handle(&self, state: Arc<AppState>, body: RequestBody, token: CancelToken) -> HandlerFuture {
         match body {
-            RequestBody::CreateUniverse(request) => Box::pin(universe::create(state, request)),
-            RequestBody::ListUniverses => Box::pin(ready(Ok(universe::list(&state)))),
-            RequestBody::OpenUniverse(request) => Box::pin(universe::open(state, request)),
-            RequestBody::GalaxyParameters(request) => Box::pin(galaxy::parameters(state, request)),
-            RequestBody::DensityMap(request) => Box::pin(galaxy::map(state, request, token)),
-            RequestBody::SystemsInRange(request) => {
-                Box::pin(galaxy::systems(state, request, token))
+            RequestBody::CreateUniverse(request) => {
+                Box::pin(universe::create(state, request).map(answered))
             }
-            RequestBody::SystemSummary(request) => Box::pin(system::summary(state, request, token)),
-            RequestBody::SystemBodies(request) => Box::pin(system::bodies(state, request, token)),
-            RequestBody::BodyDetail(request) => Box::pin(system::detail(state, request, token)),
+            RequestBody::ListUniverses => Box::pin(ready(Ok(universe::list(&state).into()))),
+            RequestBody::OpenUniverse(request) => {
+                Box::pin(universe::open(state, request).map(answered))
+            }
+            RequestBody::GalaxyParameters(request) => {
+                Box::pin(galaxy::parameters(state, request).map(answered))
+            }
+            RequestBody::DensityMap(request) => {
+                Box::pin(galaxy::map(state, request, token).map(answered))
+            }
+            RequestBody::SystemsInRange(request) => {
+                Box::pin(galaxy::systems(state, request, token).map(answered))
+            }
+            RequestBody::SystemSummary(request) => {
+                Box::pin(system::summary(state, request, token).map(answered))
+            }
+            RequestBody::SystemBodies(request) => {
+                Box::pin(system::bodies(state, request, token).map(answered))
+            }
+            RequestBody::BodyDetail(request) => {
+                Box::pin(system::detail(state, request, token).map(answered))
+            }
             RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
             // The connection answers `subscribe` through `Handler::subscribe` and `unsubscribe`
             // itself (rendering plan R03, R03.T5.b), so neither reaches here; the arms keep the
@@ -113,6 +130,12 @@ impl Handler for Handlers {
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
         }
     }
+}
+
+/// A handler's result as an [`Answer`] with no bulk payload: how every handler that answers in JSON
+/// alone meets the seam (rendering plan R03, R03.T10.a).
+fn answered(result: Result<ResponseBody, RequestError>) -> Result<Answer, RequestError> {
+    result.map(Answer::from)
 }
 
 /// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
@@ -469,7 +492,8 @@ impl Requests {
             Ok(ResponseBody::Subscribe(Box::new(Subscribed {
                 subscription: subscription.get(),
                 state,
-            })))
+            }))
+            .into())
         });
         self.start(id, kind, token, handled);
         None
@@ -737,7 +761,21 @@ async fn run(
     let started = Instant::now();
     let handled = handled.await;
     let answered = match handled {
-        Ok(body) => respond(&state, id, body, token).await,
+        // Bulk answers are streamed by R03.T10.b; until then no handler gives one.
+        Ok(Answer {
+            bulk: Some(payload),
+            ..
+        }) => {
+            tracing::error!(
+                bytes = payload.manifest().bytes,
+                "a handler answered in bulk, which is not streamed yet"
+            );
+            Err(request_error(
+                ErrorCode::Internal,
+                "the server cannot send this answer yet",
+            ))
+        }
+        Ok(Answer { body, bulk: None }) => respond(&state, id, body, token).await,
         Err(error) => Err(error),
     };
     let elapsed_ms = millis(started.elapsed());
@@ -1571,7 +1609,7 @@ mod tests {
             _token: CancelToken,
         ) -> HandlerFuture {
             let flight = self.flights.run(0, || async { explode() });
-            Box::pin(async move { flight.await.map(|_: Arc<()>| small_response()) })
+            Box::pin(async move { flight.await.map(|_: Arc<()>| small_response().into()) })
         }
     }
 
@@ -1605,7 +1643,7 @@ mod tests {
                         entered.send(()).unwrap();
                         go.recv().unwrap();
                     });
-                    Ok(small_response())
+                    Ok(small_response().into())
                 }),
                 None => self.later.handle(state, body, token),
             }

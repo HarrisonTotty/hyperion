@@ -80,6 +80,8 @@ import type { Subscribed } from "./generated/Subscribed";
 import type { SubscriptionState } from "./generated/SubscriptionState";
 import type { SubscriptionTopic } from "./generated/SubscriptionTopic";
 import type { UnsubscribeRequest } from "./generated/UnsubscribeRequest";
+// Bulk answers (rendering plan R03, R03.T10.a).
+import type { BulkManifestDto } from "./generated/BulkManifestDto";
 // The scene (rendering plan R03, R03.T4).
 import type { BodyGrantDto } from "./generated/BodyGrantDto";
 import type { CameraReportDto } from "./generated/CameraReportDto";
@@ -205,6 +207,7 @@ export type {
   SubscriptionTopic,
   UnsubscribeRequest,
   BodyGrantDto,
+  BulkManifestDto,
   CameraReportDto,
   FramePositionDto,
   KinematicsDto,

@@ -328,3 +328,20 @@ async fn a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_fra
     client.close().await;
     server.stop().await;
 }
+
+/// Rendering plan R03, Design note 11: every accepted socket is served with `TCP_NOTSENT_LOWAT` at
+/// `TCP_NOTSENT_LOWAT_BYTES`, through `hyperion_server::tap_socket`, here in the integration
+/// harness as in `main`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[tokio::test]
+async fn an_accepted_socket_has_the_low_water_mark() {
+    let server = TestServer::start().await;
+    let mut client = server.connect().await;
+    client.hello().await;
+    assert_eq!(
+        server.accepted_lowat(),
+        hyperion_server::limits::TCP_NOTSENT_LOWAT_BYTES
+    );
+    client.close().await;
+    server.stop().await;
+}
