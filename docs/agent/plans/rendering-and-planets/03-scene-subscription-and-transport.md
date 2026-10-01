@@ -1287,3 +1287,23 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   `serverSendsBinary`, which delivers a `Blob` unless the client asked for `arraybuffer`, so the
   connection test proves the setting; `test/binaryFrames.ts` builds frames as the server's
   `encode_header` and `chunk` do.
+- **Deviations in T12, as built.** The scene's messages carry no designation, which plan 14's
+  `toSystemBodiesModel` needs for its labels, so `toSceneModel(state, designate)` and
+  `applySceneNotification(model, notification, designate)` take a `designate(system)` callback,
+  which `useScene` (R03.T14) supplies from the chart's answers. Both return results rather than
+  throw: `{ kind: "ok", model }` or `{ kind: "fault", fault }`, and the update also
+  `{ kind: "sequence", expected, received }` for a gap or a step back, the model unchanged. The
+  model's types are in `lib/scene/model.ts` (`SceneModel`, `SceneSystem`, `SceneClock`,
+  `SceneKinematics`, `ScenePosition`, `SceneCraft`, `BodyGrant`, `SeenPosition`); the model keeps
+  the scene as the wire states it with every notification merged in (`wire`) and is rebuilt from
+  it, so that applying a sequence equals building its end. A re-sent body absent from the list is
+  inserted in ID order; the grants must name the bodies in order, or the scene is a fault; a body
+  re-sent with no system is a fault. **Open, for R02.T17 and R03.T14:** `tidal_radius_m` comes only
+  with an arrival, and `SceneStateDto` has none, so a client that subscribes while the scene is
+  already in a system has `tidalRadiusM: null` until the next arrival; the state (or
+  `SceneSystemDto`) needs the field, a server-side addition. `renderTime` holds the time at the
+  clock window's edge, ±H, as the server's clock stops there, and never runs back for a frame
+  stamped before its push. `predictedPath(craft, untilS)` takes `untilS` as scene seconds after the
+  pose's time and returns the straight line as its two ends, a galactic pose carried across its
+  light-year cells; a craft's wire attitude (x, y, z, w) becomes R02's `Quaternion`. Hand-built
+  fixtures are in `src/renderer/src/test/sceneFixture.ts`, on plan 14's shared wire fixture.
