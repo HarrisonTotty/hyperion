@@ -1239,3 +1239,19 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   reach it through `Handler::handle`; the connection must route them, as it does `unsubscribe`
   (an inbox per subscription is the likely shape). A held answer near the budget can be crowded by
   pushes that each fit; if R03.T8.b sees it, pushes should wait while a held frame has no room.
+- **Deviations in T5.c, as built.** `RequestClient.subscribe(universe, topic)` takes the universe
+  as well, since `SubscribeRequest` carries both, and returns a `PendingSubscription<T>` (an
+  `outcome` of `SubscribeOutcome<T>` that never rejects, and `cancel()`), in `request`'s shape.
+  `Subscription` also has `id`, `ended` and `onEnd(listener)` (`"unsubscribed"` or `"link_lost"`,
+  heard at once by a listener added after the end); `onNotification` and `onEnd` return removers.
+  The subscription is registered within the answer's own `handleServerMessage` call, through an
+  internal `onAnswer` hook on `startRequest`, before the outcome settles. A `subscribe` answered
+  as it was cancelled, or opened for another topic (`protocol_violation`), is ended with an
+  `unsubscribe` at once, so that the server holds no subscription nobody reads (`#cancelled` now
+  keeps a late-answer hook per ID). The fire-and-forget `unsubscribe` discards its outcome with
+  `void` and no `.catch`: an outcome never rejects, and the package has no console to report on.
+  `SubscriptionTable` is internal; the types `Subscription`, `SubscriptionEnd`, `NotificationOf`,
+  `StateOf` and `TopicName` and `PendingSubscription`, `SubscribeOutcome` are re-exported. The
+  two single-topic type guards (`isStateOf`, `isNotificationOf`) each disable
+  `typescript/no-unnecessary-condition` for one line until plan 12's `alerts` topic makes the
+  comparison real.
