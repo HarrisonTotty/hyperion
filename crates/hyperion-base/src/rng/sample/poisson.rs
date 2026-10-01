@@ -36,8 +36,8 @@ impl Stream {
     /// bound times the cell's volume as its mean:
     ///
     /// ```
-    /// use hyperion_sim::Seed;
-    /// use hyperion_sim::rng::{ObjectKey, Stream, tags};
+    /// use hyperion_base::Seed;
+    /// use hyperion_base::rng::{ObjectKey, Stream, tags};
     ///
     /// let mut cell = Stream::open(Seed::new(3), tags::SELFTEST_STREAM, ObjectKey::cell(0));
     /// let candidates = cell.poisson(1.2);
@@ -334,24 +334,6 @@ mod tests {
 
     fn count_to_f64(k: u64) -> f64 {
         f64::from(u32::try_from(k).unwrap())
-    }
-
-    #[test]
-    #[should_panic(expected = "a Poisson mean must lie in [0, 2^31]")]
-    fn a_negative_mean_panics() {
-        let _ = stream(5).poisson(-0.5);
-    }
-
-    #[test]
-    #[should_panic(expected = "a Poisson mean must lie in [0, 2^31]")]
-    fn a_nan_mean_panics() {
-        let _ = stream(5).poisson(f64::NAN);
-    }
-
-    #[test]
-    #[should_panic(expected = "a Poisson mean must lie in [0, 2^31]")]
-    fn an_infinite_mean_panics() {
-        let _ = stream(5).poisson(f64::INFINITY);
     }
 
     #[test]

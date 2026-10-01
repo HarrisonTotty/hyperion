@@ -377,7 +377,8 @@ SectionDto<DetailSeedHex>`, `not_modelled` until this plan fills it, and the cli
 
 Research of 2026-09-29 settled most of what the first draft left to leans; each note so settled
 says "researched 2026-09-29" and names its sources. Every timing the research took was measured on
-the shared development machine under other agents' load (load averages 14–20 on eight threads), so
+the machine then used for development under other agents' load (load averages 14–20 on eight
+threads, the UHD 620 laptop's count; the development machine now has sixteen), so
 every timing below is provisional and is re-measured on a quiet machine by the task that owns it.
 
 1. **Where each piece lives.** The field's types, its quantisation, the payload codec, the crater
@@ -777,7 +778,8 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     sides must hold, so the header carries plan 14's `surface_age` and `surface_pressure`, from
     which R11 derives its atmosphere class.
 19. **The service.** `SurfaceService` keys fields by (universe `GalaxyKey`, `BodyId`), holds
-    `Arc<CoarseField>` in a `SharedByteLru` bounded by `HYPERION_SURFACE_CACHE_MB`, fills it under
+    `Arc<CoarseField>` in a `SharedByteLru` bounded by `HYPERION_SURFACE_CACHE_MB` (for context,
+    the development machine that hosts the server in testing has 32 GB of RAM), fills it under
     `SingleFlight` at `Priority::Bulk` with a `CancelToken`, and is never persisted (open question
     4). A field is started by the first `surface_field` or `survey_pass` for the body and by
     `SurfaceService::prefetch`, which session code will call on approach. `surface_field` answers

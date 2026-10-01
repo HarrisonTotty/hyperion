@@ -50,8 +50,9 @@ results to the render thread. The heights come from a hand-parameterised Earth-s
 R09's surface generator. Earth's reference atmosphere is drawn every frame by Hillaire's four
 tables, which R08 generalises. A scripted, seeded descent, identical every run, records the
 brainstorm's metrics into a results file, and the plan ends with the gate's verdict: the descent
-passes or fails at 1080p60 on a discrete GPU of the RTX 4060 class and at 30 fps at 720p on the UHD
-620's low setting, and open question 2's rule, with a native wgpu replay and Dawn's safety toggles
+passes or fails at 1080p60 on a discrete GPU of the RTX 4060 class (run on the development
+machine's RTX 3080, which exceeds that class) and at 30 fps at 720p on the UHD 620's low setting
+(run by the owner), and open question 2's rule, with a native wgpu replay and Dawn's safety toggles
 priced, says whether a failure is the browser's. `TERRAIN: STREAMING` and `TERRAIN: DETAIL LIMITED`
 annunciate on the view from here on.
 
@@ -73,7 +74,8 @@ In scope:
 - The spike: the hand-built scene (test planet, its rotation, a Sun-like light), two wireframe
   instrument canvases and a console beside the view, the scripted seeded descent, the metrics
   harness, the results files, the capture and native wgpu replay, the Dawn toggle runs, the UHD 620
-  run, the discrete run and the verdict of open question 2.
+  run (the owner's), the discrete run (on the development machine) and the verdict of open
+  question 2.
 - The low setting of everything above, built alongside the high one.
 
 Non-goals:
@@ -644,6 +646,9 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     until R10 sizes it, and builds none. So this plan's low layout is 33,800 B of heights and morph
     targets (65 × 65 × 2 `f32`) and 16,900 B of mesh-resolution normals (65 × 65 `rg16float`) a
     slot, and 64 MiB holds 1,323 slots; R10's full layout brings that to about 430 (Design note 4).
+    For context only (the budgets above stand): the development machine's RTX 3080 has 10 GiB of
+    VRAM beside 32 GB of system RAM, and the UHD 620 has no VRAM of its own, drawing on the
+    laptop's shared system memory.
 11. **The height-worker pool** (researched 2026-09-29). Each worker is a module worker bundled by
     electron-vite as a same-origin file, started with `new Worker(new URL(…, import.meta.url))` and
     `type: "module"`, with `worker.format: "es"` in the renderer's Vite config (set by R04.T10.c) so
@@ -665,7 +670,8 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     three workers", for Design note 21's memory row only, so that the memory is measured before R09
     sends a real field and the timing is not taken with a worker the budget does not have. Default
     worker counts: single-player `clamp(floor(hardwareConcurrency ÷ 4), 1, 3)`, two on the
-    i7-8665U's eight threads, matching the budget's two cores; a station
+    i7-8665U's eight threads, matching the budget's two cores (three on the development machine's
+    sixteen); a station
     `clamp(floor(hardwareConcurrency ÷ 2) − 1, 1, 4)`, three there; the spike's `--workers` option
     (T13.c) overrides both, and a later settings plan may expose it. A page cannot set a worker's
     thread priority, so the count is the only control. Two findings for R04 and the owner: a
@@ -1662,13 +1668,15 @@ as the results file, in its schema.
 - Files: `tools/gpu-replay/src/{replay,results}.rs`.
 - Tests: in the tool, a replay of the checked-in capture on the default adapter writes a results
   file that parses against the schema.
-- Acceptance: `just replay <capture>` replays the development machine's capture on its UHD 620
-  and writes a results file.
+- Acceptance: `just replay <capture>` replays the development machine's capture on its RTX 3080
+  and writes a results file; the owner does the same for a UHD 620 capture on the UHD 620.
 
 ### R05.T16 The UHD 620 runs
 
-By hand on the development machine, recorded, each run on a quiet machine (Design note 27) with
-its results file and summary under `docs/measurements/descent-spike/`. The runs are one baseline
+By hand on the owner's UHD 620 laptop, by the owner, recorded, each run on a quiet machine (Design
+note 27) with its results file and summary under `docs/measurements/descent-spike/`. The low
+setting's harness and results file are first proved on the development machine (T14), so that the
+owner's runs need no debugging. The runs are one baseline
 and then one-factor changes from it, not a matrix.
 
 **R05.T16.a The baseline.** The low setting at 720p paced to 30 fps with the two instruments and
@@ -1713,9 +1721,12 @@ Each change is one more recorded baseline run. If nothing misses, the task recor
 
 ### R05.T17 The discrete runs
 
-By hand on a borrowed desktop with an RTX 4060-class GPU and a 60 Hz monitor (Design note 21; a
-rented cloud GPU such as an L4 or an RTX 4000 SFF Ada gives advisory GPU-time figures only, since
-its virtual display has no real vertical blank). The runs are:
+By hand on the development machine, on a quiet machine (Design note 27): its RTX 3080 (10 GiB,
+760 GB/s) exceeds the RTX 4060 class (272 GB/s), and its one display, 1920 × 1080 at a native
+240 Hz, is set to its 60 Hz mode for the runs (Design note 21; a rented cloud GPU gives advisory
+GPU-time figures only, since its virtual display has no real vertical blank). A pass there is a
+pass on a faster part than the class named, so the summary records the GPU-time headroom per pass
+beside the frame intervals. The runs are:
 
 - the high setting at 1080p60 over the same three seeds, with the same two instruments and
   console and the local server capped as in T16, which is three runs;
@@ -1800,11 +1811,12 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
 
 ## Risks and open points
 
-- **The discrete machine does not exist yet.** The project has no discrete GPU; T17 needs one
-  borrowed, or bought used, with a real monitor. A cloud GPU's figures are advisory and cannot sign
+- **The discrete machine is the development machine.** Its RTX 3080 exceeds the RTX 4060 class
+  the brainstorm names, so T17's pass is a pass on a faster part; its summary records the GPU-time
+  headroom so that the class can be judged. A cloud GPU's figures remain advisory and cannot sign
   off the gate (researched 2026-09-29: virtual displays have no real vertical blank, and the
-  compositor path and driver branch may differ). Until T17 runs, the gate is half closed: the UHD
-  620 half answers whether the low setting works, and nothing about the browser in general.
+  compositor path and driver branch may differ). The UHD 620 half, T16, is the owner's by hand;
+  until it runs, the gate answers for the discrete target only.
 - **Findings for the brainstorm, for the owner** (T19 drafts the edits):
   - The finest level's spacing (Design note 3): "sampled at 0.5 m" and "about a third" hold in one
     dimension only; in two, the finest level's largest spacing must be at most 0.375 m, which is

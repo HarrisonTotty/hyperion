@@ -736,7 +736,8 @@ Names are those the owning plans give; the owning plan is authoritative.
      - It is ported from the papers, never from GPL cdisort, and cross-checked by hand against
        PythonicDISORT (MIT; plane-parallel only).
      - Estimated by operation count at 10⁸ flops, 0.1–1 s. `BAKE_CEILING_S` = 5 s a world on the
-       UHD 620's host triggers the fallback of the Risks.
+       UHD 620's host (the owner's laptop, timed by the owner; the development machine's time is
+       recorded beside it) triggers the fallback of the Risks.
      - Discrete ordinates is chosen because it converges without sampling noise. The Monte Carlo is
        kept for the reference, so that the two stay independent.
      - Bruneton's iterated orders are not the fallback: they diverge in this regime.
@@ -818,7 +819,9 @@ Names are those the owning plans give; the owning plan is authoritative.
       suns, since they are summed (Design note 7). One table per sun would have been 1.71 MB a
       view at four suns, 2.11 MB with the planet's, over the row. This plan reads the brainstorm's
       "under 2 MB a planet" as the per-planet tables, and counts the per-view tables on a line of
-      their own, 0.43 MB a view. R08.T11 records both.
+      their own, 0.43 MB a view. R08.T11 records both. For context only, both are small beside
+      the development machine's 10 GiB of VRAM and the UHD 620's share of its laptop's system
+      memory; the 2 MB row stands.
     - **Oblate bodies** (Design note 17, the same arithmetic). The slices multiply the per-planet
       tables, not the per-view ones. Earth and every body under `ONE_SLICE_BELOW` keep the 0.40 MB
       above. Transmittance and its absorber alpha are per κ slice, 131 KB each. Multiple
@@ -1373,7 +1376,8 @@ Tests (no GPU, CPU twin):
 - a star seen at the zenith from Earth's surface is dimmed by e^(−τ) of the column.
 
 Acceptance: `pnpm test` and `just test-render` pass, and by hand a binary sky on an Earth fixture
-shows both twilights, recorded here with UHD 620 timings.
+shows both twilights, recorded here with the development machine's timings and, from the owner,
+the UHD 620's.
 
 ### R08.T8 Views from outside and other bodies
 
@@ -1459,7 +1463,8 @@ Acceptance: `pnpm test` passes, and by hand a flight past every fixture is recor
 
 ### R08.T11 The thin benchmarks
 
-Record, by hand on the UHD 620 at 720p (low) and on the discrete target when available, against
+Record, by hand on the development machine's RTX 3080 (the discrete target) and, by the owner, on
+the UHD 620 at 720p (low), against
 the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#performance-budget)):
 
 - the per-frame atmosphere time, against 2–4 ms low and 0.5–1 ms discrete, at one sun and at the
@@ -1593,9 +1598,9 @@ Per Design note 9, in four subtasks.
     baked table, pass `gate.ts` per geometry. Both m = 0 alone and m = 0..1 are run, and which is
     needed is recorded. The Rayleigh-only Venus columns gate before the licence ruling, the
     cloudy and hazy cases after it.
-  - The bake time on the UHD 620's host, summed over the bands, is under `BAKE_CEILING_S` on a
-    quiet machine, or the Risks' fallback is taken and recorded. The bands nearest the camera bake
-    first, and `ATMOSPHERE: COMPUTING` clears when the last lands.
+  - The bake time on the UHD 620's host (by the owner), summed over the bands, is under
+    `BAKE_CEILING_S` on a quiet machine, or the Risks' fallback is taken and recorded. The bands
+    nearest the camera bake first, and `ATMOSPHERE: COMPUTING` clears when the last lands.
   - When a regime's gates pass, `classifyRegime` routes its `thickScattering` worlds to the bake,
     and `ATMOSPHERE: APPROXIMATE` clears for them.
 
@@ -1653,9 +1658,10 @@ Acceptance: `pnpm test` and `just test-render`.
 
 ### R08.T17 Verification pass
 
-Run the by-hand scenes on the UHD 620, and on the discrete target when available, on a quiet
-machine. Record every figure here and in its doc comment, and run the spectral check. Acceptance:
-`just ci`, `just test-slow` and `just test-render` pass, and the records are here.
+Run the by-hand scenes on the development machine's RTX 3080 (the discrete target) and, by the
+owner, on the UHD 620, on a quiet machine. Record every figure here and in its doc comment, and run
+the spectral check. Acceptance: `just ci`, `just test-slow` and `just test-render` pass, and the
+records are here.
 
 ## Verification
 
