@@ -136,12 +136,15 @@ impl Server {
         )
         .await
         .map_err(StartServerError::LoadRegistry)?;
+        // Starting the pool waits for every worker to probe its floating-point mode, so it runs
+        // off the runtime.
+        let workers = config.workers();
         let pool = Arc::new(
-            CpuPool::new(
-                config.workers(),
-                INTERACTIVE_QUEUE_CAPACITY,
-                BULK_QUEUE_CAPACITY,
-            )
+            tokio::task::spawn_blocking(move || {
+                CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY)
+            })
+            .await
+            .map_err(|_| StartServerError::Interrupted)?
             .map_err(StartServerError::StartPool)?,
         );
         let galaxies = Arc::new(GalaxyCache::new(Arc::clone(&pool)));
