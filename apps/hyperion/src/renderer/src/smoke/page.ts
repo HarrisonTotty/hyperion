@@ -22,6 +22,7 @@ import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
+import { checkTwins } from "./twins";
 import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
 
 /** What the page reports, as `src/smoke/result.ts` reads it. */
@@ -141,6 +142,8 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     checkTargetsAsyncIndirectTiming(engine, checks),
   );
   await checks.group("T9.i material state and the splat", () => checkMaterialState(engine, checks));
+
+  await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
 
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await checks.group("T9.i splat refused", async () => {
