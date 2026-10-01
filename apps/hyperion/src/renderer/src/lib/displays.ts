@@ -1,5 +1,5 @@
 /** Identifies one of the station's displays. Later plans add theirs here and in `App`. */
-export type DisplayId = "link" | "galaxy" | "system";
+export type DisplayId = "link" | "galaxy" | "system" | "view";
 
 /** A display as the navigation bar offers it. */
 export interface DisplayDefinition {
@@ -26,4 +26,5 @@ export const DISPLAYS = [
   { id: "link", title: "Link", key: "F1" },
   { id: "galaxy", title: "Galaxy", key: "F2" },
   { id: "system", title: "System", key: "F3" },
+  { id: "view", title: "View", key: "F4" },
 ] as const satisfies ReadonlyArray<DisplayDefinition>;

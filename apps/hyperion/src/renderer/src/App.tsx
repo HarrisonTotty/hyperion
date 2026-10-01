@@ -6,6 +6,7 @@ import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
+import { ViewDisplay } from "./displays/view/ViewDisplay";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
 import { DISPLAYS, type DisplayId } from "./lib/displays";
@@ -42,6 +43,9 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       break;
     case "system":
       content = <SystemDisplay opening={inputs.systemOpening} />;
+      break;
+    case "view":
+      content = <ViewDisplay />;
       break;
   }
   return content;
@@ -89,6 +93,8 @@ export function App() {
             activeDisplay={activeDisplay}
             onSelectDisplay={setActiveDisplay}
             linkStatus={connection.status}
+            // The VIEW display draws only kept test scenes until R02.T17 brings the server's.
+            modeBanner={activeDisplay === "view" ? "TRAINING" : null}
           >
             {DISPLAYS.map(({ id }) => (
               <Activity key={id} mode={id === activeDisplay ? "visible" : "hidden"}>
