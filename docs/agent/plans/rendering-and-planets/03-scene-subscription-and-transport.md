@@ -1330,9 +1330,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   that one advance or ten send the same record; a contact is evaluated at the scene time. A
   contact with no single position (a population) or absent then carries no `seen`; a heartbeat
   re-sends the contacts the ship sees, and one it saw at the last push and no longer does. A grant
-  that stops resolving a belt's member sends nothing, the wire having no withdrawal; the client
-  then keeps a record above the ship's new grant until the scene is rebuilt (for the sensors plan,
-  which first lowers a grant). The ship is placed in the scene's system directly when it is in
+  that stops resolving a body the client holds (a belt's member) re-sends the whole system as an
+  arrival of the same system at the current grants, the wire having no withdrawal (ruled
+  2026-09-30 by a delegated decision; see the note on it below). The ship is placed in the scene's system directly when it is in
   that system's or one of its bodies' frames, otherwise through the galactic frame with the
   systems' drifts (`epoch_velocity`); a body frame whose body is absent at a time falls back to
   the barycentre. A handover between overlapping spheres cannot leave the scene in no system while
@@ -1717,3 +1717,22 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   in a row, after which it settles as `rejected` with the server's code. A watchdog marks the scene
   `stale` (`silent`) once no push has arrived for `SCENE_SILENCE_MS`, 2 s (twice the heartbeat,
   the guide's rule), holding its clock; the next push makes it `live` again.
+
+- **A withdrawn body re-sends the whole system, decided 2026-09-30 (delegated decision, item 7),
+  as built.** `SceneCore::refresh` now returns `None` when a body it had sent no longer resolves
+  at its new grant. `advance` then makes the same system arrive again through `arrival`, the
+  helper the first arrival also uses, at the scene time and the current grants, in place of
+  re-sent bodies. A body never sent that does not resolve is still just not sent. No change to the
+  protocol or the client: an arrival already replaces everything before it. Tests:
+  `a_grant_that_withdraws_a_body_sent_brings_the_whole_system_again_without_it` (a knowledge that
+  lowers every belt member to `contact`: the next delta is an arrival of the same system, with its
+  tidal radius and without those members, and the advance after it sends nothing).
+  `a_knowledge_change_re_sends_exactly_the_bodies_it_touched_with_their_new_level` now lowers only
+  bodies `contact` still resolves, so it stays a test of re-sent bodies. Nothing changes in
+  production until the sensors plan lowers a grant, since `GrantAsked` never does.
+
+  The client was checked. A same-system arrival rebuilds the model's `SceneSystem`, as any arrival
+  does, and `useScene.frameAt` keeps its previous frame, and with it the local body's hysteresis,
+  because it compares system IDs. No view consumes `useScene` yet. For R02.T17: decide whether to
+  reset the free camera or a selection by comparing the system's ID, never by the `SceneSystem`
+  object's identity, so that a same-system arrival resets neither.
