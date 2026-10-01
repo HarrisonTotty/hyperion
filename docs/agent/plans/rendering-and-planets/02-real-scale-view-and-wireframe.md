@@ -1534,3 +1534,54 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   second edge is hidden at both distances. The check is recorded at 3 × 10⁻⁵ (twice the bias's upper
   bound) and the 10⁻⁵ wording is for the owner; the alternative is a constant near 67. Pending
   R01.T9: the shaders' entries in `WGSL_CATALOGUE` and these checks as the harness's smoke test.
+- **Deviations in R02.T15, as built.** `DisplayId` gains `view` (`View`, `F4`). The display's
+  logic is pure in `displays/view/viewRun.ts`: `ViewRun { kept, tS, scene, camera }`, `startRun`,
+  `stepRun` (the script in real time, run again from its start at its end; `followPreset`,
+  `stepFreeCamera` with the held flight keys, `advanceEasedMove`), `commandRun` (a key's or a
+  control's action, as cuts by `cutTo`), `labelLines` and `labelStatements` (Design note 16:
+  `FRAME`, `TIME` as `UT …`, `STYLE`, `CAMERA`, `FOV`, `EXPOSURE` as `EV100 -1.0 MAN`, `STARS`, and
+  `SCENE` in a kept scene; `POSITIONS AS SEEN FROM SHIP` whenever the camera is not at the seat of
+  an own ship, `ROTATION NOT YET MODELLED` while a body's rotation is `null`), `frameName` (a camera
+  held to a craft names the frame the craft's position is in, a body-fixed position its body's)
+  and `markRows` (bodies, then craft but the own ship, ranges by `formatBodyDistance` from the own
+  ship or `FROM CAMERA`, each keeping its unit within the hysteresis from its last showing). The
+  engine comes from `useViewEngine`, which asks a fresh adapter and R01's `loadRenderEngine` (the
+  dynamic import that keeps the engine out of the entry chunk) when the display is shown, and
+  nothing in the safe mode, a disabled session or without WebGPU or an adapter; until it is made,
+  or where it cannot be, the view's place holds `GRAPHICS ACQUIRING ADAPTER` or R01's annunciation
+  (else `GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry`), and no canvas.
+  `Activity` tears the engine down with the loop when the display is hidden, so it is made again
+  on each showing (the cost of a device and R01's rounding probe; keeping it across hides is an
+  option for R07). The redraw loop is one `requestAnimationFrame` chain, reading the display's
+  state through a ref, drawing at the device-pixel size, and publishing the run and the marks'
+  anchors at most every 250 ms, which `useThrottledValue` holds to 4 Hz. The canvas (`ViewCanvas`)
+  is `role="application"` named `VIEW, WIREFRAME, <preset>` and described by its key legend; a
+  click picks through plan 05's `pick` over the anchors (within 1 rem). `ViewMarkList`, windowed as
+  plan 05's lists are, sits in a `TARGETS` panel; the selection it and the canvas set is the draw
+  list's `selection` (the bracket reticle); `]`/`[` (or `NEXT TARGET`/`PREVIOUS TARGET`) aim the
+  camera and select the target. **T12's and T13's hand-over:** `DrawAnchor` gains `label`
+  (`AnchorLabel`: `target` with `rangeM` and `closureMPerS`, or `symbol` for a body below 3 px), and
+  `ViewMarkLabels` sets them as DOM labels on `--surface-0` plates beside the marks, the range as
+  the list writes it and the closure signed in m/s. The exposure panel is `ExposurePanel` (not
+  `ExposureControl`, the photometry's type): the reading, the `MAN` triple (`APERTURE`, `SHUTTER`,
+  `ISO`) and the congruent pair `INHIBIT`/`ENABLE`, each held back (`aria-disabled`, keeping focus)
+  with its reason (`NOT AVAILABLE: the exposure is MAN`, …); there is no `AUTO` button (the guide's
+  "Controls and commanding" commands automation by the pair), and `AUTO NOT AVAILABLE: NO IMAGE TO
+METER` stands while there is no image to meter. The triple is not editable yet, so a change of
+  the default (R02.T18) is a change of `DEFAULT_MAN_TRIPLE`. `CameraControls` holds `SEAT`/`CHASE`
+  back with `NO OWN SHIP: SEAT and CHASE need one`, `NARROWER`/`WIDER` back at the ends of the steps,
+  and shows `EASED CAMERA MOVES` as a pressed toggle with its `ON`/`OFF` and, under reduced motion,
+  `NOT APPLIED: reduced motion`. The exposure and the setting belong to the display and outlive a
+  change of `SCENE`. The `TRAINING` banner is in the header strip: `ConsoleFrame` gains
+  `modeBanner`, which `App` sets while `VIEW` is the active display (it draws only kept scenes until
+  R02.T17, which must make it follow the scene's provenance). The new words are nomenclature rows
+  marked `_Draft (plan R02, R02.T15, nomenclature)…_`. `test/fakeViewEngine.ts` answers the
+  renderer's creations on R01's `FakeRenderEngine`. The `F4` and banner tests are in `App.test.tsx`,
+  so the acceptance command is `pnpm --filter hyperion exec vitest run
+src/renderer/src/displays/view src/renderer/src/App.test.tsx`. By hand (scratch page, not
+  committed): a canvas view made by R01's engine draws the precision scene's first frame through
+  `WireframeRenderer` and reads back 1,499 lit pixels on both SwiftShader and the RTX 3080.
+  **Pending by eye:** the display in the running client at 1920 × 1080 and 1280 × 720, including
+  whether the side column fits 720 high and the banners side by side (not run, since `DISPLAY=:0`
+  is the owner's own screen). **For the owner:** `.console__banner`'s rule is still `--line`
+  (decision 6 gives it `--text-muted`, an R01 follow-up).

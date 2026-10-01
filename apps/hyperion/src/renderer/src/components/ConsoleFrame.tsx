@@ -13,6 +13,11 @@ interface ConsoleFrameProps {
   /** Called when the operator picks a display from the navigation bar. */
   readonly onSelectDisplay: (id: DisplayId) => void;
   readonly linkStatus: ConnectionStatus;
+  /**
+   * A simulation, training or replay mode the active display is in, which the header strip's
+   * banner states (`TRAINING`); `null`, the default, in live operation.
+   */
+  readonly modeBanner?: string | null;
   readonly children: ReactNode;
 }
 
@@ -48,6 +53,7 @@ export function ConsoleFrame({
   activeDisplay,
   onSelectDisplay,
   linkStatus,
+  modeBanner = null,
   children,
 }: ConsoleFrameProps) {
   const baseId = useId();
@@ -80,6 +86,11 @@ export function ConsoleFrame({
           <h1 className="console__title">{active.title}</h1>
         </div>
         <div className="console__status">
+          {modeBanner === null ? null : (
+            <output className="console__banner" aria-label="Mode">
+              {modeBanner}
+            </output>
+          )}
           <GraphicsModeBanner />
           <UtcClock />
           <LinkStatus status={linkStatus} />

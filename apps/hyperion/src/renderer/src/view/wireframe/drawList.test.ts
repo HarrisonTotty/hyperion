@@ -56,6 +56,11 @@ const CAMERA: DrawCamera = {
   fovXRad: Math.PI / 3,
 };
 
+/** The labels of the body marks of a list, `null` for a body drawn larger than its symbol. */
+function bodyLabels(list: WireframeDrawList): unknown[] {
+  return list.anchors.filter((a) => a.target.kind === "body").map((a) => a.label?.kind ?? null);
+}
+
 /** A body's centre as a view position. */
 function centre(body: string): ViewPosition {
   return { kind: "body", body, m: vec3(0, 0, 0) };
@@ -200,6 +205,23 @@ describe("buildWireframeDrawList", () => {
       return sphere.altitudeM - (distanceM - occluderRadius(bodyRadiusM, distanceM));
     });
     expect(gaps.length > 0 && gaps.every((gap) => Math.abs(gap) < 1e-6)).toBe(true);
+  });
+
+  it("labels another craft's mark with its range", () => {
+    const craft = build().anchors.filter((anchor) => anchor.target.kind === "craft");
+    expect(craft.map((anchor) => anchor.label?.kind)).toEqual(["target"]);
+  });
+
+  it("names a body drawn as its symbol, and no body drawn larger", () => {
+    const base = scene();
+    const tiny = {
+      ...base,
+      bodies: base.bodies.map((body) => Object.assign({}, body, { radiusM: 1 })),
+    };
+    expect([
+      bodyLabels(build({}, tiny)).every((kind) => kind === "symbol"),
+      bodyLabels(build()).includes(null),
+    ]).toEqual([true, true]);
   });
 
   it("brackets another craft in --text", () => {

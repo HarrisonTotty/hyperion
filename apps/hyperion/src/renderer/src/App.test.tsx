@@ -161,6 +161,22 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
   });
 
+  it("switches to the view display on F4", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.keyboard("{F4}");
+    expect(screen.getByRole("heading", { level: 1, name: "View" })).toBeInTheDocument();
+  });
+
+  it("shows the TRAINING banner in the header strip while the view draws a kept scene", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.keyboard("{F4}");
+    expect(screen.getByRole("status", { name: "Mode" })).toHaveTextContent("TRAINING");
+  });
+
   it("hands the focus to the shown display's tab when a function key hides the one that had it", async () => {
     const user = userEvent.setup();
     render(<App />);

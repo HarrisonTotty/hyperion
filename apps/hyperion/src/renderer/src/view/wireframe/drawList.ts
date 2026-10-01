@@ -19,12 +19,12 @@ import { apparentV, illuminanceLx, PSF_QUAD_PX } from "../photometry/magnitude";
 import { starColour } from "../photometry/starColour";
 import type { Rgb } from "../photometry/toneCurve";
 import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
-import { angularDiameterPx, graticule, ringEllipse } from "./bodies";
+import { angularDiameterPx, bodyRegime, graticule, ringEllipse } from "./bodies";
 import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
 import { hullEdges, hullFaces } from "./hulls";
 import { orbitPath } from "./orbits";
-import { type ScreenPx, type SymbologyAnchor, symbologyMarks } from "./symbology";
+import { type ScreenPx, type SymbologyAnchor, symbologyMarks, targetMark } from "./symbology";
 
 /**
  * The width of the `--surface-0` casing on each side of every stroke, px: 1, the guide's casing
@@ -142,7 +142,25 @@ export interface DrawAnchor {
   readonly yPx: number;
   /** Its distance from the camera, m. */
   readonly distanceM: number;
+  /**
+   * The DOM label the view sets beside it (R02.T15): another craft's range and closure rate beside
+   * its target mark, a body drawn as its symbol named as a mark (Design note 13); `null` for none.
+   */
+  readonly label: AnchorLabel | null;
 }
+
+/** What a mark's DOM label says. */
+export type AnchorLabel =
+  /** A body below 3 px, drawn as its symbol: named. */
+  | { readonly kind: "symbol" }
+  /** Another craft: its range from the own ship (or the camera) and its closure rate. */
+  | {
+      readonly kind: "target";
+      /** m. */
+      readonly rangeM: number;
+      /** m/s, positive closing; `null` with no own ship to close on. */
+      readonly closureMPerS: number | null;
+    };
 
 /**
  * Everything the wireframe style draws in one frame, engine-agnostic and `f32` camera-relative
@@ -447,10 +465,9 @@ export function buildWireframeDrawList(
     if (at === null || !shown(pointM, body?.id ?? null)) {
       continue;
     }
-    anchors.push({ target, xPx: at.xPx, yPx: at.yPx, distanceM: norm(pointM) });
     const craft =
       target.kind === "craft" ? scene.craft.find((c) => c.id === target.craft) : undefined;
-    symbologyAnchors.push({
+    const anchor: SymbologyAnchor = {
       target,
       at,
       craft:
@@ -474,7 +491,22 @@ export function buildWireframeDrawList(
               symbol: body.symbol,
               diameterPx: angularDiameterPx(pointM, body.radiusM, projection, viewport),
             },
-    });
+    };
+    symbologyAnchors.push(anchor);
+    let label: AnchorLabel | null = null;
+    if (anchor.craft !== null) {
+      const mark = targetMark(
+        target,
+        at,
+        0,
+        anchor.craft.relativeM,
+        anchor.craft.relativeVelocityMPerS,
+      );
+      label = { kind: "target", rangeM: mark.rangeM, closureMPerS: mark.closureMPerS };
+    } else if (anchor.body !== null && bodyRegime(anchor.body.diameterPx) === "symbol") {
+      label = { kind: "symbol" };
+    }
+    anchors.push({ target, xPx: at.xPx, yPx: at.yPx, distanceM: norm(pointM), label });
   }
   const marks = symbologyMarks(
     {
