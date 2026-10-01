@@ -16,13 +16,15 @@ use std::collections::BTreeMap;
 
 use common::sunlike_point;
 use hyperion_sim::coords::GalacticPosition;
-use hyperion_sim::galaxy::frame::{FindFrameError, FrameCandidate, frame_at, select_frame};
+use hyperion_sim::galaxy::frame::{
+    FindFrameError, FrameCandidate, candidate_at, frame_at, select_frame,
+};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{
-    CellCache, CellKey, NoCache, SystemOrigin, SystemRecord, generate_cell,
+    CellCache, CellKey, NoCache, SystemOrigin, SystemRecord, generate_cell, resolve,
 };
 use hyperion_sim::galaxy::query::{
-    LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource, position_at,
+    LayerCounts, LayerSet, QuerySphere, SystemHit, SystemSource, hit_at, position_at,
 };
 use hyperion_sim::galaxy::{Galaxy, PointLy, Population};
 use hyperion_sim::id::{Layer, SystemId};
@@ -585,4 +587,57 @@ fn a_time_outside_the_clock_window_is_refused() {
     for t in [ClockWindow::START, ClockWindow::END] {
         assert!(frame_at(&galaxy, &mut NoCache::new(), &[], &ship, t, None).is_ok());
     }
+}
+
+/// `candidate_at` forms the candidate `frame_at` weighs: for every solar-circle ship that
+/// `frame_at` puts in a system, at the epoch and at the window's end, the system's candidate holds
+/// the ship and alone selects it, and a ship far outside the sphere reads a ratio above 1
+/// (rendering plan R03, R03.T7.a).
+#[test]
+fn candidate_at_gives_the_candidate_frame_at_weighs() {
+    let galaxy = galaxy();
+    let mut cache = Keep::default();
+    let mut held = 0;
+    for ship in solar_circle_ships(&galaxy) {
+        let at = GalacticPosition::from_light_years(ship).expect("inside the cube");
+        for t in [UniverseTime::EPOCH, ClockWindow::END] {
+            let Some(id) = frame_at(&galaxy, &mut cache, &[], &at, t, None)
+                .expect("a time inside the clock window")
+            else {
+                continue;
+            };
+            held += 1;
+            let record = resolve(&galaxy, id).expect("a system frame_at names resolves");
+            let candidate = candidate_at(&galaxy, &record, &at, t).expect("a born system");
+            assert_eq!(candidate.id(), id);
+            assert!(candidate.contains_ship(), "{ship:?} at {t}: {candidate:?}");
+            // Bit for bit the candidate the search forms from its hit.
+            let sphere = QuerySphere::new(at, LightYears::new(1.0e3), t, LightYears::new(0.0))
+                .expect("a finite sphere");
+            let hit = hit_at(&galaxy, &record, &sphere).expect("the system is in reach");
+            let tidal_radius = galaxy.potential().tidal_radius(
+                record.primary_initial_mass(),
+                &PointLy::from(hit.position()),
+            );
+            let searched =
+                FrameCandidate::new(hit.id(), hit.distance().into(), tidal_radius).expect("valid");
+            assert_eq!(candidate, searched);
+            assert_eq!(select_frame(&[candidate], None), Some(id));
+            let far = offset_by(
+                &at,
+                3.0 * LightYears::from(candidate.tidal_radius()).value(),
+            );
+            let outside = candidate_at(&galaxy, &record, &far, t).expect("a born system");
+            assert!(outside.ratio() > 1.0, "{outside:?}");
+        }
+    }
+    assert!(held > 0, "some ship is held by a system");
+    let outside_window = ClockWindow::END
+        .checked_add(hyperion_sim::time::Span::from_seconds(1))
+        .expect("a second past the window's end");
+    let record = a_nearby_system(&galaxy);
+    assert_eq!(
+        candidate_at(&galaxy, &record, record.epoch_position(), outside_window),
+        None
+    );
 }

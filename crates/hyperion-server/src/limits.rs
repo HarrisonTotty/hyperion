@@ -102,6 +102,11 @@ pub const TCP_NOTSENT_LOWAT_BYTES: u32 = 65_536;
 /// `subscribe` is refused with `bad_request` naming `topic`.
 pub const MAX_SUBSCRIPTIONS: usize = 4;
 
+/// Cameras one scene subscription may report: 8, one per view of the largest layout R07 draws on
+/// one client, with room (rendering plan R03, Design note 6). A ninth is refused with
+/// `bad_request` naming `cameras`.
+pub const MAX_SCENE_CAMERAS: usize = 8;
+
 /// Universes the server holds, counting those on disk and those being created.
 pub const MAX_UNIVERSES: usize = 256;
 

@@ -1116,3 +1116,12 @@ Reserved so that later plans move no star they need not:
   fullest layer-A cell now expects 20,608, in the ring near 33 ly (about 6,000 before, D6); the
   check passes under both mass functions. No output moves through the check; the inner part itself
   moves output.
+- **`candidate_at`, added by rendering plan R03 (R03.T7.a, by agreement, 2026-09-30).**
+  `galaxy::frame::candidate_at(galaxy, record, ship, t) -> Option<FrameCandidate>` gives the
+  candidate `frame_at` forms for one system, wherever the ship is, so that a caller can read the
+  ship's ratio to that system's sphere (the rendering scene's Schmitt band at 0.9). It places the
+  system by `position_at`, takes the distance through light-years as the search's hit holds it and
+  reads the tidal radius as `candidate_for` does; `candidate_for` now calls the shared
+  `candidate_from`, and the rule is untouched (`tests/frame.rs` and `frame/frames.golden` pass
+  unchanged; `candidate_at_gives_the_candidate_frame_at_weighs` is new). `None` outside the clock
+  window, before the system is born, and at the exact galactic centre. No output moves.
