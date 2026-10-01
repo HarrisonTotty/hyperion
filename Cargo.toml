@@ -50,6 +50,11 @@ tokio-tungstenite = "0.30.0"
 toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The browser target's test harness (plan R04, Design note 12), a dev-dependency of the crates whose
+# suites run on `wasm32-unknown-unknown`, under that target's `cfg` alone. Pinned exactly: it pins
+# its own `wasm-bindgen` exactly, and `just wasm-tools` installs the `wasm-bindgen-cli` whose
+# runner must match that version in `Cargo.lock`.
+wasm-bindgen-test = "=0.3.79"
 # ts-rs cannot read `#[serde(try_from)]` or `#[serde(transparent)]` and warns at every build; the
 # types that use them carry a `#[ts(type)]` override or are newtypes, which already say the binding.
 ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
