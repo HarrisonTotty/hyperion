@@ -243,7 +243,8 @@ pub(crate) struct Pusher {
 
 impl Pusher {
     /// Merges `change` into the subscription's pending push and wakes the connection. Returns
-    /// whether the subscription is still open; a push after it ended is dropped.
+    /// whether the subscription is still open; a push after it ended, or after
+    /// [`Pusher::fail`], is dropped.
     pub(crate) fn push(&self, change: PendingPush) -> bool {
         if self.is_ended() || self.has_failed() {
             return false;
@@ -305,6 +306,7 @@ impl Pusher {
     }
 
     /// Whether the topic has given the subscription up with [`Pusher::fail`].
+    #[must_use]
     fn has_failed(&self) -> bool {
         self.shared
             .failure
@@ -628,6 +630,16 @@ impl Subscriptions {
             .get(&SubscriptionId(number))
             .filter(|subscription| subscription.stage == Stage::Live)
             .ok_or_else(|| unknown_subscription(number))?;
+        // A subscription its topic gave up, whose end is not yet sent, refuses as its end will.
+        if let Some(error) = subscription
+            .shared
+            .failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        {
+            return Err(error);
+        }
         subscription
             .commands
             .try_send(command)
@@ -678,6 +690,15 @@ impl Subscriptions {
             .iter()
             .filter(|(_, subscription)| subscription.stage == Stage::Live)
             .find_map(|(&id, subscription)| {
+                // The failure is read before the pending push, never after: the topic merges its
+                // last push and only then sets the failure, so once the failure is seen here, any
+                // push made before it is seen too, and the end cannot overtake it.
+                let error = subscription
+                    .shared
+                    .failure
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone()?;
                 let pending = subscription
                     .shared
                     .pending
@@ -687,12 +708,6 @@ impl Subscriptions {
                 if pending {
                     return None;
                 }
-                let error = subscription
-                    .shared
-                    .failure
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .clone()?;
                 let frame = to_frame(&ServerMessage::SubscriptionEnded {
                     subscription: id.0,
                     error,

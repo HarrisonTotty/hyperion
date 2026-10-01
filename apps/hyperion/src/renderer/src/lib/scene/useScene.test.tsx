@@ -1,4 +1,9 @@
-import type { NotificationBody, SceneStateDto, UniverseIdHex } from "@hyperion/protocol";
+import type {
+  NotificationBody,
+  SceneStateDto,
+  ServerMessage,
+  UniverseIdHex,
+} from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -74,6 +79,15 @@ async function opens(socket: FakeWebSocket, id: number, state = stateInSystem())
     }));
   });
   await settle();
+}
+
+/** The server's ending of subscription `subscription`, its topic having failed. */
+function ended(subscription: number): ServerMessage {
+  return {
+    type: "subscription_ended",
+    subscription,
+    error: { code: "internal", message: "the scene could not be advanced", field: null },
+  };
 }
 
 /** A push of the fixture's craft, numbered `push`, stating its time `push` seconds on. */
@@ -271,6 +285,106 @@ describe("useScene", () => {
     await opens(socket, 4);
 
     expect(result.current.status).toEqual({ kind: "live" });
+  });
+
+  it("waits out the delay as resubscribing, however long, then opens the scene again", async () => {
+    const { result, socket } = renderScene();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 3);
+    act(() => {
+      socket.serverSends(ended(3));
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS - 1);
+    });
+
+    expect(result.current.status).toEqual({ kind: "stale", reason: "resubscribing" });
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(1);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    act(() => {
+      vi.advanceTimersByTime(SCENE_SILENCE_MS * 2);
+    });
+
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(2);
+    expect(result.current.status).toEqual({ kind: "stale", reason: "resubscribing" });
+  });
+
+  it("does not reopen a scene the server ended once the link has dropped meanwhile", async () => {
+    const { result, socket } = renderScene();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 3);
+    act(() => {
+      socket.serverSends(ended(3));
+    });
+
+    act(() => {
+      socket.close();
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS - 1);
+    });
+
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(1);
+    expect(result.current.status).toEqual({ kind: "stale", reason: "link_down" });
+  });
+
+  it("does not reopen the old universe's scene after the universe changes", async () => {
+    const { rerender } = renderHook(
+      ({ universe }: { readonly universe: UniverseIdHex | null }) => useScene(universe, OPTIONS),
+      { initialProps: SOME_UNIVERSE, wrapper: ServerLinkHarness },
+    );
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.serverWelcomes();
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 3);
+    act(() => {
+      socket.serverSends(ended(3));
+    });
+
+    rerender({ universe: null });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS * 2);
+    });
+
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(1);
+  });
+
+  it("gives up with the server's code after it ends the scene four times running", async () => {
+    const { result, socket } = renderScene();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 1);
+    const endedThenOpened = async (subscription: number): Promise<void> => {
+      act(() => {
+        socket.serverSends(ended(subscription));
+      });
+      act(() => {
+        vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+      });
+      await opens(socket, subscription + 1);
+    };
+    await endedThenOpened(1);
+    await endedThenOpened(2);
+    await endedThenOpened(3);
+
+    act(() => {
+      socket.serverSends(ended(4));
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(4);
+    expect(result.current.status).toEqual({
+      kind: "rejected",
+      code: "internal",
+      reason: "the server ended the scene (internal: the scene could not be advanced)",
+    });
   });
 
   it("shows the scene stale after two seconds without a push, and live at the next", async () => {

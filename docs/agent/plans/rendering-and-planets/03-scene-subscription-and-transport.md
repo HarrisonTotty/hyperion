@@ -1736,3 +1736,12 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   because it compares system IDs. No view consumes `useScene` yet. For R02.T17: decide whether to
   reset the free camera or a selection by comparing the system's ID, never by the `SceneSystem`
   object's identity, so that a same-system arrival resets neither.
+
+- **The follow-ups after review.** `Subscriptions::next_failed` reads the failure before the
+  pending push, so `subscription_ended` cannot overtake a push the topic made before failing. A
+  command routed to a subscription its topic gave up is refused with the topic's own error. On the
+  client, a stale reason other than `silent` stops the watchdog. New tests cover: the retry wait
+  surviving the silence period; a link drop or a change of universe during the wait, after which
+  the old scene is not reopened; and giving up with the server's code after four endings in a row.
+  Not tested: `subscription_ended` waiting behind a full queue, and a pool job's failure through
+  the scene topic itself. That branch shares `push_waits_for` with the pushes.

@@ -207,6 +207,12 @@ describe("RequestClient.subscribe", () => {
     expect(second.ended).toBe(false);
     // The server already ended it: the client sends no unsubscribe of its own.
     expect(sent.filter((message) => message.type === "request")).toHaveLength(2);
+  });
+
+  it("consumes and ignores a subscription_ended for a subscription it does not have", () => {
+    const { client } = recordingClient();
+    const error: RequestError = { code: "internal", message: "gone", field: null };
+
     expect(client.handleServerMessage({ type: "subscription_ended", subscription: 9, error })).toBe(
       true,
     );

@@ -283,7 +283,9 @@ impl SceneCore {
                     Some(delta) => Ok(delta),
                     // A body the client holds no longer resolves at its grant, and the wire has
                     // no withdrawal: the whole system arrives again, at the current grants (a
-                    // delegated decision of 2026-09-30).
+                    // delegated decision of 2026-09-30). `refresh` has changed `sent`, but
+                    // `arrive` cannot fail after it: `ship_galactic` above has already fetched
+                    // every system the observer reads, and `arrive` replaces `sent` whole.
                     None => self.arrival(&target, inputs, world),
                 }
             }
