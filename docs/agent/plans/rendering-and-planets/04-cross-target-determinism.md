@@ -1414,3 +1414,24 @@ warnings` with "use of a disallowed method", and was reverted.
   N)" and "plan RNN" to the rendering plan; a task ID such as `R10.T3` names no plan. The label of
   a note from another plan now names its plan set's directory beside the file name; otherwise the
   output for all 795 galaxy tasks is unchanged (compared before and after).
+- **Deviations in T9.a, as built.** `FlushProbe` keeps its two fields private and adds the getters
+  `flushes_outputs`, `flushes_inputs` and `flushes`, the constants `KEEPS_SUBNORMALS`,
+  `FLUSHES_OUTPUTS`, `FLUSHES_INPUTS` and `FLUSHES_BOTH` (so a test's probe needs no `bool`
+  constructor), and a `Display` naming the mode, which the start error and the fault log use. The
+  constructor waits for every worker's report and names the lowest failing worker, not the first
+  to report, so the error is the same on every run; each worker drops its report sender before
+  working, so a probe that panics ends the wait (the constructor then panics, as documented)
+  rather than hanging it. Because `CpuPool::new` now waits on its workers, `Server::start` builds
+  the pool under `spawn_blocking` (`lib.rs`, a rust-review finding), as it already checks the data
+  directory. A job refused unrun by a faulted pool is a private `Outcome::Refused`, counted in no
+  total; a job whose value is withheld still counts as `completed` (documented on the getter); on
+  the panic path the fault outranks the panic (the reply is `FloatingPointMode`, `panicked` is
+  still counted); the refusal is sent before the withheld value is dropped. `submit` checks the
+  flag before waiting and again under the enqueue lock, so a submission waiting on a full queue
+  when the pool faults is refused once the refused jobs free a place
+  (`a_bulk_submit_waiting_when_the_pool_faults_is_refused`). `compute/error.rs` needed no change:
+  `ComputeError` wraps both variants, and the mapping is asserted directly and through it in the
+  existing `pool_errors_become_request_errors`. `with_probe` is public, as Provides names it.
+  Extra tests: `the_probe_passes_on_a_spawned_thread`,
+  `the_scale_factors_take_the_smallest_subnormal_to_the_smallest_normal`,
+  `each_mode_says_what_it_flushes` and `the_real_probe_lets_the_pool_start`.

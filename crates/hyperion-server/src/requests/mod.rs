@@ -154,8 +154,19 @@ impl From<SubmitJobError> for RequestError {
             SubmitJobError::ShutDown => {
                 request_error(ErrorCode::Internal, "the server is shutting down")
             }
+            SubmitJobError::Faulted => floating_point_mode(),
         }
     }
+}
+
+/// The answer when the pool has found a worker that flushes subnormals: `internal`, since plan 04
+/// keeps the error codes fixed, with a message saying why nothing is generated (plan R04, design
+/// note 15).
+fn floating_point_mode() -> RequestError {
+    request_error(
+        ErrorCode::Internal,
+        "the server's floating-point mode flushes subnormals, so it refuses to generate",
+    )
 }
 
 impl From<JobError> for RequestError {
@@ -167,6 +178,7 @@ impl From<JobError> for RequestError {
                 "the server failed while answering this request",
             ),
             JobError::ShutDown => request_error(ErrorCode::Internal, "the server is shutting down"),
+            JobError::FloatingPointMode => floating_point_mode(),
         }
     }
 }
@@ -896,6 +908,17 @@ mod tests {
         assert_eq!(code(JobError::Panicked.into()), ErrorCode::Internal);
         assert_eq!(code(JobError::ShutDown.into()), ErrorCode::Internal);
         assert_eq!(code(JobError::Cancelled.into()), ErrorCode::Cancelled);
+        // A worker that flushes subnormals: the server's affair, and the message says so.
+        let refusal = request_error(
+            ErrorCode::Internal,
+            "the server's floating-point mode flushes subnormals, so it refuses to generate",
+        );
+        assert_eq!(RequestError::from(JobError::FloatingPointMode), refusal);
+        assert_eq!(RequestError::from(SubmitJobError::Faulted), refusal);
+        assert_eq!(
+            RequestError::from(ComputeError::from(JobError::FloatingPointMode)),
+            refusal
+        );
         // A cached computation's failure is its job's, with the same code.
         assert_eq!(
             code(ComputeError::from(SubmitJobError::QueueFull).into()),

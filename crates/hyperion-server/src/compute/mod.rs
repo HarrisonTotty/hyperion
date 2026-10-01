@@ -4,7 +4,9 @@
 //! runtime and never under `spawn_blocking`, so that `hello` and `ping` are answered while a map
 //! computes (plan 04, design notes 5 and 21). [`SingleFlight`] makes concurrent requests for one
 //! expensive value share a single computation, and a [`CancelToken`] lets whoever waits on a job
-//! give it up. Whatever is computed this way fails only as a [`ComputeError`].
+//! give it up. Whatever is computed this way fails only as a [`ComputeError`]. The pool refuses to
+//! generate on a thread whose floating-point mode flushes subnormals, which
+//! [`probe_flush_to_zero`] detects (plan R04, design note 15).
 //!
 //! [`GalaxyCache`] holds the galaxies built from universes' seeds, [`SharedCellCache`] the
 //! generated cells a range query reads, [`SharedSystemCache`] the systems' stars a
@@ -17,6 +19,7 @@ mod cancel;
 mod cells;
 mod density_map;
 mod error;
+mod float_mode;
 mod galaxies;
 mod key;
 mod pool;
@@ -31,6 +34,7 @@ pub use density_map::{
     ParseCodeDepthError, ParseMapResolutionError, QuantisedMap, RawDensityMap, quantise_map,
 };
 pub use error::ComputeError;
+pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
 pub use key::GalaxyKey;
 pub use pool::{
