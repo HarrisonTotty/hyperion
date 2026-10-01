@@ -391,23 +391,26 @@ the call sites here change.
    own rank decides: smallest ratio, a rival taking over only at (1 − `FRAME_HYSTERESIS`) of the
    current ratio, the lower ID only on an exact tie. On each sphere's own boundary a Schmitt band:
    enter at a ratio of at most `BODY_FRAME_ENTRY` = 0.9, leave above 1, then re-run the whole rule
-   with no current frame, as `select_frame` does; the band is 5.8 × 10⁶ m for the Moon and 1.5 × 10⁸
-   m for Earth. Distances are geometric and present, from system-frame positions at the frame time,
-   never apparent ones, identically in Rust and TypeScript. Only planets, dwarf planets and moons
-   are candidates; a wide multiple's stellar components are a note for the craft plan. The rule
-   lives in the sim, so the flight model adopts it unchanged, and the client's camera runs a
-   TypeScript twin tested against a golden the sim writes, as `lib/orbit.ts` is against
-   `orbit/states.golden`. A body frame is non-rotating and **free-falling**, not inertial: it has no
-   Coriolis or centrifugal terms, but a flight model that adopts the rule must integrate the other
-   bodies' tidal residual (the indirect term −a_body) in every body frame, as Cowell and Encke
-   propagation do.
+   with no current frame, as `select_frame` does; an ancestor's band is not carried through the
+   exit: after leaving a moon's sphere the rule re-runs from no current frame, so a camera beyond
+   its planet's entry ratio falls to the system frame, which only rounding distinguishes (decided
+   2026-09-30, delegated decision); the band is 5.8 × 10⁶ m for the Moon and 1.5 × 10⁸ m for Earth.
+   Distances are geometric and present, from system-frame positions at the frame time, never
+   apparent ones, identically in Rust and TypeScript. Only planets, dwarf planets and moons are
+   candidates; a wide multiple's stellar components are a note for the craft plan. The rule lives in
+   the sim, so the flight model adopts it unchanged, and the client's camera runs a TypeScript twin
+   tested against a golden the sim writes, as `lib/orbit.ts` is against `orbit/states.golden`. A
+   body frame is non-rotating and **free-falling**, not inertial: it has no Coriolis or centrifugal
+   terms, but a flight model that adopts the rule must integrate the other bodies' tidal residual
+   (the indirect term −a_body) in every body frame, as Cowell and Encke propagation do.
 7. **The camera's reach is the scene's system.** A free camera is clamped to the current system's
    sphere of influence, its tidal radius, which the scene states (a kept scene sets it; a server
    scene reads the arrival's `tidal_radius_m`, which R03.T7.a provides on `SceneArrivalDto::System`,
    and on which R02.T17 waits); it cannot cross into the galactic frame except where the scene
-   itself is galactic, and when the scene's system changes (a jump) the camera returns to the chase
-   preset about the own ship, or to the scene's default pose where there is none (brainstorm, "The
-   free camera").
+   itself is galactic, and when the scene's system changes (a jump) a free camera returns to the
+   chase preset about the own ship, or to the scene's default pose where there is none; seat and
+   chase, held in the own ship's frame, stay as they are (brainstorm, "The free camera"; decided
+   2026-09-30, delegated decision).
 8. **Culling is ours.** An infinite reversed matrix gives a degenerate far plane, and an engine's
    frustum extraction from it is not something to trust at 10¹² m. The draw list is culled by this
    plan's own predicates in `f64` (a sphere against the frustum's side planes, a horizon test for
@@ -453,19 +456,21 @@ the call sites here change.
     automatic function is prevented from acting: the exposure is held at its last metered value, and
     the display says who inhibited it and why, `INHIBITED · OPERATOR` or
     `INHIBITED · NO IMAGE TO METER` when the source view closed or faulted. A system-set inhibit
-    returns to `AUTO` by itself when the source returns; an operator-set one does not. The commands
-    are the guide's congruent pair `INHIBIT` and `ENABLE`, not `AUTO`. A wireframe view has no image
-    to meter, so `AUTO` is offered only when a photorealistic view it accompanies exists (R07);
-    until then the control offers `MAN`, and `AUTO` is shown unavailable with `NO IMAGE TO METER`.
-    The default `MAN` value, `DEFAULT_MAN_EV100`, is **−1**, computed through the full AgX of Design
-    note 12 and the PSF above at 1080p and 60°: Sirius's peak pixel reaches display-linear 0.957
-    (+6.3 of AgX's +6.5 stops, 99.5% of the curve's 0.961 ceiling, sRGB code 250) and a mag 6.5
-    star's 5.2 × 10⁻³ (sRGB code 16), visible, where +1 would leave the mag 6.5 star at 4.7 × 10⁻⁴
-    (code 1.6), invisible in a lit room, and −2 would push Sirius past the curve's log clamp at +6.5
-    stops, flattening its peak. Re-derived through Filament's curve on 2026-09-29 (researched): the
-    default is unchanged from the value first computed through three.js's. At 4K the pixel is a
-    quarter the size and point sources two stops brighter, so the default is stated for 1080p. The
-    recorded run confirms it.
+    returns to `AUTO` by itself when the source returns; an operator-set one does not. An operator's
+    `INHIBIT` given during a system inhibit takes it over, and it then resumes only on `ENABLE`
+    (decided 2026-09-30, delegated decision). The commands are the guide's congruent pair `INHIBIT`
+    and `ENABLE`, not `AUTO`. A wireframe view has no image to meter, so `AUTO` is offered only when
+    a photorealistic view it accompanies exists (R07); until then the control offers `MAN`, and
+    `AUTO` is shown unavailable with `NO IMAGE TO METER`. The default `MAN` value,
+    `DEFAULT_MAN_EV100`, is **−1**, computed through the full AgX of Design note 12 and the PSF
+    above at 1080p and 60°: Sirius's peak pixel reaches display-linear 0.957 (+6.3 of AgX's +6.5
+    stops, 99.5% of the curve's 0.961 ceiling, sRGB code 250) and a mag 6.5 star's 5.2 × 10⁻³ (sRGB
+    code 16), visible, where +1 would leave the mag 6.5 star at 4.7 × 10⁻⁴ (code 1.6), invisible in
+    a lit room, and −2 would push Sirius past the curve's log clamp at +6.5 stops, flattening its
+    peak. Re-derived through Filament's curve on 2026-09-29 (researched): the default is unchanged
+    from the value first computed through three.js's. At 4K the pixel is a quarter the size and
+    point sources two stops brighter, so the default is stated for 1080p. The recorded run confirms
+    it.
 12. **The tone curve is the full AgX, applied per sprite** (researched 2026-09-29). A star sprite's
     fragment computes its pre-exposed linear-sRGB colour, from T_eff and normalised to its V
     luminance, applies `agx` and writes a display value, so the wireframe needs no HDR target and no
@@ -1181,14 +1186,15 @@ bumped. It reserves no stream or tag. It adds the golden files `coords/body_fixe
   Earth's falls to the system frame. A review read Design note 6's "a Schmitt band on each
   sphere's own boundary" as keeping the ancestors' band; the difference matters only where a
   moon's sphere reaches its planet's band, which real nesting rules out, and is a question for
-  the owner (the golden and the twin follow the literal rule). `BodyFrameCandidate::new` returns
+  the owner (the golden and the twin follow the literal rule). Decided 2026-09-30 (delegated
+  decision): the literal rule stands, now stated in Design note 6. `BodyFrameCandidate::new` returns
   `BuildBodyFrameCandidateError` with a third variant, `OwnParent`; −0 is stored as +0; the
-  candidate exposes `id`, `parent`, `distance`, `hill_radius` and `ratio`; a repeated ID keeps
-  its smallest-ratio entry. Depth counts `parent` links among the candidates only and every body
-  at one depth competes (cousins as well as siblings), so callers (R02.T17, R03's `sceneAt`) pass
-  whole parent chains. The golden writes distances and Hill radii as Rust's shortest round-trip
-  decimals, which `parseFloat` reads back exactly. `just test-wasm` is pending by hand: wasmtime
-  is not installed on the lane's machine.
+  candidate exposes `id`, `parent`, `distance`, `hill_radius` and `ratio`; a repeated ID keeps its
+  smallest-ratio entry. Depth counts `parent` links among the candidates only and every body at one
+  depth competes (cousins as well as siblings), so callers (R02.T17, R03's `sceneAt`) pass whole
+  parent chains. The golden writes distances and Hill radii as Rust's shortest round-trip decimals,
+  which `parseFloat` reads back exactly. `just test-wasm` is pending by hand: wasmtime is not
+  installed on the lane's machine.
 - **Deviations in R02.T8.a, as built.** Built before T6 and T7, because R03.T13 waits on it and
   it needs only T4's golden. `view/camera/frames.ts` exports `selectCameraFrame(candidates,
 current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (built by
@@ -1237,6 +1243,31 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   its `INHIBIT`/`ENABLE` pair in "Controls and commanding", and item 7 in "Data states"; item 8 in
   "Motion and sound"; item 9 in "Layout". R02.T2.f, the nomenclature list, waits on R01.T5.c's
   drafts and is not yet done.
+- **As built, R02.T2.f; the drafts signed off 2026-09-30 (delegated decision).** The owner's
+  delegated decision (the orchestrator's `decisions-ux.md`, items 1–3, 7, 10, 11 and 15) accepted
+  items 1–5, 7 and 8 of the nine as drafted and items 6 and 9 with amendments, all applied here:
+  item 6 gains the operator's `INHIBIT` taking over a system inhibit, and shows `AUTO` "not
+  available"; item 9's main-screen mode banner also states a graphics safe or disabled mode. The
+  ten `_Draft (plan R02, R02.T2.x, item n)…_` markers are removed. R01.T5.c's draft is applied in
+  its decided form: the Layout sentence (every banner upper-case `--text` in a `1px`
+  `--text-muted` rule, the main screen's banner included), the Alerts sentence (no component
+  named; a fault in `--status-caution` text while it lasts), and rows for `GRAPHICS`,
+  `GRAPHICS ACQUIRING ADAPTER`, the mixed-case clauses after the colon, `NOT AVAILABLE` (never
+  `UNAVAILABLE`), `SAFE MODE` as the mode reading, `GRAPHICS SHADER REFUSED`, `GPU`, `WebGPU` and
+  `WGSL`, with no draft markers; the status row is split into three so that no name cell widens
+  the table (R01's code strings are lane B3's). `DETAIL SEED`'s row reads "surface detail and
+  clouds", its two R04.T3.b markers removed (recorded in R04). The plan's own entries are new
+  rows after the spatial view's presets, each still marked
+  `_Draft (plan R02, R02.T2.f, nomenclature): the owner signs off._`, since the decision did not
+  cover them: `VIEW`, `FRAME`, `WIREFRAME`/`PHOTOREALISTIC`, `SEAT`/`CHASE`/`FREE`, `FOV`, `EV100`,
+  the automation levels `AUTO`/`MAN`/`INHIBITED` and the commands `INHIBIT`/`ENABLE` (the guide
+  used them without listing them), `NO IMAGE TO METER`, `POSITIONS AS SEEN FROM SHIP`,
+  `ROTATION NOT YET MODELLED`, `EASED CAMERA MOVES`, `TEST HULL`, the two `TERRAIN:`
+  annunciations, `DECORATION ON`, `FROM CAMERA`, `TICKS TARGET` (decision 11's legend entry),
+  `SCENE` with `PRECISION TEST` and `FRAME CHANGE TEST`, the star-source reading and the count
+  line, written `STARS <n> DRAWN · <m> WITHOUT V · RADII <e>/<d>/<c>/<a>` with the list's
+  placeholder convention; the `SYSTEM BARYCENTRIC`, `BODY` and `GALACTIC` frame rows gain the
+  view's use, marked `(R02.T2.f draft)`. Design notes 6, 7 and 11 carry decisions 16, 13 and 15.
 - **Deviations in R02.T7.a, as built.** `Quaternion` operations are in `view/camera/quaternion.ts`
   (`quaternion`, `IDENTITY_QUATERNION`, `quaternionFromAxisAngle`, `multiply`, `conjugate`,
   `rotate`, `rotationRows`). Matrices are `Float32Array`s in WGSL's column-major order:
@@ -1271,7 +1302,8 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   `sceneFrameFor`, `offeredPresets`, `nextTarget`, `targetPosition`, `rebaseState` and
   `onSystemChange` are exported. `onSystemChange` returns only a **free** camera to chase (or to the
   default pose), as the brainstorm has it; seat and chase, held in the ship's `craft` frame, stay,
-  where Design note 7's shorter wording would move them too. `stepFreeCamera(state, input, dtS,
+  where Design note 7's shorter wording would move them too. Decided 2026-09-30 (delegated
+  decision): as built, and Design note 7 now says so. `stepFreeCamera(state, input, dtS,
 reducedMotion, scene)` returns `{ state, change }`: it integrates whole ticks of
   `FREE_CAMERA_TICK_S` = 1/1440 s (which divides the 60 Hz and 144 Hz frames, so the two paths are
   the same ticks), carries the remainder, caps a frame at 0.25 s, ramps and damps by one exponential
@@ -1304,23 +1336,23 @@ reducedMotion, scene)` returns `{ state, change }`: it integrates whole ticks of
   with `not_automatic`; `enable`, refused outside `INHIBITED`), and `onMetering(control, ev100 |
 null)` applies a source's report. An operator's `INHIBIT` also takes over a system inhibit, which
   then no longer resumes by itself (Design note 11 does not cover the case; the lean is the
-  operator's intent). `controlEv100` and `exposureLevelReading` go with them. `ExposureTriple` keeps
-  the Provides' `aperture` (the f-number). `toneCurve.ts` also exports `spriteToneCurve` (the
-  sprite path), `TONE_CURVE_BLACK`, `agxSigmoid`, `AGX_MIN_EV`, `AGX_MAX_EV`, the four matrices as
-  rows (the Rec. 709 ↔ 2020 products multiplied out in `f64` from Filament's `ColorSpaceUtils.h`),
-  `XYZ_TO_SRGB` and `HALF_FLOAT_MAX`; `preExpose`'s second parameter is
-  `previousExposureScale`. `toneCurve.wgsl` carries the matrices as literals, held to the port
-  within 10⁻⁹ by a test that reads the file, and adds `agxSprite`; no WGSL compiler runs in
-  `just ci`, so the file is first compiled, and compared at 64 points, by R02.T14.c on SwiftShader.
-  The flash test sums the sprite path (what is displayed) at V 6.5, 6, 5, …, −1, −1.46 and EV100
-  −1, 0, +1, +2, and passes the task's 0.90–1.05 (Design note 10's researched 0.92–1.03 is
-  tighter; the task's bracket is the test's). Beyond Provides, `starColour.ts`
-  (`starColour(tEffK | null)`, `planckianChromaticity`), because Design note 12 takes a sprite's
-  colour from T_eff: Kang et al.'s (2002) Planckian-locus fit held to 1,667–25,000 K, Filament's
-  `XYZ_to_sRGB`, normalised to unit luminance by the matrix's own Y row; no T_eff is white; R06's
-  spectral colours replace it. `NOTICE` at the root is new, holding the Apache-2.0 attribution.
-  A science check confirmed every figure; the Allen section number (§15) is as the plan cites it
-  and was not seen at source.
+  operator's intent). Decided 2026-09-30 (delegated decision): as built, now in Design note 11 and
+  the guide. `controlEv100` and `exposureLevelReading` go with them. `ExposureTriple` keeps the
+  Provides' `aperture` (the f-number). `toneCurve.ts` also exports `spriteToneCurve` (the sprite
+  path), `TONE_CURVE_BLACK`, `agxSigmoid`, `AGX_MIN_EV`, `AGX_MAX_EV`, the four matrices as rows
+  (the Rec. 709 ↔ 2020 products multiplied out in `f64` from Filament's `ColorSpaceUtils.h`),
+  `XYZ_TO_SRGB` and `HALF_FLOAT_MAX`; `preExpose`'s second parameter is `previousExposureScale`.
+  `toneCurve.wgsl` carries the matrices as literals, held to the port within 10⁻⁹ by a test that
+  reads the file, and adds `agxSprite`; no WGSL compiler runs in `just ci`, so the file is first
+  compiled, and compared at 64 points, by R02.T14.c on SwiftShader. The flash test sums the sprite
+  path (what is displayed) at V 6.5, 6, 5, …, −1, −1.46 and EV100 −1, 0, +1, +2, and passes the
+  task's 0.90–1.05 (Design note 10's researched 0.92–1.03 is tighter; the task's bracket is the
+  test's). Beyond Provides, `starColour.ts` (`starColour(tEffK | null)`, `planckianChromaticity`),
+  because Design note 12 takes a sprite's colour from T_eff: Kang et al.'s (2002) Planckian-locus
+  fit held to 1,667–25,000 K, Filament's `XYZ_to_sRGB`, normalised to unit luminance by the matrix's
+  own Y row; no T_eff is white; R06's spectral colours replace it. `NOTICE` at the root is new,
+  holding the Apache-2.0 attribution. A science check confirmed every figure; the Allen section
+  number (§15) is as the plan cites it and was not seen at source.
 - **Deviations in R02.T11, as built.** `HullOutline` also has `name` (the view's label), `eyePointM`
   and `lengthM` (which the camera's `OwnShip` reads), and is built by `hullOutline()`, which refuses
   a non-finite vertex or an index that is not an integer within the vertices. `TEST_HULL` (in
@@ -1405,7 +1437,8 @@ outerRadiusM, normal }`; its ticks go through the sampler so that one crossing t
   (`--text`, with `rangeM` and `closureMPerS`) is built and tested but drawn by T15 with its DOM
   label. **For the owner:** target brackets share the selection's corner-bracket shape, told
   apart by colour and size; should they take another shape so that the selection is not carried
-  mainly by colour?
+  mainly by colour? Decided 2026-09-30 (delegated decision): other craft take four open cardinal
+  ticks, and corner brackets mean the selection only (built under R02.T13).
 - **Deviations in R02.T13, as built.** `buildWireframeDrawList(scene, camera, viewport, tokens,
 options)`: `camera` is `DrawCamera { pose, fovXRad }`, and a fifth argument, `DrawOptions {
 lowSetting, ev100, selection, destination, remPx }`, carries what the tests and the sprites need
@@ -1421,14 +1454,16 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   side in `--surface-0` (`CASING_PX`) except hull edges: a casing would widen a 1.5 px edge past
   the 2 px the occluder's slope bias of Design note 5 covers, and the hull's own faces hide the
   stars behind it (**for the owner:** keep hull edges uncased, or raise the slope scale to about 3
-  so that the casing is covered). Graticules are `--text-muted`, the equator and prime meridian a
-  step heavier (1.5 px, a choice); hull edges `--text` at 1.5 px; a predicted path `--text` at
-  1 px dashed 6 on and 4 off (a choice), the only dashed batch. Craft other than the own ship get
-  `targetBracket`s (from the own ship, or from the camera with none) through `symbologyMarks`,
-  whose `SymbologyAnchor` gains `craft`; a craft behind a body's limb gets none. A sprite carries
-  `directionF32`, its sub-pixel `xPx`/`yPx`, `exposedRgb` (E ÷ Ω × `exposureScale(ev100)` ×
-  `starColour`, per unit of point-spread weight) and `illuminanceLx`; sprites are sorted by flux
-  (ties by ID), culled half a quad outside the view and capped at 2,000 at the low setting;
-  `preExpose` is not used, the wireframe having no half-float target. `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts`. Bodies are culled by `sphereInFrustum` on their radius, orbits on
-  a(1 + e) about their focus, craft on their hull's length. A ring counts as selected when its
-  planet is (`ViewRing` has no identity of its own).
+  so that the casing is covered). Decided 2026-09-30 (delegated decision): uncased in the wireframe;
+  R07 cases them over its image with a slope scale of 3. Graticules are `--text-muted`, the equator
+  and prime meridian a step heavier (1.5 px, a choice); hull edges `--text` at 1.5 px; a predicted
+  path `--text` at 1 px dashed 6 on and 4 off (a choice), the only dashed batch. Craft other than
+  the own ship get `targetBracket`s (from the own ship, or from the camera with none) through
+  `symbologyMarks`, whose `SymbologyAnchor` gains `craft`; a craft behind a body's limb gets none. A
+  sprite carries `directionF32`, its sub-pixel `xPx`/`yPx`, `exposedRgb` (E ÷ Ω ×
+  `exposureScale(ev100)` × `starColour`, per unit of point-spread weight) and `illuminanceLx`;
+  sprites are sorted by flux (ties by ID), culled half a quad outside the view and capped at 2,000
+  at the low setting; `preExpose` is not used, the wireframe having no half-float target.
+  `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts`. Bodies are culled by `sphereInFrustum` on
+  their radius, orbits on a(1 + e) about their focus, craft on their hull's length. A ring counts as
+  selected when its planet is (`ViewRing` has no identity of its own).
