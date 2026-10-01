@@ -1483,3 +1483,17 @@ warnings` with "use of a disallowed method", and was reverted.
   - Beyond the listed files, `.claude/skills/implement-task/SKILL.md`'s example of a skipped check
     is now the AArch64 run, since the wasm checks can no longer be skipped; the README's `just ci`
     sentence now also names `fit-check`, which `ci` already ran.
+- **Deviations in T8.a, as built (2026-09-30).** `wasm-bindgen-test = "=0.3.79"` (current at T8),
+  which put `wasm-bindgen` 0.2.129 into `Cargo.lock`. The shared checks are factored out of
+  `check_in_mode` into private `checked_actual_version` (header and commit-hook checks) and
+  `compare` (header version and line diff); `check_embedded(name, expected, actual)` is
+  `check_embedded_in_mode(Mode::from_env(), …)`, a public twin of `check_in_mode` added so that the
+  refusal to bless is testable natively (any mode but `Compare` panics with "golden files are
+  blessed natively, then embedded"). A failure names the file as `<name>.golden (embedded)`.
+  `golden!` expands to a block of two `#[cfg]`-gated statements. The testkit had twelve
+  `should_panic` unit tests (in `float`, `golden`, `order` and `stats`), all with `expected`; they
+  moved unchanged to `tests/panics.rs`, which also holds the embedded arm's five panic tests
+  (mismatch, header mismatch, bless refused in `Bless` and `BlessForbidden`, trailing space).
+  `tests/golden.rs` is wholly a `native_only` module, and holds the compile-only check that
+  `golden!` takes a computed name natively (`golden_takes_a_computed_name_natively`, never called,
+  under `#[expect(dead_code)]`). Every unit-test module carries the `as test` import.

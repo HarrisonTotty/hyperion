@@ -94,6 +94,8 @@ pub fn assert_poisson_count(name: &str, observed: u64, mean: f64, alpha: f64) {
 mod tests {
     use super::*;
     use crate::stats::ALPHA;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     /// From the exact cumulative distribution at a mean of 100, summed in 50-digit decimal
     /// arithmetic: P(X ≤ 80) = 0.022 649, P(X ≤ 81) = 0.029 066, P(X > 119) = 0.028 230,
@@ -125,13 +127,5 @@ mod tests {
         assert_poisson_count("inside", 81, 100.0, 0.05);
         assert_poisson_count("inside", 120, 100.0, 0.05);
         assert_poisson_count("large mean", 300_000, 300_000.0, ALPHA);
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "outside: observed 121 outside the Poisson interval [81, 120] of mean 100"
-    )]
-    fn count_outside_the_interval_fails_naming_both() {
-        assert_poisson_count("outside", 121, 100.0, 0.05);
     }
 }
