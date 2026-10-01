@@ -1121,3 +1121,150 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
 - **Body frames on the wire.** `FramePositionDto::Body` names a non-rotating body frame, plan 01's
   `Frame::Body`. R02's `BodyFixedPosition`, which rotates, is a position type and does not go on the
   wire here; if R02 needs it there, it adds a variant.
+- **Re-validated at `899db5e` (R03.T1, 2026-09-30).** No brainstorm change since the plan was
+  written. Found in the tree: P12.T9 has not landed (no `SubscribeRequest`, `Subscribed`,
+  `SubscriptionTopic` or `ServerMessage::Notification` anywhere), so R03.T5.a builds the whole
+  envelope; `PlanetarySystem::state_at`, `star_states_at` and `galaxy::frame::candidate_at` are
+  absent, so R03.T3 and R03.T7.a add them by agreement. The velocities they need exist and are
+  discarded today: `KeplerElements::relative_state_at` and `Orbit::relative_state_at` return
+  `(SystemVector, SystemVelocity)`, and `position_at` (through the private `Epoch::position`) and
+  `star_positions_at` keep only the first. Every other Consumes name matches, with these
+  particulars for later tasks: `star_positions_at(h, t, out: &mut Vec<(BodyId, SystemPosition)>)`
+  fills an out-parameter; `SystemPosition` has no `Sub` (use `displacement_to`, which gives other
+  − self, and `SystemVector::length`); `Span::as_seconds_f64` and `from_seconds_f64` are the names;
+  the window is `ClockWindow::contains` (±`CLOCK_WINDOW_H`, 1,000 Julian years); `hill_radius(a,
+e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a `&PointLy`;
+  `convert::planetary::system_bodies(wanted: BodiesRequest, hosts, ctx, planets, seed)`;
+  `requests::is_large` and `requests::system::bodies_of` are private, as the plan says;
+  `Handler::handle` returns `HandlerFuture`, a boxed `Result<ResponseBody, RequestError>`, which
+  R03.T10.a's `Answer` replaces; `Outbound::has_room_for(bytes)` exists; the three `axum::serve`
+  sites are `main.rs`, `src/testing.rs` (`Harness::start_with_limits`) and `tests/common/mod.rs`
+  (`TestServer::start_with`); socket2 0.6.5 is in `Cargo.lock` through tokio only; the lock holds
+  tungstenite 0.29.0 (axum's) and 0.30.0 (the tests' `tokio-tungstenite`). On the client,
+  `fractionOfPeriod` and `reduceToHalfTurn` are module-private in `lib/orbit.ts`, so R03.T13
+  exports them (or mirrors through `positionAt`) to share the exact reduction. The skills'
+  `plan_task.py` does not yet parse `R` IDs (R04.T7.c), so these tasks are read from the plan.
+  No task pending re-validation among T1–T10.a; T13 still waits on R02.T8.a.
+- **Deviations in T1, as built.** The plan 04 row and the P12.T9 note are drafted in the galaxy
+  plans and, per the RM1 lane rules, treated as provisionally accepted so that R03.T5.a proceeds;
+  the owner still signs them off (README, Awaiting the owner). The question 21 test is
+  `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` in
+  `crates/hyperion-server/tests/websocket.rs`: hello, `create_universe`, a 5 ly range query and two
+  pings, each answered by the very next text frame, which `TestClient` parses as `ServerMessage`
+  and would panic on as binary.
+- **Draft for the brainstorm's revision pass (R03.T1): open question 21 closed.** To replace the
+  entry's "**Open.**" text: "**Closed: no bump.** The first `notification` and the first binary
+  frames are additions like a new kind: the server sends a notification only on a subscription the
+  client opened and binary frames only in answer to a request whose kind asks for bulk, so a
+  version 2 client that sends neither receives neither, and a newer client asking an older server
+  gets `unsupported`. `PROTOCOL_VERSION` stays 2 while neither is ever sent unasked; a test pins it
+  (plan R03, Design note 12)." The owner signs off.
+- **Deviations in T2, as built.** `BuildSystemObserverError` gains `NotSlowerThanLight`: the
+  Lorentz factor needs |v_o| < c. `InSystemRetardation::residual` is the last correction's change
+  |τₖ − τₖ₋₁|: at most 1 ns when converged, above it only where the noise rule stopped the
+  iteration. A source absent at the observer's present is `NotPresentThen { emitted }` with the
+  observed time, since τ₀ needs the present distance. In the 100 au, 100 km/s test δ₁ ÷ τ₀ and
+  δ₂ ÷ δ₁ are held to β within 10⁻⁶ relative, but δ₃ only to β δ₂ ± 1 ns: δ₃ = 1,852 ns is formed
+  from light times each rounded to the nanosecond, so 10⁻⁶ cannot hold at k = 3. The
+  no-fixed-point test alternates 5 ns apart (1 ns would meet the inclusive tolerance). The
+  accelerated-observer test also holds the angle to 1% of the exact circular-orbit offset, since
+  at ω τ ≈ 1.13 rad a τ ÷ 2c is only the small-angle limit (0.965 of it here). The Explanatory
+  Supplement is cited as §7.2.3 "Aberration", pp. 263–269, from its printed contents (a research
+  agent's check; the book's text not seen), for the aberration only; where it treats the light
+  time is not confirmed. For R03.T13, from the determinism audit: `light_time` floors through
+  `Span::from_seconds_f64`, whose `floor_nanos` uses `math::mul_add`, so the client must port that
+  floor exactly (an exact two-product or `BigInt`, never a naive `Math.floor(x * 1e9)`), or a 1 ns
+  difference can change `corrections` and the emitted time; `Span` and `UniverseTime` stay as whole
+  seconds and nanoseconds; and `aberrated`'s grouping, documented on it, is copied operation for
+  operation.
+- **Deviations in T3, as built.** `BodyTrack::new(system, ctx, index)` returns
+  `Result<_, ResolveBodyError>` and `StarTrack::new(hierarchy, star)` an `Option`, so a track is
+  resolved once and its `SystemTrajectory` methods need no error path; a belt or the halo resolves
+  but has no position. `StarTrack` walks the whole hierarchy per call (a few stars; fine for now).
+  Both velocity tests (plan 14's and plan 11's) hold the central difference over ±1 s to 10⁻⁶ of
+  the speed plus 4 ε X, X the widest pair apocentre, the body's own apocentre or its distance: a
+  Kepler state is rounded at a few ε of its orbit, more near pericentre of an eccentric orbit,
+  which over a 2 s difference exceeds 10⁻⁶ v for wide eccentric pairs (measured: 0.008 m/s against
+  1,179 m/s on a 430 au pair). A third test pins `Epoch::centre_velocity` to `star_states_at` bit
+  for bit. The golden also records each source's velocity now, the observer's velocity,
+  `corrections` and `residual`; a primary's mass for the Hill radius is μ ÷ G − m from the orbit,
+  as a client has it, and Hill radii are written for bodies with a mass and a bound orbit. The
+  golden's farthest body is 92.9 au out (asserted beyond 60 au, bodies only); its most corrections
+  is 4, since its observers see planets, and Design note 7's five and seven are held by R03.T2's
+  unit tests instead. Plans 14 and 11 carry as-built notes of the two additions. The star tests
+  run under `cargo test -p hyperion-sim --lib stellar::multiplicity::positions`, beside the task's
+  acceptance commands.
+- **Deviations in T4, as built.** `SceneArrivalDto` is tagged by `type` in snake case (`system`,
+  `no_system`). `SceneNotificationDto`'s `ship`, `arrival` and `craft` are omitted when `None`, so
+  a heartbeat is `{sequence, clock, bodies: []}`; `SceneStateDto.system` is an explicit `null` in
+  the galactic frame, since the state is always whole. `sequence` is a JSON number (`number` in
+  TypeScript), not the crate's hexadecimal for a `u64`: at 64 Hz it passes 2⁵³ only after some
+  4 × 10⁶ years, and the client checks it arithmetically. `Copy` is derived only on types holding
+  no `String` or `Vec`. Plan 14's protocol test fixtures are re-exported under `#[cfg(test)]` from
+  `planetary.rs` (`record_fixtures`, `requests_fixtures`) for the scene's wire-form tests.
+- **Deviations in T5.a, as built.** The owner's acceptance of R03.T1's plan 04 rows is treated as
+  provisionally given (the RM1 lane rule). `ResponseBody::Subscribe` holds a `Box<Subscribed>`, as
+  `BodyDetail` does, since a scene's state holds a whole `SystemBodiesDto`; the wire form is
+  unchanged. `SubscriptionTopic`, `SubscriptionState` and `NotificationBody` are internally tagged
+  by `topic` in snake case (`"scene"`), so a request reads `"topic": {"topic": "scene", …}` and
+  P12.T9's variants take `alerts` (noted in P12.T9); `type` would match the other tagged DTOs and
+  is cheap to switch to before R03.T5.c's client reads it. The four kinds answer `unsupported`
+  through `not_served_yet` until R03.T5.b (`subscribe`, `unsubscribe`), R03.T6 (`scene_ship`) and
+  R03.T8 (the scene topic, `scene_cameras`). `RequestClient::handleServerMessage`
+  (`packages/protocol/src/requests.ts`) and the link's switch
+  (`apps/hyperion/src/renderer/src/lib/connection.ts`) gain a `notification` case, which the
+  type-aware exhaustiveness lint requires; until R03.T5.c routes it, the client consumes and drops
+  a notification.
+- **Deviations in T5.b, as built.** A topic is served through a new
+  `Handler::subscribe(state, SubscribeRequest, Pusher, token) -> SubscribeFuture`, `unsupported` by
+  default. The connection intercepts `subscribe`, reserves the subscription (openings count toward
+  `MAX_SUBSCRIPTIONS`) and runs the opening as an ordinary request under the same admission and
+  cancellation rules; the subscription goes live, and its pushes are sent, only once its
+  `subscribed` answer is queued, so notifications never precede it (tested, the answer held for
+  want of room included); a failed or cancelled opening ends it and its number is not reused; the
+  state's `sequence` is set to 0 whatever the topic wrote. A topic hands its task to
+  `Pusher::attach`, aborted when the subscription ends, under one lock with the end
+  (`TaskSlot`). `unsubscribe` is answered at once by the connection, after the same admission
+  checks; unsubscribing a subscription still opening is `bad_request` naming `subscription`. The
+  fifth `subscribe` is `bad_request` naming `topic`. Across an arrival a pending `ship` or `craft`
+  survives unless the arrival brings its own, since no change is dropped (Design note 5's
+  "everything before it" read as the system and its bodies). The connection's `select!` takes
+  pushes after reading frames, so a topic pushing fast cannot keep `ping`, `cancel` or the close
+  from being read. All the tests are in `subscriptions.rs`, end to end through the unit `Harness`
+  with `Scripted::with_openings` as the injected topic, none in `outbound.rs`; the stuck-writer
+  tests use an outbound budget of 1 MiB, below the 8 MiB clogging frame, so that nothing fits once
+  it is queued. `Pusher`, `ScenePush::heartbeat` and `Shared::merge` carry
+  `cfg_attr(not(test), expect(dead_code))` until R03.T8 pushes. For R03.T8: requests that name a
+  subscription (`scene_cameras`, and P12.T9's `alerts_observer` and `alerts_acknowledge`) cannot
+  reach it through `Handler::handle`; the connection must route them, as it does `unsubscribe`
+  (an inbox per subscription is the likely shape). A held answer near the budget can be crowded by
+  pushes that each fit; if R03.T8.b sees it, pushes should wait while a held frame has no room.
+- **Deviations in T5.c, as built.** `RequestClient.subscribe(universe, topic)` takes the universe
+  as well, since `SubscribeRequest` carries both, and returns a `PendingSubscription<T>` (an
+  `outcome` of `SubscribeOutcome<T>` that never rejects, and `cancel()`), in `request`'s shape.
+  `Subscription` also has `id`, `ended` and `onEnd(listener)` (`"unsubscribed"` or `"link_lost"`,
+  heard at once by a listener added after the end); `onNotification` and `onEnd` return removers.
+  The subscription is registered within the answer's own `handleServerMessage` call, through an
+  internal `onAnswer` hook on `startRequest`, before the outcome settles. A `subscribe` answered
+  as it was cancelled, or opened for another topic (`protocol_violation`), is ended with an
+  `unsubscribe` at once, so that the server holds no subscription nobody reads (`#cancelled` now
+  keeps a late-answer hook per ID). The fire-and-forget `unsubscribe` discards its outcome with
+  `void` and no `.catch`: an outcome never rejects, and the package has no console to report on.
+  `SubscriptionTable` is internal; the types `Subscription`, `SubscriptionEnd`, `NotificationOf`,
+  `StateOf` and `TopicName` and `PendingSubscription`, `SubscribeOutcome` are re-exported. The
+  two single-topic type guards (`isStateOf`, `isNotificationOf`) each disable
+  `typescript/no-unnecessary-condition` for one line until plan 12's `alerts` topic makes the
+  comparison real.
+- **Deviations in T10.a, as built.** `chunk` takes `axum::body::Bytes` (the `bytes` crate's type,
+  re-exported), so no `bytes` dependency is added. `BulkPayload::new(bytes)` returns
+  `Result<_, BuildBulkPayloadError>`, refusing a payload whose chunk count does not fit the
+  header's `u32` (about a petabyte); `chunk` documents the same panic. `BulkPayload::manifest()`
+  gives the `BulkManifestDto` and `frames(request)` the chunks. `BulkManifestDto.bytes` is a JSON
+  number (`number` in TypeScript), a payload being megabytes. The handlers meet the seam through
+  one private `answered(result) = result.map(Answer::from)` applied with `FutureExt::map`, and the
+  unit harness's private `Answer` enum is renamed `Reply`. Until R03.T10.b streams a bulk answer,
+  `run` answers one `internal` and logs at `error`; `bulk.rs` carries
+  `cfg_attr(not(test), expect(dead_code))` until then. `tap_socket` sets the mark on Android as
+  well as Linux, where socket2 exposes it. Both harnesses read the mark back inside their `tap_io`
+  closure (`accepted_lowat()`); the integration test, `an_accepted_socket_has_the_low_water_mark`,
+  is in `tests/websocket.rs`, which only `just ci` runs among the acceptance commands.

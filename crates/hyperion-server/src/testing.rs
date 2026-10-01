@@ -8,11 +8,14 @@ use std::future::IntoFuture;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use axum::serve::ListenerExt;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
     ClientMessage, RequestBody, RequestError, RequestId, ResponseBody, ServerMessage,
+    SubscribeRequest, SubscriptionState,
 };
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
@@ -23,8 +26,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::compute::CancelToken;
-use crate::requests::{Handler, HandlerFuture, to_frame};
+use crate::requests::{Handler, HandlerFuture, SubscribeFuture, to_frame};
 use crate::stats::{OutboundCounters, RequestCounters};
+use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
 use crate::{AppState, Server, ServerConfig, ServerStats};
 
@@ -50,7 +54,22 @@ pub(crate) struct Harness {
     server: Server,
     stop_serving: oneshot::Sender<()>,
     serving: JoinHandle<io::Result<()>>,
+    /// The low-water mark of the socket accepted last.
+    lowat: Arc<AtomicU32>,
     _data_dir: TempDir,
+}
+
+/// A socket's `TCP_NOTSENT_LOWAT`, 0 where the option does not exist.
+fn read_lowat(tcp: &TcpStream) -> u32 {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    return socket2::SockRef::from(tcp)
+        .tcp_notsent_lowat()
+        .expect("the option can be read");
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = tcp;
+        0
+    }
 }
 
 impl Harness {
@@ -80,6 +99,12 @@ impl Harness {
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        let lowat = Arc::new(AtomicU32::new(0));
+        let tapped = Arc::clone(&lowat);
+        let listener = listener.tap_io(move |tcp| {
+            crate::tap_socket(tcp);
+            tapped.store(read_lowat(tcp), Ordering::Release);
+        });
         let (stop_serving, stopped) = oneshot::channel::<()>();
         let serving = tokio::spawn(
             axum::serve(
@@ -100,8 +125,15 @@ impl Harness {
             server,
             stop_serving,
             serving,
+            lowat,
             _data_dir: data_dir,
         }
+    }
+
+    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any
+    /// or where the option does not exist (rendering plan R03, R03.T10.a).
+    pub(crate) fn accepted_lowat(&self) -> u32 {
+        self.lowat.load(Ordering::Acquire)
     }
 
     /// The server's shared state.
@@ -416,13 +448,37 @@ impl Client {
 #[derive(Debug)]
 pub(crate) struct Scripted {
     calls: mpsc::Sender<Call>,
+    /// Where subscriptions' openings go, if the test takes them.
+    openings: Option<mpsc::Sender<Opening>>,
 }
 
 impl Scripted {
-    /// The handler, and the calls it receives.
+    /// The handler, and the calls it receives. It answers every `subscribe` `unsupported`.
     pub(crate) fn new() -> (Self, Calls) {
         let (calls, received) = mpsc::channel(64);
-        (Self { calls }, Calls(received))
+        (
+            Self {
+                calls,
+                openings: None,
+            },
+            Calls(received),
+        )
+    }
+
+    /// The handler, the calls it receives, and the subscriptions it is asked to open: an
+    /// injected topic that pushes whatever the test hands its [`Pusher`] (rendering plan R03,
+    /// R03.T5.b).
+    pub(crate) fn with_openings() -> (Self, Calls, Openings) {
+        let (handler, calls) = Self::new();
+        let (openings, received) = mpsc::channel(16);
+        (
+            Self {
+                openings: Some(openings),
+                ..handler
+            },
+            calls,
+            Openings(received),
+        )
     }
 }
 
@@ -441,12 +497,83 @@ impl Handler for Scripted {
                 .await
                 .expect("the test is taking calls");
             match answer.await {
-                Ok(Answer::Respond(body)) => Ok(body),
-                Ok(Answer::Fail(error)) => Err(error),
-                Ok(Answer::Panic) => panic!("a deliberate panic in a handler"),
+                Ok(Reply::Respond(body)) => Ok(body.into()),
+                Ok(Reply::Fail(error)) => Err(error),
+                Ok(Reply::Panic) => panic!("a deliberate panic in a handler"),
                 Err(_) => std::future::pending().await,
             }
         })
+    }
+
+    fn subscribe(
+        &self,
+        _state: Arc<AppState>,
+        request: SubscribeRequest,
+        pusher: Pusher,
+        _token: CancelToken,
+    ) -> SubscribeFuture {
+        let Some(openings) = self.openings.clone() else {
+            return Box::pin(std::future::ready(Err(RequestError {
+                code: hyperion_protocol::ErrorCode::Unsupported,
+                message: "this handler opens no topic".to_owned(),
+                field: None,
+            })));
+        };
+        Box::pin(async move {
+            let (reply, answer) = oneshot::channel();
+            openings
+                .send(Opening {
+                    request,
+                    pusher,
+                    reply,
+                })
+                .await
+                .expect("the test is taking openings");
+            match answer.await {
+                Ok(answer) => answer,
+                Err(_) => std::future::pending().await,
+            }
+        })
+    }
+}
+
+/// The subscriptions a [`Scripted`] handler has been asked to open.
+#[derive(Debug)]
+pub(crate) struct Openings(mpsc::Receiver<Opening>);
+
+impl Openings {
+    /// The next opening.
+    pub(crate) async fn next(&mut self) -> Opening {
+        timeout(WAIT, self.0.recv())
+            .await
+            .expect("timed out waiting for a subscription to open")
+            .expect("the handler lives as long as the server")
+    }
+}
+
+/// One `subscribe`, as the handler received it.
+#[derive(Debug)]
+pub(crate) struct Opening {
+    /// What was asked.
+    pub(crate) request: SubscribeRequest,
+    /// The topic's end of the subscription, which may push before the opening is answered.
+    pub(crate) pusher: Pusher,
+    reply: oneshot::Sender<Result<SubscriptionState, RequestError>>,
+}
+
+impl Opening {
+    /// Opens the subscription with `state`, and returns the topic's end of it.
+    pub(crate) fn open(self, state: SubscriptionState) -> Pusher {
+        // The request may have been cancelled meanwhile; the pusher then says it has ended.
+        let _ = self.reply.send(Ok(state));
+        self.pusher
+    }
+
+    /// Refuses the subscription with `error`, and returns the topic's end of it.
+    pub(crate) fn fail(self, error: RequestError) -> Pusher {
+        // As for `open`.
+        let _ = self.reply.send(Err(error));
+        self.pusher
     }
 }
 
@@ -476,11 +603,11 @@ pub(crate) struct Call {
     pub(crate) body: RequestBody,
     /// The request's cancellation token.
     pub(crate) token: CancelToken,
-    reply: oneshot::Sender<Answer>,
+    reply: oneshot::Sender<Reply>,
 }
 
 #[derive(Debug)]
-enum Answer {
+enum Reply {
     Respond(ResponseBody),
     Fail(RequestError),
     Panic,
@@ -499,17 +626,17 @@ impl Call {
 
     /// Answers with `body`. Returns whether the request's task was still waiting.
     pub(crate) fn respond(self, body: ResponseBody) -> bool {
-        self.reply.send(Answer::Respond(body)).is_ok()
+        self.reply.send(Reply::Respond(body)).is_ok()
     }
 
     /// Answers with `error`.
     pub(crate) fn fail(self, error: RequestError) -> bool {
-        self.reply.send(Answer::Fail(error)).is_ok()
+        self.reply.send(Reply::Fail(error)).is_ok()
     }
 
     /// Makes the handler panic.
     pub(crate) fn panic(self) -> bool {
-        self.reply.send(Answer::Panic).is_ok()
+        self.reply.send(Reply::Panic).is_ok()
     }
 
     /// Waits until the request's task has let go of the call: it was cancelled, or its

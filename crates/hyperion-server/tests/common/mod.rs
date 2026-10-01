@@ -9,13 +9,15 @@
 use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use axum::serve::ListenerExt;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
-    ClientMessage, CreateUniverseRequest, RequestBody, RequestError, RequestId, ResponseBody,
-    SeedHex, ServerMessage, UniverseInfo,
+    ClientMessage, CreateUniverseRequest, NotificationBody, RequestBody, RequestError, RequestId,
+    ResponseBody, SeedHex, ServerMessage, UniverseInfo,
 };
 use hyperion_server::universe::SequenceEntropy;
 use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats};
@@ -109,6 +111,21 @@ pub struct TestServer {
     stop_serving: Option<oneshot::Sender<()>>,
     serving: Option<JoinHandle<std::io::Result<()>>>,
     temp_dir: Option<TempDir>,
+    /// The low-water mark of the socket accepted last (rendering plan R03, R03.T10.a).
+    lowat: Arc<AtomicU32>,
+}
+
+/// A socket's `TCP_NOTSENT_LOWAT`, 0 where the option does not exist.
+fn read_lowat(tcp: &tokio::net::TcpStream) -> u32 {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    return socket2::SockRef::from(tcp)
+        .tcp_notsent_lowat()
+        .expect("the option can be read");
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = tcp;
+        0
+    }
 }
 
 impl TestServer {
@@ -134,6 +151,12 @@ impl TestServer {
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        let lowat = Arc::new(AtomicU32::new(0));
+        let tapped = Arc::clone(&lowat);
+        let listener = listener.tap_io(move |tcp| {
+            hyperion_server::tap_socket(tcp);
+            tapped.store(read_lowat(tcp), Ordering::Release);
+        });
         let server = patiently("starting the server", Server::start(config))
             .await
             .expect("the server starts");
@@ -158,7 +181,14 @@ impl TestServer {
             stop_serving: Some(stop_serving),
             serving: Some(serving),
             temp_dir: None,
+            lowat,
         }
+    }
+
+    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any
+    /// or where the option does not exist.
+    pub fn accepted_lowat(&self) -> u32 {
+        self.lowat.load(Ordering::Acquire)
     }
 
     /// The WebSocket URL.
@@ -409,6 +439,16 @@ impl TestClient {
                 Message::Ping(_) | Message::Pong(_) => {}
                 other => panic!("unexpected frame {other:?}"),
             }
+        }
+    }
+
+    /// The next message from the server, which must be a `notification`: its subscription and
+    /// body (plan 12's P12.T9, built by rendering plan R03's R03.T5.b). Panics on any other
+    /// message, since a test that expects one should read it itself.
+    pub async fn next_notification(&mut self) -> (u32, NotificationBody) {
+        match self.next_message().await {
+            ServerMessage::Notification { subscription, body } => (subscription, body),
+            other => panic!("expected a notification, got {other:?}"),
         }
     }
 

@@ -1,8 +1,9 @@
 //! Where a system's stars are at any time: each pair placed about its barycentre, from the root
-//! down (plan 11, P11.T3.b).
+//! down (plan 11, P11.T3.b), and with their velocities (`star_states_at`, added by rendering plan
+//! R03's R03.T3).
 
 use super::hierarchy::{HierarchyNode, NodeIndex, SystemHierarchy};
-use crate::coords::SystemPosition;
+use crate::coords::{SystemPosition, SystemVelocity};
 use crate::id::BodyId;
 use crate::time::UniverseTime;
 
@@ -99,6 +100,110 @@ fn place(
     }
 }
 
+/// The position and velocity of every star of `h` at `t`, in the system frame from the system's
+/// barycentre, written into `out` by body index: [`star_positions_at`]'s walk with each star's
+/// velocity beside its position (asked of plan 11 by rendering plan R03, and added by R03.T3).
+///
+/// The positions are [`star_positions_at`]'s bit for bit, by the same arithmetic in the same
+/// order. A pair's orbit gives its outer member's barycentric velocity relative to its inner
+/// member's ([`KeplerElements::relative_state_at`](crate::orbit::KeplerElements::relative_state_at)),
+/// shared by the other member's share of the mass as the positions are, so the velocities are
+/// relative to the system's barycentre, in m/s along the galactic axes, and the barycentre stays
+/// at rest.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::stellar::multiplicity::{
+///     MultiplicityContext, RedrawAttempt, draw_hierarchy, star_positions_at, star_states_at,
+/// };
+/// use hyperion_sim::time::UniverseTime;
+///
+/// let galaxy = Galaxy::new(Seed::new(11));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// let record = cell.first().expect("layer C is not empty at the solar circle");
+/// let context = MultiplicityContext::ForcedMultiple { max_separation: None };
+/// let stars = draw_hierarchy(&galaxy, record, context, RedrawAttempt::FIRST);
+/// let (mut positions, mut states) = (Vec::new(), Vec::new());
+/// star_positions_at(&stars, UniverseTime::EPOCH, &mut positions);
+/// star_states_at(&stars, UniverseTime::EPOCH, &mut states);
+/// // The same positions, now with velocities: the momentum about the barycentre is zero.
+/// let mut momentum = [0.0; 3];
+/// for (((_, at), (_, same, velocity)), star) in positions.iter().zip(&states).zip(stars.stars()) {
+///     assert_eq!(at, same);
+///     for (p, v) in momentum.iter_mut().zip(velocity.metres_per_second()) {
+///         *p += star.initial_mass().value() * v;
+///     }
+/// }
+/// assert!(momentum.iter().all(|p| p.abs() < 1e-6));
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
+pub fn star_states_at(
+    h: &SystemHierarchy,
+    t: UniverseTime,
+    out: &mut Vec<(BodyId, SystemPosition, SystemVelocity)>,
+) {
+    out.clear();
+    out.reserve(h.stars().len());
+    place_state(
+        h,
+        h.root(),
+        (SystemPosition::ORIGIN, SystemVelocity::ZERO),
+        t,
+        out,
+    );
+}
+
+/// Appends the stars under `node`, whose barycentre has the state `centre`, in depth-first order,
+/// which is body order: [`place`] with the velocities.
+fn place_state(
+    h: &SystemHierarchy,
+    node: NodeIndex,
+    centre: (SystemPosition, SystemVelocity),
+    t: UniverseTime,
+    out: &mut Vec<(BodyId, SystemPosition, SystemVelocity)>,
+) {
+    let (at, moving) = centre;
+    match h.node(node) {
+        HierarchyNode::Star(star) => out.push((h.star(*star).body(), at, moving)),
+        HierarchyNode::Pair {
+            inner,
+            outer,
+            orbit,
+        } => {
+            let (separation, relative) = orbit.relative_state_at(t);
+            let inner_mass = h.node_mass(*inner).value();
+            let outer_mass = h.node_mass(*outer).value();
+            let mass = h.node_mass(node).value();
+            place_state(
+                h,
+                *inner,
+                (
+                    at.translated(separation * -(outer_mass / mass)),
+                    moving + relative * -(outer_mass / mass),
+                ),
+                t,
+                out,
+            );
+            place_state(
+                h,
+                *outer,
+                (
+                    at.translated(separation * (inner_mass / mass)),
+                    moving + relative * (inner_mass / mass),
+                ),
+                t,
+                out,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::order::assert_order_independent;
@@ -107,6 +212,7 @@ mod tests {
     use super::super::testing::{SAMPLE, galaxy, imf_records, sunlike};
     use super::*;
     use crate::time::{ClockWindow, Span};
+    use hyperion_testkit::float::assert_same_bits;
 
     /// 10⁴ hierarchies of the galaxy's mass function at the Sun-like point, multiples only.
     fn multiples() -> Vec<SystemHierarchy> {
@@ -286,5 +392,73 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// R03.T3: the states' positions are `star_positions_at`'s bit for bit.
+    #[test]
+    fn a_state_s_position_is_star_positions_at_s_bit_for_bit() {
+        let hierarchies = multiples();
+        let (mut positions, mut states) = (Vec::new(), Vec::new());
+        for h in hierarchies.iter().take(2_000) {
+            for t in times() {
+                star_positions_at(h, t, &mut positions);
+                star_states_at(h, t, &mut states);
+                assert_eq!(positions.len(), states.len());
+                for ((body, at), (same_body, same_at, _)) in positions.iter().zip(&states) {
+                    assert_eq!(body, same_body);
+                    for (x, y) in at.metres().into_iter().zip(same_at.metres()) {
+                        assert_same_bits(x, y);
+                    }
+                }
+            }
+        }
+    }
+
+    /// R03.T3: a star's velocity is the time derivative of its position, by central differences
+    /// over a second, to 10⁻⁶ relative, with a floor for the positions' own rounding: a Kepler
+    /// state is good to a few ε of its orbit's apocentre (more near the pericentre of an
+    /// eccentric orbit, where Kepler's equation amplifies it), so with X the widest apocentre or
+    /// star distance, 4 ε X is allowed, which a difference over 2 s carries into the velocity.
+    #[test]
+    fn a_star_s_velocity_is_the_derivative_of_its_position() {
+        let hierarchies = multiples();
+        let second = Span::from_seconds(1);
+        let (mut before, mut after, mut states) = (Vec::new(), Vec::new(), Vec::new());
+        let mut checked = 0;
+        for h in hierarchies.iter().take(2_000) {
+            for t in times() {
+                let (Some(early), Some(late)) = (t.checked_sub(second), t.checked_add(second))
+                else {
+                    continue;
+                };
+                star_positions_at(h, early, &mut before);
+                star_positions_at(h, late, &mut after);
+                star_states_at(h, t, &mut states);
+                let reach = h
+                    .pairs()
+                    .map(|(_, orbit)| orbit.apoapsis().value())
+                    .chain(
+                        states
+                            .iter()
+                            .map(|(_, at, _)| at.distance_from_origin().value()),
+                    )
+                    .fold(0.0, f64::max);
+                let floor = 4.0 * f64::EPSILON * reach;
+                for (((_, x0), (_, x1)), (_, _, velocity)) in before.iter().zip(&after).zip(&states)
+                {
+                    let v = velocity.metres_per_second();
+                    let speed = velocity.speed().value();
+                    for (axis, v_axis) in v.into_iter().enumerate() {
+                        let derivative = (x1.metres()[axis] - x0.metres()[axis]) / 2.0;
+                        assert!(
+                            (derivative - v_axis).abs() <= 1e-6 * speed + floor,
+                            "axis {axis}: {derivative} m/s by differences against {v_axis} m/s"
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 1_000, "{checked} stars checked");
     }
 }

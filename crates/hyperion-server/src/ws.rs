@@ -24,7 +24,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
-use hyperion_protocol::{ClientMessage, PROTOCOL_VERSION, ServerMessage};
+use hyperion_protocol::{ClientMessage, PROTOCOL_VERSION, RequestBody, ServerMessage};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::Instrument;
@@ -36,7 +36,8 @@ use crate::limits::{
     WRITE_TIMEOUT,
 };
 use crate::outbound::{self, Held, Outbound, WriterStopped};
-use crate::requests::{self, Handshake, Inbound, Requests, Tally, to_frame};
+use crate::requests::{self, Handshake, Inbound, Requests, Settled, Tally, to_frame};
+use crate::subscriptions::Subscriptions;
 
 /// The limits a connection enforces on writing to its client.
 ///
@@ -176,6 +177,8 @@ impl fmt::Display for End {
 enum Event {
     /// The oldest held request's frame fits the outbound queue now.
     Room,
+    /// A subscription has a push pending, or a pending push that had no room may have some now.
+    Pushes,
     Finished(Result<(tokio::task::Id, requests::Finished), tokio::task::JoinError>),
     Frame(Option<Result<Message, axum::Error>>),
 }
@@ -183,6 +186,10 @@ enum Event {
 /// The reading side of a connection and everything it owns.
 struct Connection {
     requests: Requests,
+    /// The connection's subscriptions, which end with it (rendering plan R03, R03.T5.b).
+    subscriptions: Subscriptions,
+    /// The smallest pending push that found no room in `outbound`, in bytes, if one did.
+    push_waits_for: Option<usize>,
     outbound: Outbound,
     /// Finished requests waiting for room in `outbound`.
     held: Held,
@@ -205,6 +212,8 @@ impl Connection {
         let mut writer = tokio::spawn(writer.run(sink).in_current_span());
         let mut connection = Self {
             requests: Requests::new(Arc::clone(&state)),
+            subscriptions: Subscriptions::new(),
+            push_waits_for: None,
             outbound,
             held: Held::new(state.outbound_stats.clone()),
             closing,
@@ -217,10 +226,14 @@ impl Connection {
         }
         let Self {
             mut requests,
+            subscriptions,
             outbound,
             held,
             ..
         } = connection;
+        // Every subscription ends with its socket: its topic's task is ended and nothing it had
+        // pending is sent.
+        drop(subscriptions);
         // Held requests are still in flight, and are abandoned with the rest.
         drop(held);
         requests.close().await;
@@ -250,6 +263,8 @@ impl Connection {
         loop {
             let next_held = self.held.next_len();
             let room = self.outbound.room_for(next_held.unwrap_or_default());
+            let push_waits_for = self.push_waits_for;
+            let push_room = self.outbound.room_for(push_waits_for.unwrap_or_default());
             let event = tokio::select! {
                 biased;
                 () = self.closing.wait() => return End::ShuttingDown,
@@ -262,12 +277,17 @@ impl Connection {
                     Event::Finished(joined)
                 }
                 frame = stream.next() => Event::Frame(frame),
+                // Pushes after frames, so that a topic pushing fast cannot keep `ping`, `cancel`
+                // and the close from being read.
+                () = push_room, if push_waits_for.is_some() => Event::Pushes,
+                () = self.subscriptions.woken() => Event::Pushes,
             };
             let handled = match event {
-                Event::Room => match self.held.pop().and_then(|held| self.requests.end(held)) {
-                    Some(frame) => self.push(Message::Text(frame.into())).await,
+                Event::Room => match self.held.pop() {
+                    Some(held) => self.end(held).await,
                     None => Ok(()),
                 },
+                Event::Pushes => self.flush_pushes().await,
                 Event::Finished(joined) => match self.requests.settle(joined) {
                     // Queued at once only if nothing is held before it, so that terminal frames
                     // are queued in the order their requests finished.
@@ -275,10 +295,7 @@ impl Connection {
                         if self.held.is_empty()
                             && self.outbound.has_room_for(settled.frame_len()) =>
                     {
-                        match self.requests.end(settled) {
-                            Some(frame) => self.push(Message::Text(frame.into())).await,
-                            None => Ok(()),
-                        }
+                        self.end(settled).await
                     }
                     Some(settled) => {
                         self.held.push(settled);
@@ -348,15 +365,72 @@ impl Connection {
                 Some(to_frame(&welcome()))
             }
             ClientMessage::Ping { nonce } => Some(to_frame(&ServerMessage::Pong { nonce })),
+            ClientMessage::Request {
+                id,
+                body: RequestBody::Subscribe(request),
+            } => {
+                self.requests
+                    .submit_subscribe(id, request, self.handshake, &mut self.subscriptions)
+            }
+            ClientMessage::Request {
+                id,
+                body: RequestBody::Unsubscribe(request),
+            } => Some(self.requests.unsubscribe(
+                id,
+                request,
+                self.handshake,
+                &mut self.subscriptions,
+            )),
             ClientMessage::Request { id, body } => self.requests.submit(id, body, self.handshake),
             ClientMessage::Cancel { id } => {
                 let cancelled = self.requests.cancel(id);
+                if cancelled.is_some() {
+                    // A subscription still opening ends with its cancelled `subscribe`.
+                    self.subscriptions.failed(id);
+                }
                 // A held frame of the request just cancelled is dropped: `cancelled` ended it.
                 self.held
                     .retain(|settled| self.requests.is_in_flight(settled));
                 cancelled
             }
         }
+    }
+
+    /// Ends a settled request by queuing its terminal frame, unless a `cancel` ended it first;
+    /// a `subscribe` answered with `subscribed` makes its subscription live once the answer is
+    /// queued, so that its notifications follow it, and one that failed ends its subscription.
+    async fn end(&mut self, settled: Settled) -> Result<(), End> {
+        let (id, responded) = (settled.id(), settled.responded());
+        let Some(frame) = self.requests.end(settled) else {
+            return Ok(());
+        };
+        self.push(Message::Text(frame.into())).await?;
+        if responded {
+            self.subscriptions.went_live(id);
+        } else {
+            self.subscriptions.failed(id);
+        }
+        Ok(())
+    }
+
+    /// Queues every live subscription's pending push that the outbound queue has room for, each
+    /// as a `notification` numbered with its subscription's next sequence, and leaves the rest
+    /// pending until room frees (rendering plan R03, Design note 5).
+    async fn flush_pushes(&mut self) -> Result<(), End> {
+        self.push_waits_for = None;
+        let mut after = None;
+        while let Some(ready) = self.subscriptions.next_ready(after) {
+            after = Some(ready.id());
+            let bytes = ready.frame_len();
+            if self.outbound.has_room_for(bytes) {
+                let frame = self.subscriptions.sent(ready);
+                self.push(Message::Text(frame.into())).await?;
+            } else {
+                self.subscriptions.not_sent(ready);
+                self.push_waits_for = Some(self.push_waits_for.map_or(bytes, |w| w.min(bytes)));
+            }
+        }
+        Ok(())
     }
 
     /// Queues a frame for the writer, waiting while the queue holds its full count of frames,
