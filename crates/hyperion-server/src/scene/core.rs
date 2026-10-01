@@ -302,6 +302,12 @@ impl SceneCore {
         }
     }
 
+    /// The system the scene is in, if it is in one.
+    #[must_use]
+    pub(crate) fn system_id(&self) -> Option<SystemId> {
+        self.system.as_ref().map(|system| system.record.id())
+    }
+
     /// The next scene time at which [`SceneCore::advance`] must be called for a body's
     /// `valid_until`: the earliest among the bodies sent, if any.
     #[must_use]

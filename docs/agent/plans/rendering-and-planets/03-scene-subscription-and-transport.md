@@ -1474,3 +1474,21 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   clock" read as the scene's). No generated body changes inside the clock window, so "a body's
   `valid_until` passing at 100,000× is pushed" is a unit test in `scene/topic.rs` on a planted
   `valid_until` (`SceneCore::plant_valid_until`, test-only).
+- **Deviations in T8.b, as built.** The craft tick runs in the topic's task (`MissedTickBehavior::Skip`)
+  while the core holds craft; the craft source is asked at each tick and at each heartbeat (which
+  starts the tick once craft appear), on the runtime, so a source must be cheap. The core is held
+  as an `Option` and lent to each pool job rather than cloned; the task keeps only the planetary
+  systems of the scene's system and the ship's frame. A large notification is serialised with
+  `try_submit` and on the runtime when the pool's queue is full, so that the connection never
+  waits for room and goes on reading (from the T8.a review). The slow-reader test is a unit test
+  (`scene/topic.rs`, through `Harness::start_configured` and a handler that answers requests by
+  script and subscriptions by the server's topic): with the writer stuck past a heartbeat, the
+  queue's bytes do not grow, and the next notification after the clogging response is numbered
+  one past the last and carries the latest ten craft, stated at its own time, and the
+  heartbeat's contacts. Recorded on this shared machine (provisional): 64 craft pushes in a second
+  of scene time at 1× with ten craft, 0.191 MB/s of JSON (the brainstorm's 0.25 MB/s, under the
+  0.5 finding threshold), `craft_are_pushed_at_64_hz_each_push_stating_its_time` in
+  `tests/scene.rs`, which allows 32 to 66 for a loaded machine. Not observed, so not built: a held
+  answer crowded by pushes that each fit (R03.T5.b's note). A topic whose pool job fails ends its
+  task with a `warn` and leaves its subscription silent until unsubscribed; the client's sequence
+  check does not see it (only a server shutting down reaches it today).
