@@ -171,7 +171,7 @@ pub(crate) async fn detail(
 /// A miss builds the context from the stars the system cache holds, resolving and generating them
 /// there first if it holds none, so that the stars are evolved once for both caches
 /// ([`SystemContext::from_stars`]).
-async fn bodies_of(
+pub(super) async fn bodies_of(
     state: &Arc<AppState>,
     key: GalaxyKey,
     galaxy: &Arc<Galaxy>,
