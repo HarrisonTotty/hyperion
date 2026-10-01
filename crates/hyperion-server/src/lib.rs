@@ -20,7 +20,7 @@ pub mod knowledge;
 pub mod limits;
 mod outbound;
 mod requests;
-mod scene;
+pub mod scene;
 mod stats;
 mod subscriptions;
 #[cfg(test)]
@@ -186,7 +186,10 @@ impl Server {
                 request_stats: RequestStats::new(),
                 outbound_stats: OutboundStats::new(),
                 connection_limits,
-                scene: SceneService::new(),
+                scene: SceneService::new(
+                    Arc::clone(config.scene_knowledge()),
+                    Arc::clone(config.craft_source()),
+                ),
             }),
         })
     }

@@ -19,15 +19,17 @@ use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hyperion_protocol::{
-    BodyIdHex, ErrorCode, KinematicsDto, NotificationBody, RequestError, RequestId,
-    SceneArrivalDto, SceneBodyDto, SceneClockDto, SceneCraftDto, SceneNotificationDto,
+    BodyIdHex, CameraReportDto, ErrorCode, KinematicsDto, NotificationBody, RequestError,
+    RequestId, SceneArrivalDto, SceneBodyDto, SceneClockDto, SceneCraftDto, SceneNotificationDto,
     ServerMessage,
 };
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
+use crate::compute::{CancelToken, CpuPool, Priority};
 use crate::limits::MAX_SUBSCRIPTIONS;
 use crate::requests::to_frame;
+use crate::scene::is_large_notification;
 
 /// A subscription's number on its connection, from 1, never reused on that connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -105,10 +107,6 @@ pub(crate) struct ScenePush {
 
 impl ScenePush {
     /// A push of the clock alone: a heartbeat.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the scene topic (R03.T8) is the first to push")
-    )]
     #[must_use]
     pub(crate) fn heartbeat(clock: SceneClockDto) -> Self {
         Self {
@@ -170,6 +168,26 @@ struct Shared {
     pending: Mutex<Option<PendingPush>>,
     /// The topic's task, which ends with the subscription.
     task: Mutex<TaskSlot>,
+    /// The commands the connection routes to the topic, until the topic takes them.
+    commands: Mutex<Option<mpsc::Receiver<SubscriptionCommand>>>,
+}
+
+/// Commands a subscription's topic may queue: a client's in flight are at most
+/// [`MAX_IN_FLIGHT_REQUESTS`](crate::limits::MAX_IN_FLIGHT_REQUESTS).
+const COMMANDS: usize = 8;
+
+/// A request the connection routes to a subscription's topic, with where the topic answers it
+/// (rendering plan R03, R03.T8.a): requests that name a subscription cannot reach it through
+/// [`Handler::handle`](crate::requests::Handler::handle).
+#[derive(Debug)]
+pub(crate) enum SubscriptionCommand {
+    /// `scene_cameras`: replace the scene's cameras.
+    SceneCameras {
+        /// The views' cameras.
+        cameras: Vec<CameraReportDto>,
+        /// Where the topic answers: the empty answer, or why the cameras are refused.
+        answer: oneshot::Sender<Result<(), RequestError>>,
+    },
 }
 
 /// Where a topic's task stands against its subscription's end, under one lock, so that a task
@@ -193,10 +211,6 @@ impl Shared {
             .take()
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the scene topic (R03.T8) is the first to push")
-    )]
     fn merge(&self, change: PendingPush) {
         let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
         match pending.as_mut() {
@@ -217,10 +231,6 @@ impl Shared {
 
 /// A topic's end of a subscription: where it merges its changes, and how it learns that the
 /// subscription has ended.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the scene topic (R03.T8) is the first to push")
-)]
 #[derive(Debug, Clone)]
 pub(crate) struct Pusher {
     shared: Arc<Shared>,
@@ -228,10 +238,6 @@ pub(crate) struct Pusher {
     ended: watch::Receiver<()>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the scene topic (R03.T8) is the first to push")
-)]
 impl Pusher {
     /// Merges `change` into the subscription's pending push and wakes the connection. Returns
     /// whether the subscription is still open; a push after it ended is dropped.
@@ -265,6 +271,16 @@ impl Pusher {
         }
     }
 
+    /// The commands the connection routes to this subscription, for the topic to answer; `None`
+    /// once taken. A topic that never takes them leaves each such request answered `internal`.
+    pub(crate) fn take_commands(&self) -> Option<mpsc::Receiver<SubscriptionCommand>> {
+        self.shared
+            .commands
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+    }
+
     /// Whether the subscription has ended: `unsubscribe`, a failed opening or the socket's close.
     #[must_use]
     pub(crate) fn is_ended(&self) -> bool {
@@ -295,6 +311,8 @@ struct Subscription {
     /// The last sequence sent: the state's 0, then one more per notification.
     sequence: u64,
     shared: Arc<Shared>,
+    /// Where the connection routes the requests that name this subscription.
+    commands: mpsc::Sender<SubscriptionCommand>,
     /// Dropped with the subscription, which ends its [`Pusher`]s.
     _ending: watch::Sender<()>,
 }
@@ -315,20 +333,100 @@ impl Drop for Subscription {
     }
 }
 
+/// A notification taken from its subscription and not yet serialised.
+#[derive(Debug)]
+pub(crate) struct Unsent {
+    id: SubscriptionId,
+    message: ServerMessage,
+}
+
+impl Unsent {
+    /// The subscription it is for.
+    #[must_use]
+    pub(crate) fn id(&self) -> SubscriptionId {
+        self.id
+    }
+
+    /// Whether it is serialised on the CPU pool rather than the runtime (rendering plan R03,
+    /// Design note 14): a scene notification carrying an arrival holds a whole system.
+    #[must_use]
+    pub(crate) fn is_large(&self) -> bool {
+        match &self.message {
+            ServerMessage::Notification {
+                body: NotificationBody::Scene(notification),
+                ..
+            } => is_large_notification(notification),
+            _ => false,
+        }
+    }
+
+    /// Serialises it here.
+    #[must_use]
+    pub(crate) fn serialise(self) -> Ready {
+        let frame = to_frame(&self.message);
+        self.with_frame(frame)
+    }
+
+    /// Serialises it on `pool`, as a large one is; here if the pool is shutting down.
+    pub(crate) async fn serialise_on(self, pool: &CpuPool) -> Ready {
+        let Self { id, message } = self;
+        let job = pool
+            .submit(Priority::Interactive, CancelToken::new(), move |_| {
+                let frame = to_frame(&message);
+                (message, frame)
+            })
+            .await;
+        let Ok(receiver) = job else {
+            tracing::warn!("the pool is shutting down; a notification is not sent");
+            return Ready::empty(id);
+        };
+        if let Ok(Ok((message, frame))) = receiver.await {
+            Self { id, message }.with_frame(frame)
+        } else {
+            // The job held the message and is gone with it: a panic in serialising, which
+            // `to_frame` rules out, or the pool stopping, after which nothing is sent.
+            tracing::warn!("a notification could not be serialised on the pool");
+            Ready::empty(id)
+        }
+    }
+
+    /// The ready notification of `frame`, the message's serialisation.
+    fn with_frame(self, frame: String) -> Ready {
+        let ServerMessage::Notification { body, .. } = self.message else {
+            unreachable!("an unsent message is a notification");
+        };
+        Ready {
+            id: self.id,
+            frame,
+            body: Some(body),
+        }
+    }
+}
+
 /// A notification ready to queue, and what to do with it once it is or is not.
 #[derive(Debug)]
 pub(crate) struct Ready {
     id: SubscriptionId,
     frame: String,
-    /// The notification's body, from which the push is recovered if it has no room.
-    body: NotificationBody,
+    /// The notification's body, from which the push is recovered if it has no room; `None` for
+    /// one that could not be serialised, which is dropped.
+    body: Option<NotificationBody>,
 }
 
 impl Ready {
-    /// The subscription it is for.
+    /// A notification that could not be serialised: nothing to send, nothing to restore.
+    fn empty(id: SubscriptionId) -> Self {
+        Self {
+            id,
+            frame: String::new(),
+            body: None,
+        }
+    }
+
+    /// Whether there is nothing to send.
     #[must_use]
-    pub(crate) fn id(&self) -> SubscriptionId {
-        self.id
+    pub(crate) fn is_empty(&self) -> bool {
+        self.body.is_none()
     }
 
     /// The frame's payload bytes, for the outbound budget.
@@ -397,7 +495,11 @@ impl Subscriptions {
         };
         let id = SubscriptionId(self.next);
         self.next = next;
-        let shared = Arc::new(Shared::default());
+        let (commands, inbox) = mpsc::channel(COMMANDS);
+        let shared = Arc::new(Shared {
+            commands: Mutex::new(Some(inbox)),
+            ..Shared::default()
+        });
         let (ending, ended) = watch::channel(());
         self.live.insert(
             id,
@@ -405,6 +507,7 @@ impl Subscriptions {
                 stage: Stage::Opening(request),
                 sequence: 0,
                 shared: Arc::clone(&shared),
+                commands,
                 _ending: ending,
             },
         );
@@ -452,16 +555,49 @@ impl Subscriptions {
         }
     }
 
+    /// Routes `command` to live subscription `number`'s topic.
+    ///
+    /// # Errors
+    ///
+    /// `bad_request` naming `subscription` if the connection has no live subscription `number`,
+    /// or its topic takes no commands; `queue_full` if its topic has [`COMMANDS`] waiting.
+    pub(crate) fn command(
+        &self,
+        number: u32,
+        command: SubscriptionCommand,
+    ) -> Result<(), RequestError> {
+        let subscription = self
+            .live
+            .get(&SubscriptionId(number))
+            .filter(|subscription| subscription.stage == Stage::Live)
+            .ok_or_else(|| unknown_subscription(number))?;
+        subscription
+            .commands
+            .try_send(command)
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => RequestError {
+                    code: ErrorCode::QueueFull,
+                    message: format!("subscription {number} has too many requests waiting"),
+                    field: None,
+                },
+                mpsc::error::TrySendError::Closed(_) => RequestError {
+                    code: ErrorCode::BadRequest,
+                    message: format!("subscription {number}'s topic takes no such request"),
+                    field: Some("subscription".to_owned()),
+                },
+            })
+    }
+
     /// Completes when a push has arrived since the last call. Cancellation-safe.
     pub(crate) async fn woken(&self) {
         self.wake.notified().await;
     }
 
-    /// The next live subscription's pending push, as the frame it would be sent as, numbered with
-    /// its next sequence; `None` if nothing is pending. Every subscription is asked in turn, from
-    /// the one after `after`.
+    /// The next live subscription's pending push, as the notification it would be sent as,
+    /// numbered with its next sequence but not yet serialised; `None` if nothing is pending. Every
+    /// subscription is asked in turn, from the one after `after`.
     #[must_use]
-    pub(crate) fn next_ready(&self, after: Option<SubscriptionId>) -> Option<Ready> {
+    pub(crate) fn next_unsent(&self, after: Option<SubscriptionId>) -> Option<Unsent> {
         let start = after.map_or(0, |id| id.0.saturating_add(1));
         self.live
             .range(SubscriptionId(start)..)
@@ -469,15 +605,13 @@ impl Subscriptions {
             .find_map(|(&id, subscription)| {
                 let push = subscription.shared.take()?;
                 let next = subscription.sequence.saturating_add(1);
-                let message = ServerMessage::Notification {
-                    subscription: id.0,
-                    body: push.into_body(next),
-                };
-                let frame = to_frame(&message);
-                let ServerMessage::Notification { body, .. } = message else {
-                    unreachable!("built as a notification just above");
-                };
-                Some(Ready { id, frame, body })
+                Some(Unsent {
+                    id,
+                    message: ServerMessage::Notification {
+                        subscription: id.0,
+                        body: push.into_body(next),
+                    },
+                })
             })
     }
 
@@ -492,10 +626,8 @@ impl Subscriptions {
 
     /// Puts back a ready notification that has no room, to be merged with what comes next.
     pub(crate) fn not_sent(&self, ready: Ready) {
-        if let Some(subscription) = self.live.get(&ready.id) {
-            subscription
-                .shared
-                .restore(PendingPush::from_body(ready.body));
+        if let (Some(subscription), Some(body)) = (self.live.get(&ready.id), ready.body) {
+            subscription.shared.restore(PendingPush::from_body(body));
         }
     }
 }
@@ -578,6 +710,7 @@ mod tests {
             clock: clock(0),
             ship: ship(),
             system: None,
+            tidal_radius_m: None,
             craft: Vec::new(),
         })
     }
@@ -952,7 +1085,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_server_s_handlers_answer_subscribe_unsupported_until_a_topic_is_served() {
+    async fn the_server_s_scene_topic_refuses_a_universe_it_does_not_hold() {
         let harness = Harness::start(crate::requests::Handlers).await;
         let mut client = harness.connect().await;
         client.hello().await;
@@ -964,9 +1097,9 @@ mod tests {
             .await;
         match client.next_message().await {
             ServerMessage::RequestError { error, .. } => {
-                assert_eq!(error.code, ErrorCode::Unsupported);
+                assert_eq!(error.code, ErrorCode::UnknownUniverse);
             }
-            other => panic!("expected `unsupported`, got {other:?}"),
+            other => panic!("expected `unknown_universe`, got {other:?}"),
         }
         client.close().await;
         harness.stop().await;

@@ -185,6 +185,8 @@ enum Event {
 
 /// The reading side of a connection and everything it owns.
 struct Connection {
+    /// The server's state, whose pool serialises a large notification.
+    state: Arc<AppState>,
     requests: Requests,
     /// The connection's subscriptions, which end with it (rendering plan R03, R03.T5.b).
     subscriptions: Subscriptions,
@@ -211,6 +213,7 @@ impl Connection {
         );
         let mut writer = tokio::spawn(writer.run(sink).in_current_span());
         let mut connection = Self {
+            state: Arc::clone(&state),
             requests: Requests::new(Arc::clone(&state)),
             subscriptions: Subscriptions::new(),
             push_waits_for: None,
@@ -225,6 +228,7 @@ impl Connection {
             state.outbound_stats.write_timed_out();
         }
         let Self {
+            state: _,
             mut requests,
             subscriptions,
             outbound,
@@ -381,6 +385,12 @@ impl Connection {
                 self.handshake,
                 &mut self.subscriptions,
             )),
+            ClientMessage::Request {
+                id,
+                body: RequestBody::SceneCameras(request),
+            } => self
+                .requests
+                .scene_cameras(id, request, self.handshake, &self.subscriptions),
             ClientMessage::Request { id, body } => self.requests.submit(id, body, self.handshake),
             ClientMessage::Cancel { id } => {
                 let cancelled = self.requests.cancel(id);
@@ -419,8 +429,16 @@ impl Connection {
     async fn flush_pushes(&mut self) -> Result<(), End> {
         self.push_waits_for = None;
         let mut after = None;
-        while let Some(ready) = self.subscriptions.next_ready(after) {
-            after = Some(ready.id());
+        while let Some(unsent) = self.subscriptions.next_unsent(after) {
+            after = Some(unsent.id());
+            let ready = if unsent.is_large() {
+                unsent.serialise_on(&self.state.pool).await
+            } else {
+                unsent.serialise()
+            };
+            if ready.is_empty() {
+                continue;
+            }
             let bytes = ready.frame_len();
             if self.outbound.has_room_for(bytes) {
                 let frame = self.subscriptions.sent(ready);

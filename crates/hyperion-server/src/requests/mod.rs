@@ -20,6 +20,9 @@ mod scene;
 mod system;
 mod universe;
 
+pub(crate) use self::system::bodies_of;
+pub(crate) use self::universe::openable_universe;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::future::ready;
@@ -30,9 +33,11 @@ use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
     ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    ServerMessage, SubscribeRequest, Subscribed, SubscriptionState, UnsubscribeRequest,
+    SceneCamerasRequest, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
+    SubscriptionTopic, UnsubscribeRequest,
 };
 use serde_json::Value;
+use tokio::sync::oneshot;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
 use tracing::Instrument;
 
@@ -43,7 +48,7 @@ use crate::compute::{
 };
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
-use crate::subscriptions::{Pusher, Subscriptions};
+use crate::subscriptions::{Pusher, SubscriptionCommand, Subscriptions};
 
 /// What a handler returns: its answer, the response's body with any bulk payload, or why there is
 /// none.
@@ -78,6 +83,21 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
         _token: CancelToken,
     ) -> SubscribeFuture {
         Box::pin(ready(Err(not_served_yet("subscribe"))))
+    }
+}
+
+/// Opens the topic a `subscribe` names: the scene's (rendering plan R03, R03.T8.a).
+fn open_topic(
+    state: Arc<AppState>,
+    request: SubscribeRequest,
+    pusher: Pusher,
+    token: CancelToken,
+) -> SubscribeFuture {
+    let SubscribeRequest { universe, topic } = request;
+    match topic {
+        SubscriptionTopic::Scene(scene) => {
+            Box::pin(crate::scene::open(state, universe, scene, pusher, token))
+        }
     }
 }
 
@@ -130,9 +150,20 @@ impl Handler for Handlers {
             RequestBody::SceneShip(request) => {
                 Box::pin(scene::ship(state, request, token).map(answered))
             }
-            // Served by R03.T8.
+            // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
+            // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
         }
+    }
+
+    fn subscribe(
+        &self,
+        state: Arc<AppState>,
+        request: SubscribeRequest,
+        pusher: Pusher,
+        token: CancelToken,
+    ) -> SubscribeFuture {
+        open_topic(state, request, pusher, token)
     }
 }
 
@@ -500,6 +531,42 @@ impl Requests {
             .into())
         });
         self.start(id, kind, token, handled);
+        None
+    }
+
+    /// Routes a `scene_cameras` to its subscription's topic and starts the request that waits for
+    /// the topic's answer (rendering plan R03, R03.T8.a), or refuses it and returns the answer: as
+    /// [`Requests::submit`] refuses, `bad_request` naming `subscription` for a subscription the
+    /// connection does not have live, and `queue_full` for one with too many waiting.
+    pub(crate) fn scene_cameras(
+        &mut self,
+        id: RequestId,
+        request: SceneCamerasRequest,
+        handshake: Handshake,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = "scene_cameras";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::SceneCameras {
+            cameras: request.cameras,
+            answer,
+        };
+        if let Err(error) = subscriptions.command(request.subscription, command) {
+            return Some(self.refuse(id, kind, error));
+        }
+        let handled: HandlerFuture = Box::pin(async move {
+            match answered.await {
+                Ok(checked) => checked.map(|()| ResponseBody::SceneCameras.into()),
+                Err(_) => Err(request_error(
+                    ErrorCode::Internal,
+                    "the subscription ended before it answered",
+                )),
+            }
+        });
+        self.start(id, kind, CancelToken::new(), handled);
         None
     }
 
@@ -1131,6 +1198,7 @@ mod tests {
                 },
                 ship: galactic_pose(),
                 system: None,
+                tidal_radius_m: None,
                 craft: Vec::new(),
             }),
         }));

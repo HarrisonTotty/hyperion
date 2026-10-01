@@ -1448,3 +1448,29 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   model, are laid out once per change and not once per push. The acceptance command should read
   `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`, which also runs
   `lightTime.test.ts`.
+- **Deviations in T8.a, as built.** The topic is `scene/topic.rs`: `open` (reached through
+  `Handlers::subscribe`) builds the core on the pool at `Priority::Interactive`, re-running the
+  job after fetching each system it asks for (`FetchSystemError`) from the body cache, and spawns
+  the task, handed to the `Pusher` (`attach`) so that it ends with the subscription; its pool jobs
+  carry a token a `CancelOnDrop` cancels when the task ends. Cameras sent with `subscribe` out of
+  reach refuse the subscription (`bad_request` naming `cameras`). `scene_cameras` is routed by the
+  connection, as R03.T5.b foresaw: each subscription has a command channel of 8
+  (`SubscriptionCommand`, `Subscriptions::command`, `Pusher::take_commands`), and
+  `Requests::scene_cameras` starts a request that awaits the topic's answer; an unknown
+  subscription is `bad_request` naming `subscription`, a full channel `queue_full`. A notification
+  carrying an arrival is serialised on the pool (Design note 14): `Subscriptions::next_ready`
+  became `next_unsent`, whose `Unsent` is serialised here or by `serialise_on(pool)` in
+  `flush_pushes`. The frame is re-selected at each heartbeat, setting change and due
+  `valid_until`, so a stand-in drifting across a sphere is noticed within a second of real time.
+  A heartbeat is pushed each second whether or not anything changed. Requested by the
+  orchestrator for R02.T17 (lane D3): `SceneStateDto` gains an optional `tidal_radius_m`, present
+  whenever `system` is, so a client subscribing inside a system has the sphere; bindings
+  regenerated. `scene` is a public module for its seams only (`SceneKnowledge`, `GrantAsked`,
+  `CraftSource`, `NoCraft`, `CraftState`), injected through `ServerConfigBuilder::scene_knowledge`
+  and `craft_source` (as `entropy` is) and held by `SceneService`; everything else stays
+  `pub(crate)`. `requests::{bodies_of, openable_universe}` are re-exported `pub(crate)`.
+  `TestClient::request_among_notifications` answers a request on a connection with subscriptions
+  open. The heartbeat test runs in real time with the scene clock paused (the task's "paused
+  clock" read as the scene's). No generated body changes inside the clock window, so "a body's
+  `valid_until` passing at 100,000× is pushed" is a unit test in `scene/topic.rs` on a planted
+  `valid_until` (`SceneCore::plant_valid_until`, test-only).
