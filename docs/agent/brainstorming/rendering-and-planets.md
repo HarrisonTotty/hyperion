@@ -2507,9 +2507,17 @@ Recommended here, as technical choices rather than rulings, each argued in the s
 
 Awaiting the owner:
 
-- **The Content Security Policy.** The renderer's policy must gain `'wasm-unsafe-eval'` before the
-  first height worker. `.claude/rules/typescript-dev.md` requires asking before the policy is
-  loosened, so the change is the owner's decision, not this document's.
+- **The Content Security Policy.** ~~The renderer's policy must gain `'wasm-unsafe-eval'` before
+  the first height worker.~~ **Ruled 2026-09-30 (R04.T10.a, by the owner's authority given to the
+  implementing lane): the policy does not change.** Tested on the repo's Electron 44.4.3, a
+  same-origin module worker loaded from `file://` or the dev server has no policy of its own and
+  compiles WebAssembly under today's `script-src 'self'`, while the page's own thread is refused
+  and a `blob:` worker is refused at creation (R04 Design note 16). So the workers stay same-origin
+  module files, the render thread never compiles WebAssembly (the loader names a policy refusal as
+  its own fault, and a source test keeps the generated module's imports in workers), and the
+  worker's `file://` reach over the disk is accepted while the renderer runs only its own code.
+  Serving through a custom scheme with a header policy remains open should that change.
+  `.claude/rules/typescript-dev.md`'s rule stands.
 - **The guide.** The edits this document asks of `docs/frontend/ux-guidelines.md`, collected under
   [What the guide must gain](#what-the-guide-must-gain), are proposals, since guide additions are the
   owner's call.
