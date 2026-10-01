@@ -402,8 +402,9 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
     this.#assertLive();
     if (spec.blend === "premultiplied") {
-      // Babylon's mode 7 changes the destination alpha until its factors are overridden.
-      throw notBuilt("createMaterial with premultiplied blending", "R01.T8.i");
+      // Babylon's mode 7 changes the destination alpha; the adapter's own pipelines (Design note
+      // 23) take `BLEND_STATES` instead.
+      throw notBuilt("createMaterial with premultiplied blending", "R01.T8.k");
     }
     const material = createShaderMaterial(this.#scene, spec);
     const uniforms = new Map<string, UniformSpec>(
@@ -850,10 +851,18 @@ export class BabylonRenderEngine implements RenderEngine, ViewHost, TargetHost {
     const internal = this.#engine.wrapWebGPUTexture(texture);
     internal.isCube = spec.dimension === "cube";
     internal.is3D = spec.dimension === "3d";
+    const isDepth = spec.format.startsWith("depth");
+    if (isDepth) {
+      // A target's depth, bound as `texture_depth_2d` (Design note 21): Babylon reads a texture's
+      // kind from its own format, which a wrapped texture leaves at the colour default.
+      internal.format = Constants.TEXTUREFORMAT_DEPTH32_FLOAT;
+      internal.type = Constants.TEXTURETYPE_FLOAT;
+    }
     setSampledView(internal, {
       label: spec.name,
       dimension: viewDimensionOf(spec),
       mipLevelCount: spec.mips,
+      ...(isDepth ? { aspect: "depth-only" } : {}),
     });
     const wrapped = new ThinTexture(internal);
     this.#sampled.set(handle, wrapped);

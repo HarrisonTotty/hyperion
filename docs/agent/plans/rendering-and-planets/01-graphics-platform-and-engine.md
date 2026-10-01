@@ -2142,3 +2142,16 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   - Checked by the scratch page on SwiftShader and the RTX 3080 (T9.i's splat round trip remains
     T9's): two points splatted onto one texel of a cleared 4 × 4 face read back as twice the
     fragment's colour, alpha included, and an untouched texel reads zero.
+- **Deviations in T8.i, as built.**
+  - Built after the shader-convention decision of 2026-09-30 (Design note 23, T8.k), so the mode-7
+    `onBind` override of Design note 21 was **not** built: every blending draw goes through the
+    adapter's own pipelines in T8.k, whose blend state is `BLEND_STATES` (colour per mode, alpha
+    always (zero, one)), which the tests pin. Until T8.k lands, a `premultiplied` material still
+    throws, naming T8.k. (Babylon's `setAlphaMode` also turns depth writes off for every blending
+    material, another reason to leave its path.)
+  - `assertNoDepthSelfSample` (`target.ts`) refuses, before anything is encoded, a frame in which a
+    draw samples the depth of the target it renders into, with `DepthSelfSample` naming the target
+    and the material. A target's own `depth32float` already carried `TEXTURE_BINDING` (T8.f). On
+    Babylon's path a depth texture bound per draw is given Babylon's depth format and type and a
+    `depth-only` view, so that Babylon binds it as `texture_depth_2d`; T8.k supersedes this with
+    its own bind groups. The harness checks (T9.i) run on T8.k's path.
