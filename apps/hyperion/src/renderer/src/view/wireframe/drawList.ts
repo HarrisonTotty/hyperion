@@ -145,8 +145,9 @@ export interface DrawAnchor {
 }
 
 /**
- * Everything the wireframe style draws in one frame, engine-agnostic and `f32` camera-relative, in
- * the order it is drawn: opaque occluders, lines, sprites (plan R02, R02.T13).
+ * Everything the wireframe style draws in one frame, engine-agnostic and `f32` camera-relative
+ * (plan R02, R02.T13): occluders, lines and sprites, which the submission draws as occluders,
+ * sprites, then lines, so that a mark's casing covers a star (R02.T14).
  */
 export interface WireframeDrawList {
   /** The bodies' occluder spheres. */

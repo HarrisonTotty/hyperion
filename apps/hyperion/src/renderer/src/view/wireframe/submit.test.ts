@@ -86,7 +86,8 @@ describe("the wireframe's shaders", () => {
   });
 
   it.each(MATERIALS)("%s declares the frame, the draw and its buffer at R01's groups", (name) => {
-    const source = WIREFRAME_MATERIALS[name].vertexWgsl;
+    // Spacing is free around a colon: the decision's own frame.wgsl writes `frame : Frame`.
+    const source = WIREFRAME_MATERIALS[name].vertexWgsl.replace(/\s*:\s*/g, ": ");
     expect(
       [
         "@group(0) @binding(0) var<uniform> frame: Frame;",

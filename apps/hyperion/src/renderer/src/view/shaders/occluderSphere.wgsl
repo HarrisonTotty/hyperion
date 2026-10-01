@@ -15,6 +15,10 @@ struct Draw {
 // centre's distance less the radius, m, differenced in f64 on the CPU, then 0, 0, 0.
 @group(2) @binding(0) var<storage, read> spheres: array<vec4f>;
 
+// The slope term's scale, px: half the widest cased stroke over a body (1.5 px plus a 1 px casing
+// each side) and the one-pixel fringe, w_max / 2 + 1 = 2.75, rounded up.
+const SLOPE_SCALE = 3.0;
+
 struct SphereVarying {
   @builtin(position) position: vec4f,
   @location(0) @interpolate(flat) sphere: u32,
@@ -61,12 +65,24 @@ fn fragmentMain(v: SphereVarying) -> SphereDepth {
   if (along <= 0.0 || h2 < 0.0 || altitudeM <= 0.0) {
     discard;
   }
-  // The near intersection, t = (D^2 - r^2) / (b + sqrt(h^2)), with D^2 - r^2 = altitude * (D + r): free of
-  // the cancellation of b - sqrt(h^2) close to the body.
+  // The near intersection, t = (D^2 - r^2) / (b + sqrt(h^2)), with D^2 - r^2 = altitude * (D + r):
+  // free of the cancellation of b - sqrt(h^2) close to the body.
   let t = altitudeM * (length(centre) + radiusM) / (along + sqrt(h2));
+  let n = frame.clipProjection[3][2];
+  // Reversed-Z, infinite far: depth = n / (-z) (Design note 4).
+  let depth = n / (t * -ray.z);
+  // The depth's slope across the screen, per pixel, from the tangent plane at the hit point: on
+  // it depth = n (N . u) / (N . P) with u = (x_ndc / s, y_ndc / (s a), -1), linear in the view.
+  let hit = t * ray;
+  let normal = (hit - centre) / radiusM;
+  let facing = abs(dot(normal, hit));
+  let slopeX = n * abs(normal.x) * 2.0 / (frame.viewport.x * frame.clipProjection[0][0] * facing);
+  let slopeY = n * abs(normal.y) * 2.0 / (frame.viewport.y * frame.clipProjection[1][1] * facing);
   var out: SphereDepth;
   out.colour = vec4f(0.0);
-  // Reversed-Z, infinite far: depth = n / (-z) (Design note 4).
-  out.depth = min(frame.clipProjection[3][2] / (t * -ray.z), 1.0);
+  // Pushed away by the slope over a cased stroke's half-width and its fringe, as the hull faces'
+  // bias is (Design note 5), so that the whole width of the body's own graticule stays in front:
+  // the 4e-6 margin alone holds only the stroke's centreline.
+  out.depth = clamp(depth - SLOPE_SCALE * max(slopeX, slopeY), 0.0, 1.0);
   return out;
 }
