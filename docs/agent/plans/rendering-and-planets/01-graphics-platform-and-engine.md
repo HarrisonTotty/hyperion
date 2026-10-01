@@ -2352,3 +2352,18 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     in its gate for changes under `view/engine/`, `view/shaders/`, `src/smoke/`,
     `src/renderer/src/smoke/`, `smoke.html`, `testRender.sh` or any `.wgsl`. The proposal to move
     the recipe into `ci` waits for one Electron upgrade with no harness failure.
+- **Deviations in T10, as built.**
+  - The twins live in `view/engine/twins.ts` (sources, inputs and CPU references) and are the
+    catalogue's first entries; the harness's check is `smoke/twins.ts`. There are three pairs, not
+    two: the bit-exact u32 sum twice, once in workgroups of 64 over 2¹⁶ inputs and once in
+    workgroups of 37 over 65,533 (`sum u32 ragged`), since a non-multiple invocation count needs a
+    workgroup no subgroup size divides; and the presentation-only f32 sum, one workgroup of 256
+    (strided sums, then a tree; its subgroup variant feeds the tree each subgroup's `subgroupAdd`
+    at its first lane, since WGSL relates no subgroup to `local_invocation_index`).
+  - The subgroup variants add each subgroup's sum with one `atomicAdd` and record the largest
+    `subgroup_size` seen with `atomicMax` in a second word, which the harness logs: SwiftShader
+    reports 4. Every `subgroupAdd` follows a bounds `if` in uniform control flow.
+  - "Both paths' bytes equal each other": each run takes one path, and both runs' totals equal the
+    CPU's `wrapping_add` total (128 and 127 wraps past 2³²), so they equal each other. The f32 sum
+    read with `tolerance` lay within `highamBound` on both paths on SwiftShader, and equal to the
+    `f64` sum there (98,298.53125); the ordinary read throws `PresentationOnlyReadback`.
