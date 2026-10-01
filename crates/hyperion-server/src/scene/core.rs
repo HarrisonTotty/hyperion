@@ -279,18 +279,15 @@ impl SceneCore {
         let target = select(world, current, &ship, t)?;
         match (target, current) {
             (Some(target), Some(id)) if target.record.id() == id => {
-                self.refresh(inputs, world, beat)
+                match self.refresh(inputs, world, beat)? {
+                    Some(delta) => Ok(delta),
+                    // A body the client holds no longer resolves at its grant, and the wire has
+                    // no withdrawal: the whole system arrives again, at the current grants (a
+                    // delegated decision of 2026-09-30).
+                    None => self.arrival(&target, inputs, world),
+                }
             }
-            (Some(target), _) => {
-                let (system, tidal_radius) = self.arrive(&target, inputs, world)?;
-                Ok(SceneDelta {
-                    arrival: Some(SceneArrivalDto::System {
-                        system: Box::new(system),
-                        tidal_radius_m: tidal_radius.value(),
-                    }),
-                    bodies: Vec::new(),
-                })
-            }
+            (Some(target), _) => self.arrival(&target, inputs, world),
             (None, Some(_)) => {
                 self.system = None;
                 Ok(SceneDelta {
@@ -401,6 +398,23 @@ impl SceneCore {
         Some(*index)
     }
 
+    /// The arrival in `target`: the whole system at the scene time, entered.
+    fn arrival(
+        &mut self,
+        target: &Target<'_>,
+        inputs: SceneInputs<'_>,
+        world: &SceneWorld<'_>,
+    ) -> Result<SceneDelta, FetchSystemError> {
+        let (system, tidal_radius) = self.arrive(target, inputs, world)?;
+        Ok(SceneDelta {
+            arrival: Some(SceneArrivalDto::System {
+                system: Box::new(system),
+                tidal_radius_m: tidal_radius.value(),
+            }),
+            bodies: Vec::new(),
+        })
+    }
+
     /// Enters `target`: the whole system at the scene time, its bodies recorded as sent.
     fn arrive(
         &mut self,
@@ -456,7 +470,8 @@ impl SceneCore {
 
     /// The bodies to re-send in the system the scene stays in: those whose `valid_until` has
     /// passed, evaluated when it passed; those whose grant changed; and at a heartbeat every
-    /// contact the ship sees, or saw at the last push, with its seen position.
+    /// contact the ship sees, or saw at the last push, with its seen position. `None` when a body
+    /// sent before no longer resolves at its grant, which only a whole new arrival can withdraw.
     ///
     /// # Errors
     ///
@@ -467,11 +482,11 @@ impl SceneCore {
         inputs: SceneInputs<'_>,
         world: &SceneWorld<'_>,
         beat: Beat,
-    ) -> Result<SceneDelta, FetchSystemError> {
+    ) -> Result<Option<SceneDelta>, FetchSystemError> {
         let t = inputs.clock.time();
         let asked = self.asked;
         let Some(system) = self.system.as_ref() else {
-            return Ok(SceneDelta::default());
+            return Ok(Some(SceneDelta::default()));
         };
         let generated = Arc::clone(&system.generated);
         let id = system.record.id();
@@ -498,6 +513,7 @@ impl SceneCore {
             .expect("the scene's system was read just above");
         let (ctx, planets) = generated.as_ref();
         let mut bodies = Vec::new();
+        let mut withdrawn = false;
         for (index, level) in levels {
             let sent = system.sent.get(&index).copied();
             let regranted = sent.is_none_or(|sent| sent.level != level);
@@ -540,17 +556,18 @@ impl SceneCore {
                         .insert(index, Sent::of(listed, body.seen.is_some()));
                     bodies.push(body);
                 }
-                // A level that no longer resolves the body sends nothing: the wire has no
-                // withdrawal, and the client keeps what it had.
+                // A level that no longer resolves a body the client holds withdraws it, which
+                // the wire can say only by sending the whole system again; one never sent is
+                // simply not sent.
                 None => {
-                    system.sent.remove(&index);
+                    withdrawn |= system.sent.remove(&index).is_some();
                 }
             }
         }
-        Ok(SceneDelta {
+        Ok((!withdrawn).then_some(SceneDelta {
             arrival: None,
             bodies,
-        })
+        }))
     }
 }
 
@@ -989,6 +1006,48 @@ mod tests {
         }
     }
 
+    /// [`OddSlotsContacts`] where `contact` still resolves the body, so that every body it lowers
+    /// can be re-sent at its new level; the rest keep the level asked.
+    #[derive(Debug)]
+    struct OddSlotsResolvedContacts;
+
+    impl OddSlotsResolvedContacts {
+        fn lowers(index: BodyIndex) -> bool {
+            (index.get() >> 8) % 2 == 1 && DetailLevel::Contact.resolves(index)
+        }
+    }
+
+    impl SceneKnowledge for OddSlotsResolvedContacts {
+        fn grant(&self, body: BodyId, asked: DetailLevel) -> DetailLevel {
+            match BodyIndex::try_from(body.body_index()) {
+                Ok(index) if Self::lowers(index) => DetailLevel::Contact,
+                _ => asked,
+            }
+        }
+
+        fn is_contact(&self, _craft: &CraftState) -> bool {
+            false
+        }
+    }
+
+    /// Grants `contact`, which resolves no member of a belt, to every body `contact` does not
+    /// resolve, and the level asked to the rest.
+    #[derive(Debug)]
+    struct BeltMembersAsContacts;
+
+    impl SceneKnowledge for BeltMembersAsContacts {
+        fn grant(&self, body: BodyId, asked: DetailLevel) -> DetailLevel {
+            match BodyIndex::try_from(body.body_index()) {
+                Ok(index) if !DetailLevel::Contact.resolves(index) => DetailLevel::Contact,
+                _ => asked,
+            }
+        }
+
+        fn is_contact(&self, _craft: &CraftState) -> bool {
+            false
+        }
+    }
+
     fn system_of(state: &SceneStateDto) -> &SceneSystemDto {
         state.system.as_ref().expect("the scene is in a system")
     }
@@ -1222,19 +1281,19 @@ mod tests {
         assert_eq!(unchanged, SceneDelta::default());
         let delta = core
             .advance(
-                inputs(at(30), &ship, &OddSlotsContacts),
+                inputs(at(30), &ship, &OddSlotsResolvedContacts),
                 &world,
                 Beat::Change,
             )
             .unwrap();
+        assert_eq!(delta.arrival, None);
         let touched: BTreeSet<BodyIdHex> = system_of(&state)
             .grants
             .iter()
-            .filter(|grant| (grant.body.to_parts().1 >> 8) % 2 == 1)
             .filter(|grant| {
-                // A belt's member is not resolved at `contact`: it cannot be re-sent, and the
-                // wire has no withdrawal.
-                DetailLevel::Contact.resolves(BodyIndex::try_from(grant.body.to_parts().1).unwrap())
+                OddSlotsResolvedContacts::lowers(
+                    BodyIndex::try_from(grant.body.to_parts().1).unwrap(),
+                )
             })
             .map(|grant| grant.body.clone())
             .collect();
@@ -1252,6 +1311,71 @@ mod tests {
                 .all(|body| body.level == DetailLevelDto::Contact)
         );
         assert!(delta.bodies.iter().any(|body| body.seen.is_some()));
+    }
+
+    #[test]
+    fn a_grant_that_withdraws_a_body_sent_brings_the_whole_system_again_without_it() {
+        let fixture = Fixture::new();
+        let world = fixture.world();
+        let ship = system_ship(&fixture);
+        let (mut core, state) = SceneCore::build(
+            DetailLevel::Full,
+            inputs(at(10), &ship, &GrantAsked),
+            Vec::new(),
+            &world,
+        )
+        .unwrap();
+        let withdrawn: BTreeSet<BodyIdHex> = system_of(&state)
+            .grants
+            .iter()
+            .filter(|grant| {
+                !DetailLevel::Contact
+                    .resolves(BodyIndex::try_from(grant.body.to_parts().1).unwrap())
+            })
+            .map(|grant| grant.body.clone())
+            .collect();
+        assert!(
+            !withdrawn.is_empty(),
+            "the fixture's system has a belt's members"
+        );
+
+        let delta = core
+            .advance(
+                inputs(at(30), &ship, &BeltMembersAsContacts),
+                &world,
+                Beat::Change,
+            )
+            .unwrap();
+        let Some(SceneArrivalDto::System {
+            system,
+            tidal_radius_m,
+        }) = delta.arrival
+        else {
+            panic!("the system arrives again: {:?}", delta.arrival);
+        };
+        assert!(delta.bodies.is_empty());
+        assert_eq!(system.system.hosts.system.to_u64(), fixture.id().raw());
+        assert_eq!(
+            tidal_radius_m.to_bits(),
+            fixture.tidal_radius(at(30)).value().to_bits()
+        );
+        let listed: BTreeSet<BodyIdHex> = system
+            .system
+            .bodies
+            .iter()
+            .map(|body| body.id.clone())
+            .collect();
+        assert!(listed.is_disjoint(&withdrawn), "no withdrawn body is sent");
+        assert!(!listed.is_empty());
+        // Once rebuilt, the scene goes on with nothing more to send.
+        let next = core
+            .advance(
+                inputs(at(40), &ship, &BeltMembersAsContacts),
+                &world,
+                Beat::Change,
+            )
+            .unwrap();
+        assert_eq!(next, SceneDelta::default());
     }
 
     #[test]
