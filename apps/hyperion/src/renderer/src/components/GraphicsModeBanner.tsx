@@ -6,10 +6,10 @@ import { graphicsModeAnnunciation, useGraphicsStatus } from "../view/engine/stat
  *
  * @remarks
  * The guide reserves the header strip's banner for a simulation, training or replay mode; extending
- * it to these two is drafted for the owner (R01 Design note 10, R01.T5.c). It is the console's
- * statement of its own condition, in plain text, and never counts as an alert. It names the mode
- * alone, the words before the colon, so that the strip fits at 1280 × 720; the `GRAPHICS` panel
- * carries the whole sentence.
+ * it to these two was signed off on 2026-09-30 (R01 Design note 10, R01.T5.c). It is the console's
+ * statement of its own condition, in plain `--text` inside a `--text-muted` rule, and never counts
+ * as an alert. It names the mode alone, the words before the colon, so that the strip fits at
+ * 1280 × 720; the `GRAPHICS` panel carries the whole sentence.
  */
 export function GraphicsModeBanner() {
   const annunciation = graphicsModeAnnunciation(useGraphicsStatus());

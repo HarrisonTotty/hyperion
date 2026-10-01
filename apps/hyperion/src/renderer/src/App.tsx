@@ -13,6 +13,7 @@ import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
+import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
 interface DisplayInputs {
@@ -63,6 +64,9 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * are memoised, so that a latency update re-renders the `LINK` display and the header but no
  * display that only makes requests.
  *
+ * Once the server has said its generator version, the client's surface module is loaded in its
+ * worker and checked against it (`useSurfaceModuleCheck`, R04.T10.c).
+ *
  * `OPEN SYSTEM` on the `GALAXY` display opens the `SYSTEM` display on its selected system at the
  * chart's time (plan 14, P14.T41.a): `App` keeps the latest opening, counted so that each is a new
  * display state, and switches to the display. The callback is stable, so the memoised `GALAXY`
@@ -71,6 +75,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
 export function App() {
   const serverUrl = window.hyperion.serverUrl;
   const connection = useServerConnection(serverUrl, __APP_VERSION__);
+  useSurfaceModuleCheck(connection.serverGeneratorVersion);
   const link = useServerLinkValue(connection);
   const [activeDisplay, setActiveDisplay] = useState<DisplayId>("link");
   const [systemOpening, setSystemOpening] = useState<SystemOpening | null>(null);

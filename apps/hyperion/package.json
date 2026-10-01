@@ -8,12 +8,11 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.worker.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@babylonjs/core": "9.28.0",
     "@hyperion/protocol": "workspace:*",
     "commander": "^15.0.0",
     "react": "^19.3.0",

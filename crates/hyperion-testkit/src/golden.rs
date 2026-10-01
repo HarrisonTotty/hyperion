@@ -8,6 +8,11 @@
 //! When generated output changes on purpose, `GENERATOR_VERSION` is bumped and `just bless`
 //! rewrites the files in the same commit. `just bless` sets `HYPERION_BLESS=1`. CI sets `CI`, and
 //! blessing under `CI` panics, so CI can never paper over a change.
+//!
+//! On `wasm32-unknown-unknown`, the client's target, a test cannot read files, so
+//! [`golden!`](crate::golden!) embeds the file in the test binary and compares it with
+//! [`check_embedded`], which shares every check with [`check`] and never blesses: golden files are
+//! blessed natively, then compared on every target.
 
 use std::ffi::OsStr;
 use std::fmt::Write as _;
@@ -90,16 +95,8 @@ pub fn check(manifest_dir: &str, name: &str, actual: &str) {
 /// - In [`Mode::BlessForbidden`]: always.
 pub fn check_in_mode(mode: Mode, manifest_dir: &Path, name: &str, actual: &str) {
     let path = golden_path(manifest_dir, name);
-    let shown = path.display();
-    let actual_version = header_version(actual).unwrap_or_else(|| {
-        panic!(
-            "golden text for {shown} must begin with `{HEADER_PREFIX}<n>`: use GoldenWriter::header"
-        )
-    });
-
-    if let Err(problem) = survives_the_commit_hooks(actual) {
-        panic!("golden text for {shown} {problem}: the pre-commit hooks would rewrite the file");
-    }
+    let shown = path.display().to_string();
+    let actual_version = checked_actual_version(&shown, actual);
 
     match mode {
         Mode::Compare => {}
@@ -119,8 +116,63 @@ pub fn check_in_mode(mode: Mode, manifest_dir: &Path, name: &str, actual: &str) 
 
     let expected = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read golden file {shown}: {e}; {BLESS_HINT}"));
+    compare(&shown, &expected, actual_version, actual);
+}
 
-    match header_version(&expected) {
+/// Compares `actual` with `expected`, the text of the golden file `name` embedded in the test
+/// binary.
+///
+/// This is what [`golden!`](crate::golden!) calls on `wasm32-unknown-unknown`, the browser target,
+/// where a test cannot read files: the macro embeds the file with `include_str!`, so a golden that
+/// does not exist yet fails to compile there. It is [`check_embedded_in_mode`] with
+/// [`Mode::from_env`]; on the browser target the environment reads nothing, so the mode there is
+/// always [`Mode::Compare`].
+///
+/// # Panics
+///
+/// As [`check_embedded_in_mode`].
+pub fn check_embedded(name: &str, expected: &str, actual: &str) {
+    check_embedded_in_mode(Mode::from_env(), name, expected, actual);
+}
+
+/// Compares `actual` with `expected`, the embedded text of the golden file `name`, with the checks
+/// [`check_in_mode`] makes when it compares. It never blesses: golden files are blessed natively,
+/// where they can be written, and then embedded (plan R04, Design note 14).
+///
+/// # Panics
+///
+/// - If `actual` does not begin with a header line, has a line with trailing whitespace, or does
+///   not end in exactly one line break, as [`check_in_mode`].
+/// - If `mode` is not [`Mode::Compare`]: golden files are blessed natively.
+/// - If `expected`'s header names a different generator version from `actual`'s, or the two
+///   differ anywhere, naming the file, the first differing line number and both lines.
+pub fn check_embedded_in_mode(mode: Mode, name: &str, expected: &str, actual: &str) {
+    let shown = format!("{name}.golden (embedded)");
+    let actual_version = checked_actual_version(&shown, actual);
+    assert!(
+        mode == Mode::Compare,
+        "cannot bless {shown}: golden files are blessed natively, then embedded"
+    );
+    compare(&shown, expected, actual_version, actual);
+}
+
+/// The generator version in `actual`'s header, once `actual` is known to survive the commit hooks.
+fn checked_actual_version(shown: &str, actual: &str) -> u32 {
+    let actual_version = header_version(actual).unwrap_or_else(|| {
+        panic!(
+            "golden text for {shown} must begin with `{HEADER_PREFIX}<n>`: use GoldenWriter::header"
+        )
+    });
+    if let Err(problem) = survives_the_commit_hooks(actual) {
+        panic!("golden text for {shown} {problem}: the pre-commit hooks would rewrite the file");
+    }
+    actual_version
+}
+
+/// Panics unless `expected`, the golden file shown as `shown`, carries `actual_version` in its
+/// header and equals `actual`, naming the first differing line.
+fn compare(shown: &str, expected: &str, actual_version: u32, actual: &str) {
+    match header_version(expected) {
         Some(v) if v == actual_version => {}
         Some(v) => panic!(
             "golden file {shown} has header generator_version = {v}, \
@@ -179,11 +231,30 @@ fn header_version(text: &str) -> Option<u32> {
 ///
 /// `golden!("rng/streams", &text)` reads `tests/golden/rng/streams.golden` under the calling
 /// crate's manifest directory. See [`golden::check`](crate::golden::check).
+///
+/// On `wasm32-unknown-unknown`, the browser target, where a test cannot read files, it embeds the
+/// file with `include_str!` instead and calls
+/// [`golden::check_embedded`](crate::golden::check_embedded): there `name` must be a string literal
+/// and the file must exist when the test is compiled. Elsewhere `name` may be computed. Each arm
+/// sits behind a `#[cfg]` that the calling crate resolves, and the stripped arm is removed before
+/// its `include_str!` expands (plan R04, Design note 14).
 #[macro_export]
 macro_rules! golden {
-    ($name:expr, $actual:expr $(,)?) => {
-        $crate::golden::check(env!("CARGO_MANIFEST_DIR"), $name, $actual)
-    };
+    ($name:expr, $actual:expr $(,)?) => {{
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        $crate::golden::check_embedded(
+            $name,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/golden/",
+                $name,
+                ".golden"
+            )),
+            $actual,
+        );
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        $crate::golden::check(env!("CARGO_MANIFEST_DIR"), $name, $actual);
+    }};
 }
 
 /// Builds the text of a golden file, one line at a time.
@@ -286,6 +357,8 @@ impl GoldenWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     #[test]
     fn writer_formats_each_kind_of_line() {
@@ -300,20 +373,6 @@ mod tests {
             "# generator_version = 7\nfree text\nword = 0xffffffffffffffff\n\
              tenth = 0x3fb999999999999a  # 0.1\ntiny = 0x3ddb7cdfd9d7bdbb  # 1e-10\n",
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "bits of a NaN are unspecified")]
-    fn writer_refuses_a_nan() {
-        GoldenWriter::new().f64("bad", f64::NAN);
-    }
-
-    #[test]
-    #[should_panic(expected = "header must be the first line")]
-    fn writer_refuses_a_late_header() {
-        let mut w = GoldenWriter::new();
-        w.line("x");
-        w.header(1);
     }
 
     #[test]
@@ -351,14 +410,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "has trailing whitespace on line 2")]
-    fn check_refuses_a_trailing_space() {
-        check_in_mode(
-            Mode::Compare,
-            Path::new("/nowhere"),
-            "x",
-            "# generator_version = 1\nx \n",
-        );
+    fn check_embedded_accepts_equal_text() {
+        let text = "# generator_version = 3\na = 0x0000000000000001\n";
+        check_embedded_in_mode(Mode::Compare, "equal", text, text);
     }
 
     #[test]

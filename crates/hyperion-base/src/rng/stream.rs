@@ -192,6 +192,8 @@ impl Stream {
 mod tests {
     use super::*;
     use crate::rng::tags;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     const SEED: Seed = Seed::new(0x5eed_0000_0000_0001);
 
