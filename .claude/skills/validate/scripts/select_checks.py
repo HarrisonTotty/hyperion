@@ -37,6 +37,12 @@ GENERATED = "packages/protocol/src/generated/"
 PRETTIER_SKIP = re.compile(rf"(\.(rs|toml|lock)$|^{GENERATED}|^\.claude/|^target/)")
 WORKSPACE_WIDE = re.compile(r"^(Cargo\.(toml|lock)|rust-toolchain\.toml|rustfmt\.toml|\.cargo/)")
 INFRA = re.compile(r"^(justfile|\.github/|\.pre-commit-config\.yaml)")
+# The engine, the smoke harness and every shader (catalogued in `view/engine/catalogue.ts`): a
+# change to any runs `just test-render` (R01.T9.e).
+RENDER_PATHS = re.compile(
+    r"^apps/hyperion/(src/renderer/src/view/(engine|shaders)/|src/renderer/src/smoke/|src/smoke/|"
+    r"src/renderer/smoke\.html$|scripts/testRender\.sh$)|\.wgsl$"
+)
 # A test marked slow runs only under `just test-slow`, so a change that touches one is gated with
 # `just ci-slow` rather than `just ci`.
 SLOW_MARK = re.compile(r'#\[ignore\s*=\s*"slow')
@@ -295,6 +301,10 @@ def main() -> None:
     skipped: list[str] = []
     if client or infra:
         gate.append(("pnpm build", "the client must still build"))
+    render = [f for f in changed if RENDER_PATHS.search(f)]
+    if render:
+        # The headless SwiftShader harness stays outside `just ci` (R01.T9.e); these paths run it.
+        gate.append(("just test-render", f"{render[0]} touches the engine, the harness or a shader"))
     if determinism:
         ok, reason = wasm_available()
         if ok:

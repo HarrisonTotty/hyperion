@@ -1475,12 +1475,12 @@ Design note 17's codes.
 not `file:` or `data:`, through `session.defaultSession.webRequest.onBeforeRequest` over
 `<all_urls>`, and fails naming each URL with its resource type; a fixture page that fetches an
 external URL proves the check fails. The page renders each `WGSL_CATALOGUE` entry once and asserts
-the frame's properties and that the WGSL guard reported nothing. A test entry that uses a GLSL
-shader must fail with its name.
+the frame's properties and that no shader was refused. _Amended by Design note 24:_ a test entry
+whose WGSL does not compile must fail with its name (there is no GLSL path left to refuse).
 
 - Acceptance: `just test-render` passes and prints an empty list of cancelled requests for the
-  catalogue; the external-fetch fixture fails and prints its URL and resource type; the GLSL fixture
-  fails with `GlslShaderRefused` and its name, and its cancelled list is empty (no compiler fetch).
+  catalogue; the external-fetch fixture fails and prints its URL and resource type; the broken-WGSL
+  fixture fails with its name and the compiler's message, and its cancelled list is empty.
 
 **R01.T9.c The feature paths.** The runner runs the page twice: as SwiftShader offers it (no
 `shader-f16`, subgroups present), then with `CapabilityOverrides.withholdSubgroups`, which requests
@@ -1496,8 +1496,8 @@ The runs form a matrix of settings × capability paths (Design note 18); R01's o
 **R01.T9.d Three canvases on one device.** The page creates a 1280 × 720 cockpit canvas and two 320
 × 240 instrument canvases, each its own `RenderView` with its own camera, a one-pass post-process
 chain and depth. Each renders a pattern with a marker in its top-left quadrant; the readback asserts
-the marker is in the top-left of each (right way up, the `_disableEngineYFlip` pin's behavioural
-check), that each view's size is its own, and that resizing one instrument leaves the other two
+the marker is in the top-left of each (right way up: the adapter's own passes, in WebGPU's own
+orientation, Design note 24), that each view's size is its own, and that resizing one instrument leaves the other two
 views' readbacks and sizes unchanged.
 
 - Acceptance: `just test-render` passes these checks.
@@ -1538,7 +1538,8 @@ texels; a material made with `createMaterialAsync` draws on the first frame afte
 a frame submitted meanwhile does not wait on its compile; a compute pass writes an indirect-args
 buffer that a `DrawItem.indirect` draw and an indirect `dispatch` then consume, drawing the
 instance count the kernel wrote; with SwiftShader's `timestamp-query`, `onPassTimes` reports one
-entry per labelled pass, raw passes unbracketed and Babylon's bracketed, each finite and
+entry per labelled pass, none bracketed (every pass is the adapter's own, Design note 24), each
+finite and
 non-negative (values are not asserted: SwiftShader checks correctness, never speed).
 
 - Acceptance: `just test-render` passes these checks.
@@ -1548,7 +1549,9 @@ Design note 21: an occluder with `colourWrites: false` leaves the colour untouch
 drawn behind it; a line with `depthWrite: false` leaves depth at the clear value; two additive
 sprites over one texel sum in linear light; 64 instances of one quad, each placed from a
 per-instance attribute and a storage-buffer entry by `instance_index`, land at their 64 positions; a
-post-process reading `depth` and `hdr-colour` writes a texel that is a known function of both; a
+post-process reading `hdr-colour` and a per-frame uniform writes a texel that is a known function
+of both, and a change of the uniform changes it (decision items 10 and 11: depth is read by a
+full-screen draw, below); a
 `createPointSplat` pass of 1,000 unit points onto a 64 × 64 `rgba32float` target sums, per texel, to
 the count of points that land there, and on a run with `float32-blendable` withheld
 `createPointSplat` throws `Float32BlendUnavailable`. From T8.i: a full-screen draw into a second
@@ -2295,3 +2298,57 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
     `false`, for R05's and R12's records.
   - Pending for the status-wording lane: `GRAPHICS SHADER REFUSED: <name> is not WGSL` now reports
     a compile error, and `GlslShaderRefused` no longer exists.
+- **Deviations in T9, as built.**
+  - Files: `src/smoke/main.ts`, `preload.ts` and `result.ts` (the report's shape, its validation
+    and the verdict, unit-tested, shared as types with the page); `src/renderer/smoke.html` and
+    `src/renderer/src/smoke/` (`page.ts`, `harness.ts`, `frames.ts`, `blending.ts`, `work.ts`,
+    `catalogue.ts`); `scripts/testRender.sh`, which `just test-render` runs under the heavy-test
+    lock after `pnpm --filter hyperion build`. The build has the smoke main, preload and page as
+    second inputs of each of electron-vite's three builds; `tsconfig.node.json` includes
+    `src/smoke`.
+  - The switches are bash arrays in `testRender.sh`, the adapter pair and the headless set of
+    Design note 17, passed on Electron's command line; `--drop-adapter-switches` drops only the
+    pair (exit 2, "no adapter"), `--fixture=broken-wgsl` and `--fixture=external-fetch` add the
+    failing fixtures (exit 1), `--variant=` picks runs (`default`, `no-subgroups`; both by
+    default). The page reads its variant and fixture from the query string, which the main process
+    forwards from `--smoke-variant=` and `--smoke-fixture=`.
+  - `smoke.html`'s CSP allows `connect-src *` and `img-src *`, on purpose: a CSP would block a
+    request silently, before `webRequest` could cancel and name it (Design note 17). The client's
+    `index.html` is untouched.
+  - The page loads the engine through `loadRenderEngine` (so the wrapper's rebuild is what T9.f
+    exercises) and records every device its adapters hand out by wrapping
+    `navigator.gpu.requestAdapter`, so that the loss check can `destroy()` the engine's own.
+    `float32-blendable` is withheld on a second engine within each run rather than a third run.
+  - T9.b: the catalogue is still empty (R02 and later plans register their shaders), so the offline
+    run covers the page's own shaders; a material entry is compiled with `createMaterialAsync`, a
+    compute entry with `createComputeAsync`, a post-process run over a drawn frame. Drawing a
+    catalogued material needs a mesh of its layout, which an entry does not carry yet: **open** for
+    the first plan that registers a material (an optional per-entry fixture mesh is the candidate).
+  - T9.c's "fixture entry declaring a second setting is run at both": `CatalogueSetting` has only
+    `default` until R12.T7.a, so no second setting can be declared; the page already iterates each
+    entry's `settings`. **Pending R12.T7.a.**
+  - T9.f's bias check draws the line first and a coplanar triangle after it: biased away
+    (`depthBiasAway` constant 64, slope 1) the triangle fails greater-or-equal and the line stays;
+    unbiased it overwrites the line. WebGPU takes no bias on lines, so the bias is on the surface,
+    as R02 uses it.
+  - The packed cube gains `COPY_SRC` (no memory cost) so that the harness reads it back.
+  - The preload helper: without `codeSplitting` groups, the build puts Vite's preload helper in
+    the smoke entry itself, and the engine's chunk (`engine-*.js`, 108 kB minified, provisional)
+    imports only the shared `status` chunk; the client's entry imports neither. The groups were
+    not needed (T8.l).
+  - **Results (2026-09-30, Electron 44.4.3, SwiftShader, `DISPLAY` unset):** both runs pass
+    (`default`: subgroups with a minimum size of 4, `timestamp-query`, `float32-blendable`,
+    `rg11b10ufloat` renderable, no `shader-f16`; `no-subgroups`: subgroups absent);
+    SwiftShader's `targetRounding` is `nearest` for `rgba16float` and `toward-zero` for
+    `rg11b10ufloat`; pass times arrive `quantized`, 9 passes, none bracketed. Fixtures: broken WGSL
+    exits 1 with "material broken fixture failed to compile: 1:60 unresolved value 'oops'" and the
+    `shader-refused` fault; external fetch exits 1 with "cancelled requests [xhr
+    https://example.invalid/smoke.json, image https://example.invalid/smoke.png]";
+    `--drop-adapter-switches` exits 2 ("no adapter").
+  - **T9.e figures (provisional: a shared machine, load average 3.8 to 14.9 during the runs):** ten
+    runs of the recipe's two steps, build included, passed 10 of 10; the build 561–1,896 ms
+    (median about 600 ms), the harness's two runs 2,090–2,442 ms, total 2,651–3,998 ms, without
+    the heavy lock's wait. `select_checks.py` (the `validate` skill) now names `just test-render`
+    in its gate for changes under `view/engine/`, `view/shaders/`, `src/smoke/`,
+    `src/renderer/src/smoke/`, `smoke.html`, `testRender.sh` or any `.wgsl`. The proposal to move
+    the recipe into `ci` waits for one Electron upgrade with no harness failure.

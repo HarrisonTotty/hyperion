@@ -38,6 +38,15 @@ client *args:
     fi
     pnpm --filter hyperion exec electron-vite dev -- "${x11[@]}" {{ args }}
 
+# Build the client and run the headless smoke harness on SwiftShader, once per capability path
+# (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
+# frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a
+# catalogued shader runs it. Arguments go to `apps/hyperion/scripts/testRender.sh`
+# (`--variant=`, `--fixture=broken-wgsl|external-fetch`, `--drop-adapter-switches`).
+test-render *args:
+    pnpm --filter hyperion build
+    just _locked bash apps/hyperion/scripts/testRender.sh {{ args }}
+
 # Typecheck Rust and TypeScript.
 check:
     cargo check --workspace --all-targets
