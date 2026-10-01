@@ -102,6 +102,16 @@ pub const TCP_NOTSENT_LOWAT_BYTES: u32 = 65_536;
 /// `subscribe` is refused with `bad_request` naming `topic`.
 pub const MAX_SUBSCRIPTIONS: usize = 4;
 
+/// How often a scene subscription is pushed its clock when nothing else changes: 1 s (rendering
+/// plan R03, Design note 4). The heartbeat keeps a client's extrapolated clock from drifting, and
+/// carries the contacts the server places, so a contact is at most a second of real time stale.
+pub const SCENE_HEARTBEAT: Duration = Duration::from_secs(1);
+
+/// How often a scene subscription holding craft is pushed them: 15.625 ms, the 64 Hz tick of the
+/// single-player brainstorm's The clock, exactly 15,625,000 ns (rendering plan R03, R03.T8.b).
+/// Missed ticks are skipped.
+pub const CRAFT_PUSH_INTERVAL: Duration = Duration::from_micros(15_625);
+
 /// Cameras one scene subscription may report: 8, one per view of the largest layout R07 draws on
 /// one client, with room (rendering plan R03, Design note 6). A ninth is refused with
 /// `bad_request` naming `cameras`.
@@ -185,5 +195,15 @@ mod tests {
         assert_eq!(MAX_BINARY_FRAME_BYTES, 262_144, "256 KiB, header included");
         assert_eq!(BULK_QUEUED_BYTES, 262_144, "one chunk");
         assert_eq!(TCP_NOTSENT_LOWAT_BYTES, 65_536, "64 KiB");
+        assert_eq!(
+            MAX_SCENE_CAMERAS, 8,
+            "one per view of R07's largest layout, with room"
+        );
+        assert_eq!(SCENE_HEARTBEAT, Duration::from_secs(1));
+        assert_eq!(
+            CRAFT_PUSH_INTERVAL * 64,
+            Duration::from_secs(1),
+            "the 64 Hz tick"
+        );
     }
 }

@@ -162,13 +162,7 @@ impl SceneClock {
     }
 
     /// What the clock reads now, on the runtime's clock (paused in tests).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the scene subscription (R03.T8) is the first to read it"
-        )
-    )]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn now(&self) -> ClockReading {
         self.at_instant(Instant::now())
@@ -194,13 +188,6 @@ impl SceneClock {
     /// The first instant at which the clock reads `time` or later: the deadline for something due
     /// at that scene time. `None` if the clock never reads it: paused, or `time` beyond the
     /// window's end. A time the clock has already passed at its anchor is due at the anchor.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the scene subscription (R03.T8) is the first to read it"
-        )
-    )]
     #[must_use]
     pub(crate) fn instant_of(&self, time: UniverseTime) -> Option<Instant> {
         let rate = u128::from(self.rate.get());

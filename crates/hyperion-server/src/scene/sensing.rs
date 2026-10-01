@@ -17,7 +17,7 @@ use hyperion_sim::time::UniverseTime;
 use crate::universe::UniverseId;
 
 /// What the ship knows of its surroundings, as far as the scene asks.
-pub(crate) trait SceneKnowledge: fmt::Debug + Send + Sync {
+pub trait SceneKnowledge: fmt::Debug + Send + Sync {
     /// The level granted for `body` when a client asked for `asked`. The scene holds the answer to
     /// `asked`, so a grant above it grants `asked`.
     fn grant(&self, body: BodyId, asked: DetailLevel) -> DetailLevel;
@@ -28,7 +28,7 @@ pub(crate) trait SceneKnowledge: fmt::Debug + Send + Sync {
 
 /// The knowledge until the sensors plan: every body at the level asked, and no craft.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub(crate) struct GrantAsked;
+pub struct GrantAsked;
 
 impl SceneKnowledge for GrantAsked {
     fn grant(&self, _body: BodyId, asked: DetailLevel) -> DetailLevel {
@@ -41,14 +41,14 @@ impl SceneKnowledge for GrantAsked {
 }
 
 /// The craft in a universe.
-pub(crate) trait CraftSource: fmt::Debug + Send + Sync {
+pub trait CraftSource: fmt::Debug + Send + Sync {
     /// Every craft of `universe` at scene time `t`.
     fn craft_at(&self, universe: UniverseId, t: UniverseTime) -> Vec<CraftState>;
 }
 
 /// The craft until sessions: none.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub(crate) struct NoCraft;
+pub struct NoCraft;
 
 impl CraftSource for NoCraft {
     fn craft_at(&self, _universe: UniverseId, _t: UniverseTime) -> Vec<CraftState> {
@@ -59,18 +59,18 @@ impl CraftSource for NoCraft {
 /// One craft as a [`CraftSource`] supplies it: for now exactly the draft wire record, which the
 /// sessions plan owns and may reshape freely while nothing in the game sends it (Design note 4).
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CraftState(SceneCraftDto);
+pub struct CraftState(SceneCraftDto);
 
 impl CraftState {
     /// The craft `record` describes.
     #[must_use]
-    pub(crate) fn new(record: SceneCraftDto) -> Self {
+    pub fn new(record: SceneCraftDto) -> Self {
         Self(record)
     }
 
     /// The craft's ID.
     #[must_use]
-    pub(crate) fn id(&self) -> &str {
+    pub fn id(&self) -> &str {
         &self.0.craft
     }
 }

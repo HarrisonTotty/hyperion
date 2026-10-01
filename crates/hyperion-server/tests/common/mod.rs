@@ -499,6 +499,34 @@ impl TestClient {
         }
     }
 
+    /// Makes a request and waits for its terminal message as [`TestClient::request`] does, keeping
+    /// the notifications that arrive before it, in order, for a client with subscriptions open.
+    pub async fn request_among_notifications(
+        &mut self,
+        body: RequestBody,
+    ) -> (
+        Result<ResponseBody, RequestError>,
+        Vec<(u32, NotificationBody)>,
+    ) {
+        let id = self.send_request(body).await;
+        let mut notifications = Vec::new();
+        loop {
+            match self.next_message().await {
+                ServerMessage::Response { id: answered, body } if answered == id => {
+                    return (Ok(body), notifications);
+                }
+                ServerMessage::RequestError {
+                    id: answered,
+                    error,
+                } if answered == id => return (Err(error), notifications),
+                ServerMessage::Notification { subscription, body } => {
+                    notifications.push((subscription, body));
+                }
+                other => panic!("expected the answer to request {}, got {other:?}", id.0),
+            }
+        }
+    }
+
     /// Creates a universe named `name` from `seed` and returns what the server made of it. Panics
     /// on a refusal, so a test that expects one makes the request itself.
     pub async fn create_universe(&mut self, name: &str, seed: u64) -> UniverseInfo {

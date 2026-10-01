@@ -9,24 +9,14 @@
 //! session will implement in their place.
 
 mod clock;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the scene subscription (R03.T8) is the first to read it"
-    )
-)]
 mod core;
-#[expect(
-    dead_code,
-    reason = "the scene subscription (R03.T8) is the first to read it"
-)]
 mod sensing;
 mod ship;
+mod topic;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use hyperion_protocol::{FramePositionDto, KinematicsDto};
 use hyperion_sim::coords::GalacticPosition;
@@ -35,28 +25,14 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 pub(crate) use self::clock::{ClockReading, SceneClock, TimeRate};
-#[expect(
-    unused_imports,
-    reason = "the scene subscription (R03.T8) is the first to read it"
-)]
-pub(crate) use self::core::{
-    Beat, FetchSystemError, SCENE_FRAME_ENTRY, SceneCore, SceneDelta, SceneInputs, SceneWorld,
-    is_large_notification,
-};
-#[expect(
-    unused_imports,
-    reason = "the scene subscription (R03.T8) is the first to read it"
-)]
-pub(crate) use self::sensing::{CraftSource, CraftState, GrantAsked, NoCraft, SceneKnowledge};
+pub(crate) use self::core::is_large_notification;
+pub use self::sensing::{CraftSource, CraftState, GrantAsked, NoCraft, SceneKnowledge};
 pub(crate) use self::ship::{ShipPosition, ShipStandIn};
+pub(crate) use self::topic::open;
 use crate::universe::UniverseId;
 
 /// A scene's clock, as the scene's core reads it (Design note 2): the stand-in's [`SceneClock`]
 /// until sessions, then the session's.
-#[expect(
-    dead_code,
-    reason = "the scene subscription (R03.T8) is the first to read it"
-)]
 pub(crate) trait Clock {
     /// What the clock reads at `at`.
     fn reading_at(&self, at: Instant) -> ClockReading;
@@ -67,13 +43,6 @@ pub(crate) trait Clock {
 
 /// A scene's ship, as the scene's core reads it (Design note 2): the [`ShipStandIn`] until
 /// sessions, then the session's ship.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the scene subscription (R03.T8) is the first to read it"
-    )
-)]
 pub(crate) trait Ship {
     /// Where the ship is at `t`, in the frame its pose is held in.
     ///
@@ -105,13 +74,6 @@ impl SceneSetting {
     ///
     /// The centre is in no system's frame (plan 03's `frame_at` leaves it to the galactic frame),
     /// so a scene subscribed before any `scene_ship` holds no system and costs nothing.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the scene subscription (R03.T8) is the first to read it"
-        )
-    )]
     #[must_use]
     fn unset(anchor: Instant) -> Self {
         let position = GalacticPosition::ORIGIN;
@@ -135,28 +97,40 @@ impl SceneSetting {
     }
 }
 
-/// Every open universe's scene setting, each behind a [`watch`] channel.
-#[derive(Debug, Default)]
+/// Every open universe's scene setting, each behind a [`watch`] channel, and what every scene
+/// reads of the ship's knowledge and the craft.
+#[derive(Debug)]
 pub(crate) struct SceneService {
     universes: Mutex<HashMap<UniverseId, watch::Sender<SceneSetting>>>,
+    knowledge: Arc<dyn SceneKnowledge>,
+    craft: Arc<dyn CraftSource>,
 }
 
 impl SceneService {
     /// An empty service: no universe has a setting until it is watched or set.
     #[must_use]
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(knowledge: Arc<dyn SceneKnowledge>, craft: Arc<dyn CraftSource>) -> Self {
+        Self {
+            universes: Mutex::new(HashMap::new()),
+            knowledge,
+            craft,
+        }
+    }
+
+    /// What the ship knows.
+    #[must_use]
+    pub(crate) fn knowledge(&self) -> Arc<dyn SceneKnowledge> {
+        Arc::clone(&self.knowledge)
+    }
+
+    /// The craft.
+    #[must_use]
+    pub(crate) fn craft(&self) -> &Arc<dyn CraftSource> {
+        &self.craft
     }
 
     /// A receiver of `universe`'s setting, which sees every later change; the unset setting
     /// ([`SceneSetting::unset`]) if nobody has set one.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the scene subscription (R03.T8) is the first to read it"
-        )
-    )]
     #[must_use]
     pub(crate) fn watch(&self, universe: UniverseId) -> watch::Receiver<SceneSetting> {
         let mut universes = self
@@ -192,7 +166,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn an_unset_universe_is_paused_at_the_epoch_at_the_galactic_centre() {
-        let service = SceneService::new();
+        let service = SceneService::new(Arc::new(GrantAsked), Arc::new(NoCraft));
         let receiver = service.watch(UniverseId::new(7));
         let setting = receiver.borrow().clone();
         let reading = setting.clock.now();

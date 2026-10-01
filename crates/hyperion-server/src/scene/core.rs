@@ -242,12 +242,12 @@ impl SceneCore {
             cameras: BTreeMap::new(),
             craft_sent: false,
         };
-        let system = match target {
+        let (system, tidal_radius_m) = match target {
             Some(target) => {
-                let (system, _) = core.arrive(&target, inputs, world)?;
-                Some(system)
+                let (system, tidal_radius) = core.arrive(&target, inputs, world)?;
+                (Some(system), Some(tidal_radius.value()))
             }
-            None => None,
+            None => (None, None),
         };
         let craft = core.craft(inputs.knowledge, craft).unwrap_or_default();
         let state = SceneStateDto {
@@ -255,6 +255,7 @@ impl SceneCore {
             clock: SceneClockDto::from(inputs.clock),
             ship: inputs.ship.kinematics(),
             system,
+            tidal_radius_m,
             craft,
         };
         Ok((core, state))
@@ -372,8 +373,26 @@ impl SceneCore {
     }
 
     /// The cameras, the latest per view.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the cameras bound nothing yet (Design note 6)")
+    )]
     pub(crate) fn cameras(&self) -> impl Iterator<Item = &CameraReportDto> {
         self.cameras.values()
+    }
+
+    /// Plants a `valid_until` at `at` on the first body sent that is not a contact, and returns
+    /// its index: no body of the pinned systems changes inside the clock window, so the tests of
+    /// a re-send plant one on the core's record of what it sent.
+    #[cfg(test)]
+    pub(crate) fn plant_valid_until(&mut self, at: UniverseTime) -> Option<BodyIndex> {
+        let system = self.system.as_mut()?;
+        let (index, sent) = system
+            .sent
+            .iter_mut()
+            .find(|(_, sent)| sent.level != DetailLevel::Contact)?;
+        sent.valid_until = Some(at);
+        Some(*index)
     }
 
     /// Enters `target`: the whole system at the scene time, its bodies recorded as sent.
@@ -1086,6 +1105,11 @@ mod tests {
         );
         assert_eq!(state.ship, wire());
         assert_eq!(state.clock, SceneClockDto::from(reading(t)));
+        assert_eq!(
+            state.tidal_radius_m.map(f64::to_bits),
+            Some(fixture.tidal_radius(t).value().to_bits()),
+            "the state states the sphere a client subscribing inside the system clamps to"
+        );
 
         let halo = galactic_ship(GalacticPosition::from_light_years([0.0, 0.0, 60_000.0]).unwrap());
         let (_, state) = SceneCore::build(
@@ -1096,6 +1120,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(state.system, None);
+        assert_eq!(state.tidal_radius_m, None);
     }
 
     #[test]
