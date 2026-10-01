@@ -1566,3 +1566,10 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   pinned at exactly one full chunk (`largest_bulk_queue_bytes` equals `MAX_BINARY_FRAME_BYTES`),
   in place of a separate `outbound::` unit test of the bulk lane. The hand-run measurement's reads
   are bounded by the harness's wait.
+- **T12 after T8.a: the state's tidal radius, as built.** R03.T8.a's optional
+  `SceneStateDto.tidal_radius_m` is read: `toSceneModel` takes it into `SceneSystem.tidalRadiusM`,
+  and `applySceneNotification` keeps it in the merged wire state (`model.wire.tidal_radius_m`) until
+  an arrival states another or the scene leaves, so applying a sequence still equals building its
+  end, the tidal radius included. A state in a system that omits it (an older server) still reads
+  `null` until the next arrival. This closes T12's open point on the tidal radius, and the README's
+  row for R02's ask is now met for a client subscribing inside a system.

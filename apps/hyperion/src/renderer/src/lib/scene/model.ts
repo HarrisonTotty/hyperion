@@ -83,8 +83,8 @@ export interface SceneSystem {
    */
   readonly hillRadiiM: ReadonlyMap<BodyIdHex, number>;
   /**
-   * The system's tidal radius at the arrival, m (R02's free-camera clamp); `null` when the scene
-   * was already in the system when the subscription opened, since the state does not carry it.
+   * The system's tidal radius, m (R02's free-camera clamp): the latest arrival's, or the opening
+   * state's when the scene was already in the system; `null` only from a state that omits it.
    */
   readonly tidalRadiusM: number | null;
 }

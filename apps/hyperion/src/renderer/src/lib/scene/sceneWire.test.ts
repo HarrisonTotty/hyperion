@@ -9,6 +9,7 @@ import { FIXTURE_EARTH, FIXTURE_JUPITER } from "../../test/planetaryFixture";
 import {
   craftFixture,
   designateFixture,
+  SCENE_TIDAL_RADIUS_M,
   earthReSentAsContact,
   sceneClock,
   sceneSequence,
@@ -47,19 +48,13 @@ function applyAll(
   );
 }
 
-/** `model` without the tidal radius, which only an arrival carries. */
-function withoutTidalRadius(model: SceneModel): SceneModel {
-  return model.system === null
-    ? model
-    : { ...model, system: { ...model.system, tidalRadiusM: null } };
-}
-
 describe("toSceneModel", () => {
   it("reads a state in a system, every body with its grant", () => {
     const model = modelOf({
       ...stateInSpace(),
       ship: shipInSystem(3_000),
       system: sliceSceneSystem(),
+      tidal_radius_m: SCENE_TIDAL_RADIUS_M,
     });
 
     expect(model.system?.bodies.bodies.map((body) => body.id)).toEqual([
@@ -68,7 +63,7 @@ describe("toSceneModel", () => {
     ]);
     expect(model.system?.grants.get(FIXTURE_EARTH)).toEqual({ level: "full", seen: null });
     expect(model.system?.model.hosts).toHaveLength(1);
-    expect(model.system?.tidalRadiusM).toBeNull();
+    expect(model.system?.tidalRadiusM).toBe(SCENE_TIDAL_RADIUS_M);
     expect(model.clock).toEqual({
       time: { seconds: 3_000, nanos: 0 },
       rate: 1_000,
@@ -79,6 +74,30 @@ describe("toSceneModel", () => {
       system: sliceSceneSystem().system.hosts.system,
       offsetM: { x: 1.5e11, y: 2e9, z: 0 },
     });
+  });
+
+  it("reads a state in a system that omits the tidal radius as having none", () => {
+    const model = modelOf({
+      ...stateInSpace(),
+      ship: shipInSystem(3_000),
+      system: sliceSceneSystem(),
+    });
+
+    expect(model.system?.tidalRadiusM).toBeNull();
+  });
+
+  it("refuses a tidal radius that is not a positive length", () => {
+    const result = toSceneModel(
+      {
+        ...stateInSpace(),
+        ship: shipInSystem(3_000),
+        system: sliceSceneSystem(),
+        tidal_radius_m: 0,
+      },
+      designateFixture,
+    );
+
+    expect(result).toEqual({ kind: "fault", fault: "tidal radius unusable" });
   });
 
   it("reads a state in the galactic frame as having no system", () => {
@@ -113,15 +132,49 @@ describe("applySceneNotification", () => {
     const afterHeartbeat = applyAll(stateInSpace(), notifications.slice(0, 3));
     const afterLeaving = applyAll(stateInSpace(), notifications);
 
-    expect(withoutTidalRadius(afterHeartbeat)).toEqual(modelOf(stateAfterHeartbeat()));
+    expect(afterHeartbeat).toEqual(modelOf(stateAfterHeartbeat()));
     expect(afterLeaving).toEqual(modelOf(stateAfterLeaving()));
   });
 
   it("keeps the arrival's tidal radius until the scene leaves the system", () => {
     const notifications = sceneSequence();
 
-    expect(applyAll(stateInSpace(), notifications.slice(0, 3)).system?.tidalRadiusM).toBe(2.1e16);
+    expect(applyAll(stateInSpace(), notifications.slice(0, 3)).system?.tidalRadiusM).toBe(
+      SCENE_TIDAL_RADIUS_M,
+    );
     expect(applyAll(stateInSpace(), notifications).system).toBeNull();
+  });
+
+  it("keeps the opening state's tidal radius through pushes, until an arrival states another", () => {
+    const [, earthReSent, heartbeat] = sceneSequence();
+    if (earthReSent === undefined || heartbeat === undefined) {
+      throw new Error("the fixture sequence re-sends a body and beats");
+    }
+    const inSystem: SceneStateDto = {
+      ...stateInSpace(),
+      sequence: 1,
+      ship: shipInSystem(3_000),
+      system: sliceSceneSystem(),
+      tidal_radius_m: 3e15,
+    };
+
+    const kept = applyAll(inSystem, [earthReSent, heartbeat]);
+    const arrived = applied(
+      applySceneNotification(
+        kept,
+        {
+          sequence: 4,
+          clock: sceneClock(4_700),
+          arrival: { type: "system", system: sliceSceneSystem(), tidal_radius_m: 4e15 },
+          bodies: [],
+        },
+        designateFixture,
+      ),
+    );
+
+    expect(kept.system?.tidalRadiusM).toBe(3e15);
+    expect(kept.wire.tidal_radius_m).toBe(3e15);
+    expect(arrived.system?.tidalRadiusM).toBe(4e15);
   });
 
   it("re-sends a body at its new level with its seen position", () => {
@@ -167,18 +220,19 @@ describe("applySceneNotification", () => {
         sequence: 1,
         clock: sceneClock(3_400),
         ship: shipInSystem(3_400),
-        arrival: { type: "system", system: withoutEarth, tidal_radius_m: 2.1e16 },
+        arrival: { type: "system", system: withoutEarth, tidal_radius_m: SCENE_TIDAL_RADIUS_M },
         bodies: [],
       },
       { sequence: 2, clock: sceneClock(3_500), bodies: [{ level: "full", record: earth }] },
     ]);
 
-    expect(withoutTidalRadius(model)).toEqual(
+    expect(model).toEqual(
       modelOf({
         sequence: 2,
         clock: sceneClock(3_500),
         ship: shipInSystem(3_400),
         system: full,
+        tidal_radius_m: SCENE_TIDAL_RADIUS_M,
         craft: [],
       }),
     );
