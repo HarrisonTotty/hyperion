@@ -31,6 +31,9 @@ export interface CancelledRequest {
   readonly resourceType: string;
 }
 
+/** The one IPC channel the page reports on, fixed on both sides of the bridge. */
+export const SMOKE_RESULT_CHANNEL = "smoke:result";
+
 /** The exit codes of Design note 17. */
 export const SMOKE_EXIT = { pass: 0, failed: 1, setup: 2, watchdog: 3 } as const;
 

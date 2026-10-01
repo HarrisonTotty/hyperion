@@ -97,12 +97,12 @@ export function flatSpec(
   };
 }
 
-/** A triangle covering the whole of a view at `zM` (negative is ahead). */
+/** A triangle covering the whole of a view of aspect up to 5 at `zM` (negative is ahead). */
 export function fullScreenMesh(engine: RenderEngine, name: string, zM = -1): MeshHandle {
   return engine.createMesh({
     name,
     positions: new Float32Array(
-      [-1, -1, 1, 5, -1, 1, -1, 5, 1].map((v, i) => (i % 3 === 2 ? zM : v * -zM)),
+      [-5, -5, 1, 15, -5, 1, -5, 15, 1].map((v, i) => (i % 3 === 2 ? zM : v * -zM)),
     ),
     indices: null,
     topology: "triangle-list",

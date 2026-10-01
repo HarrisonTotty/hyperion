@@ -22,6 +22,7 @@ import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
+import { runSoak } from "./soak";
 import { checkTwins } from "./twins";
 import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
 
@@ -95,7 +96,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   }
   const { summary } = outcome;
   const checks = new Checks();
-  const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+  const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", gpuTiming));
   const engine = await loadRenderEngine(
     outcome,
     status,
@@ -198,9 +199,28 @@ function smokeReport(): ((result: unknown) => Promise<void>) | null {
 const parameters = new URLSearchParams(window.location.search);
 const variant = parameters.get("variant") ?? "default";
 const fixtureName = parameters.get("fixture") ?? "none";
+/** Whether the run lifted timestamp quantization, so that pass times read `full`. */
+const gpuTiming = parameters.get("gpuTiming") === "1";
 const report = smokeReport();
 const fixture: SmokeFixture = isFixture(fixtureName) ? fixtureName : "none";
-void run(variant, fixture)
+/** The by-hand soak of T11 and T12 instead of the checks, for `seconds`. */
+const soakSeconds = Number(parameters.get("soak") ?? "0");
+
+/** Runs the soak and reports its figures. */
+async function soak(): Promise<Report> {
+  const checks = new Checks();
+  const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", gpuTiming));
+  await runSoak(status, checks, soakSeconds, parameters.get("video"));
+  return {
+    variant: "soak",
+    adapter: null,
+    capabilities: null,
+    checks: checks.list,
+    setupError: null,
+  };
+}
+
+void (soakSeconds > 0 ? soak() : run(variant, fixture))
   .catch((error: unknown): Report => ({
     variant,
     adapter: null,
