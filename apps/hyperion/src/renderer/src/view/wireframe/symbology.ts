@@ -65,6 +65,33 @@ function corners(at: ScreenPx, halfPx: number): ScreenSegment[] {
 }
 
 /**
+ * Four short open ticks about `at`, above, below, left and right, from `innerPx` outwards for
+ * `lengthPx`: a target's mark, which never meets at the centre and is no closed outline of the
+ * ship-wide symbol set.
+ */
+function cardinalTicks(at: ScreenPx, innerPx: number, lengthPx: number): ScreenSegment[] {
+  const outerPx = innerPx + lengthPx;
+  return [
+    [
+      { xPx: at.xPx, yPx: at.yPx - innerPx },
+      { xPx: at.xPx, yPx: at.yPx - outerPx },
+    ],
+    [
+      { xPx: at.xPx, yPx: at.yPx + innerPx },
+      { xPx: at.xPx, yPx: at.yPx + outerPx },
+    ],
+    [
+      { xPx: at.xPx - innerPx, yPx: at.yPx },
+      { xPx: at.xPx - outerPx, yPx: at.yPx },
+    ],
+    [
+      { xPx: at.xPx + innerPx, yPx: at.yPx },
+      { xPx: at.xPx + outerPx, yPx: at.yPx },
+    ],
+  ];
+}
+
+/**
  * The bracket reticle about the selection, in `--accent`, as the spatial view's: its half-size the
  * marked symbol's radius and a margin.
  *
@@ -104,8 +131,8 @@ export function destinationReticle(
   };
 }
 
-/** A target's brackets, with its range and closure rate for the DOM label beside them. */
-export interface TargetBracket extends ScreenMark {
+/** A target's mark, with its range and closure rate for the DOM label beside it. */
+export interface TargetMark extends ScreenMark {
   /** The target's range, m, from the own ship or, with none, from the camera. */
   readonly rangeM: number;
   /** Its closure rate, m/s, positive closing; `null` where there is no own ship to close on. */
@@ -113,19 +140,21 @@ export interface TargetBracket extends ScreenMark {
 }
 
 /**
- * A target's brackets in `--text`, inside the selection's, with its range and closure rate (plan
+ * A target's mark in `--text`: four open cardinal ticks outside the mark's radius, each as long as
+ * a bracket's arm, so that corner brackets mean the selection alone (state is never shown by colour
+ * alone; decided 2026-09-30 under the owner's delegation); with its range and closure rate (plan
  * R02, R02.T12.c).
  *
  * @param relativeM - The target from the range's origin (the own ship, or the camera), m.
  * @param relativeVelocityMPerS - The target's velocity relative to the own ship, m/s, or `null`.
  */
-export function targetBracket(
+export function targetMark(
   target: CameraTarget,
   at: ScreenPx,
   markRadiusPx: number,
   relativeM: Vec3,
   relativeVelocityMPerS: Vec3 | null,
-): TargetBracket {
+): TargetMark {
   const rangeM = norm(relativeM);
   const closureMPerS =
     relativeVelocityMPerS === null || !(rangeM > 0)
@@ -139,7 +168,7 @@ export function targetBracket(
     kind: "target",
     target,
     token: "text",
-    segments: corners(at, markRadiusPx),
+    segments: cardinalTicks(at, markRadiusPx, 2 * markRadiusPx * BRACKET_ARM_SHARE),
     anchor: at,
     rangeM,
     closureMPerS,
@@ -296,7 +325,7 @@ function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
 
 /**
  * The view's symbology (plan R02, R02.T12.c): each body under 3 px its symbol, each craft its target
- * brackets with range and closure (for the DOM label beside them), the selection's
+ * mark (four ticks) with range and closure (for the DOM label beside it), the selection's
  * bracket reticle in `--accent`, the destination's in `--target` outside it, and the own ship's
  * flight path marker, in that order.
  */
@@ -313,7 +342,7 @@ export function symbologyMarks(
         : symbolRadiusPx(anchor.body.symbol, input.remPx);
     if (anchor.craft !== null) {
       marks.push(
-        targetBracket(
+        targetMark(
           anchor.target,
           anchor.at,
           markRadiusPx,
