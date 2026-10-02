@@ -416,6 +416,16 @@ describe("the VIEW display", () => {
     expect(screen.getByText("VIEW").parentElement?.textContent).toMatch(/FRAME CHANGE TEST/);
   });
 
+  it("keeps its engine across a change of scene, asking for no new adapter", async () => {
+    const { user, advance, engines } = setup();
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
+    await settle();
+    advance(300);
+    expect([engines.length, screen.queryByText("GRAPHICS ACQUIRING ADAPTER")]).toEqual([1, null]);
+  });
+
   it("says AUTO is not available while there is no image to meter", async () => {
     setup();
     await settle();

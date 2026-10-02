@@ -61,7 +61,12 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
-import { DEFAULT_ENGINE_SOURCE, useViewEngine, type ViewEngineSource } from "./useViewEngine";
+import {
+  DEFAULT_ENGINE_SOURCE,
+  useViewEngine,
+  type ViewEngineSource,
+  type ViewEngineState,
+} from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
@@ -136,7 +141,11 @@ type StageSource =
 
 interface ViewStageProps {
   readonly source: StageSource;
-  readonly engineSource: ViewEngineSource;
+  /**
+   * The view's engine, made once above the stage, so that a new scene (the server's arriving, or a
+   * kept one standing in again) remounts the stage without asking for a new adapter and device.
+   */
+  readonly engineState: ViewEngineState;
   readonly exposure: ExposureControl;
   readonly onExposureChange: (exposure: ExposureControl) => void;
   readonly easedMoves: boolean;
@@ -205,7 +214,7 @@ function initialRun(source: StageSource): ViewRun {
 
 function ViewStage({
   source,
-  engineSource,
+  engineState,
   exposure,
   onExposureChange,
   easedMoves,
@@ -222,7 +231,6 @@ function ViewStage({
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
   const reducedMotion = usePrefersReducedMotion();
-  const engineState = useViewEngine(engineSource);
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
   const { ref: stageRef, size } = useElementSize();
@@ -553,6 +561,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
     throw new Error("the VIEW display is rendered outside a ViewSceneProvider");
   }
   const { scene, sceneName, keptName, knownSystem, choose } = host;
+  const engineState = useViewEngine(engineSource);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
   const [easedMoves, setEasedMoves] = useState(false);
   const universe = useUniverse().open?.id ?? null;
@@ -635,7 +644,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
       <ViewStage
         key={server === null ? option.name : SERVER_SCENE_NAME}
         source={server === null ? { kind: "kept", option } : { kind: "server", server }}
-        engineSource={engineSource}
+        engineState={engineState}
         exposure={exposure}
         onExposureChange={setExposure}
         easedMoves={easedMoves}
