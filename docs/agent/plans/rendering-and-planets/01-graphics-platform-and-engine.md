@@ -2664,3 +2664,7 @@ not drawn`, with no compiler text on the screen (it stays in the log). `status.t
     the tests; `blend`'s TSDoc now says that draws are encoded in submission order. The code
     comments that cited superseded Design note 7 (`platform.ts`, `webgpu/engine.ts`,
     `resilientEngine.ts`) cite Design note 24, and `webgpu.d.ts` no longer mentions Babylon.
+  - **m12, permission requests (main process, beside T1 and T2).** The client's main process now
+    refuses every permission request (`main/permissions.ts`, `denyPermissionRequests` on
+    `session.defaultSession` once `ready`, before the first window), as the TypeScript rules'
+    Electron section asks and as the smoke harness already did. Test: `permissions.test.ts`.

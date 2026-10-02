@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { CommanderError } from "commander";
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, session, shell } from "electron";
 
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
@@ -16,6 +16,7 @@ import {
 import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
+import { denyPermissionRequests } from "./permissions";
 
 function reportLoadFailure(error: unknown): void {
   console.error("failed to load the renderer:", error);
@@ -146,6 +147,7 @@ async function main(): Promise<void> {
   });
 
   await app.whenReady();
+  denyPermissionRequests(session.defaultSession);
   createWindow(serverUrl, graphics);
 
   app.on("activate", () => {
