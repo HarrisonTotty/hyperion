@@ -1582,3 +1582,51 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   (smallest choice made, reversible): a `contact` body (apparent position only) is lit from its
   apparent direction without eclipse or planetshine and, with no resolved radius, stays R02's
   mark (T2.a); the lean is to keep it so until a contact carries a radius.
+- **Deviations in T4.a, as built.**
+  - **Files.** `appearance/law.ts` holds `PhaseTemplateId`, `PhotometricLaw`, `PHASE_F_CLAMP` and
+    the table: `phaseFactor(law, α)` (exact f, clamped, held past the range), `phaseFactorTable`
+    (361 texels at `PHASE_TABLE_STEP_RAD` 0.5°, r, g, b interleaved in a `Float32Array`) and
+    `phaseFactorFromTable` (linear, as the shader reads it). `appearance/shapes.ts`, a file the
+    plan does not name, holds the shapes' closed forms (`lambertPhase`, `lommelSeeligerPhase`,
+    `shapePhase`, `shapeGeometricAlbedo`) and `phaseIntegral` (Simpson, 7,200 intervals), since
+    the f table needs Φ_shape and `phase.ts` (T4.b) imports the table; T4.b's `phase.ts` keeps
+    `discIntegratedPhase` and `lawFor`. `Rgb` is in display order (r, g, b): index 0 is R, 2 is B.
+  - **`PhaseTemplate` gains two fields:** `provisional: boolean`, for T5 and T16's labels, and
+    `lommelSeeligerShare`, the L that goes with the curve by Design note 5 (1 for the Moon,
+    Mercury, airless ice and magma, 0.5 for Mars, 0 otherwise), so that the templates' keys and
+    laws live in one place (`templates.ts`) and change cheaply (the coordinator's request
+    2026-10-02). No template is wired to a body class yet: Design note 5's selection rule waits
+    for the ruling in `decision-phase-curves.md`.
+  - **Moon:** Mallama and Hilton 2018 has no Moon; `moon` is Allen 1973's
+    Δm = 0.026 α + 4 × 10⁻⁹ α⁴ as Krisciunas and Schaefer 1991's eq. 9 quotes it (seen through
+    specsim's transcription; medium confidence), a source Design note 5 does not list. Its 150°
+    range is a judgement; no stated range was found. q = 0.626 at L = 1.
+  - **Ranges and branches.** Mercury's eq. 2 is used below its observed 2.1°; Uranus's eq. 15 and
+    Neptune's eq. 17 from opposition, in place of the flat eqs. 14 and 16 (which drops the
+    paper's 0.021 and 0.015 mag steps at 3.1° and 1.9°); Mars is eq. 6 without L(λe) and L(Ls),
+    held past 50° (eq. 7 unused, the coordinator's approval 2026-10-02); Saturn is its globe
+    (eqs. 11–12, joined at 6°), the rings being R11's; Earth runs to 180° (MH2018 §4.3: Tinetti's
+    curve approaches zero there), and Mallama et al. 2017's Table A-3.1 tabulates a steeper fit of
+    the same curve (2.07 mag at 90° against eq. 5's 1.57); eq. 5, the almanac's, is taken.
+  - **Stand-ins (approved by the coordinator 2026-10-02, provisional and labelled):** airless ice
+    takes the Moon's curve, snowball Earth's and magma Mercury's. The phase-curve check
+    (`check-phase-curves.md`) found four mismatches with galaxy's classes (airless ice anchored to
+    the Galilean moons, a cloud-free snowball the rule never selects, magma only below 10 kPa,
+    and the sim's Mars at 11 kPa and cloud 0.67 never reaching the Mars template); a decision is
+    pending in `decision-phase-curves.md`. A sourced icy curve exists only as Hapke fits
+    (Domingue and Verbiscer 1997, Icarus 128, 49: Europa's V to about 105°, Ganymede's to 38°).
+    With the Moon's curve an icy body's p_V q_V ÷ A_Bond is about 0.7, which T1's draft must state
+    so that T2.b's 5% check does not fire on every icy moon.
+  - **Fixture.** `SOLAR_SYSTEM_PHOTOMETRY` adds `templateV10Mag` (MH2018's zeroth-order terms, e.g.
+    Mercury's −0.613 beside Table 3's −0.69), `radiusKm` (the disc-equivalent √(a c) each Table 7
+    p_V implies: Jupiter 69,134 km, Uranus 25,264, Neptune 24,552, Mars 3,386, Saturn the paper's
+    57,240) and `template`; magnitude fields end in `Mag`; `SUN_JOHNSON_MAG` (Table 6) and
+    `JohnsonBvr` are exported beside it. q_V is computed at s = 1 with the clamp and hold: Mercury
+    0.480, Venus 1.344, Earth 1.311, Mars 1.085, Jupiter 1.312, Saturn 1.357, Uranus 1.302,
+    Neptune 1.242 (reproduced independently by the science check). The table's tests live in
+    `appearance/solarSystemPhotometry.test.ts`, inside the acceptance filter.
+  - **For T4.c.** WebGPU has no three-channel float format and `rgba32float` filters only with
+    `float32-filterable`, so the shader reads the table as RGBA texels by two `textureLoad`s and
+    interpolates itself; the table's 0.5° interpolation errs by up to 4 × 10⁻⁴ of a steep
+    crescent's f and 2 × 10⁻³ where Venus's f meets the clamp (the phase integral by 10⁻⁴), an
+    error the reference and the shader share.
