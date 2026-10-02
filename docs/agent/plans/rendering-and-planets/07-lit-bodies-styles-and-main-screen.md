@@ -1643,3 +1643,26 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   other post-processing benches (the probe's 0.3–0.8 ms stays provisional), and if per-call
   staging shows a cost T17 adds the staging ring through R01's guarded readback only (decision
   2026-10-02, item 6).
+- **Deviations in T13.a, as built** (2026-10-02). `post/autoExposure.ts`: `meteredLuminance(h,
+window = FULL_WINDOW)` (0 when the window holds no counts), `smoothEv`, `programTriple`,
+  `ExposureProgram` (the `AUTO` program's N and t, a constructor argument: R06's
+  `DEFAULT_VIEW_CAMERA` where the controller is made), `AutoExposureOptions`, and `AutoExposure`
+  as a class (Provides sketched an interface with `step`), which also holds the operator's meter
+  (`setMeter`), takes R02's command results (`apply(ExposureCommandResult)`), and exposes
+  `meteredEv100` for R02's `setAuto` and `enable`. `step(h, dtS)` takes `undefined` on frames
+  with no new histogram: the meter holds its last value, and only after `METER_TIMEOUT_S` (0.5 s)
+  without one, or on a histogram with nothing to meter (a mean of 0, as under `LIT` with no lit
+  body), does it report `null` to R02's `onMetering`, the system inhibit `NO IMAGE TO METER`;
+  a system inhibit resumes `AUTO` from its held value and smooths from there. The smoothing is in
+  closed form over each step (linear to the band's edge, then exponential at rate speed ÷ 1.5),
+  so 30 Hz and 60 Hz agree to rounding; its speeds and band are Unreal's documented defaults
+  (Speed Up 3, Speed Down 1 f-stops/s, `ExponentialTransitionDistance` 1.5; science check
+  2026-10-02), no longer "from memory", still to be settled by eye. The star-entering test uses a
+  480 × 270 frame at 60° (the Sun at 1 au 2.1 px in radius, a planet 15% of the frame): the
+  metered value moves 0.01%, where in a 64 × 64 frame the disc's own 5% of the pixels, removed
+  from the count, moved it 6%; Design note 11's "4–5 stops above the average" holds for a body
+  covering about 3–6% of the metered pixels, and one under 0.64% reaches AgX's ceiling, as a
+  real averaging meter would. **For the owner** (science check): under `AUTO` the program's
+  sensitivity S = 5880 × 2^−EV100 at f/1.4 and 1/30 s spans ISO 0.18 (a sunlit planet, EV100 15) to 6 × 10⁶ (a dark sky, EV100 −10), far outside a real sensor; the lean is to record the
+  triple as nominal until R06's `cameraLimitV` models noise from S, then clamp S and let the
+  shutter take over.
