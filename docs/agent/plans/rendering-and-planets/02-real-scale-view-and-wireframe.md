@@ -1887,3 +1887,10 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   An anchor is now kept only within the view or `ANCHOR_MARGIN_REM` (2 rem, the guide's touch
   target) of its edge; the screen-space symbology is unchanged (the GPU clips it). Tested in
   `drawList.test.ts` with the camera turned 40° off the other craft, which fails without the cull.
+- **Fixed in RM1 validation (2026-10-02, integration MINOR-1): the engine outlives the stage.**
+  `ViewStage`, keyed by its scene so that a new scene starts afresh, owned `useViewEngine`, so the
+  server's scene arriving (and a kept scene standing in again after a refusal or a timeout) asked
+  for a new adapter and device and showed `GRAPHICS ACQUIRING ADAPTER` for 0.25–0.5 s on the RTX 3080. The engine is now made in `ViewPanels`, above the keyed stage, and handed to it; a new scene
+  still remounts the stage, its canvas and its view, but on the same engine. Tested in
+  `ViewDisplay.test.tsx` (one engine across a change of `SCENE`, no `GRAPHICS ACQUIRING ADAPTER`),
+  which fails on the old code. Pending by eye: the switch on the live server scene.
