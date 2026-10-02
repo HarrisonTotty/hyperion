@@ -36,10 +36,14 @@ async function engineOn(features: ReadonlyArray<GPUFeatureName> = []): Promise<{
   return { engine: new WebGpuRenderEngine(gpu, status), gpu, status };
 }
 
-/** A material whose sources declare no `Draw` struct, so any uniforms pass the check. */
+/**
+ * A material whose sources declare no `Draw` struct, so any uniforms pass the check, shown on the
+ * console as `TEST <name>`.
+ */
 function material(engine: WebGpuRenderEngine, name: string, code = "flat"): MaterialHandle {
   return engine.createMaterial({
     name,
+    displayName: `TEST ${name.toUpperCase()}`,
     vertexWgsl: code,
     fragmentWgsl: code,
     uniforms: [{ name: "tint", type: "vec4f" }],
@@ -192,8 +196,18 @@ describe("a frame's encoding", () => {
     const { engine, gpu } = await engineOn();
     const mesh = triangle(engine);
     const flat = material(engine, "flat");
-    const first = engine.createPostProcess({ name: "first", fragmentWgsl: "a", uniforms: [] });
-    const second = engine.createPostProcess({ name: "second", fragmentWgsl: "b", uniforms: [] });
+    const first = engine.createPostProcess({
+      name: "first",
+      displayName: "TEST FIRST",
+      fragmentWgsl: "a",
+      uniforms: [],
+    });
+    const second = engine.createPostProcess({
+      name: "second",
+      displayName: "TEST SECOND",
+      fragmentWgsl: "b",
+      uniforms: [],
+    });
     const target = engine.createRenderTarget({
       name: "scene",
       size: { widthPx: 8, heightPx: 8 },
@@ -233,11 +247,14 @@ describe("a frame's encoding", () => {
   it("leaves out the draws of a material whose shaders failed to compile, and reports it", async () => {
     const { engine, gpu, status } = await engineOn();
     gpu.shaderErrors = (code) => (code.includes("oops") ? ["unresolved value 'oops'"] : []);
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const mesh = triangle(engine);
     const broken = material(engine, "broken", "return oops;");
     await vi.waitFor(() => {
-      expect(status.getSnapshot().fault).toEqual({ kind: "shader-refused", effectName: "broken" });
+      expect(status.getSnapshot().fault).toEqual({
+        kind: "shader-refused",
+        effectName: "TEST BROKEN",
+      });
     });
     const target = engine.createRenderTarget({
       name: "scene",
@@ -249,8 +266,9 @@ describe("a frame's encoding", () => {
     });
     target.render(frame("refused", [draw(mesh, broken), draw(mesh, material(engine, "flat"))]));
     expect(commandsOf(gpu, "refused").filter(({ op }) => op === "draw")).toHaveLength(1);
-    expect(console.error).toHaveBeenCalledWith(
-      "material broken failed to compile; its draws are left out:\n1:1 unresolved value 'oops'",
+    // The screen has the display name; the log keeps the code name beside it.
+    expect(logged).toHaveBeenCalledWith(
+      "material broken (TEST BROKEN) failed to compile; its draws are left out:\n1:1 unresolved value 'oops'",
     );
   });
 });

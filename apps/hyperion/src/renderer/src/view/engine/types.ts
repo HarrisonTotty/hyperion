@@ -321,6 +321,11 @@ export interface DrawItem {
  */
 export interface WgslMaterialSpec {
   readonly name: string;
+  /**
+   * The effect's name on the console (`GRAPHICS SHADER REFUSED: <displayName> …`): upper case, at
+   * most three words, what it draws; checked by `catalogue.test.ts`. The log keeps {@link name}.
+   */
+  readonly displayName: string;
   readonly vertexWgsl: string;
   readonly fragmentWgsl: string;
   /** The `Draw` struct's members after `offsetFromCameraM`, in order. */
@@ -358,6 +363,11 @@ export interface WgslMaterialSpec {
  */
 export interface WgslPostProcessSpec {
   readonly name: string;
+  /**
+   * The effect's name on the console (`GRAPHICS SHADER REFUSED: <displayName> …`): upper case, at
+   * most three words, what it draws; checked by `catalogue.test.ts`. The log keeps {@link name}.
+   */
+  readonly displayName: string;
   readonly fragmentWgsl: string;
   /** The `Draw` struct's members, in order, set per frame by `PostProcessItem.uniforms`. */
   readonly uniforms: ReadonlyArray<UniformSpec>;

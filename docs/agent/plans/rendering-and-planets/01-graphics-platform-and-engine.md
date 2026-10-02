@@ -523,7 +523,8 @@ export interface DrawItem {
   readonly indirect?: IndirectArgs;
 }
 export interface WgslMaterialSpec {
-  readonly name: string;
+  readonly name: string; // the code name, in the log
+  readonly displayName: string; // on the console: upper case, at most three words (decided 2026-10-02)
   readonly vertexWgsl: string;
   readonly fragmentWgsl: string;
   readonly uniforms: ReadonlyArray<UniformSpec>; // Draw's members after offsetFromCameraM
@@ -538,7 +539,8 @@ export interface WgslMaterialSpec {
   readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
 }
 export interface WgslPostProcessSpec {
-  readonly name: string;
+  readonly name: string; // the code name, in the log
+  readonly displayName: string; // on the console: upper case, at most three words (decided 2026-10-02)
   readonly fragmentWgsl: string;
   readonly uniforms: ReadonlyArray<UniformSpec>;
   readonly inputs?: ReadonlyArray<PostProcessInput>; // hdr-colour is always bound
@@ -654,7 +656,11 @@ export function highamBound(n: number, sumAbs: number): number; // γ(n − 1) �
   encoded commands (RM1 validation, m6).
 - `WGSL_CATALOGUE` in `view/engine/catalogue.ts`: every material, post-process and compute kernel
   the adapter can create, which the smoke harness renders one by one. Later plans register theirs
-  there.
+  there, each material and post-process with a `displayName` (decided 2026-10-02): upper case, at
+  most three words, what it draws, with no abbreviation that is not on the guide's list.
+  `catalogue.test.ts` checks every entry's name against
+  `^[A-Z][A-Z0-9]*( [A-Z0-9][A-Z0-9-]*){0,2}$` and that no two are the same; the catalogue is the
+  register of effect names, which the guide does not list one by one.
 
 ## Consumes
 
@@ -2517,7 +2523,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     any other at its first draw asynchronously, the draw left out until ready. Shader errors come
     from `getCompilationInfo`: logged with line and column, `shader-refused` dispatched with the
     material's name (the words "is not WGSL" were wrong; _closed in RM1 validation, 2026-10-02:_
-    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`),
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`; _decided 2026-10-02:_ the
+    dispatch carries the spec's `displayName` and the log both names,
+    `material wireframe:occluderSphere (BODY OCCLUDER) failed to compile; …`),
     the material's draws left out; `createMaterialAsync` rejects with the messages.
   - A view now owns its `depth32float` (attachment only; a view's depth is still not read back).
     Mesh attributes are one `float32` buffer each; `assertMeshData` refuses ragged data and indices
@@ -2548,6 +2556,7 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `false`, for R05's and R12's records.
   - _Closed in RM1 validation (2026-10-02, decision item 1):_ `GRAPHICS SHADER REFUSED` now reads
     `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn` for a compile error, and `GlslShaderRefused` no longer exists.
+    `<effect>` is the spec's `displayName` (decided 2026-10-02), not its code name.
 - **Deviations in T9, as built.**
   - Files: `src/smoke/main.ts`, `preload.ts` and `result.ts` (the report's shape, its validation
     and the verdict, unit-tested, shared as types with the page); `src/renderer/smoke.html` and
@@ -2912,3 +2921,17 @@ AVAILABLE: views could not be made, relaunch to retry`) in the view's place, lat
     detached element has none, which threw). The guide gains a draft row. Tests:
     `status.test.ts`, `resilientEngine.test.ts`, `ViewDisplay.test.tsx`,
     `GraphicsPanel.test.tsx`. _Awaiting the owner's sign-off (draft)._
+  - **Display names for effects (T8.k, T8.l).** `WgslMaterialSpec` and `WgslPostProcessSpec` gain
+    a required `displayName`, the effect's name on the console. R02's four are `WIREFRAME LINES`,
+    `BODY OCCLUDER`, `HULL OCCLUDER` and `STAR SPRITES` (`DISPLAY_NAMES` in `wireframe/submit.ts`).
+    `#reportShaderErrors` dispatches `shader-refused` with the display name, so the screen reads
+    `GRAPHICS SHADER REFUSED: BODY OCCLUDER did not compile, not drawn`, and logs
+    `material wireframe:occluderSphere (BODY OCCLUDER) failed to compile; its draws are left out:`
+    with the compiler's lines. The smoke harness's specs are named `TEST FLAT` (`flatSpec`'s
+    default), `TEST GAIN`, `TEST COPY`, `TEST TONE` and `TEST INDIRECT COPY`, the broken-WGSL
+    fixture `TEST FIXTURE`, and the unit tests' `TEST <name>`. A new `catalogue.test.ts` checks
+    every material's and post-process's name for the form and uniqueness (compute kernels dispatch
+    no refusal and are left out). The guide's `GRAPHICS SHADER REFUSED` row states the naming rule
+    and makes the catalogue the register of effect names, a draft. Later plans' catalogue
+    registrations (R07 onwards) give each effect a `displayName` in this form. _Awaiting the
+    owner's sign-off (draft)._

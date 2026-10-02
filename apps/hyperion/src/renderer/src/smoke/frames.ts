@@ -94,6 +94,7 @@ export async function checkThreeCanvases(engine: RenderEngine, checks: Checks): 
   const material = engine.createMaterial(flatSpec("marker"));
   const copy = engine.createPostProcess({
     name: "copy",
+    displayName: "TEST COPY",
     uniforms: [],
     fragmentWgsl: `
 @group(2) @binding(0) var colour : texture_2d<f32>;
