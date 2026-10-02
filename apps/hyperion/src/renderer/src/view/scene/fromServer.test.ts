@@ -178,15 +178,17 @@ describe("the server's scene as the view draws it", () => {
     ]);
   });
 
-  it("selects the camera's frame from geometric centres, never apparent ones", () => {
+  it("gives the camera the drawn centres, which its frame selection measures to", () => {
     const model = modelOf(stateNearEarth());
     const frame = frameOf(model);
     const scene = sceneOf(model, frame);
-    const jupiter = frame.bodies.find((each) => each.id === FIXTURE_JUPITER);
-    const selection = cameraSceneOf(scene).selectionOrigins;
-    expect([selection.bodyCentreM(FIXTURE_JUPITER), selection.bodyCentreM(FIXTURE_EARTH)]).toEqual([
-      jupiter?.kind === "placed" ? jupiter.geometricM : null,
-      bodyOf(scene, FIXTURE_EARTH).centreM,
+    const seen = (id: string) => frame.bodies.find((each) => each.id === id);
+    const earth = seen(FIXTURE_EARTH);
+    const { origins } = cameraSceneOf(scene);
+    // Jupiter apparent, as drawn; the local body, Earth, geometric, as `sceneAt` chose it.
+    expect([origins.bodyCentreM(FIXTURE_JUPITER), origins.bodyCentreM(FIXTURE_EARTH)]).toEqual([
+      seen(FIXTURE_JUPITER)?.apparentM,
+      earth?.kind === "placed" ? earth.geometricM : null,
     ]);
   });
 

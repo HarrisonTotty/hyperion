@@ -105,13 +105,6 @@ export interface CameraScene {
   readonly tidalRadiusM: number | null;
   /** Where every frame's origin and every craft is at the frame time, as the scene draws them. */
   readonly origins: CameraOrigins;
-  /**
-   * The same, but every body at its geometric centre at the frame time: the centres frame selection
-   * measures the camera's distances to, since they are "geometric and present … never apparent
-   * ones" (Design note 6); the camera itself is placed by {@link CameraScene.origins}. Identical to
-   * it in a scene that draws no body apparent.
-   */
-  readonly selectionOrigins: CameraOrigins;
   /** The bodies whose frames the camera may enter. */
   readonly frameBodies: ReadonlyArray<FrameBody>;
   /** The targets, in the order the next and previous target keys step through them. */
@@ -291,13 +284,11 @@ function currentBodyFrame(frame: CameraFrame, scene: CameraScene): BodyIdHex | n
  * selects there (Design note 6), or the galactic frame where the scene is galactic.
  *
  * @remarks
- * The camera is placed where the view draws it (`origins`), the same point whatever frame its pose
- * is held in, and its distances are measured to where the bodies are at the frame time, not where
- * they are drawn (`selectionOrigins`): geometric and present, as the sim's rule measures them. A
- * camera at a drawn moon whose light-time shift passes its Hill radius is therefore not in that
- * moon's frame, which costs nothing in precision (positions are differenced in `f64`). Placing the
- * pose from its own frame's geometric origin instead would move the camera on entering a frame
- * and make it leave and re-enter every step.
+ * The camera and the candidates' centres are both where the view draws them (`origins`). A free
+ * camera lives in the drawn scene, so its frame is the body it is drawn beside, and it holds still
+ * there whatever frame its pose is held in. The sim's geometric rule over present positions governs
+ * the ship's local body (`sceneAt`) and the flight model; the camera runs the same rule over the
+ * drawn centres (Design note 6, as amended 2026-10-02).
  */
 export function sceneFrameFor(pose: CameraPose, scene: CameraScene): CameraFrame {
   const { origins } = scene;
@@ -315,7 +306,7 @@ export function sceneFrameFor(pose: CameraPose, scene: CameraScene): CameraFrame
     cameraFrameCandidate(
       body.id,
       body.parent,
-      norm(sub(inSystem, scene.selectionOrigins.bodyCentreM(body.id))),
+      norm(sub(inSystem, origins.bodyCentreM(body.id))),
       body.hillRadiusM,
     ),
   );

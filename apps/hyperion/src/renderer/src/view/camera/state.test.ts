@@ -12,6 +12,7 @@ import {
   FIXTURE_SYSTEM,
 } from "../../test/viewFixtures";
 import { relativeToCamera } from "../coords/relative";
+import { type FreeCameraInput, stepFreeCamera } from "./freeCamera";
 import type { CameraPose } from "./pose";
 import { quaternionFromAxisAngle, rotate } from "./quaternion";
 import { rebase } from "./rebase";
@@ -239,39 +240,46 @@ describe("cuts and eased moves", () => {
 });
 
 describe("frame selection", () => {
-  // The moon drawn where it is seen, 10⁸ m from where it is at the frame's time.
-  const drawn = aCameraScene();
-  const geometricMoonM = sub(FIXTURE_MOON_CENTRE_M, vec3(0, 1e8, 0));
-  const lightTimed = aCameraScene({
-    selectionOrigins: {
-      ...drawn.origins,
-      bodyCentreM: (body) =>
-        body === FIXTURE_MOON ? geometricMoonM : drawn.origins.bodyCentreM(body),
-    },
-  });
+  // The scene draws the moon at FIXTURE_MOON_CENTRE_M, where the ship sees it; its geometric centre
+  // at the frame's time is 10⁸ m away, which the camera's selection never consults (Design note 6,
+  // as amended 2026-10-02).
+  const scene = aCameraScene({ ownShip: null });
+  const besideMoonM = vec3(0, 1e7, 0);
 
-  it("measures from where the bodies are, not where they are drawn (Design note 6)", () => {
-    // 10⁷ m beyond the drawn moon, inside its 5.8 × 10⁷ m Hill sphere; 1.1 × 10⁸ m from the moon.
-    const pose = aCameraPose({ positionM: add(FIXTURE_MOON_CENTRE_M, vec3(0, 1e7, 0)) });
-    expect([sceneFrameFor(pose, drawn), sceneFrameFor(pose, lightTimed)]).toEqual([
-      { kind: "body", body: FIXTURE_MOON },
-      { kind: "body", body: FIXTURE_PLANET },
-    ]);
-  });
-
-  it("selects the same frame for one drawn point whatever frame its pose is held in", () => {
-    // The same point as above, held in the drawn moon's frame: placing it from the moon's
-    // geometric centre would put it back inside the moon's Hill sphere, and it would leave and
-    // re-enter the moon's frame at every step.
+  it("puts a camera beside a drawn moon in its frame, whatever frame holds its pose", () => {
+    // 10⁷ m from the drawn moon, inside its 5.8 × 10⁷ m Hill sphere.
+    const inSystem = aCameraPose({ positionM: add(FIXTURE_MOON_CENTRE_M, besideMoonM) });
     const inMoon = aCameraPose({
       frame: { kind: "body", body: FIXTURE_MOON },
-      positionM: vec3(0, 1e7, 0),
+      positionM: besideMoonM,
     });
-    const inSystem = aCameraPose({ positionM: add(FIXTURE_MOON_CENTRE_M, vec3(0, 1e7, 0)) });
-    expect([sceneFrameFor(inMoon, lightTimed), sceneFrameFor(inSystem, lightTimed)]).toEqual([
-      { kind: "body", body: FIXTURE_PLANET },
-      { kind: "body", body: FIXTURE_PLANET },
+    expect([sceneFrameFor(inSystem, scene), sceneFrameFor(inMoon, scene)]).toEqual([
+      { kind: "body", body: FIXTURE_MOON },
+      { kind: "body", body: FIXTURE_MOON },
     ]);
+  });
+
+  it("keeps a camera at rest beside a drawn moon in its frame, never leaving and re-entering", () => {
+    const start = aCameraPose({ positionM: add(FIXTURE_MOON_CENTRE_M, besideMoonM) });
+    const frame = sceneFrameFor(start, scene);
+    const inFrame = rebase(start, frame, scene.origins).pose;
+    let state = newCameraState(aCameraScene({ ownShip: null, defaultPose: inFrame }), "camera");
+    // Turning in place re-selects the frame at every step while the camera stays where it is.
+    const look: FreeCameraInput = { translate: vec3(0, 0, 0), rotate: vec3(0, 1, 0) };
+    const drawnAt = (pose: CameraPose): Vec3 =>
+      rebase(pose, { kind: "system", system: FIXTURE_SYSTEM }, scene.origins).pose.positionM;
+    const frames: CameraPose["frame"][] = [];
+    let farthestM = 0;
+    for (let step = 0; step < 100; step += 1) {
+      state = stepFreeCamera(state, look, 1 / 60, false, scene).state;
+      frames.push(state.pose.frame);
+      farthestM = Math.max(farthestM, norm(sub(drawnAt(state.pose), drawnAt(start))));
+    }
+    expect(state.preset).toBe("free");
+    expect(new Set(frames.map((each) => JSON.stringify(each)))).toEqual(
+      new Set([JSON.stringify({ kind: "body", body: FIXTURE_MOON })]),
+    );
+    expect(farthestM).toBeLessThan(1e-3);
   });
 });
 
