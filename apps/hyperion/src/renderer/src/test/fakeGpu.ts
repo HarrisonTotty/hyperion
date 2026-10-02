@@ -119,6 +119,19 @@ export class FakeBuffer implements GPUBuffer {
   }
 }
 
+/** A view that knows its texture and its descriptor, so a test can tell what a pass bound. */
+export class FakeTextureView implements GPUTextureView {
+  label: string;
+  readonly texture: FakeTexture;
+  readonly descriptor: GPUTextureViewDescriptor | undefined;
+
+  constructor(texture: FakeTexture, descriptor: GPUTextureViewDescriptor | undefined) {
+    this.label = descriptor?.label ?? "";
+    this.texture = texture;
+    this.descriptor = descriptor;
+  }
+}
+
 /** A texture that records its descriptor and its destruction. */
 export class FakeTexture implements GPUTexture {
   readonly descriptor: GPUTextureDescriptor;
@@ -171,7 +184,7 @@ export class FakeTexture implements GPUTexture {
 
   createView(descriptor?: GPUTextureViewDescriptor): GPUTextureView {
     this.views.push(descriptor);
-    return { label: descriptor?.label ?? "" };
+    return new FakeTextureView(this, descriptor);
   }
   destroy(): undefined {
     this.destroyed = true;
