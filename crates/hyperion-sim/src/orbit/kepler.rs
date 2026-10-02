@@ -429,9 +429,67 @@ impl KeplerElements {
         )
     }
 
+    /// The same orbit with its mean anomaly at the epoch chosen so that its mean anomaly at `t`
+    /// is `mean_anomaly_rad` (any finite angle) to rounding: the elements of an evolving orbit at
+    /// a time, whose phase is the integral of its mean motion and not its period's (plan 14,
+    /// P14.T45.a).
+    ///
+    /// The phase the period alone gives at `t` is reduced exactly, as
+    /// [`mean_anomaly_at`](Self::mean_anomaly_at) reduces it, so the result is good to a few units
+    /// in the last place of 2π at any time.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildOrbitError::AngleNotFinite`] for a mean anomaly that is not finite.
+    pub(crate) fn rephased(
+        &self,
+        t: UniverseTime,
+        mean_anomaly_rad: f64,
+    ) -> Result<Self, BuildOrbitError> {
+        let fraction = phase::fraction_of_period(
+            i128::from(t.seconds()),
+            t.subsec_nanos(),
+            self.period.value(),
+        );
+        Ok(Self {
+            mean_anomaly_at_epoch: Radians::new(reduce_to_turn(
+                reduce_to_half_turn(mean_anomaly_rad) - TAU * fraction,
+            )?),
+            ..*self
+        })
+    }
+
+    /// The position and velocity at `t`, as [`relative_state_at`](Self::relative_state_at), of the
+    /// orbit whose elements are these at `reference` and change at constant rates from then:
+    /// a = aᵣ + ȧ Δt, e = eᵣ + ė Δt, and the mean anomaly the elements give plus ½ ṅ Δt², with
+    /// Δt = t − `reference` in seconds and the mean motion nᵣ + ṅ Δt in the velocity (plan 14,
+    /// P14.T45.a, the model of an evolving orbit on one drift cell).
+    ///
+    /// Δt is [`seconds_between`] `reference` and `t`. The client evaluates the same expressions
+    /// in the same order (`lib/orbit.ts`). The velocity is the Kepler velocity of the elements
+    /// then, as for osculating elements: it differs from the position's derivative by about
+    /// ȧ ÷ (n a), the period over the evolution's timescale, some 10⁻¹² for a receding moon, and
+    /// by (1 + 1 ÷ √(1 − e²)) |ė| ÷ n for the eccentricity's change, nil under mass loss and far
+    /// smaller under circularisation.
+    #[must_use]
+    pub(crate) fn drifting_state_at(
+        &self,
+        t: UniverseTime,
+        reference: UniverseTime,
+        rates: DriftRates,
+    ) -> (SystemVector, SystemVelocity) {
+        let dt = seconds_between(reference, t);
+        let a = self.semi_major_axis.value() + rates.a_m_per_s * dt;
+        let e = self.eccentricity.value() + rates.e_per_s * dt;
+        let mean_anomaly = self.unreduced_mean_anomaly_at(t) + 0.5 * rates.n_rad_per_s2 * dt * dt;
+        let mean_motion = self.mean_motion() + rates.n_rad_per_s2 * dt;
+        elliptic_state(a, e, mean_motion, mean_anomaly, &self.orientation)
+    }
+
     /// The mean anomaly at the epoch plus 2π times the centred fraction of a period elapsed, rad,
     /// in `[−π, 3π)`: what propagation reduces itself, which keeps a small anomaly's precision.
-    fn unreduced_mean_anomaly_at(&self, t: UniverseTime) -> f64 {
+    #[must_use]
+    pub(crate) fn unreduced_mean_anomaly_at(&self, t: UniverseTime) -> f64 {
         let fraction = phase::fraction_of_period(
             i128::from(t.seconds()),
             t.subsec_nanos(),
@@ -444,6 +502,52 @@ impl KeplerElements {
     fn mean_motion(&self) -> f64 {
         TAU / self.period.value()
     }
+}
+
+/// The seconds from `from` to `to` as an `f64`: the difference of the whole seconds plus the
+/// difference of the nanoseconds over 10⁹, in that order, which a client forms the same way
+/// (plan 14, P14.T45). The whole seconds are exact below 2⁵³ s apart, so across the clock
+/// window, and rounded beyond; the nanoseconds are always exact.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::orbit::seconds_between;
+/// use hyperion_sim::time::UniverseTime;
+///
+/// // How far into a drift cell a time is, as the client also forms it.
+/// let reference = UniverseTime::new(33_554_432, 0)?;
+/// let t = UniverseTime::new(33_554_431, 750_000_000)?;
+/// assert!(seconds_between(reference, t).total_cmp(&-0.25).is_eq());
+/// # Ok::<(), hyperion_sim::time::BuildUniverseTimeError>(())
+/// ```
+#[must_use]
+pub fn seconds_between(from: UniverseTime, to: UniverseTime) -> f64 {
+    let whole = i128::from(to.seconds()) - i128::from(from.seconds());
+    let nanos = i64::from(to.subsec_nanos()) - i64::from(from.subsec_nanos());
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "exact below 2^53 s, as across the clock window; rounded, as documented, beyond"
+    )]
+    let whole = whole as f64;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a difference of nanoseconds is under 10^9 in magnitude, exact in f64"
+    )]
+    let nanos = nanos as f64;
+    whole + nanos / 1e9
+}
+
+/// The constant rates an orbit's elements change at on one drift cell, which
+/// [`KeplerElements::drifting_state_at`] takes (plan 14, P14.T45.a).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DriftRates {
+    /// ȧ, m s⁻¹.
+    pub(crate) a_m_per_s: f64,
+    /// ė, s⁻¹.
+    pub(crate) e_per_s: f64,
+    /// ṅ, rad s⁻².
+    pub(crate) n_rad_per_s2: f64,
 }
 
 /// `mu`'s value, if it is finite and positive.
@@ -463,7 +567,7 @@ mod tests {
 
     use super::super::{cross, dot};
     use super::*;
-    use crate::time::Span;
+    use crate::time::{ClockWindow, Span};
     use crate::units::consts::{GM_SUN, METRES_PER_AU};
     use crate::units::{AstronomicalUnits, SolarMasses};
 
@@ -523,6 +627,48 @@ mod tests {
         ms.extend((1..200).map(|k| PI * f64::from(k) / 200.0));
         ms.retain(|m| (0.0..=PI).contains(m));
         ms
+    }
+
+    #[test]
+    fn rephasing_sets_the_mean_anomaly_at_a_time_and_refuses_a_non_finite_one() {
+        let earth = KeplerElements::from_semi_major_axis(
+            Metres::new(METRES_PER_AU),
+            GravitationalParameter::new(GM_SUN),
+            Eccentricity::new(0.0167).unwrap(),
+            orientation(0.1, 0.2, 0.3),
+            Radians::new(0.4),
+        )
+        .unwrap();
+        let t = UniverseTime::from_julian_years(-700).unwrap();
+        for phase in [0.0, 1.0, -3.0, 40.0] {
+            let rephased = earth.rephased(t, phase).unwrap();
+            let got = rephased.mean_anomaly_at(t).value();
+            let want = phase.rem_euclid(TAU);
+            let apart = (got - want).abs().min(TAU - (got - want).abs());
+            assert!(apart < 1e-13, "{phase}: {got}");
+            assert_same_bits(rephased.period().value(), earth.period().value());
+        }
+        assert!(matches!(
+            earth.rephased(t, f64::NAN),
+            Err(BuildOrbitError::AngleNotFinite { .. })
+        ));
+    }
+
+    #[test]
+    fn seconds_between_takes_whole_seconds_then_nanoseconds() {
+        let at = |s: i64, ns: u32| UniverseTime::new(s, ns).unwrap();
+        assert_same_bits(seconds_between(at(10, 0), at(10, 0)), 0.0);
+        assert_same_bits(seconds_between(at(10, 0), at(7, 250_000_000)), -2.75);
+        // 1 s plus −999,999,998 ns: the sum is formed in that order, not as the nearest f64 to
+        // 2 ns, which is what the client's form gives too.
+        assert_same_bits(
+            seconds_between(at(-5, 999_999_999), at(-4, 1)),
+            1.0 + -999_999_998.0 / 1e9,
+        );
+        assert_same_bits(
+            seconds_between(ClockWindow::START, ClockWindow::END),
+            2.0 * 31_557_600_000.0,
+        );
     }
 
     #[test]

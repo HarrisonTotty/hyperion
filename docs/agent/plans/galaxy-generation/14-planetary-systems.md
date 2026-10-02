@@ -2039,31 +2039,11 @@ elements into elements at a time.
     and no crossing among generated systems of primaries over 8 M☉.
   - _Accept:_ `cargo test -p hyperion-sim -- planetary::fate planetary::hosts
 planetary::system::tests::no_orbits_cross`.
-- **P14.T28.f Evolving orbits get a `valid_until`** (added 2026-09-30 from the rendering lanes
-  (R03.T13 findings); decided by a delegated decision, item 9). An orbit whose elements change
-  continuously inside their segment (T8.e's circularisation, a host's mass loss through
-  `host_mass(t)`, a giant-impact moon's recession of T18) carries `valid_until: None` today, though
-  `BodyOrbit::new`'s doc defines it as the next change of the body's state or elements; close_binary
-  `0x42002cb200000009` body `.0201` gains about 8 m of semi-major axis a century. Such an orbit
-  gets `valid_until` = the earlier of the segment's next change and `next_step(t)`, the first
-  multiple of `EVOLVING_ORBIT_STEP` (1 Julian year, aligned to the epoch) after `t`, windowed by
-  `within` like every other `valid_until`. Whether the elements evolve is decided by comparing the
-  elements at `t` and at the step: equal to the bit, the orbit is left with its segment's
-  `valid_until`. The scene (R03 Design note 4) and the `SYSTEM` display (T44's `nextRequestTime`)
-  already re-send or re-request on a `valid_until`, so nothing is built on the wire or the client.
-  - _Files:_ `planetary/fate.rs` (`FateAt` for `Present`), `planetary/params.rs`
-    (`EVOLVING_ORBIT_STEP`, with its drift bound in the doc comment), `planetary/system.rs` (a
-    moon's orbit section); the goldens that pin a `valid_until` (plan 14's
-    `tests/golden/planetary/`, the server's `scene_systems.golden`), with a `GENERATOR_VERSION`
-    bump per the sim-determinism skill.
-  - _Tests:_ a circularising planet, a planet of a host losing mass and a receding giant-impact moon
-    each carry a `valid_until` on the step grid, strictly after `t` and no later than a year on; a
-    body whose elements hold keeps its segment's `valid_until` (`None` where nothing changes); the
-    same record is given at any time inside one step (aligned, not relative); a step past the clock
-    window gives none; R03.T13's `apparent.test.ts` holds every body to the common bound.
-  - _Accept:_ `cargo test -p hyperion-sim -- planetary::fate planetary::system`; `cargo test -p
-hyperion-server scene`; `pnpm --filter hyperion exec vitest run
-src/renderer/src/lib/scene/apparent.test.ts`.
+- **P14.T28.f Evolving orbits get a `valid_until`. Superseded (2026-10-01)** by P14.T45, which
+  replaces it. P14.T28.f was added on 2026-09-30 from the rendering lanes' R03.T13 findings, as a
+  `valid_until` on an aligned 1-year step (a delegated decision, item 9). That step does not bound
+  the drift (see "Risks and open points", the bullet on these two findings), and it was never
+  built.
 
 #### P14.T29 Tidal and encounter stripping
 
@@ -2376,6 +2356,81 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
 - _Tests:_ Vitest: fixtures copied from the Rust wire-form tests decode; a malformed body ID is
   rejected.
 - _Accept:_ `pnpm --filter @hyperion/protocol test`, `pnpm typecheck`.
+
+#### P14.T45 Evolving orbits: a continuous phase and drifting elements
+
+Added 2026-10-01 from the rendering lanes (R03.T13 findings). Decided by a delegated decision
+("evolving orbits on the wire"), which supersedes item 9 and P14.T28.f.
+
+Three laws change an orbit's elements inside a segment:
+
+- a giant-impact moon's recession (T18), a^(13/2) = a₀^(13/2) + Kτ;
+- circularisation (T8.e), a(t) and e(t);
+- expansion under a host's mass loss (T28.b), a(t) and μ(t).
+
+Each of them today keeps the mean anomaly at the epoch and lets n follow a(t), so the phase is
+M₀ + n(t)(t − E). A body then does not move at its own elements' Kepler speed. The phase drifts
+from the physical ∫ n dt by 0.75 n ȧ (t − E), about 12,000 km for close_binary's `.0201` at the
+clock window's edge. A client holding a record errs by 1.5 n ȧ Δt t: 1.03 m for R03.T13's light
+time, and kilometres for a year's record.
+
+The fix has three parts:
+
+- **The phase is the integral.** The phase becomes M(t) = M(anchor) + ∫ n dt'.
+- **Aligned cells.** The trajectory is followed on aligned cells [t_r, t_r + S), where
+  S = 2^k s with 16 ≤ k ≤ 25, and t_r = max(⌊t ÷ S⌋ S from E, segment start). In a cell:
+  a = a_r + ȧ Δt, e = e_r + ė Δt, M = M_r + n_r Δt + ½ ṅ Δt².
+  - The rates are secants that meet the law at both ends of the cell, with
+    ½ ṅ S² = ∫ n − n_r S.
+  - k is the largest value whose model stays within ε = 10⁻⁴ m + 2⁻⁵² × the apoapsis of the law
+    at the cell's quarter points.
+  - Dyadic cells nest, so every time in a cell gets the same record.
+- **One formula.** The record carries the elements at `reference` = t_r and the rates. Its
+  `valid_until` is the cell's end or the next state or segment change. The sim and the client
+  evaluate the same formula, so R03.T13's separate pin goes. An orbit that does not evolve has no
+  drift, and its record is unchanged.
+
+- **P14.T45.a Sim.**
+  - **Files.** `planetary/drift.rs` holds:
+    - `phase_since`, which is ∫ n dt' (analytic for an impact moon; fixed-node Gauss–Legendre
+      for the other two laws);
+    - `OrbitDrift { reference, a_rate, e_rate, n_rate }`;
+    - `DriftingOrbit { elements, drift }` with `relative_state_at(t)`, whose velocity uses the
+      mean motion n_r + ṅ Δt;
+    - the cell search;
+    - `DRIFT_CELL_MAX_LOG2` = 25, `DRIFT_CELL_MIN_LOG2` = 16 and `DRIFT_TOLERANCE`.
+
+    `BodyOrbit` gains `drift()`. The model is wired into `ImpactMoon` and `satellite_record`, into
+    `FateAt` for `Present` (`fate.rs`), and into every position path (`position_at`, `state_at`,
+    and so `retarded_in_system`). A moon's `valid_until` takes its parent's state or segment
+    change, not the parent's cell end.
+
+  - _Tests:_ a cell's model meets the law at both ends; adjacent cells join within ε; records at
+    any two times in one cell are identical; over the window the model stays within ε of a
+    fine-step integration of the law; `.0201` has a drift and a `valid_until` at most 2^25 s
+    ahead; on stated seeds, the share of orbits at the 2^16 s floor is under 10⁻³, and the error
+    there is pinned.
+  - _Accept:_ `cargo test -p hyperion-sim planetary`; one `GENERATOR_VERSION` bump with the goldens
+    regenerated per the sim-determinism skill.
+- **P14.T45.b Protocol and server.**
+  - **Files.** `OrbitDriftDto { reference, semi_major_axis_rate_m_per_s, eccentricity_rate_per_s,
+mean_motion_rate_rad_per_s2 }`, and `drift: Option<OrbitDriftDto>` on `BodyOrbitDto` with
+    `#[serde(default)]`. `valid_until`'s doc reads "…or the end of the current drift cell".
+    `PROTOCOL_VERSION` stays 2, since an optional field does not bump it. The field is mapped in
+    `crates/hyperion-server/src/convert/planetary.rs`; `just gen-protocol` is run and
+    `scene_systems.golden` regenerated. `scene/core.rs` is unchanged, because it already re-sends
+    on `valid_until`.
+  - _Tests:_ a wire-form test with and without `drift`.
+  - _Accept:_ `cargo test -p hyperion-protocol`; `cargo test -p hyperion-server`;
+    `just gen-protocol-check`.
+- **P14.T45.c Client.**
+  - **Files.** `lib/system/bodiesWire.ts` reads and checks `drift`. `KeplerOrbit` gains an
+    optional `drift`. `stateAt` in `lib/orbit.ts` applies a(t), e(t) and the ½ ṅ Δt² term, with
+    Δt formed from `UniverseTime` as the sim forms it. This serves both the `SYSTEM` display and
+    R03's `scene/apparent.ts`.
+  - _Tests:_ `lib/orbit.test.ts`'s golden vectors include a drifting orbit from the sim;
+    `bodiesWire` refuses malformed rates.
+  - _Accept:_ `pnpm --filter hyperion exec vitest run src/renderer/src/lib`.
 
 ### Phase I: the `SYSTEM` display
 
@@ -5409,6 +5464,20 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     their segment stated no `valid_until`, against `BodyOrbit`'s meaning; a client holding such a
     record would drift as t² (some 100 m by the window's edge for close_binary's `.0201`). Decided:
     a `valid_until` on an aligned 1-year step, at one re-send per such body per year of scene time.
+    **Superseded (2026-10-01) by P14.T45. Item 9's "well under a centimetre" was wrong.** For
+    `.0201`, a = 1.880 × 10⁸ m, P = 1.024 × 10⁶ s (n = 6.13 × 10⁻⁶ s⁻¹), and ȧ = 8.18 cm a year
+    (`scene_systems.golden`, epoch against +100 yr). T18's closed form keeps the mean anomaly at the
+    epoch and lets n follow a(t), so the phase at t is M₀ + n(a(t)) t. A record held from t₀ to
+    t₀ + Δt is then off along the orbit by about 1.5 n ȧ Δt (t₀ + Δt). R03.T13's 2 × 10⁻¹³ Σ (1.03
+    m from 30 au, 0.19 m from the low orbit, at +100 yr) is this formula with Δt the light time
+    (about 4 h): the client places the body with the elements at the record's time and the
+    simulation with those at the emitted time. A `valid_until` does not change that residual, so
+    R03.T13's separate pin cannot go. For a record held one 1-year step, the formula gives about
+    2.4 km at +100 yr and 24 km at the window's edge, not "well under a centimetre". With
+    phase-continuous elements (M = ∫ n dt), a held record is still off by ½ ṅ Δt² a = 0.75 n ȧ
+    Δt²: about 12 m for one year, and under 1 cm only for a step of about 10 days. Re-decided on the owner's
+    delegation: the ∫ n phase, with drifting elements on aligned cells of at most 2²⁵ s that the
+    sim and the client evaluate with one formula (P14.T45). P14.T28.f was never built.
   - _P14.T35.d, as built._ The state-time check in `bodiesWire.ts` is `displayableTime`, not
     `displayTime`, since `displays/system/displayTime.ts` has that name; it shares `validNanos`
     with `usableTime`. The `SINCE` text is `formatEventTime(time)` in `displays/system/displayTime.ts`,
@@ -5422,3 +5491,95 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     times by `MIN_SAFE_INTEGER`, is removed. **For the owner:** the guide has no sentence for an
     event time outside the clock window on a display that steps finer than 0.01 yr; the years form
     is built to the decision and waits on the owner's confirmation.
+- **P14.T45.a–c, as built (G14 and G15, 2026-10-02). `GENERATOR_VERSION` 16 → 17.**
+  - _Files._ `planetary/drift.rs`: `OrbitDrift` (rates named with their units, as
+    `semi_major_axis_rate_m_per_s`, `eccentricity_rate_per_s` and `mean_motion_rate_rad_per_s2`),
+    `DriftingOrbit`, the crate-private `EvolvingLaw`, `drift_cell`, `DriftCell::holds_until` and
+    `gauss_legendre_excess`, and `DRIFT_CELL_MAX_LOG2`, `DRIFT_CELL_MIN_LOG2` and
+    `DRIFT_TOLERANCE`. `orbit/kepler.rs` gains the public `seconds_between` (the client's Δt), the
+    crate-private `rephased` and `drifting_state_at`, and `DriftRates`, the three rates it takes.
+    `RecedingLaw` is in `moons/impact.rs`, with a closed-form phase. The circularisation and
+    mass-loss law is `SegmentLaw` in `fate.rs`. Provides gains `OrbitDriftDto` and
+    `BodyOrbitDto.drift` (T45.b).
+  - _Phase integral._ There is no `phase_since`. Its role is the crate-private
+    `EvolvingLaw::phase_excess(t)`, ∫ (n − n_anchor) from the anchor, with
+    `local_excess(from, to, n_from)` for a cell's own integral: closed form for `RecedingLaw`
+    (`recession_phase_ratio_less_one`), 16-point Gauss–Legendre for `SegmentLaw`. The anchored
+    elements gain n_anchor Δt exactly, so only small quantities are differenced.
+  - _Records._ `FateAt` gains `trajectory()` and `changes_at()`. `body_orbit()` states the
+    elements at the cell's reference, with the drift. `orbit()` stays the law's elements at the
+    time, with the segment's M₀, which is what the derivation reads. `rotation_of` reads the
+    elements at its own time, not the record's. A moon's record holds until its planet's
+    `changes_at`, its loss or its own cell's end.
+  - _Which orbits evolve._ An orbit evolves where the law's a, e and μ differ, by total order,
+    between the two ends of the segment's part of the window. The anchor is the epoch clamped to
+    that part: a body formed after the epoch is anchored at its formation, and one whose segment
+    ends before the epoch at that end. An orbit whose change rounds away inside a cell carries a
+    drift with all three rates zero (`orbit/drifting_states.golden`'s `drift[04]`).
+  - _Moons._ A receding moon is anchored at the epoch clamped between the system's birth and the
+    moon's loss. Its cells start no earlier than the system's birth, since the moon's own formation
+    time is not stored.
+  - _Cells._ A cell straddling the window's start is cut on both sides. A time before `START`
+    gets a record that holds until its cell's end, `START` or earlier: `holds_until` states it even
+    though it lies outside the window, where every other `valid_until` is stated only inside it.
+    (G15 fixed this: a halved cell before `START` had `valid_until: None`, so its record claimed
+    to hold for ever; the light-time solve reaches back to −(H + L). `fate.golden`'s nine
+    pre-window `valid_until` lines moved with it.) At the other end a cell's fit is cut at `END`
+    but its end is not: the record in the cell holding `END` has a drift and `valid_until: None`,
+    and a time after `END` gets a cell that starts at `END`.
+  - _The cell check._ It reads the law's phase inside a cell as the cell's own integral. The
+    difference from the integral from the anchor is shared out quadratically, as the model shares
+    it, and not counted. The 2⁻⁵² × apoapsis term takes the apoapsis at the cell's start, not at
+    each quarter point. The quarter points see about 95% (243 ÷ 256) of the cubic phase error, so
+    its peak may exceed the checked bound by up to 5.3%.
+    - **Deviation.** The decision's composite Gauss–Legendre rule, split at the circularisation
+      floor's breakpoints and the stellar track's knots, is not built. The track's knots are not
+      exposed, and a panel per 2²⁵ s cell would cost about 15,000 law evaluations per query.
+      `SegmentLaw` integrates on one 16-point panel from the anchor instead.
+    - **Consequence.** Its quadrature error across the track's kinks is the law's, so it is
+      excluded from the check. Per kink where ṅ's slope jumps by Δṅ, the error over a panel of
+      length L is at most about 7.5 × 10⁻⁴ |Δṅ| L², and changes with the panel's end at up to
+      0.025 |Δṅ| L (science check, with the repository's GL16 table). The earlier "about 10⁻² rad
+      over the window for a one-year orbit" assumes a break in Ṁ ÷ M of about 10⁻⁶ yr⁻¹; under
+      adiabatic expansion n ∝ μ², so AGB superwind rates of 10⁻⁵ to 10⁻⁴ M☉ yr⁻¹ give about
+      0.1–1 rad, as large as the `.0201` error T45 set out to fix, and more before `START`, where
+      the panel is longer. Cells still join exactly in position, but the model's speed departs
+      from the Kepler speed by the error's rate (about 5 × 10⁻⁵ of n in the 10⁻² rad case), and
+      the velocity steps by about 2 dE ÷ dt at each cell's end (about 10⁻⁴ relative there). The
+      receding moon, in closed form, is exact.
+    - **For the owner.** Splitting at the knots is a later output change, with a bump.
+  - _The bound._ The δe term of the bound is a (1 + 1 ÷ √(1 − e²)), an envelope of |∂r ÷ ∂e|
+    that the science check verified numerically over 0 ≤ e ≤ 0.9999 (tight as e → 0); it is not
+    printed in Murray and Dermott, who give ∂E ÷ ∂e (§2.5). 2a holds only for a circular orbit.
+  - _Tests._ "Adjacent cells join within ε" is asserted at ε, in `drift/tests.rs` and on the
+    sample. The fine-integration test runs on two synthetic laws, one like `.0201` and one young
+    moon; `RecedingLaw`'s own test compares at the cell's end only, and `SegmentLaw` is not
+    compared with a fine integration, since its one-panel error is the law's. "Records at any two
+    times in one cell are identical" is also asserted on halved and cut cells, before `START`, at
+    the epoch and in the window's last cells, through `assert_order_independent`. `fit` asserts
+    its rates and errors finite, so a NaN cannot pass the check through `max`.
+  - _Floor._ A synthetic orbit of 10,000 km whose axis grows 10 m s⁻¹ falls to 2¹⁶ s, and its
+    error there, 127 km at the quarter points, is pinned: the floor bounds the re-send rate, not
+    the error. On the sample at −H, the epoch and +500 yr, of 2,266 cells cut by neither a segment
+    nor the window, 2,040 are 2²⁵ s, 205 are 2²⁴ s, 21 are 2²³ s and none is at the floor. The
+    share test counts only those: red_giant has four records on 2¹⁶ s cells cut at `END` at +H
+    (`A e`, `e202`, `e203`, `e205`), which it does not count.
+  - _Plan text._ The task's "0.75 n ȧ (t − E)" lacks a square: it is 0.75 n ȧ (t − E)², as its own
+    12,000 km figure (11,868 km) shows.
+  - _Acceptance._ `cargo test -p hyperion-sim planetary` selects test names, so it misses
+    `--test planetary_drift` (`.0201` drifts and holds at most one cell),
+    `--test orbit_drifting_states` (the client's drifting vectors) and `orbit::kepler`'s new
+    tests; run `cargo test -p hyperion-sim` whole.
+  - _Agreement._ R03.T13's `close_binary` `.0201` agrees with the golden to the bit on the client.
+    `orbit/drifting_states.golden` holds the drifting records of the three RM1 systems for
+    `orbit.test.ts`, and the system goldens now pin each record's drift. The golden's own rates
+    move a, e and the speed by under 10⁻⁹, below the vectors' tolerance, so `orbit.test.ts` pins
+    each term with synthetic rates.
+  - _Client._ `stateAt` does not check the drifted a and e against their ranges, as the sim's
+    `drifting_state_at` does not; they hold up to `valid_until`.
+  - _Protocol._ `BodyOrbitDto.drift` is skipped when `None` (`#[ts(optional)]`), so a fixed
+    orbit's bytes are unchanged and `PROTOCOL_VERSION` stays 2. `scene/core.rs`'s re-send test
+    now expects the earliest real `valid_until` at 2¹⁶ s or later.
+  - _Cost (provisional, shared machine)._ Not benchmarked. A fit evaluates the law about 100 times
+    and a search up to ten fits, and `position_at` and `velocity_at` now run the cell search too
+    (a moon pays for its planet's as well); the planetary unit tests run no slower.
