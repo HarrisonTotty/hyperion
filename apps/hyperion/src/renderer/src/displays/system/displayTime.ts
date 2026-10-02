@@ -130,7 +130,12 @@ export function stepTime(time: UniverseTime, deltaS: number): UniverseTime {
  * on a display that steps finer, and this form waits on the owner's confirmation.
  */
 export function formatEventTime(time: UniverseTime): string {
-  if (Math.abs(time.seconds) <= CLOCK_WINDOW_S) {
+  // The window's end is +H exactly, as `stepTime` holds it: a time a fraction of a second past it
+  // is outside.
+  const insideWindow =
+    time.seconds >= -CLOCK_WINDOW_S &&
+    (time.seconds < CLOCK_WINDOW_S || (time.seconds === CLOCK_WINDOW_S && time.nanos === 0));
+  if (insideWindow) {
     return formatUniverseTimeDhms(time);
   }
   return `${formatUniverseTimeYr(time.seconds / SECONDS_PER_JULIAN_YEAR)} yr`;
