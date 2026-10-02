@@ -221,7 +221,11 @@ Vec<HostDiscDto>, not_modelled: Vec<SkyGapDto>, bulk: BulkManifestDto }` (R03's)
 - `HostDiscDto`: the star index, radius in metres, `mean_luminance_cd_m2` and
   `central_luminance_cd_m2` per channel, the power-2 coefficients per channel, `teff_k`, `log_g`,
   the host's `StarColour` fields (`chroma`, `lux_per_v0`), and `bake_spectrum`, the colour row's
-  spectrum at R08's `BAKE_WAVELENGTHS_NM` (Design note 6).
+  spectrum at R08's `BAKE_WAVELENGTHS_NM` (Design note 6). The names, pinned at re-validation for
+  R07 (which reads them): `HostDiscDto { star: u8, radius_m: f64, teff_k: f64, log_g: f64,
+mean_luminance_cd_m2: [f64; 3], central_luminance_cd_m2: [f64; 3], limb: [PowerTwoDto; 3],
+chroma: [f32; 2], lux_per_v0: f64, bake_spectrum: [f64; 15] }` with `PowerTwoDto { c: f64,
+alpha: f64 }`, each array in the order B, V, R for the display's b, g, r.
 - `@hyperion/protocol`: `decodeSkyStars`, `decodeSkyBand`, the payload types, `SKY_STAR_BYTES`,
   `SKY_TEXEL_BYTES`.
 
@@ -1303,7 +1307,7 @@ plan reserves no tag, prefix or stream.
   T13.g's transient scratch and T14's release need; T10 classifies `Sky` in `kind()` and
   `is_large()` and builds its encoder over plain values; T11 reuses `query_time` and removes
   `BulkPayload`'s `expect(dead_code)`; T15 extends the guide's existing `STARS` row; T17 runs its
-  named slow tests and benches only. Brainstorm drift since the plan's creation (899db5e): only the
+  named slow tests and benches only; `HostDiscDto`'s field names are pinned for R07. Brainstorm drift since the plan's creation (899db5e): only the
   CSP ruling (R04.T10.a), which the sky's decode worker, a same-origin module worker compiling no
   WebAssembly, meets as it is. No generator-version bump and no protocol-version change follow.
   **Pending re-validation:** T13.f waits on R05 (`QualitySetting`, `ViewSettings`, `SETTINGS`,
