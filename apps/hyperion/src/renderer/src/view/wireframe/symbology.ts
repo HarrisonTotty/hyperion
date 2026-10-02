@@ -140,6 +140,27 @@ export interface TargetMark extends ScreenMark {
 }
 
 /**
+ * A target's closure rate, m/s, positive closing: the rate its range shrinks, −(r · v) ÷ |r|; `null`
+ * where the relative velocity is not known or the range is zero.
+ *
+ * @param relativeM - The target from the own ship, m.
+ * @param relativeVelocityMPerS - The target's velocity relative to the own ship, m/s, or `null`.
+ */
+export function closureRateMPerS(
+  relativeM: Vec3,
+  relativeVelocityMPerS: Vec3 | null,
+): number | null {
+  const rangeM = norm(relativeM);
+  return relativeVelocityMPerS === null || !(rangeM > 0)
+    ? null
+    : -(
+        relativeM.x * relativeVelocityMPerS.x +
+        relativeM.y * relativeVelocityMPerS.y +
+        relativeM.z * relativeVelocityMPerS.z
+      ) / rangeM;
+}
+
+/**
  * A target's mark in `--text`: four open cardinal ticks outside the mark's radius, each as long as
  * a bracket's arm, so that corner brackets mean the selection alone (state is never shown by colour
  * alone; decided 2026-09-30 under the owner's delegation); with its range and closure rate (plan
@@ -156,14 +177,7 @@ export function targetMark(
   relativeVelocityMPerS: Vec3 | null,
 ): TargetMark {
   const rangeM = norm(relativeM);
-  const closureMPerS =
-    relativeVelocityMPerS === null || !(rangeM > 0)
-      ? null
-      : -(
-          relativeM.x * relativeVelocityMPerS.x +
-          relativeM.y * relativeVelocityMPerS.y +
-          relativeM.z * relativeVelocityMPerS.z
-        ) / rangeM;
+  const closureMPerS = closureRateMPerS(relativeM, relativeVelocityMPerS);
   return {
     kind: "target",
     target,

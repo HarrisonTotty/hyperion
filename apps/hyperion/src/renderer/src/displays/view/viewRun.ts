@@ -13,7 +13,7 @@ import {
   formatSignificant,
   formatUniverseTimeDhms,
 } from "../../lib/format";
-import { norm } from "../../geometry/vec3";
+import { norm, sub } from "../../geometry/vec3";
 import { flightInput, type ViewKeyAction } from "../../view/camera/keys";
 import {
   changeFreeRate,
@@ -54,6 +54,7 @@ import {
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
+import { closureRateMPerS } from "../../view/wireframe/symbology";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
 export interface SceneOption {
@@ -396,6 +397,25 @@ export interface MarkRow {
   readonly unit: BodyDistanceUnit;
   /** Whether the range is from the camera, there being no own ship (Design note 17). */
   readonly fromCamera: boolean;
+  /**
+   * A craft's closure rate on the own ship with its sign, `+3.40 m/s`; {@link MISSING_READING}
+   * where its or the own ship's velocity is not known; `null` for a body, or with no own ship.
+   */
+  readonly closure: string | null;
+}
+
+/** A reading the scene does not have: an em dash, shown in `--text-muted` (the guide's "Missing"). */
+export const MISSING_READING = "—";
+
+/** A closure rate with its sign, since direction matters (the guide's "Numbers"): `+3.40 m/s`. */
+function closureText(closureMPerS: number): string {
+  const sign = closureMPerS < 0 ? "-" : "+";
+  return `${sign}${formatSignificant(Math.abs(closureMPerS))} m/s`;
+}
+
+/** A row's range as the list and the canvas labels both read it, `FROM CAMERA` with no own ship. */
+export function rangeText(row: MarkRow): string {
+  return row.fromCamera ? `${row.range} FROM CAMERA` : row.range;
 }
 
 /** A target's key, stable from frame to frame. */
@@ -428,6 +448,16 @@ export function markRows(
       target.kind === "craft" ? scene.craft.find((c) => c.id === target.craft) : undefined;
     const key = targetKey(target);
     const distance = formatBodyDistance(rangeM / 1000, previousUnits.get(key) ?? null);
+    let closure: string | null = null;
+    if (craft !== undefined && own !== undefined) {
+      const closureMPerS = closureRateMPerS(
+        differenceM(craft.pose.position, own.pose.position, origins),
+        own.velocityMPerS === null || craft.velocityMPerS === null
+          ? null
+          : sub(craft.velocityMPerS, own.velocityMPerS),
+      );
+      closure = closureMPerS === null ? MISSING_READING : closureText(closureMPerS);
+    }
     return {
       key,
       target,
@@ -438,6 +468,7 @@ export function markRows(
       range: `${distance.value} ${distance.unit}`,
       unit: distance.unit,
       fromCamera: own === undefined,
+      closure,
     };
   });
 }

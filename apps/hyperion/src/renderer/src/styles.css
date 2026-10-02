@@ -3151,6 +3151,13 @@ body {
   letter-spacing: 0.15em;
 }
 
+/* The stars' count line: numbers, in B612 Mono with tabular figures. */
+.view-label__count {
+  margin: 0.25rem 0 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .view-list {
   display: flex;
   flex-direction: column;

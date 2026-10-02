@@ -453,8 +453,9 @@ describe("the VIEW display's interim stars", () => {
     advance(300);
     expect([
       lastFrame()?.draws.some((draw) => draw.material.name === "wireframe:starSprite"),
-      screen.getByText(/^STARS 1 DRAWN · 0 WITHOUT V · RADII 620\/360\/210\/60 ly$/),
-    ]).toEqual([true, expect.anything()]);
+      // A reading of numbers, so an `output` (B612 Mono), not a statement.
+      screen.getByText(/^STARS 1 DRAWN · 0 WITHOUT V · RADII 620\/360\/210\/60 ly$/).tagName,
+    ]).toEqual([true, "OUTPUT"]);
   });
 });
 
