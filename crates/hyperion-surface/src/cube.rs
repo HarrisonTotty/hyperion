@@ -201,6 +201,441 @@ pub fn unit_dir(p: [f64; 3]) -> [f64; 3] {
     [x / norm, y / norm, z / norm]
 }
 
+/// The deepest quadtree level of any body: a mean vertex spacing of about 9 mm on an Earth (plan
+/// R05, Design note 2), finer than any body's finest level ([`crate::geometry::finest_level`]).
+pub const MAX_LEVEL: u8 = 24;
+
+/// Quads along a patch's side: a patch is 65 × 65 vertices (plan R05, Goal).
+pub const PATCH_QUADS: u32 = 64;
+
+/// One of a patch's four edges, named by the face coordinate that is constant along it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Edge {
+    /// The edge at the patch's smallest u (vertex column x = 0), towards i − 1.
+    UMin,
+    /// The edge at the patch's largest u (x = 64), towards i + 1.
+    UMax,
+    /// The edge at the patch's smallest v (vertex row y = 0), towards j − 1.
+    VMin,
+    /// The edge at the patch's largest v (y = 64), towards j + 1.
+    VMax,
+}
+
+impl Edge {
+    /// The four edges.
+    pub const ALL: [Self; 4] = [Self::UMin, Self::UMax, Self::VMin, Self::VMax];
+
+    /// The step in (i, j) that crosses the edge.
+    const fn step(self) -> (i64, i64) {
+        match self {
+            Self::UMin => (-1, 0),
+            Self::UMax => (1, 0),
+            Self::VMin => (0, -1),
+            Self::VMax => (0, 1),
+        }
+    }
+}
+
+/// A patch of the quadtree on a cube face: the face, the level and the cell (i, j), with i along u
+/// and j along v and both below 2^level.
+///
+/// Cell (i, j) of level n covers s in [i ÷ 2ⁿ, (i + 1) ÷ 2ⁿ] and t likewise in j, before the warp
+/// ([`st_to_uv`]). Its vertex (x, y), for x and y from 0 to [`PATCH_QUADS`], sits at
+/// s = (64 i + x) ÷ 2ⁿ⁺⁶, an exact binary fraction, and likewise t.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PatchKey {
+    face: Face,
+    level: u8,
+    i: u32,
+    j: u32,
+}
+
+/// Why a patch key's level or cell is out of range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PatchKeyRangeError {
+    /// The level is above [`MAX_LEVEL`].
+    LevelAboveMax(u8),
+    /// A cell index is not below 2^level.
+    IndexOutOfRange {
+        /// The level.
+        level: u8,
+        /// The cell's index along u.
+        i: u32,
+        /// The cell's index along v.
+        j: u32,
+    },
+}
+
+impl std::fmt::Display for PatchKeyRangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LevelAboveMax(level) => {
+                write!(f, "patch level {level} is above the maximum {MAX_LEVEL}")
+            }
+            Self::IndexOutOfRange { level, i, j } => {
+                write!(f, "patch cell ({i}, {j}) is outside level {level}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PatchKeyRangeError {}
+
+/// Why a word is not a packed [`PatchKey`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DecodePatchKeyError {
+    /// Bits above the 56 a key packs are set.
+    UnusedBitsSet(u64),
+    /// The face field is above 5.
+    FaceOutOfRange(u8),
+    /// The level or cell is out of range.
+    Range(PatchKeyRangeError),
+}
+
+impl std::fmt::Display for DecodePatchKeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnusedBitsSet(word) => {
+                write!(f, "patch key word {word:#018x} sets bits above bit 55")
+            }
+            Self::FaceOutOfRange(face) => write!(f, "patch key face {face} is above 5"),
+            Self::Range(_) => write!(f, "patch key out of range"),
+        }
+    }
+}
+
+impl std::error::Error for DecodePatchKeyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Range(e) => Some(e),
+            Self::UnusedBitsSet(_) | Self::FaceOutOfRange(_) => None,
+        }
+    }
+}
+
+impl From<PatchKeyRangeError> for DecodePatchKeyError {
+    fn from(e: PatchKeyRangeError) -> Self {
+        Self::Range(e)
+    }
+}
+
+const FACE_SHIFT: u32 = 53;
+const LEVEL_SHIFT: u32 = 48;
+const I_SHIFT: u32 = 24;
+const INDEX_MASK: u64 = (1 << 24) - 1;
+
+impl PatchKey {
+    /// The patch (`face`, `level`, `i`, `j`).
+    ///
+    /// # Errors
+    ///
+    /// [`PatchKeyRangeError::LevelAboveMax`] above [`MAX_LEVEL`], and
+    /// [`PatchKeyRangeError::IndexOutOfRange`] if `i` or `j` is not below 2^`level`.
+    pub fn new(face: Face, level: u8, i: u32, j: u32) -> Result<Self, PatchKeyRangeError> {
+        if level > MAX_LEVEL {
+            return Err(PatchKeyRangeError::LevelAboveMax(level));
+        }
+        let cells = 1_u32 << level;
+        if i >= cells || j >= cells {
+            return Err(PatchKeyRangeError::IndexOutOfRange { level, i, j });
+        }
+        Ok(Self { face, level, i, j })
+    }
+
+    /// The whole face `face`, the patch of level 0.
+    #[must_use]
+    pub const fn root(face: Face) -> Self {
+        Self {
+            face,
+            level: 0,
+            i: 0,
+            j: 0,
+        }
+    }
+
+    /// The face.
+    #[must_use]
+    pub const fn face(self) -> Face {
+        self.face
+    }
+
+    /// The level, 0 to [`MAX_LEVEL`].
+    #[must_use]
+    pub const fn level(self) -> u8 {
+        self.level
+    }
+
+    /// The cell's index along u, below 2^level.
+    #[must_use]
+    pub const fn i(self) -> u32 {
+        self.i
+    }
+
+    /// The cell's index along v, below 2^level.
+    #[must_use]
+    pub const fn j(self) -> u32 {
+        self.j
+    }
+
+    /// The key packed into a word, for cache keys: face in bits 53–55, level in 48–52, i in 24–47
+    /// and j in 0–23 (plan R05, Design note 2). The client keys its maps by a string instead, since
+    /// the word does not fit a JavaScript number.
+    #[must_use]
+    pub fn to_u64(self) -> u64 {
+        (u64::from(self.face.index()) << FACE_SHIFT)
+            | (u64::from(self.level) << LEVEL_SHIFT)
+            | (u64::from(self.i) << I_SHIFT)
+            | u64::from(self.j)
+    }
+
+    /// The key a word from [`to_u64`](Self::to_u64) packs.
+    ///
+    /// # Errors
+    ///
+    /// [`DecodePatchKeyError`] if bits above 55 are set, the face is above 5, or the level or cell
+    /// is out of range.
+    ///
+    /// # Panics
+    ///
+    /// Never: each field is masked to its width before it is narrowed.
+    pub fn from_u64(word: u64) -> Result<Self, DecodePatchKeyError> {
+        if word >> 56 != 0 {
+            return Err(DecodePatchKeyError::UnusedBitsSet(word));
+        }
+        let face_index = u8::try_from(word >> FACE_SHIFT).expect("three bits fit a u8");
+        let face =
+            Face::from_index(face_index).ok_or(DecodePatchKeyError::FaceOutOfRange(face_index))?;
+        let level = u8::try_from((word >> LEVEL_SHIFT) & 0x1f).expect("five bits fit a u8");
+        let i = u32::try_from((word >> I_SHIFT) & INDEX_MASK).expect("24 bits fit a u32");
+        let j = u32::try_from(word & INDEX_MASK).expect("24 bits fit a u32");
+        Ok(Self::new(face, level, i, j)?)
+    }
+
+    /// The patch one level up that contains this one, or `None` at level 0.
+    #[must_use]
+    pub const fn parent(self) -> Option<Self> {
+        if self.level == 0 {
+            None
+        } else {
+            Some(Self {
+                face: self.face,
+                level: self.level - 1,
+                i: self.i >> 1,
+                j: self.j >> 1,
+            })
+        }
+    }
+
+    /// The four patches one level down, in the order (2i, 2j), (2i + 1, 2j), (2i, 2j + 1),
+    /// (2i + 1, 2j + 1).
+    ///
+    /// # Panics
+    ///
+    /// At [`MAX_LEVEL`], which has no children.
+    #[must_use]
+    pub fn children(self) -> [Self; 4] {
+        assert!(
+            self.level < MAX_LEVEL,
+            "a patch at the maximum level {MAX_LEVEL} has no children"
+        );
+        let child = |di: u32, dj: u32| Self {
+            face: self.face,
+            level: self.level + 1,
+            i: 2 * self.i + di,
+            j: 2 * self.j + dj,
+        };
+        [child(0, 0), child(1, 0), child(0, 1), child(1, 1)]
+    }
+
+    /// The patch of the same level across `edge`, on the neighbouring face where the edge is a
+    /// face edge.
+    ///
+    /// # Panics
+    ///
+    /// Never: one step across an edge leaves the face by one coordinate at most, so it never
+    /// meets a cube corner.
+    #[must_use]
+    pub fn edge_neighbour(self, edge: Edge) -> Self {
+        let (di, dj) = edge.step();
+        self.step_cell(di, dj)
+            .expect("a step across one edge leaves the face by one coordinate at most")
+    }
+
+    /// The patch across `edge` and the edge of that patch which leads back to this one.
+    ///
+    /// Across a face edge the way back is generally another [`Edge`], since the two faces' axes
+    /// differ.
+    ///
+    /// # Panics
+    ///
+    /// Never: adjacency on the cube is symmetric.
+    #[must_use]
+    pub fn edge_neighbour_and_back(self, edge: Edge) -> (Self, Edge) {
+        let neighbour = self.edge_neighbour(edge);
+        let back = Edge::ALL
+            .into_iter()
+            .find(|&e| neighbour.edge_neighbour(e) == self)
+            .expect("the neighbour across an edge is a neighbour back across one of its edges");
+        (neighbour, back)
+    }
+
+    /// The patches of the same level across each corner, in the order of the corners (i − 1,
+    /// j − 1), (i + 1, j − 1), (i + 1, j + 1), (i − 1, j + 1); `None` where the corner is one of the
+    /// cube's, about which only three patches of a level meet (plan R05, Design note 2).
+    #[must_use]
+    pub fn corner_neighbours(self) -> [Option<Self>; 4] {
+        [(-1, -1), (1, -1), (1, 1), (-1, 1)].map(|(di, dj)| self.step_cell(di, dj))
+    }
+
+    /// The cell (i + `di`, j + `dj`), folded onto the neighbouring face when it leaves this one, or
+    /// `None` when both coordinates leave it (a cube corner's diagonal).
+    ///
+    /// The fold is exact integer geometry on the cube, in half-cell units: a cell's centre is
+    /// (2i + 1 − 2ⁿ, 2j + 1 − 2ⁿ) on a face of half-width 2ⁿ, placed in three dimensions by S2's
+    /// axes. One step past an edge puts one coordinate at 2ⁿ + 1, and folding the step over the
+    /// edge sets that coordinate to 2ⁿ and the old face's own to 2ⁿ − 1. The warp is the same odd
+    /// function on both sides of every edge, so the folded cell is the neighbour on the sphere
+    /// too. This is Design note 2's per-face-pair transform, computed rather than tabulated (T1.b
+    /// as built); T2's golden writes its table out.
+    fn step_cell(self, di: i64, dj: i64) -> Option<Self> {
+        let half = 1_i64 << self.level;
+        let cu = 2 * i64::from(self.i) + 1 - half + 2 * di;
+        let cv = 2 * i64::from(self.j) + 1 - half + 2 * dj;
+        let mut p = face_point(self.face, cu, cv, half);
+        let mut over = (0..3).filter(|&a| p[a].abs() > half);
+        let face = match (over.next(), over.next()) {
+            (None, _) => self.face,
+            (Some(axis), None) => {
+                let own = face_axis(self.face);
+                p[axis] = p[axis].signum() * half;
+                p[own] = p[own].signum() * (half - 1);
+                face_of_axis(axis, p[axis])
+            }
+            (Some(_), Some(_)) => return None,
+        };
+        let (u, v) = face_coords(face, p);
+        let index = |c: i64| u32::try_from((c + half - 1) / 2).expect("a folded cell is on a face");
+        Some(Self {
+            face,
+            level: self.level,
+            i: index(u),
+            j: index(v),
+        })
+    }
+
+    /// The unit direction of vertex (`x`, `y`) of the patch's 65 × 65, in body-fixed axes.
+    ///
+    /// A vertex on a face edge or a cube corner is evaluated on its **canonical face**, the lowest
+    /// index of the faces that contain it, so that every patch sharing it gets the same bits: two
+    /// faces would compute the same edge point from different (u, v) and axes, and could differ in
+    /// the last bit (plan R05, Design note 2).
+    ///
+    /// # Panics
+    ///
+    /// If `x` or `y` is above [`PATCH_QUADS`].
+    #[must_use]
+    pub fn vertex_dir(self, x: u8, y: u8) -> [f64; 3] {
+        let (quads, along_u, along_v) = self.vertex_lattice(x, y);
+        let point = face_point(self.face, 2 * along_u - quads, 2 * along_v - quads, quads);
+        let face = canonical_face(point, quads);
+        let (u, v) = face_coords(face, point);
+        // Both sums are even and non-negative, so the halving is exact.
+        lattice_dir(
+            face,
+            i64::midpoint(u, quads),
+            i64::midpoint(v, quads),
+            quads,
+        )
+    }
+
+    /// [`vertex_dir`](Self::vertex_dir) evaluated on the patch's own face, without the canonical
+    /// rule: what the tests show the rule is needed against.
+    #[cfg(test)]
+    fn vertex_dir_on_own_face(self, x: u8, y: u8) -> [f64; 3] {
+        let (quads, a, b) = self.vertex_lattice(x, y);
+        lattice_dir(self.face, a, b, quads)
+    }
+
+    /// The vertex lattice of the patch's level: its quads a face side, 2^(level + 6), and the
+    /// vertex's lattice indices (a, b) on the patch's face, each 0 to that number.
+    fn vertex_lattice(self, x: u8, y: u8) -> (i64, i64, i64) {
+        assert!(
+            u32::from(x) <= PATCH_QUADS && u32::from(y) <= PATCH_QUADS,
+            "vertex ({x}, {y}) is outside a patch of {PATCH_QUADS} quads"
+        );
+        let per_patch = i64::from(PATCH_QUADS);
+        let quads = per_patch << self.level;
+        let a = i64::from(self.i) * per_patch + i64::from(x);
+        let b = i64::from(self.j) * per_patch + i64::from(y);
+        (quads, a, b)
+    }
+}
+
+/// The unit direction of lattice vertex (`a`, `b`) of `face`, on a lattice of `quads` quads a
+/// side: s = a ÷ quads, an exact binary fraction, then the warp.
+fn lattice_dir(face: Face, a: i64, b: i64, quads: i64) -> [f64; 3] {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "lattice indices are at most 2^30, exact in f64"
+    )]
+    let exact = |n: i64| n as f64;
+    let side = exact(quads);
+    unit_dir(face_uv_to_xyz(FaceUv {
+        face,
+        u: st_to_uv(exact(a) / side),
+        v: st_to_uv(exact(b) / side),
+    }))
+}
+
+/// The integer point (`u`, `v`) of `face` on the cube of half-width `half`, by S2's axes.
+const fn face_point(face: Face, u: i64, v: i64, half: i64) -> [i64; 3] {
+    match face {
+        Face::PosX => [half, u, v],
+        Face::PosY => [-u, half, v],
+        Face::PosZ => [-u, -v, half],
+        Face::NegX => [-half, -v, -u],
+        Face::NegY => [v, -half, -u],
+        Face::NegZ => [v, u, -half],
+    }
+}
+
+/// The inverse of [`face_point`]: the (u, v) of the integer point `p` on `face`.
+const fn face_coords(face: Face, p: [i64; 3]) -> (i64, i64) {
+    match face {
+        Face::PosX => (p[1], p[2]),
+        Face::PosY => (-p[0], p[2]),
+        Face::PosZ => (-p[0], -p[1]),
+        Face::NegX => (-p[2], -p[1]),
+        Face::NegY => (-p[2], p[0]),
+        Face::NegZ => (p[1], p[0]),
+    }
+}
+
+/// The axis, 0 to 2, normal to `face`.
+const fn face_axis(face: Face) -> usize {
+    match face {
+        Face::PosX | Face::NegX => 0,
+        Face::PosY | Face::NegY => 1,
+        Face::PosZ | Face::NegZ => 2,
+    }
+}
+
+/// The face normal to `axis` on the side of `sign`'s sign.
+fn face_of_axis(axis: usize, sign: i64) -> Face {
+    let axis = u8::try_from(axis).expect("an axis is 0 to 2");
+    let index = if sign > 0 { axis } else { axis + 3 };
+    Face::from_index(index).expect("an axis and a side name a face")
+}
+
+/// The lowest-index face containing the integer point `p` of the cube of half-width `half`.
+fn canonical_face(p: [i64; 3], half: i64) -> Face {
+    (0..3)
+        .filter(|&a| p[a].abs() == half)
+        .map(|a| face_of_axis(a, p[a]))
+        .min()
+        .expect("a point of the cube lies on at least one face")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,5 +909,267 @@ mod tests {
             (mi == 0 && mj == mid) || (mj == 0 && mi == mid),
             "smallest cell at ({mi}, {mj})"
         );
+    }
+
+    fn random_key(rng: &mut Lcg) -> PatchKey {
+        let face = Face::from_index(u8::try_from(rng.next_below(6)).unwrap()).unwrap();
+        let level = u8::try_from(rng.next_below(u64::from(MAX_LEVEL) + 1)).unwrap();
+        let cells = 1_u64 << level;
+        let i = u32::try_from(rng.next_below(cells)).unwrap();
+        let j = u32::try_from(rng.next_below(cells)).unwrap();
+        PatchKey::new(face, level, i, j).unwrap()
+    }
+
+    #[test]
+    fn keys_round_trip_through_their_words() {
+        let mut rng = Lcg::new(0x6b65_7973);
+        for _ in 0..10_000 {
+            let k = random_key(&mut rng);
+            assert_eq!(PatchKey::from_u64(k.to_u64()), Ok(k));
+        }
+        let top = PatchKey::new(Face::NegZ, 24, (1 << 24) - 1, (1 << 24) - 1).unwrap();
+        assert_eq!(top.to_u64(), 0x00b8_ffff_ffff_ffff);
+        assert_eq!(PatchKey::from_u64(top.to_u64()), Ok(top));
+        assert_eq!(PatchKey::root(Face::PosX).to_u64(), 0);
+    }
+
+    #[test]
+    fn out_of_range_words_and_keys_are_refused() {
+        assert_eq!(
+            PatchKey::from_u64(1 << 56),
+            Err(DecodePatchKeyError::UnusedBitsSet(1 << 56))
+        );
+        assert_eq!(
+            PatchKey::from_u64(6 << 53),
+            Err(DecodePatchKeyError::FaceOutOfRange(6))
+        );
+        assert_eq!(
+            PatchKey::from_u64(25 << 48),
+            Err(DecodePatchKeyError::Range(
+                PatchKeyRangeError::LevelAboveMax(25)
+            ))
+        );
+        // Level 3 has cells 0 to 7.
+        assert_eq!(
+            PatchKey::from_u64((3 << 48) | (8 << 24)),
+            Err(DecodePatchKeyError::Range(
+                PatchKeyRangeError::IndexOutOfRange {
+                    level: 3,
+                    i: 8,
+                    j: 0
+                }
+            ))
+        );
+        assert_eq!(
+            PatchKey::new(Face::PosY, 0, 0, 1),
+            Err(PatchKeyRangeError::IndexOutOfRange {
+                level: 0,
+                i: 0,
+                j: 1
+            })
+        );
+    }
+
+    #[test]
+    fn parents_and_children_agree() {
+        let mut rng = Lcg::new(0x7061_7265);
+        for _ in 0..1_000 {
+            let k = random_key(&mut rng);
+            if k.level() < MAX_LEVEL {
+                for child in k.children() {
+                    assert_eq!(child.parent(), Some(k));
+                }
+            }
+            match k.parent() {
+                Some(parent) => assert!(parent.children().contains(&k)),
+                None => assert_eq!(k.level(), 0),
+            }
+        }
+    }
+
+    /// The patches along a face's border and through its middle at `level`: every cell whose i and
+    /// j are each 0, 1, the middle, the last but one or the last.
+    fn sample_patches(level: u8) -> Vec<PatchKey> {
+        let last = (1_u32 << level) - 1;
+        let mut picks = vec![0, 1.min(last), last / 2, last.saturating_sub(1), last];
+        picks.sort_unstable();
+        picks.dedup();
+        let mut keys = Vec::new();
+        for face in Face::ALL {
+            for &i in &picks {
+                for &j in &picks {
+                    keys.push(PatchKey::new(face, level, i, j).unwrap());
+                }
+            }
+        }
+        keys
+    }
+
+    /// The 65 vertices along `edge` of `key`, in increasing x or y, as bits.
+    fn edge_bits(
+        key: PatchKey,
+        edge: Edge,
+        dir: fn(PatchKey, u8, u8) -> [f64; 3],
+    ) -> Vec<[u64; 3]> {
+        let quads = u8::try_from(PATCH_QUADS).unwrap();
+        (0..=quads)
+            .map(|n| match edge {
+                Edge::UMin => dir(key, 0, n),
+                Edge::UMax => dir(key, quads, n),
+                Edge::VMin => dir(key, n, 0),
+                Edge::VMax => dir(key, n, quads),
+            })
+            .map(|d| d.map(hyperion_testkit::float::bits))
+            .collect()
+    }
+
+    /// `b` in the order of `a`: `b` itself or reversed, whichever matches `a`'s first vertex.
+    fn aligned(a: &[[u64; 3]], mut b: Vec<[u64; 3]>, first_matches: bool) -> Vec<[u64; 3]> {
+        if !first_matches {
+            b.reverse();
+        }
+        assert_eq!(a.len(), b.len());
+        b
+    }
+
+    #[test]
+    fn a_neighbours_neighbour_across_the_shared_edge_is_itself() {
+        for level in [0, 1, 5, 24] {
+            for key in sample_patches(level) {
+                for edge in Edge::ALL {
+                    let (neighbour, back) = key.edge_neighbour_and_back(edge);
+                    assert_ne!(neighbour, key);
+                    assert_eq!(neighbour.level(), level);
+                    assert_eq!(neighbour.edge_neighbour(back), key, "{key:?} {edge:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shared_edges_are_bitwise_equal_from_both_sides() {
+        let mut crossings = 0;
+        let mut own_face_differences = 0;
+        for level in [0, 5, 19, 24] {
+            for key in sample_patches(level) {
+                for edge in Edge::ALL {
+                    let (neighbour, back) = key.edge_neighbour_and_back(edge);
+                    let ours = edge_bits(key, edge, PatchKey::vertex_dir);
+                    let theirs = edge_bits(neighbour, back, PatchKey::vertex_dir);
+                    let first_matches = theirs[0] == ours[0];
+                    let theirs = aligned(&ours, theirs, first_matches);
+                    assert_eq!(
+                        ours, theirs,
+                        "{key:?} {edge:?} against {neighbour:?} {back:?}"
+                    );
+                    if neighbour.face() != key.face() {
+                        crossings += 1;
+                        // Without the canonical rule, each side evaluates on its own face.
+                        let own = edge_bits(key, edge, PatchKey::vertex_dir_on_own_face);
+                        let other = aligned(
+                            &own,
+                            edge_bits(neighbour, back, PatchKey::vertex_dir_on_own_face),
+                            first_matches,
+                        );
+                        own_face_differences +=
+                            own.iter().zip(&other).filter(|(a, b)| a != b).count();
+                    }
+                }
+            }
+        }
+        // Every face edge was crossed, and the rule is what makes the crossings agree.
+        assert!(crossings >= 24 * 4, "{crossings} crossings");
+        assert!(
+            own_face_differences > 0,
+            "evaluating on the patch's own face never differed, so the test cannot fail"
+        );
+    }
+
+    #[test]
+    fn each_cube_corner_has_one_direction_from_its_three_faces() {
+        let quads = u8::try_from(PATCH_QUADS).unwrap();
+        for level in [0, 5, 24] {
+            let last = (1_u32 << level) - 1;
+            let mut corners: Vec<([i8; 3], [u64; 3])> = Vec::new();
+            for face in Face::ALL {
+                for (ci, cj, x, y) in [
+                    (0, 0, 0, 0),
+                    (last, 0, quads, 0),
+                    (0, last, 0, quads),
+                    (last, last, quads, quads),
+                ] {
+                    let dir = PatchKey::new(face, level, ci, cj).unwrap().vertex_dir(x, y);
+                    let signs = dir.map(|c| if c > 0.0 { 1_i8 } else { -1 });
+                    corners.push((signs, dir.map(hyperion_testkit::float::bits)));
+                }
+            }
+            corners.sort_unstable();
+            assert_eq!(corners.len(), 24);
+            for group in corners.chunks(3) {
+                assert!(group.iter().all(|c| c.0 == group[0].0), "{group:?}");
+                assert!(group.iter().all(|c| c.1 == group[0].1), "{group:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_cube_corner_patch_has_seven_neighbours() {
+        for face in Face::ALL {
+            for level in [1, 3, 24] {
+                let last = (1_u32 << level) - 1;
+                for (i, j) in [(0, 0), (last, 0), (0, last), (last, last)] {
+                    let key = PatchKey::new(face, level, i, j).unwrap();
+                    let corners = key.corner_neighbours();
+                    assert_eq!(corners.iter().filter(|c| c.is_none()).count(), 1, "{key:?}");
+                    let mut all: Vec<PatchKey> = Edge::ALL
+                        .into_iter()
+                        .map(|e| key.edge_neighbour(e))
+                        .chain(corners.into_iter().flatten())
+                        .collect();
+                    all.sort_unstable();
+                    all.dedup();
+                    assert_eq!(all.len(), 7, "{key:?}");
+                    assert!(!all.contains(&key));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_interior_patch_has_eight_neighbours_on_its_face() {
+        let key = PatchKey::new(Face::NegY, 4, 7, 9).unwrap();
+        let expected = [(6, 8), (8, 8), (8, 10), (6, 10)];
+        for (got, (i, j)) in key.corner_neighbours().into_iter().zip(expected) {
+            assert_eq!(got, Some(PatchKey::new(Face::NegY, 4, i, j).unwrap()));
+        }
+        assert_eq!(
+            key.edge_neighbour(Edge::UMax),
+            PatchKey::new(Face::NegY, 4, 8, 9).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_face_edge_neighbour_is_the_adjacent_cell_on_the_sphere() {
+        // The neighbour's centre lies one cell's arc away, across the edge, at every level here.
+        let mut rng = Lcg::new(0x6e65_6967);
+        for _ in 0..2_000 {
+            let key = random_key(&mut rng);
+            for edge in Edge::ALL {
+                let neighbour = key.edge_neighbour(edge);
+                let half = PATCH_QUADS / 2;
+                let half = u8::try_from(half).unwrap();
+                let a = key.vertex_dir(half, half);
+                let b = neighbour.vertex_dir(half, half);
+                // Centres of adjacent cells of level n are 0.6 to 2.0 cell widths of the mean
+                // (π ÷ 2 ÷ 2ⁿ radians) apart, and never the same point.
+                let width = core::f64::consts::FRAC_PI_2 / f64::from(1_u32 << key.level());
+                let gap = dot(a, b).clamp(-1.0, 1.0);
+                let angle = math::acos(gap);
+                assert!(
+                    angle > 0.5 * width && angle < 2.0 * width,
+                    "{key:?} {edge:?}: {angle} vs {width}"
+                );
+            }
+        }
     }
 }

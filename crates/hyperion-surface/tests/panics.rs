@@ -8,7 +8,8 @@
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
-use hyperion_surface::cube::{unit_dir, xyz_to_face_uv};
+use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv};
+use hyperion_surface::geometry::{finest_level, vertex_spacing};
 
 #[test]
 #[should_panic(expected = "a direction must be finite and non-zero")]
@@ -26,4 +27,30 @@ fn a_nan_vector_has_no_face() {
 #[should_panic(expected = "a direction must be finite and non-zero")]
 fn the_zero_vector_has_no_unit_direction() {
     let _ = unit_dir([0.0, 0.0, 0.0]);
+}
+
+#[test]
+#[should_panic(expected = "has no children")]
+fn a_patch_at_the_maximum_level_has_no_children() {
+    let _ = PatchKey::new(Face::PosZ, MAX_LEVEL, 0, 0)
+        .unwrap()
+        .children();
+}
+
+#[test]
+#[should_panic(expected = "is outside a patch of 64 quads")]
+fn a_vertex_beyond_the_patch_is_refused() {
+    let _ = PatchKey::root(Face::PosX).vertex_dir(65, 0);
+}
+
+#[test]
+#[should_panic(expected = "a body's radius must be finite and positive")]
+fn a_zero_radius_has_no_finest_level() {
+    let _ = finest_level(0.0);
+}
+
+#[test]
+#[should_panic(expected = "is above the maximum")]
+fn spacing_above_the_maximum_level_is_refused() {
+    let _ = vertex_spacing(6.371e6, MAX_LEVEL + 1);
 }
