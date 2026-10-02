@@ -48,7 +48,7 @@ export interface ClientArgs {
  *
  * @throws InvalidArgumentError if the value is not a bare IP address or host name.
  */
-function parseAddress(value: string): string {
+export function parseAddress(value: string): string {
   const bracketed = value.startsWith("[") || !value.includes(":") ? value : `[${value}]`;
   const literal = bracketed.toLowerCase();
   const asUrl = `ws://${literal}`;
@@ -67,7 +67,7 @@ function parseAddress(value: string): string {
  * @throws InvalidArgumentError if it is not a port a server can be reached on. Port 0, which the
  * server accepts to let the OS choose one, is nothing to connect to.
  */
-function parsePort(value: string): number {
+export function parsePort(value: string): number {
   const port = /^\d{1,5}$/.test(value) ? Number(value) : Number.NaN;
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new InvalidArgumentError("expected a port from 1 to 65535");

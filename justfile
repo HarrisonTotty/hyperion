@@ -38,6 +38,16 @@ client *args: gen-surface
     fi
     pnpm --filter hyperion exec electron-vite dev -- "${x11[@]}" {{ args }}
 
+# A client of a running server, like the bridge: it sends R03's `scene_ship`, since no console
+# does until sessions exist, and the server starts the ship at the galactic centre, in no system,
+# where `VIEW` shows only its kept scene under `TRAINING`. The setting is not saved, so run it again
+# after each server start. `just place-ship --help` lists the options (universe, system, target,
+# distance, time, rate; `--port` or `HYPERION_SERVER_PORT` as for the client).
+# Place the ship stand-in in a generated system on the running server, e.g. `just place-ship --rate 10`.
+[positional-arguments]
+place-ship *args:
+    cd apps/hyperion && node scripts/placeShip.mjs "$@"
+
 # Build the client and run the headless smoke harness on SwiftShader, once per capability path
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a

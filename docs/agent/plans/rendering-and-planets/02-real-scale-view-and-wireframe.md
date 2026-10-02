@@ -1129,6 +1129,12 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
 - **Performance.** GPU time per frame of the precision scene and of a generated system with its star
   field, at 1080p, high and low settings, and frame intervals at the 50th, 95th and 99th
   percentiles, on a quiet machine with no other test run sharing it, against Design note 21's 4 ms.
+- **The server's scene, for the runs that need it.** `just server`, then `just place-ship`, then
+  `just client`, F2, `OPEN` the universe `place-ship` names (`Dev Fixture`), and F4: `VIEW` then
+  draws the server's scene of FPF 1Z0P1Z D-35 with the system's first planet straight ahead from
+  the seat, and no `TRAINING` (R03.T6's note; the README, "Seeing a generated system in `VIEW`").
+  Without `just place-ship` the stand-in is in no system and `VIEW` stays on its kept scene. Run it
+  again after each server start; `--look-at barycentre` looks at the star of a single system.
 - Files: this plan's Verification, "Recorded runs" table. R12 consolidates.
 - Acceptance: the table has one row per run, and every failure is filed as a finding against the
   task that owns it.
@@ -1183,10 +1189,10 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
 | 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Performance: frame-change scene                                                | 1920 × 1080, high         | **Provisional**, as above: GPU p50 116 µs, p95 146 µs, p99 170 µs; CPU p50 0.40 ms, p95 1.50 ms                                                                                                                     |
 | 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Performance: frame-change scene                                                | 1920 × 1080, low          | **Provisional**, as above: GPU p50 115 µs, p95 145 µs, p99 150 µs; CPU p50 0.40 ms, p95 1.50 ms                                                                                                                     |
 | 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Frame intervals, all four runs above                                           | offscreen                 | **Provisional**: p50 16.7 ms, p95 16.7–16.8 ms, p99 16.8 ms, paced by offscreen rendering's 60 Hz, not the display's vsync; on-screen pacing pending by hand for the owner                                          |
-| —          | RTX 3080                                                                                   | Performance: a generated system with its star field                            | 1920 × 1080, high and low | Pending: needs the server, a universe and a quiet machine                                                                                                                                                           |
+| —          | RTX 3080                                                                                   | Performance: a generated system with its star field                            | 1920 × 1080, high and low | Pending: needs the server and `just place-ship` (R02.T18), and a quiet machine                                                                                                                                      |
 | —          | RTX 3080                                                                                   | Precision scene by eye (no depth fighting, no jitter at 1 m, 10⁸ m, 1 au)      | —                         | Pending by hand for the owner (on screen)                                                                                                                                                                           |
 | —          | RTX 3080                                                                                   | Frame-change scene by eye (no visible jump at each crossing)                   | —                         | Pending by hand for the owner (on screen)                                                                                                                                                                           |
-| —          | RTX 3080                                                                                   | Exposure: default `MAN` EV100 −1.0 against the interim star field near the Sun | —                         | Pending by hand for the owner (on screen, needs the server)                                                                                                                                                         |
+| —          | RTX 3080                                                                                   | Exposure: default `MAN` EV100 −1.0 against the interim star field near the Sun | —                         | Pending by hand for the owner (on screen, needs the server and `just place-ship`, R02.T18)                                                                                                                          |
 | —          | UHD 620                                                                                    | Every run above, against the 4 ms target                                       | high and low              | Pending: the owner                                                                                                                                                                                                  |
 
 The performance rows were taken by a scratch variant of the smoke page (not committed) that steps
@@ -1894,3 +1900,12 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   still remounts the stage, its canvas and its view, but on the same engine. Tested in
   `ViewDisplay.test.tsx` (one engine across a change of `SCENE`, no `GRAPHICS ACQUIRING ADAPTER`),
   which fails on the old code. Pending by eye: the switch on the live server scene.
+- **RM1 validation (2026-10-02): the default seat framed none of the system's bodies.** The
+  integration validation placed the stand-in at rest 1 au along galactic +x from the barycentre and
+  saw only orbit lines and stars. Not a defect of the camera: `seat` is the default preset where
+  there is an own ship (R02.T9.a), it looks along the hull's −z, and the stand-in's attitude,
+  R02.T17's choice until the flight model, puts the nose along its velocity in the system frame
+  or, at rest, along galactic −z, where that placement had nothing. The camera is unchanged.
+  `just place-ship` (R03.T6's note) places the stand-in so that the nose has a body ahead: by
+  default at rest in the first planet's frame, 0.01 au behind it along its orbital velocity, which
+  live put planet `/256` of FPF 1Z0P1Z D-35 at 1.50 Gm in the centre of the frame.
