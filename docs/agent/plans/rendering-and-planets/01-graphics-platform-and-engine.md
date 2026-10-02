@@ -1713,7 +1713,8 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
 - **Relaunch in development.** `electron-vite dev` exits when its Electron does (Design note 3), so
   the crash-loop relaunch is checked on a built client and the `client` recipe puts the X11 flag on
   the command line itself.
-- **The skills do not yet read `R` task IDs.** Until R04.T7.c extends `plan_task.py` and
+- _Closed (T14, 2026-10-02): `plan_task.py` and `select_checks.py` take `R` IDs (R04.T7.c)._
+  **The skills do not yet read `R` task IDs.** Until R04.T7.c extends `plan_task.py` and
   `select_checks.py`, R01's tasks are built and validated by hand (Consumes).
 - _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's unawaited effect preparation** means a WGSL compile error may also surface only as an
   unhandled rejection; the backstop reports it, and `onEffectErrorObservable` covers the ordinary
@@ -1730,7 +1731,10 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
 - **The rounding probe reads one value a format.** Design note 22 tells round-to-nearest from
   truncation at one magnitude. An adapter that rounds some other way, or differently by magnitude,
   would still be classed by that one value. R07 reads anything but `nearest` as a reason to keep
-  `rgba16float`, so a misclassification costs bandwidth, not accuracy.
+  `rgba16float`, so a misclassification costs bandwidth, not accuracy. On the RTX 3080 (T11,
+  confirmed by T14's hardware harness runs of 2026-10-02) both formats read `toward-zero`, so
+  truncation is not Gen9's alone and the recommended machine keeps `rgba16float` too; SwiftShader
+  reads `nearest` for `rgba16float`. The UHD 620's class is the owner's to record.
 - _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **The premultiplied blend overrides Babylon's factors in `onBind`** (Design note 21). This leans
   on the order in which `Mesh.render` sets the alpha mode and then binds. An upgrade that moves it
   would show in T9.i's alpha check, and the fallback is the adapter's own raw pass (Design note 19)
@@ -1751,6 +1755,12 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   - By hand, pending: the adapter from the devtools console on the UHD 620 under `just client`, and
     `app.getGPUFeatureStatus()` after `gpu-info-update` (the monitor reads it but does not log it;
     the check needs a devtools step or a temporary log line).
+  - On the RTX 3080 (T14, 2026-10-02, a built client with its window never shown, read over the
+    DevTools protocol): the page's `requestAdapter()` answers `nvidia`/`ampere`,
+    `isFallbackAdapter` false. `getGPUFeatureStatus()` after `gpu-info-update` (logged by T12's
+    soak under the same switches) has `vulkan: enabled_on`, `webgpu: enabled`, `gpu_compositing`,
+    `rasterization`, `webgl` and `video_decode` `enabled`, `opengl: enabled_on`,
+    `webgpu_on_vk_via_gl_interop: disabled_off`. The UHD 620's reading stays the owner's.
 - **Deviations in T2, as built.**
   - The window's `additionalArguments` carry only `--hyperion-graphics-safe` (safe mode) and
     `--hyperion-gpu-timing`; the preload works the mode out with `launchModeOf(process.platform, …)`
@@ -1771,6 +1781,16 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
   - By hand, pending: `kill -9` of the GPU process three times within a minute on a built client
     relaunches once into safe mode, whose adapter request is null and whose consoles work; a fourth
     crash does not relaunch.
+  - **Done on the RTX 3080 (T14, 2026-10-02), hidden.** A copy of the built client
+    (`pnpm --filter hyperion build`) with its one `window.show()` removed, so that nothing reached
+    the owner's display, on `DISPLAY=:0` with a fresh profile, read over `--remote-debugging-port`. Before:
+    the adapter is `nvidia`/`ampere`. Three `kill -9` of the client's own GPU process, 1.8 s apart
+    (Chromium logged "crashed 1, 2, 3 time(s)"), relaunched the client once with
+    `--hyperion-graphics-safe` appended; in safe mode `requestAdapter()` is `null` and the page
+    shows `GRAPHICS SAFE MODE` and "GRAPHICS SAFE MODE: views not available, relaunch to retry".
+    A fourth `kill -9`, in safe mode, did not relaunch (one main process, the same pid, 10 s on).
+    A first attempt in which only two kills landed did not relaunch either, as the count requires.
+    The UHD 620's run stays the owner's.
 - **Deviations in T3, as built.**
   - `StyleAvailability` is an `interface` (object shapes are interfaces under the TypeScript rules).
   - `test/fakeGpu.ts` also exports `INTEL_UHD_620_INFO` and `SWIFTSHADER_INFO` (their subgroup sizes
@@ -2457,6 +2477,62 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
   - The capture at 150 s shows each view's marker in its top-left quadrant, the right way up.
   - T10's twins on the 3080: see T10 as built (subgroup size 32, both u32 twins equal to the CPU
     total, the f32 sum within the bound).
+- **T12, as built (2026-10-02, RTX 3080, NVIDIA 615.71.09, Electron 44.4.3).** By the owner's
+  ruling, the soak runs **hidden and offscreen** on `DISPLAY=:0`. Each run uses a fresh profile
+  under `setsid timeout` and kills its process group afterwards. It is the T11 scene
+  (`--smoke-soak=1800 --smoke-gpu-timing=1`, the client's switches with
+  `--disable-dawn-features=timestamp_quantization` and `--enable-logging=stderr`): a full-window
+  cockpit and two instruments, each with a post-process, a looping 320 × 180 VP9 test-pattern video,
+  a DOM panel, and a second window. The soak's main process logs every `child-process-gone` and
+  `gpu-info-update` with `getGPUFeatureStatus()`. It polls the GPU pid every 2 s and compares the
+  label region every 30 s.
+  - **Adapter:** `nvidia`/`ampere`, `isFallbackAdapter` false (the whole harness, run under the
+    same switches the same day: 62 checks pass, subgroups with a minimum size of 32,
+    `timestamp-query`, `float32-blendable`, `rg11b10ufloat` renderable, no `shader-f16`).
+    **Feature status** after `gpu-info-update`, in every run: `vulkan: enabled_on`,
+    `webgpu: enabled`. The other entries are `gpu_compositing`, `rasterization`, `2d_canvas`,
+    `webgl` and `video_decode` `enabled`, `opengl: enabled_on`,
+    `webgpu_on_vk_via_gl_interop: disabled_off`, `skia_graphite: disabled_off` and
+    `video_encode: disabled_software`. The reading at launch, before the GPU process starts,
+    shows `disabled_*` everywhere.
+  - Fix found by the soak: the T11 scene appended the video and the DOM panel before the
+    full-window cockpit canvas, which covered them. `smoke/soak.ts` now stacks both above the
+    canvas (`z-index: 1`), and the halfway capture shows them. A first set of runs with them
+    covered was discarded; its default run agreed with the one below.
+  - Three runs of 1,800 s each, every one complete (exit 0, the page's report and the main
+    process's summary both present):
+
+    | Run                                       | Window resizes  | GPU restarts | Losses | Hangs (gaps > 1 s) | DOM mismatches / captures | Frame interval p50 / p95 / max (ms) |
+    | ----------------------------------------- | --------------- | ------------ | ------ | ------------------ | ------------------------- | ----------------------------------- |
+    | Client switches (`DefaultANGLEVulkan` on) | none            | 0            | 0      | 0                  | 0 / 60                    | 16.7 / 33.3 / 666.6                 |
+    | Without `DefaultANGLEVulkan`              | none            | 0            | 0      | 0                  | 0 / 60                    | 16.7 / 33.3 / 683.3                 |
+    | `--disable-vulkan-surface`                | 257 (every 7 s) | 0            | 0      | 1 (1,083 ms)       | 0 / 60                    | 16.7 / 33.3 / 1,083.3               |
+
+    GPU time per pass, median (µs), was the same in all three to within a few per cent: cockpit
+    220–225, its post-process 151–153, instruments 48–50 and 37–38, their post-processes 39–40
+    and 30–32. The timer read `full` and `targetRounding` read `toward-zero` for both formats.
+    The frame's passes were the views' own, with no copy. The machine ran other lanes' work
+    alongside (load average 15 to 18), so the figures are provisional.
+
+  - **The hidden-resize hazard** (found by the old lane, reproduced 2026-10-02). With the
+    client's switches, resizing the hidden offscreen window every 7 s restarted the GPU process
+    at each resize. Each restart logged `vkAcquireNextImageKHR() failed: -1000001004`
+    (`VK_ERROR_OUT_OF_DATE_KHR`) and "Restarting GPU process due to unrecoverable error", with
+    `child-process-gone` `abnormal-exit`. After the third restart, 21 s in, the page lost WebGPU
+    and never reported, so the watchdog ended the run (exit 3). Under `--disable-vulkan-surface`,
+    257 resizes caused no restart. So the two Vulkan-surface runs above were not resized.
+  - **Validation layers:** `VK_LAYER_KHRONOS_validation` is not installed on this machine
+    (`vulkan-validation-layers` is absent; only implicit layers exist), so that run was not made.
+    It is pending for whoever installs the layer.
+  - **The switch set stays as it is.** No run says `DefaultANGLEVulkan` is needed or harmful:
+    both settings held thirty minutes with nothing lost. `--disable-vulkan-surface` avoids the
+    hidden-resize restart, but on screen it would lose Vulkan presentation, and the on-screen
+    resize is untested. That choice therefore waits for the owner's on-screen soak.
+  - **Open question 14, for the brainstorm's next revision:** on the recommended machine the
+    forced Vulkan path holds for thirty minutes of three canvases, video, DOM and a second
+    window, hidden. Gen9.5 (the question as asked) remains the owner's.
+  - **Pending by hand for the owner:** the soak on screen, with window resizes by `xdotool` and
+    the display blanked and restored (`xset dpms`), on this machine and on the UHD 620.
 - **T13, as built (2026-10-01, RTX 3080, Electron 44.4.3, a scratch prototype, not merged).** Run
   hidden and offscreen, by the owner's ruling that nothing takes the projector: an opener and a
   same-origin `window.open` child, the child's canvas a `RenderView` of the opener's engine,

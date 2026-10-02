@@ -50,7 +50,12 @@ function addVideo(source: string | null): void {
   video.src = source;
   video.loop = true;
   video.muted = true;
-  video.setAttribute("style", "position:fixed;left:16px;bottom:16px;width:320px;height:180px;");
+  // Stacked above the full-window cockpit canvas, appended later, so that the compositor draws it
+  // (T12's soak needs the video and the DOM panel on screen, not occluded).
+  video.setAttribute(
+    "style",
+    "position:fixed;z-index:1;left:16px;bottom:16px;width:320px;height:180px;",
+  );
   document.body.append(video);
   void video.play().catch((error: unknown) => {
     console.error("the soak's video did not play:", error);
@@ -63,7 +68,7 @@ function addPanel(): HTMLElement {
   panel.id = "soak-panel";
   panel.setAttribute(
     "style",
-    "position:fixed;right:16px;bottom:16px;width:320px;height:120px;background:#000;color:#0f0;font:16px monospace;",
+    "position:fixed;z-index:1;right:16px;bottom:16px;width:320px;height:120px;background:#000;color:#0f0;font:16px monospace;",
   );
   document.body.append(panel);
   return panel;
