@@ -74,11 +74,37 @@ async function checkU32(
   const [total = Number.NaN, subgroupSize = 0] = new Uint32Array(await engine.readBuffer(result));
   const expected = wrappingSumU32(inputs);
   const wraps = Math.floor(inputs.reduce((sum, value) => sum + value, 0) / 2 ** 32);
+  checkPath(engine, checks, pair.name, kernel.path);
   checks.check(
     `T10 ${pair.name} on the ${kernel.path} path equals the CPU's wrapping sum`,
     total === expected && wraps >= 1,
     `${total} against ${expected}, ${wraps} wraps, ${count} inputs in workgroups of ${workgroup}` +
       (kernel.path === "subgroup" ? `, subgroup_size ${subgroupSize}` : ""),
+  );
+  if (kernel.path === "subgroup") {
+    const minimum = engine.capabilities.subgroupMinSize ?? 4;
+    checks.check(
+      `T10 ${pair.name}'s subgroup_size is a power of two in [4, 128], at least the minimum`,
+      Number.isInteger(Math.log2(subgroupSize)) &&
+        subgroupSize >= Math.max(4, minimum) &&
+        subgroupSize <= 128,
+      `subgroup_size ${subgroupSize}, the adapter's minimum ${minimum}`,
+    );
+  }
+}
+
+/** Checks that a twin ran on the path the device's capabilities select (T9.c's two paths). */
+function checkPath(
+  engine: RenderEngine,
+  checks: Checks,
+  name: string,
+  path: "reference" | "subgroup",
+): void {
+  const expected = engine.capabilities.subgroups ? "subgroup" : "reference";
+  checks.check(
+    `T10 ${name} runs on the ${expected} path`,
+    path === expected,
+    `ran on the ${path} path; subgroups ${engine.capabilities.subgroups ? "yes" : "no"}`,
   );
 }
 
@@ -118,6 +144,7 @@ export async function checkTwins(engine: RenderEngine, checks: Checks): Promise<
     refused === "PresentationOnlyReadback",
     refused,
   );
+  checkPath(engine, checks, SUM_F32.name, kernel.path);
   const gpu = new Float32Array(await engine.readBuffer(result, "tolerance"))[0] ?? Number.NaN;
   const { sum, sumAbs } = sumF64(inputs);
   const bound = highamBound(SUM_F32_COUNT, sumAbs);
