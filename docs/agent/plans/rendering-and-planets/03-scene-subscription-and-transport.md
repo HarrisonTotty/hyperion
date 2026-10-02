@@ -1420,10 +1420,11 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   `serverSendsBinary`, which delivers a `Blob` unless the client asked for `arraybuffer`, so the
   connection test proves the setting; `test/binaryFrames.ts` builds frames as the server's
   `encode_header` and `chunk` do.
-- **Deviations in T12, as built.** The scene's messages carry no designation, which plan 14's
-  `toSystemBodiesModel` needs for its labels, so `toSceneModel(state, designate)` and
-  `applySceneNotification(model, notification, designate)` take a `designate(system)` callback,
-  which `useScene` (R03.T14) supplies from the chart's answers. Both return results rather than
+- **Deviations in T12, as built.** The scene's messages carried no designation until R03.T16,
+  and plan 14's `toSystemBodiesModel` needs one for its labels, so `toSceneModel(state, designate)`
+  and `applySceneNotification(model, notification, designate)` take a `designate(system)`
+  callback, which `useScene` (R03.T14) supplies; since R03.T16 it is the fallback for a scene
+  without `place`. Both return results rather than
   throw: `{ kind: "ok", model }` or `{ kind: "fault", fault }`, and the update also
   `{ kind: "sequence", expected, received }` for a gap or a step back, the model unchanged. The
   model's types are in `lib/scene/model.ts` (`SceneModel`, `SceneSystem`, `SceneClock`,
@@ -1662,14 +1663,12 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open
   point; closed 2026-10-02 by a delegated decision, R03.T16 adds `place` to `SceneSystemDto`):**
   the smaller reversible option, a `designate` callback on `useScene`, with no wire change, which
-  stays as the fallback for a scene without `place`; the latest one given is used from the next push on,
-  and a new one neither reopens the scene nor relabels what is held. No production caller yet
-  supplies a designation for a system the chart has not answered; R02.T17 must, by its chart's
-  answers or a lookup, unless the owner prefers the designation on `SceneSystemDto` (additive,
-  like the tidal radius). R02.T17 as built supplies only the system last opened on `SYSTEM` (no
-  request answers a system's designation or barycentre by its ID); any other system reads as its
-  ID with no star field, until R03.T16 put the designation and barycentre on `SceneSystemDto`
-  (closed 2026-10-02 by a delegated decision; R02's "Deviations in R02.T17"). Cameras are not a
+  stays as the fallback for a scene without `place`; the latest one given is used from the next
+  push on, and a new one neither reopens the scene nor relabels what is held. R02.T17 as built
+  supplied only the system last opened on `SYSTEM` (no request answers a system's designation or
+  barycentre by its ID), so any other system read as its ID with no star field, until R03.T16 put
+  the designation and barycentre on `SceneSystemDto` (closed 2026-10-02 by a delegated decision;
+  R02's "Deviations in R02.T17"). Cameras are not a
   parameter: a view hands its pose to
   `SceneView.reportCamera(view, pose)` and stops with `removeCamera(view)`, which feed the
   `CameraReporter` (`lib/scene/cameraReports.ts`) the hook owns; R02's and R07's "handed to
@@ -1820,24 +1819,33 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   missing), so a client lookup would have been a new kind, a second round trip on every arrival and
   a loading state; Knowledge does not gate the catalogue designation, a bijection of the ID already
   on the wire, nor the chart's position, which `systems_in_range` gives any client; and the cost is
-  about 250 B an arrival (221 B measured) against 9.8–99.2 kB. The field is optional, so
+  about 250 B an arrival (221 B measured) against arrivals of some 10–100 kB. The field is optional, so
   `PROTOCOL_VERSION` stays 2, and a client keeps `designate` and `knownSystem` as the fallback for a
   server without it. The one condition that would revisit it: a proper-name overlay from the
   generated languages, or a Knowledge-gated chart, either of which would be a separate field under
   the Knowledge plan rather than a change to this one.
-- **Deviations in T16, as built.** The place's velocity in the client model is
-  `SystemPlace.velocityMPerS: Vec3 | null`, the model's own naming (`SceneKinematics.velocityMPerS`),
-  not the decision's `velocityMS: Vec3Tuple`. `SystemPlace` moved to `lib/scene/model.ts` and its
-  importers (`App`, `ViewSceneProvider`, `serverScene.ts`, `ViewDisplay.tsx`, the tests) import it
-  there; `fromServer.ts` no longer declares it. `barycentreAt` is in `lib/scene/place.ts` and uses
-  `view/coords/position.ts`' `galacticTranslated` and `lightTime.ts`' `secondsBetween`, since
-  `@hyperion/protocol` has no translation helper; it throws a `RangeError` only for a drift out of
-  the galactic frame's cells. `serverScene.ts`'s `systemPlace(system, stated, known)` takes the
-  scene's place first. The adapter also refuses an empty designation, and `withBody` now keeps the
-  system DTO's other fields, so that a re-sent body no longer drops `place` (it rebuilt the DTO
-  from `system` and `grants` alone). `VIEW`'s interim queries take the place's barycentre and its `time` (the clock's
-  time only for a place known from the chart). On the server, the chart's row and `system_place`
-  share `convert::designation` and `galactic_position`; the place's position is `position_at`,
+- **Deviations in T16, as built.** The client's `SystemPlace` is a union on `kind` rather than
+  fields each `null` on its own (from the TypeScript review): `stated` (the scene's: barycentre,
+  `velocityMPerS: Vec3`, the model's own naming rather than the decision's `velocityMS:
+Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` builds from the
+  `SYSTEM` opening) and `unknown` (the ID, no barycentre). It moved to `lib/scene/model.ts`, and
+  its importers (`App`, `ViewSceneProvider`, `serverScene.ts`, `ViewDisplay.tsx`, the tests)
+  import it there; `fromServer.ts` no longer declares it. `barycentreAt` is in
+  `lib/scene/place.ts` and uses `view/coords/position.ts`' `galacticTranslated` and
+  `lightTime.ts`' `secondsBetween`, since `@hyperion/protocol` has no translation helper.
+  `serverScene.ts`'s `systemPlace(system, stated, known)` takes the scene's place first. Beyond
+  the decision's checks, the adapter refuses an empty designation, a speed not below c, a cell
+  beyond 2³⁰ ly and a place time outside the clock window, so that `barycentreAt`, which runs at
+  every drawn frame, cannot throw on a place it accepted. `withBody` now keeps the system DTO's
+  other fields, so that a re-sent body no longer drops `place` (it rebuilt the DTO from `system`
+  and `grants` alone). `VIEW`'s interim queries (`interimAt` in `ViewDisplay.tsx`) take a stated
+  place's barycentre and time, a charted place's barycentre at the scene's time, and nothing for
+  an unknown place. On the server, `scene_system` leaves `place` `None` for `SceneCore::arrive` to
+  set, as the decision has it; passing the place in instead, as the Rust review proposed, would
+  give it an eighth argument against Clippy's `too_many_arguments`, so its doc says so and the
+  core tests hold that the state and every arrival carry it. The chart's row and `system_place`
+  share `convert::designation` and `galactic_position`, and `convert::wire_time` is now the one
+  conversion of a time (`scene/core.rs` dropped its copy); the place's position is `position_at`,
   which is what a range query's hit holds (`hit_at`), so the integration test
   `the_scene_place_agrees_with_the_chart` holds the position exactly; it also holds that the
   velocity is not zero, since a server's galaxy has its kinematics. The `scene::core` tests use

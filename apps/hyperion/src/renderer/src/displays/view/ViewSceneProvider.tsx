@@ -54,10 +54,9 @@ export interface ViewSceneProviderProps {
  * @remarks
  * The scene states its system's designation (R03.T16); for a server that does not, `designate`
  * names the system the client was last told of by its designation of record and any other by its
- * ID. The subscription is open only
- * while the display is shown, as it was when the display held it; the choice outlives a hide. Every
- * push re-renders what it wraps, about once a second; the drawing loop reads positions through
- * `frameAt` with no render.
+ * ID. The subscription is open only while the display is shown, as it was when the display held
+ * it; the choice outlives a hide. Every push re-renders what it wraps, about once a second; the
+ * drawing loop reads positions through `frameAt` with no render.
  */
 export function ViewSceneProvider({ active, knownSystem, children }: ViewSceneProviderProps) {
   const [sceneName, setSceneName] = useState(SERVER_SCENE_NAME);

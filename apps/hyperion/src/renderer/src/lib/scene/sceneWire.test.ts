@@ -98,6 +98,7 @@ describe("the system's place (R03.T16)", () => {
     }
     const system = result.model.system;
     expect(system?.place).toEqual({
+      kind: "stated",
       system: system?.model.system,
       designation: SCENE_DESIGNATION,
       barycentre: scenePlace().barycentre,
@@ -132,7 +133,7 @@ describe("the system's place (R03.T16)", () => {
     expect(labelledBy(result.model, designateWrongly(system?.model.system ?? ""))).toBe(true);
   });
 
-  it("refuses a barycentre offset out of [0, 1 ly), a velocity not finite and a malformed time", () => {
+  it("refuses an offset out of [0, 1 ly), a velocity not finite, a malformed time and the like", () => {
     const place = scenePlace();
     const unusable: SystemPlaceDto[] = [
       { ...place, barycentre: { ...place.barycentre, offset_m: [METRES_PER_LIGHT_YEAR, 0, 0] } },
@@ -141,11 +142,25 @@ describe("the system's place (R03.T16)", () => {
       { ...place, velocity_m_s: [Number.POSITIVE_INFINITY, 0, 0] },
       { ...place, time: { seconds: 3_400, nanos: 1_000_000_000 } },
       { ...place, designation: "" },
+      // Beyond the wire's form: a speed not below c, a cell beyond 2³⁰ ly and a time outside the
+      // clock window, any of which could carry `barycentreAt` out of the galactic frame.
+      { ...place, velocity_m_s: [299_792_458, 0, 0] },
+      { ...place, barycentre: { ...place.barycentre, cell_ly: [2 ** 30 + 1, 0, 0] } },
+      { ...place, time: { seconds: 1_000 * 31_557_600 + 1, nanos: 0 } },
     ];
     const faults = unusable.map(
       (each) => toSceneModel(stateWithPlace(each), designateFixture).kind,
     );
-    expect(faults).toEqual(["fault", "fault", "fault", "fault", "fault", "fault"]);
+    expect(faults).toEqual(Array.from(unusable, () => "fault"));
+    // The bounds themselves are accepted: just below c, at 2³⁰ ly and at the window's edge.
+    const usable: SystemPlaceDto[] = [
+      { ...place, velocity_m_s: [299_792_457, 0, 0] },
+      { ...place, barycentre: { ...place.barycentre, cell_ly: [-(2 ** 30), 0, 0] } },
+      { ...place, time: { seconds: -1_000 * 31_557_600, nanos: 0 } },
+    ];
+    expect(usable.map((each) => toSceneModel(stateWithPlace(each), designateFixture).kind)).toEqual(
+      ["ok", "ok", "ok"],
+    );
   });
 });
 

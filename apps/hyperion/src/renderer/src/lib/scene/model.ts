@@ -72,23 +72,33 @@ export interface BodyGrant {
  * state (rendering plan R03, R03.T16).
  *
  * @remarks
- * The scene states it (`SceneSystemDto.place`); a place known only from the chart (the `SYSTEM`
- * display's opening) has no velocity or time, and a system known by neither has its ID for a
- * designation and no barycentre. `barycentreAt` (`place.ts`) carries it to another time.
+ * `stated`: the scene states it (`SceneSystemDto.place`), with the barycentre at a time and its
+ * velocity, so that `barycentreAt` (`place.ts`) carries it to another time. `charted`: known only
+ * from the chart (the `SYSTEM` display's opening), its barycentre with no velocity or time.
+ * `unknown`: known by neither, named by its ID with no barycentre.
  */
-export interface SystemPlace {
+export type SystemPlace =
+  | (SystemPlaceName & {
+      readonly kind: "stated";
+      /** The barycentre at `time`. */
+      readonly barycentre: GalacticPosition;
+      /** The barycentre's velocity, m/s along the galactic axes, constant (plan 08, P08.T7.a). */
+      readonly velocityMPerS: Vec3;
+      /** When `barycentre` holds: the time the scene built the system at. */
+      readonly time: UniverseTime;
+    })
+  | (SystemPlaceName & {
+      readonly kind: "charted";
+      /** The barycentre as the chart gave it. */
+      readonly barycentre: GalacticPosition;
+    })
+  | (SystemPlaceName & { readonly kind: "unknown" });
+
+/** What every {@link SystemPlace} holds: the system and the name its bodies' designations extend. */
+export interface SystemPlaceName {
   readonly system: SystemIdHex;
   /** The catalogue designation, or the system's ID where none is known. */
   readonly designation: string;
-  /** The barycentre at {@link time}, or `null` where the client has not been told where it is. */
-  readonly barycentre: GalacticPosition | null;
-  /**
-   * The barycentre's velocity, m/s along the galactic axes, constant (plan 08, P08.T7.a); `null`
-   * for a place known only from the chart.
-   */
-  readonly velocityMPerS: Vec3 | null;
-  /** When `barycentre` holds; `null` for a place known only from the chart. */
-  readonly time: UniverseTime | null;
 }
 
 /**

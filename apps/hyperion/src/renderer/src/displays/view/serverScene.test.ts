@@ -141,15 +141,15 @@ describe("where the scene VIEW draws comes from", () => {
 
 describe("the place of a server scene's system", () => {
   const known: SystemPlace = {
+    kind: "charted",
     system: FIXTURE_SYSTEM,
     designation: "H7K 4C0RFZ D-7",
     barycentre: galacticPositionFromLy([1, 2, 3]),
-    velocityMPerS: null,
-    time: null,
   };
 
   it("is the place the scene states, whatever the client was told of", () => {
     const stated: SystemPlace = {
+      kind: "stated",
       system: "0200080020000001",
       designation: "Vorth AB-C e4-17",
       barycentre: galacticPositionFromLy([4, 5, 6]),
@@ -168,13 +168,7 @@ describe("the place of a server scene's system", () => {
       systemPlace("0200080020000001", null, known),
     ]).toEqual([
       known,
-      {
-        system: "0200080020000001",
-        designation: "0200080020000001",
-        barycentre: null,
-        velocityMPerS: null,
-        time: null,
-      },
+      { kind: "unknown", system: "0200080020000001", designation: "0200080020000001" },
     ]);
   });
 });

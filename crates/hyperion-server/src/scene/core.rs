@@ -46,7 +46,7 @@ use super::sensing::{CraftState, SceneKnowledge};
 use super::{ClockReading, Ship, ShipPosition};
 use crate::compute::{GalaxyKey, GeneratedSystem, SharedCellCache, SharedSystemCache};
 use crate::convert::{
-    BodiesRequest, ListedBody, scene_body, scene_system, system_place, system_summary,
+    BodiesRequest, ListedBody, scene_body, scene_system, system_place, system_summary, wire_time,
 };
 use crate::limits::MAX_SCENE_CAMERAS;
 
@@ -703,15 +703,6 @@ fn seen(
         apparent_m: seen.apparent().metres(),
         emitted: wire_time(seen.emitted()),
     })
-}
-
-/// A time as the wire carries it.
-#[must_use]
-fn wire_time(t: UniverseTime) -> hyperion_protocol::UniverseTime {
-    hyperion_protocol::UniverseTime {
-        seconds: t.seconds(),
-        nanos: t.subsec_nanos(),
-    }
 }
 
 /// What a camera in a system may reach at a time.

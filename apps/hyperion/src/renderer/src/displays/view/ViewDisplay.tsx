@@ -1,3 +1,4 @@
+import type { UniverseIdHex, UniverseTime } from "@hyperion/protocol";
 import {
   type KeyboardEvent,
   memo,
@@ -58,7 +59,7 @@ import {
   systemPlace,
   viewProvenance,
 } from "./serverScene";
-import { useInterimStars } from "./useInterimStars";
+import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { DEFAULT_ENGINE_SOURCE, useViewEngine, type ViewEngineSource } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
@@ -492,6 +493,31 @@ function ViewStage({
   );
 }
 
+/**
+ * Where the interim stars of a server scene are asked: a stated place's own barycentre and time,
+ * as the scene stated them, asked once per arrival and never carried per frame (R03.T16); a charted
+ * place's barycentre at the scene's time; nothing for an unknown place.
+ */
+function interimAt(
+  universe: UniverseIdHex | null,
+  place: SystemPlace,
+  sceneTime: UniverseTime,
+): InterimStarsInput {
+  let input: InterimStarsInput;
+  switch (place.kind) {
+    case "stated":
+      input = { universe, system: place.system, centre: place.barycentre, time: place.time };
+      break;
+    case "charted":
+      input = { universe, system: place.system, centre: place.barycentre, time: sceneTime };
+      break;
+    case "unknown":
+      input = { universe, system: place.system, centre: null, time: sceneTime };
+      break;
+  }
+  return input;
+}
+
 function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -535,14 +561,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
           centre: keptStart.barycentre,
           time: keptStart.time,
         }
-      : {
-          universe,
-          system: server.place.system,
-          // The place's own barycentre and time, as stated: asked once per arrival, never
-          // re-evaluated per frame (R03.T16).
-          centre: server.place.barycentre,
-          time: server.place.time ?? server.model.clock.time,
-        },
+      : interimAt(universe, server.place, server.model.clock.time),
   );
   const lines = [
     ...(serverChosen && standing.annunciation !== null ? [standing.annunciation] : []),
