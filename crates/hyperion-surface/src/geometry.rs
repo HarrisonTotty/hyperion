@@ -21,7 +21,9 @@
 //! dσ/ds = (du/ds) · √(1 + v²) ÷ (1 + u² + v²), with du/ds = (8 ÷ 3) · max(s, 1 − s), and every
 //! face and both grid directions are alike by symmetry. A level's spacing is that rate times the
 //! step in s, 1 ÷ 2^(level + 6), times the radius: the limit of the edges' arcs, exact to a
-//! relative (step)², under 10⁻⁴ even at level 0. The rate's extremes have closed forms:
+//! relative (step)² for the mean and the largest, under 10⁻⁴ even at level 0. The smallest sits
+//! on the rate's kink at s = ½, where a finite edge differs to first order in the step: about
+//! 1.6% at level 0 and under 3 × 10⁻⁸ at level 19. The rate's extremes have closed forms:
 //!
 //! - **largest**, on the face's axes (v = 0) at u* = (√31 − 2) ÷ 9, where
 //!   d/du [√(1 + 3u) ÷ (1 + u²)] = 0, i.e. 9u² + 4u − 3 = 0: (4 ÷ 3) · √(1 + 3u*) ÷ (1 + u*²)
@@ -49,6 +51,9 @@ pub const MAX_FINEST_SPACING_M: f64 = 0.75 * FINEST_SPACING_M;
 const MEAN_RATE: f64 = 1.459_213_746_386_106;
 
 /// The smallest vertex spacing, the mean and the largest at one level of one body, metres.
+///
+/// Plain data with public fields: [`vertex_spacing`] fills it, and nothing reads it back as a
+/// checked value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpacingRange {
     /// The smallest, at the midpoints of a face's edges, metres.
@@ -150,7 +155,10 @@ mod tests {
 
     #[test]
     fn the_moon_and_ceres_are_pinned() {
-        // The Moon's mean radius 1,737.4 km and Ceres's 469.7 km (plan R05, T1.b).
+        // The Moon's mean radius, 1,737.4 km (Archinal et al. 2018, the IAU WGCCRE report,
+        // Celestial Mechanics and Dynamical Astronomy 130, 22), and Ceres's mean radius, 469.7 km
+        // (Park et al. 2019, Icarus 319, 812), as plan R05, T1.b names them. Ceres's level 15
+        // misses the bound by 1.8%, at 0.382 m.
         assert_eq!(finest_level(1.7374e6), 17);
         assert_eq!(finest_level(4.697e5), 16);
     }

@@ -2268,3 +2268,32 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   T13.b's scene, T13.c's launch path and first IPC handlers, T14.a's and T15.a's device seam,
   T14.b's switch merge, and the hidden and by-hand halves of T10.b, T11.c, T12.c, T13.c, T14.c,
   T15.c and T17 were corrected. Nothing built changes. No task is pending re-validation.
+- **Deviations in T1.a, as built.** The warp's round trip is exact at 0, ¼, ½, ¾ and 1, within
+  one ulp of s for s ≥ ½, and within 2⁻⁵³ absolute below ½: there the warp works in 1 − s, whose
+  ulp in [½, 1) is 2⁻⁵³, so s cannot be recovered more finely. `face_of` (crate-private) and
+  `unit_dir` hold the face rule and the normalisation; `Face` also converts with `TryFrom<u8>`
+  (`DecodeFaceError`). The module documentation lists the operations the TypeScript mirror must
+  keep bit for bit (`(4s)s − 1`, a division by 3, `sqrt(x² + y² + z²)` not `Math.hypot`, unary
+  negation's −0).
+- **Deviations in T1.b, as built.** `edge_neighbour` folds the step over the cube in exact integer
+  arithmetic (half-cell units on S2's axes) rather than reading a table per face pair; T2's
+  golden pins all 24 directed face crossings in its `table` section. Added:
+  `edge_neighbour_and_back` (the neighbour and the edge leading back, since two faces' axes
+  differ), `PatchKey::new` with `NewPatchKeyError` (wrapped by `DecodePatchKeyError::Range`), the
+  getters `face`, `level`, `i`, `j`, and `geometry::MAX_FINEST_SPACING_M` = 0.75 ×
+  `FINEST_SPACING_M` (0.375 m), which `finest_level` tests against. `vertex_spacing` uses closed
+  forms of the arc rate per unit s instead of a 2,048² grid: largest (4 ÷ 3)√(1 + 3u*) ÷ (1 + u*²)
+  at u* = (√31 − 2) ÷ 9, 1.704 897; smallest 2√2 ÷ 3 at an edge's midpoint; mean 1.459 214, an
+  integral a test recomputes; a 512² grid test checks all three. Pinned: the Moon (1,737.4 km)
+  is level 17 (largest spacing 0.353 m), Ceres (469.7 km) level 16 (0.191 m; level 15 misses by
+  1.8%, at 0.382 m). `MAX_LEVEL` and `PATCH_QUADS` live in `cube`, the spacing constants in
+  `geometry`.
+- **Deviations in T2's Rust half, as built.** For each of the 50 patches `cube_sphere.golden`
+  prints 81 vertices (x, y ∈ {0, 1, 8, 16, 32, 48, 56, 63, 64}) and a `digest` of all 4,225
+  directions, `hyperion_testkit::golden::f64_digest` (FNV-1a 64 over each `f64`'s little-endian
+  bits, added here beside T5's `f32_digest`), since every vertex would make the file about 30 MB;
+  as built it is 360 KB. The TypeScript mirror reproduces the digest over a `Float64Array`'s
+  bytes (BigInt arithmetic). The record format is in `tests/cube_golden.rs`'s module
+  documentation. A native-only test holds every surface golden to `TEST_PLANET_VERSION`, and the
+  sim-determinism skill's `golden_diff.py` now checks the surface crate's goldens against
+  `TEST_PLANET_VERSION` rather than `GENERATOR_VERSION`.

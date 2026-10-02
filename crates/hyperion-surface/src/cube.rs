@@ -17,6 +17,11 @@
 //!   `STtoUV` and `UVtoST`). S2 multiplies by the rounded `1.0 / 3`; this crate divides by 3,
 //!   one correctly rounded operation, so the TypeScript mirror reproduces it bit for bit (Design
 //!   note 1). Only `+ − × ÷` and `sqrt` appear, which IEEE 754 rounds exactly on every target.
+//! - For the TypeScript mirror, the operations that decide the bits: `4.0 * s * s - 1.0` in that
+//!   order (`(4s)s`, then the subtraction); a division by 3, never a product with `1 / 3`; the
+//!   norm as `sqrt(x * x + y * y + z * z)` summed left to right, never `Math.hypot`; and the face
+//!   axes' negations as unary minus, which turns +0 into −0 (`0 - u` would not). The golden pins
+//!   those −0s, so the mirror must compare bits, not numbers.
 //! - A point on a face edge or a cube corner belongs to the face of largest |axis|, ties going to
 //!   the **lowest face index** (S2 sends ties to the highest axis instead), so that every direction
 //!   has exactly one face and the rule agrees with the canonical face of [`PatchKey::vertex_dir`]
@@ -82,7 +87,31 @@ impl Face {
     }
 }
 
+impl TryFrom<u8> for Face {
+    type Error = DecodeFaceError;
+
+    fn try_from(index: u8) -> Result<Self, Self::Error> {
+        Self::from_index(index).ok_or(DecodeFaceError(index))
+    }
+}
+
+/// Why a number is not a face's index: it is above 5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DecodeFaceError(pub u8);
+
+impl std::fmt::Display for DecodeFaceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "face index {} is above 5", self.0)
+    }
+}
+
+impl std::error::Error for DecodeFaceError {}
+
 /// A point on a face: the face and its (u, v), each in [−1, 1] for a point on the cube.
+///
+/// Plain data with public fields, as S2's own `(face, u, v)` triples are: any (u, v) names a
+/// point on the face's plane, and the range is where the face's square lies, not an invariant
+/// that functions here rely on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FaceUv {
     /// The face.
@@ -166,7 +195,7 @@ pub fn xyz_to_face_uv(p: [f64; 3]) -> FaceUv {
     clippy::float_cmp,
     reason = "the tie rule needs exact equality: a magnitude ties the largest or it does not"
 )]
-pub fn face_of(p: [f64; 3]) -> Face {
+pub(crate) fn face_of(p: [f64; 3]) -> Face {
     assert!(
         p.iter().all(|c| c.is_finite()) && p.iter().any(|&c| c != 0.0),
         "a direction must be finite and non-zero, got {p:?}"
@@ -189,7 +218,9 @@ pub fn face_of(p: [f64; 3]) -> Face {
 ///
 /// # Panics
 ///
-/// If `p` is zero or not finite, which has no direction.
+/// If the squared norm x² + y² + z² is not a finite, non-zero `f64`: `p` is zero or not finite,
+/// or so large (|p| above about 10¹⁵⁴) or so small (below about 10⁻¹⁶²) that it overflows or
+/// underflows. Every point of the cube, where the crate's directions come from, is far inside.
 #[must_use]
 pub fn unit_dir(p: [f64; 3]) -> [f64; 3] {
     let [x, y, z] = p;
@@ -250,9 +281,9 @@ pub struct PatchKey {
     j: u32,
 }
 
-/// Why a patch key's level or cell is out of range.
+/// Why [`PatchKey::new`] refused a level or cell: it is out of range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PatchKeyRangeError {
+pub enum NewPatchKeyError {
     /// The level is above [`MAX_LEVEL`].
     LevelAboveMax(u8),
     /// A cell index is not below 2^level.
@@ -266,7 +297,7 @@ pub enum PatchKeyRangeError {
     },
 }
 
-impl std::fmt::Display for PatchKeyRangeError {
+impl std::fmt::Display for NewPatchKeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::LevelAboveMax(level) => {
@@ -279,7 +310,7 @@ impl std::fmt::Display for PatchKeyRangeError {
     }
 }
 
-impl std::error::Error for PatchKeyRangeError {}
+impl std::error::Error for NewPatchKeyError {}
 
 /// Why a word is not a packed [`PatchKey`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -289,7 +320,7 @@ pub enum DecodePatchKeyError {
     /// The face field is above 5.
     FaceOutOfRange(u8),
     /// The level or cell is out of range.
-    Range(PatchKeyRangeError),
+    Range(NewPatchKeyError),
 }
 
 impl std::fmt::Display for DecodePatchKeyError {
@@ -313,8 +344,8 @@ impl std::error::Error for DecodePatchKeyError {
     }
 }
 
-impl From<PatchKeyRangeError> for DecodePatchKeyError {
-    fn from(e: PatchKeyRangeError) -> Self {
+impl From<NewPatchKeyError> for DecodePatchKeyError {
+    fn from(e: NewPatchKeyError) -> Self {
         Self::Range(e)
     }
 }
@@ -329,15 +360,15 @@ impl PatchKey {
     ///
     /// # Errors
     ///
-    /// [`PatchKeyRangeError::LevelAboveMax`] above [`MAX_LEVEL`], and
-    /// [`PatchKeyRangeError::IndexOutOfRange`] if `i` or `j` is not below 2^`level`.
-    pub fn new(face: Face, level: u8, i: u32, j: u32) -> Result<Self, PatchKeyRangeError> {
+    /// [`NewPatchKeyError::LevelAboveMax`] above [`MAX_LEVEL`], and
+    /// [`NewPatchKeyError::IndexOutOfRange`] if `i` or `j` is not below 2^`level`.
+    pub fn new(face: Face, level: u8, i: u32, j: u32) -> Result<Self, NewPatchKeyError> {
         if level > MAX_LEVEL {
-            return Err(PatchKeyRangeError::LevelAboveMax(level));
+            return Err(NewPatchKeyError::LevelAboveMax(level));
         }
         let cells = 1_u32 << level;
         if i >= cells || j >= cells {
-            return Err(PatchKeyRangeError::IndexOutOfRange { level, i, j });
+            return Err(NewPatchKeyError::IndexOutOfRange { level, i, j });
         }
         Ok(Self { face, level, i, j })
     }
@@ -945,15 +976,15 @@ mod tests {
         );
         assert_eq!(
             PatchKey::from_u64(25 << 48),
-            Err(DecodePatchKeyError::Range(
-                PatchKeyRangeError::LevelAboveMax(25)
-            ))
+            Err(DecodePatchKeyError::Range(NewPatchKeyError::LevelAboveMax(
+                25
+            )))
         );
         // Level 3 has cells 0 to 7.
         assert_eq!(
             PatchKey::from_u64((3 << 48) | (8 << 24)),
             Err(DecodePatchKeyError::Range(
-                PatchKeyRangeError::IndexOutOfRange {
+                NewPatchKeyError::IndexOutOfRange {
                     level: 3,
                     i: 8,
                     j: 0
@@ -962,7 +993,7 @@ mod tests {
         );
         assert_eq!(
             PatchKey::new(Face::PosY, 0, 0, 1),
-            Err(PatchKeyRangeError::IndexOutOfRange {
+            Err(NewPatchKeyError::IndexOutOfRange {
                 level: 0,
                 i: 0,
                 j: 1
@@ -1050,7 +1081,7 @@ mod tests {
     fn shared_edges_are_bitwise_equal_from_both_sides() {
         let mut crossings = 0;
         let mut own_face_differences = 0;
-        for level in [0, 5, 19, 24] {
+        for level in [0, 1, 5, 19, 24] {
             for key in sample_patches(level) {
                 for edge in Edge::ALL {
                     let (neighbour, back) = key.edge_neighbour_and_back(edge);

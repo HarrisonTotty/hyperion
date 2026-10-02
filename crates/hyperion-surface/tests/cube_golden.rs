@@ -28,6 +28,9 @@
 //!     `VMax` in turn: `edge_neighbour_and_back`;
 //!   - `corner <c> <face> <level> <i> <j>` or `corner <c> none`, for c from 0 to 3:
 //!     `corner_neighbours`.
+//! - `table <face> <level> <i> <j> <edge> <face> <level> <i> <j> <back>`: for each face and
+//!   each of its edges in turn, a level-3 patch on that edge at an off-centre cell, its neighbour
+//!   across the edge and the edge back, so that all 24 face crossings are pinned.
 //! - `finest <radius> <level> <max_spacing>`: `finest_level(radius)` in decimal and
 //!   `vertex_spacing(radius, level).max_m`, for 20 radii from 100 km to 70,000 km.
 
@@ -92,7 +95,7 @@ fn edge_name(edge: Edge) -> &'static str {
 }
 
 #[test]
-fn cube_sphere_golden() {
+fn the_cube_sphere_matches_its_golden() {
     let mut w = GoldenWriter::new();
     w.header(TEST_PLANET_VERSION);
 
@@ -108,7 +111,7 @@ fn cube_sphere_golden() {
     }
 
     let quads = u8::try_from(PATCH_QUADS).expect("64 fits a u8");
-    for (n, key) in patches().into_iter().enumerate() {
+    for (n, key) in (0_u32..).zip(patches()) {
         w.line(&format!(
             "patch {n} {} 0x{:016x}",
             key_fields(key),
@@ -138,11 +141,33 @@ fn cube_sphere_golden() {
                 edge_name(back)
             ));
         }
-        for (c, corner) in key.corner_neighbours().into_iter().enumerate() {
+        for (c, corner) in (0_u32..).zip(key.corner_neighbours()) {
             match corner {
                 Some(neighbour) => w.line(&format!("corner {c} {}", key_fields(neighbour))),
                 None => w.line(&format!("corner {c} none")),
             }
+        }
+    }
+
+    // Every face's four edges, at level 3 from an off-centre cell on each, so that all 24
+    // directed face crossings and their orientations are pinned.
+    let last = 7;
+    for face in Face::ALL {
+        for (edge, i, j) in [
+            (Edge::UMin, 0, 1),
+            (Edge::UMax, last, 1),
+            (Edge::VMin, 1, 0),
+            (Edge::VMax, 1, last),
+        ] {
+            let key = PatchKey::new(face, 3, i, j).expect("a level-3 cell");
+            let (neighbour, back) = key.edge_neighbour_and_back(edge);
+            w.line(&format!(
+                "table {} {} {} {}",
+                key_fields(key),
+                edge_name(edge),
+                key_fields(neighbour),
+                edge_name(back)
+            ));
         }
     }
 
