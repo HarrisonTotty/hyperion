@@ -135,21 +135,19 @@ describe("a refused shader", () => {
     );
     expect(status.fault).toEqual({ kind: "shader-refused", effectName: "standard" });
     expect(graphicsAnnunciation(status)).toEqual({
-      text: "GRAPHICS SHADER REFUSED: standard is not WGSL",
+      text: "GRAPHICS SHADER REFUSED: standard did not compile, not drawn",
       standing: "fault",
     });
   });
 
-  it("keeps the first refusal's name when the compiler's unnamed one follows", async () => {
+  it("keeps the first refusal when another follows", async () => {
     const outcome = await adapterOutcome();
     const once = reduce(
       launched(),
       { kind: "adapter-outcome", outcome },
       { kind: "shader-refused", effectName: "standard" },
     );
-    expect(reduce(once, { kind: "shader-refused", effectName: "(unnamed, at the compiler)" })).toBe(
-      once,
-    );
+    expect(reduce(once, { kind: "shader-refused", effectName: "atmosphere" })).toBe(once);
   });
 
   it("does not hide a lost device", async () => {

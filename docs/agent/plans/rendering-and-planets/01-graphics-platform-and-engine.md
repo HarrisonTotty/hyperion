@@ -2066,7 +2066,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     others; it never replaces a standing fault, so the stub compiler's unnamed refusal that follows
     the wrapper's named one keeps the name, and a device loss outranks it. Its words, drafted for
     the owner with T5.c's: `GRAPHICS SHADER REFUSED: <effect> is not WGSL`
-    (`GRAPHICS_WORDS.shaderRefused`). A refused
+    (`GRAPHICS_WORDS.shaderRefused`). _Superseded (RM1 validation, 2026-10-02, decision item 1
+    of `decision-validation-items.md`):_ the words are now
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`, the compiler's messages going to the log only. A refused
     shader is a bug of ours, not the operator's; the fault makes it visible on the `LINK` panel.
   - `guardCreateEffect` takes any `EffectFactory` (the engine's `createEffect`, whatever its
     arguments), reports before it throws, and reads the effect's name from a string or from its
@@ -2372,7 +2374,8 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `createRenderPipelineAsync` (a colour target with and without depth, a canvas with depth), and
     any other at its first draw asynchronously, the draw left out until ready. Shader errors come
     from `getCompilationInfo`: logged with line and column, `shader-refused` dispatched with the
-    material's name (the words "is not WGSL" are now wrong; the status-wording lane owns them),
+    material's name (the words "is not WGSL" were wrong; _closed in RM1 validation, 2026-10-02:_
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`),
     the material's draws left out; `createMaterialAsync` rejects with the messages.
   - A view now owns its `depth32float` (attachment only; a view's depth is still not read back).
     Mesh attributes are one `float32` buffer each; `assertMeshData` refuses ragged data and indices
@@ -2401,8 +2404,8 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `loadRenderEngine`.
   - The pass timer's `bracket` is removed; `PassTimes.bracketed` stays in the type, always
     `false`, for R05's and R12's records.
-  - Pending for the status-wording lane: `GRAPHICS SHADER REFUSED: <name> is not WGSL` now reports
-    a compile error, and `GlslShaderRefused` no longer exists.
+  - _Closed in RM1 validation (2026-10-02, decision item 1):_ `GRAPHICS SHADER REFUSED` now reads
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn` for a compile error, and `GlslShaderRefused` no longer exists.
 - **Deviations in T9, as built.**
   - Files: `src/smoke/main.ts`, `preload.ts` and `result.ts` (the report's shape, its validation
     and the verdict, unit-tested, shared as types with the page); `src/renderer/smoke.html` and
@@ -2633,3 +2636,8 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
   - **m11, the lost engine's memory releases.** `#release` disposes the engine before it
     unsubscribes, so its `destroyed` events reach the allocation listeners (R05's tally). Test:
     `resilientEngine.test.ts`, the fake engine raising `FAKE_ENGINE_MEMORY`'s release on disposal.
+  - **M3, the `shader-refused` words (T8.k, T5).** Decision item 1 of
+    `decision-validation-items.md` applied: `GRAPHICS SHADER REFUSED: <effect> did not compile,
+not drawn`, with no compiler text on the screen (it stays in the log). `status.ts`'s three
+    stale comments, `status.test.ts` and the guide's row are updated, and the T8.b, T8.k and T8.l
+    notes are marked closed. `ux_lint.py` on `status.ts`: 0 errors.
