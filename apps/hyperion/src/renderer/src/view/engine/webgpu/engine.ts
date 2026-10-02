@@ -3,7 +3,7 @@
  * `loadEngine.ts` imports dynamically, and so the root of a lazily loaded chunk.
  *
  * @remarks
- * The device is requested on the adapter the client vetted (Design note 7), with the features
+ * The device is requested on the adapter the client vetted (Design note 24), with the features
  * `requiredFeatures` asks for; its capabilities are the device's, so a feature the smoke harness
  * withholds reads as absent. Every draw, post-process, dispatch, copy and readback is encoded by
  * the adapter itself on that device, through pipelines it makes from standard WGSL under explicit
@@ -86,6 +86,8 @@ import {
 } from "./pointSplat";
 import {
   assertBufferReadable,
+  coversBuffer,
+  coversTexture,
   readGpuBuffer,
   readGpuTexture,
   textureRead,
@@ -99,7 +101,7 @@ import {
   probeTargetRounding,
 } from "./roundingProbe";
 import { WebGpuRenderTarget } from "./target";
-import { PassTimer } from "./timing";
+import { PASSES_PER_FRAME, PassTimer } from "./timing";
 import { assertDrawStruct, OFFSET_MEMBER, uniformLayout } from "./uniforms";
 import { srgbViewFormat, WebGpuView } from "./view";
 
@@ -157,16 +159,20 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     this.device = device;
     this.#status = status;
     this.capabilities = deviceCapabilities(device);
-    const { gpuTiming } = status.getSnapshot();
-    this.#timer = new PassTimer(
-      device,
-      this.capabilities.timestampQuery ? (gpuTiming ? "full" : "quantized") : "absent",
-    );
     this.#resources = new ResourceRegistry(device, (event) => {
       for (const listener of this.#allocationListeners) {
         listener(event);
       }
     });
+    const { gpuTiming } = status.getSnapshot();
+    this.#timer = new PassTimer(
+      {
+        createQuerySet: (descriptor) => this.#resources.createQuerySet(descriptor),
+        createBuffer: (spec) => this.#resources.createBuffer(spec),
+        gpuBufferOf: (handle) => this.gpuBufferOf(handle),
+      },
+      this.capabilities.timestampQuery ? (gpuTiming ? "full" : "quantized") : "absent",
+    );
     this.#watches = [
       watchDeviceLoss(
         device,
@@ -228,8 +234,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   generateMips(texture: TextureHandle): void {
     const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
-    const writes = this.#timer.writesFor(`${spec.name} mips`);
     this.#submit(`${spec.name} mips`, (encoder) => {
+      const writes = this.#timer.writesFor(`${spec.name} mips`);
       this.#mips.encode(encoder, gpuTexture, spec.mips, writes);
     });
     this.#resolveTimes();
@@ -466,7 +472,12 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
     this.#assertLive();
     this.#resources.writePackedCubeLevel(cube, level, packed);
-    this.#writers.wroteOtherwise(cube);
+    // One level of several is a part of the cube.
+    if (this.#resources.textureOf(cube).spec.mips === 1) {
+      this.#writers.wroteOtherwise(cube);
+    } else {
+      this.#writers.wrotePart(cube, null);
+    }
   }
 
   writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void {
@@ -475,7 +486,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed);
     });
     // The cube carries the buffer's writer, so a presentation-only result stays refused.
-    this.#writers.copied(packed, cube);
+    this.#writers.copied(packed, cube, this.#resources.textureOf(cube).spec.mips === 1);
   }
 
   /**
@@ -507,11 +518,12 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         const { texture, spec: targetSpec } = this.#resources.textureOf(target);
         const { buffer, spec: pointsSpec } = this.#resources.bufferOf(points);
         assertSplatInputs(spec, targetSpec, pointsSpec);
-        const writes = this.#timer.writesFor(spec.name);
         this.#submit(spec.name, (encoder) => {
+          const writes = this.#timer.writesFor(spec.name);
           encodeSplat(this.device, encoder, pipeline, texture, buffer, count, spec.name, writes);
         });
-        this.#writers.wroteOtherwise(target);
+        // A splat adds to what the target holds, so it keeps the target's writer.
+        this.#writers.wrotePart(target, null);
         this.#resolveTimes();
       },
       dispose: (): void => {
@@ -539,27 +551,47 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
             offsetBytes: workgroups.offsetBytes,
           }
         : { kind: "direct", counts: workgroups };
-    const timestampWrites = this.#timer.writesFor(pass);
     this.#submit(pass, (encoder) => {
+      const timestampWrites = this.#timer.writesFor(pass);
       encodeDispatch(this.device, encoder, record, resources, counts, {
         label: pass,
         ...(timestampWrites === undefined ? {} : { timestampWrites }),
       });
     });
+    // Dispatch times wait for the next frame's resolve, unless a bake of many dispatches between
+    // frames has half filled the query set: then they resolve now, so that the frame's own passes
+    // still find room.
+    if (this.#timer.mark() >= PASSES_PER_FRAME / 2) {
+      this.#resolveTimes();
+    }
+    // Only what the kernel may write is recorded: a binding declared `read` (a `read` storage
+    // texture, a `read` storage buffer) keeps the writer it had (Design note 16).
     for (const [name, handle] of Object.entries(bindings.buffers)) {
       if (record.bindings.get(name)?.writable === true) {
         this.#writers.wroteBy(handle, record.pair);
       }
     }
-    for (const { texture } of Object.values(bindings.storage)) {
-      this.#writers.wroteBy(texture, record.pair);
+    for (const [name, { texture }] of Object.entries(bindings.storage)) {
+      if (record.bindings.get(name)?.writable !== true) {
+        continue;
+      }
+      // A kernel writes the one level it is bound at: the whole texture only when it has one.
+      if (this.#resources.textureOf(texture).spec.mips === 1) {
+        this.#writers.wroteBy(texture, record.pair);
+      } else {
+        this.#writers.wrotePart(texture, record.pair);
+      }
     }
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     this.#assertLive();
     this.#resources.writeBuffer(buffer, offsetBytes, data);
-    this.#writers.wroteOtherwise(buffer);
+    if (coversBuffer(this.#resources.bufferOf(buffer).spec, offsetBytes, data.byteLength)) {
+      this.#writers.wroteOtherwise(buffer);
+    } else {
+      this.#writers.wrotePart(buffer, null);
+    }
   }
 
   writeTexture(
@@ -570,7 +602,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   ): void {
     this.#assertLive();
     this.#resources.writeTexture(texture, origin, size, data);
-    this.#writers.wroteOtherwise(texture);
+    if (coversTexture(this.#resources.textureOf(texture).spec, origin, size, 0)) {
+      this.#writers.wroteOtherwise(texture);
+    } else {
+      this.#writers.wrotePart(texture, null);
+    }
   }
 
   readBuffer(buffer: BufferHandle, access: "cpu" | "tolerance" = "cpu"): Promise<ArrayBuffer> {
@@ -717,10 +753,25 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return handle;
   }
 
-  /** Encodes and submits one command buffer. */
+  /**
+   * Encodes and submits one command buffer.
+   *
+   * @remarks
+   * When the encoding throws, nothing is submitted, so the passes it timed are forgotten: their
+   * timestamps would otherwise be resolved and reported unwritten.
+   */
   #submit(label: string, encode: (encoder: GPUCommandEncoder) => void): void {
+    const mark = this.#timer.mark();
     const encoder = this.device.createCommandEncoder({ label });
-    encode(encoder);
+    let encoded = false;
+    try {
+      encode(encoder);
+      encoded = true;
+    } finally {
+      if (!encoded) {
+        this.#timer.rollBack(mark);
+      }
+    }
     this.device.queue.submit([encoder.finish()]);
   }
 
@@ -768,7 +819,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   }
   const engine = new WebGpuRenderEngine(device, status);
   // The device's features, not the adapter's, so that a withheld feature reads as absent in the
-  // status too (Design note 7).
+  // status too (Design note 24).
   status.dispatch({ kind: "device-capabilities", capabilities: engine.capabilities });
   // Once a device, before any view renders: a rebuild comes through here too (Design note 22).
   status.dispatch({ kind: "target-rounding", rounding: await engine.probeTargetRounding() });

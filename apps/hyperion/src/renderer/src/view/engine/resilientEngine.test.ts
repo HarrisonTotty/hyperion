@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
 import {
+  FAKE_ENGINE_MEMORY,
   type FakeEngineScript,
   fakeEngineModule,
   type FakeRenderEngine,
 } from "../../test/fakeRenderEngine";
 import { loadRenderEngine } from "./loadEngine";
+import type { AllocationEvent } from "./memory";
 import { type AdapterOutcome, requestAdapterOutcome } from "./platform";
 import { DEVICE_LOSS_LIMIT, GraphicsStatusStore, initialGraphicsStatus } from "./status";
 import { EngineUnavailable } from "./resilientEngine";
@@ -221,6 +223,58 @@ describe("a device loss", () => {
     await vi.waitFor(() => {
       expect(nth(module, 1).views.map(({ name }) => name)).toEqual(["late"]);
     });
+  });
+
+  it("keeps the restored engine when an onRestored listener throws", async () => {
+    const { engine, module, status, gpu } = await load([adapter(), adapter(), adapter()]);
+    const told = vi.fn<() => void>();
+    engine.onRestored(() => {
+      throw new Error("the caller's material no longer matches");
+    });
+    engine.onRestored(told);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(told).toHaveBeenCalledOnce();
+    });
+    await Promise.resolve();
+    expect(module.engines).toHaveLength(2);
+    expect(nth(module, 1).disposed).toBe(false);
+    expect(gpu.requests).toHaveLength(2);
+    expect(status.getSnapshot().deviceLosses).toBe(1);
+    expect(status.getSnapshot().condition.kind).toBe("nominal");
+    expect(logged).toHaveBeenCalledWith("an onRestored listener failed:", expect.any(Error));
+  });
+
+  it("keeps the restored engine when a view's canvas gives no context", async () => {
+    const { engine, module, status } = await load([adapter(), adapter(), adapter()], {
+      viewless: new Set([1]),
+    });
+    engine.createView(document.createElement("canvas"), "cockpit");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(logged).toHaveBeenCalledWith(
+        "view cockpit could not be re-created after a device loss:",
+        expect.any(Error),
+      );
+    });
+    await Promise.resolve();
+    expect(module.engines).toHaveLength(2);
+    expect(nth(module, 1).disposed).toBe(false);
+    expect(status.getSnapshot().condition.kind).toBe("nominal");
+    expect(status.getSnapshot().deviceLosses).toBe(1);
+  });
+
+  it("forwards the lost engine's memory releases to the allocation listeners", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const events = vi.fn<(event: AllocationEvent) => void>();
+    engine.onAllocation(events);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    expect(events).toHaveBeenCalledWith({ kind: "destroyed", ...FAKE_ENGINE_MEMORY });
   });
 
   it("drops writes and refuses creations while there is no device", async () => {

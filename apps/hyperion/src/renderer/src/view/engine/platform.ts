@@ -2,7 +2,7 @@
  * Acquiring and vetting a WebGPU adapter, with no engine types.
  *
  * @remarks
- * The client requests its own adapter and hands it to the engine (R01 Design note 7), so that
+ * The client requests its own adapter and hands it to the engine (R01 Design note 24), so that
  * every adapter the engine sees has been summarised and, if it is a software one, refused the
  * photorealistic style (Design note 8). An adapter is consumed by its first `requestDevice`, so a
  * rebuild after a device loss asks for a fresh one here and never reuses the old one.
@@ -58,7 +58,7 @@ export type AdapterOutcome =
 
 /**
  * The optional features requested whenever the adapter has them, and never required (R01 Design
- * note 7).
+ * note 24).
  */
 export const WANTED_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "subgroups",
@@ -116,7 +116,7 @@ export function summariseAdapter(adapter: GPUAdapter): {
  *
  * @remarks
  * A device has only the features it was asked for, so a feature the smoke harness withholds reads
- * as absent here, and so everywhere downstream, although the adapter has it (R01 Design note 7).
+ * as absent here, and so everywhere downstream, although the adapter has it (R01 Design note 24).
  */
 export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
   const { features, limits, adapterInfo } = device;
@@ -139,7 +139,7 @@ export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
  *
  * @remarks
  * The engine compares what it asked for with what the device enabled and reports the
- * difference (R01 Design note 7), so that a feature quietly missing is never mistaken for one
+ * difference (R01 Design note 24), so that a feature quietly missing is never mistaken for one
  * present.
  */
 export function featuresNotEnabled(

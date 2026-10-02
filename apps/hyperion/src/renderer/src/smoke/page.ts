@@ -120,10 +120,14 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     !summary.fallback || !styleAvailability(summary).photorealistic,
     `photorealistic ${String(styleAvailability(summary).photorealistic)}`,
   );
+  // The default run takes the subgroup path wherever the adapter offers subgroups, so that T10's
+  // twins run on both paths across the two variants; the no-subgroups run never does.
   checks.check(
     `T9.c the ${variant} run is on its path`,
-    variant !== "no-subgroups" || !engine.capabilities.subgroups,
-    capabilities,
+    variant === "no-subgroups"
+      ? !engine.capabilities.subgroups
+      : engine.capabilities.subgroups === outcome.capabilities.subgroups,
+    `${capabilities}; the adapter offers subgroups: ${outcome.capabilities.subgroups ? "yes" : "no"}`,
   );
   const rounding = status.getSnapshot().targetRounding;
   checks.check(

@@ -75,22 +75,13 @@ export async function checkTargetsAsyncIndirectTiming(
     show(chained),
   );
 
-  // An asynchronous material: a frame submitted meanwhile does not wait, and it draws on the first
-  // frame after it resolves.
-  let resolved = false;
-  const pending = engine
-    .createMaterialAsync(flatSpec("async flat"), ["rgba16float"], [full])
-    .then((handle) => {
-      resolved = true;
-      return handle;
-    });
-  first.render(frameOf("chain while compiling", [drawOf(full, flat, [0, 1, 0, 1])]));
-  checks.check(
-    "T9.h a frame submitted while a material compiles does not wait for it",
-    !resolved,
-    `resolved before the frame returned: ${String(resolved)}`,
+  // An asynchronous material draws on the first frame after it resolves, into the outputs it was
+  // prepared for.
+  const asyncMaterial = await engine.createMaterialAsync(
+    flatSpec("async flat"),
+    ["rgba16float"],
+    [full],
   );
-  const asyncMaterial = await pending;
   first.render(frameOf("chain async", [drawOf(full, asyncMaterial, [0, 0, 1, 1])]));
   const drawn = texel(halfTexels(await engine.readTexture(first.colour)), 8, 3, 3);
   checks.check(
@@ -98,6 +89,63 @@ export async function checkTargetsAsyncIndirectTiming(
     near(drawn, [0, 0, 1, 1], 0),
     show(drawn),
   );
+
+  // Into an output it was not prepared for, its pipeline is made asynchronously: the frame does
+  // not wait for it and leaves its draw out (the red under it shows), and a later frame draws it.
+  const unprepared = engine.createRenderTarget({
+    name: "chain unprepared",
+    size: { widthPx: 8, heightPx: 8 },
+    format: "rgba8unorm",
+    mips: 1,
+    depth: false,
+    category: "render-targets",
+  });
+  const pendingFrame = (): ReturnType<typeof frameOf> =>
+    frameOf("chain pending", [
+      drawOf(full, flat, [1, 0, 0, 1]),
+      drawOf(full, asyncMaterial, [0, 0, 1, 1]),
+    ]);
+  unprepared.render(pendingFrame());
+  const leftOut = texel(new Uint8Array(await engine.readTexture(unprepared.colour)), 8, 3, 3);
+  checks.check(
+    "T9.h a frame whose material's pipeline is still being made leaves that draw out",
+    near(leftOut, [255, 0, 0, 255], 0),
+    show(leftOut),
+  );
+  let later = leftOut;
+  for (let attempt = 0; attempt < 50 && !near(later, [0, 0, 255, 255], 0); attempt += 1) {
+    // Each frame waits for the pipeline the one before it asked for.
+    // oxlint-disable-next-line no-await-in-loop
+    await pause(20);
+    unprepared.render(pendingFrame());
+    // Each attempt reads the frame it just rendered before the next.
+    // oxlint-disable-next-line no-await-in-loop
+    later = texel(new Uint8Array(await engine.readTexture(unprepared.colour)), 8, 3, 3);
+  }
+  checks.check(
+    "T9.h the left-out draw is drawn once its pipeline is ready",
+    near(later, [0, 0, 255, 255], 0),
+    show(later),
+  );
+  unprepared.dispose();
+
+  // A target's mips are generated after it renders: level 1 of a flat colour is that colour.
+  const mipped = engine.createRenderTarget({
+    name: "chain mipped",
+    size: { widthPx: 8, heightPx: 8 },
+    format: "rgba16float",
+    mips: 3,
+    depth: false,
+    category: "render-targets",
+  });
+  mipped.render(frameOf("chain mipped", [drawOf(full, flat, [0.5, 0.25, 1, 1])]));
+  const level1 = texel(halfTexels(await engine.readTexture(mipped.colour, 1)), 4, 1, 1);
+  checks.check(
+    "T9.h a 3-mip target's level 1 is generated from level 0",
+    near(level1, [0.5, 0.25, 1, 1], 1e-3),
+    show(level1),
+  );
+  mipped.dispose();
 
   // A kernel writes a draw's and a dispatch's counts; each instance adds 0.25 of red.
   const args = engine.createBuffer({
@@ -150,7 +198,7 @@ export async function checkTargetsAsyncIndirectTiming(
     `counter ${counted}`,
   );
   const additive = engine.createMaterial(
-    flatSpec("indirect add", { blend: "additive", depthWrite: false, transparent: true }),
+    flatSpec("indirect add", { blend: "additive", depthWrite: false }),
   );
   first.render(
     frameOf("indirect draw", [

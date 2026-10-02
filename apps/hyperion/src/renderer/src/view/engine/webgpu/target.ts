@@ -14,6 +14,7 @@ import { TEXTURE_USAGE } from "../gpuFlags";
 import type { TextureSpec } from "../memory";
 import type { GpuCapabilities } from "../platform";
 import {
+  ColourSelfSample,
   DepthSelfSample,
   type DrawItem,
   type FrameSubmission,
@@ -108,6 +109,36 @@ export function assertNoDepthSelfSample(
   }
 }
 
+/**
+ * Refuses a draw or a post-process that samples the colour of the target it renders into, for the
+ * same reason, in the one pass that has the target's colour as its attachment: the draws' pass
+ * when the frame has no post-processes, else the chain's last pass. A draw with post-processes
+ * renders into an intermediate, and an earlier post-process into the other one, so either may
+ * sample the target's colour.
+ *
+ * @remarks
+ * A post-process whose shaders failed is left out of the chain at encoding, which can make the
+ * draws' pass write the target after all; such a frame is already reported by `shader-refused`.
+ *
+ * @throws {@link ColourSelfSample} naming the target and the material or post-process.
+ */
+export function assertNoColourSelfSample(
+  targetName: string,
+  colour: TextureHandle,
+  frame: Pick<FrameSubmission, "draws" | "postProcesses">,
+): void {
+  const last = frame.postProcesses.at(-1);
+  if (last === undefined) {
+    for (const draw of frame.draws) {
+      if (Object.values(draw.textures).includes(colour)) {
+        throw new ColourSelfSample(targetName, `material ${draw.material.name}`);
+      }
+    }
+  } else if (Object.values(last.textures ?? {}).includes(colour)) {
+    throw new ColourSelfSample(targetName, `post-process ${last.postProcess.name}`);
+  }
+}
+
 /** A target's textures at one size. */
 interface Attachments {
   readonly size: ViewSize;
@@ -152,12 +183,14 @@ export class WebGpuRenderTarget implements RenderTarget {
    * Renders `frame` into the target.
    *
    * @throws {@link DepthSelfSample} when a draw samples this target's own depth.
+   * @throws {@link ColourSelfSample} when a draw or a post-process samples its own colour.
    */
   render(frame: FrameSubmission): void {
     if (this.#disposed) {
       return;
     }
     assertNoDepthSelfSample(this.name, this.depth, frame.draws);
+    assertNoColourSelfSample(this.name, this.colour, frame);
     const { size, colour, depth } = this.#attachments;
     const host = this.#host;
     host.renderFrame(frame, {

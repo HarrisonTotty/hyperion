@@ -35,7 +35,7 @@ function smallTarget(engine: RenderEngine, name: string, sizePx: number, depth =
 export async function checkBlendComputeCube(engine: RenderEngine, checks: Checks): Promise<void> {
   const full = fullScreenMesh(engine, "blend full");
   const additive = engine.createMaterial(
-    flatSpec("half white", { blend: "additive", depthWrite: false, transparent: true }),
+    flatSpec("half white", { blend: "additive", depthWrite: false }),
   );
   const view = engine.createView(addCanvas(), "blend view");
   view.resize({ widthPx: 16, heightPx: 16 });
@@ -187,7 +187,7 @@ export async function checkMaterialState(engine: RenderEngine, checks: Checks): 
   );
 
   const additive = engine.createMaterial(
-    flatSpec("sprite", { blend: "additive", depthWrite: false, transparent: true }),
+    flatSpec("sprite", { blend: "additive", depthWrite: false }),
   );
   target.render(
     frameOf("two sprites", [
@@ -205,7 +205,7 @@ export async function checkMaterialState(engine: RenderEngine, checks: Checks): 
   // Alpha: over a drawn alpha of 2, each blending mode keeps it.
   for (const blend of ["additive", "premultiplied"] as const) {
     const material = engine.createMaterial(
-      flatSpec(`alpha ${blend}`, { blend, depthWrite: false, transparent: true }),
+      flatSpec(`alpha ${blend}`, { blend, depthWrite: false }),
     );
     target.render(
       frameOf(`alpha ${blend}`, [

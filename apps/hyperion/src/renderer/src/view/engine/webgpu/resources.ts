@@ -1,7 +1,7 @@
 /**
- * The engine's one path for GPU memory: every buffer and texture is made here, with its category,
- * and every creation, destruction and upload raises one {@link AllocationEvent} (R01 Design note
- * 18).
+ * The engine's one path for GPU memory: every buffer, texture and query set is made here, with its
+ * category, and every creation, destruction and upload raises one {@link AllocationEvent} (R01
+ * Design note 18).
  *
  * @remarks
  * Buffers and textures are made on the engine's device here and nowhere else, so that each has
@@ -82,6 +82,8 @@ export class ResourceRegistry {
   readonly #emit: (event: AllocationEvent) => void;
   readonly #buffers = new Map<BufferHandle, BufferRecord>();
   readonly #textures = new Map<TextureHandle, TextureRecord>();
+  /** Every query set made, with its name. */
+  readonly #querySets = new Map<GPUQuerySet, string>();
 
   /**
    * Makes a registry on `device`.
@@ -132,6 +134,19 @@ export class ResourceRegistry {
     this.#textures.set(handle, { spec, texture, bytes });
     this.#emit({ kind: "created", name: spec.name, bytes, category: spec.category });
     return handle;
+  }
+
+  /**
+   * Makes a query set, counted as `other` at 8 bytes a query (a timestamp's size), and destroyed
+   * at disposal.
+   */
+  createQuerySet(descriptor: GPUQuerySetDescriptor): GPUQuerySet {
+    // The one place a query set is made (Design note 18).
+    const querySet = this.#device.createQuerySet(descriptor);
+    const name = descriptor.label ?? "query set";
+    this.#querySets.set(querySet, name);
+    this.#emit({ kind: "created", name, bytes: descriptor.count * 8, category: "other" });
+    return querySet;
   }
 
   /** The buffer behind `handle`, which must be this registry's. */
@@ -266,8 +281,13 @@ export class ResourceRegistry {
     this.#emit({ kind: "destroyed", name: handle.name, bytes, category: spec.category });
   }
 
-  /** Destroys every buffer and texture, raising each one's `destroyed` event. */
+  /** Destroys every buffer, texture and query set, raising each one's `destroyed` event. */
   dispose(): void {
+    for (const [querySet, name] of this.#querySets) {
+      querySet.destroy();
+      this.#emit({ kind: "destroyed", name, bytes: querySet.count * 8, category: "other" });
+    }
+    this.#querySets.clear();
     for (const [handle, { spec, buffer }] of this.#buffers) {
       buffer.destroy();
       this.#emit({
