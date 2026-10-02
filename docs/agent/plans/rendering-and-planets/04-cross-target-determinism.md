@@ -1658,7 +1658,10 @@ warnings` with "use of a disallowed method", and was reverted.
     and a ready module is not a diagnostic; so "log the module's generator version" is read as
     that attribute. Where there is no `Worker` (jsdom) it does nothing; its DOM test stubs
     `Worker` with `test/FakeSurfaceWorker.ts`, which the loader's tests share.
-  - **`check-chunks`** also makes the module first now, since `pnpm build` bundles the worker.
+  - **`check-chunks`** also made the module first, since `pnpm build` bundles the worker. That
+    recipe went with Babylon.js in R01.T8.l (R01 Design note 24; the engine is now
+    `view/engine/webgpu/`); `just build`, which depends on `gen-surface`, is the build that bundles
+    the worker now.
   - **Checked by hand, 2026-09-30, on the development machine (`DISPLAY=:0`).** Against a local
     `hyperion-server` (port 7979), the built app (`pnpm build`, then Electron on `apps/hyperion`,
     `file://`) and `just client` (dev server, `http://localhost:5173/`) each showed
@@ -1699,3 +1702,63 @@ warnings` with "use of a disallowed method", and was reverted.
   (provisional); the wasip1 suites took 136 s of nextest, and the browser target's three crates
   (124, 1 and 52 tests, matching their native lists less `native_only`) under a second of tests
   after their builds and listings. This is the full-`ci` record T8.c's acceptance asks for.
+- **R04.T11, the verification pass (2026-10-02, at `3c4d865`, with R01.T9–T10 merged).** Each item
+  of Verification, against the tree:
+  - **`just ci`** passed: 2,711 s wall, of which 1,471 s waiting for the heavy-test lock, so about
+    1,240 s of work, under load 8.6 at the start and 13 to 23 at the end (provisional). It ran,
+    besides what it ran before: the relaxed-SIMD refusal, `_browser-clippy` (base, the surface
+    crate, the testkit), the wasip1 fast suite (nextest: 2,511 run, all passed, 161 slow ones
+    skipped, 145 s), the browser target's three crates, the ban-list test (`clippy_bans.rs`, its
+    seven tests natively and under wasip1), the flush-to-zero tests (`flush_to_zero.rs`'s parent and
+    the pool's unit tests) and the client's module tests (`renderer/src/wasm/`, four files, 21 tests,
+    also run alone).
+  - **No skipping.** `just test-wasm-fast`, the step `ci` ends with, failed at `_wasm-preflight`
+    with a message naming `just wasm-tools` in each of four cases: `WASMTIME=/nonexistent`;
+    `wasm-bindgen-test-runner` shadowed on `PATH` by one that exits 127 ("found 'none'"); and each
+    rustup target hidden by a `rustup` wrapper on `PATH` that drops it from
+    `target list --installed` (the shared toolchain was not touched).
+  - **`just ci-slow`** was not run: this lane's gate is `just ci`, and `ci-slow` fails on the seven
+    pre-existing native slow failures from `main` (T7.c's record), out of this plan's scope. The
+    slow wasip1 suite was last run whole by T7.d (2,518 s of nextest; its nine thread-spawning tests
+    fixed and passing; six failing alike on both targets with the native seven). **Pending:**
+    T11's acceptance, `just ci-slow` passing, waits on the galaxy plans' fix of those seven.
+  - **Goldens.** `golden_diff.py --base 0cf99da~1` (the commit before T4.a) reports
+    `GENERATOR_VERSION` 16 → 16, the three relocated goldens under "Renamed goldens", and new
+    goldens of which only `math/bessel` is R04's (T4.c; the others are R02's and R03's). It also
+    reports one changed golden and so a Problem, the server's
+    `systems_in_range_briefs.golden`; that change is R02.T5's (`8dfe57b`, the brief's
+    `absolute_v_mag`, a new field, with `star_count` gaining a comma), recorded in R02. Per commit,
+    R04's own commits touch goldens only by the three 100% renames and the one addition, so R04
+    changed no pinned value.
+  - **Parity.** Base's goldens compare on native, wasip1 and the browser target; the sim's on native
+    and wasip1 (T8.c's hand check, one character of `math/functions.golden`, failed all three).
+  - **The shim.** `test-wasm-browser`'s first line in this `ci` run: "wasm-bindgen-test on Electron
+    44.4.3, V8 15.2.124.28-electron.0".
+  - **Bans.** The five `clippy.toml` files hold one list (`clippy_bans.rs`). By hand: a scratch
+    `algebraic_add` call in base and in the surface crate failed
+    `cargo clippy -p … --lib -- -D warnings` ("use of a disallowed method
+    `f64::algebraic_add`"), each reverted; T1 recorded the sim, the fitting crate and the server.
+  - **Flush-to-zero.** Passed in `ci`; the inverted expectation was seen to fail in T9.b.
+  - **Routing.** The sim-determinism skill, `golden_diff.py`, `rust-dev.md`, the review-changes
+    skill, `select_checks.py`, the determinism auditor and the Rust reviewer name both new crates.
+  - **Provides.** Every name exists with the sketched signature: base's modules, `RawEventKey`'s
+    three methods, `assert_registries_disjoint`, `ObjectKey::{system, body}`, `domain_tags!`,
+    `hex`, `j0`; the sim's re-exports; the surface crate's guard, `tags` and
+    `generator_version` (a `const fn`); `FlushProbe`, `probe_flush_to_zero`,
+    `JobError::FloatingPointMode`, `SubmitJobError::Faulted`,
+    `StartPoolError::FloatingPointMode { worker, probe }`, `CpuPool::with_probe`; the recipes,
+    the shim, `check_embedded`, `DetailSeedHex`, `BodyHooksDto.detail_seed`, the client's
+    `detailSeed` and `renderer/src/wasm/`.
+  - **The module in the client** loads in `just client` and the built app (T10.c, 2026-09-30).
+  - **Owner records.** CSP ruled 2026-09-30 (T10.a); `DETAIL SEED` signed off 2026-09-30 on the
+    owner's delegation (T3.b). **Awaiting the owner:** plan 14's owner's acceptance of the
+    amendment (T3.a).
+  - **Pending on a quiet machine** (load under 1, governor recorded): `just ci`'s wall time before
+    and after the plan, the slow wasip1 suite's time (open question 12; every figure above and in
+    T7.c, T7.d and T8.c is provisional), T4.a's and T4.d's `just bench` comparisons, and T9.b's
+    probe timing.
+  - **Corrected here:** T10.c's `check-chunks` note (the recipe went with Babylon.js in R01.T8.l);
+    no other R04 text named Babylon. In the README, the "Three things done now" items say what
+    landed, the Conventions' task-ID sentence and the open item on the skills' ID patterns say
+    R04.T7.c resolved them, the plan 14 amendment row says it awaits acceptance, and the clippy
+    scope item is closed, with the brainstorm's "done now" sentence now saying five.
