@@ -118,6 +118,7 @@ export async function checkTargetsAsyncIndirectTiming(
     // oxlint-disable-next-line no-await-in-loop
     await pause(20);
     unprepared.render(pendingFrame());
+    // Each attempt reads the frame it just rendered before the next.
     // oxlint-disable-next-line no-await-in-loop
     later = texel(new Uint8Array(await engine.readTexture(unprepared.colour)), 8, 3, 3);
   }

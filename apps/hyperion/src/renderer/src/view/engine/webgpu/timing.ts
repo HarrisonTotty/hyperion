@@ -36,8 +36,12 @@ export interface TimerHost {
 /** Passes one frame can time: two queries each. */
 export const PASSES_PER_FRAME = 64;
 
-/** Resolve and staging pairs at most: frames whose times may be in flight at once. */
-export const TIMING_FRAMES_IN_FLIGHT = 3;
+/**
+ * Resolve and staging pairs at most: resolves whose times may be in flight at once. Each view's
+ * and target's render resolves its own, and a mapping settles a frame or more later, so three
+ * canvases and a few targets at 60 Hz hold several at once; the pairs are 2 KiB each.
+ */
+export const TIMING_FRAMES_IN_FLIGHT = 16;
 
 /** Bytes of one pair's buffers: every query of a frame, 8 bytes each. */
 const RESOLVE_BYTES = PASSES_PER_FRAME * 2 * 8;
@@ -147,7 +151,9 @@ export class PassTimer {
     if (pair === null) {
       if (!this.#warnedInFlight) {
         this.#warnedInFlight = true;
-        console.warn(`${TIMING_FRAMES_IN_FLIGHT} frames' pass times are in flight; dropping some`);
+        console.warn(
+          `${TIMING_FRAMES_IN_FLIGHT} resolves' pass times are still being read; dropping some`,
+        );
       }
       return null;
     }
@@ -161,8 +167,6 @@ export class PassTimer {
         .mapAsync(MAP_MODE.READ, 0, bytes)
         .then((): void => {
           const stamps = new BigUint64Array(pair.staging.getMappedRange(0, bytes).slice(0, bytes));
-          pair.staging.unmap();
-          this.#free.push(pair);
           this.#report(frame, passes, stamps);
           return undefined;
         })
@@ -171,6 +175,17 @@ export class PassTimer {
           if (!this.#disposed) {
             console.error("reading the pass times failed:", error);
           }
+        })
+        .finally(() => {
+          // The pair goes back however the read ended, so that a failed read costs one frame's
+          // times, not a pair for good.
+          if (this.#disposed) {
+            return;
+          }
+          if (pair.staging.mapState === "mapped") {
+            pair.staging.unmap();
+          }
+          this.#free.push(pair);
         });
     };
   }

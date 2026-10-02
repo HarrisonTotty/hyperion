@@ -149,6 +149,19 @@ describe("a draw or a post-process sampling a target's colour", () => {
     }).toThrow("post-process bloom samples the colour of bloom");
   });
 
+  it("passes where the sampling pass draws into an intermediate, not the target", () => {
+    const blur = { kind: "post-process", name: "blur" } as const;
+    expect(() => {
+      assertNoColourSelfSample("bloom", colour, {
+        draws: [draw({ previous: colour })],
+        postProcesses: [
+          { postProcess: blur, uniforms: {}, textures: { previous: colour } },
+          { postProcess: bloom, uniforms: {} },
+        ],
+      });
+    }).not.toThrow();
+  });
+
   it("passes when nothing samples it", () => {
     expect(() => {
       assertNoColourSelfSample("bloom", colour, {

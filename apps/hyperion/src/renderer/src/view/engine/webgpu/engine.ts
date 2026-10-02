@@ -101,7 +101,7 @@ import {
   probeTargetRounding,
 } from "./roundingProbe";
 import { WebGpuRenderTarget } from "./target";
-import { PassTimer } from "./timing";
+import { PASSES_PER_FRAME, PassTimer } from "./timing";
 import { assertDrawStruct, OFFSET_MEMBER, uniformLayout } from "./uniforms";
 import { srgbViewFormat, WebGpuView } from "./view";
 
@@ -558,9 +558,12 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         ...(timestampWrites === undefined ? {} : { timestampWrites }),
       });
     });
-    // Resolved now, so that a bake of many dispatches between frames does not fill the query set
-    // and leave the next frame's own passes untimed.
-    this.#resolveTimes();
+    // Dispatch times wait for the next frame's resolve, unless a bake of many dispatches between
+    // frames has half filled the query set: then they resolve now, so that the frame's own passes
+    // still find room.
+    if (this.#timer.mark() >= PASSES_PER_FRAME / 2) {
+      this.#resolveTimes();
+    }
     // Only what the kernel may write is recorded: a binding declared `read` (a `read` storage
     // texture, a `read` storage buffer) keeps the writer it had (Design note 16).
     for (const [name, handle] of Object.entries(bindings.buffers)) {
@@ -760,11 +763,14 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   #submit(label: string, encode: (encoder: GPUCommandEncoder) => void): void {
     const mark = this.#timer.mark();
     const encoder = this.device.createCommandEncoder({ label });
+    let encoded = false;
     try {
       encode(encoder);
-    } catch (error: unknown) {
-      this.#timer.rollBack(mark);
-      throw error;
+      encoded = true;
+    } finally {
+      if (!encoded) {
+        this.#timer.rollBack(mark);
+      }
     }
     this.device.queue.submit([encoder.finish()]);
   }

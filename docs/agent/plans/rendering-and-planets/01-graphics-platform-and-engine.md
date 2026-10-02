@@ -278,10 +278,10 @@ export type TargetRounding = "nearest" | "toward-zero" | "unknown"; // unknown u
 export type ProbedTargetFormat = "rgba16float" | "rg11b10ufloat";
 export interface GraphicsStatus {
   readonly condition: GraphicsCondition;
-  readonly capabilities: GpuCapabilities | null; // the device's, once a device is made
+  readonly capabilities: GpuCapabilities | null; // the adapter's, then the device's own
   readonly launchMode: GraphicsLaunchMode;
   readonly gpuTiming: boolean; // from window.hyperion.graphics
-  readonly timer: GpuTimer; // gpuTiming and the device's timestamp-query
+  readonly timer: GpuTimer; // gpuTiming and timestamp-query: the adapter's, then the device's
   readonly targetRounding: Readonly<Record<ProbedTargetFormat, TargetRounding>>;
   readonly fault: GraphicsFault | null; // current, cleared on recovery
   readonly deviceLosses: number;
@@ -323,7 +323,16 @@ export function feedGraphicsStatus(
   gpu: GPU | undefined,
 ): () => void;
 export function navigatorGpu(): GPU | undefined;
-export function useGraphicsStatus(): GraphicsStatus;
+export const GraphicsStatusContext: React.Context<GraphicsStatusStore | null>;
+export function useGraphicsStatus(): GraphicsStatus; // throws outside a GraphicsStatusProvider
+// GraphicsStatusProvider.tsx: makes the store from window.hyperion.graphics and feeds it.
+export function GraphicsStatusProvider(props: GraphicsStatusProviderProps): ReactNode;
+// gpuFlags.ts: WebGPU's flag values, from the specification, since TS 7's lib.dom declares the
+// flag types but not GPUBufferUsage, GPUTextureUsage and GPUMapMode; R02's wireframe imports them.
+export const BUFFER_USAGE: {/* MAP_READ … QUERY_RESOLVE */};
+export const TEXTURE_USAGE: {/* COPY_SRC … RENDER_ATTACHMENT */};
+export const MAP_MODE: {/* READ, WRITE */};
+export const COLOUR_WRITE_ALL = 0xf;
 ```
 
 ### Renderer: the engine-agnostic interface (`renderer/src/view/engine/types.ts`)
@@ -1063,11 +1072,14 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     textures of the one creation path (`target.ts`: its colour with its mips, and its own
     `depth32float` with `COPY_SRC` and `TEXTURE_BINDING`), drawn by the adapter's own render pass
     and its mips generated after (`mipmaps.ts`); `createMaterialAsync` and `createComputeAsync` use
-    `device.createRenderPipelineAsync` and `createComputePipelineAsync`, and a pipeline not
-    prepared is made asynchronously at its first draw, the draw left out until ready; an indirect
+    `device.createRenderPipelineAsync` and `createComputePipelineAsync`, and for a
+    `createMaterialAsync` material a pipeline not prepared is made asynchronously at its first
+    draw, the draw left out until ready (a `createMaterial` material makes it synchronously); an
+    indirect
     draw is encoded in place, in submission order, in the same pass (`drawIndirect` or
-    `drawIndexedIndirect`), and a dispatch takes `dispatchWorkgroupsIndirect`; every pass the
-    adapter encodes carries `timestampWrites`, so nothing is `bracketed`, and the query set and a
+    `drawIndexedIndirect`), and a dispatch takes `dispatchWorkgroupsIndirect`; every timed pass (a
+    frame's, each post-process, dispatches, splats, mip chains; the one-off rounding probe is
+    untimed) carries `timestampWrites`, so nothing is `bracketed`, and the query set and a
     ring of resolve buffers are made through the one creation path (`timing.ts`; RM1 validation
     m5). **Offscreen targets, asynchronous pipelines, indirect work and per-pass time.** Asked by
     R07 and R11 at review (R07's HDR target and bloom chain, R11's stills and GPU-culled scatter, R05's,
@@ -2709,7 +2721,8 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
   - **Gates:** `just ci` passes on the branch (T14's commit) and `just test-render` passes
     headless: both variants, 62 checks each, with an empty cancelled list. _Dated (RM1 validation,
     m8): 62 was T14's branch. The integration branch at 964665b ran 75 a variant (R02.T14.c added
-    13), and after the RM1 validation fixes 81 (M2, m1 and the mip check)._
+    13), and after the RM1 validation fixes 82 (`default`) and 80 (`no-subgroups`): M2's path
+    and `subgroup_size` checks, m1's two and the mip check._
   - **Harness times (T9.e), on a quiet machine (load average 2.0 to 2.3):** ten runs of
     `just test-render`, build included, passed 10 of 10 in 3,043 to 3,290 ms (median 3,065 ms).
     Each of the two harness runs took 1,192 to 1,396 ms. These replace T9.e's provisional
@@ -2774,23 +2787,31 @@ not drawn`, with no compiler text on the screen (it stays in the log). `status.t
     stale comments, `status.test.ts` and the guide's row are updated, and the T8.b, T8.k and T8.l
     notes are marked closed. `ux_lint.py` on `status.ts`: 0 errors.
   - **m10, colour self-sampling (T8.i, Design note 21).** `WebGpuRenderTarget.render` now also
-    refuses a draw or a `PostProcessItem.textures` entry that samples the target's own colour,
-    with the new `ColourSelfSample` (in `types.ts`, beside `DepthSelfSample`; a Provides
-    addition), before anything is encoded. Tests: `target.test.ts`.
+    refuses, with the new `ColourSelfSample` (in `types.ts`, beside `DepthSelfSample`; a Provides
+    addition), a sample of the target's own colour in the one pass whose attachment it is: a
+    draw's when the frame has no post-processes, else the last post-process's `textures`. A draw
+    with post-processes renders into an intermediate and may sample it (review). A post-process
+    whose shaders failed is dropped at encoding, which can route the draws to the target after
+    all; such a frame is already reported by `shader-refused`. Tests: `target.test.ts`.
   - **m5, the pass timer's allocations (T8.g).** The query set is made through the registry
     (`ResourceRegistry.createQuerySet`, counted as `other` at 8 bytes a query, destroyed at
     disposal), with the first timed pass rather than in the constructor, so that a listener added
     after creation sees it. The resolve and staging buffers are a ring of at most
-    `TIMING_FRAMES_IN_FLIGHT` (3) pairs of 1,024 B, made through the registry and reused; a frame
-    whose times find every pair in flight is dropped with one warning. Tests: `timing.test.ts`,
+    `TIMING_FRAMES_IN_FLIGHT` (16) pairs of 1,024 B, made through the registry as needed and
+    reused, a pair returning to the ring however its read ends (review: a failed read lost it); a
+    resolve that finds every pair still being read is dropped with one warning. Each view's and
+    target's render resolves its own, so three canvases and a few targets hold several pairs at
+    once. Tests: `timing.test.ts`,
     `engine.test.ts`. Not changed: `Drawing`'s `frame uniforms` buffer is still made in the
     engine's constructor, before a caller can listen, so R05's tally sees its destruction and not
     its creation (it should start from the engine's creation or ignore an unknown release).
   - **m9, phantom pass times (T8.g).** `#submit` takes a mark of the timer's pending passes and
     rolls back to it when the encoding throws, and the dispatch, splat and mip paths allocate
     their timestamps inside the encoding, so a pass that was never submitted is never reported.
-    `dispatch` resolves its times after each dispatch, so a bake of more than 64 dispatches no
-    longer fills the query set before a frame. Tests: `timing.test.ts`, `engine.test.ts`.
+    A dispatch's times wait for the next frame's resolve, unless the pending passes reach half
+    the query set (32), when `dispatch` resolves them, so a bake of more than 64 dispatches no
+    longer leaves the next frame untimed (review: resolving after every dispatch used up the
+    ring). Tests: `timing.test.ts`, `engine.test.ts`.
   - **m7, Babylon vestiges (T8.l).** `WgslMaterialSpec.transparent`, Babylon's queue flag that
     nothing read, is removed from the type, the wireframe's four specs, the harness's specs and
     the tests; `blend`'s TSDoc now says that draws are encoded in submission order. The code
@@ -2820,8 +2841,8 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     run whose page logged an uncaptured GPU error (`UNCAPTURED_GPU_ERROR`, the text
     `logUncapturedErrors` writes; the broken-WGSL fixture's own are left out, its check failing
     already). The run prints `uncaptured GPU errors <n>` and each error. Tests: `result.test.ts`.
-  - **Harness, after these fixes (2026-10-02, SwiftShader, headless):** both variants pass, 81
-    checks each (75 before), no request out, `uncaptured GPU errors 0`; the fixtures exit 1
+  - **Harness, after these fixes (2026-10-02, SwiftShader, headless):** both variants pass, 82
+    checks (`default`) and 80 (`no-subgroups`), 75 each before, no request out, `uncaptured GPU errors 0`; the fixtures exit 1
     (`broken-wgsl`), 1 (`external-fetch`) and 2 (`--drop-adapter-switches`). Run as
     `testRender.sh` after `pnpm --filter hyperion build`, outside the heavy-test lock, which
     another lane's slow wasm suite held.
@@ -2847,10 +2868,22 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     Scope bullets and the Non-goals' CSP sentence no longer describe a Babylon implementation.
   - **m8, T14's records.** The chunk figures and the 62-check count are dated as T14's branch, with
     a re-measure on this branch (no `loadEngine` chunk; `styles-*.js` reaches `engine-*.js` only
-    by `import()`; not minified) and the counts 75 (964665b) and 81 (after these fixes).
+    by `import()`; not minified) and the counts 75 (964665b) and 82 and 80 (after these fixes).
   - **Hardware, after these fixes (2026-10-02, RTX 3080, hidden and offscreen, the client's
     Vulkan switches with `--disable-vulkan-surface` and the timing toggle):** both variants pass,
     82 checks (`default`) and 80 (`no-subgroups`), `uncaptured GPU errors 0`, no request out. The
     `default` run is on the subgroup path with `subgroup_size` 32 (minimum 32), the pending
     pipeline and mip checks pass, and the timer reads `full` with 12 of 12 pass times off the
     65,536 ns grid.
+  - **Review of these fixes, as built.** The typescript, UX and plan-conformance reviews' findings
+    are fixed as recorded above (`ColourSelfSample` narrowed, the timer's ring and dispatch
+    resolve, a failed read returning its pair, the check counts, Design note 19's wording, the
+    Provides omissions), and m12 also installs a permission-check handler that answers no (Electron
+    grants checks otherwise). Deviation: m1's check forces a pipeline to be made at the first draw
+    by an unprepared target format (`rgba8unorm`), not by a mesh left out of `meshes`; both reach
+    the same path, and the format needs no second mesh.
+  - **Open, for the owner or a status-wording lane:** a view whose canvas gives no WebGPU context
+    on a restore (M5) is logged and left drawing nothing, while the status reads nominal. Showing
+    it would need a new fault (say `GRAPHICS VIEW NOT AVAILABLE: <view>`), which is guide
+    nomenclature, so it is not added here. Also for the owner: `GRAPHICS SHADER REFUSED: <effect>`
+    shows the material's code name (`occluderSphere`), which may want a display name.

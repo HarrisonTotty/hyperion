@@ -111,7 +111,14 @@ export function assertNoDepthSelfSample(
 
 /**
  * Refuses a draw or a post-process that samples the colour of the target it renders into, for the
- * same reason: the draws' pass, or the chain's last pass, has its level 0 as the attachment.
+ * same reason, in the one pass that has the target's colour as its attachment: the draws' pass
+ * when the frame has no post-processes, else the chain's last pass. A draw with post-processes
+ * renders into an intermediate, and an earlier post-process into the other one, so either may
+ * sample the target's colour.
+ *
+ * @remarks
+ * A post-process whose shaders failed is left out of the chain at encoding, which can make the
+ * draws' pass write the target after all; such a frame is already reported by `shader-refused`.
  *
  * @throws {@link ColourSelfSample} naming the target and the material or post-process.
  */
@@ -120,15 +127,15 @@ export function assertNoColourSelfSample(
   colour: TextureHandle,
   frame: Pick<FrameSubmission, "draws" | "postProcesses">,
 ): void {
-  for (const draw of frame.draws) {
-    if (Object.values(draw.textures).includes(colour)) {
-      throw new ColourSelfSample(targetName, `material ${draw.material.name}`);
+  const last = frame.postProcesses.at(-1);
+  if (last === undefined) {
+    for (const draw of frame.draws) {
+      if (Object.values(draw.textures).includes(colour)) {
+        throw new ColourSelfSample(targetName, `material ${draw.material.name}`);
+      }
     }
-  }
-  for (const item of frame.postProcesses) {
-    if (Object.values(item.textures ?? {}).includes(colour)) {
-      throw new ColourSelfSample(targetName, `post-process ${item.postProcess.name}`);
-    }
+  } else if (Object.values(last.textures ?? {}).includes(colour)) {
+    throw new ColourSelfSample(targetName, `post-process ${last.postProcess.name}`);
   }
 }
 
