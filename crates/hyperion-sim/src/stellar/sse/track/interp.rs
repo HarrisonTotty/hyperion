@@ -27,22 +27,28 @@ impl Interval {
     /// At `x0` it returns `y0` and at `x1` `y1`, bit for bit; the arithmetic form is output.
     #[must_use]
     pub(super) fn at(&self, x: f64) -> f64 {
+        self.at_offset(x - self.x0)
+    }
+
+    /// The interpolant at `dx` past `x0`: [`Interval::at`] of `x0 + dx`, bit for bit where `dx`
+    /// is `x − x0` rounded, and finer where the caller forms `dx` more precisely than an `x` far
+    /// from zero can hold it (plan 14, P14.T45.d).
+    #[must_use]
+    pub(super) fn at_offset(&self, dx: f64) -> f64 {
         let Self { x0, x1, y0, y1, .. } = *self;
         let h = x1 - x0;
         let delta = (y1 - y0) / h;
         if delta.abs() > 0.0 {
-            self.cubic(x, h, delta)
+            self.cubic(dx, h, delta)
         } else {
             y0
         }
     }
 
-    /// [`Interval::at`] for a non-zero secant `delta` over the width `h`.
+    /// [`Interval::at_offset`] for a non-zero secant `delta` over the width `h`.
     #[must_use]
-    fn cubic(&self, x: f64, h: f64, delta: f64) -> f64 {
-        let Self {
-            x0, y0, y1, d0, d1, ..
-        } = *self;
+    fn cubic(&self, dx: f64, h: f64, delta: f64) -> f64 {
+        let Self { y0, y1, d0, d1, .. } = *self;
         // Positive ratios only, so that a slope of the wrong sign, or NaN, is flattened.
         let flatten = |ratio: f64| if ratio > 0.0 { ratio } else { 0.0 };
         let (mut alpha, mut beta) = (flatten(d0 / delta), flatten(d1 / delta));
@@ -53,7 +59,7 @@ impl Interval {
             beta *= scale;
         }
         let (m0, m1) = (alpha * delta * h, beta * delta * h);
-        let u = (x - x0) / h;
+        let u = dx / h;
         let u2 = u * u;
         let u3 = u2 * u;
         let h00 = 2.0 * u3 - 3.0 * u2 + 1.0;
@@ -137,6 +143,32 @@ mod tests {
         for i in 0..=10 {
             let x = f64::from(i) / 10.0;
             assert_same_bits(monotone_hermite(x, 0.0, 1.0, 2.5, 2.5, 1.0, -1.0), 2.5);
+        }
+    }
+
+    /// P14.T45.d: `at` is `at_offset` of `x − x0` to the bit, and an offset finer than one unit
+    /// in the last place of an age of gigayears moves the value smoothly.
+    #[test]
+    fn the_offset_form_is_the_interpolant_and_resolves_fine_offsets() {
+        let interval = Interval {
+            x0: 1.502_68e9,
+            x1: 1.502_68e9 + 2_000.0,
+            y0: 1.3,
+            y1: 1.25,
+            d0: -2e-5,
+            d1: -3e-5,
+        };
+        for k in 0..=20 {
+            let x = interval.x0 + 100.0 * f64::from(k) + 0.123;
+            assert_same_bits(interval.at(x), interval.at_offset(x - interval.x0));
+        }
+        // A tenth of a second apart, far below the 2.4 × 10⁻⁷ yr an age of 1.5 Gyr resolves.
+        let tenth = 0.1 / 31_557_600.0;
+        let mut last = interval.at_offset(500.0);
+        for k in 1..=10 {
+            let next = interval.at_offset(500.0 + tenth * f64::from(k));
+            assert!(next < last, "{k}: {next} after {last}");
+            last = next;
         }
     }
 }

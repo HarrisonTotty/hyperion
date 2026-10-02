@@ -732,6 +732,56 @@ impl Track {
         Years::new(self.built_until)
     }
 
+    /// The star's phase and mass, M☉, at the age `base + offset` years: [`Track::state_at`]'s, but
+    /// with the mass between two knots read at the age's two parts, so that it changes smoothly
+    /// with an `offset` finer than the sum can hold (plan 14, P14.T45.d).
+    ///
+    /// An age of gigayears holds a time to one unit in its last place, about 2.4 × 10⁻⁷ yr or
+    /// 7.5 s at 1.5 Gyr, so the mass read at the summed age is a staircase in time, with steps of
+    /// Ṁ × 7.5 s. An orbit widening under a superwind then steps by metres, and its phase
+    /// integral picks up the steps' noise. With `base` the star's age at the epoch and `offset`
+    /// the years since, the knot interval's fraction is (`base` − the knot's age) + `offset`, whose
+    /// first difference is exact by Sterbenz's lemma for a knot within a factor of two of `base`.
+    /// The segment, the phase and the floors (the core mass, the smallest evaluated mass) are read
+    /// at the summed age, as is everything at an age the track clamps.
+    #[must_use]
+    pub(crate) fn mass_at_split(&self, base: f64, offset: f64) -> (Phase, f64) {
+        let summed = base + offset;
+        let age = self.checked_age(Years::new(summed));
+        let segment = self.segment_at(age);
+        let evaluated = segment.evaluate(&self.physics(), age);
+        let phase = evaluated.point.phase;
+        // An age the track clamps, before its start or past its build, is read as clamped.
+        let clamped = !(summed > 0.0 && summed <= self.built_until);
+        if phase.is_remnant() || clamped {
+            return (phase, evaluated.mass);
+        }
+        let mass = segment
+            .mass_at_split(age, base, offset)
+            .max(build::MIN_EVALUATED_MASS)
+            .max(evaluated.point.point.core_mass.value());
+        (phase, mass)
+    }
+
+    /// The ages strictly between `from_age` and `to_age` (years) at which the track's mass may
+    /// change its slope: every segment's start and finite end and every knot's age, in the
+    /// segments' order and so ascending, a junction once for each segment that meets it (plan 14,
+    /// P14.T45.d).
+    ///
+    /// Between two of them the mass is one monotone cubic Hermite in age, or constant
+    /// ([`Segment::coordinate_and_mass`]), so a function of it has no kink there: the phase
+    /// integral of an orbit widening under the star's winds is split at them.
+    pub(crate) fn mass_breaks(&self, from_age: f64, to_age: f64) -> impl Iterator<Item = f64> {
+        self.segments
+            .iter()
+            .flat_map(|segment| {
+                std::iter::once(segment.start)
+                    .chain(segment.knots.iter().map(|knot| knot.age))
+                    .chain(std::iter::once(segment.end))
+            })
+            .filter(move |&age| age.is_finite() && from_age < age && age < to_age)
+    }
+
     /// The age at which the main sequence ends, if the track has been built past it: the start
     /// of the first segment after the last main-sequence one (the rotation of an evolved star
     /// reads the star there, P06.T25).
@@ -1481,6 +1531,29 @@ impl Segment {
             .at(age),
         };
         (coord, mass)
+    }
+
+    /// The mass, M☉, at the age `base + offset` years, of which `age` (years) is the rounded sum,
+    /// before the floors [`Segment::evaluate_at`] applies: [`Segment::coordinate_and_mass`]'s,
+    /// but between knots with the interval's fraction formed from (`base` − the knot's age) +
+    /// `offset`, so that it follows an `offset` finer than one unit in the last place of `age`
+    /// (plan 14, P14.T45.d). `offset` is meant to be small beside `base`: the star's age at the
+    /// epoch and the years since, within the source horizon.
+    #[must_use]
+    pub(crate) fn mass_at_split(&self, age: f64, base: f64, offset: f64) -> f64 {
+        if matches!(self.model, Model::Protostar(_)) || self.knots.len() < 2 {
+            return self.coordinate_and_mass(age).1;
+        }
+        let (a, b) = self.knot_interval(age);
+        Interval {
+            x0: a.age,
+            x1: b.age,
+            y0: a.mass,
+            y1: b.mass,
+            d0: a.mass_rate,
+            d1: b.mass_rate,
+        }
+        .at_offset((base - a.age) + offset)
     }
 
     /// The thermal pulses at `age`, interpolated between the knots (zero without them).
