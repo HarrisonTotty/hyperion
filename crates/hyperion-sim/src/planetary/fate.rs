@@ -79,16 +79,16 @@ use crate::Seed;
 use crate::coords::SystemVelocity;
 use crate::id::BodyId;
 use crate::orbit::KeplerElements;
-use crate::planetary::drift::{DriftingOrbit, EvolvingLaw, drift_cell, gauss_legendre_excess};
+use crate::planetary::drift::{DriftingOrbit, EvolvingLaw, composite_excess, drift_cell};
 use crate::planetary::hosts::evolved::{
     Aftermath, Circularisation, circularised, circularised_axis, engulfment_reach, expanded,
     expanded_axis, first_engulfment, supernova,
 };
 use crate::planetary::hosts::young::Formation;
 use crate::planetary::record::BodyOrbit;
-use crate::stellar::StarState;
+use crate::stellar::Phase;
 use crate::stellar::system::StarModel;
-use crate::time::{ClockWindow, Span, UniverseTime};
+use crate::time::{ClockWindow, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
     EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarMasses, Years,
@@ -470,8 +470,9 @@ impl FateAt {
 
 /// A segment's circularisation and expansion as an evolving law (P14.T45.a): its elements at a
 /// time are [`BodyFate::orbit_in`]'s about the host's mass then, held at their value just before
-/// the segment's next change, and its phase excess the 16-point Gauss–Legendre integral of the
-/// mean motion's excess from the anchor ([`gauss_legendre_excess`]).
+/// the segment's next change, and its phase excess the integral of the mean motion's excess from
+/// the anchor, by the 16-point Gauss–Legendre rule on each interval between the law's break
+/// points ([`composite_excess`], P14.T45.d).
 struct SegmentLaw<'s, 'a> {
     fate: &'s BodyFate<'a>,
     segment: &'s Segment,
@@ -480,6 +481,9 @@ struct SegmentLaw<'s, 'a> {
     anchor: UniverseTime,
     anchored: KeplerElements,
     n_anchor_rad_per_s: f64,
+    /// The times strictly inside the segment, ascending and without repeats, at which the mean
+    /// motion may change its slope ([`BodyFate::breaks`]).
+    breaks: Vec<UniverseTime>,
 }
 
 impl EvolvingLaw for SegmentLaw<'_, '_> {
@@ -497,9 +501,17 @@ impl EvolvingLaw for SegmentLaw<'_, '_> {
     }
 
     fn local_excess(&self, from: UniverseTime, to: UniverseTime, n_from_rad_per_s: f64) -> f64 {
-        gauss_legendre_excess(from, to, n_from_rad_per_s, |at| {
+        composite_excess(from, to, n_from_rad_per_s, &self.breaks, |at| {
             TAU / self.shape_at(at).period().value()
         })
+    }
+
+    fn breaks_around(&self, t: UniverseTime) -> (Option<UniverseTime>, Option<UniverseTime>) {
+        let after = self.breaks.partition_point(|&at| at <= t);
+        (
+            after.checked_sub(1).map(|before| self.breaks[before]),
+            self.breaks.get(after).copied(),
+        )
     }
 }
 
@@ -820,14 +832,9 @@ impl<'a> BodyFate<'a> {
                 self.segments.last().map_or(self.body.mass, |s| s.mass),
             );
         }
-        let index = self.segments.partition_point(|segment| segment.start <= t) - 1;
-        let segment = &self.segments[index];
-        let next = self.segments.get(index + 1).map_or_else(
-            || self.ending.and_then(|ending| ending.ended_at()),
-            |segment| Some(segment.start),
-        );
+        let (segment, next) = self.segment_at(t);
         let orbit = self.orbit_in(segment, t, self.host_mass(t));
-        let (trajectory, valid_until) = match self.law(segment, next) {
+        let (trajectory, valid_until) = match self.law(segment, next, t) {
             Some(law) => {
                 let cell = drift_cell(&law, t, segment.start, next);
                 (cell.orbit, cell.holds_until(t, next))
@@ -844,19 +851,37 @@ impl<'a> BodyFate<'a> {
         }
     }
 
-    /// The law `segment`'s elements follow until `until`, its next change if any, if they change
-    /// inside the clock window (P14.T45.a); `None` for an orbit that holds there.
+    /// The segment holding `t`, a time at or after the body's formation, and the segment's next
+    /// change: the next segment's start, or the body's ending.
+    #[must_use]
+    fn segment_at(&self, t: UniverseTime) -> (&Segment, Option<UniverseTime>) {
+        let index = self.segments.partition_point(|segment| segment.start <= t) - 1;
+        let next = self.segments.get(index + 1).map_or_else(
+            || self.ending.and_then(|ending| ending.ended_at()),
+            |segment| Some(segment.start),
+        );
+        (&self.segments[index], next)
+    }
+
+    /// The law `segment`'s elements follow until `until`, its next change if any, if the body's
+    /// position at `t` follows it (P14.T45.a, P14.T45.d); `None` for an orbit that holds.
     ///
-    /// Whether the orbit evolves is read from its elements at the two ends of the segment's part
-    /// of the window: the circularised axis and eccentricity only fall, and a host's mass only
-    /// falls, so equal elements there are equal throughout. The anchor its phase is counted from
-    /// is the epoch where the segment holds it, and the segment's nearer end in the window
-    /// otherwise.
+    /// The orbit evolves where its elements differ between the two ends of the segment's part of
+    /// the source horizon, [`SourceHorizon::START`] to `END`: the circularised axis and
+    /// eccentricity only fall, and a host's mass only falls, so equal elements there are equal
+    /// throughout. The light-time solve reaches back to the horizon's start, so an orbit that
+    /// changed only before the window still has its phase there from the integral. Inside the
+    /// window and after it, an orbit that does not change over the segment's part of the window
+    /// takes a fixed record, which equals the law's there: its mean motion is the anchor's, so its
+    /// phase excess is zero. The anchor its phase is counted from is the epoch clamped to the
+    /// segment's part of the horizon: the epoch where the segment holds it, the segment's nearer
+    /// end in the window otherwise, and for a segment that ends before the window its end.
     #[must_use]
     fn law<'s>(
         &'s self,
         segment: &'s Segment,
         until: Option<UniverseTime>,
+        t: UniverseTime,
     ) -> Option<SegmentLaw<'s, 'a>> {
         let one_nanosecond = Span::new(0, 1).expect("0 s and 1 ns is a normalised span");
         let last = until.map_or(ClockWindow::END, |until| {
@@ -864,8 +889,12 @@ impl<'a> BodyFate<'a> {
                 .checked_sub(one_nanosecond)
                 .expect("a change after a segment's start is not the clock's first instant")
         });
-        let low = segment.start.max(ClockWindow::START);
         let high = last.min(ClockWindow::END);
+        let low = if t < ClockWindow::START {
+            segment.start.max(SourceHorizon::START)
+        } else {
+            segment.start.max(ClockWindow::START)
+        };
         if high < low {
             return None;
         }
@@ -887,7 +916,8 @@ impl<'a> BodyFate<'a> {
         ) {
             return None;
         }
-        let anchor = UniverseTime::EPOCH.clamp(low, high);
+        let horizon_low = segment.start.max(SourceHorizon::START);
+        let anchor = UniverseTime::EPOCH.clamp(horizon_low.min(high), high);
         let anchored = self.orbit_in(segment, anchor, self.host_mass(anchor));
         Some(SegmentLaw {
             fate: self,
@@ -896,7 +926,46 @@ impl<'a> BodyFate<'a> {
             anchor,
             n_anchor_rad_per_s: TAU / anchored.period().value(),
             anchored,
+            breaks: self.breaks(segment, last),
         })
+    }
+
+    /// The times strictly between `segment`'s start and `last`, ascending and without repeats,
+    /// at which the mean motion of its law may change its slope (P14.T45.d): each host star's
+    /// track-segment boundaries and knot ages ([`StarModel::mass_breaks`]), the host's sudden
+    /// deaths, and for a circularising orbit its eccentricity floor's corners
+    /// ([`corners`](crate::planetary::hosts::evolved::EccentricityFloor::corners)).
+    #[must_use]
+    fn breaks(&self, segment: &Segment, last: UniverseTime) -> Vec<UniverseTime> {
+        let inside = |at: &UniverseTime| segment.start < *at && *at < last;
+        let mut breaks: Vec<UniverseTime> = Vec::new();
+        for star in &self.host.stars {
+            breaks.extend(star.mass_breaks(segment.start, last));
+        }
+        breaks.extend(
+            self.deaths
+                .iter()
+                .flatten()
+                .filter(|death| death.sudden)
+                .map(|death| death.at)
+                .filter(inside),
+        );
+        let circularisation = self.body.circularisation;
+        let e0 = segment.orbit.eccentricity().value();
+        if segment.circularises && circularisation.timescale().is_some() && e0 > 0.0 {
+            breaks.extend(
+                circularisation
+                    .floor()
+                    .corners(e0)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|age| clock_time(self.host.first(), Years::new(age)))
+                    .filter(inside),
+            );
+        }
+        breaks.sort_unstable();
+        breaks.dedup();
+        breaks
     }
 
     /// Follows the body on its last segment up to the sudden death `next` of one of its host
@@ -1141,22 +1210,58 @@ fn star_mass(model: &StarModel, death: Option<StarDeath>, t: UniverseTime) -> So
     match death {
         Some(death) if death.sudden && t >= death.at => death.after,
         Some(death) if death.sudden => {
-            let state = living_state(model, t);
-            if state.phase().is_remnant() {
+            let (phase, mass) = living_mass(model, t);
+            if phase.is_remnant() {
                 death.before
             } else {
-                state.mass()
+                mass
             }
         }
-        Some(_) | None => living_state(model, t).mass(),
+        Some(_) | None => living_mass(model, t).1,
     }
 }
 
-/// The state of the host star `model` at `t`, a time at which a body of it exists.
-fn living_state(model: &StarModel, t: UniverseTime) -> StarState {
+/// The phase and the mass of the host star `model` at `t`, a time at which a body of it exists:
+/// the mass read smoothly in time ([`StarModel::phase_and_mass_at`], P14.T45.d).
+fn living_mass(model: &StarModel, t: UniverseTime) -> (Phase, SolarMasses) {
     model
-        .state_at(t)
+        .phase_and_mass_at(t)
         .expect("a host star has formed by the time its body has, 0.3 Myr at the earliest")
+}
+
+#[cfg(test)]
+impl BodyFate<'_> {
+    /// For P14.T45.d's tests: the phase excess at `t` of the law the body follows then, rad, by
+    /// the 16-point rule and by the 32-point rule on the same intervals; the phase ∫ n dt gained
+    /// from the anchor, rad, whose magnitude the rounding allowance scales; and the along-track
+    /// factor a √((1 + e) ÷ (1 − e)) at `t`, m. `None` unless the body is present at `t` on an
+    /// orbit that evolves.
+    pub(crate) fn quadrature_at(&self, t: UniverseTime) -> Option<[f64; 4]> {
+        use crate::orbit::seconds_between;
+        use crate::planetary::drift::composite_excess_by;
+        use crate::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS};
+        if self.at(t).state() != BodyState::Present {
+            return None;
+        }
+        let (segment, next) = self.segment_at(t);
+        let law = self.law(segment, next, t)?;
+        let n = |at: UniverseTime| TAU / law.shape_at(at).period().value();
+        let n_anchor = law.n_anchor_rad_per_s;
+        let by16 = law.phase_excess(t);
+        let by32 = composite_excess_by(
+            (&GL32_NODES, &GL32_WEIGHTS),
+            law.anchor,
+            t,
+            n_anchor,
+            &law.breaks,
+            n,
+        );
+        let gained = by16 + n_anchor * seconds_between(law.anchor, t);
+        let shape = law.shape_at(t);
+        let e = shape.eccentricity().value();
+        let along = shape.semi_major_axis().value() * ((1.0 + e) / (1.0 - e)).sqrt();
+        Some([by16, by32, gained, along])
+    }
 }
 
 mod scatter;

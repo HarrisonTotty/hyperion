@@ -735,3 +735,363 @@ fn natal_kicks_unbind_planets_the_mass_loss_alone_would_keep() {
     assert!(bh[0] > 0 && bh[1] >= bh[2], "{bh:?}");
     assert_eq!(fallback[1], fallback[2], "{fallback:?}");
 }
+
+// P14.T45.d: the phase integral split at the law's break points.
+
+/// What [`reference_excess`] finds.
+struct Reference {
+    /// ∫ (n − `n_from`) dt, rad.
+    excess: f64,
+    /// The magnitude of the phase ∫ n dt over the span, rad.
+    gained: f64,
+}
+
+/// ∫ (n − `n_from`) from `from` to `to` for `law`, the reference: each interval between its break
+/// points cut into 64 equal panels, each integrated by the 32-point Gauss–Legendre rule.
+fn reference_excess(
+    law: &SegmentLaw<'_, '_>,
+    from: UniverseTime,
+    to: UniverseTime,
+    n_from: f64,
+) -> Reference {
+    use crate::orbit::seconds_between;
+    use crate::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS};
+    const PANELS: u32 = 64;
+    let n = |at: UniverseTime| TAU / law.shape_at(at).period().value();
+    let (low, high, sign) = if from <= to {
+        (from, to, 1.0)
+    } else {
+        (to, from, -1.0)
+    };
+    let mut ends = vec![low];
+    ends.extend(law.breaks.iter().copied().filter(|&b| low < b && b < high));
+    ends.push(high);
+    let (mut excess, mut gained) = (0.0, 0.0);
+    for pair in ends.windows(2) {
+        let length = seconds_between(pair[0], pair[1]);
+        let h = length / f64::from(PANELS);
+        for k in 0..PANELS {
+            let mut panel = 0.0;
+            for (node, weight) in GL32_NODES.iter().zip(&GL32_WEIGHTS) {
+                let offset = h * f64::from(k) + 0.5 * h * (1.0 + node);
+                let at = pair[0]
+                    .checked_add(Span::from_seconds_f64(offset).expect("on the clock"))
+                    .expect("on the clock");
+                panel += weight * (n(at) - n_from);
+            }
+            excess += 0.5 * h * panel;
+        }
+        gained += n_from * length;
+    }
+    Reference {
+        excess: sign * excess,
+        gained: (gained + excess).abs(),
+    }
+}
+
+/// A host of `mass` M☉ whose white dwarf is born `before_death` years after the epoch: late on
+/// its thermally pulsing AGB for a few thousand years, a white dwarf for a negative one.
+fn host_before_death(mass: f64, before_death: f64) -> StarModel {
+    let old = star(mass, 13e9);
+    let death = death_of(&old).expect("a star of 1–3 M☉ has died by 13 Gyr");
+    star(mass, old.age_at(death.at).value() - before_death)
+}
+
+fn years_from_epoch(y: f64) -> UniverseTime {
+    UniverseTime::EPOCH
+        .checked_add(Span::from_seconds_f64(y * SECONDS_PER_JULIAN_YEAR).expect("on the clock"))
+        .expect("on the clock")
+}
+
+/// The law `fate`'s body follows at `t`.
+fn law_at<'s, 'a>(fate: &'s BodyFate<'a>, t: UniverseTime) -> Option<SegmentLaw<'s, 'a>> {
+    let (segment, next) = fate.segment_at(t);
+    fate.law(segment, next, t)
+}
+
+/// How far `law`'s phase at `t` lies from the reference along the orbit, m, with the tolerance
+/// of the [drift module](crate::planetary::drift): 10 µm plus 4 · 2⁻⁵² of the phase gained since
+/// the anchor, along the orbit, and before the window's start 16 · 2⁻⁵² of it (P14.T45.d).
+fn phase_error(law: &SegmentLaw<'_, '_>, t: UniverseTime) -> (f64, f64) {
+    let reference = reference_excess(law, law.anchor, t, law.n_anchor_rad_per_s);
+    let shape = law.shape_at(t);
+    let e = shape.eccentricity().value();
+    let along = shape.semi_major_axis().value() * ((1.0 + e) / (1.0 - e)).sqrt();
+    let error = (law.phase_excess(t) - reference.excess).abs() * along;
+    let ulps = if t < ClockWindow::START { 16.0 } else { 4.0 };
+    (error, 1e-5 + ulps * f64::EPSILON * reference.gained * along)
+}
+
+/// The decision's case (2026-10-02): a 2 M☉ host 2,775 years before its white dwarf's birth,
+/// late on its thermally pulsing AGB, and an Earth on a circular orbit of 3 au, which widens as
+/// the superwind blows. The one-panel rule erred by up to 1.4 × 10⁻⁴ rad in the window on such
+/// hosts; split at the track's knots, the rule meets the tolerance back to −(H + L).
+#[test]
+fn the_composite_phase_integral_meets_its_tolerance_on_a_late_agb_host() {
+    let host_star = host_before_death(2.0, 2_775.0);
+    let host = FateHost::star(&host_star);
+    let planet = body(3.0, 0.0, earth_mass(), 2.0, 2.0);
+    let fate = BodyFate::resolve(&planet, &host);
+    for t in [
+        years_from_epoch(1.0),
+        years_from_epoch(-1.0),
+        years_from_epoch(100.0),
+        years_from_epoch(-100.0),
+        years_from_epoch(1000.0),
+        years_from_epoch(-1000.0),
+        years_from_epoch(-1e4),
+        years_from_epoch(-1e5),
+        SourceHorizon::START,
+    ] {
+        let law = law_at(&fate, t).expect("the orbit widens");
+        assert!(law.breaks.len() > 30, "{} breaks", law.breaks.len());
+        let (error, tolerance) = phase_error(&law, t);
+        assert!(
+            error <= tolerance,
+            "{t}: {error:e} m against {tolerance:e} m"
+        );
+    }
+}
+
+/// Across evolved hosts of 1–3 M☉ late on, and earlier on, their AGB, and orbits of 3–25 au,
+/// the rule meets the tolerance through the window (P14.T45.d).
+#[test]
+fn the_composite_phase_integral_meets_its_tolerance_across_evolved_hosts() {
+    let mut checked = 0;
+    for mass in [1.0, 1.5, 2.0, 3.0] {
+        for before_death in [2_775.0, 2e4, 3e5] {
+            let host_star = host_before_death(mass, before_death);
+            let host = FateHost::star(&host_star);
+            for a_au in [3.0, 10.0, 25.0] {
+                let planet = body(a_au, 0.0, earth_mass(), mass, 2.0);
+                let fate = BodyFate::resolve(&planet, &host);
+                for y in [-999.0, -100.0, -1.0, 1.0, 100.0, 999.0] {
+                    let t = years_from_epoch(y);
+                    if fate.at(t).state() != BodyState::Present {
+                        continue;
+                    }
+                    let Some(law) = law_at(&fate, t) else {
+                        continue;
+                    };
+                    let (error, tolerance) = phase_error(&law, t);
+                    assert!(
+                        error <= tolerance,
+                        "{mass} M☉, {before_death} yr, {a_au} au, {y} yr: {error:e} m against \
+                         {tolerance:e} m"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 150, "{checked} cases");
+}
+
+/// A circularising orbit's law breaks at its eccentricity floor's corners, mapped to the clock
+/// through its host's age, and its phase meets the tolerance across them (P14.T45.d).
+#[test]
+fn a_circularising_orbit_breaks_at_its_floor_s_corners() {
+    use crate::planetary::hosts::evolved::EccentricityFloor;
+    // At 1 Gyr the floor is still decaying from its first corner, at 405 Myr, to its second,
+    // at 1.79 Gyr, which comes after the window.
+    let sun = star(1.0, 1e9);
+    let host = FateHost::star(&sun);
+    let floor = EccentricityFloor::new(0.3, 1e-9, 0.05);
+    let planet = body(0.05, 0.2, earth_mass(), 1.0, 2.0).with_circularisation(
+        Circularisation::new(Years::new(5e9))
+            .expect("positive")
+            .with_floor(floor),
+    );
+    let fate = BodyFate::resolve(&planet, &host);
+    for t in [
+        years_from_epoch(-999.0),
+        years_from_epoch(0.0),
+        years_from_epoch(999.0),
+    ] {
+        let law = law_at(&fate, t).expect("the orbit circularises through the window");
+        let [first, second] = floor.corners(0.2).map(|corner| {
+            clock_time(&sun, Years::new(corner.expect("both corners"))).expect("on the clock")
+        });
+        assert!(law.breaks.contains(&first), "{first}");
+        assert!(second > ClockWindow::END && !law.breaks.contains(&second));
+        let (error, tolerance) = phase_error(&law, t);
+        assert!(
+            error <= tolerance,
+            "{t}: {error:e} m against {tolerance:e} m"
+        );
+    }
+}
+
+/// The decision's adjacent case: a 2 M☉ host whose white dwarf was born 20 kyr before the epoch,
+/// and an Earth at 3 au. Its orbit holds through the window, so its records there are fixed, but
+/// the light-time solve reaches back to −(H + L), where the orbit was still widening: there its
+/// phase is the integral, not M₀ + n(a(t))(t − E), which erred by 1.54 rad at −100 kyr.
+#[test]
+fn an_orbit_whose_host_lost_its_mass_before_the_window_drifts_before_it() {
+    let host_star = host_before_death(2.0, -2e4);
+    let host = FateHost::star(&host_star);
+    let planet = body(3.0, 0.0, earth_mass(), 2.0, 2.0);
+    let fate = BodyFate::resolve(&planet, &host);
+    for y in [-999.0, 0.0, 999.0] {
+        let now = fate.at(years_from_epoch(y));
+        assert_eq!(now.state(), BodyState::Present);
+        assert!(
+            now.trajectory().expect("present").drift().is_none(),
+            "{y} yr"
+        );
+    }
+    let then = years_from_epoch(-1e5);
+    let past = fate.at(then);
+    let trajectory = past.trajectory().expect("present");
+    assert!(trajectory.drift().is_some());
+    let law = law_at(&fate, then).expect("the orbit widened before the window");
+    assert_eq!(law.anchor, UniverseTime::EPOCH);
+    let (error, tolerance) = phase_error(&law, then);
+    assert!(error <= tolerance, "{error:e} m against {tolerance:e} m");
+    // The phase the record gives against the old one: the integral of a mean motion that fell
+    // as the star shed its envelope, against the present mean motion run back.
+    let old = past
+        .orbit()
+        .expect("present")
+        .relative_state_at(then)
+        .0
+        .metres();
+    let new = trajectory.relative_state_at(then).0.metres();
+    let apart = old
+        .iter()
+        .zip(new)
+        .map(|(x, y)| (x - y) * (x - y))
+        .sum::<f64>()
+        .sqrt();
+    assert!(apart > 1e11, "{apart:e} m");
+}
+
+/// The model's speed is the Kepler speed of the law's own elements at the time, to 10⁻⁹: the
+/// one-panel rule's error made it differ by up to 1.7 × 10⁻⁵ on late-AGB hosts (P14.T45.d).
+#[test]
+fn the_models_speed_is_the_kepler_speed_of_the_laws_elements() {
+    let host_star = host_before_death(2.0, 2_775.0);
+    let host = FateHost::star(&host_star);
+    for a_au in [3.0, 25.0] {
+        let planet = body(a_au, 0.0, earth_mass(), 2.0, 2.0);
+        let fate = BodyFate::resolve(&planet, &host);
+        for y in [-999.0, -400.0, -1.0, 0.0, 0.7, 250.0, 998.0] {
+            let t = years_from_epoch(y);
+            let now = fate.at(t);
+            let elements = now.orbit().expect("present");
+            let (position, velocity) = now.trajectory().expect("present").relative_state_at(t);
+            let r = position.metres().iter().map(|x| x * x).sum::<f64>().sqrt();
+            let v = velocity
+                .metres_per_second()
+                .iter()
+                .map(|x| x * x)
+                .sum::<f64>()
+                .sqrt();
+            let mu = elements.gravitational_parameter().value();
+            let kepler = (mu * (2.0 / r - 1.0 / elements.semi_major_axis().value())).sqrt();
+            assert!(
+                ((v - kepler) / kepler).abs() < 1e-9,
+                "{a_au} au, {y} yr: {v} m/s against {kepler} m/s"
+            );
+        }
+    }
+}
+
+/// At sampled cell ends not at the 2¹⁶ s floor, the velocity steps by at most 10⁻⁵ m s⁻¹, and for
+/// a cell clear of the law's break points by at most 10 ε ÷ S, with ε the cell's tolerance and
+/// the rounding allowance of the phase gained since the anchor (P14.T45.d): the one-panel rule's
+/// error stepped it by up to 0.13 m s⁻¹.
+#[test]
+fn the_velocity_steps_little_at_a_cell_s_end() {
+    use crate::planetary::drift::{DRIFT_CELL_MIN_LOG2, DRIFT_TOLERANCE};
+    let (mut ends, mut clean) = (0, 0);
+    for (mass, before_death) in [
+        (2.0, 2_775.0),
+        (3.0, 2e4),
+        (1.0, 3e5),
+        (1.5, 3e5),
+        (2.0, 3e6),
+    ] {
+        let host_star = host_before_death(mass, before_death);
+        let host = FateHost::star(&host_star);
+        for a_au in [3.0, 10.0] {
+            let planet = body(a_au, 0.0, earth_mass(), mass, 2.0);
+            let fate = BodyFate::resolve(&planet, &host);
+            let mut starts: Vec<UniverseTime> = [-999.0, -3.0, 0.0, 2.0, 500.0, 990.0]
+                .into_iter()
+                .map(years_from_epoch)
+                .collect();
+            // Just before the law's break points in the window, whose cells end cut at them.
+            let law = law_at(&fate, UniverseTime::EPOCH).expect("the orbit widens");
+            starts.extend(
+                law.breaks
+                    .iter()
+                    .filter(|&&at| ClockWindow::contains(at) && at > ClockWindow::START)
+                    .take(6)
+                    .map(|&at| after(at, -100_000).max(ClockWindow::START)),
+            );
+            for mut t in starts {
+                for _ in 0..3 {
+                    let now = fate.at(t);
+                    let (Some(trajectory), Some(until)) = (now.trajectory(), now.valid_until())
+                    else {
+                        break;
+                    };
+                    let Some(drift) = trajectory.drift() else {
+                        break;
+                    };
+                    let next = fate.at(until);
+                    let Some(after) = next.trajectory().filter(|_| next.state() == now.state())
+                    else {
+                        break;
+                    };
+                    let length = until.seconds() - drift.reference().seconds();
+                    let aligned = drift.reference().subsec_nanos() == 0
+                        && until.subsec_nanos() == 0
+                        && length > 0
+                        && length.count_ones() == 1
+                        && drift.reference().seconds() % length == 0;
+                    let floor = aligned && length.trailing_zeros() == DRIFT_CELL_MIN_LOG2;
+                    if !floor {
+                        let before = trajectory.relative_state_at(until).1.metres_per_second();
+                        let joined = after.relative_state_at(until).1.metres_per_second();
+                        let step = before
+                            .iter()
+                            .zip(joined)
+                            .map(|(x, y)| (x - y) * (x - y))
+                            .sum::<f64>()
+                            .sqrt();
+                        assert!(
+                            step <= 1e-5,
+                            "{mass} M☉, {a_au} au, at {until}: {step:e} m/s"
+                        );
+                        if aligned {
+                            #[expect(
+                                clippy::cast_precision_loss,
+                                reason = "a cell of at most 2^25 s is exact in an f64"
+                            )]
+                            let length = length as f64;
+                            // The cell's tolerance, with the rounding of the phase gained since
+                            // the anchor, which the fit shares out across the cell unchecked.
+                            let [_, _, gained, along] =
+                                fate.quadrature_at(until).expect("a drifting orbit");
+                            let rounding = 4.0 * f64::EPSILON * gained.abs() * along;
+                            let bound = 10.0 * (DRIFT_TOLERANCE.value() + rounding) / length;
+                            assert!(
+                                step <= bound,
+                                "{mass} M☉, {a_au} au, at {until}: {step:e} m/s against {bound:e}"
+                            );
+                            clean += 1;
+                        }
+                        ends += 1;
+                    }
+                    t = until;
+                }
+            }
+        }
+    }
+    assert!(
+        ends > 80 && clean > 20 && ends - clean > 10,
+        "{ends} ends, {clean} clean"
+    );
+}
