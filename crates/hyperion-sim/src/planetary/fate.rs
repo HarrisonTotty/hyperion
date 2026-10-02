@@ -20,7 +20,9 @@
 //! 1. Its formation time: the clock time of its formation age on its host.
 //! 2. Segments of its life between its host's sudden deaths. In each, the orbit is the segment's
 //!    elements circularised to the host's age (the first segment only) and then expanded from the
-//!    segment's reference mass to the mass the body orbits then, so a(t) = a₀ M₀ ÷ M(t).
+//!    segment's reference mass to the mass the body orbits then, so a(t) = a₀ M₀ ÷ M(t), the
+//!    adiabatic limit of isotropic mass loss: a M constant (Veras et al. 2011, MNRAS 417, 2104,
+//!    eq. 18) and e constant over an orbit (eq. 17), valid while Ψ = (Ṁ ÷ M) ÷ n ≪ 1 (eq. 15).
 //! 3. In each segment, the first time the body's semi-major axis is inside the engulfment reach
 //!    times the largest radius of the host's stars that have not died by the segment's start
 //!    ([`hosts::evolved::engulfment_reach`](crate::planetary::hosts::evolved::engulfment_reach)),

@@ -2466,7 +2466,9 @@ mean_motion_rate_rad_per_s2 }`, and `drift: Option<OrbitDriftDto>` on `BodyOrbit
     most `DRIFT_TOLERANCE` ÷ 10 (10 µm), plus a rounding allowance of 4 · 2⁻⁵² × Σ |panel
     contributions| times the same factor. Before `START` the same bound holds, but the rounding
     allowance dominates: metres at −(H + L), where the phase itself is about 10⁴ rad. The docs
-    say so.
+    say so. _(As built, see T45.d's entry under Risks: before `START` the bound is 16 · 2⁻⁵², and
+    the late-AGB case's error at −(H + L) is 107 m, with 2.6 × 10⁵ rad gained, not metres and
+    10⁴ rad. Corrected in RM1 validation, 2026-10-02.)_
   - **Files.**
     - `stellar/sse/track.rs`: the crate-private `Track::mass_breaks(from_age, to_age)`, the
       segment boundaries and knot ages between, ascending.
@@ -5816,3 +5818,18 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   (`moon_trajectory` given such a change: its `valid_until` is the change). The sample holds no
   drifting moon of such a planet, so no golden pins the moon's record there. Before `START`,
   `changes_at` can now be stated where a fixed orbit's `valid_until` is not; its doc says so.
+- **Fixed in RM1 validation (2026-10-02), the other galaxy findings:**
+  - _T45.d's task text_ still gave the pre-`START` figures the build did not meet ("metres at
+    −(H + L)", "about 10⁴ rad"). It now carries the as-built 107 m and 2.6 × 10⁵ rad (16 · 2⁻⁵²),
+    reproduced independently by the validation.
+  - _The R03.T3 note_ on `state_at`'s velocity ("leaving out the elements' slow drift") was stale
+    after T45.a; it now says it is superseded by T45.a and T45.e.
+  - _The adiabatic-expansion law_ (a M constant, e constant over an orbit, n ∝ M²) cited only
+    design note 11. `hosts/evolved.rs` (`expanded`), the `fate.rs` and `drift.rs` module docs now
+    cite Veras et al. 2011, MNRAS 417, 2104: eq. 18 for a, eq. 20 for n, eq. 17 for e, valid while
+    Ψ ≪ 1 (eq. 15), as `planetary/halo.rs` already does (equation numbers from the science check,
+    read from arXiv:1107.1239).
+  - _The drift velocity's omission_ (finding 2) is closed by T45.e above.
+  - _`formatEventTime`_ (P14.T35.d) tested `|seconds| ≤ H`, so a time a fraction of a second past
+    +H read in the MET form, while `stepTime` holds that time beyond the window. It now uses
+    `stepTime`'s edge: inside from −H to +H exactly, a time just after −H included.
