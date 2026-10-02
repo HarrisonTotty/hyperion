@@ -14,6 +14,9 @@
   plan 06, through R06, for each host's radius and absolute V. Phase
   C also depends on **the single-player sessions, ship state and closed-loop commands, for which no
   plan exists yet** (Design note 21). Phase C does not start until that plan is written and built.
+  Re-validated at `ce7aeb3` (2026-10-02): still no sessions plan (only the brainstorm
+  `single-player-experience.md`), so **Phase C (T22–T28) is out of scope for RM3**; RM3 is Phases A
+  and B.
 - **Brainstorm sections covered** (by heading, in
   [the brainstorm](../../brainstorming/rendering-and-planets.md)): step 5 of "Suggested order of
   attack"; the three regimes of "The scales the view spans"; the shading sentences of "Luminance in
@@ -113,11 +116,22 @@ with `displays/`, `lib/`, `mainScreen/`, `test/` or `view/`, which are relative 
 named precisely enough to be grepped.
 
 Names used below and defined elsewhere: `HostDiscDto` is R06's wire form of `sky::disc::HostDisc`
-(its `SkyResponse.hosts`, with radius, per-channel mean luminance and power-2 coefficients);
-`SceneFrameBody` is one body's entry of R03's `SceneFrame`; `Viewport` is R02's viewport argument
-of `project` and `graticule` (`{ widthPx, heightPx, fovXRad }`); `ViewSpec` is one view's
-`ViewId`, `CameraState` and canvas size; `Rgb` and `ExposureTriple` are R02's, from
-`view/photometry`, `Rgb` being the one per-channel triple that R05, R07 and R08 share.
+(its `SkyResponse.hosts`, with radius, per-channel mean luminance and power-2 coefficients, in the
+channel order B, V, R for the display's b, g, r; R06.T10 fixes the field names);
+`SceneFrameBody` is one body's entry of R03's `SceneFrame`, built as `SceneBodyFrame`
+(`lib/scene/apparent.ts`), a union of `placed` (`geometricM`, `apparentM`, `emitted`, `lightTime`,
+`level`, `hillRadiusM: number | null`) and `contact` (`apparentM`, `emitted` and `level` only);
+`Viewport` is R02's (`view/camera/projection.ts`, `{ widthPx, heightPx }`), the field of view
+being `ProjectionCamera.fovXRad`, so a sketch below that takes `camera: CameraPose` and a viewport
+takes R02's `DrawCamera { pose, fovXRad }` with it; `ViewSpec` is one view's `ViewId`,
+`CameraState` and canvas size; `ExposureTriple` is R02's, from `view/photometry/exposure.ts`, and
+`Rgb` R02's from `view/photometry/toneCurve.ts` (not `lib/galaxy/ramp.ts`'s), the one per-channel
+triple that R05, R07 and R08 share. `Vec3` is `renderer/src/geometry/vec3.ts`'s. Shaders follow R01
+Design note 23: `@group(0)` `Frame` (`view/shaders/frame.wgsl`), `@group(1)` the draw's `Draw`
+(`offsetFromCameraM`, then the spec's uniforms), `@group(2)` resources at declared bindings (a
+post-process's input colour holds bindings 0 and 1, `POST_PROCESS_BINDINGS`), `vertexMain` and
+`fragmentMain`; every material and post-process registered in `WGSL_CATALOGUE` carries a
+`displayName` (upper case, at most three words, what it draws; compute kernels have none).
 
 ### Lighting (`lighting/`)
 
@@ -212,7 +226,7 @@ export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>>;
  * it first, in `view/terrain/planet.ts` (R05.T7.a), with this shape; this plan re-exports it and
  * defines no second one.
  */
-export type { BodyFigure } from "../terrain/planet"; // { equatorialRadiusM; polarRadiusM; pole }
+export type { BodyFigure } from "../terrain/planet"; // { equatorialRadiusM; polarRadiusM; pole: Vec3 | null }
 export type AppearanceLabel = "BODY ALBEDO: NOT YET MODELLED";
 export interface BodyAppearance {
   // what R08 and R10 read per body; built by R07.T5
@@ -281,9 +295,13 @@ the reference spheroid at zero height).
 // R02's `RenderStyle` gains its variant: "wireframe" | "photorealistic"
 export function photorealisticPasses(setting: QualitySetting): PassList; // Design note 8
 /**
- * This plan's pass labels: each is the pass's `FrameSubmission.label`, fixed across frames and
- * releases, so that R12's `PASS_ROWS` keys on them. Later plans' passes in their slots carry their
- * own plans' labels.
+ * This plan's pass labels, fixed across frames and releases, so that R12's `PASS_ROWS` keys on
+ * them. Later plans' passes in their slots carry their own plans' labels. As R01 built
+ * `onPassTimes`, a submission's main pass is timed under its `FrameSubmission.label`, a compute
+ * dispatch under its `pass` argument (default `"compute"`), and each post-process of a submission
+ * under `` `${frame.label} ${spec.name}` ``; each label below is therefore given as the
+ * `FrameSubmission.label` or `dispatch` pass of its own submission, or the post-process `spec.name`
+ * chosen so that the derived label is the one recorded in `PassList`.
  */
 export const PHOTOREAL_PASS_LABELS = {
   bodies: "bodies", // mesh bodies, opaque with depth
@@ -300,7 +318,9 @@ export interface PassList {
   }>; // in order
 }
 export type MeterMode = "average" | "lit" | "dark"; // Design note 10
-/** The class each pass writes in the HDR target's alpha, an exact small integer (note 10). */
+/** The class each pass writes in the HDR target's alpha, an exact small integer (note 10).
+ *  In `post/meter.ts` with `meterWeights`, the file R06.T13.e creates under this name if it lands
+ *  first (then extended here, never redeclared); `GlareSource` likewise in `post/glare.ts`. */
 export const METER_CLASS = { hostDisc: 0, other: 1, litBody: 2, unlitBody: 3 } as const;
 export function meterWeights(mode: MeterMode): readonly [number, number, number, number];
 export interface Histogram {
@@ -332,8 +352,13 @@ export interface GlareSource {
   readonly angularRadiusRad: number;
   readonly excessLuminance: Rgb;
 } // cd/m² above 65,504
-/** sr⁻¹, Σ = 1; an eye view uses R06's default eye observer (age 25, pigmentation 0.5). */
-export function glareSpread(role: ViewRole, thetaRad: number): number;
+/** sr⁻¹, Σ = 1; an eye view passes R06's `DEFAULT_EYE_OBSERVER` (age 25, pigmentation 0.5) as
+ *  `eye`, so that T14.a builds and tests before R06.T13.e lands. */
+export function glareSpread(
+  role: ViewRole,
+  thetaRad: number,
+  eye: { readonly ageYears: number; readonly pigmentation: number },
+): number;
 export interface BloomKernel {
   readonly levels: number;
   readonly weights: Float32Array; // NNLS, non-negative, Σ = 1
@@ -342,7 +367,9 @@ export function bloomKernel(setting: QualitySetting, role: ViewRole, radPerPx: n
 ```
 
 WGSL: `post/histogram.wgsl` (shared-memory atomics; a `KernelPair` with `readback: "bit-exact"`
-and no subgroup twin unless R01's catalogue asks for one), `post/bloomDown.wgsl`,
+and no subgroup twin unless R01's catalogue asks for one; run through `createComputeAsync` and
+`dispatch(kernel, bindings, workgroups, "histogram")`, read back through R01's
+`readBuffer(buffer, "cpu")`), `post/bloomDown.wgsl`,
 `post/bloomUp.wgsl`, `post/tonemap.wgsl` (R02's `agx`, the analytic glare of `GlareSource`s, the
 upscale, the encoding and the dither in one pass).
 
@@ -374,7 +401,8 @@ export class ResolutionController {
 ```
 
 `displays/view/InstrumentView.tsx`, `displays/view/StyleControl.tsx`,
-`displays/view/MeterControl.tsx`; R02's `ViewDisplay.tsx` gains the instrument slots. In Phase C
+`displays/view/MeterControl.tsx` (beside R02's `ExposurePanel.tsx`, the `ExposureControl` panel as
+built); R02's `ViewDisplay.tsx` gains the instrument slots. In Phase C
 R02's `CameraPreset` gains `slaved`, shown `SLAVED` (R07.T25).
 
 ### Main screen (Phase C)
@@ -436,7 +464,22 @@ where a name has changed by the time this plan runs, only the call sites here ch
   render-target rounding, `GraphicsStatus.targetRounding` (R01 Design note 22, R01.T8.j), which
   Design note 12 reads; and blend modes that all keep the destination alpha, `"additive"` and
   `"premultiplied"` (R01 Design note 21, R01.T8.i), so that every blended pass of R06, R08 and R11
-  leaves `METER_CLASS` intact (Design note 10).
+  leaves `METER_CLASS` intact (Design note 10). _As built (`view/engine/types.ts`, re-checked at
+  `ce7aeb3`):_ `createView(canvas, name)` takes a name; `createMaterialAsync(spec, targets,
+meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, pass?)`;
+  `readBuffer(buffer, access?)` makes a new staging buffer per call (no ring, no partial range);
+  `createRenderTarget({ name, size, format, mips, depth, category })` with `RenderTarget.colour`
+  sampled by later passes (sampling a target while rendering into it throws `ColourSelfSample`);
+  post-processes are full-screen draws, `PostProcessItem { postProcess, uniforms, textures? }`,
+  chained through two `rgba16float` intermediates, input colour at `POST_PROCESS_BINDINGS` 0 and 1,
+  and the last written to the canvas's sRGB view; `blend: "none" | "additive" | "premultiplied"`,
+  `"none"` writing alpha and the other two keeping it (source zero, destination one);
+  `GraphicsStatus.targetRounding` is per format (`rgba16float`, `rg11b10ufloat`); `timer` is
+  `"quantized" | "full" | "absent"`; `styleAvailability(summary: AdapterSummary)`;
+  `GPU_TIMING_SWITCH` lives in `apps/hyperion/src/preload/graphicsLaunch.ts` and is honoured only in
+  the `vulkan` launch mode; the smoke harness's variants are `default` and `no-subgroups`
+  (`smoke/page.ts`'s `VARIANTS`), and no override withholds `timestamp-query`; every material,
+  target and kernel is re-created by its owner in `onRestored` after a device loss.
 - **R02:** `view/coords` (`relativeToCamera`, `narrow`, `originMinusCamera`), `view/camera`
   (`CameraPose`, `CameraState`, `RenderStyle`, `ViewRole`, `ViewId`, `project`,
   `pixelSolidAngle`, `perspectiveReversedInfinite`), `view/depth` (`DEPTH_COMPARE`,
@@ -449,18 +492,39 @@ where a name has changed by the time this plan runs, only the call sites here ch
   `starSprite.wgsl`, `ViewDisplay`, `ViewCanvas`, `ViewMarkList`, `ViewLabelBlock`, the
   `ExposureControl` panel, `CameraControls`, and the nine guide drafts (R02.T2), items 2, 3, 4, 6
   and 9 above all; `CameraPreset`, a union left open to this plan's Phase C member `slaved`
-  (R07.T25).
+  (R07.T25). _As built (re-checked at `ce7aeb3`):_ `Viewport` is `{ widthPx, heightPx }` and the
+  field of view `ProjectionCamera.fovXRad` (`CameraState.fovDeg` in degrees); `graticule` is in
+  `view/wireframe/bodies.ts`; `ExposureControl` is `manual { triple }` | `auto { ev100 }` |
+  `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`, driven by `setManual`, `setAuto`
+  (refused with `no_image_to_meter` until a photorealistic view meters), `inhibit`, `enable` and
+  `onMetering(control, ev100 | null)`, which this plan's meter feeds; the panel is `ExposurePanel`;
+  `buildWireframeDrawList(scene, camera: DrawCamera, viewport, tokens, options: DrawOptions)` with
+  `CASING_PX` = 1, lines `premultiplied`, screen symbology at depth 1; `agx`, `agxSigmoid` and
+  `agxSprite` in `toneCurve.wgsl`; there is no client `BodyFixedRotation` type: a body's rotation is
+  `CameraOrigins.bodyFixedRotation(body): Rotation3 | null` (`view/coords/position.ts`), `null`
+  today since plan 14 sends no rotation; the sphere occluder's `SLOPE_SCALE` is 3 (a WGSL constant
+  in `occluderSphere.wgsl`) while the hull faces' `occluder.wgsl` bias keeps `slopeScale: 2`.
 - **R03:** `useScene` and `sceneAt` (`SceneFrame`, with each body's `geometricM`, `apparentM`,
   `emitted` and `hillRadiusM`), bodies as plan 14's `BodySummaryDto` inside R03's
   `SceneBodyDto` and `SceneSystemDto`, each with its granted `level`, `SceneClockDto`,
   `KinematicsDto`, `CameraReporter`, the two-clients-agree test, and the optional `main_screen`
-  field its Design note 4 reserves.
+  field its Design note 4 reserves. _As built (re-checked at `ce7aeb3`):_ `sceneAt(model, observer,
+time, previous)` with `previous` required; a body's entry is `SceneBodyFrame`, and a `contact`
+  entry has no `geometricM` or `hillRadiusM`; levels come per body through `SceneSystemDto.grants`
+  (`BodyGrantDto { body, level, seen }`), not on each body; `main_screen` is room left by R03's
+  Design note 4, not a field (Phase C adds it); the two-clients test is
+  `crates/hyperion-server/tests/scene_agree.rs`.
 - **R05:** `selectPatches`, `PlanetGeometry`, `PatchCache` and the patch geometry with per-patch
   `f64` origins; `QualitySetting` (`"high" | "low"`), `ViewSettings` and `SETTINGS`, to which this
   plan adds its settings as fields with their high and low values; the streaming
   priority of secondary views; `BodyFigure`, which this plan re-exports; and, asked of R05 and met
   there, a `PlanetGeometry` of a reference spheroid drawn at zero height with no height worker,
-  `planetGeometry(figure, null)` (R05.T7.a; Design notes 3 and 19), which R07.T9 uses.
+  `planetGeometry(figure, null)` (R05.T7.a; Design notes 3 and 19), which R07.T9 uses. _Not built
+  at `ce7aeb3`_ (no `view/terrain/` or `view/quality/`); R05's Provides still match these names:
+  `BodyFigure` and `planetGeometry` from R05.T7.a (`view/terrain/planet.ts`, `pole: Vec3 | null`),
+  `QualitySetting`, `ViewSettings` and `SETTINGS` from R05.T7.b (`view/quality/`), the 0.25
+  secondary-view weight from R05.T7.d, `PatchCache` from R05.T8, the patch's `originM` from
+  R05.T10 and the terrain pass from R05.T11.
 - **R06:** `HostDiscDto` on `SkyResponse.hosts`: its radius, `mean_luminance_cd_m2` per channel
   (the disc mean, which E = π L̄ sin²ρ uses, never `central_luminance_cd_m2`), the power-2
   coefficients per channel, and the host's `teff_k`, `log_g`, `chroma` and `lux_per_v0`, since the
@@ -474,6 +538,12 @@ GlareSource[]` returns one `GlareSource` per disc, `excessLuminance` per channel
   65,504, in eye views also for a disc up to 45° outside the frame. Where this plan's `post/`
   module is absent, R06.T13.e declares `METER_CLASS` and `GlareSource` there under this plan's
   names, and this plan extends that file, so that R06 depends on nothing of R07 at build time.
+  _Not built at `ce7aeb3`_ (no `view/sky/`, `view/post/` or `sky` protocol module). Providers:
+  `HostDiscDto` R06.T10 (filled by R06.T11.c; its radius and coefficient field names are fixed
+  there, not yet in R06's text), `cameraLimitV` and `DEFAULT_VIEW_CAMERA` (N = 1.4, t = 1/30 s,
+  R06 Design note 18) R06.T13.a, `HostDiscLayer`, `glareSources`, `DEFAULT_EYE_OBSERVER` and the
+  meter class R06.T13.e (`view/post/{meter,glare}.ts` if this plan's are absent). `angular_radius`
+  is Rust only (`sky::disc`); the client computes asin(R ÷ d) itself (T3).
 - **R08:** `DiscReflectanceTable`, baked by R08's `bakeDiscReflectance(medium, appearance:
 BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only disc shading;
   R08.T16.b adds its read path to this plan's `shaders/bodyDisc.wgsl`. It reads `BodyAppearance`
@@ -498,7 +568,20 @@ BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only 
   radius; the `SurfaceState` and Bond albedo of P14.T13.c once carried; `body_fixed_at` (P14.T14.c)
   through R02's `BodyFixedRotation`; the surface pressure and cloud fraction of `Atmosphere`
   (`planetary/derive/atmosphere.rs`) that choose the law (Design note 5); the photometric section
-  and flattening asked for in R07.T1.
+  and flattening asked for in R07.T1. _Re-checked on `main` at `ce7aeb3` (`GENERATOR_VERSION`
+  19):_ none of R07.T1's asks is drafted in plan 14 or built — no photometry section, no
+  flattening, no spheroid datum; `radius_m` on `BulkPropertiesDto` is the mean radius.
+  `SurfaceState` (`atmosphere.rs:699`: `GasEnvelope`, `MagmaOcean`, `Airless`,
+  `RunawayGreenhouse`, `Temperate`, `Snowball`), `Atmosphere::surface_pressure` and
+  `cloud_fraction` exist in the sim only and are read by plan 14's section, never by the client;
+  the Bond albedo is iterated from a 0.3 seed through `SurfaceState::albedo` (a provisional table)
+  and `Atmosphere::albedo` and reaches the wire only inside `equilibrium_temperature_k`;
+  `BodySurfaceDto` is still empty. Spin, locking and body-fixed frames are built sim-side
+  (`planetary/derive/rotation.rs`, `planetary/frames.rs::body_fixed_at`,
+  `PlanetarySystem::rotation_of`) but reach no DTO, so the client's `bodyFixedRotation` is `null`.
+  Locking's moments of inertia are per class already (`params.rs`: rocky 0.33, icy 0.34,
+  sub-Neptune and ice giant 0.23, gas giant 0.25, provisional; `PlanetClass` has five classes and no
+  Saturn-like split).
 - **Galaxy plan 06:** through R06's `host_discs`, each host's radius, effective temperature and
   surface gravity; `stellar::photometry::absolute_magnitude_v`
   (`crates/hyperion-sim/src/stellar/photometry.rs:137`) as the check of Design note 4.
@@ -510,6 +593,9 @@ BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only 
   replay log; the simulation, training, replay and pause modes; and ship alerts in the guide's four
   classes. None of it exists: `ClientMessage` has `Hello { client_version }`, `Ping`, `Request` and
   `Cancel` only (`crates/hyperion-protocol/src/envelope.rs:34`), and nothing identifies a station.
+  Still so at `ce7aeb3`: `Hello { client_version }` (`envelope.rs:41`), `PROTOCOL_VERSION` 2
+  (`lib.rs:108`), one ship stand-in per open universe, and no sessions plan in
+  `docs/agent/plans/`.
 
 ## Design notes
 
@@ -523,6 +609,11 @@ client's command line takes `--address` and `--port` only (`apps/hyperion/src/ma
 `planetary/derive/rotation.rs` or `planetary/frames.rs`; no geometric albedo, phase integral or
 flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
 `components/StatusLine.tsx` exist, the latter unrelated to the main screen's status line.
+Re-checked at `ce7aeb3` (RM1 merged): R01's engine, R02's `view/` and wireframe `VIEW` and R03's
+scene exist as the Consumes' "as built" notes give them; `lib/displays.ts` gains `view`; R05's and
+R06's modules and everything of plan 14 named above as absent are still absent, save rotation,
+which exists sim-side only; `PROTOCOL_VERSION` is still 2 and the command line still `--address`
+and `--port`.
 
 1. **Three regimes, chosen per view per frame on the CPU.** A body is a `point` while its angular
    diameter is under 3 px of the view's own pixels (brainstorm, "The scales the view spans"): its
@@ -728,7 +819,10 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
     Colour-attachment writes on Gen9 round toward zero (probed), a −0.78% to −1.56% bias per write
     in `rg11b10ufloat` and −0.05% in `rgba16float`, so the bloom chain stays in `rgba16float` unless
     R01's probe, `GraphicsStatus.targetRounding`, reports `nearest` for `rg11b10ufloat`, and the CPU
-    twin models truncation. The chain uses no random sampling, so the guide's flash limit holds.
+    twin models truncation. As R01 built and ran the probe, the RTX 3080 also reads `toward-zero`
+    for both formats (SwiftShader `nearest` for `rgba16float`), so truncation is not Gen9's alone
+    and the chain stays `rgba16float` on the recommended machine too. The chain uses no random
+    sampling, so the guide's flash limit holds.
 13. **The tone-mapping pass encodes and dithers** (researched 2026-09-29; probes on the UHD 620).
     AgX's formed image spans 16.5 stops, −10 to +6.5 about 0.18, about 9.2 below and 7.3 above the
     metered average; the brainstorm's "roughly 25 stops" is AgX Log's encoding. The canvas is
@@ -739,7 +833,11 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
     near black is settled by a dark ramp against Blender's AgX Base sRGB to one code (R07.T15), and
     whichever is chosen applies to R02's wireframe sprites too, so that an isolated star on black is
     identical in both styles before the dither and within one code after it. The pass also upscales
-    from the view's internal resolution.
+    from the view's internal resolution. As R01 built the view, the canvas takes
+    `getPreferredCanvasFormat()` (`rgba8unorm` or `bgra8unorm`) with only its `-srgb` view format,
+    and a submission's last post-process writes through that sRGB view; so T15 adds to R01's
+    engine the choice of writing the last post-process through the canvas's own non-sRGB view
+    (`view/engine/`, run under `just test-render`), the wireframe keeping the sRGB view.
 14. **Per-view budgets are a pure policy** (researched 2026-09-29; probes on the UHD 620,
     provisional under load). The primary view renders at its internal scale; each secondary view at
     a lower scale or 30 Hz; on the low setting at most one view is photorealistic, and the style
@@ -884,13 +982,24 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
 ## Tasks
 
 Phase A builds the photorealistic style for one view, Phase B several views, Phase C the main
-screen. T1 and T3 can start at once; T2.a follows T4.a, and T2.b waits on plan 14's section. T4 and
+screen. T1 and T3 can start at once; T2.a follows T4.b (`lawFor`), and T2.b waits on plan 14's section. T4 and
 T6 can run beside T3. T5 needs T2.a and T4.a. T7 needs T3–T5. T8.a needs T6 and T7; T8.b, T9, T10
 and T11 follow T8.a. T12–T15 follow T7 and are independent of T8–T11, with T14.a before T13.a
 (T13 reads no veil but tests against T14.a's glare sources) and T13.a before T16. T16 follows T8.a
 and T13.a; T17 closes Phase A. Phase B follows T7 and T13. Phase C waits on the sessions plan.
 TypeScript paths follow the rule at the head of Provides. Every task that adds or changes a shader
-registered in `WGSL_CATALOGUE` runs `just test-render` in its acceptance. Every timing below that
+registered in `WGSL_CATALOGUE`, or anything under `view/engine/`, runs `just test-render` in its
+acceptance, and gives each material and post-process a `displayName`.
+
+Waits on R05 and R06 (re-validated at `ce7aeb3`, neither built): T2.a on R05.T7.a (`BodyFigure`);
+T3 on R06.T10 (`HostDiscDto`'s field names); T5 on T2.a and R06.T10; T7 on R05.T7.b
+(`QualitySetting`); T8.a on T3, T7 and R06.T13.e (the host-disc pass it is ordered with); T9 on
+R05.T7.a–b, T8 and T11; T10 on T9 and R06.T13.e; T11 on T8.a; T14.b's injected sources on
+R06.T13.e's `glareSources` (synthetic sources in its tests until then); T17 on R05.T7.b; T18 on
+R05.T7.b; T19 on R05.T7.d. Free of both, and startable now: T1, T4.a–c, T6.a–c, T12, T13.a (the
+`AUTO` program's aperture and shutter a constructor argument, set from R06's `DEFAULT_VIEW_CAMERA`
+where the controller is made, in T13.b), T13.b, T14.a (the eye observer an argument), T15 and T16's
+guide draft. T2.b waits on plan 14 (T1). T20 and T21 are by hand for the owner. Every timing below that
 comes from the research probes was measured under shared load and is provisional until re-measured
 on a quiet machine.
 
@@ -914,16 +1023,32 @@ or equatorial and polar radii) with its per-class moment of inertia, which also 
 classes (rocky, Jupiter-like, Saturn-like, ice giant) defined by a criterion on plan 14's
 composition classes for its owner to set, and the six-planet check; and the spheroid as the
 reference figure that heights are measured from (Design note 19). Both subtasks are plan 14's to
-build; the edit ends in plan 14's owner accepting them. Acceptance: the drafted subtasks cite the
-sources above; `npx prettier --check` on both plan files.
+build; the edit ends in plan 14's owner accepting them. Draft them against plan 14 as built
+(re-validated at `ce7aeb3`, `GENERATOR_VERSION` 19): the law's inputs are the sim's `SurfaceState`
+and `Atmosphere::{surface_pressure, cloud_fraction}` (`planetary/derive/atmosphere.rs`) and its
+iterated Bond albedo, none of them on the wire, so the section is computed server-side and is
+the only photometric thing the client reads; P14.T14.b's moments of inertia are already per
+class as built (`params.rs`: rocky 0.33, icy 0.34, sub-Neptune and ice giant 0.23, gas giant 0.25,
+provisional), so the flattening draft reuses those constants and asks only for what they lack
+(a Saturn-like 0.21 inside `GasGiant`, by a criterion for the owner, and the six-planet check);
+and, since rotation reaches no DTO yet, the drafts name the pole and rotation on the wire (the
+roadmap's existing ask of P14.T14 through P14.T35) as the flattening's companion, without which an
+oblate body has no axis. Both are a `GENERATOR_VERSION` bump of plan 14 and an additive protocol
+change (`just gen-protocol`), plan 14's to make. Acceptance: the drafted subtasks cite the sources
+above; `pnpm exec prettier --check` on both plan files.
 
 #### R07.T2 The photometric section on the scene
 
 - **R07.T2.a Absence, now.** `appearance/fromWire.ts` maps a body with no photometric section to
   `PROVISIONAL_PHOTOMETRY` (built here: Design note 5's Lambert sphere, p = 0.2, q = 1.5, through
-  T4.a's `lawFor`) with the `BODY ALBEDO: NOT YET MODELLED` label, and a body with no flattening to
-  a sphere of its radius as a `BodyFigure`. Tests: a body from today's `BodySummaryDto` maps to the
-  provisional law and label; its figure is a sphere. Acceptance: `pnpm test`, `just ci`.
+  T4.b's `lawFor`) with the `BODY ALBEDO: NOT YET MODELLED` label, and a body with no flattening to
+  a sphere of its `bulk.radius_m` as a `BodyFigure` (`pole` from `bodyFixedRotation`, `null` while
+  plan 14 sends no rotation). A `contact` entry of R03's frame has an apparent position only: it
+  is lit from its apparent direction with no eclipse or planetshine term, and with no resolved
+  radius it stays R02's mark (a question for the owner, Risks). Tests: a body from today's
+  `BodySummaryDto` maps to the provisional law and label; its figure is a sphere with a `null`
+  pole. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/appearance`,
+  `just ci`.
 - **R07.T2.b The section, once plan 14 has built it.** After plan 14's subtask lands and
   `just gen-protocol` has run, `lib/system/bodiesWire.ts` and `lib/system/model.ts` parse
   `photometry` and the figure as `SectionDto`s, and `fromWire.ts` maps them to `BodyPhotometry` with
@@ -1005,7 +1130,8 @@ run src/renderer/src/view/lighting`.
 
 #### R07.T7 The photorealistic style
 
-`photoreal/{style,passes}.ts` (Design note 8): the `photorealistic` variant of R02's `RenderStyle`,
+`photoreal/{style,passes}.ts` (Design note 8): the `photorealistic` variant of R02's `RenderStyle`
+(`view/camera/state.ts`),
 the pass list with empty slots for R08, R10 and R11, the style switch per view in
 `displays/view/StyleControl.tsx` (a display control, single-key binding shown), and the refusal on a
 fallback adapter through R01's `styleAvailability`. The HDR target is R02's. Tests: switching style
@@ -1067,10 +1193,13 @@ low setting. Acceptance: `pnpm test`, `just test-render`.
 
 `post/histogram.wgsl` and `post/histogram.ts` (Design note 10): 256 bins over log₂ −14 to +16 of the
 pre-exposed value, the meter class mapped to integer weights by `meterWeights`, workgroup-memory
-atomics with one global add per non-empty bin, read back through a ring of three buffers; a
-`KernelPair` with `readback: "bit-exact"` and no subgroup twin. Tests: a CPU histogram of a
-synthetic target equals the GPU's bin for bin in the smoke harness, on the harness's runs with and
-without the `subgroups` feature; host-disc pixels are not counted under any meter; zeros land in
+atomics with one global add per non-empty bin, read back with at most three reads in flight over
+a ring of three histogram buffers (R01's `readBuffer` makes its own staging buffer per call, so no
+mapped buffer is ever reused; if T12's bench shows that per-call staging costs, a staging ring is
+added to R01's readback in `view/engine/` under this task); a `KernelPair` with
+`readback: "bit-exact"` and no subgroup twin. Tests: a CPU histogram of a
+synthetic target equals the GPU's bin for bin in the smoke harness, on its `default` and
+`no-subgroups` variants; host-disc pixels are not counted under any meter; zeros land in
 bin 0; each meter's weights select their classes; the readback never maps a buffer in use. Bench,
 recorded under `--hyperion-gpu-timing` with the flag noted, with a uniform dark-sky input as the
 worst case: 0.3–0.5 ms on the discrete target, about 1 ms at 640 × 360 on the UHD 620 (brainstorm,
@@ -1082,9 +1211,12 @@ Performance budget; the probe's 0.3–0.8 ms is provisional). Acceptance: `just 
 - **R07.T13.a The meter and the controller.** `post/autoExposure.ts` (Design notes 10–12):
   `meteredLuminance` as the weighted arithmetic mean with window [0, 1] by default, bin 0 at
   luminance 0 and no veil; `AutoExposure.step` with the smoothing of Design note 11; `AVG`, `LIT`
-  and `DARK` meters; `AUTO`, `MAN` and `INHIBITED` through R02's `ExposureControl`, entering
-  `INHIBITED` when no histogram arrives; the `ExposureReading` with its triple for R06's
-  `cameraLimitV` and for wireframe views. Tests, against hand values with the citations re-checked:
+  and `DARK` meters; `AUTO`, `MAN` and `INHIBITED` through R02's `ExposureControl` as built, the
+  metered EV100 reported through `onMetering(control, ev100 | null)`, `null` when no histogram
+  arrives (R02's system inhibit `no_image_to_meter`), so that R02's `setAuto` is accepted once a
+  photorealistic view meters; the `ExposureReading` with its triple for R06's `cameraLimitV` and
+  for wireframe views, the `AUTO` program's aperture and shutter a constructor argument (R06's
+  `DEFAULT_VIEW_CAMERA`, N = 1.4 and t = 1/30 s, passed where the controller is made). Tests, against hand values with the citations re-checked:
   EV100 from a uniform 100 cd/m² field is log₂(800) = 9.644 (Lagarde and de Rousiers 2014, eq. 69);
   the displayed EV100 equals log₂(mean × 8) for a two-level histogram; the white point is 9.6 × L̄
   under a linear clip (eq. 75, Listing 28); a 5% disc 25 stops above a black frame is exposed 4–5
@@ -1094,16 +1226,16 @@ Performance budget; the probe's 0.3–0.8 ms is provisional). Acceptance: `just 
   `DARK` differ as stated on a half-lit body; `INHIBITED` holds; under `AUTO` the triple's EV100
   equals the reading's to 10⁻⁹. Acceptance: `pnpm --filter hyperion exec vitest run
 src/renderer/src/view/post`.
-- **R07.T13.b The control.** `displays/view/MeterControl.tsx`: EV100 with its automation level and
-  the meter, keyboard operable. Tests (Vitest): each meter selectable by keyboard; the reading and
+- **R07.T13.b The control.** `displays/view/MeterControl.tsx`, beside R02's `ExposurePanel`: EV100
+  with its automation level and the meter, keyboard operable. Tests (Vitest): each meter selectable by keyboard; the reading and
   its source view shown. By eye, recorded: a lit planet on black, a star entering frame, the
   cockpit turning to a planet, which settle the smoothing speeds. Acceptance: `pnpm test`.
 
 #### R07.T14 Bloom as veiling glare
 
 - **R07.T14.a The spread functions and the kernel.** `post/{bloom,glare}.ts` (Design note 12):
-  `glareSpread` (the CIE function with 0.0046°, for R06's default eye observer, age 25 and
-  pigmentation 0.5, renormalised; the lens tail for camera views); `bloomKernel` by non-negative
+  `glareSpread` (the CIE function with 0.0046°, for an eye observer passed in, R06's default of
+  age 25 and pigmentation 0.5 at the call sites, renormalised; the lens tail for camera views); `bloomKernel` by non-negative
   least squares per angular pixel scale; the threshold at AgX's top of range; the CPU twin of the
   chain with truncation modelled; each `GlareSource`'s closed form. Tests: the CIE function
   integrates to 1.047 at age 25 and 1.010 at pigmentation 0 before renormalisation; the chain's
@@ -1120,8 +1252,9 @@ src/renderer/src/view/post`.
 #### R07.T15 Tone mapping, upscale and output
 
 `post/tonemap.wgsl`, `post/tonemap.ts` (Design notes 9 and 13): R02's `agx`, Filament's port as
-built by R02.T10.c with its header and `NOTICE` entry, included unchanged; the canvas configured
-`rgba8unorm` with the encoding in the pass; static blue-noise TPDF dither of ±1 LSB in the encoded
+built by R02.T10.c with its header and `NOTICE` entry, included unchanged; the canvas's preferred
+format written through its non-sRGB view with the encoding in the pass (the option Design note 13
+adds to R01's engine, in `view/engine/`); static blue-noise TPDF dither of ±1 LSB in the encoded
 domain; upscale from the internal resolution. Tests: `agx` against values computed once in `f64`
 from Filament's formula and pinned with their citation; monotone in luminance; an isolated star
 identical in both styles before the dither and within one code after it; the WGSL matches the
@@ -1134,8 +1267,11 @@ recorded: a Sun-like star in frame with a lit planet, hues holding in the highli
 
 `photoreal/overlay.ts` (Design notes 16–17): R02's draw list with casing on in the photorealistic
 style; rings and hulls as cased marks until R11; DOM readouts on `--surface-0` plates; the label
-block gains the meter, the style and `BODY ALBEDO: NOT YET MODELLED`. Draft, for the owner, the
-nomenclature entries this plan adds beyond R02's nine items (`PHOTOREALISTIC`, `METER AVG`,
+block gains the meter, the style and `BODY ALBEDO: NOT YET MODELLED`; hull edges cased over the
+image, with the hull faces' occluder bias (`occluder.wgsl`, `slopeScale` 2 as built) raised to 3 so
+that the casing is covered (the UX decision, item 12; the sphere occluder's `SLOPE_SCALE` is 3
+already). Draft, for the owner, the nomenclature entries this plan adds beyond R02's nine items
+(`PHOTOREALISTIC` is already drafted by R02, beside `WIREFRAME`; `METER AVG`,
 `METER LIT`, `METER DARK`, `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one
 edit of `docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. Tests: every overlay
 mark over the image has a casing stroke; plates are present for every readout; the console-ux
@@ -1167,7 +1303,7 @@ timestamps are unavailable. Acceptance: `pnpm test`.
 #### R07.T19 Instrument views in `VIEW`
 
 `displays/view/InstrumentView.tsx`, `ViewDisplay.tsx` (Design note 15): two slots, each with its own
-camera, style and target, R01's `createView`, R02's DOM list and label block, and the exposure
+camera, style and target, R01's `createView(canvas, name)`, R02's DOM list and label block, and the exposure
 reading of the primary view. Tests (Vitest): each view focusable and named; keyboard reaches every
 camera control in every view; the style control of a second view is disabled on low with its
 reason; a wireframe instrument shows the source of its exposure. Acceptance: `pnpm test`,
@@ -1193,7 +1329,9 @@ record.
 
 ### Phase C: the main screen (gated on the sessions plan)
 
-Each task begins by fitting its names to the sessions plan as built.
+Each task begins by fitting its names to the sessions plan as built. **Out of scope for RM3**
+(re-validated at `ce7aeb3`: no sessions plan exists); these tasks were not re-validated against
+the code and are re-validated when that plan is built.
 
 #### R07.T22 The client role
 
@@ -1318,6 +1456,10 @@ additive: optional sections parsed by the client, a defaulted `role` and `reduce
 `Hello`, R03's reserved
 optional field and new commands in the sessions plan's envelope, none of which moves
 `PROTOCOL_VERSION` by the brainstorm's rule. The plan reserves nothing in the generator.
+Re-validated at `ce7aeb3` (`GENERATOR_VERSION` 19): Phases A and B change no protocol type and
+generate nothing; T2.b only parses bindings that plan 14's subtasks generate, and those subtasks
+(T1's drafts) carry plan 14's own bump, coordinated through the orchestrator, and its
+`just gen-protocol`.
 
 ## Risks and open points
 
@@ -1383,7 +1525,9 @@ optional field and new commands in the sessions plan's envelope, none of which m
   item 12). R02 draws hull edges uncased in the wireframe, since a casing would widen a 1.5 px
   edge past the 2 px that its occluder's slope bias covers. This plan's overlay (T16) must case them
   over the photorealistic image and raise the occluder's slope scale to 3 so that the casing is
-  covered (R02's Risks, T13 as built).
+  covered (R02's Risks, T13 as built). As built at `ce7aeb3` the sphere occluder's `SLOPE_SCALE`
+  is already 3 (RM1 validation, for graticule strokes); the one to raise is the hull faces'
+  `occluder.wgsl` depth bias, `slopeScale` 2.
 - **The camera's local state, decided 2026-09-30 by a delegated decision** (the UX decisions,
   item 14). R02's `CameraState` keeps `free` (`FreeFlight`) and `move` (`EasedMove`), a local
   view's integration state. This plan moves them into a local wrapper, so that the server-held
@@ -1409,3 +1553,32 @@ optional field and new commands in the sessions plan's envelope, none of which m
   (T7), and the resolution controller's bounds are the setting value
   `ViewSettings.internalScaleBounds` (Design note 14, T17, T18). Not yet designed here: the
   instrument panels' sizes in the cockpit layout, which R12 needs for its runs.
+- **Re-validated at `ce7aeb3`** (2026-10-02, RM3; RM1 merged, R05 and R06 not built, `main`
+  equal to the integration branch). Consumes swept against R01–R04 as built and their Risks: the
+  "as built" notes in Consumes (R01's engine calls, `createView`'s name, per-call readback,
+  post-process labels and bindings, the canvas's sRGB view, per-format rounding, the timing
+  switch's home; R02's `Viewport` without `fovXRad`, `ExposureControl`'s union and
+  `onMetering`, `ExposurePanel`, `graticule`'s module, no client `BodyFixedRotation`; R03's
+  `SceneBodyFrame` union and per-body grants). Edits: Provides' names and the WGSL convention
+  with `displayName` (R01 Design notes 23–24; Babylon dropped); `METER_CLASS` in `post/meter.ts`
+  to meet R06.T13.e's file; pass labels as `onPassTimes` derives them; `glareSpread` and the
+  `AUTO` program take the eye observer and the default camera as arguments so that T13.a and
+  T14.a do not wait on R06; T12's readback over R01's per-call staging; T15 adds a non-sRGB
+  canvas write to R01's engine (Design note 13); the RTX 3080's `toward-zero` rounding in Design
+  note 12; T16's hull-occluder bias; T2.a after T4.b, where `lawFor` is; T1's draft fitted to plan
+  14 as built; `pnpm exec prettier`; Phase C out of scope for RM3. RM1's decisions and follow-ups
+  for this plan (UX items 12 and 14, the kept scene's `TRAINING`, hardware item 6's HDR and EDID,
+  the hidden-window OUT_OF_DATE restart, Babylon dropped) were already folded in by the RM1-close
+  pass (`ca9b2ae`) and are kept. Brainstorm drift since `899db5e`: only the CSP ruling and
+  Babylon wording, neither touching this plan. **Pending re-validation:** T2.a waits on
+  R05.T7.a; T3 on R06.T10 (`HostDiscDto`'s field names); T5 on R06.T10; T7, T17 and T18 on
+  R05.T7.b; T8.a and T10 on R06.T13.e; T9 on R05.T7.a–b, T8 and T11; T19 on R05.T7.d; T2.b on
+  plan 14's subtasks from T1; T22–T28 on the sessions plan. **Missing galaxy work** (plan 14 on
+  `main`): the photometry section (T2.b, T8.a's modelled albedos, T11's neighbours' p); the
+  flattening and the Saturn-like moment of inertia (T8.a's and T9's oblate figures); rotation and
+  pole on the wire (P14.T14 is sim-only; the oblate axis in T8.a and T9, and R02's
+  `bodyFixedRotation`); the spheroid datum (Design note 19, for R05, R09 and R10). Until then every
+  body is a sphere of its mean radius with the provisional photometry, labelled. **For the owner**
+  (smallest choice made, reversible): a `contact` body (apparent position only) is lit from its
+  apparent direction without eclipse or planetshine and, with no resolved radius, stays R02's
+  mark (T2.a); the lean is to keep it so until a contact carries a radius.
