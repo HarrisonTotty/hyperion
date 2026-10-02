@@ -371,6 +371,7 @@ pub(crate) mod tests {
                 mu_m3_s2: 1.327_128_386_004e20,
             },
             valid_until: None,
+            drift: None,
         }
     }
 

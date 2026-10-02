@@ -1,4 +1,4 @@
-# generator_version = 16
+# generator_version = 17
 # galaxy mw, 1303000000000000
 mw.brown_dwarfs_per_system = 0x3fd0b99792daeba1  # 0.2613276418812181
 mw.rogue_planets_per_system = 0x403e2eef8b07153c  # 30.18334263728069

@@ -531,11 +531,16 @@ fn a_death_in_the_window_is_when_the_orbit_holds_until() {
     let death = death_of(&host_star).expect("dead by the end of the window");
     assert!(death.at > UniverseTime::EPOCH);
     let now = state_at(&planet, &host, UniverseTime::EPOCH);
-    assert_eq!(now.valid_until(), Some(death.at));
+    assert_eq!(now.changes_at(), Some(death.at));
+    // The host loses mass, so the record holds until its drift cell ends, which is no later.
+    let until = now.valid_until().expect("inside the window");
+    assert!(until <= death.at, "{until} after {}", death.at);
     assert_eq!(
         now.body_orbit().expect("present").valid_until(),
-        Some(death.at)
+        Some(until)
     );
+    let last = state_at(&planet, &host, after(death.at, -1));
+    assert_eq!(last.valid_until(), Some(death.at));
     assert_eq!(state_at(&planet, &host, death.at).valid_until(), None);
 }
 

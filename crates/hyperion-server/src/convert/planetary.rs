@@ -13,10 +13,10 @@ use hyperion_protocol::{
     BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyGrantDto, BodyHooksDto, BodyIdHex,
     BodyKindDto, BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
     BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto, ErrorCode,
-    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitHostDto, PlanetClassDto, PopulationDto,
-    RequestError, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto,
-    SectionDto, SeenPositionDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto,
-    SystemSummaryDto, SystemSummaryRequest, ZoneDto,
+    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto, PlanetClassDto,
+    PopulationDto, RequestError, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto,
+    SceneSystemDto, SectionDto, SeenPositionDto, SystemBodiesDto, SystemBodiesRequest,
+    SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -632,6 +632,12 @@ fn body_orbit(system: SystemId, parent: Option<OrbitHostDto>, orbit: &BodyOrbit)
             .expect("a body with an orbit orbits a host"),
         orbit: orbit_dto(orbit.elements()),
         valid_until: orbit.valid_until().map(wire_time),
+        drift: orbit.drift().map(|drift| OrbitDriftDto {
+            reference: wire_time(drift.reference()),
+            semi_major_axis_rate_m_per_s: drift.semi_major_axis_rate_m_per_s(),
+            eccentricity_rate_per_s: drift.eccentricity_rate_per_s(),
+            mean_motion_rate_rad_per_s2: drift.mean_motion_rate_rad_per_s2(),
+        }),
     }
 }
 
