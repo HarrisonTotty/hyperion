@@ -1017,3 +1017,16 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     lines, so the owner (T8) keeps one per universe and clones it. Nothing wires the store into
     `AppState` yet. Every sighting is kept in memory and on disk; T8 should decide whether a
     long-lived recurrent contact needs its sightings thinned.
+- **`observe::in_system`, added by rendering plan R03 (R03.T2 and R03.T3, by agreement, `e91fd75`
+  and `6db8630`; recorded in RM1 validation, 2026-10-02).** Beside this plan's galactic
+  `observe::retarded`, `crates/hyperion-sim/src/observe/in_system.rs` evaluates what an observer
+  inside a system sees of its bodies and stars: `SystemObserver`, `retarded_in_system` returning an
+  `InSystemRetardation`, `IN_SYSTEM_LIGHT_TIME_TOLERANCE` (1 ns) and `IN_SYSTEM_MAX_CORRECTIONS`
+  (10). The light time is iterated to a fixed point (SPICE's converged "CN"), the observer enters
+  only at reception, and the apparent point is the emission event Lorentz-boosted into the
+  observer's frame (R03 Design note 7). `observe/in_system/tracks.rs` holds the sources: a system's
+  bodies and stars, placed by plan 14's `PlanetarySystem::position_at` and plan 11's
+  `star_positions_at` and moving by `state_at` and `star_states_at`.
+  `tests/observe_in_system_golden.rs` pins `solar_like` and `close_binary` in
+  `observe/in_system.golden`. This plan's galactic functions are unchanged. The subscription
+  envelope that R03.T5.a built to P12.T9's design is recorded under P12.T9 above.
