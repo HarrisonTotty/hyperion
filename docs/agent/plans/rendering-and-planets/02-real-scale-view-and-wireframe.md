@@ -1881,3 +1881,9 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   the RTX 3080 under the client's switches, passes 78 of 78 checks in both variants (`default`,
   `no-subgroups`) at build 1394abb. With the shader's old `max()` form put back, the slope check
   fails on the RTX 3080 (depth 0.02138445 against 0.02107446), so it is a real regression test.
+- **Fixed in RM1 validation (2026-10-02, integration MINOR-2): no anchors outside the view.**
+  `buildWireframeDrawList` culled only marks behind the camera, so a mark in front of it but outside
+  the view still got a pickable anchor and a DOM label, laid out thousands of pixels off the stage.
+  An anchor is now kept only within the view or `ANCHOR_MARGIN_REM` (2 rem, the guide's touch
+  target) of its edge; the screen-space symbology is unchanged (the GPU clips it). Tested in
+  `drawList.test.ts` with the camera turned 40° off the other craft, which fails without the cull.
