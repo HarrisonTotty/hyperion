@@ -19,7 +19,7 @@ import type { LoadEngineOptions, RenderEngine } from "./types";
  * Imports the engine and creates it on the vetted adapter.
  *
  * @param outcome - A fresh adapter, vetted by `requestAdapterOutcome`: an adapter is consumed by its
- * first device (R01 Design note 7).
+ * first device (R01 Design note 24).
  * @param status - The store the engine reports its faults and device losses to.
  */
 export async function loadRenderEngine(
