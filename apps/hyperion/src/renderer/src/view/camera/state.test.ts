@@ -259,12 +259,19 @@ describe("frame selection", () => {
     ]);
   });
 
-  it("keeps a camera in a body's frame at its offset from that body", () => {
-    const pose = aCameraPose({
+  it("selects the same frame for one drawn point whatever frame its pose is held in", () => {
+    // The same point as above, held in the drawn moon's frame: placing it from the moon's
+    // geometric centre would put it back inside the moon's Hill sphere, and it would leave and
+    // re-enter the moon's frame at every step.
+    const inMoon = aCameraPose({
       frame: { kind: "body", body: FIXTURE_MOON },
       positionM: vec3(0, 1e7, 0),
     });
-    expect(sceneFrameFor(pose, lightTimed)).toEqual({ kind: "body", body: FIXTURE_MOON });
+    const inSystem = aCameraPose({ positionM: add(FIXTURE_MOON_CENTRE_M, vec3(0, 1e7, 0)) });
+    expect([sceneFrameFor(inMoon, lightTimed), sceneFrameFor(inSystem, lightTimed)]).toEqual([
+      { kind: "body", body: FIXTURE_PLANET },
+      { kind: "body", body: FIXTURE_PLANET },
+    ]);
   });
 });
 

@@ -351,7 +351,7 @@ describe("the VIEW display", () => {
     await user.keyboard("{PageUp}");
     advance(300);
     expect(rate).toHaveTextContent("RATE 3.16 km/s");
-    expect(screen.queryByText(/NOT AVAILABLE: RATE/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/NOT AVAILABLE: PAGE/)).not.toBeInTheDocument();
     for (let i = 0; i < 8; i += 1) {
       // Each press is one step; they are sequential by nature.
       // oxlint-disable-next-line no-await-in-loop
@@ -359,7 +359,9 @@ describe("the VIEW display", () => {
     }
     advance(300);
     expect(rate).toHaveTextContent("RATE 1.00 m/s");
-    expect(screen.getByText("NOT AVAILABLE: RATE at its lowest step")).toBeInTheDocument();
+    expect(
+      screen.getByText("NOT AVAILABLE: PAGE DOWN, RATE at its lowest step"),
+    ).toBeInTheDocument();
   });
 
   it("moves a mark's label with its mark every frame, between readouts", async () => {
