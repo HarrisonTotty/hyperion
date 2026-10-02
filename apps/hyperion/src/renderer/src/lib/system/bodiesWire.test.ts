@@ -1,4 +1,4 @@
-import type { BodyStateDto, SectionDto, UniverseTime } from "@hyperion/protocol";
+import type { BodyStateDto, OrbitDriftDto, SectionDto, UniverseTime } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -46,6 +46,23 @@ function withFirstState(state: BodyStateDto) {
     body.id === first ? { ...body, state, orbit: { state: "not_applicable" } } : body,
   );
 }
+
+/** The slice's answer with every orbit drifting as `drift` says. */
+function withDrift(drift: OrbitDriftDto) {
+  return sliceBodiesWith((body) =>
+    body.orbit.state === "ok"
+      ? { ...body, orbit: { state: "ok", value: { ...body.orbit.value, drift } } }
+      : body,
+  );
+}
+
+/** A drift of close_binary's receding moon's size, from the epoch. */
+const DRIFT: OrbitDriftDto = {
+  reference: { seconds: 0, nanos: 0 },
+  semi_major_axis_rate_m_per_s: 2.59e-9,
+  eccentricity_rate_per_s: 0,
+  mean_motion_rate_rad_per_s2: -1.27e-22,
+};
 
 /** The slice's answer with every orbit's `valid_until` set to `validUntil`. */
 function withValidUntil(validUntil: UniverseTime) {
@@ -216,6 +233,34 @@ describe("toSystemBodiesModel", () => {
     );
 
     expect(faultOf(stray)).toBe("body 57344 host unknown");
+  });
+
+  it("reads an evolving orbit's drift with its rates", () => {
+    const earth = bodiesOf(withDrift(DRIFT)).bodies.bodies[0];
+
+    expect(earth?.orbit).toMatchObject({
+      state: "ok",
+      value: {
+        orbit: {
+          drift: {
+            reference: { seconds: 0, nanos: 0 },
+            semiMajorAxisRateMPerS: 2.59e-9,
+            eccentricityRatePerS: 0,
+            meanMotionRateRadPerS2: -1.27e-22,
+          },
+        },
+      },
+    });
+    expect(bodiesOf().bodies.bodies[0]?.orbit).not.toHaveProperty("value.orbit.drift");
+  });
+
+  it("refuses a drift with a rate that is not finite or a malformed reference", () => {
+    expect(faultOf(withDrift({ ...DRIFT, mean_motion_rate_rad_per_s2: Number.NaN }))).toBe(
+      "orbit drift unusable",
+    );
+    expect(faultOf(withDrift({ ...DRIFT, reference: { seconds: 0.5, nanos: 0 } }))).toBe(
+      "orbit drift unusable",
+    );
   });
 
   it("refuses an orbit the client cannot propagate", () => {

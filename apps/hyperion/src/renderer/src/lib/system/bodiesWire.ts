@@ -21,6 +21,7 @@ import {
   type BulkPropertiesDto,
   type HabitableZoneDto,
   isBodyId,
+  type OrbitDriftDto,
   type OrbitHostDto,
   parseBodyId,
   type PopulationDto,
@@ -35,7 +36,7 @@ import {
 } from "@hyperion/protocol";
 
 import { vec3 } from "../../geometry/vec3";
-import { NEAR_PARABOLIC_ECCENTRICITY } from "../orbit";
+import { NEAR_PARABOLIC_ECCENTRICITY, type OrbitDrift } from "../orbit";
 import type {
   BodyDetail,
   BodyKind,
@@ -214,8 +215,26 @@ function toState(state: BodyStateDto): BodyState {
   return result;
 }
 
+/** An evolving orbit's drift, with its reference time and its rates checked (P14.T45.c). */
+function toDrift(drift: OrbitDriftDto): OrbitDrift {
+  check(
+    usableTime(drift.reference) &&
+      Number.isFinite(drift.semi_major_axis_rate_m_per_s) &&
+      Number.isFinite(drift.eccentricity_rate_per_s) &&
+      Number.isFinite(drift.mean_motion_rate_rad_per_s2),
+    "orbit drift unusable",
+  );
+  return {
+    reference: drift.reference,
+    semiMajorAxisRateMPerS: drift.semi_major_axis_rate_m_per_s,
+    eccentricityRatePerS: drift.eccentricity_rate_per_s,
+    meanMotionRateRadPerS2: drift.mean_motion_rate_rad_per_s2,
+  };
+}
+
 function toOrbit(orbit: BodyOrbitDto): BodyOrbit {
-  const kepler = toKeplerOrbit(orbit.orbit);
+  const fixed = toKeplerOrbit(orbit.orbit);
+  const kepler = orbit.drift === undefined ? fixed : { ...fixed, drift: toDrift(orbit.drift) };
   check(
     kepler.eccentricity >= 0 &&
       kepler.eccentricity < NEAR_PARABOLIC_ECCENTRICITY &&

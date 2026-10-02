@@ -98,10 +98,38 @@ pub struct BodyOrbitDto {
     /// planet's body frame, referred to the planet's equator (plan 14, phase D).
     pub orbit: OrbitDto,
     /// The last instant at which the elements hold: the next change of the body's state or orbit
-    /// that the server knows of (its host losing mass, the body destroyed or unbound), past which a
-    /// display that has moved its time asks the server again; `null` when no change falls inside
-    /// the clock window, 1,000 years either side of the epoch.
+    /// that the server knows of (a host's sudden death, the body destroyed or unbound), or the
+    /// end of the current drift cell of an evolving orbit, past which a display that has moved
+    /// its time asks the server again and a scene re-sends the body; `null` when no change falls
+    /// inside the clock window, 1,000 years either side of the epoch.
     pub valid_until: Option<UniverseTime>,
+    /// For an orbit whose elements evolve (a moon's tidal recession, circularisation, a host's
+    /// mass loss), how they change through the current drift cell; absent for an orbit that holds
+    /// (plan 14, P14.T45.b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub drift: Option<OrbitDriftDto>,
+}
+
+/// How an evolving orbit's elements change through one drift cell (plan 14, P14.T45).
+///
+/// `orbit` holds exactly at `reference`, the cell's start. At a time t up to `valid_until`, with
+/// Δt = t − `reference` in seconds (the difference of the whole seconds plus that of the
+/// nanoseconds ÷ 10⁹): the semi-major axis is a + ȧ Δt, the eccentricity e + ė Δt, the mean
+/// anomaly the elements' own plus ½ ṅ Δt², and the mean motion in the velocity 2π ÷ P + ṅ Δt. The
+/// simulation places the body by the same formula, so a client that applies it agrees with the
+/// server as for an orbit that holds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct OrbitDriftDto {
+    /// The instant the elements hold at exactly.
+    pub reference: UniverseTime,
+    /// ȧ, m s⁻¹.
+    pub semi_major_axis_rate_m_per_s: f64,
+    /// ė, s⁻¹.
+    pub eccentricity_rate_per_s: f64,
+    /// ṅ, rad s⁻².
+    pub mean_motion_rate_rad_per_s2: f64,
 }
 
 /// What a body orbits: a star, the barycentre of a pair of stars or of the whole system, or
@@ -152,6 +180,7 @@ mod tests {
             parent: OrbitHostDto::Star { body_index: 0 },
             orbit: wide_pair_orbit(),
             valid_until: None,
+            drift: None,
         }
     }
 
@@ -184,6 +213,45 @@ mod tests {
                 "valid_until": { "seconds": 9_467_280_000_i64, "nanos": 500_000_000 },
             }),
         );
+    }
+
+    #[test]
+    fn an_evolving_orbit_carries_its_drift() {
+        assert_wire_form(
+            &BodyOrbitDto {
+                valid_until: Some(UniverseTime {
+                    seconds: 33_554_432,
+                    nanos: 0,
+                }),
+                drift: Some(OrbitDriftDto {
+                    reference: UniverseTime {
+                        seconds: 0,
+                        nanos: 0,
+                    },
+                    semi_major_axis_rate_m_per_s: 2.5e-9,
+                    eccentricity_rate_per_s: -1.5e-20,
+                    mean_motion_rate_rad_per_s2: -1.25e-22,
+                }),
+                ..planet_orbit()
+            },
+            json!({
+                "parent": { "type": "star", "body_index": 0 },
+                "orbit": wide_pair_orbit_json(),
+                "valid_until": { "seconds": 33_554_432, "nanos": 0 },
+                "drift": {
+                    "reference": { "seconds": 0, "nanos": 0 },
+                    "semi_major_axis_rate_m_per_s": 2.5e-9,
+                    "eccentricity_rate_per_s": -1.5e-20,
+                    "mean_motion_rate_rad_per_s2": -1.25e-22,
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn an_orbit_without_a_drift_key_reads_as_one_that_holds() {
+        let read: BodyOrbitDto = serde_json::from_value(planet_orbit_json()).unwrap();
+        assert_eq!(read.drift, None);
     }
 
     #[test]

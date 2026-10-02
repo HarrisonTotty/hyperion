@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 // The server's fixture (plan 14, P14.T39), read from the repository, so that a re-blessed golden
 // moves this test with it.
 import fixture from "../../../../../../crates/hyperion-sim/tests/golden/orbit/states.golden?raw";
+// The drifting orbits of the RM1 fixture's golden systems (P14.T45.c), as the server pins them.
+import driftFixture from "../../../../../../crates/hyperion-sim/tests/golden/orbit/drifting_states.golden?raw";
 import { add, cross, dot, norm, scale, sub, type Vec3 } from "../geometry/vec3";
 import {
   type BodyPlacement,
@@ -80,6 +82,58 @@ function parseFixture(text: string): FixtureCase[] {
 
 const CASES = parseFixture(fixture);
 
+/**
+ * The fields of a drifting line, in the order its header gives:
+ * `a e i node peri m0 period mu ref_s ref_ns a_rate e_rate n_rate t_s t_ns x y z vx vy vz`.
+ */
+const DRIFT_FIELDS_PER_LINE = 21;
+
+function parseDriftFixture(text: string): FixtureCase[] {
+  return text
+    .split("\n")
+    .filter((line) => line.startsWith("drift["))
+    .map((line) => {
+      const [label = "", values = ""] = line.split(" = ");
+      const fields = values.split(" ").map(Number);
+      const at = (index: number): number => {
+        const value = fields[index];
+        if (
+          fields.length !== DRIFT_FIELDS_PER_LINE ||
+          value === undefined ||
+          !Number.isFinite(value)
+        ) {
+          throw new Error(
+            `the drift fixture's line ${label} does not hold ${DRIFT_FIELDS_PER_LINE} numbers`,
+          );
+        }
+        return value;
+      };
+      return {
+        label,
+        orbit: {
+          semiMajorAxisM: at(0),
+          eccentricity: at(1),
+          inclinationRad: at(2),
+          ascendingNodeRad: at(3),
+          argumentOfPeriapsisRad: at(4),
+          meanAnomalyAtEpochRad: at(5),
+          periodS: at(6),
+          drift: {
+            reference: { seconds: at(8), nanos: at(9) },
+            semiMajorAxisRateMPerS: at(10),
+            eccentricityRatePerS: at(11),
+            meanMotionRateRadPerS2: at(12),
+          },
+        },
+        time: { seconds: at(13), nanos: at(14) },
+        positionM: { x: at(15), y: at(16), z: at(17) },
+        velocityMPerS: { x: at(18), y: at(19), z: at(20) },
+      };
+    });
+}
+
+const DRIFT_CASES = parseDriftFixture(driftFixture);
+
 /** The relative distance between two vectors, against the length of the expected one. */
 function relativeError(actual: Vec3, expected: Vec3): number {
   return norm(sub(actual, expected)) / norm(expected);
@@ -118,6 +172,95 @@ describe("the server's fixture", () => {
       expect(relativeError(state.velocityMPerS, velocityMPerS)).toBeLessThan(1e-9);
     },
   );
+});
+
+describe("the server's drifting orbits (P14.T45.c)", () => {
+  it("holds every drifting line the header describes, in order", () => {
+    expect(DRIFT_CASES.length).toBeGreaterThanOrEqual(8);
+    expect(DRIFT_CASES.map((entry) => entry.label)).toEqual(
+      DRIFT_CASES.map((_, index) => `drift[${String(index).padStart(2, "0")}]`),
+    );
+  });
+
+  it.each(DRIFT_CASES.map((entry) => [entry.label, entry] as const))(
+    "gives the server's position and velocity for %s to 1E-9 relative",
+    (_, { orbit, time, positionM, velocityMPerS }) => {
+      const state = stateAt(orbit, time);
+
+      expect(relativeError(state.positionM, positionM)).toBeLessThan(1e-9);
+      expect(relativeError(state.velocityMPerS, velocityMPerS)).toBeLessThan(1e-9);
+    },
+  );
+
+  it("is the fixed orbit at its reference time", () => {
+    const reference: UniverseTime = { seconds: 33_554_432, nanos: 0 };
+    const drift = {
+      reference,
+      semiMajorAxisRateMPerS: 3,
+      eccentricityRatePerS: 1e-9,
+      meanMotionRateRadPerS2: 1e-15,
+    };
+
+    expect(stateAt(orbitOf({ drift }), reference)).toEqual(stateAt(orbitOf(), reference));
+  });
+
+  it("adds half the mean motion's rate times the time squared to the phase", () => {
+    const reference: UniverseTime = { seconds: 0, nanos: 0 };
+    const meanMotionRateRadPerS2 = 2e-20;
+    const time: UniverseTime = { seconds: 10_000_000, nanos: 0 };
+    const drifting = orbitOf({
+      drift: {
+        reference,
+        semiMajorAxisRateMPerS: 0,
+        eccentricityRatePerS: 0,
+        meanMotionRateRadPerS2,
+      },
+    });
+    const shifted = orbitOf({ meanAnomalyAtEpochRad: 0.7 + 0.5 * meanMotionRateRadPerS2 * 1e14 });
+
+    expect(
+      relativeError(stateAt(drifting, time).positionM, stateAt(shifted, time).positionM),
+    ).toBeLessThan(1e-12);
+  });
+  // The golden's own rates move the axis, the eccentricity and the speed by under 1E-9, below the
+  // vectors' tolerance, so each term is pinned here with rates large enough to show it.
+  const sinceS = 10_000_000;
+  const at: UniverseTime = { seconds: sinceS, nanos: 0 };
+  const zeroDrift = {
+    reference: { seconds: 0, nanos: 0 },
+    semiMajorAxisRateMPerS: 0,
+    eccentricityRatePerS: 0,
+    meanMotionRateRadPerS2: 0,
+  };
+
+  it("moves the semi-major axis at its rate", () => {
+    const drifting = orbitOf({ drift: { ...zeroDrift, semiMajorAxisRateMPerS: 100 } });
+    const grown = orbitOf({ semiMajorAxisM: 1.495_978_707e11 + 100 * sinceS });
+
+    expect(
+      relativeError(stateAt(drifting, at).positionM, stateAt(grown, at).positionM),
+    ).toBeLessThan(1e-12);
+  });
+
+  it("moves the eccentricity at its rate", () => {
+    const drifting = orbitOf({ drift: { ...zeroDrift, eccentricityRatePerS: 1e-9 } });
+    const changed = orbitOf({ eccentricity: 0.3 + 1e-9 * sinceS });
+
+    expect(
+      relativeError(stateAt(drifting, at).positionM, stateAt(changed, at).positionM),
+    ).toBeLessThan(1e-12);
+  });
+
+  it("gives the speed at the drifted mean motion", () => {
+    const meanMotionRateRadPerS2 = 2e-20;
+    const drifting = orbitOf({ drift: { ...zeroDrift, meanMotionRateRadPerS2 } });
+    const shifted = orbitOf({ meanAnomalyAtEpochRad: 0.7 + 0.5 * meanMotionRateRadPerS2 * 1e14 });
+    const meanMotionRadPerS = (2 * Math.PI) / 31_558_196.020_381_22;
+    const factor = (meanMotionRadPerS + meanMotionRateRadPerS2 * sinceS) / meanMotionRadPerS;
+    const want = scale(stateAt(shifted, at).velocityMPerS, factor);
+
+    expect(relativeError(stateAt(drifting, at).velocityMPerS, want)).toBeLessThan(1e-12);
+  });
 });
 
 describe("solveKepler", () => {

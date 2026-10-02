@@ -57,6 +57,7 @@ import type { MoonOriginDto } from "./generated/MoonOriginDto";
 import type { NatalKickDto } from "./generated/NatalKickDto";
 import type { ObjectKindDto } from "./generated/ObjectKindDto";
 import type { OpenUniverseRequest } from "./generated/OpenUniverseRequest";
+import type { OrbitDriftDto } from "./generated/OrbitDriftDto";
 import type { OrbitDto } from "./generated/OrbitDto";
 import type { OrbitHostDto } from "./generated/OrbitHostDto";
 import type { Parameter } from "./generated/Parameter";
@@ -184,6 +185,7 @@ export type {
   NatalKickDto,
   ObjectKindDto,
   OpenUniverseRequest,
+  OrbitDriftDto,
   OrbitDto,
   OrbitHostDto,
   Parameter,
