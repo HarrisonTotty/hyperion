@@ -65,7 +65,10 @@ use std::fmt;
 
 use crate::math;
 
-pub use kepler::{Eccentricity, KEPLER_HALLEY_ITERATIONS, KeplerElements, solve_kepler};
+pub(crate) use kepler::DriftRates;
+pub use kepler::{
+    Eccentricity, KEPLER_HALLEY_ITERATIONS, KeplerElements, seconds_between, solve_kepler,
+};
 pub use open::{NEAR_PARABOLIC_BAND, OpenOrbit, solve_barker, solve_kepler_hyperbolic};
 pub use orientation::Orientation;
 pub use peters::{peters_merger_time, peters_separation_for};

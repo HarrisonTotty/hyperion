@@ -5491,3 +5491,95 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     times by `MIN_SAFE_INTEGER`, is removed. **For the owner:** the guide has no sentence for an
     event time outside the clock window on a display that steps finer than 0.01 yr; the years form
     is built to the decision and waits on the owner's confirmation.
+- **P14.T45.a–c, as built (G14 and G15, 2026-10-02). `GENERATOR_VERSION` 16 → 17.**
+  - _Files._ `planetary/drift.rs`: `OrbitDrift` (rates named with their units, as
+    `semi_major_axis_rate_m_per_s`, `eccentricity_rate_per_s` and `mean_motion_rate_rad_per_s2`),
+    `DriftingOrbit`, the crate-private `EvolvingLaw`, `drift_cell`, `DriftCell::holds_until` and
+    `gauss_legendre_excess`, and `DRIFT_CELL_MAX_LOG2`, `DRIFT_CELL_MIN_LOG2` and
+    `DRIFT_TOLERANCE`. `orbit/kepler.rs` gains the public `seconds_between` (the client's Δt), the
+    crate-private `rephased` and `drifting_state_at`, and `DriftRates`, the three rates it takes.
+    `RecedingLaw` is in `moons/impact.rs`, with a closed-form phase. The circularisation and
+    mass-loss law is `SegmentLaw` in `fate.rs`. Provides gains `OrbitDriftDto` and
+    `BodyOrbitDto.drift` (T45.b).
+  - _Phase integral._ There is no `phase_since`. Its role is the crate-private
+    `EvolvingLaw::phase_excess(t)`, ∫ (n − n_anchor) from the anchor, with
+    `local_excess(from, to, n_from)` for a cell's own integral: closed form for `RecedingLaw`
+    (`recession_phase_ratio_less_one`), 16-point Gauss–Legendre for `SegmentLaw`. The anchored
+    elements gain n_anchor Δt exactly, so only small quantities are differenced.
+  - _Records._ `FateAt` gains `trajectory()` and `changes_at()`. `body_orbit()` states the
+    elements at the cell's reference, with the drift. `orbit()` stays the law's elements at the
+    time, with the segment's M₀, which is what the derivation reads. `rotation_of` reads the
+    elements at its own time, not the record's. A moon's record holds until its planet's
+    `changes_at`, its loss or its own cell's end.
+  - _Which orbits evolve._ An orbit evolves where the law's a, e and μ differ, by total order,
+    between the two ends of the segment's part of the window. The anchor is the epoch clamped to
+    that part: a body formed after the epoch is anchored at its formation, and one whose segment
+    ends before the epoch at that end. An orbit whose change rounds away inside a cell carries a
+    drift with all three rates zero (`orbit/drifting_states.golden`'s `drift[04]`).
+  - _Moons._ A receding moon is anchored at the epoch clamped between the system's birth and the
+    moon's loss. Its cells start no earlier than the system's birth, since the moon's own formation
+    time is not stored.
+  - _Cells._ A cell straddling the window's start is cut on both sides. A time before `START`
+    gets a record that holds until its cell's end, `START` or earlier: `holds_until` states it even
+    though it lies outside the window, where every other `valid_until` is stated only inside it.
+    (G15 fixed this: a halved cell before `START` had `valid_until: None`, so its record claimed
+    to hold for ever; the light-time solve reaches back to −(H + L). `fate.golden`'s nine
+    pre-window `valid_until` lines moved with it.) At the other end a cell's fit is cut at `END`
+    but its end is not: the record in the cell holding `END` has a drift and `valid_until: None`,
+    and a time after `END` gets a cell that starts at `END`.
+  - _The cell check._ It reads the law's phase inside a cell as the cell's own integral. The
+    difference from the integral from the anchor is shared out quadratically, as the model shares
+    it, and not counted. The 2⁻⁵² × apoapsis term takes the apoapsis at the cell's start, not at
+    each quarter point. The quarter points see about 95% (243 ÷ 256) of the cubic phase error, so
+    its peak may exceed the checked bound by up to 5.3%.
+    - **Deviation.** The decision's composite Gauss–Legendre rule, split at the circularisation
+      floor's breakpoints and the stellar track's knots, is not built. The track's knots are not
+      exposed, and a panel per 2²⁵ s cell would cost about 15,000 law evaluations per query.
+      `SegmentLaw` integrates on one 16-point panel from the anchor instead.
+    - **Consequence.** Its quadrature error across the track's kinks is the law's, so it is
+      excluded from the check. Per kink where ṅ's slope jumps by Δṅ, the error over a panel of
+      length L is at most about 7.5 × 10⁻⁴ |Δṅ| L², and changes with the panel's end at up to
+      0.025 |Δṅ| L (science check, with the repository's GL16 table). The earlier "about 10⁻² rad
+      over the window for a one-year orbit" assumes a break in Ṁ ÷ M of about 10⁻⁶ yr⁻¹; under
+      adiabatic expansion n ∝ μ², so AGB superwind rates of 10⁻⁵ to 10⁻⁴ M☉ yr⁻¹ give about
+      0.1–1 rad, as large as the `.0201` error T45 set out to fix, and more before `START`, where
+      the panel is longer. Cells still join exactly in position, but the model's speed departs
+      from the Kepler speed by the error's rate (about 5 × 10⁻⁵ of n in the 10⁻² rad case), and
+      the velocity steps by about 2 dE ÷ dt at each cell's end (about 10⁻⁴ relative there). The
+      receding moon, in closed form, is exact.
+    - **For the owner.** Splitting at the knots is a later output change, with a bump.
+  - _The bound._ The δe term of the bound is a (1 + 1 ÷ √(1 − e²)), an envelope of |∂r ÷ ∂e|
+    that the science check verified numerically over 0 ≤ e ≤ 0.9999 (tight as e → 0); it is not
+    printed in Murray and Dermott, who give ∂E ÷ ∂e (§2.5). 2a holds only for a circular orbit.
+  - _Tests._ "Adjacent cells join within ε" is asserted at ε, in `drift/tests.rs` and on the
+    sample. The fine-integration test runs on two synthetic laws, one like `.0201` and one young
+    moon; `RecedingLaw`'s own test compares at the cell's end only, and `SegmentLaw` is not
+    compared with a fine integration, since its one-panel error is the law's. "Records at any two
+    times in one cell are identical" is also asserted on halved and cut cells, before `START`, at
+    the epoch and in the window's last cells, through `assert_order_independent`. `fit` asserts
+    its rates and errors finite, so a NaN cannot pass the check through `max`.
+  - _Floor._ A synthetic orbit of 10,000 km whose axis grows 10 m s⁻¹ falls to 2¹⁶ s, and its
+    error there, 127 km at the quarter points, is pinned: the floor bounds the re-send rate, not
+    the error. On the sample at −H, the epoch and +500 yr, of 2,266 cells cut by neither a segment
+    nor the window, 2,040 are 2²⁵ s, 205 are 2²⁴ s, 21 are 2²³ s and none is at the floor. The
+    share test counts only those: red_giant has four records on 2¹⁶ s cells cut at `END` at +H
+    (`A e`, `e202`, `e203`, `e205`), which it does not count.
+  - _Plan text._ The task's "0.75 n ȧ (t − E)" lacks a square: it is 0.75 n ȧ (t − E)², as its own
+    12,000 km figure (11,868 km) shows.
+  - _Acceptance._ `cargo test -p hyperion-sim planetary` selects test names, so it misses
+    `--test planetary_drift` (`.0201` drifts and holds at most one cell),
+    `--test orbit_drifting_states` (the client's drifting vectors) and `orbit::kepler`'s new
+    tests; run `cargo test -p hyperion-sim` whole.
+  - _Agreement._ R03.T13's `close_binary` `.0201` agrees with the golden to the bit on the client.
+    `orbit/drifting_states.golden` holds the drifting records of the three RM1 systems for
+    `orbit.test.ts`, and the system goldens now pin each record's drift. The golden's own rates
+    move a, e and the speed by under 10⁻⁹, below the vectors' tolerance, so `orbit.test.ts` pins
+    each term with synthetic rates.
+  - _Client._ `stateAt` does not check the drifted a and e against their ranges, as the sim's
+    `drifting_state_at` does not; they hold up to `valid_until`.
+  - _Protocol._ `BodyOrbitDto.drift` is skipped when `None` (`#[ts(optional)]`), so a fixed
+    orbit's bytes are unchanged and `PROTOCOL_VERSION` stays 2. `scene/core.rs`'s re-send test
+    now expects the earliest real `valid_until` at 2¹⁶ s or later.
+  - _Cost (provisional, shared machine)._ Not benchmarked. A fit evaluates the law about 100 times
+    and a search up to ten fits, and `position_at` and `velocity_at` now run the cell search too
+    (a moon pays for its planet's as well); the planetary unit tests run no slower.

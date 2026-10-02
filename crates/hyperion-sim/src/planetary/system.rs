@@ -105,6 +105,7 @@ use crate::planetary::derive::{
     PlanetClass, derive_body, habitable_zone_of, radius_chen_kipping,
 };
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
+use crate::planetary::drift::{DriftingOrbit, drift_cell};
 use crate::planetary::error::ResolveBodyError;
 use crate::planetary::fate::{BodyFate, BodyState, FateBody, FateHost, ScatterDraws};
 use crate::planetary::halo::{
@@ -1645,7 +1646,10 @@ impl PlanetarySystem {
         let zone = self.zone_of(primary);
         let host = fate_host(ctx, zone);
         let fate = self.fate_of(primary, &host).at(t);
-        let Some(centre) = fate.orbit().map(|orbit| epoch.position(zone, orbit)) else {
+        let Some(centre) = fate
+            .trajectory()
+            .map(|trajectory| epoch.position(zone, trajectory))
+        else {
             return Ok(None);
         };
         Ok(match &body.part {
@@ -1653,7 +1657,7 @@ impl PlanetarySystem {
             Part::Moon(moon) => {
                 match moon_state(fate.state(), &moon.satellite, ctx.age_at_epoch(), t) {
                     BodyState::Present => {
-                        let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                        let (orbit, _) = moon_trajectory(ctx, moon, t, fate.changes_at());
                         Some(centre.translated(orbit.relative_state_at(t).0))
                     }
                     BodyState::NotYetFormed
@@ -1671,9 +1675,10 @@ impl PlanetarySystem {
     /// The velocity follows the position's construction: the host's barycentric velocity on plan
     /// 11's walk ([`star_states_at`](crate::stellar::multiplicity::star_states_at)), plus the
     /// body's Kepler velocity about it, and for a moon its planet's plus its own relative velocity.
-    /// It is the time derivative of the Kepler state at the elements then; a slow change of the
-    /// elements themselves (a moon's tidal migration, a host's mass loss) is left out, which is
-    /// far below the orbital velocity. `None` where `position_at` is.
+    /// For an evolving orbit it is the model's (P14.T45.a): the Kepler velocity at the model's
+    /// elements then with the mean motion nᵣ + ṅ Δt, leaving out the slow change of the axis
+    /// and eccentricity themselves, which is far below the orbital velocity. `None` where
+    /// `position_at` is.
     ///
     /// # Errors
     ///
@@ -1702,14 +1707,14 @@ impl PlanetarySystem {
         let zone = self.zone_of(primary);
         let host = fate_host(ctx, zone);
         let fate = self.fate_of(primary, &host).at(t);
-        let orbit = fate
-            .orbit()
+        let trajectory = fate
+            .trajectory()
             .expect("a body with a position has its primary's orbit then");
-        let centre = epoch.velocity(zone, orbit);
+        let centre = epoch.velocity(zone, trajectory);
         let velocity = match &body.part {
             Part::Planet(_) | Part::Member(_) | Part::Ring(_) => centre,
             Part::Moon(moon) => {
-                let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                let (orbit, _) = moon_trajectory(ctx, moon, t, fate.changes_at());
                 centre + orbit.relative_state_at(t).1
             }
         };
@@ -1865,7 +1870,20 @@ impl PlanetarySystem {
         else {
             return Ok(None);
         };
-        let elements = *orbit.elements();
+        // The elements at the time itself, as the derivation reads them, and not the record's,
+        // which an evolving orbit states at its drift cell's start (P14.T45.a).
+        let t = parent_time(ctx);
+        let elements = match &body.part {
+            Part::Moon(moon) => moon.satellite.orbit_at(&moon.parent, ctx.age_at(t)),
+            Part::Planet(_) | Part::Member(_) | Part::Ring(_) => {
+                let host = fate_host(ctx, self.zone_of(body));
+                self.fate_of(body, &host)
+                    .at(t)
+                    .orbit()
+                    .copied()
+                    .unwrap_or(*orbit.elements())
+            }
+        };
         let mass = Kilograms::from(*mass);
         let primary =
             elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value();
@@ -1974,7 +1992,7 @@ impl PlanetarySystem {
         };
         let mut now = ParentNow {
             state: at.state(),
-            valid_until: at.valid_until(),
+            changes_at: at.changes_at(),
             position: None,
             derived: None,
             sky: None,
@@ -1993,7 +2011,10 @@ impl PlanetarySystem {
                 let placed = Self::placed_now(body, orbit, at.mass());
                 let (derived, sky) =
                     self.derive(epoch, body, zone, &placed, fate.host_mass(epoch.t));
-                let position = epoch.position(zone, orbit);
+                let position = epoch.position(
+                    zone,
+                    at.trajectory().expect("a present body has a trajectory"),
+                );
                 now.position = Some(position);
                 now.derived = Some(derived);
                 now.sky = sky;
@@ -2082,15 +2103,14 @@ impl PlanetarySystem {
                 .hooks(Section::NotApplicable),
             (Part::Moon(moon), true, Some(centre)) => {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-                let valid_until = earliest(
-                    parent.valid_until,
-                    moon_lost_at(&moon.satellite, ctx.age_at_epoch())
-                        .filter(|&lost| lost > t && ClockWindow::contains(lost)),
-                );
+                let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, parent.changes_at);
                 let bulk = Self::moon_bulk(epoch, moon, &orbit, parent);
                 builder
-                    .orbit(Section::Ok(BodyOrbit::new(orbit, valid_until)))
-                    .position(centre.translated(orbit.relative_state_at(t).0))
+                    .orbit(Section::Ok(
+                        BodyOrbit::new(*trajectory.elements(), valid_until)
+                            .with_drift(trajectory.drift().copied()),
+                    ))
+                    .position(centre.translated(trajectory.relative_state_at(t).0))
                     .bulk(bulk)
                     .population(Section::NotApplicable)
             }
@@ -2409,7 +2429,9 @@ impl PlanetarySystem {
 #[derive(Debug, Clone, PartialEq)]
 struct ParentNow {
     state: BodyState,
-    valid_until: Option<UniverseTime>,
+    /// The next change of its state or segment inside the clock window, which its moons' records
+    /// hold until; not its own drift cell's end (P14.T45.a).
+    changes_at: Option<UniverseTime>,
     position: Option<SystemPosition>,
     derived: Option<DerivedBody>,
     sky: Option<MoonSky>,
@@ -2433,6 +2455,40 @@ fn moon_state(
         }
         (other, _) => other,
     }
+}
+
+/// How the present moon `moon` moves about its planet at `t`, and the time its record holds until,
+/// inside the clock window: its planet's next change `parent_changes`, its loss, or for a
+/// receding giant-impact moon the end of its drift cell (P14.T45.a).
+///
+/// A receding moon's phase is anchored at the epoch, held between the system's birth and the
+/// moon's loss, where its elements are its own then.
+#[must_use]
+fn moon_trajectory(
+    ctx: &SystemContext,
+    moon: &MoonPart,
+    t: UniverseTime,
+    parent_changes: Option<UniverseTime>,
+) -> (DriftingOrbit, Option<UniverseTime>) {
+    let within = |time: UniverseTime| ClockWindow::contains(time).then_some(time);
+    let age_at_epoch = ctx.age_at_epoch();
+    let lost = moon_lost_at(&moon.satellite, age_at_epoch).filter(|&lost| lost > t);
+    let next = earliest(parent_changes, lost);
+    if let SatelliteMoon::GiantImpact(impact) = moon.satellite.moon() {
+        let birth = time_at_age(Years::new(0.0), age_at_epoch)
+            .expect("a system's birth, under 14 Gyr ago, is a time of the clock")
+            .min(t);
+        let anchor = lost.map_or(UniverseTime::EPOCH.max(birth), |lost| {
+            UniverseTime::EPOCH.clamp(birth, lost.max(birth))
+        });
+        let anchored = moon.satellite.orbit_at(&moon.parent, ctx.age_at(anchor));
+        if let Some(law) = impact.law(anchored, anchor) {
+            let cell = drift_cell(&law, t, birth, next);
+            return (cell.orbit, cell.holds_until(t, next));
+        }
+    }
+    let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+    (DriftingOrbit::fixed(orbit), next.and_then(within))
 }
 
 /// When a giant-impact moon is lost, as a time, if it is representable.
@@ -2756,7 +2812,7 @@ impl<'c> Epoch<'c> {
     /// The velocity at the time of a body of `zone` on `orbit`, relative to the system's
     /// barycentre: [`position`](Self::position)'s derivative at the elements then.
     #[must_use]
-    fn velocity(&self, zone: &OrbitZone, orbit: &KeplerElements) -> SystemVelocity {
+    fn velocity(&self, zone: &OrbitZone, orbit: &DriftingOrbit) -> SystemVelocity {
         let (_, relative) = orbit.relative_state_at(self.t);
         self.centre_velocity(members_of(zone)) + relative
     }
@@ -2764,7 +2820,7 @@ impl<'c> Epoch<'c> {
     /// The position at the time of a body of `zone` on `orbit`, its elements then about the zone's
     /// host.
     #[must_use]
-    fn position(&self, zone: &OrbitZone, orbit: &KeplerElements) -> SystemPosition {
+    fn position(&self, zone: &OrbitZone, orbit: &DriftingOrbit) -> SystemPosition {
         let (offset, _) = orbit.relative_state_at(self.t);
         self.centre(members_of(zone)).translated(offset)
     }

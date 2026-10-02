@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { type Vec3 } from "../../geometry/vec3";
 import {
+  GOLDEN_SYSTEMS,
   type GoldenReading,
   type GoldenSource,
   goldenReadings,
@@ -28,46 +29,31 @@ import type { SceneModel, SceneSystem } from "./model";
 import { toSceneModel } from "./sceneWire";
 
 /**
- * The largest discrepancy measured against the golden (R03.T13, 2026-09-30) for a body whose
- * elements hold, as a fraction of Σ = |x_B(t − τ)| + |x_o(t)|: 5 × 10⁻¹⁵, inside Design note 7's
- * 10⁻¹⁴.
+ * The largest discrepancy measured against the golden (R03.T13, 2026-09-30) as a fraction of
+ * Σ = |x_B(t − τ)| + |x_o(t)|: 5 × 10⁻¹⁵, inside Design note 7's 10⁻¹⁴. Since plan 14's P14.T45 an
+ * evolving orbit, a receding moon's among them, is sent as drifting elements that the client
+ * evaluates with the simulation's own formula, so it is held to the same bound.
  */
 const MEASURED_RATIO = 5e-15;
-
-/**
- * The largest measured for a moon whose orbit evolves tidally while its `valid_until` is unset:
- * 2.0 × 10⁻¹³ Σ, since the simulation evaluates its elements at the emitted time and the wire states
- * them at the record's (a plan 14 matter, recorded in the plan's as-built notes).
- */
-const MEASURED_EVOLVING_RATIO = 2.0e-13;
 
 /** Design note 7's ceiling: a measurement above it is a bug, not a bound to widen. */
 const CEILING_RATIO = 1e-12;
 
-/** The pinned tolerances as fractions of Σ: ten times each measurement, held to the ceiling. */
+/** The pinned tolerance as a fraction of Σ: ten times the measurement, held to the ceiling. */
 const PINNED_RATIO = Math.min(10 * MEASURED_RATIO, CEILING_RATIO);
-const PINNED_EVOLVING_RATIO = Math.min(10 * MEASURED_EVOLVING_RATIO, CEILING_RATIO);
 
-/**
- * The bodies of a golden system whose elements differ between the epoch's answer and a century
- * on's while neither states a `valid_until`: the moons whose orbits evolve tidally.
- */
-function evolving(system: GoldenReading["system"]): ReadonlySet<BodyIdHex> {
-  const orbitsOf = (when: GoldenReading["when"]): Map<BodyIdHex, number> => {
-    const orbits = new Map<BodyIdHex, number>();
-    for (const body of goldenSystemBodies(system, when).bodies) {
-      if (body.orbit.state === "ok" && body.orbit.value.valid_until === null) {
-        orbits.set(body.id, body.orbit.value.orbit.semi_major_axis_m);
-      }
+/** A golden system's bodies at a golden time whose orbits the wire states, by ID. */
+function orbitsOf(
+  system: GoldenReading["system"],
+  when: GoldenReading["when"],
+): ReadonlyMap<BodyIdHex, SystemBodiesDto["bodies"][number]> {
+  const orbits = new Map<BodyIdHex, SystemBodiesDto["bodies"][number]>();
+  for (const body of goldenSystemBodies(system, when).bodies) {
+    if (body.orbit.state === "ok") {
+      orbits.set(body.id, body);
     }
-    return orbits;
-  };
-  const then = orbitsOf("plus_100_years");
-  return new Set(
-    [...orbitsOf("epoch")]
-      .filter(([id, a]) => then.has(id) && then.get(id) !== a)
-      .map(([id]) => id),
-  );
+  }
+  return orbits;
 }
 
 function norm(v: Vec3): number {
@@ -239,9 +225,7 @@ describe("apparentPosition against the simulation's golden vectors", () => {
   it("places every vector within the pinned bound, and measures under the ceiling", () => {
     const outside: string[] = [];
     let worstRatio = 0;
-    let worstEvolvingRatio = 0;
     for (const { golden, source, id, system } of sources) {
-      const drifting = evolving(golden.system).has(id);
       const track = placedTrack(systemPlacements(system), id);
       const seen = seenOrThrow(apparentPosition(track, observerOf(golden), golden.time, null));
       const sim = source.seen;
@@ -256,18 +240,47 @@ describe("apparentPosition against the simulation's golden vectors", () => {
         norm(golden.observerVelocityMPerS),
         nanosBetween(seen.emitted, sim.emitted),
       );
-      const pinned = drifting ? PINNED_EVOLVING_RATIO : PINNED_RATIO;
-      if (!(apartM <= Math.max(bound, pinned * sigma))) {
+      if (!(apartM <= Math.max(bound, PINNED_RATIO * sigma))) {
         outside.push(`${golden.system} ${golden.when} ${golden.who} ${id}: ${apartM} m`);
       }
-      if (drifting) {
-        worstEvolvingRatio = Math.max(worstEvolvingRatio, apartM / sigma);
-      } else {
-        worstRatio = Math.max(worstRatio, apartM / sigma);
-      }
+      worstRatio = Math.max(worstRatio, apartM / sigma);
     }
     expect(outside).toEqual([]);
-    expect(Math.max(worstRatio, worstEvolvingRatio)).toBeLessThanOrEqual(CEILING_RATIO);
+    expect(worstRatio).toBeLessThanOrEqual(CEILING_RATIO);
+  });
+
+  it("gives every orbit whose elements change a drift or a valid_until before they change", () => {
+    const unstated: string[] = [];
+    for (const system of GOLDEN_SYSTEMS) {
+      const then = orbitsOf(system, "plus_100_years");
+      const thenS = goldenSystemBodies(system, "plus_100_years").hosts.time.seconds;
+      for (const [id, body] of orbitsOf(system, "epoch")) {
+        const century = then.get(id);
+        if (body.orbit.state !== "ok" || century?.orbit.state !== "ok") {
+          continue;
+        }
+        const orbit = body.orbit.value;
+        const changed = JSON.stringify(orbit.orbit) !== JSON.stringify(century.orbit.value.orbit);
+        const until = orbit.valid_until;
+        const stated = orbit.drift !== undefined || (until !== null && until.seconds < thenS);
+        if (changed && !stated) {
+          unstated.push(`${system} ${id}`);
+        }
+      }
+    }
+    expect(unstated).toEqual([]);
+  });
+
+  it("includes close_binary's receding moon .0201, with a drift, among the compared sources", () => {
+    const moon = sources.find(
+      ({ id, golden }) => id === "42002cb200000009.0201" && golden.when === "plus_100_years",
+    );
+    const body = goldenSystemBodies("close_binary", "plus_100_years").bodies.find(
+      ({ id }) => id === "42002cb200000009.0201",
+    );
+
+    expect(moon).toBeDefined();
+    expect(body?.orbit.state === "ok" ? body.orbit.value.drift : undefined).toBeDefined();
   });
 
   it("gives every emitted time within the allowance of the golden's", () => {
