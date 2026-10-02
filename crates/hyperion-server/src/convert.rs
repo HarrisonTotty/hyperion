@@ -22,19 +22,19 @@ use std::sync::Arc;
 use hyperion_protocol::{
     CreateUniverseRequest, DensityMap, DensityMapRequest, ErrorCode, GalaxyParameters, LayerCensus,
     LayerStatus, MassLayer, Parameter, ParameterGroup, ParameterOrigin, ParameterValue,
-    RequestError, SeedHex, StellarBriefDto, SystemIdHex, SystemsInRange, SystemsInRangeRequest,
-    Unit, UniverseInfo, UniverseList,
+    RequestError, SeedHex, StellarBriefDto, SystemIdHex, SystemPlaceDto, SystemsInRange,
+    SystemsInRangeRequest, Unit, UniverseInfo, UniverseList,
 };
 use hyperion_sim::coords::{GalacticPosition, LyCell};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::{
     ArmParams, GalaxyParams, HaloComponentKind, HaloComponentParams, HaloParams,
 };
-use hyperion_sim::galaxy::placement::{SystemKind, layer_spec};
+use hyperion_sim::galaxy::placement::{SystemKind, SystemRecord, layer_spec};
 use hyperion_sim::galaxy::potential::PotentialTables;
 use hyperion_sim::galaxy::query::{
     BuildRangeQueryError, Census, CensusStop, MassFloor, RangeQuery, RangeResult,
-    SubstellarRequest, SystemHit, epoch_velocity,
+    SubstellarRequest, SystemHit, epoch_velocity, position_at,
 };
 use hyperion_sim::galaxy::substellar::SubstellarAbundance;
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
@@ -456,7 +456,7 @@ fn system_record(
     };
     hyperion_protocol::SystemRecord {
         id: SystemIdHex::from_u64(record.id().raw()),
-        designation: record.id().designation().to_string(),
+        designation: designation(record),
         position: galactic_position(hit.position()),
         layer: mass_layer(record.layer()),
         initial_mass_msun: record.primary_initial_mass().value(),
@@ -466,6 +466,33 @@ fn system_record(
         stellar: brief,
         fe_h_dex,
     }
+}
+
+/// Where a system is at `t`, as a scene states it (R03.T16): its catalogue designation, its
+/// barycentre in the galactic frame at `t` and its velocity there, m/s along the galactic axes.
+///
+/// The designation and the position are the chart's own: the same [`designation`], and
+/// [`position_at`], which a range query's hit holds, through the same [`galactic_position`], so a
+/// scene's place and `systems_in_range`'s row for the system at `t` agree exactly. The velocity is
+/// [`epoch_velocity`], constant (plan 08, P08.T7.a), which the row carries in km/s.
+#[must_use]
+pub(crate) fn system_place(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    t: UniverseTime,
+) -> SystemPlaceDto {
+    SystemPlaceDto {
+        designation: designation(record),
+        barycentre: galactic_position(&position_at(galaxy, record, t)),
+        velocity_m_s: epoch_velocity(galaxy, record).metres_per_second(),
+        time: stellar::wire_time(t),
+    }
+}
+
+/// A system's catalogue designation, derived from its ID alone (plan 01): never a proper name.
+#[must_use]
+fn designation(record: &SystemRecord) -> String {
+    record.id().designation().to_string()
 }
 
 /// The census as the wire carries it: all five stellar layers, A to E, then the substellar layers

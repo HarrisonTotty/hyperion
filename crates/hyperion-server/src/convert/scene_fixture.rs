@@ -178,7 +178,7 @@ fn scene_message_sizes() {
             let scene = SceneSystemDto {
                 system: bodies,
                 grants,
-                place: None,
+                place: Some(super::system_place(&galaxy, &record, wanted.time())),
             };
             let state = frame(&ServerMessage::Response {
                 id: RequestId(1),

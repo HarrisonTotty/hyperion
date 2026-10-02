@@ -45,7 +45,9 @@ use hyperion_sim::units::Metres;
 use super::sensing::{CraftState, SceneKnowledge};
 use super::{ClockReading, Ship, ShipPosition};
 use crate::compute::{GalaxyKey, GeneratedSystem, SharedCellCache, SharedSystemCache};
-use crate::convert::{BodiesRequest, ListedBody, scene_body, scene_system, system_summary};
+use crate::convert::{
+    BodiesRequest, ListedBody, scene_body, scene_system, system_place, system_summary,
+};
 use crate::limits::MAX_SCENE_CAMERAS;
 
 /// The ratio of the ship's distance to a system's tidal radius at or below which the scene enters
@@ -434,7 +436,7 @@ impl SceneCore {
         let observer = observer(world, &record, generated, inputs.ship, t)?;
         let (ctx, planets) = generated.as_ref();
         let id = record.id();
-        let (system, listed) = scene_system(
+        let (mut system, listed) = scene_system(
             BodiesRequest::new(id, t, self.asked),
             world.hosts(&record, t),
             ctx,
@@ -443,6 +445,7 @@ impl SceneCore {
             |index| inputs.knowledge.grant(index.body_id(id), self.asked),
             |index| seen(generated, observer.as_ref(), index),
         );
+        system.place = Some(system_place(world.galaxy, &record, t));
         let seen_bodies: BTreeSet<BodyIndex> = system
             .grants
             .iter()
@@ -830,7 +833,9 @@ fn camera_refusal(message: String) -> RequestError {
 mod tests {
     use std::collections::BTreeSet;
 
-    use hyperion_protocol::{BodyIdHex, DetailLevelDto, KinematicsDto, SystemBodiesDto};
+    use hyperion_protocol::{
+        BodyIdHex, DetailLevelDto, KinematicsDto, SystemBodiesDto, SystemPlaceDto,
+    };
     use hyperion_sim::GENERATOR_VERSION;
     use hyperion_sim::coords::GalacticDisplacement;
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
@@ -1189,6 +1194,61 @@ mod tests {
         .unwrap();
         assert_eq!(state.system, None);
         assert_eq!(state.tidal_radius_m, None);
+    }
+
+    /// The place the scene must state for the fixture's system at `t`, from the sim directly.
+    fn expected_place(fixture: &Fixture, t: UniverseTime) -> SystemPlaceDto {
+        let barycentre = position_at(&fixture.galaxy, &fixture.record, t);
+        SystemPlaceDto {
+            designation: fixture.id().designation().to_string(),
+            barycentre: hyperion_protocol::GalacticPosition {
+                cell_ly: barycentre.cell().to_array(),
+                offset_m: barycentre.offset_metres(),
+            },
+            velocity_m_s: epoch_velocity(&fixture.galaxy, &fixture.record).metres_per_second(),
+            time: wire_time(t),
+        }
+    }
+
+    #[test]
+    fn an_arrival_states_its_systems_place() {
+        let fixture = Fixture::new();
+        let world = fixture.world();
+        let halo = galactic_ship(GalacticPosition::from_light_years([0.0, 0.0, 60_000.0]).unwrap());
+        let (mut core, state) = SceneCore::build(
+            DetailLevel::Full,
+            inputs(at(10), &halo, &GrantAsked),
+            Vec::new(),
+            &world,
+        )
+        .unwrap();
+        assert_eq!(state.system, None);
+
+        let t = at(86_400);
+        let ship = system_ship(&fixture);
+        let delta = core
+            .advance(inputs(t, &ship, &GrantAsked), &world, Beat::Change)
+            .unwrap();
+        let Some(SceneArrivalDto::System { system, .. }) = delta.arrival else {
+            panic!("the ship arrived in the system: {:?}", delta.arrival);
+        };
+        assert_eq!(system.place, Some(expected_place(&fixture, t)));
+    }
+
+    #[test]
+    fn a_state_built_inside_a_system_states_its_place() {
+        let fixture = Fixture::new();
+        let world = fixture.world();
+        let t = at(86_400);
+        let ship = system_ship(&fixture);
+        let (_, state) = SceneCore::build(
+            DetailLevel::Full,
+            inputs(t, &ship, &GrantAsked),
+            Vec::new(),
+            &world,
+        )
+        .unwrap();
+        assert_eq!(system_of(&state).place, Some(expected_place(&fixture, t)));
     }
 
     #[test]
