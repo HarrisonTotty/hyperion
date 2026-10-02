@@ -2672,3 +2672,24 @@ not drawn`, with no compiler text on the screen (it stays in the log). `status.t
     `view/engine/catalogue.ts` imports (read from its relative imports at each run, so later
     plans' catalogue sources are covered too) routes `just test-render`; an edit to
     `view/wireframe/submit.ts` now does (checked by a scratch edit, reverted).
+  - **M2, the subgroup path asserted (T9.c, T10).** The `default` run's T9.c check now passes only
+    when the device has subgroups exactly when the adapter offers them, and each T10 twin checks
+    that it ran on the path the device's capabilities select (`T10 <name> runs on the <path>
+path`). On the subgroup path each u32 twin checks that `subgroup_size` is a power of two in
+    [4, 128] and at least the adapter's minimum. Verified by the validation's experiment: with the
+    `default` variant made to withhold subgroups (scratch edit, reverted), the run now fails T9.c.
+  - **m1, the T9.h check that could not fail.** Replaced: an asynchronous material prepared for
+    `rgba16float` is drawn, over a red draw, into an `rgba8unorm` target it was not prepared for;
+    the frame returns with its draw left out (red read back), and a later frame draws it once the
+    pipeline is ready (blue).
+  - **m6's mip check (T9.h).** A 3-mip `rgba16float` target of a flat colour reads that colour at
+    level 1, so `MipGenerator` is exercised on the GPU.
+  - **m2 and m3, the harness's verdict (T9).** `judgeSmokeRun` fails a run with no checks, and a
+    run whose page logged an uncaptured GPU error (`UNCAPTURED_GPU_ERROR`, the text
+    `logUncapturedErrors` writes; the broken-WGSL fixture's own are left out, its check failing
+    already). The run prints `uncaptured GPU errors <n>` and each error. Tests: `result.test.ts`.
+  - **Harness, after these fixes (2026-10-02, SwiftShader, headless):** both variants pass, 81
+    checks each (75 before), no request out, `uncaptured GPU errors 0`; the fixtures exit 1
+    (`broken-wgsl`), 1 (`external-fetch`) and 2 (`--drop-adapter-switches`). Run as
+    `testRender.sh` after `pnpm --filter hyperion build`, outside the heavy-test lock, which
+    another lane's slow wasm suite held.

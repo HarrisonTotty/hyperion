@@ -2,7 +2,8 @@
  * The headless smoke harness's main process (R01.T9, Design note 17): a plain Electron entry that
  * loads `smoke.html` in a hidden offscreen window, refuses every request but `file:` and `data:`,
  * waits for the page's one report, prints it a line a check and exits with 0 (pass), 1 (a property
- * failed or a request went out), 2 (a setup error, such as no adapter) or 3 (the watchdog).
+ * failed, no check ran, a request went out or the page logged an uncaptured GPU error), 2 (a setup
+ * error, such as no adapter) or 3 (the watchdog).
  *
  * @remarks
  * Its switches come from the `just test-render` recipe's command line, never from the client's
@@ -22,6 +23,7 @@ import { app, BrowserWindow, ipcMain, session } from "electron";
 import {
   type CancelledRequest,
   isOfflineUrl,
+  isUncapturedGpuError,
   judgeSmokeRun,
   readSmokeResult,
   SMOKE_EXIT,
@@ -45,6 +47,8 @@ const resize = argument("smoke-resize", "1") === "1";
 const video = argument("smoke-video", "");
 const capturePath = argument("smoke-capture", "");
 const cancelled: CancelledRequest[] = [];
+/** The page's uncaptured GPU errors, as the engine logged them. */
+const gpuErrors: string[] = [];
 /** The page's own URL, without its query: the only frame allowed to report. */
 const PAGE_URL = pathToFileURL(join(__dirname, "../renderer/smoke.html")).href;
 
@@ -130,7 +134,12 @@ void app
           finish(["SETUP the page's report is malformed"], SMOKE_EXIT.setup);
           return;
         }
-        const { lines, exitCode } = judgeSmokeRun(result, cancelled);
+        // The broken fixture's shader raises its own validation errors; its check already fails.
+        const { lines, exitCode } = judgeSmokeRun(
+          result,
+          cancelled,
+          fixture === "broken-wgsl" ? [] : gpuErrors,
+        );
         finish(lines, exitCode);
       } catch (error: unknown) {
         finish([`SETUP the report could not be judged: ${String(error)}`], SMOKE_EXIT.setup);
@@ -141,6 +150,9 @@ void app
     window.webContents.on("console-message", (details) => {
       if (details.level === "error" || details.level === "warning") {
         process.stderr.write(`page ${details.level}: ${details.message}\n`);
+      }
+      if (details.level === "error" && isUncapturedGpuError(details.message)) {
+        gpuErrors.push(details.message);
       }
     });
     await window.loadFile(join(__dirname, "../renderer/smoke.html"), {

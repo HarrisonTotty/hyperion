@@ -85,10 +85,29 @@ export function readSmokeResult(value: unknown): SmokeResult | null {
   return { variant, adapter, capabilities, checks, setupError };
 }
 
-/** The run's printed lines and its exit code. */
+/**
+ * What the engine logs, on the page, for a GPU error nothing captured (`webgpu/deviceLoss.ts`'s
+ * `logUncapturedErrors`), by which the main process counts them.
+ */
+export const UNCAPTURED_GPU_ERROR = "the GPU device raised an uncaptured error";
+
+/** Whether a page's console message is the engine's log of an uncaptured GPU error. */
+export function isUncapturedGpuError(message: string): boolean {
+  return message.includes(UNCAPTURED_GPU_ERROR);
+}
+
+/**
+ * The run's printed lines and its exit code.
+ *
+ * @param gpuErrors - The page's uncaptured GPU errors that count against the run: a validation
+ * error in a pass no check reads back (a timestamp resolve, a mip pass, an unsampled
+ * post-process) would otherwise pass unseen. The broken-WGSL fixture's own are left out by the
+ * caller.
+ */
 export function judgeSmokeRun(
   result: SmokeResult,
   cancelled: ReadonlyArray<CancelledRequest>,
+  gpuErrors: ReadonlyArray<string>,
 ): { readonly lines: ReadonlyArray<string>; readonly exitCode: number } {
   const lines = [
     `variant ${result.variant}`,
@@ -98,10 +117,16 @@ export function judgeSmokeRun(
       (check) => `${check.pass ? "PASS" : "FAIL"} ${check.name}: ${check.detail}`,
     ),
     `cancelled requests [${cancelled.map((request) => `${request.resourceType} ${request.url}`).join(", ")}]`,
+    `uncaptured GPU errors ${gpuErrors.length}`,
+    ...gpuErrors.map((message) => `GPU ERROR ${message}`),
   ];
   if (result.setupError !== null) {
     return { lines: [...lines, `SETUP ${result.setupError}`], exitCode: SMOKE_EXIT.setup };
   }
-  const failed = result.checks.some((check) => !check.pass) || cancelled.length > 0;
+  if (result.checks.length === 0) {
+    return { lines: [...lines, "FAIL the page ran no checks"], exitCode: SMOKE_EXIT.failed };
+  }
+  const failed =
+    result.checks.some((check) => !check.pass) || cancelled.length > 0 || gpuErrors.length > 0;
   return { lines, exitCode: failed ? SMOKE_EXIT.failed : SMOKE_EXIT.pass };
 }
