@@ -544,6 +544,26 @@ fn a_death_in_the_window_is_when_the_orbit_holds_until() {
     assert_eq!(state_at(&planet, &host, death.at).valid_until(), None);
 }
 
+/// Before the window's start a present body's next change is stated wherever it falls, so that its
+/// moons' drifting records there hold no further than it (RM1 validation, 2026-10-02); inside the
+/// window it is stated only inside it, as before.
+#[test]
+fn a_change_before_the_window_is_stated_for_a_time_before_it() {
+    let lifetime = death_of(&star(20.0, 3e7)).expect("dead");
+    let age = star(20.0, 3e7).age_at(lifetime.at).value() + 5_000.0;
+    let host_star = star(20.0, age);
+    let host = FateHost::star(&host_star);
+    let planet = body(400.0, 0.0, jupiter_mass(), 20.0, 0.3);
+    let death = death_of(&host_star).expect("dead before the window");
+    assert!(SourceHorizon::START < death.at && death.at < ClockWindow::START);
+    let before = state_at(&planet, &host, after(death.at, -1_000));
+    assert_eq!(before.state(), BodyState::Present);
+    assert_eq!(before.changes_at(), Some(death.at));
+    // Inside the window nothing changes again: the next change, if any, lies past its end.
+    let now = state_at(&planet, &host, UniverseTime::EPOCH);
+    assert!(now.changes_at().is_none_or(ClockWindow::contains));
+}
+
 #[test]
 fn the_transform_is_deterministic_and_independent_of_query_order() {
     let sun = star(1.0, 13.5e9);
@@ -966,10 +986,14 @@ fn an_orbit_whose_host_lost_its_mass_before_the_window_drifts_before_it() {
     assert!(apart > 1e11, "{apart:e} m");
 }
 
-/// The model's speed is the Kepler speed of the law's own elements at the time, to 10⁻⁹: the
-/// one-panel rule's error made it differ by up to 1.7 × 10⁻⁵ on late-AGB hosts (P14.T45.d).
+/// The Kepler part of the model's velocity, v − (ȧ ∂r/∂a + ė ∂r/∂e), has the Kepler speed of the
+/// law's own elements at the time, to 10⁻⁹: the one-panel rule's error made it differ by up to
+/// 1.7 × 10⁻⁵ on late-AGB hosts (P14.T45.d). The full speed, the position's derivative since
+/// P14.T45.e, exceeds vis-viva on a superwind host by about Ψ² ÷ 2 ≈ 7 × 10⁻⁹, which is
+/// physical. These orbits are circular and stay so (ė = 0), so the rate part is ȧ r ÷ a(t), r
+/// being linear in a at a fixed mean anomaly.
 #[test]
-fn the_models_speed_is_the_kepler_speed_of_the_laws_elements() {
+fn the_models_kepler_speed_is_the_kepler_speed_of_the_laws_elements() {
     let host_star = host_before_death(2.0, 2_775.0);
     let host = FateHost::star(&host_star);
     for a_au in [3.0, 25.0] {
@@ -979,14 +1003,9 @@ fn the_models_speed_is_the_kepler_speed_of_the_laws_elements() {
             let t = years_from_epoch(y);
             let now = fate.at(t);
             let elements = now.orbit().expect("present");
-            let (position, velocity) = now.trajectory().expect("present").relative_state_at(t);
-            let r = position.metres().iter().map(|x| x * x).sum::<f64>().sqrt();
-            let v = velocity
-                .metres_per_second()
-                .iter()
-                .map(|x| x * x)
-                .sum::<f64>()
-                .sqrt();
+            let trajectory = now.trajectory().expect("present");
+            let r = distance(trajectory.relative_state_at(t).0.metres(), [0.0; 3]);
+            let v = distance(kepler_part(trajectory, t), [0.0; 3]);
             let mu = elements.gravitational_parameter().value();
             let kepler = (mu * (2.0 / r - 1.0 / elements.semi_major_axis().value())).sqrt();
             assert!(
@@ -997,14 +1016,57 @@ fn the_models_speed_is_the_kepler_speed_of_the_laws_elements() {
     }
 }
 
-/// At sampled cell ends not at the 2¹⁶ s floor, the velocity steps by at most 10⁻⁵ m s⁻¹, and for
-/// a cell clear of the law's break points by at most 10 ε ÷ S, with ε the cell's tolerance and
-/// the rounding allowance of the phase gained since the anchor (P14.T45.d): the one-panel rule's
-/// error stepped it by up to 0.13 m s⁻¹.
+/// The model's velocity is its position's derivative, to 10⁻⁹ of the speed beyond a central
+/// difference's own error, on the late-AGB host's widening orbits, where the Kepler velocity alone
+/// missed by Ψ = ȧ ÷ (n a) ≈ 1.2 × 10⁻⁴ (0.9 m s⁻¹ at 9.5 au), and on an eccentric orbit that
+/// circularises fast (P14.T45.e).
+#[test]
+fn the_models_velocity_is_the_derivative_of_its_position() {
+    use crate::planetary::drift::tests::velocity_derivative_excess;
+    let host_star = host_before_death(2.0, 2_775.0);
+    let host = FateHost::star(&host_star);
+    // A young Sun, so that the orbit is still eccentric (e ≈ 0.04) and circularising.
+    let sun = star(1.0, 5e7);
+    let sun_host = FateHost::star(&sun);
+    let widening = [3.0, 25.0].map(|a_au| body(a_au, 0.0, earth_mass(), 2.0, 2.0));
+    let circularising = body(0.05, 0.2, earth_mass(), 1.0, 2.0)
+        .with_circularisation(Circularisation::new(Years::new(3e7)).expect("positive"));
+    let cases = [
+        (&widening[0], &host),
+        (&widening[1], &host),
+        (&circularising, &sun_host),
+    ];
+    let mut drifting = 0;
+    for (planet, host) in cases {
+        let fate = BodyFate::resolve(planet, host);
+        for y in [-999.0, -1.0, 0.0, 0.7, 998.0] {
+            let t = years_from_epoch(y);
+            let now = fate.at(t);
+            let trajectory = *now.trajectory().expect("present");
+            let Some(drift) = trajectory.drift() else {
+                continue;
+            };
+            let inside = after(drift.reference(), 600);
+            assert_eq!(fate.at(inside).trajectory(), Some(&trajectory));
+            let excess = velocity_derivative_excess(&trajectory, inside);
+            assert!(excess < 1e-9, "{y} yr: {excess:e}");
+            drifting += 1;
+        }
+    }
+    assert_eq!(drifting, 15, "every case drifts at every time");
+}
+
+/// At sampled cell ends not at the 2¹⁶ s floor, the Kepler part of the velocity steps by at most
+/// 10⁻⁵ m s⁻¹, and for a cell clear of the law's break points by at most 10 ε ÷ S, with ε the
+/// cell's tolerance and the rounding allowance of the phase gained since the anchor (P14.T45.d):
+/// the one-panel rule's error stepped it by up to 0.13 m s⁻¹. The rate part ȧ ∂r/∂a (P14.T45.e)
+/// adds the change of the secant ȧ: under 10⁻⁸ m s⁻¹ on clean cells, and at a break where the
+/// host's Ṁ jumps the law's own jump, which is the position's derivative stepping there.
 #[test]
 fn the_velocity_steps_little_at_a_cell_s_end() {
     use crate::planetary::drift::{DRIFT_CELL_MIN_LOG2, DRIFT_TOLERANCE};
     let (mut ends, mut clean) = (0, 0);
+    let mut largest_clean_rate_step = 0.0_f64;
     for (mass, before_death) in [
         (2.0, 2_775.0),
         (3.0, 2e4),
@@ -1053,18 +1115,27 @@ fn the_velocity_steps_little_at_a_cell_s_end() {
                         && drift.reference().seconds() % length == 0;
                     let floor = aligned && length.trailing_zeros() == DRIFT_CELL_MIN_LOG2;
                     if !floor {
-                        let before = trajectory.relative_state_at(until).1.metres_per_second();
-                        let joined = after.relative_state_at(until).1.metres_per_second();
-                        let step = before
-                            .iter()
-                            .zip(joined)
-                            .map(|(x, y)| (x - y) * (x - y))
-                            .sum::<f64>()
-                            .sqrt();
+                        let step =
+                            distance(kepler_part(trajectory, until), kepler_part(after, until));
                         assert!(
                             step <= 1e-5,
                             "{mass} M☉, {a_au} au, at {until}: {step:e} m/s"
                         );
+                        // The rate part ȧ r ÷ a steps by the change of the secant ȧ, |Δȧ| on a
+                        // circle: at a break where the host's Ṁ jumps, the law's own.
+                        let rate_step = (axis_rate(after) - axis_rate(trajectory)).abs();
+                        let full = distance(
+                            trajectory.relative_state_at(until).1.metres_per_second(),
+                            after.relative_state_at(until).1.metres_per_second(),
+                        );
+                        assert!(
+                            full <= step + rate_step * (1.0 + 1e-9) + 1e-12,
+                            "{mass} M☉, {a_au} au, at {until}: {full:e} m/s against \
+                             {step:e} + {rate_step:e}"
+                        );
+                        if aligned {
+                            largest_clean_rate_step = largest_clean_rate_step.max(rate_step);
+                        }
                         if aligned {
                             #[expect(
                                 clippy::cast_precision_loss,
@@ -1094,4 +1165,38 @@ fn the_velocity_steps_little_at_a_cell_s_end() {
         ends > 80 && clean > 20 && ends - clean > 10,
         "{ends} ends, {clean} clean"
     );
+    // On cells clear of breaks the secant ȧ changes by ä S, a few 10⁻⁹ m s⁻¹ here.
+    assert!(
+        largest_clean_rate_step < 1e-8,
+        "{largest_clean_rate_step:e} m/s"
+    );
+}
+
+/// The distance between two vectors.
+fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y) * (x - y))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// ȧ of a drifting record, m s⁻¹, for an orbit that stays circular (ė = 0).
+fn axis_rate(trajectory: &DriftingOrbit) -> f64 {
+    let drift = trajectory.drift().expect("drifting");
+    assert!(drift.eccentricity_rate_per_s().abs() < f64::MIN_POSITIVE);
+    drift.semi_major_axis_rate_m_per_s()
+}
+
+/// The Kepler part of a circular drifting orbit's velocity at `t`, m s⁻¹: the velocity less
+/// ȧ ∂r/∂a = ȧ r ÷ a(t), since r is linear in a at a fixed mean anomaly and ė = 0 (P14.T45.e).
+fn kepler_part(trajectory: &DriftingOrbit, t: UniverseTime) -> [f64; 3] {
+    let a_rate = axis_rate(trajectory);
+    let reference = trajectory.drift().expect("drifting").reference();
+    let axis = trajectory.elements().semi_major_axis().value()
+        + a_rate * crate::orbit::seconds_between(reference, t);
+    let (position, velocity) = trajectory.relative_state_at(t);
+    let position = position.metres();
+    let velocity = velocity.metres_per_second();
+    std::array::from_fn(|i| velocity[i] - a_rate * position[i] / axis)
 }

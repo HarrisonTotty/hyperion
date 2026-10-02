@@ -372,7 +372,8 @@ function secondsBetween(from: UniverseTime, to: UniverseTime): number {
  * any universe time before or after it is valid. The mean anomaly is M₀ plus 2π times the centred
  * fraction of a period elapsed since the epoch, reduced exactly from the time's whole seconds (see
  * the module's remarks). An orbit with a {@link OrbitDrift} adds its rates' changes from the drift's
- * reference time (P14.T45.c).
+ * reference time (P14.T45.c), and its velocity is the time derivative of that drifting position:
+ * the Kepler velocity of the elements then plus ȧ ∂r/∂a + ė ∂r/∂e (P14.T45.e).
  *
  * @throws RangeError for an orbit that is not propagated on the client (e ≥
  *   {@link NEAR_PARABOLIC_ECCENTRICITY}) or has a stored element out of range, or for a malformed
@@ -405,9 +406,21 @@ export function stateAt(orbit: KeplerOrbit, time: UniverseTime): OrbitState {
   const across = a * axisRatio * sin;
   const radiusOverA = oneMinusE + e * cosineDeficit;
   const speed = (meanMotionRadPerS * a) / radiusOverA;
+  let velocityAlongMPerS = -speed * sin;
+  let velocityAcrossMPerS = speed * axisRatio * cos;
+  if (drift !== undefined) {
+    // ȧ ∂r/∂a + ė ∂r/∂e at a fixed mean anomaly, as the server's `PlaneState::add_rate_terms`
+    // adds them, so the velocity is the drifting position's derivative (P14.T45.e).
+    const aRate = drift.semiMajorAxisRateMPerS;
+    const eRate = drift.eccentricityRatePerS;
+    velocityAlongMPerS +=
+      aRate * (oneMinusE - cosineDeficit) - eRate * a * (1 + (sin * sin) / radiusOverA);
+    velocityAcrossMPerS +=
+      aRate * axisRatio * sin + eRate * a * sin * ((axisRatio * cos) / radiusOverA - e / axisRatio);
+  }
   return {
     positionM: planeToFrame(orientation, alongPeriapsis, across),
-    velocityMPerS: planeToFrame(orientation, -speed * sin, speed * axisRatio * cos),
+    velocityMPerS: planeToFrame(orientation, velocityAlongMPerS, velocityAcrossMPerS),
   };
 }
 

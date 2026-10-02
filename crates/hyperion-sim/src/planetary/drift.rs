@@ -13,9 +13,10 @@
 //! each interval between the law's break points ([`composite_excess`], P14.T45.d): the host's
 //! track knots and segment boundaries, its sudden deaths and the eccentricity floor's corners.
 //! Between two of them the mean motion is smooth (a polynomial of degree 6 in time where a host's
-//! winds alone move it, since n ∝ M² and the track's mass is a cubic in age between knots), so
-//! the rule is exact there to rounding, and a fixed set of panels makes the integral one function
-//! of time. The one corner left unbroken is the track's floor at the core mass, which an envelope
+//! winds alone move it, since n ∝ M² under adiabatic mass loss, a M constant (Veras et al. 2011,
+//! MNRAS 417, 2104, eq. 18 and 20, for Ψ ≪ 1), and the track's mass is a cubic in age between
+//! knots), so the rule is exact there to rounding, and a fixed set of panels makes the integral
+//! one function of time. The one corner left unbroken is the track's floor at the core mass, which an envelope
 //! run down at the AGB's end could meet inside a knot interval; the rule is then exact only to
 //! that corner's error, as T45.a's one panel was at every kink. The host's mass is read smoothly in time for it
 //! ([`StarModel::phase_and_mass_at`](crate::stellar::system::StarModel::phase_and_mass_at)):
@@ -206,7 +207,8 @@ impl DriftingOrbit {
 
     /// The position and velocity relative to the primary at `t`, m and m s⁻¹: the elements'
     /// Kepler state, or for an evolving orbit the model of its cell
-    /// ([`KeplerElements::drifting_state_at`]).
+    /// ([`KeplerElements::drifting_state_at`]), whose velocity is its position's time derivative
+    /// (P14.T45.e).
     #[must_use]
     pub fn relative_state_at(&self, t: UniverseTime) -> (SystemVector, SystemVelocity) {
         match &self.drift {
@@ -559,4 +561,4 @@ pub(crate) fn recession_phase_ratio_less_one(x: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
