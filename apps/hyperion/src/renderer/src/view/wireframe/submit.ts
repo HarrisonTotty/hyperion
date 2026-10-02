@@ -82,7 +82,7 @@ function spec(
   name: WireframeMaterial,
   state: Pick<
     WgslMaterialSpec,
-    "uniforms" | "transparent" | "depthWrite" | "colourWrites" | "blend" | "depthBiasAway"
+    "uniforms" | "depthWrite" | "colourWrites" | "blend" | "depthBiasAway"
   >,
 ): WgslMaterialSpec {
   return {
@@ -116,21 +116,18 @@ export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMateria
       { name: "dashOnPx", type: "f32" },
       { name: "dashOffPx", type: "f32" },
     ],
-    transparent: true,
     depthWrite: false,
     colourWrites: true,
     blend: "premultiplied",
   }),
   occluderSphere: spec("occluderSphere", {
     uniforms: [],
-    transparent: false,
     depthWrite: true,
     colourWrites: false,
     blend: "none",
   }),
   occluderHull: spec("occluderHull", {
     uniforms: [{ name: "firstTriangle", type: "f32" }],
-    transparent: false,
     depthWrite: true,
     colourWrites: false,
     blend: "none",
@@ -138,7 +135,6 @@ export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMateria
   }),
   starSprite: spec("starSprite", {
     uniforms: [],
-    transparent: true,
     depthWrite: false,
     colourWrites: true,
     blend: "additive",

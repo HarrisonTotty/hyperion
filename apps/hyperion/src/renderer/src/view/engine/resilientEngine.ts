@@ -6,7 +6,7 @@
  * On a loss the engine reports `device-lost` to the status store, disposes the lost engine and
  * every view's context and target, asks for a fresh adapter (an adapter is consumed by its first
  * device, so the old one is never reused), and loads a new engine through the same import (R01
- * Design notes 7 and 9). A null adapter means Chromium has withdrawn WebGPU: the status becomes
+ * Design notes 9 and 24). A null adapter means Chromium has withdrawn WebGPU: the status becomes
  * `disabled` with cause `adapter-withdrawn`. After `DEVICE_LOSS_LIMIT` losses it stops, and the
  * status is `disabled` with cause `device-losses`. Views survive a rebuild, re-created at their
  * sizes; every other handle belongs to the lost engine, so the caller makes them again when
@@ -427,7 +427,7 @@ export class ResilientEngine implements RenderEngine {
       }
     }
     this.#status.dispatch({ kind: "device-restored", outcome });
-    // The restore writes the adapter's capabilities; the device's are what holds (Design note 7).
+    // The restore writes the adapter's capabilities; the device's are what holds (Design note 24).
     this.#status.dispatch({ kind: "device-capabilities", capabilities: inner.capabilities });
     for (const listener of this.#restoredListeners) {
       try {

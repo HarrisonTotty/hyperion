@@ -150,7 +150,7 @@ export async function checkTargetsAsyncIndirectTiming(
     `counter ${counted}`,
   );
   const additive = engine.createMaterial(
-    flatSpec("indirect add", { blend: "additive", depthWrite: false, transparent: true }),
+    flatSpec("indirect add", { blend: "additive", depthWrite: false }),
   );
   first.render(
     frameOf("indirect draw", [

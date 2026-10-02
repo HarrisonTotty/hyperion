@@ -88,7 +88,6 @@ export function flatSpec(
     fragmentWgsl: FLAT_WGSL,
     uniforms: [{ name: "tint", type: "vec4f" }],
     samplers: [],
-    transparent: false,
     cullMode: "none",
     depthWrite: true,
     colourWrites: true,

@@ -2628,7 +2628,7 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     a packed-cube level (CPU or copied) only when the cube has one level, a kernel's storage
     texture only when it has one level, and a splat (it adds to what is there) never. Tests:
     `engine.test.ts` (the engine over `FakeDevice`) and `readback.test.ts`.
-  - **M5, a failed restore (T8.k, `ResilientEngine`).** Only `#create` is inside the rebuild's
+  - **M5, a failed restore (T8.e, `ResilientEngine`).** Only `#create` is inside the rebuild's
     `try` now. `#restore` runs after it and catches each view's re-creation and each
     `onRestored` listener on its own, logging it, so a canvas with no context or a throwing
     listener neither disposes the new engine nor counts a loss. Tests: two in
@@ -2641,7 +2641,7 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
 not drawn`, with no compiler text on the screen (it stays in the log). `status.ts`'s three
     stale comments, `status.test.ts` and the guide's row are updated, and the T8.b, T8.k and T8.l
     notes are marked closed. `ux_lint.py` on `status.ts`: 0 errors.
-  - **m10, colour self-sampling (T8.e, Design note 21).** `WebGpuRenderTarget.render` now also
+  - **m10, colour self-sampling (T8.i, Design note 21).** `WebGpuRenderTarget.render` now also
     refuses a draw or a `PostProcessItem.textures` entry that samples the target's own colour,
     with the new `ColourSelfSample` (in `types.ts`, beside `DepthSelfSample`; a Provides
     addition), before anything is encoded. Tests: `target.test.ts`.
@@ -2659,3 +2659,8 @@ not drawn`, with no compiler text on the screen (it stays in the log). `status.t
     their timestamps inside the encoding, so a pass that was never submitted is never reported.
     `dispatch` resolves its times after each dispatch, so a bake of more than 64 dispatches no
     longer fills the query set before a frame. Tests: `timing.test.ts`, `engine.test.ts`.
+  - **m7, Babylon vestiges (T8.l).** `WgslMaterialSpec.transparent`, Babylon's queue flag that
+    nothing read, is removed from the type, the wireframe's four specs, the harness's specs and
+    the tests; `blend`'s TSDoc now says that draws are encoded in submission order. The code
+    comments that cited superseded Design note 7 (`platform.ts`, `webgpu/engine.ts`,
+    `resilientEngine.ts`) cite Design note 24, and `webgpu.d.ts` no longer mentions Babylon.

@@ -3,7 +3,7 @@
  * `loadEngine.ts` imports dynamically, and so the root of a lazily loaded chunk.
  *
  * @remarks
- * The device is requested on the adapter the client vetted (Design note 7), with the features
+ * The device is requested on the adapter the client vetted (Design note 24), with the features
  * `requiredFeatures` asks for; its capabilities are the device's, so a feature the smoke harness
  * withholds reads as absent. Every draw, post-process, dispatch, copy and readback is encoded by
  * the adapter itself on that device, through pipelines it makes from standard WGSL under explicit
@@ -813,7 +813,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   }
   const engine = new WebGpuRenderEngine(device, status);
   // The device's features, not the adapter's, so that a withheld feature reads as absent in the
-  // status too (Design note 7).
+  // status too (Design note 24).
   status.dispatch({ kind: "device-capabilities", capabilities: engine.capabilities });
   // Once a device, before any view renders: a rebuild comes through here too (Design note 22).
   status.dispatch({ kind: "target-rounding", rounding: await engine.probeTargetRounding() });

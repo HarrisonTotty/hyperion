@@ -327,11 +327,6 @@ export interface WgslMaterialSpec {
   readonly samplers: ReadonlyArray<SamplerSpec>;
   /** The sampled textures it declares in `@group(2)`. */
   readonly textures?: ReadonlyArray<TextureBindingSpec>;
-  /**
-   * Documents a blended draw; it does not reorder anything, since draws are encoded in submission
-   * order, so the caller submits its translucent draws after its opaque ones.
-   */
-  readonly transparent: boolean;
   readonly cullMode: "none" | "back";
   /** `false` for R02's lines and sprites. */
   readonly depthWrite: boolean;
@@ -339,7 +334,8 @@ export interface WgslMaterialSpec {
   readonly colourWrites: boolean;
   /**
    * Every mode keeps the destination alpha, R07's meter class (R01 Design note 21); `additive` is
-   * R02's sprites, in linear light.
+   * R02's sprites, in linear light. Nothing is reordered by it: draws are encoded in submission
+   * order, so the caller submits its blended draws after its opaque ones.
    */
   readonly blend: "none" | "additive" | "premultiplied";
   readonly storageBuffers?: ReadonlyArray<StorageBufferSpec>;
