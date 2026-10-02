@@ -10,6 +10,7 @@
     "src/main",
     "src/preload",
     "src/smoke",
+    "src/tools",
     "electron.vite.config.mts",
     "vitest.config.mts",
     "package.json"

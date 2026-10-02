@@ -827,6 +827,23 @@ Tests (paused tokio clock): the clock advances at its rate and not while paused;
 the universe's `watch` channel (the push to subscriptions is R03.T8.a's test). Acceptance:
 `cargo test -p hyperion-server scene::clock`; `just ci`.
 
+**Placing the stand-in by hand: `just place-ship`.** No console sends `scene_ship` before sessions,
+and the unset stand-in is at the galactic centre, in no system, so a stock `just server` and
+`just client` show `VIEW`'s kept scene under `TRAINING` (`SCENE NOT AVAILABLE: the ship is in no
+system`). The developer flow is `just server`, then `just place-ship`, then `just client`, F2,
+`OPEN` the universe it names, and F4. `just place-ship` (`apps/hyperion/src/tools/placeShip.ts`,
+run by `apps/hyperion/scripts/placeShip.mjs` through Vite's module runner) is a client of the
+server, with no server mode of its own: it finds or creates a universe (`Dev Fixture`, seed
+`0x4d2`, by default), picks a system (by ID or designation, or the nearest with a planet to
+`0,26000,0` ly, which for that seed is FPF 1Z0P1Z D-35, `61ffd967fe000023`), and sends
+`scene_ship`. By default it puts the stand-in at rest in the system's first planet's frame,
+0.01 au behind the planet along its orbital velocity, so that the seat camera, which looks along
+the stand-in's velocity in the system frame (R02.T17's stand-in attitude), has the planet ahead;
+`--look-at barycentre` puts it at rest 1 au along galactic +z from the barycentre instead, and
+`--look-at <body ID>`, `--distance`, `--time` and `--rate` choose the rest. The README's
+"Seeing a generated system in `VIEW`" lists the options. The sessions plan, which retires the
+stand-in, retires the tool with it. Added 2026-10-02 (RM1 validation, see the Risks).
+
 ### R03.T7 The scene's core
 
 `crates/hyperion-server/src/scene/core.rs`, pure and synchronous: `SceneCore::build(inputs) ->
@@ -1114,7 +1131,8 @@ and no kind is added.
   notification or binary frame (T1).
 - **Figures:** the recorded sizes, rates and latencies of T8.b, T10.b and T15.
 - **By eye:** R02's wireframe drawing a generated system from `useScene`, with a moon's position
-  steady as the stand-in's clock runs at 10⁵×, is R02's check and the first real use of this plan.
+  steady as the stand-in's clock runs at 10⁵×, is R02's check and the first real use of this plan. The
+  stand-in is placed with `just place-ship` (R03.T6's note).
 
 ## Generator version
 
@@ -1150,6 +1168,16 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
   It is a development and testing seam that sessions retire (Design note 2), and its request is
   refused once a universe has a session. Until then any client can move every client's scene, as any
   client can set plan 12's observer.
+- **Fixed in RM1 validation (2026-10-02): nothing placed the stand-in.** The integration
+  validation (MAJOR-1) found that no client code sends `scene_ship` and no document said how to,
+  so a stock server and client could never show the server's scene, and R02.T18's by-hand checks
+  that need it could not be run. `just place-ship` now does it as a client of the server (R03.T6's
+  note, the README), with tests in `apps/hyperion/src/tools/placeShip.test.ts`; no server mode was
+  added. Checked live on 2026-10-02 against a debug server and the built client (hidden,
+  offscreen): `VIEW` drew the server's scene of FPF 1Z0P1Z D-35 with no `TRAINING`, `CAMERA SEAT`,
+  and the planet `/256` at 1.50 Gm in the centre of the frame. A first draft searched with
+  `system_bodies` at `contact`, which leaves every body's kind `unresolved`, so it found no planet;
+  it asks at `mass_and_orbit`, and a test holds it there.
 - **Elements across an event within the light time.** A body whose elements change at a
   `valid_until` is seen with its old elements for up to a light time afterwards, and a body
   destroyed less than a light time ago is still seen. The scene sends each body's current record
@@ -1736,7 +1764,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
     from first chunk to last: median 1.67 ms, worst 4.8 ms. On loopback a transfer adds about a
     millisecond. The slow-link figures are T10.b's (Design note 11).
   - **Pending, by hand:** the latency between two machines on gigabit Ethernet and on Wi-Fi, with
-    the link rates. This machine alone cannot take it.
+    the link rates. This machine alone cannot take it. A live scene for it, or for any look at a
+    generated system, is set up with `just place-ship` (R03.T6's note; `--address` names a
+    server on the other machine).
   - **Pending:** the smoke check of a 15 MiB (61-chunk) transfer and its terminal response in the
     real Electron renderer. No kind is answered in bulk until R06 and R09, so neither the server
     binary nor any page can ask for one yet. A stand-in kind would be test-only server code
