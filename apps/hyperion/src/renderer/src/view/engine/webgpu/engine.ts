@@ -346,13 +346,17 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
     const { handle, record } = this.#makeMaterial(spec, false);
-    void compilationErrorsOf(record.modules).then((errors): void => {
-      if (errors.length > 0) {
-        record.broken = true;
-        this.#reportShaderErrors(`material ${spec.name}`, spec.name, errors);
-      }
-      return undefined;
-    });
+    void compilationErrorsOf(record.modules)
+      .then((errors): void => {
+        if (errors.length > 0) {
+          record.broken = true;
+          this.#reportShaderErrors(`material ${spec.name}`, spec.name, errors);
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        this.#reportCompileCheckFailure(`material ${spec.name}`, error);
+      });
     return handle;
   }
 
@@ -415,13 +419,17 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       pipelines: new Map(),
       broken: false,
     };
-    void compilationErrors(fragment).then((errors): void => {
-      if (errors.length > 0) {
-        record.broken = true;
-        this.#reportShaderErrors(`post-process ${spec.name}`, spec.name, errors);
-      }
-      return undefined;
-    });
+    void compilationErrors(fragment)
+      .then((errors): void => {
+        if (errors.length > 0) {
+          record.broken = true;
+          this.#reportShaderErrors(`post-process ${spec.name}`, spec.name, errors);
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        this.#reportCompileCheckFailure(`post-process ${spec.name}`, error);
+      });
     const handle: PostProcessHandle = Object.freeze({ kind: "post-process", name: spec.name });
     this.#postProcesses.set(handle, record);
     return handle;
@@ -690,6 +698,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
     console.error(`${owner} failed to compile; its draws are left out:\n${errors.join("\n")}`);
     this.#status.dispatch({ kind: "shader-refused", effectName: name });
+  }
+
+  /** A compile check that could not run (a lost device, say): logged unless the engine is gone. */
+  #reportCompileCheckFailure(owner: string, error: unknown): void {
+    if (!this.#disposed) {
+      console.error(`the compile check of ${owner} failed:`, error);
+    }
   }
 
   #kernelHandle(pair: KernelPair, record: KernelRecord): ComputeHandle {
