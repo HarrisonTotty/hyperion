@@ -153,6 +153,8 @@ impl Handler for Handlers {
             // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
             // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
+            // Rendering plan R06's kind, defined by R06.T10 and served from R06.T11.
+            RequestBody::Sky(_) => Box::pin(ready(Err(not_served_yet("sky")))),
         }
     }
 
@@ -201,6 +203,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::Unsubscribe(_) => "unsubscribe",
         RequestBody::SceneShip(_) => "scene_ship",
         RequestBody::SceneCameras(_) => "scene_cameras",
+        RequestBody::Sky(_) => "sky",
     }
 }
 
@@ -211,13 +214,15 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
 /// record cannot. A subscription's answer is as large as its topic's state: the scene's holds a
 /// whole system's bodies (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and
-/// `unsubscribe` are small.
+/// `unsubscribe` are small. The sky's JSON is small but its census and hosts grow with the request,
+/// and rendering plan R06 classes it large (`is_large`; Design note 17's size class).
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::SystemBodies(_)
-        | ResponseBody::BodyEvents(_) => true,
+        | ResponseBody::BodyEvents(_)
+        | ResponseBody::Sky(_) => true,
         ResponseBody::Subscribe(subscribed) => match subscribed.state {
             SubscriptionState::Scene(_) => true,
         },
@@ -935,9 +940,10 @@ mod tests {
         DensityMapRequest, DetailLevelDto, FramePositionDto, GalacticPosition,
         GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
         OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
-        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SubscribeRequest,
-        Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
-        SystemsInRangeRequest, UniverseIdHex, UniverseTime, UnsubscribeRequest,
+        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
+        SubscribeRequest, Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex,
+        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+        UnsubscribeRequest,
     };
 
     use super::*;
@@ -1014,6 +1020,16 @@ mod tests {
             RequestBody::SceneCameras(SceneCamerasRequest {
                 subscription: 1,
                 cameras: Vec::new(),
+            }),
+            RequestBody::Sky(SkyRequest {
+                universe: UniverseIdHex::from_u64(42),
+                observer: GalacticPosition::default(),
+                time: UniverseTime::default(),
+                eye: None,
+                camera_limit_v: Some(9.5),
+                n_max: None,
+                cone: None,
+                exclude_system: None,
             }),
         ]
     }
@@ -1182,7 +1198,8 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it.
+        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it, and R06's `sky`
+        // until R06.T11 serves it.
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
@@ -1193,10 +1210,11 @@ mod tests {
                         | RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
+                        | RequestBody::Sky(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 5);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

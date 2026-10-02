@@ -1364,6 +1364,26 @@ plan reserves no tag, prefix or stream.
   `mipSizes` and `cubeLevels` (faces joined for `writePackedCubeLevel`). The extension gives no
   worked numbers; the tests pin its limits (65,408, 2⁻²⁴, 1.0 = exponent 16 mantissa 256) and the
   round-up case (0.99999 packs as 1.0).
+- **Deviations in T10, as built (2026-10-02).** The wire's chroma (stars and texels) is the
+  linear Rec. 709 chromaticity r ÷ (r + g + b), g ÷ (r + g + b), each in [0, 1] as Design note
+  17's `u16` fractions require, not `StarColour::chroma`'s "r and g of unit luminance", which
+  exceeds 1 for red and blue stars; the client recovers unit luminance by dividing by
+  0.2126 r + 0.7152 g + 0.0722 b, and T11 converts. `HostDiscDto.chroma` keeps the pinned
+  `StarColour` meaning. Shapes the plan left open: `EyeDto` (`field_factor`, `age_years`,
+  `pigmentation`); `ConeDto` (`axis: [f64; 3]`, `half_angle_deg`); `BandSpecDto`
+  (`face_texels`); `SkyGapDto` (`feature_members`, `centre_members`, `white_dwarfs`);
+  `SkyLayerCensusDto` (`layer`, `cap_ly`, `rule_bound_ly`, `expected_beyond`, `cells`,
+  `candidates_opened`, `accepted`, `listed`, `without_photometry`, `feature_members_absent`; the
+  two `u64` counts as JSON numbers); `ResponseBody::Sky` is boxed. Constants beside `MAX_CUT_V`:
+  `MAX_SKY_STARS` (3 × 10⁵, the default and cap of `n_max`), `SKY_STAR_BYTES`,
+  `SKY_TEXEL_BYTES`, `SKY_BAKE_BINS` (15), restated in `packages/protocol/src/sky.ts` as R03's
+  frame constants are. The server's encoder takes `SkyStarWire` and `SkyTexelWire` and returns
+  `EncodedSky` (`bytes`, `stars_bytes`, `band_bytes`); quantised fields round to nearest and clamp
+  to their integer's range (NaN as 0), and an eye limit never takes the `i16::MIN` sentinel. The
+  decoders return a result union (`SkyDecoded<T>`) of struct-of-arrays (`SkyStars`, `SkyBand`,
+  eye limit NaN where absent), and `splitSkyPayload(payload, response)` splits by `stars_bytes`
+  and `band_bytes`. Until T11 the server answers `sky` with `unsupported` under its own ID, as it
+  does `body_events`.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
