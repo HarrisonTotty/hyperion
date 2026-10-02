@@ -45,7 +45,12 @@ import {
   type ExposureControl,
   exposureLevelReading,
 } from "../../view/photometry/exposure";
-import { cameraSceneOf, sceneOrigins, type ViewScene } from "../../view/scene/model";
+import {
+  cameraSceneOf,
+  sceneOrigins,
+  type ViewBodyKind,
+  type ViewScene,
+} from "../../view/scene/model";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
@@ -364,6 +369,18 @@ export function labelStatements(run: ViewRun): ReadonlyArray<string> {
   return statements;
 }
 
+/**
+ * Each body kind's name in the list's `KIND` column, as the guide's nomenclature names it (its
+ * `KIND` row): `PLANET`, `DWARF PLANET`, `MOON`, `UNRESOLVED CONTACT`, and `STAR`.
+ */
+export const BODY_KIND_NAMES: Readonly<Record<ViewBodyKind, string>> = {
+  star: "STAR",
+  planet: "PLANET",
+  dwarf_planet: "DWARF PLANET",
+  moon: "MOON",
+  unresolved: "UNRESOLVED CONTACT",
+};
+
 /** A row of the view's list: a target with its range. */
 export interface MarkRow {
   /** The row's key: the target's kind and ID. */
@@ -371,7 +388,7 @@ export interface MarkRow {
   readonly target: CameraTarget;
   /** Its designation, `TEST HULL` for a craft drawn by the test hull. */
   readonly name: string;
-  /** What it is: `PLANET`, `MOON`, `STAR` or `CRAFT`. */
+  /** What it is: one of {@link BODY_KIND_NAMES}, or `CRAFT`. */
   readonly kind: string;
   /** Its range, with its unit: `384 Mm`. */
   readonly range: string;
@@ -417,7 +434,7 @@ export function markRows(
       name:
         body?.designation ??
         (craft === undefined ? "" : `${craft.designation} · ${craft.hull.name}`),
-      kind: body === undefined ? "CRAFT" : body.kind.toUpperCase(),
+      kind: body === undefined ? "CRAFT" : BODY_KIND_NAMES[body.kind],
       range: `${distance.value} ${distance.unit}`,
       unit: distance.unit,
       fromCamera: own === undefined,

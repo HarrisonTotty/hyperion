@@ -1750,3 +1750,11 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   says `NOT AVAILABLE: RATE at its lowest step` or `… highest step`, as the field of view's ends do.
   No `SLOWER`/`FASTER` buttons were added, since they would be new nomenclature; the guide's draft
   `RATE` row now also names the readout, for the owner with the rest of that row.
+- **Fixed in RM1 validation (2026-10-02): the list's `KIND` names (M3).** The column showed code
+  values: an unresolved contact read `UNRESOLVED`, overflowing its 7ch column, and a dwarf planet
+  read `PLANET`, because `viewKind` folded `dwarf_planet` into `planet`. `ViewBodyKind` gains
+  `dwarf_planet` (drawn as the planet's inverted triangle at the floor size class), and the list
+  names each kind by `BODY_KIND_NAMES`, the guide's `KIND` row: `PLANET`, `DWARF PLANET`, `MOON`,
+  `UNRESOLVED CONTACT` (and `STAR`, `CRAFT`). The column is 12ch, as wide as its longest word, and a
+  two-word kind breaks at its space onto a second line of the 2rem row (a choice of the fix, to keep
+  the designation's column; pending by eye with the rest of T15).

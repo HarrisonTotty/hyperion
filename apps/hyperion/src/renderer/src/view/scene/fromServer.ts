@@ -126,8 +126,10 @@ function viewKind(body: SystemBody): ViewBodyKind | null {
   let kind: ViewBodyKind | null;
   switch (body.kind.kind) {
     case "planet":
-    case "dwarf_planet":
       kind = "planet";
+      break;
+    case "dwarf_planet":
+      kind = "dwarf_planet";
       break;
     case "moon":
       kind = "moon";
