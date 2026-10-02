@@ -1,4 +1,4 @@
-# generator_version = 17
+# generator_version = 18
 ThinDisc.fe_h = 0x3fb5fa28fc94abe8  # 0.08584839025995417
 ThinDisc.gone = 0x3fcb65a121a6673a  # 0.21403898375575087
 ThinDisc.NeutronStar.retained = 0x3fd161ede3703bcd  # 0.27160212717802495

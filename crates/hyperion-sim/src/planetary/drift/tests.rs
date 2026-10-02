@@ -6,7 +6,7 @@ use crate::units::{GravitationalParameter, Radians};
 
 /// A synthetic evolving orbit: an axis growing linearly at `rate` m s⁻¹ from `axis` m at the
 /// epoch, an eccentricity falling linearly at `e_rate` s⁻¹ from `e`, about the Earth's μ, with its
-/// phase excess by [`gauss_legendre_excess`].
+/// phase excess in closed form.
 struct Linear {
     anchored: KeplerElements,
     rate: f64,
@@ -244,6 +244,121 @@ fn an_orbit_too_fast_for_any_cell_falls_to_the_floor_and_its_error_there_is_pinn
 /// The floor test's largest displacement at the quarter points, m, as measured (2026-10-02): the
 /// model is far outside the tolerance there, and the floor bounds the re-send rate, not the error.
 const FLOOR_ERROR_M: f64 = 127_186.401_026_552_25;
+
+/// A mean motion with kinks at `breaks`: n(t) = 10⁻⁸ + 10⁻²¹ |t − b| summed over the breaks b, s,
+/// whose integral is in closed form.
+fn kinked(breaks: &[f64]) -> (impl Fn(UniverseTime) -> f64, impl Fn(f64, f64) -> f64) {
+    let at = breaks.to_vec();
+    let integral_breaks = breaks.to_vec();
+    let n = move |t: UniverseTime| {
+        let s = seconds_between(UniverseTime::EPOCH, t);
+        1e-8 + at.iter().map(|b| 1e-21 * (s - b).abs()).sum::<f64>()
+    };
+    // ∫ |s − b| ds from x to y, by parts either side of b.
+    let primitive = |s: f64, b: f64| 0.5 * (s - b) * (s - b).abs();
+    let integral = move |x: f64, y: f64| {
+        1e-8 * (y - x)
+            + integral_breaks
+                .iter()
+                .map(|&b| 1e-21 * (primitive(y, b) - primitive(x, b)))
+                .sum::<f64>()
+    };
+    (n, integral)
+}
+
+#[test]
+fn the_composite_rule_is_exact_between_breaks_and_the_same_either_way() {
+    let seconds = [-2.5e10, -3.0e9, 4.0e8, 2.0e10];
+    let breaks: Vec<UniverseTime> = seconds
+        .iter()
+        .map(|&s| {
+            UniverseTime::EPOCH
+                .checked_add(Span::from_seconds_f64(s).unwrap())
+                .unwrap()
+        })
+        .collect();
+    let (n, integral) = kinked(&seconds);
+    let n0 = n(UniverseTime::EPOCH);
+    for (from, to) in [(0.0, 3e10), (-3e10, 1e9), (5e8, 6e8), (-2.6e10, 2.1e10)] {
+        let (from, to) = (years(from / 31_557_600.0), years(to / 31_557_600.0));
+        let got = composite_excess(from, to, n0, &breaks, &n);
+        let (x, y) = (
+            seconds_between(UniverseTime::EPOCH, from),
+            seconds_between(UniverseTime::EPOCH, to),
+        );
+        let exact = integral(x, y) - n0 * (y - x);
+        assert!(
+            (got - exact).abs() <= 1e-13 * integral(x, y).abs(),
+            "{from} to {to}: {got:e} against {exact:e}"
+        );
+        // One panel across the kinks errs by far more.
+        let one = composite_excess(from, to, n0, &[], &n);
+        if breaks.iter().any(|&b| from < b && b < to) {
+            assert!(
+                (one - exact).abs() > 1e3 * (got - exact).abs().max(1e-18),
+                "one panel across the kinks errs by {:e}, the composite by {:e}",
+                one - exact,
+                got - exact
+            );
+        }
+        assert_same_bits(composite_excess(to, from, n0, &breaks, &n), -got);
+    }
+}
+
+/// [`Linear`] with break points: a law whose cells [`drift_cell`] must cut at them.
+struct Broken {
+    law: Linear,
+    breaks: Vec<UniverseTime>,
+}
+
+impl EvolvingLaw for Broken {
+    fn anchored(&self) -> &KeplerElements {
+        self.law.anchored()
+    }
+
+    fn shape_at(&self, t: UniverseTime) -> KeplerElements {
+        self.law.shape_at(t)
+    }
+
+    fn phase_excess(&self, t: UniverseTime) -> f64 {
+        self.law.phase_excess(t)
+    }
+
+    fn local_excess(&self, from: UniverseTime, to: UniverseTime, n_from_rad_per_s: f64) -> f64 {
+        self.law.local_excess(from, to, n_from_rad_per_s)
+    }
+
+    fn breaks_around(&self, t: UniverseTime) -> (Option<UniverseTime>, Option<UniverseTime>) {
+        let after = self.breaks.partition_point(|&at| at <= t);
+        (
+            after.checked_sub(1).map(|k| self.breaks[k]),
+            self.breaks.get(after).copied(),
+        )
+    }
+}
+
+#[test]
+fn cells_are_cut_at_the_law_s_break_points() {
+    let [law, _] = moons();
+    let (b0, b1) = (years(0.3), years(0.6));
+    let broken = Broken {
+        law,
+        breaks: vec![b0, b1],
+    };
+    let inside = drift_cell(&broken, years(0.4), ClockWindow::START, None);
+    assert_eq!(inside.orbit.drift().unwrap().reference(), b0);
+    assert_eq!(inside.end, b1);
+    assert_eq!(inside.holds_until(years(0.4), None), Some(b1));
+    // Every time between the two breaks gets the same cell, and the next starts at the break.
+    assert_eq!(
+        drift_cell(&broken, years(0.55), ClockWindow::START, None),
+        inside
+    );
+    let next = drift_cell(&broken, b1, ClockWindow::START, None);
+    assert_eq!(next.orbit.drift().unwrap().reference(), b1);
+    let before = drift_cell(&broken, years(0.1), ClockWindow::START, None);
+    assert_eq!(before.end, b0);
+}
 
 #[test]
 fn cells_are_cut_at_the_segment_and_the_window() {

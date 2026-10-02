@@ -1,4 +1,4 @@
-# generator_version = 17
+# generator_version = 18
 window n=1e-3 = 0x411ab045b66fb180  # 437265.42816045135
 window n=1e-3 radius at 0.01 = 0x4057632de823cd70  # 93.54967692848527
 window n=1e-3 speed at 0.01 = 0x40b138d1352a33c7  # 4408.817217481271
