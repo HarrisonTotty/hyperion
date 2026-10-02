@@ -130,7 +130,8 @@ closed.
 ## Three things done now
 
 The brainstorm has three things done now rather than in a step, because they cost little today and
-a great deal later. All three are R04's, need nothing else, and should land first:
+a great deal later. All three are R04's, need nothing else, and should land first. They have
+landed (checked in R04.T11); only plan 14's owner's acceptance of the amendment is still awaited:
 
 1. **R04.T3**: galaxy plan 14 is amended so that `BodyHooksDto` carries `detail_seed` in place of
    `surface_seed`, and the client's parser follows, **before P14.T23 lands**. The wire already has
@@ -138,12 +139,17 @@ a great deal later. All three are R04's, need nothing else, and should land firs
    the amendment also changes the DTO and its client mirror. R04.T3.a drafts the amendment for plan
    14's owner and R04.T3.b the guide's `DETAIL SEED` rows for the guide's owner; R04.T3.c changes
    the DTO and the client once the amendment is accepted. R09 later registers
-   `body.surface.detail` and fills the field.
+   `body.surface.detail` and fills the field. **Done:** T3.a drafted (2026-09-30; P14.T23 had
+   already landed to it), **awaiting plan 14's owner's acceptance**; T3.b signed off on the
+   owner's delegation (2026-09-30, `DETAIL SEED` kept); T3.c built, treating T3.a as provisionally
+   accepted.
 2. **R04.T1**: the `algebraic_*` float methods are banned in every `clippy.toml` (the root's, the
    sim's and the fitting crate's today; `hyperion-base`'s and `hyperion-surface`'s once R04.T4 and
-   T5 create them), and a test holds all five to one list.
+   T5 create them), and a test holds all five to one list. **Done:** all five carry the bans,
+   held by `crates/hyperion-testkit/tests/clippy_bans.rs`.
 3. **R04.T2**: the sim-determinism skill and the `planetary_*golden.rs` headers stop claiming that
-   CI checks 64-bit Arm and wasm32, and say what runs.
+   CI checks 64-bit Arm and wasm32, and say what runs. **Done:** they name the three targets
+   `just ci` runs and say that nothing checks AArch64.
 
 ## Conventions
 
@@ -153,10 +159,9 @@ these plans: the ten-section plan layout, the code shape, the generator version,
 Figures rule. Only what differs is stated here.
 
 - **Task IDs** are `R<nn>.T<n>`, with subtasks `R05.T3.a`. Galaxy tasks keep `P<nn>.T<n>` and are
-  cited as "galaxy plan 14" or `P14.T23`. The `implement-task` and `validate` skills' scripts match
-  only `P..` IDs today (`plan_task.py`'s `ID_RE`, `select_checks.py`'s `TASK_RE`), so they need the
-  `R` prefix before they can pick up these plans' tasks (see
-  [Open across plans](#open-across-plans)).
+  cited as "galaxy plan 14" or `P14.T23`. The `implement-task` and `validate` skills' scripts
+  (`plan_task.py`'s `ID_RE`, `select_checks.py`'s `TASK_RE`) take both prefixes since R04.T7.c, the
+  prefix picking the plan set.
 - **Two crates join the workspace** (R04). `hyperion-base`, beneath the sim, holds `math`, `rng`
   (with the part of `id` it needs), `units` and `version`; `libm` pinned with `=` becomes its one
   runtime dependency, and the sim re-exports every path it exposed, so `hyperion_sim::math` and the
@@ -259,7 +264,7 @@ other on 2026-09-29; the open asks are also listed in the owner plan's Risks and
 | Plan 12 | P12.T9's subscription envelope (`subscribe`, `unsubscribe`, `Notification`), to plan 12's design, with `Scene` as the first topic; a note in P12.T9                                                                                                                                                                                      | R03.T1, R03.T5                        | built by R03 if P12.T9 has not landed                                      |
 | Plan 12 | `observe::{SystemTrajectory, retarded_in_system, SystemObserver, InSystemRetardation}` in `observe/in_system.rs`                                                                                                                                                                                                                         | R03.T2                                | built by R03 in plan 12's module                                           |
 | Plan 12 | P12.T7's `KnowledgeStore`, on which `knowledge/surveys.v1.jsonl` is built                                                                                                                                                                                                                                                                | R09.T18                               | carried by plan 12, unbuilt; R09.T18 waits                                 |
-| Plan 14 | The amendment of P14.T23 and `BodyHooksDto`: `detail_seed` on the wire, the surface seed server-only                                                                                                                                                                                                                                     | R04.T3.a; the wire change in R04.T3.c | drafted (edits plan 14 before P14.T23)                                     |
+| Plan 14 | The amendment of P14.T23 and `BodyHooksDto`: `detail_seed` on the wire, the surface seed server-only                                                                                                                                                                                                                                     | R04.T3.a; the wire change in R04.T3.c | drafted, wire change built (T3.c); awaiting plan 14's owner's acceptance   |
 | Plan 14 | `body_fixed_at(body, t)` (P14.T14.c) returning R02's `coords::BodyFixedRotation`, one rotation type, in R02's direction: fixed → body (`to_body` = R · p)                                                                                                                                                                                | R02 (Design note 14)                  | open; graticules read `ROTATION NOT YET MODELLED`                          |
 | Plan 14 | `PlanetarySystem::state_at(ctx, index, t)`, a body's velocity beside `position_at`                                                                                                                                                                                                                                                       | R03.T3                                | built by R03.T3 in plan 14's file if absent                                |
 | Plan 14 | A `photometry` section on `BodySummaryDto` at `Bulk` (p in B, V, R; a phase template and s per channel; L; the template and L by surface pressure and cloud fraction; the ratio p_V q_V ÷ A_Bond); two checks of the Bond albedo against p (the Moon, the Earth)                                                                         | R07.T1                                | drafted                                                                    |
@@ -617,13 +622,8 @@ recorded here rather than settled.
   alpha check catches a change, and the fallback is R01's raw pass. R01's rounding probe classes
   each format by one value, and R07 reads anything but `nearest` as a reason to keep
   `rgba16float`, so a misclassification costs bandwidth, not accuracy (R01's Risks).
-- **The skills' task-ID patterns.** `implement-task`'s `plan_task.py` and `validate`'s
-  `select_checks.py` match only `P..` IDs. They need the `R` prefix before the first rendering task
-  is implemented through them. R04.T7.c owns the change, beside its own edit of `select_checks.py`:
-  the `R`-prefix part lands first, as its own commit, before R01's first task goes through either
-  skill, and is coordinated with R01.T9.e, which adds `just test-render` routing to the same
-  `select_checks.py`, so whichever lands second rebases onto the first. Until then R01's tasks are
-  built and checked by hand.
+- **The skills' task-ID patterns.** Resolved by R04.T7.c: `plan_task.py` and `select_checks.py`
+  take `R` IDs, the prefix picking the plan set.
 - **The brainstorm's "done now" clippy scope.** The brainstorm names three `clippy.toml` files for
   the ban; R04 bans in five, since base and the surface crate must carry it from their creation.
-  Consistent, but the brainstorm's sentence should say five once they exist.
+  Resolved: the five exist (R04.T1, T4.a, T5), and the brainstorm's sentence now says five.

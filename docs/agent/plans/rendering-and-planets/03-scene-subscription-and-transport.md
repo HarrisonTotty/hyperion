@@ -1422,8 +1422,10 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   frames of the three systems at both times, at `mass_and_orbit`, through the handler's own
   converters on that galaxy. A belt's members, not yet on the wire, and rings, which have no single
   position, are not compared: 140 vectors are, stars among them (at least 20, asserted). Two unbinding times in the frames
-  lie some 6 Gyr before the epoch, beyond 2⁵³ s, which plan 14's adapter refuses; the test holds
-  them to a safe integer and the issue is reported as galaxy work. **The measurement**
+  lie some 6 Gyr before the epoch, beyond 2⁵³ s, which plan 14's adapter refused; the test held
+  them to a safe integer and the issue was reported as galaxy work (closed 2026-09-30 by plan 14's
+  P14.T35.d, decision item 8: the adapter takes any whole number of seconds for a body state's
+  time, and the test no longer holds them). **The measurement**
   (2026-09-30): the largest discrepancy is 2.0 × 10⁻¹³ Σ (1.03 m, a moon of `close_binary` a
   century on); it and the next (6.8 × 10⁻¹⁵ Σ, a moon of `solar_like`) come from moons whose orbits
   evolve tidally with age while their `valid_until` is `None`, so the sim evaluates the elements at
@@ -1433,9 +1435,15 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   finds the drifting moons from the fixture itself (elements that differ between its two times with
   no `valid_until`) and pins them apart: every other vector at the larger of Design note 7's bound
   and 10 × 5 × 10⁻¹⁵ Σ, the drifting moons at min(10 × 2.0 × 10⁻¹³, 10⁻¹²) Σ, and fails on any
-  measurement above the Verification's ceiling of 10⁻¹² Σ. **Awaiting the owner:** whether plan 14
-  should give a tidally evolving orbit a `valid_until` (or the client bound those moons so), and the
-  unbinding times beyond 2⁵³ s; both are reported to the orchestrator for plan 14. **Tests, as
+  measurement above the Verification's ceiling of 10⁻¹² Σ. **Closed (2026-10-01):** plan 14's
+  P14.T45 makes an evolving orbit's phase ∫n dt and sends it as drifting elements on aligned cells
+  of at most 2^25 s, which the sim and client evaluate with one formula. The drifting-moon pin was
+  removed in the T45 change: every vector is held to the larger of Design note 7's bound and
+  10 × 5 × 10⁻¹⁵ Σ, and close_binary's `.0201` agrees with the golden to the bit. The fixture scan
+  became an assertion that every orbit whose elements differ between the two times carries a
+  `drift` or a `valid_until` before the later time, and a check that the golden compares `.0201`
+  with its drift.
+  Plan 14's unbinding-time question is closed separately by item 8. **Tests, as
   built.** The far body and its moons are held to 1.01 |Δv_moon| τ, plus the giant's and the
   observer's motion across the difference of the two light times, plus 1 m: without the second term
   a moon's measured offset exceeds the plan's bound by 0.3%; the factor and the metre cover a 1 s

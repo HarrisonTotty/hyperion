@@ -2782,7 +2782,8 @@ annunciation with it.
 Three things are done now rather than in a step, because they cost little today and a great deal
 later. Plan 14 is amended before P14.T23 lands, so that `BodyHooksDto` carries `detail_seed` in place
 of `surface_seed`, the client's parser follows, and the surface seed never reaches a client. The
-root, sim and fitting crates' `clippy.toml` files ban the `algebraic_*` methods. And the claim in the
+root, sim and fitting crates' `clippy.toml` files ban the `algebraic_*` methods, and base's and the
+surface crate's from their creation, five in all. And the claim in the
 sim-determinism skill and the planetary golden tests' headers, that CI checks 64-bit Arm and wasm32,
 is made to say what runs.
 

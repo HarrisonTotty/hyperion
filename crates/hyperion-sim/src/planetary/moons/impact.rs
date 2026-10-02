@@ -10,7 +10,7 @@
 //!
 //! a(τ)^(13⁄2) = a₀^(13⁄2) + (13⁄2) × 3 (k₂ ÷ Q) √(G ÷ `M_p`) `R_p`⁵ m τ,
 //!
-//! the closed form of ȧ = 3 (k₂ ÷ Q) (m ÷ `M_p`) n `R_p`⁵ ÷ a⁵ (Murray and Dermott 1999, §4.9), which
+//! the closed form of ȧ = 3 (k₂ ÷ Q) (m ÷ `M_p`) n `R_p`⁵ ÷ a⁴ (Murray and Dermott 1999, §4.9), which
 //! is continuous and increasing in the age τ, with the parent's k₂ and Q (P14.T14.b's rocky 0.3
 //! and 100). A moon whose orbit passes the prograde stability limit of its parent's Hill sphere
 //! (P14.T15) is lost at that age, [`BodyState::Unbound`].
@@ -39,8 +39,9 @@
 
 use crate::Seed;
 use crate::math;
-use crate::orbit::KeplerElements;
+use crate::orbit::{KeplerElements, seconds_between};
 use crate::planetary::derive::{OrbitSense, PlanetClass};
+use crate::planetary::drift::{EvolvingLaw, recession_phase_ratio_less_one};
 use crate::planetary::fate::BodyState;
 use crate::planetary::moons::{MoonParent, ParentKind, decide, draw_rank, log_uniform, moon_orbit};
 use crate::planetary::params::{ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q};
@@ -187,6 +188,83 @@ impl ImpactMoon {
             .and_then(|span| UniverseTime::EPOCH.checked_add(span))
             .unwrap_or(t);
         BodyState::Unbound { at }
+    }
+
+    /// The recession as an evolving law anchored at `anchor`, where the moon's elements are
+    /// `anchored` (P14.T45.a), or `None` for a moon that does not recede.
+    #[must_use]
+    pub(crate) fn law(
+        &self,
+        anchored: KeplerElements,
+        anchor: UniverseTime,
+    ) -> Option<RecedingLaw> {
+        (self.recession > 0.0).then(|| {
+            let axis = anchored.semi_major_axis().value();
+            RecedingLaw {
+                anchor,
+                anchored,
+                scale_s: math::powf(axis, 6.5) / self.recession,
+            }
+        })
+    }
+}
+
+/// A giant-impact moon's recession from an anchor, as [`drift`](crate::planetary::drift) follows
+/// it (P14.T45.a).
+///
+/// With x = K Δτ ÷ aₐ^(13/2) for Δτ seconds from the anchor, where the axis is aₐ, the closed
+/// form above is a = aₐ (1 + x)^(2/13), and with n ∝ a^(−3/2) the phase gained is ∫ n dτ =
+/// nₐ Δτ φ(x), where φ(x) = ((1 + x)^(10/13) − 1) ÷ ((10/13) x)
+/// ([`recession_phase_ratio_less_one`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RecedingLaw {
+    anchor: UniverseTime,
+    anchored: KeplerElements,
+    /// aₐ^(13/2) ÷ K, s: the time over which x grows by one.
+    scale_s: f64,
+}
+
+impl RecedingLaw {
+    /// The seconds from the anchor to `t`, and x then.
+    #[must_use]
+    fn x(&self, t: UniverseTime) -> (f64, f64) {
+        let dt = seconds_between(self.anchor, t);
+        (dt, dt / self.scale_s)
+    }
+}
+
+impl EvolvingLaw for RecedingLaw {
+    fn anchored(&self) -> &KeplerElements {
+        &self.anchored
+    }
+
+    fn shape_at(&self, t: UniverseTime) -> KeplerElements {
+        let (_, x) = self.x(t);
+        let axis =
+            self.anchored.semi_major_axis().value() * math::exp(math::ln_1p(x) * (2.0 / 13.0));
+        KeplerElements::from_semi_major_axis(
+            Metres::new(axis),
+            self.anchored.gravitational_parameter(),
+            self.anchored.eccentricity(),
+            *self.anchored.orientation(),
+            self.anchored.mean_anomaly_at_epoch(),
+        )
+        .expect("a receding moon's axis is positive and finite")
+    }
+
+    fn phase_excess(&self, t: UniverseTime) -> f64 {
+        let (dt, x) = self.x(t);
+        let n = std::f64::consts::TAU / self.anchored.period().value();
+        n * dt * recession_phase_ratio_less_one(x)
+    }
+
+    fn local_excess(&self, from: UniverseTime, to: UniverseTime, n_from_rad_per_s: f64) -> f64 {
+        // The same closed form anchored at `from`: x grows by one over a_from^(13/2) ÷ K there.
+        let axis = self.shape_at(from).semi_major_axis().value();
+        let anchored = self.anchored.semi_major_axis().value();
+        let scale_s = self.scale_s * math::powf(axis / anchored, 6.5);
+        let dt = seconds_between(from, to);
+        n_from_rad_per_s * dt * recession_phase_ratio_less_one(dt / scale_s)
     }
 }
 
@@ -428,6 +506,57 @@ mod tests {
                 moon.semi_major_axis_at(Years::new(4.57e9))
             );
             hyperion_testkit::float::assert_same_bits(orbit.eccentricity().value(), 0.0);
+        }
+    }
+
+    /// P14.T45.a: the recession as a law follows the closed form's axis, and its drift cells'
+    /// models follow a fine integration of its mean motion to the drift tolerance, across the
+    /// clock window, for moons of Earths at 4.57 Gyr.
+    #[test]
+    fn the_receding_law_follows_its_axis_and_a_fine_integration_of_its_phase() {
+        use crate::planetary::drift::{DRIFT_TOLERANCE, drift_cell};
+        use crate::time::ClockWindow;
+        let moons = moons_of(400, |i| earth(planet_id(i, 3)));
+        assert!(!moons.is_empty());
+        let age = 4.57e9;
+        for (parent, moon) in moons.iter().take(20) {
+            let anchored = moon.orbit_at(parent, Years::new(age));
+            let law = moon.law(anchored, UniverseTime::EPOCH).expect("it recedes");
+            for years in [-999_i64, -1, 0, 1, 250, 998] {
+                let t = UniverseTime::from_julian_years(years).unwrap();
+                // The law's axis against the closed form at the same age.
+                let closed = moon
+                    .semi_major_axis_at(Years::new(age + f64::from(i32::try_from(years).unwrap())));
+                let axis = law.shape_at(t).semi_major_axis();
+                assert!(
+                    (axis / closed - 1.0).abs() < 1e-12,
+                    "{} against {}",
+                    axis.value(),
+                    closed.value()
+                );
+                // The model's phase across its cell against the trapezoidal rule on 4,096 steps.
+                let cell = drift_cell(&law, t, ClockWindow::START, None);
+                let drift = *cell.orbit.drift().unwrap();
+                let start = drift.reference();
+                let length = seconds_between(start, cell.end);
+                let n_start = std::f64::consts::TAU / law.shape_at(start).period().value();
+                let n_at = |dt: f64| {
+                    let at = start
+                        .checked_add(Span::from_seconds_f64(dt).unwrap())
+                        .unwrap();
+                    std::f64::consts::TAU / law.shape_at(at).period().value() - n_start
+                };
+                let steps = 4_096;
+                let h = length / f64::from(steps);
+                let mut gained = 0.0;
+                for k in 0..steps {
+                    gained += 0.5 * h * (n_at(h * f64::from(k)) + n_at(h * f64::from(k + 1)));
+                }
+                let model = 0.5 * drift.mean_motion_rate_rad_per_s2() * length * length;
+                let apart = (gained - model).abs() * axis.value();
+                let tolerance = DRIFT_TOLERANCE.value() + f64::EPSILON * axis.value();
+                assert!(apart < tolerance, "{apart} m over a cell at {t}");
+            }
         }
     }
 

@@ -36,6 +36,7 @@ use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltPart, BeltSite};
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
+use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
 use crate::planetary::index::{BodyIndex, BodySub};
 pub use crate::planetary::label::BodyLabel;
@@ -378,19 +379,42 @@ pub struct BodyOrbit {
     elements: KeplerElements,
     valid_until: Option<UniverseTime>,
     about: Option<OrbitHost>,
+    drift: Option<OrbitDrift>,
 }
 
 impl BodyOrbit {
     /// Elements `elements`, which hold until `valid_until`: the next change of the body's state or
-    /// orbit that the fate transform (P14.T28) knows of, or `None` if none falls inside the clock
-    /// window. The client propagates the elements for drawing up to that time (design note 18).
+    /// orbit that the fate transform (P14.T28) knows of, or the end of the current drift cell of
+    /// an evolving orbit (P14.T45.a), or `None` if none falls inside the clock window. The client
+    /// propagates the elements for drawing up to that time (design note 18).
     #[must_use]
     pub const fn new(elements: KeplerElements, valid_until: Option<UniverseTime>) -> Self {
         Self {
             elements,
             valid_until,
             about: None,
+            drift: None,
         }
+    }
+
+    /// The same orbit, evolving from its elements at `drift`'s reference time as `drift` says,
+    /// or holding for `None` (P14.T45.a).
+    #[must_use]
+    pub const fn with_drift(self, drift: Option<OrbitDrift>) -> Self {
+        Self { drift, ..self }
+    }
+
+    /// How the elements change through the drift cell, for an evolving orbit (P14.T45.a).
+    #[must_use]
+    pub const fn drift(&self) -> Option<&OrbitDrift> {
+        self.drift.as_ref()
+    }
+
+    /// The elements and their drift as a trajectory, which gives the body's position relative to
+    /// its primary at any time up to [`valid_until`](Self::valid_until).
+    #[must_use]
+    pub const fn trajectory(&self) -> DriftingOrbit {
+        DriftingOrbit::new(self.elements, self.drift)
     }
 
     /// The same orbit, about `host` where that is not the record's parent: a belt's member is

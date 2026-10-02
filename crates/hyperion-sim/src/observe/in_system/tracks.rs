@@ -226,7 +226,7 @@ mod tests {
                 let Some(orbit) = record.orbit().ok() else {
                     continue;
                 };
-                let expected = centre.translated(orbit.elements().relative_state_at(t).0);
+                let expected = centre.translated(orbit.trajectory().relative_state_at(t).0);
                 assert_same_position(Some(at), Some(expected));
                 moons += 1;
             }

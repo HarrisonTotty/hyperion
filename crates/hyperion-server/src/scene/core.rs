@@ -387,8 +387,9 @@ impl SceneCore {
     }
 
     /// Plants a `valid_until` at `at` on the first body sent that is not a contact, and returns
-    /// its index: no body of the pinned systems changes inside the clock window, so the tests of
-    /// a re-send plant one on the core's record of what it sent.
+    /// its index: the pinned systems' bodies change only at their drift cells' ends (P14.T45),
+    /// 2¹⁶ s and more from the epoch, so the tests of a re-send plant one on the core's record of
+    /// what it sent.
     #[cfg(test)]
     pub(crate) fn plant_valid_until(&mut self, at: UniverseTime) -> Option<BodyIndex> {
         let system = self.system.as_mut()?;
@@ -1480,10 +1481,12 @@ mod tests {
             due.bodies[0], expected,
             "evaluated when its elements changed"
         );
-        assert_eq!(
-            core.next_due(),
-            None,
-            "the body's own record holds no later change"
+        // The planted body's own record, and every other's, holds until a drift cell's end at
+        // the earliest (P14.T45), 2^16 s or more from the epoch.
+        assert!(
+            core.next_due().is_none_or(|due| due >= at(1 << 16)),
+            "no record changes again within the test's seconds: {:?}",
+            core.next_due()
         );
         let after = core
             .advance(inputs(at(20), &ship, &GrantAsked), &world, Beat::Change)
