@@ -2641,3 +2641,7 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
 not drawn`, with no compiler text on the screen (it stays in the log). `status.ts`'s three
     stale comments, `status.test.ts` and the guide's row are updated, and the T8.b, T8.k and T8.l
     notes are marked closed. `ux_lint.py` on `status.ts`: 0 errors.
+  - **m10, colour self-sampling (T8.e, Design note 21).** `WebGpuRenderTarget.render` now also
+    refuses a draw or a `PostProcessItem.textures` entry that samples the target's own colour,
+    with the new `ColourSelfSample` (in `types.ts`, beside `DepthSelfSample`; a Provides
+    addition), before anything is encoded. Tests: `target.test.ts`.

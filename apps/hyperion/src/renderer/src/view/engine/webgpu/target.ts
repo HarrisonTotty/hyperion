@@ -14,6 +14,7 @@ import { TEXTURE_USAGE } from "../gpuFlags";
 import type { TextureSpec } from "../memory";
 import type { GpuCapabilities } from "../platform";
 import {
+  ColourSelfSample,
   DepthSelfSample,
   type DrawItem,
   type FrameSubmission,
@@ -108,6 +109,29 @@ export function assertNoDepthSelfSample(
   }
 }
 
+/**
+ * Refuses a draw or a post-process that samples the colour of the target it renders into, for the
+ * same reason: the draws' pass, or the chain's last pass, has its level 0 as the attachment.
+ *
+ * @throws {@link ColourSelfSample} naming the target and the material or post-process.
+ */
+export function assertNoColourSelfSample(
+  targetName: string,
+  colour: TextureHandle,
+  frame: Pick<FrameSubmission, "draws" | "postProcesses">,
+): void {
+  for (const draw of frame.draws) {
+    if (Object.values(draw.textures).includes(colour)) {
+      throw new ColourSelfSample(targetName, `material ${draw.material.name}`);
+    }
+  }
+  for (const item of frame.postProcesses) {
+    if (Object.values(item.textures ?? {}).includes(colour)) {
+      throw new ColourSelfSample(targetName, `post-process ${item.postProcess.name}`);
+    }
+  }
+}
+
 /** A target's textures at one size. */
 interface Attachments {
   readonly size: ViewSize;
@@ -152,12 +176,14 @@ export class WebGpuRenderTarget implements RenderTarget {
    * Renders `frame` into the target.
    *
    * @throws {@link DepthSelfSample} when a draw samples this target's own depth.
+   * @throws {@link ColourSelfSample} when a draw or a post-process samples its own colour.
    */
   render(frame: FrameSubmission): void {
     if (this.#disposed) {
       return;
     }
     assertNoDepthSelfSample(this.name, this.depth, frame.draws);
+    assertNoColourSelfSample(this.name, this.colour, frame);
     const { size, colour, depth } = this.#attachments;
     const host = this.#host;
     host.renderFrame(frame, {
