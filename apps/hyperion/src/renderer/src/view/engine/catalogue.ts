@@ -9,6 +9,7 @@
  */
 
 import type { KernelPair } from "./kernels";
+import { SUBGROUP_TWINS } from "./twins";
 import type { WgslMaterialSpec, WgslPostProcessSpec } from "./types";
 
 /** A named rendering setting at which the harness renders an entry. */
@@ -24,5 +25,11 @@ export type CatalogueEntry = (
   readonly settings?: ReadonlyArray<CatalogueSetting>;
 };
 
-/** Every shader the engine can create. Empty until the first shaders are registered. */
-export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [];
+/** R01.T10's subgroup twins, run on both capability paths. */
+const TWIN_ENTRIES: ReadonlyArray<CatalogueEntry> = SUBGROUP_TWINS.map((spec) => ({
+  kind: "compute",
+  spec,
+}));
+
+/** Every shader the engine can create; later plans add theirs here. */
+export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [...TWIN_ENTRIES];
