@@ -89,6 +89,43 @@ just client    # run the Electron client with hot reload (`just client --help` f
 
 Options to `just client` reach the client: `just client --address 10.0.0.5 --port 9100`.
 
+### Seeing a generated system in `VIEW`
+
+Until sessions exist, the ship is a stand-in that the server starts at the galactic centre, in no
+system, and no console moves it. So a plain `just server` and `just client` show `VIEW`'s kept
+test scene under `TRAINING`, with `SCENE NOT AVAILABLE: the ship is in no system`. To see the
+server's scene of a real system:
+
+```sh
+just server        # in one terminal
+just place-ship    # in another, once the server is up
+just client        # then F2, OPEN the universe place-ship names, and F4 for VIEW
+```
+
+`just place-ship` is a client of the running server, like the bridge. It opens the universe
+`Dev Fixture` (creating it with seed `4d2` the first time), picks the system nearest
+`0,26000,0` ly that has a planet, and sends `scene_ship` to put the ship 0.01 au behind that
+planet along its orbit, at rest in the planet's frame, with the clock at 0 s running at 1×. The
+seat camera, `VIEW`'s default, looks along the ship's nose, which for the stand-in is its velocity
+in the system frame, so the planet is straight ahead. Options choose the rest
+(`just place-ship --help`):
+
+| Option                       | Default                                 | What                                                       |
+| ---------------------------- | --------------------------------------- | ---------------------------------------------------------- |
+| `--universe <NAME or ID>`    | `Dev Fixture`                           | Universe; a name not found is created with `--seed`        |
+| `--seed <HEX>`               | `4d2`                                   | Seed of a universe it creates                              |
+| `--system <ID or DESIG>`     | nearest with a planet                   | System, by ID, or by designation within the search         |
+| `--near <X,Y,Z>`, `--radius` | `0,26000,0` ly, `40` ly                 | Where the system is searched for                           |
+| `--look-at <TARGET>`         | `planet`                                | `planet` (the first), `barycentre`, or a body ID           |
+| `--distance <AU>`            | 0.01 from a body, 1 from the barycentre | Distance from the target                                   |
+| `--time <S>`, `--rate <N>`   | `0`, `1`                                | Scene clock: time from the epoch, and 0 or 1, 10 … 100,000 |
+| `--address`, `--port`        | as `just client`                        | The server, also from `HYPERION_SERVER_ADDR` and `_PORT`   |
+
+`--look-at barycentre` puts the ship at rest 1 au along galactic +z from the barycentre, looking
+down at it: a single system's star, but empty space between the stars of a wide multiple. The
+setting is not saved, so run `just place-ship` again after each server start, and it moves the
+scene of every client of that universe.
+
 ### Server configuration
 
 The server takes these options, each of which can instead be set by its environment variable.
