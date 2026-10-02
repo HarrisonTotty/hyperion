@@ -2668,3 +2668,7 @@ not drawn`, with no compiler text on the screen (it stays in the log). `status.t
     refuses every permission request (`main/permissions.ts`, `denyPermissionRequests` on
     `session.defaultSession` once `ready`, before the first window), as the TypeScript rules'
     Electron section asks and as the smoke harness already did. Test: `permissions.test.ts`.
+  - **m4, `select_checks.py`'s routing (T9.e).** Besides `RENDER_PATHS`, every file that
+    `view/engine/catalogue.ts` imports (read from its relative imports at each run, so later
+    plans' catalogue sources are covered too) routes `just test-render`; an edit to
+    `view/wireframe/submit.ts` now does (checked by a scratch edit, reverted).
