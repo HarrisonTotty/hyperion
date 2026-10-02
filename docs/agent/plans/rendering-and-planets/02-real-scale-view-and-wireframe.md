@@ -1141,6 +1141,29 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
 - The SwiftShader smoke test (R02.T14.c) completes a frame of each kept scene with only finite
   texels.
 - The recorded runs of R02.T18, below. No golden image is stored anywhere.
+- **R02.T16.a's census, measured 2026-10-02** (RM1 validation m4), at generator version 18, build
+  e4c5cfc, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000` at the
+  Sun-like point [0, 26,000, 0] ly and time 0, through the server's own `systems_in_range` path
+  (`range_query`, `range_brief`, `systems_in_range`) with `limit` 20,000 and `include_stellar`, by
+  a scratch test that was not committed. The counts are exact for the seed; the times were taken
+  on the shared machine, a release build, and stay provisional.
+
+  | Query         | Layers included (expected → returned)                           | Rows   | With V | Range query | Briefs   |
+  | ------------- | --------------------------------------------------------------- | ------ | ------ | ----------- | -------- |
+  | `e` to 620 ly | E 15,160 → 15,189                                               | 15,189 | 11     | 42 ms       | 2,730 ms |
+  | `d` to 360 ly | D 11,349 → 11,411; E 3,138 → 3,126                              | 14,537 | 306    | 36 ms       | 2,218 ms |
+  | `c` to 210 ly | C 11,260 → 11,131; D 2,310 → 2,318; E 639 → 628                 | 14,077 | 7,318  | 32 ms       | 923 ms   |
+  | `a` to 60 ly  | A 1,074 → 1,013; B 190 → 198; C 267 → 260; D 55 → 54; E 15 → 22 | 1,547  | 1,387  | 7 ms        | 30 ms    |
+
+  Merged by ID: 38,942 rows, 8,794 drawn (with `absolute_v_mag`) and 30,148 without, of which
+  **1,371 are at V ≤ 6.5** (V = M_V + 5 log₁₀(d ÷ 10 pc), no extinction), against about 9,000 in
+  the real sky: the thin sky Design note 19 expects. Every layer each query asks for is included,
+  none `over_limit`, so no retry is made near the Sun. The `e` and `d` rows are mostly remnants,
+  which have no V, and their briefs dominate the time (2.7 s for the `e` query's 15,189 rows,
+  about 0.18 ms a row). Since Design note 19's measurement at version 15 the expected counts have
+  moved (E 15,160 at 620 ly, where the note's bisection put 19,992 at 683 ly), and the radii
+  remain inside the limit.
+
 - The owner has answered each of R02.T2's drafts; until then they stand as drafts and the client is
   built to them.
 
@@ -1655,11 +1678,10 @@ src/renderer/src/displays/view src/renderer/src/App.test.tsx`. By hand (scratch 
   `aStarRow` fixture is not added: the tests build rows with galaxy plan 05's `aSystemsInRange` and
   `aStellarBrief`. The display's tests now render it inside `ServerLinkHarness`, `UniverseProvider`
   and the `UNIVERSE` panel (to open a universe), and one answers the four queries with a star
-  straight ahead of the seat and finds a sprite draw and the count line. **Pending, on a quiet
-  machine:** re-measuring the four queries' census counts and server times on the Milky Way fixture
-  near the Sun (the `e` query's brief-building time included) and counting the rows at V ≤ 6.5, for
-  Verification; not run here, the machine being shared (the counts are exact and could be taken
-  under load, the times not), so Design note 19's figures stand as provisional.
+  straight ahead of the seat and finds a sprite draw and the count line. The four queries' census
+  counts and the rows at V ≤ 6.5 were taken in RM1 validation (m4) and are in Verification.
+  **Pending, on a quiet machine:** the server times, the `e` query's brief-building time included;
+  those in Verification were taken under shared load and stay provisional.
 - **Deviations in R02.T17, as built.** `view/scene/fromServer.ts` turns R03's client scene into a
   `ViewScene`: `viewSceneFromServer(model, frame, place)` over `sceneAt`'s `SceneFrame` (R03.T13's
   apparent positions: the ship's local body at its `geometricM`, every other body and star at its
@@ -1806,3 +1828,7 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
     once as it mounts and hands it to the stage through `labelRef`; the drawing loop then moves
     every label with its mark each frame (`markLabelTransform`), and only the text changes at 4 Hz.
     Pending by eye with the rest of T15.
+- **Fixed in RM1 validation (2026-10-02): R02.T16.a's census counts are taken (m4).** The counts
+  are exact and do not need a quiet machine, so the four queries' census, their rows with and
+  without V, and the merged count at V ≤ 6.5 (1,371) are now in Verification; only the times stay
+  pending on a quiet machine.
