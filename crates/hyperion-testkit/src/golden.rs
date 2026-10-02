@@ -354,11 +354,57 @@ impl GoldenWriter {
     }
 }
 
+/// The FNV-1a 64 offset basis.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// The FNV-1a 64 prime.
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// FNV-1a 64 over `bytes`, continuing from `hash`.
+fn fnv1a(hash: u64, bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .fold(hash, |h, &b| (h ^ u64::from(b)).wrapping_mul(FNV_PRIME))
+}
+
+/// A digest of `values` for a golden file: FNV-1a 64 over each value's IEEE 754 bits as eight
+/// little-endian bytes, in order.
+///
+/// The offset basis is `0xcbf29ce484222325` and the prime `0x100000001b3`; each byte is xor-ed into
+/// the hash, which is then multiplied by the prime modulo 2⁶⁴. A TypeScript twin reproduces it
+/// over the bytes of a `Float64Array` on a little-endian machine. Float bits are hashed here, in the
+/// testkit, and never in a determinism crate, whose `clippy.toml` bans reading them (plan R05,
+/// Design note 13). A `-0.0` and a `0.0` give different digests.
+#[must_use]
+pub fn f64_digest(values: &[f64]) -> u64 {
+    values
+        .iter()
+        .fold(FNV_OFFSET, |h, v| fnv1a(h, &v.to_le_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    #[test]
+    fn fnv1a_matches_its_published_vectors() {
+        // The FNV test suite's "" and "a" (Fowler, Noll and Vo, isthe.com/chongo/tech/comp/fnv).
+        assert_eq!(fnv1a(FNV_OFFSET, b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a(FNV_OFFSET, b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a(FNV_OFFSET, b"foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    #[test]
+    fn f64_digest_hashes_each_values_little_endian_bits() {
+        assert_eq!(f64_digest(&[]), FNV_OFFSET);
+        // 1.0 is 0x3ff0000000000000: bytes 00 00 00 00 00 00 f0 3f.
+        let bytes = [0, 0, 0, 0, 0, 0, 0xf0, 0x3f];
+        assert_eq!(f64_digest(&[1.0]), fnv1a(FNV_OFFSET, &bytes));
+        assert_ne!(f64_digest(&[0.0]), f64_digest(&[-0.0]));
+        assert_ne!(f64_digest(&[1.0, 2.0]), f64_digest(&[2.0, 1.0]));
+    }
 
     #[test]
     fn writer_formats_each_kind_of_line() {
