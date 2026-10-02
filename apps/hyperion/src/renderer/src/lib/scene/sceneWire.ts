@@ -26,10 +26,12 @@ import type {
   SystemPlaceDto,
   UniverseTime,
 } from "@hyperion/protocol";
-import { METRES_PER_LIGHT_YEAR } from "@hyperion/protocol";
+import { METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR } from "@hyperion/protocol";
 
-import { vec3, type Vec3 } from "../../geometry/vec3";
+import { norm, vec3, type Vec3 } from "../../geometry/vec3";
+import { CLOCK_WINDOW_YR } from "../galaxy/model";
 import { toSystemBodiesModel } from "../system/bodiesWire";
+import { SPEED_OF_LIGHT_M_PER_S } from "./lightTime";
 import type {
   BodyGrant,
   SceneCraft,
@@ -181,15 +183,45 @@ function toSeen(seen: SeenPositionDto): SeenPosition {
 }
 
 /** The system's place as the scene states it: a designation, a galactic position, a velocity, a time. */
+/** The clock window's half-width, s: ±1,000 Julian years of the epoch, as the scene clock keeps. */
+const CLOCK_WINDOW_S = CLOCK_WINDOW_YR * SECONDS_PER_JULIAN_YEAR;
+
+/**
+ * The largest light-year cell a stated place may sit in, on each axis: half the galactic frame's
+ * `i32` range, so that no drift below c within the clock window can carry it out of the frame.
+ */
+const PLACE_CELL_LIMIT_LY = 2 ** 30;
+
+/**
+ * The system's place as the scene states it: a designation, a galactic position, a velocity, a
+ * time.
+ *
+ * @remarks
+ * Beyond the wire's form, a place is refused with a speed not below c, a time outside the clock
+ * window or a cell beyond {@link PLACE_CELL_LIMIT_LY}: within those `barycentreAt` carries it to any
+ * time in the window without leaving the galactic frame, so that no frame can throw over it.
+ */
 function toPlace(system: SystemIdHex, place: SystemPlaceDto): SystemPlace {
   check(place.designation.length > 0, "system designation unusable");
-  check(allFinite(place.velocity_m_s), "system velocity unusable");
+  const velocity = toVec3(place.velocity_m_s);
+  check(
+    allFinite(place.velocity_m_s) && norm(velocity) < SPEED_OF_LIGHT_M_PER_S,
+    "system velocity unusable",
+  );
+  const barycentre = checkGalactic(place.barycentre);
+  check(
+    barycentre.cell_ly.every((cell) => Math.abs(cell) <= PLACE_CELL_LIMIT_LY),
+    "system position unusable",
+  );
+  const time = checkTime(place.time, "system place");
+  check(Math.abs(time.seconds) <= CLOCK_WINDOW_S, "system place time unusable");
   return {
+    kind: "stated",
     system,
     designation: place.designation,
-    barycentre: checkGalactic(place.barycentre),
-    velocityMPerS: toVec3(place.velocity_m_s),
-    time: checkTime(place.time, "system place"),
+    barycentre,
+    velocityMPerS: velocity,
+    time,
   };
 }
 

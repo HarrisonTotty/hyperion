@@ -103,6 +103,7 @@ export function App() {
       target === null
         ? null
         : {
+            kind: "charted",
             system: target.system,
             designation: target.designation,
             barycentre: galacticPositionFromLy([
@@ -110,8 +111,6 @@ export function App() {
               target.positionLy.y,
               target.positionLy.z,
             ]),
-            velocityMPerS: null,
-            time: null,
           },
     [target],
   );

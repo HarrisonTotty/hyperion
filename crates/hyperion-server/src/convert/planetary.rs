@@ -304,6 +304,9 @@ pub(crate) struct ListedBody {
 /// states the level asked, the most any record holds. Returns the system and its bodies as listed,
 /// in index order.
 ///
+/// The system's `place` is left `None`: the caller, `SceneCore::arrive`, sets it from the galaxy
+/// through [`system_place`](super::system_place), so that this converter takes no galaxy (R03.T16).
+/// It is the one caller, and its tests hold that the state and every arrival carry the place.
 /// # Panics
 ///
 /// As [`system_bodies`].

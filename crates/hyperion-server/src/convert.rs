@@ -52,7 +52,9 @@ pub(crate) use self::planetary::{
     hosts_request, scene_body, scene_system, system_bodies,
 };
 pub(crate) use self::scene::{ShipRequest, unknown_frame_body, unknown_frame_system};
-pub(crate) use self::stellar::{SummaryRequest, brief_dto, system_summary, unknown_system};
+pub(crate) use self::stellar::{
+    SummaryRequest, brief_dto, system_summary, unknown_system, wire_time,
+};
 use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
 use crate::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS, MAX_QUERY_RADIUS_LY};
 use crate::universe::{
@@ -485,7 +487,7 @@ pub(crate) fn system_place(
         designation: designation(record),
         barycentre: galactic_position(&position_at(galaxy, record, t)),
         velocity_m_s: epoch_velocity(galaxy, record).metres_per_second(),
-        time: stellar::wire_time(t),
+        time: wire_time(t),
     }
 }
 

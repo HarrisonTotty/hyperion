@@ -164,7 +164,5 @@ export function systemPlace(
   if (stated !== null) {
     return stated;
   }
-  return known?.system === system
-    ? known
-    : { system, designation: system, barycentre: null, velocityMPerS: null, time: null };
+  return known?.system === system ? known : { kind: "unknown", system, designation: system };
 }

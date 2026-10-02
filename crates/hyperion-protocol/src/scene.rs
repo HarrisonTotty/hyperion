@@ -177,8 +177,9 @@ pub struct SceneSystemDto {
     pub system: SystemBodiesDto,
     /// One grant per body of `system.bodies`, in the same order.
     pub grants: Vec<BodyGrantDto>,
-    /// Where the system is. The server always sends it; it is optional so that the field was an
-    /// addition (`PROTOCOL_VERSION` 2), and a client without it names the system by its ID.
+    /// Where the system is. The server always sends it; it is optional only so that adding it left
+    /// [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) at 2, and a client that predates it names the
+    /// system by its ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub place: Option<SystemPlaceDto>,
@@ -581,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn scene_system_without_place_wire_form() {
+    fn a_scene_system_without_a_place_omits_the_key_and_reads_back_as_none() {
         let mut system = scene_system();
         system.place = None;
         let mut json = scene_system_json();

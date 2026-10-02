@@ -50,13 +50,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const PLACE: SystemPlace = {
+const PLACE = {
+  kind: "charted",
   system: FIXTURE_SYSTEM,
   designation: SCENE_DESIGNATION,
   barycentre: galacticPositionFromLy([8_000, 26_000, 20]),
-  velocityMPerS: null,
-  time: null,
-};
+} as const satisfies SystemPlace;
 
 /** The ship 10,000 km from the slice's Earth, in the Earth's frame, at `seconds`. */
 function stateNearEarth(seconds = 3_000): SceneStateDto {
@@ -107,7 +106,7 @@ function frameOf(model: SceneModel, time: UniverseTime = model.clock.time): Scen
   return frame;
 }
 
-function sceneOf(model: SceneModel, frame: SceneFrame, place = PLACE): ViewScene {
+function sceneOf(model: SceneModel, frame: SceneFrame, place: SystemPlace = PLACE): ViewScene {
   const scene = viewSceneFromServer(model, frame, place);
   if (scene === null) {
     throw new Error("the fixture's scene cannot be drawn");
@@ -240,11 +239,9 @@ describe("the server's scene as the view draws it", () => {
     const model = modelOf(stateNearEarth());
     const frame = frameOf(model);
     const unknown = sceneOf(model, frame, {
+      kind: "unknown",
       system: FIXTURE_SYSTEM,
       designation: FIXTURE_SYSTEM,
-      barycentre: null,
-      velocityMPerS: null,
-      time: null,
     });
     expect([
       bodyOf(sceneOf(model, frame), FIXTURE_EARTH).designation,
@@ -256,7 +253,7 @@ describe("the server's scene as the view draws it", () => {
   it("puts the barycentre where the scene's place has drifted to at the frame's time", () => {
     const model = modelOf(stateNearEarth(3_000));
     const place = model.system?.place ?? null;
-    if (place === null || place.barycentre === null || place.velocityMPerS === null) {
+    if (place?.kind !== "stated") {
       throw new Error("the fixture's scene states its place");
     }
     // The place holds at 3,400 s, the frame is at 3,000 s: 400 s before, at the place's velocity.

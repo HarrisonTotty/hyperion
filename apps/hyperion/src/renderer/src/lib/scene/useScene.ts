@@ -105,8 +105,9 @@ export interface SceneOptions {
   /** The detail level asked for every body; the server grants each its own. */
   readonly detail: DetailLevelDto;
   /**
-   * Names a system: the scene's messages carry no designation (R03.T12). The latest one given is
-   * used from the next push on; a new one neither reopens the scene nor relabels what is held.
+   * Names a system whose scene states no place (R03.T16), the fallback for a server that does not
+   * send it. The latest one given is used from the next push on; a new one neither reopens the
+   * scene nor relabels what is held.
    */
   readonly designate: Designate;
 }

@@ -17,7 +17,8 @@ system: SystemBodiesDto,
  */
 grants: Array<BodyGrantDto>, 
 /**
- * Where the system is. The server always sends it; it is optional so that the field was an
- * addition (`PROTOCOL_VERSION` 2), and a client without it names the system by its ID.
+ * Where the system is. The server always sends it; it is optional only so that adding it left
+ * [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) at 2, and a client that predates it names the
+ * system by its ID.
  */
 place?: SystemPlaceDto, };
