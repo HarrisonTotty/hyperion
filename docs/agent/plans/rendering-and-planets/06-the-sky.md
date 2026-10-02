@@ -1353,6 +1353,17 @@ plan reserves no tag, prefix or stream.
   once the sky has arrived; the "Views" class gains the rule that the star limit is always a V magnitude with
   its kind, with any stand-in after a middle dot, and a paragraph that the unresolved band is
   labelled and drawn only in the photorealistic style. **Awaiting the owner's sign-off.**
+- **Deviations in T13.b, as built (2026-10-02).** A fourth file, `view/sky/cube.ts`, holds what
+  the CPU splat, the mips and T13.g's WGSL share: `cubeTexelOf` (WebGPU's face order and (u, v)
+  orientation, ties to x then y then z) and `texelSolidAnglesSr` (the exact atan2 texel area). The
+  splat's point layout is pinned here for T13.g's GPU splat: `SPLAT_POINT_FLOATS` (8), direction
+  (x, y, z, 0) then illuminance (r, g, b, 1) in lx, so alpha sums the count. `pack.ts` exports
+  `packRgb9e5`, `unpackRgb9e5`, `packRgb9e5Texels`, `RGB9E5_MAX`, `RGB9E5_MIN_POSITIVE`; `mips.ts`
+  exports `divideBySolidAngle`, `peakScaleExponent` (brightest channel to (2¹⁴, 2¹⁵]),
+  `scaleByPowerOfTwo`, `faceMipChain` (children weighted by their summed solid angle), `mipStep`,
+  `mipSizes` and `cubeLevels` (faces joined for `writePackedCubeLevel`). The extension gives no
+  worked numbers; the tests pin its limits (65,408, 2⁻²⁴, 1.0 = exponent 16 mantissa 256) and the
+  round-up case (0.99999 packs as 1.0).
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
