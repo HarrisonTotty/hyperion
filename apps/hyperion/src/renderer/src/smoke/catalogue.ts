@@ -24,6 +24,7 @@ export type SmokeFixture = "none" | "broken-wgsl" | "external-fetch";
 export const BROKEN_ENTRY: CatalogueEntry = {
   kind: "material",
   spec: flatSpec("broken fixture", {
+    displayName: "TEST FIXTURE",
     fragmentWgsl: "@fragment fn fragmentMain() -> @location(0) vec4f { return oops; }",
   }),
 };

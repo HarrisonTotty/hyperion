@@ -78,6 +78,17 @@ export const MATERIAL_BUFFER: Readonly<Record<WireframeMaterial, WireframeBuffer
   starSprite: "sprites",
 };
 
+/**
+ * Each material's display name, the effect's name on the console (decided 2026-10-02): what it
+ * draws, in the guide's words.
+ */
+const DISPLAY_NAMES: Readonly<Record<WireframeMaterial, string>> = {
+  lines: "WIREFRAME LINES",
+  occluderSphere: "BODY OCCLUDER",
+  occluderHull: "HULL OCCLUDER",
+  starSprite: "STAR SPRITES",
+};
+
 function spec(
   name: WireframeMaterial,
   state: Pick<
@@ -87,6 +98,7 @@ function spec(
 ): WgslMaterialSpec {
   return {
     name: `wireframe:${name}`,
+    displayName: DISPLAY_NAMES[name],
     vertexWgsl: SOURCES[name],
     fragmentWgsl: SOURCES[name],
     samplers: [],

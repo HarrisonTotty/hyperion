@@ -215,6 +215,7 @@ export async function checkTargetsAsyncIndirectTiming(
   // A frame with both an indirect draw and a post-process (decision item 12).
   const copy = engine.createPostProcess({
     name: "indirect copy",
+    displayName: "TEST INDIRECT COPY",
     uniforms: [],
     fragmentWgsl: `
 @group(2) @binding(0) var colour : texture_2d<f32>;

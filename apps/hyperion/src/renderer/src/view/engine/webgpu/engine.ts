@@ -356,7 +356,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       .then((errors): void => {
         if (errors.length > 0) {
           record.broken = true;
-          this.#reportShaderErrors(`material ${spec.name}`, spec.name, errors);
+          this.#reportShaderErrors(`material ${spec.name}`, spec.displayName, errors);
         }
         return undefined;
       })
@@ -383,7 +383,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     const errors = await compilationErrorsOf(record.modules);
     if (errors.length > 0) {
       record.broken = true;
-      this.#reportShaderErrors(`material ${spec.name}`, spec.name, errors);
+      this.#reportShaderErrors(`material ${spec.name}`, spec.displayName, errors);
       throw new Error(`material ${spec.name} failed to compile: ${errors.join("; ")}`);
     }
     const outputs = targets.flatMap((target): Array<readonly [GPUTextureFormat, boolean]> =>
@@ -429,7 +429,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       .then((errors): void => {
         if (errors.length > 0) {
           record.broken = true;
-          this.#reportShaderErrors(`post-process ${spec.name}`, spec.name, errors);
+          this.#reportShaderErrors(`post-process ${spec.name}`, spec.displayName, errors);
         }
         return undefined;
       })
@@ -728,12 +728,18 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return { handle, record };
   }
 
-  #reportShaderErrors(owner: string, name: string, errors: ReadonlyArray<string>): void {
+  /**
+   * Logs a shader's compile errors under its code name (`owner`) with its display name, and
+   * reports the refusal to the status store by its display name, the screen's (decided 2026-10-02).
+   */
+  #reportShaderErrors(owner: string, displayName: string, errors: ReadonlyArray<string>): void {
     if (this.#disposed) {
       return;
     }
-    console.error(`${owner} failed to compile; its draws are left out:\n${errors.join("\n")}`);
-    this.#status.dispatch({ kind: "shader-refused", effectName: name });
+    console.error(
+      `${owner} (${displayName}) failed to compile; its draws are left out:\n${errors.join("\n")}`,
+    );
+    this.#status.dispatch({ kind: "shader-refused", effectName: displayName });
   }
 
   /** A compile check that could not run (a lost device, say): logged unless the engine is gone. */

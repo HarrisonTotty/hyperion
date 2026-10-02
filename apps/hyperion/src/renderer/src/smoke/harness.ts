@@ -77,13 +77,17 @@ struct Draw {
 }
 `;
 
-/** A flat material of `FLAT_WGSL` with `overrides` on its state. */
+/**
+ * A flat material of `FLAT_WGSL` with `overrides` on its state, named `TEST FLAT` on the console
+ * unless `overrides` names it.
+ */
 export function flatSpec(
   name: string,
   overrides: Partial<WgslMaterialSpec> = {},
 ): WgslMaterialSpec {
   return {
     name,
+    displayName: "TEST FLAT",
     vertexWgsl: FLAT_WGSL,
     fragmentWgsl: FLAT_WGSL,
     uniforms: [{ name: "tint", type: "vec4f" }],
