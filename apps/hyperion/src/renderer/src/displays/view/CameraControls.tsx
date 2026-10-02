@@ -12,7 +12,7 @@ export interface CameraControlsProps {
   readonly offered: ReadonlyArray<CameraPreset>;
   /** The horizontal field of view, degrees. */
   readonly fovDeg: number;
-  /** The free camera's commanded rate step (`freeRateMPerS`). */
+  /** The free camera's rate step (`freeRateMPerS`). */
   readonly rateStep: number;
   /** The highest rate step the scene allows (`maxFreeRateStep`). */
   readonly maxRateStep: number;
@@ -36,7 +36,7 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
  * The view's camera controls (plan R02, R02.T15.c): the presets `SEAT`, `CHASE` and `FREE`, the
  * previous and next target, the field of view a step narrower or wider with its reading, and the
  * `EASED CAMERA MOVES` setting, each a button reachable by keyboard and showing its key; the field
- * of view's buttons are held back at the ends of its steps, the free camera's commanded rate
+ * of view's buttons are held back at the ends of its steps, the free camera's rate
  * (stepped by `PAGE UP` and `PAGE DOWN` on the canvas) with a statement at either end of its steps,
  * and the setting says when reduced motion stops it applying.
  *
@@ -167,7 +167,8 @@ export function CameraControls({
       </p>
       {slowest || fastest ? (
         <p className="view-camera__reason">
-          NOT AVAILABLE: RATE at its {fastest ? "highest" : "lowest"} step
+          NOT AVAILABLE:{" "}
+          {fastest ? "PAGE UP, RATE at its highest" : "PAGE DOWN, RATE at its lowest"} step
         </p>
       ) : null}
       <div className="view-camera__setting">

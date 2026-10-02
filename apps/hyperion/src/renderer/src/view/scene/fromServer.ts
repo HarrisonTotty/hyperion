@@ -277,10 +277,10 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * `sceneAt` gives one, so that a body below `mass_and_orbit` or placed by `seen` is never the
  * camera's frame. The ship's local body is drawn at its `geometricM`, every other body and star at
  * its `apparentM`; a placed body drawn apparent also carries its `geometricM` as its
- * `geometricCentreM`, from which the camera's frame selection measures (Design note 6). A body's rotation is not modelled yet (Design note 14): its pole is its orbit's
- * normal. Rings are drawn about their planet, in its orbital plane (plan 14's convention for this
- * generator version); orbits are every placed planet's and moon's about the body or star it
- * orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
+ * `geometricCentreM`, to which the camera's frame selection measures (Design note 6). A body's
+ * rotation is not modelled yet (Design note 14): its pole is its orbit's normal. Rings are drawn
+ * about their planet, in its orbital plane (plan 14's convention for this generator version);
+ * orbits are every placed planet's and moon's about the body or star it orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
  * The ship stand-in is the own ship, in the system frame at the observer's present position.
  */
 export function viewSceneFromServer(

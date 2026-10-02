@@ -307,7 +307,7 @@ export interface LabelLine {
 }
 
 /**
- * The free camera's commanded translation rate as the view reads it, three significant figures:
+ * The free camera's translation rate, the speed its flight keys fly it at, as the view reads it, three significant figures:
  * `RATE 316 m/s`, then in km/s from 1 km/s, `RATE 1.00 km/s` (the guide's "Numbers").
  *
  * @param rateStep - The camera's rate step, {@link freeRateMPerS}'s argument.
