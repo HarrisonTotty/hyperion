@@ -1,7 +1,8 @@
 //! The scene subscription, live, over a real socket (rendering plan R03, R03.T8.a): subscribe in a
 //! pinned system and receive its bodies as `system_bodies` answers them, a heartbeat each second,
 //! the ship stand-in's changes pushed to every subscription of the universe, a departure from the
-//! system, and the refusals of an unknown subscription and of a camera out of reach.
+//! system, and the refusals of an unknown subscription and of a camera out of reach; and the
+//! system's place on the scene against the chart's row (R03.T16.b).
 
 mod common;
 
@@ -11,9 +12,9 @@ use common::scene::{
     universe,
 };
 use hyperion_protocol::{
-    CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto, NotificationBody,
-    RequestBody, ResponseBody, SceneArrivalDto, SceneCamerasRequest, SceneClockStateDto,
-    SystemBodiesRequest,
+    CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto, MassLayer,
+    NotificationBody, RequestBody, ResponseBody, SceneArrivalDto, SceneCamerasRequest,
+    SceneClockStateDto, SystemBodiesRequest, SystemsInRangeRequest,
 };
 use hyperion_server::scene::{CraftState, SceneKnowledge};
 use hyperion_sim::id::BodyId;
@@ -49,6 +50,51 @@ async fn a_scene_in_a_pinned_system_holds_every_body_as_system_bodies_answers_th
     assert_eq!(state.clock.time, TIME);
     assert_eq!(state.clock.state, SceneClockStateDto::Paused);
     assert_eq!(state.sequence, 0);
+}
+
+#[tokio::test]
+async fn the_scene_place_agrees_with_the_chart() {
+    let (_server, mut client, universe) = universe().await;
+    let [system, _] = systems();
+    set_ship(&mut client, &universe, in_system(&system), 0).await;
+    let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Contact).await;
+    let place = state
+        .system
+        .expect("the ship is in the system's frame")
+        .place
+        .expect("the server states the system's place");
+    let (answer, _) = client
+        .request_among_notifications(RequestBody::SystemsInRange(SystemsInRangeRequest {
+            universe: universe.clone(),
+            centre: place.barycentre,
+            radius_ly: 0.01,
+            time: place.time,
+            min_layer: MassLayer::A,
+            limit: 20_000,
+            include_stellar: false,
+        }))
+        .await;
+    let Ok(ResponseBody::SystemsInRange(found)) = answer else {
+        panic!("systems_in_range answers: {answer:?}");
+    };
+    let row = found
+        .systems
+        .iter()
+        .find(|row| row.id == system)
+        .expect("the chart finds the system at its own barycentre");
+    assert_eq!(place.designation, row.designation);
+    assert_eq!(place.barycentre, row.position, "the same position, exactly");
+    assert!(
+        place.velocity_m_s.iter().any(|v| v.abs() > 1.0e3),
+        "a server galaxy has kinematics, so the comparison is not of zeros"
+    );
+    for (m_s, km_s) in place.velocity_m_s.iter().zip(row.velocity_km_s) {
+        let chart = km_s * 1_000.0;
+        assert!(
+            (m_s - chart).abs() <= 1e-12 * chart.abs(),
+            "the place's {m_s} m/s against the chart's {km_s} km/s"
+        );
+    }
 }
 
 #[tokio::test]
