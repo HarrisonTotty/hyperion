@@ -867,9 +867,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     hard bound, as the brainstorm's test promises: T6's slow test asserts that no sampled
     difference ever exceeds it, and records the ratio of the 99.9th percentile to it per level, so
     that a loose bound cannot silently over-refine. A ratio below a quarter is a finding, not a
-    failure. Whether selection then takes a calibrated bound, such as R10's min(hard, 4σ), is the
-    owner's ruling, which the roadmap lists as awaiting the owner with R10.T4. Until the owner
-    rules, the hard bound selects, and a sampled maximum never enters the contract. The
+    failure. Whether selection then takes a calibrated bound, such as R10's min(hard, 4σ), is
+    ruled (2026-10-02, decisions-r05.md item 6): R05 selects by the hard bound everywhere,
+    the gate's runs included; R10.T4 applies min(hard, kσ) under the criterion recorded there. A
+    sampled maximum never enters R05's contract. The
     brainstorm's patch-to-distance ratio of about five is provisional until this bound exists, and
     T6 records the ratio it implies per level: for fractal relief ε_n falls more slowly than the
     patch size, so the ratio grows towards the finest levels, and demand with it.
@@ -1427,8 +1428,11 @@ through its own vertices on the same diagonal rule.
 - Files: `src/test_planet/bound.rs`, `src/wasm.rs`, `tests/level_bound.rs`,
   `tests/level_table_golden.rs`, `tests/golden/level_table.golden`.
 - Tests: no sample exceeds the bound at any level; the ratio of the 99.9th percentile to the
-  bound is recorded per level, and a ratio below a quarter is reported as a finding for the
-  owner's ruling on the selection bound (Design note 15), not failed; the implied
+  bound is recorded per level, and a ratio below a quarter is reported as a finding (Design note
+  15), not failed; per level also recorded (decisions-r05.md item 6): σ_n, the RMS of the omitted
+  octaves, √Σσ_k² with the fade weight of the newest included octave, the 99.9th percentile ÷
+  4σ_n, and the per-patch maximum over 65 × 65 vertices ÷ 4σ_n for the 10⁴ samples grouped by
+  patch; the implied
   patch-to-distance ratio k_n = ε_n ÷ (S_n τ θ_px) at τ = 1 px, 1080p and 60° is written out and
   recorded in the documentation for T13.a; the level-table golden on all three targets.
 - Acceptance: `just test-slow level_bound_holds` runs it; `just ci`; the ratios are in the module
@@ -1785,7 +1789,10 @@ bounds.
   for every segment and written out beside it, not asserted against the brainstorm; the fixed-step
   run of the whole descent through `selectPatches` and a simulated cache gives a selection
   sequence whose hash is pinned, and its measured demand, first-time-selected keys a second, lies
-  within a factor of two of the per-level D in every segment on both settings.
+  within a factor of two of the per-level D in every segment on both settings; the same run
+  records the patch counts and the predicted demand under both selection bounds, the hard ε_n and
+  min(hard, 4σ_n), as a second pass of the pure selection with ε as its parameter
+  (decisions-r05.md item 6).
 - Acceptance: `pnpm --filter hyperion exec vitest run view/spike`.
 
 **R05.T13.b The spike scene.** `spikeScene.ts` (the test planet, its rotation,
@@ -2057,7 +2064,10 @@ whether the rule fires. The verdict, with its figures, is written in this plan's
 points and summarised in `docs/measurements/descent-spike/README.md`, and an edit to the
 brainstorm's open question 2 (from **Lean** to **Closed**, or to what the runs show) is drafted
 for the owner, as are the brainstorm findings this plan reports (Risks and open points). If the
-rule fires, the owner is told before any later plan depends on the browser.
+rule fires, the owner is told before any later plan depends on the browser. If the discrete run
+fails on streaming demand and the demand under min(hard, 4σ_n) (T13.a) would meet the budget, the
+verdict names the selection bound as ours to fix; that is never a fired rule (decisions-r05.md
+item 6).
 
 - Files: this plan, `docs/measurements/descent-spike/README.md`.
 - Acceptance: the verdict names each criterion of Design note 21 with its measured value on each
@@ -2072,8 +2082,8 @@ rule fires, the owner is told before any later plan depends on the browser.
 - **Geometry:** shared edges are bitwise equal across faces (T1.b, T4.a); both vertex paths are
   under 1 mm from `f64` at level 19 and the naive form is not (T4.b); the collision interpolant is
   the drawn finest mesh (T4.c).
-- **Level of detail:** the hard bound holds, and its looseness per level is recorded for the
-  owner's ruling on the selection bound (T6);
+- **Level of detail:** the hard bound holds, and its looseness per level, with σ_n and the
+  ratios to 4σ_n, is recorded for R10.T4's mechanical rule (T6);
   selection meets τ, is balanced, is a pure function of its inputs and keeps the finest level under
   every grounded body on every setting and tolerance (T7); the morph is continuous at shared
   vertices and 1 at every level transition (T7.c).
@@ -2179,8 +2189,9 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   until T3 measures them.
 - **The hard bound may be loose.** If T6 finds it looser than four times the 99.9th percentile,
   selection over-refines and demand rises. Whether selection then takes a calibrated bound
-  (R10's min(hard, 4σ)) is the owner's ruling, which the roadmap lists with R10.T4; T6's recorded
-  ratios go to the owner, and the hard bound selects until the ruling.
+  (R10's min(hard, 4σ)) is ruled (2026-10-02, decisions-r05.md item 6): R05 selects by the hard
+  bound everywhere, gate runs included; R10.T4 applies min(hard, kσ) under the criterion recorded
+  there, from T6's and its own recorded figures.
 - **The descending thresholds** (Design note 9) are provisional: 1 km and 30 s, and
   `FORCED_REGION_RESIDENCY_S` 30 s, until T16 measures how long a forced region takes to become
   resident and T18 sets them.
