@@ -656,7 +656,12 @@ and `--port`.
    which suns shine.
 5. **The BRDF is a lunar-Lambert disc times a fitted phase function** (researched 2026-09-29;
    Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7; Mallama and Hilton 2018, Astronomy
-   and Computing 25, 10, arXiv:1808.01973, eqs. 2–17; McEwen 1991, Icarus 92, 298, from memory).
+   and Computing 25, 10, arXiv:1808.01973, eqs. 2–17; McEwen 1991, Icarus 92, 298, from memory;
+   added by decision-phase-curves, 2026-10-02: Krisciunas and Schaefer 1991, PASP 103, 1033, eq. 9,
+   after Allen 1973, _Astrophysical Quantities_, 3rd ed., p. 143, for the Moon; Squyres and Veverka
+   1981, Icarus 46, 137, and 1982, Icarus 52, and Buratti 1991, Icarus 92, 312, for Ganymede's q;
+   Grundy et al. 2007, Science 318, 234, for Europa's; Buratti 1984, Icarus 59, 392, for L at high
+   albedo).
    Every measured phase integral in V lies between 0.48 (Mercury) and 1.36 (Saturn), below
    Lambert's 1.5 and Lommel–Seeliger's 1.64, so no law of fixed disc-integrated shape reaches p and
    q together; the law needs a free phase function. It is I/F = A · f(α) · [L · 2μ₀ ÷ (μ₀ + μ) +
@@ -1070,7 +1075,9 @@ V-weighted sum is E_V; the direction error from neglecting the star-to-body ligh
 #### R07.T4 The BRDF and its phase function
 
 - **R07.T4.a Templates and the law.** `appearance/{law,templates}.ts` (Design note 5):
-  `PHASE_TEMPLATES` from Mallama and Hilton 2018's eqs. 2–17 inside their valid ranges (Mercury's
+  `PHASE_TEMPLATES` from Mallama and Hilton 2018's eqs. 2–17 inside their valid ranges and the
+  Moon's from Krisciunas and Schaefer 1991 eq. 9 (Allen 1973) to 150°, which `airless-ice` and
+  `snowball` borrow at L = 1 (decision-phase-curves, 2026-10-02) (Mercury's
   zeroth-order term −0.613, as that paper corrects the 2017 table), f tabulated at 0.5°, clamped at
   `PHASE_F_CLAMP` and held past each range; `PhotometricLaw` with its per-channel exponents.
   `test/litFixtures.ts` gains `SOLAR_SYSTEM_PHOTOMETRY`: p in B, V and R, B−V and V−R, V(1,0) and
@@ -1466,8 +1473,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
 - **Provisional timings.** Every timing from the research probes (histogram, present overhead,
   quantisation's effect) was measured while other work loaded the machine; T17 and T20 re-measure
   on a quiet one before any figure becomes "as built".
-- **Templates without an analogue** (airless ice, snowball, magma) are provisional and labelled;
-  the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
+- **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
+  Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
+  Venus's curve unlabelled (decision-phase-curves, 2026-10-02). The q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
   al. 2016 would settle Jupiter); and plan 14's airless-rock Bond albedo and Earth's albedo are
   checks for its owner (T1).
 - **The lens PSF** of camera views rests on recalled veiling-glare figures (low confidence); the
@@ -1477,8 +1485,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   see flare, so a realistic camera mode that meters it could be offered as an operator-selected
   meter (the research lean, 2026-09-29), not as a default and not with a cap, which would be an
   arbitrary number; it would need a guide entry for the owner. Not built.
-- **The law's thresholds** (Design note 5: 100 Pa and 10 kPa, a cloud fraction of 0.3) are
-  judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
+- **The law's thresholds** (Design note 5: 100 Pa and 30 kPa, raised from 10 kPa so that the
+  simulated Mars, 11 kPa, reaches the Mars template; the cloud term suspended until plan 14's cloud
+  fraction depends on the condensables, `README` open finding; decision-phase-curves, 2026-10-02,
+  to be built in T5 and T1's draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
   clamp; the smooth blend of Design note 5 replaces the steps if the population shows jumps.
 - **Planetshine's uniform-disc approximation** shifts its terminator on the receiver by the
   neighbour's crescent offset, up to about 4° at Io; stated, not corrected.
@@ -1593,14 +1603,12 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     `discIntegratedPhase` and `lawFor`. `Rgb` is in display order (r, g, b): index 0 is R, 2 is B.
   - **`PhaseTemplate` gains two fields:** `provisional: boolean`, for T5 and T16's labels, and
     `lommelSeeligerShare`, the L that goes with the curve by Design note 5 (1 for the Moon,
-    Mercury, airless ice and magma, 0.5 for Mars, 0 otherwise), so that the templates' keys and
-    laws live in one place (`templates.ts`) and change cheaply (the coordinator's request
-    2026-10-02). No template is wired to a body class yet: Design note 5's selection rule waits
-    for the ruling in `decision-phase-curves.md`.
-  - **Moon:** Mallama and Hilton 2018 has no Moon; `moon` is Allen 1973's
-    Δm = 0.026 α + 4 × 10⁻⁹ α⁴ as Krisciunas and Schaefer 1991's eq. 9 quotes it (seen through
-    specsim's transcription; medium confidence), a source Design note 5 does not list. Its 150°
-    range is a judgement; no stated range was found. q = 0.626 at L = 1.
+    Mercury, airless ice, the snowball and magma, 0.5 for Mars, 0 otherwise), so that the
+    templates' keys and laws live in one place (`templates.ts`) and change cheaply (the
+    coordinator's request 2026-10-02).
+  - **Moon:** Mallama and Hilton 2018 has no Moon; `moon` is Krisciunas and Schaefer 1991's eq. 9,
+    Δm = 0.026 α + 4 × 10⁻⁹ α⁴, a fit to Allen 1973's table (p. 143, to 160°), held past 150°,
+    now in Design note 5's sources. q = 0.626 at L = 1.
   - **Ranges and branches.** Mercury's eq. 2 is used below its observed 2.1°; Uranus's eq. 15 and
     Neptune's eq. 17 from opposition, in place of the flat eqs. 14 and 16 (which drops the
     paper's 0.021 and 0.015 mag steps at 3.1° and 1.9°); Mars is eq. 6 without L(λe) and L(Ls),
@@ -1608,15 +1616,16 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     (eqs. 11–12, joined at 6°), the rings being R11's; Earth runs to 180° (MH2018 §4.3: Tinetti's
     curve approaches zero there), and Mallama et al. 2017's Table A-3.1 tabulates a steeper fit of
     the same curve (2.07 mag at 90° against eq. 5's 1.57); eq. 5, the almanac's, is taken.
-  - **Stand-ins (approved by the coordinator 2026-10-02, provisional and labelled):** airless ice
-    takes the Moon's curve, snowball Earth's and magma Mercury's. The phase-curve check
-    (`check-phase-curves.md`) found four mismatches with galaxy's classes (airless ice anchored to
-    the Galilean moons, a cloud-free snowball the rule never selects, magma only below 10 kPa,
-    and the sim's Mars at 11 kPa and cloud 0.67 never reaching the Mars template); a decision is
-    pending in `decision-phase-curves.md`. A sourced icy curve exists only as Hapke fits
-    (Domingue and Verbiscer 1997, Icarus 128, 49: Europa's V to about 105°, Ganymede's to 38°).
-    With the Moon's curve an icy body's p_V q_V ÷ A_Bond is about 0.7, which T1's draft must state
-    so that T2.b's 5% check does not fire on every icy moon.
+  - **Borrowed shapes (decision-phase-curves, 2026-10-02, after the phase-curve check's four
+    mismatches with galaxy's classes):** airless ice and the snowball take the Moon's curve at L = 1,
+    their q reached through s (Ganymede's 0.80 at s ≈ 0.82, ratio 0.98; Europa's 1.01 at s ≈ 0.67,
+    ratio 0.99, both inside T2.b's 5%); magma takes Mercury's, for the thin branch below 30 kPa
+    only. All three are `provisional` and labelled. The Moon's constant is `MOON_KS91`. q does not
+    depend on L inside a template's range; past it, where f is held, L moves q by 3 × 10⁻⁴ of
+    airless ice's 0.80 (the ruling's 10⁻⁴ was computed at s = 1), which T4.b's test states.
+    The selection rule (30 kPa, the cloud term suspended) is T5's and T1's draft's, and no template
+    is wired to a body class yet. A sourced icy curve exists only as Hapke fits (Domingue and
+    Verbiscer 1997, Icarus 128, 49).
   - **Fixture.** `SOLAR_SYSTEM_PHOTOMETRY` adds `templateV10Mag` (MH2018's zeroth-order terms, e.g.
     Mercury's −0.613 beside Table 3's −0.69), `radiusKm` (the disc-equivalent √(a c) each Table 7
     p_V implies: Jupiter 69,134 km, Uranus 25,264, Neptune 24,552, Mars 3,386, Saturn the paper's

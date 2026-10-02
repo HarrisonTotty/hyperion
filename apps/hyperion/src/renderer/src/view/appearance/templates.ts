@@ -7,17 +7,19 @@
  * opposition: Φ_t(α) = 10^(−0.4 [V(α) − V(0)]). The planets' curves are Mallama and Hilton,
  * "Computing apparent planetary magnitudes for The Astronomical Almanac", Astronomy and Computing
  * 25 (2018) 10, arXiv:1808.01973, eqs. 2–17, each inside the range that paper states for it; the
- * Moon's is Allen's, _Astrophysical Quantities_, 3rd ed. (1973), as Krisciunas and Schaefer,
- * PASP 103 (1991) 1033, eq. 9 quote it: m = −12.73 + 0.026 |α| + 4 × 10⁻⁹ α⁴ (seen in specsim's
- * transcription, the paper not read; medium confidence). A template is defined on [0, `validToRad`]; past it the law
- * holds its phase factor f (`law.ts`), never the template's polynomial, which is unconstrained by
- * data there. Distance and the zeroth-order term drop out of Φ_t, so Mercury's corrected V(1, 0) of
+ * Moon's is Krisciunas and Schaefer, PASP 103 (1991) 1033, eq. 9, a fit to the table in Allen,
+ * _Astrophysical Quantities_, 3rd ed. (1973), p. 143: V = −12.73 + 0.026 |α| + 4 × 10⁻⁹ α⁴, with no
+ * opposition surge. A template is defined on [0, `validToRad`]; past it the law holds its phase
+ * factor f (`law.ts`), never the template's polynomial, which is unconstrained by data there. Distance and the zeroth-order term drop out of Φ_t, so Mercury's corrected V(1, 0) of
  * −0.613 (that paper's §3.1, against the −0.694 of Mallama et al. 2017's Table A-1.2) changes no
  * template.
  *
- * Three templates have no measured analogue and are stand-ins, flagged `provisional` and labelled
- * wherever they are shown: airless ice takes the Moon's curve, a snowball Earth's and a magma ocean
- * Mercury's, until a source for each is chosen (Risks).
+ * Three templates borrow a curve's shape and are flagged `provisional`. Airless ice and a snowball
+ * take the Moon's curve at L = 1. No disc-integrated V polynomial of an icy satellite is published
+ * (Domingue and Verbiscer 1997, Icarus 128, 49, give Hapke fits only). Plan 14 solves s to the icy
+ * analogue's measured q: Ganymede's 0.80 (Squyres and Veverka 1981, Icarus 46, 137) and Europa's
+ * 1.01 (Grundy et al. 2007, Science 318, 234). A magma ocean under 30 kPa takes Mercury's curve;
+ * above it, Venus's (decision-phase-curves, 2026-10-02).
  */
 import type { PhaseTemplateId } from "./law";
 
@@ -85,7 +87,10 @@ function template(
   };
 }
 
-/** The Moon, Allen (1973): Δm = 0.026 α + 4 × 10⁻⁹ α⁴, α in degrees. */
+/**
+ * The Moon, Krisciunas and Schaefer 1991, eq. 9 (after Allen 1973): Δm = 0.026 α + 4 × 10⁻⁹ α⁴, α
+ * in degrees.
+ */
 function moonDimming(alphaDeg: number): number {
   return 0.026 * alphaDeg + 4e-9 * alphaDeg ** 4;
 }
@@ -157,8 +162,8 @@ function neptuneDimming(alphaDeg: number): number {
 }
 
 const MH2018 = "Mallama and Hilton 2018, Astronomy and Computing 25, 10";
-const ALLEN_MOON =
-  "Allen 1973, Astrophysical Quantities, 3rd ed., as quoted by Krisciunas and Schaefer 1991, PASP 103, 1033, eq. 9";
+const MOON_KS91 =
+  "Krisciunas and Schaefer 1991, PASP 103, 1033, eq. 9 (a fit to Allen 1973, Astrophysical Quantities, 3rd ed., p. 143)";
 
 /**
  * The phase-curve templates by identifier (Design note 5).
@@ -170,11 +175,11 @@ const ALLEN_MOON =
  * mag at 90° against eq. 5's 1.57, and eq. 5, the almanac's, is taken);
  * Mars to 50° (eq. 6; eq. 7's average of Mercury and Earth beyond it is not used, as Design note 5
  * holds f past 50° instead); Jupiter to 130° (Mayorga et al.: untrustworthy beyond); Saturn's globe
- * to 150° (eq. 12); Uranus to 154°; Neptune to 133°; the Moon to 150°, a judgement (about where
- * lunar photometry near new Moon ends), no source stating a range having been found.
+ * to 150° (eq. 12); Uranus to 154°; Neptune to 133°; the Moon to 150° (Allen's table runs to 160°,
+ * where the fit gives 6.78 mag against the table's 7.5).
  */
 export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> = {
-  moon: template(moonDimming, 150, 1, `${ALLEN_MOON}; to 150° by judgement`, false),
+  moon: template(moonDimming, 150, 1, `${MOON_KS91}; to 150°`, false),
   mercury: template(mercuryDimming, 169.5, 1, `${MH2018}, eq. 2; to 169.5°`, false),
   mars: template(marsDimming, 50, 0.5, `${MH2018}, eq. 6; to 50°`, false),
   venus: template(venusDimming, 179, 0, `${MH2018}, eqs. 3–4; to 179°`, false),
@@ -187,21 +192,21 @@ export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> =
     moonDimming,
     150,
     1,
-    `PROVISIONAL: the Moon's curve stands in (${ALLEN_MOON}); no icy analogue chosen`,
+    `PROVISIONAL: the Moon's curve shape (${MOON_KS91}); q from Ganymede's 0.80 (Squyres and Veverka 1981, Icarus 46, 137) through s`,
     true,
   ),
   snowball: template(
-    earthDimming,
-    180,
-    0,
-    `PROVISIONAL: Earth's curve stands in (${MH2018}, eq. 5); no snowball analogue`,
+    moonDimming,
+    150,
+    1,
+    `PROVISIONAL: the Moon's curve shape (${MOON_KS91}); q from Europa's 1.01 (Grundy et al. 2007, Science 318, 234) through s; cloud-free ice`,
     true,
   ),
   magma: template(
     mercuryDimming,
     169.5,
     1,
-    `PROVISIONAL: Mercury's curve stands in (${MH2018}, eq. 2); no magma-ocean analogue`,
+    `PROVISIONAL: Mercury's curve stands in (${MH2018}, eq. 2); no magma-ocean analogue; thin branch only, P < 30 kPa (thicker: venus)`,
     true,
   ),
 };

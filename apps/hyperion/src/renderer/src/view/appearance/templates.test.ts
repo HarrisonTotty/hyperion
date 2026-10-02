@@ -62,8 +62,19 @@ describe("PHASE_TEMPLATES", () => {
     expect(dimmingMag("mercury", 90)).toBeCloseTo(expected, 9);
   });
 
-  it("dims the Moon by Allen's 0.026 α + 4 × 10⁻⁹ α⁴", () => {
-    expect(dimmingMag("moon", 90)).toBeCloseTo(0.026 * 90 + 4e-9 * 90 ** 4, 9);
+  it.each([
+    [0, 0],
+    [30, 0.7832],
+    [90, 2.6024],
+    [150, 5.925],
+  ] as const)("dims the Moon by Krisciunas and Schaefer's eq. 9 at %i°: %f mag", (deg, mag) => {
+    expect(dimmingMag("moon", deg)).toBeCloseTo(mag, 3);
+  });
+
+  it.each(["airless-ice", "snowball"] as const)("gives %s the Moon's curve at L = 1", (id) => {
+    expect(PHASE_TEMPLATES[id].lommelSeeligerShare).toBe(1);
+    expect(PHASE_TEMPLATES[id].validToRad).toBe(PHASE_TEMPLATES.moon.validToRad);
+    expect(dimmingMag(id, 90)).toBe(dimmingMag("moon", 90));
   });
 
   it("flags exactly the three stand-in templates as provisional", () => {
