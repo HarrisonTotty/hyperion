@@ -1635,6 +1635,38 @@ fn adjacent_drift_cells_join_within_the_tolerance() {
     assert!(joins > 100, "{joins} joins");
 }
 
+/// Every drifting record of the sample at the epoch, receding moons and circularising planets
+/// among them, moves at its position's derivative, to 10⁻⁹ of its speed beyond a central
+/// difference's own error (P14.T45.e).
+#[test]
+fn a_drifting_record_s_velocity_is_the_derivative_of_its_position() {
+    use crate::planetary::drift::tests::velocity_derivative_excess;
+    let (mut moons, mut eccentric) = (0, 0);
+    for (_, _, record) in drifting_records(UniverseTime::EPOCH) {
+        let orbit = record.orbit().ok().expect("drifting");
+        let drift = orbit.drift().expect("drifting");
+        let inside = drift
+            .reference()
+            .checked_add(Span::new(600, 0).unwrap())
+            .unwrap();
+        if orbit.valid_until().is_some_and(|until| until <= inside) {
+            continue;
+        }
+        let excess = velocity_derivative_excess(&orbit.trajectory(), inside);
+        assert!(excess < 1e-9, "{:?}: {excess:e}", record.index());
+        if matches!(record.identity().parent(), Some(OrbitHost::Body(_))) {
+            moons += 1;
+        }
+        if drift.eccentricity_rate_per_s() < 0.0 {
+            eccentric += 1;
+        }
+    }
+    assert!(
+        moons > 0 && eccentric > 0,
+        "{moons} moons, {eccentric} circularising"
+    );
+}
+
 /// The share of evolving orbits whose cells fall to the smallest size, over the sample at three
 /// times, counting the cells that neither a segment nor a state cut: under 10⁻³ (P14.T45.a).
 #[test]

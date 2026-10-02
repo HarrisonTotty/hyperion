@@ -1675,10 +1675,10 @@ impl PlanetarySystem {
     /// The velocity follows the position's construction: the host's barycentric velocity on plan
     /// 11's walk ([`star_states_at`](crate::stellar::multiplicity::star_states_at)), plus the
     /// body's Kepler velocity about it, and for a moon its planet's plus its own relative velocity.
-    /// For an evolving orbit it is the model's (P14.T45.a): the Kepler velocity at the model's
-    /// elements then with the mean motion nᵣ + ṅ Δt, leaving out the slow change of the axis
-    /// and eccentricity themselves, which is far below the orbital velocity. `None` where
-    /// `position_at` is.
+    /// For an evolving orbit it is the model's (P14.T45.a and T45.e): the time derivative of the
+    /// model's position, the Kepler velocity at the model's elements then with the mean motion
+    /// nᵣ + ṅ Δt plus ȧ ∂r/∂a + ė ∂r/∂e, so that a matched ship or an extrapolated state stays
+    /// with the body. `None` where `position_at` is.
     ///
     /// # Errors
     ///
