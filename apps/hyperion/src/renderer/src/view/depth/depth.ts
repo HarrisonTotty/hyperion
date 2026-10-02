@@ -77,12 +77,22 @@ export interface LayerCamera {
   bodyDistanceM(body: BodyIdHex): number;
 }
 
-/** A layer's place within its body: 0 below the camera, 1 the plane, 2 above. */
+/**
+ * A layer's place within its body, back to front: 0 a shell above the camera, 1 the plane, 2 a
+ * shell below.
+ *
+ * @remarks
+ * Along any ray that meets both, a shell above the camera (radius R ≥ d, the camera's distance
+ * from the centre) is left only after a shell below it (r < d) is met: |p|² is convex along the
+ * ray, starts at d² and is r² < d² at the lower shell's near hit, so |p| ≤ d < R until then. Every
+ * shell above the camera is therefore farther than every shell below it. The plane between the
+ * two groups is a heuristic: along a given ray a ring plane can lie on either side of a shell.
+ */
 function withinBody(layer: Exclude<DepthLayer, { kind: "opaque" }>, distanceM: number): number {
   if (layer.kind === "plane") {
     return 1;
   }
-  return layer.radiusM < distanceM ? 0 : 2;
+  return layer.radiusM < distanceM ? 2 : 0;
 }
 
 function compareLayers(a: DepthLayer, b: DepthLayer, camera: LayerCamera): number {
@@ -107,8 +117,9 @@ function compareLayers(a: DepthLayer, b: DepthLayer, camera: LayerCamera): numbe
     return pa - pb;
   }
   if (a.kind === "shell" && b.kind === "shell" && a.radiusM !== b.radiusM) {
-    // Below the camera by ascending altitude; above it by descending altitude.
-    return pa === 0 ? a.radiusM - b.radiusM : b.radiusM - a.radiusM;
+    // Above the camera by descending altitude (the larger shell's exit is farther); below it by
+    // ascending altitude (the smaller shell's near hit is farther).
+    return pa === 0 ? b.radiusM - a.radiusM : a.radiusM - b.radiusM;
   }
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
@@ -118,10 +129,12 @@ function compareLayers(a: DepthLayer, b: DepthLayer, camera: LayerCamera): numbe
  *
  * @remarks
  * Opaque layers first; then, per body, back to front by the distance of the body's centre; within
- * a body, the shells below the camera by ascending altitude, then the planes (rings), then the
- * shells above the camera by descending altitude. Every transparent layer tests depth and writes
- * none. The order is a function of the layers and the camera alone, whatever order they come in.
- * R08 and R11 consume it.
+ * a body, the shells above the camera by descending altitude, then the planes (rings), then the
+ * shells below the camera by ascending altitude. Every shell above the camera is farther along a
+ * shared ray than every shell below it (corrected in RM1 validation, which found the two groups
+ * reversed); the rings' place between them is a heuristic. Every transparent layer tests depth
+ * and writes none. The order is a function of the layers and the camera alone, whatever order
+ * they come in. R05, R07, R08 and R11 consume it.
  */
 export function transparentLayerOrder<L extends DepthLayer>(
   layers: ReadonlyArray<L>,

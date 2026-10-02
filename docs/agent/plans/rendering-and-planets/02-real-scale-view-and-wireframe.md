@@ -821,9 +821,12 @@ Design note 22 differenced as (p − craft) − offset.
 
 **R02.T7.b Depth constants, ordering and transparent layers.** `view/depth/`: the constants,
 `separable`, `occluderRadius` (Design note 5), and `transparentLayerOrder`: opaque first; then per
-body, back to front by the distance of the body's centre; within a body, the shells below the camera
-by ascending altitude, then the planes (rings), then the shells above by descending altitude; every
-transparent layer tests depth and writes none (brainstorm, "Depth"). R08 and R11 consume it.
+body, back to front by the distance of the body's centre; within a body, the shells above the camera
+by descending altitude, then the planes (rings), then the shells below the camera by ascending
+altitude; every transparent layer tests depth and writes none (brainstorm, "Depth"). Every shell
+above the camera is farther along a shared ray than every shell below it, so the above group goes
+first; the rings' place between the groups is a heuristic. (Corrected in RM1 validation: the text
+first had the two groups the other way round.) R05, R07, R08 and R11 consume it.
 
 - Tests: surfaces 1 m apart are separable to 10⁶ m and 1 km apart to 10⁹ m (Reed 2015 through the
   brainstorm); `occluderRadius` keeps a graticule point on the front hemisphere at least 4 × 10⁻⁶ d
@@ -1729,3 +1732,13 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   `CAMERA REPORT UNANSWERED` and `OWN SHIP`, marked `_Draft (plan R02, R02.T17, nomenclature)…_`
   for the owner. **Pending by eye:** the status line, `RETRY` and the muted stale readings in the
   running client, at 1920 × 1080 and 1280 × 720.
+- **Fixed in RM1 validation (2026-10-02): R02.T7.b's transparent-layer order (M1).** The text and
+  `transparentLayerOrder` drew a body's shells below the camera first and its shells above it last,
+  so a high cloud deck and the air were composited over the nearer low deck. Along any ray that meets
+  both, a shell above the camera (R ≥ d) is left only after a shell below it (r < d) is met, since
+  |p|² is convex along the ray, starts at d² and is r² < d² at the lower hit: every shell above is
+  farther. The order is now the shells above the camera by descending altitude, then the planes
+  (rings), then the shells below by ascending altitude; the rings' place between the groups is a
+  heuristic, noted in R11's Consumes. The task text, R11's Consumes and the README's asks between
+  plans say so; `depth.test.ts` pins the new order and checks it against each shell's crossing
+  distance along a ray.
