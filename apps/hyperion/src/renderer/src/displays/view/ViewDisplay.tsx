@@ -103,7 +103,7 @@ const KEY_LEGEND = "W/S A/D R/F MOVE · ARROWS Q/E TURN · PAGE UP/DOWN RATE";
 const VIEW_NAME = "view";
 
 /** The view's identity in the scene's camera reports: one local view, the display's. */
-const VIEW_ID: ViewId = viewId("view");
+const VIEW_ID: ViewId = viewId(VIEW_NAME);
 
 /** No stars, one array for every frame without an answer. */
 const NO_STARS: ReadonlyArray<ViewStar> = [];
@@ -309,7 +309,8 @@ function ViewStage({
       view = engine.createView(canvas, VIEW_NAME);
     } catch (error: unknown) {
       // Not a loss: the canvas gave no context, or the engine could not configure it. The view
-      // stays unmade for the stage's life (a remount, a new scene, retries), so this cannot loop.
+      // stays unmade until the stage remounts (a new scene); nothing here retries, so this cannot
+      // loop.
       console.error(`view ${VIEW_NAME} could not be made:`, error);
       // The engine's refusal is the external system's answer, known only once the canvas exists.
       // oxlint-disable-next-line react/set-state-in-effect

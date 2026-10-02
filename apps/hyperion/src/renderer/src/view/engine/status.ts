@@ -9,7 +9,8 @@
  * standing (plain text). None is an alert: the guide says alerts are raised by the server and a
  * console never invents one (R01 Design note 10). A refused shader (`GRAPHICS SHADER REFUSED`) and a
  * view not re-created after a device loss (`GRAPHICS VIEW REFUSED`, decided 2026-10-02) are faults
- * too. The words were signed off on 2026-09-30 (R01.T5.c); each is one constant here.
+ * too. The words were signed off on 2026-09-30 (R01.T5.c), but for `GRAPHICS VIEW REFUSED`, a
+ * draft awaiting the owner (decided 2026-10-02); each is one constant here.
  */
 
 import { createContext, useContext, useSyncExternalStore } from "react";

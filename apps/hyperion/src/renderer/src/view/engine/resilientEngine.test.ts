@@ -277,6 +277,27 @@ describe("a device loss", () => {
     expect(status.getSnapshot().fault).toBeNull();
   });
 
+  it("releases nothing for a refused view that a later restore re-created", async () => {
+    const { engine, module, status } = await load([adapter(), adapter(), adapter()], {
+      viewless: new Set([1]),
+    });
+    const view = engine.createView(document.createElement("canvas"), "cockpit");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(status.getSnapshot().fault).toEqual({ kind: "view-refused", viewName: "cockpit" });
+    });
+    nth(module, 1).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(3);
+    });
+    await Promise.resolve();
+    expect(status.getSnapshot().fault).toBeNull();
+    const dispatched = vi.spyOn(status, "dispatch");
+    view.dispose();
+    expect(dispatched).not.toHaveBeenCalled();
+  });
+
   it("releases no fault when a view that was re-created is disposed", async () => {
     const { engine, module, status } = await load([adapter(), adapter()]);
     const view = engine.createView(document.createElement("canvas"), "cockpit");

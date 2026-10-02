@@ -311,7 +311,9 @@ export interface GraphicsAnnunciation {
   readonly text: string;
   readonly standing: Extract<StatusStanding, "refused" | "fault">;
 }
-export const GRAPHICS_WORDS: {/* Design note 10's words, signed off; shaderRefused(effect) */};
+export const GRAPHICS_WORDS: {
+  /* Design note 10's words, signed off; shaderRefused(effect); viewRefused a draft (decided 2026-10-02) */
+};
 export function graphicsAnnunciation(status: GraphicsStatus): GraphicsAnnunciation | null;
 export function graphicsModeAnnunciation(status: GraphicsStatus): GraphicsAnnunciation | null;
 export class GraphicsStatusStore {
@@ -2915,12 +2917,20 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     successful attach clears its mark. The `GRAPHICS` panel shows it unchanged; `ViewDisplay`
     names its view `VIEW_NAME` (`"view"`) and its label block's plate shows the fault only for
     its own view, keeping the canvas. Also, from the decision's aside: `ViewDisplay` now catches
-    the first creation's `engine.createView` failure and shows `NOT_MADE` (`GRAPHICS NOT
-AVAILABLE: views could not be made, relaunch to retry`) in the view's place, latched for the
+    the first creation's `engine.createView` failure and shows `NOT_MADE`
+    (`GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry`) in the view's place, latched for the
     stage's life; the tokens are no longer read from a canvas that has just been unmounted (a
     detached element has none, which threw). The guide gains a draft row. Tests:
     `status.test.ts`, `resilientEngine.test.ts`, `ViewDisplay.test.tsx`,
-    `GraphicsPanel.test.tsx`. _Awaiting the owner's sign-off (draft)._
+    `GraphicsPanel.test.tsx` (and a refused view that a later restore re-creates releases
+    nothing). `RenderEngine.createView`'s TSDoc now states that it throws for a canvas with no
+    context. Accept: the decision's vitest run (`view/engine`, `displays/view`, `components`)
+    passes; `ux_lint.py` on the changed files reports none of this change's lines. Limit, for the
+    multi-view follow-up: the first refusal stands, so with two refused views, releasing the first
+    clears the fault while the second still draws nothing; a console with two views should keep the
+    set of refused views (one view per console today, as the decision notes). Also for the owner
+    (review): `NOT_MADE` stands in `fault` while the guide lists `GRAPHICS NOT AVAILABLE` as a
+    Status. _Awaiting the owner's sign-off (draft)._
   - **Display names for effects (T8.k, T8.l).** `WgslMaterialSpec` and `WgslPostProcessSpec` gain
     a required `displayName`, the effect's name on the console. R02's four are `WIREFRAME LINES`,
     `BODY OCCLUDER`, `HULL OCCLUDER` and `STAR SPRITES` (`DISPLAY_NAMES` in `wireframe/submit.ts`).
@@ -2933,5 +2943,13 @@ AVAILABLE: views could not be made, relaunch to retry`) in the view's place, lat
     every material's and post-process's name for the form and uniqueness (compute kernels dispatch
     no refusal and are left out). The guide's `GRAPHICS SHADER REFUSED` row states the naming rule
     and makes the catalogue the register of effect names, a draft. Later plans' catalogue
-    registrations (R07 onwards) give each effect a `displayName` in this form. _Awaiting the
-    owner's sign-off (draft)._
+    registrations (R07 onwards) give each effect a `displayName` in this form. As built,
+    `#reportShaderErrors(owner, displayName, errors)` takes three parameters, not four: `owner`
+    already carries the code name (`material ${spec.name}`). `flatSpec`'s specs share `TEST FLAT`
+    (the harness's own; the failing check's name carries the code name). Accept: `vitest run
+src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes both variants;
+    `just test-render --fixture=broken-wgsl` exits 1 with
+    `FAIL T9.b no shader was refused: {"kind":"shader-refused","effectName":"TEST FIXTURE"}` and
+    the log line `material broken fixture (TEST FIXTURE) failed to compile`. No script compares the
+    `LINK` text, so there was no expected text to change. _Awaiting the owner's sign-off
+    (draft)._
