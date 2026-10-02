@@ -1,3 +1,4 @@
+import { StaleMark } from "../../components/StaleMark";
 import { formatSignificant } from "../../lib/format";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
 import { type MarkRow, targetKey } from "./viewRun";
@@ -10,6 +11,11 @@ export interface ViewMarkLabelsProps {
   readonly devicePixelRatio: number;
   /** The list's rows, whose names and ranges (with their unit's hysteresis) the labels repeat. */
   readonly rows: ReadonlyArray<MarkRow>;
+  /**
+   * Whether the ranges and closure rates are stale, a server scene held through a stale period
+   * (R02.T17): a target's readings are muted with their trailing `S`.
+   */
+  readonly stale?: boolean | undefined;
 }
 
 /** The space between a mark and its label, rem. */
@@ -29,7 +35,12 @@ function closureText(closureMPerS: number): string {
  * @remarks
  * Hidden from assistive technology: the list beside the view carries the same names and ranges.
  */
-export function ViewMarkLabels({ anchors, devicePixelRatio, rows }: ViewMarkLabelsProps) {
+export function ViewMarkLabels({
+  anchors,
+  devicePixelRatio,
+  rows,
+  stale = false,
+}: ViewMarkLabelsProps) {
   return (
     <div className="view-marks" aria-hidden="true">
       {anchors.map((anchor) => {
@@ -39,10 +50,11 @@ export function ViewMarkLabels({ anchors, devicePixelRatio, rows }: ViewMarkLabe
         if (label === null || row === undefined) {
           return null;
         }
-        const parts = label.kind === "target" ? [row.name, row.range] : [row.name];
+        const readings = label.kind === "target" ? [row.range] : [];
         if (label.kind === "target" && label.closureMPerS !== null) {
-          parts.push(closureText(label.closureMPerS));
+          readings.push(closureText(label.closureMPerS));
         }
+        const staleReadings = stale && readings.length > 0;
         return (
           <span
             key={key}
@@ -51,7 +63,14 @@ export function ViewMarkLabels({ anchors, devicePixelRatio, rows }: ViewMarkLabe
               transform: `translate(calc(${String(anchor.xPx / devicePixelRatio)}px + ${String(LABEL_OFFSET_REM)}rem), ${String(anchor.yPx / devicePixelRatio)}px)`,
             }}
           >
-            {parts.join(" ")}
+            {row.name}
+            {readings.length === 0 ? null : (
+              <>
+                {" "}
+                <span className={staleReadings ? "stale" : undefined}>{readings.join(" ")}</span>
+              </>
+            )}
+            {staleReadings ? <StaleMark /> : null}
           </span>
         );
       })}

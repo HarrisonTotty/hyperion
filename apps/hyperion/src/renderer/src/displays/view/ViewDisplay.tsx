@@ -7,11 +7,15 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  use,
   useState,
 } from "react";
 
+import { StaleMark } from "../../components/StaleMark";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { BodyDistanceUnit } from "../../lib/format";
+import type { SceneFrame } from "../../lib/scene/apparent";
+import type { SceneKinematics, SceneModel } from "../../lib/scene/model";
 import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { useUniverse } from "../../lib/universe";
 import { usePrefersReducedMotion } from "../../lib/usePrefersReducedMotion";
@@ -26,7 +30,7 @@ import {
   type ViewKeyAction,
   viewKeyAction,
 } from "../../view/camera/keys";
-import { type CameraTarget, offeredPresets } from "../../view/camera/state";
+import { type CameraTarget, offeredPresets, type ViewId, viewId } from "../../view/camera/state";
 import {
   type GraphicsAnnunciation,
   graphicsAnnunciation,
@@ -38,17 +42,30 @@ import {
   DEFAULT_EXPOSURE,
   type ExposureControl,
 } from "../../view/photometry/exposure";
+import {
+  cameraKinematics,
+  serverSceneAtFrame,
+  serverSceneAtPush,
+  type SystemPlace,
+} from "../../view/scene/fromServer";
 import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
 import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
 import { WireframeRenderer } from "../../view/wireframe/submit";
 import { CameraControls } from "./CameraControls";
 import { ExposurePanel } from "./ExposurePanel";
+import {
+  cameraAnnunciation,
+  serverSceneStanding,
+  systemPlace,
+  viewProvenance,
+} from "./serverScene";
 import { useInterimStars } from "./useInterimStars";
 import { DEFAULT_ENGINE_SOURCE, useViewEngine, type ViewEngineSource } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { ViewMarkLabels } from "./ViewMarkLabels";
 import { ViewMarkList } from "./ViewMarkList";
+import { ViewSceneContext } from "./ViewSceneProvider";
 import {
   commandRun,
   labelLines,
@@ -59,7 +76,9 @@ import {
   runPose,
   SCENE_OPTIONS,
   type SceneOption,
+  SERVER_SCENE_NAME,
   startRun,
+  startServerRun,
   stepRun,
   targetKey,
   type ViewRun,
@@ -70,6 +89,9 @@ const READOUT_INTERVAL_MS = 250;
 
 /** The keys of the canvas, shown beside it and describing it. */
 const KEY_LEGEND = "W/S A/D R/F MOVE · ARROWS Q/E TURN · PAGE UP/DOWN RATE";
+
+/** The view's identity in the scene's camera reports: one local view, the display's. */
+const VIEW_ID: ViewId = viewId("view");
 
 /** No stars, one array for every frame without an answer. */
 const NO_STARS: ReadonlyArray<ViewStar> = [];
@@ -95,8 +117,24 @@ interface ViewDisplayProps {
   readonly engineSource?: ViewEngineSource | undefined;
 }
 
+/** What a view of the server's scene reads of `useScene`, kept current by its stage. */
+interface ServerInput {
+  readonly model: SceneModel;
+  readonly place: SystemPlace;
+  /** Whether the scene is stale: its time is held, and its readings are muted with their `S`. */
+  readonly stale: boolean;
+  readonly frameAt: (nowMs: number) => SceneFrame | null;
+  readonly reportCamera: (view: ViewId, pose: SceneKinematics) => void;
+  readonly removeCamera: (view: ViewId) => void;
+}
+
+/** What a stage draws: a kept scene, or the server's. */
+type StageSource =
+  | { readonly kind: "kept"; readonly option: SceneOption }
+  | { readonly kind: "server"; readonly server: ServerInput };
+
 interface ViewStageProps {
-  readonly option: SceneOption;
+  readonly source: StageSource;
   readonly engineSource: ViewEngineSource;
   readonly exposure: ExposureControl;
   readonly onExposureChange: (exposure: ExposureControl) => void;
@@ -146,8 +184,26 @@ function unitsOf(rows: ReadonlyArray<MarkRow>): ReadonlyMap<string, BodyDistance
   return new Map(rows.map((row) => [row.key, row.unit]));
 }
 
+/**
+ * The run a stage starts with: its kept scene's, or the server's scene at its latest push, which
+ * the drawing loop then reads at each frame.
+ *
+ * @throws Error when a stage is given a server scene that cannot be drawn, which `ViewPanels`
+ *   never does.
+ */
+function initialRun(source: StageSource): ViewRun {
+  if (source.kind === "kept") {
+    return startRun(source.option.make());
+  }
+  const first = serverSceneAtPush(source.server.model, source.server.place);
+  if (first === null) {
+    throw new Error("a view was started on a server scene it cannot draw");
+  }
+  return startServerRun(first);
+}
+
 function ViewStage({
-  option,
+  source,
   engineSource,
   exposure,
   onExposureChange,
@@ -157,7 +213,9 @@ function ViewStage({
   countLine,
 }: ViewStageProps) {
   const legendId = useId();
-  const [initial] = useState(() => startRun(option.make()));
+  const server = source.kind === "server" ? source.server : null;
+  const serverRef = useRef<ServerInput | null>(null);
+  const [initial] = useState(() => initialRun(source));
   const runRef = useRef<ViewRun>(initial);
   const [published, setPublished] = useState<Published>({ run: initial, anchors: [] });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
@@ -203,6 +261,22 @@ function ViewStage({
     };
   }, [exposure, selection, reducedMotion, size, canvas, stars]);
 
+  // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
+  useLayoutEffect(() => {
+    serverRef.current = server;
+  }, [server]);
+
+  // The view's camera is reported to the server's scene while the stage draws it (R03.T14).
+  const removeCamera = server?.removeCamera ?? null;
+  useEffect(() => {
+    if (removeCamera === null) {
+      return undefined;
+    }
+    return () => {
+      removeCamera(VIEW_ID);
+    };
+  }, [removeCamera]);
+
   // The redraw loop: every frame while the display is shown; `Activity` tears it down when hidden.
   useEffect(() => {
     if (engineState.kind !== "ready" || canvas === null) {
@@ -220,12 +294,18 @@ function ViewStage({
       const dtS = lastMs === null ? 0 : (nowMs - lastMs) / 1000;
       lastMs = nowMs;
       const inputs = inputsRef.current;
+      const current = serverRef.current;
       const run = stepRun(runRef.current, {
+        // The server's scene where the ship sees it at this frame's time (R03's `frameAt`).
+        serverScene: current === null ? null : serverSceneAtFrame(current, nowMs),
         dtS,
         held: heldRef.current,
         reducedMotion: inputs.reducedMotion,
       });
       runRef.current = run;
+      if (run.source.kind === "server" && current !== null) {
+        current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
+      }
       if (inputs.size !== null && inputs.tokens !== null && inputs.size.widthPx > 0) {
         const ratio = inputs.size.devicePixelRatio;
         const viewport = {
@@ -358,9 +438,14 @@ function ViewStage({
               onBlur={onCanvasBlur}
               onPick={onPick}
             >
-              <ViewMarkLabels anchors={shown.anchors} devicePixelRatio={ratio} rows={rows} />
+              <ViewMarkLabels
+                anchors={shown.anchors}
+                devicePixelRatio={ratio}
+                rows={rows}
+                stale={server?.stale === true}
+              />
               <ViewLabelBlock
-                lines={labelLines(shown.run, exposure)}
+                lines={labelLines(shown.run, exposure, server?.stale === true)}
                 statements={
                   countLine === null
                     ? labelStatements(shown.run)
@@ -382,10 +467,11 @@ function ViewStage({
       <div className="view__side">
         <section className="panel view-targets" aria-labelledby={`${legendId}-targets`}>
           <h2 className="panel__title" id={`${legendId}-targets`}>
-            Targets
+            Targets{server?.stale === true ? <StaleMark /> : null}
           </h2>
           <ViewMarkList
             rows={rows}
+            stale={server?.stale === true}
             selectedKey={selection === null ? null : targetKey(selection)}
             onSelect={(row) => {
               setSelection(row.target);
@@ -408,47 +494,99 @@ function ViewStage({
 }
 
 function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) {
-  const [sceneName, setSceneName] = useState(SCENE_OPTIONS[0]?.name ?? "");
+  const statusId = useId();
+  const host = use(ViewSceneContext);
+  if (host === null) {
+    throw new Error("the VIEW display is rendered outside a ViewSceneProvider");
+  }
+  const { scene, sceneName, keptName, knownSystem, choose } = host;
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
   const [easedMoves, setEasedMoves] = useState(false);
-  const option = SCENE_OPTIONS.find((each) => each.name === sceneName);
+  const universe = useUniverse().open?.id ?? null;
+  const standing = serverSceneStanding(scene);
+  // The server's scene is chosen by default; a kept scene stands in while it cannot be drawn.
+  const serverChosen = sceneName === SERVER_SCENE_NAME;
+  const model = scene.model;
+  const sceneSystem = model?.system?.model.system ?? null;
+  const server: ServerInput | null =
+    viewProvenance(sceneName, scene) === "server" && model !== null && sceneSystem !== null
+      ? {
+          model,
+          place: systemPlace(sceneSystem, knownSystem),
+          stale: standing.stale,
+          frameAt: scene.frameAt,
+          reportCamera: scene.reportCamera,
+          removeCamera: scene.removeCamera,
+        }
+      : null;
+  const option = SCENE_OPTIONS.find((each) => each.name === (serverChosen ? keptName : sceneName));
   if (option === undefined) {
-    throw new Error(`no kept scene named ${sceneName}`);
+    throw new Error(`no kept scene named ${serverChosen ? keptName : sceneName}`);
   }
+
   // Where the scene starts, kept for its identity: the interim stars are asked about its system
   // from here, above the stage that a new scene remounts, so that a scene in the same system asks
   // nothing again (Design note 19).
-  const start = useMemo(() => option.make().sceneAt(0), [option]);
-  const universe = useUniverse().open?.id ?? null;
-  const interim = useInterimStars({
-    universe,
-    system: start.system,
-    centre: start.barycentre,
-    time: start.time,
-  });
+  const keptStart = useMemo(() => option.make().sceneAt(0), [option]);
+  const interim = useInterimStars(
+    server === null
+      ? {
+          universe,
+          system: keptStart.system,
+          centre: keptStart.barycentre,
+          time: keptStart.time,
+        }
+      : {
+          universe,
+          system: server.place.system,
+          centre: server.place.barycentre,
+          time: server.model.clock.time,
+        },
+  );
+  const lines = [
+    ...(serverChosen && standing.annunciation !== null ? [standing.annunciation] : []),
+    ...(server !== null && scene.cameraFault !== null
+      ? [cameraAnnunciation(scene.cameraFault)]
+      : []),
+  ];
   return (
     <div className="view-display">
       <div className="view-display__bar">
         <fieldset className="preset-buttons" aria-label="Scene">
           <span className="field__label">SCENE</span>
-          {SCENE_OPTIONS.map((each) => (
+          {[SERVER_SCENE_NAME, ...SCENE_OPTIONS.map((each) => each.name)].map((name) => (
             <button
-              key={each.name}
+              key={name}
               type="button"
               className="control preset-buttons__button"
-              aria-pressed={each.name === sceneName}
+              aria-pressed={name === sceneName}
+              aria-describedby={
+                name === SERVER_SCENE_NAME && lines.length > 0 ? statusId : undefined
+              }
               onClick={() => {
-                setSceneName(each.name);
+                choose(name);
               }}
             >
-              {each.name}
+              {name}
             </button>
           ))}
         </fieldset>
+        {lines.length === 0 ? null : (
+          <div className="view-display__status" id={statusId}>
+            {lines.map((line) => (
+              <StatusLine
+                key={line.text}
+                text={line.text}
+                standing={line.standing}
+                action={line.retry === true ? { label: "RETRY", onAction: scene.retry } : undefined}
+              />
+            ))}
+          </div>
+        )}
       </div>
       <ViewStage
-        key={option.name}
-        option={option}
+        key={server === null ? option.name : SERVER_SCENE_NAME}
+        source={server === null ? { kind: "kept", option } : { kind: "server", server }}
         engineSource={engineSource}
         exposure={exposure}
         onExposureChange={setExposure}
@@ -462,27 +600,40 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
 }
 
 /**
- * The `VIEW` display (plan R02, R02.T15): the surroundings drawn as a wireframe in perspective at
- * real scale, from a seat, chase or free camera, with its list of targets, its label block, its
- * camera controls and its exposure instrument.
+ * The `VIEW` display (plan R02, R02.T15 and T17): the surroundings drawn as a wireframe in
+ * perspective at real scale, from a seat, chase or free camera, with its list of targets, its label
+ * block, its camera controls and its exposure instrument.
  *
  * @remarks
- * Until R02.T17 brings the server's scene, it draws a kept test scene chosen under `SCENE`,
- * `PRECISION TEST` or `FRAME CHANGE TEST`, under the header strip's `TRAINING` banner, which `App`
- * shows while this display is; a new choice starts its script and camera afresh, keeping the
- * exposure and the `EASED CAMERA MOVES` setting. The engine is loaded lazily through R01's
- * `loadRenderEngine` when the display is first shown; until it is ready, or where it cannot be
- * had, the graphics' own annunciation stands in the view's place. The view redraws every frame
- * while the display is shown and stops when it is hidden (`Activity` tears its loop down); its
- * readouts change at most four times a second. A preset change and a slew to a target are cuts,
- * eased over 0.4 s only under the `EASED CAMERA MOVES` setting and never under
- * `prefers-reduced-motion`, which also removes the free camera's ramp and damping (Design note 18).
+ * It draws the scene chosen under `SCENE`: `SERVER`, the server's scene of the open universe from
+ * R03's subscription (`useScene`), by default, or a kept test scene, `PRECISION TEST` or
+ * `FRAME CHANGE TEST`; the subscription and the choice are held above the console frame by
+ * `ViewSceneProvider`, which it must be rendered in, so that `App`'s header strip shows `TRAINING`
+ * over a kept scene only. While the server's scene cannot be drawn (no universe open, the
+ * subscription pending, refused or unanswered, the link down before a scene arrived, or the ship in
+ * no system) the kept scene last chosen is drawn in its place, and a status line beside the
+ * selector says why, offering `RETRY` after a refusal or a timeout. A server scene held through a
+ * stale period (the link down, the scene reopened after the server ended it, or nothing received
+ * for twice the heartbeat) stays drawn with its time held, its time and every target's range and
+ * closure muted with their `S`, and the status line says why. The view's camera is reported to the
+ * scene at each frame (the reporter sends at 4 Hz and at once on a change of frame). A new choice
+ * starts its scene and camera afresh, keeping the exposure and the `EASED CAMERA MOVES` setting;
+ * a server scene arriving in another system moves a free camera as a jump does.
+ *
+ * The engine is loaded lazily through R01's `loadRenderEngine` when the display is first shown;
+ * until it is ready, or where it cannot be had, the graphics' own annunciation stands in the view's
+ * place. The view redraws every frame while the display is shown and stops when it is hidden
+ * (`Activity` tears its loop and its subscription down); its readouts change at most four times a
+ * second. A preset change and a slew to a target are cuts, eased over 0.4 s only under the
+ * `EASED CAMERA MOVES` setting and never under `prefers-reduced-motion`, which also removes the
+ * free camera's ramp and damping (Design note 18).
  *
  * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `]` and `[` the
  * next and previous target, `+` and `-` the field of view; on the focused canvas the flight keys
  * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown). A click on the canvas, or the list, selects a
  * mark, whose bracket reticle the view then draws. Its stars are the interim field of the open
- * universe's range queries about the scene's system (R02.T16), with their count line; another craft's mark carries its range and
- * closure rate, and a body drawn as its symbol its designation, as DOM labels over the canvas.
+ * universe's range queries about the scene's system (R02.T16), with their count line, asked only
+ * where the system's position is known; another craft's mark carries its range and closure rate,
+ * and a body drawn as its symbol its designation, as DOM labels over the canvas.
  */
 export const ViewDisplay = memo(ViewPanels);

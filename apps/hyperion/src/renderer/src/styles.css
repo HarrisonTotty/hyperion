@@ -3049,6 +3049,13 @@ body {
   padding: 0;
 }
 
+/* Where the server's scene stands, beside the SCENE selector: one line per condition. */
+.view-display__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+}
+
 .view {
   display: grid;
   flex: 1 1 0;

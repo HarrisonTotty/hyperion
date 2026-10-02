@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import type { ViewBody } from "../../view/scene/model";
-import type { KeptScene } from "../../view/scenes/kept";
+import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import {
@@ -16,7 +16,7 @@ import {
   stepRun,
 } from "./viewRun";
 
-const STILL = { dtS: 0, held: new Set<string>(), reducedMotion: false };
+const STILL = { serverScene: null, dtS: 0, held: new Set<string>(), reducedMotion: false };
 const CUT = { easedMoves: false, reducedMotion: false };
 
 function done(result: ReturnType<typeof commandRun>): ViewRun {
@@ -65,7 +65,12 @@ describe("a view's run", () => {
     const free = done(
       commandRun(startRun(precisionScene()), { kind: "preset", preset: "free" }, CUT),
     );
-    const flown = stepRun(free, { dtS: 0.1, held: new Set(["w"]), reducedMotion: true });
+    const flown = stepRun(free, {
+      serverScene: null,
+      dtS: 0.1,
+      held: new Set(["w"]),
+      reducedMotion: true,
+    });
     expect(flown.camera.pose.positionM).not.toEqual(free.camera.pose.positionM);
   });
 
@@ -143,7 +148,7 @@ describe("the label block", () => {
     const { scene } = startRun(precisionScene());
     expect([
       frameName({ kind: "system", system: scene.system }, scene),
-      frameName({ kind: "galactic", origin: scene.barycentre }, scene),
+      frameName({ kind: "galactic", origin: KEPT_BARYCENTRE }, scene),
     ]).toEqual(["SYSTEM BARYCENTRIC", "GALACTIC"]);
   });
 

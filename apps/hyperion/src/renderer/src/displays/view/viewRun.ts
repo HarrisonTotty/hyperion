@@ -1,7 +1,7 @@
 /**
  * The `VIEW` display's run of a scene: the scene at its time, the camera stepped through it, and
- * what the display shows of both (plan R02, R02.T15). Pure: the display calls it each frame and on
- * each command.
+ * what the display shows of both (plan R02, R02.T15 and T17). Pure: the display calls it each frame
+ * and on each command.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
@@ -28,6 +28,7 @@ import {
   followPreset,
   newCameraState,
   nextTarget,
+  onSystemChange,
   stepFov,
   targetPosition,
 } from "../../view/camera/state";
@@ -43,22 +44,32 @@ import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/fra
 import type { KeptScene } from "../../view/scenes/kept";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
 
-/** A scene the `SCENE` selector offers, by the name it shows. */
+/** A kept scene the `SCENE` selector offers, by the name it shows. */
 export interface SceneOption {
   readonly name: string;
   readonly make: () => KeptScene;
 }
 
-/** The kept scenes, until R02.T17 adds the server's: `PRECISION TEST` and `FRAME CHANGE TEST`. */
+/** The kept scenes: `PRECISION TEST` and `FRAME CHANGE TEST`. */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
   { name: FRAME_CHANGE_SCENE_NAME, make: frameChangeScene },
 ];
 
-/** A view's run: its kept scene, the script's time, the scene then and the camera in it. */
+/** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */
+export const SERVER_SCENE_NAME = "SERVER";
+
+/**
+ * Where a run's scene comes from: a kept scene's script, or the server's scene, which each frame
+ * brings ({@link FrameInput.serverScene}).
+ */
+export type RunSource =
+  { readonly kind: "kept"; readonly kept: KeptScene } | { readonly kind: "server" };
+
+/** A view's run: its source, a script's time, the scene then and the camera in it. */
 export interface ViewRun {
-  readonly kept: KeptScene;
-  /** Seconds into the script, in [0, its duration). */
+  readonly source: RunSource;
+  /** Seconds into a kept scene's script, in [0, its duration); 0 for the server's scene. */
   readonly tS: number;
   readonly scene: ViewScene;
   readonly camera: CameraState;
@@ -67,11 +78,34 @@ export interface ViewRun {
 /** A run at the start of `kept`'s script, its camera at the seat (or free, with no own ship). */
 export function startRun(kept: KeptScene): ViewRun {
   const scene = kept.sceneAt(0);
-  return { kept, tS: 0, scene, camera: newCameraState(cameraSceneOf(scene), "eye") };
+  return {
+    source: { kind: "kept", kept },
+    tS: 0,
+    scene,
+    camera: newCameraState(cameraSceneOf(scene), "eye"),
+  };
 }
 
-/** What one display frame brings: its duration and the flight keys held. */
+/**
+ * A run of the server's scene from `scene`, its first frame, the camera at the seat of the ship
+ * stand-in; each step takes the scene its frame brings.
+ */
+export function startServerRun(scene: ViewScene): ViewRun {
+  return {
+    source: { kind: "server" },
+    tS: 0,
+    scene,
+    camera: newCameraState(cameraSceneOf(scene), "eye"),
+  };
+}
+
+/** What one display frame brings: its duration, the flight keys held and the server's scene. */
 export interface FrameInput {
+  /**
+   * The server's scene at the frame's time (`useScene`'s `frameAt`), for a run of it; `null` for a
+   * kept run, and while the server's cannot be drawn, when the run holds its last.
+   */
+  readonly serverScene: ViewScene | null;
   /** The frame's duration, s. */
   readonly dtS: number;
   /** The flight keys held on the focused canvas (`keys.ts`' binding names). */
@@ -79,17 +113,55 @@ export interface FrameInput {
   readonly reducedMotion: boolean;
 }
 
+/** Whether every frame a camera's pose refers to is in `scene`: its system, body or craft. */
+function frameHeld(camera: CameraState, scene: ViewScene): boolean {
+  const frame = camera.pose.frame;
+  let held: boolean;
+  switch (frame.kind) {
+    case "galactic":
+      held = true;
+      break;
+    case "system":
+      held = frame.system === scene.system;
+      break;
+    case "body":
+      held = scene.bodies.some((body) => body.id === frame.body);
+      break;
+    case "craft":
+      held = scene.craft.some((craft) => craft.id === frame.craft);
+      break;
+  }
+  return held;
+}
+
 /**
- * The run one frame on: the script advanced in real time and run again from its start at its end,
- * the seat or chase camera following the own ship, the free camera flown by the held keys, and an
- * eased move advanced.
+ * The run one frame on: a kept scene's script advanced in real time and run again from its start
+ * at its end, or the server's scene the frame brings; the seat or chase camera following
+ * the own ship, the free camera flown by the held keys, and an eased move advanced.
+ *
+ * @remarks
+ * When the server's scene is in another system, told by the system's ID and never by the scene
+ * object's identity, or no longer holds the body or craft the camera is held to, the camera is
+ * moved as on a jump (`onSystemChange`, Design note 7): a free camera returns to the chase preset,
+ * a seat or chase camera stays with the ship. While the server's scene cannot be drawn the run
+ * holds its last.
  */
 export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
   const dtS = Math.min(Math.max(input.dtS, 0), MAX_FREE_STEP_S);
-  const tS = (run.tS + dtS) % run.kept.durationS;
-  const scene = run.kept.sceneAt(tS);
+  let tS = 0;
+  let scene: ViewScene;
+  let camera = run.camera;
+  if (run.source.kind === "kept") {
+    tS = (run.tS + dtS) % run.source.kept.durationS;
+    scene = run.source.kept.sceneAt(tS);
+  } else {
+    scene = input.serverScene ?? run.scene;
+    if (scene.system !== run.scene.system || !frameHeld(camera, scene)) {
+      camera = onSystemChange(camera, cameraSceneOf(scene));
+    }
+  }
   const cameraScene = cameraSceneOf(scene);
-  const following = followPreset(run.camera, cameraScene);
+  const following = followPreset(camera, cameraScene);
   const flown = stepFreeCamera(
     following,
     flightInput(input.held),
@@ -208,10 +280,18 @@ export function frameName(frame: CameraFrame, scene: ViewScene): string {
 /** The star source's reading until R06's sky (Design note 16). */
 export const STAR_SOURCE = "RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION";
 
+/**
+ * The star source's reading where the scene's system has no known position (a server scene's
+ * system the client was not told of, R02.T17): no range query can be centred, so none is drawn.
+ */
+export const STARS_WITHOUT_POSITION = "NOT AVAILABLE: the system's position is not known";
+
 /** One line of the label block: its label and its reading. */
 export interface LabelLine {
   readonly label: string;
   readonly value: string;
+  /** Set on a reading of the server's scene while the scene is stale: muted, with its `S`. */
+  readonly stale?: true;
 }
 
 /** The exposure's reading: `EV100 -1.0 MAN`. */
@@ -224,17 +304,28 @@ export function exposureReading(exposure: ExposureControl): string {
  * style, the camera preset, the field of view and the exposure with its level, and the star source;
  * the scene's name in a kept scene; `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull;
  * `ROTATION NOT YET MODELLED` while a body's rotation is not modelled.
+ *
+ * @param stale - Whether the server's scene is stale (`useScene`'s `stale`): its time, held where
+ *   the scene went stale, then reads as the guide's stale value.
  */
-export function labelLines(run: ViewRun, exposure: ExposureControl): ReadonlyArray<LabelLine> {
+export function labelLines(
+  run: ViewRun,
+  exposure: ExposureControl,
+  stale = false,
+): ReadonlyArray<LabelLine> {
   const { scene, camera } = run;
+  const time = `UT ${formatUniverseTimeDhms(scene.time)}`;
   const lines: LabelLine[] = [
     { label: "FRAME", value: frameName(camera.pose.frame, scene) },
-    { label: "TIME", value: `UT ${formatUniverseTimeDhms(scene.time)}` },
+    stale ? { label: "TIME", value: time, stale: true } : { label: "TIME", value: time },
     { label: "STYLE", value: "WIREFRAME" },
     { label: "CAMERA", value: PRESET_NAMES[camera.preset] },
     { label: "FOV", value: `${String(camera.fovDeg)}°` },
     { label: "EXPOSURE", value: exposureReading(exposure) },
-    { label: "STARS", value: STAR_SOURCE },
+    {
+      label: "STARS",
+      value: scene.barycentre === null ? STARS_WITHOUT_POSITION : STAR_SOURCE,
+    },
   ];
   if (scene.provenance.kind === "kept") {
     lines.push({ label: "SCENE", value: scene.provenance.name });

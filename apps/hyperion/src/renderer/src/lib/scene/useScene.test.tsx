@@ -512,7 +512,10 @@ describe("useScene", () => {
     });
     await settle();
 
-    expect(result.current.cameraRefusal).toBe("a camera is outside the scene's reach");
+    expect(result.current.cameraFault).toEqual({
+      kind: "refused",
+      reason: "a camera is outside the scene's reach",
+    });
   });
 
   it("places every body within v × 20 ms × rate across two clients fed 20 ms apart", async () => {
@@ -762,7 +765,10 @@ describe("useScene", () => {
     });
     await settle();
 
-    expect(result.current.cameraRefusal).toBe("a camera is outside the scene's reach");
+    expect(result.current.cameraFault).toEqual({
+      kind: "refused",
+      reason: "a camera is outside the scene's reach",
+    });
     expect(socket.requestsOfKind("scene_cameras").at(-1)?.body.cameras[0]?.pose.position).toEqual({
       frame: "system",
       system: FIXTURE_SYSTEM,

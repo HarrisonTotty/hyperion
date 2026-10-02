@@ -1604,7 +1604,11 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   and a new one neither reopens the scene nor relabels what is held. No production caller yet
   supplies a designation for a system the chart has not answered; R02.T17 must, by its chart's
   answers or a lookup, unless the owner prefers the designation on `SceneSystemDto` (additive,
-  like the tidal radius). Cameras are not a parameter: a view hands its pose to
+  like the tidal radius). R02.T17 as built supplies only the system last opened on `SYSTEM` (no
+  request answers a system's designation or barycentre by its ID); any other system reads as its
+  ID with no star field, and the choice between a client lookup and the designation and barycentre
+  on `SceneSystemDto` still awaits the owner (R02's "Deviations in R02.T17"). Cameras are not a
+  parameter: a view hands its pose to
   `SceneView.reportCamera(view, pose)` and stops with `removeCamera(view)`, which feed the
   `CameraReporter` (`lib/scene/cameraReports.ts`) the hook owns; R02's and R07's "handed to
   `CameraReporter`" means these. The reporter gives each `ViewId` a wire slot 0–7 for as long as it

@@ -22,8 +22,11 @@ export interface InterimStarsInput {
   /** The open universe, or `null` when none is: then nothing is asked. */
   readonly universe: UniverseIdHex | null;
   readonly system: SystemIdHex;
-  /** The system's barycentre, the queries' centre. */
-  readonly centre: GalacticPosition;
+  /**
+   * The system's barycentre, the queries' centre, or `null` where the client does not know where
+   * the system is (a server scene's system it has not been told of, R02.T17): nothing is asked.
+   */
+  readonly centre: GalacticPosition | null;
   /** The scene's time on arrival. */
   readonly time: UniverseTime;
 }
@@ -39,7 +42,7 @@ export interface InterimStars {
 interface Arrival {
   readonly universe: UniverseIdHex | null;
   readonly system: SystemIdHex;
-  readonly centre: GalacticPosition;
+  readonly centre: GalacticPosition | null;
   readonly time: UniverseTime;
   readonly radiiLy: ReadonlyArray<number>;
   readonly retried: ReadonlyArray<boolean>;
@@ -67,14 +70,20 @@ function arrivalAt(input: InterimStarsInput): Arrival {
 export function useInterimStars(input: InterimStarsInput): InterimStars {
   const [arrival, setArrival] = useState<Arrival>(() => arrivalAt(input));
   let current = arrival;
-  if (input.system !== arrival.system || input.universe !== arrival.universe) {
+  // The centre is learnt with the system's designation, possibly after the arrival (R02.T17).
+  if (
+    input.system !== arrival.system ||
+    input.universe !== arrival.universe ||
+    (arrival.centre === null && input.centre !== null)
+  ) {
     current = arrivalAt(input);
     setArrival(current);
   }
+  const centre = current.centre;
   const bodies = INTERIM_QUERIES.map((query, index) =>
-    current.universe === null
+    current.universe === null || centre === null
       ? null
-      : interimRequest(current.universe, current.centre, current.time, {
+      : interimRequest(current.universe, centre, current.time, {
           layer: query.layer,
           radiusLy: current.radiiLy[index] ?? query.radiusLy,
         }),
@@ -109,9 +118,9 @@ export function useInterimStars(input: InterimStarsInput): InterimStars {
   const answers: SystemsInRange[] = states.flatMap((state) =>
     state.kind === "ok" ? [state.response] : [],
   );
-  if (answers.length === 0) {
+  if (answers.length === 0 || centre === null) {
     return { field: null, countLine: null };
   }
-  const field = interimField(answers, current.centre, current.system);
+  const field = interimField(answers, centre, current.system);
   return { field, countLine: interimCountLine(field, current.radiiLy) };
 }

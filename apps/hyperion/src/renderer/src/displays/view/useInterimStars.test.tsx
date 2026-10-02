@@ -85,6 +85,26 @@ describe("useInterimStars", () => {
     ]);
   });
 
+  it("asks nothing while the system's position is not known", () => {
+    const { socket, result } = renderStars({ ...INPUT, centre: null });
+    expect([socket.requestsOfKind("systems_in_range").length, result.current]).toEqual([
+      0,
+      { field: null, countLine: null },
+    ]);
+  });
+
+  it("asks the four queries once when the system's position is learnt after its arrival", () => {
+    const { socket, rerender } = renderStars({ ...INPUT, centre: null });
+    rerender(INPUT);
+    rerender(INPUT);
+    expect(socket.requestsOfKind("systems_in_range").map(({ body }) => body.min_layer)).toEqual([
+      "e",
+      "d",
+      "c",
+      "a",
+    ]);
+  });
+
   it("asks once more at the shrunk radius where the floor was over the limit, and no second time", async () => {
     const { socket } = renderStars();
     await server(() => {
