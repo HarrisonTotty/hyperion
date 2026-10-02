@@ -14,7 +14,6 @@ import {
   labelLines,
   labelStatements,
   markRows,
-  MISSING_READING,
   type ViewRun,
   startRun,
   stepRun,
@@ -276,8 +275,9 @@ describe("the list", () => {
     const rows = markRows(startRun(closing));
     const craft = rows.filter((row) => row.target.kind === "craft");
     expect([
-      craft.length > 0 && craft.every((row) => row.closure === "+3.40 m/s"),
-      rows.filter((row) => row.target.kind === "body").every((row) => row.closure === null),
+      craft.length > 0 &&
+        craft.every((row) => row.closure.kind === "known" && row.closure.text === "+3.40 m/s"),
+      rows.filter((row) => row.target.kind === "body").every((row) => row.closure.kind === "none"),
     ]).toEqual([true, true]);
   });
 
@@ -286,7 +286,7 @@ describe("the list", () => {
     const craft = markRows(startRun(frameChangeScene())).filter(
       (row) => row.target.kind === "craft",
     );
-    expect(craft.length > 0 && craft.every((row) => row.closure === MISSING_READING)).toBe(true);
+    expect(craft.length > 0 && craft.every((row) => row.closure.kind === "unknown")).toBe(true);
   });
 
   it("labels its ranges FROM CAMERA where there is no own ship", () => {

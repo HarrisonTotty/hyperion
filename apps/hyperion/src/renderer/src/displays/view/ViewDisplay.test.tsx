@@ -362,6 +362,28 @@ describe("the VIEW display", () => {
     expect(screen.getByText("NOT AVAILABLE: RATE at its lowest step")).toBeInTheDocument();
   });
 
+  it("moves a mark's label with its mark every frame, between readouts", async () => {
+    stubMatchMedia(true);
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    advance(300);
+    // The labels are hidden from assistive technology; the list names the same targets.
+    const name = screen.getAllByRole("option")[0]?.querySelector(".view-list__name")?.textContent;
+    const label = screen
+      .getAllByText(name ?? "", { exact: false })
+      .find((each) => each.classList.contains("view-marks__label"));
+    const before = label?.style.transform;
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowLeft>}");
+    // Three frames, short of the next 4 Hz readout.
+    advance(50);
+    expect([label?.isConnected, before !== undefined && label?.style.transform !== before]).toEqual(
+      [true, true],
+    );
+  });
+
   it("stops flying when its canvas loses focus", async () => {
     stubMatchMedia(true);
     const { user, advance, lastFrame } = setup();

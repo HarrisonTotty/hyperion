@@ -330,12 +330,21 @@ function ViewStage({
         });
         anchors = list.anchors;
         renderer.render(view, list, camera, viewport);
-        // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10).
+        // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10). A
+        // label whose mark this frame did not draw is hidden until the next readout removes it.
+        const placed = new Set<string>();
         for (const anchor of anchors) {
-          const node =
-            anchor.label === null ? undefined : labelsRef.current.get(targetKey(anchor.target));
+          const key = targetKey(anchor.target);
+          const node = anchor.label === null ? undefined : labelsRef.current.get(key);
           if (node !== undefined) {
             node.style.transform = markLabelTransform(anchor, ratio);
+            node.style.visibility = "";
+            placed.add(key);
+          }
+        }
+        for (const [key, node] of labelsRef.current) {
+          if (!placed.has(key)) {
+            node.style.visibility = "hidden";
           }
         }
       }

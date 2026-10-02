@@ -12,13 +12,30 @@ import { StaleMark } from "../../components/StaleMark";
 import { formatListPosition } from "../../lib/format";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
-import { type MarkRow, MISSING_READING, rangeText } from "./viewRun";
+import { type ClosureReading, type MarkRow, rangeText } from "./viewRun";
 
 /** A row's height, rem. */
 const ROW_REM = 2;
 
 /** Rows drawn beyond the window on each side. */
 const OVERSCAN_ROWS = 4;
+
+/** A row's closure rate as its accessible name reads it, after a comma, or nothing. */
+function closureName(closure: ClosureReading): string {
+  let text: string;
+  switch (closure.kind) {
+    case "none":
+      text = "";
+      break;
+    case "unknown":
+      text = ", closure not known";
+      break;
+    case "known":
+      text = `, closure ${closure.text}`;
+      break;
+  }
+  return text;
+}
 
 /** Props of {@link ViewMarkList}. */
 export interface ViewMarkListProps {
@@ -180,10 +197,7 @@ export function ViewMarkList({ rows, selectedKey, onSelect, stale = false }: Vie
               return null;
             }
             const rangeReading = rangeText(row);
-            const closure =
-              row.closure === null
-                ? ""
-                : `, closure ${row.closure === MISSING_READING ? "not known" : row.closure}`;
+            const closure = closureName(row.closure);
             return (
               <div
                 key={row.key}
