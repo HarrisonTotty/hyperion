@@ -397,6 +397,16 @@ describe("the VIEW display", () => {
     await settle();
     expect(screen.getByText("AUTO NOT AVAILABLE: NO IMAGE TO METER")).toBeInTheDocument();
   });
+
+  it("offers its exposure's congruent pair in the guide's order, ENABLE then INHIBIT", async () => {
+    setup();
+    await settle();
+    const names = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((name) => name === "ENABLE" || name === "INHIBIT");
+    expect(names).toEqual(["ENABLE", "INHIBIT"]);
+  });
 });
 
 describe("the VIEW display's interim stars", () => {

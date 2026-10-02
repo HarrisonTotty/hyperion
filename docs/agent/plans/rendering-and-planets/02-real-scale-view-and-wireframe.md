@@ -657,7 +657,7 @@ acceptance for each is `pnpm format:check` and the quoted strings found by `grep
   image, never on symbology or chrome. Grep: `rendered image is data`, `plate`.
 - **R02.T2.c Items 6 and 7: exposure and limited detail.** In "Data states" and "Controls and
   commanding": the exposure as a value with its unit (`EV100`) and automation level (`AUTO`, `MAN`,
-  `INHIBITED`, with Design note 11's meanings: who inhibited it and why, `INHIBIT` and `ENABLE` as
+  `INHIBITED`, with Design note 11's meanings: who inhibited it and why, `ENABLE` and `INHIBIT` as
   the commands, a system inhibit resuming by itself and an operator's not); `TERRAIN: STREAMING` and
   `TERRAIN: DETAIL LIMITED` as steady annunciations in `--text` on the label block's plate, neither
   a data state nor an alert, with no status colour and never the word "degraded". Grep: `EV100`,
@@ -1049,7 +1049,7 @@ the draw list's anchors, as plan 05's `pick` does.
 
 **R02.T15.c The label block and the exposure instrument.** `ViewLabelBlock` with Design note 16's
 lines at 4 Hz through `useThrottledValue`; the exposure panel showing `EV100 −1.0 MAN` with its
-triple, `AUTO` unavailable with its reason, `INHIBIT` and `ENABLE` as its commands and the
+triple, `AUTO` unavailable with its reason, `ENABLE` and `INHIBIT` as its commands and the
 `INHIBITED` reading with who set it; camera controls for preset, target and field of view, each a
 button reachable by keyboard with its key shown.
 
@@ -1615,7 +1615,7 @@ test-render` passes on SwiftShader, both variants: the tone curve within 4.6 × 
   `ViewMarkLabels` sets them as DOM labels on `--surface-0` plates beside the marks, the range as
   the list writes it and the closure signed in m/s. The exposure panel is `ExposurePanel` (not
   `ExposureControl`, the photometry's type): the reading, the `MAN` triple (`APERTURE`, `SHUTTER`,
-  `ISO`) and the congruent pair `INHIBIT`/`ENABLE`, each held back (`aria-disabled`, keeping focus)
+  `ISO`) and the congruent pair `ENABLE`/`INHIBIT` (in that order since RM1 validation), each held back (`aria-disabled`, keeping focus)
   with its reason (`NOT AVAILABLE: the exposure is MAN`, …); there is no `AUTO` button (the guide's
   "Controls and commanding" commands automation by the pair), and `AUTO NOT AVAILABLE: NO IMAGE TO
 METER` stands while there is no image to meter. The triple is not editable yet, so a change of
@@ -1780,3 +1780,10 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   fact sheets; `PSF_QUAD_PX` states its reason, Design note 10's point-spread function: at σ =
   0.64 px, ±3.5 px about the star's pixel centre leaves out at most 2.8 × 10⁻⁶ of the light, with the
   star at its pixel's edge, 3 px (4.7 σ) from the quad's near side in each axis.
+- **Fixed in RM1 validation (2026-10-02): `ENABLE` before `INHIBIT` (m9).** The exposure panel
+  offered `INHIBIT` first, while the guide's general rule gives congruent pairs "in a consistent
+  order", `ENABLE`/`INHIBIT`; the guide's own exposure bullet and its draft nomenclature row said
+  `INHIBIT` and `ENABLE`, against that rule. Following the general rule, the panel now offers
+  `ENABLE` then `INHIBIT` (tested in `ViewDisplay.test.tsx`), and the guide's exposure bullet and
+  row, this plan's T15 text and the panel's TSDoc name the pair in that order. The row stays a draft
+  for the owner.
