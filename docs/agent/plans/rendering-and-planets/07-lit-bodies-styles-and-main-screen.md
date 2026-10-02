@@ -1582,3 +1582,32 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   (smallest choice made, reversible): a `contact` body (apparent position only) is lit from its
   apparent direction without eclipse or planetshine and, with no resolved radius, stays R02's
   mark (T2.a); the lean is to keep it so until a contact carries a radius.
+- **Deviations in T14.a, as built** (2026-10-02). `post/glare.ts`, `post/bloom.ts` and an added
+  `post/nnls.ts` (Lawson and Hanson's non-negative least squares), each with tests.
+  `bloomKernel(setting: BloomSetting, role, radPerPx, eye: EyeObserver)`: `BloomSetting` is the
+  literal `"high" | "low"`, structurally R05's unbuilt `QualitySetting`, and becomes that import
+  when R05.T7.b lands; `eye` is an argument as for `glareSpread`, so that it builds before R06
+  (both approved by the orchestrator). `BloomKernel` extends `BloomLevels { firstLevel, levels }`:
+  `weights[k]` multiplies mip level `firstLevel + k`, the low setting starting at level 1, quarter
+  resolution; the level counts are constants (`BLOOM_LEVELS`: 7 from level 0 high, 5 from level 1
+  low) until T17 makes them settings. **Design note 12's age factor is corrected** (science check,
+  2026-10-02): the CIE 135/1999 complete equation has age in both terms, [1 − 0.08 (A/70)⁴] on the
+  core and [1 + 1.6 (A/70)⁴] on the wide-angle term (McCann and Vonikakis 2018, eq. 2; Vos and van
+  den Berg 1997); "(A ÷ 62.5)⁴, wide term only" is CIE 146:2002's simpler equation. The code uses
+  the complete form, which gives T14.a's 1.047 and 1.010; the equation is valid to 100° and is
+  extrapolated beyond (1.2% of its energy). The threshold 2^`AGX_MAX_EV` = 16.29 is 156.4 L̄, not 157. The camera PSF is a Gaussian core of σ = 0.25′ holding 97% and a Harvey-type 1 ÷ (1 +
+  (θ/0.1°)²) tail holding 3%, within the 1–10% veiling glare index reported for commercial lenses;
+  the shape and knee are assumed (low confidence, as before). The fit matches encircled energy at
+  16 radii from 0 to 128 px with Σ w = 1; at 1080p across 60° the eye kernel is within 8.4% at
+  1 px, 4.4% at 4 px and 1% at 16 and 64 px; the CIE energy beyond the chain's reach (about 6%
+  beyond 128 px) is gathered into its widest levels, conserving energy but not the far veil. The
+  chain's last step, w₀ D₀ + up(U₁), runs inside the tone-mapping pass in `f32`, unrounded; every
+  other level is a rounded `rgba16float` write, `unknown` rounding modelled as toward zero.
+  `GlareSource.excessLuminance` is cd/m² (Provides and R06's contract): the mean luminance less
+  65,504 ÷ the pre-exposure scale. `glareSourceVeil` is the point form, L_ex Ω PSF(θ), exact in
+  energy but far too faint just outside a resolved disc's limb; ruled 2026-10-02 (orchestrator):
+  T14.b adds a near-limb term per CIE core term, the half-plane closed form 2ac²(π/2 − atan(d/c))
+  at distance d beyond the limb, as max(point, half-plane), tested against a brute-force disc
+  quadrature, with a science check. `bloomKernel` costs some 35 ms per fit after a one-off
+  250–700 ms for the level responses (provisional, under load): its caller refits only when the
+  angular pixel scale changes materially, not each frame.
