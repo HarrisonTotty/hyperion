@@ -146,9 +146,10 @@ pub mod derive { pub fn radius_chen_kipping(..); pub fn radius_zeng(..); pub fn 
     pub fn roche_limit_fluid(..) -> Metres; pub fn roche_limit_rigid(..) -> Metres;
     pub fn hill_radius(..) -> Metres; pub fn satellite_stability_limit(..) -> Metres; }
 pub mod hooks { pub struct BodyHooks { /* surface_seed (server-only, never in a DTO:
-    amended by R04.T3.a (rendering plans), drafted for plan 14's owner), bulk, surface,
-    habitability, resources, figures */ } pub struct BulkComposition; pub struct SurfaceConditions;
-    pub struct HabitabilityAssessment; pub struct ResourceAbundances; pub struct GlobalFigures; }
+    amended by R04.T3.a (rendering plans), accepted 2026-09-30 by a delegated decision), bulk,
+    surface, habitability, resources, figures */ } pub struct BulkComposition;
+    pub struct SurfaceConditions; pub struct HabitabilityAssessment; pub struct ResourceAbundances;
+    pub struct GlobalFigures; }
 pub mod fate { pub enum BodyState { NotYetFormed, Present, Destroyed { cause: DestructionCause,
     at: UniverseTime }, Unbound { at: UniverseTime } } }
 
@@ -214,7 +215,7 @@ In plan 04's envelope (`ClientMessage::Request { id, body }`), with the `Dto` na
   33 of 2026-09-22 `OrbitDto` itself carries the whole element set and μ, `mu_m3_s2`, so this plan
   adds no element of its own), `BodySummaryDto`, `BeltDto`, `ZoneDto`, `HabitableZoneDto`,
   `BodyHooksDto` (whose seed is `detail_seed: SectionDto<DetailSeedHex>`, never the surface seed:
-  amended by R04.T3.a (rendering plans), drafted for plan 14's owner, per
+  amended by R04.T3.a (rendering plans), accepted 2026-09-30 by a delegated decision, per
   [R04, Design note 17](../rendering-and-planets/04-cross-target-determinism.md#design-notes)),
   `BodyEventDto`, `BodyStateDto`, `BodyKindDto`.
 - `ErrorCode::UnknownBody` (`unknown_body`), beside plan 06's `ErrorCode::UnknownSystem` (P06.T33;
@@ -1888,8 +1889,8 @@ depends on nothing else, so no later change to derivation can alter a map's seed
 is the server's alone: it is computed for the server's own use and never put in a DTO, since a
 client holding it could synthesise a surface the ship has not seen. The hooks section's wire form
 carries a `detail_seed` in its place, `not_modelled` until the rendering plans' R09 registers
-`body.surface.detail` and computes it (amended by R04.T3.a (rendering plans), drafted for plan 14's
-owner; see
+`body.surface.detail` and computes it (amended by R04.T3.a (rendering plans),
+accepted 2026-09-30 by a delegated decision; see
 [R04, Design note 17](../rendering-and-planets/04-cross-target-determinism.md#design-notes)).
 `BulkComposition`
 is T11's fractions plus the atmosphere's inventory from T13 and the host's [Fe/H] and [α/Fe], which
@@ -4169,8 +4170,8 @@ record: BodyRecordDto }`. `ResponseBody::SystemBodies` and `BodyDetail` hold the
     `never`, as the sim's `Surface` and `Hooks` are, so no `ok` surface and no event parses.
     `BodyHooksDto { detail_seed: SectionDto<DetailSeedHex> }` holds the one hook whose form the
     plan fixes, in a 16-hex-digit newtype, `not_modelled` until R09 fills it; the surface seed
-    itself never reaches the wire (amended by R04.T3.a (rendering plans), drafted for plan 14's
-    owner; see
+    itself never reaches the wire (amended by R04.T3.a (rendering plans),
+    accepted 2026-09-30 by a delegated decision; see
     [R04, Design note 17](../rendering-and-planets/04-cross-target-determinism.md#design-notes));
     T23–T26 add the others, as `Modelled` fields where a hook lands
     before its section's others. **For the orchestrator:** an uninhabited `BodyHooksDto` would

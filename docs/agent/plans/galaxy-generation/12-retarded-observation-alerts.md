@@ -570,13 +570,16 @@ and, only when resolved, `host`, `designation`, `light_age_yr`, `apparent_positi
 Files: `crates/hyperion-protocol/src/alerts.rs`, server handlers, generated bindings,
 `packages/protocol/src/index.ts` (`NotificationOf`, a subscription helper on `RequestClient`).
 
-Note (drafted by rendering plan R03's R03.T1 for this plan's owner): the scene subscription needs
+Note (drafted by rendering plan R03's R03.T1 for this plan's owner; accepted 2026-09-30 by a
+delegated decision, amended to name `subscription_ended`): the scene subscription needs
 the envelope first, so R03.T5 builds `subscribe`, `unsubscribe`, `Subscribed`,
-`SubscriptionTopic`, `SubscriptionState`, `ServerMessage::Notification`, `NotificationBody` and the
-unknown-subscription refusal to this task's design, in `crates/hyperion-protocol/src/envelope.rs`
-beside `ServerMessage`, with `Scene` as the only topic, and `TestClient::next_notification()` (in
-`crates/hyperion-server/tests/common/mod.rs`), `NotificationOf<T>` and the subscription helper on
-`RequestClient` (R03.T5.c).
+`SubscriptionTopic`, `SubscriptionState`, `ServerMessage::Notification`, `NotificationBody`,
+`ServerMessage::SubscriptionEnded` (`subscription_ended { subscription, error }`: a subscription
+also ends when its topic fails, the place freed and no retry, not only with `unsubscribe` or the
+socket) and the unknown-subscription refusal to this task's design, in
+`crates/hyperion-protocol/src/envelope.rs` beside `ServerMessage`, with `Scene` as the only topic,
+and `TestClient::next_notification()` (in `crates/hyperion-server/tests/common/mod.rs`),
+`NotificationOf<T>` and the subscription helper on `RequestClient` (R03.T5.c).
 This task then adds only the `Alerts` topic, state and notification body, `alerts_observer` and
 `alerts_acknowledge`, and `alerts.rs` holds only the `Alerts` payloads. One departure (R03 Design
 note 1): the subscription helper lives on `RequestClient` itself
