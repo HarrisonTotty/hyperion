@@ -1611,3 +1611,35 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   quadrature, with a science check. `bloomKernel` costs some 35 ms per fit after a one-off
   250–700 ms for the level responses (provisional, under load): its caller refits only when the
   angular pixel scale changes materially, not each frame.
+- **Deviations in T12, as built** (2026-10-02). `post/histogram.{wgsl,ts}` and `post/meter.ts`
+  (`MeterMode`, `METER_CLASS`, `MeterClass`, `meterWeights`; R06.T13.e extends this file, never
+  redeclares). The kernel, `HISTOGRAM_KERNEL` (`exposure histogram`, reference only,
+  `bit-exact`, entry `main`), takes the HDR colour as a sampled `TextureHandle` (`hdr`; decision
+  2026-10-02, item 1: T7 wires the view's scene target), its `Params` uniform (`histogramParams`:
+  the four class weights, the size, the stride) and a 256-word `bins` buffer, and bins the Rec.
+  709 luminance (`METER_LUMA`, BT.709) of the pre-exposed value: bin 0 below 2⁻¹⁴ (and NaN in the
+  CPU twin; WGSL leaves the kernel's NaN case unspecified), bin 255 from 2¹⁶ and for +∞ (a pass
+  writing above 65,504; review fix, since a saturating `u32` of +∞ wrapped to bin 0), else 1 +
+  ⌊(log₂ L + 14) × 8.5⌋; the class is `round(alpha)`, half to even, clamped to [0, 3]. The low
+  setting's quarter-resolution input is a stride of 2 on each axis (`HistogramRequest.stride`),
+  not a separate downsample. Exports beyond Provides: `HistogramReader`, `HistogramRequest`,
+  `HistogramEngine` (the four engine calls the reader makes), `HISTOGRAM_RING` (3),
+  `HISTOGRAM_PASS` (`"histogram"`, `PHOTOREAL_PASS_LABELS.histogram` once T7 builds it),
+  `HISTOGRAM_WORKGROUP` (16 × 16, one bin per invocation), `HISTOGRAM_BINS_PER_STOP` (8.5),
+  `histogramWorkgroups`, `METER_LUMA`, the CPU twin `cpuHistogram` with `histogramBin`,
+  `binCentreLuminance` and `meterClassOf`. `HistogramReader` owns the ring of three storage
+  buffers: a frame finding all three still being read takes no histogram, results older than one
+  delivered are dropped, and the owner re-creates the reader in `onRestored`. Since R01's
+  `readBuffer` stages per call, no mapped buffer is ever reused; the test of "never maps a buffer
+  in use" checks instead, on a fake engine, that no slot is zeroed or dispatched into while its
+  read is pending. Registered in `WGSL_CATALOGUE` (`POST_ENTRIES`); the smoke check
+  (`smoke/histogram.ts`, on a 70 × 45 `rgba16float` texture of its own, luminances at bin
+  centres, with black and infinite texels) passes bin for bin under each meter at strides 1 and 2,
+  and through the reader's ring, on both `default` and `no-subgroups` (`just test-render`,
+  SwiftShader, 2026-10-02). **The bench is pending, and no staging ring was added to R01's
+  readback**: the RTX 3080 at 1920 × 1080 on a quiet machine, and the owner's UHD 620 at 1280 × 720
+  with stride 2 (640 × 360), both under `--hyperion-gpu-timing` with a uniform dark-sky input;
+  T17 builds the by-hand harness that drives `HistogramReader` and records the figures with the
+  other post-processing benches (the probe's 0.3–0.8 ms stays provisional), and if per-call
+  staging shows a cost T17 adds the staging ring through R01's guarded readback only (decision
+  2026-10-02, item 6).

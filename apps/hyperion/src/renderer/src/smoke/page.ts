@@ -22,6 +22,7 @@ import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
+import { checkHistogram } from "./histogram";
 import { runSoak } from "./soak";
 import { checkTwins } from "./twins";
 import { checkWireframe } from "./wireframe";
@@ -152,6 +153,8 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
 
   await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
+
+  await checks.group("R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
 
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await checks.group("T9.i splat refused", async () => {

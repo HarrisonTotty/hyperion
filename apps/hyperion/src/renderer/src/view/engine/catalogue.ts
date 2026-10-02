@@ -9,6 +9,7 @@
  */
 
 import type { KernelPair } from "./kernels";
+import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type { WgslMaterialSpec, WgslPostProcessSpec } from "./types";
@@ -40,8 +41,12 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME
   (spec) => ({ kind: "material", spec }),
 );
 
+/** R07's post-processing kernels and passes (plan R07, T12–T15). */
+const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [{ kind: "compute", spec: HISTOGRAM_KERNEL }];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
   ...WIREFRAME_ENTRIES,
+  ...POST_ENTRIES,
 ];
