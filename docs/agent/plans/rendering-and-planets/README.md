@@ -39,8 +39,9 @@ delegation are recorded under [Awaiting the owner](#awaiting-the-owner). What re
 by hand and the owner's: on the development machine, on screen, the soak with `xdotool` resizes
 and the display blank, the three canvases' and a child window's on-screen pacing and resizes
 (which settle the Vulkan-surface switch, R01's Risks), the by-eye checks of the `GRAPHICS` panel,
-the safe-mode banner and the `VIEW` display at 1920 × 1080 and 1280 × 720, and R02.T18's recorded
-runs; R03's latency between two machines; on the UHD 620,
+the safe-mode banner and the `VIEW` display at 1920 × 1080 and 1280 × 720, and R02.T18's by-eye
+and on-screen runs (its hidden RTX 3080 runs are recorded in R02's Recorded runs, provisional); R03's
+latency between two machines; on the UHD 620,
 every check specific to it (the adapter, the f16 path, `targetRounding`, the soak, the crash-loop
 relaunch); and the timings marked provisional, re-taken on a quiet machine. Each plan's Risks and
 open points list its own.
