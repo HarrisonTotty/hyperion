@@ -398,11 +398,20 @@ export interface MarkRow {
   /** Whether the range is from the camera, there being no own ship (Design note 17). */
   readonly fromCamera: boolean;
   /**
-   * A craft's closure rate on the own ship with its sign, `+3.40 m/s`; {@link MISSING_READING}
-   * where its or the own ship's velocity is not known; `null` for a body, or with no own ship.
+   * A craft's closure rate on the own ship: `known`, with its sign, `+3.40 m/s`; `unknown`
+   * where its or the own ship's velocity is not known; `none` for a body, or with no own ship.
    */
-  readonly closure: string | null;
+  readonly closure: ClosureReading;
 }
+
+/**
+ * A list row's closure rate: `none` for a body or with no own ship to close on, `unknown` where its
+ * or the own ship's velocity is not known (shown as {@link MISSING_READING}), else `known`.
+ */
+export type ClosureReading =
+  | { readonly kind: "none" }
+  | { readonly kind: "unknown" }
+  | { readonly kind: "known"; readonly text: string };
 
 /** A reading the scene does not have: an em dash, shown in `--text-muted` (the guide's "Missing"). */
 export const MISSING_READING = "—";
@@ -448,7 +457,7 @@ export function markRows(
       target.kind === "craft" ? scene.craft.find((c) => c.id === target.craft) : undefined;
     const key = targetKey(target);
     const distance = formatBodyDistance(rangeM / 1000, previousUnits.get(key) ?? null);
-    let closure: string | null = null;
+    let closure: ClosureReading = { kind: "none" };
     if (craft !== undefined && own !== undefined) {
       const closureMPerS = closureRateMPerS(
         differenceM(craft.pose.position, own.pose.position, origins),
@@ -456,7 +465,10 @@ export function markRows(
           ? null
           : sub(craft.velocityMPerS, own.velocityMPerS),
       );
-      closure = closureMPerS === null ? MISSING_READING : closureText(closureMPerS);
+      closure =
+        closureMPerS === null
+          ? { kind: "unknown" }
+          : { kind: "known", text: closureText(closureMPerS) };
     }
     return {
       key,

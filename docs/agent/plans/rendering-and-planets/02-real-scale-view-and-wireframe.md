@@ -1814,7 +1814,7 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
     adds with no own ship; both now read `rangeText(row)`, so every range from the camera says so
     (Design note 17).
   - **A missing closure rate (m7).** With an own ship but an unknown velocity the label's closure
-    rate disappeared. `MarkRow` gains `closure`, computed in `markRows` by the draw list's own rule
+    rate disappeared. `MarkRow` gains `closure`, a `ClosureReading` (`none`, `unknown` or `known`), computed in `markRows` by the draw list's own rule
     (`closureRateMPerS`, now exported from `symbology.ts`): `+3.40 m/s`, `—` where a velocity is not
     known, shown in `--text-muted` (`.readout__missing`), and `null` for a body or with no own ship.
     The labels read it from the row, and the list's options carry it in their accessible names

@@ -1,6 +1,15 @@
 import { StaleMark } from "../../components/StaleMark";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
-import { MISSING_READING, type MarkRow, rangeText, targetKey } from "./viewRun";
+import {
+  type ClosureReading,
+  MISSING_READING,
+  type MarkRow,
+  rangeText,
+  targetKey,
+} from "./viewRun";
+
+/** No closure rate, for a body's label. */
+const NO_CLOSURE: ClosureReading = { kind: "none" };
 
 /** Props of {@link ViewMarkLabels}. */
 export interface ViewMarkLabelsProps {
@@ -59,8 +68,7 @@ export function ViewMarkLabels({
           return null;
         }
         const target = label.kind === "target";
-        const closure = target ? row.closure : null;
-        const missing = closure === MISSING_READING;
+        const closure = target ? row.closure : NO_CLOSURE;
         const staleReadings = stale && target;
         return (
           <span
@@ -87,9 +95,9 @@ export function ViewMarkLabels({
                 {" "}
                 <span className={staleReadings ? "stale" : undefined}>
                   {rangeText(row)}
-                  {closure === null || missing ? null : ` ${closure}`}
+                  {closure.kind === "known" ? ` ${closure.text}` : null}
                 </span>
-                {missing ? (
+                {closure.kind === "unknown" ? (
                   <>
                     {" "}
                     <span className="readout__missing">{MISSING_READING}</span>
