@@ -107,8 +107,6 @@ export function aCameraScene(
     system: FIXTURE_SYSTEM,
     tidalRadiusM: FIXTURE_TIDAL_RADIUS_M,
     origins,
-    // The fixtures draw no body apparent: selection measures from the same centres.
-    selectionOrigins: origins,
     frameBodies: [
       { id: FIXTURE_PLANET, parent: null, hillRadiusM: FIXTURE_PLANET_HILL_M },
       { id: FIXTURE_MOON, parent: FIXTURE_PLANET, hillRadiusM: FIXTURE_MOON_HILL_M },
