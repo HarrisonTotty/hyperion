@@ -1666,3 +1666,15 @@ window = FULL_WINDOW)` (0 when the window holds no counts), `smoothEv`, `program
   sensitivity S = 5880 × 2^−EV100 at f/1.4 and 1/30 s spans ISO 0.18 (a sunlit planet, EV100 15) to 6 × 10⁶ (a dark sky, EV100 −10), far outside a real sensor; the lean is to record the
   triple as nominal until R06's `cameraLimitV` models noise from S, then clamp S and let the
   shutter take over.
+- **Deviations in T13.b, as built** (2026-10-02). `displays/view/MeterControl.tsx` (with
+  `meterLabel`) shows `EV100 9.6 AUTO` through R02's `exposureReading`, `METER AVG`, the source
+  view as `SOURCE VIEW`, and the meters `AVG`, `LIT` and `DARK` as pressed-state buttons in the
+  guide's order, reachable by Tab and pressed by Enter or Space; with no reading it says `NO
+IMAGE TO METER` and holds the meters back (`aria-disabled`, focusable). It takes an
+  `ExposureReading | null` and `onMeter(mode)`. **Not yet mounted in `ViewDisplay`**: no view
+  meters an image until T7 makes the photorealistic view and its `AutoExposure`; T7 mounts it
+  beside `ExposurePanel` (a few lines of `ViewDisplay`), so that no control stands on screen with
+  nothing behind it. The labels `METER AVG`, `METER LIT`, `METER DARK` are T16's guide draft. The
+  by-eye checks (a lit planet on black, a star entering the frame, the cockpit turning to a
+  planet), which settle the smoothing speeds, wait on T7 and are pending by hand for the owner:
+  `just client` with a photorealistic `VIEW` on the development machine.

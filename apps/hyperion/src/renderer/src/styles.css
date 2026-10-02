@@ -3284,6 +3284,32 @@ body {
   gap: 0.5rem;
 }
 
+/* The exposure meter beside the exposure panel (plan R07, T13.b). */
+.view-meter__reading,
+.view-meter__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.view-meter__reading,
+.view-meter__reason {
+  margin: 0 0 0.5rem;
+}
+
+.view-meter__reason {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.view-meter__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.5rem 0 0;
+  border: 0;
+  padding: 0;
+}
+
 /* Where the view would be, while its engine is made or cannot be. */
 .view__unavailable {
   flex: 1 1 auto;
