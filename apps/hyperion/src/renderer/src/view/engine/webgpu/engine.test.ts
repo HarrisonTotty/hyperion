@@ -199,6 +199,7 @@ describe("the engine's pass times", () => {
     engine.onAllocation((event) => events.push(event));
     const image = engine.createTexture(storageTexture("image"));
     splat(engine, image);
+    renderEmptyFrame(engine, "frame");
     engine.dispose();
     expect(events.filter(({ name }) => name.startsWith("pass times"))).toEqual([
       { kind: "created", name: "pass times", bytes: 1024, category: "other" },
@@ -210,7 +211,7 @@ describe("the engine's pass times", () => {
     ]);
   });
 
-  it("leave out a dispatch whose encoding threw, and are resolved after each dispatch", async () => {
+  it("leave out a dispatch whose encoding threw", async () => {
     const { engine } = await engineOn(["timestamp-query"]);
     const times = vi.fn<(times: PassTimes) => void>();
     engine.onPassTimes(times);
@@ -233,9 +234,53 @@ describe("the engine's pass times", () => {
       [1, 1, 1],
       "bake",
     );
+    renderEmptyFrame(engine, "frame");
     await vi.waitFor(() => {
       expect(times).toHaveBeenCalledOnce();
     });
-    expect(times.mock.calls[0]?.[0].passes.map(({ label }) => label)).toEqual(["bake"]);
+    expect(times.mock.calls[0]?.[0].passes.map(({ label }) => label)).toEqual(["bake", "frame"]);
+  });
+
+  it("resolve a long bake's dispatches before they fill the query set", async () => {
+    const { engine } = await engineOn(["timestamp-query"]);
+    const times = vi.fn<(times: PassTimes) => void>();
+    engine.onPassTimes(times);
+    const image = engine.createTexture(storageTexture("image"));
+    const kernel = engine.createCompute(SPLATTER);
+    for (let pass = 0; pass < 100; pass += 1) {
+      engine.dispatch(
+        kernel,
+        { ...NO_BINDINGS, storage: { out: { texture: image, level: 0 } } },
+        [1, 1, 1],
+        `bake ${pass}`,
+      );
+    }
+    renderEmptyFrame(engine, "frame");
+    await vi.waitFor(() => {
+      expect(times).toHaveBeenCalledTimes(4);
+    });
+    const labels = times.mock.calls.flatMap(([frame]) => frame.passes.map(({ label }) => label));
+    expect(labels).toHaveLength(101);
+    expect(labels.at(-1)).toBe("frame");
   });
 });
+
+/** Renders a frame with no draws into a small target, which resolves the pending pass times. */
+function renderEmptyFrame(engine: WebGpuRenderEngine, label: string): void {
+  engine
+    .createRenderTarget({
+      name: label,
+      size: { widthPx: 4, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: false,
+      category: "render-targets",
+    })
+    .render({
+      label,
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [],
+      postProcesses: [],
+    });
+}

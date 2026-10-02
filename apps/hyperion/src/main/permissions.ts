@@ -18,14 +18,21 @@ export function refusePermission(
   decide(false);
 }
 
+/** A permission-check handler that answers no, whatever is checked. */
+export function refusePermissionCheck(): boolean {
+  return false;
+}
+
 /**
- * Makes `session` refuse every permission a page requests.
+ * Makes `session` refuse every permission a page requests, and answer no to every check, which
+ * Electron otherwise grants (`navigator.permissions.query` would read `granted`).
  *
  * @remarks
  * Set once, before the first window is created, on `session.defaultSession`.
  */
 export function denyPermissionRequests(
-  session: Pick<Session, "setPermissionRequestHandler">,
+  session: Pick<Session, "setPermissionRequestHandler" | "setPermissionCheckHandler">,
 ): void {
   session.setPermissionRequestHandler(refusePermission);
+  session.setPermissionCheckHandler(refusePermissionCheck);
 }

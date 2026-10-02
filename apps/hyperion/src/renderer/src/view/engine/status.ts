@@ -73,12 +73,12 @@ export type ProbedTargetFormat = "rgba16float" | "rg11b10ufloat";
 /** Everything the console knows of its graphics. */
 export interface GraphicsStatus {
   readonly condition: GraphicsCondition;
-  /** The current adapter's, or `null` before one answers. */
+  /** The adapter's until its device reports its own, or `null` before one answers. */
   readonly capabilities: GpuCapabilities | null;
   readonly launchMode: GraphicsLaunchMode;
   /** Whether `--hyperion-gpu-timing` lifted timestamp quantization for this launch. */
   readonly gpuTiming: boolean;
-  /** From {@link GraphicsStatus.gpuTiming} and the adapter's `timestamp-query`. */
+  /** From {@link GraphicsStatus.gpuTiming} and `timestamp-query`: the adapter's, then the device's. */
   readonly timer: GpuTimer;
   /** `unknown` for each format until probed. */
   readonly targetRounding: Readonly<Record<ProbedTargetFormat, TargetRounding>>;

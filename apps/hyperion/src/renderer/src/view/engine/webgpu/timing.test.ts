@@ -6,11 +6,12 @@ import { PASSES_PER_FRAME, PassTimer, type TimerHost, TIMING_FRAMES_IN_FLIGHT } 
 
 /**
  * An engine's creation path that records its query sets and buffers, and hands out buffers
- * holding `stamps` once mapped; a mapping resolves when the test calls `settle`, or at once.
+ * holding `stamps` once mapped; a mapping resolves at once, when the test calls `settle`
+ * (`held`), or never (`failing`, which rejects).
  */
 function timerDevice(
   stamps: ReadonlyArray<bigint>,
-  held = false,
+  mapping: "at-once" | "held" | "failing" = "at-once",
 ): TimerHost & {
   readonly querySets: GPUQuerySetDescriptor[];
   readonly buffers: BufferSpec[];
@@ -46,14 +47,18 @@ function timerDevice(
         size: spec.bytes,
         usage: spec.usage,
         mapState: "unmapped",
-        mapAsync: () =>
-          held
-            ? new Promise((resolve) => {
-                waiting.push(() => {
-                  resolve(undefined);
-                });
-              })
-            : Promise.resolve(undefined),
+        mapAsync: () => {
+          if (mapping === "held") {
+            return new Promise((resolve) => {
+              waiting.push(() => {
+                resolve(undefined);
+              });
+            });
+          }
+          return mapping === "failing"
+            ? Promise.reject(new Error("the mapping failed"))
+            : Promise.resolve(undefined);
+        },
         getMappedRange: () => new BigUint64Array(stamps).buffer,
         unmap: () => undefined,
         destroy: () => undefined,
@@ -207,7 +212,7 @@ describe("the pass timer's buffers", () => {
 
   it("drop a frame's times, with one warning, while every pair is in flight", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const device = timerDevice([0n, 10n], true);
+    const device = timerDevice([0n, 10n], "held");
     const timer = new PassTimer(device, "quantized");
     for (let frame = 0; frame < TIMING_FRAMES_IN_FLIGHT; frame += 1) {
       timer.writesFor("cockpit");
@@ -218,5 +223,21 @@ describe("the pass timer's buffers", () => {
     expect(timer.pending).toEqual([]);
     expect(device.buffers).toHaveLength(TIMING_FRAMES_IN_FLIGHT * 2);
     expect(console.warn).toHaveBeenCalledOnce();
+  });
+
+  it("are reused after a read that failed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const device = timerDevice([0n, 10n], "failing");
+    const timer = new PassTimer(device, "quantized");
+    for (let frame = 1; frame <= TIMING_FRAMES_IN_FLIGHT + 2; frame += 1) {
+      timer.writesFor("cockpit");
+      timer.resolve(recordingEncoder())?.();
+      // Each frame waits for the one before it to fail, as frames a few apart do.
+      // oxlint-disable-next-line no-await-in-loop
+      await vi.waitFor(() => {
+        expect(console.error).toHaveBeenCalledTimes(frame);
+      });
+    }
+    expect(device.buffers).toHaveLength(2);
   });
 });

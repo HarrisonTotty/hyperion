@@ -92,7 +92,8 @@ export interface RenderTarget {
    * Renders into level 0; a chain of levels is one target per level.
    *
    * @throws {@link DepthSelfSample} when a draw samples the target's own depth, and
-   * {@link ColourSelfSample} when a draw or a post-process samples its own colour.
+   * {@link ColourSelfSample} when the pass that writes its colour (the draws', or the last
+   * post-process's) samples it.
    */
   render(frame: FrameSubmission): void;
   dispose(): void;
