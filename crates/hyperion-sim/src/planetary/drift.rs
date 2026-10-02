@@ -146,7 +146,10 @@ impl OrbitDrift {
 /// from its reference time (P14.T45.a).
 ///
 /// A record's orbit gives the body's position about its primary up to its `valid_until`; for an
-/// evolving orbit that is the end of its drift cell, past which the next record holds.
+/// evolving orbit that is the end of its drift cell, past which the next record holds. The
+/// velocity is the position's derivative within a record, and it may step at the record's
+/// `valid_until` where the host's Ṁ jumps, by up to ȧ, a few m/s on a late-AGB superwind host
+/// (P14.T45.e).
 ///
 /// # Examples
 ///

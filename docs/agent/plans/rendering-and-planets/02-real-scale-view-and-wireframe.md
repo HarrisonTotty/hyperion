@@ -414,7 +414,12 @@ the call sites here change.
    its planet's entry ratio falls to the system frame, which only rounding distinguishes (decided
    2026-09-30, delegated decision); the band is 5.8 × 10⁶ m for the Moon and 1.5 × 10⁸ m for Earth.
    Distances are geometric and present, from system-frame positions at the frame time, never
-   apparent ones, identically in Rust and TypeScript. Only planets, dwarf planets and moons are
+   apparent ones, identically in Rust and TypeScript. This is the sim's rule, which the flight model
+   and the choice of the ship's local body (`sceneAt`) follow. The view's camera, placed in the
+   drawn scene where every body but the ship's local one is apparent, runs the same rule over the
+   bodies' drawn centres, so that a free camera beside a drawn body is in that body's frame
+   (decided 2026-10-02, delegated decision). The twin is the same function; only its inputs differ.
+   Only planets, dwarf planets and moons are
    candidates; a wide multiple's stellar components are a note for the craft plan. The rule lives in
    the sim, so the flight model adopts it unchanged, and the client's camera runs a TypeScript twin
    tested against a golden the sim writes, as `lib/orbit.ts` is against `orbit/states.golden`. A
@@ -840,7 +845,8 @@ first had the two groups the other way round.) R05, R07, R08 and R11 consume it.
 ### R02.T8 The camera's frame selection and rebasing
 
 **R02.T8.a The twin.** `selectCameraFrame`, the TypeScript twin of `select_body_frame`, and the
-tidal-radius clamp of Design note 7.
+tidal-radius clamp of Design note 7; the camera feeds the twin the bodies' drawn centres, the sim
+their geometric ones (Design note 6, as amended).
 
 - Tests: every line of `body_frames.golden` (read with `?raw`, as `lib/orbit.test.ts` reads its
   golden) gives the sim's answer.
@@ -1097,8 +1103,9 @@ sprite shader through the exposure; the label's star-source line; the count line
 Once R03's scene topic lands: `view/scene/fromServer.ts` turns R03's client scene into a `ViewScene`
 (bodies from their orbital elements through `lib/orbit.ts` at R03's render time, each at its granted
 `level`, a `seen` body at its server-given apparent position only; radii, Hill radii, rings;
-`sceneAt`'s `hillRadiusM`, a `null` one leaving the body out of frame selection; craft when they
-exist; the ship stand-in as the own ship), the ship's local body drawn from `sceneAt`'s `geometricM`
+`sceneAt`'s `hillRadiusM`, a `null` one leaving the body out of frame selection, which measures
+to the drawn centres while `sceneAt` chooses the local body on geometric ones (Design note 6, as
+amended); craft when they exist; the ship stand-in as the own ship), the ship's local body drawn from `sceneAt`'s `geometricM`
 and every other body, a free camera's own local body included, from its `apparentM`, the `SCENE`
 selector gains the server's scene for the open system, and each local view's pose is handed to
 `CameraReporter`. Graticules stay still under `ROTATION NOT YET MODELLED` until P14.T14.c.
@@ -1816,6 +1823,14 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   planet whether its pose is held in the system frame or the moon's) and `fromServer.test.ts`.
   **For the owner:** this keeps Design note 6's "never apparent" literally; the other choice is to
   measure in drawn space and amend the note to say the camera's twin uses drawn positions.
+  **Decided (2026-10-02, delegated decision):** the other choice. Selection measures to the drawn
+  centres and `selectionOrigins` is removed (with `ViewBody.geometricCentreM` and `sceneOrigins`'s
+  `"geometric"` mode); the camera keeps m1's placement by the drawn origins. Design note 6 is
+  amended. The m1 tests are replaced: a camera 10⁷ m from a drawn moon is in the moon's frame
+  whether its pose is held in the system frame or the moon's, and one turning at rest beside it for
+  100 `stepFreeCamera` steps stays in that frame at a drawn position constant to 1 mm;
+  `fromServer.test.ts` draws Jupiter 1.5 Hill radii from its geometric centre and a camera
+  2 × 10⁸ m from the drawn Jupiter is in its frame (it fails under m1's selection).
 - **Fixed in RM1 validation (2026-10-02): the no-tidal-radius branch is tested (m5).**
   `serverScene.test.ts` now has a live scene whose system's tidal radius was not sent: it is not
   drawn, reads `SCENE NOT AVAILABLE: the system's tidal radius was not sent` as a fault, and

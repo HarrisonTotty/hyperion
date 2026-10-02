@@ -1044,7 +1044,9 @@ body sits at its `apparent_m`; an observer whose velocity equals a body's at t s
 receipt time, exposes `frameAt(nowMs)` for R02 (`sceneAt` at the render time, carrying the previous
 local body), reports cameras through `CameraReporter` in `lib/scene/cameraReports.ts` (at most
 4 Hz, which keeps a report within a quarter-second of a camera's pose while costing a few hundred
-bytes a second, and at once when a camera's frame changes), resubscribes after a reconnection and
+bytes a second, and at once when a camera's frame changes; the reported pose is the camera's
+position in the drawn scene, held in its frame, R02's Design note 6 as amended 2026-10-02),
+resubscribes after a reconnection and
 after a sequence error (R03.T12), and marks the
 scene stale while the link is down, as plan 12's `useAlerts` is to. Tests (Vitest with
 `FakeWebSocket` gaining `serverNotifies(subscription, body)` if plan 12 has not added it): subscribe,
