@@ -11,12 +11,12 @@ import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
+import type { SystemPlace } from "./lib/scene/model";
 import { DISPLAYS, type DisplayId } from "./lib/displays";
 import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
-import type { SystemPlace } from "./view/scene/fromServer";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -110,6 +110,8 @@ export function App() {
               target.positionLy.y,
               target.positionLy.z,
             ]),
+            velocityMPerS: null,
+            time: null,
           },
     [target],
   );

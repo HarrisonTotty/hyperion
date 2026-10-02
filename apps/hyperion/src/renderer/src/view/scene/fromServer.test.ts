@@ -9,10 +9,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { stepRun, startServerRun, type ViewRun } from "../../displays/view/viewRun";
 import { bodyPositionM, layoutBodies } from "../../displays/system/bodyMap";
-import { add, norm, sub, vec3, type Vec3 } from "../../geometry/vec3";
+import { add, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import { type SceneFrame, sceneAt, shipObserver } from "../../lib/scene/apparent";
 import { CAMERA_REPORT_INTERVAL_MS, CameraReporter } from "../../lib/scene/cameraReports";
-import type { SceneModel } from "../../lib/scene/model";
+import type { SceneModel, SystemPlace } from "../../lib/scene/model";
 import { toSceneModel } from "../../lib/scene/sceneWire";
 import { layoutHierarchy } from "../../lib/system/hierarchy";
 import {
@@ -34,6 +34,7 @@ import {
 import type { CameraPose } from "../camera/pose";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { sceneFrameFor, viewId } from "../camera/state";
+import { galacticTranslated } from "../coords/position";
 import { TEST_HULL } from "./hull";
 import {
   cameraKinematics,
@@ -41,7 +42,6 @@ import {
   serverSceneAtFrame,
   serverSceneAtPush,
   serverSceneGap,
-  type SystemPlace,
   viewSceneFromServer,
 } from "./fromServer";
 import { cameraSceneOf, type ViewBody, type ViewScene } from "./model";
@@ -54,6 +54,8 @@ const PLACE: SystemPlace = {
   system: FIXTURE_SYSTEM,
   designation: SCENE_DESIGNATION,
   barycentre: galacticPositionFromLy([8_000, 26_000, 20]),
+  velocityMPerS: null,
+  time: null,
 };
 
 /** The ship 10,000 km from the slice's Earth, in the Earth's frame, at `seconds`. */
@@ -241,12 +243,30 @@ describe("the server's scene as the view draws it", () => {
       system: FIXTURE_SYSTEM,
       designation: FIXTURE_SYSTEM,
       barycentre: null,
+      velocityMPerS: null,
+      time: null,
     });
     expect([
       bodyOf(sceneOf(model, frame), FIXTURE_EARTH).designation,
       bodyOf(unknown, FIXTURE_EARTH).designation,
       unknown.barycentre,
     ]).toEqual([`${SCENE_DESIGNATION} /768`, `${FIXTURE_SYSTEM} /768`, null]);
+  });
+
+  it("puts the barycentre where the scene's place has drifted to at the frame's time", () => {
+    const model = modelOf(stateNearEarth(3_000));
+    const place = model.system?.place ?? null;
+    if (place === null || place.barycentre === null || place.velocityMPerS === null) {
+      throw new Error("the fixture's scene states its place");
+    }
+    // The place holds at 3,400 s, the frame is at 3,000 s: 400 s before, at the place's velocity.
+    const scene = sceneOf(model, frameOf(model), place);
+    expect(scene.barycentre).toEqual(
+      galacticTranslated(place.barycentre, scale(place.velocityMPerS, -400)),
+    );
+    expect(scene.barycentre).not.toEqual(place.barycentre);
+    // A place known only from the chart has no drift: its barycentre is drawn as it is.
+    expect(sceneOf(model, frameOf(model)).barycentre).toEqual(PLACE.barycentre);
   });
 
   it("draws a planet's ring about it, a moon's orbit about its planet and a planet's about its star", () => {

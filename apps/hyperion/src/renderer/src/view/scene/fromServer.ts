@@ -6,15 +6,14 @@
  * The positions are `sceneAt`'s (rendering plan R03, R03.T13): the ship's local body is drawn where
  * it is at the frame's time (`geometricM`), and every other body and star where the ship sees it
  * (`apparentM`), a free camera's own local body included (R03's design note 7); a contact stands at
- * the server's seen position. The scene's messages carry neither the system's designation nor its
- * galactic position, so both come from a {@link SystemPlace} the client already holds; the
- * designations are composed here, at every frame, so that one learnt after the arrival relabels the
- * bodies at once.
+ * the server's seen position. The system's designation and galactic position come from a
+ * {@link SystemPlace}: the scene's own (R03.T16), or, from a server that does not send it, one the
+ * client already holds; the designations are composed here, at every frame, so that one learnt
+ * after the arrival relabels the bodies at once.
  */
 import {
   type BodyIdHex,
   formatBodyId,
-  type GalacticPosition,
   type SystemIdHex,
   type UniverseTime,
 } from "@hyperion/protocol";
@@ -22,7 +21,14 @@ import {
 import { add, norm, scale, vec3, type Vec3 } from "../../geometry/vec3";
 import { KM_PER_RSUN } from "../../lib/format";
 import { type SceneFrame, sceneAt, shipObserver, systemPlacements } from "../../lib/scene/apparent";
-import type { SceneCraft, SceneKinematics, SceneModel, ScenePosition } from "../../lib/scene/model";
+import type {
+  SceneCraft,
+  SceneKinematics,
+  SceneModel,
+  ScenePosition,
+  SystemPlace,
+} from "../../lib/scene/model";
+import { barycentreAt } from "../../lib/scene/place";
 import { bodySymbol } from "../../lib/system/bodySymbols";
 import { orbitNormal } from "../../lib/system/hierarchy";
 import type { SystemBody } from "../../lib/system/model";
@@ -56,18 +62,6 @@ const SOLAR_RADIUS_M = KM_PER_RSUN * 1_000;
 
 /** Galactic north, which stands for the own ship's dorsal side while its attitude is a guess. */
 const GALACTIC_NORTH = vec3(0, 0, 1);
-
-/**
- * What the client knows of a scene's system that the scene's messages do not carry: its
- * designation of record, which every body's extends, and its barycentre in the galactic frame.
- */
-export interface SystemPlace {
-  readonly system: SystemIdHex;
-  /** The designation, or the system's ID where none is known yet. */
-  readonly designation: string;
-  /** The barycentre, or `null` where the client has not been told where the system is. */
-  readonly barycentre: GalacticPosition | null;
-}
 
 /** Why the server's scene cannot be drawn now, or `null` when it can. */
 export type ServerSceneGap = "no_system" | "no_tidal_radius";
@@ -402,7 +396,7 @@ export function viewSceneFromServer(
     time: frame.time,
     timeRate: running ? model.clock.rate : 0,
     system: systemId,
-    barycentre: place.barycentre,
+    barycentre: barycentreAt(place, frame.time),
     tidalRadiusM: system.tidalRadiusM,
     bodies,
     rings,

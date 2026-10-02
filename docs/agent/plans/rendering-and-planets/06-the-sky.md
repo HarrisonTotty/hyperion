@@ -267,7 +267,9 @@ the call sites here change.
   `MAX_BINARY_FRAME_BYTES`, `BULK_QUEUED_BYTES`), `BulkManifestDto`, and on the client
   `parseBinaryFrameHeader`, `BulkAssembler` and `requestBulk`; `TestClient::next_binary()`.
   The scene's host stars' drawn positions (light-time and aberration) for the discs. Chunks are
-  assembled and decoded only once complete, off the main thread (R03's Design note 11).
+  assembled and decoded only once complete, off the main thread (R03's Design note 11). The sky
+  request's `observer` is the scene system's barycentre, `barycentreAt(place, t)` over
+  `SceneSystem.place` (R03.T16), plus the ship's offset in the system's frame.
 - **R01:** the engine adapter, its device, its WGSL-only guard, `createBuffer`, `createTexture`,
   `createCompute` and `dispatch`, `WGSL_CATALOGUE` (where every shader here is registered), the
   smoke harness (`just test-render`, readback by `copyTextureToBuffer`), `MemoryCategory` (which

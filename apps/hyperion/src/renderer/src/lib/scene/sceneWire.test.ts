@@ -3,6 +3,7 @@ import {
   METRES_PER_LIGHT_YEAR,
   type SceneNotificationDto,
   type SceneStateDto,
+  type SystemPlaceDto,
 } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -12,7 +13,9 @@ import {
   designateFixture,
   SCENE_TIDAL_RADIUS_M,
   earthReSentAsContact,
+  SCENE_DESIGNATION,
   sceneClock,
+  scenePlace,
   sceneSequence,
   shipInSpace,
   shipInSystem,
@@ -54,6 +57,97 @@ function applyAll(
     modelOf(state),
   );
 }
+
+/** Names every system wrongly, so that a label taken from it shows it was used. */
+function designateWrongly(system: string): string {
+  return `CHART ${system}`;
+}
+
+/** Every star's and body's designation in the model's system, which all extend the system's. */
+function labels(model: SceneModel): string[] {
+  const system = model.system;
+  return system === null
+    ? []
+    : [...system.model.hosts, ...system.bodies.bodies].map((each) => each.designation);
+}
+
+/** Whether every label extends `designation`, and there is at least one. */
+function labelledBy(model: SceneModel, designation: string): boolean {
+  const all = labels(model);
+  return all.length > 0 && all.every((label) => label.startsWith(`${designation} /`));
+}
+
+/** The slice's system in a state, with `place` in place of the fixture's (absent for `null`). */
+function stateWithPlace(place: SystemPlaceDto | null): SceneStateDto {
+  const { place: _place, ...system } = sliceSceneSystem();
+  return {
+    sequence: 0,
+    clock: sceneClock(3_400),
+    ship: shipInSystem(3_400),
+    system: place === null ? system : { ...system, place },
+    tidal_radius_m: SCENE_TIDAL_RADIUS_M,
+    craft: [],
+  };
+}
+
+describe("the system's place (R03.T16)", () => {
+  it("is read from a state, and the bodies take its designation, not designate's", () => {
+    const result = toSceneModel(stateWithPlace(scenePlace()), designateWrongly);
+    if (result.kind !== "ok") {
+      throw new Error(result.fault);
+    }
+    const system = result.model.system;
+    expect(system?.place).toEqual({
+      system: system?.model.system,
+      designation: SCENE_DESIGNATION,
+      barycentre: scenePlace().barycentre,
+      velocityMPerS: { x: -11_100, y: 232_240.5, z: 7_250 },
+      time: { seconds: 3_400, nanos: 0 },
+    });
+    expect(labelledBy(result.model, SCENE_DESIGNATION)).toBe(true);
+  });
+
+  it("is read from an arrival, and kept across a re-sent body", () => {
+    const [arrival, resent] = sceneSequence();
+    if (arrival === undefined || resent === undefined) {
+      throw new Error("the sequence has an arrival and a re-sent body");
+    }
+    const first = applied(
+      applySceneNotification(modelOf(stateInSpace()), arrival, designateWrongly),
+    );
+    const second = applied(applySceneNotification(first, resent, designateWrongly));
+    for (const model of [first, second]) {
+      expect(model.system?.place?.designation).toBe(SCENE_DESIGNATION);
+      expect(labelledBy(model, SCENE_DESIGNATION)).toBe(true);
+    }
+  });
+
+  it("falls back to designate, with no barycentre, where the scene states none", () => {
+    const result = toSceneModel(stateWithPlace(null), designateWrongly);
+    if (result.kind !== "ok") {
+      throw new Error(result.fault);
+    }
+    const system = result.model.system;
+    expect(system?.place).toBeNull();
+    expect(labelledBy(result.model, designateWrongly(system?.model.system ?? ""))).toBe(true);
+  });
+
+  it("refuses a barycentre offset out of [0, 1 ly), a velocity not finite and a malformed time", () => {
+    const place = scenePlace();
+    const unusable: SystemPlaceDto[] = [
+      { ...place, barycentre: { ...place.barycentre, offset_m: [METRES_PER_LIGHT_YEAR, 0, 0] } },
+      { ...place, barycentre: { ...place.barycentre, offset_m: [-1, 0, 0] } },
+      { ...place, velocity_m_s: [0, Number.NaN, 0] },
+      { ...place, velocity_m_s: [Number.POSITIVE_INFINITY, 0, 0] },
+      { ...place, time: { seconds: 3_400, nanos: 1_000_000_000 } },
+      { ...place, designation: "" },
+    ];
+    const faults = unusable.map(
+      (each) => toSceneModel(stateWithPlace(each), designateFixture).kind,
+    );
+    expect(faults).toEqual(["fault", "fault", "fault", "fault", "fault", "fault"]);
+  });
+});
 
 describe("toSceneModel", () => {
   it("reads a state in a system, every body with its grant", () => {
@@ -226,6 +320,7 @@ describe("applySceneNotification", () => {
   it("inserts a re-sent body absent from the list in index order, with its grant", () => {
     const full = sliceSceneSystem();
     const withoutEarth = {
+      ...full,
       system: {
         ...full.system,
         bodies: full.system.bodies.filter((body) => body.id !== FIXTURE_EARTH),

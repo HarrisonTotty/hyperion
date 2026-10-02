@@ -15,7 +15,7 @@ import { StaleMark } from "../../components/StaleMark";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { BodyDistanceUnit } from "../../lib/format";
 import type { SceneFrame } from "../../lib/scene/apparent";
-import type { SceneKinematics, SceneModel } from "../../lib/scene/model";
+import type { SceneKinematics, SceneModel, SystemPlace } from "../../lib/scene/model";
 import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { useUniverse } from "../../lib/universe";
 import { usePrefersReducedMotion } from "../../lib/usePrefersReducedMotion";
@@ -46,7 +46,6 @@ import {
   cameraKinematics,
   serverSceneAtFrame,
   serverSceneAtPush,
-  type SystemPlace,
 } from "../../view/scene/fromServer";
 import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
 import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
@@ -507,12 +506,12 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
   // The server's scene is chosen by default; a kept scene stands in while it cannot be drawn.
   const serverChosen = sceneName === SERVER_SCENE_NAME;
   const model = scene.model;
-  const sceneSystem = model?.system?.model.system ?? null;
+  const sceneSystem = model?.system ?? null;
   const server: ServerInput | null =
     viewProvenance(sceneName, scene) === "server" && model !== null && sceneSystem !== null
       ? {
           model,
-          place: systemPlace(sceneSystem, knownSystem),
+          place: systemPlace(sceneSystem.model.system, sceneSystem.place, knownSystem),
           stale: standing.stale,
           frameAt: scene.frameAt,
           reportCamera: scene.reportCamera,
@@ -539,8 +538,10 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
       : {
           universe,
           system: server.place.system,
+          // The place's own barycentre and time, as stated: asked once per arrival, never
+          // re-evaluated per frame (R03.T16).
           centre: server.place.barycentre,
-          time: server.model.clock.time,
+          time: server.place.time ?? server.model.clock.time,
         },
   );
   const lines = [

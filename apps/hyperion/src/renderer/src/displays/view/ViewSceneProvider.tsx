@@ -1,9 +1,9 @@
 import type { DetailLevelDto, SystemIdHex } from "@hyperion/protocol";
 import { createContext, type ReactNode, useCallback, useMemo, useState } from "react";
 
+import type { SystemPlace } from "../../lib/scene/model";
 import { type SceneView, useScene } from "../../lib/scene/useScene";
 import { useUniverse } from "../../lib/universe";
-import type { SystemPlace } from "../../view/scene/fromServer";
 import type { SceneProvenance } from "../../view/scene/model";
 import { viewProvenance } from "./serverScene";
 import { SCENE_OPTIONS, SERVER_SCENE_NAME } from "./viewRun";
@@ -22,7 +22,10 @@ export interface ViewSceneHost {
   readonly sceneName: string;
   /** The kept scene last chosen, which stands in while the server's cannot be drawn. */
   readonly keptName: string;
-  /** The system the client was last told of, which the server's scene does not carry. */
+  /**
+   * The system the client was last told of: the fallback for a server whose scene does not state
+   * its system's place (R03.T16).
+   */
   readonly knownSystem: SystemPlace | null;
   /** Chooses a scene by its name, as the selector's buttons do. */
   readonly choose: (name: string) => void;
@@ -49,8 +52,9 @@ export interface ViewSceneProviderProps {
  * `TRAINING` banner is computed during render from what `VIEW` draws (delegated decision 3).
  *
  * @remarks
- * The scene's messages carry no designation (R03.T12): `designate` names the system the client was
- * last told of by its designation of record and any other by its ID. The subscription is open only
+ * The scene states its system's designation (R03.T16); for a server that does not, `designate`
+ * names the system the client was last told of by its designation of record and any other by its
+ * ID. The subscription is open only
  * while the display is shown, as it was when the display held it; the choice outlives a hide. Every
  * push re-renders what it wraps, about once a second; the drawing loop reads positions through
  * `frameAt` with no render.

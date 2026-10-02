@@ -236,7 +236,8 @@ chunks).
 
 In `apps/hyperion/src/renderer/src/lib/scene/`: `sceneWire.ts` (`toSceneModel`,
 `applySceneNotification`, over `lib/system/bodiesWire.ts`'s `toSystemBodiesModel`), `sceneClock.ts`
-(`renderTime(clock, receivedMs, nowMs): UniverseTime`), `craft.ts`
+(`renderTime(clock, receivedMs, nowMs): UniverseTime`), `model.ts` (`SceneSystem.place`, a
+`SystemPlace` or `null`, R03.T16), `place.ts` (`barycentreAt(place, t)`, R03.T16), `craft.ts`
 (`predictedPath(craft, untilS) -> ReadonlyArray<CraftPose>`: the planned path when the craft has
 one, else its pose extrapolated in a straight line), `apparent.ts` (`apparentPosition`,
 `sceneAt(model, observer, time, previousLocal?) -> SceneFrame` with each body's and star's
@@ -1439,11 +1440,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   a system has `tidalRadiusM: null` until the next arrival, and R02.T17's clamp has nothing to read;
   the README's row for R02's ask reads "met" but is only partly met. The likely fix is an optional
   `tidal_radius_m` on `SceneStateDto` (the README puts it "not on `SceneSystemDto`"), added on the
-  server with R03.T8.a. **Open, likewise:** the scene's messages carry no system designation, so
-  `useScene` needs a designation source for any system the scene arrives in, which its planned
-  signature `useScene(requests, universe, cameras)` lacks; the alternatives are a `designate`
-  parameter on `useScene` (asking the server for an unknown system's designation) or the
-  designation on `SceneSystemDto`, an additive server change like the tidal radius. `renderTime` holds the time at the
+  server with R03.T8.a. The scene's messages carried no system designation either, so `useScene`
+  needed a designation source for any system the scene arrives in: closed 2026-10-02 by a
+  delegated decision, R03.T16 adds `place` to `SceneSystemDto`. `renderTime` holds the time at the
   clock window's edge, ±H, as the server's clock stops there, and never runs back for a frame
   stamped before its push. `predictedPath(craft, untilS)` takes `untilS` as scene seconds after the
   pose's time (a `RangeError` for one negative or not finite) and returns the straight line as its
@@ -1661,15 +1660,16 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
 - **Deviations in T14, as built.** `useScene(universe, { detail, designate })` reads the request
   client and the link's status from `useServerLink()`, as the app's other server hooks do, rather
   than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open
-  point, taken provisionally, awaiting the owner):** the smaller reversible option, a `designate`
-  callback on `useScene`, with no wire change; the latest one given is used from the next push on,
+  point; closed 2026-10-02 by a delegated decision, R03.T16 adds `place` to `SceneSystemDto`):**
+  the smaller reversible option, a `designate` callback on `useScene`, with no wire change, which
+  stays as the fallback for a scene without `place`; the latest one given is used from the next push on,
   and a new one neither reopens the scene nor relabels what is held. No production caller yet
   supplies a designation for a system the chart has not answered; R02.T17 must, by its chart's
   answers or a lookup, unless the owner prefers the designation on `SceneSystemDto` (additive,
   like the tidal radius). R02.T17 as built supplies only the system last opened on `SYSTEM` (no
   request answers a system's designation or barycentre by its ID); any other system reads as its
-  ID with no star field, and the choice between a client lookup and the designation and barycentre
-  on `SceneSystemDto` still awaits the owner (R02's "Deviations in R02.T17"). Cameras are not a
+  ID with no star field, until R03.T16 put the designation and barycentre on `SceneSystemDto`
+  (closed 2026-10-02 by a delegated decision; R02's "Deviations in R02.T17"). Cameras are not a
   parameter: a view hands its pose to
   `SceneView.reportCamera(view, pose)` and stops with `removeCamera(view)`, which feed the
   `CameraReporter` (`lib/scene/cameraReports.ts`) the hook owns; R02's and R07's "handed to
@@ -1811,3 +1811,44 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   the old scene is not reopened; and giving up with the server's code after four endings in a row.
   Not tested: `subscription_ended` waiting behind a full queue, and a pool job's failure through
   the scene topic itself. That branch shares `push_waits_for` with the pushes.
+
+- **The system's place rides `SceneSystemDto` (R03.T16, delegated decision 2026-10-02).** The
+  scene states its system's catalogue designation, its barycentre in the galactic frame at a stated
+  time and the barycentre's velocity (`SystemPlaceDto`), on `SceneSystemDto` so that the state and
+  every arrival carry it. The reasons: no request answers a system by its ID with a designation or
+  a position (`system_summary` carries neither, and `systems_in_range` needs the very centre that is
+  missing), so a client lookup would have been a new kind, a second round trip on every arrival and
+  a loading state; Knowledge does not gate the catalogue designation, a bijection of the ID already
+  on the wire, nor the chart's position, which `systems_in_range` gives any client; and the cost is
+  about 250 B an arrival (221 B measured) against 9.8–99.2 kB. The field is optional, so
+  `PROTOCOL_VERSION` stays 2, and a client keeps `designate` and `knownSystem` as the fallback for a
+  server without it. The one condition that would revisit it: a proper-name overlay from the
+  generated languages, or a Knowledge-gated chart, either of which would be a separate field under
+  the Knowledge plan rather than a change to this one.
+- **Deviations in T16, as built.** The place's velocity in the client model is
+  `SystemPlace.velocityMPerS: Vec3 | null`, the model's own naming (`SceneKinematics.velocityMPerS`),
+  not the decision's `velocityMS: Vec3Tuple`. `SystemPlace` moved to `lib/scene/model.ts` and its
+  importers (`App`, `ViewSceneProvider`, `serverScene.ts`, `ViewDisplay.tsx`, the tests) import it
+  there; `fromServer.ts` no longer declares it. `barycentreAt` is in `lib/scene/place.ts` and uses
+  `view/coords/position.ts`' `galacticTranslated` and `lightTime.ts`' `secondsBetween`, since
+  `@hyperion/protocol` has no translation helper; it throws a `RangeError` only for a drift out of
+  the galactic frame's cells. `serverScene.ts`'s `systemPlace(system, stated, known)` takes the
+  scene's place first. The adapter also refuses an empty designation, and `withBody` now keeps the
+  system DTO's other fields, so that a re-sent body no longer drops `place` (it rebuilt the DTO
+  from `system` and `grants` alone). `VIEW`'s interim queries take the place's barycentre and its `time` (the clock's
+  time only for a place known from the chart). On the server, the chart's row and `system_place`
+  share `convert::designation` and `galactic_position`; the place's position is `position_at`,
+  which is what a range query's hit holds (`hit_at`), so the integration test
+  `the_scene_place_agrees_with_the_chart` holds the position exactly; it also holds that the
+  velocity is not zero, since a server's galaxy has its kinematics. The `scene::core` tests use
+  `Galaxy::new`, which has none, so their velocity is zero and their positions the epoch's
+  (`position_at` at the arrival time, as built). The display test of a system never opened on
+  `SYSTEM` sends the scene under another system ID (`0200080020000005`, the answer's text
+  rewritten): the slice's fixture shares the kept scenes' `KEPT_SYSTEM`, and the interim stars are
+  asked again only on a change of system ID; a second test holds that a scene with no place reads
+  as the ID with `STARS` not available and asks nothing. **Sizes** (the hand-run
+  `scene_message_sizes`, provisional, on the shared machine): the place adds 221 B to each state
+  and arrival (`0x42006cba00000009` at `contact`, 9,757 to 9,978 B); with it the frames are 9,978 /
+  12,644 / 11,226 B at `contact`, 17,412 / 20,988 / 19,251 B at `mass_and_orbit` and 30,917 /
+  59,438 / 100,649 B at `bulk` and `full`, the `mass_and_orbit` and `bulk` sizes having grown since
+  T15 by plan 14's drifting elements (P14.T45), not by the place.

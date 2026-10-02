@@ -15,6 +15,7 @@ import type {
   SceneSystemDto,
   SystemBodiesDto,
   SystemIdHex,
+  SystemPlaceDto,
 } from "@hyperion/protocol";
 
 import { earthContact, FIXTURE_EARTH, FIXTURE_SYSTEM, sliceBodies } from "./planetaryFixture";
@@ -25,6 +26,19 @@ export const SCENE_DESIGNATION = "H7K 4C0RFZ D-7";
 /** Names every system by {@link SCENE_DESIGNATION}. */
 export function designateFixture(_system: SystemIdHex): string {
   return SCENE_DESIGNATION;
+}
+
+/**
+ * The fixture system's place as the scene states it (R03.T16): its designation, its barycentre
+ * near {@link shipInSpace}'s point, a disc star's drift and the arrival's time.
+ */
+export function scenePlace(): SystemPlaceDto {
+  return {
+    designation: SCENE_DESIGNATION,
+    barycentre: { cell_ly: [8_000, 10, 20], offset_m: [1.2e15, 2.1e15, 3.05e15] },
+    velocity_m_s: [-11_100, 232_240.5, 7_250],
+    time: { seconds: 3_400, nanos: 0 },
+  };
 }
 
 /** The fixture system's tidal radius as the scene states it, m. */
@@ -62,12 +76,13 @@ export function sliceSystemBodies(): SystemBodiesDto {
   return bodies;
 }
 
-/** The slice's system as a scene holds it, every body granted the level asked. */
+/** The slice's system as a scene holds it, every body granted the level asked, with its place. */
 export function sliceSceneSystem(): SceneSystemDto {
   const system = sliceSystemBodies();
   return {
     system,
     grants: system.bodies.map((body): BodyGrantDto => ({ body: body.id, level: system.granted })),
+    place: scenePlace(),
   };
 }
 
@@ -142,6 +157,7 @@ export function stateAfterHeartbeat(): SceneStateDto {
           ? { body: FIXTURE_EARTH, level: earth.level, seen: earth.seen }
           : grant,
       ),
+      place: scenePlace(),
     },
     tidal_radius_m: SCENE_TIDAL_RADIUS_M,
     craft: [],
