@@ -24,6 +24,7 @@ import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvase
 import { Checks } from "./harness";
 import { runSoak } from "./soak";
 import { checkTwins } from "./twins";
+import { checkWireframe } from "./wireframe";
 import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
 
 /** What the page reports, as `src/smoke/result.ts` reads it. */
@@ -145,6 +146,8 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("T9.i material state and the splat", () => checkMaterialState(engine, checks));
 
   await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
+
+  await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
 
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await checks.group("T9.i splat refused", async () => {

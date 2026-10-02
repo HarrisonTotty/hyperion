@@ -1553,8 +1553,18 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   4 × 10⁻⁵ on 2026-10-01 through the same scratch page on both adapters (SwiftShader headless;
   the RTX 3080, NVIDIA 615.71.09, in a hidden offscreen window): at 1 m and at 10⁸ m the own edge
   reads its full value (red 147) and the edge behind reads 0, and every other check above
-  repeats. Pending R01.T9: the shaders' entries in `WGSL_CATALOGUE` and these checks as the
-  harness's smoke test.
+  repeats. **Registered, 2026-10-02** (R01.T9 landed): `WGSL_CATALOGUE` gains the four
+  `WIREFRAME_MATERIALS` (compiled offline by T9.b), and `smoke/wireframe.ts`'s `checkWireframe`
+  runs these checks as the group `R02.T14.c the wireframe` of R01's smoke page, through
+  `WireframeRenderer.frame` as the display submits: both kept scenes' first frames at 640 × 360
+  (every texel finite, depth 0 at the corner), the cased stroke against the tokens read from
+  `styles.css` (which the module imports so that `readTokens` has them), the near-plane face, the
+  tone curve as a compute twin (`agx` of a grey, 64 luminances from 10⁻⁶ to 10³, read back and
+  compared with `toneCurve`), and the edge check at 4 × 10⁻⁵ at 1 m and 10⁸ m with a control (the
+  edge behind drawn with no face) so that it cannot pass vacuously. The sprite placement and the
+  sphere occluder's ray depth stay the scratch pages' (not repeated in the harness). `just
+test-render` passes on SwiftShader, both variants: the tone curve within 4.6 × 10⁻⁷, the near face
+  at depth 0.99989 above and 0 below.
 - **Deviations in R02.T15, as built.** `DisplayId` gains `view` (`View`, `F4`). The display's
   logic is pure in `displays/view/viewRun.ts`: `ViewRun { kept, tS, scene, camera }`, `startRun`,
   `stepRun` (the script in real time, run again from its start at its end; `followPreset`,
