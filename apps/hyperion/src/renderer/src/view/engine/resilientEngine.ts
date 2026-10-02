@@ -65,13 +65,19 @@ class ResilientView implements RenderView {
   readonly canvas: HTMLCanvasElement;
   #inner: RenderView | null;
   #size: ViewSize | null = null;
-  readonly #forget: (view: ResilientView) => void;
+  /** Whether its re-creation failed in the last restore, so that it draws nothing. */
+  #refused = false;
+  readonly #forget: (view: ResilientView, refused: boolean) => void;
 
+  /**
+   * @param forget - Called on disposal with whether the view stood refused: the engine forgets it,
+   * and releases its `view-refused` fault if it did.
+   */
   constructor(
     canvas: HTMLCanvasElement,
     name: string,
     inner: RenderView | null,
-    forget: (view: ResilientView) => void,
+    forget: (view: ResilientView, refused: boolean) => void,
   ) {
     this.canvas = canvas;
     this.name = name;
@@ -91,9 +97,17 @@ class ResilientView implements RenderView {
   attach(inner: RenderView | null): void {
     this.#inner?.dispose();
     this.#inner = inner;
-    if (inner !== null && this.#size !== null) {
-      inner.resize(this.#size);
+    if (inner !== null) {
+      this.#refused = false;
+      if (this.#size !== null) {
+        inner.resize(this.#size);
+      }
     }
+  }
+
+  /** Marks the view as not re-created in a restore: it draws nothing until re-created or disposed. */
+  refuse(): void {
+    this.#refused = true;
   }
 
   resize(size: ViewSize): void {
@@ -114,7 +128,9 @@ class ResilientView implements RenderView {
   dispose(): void {
     this.#inner?.dispose();
     this.#inner = null;
-    this.#forget(this);
+    const refused = this.#refused;
+    this.#refused = false;
+    this.#forget(this, refused);
   }
 }
 
@@ -164,8 +180,11 @@ export class ResilientEngine implements RenderEngine {
       canvas,
       name,
       this.#inner?.createView(canvas, name) ?? null,
-      (v) => {
+      (v, refused) => {
         this.#views.delete(v);
+        if (refused) {
+          this.#status.dispatch({ kind: "view-released", viewName: v.name });
+        }
       },
     );
     this.#views.add(view);
@@ -411,7 +430,9 @@ export class ResilientEngine implements RenderEngine {
    *
    * @remarks
    * A view whose canvas gives no context, or a listener that throws, is logged and passed over on
-   * its own: neither is a loss, and the others are still restored and told.
+   * its own: neither is a loss, and the others are still restored and told. Each view not
+   * re-created is reported as `view-refused` after `device-restored`, which would clear it, in the
+   * order the views were walked (decided 2026-10-02); its disposal reports `view-released`.
    */
   #restore(outcome: AdapterOutcome & { readonly kind: "adapter" }, inner: RenderEngine): void {
     if (this.#isDisposed()) {
@@ -419,16 +440,22 @@ export class ResilientEngine implements RenderEngine {
       return;
     }
     this.#adopt(inner);
+    const refused: string[] = [];
     for (const view of this.#views) {
       try {
         view.attach(inner.createView(view.canvas, view.name));
       } catch (error: unknown) {
         console.error(`view ${view.name} could not be re-created after a device loss:`, error);
+        view.refuse();
+        refused.push(view.name);
       }
     }
     this.#status.dispatch({ kind: "device-restored", outcome });
     // The restore writes the adapter's capabilities; the device's are what holds (Design note 24).
     this.#status.dispatch({ kind: "device-capabilities", capabilities: inner.capabilities });
+    for (const viewName of refused) {
+      this.#status.dispatch({ kind: "view-refused", viewName });
+    }
     for (const listener of this.#restoredListeners) {
       try {
         listener();

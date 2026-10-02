@@ -38,7 +38,7 @@ import {
   graphicsAnnunciation,
   useGraphicsStatus,
 } from "../../view/engine/status";
-import type { ViewSize } from "../../view/engine/types";
+import type { RenderView, ViewSize } from "../../view/engine/types";
 import {
   controlEv100,
   DEFAULT_EXPOSURE,
@@ -96,8 +96,14 @@ const READOUT_INTERVAL_MS = 250;
 /** The keys of the canvas, shown beside it and describing it. */
 const KEY_LEGEND = "W/S A/D R/F MOVE · ARROWS Q/E TURN · PAGE UP/DOWN RATE";
 
+/**
+ * The name the stage's view is created with: the engine's name for it, and the one a
+ * `view-refused` fault carries, by which the plate shows that fault for this view alone.
+ */
+const VIEW_NAME = "view";
+
 /** The view's identity in the scene's camera reports: one local view, the display's. */
-const VIEW_ID: ViewId = viewId("view");
+const VIEW_ID: ViewId = viewId(VIEW_NAME);
 
 /** No stars, one array for every frame without an answer. */
 const NO_STARS: ReadonlyArray<ViewStar> = [];
@@ -235,6 +241,8 @@ function ViewStage({
   const annunciation = graphicsAnnunciation(graphics);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
+  // Whether the engine refused the stage's view at its first creation (a canvas with no context).
+  const [viewRefused, setViewRefused] = useState(false);
   const heldRef = useRef(new Set<string>());
   // The marks' labels by their target's key, which the loop moves with their marks every frame.
   const labelsRef = useRef(new Map<string, HTMLElement>());
@@ -267,7 +275,9 @@ function ViewStage({
       selection,
       reducedMotion,
       size,
-      tokens: canvas === null ? null : readTokens(canvas),
+      // A canvas just unmounted (its view refused) is still held until its ref's update lands,
+      // and a detached element has no computed tokens.
+      tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
       stars,
     };
   }, [exposure, selection, reducedMotion, size, canvas, stars]);
@@ -294,7 +304,19 @@ function ViewStage({
       return undefined;
     }
     const { engine } = engineState;
-    const view = engine.createView(canvas, "view");
+    let view: RenderView;
+    try {
+      view = engine.createView(canvas, VIEW_NAME);
+    } catch (error: unknown) {
+      // Not a loss: the canvas gave no context, or the engine could not configure it. The view
+      // stays unmade until the stage remounts (a new scene); nothing here retries, so this cannot
+      // loop.
+      console.error(`view ${VIEW_NAME} could not be made:`, error);
+      // The engine's refusal is the external system's answer, known only once the canvas exists.
+      // oxlint-disable-next-line react/set-state-in-effect
+      setViewRefused(true);
+      return undefined;
+    }
     const renderer = new WireframeRenderer(engine);
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
@@ -450,14 +472,19 @@ function ViewStage({
   // be, the graphics' own annunciation (R01's), or the adapter being acquired.
   const engineLine: { readonly text: string; readonly standing: StatusStanding } | null =
     engineState.kind === "ready"
-      ? null
+      ? viewRefused
+        ? NOT_MADE
+        : null
       : engineState.kind === "pending"
         ? ACQUIRING
         : // Still acquiring by the status means the view's own request found nothing.
           annunciation === null || graphics.condition.kind === "acquiring"
           ? NOT_MADE
           : annunciation;
-  const fault = annunciation?.standing === "fault" ? annunciation.text : null;
+  // A refused view's fault is shown on its own view's plate alone (decided 2026-10-02).
+  const otherView =
+    graphics.fault?.kind === "view-refused" && graphics.fault.viewName !== VIEW_NAME;
+  const fault = annunciation?.standing === "fault" && !otherView ? annunciation.text : null;
 
   return (
     <div className="view">

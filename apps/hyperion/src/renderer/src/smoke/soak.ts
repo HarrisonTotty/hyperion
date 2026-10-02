@@ -254,6 +254,7 @@ export async function runSoak(
 function makeTone(engine: RenderEngine): ReturnType<RenderEngine["createPostProcess"]> {
   return engine.createPostProcess({
     name: "tone",
+    displayName: "TEST TONE",
     uniforms: [{ name: "exposure", type: "f32" }],
     fragmentWgsl: `
 struct Draw { exposure : f32 }

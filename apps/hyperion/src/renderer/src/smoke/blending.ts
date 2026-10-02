@@ -310,6 +310,7 @@ async function checkPostProcessAndDepthRead(
   const flat = engine.createMaterial(flatSpec("pp flat"));
   const gain = engine.createPostProcess({
     name: "gain",
+    displayName: "TEST GAIN",
     uniforms: [{ name: "gain", type: "f32" }],
     fragmentWgsl: `
 struct Draw { gain : f32 }

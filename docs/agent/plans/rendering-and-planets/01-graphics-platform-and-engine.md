@@ -251,7 +251,8 @@ export function requiredFeatures(
 export type GraphicsFault =
   | { readonly kind: "device-lost"; readonly reason: GPUDeviceLostReason; readonly message: string }
   | { readonly kind: "gpu-process-gone"; readonly count: number }
-  | { readonly kind: "shader-refused"; readonly effectName: string }; // a WGSL compile error
+  | { readonly kind: "shader-refused"; readonly effectName: string } // a WGSL compile error
+  | { readonly kind: "view-refused"; readonly viewName: string }; // not re-created after a loss
 export type GraphicsCondition =
   | { readonly kind: "acquiring" }
   | {
@@ -295,6 +296,8 @@ export type GraphicsEvent =
   | { kind: "adapter-withdrawn" }
   | { kind: "gpu-process-gone"; count }
   | { kind: "shader-refused"; effectName }
+  | { kind: "view-refused"; viewName } // a view's re-creation failed in a restore
+  | { kind: "view-released"; viewName } // a refused view was disposed
   | { kind: "device-capabilities"; capabilities }
   | { kind: "target-rounding"; rounding };
 export function initialGraphicsStatus(
@@ -308,7 +311,9 @@ export interface GraphicsAnnunciation {
   readonly text: string;
   readonly standing: Extract<StatusStanding, "refused" | "fault">;
 }
-export const GRAPHICS_WORDS: {/* Design note 10's words, signed off; shaderRefused(effect) */};
+export const GRAPHICS_WORDS: {
+  /* Design note 10's words, signed off; shaderRefused(effect); viewRefused a draft (decided 2026-10-02) */
+};
 export function graphicsAnnunciation(status: GraphicsStatus): GraphicsAnnunciation | null;
 export function graphicsModeAnnunciation(status: GraphicsStatus): GraphicsAnnunciation | null;
 export class GraphicsStatusStore {
@@ -520,7 +525,8 @@ export interface DrawItem {
   readonly indirect?: IndirectArgs;
 }
 export interface WgslMaterialSpec {
-  readonly name: string;
+  readonly name: string; // the code name, in the log
+  readonly displayName: string; // on the console: upper case, at most three words (decided 2026-10-02)
   readonly vertexWgsl: string;
   readonly fragmentWgsl: string;
   readonly uniforms: ReadonlyArray<UniformSpec>; // Draw's members after offsetFromCameraM
@@ -535,7 +541,8 @@ export interface WgslMaterialSpec {
   readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
 }
 export interface WgslPostProcessSpec {
-  readonly name: string;
+  readonly name: string; // the code name, in the log
+  readonly displayName: string; // on the console: upper case, at most three words (decided 2026-10-02)
   readonly fragmentWgsl: string;
   readonly uniforms: ReadonlyArray<UniformSpec>;
   readonly inputs?: ReadonlyArray<PostProcessInput>; // hdr-colour is always bound
@@ -651,7 +658,11 @@ export function highamBound(n: number, sumAbs: number): number; // γ(n − 1) �
   encoded commands (RM1 validation, m6).
 - `WGSL_CATALOGUE` in `view/engine/catalogue.ts`: every material, post-process and compute kernel
   the adapter can create, which the smoke harness renders one by one. Later plans register theirs
-  there.
+  there, each material and post-process with a `displayName` (decided 2026-10-02): upper case, at
+  most three words, what it draws, with no abbreviation that is not on the guide's list.
+  `catalogue.test.ts` checks every entry's name against
+  `^[A-Z][A-Z0-9]*( [A-Z0-9][A-Z0-9-]*){0,2}$` and that no two are the same; the catalogue is the
+  register of effect names, which the guide does not list one by one.
 
 ## Consumes
 
@@ -872,6 +883,9 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     - `GRAPHICS NOT AVAILABLE: no WebGPU` (`no-webgpu`) and
       `GRAPHICS NO ADAPTER: views not available, relaunch to retry` (`no-adapter`);
     - `GRAPHICS DEVICE LOST: re-creating` and `GRAPHICS PROCESS RESTARTED: re-acquiring` (faults);
+    - `GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry` (a
+      fault, on the `GRAPHICS` panel and on that view's label block; decided 2026-10-02,
+      delegated, a draft for the owner);
     - `GRAPHICS SAFE MODE: views not available, relaunch to retry`;
     - `GRAPHICS DISABLED: <n> device losses, relaunch to retry` (cause `device-losses`, n being the
       count) and `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` (cause
@@ -2511,7 +2525,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     any other at its first draw asynchronously, the draw left out until ready. Shader errors come
     from `getCompilationInfo`: logged with line and column, `shader-refused` dispatched with the
     material's name (the words "is not WGSL" were wrong; _closed in RM1 validation, 2026-10-02:_
-    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`),
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`; _decided 2026-10-02:_ the
+    dispatch carries the spec's `displayName` and the log both names,
+    `material wireframe:occluderSphere (BODY OCCLUDER) failed to compile; …`),
     the material's draws left out; `createMaterialAsync` rejects with the messages.
   - A view now owns its `depth32float` (attachment only; a view's depth is still not read back).
     Mesh attributes are one `float32` buffer each; `assertMeshData` refuses ragged data and indices
@@ -2542,6 +2558,7 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `false`, for R05's and R12's records.
   - _Closed in RM1 validation (2026-10-02, decision item 1):_ `GRAPHICS SHADER REFUSED` now reads
     `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn` for a compile error, and `GlslShaderRefused` no longer exists.
+    `<effect>` is the spec's `displayName` (decided 2026-10-02), not its code name.
 - **Deviations in T9, as built.**
   - Files: `src/smoke/main.ts`, `preload.ts` and `result.ts` (the report's shape, its validation
     and the verdict, unit-tested, shared as types with the page); `src/renderer/smoke.html` and
@@ -2778,6 +2795,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `onRestored` listener on its own, logging it, so a canvas with no context or a throwing
     listener neither disposes the new engine nor counts a loss. Tests: two in
     `resilientEngine.test.ts`, with the fake engine module's new `viewless` creations.
+    _Follow-up (decided 2026-10-02):_ a view not re-created is now reported as `view-refused`
+    after `device-restored`, and released (`view-released`) when it is disposed: see
+    `GRAPHICS VIEW REFUSED` below.
   - **m11, the lost engine's memory releases.** `#release` disposes the engine before it
     unsubscribes, so its `destroyed` events reach the allocation listeners (R05's tally). Test:
     `resilientEngine.test.ts`, the fake engine raising `FAKE_ENGINE_MEMORY`'s release on disposal.
@@ -2882,8 +2902,54 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     grants checks otherwise). Deviation: m1's check forces a pipeline to be made at the first draw
     by an unprepared target format (`rgba8unorm`), not by a mesh left out of `meshes`; both reach
     the same path, and the format needs no second mesh.
-  - **Open, for the owner or a status-wording lane:** a view whose canvas gives no WebGPU context
-    on a restore (M5) is logged and left drawing nothing, while the status reads nominal. Showing
-    it would need a new fault (say `GRAPHICS VIEW NOT AVAILABLE: <view>`), which is guide
-    nomenclature, so it is not added here. Also for the owner: `GRAPHICS SHADER REFUSED: <effect>`
-    shows the material's code name (`occluderSphere`), which may want a display name.
+  - _Closed (decided 2026-10-02, below):_ a view whose canvas gives no WebGPU context on a
+    restore (M5) was logged and left drawing nothing while the status read nominal; and
+    `GRAPHICS SHADER REFUSED: <effect>` showed the material's code name (`occluderSphere`).
+- **Decided 2026-10-02 (delegated; `decision-r01-status.md`), as built:**
+  - **`GRAPHICS VIEW REFUSED` (T8.e, T5).** A view not re-created after a device loss is a fault,
+    `GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry`, in
+    `--status-caution` text, never an alert. `status.ts` gains the `view-refused` fault and the
+    `view-refused` and `view-released` events; `afterViewRefused` follows `afterShaderRefused` (a
+    settled condition or a standing fault outranks it, the first refusal stands), and a release
+    clears only its own view's fault. `ResilientEngine.#restore` dispatches `view-refused` for each
+    view whose re-creation threw, after `device-restored` and `device-capabilities`, in the order
+    the views were walked; a refused view's `dispose` dispatches `view-released`, and a later
+    successful attach clears its mark. The `GRAPHICS` panel shows it unchanged; `ViewDisplay`
+    names its view `VIEW_NAME` (`"view"`) and its label block's plate shows the fault only for
+    its own view, keeping the canvas. Also, from the decision's aside: `ViewDisplay` now catches
+    the first creation's `engine.createView` failure and shows `NOT_MADE`
+    (`GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry`) in the view's place, latched for the
+    stage's life; the tokens are no longer read from a canvas that has just been unmounted (a
+    detached element has none, which threw). The guide gains a draft row. Tests:
+    `status.test.ts`, `resilientEngine.test.ts`, `ViewDisplay.test.tsx`,
+    `GraphicsPanel.test.tsx` (and a refused view that a later restore re-creates releases
+    nothing). `RenderEngine.createView`'s TSDoc now states that it throws for a canvas with no
+    context. Accept: the decision's vitest run (`view/engine`, `displays/view`, `components`)
+    passes; `ux_lint.py` on the changed files reports none of this change's lines. Limit, for the
+    multi-view follow-up: the first refusal stands, so with two refused views, releasing the first
+    clears the fault while the second still draws nothing; a console with two views should keep the
+    set of refused views (one view per console today, as the decision notes). Also for the owner
+    (review): `NOT_MADE` stands in `fault` while the guide lists `GRAPHICS NOT AVAILABLE` as a
+    Status. _Awaiting the owner's sign-off (draft)._
+  - **Display names for effects (T8.k, T8.l).** `WgslMaterialSpec` and `WgslPostProcessSpec` gain
+    a required `displayName`, the effect's name on the console. R02's four are `WIREFRAME LINES`,
+    `BODY OCCLUDER`, `HULL OCCLUDER` and `STAR SPRITES` (`DISPLAY_NAMES` in `wireframe/submit.ts`).
+    `#reportShaderErrors` dispatches `shader-refused` with the display name, so the screen reads
+    `GRAPHICS SHADER REFUSED: BODY OCCLUDER did not compile, not drawn`, and logs
+    `material wireframe:occluderSphere (BODY OCCLUDER) failed to compile; its draws are left out:`
+    with the compiler's lines. The smoke harness's specs are named `TEST FLAT` (`flatSpec`'s
+    default), `TEST GAIN`, `TEST COPY`, `TEST TONE` and `TEST INDIRECT COPY`, the broken-WGSL
+    fixture `TEST FIXTURE`, and the unit tests' `TEST <name>`. A new `catalogue.test.ts` checks
+    every material's and post-process's name for the form and uniqueness (compute kernels dispatch
+    no refusal and are left out). The guide's `GRAPHICS SHADER REFUSED` row states the naming rule
+    and makes the catalogue the register of effect names, a draft. Later plans' catalogue
+    registrations (R07 onwards) give each effect a `displayName` in this form. As built,
+    `#reportShaderErrors(owner, displayName, errors)` takes three parameters, not four: `owner`
+    already carries the code name (`material ${spec.name}`). `flatSpec`'s specs share `TEST FLAT`
+    (the harness's own; the failing check's name carries the code name). Accept: `vitest run
+src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes both variants;
+    `just test-render --fixture=broken-wgsl` exits 1 with
+    `FAIL T9.b no shader was refused: {"kind":"shader-refused","effectName":"TEST FIXTURE"}` and
+    the log line `material broken fixture (TEST FIXTURE) failed to compile`. No script compares the
+    `LINK` text, so there was no expected text to change. _Awaiting the owner's sign-off
+    (draft)._

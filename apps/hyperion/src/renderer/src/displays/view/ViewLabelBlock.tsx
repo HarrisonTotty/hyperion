@@ -10,7 +10,10 @@ export interface ViewLabelBlockProps {
   readonly statements: ReadonlyArray<string>;
   /** The interim stars' count line (`STARS 1,204 DRAWN · …`), or `null` before an answer. */
   readonly countLine: string | null;
-  /** A graphics fault standing while the view draws (`GRAPHICS DEVICE LOST: re-creating`), or `null`. */
+  /**
+   * A graphics fault standing while the view draws (`GRAPHICS DEVICE LOST: re-creating`, or this
+   * view's `GRAPHICS VIEW REFUSED: …`), or `null`.
+   */
   readonly fault: string | null;
 }
 
