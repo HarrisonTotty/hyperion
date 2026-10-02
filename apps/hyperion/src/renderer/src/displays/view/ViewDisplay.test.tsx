@@ -198,6 +198,57 @@ describe("the VIEW display", () => {
     expect(screen.getByText(/^GRAPHICS NOT AVAILABLE/)).toBeInTheDocument();
   });
 
+  it("says the view could not be made where the engine refuses its canvas", async () => {
+    const fake = fakeViewEngineSource();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setup({
+      source: {
+        ...fake.source,
+        load: async (outcome, status) => {
+          const engine = await fake.source.load(outcome, status);
+          engine.createView = () => {
+            throw new Error("the canvas gave no context");
+          };
+          return engine;
+        },
+      },
+    });
+    await settle();
+    expect([
+      screen.getByText("GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry"),
+      screen.queryByRole("application"),
+    ]).toEqual([expect.anything(), null]);
+    expect(logged).toHaveBeenCalledWith("view view could not be made:", expect.any(Error));
+  });
+
+  it("shows a refused view's fault on its own view's plate", async () => {
+    const store = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+    const { advance } = setup({ store });
+    await settle();
+    act(() => {
+      store.dispatch({ kind: "view-refused", viewName: "view" });
+    });
+    advance(16);
+    expect(
+      screen.getByText(
+        "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+      ),
+    ).toHaveClass("request-status__text--fault");
+    expect(screen.getByRole("application")).toBeInTheDocument();
+  });
+
+  it("does not show another view's refusal on its plate", async () => {
+    const store = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+    const { advance } = setup({ store });
+    await settle();
+    act(() => {
+      store.dispatch({ kind: "view-refused", viewName: "cockpit" });
+    });
+    advance(16);
+    expect(store.getSnapshot().fault).toEqual({ kind: "view-refused", viewName: "cockpit" });
+    expect(screen.queryByText(/^GRAPHICS VIEW REFUSED/)).toBeNull();
+  });
+
   it("names its canvas for its style and camera", async () => {
     const { advance } = setup();
     await settle();

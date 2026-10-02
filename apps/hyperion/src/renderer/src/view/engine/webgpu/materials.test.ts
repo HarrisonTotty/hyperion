@@ -14,6 +14,7 @@ import {
 
 const SPEC: WgslMaterialSpec = {
   name: "hull",
+  displayName: "TEST MATERIAL",
   vertexWgsl: "vertex",
   fragmentWgsl: "fragment",
   uniforms: [{ name: "tint", type: "vec4f" }],
@@ -129,6 +130,7 @@ describe("a material's resources", () => {
 describe("a post-process", () => {
   const POST: WgslPostProcessSpec = {
     name: "tonemap",
+    displayName: "TEST TONE MAP",
     fragmentWgsl: "fragment",
     uniforms: [],
     textures: [{ name: "bloom", binding: 2 }],
