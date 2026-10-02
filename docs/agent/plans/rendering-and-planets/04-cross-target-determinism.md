@@ -1680,7 +1680,7 @@ warnings` with "use of a disallowed method", and was reverted.
 - **T10.b, checked later (2026-09-30).** In a fresh `git worktree` at 7beb6ec (after
   `pnpm install`), a trivial commit to a TypeScript file passed every commit hook, the oxlint and
   `tsc` hooks building the module through `_with-surface`; the worktree was removed after.
-- **R04.T7.d, as built (2026-09-30): what the slow wasip1 suite found.** `just test-wasm-slow`
+- **As built, R04.T7.d (2026-09-30): what the slow wasip1 suite found.** `just test-wasm-slow`
   (run on its own, since `ci-slow` stops at the native failures above) took 3,291 s wall: 760 s
   waiting for the heavy-test lock, about 70 s building, and 2,518 s of nextest (load 9.8 before,
   8.9 after; provisional). 161 slow tests ran; 15 failed. Six are the pre-existing native failures
@@ -1706,7 +1706,7 @@ warnings` with "use of a disallowed method", and was reverted.
   (provisional); the wasip1 suites took 136 s of nextest, and the browser target's three crates
   (124, 1 and 52 tests, matching their native lists less `native_only`) under a second of tests
   after their builds and listings. This is the full-`ci` record T8.c's acceptance asks for.
-- **R04.T11, the verification pass (2026-10-02, at `3c4d865`, with R01.T9–T10 merged).** Each item
+- **The verification pass, R04.T11 (2026-10-02, at `3c4d865`, with R01.T9–T10 merged).** Each item
   of Verification, against the tree:
   - **`just ci`** passed: 2,711 s wall, of which 1,471 s waiting for the heavy-test lock, so about
     1,240 s of work, under load 8.6 at the start and 13 to 23 at the end (provisional). It ran,
@@ -1764,5 +1764,22 @@ warnings` with "use of a disallowed method", and was reverted.
   - **Corrected here:** T10.c's `check-chunks` note (the recipe went with Babylon.js in R01.T8.l);
     no other R04 text named Babylon. In the README, the "Three things done now" items say what
     landed, the Conventions' task-ID sentence and the open item on the skills' ID patterns say
-    R04.T7.c resolved them, the plan 14 amendment row says it awaits acceptance, and the clippy
+    R04.T7.c resolved them, the plan 14 amendment row says it was accepted as drafted (RM1 close), and the clippy
     scope item is closed, with the brainstorm's "done now" sentence now saying five.
+- **Fixed in RM1 validation (2026-10-02):**
+  - Two Risks bullets above began with a bold task ID, which `plan_task.py`'s inline-task pattern
+    (a bold bullet starting with an ID, plan 15's convention for tasks) read as tasks: `--list R04`
+    showed a second `R04.T11` and an `R04.T7.d` titled ", as built …". They now read "As built,
+    R04.T7.d …" and "The verification pass, R04.T11 …"; T7.d has no heading of its own, so
+    `plan_task.py R04.T7.d` now reports it as not found.
+  - The sim's crate docs (`crates/hyperion-sim/src/lib.rs`) named `hyperion-base` its only runtime
+    dependency; since T5 it also depends on `hyperion-surface`. They now name both, with `libm` the
+    only external one.
+  - T11's "Corrected here" line said the plan 14 amendment row awaits acceptance; it was accepted
+    as drafted (RM1 close), as the roadmap's row and T11's "Owner records" say.
+  - **Deviation recorded (T8.b, as built).** Design note 11 lists Electron's binary among the tools
+    whose absence fails "with a message that names `just wasm-tools`". `test-wasm-browser`
+    (`justfile`, the check on `$electron`) fails, without skipping, with "Electron's binary … is
+    missing: run `just install`". That is the right remedy, since Electron comes from
+    `pnpm install` and not from `just wasm-tools`; only the wording departs from the note, and no
+    code changes.
