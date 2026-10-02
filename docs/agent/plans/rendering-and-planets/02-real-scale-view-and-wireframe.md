@@ -1769,3 +1769,8 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   camera in a moon's frame keeps its offset from the moon while its distances to every other body are
   the sim's. Drawing, the rebase on a change of frame and the camera report still use the drawn
   origins. Tested in `state.test.ts` (a moon drawn 10⁸ m from where it is) and `fromServer.test.ts`.
+- **Fixed in RM1 validation (2026-10-02): the no-tidal-radius branch is tested (m5).**
+  `serverScene.test.ts` now has a live scene whose system's tidal radius was not sent: it is not
+  drawn, reads `SCENE NOT AVAILABLE: the system's tidal radius was not sent` as a fault, and
+  `viewProvenance` gives `kept`, so the kept scene stands in; `fromServer.test.ts` has the
+  matching `serverSceneGap` case, `no_tidal_radius`.
