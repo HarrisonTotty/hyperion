@@ -10,10 +10,14 @@ describe("formatEventTime", () => {
     );
     expect(formatEventTime({ seconds: -CLOCK_WINDOW_S, nanos: 0 })).toBe("-1000 yr 000/00:00:00");
     expect(formatEventTime({ seconds: CLOCK_WINDOW_S, nanos: 0 })).toBe("+1000 yr 000/00:00:00");
+    // A fraction of a second after the window's start is inside it.
+    expect(formatEventTime({ seconds: -CLOCK_WINDOW_S, nanos: 1 })).toBe("-1000 yr 000/00:00:00");
   });
 
   it("reads in years outside it, with no seconds the client does not hold", () => {
     expect(formatEventTime({ seconds: -CLOCK_WINDOW_S - 1, nanos: 0 })).toBe("-1000.00 yr");
+    // Less than a second past the window's end is past it, as `stepTime` holds the edge.
+    expect(formatEventTime({ seconds: CLOCK_WINDOW_S, nanos: 1 })).toBe("+1000.00 yr");
     // About -6.3 Gyr, past the 2^53 s that a number holds exactly (P14.T35.d).
     expect(formatEventTime({ seconds: -199_097_968_544_446_944, nanos: 0 })).toBe(
       "-6,309,033,910.83 yr",

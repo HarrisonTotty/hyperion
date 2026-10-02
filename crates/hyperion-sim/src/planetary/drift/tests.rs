@@ -422,3 +422,50 @@ fn the_recession_phase_ratio_is_continuous_and_matches_its_closed_form() {
     );
     assert_same_bits(recession_phase_ratio_less_one(0.0), 0.0);
 }
+
+/// The gap between `orbit`'s velocity at `t` and a central difference of its positions at t ± 1 s
+/// and t ± 60 s, beyond the difference's own error, as a share of the speed (P14.T45.e). `t` must
+/// lie at least 60 s inside the record's cell.
+///
+/// The difference's error is taken as 4 units in the last place of the radius per position over
+/// the 2h baseline, plus its truncation h² |r⃛| ÷ 6, bounded by h² v (v ÷ r)² ÷ 3 for e ≤ 0.5
+/// (|r⃛| = (μ ÷ r³) √(vₜ² + 4 vᵣ²), at most 0.5 ÷ (1 − e) of 2 v³ ÷ r², at apoapsis).
+pub(crate) fn velocity_derivative_excess(orbit: &DriftingOrbit, t: UniverseTime) -> f64 {
+    let norm = |x: [f64; 3]| x.iter().map(|c| c * c).sum::<f64>().sqrt();
+    let (position, velocity) = orbit.relative_state_at(t);
+    let velocity = velocity.metres_per_second();
+    let (r, speed) = (norm(position.metres()), norm(velocity));
+    let mut worst = 0.0_f64;
+    for h in [1, 60] {
+        let span = Span::from_seconds(h);
+        let at = |t: Option<UniverseTime>| orbit.relative_state_at(t.expect("in range")).0.metres();
+        let (later, earlier) = (at(t.checked_add(span)), at(t.checked_sub(span)));
+        #[expect(clippy::cast_precision_loss, reason = "1 or 60, exact")]
+        let h = h as f64;
+        let gap: [f64; 3] =
+            std::array::from_fn(|i| (later[i] - earlier[i]) / (2.0 * h) - velocity[i]);
+        let allowance =
+            4.0 * f64::EPSILON * r / h + h * h * speed * (speed / r) * (speed / r) / 3.0;
+        worst = worst.max((norm(gap) - allowance).max(0.0) / speed);
+    }
+    worst
+}
+
+/// A drifting record's velocity is its position's derivative to 10⁻⁹ of the speed, on the
+/// synthetic moons and on an orbit whose axis and eccentricity change fast, Ψ = ȧ ÷ (n a) of
+/// 5 × 10⁻⁴ (P14.T45.e): the Kepler velocity alone missed by Ψ.
+#[test]
+fn a_drifting_velocity_is_the_derivative_of_its_position() {
+    let [receding, young] = moons();
+    let fast = Linear::new(1e10, 0.1, 0.3, -1e-12);
+    for law in [receding, young, fast] {
+        for y in [-999.0, -3.3, 0.0, 0.5, 990.0] {
+            let cell = drift_cell(&law, years(y), ClockWindow::START, None);
+            let reference = cell.orbit.drift().expect("drifting").reference();
+            let t = reference.checked_add(Span::from_seconds(600)).unwrap();
+            assert!(t < cell.end);
+            let excess = velocity_derivative_excess(&cell.orbit, t);
+            assert!(excess < 1e-9, "{y} yr: {excess:e}");
+        }
+    }
+}

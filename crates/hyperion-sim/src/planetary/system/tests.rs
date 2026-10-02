@@ -1635,6 +1635,38 @@ fn adjacent_drift_cells_join_within_the_tolerance() {
     assert!(joins > 100, "{joins} joins");
 }
 
+/// Every drifting record of the sample at the epoch, receding moons and circularising planets
+/// among them, moves at its position's derivative, to 10⁻⁹ of its speed beyond a central
+/// difference's own error (P14.T45.e).
+#[test]
+fn a_drifting_record_s_velocity_is_the_derivative_of_its_position() {
+    use crate::planetary::drift::tests::velocity_derivative_excess;
+    let (mut moons, mut eccentric) = (0, 0);
+    for (_, _, record) in drifting_records(UniverseTime::EPOCH) {
+        let orbit = record.orbit().ok().expect("drifting");
+        let drift = orbit.drift().expect("drifting");
+        let inside = drift
+            .reference()
+            .checked_add(Span::new(600, 0).unwrap())
+            .unwrap();
+        if orbit.valid_until().is_some_and(|until| until <= inside) {
+            continue;
+        }
+        let excess = velocity_derivative_excess(&orbit.trajectory(), inside);
+        assert!(excess < 1e-9, "{:?}: {excess:e}", record.index());
+        if matches!(record.identity().parent(), Some(OrbitHost::Body(_))) {
+            moons += 1;
+        }
+        if drift.eccentricity_rate_per_s() < 0.0 {
+            eccentric += 1;
+        }
+    }
+    assert!(
+        moons > 0 && eccentric > 0,
+        "{moons} moons, {eccentric} circularising"
+    );
+}
+
 /// The share of evolving orbits whose cells fall to the smallest size, over the sample at three
 /// times, counting the cells that neither a segment nor a state cut: under 10⁻³ (P14.T45.a).
 #[test]
@@ -1739,6 +1771,39 @@ fn a_fixed_moon_does_not_follow_its_planet_s_drift_cells() {
         }
     }
     assert!(checked > 10, "{checked} fixed moons of drifting planets");
+}
+
+/// Before the window's start a receding moon's record is cut at its planet's next change there,
+/// which `FateAt::changes_at` now states (RM1 validation, 2026-10-02): its cell ends no later, and
+/// its `valid_until` is that change. The sample holds no moon whose planet changes between −(H + L)
+/// and `START`, so the change is supplied here; `fate::tests` checks that the planet states it.
+#[test]
+fn a_receding_moon_s_record_before_the_window_is_cut_at_its_planet_s_change() {
+    let t = ClockWindow::START
+        .checked_sub(Span::new(1 << 22, 0).unwrap())
+        .unwrap();
+    let mut checked = 0;
+    for (ctx, system) in whole() {
+        for body in system.bodies() {
+            let Part::Moon(moon) = &body.part else {
+                continue;
+            };
+            let (alone, until) = moon_trajectory(ctx, moon, t, None);
+            let (Some(drift), Some(until)) = (alone.drift(), until) else {
+                continue;
+            };
+            assert!(drift.reference() <= t && t < until);
+            let change = t.checked_add(Span::new(1_000, 0).unwrap()).unwrap();
+            if change >= until {
+                continue;
+            }
+            let (cut, cut_until) = moon_trajectory(ctx, moon, t, Some(change));
+            assert_eq!(cut_until, Some(change), "{:?}", body.index);
+            assert!(cut.drift().is_some(), "{:?}", body.index);
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "{checked} receding moons");
 }
 
 /// The drift cell that straddles the clock window's start gives one record on each side of it,

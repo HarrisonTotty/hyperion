@@ -162,20 +162,97 @@ pub(super) fn elliptic_state(
     mean_anomaly: f64,
     orientation: &Orientation,
 ) -> (SystemVector, SystemVelocity) {
-    let (a, e) = (semi_major_axis, eccentricity);
-    let anomaly = eccentric_anomaly(reduce_to_half_turn(mean_anomaly), e);
-    let (sin, cos) = math::sin_cos(anomaly);
-    let one_minus_cos = one_minus_cos(sin, cos);
-    let one_minus_e = 1.0 - e;
-    let axis_ratio = (one_minus_e * (1.0 + e)).sqrt();
-    let along_periapsis = a * (one_minus_e - one_minus_cos);
-    let across = a * axis_ratio * sin;
-    let radius_over_a = one_minus_e + e * one_minus_cos;
-    let speed = mean_motion * a / radius_over_a;
-    (
-        SystemVector::new(orientation.plane_to_system(along_periapsis, across)),
-        SystemVelocity::new(orientation.plane_to_system(-speed * sin, speed * axis_ratio * cos)),
-    )
+    PlaneState::new(semi_major_axis, eccentricity, mean_motion, mean_anomaly).in_system(orientation)
+}
+
+/// A state on an ellipse in the orbit's own plane, x towards periapsis, before the rotation into
+/// the system frame, with the anomaly's terms that the drift's rate terms reuse
+/// ([`KeplerElements::drifting_state_at`]).
+struct PlaneState {
+    /// a, m.
+    a: f64,
+    /// e.
+    e: f64,
+    /// sin E.
+    sin: f64,
+    /// cos E.
+    cos: f64,
+    /// 1 − cos E, kept precise near periapsis.
+    one_minus_cos: f64,
+    /// 1 − e.
+    one_minus_e: f64,
+    /// √((1 − e)(1 + e)), the axis ratio b ÷ a.
+    axis_ratio: f64,
+    /// 1 − e cos E, as (1 − e) + e (1 − cos E): r ÷ a.
+    radius_over_a: f64,
+    /// x, m.
+    along_periapsis: f64,
+    /// y, m.
+    across: f64,
+    /// ẋ, m s⁻¹.
+    velocity_along: f64,
+    /// ẏ, m s⁻¹.
+    velocity_across: f64,
+}
+
+impl PlaneState {
+    /// The Kepler state of [`elliptic_state`]'s arguments, in the plane.
+    fn new(semi_major_axis: f64, eccentricity: f64, mean_motion: f64, mean_anomaly: f64) -> Self {
+        let (a, e) = (semi_major_axis, eccentricity);
+        let anomaly = eccentric_anomaly(reduce_to_half_turn(mean_anomaly), e);
+        let (sin, cos) = math::sin_cos(anomaly);
+        let one_minus_cos = one_minus_cos(sin, cos);
+        let one_minus_e = 1.0 - e;
+        let axis_ratio = (one_minus_e * (1.0 + e)).sqrt();
+        let along_periapsis = a * (one_minus_e - one_minus_cos);
+        let across = a * axis_ratio * sin;
+        let radius_over_a = one_minus_e + e * one_minus_cos;
+        let speed = mean_motion * a / radius_over_a;
+        Self {
+            a,
+            e,
+            sin,
+            cos,
+            one_minus_cos,
+            one_minus_e,
+            axis_ratio,
+            radius_over_a,
+            along_periapsis,
+            across,
+            velocity_along: -speed * sin,
+            velocity_across: speed * axis_ratio * cos,
+        }
+    }
+
+    /// Adds ȧ ∂r/∂a + ė ∂r/∂e to the velocity, at a fixed mean anomaly, so that it becomes the time
+    /// derivative of a position whose a and e change at `rates` (plan 14, P14.T45.e).
+    ///
+    /// With x = a ((1 − e) − (1 − cos E)), y = a √(1 − e²) sin E, and ∂E/∂e = sin E ÷ (1 − e cos E)
+    /// from Kepler's equation at fixed M (Murray and Dermott 1999, §2.5):
+    /// ∂x/∂a = (1 − e) − (1 − cos E), ∂y/∂a = √(1 − e²) sin E,
+    /// ∂x/∂e = −a (1 + sin²E ÷ (1 − e cos E)) and
+    /// ∂y/∂e = a sin E (√(1 − e²) cos E ÷ (1 − e cos E) − e ÷ √(1 − e²)). The client adds the same
+    /// expressions in the same order (`lib/orbit.ts`).
+    fn add_rate_terms(&mut self, rates: DriftRates) {
+        let (a, e, sin) = (self.a, self.e, self.sin);
+        self.velocity_along += rates.a_m_per_s * (self.one_minus_e - self.one_minus_cos)
+            - rates.e_per_s * a * (1.0 + sin * sin / self.radius_over_a);
+        self.velocity_across += rates.a_m_per_s * self.axis_ratio * sin
+            + rates.e_per_s
+                * a
+                * sin
+                * (self.axis_ratio * self.cos / self.radius_over_a - e / self.axis_ratio);
+    }
+
+    /// The position and velocity rotated into the system frame.
+    fn in_system(&self, orientation: &Orientation) -> (SystemVector, SystemVelocity) {
+        (
+            SystemVector::new(orientation.plane_to_system(self.along_periapsis, self.across)),
+            SystemVelocity::new(
+                orientation.plane_to_system(self.velocity_along, self.velocity_across),
+            ),
+        )
+    }
 }
 
 /// The Keplerian elements of a bound relative orbit at the epoch, in the system frame.
@@ -466,11 +543,14 @@ impl KeplerElements {
     /// P14.T45.a, the model of an evolving orbit on one drift cell).
     ///
     /// Δt is [`seconds_between`] `reference` and `t`. The client evaluates the same expressions
-    /// in the same order (`lib/orbit.ts`). The velocity is the Kepler velocity of the elements
-    /// then, as for osculating elements: it differs from the position's derivative by about
-    /// ȧ ÷ (n a), the period over the evolution's timescale, some 10⁻¹² for a receding moon, and
-    /// by (1 + 1 ÷ √(1 − e²)) |ė| ÷ n for the eccentricity's change, nil under mass loss and far
-    /// smaller under circularisation.
+    /// in the same order (`lib/orbit.ts`). The velocity is the time derivative of this position:
+    /// the Kepler velocity of the elements at `t`, plus ȧ ∂r/∂a + ė ∂r/∂e (P14.T45.e), so that a
+    /// state extrapolated over Δt misses only at second order. The added terms are of order
+    /// Ψ = ȧ ÷ (n a) and ė ÷ n of the speed: some 10⁻¹² for a receding moon, and about 1.2 × 10⁻⁴
+    /// (0.9 m s⁻¹) for a planet at 9.5 au about a late-AGB superwind host. The elements are the
+    /// secular law's mean elements, not osculating ones: under mass loss the osculating
+    /// eccentricity oscillates at order Ψ (Veras et al. 2011, MNRAS 417, 2104, eq. 17; Ψ as their
+    /// eq. 15).
     #[must_use]
     pub(crate) fn drifting_state_at(
         &self,
@@ -483,7 +563,9 @@ impl KeplerElements {
         let e = self.eccentricity.value() + rates.e_per_s * dt;
         let mean_anomaly = self.unreduced_mean_anomaly_at(t) + 0.5 * rates.n_rad_per_s2 * dt * dt;
         let mean_motion = self.mean_motion() + rates.n_rad_per_s2 * dt;
-        elliptic_state(a, e, mean_motion, mean_anomaly, &self.orientation)
+        let mut plane = PlaneState::new(a, e, mean_motion, mean_anomaly);
+        plane.add_rate_terms(rates);
+        plane.in_system(&self.orientation)
     }
 
     /// The mean anomaly at the epoch plus 2π times the centred fraction of a period elapsed, rad,

@@ -335,6 +335,10 @@ fn damped(
 /// `now` (design note 11): the axis times `reference` ÷ `now` and the gravitational parameter
 /// times `now` ÷ `reference`, so that the specific angular momentum √(μ a (1 − e²)) is kept.
 ///
+/// This is the adiabatic limit of isotropic mass loss: a M constant (Veras et al. 2011, MNRAS 417,
+/// 2104, eq. 18) and e constant over an orbit (their eq. 17), valid while the mass-loss index
+/// Ψ = (Ṁ ÷ M) ÷ n is far below 1 (their eq. 15).
+///
 /// `orbit` is returned unchanged, bit for bit, when the two masses are the same.
 ///
 /// # Panics

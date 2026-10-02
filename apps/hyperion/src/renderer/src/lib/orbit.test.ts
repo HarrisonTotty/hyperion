@@ -201,7 +201,27 @@ describe("the server's drifting orbits (P14.T45.c)", () => {
       meanMotionRateRadPerS2: 1e-15,
     };
 
-    expect(stateAt(orbitOf({ drift }), reference)).toEqual(stateAt(orbitOf(), reference));
+    expect(stateAt(orbitOf({ drift }), reference).positionM).toEqual(
+      stateAt(orbitOf(), reference).positionM,
+    );
+  });
+
+  it("moves at the time derivative of its drifting position (P14.T45.e)", () => {
+    const drifting = orbitOf({
+      drift: {
+        reference: EPOCH,
+        semiMajorAxisRateMPerS: 100,
+        eccentricityRatePerS: 1e-9,
+        meanMotionRateRadPerS2: 2e-20,
+      },
+    });
+    const stepS = 60;
+    const later = stateAt(drifting, { seconds: 10_000_000 + stepS, nanos: 0 }).positionM;
+    const earlier = stateAt(drifting, { seconds: 10_000_000 - stepS, nanos: 0 }).positionM;
+    const difference = scale(sub(later, earlier), 1 / (2 * stepS));
+    const { velocityMPerS } = stateAt(drifting, { seconds: 10_000_000, nanos: 0 });
+
+    expect(relativeError(velocityMPerS, difference)).toBeLessThan(1e-9);
   });
 
   it("adds half the mean motion's rate times the time squared to the phase", () => {
