@@ -1774,3 +1774,9 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   drawn, reads `SCENE NOT AVAILABLE: the system's tidal radius was not sent` as a fault, and
   `viewProvenance` gives `kept`, so the kept scene stands in; `fromServer.test.ts` has the
   matching `serverSceneGap` case, `no_tidal_radius`.
+- **Fixed in RM1 validation (2026-10-02): two citations (m11).** `body_frame.rs`'s Pluto and Charon
+  test values now cite the NASA Pluto fact sheet (Pluto's heliocentric orbit) and Brozović et al.
+  2015, Icarus 246, 317 (the masses and Charon's orbit), as the Earth and Moon helper cites its
+  fact sheets; `PSF_QUAD_PX` states its reason, Design note 10's point-spread function: at σ =
+  0.64 px, ±3.5 px about the star's pixel centre leaves out at most 2.8 × 10⁻⁶ of the light, with the
+  star at its pixel's edge, 3 px (4.7 σ) from the quad's near side in each axis.

@@ -378,8 +378,9 @@ mod tests {
 
     #[test]
     fn a_massive_moon_nests_as_the_moon_does() {
-        // Pluto (a = 5.906 × 10¹² m, e = 0.2488, 1.303 × 10²² kg about the Sun) and Charon
-        // (a = 1.96 × 10⁷ m, e = 0, 1.586 × 10²¹ kg).
+        // Pluto (a = 5.906 × 10¹² m, e = 0.2488 about the Sun: NASA Pluto fact sheet; 1.303 ×
+        // 10²² kg) and Charon (a = 1.96 × 10⁷ m, e = 0, 1.586 × 10²¹ kg): the masses from the
+        // system's GM fit, and Charon's orbit, in Brozović et al. 2015, Icarus 246, 317.
         let pluto_hill = hill_radius(
             Metres::new(5.906e12),
             0.2488,
