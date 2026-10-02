@@ -250,8 +250,9 @@ describe("a device loss", () => {
     const { engine, module, status } = await load([adapter(), adapter(), adapter()], {
       viewless: new Set([1]),
     });
-    engine.createView(document.createElement("canvas"), "cockpit");
+    const view = engine.createView(document.createElement("canvas"), "cockpit");
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dispatched = vi.spyOn(status, "dispatch");
     nth(module, 0).loseDevice();
     await vi.waitFor(() => {
       expect(logged).toHaveBeenCalledWith(
@@ -264,6 +265,28 @@ describe("a device loss", () => {
     expect(nth(module, 1).disposed).toBe(false);
     expect(status.getSnapshot().condition.kind).toBe("nominal");
     expect(status.getSnapshot().deviceLosses).toBe(1);
+    const kinds = dispatched.mock.calls.map(([event]) => event.kind);
+    expect(kinds.slice(kinds.indexOf("device-restored"))).toEqual([
+      "device-restored",
+      "device-capabilities",
+      "view-refused",
+    ]);
+    expect(status.getSnapshot().fault).toEqual({ kind: "view-refused", viewName: "cockpit" });
+    view.dispose();
+    expect(dispatched).toHaveBeenLastCalledWith({ kind: "view-released", viewName: "cockpit" });
+    expect(status.getSnapshot().fault).toBeNull();
+  });
+
+  it("releases no fault when a view that was re-created is disposed", async () => {
+    const { engine, module, status } = await load([adapter(), adapter()]);
+    const view = engine.createView(document.createElement("canvas"), "cockpit");
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    const dispatched = vi.spyOn(status, "dispatch");
+    view.dispose();
+    expect(dispatched).not.toHaveBeenCalled();
   });
 
   it("forwards the lost engine's memory releases to the allocation listeners", async () => {

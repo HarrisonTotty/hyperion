@@ -251,7 +251,8 @@ export function requiredFeatures(
 export type GraphicsFault =
   | { readonly kind: "device-lost"; readonly reason: GPUDeviceLostReason; readonly message: string }
   | { readonly kind: "gpu-process-gone"; readonly count: number }
-  | { readonly kind: "shader-refused"; readonly effectName: string }; // a WGSL compile error
+  | { readonly kind: "shader-refused"; readonly effectName: string } // a WGSL compile error
+  | { readonly kind: "view-refused"; readonly viewName: string }; // not re-created after a loss
 export type GraphicsCondition =
   | { readonly kind: "acquiring" }
   | {
@@ -295,6 +296,8 @@ export type GraphicsEvent =
   | { kind: "adapter-withdrawn" }
   | { kind: "gpu-process-gone"; count }
   | { kind: "shader-refused"; effectName }
+  | { kind: "view-refused"; viewName } // a view's re-creation failed in a restore
+  | { kind: "view-released"; viewName } // a refused view was disposed
   | { kind: "device-capabilities"; capabilities }
   | { kind: "target-rounding"; rounding };
 export function initialGraphicsStatus(
@@ -872,6 +875,9 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     - `GRAPHICS NOT AVAILABLE: no WebGPU` (`no-webgpu`) and
       `GRAPHICS NO ADAPTER: views not available, relaunch to retry` (`no-adapter`);
     - `GRAPHICS DEVICE LOST: re-creating` and `GRAPHICS PROCESS RESTARTED: re-acquiring` (faults);
+    - `GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry` (a
+      fault, on the `GRAPHICS` panel and on that view's label block; decided 2026-10-02,
+      delegated, a draft for the owner);
     - `GRAPHICS SAFE MODE: views not available, relaunch to retry`;
     - `GRAPHICS DISABLED: <n> device losses, relaunch to retry` (cause `device-losses`, n being the
       count) and `GRAPHICS DISABLED: adapter withdrawn, relaunch to retry` (cause
@@ -2778,6 +2784,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `onRestored` listener on its own, logging it, so a canvas with no context or a throwing
     listener neither disposes the new engine nor counts a loss. Tests: two in
     `resilientEngine.test.ts`, with the fake engine module's new `viewless` creations.
+    _Follow-up (decided 2026-10-02):_ a view not re-created is now reported as `view-refused`
+    after `device-restored`, and released (`view-released`) when it is disposed: see
+    `GRAPHICS VIEW REFUSED` below.
   - **m11, the lost engine's memory releases.** `#release` disposes the engine before it
     unsubscribes, so its `destroyed` events reach the allocation listeners (R05's tally). Test:
     `resilientEngine.test.ts`, the fake engine raising `FAKE_ENGINE_MEMORY`'s release on disposal.
@@ -2882,8 +2891,24 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     grants checks otherwise). Deviation: m1's check forces a pipeline to be made at the first draw
     by an unprepared target format (`rgba8unorm`), not by a mesh left out of `meshes`; both reach
     the same path, and the format needs no second mesh.
-  - **Open, for the owner or a status-wording lane:** a view whose canvas gives no WebGPU context
-    on a restore (M5) is logged and left drawing nothing, while the status reads nominal. Showing
-    it would need a new fault (say `GRAPHICS VIEW NOT AVAILABLE: <view>`), which is guide
-    nomenclature, so it is not added here. Also for the owner: `GRAPHICS SHADER REFUSED: <effect>`
-    shows the material's code name (`occluderSphere`), which may want a display name.
+  - _Closed (decided 2026-10-02, below):_ a view whose canvas gives no WebGPU context on a
+    restore (M5) was logged and left drawing nothing while the status read nominal; and
+    `GRAPHICS SHADER REFUSED: <effect>` showed the material's code name (`occluderSphere`).
+- **Decided 2026-10-02 (delegated; `decision-r01-status.md`), as built:**
+  - **`GRAPHICS VIEW REFUSED` (T8.e, T5).** A view not re-created after a device loss is a fault,
+    `GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry`, in
+    `--status-caution` text, never an alert. `status.ts` gains the `view-refused` fault and the
+    `view-refused` and `view-released` events; `afterViewRefused` follows `afterShaderRefused` (a
+    settled condition or a standing fault outranks it, the first refusal stands), and a release
+    clears only its own view's fault. `ResilientEngine.#restore` dispatches `view-refused` for each
+    view whose re-creation threw, after `device-restored` and `device-capabilities`, in the order
+    the views were walked; a refused view's `dispose` dispatches `view-released`, and a later
+    successful attach clears its mark. The `GRAPHICS` panel shows it unchanged; `ViewDisplay`
+    names its view `VIEW_NAME` (`"view"`) and its label block's plate shows the fault only for
+    its own view, keeping the canvas. Also, from the decision's aside: `ViewDisplay` now catches
+    the first creation's `engine.createView` failure and shows `NOT_MADE` (`GRAPHICS NOT
+AVAILABLE: views could not be made, relaunch to retry`) in the view's place, latched for the
+    stage's life; the tokens are no longer read from a canvas that has just been unmounted (a
+    detached element has none, which threw). The guide gains a draft row. Tests:
+    `status.test.ts`, `resilientEngine.test.ts`, `ViewDisplay.test.tsx`,
+    `GraphicsPanel.test.tsx`. _Awaiting the owner's sign-off (draft)._

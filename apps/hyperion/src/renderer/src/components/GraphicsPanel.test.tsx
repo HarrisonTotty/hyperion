@@ -107,6 +107,19 @@ describe("GraphicsPanel", () => {
     expect(reading("Device Losses")).toHaveTextContent("1");
   });
 
+  it("reports a refused view as a fault", async () => {
+    renderPanel(
+      "vulkan",
+      { kind: "adapter-outcome", outcome: await adapter() },
+      { kind: "view-refused", viewName: "view" },
+    );
+    expect(
+      screen.getByText(
+        "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+      ),
+    ).toHaveClass("request-status__text--fault");
+  });
+
   it("reports a restarted GPU process as a fault until an adapter is granted", async () => {
     const adapterOutcome = await adapter();
     const store = renderPanel("vulkan", { kind: "adapter-outcome", outcome: adapterOutcome });

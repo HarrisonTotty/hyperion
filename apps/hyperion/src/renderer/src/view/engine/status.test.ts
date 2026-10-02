@@ -126,16 +126,16 @@ describe("the device's capabilities", () => {
 });
 
 describe("a refused shader", () => {
-  it("is a fault naming the effect", async () => {
+  it("is a fault naming the effect by its display name", async () => {
     const outcome = await adapterOutcome();
     const status = reduce(
       launched(),
       { kind: "adapter-outcome", outcome },
-      { kind: "shader-refused", effectName: "standard" },
+      { kind: "shader-refused", effectName: "TEST EFFECT" },
     );
-    expect(status.fault).toEqual({ kind: "shader-refused", effectName: "standard" });
+    expect(status.fault).toEqual({ kind: "shader-refused", effectName: "TEST EFFECT" });
     expect(graphicsAnnunciation(status)).toEqual({
-      text: "GRAPHICS SHADER REFUSED: standard did not compile, not drawn",
+      text: "GRAPHICS SHADER REFUSED: TEST EFFECT did not compile, not drawn",
       standing: "fault",
     });
   });
@@ -145,15 +145,15 @@ describe("a refused shader", () => {
     const once = reduce(
       launched(),
       { kind: "adapter-outcome", outcome },
-      { kind: "shader-refused", effectName: "standard" },
+      { kind: "shader-refused", effectName: "TEST EFFECT" },
     );
-    expect(reduce(once, { kind: "shader-refused", effectName: "atmosphere" })).toBe(once);
+    expect(reduce(once, { kind: "shader-refused", effectName: "ATMOSPHERE" })).toBe(once);
   });
 
   it("does not hide a lost device", async () => {
     const outcome = await adapterOutcome();
     const lost = reduce(launched(), { kind: "adapter-outcome", outcome }, LOST);
-    expect(reduce(lost, { kind: "shader-refused", effectName: "standard" })).toBe(lost);
+    expect(reduce(lost, { kind: "shader-refused", effectName: "TEST EFFECT" })).toBe(lost);
   });
 
   it("is cleared by a restore", async () => {
@@ -161,7 +161,7 @@ describe("a refused shader", () => {
     const status = reduce(
       launched(),
       { kind: "adapter-outcome", outcome },
-      { kind: "shader-refused", effectName: "standard" },
+      { kind: "shader-refused", effectName: "TEST EFFECT" },
       { kind: "device-restored", outcome },
     );
     expect(status.fault).toBeNull();
@@ -169,7 +169,65 @@ describe("a refused shader", () => {
 
   it("changes nothing in a settled condition", () => {
     const safe = launched("safe");
-    expect(reduce(safe, { kind: "shader-refused", effectName: "standard" })).toBe(safe);
+    expect(reduce(safe, { kind: "shader-refused", effectName: "TEST EFFECT" })).toBe(safe);
+  });
+});
+
+describe("a refused view", () => {
+  const REFUSED: GraphicsEvent = { kind: "view-refused", viewName: "view" };
+
+  it("is a fault in the decided words", async () => {
+    const outcome = await adapterOutcome();
+    const status = reduce(launched(), { kind: "adapter-outcome", outcome }, REFUSED);
+    expect(status.fault).toEqual({ kind: "view-refused", viewName: "view" });
+    expect(graphicsAnnunciation(status)).toEqual({
+      text: "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+      standing: "fault",
+    });
+  });
+
+  it("does not hide a lost device or a refused shader", async () => {
+    const outcome = await adapterOutcome();
+    const lost = reduce(launched(), { kind: "adapter-outcome", outcome }, LOST);
+    expect(reduce(lost, REFUSED)).toBe(lost);
+    const shader = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "BODY OCCLUDER" },
+    );
+    expect(reduce(shader, REFUSED)).toBe(shader);
+  });
+
+  it("keeps the first refusal when another view's follows", async () => {
+    const outcome = await adapterOutcome();
+    const once = reduce(launched(), { kind: "adapter-outcome", outcome }, REFUSED);
+    expect(reduce(once, { kind: "view-refused", viewName: "cockpit" })).toBe(once);
+  });
+
+  it("is cleared by its own view's release only", async () => {
+    const outcome = await adapterOutcome();
+    const refused = reduce(launched(), { kind: "adapter-outcome", outcome }, REFUSED);
+    expect(reduce(refused, { kind: "view-released", viewName: "cockpit" })).toBe(refused);
+    expect(reduce(refused, { kind: "view-released", viewName: "view" }).fault).toBeNull();
+    const shader = reduce(
+      launched(),
+      { kind: "adapter-outcome", outcome },
+      { kind: "shader-refused", effectName: "BODY OCCLUDER" },
+    );
+    expect(reduce(shader, { kind: "view-released", viewName: "view" })).toBe(shader);
+  });
+
+  it("is cleared by a restore, and raised again by a refusal after it", async () => {
+    const outcome = await adapterOutcome();
+    const refused = reduce(launched(), { kind: "adapter-outcome", outcome }, REFUSED);
+    const restored = reduce(refused, LOST, { kind: "device-restored", outcome });
+    expect(restored.fault).toBeNull();
+    expect(reduce(restored, REFUSED).fault).toEqual({ kind: "view-refused", viewName: "view" });
+  });
+
+  it("changes nothing in a settled condition", () => {
+    const safe = launched("safe");
+    expect(reduce(safe, REFUSED)).toBe(safe);
   });
 });
 
