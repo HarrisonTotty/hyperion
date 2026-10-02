@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { FakeAdapter, type FakeDevice, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { KernelPair } from "../kernels";
-import type { TextureSpec } from "../memory";
+import type { AllocationEvent, TextureSpec } from "../memory";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
-import { PresentationOnlyReadback, type TextureHandle } from "../types";
+import { type PassTimes, PresentationOnlyReadback, type TextureHandle } from "../types";
 import { WebGpuRenderEngine } from "./engine";
 
 /** An engine over a fake device with `features`. */
@@ -186,5 +186,56 @@ describe("the readback guard", () => {
     engine.writePackedCubeLevelFromBuffer(cube, 0, packed);
     engine.writePackedCubeLevel(cube, 1, new Uint32Array(2 * 2 * 6));
     await expect(engine.readTexture(cube)).rejects.toBeInstanceOf(PresentationOnlyReadback);
+  });
+});
+
+describe("the engine's pass times", () => {
+  it("count the query set and the timer's buffers as allocations", async () => {
+    const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: ["timestamp-query"] });
+    const device = await adapter.requestDevice({ requiredFeatures: ["timestamp-query"] });
+    const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+    const events: AllocationEvent[] = [];
+    const engine = new WebGpuRenderEngine(device, status);
+    engine.onAllocation((event) => events.push(event));
+    const image = engine.createTexture(storageTexture("image"));
+    splat(engine, image);
+    engine.dispose();
+    expect(events.filter(({ name }) => name.startsWith("pass times"))).toEqual([
+      { kind: "created", name: "pass times", bytes: 1024, category: "other" },
+      { kind: "created", name: "pass times resolved 1", bytes: 1024, category: "other" },
+      { kind: "created", name: "pass times readback 1", bytes: 1024, category: "other" },
+      { kind: "destroyed", name: "pass times", bytes: 1024, category: "other" },
+      { kind: "destroyed", name: "pass times resolved 1", bytes: 1024, category: "other" },
+      { kind: "destroyed", name: "pass times readback 1", bytes: 1024, category: "other" },
+    ]);
+  });
+
+  it("leave out a dispatch whose encoding threw, and are resolved after each dispatch", async () => {
+    const { engine } = await engineOn(["timestamp-query"]);
+    const times = vi.fn<(times: PassTimes) => void>();
+    engine.onPassTimes(times);
+    const image = engine.createTexture(storageTexture("image"));
+    const kernel = engine.createCompute(SPLATTER);
+    expect(() => {
+      engine.dispatch(
+        kernel,
+        {
+          ...NO_BINDINGS,
+          storage: { out: { texture: image, level: 0 }, ghost: { texture: image, level: 0 } },
+        },
+        [1, 1, 1],
+        "broken",
+      );
+    }).toThrow(/declares no binding ghost/u);
+    engine.dispatch(
+      kernel,
+      { ...NO_BINDINGS, storage: { out: { texture: image, level: 0 } } },
+      [1, 1, 1],
+      "bake",
+    );
+    await vi.waitFor(() => {
+      expect(times).toHaveBeenCalledOnce();
+    });
+    expect(times.mock.calls[0]?.[0].passes.map(({ label }) => label)).toEqual(["bake"]);
   });
 });
