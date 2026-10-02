@@ -1,15 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { PassTimes } from "../types";
-import { PASSES_PER_FRAME, PassTimer, type TimerDevice } from "./timing";
+import type { BufferSpec } from "../memory";
+import type { BufferHandle, PassTimes } from "../types";
+import { PASSES_PER_FRAME, PassTimer, type TimerHost, TIMING_FRAMES_IN_FLIGHT } from "./timing";
 
-/** A device that records its query sets and hands out buffers holding `stamps` once mapped. */
-function timerDevice(stamps: ReadonlyArray<bigint>): TimerDevice & {
+/**
+ * An engine's creation path that records its query sets and buffers, and hands out buffers
+ * holding `stamps` once mapped; a mapping resolves when the test calls `settle`, or at once.
+ */
+function timerDevice(
+  stamps: ReadonlyArray<bigint>,
+  held = false,
+): TimerHost & {
   readonly querySets: GPUQuerySetDescriptor[];
+  readonly buffers: BufferSpec[];
+  /** Resolves every mapping waiting. */
+  settle(): void;
 } {
   const querySets: GPUQuerySetDescriptor[] = [];
+  const buffers: BufferSpec[] = [];
+  const gpuBuffers = new Map<BufferHandle, GPUBuffer>();
+  const waiting: Array<() => void> = [];
   return {
     querySets,
+    buffers,
+    settle: () => {
+      for (const resolve of waiting.splice(0)) {
+        resolve();
+      }
+    },
     createQuerySet(descriptor: GPUQuerySetDescriptor): GPUQuerySet {
       querySets.push(descriptor);
       return {
@@ -19,17 +38,34 @@ function timerDevice(stamps: ReadonlyArray<bigint>): TimerDevice & {
         destroy: () => undefined,
       };
     },
-    createBuffer(descriptor: GPUBufferDescriptor): GPUBuffer {
-      return {
-        label: descriptor.label ?? "",
-        size: descriptor.size,
-        usage: descriptor.usage,
+    createBuffer(spec: BufferSpec): BufferHandle {
+      buffers.push(spec);
+      const handle: BufferHandle = { kind: "buffer", name: spec.name, bytes: spec.bytes };
+      gpuBuffers.set(handle, {
+        label: spec.name,
+        size: spec.bytes,
+        usage: spec.usage,
         mapState: "unmapped",
-        mapAsync: () => Promise.resolve(undefined),
+        mapAsync: () =>
+          held
+            ? new Promise((resolve) => {
+                waiting.push(() => {
+                  resolve(undefined);
+                });
+              })
+            : Promise.resolve(undefined),
         getMappedRange: () => new BigUint64Array(stamps).buffer,
         unmap: () => undefined,
         destroy: () => undefined,
-      };
+      });
+      return handle;
+    },
+    gpuBufferOf(handle: BufferHandle): GPUBuffer {
+      const buffer = gpuBuffers.get(handle);
+      if (buffer === undefined) {
+        throw new Error(`no buffer ${handle.name}`);
+      }
+      return buffer;
     },
   };
 }
@@ -122,6 +158,16 @@ describe("the pass timer's capacity", () => {
     expect(timer.writesFor("second")?.beginningOfPassWriteIndex).toBe(0);
   });
 
+  it("forgets passes rolled back, whose encoding threw before they were submitted", () => {
+    const timer = new PassTimer(timerDevice([]), "quantized");
+    timer.writesFor("frame");
+    const mark = timer.mark();
+    timer.writesFor("dispatch that threw");
+    timer.rollBack(mark);
+    expect(timer.pending.map(({ label }) => label)).toEqual(["frame"]);
+    expect(timer.writesFor("next")?.beginningOfPassWriteIndex).toBe(2);
+  });
+
   it("reports nothing once disposed", async () => {
     const timer = new PassTimer(timerDevice([0n, 10n]), "quantized");
     const listener = vi.fn<(times: PassTimes) => void>();
@@ -134,5 +180,43 @@ describe("the pass timer's capacity", () => {
     await Promise.resolve();
     expect(listener).not.toHaveBeenCalled();
     expect(timer.writesFor("later")).toBeUndefined();
+  });
+});
+
+describe("the pass timer's buffers", () => {
+  it("are made through the engine's creation path and reused frame after frame", async () => {
+    const device = timerDevice([0n, 10n]);
+    const timer = new PassTimer(device, "quantized");
+    const listener = vi.fn<(times: PassTimes) => void>();
+    timer.listen(listener);
+    for (let frame = 1; frame <= 5; frame += 1) {
+      timer.writesFor("cockpit");
+      timer.resolve(recordingEncoder())?.();
+      // Each frame waits for the one before it to be read, as frames a few apart do.
+      // oxlint-disable-next-line no-await-in-loop
+      await vi.waitFor(() => {
+        expect(listener).toHaveBeenCalledTimes(frame);
+      });
+    }
+    expect(device.buffers.map(({ name }) => name)).toEqual([
+      "pass times resolved 1",
+      "pass times readback 1",
+    ]);
+    expect(device.querySets).toHaveLength(1);
+  });
+
+  it("drop a frame's times, with one warning, while every pair is in flight", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const device = timerDevice([0n, 10n], true);
+    const timer = new PassTimer(device, "quantized");
+    for (let frame = 0; frame < TIMING_FRAMES_IN_FLIGHT; frame += 1) {
+      timer.writesFor("cockpit");
+      timer.resolve(recordingEncoder())?.();
+    }
+    timer.writesFor("cockpit");
+    expect(timer.resolve(recordingEncoder())).toBeNull();
+    expect(timer.pending).toEqual([]);
+    expect(device.buffers).toHaveLength(TIMING_FRAMES_IN_FLIGHT * 2);
+    expect(console.warn).toHaveBeenCalledOnce();
   });
 });

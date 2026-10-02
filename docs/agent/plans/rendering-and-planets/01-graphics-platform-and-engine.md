@@ -2645,3 +2645,17 @@ not drawn`, with no compiler text on the screen (it stays in the log). `status.t
     refuses a draw or a `PostProcessItem.textures` entry that samples the target's own colour,
     with the new `ColourSelfSample` (in `types.ts`, beside `DepthSelfSample`; a Provides
     addition), before anything is encoded. Tests: `target.test.ts`.
+  - **m5, the pass timer's allocations (T8.g).** The query set is made through the registry
+    (`ResourceRegistry.createQuerySet`, counted as `other` at 8 bytes a query, destroyed at
+    disposal), with the first timed pass rather than in the constructor, so that a listener added
+    after creation sees it. The resolve and staging buffers are a ring of at most
+    `TIMING_FRAMES_IN_FLIGHT` (3) pairs of 1,024 B, made through the registry and reused; a frame
+    whose times find every pair in flight is dropped with one warning. Tests: `timing.test.ts`,
+    `engine.test.ts`. Not changed: `Drawing`'s `frame uniforms` buffer is still made in the
+    engine's constructor, before a caller can listen, so R05's tally sees its destruction and not
+    its creation (it should start from the engine's creation or ignore an unknown release).
+  - **m9, phantom pass times (T8.g).** `#submit` takes a mark of the timer's pending passes and
+    rolls back to it when the encoding throws, and the dispatch, splat and mip paths allocate
+    their timestamps inside the encoding, so a pass that was never submitted is never reported.
+    `dispatch` resolves its times after each dispatch, so a bake of more than 64 dispatches no
+    longer fills the query set before a frame. Tests: `timing.test.ts`, `engine.test.ts`.

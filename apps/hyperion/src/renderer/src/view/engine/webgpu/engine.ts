@@ -159,16 +159,20 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     this.device = device;
     this.#status = status;
     this.capabilities = deviceCapabilities(device);
-    const { gpuTiming } = status.getSnapshot();
-    this.#timer = new PassTimer(
-      device,
-      this.capabilities.timestampQuery ? (gpuTiming ? "full" : "quantized") : "absent",
-    );
     this.#resources = new ResourceRegistry(device, (event) => {
       for (const listener of this.#allocationListeners) {
         listener(event);
       }
     });
+    const { gpuTiming } = status.getSnapshot();
+    this.#timer = new PassTimer(
+      {
+        createQuerySet: (descriptor) => this.#resources.createQuerySet(descriptor),
+        createBuffer: (spec) => this.#resources.createBuffer(spec),
+        gpuBufferOf: (handle) => this.gpuBufferOf(handle),
+      },
+      this.capabilities.timestampQuery ? (gpuTiming ? "full" : "quantized") : "absent",
+    );
     this.#watches = [
       watchDeviceLoss(
         device,
@@ -230,8 +234,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   generateMips(texture: TextureHandle): void {
     const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
-    const writes = this.#timer.writesFor(`${spec.name} mips`);
     this.#submit(`${spec.name} mips`, (encoder) => {
+      const writes = this.#timer.writesFor(`${spec.name} mips`);
       this.#mips.encode(encoder, gpuTexture, spec.mips, writes);
     });
     this.#resolveTimes();
@@ -514,8 +518,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         const { texture, spec: targetSpec } = this.#resources.textureOf(target);
         const { buffer, spec: pointsSpec } = this.#resources.bufferOf(points);
         assertSplatInputs(spec, targetSpec, pointsSpec);
-        const writes = this.#timer.writesFor(spec.name);
         this.#submit(spec.name, (encoder) => {
+          const writes = this.#timer.writesFor(spec.name);
           encodeSplat(this.device, encoder, pipeline, texture, buffer, count, spec.name, writes);
         });
         // A splat adds to what the target holds, so it keeps the target's writer.
@@ -547,13 +551,16 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
             offsetBytes: workgroups.offsetBytes,
           }
         : { kind: "direct", counts: workgroups };
-    const timestampWrites = this.#timer.writesFor(pass);
     this.#submit(pass, (encoder) => {
+      const timestampWrites = this.#timer.writesFor(pass);
       encodeDispatch(this.device, encoder, record, resources, counts, {
         label: pass,
         ...(timestampWrites === undefined ? {} : { timestampWrites }),
       });
     });
+    // Resolved now, so that a bake of many dispatches between frames does not fill the query set
+    // and leave the next frame's own passes untimed.
+    this.#resolveTimes();
     // Only what the kernel may write is recorded: a binding declared `read` (a `read` storage
     // texture, a `read` storage buffer) keeps the writer it had (Design note 16).
     for (const [name, handle] of Object.entries(bindings.buffers)) {
@@ -743,10 +750,22 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return handle;
   }
 
-  /** Encodes and submits one command buffer. */
+  /**
+   * Encodes and submits one command buffer.
+   *
+   * @remarks
+   * When the encoding throws, nothing is submitted, so the passes it timed are forgotten: their
+   * timestamps would otherwise be resolved and reported unwritten.
+   */
   #submit(label: string, encode: (encoder: GPUCommandEncoder) => void): void {
+    const mark = this.#timer.mark();
     const encoder = this.device.createCommandEncoder({ label });
-    encode(encoder);
+    try {
+      encode(encoder);
+    } catch (error: unknown) {
+      this.#timer.rollBack(mark);
+      throw error;
+    }
     this.device.queue.submit([encoder.finish()]);
   }
 
