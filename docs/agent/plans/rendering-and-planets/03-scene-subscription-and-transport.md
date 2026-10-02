@@ -176,7 +176,9 @@ pub struct SystemPlaceDto { designation: String, barycentre: GalacticPosition,  
 pub struct SceneBodyDto { level: DetailLevelDto, record: BodySummaryDto,
     seen: Option<SeenPositionDto> }                                   // a re-sent body
 pub struct SceneStateDto { sequence: u64, clock: SceneClockDto, ship: KinematicsDto,
-    system: Option<SceneSystemDto>, craft: Vec<SceneCraftDto> }
+    system: Option<SceneSystemDto>,
+    tidal_radius_m: Option<f64>,                       // R03.T8.a; present whenever `system` is
+    craft: Vec<SceneCraftDto> }
 pub struct SceneNotificationDto { sequence: u64, clock: SceneClockDto,
     ship: Option<KinematicsDto>, arrival: Option<SceneArrivalDto>,
     bodies: Vec<SceneBodyDto>, craft: Option<Vec<SceneCraftDto>> }
@@ -1442,15 +1444,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   `sequence` that is not a whole number, and a galactic position whose offsets leave `[0, 1 ly)`. A
   fault, like a sequence error, leaves the model as it was; `useScene` (R03.T14) resubscribes on
   either. _Closed: R03.T8.a's `SceneStateDto` gained an optional `tidal_radius_m`, present
-  whenever `system` is (its as-built note below; the README's row says so)._ **Open, pending the
-  owner (no task owns it yet):** `tidal_radius_m` comes only with an
-  arrival, and `SceneStateDto` has none, so a client that subscribes while the scene is already in
-  a system has `tidalRadiusM: null` until the next arrival, and R02.T17's clamp has nothing to read;
-  the README's row for R02's ask reads "met" but is only partly met. The likely fix is an optional
-  `tidal_radius_m` on `SceneStateDto` (the README puts it "not on `SceneSystemDto`"), added on the
-  server with R03.T8.a. The scene's messages carried no system designation either, so `useScene`
-  needed a designation source for any system the scene arrives in: closed 2026-10-02 by a
-  delegated decision, R03.T16 adds `place` to `SceneSystemDto`. `renderTime` holds the time at the
+  whenever `system` is (its as-built note below; the README's row says so)._ The scene's messages
+  carried no system designation, so `useScene` needed a designation source for any system the scene
+  arrives in: closed 2026-10-02 by a delegated decision, R03.T16 adds `place` to `SceneSystemDto`. `renderTime` holds the time at the
   clock window's edge, ±H, as the server's clock stops there, and never runs back for a frame
   stamped before its push. `predictedPath(craft, untilS)` takes `untilS` as scene seconds after the
   pose's time (a `RangeError` for one negative or not finite) and returns the straight line as its
@@ -1558,7 +1554,8 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   as an `Option` and lent to each pool job rather than cloned; the task keeps only the planetary
   systems of the scene's system and the ship's frame. A large notification is serialised with
   `try_submit` and on the runtime when the pool's queue is full, so that the connection never
-  waits for room and goes on reading (from the T8.a review). The slow-reader test is a unit test
+  waits for room in the pool (from the T8.a review). It still awaited the job inline, so the
+  connection stopped reading while the job queued; fixed in the RM1 validation (see Risks). The slow-reader test is a unit test
   (`scene/topic.rs`, through `Harness::start_configured` and a handler that answers requests by
   script and subscriptions by the server's topic): with the writer stuck past a heartbeat, the
   queue's bytes do not grow, and the next notification after the clogging response is numbered
@@ -1663,8 +1660,8 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   for a push carrying a setting's ship, the ship's time, since a setting restarts the clock there
   (the test's continued settings lie a few milliseconds of real time behind the server's line). No
   server change. Run 15 times in a row and 40 times as 20 concurrent copies (load average over 20):
-  no failure. The owner's open point above, whether a merged arrival should state its own clock,
-  stands.
+  no failure. Whether a merged arrival should state its own clock was decided on 2026-09-30 (the
+  "T8 and T9 after review" note above): each record states its own time, as Design note 5 has it.
 - **Deviations in T14, as built.** `useScene(universe, { detail, designate })` reads the request
   client and the link's status from `useServerLink()`, as the app's other server hooks do, rather
   than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open
@@ -1867,3 +1864,55 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
   12,644 / 11,226 B at `contact`, 17,412 / 20,988 / 19,251 B at `mass_and_orbit` and 30,917 /
   59,438 / 100,649 B at `bulk` and `full`, the `mass_and_orbit` and `bulk` sizes having grown since
   T15 by plan 14's drifting elements (P14.T45), not by the place.
+- **Fixed in RM1 validation (2026-10-02): the connection reads on while an arrival is
+  serialised.** `flush_pushes` awaited `serialise_on` inline, so while an arrival's job queued
+  behind other interactive jobs (galaxy builds among them) the connection's `select!` stopped:
+  `ping`, `cancel` and the close went unread. The serialisation is now a future the connection owns
+  (`Connection::serialising`, one at a time) and polls in its `select!` after frames; the
+  subscription is marked `Outgoing::Serialising` meanwhile, so it sends nothing else and is not
+  ended before it (`next_failed` counts it pending). `serialise_on` takes the pool by `Arc` so the
+  future borrows nothing, and cancels its job if dropped while the job is still queued (the
+  connection closed, or the subscription ended). Tests:
+  `subscriptions::tests::ping_is_answered_while_an_arrival_waits_behind_a_busy_pool` (the
+  harness's one worker held by a slow job; fails after 60 s on the old code) and
+  `an_arrival_whose_subscription_ends_while_it_is_serialised_is_dropped_and_frees_the_next`.
+- **Fixed in RM1 validation (2026-10-02): a slow reader's arrival is serialised once.** A pending
+  arrival that found no room was restored to the pending push and serialised again on every wake
+  (about 1 Hz from the heartbeat, 64 Hz once craft exist). A serialised notification without room
+  now waits as it is (`Outgoing::Waiting`, its frame and body kept), and each wake only compares
+  its length with the queue's room. Once there is room it is sent as serialised if nothing merged
+  since, or folded with what merged since and serialised again once, under the same sequence, so
+  a slow reader still gets one fuller notification (`Subscriptions::next_step` and `offer` replace
+  `next_unsent`, `sent` and `not_sent`). Tests: `an_arrival_without_room_is_serialised_once_and_folded_with_later_changes_once_it_has_room`,
+  `a_waiting_notification_with_nothing_merged_since_is_sent_as_it_was_serialised`,
+  `a_second_arrival_stays_pending_while_one_is_being_serialised`.
+- **Fixed in RM1 validation (2026-10-02): a topic task that panics ends its subscription.** The
+  task's `JoinHandle` was dropped (only an `AbortHandle` kept), so a panic in it, reachable through
+  an injected `CraftSource` or `SceneKnowledge`, left the subscription silent and holding its
+  slot. `scene::topic::spawn` now runs the task under `catch_unwind`, logs the panic and calls
+  `Pusher::fail(internal)`, so the client gets `subscription_ended` after the last push and the
+  slot is freed; the subscription's `TaskSlot` keeps the task's `JoinHandle` (aborted when the
+  subscription ends). Test: `scene::topic::tests::a_topic_task_that_panics_ends_its_subscription_internal`.
+- **Fixed in RM1 validation (2026-10-02): a `valid_until` not after its own time is not kept.**
+  `Sent::of` takes the time the body was evaluated at and drops a `valid_until` at or before it,
+  which would otherwise make `next_due` name a past time and wake the topic again and again
+  (hardening against a simulation fault; not observed).
+- **Fixed in RM1 validation (2026-10-02): `useScene` and the protocol client survive malformed
+  messages.** The resubscription count now restarts whenever the effect opens the scene (the
+  link's return included), so a scene given up before the link dropped has its full count after.
+  The adapter faults a state or notification with no clock, ship, craft list or bodies list, and
+  `useScene` takes a `TypeError` from a message malformed deeper than that as a fault too (any
+  other error is a bug and is thrown on): the opening is refused as `unusable` and unsubscribed,
+  the push resubscribes. In `@hyperion/protocol`, a `subscription_ended` whose `error` is not a
+  request error with a known code ends the subscription as `internal` with a reason of the
+  client's own, and a `subscribe` answer whose state has no `topic` settles as
+  `protocol_violation` and unsubscribes, instead of throwing in the socket's listener and leaving
+  the outcome unsettled.
+- **Fixed in RM1 validation (2026-10-02): client limits on a bulk transfer.** `BulkAssembler`
+  fails a request at once when a chunk states more than `MAX_BULK_CHUNKS` (257) chunks or its
+  chunks carry more than `MAX_BULK_PAYLOAD_BYTES` (64 MiB, four times R09's coarse field of about
+  15 MiB). The manifest, which states the real size, arrives only with the terminal response, so
+  the limits are fixed rather than taken from it; a kind that needs more raises them.
+- **Fixed in RM1 validation (2026-10-02): cleanups.** `#[must_use]` on `Ready::empty`, `welcome`,
+  `End::close_frame` and `Stream::new`; `ScenePush::merge` indexes the earlier bodies by ID once
+  instead of searching them for each later body; a stray TSDoc line above `CLOCK_WINDOW_S` removed.
