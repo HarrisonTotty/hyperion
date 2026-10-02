@@ -23,6 +23,14 @@ function modelOf(state: Parameters<typeof toSceneModel>[0]): SceneModel {
   return result.model;
 }
 
+/** The model with its system's tidal radius unsent, as a server that does not send it gives it. */
+function withoutTidalRadius(model: SceneModel): SceneModel {
+  if (model.system === null) {
+    throw new Error("the fixture's model holds no system");
+  }
+  return { ...model, system: { ...model.system, tidalRadiusM: null } };
+}
+
 function snapshot(status: SceneStatus, model: SceneModel | null): SceneSnapshot {
   return { status, model, cameraFault: null };
 }
@@ -68,6 +76,22 @@ describe("where the server's scene stands", () => {
         standing: "waiting",
       },
     });
+  });
+
+  it("is not drawn, a kept scene standing in, when the system's tidal radius was not sent", () => {
+    const model = withoutTidalRadius(modelOf(stateAfterHeartbeat()));
+    const live = snapshot({ kind: "live" }, model);
+    expect([serverSceneStanding(live), viewProvenance(SERVER_SCENE_NAME, live)]).toEqual([
+      {
+        drawable: false,
+        stale: false,
+        annunciation: {
+          text: "SCENE NOT AVAILABLE: the system's tidal radius was not sent",
+          standing: "fault",
+        },
+      },
+      "kept",
+    ]);
   });
 
   it("is not drawn once refused or unanswered, even with a scene held", () => {

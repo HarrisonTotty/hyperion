@@ -313,6 +313,15 @@ describe("the server's scene as the view draws it", () => {
     expect([serverSceneGap(model), serverSceneAtPush(model, PLACE)]).toEqual(["no_system", null]);
   });
 
+  it("cannot be drawn when the system's tidal radius was not sent", () => {
+    const model = modelOf(stateNearEarth());
+    if (model.system === null) {
+      throw new Error("the fixture's model holds no system");
+    }
+    const unsent = { ...model, system: { ...model.system, tidalRadiusM: null } };
+    expect([serverSceneGap(model), serverSceneGap(unsent)]).toEqual([null, "no_tidal_radius"]);
+  });
+
   it("is drawn at frameAt(nowMs) each frame", () => {
     const model = modelOf(stateNearEarth());
     const first = sceneOf(model, frameOf(model));
