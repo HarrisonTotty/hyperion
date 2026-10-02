@@ -8,6 +8,8 @@ export interface ViewLabelBlockProps {
   readonly lines: ReadonlyArray<LabelLine>;
   /** Steady statements while their conditions hold: `POSITIONS AS SEEN FROM SHIP` and the rest. */
   readonly statements: ReadonlyArray<string>;
+  /** The interim stars' count line (`STARS 1,204 DRAWN · …`), or `null` before an answer. */
+  readonly countLine: string | null;
   /** A graphics fault standing while the view draws (`GRAPHICS DEVICE LOST: re-creating`), or `null`. */
   readonly fault: string | null;
 }
@@ -21,9 +23,11 @@ export interface ViewLabelBlockProps {
  * Each reading is an `output`; none is announced as it changes, since they change continuously. A
  * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"). A
  * graphics fault is set as `StatusLine`'s fault, in `--status-caution`, apart from the steady
- * statements (the guide's "Alerts": a console's report on its own graphics is never an alert).
+ * statements (the guide's "Alerts": a console's report on its own graphics is never an alert). The
+ * stars' count line is a reading of numbers, so an `output` in B612 Mono (the guide's
+ * "Typography"), not a statement.
  */
-export function ViewLabelBlock({ lines, statements, fault }: ViewLabelBlockProps) {
+export function ViewLabelBlock({ lines, statements, countLine, fault }: ViewLabelBlockProps) {
   return (
     <div className="view-label">
       <p className="view-label__class">VIEW</p>
@@ -45,6 +49,11 @@ export function ViewLabelBlock({ lines, statements, fault }: ViewLabelBlockProps
           {statement}
         </p>
       ))}
+      {countLine === null ? null : (
+        <p className="view-label__count">
+          <output aria-live="off">{countLine}</output>
+        </p>
+      )}
       {fault === null ? null : <StatusLine text={fault} standing="fault" />}
     </div>
   );

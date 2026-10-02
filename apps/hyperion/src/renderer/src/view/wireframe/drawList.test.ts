@@ -13,6 +13,7 @@ import {
   NO_TURN,
 } from "../../test/viewFixtures";
 import type { CameraPose } from "../camera/pose";
+import { quaternionFromAxisAngle } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
@@ -210,6 +211,19 @@ describe("buildWireframeDrawList", () => {
   it("labels another craft's mark with its range", () => {
     const craft = build().anchors.filter((anchor) => anchor.target.kind === "craft");
     expect(craft.map((anchor) => anchor.label?.kind)).toEqual(["target"]);
+  });
+
+  it("anchors no mark that is in front of the camera but outside the view", () => {
+    // Turned 40° about +y: the other craft, 3° off the old axis, falls outside the 60° field.
+    const turned: DrawCamera = {
+      ...CAMERA,
+      pose: {
+        ...CAMERA.pose,
+        orientation: quaternionFromAxisAngle(vec3(0, 1, 0), (40 * Math.PI) / 180),
+      },
+    };
+    const list = buildWireframeDrawList(scene(), turned, VIEWPORT, TOKENS, OPTIONS);
+    expect(list.anchors.some((anchor) => anchor.target.kind === "craft")).toBe(false);
   });
 
   it("names a body drawn as its symbol, and no body drawn larger", () => {

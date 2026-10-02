@@ -33,7 +33,14 @@ export const PARSEC_M = (648_000 / Math.PI) * 149_597_870_700;
  */
 export const PSF_SIGMA_PX = 0.64;
 
-/** The side of the square of pixels a star's light is spread over, px: 7, ±3 about its pixel. */
+/**
+ * The side of the square of pixels a star's light is spread over, px: 7, ±3 about its pixel.
+ *
+ * @remarks
+ * Plan R02, Design note 10's point-spread function: at σ = {@link PSF_SIGMA_PX}, ±3.5 px about the
+ * star's pixel centre holds all but 2.8 × 10⁻⁶ of the light, at worst, with the star at its pixel's
+ * edge, 3 px (4.7 σ) from the quad's near side in each axis.
+ */
 export const PSF_QUAD_PX = 7;
 
 /**

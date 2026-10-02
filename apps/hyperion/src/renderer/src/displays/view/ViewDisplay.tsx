@@ -24,6 +24,7 @@ import type { Anchor } from "../../spatial/drawList";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { pick } from "../../spatial/pick";
 import { useThrottledValue } from "../../spatial/useThrottledValue";
+import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import {
   flightKey,
   flightKeyAction,
@@ -60,10 +61,15 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
-import { DEFAULT_ENGINE_SOURCE, useViewEngine, type ViewEngineSource } from "./useViewEngine";
+import {
+  DEFAULT_ENGINE_SOURCE,
+  useViewEngine,
+  type ViewEngineSource,
+  type ViewEngineState,
+} from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
-import { ViewMarkLabels } from "./ViewMarkLabels";
+import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
@@ -135,7 +141,11 @@ type StageSource =
 
 interface ViewStageProps {
   readonly source: StageSource;
-  readonly engineSource: ViewEngineSource;
+  /**
+   * The view's engine, made once above the stage, so that a new scene (the server's arriving, or a
+   * kept one standing in again) remounts the stage without asking for a new adapter and device.
+   */
+  readonly engineState: ViewEngineState;
   readonly exposure: ExposureControl;
   readonly onExposureChange: (exposure: ExposureControl) => void;
   readonly easedMoves: boolean;
@@ -204,7 +214,7 @@ function initialRun(source: StageSource): ViewRun {
 
 function ViewStage({
   source,
-  engineSource,
+  engineState,
   exposure,
   onExposureChange,
   easedMoves,
@@ -221,12 +231,13 @@ function ViewStage({
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
   const reducedMotion = usePrefersReducedMotion();
-  const engineState = useViewEngine(engineSource);
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   const heldRef = useRef(new Set<string>());
+  // The marks' labels by their target's key, which the loop moves with their marks every frame.
+  const labelsRef = useRef(new Map<string, HTMLElement>());
   const inputsRef = useRef<LoopInputs>({
     exposure,
     selection,
@@ -327,6 +338,23 @@ function ViewStage({
         });
         anchors = list.anchors;
         renderer.render(view, list, camera, viewport);
+        // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10). A
+        // label whose mark this frame did not draw is hidden until the next readout removes it.
+        const placed = new Set<string>();
+        for (const anchor of anchors) {
+          const key = targetKey(anchor.target);
+          const node = anchor.label === null ? undefined : labelsRef.current.get(key);
+          if (node !== undefined) {
+            node.style.transform = markLabelTransform(anchor, ratio);
+            node.style.visibility = "";
+            placed.add(key);
+          }
+        }
+        for (const [key, node] of labelsRef.current) {
+          if (!placed.has(key)) {
+            node.style.visibility = "hidden";
+          }
+        }
       }
       if (nowMs - publishedMs >= READOUT_INTERVAL_MS) {
         publishedMs = nowMs;
@@ -396,6 +424,14 @@ function ViewStage({
     heldRef.current.clear();
   };
 
+  const placeLabel = useCallback((key: string, node: HTMLElement | null): void => {
+    if (node === null) {
+      labelsRef.current.delete(key);
+    } else {
+      labelsRef.current.set(key, node);
+    }
+  }, []);
+
   const ratio = size?.devicePixelRatio ?? 1;
   const onPick = (xPx: number, yPx: number): void => {
     const remPx = size?.remPx ?? 16;
@@ -443,14 +479,12 @@ function ViewStage({
                 devicePixelRatio={ratio}
                 rows={rows}
                 stale={server?.stale === true}
+                labelRef={placeLabel}
               />
               <ViewLabelBlock
                 lines={labelLines(shown.run, exposure, server?.stale === true)}
-                statements={
-                  countLine === null
-                    ? labelStatements(shown.run)
-                    : [...labelStatements(shown.run), countLine]
-                }
+                statements={labelStatements(shown.run)}
+                countLine={countLine}
                 fault={fault}
               />
             </ViewCanvas>
@@ -482,6 +516,8 @@ function ViewStage({
           preset={shown.run.camera.preset}
           offered={offeredPresets(cameraSceneOf(shown.run.scene))}
           fovDeg={shown.run.camera.fovDeg}
+          rateStep={shown.run.camera.free.rateStep}
+          maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
           easedMoves={easedMoves}
           reducedMotion={reducedMotion}
           onAction={command}
@@ -525,6 +561,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
     throw new Error("the VIEW display is rendered outside a ViewSceneProvider");
   }
   const { scene, sceneName, keptName, knownSystem, choose } = host;
+  const engineState = useViewEngine(engineSource);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
   const [easedMoves, setEasedMoves] = useState(false);
   const universe = useUniverse().open?.id ?? null;
@@ -607,7 +644,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
       <ViewStage
         key={server === null ? option.name : SERVER_SCENE_NAME}
         source={server === null ? { kind: "kept", option } : { kind: "server", server }}
-        engineSource={engineSource}
+        engineState={engineState}
         exposure={exposure}
         onExposureChange={setExposure}
         easedMoves={easedMoves}

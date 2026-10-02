@@ -96,16 +96,19 @@ export function aCameraScene(
     body: FIXTURE_PLANET,
     m: vec3(2e7, 0, 0),
   };
+  const origins: CameraScene["origins"] = {
+    systemBarycentre: () => barycentre,
+    bodyCentreM: (body) =>
+      body === FIXTURE_MOON ? FIXTURE_MOON_CENTRE_M : FIXTURE_PLANET_CENTRE_M,
+    bodyFixedRotation: () => null,
+    craftPosition: () => shipAt,
+  };
   return {
     system: FIXTURE_SYSTEM,
     tidalRadiusM: FIXTURE_TIDAL_RADIUS_M,
-    origins: {
-      systemBarycentre: () => barycentre,
-      bodyCentreM: (body) =>
-        body === FIXTURE_MOON ? FIXTURE_MOON_CENTRE_M : FIXTURE_PLANET_CENTRE_M,
-      bodyFixedRotation: () => null,
-      craftPosition: () => shipAt,
-    },
+    origins,
+    // The fixtures draw no body apparent: selection measures from the same centres.
+    selectionOrigins: origins,
     frameBodies: [
       { id: FIXTURE_PLANET, parent: null, hillRadiusM: FIXTURE_PLANET_HILL_M },
       { id: FIXTURE_MOON, parent: FIXTURE_PLANET, hillRadiusM: FIXTURE_MOON_HILL_M },

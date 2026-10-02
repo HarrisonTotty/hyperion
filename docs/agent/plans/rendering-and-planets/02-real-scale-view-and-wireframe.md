@@ -384,10 +384,13 @@ the call sites here change.
    A body's occluder sphere, which writes its own depth (`occluderSphere.wgsl`), takes the same
    slope term in the fragment: its exact ray-sphere depth is pushed away by `SLOPE_SCALE` = 3 px
    (w_max ÷ 2 + 1 for a 1.5 px stroke with 1 px casings, rounded up) of the depth's screen slope,
-   taken from the tangent plane at the hit point. The 4 × 10⁻⁶ margin alone keeps only a graticule
+   taken from the tangent plane at the hit point, its magnitude (the gradient's length, not its larger
+   component, which falls up to √2 short where the gradient runs diagonally; corrected in RM1
+   validation). The 4 × 10⁻⁶ margin alone keeps only a graticule
    stroke's centreline in front. Near the limb the slope, and with it the push, grows without
    bound, but a line behind the body lies at least the sphere's chord 2R cos θ behind the front
-   surface. The push exceeds that chord only within `SLOPE_SCALE` ÷ 4 = 0.75 px of the limb (for
+   surface. The push exceeds that chord only within `SLOPE_SCALE` ÷ 4 = 0.75 px of the limb, in every
+   direction, the bound being computed from the radial slope, which is the gradient's length (for
    small discs; less for large ones, 0.38 px for a disc filling the view), where a line passing
    behind the body may overrun the limb by less than a pixel. That is inside the antialiasing
    fringe, and is accepted (decided 2026-10-01, delegated decision).
@@ -657,7 +660,7 @@ acceptance for each is `pnpm format:check` and the quoted strings found by `grep
   image, never on symbology or chrome. Grep: `rendered image is data`, `plate`.
 - **R02.T2.c Items 6 and 7: exposure and limited detail.** In "Data states" and "Controls and
   commanding": the exposure as a value with its unit (`EV100`) and automation level (`AUTO`, `MAN`,
-  `INHIBITED`, with Design note 11's meanings: who inhibited it and why, `INHIBIT` and `ENABLE` as
+  `INHIBITED`, with Design note 11's meanings: who inhibited it and why, `ENABLE` and `INHIBIT` as
   the commands, a system inhibit resuming by itself and an operator's not); `TERRAIN: STREAMING` and
   `TERRAIN: DETAIL LIMITED` as steady annunciations in `--text` on the label block's plate, neither
   a data state nor an alert, with no status colour and never the word "degraded". Grep: `EV100`,
@@ -821,9 +824,12 @@ Design note 22 differenced as (p − craft) − offset.
 
 **R02.T7.b Depth constants, ordering and transparent layers.** `view/depth/`: the constants,
 `separable`, `occluderRadius` (Design note 5), and `transparentLayerOrder`: opaque first; then per
-body, back to front by the distance of the body's centre; within a body, the shells below the camera
-by ascending altitude, then the planes (rings), then the shells above by descending altitude; every
-transparent layer tests depth and writes none (brainstorm, "Depth"). R08 and R11 consume it.
+body, back to front by the distance of the body's centre; within a body, the shells above the camera
+by descending altitude, then the planes (rings), then the shells below the camera by ascending
+altitude; every transparent layer tests depth and writes none (brainstorm, "Depth"). Every shell
+above the camera is farther along a shared ray than every shell below it, so the above group goes
+first; the rings' place between the groups is a heuristic. (Corrected in RM1 validation: the text
+first had the two groups the other way round.) R05, R07, R08 and R11 consume it.
 
 - Tests: surfaces 1 m apart are separable to 10⁶ m and 1 km apart to 10⁹ m (Reed 2015 through the
   brainstorm); `occluderRadius` keeps a graticule point on the front hemisphere at least 4 × 10⁻⁶ d
@@ -1046,7 +1052,7 @@ the draw list's anchors, as plan 05's `pick` does.
 
 **R02.T15.c The label block and the exposure instrument.** `ViewLabelBlock` with Design note 16's
 lines at 4 Hz through `useThrottledValue`; the exposure panel showing `EV100 −1.0 MAN` with its
-triple, `AUTO` unavailable with its reason, `INHIBIT` and `ENABLE` as its commands and the
+triple, `AUTO` unavailable with its reason, `ENABLE` and `INHIBIT` as its commands and the
 `INHIBITED` reading with who set it; camera controls for preset, target and field of view, each a
 button reachable by keyboard with its key shown.
 
@@ -1136,8 +1142,34 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
 - The TypeScript twin of the body-frame rule agrees with every line of the sim's golden, and the
   golden passes on wasip1 (`just test-wasm` by hand, or in `just ci` once R04.T7 lands).
 - The SwiftShader smoke test (R02.T14.c) completes a frame of each kept scene with only finite
-  texels.
+  texels. Since RM1 validation the harness also checks, on the run's adapter, that a sphere
+  occluder's depth at a diagonal texel is pushed by its slope's magnitude (within a tenth of the
+  difference from the old larger-component form), and that a star sprite at (32.3, 20.8) px peaks in
+  its own pixel, lights nothing outside its 7 × 7 quad, and sums to `spriteToneCurve` of its
+  PSF-weighted colour within 0.5 %: twelve R02 checks in all.
 - The recorded runs of R02.T18, below. No golden image is stored anywhere.
+- **R02.T16.a's census, measured 2026-10-02** (RM1 validation m4), at generator version 18, build
+  e4c5cfc, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000` at the
+  Sun-like point [0, 26,000, 0] ly and time 0, through the server's own `systems_in_range` path
+  (`range_query`, `range_brief`, `systems_in_range`) with `limit` 20,000 and `include_stellar`, by
+  a scratch test that was not committed. The counts are exact for the seed; the times were taken
+  on the shared machine, a release build, and stay provisional.
+
+  | Query         | Layers included (expected → returned)                           | Rows   | With V | Range query | Briefs   |
+  | ------------- | --------------------------------------------------------------- | ------ | ------ | ----------- | -------- |
+  | `e` to 620 ly | E 15,160 → 15,189                                               | 15,189 | 11     | 42 ms       | 2,730 ms |
+  | `d` to 360 ly | D 11,349 → 11,411; E 3,138 → 3,126                              | 14,537 | 306    | 36 ms       | 2,218 ms |
+  | `c` to 210 ly | C 11,260 → 11,131; D 2,310 → 2,318; E 639 → 628                 | 14,077 | 7,318  | 32 ms       | 923 ms   |
+  | `a` to 60 ly  | A 1,074 → 1,013; B 190 → 198; C 267 → 260; D 55 → 54; E 15 → 22 | 1,547  | 1,387  | 7 ms        | 30 ms    |
+
+  Merged by ID: 38,942 rows, 8,794 drawn (with `absolute_v_mag`) and 30,148 without, of which
+  **1,371 are at V ≤ 6.5** (V = M_V + 5 log₁₀(d ÷ 10 pc), no extinction), against about 9,000 in
+  the real sky: the thin sky Design note 19 expects. Every layer each query asks for is included,
+  none `over_limit`, so no retry is made near the Sun. The `e` and `d` rows are mostly remnants,
+  which have no V, and their briefs dominate the time (2.7 s for the `e` query's 15,189 rows,
+  about 0.18 ms a row). Design note 19's measurement at version 15 agrees: its 19,992 E systems at 683 ly,
+  scaled by r³ to 620 ly, give about 14,960, within 1.5 % of the 15,160 expected here.
+
 - The owner has answered each of R02.T2's drafts; until then they stand as drafts and the client is
   built to them.
 
@@ -1524,7 +1556,8 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   the occluder radius, differenced in `f64`), and the intersection is t = altitude × (D + r) ÷ (b +
   √h²), free of cancellation near the body. Its written depth is then pushed away by three pixels'
   worth of its own screen slope, taken in closed form from the tangent plane at the hit point (a
-  slope term like the hull faces', `SLOPE_SCALE` = 3 for a 1.5 px stroke with its 1 px casings and
+  slope term like the hull faces', its magnitude since RM1 validation, `SLOPE_SCALE` = 3 for a
+  1.5 px stroke with its 1 px casings and
   fringe): the 4 × 10⁻⁶ margin of Design note 5 holds a graticule's centreline in front of its
   occluder but not its width, and without the term the inner half of every obliquely seen graticule
   stroke failed the depth test (found by the plan-conformance review; checked on both adapters, the
@@ -1579,7 +1612,8 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   tone curve as a compute twin (`agx` of a grey, 64 luminances from 10⁻⁶ to 10³, read back and
   compared with `toneCurve`), and the edge check at 4 × 10⁻⁵ at 1 m and 10⁸ m with a control (the
   edge behind drawn with no face) so that it cannot pass vacuously. The sprite placement and the
-  sphere occluder's ray depth stay the scratch pages' (not repeated in the harness). `just
+  sphere occluder's ray depth were first checked by scratch pages; since RM1 validation (m2, m3) the
+  harness checks both (below). `just
 test-render` passes on SwiftShader, both variants: the tone curve within 4.6 × 10⁻⁷, the near face
   at depth 0.99989 above and 0 below.
 - **Deviations in R02.T15, as built.** `DisplayId` gains `view` (`View`, `F4`). The display's
@@ -1612,7 +1646,7 @@ test-render` passes on SwiftShader, both variants: the tone curve within 4.6 × 
   `ViewMarkLabels` sets them as DOM labels on `--surface-0` plates beside the marks, the range as
   the list writes it and the closure signed in m/s. The exposure panel is `ExposurePanel` (not
   `ExposureControl`, the photometry's type): the reading, the `MAN` triple (`APERTURE`, `SHUTTER`,
-  `ISO`) and the congruent pair `INHIBIT`/`ENABLE`, each held back (`aria-disabled`, keeping focus)
+  `ISO`) and the congruent pair `ENABLE`/`INHIBIT` (in that order since RM1 validation), each held back (`aria-disabled`, keeping focus)
   with its reason (`NOT AVAILABLE: the exposure is MAN`, …); there is no `AUTO` button (the guide's
   "Controls and commanding" commands automation by the pair), and `AUTO NOT AVAILABLE: NO IMAGE TO
 METER` stands while there is no image to meter. The triple is not editable yet, so a change of
@@ -1652,11 +1686,10 @@ src/renderer/src/displays/view src/renderer/src/App.test.tsx`. By hand (scratch 
   `aStarRow` fixture is not added: the tests build rows with galaxy plan 05's `aSystemsInRange` and
   `aStellarBrief`. The display's tests now render it inside `ServerLinkHarness`, `UniverseProvider`
   and the `UNIVERSE` panel (to open a universe), and one answers the four queries with a star
-  straight ahead of the seat and finds a sprite draw and the count line. **Pending, on a quiet
-  machine:** re-measuring the four queries' census counts and server times on the Milky Way fixture
-  near the Sun (the `e` query's brief-building time included) and counting the rows at V ≤ 6.5, for
-  Verification; not run here, the machine being shared (the counts are exact and could be taken
-  under load, the times not), so Design note 19's figures stand as provisional.
+  straight ahead of the seat and finds a sprite draw and the count line. The four queries' census
+  counts and the rows at V ≤ 6.5 were taken in RM1 validation (m4) and are in Verification.
+  **Pending, on a quiet machine:** the server times, the `e` query's brief-building time included;
+  those in Verification were taken under shared load and stay provisional.
 - **Deviations in R02.T17, as built.** `view/scene/fromServer.ts` turns R03's client scene into a
   `ViewScene`: `viewSceneFromServer(model, frame, place)` over `sceneAt`'s `SceneFrame` (R03.T13's
   apparent positions: the ship's local body at its `geometricM`, every other body and star at its
@@ -1729,3 +1762,135 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   `CAMERA REPORT UNANSWERED` and `OWN SHIP`, marked `_Draft (plan R02, R02.T17, nomenclature)…_`
   for the owner. **Pending by eye:** the status line, `RETRY` and the muted stale readings in the
   running client, at 1920 × 1080 and 1280 × 720.
+- **Fixed in RM1 validation (2026-10-02): R02.T7.b's transparent-layer order (M1).** The text and
+  `transparentLayerOrder` drew a body's shells below the camera first and its shells above it last,
+  so a high cloud deck and the air were composited over the nearer low deck. Along any ray that meets
+  both, a shell above the camera (R ≥ d) is left only after a shell below it (r < d) is met, since
+  |p|² is convex along the ray, starts at d² and is r² < d² at the lower hit: every shell above is
+  farther. The order is now the shells above the camera by descending altitude, then the planes
+  (rings), then the shells below by ascending altitude; the rings' place between the groups is a
+  heuristic, noted in R11's Consumes. The task text, R11's Consumes and the README's asks between
+  plans say so; `depth.test.ts` pins the new order and checks it against each shell's crossing
+  distance along a ray.
+- **Fixed in RM1 validation (2026-10-02): the free camera's rate is shown (M2).** The rate was
+  stepped (`PAGE UP`, `PAGE DOWN`) but shown nowhere, and `changeFreeRate` clamped silently at
+  both ends, against the guide's "Elements with states or modes always show the current one". The
+  camera panel now reads it in B612 Mono at the readouts' 4 Hz, `RATE 1.00 km/s` (`freeRateReading`:
+  three significant figures, m/s below 1 km/s and km/s from there), and at either end of its steps
+  says `NOT AVAILABLE: PAGE DOWN, RATE at its lowest step` or `NOT AVAILABLE: PAGE UP, RATE at its
+highest step`, naming the key held back as the field of view's ends name theirs; the reading is
+  17ch wide, for the galactic scene's top step, `RATE 3.16E11 km/s`.
+  No `SLOWER`/`FASTER` buttons were added, since they would be new nomenclature; the guide's draft
+  `RATE` row now also names the readout, for the owner with the rest of that row.
+- **Fixed in RM1 validation (2026-10-02): the list's `KIND` names (M3).** The column showed code
+  values: an unresolved contact read `UNRESOLVED`, overflowing its 7ch column, and a dwarf planet
+  read `PLANET`, because `viewKind` folded `dwarf_planet` into `planet`. `ViewBodyKind` gains
+  `dwarf_planet` (drawn as the planet's inverted triangle at the floor size class), and the list
+  names each kind by `BODY_KIND_NAMES`, the guide's `KIND` row: `PLANET`, `DWARF PLANET`, `MOON`,
+  `UNRESOLVED CONTACT` (and `STAR`, `CRAFT`). The column is 12ch, which holds `DWARF PLANET` (11.6ch in
+  B612), and `UNRESOLVED CONTACT` alone breaks at its space onto a second line of the 2rem row (a
+  choice of the fix, to keep the designation's column; pending by eye with the rest of T15, two such
+  rows running together especially).
+- **Fixed in RM1 validation (2026-10-02): frame selection measures from geometric centres (m1).**
+  `sceneFrameFor` measured each candidate's distance from `origins.bodyCentreM`, which in a server
+  scene is the body's apparent position for every body but the ship's local one, against Design
+  note 6's "geometric and present … never apparent". `CameraScene` gains `selectionOrigins`, the
+  scene's origins with every body at its geometric centre: `ViewBody` gains an optional
+  `geometricCentreM`, which `viewSceneFromServer` sets to `sceneAt`'s `geometricM` for each placed
+  body it draws apparent, and `cameraSceneOf` builds `selectionOrigins` from it
+  (`sceneOrigins(scene, "geometric")`). The camera is placed where the view draws it, by the drawn
+  origins, the same point whatever frame its pose is held in, and only the candidates' centres are
+  geometric. (A first version placed the pose from its own frame's geometric origin; the review found
+  that a camera then moved on entering a light-shifted moon's frame, by up to about four Hill radii
+  for Io, and left and re-entered it every step.) A camera hovering at a drawn moon whose light-time
+  shift passes its Hill radius is therefore not in that moon's frame: frame selection then follows
+  where the moon is, not where it is seen, which costs no precision since positions are differenced
+  in `f64`. Drawing, the rebase on a change of frame and the camera report use the drawn origins.
+  Tested in `state.test.ts` (a moon drawn 10⁸ m from where it is: the same drawn point selects the
+  planet whether its pose is held in the system frame or the moon's) and `fromServer.test.ts`.
+  **For the owner:** this keeps Design note 6's "never apparent" literally; the other choice is to
+  measure in drawn space and amend the note to say the camera's twin uses drawn positions.
+- **Fixed in RM1 validation (2026-10-02): the no-tidal-radius branch is tested (m5).**
+  `serverScene.test.ts` now has a live scene whose system's tidal radius was not sent: it is not
+  drawn, reads `SCENE NOT AVAILABLE: the system's tidal radius was not sent` as a fault, and
+  `viewProvenance` gives `kept`, so the kept scene stands in; `fromServer.test.ts` has the
+  matching `serverSceneGap` case, `no_tidal_radius`.
+- **Fixed in RM1 validation (2026-10-02): two citations (m11).** `body_frame.rs`'s Pluto and Charon
+  test values now cite the NASA Pluto fact sheet (Pluto's heliocentric orbit) and Brozović et al.
+  2015, Icarus 246, 317 (the masses and Charon's orbit), as the Earth and Moon helper cites its
+  fact sheets; `PSF_QUAD_PX` states its reason, Design note 10's point-spread function: at σ =
+  0.64 px, ±3.5 px about the star's pixel centre leaves out at most 2.8 × 10⁻⁶ of the light, with the
+  star at its pixel's edge, 3 px (4.7 σ) from the quad's near side in each axis.
+- **Fixed in RM1 validation (2026-10-02): `ENABLE` before `INHIBIT` (m9).** The exposure panel
+  offered `INHIBIT` first, while the guide's general rule gives congruent pairs "in a consistent
+  order", `ENABLE`/`INHIBIT`; the guide's own exposure bullet and its draft nomenclature row said
+  `INHIBIT` and `ENABLE`, against that rule. Following the general rule, the panel now offers
+  `ENABLE` then `INHIBIT` (tested in `ViewDisplay.test.tsx`), and the guide's exposure bullet and
+  row, this plan's T15 text and the panel's TSDoc name the pair in that order. The row stays a draft
+  for the owner. **For the owner:** the exposure bullet in "Controls and commanding" is not a draft,
+  and was changed here only to agree with the guide's own pair rule; it awaits the owner's
+  confirmation with the row.
+- **Fixed in RM1 validation (2026-10-02): the marks' labels and the count line (m6, m7, m8, m10).**
+  - **`FROM CAMERA` (m6).** The canvas labels read `row.range` and dropped the qualifier the list
+    adds with no own ship; both now read `rangeText(row)`, so every range from the camera says so
+    (Design note 17).
+  - **A missing closure rate (m7).** With an own ship but an unknown velocity the label's closure
+    rate disappeared. `MarkRow` gains `closure`, a `ClosureReading` (`none`, `unknown` or `known`), computed in `markRows` by the draw list's own rule
+    (`closureRateMPerS`, now exported from `symbology.ts`): `+3.40 m/s`, `—` where a velocity is not
+    known, shown in `--text-muted` (`.readout__missing`), and nothing for a body or with no own
+    ship. The labels read it from the row, and the list's options carry it in their accessible names
+    (`closure +3.40 m/s`, or `closure not known`), since the labels are hidden from assistive
+    technology. The list shows no closure column: the 12ch `KIND` column already takes the side
+    panel's width, so a sighted operator reads the closure rate on the canvas labels (a narrowing of
+    the finding's fix, by choice). The kept scenes give their craft no velocity, so their labels now read `—`.
+  - **The count line (m8).** `STARS n DRAWN · …` was set as a statement in proportional B612; it
+    is now `ViewLabelBlock`'s `countLine`, an `output` in B612 Mono with tabular figures
+    (`.view-label__count`).
+  - **Labels follow their marks (m10).** The labels were placed from the 4 Hz published anchors,
+    so they trailed a moving camera's marks by up to 250 ms. `ViewMarkLabels` places each label
+    once as it mounts and hands it to the stage through `labelRef`; the drawing loop then moves
+    every label with its mark each frame (`markLabelTransform`), and only the text changes at 4 Hz;
+    a label whose mark that frame did not draw is hidden until the next readout removes it.
+    `ViewDisplay.test.tsx` shows a label moving between two readouts. Pending by eye with the rest
+    of T15.
+- **Fixed in RM1 validation (2026-10-02): R02.T16.a's census counts are taken (m4).** The counts
+  are exact and do not need a quiet machine, so the four queries' census, their rows with and
+  without V, and the merged count at V ≤ 6.5 (1,371) are now in Verification; only the times stay
+  pending on a quiet machine.
+- **Fixed in RM1 validation (2026-10-02): the sphere occluder's slope push (m2).**
+  `occluderSphere.wgsl` pushed by `max(slopeX, slopeY)`, which falls up to √2 short of the 2.75 px
+  `SLOPE_SCALE` is sized for where the depth's gradient runs diagonally, so the outer part of a
+  graticule stroke's inner casing could fail the depth test there. It now pushes by
+  `length(vec2f(slopeX, slopeY))`; the shader's per-pixel scale is the same on both axes, so that is
+  the magnitude in pixels. Design note 5's 0.75 px limb bound was computed from the radial slope,
+  the gradient's length, so it is unchanged and now holds in every direction (the validator's
+  estimate of 1.06 px does not apply: `max()` equalled the length only where the gradient lay along a
+  screen axis, and fell short elsewhere). `checkWireframe`'s new `checkSphereSlope` reads a diagonal
+  texel's depth and compares it with both forms computed in `f64`; on the RTX 3080 it read
+  0.02107446, the magnitude's 0.02107446, against the old form's 0.02138445.
+- **Fixed in RM1 validation (2026-10-02): a star sprite drawn on the GPU (m3).** No committed
+  check drew a sprite: the kept scenes have no stars, and `starSprite.wgsl` was only compiled.
+  `checkWireframe`'s new `checkStarSprite` draws one sprite at (32.3, 20.8) px, colour (2, 1.2, 0.8)
+  per unit weight, and against a frame with none checks that its peak is in its own pixel, that no
+  channel outside its 7 × 7 quad changes, and that the summed texels are within 0.5 % of
+  `spriteToneCurve` of the colour times each pixel's PSF weight, computed in `f64` with the shader's
+  pixel-centre convention. On the RTX 3080: summed (1.997, 1.313, 0.9607) against (1.998, 1.313,
+  0.9609).
+- **RM1 validation's GPU runs (2026-10-02), for m2 and m3.** `just test-render` on SwiftShader
+  passes in both variants with the three new checks. The whole harness, run hidden and offscreen on
+  the RTX 3080 under the client's switches, passes 78 of 78 checks in both variants (`default`,
+  `no-subgroups`) at build 1394abb. With the shader's old `max()` form put back, the slope check
+  fails on the RTX 3080 (depth 0.02138445 against 0.02107446), so it is a real regression test.
+- **Fixed in RM1 validation (2026-10-02, integration MINOR-2): no anchors outside the view.**
+  `buildWireframeDrawList` culled only marks behind the camera, so a mark in front of it but outside
+  the view still got a pickable anchor and a DOM label, laid out thousands of pixels off the stage.
+  An anchor is now kept only within the view or `ANCHOR_MARGIN_REM` (2 rem, the guide's touch
+  target) of its edge; the screen-space symbology is unchanged (the GPU clips it). Tested in
+  `drawList.test.ts` with the camera turned 40° off the other craft, which fails without the cull.
+- **Fixed in RM1 validation (2026-10-02, integration MINOR-1): the engine outlives the stage.**
+  `ViewStage`, keyed by its scene so that a new scene starts afresh, owned `useViewEngine`, so the
+  server's scene arriving (and a kept scene standing in again after a refusal or a timeout) asked
+  for a new adapter and device and showed `GRAPHICS ACQUIRING ADAPTER` for 0.25–0.5 s on the RTX 3080. The engine is now made in `ViewPanels`, above the keyed stage, and handed to it; a new scene
+  still remounts the stage, its canvas and its view, but on the same engine. Tested in
+  `ViewDisplay.test.tsx` (one engine across a change of `SCENE`, no `GRAPHICS ACQUIRING ADAPTER`),
+  which fails on the old code. Pending by eye: the switch on the live server scene.
