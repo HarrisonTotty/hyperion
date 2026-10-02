@@ -2874,7 +2874,7 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     82 checks (`default`) and 80 (`no-subgroups`), `uncaptured GPU errors 0`, no request out. The
     `default` run is on the subgroup path with `subgroup_size` 32 (minimum 32), the pending
     pipeline and mip checks pass, and the timer reads `full` with 12 of 12 pass times off the
-    65,536 ns grid.
+    65,536 ns grid. Re-run after the review fixes: the same counts on both platforms (SwiftShader 82 and 80, RTX 3080 82 and 80), `uncaptured GPU errors 0`, and on the 3080 14 of 14 pass times off the grid, the dispatches now resolved with the next frame.
   - **Review of these fixes, as built.** The typescript, UX and plan-conformance reviews' findings
     are fixed as recorded above (`ColourSelfSample` narrowed, the timer's ring and dispatch
     resolve, a failed read returning its pair, the check counts, Design note 19's wording, the
