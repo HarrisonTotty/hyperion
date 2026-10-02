@@ -347,7 +347,14 @@ pub(crate) fn scene_system(
         });
     }
     let system = assemble(wanted, hosts, ctx, planets, seed, &snapshot, bodies);
-    (SceneSystemDto { system, grants }, listed)
+    (
+        SceneSystemDto {
+            system,
+            grants,
+            place: None,
+        },
+        listed,
+    )
 }
 
 /// One body of a scene re-sent at `t` at `level`, with `seen` for a contact, and when its elements

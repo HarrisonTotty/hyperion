@@ -77,7 +77,7 @@ pub use scene::{
     BodyGrantDto, CameraReportDto, FramePositionDto, KinematicsDto, SceneArrivalDto, SceneBodyDto,
     SceneCamerasRequest, SceneClockDto, SceneClockStateDto, SceneCraftDto, SceneNotificationDto,
     SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SceneSystemDto,
-    SeenPositionDto,
+    SeenPositionDto, SystemPlaceDto,
 };
 pub use stellar::{
     BinaryClassDto, CataclysmicKindDto, HighMassXrayBinaryKindDto, KickModeDto, NatalKickDto,

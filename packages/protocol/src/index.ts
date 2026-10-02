@@ -112,6 +112,7 @@ import type { SystemBodiesDto } from "./generated/SystemBodiesDto";
 import type { SystemBodiesRequest } from "./generated/SystemBodiesRequest";
 import type { SystemExistenceDto } from "./generated/SystemExistenceDto";
 import type { SystemIdHex } from "./generated/SystemIdHex";
+import type { SystemPlaceDto } from "./generated/SystemPlaceDto";
 import type { SystemPlaneDto } from "./generated/SystemPlaneDto";
 import type { SystemRecord } from "./generated/SystemRecord";
 import type { SystemSummaryDto } from "./generated/SystemSummaryDto";
@@ -237,6 +238,7 @@ export type {
   SystemBodiesRequest,
   SystemExistenceDto,
   SystemIdHex,
+  SystemPlaceDto,
   SystemPlaneDto,
   SystemRecord,
   SystemSummaryDto,

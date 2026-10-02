@@ -177,6 +177,29 @@ pub struct SceneSystemDto {
     pub system: SystemBodiesDto,
     /// One grant per body of `system.bodies`, in the same order.
     pub grants: Vec<BodyGrantDto>,
+    /// Where the system is. The server always sends it; it is optional so that the field was an
+    /// addition (`PROTOCOL_VERSION` 2), and a client without it names the system by its ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub place: Option<SystemPlaceDto>,
+}
+
+/// Where a scene's system is: its catalogue designation and its barycentre in the galactic frame,
+/// which the scene's bodies, all in the system's frame, do not state (R03.T16).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SystemPlaceDto {
+    /// The system's catalogue designation, derived from its ID alone (plan 01), as the chart's
+    /// [`SystemRecord::designation`](crate::galaxy::SystemRecord::designation) states it. Never a
+    /// proper name, which is a later overlay and may be bounded by Knowledge.
+    pub designation: String,
+    /// The barycentre at `time`, in the `GALACTIC` frame.
+    pub barycentre: GalacticPosition,
+    /// The barycentre's velocity, m/s along the galactic axes. Systems move in straight lines, so
+    /// the barycentre at `t` is `barycentre` plus this times `t − time` (plan 08, P08.T7.a).
+    pub velocity_m_s: [f64; 3],
+    /// When `barycentre` holds: the time the system was built at.
+    pub time: UniverseTime,
 }
 
 /// A body re-sent by a notification: its record at its grant, which supersedes every earlier one.
@@ -379,7 +402,29 @@ mod tests {
                 level: DetailLevelDto::Full,
                 seen: None,
             }],
+            place: Some(place()),
         }
+    }
+
+    fn place() -> SystemPlaceDto {
+        SystemPlaceDto {
+            designation: "Vorth AB-C e4-17".to_owned(),
+            barycentre: GalacticPosition {
+                cell_ly: [-26_000, 12, 3],
+                offset_m: [4.5e15, 1.25e14, 0.5],
+            },
+            velocity_m_s: [-11_100.0, 232_240.5, 7_250.0],
+            time: time(),
+        }
+    }
+
+    fn place_json() -> Value {
+        json!({
+            "designation": "Vorth AB-C e4-17",
+            "barycentre": { "cell_ly": [-26_000, 12, 3], "offset_m": [4.5e15, 1.25e14, 0.5] },
+            "velocity_m_s": [-11_100.0, 232_240.5, 7_250.0],
+            "time": time_json(),
+        })
     }
 
     fn scene_system_json() -> Value {
@@ -394,6 +439,7 @@ mod tests {
                 "bodies": [planet_summary_json()],
             },
             "grants": [{ "body": "0200080020000000.0300", "level": "full" }],
+            "place": place_json(),
         })
     }
 
@@ -527,6 +573,23 @@ mod tests {
     #[test]
     fn a_scene_system_is_plan_14_s_answer_with_the_grants() {
         assert_wire_form(&scene_system(), scene_system_json());
+    }
+
+    #[test]
+    fn a_system_place_states_its_designation_barycentre_velocity_and_time() {
+        assert_wire_form(&place(), place_json());
+    }
+
+    #[test]
+    fn scene_system_without_place_wire_form() {
+        let mut system = scene_system();
+        system.place = None;
+        let mut json = scene_system_json();
+        json.as_object_mut()
+            .expect("the fixture is an object")
+            .remove("place");
+        // Both directions: no `place` key is written, and JSON without one reads back as `None`.
+        assert_wire_form(&system, json);
     }
 
     #[test]

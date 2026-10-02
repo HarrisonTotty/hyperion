@@ -169,7 +169,10 @@ pub struct SeenPositionDto { apparent_m: [f64; 3], emitted: UniverseTime }  // a
 pub struct BodyGrantDto { body: BodyIdHex, level: DetailLevelDto,
     seen: Option<SeenPositionDto> }                                   // Design note 13
 pub struct SceneSystemDto { system: SystemBodiesDto,   // `granted`: the level asked; each record
-    grants: Vec<BodyGrantDto> }                        // degraded to its own grant, index order
+    grants: Vec<BodyGrantDto>,                         // degraded to its own grant, index order
+    place: Option<SystemPlaceDto> }                    // R03.T16; always sent, optional to be additive
+pub struct SystemPlaceDto { designation: String, barycentre: GalacticPosition,  // R03.T16 (added
+    velocity_m_s: [f64; 3], time: UniverseTime }       // 2026-10-02 by a delegated decision)
 pub struct SceneBodyDto { level: DetailLevelDto, record: BodySummaryDto,
     seen: Option<SeenPositionDto> }                                   // a re-sent body
 pub struct SceneStateDto { sequence: u64, clock: SceneClockDto, ship: KinematicsDto,
@@ -644,7 +647,7 @@ order; T6 follows T5.a; T7 follows T3 and T6, since it evaluates contacts with `
 follows T5.b and T7; T9 follows T8. T10.a (binary frames) can start after T1 and runs beside
 T4–T9; T10.b follows T5.b and T10.a, and its heartbeat measurement follows T8.a; T11 follows
 T10.a. T12 follows T5.c; T13 follows T3, T12 and R02.T8.a; T14 follows T8, T11 and T13. T15
-closes.
+closes. T16, added 2026-10-02 by a delegated decision, follows T15 and R02.T17.
 
 ### R03.T1 Reconcile, reserve the kinds, rule question 21
 
@@ -1043,6 +1046,57 @@ unit test
 uses `FakeWebSocket` (run by hand, or in R01's headless harness if it can open a socket, and
 recorded); the envelope's state against P12.T9 for plan 12's writer. Acceptance: `just ci`; the
 figures are in the plan.
+
+### R03.T16 The system's place on the scene
+
+Added 2026-10-02 by a delegated decision (the owner's open point of T12 and T14, which R02.T17
+inherited; the record is in the Risks, "The system's place rides `SceneSystemDto`"). `VIEW` named a
+scene's system, and drew its star field, only for the system last opened on `SYSTEM`, since no
+message stated a system's designation or galactic position. The scene now states both on
+`SceneSystemDto`, which rides the state and every arrival. T16 follows T15 and R02.T17; its
+subtasks run in order. The field is optional so that it is an addition: `PROTOCOL_VERSION` stays 2
+and no kind is added.
+
+- **R03.T16.a The place on the wire.** `crates/hyperion-protocol/src/scene.rs`:
+  `SystemPlaceDto { designation, barycentre: GalacticPosition, velocity_m_s, time }`, the
+  catalogue designation only (never a proper name, a later overlay that Knowledge may bound),
+  the barycentre at `time` in the `GALACTIC` frame and its velocity along the galactic axes (the
+  barycentre at t is `barycentre` plus the velocity times t − `time`, plan 08's P08.T7.a), and
+  `SceneSystemDto.place: Option<SystemPlaceDto>` after `grants`, omitted when `None`. Re-export it
+  in `lib.rs`; regenerate the bindings with `just gen-protocol` and export the type from
+  `packages/protocol/src/index.ts`. Tests: the fixtures `scene_system()` and `scene_system_json()`
+  gain a place, so every state and arrival wire-form test carries one; a `SceneSystemDto` with no
+  place writes no `place` key and JSON without the key reads back as `None`. Acceptance:
+  `cargo test -p hyperion-protocol scene`; `just gen-protocol-check`; `just ci`.
+- **R03.T16.b The server fills it.** `crates/hyperion-server/src/convert.rs`:
+  `system_place(galaxy, record, t) -> SystemPlaceDto` (the designation as the chart's row writes it,
+  the barycentre through `position_at` and the velocity through `epoch_velocity`), which the chart's
+  row (`convert::galaxy`) shares for the designation and the position; `scene_system` leaves `place`
+  `None` and `SceneCore::arrive` sets it, so the state and every arrival carry it; the measured
+  fixture of `convert/scene_fixture.rs` carries it. Tests in `scene/core.rs`: an arrival states its
+  system's place (designation, barycentre at the arrival time, velocity and time); a state built
+  inside a system states it. In `tests/scene.rs`, `the_scene_place_agrees_with_the_chart`: the
+  place's designation and position equal `systems_in_range`'s row for the system at the place's
+  time, and its velocity the row's `velocity_km_s × 1000` within 10⁻¹² relative. Acceptance:
+  `cargo test -p hyperion-server --lib scene::core`; `cargo test -p hyperion-server --test scene`;
+  `just ci`.
+- **R03.T16.c The client reads it.** `lib/scene/model.ts`: `SceneSystem.place: SystemPlace | null`,
+  `SystemPlace` moved from `view/scene/fromServer.ts` into `lib/scene` and extended with
+  `velocityMS` and `time` (both `null` for a place known only from the chart). `sceneWire.ts` takes
+  the bodies' designation from the place when present and otherwise falls back to `designate`; a
+  barycentre whose offsets leave `[0, 1 ly)`, a velocity not finite or a malformed time is a fault.
+  `barycentreAt(place, t)` in `lib/scene` gives the barycentre drifted in a straight line from the
+  place's time. `VIEW` (`displays/view/serverScene.ts`, `ViewDisplay.tsx`) takes the scene's place
+  first, then `knownSystem` when it names the same system, then the ID; its interim star field is
+  asked at the place's own barycentre and time, once per arrival. `designate` and `knownSystem`
+  stay as the fallback for a server that sends no place. Tests: a state and an arrival with a place
+  give it and label the bodies by it; without one, `designate` and a `null` barycentre; an
+  out-of-range offset and a non-finite velocity are faults; a drift across a 1 ly cell boundary
+  renormalises the cell; a server scene in a system never opened on `SYSTEM` shows its designation
+  and asks the interim stars, and `STARS` is not "position not known". Acceptance:
+  `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`;
+  `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`;
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene`; `just ci`.
 
 ## Verification
 
