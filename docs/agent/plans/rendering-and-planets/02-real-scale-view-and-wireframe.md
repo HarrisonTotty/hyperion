@@ -1822,7 +1822,9 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   `"geometric"` mode); the camera keeps m1's placement by the drawn origins. Design note 6 is
   amended. The m1 tests are replaced: a camera 10⁷ m from a drawn moon is in the moon's frame
   whether its pose is held in the system frame or the moon's, and one turning at rest beside it for
-  100 `stepFreeCamera` steps stays in that frame at a drawn position constant to 1 mm.
+  100 `stepFreeCamera` steps stays in that frame at a drawn position constant to 1 mm;
+  `fromServer.test.ts` draws Jupiter 1.5 Hill radii from its geometric centre and a camera
+  2 × 10⁸ m from the drawn Jupiter is in its frame (it fails under m1's selection).
 - **Fixed in RM1 validation (2026-10-02): the no-tidal-radius branch is tested (m5).**
   `serverScene.test.ts` now has a live scene whose system's tidal radius was not sent: it is not
   drawn, reads `SCENE NOT AVAILABLE: the system's tidal radius was not sent` as a fault, and

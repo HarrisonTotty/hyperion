@@ -209,6 +209,33 @@ describe("the server's scene as the view draws it", () => {
     ]);
   });
 
+  it("puts a camera beside a drawn body in its frame however far it was seen from its geometric centre", () => {
+    // Jupiter seen 1.5 Hill radii from where it is: measured to its geometric centre, a camera
+    // 2 × 10⁸ m from where it is drawn would be outside its sphere (Design note 6, as amended).
+    const model = modelOf(stateNearEarth());
+    const frame = frameOf(model);
+    const index = frame.bodies.findIndex((each) => each.id === FIXTURE_JUPITER);
+    const jupiter = frame.bodies[index];
+    if (jupiter?.kind !== "placed" || jupiter.hillRadiusM === null) {
+      throw new Error("the fixture's Jupiter is not placed with a Hill radius");
+    }
+    const apparentM = add(jupiter.geometricM, vec3(0, 1.5 * jupiter.hillRadiusM, 0));
+    const shifted: SceneFrame = {
+      ...frame,
+      bodies: frame.bodies.with(index, { ...jupiter, apparentM }),
+    };
+    const scene = sceneOf(model, shifted);
+    const pose: CameraPose = {
+      frame: { kind: "system", system: FIXTURE_SYSTEM },
+      positionM: add(bodyOf(scene, FIXTURE_JUPITER).centreM, vec3(2e8, 0, 0)),
+      orientation: IDENTITY_QUATERNION,
+    };
+    expect(sceneFrameFor(pose, cameraSceneOf(scene))).toEqual({
+      kind: "body",
+      body: FIXTURE_JUPITER,
+    });
+  });
+
   it("never makes a body with no Hill radius the camera's frame", () => {
     // The Earth re-sent at `contact`, placed by the server's seen position, has none.
     const model = modelOf(stateAfterHeartbeat());
