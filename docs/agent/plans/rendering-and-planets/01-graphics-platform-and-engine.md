@@ -2693,3 +2693,14 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     (`broken-wgsl`), 1 (`external-fetch`) and 2 (`--drop-adapter-switches`). Run as
     `testRender.sh` after `pnpm --filter hyperion build`, outside the heavy-test lock, which
     another lane's slow wasm suite held.
+  - **m6, the engine's unit tests (T8.k, T8.l).** `FakeDevice` now records bind-group layouts,
+    pipeline layouts, render and compute pipelines (with `auto` layouts made on demand), shader
+    modules (whose compile errors a test chooses), samplers, bind groups, query sets and command
+    encoders whose passes log every command; views know their texture. `encoding.test.ts` drives
+    the engine against it: the `frame` and `draw` layouts (`hasDynamicOffset: true`) and
+    `[frame, draw, resources]` pipeline layouts; `Drawing.encodeFrame`'s submission order with an
+    indirect draw in place and each draw's dynamic offset (0, 256, 512); a two-pass post-process
+    chain's attachments and `hdr-colour` inputs; a compile error becoming `shader-refused` and its
+    draws left out; `MipGenerator`'s levels and timestamps; and `createWebGpuEngine`'s feature
+    request with a withheld feature. `engine.test.ts` covers the dispatch's writer recording (M1)
+    and the timer (m5, m9), and T9.h gains a GPU mip check.
