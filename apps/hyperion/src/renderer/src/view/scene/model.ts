@@ -3,6 +3,7 @@ import type { BodyIdHex, GalacticPosition, SystemIdHex, UniverseTime } from "@hy
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
 import {
+  BODY_MIN_SIZE_CLASS,
   CONTACT_SIZE_CLASS,
   MOON_SIZE_CLASS,
   PLANET_SIZE_CLASSES,
@@ -16,10 +17,10 @@ import type { Rotation3 } from "../coords/rotation";
 import type { HullOutline } from "./hull";
 
 /**
- * What a body is, as the wireframe marks it below 3 px: a planet (a dwarf planet among them), a
- * moon or a star, or an unresolved contact, whose kind the server withholds (R02.T17).
+ * What a body is, as the wireframe marks it below 3 px and the list names it: a planet, a dwarf
+ * planet, a moon or a star, or an unresolved contact, whose kind the server withholds (R02.T17).
  */
-export type ViewBodyKind = "star" | "planet" | "moon" | "unresolved";
+export type ViewBodyKind = "star" | "planet" | "dwarf_planet" | "moon" | "unresolved";
 
 /**
  * A body of the view's scene at the scene's time.
@@ -66,15 +67,20 @@ export interface BodyMarkSymbol {
 
 /**
  * The ship-wide symbol of each kind with no more known of the body (`lib/system/bodySymbols.ts`): a
- * planet the inverted triangle at a smaller planet's size, a moon the pentagon, a star the circle
- * at size class 2, an unresolved contact the hexagon. A server scene gives each body its own
- * (R02.T17: a giant's larger triangle, a host's own symbol).
+ * planet the inverted triangle at a smaller planet's size, a dwarf planet the same, its own class
+ * raised to the floor, a moon the pentagon, a star the circle at size class 2, an unresolved
+ * contact the hexagon. A server scene gives each body its own (R02.T17: a giant's larger triangle,
+ * a host's own symbol).
  */
 export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
   let symbol: BodyMarkSymbol;
   switch (kind) {
     case "planet":
       symbol = { shape: "triangle-down", sizeClass: PLANET_SIZE_CLASSES.planet };
+      break;
+    case "dwarf_planet":
+      // A dwarf planet's class, 0, is raised to the floor every body symbol is drawn at.
+      symbol = { shape: "triangle-down", sizeClass: BODY_MIN_SIZE_CLASS };
       break;
     case "moon":
       symbol = { shape: "pentagon", sizeClass: MOON_SIZE_CLASS };

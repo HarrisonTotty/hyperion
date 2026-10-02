@@ -290,6 +290,12 @@ describe("the server's scene as the view draws it", () => {
     ]).toEqual([`${FIXTURE_SYSTEM}.0000`, false]);
   });
 
+  it("keeps a dwarf planet apart from a planet", () => {
+    const model = modelOf(statePopulated());
+    const scene = sceneOf(model, frameOf(model));
+    expect(bodyOf(scene, `${FIXTURE_SYSTEM}.e001`).kind).toBe("dwarf_planet");
+  });
+
   it("cannot be drawn with the ship in no system", () => {
     const model = modelOf(stateInSpace());
     expect([serverSceneGap(model), serverSceneAtPush(model, PLACE)]).toEqual(["no_system", null]);

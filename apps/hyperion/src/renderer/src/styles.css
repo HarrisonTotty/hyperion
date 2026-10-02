@@ -3160,7 +3160,8 @@ body {
 .view-list__head,
 .view-list__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 7ch minmax(9ch, auto);
+  /* `KIND` is as wide as its longest word, `UNRESOLVED`; a two-word kind breaks at its space. */
+  grid-template-columns: minmax(0, 1fr) 12ch minmax(9ch, auto);
   align-items: center;
   gap: 0 0.375rem;
 }
@@ -3209,6 +3210,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Two lines of a two-word kind, `UNRESOLVED CONTACT` or `DWARF PLANET`, fit the 2rem row. */
+.view-list__kind {
+  line-height: 1;
 }
 
 .view-list__number {

@@ -224,6 +224,26 @@ describe("the list", () => {
     expect([again?.unit === other, kept?.unit]).toEqual([false, first.unit]);
   });
 
+  it("names each body's kind as the nomenclature does", () => {
+    const kept = frameChangeScene();
+    const kinds: ReadonlyArray<ViewBody["kind"]> = ["dwarf_planet", "unresolved"];
+    const renamed: KeptScene = {
+      ...kept,
+      sceneAt: (tS) => {
+        const scene = kept.sceneAt(tS);
+        const bodies = scene.bodies.map((body, index) => ({
+          ...body,
+          kind: kinds[index % kinds.length] ?? body.kind,
+        }));
+        return { ...scene, bodies };
+      },
+    };
+    const bodyKinds = markRows(startRun(renamed))
+      .filter((row) => row.target.kind === "body")
+      .map((row) => row.kind);
+    expect(new Set(bodyKinds)).toEqual(new Set(["DWARF PLANET", "UNRESOLVED CONTACT"]));
+  });
+
   it("labels its ranges FROM CAMERA where there is no own ship", () => {
     const kept = precisionScene();
     const shipless: KeptScene = {
