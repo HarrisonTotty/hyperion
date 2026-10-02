@@ -1678,7 +1678,9 @@ impl PlanetarySystem {
     /// For an evolving orbit it is the model's (P14.T45.a and T45.e): the time derivative of the
     /// model's position, the Kepler velocity at the model's elements then with the mean motion
     /// nᵣ + ṅ Δt plus ȧ ∂r/∂a + ė ∂r/∂e, so that a matched ship or an extrapolated state stays
-    /// with the body. `None` where `position_at` is.
+    /// with the body. That velocity is the position's derivative within a record, and it may step
+    /// at the record's `valid_until` where the host's Ṁ jumps, by up to ȧ, a few m/s on a late-AGB
+    /// superwind host (P14.T45.e). `None` where `position_at` is.
     ///
     /// # Errors
     ///

@@ -5803,9 +5803,20 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     "0.24–2.0 m s⁻¹ across 5–42 au" does not follow from the host's stated Ṁ and M, which give
     0.47–3.9 m s⁻¹ (the 9.5 au figure, 0.89 m s⁻¹, does); the task text above uses the latter.
     The osculating eccentricity's oscillation is Veras et al.'s eq. 17, with Ψ their eq. 15.
-  - **For the owner:** the velocity of a planet of a superwind host now steps by up to a few
-    m s⁻¹ where the host's mass-loss rate jumps (a track knot or the AGB's end), since the model's
-    Ṁ is piecewise; a ship matched to the body just before then separates at that rate after.
+  - **Decided (2026-10-02, delegated decision): accepted as built.** The velocity of a planet of a
+    superwind host steps by up to a few m s⁻¹ where the host's mass-loss rate jumps (a track knot
+    or the AGB's end). The step is the mean-element law's own kink where the track's Ṁ jumps: the
+    track's mass is cubic in age between knots (`track.rs` `mass_breaks`), so Ṁ and ȧ = a Ṁ ÷ M
+    are only piecewise continuous. It is of the order of the Ψ oscillation the model already omits
+    (Veras et al. 2011, eqs. 15 and 17), so smoothing Ṁ would not make the velocity truer than ȧ,
+    and would change stellar output and every superwind golden for a rare case. It falls at a law
+    break, so at the record's `valid_until`. A consumer never extrapolates a record past its
+    `valid_until`. Ṁ is not smoothed and `GENERATOR_VERSION` is unchanged. The core-mass floor's
+    corner (T45.d, "Corners left") is not a break: there the cell's secant smooths the step, and
+    the position carries that corner's error. A ship matched to the planet sits inside its Hill
+    sphere, so in its free-falling frame, and keeps its frame-relative state across the step,
+    provided the flight model takes the indirect term −a_body from the gravity model and never
+    differentiates the ephemeris twice (a note for the craft and flight-model plan).
 - **Fixed in RM1 validation (2026-10-02), under the same bump:** a moon's drifting record before
   `START` ignored its planet's state changes before `START` (`FateAt::changes_at` was filtered to
   the window), so it could claim to hold past its planet's destruction or unbinding there, against
