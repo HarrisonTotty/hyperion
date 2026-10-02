@@ -88,7 +88,13 @@ export interface RenderTarget {
   readonly colour: TextureHandle;
   readonly depth: TextureHandle | null;
   resize(size: ViewSize): void;
-  /** Renders into level 0; a chain of levels is one target per level. */
+  /**
+   * Renders into level 0; a chain of levels is one target per level.
+   *
+   * @throws {@link DepthSelfSample} when a draw samples the target's own depth, and
+   * {@link ColourSelfSample} when the pass that writes its colour (the draws', or the last
+   * post-process's) samples it.
+   */
   render(frame: FrameSubmission): void;
   dispose(): void;
 }
@@ -322,11 +328,6 @@ export interface WgslMaterialSpec {
   readonly samplers: ReadonlyArray<SamplerSpec>;
   /** The sampled textures it declares in `@group(2)`. */
   readonly textures?: ReadonlyArray<TextureBindingSpec>;
-  /**
-   * Documents a blended draw; it does not reorder anything, since draws are encoded in submission
-   * order, so the caller submits its translucent draws after its opaque ones.
-   */
-  readonly transparent: boolean;
   readonly cullMode: "none" | "back";
   /** `false` for R02's lines and sprites. */
   readonly depthWrite: boolean;
@@ -334,7 +335,8 @@ export interface WgslMaterialSpec {
   readonly colourWrites: boolean;
   /**
    * Every mode keeps the destination alpha, R07's meter class (R01 Design note 21); `additive` is
-   * R02's sprites, in linear light.
+   * R02's sprites, in linear light. Nothing is reordered by it: draws are encoded in submission
+   * order, so the caller submits its blended draws after its opaque ones.
    */
   readonly blend: "none" | "additive" | "premultiplied";
   readonly storageBuffers?: ReadonlyArray<StorageBufferSpec>;
@@ -510,6 +512,23 @@ export class DepthSelfSample extends Error {
     this.name = "DepthSelfSample";
     this.targetName = targetName;
     this.materialName = materialName;
+  }
+}
+
+/**
+ * Thrown when a draw or a post-process samples the colour of the target it renders into: WebGPU
+ * forbids a texture as an attachment and a binding in one pass, and would drop the frame.
+ */
+export class ColourSelfSample extends Error {
+  readonly targetName: string;
+  /** The draw's material, or the post-process. */
+  readonly ownerName: string;
+
+  constructor(targetName: string, ownerName: string) {
+    super(`${ownerName} samples the colour of ${targetName}, which it renders into`);
+    this.name = "ColourSelfSample";
+    this.targetName = targetName;
+    this.ownerName = ownerName;
   }
 }
 

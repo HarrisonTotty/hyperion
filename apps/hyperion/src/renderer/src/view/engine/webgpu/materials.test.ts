@@ -23,7 +23,6 @@ const SPEC: WgslMaterialSpec = {
     { name: "sceneDepth", binding: 3, sampleType: "depth" },
   ],
   storageBuffers: [{ name: "instances", binding: 2 }],
-  transparent: false,
   cullMode: "back",
   depthWrite: true,
   colourWrites: true,

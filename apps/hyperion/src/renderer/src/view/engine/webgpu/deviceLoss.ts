@@ -57,5 +57,7 @@ function logUncapturedError(event: Event): void {
     typeof error === "object" && error !== null && "message" in error
       ? String(error.message)
       : "an error with no message";
+  // The smoke harness's main process fails a run on this text (`src/smoke/result.ts`,
+  // `UNCAPTURED_GPU_ERROR`): keep the two the same.
   console.error(`the GPU device raised an uncaptured error: ${message}`);
 }

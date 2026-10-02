@@ -58,12 +58,14 @@ In scope:
 - The renderer's adapter and device acquisition, the capability summary, the fallback-adapter
   refusal, device-loss handling, and the graphics status that the `LINK` display and every later
   view read.
-- The engine-agnostic interface under `apps/hyperion/src/renderer/src/view/engine/` and its Babylon
-  implementation, with the WGSL-only guard, the pinned internals, reversed depth and the depth
-  format, one canvas context per view, offscreen render targets, asynchronous pipelines, indirect
-  draws and dispatches, per-pass GPU time and the guarded CPU readback.
-- Lazy loading as a dynamic import and a named chunk, and a check that the main bundle holds no
-  engine code.
+- The engine-agnostic interface under `apps/hyperion/src/renderer/src/view/engine/` and its
+  implementation, HYPERION's own WebGPU renderer in `view/engine/webgpu/` (Design notes 23 and 24,
+  which replaced the Babylon implementation, its WGSL-only guard and its pinned internals), with
+  standard WGSL under explicit layouts, reversed depth and the depth format, one canvas context per
+  view, offscreen render targets, asynchronous pipelines, indirect draws and dispatches, per-pass
+  GPU time and the guarded CPU readback.
+- Lazy loading as a dynamic import (Design note 14 as amended by 24: no named chunk and no
+  `checkChunks.mjs`; the laziness is checked on the built chunks in T14).
 - The headless SwiftShader smoke harness, the offline render test, and the subgroup-twin selection.
 - By-hand runs, recorded: the three-canvas proof on the development machine (RTX 3080) and, by the
   owner, on the UHD 620; the Vulkan soak; the child-window prototype.
@@ -78,8 +80,8 @@ Non-goals, each with its owner:
 - The `VIEW` display, its styles, the free camera and the nine UX-guide items: R02. This plan's
   nomenclature drafts are handed to R02's single pass to absorb and re-check.
 - The scene subscription and the wire: R03. WebAssembly, the CSP's `'wasm-unsafe-eval'` and height
-  workers: R04 and R05. This plan changes no CSP: the WGSL-only guard means Babylon needs neither
-  WebAssembly nor a CDN origin.
+  workers: R04 and R05. This plan changes no CSP: the engine is HYPERION's own WebGPU code
+  (Design note 24) and needs neither WebAssembly nor a CDN origin.
 - Any real subgroup kernel. The exposure histogram's reduction is R07's; this plan supplies the pair
   mechanism and proves it on a toy reduction.
 - Per-view budgets, secondary-view resolution and the one-photorealistic-view rule: R07. Still
@@ -184,51 +186,88 @@ export interface GpuProcessGoneReport { readonly reason: string; readonly count:
 
 ### Renderer: platform and status (`renderer/src/view/engine/`)
 
+As built (RM1 validation, 2026-10-02: rewritten from the code; it replaces the Babylon-era sketch).
+
 ```ts
 // platform.ts — no engine types
 export interface AdapterSummary {
-  readonly vendor: string; readonly architecture: string; readonly description: string;
-  readonly fallback: boolean;           // info.isFallbackAdapter, or architecture "swiftshader"
+  readonly vendor: string;
+  readonly architecture: string;
+  readonly description: string;
+  readonly fallback: boolean; // info.isFallbackAdapter, or architecture "swiftshader"
 }
 export interface GpuCapabilities {
-  readonly subgroups: boolean; readonly shaderF16: boolean; readonly timestampQuery: boolean;
-  readonly float32Filterable: boolean; readonly float32Blendable: boolean;
-  readonly rg11b10Renderable: boolean; readonly depthClipControl: boolean; // R10's cascades
-  readonly maxTextureDimension2D: number; readonly subgroupMinSize: number | null;
+  readonly subgroups: boolean;
+  readonly shaderF16: boolean;
+  readonly timestampQuery: boolean;
+  readonly float32Filterable: boolean;
+  readonly float32Blendable: boolean;
+  readonly rg11b10Renderable: boolean;
+  readonly depthClipControl: boolean; // R10's cascades
+  readonly maxTextureDimension2D: number;
+  readonly subgroupMinSize: number | null;
 }
-export type StyleAvailability = { readonly wireframe: boolean; readonly photorealistic: boolean };
+export interface StyleAvailability {
+  readonly wireframe: boolean;
+  readonly photorealistic: boolean;
+}
 export type AdapterOutcome =
-  | { readonly kind: "no-webgpu" }                       // navigator.gpu absent
+  | { readonly kind: "no-webgpu" } // navigator.gpu absent
   | { readonly kind: "no-adapter" }
-  | { readonly kind: "adapter"; readonly adapter: GPUAdapter; readonly summary: AdapterSummary;
-      readonly capabilities: GpuCapabilities; readonly styles: StyleAvailability };
-export function summariseAdapter(adapter: GPUAdapter): { summary: AdapterSummary;
-    capabilities: GpuCapabilities };
+  | {
+      readonly kind: "adapter";
+      readonly adapter: GPUAdapter;
+      readonly summary: AdapterSummary;
+      readonly capabilities: GpuCapabilities;
+      readonly styles: StyleAvailability;
+    };
+export function summariseAdapter(adapter: GPUAdapter): {
+  readonly summary: AdapterSummary;
+  readonly capabilities: GpuCapabilities;
+};
+/** A device's capabilities from its own features: a withheld feature reads as absent. */
+export function deviceCapabilities(device: GPUDevice): GpuCapabilities;
+/** What was asked of a device and not enabled, which the engine logs. */
+export function featuresNotEnabled(
+  requested: ReadonlyArray<GPUFeatureName>,
+  enabled: ReadonlySet<string>,
+): ReadonlyArray<GPUFeatureName>;
 export function styleAvailability(summary: AdapterSummary): StyleAvailability;
 export function requestAdapterOutcome(gpu: GPU | undefined): Promise<AdapterOutcome>;
 /** Optional features requested whenever present; never required. */
 export const WANTED_FEATURES: ReadonlyArray<GPUFeatureName>;
-export interface CapabilityOverrides { readonly withholdSubgroups: boolean;
-    readonly withholdShaderF16: boolean;
-    readonly withholdFloat32Blendable?: boolean } // the harness's runs only (T9.i)
+export interface CapabilityOverrides {
+  readonly withholdSubgroups: boolean;
+  readonly withholdShaderF16: boolean;
+  readonly withholdFloat32Blendable?: boolean;
+} // the harness's runs only (T9.i)
 /** WANTED_FEATURES ∩ the adapter's features, minus what the overrides withhold. */
-export function requiredFeatures(adapter: GPUAdapter, overrides: CapabilityOverrides | undefined):
-    ReadonlyArray<GPUFeatureName>;
+export function requiredFeatures(
+  adapter: GPUAdapter,
+  overrides: CapabilityOverrides | undefined,
+): ReadonlyArray<GPUFeatureName>;
 
 // status.ts
 export type GraphicsFault =
   | { readonly kind: "device-lost"; readonly reason: GPUDeviceLostReason; readonly message: string }
-  | { readonly kind: "gpu-process-gone"; readonly count: number };
+  | { readonly kind: "gpu-process-gone"; readonly count: number }
+  | { readonly kind: "shader-refused"; readonly effectName: string }; // a WGSL compile error
 export type GraphicsCondition =
   | { readonly kind: "acquiring" }
-  | { readonly kind: "nominal"; readonly summary: AdapterSummary;
-      readonly styles: StyleAvailability }
+  | {
+      readonly kind: "nominal";
+      readonly summary: AdapterSummary;
+      readonly styles: StyleAvailability;
+    }
   | { readonly kind: "software-adapter"; readonly summary: AdapterSummary }
-  | { readonly kind: "no-webgpu" }                        // navigator.gpu absent
-  | { readonly kind: "no-adapter" }                       // requestAdapter gave null at start
+  | { readonly kind: "no-webgpu" } // navigator.gpu absent
+  | { readonly kind: "no-adapter" } // requestAdapter gave null at start
   | { readonly kind: "safe-mode" }
-  | { readonly kind: "disabled"; readonly cause: "device-losses" | "adapter-withdrawn";
-      readonly losses: number };
+  | {
+      readonly kind: "disabled";
+      readonly cause: "device-losses" | "adapter-withdrawn";
+      readonly losses: number;
+    };
 /**
  * Whether timestamps carry Dawn's 65,536 ns quantization (Design note 4), or the device has no
  * `timestamp-query` at all.
@@ -236,31 +275,71 @@ export type GraphicsCondition =
 export type GpuTimer = "quantized" | "full" | "absent";
 /** How the adapter rounds a colour-attachment write, per float format (R07; Design note 22). */
 export type TargetRounding = "nearest" | "toward-zero" | "unknown"; // unknown until probed
+export type ProbedTargetFormat = "rgba16float" | "rg11b10ufloat";
 export interface GraphicsStatus {
   readonly condition: GraphicsCondition;
-  readonly capabilities: GpuCapabilities | null;
+  readonly capabilities: GpuCapabilities | null; // the adapter's, then the device's own
   readonly launchMode: GraphicsLaunchMode;
-  readonly timer: GpuTimer; // gpuTiming from window.hyperion.graphics, and the device's features
-  readonly targetRounding: Readonly<Record<"rgba16float" | "rg11b10ufloat", TargetRounding>>;
-  readonly fault: GraphicsFault | null;          // current, cleared on recovery
-  readonly deviceLosses: number; readonly gpuProcessCrashes: number;
+  readonly gpuTiming: boolean; // from window.hyperion.graphics
+  readonly timer: GpuTimer; // gpuTiming and timestamp-query: the adapter's, then the device's
+  readonly targetRounding: Readonly<Record<ProbedTargetFormat, TargetRounding>>;
+  readonly fault: GraphicsFault | null; // current, cleared on recovery
+  readonly deviceLosses: number;
+  readonly gpuProcessCrashes: number;
 }
-export type GraphicsEvent = /* adapter outcome, device lost, device restored, process gone,
-    adapter withdrawn on a rebuild */;
+export type GraphicsEvent =
+  | { kind: "adapter-outcome"; outcome }
+  | { kind: "adapter-reacquired"; outcome }
+  | { kind: "device-lost"; reason; message }
+  | { kind: "device-restored"; outcome }
+  | { kind: "adapter-withdrawn" }
+  | { kind: "gpu-process-gone"; count }
+  | { kind: "shader-refused"; effectName }
+  | { kind: "device-capabilities"; capabilities }
+  | { kind: "target-rounding"; rounding };
+export function initialGraphicsStatus(
+  launchMode: GraphicsLaunchMode,
+  gpuTiming: boolean,
+): GraphicsStatus;
 export function reduceGraphicsStatus(status: GraphicsStatus, event: GraphicsEvent): GraphicsStatus;
 export const DEVICE_LOSS_LIMIT = 3;
 /** `standing` is `StatusLine`'s own `StatusStanding`: `refused` for a plain statement. */
-export function graphicsAnnunciation(status: GraphicsStatus):
-    { readonly text: string;
-      readonly standing: Extract<StatusStanding, "refused" | "fault"> } | null;
-export class GraphicsStatusStore { subscribe(l: () => void): () => void; getSnapshot(): GraphicsStatus;
-    dispatch(e: GraphicsEvent): void }
-export function useGraphicsStatus(): GraphicsStatus;
+export interface GraphicsAnnunciation {
+  readonly text: string;
+  readonly standing: Extract<StatusStanding, "refused" | "fault">;
+}
+export const GRAPHICS_WORDS: {/* Design note 10's words, signed off; shaderRefused(effect) */};
+export function graphicsAnnunciation(status: GraphicsStatus): GraphicsAnnunciation | null;
+export function graphicsModeAnnunciation(status: GraphicsStatus): GraphicsAnnunciation | null;
+export class GraphicsStatusStore {
+  subscribe(l: () => void): () => void;
+  getSnapshot(): GraphicsStatus;
+  dispatch(e: GraphicsEvent): void;
+}
+/** Requests the adapter at start and after each GPU-process crash, and feeds the store. */
+export function feedGraphicsStatus(
+  store: GraphicsStatusStore,
+  graphics: GraphicsApi,
+  gpu: GPU | undefined,
+): () => void;
+export function navigatorGpu(): GPU | undefined;
+export const GraphicsStatusContext: React.Context<GraphicsStatusStore | null>;
+export function useGraphicsStatus(): GraphicsStatus; // throws outside a GraphicsStatusProvider
+// GraphicsStatusProvider.tsx: makes the store from window.hyperion.graphics and feeds it.
+export function GraphicsStatusProvider(props: GraphicsStatusProviderProps): ReactNode;
+// gpuFlags.ts: WebGPU's flag values, from the specification, since TS 7's lib.dom declares the
+// flag types but not GPUBufferUsage, GPUTextureUsage and GPUMapMode; R02's wireframe imports them.
+export const BUFFER_USAGE: {/* MAP_READ … QUERY_RESOLVE */};
+export const TEXTURE_USAGE: {/* COPY_SRC … RENDER_ATTACHMENT */};
+export const MAP_MODE: {/* READ, WRITE */};
+export const COLOUR_WRITE_ALL = 0xf;
 ```
 
 ### Renderer: the engine-agnostic interface (`renderer/src/view/engine/types.ts`)
 
-No type from `@babylonjs/*` appears in these signatures or anywhere outside `view/engine/babylon/`.
+As built (RM1 validation, 2026-10-02: rewritten from `types.ts`; it replaces the Babylon-era
+sketch). Only `view/engine/webgpu/` allocates on the device (Design note 1 as amended), and only
+`loadEngine.ts` names `webgpu/engine`, by a dynamic `import()` (Design notes 14 and 24).
 
 ```ts
 export type DepthPolicy = "reversed-z-float"; // depth32float, clear 0, compare greater-equal
@@ -269,41 +348,42 @@ export interface ViewSize {
   readonly widthPx: number;
   readonly heightPx: number;
 }
+// Handles, each owned by the engine that made it, with a literal `kind` and a `name`:
+// MeshHandle, MaterialHandle, PostProcessHandle, TextureHandle; ComputeHandle also carries
+// `path: "reference" | "subgroup"`, BufferHandle `bytes`.
 export interface RenderEngine {
   readonly capabilities: GpuCapabilities; // the device's features, after overrides
   readonly depthPolicy: DepthPolicy;
   createView(canvas: HTMLCanvasElement, name: string): RenderView;
-  /** An offscreen colour target with its own depth: HDR, bloom chains, stills, the harness. */
   createRenderTarget(spec: RenderTargetSpec): RenderTarget;
   createMesh(spec: MeshSpec): MeshHandle;
   createMaterial(spec: WgslMaterialSpec): MaterialHandle;
-  /** Resolves once every pipeline the material needs is compiled; no frame waits on a compile. */
+  /**
+   * Resolves once the shaders are compiled and the pipelines for `meshes` into `targets` are made;
+   * a mesh not named has its pipeline made asynchronously at its first draw, left out until ready.
+   * Rejects naming the compiler's messages.
+   */
   createMaterialAsync(
     spec: WgslMaterialSpec,
     targets: ReadonlyArray<RenderTargetFormat>,
+    meshes?: ReadonlyArray<MeshHandle>,
   ): Promise<MaterialHandle>;
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle;
-  /** The variant is chosen by `selectKernel` against `capabilities`. */
-  createCompute(pair: KernelPair): ComputeHandle;
+  createCompute(pair: KernelPair): ComputeHandle; // the variant from selectKernel
   createComputeAsync(pair: KernelPair): Promise<ComputeHandle>;
   /** Every GPU buffer and texture is created here, and nowhere else, with its memory category. */
   createBuffer(spec: BufferSpec): BufferHandle;
   createTexture(spec: TextureSpec): TextureHandle; // 2D, 3D, cube; sampled and/or storage
-  /** R06's packed star cube: rgb9e5ufloat, every mip written by copyBufferToTexture. */
   createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle;
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void;
-  /** The same level written from a GPU buffer a kernel filled, with no readback (R06's bake). */
   writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void;
-  /**
-   * An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat). Throws
-   * without `float32-blendable`; the caller falls back to a compute splat. Design note 21.
-   */
+  /** Throws Float32BlendUnavailable without float32-blendable (Design note 21). */
   createPointSplat(spec: PointSplatSpec): PointSplatHandle;
   dispatch(
     kernel: ComputeHandle,
     bindings: ComputeBindings,
-    workgroups: readonly [number, number, number] | IndirectArgs, // indirect: GPU-written counts
-    pass?: string, // the timed pass it belongs to; default `compute`
+    workgroups: readonly [number, number, number] | IndirectArgs,
+    pass?: string,
   ): void;
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void;
   writeTexture(
@@ -312,28 +392,15 @@ export interface RenderEngine {
     size: GPUExtent3D,
     data: ArrayBufferView,
   ): void; // each write raises an `uploaded` event
-  /**
-   * CPU readback, refused for a buffer last written by a `presentation-only` kernel. `"tolerance"`
-   * lifts the refusal for the smoke harness's tolerance checks; the boundary test fails on it
-   * anywhere else.
-   */
+  /** Refused (PresentationOnlyReadback) for a presentation-only kernel's result; "tolerance" is the harness's. */
   readBuffer(buffer: BufferHandle, access?: "cpu" | "tolerance"): Promise<ArrayBuffer>;
-  /** CPU readback of a texture level or a region of it, colour or depth; the same refusal. */
-  readTexture(
-    texture: TextureHandle,
-    level?: number,
-    rect?: {
-      readonly x: number;
-      readonly y: number;
-      readonly width: number;
-      readonly height: number;
-    },
-  ): Promise<ArrayBuffer>;
-  /** Per-pass GPU time for each frame, once its query set resolves; silent without the feature. */
+  readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer>;
   onPassTimes(listener: (times: PassTimes) => void): () => void;
-  /** Every creation and destruction, with its byte size and category; R05's tally subscribes. */
+  /** Every creation, destruction and upload; R05's tally subscribes. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
   onFault(listener: (fault: GraphicsFault) => void): () => void;
+  /** After a rebuild (Design note 9): views survive; every other handle is made again here. */
+  onRestored(listener: () => void): () => void;
   dispose(): void;
 }
 export type RenderTargetFormat = ColourTargetFormat | "canvas";
@@ -343,23 +410,21 @@ export interface RenderTargetSpec {
   readonly format: ColourTargetFormat;
   readonly mips: number; // sampled mips, generated after rendering
   readonly depth: boolean; // depth32float of its own, with COPY_SRC and TEXTURE_BINDING
-  readonly category: MemoryCategory; // "render-targets" unless a later plan names another
+  readonly category: MemoryCategory;
 }
-/** An offscreen target: drawn like a view, sampled as a texture by later passes. */
 export interface RenderTarget {
   readonly name: string;
   readonly colour: TextureHandle;
   readonly depth: TextureHandle | null;
   resize(size: ViewSize): void;
-  render(frame: FrameSubmission): void; // level 0; a chain of levels is one target per level
+  /** Level 0. Throws DepthSelfSample or ColourSelfSample on sampling its own depth or colour. */
+  render(frame: FrameSubmission): void;
   dispose(): void;
 }
-/** The GPU-side arguments of an indirect draw or dispatch, in WebGPU's layout. */
 export interface IndirectArgs {
-  readonly buffer: BufferHandle; // created with GPUBufferUsage.INDIRECT
+  readonly buffer: BufferHandle;
   readonly offsetBytes: number;
 }
-/** One frame's GPU time per labelled pass, in nanoseconds, with the timer's resolution. */
 export interface PassTimes {
   readonly frame: number;
   readonly timer: GpuTimer;
@@ -367,7 +432,7 @@ export interface PassTimes {
     readonly label: string;
     readonly ns: number;
     readonly bracketed: boolean;
-  }>; // bracketed: measured around a Babylon-encoded pass
+  }>; // always false: every pass is the adapter's own
 }
 export interface ComputeBindings {
   readonly uniforms: Readonly<Record<string, Float32Array | Uint32Array>>;
@@ -377,31 +442,38 @@ export interface ComputeBindings {
     Record<string, { readonly texture: TextureHandle; readonly level: number }>
   >;
 }
-// Opaque handles, each owned by the engine that made it: MeshHandle, MaterialHandle,
-// PostProcessHandle, ComputeHandle, BufferHandle, TextureHandle.
+export interface VertexAttribute {
+  readonly data: Float32Array;
+  readonly size: 1 | 2 | 3 | 4;
+}
 export interface MeshSpec {
   readonly name: string;
   readonly positions: Float32Array; // metres, relative to the draw's offset
   readonly indices: Uint32Array | null;
   readonly topology: "triangle-list" | "line-list" | "point-list";
-  readonly attributes: Readonly<
-    Record<string, { readonly data: Float32Array; readonly size: 1 | 2 | 3 | 4 }>
-  >;
-  /** Per-instance attributes, stepped once per instance (R02's segment instances). */
-  readonly instanceAttributes?: Readonly<
-    Record<string, { readonly data: Float32Array; readonly size: 1 | 2 | 3 | 4 }>
-  >;
+  readonly attributes: Readonly<Record<string, VertexAttribute>>;
+  readonly instanceAttributes?: Readonly<Record<string, VertexAttribute>>;
 }
 export interface StorageBufferSpec {
   readonly name: string;
-  readonly binding: number; // read-only in the vertex and fragment stages
+  readonly binding: number;
 }
-export type PostProcessInput = "depth" | "hdr-colour";
+export interface TextureBindingSpec {
+  readonly name: string;
+  readonly binding: number; // @group(2)
+  readonly sampleType?: "float" | "unfilterable-float" | "depth" | "uint" | "sint";
+  readonly viewDimension?: "2d" | "2d-array" | "3d" | "cube";
+}
+export type PostProcessInput = "hdr-colour";
+/** The shader convention (Design note 23): Frame, Draw at a dynamic offset, resources. */
+export const BIND_GROUPS = { frame: 0, draw: 1, resources: 2 } as const;
+export const POST_PROCESS_BINDINGS = { "hdr-colour": 0, "hdr-colour-sampler": 1 } as const;
+export const POST_PROCESS_VARYING = "uv";
 export interface PointSplatSpec {
   readonly name: string;
   readonly vertexWgsl: string;
   readonly fragmentWgsl: string;
-  readonly format: "rgba32float"; // a bake scratch, never a frame's colour target
+  readonly format: "rgba32float";
   readonly blend: "additive";
 }
 export interface PointSplatHandle {
@@ -416,9 +488,100 @@ export interface SamplerSpec {
   readonly name: string;
   readonly filter: "nearest" | "linear";
   readonly address: "clamp-to-edge" | "repeat";
+  readonly binding: number; // @group(2)
 }
+export interface RenderView {
+  readonly name: string;
+  resize(size: ViewSize): void; // this view's attachments only
+  render(frame: FrameSubmission): void;
+  readBack(): Promise<Float32Array | Uint8Array>; // harness only: copyTextureToBuffer
+  dispose(): void;
+}
+export interface FrameSubmission {
+  readonly label: string; // the pass's label in PassTimes, stable across frames
+  readonly viewRotation: Float32Array; // 4 × 4 column-major, translation zero (R02 fills it)
+  readonly projection: Float32Array; // 4 × 4 column-major, reversed-Z, WebGPU clip space
+  readonly draws: ReadonlyArray<DrawItem>; // encoded in submission order, indirect ones in place
+  readonly postProcesses: ReadonlyArray<PostProcessItem>;
+}
+export interface PostProcessItem {
+  readonly postProcess: PostProcessHandle;
+  readonly uniforms: Readonly<Record<string, Float32Array>>;
+  readonly textures?: Readonly<Record<string, TextureHandle>>;
+}
+export interface DrawItem {
+  readonly mesh: MeshHandle;
+  readonly material: MaterialHandle;
+  readonly offsetFromCameraM: Float32Array; // f64-differenced on the CPU, narrowed (R02)
+  readonly uniforms: Readonly<Record<string, Float32Array>>;
+  readonly textures: Readonly<Record<string, TextureHandle>>; // a target's depth: texture_depth_2d
+  readonly instanceCount?: number;
+  readonly storageBuffers?: Readonly<Record<string, BufferHandle>>;
+  readonly indirect?: IndirectArgs;
+}
+export interface WgslMaterialSpec {
+  readonly name: string;
+  readonly vertexWgsl: string;
+  readonly fragmentWgsl: string;
+  readonly uniforms: ReadonlyArray<UniformSpec>; // Draw's members after offsetFromCameraM
+  readonly samplers: ReadonlyArray<SamplerSpec>;
+  readonly textures?: ReadonlyArray<TextureBindingSpec>;
+  readonly cullMode: "none" | "back";
+  readonly depthWrite: boolean;
+  readonly colourWrites: boolean;
+  /** Every mode keeps the destination alpha (Design note 21); nothing is reordered by it. */
+  readonly blend: "none" | "additive" | "premultiplied";
+  readonly storageBuffers?: ReadonlyArray<StorageBufferSpec>;
+  readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
+}
+export interface WgslPostProcessSpec {
+  readonly name: string;
+  readonly fragmentWgsl: string;
+  readonly uniforms: ReadonlyArray<UniformSpec>;
+  readonly inputs?: ReadonlyArray<PostProcessInput>; // hdr-colour is always bound
+  readonly samplers?: ReadonlyArray<SamplerSpec>;
+  readonly textures?: ReadonlyArray<TextureBindingSpec>;
+}
+export interface TexelRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+/** The WebGPU module's one export, `webgpu/engine.ts`, which only loadEngine.ts imports. */
+export type CreateWebGpuEngine = (
+  outcome: AdapterOutcome & { readonly kind: "adapter" },
+  status: GraphicsStatusStore,
+  overrides: CapabilityOverrides | undefined,
+) => Promise<RenderEngine>;
+export interface LoadEngineOptions {
+  readonly overrides?: CapabilityOverrides; // the harness's withheld-feature runs
+  readonly importEngine?: () => Promise<{ readonly createWebGpuEngine: CreateWebGpuEngine }>;
+  readonly gpu?: GPU; // navigator.gpu, from which a rebuild asks for a fresh adapter
+}
+export class Float32BlendUnavailable extends Error {}
+export class DepthSelfSample extends Error {
+  readonly targetName: string;
+  readonly materialName: string;
+}
+export class ColourSelfSample extends Error {
+  readonly targetName: string;
+  readonly ownerName: string;
+} // added in RM1 validation (m10)
+export class PresentationOnlyReadback extends Error {
+  readonly kernelName: string;
+}
+
+// loadEngine.ts: imports webgpu/engine dynamically and wraps it in a ResilientEngine.
+export function loadRenderEngine(
+  outcome: AdapterOutcome & { readonly kind: "adapter" },
+  status: GraphicsStatusStore,
+  options?: LoadEngineOptions,
+): Promise<RenderEngine>;
+// resilientEngine.ts
+export class EngineUnavailable extends Error {} // a creation while there is no device
 // memory.ts — the categories; R05's tally and R12's itemisation extend the union
-export type MemoryCategory = "render-targets" | "other"; /* | … added by later plans */
+export type MemoryCategory = "render-targets" | "other";
 export interface BufferSpec {
   readonly name: string;
   readonly bytes: number;
@@ -427,7 +590,7 @@ export interface BufferSpec {
 }
 export interface TextureSpec {
   readonly name: string;
-  readonly size: GPUExtent3D; // TS 7's lib.dom has no GPUExtent3DStrict
+  readonly size: GPUExtent3D;
   readonly dimension: "2d" | "3d" | "cube";
   readonly format: GPUTextureFormat;
   readonly mips: number;
@@ -443,94 +606,7 @@ export type AllocationEvent =
     }
   | { readonly kind: "uploaded"; readonly name: string; readonly bytes: number };
 export function textureBytes(spec: TextureSpec): number; // mips, layers, packed formats
-export interface RenderView {
-  readonly name: string;
-  resize(size: ViewSize): void; // this view's attachments only
-  render(frame: FrameSubmission): void;
-  readBack(): Promise<Float32Array | Uint8Array>; // harness only: copyTextureToBuffer
-  dispose(): void;
-}
-export interface FrameSubmission {
-  /** The pass's label in `PassTimes`, stable across frames (R12 keys its records on it). */
-  readonly label: string;
-  readonly viewRotation: Float32Array; // 4 × 4, translation zero, right-handed (R02 fills it)
-  readonly projection: Float32Array; // 4 × 4, reversed-Z, WebGPU clip space; passed unchanged
-  readonly draws: ReadonlyArray<DrawItem>;
-  readonly postProcesses: ReadonlyArray<PostProcessHandle>;
-}
-export interface DrawItem {
-  readonly mesh: MeshHandle;
-  readonly material: MaterialHandle;
-  readonly offsetFromCameraM: Float32Array; // f64-differenced on the CPU, narrowed (R02)
-  readonly uniforms: Readonly<Record<string, Float32Array>>;
-  /** Per-draw sampled textures; a `RenderTarget.depth` binds as `texture_depth_2d` (R05). */
-  readonly textures: Readonly<Record<string, TextureHandle>>;
-  /** Default 1; the index reaches WGSL as `@builtin(instance_index)` (R02, R05). */
-  readonly instanceCount?: number;
-  /** Buffers bound to the material's `storageBuffers`, by name (R05). */
-  readonly storageBuffers?: Readonly<Record<string, BufferHandle>>;
-  /** Instance and vertex counts written on the GPU (R05's and R11's culling); Design note 19. */
-  readonly indirect?: IndirectArgs;
-}
-export interface WgslMaterialSpec {
-  readonly name: string;
-  readonly vertexWgsl: string;
-  readonly fragmentWgsl: string;
-  readonly uniforms: ReadonlyArray<UniformSpec>;
-  readonly samplers: ReadonlyArray<SamplerSpec>;
-  readonly transparent: boolean;
-  readonly cullMode: "none" | "back";
-  readonly depthWrite: boolean; // false for R02's lines and sprites
-  readonly colourWrites: boolean; // false for R02's depth-only occluders
-  /** Every mode keeps the destination alpha, R07's meter class (Design note 21). */
-  readonly blend: "none" | "additive" | "premultiplied"; // additive: R02's sprites, linear light
-  readonly storageBuffers?: ReadonlyArray<StorageBufferSpec>;
-  /**
-   * Positive is away from the camera, whatever the depth direction (R02's hull occluder faces;
-   * never set on a line pass).
-   */
-  readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
-}
-export interface WgslPostProcessSpec {
-  readonly name: string;
-  readonly fragmentWgsl: string;
-  readonly uniforms: ReadonlyArray<UniformSpec>;
-  /** Extra inputs: the view's reversed-Z depth and its HDR colour (R05's aerial perspective). */
-  readonly inputs?: ReadonlyArray<PostProcessInput>;
-  readonly samplers?: ReadonlyArray<SamplerSpec>;
-}
-export interface LoadEngineOptions {
-  readonly overrides?: CapabilityOverrides; // the harness's withheld-feature runs
-  /** The dynamic import, injectable so that a test fakes it without `vi.mock` of our module. */
-  readonly importEngine?: () => Promise<{ createBabylonEngine: CreateBabylonEngine }>;
-}
-export function loadRenderEngine(
-  outcome: AdapterOutcome & { kind: "adapter" },
-  status: GraphicsStatusStore,
-  options?: LoadEngineOptions,
-): Promise<RenderEngine>; // loadEngine.ts, dynamic import
-/** The Babylon module's one export, `view/engine/babylon/engine.ts`. */
-export type CreateBabylonEngine = (
-  outcome: AdapterOutcome & { kind: "adapter" },
-  status: GraphicsStatusStore,
-  overrides: CapabilityOverrides | undefined,
-) => Promise<RenderEngine>;
-/** Thrown by the WGSL-only guard, naming the effect (Design note 12); `wgslGuard.ts`. */
-export class GlslShaderRefused extends Error {
-  readonly effectName: string;
-}
-/** Thrown by `createPointSplat` when the device lacks `float32-blendable` (Design note 21). */
-export class Float32BlendUnavailable extends Error {}
-/** Thrown when a draw samples the depth of the target it renders into (Design note 21). */
-export class DepthSelfSample extends Error {
-  readonly targetName: string;
-  readonly materialName: string;
-}
-/** Thrown by `readBuffer` and `readTexture` for a presentation-only result (Design note 16). */
-export class PresentationOnlyReadback extends Error {
-  readonly kernelName: string;
-}
-/** Canvas pixels from CSS size, rounded, clamped to the limit, never zero; `viewSize.ts`. */
+// viewSize.ts
 export function viewPixelSize(
   cssSize: { readonly width: number; readonly height: number },
   devicePixelRatio: number,
@@ -567,8 +643,12 @@ export function highamBound(n: number, sumAbs: number): number; // γ(n − 1) �
 - `smoke/` (new, beside `main`, `preload` and `renderer`): the harness's Electron entry and its
   preload; `renderer/smoke.html`, its test page; `just test-render`. Only the smoke page may pass
   `readBuffer`'s `"tolerance"` access, to check a presentation-only sum against its bound.
-- `scripts/checkChunks.mjs` under `apps/hyperion/`: fails if the entry chunk holds Babylon code or
-  no `babylon` chunk exists.
+- _Removed by Design note 24 (R01.T8.l):_ `scripts/checkChunks.mjs`. There is no Babylon chunk to
+  check; T14 checks that the entry chunk reaches the engine only by a dynamic `import()`.
+- `renderer/src/test/fakeRenderEngine.ts`: a fake engine module for `loadRenderEngine`'s and
+  `ResilientEngine`'s tests (RM1 validation: it raises a disposal's `destroyed` event and can make
+  view-less engines). `FakeDevice` records the engine's layouts, pipelines, bind groups and
+  encoded commands (RM1 validation, m6).
 - `WGSL_CATALOGUE` in `view/engine/catalogue.ts`: every material, post-process and compute kernel
   the adapter can create, which the smoke harness renders one by one. Later plans register theirs
   there.
@@ -617,7 +697,12 @@ commands in their acceptance lines.
 
 ## Design notes
 
-1. **Where the code lives.** The engine-agnostic interface and its Babylon implementation are
+1. _Amended by Design note 24 (marked in RM1 validation, 2026-10-02): the implementation is
+   `view/engine/webgpu/`, no `@babylonjs/*` exists, and the boundary test's engine rules are that
+   only `view/engine/webgpu/` calls `device.createBuffer` or `device.createTexture`, and that no
+   file outside it imports `webgpu/engine` statically (only `loadEngine.ts`'s dynamic `import()`).
+   The `registerView` and `"tolerance"` rules below stand._ **Where the code lives.** The
+   engine-agnostic interface and its Babylon implementation are
    created here under `renderer/src/view/engine/`, the first files of the `view/` directory the
    brainstorm names. R02 adds the camera, scene builder and styles beside them. Only
    `view/engine/babylon/` may import `@babylonjs/*`; a test, not a lint override, enforces it
@@ -709,7 +794,12 @@ commands in their acceptance lines.
    it the probe saw Chromium block WebGPU for the page after the second crash, so the client never
    got the chance to report and recover.
 
-7. _Superseded by Design note 24 (2026-09-30)._ **The client requests its own adapter, and Babylon is handed it.** Researched 2026-09-29 in
+7. _Superseded by Design note 24 (2026-09-30). What survives without Babylon (marked in RM1
+   validation, 2026-10-02): the client vets its own adapter and the engine requests its device on
+   it with `requiredFeatures(adapter, overrides)`; an adapter is consumed by its first device, so a
+   rebuild asks for a fresh one; `RenderEngine.capabilities` is the device's features, so a
+   withheld feature reads as absent; a feature asked and not enabled is logged. The code cites
+   Design note 24 for these._ **The client requests its own adapter, and Babylon is handed it.** Researched 2026-09-29 in
    `@babylonjs/core` 9.28.0: `WebGPUEngine.initAsync` always calls `navigator.gpu.requestAdapter`
    itself (`Engines/webgpuEngine.pure.js:413-417`), takes no adapter or device, and silently drops
    requested features the adapter lacks (`:430-438`). So each engine creation installs a wrapper on
@@ -740,7 +830,15 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
    stays available on a software adapter, as the brainstorm confines the refusal to the
    photorealistic style.
 
-9. **Loss is ours to handle, not Babylon's.** Researched 2026-09-29: Babylon's own restore after
+9. _Amended by Design note 24 (marked in RM1 validation, 2026-10-02): there is no Babylon, so
+   `doNotHandleContextLost` and `engine._device` are gone. The engine watches its own device's
+   `lost` promise and logs `uncapturederror` (`webgpu/deviceLoss.ts`); `ResilientEngine`
+   (`resilientEngine.ts`, which `loadRenderEngine` returns) reports `device-lost`, disposes the
+   engine and every view's context, asks `requestAdapterOutcome` for a fresh adapter and makes a
+   new engine through the same import, then re-creates the views and fires `onRestored`. The
+   counts, the limit and the `adapter-withdrawn` rule below stand. RM1 validation: only the
+   creation counts as a loss when it fails, never a view or an `onRestored` listener that throws
+   (M5)._ **Loss is ours to handle, not Babylon's.** Researched 2026-09-29: Babylon's own restore after
    `device.lost` calls `initEngine()` without awaiting it (`abstractEngine.pure.js:253`), so its
    rebuild can run against the lost device, and it skips wrapped external textures (`:203`), which
    every view is. The adapter therefore passes `doNotHandleContextLost: true`, awaits
@@ -921,8 +1019,18 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     blocks silently. Node's own `fetch` bypasses Chromium, so the harness's main process makes no
     request itself.
 
-18. **What the sibling plans asked of the adapter, and how it is met.** Checked 2026-09-29 against
-    R02, R05, R06 and R12 as written.
+18. _Amended by Design notes 23 and 24 (marked in RM1 validation, 2026-10-02): the asks stand,
+    and are met by the adapter's own pipelines, not Babylon's._ As built: R02's matrices reach
+    `@group(0)`'s `Frame` unchanged and WebGPU's own orientation needs no flip, so
+    `useRightHandedSystem`, `alwaysSelectAsActiveMesh` and `_disableEngineYFlip` are gone (nothing
+    culls but R02 and R05); `depthBiasAway` goes into the pipeline's `depthBias` and
+    `depthBiasSlopeScale`, negated for reversed depth by the adapter itself, triangles only
+    (`materials.ts`, `depthBiasOf`), never `zOffset`; each canvas is configured with its preferred
+    format and the `-srgb` view format, drawn through the sRGB view; the packed cube is a texture of
+    the one creation path written by `queue.writeTexture` or `copyBufferToTexture`, with no
+    `_hardwareTexture`; the boundary test's directory is `view/engine/webgpu/`. The resource and
+    settings bullets stand. **What the sibling plans asked of the adapter, and how it is met.**
+    Checked 2026-09-29 against R02, R05, R06 and R12 as written.
     - _R02's projection is used as given._ Every material is our own WGSL, so R02's view rotation
       and projection reach the shader as uniforms and never pass through Babylon's camera: no half-Z
       conversion, and no Y flip, since each view's target sets `_disableEngineYFlip`. The scene is
@@ -959,8 +1067,22 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
       has one setting, `default`; a catalogue entry may declare the settings it renders at, and
       R12.T7.a adds the ladder's.
 
-19. **Offscreen targets, asynchronous pipelines, indirect work and per-pass time.** Asked by R07
-    and R11 at review (R07's HDR target and bloom chain, R11's stills and GPU-culled scatter, R05's,
+19. _Amended by Design notes 23 and 24 (marked in RM1 validation, 2026-10-02): the mechanisms
+    below are Babylon's and are superseded; the capabilities stand._ As built: a target is two
+    textures of the one creation path (`target.ts`: its colour with its mips, and its own
+    `depth32float` with `COPY_SRC` and `TEXTURE_BINDING`), drawn by the adapter's own render pass
+    and its mips generated after (`mipmaps.ts`); `createMaterialAsync` and `createComputeAsync` use
+    `device.createRenderPipelineAsync` and `createComputePipelineAsync`, and for a
+    `createMaterialAsync` material a pipeline not prepared is made asynchronously at its first
+    draw, the draw left out until ready (a `createMaterial` material makes it synchronously); an
+    indirect
+    draw is encoded in place, in submission order, in the same pass (`drawIndirect` or
+    `drawIndexedIndirect`), and a dispatch takes `dispatchWorkgroupsIndirect`; every timed pass (a
+    frame's, each post-process, dispatches, splats, mip chains; the one-off rounding probe is
+    untimed) carries `timestampWrites`, so nothing is `bracketed`, and the query set and a
+    ring of resolve buffers are made through the one creation path (`timing.ts`; RM1 validation
+    m5). **Offscreen targets, asynchronous pipelines, indirect work and per-pass time.** Asked by
+    R07 and R11 at review (R07's HDR target and bloom chain, R11's stills and GPU-culled scatter, R05's,
     R07's, R11's and R12's per-pass benchmarks). Checked 2026-09-29 in `@babylonjs/core` 9.28.0:
     - _Offscreen targets._ `createRenderTarget` builds a Babylon `RenderTargetTexture` of the given
       format (`rgba16float`, `rg11b10ufloat` or `rgba8unorm`) with `generateDepthBuffer` when
@@ -1004,7 +1126,21 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     the harness's copy of a canvas texture. Each resource records the kernel that last wrote it, so
     the presentation-only refusal of Design note 16 holds at the one place a result reaches the CPU.
 
-21. **Material state, instancing, storage buffers, texture writes and R06's bake passes.** Asked by
+21. _Amended by Design notes 23 and 24 (marked in RM1 validation, 2026-10-02): every Babylon
+    mechanism below is superseded; the state and its meaning stand._ As built (`materials.ts`,
+    `drawing.ts`): `depthWrite` and `colourWrites` are the pipeline's `depthWriteEnabled` and
+    `writeMask`; `additive` is colour (src-alpha, one) and `premultiplied` (one,
+    one-minus-src-alpha), each with alpha (zero, one), in the pipeline's blend state, with no
+    `onBind` and no mode 7; instances are vertex buffers stepped per instance and
+    `DrawItem.instanceCount` is the draw's count, not `thinInstanceSetBuffer`; storage buffers,
+    textures and samplers are `@group(2)` entries at the bindings their specifications declare,
+    a depth texture as `texture_depth_2d` through a `depth-only` view; a post-process binds the
+    colour drawn so far at `POST_PROCESS_BINDINGS` and its own `textures`, and a target's depth is
+    read by a full-screen draw (R05), not a post-process input; `writeTexture` is
+    `queue.writeTexture` on the registry's texture. `DepthSelfSample` stands, and RM1 validation
+    adds `ColourSelfSample` for a draw or post-process sampling its own target's colour (m10).
+    `WgslMaterialSpec.transparent` is removed (m7): draws are encoded in submission order.
+    **Material state, instancing, storage buffers, texture writes and R06's bake passes.** Asked by
     R02 (its Design notes 5, 9 and 12), R05 (Consumes; T11, T12.c) and R06 (Design note 21) in the
     reconciliation of 2026-09-29, and met here by the names they proposed. Checked in
     `@babylonjs/core` 9.28.0:
@@ -2066,7 +2202,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     others; it never replaces a standing fault, so the stub compiler's unnamed refusal that follows
     the wrapper's named one keeps the name, and a device loss outranks it. Its words, drafted for
     the owner with T5.c's: `GRAPHICS SHADER REFUSED: <effect> is not WGSL`
-    (`GRAPHICS_WORDS.shaderRefused`). A refused
+    (`GRAPHICS_WORDS.shaderRefused`). _Superseded (RM1 validation, 2026-10-02, decision item 1
+    of `decision-validation-items.md`):_ the words are now
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`, the compiler's messages going to the log only. A refused
     shader is a bug of ours, not the operator's; the fault makes it visible on the `LINK` panel.
   - `guardCreateEffect` takes any `EffectFactory` (the engine's `createEffect`, whatever its
     arguments), reports before it throws, and reads the effect's name from a string or from its
@@ -2372,7 +2510,8 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `createRenderPipelineAsync` (a colour target with and without depth, a canvas with depth), and
     any other at its first draw asynchronously, the draw left out until ready. Shader errors come
     from `getCompilationInfo`: logged with line and column, `shader-refused` dispatched with the
-    material's name (the words "is not WGSL" are now wrong; the status-wording lane owns them),
+    material's name (the words "is not WGSL" were wrong; _closed in RM1 validation, 2026-10-02:_
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn`),
     the material's draws left out; `createMaterialAsync` rejects with the messages.
   - A view now owns its `depth32float` (attachment only; a view's depth is still not read back).
     Mesh attributes are one `float32` buffer each; `assertMeshData` refuses ragged data and indices
@@ -2401,8 +2540,8 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `loadRenderEngine`.
   - The pass timer's `bracket` is removed; `PassTimes.bracketed` stays in the type, always
     `false`, for R05's and R12's records.
-  - Pending for the status-wording lane: `GRAPHICS SHADER REFUSED: <name> is not WGSL` now reports
-    a compile error, and `GlslShaderRefused` no longer exists.
+  - _Closed in RM1 validation (2026-10-02, decision item 1):_ `GRAPHICS SHADER REFUSED` now reads
+    `GRAPHICS SHADER REFUSED: <effect> did not compile, not drawn` for a compile error, and `GlslShaderRefused` no longer exists.
 - **Deviations in T9, as built.**
   - Files: `src/smoke/main.ts`, `preload.ts` and `result.ts` (the report's shape, its validation
     and the verdict, unit-tested, shared as types with the page); `src/renderer/smoke.html` and
@@ -2580,12 +2719,21 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     by hand for the owner**, on screen.
 - **T14, as built (2026-10-02, RTX 3080, Electron 44.4.3).**
   - **Gates:** `just ci` passes on the branch (T14's commit) and `just test-render` passes
-    headless: both variants, 62 checks each, with an empty cancelled list.
+    headless: both variants, 62 checks each, with an empty cancelled list. _Dated (RM1 validation,
+    m8): 62 was T14's branch. The integration branch at 964665b ran 75 a variant (R02.T14.c added
+    13), and after the RM1 validation fixes 82 (`default`) and 80 (`no-subgroups`): M2's path
+    and `subgroup_size` checks, m1's two and the mip check._
   - **Harness times (T9.e), on a quiet machine (load average 2.0 to 2.3):** ten runs of
     `just test-render`, build included, passed 10 of 10 in 3,043 to 3,290 ms (median 3,065 ms).
     Each of the two harness runs took 1,192 to 1,396 ms. These replace T9.e's provisional
     2.7 to 4.0 s.
-  - **Chunks** (`pnpm --filter hyperion build`, minified, gzip in brackets):
+  - **Chunks on T14's branch** (`pnpm --filter hyperion build`, gzip in brackets; _dated in RM1
+    validation, m8: these are T14's branch, not the integration branch, and "minified" was wrong,
+    the renderer output is not minified. Re-measured on the RM1 validation fix branch, 2026-10-02:
+    there is no `loadEngine-*.js`; `loadRenderEngine` is inside the shared `styles-*.js` (274,441 B,
+    85.3 kB gzip), which reaches `engine-*.js` (114,020 B, 31.5 kB) only by `import()`;
+    `index-*.js` is 1,312,596 B (314 kB) and names no engine chunk; `kernels-*.js` 4,748 B;
+    `smoke-*.js` 73,678 B. Laziness holds._):
     - the client's entry `index-*.js`: 1,452,726 B (360 kB). It imports `loadEngine-*.js`
       statically.
     - `loadEngine-*.js`: 47,871 B (13.8 kB). It reaches `engine-*.js` only by a dynamic
@@ -2615,3 +2763,127 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
   - **Not run:** the validation-layer soak, because the layer is not installed (T12 as built).
     The proposal to move `just test-render` into `ci` still waits for an Electron upgrade with no
     harness failure.
+- **Fixed in RM1 validation (2026-10-02)** (`validation-r01.md`, every finding):
+  - **M1, the readback guard (T8.f).** `dispatch` now records a storage texture as the kernel's
+    only when its declaration is writable, as it already did for buffers, so a bit-exact kernel
+    that reads a presentation-only texture no longer clears its mark, and a presentation-only
+    kernel that reads a texture no longer marks it. A write of part of a resource keeps a
+    presentation-only mark (`WriterRecord.wrotePart`): a CPU `writeBuffer` or `writeTexture`
+    clears the writer only when it covers every byte or texel (`coversBuffer`, `coversTexture`),
+    a packed-cube level (CPU or copied) only when the cube has one level, a kernel's storage
+    texture only when it has one level, and a splat (it adds to what is there) never. Tests:
+    `engine.test.ts` (the engine over `FakeDevice`) and `readback.test.ts`.
+  - **M5, a failed restore (T8.e, `ResilientEngine`).** Only `#create` is inside the rebuild's
+    `try` now. `#restore` runs after it and catches each view's re-creation and each
+    `onRestored` listener on its own, logging it, so a canvas with no context or a throwing
+    listener neither disposes the new engine nor counts a loss. Tests: two in
+    `resilientEngine.test.ts`, with the fake engine module's new `viewless` creations.
+  - **m11, the lost engine's memory releases.** `#release` disposes the engine before it
+    unsubscribes, so its `destroyed` events reach the allocation listeners (R05's tally). Test:
+    `resilientEngine.test.ts`, the fake engine raising `FAKE_ENGINE_MEMORY`'s release on disposal.
+  - **M3, the `shader-refused` words (T8.k, T5).** Decision item 1 of
+    `decision-validation-items.md` applied: `GRAPHICS SHADER REFUSED: <effect> did not compile,
+not drawn`, with no compiler text on the screen (it stays in the log). `status.ts`'s three
+    stale comments, `status.test.ts` and the guide's row are updated, and the T8.b, T8.k and T8.l
+    notes are marked closed. `ux_lint.py` on `status.ts`: 0 errors.
+  - **m10, colour self-sampling (T8.i, Design note 21).** `WebGpuRenderTarget.render` now also
+    refuses, with the new `ColourSelfSample` (in `types.ts`, beside `DepthSelfSample`; a Provides
+    addition), a sample of the target's own colour in the one pass whose attachment it is: a
+    draw's when the frame has no post-processes, else the last post-process's `textures`. A draw
+    with post-processes renders into an intermediate and may sample it (review). A post-process
+    whose shaders failed is dropped at encoding, which can route the draws to the target after
+    all; such a frame is already reported by `shader-refused`. Tests: `target.test.ts`.
+  - **m5, the pass timer's allocations (T8.g).** The query set is made through the registry
+    (`ResourceRegistry.createQuerySet`, counted as `other` at 8 bytes a query, destroyed at
+    disposal), with the first timed pass rather than in the constructor, so that a listener added
+    after creation sees it. The resolve and staging buffers are a ring of at most
+    `TIMING_FRAMES_IN_FLIGHT` (16) pairs of 1,024 B, made through the registry as needed and
+    reused, a pair returning to the ring however its read ends (review: a failed read lost it); a
+    resolve that finds every pair still being read is dropped with one warning. Each view's and
+    target's render resolves its own, so three canvases and a few targets hold several pairs at
+    once. Tests: `timing.test.ts`,
+    `engine.test.ts`. Not changed: `Drawing`'s `frame uniforms` buffer is still made in the
+    engine's constructor, before a caller can listen, so R05's tally sees its destruction and not
+    its creation (it should start from the engine's creation or ignore an unknown release).
+  - **m9, phantom pass times (T8.g).** `#submit` takes a mark of the timer's pending passes and
+    rolls back to it when the encoding throws, and the dispatch, splat and mip paths allocate
+    their timestamps inside the encoding, so a pass that was never submitted is never reported.
+    A dispatch's times wait for the next frame's resolve, unless the pending passes reach half
+    the query set (32), when `dispatch` resolves them, so a bake of more than 64 dispatches no
+    longer leaves the next frame untimed (review: resolving after every dispatch used up the
+    ring). Tests: `timing.test.ts`, `engine.test.ts`.
+  - **m7, Babylon vestiges (T8.l).** `WgslMaterialSpec.transparent`, Babylon's queue flag that
+    nothing read, is removed from the type, the wireframe's four specs, the harness's specs and
+    the tests; `blend`'s TSDoc now says that draws are encoded in submission order. The code
+    comments that cited superseded Design note 7 (`platform.ts`, `webgpu/engine.ts`,
+    `resilientEngine.ts`) cite Design note 24, and `webgpu.d.ts` no longer mentions Babylon.
+  - **m12, permission requests (main process, beside T1 and T2).** The client's main process now
+    refuses every permission request (`main/permissions.ts`, `denyPermissionRequests` on
+    `session.defaultSession` once `ready`, before the first window), as the TypeScript rules'
+    Electron section asks and as the smoke harness already did. Test: `permissions.test.ts`.
+  - **m4, `select_checks.py`'s routing (T9.e).** Besides `RENDER_PATHS`, every file that
+    `view/engine/catalogue.ts` imports (read from its relative imports at each run, so later
+    plans' catalogue sources are covered too) routes `just test-render`; an edit to
+    `view/wireframe/submit.ts` now does (checked by a scratch edit, reverted).
+  - **M2, the subgroup path asserted (T9.c, T10).** The `default` run's T9.c check now passes only
+    when the device has subgroups exactly when the adapter offers them, and each T10 twin checks
+    that it ran on the path the device's capabilities select (`T10 <name> runs on the <path>
+path`). On the subgroup path each u32 twin checks that `subgroup_size` is a power of two in
+    [4, 128] and at least the adapter's minimum. Verified by the validation's experiment: with the
+    `default` variant made to withhold subgroups (scratch edit, reverted), the run now fails T9.c.
+  - **m1, the T9.h check that could not fail.** Replaced: an asynchronous material prepared for
+    `rgba16float` is drawn, over a red draw, into an `rgba8unorm` target it was not prepared for;
+    the frame returns with its draw left out (red read back), and a later frame draws it once the
+    pipeline is ready (blue).
+  - **m6's mip check (T9.h).** A 3-mip `rgba16float` target of a flat colour reads that colour at
+    level 1, so `MipGenerator` is exercised on the GPU.
+  - **m2 and m3, the harness's verdict (T9).** `judgeSmokeRun` fails a run with no checks, and a
+    run whose page logged an uncaptured GPU error (`UNCAPTURED_GPU_ERROR`, the text
+    `logUncapturedErrors` writes; the broken-WGSL fixture's own are left out, its check failing
+    already). The run prints `uncaptured GPU errors <n>` and each error. Tests: `result.test.ts`.
+  - **Harness, after these fixes (2026-10-02, SwiftShader, headless):** both variants pass, 82
+    checks (`default`) and 80 (`no-subgroups`), 75 each before, no request out, `uncaptured GPU errors 0`; the fixtures exit 1
+    (`broken-wgsl`), 1 (`external-fetch`) and 2 (`--drop-adapter-switches`). Run as
+    `testRender.sh` after `pnpm --filter hyperion build`, outside the heavy-test lock, which
+    another lane's slow wasm suite held.
+  - **m6, the engine's unit tests (T8.k, T8.l).** `FakeDevice` now records bind-group layouts,
+    pipeline layouts, render and compute pipelines (with `auto` layouts made on demand), shader
+    modules (whose compile errors a test chooses), samplers, bind groups, query sets and command
+    encoders whose passes log every command; views know their texture. `encoding.test.ts` drives
+    the engine against it: the `frame` and `draw` layouts (`hasDynamicOffset: true`) and
+    `[frame, draw, resources]` pipeline layouts; `Drawing.encodeFrame`'s submission order with an
+    indirect draw in place and each draw's dynamic offset (0, 256, 512); a two-pass post-process
+    chain's attachments and `hdr-colour` inputs; a compile error becoming `shader-refused` and its
+    draws left out; `MipGenerator`'s levels and timestamps; and `createWebGpuEngine`'s feature
+    request with a withheld feature. `engine.test.ts` covers the dispatch's writer recording (M1)
+    and the timer (m5, m9), and T9.h gains a GPU mip check.
+  - **M4, Provides and the design notes (T8.l).** Provides' platform-and-status and interface
+    blocks are rewritten from the code as built (`CreateWebGpuEngine`, `BIND_GROUPS`,
+    `TextureBindingSpec`, `PostProcessItem`, `POST_PROCESS_BINDINGS`, `onRestored`,
+    `EngineUnavailable`, `LoadEngineOptions.gpu`, `createMaterialAsync`'s `meshes`,
+    `SamplerSpec.binding`, `PostProcessInput = "hdr-colour"`, the `shader-refused` fault, the
+    status events), replacing `CreateBabylonEngine`, `GlslShaderRefused` and the Babylon notes;
+    `checkChunks.mjs` is marked removed. Design notes 1, 9, 18, 19 and 21 are marked amended by
+    notes 23 and 24, each with its as-built mechanism, and note 7 says what of it survives. The
+    Scope bullets and the Non-goals' CSP sentence no longer describe a Babylon implementation.
+  - **m8, T14's records.** The chunk figures and the 62-check count are dated as T14's branch, with
+    a re-measure on this branch (no `loadEngine` chunk; `styles-*.js` reaches `engine-*.js` only
+    by `import()`; not minified) and the counts 75 (964665b) and 82 and 80 (after these fixes).
+  - **Hardware, after these fixes (2026-10-02, RTX 3080, hidden and offscreen, the client's
+    Vulkan switches with `--disable-vulkan-surface` and the timing toggle):** both variants pass,
+    82 checks (`default`) and 80 (`no-subgroups`), `uncaptured GPU errors 0`, no request out. The
+    `default` run is on the subgroup path with `subgroup_size` 32 (minimum 32), the pending
+    pipeline and mip checks pass, and the timer reads `full` with 12 of 12 pass times off the
+    65,536 ns grid. Re-run after the review fixes: the same counts on both platforms (SwiftShader 82 and 80, RTX 3080 82 and 80), `uncaptured GPU errors 0`, and on the 3080 14 of 14 pass times off the grid, the dispatches now resolved with the next frame.
+  - **Review of these fixes, as built.** The typescript, UX and plan-conformance reviews' findings
+    are fixed as recorded above (`ColourSelfSample` narrowed, the timer's ring and dispatch
+    resolve, a failed read returning its pair, the check counts, Design note 19's wording, the
+    Provides omissions), and m12 also installs a permission-check handler that answers no (Electron
+    grants checks otherwise). Deviation: m1's check forces a pipeline to be made at the first draw
+    by an unprepared target format (`rgba8unorm`), not by a mesh left out of `meshes`; both reach
+    the same path, and the format needs no second mesh.
+  - **Open, for the owner or a status-wording lane:** a view whose canvas gives no WebGPU context
+    on a restore (M5) is logged and left drawing nothing, while the status reads nominal. Showing
+    it would need a new fault (say `GRAPHICS VIEW NOT AVAILABLE: <view>`), which is guide
+    nomenclature, so it is not added here. Also for the owner: `GRAPHICS SHADER REFUSED: <effect>`
+    shows the material's code name (`occluderSphere`), which may want a display name.

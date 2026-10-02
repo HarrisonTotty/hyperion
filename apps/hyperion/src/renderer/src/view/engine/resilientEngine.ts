@@ -6,7 +6,7 @@
  * On a loss the engine reports `device-lost` to the status store, disposes the lost engine and
  * every view's context and target, asks for a fresh adapter (an adapter is consumed by its first
  * device, so the old one is never reused), and loads a new engine through the same import (R01
- * Design notes 7 and 9). A null adapter means Chromium has withdrawn WebGPU: the status becomes
+ * Design notes 9 and 24). A null adapter means Chromium has withdrawn WebGPU: the status becomes
  * `disabled` with cause `adapter-withdrawn`. After `DEVICE_LOSS_LIMIT` losses it stops, and the
  * status is `disabled` with cause `device-losses`. Views survive a rebuild, re-created at their
  * sizes; every other handle belongs to the lost engine, so the caller makes them again when
@@ -344,17 +344,21 @@ export class ResilientEngine implements RenderEngine {
     ];
   }
 
-  /** Disposes the current engine and every view's attachments to it. */
+  /**
+   * Disposes the current engine and every view's attachments to it, then stops forwarding what it
+   * reports: its disposal's `destroyed` events reach the allocation listeners, so that a tally
+   * built on them lets go of the lost device's bytes.
+   */
   #release(): void {
-    for (const unsubscribe of this.#unsubscribe) {
-      unsubscribe();
-    }
-    this.#unsubscribe = [];
     for (const view of this.#views) {
       view.attach(null);
     }
     this.#inner?.dispose();
     this.#inner = null;
+    for (const unsubscribe of this.#unsubscribe) {
+      unsubscribe();
+    }
+    this.#unsubscribe = [];
   }
 
   /**
@@ -383,22 +387,32 @@ export class ResilientEngine implements RenderEngine {
         this.#status.dispatch({ kind: "adapter-withdrawn" });
         return;
       }
+      // Only the creation is a loss when it fails: what the restore runs afterwards (a view's
+      // context, a caller's listener) is the new engine's caller's, and the engine stays.
+      let inner: RenderEngine;
       try {
         // oxlint-disable-next-line no-await-in-loop
-        const inner = await this.#create(outcome);
-        this.#restore(outcome, inner);
-        return;
+        inner = await this.#create(outcome);
       } catch (error: unknown) {
         console.error("re-creating the engine after a device loss failed:", error);
         lost = {
           reason: "unknown",
           message: error instanceof Error ? error.message : "the engine could not be made",
         };
+        continue;
       }
+      this.#restore(outcome, inner);
+      return;
     }
   }
 
-  /** Makes `inner` current after a rebuild, its views first, then tells the store and callers. */
+  /**
+   * Makes `inner` current after a rebuild, its views first, then tells the store and callers.
+   *
+   * @remarks
+   * A view whose canvas gives no context, or a listener that throws, is logged and passed over on
+   * its own: neither is a loss, and the others are still restored and told.
+   */
   #restore(outcome: AdapterOutcome & { readonly kind: "adapter" }, inner: RenderEngine): void {
     if (this.#isDisposed()) {
       inner.dispose();
@@ -406,13 +420,21 @@ export class ResilientEngine implements RenderEngine {
     }
     this.#adopt(inner);
     for (const view of this.#views) {
-      view.attach(inner.createView(view.canvas, view.name));
+      try {
+        view.attach(inner.createView(view.canvas, view.name));
+      } catch (error: unknown) {
+        console.error(`view ${view.name} could not be re-created after a device loss:`, error);
+      }
     }
     this.#status.dispatch({ kind: "device-restored", outcome });
-    // The restore writes the adapter's capabilities; the device's are what holds (Design note 7).
+    // The restore writes the adapter's capabilities; the device's are what holds (Design note 24).
     this.#status.dispatch({ kind: "device-capabilities", capabilities: inner.capabilities });
     for (const listener of this.#restoredListeners) {
-      listener();
+      try {
+        listener();
+      } catch (error: unknown) {
+        console.error("an onRestored listener failed:", error);
+      }
     }
   }
 }
