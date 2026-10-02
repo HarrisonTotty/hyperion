@@ -394,6 +394,63 @@ impl StarModel {
         })
     }
 
+    /// The star's phase and mass at `t`, or `None` if it has not formed by then: those of
+    /// [`StarModel::state_at`], but with a track's mass read at its age at the epoch and the years
+    /// since as two parts ([`Track::mass_at_split`]), so that it changes smoothly in time rather
+    /// than in steps of one unit in the last place of a gigayear age (plan 14, P14.T45.d). It is
+    /// the mass a planet's orbit widens with.
+    ///
+    /// # Panics
+    ///
+    /// As [`StarModel::state_at`].
+    #[must_use]
+    pub(crate) fn phase_and_mass_at(&self, t: UniverseTime) -> Option<(Phase, SolarMasses)> {
+        let years = t.since_epoch().as_julian_years_f64();
+        if self.age_at_epoch.value() + years <= 0.0 {
+            return None;
+        }
+        Some(match &self.evolution {
+            Evolution::Track(track) => {
+                let (phase, mass) = track.mass_at_split(self.age_at_epoch.value(), years);
+                (phase, SolarMasses::new(mass))
+            }
+            Evolution::Cooling => {
+                let state = self.cooling_at(self.age_at(t));
+                (state.phase(), state.mass())
+            }
+        })
+    }
+
+    /// The clock times strictly between `from` and `to` at which the star's mass may change its
+    /// slope, ascending and without repeats: its track's segment boundaries and knot ages
+    /// ([`Track::mass_breaks`]), and none for an object below 0.1 M☉, whose cooling fits keep its
+    /// mass (plan 14, P14.T45.d).
+    ///
+    /// An age maps to the clock time `EPOCH` + (age − [`StarModel::age_at_epoch`]) ×
+    /// 31,557,600 s, floored to the nanosecond ([`Span::from_seconds_f64`]), the arithmetic of the
+    /// fate transform's clock deaths. [`StarModel::age_at`] of that time can differ from the age
+    /// by the rounding of an age of gigayears, up to half a minute at 8–16 Gyr, so the break falls
+    /// that close to the kink: a panel that meets a kink a time δ off integrates it with an error
+    /// of about Δṅ δ², nothing at that scale. An age off the clock gives no break.
+    #[must_use]
+    pub(crate) fn mass_breaks(&self, from: UniverseTime, to: UniverseTime) -> Vec<UniverseTime> {
+        let Evolution::Track(track) = &self.evolution else {
+            return Vec::new();
+        };
+        let (from_age, to_age) = (self.age_at(from).value(), self.age_at(to).value());
+        let mut breaks: Vec<UniverseTime> = track
+            .mass_breaks(from_age, to_age)
+            .filter_map(|age| {
+                Span::from_seconds_f64((age - self.age_at_epoch.value()) * SECONDS_PER_JULIAN_YEAR)
+                    .and_then(|span| UniverseTime::EPOCH.checked_add(span))
+            })
+            .filter(|&t| from < t && t < to)
+            .collect();
+        breaks.sort_unstable();
+        breaks.dedup();
+        breaks
+    }
+
     /// The age at which the star dies, Julian years since its onset of collapse, or `None` for an
     /// object below 0.1 M☉, which never dies.
     ///
@@ -3082,6 +3139,108 @@ mod tests {
                 .unwrap(),
         ] {
             assert_eq!(star.age_at(t), record.age_at(t));
+        }
+    }
+
+    /// A 2 M☉ star `before_death` years before its white dwarf's birth at the epoch.
+    fn two_solar_masses_before_death(before_death: f64) -> StarModel {
+        let old = StarModel::new(
+            SolarMasses::new(2.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(5e9),
+        )
+        .unwrap();
+        let death = old.lifetime().expect("a 2 M☉ star dies");
+        StarModel::new(
+            SolarMasses::new(2.0),
+            Composition::SOLAR,
+            StarDraws::median(),
+            Years::new(death.value() - before_death),
+        )
+        .unwrap()
+    }
+
+    fn seconds_from_epoch(seconds: i64) -> UniverseTime {
+        UniverseTime::EPOCH
+            .checked_add(Span::from_seconds(seconds))
+            .unwrap()
+    }
+
+    /// P14.T45.d: the split-age mass has `state_at`'s phase, its mass bit for bit at the epoch
+    /// and for a remnant, and elsewhere differs from it by under one step of the summed age's
+    /// staircase, Ṁ × one unit in the last place of the age, while falling every second.
+    #[test]
+    fn the_split_age_mass_is_the_state_s_without_its_staircase() {
+        let star = two_solar_masses_before_death(2_775.0);
+        let now = star.state_at(UniverseTime::EPOCH).unwrap();
+        assert_eq!(now.phase(), Phase::ThermallyPulsingAgb);
+        let (phase, mass) = star.phase_and_mass_at(UniverseTime::EPOCH).unwrap();
+        assert_eq!(phase, now.phase());
+        assert_same_bits(mass.value(), now.mass().value());
+        let step = now.mass_loss_rate().value() * f64::EPSILON * star.age_at_epoch().value();
+        let (mut previous, mut stairs) = (mass.value(), 0);
+        let mut last_state = now.mass().value();
+        for second in 1..=64 {
+            let t = seconds_from_epoch(1_000_000 + second);
+            let state = star.state_at(t).unwrap();
+            let (phase, mass) = star.phase_and_mass_at(t).unwrap();
+            assert_eq!(phase, state.phase());
+            assert!(
+                (mass.value() - state.mass().value()).abs() <= 2.0 * step,
+                "{t}: {} against {}",
+                mass.value(),
+                state.mass().value()
+            );
+            assert!(
+                mass.value() < previous,
+                "{t}: the split mass falls every second"
+            );
+            stairs += u32::from(state.mass().value().total_cmp(&last_state).is_eq());
+            previous = mass.value();
+            last_state = state.mass().value();
+        }
+        // The summed age holds a time to about 7.5 s here, so its mass repeats.
+        assert!(stairs > 32, "{stairs} repeats of the summed age's mass");
+        let white_dwarf = two_solar_masses_before_death(-2e4);
+        for t in [UniverseTime::EPOCH, seconds_from_epoch(123_456_789)] {
+            let state = white_dwarf.state_at(t).unwrap();
+            let (phase, mass) = white_dwarf.phase_and_mass_at(t).unwrap();
+            assert_eq!(phase, state.phase());
+            assert_same_bits(mass.value(), state.mass().value());
+        }
+    }
+
+    /// P14.T45.d: a star's mass breaks in a span are its track's knot ages and segment boundaries
+    /// there, mapped to the clock: strictly inside the span, ascending and without repeats.
+    #[test]
+    fn mass_breaks_are_the_track_s_inside_the_span_ascending() {
+        // Late on the thermally pulsing AGB, whose knots crowd towards its end, over the ten
+        // millennia to the end of the clock window.
+        let star = two_solar_masses_before_death(2_775.0);
+        let (from, to) = (
+            seconds_from_epoch(-315_576_000_000),
+            seconds_from_epoch(31_557_600_000),
+        );
+        let breaks = star.mass_breaks(from, to);
+        let Evolution::Track(track) = &star.evolution else {
+            panic!("a 2 M☉ star follows a track")
+        };
+        let ages: Vec<f64> = track
+            .mass_breaks(star.age_at(from).value(), star.age_at(to).value())
+            .collect();
+        assert!(breaks.len() > 5, "{} breaks", breaks.len());
+        assert!(breaks.len() <= ages.len());
+        assert!(breaks.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(breaks.iter().all(|&b| from < b && b < to));
+        // Each break is a knot's or a boundary's age, to the rounding of the age.
+        for b in &breaks {
+            let age = star.age_at(*b).value();
+            let nearest = ages
+                .iter()
+                .map(|a| (a - age).abs())
+                .fold(f64::INFINITY, f64::min);
+            assert!(nearest <= 4.0 * f64::EPSILON * age, "{b}: {nearest} yr off");
         }
     }
 }

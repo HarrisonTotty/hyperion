@@ -1675,6 +1675,40 @@ fn few_evolving_orbits_fall_to_the_smallest_drift_cell() {
     );
 }
 
+/// On the sample's drifting planets, the 16-point rule on each interval between the law's break
+/// points agrees with the 32-point rule on the same intervals to the drift module's tolerance:
+/// 10 µm along the orbit, plus 4 · 2⁻⁵² of the phase gained since the anchor (P14.T45.d).
+#[test]
+fn the_phase_integral_agrees_with_a_finer_rule_on_the_sample() {
+    let mut checked = 0;
+    let later = UniverseTime::from_julian_years(700).expect("in the window");
+    let earlier = UniverseTime::from_julian_years(-990).expect("in the window");
+    for (ctx, system, record) in drifting_records(UniverseTime::EPOCH) {
+        let Some(body) = system.body(record.index()) else {
+            continue;
+        };
+        if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+            continue;
+        }
+        let host = fate_host(ctx, system.zone_of(body));
+        let fate = system.fate_of(body, &host);
+        for t in [earlier, UniverseTime::EPOCH, later] {
+            let Some([by16, by32, gained, along]) = fate.quadrature_at(t) else {
+                continue;
+            };
+            let error = (by16 - by32).abs() * along;
+            let tolerance = 1e-5 + 4.0 * f64::EPSILON * gained.abs() * along;
+            assert!(
+                error <= tolerance,
+                "{:?} at {t}: {error:e} m against {tolerance:e} m",
+                record.index()
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 100, "{checked} checked");
+}
+
 /// A moon's record holds until its planet's next change of state or segment, not its planet's
 /// drift cell's end (P14.T45.a): a moon that does not recede has no drift and the same
 /// `valid_until` as its planet's `changes_at`.

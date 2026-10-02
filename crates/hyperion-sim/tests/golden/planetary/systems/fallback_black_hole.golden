@@ -1,4 +1,4 @@
-# generator_version = 17
+# generator_version = 18
 fallback_black_hole 0x8200b2e00000000a: OldThinDisc, 1 stars
 fe_h = 0x3fb4f7e2726babd0  # 0.08190741818877645
 age_at_epoch_yr = 0x41ba11f1aeb1df1d  # 437383598.6948107

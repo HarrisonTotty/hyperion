@@ -8,16 +8,40 @@
 //! **The phase is the integral of the mean motion.** An evolving orbit's mean anomaly is
 //! M(t) = M(anchor) + ∫ n dt' from its anchor: the epoch for an orbit present then, else the
 //! nearest end of its segment. A body then moves at its own elements' Kepler speed, and its
-//! phase does not depend on where the clock's origin sits. That is exact for the receding moon,
-//! whose integral is in closed form, and true to the one-panel quadrature for circularisation and
-//! mass loss, whose error across the kinks of the host's track changes the speed slightly and
-//! steps the velocity at each cell's end (the plan's P14.T45 as-built entry). [`EvolvingLaw`] is a law with its
-//! anchor, and its phase is the anchored elements' own phase plus [`EvolvingLaw::phase_excess`],
-//! ∫ (n − n at the anchor) dt'.
+//! phase does not depend on where the clock's origin sits. The receding moon's integral is in
+//! closed form. Circularisation and mass loss integrate by the 16-point Gauss–Legendre rule on
+//! each interval between the law's break points ([`composite_excess`], P14.T45.d): the host's
+//! track knots and segment boundaries, its sudden deaths and the eccentricity floor's corners.
+//! Between two of them the mean motion is smooth (a polynomial of degree 6 in time where a host's
+//! winds alone move it, since n ∝ M² and the track's mass is a cubic in age between knots), so
+//! the rule is exact there to rounding, and a fixed set of panels makes the integral one function
+//! of time. The one corner left unbroken is the track's floor at the core mass, which an envelope
+//! run down at the AGB's end could meet inside a knot interval; the rule is then exact only to
+//! that corner's error, as T45.a's one panel was at every kink. The host's mass is read smoothly in time for it
+//! ([`StarModel::phase_and_mass_at`](crate::stellar::system::StarModel::phase_and_mass_at)):
+//! read at a summed age of gigayears it steps every few seconds, and the steps' noise in the
+//! integral stepped the velocity at cell ends by up to 10⁻² m s⁻¹ on AGB hosts. [`EvolvingLaw`] is
+//! a law with its anchor, and its phase is the anchored elements' own phase plus
+//! [`EvolvingLaw::phase_excess`], ∫ (n − n at the anchor) dt'.
+//!
+//! **What the integral holds to.** Inside the clock window the law's own phase error, times the
+//! along-track factor a √((1 + e) ÷ (1 − e)), is at most a tenth of [`DRIFT_TOLERANCE`] (10 µm),
+//! plus a rounding allowance of 4 · 2⁻⁵² times the phase ∫ n dt the panels add, times the same
+//! factor: 4 to 8 units in the last place of the phase gained since the anchor, of the order a
+//! fixed orbit's phase also carries. The allowance is the phase's and not the excess's because
+//! each evaluation of n carries a relative rounding of a few 2⁻⁵³ before the anchor's mean motion
+//! is subtracted. It dominates beyond days from the anchor: at the window's edge it is about
+//! 0.2 m for an Earth formed at 3 au about a late-AGB host of 2 M☉, and the errors measured on
+//! evolved hosts of 1–3 M☉ stay under a fifth of it. Before the window's start the panels are
+//! millennia long and the rounding of the evaluations accumulates past it: the bound there is
+//! 16 · 2⁻⁵² of the phase gained. For that Earth, the error was 2.1 times the 4 · 2⁻⁵² allowance
+//! at −10⁵ yr (69 m, with 6.7 × 10⁴ rad gained), and at the source horizon's start, −(H + L),
+//! 0.87 times it (107 m, with 2.6 × 10⁵ rad gained; the 16 · 2⁻⁵² bound is 490 m).
 //!
 //! **The trajectory is a model on aligned cells.** The model holds on dyadic cells [tᵣ, tₑ) of
 //! S = 2^k s, 2^[`DRIFT_CELL_MIN_LOG2`] to 2^[`DRIFT_CELL_MAX_LOG2`], aligned to the epoch and
-//! cut at the segment's ends and the clock window's.
+//! cut at the segment's ends, the clock window's and the law's break points, so that no kink of
+//! the law lies inside a cell.
 //! - **Inside a cell:** a = aᵣ + ȧ Δt, e = eᵣ + ė Δt and M = Mᵣ + nᵣ Δt + ½ ṅ Δt²
 //!   ([`KeplerElements::drifting_state_at`]).
 //! - **The rates:** secants that meet the law at both ends of the cell.
@@ -33,6 +57,7 @@
 //! orbit. The record's `valid_until` is the cell's end, or the next change of the body's state or
 //! segment if earlier.
 
+use std::cmp::Ordering;
 use std::f64::consts::TAU;
 
 use crate::coords::{SystemVector, SystemVelocity};
@@ -210,6 +235,14 @@ pub(crate) trait EvolvingLaw {
     /// `from`: the shape of the phase inside one cell, computed there so that the cell's check
     /// does not difference two integrals from a distant anchor.
     fn local_excess(&self, from: UniverseTime, to: UniverseTime, n_from_rad_per_s: f64) -> f64;
+
+    /// The law's last break point at or before `t` and its first after it, if any: the times at
+    /// which its mean motion may change its slope, where [`drift_cell`] cuts a cell as at a
+    /// segment's ends (P14.T45.d). A law smooth throughout, as the receding moon's, has none.
+    fn breaks_around(&self, t: UniverseTime) -> (Option<UniverseTime>, Option<UniverseTime>) {
+        let _ = t;
+        (None, None)
+    }
 }
 
 /// The mean motion 2π ÷ P of `orbit`, rad s⁻¹.
@@ -218,27 +251,77 @@ fn mean_motion(orbit: &KeplerElements) -> f64 {
     TAU / orbit.period().value()
 }
 
-/// ∫ (n(t') − n at the anchor) dt' from `anchor` to `t` for a law whose mean motion at a time is
-/// `mean_motion_at`, by the 16-point Gauss–Legendre rule on the one panel between them, its nodes
-/// in their table's order: what circularisation and mass loss use (P14.T45.a).
+/// ∫ (n(t') − `n_from_rad_per_s`) dt' from `from` to `to`, rad, for a law whose mean motion at a
+/// time is `mean_motion_at` and is smooth between `breaks` (ascending): the 16-point
+/// Gauss–Legendre rule on each interval between the breaks strictly inside the span, its nodes in
+/// their table's order, the intervals summed in ascending time order. What circularisation and
+/// mass loss use (P14.T45.d).
+///
+/// The panels depend on the span and the breaks alone, so the integral is one fixed function of
+/// its two ends. A span that runs back in time gives the negated integral of the same span
+/// forwards, so the two directions agree to the bit.
 #[must_use]
-pub(crate) fn gauss_legendre_excess(
-    anchor: UniverseTime,
-    t: UniverseTime,
-    n_anchor_rad_per_s: f64,
+pub(crate) fn composite_excess(
+    from: UniverseTime,
+    to: UniverseTime,
+    n_from_rad_per_s: f64,
+    breaks: &[UniverseTime],
     mean_motion_at: impl Fn(UniverseTime) -> f64,
 ) -> f64 {
-    if anchor == t {
-        return 0.0;
-    }
-    let span = seconds_between(anchor, t);
-    let half = 0.5 * span;
+    composite_excess_by(
+        (&GL16_NODES, &GL16_WEIGHTS),
+        from,
+        to,
+        n_from_rad_per_s,
+        breaks,
+        mean_motion_at,
+    )
+}
+
+/// [`composite_excess`] by the Gauss–Legendre rule of `rule`'s nodes and weights on [−1, 1]: the
+/// tests compare the 16-point rule with the 32-point one on the same intervals.
+#[must_use]
+pub(crate) fn composite_excess_by(
+    rule: (&[f64], &[f64]),
+    from: UniverseTime,
+    to: UniverseTime,
+    n_from_rad_per_s: f64,
+    breaks: &[UniverseTime],
+    mean_motion_at: impl Fn(UniverseTime) -> f64,
+) -> f64 {
+    let (low, high, sign) = match from.cmp(&to) {
+        Ordering::Equal => return 0.0,
+        Ordering::Less => (from, to, 1.0),
+        Ordering::Greater => (to, from, -1.0),
+    };
+    let first = breaks.partition_point(|&at| at <= low);
+    let last = breaks.partition_point(|&at| at < high).max(first);
     let mut sum = 0.0;
-    for (node, weight) in GL16_NODES.iter().zip(&GL16_WEIGHTS) {
+    let mut left = low;
+    for &right in breaks[first..last].iter().chain(std::iter::once(&high)) {
+        sum += panel_excess(rule, left, right, n_from_rad_per_s, &mean_motion_at);
+        left = right;
+    }
+    sign * sum
+}
+
+/// ∫ (n(t') − `n_from_rad_per_s`) dt' from `from` to the later `to` by the Gauss–Legendre rule
+/// `rule` on the one panel between them, its nodes in their table's order.
+#[must_use]
+fn panel_excess(
+    (nodes, weights): (&[f64], &[f64]),
+    from: UniverseTime,
+    to: UniverseTime,
+    n_from_rad_per_s: f64,
+    mean_motion_at: &impl Fn(UniverseTime) -> f64,
+) -> f64 {
+    let half = 0.5 * seconds_between(from, to);
+    let mut sum = 0.0;
+    for (node, weight) in nodes.iter().zip(weights) {
         let at = Span::from_seconds_f64(half * (1.0 + node))
-            .and_then(|offset| anchor.checked_add(offset))
+            .and_then(|offset| from.checked_add(offset))
             .expect("a node between two times of the clock is a time of the clock");
-        sum += weight * (mean_motion_at(at) - n_anchor_rad_per_s);
+        sum += weight * (mean_motion_at(at) - n_from_rad_per_s);
     }
     half * sum
 }
@@ -311,13 +394,12 @@ fn fit(law: &impl EvolvingLaw, start: UniverseTime, end: UniverseTime) -> Fit {
         "a drift cell's rates are finite"
     );
     // Inside the cell the law's phase is taken as the cell's own integral. What it falls short of
-    // the integral from the anchor by is that integral's own error over its long span: rounding,
-    // about 10⁻¹⁶ of the phase gained since the anchor, and for a law integrated by quadrature
-    // (circularisation, mass loss) the quadrature's error across the kinks of the host's track,
-    // which one panel does not resolve. It belongs to the law's evaluation and not to the model:
-    // it is shared out as the model shares it, quadratically, so that the check measures the
-    // model's curvature alone. The receding moon's integral is in closed form, so there it is
-    // rounding alone.
+    // the integral from the anchor by is rounding alone, about 10⁻¹⁶ of the phase gained since
+    // the anchor: the receding moon's integral is in closed form, and the composite rule of
+    // circularisation and mass loss is exact to rounding between the break points the cell lies
+    // between (P14.T45.d). It belongs to the law's evaluation and not to the model: it is shared
+    // out as the model shares it, quadratically, so that the check measures the model's
+    // curvature alone.
     let shortfall = surplus - law.local_excess(start, end, n_start);
     let mut worst: f64 = 0.0;
     for fraction in 1..=3 {
@@ -360,18 +442,20 @@ fn fit(law: &impl EvolvingLaw, start: UniverseTime, end: UniverseTime) -> Fit {
 pub(crate) struct DriftCell {
     /// The model on the cell.
     pub(crate) orbit: DriftingOrbit,
-    /// The end of the aligned cell, cut only at `START` for a time before it: the time the
-    /// record's elements hold until, unless the body's state or segment changes first.
+    /// The end of the aligned cell, cut at the law's next break point and, for a time before
+    /// `START`, at `START`: the time the record's elements hold until, unless the body's state or
+    /// segment changes first.
     pub(crate) end: UniverseTime,
     /// The cell's size, log₂ s.
     pub(crate) log2: u32,
 }
 
 impl DriftCell {
-    /// The time the record at `t` holds until, if any: the cell's end, or `next`, the body's next
-    /// change of state or segment, if earlier. Inside the clock window it is stated only where it
-    /// falls in the window, as every record's `valid_until` is; before `START` it is always stated,
-    /// since a cell there ends at `START` or earlier and its model holds no further (P14.T45.a).
+    /// The time the record at `t` holds until, if any: the cell's end, cut at the law's next break
+    /// point (P14.T45.d), or `next`, the body's next change of state or segment, if earlier.
+    /// Inside the clock window it is stated only where it falls in the window, as every record's
+    /// `valid_until` is; before `START` it is always stated, since a cell there ends at `START` or
+    /// earlier and its model holds no further (P14.T45.a).
     #[must_use]
     pub(crate) fn holds_until(
         &self,
@@ -397,7 +481,9 @@ fn aligned_start(t: UniverseTime, log2: u32) -> i64 {
 ///
 /// The clock window's ends cut a cell on either side: a time inside the window is held to a cell
 /// cut at them, and a time outside to one that ends at `START` or starts at `END`, so that every
-/// time of one cut cell gets the same record.
+/// time of one cut cell gets the same record. The law's break points around `t` cut it as
+/// `from` and `until` do (P14.T45.d): every time between two breaks sees the same two, so the
+/// cells still nest.
 #[must_use]
 pub(crate) fn drift_cell(
     law: &impl EvolvingLaw,
@@ -406,6 +492,7 @@ pub(crate) fn drift_cell(
     until: Option<UniverseTime>,
 ) -> DriftCell {
     let (before, after) = (t < ClockWindow::START, t > ClockWindow::END);
+    let (break_before, break_after) = law.breaks_around(t);
     let mut log2 = DRIFT_CELL_MAX_LOG2;
     loop {
         let size = 1_i64 << log2;
@@ -420,7 +507,11 @@ pub(crate) fn drift_cell(
         } else {
             cell_end
         };
+        let cell_end = break_after.map_or(cell_end, |cut| cell_end.min(cut));
         let mut start = cell_start.max(from);
+        if let Some(cut) = break_before {
+            start = start.max(cut);
+        }
         if !before {
             start = start.max(ClockWindow::START);
         }
