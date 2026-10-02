@@ -4293,3 +4293,53 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
   white dwarfs, neutron stars, black holes and no remnant, without a luminosity, or below the
   corrections' last row (1,710 K). Its golden change is the three rows of the server's
   `systems_in_range_briefs.golden` that gained the field.
+
+### Asked by rendering plan R06
+
+Drafted by R06.T1 (2026-10-02) for this plan's owner to accept, as the rendering roadmap's
+"Awaiting the owner" says. Rendering plan R06 (`docs/agent/plans/rendering-and-planets/06-the-sky.md`,
+"Named asks of galaxy plan 06" and Design note 19) consumes each with an interim of its own until it
+lands here; none changes this plan's output until the owner accepts it, and each that does is a
+generator-version change made here, not in R06.
+
+- **A1, `BriefModel` over the retarded interval** (R06's open question 17). The sky places every
+  star at its emitted time, up to some 2.6 × 10⁵ years before the query's (the light time across
+  the galaxy), while `BriefModel`'s routes are tested only over the clock window. Ask: a
+  constructor such as `BriefModel::new_for(galaxy, record, earliest_emitted)` whose routes are
+  tested from the earliest emitted time to +H. **R06's interim:** for an emitted time outside the
+  clock window the census reads `SystemStars::generate(..).brief_at`, as plan 12's observed mode
+  does (P12.T0's finding), which is exact and dearer. **Switched by:** R06.T8.b's brief, the one
+  call site, once A1 lands.
+- **A2, the Humphreys–Davidson limit** (R06's open questions 13 and 17). Under the default
+  `WindRecipe::Modern` (`stellar/sse/wind.rs`), a star beyond the limit loses the constant
+  `MODERN_LBV` (1.5 × 10⁻⁴ M☉/yr), below the Nieuwenhuijzen–de Jager rate it replaces on the cool
+  side (8.1 × 10⁻⁴ at log L 6.3 and 4,000 K), so crossing the limit slows the wind and the tracks
+  keep cool supergiants above log L 5.8 for some 2 × 10⁵ years, about 1.3 mag brighter at the top
+  than any observed star. Ask: a ruling on whether the tracks keep them. R06's research lean
+  (medium-high): enforce the limit through mass loss, not a photometry clamp, by flooring the
+  Modern rate at the cool-side rate and adding Hurley, Pols and Tout's LBV term at their log L 5.78
+  line (Humphreys and Davidson 1979 and 1994; Davies, Crowther and Beasor 2018 place red
+  supergiants' upper limit near log L 5.5, which is left as it is); layer E's brightest then
+  reaches M_V ≈ −9.7. **R06's interim:** the census follows the tracks as they stand, and the cap
+  rule reads R06's brightness envelope, so a ruling moves the caps with no change in R06.
+  **Switched by:** none needed (R06.T6.b's envelope and R06.T7's caps re-read the tracks).
+- **A3, protostars dark in V** (R06's open question 13). `absolute_magnitude_v` treats a Class 0/I
+  protostar (`premain::protostar_class`) as a living star with a V magnitude, but its envelope's
+  extinction (A_V ≳ 100 for Class 0, tens to about 100 for Class I; André, Ward-Thompson and
+  Barsony 1993; Whitney et al. 2003) hides it in V. Ask: Class 0/I has no absolute V magnitude;
+  Class II takes no circumstellar term, the birth cloud's extinction being plan 07's. R06's lean
+  (high). **R06's interim:** the census and the luminosity function apply the rule themselves in
+  one function, `sky::photometry::is_dark_in_v`. **Switched by:** R06.T5.a's `sky::photometry`,
+  which then calls this plan's rule.
+- **A4, V magnitudes of white dwarfs and of M giants.** `photometry.rs` gives white dwarfs no
+  absolute V, and reads the bolometric correction at the star's temperature whatever its gravity,
+  so a late M giant is up to 1.7 mag too bright at M6 III (the module's own note). Ask: an absolute
+  V for white dwarfs from the Montreal cooling grids (Bédard et al. 2020, ApJ 901, 93), and a
+  gravity-dependent BC_V for cool giants (R06's lean, medium-high: Fluks et al. 1994 or Worthey and
+  Lee 2011 for M giants, Levesque et al. 2005's column for supergiants). The ask includes a check
+  of the module's "Straižys and Kuriliene (1981, Ap&SS 80, 353, Table III)" citation for the M
+  giants' corrections, as the rendering roadmap's asks table records. **R06's interim:** a white
+  dwarf is left out of the census and counted in its `without_photometry` tally, which the `sky`
+  response reports (and the view labels `WD NOT MODELLED`); M giants are as bright as this plan
+  says. **Switched by:** R06.T5.a's `sky::photometry::absolute_v_of_state`, which then reads this
+  plan's V for white dwarfs; R06's census and luminosity function follow it with no other change.
