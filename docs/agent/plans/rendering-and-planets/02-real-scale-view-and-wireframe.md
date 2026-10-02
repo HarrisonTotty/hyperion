@@ -384,10 +384,13 @@ the call sites here change.
    A body's occluder sphere, which writes its own depth (`occluderSphere.wgsl`), takes the same
    slope term in the fragment: its exact ray-sphere depth is pushed away by `SLOPE_SCALE` = 3 px
    (w_max ÷ 2 + 1 for a 1.5 px stroke with 1 px casings, rounded up) of the depth's screen slope,
-   taken from the tangent plane at the hit point. The 4 × 10⁻⁶ margin alone keeps only a graticule
+   taken from the tangent plane at the hit point, its magnitude (the gradient's length, not its larger
+   component, which falls up to √2 short where the gradient runs diagonally; corrected in RM1
+   validation). The 4 × 10⁻⁶ margin alone keeps only a graticule
    stroke's centreline in front. Near the limb the slope, and with it the push, grows without
    bound, but a line behind the body lies at least the sphere's chord 2R cos θ behind the front
-   surface. The push exceeds that chord only within `SLOPE_SCALE` ÷ 4 = 0.75 px of the limb (for
+   surface. The push exceeds that chord only within `SLOPE_SCALE` ÷ 4 = 0.75 px of the limb, in every
+   direction, the bound being computed from the radial slope, which is the gradient's length (for
    small discs; less for large ones, 0.38 px for a disc filling the view), where a line passing
    behind the body may overrun the limb by less than a pixel. That is inside the antialiasing
    fringe, and is accepted (decided 2026-10-01, delegated decision).
@@ -1139,7 +1142,11 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
 - The TypeScript twin of the body-frame rule agrees with every line of the sim's golden, and the
   golden passes on wasip1 (`just test-wasm` by hand, or in `just ci` once R04.T7 lands).
 - The SwiftShader smoke test (R02.T14.c) completes a frame of each kept scene with only finite
-  texels.
+  texels. Since RM1 validation the harness also checks, on the run's adapter, that a sphere
+  occluder's depth at a diagonal texel is pushed by its slope's magnitude (within a tenth of the
+  difference from the old larger-component form), and that a star sprite at (32.3, 20.8) px peaks in
+  its own pixel, lights nothing outside its 7 × 7 quad, and sums to `spriteToneCurve` of its
+  PSF-weighted colour within 0.5 %: twelve R02 checks in all.
 - The recorded runs of R02.T18, below. No golden image is stored anywhere.
 - **R02.T16.a's census, measured 2026-10-02** (RM1 validation m4), at generator version 18, build
   e4c5cfc, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000` at the
@@ -1160,9 +1167,8 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
   the real sky: the thin sky Design note 19 expects. Every layer each query asks for is included,
   none `over_limit`, so no retry is made near the Sun. The `e` and `d` rows are mostly remnants,
   which have no V, and their briefs dominate the time (2.7 s for the `e` query's 15,189 rows,
-  about 0.18 ms a row). Since Design note 19's measurement at version 15 the expected counts have
-  moved (E 15,160 at 620 ly, where the note's bisection put 19,992 at 683 ly), and the radii
-  remain inside the limit.
+  about 0.18 ms a row). Design note 19's measurement at version 15 agrees: its 19,992 E systems at 683 ly,
+  scaled by r³ to 620 ly, give about 14,960, within 1.5 % of the 15,160 expected here.
 
 - The owner has answered each of R02.T2's drafts; until then they stand as drafts and the client is
   built to them.
@@ -1550,7 +1556,8 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   the occluder radius, differenced in `f64`), and the intersection is t = altitude × (D + r) ÷ (b +
   √h²), free of cancellation near the body. Its written depth is then pushed away by three pixels'
   worth of its own screen slope, taken in closed form from the tangent plane at the hit point (a
-  slope term like the hull faces', `SLOPE_SCALE` = 3 for a 1.5 px stroke with its 1 px casings and
+  slope term like the hull faces', its magnitude since RM1 validation, `SLOPE_SCALE` = 3 for a
+  1.5 px stroke with its 1 px casings and
   fringe): the 4 × 10⁻⁶ margin of Design note 5 holds a graticule's centreline in front of its
   occluder but not its width, and without the term the inner half of every obliquely seen graticule
   stroke failed the depth test (found by the plan-conformance review; checked on both adapters, the
@@ -1605,7 +1612,8 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   tone curve as a compute twin (`agx` of a grey, 64 luminances from 10⁻⁶ to 10³, read back and
   compared with `toneCurve`), and the edge check at 4 × 10⁻⁵ at 1 m and 10⁸ m with a control (the
   edge behind drawn with no face) so that it cannot pass vacuously. The sprite placement and the
-  sphere occluder's ray depth stay the scratch pages' (not repeated in the harness). `just
+  sphere occluder's ray depth were first checked by scratch pages; since RM1 validation (m2, m3) the
+  harness checks both (below). `just
 test-render` passes on SwiftShader, both variants: the tone curve within 4.6 × 10⁻⁷, the near face
   at depth 0.99989 above and 0 below.
 - **Deviations in R02.T15, as built.** `DisplayId` gains `view` (`View`, `F4`). The display's
@@ -1765,11 +1773,13 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   plans say so; `depth.test.ts` pins the new order and checks it against each shell's crossing
   distance along a ray.
 - **Fixed in RM1 validation (2026-10-02): the free camera's rate is shown (M2).** The rate was
-  commanded (`PAGE UP`, `PAGE DOWN`) but shown nowhere, and `changeFreeRate` clamped silently at
+  stepped (`PAGE UP`, `PAGE DOWN`) but shown nowhere, and `changeFreeRate` clamped silently at
   both ends, against the guide's "Elements with states or modes always show the current one". The
   camera panel now reads it in B612 Mono at the readouts' 4 Hz, `RATE 1.00 km/s` (`freeRateReading`:
   three significant figures, m/s below 1 km/s and km/s from there), and at either end of its steps
-  says `NOT AVAILABLE: RATE at its lowest step` or `… highest step`, as the field of view's ends do.
+  says `NOT AVAILABLE: PAGE DOWN, RATE at its lowest step` or `NOT AVAILABLE: PAGE UP, RATE at its
+highest step`, naming the key held back as the field of view's ends name theirs; the reading is
+  17ch wide, for the galactic scene's top step, `RATE 3.16E11 km/s`.
   No `SLOWER`/`FASTER` buttons were added, since they would be new nomenclature; the guide's draft
   `RATE` row now also names the readout, for the owner with the rest of that row.
 - **Fixed in RM1 validation (2026-10-02): the list's `KIND` names (M3).** The column showed code
@@ -1777,9 +1787,10 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   read `PLANET`, because `viewKind` folded `dwarf_planet` into `planet`. `ViewBodyKind` gains
   `dwarf_planet` (drawn as the planet's inverted triangle at the floor size class), and the list
   names each kind by `BODY_KIND_NAMES`, the guide's `KIND` row: `PLANET`, `DWARF PLANET`, `MOON`,
-  `UNRESOLVED CONTACT` (and `STAR`, `CRAFT`). The column is 12ch, as wide as its longest word, and a
-  two-word kind breaks at its space onto a second line of the 2rem row (a choice of the fix, to keep
-  the designation's column; pending by eye with the rest of T15).
+  `UNRESOLVED CONTACT` (and `STAR`, `CRAFT`). The column is 12ch, which holds `DWARF PLANET` (11.6ch in
+  B612), and `UNRESOLVED CONTACT` alone breaks at its space onto a second line of the 2rem row (a
+  choice of the fix, to keep the designation's column; pending by eye with the rest of T15, two such
+  rows running together especially).
 - **Fixed in RM1 validation (2026-10-02): frame selection measures from geometric centres (m1).**
   `sceneFrameFor` measured each candidate's distance from `origins.bodyCentreM`, which in a server
   scene is the body's apparent position for every body but the ship's local one, against Design
@@ -1787,10 +1798,18 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   scene's origins with every body at its geometric centre: `ViewBody` gains an optional
   `geometricCentreM`, which `viewSceneFromServer` sets to `sceneAt`'s `geometricM` for each placed
   body it draws apparent, and `cameraSceneOf` builds `selectionOrigins` from it
-  (`sceneOrigins(scene, "geometric")`). The pose is placed from its frame's geometric origin, so a
-  camera in a moon's frame keeps its offset from the moon while its distances to every other body are
-  the sim's. Drawing, the rebase on a change of frame and the camera report still use the drawn
-  origins. Tested in `state.test.ts` (a moon drawn 10⁸ m from where it is) and `fromServer.test.ts`.
+  (`sceneOrigins(scene, "geometric")`). The camera is placed where the view draws it, by the drawn
+  origins, the same point whatever frame its pose is held in, and only the candidates' centres are
+  geometric. (A first version placed the pose from its own frame's geometric origin; the review found
+  that a camera then moved on entering a light-shifted moon's frame, by up to about four Hill radii
+  for Io, and left and re-entered it every step.) A camera hovering at a drawn moon whose light-time
+  shift passes its Hill radius is therefore not in that moon's frame: frame selection then follows
+  where the moon is, not where it is seen, which costs no precision since positions are differenced
+  in `f64`. Drawing, the rebase on a change of frame and the camera report use the drawn origins.
+  Tested in `state.test.ts` (a moon drawn 10⁸ m from where it is: the same drawn point selects the
+  planet whether its pose is held in the system frame or the moon's) and `fromServer.test.ts`.
+  **For the owner:** this keeps Design note 6's "never apparent" literally; the other choice is to
+  measure in drawn space and amend the note to say the camera's twin uses drawn positions.
 - **Fixed in RM1 validation (2026-10-02): the no-tidal-radius branch is tested (m5).**
   `serverScene.test.ts` now has a live scene whose system's tidal radius was not sent: it is not
   drawn, reads `SCENE NOT AVAILABLE: the system's tidal radius was not sent` as a fault, and
@@ -1808,7 +1827,9 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   `INHIBIT` and `ENABLE`, against that rule. Following the general rule, the panel now offers
   `ENABLE` then `INHIBIT` (tested in `ViewDisplay.test.tsx`), and the guide's exposure bullet and
   row, this plan's T15 text and the panel's TSDoc name the pair in that order. The row stays a draft
-  for the owner.
+  for the owner. **For the owner:** the exposure bullet in "Controls and commanding" is not a draft,
+  and was changed here only to agree with the guide's own pair rule; it awaits the owner's
+  confirmation with the row.
 - **Fixed in RM1 validation (2026-10-02): the marks' labels and the count line (m6, m7, m8, m10).**
   - **`FROM CAMERA` (m6).** The canvas labels read `row.range` and dropped the qualifier the list
     adds with no own ship; both now read `rangeText(row)`, so every range from the camera says so
@@ -1816,19 +1837,42 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   - **A missing closure rate (m7).** With an own ship but an unknown velocity the label's closure
     rate disappeared. `MarkRow` gains `closure`, a `ClosureReading` (`none`, `unknown` or `known`), computed in `markRows` by the draw list's own rule
     (`closureRateMPerS`, now exported from `symbology.ts`): `+3.40 m/s`, `—` where a velocity is not
-    known, shown in `--text-muted` (`.readout__missing`), and `null` for a body or with no own ship.
-    The labels read it from the row, and the list's options carry it in their accessible names
+    known, shown in `--text-muted` (`.readout__missing`), and nothing for a body or with no own
+    ship. The labels read it from the row, and the list's options carry it in their accessible names
     (`closure +3.40 m/s`, or `closure not known`), since the labels are hidden from assistive
-    technology. The kept scenes give their craft no velocity, so their labels now read `—`.
+    technology. The list shows no closure column: the 12ch `KIND` column already takes the side
+    panel's width, so a sighted operator reads the closure rate on the canvas labels (a narrowing of
+    the finding's fix, by choice). The kept scenes give their craft no velocity, so their labels now read `—`.
   - **The count line (m8).** `STARS n DRAWN · …` was set as a statement in proportional B612; it
     is now `ViewLabelBlock`'s `countLine`, an `output` in B612 Mono with tabular figures
     (`.view-label__count`).
   - **Labels follow their marks (m10).** The labels were placed from the 4 Hz published anchors,
     so they trailed a moving camera's marks by up to 250 ms. `ViewMarkLabels` places each label
     once as it mounts and hands it to the stage through `labelRef`; the drawing loop then moves
-    every label with its mark each frame (`markLabelTransform`), and only the text changes at 4 Hz.
-    Pending by eye with the rest of T15.
+    every label with its mark each frame (`markLabelTransform`), and only the text changes at 4 Hz;
+    a label whose mark that frame did not draw is hidden until the next readout removes it.
+    `ViewDisplay.test.tsx` shows a label moving between two readouts. Pending by eye with the rest
+    of T15.
 - **Fixed in RM1 validation (2026-10-02): R02.T16.a's census counts are taken (m4).** The counts
   are exact and do not need a quiet machine, so the four queries' census, their rows with and
   without V, and the merged count at V ≤ 6.5 (1,371) are now in Verification; only the times stay
   pending on a quiet machine.
+- **Fixed in RM1 validation (2026-10-02): the sphere occluder's slope push (m2).**
+  `occluderSphere.wgsl` pushed by `max(slopeX, slopeY)`, which falls up to √2 short of the 2.75 px
+  `SLOPE_SCALE` is sized for where the depth's gradient runs diagonally, so the outer part of a
+  graticule stroke's inner casing could fail the depth test there. It now pushes by
+  `length(vec2f(slopeX, slopeY))`; the shader's per-pixel scale is the same on both axes, so that is
+  the magnitude in pixels. Design note 5's 0.75 px limb bound was computed from the radial slope,
+  the gradient's length, so it is unchanged and now holds in every direction (the validator's
+  estimate of 1.06 px does not apply: `max()` equalled the length only where the gradient lay along a
+  screen axis, and fell short elsewhere). `checkWireframe`'s new `checkSphereSlope` reads a diagonal
+  texel's depth and compares it with both forms computed in `f64`; on the RTX 3080 it read
+  0.02107446, the magnitude's 0.02107446, against the old form's 0.02138445.
+- **Fixed in RM1 validation (2026-10-02): a star sprite drawn on the GPU (m3).** No committed
+  check drew a sprite: the kept scenes have no stars, and `starSprite.wgsl` was only compiled.
+  `checkWireframe`'s new `checkStarSprite` draws one sprite at (32.3, 20.8) px, colour (2, 1.2, 0.8)
+  per unit weight, and against a frame with none checks that its peak is in its own pixel, that no
+  channel outside its 7 × 7 quad changes, and that the summed texels are within 0.5 % of
+  `spriteToneCurve` of the colour times each pixel's PSF weight, computed in `f64` with the shader's
+  pixel-centre convention. On the RTX 3080: summed (1.997, 1.313, 0.9607) against (1.998, 1.313,
+  0.9609).
