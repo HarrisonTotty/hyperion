@@ -70,7 +70,8 @@ export function packedCubeSpec(
     dimension: "cube",
     format: "rgb9e5ufloat",
     mips,
-    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    // COPY_SRC for the harness's round trips (T9.g); it costs no memory.
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST | TEXTURE_USAGE.COPY_SRC,
     category,
   };
 }

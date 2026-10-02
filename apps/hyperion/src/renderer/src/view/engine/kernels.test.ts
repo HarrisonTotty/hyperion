@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { assertNoF16Subgroups, highamBound, type KernelPair, selectKernel } from "./kernels";
 import type { GpuCapabilities } from "./platform";
+import {
+  SUM_F32,
+  SUM_F32_COUNT,
+  SUM_U32,
+  SUM_U32_COUNT,
+  SUM_U32_RAGGED,
+  SUM_U32_RAGGED_COUNT,
+  SUM_U32_RAGGED_WORKGROUP,
+  sumF32Inputs,
+  sumF64,
+  sumU32Inputs,
+  wrappingSumU32,
+} from "./twins";
 
 const CAPABILITIES: GpuCapabilities = {
   subgroups: false,
@@ -98,5 +111,46 @@ describe("the Higham bound", () => {
   it("refuses a count that is not a positive integer", () => {
     expect(() => highamBound(0, 1)).toThrow("at least one term");
     expect(() => highamBound(2.5, 1)).toThrow("at least one term");
+  });
+});
+
+describe("the subgroup twins' CPU references", () => {
+  it("wrap a u32 sum modulo 2³², as Rust's wrapping_add does", () => {
+    expect(wrappingSumU32([0xffff_ffff, 2])).toBe(1);
+    expect(wrappingSumU32([])).toBe(0);
+  });
+
+  it("give inputs that wrap the u32 sum past 2³² more than once", () => {
+    const inputs = sumU32Inputs(SUM_U32_COUNT);
+    const exact = inputs.reduce((sum, value) => sum + value, 0);
+    expect(exact).toBeGreaterThan(2 * 2 ** 32);
+    expect(wrappingSumU32(inputs)).toBe(exact % 2 ** 32);
+  });
+
+  it("leave the ragged count and workgroup indivisible by any subgroup size", () => {
+    for (const size of [4, 8, 16, 32, 64, 128]) {
+      expect(SUM_U32_RAGGED_WORKGROUP % size).not.toBe(0);
+      expect(SUM_U32_RAGGED_COUNT % size).not.toBe(0);
+    }
+  });
+
+  it("give finite, normal f32 inputs, and their f64 sum and absolute sum", () => {
+    const inputs = sumF32Inputs(SUM_F32_COUNT);
+    expect(inputs.every((value) => value >= 1 && value < 2)).toBe(true);
+    expect(sumF64([1.5, -0.25])).toEqual({ sum: 1.25, sumAbs: 1.75 });
+  });
+
+  it("declare which pair may reach the CPU, and read subgroup_size", () => {
+    expect([SUM_U32.readback, SUM_U32_RAGGED.readback, SUM_F32.readback]).toEqual([
+      "bit-exact",
+      "bit-exact",
+      "presentation-only",
+    ]);
+    expect(SUM_U32.subgroup).toContain("@builtin(subgroup_size)");
+    expect(() => {
+      for (const pair of [SUM_U32, SUM_U32_RAGGED, SUM_F32]) {
+        assertNoF16Subgroups(pair.name, pair.subgroup ?? "");
+      }
+    }).not.toThrow();
   });
 });

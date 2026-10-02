@@ -33,6 +33,7 @@ import {
 } from "./materials";
 import type { MeshRecord } from "./meshes";
 import { viewDimensionOf } from "./resources";
+import type { TextureBindingSpec } from "../types";
 import {
   FRAME_BYTES,
   packFrame,
@@ -291,6 +292,11 @@ export class Drawing {
   /**
    * Encodes `frame` into `output`: the draws' pass, then each post-process's.
    *
+   * @remarks
+   * The `Frame` buffer and the ring are shared by every view and target and rewritten from the
+   * start for each frame, so the caller submits `encoder` before it encodes the next frame: the
+   * queue then orders each frame's uploads before its own commands and after the previous ones.
+   *
    * @param timestamps - The timestamp writes of a pass by its label, when the frame is timed.
    */
   encodeFrame(
@@ -338,12 +344,17 @@ export class Drawing {
     if (intermediates === null) {
       return;
     }
+    const steps = chainSteps(postProcesses.length);
     postProcesses.forEach((resolved, index) => {
-      const input = intermediates[index % 2] ?? intermediates[0];
-      const last = index === postProcesses.length - 1;
-      const target = last
-        ? output.colour
-        : this.#viewOf(intermediates[(index + 1) % 2] ?? intermediates[1], "2d", false);
+      const step = steps[index];
+      if (step === undefined) {
+        return;
+      }
+      const input = intermediates[step.input];
+      const target =
+        step.output === "output"
+          ? output.colour
+          : this.#viewOf(intermediates[step.output], "2d", false);
       const label = `${frame.label} ${resolved.record.spec.name}`;
       const pass = encoder.beginRenderPass({
         label,
@@ -364,6 +375,7 @@ export class Drawing {
   /** Destroys the draw path's buffers. */
   dispose(): void {
     this.#ring.dispose();
+    this.#host.destroyBuffer(this.#frameBuffer);
     this.#bindGroups.clear();
   }
 
@@ -458,12 +470,7 @@ export class Drawing {
       if (handle === undefined) {
         throw new Error(`draw of ${record.spec.name} binds no texture ${texture.name}`);
       }
-      const { texture: gpuTexture, spec } = this.#host.textureOf(handle);
-      const view = this.#viewOf(
-        gpuTexture,
-        texture.viewDimension ?? viewDimensionOf(spec),
-        spec.format.startsWith("depth"),
-      );
+      const view = this.#boundView(`material ${record.spec.name}`, texture, handle);
       entries.push({ binding: texture.binding, resource: view, key: view });
     }
     for (const buffer of record.bindings.storageBuffers) {
@@ -497,12 +504,7 @@ export class Drawing {
         if (handle === undefined) {
           throw new Error(`post-process ${record.spec.name} is given no texture ${texture.name}`);
         }
-        const { texture: gpuTexture, spec } = this.#host.textureOf(handle);
-        view = this.#viewOf(
-          gpuTexture,
-          texture.viewDimension ?? viewDimensionOf(spec),
-          spec.format.startsWith("depth"),
-        );
+        view = this.#boundView(`post-process ${record.spec.name}`, texture, handle);
       }
       entries.push({ binding: texture.binding, resource: view, key: view });
     }
@@ -541,6 +543,31 @@ export class Drawing {
     return bindGroup;
   }
 
+  /**
+   * The view a texture binding takes, checked against what the layout declared.
+   *
+   * @throws Error naming the owner and the binding when the texture's dimension is not the one
+   * declared (`2d` by default), or a depth texture is not declared `depth`, or the reverse: the
+   * bind group would fail validation and the draw silently draw nothing.
+   */
+  #boundView(owner: string, binding: TextureBindingSpec, handle: TextureHandle): GPUTextureView {
+    const { texture, spec } = this.#host.textureOf(handle);
+    const declared = binding.viewDimension ?? "2d";
+    const own = viewDimensionOf(spec);
+    if (own !== declared) {
+      throw new Error(
+        `${owner} declares ${binding.name} as ${declared}, but ${handle.name} is ${own}`,
+      );
+    }
+    const depth = spec.format.startsWith("depth");
+    if (depth !== (binding.sampleType === "depth")) {
+      throw new Error(
+        `${owner} declares ${binding.name} as ${binding.sampleType ?? "float"}, but ${handle.name} is ${spec.format}`,
+      );
+    }
+    return this.#viewOf(texture, declared, depth);
+  }
+
   /** A view of every mip of `texture` as `dimension`, its depth aspect alone for a depth format. */
   #viewOf(texture: GPUTexture, dimension: GPUTextureViewDimension, depth: boolean): GPUTextureView {
     const views = this.#views.get(texture) ?? new Map<string, GPUTextureView>();
@@ -562,6 +589,23 @@ export class Drawing {
     }
     return id;
   }
+}
+
+/** One post-process of a chain: the intermediate it reads, and where it writes. */
+export interface ChainStep {
+  readonly input: 0 | 1;
+  readonly output: 0 | 1 | "output";
+}
+
+/**
+ * The ping-pong of a chain of `count` post-processes: the draws go to intermediate 0, each pass
+ * reads the one the pass before wrote, and the last writes the output.
+ */
+export function chainSteps(count: number): ReadonlyArray<ChainStep> {
+  return Array.from({ length: count }, (_, index) => {
+    const input = index % 2 === 0 ? 0 : 1;
+    return { input, output: index === count - 1 ? "output" : input === 0 ? 1 : 0 };
+  });
 }
 
 /** A pass descriptor's timestamp writes, when there are some. */
