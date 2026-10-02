@@ -31,7 +31,7 @@ export type GraphicsFault =
       readonly message: string;
     }
   | { readonly kind: "gpu-process-gone"; readonly count: number }
-  /** A GLSL shader reached the engine and was refused, a bug the console reports (Design note 12). */
+  /** A shader did not compile on the GPU, and its draws are left out: a bug the console reports (Design note 12). */
   | { readonly kind: "shader-refused"; readonly effectName: string };
 
 /** The graphics' standing condition. */
@@ -110,7 +110,7 @@ export type GraphicsEvent =
   | { readonly kind: "adapter-withdrawn" }
   /** The main process reported a GPU-process crash. */
   | { readonly kind: "gpu-process-gone"; readonly count: number }
-  /** The WGSL-only guard refused a GLSL effect (R01.T8.b). */
+  /** A WGSL module failed `getCompilationInfo` (R01.T8.k). */
   | { readonly kind: "shader-refused"; readonly effectName: string }
   /**
    * The engine made its device and read its capabilities, in which a feature the harness withheld
@@ -227,8 +227,8 @@ function afterProcessGone(status: GraphicsStatus, count: number): GraphicsStatus
  * The status after a refused shader: its fault, unless a fault already stands.
  *
  * @remarks
- * The first refusal names the effect; the stub compiler's own refusal of the same effect follows it
- * unnamed, and must not replace it. A device loss or a crashed GPU process outranks a refusal,
+ * The first refusal stands; a later one, of the same effect or another, does not replace it (each
+ * is in the log). A device loss or a crashed GPU process outranks a refusal,
  * since the operator can act on those.
  */
 function afterShaderRefused(status: GraphicsStatus, effectName: string): GraphicsStatus {
@@ -364,7 +364,7 @@ export const GRAPHICS_WORDS = {
   deviceLost: "GRAPHICS DEVICE LOST: re-creating",
   processRestarted: "GRAPHICS PROCESS RESTARTED: re-acquiring",
   shaderRefused: (effectName: string): string =>
-    `GRAPHICS SHADER REFUSED: ${effectName} is not WGSL`,
+    `GRAPHICS SHADER REFUSED: ${effectName} did not compile, not drawn`,
   safeMode: "GRAPHICS SAFE MODE: views not available, relaunch to retry",
   disabledByLosses: (losses: number): string =>
     `GRAPHICS DISABLED: ${losses} device losses, relaunch to retry`,
