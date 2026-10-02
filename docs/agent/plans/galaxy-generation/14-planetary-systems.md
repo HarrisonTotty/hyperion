@@ -5804,3 +5804,15 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - **For the owner:** the velocity of a planet of a superwind host now steps by up to a few
     m s⁻¹ where the host's mass-loss rate jumps (a track knot or the AGB's end), since the model's
     Ṁ is piecewise; a ship matched to the body just before then separates at that rate after.
+- **Fixed in RM1 validation (2026-10-02), under the same bump:** a moon's drifting record before
+  `START` ignored its planet's state changes before `START` (`FateAt::changes_at` was filtered to
+  the window), so it could claim to hold past its planet's destruction or unbinding there, against
+  the evolving-orbits decision. `BodyFate::at` now states a present body's next change wherever it
+  falls for a time before `START`, as `DriftCell::holds_until` does, and inside the window as
+  before; `moon_trajectory` cuts the moon's cell and its `valid_until` at it. No golden moved:
+  only records of moons whose planet ends between −(H + L) and `START` change. Test:
+  `a_change_before_the_window_is_stated_for_a_time_before_it` (a 20 M☉ host dead 5,000 yr before
+  the epoch) and `a_receding_moon_s_record_before_the_window_is_cut_at_its_planet_s_change`
+  (`moon_trajectory` given such a change: its `valid_until` is the change). The sample holds no
+  drifting moon of such a planet, so no golden pins the moon's record there. Before `START`,
+  `changes_at` can now be stated where a fixed orbit's `valid_until` is not; its doc says so.

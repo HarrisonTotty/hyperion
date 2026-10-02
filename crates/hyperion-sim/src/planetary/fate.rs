@@ -440,10 +440,14 @@ impl FateAt {
     }
 
     /// The next time the body's state changes, or its orbit steps (a supernova), if that is
-    /// inside the clock window: its formation, its destruction or unbinding, a host star's sudden
-    /// death. Between, the orbit changes only slowly, by the tides and the winds, which
+    /// inside the clock window, or wherever it falls for a present body at a time before the
+    /// window's start, where drifting records hold until their cell's end and the light-time solve
+    /// reads them: its formation, its destruction or unbinding, a host star's sudden death.
+    /// Between, the orbit changes only slowly, by the tides and the winds, which
     /// [`trajectory`](Self::trajectory) follows. A moon's record holds until its planet's next
-    /// change, not its planet's drift cell's end.
+    /// change, not its planet's drift cell's end. Before the window's start this can be stated
+    /// where [`valid_until`](Self::valid_until) is not: a fixed orbit's record states no
+    /// `valid_until` outside the window, but its moons' drifting records still end at the change.
     #[must_use]
     pub const fn changes_at(&self) -> Option<UniverseTime> {
         self.changes_at
@@ -846,7 +850,9 @@ impl<'a> BodyFate<'a> {
             orbit: Some(orbit),
             trajectory: Some(trajectory),
             valid_until,
-            changes_at: next.and_then(within),
+            // Before `START` a moon's drifting record holds until its planet's change there too,
+            // as `holds_until` states a cell's end there (RM1 validation, 2026-10-02).
+            changes_at: next.filter(|&next| t < ClockWindow::START || ClockWindow::contains(next)),
             mass: segment.mass,
         }
     }

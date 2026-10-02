@@ -2429,8 +2429,9 @@ impl PlanetarySystem {
 #[derive(Debug, Clone, PartialEq)]
 struct ParentNow {
     state: BodyState,
-    /// The next change of its state or segment inside the clock window, which its moons' records
-    /// hold until; not its own drift cell's end (P14.T45.a).
+    /// The next change of its state or segment inside the clock window, or anywhere for a time
+    /// before it ([`FateAt::changes_at`]), which its moons' records hold until; not its own drift
+    /// cell's end (P14.T45.a).
     changes_at: Option<UniverseTime>,
     position: Option<SystemPosition>,
     derived: Option<DerivedBody>,

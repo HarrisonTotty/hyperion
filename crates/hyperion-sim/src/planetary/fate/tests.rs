@@ -544,6 +544,26 @@ fn a_death_in_the_window_is_when_the_orbit_holds_until() {
     assert_eq!(state_at(&planet, &host, death.at).valid_until(), None);
 }
 
+/// Before the window's start a present body's next change is stated wherever it falls, so that its
+/// moons' drifting records there hold no further than it (RM1 validation, 2026-10-02); inside the
+/// window it is stated only inside it, as before.
+#[test]
+fn a_change_before_the_window_is_stated_for_a_time_before_it() {
+    let lifetime = death_of(&star(20.0, 3e7)).expect("dead");
+    let age = star(20.0, 3e7).age_at(lifetime.at).value() + 5_000.0;
+    let host_star = star(20.0, age);
+    let host = FateHost::star(&host_star);
+    let planet = body(400.0, 0.0, jupiter_mass(), 20.0, 0.3);
+    let death = death_of(&host_star).expect("dead before the window");
+    assert!(SourceHorizon::START < death.at && death.at < ClockWindow::START);
+    let before = state_at(&planet, &host, after(death.at, -1_000));
+    assert_eq!(before.state(), BodyState::Present);
+    assert_eq!(before.changes_at(), Some(death.at));
+    // Inside the window nothing changes again: the next change, if any, lies past its end.
+    let now = state_at(&planet, &host, UniverseTime::EPOCH);
+    assert!(now.changes_at().is_none_or(ClockWindow::contains));
+}
+
 #[test]
 fn the_transform_is_deterministic_and_independent_of_query_order() {
     let sun = star(1.0, 13.5e9);
