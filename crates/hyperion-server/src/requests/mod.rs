@@ -12,11 +12,16 @@
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
-//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], and the system's in [`system`].
+//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], and the
+//! scene's in [`scene`].
 
 mod galaxy;
+mod scene;
 mod system;
 mod universe;
+
+pub(crate) use self::system::bodies_of;
+pub(crate) use self::universe::openable_universe;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -24,24 +29,33 @@ use std::future::ready;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
     ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    ServerMessage,
+    SceneCamerasRequest, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
+    SubscriptionTopic, UnsubscribeRequest,
 };
 use serde_json::Value;
+use tokio::sync::oneshot;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
 use tracing::Instrument;
 
 use crate::AppState;
+use crate::bulk::{Answer, BulkPayload};
 use crate::compute::{
     CancelToken, ComputeError, JobError, Priority, SubmitJobError, panic_message,
 };
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
+use crate::subscriptions::{Pusher, SubscriptionCommand, Subscriptions};
 
-/// What a handler returns: the response's body, or why there is none.
-pub(crate) type HandlerFuture = BoxFuture<'static, Result<ResponseBody, RequestError>>;
+/// What a handler returns: its answer, the response's body with any bulk payload, or why there is
+/// none.
+pub(crate) type HandlerFuture = BoxFuture<'static, Result<Answer, RequestError>>;
+
+/// What a topic's opening returns: the topic's whole state, or why the subscription failed.
+pub(crate) type SubscribeFuture = BoxFuture<'static, Result<SubscriptionState, RequestError>>;
 
 /// Answers requests.
 pub(crate) trait Handler: fmt::Debug + Send + Sync {
@@ -50,8 +64,41 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
     /// The future runs on a task of its own and is dropped at an `.await` if the client cancels
     /// the request or its connection closes; `token` is cancelled first. Work handed to the CPU
     /// pool should carry `token`, so that a job still queued when the request is cancelled is
-    /// skipped. A panic costs this request alone, which is answered `internal`.
+    /// skipped. A panic costs this request alone, which is answered `internal`. `subscribe` and
+    /// `unsubscribe` never reach it: the connection routes them ([`Handler::subscribe`]).
     fn handle(&self, state: Arc<AppState>, body: RequestBody, token: CancelToken) -> HandlerFuture;
+
+    /// Opens a subscription to `request`'s topic (rendering plan R03, R03.T5.b): the topic's
+    /// whole state, which answers `subscribe`, with every later change merged into `pusher`.
+    ///
+    /// The connection has reserved the subscription already and numbers the answer. The future
+    /// runs as a request's does; a topic that keeps pushing spawns a task of its own and hands it
+    /// to [`Pusher::attach`], so that it ends with the subscription. Until a topic is served, it
+    /// is answered `unsupported`.
+    fn subscribe(
+        &self,
+        _state: Arc<AppState>,
+        _request: SubscribeRequest,
+        _pusher: Pusher,
+        _token: CancelToken,
+    ) -> SubscribeFuture {
+        Box::pin(ready(Err(not_served_yet("subscribe"))))
+    }
+}
+
+/// Opens the topic a `subscribe` names: the scene's (rendering plan R03, R03.T8.a).
+fn open_topic(
+    state: Arc<AppState>,
+    request: SubscribeRequest,
+    pusher: Pusher,
+    token: CancelToken,
+) -> SubscribeFuture {
+    let SubscribeRequest { universe, topic } = request;
+    match topic {
+        SubscriptionTopic::Scene(scene) => {
+            Box::pin(crate::scene::open(state, universe, scene, pusher, token))
+        }
+    }
 }
 
 /// The server's handlers: every request kind, and the code that answers it.
@@ -69,20 +116,61 @@ pub(crate) struct Handlers;
 impl Handler for Handlers {
     fn handle(&self, state: Arc<AppState>, body: RequestBody, token: CancelToken) -> HandlerFuture {
         match body {
-            RequestBody::CreateUniverse(request) => Box::pin(universe::create(state, request)),
-            RequestBody::ListUniverses => Box::pin(ready(Ok(universe::list(&state)))),
-            RequestBody::OpenUniverse(request) => Box::pin(universe::open(state, request)),
-            RequestBody::GalaxyParameters(request) => Box::pin(galaxy::parameters(state, request)),
-            RequestBody::DensityMap(request) => Box::pin(galaxy::map(state, request, token)),
-            RequestBody::SystemsInRange(request) => {
-                Box::pin(galaxy::systems(state, request, token))
+            RequestBody::CreateUniverse(request) => {
+                Box::pin(universe::create(state, request).map(answered))
             }
-            RequestBody::SystemSummary(request) => Box::pin(system::summary(state, request, token)),
-            RequestBody::SystemBodies(request) => Box::pin(system::bodies(state, request, token)),
-            RequestBody::BodyDetail(request) => Box::pin(system::detail(state, request, token)),
+            RequestBody::ListUniverses => Box::pin(ready(Ok(universe::list(&state).into()))),
+            RequestBody::OpenUniverse(request) => {
+                Box::pin(universe::open(state, request).map(answered))
+            }
+            RequestBody::GalaxyParameters(request) => {
+                Box::pin(galaxy::parameters(state, request).map(answered))
+            }
+            RequestBody::DensityMap(request) => {
+                Box::pin(galaxy::map(state, request, token).map(answered))
+            }
+            RequestBody::SystemsInRange(request) => {
+                Box::pin(galaxy::systems(state, request, token).map(answered))
+            }
+            RequestBody::SystemSummary(request) => {
+                Box::pin(system::summary(state, request, token).map(answered))
+            }
+            RequestBody::SystemBodies(request) => {
+                Box::pin(system::bodies(state, request, token).map(answered))
+            }
+            RequestBody::BodyDetail(request) => {
+                Box::pin(system::detail(state, request, token).map(answered))
+            }
             RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
+            // The connection answers `subscribe` through `Handler::subscribe` and `unsubscribe`
+            // itself (rendering plan R03, R03.T5.b), so neither reaches here; the arms keep the
+            // match exhaustive for a caller that bypasses the connection.
+            RequestBody::Subscribe(_) => Box::pin(ready(Err(not_served_yet("subscribe")))),
+            RequestBody::Unsubscribe(_) => Box::pin(ready(Err(not_served_yet("unsubscribe")))),
+            RequestBody::SceneShip(request) => {
+                Box::pin(scene::ship(state, request, token).map(answered))
+            }
+            // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
+            // the match exhaustive for a caller that bypasses the connection.
+            RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
         }
     }
+
+    fn subscribe(
+        &self,
+        state: Arc<AppState>,
+        request: SubscribeRequest,
+        pusher: Pusher,
+        token: CancelToken,
+    ) -> SubscribeFuture {
+        open_topic(state, request, pusher, token)
+    }
+}
+
+/// A handler's result as an [`Answer`] with no bulk payload: how every handler that answers in JSON
+/// alone meets the seam (rendering plan R03, R03.T10.a).
+fn answered(result: Result<ResponseBody, RequestError>) -> Result<Answer, RequestError> {
+    result.map(Answer::from)
 }
 
 /// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
@@ -109,6 +197,10 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::SystemBodies(_) => "system_bodies",
         RequestBody::BodyDetail(_) => "body_detail",
         RequestBody::BodyEvents(_) => "body_events",
+        RequestBody::Subscribe(_) => "subscribe",
+        RequestBody::Unsubscribe(_) => "unsubscribe",
+        RequestBody::SceneShip(_) => "scene_ship",
+        RequestBody::SceneCameras(_) => "scene_cameras",
     }
 }
 
@@ -117,19 +209,27 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 ///
 /// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
-/// record cannot.
-fn is_large(body: &ResponseBody) -> bool {
+/// record cannot. A subscription's answer is as large as its topic's state: the scene's holds a
+/// whole system's bodies (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and
+/// `unsubscribe` are small.
+pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_) => true,
+        ResponseBody::Subscribe(subscribed) => match subscribed.state {
+            SubscriptionState::Scene(_) => true,
+        },
         ResponseBody::CreateUniverse(_)
         | ResponseBody::ListUniverses(_)
         | ResponseBody::OpenUniverse(_)
         | ResponseBody::GalaxyParameters(_)
         | ResponseBody::SystemSummary(_)
-        | ResponseBody::BodyDetail(_) => false,
+        | ResponseBody::BodyDetail(_)
+        | ResponseBody::Unsubscribe
+        | ResponseBody::SceneShip(_)
+        | ResponseBody::SceneCameras => false,
     }
 }
 
@@ -154,8 +254,19 @@ impl From<SubmitJobError> for RequestError {
             SubmitJobError::ShutDown => {
                 request_error(ErrorCode::Internal, "the server is shutting down")
             }
+            SubmitJobError::Faulted => floating_point_mode(),
         }
     }
+}
+
+/// The answer when the pool has found a worker that flushes subnormals: `internal`, since plan 04
+/// keeps the error codes fixed, with a message saying why nothing is generated (plan R04, design
+/// note 15).
+fn floating_point_mode() -> RequestError {
+    request_error(
+        ErrorCode::Internal,
+        "the server's floating-point mode flushes subnormals, so it refuses to generate",
+    )
 }
 
 impl From<JobError> for RequestError {
@@ -167,6 +278,7 @@ impl From<JobError> for RequestError {
                 "the server failed while answering this request",
             ),
             JobError::ShutDown => request_error(ErrorCode::Internal, "the server is shutting down"),
+            JobError::FloatingPointMode => floating_point_mode(),
         }
     }
 }
@@ -306,6 +418,8 @@ pub(crate) enum Handshake {
 pub(crate) struct Finished {
     frame: String,
     ending: Ending,
+    /// The bulk payload streamed before the terminal frame, if the answer has one.
+    bulk: Option<BulkPayload>,
 }
 
 /// A request whose task has ended, with its terminal frame, not yet queued.
@@ -318,13 +432,32 @@ pub(crate) struct Settled {
     task: TaskId,
     frame: String,
     ending: Ending,
+    bulk: Option<BulkPayload>,
 }
 
 impl Settled {
+    /// The bulk payload whose chunks precede the terminal frame, taken to stream (rendering plan
+    /// R03, Design note 10); `None` for an answer in JSON alone.
+    pub(crate) fn take_bulk(&mut self) -> Option<BulkPayload> {
+        self.bulk.take()
+    }
+
     /// The payload bytes of the terminal frame.
     #[must_use]
     pub(crate) fn frame_len(&self) -> usize {
         self.frame.len()
+    }
+
+    /// The request's ID.
+    #[must_use]
+    pub(crate) fn id(&self) -> RequestId {
+        self.id
+    }
+
+    /// Whether the request is answered with a `response`, rather than a `request_error`.
+    #[must_use]
+    pub(crate) fn responded(&self) -> bool {
+        self.ending == Ending::Responded
     }
 }
 
@@ -369,26 +502,159 @@ impl Requests {
         handshake: Handshake,
     ) -> Option<String> {
         let kind = kind(&body);
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let token = CancelToken::new();
+        let handled = self
+            .state
+            .handler
+            .handle(Arc::clone(&self.state), body, token.clone());
+        self.start(id, kind, token, handled);
+        None
+    }
+
+    /// Accepts a `subscribe` and starts its topic's opening as a request, or refuses it and
+    /// returns the answer: as [`Requests::submit`] refuses, and `bad_request` naming `topic` once
+    /// the connection holds [`MAX_SUBSCRIPTIONS`](crate::limits::MAX_SUBSCRIPTIONS). The
+    /// subscription is reserved in `subscriptions` until the request ends
+    /// ([`Subscriptions::opened`]).
+    pub(crate) fn submit_subscribe(
+        &mut self,
+        id: RequestId,
+        request: SubscribeRequest,
+        handshake: Handshake,
+        subscriptions: &mut Subscriptions,
+    ) -> Option<String> {
+        let kind = "subscribe";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let (subscription, pusher) = match subscriptions.reserve(id) {
+            Ok(reserved) => reserved,
+            Err(error) => return Some(self.refuse(id, kind, error)),
+        };
+        let token = CancelToken::new();
+        let opening =
+            self.state
+                .handler
+                .subscribe(Arc::clone(&self.state), request, pusher, token.clone());
+        let handled: HandlerFuture = Box::pin(async move {
+            let mut state = opening.await?;
+            // The state is sequence 0, whatever the topic set: the first notification is 1.
+            match &mut state {
+                SubscriptionState::Scene(scene) => scene.sequence = 0,
+            }
+            Ok(ResponseBody::Subscribe(Box::new(Subscribed {
+                subscription: subscription.get(),
+                state,
+            }))
+            .into())
+        });
+        self.start(id, kind, token, handled);
+        None
+    }
+
+    /// Routes a `scene_cameras` to its subscription's topic and starts the request that waits for
+    /// the topic's answer (rendering plan R03, R03.T8.a), or refuses it and returns the answer: as
+    /// [`Requests::submit`] refuses, `bad_request` naming `subscription` for a subscription the
+    /// connection does not have live, and `queue_full` for one with too many waiting.
+    pub(crate) fn scene_cameras(
+        &mut self,
+        id: RequestId,
+        request: SceneCamerasRequest,
+        handshake: Handshake,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = "scene_cameras";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::SceneCameras {
+            cameras: request.cameras,
+            answer,
+        };
+        if let Err(error) = subscriptions.command(request.subscription, command) {
+            return Some(self.refuse(id, kind, error));
+        }
+        let handled: HandlerFuture = Box::pin(async move {
+            match answered.await {
+                Ok(checked) => checked.map(|()| ResponseBody::SceneCameras.into()),
+                Err(_) => Err(request_error(
+                    ErrorCode::Internal,
+                    "the subscription ended before it answered",
+                )),
+            }
+        });
+        self.start(id, kind, CancelToken::new(), handled);
+        None
+    }
+
+    /// Answers an `unsubscribe` at once: ends the subscription and returns the empty answer, or
+    /// the refusal: as [`Requests::submit`] refuses, and `bad_request` naming `subscription` for a
+    /// subscription the connection does not have.
+    pub(crate) fn unsubscribe(
+        &mut self,
+        id: RequestId,
+        request: UnsubscribeRequest,
+        handshake: Handshake,
+        subscriptions: &mut Subscriptions,
+    ) -> String {
+        let kind = "unsubscribe";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return refusal;
+        }
+        match subscriptions.end(request.subscription) {
+            Ok(()) => {
+                self.state.request_stats.accepted();
+                self.state.request_stats.ended(Ending::Responded);
+                tracing::debug!(
+                    id = id.0,
+                    subscription = request.subscription,
+                    "subscription ended"
+                );
+                to_frame(&ServerMessage::Response {
+                    id,
+                    body: ResponseBody::Unsubscribe,
+                })
+            }
+            Err(error) => self.refuse(id, kind, error),
+        }
+    }
+
+    /// The refusal of a request on arrival, if it is refused: an ID in flight, before `hello`, or
+    /// beyond [`MAX_IN_FLIGHT_REQUESTS`] (design notes 2, 7 and 24).
+    fn admit(&self, id: RequestId, kind: &str, handshake: Handshake) -> Option<String> {
         if let Some(refusal) = self.refuse_early(id, kind, handshake) {
             return Some(refusal);
         }
-        if self.in_flight.len() >= MAX_IN_FLIGHT_REQUESTS {
-            return Some(self.refuse(
+        (self.in_flight.len() >= MAX_IN_FLIGHT_REQUESTS).then(|| {
+            self.refuse(
                 id,
                 kind,
                 request_error(
                     ErrorCode::TooManyRequests,
                     format!("at most {MAX_IN_FLIGHT_REQUESTS} requests may be in flight at once"),
                 ),
-            ));
-        }
-        let token = CancelToken::new();
+            )
+        })
+    }
+
+    /// Starts an accepted request's task, which awaits `handled` and makes its terminal frame.
+    fn start(
+        &mut self,
+        id: RequestId,
+        kind: &'static str,
+        token: CancelToken,
+        handled: HandlerFuture,
+    ) {
         // Counted before the task starts, so that a handler sees its request counted.
         self.state.request_stats.accepted();
         let span = tracing::debug_span!("request", id = id.0, kind);
         let task = self
             .tasks
-            .spawn(run(Arc::clone(&self.state), id, body, token.clone()).instrument(span));
+            .spawn(run(Arc::clone(&self.state), id, handled, token.clone()).instrument(span));
         self.in_flight.insert(
             id,
             InFlight {
@@ -398,7 +664,6 @@ impl Requests {
                 accepted: Instant::now(),
             },
         );
-        None
     }
 
     /// Answers a request that did not parse, with `error` unless it is refused as a request that
@@ -469,8 +734,15 @@ impl Requests {
             .in_flight
             .iter()
             .find(|(_, entry)| entry.task.id() == task)?;
-        let (frame, ending) = match joined {
-            Ok((_, Finished { frame, ending })) => (frame, ending),
+        let (frame, ending, bulk) = match joined {
+            Ok((
+                _,
+                Finished {
+                    frame,
+                    ending,
+                    bulk,
+                },
+            )) => (frame, ending, bulk),
             Err(error) => {
                 let reason = match error.try_into_panic() {
                     Ok(payload) => panic_message(payload.as_ref()),
@@ -484,7 +756,7 @@ impl Requests {
                         "the server failed while answering this request",
                     ),
                 });
-                (frame, Ending::Failed)
+                (frame, Ending::Failed, None)
             }
         };
         Some(Settled {
@@ -492,6 +764,7 @@ impl Requests {
             task,
             frame,
             ending,
+            bulk,
         })
     }
 
@@ -582,25 +855,30 @@ impl Drop for Requests {
 async fn run(
     state: Arc<AppState>,
     id: RequestId,
-    body: RequestBody,
+    handled: HandlerFuture,
     token: CancelToken,
 ) -> Finished {
     let started = Instant::now();
-    let handled = state
-        .handler
-        .handle(Arc::clone(&state), body, token.clone())
-        .await;
-    let answered = match handled {
-        Ok(body) => respond(&state, id, body, token).await,
-        Err(error) => Err(error),
+    let handled = handled.await;
+    // A bulk payload rides beside the terminal frame, which the connection queues after its
+    // chunks (rendering plan R03, R03.T10.b).
+    let (answered, bulk) = match handled {
+        Ok(Answer { body, bulk }) => (respond(&state, id, body, token).await, bulk),
+        Err(error) => (Err(error), None),
     };
     let elapsed_ms = millis(started.elapsed());
     match answered {
         Ok(frame) => {
-            tracing::debug!(outcome = "response", elapsed_ms, "request finished");
+            tracing::debug!(
+                outcome = "response",
+                elapsed_ms,
+                bulk_bytes = bulk.as_ref().map(|payload| payload.manifest().bytes),
+                "request finished"
+            );
             Finished {
                 frame,
                 ending: Ending::Responded,
+                bulk,
             }
         }
         Err(error) => {
@@ -613,6 +891,7 @@ async fn run(
             Finished {
                 frame: to_frame(&ServerMessage::RequestError { id, error }),
                 ending,
+                bulk: None,
             }
         }
     }
@@ -653,9 +932,12 @@ mod tests {
 
     use hyperion_protocol::{
         BodyDetailRequest, BodyEventsRequest, BodyIdHex, CreateUniverseRequest, DensityMap,
-        DensityMapRequest, DetailLevelDto, GalacticPosition, GalaxyParametersRequest,
-        MapPopulation, MapView, MassLayer, OpenUniverseRequest, SystemBodiesRequest, SystemIdHex,
-        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+        DensityMapRequest, DetailLevelDto, FramePositionDto, GalacticPosition,
+        GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
+        OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
+        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SubscribeRequest,
+        Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
+        SystemsInRangeRequest, UniverseIdHex, UniverseTime, UnsubscribeRequest,
     };
 
     use super::*;
@@ -711,12 +993,40 @@ mod tests {
                 detail: DetailLevelDto::Full,
             }),
             RequestBody::BodyEvents(BodyEventsRequest {
-                universe,
+                universe: universe.clone(),
                 system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 from: UniverseTime::default(),
                 to: UniverseTime::default(),
             }),
+            RequestBody::Subscribe(SubscribeRequest {
+                universe: universe.clone(),
+                topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                    detail: DetailLevelDto::Full,
+                    cameras: Vec::new(),
+                }),
+            }),
+            RequestBody::Unsubscribe(UnsubscribeRequest { subscription: 1 }),
+            RequestBody::SceneShip(SceneShipRequest {
+                universe,
+                ship: galactic_pose(),
+                time_rate: 1,
+            }),
+            RequestBody::SceneCameras(SceneCamerasRequest {
+                subscription: 1,
+                cameras: Vec::new(),
+            }),
         ]
+    }
+
+    /// A pose at the galactic origin, at rest, at the epoch.
+    fn galactic_pose() -> KinematicsDto {
+        KinematicsDto {
+            position: FramePositionDto::Galactic {
+                position: GalacticPosition::default(),
+            },
+            velocity_m_s: [0.0; 3],
+            time: UniverseTime::default(),
+        }
     }
 
     fn density_map() -> ResponseBody {
@@ -869,15 +1179,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn body_events_is_unsupported_until_its_handler_lands() {
+    async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
-        // answer it as an older server would until P14.T31 serves it.
+        // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
+        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it.
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
-            .filter(|body| matches!(body, RequestBody::BodyEvents(_)))
+            .filter(|body| {
+                matches!(
+                    body,
+                    RequestBody::BodyEvents(_)
+                        | RequestBody::Subscribe(_)
+                        | RequestBody::Unsubscribe(_)
+                        | RequestBody::SceneCameras(_)
+                )
+            })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 4);
         for body in events {
             let name = kind(&body);
             let answer = Handlers
@@ -888,6 +1207,41 @@ mod tests {
         harness.stop().await;
     }
 
+    /// Rendering plan R03, Design note 14: a scene's `subscribed` holds a whole system's bodies
+    /// and is serialised on the pool; the scene's small answers are not.
+    #[test]
+    fn a_scene_subscribed_is_large_and_the_scene_s_small_answers_are_not() {
+        let subscribed = ResponseBody::Subscribe(Box::new(Subscribed {
+            subscription: 1,
+            state: SubscriptionState::Scene(SceneStateDto {
+                sequence: 0,
+                clock: SceneClockDto {
+                    time: UniverseTime::default(),
+                    time_rate: 1,
+                    state: SceneClockStateDto::Running,
+                },
+                ship: galactic_pose(),
+                system: None,
+                tidal_radius_m: None,
+                craft: Vec::new(),
+            }),
+        }));
+        assert!(is_large(&subscribed));
+        for small in [
+            ResponseBody::Unsubscribe,
+            ResponseBody::SceneCameras,
+            ResponseBody::SceneShip(SceneShipSet {
+                clock: SceneClockDto {
+                    time: UniverseTime::default(),
+                    time_rate: 0,
+                    state: SceneClockStateDto::Paused,
+                },
+            }),
+        ] {
+            assert!(!is_large(&small), "{small:?}");
+        }
+    }
+
     #[test]
     fn pool_errors_become_request_errors() {
         let code = |error: RequestError| error.code;
@@ -896,6 +1250,17 @@ mod tests {
         assert_eq!(code(JobError::Panicked.into()), ErrorCode::Internal);
         assert_eq!(code(JobError::ShutDown.into()), ErrorCode::Internal);
         assert_eq!(code(JobError::Cancelled.into()), ErrorCode::Cancelled);
+        // A worker that flushes subnormals: the server's affair, and the message says so.
+        let refusal = request_error(
+            ErrorCode::Internal,
+            "the server's floating-point mode flushes subnormals, so it refuses to generate",
+        );
+        assert_eq!(RequestError::from(JobError::FloatingPointMode), refusal);
+        assert_eq!(RequestError::from(SubmitJobError::Faulted), refusal);
+        assert_eq!(
+            RequestError::from(ComputeError::from(JobError::FloatingPointMode)),
+            refusal
+        );
         // A cached computation's failure is its job's, with the same code.
         assert_eq!(
             code(ComputeError::from(SubmitJobError::QueueFull).into()),
@@ -1350,7 +1715,7 @@ mod tests {
             _token: CancelToken,
         ) -> HandlerFuture {
             let flight = self.flights.run(0, || async { explode() });
-            Box::pin(async move { flight.await.map(|_: Arc<()>| small_response()) })
+            Box::pin(async move { flight.await.map(|_: Arc<()>| small_response().into()) })
         }
     }
 
@@ -1384,7 +1749,7 @@ mod tests {
                         entered.send(()).unwrap();
                         go.recv().unwrap();
                     });
-                    Ok(small_response())
+                    Ok(small_response().into())
                 }),
                 None => self.later.handle(state, body, token),
             }

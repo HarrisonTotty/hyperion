@@ -145,6 +145,30 @@ impl EccentricityFloor {
         let secular = self.secular * math::exp(-self.secular_decay * elapsed.max(0.0));
         secular.max(self.resonant)
     }
+
+    /// The times, years in [`EccentricityFloor::at`]'s count, at which the floor an orbit of
+    /// primordial eccentricity `e0` is held to, min(floor, e₀), turns a corner: where the decaying
+    /// secular term falls to e₀, and where it falls to the resonant term. Each is in closed form,
+    /// ln(secular ÷ level) ÷ decay, and `None` where the floor does not turn there (P14.T45.d):
+    /// a floor that never decays, a level the secular term starts at or below, or a resonant
+    /// corner the floor meets while still held at e₀.
+    ///
+    /// Between them the eccentricity and axis of [`tides::circularise_to`] are smooth, so the
+    /// phase integral of a circularising orbit is split at them.
+    #[must_use]
+    pub(crate) fn corners(&self, e0: f64) -> [Option<f64>; 2] {
+        let crossing = |level: f64| {
+            (self.secular_decay > 0.0 && level > 0.0 && self.secular > level)
+                .then(|| math::ln(self.secular / level) / self.secular_decay)
+        };
+        // Held at e₀ until the secular term falls to it, which it does only above the resonant
+        // term; the resonant corner shows only below e₀.
+        let held = (self.resonant < e0).then(|| crossing(e0)).flatten();
+        let resonant = (self.resonant < e0)
+            .then(|| crossing(self.resonant))
+            .flatten();
+        [held, resonant]
+    }
 }
 
 impl Circularisation {
@@ -310,6 +334,10 @@ fn damped(
 /// `orbit`, whose elements are about the mass `reference`, expanded adiabatically to the mass
 /// `now` (design note 11): the axis times `reference` ÷ `now` and the gravitational parameter
 /// times `now` ÷ `reference`, so that the specific angular momentum √(μ a (1 − e²)) is kept.
+///
+/// This is the adiabatic limit of isotropic mass loss: a M constant (Veras et al. 2011, MNRAS 417,
+/// 2104, eq. 18) and e constant over an orbit (their eq. 17), valid while the mass-loss index
+/// Ψ = (Ṁ ÷ M) ÷ n is far below 1 (their eq. 15).
 ///
 /// `orbit` is returned unchanged, bit for bit, when the two masses are the same.
 ///
@@ -606,6 +634,41 @@ mod tests {
             Radians::new(0.7),
         )
         .expect("valid orbit")
+    }
+
+    /// P14.T45.d: the floor's corners are where the decaying secular term falls to e₀ and to the
+    /// resonant term, and there are none where the held floor does not turn.
+    #[test]
+    fn the_floor_turns_its_corners_where_they_are_said_to_be() {
+        let floor = EccentricityFloor::new(0.3, 1e-9, 0.05);
+        let e0 = 0.2;
+        let [held, resonant] = floor.corners(e0);
+        let (held, resonant) = (
+            held.expect("0.3 decays through 0.2"),
+            resonant.expect("to 0.05"),
+        );
+        assert!((held - math::ln(1.5) / 1e-9).abs() <= 1e-6 * held);
+        assert!((resonant - math::ln(6.0) / 1e-9).abs() <= 1e-6 * resonant);
+        assert!((floor.at(held) - e0).abs() < 1e-12);
+        assert!((floor.at(resonant) - 0.05).abs() < 1e-12);
+        // The held floor, min(floor, e₀), is flat before the first corner and after the second.
+        let held_at = |t: f64| floor.at(t).min(e0);
+        assert_same_bits(held_at(0.5 * held), e0);
+        assert_same_bits(held_at(2.0 * resonant), 0.05);
+        // No corner where the floor does not decay, starts at or below the level, or never falls
+        // below e₀.
+        assert_eq!(
+            EccentricityFloor::new(0.3, 0.0, 0.05).corners(e0),
+            [None, None]
+        );
+        assert_eq!(EccentricityFloor::new(0.1, 1e-9, 0.05).corners(e0)[0], None);
+        assert!(EccentricityFloor::new(0.1, 1e-9, 0.05).corners(e0)[1].is_some());
+        assert_eq!(
+            EccentricityFloor::new(0.3, 1e-9, 0.25).corners(e0),
+            [None, None]
+        );
+        assert_eq!(EccentricityFloor::new(0.3, 1e-9, 0.0).corners(e0)[1], None);
+        assert_eq!(EccentricityFloor::NONE.corners(e0), [None, None]);
     }
 
     fn years(y: f64) -> UniverseTime {

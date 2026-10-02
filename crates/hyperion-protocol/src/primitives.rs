@@ -147,10 +147,13 @@ hex64_newtype!(
 );
 
 hex64_newtype!(
-    /// The seed of a body's surface map: one block output of the universe's seed on `body.surface`,
-    /// keyed by the body's ID, which depends on nothing else about the body (plan 14, P14.T23).
-    SurfaceSeedHex,
-    "a surface seed"
+    /// A body's detail seed, the seed of the client's local terrain synthesis, which the rendering
+    /// plans' R09 derives on `body.surface.detail` (rendering plan R04, Design note 17).
+    ///
+    /// It replaced the surface seed on the wire: the surface seed (plan 14, P14.T23) stays on the
+    /// server, since a client holding it could synthesise a surface the ship has not seen.
+    DetailSeedHex,
+    "a detail seed"
 );
 
 hex64_newtype!(
@@ -279,9 +282,11 @@ impl fmt::Display for BodyIdHex {
 ///
 /// Zero is the epoch, the instant the galaxy's fields describe. `seconds` may be negative, and
 /// `nanos` (0 to 999,999,999) always counts forward from it, so 1.5 s before the epoch is
-/// `{"seconds": -2, "nanos": 500000000}`. Every second of the source horizon, 8.3 × 10¹² s either
-/// side of the epoch, is far inside the 2⁵³ that a JavaScript number holds exactly, so `seconds` is
-/// a JSON number.
+/// `{"seconds": -2, "nanos": 500000000}`. `seconds` is a JSON number, exact in a JavaScript number
+/// within ±(2⁵³ − 1) s, about ±285 Myr, which holds the source horizon (8.3 × 10¹² s either side
+/// of the epoch). Every time a client computes with lies inside the clock window. Only a body
+/// state's `at` ([`BodyStateDto`](crate::BodyStateDto)) may lie further, and it is display-only:
+/// a client reads it to within a relative 2⁻⁵³, 32 s at 6 Gyr (plan 14, P14.T35.d).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS,
 )]
@@ -337,11 +342,11 @@ mod tests {
     }
 
     #[test]
-    fn a_surface_seed_is_sixteen_hex_digits() {
-        let seed = SurfaceSeedHex::from_u64(u64::MAX - 1);
+    fn a_detail_seed_is_sixteen_hex_digits() {
+        let seed = DetailSeedHex::from_u64(u64::MAX - 1);
         assert_wire_form(&seed, json!("fffffffffffffffe"));
         assert_eq!(
-            SurfaceSeedHex::try_from("FFFFFFFFFFFFFFFE".to_owned()),
+            DetailSeedHex::try_from("FFFFFFFFFFFFFFFE".to_owned()),
             Err(ParseHex64Error::InvalidDigit)
         );
     }

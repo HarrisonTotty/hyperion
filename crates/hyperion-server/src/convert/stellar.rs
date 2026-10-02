@@ -19,10 +19,12 @@ use hyperion_protocol::{
     VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
 use hyperion_sim::id::SystemId;
+use hyperion_sim::math;
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::stellar::binary::{BinaryClass, CvKind, HmxbKind, XrbKind};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
 use hyperion_sim::stellar::nebula::PlanetaryNebula;
+use hyperion_sim::stellar::photometry::{absolute_bolometric_magnitude, bolometric_correction_v};
 use hyperion_sim::stellar::remnant::{
     CompactRemnant, KickMode, NatalKick, PulsarState, RemnantKind,
 };
@@ -32,7 +34,9 @@ use hyperion_sim::stellar::system::{
 use hyperion_sim::stellar::variability::{Variability, VariableKind};
 use hyperion_sim::stellar::{ObjectKind, Phase, StarState};
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::{Days, Dex, KilometresPerSecond, Magnitudes, Megayears, Years};
+use hyperion_sim::units::{
+    Days, Dex, Kelvin, KilometresPerSecond, Magnitudes, Megayears, SolarLuminosities, Years,
+};
 
 use super::query_time;
 
@@ -206,12 +210,13 @@ fn binary_class_dto(class: BinaryClass) -> Modelled<BinaryClassDto> {
 ///
 /// As in a summary, an object with no light has no photosphere: its log L and `T_eff` are `null`
 /// (ruling 54), where the sim's brief has no logarithm and a temperature of 0 K. The wire's `f32`s
-/// round the sim's values, which is finer than any display of them.
+/// round the sim's values, log L, `T_eff` and M<sub>V</sub>, which is finer than any display of
+/// them.
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "log L lies within ±20 and T_eff under 10⁷ K, well inside f32's range, whose seven \
-              digits are finer than the chart and the HR diagram draw them"
+    reason = "log L lies within ±20, T_eff under 10⁷ K and M_V within ±20 mag, well inside f32's \
+              range, whose seven digits are finer than the chart and the HR diagram draw them"
 )]
 pub(crate) fn brief_dto(brief: &StellarBrief) -> StellarBriefDto {
     let log_luminosity = brief.log_luminosity().map(Dex::value);
@@ -221,7 +226,50 @@ pub(crate) fn brief_dto(brief: &StellarBrief) -> StellarBriefDto {
         log_luminosity_lsun: log_luminosity.map(|l| l as f32),
         teff_k: log_luminosity.map(|_| brief.effective_temperature().value() as f32),
         star_count: brief.star_count(),
+        absolute_v_mag: brief_absolute_v(brief).map(|m| m.value() as f32),
     }
+}
+
+/// The absolute visual magnitude of a brief's primary, M<sub>V</sub> = M<sub>bol</sub> −
+/// BC<sub>V</sub>, from the brief's log L and `T_eff` as plan 06's
+/// [`absolute_magnitude_v`](hyperion_sim::stellar::photometry::absolute_magnitude_v) computes it
+/// from a state (a named ask of plan 06, built by plan R02, R02.T5).
+///
+/// Like that function it asks first whether the primary is a living star: the bolometric
+/// magnitude and the correction alone both have values for a white dwarf, whose light is not on
+/// the dwarf sequence's corrections. `None` for a white dwarf, a neutron star, a black hole or
+/// nothing, for an object without luminosity, and below the corrections' last row (1,710 K).
+#[must_use]
+fn brief_absolute_v(brief: &StellarBrief) -> Option<Magnitudes> {
+    let living = match brief.kind() {
+        ObjectKind::Protostar
+        | ObjectKind::PreMainSequence
+        | ObjectKind::Dwarf
+        | ObjectKind::Subgiant
+        | ObjectKind::Giant
+        | ObjectKind::Supergiant
+        | ObjectKind::WolfRayet
+        | ObjectKind::HotSubdwarf
+        | ObjectKind::Substellar => true,
+        ObjectKind::WhiteDwarf
+        | ObjectKind::NeutronStar
+        | ObjectKind::BlackHole
+        | ObjectKind::NoRemnant => false,
+    };
+    if !living {
+        return None;
+    }
+    absolute_v_from(brief.log_luminosity()?, brief.effective_temperature())
+}
+
+/// M<sub>V</sub> of a living star of log₁₀ L (L☉) `log_luminosity` and effective temperature
+/// `teff`: plan 06's bolometric magnitude less its V-band bolometric correction.
+#[must_use]
+fn absolute_v_from(log_luminosity: Dex, teff: Kelvin) -> Option<Magnitudes> {
+    let luminosity = SolarLuminosities::new(math::exp10(log_luminosity.value()));
+    let m_bol = absolute_bolometric_magnitude(luminosity)?;
+    let bc = bolometric_correction_v(teff)?;
+    Some(m_bol - bc)
 }
 
 /// What a dead star left, with what this generator version knows of it.
@@ -420,7 +468,7 @@ pub(crate) fn orbit_dto(orbit: &KeplerElements) -> OrbitDto {
 
 /// A clock time as the wire carries it.
 #[must_use]
-pub(super) fn wire_time(t: UniverseTime) -> hyperion_protocol::UniverseTime {
+pub(crate) fn wire_time(t: UniverseTime) -> hyperion_protocol::UniverseTime {
     hyperion_protocol::UniverseTime {
         seconds: t.seconds(),
         nanos: t.subsec_nanos(),
@@ -804,5 +852,36 @@ mod tests {
             .expect("a class serialises"),
             serde_json::json!({ "type": "high_mass_xray_binary", "kind": "be_x" })
         );
+    }
+
+    #[test]
+    fn a_sun_like_brief_has_the_sun_s_absolute_v() {
+        // log L = 0 and 5,772 K: plan 06's photometry doctest gives the Sun M_V = 4.825.
+        let m_v = absolute_v_from(Dex::new(0.0), Kelvin::new(5_772.0)).expect("tabulated");
+        assert!((m_v.value() - 4.83).abs() <= 0.01, "{m_v:?}");
+        // Below the corrections' last row there is no value.
+        assert_eq!(absolute_v_from(Dex::new(-5.0), Kelvin::new(1_000.0)), None);
+    }
+
+    #[test]
+    fn a_living_primary_s_brief_carries_its_state_s_absolute_v() {
+        let stars = system(1.0, 4.6e9);
+        let brief = brief_dto(&stars.brief_at(years(0)).expect("born"));
+        let summary = answer(&stars, 0);
+        let expected = summary.stars[0]
+            .absolute_v_mag
+            .expect("a living star has M_V");
+        let sent = f64::from(brief.absolute_v_mag.expect("the brief carries M_V"));
+        assert!((sent - expected).abs() < 1e-5, "{sent} against {expected}");
+    }
+
+    #[test]
+    fn a_white_dwarf_s_brief_has_no_absolute_v() {
+        let brief = brief_dto(&system(2.0, 5.0e9).brief_at(years(0)).expect("born"));
+        assert_eq!(brief.kind, ObjectKindDto::WhiteDwarf);
+        assert!(brief.log_luminosity_lsun.is_some() && brief.teff_k.is_some());
+        assert_eq!(brief.absolute_v_mag, None);
+        let wire = serde_json::to_value(&brief).expect("a brief serialises");
+        assert!(wire.get("absolute_v_mag").is_none(), "{wire}");
     }
 }

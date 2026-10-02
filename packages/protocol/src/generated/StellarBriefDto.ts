@@ -30,4 +30,14 @@ teff_k: number | null,
  * three stellar companions, direct or in subsystems (plan 11, P11.T13; rulings 74 and 81),
  * and one bound brown dwarf, which the count includes (P11.T2.d).
  */
-star_count: number, };
+star_count: number, 
+/**
+ * Its absolute visual magnitude M<sub>V</sub>, mag (Johnson V at 10 pc), from its luminosity
+ * and temperature through plan 06's bolometric corrections (a named ask of plan 06, built by
+ * plan R02, R02.T5).
+ *
+ * Absent where the primary is not a living star (a white dwarf, a neutron star, a black hole
+ * or nothing), has no luminosity, or is below the last of plan 06's corrections (1,710 K), so
+ * a brief without it keeps its earlier wire form.
+ */
+absolute_v_mag?: number, };

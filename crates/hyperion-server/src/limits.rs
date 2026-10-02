@@ -68,6 +68,55 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// a shutdown.
 pub const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// The largest outbound binary frame, header included: 262,144 bytes (rendering plan R03, Design
+/// notes 10 and 11).
+///
+/// Well within the rendering brainstorm's "at most 1 MB" (Runtime and code shape). A WebSocket
+/// message cannot be interleaved with another (RFC 6455, section 5.4), so a scene push waits behind
+/// the rest of the chunk being written: about 52 ms at 40 Mbit/s and 2 ms at 1 Gbit/s, under the
+/// main screen's 100 ms loop, where 1 MB chunks would take over 200 ms whatever the kernel holds.
+/// Each frame carries 262,120 payload bytes after its 24-byte header, so a payload of L bytes is
+/// ⌈L ÷ 262,120⌉ frames: 58 for 15 × 10⁶ bytes, 61 for 15 MiB.
+pub const MAX_BINARY_FRAME_BYTES: usize = 262_144;
+
+/// Bulk frame bytes, headers included, the outbound queue holds at once: one chunk, the next queued only once the
+/// bulk bytes queued fall under it, while text frames queue as before (rendering plan R03, Design
+/// note 11). R03.T10.b streams under it.
+pub const BULK_QUEUED_BYTES: usize = 262_144;
+
+/// `TCP_NOTSENT_LOWAT` on every accepted socket, Linux only: 65,536 bytes (rendering plan R03,
+/// Design note 11).
+///
+/// Once that much is unsent the kernel takes no more from the writer, so a push waits behind at
+/// most this much of the send buffer rather than up to `tcp_wmem`'s maximum, up to 4 MB, that Linux autotunes it to (kernel
+/// `ip-sysctl` documentation, `tcp_notsent_lowat`; Cloudflare found 16 KiB kept connections fully
+/// used, P. Meenan 2018, "HTTP/2 Prioritization with NGINX"). About 13 ms at 40 Mbit/s. socket2
+/// does not expose it on macOS, and Windows has none; there the chunk bound alone holds.
+pub const TCP_NOTSENT_LOWAT_BYTES: u32 = 65_536;
+
+/// Subscriptions one connection may hold at once, those still opening included (rendering plan
+/// R03, R03.T5.b).
+///
+/// Room for the scene, plan 12's alerts and two more topics on one connection: one scene
+/// subscription already carries every view's camera, so a client needs one per topic. A fifth
+/// `subscribe` is refused with `bad_request` naming `topic`.
+pub const MAX_SUBSCRIPTIONS: usize = 4;
+
+/// How often a scene subscription is pushed its clock when nothing else changes: 1 s (rendering
+/// plan R03, Design note 4). The heartbeat keeps a client's extrapolated clock from drifting, and
+/// carries the contacts the server places, so a contact is at most a second of real time stale.
+pub const SCENE_HEARTBEAT: Duration = Duration::from_secs(1);
+
+/// How often a scene subscription holding craft is pushed them: 15.625 ms, the 64 Hz tick of the
+/// single-player brainstorm's The clock, exactly 15,625,000 ns (rendering plan R03, R03.T8.b).
+/// Missed ticks are skipped.
+pub const CRAFT_PUSH_INTERVAL: Duration = Duration::from_micros(15_625);
+
+/// Cameras one scene subscription may report: 8, one per view of the largest layout R07 draws on
+/// one client, with room (rendering plan R03, Design note 6). A ninth is refused with
+/// `bad_request` naming `cameras`.
+pub const MAX_SCENE_CAMERAS: usize = 8;
+
 /// Universes the server holds, counting those on disk and those being created.
 pub const MAX_UNIVERSES: usize = 256;
 
@@ -139,5 +188,22 @@ mod tests {
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);
+        assert_eq!(
+            MAX_SUBSCRIPTIONS, 4,
+            "the scene, the alerts and two more topics"
+        );
+        assert_eq!(MAX_BINARY_FRAME_BYTES, 262_144, "256 KiB, header included");
+        assert_eq!(BULK_QUEUED_BYTES, 262_144, "one chunk");
+        assert_eq!(TCP_NOTSENT_LOWAT_BYTES, 65_536, "64 KiB");
+        assert_eq!(
+            MAX_SCENE_CAMERAS, 8,
+            "one per view of R07's largest layout, with room"
+        );
+        assert_eq!(SCENE_HEARTBEAT, Duration::from_secs(1));
+        assert_eq!(
+            CRAFT_PUSH_INTERVAL * 64,
+            Duration::from_secs(1),
+            "the 64 Hz tick"
+        );
     }
 }

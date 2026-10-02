@@ -6,8 +6,8 @@ import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
 import { MOON_SIZE_CLASS } from "../../lib/system/bodySymbols";
 import { orbitNormal } from "../../lib/system/hierarchy";
 import type { SystemBody } from "../../lib/system/model";
-import { localFrameAt } from "../../spatial/frame";
-import { dot, norm, scale, sub, vec3 } from "../../spatial/vec3";
+import { localFrameAt } from "../../geometry/frame";
+import { dot, norm, scale, sub, vec3 } from "../../geometry/vec3";
 import { FIXTURE_SYSTEM, populatedBodies } from "../../test/planetaryFixture";
 import {
   bodyFitAu,

@@ -6,8 +6,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { FakeWebSocket } from "./test/FakeWebSocket";
 import { aDensityMap, anOpenedUniverse, aUniverseList } from "./test/galaxyFixtures";
+import {
+  SCENE_TIDAL_RADIUS_M,
+  sceneClock,
+  shipInSpace,
+  shipInSystem,
+  sliceSceneSystem,
+} from "./test/sceneFixture";
 import { stubCanvas } from "./test/RecordingContext2D";
-import { stubHyperionApi } from "./test/stubHyperionApi";
+import { stubHyperionApi, TEST_GRAPHICS, TEST_SERVER_URL } from "./test/stubHyperionApi";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function answer(play: () => void): Promise<void> {
@@ -19,6 +26,11 @@ async function answer(play: () => void): Promise<void> {
 
 function chartCentreMarks(): HTMLElement[] {
   return screen.queryAllByRole("img", { name: "Chart centre" });
+}
+
+/** The header strip's mode banner, or `null` while none stands. */
+function modeBanner(): HTMLElement | null {
+  return screen.queryByRole("status", { name: "Mode" });
 }
 
 describe("App", () => {
@@ -47,10 +59,31 @@ describe("App", () => {
     expect(screen.getByText("ws://10.0.0.5:9100/ws")).toBeInTheDocument();
   });
 
+  it("shows the graphics panel on the link display, without WebGPU in jsdom", async () => {
+    render(<App />);
+
+    const panel = screen.getByRole("region", { name: "Graphics" });
+    expect(within(panel).getByText("VULKAN")).toBeInTheDocument();
+    expect(await within(panel).findByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
+  });
+
+  it("shows a safe launch in the graphics panel and the header strip", () => {
+    stubHyperionApi(TEST_SERVER_URL, { ...TEST_GRAPHICS, launchMode: "safe" });
+    render(<App />);
+
+    const panel = screen.getByRole("region", { name: "Graphics" });
+    expect(within(panel).getByText("SAFE MODE")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("banner")).getByRole("status", { name: "Graphics mode" }),
+    ).toHaveTextContent("GRAPHICS SAFE MODE");
+  });
+
   it("shows the link being established on launch", () => {
     render(<App />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("ESTABLISHING LINK");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent(
+      "ESTABLISHING LINK",
+    );
   });
 
   it("greets the server and reports a nominal link once welcomed", () => {
@@ -70,7 +103,7 @@ describe("App", () => {
         generator_version: 2,
       });
     });
-    expect(screen.getByRole("status")).toHaveTextContent("LINK NOMINAL");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent("LINK NOMINAL");
     expect(screen.getByText("9.9.9")).toBeInTheDocument();
   });
 
@@ -88,7 +121,9 @@ describe("App", () => {
       });
     });
 
-    expect(screen.getByRole("status")).toHaveTextContent("LINK INCOMPATIBLE");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent(
+      "LINK INCOMPATIBLE",
+    );
   });
 
   it("reports loss of carrier when the socket closes", () => {
@@ -99,7 +134,7 @@ describe("App", () => {
       socket.close();
     });
 
-    expect(screen.getByRole("status")).toHaveTextContent("NO CARRIER");
+    expect(screen.getByRole("status", { name: "Server link" })).toHaveTextContent("NO CARRIER");
   });
 
   it("switches to the galaxy display when its tab is clicked", async () => {
@@ -136,6 +171,99 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Galaxy" })).toBeInTheDocument();
     await user.keyboard("{F1}");
     expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
+  });
+
+  it("switches to the view display on F4", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.keyboard("{F4}");
+    expect(screen.getByRole("heading", { level: 1, name: "View" })).toBeInTheDocument();
+  });
+
+  describe("the TRAINING banner, which follows what VIEW draws", () => {
+    /** Opens a universe on GALAXY, then shows VIEW, whose scene subscription goes out. */
+    async function viewOfAnOpenUniverse(
+      user: ReturnType<typeof userEvent.setup>,
+    ): Promise<FakeWebSocket> {
+      const socket = FakeWebSocket.latest();
+      act(() => {
+        socket.serverWelcomes();
+      });
+      await user.keyboard("{F2}");
+      await answer(() => {
+        socket.serverAnswers("list_universes", () => aUniverseList());
+      });
+      await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+      await answer(() => {
+        socket.serverAnswers("open_universe", () => anOpenedUniverse());
+      });
+      await user.keyboard("{F4}");
+      return socket;
+    }
+
+    /** Answers the scene subscription with the ship in the slice's system. */
+    async function sceneInSystem(socket: FakeWebSocket): Promise<void> {
+      await answer(() => {
+        socket.serverAnswers("subscribe", () => ({
+          kind: "subscribe",
+          subscription: 7,
+          state: {
+            topic: "scene",
+            sequence: 0,
+            clock: sceneClock(3_000),
+            ship: shipInSystem(3_000),
+            system: sliceSceneSystem(),
+            tidal_radius_m: SCENE_TIDAL_RADIUS_M,
+            craft: [],
+          },
+        }));
+      });
+    }
+
+    it("shows TRAINING while the view draws a kept scene", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+
+      await user.keyboard("{F4}");
+      expect(modeBanner()).toHaveTextContent("TRAINING");
+    });
+
+    it("clears TRAINING once the server's scene is selected and drawn", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      const socket = await viewOfAnOpenUniverse(user);
+      await user.click(screen.getByRole("button", { name: "PRECISION TEST" }));
+      expect(modeBanner()).toHaveTextContent("TRAINING");
+
+      await user.click(screen.getByRole("button", { name: "SERVER" }));
+      await sceneInSystem(socket);
+
+      expect(modeBanner()).not.toBeInTheDocument();
+    });
+
+    it("restores TRAINING when the server's scene is lost and a kept scene stands in", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      const socket = await viewOfAnOpenUniverse(user);
+      await sceneInSystem(socket);
+      expect(modeBanner()).not.toBeInTheDocument();
+
+      // The ship leaves the system: the server's scene has nothing to draw.
+      await answer(() => {
+        socket.serverNotifies(7, {
+          topic: "scene",
+          sequence: 1,
+          clock: sceneClock(3_100),
+          ship: shipInSpace(3_100),
+          arrival: { type: "no_system" },
+          bodies: [],
+        });
+      });
+
+      expect(modeBanner()).toHaveTextContent("TRAINING");
+      expect(screen.getByText("SCENE NOT AVAILABLE: the ship is in no system")).toBeInTheDocument();
+    });
   });
 
   it("hands the focus to the shown display's tab when a function key hides the one that had it", async () => {

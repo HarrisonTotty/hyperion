@@ -33,7 +33,7 @@ import type {
   VariableKindDto,
 } from "@hyperion/protocol";
 
-import type { Vec3 } from "../../spatial/vec3";
+import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../orbit";
 
 /**
@@ -388,8 +388,12 @@ export interface SystemBody {
 
 /** A body's hooks: what the generators of surfaces, life and civilisations read. */
 export interface BodyHooks {
-  /** The seed of its surface map, 16 lower-case hexadecimal digits. */
-  readonly surfaceSeed: string;
+  /**
+   * The seed of the client's local terrain synthesis, 16 lower-case hexadecimal digits, as a
+   * section of its own: `not_modelled` until the server derives it (rendering plan R09). The
+   * body's surface seed never reaches the client (R04, Design note 17).
+   */
+  readonly detailSeed: Section<string>;
 }
 
 /** One body's whole record (the protocol's `BodyRecordDto`): its list entry, its surface and hooks. */

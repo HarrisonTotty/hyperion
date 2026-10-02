@@ -1,3 +1,4 @@
+import type { BodyStateDto, OrbitDriftDto, SectionDto, UniverseTime } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +12,7 @@ import {
   sliceBodies,
   sliceBodiesWith,
 } from "../../test/planetaryFixture";
+import { GOLDEN_SYSTEMS, GOLDEN_TIMES, goldenSystemBodies } from "../../test/inSystemGolden";
 import {
   EARTH_MASS_KG,
   toBodiesRequest,
@@ -32,6 +34,56 @@ function bodiesOf(response = sliceBodies()) {
 function faultOf(response = sliceBodies()): string {
   const result = toSystemBodiesModel(response, DESIGNATION);
   return result.kind === "fault" ? result.fault : "no fault";
+}
+
+/** The slice's answer with its first body in `state`, and so with no orbit. */
+function withFirstState(state: BodyStateDto) {
+  const first = sliceBodies().bodies[0]?.id;
+  if (first === undefined) {
+    throw new Error("the slice's answer has a body");
+  }
+  return sliceBodiesWith((body) =>
+    body.id === first ? { ...body, state, orbit: { state: "not_applicable" } } : body,
+  );
+}
+
+/** The slice's answer with every orbit drifting as `drift` says. */
+function withDrift(drift: OrbitDriftDto) {
+  return sliceBodiesWith((body) =>
+    body.orbit.state === "ok"
+      ? { ...body, orbit: { state: "ok", value: { ...body.orbit.value, drift } } }
+      : body,
+  );
+}
+
+/** A drift of close_binary's receding moon's size, from the epoch. */
+const DRIFT: OrbitDriftDto = {
+  reference: { seconds: 0, nanos: 0 },
+  semi_major_axis_rate_m_per_s: 2.59e-9,
+  eccentricity_rate_per_s: 0,
+  mean_motion_rate_rad_per_s2: -1.27e-22,
+};
+
+/** The slice's answer with every orbit's `valid_until` set to `validUntil`. */
+function withValidUntil(validUntil: UniverseTime) {
+  return sliceBodiesWith((body) =>
+    body.orbit.state === "ok"
+      ? { ...body, orbit: { state: "ok", value: { ...body.orbit.value, valid_until: validUntil } } }
+      : body,
+  );
+}
+
+/** The fixture's Earth with a hooks section that is `ok` and carries `detailSeed`, read. */
+function earthWithDetailSeed(detailSeed: SectionDto<string>) {
+  const detail = earthDetail();
+  return toBodyDetail(
+    {
+      ...detail,
+      record: { ...detail.record, hooks: { state: "ok", value: { detail_seed: detailSeed } } },
+    },
+    FIXTURE_SYSTEM,
+    DESIGNATION,
+  );
 }
 
 /** The slice's answer with its giant's effective temperature set to `effectiveK`. */
@@ -183,6 +235,34 @@ describe("toSystemBodiesModel", () => {
     expect(faultOf(stray)).toBe("body 57344 host unknown");
   });
 
+  it("reads an evolving orbit's drift with its rates", () => {
+    const earth = bodiesOf(withDrift(DRIFT)).bodies.bodies[0];
+
+    expect(earth?.orbit).toMatchObject({
+      state: "ok",
+      value: {
+        orbit: {
+          drift: {
+            reference: { seconds: 0, nanos: 0 },
+            semiMajorAxisRateMPerS: 2.59e-9,
+            eccentricityRatePerS: 0,
+            meanMotionRateRadPerS2: -1.27e-22,
+          },
+        },
+      },
+    });
+    expect(bodiesOf().bodies.bodies[0]?.orbit).not.toHaveProperty("value.orbit.drift");
+  });
+
+  it("refuses a drift with a rate that is not finite or a malformed reference", () => {
+    expect(faultOf(withDrift({ ...DRIFT, mean_motion_rate_rad_per_s2: Number.NaN }))).toBe(
+      "orbit drift unusable",
+    );
+    expect(faultOf(withDrift({ ...DRIFT, reference: { seconds: 0.5, nanos: 0 } }))).toBe(
+      "orbit drift unusable",
+    );
+  });
+
   it("refuses an orbit the client cannot propagate", () => {
     const response = sliceBodiesWith((body) =>
       body.orbit.state === "ok"
@@ -270,10 +350,86 @@ describe("toBodyDetail", () => {
     expect(contact.detail.record.orbit).toEqual({ state: "not_resolved" });
   });
 
+  it("reads a hooks section with its detail seed", () => {
+    const result = earthWithDetailSeed({ state: "ok", value: "0123456789abcdef" });
+
+    expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
+      state: "ok",
+      value: { detailSeed: { state: "ok", value: "0123456789abcdef" } },
+    });
+  });
+
+  it("reads a hooks section whose detail seed is not modelled", () => {
+    const result = earthWithDetailSeed({ state: "not_modelled" });
+
+    expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
+      state: "ok",
+      value: { detailSeed: { state: "not_modelled" } },
+    });
+  });
+
+  it("refuses a detail seed that is not 16 lower-case hexadecimal digits", () => {
+    expect(earthWithDetailSeed({ state: "ok", value: "0123456789ABCDEF" })).toEqual({
+      kind: "fault",
+      fault: "detail seed malformed",
+    });
+  });
+
   it("refuses a record of another system", () => {
     expect(toBodyDetail(earthDetail(), "0200080020000001", DESIGNATION)).toEqual({
       kind: "fault",
       fault: `body ${FIXTURE_EARTH} of another system`,
     });
+  });
+});
+
+/** A golden system's `system_bodies` answer as the server sent it, with its kind. */
+function goldenAnswer(
+  system: (typeof GOLDEN_SYSTEMS)[number],
+  when: (typeof GOLDEN_TIMES)[number],
+) {
+  return { kind: "system_bodies" as const, ...goldenSystemBodies(system, when) };
+}
+
+describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
+  // About -6.3 Gyr, which a JavaScript number holds to 32 s.
+  const LONG_AGO_S = -199_097_968_544_446_944;
+
+  it("reads every frame of the RM1 fixture's three golden systems", () => {
+    for (const system of GOLDEN_SYSTEMS) {
+      for (const when of GOLDEN_TIMES) {
+        expect(faultOf(goldenAnswer(system, when)), `${system} ${when}`).toBe("no fault");
+      }
+    }
+  });
+
+  it("keeps the wide binary's moon unbound 2.1 Gyr before the epoch", () => {
+    const { bodies } = bodiesOf(goldenAnswer("wide_binary", "epoch"));
+    const moon = bodies.bodies.find((body) => body.id === "41ffecae00000004.0401");
+
+    expect(moon?.state).toEqual({
+      kind: "unbound",
+      at: { seconds: -67_192_088_818_403_264, nanos: 0 },
+    });
+  });
+
+  it("reads an unbinding or a destruction at any whole number of seconds", () => {
+    const at = { seconds: LONG_AGO_S, nanos: 0 };
+
+    expect(faultOf(withFirstState({ type: "unbound", at }))).toBe("no fault");
+    expect(faultOf(withFirstState({ type: "destroyed", cause: "engulfed", at }))).toBe("no fault");
+  });
+
+  it("refuses a state time that is not whole seconds and nanoseconds", () => {
+    expect(faultOf(withFirstState({ type: "unbound", at: { seconds: 0.5, nanos: 0 } }))).toBe(
+      "state time unusable",
+    );
+    expect(faultOf(withFirstState({ type: "unbound", at: { seconds: 0, nanos: 1e9 } }))).toBe(
+      "state time unusable",
+    );
+  });
+
+  it("still refuses an orbit's valid_until beyond 2^53 s, which the client computes with", () => {
+    expect(faultOf(withValidUntil({ seconds: -LONG_AGO_S, nanos: 0 }))).toBe("orbit time unusable");
   });
 });

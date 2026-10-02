@@ -11,12 +11,15 @@
 //! the connection with a policy violation. Closing the connection, for whatever reason, cancels
 //! every request it has in flight.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Extension;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade, close_code};
@@ -24,19 +27,21 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
-use hyperion_protocol::{ClientMessage, PROTOCOL_VERSION, ServerMessage};
+use hyperion_protocol::{ClientMessage, PROTOCOL_VERSION, RequestBody, ServerMessage};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::Instrument;
 
 use crate::AppState;
+use crate::bulk::BulkPayload;
 use crate::connections::{Closing, ConnectionGuard};
 use crate::limits::{
     CLOSE_TIMEOUT, MAX_CONSECUTIVE_MALFORMED_FRAMES, MAX_INBOUND_FRAME_BYTES, OUTBOUND_BYTES,
     WRITE_TIMEOUT,
 };
 use crate::outbound::{self, Held, Outbound, WriterStopped};
-use crate::requests::{self, Handshake, Inbound, Requests, Tally, to_frame};
+use crate::requests::{self, Handshake, Inbound, Requests, Settled, Tally, to_frame};
+use crate::subscriptions::{Large, Offered, Ready, Step, Subscriptions};
 
 /// The limits a connection enforces on writing to its client.
 ///
@@ -104,6 +109,7 @@ async fn serve(
 }
 
 /// The answer to `hello`.
+#[must_use]
 fn welcome() -> ServerMessage {
     ServerMessage::Welcome {
         server_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -131,6 +137,7 @@ enum End {
 
 impl End {
     /// The close frame the server sends, when it is the one closing.
+    #[must_use]
     fn close_frame(&self) -> Option<CloseFrame> {
         match self {
             Self::TooManyMalformed => Some(CloseFrame {
@@ -176,16 +183,37 @@ impl fmt::Display for End {
 enum Event {
     /// The oldest held request's frame fits the outbound queue now.
     Room,
+    /// A subscription has a push pending, or a pending push that had no room may have some now.
+    Pushes,
+    /// A large notification is serialised.
+    Serialised(Ready),
     Finished(Result<(tokio::task::Id, requests::Finished), tokio::task::JoinError>),
+    /// The streaming request's next chunk, or its terminal frame, may be queued.
+    Chunk,
     Frame(Option<Result<Message, axum::Error>>),
 }
 
+/// A large notification being serialised on the CPU pool.
+type Serialising = Pin<Box<dyn Future<Output = Ready> + Send>>;
+
 /// The reading side of a connection and everything it owns.
 struct Connection {
+    /// The server's state, whose pool serialises a large notification.
+    state: Arc<AppState>,
     requests: Requests,
+    /// The connection's subscriptions, which end with it (rendering plan R03, R03.T5.b).
+    subscriptions: Subscriptions,
+    /// The smallest pending push that found no room in `outbound`, in bytes, if one did.
+    push_waits_for: Option<usize>,
+    /// The large notification being serialised, one at a time, which the connection polls with
+    /// its socket so that it reads on meanwhile.
+    serialising: Option<Serialising>,
     outbound: Outbound,
     /// Finished requests waiting for room in `outbound`.
     held: Held,
+    /// Requests answered in bulk, in the order they finished, each streaming its chunks before
+    /// its terminal frame; the first streams now (rendering plan R03, R03.T10.b).
+    streams: VecDeque<Stream>,
     closing: Closing,
     handshake: Handshake,
     malformed_in_a_row: u32,
@@ -204,9 +232,14 @@ impl Connection {
         );
         let mut writer = tokio::spawn(writer.run(sink).in_current_span());
         let mut connection = Self {
+            state: Arc::clone(&state),
             requests: Requests::new(Arc::clone(&state)),
+            subscriptions: Subscriptions::new(),
+            push_waits_for: None,
+            serialising: None,
             outbound,
             held: Held::new(state.outbound_stats.clone()),
+            streams: VecDeque::new(),
             closing,
             handshake: Handshake::Pending,
             malformed_in_a_row: 0,
@@ -216,13 +249,20 @@ impl Connection {
             state.outbound_stats.write_timed_out();
         }
         let Self {
+            state: _,
             mut requests,
+            subscriptions,
             outbound,
             held,
+            streams,
             ..
         } = connection;
-        // Held requests are still in flight, and are abandoned with the rest.
+        // Every subscription ends with its socket: its topic's task is ended and nothing it had
+        // pending is sent.
+        drop(subscriptions);
+        // Held and streaming requests are still in flight, and are abandoned with the rest.
         drop(held);
+        drop(streams);
         requests.close().await;
         let closed = timeout(
             limits.close_timeout,
@@ -250,6 +290,10 @@ impl Connection {
         loop {
             let next_held = self.held.next_len();
             let room = self.outbound.room_for(next_held.unwrap_or_default());
+            let push_waits_for = self.push_waits_for;
+            let push_room = self.outbound.room_for(push_waits_for.unwrap_or_default());
+            let next_chunk = self.streams.front_mut().map(Stream::next_len);
+            let chunk_room = self.outbound.bulk_room_for(next_chunk.unwrap_or_default());
             let event = tokio::select! {
                 biased;
                 () = self.closing.wait() => return End::ShuttingDown,
@@ -262,28 +306,38 @@ impl Connection {
                     Event::Finished(joined)
                 }
                 frame = stream.next() => Event::Frame(frame),
+                ready = async {
+                    match self.serialising.as_mut() {
+                        Some(serialising) => serialising.await,
+                        None => std::future::pending().await,
+                    }
+                }, if self.serialising.is_some() => Event::Serialised(ready),
+                // Pushes after frames, so that a topic pushing fast cannot keep `ping`, `cancel`
+                // and the close from being read.
+                () = push_room, if push_waits_for.is_some() => Event::Pushes,
+                () = self.subscriptions.woken() => Event::Pushes,
+                // A bulk transfer last, a chunk at a time, so that everything else overtakes it
+                // (Design note 11).
+                () = chunk_room, if next_chunk.is_some() => Event::Chunk,
             };
             let handled = match event {
-                Event::Room => match self.held.pop().and_then(|held| self.requests.end(held)) {
-                    Some(frame) => self.push(Message::Text(frame.into())).await,
+                Event::Room => match self.held.pop() {
+                    Some(held) => self.end(held).await,
                     None => Ok(()),
                 },
+                Event::Pushes => self.flush_pushes().await,
+                Event::Serialised(ready) => self.on_serialised(ready).await,
+                Event::Chunk => self.stream_chunk().await,
                 Event::Finished(joined) => match self.requests.settle(joined) {
-                    // Queued at once only if nothing is held before it, so that terminal frames
-                    // are queued in the order their requests finished.
-                    Some(settled)
-                        if self.held.is_empty()
-                            && self.outbound.has_room_for(settled.frame_len()) =>
-                    {
-                        match self.requests.end(settled) {
-                            Some(frame) => self.push(Message::Text(frame.into())).await,
-                            None => Ok(()),
+                    Some(mut settled) => match settled.take_bulk() {
+                        // An answer in bulk streams its chunks first, after any streaming before
+                        // it, and its terminal frame then joins the others.
+                        Some(bulk) => {
+                            self.streams.push_back(Stream::new(settled, &bulk));
+                            Ok(())
                         }
-                    }
-                    Some(settled) => {
-                        self.held.push(settled);
-                        Ok(())
-                    }
+                        None => self.queue_terminal(settled).await,
+                    },
                     None => Ok(()),
                 },
                 Event::Frame(None | Some(Ok(Message::Close(_)))) => Err(End::ClientClosed),
@@ -348,15 +402,171 @@ impl Connection {
                 Some(to_frame(&welcome()))
             }
             ClientMessage::Ping { nonce } => Some(to_frame(&ServerMessage::Pong { nonce })),
+            ClientMessage::Request {
+                id,
+                body: RequestBody::Subscribe(request),
+            } => {
+                self.requests
+                    .submit_subscribe(id, request, self.handshake, &mut self.subscriptions)
+            }
+            ClientMessage::Request {
+                id,
+                body: RequestBody::Unsubscribe(request),
+            } => Some(self.requests.unsubscribe(
+                id,
+                request,
+                self.handshake,
+                &mut self.subscriptions,
+            )),
+            ClientMessage::Request {
+                id,
+                body: RequestBody::SceneCameras(request),
+            } => self
+                .requests
+                .scene_cameras(id, request, self.handshake, &self.subscriptions),
             ClientMessage::Request { id, body } => self.requests.submit(id, body, self.handshake),
             ClientMessage::Cancel { id } => {
                 let cancelled = self.requests.cancel(id);
-                // A held frame of the request just cancelled is dropped: `cancelled` ended it.
+                if cancelled.is_some() {
+                    // A subscription still opening ends with its cancelled `subscribe`.
+                    self.subscriptions.failed(id);
+                }
+                // A held frame of the request just cancelled is dropped: `cancelled` ended it, and
+                // so is a transfer's rest, of which no further chunk is queued.
                 self.held
                     .retain(|settled| self.requests.is_in_flight(settled));
+                self.streams
+                    .retain(|stream| self.requests.is_in_flight(&stream.settled));
                 cancelled
             }
         }
+    }
+
+    /// Ends a settled request by queuing its terminal frame, unless a `cancel` ended it first;
+    /// a `subscribe` answered with `subscribed` makes its subscription live once the answer is
+    /// queued, so that its notifications follow it, and one that failed ends its subscription.
+    async fn end(&mut self, settled: Settled) -> Result<(), End> {
+        let (id, responded) = (settled.id(), settled.responded());
+        let Some(frame) = self.requests.end(settled) else {
+            return Ok(());
+        };
+        self.push(Message::Text(frame.into())).await?;
+        if responded {
+            self.subscriptions.went_live(id);
+        } else {
+            self.subscriptions.failed(id);
+        }
+        Ok(())
+    }
+
+    /// Queues the streaming request's next chunk, or, once all are queued, its terminal frame,
+    /// which ends the request (Design note 10).
+    async fn stream_chunk(&mut self) -> Result<(), End> {
+        let Some(stream) = self.streams.front_mut() else {
+            return Ok(());
+        };
+        if let Some(chunk) = stream.chunks.next() {
+            return self.push_bulk(chunk).await;
+        }
+        let stream = self
+            .streams
+            .pop_front()
+            .expect("the front stream was read just above");
+        self.queue_terminal(stream.settled).await
+    }
+
+    /// Queues a finished request's terminal frame at once if nothing is held before it and the
+    /// queue has room for it, so that terminal frames are queued in the order their requests
+    /// finished; holds it otherwise.
+    async fn queue_terminal(&mut self, settled: Settled) -> Result<(), End> {
+        if self.held.is_empty() && self.outbound.has_room_for(settled.frame_len()) {
+            self.end(settled).await
+        } else {
+            self.held.push(settled);
+            Ok(())
+        }
+    }
+
+    /// Queues a bulk frame, waiting while the queue holds its full count of frames, unless the
+    /// server starts shutting down meanwhile.
+    async fn push_bulk(&mut self, frame: Bytes) -> Result<(), End> {
+        tokio::select! {
+            biased;
+            () = self.closing.wait() => Err(End::ShuttingDown),
+            sent = self.outbound.send_bulk(frame) => sent.map_err(|_| End::WriterGone),
+        }
+    }
+
+    /// Queues every live subscription's pending push that the outbound queue has room for, each
+    /// as a `notification` numbered with its subscription's next sequence, and leaves the rest
+    /// pending until room frees (rendering plan R03, Design note 5). A large one is serialised off
+    /// the connection's path, so that frames are read meanwhile, and queued once it is back.
+    async fn flush_pushes(&mut self) -> Result<(), End> {
+        self.push_waits_for = None;
+        let mut after = None;
+        loop {
+            let outbound = &self.outbound;
+            let Some(step) = self.subscriptions.next_step(
+                after,
+                |bytes| outbound.has_room_for(bytes),
+                if self.serialising.is_none() {
+                    Large::MaySerialise
+                } else {
+                    Large::Hold
+                },
+            ) else {
+                break;
+            };
+            after = Some(step.id());
+            match step {
+                Step::Send(_, frame) => self.push(Message::Text(frame.into())).await?,
+                Step::Waiting(_, bytes) => self.waits_for(bytes),
+                Step::Serialise(unsent) if unsent.is_large() => {
+                    self.serialising =
+                        Some(Box::pin(unsent.serialise_on(Arc::clone(&self.state.pool))));
+                }
+                Step::Serialise(unsent) => self.offer(unsent.serialise()).await?,
+            }
+        }
+        // A subscription its topic gave up ends once its last push is queued.
+        while let Some((id, frame)) = self.subscriptions.next_failed() {
+            let bytes = frame.len();
+            if !self.outbound.has_room_for(bytes) {
+                self.waits_for(bytes);
+                break;
+            }
+            self.subscriptions.ended_by_topic(id);
+            self.push(Message::Text(frame.into())).await?;
+        }
+        Ok(())
+    }
+
+    /// Takes a large notification back from the pool, and queues it and whatever else is
+    /// pending that has room.
+    async fn on_serialised(&mut self, ready: Ready) -> Result<(), End> {
+        self.serialising = None;
+        self.offer(ready).await?;
+        self.flush_pushes().await
+    }
+
+    /// Queues a serialised notification if the outbound queue has room for it, and leaves it
+    /// waiting for room otherwise.
+    async fn offer(&mut self, ready: Ready) -> Result<(), End> {
+        let outbound = &self.outbound;
+        match self
+            .subscriptions
+            .offer(ready, |bytes| outbound.has_room_for(bytes))
+        {
+            Offered::Send(frame) => self.push(Message::Text(frame.into())).await?,
+            Offered::Waiting(bytes) => self.waits_for(bytes),
+            Offered::Nothing => {}
+        }
+        Ok(())
+    }
+
+    /// Notes that a push waits for room for `bytes`.
+    fn waits_for(&mut self, bytes: usize) {
+        self.push_waits_for = Some(self.push_waits_for.map_or(bytes, |w| w.min(bytes)));
     }
 
     /// Queues a frame for the writer, waiting while the queue holds its full count of frames,
@@ -367,6 +577,31 @@ impl Connection {
             () = self.closing.wait() => Err(End::ShuttingDown),
             sent = self.outbound.send(message) => sent.map_err(|_| End::WriterGone),
         }
+    }
+}
+
+/// A request answered in bulk: its chunks not yet queued, then its terminal frame.
+struct Stream {
+    /// The request, in flight until its terminal frame is queued.
+    settled: Settled,
+    chunks: std::iter::Peekable<Box<dyn Iterator<Item = Bytes> + Send>>,
+}
+
+impl Stream {
+    /// The stream of `settled`'s answer, whose payload is `bulk`.
+    #[must_use]
+    fn new(settled: Settled, bulk: &BulkPayload) -> Self {
+        let chunks: Box<dyn Iterator<Item = Bytes> + Send> = Box::new(bulk.frames(settled.id()));
+        Self {
+            settled,
+            chunks: chunks.peekable(),
+        }
+    }
+
+    /// The bytes of what is queued next: the next chunk, or 0 for the terminal frame, which is
+    /// queued as soon as the last chunk is.
+    fn next_len(&mut self) -> usize {
+        self.chunks.peek().map_or(0, Bytes::len)
     }
 }
 

@@ -8,7 +8,8 @@ import {
 import { useEffect, useState } from "react";
 
 const PING_INTERVAL_MS = 2_000;
-const RECONNECT_DELAY_MS = 2_000;
+/** How long the link waits before trying again after the socket closes, ms. */
+export const RECONNECT_DELAY_MS = 2_000;
 
 /**
  * Lifecycle of the server link.
@@ -117,6 +118,9 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
     const connect = (): void => {
       setState((previous) => ({ ...previous, status: "connecting" }));
       const current = new WebSocket(url);
+      // Before any message can arrive: a binary frame is then one `ArrayBuffer`, handed over whole,
+      // where the default `blob` would need an asynchronous read per chunk (R03, Design note 10).
+      current.binaryType = "arraybuffer";
       socket = current;
 
       current.addEventListener("open", () => {
@@ -124,6 +128,13 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
       });
 
       current.addEventListener("message", (event: MessageEvent<unknown>) => {
+        if (event.data instanceof ArrayBuffer) {
+          const receipt = link.requests.handleBinaryFrame(event.data);
+          if (!receipt.ok) {
+            console.error("server sent a malformed binary frame:", receipt.message);
+          }
+          return;
+        }
         if (typeof event.data !== "string") {
           return;
         }
@@ -173,6 +184,8 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
             break;
           case "response":
           case "request_error":
+          case "notification":
+          case "subscription_ended":
             // The request client consumes every one of these above.
             break;
         }

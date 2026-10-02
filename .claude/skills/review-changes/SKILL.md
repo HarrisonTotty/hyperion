@@ -23,8 +23,8 @@ git -C ${CLAUDE_PROJECT_DIR} diff --stat HEAD
 
 Arguments: `$ARGUMENTS`.
 
-- A token like `P02.T5.a` is the plan task under review, and `--feature <plan-set>` names its plan
-  set when plan numbers repeat across sets. If there is no task ID, take the task from the
+- A token like `P02.T5.a` (a galaxy plan) or `R04.T3.c` (a rendering plan) is the plan task under
+  review, and `--feature <plan-set>` names its plan set if the prefix alone does not. If there is no task ID, take the task from the
   conversation, or, when the scope is a commit, from that commit's subject. If there is still none,
   skip the plan-conformance reviewer.
 - Any other token is a git ref or range. The default is uncommitted work against `HEAD`,
@@ -50,8 +50,9 @@ Route to each reviewer whose area the change touches:
 
 - `rust-reviewer`: `*.rs`, `Cargo.toml`, `Cargo.lock`, `clippy.toml`, `rustfmt.toml`.
 - `determinism-auditor`: anything that could move generated output. That is
-  `crates/hyperion-sim/`, `crates/hyperion-testkit/`, `crates/hyperion-fit/`, golden files, and the
-  root `Cargo.toml` or `Cargo.lock` (the `libm` pin).
+  `crates/hyperion-sim/`, `crates/hyperion-base/`, `crates/hyperion-surface/`,
+  `crates/hyperion-testkit/`, `crates/hyperion-fit/`, golden files, and the root `Cargo.toml` or
+  `Cargo.lock` (the `libm` pin).
 - `typescript-reviewer`: `*.ts`, `*.tsx`, `*.mts`, `*.cts`, `package.json`, `tsconfig*.json`,
   `.oxlintrc.json`, and `apps/hyperion/src/renderer/index.html` (the CSP). For regenerated bindings
   in `packages/protocol/src/generated/`, also pass the `crates/hyperion-protocol/` files that

@@ -11,7 +11,7 @@ import {
 import { layoutHierarchy, orbitNormal } from "../../lib/system/hierarchy";
 import type { SizeClass, SymbolShape } from "../../spatial/marks";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX, symbolOutline } from "../../spatial/symbols";
-import { dot, norm, scale, sub, vec3 } from "../../spatial/vec3";
+import { dot, norm, scale, sub, vec3 } from "../../geometry/vec3";
 import {
   FIXTURE_EARTH,
   FIXTURE_JUPITER,

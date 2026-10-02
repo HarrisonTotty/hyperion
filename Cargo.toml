@@ -9,8 +9,10 @@ rust-version = "1.98"
 publish = false
 
 [workspace.dependencies]
+hyperion-base = { path = "crates/hyperion-base" }
 hyperion-protocol = { path = "crates/hyperion-protocol" }
 hyperion-sim = { path = "crates/hyperion-sim" }
+hyperion-surface = { path = "crates/hyperion-surface" }
 hyperion-testkit = { path = "crates/hyperion-testkit" }
 
 anyhow = "1.0.104"
@@ -27,6 +29,9 @@ libm = { version = "=0.2.16", default-features = false }
 # `hyperion-fit` only (plan 15, Design note 3): its deterministic parallel map-reduce.
 rayon = "1.11.0"
 serde = { version = "1.0.229", features = ["derive"] }
+# The server only (rendering plan R03, R03.T10.a): `TCP_NOTSENT_LOWAT` on accepted sockets without
+# `unsafe`, through `SockRef`; `all` for that option. Already in the tree through tokio.
+socket2 = { version = "0.6.5", features = ["all"] }
 # `float_roundtrip` (ruling 64.7): the default parser can read a 17-digit float one ulp off, so a
 # client's coordinates would reach the server a bit away from what it sent. Writing is exact either
 # way, so no server output moves.
@@ -48,6 +53,14 @@ tokio-tungstenite = "0.30.0"
 toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The browser target's test harness (plan R04, Design note 12), a dev-dependency of the crates whose
+# suites run on `wasm32-unknown-unknown`, under that target's `cfg` alone. Pinned exactly: it pins
+# its own `wasm-bindgen` exactly, and `just wasm-tools` installs the `wasm-bindgen-cli` whose
+# runner must match that version in `Cargo.lock`.
+wasm-bindgen-test = "=0.3.79"
+# The surface crate's exports to the client's module (plan R04, T10.b), on the browser target only.
+# Pinned exactly, to the version wasm-bindgen-test pins, which `wasm-bindgen-cli` must match.
+wasm-bindgen = "=0.2.129"
 # ts-rs cannot read `#[serde(try_from)]` or `#[serde(transparent)]` and warns at every build; the
 # types that use them carry a `#[ts(type)]` override or are newtypes, which already say the binding.
 ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
@@ -88,6 +101,16 @@ incremental = true
 [profile.dev.package.hyperion-sim]
 opt-level = 2
 
+# The sim's `math`, `units` and the mechanism of its `rng` live in `hyperion-base` (plan R04), and
+# `"*"` below covers no workspace member, so base needs its own entry, or the fast suite would run
+# the sim's maths at `opt-level = 0`, for the same reason and with the same guarantee as the sim's.
+[profile.dev.package.hyperion-base]
+opt-level = 2
+
+# The surface crate's height function will dominate its tests and R05's, for the same reason.
+[profile.dev.package.hyperion-surface]
+opt-level = 2
+
 # The fitting crate solves least squares and the testkit runs the statistics, for the same reason.
 [profile.dev.package.hyperion-fit]
 opt-level = 2
@@ -96,8 +119,8 @@ opt-level = 2
 opt-level = 2
 
 # Dependencies, for the same reason and at almost no ongoing cost, since they rarely rebuild. `"*"`
-# is every dependency and no workspace member. It is `libm` that matters: the sim's only runtime
-# dependency, which every transcendental reaches through `hyperion_sim::math`, so an unoptimised
+# is every dependency and no workspace member. It is `libm` that matters: base's only runtime
+# dependency, which every transcendental reaches through `hyperion_base::math`, so an unoptimised
 # `libm` was undoing part of the sim's own `opt-level = 2` above. It also covers `serde_json`, which
 # is most of the work in the protocol's and the server's golden tests. Generated output is
 # unaffected: Rust neither contracts float operations nor enables fast-math, so IEEE results are

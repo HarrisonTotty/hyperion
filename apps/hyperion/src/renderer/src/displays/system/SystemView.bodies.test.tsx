@@ -2,7 +2,7 @@
  * The `SYSTEM` display's planets over a fake socket, against the shared wire fixture (plan 14,
  * P14.T41.b, T42 and T43 for bodies).
  */
-import type { ResponseFor } from "@hyperion/protocol";
+import type { ResponseFor, SectionDto } from "@hyperion/protocol";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +31,7 @@ import {
   PIN_SYSTEM,
 } from "../../test/systemFixtures";
 import { orbitNormal } from "../../lib/system/hierarchy";
-import { dot } from "../../spatial/vec3";
+import { dot } from "../../geometry/vec3";
 import { SystemView } from "./SystemView";
 
 const WIDTH_PX = 400;
@@ -124,6 +124,15 @@ async function answerDetail(socket: FakeWebSocket, detail: ResponseFor<"body_det
   await server(() => {
     socket.serverAnswers("body_detail", () => detail);
   });
+}
+
+/** The fixture's Earth with a hooks section that is `ok` and carries `detailSeed`. */
+function earthWithDetailSeed(detailSeed: SectionDto<string>): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  return {
+    ...detail,
+    record: { ...detail.record, hooks: { state: "ok", value: { detail_seed: detailSeed } } },
+  };
 }
 
 beforeEach(() => {
@@ -376,6 +385,37 @@ describe("SystemView's body readout", () => {
     expect(reading("SMA")).toBe("1.00 AU");
   });
 
+  it.each(["not_modelled", "not_resolved"] as const)(
+    "reads a %s DETAIL SEED as the em dash",
+    async (state) => {
+      const { user, socket } = renderView();
+      await answer(socket);
+      await selectRow(user, /\/768/);
+      await answerDetail(socket, earthWithDetailSeed({ state }));
+
+      expect(terms("GENERATOR INPUTS")).toHaveLength(0);
+      expect(reading("DETAIL SEED")).toBe("—");
+    },
+  );
+
+  it("leaves the DETAIL SEED row out where it does not apply", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthWithDetailSeed({ state: "not_applicable" }));
+
+    expect(terms("DETAIL SEED")).toHaveLength(0);
+  });
+
+  it("reads the DETAIL SEED in upper case once the server sends it", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthWithDetailSeed({ state: "ok", value: "0123456789abcdef" }));
+
+    expect(reading("DETAIL SEED")).toBe("0123456789ABCDEF");
+  });
+
   it("shows no surface row at all for a gas giant, whose surface does not apply", async () => {
     const { user, socket } = renderView();
     await answer(socket);
@@ -425,6 +465,23 @@ describe("SystemView with every kind of body", () => {
     expect(reading("CAUSE")).toBe("ENGULFED");
     expect(reading("SINCE")).toBe("UT -500 yr 000/00:00:00");
     expect(terms("ORBIT")).toHaveLength(0);
+  });
+
+  it("reads an unbinding billions of years past in years (P14.T35.d)", async () => {
+    const { user, socket } = renderView();
+    // About -6.3 Gyr, past the 2^53 s that a JavaScript number holds exactly.
+    const longAgo = { seconds: -199_097_968_544_446_944, nanos: 0 };
+    await answer(
+      socket,
+      populatedBodiesWith((body) =>
+        body.state.type === "unbound" ? { ...body, state: { type: "unbound", at: longAgo } } : body,
+      ),
+    );
+
+    await selectRow(user, /\/1024,/);
+
+    expect(reading("STATE")).toBe("UNBOUND");
+    expect(reading("SINCE")).toBe("UT -6,309,033,910.83 yr");
   });
 
   it("names only the moons and rings the tags leave unmodelled", async () => {

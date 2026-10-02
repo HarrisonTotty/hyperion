@@ -16,17 +16,16 @@ are listed, so the caller can report them.
 
 from __future__ import annotations
 
-import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-TASK_RE = re.compile(r"^P(\d{2})\.T(\d+)(?:\.([a-z]+))?$", re.IGNORECASE)
+# P for a galaxy plan task, R for a rendering plan task; plan_task.py picks the plan set by it.
+TASK_RE = re.compile(r"^([PR])(\d{2})\.T(\d+)(?:\.([a-z]+))?$", re.IGNORECASE)
 RUST_FILE = re.compile(r"(\.rs|Cargo\.(toml|lock)|clippy\.toml|rustfmt\.toml|rust-toolchain\.toml)$|^\.cargo/")
 TS_FILE = re.compile(
     r"(\.(ts|tsx|mts|cts|js|mjs|cjs|jsx)|package\.json|tsconfig[^/]*\.json|pnpm-lock\.yaml|"
@@ -36,18 +35,49 @@ GENERATED = "packages/protocol/src/generated/"
 PRETTIER_SKIP = re.compile(rf"(\.(rs|toml|lock)$|^{GENERATED}|^\.claude/|^target/)")
 WORKSPACE_WIDE = re.compile(r"^(Cargo\.(toml|lock)|rust-toolchain\.toml|rustfmt\.toml|\.cargo/)")
 INFRA = re.compile(r"^(justfile|\.github/|\.pre-commit-config\.yaml)")
+# The engine, the smoke harness and every shader (catalogued in `view/engine/catalogue.ts`): a
+# change to any runs `just test-render` (R01.T9.e).
+RENDER_PATHS = re.compile(
+    r"^apps/hyperion/(src/renderer/src/view/(engine|shaders)/|src/renderer/src/smoke/|src/smoke/|"
+    r"src/renderer/smoke\.html$|scripts/testRender\.sh$)|\.wgsl$"
+)
 # A test marked slow runs only under `just test-slow`, so a change that touches one is gated with
 # `just ci-slow` rather than `just ci`.
 SLOW_MARK = re.compile(r'#\[ignore\s*=\s*"slow')
-DETERMINISM_CRATES = {"hyperion-sim", "hyperion-testkit", "hyperion-fit"}
+DETERMINISM_CRATES = {"hyperion-sim", "hyperion-base", "hyperion-surface", "hyperion-testkit", "hyperion-fit"}
 # `cargo test` runs ts-rs's export tests, which rewrite the checked-in bindings through
 # TS_RS_EXPORT_DIR (.cargo/config.toml). An environment value takes precedence over that config,
 # so pointing it at a scratch directory keeps the tree untouched and `gen-protocol-check` honest.
 NO_EXPORT = 'TS_RS_EXPORT_DIR="$(mktemp -d)" '
 
 
+CATALOGUE = "apps/hyperion/src/renderer/src/view/engine/catalogue.ts"
+RELATIVE_IMPORT = re.compile(r'\bfrom\s+"(\.{1,2}/[^"]+)"')
+
+
 class ToolingError(Exception):
     pass
+
+
+def catalogue_sources(root: Path) -> set[str]:
+    """The files the shader catalogue imports, whose specs it renders (R01.T9.e).
+
+    A material's blend, cull, uniforms and bindings can live beside its feature (the wireframe's in
+    `view/wireframe/submit.ts`), so a change there routes `just test-render` as a shader's does.
+    """
+    path = root / CATALOGUE
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    sources: set[str] = set()
+    for spec in RELATIVE_IMPORT.findall(text):
+        resolved = (path.parent / spec).resolve()
+        for candidate in (resolved.with_suffix(".ts"), resolved.with_suffix(".tsx"), resolved / "index.ts"):
+            if candidate.is_file():
+                sources.add(candidate.relative_to(root.resolve()).as_posix())
+                break
+    return sources
 
 
 def git(root: Path, *args: str) -> list[str]:
@@ -86,7 +116,7 @@ def normal_task(word: str) -> str | None:
     m = TASK_RE.match(word.strip(",;:."))
     if not m:
         return None
-    return f"P{m[1]}.T{m[2]}" + (f".{m[3].lower()}" if m[3] else "")
+    return f"{m[1].upper()}{m[2]}.T{m[3]}" + (f".{m[4].lower()}" if m[4] else "")
 
 
 def parse_args(root: Path, argv: list[str]) -> tuple[str | None, str, str | None, list[str]]:
@@ -138,21 +168,6 @@ def read_or_empty(path: Path) -> str:
 def crate_of(path: str) -> str | None:
     parts = path.split("/")
     return parts[1] if len(parts) > 2 and parts[0] == "crates" else None
-
-
-def wasm_available() -> tuple[bool, str]:
-    runner = os.environ.get("WASMTIME", "wasmtime")
-    if shutil.which(runner) is None:
-        return False, "wasmtime is not on PATH"
-    try:
-        targets = subprocess.run(
-            ["rustup", "target", "list", "--installed"], capture_output=True, text=True, check=True
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return False, "cannot query rustup targets"
-    if "wasm32-wasip1" not in targets:
-        return False, "target wasm32-wasip1 not installed (`rustup target add wasm32-wasip1`)"
-    return True, ""
 
 
 def changes(root: Path, base: str) -> tuple[list[str], set[str], str]:
@@ -287,19 +302,27 @@ def main() -> None:
     slow_owned = slow_marked or determinism
     if slow_owned:
         why = "the fast gate plus the slow tests: "
-        why += f"{slow_marked[0]} marks one" if slow_marked else "sim, testkit or fit changed"
+        why += f"{slow_marked[0]} marks one" if slow_marked else "a determinism crate changed"
         gate: list[tuple[str, str]] = [(f"{NO_EXPORT}just ci-slow", why)]
     else:
-        gate = [(f"{NO_EXPORT}just ci", "the commit gate: fmt-check, check, lint, test, gen-protocol-check")]
+        gate = [
+            (
+                f"{NO_EXPORT}just ci",
+                "the commit gate: fmt-check, check, lint, test, fit-check, gen-protocol-check, test-wasm-fast",
+            )
+        ]
     skipped: list[str] = []
     if client or infra:
         gate.append(("pnpm build", "the client must still build"))
+    catalogued = catalogue_sources(root)
+    render = [f for f in changed if RENDER_PATHS.search(f) or f in catalogued]
+    if render:
+        # The headless SwiftShader harness stays outside `just ci` (R01.T9.e); these paths run it.
+        gate.append(("just test-render", f"{render[0]} touches the engine, the harness or a shader"))
+    # The WebAssembly checks are no separate step: `just ci` runs the fast suites on wasm32 and
+    # `just ci-slow` the slow ones, and each fails, naming `just wasm-tools`, when a tool is missing
+    # (plan R04, T7.c).
     if determinism:
-        ok, reason = wasm_available()
-        if ok:
-            gate.append(("just test-wasm", "sim, testkit or fit changed; goldens must hold bit for bit on wasm32"))
-        else:
-            skipped.append(f"`just test-wasm`: {reason}")
         skipped.append("AArch64 golden run: nowhere to run it (no remote, and the CI workflow was removed on "
                        "2026-09-22; plan 01's Risks says how to restore one)")
     if manifests:

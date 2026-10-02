@@ -933,6 +933,7 @@ mod tests {
                     log_luminosity_lsun: Some(-4.5),
                     teff_k: Some(250_000.0),
                     star_count: 3,
+                    absolute_v_mag: None,
                 }),
                 fe_h_dex: None,
             },
@@ -1036,6 +1037,7 @@ mod tests {
                 log_luminosity_lsun: Some(-2.5),
                 teff_k: Some(3_200.0),
                 star_count: 1,
+                absolute_v_mag: None,
             }),
             fe_h_dex: None,
             ..two_rows().remove(1)
@@ -1058,6 +1060,7 @@ mod tests {
                 log_luminosity_lsun: Some(-5.25),
                 teff_k: Some(1_100.0),
                 star_count: 1,
+                absolute_v_mag: None,
             }),
             fe_h_dex: None,
         };

@@ -38,6 +38,8 @@
 //! - [`system`]: the assembled generator, [`generate`] and [`generate_planets`], and the
 //!   [`PlanetarySystem`] they return with its queries at a time, `body_at`, `snapshot_at`,
 //!   `position_at` and `habitable_zone_at` (P14.T30.a–b).
+//! - [`body_frame`]: which body's non-rotating frame a camera or craft is in, by the Hill sphere
+//!   (plan R02, R02.T4), the rule the client's camera twins.
 //! - [`label`]: bodies' labels for people, `A b` onwards (design note 22, P14.T30.c).
 //! - [`rings`], [`belts`] and [`halo`]: a giant's rings (P14.T20), a host's asteroid and
 //!   Kuiper-like belts with their fading debris and largest members (P14.T21.a–c), and the
@@ -95,9 +97,11 @@
 
 pub mod architecture;
 pub mod belts;
+pub mod body_frame;
 pub mod context;
 pub mod derive;
 pub mod disc;
+pub mod drift;
 pub mod error;
 pub mod fate;
 pub mod frames;

@@ -1,6 +1,6 @@
-import type { LocalFrame } from "./frame";
+import type { LocalFrame } from "../geometry/frame";
 import type { PlaneSpec } from "./marks";
-import { add, scale, type Vec3 } from "./vec3";
+import { add, scale, type Vec3 } from "../geometry/vec3";
 
 /** A straight line between two points, in scene units about the view centre. */
 export interface Segment {

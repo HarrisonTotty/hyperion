@@ -51,7 +51,10 @@
 //! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
 //!   the Roche, Hill and satellite-stability limits.
 //!
-//! The crate's only runtime dependency is `libm`.
+//! [`math`], [`units`], [`version`] and the mechanism of [`rng`] live in `hyperion-base`, beneath
+//! this crate, and are re-exported here at their old paths. This crate's runtime dependencies are
+//! that crate and `hyperion-surface` (whose domain-tag registry the sim's own is checked disjoint
+//! from), both in this workspace; `libm`, beneath them, is the only external one.
 
 pub mod alerts;
 pub mod coords;
@@ -59,7 +62,6 @@ pub mod events;
 pub mod galaxy;
 pub mod id;
 pub mod lensing;
-pub mod math;
 pub mod observe;
 pub mod orbit;
 pub mod planetary;
@@ -67,11 +69,9 @@ pub mod rng;
 pub mod stellar;
 pub mod tables;
 pub mod time;
-pub mod units;
-pub mod version;
 
+pub use hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math, units, version};
 pub use rng::Seed;
-pub use version::{GENERATOR_VERSION, GeneratorVersion};
 
 use std::time::Duration;
 
@@ -167,6 +167,16 @@ mod tests {
         assert_eq!(sim.now(), time::UniverseTime::new(0, 150_000_000).unwrap());
         sim.step(Duration::from_secs(2));
         assert_eq!(sim.now(), time::UniverseTime::new(2, 150_000_000).unwrap());
+    }
+
+    /// The surface crate reports the generator version the sim generates with, so that the client's
+    /// module and the server agree on which surfaces they compute (plan R04, T5).
+    #[test]
+    fn the_generator_version_is_the_sims() {
+        assert_eq!(
+            hyperion_surface::generator_version(),
+            GENERATOR_VERSION.get()
+        );
     }
 
     #[test]

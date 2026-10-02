@@ -8,7 +8,7 @@
  */
 import { SECONDS_PER_JULIAN_YEAR, type UniverseTime } from "@hyperion/protocol";
 
-import { TIME_SYSTEM_LABEL } from "../../lib/format";
+import { formatUniverseTimeDhms, formatUniverseTimeYr, TIME_SYSTEM_LABEL } from "../../lib/format";
 import { CLOCK_WINDOW_YR } from "../../lib/galaxy/model";
 
 /**
@@ -114,4 +114,29 @@ export function stepTime(time: UniverseTime, deltaS: number): UniverseTime {
     return { seconds: -CLOCK_WINDOW_S, nanos: 0 };
   }
   return { seconds, nanos: time.nanos };
+}
+
+/**
+ * Formats when a body was destroyed or unbound, for after {@link TIME_SYSTEM_LABEL}: in the display
+ * time's `MET` form inside the clock window, `+12 yr 183/14:08:33`, and as signed years with their
+ * unit outside it, `-2,129,188,810.89 yr` (plan 14, P14.T35.d).
+ *
+ * @remarks
+ * A body state's time may lie billions of years before the epoch, beyond the 2⁵³ s that a
+ * JavaScript number holds exactly. There the client holds it only to some tens of seconds, which a
+ * reading to the second would misstate (the guide's principle 5: never show a number the simulation
+ * does not have). The years form is the guide's form for universe time, `UT +12.50 yr`, as the
+ * galaxy map's time reads; the guide has no sentence yet for an event time outside the clock window
+ * on a display that steps finer, and this form waits on the owner's confirmation.
+ */
+export function formatEventTime(time: UniverseTime): string {
+  // The window's end is +H exactly, as `stepTime` holds it: a time a fraction of a second past it
+  // is outside.
+  const insideWindow =
+    time.seconds >= -CLOCK_WINDOW_S &&
+    (time.seconds < CLOCK_WINDOW_S || (time.seconds === CLOCK_WINDOW_S && time.nanos === 0));
+  if (insideWindow) {
+    return formatUniverseTimeDhms(time);
+  }
+  return `${formatUniverseTimeYr(time.seconds / SECONDS_PER_JULIAN_YEAR)} yr`;
 }

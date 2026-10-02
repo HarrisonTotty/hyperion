@@ -267,14 +267,18 @@ the call sites here change.
   `MAX_BINARY_FRAME_BYTES`, `BULK_QUEUED_BYTES`), `BulkManifestDto`, and on the client
   `parseBinaryFrameHeader`, `BulkAssembler` and `requestBulk`; `TestClient::next_binary()`.
   The scene's host stars' drawn positions (light-time and aberration) for the discs. Chunks are
-  assembled and decoded only once complete, off the main thread (R03's Design note 11).
-- **R01:** the engine adapter, its device, its WGSL-only guard, `createBuffer`, `createTexture`,
+  assembled and decoded only once complete, off the main thread (R03's Design note 11). The sky
+  request's `observer` is the scene system's barycentre, `barycentreAt(place, t)` over
+  `SceneSystem.place` (R03.T16), plus the ship's offset in the system's frame.
+- **R01:** the engine adapter (HYPERION's own WebGPU renderer, R01 Design note 24), its device,
+  standard WGSL with compile errors reported by material name (Design note 23), `createBuffer`,
+  `createTexture`,
   `createCompute` and `dispatch`, `WGSL_CATALOGUE` (where every shader here is registered), the
   smoke harness (`just test-render`, readback by `copyTextureToBuffer`), `MemoryCategory` (which
   this plan extends), `GpuCapabilities.float32Blendable`, and the packed cube, `createPackedCube`,
-  with Babylon's `_hardwareTexture` pinned by R01's typecheck of `internals.ts` and the harness's
-  cube round trip (R01.T9.g). **Provided by R01** (its Provides, `RenderEngine`, built with
-  R01.T8.d), which this plan asked for and now consumes by these names:
+  made on the device directly (a six-layer `rgb9e5ufloat` texture with the named mips, R01.T8.d as
+  built) and checked by the harness's cube round trip (R01.T9.g). **Provided by R01** (its Provides,
+  `RenderEngine`, built with R01.T8.d), which this plan asked for and now consumes by these names:
   - `writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle):
 void`, a `copyBufferToTexture` from a GPU buffer the pack kernel wrote, in place of (or beside)
     today's `writePackedCubeLevel(cube, level, packed: Uint32Array)`, which would force a readback
@@ -647,22 +651,25 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     nor a storage format, so the bake draws the baked stars as a `point-list` with additive blending
     into an `rgba32float` scratch face through R01's `createPointSplat` (it needs
     `float32-blendable`, which R01 requests when present and never requires, and which SwiftShader
-    and the development machine report). Where `GpuCapabilities.float32Blendable` is false the bake
+    and the UHD 620 report by probe; the development machine's RTX 3080 is read from R01's feature
+    report). Where `GpuCapabilities.float32Blendable` is false the bake
     worker splats on the CPU into a `Float32Array` per face and uploads it with `createTexture`, the
     same sums in another order (to 10⁻⁶ relative). Then a compute pass divides by each texel's solid
     angle, scales by a power of two chosen so the brightest texel lands near 2¹⁵ (exact, and kept
     with the texture), builds the mips from the `f32` scratch weighted by solid angle, packs each
     level to `u32` in a GPU buffer and copies it in with `copyBufferToTexture` through R01's
-    `writePackedCubeLevelFromBuffer`, with no readback. Babylon creates the cube (`RawCubeTexture`
-    with `TEXTURETYPE_UNSIGNED_INT_5_9_9_9_REV`, null data, mips allocated) but cannot generate its
-    mips, so the adapter writes every level itself through `_hardwareTexture`, pinned by R01's
-    typecheck of `internals.ts` and the harness's cube round trip (R01.T9.g). A TypeScript packer is
+    `writePackedCubeLevelFromBuffer`, with no readback. The adapter creates the cube on the device
+    (a six-layer `rgb9e5ufloat` texture with its mips allocated, R01.T8.d as built) and writes every
+    level itself, checked by the harness's cube round trip (R01.T9.g). A TypeScript packer is
     the reference the WGSL one is tested against. Faces are 3,072² on the high setting (about 300 MB
     with mips) and 1,024² on the low (34 MB); 3,072 is not a power of two, so its last mip step
     filters 3 × 3. The bake also holds, one face at a time and only while it runs, an `rgba32float`
     scratch with its mips (3,072² × 16 B × 4/3 ≈ 201 MB on the high setting, 22 MB on the low) and
     the packed level's staging buffer (up to 38 MB); these transients count under `MemoryCategory`
-    `"sky-scratch"`, the cube under `"sky-cube"`, so R05's tally and R12 see them. Every shader of
+    `"sky-scratch"`, the cube under `"sky-cube"`, so R05's tally and R12 see them. For context only:
+    the high setting's peak during a bake, about 540 MB, is about a twentieth of the development
+    machine's 10 GiB of VRAM, while the low setting's comes from the UHD 620's shared system
+    memory. Every shader of
     the sky (splat, pack, band, disc) is registered in R01's `WGSL_CATALOGUE`, so `just test-render`
     renders it.
 22. **The low setting.** 1,024² faces, whose centre texel (2 ÷ 1,024 rad, 403″ = 6.7′) is larger
@@ -1023,8 +1030,8 @@ Acceptance for T13 as a whole: `pnpm test`, `just ci`, `just test-render`, and b
 in the plan: near the Sun the brightest stars the census lists match the brainstorm's statistics
 (some 15,000 visible to the eye, some 740 in a 60° view), no star flickers as the camera turns
 slowly, the band shows its dust lanes, and the Sun's disc is limb-darkened; the star field's GPU
-time on the UHD 620 at 720p (target under 0.5 ms) and, once one is available, on the discrete
-target at 1080p (under 0.2 ms), each recorded with its setting.
+time on the development machine's RTX 3080, the discrete target, at 1080p (under 0.2 ms) and, by
+the owner, on the UHD 620 at 720p (target under 0.5 ms), each recorded with its setting.
 
 ### R06.T14 Several views and the re-bake
 
@@ -1151,9 +1158,9 @@ plan reserves no tag, prefix or stream.
 - **Licences of the spectral grids** are silent rather than permissive. Only integrated tables are
   committed, with citations; if the project is ever sold, the authors should be asked (research
   finding).
-- **Babylon internals.** `_hardwareTexture` joins `_device` and `_disableEngineYFlip` among the
-  pinned names; a Babylon change fails R01's typecheck of `internals.ts` or the cube round trip
-  (R01.T9.g), and the fallback is the adapter creating the cube with the raw device.
+- _Closed by R01 Design notes 23 and 24 (2026-09-30): Babylon was dropped, no engine internals
+  remain, and the adapter creates the cube on the raw device._ **Babylon internals.** This plan
+  would have added `_hardwareTexture` to R01's pinned internals.
 - **Asked by later plans, now designed here.** R07's two asks are met by R06.T13.e: the disc pass
   writes `METER_CLASS.hostDisc` in the HDR target's alpha, and `glareSources` returns R07's
   `GlareSource` per disc, for eye views also when it is up to 45° outside the frame (R07 Design

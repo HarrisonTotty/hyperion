@@ -570,6 +570,29 @@ and, only when resolved, `host`, `designation`, `light_age_yr`, `apparent_positi
 Files: `crates/hyperion-protocol/src/alerts.rs`, server handlers, generated bindings,
 `packages/protocol/src/index.ts` (`NotificationOf`, a subscription helper on `RequestClient`).
 
+Note (drafted by rendering plan R03's R03.T1 for this plan's owner; accepted 2026-09-30 by a
+delegated decision, amended to name `subscription_ended`): the scene subscription needs
+the envelope first, so R03.T5 builds `subscribe`, `unsubscribe`, `Subscribed`,
+`SubscriptionTopic`, `SubscriptionState`, `ServerMessage::Notification`, `NotificationBody`,
+`ServerMessage::SubscriptionEnded` (`subscription_ended { subscription, error }`: a subscription
+also ends when its topic fails, the place freed and no retry, not only with `unsubscribe` or the
+socket) and the unknown-subscription refusal to this task's design, in
+`crates/hyperion-protocol/src/envelope.rs` beside `ServerMessage`, with `Scene` as the only topic,
+and `TestClient::next_notification()` (in `crates/hyperion-server/tests/common/mod.rs`),
+`NotificationOf<T>` and the subscription helper on `RequestClient` (R03.T5.c).
+This task then adds only the `Alerts` topic, state and notification body, `alerts_observer` and
+`alerts_acknowledge`, and `alerts.rs` holds only the `Alerts` payloads. One departure (R03 Design
+note 1): the subscription helper lives on `RequestClient` itself
+(`packages/protocol/src/subscriptions.ts`), so `handleServerMessage` routes a `notification` to its
+subscription and consumes it (returns `true`), dropping one for an unknown subscription, rather than
+leaving it unconsumed for a helper outside. As built (R03.T5.a): the envelope's three enums,
+`SubscriptionTopic`, `SubscriptionState` and `NotificationBody`, are tagged by `topic` in snake
+case, and `ResponseBody::Subscribe` holds a `Box<Subscribed>`; the `Alerts` variants follow both. As built
+(R03.T5.b): a topic implements `Handler::subscribe` in the server and merges its changes into its
+`Pusher` as a `PendingPush` variant with its own `Merge`; requests that name a subscription
+(`alerts_observer`, `alerts_acknowledge`) are routed by the connection, on the path R03.T8 builds
+for `scene_cameras`.
+
 Tests: wire forms; an integration test subscribes near a pinned recurrent nova, advances the
 observer's time past an arrival and receives one contact at `bearing`, then moves the observer close
 and receives the same `contact` at `resolved` with the pinned host; a JSON-level assertion that no
@@ -994,3 +1017,16 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     lines, so the owner (T8) keeps one per universe and clones it. Nothing wires the store into
     `AppState` yet. Every sighting is kept in memory and on disk; T8 should decide whether a
     long-lived recurrent contact needs its sightings thinned.
+- **`observe::in_system`, added by rendering plan R03 (R03.T2 and R03.T3, by agreement, `e91fd75`
+  and `6db8630`; recorded in RM1 validation, 2026-10-02).** Beside this plan's galactic
+  `observe::retarded`, `crates/hyperion-sim/src/observe/in_system.rs` evaluates what an observer
+  inside a system sees of its bodies and stars: `SystemObserver`, `retarded_in_system` returning an
+  `InSystemRetardation`, `IN_SYSTEM_LIGHT_TIME_TOLERANCE` (1 ns) and `IN_SYSTEM_MAX_CORRECTIONS`
+  (10). The light time is iterated to a fixed point (SPICE's converged "CN"), the observer enters
+  only at reception, and the apparent point is the emission event Lorentz-boosted into the
+  observer's frame (R03 Design note 7). `observe/in_system/tracks.rs` holds the sources: a system's
+  bodies and stars, placed by plan 14's `PlanetarySystem::position_at` and plan 11's
+  `star_positions_at` and moving by `state_at` and `star_states_at`.
+  `tests/observe_in_system_golden.rs` pins `solar_like` and `close_binary` in
+  `observe/in_system.golden`. This plan's galactic functions are unchanged. The subscription
+  envelope that R03.T5.a built to P12.T9's design is recorded under P12.T9 above.

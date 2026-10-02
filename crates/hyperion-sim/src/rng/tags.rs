@@ -1,7 +1,12 @@
-//! The single registry of domain tags.
+//! The sim's registry of domain tags: every stage's, beside the foundation's and the surface
+//! crate's.
 //!
-//! Every domain tag in the crate is declared here and nowhere else, so that the collision check,
-//! a `const` assertion over this one list, covers them all. The rules:
+//! Every domain tag the sim opens is declared here and nowhere else, except the few the layers
+//! beneath it open themselves: `hyperion_base::rng::tags` (`selftest.stream`, re-exported here as
+//! [`SELFTEST_STREAM`] so that every old path holds) and, from the rendering plans' R09,
+//! `hyperion_surface::tags` (the `surface.*` tags). Each registry asserts its own names at compile
+//! time, and this module asserts the registries disjoint (plan R04, Design note 4), so the
+//! collision check still covers every tag in the workspace. The rules:
 //!
 //! - A tag is never renamed or removed. Its name is hashed into the key of every stream it opens,
 //!   so a rename moves every value drawn under it.
@@ -12,13 +17,13 @@
 //! - The tag behind each event tag is an ordinary entry of scope `Event`, which the event-tag
 //!   registry in `id/event_tags.rs` names by constant.
 
-use super::domain_tag::domain_tags;
+use hyperion_base::domain_tags;
+
+pub use hyperion_base::rng::tags::SELFTEST_STREAM;
 
 domain_tags! {
-    // Plan 01: the determinism foundation.
-
-    /// A stream for tests and golden files, never opened by a generator.
-    SELFTEST_STREAM: SelfTest = "selftest.stream";
+    // Plan 01: the determinism foundation. Its `selftest.stream` is the foundation's own, in
+    // `hyperion_base::rng::tags`, since base's tests open it.
 
     /// The key derivation of event tag `0x0001`,
     /// [`SELF_TEST`](crate::id::event_tags::SELF_TEST), which no generator emits.
@@ -769,9 +774,41 @@ domain_tags! {
     SYSTEM_SUBSTELLAR: System = "system.substellar";
 }
 
+/// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
+/// crate's and this one, in that order, the order the `rng/tags` golden prints them in.
+const _: () = super::assert_registries_disjoint(&[
+    hyperion_base::rng::tags::ALL,
+    hyperion_surface::tags::ALL,
+    ALL,
+]);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `const` assertion above, again at run time, so that a failure names the registries.
+    #[test]
+    fn registries_are_disjoint() {
+        let registries = [
+            ("hyperion_base::rng::tags", hyperion_base::rng::tags::ALL),
+            ("hyperion_surface::tags", hyperion_surface::tags::ALL),
+            ("hyperion_sim::rng::tags", ALL),
+        ];
+        for (i, (name, registry)) in registries.iter().enumerate() {
+            for (other_name, other) in &registries[..i] {
+                for tag in *registry {
+                    assert!(
+                        other
+                            .iter()
+                            .all(|o| o.name() != tag.name() && o.hash() != tag.hash()),
+                        "{} of {name} is also in {other_name}",
+                        tag.name()
+                    );
+                }
+            }
+        }
+        assert!(hyperion_base::rng::tags::ALL.contains(&SELFTEST_STREAM));
+    }
 
     #[test]
     fn no_two_tags_share_a_name_or_a_hash() {
@@ -932,7 +969,9 @@ mod tests {
         assert_eq!(SELFTEST_STREAM.scope(), crate::rng::TagScope::SelfTest);
         assert_eq!(EVENT_SELFTEST.name(), "event.selftest");
         assert_eq!(EVENT_SELFTEST.scope(), crate::rng::TagScope::Event);
-        assert!(ALL.contains(&SELFTEST_STREAM) && ALL.contains(&EVENT_SELFTEST));
+        // `selftest.stream` is the foundation's since the crate split, re-exported here.
+        assert!(hyperion_base::rng::tags::ALL.contains(&SELFTEST_STREAM));
+        assert!(ALL.contains(&EVENT_SELFTEST));
     }
 
     #[test]

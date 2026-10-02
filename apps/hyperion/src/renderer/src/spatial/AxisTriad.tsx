@@ -1,5 +1,5 @@
 import type { CameraAngles } from "./camera";
-import type { LocalFrame } from "./frame";
+import type { LocalFrame } from "../geometry/frame";
 import { TRIAD_MARKER_REM, type TriadAxis, type TriadBoxRem, triadLayout } from "./furniture";
 
 /** SVG user units in a `rem`, so that stroke widths read as CSS pixels at 100%. */

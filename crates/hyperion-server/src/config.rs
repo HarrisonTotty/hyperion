@@ -16,6 +16,7 @@
 //! | `--body-cache`   | `HYPERION_BODY_CACHE_MB`   | 128 (MiB)                                    |
 //! | `--brief-cache`  | `HYPERION_BRIEF_CACHE_MB`  | 64 (MiB)                                     |
 
+use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
@@ -210,6 +211,8 @@ pub struct ServerConfig {
     body_cache_bytes: usize,
     brief_cache_bytes: usize,
     entropy: Arc<dyn Entropy>,
+    scene_knowledge: Arc<dyn SceneKnowledge>,
+    craft_source: Arc<dyn CraftSource>,
 }
 
 impl ServerConfig {
@@ -272,6 +275,18 @@ impl ServerConfig {
     pub fn entropy(&self) -> &Arc<dyn Entropy> {
         &self.entropy
     }
+
+    /// What the ship knows, as the scene asks it (rendering plan R03, Design note 13).
+    #[must_use]
+    pub fn scene_knowledge(&self) -> &Arc<dyn SceneKnowledge> {
+        &self.scene_knowledge
+    }
+
+    /// The craft each universe's scene is told of (rendering plan R03, Design note 4).
+    #[must_use]
+    pub fn craft_source(&self) -> &Arc<dyn CraftSource> {
+        &self.craft_source
+    }
 }
 
 /// Builds a [`ServerConfig`], starting from the defaults.
@@ -293,6 +308,8 @@ impl Default for ServerConfigBuilder {
                 body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
                 entropy: Arc::new(OsEntropy),
+                scene_knowledge: Arc::new(GrantAsked),
+                craft_source: Arc::new(NoCraft),
             },
         }
     }
@@ -362,6 +379,22 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn entropy(mut self, entropy: impl Entropy + 'static) -> Self {
         self.config.entropy = Arc::new(entropy);
+        self
+    }
+
+    /// What the ship knows, as the scene asks it; [`GrantAsked`] by default, until the sensors plan.
+    /// Tests restrict the scene with their own.
+    #[must_use]
+    pub fn scene_knowledge(mut self, knowledge: impl SceneKnowledge + 'static) -> Self {
+        self.config.scene_knowledge = Arc::new(knowledge);
+        self
+    }
+
+    /// The craft each universe's scene is told of; [`NoCraft`] by default, until sessions. Tests
+    /// supply their own.
+    #[must_use]
+    pub fn craft_source(mut self, craft: impl CraftSource + 'static) -> Self {
+        self.config.craft_source = Arc::new(craft);
         self
     }
 

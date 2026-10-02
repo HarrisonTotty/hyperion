@@ -29,6 +29,14 @@ argue with its output.
   through `dt` arguments and randomness through the seed.
 - `hyperion-sim` must be deterministic: never let `HashMap`/`HashSet` iteration order influence
   output (use `BTreeMap`, or sort first), and never seed from the OS or the wall clock.
+- `hyperion-base` sits beneath the sim, the fitting crate and the surface crate: `math`, `units`,
+  `rng` and the generator version. It does no I/O, reads no clocks, spawns no threads and holds no
+  caches, and `libm` is its only runtime dependency.
+- `hyperion-surface` holds the shared height function the server and the client both run. It
+  depends on `hyperion-base` alone, and on `wasm-bindgen` under
+  `cfg(all(target_arch = "wasm32", target_os = "unknown"))` only, for the client module's exports
+  in `src/wasm.rs`; it compiles to `wasm32-unknown-unknown`, where `just gen-surface` builds it into
+  the client's module, and never depends on the sim, which depends on it.
 - `hyperion-protocol` holds only wire types and their serde/ts-rs derives, with no behaviour.
 - Binaries stay thin: `main.rs` parses configuration and calls into `lib.rs`, so integration tests
   can reach the logic.
@@ -85,6 +93,9 @@ argue with its output.
   precision loss cannot occur.
 - Never compare floats with `==`. Compare against an explicit tolerance, or use `total_cmp` for
   ordering.
+- Code that runs both natively and as WebAssembly (`hyperion-base`, `hyperion-surface`) follows the
+  sim-determinism skill's "Hazards across targets": signed zeros in `min` and `max`, NaN signs,
+  relaxed SIMD, `f32` and `usize` in the authoritative path.
 
 ## Unsafe
 

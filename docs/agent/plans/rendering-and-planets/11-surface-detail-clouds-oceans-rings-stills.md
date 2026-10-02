@@ -38,9 +38,9 @@ layer with a power-law phase function and an opposition surge, a baked shadowing
 particles, both analytic shadows and a radial profile, giving way to instanced particles once the
 largest subtends a pixel. A console can ask for a still image, rendered tile by tile through the
 offscreen pipeline beside the live view, labelled as data and saved with its label, and a soak at
-the batch cap on the UHD 620 loses no device. Open questions 7, 8 and 11 are built to their leans,
-and open question 18 is ruled by this plan, pending the owner's revision of the brainstorm: craters
-of 1–2 m stay decoration.
+the batch cap on the development machine and on the UHD 620 loses no device. Open questions 7, 8 and
+11 are built to their leans, and open question 18 is ruled by this plan, pending the owner's
+revision of the brainstorm: craters of 1–2 m stay decoration.
 
 ## Scope and non-goals
 
@@ -234,7 +234,8 @@ ambiguous, the design note that reads it is named.
   (`RenderEngine.createRenderTarget(spec: RenderTargetSpec)`); indirect draws and dispatches
   (`DrawItem.indirect` and `dispatch(kernel, bindings, IndirectArgs)`); asynchronous pipeline
   creation (`createMaterialAsync`, `createComputeAsync`); per-pass GPU time (`onPassTimes`,
-  delivering `PassTimes` keyed by `FrameSubmission.label`, each with its `bracketed` flag) where the
+  delivering `PassTimes` keyed by `FrameSubmission.label`, `bracketed` always `false` since R01
+  Design note 24) where the
   adapter exposes `timestamp-query`, quantised to 65,536 ns in shipping launches and unquantised
   under `--hyperion-gpu-timing` (its Design note 4, found by probe), with
   `GraphicsStatus.timer: GpuTimer` (`"quantized" | "full" | "absent"`); CPU read-back
@@ -246,8 +247,10 @@ ambiguous, the design note that reads it is named.
   `WGSL_CATALOGUE` every shader here is registered for its no-f16 and no-subgroup runs.
 - **R02:** the camera, camera-relative `f64` differencing and per-patch origins; `BodyFixedPosition`
   and its client mirror; the fixed reversed-Z infinite projection; `transparentLayerOrder`
-  (R02.T7.b: opaque first, then per body back to front, within a body the shells below the camera by
-  ascending altitude, then the rings' plane, then the shells above by descending altitude, each
+  (R02.T7.b: opaque first, then per body back to front, within a body the shells above the camera by
+  descending altitude, then the rings' plane, then the shells below by ascending altitude, as
+  corrected in RM1 validation; the rings' place between the two groups is only a heuristic, since a
+  ring plane can lie on either side of a shell along a ray; each
   testing and not writing depth); the photometric units and pre-exposure; AgX's `toneCurve` and its
   WGSL twin `agx`, which a still's PNG is encoded through; `ViewLabelBlock`; the nine guide drafts,
   of which item 2's decoration rule and flash threshold, item 7's annunciations and the
@@ -362,9 +365,9 @@ ambiguous, the design note that reads it is named.
    ocean, rings — then stills, which need every pass to exist. Each feature's high and low settings
    are built in the same task, as the budget's third rule requires ("a two-dimensional cloud layer
    written after the volumetric one exists will never be tested and will rot"), and each records its
-   own benchmark on the machine that exists (the UHD 620) and, where one is to hand, on the discrete
-   reference: in doc comments and this plan's "as built" notes, with the machine, driver, setting,
-   resolution, whether the timer was quantised (R01's `GraphicsStatus.timer`), whether the
+   own benchmark on the development machine's RTX 3080, the discrete reference, and, by the owner,
+   on the UHD 620: in doc comments and this plan's "as built" notes, with the machine, driver,
+   setting, resolution, whether the timer was quantised (R01's `GraphicsStatus.timer`), whether the
    machine was otherwise idle, the load average at the start (under 1 for the run to count) and the
    CPU governor, as the roadmap's measurement convention requires, for R12's first task to fold into
    its results record. Timings taken during this plan's research were measured under shared load and
@@ -694,8 +697,10 @@ ambiguous, the design note that reads it is named.
     the exposure the view had at the request, never metered per tile. Tiles are the smaller of the
     adapter's `maxTextureDimension2D` (16,384 on the UHD 620 by probe, 8,192 the core guarantee, so
     it is read and never assumed) and `STILL_TILE_MAX_PX`, 2,048 on the low setting and 4,096 on the
-    target, chosen by memory, with widths a multiple of 64 px so that `bytesPerRow` meets the
-    256-byte rule; each tile's projection is M · P, M touching only clip x and y, so R02's
+    target, chosen by memory (for context, the development machine's RTX 3080 has 10 GiB of VRAM,
+    and the UHD 620 shares its laptop's system memory), with widths a multiple of 64 px so that
+    `bytesPerRow` meets the 256-byte rule; each tile's projection is M · P, M touching only clip x
+    and y, so R02's
     reversed-Z projection keeps its depth. Every screen-space footprint (terrain error, mips,
     decoration fade, the ring profile's mip and hand-over) is taken from the full still's pixel,
     frustum culling is per tile, bloom and glare run once on the assembled image, and sub-pixel
@@ -710,8 +715,8 @@ ambiguous, the design note that reads it is named.
     round trip measured at job start (median of five), growing by at most 1.5 times a step and
     halving after an overrun, which over-estimates by 1.5–5 ms and so cannot undershoot the cap. No
     single dispatch or draw may exceed about 50 ms, by construction from the measured cost per
-    workgroup; i915's 640 ms preemption timeout and 2,500 ms heartbeat are confirmed on this
-    machine. The first device or GPU-process loss while a still is in flight suspends stills for the
+    workgroup; i915's 640 ms preemption timeout and 2,500 ms heartbeat are confirmed on the UHD 620
+    laptop. The first device or GPU-process loss while a still is in flight suspends stills for the
     session on that client (`STILLS SUSPENDED` in the control), allowing only an explicit re-request
     at the smallest batch with growth capped at half the batch that was in flight; a second disables
     them, since three losses disable WebGPU. The still asks the server for nothing the view could
@@ -825,7 +830,8 @@ the label is text in the DOM, not canvas. Acceptance: `pnpm test`, `just ci`.
   when `decoration` is off; `DECORATION ON` shows while it is drawn. Tests: R01's smoke harness
   renders one patch's depth with decoration on and off and asserts the read-backs equal bit for bit;
   every texel finite; the low setting's pipeline contains no decoration code. Bench: GPU time added
-  to the terrain pass on the UHD 620 at 720p on the high setting.
+  to the terrain pass on the high setting, at 1080p on the development machine and, by the owner,
+  at 720p on the UHD 620.
 
 Files: `surface/decoration/*`, R10's terrain material shader, R01's `WGSL_CATALOGUE`, tests.
 Acceptance: `pnpm test`, `just ci`, `just test-render`, and by hand: from 2 m above a sandy slope,
@@ -999,7 +1005,8 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   10); the low setting's clouds. Tests: under a τ = 10 column at μ₀ = 1 the direct factor is below
   10⁻⁴ and the ground's total irradiance is within 2% of T_total times the unclouded total; with
   `cloudShadows` off neither hook is written; the smoke harness; every texel finite. Bench on the
-  UHD 620 at 720p against about 1 ms and under 16 MB.
+  UHD 620 at 720p, by the owner, against about 1 ms and under 16 MB, with the development machine's
+  figure beside it.
 - **R11.T7.c The volume.** `cloudVolume.wgsl` with the noises, march, integration, phase and octaves
   of Design note 10, and the transmittance map for its shadows; high setting only. The noise
   textures are generated into a storage-capable format and copied, or generated on the CPU once,
@@ -1007,8 +1014,8 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   condensate's g; the octaves' fit to δ-Eddington over τ 1–50 and μ₀ 0.5–1, with its error in the
   doc comment; per column, the TypeScript reference march matches δ-Eddington for that column's τ to
   3–5% at μ₀ ≥ 0.5; per coverage cell, the mean of per-texel δ-Eddington equals the march's cell
-  mean to 2%; the smoke harness. Bench on the discrete target against 1.5–3 ms and 10–20 MB, and on
-  the UHD 620 for the record.
+  mean to 2%; the smoke harness. Bench on the discrete target (the development machine's RTX 3080)
+  against 1.5–3 ms and 10–20 MB, and by the owner on the UHD 620 for the record.
 - **R11.T7.d The switch.** Switching the setting, or the style, leaves the coverage and density
   fields identical and the cell-mean brightness within the T7.c tolerance. By hand, recorded: an
   Earth-like world from orbit, from within the layer and from below, on both settings, and its zonal
@@ -1047,7 +1054,8 @@ Files: `clouds/*`, R10's hooks, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm
   reference; the lower-layer cull at 10⁻⁶ of the camera distance.
 - **R11.T8.d The shoreline.** `shoreline.wgsl`: amplitude attenuated by depth, foam from depth and
   the terrain's slope, the depth fade. By hand, recorded: a coast from 1 km, 100 m and 2 m.
-- **R11.T8.e Benches.** Both GPUs, against 1–2 ms on the target and 2–3 ms on the UHD 620's low
+- **R11.T8.e Benches.** Both GPUs (the development machine's RTX 3080, and the UHD 620 by the
+  owner), against 1–2 ms on the target and 2–3 ms on the UHD 620's low
   setting, and by eye: a world with oceans is recognisable from orbit by its glint alone, and a
   frozen sea reads as ice.
 
@@ -1136,7 +1144,9 @@ on it.
   the PNG's `iTXt` label parses back equal to the sidecar; a still whose frustum had not streamed is
   labelled `TERRAIN: STREAMING`; the handlers refuse a foreign sender, an oversized image and a
   malformed label; the control and list by keyboard, through `getByRole`.
-- **R11.T10.d The soak, by hand, recorded.** On an otherwise idle UHD 620 at the batch cap: repeated
+- **R11.T10.d The soak, by hand, recorded.** On the otherwise idle development machine (RTX 3080)
+  and, by the owner, on an otherwise idle UHD 620, whose i915 preemption limit is the one the cap
+  guards, at the batch cap: repeated
   stills of a cloudy, ringed and oceanic scene for 30 minutes beside the live view, recording the
   live view's frame time, lost devices and GPU-process restarts (none allowed), the batch sizes the
   controller settled on with and without timestamps, the first still's pipeline-compile time, the
@@ -1172,8 +1182,8 @@ Verification. Acceptance: `just ci`, `just ci-slow` and the recorded runs comple
   field has it.
 - **Rings:** the shadowing table meets Salo and French's tilt ratio and I/F, and a uniform layer
   fails them; extinction is conserved across the split; the shadows match their ray oracles.
-- **Stills:** one batch in flight, none over the cap, no synchronous compile, and the UHD 620 soak
-  loses no device.
+- **Stills:** one batch in flight, none over the cap, no synchronous compile, and the soaks on the
+  development machine and the UHD 620 lose no device.
 - **Flash limit:** the recorded sequences of T11 pass.
 - **Benches:** decoration, scatter, clouds, ocean and rings on both GPUs against the budget's rows,
   and `rocks_per_finest_patch`, all recorded on a quiet machine; a miss is a finding for R12, not a

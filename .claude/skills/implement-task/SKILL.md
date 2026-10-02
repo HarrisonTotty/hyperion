@@ -1,6 +1,6 @@
 ---
 name: implement-task
-description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5 or P05.T1.a, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan. Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
+description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5, P05.T1.a or R04.T3.c, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan. Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
 argument-hint: "<task-id> [--feature <plan-set>]"
 ---
 
@@ -44,8 +44,9 @@ python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --acceptance
 python3 .claude/skills/implement-task/scripts/plan_task.py --list P02             # IDs and titles; [commit] if a subject names one
 ```
 
-When more than one plan set exists, plan numbers repeat: add `--feature <plan-set>` to every call,
-and pass it on to `validate` and `review-changes`.
+Plan numbers repeat across plan sets, and the ID's prefix picks the set: `P` for
+`galaxy-generation`, `R` for `rendering-and-planets`. For any other set, add
+`--feature <plan-set>` to every call, and pass it on to `validate` and `review-changes`.
 
 Then read:
 
@@ -100,7 +101,8 @@ matching files, and they override habits from other codebases. In addition:
 
 - Build the files, names and tests the task lists. Keep the names in Provides. If one must change,
   record why in step 7.
-- **Simulation code** (`crates/hyperion-sim`, `crates/hyperion-testkit`): load the
+- **Simulation code** (`crates/hyperion-sim`, `crates/hyperion-base`,
+  `crates/hyperion-surface`, `crates/hyperion-testkit`): load the
   `sim-determinism` skill before writing generators, random draws, or anything a golden file pins.
 - **Operator-facing UI** (`apps/hyperion/src/renderer`): load the `console-ux` skill before writing
   components, CSS, displayed strings or value formatting.
@@ -158,7 +160,7 @@ holds.
 Tell the user briefly:
 
 - What exists now (files, public items) and the validation result, naming anything skipped and
-  why, such as `just test-wasm` when wasmtime is missing.
+  why, such as an AArch64 run, which nothing here can make.
 - The decisions you made (step 3) and the deviations you recorded (step 7).
 - What waits on the owner: confirmation items and open questions.
 - A commit message, or the commit itself if the user asked for commits. Make one commit per task

@@ -18,9 +18,10 @@ use std::error::Error;
 use std::fmt;
 
 use crate::coords::GalacticPosition;
-use crate::galaxy::placement::{CellCache, LayerSpec, STELLAR_LAYERS, SystemRecord};
+use crate::galaxy::placement::{CellCache, Existence, LayerSpec, STELLAR_LAYERS, SystemRecord};
 use crate::galaxy::query::{
     LayerSet, QuerySphere, SystemHit, SystemSource, cells_in_sphere, hit_at, pad_for, pad_speed,
+    position_at,
 };
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, SystemId};
@@ -372,14 +373,89 @@ fn search_sphere(
 /// tidal radius is read at that position, from the primary's initial mass (plan 03, Design note 16).
 #[must_use]
 fn candidate_for(galaxy: &Galaxy, hit: &SystemHit) -> Option<FrameCandidate> {
-    let tidal_radius = galaxy.potential().tidal_radius(
-        hit.record().primary_initial_mass(),
-        &PointLy::from(hit.position()),
-    );
+    candidate_from(galaxy, hit.record(), hit.position(), hit.distance())
+}
+
+/// The candidate a system at `position`, `distance` from the ship, makes: its tidal radius read at
+/// that position from its primary's initial mass, or `None` where that radius is no sphere of
+/// influence.
+#[must_use]
+fn candidate_from(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    position: &GalacticPosition,
+    distance: LightYears,
+) -> Option<FrameCandidate> {
+    let tidal_radius = galaxy
+        .potential()
+        .tidal_radius(record.primary_initial_mass(), &PointLy::from(position));
     // The error is dropped rather than propagated because the one case that reaches it is a system
     // at the exact galactic centre, whose tidal radius is zero: it is no sphere of influence, and
     // the centre's members are plan 09's rule, not this one (plan 03, T12.a as built).
-    FrameCandidate::new(hit.id(), Metres::from(hit.distance()), tidal_radius).ok()
+    FrameCandidate::new(record.id(), Metres::from(distance), tidal_radius).ok()
+}
+
+/// The candidate [`frame_at`] forms for one system from a ship at `ship` at `t`, wherever the ship
+/// is: the ship's distance from the system's barycentre and the system's tidal radius, both at
+/// `t`, so that a caller can read the ship's [`ratio`](FrameCandidate::ratio) to that system's
+/// sphere of influence (added by rendering plan R03, R03.T7.a, by agreement).
+///
+/// For a grid system, the candidate is formed exactly as [`frame_at`] forms it from its hit: the
+/// system placed at `t` by [`position_at`], the distance taken through light-years as the search's
+/// hit holds it, and the tidal radius read at the system's position from its primary's initial
+/// mass, so that a candidate this gives and one [`frame_at`] weighs are equal, bit for bit. A
+/// source's member drifting at its own velocity is placed by its source, not here, so for one away
+/// from the epoch the two differ; the scene passes no sources. Unlike the search it
+/// has no reach: a ship far outside the sphere gets a ratio above 1. `None` for a time outside the
+/// [`ClockWindow`], a system not yet born at `t`, which holds nothing, and a system at the exact
+/// galactic centre, whose tidal radius is zero.
+///
+/// The rendering scene uses it for the Schmitt band at a sphere's boundary (R03, Design note 3): it
+/// enters the system [`frame_at`] names only once this ratio is at most 0.9, and states the
+/// candidate's tidal radius to the client on arrival.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::frame::{candidate_at, frame_at};
+/// use hyperion_sim::galaxy::placement::{CellKey, NoCache, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::time::UniverseTime;
+///
+/// let galaxy = Galaxy::new(Seed::new(19));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+/// let system = cell.first().expect("a 32 ly cell of the solar circle holds systems");
+/// let ship = *system.epoch_position();
+/// let t = UniverseTime::EPOCH;
+///
+/// let frame = frame_at(&galaxy, &mut NoCache::new(), &[], &ship, t, None)?;
+/// assert_eq!(frame, Some(system.id()));
+/// // A ship on the barycentre is at the centre of the sphere.
+/// let candidate = candidate_at(&galaxy, system, &ship, t).expect("a born system off the centre");
+/// assert_eq!(candidate.id(), system.id());
+/// assert!(candidate.ratio() < 1e-12);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn candidate_at(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    ship: &GalacticPosition,
+    t: UniverseTime,
+) -> Option<FrameCandidate> {
+    if !ClockWindow::contains(t) {
+        return None;
+    }
+    match record.existence_at(t) {
+        Existence::NoSystemYet => return None,
+        Existence::Exists => {}
+    }
+    let position = position_at(galaxy, record, t);
+    let distance = LightYears::from(ship.distance_to(&position));
+    candidate_from(galaxy, record, &position, distance)
 }
 
 /// Whether any source replaces this grid system at `t`, so that it cannot hold the ship either.

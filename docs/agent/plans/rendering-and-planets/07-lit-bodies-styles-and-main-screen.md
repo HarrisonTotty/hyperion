@@ -80,8 +80,8 @@ In scope:
 
 Non-goals:
 
-- The per-view canvas context, the engine adapter, the WGSL-only guard, kernel selection, the
-  smoke harness and the child-window prototype itself (R01, R01.T13). This plan submits through
+- The per-view canvas context, the engine adapter, WGSL compile-error reporting, kernel selection,
+  the smoke harness and the child-window prototype itself (R01, R01.T13). This plan submits through
   them.
 - The camera model, reversed-Z, the HDR target and pre-exposure, the exposure triple and its three
   automation levels, the AgX function `toneCurve` and its WGSL twin `agx`, the wireframe style,
@@ -732,14 +732,14 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
 13. **The tone-mapping pass encodes and dithers** (researched 2026-09-29; probes on the UHD 620).
     AgX's formed image spans 16.5 stops, −10 to +6.5 about 0.18, about 9.2 below and 7.3 above the
     metered average; the brainstorm's "roughly 25 stops" is AgX Log's encoding. The canvas is
-    `rgba8unorm`, `getPreferredCanvasFormat()` on this machine, written through a non-sRGB view with
-    the encoding in the pass, so that the dither is applied in the encoded domain: triangular
-    (TPDF) noise of ±1 LSB from a static blue-noise tile, never animated. Whether Filament's
-    `pow(v, 2.2)` then the sRGB curve or the sigmoid's output written directly is right near black
-    is settled by a dark ramp against Blender's AgX Base sRGB to one code (R07.T15), and whichever
-    is chosen applies to R02's wireframe sprites too, so that an isolated star on black is identical
-    in both styles before the dither and within one code after it. The pass also upscales from the
-    view's internal resolution.
+    `rgba8unorm`, `getPreferredCanvasFormat()` on the probed UHD 620, written through a non-sRGB
+    view with the encoding in the pass, so that the dither is applied in the encoded domain:
+    triangular (TPDF) noise of ±1 LSB from a static blue-noise tile, never animated. Whether
+    Filament's `pow(v, 2.2)` then the sRGB curve or the sigmoid's output written directly is right
+    near black is settled by a dark ramp against Blender's AgX Base sRGB to one code (R07.T15), and
+    whichever is chosen applies to R02's wireframe sprites too, so that an isolated star on black is
+    identical in both styles before the dither and within one code after it. The pass also upscales
+    from the view's internal resolution.
 14. **Per-view budgets are a pure policy** (researched 2026-09-29; probes on the UHD 620,
     provisional under load). The primary view renders at its internal scale; each secondary view at
     a lower scale or 30 Hz; on the low setting at most one view is photorealistic, and the style
@@ -848,24 +848,25 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
     label block, a phrase drafted for the owner in R07.T26. A discrete command shows `PENDING`
     within 100 ms (MIL-STD-1472H §5.1.2.1.6.4, Table V) and completes within 250 ms.
 23. **Main-screen text is sized for the room** (researched 2026-09-29; MIL-STD-1472H, read). Its
-    text is colour-coded, so it follows §5.17.25.14: at least 20′ at the longest anticipated
-    viewing distance, above §5.17.18.2's 10′ "shall" and 15′ "should", measured from the top of the
-    capitals to the bottom of the descenders (§3.2.28). The alert annunciator's text is at least 30′
-    and the newest emergency up to 60′ (§5.7.3.6, warning and caution signals). The height in
-    device pixels is 2 D tan(θ ÷ 2) × (width in pixels ÷ W), divided by `devicePixelRatio` for CSS
-    (this machine runs at 0.78125); at 4 m on a 55″ 1080p television that is 36.7 px at 20′ and
-    55.0 px at 30′. No web API gives a display's physical size, so the main-screen machine holds two
-    settings, the screen diagonal and the furthest viewing distance, the diagonal pre-filled from
-    EDID where it is plausible (non-zero and within 5% of the pixel aspect; Electron's main process
-    reads `/sys/class/drm/card*-*/edid` on Linux, matching a connector to Electron's display by the
-    EDID's monitor name against `Display.label` and its native mode against the display's size,
-    with no pre-fill when the match is ambiguous), with an on-screen 100 mm bar to check it. EDID is
-    unreliable for televisions and zero for projectors. The main screen takes no input in use (guide
-    item 9), so the two settings are given at installation, as the command-line options
-    `--screen-diagonal-in` and `--viewing-distance-m` or through `DisplaySetup` with a keyboard
-    attached for the purpose, and saved on that machine. The setup warns when distance ÷ diagonal
-    falls outside 2–10 (§5.2.2.12.3) and states that a television must be in game or PC mode,
-    since outside it input lag reaches 40–120 ms. The guide's rem scale does not apply.
+    text is colour-coded, so it follows §5.17.25.14: at least 20′ at the longest anticipated viewing
+    distance, above §5.17.18.2's 10′ "shall" and 15′ "should", measured from the top of the capitals
+    to the bottom of the descenders (§3.2.28). The alert annunciator's text is at least 30′ and the
+    newest emergency up to 60′ (§5.7.3.6, warning and caution signals). The height in device pixels
+    is 2 D tan(θ ÷ 2) × (width in pixels ÷ W), divided by `devicePixelRatio` for CSS (the probed UHD
+    620 laptop runs at 0.78125, and so does the development machine, at `Xft.dpi` 75); at 4 m on a
+    55″ 1080p television that is 36.7 px at 20′ and 55.0 px at 30′. No web API gives a display's
+    physical size, so the main-screen machine holds two settings, the screen diagonal and the
+    furthest viewing distance, the diagonal pre-filled from EDID where it is plausible (non-zero and
+    within 5% of the pixel aspect; Electron's main process reads `/sys/class/drm/card*-*/edid` on
+    Linux, matching a connector to Electron's display by the EDID's monitor name against
+    `Display.label` and its native mode against the display's size, with no pre-fill when the match
+    is ambiguous), with an on-screen 100 mm bar to check it. EDID is unreliable for televisions and
+    zero for projectors. The main screen takes no input in use (guide item 9), so the two settings
+    are given at installation, as the command-line options `--screen-diagonal-in` and
+    `--viewing-distance-m` or through `DisplaySetup` with a keyboard attached for the purpose, and
+    saved on that machine. The setup warns when distance ÷ diagonal falls outside 2–10 (§5.2.2.12.3)
+    and states that a television must be in game or PC mode, since outside it input lag reaches
+    40–120 ms. The guide's rem scale does not apply.
 24. **Later plans' inputs have hooks here, each with a default.** R10 and R11 run after this plan,
     so the shading takes their inputs through interfaces built and tested now on synthetic data.
     `body_brdf` takes a `LunarLambert` struct rather than a per-body uniform, so R10 can build one
@@ -1145,11 +1146,11 @@ owner.
 
 Add Design note 18's settings as fields of R05's `ViewSettings`, with their high and low values in
 `SETTINGS`, and Design note 14's `internalScaleBounds`, [0.5, 1.0] on both; record the benchmarks of
-T12, T14 and T15 and the whole style's frame time on the UHD 620 at 720p on a quiet machine, and on
-a discrete part of the RTX 4060 class when one is borrowed or rented (the brainstorm's Testing
-section), under `--hyperion-gpu-timing`, in this plan as "as built" figures replacing the probes'
-provisional ones; R12 consolidates them. Acceptance: `just ci`; the figures recorded with their
-settings, flags, load and dates.
+T12, T14 and T15 and the whole style's frame time on the development machine's RTX 3080, which
+exceeds the RTX 4060 class of the brainstorm's Testing section, at 1080p, and, by the owner, on the
+UHD 620 at 720p, each on a quiet machine, under `--hyperion-gpu-timing`, in this plan as "as built"
+figures replacing the probes' provisional ones; R12 consolidates them. Acceptance: `just ci`; the
+figures recorded with their settings, flags, load and dates.
 
 ### Phase B: several views
 
@@ -1174,11 +1175,12 @@ reason; a wireframe instrument shows the source of its exposure. Acceptance: `pn
 
 #### R07.T20 Several views, by hand
 
-With the real styles on the UHD 620 on a quiet machine: a full-window photorealistic view and two
-wireframe instruments, each the right way up, no GPU time in copies, a resize of one leaving the
-others' attachments alone, the frame time with instruments open against the low setting's 33 ms
-(brainstorm, Testing), and the per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s
-provisional 0.3 ms. Recorded in this plan. Acceptance: the record.
+With the real styles on the development machine (RTX 3080) and, by the owner, on the UHD 620, each
+on a quiet machine: a full-window photorealistic view and two wireframe instruments, each the right
+way up, no GPU time in copies, a resize of one leaving the others' attachments alone, the frame time
+with instruments open against the low setting's 33 ms on the UHD 620 (brainstorm, Testing), and the
+per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. Recorded in this
+plan. Acceptance: the record.
 
 #### R07.T21 A child window on a second monitor
 
@@ -1268,7 +1270,9 @@ AlertAnnunciator}.tsx` (Design notes 22–23, guide item 9): full screen, no con
   options override the saved values. Acceptance: `pnpm test`.
 - **R07.T27.c EDID, and the room.** `apps/hyperion/src/main/displayEdid.ts`: the EDID read and its
   match to Electron's display (Design note 23). Tests: EDID parsing of a pinned blob; a zero size
-  rejected; an ambiguous match gives no pre-fill. By hand, recorded: the main screen across a room
+  rejected; an ambiguous match gives no pre-fill; no pre-fill when the EDID's two reported sizes
+  disagree by more than 5%, with the development machine's projector EDID as the fixture (decided
+  2026-09-30 by a delegated decision; Risks). By hand, recorded: the main screen across a room
   at the set distance, the text legible and the 100 mm bar measured. Acceptance: `pnpm test`; the
   record.
 
@@ -1301,7 +1305,8 @@ ms. Acceptance: the test passes; the record.
   smoothing; the loop about 60 ms typical and within 100 ms at the 95th percentile to the photon
   with a game-mode display, its worst case recorded (T22–T28).
 - **By eye, recorded:** the phase, occultation and eclipse scenes, a lit planet on black, a star and
-  planet in frame, the cockpit with instruments on the UHD 620 (T8–T10, T13.b, T15, T20), and the
+  planet in frame, the cockpit with instruments on the development machine and on the UHD 620
+  (T8–T10, T13.b, T15, T20), and the
   main screen across a room (T27.c).
 - **Benchmarks:** T12, T14, T15 and T17's timings on both GPUs on a quiet machine, handed to R12.
 
@@ -1364,8 +1369,36 @@ optional field and new commands in the sessions plan's envelope, none of which m
   and present term (25–33 ms, through the main screen's internal scale) and the animation-frame
   wait.
 - **A child window on a second monitor** is unproved until a second display is at hand (T21).
-- **HDR output.** An `rgba16float` canvas with extended tone mapping configures on this machine, but
-  the panel is not HDR; it would suit a main screen on an HDR television and is left open.
+- **HDR output.** An `rgba16float` canvas with extended tone mapping configures on the probed UHD
+  620, but its panel is not HDR; it would suit a main screen on an HDR television and is left open.
+  _Decided 2026-09-30 by a delegated decision (hardware item 6):_ HDR stays open. The development
+  machine's display, an Optoma UHD projector, declares no HDR, and Xorg has no HDR path. What is
+  checked on that machine: the device-pixel ratio (0.78125 at `Xft.dpi` 75), that an
+  extended-range canvas configures, and the projector's declared 72 ms of lag, which T28 records
+  as the display's own lag.
+- **EDID on the development machine, decided 2026-09-30 by a delegated decision** (hardware item
+  6). The projector's EDID reports two sizes that disagree, so Design note 23's pre-fill also
+  requires them to agree within 5%, and that EDID is T27.c's test fixture for the no-pre-fill case.
+- **Hull edges over the image, decided 2026-09-30 by a delegated decision** (the UX decisions,
+  item 12). R02 draws hull edges uncased in the wireframe, since a casing would widen a 1.5 px
+  edge past the 2 px that its occluder's slope bias covers. This plan's overlay (T16) must case them
+  over the photorealistic image and raise the occluder's slope scale to 3 so that the casing is
+  covered (R02's Risks, T13 as built).
+- **The camera's local state, decided 2026-09-30 by a delegated decision** (the UX decisions,
+  item 14). R02's `CameraState` keeps `free` (`FreeFlight`) and `move` (`EasedMove`), a local
+  view's integration state. This plan moves them into a local wrapper, so that the server-held
+  main-screen camera carries only the shared shape (the brainstorm's "one shape in both
+  deployments"; R02's Risks, T9 as built).
+- **A kept scene on the main screen says `TRAINING`** (decided 2026-10-01 by a delegated decision,
+  R02's depth decisions, item 3). R02 shows the `TRAINING` banner only while `VIEW` draws a kept
+  scene; the main screen, when it shows a kept scene, must say `TRAINING` too.
+- **Hidden-window resizes restart the GPU process** under the Vulkan surface (R01's Risks, "The
+  forced path is the only Linux path"; T12 and T13 as built). On the RTX 3080 every resize or
+  creation of a hidden window gave `vkAcquireNextImageKHR` OUT_OF_DATE and a GPU-process
+  restart, and three restarts remove WebGPU. `--disable-vulkan-surface` avoids it, but whether it
+  costs Vulkan presentation on screen is unchecked. This plan's child windows (T21) and any
+  minimised or hidden view must be checked on screen, by hand, before the choice of switch is
+  made; the visible-window check is pending by hand for the owner.
 - **Asked by later plans.** R10's asks are built here as signatures with defaults (Design note 24)
   and completed by R10's own tasks in this plan's files, with the signatures unchanged: `body_brdf`
   with per-texel lunar-Lambert parameters (T4.c, completed by R10.T10.b); the disc sampling

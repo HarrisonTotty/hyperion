@@ -1,72 +1,89 @@
 # Clippy configuration for every crate without one of its own: `hyperion-server`,
 # `hyperion-protocol` and `hyperion-testkit`. Clippy takes the nearest `clippy.toml` walking up from
-# the crate's manifest and does not merge, so `crates/hyperion-sim/clippy.toml` and
-# `crates/hyperion-fit/clippy.toml` shadow this file entirely and stay self-contained.
+# the crate's manifest and does not merge, so the determinism crates' own files (the sim's, the
+# fitting crate's, base's and the surface crate's) shadow this file entirely and stay self-contained;
+# `crates/hyperion-testkit/tests/clippy_bans.rs` holds them all to one ban list.
 #
-# Every transcendental function goes through `hyperion_sim::math`, which wraps the exactly pinned
-# `libm`. The platform's own versions differ between operating systems and CPU architectures, and a
-# saved universe must survive being moved to another machine. That binds outside the sim as well:
-# the server turns a map's column densities into log₁₀ before quantising them
-# (`compute::density_map`), and the golden codes hold only because that logarithm is the sim's.
+# Every transcendental function goes through `hyperion_sim::math` (`hyperion_base::math`), which
+# wraps the exactly pinned `libm`. The platform's own versions differ between operating systems and
+# CPU architectures, and a saved universe must survive being moved to another machine. That binds
+# outside the sim as well: the server turns a map's column densities into log₁₀ before quantising
+# them (`compute::density_map`), and the golden codes hold only because that logarithm is the sim's.
 # That includes `mul_add`, which calls the platform's `fma` where the CPU has none.
 #
 # Unlike the sim's and the fitting crate's lists, this one does not ban the float-bit conversions
 # (`to_bits`, `to_le_bytes` and friends). Printing float bits is the testkit's job, and the server's
 # tests compare `f64` fields by their bits because the rules forbid `==` on floats; neither hashes
 # them, which is what the sim's ban is for.
+#
+# The `algebraic_*` methods (`algebraic_add`, `_sub`, `_mul`, `_div` and `_rem`, on `f64` and `f32`)
+# license the compiler to fuse, reassociate and otherwise rewrite float arithmetic as if it were
+# real arithmetic. Rust's documentation of them ("Algebraic operators", `core`'s
+# `primitive_docs.rs`, rustc 1.98.1) warns that "the same inputs may produce different results even
+# within a single program run", so no crate of the workspace calls them, generator or not.
 disallowed-methods = [
-    { path = "f64::sin", reason = "use hyperion_sim::math::sin: platform maths is not reproducible" },
-    { path = "f64::cos", reason = "use hyperion_sim::math::cos: platform maths is not reproducible" },
-    { path = "f64::tan", reason = "use hyperion_sim::math::tan: platform maths is not reproducible" },
-    { path = "f64::sin_cos", reason = "use hyperion_sim::math::sin_cos: platform maths is not reproducible" },
-    { path = "f64::asin", reason = "use hyperion_sim::math::asin: platform maths is not reproducible" },
-    { path = "f64::acos", reason = "use hyperion_sim::math::acos: platform maths is not reproducible" },
-    { path = "f64::atan", reason = "use hyperion_sim::math::atan: platform maths is not reproducible" },
-    { path = "f64::atan2", reason = "use hyperion_sim::math::atan2: platform maths is not reproducible" },
-    { path = "f64::sinh", reason = "use hyperion_sim::math::sinh: platform maths is not reproducible" },
-    { path = "f64::cosh", reason = "use hyperion_sim::math::cosh: platform maths is not reproducible" },
-    { path = "f64::tanh", reason = "use hyperion_sim::math::tanh: platform maths is not reproducible" },
-    { path = "f64::asinh", reason = "use hyperion_sim::math::asinh: platform maths is not reproducible" },
-    { path = "f64::acosh", reason = "use hyperion_sim::math::acosh: platform maths is not reproducible" },
-    { path = "f64::atanh", reason = "use hyperion_sim::math::atanh: platform maths is not reproducible" },
-    { path = "f64::exp", reason = "use hyperion_sim::math::exp: platform maths is not reproducible" },
-    { path = "f64::exp2", reason = "use hyperion_sim::math::exp2: platform maths is not reproducible" },
-    { path = "f64::exp_m1", reason = "use hyperion_sim::math::exp_m1: platform maths is not reproducible" },
-    { path = "f64::ln", reason = "use hyperion_sim::math::ln: platform maths is not reproducible" },
-    { path = "f64::log", reason = "use hyperion_sim::math::ln and divide: platform maths is not reproducible" },
-    { path = "f64::log2", reason = "use hyperion_sim::math::log2: platform maths is not reproducible" },
-    { path = "f64::log10", reason = "use hyperion_sim::math::log10: platform maths is not reproducible" },
-    { path = "f64::ln_1p", reason = "use hyperion_sim::math::ln_1p: platform maths is not reproducible" },
-    { path = "f64::powf", reason = "use hyperion_sim::math::powf: platform maths is not reproducible" },
-    { path = "f64::powi", reason = "use hyperion_sim::math::powi: platform powi has unspecified precision" },
-    { path = "f64::cbrt", reason = "use hyperion_sim::math::cbrt: platform maths is not reproducible" },
-    { path = "f64::hypot", reason = "use hyperion_sim::math::hypot: platform maths is not reproducible" },
-    { path = "f64::mul_add", reason = "use hyperion_sim::math::mul_add: without hardware FMA this calls the platform's fma" },
-    { path = "f32::sin", reason = "use f64 and hyperion_sim::math::sin: platform maths is not reproducible" },
-    { path = "f32::cos", reason = "use f64 and hyperion_sim::math::cos: platform maths is not reproducible" },
-    { path = "f32::tan", reason = "use f64 and hyperion_sim::math::tan: platform maths is not reproducible" },
-    { path = "f32::sin_cos", reason = "use f64 and hyperion_sim::math::sin_cos: platform maths is not reproducible" },
-    { path = "f32::asin", reason = "use f64 and hyperion_sim::math::asin: platform maths is not reproducible" },
-    { path = "f32::acos", reason = "use f64 and hyperion_sim::math::acos: platform maths is not reproducible" },
-    { path = "f32::atan", reason = "use f64 and hyperion_sim::math::atan: platform maths is not reproducible" },
-    { path = "f32::atan2", reason = "use f64 and hyperion_sim::math::atan2: platform maths is not reproducible" },
-    { path = "f32::sinh", reason = "use f64 and hyperion_sim::math::sinh: platform maths is not reproducible" },
-    { path = "f32::cosh", reason = "use f64 and hyperion_sim::math::cosh: platform maths is not reproducible" },
-    { path = "f32::tanh", reason = "use f64 and hyperion_sim::math::tanh: platform maths is not reproducible" },
-    { path = "f32::asinh", reason = "use f64 and hyperion_sim::math::asinh: platform maths is not reproducible" },
-    { path = "f32::acosh", reason = "use f64 and hyperion_sim::math::acosh: platform maths is not reproducible" },
-    { path = "f32::atanh", reason = "use f64 and hyperion_sim::math::atanh: platform maths is not reproducible" },
-    { path = "f32::exp", reason = "use f64 and hyperion_sim::math::exp: platform maths is not reproducible" },
-    { path = "f32::exp2", reason = "use f64 and hyperion_sim::math::exp2: platform maths is not reproducible" },
-    { path = "f32::exp_m1", reason = "use f64 and hyperion_sim::math::exp_m1: platform maths is not reproducible" },
-    { path = "f32::ln", reason = "use f64 and hyperion_sim::math::ln: platform maths is not reproducible" },
-    { path = "f32::log", reason = "use f64 and hyperion_sim::math::ln and divide: platform maths is not reproducible" },
-    { path = "f32::log2", reason = "use f64 and hyperion_sim::math::log2: platform maths is not reproducible" },
-    { path = "f32::log10", reason = "use f64 and hyperion_sim::math::log10: platform maths is not reproducible" },
-    { path = "f32::ln_1p", reason = "use f64 and hyperion_sim::math::ln_1p: platform maths is not reproducible" },
-    { path = "f32::powf", reason = "use f64 and hyperion_sim::math::powf: platform maths is not reproducible" },
-    { path = "f32::powi", reason = "use f64 and hyperion_sim::math::powi: platform powi has unspecified precision" },
-    { path = "f32::cbrt", reason = "use f64 and hyperion_sim::math::cbrt: platform maths is not reproducible" },
-    { path = "f32::hypot", reason = "use f64 and hyperion_sim::math::hypot: platform maths is not reproducible" },
-    { path = "f32::mul_add", reason = "use f64 and hyperion_sim::math::mul_add: without hardware FMA this calls the platform's fma" },
+    { path = "f64::sin", reason = "use hyperion_sim::math::sin (hyperion_base::math::sin): platform maths is not reproducible" },
+    { path = "f64::cos", reason = "use hyperion_sim::math::cos (hyperion_base::math::cos): platform maths is not reproducible" },
+    { path = "f64::tan", reason = "use hyperion_sim::math::tan (hyperion_base::math::tan): platform maths is not reproducible" },
+    { path = "f64::sin_cos", reason = "use hyperion_sim::math::sin_cos (hyperion_base::math::sin_cos): platform maths is not reproducible" },
+    { path = "f64::asin", reason = "use hyperion_sim::math::asin (hyperion_base::math::asin): platform maths is not reproducible" },
+    { path = "f64::acos", reason = "use hyperion_sim::math::acos (hyperion_base::math::acos): platform maths is not reproducible" },
+    { path = "f64::atan", reason = "use hyperion_sim::math::atan (hyperion_base::math::atan): platform maths is not reproducible" },
+    { path = "f64::atan2", reason = "use hyperion_sim::math::atan2 (hyperion_base::math::atan2): platform maths is not reproducible" },
+    { path = "f64::sinh", reason = "use hyperion_sim::math::sinh (hyperion_base::math::sinh): platform maths is not reproducible" },
+    { path = "f64::cosh", reason = "use hyperion_sim::math::cosh (hyperion_base::math::cosh): platform maths is not reproducible" },
+    { path = "f64::tanh", reason = "use hyperion_sim::math::tanh (hyperion_base::math::tanh): platform maths is not reproducible" },
+    { path = "f64::asinh", reason = "use hyperion_sim::math::asinh (hyperion_base::math::asinh): platform maths is not reproducible" },
+    { path = "f64::acosh", reason = "use hyperion_sim::math::acosh (hyperion_base::math::acosh): platform maths is not reproducible" },
+    { path = "f64::atanh", reason = "use hyperion_sim::math::atanh (hyperion_base::math::atanh): platform maths is not reproducible" },
+    { path = "f64::exp", reason = "use hyperion_sim::math::exp (hyperion_base::math::exp): platform maths is not reproducible" },
+    { path = "f64::exp2", reason = "use hyperion_sim::math::exp2 (hyperion_base::math::exp2): platform maths is not reproducible" },
+    { path = "f64::exp_m1", reason = "use hyperion_sim::math::exp_m1 (hyperion_base::math::exp_m1): platform maths is not reproducible" },
+    { path = "f64::ln", reason = "use hyperion_sim::math::ln (hyperion_base::math::ln): platform maths is not reproducible" },
+    { path = "f64::log", reason = "use hyperion_sim::math::ln (hyperion_base::math::ln) and divide: platform maths is not reproducible" },
+    { path = "f64::log2", reason = "use hyperion_sim::math::log2 (hyperion_base::math::log2): platform maths is not reproducible" },
+    { path = "f64::log10", reason = "use hyperion_sim::math::log10 (hyperion_base::math::log10): platform maths is not reproducible" },
+    { path = "f64::ln_1p", reason = "use hyperion_sim::math::ln_1p (hyperion_base::math::ln_1p): platform maths is not reproducible" },
+    { path = "f64::powf", reason = "use hyperion_sim::math::powf (hyperion_base::math::powf): platform maths is not reproducible" },
+    { path = "f64::powi", reason = "use hyperion_sim::math::powi (hyperion_base::math::powi): platform powi has unspecified precision" },
+    { path = "f64::cbrt", reason = "use hyperion_sim::math::cbrt (hyperion_base::math::cbrt): platform maths is not reproducible" },
+    { path = "f64::hypot", reason = "use hyperion_sim::math::hypot (hyperion_base::math::hypot): platform maths is not reproducible" },
+    { path = "f64::mul_add", reason = "use hyperion_sim::math::mul_add (hyperion_base::math::mul_add): without hardware FMA this calls the platform's fma" },
+    { path = "f32::sin", reason = "use f64 and hyperion_sim::math::sin (hyperion_base::math::sin): platform maths is not reproducible" },
+    { path = "f32::cos", reason = "use f64 and hyperion_sim::math::cos (hyperion_base::math::cos): platform maths is not reproducible" },
+    { path = "f32::tan", reason = "use f64 and hyperion_sim::math::tan (hyperion_base::math::tan): platform maths is not reproducible" },
+    { path = "f32::sin_cos", reason = "use f64 and hyperion_sim::math::sin_cos (hyperion_base::math::sin_cos): platform maths is not reproducible" },
+    { path = "f32::asin", reason = "use f64 and hyperion_sim::math::asin (hyperion_base::math::asin): platform maths is not reproducible" },
+    { path = "f32::acos", reason = "use f64 and hyperion_sim::math::acos (hyperion_base::math::acos): platform maths is not reproducible" },
+    { path = "f32::atan", reason = "use f64 and hyperion_sim::math::atan (hyperion_base::math::atan): platform maths is not reproducible" },
+    { path = "f32::atan2", reason = "use f64 and hyperion_sim::math::atan2 (hyperion_base::math::atan2): platform maths is not reproducible" },
+    { path = "f32::sinh", reason = "use f64 and hyperion_sim::math::sinh (hyperion_base::math::sinh): platform maths is not reproducible" },
+    { path = "f32::cosh", reason = "use f64 and hyperion_sim::math::cosh (hyperion_base::math::cosh): platform maths is not reproducible" },
+    { path = "f32::tanh", reason = "use f64 and hyperion_sim::math::tanh (hyperion_base::math::tanh): platform maths is not reproducible" },
+    { path = "f32::asinh", reason = "use f64 and hyperion_sim::math::asinh (hyperion_base::math::asinh): platform maths is not reproducible" },
+    { path = "f32::acosh", reason = "use f64 and hyperion_sim::math::acosh (hyperion_base::math::acosh): platform maths is not reproducible" },
+    { path = "f32::atanh", reason = "use f64 and hyperion_sim::math::atanh (hyperion_base::math::atanh): platform maths is not reproducible" },
+    { path = "f32::exp", reason = "use f64 and hyperion_sim::math::exp (hyperion_base::math::exp): platform maths is not reproducible" },
+    { path = "f32::exp2", reason = "use f64 and hyperion_sim::math::exp2 (hyperion_base::math::exp2): platform maths is not reproducible" },
+    { path = "f32::exp_m1", reason = "use f64 and hyperion_sim::math::exp_m1 (hyperion_base::math::exp_m1): platform maths is not reproducible" },
+    { path = "f32::ln", reason = "use f64 and hyperion_sim::math::ln (hyperion_base::math::ln): platform maths is not reproducible" },
+    { path = "f32::log", reason = "use f64 and hyperion_sim::math::ln (hyperion_base::math::ln) and divide: platform maths is not reproducible" },
+    { path = "f32::log2", reason = "use f64 and hyperion_sim::math::log2 (hyperion_base::math::log2): platform maths is not reproducible" },
+    { path = "f32::log10", reason = "use f64 and hyperion_sim::math::log10 (hyperion_base::math::log10): platform maths is not reproducible" },
+    { path = "f32::ln_1p", reason = "use f64 and hyperion_sim::math::ln_1p (hyperion_base::math::ln_1p): platform maths is not reproducible" },
+    { path = "f32::powf", reason = "use f64 and hyperion_sim::math::powf (hyperion_base::math::powf): platform maths is not reproducible" },
+    { path = "f32::powi", reason = "use f64 and hyperion_sim::math::powi (hyperion_base::math::powi): platform powi has unspecified precision" },
+    { path = "f32::cbrt", reason = "use f64 and hyperion_sim::math::cbrt (hyperion_base::math::cbrt): platform maths is not reproducible" },
+    { path = "f32::hypot", reason = "use f64 and hyperion_sim::math::hypot (hyperion_base::math::hypot): platform maths is not reproducible" },
+    { path = "f32::mul_add", reason = "use f64 and hyperion_sim::math::mul_add (hyperion_base::math::mul_add): without hardware FMA this calls the platform's fma" },
+    { path = "f64::algebraic_add", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_sub", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_mul", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_div", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f64::algebraic_rem", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_add", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_sub", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_mul", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_div", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
+    { path = "f32::algebraic_rem", reason = "may fuse or reassociate: the same inputs may give different results even within one run" },
 ]

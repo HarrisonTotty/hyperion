@@ -10,6 +10,7 @@
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
 //! serving has stopped.
 
+pub(crate) mod bulk;
 pub mod cache;
 pub mod compute;
 pub mod config;
@@ -19,7 +20,9 @@ pub mod knowledge;
 pub mod limits;
 mod outbound;
 mod requests;
+pub mod scene;
 mod stats;
+mod subscriptions;
 #[cfg(test)]
 mod testing;
 pub mod universe;
@@ -40,6 +43,7 @@ use crate::compute::{
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
+use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
 use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
@@ -102,6 +106,9 @@ pub(crate) struct AppState {
     pub(crate) outbound_stats: OutboundStats,
     /// The limits each connection enforces on writing to its client.
     pub(crate) connection_limits: ConnectionLimits,
+    /// Each open universe's scene clock and ship stand-in, which `scene_ship` sets (rendering
+    /// plan R03, Design note 2).
+    pub(crate) scene: SceneService,
 }
 
 impl Server {
@@ -136,12 +143,15 @@ impl Server {
         )
         .await
         .map_err(StartServerError::LoadRegistry)?;
+        // Starting the pool waits for every worker to probe its floating-point mode, so it runs
+        // off the runtime.
+        let workers = config.workers();
         let pool = Arc::new(
-            CpuPool::new(
-                config.workers(),
-                INTERACTIVE_QUEUE_CAPACITY,
-                BULK_QUEUE_CAPACITY,
-            )
+            tokio::task::spawn_blocking(move || {
+                CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY)
+            })
+            .await
+            .map_err(|_| StartServerError::Interrupted)?
             .map_err(StartServerError::StartPool)?,
         );
         let galaxies = Arc::new(GalaxyCache::new(Arc::clone(&pool)));
@@ -179,6 +189,10 @@ impl Server {
                 request_stats: RequestStats::new(),
                 outbound_stats: OutboundStats::new(),
                 connection_limits,
+                scene: SceneService::new(
+                    Arc::clone(config.scene_knowledge()),
+                    Arc::clone(config.craft_source()),
+                ),
             }),
         })
     }
@@ -225,6 +239,36 @@ impl Server {
     pub(crate) fn state(&self) -> &Arc<AppState> {
         &self.state
     }
+}
+
+/// Prepares a socket the server has accepted: sets `TCP_NOTSENT_LOWAT` to
+/// [`TCP_NOTSENT_LOWAT_BYTES`](limits::TCP_NOTSENT_LOWAT_BYTES) on Linux and Android, so that the
+/// kernel holds little unsent behind a scene push (rendering plan R03, Design note 11).
+///
+/// Every place that serves the router calls it, through axum's `ListenerExt::tap_io`, so that every
+/// connection is prepared alike. A failure is logged at `warn` and the connection goes on; elsewhere
+/// it does nothing, since socket2 does not expose the option there.
+///
+/// # Examples
+///
+/// ```no_run
+/// use axum::serve::ListenerExt;
+/// use tokio::net::TcpListener;
+///
+/// # async fn serve(router: axum::Router) -> std::io::Result<()> {
+/// let listener = TcpListener::bind("127.0.0.1:0").await?;
+/// axum::serve(listener.tap_io(|tcp| hyperion_server::tap_socket(tcp)), router).await
+/// # }
+/// ```
+pub fn tap_socket(tcp: &tokio::net::TcpStream) {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Err(error) =
+        socket2::SockRef::from(tcp).set_tcp_notsent_lowat(limits::TCP_NOTSENT_LOWAT_BYTES)
+    {
+        tracing::warn!(%error, "could not set TCP_NOTSENT_LOWAT on an accepted socket");
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let _ = tcp;
 }
 
 async fn healthz() -> &'static str {

@@ -14,8 +14,8 @@ import type {
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import type { RequestState } from "../../lib/useServerRequest";
 import type { SpatialScene } from "../../spatial/marks";
-import { localFrameAt } from "../../spatial/frame";
-import { dot, norm } from "../../spatial/vec3";
+import { localFrameAt } from "../../geometry/frame";
+import { dot, norm } from "../../geometry/vec3";
 import {
   bodyFitAu,
   bodyFrameName,

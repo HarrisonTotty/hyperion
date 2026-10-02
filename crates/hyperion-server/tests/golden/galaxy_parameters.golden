@@ -1,4 +1,4 @@
-# generator_version = 16
+# generator_version = 19
 {
   "type": "response",
   "id": 3,
@@ -6,7 +6,7 @@
     "kind": "galaxy_parameters",
     "universe": "5eed000000000001",
     "seed": "00000000000004d2",
-    "generator_version": 16,
+    "generator_version": 19,
     "groups": [
       {
         "key": "identity",
@@ -24,7 +24,7 @@
             "origin": "fixed",
             "value": {
               "type": "number",
-              "value": 16.0,
+              "value": 19.0,
               "unit": "count"
             }
           },

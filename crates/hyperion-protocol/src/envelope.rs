@@ -18,6 +18,11 @@ use crate::planetary::{
     BodyDetailDto, BodyDetailRequest, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
     SystemBodiesRequest,
 };
+use crate::primitives::UniverseIdHex;
+use crate::scene::{
+    SceneCamerasRequest, SceneNotificationDto, SceneShipRequest, SceneShipSet, SceneStateDto,
+    SceneSubscribeRequest,
+};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
 
@@ -98,6 +103,88 @@ pub enum ServerMessage {
         /// Why it failed.
         error: RequestError,
     },
+    /// A push on a subscription the client opened with `subscribe` (plan 04's reserved
+    /// `notification`; plan 12's P12.T9, built by rendering plan R03's R03.T5.a). The server sends
+    /// one only on a subscription the client opened, so a client that subscribes to nothing never
+    /// receives one.
+    Notification {
+        /// The subscription, as its `subscribed` answer numbered it.
+        subscription: u32,
+        /// What changed, by topic.
+        body: NotificationBody,
+    },
+    /// The end of a subscription the server can no longer serve, as when its topic's work fails
+    /// (rendering plan R03; a delegated decision of 2026-09-30). It follows the subscription's
+    /// last notification, nothing follows it on the subscription, and its number is not reused.
+    /// Like a notification it is sent only on a subscription the client opened.
+    SubscriptionEnded {
+        /// The subscription, as its `subscribed` answer numbered it.
+        subscription: u32,
+        /// Why it ended.
+        error: RequestError,
+    },
+}
+
+/// What a subscription watches, tagged by `topic`: the topic's own request fields.
+///
+/// Plan 12's P12.T9 adds `alerts`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "topic", rename_all = "snake_case")]
+#[ts(export)]
+pub enum SubscriptionTopic {
+    /// A universe's scene (rendering plan R03).
+    Scene(SceneSubscribeRequest),
+}
+
+/// A subscription's whole state when it opens, tagged by `topic`, the same value as its request's
+/// topic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "topic", rename_all = "snake_case")]
+#[ts(export)]
+pub enum SubscriptionState {
+    /// The scene.
+    Scene(SceneStateDto),
+}
+
+/// A notification's body, tagged by `topic`: what changed since the last push.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "topic", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NotificationBody {
+    /// The scene.
+    Scene(SceneNotificationDto),
+}
+
+/// Opens a subscription (`subscribe`), answered by [`Subscribed`] with the topic's whole state;
+/// its pushes follow as [`ServerMessage::Notification`]s until `unsubscribe` or the socket's
+/// close.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SubscribeRequest {
+    /// The universe.
+    pub universe: UniverseIdHex,
+    /// What to watch.
+    pub topic: SubscriptionTopic,
+}
+
+/// Ends a subscription (`unsubscribe`), answered with an empty body. A subscription the
+/// connection does not have is refused with `bad_request` naming `subscription`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UnsubscribeRequest {
+    /// The subscription, as its `subscribed` answer numbered it.
+    pub subscription: u32,
+}
+
+/// The answer to `subscribe`: the subscription's number on this connection, from 1 and never
+/// reused on it, and the topic's whole state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Subscribed {
+    /// The subscription's number, which its notifications carry.
+    pub subscription: u32,
+    /// The topic's whole state.
+    pub state: SubscriptionState,
 }
 
 /// Why a request failed.
@@ -176,6 +263,14 @@ pub enum RequestBody {
     BodyDetail(BodyDetailRequest),
     /// The events on one system's bodies in a window of time.
     BodyEvents(BodyEventsRequest),
+    /// Open a subscription to a topic.
+    Subscribe(SubscribeRequest),
+    /// End a subscription.
+    Unsubscribe(UnsubscribeRequest),
+    /// Set a universe's ship stand-in and scene clock (rendering plan R03).
+    SceneShip(SceneShipRequest),
+    /// Replace a scene subscription's cameras (rendering plan R03).
+    SceneCameras(SceneCamerasRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -205,6 +300,15 @@ pub enum ResponseBody {
     BodyDetail(Box<BodyDetailDto>),
     /// The events in the window.
     BodyEvents(BodyEventsDto),
+    // Boxed: a scene's state holds a whole system's bodies.
+    /// The subscription opened, with its topic's whole state.
+    Subscribe(Box<Subscribed>),
+    /// The subscription ended.
+    Unsubscribe,
+    /// The scene clock as set.
+    SceneShip(SceneShipSet),
+    /// The cameras replaced.
+    SceneCameras,
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -223,6 +327,10 @@ pub const REQUEST_KINDS: &[&str] = &[
     "system_bodies",
     "body_detail",
     "body_events",
+    "subscribe",
+    "unsubscribe",
+    "scene_ship",
+    "scene_cameras",
 ];
 
 #[cfg(test)]
@@ -241,6 +349,9 @@ mod tests {
     };
     use crate::primitives::{
         BodyIdHex, GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime,
+    };
+    use crate::scene::{
+        CameraReportDto, FramePositionDto, KinematicsDto, SceneClockDto, SceneClockStateDto,
     };
     use crate::stellar::SystemExistenceDto;
     use crate::testing::{assert_wire_form, assert_wire_strings};
@@ -349,7 +460,57 @@ mod tests {
                     nanos: 0,
                 },
             })),
-            Some(RequestBody::BodyEvents(_)) => None,
+            Some(RequestBody::BodyEvents(_)) => Some(RequestBody::Subscribe(SubscribeRequest {
+                universe,
+                topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                    detail: DetailLevelDto::Bulk,
+                    cameras: Vec::new(),
+                }),
+            })),
+            Some(RequestBody::Subscribe(_)) => Some(RequestBody::Unsubscribe(UnsubscribeRequest {
+                subscription: 1,
+            })),
+            Some(RequestBody::Unsubscribe(_)) => Some(RequestBody::SceneShip(SceneShipRequest {
+                universe,
+                ship: scene_pose(),
+                time_rate: 10,
+            })),
+            Some(RequestBody::SceneShip(_)) => {
+                Some(RequestBody::SceneCameras(SceneCamerasRequest {
+                    subscription: 1,
+                    cameras: vec![CameraReportDto {
+                        view: 0,
+                        pose: scene_pose(),
+                    }],
+                }))
+            }
+            Some(RequestBody::SceneCameras(_)) => None,
+        }
+    }
+
+    /// A body's record at the `contact` level, every section withheld.
+    fn unresolved_detail() -> BodyDetailDto {
+        let universe = universe();
+        BodyDetailDto {
+            universe,
+            time: UniverseTime::default(),
+            granted: DetailLevelDto::Contact,
+            record: BodyRecordDto {
+                id: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                kind: BodyKindDto::Unresolved,
+                label: SectionDto::NotResolved,
+                parent: Some(OrbitHostDto::Star { body_index: 0 }),
+                state: BodyStateDto::NotYetFormed,
+                position_m: None,
+                mass_kg: SectionDto::NotResolved,
+                orbit: SectionDto::NotResolved,
+                moons: SectionDto::NotResolved,
+                rings: SectionDto::NotResolved,
+                population: SectionDto::NotResolved,
+                bulk: SectionDto::NotResolved,
+                surface: SectionDto::NotResolved,
+                hooks: SectionDto::NotResolved,
+            },
         }
     }
 
@@ -420,27 +581,7 @@ mod tests {
                 })))
             }
             Some(ResponseBody::SystemBodies(_)) => {
-                Some(ResponseBody::BodyDetail(Box::new(BodyDetailDto {
-                    universe,
-                    time: UniverseTime::default(),
-                    granted: DetailLevelDto::Contact,
-                    record: BodyRecordDto {
-                        id: BodyIdHex::from_parts(system().to_u64(), 0x0100),
-                        kind: BodyKindDto::Unresolved,
-                        label: SectionDto::NotResolved,
-                        parent: Some(OrbitHostDto::Star { body_index: 0 }),
-                        state: BodyStateDto::NotYetFormed,
-                        position_m: None,
-                        mass_kg: SectionDto::NotResolved,
-                        orbit: SectionDto::NotResolved,
-                        moons: SectionDto::NotResolved,
-                        rings: SectionDto::NotResolved,
-                        population: SectionDto::NotResolved,
-                        bulk: SectionDto::NotResolved,
-                        surface: SectionDto::NotResolved,
-                        hooks: SectionDto::NotResolved,
-                    },
-                })))
+                Some(ResponseBody::BodyDetail(Box::new(unresolved_detail())))
             }
             Some(ResponseBody::BodyDetail(_)) => Some(ResponseBody::BodyEvents(BodyEventsDto {
                 universe,
@@ -449,7 +590,15 @@ mod tests {
                 to: UniverseTime::default(),
                 events: Vec::new(),
             })),
-            Some(ResponseBody::BodyEvents(_)) => None,
+            Some(ResponseBody::BodyEvents(_)) => {
+                Some(ResponseBody::Subscribe(Box::new(scene_subscribed())))
+            }
+            Some(ResponseBody::Subscribe(_)) => Some(ResponseBody::Unsubscribe),
+            Some(ResponseBody::Unsubscribe) => Some(ResponseBody::SceneShip(SceneShipSet {
+                clock: scene_clock(),
+            })),
+            Some(ResponseBody::SceneShip(_)) => Some(ResponseBody::SceneCameras),
+            Some(ResponseBody::SceneCameras) => None,
         }
     }
 
@@ -715,7 +864,209 @@ mod tests {
                 "system_bodies",
                 "body_detail",
                 "body_events",
+                "subscribe",
+                "unsubscribe",
+                "scene_ship",
+                "scene_cameras",
             ]
+        );
+    }
+
+    /// A ship stand-in 1 au out along x in the test system, moving at 30 km/s.
+    fn scene_pose() -> KinematicsDto {
+        KinematicsDto {
+            position: FramePositionDto::System {
+                system: system(),
+                offset_m: [1.5e11, 0.0, 0.0],
+            },
+            velocity_m_s: [0.0, 30_000.0, 0.0],
+            time: UniverseTime::default(),
+        }
+    }
+
+    fn scene_pose_json() -> Value {
+        json!({
+            "position": { "frame": "system", "system": "0200080020000000", "offset_m": [1.5e11, 0.0, 0.0] },
+            "velocity_m_s": [0.0, 30_000.0, 0.0],
+            "time": { "seconds": 0, "nanos": 0 },
+        })
+    }
+
+    fn scene_clock() -> SceneClockDto {
+        SceneClockDto {
+            time: UniverseTime::default(),
+            time_rate: 10,
+            state: SceneClockStateDto::Running,
+        }
+    }
+
+    fn scene_clock_json() -> Value {
+        json!({ "time": { "seconds": 0, "nanos": 0 }, "time_rate": 10, "state": "running" })
+    }
+
+    /// A scene subscription's answer, in the galactic frame.
+    fn scene_subscribed() -> Subscribed {
+        Subscribed {
+            subscription: 1,
+            state: SubscriptionState::Scene(SceneStateDto {
+                sequence: 0,
+                clock: scene_clock(),
+                ship: scene_pose(),
+                system: None,
+                tidal_radius_m: None,
+                craft: Vec::new(),
+            }),
+        }
+    }
+
+    #[test]
+    fn subscribe_wire_form() {
+        assert_wire_form(
+            &ClientMessage::Request {
+                id: RequestId(4),
+                body: RequestBody::Subscribe(SubscribeRequest {
+                    universe: universe(),
+                    topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                        detail: DetailLevelDto::Full,
+                        cameras: vec![CameraReportDto {
+                            view: 2,
+                            pose: scene_pose(),
+                        }],
+                    }),
+                }),
+            },
+            json!({
+                "type": "request",
+                "id": 4,
+                "body": {
+                    "kind": "subscribe",
+                    "universe": "000000000000002a",
+                    "topic": {
+                        "topic": "scene",
+                        "detail": "full",
+                        "cameras": [{ "view": 2, "pose": scene_pose_json() }],
+                    },
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn subscribed_wire_form() {
+        assert_wire_form(
+            &ServerMessage::Response {
+                id: RequestId(4),
+                body: ResponseBody::Subscribe(Box::new(scene_subscribed())),
+            },
+            json!({
+                "type": "response",
+                "id": 4,
+                "body": {
+                    "kind": "subscribe",
+                    "subscription": 1,
+                    "state": {
+                        "topic": "scene",
+                        "sequence": 0,
+                        "clock": scene_clock_json(),
+                        "ship": scene_pose_json(),
+                        "system": null,
+                        "craft": [],
+                    },
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn unsubscribe_wire_form() {
+        assert_wire_form(
+            &RequestBody::Unsubscribe(UnsubscribeRequest { subscription: 3 }),
+            json!({ "kind": "unsubscribe", "subscription": 3 }),
+        );
+        assert_wire_form(&ResponseBody::Unsubscribe, json!({ "kind": "unsubscribe" }));
+    }
+
+    #[test]
+    fn scene_ship_and_scene_cameras_wire_forms() {
+        assert_wire_form(
+            &RequestBody::SceneShip(SceneShipRequest {
+                universe: universe(),
+                ship: scene_pose(),
+                time_rate: 100_000,
+            }),
+            json!({
+                "kind": "scene_ship",
+                "universe": "000000000000002a",
+                "ship": scene_pose_json(),
+                "time_rate": 100_000,
+            }),
+        );
+        assert_wire_form(
+            &ResponseBody::SceneShip(SceneShipSet {
+                clock: scene_clock(),
+            }),
+            json!({ "kind": "scene_ship", "clock": scene_clock_json() }),
+        );
+        assert_wire_form(
+            &RequestBody::SceneCameras(SceneCamerasRequest {
+                subscription: 1,
+                cameras: Vec::new(),
+            }),
+            json!({ "kind": "scene_cameras", "subscription": 1, "cameras": [] }),
+        );
+        assert_wire_form(
+            &ResponseBody::SceneCameras,
+            json!({ "kind": "scene_cameras" }),
+        );
+    }
+
+    #[test]
+    fn notification_wire_form() {
+        assert_wire_form(
+            &ServerMessage::Notification {
+                subscription: 1,
+                body: NotificationBody::Scene(SceneNotificationDto {
+                    sequence: 1,
+                    clock: scene_clock(),
+                    ship: None,
+                    arrival: None,
+                    bodies: Vec::new(),
+                    craft: None,
+                }),
+            },
+            json!({
+                "type": "notification",
+                "subscription": 1,
+                "body": {
+                    "topic": "scene",
+                    "sequence": 1,
+                    "clock": scene_clock_json(),
+                    "bodies": [],
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn subscription_ended_wire_form() {
+        assert_wire_form(
+            &ServerMessage::SubscriptionEnded {
+                subscription: 3,
+                error: RequestError {
+                    code: ErrorCode::Internal,
+                    message: "the scene could not be advanced".to_owned(),
+                    field: None,
+                },
+            },
+            json!({
+                "type": "subscription_ended",
+                "subscription": 3,
+                "error": {
+                    "code": "internal",
+                    "message": "the scene could not be advanced",
+                    "field": null,
+                },
+            }),
         );
     }
 

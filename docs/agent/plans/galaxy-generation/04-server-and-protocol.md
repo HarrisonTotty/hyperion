@@ -425,14 +425,22 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   | 10   | `global_features`, `stream_track`                                                     |
   | 12   | `resolve_system`, `subscribe`, `unsubscribe`, `alerts_observer`, `alerts_acknowledge` |
   | 14   | `system_bodies`, `body_detail`, `body_events`                                         |
+  | R03  | `scene_ship`, `scene_cameras`                                                         |
 
   Plans 08, 11 and 13 add fields to existing kinds and no kind of their own. `galaxy_features` (plan
   09: the features drawn on the galaxy map) and `global_features` (plan 10: the entries of the
   global list) are different requests despite the likeness.
 
+  Row R03 is the rendering plan R03's (`docs/agent/plans/rendering-and-planets/`), drafted by
+  R03.T1 for this plan's owner and accepted 2026-09-30 by a delegated decision. `subscribe` and
+  `unsubscribe` stay plan 12's; R03 may build them, with `notification` and
+  `subscription_ended` (the server's end of a subscription whose topic failed), to plan 12's design
+  (P12.T9) if P12.T9 has not landed, with the scene as their first topic.
+
 - Server message type `notification`, for pushes. A subscription is opened by an ordinary request
-  whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe` or the
-  socket. Alerts reach a console that way, through the knowledge overlay.
+  whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe`, the
+  socket, or the server's `subscription_ended` when its topic fails (built by R03). Alerts reach a
+  console that way, through the knowledge overlay.
 - Server message type `response_part`, should a payload outgrow one frame: parts precede the
   terminal `response`. Binary frames stay unused and reserved for bulk payloads.
 - Any `SystemIdHex` or body ID arriving from a client goes through the sim's `resolve` before use,

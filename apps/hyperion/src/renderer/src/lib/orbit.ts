@@ -29,7 +29,7 @@
  */
 import type { UniverseTime } from "@hyperion/protocol";
 
-import { add, scale, type Vec3 } from "../spatial/vec3";
+import { add, scale, type Vec3 } from "../geometry/vec3";
 
 /**
  * The number of Halley iterations {@link solveKepler} runs from Mikkola's starter: always this
@@ -73,6 +73,32 @@ export interface KeplerOrbit {
   readonly meanAnomalyAtEpochRad: number;
   /** The period P, s, finite and positive. */
   readonly periodS: number;
+  /**
+   * For an evolving orbit, how its elements change through its drift cell: the elements above hold
+   * at its `reference` (plan 14, P14.T45.c), and the drift up to the record's `valid_until`, past
+   * which the server sends the next cell. Absent for an orbit that holds.
+   */
+  readonly drift?: OrbitDrift;
+}
+
+/**
+ * How an evolving orbit's elements change through one drift cell: the wire's `OrbitDriftDto` as the
+ * client holds it (plan 14, P14.T45).
+ *
+ * @remarks
+ * At a time t, with Δt = t − `reference` in seconds, the axis is a + ȧ Δt, the eccentricity
+ * e + ė Δt, the mean anomaly the elements' own plus ½ ṅ Δt², and the mean motion in the velocity
+ * 2π ÷ P + ṅ Δt: the server's `KeplerElements::drifting_state_at`, in the same order of operations.
+ */
+export interface OrbitDrift {
+  /** The time the elements hold at exactly: the cell's start. */
+  readonly reference: UniverseTime;
+  /** ȧ, m/s, finite. */
+  readonly semiMajorAxisRateMPerS: number;
+  /** ė, per second, finite. */
+  readonly eccentricityRatePerS: number;
+  /** ṅ, rad/s², finite. */
+  readonly meanMotionRateRadPerS2: number;
 }
 
 /** A body's position and velocity relative to its parent, in the axes of the parent's frame. */
@@ -329,22 +355,45 @@ export function solveKepler(meanAnomalyRad: number, eccentricity: number): numbe
 }
 
 /**
+ * The seconds from `from` to `to`: the difference of the whole seconds plus the difference of the
+ * nanoseconds over 10⁹, in that order, as the server's `orbit::seconds_between` forms it.
+ */
+function secondsBetween(from: UniverseTime, to: UniverseTime): number {
+  return to.seconds - from.seconds + (to.nanos - from.nanos) / 1e9;
+}
+
+/**
  * A body's position and velocity relative to its parent at `time`, in the axes of the parent's
- * frame: the server's `KeplerElements::relative_state_at`.
+ * frame: the server's `KeplerElements::relative_state_at`, or for an evolving orbit its
+ * `drifting_state_at`.
  *
  * @remarks
  * A pure function of the elements and the time, symmetric in time: the epoch is no boundary, and
  * any universe time before or after it is valid. The mean anomaly is M₀ plus 2π times the centred
  * fraction of a period elapsed since the epoch, reduced exactly from the time's whole seconds (see
- * the module's remarks).
+ * the module's remarks). An orbit with a {@link OrbitDrift} adds its rates' changes from the drift's
+ * reference time (P14.T45.c), and its velocity is the time derivative of that drifting position:
+ * the Kepler velocity of the elements then plus ȧ ∂r/∂a + ė ∂r/∂e (P14.T45.e).
  *
  * @throws RangeError for an orbit that is not propagated on the client (e ≥
- *   {@link NEAR_PARABOLIC_ECCENTRICITY}) or has an element out of range, or for a malformed time.
+ *   {@link NEAR_PARABOLIC_ECCENTRICITY}) or has a stored element out of range, or for a malformed
+ *   time. The drifted axis and eccentricity are not checked: they hold up to the record's
+ *   `valid_until`, as the server's `drifting_state_at` takes them unchecked.
  */
 export function stateAt(orbit: KeplerOrbit, time: UniverseTime): OrbitState {
   const orientation = orientationOf(orbit);
-  const { semiMajorAxisM: a, eccentricity: e, periodS } = orbit;
-  const meanAnomaly = orbit.meanAnomalyAtEpochRad + TAU * fractionOfPeriod(time, periodS);
+  const { periodS, drift } = orbit;
+  let a = orbit.semiMajorAxisM;
+  let e = orbit.eccentricity;
+  let meanAnomaly = orbit.meanAnomalyAtEpochRad + TAU * fractionOfPeriod(time, periodS);
+  let meanMotionRadPerS = TAU / periodS;
+  if (drift !== undefined) {
+    const sinceReferenceS = secondsBetween(drift.reference, time);
+    a += drift.semiMajorAxisRateMPerS * sinceReferenceS;
+    e += drift.eccentricityRatePerS * sinceReferenceS;
+    meanAnomaly += 0.5 * drift.meanMotionRateRadPerS2 * sinceReferenceS * sinceReferenceS;
+    meanMotionRadPerS += drift.meanMotionRateRadPerS2 * sinceReferenceS;
+  }
   const anomaly = eccentricAnomaly(reduceToHalfTurn(meanAnomaly), e);
   const sin = Math.sin(anomaly);
   const cos = Math.cos(anomaly);
@@ -356,10 +405,22 @@ export function stateAt(orbit: KeplerOrbit, time: UniverseTime): OrbitState {
   const alongPeriapsis = a * (oneMinusE - cosineDeficit);
   const across = a * axisRatio * sin;
   const radiusOverA = oneMinusE + e * cosineDeficit;
-  const speed = ((TAU / periodS) * a) / radiusOverA;
+  const speed = (meanMotionRadPerS * a) / radiusOverA;
+  let velocityAlongMPerS = -speed * sin;
+  let velocityAcrossMPerS = speed * axisRatio * cos;
+  if (drift !== undefined) {
+    // ȧ ∂r/∂a + ė ∂r/∂e at a fixed mean anomaly, as the server's `PlaneState::add_rate_terms`
+    // adds them, so the velocity is the drifting position's derivative (P14.T45.e).
+    const aRate = drift.semiMajorAxisRateMPerS;
+    const eRate = drift.eccentricityRatePerS;
+    velocityAlongMPerS +=
+      aRate * (oneMinusE - cosineDeficit) - eRate * a * (1 + (sin * sin) / radiusOverA);
+    velocityAcrossMPerS +=
+      aRate * axisRatio * sin + eRate * a * sin * ((axisRatio * cos) / radiusOverA - e / axisRatio);
+  }
   return {
     positionM: planeToFrame(orientation, alongPeriapsis, across),
-    velocityMPerS: planeToFrame(orientation, -speed * sin, speed * axisRatio * cos),
+    velocityMPerS: planeToFrame(orientation, velocityAlongMPerS, velocityAcrossMPerS),
   };
 }
 

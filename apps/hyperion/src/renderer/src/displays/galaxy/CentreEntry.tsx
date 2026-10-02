@@ -3,8 +3,8 @@ import { type FormEvent, useEffect, useId, useState } from "react";
 import { formatBearingDeg, formatLengthLy, formatNumber, formatSigned } from "../../lib/format";
 import { type CentreLy, ROOT_CUBE_HALF_LY } from "../../lib/galaxy/model";
 import { isTextEntry } from "../../lib/textEntry";
-import { AXIS_TOLERANCE_LY, cylindrical } from "../../spatial/frame";
-import { vec3 } from "../../spatial/vec3";
+import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
+import { vec3 } from "../../geometry/vec3";
 
 /** A coordinate of the cursor, by its place in a {@link CentreLy}. */
 type Axis = 0 | 1 | 2;

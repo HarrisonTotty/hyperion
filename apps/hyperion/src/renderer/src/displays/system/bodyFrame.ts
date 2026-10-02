@@ -17,7 +17,7 @@ import { bodySymbol } from "../../lib/system/bodySymbols";
 import { bodyKindLabel, bodyStateLabel, sectionStateLabel } from "../../lib/system/bodyWords";
 import { orbitNormal } from "../../lib/system/hierarchy";
 import type { BodyOrbit, SystemBody } from "../../lib/system/model";
-import { type LocalFrame, planeFrame } from "../../spatial/frame";
+import { type LocalFrame, planeFrame } from "../../geometry/frame";
 import type {
   AnnulusMark,
   PathMark,
@@ -26,7 +26,7 @@ import type {
   SpatialScene,
 } from "../../spatial/marks";
 import { gridSpacing } from "../../spatial/scale";
-import { scale, type Vec3 } from "../../spatial/vec3";
+import { scale, type Vec3 } from "../../geometry/vec3";
 import { populationName } from "./bodyMap";
 import type { OrbitPlane } from "./orbitMap";
 import { METRES_PER_AU } from "./orbitScale";

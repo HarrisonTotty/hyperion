@@ -702,7 +702,10 @@ changed by the time this plan runs only the call sites here change.
     rule's other term governs: 1.3 × the all-round peak at 100 m is about 1,900 slots, 390 MB. So
     the high setting's budget is about 400 MB, not the brainstorm's 128–256 MB, whose upper end
     holds only the frustum term; it sits inside the discrete ceiling of 2–3 GB and raises the
-    brainstorm's GPU total of 0.6–1 GB by about 0.15–0.25 GB. The frustum term alone would fit 256
+    brainstorm's GPU total of 0.6–1 GB by about 0.15–0.25 GB. For context only (the budgets stand,
+    decided 2026-09-30 by a delegated decision, hardware item 5): the development machine's RTX
+    3080 has 10 GiB of VRAM, shared with the local LLM, and the UHD 620 shares its laptop's system
+    memory. The frustum term alone would fit 256
     MiB; T14 measures whether the all-round peak ever becomes resident, and adopts the frustum rule
     on the high setting only if it never does, recording which. `writeTexture` has no 256-byte row
     rule (only encoder copies do), so 520-byte rows upload as they are, but tiled layouts on Intel
@@ -884,10 +887,12 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   is 0 exactly on vertices of unsurveyed or margin cells; inserting a block that adds cells changes
   no baked height of a patch already baked (Design note 16); a change of a cell's `ResolutionCode`
   alone leaves every bake byte-identical (the image is the same at every survey resolution that
-  covers it, Design note 6). Bench `bake/patch_65`: the brainstorm's 40 ms a patch on two cores of
-  the development machine (about 10 µs a point with its gradient, Performance budget), recorded with
-  and without the class weights. Acceptance: `cargo test -p hyperion-surface bake`, and the bench's
-  figure in this task's entry.
+  covers it, Design note 6). Bench `bake/patch_65`: the brainstorm's 40 ms a patch on two cores
+  (about 10 µs a point with its gradient, Performance budget), recorded with and without the class
+  weights on the development machine (a Ryzen 7 3700X) and, by the owner, on the UHD 620 laptop's
+  i7-8665U, whose cores the brainstorm's figure budgets. The 40 ms stays the laptop's figure: the
+  desktop records its own and fails only if over it (decided 2026-09-30, Risks). Acceptance:
+  `cargo test -p hyperion-surface bake`, and the bench's figure in this task's entry.
 - **R10.T6.b The worker binding.** The worker's entry points on R05's binding:
   `field_init(body, header)`, `field_chunk(body, block)` (one R09 payload block, Design note 16),
   `field_release(body)`, holding one `PartialField` per body; `bake`, taking R05's `BakeOptions`
@@ -944,8 +949,9 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   that local horizon to 10⁻⁶; the lit-fraction formula as a pure TypeScript twin against hand values
   (0 and 1 beyond ±ρ, one half at e_sun = e_horizon); R01's smoke harness compiles and runs the pass
   on SwiftShader with and without f16, every texel finite. By hand, recorded: a sunset over a
-  generated range on the UHD 620 low setting, with the pass's GPU time against the budget's 0.3–0.5
-  ms (Performance budget, Shadows row), and whether eight azimuths show missing peaks. Acceptance:
+  generated range on the low setting, on the development machine and, by the owner, on the UHD 620,
+  whose GPU time is the one held against the budget's 0.3–0.5 ms (Performance budget, Shadows row),
+  and whether eight azimuths show missing peaks. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows` and the smoke run.
 
 ### R10.T9 Cascaded terrain shadows on the high setting
@@ -962,10 +968,10 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows`.
 - **R10.T9.b The high setting's shadow term.** The horizon map everywhere, cascades by `min`, each
   cascade fading to lit over its last 10%, 2 × 2 PCF with Poisson taps, exposed to R11 through
-  `terrain_shadow_factor`. By hand, recorded: the discrete target at 1080p against the budget's
-  1.5–3 ms, and no double-dark band at a cascade's edge in a sunset scene; R01's feature report on
-  whether the UHD 620 offers `depth-clip-control`. Smoke run on SwiftShader. Acceptance: the smoke
-  run passes and the figures are recorded.
+  `terrain_shadow_factor`. By hand, recorded: the discrete target (the development machine's
+  RTX 3080) at 1080p against the budget's 1.5–3 ms, and no double-dark band at a cascade's edge in a
+  sunset scene; R01's feature report on whether the UHD 620 offers `depth-clip-control`. Smoke run
+  on SwiftShader. Acceptance: the smoke run passes and the figures are recorded.
 
 ### R10.T10 The lit style on generated terrain
 
@@ -1043,13 +1049,13 @@ Tests (pure): `contourInterval` walks the 1-2-5 sequence from the nadir's height
 `f64` contour levels to 1 mm at ±20 km; the fade thresholds sit at 4 px and 3–6 px; the wireframe's
 selection is within a factor of two of `patchCountModel`'s ratio to the lit style, about a fifth;
 the grounded-body rule holds in this style. Smoke run on SwiftShader. By hand, recorded: a station
-wireframe at 1080p on the UHD 620 during the low fast pass of the scripted descent with the height
-workers busy, by `timestamp-query` with developer features, p50, p95 and p99 GPU time per pass and
-the GPU clock from `intel_gpu_top`, with the patch and triangle counts, against the brainstorm's 60
-fps and its 4–9 ms for the whole view (Two deployments, one scene; the research's provisional
-estimate is 3–6.5 ms with analytic antialiasing); and legibility on steep and gentle terrain.
-Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`, the smoke run,
-and the figures recorded.
+wireframe at 1080p on the UHD 620, by the owner, during the low fast pass of the scripted descent
+with the height workers busy, by `timestamp-query` with developer features, p50, p95 and p99 GPU
+time per pass and the GPU clock from `intel_gpu_top`, with the patch and triangle counts, against
+the brainstorm's 60 fps and its 4–9 ms for the whole view (Two deployments, one scene; the
+research's provisional estimate is 3–6.5 ms with analytic antialiasing); and legibility on steep and
+gentle terrain. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`,
+the smoke run, and the figures recorded.
 
 ### R10.T12 Coverage and terrain readouts on the view
 
@@ -1107,9 +1113,10 @@ the guide edit is made as the owner directs.
   `BakedOffsets`, and whether 64 MiB and about 400 MB hold, or the finding; and record the resident
   total (the cache, the coverage mask, the class map, the cascades, each worker's field copy)
   against the ceilings of 1 GB low and 2–3 GB discrete, from driver-reported GPU memory as well as
-  computed bytes. By hand, recorded, on a quiet machine: the peaks and totals on both GPUs where
-  available. Acceptance: the figures recorded and the constants updated, with
-  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` passing.
+  computed bytes. By hand, recorded, on a quiet machine: the peaks and totals on the development
+  machine's RTX 3080 and, by the owner, on the UHD 620. Acceptance: the figures recorded and the
+  constants updated, with `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
+  passing.
 
 ### R10.T15 Verification pass
 
@@ -1140,9 +1147,10 @@ every golden of this plan asserted on the three targets. Acceptance: `just ci`, 
   order-independent, the horizon far field bit-identical at shared points (T6.a, T8.a).
 - **Benches:** `bake/patch_65` (40 ms), `bake/horizon` (a quarter of it), taken on a quiet machine
   and recorded with the load average; a run under shared load is provisional and repeated.
-- **By hand, recorded:** the horizon-map pass on the UHD 620 (0.3–0.5 ms), the cascades on the
-  discrete target (1.5–3 ms), the disc-to-terrain handover, the station wireframe at 60 fps at 1080p
-  on the UHD 620 under load, the descent on a generated world, and the cache peaks.
+- **By hand, recorded:** on the development machine (RTX 3080), the cascades (1.5–3 ms), the
+  disc-to-terrain handover, the descent on a generated world and the cache peaks; by the owner on
+  the UHD 620, the horizon-map pass (0.3–0.5 ms), the station wireframe at 60 fps at 1080p under
+  load and the cache peaks.
 
 ## Generator version
 
@@ -1208,3 +1216,11 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   sample world has them.
 - **Vegetation** is absent until a biosphere exists; a living world's land is drawn bare, which is
   wrong for it and says nothing false about what the generator computed.
+- **The hardware decisions, decided 2026-09-30 by a delegated decision**, as they fall on this
+  plan:
+  - _CPU budgets (item 3):_ the 40 ms patch bake (`bake/patch_65`, and the horizon's quarter of
+    it) stays the UHD 620 laptop's figure. The development machine records its own and fails only
+    if it is over the laptop's budget.
+  - _Memory (item 5):_ the ceilings are unchanged: about 400 MB for the high setting's height
+    cache (Design note 15) inside the 2–3 GB discrete ceiling. Only the context changes: the RTX
+    3080's 10 GiB is shared with the local LLM.

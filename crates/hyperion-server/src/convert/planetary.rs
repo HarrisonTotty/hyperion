@@ -10,12 +10,13 @@
 
 use hyperion_protocol::{
     ArchitectureClassDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto,
-    BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyHooksDto, BodyIdHex, BodyKindDto,
-    BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto, BodySurfaceDto, BulkPropertiesDto,
-    CometaryHaloDto, DestructionCauseDto, DetailLevelDto, ErrorCode, HabitableZoneDto,
-    MassFractionsDto, MoonOriginDto, OrbitHostDto, PlanetClassDto, PopulationDto, RequestError,
-    RingDto, RingGapDto, RingKindDto, RingMaterialDto, SectionDto, SystemBodiesDto,
-    SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, ZoneDto,
+    BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyGrantDto, BodyHooksDto, BodyIdHex,
+    BodyKindDto, BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
+    BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto, ErrorCode,
+    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto, PlanetClassDto,
+    PopulationDto, RequestError, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto,
+    SceneSystemDto, SectionDto, SeenPositionDto, SystemBodiesDto, SystemBodiesRequest,
+    SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -29,13 +30,13 @@ use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
     BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, Hooks, MoonOrigin,
-    Population, Section, Surface,
+    Population, Section, Surface, SystemSnapshot,
 };
 use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
 use hyperion_sim::planetary::{
     BodyIndex, BodySub, PlanetarySystem, ResolveBodyError, SystemContext,
 };
-use hyperion_sim::time::UniverseTime;
+use hyperion_sim::time::{ClockWindow, UniverseTime};
 use hyperion_sim::units::{Kelvin, Kilograms, Metres};
 
 use super::query_time;
@@ -71,6 +72,27 @@ impl BodiesRequest {
     #[must_use]
     pub(crate) fn level(self) -> DetailLevel {
         self.level
+    }
+}
+
+impl BodiesRequest {
+    /// The request for `system` at `time` at `level`: the scene's own, which reaches no wire
+    /// request.
+    ///
+    /// # Panics
+    ///
+    /// If `time` lies outside the clock window, which the scene clock never leaves.
+    #[must_use]
+    pub(crate) fn new(system: SystemId, time: UniverseTime, level: DetailLevel) -> Self {
+        assert!(
+            ClockWindow::contains(time),
+            "the scene's time {time} lies outside the clock window"
+        );
+        Self {
+            system,
+            time,
+            level,
+        }
     }
 }
 
@@ -199,7 +221,7 @@ fn unknown_body_system(body: &BodyIdHex, reason: impl std::fmt::Display) -> Requ
 
 /// The level a request asked for, as the sim names it.
 #[must_use]
-fn detail_level(level: DetailLevelDto) -> DetailLevel {
+pub(crate) fn detail_level(level: DetailLevelDto) -> DetailLevel {
     match level {
         DetailLevelDto::Contact => DetailLevel::Contact,
         DetailLevelDto::MassAndOrbit => DetailLevel::MassAndOrbit,
@@ -211,7 +233,7 @@ fn detail_level(level: DetailLevelDto) -> DetailLevel {
 
 /// A detail level as the wire names it.
 #[must_use]
-fn detail_level_dto(level: DetailLevel) -> DetailLevelDto {
+pub(crate) fn detail_level_dto(level: DetailLevel) -> DetailLevelDto {
     match level {
         DetailLevel::Contact => DetailLevelDto::Contact,
         DetailLevel::MassAndOrbit => DetailLevelDto::MassAndOrbit,
@@ -252,8 +274,146 @@ pub(crate) fn system_bodies(
     planets: &PlanetarySystem,
     seed: Seed,
 ) -> SystemBodiesDto {
+    let snapshot = planets
+        .snapshot_at(ctx, wanted.time())
+        .degrade(wanted.level());
+    let bodies = snapshot.bodies().iter().map(body_summary).collect();
+    assemble(wanted, hosts, ctx, planets, seed, &snapshot, bodies)
+}
+
+/// One body of a scene's system as [`scene_system`] lists it: its index, the level it was
+/// granted, and when its elements stop holding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ListedBody {
+    /// The body's index.
+    pub(crate) index: BodyIndex,
+    /// The level granted for it.
+    pub(crate) level: DetailLevel,
+    /// When its elements stop holding, from its whole record whatever the level shows: the scene
+    /// time at which the scene re-sends it.
+    pub(crate) valid_until: Option<UniverseTime>,
+}
+
+/// The scene's system (rendering plan R03, Design note 13): plan 14's [`system_bodies`] answer at
+/// the level asked, with each body's record degraded to its own grant, and the grants beside it.
+///
+/// `grant` gives each body's level, held to the level asked, which [`BodyRecord::degrade`] never
+/// exceeds; a body its level does not resolve (a belt's member below `bulk`) is left out, as
+/// [`SystemSnapshot::degrade`](hyperion_sim::planetary::record::SystemSnapshot::degrade) leaves it
+/// out. A body granted `contact` carries `seen_from_ship`'s position. The system's own `granted`
+/// states the level asked, the most any record holds. Returns the system and its bodies as listed,
+/// in index order.
+///
+/// The system's `place` is left `None`: the caller, `SceneCore::arrive`, sets it from the galaxy
+/// through [`system_place`](super::system_place), so that this converter takes no galaxy (R03.T16).
+/// It is the one caller, and its tests hold that the state and every arrival carry the place.
+/// # Panics
+///
+/// As [`system_bodies`].
+#[must_use]
+pub(crate) fn scene_system(
+    wanted: BodiesRequest,
+    hosts: SystemSummaryDto,
+    ctx: &SystemContext,
+    planets: &PlanetarySystem,
+    seed: Seed,
+    mut grant: impl FnMut(BodyIndex) -> DetailLevel,
+    mut seen_from_ship: impl FnMut(BodyIndex) -> Option<SeenPositionDto>,
+) -> (SceneSystemDto, Vec<ListedBody>) {
+    let full = planets.snapshot_at(ctx, wanted.time());
+    let snapshot = full.degrade(wanted.level());
+    let system = planets.system();
+    let mut bodies = Vec::with_capacity(full.bodies().len());
+    let mut grants = Vec::with_capacity(full.bodies().len());
+    let mut listed = Vec::with_capacity(full.bodies().len());
+    for record in full.bodies() {
+        let index = record.index();
+        let level = grant(index).min(wanted.level());
+        if !level.resolves(index) {
+            continue;
+        }
+        let sighting = if level == DetailLevel::Contact {
+            seen_from_ship(index)
+        } else {
+            None
+        };
+        bodies.push(body_summary(&record.degrade(level)));
+        grants.push(BodyGrantDto {
+            body: body_id(system, index),
+            level: detail_level_dto(level),
+            seen: sighting,
+        });
+        listed.push(ListedBody {
+            index,
+            level,
+            valid_until: valid_until(record),
+        });
+    }
+    let system = assemble(wanted, hosts, ctx, planets, seed, &snapshot, bodies);
+    (
+        SceneSystemDto {
+            system,
+            grants,
+            place: None,
+        },
+        listed,
+    )
+}
+
+/// One body of a scene re-sent at `t` at `level`, with `seen` for a contact, and when its elements
+/// stop holding; `None` if `level` does not resolve the body, or the system holds none at `index`.
+///
+/// # Panics
+///
+/// As [`system_bodies`].
+#[must_use]
+pub(crate) fn scene_body(
+    ctx: &SystemContext,
+    planets: &PlanetarySystem,
+    index: BodyIndex,
+    t: UniverseTime,
+    level: DetailLevel,
+    seen: Option<SeenPositionDto>,
+) -> Option<(SceneBodyDto, ListedBody)> {
+    if !level.resolves(index) {
+        return None;
+    }
+    let record = planets.body_at(ctx, index, t).ok()?;
+    let listed = ListedBody {
+        index,
+        level,
+        valid_until: valid_until(&record),
+    };
+    let body = SceneBodyDto {
+        level: detail_level_dto(level),
+        record: body_summary(&record.degrade(level)),
+        seen: if level == DetailLevel::Contact {
+            seen
+        } else {
+            None
+        },
+    };
+    Some((body, listed))
+}
+
+/// When a whole record's elements stop holding, if they do inside the clock window.
+#[must_use]
+fn valid_until(record: &BodyRecord) -> Option<UniverseTime> {
+    record.orbit().ok().and_then(BodyOrbit::valid_until)
+}
+
+/// A `system_bodies` answer of `snapshot`, degraded to the level asked, with `bodies` as its list.
+#[must_use]
+fn assemble(
+    wanted: BodiesRequest,
+    hosts: SystemSummaryDto,
+    ctx: &SystemContext,
+    planets: &PlanetarySystem,
+    seed: Seed,
+    snapshot: &SystemSnapshot,
+    bodies: Vec<BodySummaryDto>,
+) -> SystemBodiesDto {
     let t = wanted.time();
-    let snapshot = planets.snapshot_at(ctx, t).degrade(wanted.level());
     let born = ctx.existence_at(t) == Existence::Exists;
     let zones: Vec<ZoneDto> = if born {
         zones(ctx, planets, seed, t)
@@ -275,7 +435,7 @@ pub(crate) fn system_bodies(
         halo: section(snapshot.halo(), |halo| {
             halo.map(|index| body_id(planets.system(), index))
         }),
-        bodies: snapshot.bodies().iter().map(body_summary).collect(),
+        bodies,
     }
 }
 
@@ -482,6 +642,12 @@ fn body_orbit(system: SystemId, parent: Option<OrbitHostDto>, orbit: &BodyOrbit)
             .expect("a body with an orbit orbits a host"),
         orbit: orbit_dto(orbit.elements()),
         valid_until: orbit.valid_until().map(wire_time),
+        drift: orbit.drift().map(|drift| OrbitDriftDto {
+            reference: wire_time(drift.reference()),
+            semi_major_axis_rate_m_per_s: drift.semi_major_axis_rate_m_per_s(),
+            eccentricity_rate_per_s: drift.eccentricity_rate_per_s(),
+            mean_motion_rate_rad_per_s2: drift.mean_motion_rate_rad_per_s2(),
+        }),
     }
 }
 

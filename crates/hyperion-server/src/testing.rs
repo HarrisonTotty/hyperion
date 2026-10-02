@@ -8,11 +8,14 @@ use std::future::IntoFuture;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use axum::serve::ListenerExt;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
     ClientMessage, RequestBody, RequestError, RequestId, ResponseBody, ServerMessage,
+    SubscribeRequest, SubscriptionState,
 };
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
@@ -23,10 +26,11 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::compute::CancelToken;
-use crate::requests::{Handler, HandlerFuture, to_frame};
+use crate::requests::{Handler, HandlerFuture, SubscribeFuture, to_frame};
 use crate::stats::{OutboundCounters, RequestCounters};
+use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
-use crate::{AppState, Server, ServerConfig, ServerStats};
+use crate::{AppState, Server, ServerConfig, ServerConfigBuilder, ServerStats};
 
 /// Upper bound on any single wait.
 ///
@@ -50,7 +54,22 @@ pub(crate) struct Harness {
     server: Server,
     stop_serving: oneshot::Sender<()>,
     serving: JoinHandle<io::Result<()>>,
+    /// The low-water mark of the socket accepted last.
+    lowat: Arc<AtomicU32>,
     _data_dir: TempDir,
+}
+
+/// A socket's `TCP_NOTSENT_LOWAT`, 0 where the option does not exist.
+fn read_lowat(tcp: &TcpStream) -> u32 {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    return socket2::SockRef::from(tcp)
+        .tcp_notsent_lowat()
+        .expect("the option can be read");
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = tcp;
+        0
+    }
 }
 
 impl Harness {
@@ -64,11 +83,35 @@ impl Harness {
         handler: impl Handler + 'static,
         limits: ConnectionLimits,
     ) -> Self {
+        Self::start_configured(handler, limits, |config| config).await
+    }
+
+    /// [`Harness::start_with_limits`], with the configuration `configure` makes of the harness's,
+    /// as a test that injects the scene's knowledge or craft needs.
+    pub(crate) async fn start_configured(
+        handler: impl Handler + 'static,
+        limits: ConnectionLimits,
+        configure: impl FnOnce(ServerConfigBuilder) -> ServerConfigBuilder,
+    ) -> Self {
+        Self::start_tapped(handler, limits, configure, Tap::LowWaterMark).await
+    }
+
+    /// [`Harness::start_configured`], with accepted sockets prepared as `tap` says: by
+    /// [`tap_socket`](crate::tap_socket), as every server does, or left as the kernel makes them,
+    /// for a measurement of what the low-water mark buys (rendering plan R03, R03.T10.b).
+    pub(crate) async fn start_tapped(
+        handler: impl Handler + 'static,
+        limits: ConnectionLimits,
+        configure: impl FnOnce(ServerConfigBuilder) -> ServerConfigBuilder,
+        tap: Tap,
+    ) -> Self {
         let data_dir = tempfile::tempdir().expect("a temporary directory");
-        let config = ServerConfig::builder()
-            .data_dir(data_dir.path())
-            .workers(std::num::NonZeroUsize::MIN)
-            .build();
+        let config = configure(
+            ServerConfig::builder()
+                .data_dir(data_dir.path())
+                .workers(std::num::NonZeroUsize::MIN),
+        )
+        .build();
         let server = timeout(
             WAIT,
             Server::start_with_handler(config, Arc::new(handler), limits),
@@ -80,6 +123,15 @@ impl Harness {
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        let lowat = Arc::new(AtomicU32::new(0));
+        let tapped = Arc::clone(&lowat);
+        let listener = listener.tap_io(move |tcp| {
+            match tap {
+                Tap::LowWaterMark => crate::tap_socket(tcp),
+                Tap::Kernel => {}
+            }
+            tapped.store(read_lowat(tcp), Ordering::Release);
+        });
         let (stop_serving, stopped) = oneshot::channel::<()>();
         let serving = tokio::spawn(
             axum::serve(
@@ -100,8 +152,15 @@ impl Harness {
             server,
             stop_serving,
             serving,
+            lowat,
             _data_dir: data_dir,
         }
+    }
+
+    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any
+    /// or where the option does not exist (rendering plan R03, R03.T10.a).
+    pub(crate) fn accepted_lowat(&self) -> u32 {
+        self.lowat.load(Ordering::Acquire)
     }
 
     /// The server's shared state.
@@ -358,6 +417,28 @@ impl Client {
         }
     }
 
+    /// The next text or binary frame from the server, skipping WebSocket pings and pongs: a
+    /// message, or a bulk frame's bytes (rendering plan R03, R03.T10.b).
+    pub(crate) async fn next_frame(&mut self) -> Received {
+        loop {
+            let frame = timeout(WAIT, self.socket.next())
+                .await
+                .expect("timed out waiting for a frame")
+                .expect("the server closed the connection")
+                .expect("the connection is healthy");
+            match frame {
+                Message::Text(text) => {
+                    return Received::Message(
+                        serde_json::from_str(&text).expect("the server sends valid messages"),
+                    );
+                }
+                Message::Binary(bytes) => return Received::Binary(bytes.to_vec()),
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("unexpected frame {other:?}"),
+            }
+        }
+    }
+
     /// Sends a close frame, without reading.
     pub(crate) async fn send_close(&mut self) {
         timeout(WAIT, self.socket.close(None))
@@ -410,19 +491,61 @@ impl Client {
     }
 }
 
+/// How a [`Harness`] prepares the sockets it accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tap {
+    /// As every server does: [`tap_socket`](crate::tap_socket) sets the low-water mark.
+    LowWaterMark,
+    /// As the kernel makes them.
+    Kernel,
+}
+
+/// A frame a [`Client`] received.
+#[derive(Debug)]
+pub(crate) enum Received {
+    /// A text frame: a message.
+    Message(ServerMessage),
+    /// A binary frame: a bulk chunk's header and payload.
+    Binary(Vec<u8>),
+}
+
 /// A handler that hands every call to the test, which answers each one by hand.
 ///
 /// A call the test drops unanswered never ends by itself, like a long computation.
 #[derive(Debug)]
 pub(crate) struct Scripted {
     calls: mpsc::Sender<Call>,
+    /// Where subscriptions' openings go, if the test takes them.
+    openings: Option<mpsc::Sender<Opening>>,
 }
 
 impl Scripted {
-    /// The handler, and the calls it receives.
+    /// The handler, and the calls it receives. It answers every `subscribe` `unsupported`.
     pub(crate) fn new() -> (Self, Calls) {
         let (calls, received) = mpsc::channel(64);
-        (Self { calls }, Calls(received))
+        (
+            Self {
+                calls,
+                openings: None,
+            },
+            Calls(received),
+        )
+    }
+
+    /// The handler, the calls it receives, and the subscriptions it is asked to open: an
+    /// injected topic that pushes whatever the test hands its [`Pusher`] (rendering plan R03,
+    /// R03.T5.b).
+    pub(crate) fn with_openings() -> (Self, Calls, Openings) {
+        let (handler, calls) = Self::new();
+        let (openings, received) = mpsc::channel(16);
+        (
+            Self {
+                openings: Some(openings),
+                ..handler
+            },
+            calls,
+            Openings(received),
+        )
     }
 }
 
@@ -441,12 +564,87 @@ impl Handler for Scripted {
                 .await
                 .expect("the test is taking calls");
             match answer.await {
-                Ok(Answer::Respond(body)) => Ok(body),
-                Ok(Answer::Fail(error)) => Err(error),
-                Ok(Answer::Panic) => panic!("a deliberate panic in a handler"),
+                Ok(Reply::Respond(body)) => Ok(body.into()),
+                Ok(Reply::RespondBulk(body, bulk)) => Ok(crate::bulk::Answer {
+                    body,
+                    bulk: Some(bulk),
+                }),
+                Ok(Reply::Fail(error)) => Err(error),
+                Ok(Reply::Panic) => panic!("a deliberate panic in a handler"),
                 Err(_) => std::future::pending().await,
             }
         })
+    }
+
+    fn subscribe(
+        &self,
+        _state: Arc<AppState>,
+        request: SubscribeRequest,
+        pusher: Pusher,
+        _token: CancelToken,
+    ) -> SubscribeFuture {
+        let Some(openings) = self.openings.clone() else {
+            return Box::pin(std::future::ready(Err(RequestError {
+                code: hyperion_protocol::ErrorCode::Unsupported,
+                message: "this handler opens no topic".to_owned(),
+                field: None,
+            })));
+        };
+        Box::pin(async move {
+            let (reply, answer) = oneshot::channel();
+            openings
+                .send(Opening {
+                    request,
+                    pusher,
+                    reply,
+                })
+                .await
+                .expect("the test is taking openings");
+            match answer.await {
+                Ok(answer) => answer,
+                Err(_) => std::future::pending().await,
+            }
+        })
+    }
+}
+
+/// The subscriptions a [`Scripted`] handler has been asked to open.
+#[derive(Debug)]
+pub(crate) struct Openings(mpsc::Receiver<Opening>);
+
+impl Openings {
+    /// The next opening.
+    pub(crate) async fn next(&mut self) -> Opening {
+        timeout(WAIT, self.0.recv())
+            .await
+            .expect("timed out waiting for a subscription to open")
+            .expect("the handler lives as long as the server")
+    }
+}
+
+/// One `subscribe`, as the handler received it.
+#[derive(Debug)]
+pub(crate) struct Opening {
+    /// What was asked.
+    pub(crate) request: SubscribeRequest,
+    /// The topic's end of the subscription, which may push before the opening is answered.
+    pub(crate) pusher: Pusher,
+    reply: oneshot::Sender<Result<SubscriptionState, RequestError>>,
+}
+
+impl Opening {
+    /// Opens the subscription with `state`, and returns the topic's end of it.
+    pub(crate) fn open(self, state: SubscriptionState) -> Pusher {
+        // The request may have been cancelled meanwhile; the pusher then says it has ended.
+        let _ = self.reply.send(Ok(state));
+        self.pusher
+    }
+
+    /// Refuses the subscription with `error`, and returns the topic's end of it.
+    pub(crate) fn fail(self, error: RequestError) -> Pusher {
+        // As for `open`.
+        let _ = self.reply.send(Err(error));
+        self.pusher
     }
 }
 
@@ -476,12 +674,13 @@ pub(crate) struct Call {
     pub(crate) body: RequestBody,
     /// The request's cancellation token.
     pub(crate) token: CancelToken,
-    reply: oneshot::Sender<Answer>,
+    reply: oneshot::Sender<Reply>,
 }
 
 #[derive(Debug)]
-enum Answer {
+enum Reply {
     Respond(ResponseBody),
+    RespondBulk(ResponseBody, crate::bulk::BulkPayload),
     Fail(RequestError),
     Panic,
 }
@@ -499,17 +698,23 @@ impl Call {
 
     /// Answers with `body`. Returns whether the request's task was still waiting.
     pub(crate) fn respond(self, body: ResponseBody) -> bool {
-        self.reply.send(Answer::Respond(body)).is_ok()
+        self.reply.send(Reply::Respond(body)).is_ok()
+    }
+
+    /// Answers with `body` and the bulk payload `bulk`, whose chunks precede it (rendering plan
+    /// R03, R03.T10.b).
+    pub(crate) fn respond_bulk(self, body: ResponseBody, bulk: crate::bulk::BulkPayload) -> bool {
+        self.reply.send(Reply::RespondBulk(body, bulk)).is_ok()
     }
 
     /// Answers with `error`.
     pub(crate) fn fail(self, error: RequestError) -> bool {
-        self.reply.send(Answer::Fail(error)).is_ok()
+        self.reply.send(Reply::Fail(error)).is_ok()
     }
 
     /// Makes the handler panic.
     pub(crate) fn panic(self) -> bool {
-        self.reply.send(Answer::Panic).is_ok()
+        self.reply.send(Reply::Panic).is_ok()
     }
 
     /// Waits until the request's task has let go of the call: it was cancelled, or its

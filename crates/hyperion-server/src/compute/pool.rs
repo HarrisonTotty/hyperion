@@ -14,6 +14,11 @@
 //! is released the moment a worker takes the job. Jobs run under `catch_unwind`, so a panic costs
 //! one request and not a worker. A job's result, or why it has none, arrives on a
 //! [`JobReceiver`], which is always sent exactly one message.
+//!
+//! Every worker checks its floating-point mode with a [`FlushProbe`] before its first job and after
+//! each job, before the reply, so that no value computed under a mode that flushes subnormals ever
+//! leaves it (plan R04, design note 15). A failed probe at start stops the pool from starting; a
+//! failed probe after a job faults the pool, which then refuses all work.
 
 use std::any::Any;
 use std::collections::VecDeque;
@@ -22,13 +27,13 @@ use std::fmt;
 use std::io;
 use std::num::NonZeroUsize;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError, oneshot};
 
-use super::CancelToken;
+use super::{CancelToken, FlushProbe, probe_flush_to_zero};
 
 /// Where a job waits for a worker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -59,6 +64,9 @@ pub enum JobError {
     Panicked,
     /// The pool shut down before a worker took it.
     ShutDown,
+    /// Its worker's floating-point mode was found to flush subnormals, after this job or an
+    /// earlier one, so its value, if it ran, was withheld and the pool is faulted.
+    FloatingPointMode,
 }
 
 impl fmt::Display for JobError {
@@ -67,6 +75,7 @@ impl fmt::Display for JobError {
             Self::Cancelled => "the job was cancelled",
             Self::Panicked => "the job panicked",
             Self::ShutDown => "the cpu pool shut down before the job ran",
+            Self::FloatingPointMode => "a cpu worker's floating-point mode flushes subnormals",
         })
     }
 }
@@ -87,6 +96,8 @@ pub enum SubmitJobError {
     QueueFull,
     /// The pool is shutting down.
     ShutDown,
+    /// A worker's floating-point mode was found to flush subnormals, so the pool refuses all work.
+    Faulted,
 }
 
 impl fmt::Display for SubmitJobError {
@@ -94,6 +105,9 @@ impl fmt::Display for SubmitJobError {
         f.write_str(match self {
             Self::QueueFull => "the cpu pool's queue is full",
             Self::ShutDown => "the cpu pool is shutting down",
+            Self::Faulted => {
+                "the cpu pool refuses work: a worker's floating-point mode flushes subnormals"
+            }
         })
     }
 }
@@ -113,6 +127,15 @@ pub enum StartPoolError {
         /// The operating system's error.
         source: io::Error,
     },
+    /// A worker's floating-point mode flushes subnormals, so the pool must not generate. Every
+    /// worker was stopped.
+    FloatingPointMode {
+        /// The failing worker's index: its thread is `hyperion-cpu-{worker}`. The lowest, if
+        /// several failed.
+        worker: usize,
+        /// What its probe saw.
+        probe: FlushProbe,
+    },
 }
 
 impl fmt::Display for StartPoolError {
@@ -124,6 +147,11 @@ impl fmt::Display for StartPoolError {
                 Semaphore::MAX_PERMITS
             ),
             Self::SpawnWorker { .. } => f.write_str("failed to spawn a cpu worker thread"),
+            Self::FloatingPointMode { worker, probe } => write!(
+                f,
+                "the floating-point mode of the cpu worker hyperion-cpu-{worker} {probe}, so the \
+                 pool refuses to generate"
+            ),
         }
     }
 }
@@ -131,7 +159,7 @@ impl fmt::Display for StartPoolError {
 impl Error for StartPoolError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::CapacityTooLarge { .. } => None,
+            Self::CapacityTooLarge { .. } | Self::FloatingPointMode { .. } => None,
             Self::SpawnWorker { source } => Some(source),
         }
     }
@@ -196,7 +224,9 @@ impl PoolCounters {
         self.running
     }
 
-    /// Jobs that ran to completion and returned a value.
+    /// Jobs that ran to completion and returned a value, including a value then withheld because
+    /// the probe after the job found the worker flushing subnormals. Jobs a faulted pool refused
+    /// unrun are counted in no total.
     #[must_use]
     pub fn completed(&self) -> u64 {
         self.completed
@@ -220,6 +250,18 @@ impl PoolCounters {
 /// [`CpuPool::shutdown`] is the teardown: it drops queued jobs and joins the workers. Dropping the
 /// pool without it only tells the workers to stop; they finish the job in hand and exit on their
 /// own, and jobs still queued then report [`JobError::ShutDown`].
+///
+/// Each worker probes its floating-point mode ([`probe_flush_to_zero`]) before its first job and
+/// after every job, before the reply. A worker that fails at start keeps the pool from starting;
+/// one that fails after a job answers that job [`JobError::FloatingPointMode`] and faults the pool:
+/// every later submission is refused with [`SubmitJobError::Faulted`], and jobs already queued
+/// answer [`JobError::FloatingPointMode`] unrun. Nothing runs on a worker between jobs, so the two
+/// probes cover every job.
+///
+/// The server loads no native library today. Code that loads one must probe the loading thread
+/// (a library's constructor runs there, and threads created after it inherit its mode) and then
+/// every worker, by a job on each, before trusting the pool again, since a library may write the
+/// control register of any thread that calls into it.
 #[derive(Debug)]
 pub struct CpuPool {
     shared: Arc<Shared>,
@@ -236,12 +278,41 @@ impl CpuPool {
     ///
     /// # Errors
     ///
-    /// [`StartPoolError::CapacityTooLarge`] if a capacity exceeds [`Semaphore::MAX_PERMITS`], and
-    /// [`StartPoolError::SpawnWorker`] if a thread cannot be spawned.
+    /// [`StartPoolError::CapacityTooLarge`] if a capacity exceeds [`Semaphore::MAX_PERMITS`],
+    /// [`StartPoolError::SpawnWorker`] if a thread cannot be spawned, and
+    /// [`StartPoolError::FloatingPointMode`] if a worker's floating-point mode flushes subnormals.
     pub fn new(
         workers: NonZeroUsize,
         interactive_capacity: NonZeroUsize,
         bulk_capacity: NonZeroUsize,
+    ) -> Result<Self, StartPoolError> {
+        Self::with_probe(
+            workers,
+            interactive_capacity,
+            bulk_capacity,
+            probe_flush_to_zero,
+        )
+    }
+
+    /// [`CpuPool::new`] with `probe` in place of [`probe_flush_to_zero`], so that tests can make a
+    /// worker's probe fail.
+    ///
+    /// Waits until every worker has probed its thread, which takes microseconds.
+    ///
+    /// # Errors
+    ///
+    /// As [`CpuPool::new`]; [`StartPoolError::FloatingPointMode`] when `probe` reports flushing on
+    /// any worker, naming the lowest such worker, after every worker has been stopped and joined.
+    ///
+    /// # Panics
+    ///
+    /// If `probe` panics on a worker, which [`probe_flush_to_zero`] cannot. The other workers are
+    /// left running until the pool's shared state is dropped with them.
+    pub fn with_probe(
+        workers: NonZeroUsize,
+        interactive_capacity: NonZeroUsize,
+        bulk_capacity: NonZeroUsize,
+        probe: fn() -> FlushProbe,
     ) -> Result<Self, StartPoolError> {
         for capacity in [interactive_capacity, bulk_capacity] {
             if capacity.get() > Semaphore::MAX_PERMITS {
@@ -250,13 +321,16 @@ impl CpuPool {
                 });
             }
         }
-        let shared = Arc::new(Shared::default());
+        let shared = Arc::new(Shared::new(probe));
         let mut handles = Vec::with_capacity(workers.get());
+        // Bounded by the number of workers, each of which sends exactly one report.
+        let (report, reports) = mpsc::sync_channel(workers.get());
         for index in 0..workers.get() {
             let worker_shared = Arc::clone(&shared);
+            let worker_report = report.clone();
             let spawned = thread::Builder::new()
                 .name(format!("hyperion-cpu-{index}"))
-                .spawn(move || work(&worker_shared));
+                .spawn(move || start_worker(index, &worker_shared, worker_report));
             match spawned {
                 Ok(handle) => handles.push(handle),
                 Err(source) => {
@@ -265,6 +339,26 @@ impl CpuPool {
                     return Err(StartPoolError::SpawnWorker { source });
                 }
             }
+        }
+        drop(report);
+        let mut failed: Option<(usize, FlushProbe)> = None;
+        for _ in 0..workers.get() {
+            let (index, result) = reports
+                .recv()
+                .expect("each worker sends its report and drops its sender before working, so the channel closes early only if a probe panicked");
+            if result.flushes() && failed.is_none_or(|(lowest, _)| index < lowest) {
+                failed = Some((index, result));
+            }
+        }
+        if let Some((worker, probe)) = failed {
+            drop(shared.stop());
+            // The workers are idle or already gone, so these joins return at once. A worker that
+            // panicked could only have done so outside any job, and the error returned already
+            // says that the pool is unusable.
+            for handle in handles {
+                let _ = handle.join();
+            }
+            return Err(StartPoolError::FloatingPointMode { worker, probe });
         }
         Ok(Self {
             shared,
@@ -281,8 +375,9 @@ impl CpuPool {
     ///
     /// # Errors
     ///
-    /// [`SubmitJobError::QueueFull`] if the queue is full, and [`SubmitJobError::ShutDown`] once
-    /// [`CpuPool::shutdown`] has begun.
+    /// [`SubmitJobError::QueueFull`] if the queue is full, [`SubmitJobError::ShutDown`] once
+    /// [`CpuPool::shutdown`] has begun, and [`SubmitJobError::Faulted`] once a worker's probe has
+    /// failed.
     pub fn try_submit<F, T>(
         &self,
         priority: Priority,
@@ -293,6 +388,9 @@ impl CpuPool {
         F: FnOnce(&CancelToken) -> T + Send + 'static,
         T: Send + 'static,
     {
+        if self.shared.is_faulted() {
+            return Err(SubmitJobError::Faulted);
+        }
         let permit = Arc::clone(self.semaphore(priority))
             .try_acquire_owned()
             .map_err(|error| match error {
@@ -309,7 +407,8 @@ impl CpuPool {
     /// # Errors
     ///
     /// [`SubmitJobError::ShutDown`] once [`CpuPool::shutdown`] has begun, including while this
-    /// waits.
+    /// waits, and [`SubmitJobError::Faulted`] once a worker's probe has failed, checked before it
+    /// waits and again once it has a place.
     pub async fn submit<F, T>(
         &self,
         priority: Priority,
@@ -320,6 +419,9 @@ impl CpuPool {
         F: FnOnce(&CancelToken) -> T + Send + 'static,
         T: Send + 'static,
     {
+        if self.shared.is_faulted() {
+            return Err(SubmitJobError::Faulted);
+        }
         let permit = Arc::clone(self.semaphore(priority))
             .acquire_owned()
             .await
@@ -404,8 +506,10 @@ impl CpuPool {
         };
         let refused = {
             let mut state = self.shared.lock();
-            if state.stopping {
-                Some(queued)
+            if state.faulted {
+                Some((queued, SubmitJobError::Faulted))
+            } else if state.stopping {
+                Some((queued, SubmitJobError::ShutDown))
             } else {
                 match priority {
                     Priority::Interactive => state.interactive.push_back(queued),
@@ -415,8 +519,10 @@ impl CpuPool {
                 None
             }
         };
-        if refused.is_some() {
-            return Err(SubmitJobError::ShutDown);
+        if let Some((queued, error)) = refused {
+            // Dropped outside the lock, as `shutdown` drops queued jobs.
+            drop(queued);
+            return Err(error);
         }
         self.shared.available.notify_one();
         Ok(receiver)
@@ -441,10 +547,12 @@ impl Drop for CpuPool {
 }
 
 /// What the pool and its workers share.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
     available: Condvar,
+    /// Checks a worker's floating-point mode: [`probe_flush_to_zero`] except in tests.
+    probe: fn() -> FlushProbe,
 }
 
 #[derive(Debug, Default)]
@@ -452,6 +560,8 @@ struct State {
     interactive: VecDeque<Queued>,
     bulk: VecDeque<Queued>,
     stopping: bool,
+    /// A worker's probe failed after a job: no job runs and no submission is taken any more.
+    faulted: bool,
     counters: PoolCounters,
 }
 
@@ -463,6 +573,18 @@ impl State {
 }
 
 impl Shared {
+    fn new(probe: fn() -> FlushProbe) -> Self {
+        Self {
+            state: Mutex::default(),
+            available: Condvar::new(),
+            probe,
+        }
+    }
+
+    fn is_faulted(&self) -> bool {
+        self.lock().faulted
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         // Every critical section is a few queue and counter updates that cannot panic part-way,
         // so a poisoned lock still guards consistent state.
@@ -482,8 +604,9 @@ impl Shared {
         dropped
     }
 
-    /// Waits for the next job, interactive first, or `None` once the pool is stopping.
-    fn next(&self) -> Option<Queued> {
+    /// Waits for the next job, interactive first, or `None` once the pool is stopping, with
+    /// whether it may run or must be refused because the pool is faulted.
+    fn next(&self) -> Option<(Queued, Admission)> {
         let mut state = self.lock();
         loop {
             if state.stopping {
@@ -496,7 +619,12 @@ impl Shared {
             if let Some(queued) = next {
                 state.refresh_depths();
                 state.counters.running += 1;
-                return Some(queued);
+                let admission = if state.faulted {
+                    Admission::Refuse
+                } else {
+                    Admission::Run
+                };
+                return Some((queued, admission));
             }
             state = self
                 .available
@@ -514,8 +642,50 @@ impl Shared {
             Outcome::Completed => state.counters.completed += 1,
             Outcome::Cancelled => state.counters.cancelled += 1,
             Outcome::Panicked(_) => state.counters.panicked += 1,
+            Outcome::Refused => {}
         }
     }
+
+    /// Probes the calling worker after a job and, if its mode flushes, faults the pool, logging
+    /// the fault the first time only. Says whether the job's result may leave the worker.
+    fn probe_after_job(&self) -> Release {
+        let probe = (self.probe)();
+        if !probe.flushes() {
+            return Release::Send;
+        }
+        let first = {
+            let mut state = self.lock();
+            !std::mem::replace(&mut state.faulted, true)
+        };
+        if first {
+            let current = thread::current();
+            tracing::error!(
+                thread = current.name().unwrap_or("unnamed"),
+                %probe,
+                "a cpu worker's floating-point mode flushes subnormals; the server refuses to \
+                 generate"
+            );
+        }
+        Release::Withhold
+    }
+}
+
+/// Whether a job taken from a queue may run, by the pool's fault flag when it was taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admission {
+    /// The pool is sound: run the job.
+    Run,
+    /// The pool is faulted: answer [`JobError::FloatingPointMode`] without running it.
+    Refuse,
+}
+
+/// Whether a job's result may be sent, by the probe run after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Release {
+    /// The mode keeps subnormals: send the result.
+    Send,
+    /// The mode flushes, or the pool is faulted: answer [`JobError::FloatingPointMode`] instead.
+    Withhold,
 }
 
 /// A job waiting in a queue, with the permit that holds its place.
@@ -541,12 +711,17 @@ enum Outcome {
     Completed,
     Cancelled,
     Panicked(String),
+    /// Not run, because the pool is faulted. Counted in no total.
+    Refused,
 }
 
 /// A job with its type erased, so that one queue holds jobs of every result type.
 trait Runnable: Send {
-    /// Runs the job, or skips it if cancelled, then calls `finish` and sends the reply.
-    fn run(self: Box<Self>, finish: &dyn Fn(&Outcome));
+    /// Runs the job, or skips it if `admission` refuses it or the job is cancelled, then calls
+    /// `finish` and sends the reply. `finish` records the outcome and probes the worker; if it
+    /// answers [`Release::Withhold`], the reply is [`JobError::FloatingPointMode`] whatever the
+    /// job returned.
+    fn run(self: Box<Self>, admission: Admission, finish: &dyn Fn(&Outcome) -> Release);
 }
 
 struct Job<F, T> {
@@ -560,9 +735,11 @@ where
     F: FnOnce(&CancelToken) -> T + Send,
     T: Send,
 {
-    fn run(self: Box<Self>, finish: &dyn Fn(&Outcome)) {
+    fn run(self: Box<Self>, admission: Admission, finish: &dyn Fn(&Outcome) -> Release) {
         let Self { token, work, reply } = *self;
-        let (result, outcome) = if token.is_cancelled() {
+        let (result, outcome) = if admission == Admission::Refuse {
+            (Err(JobError::FloatingPointMode), Outcome::Refused)
+        } else if token.is_cancelled() {
             (Err(JobError::Cancelled), Outcome::Cancelled)
         } else {
             match panic::catch_unwind(AssertUnwindSafe(|| work(&token))) {
@@ -573,8 +750,16 @@ where
                 ),
             }
         };
-        finish(&outcome);
-        reply.send(result);
+        match finish(&outcome) {
+            Release::Send => reply.send(result),
+            Release::Withhold => {
+                // A value computed under a flushing mode must not leave the worker. Answered
+                // before the value is dropped, so that a panic in its drop cannot change the
+                // answer.
+                reply.send(Err(JobError::FloatingPointMode));
+                drop(result);
+            }
+        }
     }
 }
 
@@ -600,14 +785,32 @@ impl<T> Drop for Reply<T> {
     }
 }
 
+/// A worker's life: probe the thread, report to the constructor, and work if the probe passed.
+fn start_worker(index: usize, shared: &Shared, report: mpsc::SyncSender<(usize, FlushProbe)>) {
+    let probe = (shared.probe)();
+    // The channel has room for every worker's report. The send fails only when the constructor
+    // has already returned because a later thread could not be spawned; the pool is then
+    // stopping, and nobody needs the report.
+    let _ = report.send((index, probe));
+    // Dropped before working, so that the constructor's wait ends even if another worker's probe
+    // panics instead of reporting.
+    drop(report);
+    if !probe.flushes() {
+        work(shared);
+    }
+}
+
 /// A worker's loop: take a job, run it, repeat until the pool stops.
 fn work(shared: &Shared) {
-    while let Some(Queued {
-        permit,
-        priority,
-        enqueued,
-        job,
-    }) = shared.next()
+    while let Some((
+        Queued {
+            permit,
+            priority,
+            enqueued,
+            job,
+        },
+        admission,
+    )) = shared.next()
     {
         // The queue slot is free as soon as a worker holds the job.
         drop(permit);
@@ -623,17 +826,26 @@ fn work(shared: &Shared) {
         // in the drop of a job skipped unrun, or of a value nobody waits for any more. Both come
         // after the job is counted and answered, so the worker need only go on to the next.
         let escaped = panic::catch_unwind(AssertUnwindSafe(|| {
-            job.run(&|outcome| {
+            job.run(admission, &|outcome| {
                 span.record("run_ms", millis(started.elapsed()));
                 match outcome {
                     Outcome::Panicked(message) => {
                         tracing::error!(panic = %message, "a job panicked");
                     }
-                    Outcome::Completed | Outcome::Cancelled => {
+                    Outcome::Completed | Outcome::Cancelled | Outcome::Refused => {
                         tracing::debug!(outcome = ?outcome, "job finished");
                     }
                 }
+                // Probed before the job is counted, so that a requester who sees it counted also
+                // sees the pool faulted. A refused job ran nothing, and the pool is faulted already.
+                let release = match outcome {
+                    Outcome::Refused => Release::Withhold,
+                    Outcome::Completed | Outcome::Cancelled | Outcome::Panicked(_) => {
+                        shared.probe_after_job()
+                    }
+                };
                 shared.finish(outcome);
+                release
             });
         }));
         if let Err(payload) = escaped {
@@ -1118,6 +1330,169 @@ mod tests {
         assert_eq!(result(done).await, Ok(()));
         // The worker exits after the job in hand, and its queued work goes with it.
         assert_eq!(result(queued).await, Err(JobError::ShutDown));
+    }
+
+    fn probing_pool(workers: usize, probe: fn() -> FlushProbe) -> Result<CpuPool, StartPoolError> {
+        let n = |value| NonZeroUsize::new(value).unwrap();
+        CpuPool::with_probe(n(workers), n(4), n(4), probe)
+    }
+
+    /// Flushes on the workers `hyperion-cpu-1` and `hyperion-cpu-2` only.
+    fn flushes_on_workers_1_and_2() -> FlushProbe {
+        match thread::current().name() {
+            Some("hyperion-cpu-1") => FlushProbe::FLUSHES_BOTH,
+            Some("hyperion-cpu-2") => FlushProbe::FLUSHES_INPUTS,
+            _ => FlushProbe::KEEPS_SUBNORMALS,
+        }
+    }
+
+    #[test]
+    fn a_pool_whose_probe_fails_at_start_refuses_to_start() {
+        let error = probing_pool(4, flushes_on_workers_1_and_2).unwrap_err();
+        let StartPoolError::FloatingPointMode { worker, probe } = error else {
+            panic!("expected a floating-point mode error, got {error:?}");
+        };
+        assert_eq!((worker, probe), (1, FlushProbe::FLUSHES_BOTH));
+        assert_eq!(
+            error.to_string(),
+            "the floating-point mode of the cpu worker hyperion-cpu-1 flushes subnormal results to \
+             zero and reads subnormal operands as zero, so the pool refuses to generate"
+        );
+        // Worker 0 passed, and is stopped with the rest.
+        let only = probing_pool(1, flushes_on_workers_1_and_2);
+        assert!(only.is_ok(), "{only:?}");
+    }
+
+    #[test]
+    fn the_real_probe_lets_the_pool_start() {
+        assert!(probing_pool(2, probe_flush_to_zero).is_ok());
+    }
+
+    /// Passes for its first two calls (the worker's start and its first job), then flushes.
+    fn flushes_from_the_third_call() -> FlushProbe {
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+            FlushProbe::KEEPS_SUBNORMALS
+        } else {
+            FlushProbe::FLUSHES_OUTPUTS
+        }
+    }
+
+    #[tokio::test]
+    async fn a_job_after_which_the_probe_fails_answers_floating_point_mode_and_faults_the_pool() {
+        let pool = probing_pool(1, flushes_from_the_third_call).unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        // The first job runs while the next two queue behind it.
+        let held = hold(&pool).await;
+        let flushed = pool
+            .try_submit(
+                Priority::Interactive,
+                CancelToken::new(),
+                record(&log, "flushed"),
+            )
+            .unwrap();
+        let queued = pool
+            .submit(Priority::Bulk, CancelToken::new(), record(&log, "queued"))
+            .await
+            .unwrap();
+        // Its probe is the second call, which passes.
+        held.release().await;
+        // The next job runs, and the probe after it fails: its value is withheld.
+        assert_eq!(result(flushed).await, Err(JobError::FloatingPointMode));
+        // The job queued behind it is refused unrun.
+        assert_eq!(result(queued).await, Err(JobError::FloatingPointMode));
+        assert_eq!(*log.lock().unwrap(), ["flushed"]);
+        assert_eq!(
+            pool.try_submit(Priority::Interactive, CancelToken::new(), |_| ())
+                .unwrap_err(),
+            SubmitJobError::Faulted
+        );
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                counters.running(),
+                counters.completed(),
+                counters.queued_bulk()
+            ),
+            (0, 2, 0)
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// Passes at the worker's start, then flushes (a twin of [`flushes_from_the_second_call`],
+    /// whose counter another test owns).
+    fn flushes_from_the_second_call_too() -> FlushProbe {
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1 {
+            FlushProbe::KEEPS_SUBNORMALS
+        } else {
+            FlushProbe::FLUSHES_BOTH
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bulk_submit_waiting_when_the_pool_faults_is_refused() {
+        let n = |value| NonZeroUsize::new(value).unwrap();
+        let pool = CpuPool::with_probe(n(1), n(4), n(1), flushes_from_the_second_call_too).unwrap();
+        let Held { release, done } = hold(&pool).await;
+        let queued = pool
+            .submit(Priority::Bulk, CancelToken::new(), |_| "queued")
+            .await
+            .unwrap();
+        let mut waiting = pin!(pool.submit(Priority::Bulk, CancelToken::new(), |_| "waiting"));
+        assert!(poll!(&mut waiting).is_pending(), "the bulk queue is full");
+        // The probe after the held job faults the pool before the worker takes the queued job,
+        // which frees the place the waiting submission then finds refused.
+        release.send(()).unwrap();
+        assert_eq!(result(done).await, Err(JobError::FloatingPointMode));
+        assert_eq!(result(queued).await, Err(JobError::FloatingPointMode));
+        assert_eq!(
+            timeout(WAIT, waiting)
+                .await
+                .expect("timed out waiting for the refusal")
+                .unwrap_err(),
+            SubmitJobError::Faulted
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// Passes at the worker's start, then flushes.
+    fn flushes_from_the_second_call() -> FlushProbe {
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        if CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1 {
+            FlushProbe::KEEPS_SUBNORMALS
+        } else {
+            FlushProbe::FLUSHES_INPUTS
+        }
+    }
+
+    #[tokio::test]
+    async fn a_faulted_pool_refuses_submissions() {
+        let pool = probing_pool(1, flushes_from_the_second_call).unwrap();
+        // A panicking job is probed too, and the fault outranks the panic.
+        let panicking = pool
+            .try_submit(Priority::Interactive, CancelToken::new(), |_| -> u32 {
+                panic!("a deliberate panic in a job");
+            })
+            .unwrap();
+        assert_eq!(result(panicking).await, Err(JobError::FloatingPointMode));
+        for priority in [Priority::Interactive, Priority::Bulk] {
+            assert_eq!(
+                pool.try_submit(priority, CancelToken::new(), |_| ())
+                    .unwrap_err(),
+                SubmitJobError::Faulted,
+                "{priority:?}"
+            );
+            assert_eq!(
+                pool.submit(priority, CancelToken::new(), |_| ())
+                    .await
+                    .unwrap_err(),
+                SubmitJobError::Faulted,
+                "{priority:?}"
+            );
+        }
+        assert_eq!(pool.counters().panicked(), 1);
+        pool.shutdown().await.unwrap();
     }
 
     #[tokio::test]

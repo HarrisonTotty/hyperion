@@ -1,0 +1,33 @@
+[package]
+name = "hyperion-surface"
+description = "HYPERION's shared height function, run bit for bit alike by the server and the client."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+# A `cdylib` as well, which `just gen-surface` builds for wasm32-unknown-unknown into the client's
+# WebAssembly module (plan R04, T10.b); the sim links the `lib`.
+crate-type = ["lib", "cdylib"]
+# The library has no benchmarks, and libtest's harness rejects Criterion's arguments.
+bench = false
+
+[dependencies]
+# Its only dependency on every target: `math`, `rng`, `units` and the generator version. It never
+# depends on the sim, which depends on it, and a new dependency is a reviewed change (plan R04,
+# Risks).
+hyperion-base.workspace = true
+
+# The client module's exports (`src/wasm.rs`), on the browser target alone, so that the sim's wasip1
+# and native builds, which link this crate, never compile it (plan R04, Design note 16).
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+wasm-bindgen.workspace = true
+
+# The browser target's harness, on that target alone, never on `cfg(target_arch = "wasm32")`, which
+# would build it into the wasip1 runs too (plan R04, Design note 12).
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test.workspace = true
+
+[lints]
+workspace = true

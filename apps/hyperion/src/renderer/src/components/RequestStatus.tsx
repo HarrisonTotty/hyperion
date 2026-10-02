@@ -37,6 +37,14 @@ const REFUSALS: ReadonlySet<string> = new Set<ErrorCode>([
 ]);
 
 /**
+ * Whether the server refused a request for what it asked (a refusal, plain `--text`) rather than
+ * because anything failed (a fault): the split every request status uses.
+ */
+export function isRefusal(code: string): boolean {
+  return REFUSALS.has(code);
+}
+
+/**
  * The words for a request state that is not `ok` or `idle`, and how it stands; `null` for a state
  * that shows nothing.
  *

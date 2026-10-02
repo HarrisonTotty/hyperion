@@ -6,16 +6,20 @@
     reason = "each test binary compiles this module and uses its own subset of the helpers"
 )]
 
+pub mod scene;
+
 use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use axum::serve::ListenerExt;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
-    ClientMessage, CreateUniverseRequest, RequestBody, RequestError, RequestId, ResponseBody,
-    SeedHex, ServerMessage, UniverseInfo,
+    ClientMessage, CreateUniverseRequest, NotificationBody, RequestBody, RequestError, RequestId,
+    ResponseBody, SeedHex, ServerMessage, UniverseInfo,
 };
 use hyperion_server::universe::SequenceEntropy;
 use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats};
@@ -109,6 +113,21 @@ pub struct TestServer {
     stop_serving: Option<oneshot::Sender<()>>,
     serving: Option<JoinHandle<std::io::Result<()>>>,
     temp_dir: Option<TempDir>,
+    /// The low-water mark of the socket accepted last (rendering plan R03, R03.T10.a).
+    lowat: Arc<AtomicU32>,
+}
+
+/// A socket's `TCP_NOTSENT_LOWAT`, 0 where the option does not exist.
+fn read_lowat(tcp: &tokio::net::TcpStream) -> u32 {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    return socket2::SockRef::from(tcp)
+        .tcp_notsent_lowat()
+        .expect("the option can be read");
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = tcp;
+        0
+    }
 }
 
 impl TestServer {
@@ -134,6 +153,12 @@ impl TestServer {
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        let lowat = Arc::new(AtomicU32::new(0));
+        let tapped = Arc::clone(&lowat);
+        let listener = listener.tap_io(move |tcp| {
+            hyperion_server::tap_socket(tcp);
+            tapped.store(read_lowat(tcp), Ordering::Release);
+        });
         let server = patiently("starting the server", Server::start(config))
             .await
             .expect("the server starts");
@@ -158,7 +183,14 @@ impl TestServer {
             stop_serving: Some(stop_serving),
             serving: Some(serving),
             temp_dir: None,
+            lowat,
         }
+    }
+
+    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any
+    /// or where the option does not exist.
+    pub fn accepted_lowat(&self) -> u32 {
+        self.lowat.load(Ordering::Acquire)
     }
 
     /// The WebSocket URL.
@@ -360,6 +392,48 @@ pub fn pretty_json_frame(compact: &str) -> String {
     out
 }
 
+/// A bulk frame's header (rendering plan R03, Design note 10): 24 bytes, little-endian, after the
+/// magic `HYPB`, format 1 and the header's own length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BinaryHeader {
+    /// The request the chunk answers.
+    pub request: u32,
+    /// The chunk's index, from 0.
+    pub index: u32,
+    /// The transfer's chunk count.
+    pub count: u32,
+    /// The payload's length in bytes.
+    pub payload_len: u32,
+}
+
+impl BinaryHeader {
+    /// The header of `frame`, checked, and its payload.
+    fn split(frame: &[u8]) -> (Self, Vec<u8>) {
+        assert!(frame.len() >= 24, "a bulk frame holds its 24-byte header");
+        assert_eq!(&frame[0..4], b"HYPB", "the magic");
+        assert_eq!((frame[4], frame[5]), (1, 0), "format 1, reserved 0");
+        assert_eq!(
+            u16::from_le_bytes([frame[6], frame[7]]),
+            24,
+            "the header's length"
+        );
+        let word = |at: usize| u32::from_le_bytes(frame[at..at + 4].try_into().expect("4 bytes"));
+        let header = Self {
+            request: word(8),
+            index: word(12),
+            count: word(16),
+            payload_len: word(20),
+        };
+        let payload = frame[24..].to_vec();
+        assert_eq!(
+            usize::try_from(header.payload_len).expect("a u32 fits a usize"),
+            payload.len(),
+            "the payload's stated length"
+        );
+        (header, payload)
+    }
+}
+
 /// A WebSocket client speaking `hyperion-protocol`.
 #[derive(Debug)]
 pub struct TestClient {
@@ -412,6 +486,33 @@ impl TestClient {
         }
     }
 
+    /// The next message from the server, which must be a `notification`: its subscription and
+    /// body (plan 12's P12.T9, built by rendering plan R03's R03.T5.b). Panics on any other
+    /// message, since a test that expects one should read it itself.
+    pub async fn next_notification(&mut self) -> (u32, NotificationBody) {
+        match self.next_message().await {
+            ServerMessage::Notification { subscription, body } => (subscription, body),
+            other => panic!("expected a notification, got {other:?}"),
+        }
+    }
+
+    /// The next frame from the server, which must be a bulk frame (rendering plan R03, R03.T10.b):
+    /// its header, read and checked, and its payload. Panics on a text frame, since a test that
+    /// expects one should read it itself.
+    pub async fn next_binary(&mut self) -> (BinaryHeader, Vec<u8>) {
+        loop {
+            let frame = patiently("waiting for a binary frame", self.socket.next())
+                .await
+                .expect("the server closed the connection")
+                .expect("the connection is healthy");
+            match frame {
+                Message::Binary(bytes) => return BinaryHeader::split(&bytes),
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("expected a binary frame, got {other:?}"),
+            }
+        }
+    }
+
     /// Says hello and returns the server's answer.
     pub async fn hello(&mut self) -> ServerMessage {
         self.send(&ClientMessage::Hello {
@@ -456,6 +557,34 @@ impl TestClient {
                 error,
             } if answered == id => Err(error),
             other => panic!("expected the answer to request {}, got {other:?}", id.0),
+        }
+    }
+
+    /// Makes a request and waits for its terminal message as [`TestClient::request`] does, keeping
+    /// the notifications that arrive before it, in order, for a client with subscriptions open.
+    pub async fn request_among_notifications(
+        &mut self,
+        body: RequestBody,
+    ) -> (
+        Result<ResponseBody, RequestError>,
+        Vec<(u32, NotificationBody)>,
+    ) {
+        let id = self.send_request(body).await;
+        let mut notifications = Vec::new();
+        loop {
+            match self.next_message().await {
+                ServerMessage::Response { id: answered, body } if answered == id => {
+                    return (Ok(body), notifications);
+                }
+                ServerMessage::RequestError {
+                    id: answered,
+                    error,
+                } if answered == id => return (Err(error), notifications),
+                ServerMessage::Notification { subscription, body } => {
+                    notifications.push((subscription, body));
+                }
+                other => panic!("expected the answer to request {}, got {other:?}", id.0),
+            }
         }
     }
 

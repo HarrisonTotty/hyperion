@@ -594,7 +594,7 @@ fn a_moon_is_at_its_planet_s_position_plus_its_own_offset() {
                 let centre = system.position_at(ctx, parent, t).unwrap().unwrap();
                 let record = system.body_at(ctx, body.index(), t).unwrap();
                 let expected = match record.orbit().ok() {
-                    Some(orbit) => centre.translated(orbit.elements().relative_state_at(t).0),
+                    Some(orbit) => centre.translated(orbit.trajectory().relative_state_at(t).0),
                     None => centre,
                 };
                 for (x, y) in at.metres().into_iter().zip(expected.metres()) {
@@ -651,7 +651,7 @@ fn a_body_is_at_its_host_s_position_plus_its_orbit() {
                     continue;
                 };
                 let zone = system.zone(body.host()).unwrap();
-                let (offset, _) = orbit.elements().relative_state_at(t);
+                let (offset, _) = orbit.trajectory().relative_state_at(t);
                 let expected = epoch.centre(members_of(zone)).translated(offset);
                 let got = system.position_at(ctx, body.index(), t).unwrap().unwrap();
                 for (x, y) in got.metres().into_iter().zip(expected.metres()) {
@@ -661,6 +661,117 @@ fn a_body_is_at_its_host_s_position_plus_its_orbit() {
         }
     }
     assert!(pairs > 10, "{pairs} pair zones");
+}
+
+/// R03.T3: `state_at`'s position is `position_at`'s bit for bit, and it is `None` exactly where
+/// `position_at` is.
+#[test]
+fn a_state_s_position_is_position_at_s_bit_for_bit() {
+    let mut states = 0;
+    for (ctx, system) in whole().iter().take(200) {
+        for t in window() {
+            for index in system
+                .bodies()
+                .iter()
+                .map(Body::index)
+                .chain(system.belts().iter().map(Belt::index))
+            {
+                let position = system.position_at(ctx, index, t).unwrap();
+                let state = system.state_at(ctx, index, t).unwrap();
+                assert_eq!(position.is_some(), state.is_some());
+                if let (Some(position), Some((same, _))) = (position, state) {
+                    for (x, y) in position.metres().into_iter().zip(same.metres()) {
+                        assert_same_bits(x, y);
+                    }
+                    states += 1;
+                }
+            }
+        }
+    }
+    assert!(states > 1_000, "{states} states");
+}
+
+/// R03.T3: the host's velocity on `state_at`'s walk is `star_states_at`'s bit for bit for a
+/// single star's zone, as `centre` is `star_positions_at`'s: the two copies of the walk agree.
+#[test]
+fn a_star_s_zone_moves_with_star_states_at_bit_for_bit() {
+    let mut states = Vec::new();
+    let mut stars = 0;
+    for (ctx, system) in generated() {
+        for t in window() {
+            let epoch = Epoch::new(system, ctx, t);
+            crate::stellar::multiplicity::star_states_at(ctx.hierarchy(), t, &mut states);
+            for (n, (_, _, velocity)) in states.iter().enumerate() {
+                let centre = epoch.centre_velocity(1 << n);
+                for (x, y) in centre
+                    .metres_per_second()
+                    .into_iter()
+                    .zip(velocity.metres_per_second())
+                {
+                    assert_same_bits(x, y);
+                }
+                stars += 1;
+            }
+        }
+    }
+    assert!(stars > 1_000, "{stars} stars");
+}
+
+/// R03.T3: a body's velocity is the time derivative of its position, by central differences over
+/// a second, to 10⁻⁶ relative, with a floor for the positions' own rounding, a few ε of the widest
+/// orbit on its path (the host's pairs' and its own apocentres, and its distance), which a
+/// difference over 2 s carries into the velocity.
+#[test]
+fn a_body_s_velocity_is_the_derivative_of_its_position() {
+    let second = Span::from_seconds(1);
+    let mut checked = 0;
+    for (ctx, system) in whole().iter().take(200) {
+        let pairs = ctx
+            .hierarchy()
+            .pairs()
+            .map(|(_, orbit)| orbit.apoapsis().value())
+            .fold(0.0, f64::max);
+        for t in [
+            ClockWindow::START.checked_add(second).unwrap(),
+            UniverseTime::EPOCH,
+            ClockWindow::END.checked_sub(second).unwrap(),
+        ] {
+            for body in system.bodies() {
+                let Some((at, velocity)) = system.state_at(ctx, body.index(), t).unwrap() else {
+                    continue;
+                };
+                let (Some(early), Some(late)) = (
+                    system
+                        .position_at(ctx, body.index(), t.checked_sub(second).unwrap())
+                        .unwrap(),
+                    system
+                        .position_at(ctx, body.index(), t.checked_add(second).unwrap())
+                        .unwrap(),
+                ) else {
+                    continue;
+                };
+                let record = system.body_at(ctx, body.index(), t).unwrap();
+                let own = record
+                    .orbit()
+                    .ok()
+                    .map_or(0.0, |orbit| orbit.elements().apoapsis().value());
+                let reach = pairs.max(own).max(at.distance_from_origin().value());
+                let floor = 4.0 * f64::EPSILON * reach;
+                let v = velocity.metres_per_second();
+                let speed = velocity.speed().value();
+                for (axis, v_axis) in v.into_iter().enumerate() {
+                    let derivative = (late.metres()[axis] - early.metres()[axis]) / 2.0;
+                    assert!(
+                        (derivative - v_axis).abs() <= 1e-6 * speed + floor,
+                        "{:?} axis {axis} at {t}: {derivative} m/s by differences against {v_axis} m/s",
+                        body.index()
+                    );
+                }
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 1_000, "{checked} bodies checked");
 }
 
 #[test]
@@ -1382,4 +1493,344 @@ fn a_companion_widens_by_its_regime() {
     let middle = present_pericentre(q0, kept, 0.1 * 30.0_f64.sqrt());
     assert!((middle / q0 - 2.0_f64.sqrt()).abs() < 1e-9);
     assert!((present_pericentre(q0, kept, 0.0) / q0 - 2.0).abs() < 1e-12);
+}
+
+// P14.T45.a: evolving orbits on drift cells.
+
+/// Each record with a drift in the sample at `t`, with its system.
+fn drifting_records(
+    t: UniverseTime,
+) -> Vec<(&'static SystemContext, &'static PlanetarySystem, BodyRecord)> {
+    let mut found = Vec::new();
+    for (ctx, system) in whole() {
+        for record in system.snapshot_at(ctx, t).bodies() {
+            if record
+                .orbit()
+                .ok()
+                .is_some_and(|orbit| orbit.drift().is_some())
+            {
+                found.push((ctx, system, record.clone()));
+            }
+        }
+    }
+    found
+}
+
+/// A drift cell's tolerance about `orbit`, m.
+fn drift_tolerance(orbit: &KeplerElements) -> f64 {
+    crate::planetary::drift::DRIFT_TOLERANCE.value() + f64::EPSILON * orbit.apoapsis().value()
+}
+
+#[test]
+fn records_at_any_two_times_in_one_drift_cell_are_the_same() {
+    let records = drifting_records(UniverseTime::EPOCH);
+    assert!(records.len() > 100, "{} drifting records", records.len());
+    for (ctx, system, record) in records.iter().take(400) {
+        let orbit = record.orbit().ok().expect("drifting");
+        let start = orbit.drift().expect("drifting").reference();
+        let until = orbit.valid_until().expect("a cell ends inside the window");
+        let last = until.checked_sub(Span::new(0, 1).unwrap()).unwrap();
+        for t in [start, last] {
+            let again = system.body_at(ctx, record.index(), t).unwrap();
+            assert_eq!(
+                again.orbit().ok(),
+                Some(orbit),
+                "{:?} at {t}",
+                record.index()
+            );
+        }
+    }
+}
+
+/// The last instant a drifting record holds: a nanosecond before its `valid_until`, or the window's
+/// end for a cell cut there.
+fn last_instant_of(orbit: &BodyOrbit) -> UniverseTime {
+    orbit.valid_until().map_or(ClockWindow::END, |until| {
+        until.checked_sub(Span::new(0, 1).unwrap()).unwrap()
+    })
+}
+
+/// Records are one per cell where cells are halved or cut too: before the window's start, at the
+/// epoch and in the window's last cells, where the sample's 2¹⁶ s cells sit, at the reference, the
+/// middle and the last instant of each cell, bit for bit and whatever was asked before (P14.T45.a).
+#[test]
+fn records_of_halved_and_cut_drift_cells_are_the_same_at_every_time_in_them() {
+    use crate::planetary::drift::DRIFT_CELL_MAX_LOG2;
+    let before_start = ClockWindow::START
+        .checked_sub(Span::new(1 << 20, 0).unwrap())
+        .unwrap();
+    let near_end = ClockWindow::END
+        .checked_sub(Span::new(1 << 15, 0).unwrap())
+        .unwrap();
+    let (mut checked, mut short) = (0, 0);
+    for at in [before_start, UniverseTime::EPOCH, near_end] {
+        for (ctx, system, record) in drifting_records(at).iter().take(300) {
+            let orbit = record.orbit().ok().expect("drifting");
+            let reference = orbit.drift().expect("drifting").reference();
+            let last = last_instant_of(orbit);
+            let middle = reference
+                .checked_add(Span::new((last.seconds() - reference.seconds()) / 2, 0).unwrap())
+                .unwrap();
+            let times = [reference, middle, last, at];
+            let once = |t: &UniverseTime| {
+                system
+                    .body_at(ctx, record.index(), *t)
+                    .unwrap()
+                    .orbit()
+                    .ok()
+                    .copied()
+            };
+            assert_order_independent(&times, once);
+            for t in times {
+                assert_eq!(
+                    once(&t).as_ref(),
+                    Some(orbit),
+                    "{:?} at {t}",
+                    record.index()
+                );
+            }
+            if last.seconds() - reference.seconds() < (1 << DRIFT_CELL_MAX_LOG2) - 1 {
+                short += 1;
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 300, "{checked} records");
+    assert!(short > 20, "{short} halved or cut cells");
+}
+
+#[test]
+fn adjacent_drift_cells_join_within_the_tolerance() {
+    let mut joins = 0;
+    for (ctx, system, record) in drifting_records(UniverseTime::EPOCH).iter().take(400) {
+        let orbit = record.orbit().ok().expect("drifting");
+        let until = orbit.valid_until().expect("a cell ends inside the window");
+        let next = system.body_at(ctx, record.index(), until).unwrap();
+        let (Some(after), true) = (
+            next.orbit().ok(),
+            next.identity().state() == record.identity().state(),
+        ) else {
+            continue;
+        };
+        if after.drift().is_none() {
+            continue;
+        }
+        let last = until.checked_sub(Span::new(0, 1).unwrap()).unwrap();
+        let before = orbit.trajectory().relative_state_at(last).0;
+        let joined = after.trajectory().relative_state_at(last).0;
+        let apart = before
+            .metres()
+            .iter()
+            .zip(joined.metres())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            apart < drift_tolerance(orbit.elements()),
+            "{:?}: {apart} m at {until}",
+            record.index()
+        );
+        joins += 1;
+    }
+    assert!(joins > 100, "{joins} joins");
+}
+
+/// Every drifting record of the sample at the epoch, receding moons and circularising planets
+/// among them, moves at its position's derivative, to 10⁻⁹ of its speed beyond a central
+/// difference's own error (P14.T45.e).
+#[test]
+fn a_drifting_record_s_velocity_is_the_derivative_of_its_position() {
+    use crate::planetary::drift::tests::velocity_derivative_excess;
+    let (mut moons, mut eccentric) = (0, 0);
+    for (_, _, record) in drifting_records(UniverseTime::EPOCH) {
+        let orbit = record.orbit().ok().expect("drifting");
+        let drift = orbit.drift().expect("drifting");
+        let inside = drift
+            .reference()
+            .checked_add(Span::new(600, 0).unwrap())
+            .unwrap();
+        if orbit.valid_until().is_some_and(|until| until <= inside) {
+            continue;
+        }
+        let excess = velocity_derivative_excess(&orbit.trajectory(), inside);
+        assert!(excess < 1e-9, "{:?}: {excess:e}", record.index());
+        if matches!(record.identity().parent(), Some(OrbitHost::Body(_))) {
+            moons += 1;
+        }
+        if drift.eccentricity_rate_per_s() < 0.0 {
+            eccentric += 1;
+        }
+    }
+    assert!(
+        moons > 0 && eccentric > 0,
+        "{moons} moons, {eccentric} circularising"
+    );
+}
+
+/// The share of evolving orbits whose cells fall to the smallest size, over the sample at three
+/// times, counting the cells that neither a segment nor a state cut: under 10⁻³ (P14.T45.a).
+#[test]
+fn few_evolving_orbits_fall_to_the_smallest_drift_cell() {
+    use crate::planetary::drift::{DRIFT_CELL_MAX_LOG2, DRIFT_CELL_MIN_LOG2};
+    let (mut cells, mut floor) = (0_u32, 0_u32);
+    let mut sizes = [0_u32; DRIFT_CELL_MAX_LOG2 as usize + 1];
+    let later = UniverseTime::from_julian_years(500).expect("in the window");
+    for t in [ClockWindow::START, UniverseTime::EPOCH, later] {
+        for (_, _, record) in drifting_records(t) {
+            let orbit = record.orbit().ok().expect("drifting");
+            let start = orbit.drift().expect("drifting").reference();
+            let Some(until) = orbit.valid_until() else {
+                continue;
+            };
+            let length = until.seconds() - start.seconds();
+            let aligned = start.subsec_nanos() == 0
+                && until.subsec_nanos() == 0
+                && length > 0
+                && length.count_ones() == 1
+                && start.seconds() % length == 0;
+            if !aligned {
+                continue;
+            }
+            let log2 = length.trailing_zeros();
+            assert!((DRIFT_CELL_MIN_LOG2..=DRIFT_CELL_MAX_LOG2).contains(&log2));
+            sizes[usize::try_from(log2).unwrap()] += 1;
+            cells += 1;
+            if log2 == DRIFT_CELL_MIN_LOG2 {
+                floor += 1;
+            }
+        }
+    }
+    assert!(cells > 300, "{cells} cells");
+    assert!(
+        f64::from(floor) < 1e-3 * f64::from(cells),
+        "{floor} of {cells} cells at the floor; sizes by log2 {sizes:?}"
+    );
+}
+
+/// On the sample's drifting planets, the 16-point rule on each interval between the law's break
+/// points agrees with the 32-point rule on the same intervals to the drift module's tolerance:
+/// 10 µm along the orbit, plus 4 · 2⁻⁵² of the phase gained since the anchor (P14.T45.d).
+#[test]
+fn the_phase_integral_agrees_with_a_finer_rule_on_the_sample() {
+    let mut checked = 0;
+    let later = UniverseTime::from_julian_years(700).expect("in the window");
+    let earlier = UniverseTime::from_julian_years(-990).expect("in the window");
+    for (ctx, system, record) in drifting_records(UniverseTime::EPOCH) {
+        let Some(body) = system.body(record.index()) else {
+            continue;
+        };
+        if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+            continue;
+        }
+        let host = fate_host(ctx, system.zone_of(body));
+        let fate = system.fate_of(body, &host);
+        for t in [earlier, UniverseTime::EPOCH, later] {
+            let Some([by16, by32, gained, along]) = fate.quadrature_at(t) else {
+                continue;
+            };
+            let error = (by16 - by32).abs() * along;
+            let tolerance = 1e-5 + 4.0 * f64::EPSILON * gained.abs() * along;
+            assert!(
+                error <= tolerance,
+                "{:?} at {t}: {error:e} m against {tolerance:e} m",
+                record.index()
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 100, "{checked} checked");
+}
+
+/// A moon's record holds until its planet's next change of state or segment, not its planet's
+/// drift cell's end (P14.T45.a): a moon that does not recede has no drift and the same
+/// `valid_until` as its planet's `changes_at`.
+#[test]
+fn a_fixed_moon_does_not_follow_its_planet_s_drift_cells() {
+    let mut checked = 0;
+    for (ctx, system) in whole() {
+        let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        for record in snapshot.bodies() {
+            let (Some(orbit), BodyKind::Moon(_)) = (record.orbit().ok(), record.identity().kind())
+            else {
+                continue;
+            };
+            if orbit.drift().is_some() {
+                continue;
+            }
+            let Some(OrbitHost::Body(parent)) = record.identity().parent() else {
+                continue;
+            };
+            let Some(parent_orbit) = snapshot.body(parent).and_then(|p| p.orbit().ok()) else {
+                continue;
+            };
+            let Some(cell_end) = parent_orbit.drift().and(parent_orbit.valid_until()) else {
+                continue;
+            };
+            assert_ne!(orbit.valid_until(), Some(cell_end), "{:?}", record.index());
+            checked += 1;
+        }
+    }
+    assert!(checked > 10, "{checked} fixed moons of drifting planets");
+}
+
+/// Before the window's start a receding moon's record is cut at its planet's next change there,
+/// which `FateAt::changes_at` now states (RM1 validation, 2026-10-02): its cell ends no later, and
+/// its `valid_until` is that change. The sample holds no moon whose planet changes between −(H + L)
+/// and `START`, so the change is supplied here; `fate::tests` checks that the planet states it.
+#[test]
+fn a_receding_moon_s_record_before_the_window_is_cut_at_its_planet_s_change() {
+    let t = ClockWindow::START
+        .checked_sub(Span::new(1 << 22, 0).unwrap())
+        .unwrap();
+    let mut checked = 0;
+    for (ctx, system) in whole() {
+        for body in system.bodies() {
+            let Part::Moon(moon) = &body.part else {
+                continue;
+            };
+            let (alone, until) = moon_trajectory(ctx, moon, t, None);
+            let (Some(drift), Some(until)) = (alone.drift(), until) else {
+                continue;
+            };
+            assert!(drift.reference() <= t && t < until);
+            let change = t.checked_add(Span::new(1_000, 0).unwrap()).unwrap();
+            if change >= until {
+                continue;
+            }
+            let (cut, cut_until) = moon_trajectory(ctx, moon, t, Some(change));
+            assert_eq!(cut_until, Some(change), "{:?}", body.index);
+            assert!(cut.drift().is_some(), "{:?}", body.index);
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "{checked} receding moons");
+}
+
+/// The drift cell that straddles the clock window's start gives one record on each side of it,
+/// each holding no further than `START` from before it (P14.T45.a).
+#[test]
+fn the_window_s_start_cuts_a_drift_cell_on_both_sides() {
+    let before = ClockWindow::START
+        .checked_sub(Span::new(0, 1).unwrap())
+        .unwrap();
+    let mut checked = 0;
+    for (ctx, system, record) in drifting_records(ClockWindow::START).iter().take(200) {
+        let early = system.body_at(ctx, record.index(), before).unwrap();
+        let Some(orbit) = early.orbit().ok() else {
+            continue;
+        };
+        if orbit.drift().is_some() {
+            assert!(
+                orbit
+                    .valid_until()
+                    .is_some_and(|until| until <= ClockWindow::START),
+                "{:?}",
+                record.index()
+            );
+        }
+        let late = record.orbit().ok().unwrap();
+        assert!(late.drift().unwrap().reference() >= ClockWindow::START);
+        checked += 1;
+    }
+    assert!(checked > 50, "{checked}");
 }

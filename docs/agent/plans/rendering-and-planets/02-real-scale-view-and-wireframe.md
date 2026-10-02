@@ -71,7 +71,8 @@ In scope:
 - The kept precision and frame-change scenes, their automatic tests and their by-hand records.
 - Drafts of all nine items of "What the guide must gain" and their nomenclature entries.
 - The move of `vec3`, `frame` and the direction conventions out of `spatial/`.
-- The wireframe's own low setting and its benchmark at 1080p on the UHD 620.
+- The wireframe's own low setting and its benchmark at 1080p on the development machine (RTX 3080)
+  and, by the owner, on the UHD 620.
 
 Non-goals:
 
@@ -366,16 +367,34 @@ the call sites here change.
    strokes up to 2 px, with no `depthBiasClamp` (it must be 0 in compatibility mode). For
    `depth32float` the constant's unit is 2^(e − 23) of the primitive's largest depth, so −128 moves
    a face by 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵ of its distance, twice the 67 the 4 × 10⁻⁶ margin needs, since
-   backends may differ by 2×; the slope term covers a stroke's half-width and its one-pixel
-   antialiasing fringe. Bias is valid only on triangle topologies and is never set on a line pass.
-   The adapter carries it as `depthBiasAway { constant: 128, slopeScale: 2 }`, positive meaning
-   away, in one place, because Babylon's `zOffset` and `zOffsetUnits` are already negated under
-   `useReverseDepthBuffer` and a double negation is the likely bug. The occluder is drawn two-sided,
-   so that a winding flip between our right-handed matrix and a left-handed engine cannot unhide
-   every hidden line. The bias is local to the occluder pass, not the global bias the brainstorm
-   rejects. Sources: W3C WebGPU, "GPUDepthStencilState" and "biased fragment depth"; Babylon.js
-   main, `Engines/WebGPU/webgpuCacheRenderPipeline.ts` and `Engines/abstractEngine.pure.ts`
-   (`setZOffset`, `setZOffsetUnits`).
+   backends may differ by 2×. The price is the other end: a line up to 128 × 2⁻²³ = 1.5 × 10⁻⁵ of
+   the distance behind a hull face, 2⁻¹⁵ ≈ 3.05 × 10⁻⁵ on a backend at twice the unit, may show
+   through it, which at hull sizes reaches only the face's own edges. The slope term covers a
+   stroke's half-width and its one-pixel antialiasing fringe. Bias is valid only on triangle
+   topologies and is never set on a line pass. The adapter carries it as
+   `depthBiasAway { constant: 128, slopeScale: 2 }`, positive meaning away, in one place, because
+   Babylon's `zOffset` and `zOffsetUnits` are already negated under `useReverseDepthBuffer` and a
+   double negation is the likely bug. The occluder is drawn two-sided, so that a winding flip
+   between our right-handed matrix and a left-handed engine cannot unhide every hidden line. The
+   bias is local to the occluder pass, not the global bias the brainstorm rejects. Sources: W3C
+   WebGPU, "GPUDepthStencilState" and "biased fragment depth"; Babylon.js main,
+   `Engines/WebGPU/webgpuCacheRenderPipeline.ts` and `Engines/abstractEngine.pure.ts` (`setZOffset`,
+   `setZOffsetUnits`).
+
+   A body's occluder sphere, which writes its own depth (`occluderSphere.wgsl`), takes the same
+   slope term in the fragment: its exact ray-sphere depth is pushed away by `SLOPE_SCALE` = 3 px
+   (w_max ÷ 2 + 1 for a 1.5 px stroke with 1 px casings, rounded up) of the depth's screen slope,
+   taken from the tangent plane at the hit point, its magnitude (the gradient's length, not its larger
+   component, which falls up to √2 short where the gradient runs diagonally; corrected in RM1
+   validation). The 4 × 10⁻⁶ margin alone keeps only a graticule
+   stroke's centreline in front. Near the limb the slope, and with it the push, grows without
+   bound, but a line behind the body lies at least the sphere's chord 2R cos θ behind the front
+   surface. The push exceeds that chord only within `SLOPE_SCALE` ÷ 4 = 0.75 px of the limb, in every
+   direction, the bound being computed from the radial slope, which is the gradient's length (for
+   small discs; less for large ones, 0.38 px for a disc filling the view), where a line passing
+   behind the body may overrun the limb by less than a pixel. That is inside the antialiasing
+   fringe, and is accepted (decided 2026-10-01, delegated decision).
+
 6. **The body-frame rule** (researched 2026-09-29; a physics ruling). The frame boundary is a
    precision device, not a dynamical one: with every body's gravity integrated, the choice of frame
    changes only rounding, so the larger, already-computed Hill sphere is kept rather than the
@@ -390,23 +409,31 @@ the call sites here change.
    own rank decides: smallest ratio, a rival taking over only at (1 − `FRAME_HYSTERESIS`) of the
    current ratio, the lower ID only on an exact tie. On each sphere's own boundary a Schmitt band:
    enter at a ratio of at most `BODY_FRAME_ENTRY` = 0.9, leave above 1, then re-run the whole rule
-   with no current frame, as `select_frame` does; the band is 5.8 × 10⁶ m for the Moon and 1.5 × 10⁸
-   m for Earth. Distances are geometric and present, from system-frame positions at the frame time,
-   never apparent ones, identically in Rust and TypeScript. Only planets, dwarf planets and moons
-   are candidates; a wide multiple's stellar components are a note for the craft plan. The rule
-   lives in the sim, so the flight model adopts it unchanged, and the client's camera runs a
-   TypeScript twin tested against a golden the sim writes, as `lib/orbit.ts` is against
-   `orbit/states.golden`. A body frame is non-rotating and **free-falling**, not inertial: it has no
-   Coriolis or centrifugal terms, but a flight model that adopts the rule must integrate the other
-   bodies' tidal residual (the indirect term −a_body) in every body frame, as Cowell and Encke
-   propagation do.
+   with no current frame, as `select_frame` does; an ancestor's band is not carried through the
+   exit: after leaving a moon's sphere the rule re-runs from no current frame, so a camera beyond
+   its planet's entry ratio falls to the system frame, which only rounding distinguishes (decided
+   2026-09-30, delegated decision); the band is 5.8 × 10⁶ m for the Moon and 1.5 × 10⁸ m for Earth.
+   Distances are geometric and present, from system-frame positions at the frame time, never
+   apparent ones, identically in Rust and TypeScript. This is the sim's rule, which the flight model
+   and the choice of the ship's local body (`sceneAt`) follow. The view's camera, placed in the
+   drawn scene where every body but the ship's local one is apparent, runs the same rule over the
+   bodies' drawn centres, so that a free camera beside a drawn body is in that body's frame
+   (decided 2026-10-02, delegated decision). The twin is the same function; only its inputs differ.
+   Only planets, dwarf planets and moons are
+   candidates; a wide multiple's stellar components are a note for the craft plan. The rule lives in
+   the sim, so the flight model adopts it unchanged, and the client's camera runs a TypeScript twin
+   tested against a golden the sim writes, as `lib/orbit.ts` is against `orbit/states.golden`. A
+   body frame is non-rotating and **free-falling**, not inertial: it has no Coriolis or centrifugal
+   terms, but a flight model that adopts the rule must integrate the other bodies' tidal residual
+   (the indirect term −a_body) in every body frame, as Cowell and Encke propagation do.
 7. **The camera's reach is the scene's system.** A free camera is clamped to the current system's
    sphere of influence, its tidal radius, which the scene states (a kept scene sets it; a server
    scene reads the arrival's `tidal_radius_m`, which R03.T7.a provides on `SceneArrivalDto::System`,
    and on which R02.T17 waits); it cannot cross into the galactic frame except where the scene
-   itself is galactic, and when the scene's system changes (a jump) the camera returns to the chase
-   preset about the own ship, or to the scene's default pose where there is none (brainstorm, "The
-   free camera").
+   itself is galactic, and when the scene's system changes (a jump) a free camera returns to the
+   chase preset about the own ship, or to the scene's default pose where there is none; seat and
+   chase, held in the own ship's frame, stay as they are (brainstorm, "The free camera"; decided
+   2026-09-30, delegated decision).
 8. **Culling is ours.** An infinite reversed matrix gives a degenerate far plane, and an engine's
    frustum extraction from it is not something to trust at 10¹² m. The draw list is culled by this
    plan's own predicates in `f64` (a sphere against the frustum's side planes, a horizon test for
@@ -452,19 +479,21 @@ the call sites here change.
     automatic function is prevented from acting: the exposure is held at its last metered value, and
     the display says who inhibited it and why, `INHIBITED · OPERATOR` or
     `INHIBITED · NO IMAGE TO METER` when the source view closed or faulted. A system-set inhibit
-    returns to `AUTO` by itself when the source returns; an operator-set one does not. The commands
-    are the guide's congruent pair `INHIBIT` and `ENABLE`, not `AUTO`. A wireframe view has no image
-    to meter, so `AUTO` is offered only when a photorealistic view it accompanies exists (R07);
-    until then the control offers `MAN`, and `AUTO` is shown unavailable with `NO IMAGE TO METER`.
-    The default `MAN` value, `DEFAULT_MAN_EV100`, is **−1**, computed through the full AgX of Design
-    note 12 and the PSF above at 1080p and 60°: Sirius's peak pixel reaches display-linear 0.957
-    (+6.3 of AgX's +6.5 stops, 99.5% of the curve's 0.961 ceiling, sRGB code 250) and a mag 6.5
-    star's 5.2 × 10⁻³ (sRGB code 16), visible, where +1 would leave the mag 6.5 star at 4.7 × 10⁻⁴
-    (code 1.6), invisible in a lit room, and −2 would push Sirius past the curve's log clamp at +6.5
-    stops, flattening its peak. Re-derived through Filament's curve on 2026-09-29 (researched): the
-    default is unchanged from the value first computed through three.js's. At 4K the pixel is a
-    quarter the size and point sources two stops brighter, so the default is stated for 1080p. The
-    recorded run confirms it.
+    returns to `AUTO` by itself when the source returns; an operator-set one does not. An operator's
+    `INHIBIT` given during a system inhibit takes it over, and it then resumes only on `ENABLE`
+    (decided 2026-09-30, delegated decision). The commands are the guide's congruent pair `INHIBIT`
+    and `ENABLE`, not `AUTO`. A wireframe view has no image to meter, so `AUTO` is offered only when
+    a photorealistic view it accompanies exists (R07); until then the control offers `MAN`, and
+    `AUTO` is shown unavailable with `NO IMAGE TO METER`. The default `MAN` value,
+    `DEFAULT_MAN_EV100`, is **−1**, computed through the full AgX of Design note 12 and the PSF
+    above at 1080p and 60°: Sirius's peak pixel reaches display-linear 0.957 (+6.3 of AgX's +6.5
+    stops, 99.5% of the curve's 0.961 ceiling, sRGB code 250) and a mag 6.5 star's 5.2 × 10⁻³ (sRGB
+    code 16), visible, where +1 would leave the mag 6.5 star at 4.7 × 10⁻⁴ (code 1.6), invisible in
+    a lit room, and −2 would push Sirius past the curve's log clamp at +6.5 stops, flattening its
+    peak. Re-derived through Filament's curve on 2026-09-29 (researched): the default is unchanged
+    from the value first computed through three.js's. At 4K the pixel is a quarter the size and
+    point sources two stops brighter, so the default is stated for 1080p. The recorded run confirms
+    it.
 12. **The tone curve is the full AgX, applied per sprite** (researched 2026-09-29). A star sprite's
     fragment computes its pre-exposed linear-sRGB colour, from T_eff and normalised to its V
     luminance, applies `agx` and writes a display value, so the wireframe needs no HDR target and no
@@ -571,7 +600,8 @@ the call sites here change.
     9 ms of GPU time once terrain arrives (brainstorm, "Two deployments, one scene"); without
     terrain this plan's wireframe must stay under 4 ms there, the lower end of the budget's "Station
     wireframe view" row (brainstorm, "Performance budget": under 3 ms at 1080p on the discrete GPU,
-    4–9 ms on the UHD 620), and under 3 ms on a discrete GPU when one is measured. Its low setting
+    4–9 ms on the UHD 620), and under 3 ms on a discrete GPU, measured on the development machine's
+    RTX 3080. Its low setting
     caps star sprites at 2,000 by flux, draws graticules at 30° only, and analytic line coverage
     stays on, since MSAA would cost more than the lines. Both settings are measured and recorded
     (R02.T18).
@@ -635,7 +665,7 @@ acceptance for each is `pnpm format:check` and the quoted strings found by `grep
   image, never on symbology or chrome. Grep: `rendered image is data`, `plate`.
 - **R02.T2.c Items 6 and 7: exposure and limited detail.** In "Data states" and "Controls and
   commanding": the exposure as a value with its unit (`EV100`) and automation level (`AUTO`, `MAN`,
-  `INHIBITED`, with Design note 11's meanings: who inhibited it and why, `INHIBIT` and `ENABLE` as
+  `INHIBITED`, with Design note 11's meanings: who inhibited it and why, `ENABLE` and `INHIBIT` as
   the commands, a system inhibit resuming by itself and an operator's not); `TERRAIN: STREAMING` and
   `TERRAIN: DETAIL LIMITED` as steady annunciations in `--text` on the label block's plate, neither
   a data state nor an alert, with no status colour and never the word "degraded". Grep: `EV100`,
@@ -799,9 +829,12 @@ Design note 22 differenced as (p − craft) − offset.
 
 **R02.T7.b Depth constants, ordering and transparent layers.** `view/depth/`: the constants,
 `separable`, `occluderRadius` (Design note 5), and `transparentLayerOrder`: opaque first; then per
-body, back to front by the distance of the body's centre; within a body, the shells below the camera
-by ascending altitude, then the planes (rings), then the shells above by descending altitude; every
-transparent layer tests depth and writes none (brainstorm, "Depth"). R08 and R11 consume it.
+body, back to front by the distance of the body's centre; within a body, the shells above the camera
+by descending altitude, then the planes (rings), then the shells below the camera by ascending
+altitude; every transparent layer tests depth and writes none (brainstorm, "Depth"). Every shell
+above the camera is farther along a shared ray than every shell below it, so the above group goes
+first; the rings' place between the groups is a heuristic. (Corrected in RM1 validation: the text
+first had the two groups the other way round.) R05, R07, R08 and R11 consume it.
 
 - Tests: surfaces 1 m apart are separable to 10⁶ m and 1 km apart to 10⁹ m (Reed 2015 through the
   brainstorm); `occluderRadius` keeps a graticule point on the front hemisphere at least 4 × 10⁻⁶ d
@@ -812,7 +845,8 @@ transparent layer tests depth and writes none (brainstorm, "Depth"). R08 and R11
 ### R02.T8 The camera's frame selection and rebasing
 
 **R02.T8.a The twin.** `selectCameraFrame`, the TypeScript twin of `select_body_frame`, and the
-tidal-radius clamp of Design note 7.
+tidal-radius clamp of Design note 7; the camera feeds the twin the bodies' drawn centres, the sim
+their geometric ones (Design note 6, as amended).
 
 - Tests: every line of `body_frames.golden` (read with `?raw`, as `lib/orbit.test.ts` reads its
   golden) gives the sim's answer.
@@ -1000,8 +1034,9 @@ scene, the precision scene and the frame-change scene, and read each back: every
 depth buffer holds 0 where nothing was drawn; the casing texels around a line are `--surface-0`; the
 tone curve's WGSL output at 64 luminances equals its twin within 10⁻⁵; a texel at the near plane
 reads depth 1 and +y is up on screen (no half-Z conversion or Y flip was added over the frozen
-projection); a face with its own edge and a second edge 10⁻⁵ of the distance behind it, at 1 m and
-at 10⁸ m, shows the first edge and hides the second. Properties only, never a stored image.
+projection); a face with its own edge, and a second edge 4 × 10⁻⁵ of the distance behind it
+(beyond the bias's worst case, 2 × 128 × 2⁻²³ = 2⁻¹⁵ ≈ 3.05 × 10⁻⁵, Design note 5), at 1 m and at
+10⁸ m, shows the first edge and hides the second. Properties only, never a stored image.
 
 - Files: `view/shaders/*.wgsl`, `view/wireframe/submit.ts` (the only file that calls R01's adapter),
   the smoke test in R01's harness directory.
@@ -1023,7 +1058,7 @@ the draw list's anchors, as plan 05's `pick` does.
 
 **R02.T15.c The label block and the exposure instrument.** `ViewLabelBlock` with Design note 16's
 lines at 4 Hz through `useThrottledValue`; the exposure panel showing `EV100 −1.0 MAN` with its
-triple, `AUTO` unavailable with its reason, `INHIBIT` and `ENABLE` as its commands and the
+triple, `AUTO` unavailable with its reason, `ENABLE` and `INHIBIT` as its commands and the
 `INHIBITED` reading with who set it; camera controls for preset, target and field of view, each a
 button reachable by keyboard with its key shown.
 
@@ -1068,8 +1103,9 @@ sprite shader through the exposure; the label's star-source line; the count line
 Once R03's scene topic lands: `view/scene/fromServer.ts` turns R03's client scene into a `ViewScene`
 (bodies from their orbital elements through `lib/orbit.ts` at R03's render time, each at its granted
 `level`, a `seen` body at its server-given apparent position only; radii, Hill radii, rings;
-`sceneAt`'s `hillRadiusM`, a `null` one leaving the body out of frame selection; craft when they
-exist; the ship stand-in as the own ship), the ship's local body drawn from `sceneAt`'s `geometricM`
+`sceneAt`'s `hillRadiusM`, a `null` one leaving the body out of frame selection, which measures
+to the drawn centres while `sceneAt` chooses the local body on geometric ones (Design note 6, as
+amended); craft when they exist; the ship stand-in as the own ship), the ship's local body drawn from `sceneAt`'s `geometricM`
 and every other body, a free camera's own local body included, from its `apparentM`, the `SCENE`
 selector gains the server's scene for the open system, and each local view's pose is handed to
 `CameraReporter`. Graticules stay still under `ROTATION NOT YET MODELLED` until P14.T14.c.
@@ -1081,11 +1117,14 @@ selector gains the server's scene for the open system, and each local view's pos
   local body, when it is another, at its `apparentM`; the camera report carries the pose on each
   frame change and at R03's stated rate; a body with a `null` `hillRadiusM` is never the camera's
   frame; the view draws at `frameAt(nowMs)` each frame.
-- Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene`.
+- Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene
+src/renderer/src/displays/view src/renderer/src/App.test.tsx` (the `TRAINING` banner's three
+  tests, delegated decision 3).
 
 ### R02.T18 Recorded runs, by hand
 
-On the UHD 620 (and on a discrete GPU when one is available), with the settings recorded:
+On the development machine (RTX 3080), and on the UHD 620 by the owner, with the settings recorded
+(the 4 ms target of Design note 21 is the UHD 620's, the 3 ms the discrete GPU's):
 
 - **The precision scene.** The camera translates and rotates along its path: no depth fighting
   between plate, moon and planet, no visible jitter at 1 m, 10⁸ m and 1 au. Recorded as pass or fail
@@ -1097,6 +1136,12 @@ On the UHD 620 (and on a discrete GPU when one is available), with the settings 
 - **Performance.** GPU time per frame of the precision scene and of a generated system with its star
   field, at 1080p, high and low settings, and frame intervals at the 50th, 95th and 99th
   percentiles, on a quiet machine with no other test run sharing it, against Design note 21's 4 ms.
+- **The server's scene, for the runs that need it.** `just server`, then `just place-ship`, then
+  `just client`, F2, `OPEN` the universe `place-ship` names (`Dev Fixture`), and F4: `VIEW` then
+  draws the server's scene of FPF 1Z0P1Z D-35 with the system's first planet straight ahead from
+  the seat, and no `TRAINING` (R03.T6's note; the README, "Seeing a generated system in `VIEW`").
+  Without `just place-ship` the stand-in is in no system and `VIEW` stays on its kept scene. Run it
+  again after each server start; `--look-at barycentre` looks at the star of a single system.
 - Files: this plan's Verification, "Recorded runs" table. R12 consolidates.
 - Acceptance: the table has one row per run, and every failure is filed as a finding against the
   task that owns it.
@@ -1110,15 +1155,58 @@ On the UHD 620 (and on a discrete GPU when one is available), with the settings 
 - The TypeScript twin of the body-frame rule agrees with every line of the sim's golden, and the
   golden passes on wasip1 (`just test-wasm` by hand, or in `just ci` once R04.T7 lands).
 - The SwiftShader smoke test (R02.T14.c) completes a frame of each kept scene with only finite
-  texels.
+  texels. Since RM1 validation the harness also checks, on the run's adapter, that a sphere
+  occluder's depth at a diagonal texel is pushed by its slope's magnitude (within a tenth of the
+  difference from the old larger-component form), and that a star sprite at (32.3, 20.8) px peaks in
+  its own pixel, lights nothing outside its 7 × 7 quad, and sums to `spriteToneCurve` of its
+  PSF-weighted colour within 0.5 %: twelve R02 checks in all.
 - The recorded runs of R02.T18, below. No golden image is stored anywhere.
+- **R02.T16.a's census, measured 2026-10-02** (RM1 validation m4), at generator version 18, build
+  e4c5cfc, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000` at the
+  Sun-like point [0, 26,000, 0] ly and time 0, through the server's own `systems_in_range` path
+  (`range_query`, `range_brief`, `systems_in_range`) with `limit` 20,000 and `include_stellar`, by
+  a scratch test that was not committed. The counts are exact for the seed; the times were taken
+  on the shared machine, a release build, and stay provisional.
+
+  | Query         | Layers included (expected → returned)                           | Rows   | With V | Range query | Briefs   |
+  | ------------- | --------------------------------------------------------------- | ------ | ------ | ----------- | -------- |
+  | `e` to 620 ly | E 15,160 → 15,189                                               | 15,189 | 11     | 42 ms       | 2,730 ms |
+  | `d` to 360 ly | D 11,349 → 11,411; E 3,138 → 3,126                              | 14,537 | 306    | 36 ms       | 2,218 ms |
+  | `c` to 210 ly | C 11,260 → 11,131; D 2,310 → 2,318; E 639 → 628                 | 14,077 | 7,318  | 32 ms       | 923 ms   |
+  | `a` to 60 ly  | A 1,074 → 1,013; B 190 → 198; C 267 → 260; D 55 → 54; E 15 → 22 | 1,547  | 1,387  | 7 ms        | 30 ms    |
+
+  Merged by ID: 38,942 rows, 8,794 drawn (with `absolute_v_mag`) and 30,148 without, of which
+  **1,371 are at V ≤ 6.5** (V = M_V + 5 log₁₀(d ÷ 10 pc), no extinction), against about 9,000 in
+  the real sky: the thin sky Design note 19 expects. Every layer each query asks for is included,
+  none `over_limit`, so no retry is made near the Sun. The `e` and `d` rows are mostly remnants,
+  which have no V, and their briefs dominate the time (2.7 s for the `e` query's 15,189 rows,
+  about 0.18 ms a row). Design note 19's measurement at version 15 agrees: its 19,992 E systems at 683 ly,
+  scaled by r³ to 620 ly, give about 14,960, within 1.5 % of the 15,160 expected here.
+
 - The owner has answered each of R02.T2's drafts; until then they stand as drafts and the client is
   built to them.
 
 ### Recorded runs
 
-| Date | Machine and driver | Run | Setting | Result |
-| ---- | ------------------ | --- | ------- | ------ |
+| Date       | Machine and driver                                                                         | Run                                                                            | Setting                   | Result                                                                                                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | R02.T14.c smoke checks (`just test-render`'s page on the hardware adapter)     | default                   | Pass: all 75 checks, the nine of R02.T14.c among them; tone curve within 5.0 × 10⁻⁷, near face 0.99989 above and 0 below, both edges at 1 m and 10⁸ m as specified                                                  |
+| 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Performance: precision scene, GPU time of the wireframe pass                   | 1920 × 1080, high         | **Provisional** (shared machine, load 8–15, another lane's GPU soak running): GPU p50 135 µs, p95 368 µs, p99 429 µs over 1,203 frames; CPU build and submit p50 0.70 ms, p95 0.90 ms. Within Design note 21's 3 ms |
+| 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Performance: precision scene                                                   | 1920 × 1080, low          | **Provisional**, as above: GPU p50 142 µs, p95 178 µs, p99 208 µs; CPU p50 0.70 ms, p95 1.50 ms                                                                                                                     |
+| 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Performance: frame-change scene                                                | 1920 × 1080, high         | **Provisional**, as above: GPU p50 116 µs, p95 146 µs, p99 170 µs; CPU p50 0.40 ms, p95 1.50 ms                                                                                                                     |
+| 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Performance: frame-change scene                                                | 1920 × 1080, low          | **Provisional**, as above: GPU p50 115 µs, p95 145 µs, p99 150 µs; CPU p50 0.40 ms, p95 1.50 ms                                                                                                                     |
+| 2026-10-02 | RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, ANGLE Vulkan, hidden offscreen, build 5028cb7 | Frame intervals, all four runs above                                           | offscreen                 | **Provisional**: p50 16.7 ms, p95 16.7–16.8 ms, p99 16.8 ms, paced by offscreen rendering's 60 Hz, not the display's vsync; on-screen pacing pending by hand for the owner                                          |
+| —          | RTX 3080                                                                                   | Performance: a generated system with its star field                            | 1920 × 1080, high and low | Pending: needs the server and `just place-ship` (R02.T18), and a quiet machine                                                                                                                                      |
+| —          | RTX 3080                                                                                   | Precision scene by eye (no depth fighting, no jitter at 1 m, 10⁸ m, 1 au)      | —                         | Pending by hand for the owner (on screen)                                                                                                                                                                           |
+| —          | RTX 3080                                                                                   | Frame-change scene by eye (no visible jump at each crossing)                   | —                         | Pending by hand for the owner (on screen)                                                                                                                                                                           |
+| —          | RTX 3080                                                                                   | Exposure: default `MAN` EV100 −1.0 against the interim star field near the Sun | —                         | Pending by hand for the owner (on screen, needs the server and `just place-ship`, R02.T18)                                                                                                                          |
+| —          | UHD 620                                                                                    | Every run above, against the 4 ms target                                       | high and low              | Pending: the owner                                                                                                                                                                                                  |
+
+The performance rows were taken by a scratch variant of the smoke page (not committed) that steps
+each kept scene in real time for 20 s, builds its draw list as the display does and renders it
+through `WireframeRenderer` into a 1920 × 1080 `rgba16float` target, with Dawn's timestamp
+quantization lifted (`GraphicsStatus.timer` `full`); the GPU time is the `view:wireframe` pass's.
+No run failed, so no finding is filed.
 
 ## Generator version
 
@@ -1157,3 +1245,682 @@ bumped. It reserves no stream or tag. It adds the golden files `coords/body_fixe
 - **Asked by R07, not yet a task here.** An oblate graticule for the giants R07 draws oblate from
   plan 14's flattening (R07 Design note 19, whose non-goals name it R02's). Until it exists a
   graticule is a sphere of the equatorial radius. The roadmap's asks table carries it.
+- **Deviations in R02.T3, as built.** `BodyFixedRotation` also has `rows()` (the golden writes it
+  and R02.T6.a reads it) and `vector_to_body_fixed`, the inverse of `vector_to_body`.
+  `BuildRotationError` has a third variant, `NotFinite`, so that a NaN matrix is refused by name
+  rather than slipping through the tolerance comparisons; the 10⁻¹² limit is the public
+  `ROTATION_ORTHONORMAL_TOLERANCE`, applied to every entry of R Rᵀ. Following `SystemPosition` and
+  `SystemVector`, `BodyFixedPosition` has `ORIGIN`, `translated`, `displacement_to` and
+  `distance_from_origin`, both vector types `ZERO`, `length` and vector arithmetic, and all four
+  types `Default`. The round-trip test samples 1,000 seeded points on the 6,371 km sphere about a
+  pole tilted 23.44°. **Found:** P14.T14.c has landed as `planetary::frames::body_fixed_at`,
+  returning its own `FrameRotation` in the transposed direction (rows are the fixed axes, inertial
+  → fixed). The ask that it return `BodyFixedRotation` stays open; the module documentation names
+  the conversion meanwhile (`from_rows` of the transpose), and Design note 14's
+  `ROTATION NOT YET MODELLED` may be revisited when R02.T17 wires real bodies.
+- **Deviations in R02.T4, as built.** The exit follows the text literally: while the camera is
+  inside its current frame's sphere, that frame and its candidate ancestors form a chain whose
+  members keep the exit at 1 and the incumbent's `FRAME_HYSTERESIS`; once it has left (ratio
+  above 1), or the current frame is not among the candidates, the chain is empty and the whole
+  rule re-runs with no current frame, so a camera leaving the Moon's sphere at 0.95 of the
+  Earth's falls to the system frame. A review read Design note 6's "a Schmitt band on each
+  sphere's own boundary" as keeping the ancestors' band; the difference matters only where a
+  moon's sphere reaches its planet's band, which real nesting rules out, and is a question for
+  the owner (the golden and the twin follow the literal rule). Decided 2026-09-30 (delegated
+  decision): the literal rule stands, now stated in Design note 6. `BodyFrameCandidate::new` returns
+  `BuildBodyFrameCandidateError` with a third variant, `OwnParent`; −0 is stored as +0; the
+  candidate exposes `id`, `parent`, `distance`, `hill_radius` and `ratio`; a repeated ID keeps its
+  smallest-ratio entry. Depth counts `parent` links among the candidates only and every body at one
+  depth competes (cousins as well as siblings), so callers (R02.T17, R03's `sceneAt`) pass whole
+  parent chains. The golden writes distances and Hill radii as Rust's shortest round-trip decimals,
+  which `parseFloat` reads back exactly. `just test-wasm` is pending by hand: wasmtime is not
+  installed on the lane's machine.
+- **Deviations in R02.T8.a, as built.** Built before T6 and T7, because R03.T13 waits on it and
+  it needs only T4's golden. `view/camera/frames.ts` exports `selectCameraFrame(candidates,
+current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (built by
+  `cameraFrameCandidate`, which refuses what `BodyFrameCandidate::new` refuses and stores −0 as
+  +0), `BODY_FRAME_ENTRY` and `FRAME_HYSTERESIS` mirrored as constants, and the tidal-radius clamp
+  as `clampToTidalRadius(positionM, tidalRadiusM)`. Eligible candidates are taken in ID order, as
+  the sim's `BTreeMap` iterates; the wire form's fixed-width hex sorts as `BodyId` does. The test
+  also runs every golden case with the candidates reversed.
+- **Deviations in R02.T6.a, as built.** `FrameOrigins.bodyCentre` is `bodyCentreM` (the unit in
+  the name). `Rotation3` is a branded `{ rows: [Vec3, Vec3, Vec3] }` built only by
+  `rotation3FromRows`, which refuses non-finite entries, departures from orthonormality above
+  `ROTATION_ORTHONORMAL_TOLERANCE` (10⁻¹², the sim's) and reflections; `IDENTITY_ROTATION`,
+  `rotateToBody` (R · p) and `rotateToBodyFixed` (Rᵀ · p) go with it, in `view/coords/rotation.ts`.
+  The conversions between the four kinds are `expressIn(p, frame, origins)` over a `ViewFrame`
+  union, built on `differenceM(a, b, origins)`, which differences in the innermost frame the two
+  share (one body's frames, one system's, else through the galactic frame, barycentres differenced
+  cells first); `frameOf`, `systemOfFrame` and `galacticTranslated` (which refuses a result
+  outside the wire's `i32` cells) are exported too. A `null` rotation takes the body-fixed axes as
+  the body frame's (Design note 14). The galactic delta's test tolerates the frame's 2 m spacing
+  at a whole light-year's offset rather than asserting an exact cells-first sum.
+- **Deviations in R02.T6.b, as built.** `relativeToCamera` and `originMinusCamera` take
+  `CameraOrigins`, which extends `FrameOrigins` with `craftPosition(craft: CraftId)`, which the
+  `craft` frame needs; `CraftId` is a plain string. `CameraPose`, `CameraFrame` (whose `galactic`
+  variant carries its own `origin: GalacticPosition`) and the `Quaternion` interface are in
+  `view/camera/pose.ts`; the quaternion's operations and constructor are R02.T7.a's. A `craft`
+  pose's offset is along the galactic axes. The hull test's system-frame half asserts an error
+  above 0.1 m (f64 at 1 ly is spaced at 2 m, so the rounding is up to a metre, 0.37 m in the
+  test), where the plan says "by metres".
+- **Deviations in R02.T5, as built.** Plan 06 had not added the field, so R02.T5 built it:
+  `StellarBriefDto.absolute_v_mag` (`Option<f32>`, skipped when `None`), filled by `brief_dto`
+  through `brief_absolute_v`, which gates on the brief's `ObjectKind` being a living star (the
+  kinds `object_kind` gives only to remnant phases are refused, which is `phase().is_living()`)
+  and then computes `absolute_v_from(log L, T_eff)` with plan 06's `absolute_bolometric_magnitude`
+  and `bolometric_correction_v`. The Sun-like figure (4.83 ± 0.01) is tested on
+  `absolute_v_from(0 dex, 5,772 K)`, since the server cannot build a `StellarBrief` by hand; a real
+  1 M☉ brief is compared with its state's M_V and a white dwarf's brief has no key. "On every row
+  with a brief" is checked per row against plan 06's formula in `assert_briefs_are_the_sims`,
+  plus an `any`: most rows of the fixture are remnants (the briefs golden gained the field on 3
+  of its rows). Beyond the task's files, `hyperion-protocol/src/galaxy.rs`'s test
+  constructions, `hyperion-server/tests/systems_in_range.rs` and its
+  `systems_in_range_briefs.golden` changed with the field. `PROTOCOL_VERSION` stays 2.
+- **As built, R02.T2.a–e.** The nine items are drafted in one commit, each ending in a marker
+  `_Draft (plan R02, R02.T2.x, item n): the owner signs off._` so that the owner can accept or
+  revert each: items 1 and 5 as a "Views" entry and its scale substitute in "Graphs, schematics and
+  spatial displays"; items 2, 3 and 4 as three bullets in "Colour"; item 6 in "Data states" with
+  its `INHIBIT`/`ENABLE` pair in "Controls and commanding", and item 7 in "Data states"; item 8 in
+  "Motion and sound"; item 9 in "Layout". R02.T2.f, the nomenclature list, waits on R01.T5.c's
+  drafts and is not yet done.
+- **As built, R02.T2.f; the drafts signed off 2026-09-30 (delegated decision).** The owner's
+  delegated decision (the orchestrator's `decisions-ux.md`, items 1–3, 7, 10, 11 and 15) accepted
+  items 1–5, 7 and 8 of the nine as drafted and items 6 and 9 with amendments, all applied here:
+  item 6 gains the operator's `INHIBIT` taking over a system inhibit, and shows `AUTO` "not
+  available"; item 9's main-screen mode banner also states a graphics safe or disabled mode. The
+  ten `_Draft (plan R02, R02.T2.x, item n)…_` markers are removed. R01.T5.c's draft is applied in
+  its decided form: the Layout sentence (every banner upper-case `--text` in a `1px`
+  `--text-muted` rule, the main screen's banner included), the Alerts sentence (no component
+  named; a fault in `--status-caution` text while it lasts), and rows for `GRAPHICS`,
+  `GRAPHICS ACQUIRING ADAPTER`, the mixed-case clauses after the colon, `NOT AVAILABLE` (never
+  `UNAVAILABLE`), `SAFE MODE` as the mode reading, `GRAPHICS SHADER REFUSED`, `GPU`, `WebGPU` and
+  `WGSL`, with no draft markers; the status row is split into three so that no name cell widens
+  the table (R01's code strings are lane B3's). `DETAIL SEED`'s row reads "surface detail and
+  clouds", its two R04.T3.b markers removed (recorded in R04). The plan's own entries are new
+  rows after the spatial view's presets, each still marked
+  `_Draft (plan R02, R02.T2.f, nomenclature): the owner signs off._`, since the decision did not
+  cover them: `VIEW`, `FRAME`, `WIREFRAME`/`PHOTOREALISTIC`, `SEAT`/`CHASE`/`FREE`, `FOV`, `EV100`,
+  the automation levels `AUTO`/`MAN`/`INHIBITED` and the commands `INHIBIT`/`ENABLE` (the guide
+  used them without listing them), `NO IMAGE TO METER`, `POSITIONS AS SEEN FROM SHIP`,
+  `ROTATION NOT YET MODELLED`, `EASED CAMERA MOVES`, `TEST HULL`, the two `TERRAIN:`
+  annunciations, `DECORATION ON`, `FROM CAMERA`, `TICKS TARGET` (decision 11's legend entry),
+  `SCENE` with `PRECISION TEST` and `FRAME CHANGE TEST`, the star-source reading and the count
+  line, written `STARS <n> DRAWN · <m> WITHOUT V · RADII <e>/<d>/<c>/<a>` with the list's
+  placeholder convention; the `SYSTEM BARYCENTRIC`, `BODY` and `GALACTIC` frame rows gain the
+  view's use, marked `(R02.T2.f draft)`. Design notes 6, 7 and 11 carry decisions 16, 13 and 15.
+- **Deviations in R02.T7.a, as built.** `Quaternion` operations are in `view/camera/quaternion.ts`
+  (`quaternion`, `IDENTITY_QUATERNION`, `quaternionFromAxisAngle`, `multiply`, `conjugate`,
+  `rotate`, `rotationRows`). Matrices are `Float32Array`s in WGSL's column-major order:
+  `viewRotation` (3 × 3, Rᵀ) and `viewRotation4`, the 4 × 4 with a zero translation column that
+  R01's `FrameSubmission.viewRotation` takes (its layout is assumed column-major, to be confirmed
+  against R01's adapter in R02.T14). `project` and `pixelSolidAngle` take a
+  `ProjectionCamera { orientation, fovXRad }` and a `Viewport { widthPx, heightPx }`; `project`
+  returns `{ xPx, yPx, depth, inFront }` with y down; `toViewAxes` and `DEFAULT_FOV_DEG` = 60 are
+  exported. The corner pixel's ratio is cos³ 33.5° = 0.5794, which the plan rounds to 0.580; the
+  test holds it to 0.2%.
+- **Deviations in R02.T7.b, as built.** `view/depth/depth.ts` also exports `OCCLUDER_MARGIN`
+  (4 × 10⁻⁶), `DepthLayer` (`opaque`, `shell` with `radiusM`, `plane`, each with an `id`) and
+  `LayerCamera { bodyDistanceM(body) }`. `separable` is `|a − b| ≥ 10⁻⁶ d`. Ties: bodies at equal
+  distance go by the lower ID, a shell whose radius equals the camera's distance counts as above,
+  and equal places go by `id`. The occluder test measures the gap along each ray as a fraction of
+  the graticule point's own distance (at the sub-camera point it is 4 × 10⁻⁶ d exactly).
+  "Transparent layers write no depth" stays a documented rule for the pipelines (R02.T14).
+- **Deviations in R02.T9, as built.** `CameraState` also carries `look` (`SeatLook`: `forward`,
+  `aft`, `target`), `fovDeg` (on `FOV_STEPS_DEG`, stepped by `stepFov`), `free` (`FreeFlight`: rates
+  in camera axes, `rateStep`, the time left after the last whole tick) and `move` (`EasedMove`,
+  blended by `displayPose`, run out by `advanceEasedMove`). `free` and `move` are a local view's
+  integration state; whether R07's server-held main-screen camera should carry them, or they move
+  to a local wrapper, is left to R07 (the brainstorm's "one shape in both deployments"). The camera
+  reads the scene through `CameraScene` (`system`, `tidalRadiusM`, `origins`, `frameBodies`,
+  `targets`, `ownShip: OwnShip | null`, `defaultPose`), which T11's `ViewScene` and T17 supply;
+  `OwnShip` holds its hull in the camera's axes (+x starboard, +y dorsal, −z forward), and the chase
+  offset is `CHASE_OFFSET_HULL_LENGTHS` (0, 0.5, 3) hull lengths. `cutTo(state, to, scene,
+{ easedMoves, reducedMotion })` takes a `CutDestination` (`preset`, `target` or `look`) and
+  returns a `CutResult` whose `refused` reason is `no_own_ship`; a target makes the seat look at it
+  and turns a free camera in place, and a craft target holds a free camera in that craft's frame.
+  `presetPose`, `followPreset` (seat and chase recomputed from the ship's attitude each frame),
+  `sceneFrameFor`, `offeredPresets`, `nextTarget`, `targetPosition`, `rebaseState` and
+  `onSystemChange` are exported. `onSystemChange` returns only a **free** camera to chase (or to the
+  default pose), as the brainstorm has it; seat and chase, held in the ship's `craft` frame, stay,
+  where Design note 7's shorter wording would move them too. Decided 2026-09-30 (delegated
+  decision): as built, and Design note 7 now says so. `stepFreeCamera(state, input, dtS,
+reducedMotion, scene)` returns `{ state, change }`: it integrates whole ticks of
+  `FREE_CAMERA_TICK_S` = 1/1440 s (which divides the 60 Hz and 144 Hz frames, so the two paths are
+  the same ticks), carries the remainder, caps a frame at 0.25 s, ramps and damps by one exponential
+  approach with τ = 0.25 s (removed under reduced motion), rests below 10⁻⁶ of the rate, clamps once
+  per frame in the system frame and re-selects the frame by `sceneFrameFor` (a camera held about a
+  craft keeps that frame; detaching from a craft seeds the rule's hysteresis with the craft's body
+  frame). The rate is 10^(step ÷ 2) m/s from step 0 (1 m/s), starting at step 6, up to a tenth of
+  the tidal diameter a second (0.1 ly/s in a galactic scene); rotation is 45°/s per axis. These
+  figures are choices of this plan. Keys (`keys.ts`): `1` `2` `3` seat, chase, free; `]` and `[`
+  targets; `+`/`=` narrower and `-` wider; on the focused canvas W/S, A/D, R/F translate, the arrows
+  pitch and yaw, Q/E roll, PageUp/PageDown step the rate; `flightKeyReleased` honours a release
+  whatever the modifiers, and the display clears the held set on blur (T15). Beyond the task's
+  files: `quaternion.ts` gains `quaternionFromRows`, `lookAlong` and `slerp`; `relative.ts` exports
+  `frameOrigin`; `test/viewFixtures.ts` starts with the camera fixtures (`aCameraScene`,
+  `aCameraPose`, `anOwnShip`); `vitest.config.mts` lists `keys.test.ts` as a DOM test.
+- **R02.T8.b's `rebase` built early, with R02.T9.** T9.b re-selects the frame every step, so
+  `view/camera/rebase.ts` (`rebase`, `FrameChange { from, to }`, `sameCameraFrame`) landed with T9;
+  `change` is `null` where the frame is unchanged. T8.b adds its scene tests.
+- **Deviations in R02.T10, as built.** `Rgb` (and `Rows3`, `applyRows`) live in
+  `view/photometry/toneCurve.ts`. `magnitude.ts` also exports `PARSEC_M`, `PSF_SIGMA_PX` = 0.64,
+  `PSF_QUAD_PX` = 7, `SubpixelOffset { xPx, yPx }` (offsets from the pixel's centre) and its own
+  `erf` (series below 2.5, continued fraction above, about 10⁻¹⁴); `psfPixelWeights` returns a
+  row-major `Float64Array` of 49, normalised over the quad (the tails beyond ±3.5 px hold up to
+  2.8 × 10⁻⁶). `exposure.ts` also exports `METER_CALIBRATION_K`, `LENS_ATTENUATION_Q`,
+  `SATURATION_CONSTANT`, `DEFAULT_MAN_TRIPLE` (f/1, 2 s, ISO 100: EV100 −1) and
+  `DEFAULT_EXPOSURE`; `ExposureControl` is `manual { triple }` | `auto { ev100 }` |
+  `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`, discriminated on `kind`; the
+  commands are functions returning `ExposureCommandResult` (`setManual`, refused with
+  `invalid_triple`; `setAuto`, refused with `no_image_to_meter`; `inhibit`, refused under `MAN`
+  with `not_automatic`; `enable`, refused outside `INHIBITED`), and `onMetering(control, ev100 |
+null)` applies a source's report. An operator's `INHIBIT` also takes over a system inhibit, which
+  then no longer resumes by itself (Design note 11 does not cover the case; the lean is the
+  operator's intent). Decided 2026-09-30 (delegated decision): as built, now in Design note 11 and
+  the guide. `controlEv100` and `exposureLevelReading` go with them. `ExposureTriple` keeps the
+  Provides' `aperture` (the f-number). `toneCurve.ts` also exports `spriteToneCurve` (the sprite
+  path), `TONE_CURVE_BLACK`, `agxSigmoid`, `AGX_MIN_EV`, `AGX_MAX_EV`, the four matrices as rows
+  (the Rec. 709 ↔ 2020 products multiplied out in `f64` from Filament's `ColorSpaceUtils.h`),
+  `XYZ_TO_SRGB` and `HALF_FLOAT_MAX`; `preExpose`'s second parameter is `previousExposureScale`.
+  `toneCurve.wgsl` carries the matrices as literals, held to the port within 10⁻⁹ by a test that
+  reads the file, and adds `agxSprite`; no WGSL compiler runs in `just ci`, so the file is first
+  compiled, and compared at 64 points, by R02.T14.c on SwiftShader. The flash test sums the sprite
+  path (what is displayed) at V 6.5, 6, 5, …, −1, −1.46 and EV100 −1, 0, +1, +2, and passes the
+  task's 0.90–1.05 (Design note 10's researched 0.92–1.03 is tighter; the task's bracket is the
+  test's). Beyond Provides, `starColour.ts` (`starColour(tEffK | null)`, `planckianChromaticity`),
+  because Design note 12 takes a sprite's colour from T_eff: Kang et al.'s (2002) Planckian-locus
+  fit held to 1,667–25,000 K, Filament's `XYZ_to_sRGB`, normalised to unit luminance by the matrix's
+  own Y row; no T_eff is white; R06's spectral colours replace it. `NOTICE` at the root is new,
+  holding the Apache-2.0 attribution. A science check confirmed every figure; the Allen section
+  number (§15) is as the plan cites it and was not seen at source.
+- **Deviations in R02.T11, as built.** `HullOutline` also has `name` (the view's label), `eyePointM`
+  and `lengthM` (which the camera's `OwnShip` reads), and is built by `hullOutline()`, which refuses
+  a non-finite vertex or an index that is not an integer within the vertices. `TEST_HULL` (in
+  `view/scene/hull.ts`) is a 20 m wedge with its eye point above the forward section, outside the
+  faces as an open cockpit's is, so that the hull's occluder never encloses the seat camera; its
+  1 m plate is a windscreen `TEST_PLATE_DISTANCE_M` = 1 m forward of the eye, facing it. In
+  `view/scene/model.ts`: `ViewBody` also carries `kind` (`star`, `planet`, `moon`, for Design note
+  13's symbol), `designation` and `centreM` (system-frame metres); `ViewRing` carries its plane's
+  `normal`, so that a ring does not hang on a rotation that may be `null`; `ViewOrbit` is
+  `{ body, parent, orbit: KeplerOrbit }`; `ViewCraft` has `designation`, `pose: CraftPose
+{ position, attitude }`, `predictedPath` and `velocityMPerS` (the own ship's flight path marker,
+  T12.c); `ViewStar` has `tEffK` for its colour (T10). `ViewScene` also has `system`,
+  `barycentre`, `tidalRadiusM` and `defaultPose`, and its provenance is a union carrying a kept
+  scene's name (`{ kind: "kept", name }` | `{ kind: "server" }`) in place of a separate `name`.
+  `sceneOrigins(scene)` gives its `CameraOrigins` and `cameraSceneOf(scene)` T9's `CameraScene`
+  (frame bodies: planets and moons with a Hill radius; targets: bodies, then craft but the own
+  ship; it refuses an own ship not among the craft). The kept scenes are `KeptScene { name,
+durationS, sceneAt(tS), cameraAt(tS) }` from `view/scenes/kept.ts` (not in the task's files),
+  which also holds the kept system's ID, `keptBody`, `keptTime`, the barycentre (Design note 19's
+  Sun-like point) and the tidal radius (2.7 × 10⁵ au). The precision scene's ship is some 2.4 au
+  out; its bodies have no Hill radius, so everything is in the system frame; the seat camera
+  sways by up to 0.3 m and turns by up to 6° in yaw and 3° in pitch; the smoothness test emulates
+  the GPU's `f32` path (narrowing, the rotation-only matrix, the projection) at 60 Hz, and the
+  separability test is taken at the path's start. "The plate's hidden edges are hidden by its
+  faces" is read as: from the seat, sampled points of every other hull edge are hidden by the
+  plate's faces, pushed back by either end of Design note 5's bias (7.6 × 10⁻⁶ and 1.5 × 10⁻⁵ of
+  the distance), exactly where an analytic test puts them behind the plate, and the plate's own
+  edges stay in front of their biased faces. The frame-change scene's planet has Earth's radius,
+  Hill radius, sidereal rate and a 23.44° tilt; its moon the Moon's Hill radius; the own ship
+  flies three corners (ratios 1.2, 0.34 of the moon's, 1.35) and the scripted free camera the same
+  path displaced by (0, −3 × 10⁷, 1.5 × 10⁷) m; the lander stands upright (dorsal along the local
+  vertical, nose east). The fixtures add `aBody`, `aViewCraft`, `aViewStar` and `aViewScene`;
+  `aStarRow` is left to R02.T16, which uses it. T11.c's own tests (the paths cross both spheres
+  both ways, the lander is upright) are in `view/scenes/frameChange.test.ts`; T8.b's run on it.
+- **Deviations in R02.T8.b, as built.** `rebase` landed with T9 (above). The scene tests are in
+  `view/camera/rebase.scene.test.ts`, stepped every 0.25 s over T11.c's scene; the acceptance
+  command is `pnpm --filter hyperion exec vitest run src/renderer/src/view/camera/rebase`, since
+  T8.a's `frames.test.ts` filter does not select them. A seat or chase camera is held in the own
+  ship's `craft` frame (Design note 22), so on the ship's path it is the ship's position that
+  changes frame: that half re-expresses the ship's position (`expressIn`) in its old and new body
+  frames, chosen by the rule as the flight model will, and compares a chase camera's view of the
+  landmark in each at the same instant; the free camera's half calls `sceneFrameFor` and `rebase`
+  on the scripted camera, whose changes fall at other moments from the ship's. Continuity is the
+  same-instant jump, below 1 mm and 1 px at every change (four each: planet, moon, planet,
+  system). The hysteresis is asserted: each entry falls at a ratio of at most 0.9 and each exit
+  above 1, within one step of its threshold. The ω × r check is a central difference over ±0.5 s at
+  100 s, held to 10⁻⁶ relative (the task gives no tolerance). Beyond the task, `cutTo`'s `cut`
+  result now carries `change: FrameChange | null` too, so that a cut that moves the camera to
+  another frame (free to seat or chase) invalidates as a step's change does; `onSystemChange`
+  resets the pose outright, and a consumer that caches camera-relative quantities compares frames
+  with `sameCameraFrame` there.
+- **Deviations in R02.T12, as built.** The subdivision is shared in `view/wireframe/curve.ts` (not
+  in the task's files): `sampleCurve(spec, camera, viewport)` over a `CurveSpec { point, windows,
+initialSpans }` returns `Polyline`s (camera-relative `f64` `Vec3`s); each window is cut into
+  even spans and a span halved while its midpoint or quarter points project 0.25 px
+  (`SAGITTA_TOLERANCE_PX`) or more from its projected chord, to a depth of 24; a span wholly 64 px
+  beyond one edge is not refined; where the curve passes behind the near plane the run ends at a
+  bisected boundary and starts again after it. A graticule line's facing arc is found in closed
+  form by `cosineWindows` (the facing test −n · c > r is linear in cos u and sin u along a circle
+  of the sphere), so a short arc near the limb from low altitude is never missed; a test at 400 km
+  and 10 km draws every meridian that has one. `graticule(body, camera, viewport, lowSetting)`
+  takes a camera-relative `GraticuleBody { centreM, radiusM, rotation, unmodelledPole }` and
+  returns `BodyWireframe { regime, diameterPx, lines }` of `GraticuleLine { kind: limb | meridian
+| parallel, major, runs }`; only the equator and prime meridian are `major`. A body whose
+  rotation is not modelled is drawn about its orbit normal (`graticuleRotation`, Design note 14),
+  for which `ViewBody` gains `orbitNormal: Vec3 | null` (the frame's +z where `null`) and, for its
+  mark, `symbol: BodyMarkSymbol` (`bodyKindSymbol(kind)` gives the kind's default; R02.T17 gives a
+  giant or a host its own). `angularDiameterPx`, `perpendicularPair`, `GRATICULE_STEP_DEG` and the
+  regime thresholds are exported. `ringEllipse` takes `RingGeometry { centreM, innerRadiusM,
+outerRadiusM, normal }`; its ticks go through the sampler so that one crossing the near plane is
+  cut. `orbitPath(orbit, parentM, camera, viewport)` samples the eccentric anomaly of
+  `ellipseOf(orbit)`, whose P and Q are taken from `orbitPolyline`'s points at E = 0 and π/2 (held
+  to it within 10⁻¹² a). `hullEdges(hull, attitude)` returns `HullSegment` offsets from the craft
+  (Design note 2); `hullFaces` goes with it. Culling: `sphereInFrustum` tests the four side planes
+  and the near plane and keeps a sphere holding the camera; `behindLimb` is the horizon test, with
+  `SURFACE_TOLERANCE` = 10⁻⁹ so that a mark on the near surface is not hidden. Symbology: every
+  `ScreenMark` names its `target`; `symbologyMarks(input, camera, viewport)` composes the body
+  symbols (a ringed circle with its disc), `bracketReticle` (`--accent`), `destinationReticle`
+  (`--target`, a margin outside) and `flightPathMarker` (from the velocity's direction, so it shows
+  at docking speeds); reticles are sized from the mark's radius plus 0.25 rem margins, as the
+  spatial view's, and the marker in rem (`FLIGHT_PATH_MARKER_REM`, a choice); `targetMark` (first
+  built as `targetBracket`) (`--text`, with `rangeM` and `closureMPerS`) is built and tested but
+  drawn by T15 with its DOM label. **For the owner:** target brackets share the selection's
+  corner-bracket shape, told apart by colour and size; should they take another shape so that the
+  selection is not carried mainly by colour? Decided 2026-09-30 (delegated decision): other craft
+  take four open cardinal ticks, and corner brackets mean the selection only (built under R02.T13).
+- **Deviations in R02.T13, as built.** `buildWireframeDrawList(scene, camera, viewport, tokens,
+options)`: `camera` is `DrawCamera { pose, fovXRad }`, and a fifth argument, `DrawOptions {
+lowSetting, ev100, selection, destination, remPx }`, carries what the tests and the sprites need
+  (the low setting, the exposure, the selection whose orbit, or planet's rings, is drawn at 2 px
+  `--text`, the destination's `--target` reticle, the rem symbols follow); the list is a function
+  of these five. `WireframeDrawList { occluderSpheres, occluderMeshes, lines, sprites, anchors }`
+  in draw order, with `anchors` (`DrawAnchor { target, xPx, yPx, distanceM }`) for T15's pick and
+  labels. A `LineBatch` has a stable `id`, a `space` and an `originF32`: `view` batches are `f32`
+  metres from `originF32` (zero but for a hull's, whose origin is `originMinusCamera` of the
+  craft's pose, Design notes 2 and 22), depth-tested; `screen` batches are the symbology in pixels
+  (z 0), placed after the CPU's horizon test, with no view matrix and no depth test (their packing
+  is of pixels, not positions). Segments are six `f32` per instance. Every batch is cased 1 px each
+  side in `--surface-0` (`CASING_PX`) except hull edges: a casing would widen a 1.5 px edge past
+  the 2 px the occluder's slope bias of Design note 5 covers, and the hull's own faces hide the
+  stars behind it (**for the owner:** keep hull edges uncased, or raise the slope scale to about 3
+  so that the casing is covered). Decided 2026-09-30 (delegated decision): uncased in the wireframe;
+  R07 cases them over its image with a slope scale of 3. Graticules are `--text-muted`, the equator
+  and prime meridian a step heavier (1.5 px, a choice); hull edges `--text` at 1.5 px; a predicted
+  path `--text` at 1 px dashed 6 on and 4 off (a choice), the only dashed batch. Craft other than
+  the own ship get `targetMark`s (from the own ship, or from the camera with none) through
+  `symbologyMarks`, whose `SymbologyAnchor` gains `craft`; a craft behind a body's limb gets none. A
+  sprite carries `directionF32`, its sub-pixel `xPx`/`yPx`, `exposedRgb` (E ÷ Ω ×
+  `exposureScale(ev100)` × `starColour`, per unit of point-spread weight) and `illuminanceLx`;
+  sprites are sorted by flux (ties by ID), culled half a quad outside the view and capped at 2,000
+  at the low setting; `preExpose` is not used, the wireframe having no half-float target.
+  `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts`. Bodies are culled by `sphereInFrustum` on
+  their radius, orbits on a(1 + e) about their focus, craft on their hull's length. A ring counts as
+  selected when its planet is (`ViewRing` has no identity of its own).
+- **R02.T13's follow-up, target marks (decided 2026-09-30, delegated decision 11).** Other craft's
+  marks are four open cardinal ticks, above, below, left and right of the mark, from its radius
+  outwards for a bracket's arm (two thirds of the radius), in `--text`; corner brackets now mean
+  the selection alone. `targetBracket` and `TargetBracket` are renamed `targetMark` and
+  `TargetMark`; range and closure are unchanged. The legend entry is `TICKS TARGET` (R02.T2.f).
+- **Deviations in R02.T14, as built.** The shaders follow R01's Design note 23 (decided
+  2026-09-30, standard WGSL, built as R01.T8.k): `frame.wgsl`'s `Frame` at `@group(0)` (R01's file;
+  its `viewport` is a `vec4f`), each shader's own `Draw` at `@group(1)` (`offsetFromCameraM` then
+  the spec's uniforms in order, held to the specs by a test that reads the sources), one read-only
+  `array<vec4f>` storage buffer at `@group(2) @binding(0)`, entry points `vertexMain` and
+  `fragmentMain`, and the meshes' positions used as corner parameters at `@location(0)`. Every
+  per-frame quantity goes through four storage buffers that `WireframeRenderer`
+  (`view/wireframe/submit.ts`) grows by doubling (the engine frees no buffer, so an outgrown one is
+  kept until the engine goes); the pure `packWireframe` packs them and is what the tests read. Four
+  materials, not three: the bodies' occluder spheres are `occluderSphere.wgsl`, each a screen
+  rectangle the CPU bounds (`sphereScreenRect`: a 16-gon circumscribing the silhouette circle, the
+  whole view where it reaches behind the near plane) in which each fragment intersects its ray with
+  the sphere and writes that depth through `frag_depth`, exact where a tessellated sphere would fall
+  inside its own limb; for that the draw list's `OccluderSphere` gains `altitudeM` (distance less
+  the occluder radius, differenced in `f64`), and the intersection is t = altitude × (D + r) ÷ (b +
+  √h²), free of cancellation near the body. Its written depth is then pushed away by three pixels'
+  worth of its own screen slope, taken in closed form from the tangent plane at the hit point (a
+  slope term like the hull faces', its magnitude since RM1 validation, `SLOPE_SCALE` = 3 for a
+  1.5 px stroke with its 1 px casings and
+  fringe): the 4 × 10⁻⁶ margin of Design note 5 holds a graticule's centreline in front of its
+  occluder but not its width, and without the term the inner half of every obliquely seen graticule
+  stroke failed the depth test (found by the plan-conformance review; checked on both adapters, the
+  stroke's full value restored). Design note 5 now states the term and its bound (under 0.75 px at
+  the limb; decided 2026-10-01, delegated decision). The hulls' faces are `occluder.wgsl`, with
+  `firstTriangle` in its `Draw`. Provides' shader list and the Consumes' `none`/`additive` are thus
+  stale: the shaders are `frame.wgsl` (R01's), `lines.wgsl`, `occluder.wgsl`, `occluderSphere.wgsl`,
+  `starSprite.wgsl` and `toneCurve.wgsl`, and lines use `premultiplied`. Lines take R01's
+  `premultiplied` blend (the Consumes said `none`/`additive`): a stroke's antialiased coverage must
+  lie over what is beneath, and its casing must cover a star, so the submission draws occluders,
+  then sprites, then each batch's casing (width + 2 × casing, `--surface-0`) and its stroke as two
+  draws of one instance range, where T13's list has lines before sprites. Screen-space symbology is
+  drawn at depth 1 (the near plane's), which passes every greater-equal test, since a material has
+  no depth-test switch. A dashed batch's phase is the screen length before each segment, restarting
+  where a polyline breaks. Sprites write alpha 1, since R01's `additive` is `src-alpha, one`; their
+  erf is Abramowitz and Stegun 7.1.26. Token colours are decoded from sRGB to linear
+  (`linearColour`), so that the canvas's sRGB view encodes them back. **`toneCurve.wgsl`'s sigmoid**
+  is re-expanded exactly about x = 0.5 and evaluated by Horner's rule: the monomial form lost 1.2 ×
+  10⁻⁵ in `f32` (its terms reach 100 and cancel), which put the 64-point comparison at 2.7 × 10⁻⁵ on
+  SwiftShader and 5.4 × 10⁻⁵ on the RTX 3080; the new form loses 1.5 × 10⁻⁷, tested in `f32` by
+  `Math.fround`.
+- **R02.T14.c, checked by scratch pages (not committed); its registration waits.** B3's
+  `just test-render` (R01.T9) is not on the branch, so the smoke checks ran from scratch pages:
+  first on a raw-WebGPU host of the same convention, then through R01's own engine
+  (`createWebGpuEngine`, `WireframeRenderer.frame` into a 640 × 360 `createRenderTarget`, read back
+  by `readTexture`), on SwiftShader headless and on the RTX 3080 (`DISPLAY=:0`, NVIDIA 615.71.09),
+  with identical results: every texel of the first frame of both kept scenes finite (an
+  `rgba16float` target), the depth 0 at a corner where nothing was drawn; a cased 1 px stroke's
+  neighbouring rows exactly `--surface-0` and its own row `--text`; a face at the near plane reads
+  depth 0.99989 (its 1.0001 × n) in the upper half of the view and 0 in the lower (+y up, no
+  half-Z or flip); the AgX WGSL at 64 luminances from 10⁻⁶ to 10³ within 5.1 × 10⁻⁷ (SwiftShader)
+  and 4.5 × 10⁻⁷ (RTX 3080) of the TypeScript port, `agxSprite` likewise; a sprite at (320.3,
+  180.7) peaks in its own pixel and lights nothing outside its 7 × 7 quad; the sphere occluder's
+  depth equals the exact ray intersection to seven digits at 10⁷ m, 400 km altitude and 1 AU before
+  its slope term and lies behind it after, hides a line behind the body, and shows a cased line on
+  its near surface seen at an angle at full value with its casing on both sides. **Finding:** the
+  edge check as written ("a second edge 10⁻⁵ of the distance behind … hidden") holds at 1 m (the
+  bias moves the face by 9.5 × 10⁻⁶ there) but fails at 10⁸ m, where the face's depth, 10⁻⁹, sits
+  low in its binade and the bias of 128 moves it by 1.42 × 10⁻⁵ of the distance, which Design note 5
+  itself states as 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵; both adapters agree. At 2 × 10⁻⁵ and 3 × 10⁻⁵ the
+  second edge is hidden at both distances. Decided 2026-10-01 (delegated decision): the
+  criterion was the plan's error; the check is at 4 × 10⁻⁵ and the bias stays 128. Re-run at
+  4 × 10⁻⁵ on 2026-10-01 through the same scratch page on both adapters (SwiftShader headless;
+  the RTX 3080, NVIDIA 615.71.09, in a hidden offscreen window): at 1 m and at 10⁸ m the own edge
+  reads its full value (red 147) and the edge behind reads 0, and every other check above
+  repeats. **Registered, 2026-10-02** (R01.T9 landed): `WGSL_CATALOGUE` gains the four
+  `WIREFRAME_MATERIALS` (compiled offline by T9.b), and `smoke/wireframe.ts`'s `checkWireframe`
+  runs these checks as the group `R02.T14.c the wireframe` of R01's smoke page, through
+  `WireframeRenderer.frame` as the display submits: both kept scenes' first frames at 640 × 360
+  (every texel finite, depth 0 at the corner), the cased stroke against the tokens read from
+  `styles.css` (which the module imports so that `readTokens` has them), the near-plane face, the
+  tone curve as a compute twin (`agx` of a grey, 64 luminances from 10⁻⁶ to 10³, read back and
+  compared with `toneCurve`), and the edge check at 4 × 10⁻⁵ at 1 m and 10⁸ m with a control (the
+  edge behind drawn with no face) so that it cannot pass vacuously. The sprite placement and the
+  sphere occluder's ray depth were first checked by scratch pages; since RM1 validation (m2, m3) the
+  harness checks both (below). `just
+test-render` passes on SwiftShader, both variants: the tone curve within 4.6 × 10⁻⁷, the near face
+  at depth 0.99989 above and 0 below.
+- **Deviations in R02.T15, as built.** `DisplayId` gains `view` (`View`, `F4`). The display's
+  logic is pure in `displays/view/viewRun.ts`: `ViewRun { kept, tS, scene, camera }`, `startRun`,
+  `stepRun` (the script in real time, run again from its start at its end; `followPreset`,
+  `stepFreeCamera` with the held flight keys, `advanceEasedMove`), `commandRun` (a key's or a
+  control's action, as cuts by `cutTo`), `labelLines` and `labelStatements` (Design note 16:
+  `FRAME`, `TIME` as `UT …`, `STYLE`, `CAMERA`, `FOV`, `EXPOSURE` as `EV100 -1.0 MAN`, `STARS`, and
+  `SCENE` in a kept scene; `POSITIONS AS SEEN FROM SHIP` whenever the camera is not at the seat of
+  an own ship, `ROTATION NOT YET MODELLED` while a body's rotation is `null`), `frameName` (a camera
+  held to a craft names the frame the craft's position is in, a body-fixed position its body's)
+  and `markRows` (bodies, then craft but the own ship, ranges by `formatBodyDistance` from the own
+  ship or `FROM CAMERA`, each keeping its unit within the hysteresis from its last showing). The
+  engine comes from `useViewEngine`, which asks a fresh adapter and R01's `loadRenderEngine` (the
+  dynamic import that keeps the engine out of the entry chunk) when the display is shown, and
+  nothing in the safe mode, a disabled session or without WebGPU or an adapter; until it is made,
+  or where it cannot be, the view's place holds `GRAPHICS ACQUIRING ADAPTER` or R01's annunciation
+  (else `GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry`), and no canvas.
+  `Activity` tears the engine down with the loop when the display is hidden, so it is made again
+  on each showing (the cost of a device and R01's rounding probe; keeping it across hides is an
+  option for R07). The redraw loop is one `requestAnimationFrame` chain, reading the display's
+  state through a ref, drawing at the device-pixel size, and publishing the run and the marks'
+  anchors at most every 250 ms, which `useThrottledValue` holds to 4 Hz. The canvas (`ViewCanvas`)
+  is `role="application"` named `VIEW, WIREFRAME, <preset>` and described by its key legend; a
+  click picks through plan 05's `pick` over the anchors (within 1 rem). `ViewMarkList`, windowed as
+  plan 05's lists are, sits in a `TARGETS` panel; the selection it and the canvas set is the draw
+  list's `selection` (the bracket reticle); `]`/`[` (or `NEXT TARGET`/`PREVIOUS TARGET`) aim the
+  camera and select the target. **T12's and T13's hand-over:** `DrawAnchor` gains `label`
+  (`AnchorLabel`: `target` with `rangeM` and `closureMPerS`, or `symbol` for a body below 3 px), and
+  `ViewMarkLabels` sets them as DOM labels on `--surface-0` plates beside the marks, the range as
+  the list writes it and the closure signed in m/s. The exposure panel is `ExposurePanel` (not
+  `ExposureControl`, the photometry's type): the reading, the `MAN` triple (`APERTURE`, `SHUTTER`,
+  `ISO`) and the congruent pair `ENABLE`/`INHIBIT` (in that order since RM1 validation), each held back (`aria-disabled`, keeping focus)
+  with its reason (`NOT AVAILABLE: the exposure is MAN`, …); there is no `AUTO` button (the guide's
+  "Controls and commanding" commands automation by the pair), and `AUTO NOT AVAILABLE: NO IMAGE TO
+METER` stands while there is no image to meter. The triple is not editable yet, so a change of
+  the default (R02.T18) is a change of `DEFAULT_MAN_TRIPLE`. `CameraControls` holds `SEAT`/`CHASE`
+  back with `NO OWN SHIP: SEAT and CHASE need one`, `NARROWER`/`WIDER` back at the ends of the
+  steps, and shows `EASED CAMERA MOVES` as a pressed toggle with its `ON`/`OFF` and, under reduced
+  motion, `NOT APPLIED: reduced motion`. The exposure and the setting belong to the display and
+  outlive a change of `SCENE`. The `TRAINING` banner is in the header strip: `ConsoleFrame` gains
+  `modeBanner`, which `App` sets while `VIEW` is the active display (it draws only kept scenes until
+  R02.T17, which must make it follow the scene's provenance). The new words are nomenclature rows
+  marked `_Draft (plan R02, R02.T15, nomenclature)…_`. `test/fakeViewEngine.ts` answers the
+  renderer's creations on R01's `FakeRenderEngine`. The `F4` and banner tests are in `App.test.tsx`,
+  so the acceptance command is `pnpm --filter hyperion exec vitest run
+src/renderer/src/displays/view src/renderer/src/App.test.tsx`. By hand (scratch page, not
+  committed): a canvas view made by R01's engine draws the precision scene's first frame through
+  `WireframeRenderer` and reads back 1,499 lit pixels on both SwiftShader and the RTX 3080.
+  **Pending by eye:** the display in the running client at 1920 × 1080 and 1280 × 720, including
+  whether the side column fits 720 high and the banners side by side (not run, since `DISPLAY=:0`
+  is the owner's own screen).
+- **Deviations in R02.T16, as built.** `view/stars/interim.ts` holds the queries
+  (`INTERIM_QUERIES`, `interimRequest` with `limit` = `INTERIM_LIMIT` = 20,000 and
+  `include_stellar`), the retry (`retryRadiusLy`: only where the floor layer's census status is
+  `over_limit`, at r × (0.9 × limit ÷ Σ expected)^⅓ with the expected counts summed from E down to
+  the floor), the merge (`interimField`: one row per ID, the first answer's kept; the scene's own
+  system left out; a row without `absolute_v_mag` counted in `withoutV` and not drawn; a star by its
+  `galacticDeltaM` direction and distance from the barycentre, its colour from the brief's `teff_k`)
+  and the count line (`interimCountLine`, `STARS 1 DRAWN · 0 WITHOUT V · RADII 620/360/210/60 ly`,
+  the radii in whole light-years). `displays/view/useInterimStars.ts` runs four `useServerRequest`s
+  for the open universe (none without one); the arrival (system, centre and time) is held in state
+  and changes only with the system or the universe, so a camera moving or a scene's clock running
+  asks nothing again; a retry is adjusted during render once, flagged per query so that no second
+  one follows. The hook is called in `ViewPanels`, above the stage that a change of `SCENE`
+  remounts, from the scene's start, so that another kept scene in the same system asks nothing
+  again. The merged field is rebuilt at each render (4 Hz); memoising it on the four answers is left
+  until a profile shows it. The display draws the field into every frame's scene and adds the count
+  line under the label block's lines, the star-source reading staying in `STARS`. The plan's
+  `aStarRow` fixture is not added: the tests build rows with galaxy plan 05's `aSystemsInRange` and
+  `aStellarBrief`. The display's tests now render it inside `ServerLinkHarness`, `UniverseProvider`
+  and the `UNIVERSE` panel (to open a universe), and one answers the four queries with a star
+  straight ahead of the seat and finds a sprite draw and the count line. The four queries' census
+  counts and the rows at V ≤ 6.5 were taken in RM1 validation (m4) and are in Verification.
+  **Pending, on a quiet machine:** the server times, the `e` query's brief-building time included;
+  those in Verification were taken under shared load and stay provisional.
+- **Deviations in R02.T17, as built.** `view/scene/fromServer.ts` turns R03's client scene into a
+  `ViewScene`: `viewSceneFromServer(model, frame, place)` over `sceneAt`'s `SceneFrame` (R03.T13's
+  apparent positions: the ship's local body at its `geometricM`, every other body and star at its
+  `apparentM`, a `seen` body with no Hill radius so never a frame), `serverSceneAtPush` for a
+  stage's first frame, `serverSceneAtFrame(source, nowMs)` for each drawn frame through
+  `useScene`'s `frameAt` (returning `null`, so that the run holds its last, for the moment a push
+  into another system has reached the store but not the render), `serverSceneGap`, and
+  `cameraKinematics`, the pose as R03's camera report states it (at rest in its frame, a craft
+  frame stated in the frame of the craft's position). The body positions come from R03's
+  `sceneAt`, which is built on `lib/orbit.ts`, rather than from `lib/orbit.ts` directly. The 10⁻⁹
+  test holds `sceneAt`'s geometric positions to the `SYSTEM` display's orbit map; `fromServer`
+  draws a geometric position only for the local body (its own test), every other body's drawn
+  position being apparent. The tests reuse R03.T12's `test/sceneFixture.ts` and the populated
+  wire fixture rather than a new hand-built fixture, building every model with `toSceneModel` from
+  a state (a re-sent body folded into the state), so `SceneNotificationDto`s are applied only in
+  `App.test.tsx`'s banner test. Rotation stays `null` although P14.T14.c has landed: the scene's
+  messages carry no pole or rotation, so R02.T3's "may be revisited" stays open until the scene
+  topic carries `body_fixed_at`. **How `designate` is supplied:** the scene's messages carry
+  neither designation nor barycentre (R03.T12), so `App` hands the system last opened on `SYSTEM`
+  (its `SystemTarget`'s designation of record and barycentre, as a `SystemPlace`) to
+  `ViewSceneProvider`, whose `designate` names that system by its designation and any other by its
+  ID; bodies are named at each frame, so a designation learnt later relabels them. **This was short
+  of R03.T14's "must, by its chart's answers or a lookup"** until R03.T16 (no request answers a
+  system's designation or position by its ID: `system_summary` carries neither), so a system not
+  opened on `SYSTEM` read as its hex ID and was drawn without a barycentre: nothing is expressed in
+  the galactic frame (`ViewScene.barycentre` is now `GalacticPosition | null`), the interim stars
+  (`useInterimStars`, whose `centre` may now be `null`) ask nothing until it is known, and the
+  label block's `STARS` reads `NOT AVAILABLE: the system's position is not known`. Settled by
+  R03.T16 (delegated decision 2026-10-02): the scene carries the system's place
+  (`SceneSystemDto.place`), and the `knownSystem` path remains only as a fallback for a server
+  that does not send it. The free camera's clamp and rate read `ViewScene.tidalRadiusM`, which is
+  the scene store's `tidal_radius_m` (`SceneSystem.tidalRadiusM`); a scene without it is not drawn
+  (`SCENE NOT AVAILABLE: the system's tidal radius was not sent`). `ViewBodyKind` gains
+  `unresolved` (the hexagon at the contact size class) for a body whose kind the server withholds;
+  rings are drawn about their planet in its orbital plane; the ship stand-in is the own ship
+  (`ship`, `OWN SHIP`, `TEST_HULL`), its attitude along its velocity with its dorsal side to
+  galactic north until the flight model gives it one; other craft coast from their pushed pose.
+  **The display.** `ViewSceneProvider` (`displays/view/ViewSceneProvider.tsx`), above the console
+  frame in `App`, holds the subscription (`useScene(universe, { detail: "full", designate })`, open
+  only while `VIEW` is shown) and the `SCENE` choice, and gives both to `ViewDisplay` through
+  `ViewSceneContext`; `SCENE` gains `SERVER`, chosen by default. `ViewRun` gains a `source`
+  (`kept` or `server`) and `startServerRun`; `stepRun`'s `FrameInput` gains a required
+  `serverScene`; a server scene in another system (told by its ID), or no longer holding the
+  camera's frame, moves the camera as a jump does (`onSystemChange`). While the server's scene
+  cannot be drawn (no universe, pending, `NO CARRIER` before a scene, refused, timed out, the ship
+  in no system) the last kept scene stands in and a status line beside the selector says why
+  (`displays/view/serverScene.ts`, each annunciation three words or fewer before its colon: `SCENE
+NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a refusal and a fault
+  otherwise, as `RequestStatus` splits them through its new `isRefusal`, and `SCENE TIMED OUT`, both
+  with `RETRY`, which `useScene`'s new `retry` serves). A stale scene (the link down, the scene
+  being reopened after `subscription_ended` or an unusable push, or nothing received for
+  `SCENE_SILENCE_MS`) stays drawn with its time held; its `TIME` reading, each target's range in the
+  list and each range and closure on the canvas labels are muted with their `S`, the list's rows
+  are named stale, and the line reads `SCENE STALE: NO CARRIER`, `… reopening the scene` or
+  `… nothing received for 2 s`. A camera report not accepted reads `CAMERA REPORT REFUSED: <reason>`
+  (plain) or `CAMERA REPORT UNANSWERED` (a fault): `useScene`'s `cameraRefusal: string | null`
+  became `cameraFault: CameraReportFault | null` to tell them apart. The view's camera is handed to
+  `reportCamera` every frame (the reporter sends at 4 Hz and at once on a change of frame) and
+  removed when the stage goes. **The banner** (delegated decision 3, 2026-10-01): `App` computes
+  `TRAINING` during render from `viewProvenance(sceneName, scene)`, which `ViewSceneProvider` hands
+  its children, so it stands only while `VIEW` draws a kept scene; the three tests (kept →
+  `TRAINING`, server scene → none, server scene lost → `TRAINING` again) are in `App.test.tsx`, and
+  the acceptance command includes it. Every push re-renders the provider's subtree, about once a
+  second; the drawing loop reads positions through `frameAt` with no render. **Beyond the task's
+  files:** `useScene` (`SceneView`'s functions are `readonly` properties so they pass unbound;
+  `cameraFault`; `retry`), `RequestStatus` (`isRefusal`), `ViewLabelBlock`, `ViewMarkList` and
+  `ViewMarkLabels` (stale readings with `StaleMark`), `styles.css` (`.view-display__status`), and
+  the guide's nomenclature list, which gains draft rows for `SERVER`, `SCENE NOT AVAILABLE`,
+  `SCENE PENDING`, `SCENE REJECTED`, `SCENE TIMED OUT`, `SCENE STALE`, `CAMERA REPORT REFUSED`,
+  `CAMERA REPORT UNANSWERED` and `OWN SHIP`, marked `_Draft (plan R02, R02.T17, nomenclature)…_`
+  for the owner. **Pending by eye:** the status line, `RETRY` and the muted stale readings in the
+  running client, at 1920 × 1080 and 1280 × 720.
+- **Fixed in RM1 validation (2026-10-02): R02.T7.b's transparent-layer order (M1).** The text and
+  `transparentLayerOrder` drew a body's shells below the camera first and its shells above it last,
+  so a high cloud deck and the air were composited over the nearer low deck. Along any ray that meets
+  both, a shell above the camera (R ≥ d) is left only after a shell below it (r < d) is met, since
+  |p|² is convex along the ray, starts at d² and is r² < d² at the lower hit: every shell above is
+  farther. The order is now the shells above the camera by descending altitude, then the planes
+  (rings), then the shells below by ascending altitude; the rings' place between the groups is a
+  heuristic, noted in R11's Consumes. The task text, R11's Consumes and the README's asks between
+  plans say so; `depth.test.ts` pins the new order and checks it against each shell's crossing
+  distance along a ray.
+- **Fixed in RM1 validation (2026-10-02): the free camera's rate is shown (M2).** The rate was
+  stepped (`PAGE UP`, `PAGE DOWN`) but shown nowhere, and `changeFreeRate` clamped silently at
+  both ends, against the guide's "Elements with states or modes always show the current one". The
+  camera panel now reads it in B612 Mono at the readouts' 4 Hz, `RATE 1.00 km/s` (`freeRateReading`:
+  three significant figures, m/s below 1 km/s and km/s from there), and at either end of its steps
+  says `NOT AVAILABLE: PAGE DOWN, RATE at its lowest step` or `NOT AVAILABLE: PAGE UP, RATE at its
+highest step`, naming the key held back as the field of view's ends name theirs; the reading is
+  17ch wide, for the galactic scene's top step, `RATE 3.16E11 km/s`.
+  No `SLOWER`/`FASTER` buttons were added, since they would be new nomenclature; the guide's draft
+  `RATE` row now also names the readout, for the owner with the rest of that row.
+- **Fixed in RM1 validation (2026-10-02): the list's `KIND` names (M3).** The column showed code
+  values: an unresolved contact read `UNRESOLVED`, overflowing its 7ch column, and a dwarf planet
+  read `PLANET`, because `viewKind` folded `dwarf_planet` into `planet`. `ViewBodyKind` gains
+  `dwarf_planet` (drawn as the planet's inverted triangle at the floor size class), and the list
+  names each kind by `BODY_KIND_NAMES`, the guide's `KIND` row: `PLANET`, `DWARF PLANET`, `MOON`,
+  `UNRESOLVED CONTACT` (and `STAR`, `CRAFT`). The column is 12ch, which holds `DWARF PLANET` (11.6ch in
+  B612), and `UNRESOLVED CONTACT` alone breaks at its space onto a second line of the 2rem row (a
+  choice of the fix, to keep the designation's column; pending by eye with the rest of T15, two such
+  rows running together especially).
+- **Fixed in RM1 validation (2026-10-02): frame selection measures from geometric centres (m1).**
+  `sceneFrameFor` measured each candidate's distance from `origins.bodyCentreM`, which in a server
+  scene is the body's apparent position for every body but the ship's local one, against Design
+  note 6's "geometric and present … never apparent". `CameraScene` gains `selectionOrigins`, the
+  scene's origins with every body at its geometric centre: `ViewBody` gains an optional
+  `geometricCentreM`, which `viewSceneFromServer` sets to `sceneAt`'s `geometricM` for each placed
+  body it draws apparent, and `cameraSceneOf` builds `selectionOrigins` from it
+  (`sceneOrigins(scene, "geometric")`). The camera is placed where the view draws it, by the drawn
+  origins, the same point whatever frame its pose is held in, and only the candidates' centres are
+  geometric. (A first version placed the pose from its own frame's geometric origin; the review found
+  that a camera then moved on entering a light-shifted moon's frame, by up to about four Hill radii
+  for Io, and left and re-entered it every step.) A camera hovering at a drawn moon whose light-time
+  shift passes its Hill radius is therefore not in that moon's frame: frame selection then follows
+  where the moon is, not where it is seen, which costs no precision since positions are differenced
+  in `f64`. Drawing, the rebase on a change of frame and the camera report use the drawn origins.
+  Tested in `state.test.ts` (a moon drawn 10⁸ m from where it is: the same drawn point selects the
+  planet whether its pose is held in the system frame or the moon's) and `fromServer.test.ts`.
+  **For the owner:** this keeps Design note 6's "never apparent" literally; the other choice is to
+  measure in drawn space and amend the note to say the camera's twin uses drawn positions.
+  **Decided (2026-10-02, delegated decision):** the other choice. Selection measures to the drawn
+  centres and `selectionOrigins` is removed (with `ViewBody.geometricCentreM` and `sceneOrigins`'s
+  `"geometric"` mode); the camera keeps m1's placement by the drawn origins. Design note 6 is
+  amended. The m1 tests are replaced: a camera 10⁷ m from a drawn moon is in the moon's frame
+  whether its pose is held in the system frame or the moon's, and one turning at rest beside it for
+  100 `stepFreeCamera` steps stays in that frame at a drawn position constant to 1 mm;
+  `fromServer.test.ts` draws Jupiter 1.5 Hill radii from its geometric centre and a camera
+  2 × 10⁸ m from the drawn Jupiter is in its frame (it fails under m1's selection).
+- **Fixed in RM1 validation (2026-10-02): the no-tidal-radius branch is tested (m5).**
+  `serverScene.test.ts` now has a live scene whose system's tidal radius was not sent: it is not
+  drawn, reads `SCENE NOT AVAILABLE: the system's tidal radius was not sent` as a fault, and
+  `viewProvenance` gives `kept`, so the kept scene stands in; `fromServer.test.ts` has the
+  matching `serverSceneGap` case, `no_tidal_radius`.
+- **Fixed in RM1 validation (2026-10-02): two citations (m11).** `body_frame.rs`'s Pluto and Charon
+  test values now cite the NASA Pluto fact sheet (Pluto's heliocentric orbit) and Brozović et al.
+  2015, Icarus 246, 317 (the masses and Charon's orbit), as the Earth and Moon helper cites its
+  fact sheets; `PSF_QUAD_PX` states its reason, Design note 10's point-spread function: at σ =
+  0.64 px, ±3.5 px about the star's pixel centre leaves out at most 2.8 × 10⁻⁶ of the light, with the
+  star at its pixel's edge, 3 px (4.7 σ) from the quad's near side in each axis.
+- **Fixed in RM1 validation (2026-10-02): `ENABLE` before `INHIBIT` (m9).** The exposure panel
+  offered `INHIBIT` first, while the guide's general rule gives congruent pairs "in a consistent
+  order", `ENABLE`/`INHIBIT`; the guide's own exposure bullet and its draft nomenclature row said
+  `INHIBIT` and `ENABLE`, against that rule. Following the general rule, the panel now offers
+  `ENABLE` then `INHIBIT` (tested in `ViewDisplay.test.tsx`), and the guide's exposure bullet and
+  row, this plan's T15 text and the panel's TSDoc name the pair in that order. The row stays a draft
+  for the owner. **For the owner:** the exposure bullet in "Controls and commanding" is not a draft,
+  and was changed here only to agree with the guide's own pair rule; it awaits the owner's
+  confirmation with the row.
+- **Fixed in RM1 validation (2026-10-02): the marks' labels and the count line (m6, m7, m8, m10).**
+  - **`FROM CAMERA` (m6).** The canvas labels read `row.range` and dropped the qualifier the list
+    adds with no own ship; both now read `rangeText(row)`, so every range from the camera says so
+    (Design note 17).
+  - **A missing closure rate (m7).** With an own ship but an unknown velocity the label's closure
+    rate disappeared. `MarkRow` gains `closure`, a `ClosureReading` (`none`, `unknown` or `known`), computed in `markRows` by the draw list's own rule
+    (`closureRateMPerS`, now exported from `symbology.ts`): `+3.40 m/s`, `—` where a velocity is not
+    known, shown in `--text-muted` (`.readout__missing`), and nothing for a body or with no own
+    ship. The labels read it from the row, and the list's options carry it in their accessible names
+    (`closure +3.40 m/s`, or `closure not known`), since the labels are hidden from assistive
+    technology. The list shows no closure column: the 12ch `KIND` column already takes the side
+    panel's width, so a sighted operator reads the closure rate on the canvas labels (a narrowing of
+    the finding's fix, by choice). The kept scenes give their craft no velocity, so their labels now read `—`.
+  - **The count line (m8).** `STARS n DRAWN · …` was set as a statement in proportional B612; it
+    is now `ViewLabelBlock`'s `countLine`, an `output` in B612 Mono with tabular figures
+    (`.view-label__count`).
+  - **Labels follow their marks (m10).** The labels were placed from the 4 Hz published anchors,
+    so they trailed a moving camera's marks by up to 250 ms. `ViewMarkLabels` places each label
+    once as it mounts and hands it to the stage through `labelRef`; the drawing loop then moves
+    every label with its mark each frame (`markLabelTransform`), and only the text changes at 4 Hz;
+    a label whose mark that frame did not draw is hidden until the next readout removes it.
+    `ViewDisplay.test.tsx` shows a label moving between two readouts. Pending by eye with the rest
+    of T15.
+- **Fixed in RM1 validation (2026-10-02): R02.T16.a's census counts are taken (m4).** The counts
+  are exact and do not need a quiet machine, so the four queries' census, their rows with and
+  without V, and the merged count at V ≤ 6.5 (1,371) are now in Verification; only the times stay
+  pending on a quiet machine.
+- **Fixed in RM1 validation (2026-10-02): the sphere occluder's slope push (m2).**
+  `occluderSphere.wgsl` pushed by `max(slopeX, slopeY)`, which falls up to √2 short of the 2.75 px
+  `SLOPE_SCALE` is sized for where the depth's gradient runs diagonally, so the outer part of a
+  graticule stroke's inner casing could fail the depth test there. It now pushes by
+  `length(vec2f(slopeX, slopeY))`; the shader's per-pixel scale is the same on both axes, so that is
+  the magnitude in pixels. Design note 5's 0.75 px limb bound was computed from the radial slope,
+  the gradient's length, so it is unchanged and now holds in every direction (the validator's
+  estimate of 1.06 px does not apply: `max()` equalled the length only where the gradient lay along a
+  screen axis, and fell short elsewhere). `checkWireframe`'s new `checkSphereSlope` reads a diagonal
+  texel's depth and compares it with both forms computed in `f64`; on the RTX 3080 it read
+  0.02107446, the magnitude's 0.02107446, against the old form's 0.02138445.
+- **Fixed in RM1 validation (2026-10-02): a star sprite drawn on the GPU (m3).** No committed
+  check drew a sprite: the kept scenes have no stars, and `starSprite.wgsl` was only compiled.
+  `checkWireframe`'s new `checkStarSprite` draws one sprite at (32.3, 20.8) px, colour (2, 1.2, 0.8)
+  per unit weight, and against a frame with none checks that its peak is in its own pixel, that no
+  channel outside its 7 × 7 quad changes, and that the summed texels are within 0.5 % of
+  `spriteToneCurve` of the colour times each pixel's PSF weight, computed in `f64` with the shader's
+  pixel-centre convention. On the RTX 3080: summed (1.997, 1.313, 0.9607) against (1.998, 1.313,
+  0.9609).
+- **RM1 validation's GPU runs (2026-10-02), for m2 and m3.** `just test-render` on SwiftShader
+  passes in both variants with the three new checks. The whole harness, run hidden and offscreen on
+  the RTX 3080 under the client's switches, passes 78 of 78 checks in both variants (`default`,
+  `no-subgroups`) at build 1394abb. With the shader's old `max()` form put back, the slope check
+  fails on the RTX 3080 (depth 0.02138445 against 0.02107446), so it is a real regression test.
+- **Fixed in RM1 validation (2026-10-02, integration MINOR-2): no anchors outside the view.**
+  `buildWireframeDrawList` culled only marks behind the camera, so a mark in front of it but outside
+  the view still got a pickable anchor and a DOM label, laid out thousands of pixels off the stage.
+  An anchor is now kept only within the view or `ANCHOR_MARGIN_REM` (2 rem, the guide's touch
+  target) of its edge; the screen-space symbology is unchanged (the GPU clips it). Tested in
+  `drawList.test.ts` with the camera turned 40° off the other craft, which fails without the cull.
+- **Fixed in RM1 validation (2026-10-02, integration MINOR-1): the engine outlives the stage.**
+  `ViewStage`, keyed by its scene so that a new scene starts afresh, owned `useViewEngine`, so the
+  server's scene arriving (and a kept scene standing in again after a refusal or a timeout) asked
+  for a new adapter and device and showed `GRAPHICS ACQUIRING ADAPTER` for 0.25–0.5 s on the RTX 3080. The engine is now made in `ViewPanels`, above the keyed stage, and handed to it; a new scene
+  still remounts the stage, its canvas and its view, but on the same engine. Tested in
+  `ViewDisplay.test.tsx` (one engine across a change of `SCENE`, no `GRAPHICS ACQUIRING ADAPTER`),
+  which fails on the old code. Pending by eye: the switch on the live server scene.
+- **RM1 validation (2026-10-02): the default seat framed none of the system's bodies.** The
+  integration validation placed the stand-in at rest 1 au along galactic +x from the barycentre and
+  saw only orbit lines and stars. Not a defect of the camera: `seat` is the default preset where
+  there is an own ship (R02.T9.a), it looks along the hull's −z, and the stand-in's attitude,
+  R02.T17's choice until the flight model, puts the nose along its velocity in the system frame
+  or, at rest, along galactic −z, where that placement had nothing. The camera is unchanged.
+  `just place-ship` (R03.T6's note) places the stand-in so that the nose has a body ahead: by
+  default at rest in the first planet's frame, 0.01 au behind it along its orbital velocity, which
+  live put planet `/256` of FPF 1Z0P1Z D-35 at 1.50 Gm in the centre of the frame.

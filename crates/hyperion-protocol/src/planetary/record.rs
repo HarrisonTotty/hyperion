@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, PopulationDto, SectionDto};
-use crate::primitives::{BodyIdHex, SurfaceSeedHex, UniverseIdHex, UniverseTime};
+use crate::primitives::{BodyIdHex, DetailSeedHex, UniverseIdHex, UniverseTime};
 
 /// What a body is (plan 14's `BodyKind`), with every variant from the start, so that a later task
 /// fills a variant and never changes the type's shape.
@@ -103,12 +103,14 @@ pub enum BodyStateDto {
     Destroyed {
         /// What destroyed it.
         cause: DestructionCauseDto,
-        /// When.
+        /// When. It may lie beyond the ±(2⁵³ − 1) s that a JavaScript number holds exactly, as a
+        /// disc dispersed billions of years ago does, and is for display only (P14.T35.d).
         at: UniverseTime,
     },
     /// The body was unbound from its system, and is no longer tracked.
     Unbound {
-        /// When.
+        /// When. It may lie beyond the ±(2⁵³ − 1) s that a JavaScript number holds exactly, as an
+        /// unbinding billions of years ago does, and is for display only (P14.T35.d).
         at: UniverseTime,
     },
 }
@@ -214,18 +216,21 @@ pub struct BulkPropertiesDto {
 pub enum BodySurfaceDto {}
 
 /// A body's hooks section, what the generators of surfaces, life and civilisations read (plan
-/// 14's `hooks::BodyHooks`): its surface seed, and with P14.T23–T26 its bulk composition,
+/// 14's `hooks::BodyHooks`): its detail seed, and with P14.T23–T26 its bulk composition,
 /// habitability and resources.
 ///
-/// No hook is computed yet, so every hooks section is `not_modelled`. The seed's wire form is fixed
-/// here because the plan fixes it; the other hooks join it as the tasks that compute them land.
+/// No hook is on the wire yet, so every hooks section is `not_modelled`. The body's surface seed
+/// (P14.T23) is never sent: a client holding it could synthesise a surface the ship has not seen,
+/// so the server keeps it, and the client gets the detail seed instead (plan 14 as amended by the
+/// rendering plans' R04.T3.a; R04, Design note 17). The detail seed is a section of its own
+/// because the hooks section becomes `ok` with the bulk composition while the detail seed waits for
+/// R09 to derive it; the other hooks join it as the tasks that compute them land.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct BodyHooksDto {
-    /// The seed of the body's surface map, one block output of the universe seed on
-    /// `body.surface` keyed by the body's ID (P14.T23), so that no change to the rest of the
-    /// derivation alters a map.
-    pub surface_seed: SurfaceSeedHex,
+    /// The seed of the client's local terrain synthesis, derived on `body.surface.detail` (R09);
+    /// `not_modelled` until R09 computes it.
+    pub detail_seed: SectionDto<DetailSeedHex>,
 }
 
 /// One body as a system's list carries it: its identity and state, and the sections the list and
@@ -366,6 +371,7 @@ pub(crate) mod tests {
                 mu_m3_s2: 1.327_128_386_004e20,
             },
             valid_until: None,
+            drift: None,
         }
     }
 
@@ -585,7 +591,7 @@ pub(crate) mod tests {
             "effective_temperature_k",
             "mass_fractions",
             "class",
-            "surface_seed",
+            "detail_seed",
         ] {
             assert!(
                 !keys.iter().any(|key| key == withheld),
@@ -840,9 +846,15 @@ pub(crate) mod tests {
     fn body_hooks_wire_form() {
         assert_wire_form(
             &BodyHooksDto {
-                surface_seed: SurfaceSeedHex::from_u64(0x0123_4567_89ab_cdef),
+                detail_seed: SectionDto::NotModelled,
             },
-            json!({ "surface_seed": "0123456789abcdef" }),
+            json!({ "detail_seed": { "state": "not_modelled" } }),
+        );
+        assert_wire_form(
+            &BodyHooksDto {
+                detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(0x0123_4567_89ab_cdef)),
+            },
+            json!({ "detail_seed": { "state": "ok", "value": "0123456789abcdef" } }),
         );
     }
 

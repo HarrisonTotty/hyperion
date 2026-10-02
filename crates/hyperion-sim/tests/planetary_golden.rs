@@ -5,8 +5,8 @@
 //! by ID, each with its `snapshot_at` at the epoch and at +H.
 //!
 //! They pin the arithmetic, not only the draws: a reordered sum, a changed power or a moved word
-//! changes a line here, which is a generator-version change. CI checks the same file on 64-bit Arm
-//! and on wasm32.
+//! changes a line here, which is a generator-version change. The sim-determinism skill says which
+//! targets compare it.
 
 #[expect(
     dead_code,
@@ -1062,6 +1062,16 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
             w.f64("period_s", e.period().value());
             w.f64("mu_m3_s2", e.gravitational_parameter().value());
             w.line(&format!("valid_until: {:?}", orbit.valid_until()));
+            // P14.T45.a: an evolving orbit's drift through its cell.
+            match orbit.drift() {
+                Some(drift) => {
+                    w.line(&format!("drift_reference: {:?}", drift.reference()));
+                    w.f64("a_rate_m_s", drift.semi_major_axis_rate_m_per_s());
+                    w.f64("e_rate_s", drift.eccentricity_rate_per_s());
+                    w.f64("n_rate_rad_s2", drift.mean_motion_rate_rad_per_s2());
+                }
+                None => w.line("drift: none"),
+            }
         }
         other => write_section_state(w, "orbit", other),
     }

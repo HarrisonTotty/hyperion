@@ -5,9 +5,9 @@ import type { CentreLy, ChartResult, ChartSystem } from "../../lib/galaxy/model"
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { useUniverse } from "../../lib/universe";
 import type { RequestState } from "../../lib/useServerRequest";
-import { type LocalFrame, localFrameAt } from "../../spatial/frame";
+import { type LocalFrame, localFrameAt } from "../../geometry/frame";
 import type { SpatialScene } from "../../spatial/marks";
-import { vec3 } from "../../spatial/vec3";
+import { vec3 } from "../../geometry/vec3";
 import {
   chartDataFault,
   DEFAULT_DRIVE_RANGE_LY,

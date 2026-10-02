@@ -56,14 +56,16 @@ The full design is in
 
 ## Layout
 
-| Path                       | What                                                                 |
-| -------------------------- | -------------------------------------------------------------------- |
-| `crates/hyperion-server`   | Game server binary (axum, WebSocket at `/ws`)                        |
-| `crates/hyperion-sim`      | Deterministic simulation / procgen core — no I/O                     |
-| `crates/hyperion-protocol` | Wire protocol types; source of truth for the TypeScript bindings     |
-| `apps/hyperion`            | Bridge client (Electron + React, built with electron-vite)           |
-| `packages/protocol`        | `@hyperion/protocol` — TS bindings generated from the protocol crate |
-| `docs/`                    | Design docs, agent plans, UX guidelines                              |
+| Path                       | What                                                                  |
+| -------------------------- | --------------------------------------------------------------------- |
+| `crates/hyperion-server`   | Game server binary (axum, WebSocket at `/ws`)                         |
+| `crates/hyperion-sim`      | Deterministic simulation / procgen core — no I/O                      |
+| `crates/hyperion-base`     | Beneath the sim: maths on the pinned `libm`, units, generator version |
+| `crates/hyperion-surface`  | The shared height function, native and WebAssembly (no terrain yet)   |
+| `crates/hyperion-protocol` | Wire protocol types; source of truth for the TypeScript bindings      |
+| `apps/hyperion`            | Bridge client (Electron + React, built with electron-vite)            |
+| `packages/protocol`        | `@hyperion/protocol` — TS bindings generated from the protocol crate  |
+| `docs/`                    | Design docs, agent plans, UX guidelines                               |
 
 ## Prerequisites
 
@@ -71,6 +73,10 @@ The full design is in
 - Node.js ≥ 22.12 and pnpm 12
 - [`just`](https://github.com/casey/just)
 - [`uv`](https://docs.astral.sh/uv/) — runs [pre-commit](https://pre-commit.com) for the git hooks
+- For the WebAssembly checks in `just ci`: the `wasm32-wasip1` and `wasm32-unknown-unknown`
+  targets (listed in `rust-toolchain.toml`), [wasmtime](https://wasmtime.dev) at the version the
+  justfile pins, `wasm-bindgen-cli` at the version of `wasm-bindgen` that `Cargo.lock` names, and
+  [cargo-nextest](https://nexte.st). `just wasm-tools` installs them.
 
 ## Development
 
@@ -82,6 +88,43 @@ just client    # run the Electron client with hot reload (`just client --help` f
 ```
 
 Options to `just client` reach the client: `just client --address 10.0.0.5 --port 9100`.
+
+### Seeing a generated system in `VIEW`
+
+Until sessions exist, the ship is a stand-in that the server starts at the galactic centre, in no
+system, and no console moves it. So a plain `just server` and `just client` show `VIEW`'s kept
+test scene under `TRAINING`, with `SCENE NOT AVAILABLE: the ship is in no system`. To see the
+server's scene of a real system:
+
+```sh
+just server        # in one terminal
+just place-ship    # in another, once the server is up
+just client        # then F2, OPEN the universe place-ship names, and F4 for VIEW
+```
+
+`just place-ship` is a client of the running server, like the bridge. It opens the universe
+`Dev Fixture` (creating it with seed `4d2` the first time), picks the system nearest
+`0,26000,0` ly that has a planet, and sends `scene_ship` to put the ship 0.01 au behind that
+planet along its orbit, at rest in the planet's frame, with the clock at 0 s running at 1×. The
+seat camera, `VIEW`'s default, looks along the ship's nose, which for the stand-in is its velocity
+in the system frame, so the planet is straight ahead. Options choose the rest
+(`just place-ship --help`):
+
+| Option                       | Default                                 | What                                                       |
+| ---------------------------- | --------------------------------------- | ---------------------------------------------------------- |
+| `--universe <NAME or ID>`    | `Dev Fixture`                           | Universe; a name not found is created with `--seed`        |
+| `--seed <HEX>`               | `4d2`                                   | Seed of a universe it creates                              |
+| `--system <ID or DESIG>`     | nearest with a planet                   | System, by ID, or by designation within the search         |
+| `--near <X,Y,Z>`, `--radius` | `0,26000,0` ly, `40` ly                 | Where the system is searched for                           |
+| `--look-at <TARGET>`         | `planet`                                | `planet` (the first), `barycentre`, or a body ID           |
+| `--distance <AU>`            | 0.01 from a body, 1 from the barycentre | Distance from the target                                   |
+| `--time <S>`, `--rate <N>`   | `0`, `1`                                | Scene clock: time from the epoch, and 0 or 1, 10 … 100,000 |
+| `--address`, `--port`        | as `just client`                        | The server, also from `HYPERION_SERVER_ADDR` and `_PORT`   |
+
+`--look-at barycentre` puts the ship at rest 1 au along galactic +z from the barycentre, looking
+down at it: a single system's star, but empty space between the stars of a wide multiple. The
+setting is not saved, so run `just place-ship` again after each server start, and it moves the
+scene of every client of that universe.
 
 ### Server configuration
 
@@ -128,11 +171,14 @@ somewhere else, and the `LINK` display shows the endpoint in use.
 | `just fmt`   | `cargo fmt`               | `prettier`                    |
 | `just test`  | `cargo test`              | `vitest`                      |
 
-`just ci` is the gate before a commit: the four checks above plus a check that the generated
-protocol bindings are up to date. It takes about three minutes.
+`just ci` is the gate before a commit: the four checks above, a check that the fitted tables are
+fresh, a check that the generated protocol bindings are up to date, and `just test-wasm-fast`, the
+fast suites on WebAssembly. Without the WebAssembly suites it took about three minutes on a quiet
+machine; they add about two more (measured under shared load, to be re-timed quiet).
 
-- `just ci-slow` is `just ci` plus `just test-slow`. The slow tests take far longer than the rest,
-  so run it before a push that changes the sim, and after a `GENERATOR_VERSION` bump.
+- `just ci-slow` is `just ci` plus `just test-slow` and `just test-wasm-slow`. The slow tests take
+  far longer than the rest, so run it before a push that changes the sim, and after a
+  `GENERATOR_VERSION` bump.
 - `just test-slow` runs the slow statistical tests, marked `#[ignore = "slow: ..."]`, under the
   `slow-test` profile (release speed with debug assertions on). It uses
   [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`), which runs the tests
@@ -142,14 +188,26 @@ protocol bindings are up to date. It takes about three minutes.
   is a finding to raise, never a failure.
 - `just bless` rewrites the golden files under `crates/*/tests/golden/` after a deliberate
   `GENERATOR_VERSION` bump; it refuses to run under `CI`.
-- `just test-wasm` runs the sim's and the testkit's tests, goldens and slow tests included, as
-  `wasm32-wasip1` under wasmtime, where `usize` is 32 bits. It needs wasmtime and the target
-  (`rustup target add wasm32-wasip1`), so it is part of neither `ci` nor `ci-slow`. Run it, and the
-  same tests on AArch64, to check generated output bit for bit on three architectures.
-- `just test`, `just test-slow` and `just bench` build first, then run under one lock shared by
-  every worktree of the clone (`.git/hyperion-heavy-tests.lock`). A second run waits for the first to
-  finish, and says so, because two suites at once each take twice as long, and the load fails the
-  timing-sensitive server tests.
+- `just test-wasm-fast`, part of `just ci`, checks generated output bit for bit on WebAssembly as
+  well as on native x86-64: it runs the fast tests of `hyperion-base`, `hyperion-surface`,
+  `hyperion-sim` and `hyperion-testkit`, goldens included, as `wasm32-wasip1` under wasmtime, where
+  `usize` is 32 bits, with cargo-nextest (one process per test, since wasip1 has no threads); and
+  it checks that a build with relaxed SIMD fails, runs Clippy for the browser target over the
+  crates that run there, and runs `just test-wasm-browser` (below), so that the same goldens are
+  compared natively, on wasip1 and in the browser. `just test-wasm-slow`, part of `just ci-slow`,
+  runs their slow tests and doctests there; `just test-wasm` runs both. A missing tool fails them
+  with a pointer to `just wasm-tools`; they never skip. Nothing checks AArch64.
+- `just test-wasm-browser` runs the tests of the crates the client ships or tests with
+  (`hyperion-base`, `hyperion-surface`, `hyperion-testkit`; not the sim, which no browser loads) as
+  `wasm32-unknown-unknown`, the client's target, under `wasm-bindgen-test` on the V8 that Electron
+  ships: `tools/electron-node/node` runs Electron as Node, and the recipe's first line shows the
+  Electron and V8 versions it ran on. It fails if any test that runs natively, outside a
+  `native_only` module, is missing there, since a plain `#[test]` is silently dropped on that
+  target (each test module imports `wasm_bindgen_test::wasm_bindgen_test as test` instead).
+- `just test`, `just test-slow`, `just bench` and the WebAssembly checks build first, then run
+  under one lock shared by every worktree of the clone (`.git/hyperion-heavy-tests.lock`). A second
+  run waits for the first to finish, and says so, because two suites at once each take twice as
+  long, and the load fails the timing-sensitive server tests.
 
 ### Git hooks
 

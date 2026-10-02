@@ -1,0 +1,28 @@
+[package]
+name = "hyperion-base"
+description = "HYPERION's determinism foundation beneath the sim: maths, units, random streams, the generator version."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+# The library has no benchmarks (the foundation benches stay in `hyperion-sim`), and libtest's
+# harness rejects Criterion's arguments.
+bench = false
+
+[dependencies]
+# The only runtime dependency, of this crate and so of the sim and the surface crate above it.
+# See `hyperion_base::math`.
+libm.workspace = true
+
+[dev-dependencies]
+hyperion-testkit.workspace = true
+
+# The browser target's harness, on that target alone, never on `cfg(target_arch = "wasm32")`, which
+# would build it into the wasip1 runs too (plan R04, Design note 12).
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test.workspace = true
+
+[lints]
+workspace = true

@@ -53,7 +53,7 @@ pub use hierarchy::{
     stripped_mark_min_mass,
 };
 pub use model::{MAX_COMPANIONS, MultiplicityModel};
-pub use positions::star_positions_at;
+pub use positions::{star_positions_at, star_states_at};
 pub use quadrature::{
     all_stars_fraction_below, all_stars_fraction_below_as_drawn, band_share_as_drawn,
     mean_companion_mass_per_system, stripped_share, stripped_share_as_drawn,
