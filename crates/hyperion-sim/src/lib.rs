@@ -52,8 +52,9 @@
 //!   the Roche, Hill and satellite-stability limits.
 //!
 //! [`math`], [`units`], [`version`] and the mechanism of [`rng`] live in `hyperion-base`, beneath
-//! this crate, and are re-exported here at their old paths. That crate is this one's only runtime
-//! dependency, and `libm`, beneath it, the only external one.
+//! this crate, and are re-exported here at their old paths. This crate's runtime dependencies are
+//! that crate and `hyperion-surface` (whose domain-tag registry the sim's own is checked disjoint
+//! from), both in this workspace; `libm`, beneath them, is the only external one.
 
 pub mod alerts;
 pub mod coords;
