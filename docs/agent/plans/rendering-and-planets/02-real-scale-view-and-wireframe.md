@@ -1876,3 +1876,8 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   `spriteToneCurve` of the colour times each pixel's PSF weight, computed in `f64` with the shader's
   pixel-centre convention. On the RTX 3080: summed (1.997, 1.313, 0.9607) against (1.998, 1.313,
   0.9609).
+- **RM1 validation's GPU runs (2026-10-02), for m2 and m3.** `just test-render` on SwiftShader
+  passes in both variants with the three new checks. The whole harness, run hidden and offscreen on
+  the RTX 3080 under the client's switches, passes 78 of 78 checks in both variants (`default`,
+  `no-subgroups`) at build 1394abb. With the shader's old `max()` form put back, the slope check
+  fails on the RTX 3080 (depth 0.02138445 against 0.02107446), so it is a real regression test.
