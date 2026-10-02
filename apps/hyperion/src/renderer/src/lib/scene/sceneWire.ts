@@ -83,6 +83,14 @@ function check(condition: boolean, what: string): asserts condition {
   }
 }
 
+/**
+ * Whether a part of a message the wire's types call an object is one. The protocol does not check
+ * the server's messages beyond their tags, so a part the types promise may still be missing.
+ */
+function isPresent(value: unknown): boolean {
+  return typeof value === "object" && value !== null;
+}
+
 /** The rates a scene clock runs at: paused, or a power of ten from 1× to 100,000×. */
 const CLOCK_RATES: ReadonlySet<number> = new Set([0, 1, 10, 100, 1_000, 10_000, 100_000]);
 
@@ -182,7 +190,6 @@ function toSeen(seen: SeenPositionDto): SeenPosition {
   return { apparentM: toVec3(seen.apparent_m), emitted: checkTime(seen.emitted, "seen") };
 }
 
-/** The system's place as the scene states it: a designation, a galactic position, a velocity, a time. */
 /** The clock window's half-width, s: ±1,000 Julian years of the epoch, as the scene clock keeps. */
 const CLOCK_WINDOW_S = CLOCK_WINDOW_YR * SECONDS_PER_JULIAN_YEAR;
 
@@ -308,6 +315,9 @@ function build(
 ): SceneModelResult {
   try {
     check(Number.isSafeInteger(wire.sequence) && wire.sequence >= 0, "sequence unusable");
+    check(isPresent(wire.clock) && isPresent(wire.clock.time), "clock missing");
+    check(isPresent(wire.ship), "ship missing");
+    check(Array.isArray(wire.craft), "craft missing");
     check(CLOCK_RATES.has(wire.clock.time_rate), "clock rate unusable");
     const tidalRadiusM = wire.tidal_radius_m ?? null;
     return {
@@ -401,6 +411,9 @@ export function applySceneNotification(
   const expected = model.sequence + 1;
   if (notification.sequence !== expected) {
     return { kind: "sequence", expected, received: notification.sequence };
+  }
+  if (!isPresent(notification.clock) || !Array.isArray(notification.bodies)) {
+    return { kind: "fault", fault: "clock or bodies missing" };
   }
   let system = model.wire.system;
   let tidalRadiusM = model.wire.tidal_radius_m;

@@ -1,3 +1,4 @@
+import type { ErrorCode } from "./generated/ErrorCode";
 import type { NotificationBody } from "./generated/NotificationBody";
 import type { RequestError } from "./generated/RequestError";
 import type { ServerMessage } from "./generated/ServerMessage";
@@ -25,6 +26,53 @@ export type SubscriptionEnd =
 
 const UNSUBSCRIBED: SubscriptionEnd = { kind: "unsubscribed" };
 const LINK_LOST: SubscriptionEnd = { kind: "link_lost" };
+
+/** The reason given for a `subscription_ended` whose own the client cannot read. */
+const UNREADABLE_END: RequestError = {
+  code: "internal",
+  message: "the server ended the subscription without a reason the client can read",
+  field: null,
+};
+
+/**
+ * Every code a request error may carry, as this client knows them; a code added to `ErrorCode` must
+ * be added here, or this does not compile.
+ */
+const ERROR_CODES: Readonly<Record<ErrorCode, true>> = {
+  bad_request: true,
+  unsupported: true,
+  hello_required: true,
+  unknown_universe: true,
+  unknown_system: true,
+  unknown_body: true,
+  generator_version_mismatch: true,
+  unsupported_save_format: true,
+  name_taken: true,
+  universe_limit_reached: true,
+  too_many_requests: true,
+  queue_full: true,
+  cancelled: true,
+  storage_failed: true,
+  internal: true,
+};
+
+/**
+ * Whether `error`, as parsed from the wire, is a request error this client can read: a code it
+ * knows, a message, and a field as a string or `null`.
+ */
+function isRequestError(error: unknown): error is RequestError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    Object.hasOwn(ERROR_CODES, error.code) &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    "field" in error &&
+    (error.field === null || typeof error.field === "string")
+  );
+}
 
 /**
  * A live subscription to topic `T`, which the server pushes notifications on until it ends.
@@ -168,10 +216,12 @@ export class SubscriptionTable {
 
   /**
    * Ends the subscription a `subscription_ended` names, with the server's reason; one this
-   * connection does not have is ignored.
+   * connection does not have is ignored. A reason the client cannot read still ends it, as
+   * `internal`, so that the topic's owner is told and does not wait on it.
    */
   endedByServer(message: Extract<ServerMessage, { type: "subscription_ended" }>): void {
-    this.#live.get(message.subscription)?.end({ kind: "ended", error: message.error });
+    const error = isRequestError(message.error) ? message.error : UNREADABLE_END;
+    this.#live.get(message.subscription)?.end({ kind: "ended", error });
   }
 
   /** Ends every subscription as `link_lost`, for when the socket has closed. */
