@@ -1104,7 +1104,9 @@ selector gains the server's scene for the open system, and each local view's pos
   local body, when it is another, at its `apparentM`; the camera report carries the pose on each
   frame change and at R03's stated rate; a body with a `null` `hillRadiusM` is never the camera's
   frame; the view draws at `frameAt(nowMs)` each frame.
-- Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene`.
+- Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene
+src/renderer/src/displays/view src/renderer/src/App.test.tsx` (the `TRAINING` banner's three
+  tests, delegated decision 3).
 
 ### R02.T18 Recorded runs, by hand
 
@@ -1628,3 +1630,74 @@ src/renderer/src/displays/view src/renderer/src/App.test.tsx`. By hand (scratch 
   near the Sun (the `e` query's brief-building time included) and counting the rows at V ≤ 6.5, for
   Verification; not run here, the machine being shared (the counts are exact and could be taken
   under load, the times not), so Design note 19's figures stand as provisional.
+- **Deviations in R02.T17, as built.** `view/scene/fromServer.ts` turns R03's client scene into a
+  `ViewScene`: `viewSceneFromServer(model, frame, place)` over `sceneAt`'s `SceneFrame` (R03.T13's
+  apparent positions: the ship's local body at its `geometricM`, every other body and star at its
+  `apparentM`, a `seen` body with no Hill radius so never a frame), `serverSceneAtPush` for a
+  stage's first frame, `serverSceneAtFrame(source, nowMs)` for each drawn frame through
+  `useScene`'s `frameAt` (returning `null`, so that the run holds its last, for the moment a push
+  into another system has reached the store but not the render), `serverSceneGap`, and
+  `cameraKinematics`, the pose as R03's camera report states it (at rest in its frame, a craft
+  frame stated in the frame of the craft's position). The body positions come from R03's
+  `sceneAt`, which is built on `lib/orbit.ts`, rather than from `lib/orbit.ts` directly. The 10⁻⁹
+  test holds `sceneAt`'s geometric positions to the `SYSTEM` display's orbit map; `fromServer`
+  draws a geometric position only for the local body (its own test), every other body's drawn
+  position being apparent. The tests reuse R03.T12's `test/sceneFixture.ts` and the populated
+  wire fixture rather than a new hand-built fixture, building every model with `toSceneModel` from
+  a state (a re-sent body folded into the state), so `SceneNotificationDto`s are applied only in
+  `App.test.tsx`'s banner test. Rotation stays `null` although P14.T14.c has landed: the scene's
+  messages carry no pole or rotation, so R02.T3's "may be revisited" stays open until the scene
+  topic carries `body_fixed_at`. **How `designate` is supplied:** the scene's messages carry
+  neither designation nor barycentre (R03.T12), so `App` hands the system last opened on `SYSTEM`
+  (its `SystemTarget`'s designation of record and barycentre, as a `SystemPlace`) to
+  `ViewSceneProvider`, whose `designate` names that system by its designation and any other by its
+  ID; bodies are named at each frame, so a designation learnt later relabels them. **This is short
+  of R03.T14's "must, by its chart's answers or a lookup"** (no request answers a system's
+  designation or position by its ID: `system_summary` carries neither), so a system not opened on
+  `SYSTEM` reads as its hex ID and is drawn without a barycentre: nothing is expressed in the
+  galactic frame (`ViewScene.barycentre` is now `GalacticPosition | null`), the interim stars
+  (`useInterimStars`, whose `centre` may now be `null`) ask nothing until it is known, and the
+  label block's `STARS` reads `NOT AVAILABLE: the system's position is not known`. Pending the
+  owner: a client lookup, or the designation and barycentre carried on `SceneSystemDto` (additive,
+  as `tidal_radius_m` is). The free camera's clamp and rate read `ViewScene.tidalRadiusM`, which is
+  the scene store's `tidal_radius_m` (`SceneSystem.tidalRadiusM`); a scene without it is not drawn
+  (`SCENE NOT AVAILABLE: the system's tidal radius was not sent`). `ViewBodyKind` gains
+  `unresolved` (the hexagon at the contact size class) for a body whose kind the server withholds;
+  rings are drawn about their planet in its orbital plane; the ship stand-in is the own ship
+  (`ship`, `OWN SHIP`, `TEST_HULL`), its attitude along its velocity with its dorsal side to
+  galactic north until the flight model gives it one; other craft coast from their pushed pose.
+  **The display.** `ViewSceneProvider` (`displays/view/ViewSceneProvider.tsx`), above the console
+  frame in `App`, holds the subscription (`useScene(universe, { detail: "full", designate })`, open
+  only while `VIEW` is shown) and the `SCENE` choice, and gives both to `ViewDisplay` through
+  `ViewSceneContext`; `SCENE` gains `SERVER`, chosen by default. `ViewRun` gains a `source`
+  (`kept` or `server`) and `startServerRun`; `stepRun`'s `FrameInput` gains a required
+  `serverScene`; a server scene in another system (told by its ID), or no longer holding the
+  camera's frame, moves the camera as a jump does (`onSystemChange`). While the server's scene
+  cannot be drawn (no universe, pending, `NO CARRIER` before a scene, refused, timed out, the ship
+  in no system) the last kept scene stands in and a status line beside the selector says why
+  (`displays/view/serverScene.ts`, each annunciation three words or fewer before its colon: `SCENE
+NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a refusal and a fault
+  otherwise, as `RequestStatus` splits them through its new `isRefusal`, and `SCENE TIMED OUT`, both
+  with `RETRY`, which `useScene`'s new `retry` serves). A stale scene (the link down, the scene
+  being reopened after `subscription_ended` or an unusable push, or nothing received for
+  `SCENE_SILENCE_MS`) stays drawn with its time held; its `TIME` reading, each target's range in the
+  list and each range and closure on the canvas labels are muted with their `S`, the list's rows
+  are named stale, and the line reads `SCENE STALE: NO CARRIER`, `… reopening the scene` or
+  `… nothing received for 2 s`. A camera report not accepted reads `CAMERA REPORT REFUSED: <reason>`
+  (plain) or `CAMERA REPORT UNANSWERED` (a fault): `useScene`'s `cameraRefusal: string | null`
+  became `cameraFault: CameraReportFault | null` to tell them apart. The view's camera is handed to
+  `reportCamera` every frame (the reporter sends at 4 Hz and at once on a change of frame) and
+  removed when the stage goes. **The banner** (delegated decision 3, 2026-10-01): `App` computes
+  `TRAINING` during render from `viewProvenance(sceneName, scene)`, which `ViewSceneProvider` hands
+  its children, so it stands only while `VIEW` draws a kept scene; the three tests (kept →
+  `TRAINING`, server scene → none, server scene lost → `TRAINING` again) are in `App.test.tsx`, and
+  the acceptance command includes it. Every push re-renders the provider's subtree, about once a
+  second; the drawing loop reads positions through `frameAt` with no render. **Beyond the task's
+  files:** `useScene` (`SceneView`'s functions are `readonly` properties so they pass unbound;
+  `cameraFault`; `retry`), `RequestStatus` (`isRefusal`), `ViewLabelBlock`, `ViewMarkList` and
+  `ViewMarkLabels` (stale readings with `StaleMark`), `styles.css` (`.view-display__status`), and
+  the guide's nomenclature list, which gains draft rows for `SERVER`, `SCENE NOT AVAILABLE`,
+  `SCENE PENDING`, `SCENE REJECTED`, `SCENE TIMED OUT`, `SCENE STALE`, `CAMERA REPORT REFUSED`,
+  `CAMERA REPORT UNANSWERED` and `OWN SHIP`, marked `_Draft (plan R02, R02.T17, nomenclature)…_`
+  for the owner. **Pending by eye:** the status line, `RETRY` and the muted stale readings in the
+  running client, at 1920 × 1080 and 1280 × 720.

@@ -66,11 +66,16 @@ export interface SceneSnapshot {
   /** The scene after the latest push applied, or `null` before any arrived. */
   readonly model: SceneModel | null;
   /**
-   * Why the server refused the latest camera report answered, or why it went unanswered, in its
-   * own words; `null` once a report is accepted.
+   * What became of the latest camera report settled, when it was not accepted: refused, with the
+   * server's reason in its own words, or unanswered in {@link REQUEST_TIMEOUT_MS}; `null` once a
+   * report is accepted.
    */
-  readonly cameraRefusal: string | null;
+  readonly cameraFault: CameraReportFault | null;
 }
+
+/** A camera report the server did not accept: refused with its reason, or timed out. */
+export type CameraReportFault =
+  { readonly kind: "refused"; readonly reason: string } | { readonly kind: "timed_out" };
 
 /** The scene of a universe, for R02's view: its state, its frames and its camera reports. */
 export interface SceneView extends SceneSnapshot {
@@ -83,11 +88,16 @@ export interface SceneView extends SceneSnapshot {
    * Meant to be called from a drawing loop, not during a render: it keeps the frame it returns as
    * the next one's `previous`. Stable for the life of the subscription.
    */
-  frameAt(nowMs: number): SceneFrame | null;
+  readonly frameAt: (nowMs: number) => SceneFrame | null;
   /** Hands over a local view's camera pose for the reports (Design note 6). */
-  reportCamera(view: ViewId, pose: SceneKinematics): void;
+  readonly reportCamera: (view: ViewId, pose: SceneKinematics) => void;
   /** Stops reporting a local view's camera, as when the view closes. */
-  removeCamera(view: ViewId): void;
+  readonly removeCamera: (view: ViewId) => void;
+  /**
+   * Opens the scene again after it was refused or went unanswered (the operator's `RETRY`); does
+   * nothing in any other state.
+   */
+  readonly retry: () => void;
 }
 
 /** What a scene is asked for, besides its universe. */
@@ -110,7 +120,7 @@ const MAX_RESUBSCRIPTIONS = 3;
  */
 export const SCENE_SILENCE_MS = 2_000;
 
-const IDLE: SceneSnapshot = { status: { kind: "idle" }, model: null, cameraRefusal: null };
+const IDLE: SceneSnapshot = { status: { kind: "idle" }, model: null, cameraFault: null };
 
 /** The opening state as the scene's adapter reads it, without the envelope's `topic`. */
 function sceneState(state: StateOf<"scene">): SceneStateDto {
@@ -251,6 +261,17 @@ class SceneStore {
       });
   }
 
+  /** See {@link SceneView.retry}. */
+  readonly retry = (): void => {
+    const status = this.#snapshot.status.kind;
+    if (status !== "rejected" && status !== "timed_out") {
+      return;
+    }
+    this.#resubscriptions = 0;
+    this.#set({ status: { kind: "pending" } });
+    this.open();
+  };
+
   /** Stops the subscription; what it held stays for the link's return. */
   close(): void {
     this.#stop();
@@ -346,13 +367,13 @@ class SceneStore {
         this.#stopCameraReport = null;
         switch (state.kind) {
           case "ok":
-            this.#set({ cameraRefusal: null });
+            this.#set({ cameraFault: null });
             break;
           case "rejected":
-            this.#set({ cameraRefusal: state.reason });
+            this.#set({ cameraFault: { kind: "refused", reason: state.reason } });
             break;
           case "timed_out":
-            this.#set({ cameraRefusal: "camera report unanswered" });
+            this.#set({ cameraFault: { kind: "timed_out" } });
             break;
           case "link_down":
             break;
@@ -462,16 +483,21 @@ class SceneStore {
     this.#retry = undefined;
   }
 
-  /** Changes the snapshot's status or camera refusal, notifying only for a real change. */
-  #set(change: { readonly status?: SceneStatus; readonly cameraRefusal?: string | null }): void {
+  /** Changes the snapshot's status or camera fault, notifying only for a real change. */
+  #set(change: {
+    readonly status?: SceneStatus;
+    readonly cameraFault?: CameraReportFault | null;
+  }): void {
     const current = this.#snapshot;
     const status = change.status ?? current.status;
-    const cameraRefusal =
-      change.cameraRefusal === undefined ? current.cameraRefusal : change.cameraRefusal;
-    if (sameStatus(status, current.status) && cameraRefusal === current.cameraRefusal) {
+    const cameraFault = change.cameraFault === undefined ? current.cameraFault : change.cameraFault;
+    if (
+      sameStatus(status, current.status) &&
+      JSON.stringify(cameraFault) === JSON.stringify(current.cameraFault)
+    ) {
       return;
     }
-    this.#snapshot = { ...current, status, cameraRefusal };
+    this.#snapshot = { ...current, status, cameraFault };
     this.#notify();
   }
 
@@ -534,5 +560,6 @@ export function useScene(universe: UniverseIdHex | null, options: SceneOptions):
     frameAt: store.frameAt,
     reportCamera: store.reportCamera,
     removeCamera: store.removeCamera,
+    retry: store.retry,
   };
 }

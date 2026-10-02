@@ -2,7 +2,11 @@ import type { BodyIdHex, GalacticPosition, SystemIdHex, UniverseTime } from "@hy
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
-import { MOON_SIZE_CLASS, PLANET_SIZE_CLASSES } from "../../lib/system/bodySymbols";
+import {
+  CONTACT_SIZE_CLASS,
+  MOON_SIZE_CLASS,
+  PLANET_SIZE_CLASSES,
+} from "../../lib/system/bodySymbols";
 import type { SizeClass, SymbolShape } from "../../spatial/marks";
 import type { CameraPose, CraftId, Quaternion } from "../camera/pose";
 import type { CameraScene, CameraTarget } from "../camera/state";
@@ -11,8 +15,11 @@ import type { CameraOrigins } from "../coords/relative";
 import type { Rotation3 } from "../coords/rotation";
 import type { HullOutline } from "./hull";
 
-/** What a body is, as the wireframe marks it below 3 px (planet, moon or star). */
-export type ViewBodyKind = "star" | "planet" | "moon";
+/**
+ * What a body is, as the wireframe marks it below 3 px: a planet (a dwarf planet among them), a
+ * moon or a star, or an unresolved contact, whose kind the server withholds (R02.T17).
+ */
+export type ViewBodyKind = "star" | "planet" | "moon" | "unresolved";
 
 /**
  * A body of the view's scene at the scene's time.
@@ -60,8 +67,8 @@ export interface BodyMarkSymbol {
 /**
  * The ship-wide symbol of each kind with no more known of the body (`lib/system/bodySymbols.ts`): a
  * planet the inverted triangle at a smaller planet's size, a moon the pentagon, a star the circle
- * at size class 2. A server scene gives each body its own (R02.T17: a giant's larger triangle, a
- * host's own symbol).
+ * at size class 2, an unresolved contact the hexagon. A server scene gives each body its own
+ * (R02.T17: a giant's larger triangle, a host's own symbol).
  */
 export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
   let symbol: BodyMarkSymbol;
@@ -74,6 +81,9 @@ export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
       break;
     case "star":
       symbol = { shape: "circle", sizeClass: 2 };
+      break;
+    case "unresolved":
+      symbol = { shape: "hexagon", sizeClass: CONTACT_SIZE_CLASS };
       break;
   }
   return symbol;
@@ -162,8 +172,12 @@ export interface ViewScene {
   readonly timeRate: number;
   /** The scene's system. */
   readonly system: SystemIdHex;
-  /** The system's barycentre in the galactic frame. */
-  readonly barycentre: GalacticPosition;
+  /**
+   * The system's barycentre in the galactic frame, or `null` where the client does not know it:
+   * a server scene's messages do not carry it (R02.T17), so it is known only for a system the
+   * client has been told of. Without it nothing is expressed in the galactic frame.
+   */
+  readonly barycentre: GalacticPosition | null;
   /** The system's tidal radius, m, which bounds a free camera (Design note 7). */
   readonly tidalRadiusM: number;
   /** The bodies. */
@@ -185,7 +199,8 @@ export interface ViewScene {
 /**
  * Where every frame's origin and every craft of a scene is: the scene's {@link CameraOrigins}.
  *
- * @throws Error from a lookup, when asked for a body or craft the scene does not have.
+ * @throws Error from a lookup, when asked for a body or craft the scene does not have, or for the
+ *   barycentre of a scene that does not know it.
  */
 export function sceneOrigins(scene: ViewScene): CameraOrigins {
   const bodies = new Map(scene.bodies.map((body) => [body.id, body]));
@@ -201,6 +216,9 @@ export function sceneOrigins(scene: ViewScene): CameraOrigins {
     systemBarycentre: (system) => {
       if (system !== scene.system) {
         throw new Error(`the scene holds system ${scene.system}, not ${system}`);
+      }
+      if (scene.barycentre === null) {
+        throw new Error(`the position of system ${system} is not known`);
       }
       return scene.barycentre;
     },

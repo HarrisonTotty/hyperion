@@ -1,4 +1,5 @@
-import { Activity, type ReactElement, useCallback, useState } from "react";
+import { galacticPositionFromLy } from "@hyperion/protocol";
+import { Activity, type ReactElement, useCallback, useMemo, useState } from "react";
 
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ConsoleFrame } from "./components/ConsoleFrame";
@@ -6,6 +7,7 @@ import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
+import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
@@ -14,6 +16,7 @@ import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
+import type { SystemPlace } from "./view/scene/fromServer";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -75,6 +78,12 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * chart's time (plan 14, P14.T41.a): `App` keeps the latest opening, counted so that each is a new
  * display state, and switches to the display. The callback is stable, so the memoised `GALAXY`
  * display is not rendered again for it.
+ *
+ * The header strip's `TRAINING` banner stands while `VIEW` is shown drawing a kept test scene, and
+ * not over the server's scene (R02.T17; the guide's training banner): `ViewSceneProvider` holds the
+ * display's scene and its `SCENE` choice above the frame, so the banner is computed during render
+ * from what `VIEW` draws. The system last opened on `SYSTEM` is handed to it with its designation
+ * and position, which the server's scene does not carry.
  */
 export function App() {
   const serverUrl = window.hyperion.serverUrl;
@@ -88,25 +97,52 @@ export function App() {
     setSystemOpening((previous) => ({ target, sequence: (previous?.sequence ?? 0) + 1 }));
     setActiveDisplay("system");
   }, []);
-  const inputs: DisplayInputs = { connection, serverUrl, systemOpening, openSystem };
+  const target = systemOpening?.target ?? null;
+  const knownSystem = useMemo(
+    (): SystemPlace | null =>
+      target === null
+        ? null
+        : {
+            system: target.system,
+            designation: target.designation,
+            barycentre: galacticPositionFromLy([
+              target.positionLy.x,
+              target.positionLy.y,
+              target.positionLy.z,
+            ]),
+          },
+    [target],
+  );
+  const inputs: DisplayInputs = {
+    connection,
+    serverUrl,
+    systemOpening,
+    openSystem,
+  };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
       <ServerLinkContext value={link}>
         <UniverseProvider>
-          <ConsoleFrame
-            displays={DISPLAYS}
-            activeDisplay={activeDisplay}
-            onSelectDisplay={setActiveDisplay}
-            linkStatus={connection.status}
-            // The VIEW display draws only kept test scenes until R02.T17 brings the server's.
-            modeBanner={activeDisplay === "view" ? "TRAINING" : null}
-          >
-            {DISPLAYS.map(({ id }) => (
-              <Activity key={id} mode={id === activeDisplay ? "visible" : "hidden"}>
-                {displayContent(id, inputs)}
-              </Activity>
-            ))}
-          </ConsoleFrame>
+          <ViewSceneProvider active={activeDisplay === "view"} knownSystem={knownSystem}>
+            {(sceneProvenance) => (
+              <ConsoleFrame
+                displays={DISPLAYS}
+                activeDisplay={activeDisplay}
+                onSelectDisplay={setActiveDisplay}
+                linkStatus={connection.status}
+                // Training is a kept test scene on VIEW; the server's scene is live operation.
+                modeBanner={
+                  activeDisplay === "view" && sceneProvenance === "kept" ? "TRAINING" : null
+                }
+              >
+                {DISPLAYS.map(({ id }) => (
+                  <Activity key={id} mode={id === activeDisplay ? "visible" : "hidden"}>
+                    {displayContent(id, inputs)}
+                  </Activity>
+                ))}
+              </ConsoleFrame>
+            )}
+          </ViewSceneProvider>
         </UniverseProvider>
       </ServerLinkContext>
     </GraphicsStatusProvider>

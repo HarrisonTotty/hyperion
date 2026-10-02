@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 
+import { StaleMark } from "../../components/StaleMark";
 import { formatListPosition } from "../../lib/format";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
@@ -26,6 +27,11 @@ export interface ViewMarkListProps {
   readonly selectedKey: string | null;
   /** Called with the row the operator selects. */
   readonly onSelect: (row: MarkRow) => void;
+  /**
+   * Whether the ranges are stale, a server scene held through a stale period (R02.T17): each is
+   * muted with its trailing `S`, and its row named stale.
+   */
+  readonly stale?: boolean | undefined;
 }
 
 /**
@@ -37,7 +43,7 @@ export interface ViewMarkListProps {
  * Windowed as plan 05's lists are (its design note D17), though a kept scene's list is short. Stars
  * are not listed: they are not targets.
  */
-export function ViewMarkList({ rows, selectedKey, onSelect }: ViewMarkListProps) {
+export function ViewMarkList({ rows, selectedKey, onSelect, stale = false }: ViewMarkListProps) {
   const baseId = useId();
   const { ref: measureRef, metrics } = useScrollMetrics();
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -184,14 +190,17 @@ export function ViewMarkList({ rows, selectedKey, onSelect }: ViewMarkListProps)
                 aria-selected={row.key === selectedKey}
                 aria-posinset={index + 1}
                 aria-setsize={total}
-                aria-label={`${row.name}, ${row.kind}, range ${rangeText}`}
+                aria-label={`${row.name}, ${row.kind}, range ${rangeText}${stale ? ", stale" : ""}`}
                 className="view-list__row"
                 style={{ transform: `translateY(${String(index * ROW_REM)}rem)` }}
                 data-index={index}
               >
                 <span className="view-list__name">{row.name}</span>
                 <span className="view-list__kind">{row.kind}</span>
-                <span className="view-list__number">{rangeText}</span>
+                <span className="view-list__number">
+                  <span className={stale ? "stale" : undefined}>{rangeText}</span>
+                  {stale ? <StaleMark /> : null}
+                </span>
               </div>
             );
           })}

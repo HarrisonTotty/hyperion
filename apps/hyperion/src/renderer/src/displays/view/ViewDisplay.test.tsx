@@ -15,6 +15,12 @@ import {
   aSystemsInRange,
   aUniverseList,
 } from "../../test/galaxyFixtures";
+import {
+  SCENE_TIDAL_RADIUS_M,
+  sceneClock,
+  shipInSystem,
+  sliceSceneSystem,
+} from "../../test/sceneFixture";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
@@ -32,6 +38,7 @@ import { precisionScene } from "../../view/scenes/precision";
 import { buildWireframeDrawList } from "../../view/wireframe/drawList";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
+import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, startRun, stepRun } from "./viewRun";
 
 const WIDTH_PX = 640;
@@ -73,9 +80,13 @@ function setup(
       <UniverseProvider>
         <GraphicsStatusContext value={store}>
           <UniversePanel expanded onToggle={() => undefined} />
-          <Activity mode={mode}>
-            <ViewDisplay engineSource={source} />
-          </Activity>
+          <ViewSceneProvider active={mode === "visible"} knownSystem={null}>
+            {() => (
+              <Activity mode={mode}>
+                <ViewDisplay engineSource={source} />
+              </Activity>
+            )}
+          </ViewSceneProvider>
         </GraphicsStatusContext>
       </UniverseProvider>
     </ServerLinkHarness>
@@ -217,6 +228,7 @@ describe("the VIEW display", () => {
     // The display's first frame is the scene at its start; its marks are where the draw list puts
     // them for the same camera and viewport.
     const run = stepRun(startRun(precisionScene()), {
+      serverScene: null,
       dtS: 0,
       held: new Set(),
       reducedMotion: false,
@@ -454,5 +466,147 @@ describe("the VIEW display's eased moves", () => {
     await user.keyboard("2");
     advance(16);
     expect(hullDistanceM(lastFrame()) - seat > 30).toBe(true);
+  });
+});
+
+/** Opens a universe, whose scene subscription the display then sends. */
+async function openUniverse(view: Setup): Promise<void> {
+  await act(async () => {
+    view.socket.serverAnswers("list_universes", () => aUniverseList());
+    await Promise.resolve();
+  });
+  await settle();
+  view.advance(300);
+  await view.user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+  await act(async () => {
+    view.socket.serverAnswers("open_universe", () => anOpenedUniverse());
+    await Promise.resolve();
+  });
+}
+
+/** Answers the scene subscription with the ship 1 AU out in the slice's system. */
+async function sceneArrives(socket: FakeWebSocket): Promise<void> {
+  await act(async () => {
+    socket.serverAnswers("subscribe", () => ({
+      kind: "subscribe",
+      subscription: 5,
+      state: {
+        topic: "scene",
+        sequence: 0,
+        clock: sceneClock(3_000),
+        ship: shipInSystem(3_000),
+        system: sliceSceneSystem(),
+        tidal_radius_m: SCENE_TIDAL_RADIUS_M,
+        craft: [],
+      },
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+function labelBlock(): string {
+  return screen.getByText("VIEW").parentElement?.textContent ?? "";
+}
+
+describe("the VIEW display's server scene", () => {
+  it("draws a kept scene in its place, saying why, while no universe is open", async () => {
+    const { advance } = setup();
+    await settle();
+    advance(300);
+    expect([
+      screen.getByRole("button", { name: "SERVER" }).getAttribute("aria-pressed"),
+      screen.getByText("SCENE NOT AVAILABLE: no universe open"),
+      labelBlock(),
+    ]).toEqual(["true", expect.anything(), expect.stringMatching(/SCENE.*PRECISION TEST/)]);
+  });
+
+  it("draws the server's scene once it arrives, and reports its camera", async () => {
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket);
+    await settle();
+    view.advance(300);
+    await settle();
+    expect([
+      labelBlock().includes("PRECISION TEST"),
+      screen.queryByText(/^SCENE /),
+      // The seat is on the stand-in's test hull, whose origin is metres from the eye.
+      hullDistanceM(view.lastFrame()) < 20,
+      view.socket.requestsOfKind("scene_cameras").at(-1)?.body.cameras.length,
+    ]).toEqual([false, null, true, 1]);
+  });
+
+  it("shows a scene the server ended as stale while it is reopened", async () => {
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket);
+    await settle();
+    view.advance(300);
+    act(() => {
+      view.socket.serverSends({
+        type: "subscription_ended",
+        subscription: 5,
+        error: { code: "internal", message: "the scene could not be advanced", field: null },
+      });
+    });
+    await settle();
+    view.advance(300);
+    expect([
+      screen.getByText("SCENE STALE: reopening the scene"),
+      screen.getByText(/^UT /).classList.contains("stale"),
+      screen.getByRole("heading", { name: "Targets stale" }),
+      labelBlock().includes("PRECISION TEST"),
+      screen
+        .getAllByRole("option")
+        .every((row) => row.getAttribute("aria-label")?.endsWith(", stale") === true),
+    ]).toEqual([expect.anything(), true, expect.anything(), false, true]);
+  });
+
+  it("says a camera report was refused, with the server's reason", async () => {
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket);
+    await settle();
+    view.advance(300);
+    const report = view.socket.requestsOfKind("scene_cameras").at(-1);
+    if (report === undefined) {
+      throw new Error("the view's camera is reported");
+    }
+    act(() => {
+      view.socket.serverRejects(report.id, {
+        code: "bad_request",
+        message: "a camera is outside the scene's reach",
+        field: "cameras",
+      });
+    });
+    await settle();
+    view.advance(300);
+    expect(
+      screen.getByText("CAMERA REPORT REFUSED: a camera is outside the scene's reach"),
+    ).toBeInTheDocument();
+  });
+
+  it("offers RETRY on a refused scene, which asks for it again", async () => {
+    const view = setup();
+    await openUniverse(view);
+    const subscribe = view.socket.requestsOfKind("subscribe").at(-1);
+    if (subscribe === undefined) {
+      throw new Error("the scene is asked for");
+    }
+    act(() => {
+      view.socket.serverRejects(subscribe.id, {
+        code: "internal",
+        message: "the scene could not be made",
+        field: null,
+      });
+    });
+    await settle();
+    view.advance(300);
+    expect(screen.getByText("SCENE REJECTED: the scene could not be made")).toBeInTheDocument();
+    await view.user.click(screen.getByRole("button", { name: "RETRY" }));
+    expect([
+      view.socket.requestsOfKind("subscribe").length,
+      screen.getByText("SCENE PENDING"),
+    ]).toEqual([2, expect.anything()]);
   });
 });

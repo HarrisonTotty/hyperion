@@ -1,3 +1,4 @@
+import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import type { LabelLine } from "./viewRun";
 
@@ -18,6 +19,7 @@ export interface ViewLabelBlockProps {
  *
  * @remarks
  * Each reading is an `output`; none is announced as it changes, since they change continuously. A
+ * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"). A
  * graphics fault is set as `StatusLine`'s fault, in `--status-caution`, apart from the steady
  * statements (the guide's "Alerts": a console's report on its own graphics is never an alert).
  */
@@ -30,7 +32,10 @@ export function ViewLabelBlock({ lines, statements, fault }: ViewLabelBlockProps
           <div className="field view-label__line" key={line.label}>
             <dt className="field__label">{line.label}</dt>
             <dd>
-              <output aria-live="off">{line.value}</output>
+              <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
+                {line.value}
+              </output>
+              {line.stale === true ? <StaleMark /> : null}
             </dd>
           </div>
         ))}
