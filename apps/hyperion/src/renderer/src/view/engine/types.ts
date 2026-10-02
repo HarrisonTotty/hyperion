@@ -391,6 +391,14 @@ export interface RenderEngine {
   /** The device's features, after the harness's overrides. */
   readonly capabilities: GpuCapabilities;
   readonly depthPolicy: DepthPolicy;
+  /**
+   * A view drawing into `canvas`, under `name` (the name a `view-refused` fault carries).
+   *
+   * @throws Error when the canvas gives no WebGPU context or the context cannot be configured;
+   *   the caller reports it (`ViewDisplay` shows `NOT_MADE`; a restore reports `view-refused`).
+   * @remarks
+   * `ResilientEngine` makes a view while there is no device too: it draws from the restore on.
+   */
   createView(canvas: HTMLCanvasElement, name: string): RenderView;
   /** An offscreen colour target with its own depth: HDR, bloom chains, stills, the harness. */
   createRenderTarget(spec: RenderTargetSpec): RenderTarget;

@@ -14,7 +14,7 @@ import {
 
 const SPEC: WgslMaterialSpec = {
   name: "hull",
-  displayName: "TEST HULL",
+  displayName: "TEST MATERIAL",
   vertexWgsl: "vertex",
   fragmentWgsl: "fragment",
   uniforms: [{ name: "tint", type: "vec4f" }],
