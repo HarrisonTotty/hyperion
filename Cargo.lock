@@ -754,6 +754,7 @@ name = "hyperion-surface"
 version = "0.1.0"
 dependencies = [
  "hyperion-base",
+ "hyperion-testkit",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]

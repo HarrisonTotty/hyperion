@@ -24,6 +24,11 @@ hyperion-base.workspace = true
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 wasm-bindgen.workspace = true
 
+# Golden files, test inputs and order checks, for the tests alone: a dev-dependency, so the crate's
+# runtime boundary, `hyperion-base` alone, holds (plan R05, T1.a).
+[dev-dependencies]
+hyperion-testkit.workspace = true
+
 # The browser target's harness, on that target alone, never on `cfg(target_arch = "wasm32")`, which
 # would build it into the wasip1 runs too (plan R04, Design note 12).
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
