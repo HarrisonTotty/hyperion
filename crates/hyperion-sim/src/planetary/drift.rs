@@ -206,7 +206,8 @@ impl DriftingOrbit {
 
     /// The position and velocity relative to the primary at `t`, m and m s⁻¹: the elements'
     /// Kepler state, or for an evolving orbit the model of its cell
-    /// ([`KeplerElements::drifting_state_at`]).
+    /// ([`KeplerElements::drifting_state_at`]), whose velocity is its position's time derivative
+    /// (P14.T45.e).
     #[must_use]
     pub fn relative_state_at(&self, t: UniverseTime) -> (SystemVector, SystemVelocity) {
         match &self.drift {
@@ -559,4 +560,4 @@ pub(crate) fn recession_phase_ratio_less_one(x: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

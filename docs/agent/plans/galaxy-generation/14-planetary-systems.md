@@ -2500,6 +2500,45 @@ mean_motion_rate_rad_per_s2 }`, and `drift: Option<OrbitDriftDto>` on `BodyOrbit
     system goldens, `orbit/drifting_states`, the server's `scene_systems` and `orbit.test.ts`'s
     vectors regenerated. `PROTOCOL_VERSION` stays 2; `lib/orbit.ts` and `bodiesWire.ts` are
     unchanged.
+- **P14.T45.e The drift velocity is the position's derivative.** Added 2026-10-02 by a delegated
+  decision ("two RM1 validation items", item 2), after T45.d. The drift model's velocity is the
+  Kepler velocity of the elements at the time, which leaves out ȧ ∂r/∂a + ė ∂r/∂e. On a late-AGB
+  superwind host (2 M☉, Ṁ 1.25 × 10⁻⁵ M☉ yr⁻¹, M 0.63 M☉) that is ȧ = a Ṁ ÷ M ≈ 0.90 m s⁻¹ at
+  9.5 au (0.47–3.9 m s⁻¹ across 5–42 au at that Ṁ and M), 1.2 × 10⁻⁴ of n a: a state vector extrapolated a day
+  misses by 78 km, and a ship matched to a body's `state_at` velocity separates from it at that
+  rate. That breaks the brainstorm's rule that an observed position and velocity, extrapolated and
+  jumped to, land exactly (`galaxy-generation.md` §Orbits and time). Elsewhere the term is below
+  every consumer's resolution (10⁻¹⁰–10⁻⁵ m s⁻¹).
+  - **The velocity.** v = v_Kepler(a(t), e(t), n(t), M(t)) + ȧ ∂r/∂a + ė ∂r/∂e, at fixed M (the
+    model's M does not depend on e, so ∂E/∂e = sin E ÷ (1 − e cos E)). In the orbit's plane,
+    before the rotation and in this order:
+    - vₓ += ȧ ((1 − e) − (1 − cos E)) − ė a (1 + sin²E ÷ (1 − e cos E));
+    - v_y += ȧ √((1 − e)(1 + e)) sin E + ė a sin E (√(1 − e²) cos E ÷ (1 − e cos E) − e ÷ √(1 − e²)),
+
+    with the (1 − cos E) and (1 − e) + e (1 − cos E) forms the position uses. It is not
+    documented as "the osculating velocity": the record's elements are the secular law's mean
+    elements, and the real osculating eccentricity oscillates at order Ψ = ȧ ÷ (n a)
+    (Veras et al. 2011, MNRAS 417, 2104, eq. 17; Ψ as their eq. 15).
+
+  - **Files.** `orbit/kepler.rs`: only `drifting_state_at` gains the terms; the perifocal step is
+    factored so that `relative_state_at` and `elliptic_state` stay bit for bit (no +0.0 for a
+    fixed orbit). `lib/orbit.ts` `stateAt`: the same additions in the same order, inside the
+    `drift !== undefined` branch only. Docs: `drifting_state_at`, `planetary/system.rs`'s
+    `state_at`, `planetary/drift.rs`'s `DriftingOrbit`, this plan's R03.T3 note ("superseded by
+    P14.T45.a and T45.e") and T45.d's "Corners left" ("closed by T45.e").
+  - _Tests:_ the velocity against a central difference of `drifting_state_at` positions at ±1 s and
+    ±60 s inside a cell, on the late-AGB case of `fate/tests.rs`, a receding moon and a
+    circularising orbit, within 10⁻⁹ of n a or the difference's rounding; T45.d's "model's speed
+    against vis-viva under 10⁻⁹" restated on the Kepler part, v − (ȧ ∂r/∂a + ė ∂r/∂e), since the
+    full speed of a superwind orbit exceeds vis-viva by about Ψ² ÷ 2 ≈ 7 × 10⁻⁹, which is
+    physical; the cell-end velocity-step test re-run.
+  - _Accept:_ `cargo test -p hyperion-sim` (whole); `cargo test -p hyperion-server`;
+    `just gen-protocol-check`; the client's `lib` and `scene` tests,
+    `pnpm --filter hyperion exec vitest run src/renderer/src/lib src/renderer/src/scene`; the
+    science checker on the derivative and the doc text. One
+    `GENERATOR_VERSION` bump, 18 → 19: values move in `orbit/drifting_states` and
+    `observe/in_system`, and every other golden changes only its version line. `PROTOCOL_VERSION`
+    stays 2, and the wire and `bodiesWire.ts` are unchanged.
 
 ### Phase I: the `SYSTEM` display
 
@@ -5516,7 +5555,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   and `Epoch::velocity` on `centre`'s walk (bit for bit plan 11's `star_states_at` for a star's
   zone, tested), plus the Kepler velocity about the host and, for a moon, its own. The velocity is
   the Kepler state's at the elements then, leaving out the elements' slow drift (tidal migration,
-  mass loss). The position path is untouched and every planetary golden unchanged; tests in
+  mass loss); **superseded by P14.T45.a and T45.e**: for an evolving orbit the velocity is the
+  drifting position's time derivative, the model's mean motion with ȧ ∂r/∂a + ė ∂r/∂e. The
+  position path is untouched and every planetary golden unchanged; tests in
   `planetary/system/tests.rs` (`a_state_s_position_is_position_at_s_bit_for_bit`,
   `a_body_s_velocity_is_the_derivative_of_its_position`,
   `a_star_s_zone_moves_with_star_states_at_bit_for_bit`).
@@ -5691,7 +5732,8 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     10⁻⁵ m s⁻¹ cap; ends cut at a break are sampled too.
   - _Corners left._ The track's floor at the core mass can turn a corner inside a knot interval
     if an envelope runs out there at the AGB's end; it is not a break, and the rule is exact only
-    to that corner's error. The model's velocity omits ∂r ÷ ∂a · ȧ, as in T45.a (`elliptic_state`).
+    to that corner's error. The model's velocity omits ∂r ÷ ∂a · ȧ, as in T45.a (`elliptic_state`):
+    **closed by T45.e**, which adds ȧ ∂r/∂a + ė ∂r/∂e (0.9 m s⁻¹ at 9.5 au on a late-AGB host).
   - _Tests._ The reference is 64 panels of the 32-point rule on each interval between the law's
     break points, not 4,000 uniform panels: a uniform reference converges only as h² at the kinks.
     It shares the law's breaks, so a missing break is caught only through the refinement
@@ -5725,3 +5767,40 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     - The clean-cell velocity-step bound carries the rounding term.
     - The smooth host mass is a change beyond the decision, to the stellar code's read of a
       track's mass.
+- **P14.T45.e, as built (fix lane F4, 2026-10-02). `GENERATOR_VERSION` 18 → 19.**
+  - _Files._ `orbit/kepler.rs`: `elliptic_state` now builds a private `PlaneState` (the in-plane
+    state with sin E, cos E, 1 − cos E, 1 − e, √(1 − e²) and r ÷ a) and rotates it, with the same
+    operations in the same order, so `relative_state_at` and `open.rs`'s callers are unchanged to
+    the bit (`orbit/states.golden` moved only its version line). `drifting_state_at` alone calls
+    `PlaneState::add_rate_terms` before the rotation. `lib/orbit.ts` adds the same two expressions
+    in the drift branch only.
+  - _Tests._ `planetary::drift::tests::velocity_derivative_excess` (the drift tests module is now
+    `pub(crate)`, test-only) measures the velocity against central differences at ±1 s and ±60 s,
+    less 4 ulp of r over the baseline and the truncation h² v (v ÷ r)² ÷ 3, sound for e ≤ 0.5. It
+    is held under 10⁻⁹ of the speed on the synthetic moons and an orbit with Ψ = 5 × 10⁻⁴ and
+    ė ÷ n = 5 × 10⁻⁵ (`drift/tests.rs`), the late-AGB host's orbits at 3 and 25 au and an
+    eccentric orbit circularising about a 50 Myr Sun (`fate/tests.rs`), and every drifting record
+    of the sample at the epoch, receding moons and circularising planets among them
+    (`system/tests.rs`). Without the terms the late-AGB case misses by 1.1 × 10⁻⁴. The vis-viva
+    test is now `the_models_kepler_speed_is_the_kepler_speed_of_the_laws_elements`, on
+    v − ȧ r ÷ a(t) (its orbits are circular, with ė = 0). `orbit.test.ts` gains the central
+    difference with large synthetic rates; "is the fixed orbit at its reference time" now compares
+    positions, since the velocity there carries the rates.
+  - _Velocity step at cell ends._ The step test now holds the Kepler part to the T45.d bounds and
+    the full velocity to that plus |Δȧ|. On clean cells |Δȧ| = |ä| S was at most a few
+    10⁻⁹ m s⁻¹ (asserted under 10⁻⁸). At a break where the host's Ṁ jumps, the derivative jumps
+    with it: on the late-AGB host the superwind ends 16 yr after the epoch, and the velocity of
+    the planets at 3 and 10 au steps there by 0.90 and 2.99 m s⁻¹, the whole ȧ. The position is
+    continuous; this is the model law's own kink, which the Kepler velocity hid.
+  - _Goldens._ Values moved only in `orbit/drifting_states` (16 of its lines, in `vx vy vz` only) and
+    `observe/in_system` (`velocity_now` and, through aberration, apparent positions); every other
+    golden changed only its version line (`galaxy_parameters` states it in its body).
+    `orbit.test.ts` and `test/inSystemGolden.ts` read the goldens directly and pass unchanged.
+    `PROTOCOL_VERSION` stays 2.
+  - _Science check._ The derivative and the client's mirror verified numerically. The decision's
+    "0.24–2.0 m s⁻¹ across 5–42 au" does not follow from the host's stated Ṁ and M, which give
+    0.47–3.9 m s⁻¹ (the 9.5 au figure, 0.89 m s⁻¹, does); the task text above uses the latter.
+    The osculating eccentricity's oscillation is Veras et al.'s eq. 17, with Ψ their eq. 15.
+  - **For the owner:** the velocity of a planet of a superwind host now steps by up to a few
+    m s⁻¹ where the host's mass-loss rate jumps (a track knot or the AGB's end), since the model's
+    Ṁ is piecewise; a ship matched to the body just before then separates at that rate after.
