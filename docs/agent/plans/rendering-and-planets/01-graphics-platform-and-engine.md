@@ -2615,3 +2615,13 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
   - **Not run:** the validation-layer soak, because the layer is not installed (T12 as built).
     The proposal to move `just test-render` into `ci` still waits for an Electron upgrade with no
     harness failure.
+- **Fixed in RM1 validation (2026-10-02)** (`validation-r01.md`, every finding):
+  - **M1, the readback guard (T8.f).** `dispatch` now records a storage texture as the kernel's
+    only when its declaration is writable, as it already did for buffers, so a bit-exact kernel
+    that reads a presentation-only texture no longer clears its mark, and a presentation-only
+    kernel that reads a texture no longer marks it. A write of part of a resource keeps a
+    presentation-only mark (`WriterRecord.wrotePart`): a CPU `writeBuffer` or `writeTexture`
+    clears the writer only when it covers every byte or texel (`coversBuffer`, `coversTexture`),
+    a packed-cube level (CPU or copied) only when the cube has one level, a kernel's storage
+    texture only when it has one level, and a splat (it adds to what is there) never. Tests:
+    `engine.test.ts` (the engine over `FakeDevice`) and `readback.test.ts`.

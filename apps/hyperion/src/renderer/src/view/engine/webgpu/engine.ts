@@ -86,6 +86,8 @@ import {
 } from "./pointSplat";
 import {
   assertBufferReadable,
+  coversBuffer,
+  coversTexture,
   readGpuBuffer,
   readGpuTexture,
   textureRead,
@@ -466,7 +468,12 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
     this.#assertLive();
     this.#resources.writePackedCubeLevel(cube, level, packed);
-    this.#writers.wroteOtherwise(cube);
+    // One level of several is a part of the cube.
+    if (this.#resources.textureOf(cube).spec.mips === 1) {
+      this.#writers.wroteOtherwise(cube);
+    } else {
+      this.#writers.wrotePart(cube, null);
+    }
   }
 
   writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void {
@@ -475,7 +482,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed);
     });
     // The cube carries the buffer's writer, so a presentation-only result stays refused.
-    this.#writers.copied(packed, cube);
+    this.#writers.copied(packed, cube, this.#resources.textureOf(cube).spec.mips === 1);
   }
 
   /**
@@ -511,7 +518,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         this.#submit(spec.name, (encoder) => {
           encodeSplat(this.device, encoder, pipeline, texture, buffer, count, spec.name, writes);
         });
-        this.#writers.wroteOtherwise(target);
+        // A splat adds to what the target holds, so it keeps the target's writer.
+        this.#writers.wrotePart(target, null);
         this.#resolveTimes();
       },
       dispose: (): void => {
@@ -546,20 +554,34 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         ...(timestampWrites === undefined ? {} : { timestampWrites }),
       });
     });
+    // Only what the kernel may write is recorded: a binding declared `read` (a `read` storage
+    // texture, a `read` storage buffer) keeps the writer it had (Design note 16).
     for (const [name, handle] of Object.entries(bindings.buffers)) {
       if (record.bindings.get(name)?.writable === true) {
         this.#writers.wroteBy(handle, record.pair);
       }
     }
-    for (const { texture } of Object.values(bindings.storage)) {
-      this.#writers.wroteBy(texture, record.pair);
+    for (const [name, { texture }] of Object.entries(bindings.storage)) {
+      if (record.bindings.get(name)?.writable !== true) {
+        continue;
+      }
+      // A kernel writes the one level it is bound at: the whole texture only when it has one.
+      if (this.#resources.textureOf(texture).spec.mips === 1) {
+        this.#writers.wroteBy(texture, record.pair);
+      } else {
+        this.#writers.wrotePart(texture, record.pair);
+      }
     }
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     this.#assertLive();
     this.#resources.writeBuffer(buffer, offsetBytes, data);
-    this.#writers.wroteOtherwise(buffer);
+    if (coversBuffer(this.#resources.bufferOf(buffer).spec, offsetBytes, data.byteLength)) {
+      this.#writers.wroteOtherwise(buffer);
+    } else {
+      this.#writers.wrotePart(buffer, null);
+    }
   }
 
   writeTexture(
@@ -570,7 +592,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   ): void {
     this.#assertLive();
     this.#resources.writeTexture(texture, origin, size, data);
-    this.#writers.wroteOtherwise(texture);
+    if (coversTexture(this.#resources.textureOf(texture).spec, origin, size, 0)) {
+      this.#writers.wroteOtherwise(texture);
+    } else {
+      this.#writers.wrotePart(texture, null);
+    }
   }
 
   readBuffer(buffer: BufferHandle, access: "cpu" | "tolerance" = "cpu"): Promise<ArrayBuffer> {

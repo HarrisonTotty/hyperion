@@ -6,6 +6,8 @@ import type { TextureSpec } from "../memory";
 import { PresentationOnlyReadback } from "../types";
 import {
   assertBufferReadable,
+  coversBuffer,
+  coversTexture,
   paddedBytesPerRow,
   stagingLayout,
   textureRead,
@@ -170,9 +172,39 @@ describe("a copy", () => {
     const buffer = {};
     const cube = {};
     writers.wroteBy(buffer, ROUGH);
-    writers.copied(buffer, cube);
+    writers.copied(buffer, cube, true);
     expect(() => {
       writers.assertReadable(cube, "cpu");
     }).toThrow(PresentationOnlyReadback);
+  });
+
+  it("of part of a resource keeps the destination's presentation-only mark", () => {
+    const writers = new WriterRecord();
+    const buffer = {};
+    const cube = {};
+    writers.wroteBy(cube, ROUGH);
+    writers.copied(buffer, cube, false);
+    expect(() => {
+      writers.assertReadable(cube, "cpu");
+    }).toThrow(PresentationOnlyReadback);
+  });
+});
+
+describe("a write's coverage", () => {
+  const buffer = { name: "b", bytes: 16, usage: BUFFER_USAGE.COPY_DST, category: "other" } as const;
+
+  it("covers a buffer only from its start to its end", () => {
+    expect(coversBuffer(buffer, 0, 16)).toBe(true);
+    expect(coversBuffer(buffer, 0, 4)).toBe(false);
+    expect(coversBuffer(buffer, 4, 12)).toBe(false);
+  });
+
+  it("covers a texture only over every texel and layer of its one level", () => {
+    const cube = textureOf("rgba8unorm", { mips: 1, size: [8, 8], dimension: "cube" });
+    expect(coversTexture(cube, [0, 0, 0], [8, 8, 6], 0)).toBe(true);
+    expect(coversTexture(cube, [0, 0, 0], [8, 8, 1], 0)).toBe(false);
+    expect(coversTexture(cube, { x: 1 }, [8, 8, 6], 0)).toBe(false);
+    const mipped = textureOf("rgba8unorm", { mips: 2, size: [8, 8] });
+    expect(coversTexture(mipped, [0, 0], [8, 8], 0)).toBe(false);
   });
 });
