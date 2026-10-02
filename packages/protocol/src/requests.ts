@@ -321,6 +321,7 @@ export class RequestClient {
     topic: Extract<SubscriptionTopic, { topic: T }>,
   ): PendingSubscription<T> {
     let opened: Subscription<T> | undefined;
+    let unreadable: string | undefined;
     const started = this[startRequest](
       { kind: "subscribe", universe, topic },
       {
@@ -329,14 +330,19 @@ export class RequestClient {
             return;
           }
           const id = response.subscription;
-          if (isStateOf(topic.topic, response.state)) {
+          const state: unknown = response.state;
+          if (!isTagged(state)) {
+            // A state that cannot even be told apart, such as none at all.
+            unreadable = "its state has no topic";
+          } else if (isStateOf(topic.topic, response.state)) {
             opened = this.#subscriptions.open(id, response.state, () => {
               this.#unsubscribe(id);
             });
-          } else {
-            // Opened, but not as asked: the subscription is of no use and is ended at once.
-            this.#unsubscribe(id);
+            return;
           }
+          // Opened, but not as asked or not readably: the subscription is of no use and is ended
+          // at once.
+          this.#unsubscribe(id);
         },
         onLateAnswer: (late) => {
           // Answered as it was cancelled: the server holds a subscription nobody will read.
@@ -355,7 +361,10 @@ export class RequestClient {
           ok: false,
           error: {
             code: "protocol_violation",
-            message: `the server opened a subscription to another topic than ${topic.topic}`,
+            message:
+              unreadable === undefined
+                ? `the server opened a subscription to another topic than ${topic.topic}`
+                : `the server's subscribe answer could not be read: ${unreadable}`,
           },
         };
       }
@@ -557,6 +566,19 @@ export class RequestClient {
     );
     return this.#lastId;
   }
+}
+
+/**
+ * Whether a subscription's state, as parsed from the wire, has a `topic` to be told apart by: the
+ * protocol trusts the server's messages, and a state may still be missing.
+ */
+function isTagged(state: unknown): boolean {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    "topic" in state &&
+    typeof state.topic === "string"
+  );
 }
 
 /** Whether `state` is the state of a subscription to `topic`, which makes it a {@link StateOf}. */

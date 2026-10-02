@@ -5,6 +5,7 @@ import type { RequestError } from "./generated/RequestError";
 import type { SceneNotificationDto } from "./generated/SceneNotificationDto";
 import type { SceneStateDto } from "./generated/SceneStateDto";
 import type { ServerMessage } from "./generated/ServerMessage";
+import { decodeServerMessage } from "./index";
 import { RequestClient } from "./requests";
 import type { NotificationOf, Subscription, SubscriptionEnd } from "./subscriptions";
 
@@ -207,6 +208,56 @@ describe("RequestClient.subscribe", () => {
     expect(second.ended).toBe(false);
     // The server already ended it: the client sends no unsubscribe of its own.
     expect(sent.filter((message) => message.type === "request")).toHaveLength(2);
+  });
+
+  it("ends the subscription as internal when the server's reason cannot be read", async () => {
+    const { client, sent } = recordingClient();
+    const subscription = await sceneSubscription(client, sent, 1);
+    const ends: SubscriptionEnd[] = [];
+    subscription.onEnd((end) => ends.push(end));
+
+    expect(
+      client.handleServerMessage(
+        decodeServerMessage('{"type":"subscription_ended","subscription":1}'),
+      ),
+    ).toBe(true);
+
+    expect(subscription.ended).toBe(true);
+    expect(ends).toEqual([
+      {
+        kind: "ended",
+        error: {
+          code: "internal",
+          message: "the server ended the subscription without a reason the client can read",
+          field: null,
+        },
+      },
+    ]);
+  });
+
+  it("settles a subscribe answered with no state as a protocol violation, and unsubscribes", async () => {
+    const { client, sent } = recordingClient();
+    const pending = client.subscribe(UNIVERSE, { topic: "scene", detail: "full", cameras: [] });
+    const id = lastRequestId(sent);
+
+    expect(
+      client.handleServerMessage(
+        decodeServerMessage(
+          JSON.stringify({
+            type: "response",
+            id,
+            body: { kind: "subscribe", subscription: 4, state: null },
+          }),
+        ),
+      ),
+    ).toBe(true);
+
+    const outcome = await pending.outcome;
+    expect(outcome.ok ? null : outcome.error.code).toBe("protocol_violation");
+    expect(sent[sent.length - 1]).toMatchObject({
+      type: "request",
+      body: { kind: "unsubscribe", subscription: 4 },
+    });
   });
 
   it("consumes and ignores a subscription_ended for a subscription it does not have", () => {

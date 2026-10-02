@@ -1,8 +1,9 @@
-import type {
-  NotificationBody,
-  SceneStateDto,
-  ServerMessage,
-  UniverseIdHex,
+import {
+  decodeServerMessage,
+  type NotificationBody,
+  type SceneStateDto,
+  type ServerMessage,
+  type UniverseIdHex,
 } from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
@@ -678,6 +679,111 @@ describe("useScene", () => {
       reason: "clock rate unusable",
     });
     expect(socket.requestsOfKind("unsubscribe").map(({ body }) => body.subscription)).toEqual([3]);
+  });
+
+  it("refuses an opening state with no clock, and unsubscribes", async () => {
+    const { result, socket } = renderScene();
+    const { clock: _clock, ...noClock } = stateInSystem();
+    const [request] = socket.requestsOfKind("subscribe");
+    if (request === undefined) {
+      throw new Error("no subscribe was sent");
+    }
+
+    act(() => {
+      socket.serverSends(
+        decodeServerMessage(
+          JSON.stringify({
+            type: "response",
+            id: request.id,
+            body: { kind: "subscribe", subscription: 3, state: { topic: "scene", ...noClock } },
+          }),
+        ),
+      );
+    });
+    await settle();
+
+    expect(result.current.status).toMatchObject({ kind: "rejected", code: "unusable" });
+    expect(socket.requestsOfKind("unsubscribe").map(({ body }) => body.subscription)).toEqual([3]);
+  });
+
+  it("subscribes again after a push with no clock", async () => {
+    const { result, socket } = renderScene();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 1);
+
+    act(() => {
+      socket.serverSends(
+        decodeServerMessage(
+          JSON.stringify({
+            type: "notification",
+            subscription: 1,
+            body: { topic: "scene", sequence: 1, bodies: [] },
+          }),
+        ),
+      );
+    });
+
+    expect(result.current.status).toEqual({ kind: "stale", reason: "resubscribing" });
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(2);
+  });
+
+  it("reopens a scene the server ended without a reason it can read", async () => {
+    const { result, socket } = renderScene();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 1);
+
+    act(() => {
+      socket.serverSends(decodeServerMessage('{"type":"subscription_ended","subscription":1}'));
+    });
+
+    expect(result.current.status).toEqual({ kind: "stale", reason: "resubscribing" });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    expect(socket.requestsOfKind("subscribe")).toHaveLength(2);
+  });
+
+  it("has its full count of resubscriptions again once the link returns after giving up", async () => {
+    const { result, socket } = renderScene();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await opens(socket, 1);
+    const endedThenOpened = async (subscription: number): Promise<void> => {
+      act(() => {
+        socket.serverSends(ended(subscription));
+      });
+      act(() => {
+        vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+      });
+      await opens(socket, subscription + 1);
+    };
+    await endedThenOpened(1);
+    await endedThenOpened(2);
+    await endedThenOpened(3);
+    act(() => {
+      socket.serverSends(ended(4));
+    });
+    expect(result.current.status).toMatchObject({ kind: "rejected", code: "internal" });
+
+    act(() => {
+      socket.close();
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    const next = FakeWebSocket.latest();
+    act(() => {
+      next.serverWelcomes();
+    });
+    await opens(next, 1);
+    act(() => {
+      next.serverSends(ended(1));
+    });
+
+    expect(result.current.status).toEqual({ kind: "stale", reason: "resubscribing" });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    expect(next.requestsOfKind("subscribe")).toHaveLength(2);
   });
 
   it("subscribes again after a push it cannot use, and gives up after three in a row", async () => {

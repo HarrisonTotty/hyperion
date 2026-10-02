@@ -26,7 +26,15 @@ import { type SceneFrame, sceneAt, shipObserver } from "./apparent";
 import { CameraReporter } from "./cameraReports";
 import type { SceneKinematics, SceneModel } from "./model";
 import { renderTime } from "./sceneClock";
-import { applySceneNotification, type Designate, toSceneModel } from "./sceneWire";
+import {
+  applySceneNotification,
+  type Designate,
+  type SceneUpdate,
+  toSceneModel,
+} from "./sceneWire";
+
+/** Why a scene message could not be used. */
+type SceneFault = Extract<SceneUpdate, { readonly kind: "fault" }>;
 
 /**
  * Why a scene could not be opened: the server's refusal, or `unusable` for an opening state the
@@ -135,6 +143,23 @@ function sceneNotification(notification: NotificationOf<"scene">): SceneNotifica
   return scene;
 }
 
+/**
+ * What `read` makes of a message from the server, or a fault for the `TypeError` of a message
+ * malformed deeper than the adapter checks (a system with no grants, say), so that the scene is
+ * refused or resubscribed rather than left opening or stale for good. Any other error is a bug,
+ * and is thrown on.
+ */
+function unthrown<T extends SceneUpdate>(read: () => T, what: string): T | SceneFault {
+  try {
+    return read();
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      return { kind: "fault", fault: `${what}: ${error.message}` };
+    }
+    throw error;
+  }
+}
+
 /** The system a model holds, by which a frame's predecessor is kept or dropped. */
 function systemOf(model: SceneModel | null): SystemIdHex | null {
   return model?.system?.model.system ?? null;
@@ -207,8 +232,17 @@ class SceneStore {
   /** The current snapshot, the same object until it changes. */
   readonly getSnapshot = (): SceneSnapshot => this.#snapshot;
 
-  /** Opens the subscription, the link being up. */
+  /**
+   * Opens the subscription afresh, the link being up: the count of resubscriptions starts again,
+   * so that a scene given up before the link dropped has its full count once it returns.
+   */
   open(): void {
+    this.#resubscriptions = 0;
+    this.#open();
+  }
+
+  /** Opens the subscription, the link being up. */
+  #open(): void {
     const universe = this.universe;
     if (universe === null) {
       return;
@@ -268,7 +302,6 @@ class SceneStore {
     if (status !== "rejected" && status !== "timed_out") {
       return;
     }
-    this.#resubscriptions = 0;
     this.#set({ status: { kind: "pending" } });
     this.open();
   };
@@ -314,7 +347,10 @@ class SceneStore {
   };
 
   #adopt(subscription: Subscription<"scene">, generation: number): void {
-    const opened = toSceneModel(sceneState(subscription.state), this.#designate);
+    const opened = unthrown(
+      () => toSceneModel(sceneState(subscription.state), this.#designate),
+      "opening state unreadable",
+    );
     if (opened.kind === "fault") {
       subscription.unsubscribe();
       this.#set({ status: { kind: "rejected", code: "unusable", reason: opened.fault } });
@@ -393,7 +429,10 @@ class SceneStore {
     if (model === null) {
       return;
     }
-    const update = applySceneNotification(model, sceneNotification(notification), this.#designate);
+    const update = unthrown(
+      () => applySceneNotification(model, sceneNotification(notification), this.#designate),
+      "notification unreadable",
+    );
     switch (update.kind) {
       case "ok":
         this.#resubscriptions = 0;
@@ -441,12 +480,12 @@ class SceneStore {
     console.error(`${why}; resubscribing`);
     this.#goStale("resubscribing");
     if (delayMs <= 0) {
-      this.open();
+      this.#open();
       return;
     }
     this.#retry = setTimeout(() => {
       this.#retry = undefined;
-      this.open();
+      this.#open();
     }, delayMs);
   }
 
