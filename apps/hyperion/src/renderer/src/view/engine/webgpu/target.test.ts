@@ -5,13 +5,20 @@ import { TEXTURE_USAGE } from "../gpuFlags";
 import type { AllocationEvent } from "../memory";
 import { summariseAdapter } from "../platform";
 import {
+  ColourSelfSample,
   DepthSelfSample,
   type DrawItem,
   type RenderTargetSpec,
   type TextureHandle,
 } from "../types";
 import { ResourceRegistry } from "./resources";
-import { assertNoDepthSelfSample, assertTargetFits, colourSpec, depthSpec } from "./target";
+import {
+  assertNoColourSelfSample,
+  assertNoDepthSelfSample,
+  assertTargetFits,
+  colourSpec,
+  depthSpec,
+} from "./target";
 
 const SPEC: RenderTargetSpec = {
   name: "hdr",
@@ -113,6 +120,41 @@ describe("a draw sampling a target's depth", () => {
     }).not.toThrow();
     expect(() => {
       assertNoDepthSelfSample("terrain", depth, [draw({ lut: other })]);
+    }).not.toThrow();
+  });
+});
+
+describe("a draw or a post-process sampling a target's colour", () => {
+  const colour: TextureHandle = Object.freeze({ kind: "texture", name: "bloom:colour" });
+  const other: TextureHandle = Object.freeze({ kind: "texture", name: "lut" });
+  const bloom = { kind: "post-process", name: "bloom" } as const;
+
+  it("is refused in a draw into the same target, naming the target and the material", () => {
+    const attempt = (): void => {
+      assertNoColourSelfSample("bloom", colour, {
+        draws: [draw({ lut: other }), draw({ scene: colour })],
+        postProcesses: [],
+      });
+    };
+    expect(attempt).toThrow(ColourSelfSample);
+    expect(attempt).toThrow("material aerial samples the colour of bloom");
+  });
+
+  it("is refused in a post-process of the same target, naming it", () => {
+    expect(() => {
+      assertNoColourSelfSample("bloom", colour, {
+        draws: [],
+        postProcesses: [{ postProcess: bloom, uniforms: {}, textures: { level: colour } }],
+      });
+    }).toThrow("post-process bloom samples the colour of bloom");
+  });
+
+  it("passes when nothing samples it", () => {
+    expect(() => {
+      assertNoColourSelfSample("bloom", colour, {
+        draws: [draw({ lut: other })],
+        postProcesses: [{ postProcess: bloom, uniforms: {} }],
+      });
     }).not.toThrow();
   });
 });
