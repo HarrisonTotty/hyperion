@@ -680,7 +680,7 @@ and `--port`.
    order: a gas envelope, the giant of its class, L = 0; a runaway greenhouse, Venus's, L = 0; a
    magma ocean, `magma` (Mercury's curve, L = 1, provisional) under 30 kPa and Venus's at or above
    it; a snowball, `snowball` (the Moon's curve, L = 1, provisional, q solved to Europa's 1.01);
-   airless rock, the Moon's or Mercury's, L = 1; airless ice, `airless-ice` (the Moon's curve,
+   airless rock, Mercury's, L = 1 (the Moon's kept as a test analogue); airless ice, `airless-ice` (the Moon's curve,
    L = 1, provisional, q solved to Ganymede's 0.80); a temperate world under 30 kPa the Mars
    template with L = 0.5, otherwise Earth's, L = 0. The cloud condition (c under 0.3) is suspended
    while plan 14's cloud fraction is a constant of the state, and restored when it depends on the
@@ -1024,7 +1024,7 @@ and the stated ratio p_V q_V ÷ A_Bond; the template and L chosen from surface p
 fraction by Design note 5's rule as decision-phase-curves (2026-10-02) restates it (the surface
 state first; 30 kPa for the magma and Mars branches; airless ice and snowball on the Moon's curve
 with q solved to Ganymede's 0.80 and Europa's 1.01; magma the thin branch only), p = the
-analogue's p × A_Bond ÷ the analogue's Bond albedo, capped so that p q ≤ 1; its tests reproduce Mallama et al. 2017's
+analogue's p × A_Bond ÷ the generator's albedo for the analogue (Europa's measured 0.68 for the snowball; decision-p14-phase-j, 9), capped so that p q ≤ 1; its tests reproduce Mallama et al. 2017's
 Table 7 and the computed q to 0.5% and state each analogue's ratio. Add two checks for plan 14's
 owner: airless rock's Bond albedo of 0.11 against the Moon's p_V 0.12 and a Mercury-like q of 0.48,
 which give 0.06 (Lane and Irvine 1973 to be read); and Earth's p_V 0.434 with Tinetti's curve, which
@@ -1054,7 +1054,7 @@ the detail level that grants it (`bulk`, the level that grants `bulk.radius_m`, 
 both). The client twin of `body_fixed_at` matches a Rust fixture to 10⁻⁹ rad at five times either
 side of the locking time. _Drafted (2026-10-02):_ plan 14's Phase J, P14.T46 (moment of inertia,
 rotation, flattening, datum, wire, one bump) and P14.T47 (photometry), marked "drafted for the
-owner (delegated decision pending)".
+owner (delegated decision pending)". Accepted with amendments 2026-10-02 (decision-p14-phase-j).
 
 #### R07.T2 The photometric section on the scene
 
