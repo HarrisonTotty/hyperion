@@ -8,6 +8,7 @@ import { precisionScene } from "../../view/scenes/precision";
 import {
   commandRun,
   frameName,
+  freeRateReading,
   labelLines,
   labelStatements,
   markRows,
@@ -96,6 +97,13 @@ describe("a view's run", () => {
   it("steps the field of view", () => {
     const narrower = done(commandRun(startRun(precisionScene()), { kind: "fov", step: -1 }, CUT));
     expect(narrower.camera.fovDeg).toBe(45);
+  });
+
+  it("reads the free camera's rate in m/s below 1 km/s and in km/s from there", () => {
+    expect(freeRateReading(0)).toBe("RATE 1.00 m/s");
+    expect(freeRateReading(5)).toBe("RATE 316 m/s");
+    expect(freeRateReading(6)).toBe("RATE 1.00 km/s");
+    expect(freeRateReading(7)).toBe("RATE 3.16 km/s");
   });
 
   it("aims the camera at the next target", () => {

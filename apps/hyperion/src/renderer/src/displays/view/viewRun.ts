@@ -10,11 +10,17 @@ import {
   type BodyDistanceUnit,
   formatBodyDistance,
   formatNumber,
+  formatSignificant,
   formatUniverseTimeDhms,
 } from "../../lib/format";
 import { norm } from "../../geometry/vec3";
 import { flightInput, type ViewKeyAction } from "../../view/camera/keys";
-import { changeFreeRate, MAX_FREE_STEP_S, stepFreeCamera } from "../../view/camera/freeCamera";
+import {
+  changeFreeRate,
+  freeRateMPerS,
+  MAX_FREE_STEP_S,
+  stepFreeCamera,
+} from "../../view/camera/freeCamera";
 import type { CameraFrame, CameraPose } from "../../view/camera/pose";
 import {
   advanceEasedMove,
@@ -292,6 +298,19 @@ export interface LabelLine {
   readonly value: string;
   /** Set on a reading of the server's scene while the scene is stale: muted, with its `S`. */
   readonly stale?: true;
+}
+
+/**
+ * The free camera's commanded translation rate as the view reads it, three significant figures:
+ * `RATE 316 m/s`, then in km/s from 1 km/s, `RATE 1.00 km/s` (the guide's "Numbers").
+ *
+ * @param rateStep - The camera's rate step, {@link freeRateMPerS}'s argument.
+ */
+export function freeRateReading(rateStep: number): string {
+  const rateMPerS = freeRateMPerS(rateStep);
+  return rateMPerS < 1000
+    ? `RATE ${formatSignificant(rateMPerS)} m/s`
+    : `RATE ${formatSignificant(rateMPerS / 1000)} km/s`;
 }
 
 /** The exposure's reading: `EV100 -1.0 MAN`. */

@@ -24,6 +24,7 @@ import type { Anchor } from "../../spatial/drawList";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { pick } from "../../spatial/pick";
 import { useThrottledValue } from "../../spatial/useThrottledValue";
+import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import {
   flightKey,
   flightKeyAction,
@@ -482,6 +483,8 @@ function ViewStage({
           preset={shown.run.camera.preset}
           offered={offeredPresets(cameraSceneOf(shown.run.scene))}
           fovDeg={shown.run.camera.fovDeg}
+          rateStep={shown.run.camera.free.rateStep}
+          maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
           easedMoves={easedMoves}
           reducedMotion={reducedMotion}
           onAction={command}
