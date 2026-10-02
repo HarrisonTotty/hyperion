@@ -702,9 +702,10 @@ changed by the time this plan runs only the call sites here change.
     rule's other term governs: 1.3 × the all-round peak at 100 m is about 1,900 slots, 390 MB. So
     the high setting's budget is about 400 MB, not the brainstorm's 128–256 MB, whose upper end
     holds only the frustum term; it sits inside the discrete ceiling of 2–3 GB and raises the
-    brainstorm's GPU total of 0.6–1 GB by about 0.15–0.25 GB. For context only (the budgets stand):
-    the development machine's RTX 3080 has 10 GiB of VRAM, and the UHD 620 shares its laptop's
-    system memory. The frustum term alone would fit 256
+    brainstorm's GPU total of 0.6–1 GB by about 0.15–0.25 GB. For context only (the budgets stand,
+    decided 2026-09-30 by a delegated decision, hardware item 5): the development machine's RTX
+    3080 has 10 GiB of VRAM, shared with the local LLM, and the UHD 620 shares its laptop's system
+    memory. The frustum term alone would fit 256
     MiB; T14 measures whether the all-round peak ever becomes resident, and adopts the frustum rule
     on the high setting only if it never does, recording which. `writeTexture` has no 256-byte row
     rule (only encoder copies do), so 520-byte rows upload as they are, but tiled layouts on Intel
@@ -889,7 +890,8 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   covers it, Design note 6). Bench `bake/patch_65`: the brainstorm's 40 ms a patch on two cores
   (about 10 µs a point with its gradient, Performance budget), recorded with and without the class
   weights on the development machine (a Ryzen 7 3700X) and, by the owner, on the UHD 620 laptop's
-  i7-8665U, whose cores the brainstorm's figure budgets. Acceptance:
+  i7-8665U, whose cores the brainstorm's figure budgets. The 40 ms stays the laptop's figure: the
+  desktop records its own and fails only if over it (decided 2026-09-30, Risks). Acceptance:
   `cargo test -p hyperion-surface bake`, and the bench's figure in this task's entry.
 - **R10.T6.b The worker binding.** The worker's entry points on R05's binding:
   `field_init(body, header)`, `field_chunk(body, block)` (one R09 payload block, Design note 16),
@@ -1214,3 +1216,11 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   sample world has them.
 - **Vegetation** is absent until a biosphere exists; a living world's land is drawn bare, which is
   wrong for it and says nothing false about what the generator computed.
+- **The hardware decisions, decided 2026-09-30 by a delegated decision**, as they fall on this
+  plan:
+  - _CPU budgets (item 3):_ the 40 ms patch bake (`bake/patch_65`, and the horizon's quarter of
+    it) stays the UHD 620 laptop's figure. The development machine records its own and fails only
+    if it is over the laptop's budget.
+  - _Memory (item 5):_ the ceilings are unchanged: about 400 MB for the high setting's height
+    cache (Design note 15) inside the 2–3 GB discrete ceiling. Only the context changes: the RTX
+    3080's 10 GiB is shared with the local LLM.

@@ -1261,7 +1261,8 @@ It reserves, so that later plans need not:
   (the T10.a record below).
 - **Two more sign-offs gate T3.** Plan 14's owner accepts the amendment (T3.a) before the wire
   changes (T3.c), which must land before P14.T23; the guide's owner signs off the `DETAIL SEED`
-  rows (T3.b), and the client is built to the draft meanwhile.
+  rows (T3.b), and the client is built to the draft meanwhile. _Both given 2026-09-30 by delegated
+  decisions (the as-built notes below)._
 - **Relaxed SIMD from a dependency.** Design note 10's source test covers the workspace's own
   files only; a dependency could enable the feature inside its own code. Base's one dependency is
   `libm`, pinned exactly, and any new dependency of base or the surface crate is reviewed for it.
@@ -1319,6 +1320,9 @@ It reserves, so that later plans need not:
   "(draft for the owner, R04.T3.b)". **Awaiting the owners:** plan 14's owner's acceptance of
   T3.a and the guide owner's sign-off of T3.b, neither yet recorded. T3.c was built treating T3.a
   as provisionally accepted (the orchestrator's instruction for this lane) and to T3.b's draft.
+  _Both since decided by delegated decisions: T3.b signed off 2026-09-30 (`DETAIL SEED` kept), and
+  T3.a accepted as drafted 2026-09-30 (protocol item 1); plan 14's four markers say so (RM1
+  close)._
 - **Deviations in T3.c, as built.** `SectionDto`'s wire form is `{"state":"ok","value":…}`, so
   `body_hooks_wire_form` pins `{"detail_seed":{"state":"not_modelled"}}` and
   `{"detail_seed":{"state":"ok","value":"0123456789abcdef"}}`. The client's `BodyHooks.detailSeed`
@@ -1751,8 +1755,8 @@ warnings` with "use of a disallowed method", and was reverted.
     `detailSeed` and `renderer/src/wasm/`.
   - **The module in the client** loads in `just client` and the built app (T10.c, 2026-09-30).
   - **Owner records.** CSP ruled 2026-09-30 (T10.a); `DETAIL SEED` signed off 2026-09-30 on the
-    owner's delegation (T3.b). **Awaiting the owner:** plan 14's owner's acceptance of the
-    amendment (T3.a).
+    owner's delegation (T3.b); plan 14's amendment (T3.a) accepted as drafted 2026-09-30 by a
+    delegated decision (protocol item 1, recorded at RM1 close).
   - **Pending on a quiet machine** (load under 1, governor recorded): `just ci`'s wall time before
     and after the plan, the slow wasip1 suite's time (open question 12; every figure above and in
     T7.c, T7.d and T8.c is provisional), T4.a's and T4.d's `just bench` comparisons, and T9.b's

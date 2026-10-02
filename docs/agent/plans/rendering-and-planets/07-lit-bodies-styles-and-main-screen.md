@@ -80,8 +80,8 @@ In scope:
 
 Non-goals:
 
-- The per-view canvas context, the engine adapter, the WGSL-only guard, kernel selection, the
-  smoke harness and the child-window prototype itself (R01, R01.T13). This plan submits through
+- The per-view canvas context, the engine adapter, WGSL compile-error reporting, kernel selection,
+  the smoke harness and the child-window prototype itself (R01, R01.T13). This plan submits through
   them.
 - The camera model, reversed-Z, the HDR target and pre-exposure, the exposure triple and its three
   automation levels, the AgX function `toneCurve` and its WGSL twin `agx`, the wireframe style,
@@ -853,19 +853,20 @@ flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
     to the bottom of the descenders (§3.2.28). The alert annunciator's text is at least 30′ and the
     newest emergency up to 60′ (§5.7.3.6, warning and caution signals). The height in device pixels
     is 2 D tan(θ ÷ 2) × (width in pixels ÷ W), divided by `devicePixelRatio` for CSS (the probed UHD
-    620 laptop runs at 0.78125); at 4 m on a 55″ 1080p television that is 36.7 px at 20′ and 55.0 px
-    at 30′. No web API gives a display's physical size, so the main-screen machine holds two
-    settings, the screen diagonal and the furthest viewing distance, the diagonal pre-filled from
-    EDID where it is plausible (non-zero and within 5% of the pixel aspect; Electron's main process
-    reads `/sys/class/drm/card*-*/edid` on Linux, matching a connector to Electron's display by the
-    EDID's monitor name against `Display.label` and its native mode against the display's size,
-    with no pre-fill when the match is ambiguous), with an on-screen 100 mm bar to check it. EDID is
-    unreliable for televisions and zero for projectors. The main screen takes no input in use (guide
-    item 9), so the two settings are given at installation, as the command-line options
-    `--screen-diagonal-in` and `--viewing-distance-m` or through `DisplaySetup` with a keyboard
-    attached for the purpose, and saved on that machine. The setup warns when distance ÷ diagonal
-    falls outside 2–10 (§5.2.2.12.3) and states that a television must be in game or PC mode,
-    since outside it input lag reaches 40–120 ms. The guide's rem scale does not apply.
+    620 laptop runs at 0.78125, and so does the development machine, at `Xft.dpi` 75); at 4 m on a
+    55″ 1080p television that is 36.7 px at 20′ and 55.0 px at 30′. No web API gives a display's
+    physical size, so the main-screen machine holds two settings, the screen diagonal and the
+    furthest viewing distance, the diagonal pre-filled from EDID where it is plausible (non-zero and
+    within 5% of the pixel aspect; Electron's main process reads `/sys/class/drm/card*-*/edid` on
+    Linux, matching a connector to Electron's display by the EDID's monitor name against
+    `Display.label` and its native mode against the display's size, with no pre-fill when the match
+    is ambiguous), with an on-screen 100 mm bar to check it. EDID is unreliable for televisions and
+    zero for projectors. The main screen takes no input in use (guide item 9), so the two settings
+    are given at installation, as the command-line options `--screen-diagonal-in` and
+    `--viewing-distance-m` or through `DisplaySetup` with a keyboard attached for the purpose, and
+    saved on that machine. The setup warns when distance ÷ diagonal falls outside 2–10 (§5.2.2.12.3)
+    and states that a television must be in game or PC mode, since outside it input lag reaches
+    40–120 ms. The guide's rem scale does not apply.
 24. **Later plans' inputs have hooks here, each with a default.** R10 and R11 run after this plan,
     so the shading takes their inputs through interfaces built and tested now on synthetic data.
     `body_brdf` takes a `LunarLambert` struct rather than a per-body uniform, so R10 can build one
@@ -1269,7 +1270,9 @@ AlertAnnunciator}.tsx` (Design notes 22–23, guide item 9): full screen, no con
   options override the saved values. Acceptance: `pnpm test`.
 - **R07.T27.c EDID, and the room.** `apps/hyperion/src/main/displayEdid.ts`: the EDID read and its
   match to Electron's display (Design note 23). Tests: EDID parsing of a pinned blob; a zero size
-  rejected; an ambiguous match gives no pre-fill. By hand, recorded: the main screen across a room
+  rejected; an ambiguous match gives no pre-fill; no pre-fill when the EDID's two reported sizes
+  disagree by more than 5%, with the development machine's projector EDID as the fixture (decided
+  2026-09-30 by a delegated decision; Risks). By hand, recorded: the main screen across a room
   at the set distance, the text legible and the 100 mm bar measured. Acceptance: `pnpm test`; the
   record.
 
@@ -1367,8 +1370,35 @@ optional field and new commands in the sessions plan's envelope, none of which m
   wait.
 - **A child window on a second monitor** is unproved until a second display is at hand (T21).
 - **HDR output.** An `rgba16float` canvas with extended tone mapping configures on the probed UHD
-  620, but its panel is not HDR, and the development machine's display is not yet checked; it would
-  suit a main screen on an HDR television and is left open.
+  620, but its panel is not HDR; it would suit a main screen on an HDR television and is left open.
+  _Decided 2026-09-30 by a delegated decision (hardware item 6):_ HDR stays open. The development
+  machine's display, an Optoma UHD projector, declares no HDR, and Xorg has no HDR path. What is
+  checked on that machine: the device-pixel ratio (0.78125 at `Xft.dpi` 75), that an
+  extended-range canvas configures, and the projector's declared 72 ms of lag, which T28 records
+  as the display's own lag.
+- **EDID on the development machine, decided 2026-09-30 by a delegated decision** (hardware item
+  6). The projector's EDID reports two sizes that disagree, so Design note 23's pre-fill also
+  requires them to agree within 5%, and that EDID is T27.c's test fixture for the no-pre-fill case.
+- **Hull edges over the image, decided 2026-09-30 by a delegated decision** (the UX decisions,
+  item 12). R02 draws hull edges uncased in the wireframe, since a casing would widen a 1.5 px
+  edge past the 2 px that its occluder's slope bias covers. This plan's overlay (T16) must case them
+  over the photorealistic image and raise the occluder's slope scale to 3 so that the casing is
+  covered (R02's Risks, T13 as built).
+- **The camera's local state, decided 2026-09-30 by a delegated decision** (the UX decisions,
+  item 14). R02's `CameraState` keeps `free` (`FreeFlight`) and `move` (`EasedMove`), a local
+  view's integration state. This plan moves them into a local wrapper, so that the server-held
+  main-screen camera carries only the shared shape (the brainstorm's "one shape in both
+  deployments"; R02's Risks, T9 as built).
+- **A kept scene on the main screen says `TRAINING`** (decided 2026-10-01 by a delegated decision,
+  R02's depth decisions, item 3). R02 shows the `TRAINING` banner only while `VIEW` draws a kept
+  scene; the main screen, when it shows a kept scene, must say `TRAINING` too.
+- **Hidden-window resizes restart the GPU process** under the Vulkan surface (R01's Risks, "The
+  forced path is the only Linux path"; T12 and T13 as built). On the RTX 3080 every resize or
+  creation of a hidden window gave `vkAcquireNextImageKHR` OUT_OF_DATE and a GPU-process
+  restart, and three restarts remove WebGPU. `--disable-vulkan-surface` avoids it, but whether it
+  costs Vulkan presentation on screen is unchecked. This plan's child windows (T21) and any
+  minimised or hidden view must be checked on screen, by hand, before the choice of switch is
+  made; the visible-window check is pending by hand for the owner.
 - **Asked by later plans.** R10's asks are built here as signatures with defaults (Design note 24)
   and completed by R10's own tasks in this plan's files, with the signatures unchanged: `body_brdf`
   with per-texel lunar-Lambert parameters (T4.c, completed by R10.T10.b); the disc sampling

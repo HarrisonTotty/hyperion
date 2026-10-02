@@ -432,13 +432,15 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   global list) are different requests despite the likeness.
 
   Row R03 is the rendering plan R03's (`docs/agent/plans/rendering-and-planets/`), drafted by
-  R03.T1 for this plan's owner. `subscribe` and `unsubscribe` stay plan 12's; R03 may build them,
-  with `notification`, to plan 12's design (P12.T9) if P12.T9 has not landed, with the scene as
-  their first topic.
+  R03.T1 for this plan's owner and accepted 2026-09-30 by a delegated decision. `subscribe` and
+  `unsubscribe` stay plan 12's; R03 may build them, with `notification` and
+  `subscription_ended` (the server's end of a subscription whose topic failed), to plan 12's design
+  (P12.T9) if P12.T9 has not landed, with the scene as their first topic.
 
 - Server message type `notification`, for pushes. A subscription is opened by an ordinary request
-  whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe` or the
-  socket. Alerts reach a console that way, through the knowledge overlay.
+  whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe`, the
+  socket, or the server's `subscription_ended` when its topic fails (built by R03). Alerts reach a
+  console that way, through the knowledge overlay.
 - Server message type `response_part`, should a payload outgrow one frame: parts precede the
   terminal `response`. Binary frames stay unused and reserved for bulk payloads.
 - Any `SystemIdHex` or body ID arriving from a client goes through the sim's `resolve` before use,

@@ -1210,7 +1210,9 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   No task pending re-validation among T1–T10.a; T13 still waits on R02.T8.a.
 - **Deviations in T1, as built.** The plan 04 row and the P12.T9 note are drafted in the galaxy
   plans and, per the RM1 lane rules, treated as provisionally accepted so that R03.T5.a proceeds;
-  the owner still signs them off (README, Awaiting the owner). The question 21 test is
+  the owner still signs them off (README, Awaiting the owner). _Accepted 2026-09-30 by a delegated
+  decision (protocol item 2), amended to name `subscription_ended` among the envelope's messages;
+  both galaxy plans' notes are marked accepted (RM1 close)._ The question 21 test is
   `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` in
   `crates/hyperion-server/tests/websocket.rs`: hello, `create_universe`, a 5 ly range query and two
   pings, each answered by the very next text frame, which `TestClient` parses as `ServerMessage`
@@ -1220,8 +1222,11 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   frames are additions like a new kind: the server sends a notification only on a subscription the
   client opened and binary frames only in answer to a request whose kind asks for bulk, so a
   version 2 client that sends neither receives neither, and a newer client asking an older server
-  gets `unsupported`. `PROTOCOL_VERSION` stays 2 while neither is ever sent unasked; a test pins it
-  (plan R03, Design note 12)." The owner signs off.
+  gets `unsupported`. `subscription_ended` needs no bump either: like a notification, it is sent
+  only on a subscription the client opened. `PROTOCOL_VERSION` stays 2 while none of these is ever
+  sent unasked; a test pins it (plan R03, Design note 12)." The owner signs off. _Closure decided
+  2026-09-30 by a delegated decision (protocol item 3), with the `subscription_ended` sentence; the
+  brainstorm edit itself waits for its revision pass._
 - **Deviations in T2, as built.** `BuildSystemObserverError` gains `NotSlowerThanLight`: the
   Lorentz factor needs |v_o| < c. `InSystemRetardation::residual` is the last correction's change
   |τₖ − τₖ₋₁|: at most 1 ns when converged, above it only where the noise rule stopped the
@@ -1436,7 +1441,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   or a power of ten to 100,000, a time that is not whole seconds and nanoseconds in `[0, 10⁹)`, a
   `sequence` that is not a whole number, and a galactic position whose offsets leave `[0, 1 ly)`. A
   fault, like a sequence error, leaves the model as it was; `useScene` (R03.T14) resubscribes on
-  either. **Open, pending the owner (no task owns it yet):** `tidal_radius_m` comes only with an
+  either. _Closed: R03.T8.a's `SceneStateDto` gained an optional `tidal_radius_m`, present
+  whenever `system` is (its as-built note below; the README's row says so)._ **Open, pending the
+  owner (no task owns it yet):** `tidal_radius_m` comes only with an
   arrival, and `SceneStateDto` has none, so a client that subscribes while the scene is already in
   a system has `tidalRadiusM: null` until the next arrival, and R02.T17's clamp has nothing to read;
   the README's row for R02's ask reads "met" but is only partly met. The likely fix is an optional

@@ -737,7 +737,8 @@ Names are those the owning plans give; the owning plan is authoritative.
        PythonicDISORT (MIT; plane-parallel only).
      - Estimated by operation count at 10⁸ flops, 0.1–1 s. `BAKE_CEILING_S` = 5 s a world on the
        UHD 620's host (the owner's laptop, timed by the owner; the development machine's time is
-       recorded beside it) triggers the fallback of the Risks.
+       recorded beside it) triggers the fallback of the Risks. The ceiling stays the laptop's
+       figure; the desktop fails only if over it (decided 2026-09-30, Risks).
      - Discrete ordinates is chosen because it converges without sampling noise. The Monte Carlo is
        kept for the reference, so that the two stay independent.
      - Bruneton's iterated orders are not the fallback: they diverge in this regime.
@@ -1786,3 +1787,7 @@ generator, and the reference's sampling needs no domain tag.
 - **Knowledge.** Until a sensors plan builds the body-level overlay, the server grants the detail
   level asked, so `ATMOSPHERE: NOT RESOLVED` is exercised only by tests and by requests that ask for
   less.
+- **CPU budgets on the desktop, decided 2026-09-30 by a delegated decision** (the hardware
+  decisions, item 3). `BAKE_CEILING_S`, 5 s a world, stays the UHD 620 laptop's figure, the
+  minimum specification. The development machine (Ryzen 7 3700X) records its own bake time beside
+  it and fails only if it is over the laptop's ceiling; no separate desktop ceiling is set.
