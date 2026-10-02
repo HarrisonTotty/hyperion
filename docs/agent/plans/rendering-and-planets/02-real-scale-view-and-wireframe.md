@@ -1742,3 +1742,11 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   heuristic, noted in R11's Consumes. The task text, R11's Consumes and the README's asks between
   plans say so; `depth.test.ts` pins the new order and checks it against each shell's crossing
   distance along a ray.
+- **Fixed in RM1 validation (2026-10-02): the free camera's rate is shown (M2).** The rate was
+  commanded (`PAGE UP`, `PAGE DOWN`) but shown nowhere, and `changeFreeRate` clamped silently at
+  both ends, against the guide's "Elements with states or modes always show the current one". The
+  camera panel now reads it in B612 Mono at the readouts' 4 Hz, `RATE 1.00 km/s` (`freeRateReading`:
+  three significant figures, m/s below 1 km/s and km/s from there), and at either end of its steps
+  says `NOT AVAILABLE: RATE at its lowest step` or `… highest step`, as the field of view's ends do.
+  No `SLOWER`/`FASTER` buttons were added, since they would be new nomenclature; the guide's draft
+  `RATE` row now also names the readout, for the owner with the rest of that row.

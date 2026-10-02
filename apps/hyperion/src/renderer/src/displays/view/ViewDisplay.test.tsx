@@ -341,6 +341,27 @@ describe("the VIEW display", () => {
     expect(Math.abs(drift() - still) > 100).toBe(true);
   });
 
+  it("shows the free camera's rate, and says so at the lowest step", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    expect(rate).toHaveTextContent("RATE 1.00 km/s");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{PageUp}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 3.16 km/s");
+    expect(screen.queryByText(/NOT AVAILABLE: RATE/)).not.toBeInTheDocument();
+    for (let i = 0; i < 8; i += 1) {
+      // Each press is one step; they are sequential by nature.
+      // oxlint-disable-next-line no-await-in-loop
+      await user.keyboard("{PageDown}");
+    }
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 1.00 m/s");
+    expect(screen.getByText("NOT AVAILABLE: RATE at its lowest step")).toBeInTheDocument();
+  });
+
   it("stops flying when its canvas loses focus", async () => {
     stubMatchMedia(true);
     const { user, advance, lastFrame } = setup();

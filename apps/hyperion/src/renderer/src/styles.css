@@ -3229,6 +3229,7 @@ body {
 }
 
 .view-camera__fov,
+.view-camera__rate-reading,
 .view-exposure__reading {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -3301,6 +3302,11 @@ body {
 .view-camera__fov {
   min-width: 8ch;
   text-align: right;
+}
+
+/* The free camera's rate on a line of its own, under the field of view's buttons. */
+.view-camera__rate {
+  margin: 0 0 0.5rem;
 }
 
 .view-camera__setting {
