@@ -2625,3 +2625,11 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     a packed-cube level (CPU or copied) only when the cube has one level, a kernel's storage
     texture only when it has one level, and a splat (it adds to what is there) never. Tests:
     `engine.test.ts` (the engine over `FakeDevice`) and `readback.test.ts`.
+  - **M5, a failed restore (T8.k, `ResilientEngine`).** Only `#create` is inside the rebuild's
+    `try` now. `#restore` runs after it and catches each view's re-creation and each
+    `onRestored` listener on its own, logging it, so a canvas with no context or a throwing
+    listener neither disposes the new engine nor counts a loss. Tests: two in
+    `resilientEngine.test.ts`, with the fake engine module's new `viewless` creations.
+  - **m11, the lost engine's memory releases.** `#release` disposes the engine before it
+    unsubscribes, so its `destroyed` events reach the allocation listeners (R05's tally). Test:
+    `resilientEngine.test.ts`, the fake engine raising `FAKE_ENGINE_MEMORY`'s release on disposal.

@@ -3,9 +3,11 @@
  * adapter as a real one does, and whose device loss the test raises.
  *
  * @remarks
- * Only views, faults and disposal are faked; every other member throws, naming itself.
+ * Only views, faults, allocation listeners and disposal are faked; every other member throws,
+ * naming itself.
  */
 
+import type { AllocationEvent } from "../view/engine/memory";
 import { deviceCapabilities } from "../view/engine/platform";
 import type { GraphicsFault } from "../view/engine/status";
 import type {
@@ -15,6 +17,13 @@ import type {
   RenderView,
   ViewSize,
 } from "../view/engine/types";
+
+/** The allocation every fake engine holds, and whose `destroyed` event its disposal raises. */
+export const FAKE_ENGINE_MEMORY = {
+  name: "fake engine memory",
+  bytes: 64,
+  category: "other",
+} as const;
 
 function notFaked(member: string): Error {
   return new Error(`FakeRenderEngine does not fake ${member}`);
@@ -54,10 +63,18 @@ export class FakeRenderEngine implements RenderEngine {
   readonly views: FakeView[] = [];
   disposed = false;
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
+  readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
+  readonly #viewless: boolean;
   #lost: GraphicsFault | null = null;
 
-  constructor(device: GPUDevice) {
+  /**
+   * Wraps `device`.
+   *
+   * @param viewless - Whether `createView` throws, as on a canvas that gives no WebGPU context.
+   */
+  constructor(device: GPUDevice, viewless = false) {
     this.capabilities = deviceCapabilities(device);
+    this.#viewless = viewless;
   }
 
   /** Raises a device loss, as the WebGPU engine reports one. */
@@ -70,6 +87,9 @@ export class FakeRenderEngine implements RenderEngine {
   }
 
   createView(canvas: HTMLCanvasElement, name: string): RenderView {
+    if (this.#viewless) {
+      throw new Error(`${name}'s canvas gives no WebGPU context`);
+    }
     const view = new FakeView(canvas, name);
     this.views.push(view);
     return view;
@@ -87,8 +107,11 @@ export class FakeRenderEngine implements RenderEngine {
       this.#faultListeners.delete(listener);
     };
   }
-  onAllocation(): () => void {
-    return () => undefined;
+  onAllocation(listener: (event: AllocationEvent) => void): () => void {
+    this.#allocationListeners.add(listener);
+    return () => {
+      this.#allocationListeners.delete(listener);
+    };
   }
   onPassTimes(): () => void {
     return () => undefined;
@@ -96,8 +119,13 @@ export class FakeRenderEngine implements RenderEngine {
   onRestored(): () => void {
     return () => undefined;
   }
+  /** Releases its one fake allocation, {@link FAKE_ENGINE_MEMORY}, as the WebGPU engine does its own. */
   dispose(): void {
     this.disposed = true;
+    for (const listener of this.#allocationListeners) {
+      listener({ kind: "destroyed", ...FAKE_ENGINE_MEMORY });
+    }
+    this.#allocationListeners.clear();
   }
   createRenderTarget(): never {
     throw notFaked("createRenderTarget");
@@ -161,6 +189,8 @@ export interface FakeEngineScript {
   readonly failing?: ReadonlySet<number>;
   /** Creations whose device is lost before the engine is handed over. */
   readonly lostAtBirth?: ReadonlySet<number>;
+  /** Creations whose `createView` throws. */
+  readonly viewless?: ReadonlySet<number>;
 }
 
 /** A fake engine module and the engines it has made, first first. */
@@ -182,7 +212,7 @@ export function fakeEngineModule(script: FakeEngineScript = {}): FakeEngineModul
     if (script.failing?.has(index) === true) {
       throw new Error(`creation ${index} failed`);
     }
-    const engine = new FakeRenderEngine(device);
+    const engine = new FakeRenderEngine(device, script.viewless?.has(index) === true);
     engines.push(engine);
     if (script.lostAtBirth?.has(index) === true) {
       engine.loseDevice();
