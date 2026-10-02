@@ -276,7 +276,8 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * section (a body without one is drawn as its symbol at any range), a Hill radius only where
  * `sceneAt` gives one, so that a body below `mass_and_orbit` or placed by `seen` is never the
  * camera's frame. The ship's local body is drawn at its `geometricM`, every other body and star at
- * its `apparentM`. A body's rotation is not modelled yet (Design note 14): its pole is its orbit's
+ * its `apparentM`; a placed body drawn apparent also carries its `geometricM` as its
+ * `geometricCentreM`, from which the camera's frame selection measures (Design note 6). A body's rotation is not modelled yet (Design note 14): its pole is its orbit's
  * normal. Rings are drawn about their planet, in its orbital plane (plan 14's convention for this
  * generator version); orbits are every placed planet's and moon's about the body or star it
  * orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
@@ -329,6 +330,7 @@ export function viewSceneFromServer(
       radiusM: record.bulk.state === "ok" ? record.bulk.value.radiusM : 0,
       hillRadiusM: placed ? seen.hillRadiusM : null,
       centreM: placed && seen.id === frame.localBody ? seen.geometricM : seen.apparentM,
+      ...(placed && seen.id !== frame.localBody ? { geometricCentreM: seen.geometricM } : {}),
       rotation: null,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,
       symbol: symbolOf(record, kind),

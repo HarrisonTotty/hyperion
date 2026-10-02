@@ -178,6 +178,18 @@ describe("the server's scene as the view draws it", () => {
     ]);
   });
 
+  it("selects the camera's frame from geometric centres, never apparent ones", () => {
+    const model = modelOf(stateNearEarth());
+    const frame = frameOf(model);
+    const scene = sceneOf(model, frame);
+    const jupiter = frame.bodies.find((each) => each.id === FIXTURE_JUPITER);
+    const selection = cameraSceneOf(scene).selectionOrigins;
+    expect([selection.bodyCentreM(FIXTURE_JUPITER), selection.bodyCentreM(FIXTURE_EARTH)]).toEqual([
+      jupiter?.kind === "placed" ? jupiter.geometricM : null,
+      bodyOf(scene, FIXTURE_EARTH).centreM,
+    ]);
+  });
+
   it("draws a free camera's own local body, when it is another, at its apparent position", () => {
     const model = modelOf(stateNearEarth());
     const frame = frameOf(model);

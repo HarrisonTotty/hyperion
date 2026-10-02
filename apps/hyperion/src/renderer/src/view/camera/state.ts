@@ -103,8 +103,14 @@ export interface CameraScene {
   readonly system: SystemIdHex | null;
   /** The system's tidal radius, m, which bounds a free camera (Design note 7); `null` if galactic. */
   readonly tidalRadiusM: number | null;
-  /** Where every frame's origin and every craft is at the frame time. */
+  /** Where every frame's origin and every craft is at the frame time, as the scene draws them. */
   readonly origins: CameraOrigins;
+  /**
+   * The same, but every body at its geometric centre at the frame time: what frame selection
+   * measures from, since its distances are "geometric and present … never apparent ones" (Design
+   * note 6). Identical to {@link CameraScene.origins} in a scene that draws no body apparent.
+   */
+  readonly selectionOrigins: CameraOrigins;
   /** The bodies whose frames the camera may enter. */
   readonly frameBodies: ReadonlyArray<FrameBody>;
   /** The targets, in the order the next and previous target keys step through them. */
@@ -282,9 +288,15 @@ function currentBodyFrame(frame: CameraFrame, scene: CameraScene): BodyIdHex | n
 /**
  * The frame a detached camera at `pose` belongs in: the scene's system or the body frame the rule
  * selects there (Design note 6), or the galactic frame where the scene is galactic.
+ *
+ * @remarks
+ * The camera's distances are measured where the bodies are at the frame time, not where they are
+ * drawn (`selectionOrigins`): the pose, an offset from its frame's origin, is placed from that
+ * origin's geometric centre, so a camera in a moon's frame stays at its offset from the moon while
+ * its distances to every other body are geometric and present, as the sim's rule measures them.
  */
 export function sceneFrameFor(pose: CameraPose, scene: CameraScene): CameraFrame {
-  const { origins } = scene;
+  const origins = scene.selectionOrigins;
   if (scene.system === null) {
     const origin = expressIn(frameOrigin(pose.frame, origins), { kind: "galactic" }, origins);
     if (origin.kind !== "galactic") {

@@ -43,8 +43,14 @@ export interface ViewBody {
   readonly radiusM: number;
   /** Its Hill radius at pericentre, m, or `null` where it is not known. */
   readonly hillRadiusM: number | null;
-  /** Its centre, m from the system's barycentre along the galactic axes. */
+  /** Its centre as drawn, m from the system's barycentre along the galactic axes. */
   readonly centreM: Vec3;
+  /**
+   * Its geometric centre at the scene's time, m, where that differs from `centreM` (a server
+   * scene's body drawn where the ship sees it, R02.T17); absent where it is `centreM`. Frame
+   * selection measures from it (Design note 6).
+   */
+  readonly geometricCentreM?: Vec3;
   /** Its rotation from body-fixed to body axes, or `null` where rotation is not modelled. */
   readonly rotation: Rotation3 | null;
   /**
@@ -205,10 +211,15 @@ export interface ViewScene {
 /**
  * Where every frame's origin and every craft of a scene is: the scene's {@link CameraOrigins}.
  *
+ * @param centres - `drawn` places each body at its `centreM`; `geometric` at its
+ *   `geometricCentreM` where it has one, for frame selection (Design note 6).
  * @throws Error from a lookup, when asked for a body or craft the scene does not have, or for the
  *   barycentre of a scene that does not know it.
  */
-export function sceneOrigins(scene: ViewScene): CameraOrigins {
+export function sceneOrigins(
+  scene: ViewScene,
+  centres: "drawn" | "geometric" = "drawn",
+): CameraOrigins {
   const bodies = new Map(scene.bodies.map((body) => [body.id, body]));
   const craft = new Map(scene.craft.map((c) => [c.id, c]));
   const bodyOf = (id: BodyIdHex): ViewBody => {
@@ -228,7 +239,10 @@ export function sceneOrigins(scene: ViewScene): CameraOrigins {
       }
       return scene.barycentre;
     },
-    bodyCentreM: (id) => bodyOf(id).centreM,
+    bodyCentreM: (id) => {
+      const body = bodyOf(id);
+      return centres === "geometric" ? (body.geometricCentreM ?? body.centreM) : body.centreM;
+    },
     bodyFixedRotation: (id) => bodyOf(id).rotation,
     craftPosition: (id) => {
       const found = craft.get(id);
@@ -261,6 +275,7 @@ export function cameraSceneOf(scene: ViewScene): CameraScene {
     system: scene.system,
     tidalRadiusM: scene.tidalRadiusM,
     origins: sceneOrigins(scene),
+    selectionOrigins: sceneOrigins(scene, "geometric"),
     frameBodies: scene.bodies.flatMap((body) =>
       body.kind !== "star" && body.hillRadiusM !== null
         ? [{ id: body.id, parent: body.parent, hillRadiusM: body.hillRadiusM }]
