@@ -1324,6 +1324,14 @@ plan reserves no tag, prefix or stream.
   until R07, the wireframe view draws the sprites and the baked cube tone-mapped per pixel by R02's
   `agxSprite`, and the band and discs only in the photorealistic style, as T13.f already says of
   the band. R07, being re-validated in parallel, owns where the HDR target is created.
+- **Deviations in T15, as built (2026-10-02).** Drafted in `docs/frontend/ux-guidelines.md`: the
+  existing `STARS` row gains the label-block use `STARS V <m> EYE|CAM` (in `mag`, one decimal);
+  new rows `EYE`, `CAM` (one row), `CLUSTERS NOT MODELLED`, `WD NOT MODELLED` and
+  `UNRESOLVED STARS`, the last being the band's name in the DOM list's view notes, which Design
+  note 23 left unnamed (the lane's choice); R02's two interim rows are marked withdrawn on a view once the sky
+  has arrived; the "Views" class gains the rule that the star limit is always a V magnitude with
+  its kind, with any stand-in after a middle dot, and a paragraph that the unresolved band is
+  labelled and drawn only in the photorealistic style. **Awaiting the owner's sign-off.**
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
