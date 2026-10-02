@@ -19,6 +19,23 @@ export const BINARY_FRAME_HEADER_BYTES = 24;
 export const MAX_BINARY_FRAME_BYTES = 262_144;
 
 /**
+ * The most payload bytes the client collects for one request answered in bulk, 64 MiB: four times
+ * the largest transfer planned, R09's coarse field of about 15 MiB (rendering plan R03, Design
+ * note 11), so that a server streaming chunks without end fails the request instead of growing the
+ * client's memory until the link drops. The manifest, which states the real size, arrives only with
+ * the terminal response, after every chunk.
+ */
+export const MAX_BULK_PAYLOAD_BYTES = 64 * 1024 * 1024;
+
+/**
+ * The most chunks the client collects for one request: {@link MAX_BULK_PAYLOAD_BYTES} in chunks of
+ * the largest payload a frame carries, 257.
+ */
+export const MAX_BULK_CHUNKS = Math.ceil(
+  MAX_BULK_PAYLOAD_BYTES / (MAX_BINARY_FRAME_BYTES - BINARY_FRAME_HEADER_BYTES),
+);
+
+/**
  * One binary frame's header (rendering plan R03, Design note 10).
  *
  * @remarks
@@ -136,7 +153,8 @@ interface Collecting {
  * The chunks come in order before their request's terminal response (Design note 10), so a chunk
  * whose index is not the next expected is a missing or reordered one, and fails its request at
  * once. Each chunk is kept as the view {@link parseBinaryFrameHeader} gave, over the frame's own
- * `ArrayBuffer`, never copied or parsed (Design note 11).
+ * `ArrayBuffer`, never copied or parsed (Design note 11). A request whose chunks state more than
+ * {@link MAX_BULK_CHUNKS}, or carry more than {@link MAX_BULK_PAYLOAD_BYTES}, fails at once too.
  */
 export class BulkAssembler {
   readonly #collecting = new Map<RequestId, Collecting>();
@@ -165,6 +183,17 @@ export class BulkAssembler {
       return broken(
         `chunk ${header.index} of request ${header.request} states ${header.count} chunks, ` +
           `after ${collecting.count}`,
+      );
+    }
+    if (header.count > MAX_BULK_CHUNKS) {
+      return broken(
+        `chunk ${header.index} of request ${header.request} states ${header.count} chunks, ` +
+          `over ${MAX_BULK_CHUNKS}`,
+      );
+    }
+    if (collecting.bytes + payload.byteLength > MAX_BULK_PAYLOAD_BYTES) {
+      return broken(
+        `request ${header.request}'s chunks carry over ${MAX_BULK_PAYLOAD_BYTES} bytes`,
       );
     }
     if (header.index !== collecting.chunks.length) {

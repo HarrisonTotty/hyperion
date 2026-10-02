@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { BINARY_FRAME_HEADER_BYTES, MAX_BINARY_FRAME_BYTES, parseBinaryFrameHeader } from "./bulk";
+import {
+  BINARY_FRAME_HEADER_BYTES,
+  BulkAssembler,
+  MAX_BINARY_FRAME_BYTES,
+  MAX_BULK_CHUNKS,
+  MAX_BULK_PAYLOAD_BYTES,
+  parseBinaryFrameHeader,
+} from "./bulk";
 import type { BulkManifestDto } from "./generated/BulkManifestDto";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ResponseBody } from "./generated/ResponseBody";
@@ -336,5 +343,44 @@ describe("RequestClient with bulk answers", () => {
 
     expect(receipt).toMatchObject({ ok: false, message: expect.stringMatching(/HYPB/) });
     await expect(pending.outcome).resolves.toMatchObject({ ok: true });
+  });
+});
+
+describe("BulkAssembler's limits", () => {
+  const CHUNK_PAYLOAD = MAX_BINARY_FRAME_BYTES - BINARY_FRAME_HEADER_BYTES;
+
+  it("are 64 MiB, in at most 257 chunks of the largest payload", () => {
+    expect(MAX_BULK_PAYLOAD_BYTES).toBe(67_108_864);
+    expect(MAX_BULK_CHUNKS).toBe(257);
+  });
+
+  it("fail a request whose chunk states more chunks than the limit", () => {
+    const assembler = new BulkAssembler();
+    assembler.expect(7);
+    const header = { request: 7, index: 0, count: MAX_BULK_CHUNKS + 1, payloadBytes: 1 };
+
+    expect(assembler.add(header, new Uint8Array(1))).toMatchObject({ ok: false, reason: "broken" });
+    expect(assembler.add({ ...header, count: 1 }, new Uint8Array(1))).toEqual({
+      ok: false,
+      reason: "unexpected",
+    });
+  });
+
+  it("fail a request at the chunk that carries it over the byte limit", () => {
+    const assembler = new BulkAssembler();
+    assembler.expect(7);
+    const payload = new Uint8Array(CHUNK_PAYLOAD);
+    const within = Math.floor(MAX_BULK_PAYLOAD_BYTES / CHUNK_PAYLOAD);
+    const header = (index: number) => ({
+      request: 7,
+      index,
+      count: MAX_BULK_CHUNKS,
+      payloadBytes: CHUNK_PAYLOAD,
+    });
+    for (let index = 0; index < within; index += 1) {
+      expect(assembler.add(header(index), payload)).toEqual({ ok: true });
+    }
+
+    expect(assembler.add(header(within), payload)).toMatchObject({ ok: false, reason: "broken" });
   });
 });
