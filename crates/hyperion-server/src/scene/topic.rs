@@ -10,11 +10,14 @@
 //! only waits.
 
 use std::collections::BTreeMap;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
+use futures_util::FutureExt;
+
 use hyperion_protocol::{
-    CameraReportDto, RequestError, SceneClockDto, SceneSubscribeRequest, SubscriptionState,
-    UniverseIdHex,
+    CameraReportDto, ErrorCode, RequestError, SceneClockDto, SceneSubscribeRequest,
+    SubscriptionState, UniverseIdHex,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::id::SystemId;
@@ -27,9 +30,10 @@ use super::{Clock, ClockReading, SceneSetting, Ship, ShipPosition};
 use crate::AppState;
 use crate::compute::{
     CancelOnDrop, CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Priority,
+    panic_message,
 };
 use crate::limits::{CRAFT_PUSH_INTERVAL, SCENE_HEARTBEAT};
-use crate::requests::{bodies_of, openable_universe};
+use crate::requests::{bodies_of, openable_universe, request_error};
 use crate::subscriptions::{PendingPush, Pusher, ScenePush, SubscriptionCommand};
 use crate::universe::UniverseId;
 
@@ -155,9 +159,30 @@ pub(crate) async fn open(
         commands,
         pusher: pusher.clone(),
     };
-    let task = tokio::spawn(topic.run());
-    pusher.attach(task.abort_handle());
+    spawn(topic, &pusher);
     Ok(SubscriptionState::Scene(scene))
+}
+
+/// Starts `topic`'s task and hands it to `pusher`'s subscription, which owns it and aborts it when
+/// the subscription ends. A task that panics ends the subscription `internal`, as a failed job
+/// does, so that the client is told and the subscription's place is freed.
+fn spawn(topic: Topic, pusher: &Pusher) {
+    let failing = pusher.clone();
+    // Unwind-safe as asserted: a topic that panicked is dropped, and nothing of it is used again.
+    let run = AssertUnwindSafe(topic.run()).catch_unwind();
+    let task = tokio::spawn(async move {
+        if let Err(payload) = run.await {
+            tracing::error!(
+                panic = %panic_message(payload.as_ref()),
+                "a scene subscription's task panicked"
+            );
+            failing.fail(request_error(
+                ErrorCode::Internal,
+                "the scene subscription failed",
+            ));
+        }
+    });
+    pusher.attach(task);
 }
 
 /// A push of `delta`, stating the clock `reading` it was evaluated at.
@@ -432,7 +457,7 @@ mod tests {
     use super::*;
     use crate::requests::Handlers;
     use crate::scene::{SceneClock, ShipPosition, ShipStandIn, TimeRate};
-    use crate::subscriptions::Subscriptions;
+    use crate::subscriptions::{Large, Offered, Step, Subscriptions};
     use hyperion_protocol::{
         DetailLevelDto, RequestBody, ResponseBody, SceneCraftDto, SubscribeRequest,
         SubscriptionState, SubscriptionTopic,
@@ -531,24 +556,27 @@ mod tests {
             commands: pusher.take_commands(),
             pusher: pusher.clone(),
         };
-        let task = tokio::spawn(topic.run());
-        pusher.attach(task.abort_handle());
+        spawn(topic, &pusher);
 
         let unsent = timeout(WAIT, async {
             loop {
                 subscriptions.woken().await;
-                if let Some(unsent) = subscriptions.next_unsent(None) {
+                if let Some(Step::Serialise(unsent)) =
+                    subscriptions.next_step(None, |_| true, Large::MaySerialise)
+                {
                     break unsent;
                 }
             }
         })
         .await
         .expect("a push within the wait");
-        let ready = unsent.serialise();
+        let Offered::Send(frame) = subscriptions.offer(unsent.serialise(), |_| true) else {
+            panic!("sent, with room for it");
+        };
         let ServerMessage::Notification {
             body: NotificationBody::Scene(notification),
             ..
-        } = serde_json::from_str(&subscriptions.sent(ready)).unwrap()
+        } = serde_json::from_str(&frame).unwrap()
         else {
             panic!("a scene notification");
         };
@@ -777,6 +805,80 @@ mod tests {
             seen.is_subset(&moved),
             "the heartbeat's contacts: {seen:?} in {moved:?}"
         );
+        drop(client);
+        harness.stop().await;
+    }
+
+    /// No craft when the scene opens, and a panic every time after.
+    #[derive(Debug, Default)]
+    struct PanicsAfterOpening(std::sync::atomic::AtomicBool);
+
+    impl CraftSource for PanicsAfterOpening {
+        fn craft_at(&self, _universe: UniverseId, _t: UniverseTime) -> Vec<CraftState> {
+            let opened = self.0.swap(true, std::sync::atomic::Ordering::Relaxed);
+            assert!(!opened, "the craft source fails");
+            Vec::new()
+        }
+    }
+
+    /// A topic whose task panics, here in an injected craft source at its first heartbeat, ends
+    /// its subscription `internal` and frees its place, rather than leaving it silent.
+    #[tokio::test]
+    async fn a_topic_task_that_panics_ends_its_subscription_internal() {
+        let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
+            config.craft_source(PanicsAfterOpening::default())
+        })
+        .await;
+        let state = Arc::clone(harness.state());
+        let (universe, cell) = universe_and_cell(&state).await;
+        let start = UniverseTime::new(3_600, 0).unwrap();
+        state
+            .scene
+            .set(universe.id(), in_system(cell[0].id(), start, 1));
+        let mut client = harness.connect().await;
+        client.hello().await;
+        let subscribe = RequestBody::Subscribe(SubscribeRequest {
+            universe: universe.id().into(),
+            topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                detail: DetailLevelDto::Contact,
+                cameras: Vec::new(),
+            }),
+        });
+        client.request(1, subscribe).await;
+        let subscription = match client.next_message().await {
+            ServerMessage::Response {
+                body: ResponseBody::Subscribe(subscribed),
+                ..
+            } => subscribed.subscription,
+            other => panic!("expected `subscribed`, got {other:?}"),
+        };
+        let ended = loop {
+            match client.next_message().await {
+                ServerMessage::Notification { .. } => {}
+                ServerMessage::SubscriptionEnded {
+                    subscription: on,
+                    error,
+                } => {
+                    assert_eq!(on, subscription);
+                    break error;
+                }
+                other => panic!("expected `subscription_ended`, got {other:?}"),
+            }
+        };
+        assert_eq!(ended.code, hyperion_protocol::ErrorCode::Internal);
+        // Its place is freed: no request may name it.
+        client
+            .request(
+                2,
+                RequestBody::Unsubscribe(hyperion_protocol::UnsubscribeRequest { subscription }),
+            )
+            .await;
+        match client.next_message().await {
+            ServerMessage::RequestError { error, .. } => {
+                assert_eq!(error.field.as_deref(), Some("subscription"));
+            }
+            other => panic!("expected the unknown subscription refused, got {other:?}"),
+        }
         drop(client);
         harness.stop().await;
     }
