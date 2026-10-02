@@ -608,7 +608,8 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     rising with mass before and on the main sequence). A living primary can be fainter in V than a
     lighter companion: a post-AGB star, a stripped helium star and a TP-AGB star all can. So the
     bound is n × F₁ only while the primary is a protostar, pre-main-sequence or main-sequence star
-    (and, once plan 11's binaries are wired, its system cannot have interacted), since its
+    (for a single star; a multiple system takes n × F_env at `max_star_mass(m₁)`, Design note 8,
+    since the census cannot tell before generation whether a pair has interacted), since its
     companions are then no further evolved and V rises with mass there; otherwise it is F₁ + (n − 1)
     × F_env, with F_env the envelope's flux at `max_star_mass(m₁)` (Design note 8). A dense-mass
     slow test pins that V never falls with mass along the early isochrones. The census counts stars,
@@ -917,8 +918,12 @@ is_dark_in_v}` (A3's and A4's interims in one place). Tests: the total light per
   the bench `sky/luminosity_tables`. Acceptance: `cargo test -p hyperion-sim sky::luminosity` and
   `cargo bench -p hyperion-sim --no-run`.
 - **R06.T5.c Against realised cells (slow).** For 200 cells of each layer at the solar circle and
-  in the bulge, the summed V light of every realised system (`SystemStars`) against the density
-  times the table, within a Poisson and track-sampling interval. Acceptance: `just test-slow
+  in the bulge, the summed V light of every realised system, each star's state from
+  `SystemStars::state_at(t).stars()` (pair-evolved since P11.T11), against the density times the
+  table, within a Poisson and track-sampling interval; and, recorded but not gated, the ratio of
+  realised to tabulated counts brighter than M_V = −3 and −5 per layer; a ratio above 1.3 in a
+  layer whose cap is set by its bright end is a finding for T7, which then scales that layer's
+  expected count beyond by the measured ratio (decision record item 3). Acceptance: `just test-slow
 luminosity_matches_realised_cells` passes.
 
 Files: `sky/{luminosity,photometry}.rs`, `crates/hyperion-sim/benches/sky.rs`.
@@ -1118,7 +1123,9 @@ src/renderer/src/view/sky`.
   `psfPixelWeights` (Design note 20). As built, R02's sprites are `view/wireframe/drawList.ts`'s
   `starSprites` (flux-sorted, capped at 2,000 on the low setting), drawn through the
   `wireframe:starSprite` material from a storage buffer of two `vec4f` per sprite; `SkySprites`
-  feeds that layout and supersedes the interim's selection. Tests: a star 0.1 ly away moves nine pixels across 30 au at
+  feeds that layout and supersedes the interim's selection. For the photorealistic style it adds an
+  HDR twin of R02's `starSprite.wgsl` (same file, tone step compiled out, `rgba16float` pipeline);
+  the wireframe keeps R02's material (decision record item 1). Tests: a star 0.1 ly away moves nine pixels across 30 au at
   1080p and 60°, as the brainstorm computes; a star crossing the bake/sprite threshold keeps its
   flux; a moving star's summed energy stays within 1% (Design note 23). Files:
   `view/sky/{sprites,select}.ts`. Acceptance: `pnpm --filter hyperion exec vitest run
@@ -1126,9 +1133,14 @@ src/renderer/src/view/sky`.
 - **R06.T13.d The band layer.** `BandLayer`: the band map uploaded as a small cube
   (`rgba16float`, 64² faces, through `createTexture` with `dimension: "cube"` and a
   `viewDimension: "cube"` binding), bilinearly filtered, drawn first, with the culled stars added.
-  Pending a ruling (Risks, "No HDR target before R07"): until R07's photorealistic style brings the
-  HDR target, the band and the discs are checked by the harness on a target of its own and the
-  wireframe view draws the sprites (and the baked cube) tone-mapped per pixel, as R02 does. Files:
+  Decided 2026-10-02 (decision record item 1): the band, disc, sprite and cube passes have an HDR
+  variant (pre-exposed linear, meter-class alpha, `rgba16float` pipelines), checked by the harness
+  on a target the test creates; R07.T7 creates the views' HDR target. The wireframe draws the baked
+  cube and the sprites tone-mapped per pixel by R02's `agxSprite` straight to the canvas (the cube's
+  display variant, registered beside the HDR one), and the band and the discs only in the
+  photorealistic style. The cube-sampling draw is `BandLayer`'s full-screen draw: in the HDR
+  variant it samples the band and the cube together, in the display variant the cube alone; both
+  variants are registered in `WGSL_CATALOGUE` with their `displayName`s. Files:
   `view/sky/band.ts`, `view/sky/shaders/band.wgsl`. Tests: upload layout; the culled-flux sum.
   Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky`,
   `just test-render`.
@@ -1136,7 +1148,7 @@ src/renderer/src/view/sky`.
   response's `hosts` and the scene's drawn position, angular radius asin(R ÷ d), the power-2 law per
   channel in the fragment shader on `central_luminance`, the clamp and the glare hand-off to R07
   (Design note 16), a point sprite below three pixels; the disc pass writes `METER_CLASS.hostDisc`
-  (0) in the HDR target's alpha (R02 leaves that channel to R07's meter class), and the sprite and
+  (0) in the HDR target's alpha (R07.T7's; the harness's own target until then) (R02 leaves that channel to R07's meter class), and the sprite and
   band passes blend alpha as source zero, destination one so the class survives;
   `HostDiscLayer.glareSources(camera, viewport): GlareSource[]` returns one R07 `GlareSource` per
   disc, `{ direction; angularRadiusRad; excessLuminance: Rgb }` per channel in cd/m² above 65,504,
@@ -1234,13 +1246,17 @@ sky::census::features` and `just ci`.
   timelines reach `SystemStars::state_at`), and P11.T6 and T8–T10 move no star's mass, so this
   subtask runs straight after T8.e. The brief (`brief_at`) is the primary's single-star model and
   cannot tell whether a multiple system has interacted, and P11's `can_interact` is crate-private
-  and reads the models' tracks, which need `SystemStars::generate`. The re-validation's lean, a
-  bound and so never a change of answer: for n ≥ 2 take n × F_env at `max_star_mass(m₁)` (the
-  primary can itself be a rejuvenated accretor), unless a cheaper exact gate is found, such as a
-  public period-and-mass test from plan 11 (an ask of plan 11 if wanted); T17 measures the cost.
-  Tests: a pinned blue straggler of an old cell (a merger or an accretor) is listed and equals
-  `brute_force_sky`; the identity tests of T8.e pass unchanged. Acceptance: `cargo test -p
-hyperion-sim --test sky_census` and `just ci`.
+  and reads the models' tracks, which need `SystemStars::generate`. Decided 2026-10-02
+  (decision record item 2): for n ≥ 2 the bound is n × F_env at `max_star_mass(m₁)` over ages
+  from zero; n × F₁ only for single stars. No ask of plan 11 unless T17 finds the multiple-system
+  bound above 25% of census time in a benched field, in which case a public period-and-mass
+  interaction test is asked of plan 11 then. Tests: a pinned blue straggler of an old cell (a
+  merger or an accretor) is listed and equals `brute_force_sky`; the identity tests of T8.e pass
+  unchanged; (slow) `envelope_bounds_pair_states`: over ≥ 10⁴ realised multiple systems in old and
+  young cells of each layer, every star of `SystemStars::state_at(t).stars()` is no brighter in V
+  than the envelope at `max_star_mass(m₁)` with ages from zero, within the 0.3 mag margin.
+  Acceptance: `cargo test -p hyperion-sim --test sky_census`, `just test-slow
+envelope_bounds_pair_states` and `just ci`.
 
 ### R06.T17 Verification pass
 
@@ -1253,7 +1269,9 @@ systems layers C to E hold; the candidates the binary rule of T16.b costs; check
 counts against `range_500ly_floor_d` (37,675 systems at version 15, re-measured at the current version). Add goldens:
 `crates/hyperion-sim/tests/golden/sky/census_near_sun.golden`, the census of a pinned observer near
 the Sun to V 7 (IDs, star indices, V to 10⁻⁶ mag), and `sky/band_face_row.golden`, one band face
-row, read by the testkit's golden harness. Decide N_max and the sprite budget per setting from the
+row, read by the testkit's golden harness. Record the per-record bound's pass rate (records
+generated ÷ records skipped) for single and multiple systems in each census bench, against T16.b's
+25% trigger (decision record item 2). Decide N_max and the sprite budget per setting from the
 measurements (open question 16) and record them. Each timing is taken on a quiet machine, as the
 roadmap's conventions require, or marked provisional. Acceptance: `just ci`, and the named `just test-slow` and `just
 bench -- sky` runs above complete.
@@ -1315,8 +1333,11 @@ plan reserves no tag, prefix or stream.
   or `origin/galaxy-generation`). **Missing galaxy work** at re-validation: P09.T40 (T16.a);
   P09.T28.b (centre members, tallied until then, T8.b); A1–A4 and the plan 06 heading (T1 drafts
   them; interims hold); P07.T10.a–c is on `origin/galaxy-generation` only and is not needed.
-- **No HDR target before R07 (open; for the orchestrator, then the owner).** R06 Design notes 16
-  and 21 and T13.d–e write into "the HDR target" with pre-exposure and `METER_CLASS` in its alpha,
+- **No HDR target before R07 (closed 2026-10-02 by the decision record's item 1).** R07.T7 creates
+  each photorealistic view's HDR scene target; R06's sky passes get HDR variants tested on targets
+  the tests create; the wireframe draws the cube and the sprites tone-mapped per pixel, the band
+  and the discs only in the photorealistic style; T13.c–e carry the edits. The question as it
+  stood: R06 Design notes 16 and 21 and T13.d–e write into "the HDR target" with pre-exposure and `METER_CLASS` in its alpha,
   and R07 calls the HDR target R02's; but R02 as built draws the wireframe straight to the canvas,
   tone-mapping each sprite (R02.T13's deviation), and nothing draws into an `rgba16float` scene
   target until R07's photorealistic style. Lean (the smallest reversible choice): R06 builds the
@@ -1328,15 +1349,16 @@ plan reserves no tag, prefix or stream.
   existing `STARS` row gains the label-block use `STARS V <m> EYE|CAM` (in `mag`, one decimal);
   new rows `EYE`, `CAM` (one row), `CLUSTERS NOT MODELLED`, `WD NOT MODELLED` and
   `UNRESOLVED STARS`, the last being the band's name in the DOM list's view notes, which Design
-  note 23 left unnamed (the lane's choice); R02's two interim rows are marked withdrawn on a view once the sky
-  has arrived; the "Views" class gains the rule that the star limit is always a V magnitude with
+  note 23 left unnamed (the lane's choice); R02's two interim rows are marked withdrawn on a view
+  once the sky has arrived; the "Views" class gains the rule that the star limit is always a V magnitude with
   its kind, with any stand-in after a middle dot, and a paragraph that the unresolved band is
   labelled and drawn only in the photorealistic style. **Awaiting the owner's sign-off.**
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
   mergers brighter than the cut are listed by the census itself. The caps (T7) read the envelope,
-  which T16.b widens. T5.c's comparison with realised cells measures the difference.
+  which T16.b widens. T5.c's comparison with realised cells measures the difference. Accepted
+  2026-10-02 (decision record item 3); T5.c measures both the integrated light and the bright end.
 - **Merges with the galaxy branch.** `origin/galaxy-generation` adds the `extinction_map`,
   `extinction` and observed-mode kinds to `envelope.rs`, `REQUEST_KINDS`, `requests/mod.rs` and the
   protocol package's `index.ts`, the same lists T10 and T11 extend; whichever lands second merges
