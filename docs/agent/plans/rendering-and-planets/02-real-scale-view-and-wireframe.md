@@ -1758,3 +1758,14 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   `UNRESOLVED CONTACT` (and `STAR`, `CRAFT`). The column is 12ch, as wide as its longest word, and a
   two-word kind breaks at its space onto a second line of the 2rem row (a choice of the fix, to keep
   the designation's column; pending by eye with the rest of T15).
+- **Fixed in RM1 validation (2026-10-02): frame selection measures from geometric centres (m1).**
+  `sceneFrameFor` measured each candidate's distance from `origins.bodyCentreM`, which in a server
+  scene is the body's apparent position for every body but the ship's local one, against Design
+  note 6's "geometric and present … never apparent". `CameraScene` gains `selectionOrigins`, the
+  scene's origins with every body at its geometric centre: `ViewBody` gains an optional
+  `geometricCentreM`, which `viewSceneFromServer` sets to `sceneAt`'s `geometricM` for each placed
+  body it draws apparent, and `cameraSceneOf` builds `selectionOrigins` from it
+  (`sceneOrigins(scene, "geometric")`). The pose is placed from its frame's geometric origin, so a
+  camera in a moon's frame keeps its offset from the moon while its distances to every other body are
+  the sim's. Drawing, the rebase on a change of frame and the camera report still use the drawn
+  origins. Tested in `state.test.ts` (a moon drawn 10⁸ m from where it is) and `fromServer.test.ts`.

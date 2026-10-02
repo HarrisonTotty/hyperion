@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { dot, norm, normalise, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
+import { add, dot, norm, normalise, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import {
   aCameraPose,
   aCameraScene,
   anOwnShip,
   FIXTURE_MOON,
+  FIXTURE_MOON_CENTRE_M,
   FIXTURE_PLANET,
   FIXTURE_SHIP,
   FIXTURE_SYSTEM,
@@ -27,6 +28,7 @@ import {
   nextTarget,
   offeredPresets,
   rebaseState,
+  sceneFrameFor,
   onSystemChange,
   stepFov,
   targetPosition,
@@ -233,6 +235,36 @@ describe("cuts and eased moves", () => {
     const turned = followPreset(chase, aCameraScene({ ownShip: anOwnShip({ attitude }) }));
     const astern = rotate(attitude, scale(CHASE_OFFSET_HULL_LENGTHS, 20));
     expect(apart(turned.pose.positionM, astern)).toBeLessThan(1e-9);
+  });
+});
+
+describe("frame selection", () => {
+  // The moon drawn where it is seen, 10⁸ m from where it is at the frame's time.
+  const drawn = aCameraScene();
+  const geometricMoonM = sub(FIXTURE_MOON_CENTRE_M, vec3(0, 1e8, 0));
+  const lightTimed = aCameraScene({
+    selectionOrigins: {
+      ...drawn.origins,
+      bodyCentreM: (body) =>
+        body === FIXTURE_MOON ? geometricMoonM : drawn.origins.bodyCentreM(body),
+    },
+  });
+
+  it("measures from where the bodies are, not where they are drawn (Design note 6)", () => {
+    // 10⁷ m beyond the drawn moon, inside its 5.8 × 10⁷ m Hill sphere; 1.1 × 10⁸ m from the moon.
+    const pose = aCameraPose({ positionM: add(FIXTURE_MOON_CENTRE_M, vec3(0, 1e7, 0)) });
+    expect([sceneFrameFor(pose, drawn), sceneFrameFor(pose, lightTimed)]).toEqual([
+      { kind: "body", body: FIXTURE_MOON },
+      { kind: "body", body: FIXTURE_PLANET },
+    ]);
+  });
+
+  it("keeps a camera in a body's frame at its offset from that body", () => {
+    const pose = aCameraPose({
+      frame: { kind: "body", body: FIXTURE_MOON },
+      positionM: vec3(0, 1e7, 0),
+    });
+    expect(sceneFrameFor(pose, lightTimed)).toEqual({ kind: "body", body: FIXTURE_MOON });
   });
 });
 
