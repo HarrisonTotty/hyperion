@@ -234,7 +234,8 @@ ambiguous, the design note that reads it is named.
   (`RenderEngine.createRenderTarget(spec: RenderTargetSpec)`); indirect draws and dispatches
   (`DrawItem.indirect` and `dispatch(kernel, bindings, IndirectArgs)`); asynchronous pipeline
   creation (`createMaterialAsync`, `createComputeAsync`); per-pass GPU time (`onPassTimes`,
-  delivering `PassTimes` keyed by `FrameSubmission.label`, each with its `bracketed` flag) where the
+  delivering `PassTimes` keyed by `FrameSubmission.label`, `bracketed` always `false` since R01
+  Design note 24) where the
   adapter exposes `timestamp-query`, quantised to 65,536 ns in shipping launches and unquantised
   under `--hyperion-gpu-timing` (its Design note 4, found by probe), with
   `GraphicsStatus.timer: GpuTimer` (`"quantized" | "full" | "absent"`); CPU read-back

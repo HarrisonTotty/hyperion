@@ -7,8 +7,8 @@
   differencing, `BodyFixedPosition`, the photometric pipeline, the wireframe style and the label
   block) and [R04](04-cross-target-determinism.md) (`hyperion-base`, the `hyperion-surface`
   skeleton, both wasm targets in `just ci`, the terrain hazards, the client's first WebAssembly and
-  the owner's ruling on the Content Security Policy, R04.T10.a, which gates R04.T10.c's worker
-  loader). Nothing of galaxy plans 12 or 14
+  R04.T10.c's worker loader, built under the Content Security Policy unchanged, as R04.T10.a ruled
+  on 2026-09-30). Nothing of galaxy plans 12 or 14
   and no session is needed: the spike runs on a scene built by hand.
 - **Brainstorm sections covered** (by heading, in [the
   brainstorm](../../brainstorming/rendering-and-planets.md)): step 3 of [Suggested order of
@@ -50,11 +50,11 @@ results to the render thread. The heights come from a hand-parameterised Earth-s
 R09's surface generator. Earth's reference atmosphere is drawn every frame by Hillaire's four
 tables, which R08 generalises. A scripted, seeded descent, identical every run, records the
 brainstorm's metrics into a results file, and the plan ends with the gate's verdict: the descent
-passes or fails at 1080p60 on a discrete GPU of the RTX 4060 class (run on the development
-machine's RTX 3080, which exceeds that class) and at 30 fps at 720p on the UHD 620's low setting
-(run by the owner), and open question 2's rule, with a native wgpu replay and Dawn's safety toggles
-priced, says whether a failure is the browser's. `TERRAIN: STREAMING` and `TERRAIN: DETAIL LIMITED`
-annunciate on the view from here on.
+passes or fails at 1080p on the recommended specification, the development machine's RTX 3080, at
+its display's measured vsync period (Design note 21), and at 30 fps at 720p on the UHD 620's low
+setting (run by the owner), and open question 2's rule, with a native wgpu replay and Dawn's safety
+toggles priced, says whether a failure is the browser's. `TERRAIN: STREAMING` and `TERRAIN: DETAIL
+LIMITED` annunciate on the view from here on.
 
 ## Scope and non-goals
 
@@ -297,7 +297,7 @@ class PatchCache {
 }
 function resolveDrawSet(sel: Selection, cache: PatchCache): DrawSet; // ancestor fallback
 
-// workers/: pool.ts, heightWorker.ts
+// workers/: pool.ts, height.worker.ts
 type BakedPatch = {
   key: PatchKey;
   generation: number;
@@ -381,14 +381,16 @@ its first task.
   `createPostProcess`, `createCompute` from a `KernelPair`, `createBuffer`, `createTexture`,
   `writeBuffer`, `dispatch`, `readBuffer` and `readTexture` (the CPU readback the smoke assertions
   and the Node tests use), `onPassTimes` delivering `PassTimes` keyed by `FrameSubmission.label`
-  with its `bracketed` flag (the per-pass GPU time of Design note 18), `onAllocation` and
+  (the per-pass GPU time of Design note 18; `bracketed` is always `false`, every pass being the
+  adapter's own, R01 Design note 24), `onAllocation` and
   `onFault`; `createRenderTarget` with a `RenderTargetSpec` whose `depth` gives the terrain pass a
   sampled colour and depth; `RenderView`; `FrameSubmission` with its `label`, and `DrawItem` with
   its `offsetFromCameraM`, `textures` and `indirect: IndirectArgs`, whose instance count the
   terrain pass writes with `writeBuffer` for its one instanced draw), `loadRenderEngine` behind its
   dynamic import with its optional `LoadEngineOptions` (the tests' injected `importEngine`),
   `GpuCapabilities`
-  (`shaderF16`, `subgroups`, `timestampQuery`), the WGSL-only guard, one canvas context per view on
+  (`shaderF16`, `subgroups`, `timestampQuery`), standard WGSL with its compile errors reported by
+  material name (R01 Design note 23), one canvas context per view on
   one device, the fault path (`GraphicsFault`, `GraphicsStatusStore`), the refusal of a fallback
   adapter; in the main process `graphicsSwitches` with its `gpuTiming` option and
   `GPU_TIMING_SWITCH`, which lift timestamp quantisation for measurement runs, and
@@ -440,8 +442,9 @@ its first task.
   `wasm_bindgen_test as test` import, a test that cannot run on `wasm32-unknown-unknown` (one that
   reads files, such as the golden writers' bless path) sits in a module named `native_only`, and
   every `should_panic` test states `expected` and lives in the crate's `tests/panics.rs`; and the
-  owner's ruling on the CSP question (R04.T10.a: add `'wasm-unsafe-eval'`, change nothing, or
-  serve through a custom scheme), which gates R04.T10.c and so T10.b.
+  CSP ruling (R04.T10.a, 2026-09-30: change nothing): workers are same-origin `*.worker.ts` module
+  files, only workers and tests import `generated/surface/`, and the render thread never compiles
+  WebAssembly.
 - **Galaxy plan 14:** nothing built. `body_fixed_at` (P14.T14.c) does not exist; the test planet
   carries its own rotation in the shape R02's rotation interface takes (Design note 14).
 - **Tree facts relied on** (checked 2026-09-29): `crates/hyperion-server/src/config.rs`'s
@@ -680,7 +683,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     compilation on the render thread does; and no documented guarantee was found that module workers
     load from `file://` in Electron 44, so T10's first acceptance is a smoke test of the built app,
     with a privileged custom scheme served through `protocol.handle` as the fallback, which
-    Electron's security checklist prefers anyway.
+    Electron's security checklist prefers anyway. _Settled by R04 (2026-09-30): R04.T10.a ruled
+    the policy unchanged on these findings, and R04.T10.c's module worker loads from `file://` in
+    the built app and from the dev server, checked by hand. Desktop timed runs pin three workers
+    (decided 2026-09-30 by a delegated decision; T17)._
 12. **The test planet** (researched 2026-09-29). An Earth-sized (WGS 84's figure, Design note 5;
     volumetric radius 6,371 km), dry world whose height
     is a sum of 3D improved Perlin gradient noise octaves (Perlin 2002: the reference
@@ -760,10 +766,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     shape R08 generalises. The WGSL is ported from Bevy 0.19's atmosphere (MIT or Apache-2.0,
     already WGSL, already a list of terms, with a ray-marched mode for views from space), with
     sebh's UnrealEngineSkyAtmosphere (MIT) as the numerical reference, both licence notices kept in
-    the ported files. Babylon's own Hillaire atmosphere in `@babylonjs/addons` is not used: it
-    assumes forward depth with an infinite far plane, has exactly three media, rewrites the
-    directional lights' colour and intensity every frame and is marked experimental. Earth's terms,
-    each cited in T12.a:
+    the ported files. Babylon's Hillaire atmosphere (its add-ons package) was not used even before
+    R01 dropped Babylon (R01 Design note 24): it assumes forward depth with an infinite far plane,
+    has exactly three media, rewrites the directional lights' colour and intensity every frame and
+    is marked experimental. Earth's terms, each cited in T12.a:
     - **Rayleigh**, exponential with an 8 km scale height, 4.85, 11.5 and 28.7 × 10⁻⁶ m⁻¹ at 680,
       550 and 440 nm, from Peck and Reeder 1972's refractivity with Bates 1984's King factor at
       288.15 K and 101,325 Pa (the US Standard Atmosphere's sea level, N = 2.547 × 10²⁵ m⁻³);
@@ -838,11 +844,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     presentation times in the trace, falling back to `requestAnimationFrame` timestamps, at the
     50th, 95th and 99th percentiles, with missed and hitching frames counted; GPU time per pass from
     each pass's `timestampWrites` at its start and end, read through R01's `onPassTimes` as
-    `PassTimes` keyed by each `FrameSubmission.label`, a Babylon-encoded pass carrying `bracketed`
-    (its figure then includes queue gaps, an upper bound; timestamps inside passes need
-    `--enable-unsafe-webgpu`, which is never set); main-thread time split into our code
-    (`performance.measure` spans), the engine (CPU-profiler self time in Babylon's own chunk, which
-    R01's named `babylon` chunk, from `codeSplitting` groups, makes separable) and idle; patches a
+    `PassTimes` keyed by each `FrameSubmission.label` (every pass is the adapter's own, so none is
+    bracketed, R01 Design note 24; timestamps inside passes need `--enable-unsafe-webgpu`, which is
+    never set); main-thread time split into our code (`performance.measure` spans), the engine
+    adapter (CPU-profiler self time in its lazily imported `engine-*.js` chunk) and idle; patches a
     second requested, baked and made resident, against the predicted demand (Design note 19); upload
     bytes from the engine's `writeBuffer` and `writeTexture` tally (R01's `uploaded` events);
     pipeline creations after warm-up, from a shim on `createRenderPipeline`, `createComputePipeline`
@@ -937,7 +942,7 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     UHD 620 run is paced to every second vsync of a 60 Hz display, since uncapped intervals
     alternate between 16.7 and 33.3 ms and their percentiles mean nothing.
 
-    | Criterion             | 1080p60, discrete (T = 16.7 ms)                                         | 720p30, UHD 620 low (T = 33.3 ms)                                                               |
+    | Criterion             | 1080p, RTX 3080 (T = measured vsync period, 16.68 ms)                   | 720p30, UHD 620 low (T = 33.3 ms)                                                               |
     | --------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
     | 50th percentile       | ≤ T + 0.5 ms                                                            | ≤ T + 0.5 ms                                                                                    |
     | 95th percentile       | ≤ T + 1 ms                                                              | ≤ 35 ms                                                                                         |
@@ -950,14 +955,23 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 
     The memory row reads the brainstorm's "2 to 3 GB" as the roadmap's correction does: a finding
     above 2 GB and a failure above 3 GB. Its "three workers" is the separate memory run of Design
-    note 11; the timed runs keep the default count. The last two rows keep the gate honest about
-    what the spike does not draw (Design note 17):
+    note 11 on the UHD 620, whose timed runs keep the default count; on the desktop the timed runs
+    pin three workers and the row is read from them (T17). The last two rows keep the gate honest
+    about what the spike does not draw (Design note 17):
     the budget's other rows must still fit beside terrain and atmosphere. Patches a second
     sustained are recorded against the predicted demand but are not a pass criterion: where demand
     outruns the workers, the view annunciates `TERRAIN: STREAMING`, as the budget intends, and the
     run records how long and where. Percentile and missed-frame conventions follow frame-time
     practice (PresentMon's `MsBetweenPresents`, Chromium's dropped-frame metric); the headroom row
     is the defined meaning of open question 2's "fit with headroom".
+
+    _Decided 2026-09-30 by a delegated decision (the hardware decisions, items 1, 4 and 5):_ the
+    discrete half runs on the recommended specification, the RTX 3080, not an RTX 4060-class part.
+    The criteria are unchanged, with T the display's measured vsync period: 16.68 ms at the
+    projector's 1080p 59.94 Hz mode, since it has no exact 60 Hz mode. No margin is scaled for the
+    faster part. The memory ceilings are unchanged; the RTX 3080's 10 GiB is shared with the local
+    LLM. The brainstorm's discrete column keeps its RTX 4060-class estimates until R12.T10 replaces
+    it.
 
 22. **Open question 2's rule, operationalised** (researched 2026-09-29). The verdict (T19) applies
     the brainstorm's rule in order. A failure on the UHD 620 alone redesigns the low setting and
@@ -1370,7 +1384,7 @@ worker at a time.
   `terminate` on unmount leaves no listener behind.
 - Acceptance: `pnpm --filter hyperion exec vitest run view/terrain/workers`.
 
-**R05.T10.b The worker and its WebAssembly.** `heightWorker.ts`, extending R04's loader and probe
+**R05.T10.b The worker and its WebAssembly.** `height.worker.ts`, extending R04's loader and probe
 worker in `renderer/src/wasm/`: it loads the module `just gen-surface` produces (wasm-bindgen's web
 target) through `init` on a `?url` import, bakes, and copies and transfers the typed arrays. It
 relies on the renderer's `worker.format: "es"`, which R04.T10.c sets. A Node-environment vitest
@@ -1381,15 +1395,17 @@ app, started through `loadFile`, a worker bakes one patch and logs the module's 
 any policy violation, extending R04's own check of its probe worker; T13.c's `--smoke` mode later
 makes this a command that exits with a status. If module workers do
 not load from `file://`, this task serves the renderer from a privileged custom scheme through
-`protocol.handle` instead, with R01's and the owner's agreement, as Design note 11's fallback.
+`protocol.handle` instead, with R01's and the owner's agreement, as Design note 11's fallback (R04's
+probe worker does load from `file://`, R04.T10.c). The file is `*.worker.ts`, so it compiles under
+`tsconfig.worker.json` and is one of the files the source guard lets import `generated/surface/`.
 
-- Files: `view/terrain/workers/heightWorker.ts`, `view/terrain/workers/f32Digest.ts`,
+- Files: `view/terrain/workers/height.worker.ts`, `view/terrain/workers/f32Digest.ts`,
   `renderer/src/wasm/` (R04's loader, extended), `view/terrain/workers/wasm.node.test.ts`.
 - Tests: the Node-environment wasm test; the built-app check.
 - Acceptance: `just gen-surface && pnpm --filter hyperion exec vitest run view/terrain/workers`; by
   hand, recorded in the task's notes: the built app (`pnpm --filter hyperion build`, run from
-  `out/`) bakes a patch in a worker with no policy violation, after the owner's ruling on the
-  policy.
+  `out/`) bakes a patch in a worker with no policy violation, under the unchanged policy
+  (R04.T10.a).
 
 ### R05.T11 The terrain pass
 
@@ -1624,9 +1640,10 @@ the main process into frame, GPU-pass, main-thread and GC figures.
 - Acceptance: `pnpm --filter hyperion exec vitest run src/main/spike src/main/reduceTrace`.
 
 **R05.T14.c Memory and the results file.** `app.getAppMetrics()` and the renderer's memory at
-1 Hz; a reader of the GPU process's DRM fdinfo; `nvidia-smi -q -x` where present; and the results
-writer. The writer produces the file of Design note 18, with the machine, driver, Electron and
-Chromium versions, setting, seed, options, switches, load average, governor and every figure,
+1 Hz; a reader of the GPU process's DRM fdinfo; `nvidia-smi -q -x` where present, which is the
+headline GPU memory on NVIDIA, whose driver gives no per-client figure through fdinfo; and the
+results writer. The writer produces the file of Design note 18, with the machine, driver, Electron
+and Chromium versions, setting, seed, options, switches, load average, governor and every figure,
 including the per-level ε_n and k_n. It writes a Markdown summary beside the file.
 
 - Files: `apps/hyperion/src/main/fdinfo.ts`, `apps/hyperion/src/main/results.ts`, their tests,
@@ -1635,7 +1652,8 @@ including the per-level ε_n and k_n. It writes a Markdown summary beside the fi
   client IDs; the results writer's output parses against its schema.
 - Acceptance: `pnpm --filter hyperion exec vitest run src/main/fdinfo src/main/results`;
   `just descent-spike --setting low` on the development machine writes a results file with every
-  figure present.
+  figure present or null with a stated reason (on the RTX 3080 the fdinfo readings are null:
+  decided 2026-09-30 by a delegated decision, hardware item 2).
 
 ### R05.T15 The capture and the native replay
 
@@ -1722,17 +1740,21 @@ Each change is one more recorded baseline run. If nothing misses, the task recor
 ### R05.T17 The discrete runs
 
 By hand on the development machine, on a quiet machine (Design note 27): its RTX 3080 (10 GiB,
-760 GB/s) exceeds the RTX 4060 class (272 GB/s), and its one display, 1920 × 1080 at a native
-240 Hz, is set to its 60 Hz mode for the runs (Design note 21; a rented cloud GPU gives advisory
-GPU-time figures only, since its virtual display has no real vertical blank). A pass there is a
-pass on a faster part than the class named, so the summary records the GPU-time headroom per pass
-beside the frame intervals. The runs are:
+760 GB/s), the recommended specification, exceeds the RTX 4060 class (272 GB/s), and its one
+display, an Optoma UHD projector (native 3840 × 2160 at 60 Hz), is set to its 1080p 59.94 Hz mode
+for the runs, T being the measured vsync period (Design note 21; it has no exact 60 Hz mode; a
+rented cloud GPU gives advisory GPU-time figures only, since its virtual display has no real
+vertical blank). A pass there is a pass on a faster part than the class named, so the summary
+records the GPU-time headroom per pass beside the frame intervals. The runs are:
 
-- the high setting at 1080p60 over the same three seeds, with the same two instruments and
-  console and the local server capped as in T16, which is three runs;
+- the high setting at 1080p over the same three seeds, with the same two instruments and console
+  and the local server capped as in T16, which is three runs;
 - on one seed, safety checks off, the other vertex path, and mesh normals, which is three runs;
-- the memory run with three workers;
+- on one seed, the same run with `--workers 2`, the budget's two cores, for comparison;
 - one capture replayed natively on the same machine by `just replay`.
+
+Every timed run pins `--workers 3`, so the memory row is read from the timed runs and there is no
+separate memory run (decided 2026-09-30 by a delegated decision, hardware item 4).
 
 The machine, driver and display are recorded with the results.
 
@@ -1817,6 +1839,22 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   off the gate (researched 2026-09-29: virtual displays have no real vertical blank, and the
   compositor path and driver branch may differ). The UHD 620 half, T16, is the owner's by hand;
   until it runs, the gate answers for the discrete target only.
+- **The hardware decisions, decided 2026-09-30 by a delegated decision** (the orchestration's
+  hardware record), as they fall on this plan:
+  - _The gate (item 1):_ retargeted to the recommended specification, the RTX 3080, with Design
+    note 21's criteria unchanged and T the measured vsync period (16.68 ms at 59.94 Hz); no
+    scaling margin. Written into Design note 21 and T17.
+  - _Readings (item 2):_ `nvidia-smi` memory is the headline on NVIDIA; the fdinfo readings are
+    null with a reason there. T14.c's acceptance is "present or null with reason".
+  - _CPU budgets (item 3):_ the bake budget (about 40 ms a 65 × 65 patch, Design note 25) stays
+    the laptop's figure. The desktop records its own and fails only if over the laptop budget.
+  - _Workers (item 4):_ desktop timed runs pin `--workers 3`; T17's separate memory run is
+    dropped, and one seed is compared at `--workers 2`.
+  - _Memory (item 5):_ the ceilings are unchanged (2–3 GB discrete, 1 GB on the UHD 620); only
+    the context changes: the 10 GiB is shared with the local LLM.
+  - The display is an Optoma UHD projector (native 3840 × 2160 at 60 Hz; 1080p at 240, 120,
+    59.94, 50 or 23.98 Hz, no exact 60), with `Xft.dpi` 75, so the device-pixel ratio is
+    0.78125.
 - **Findings for the brainstorm, for the owner** (T19 drafts the edits):
   - The finest level's spacing (Design note 3): "sampled at 0.5 m" and "about a third" hold in one
     dimension only; in two, the finest level's largest spacing must be at most 0.375 m, which is
@@ -1843,8 +1881,9 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   - Normals at twice the mesh's resolution quadruple the gradients the bake budget counts (Design
     note 25).
   - The worker's policy (Design note 11): a `file://` worker has no policy of its own, so
-    `'wasm-unsafe-eval'` is probably needed only for compilation on the render thread; the change
-    stays the owner's either way.
+    `'wasm-unsafe-eval'` is needed only for compilation on the render thread. Ruled 2026-09-30
+    (R04.T10.a): the policy is unchanged and the render thread never compiles WebAssembly; the
+    brainstorm already carries the ruling.
 - **Timings measured so far are provisional.** The development machine is shared with other
   agents' tests; every figure in this plan measured today, including the research agents' Threefry
   timing and the estimates built on it, is re-measured on a quiet machine (Design note 27) before it
@@ -1854,8 +1893,10 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   plan changes the layout before T8 runs, T8 follows R10. `BakedOffsets` is barred from the low
   setting by its 64 MiB budget, whatever T18 finds.
 - **Module workers from `file://`** are undocumented in Electron 44 (researched 2026-09-29, medium
-  confidence). T10.b's smoke run settles it; the fallback, a privileged custom scheme, touches R01's
-  main process and the policy's origin and needs the owner.
+  confidence). R04.T10.c's probe worker loads from `file://` in the built app (checked by hand,
+  2026-09-30), so the risk is now small; T10.b's smoke run confirms it for the height worker. The
+  fallback, a privileged custom scheme, touches R01's main process and the policy's origin and
+  needs the owner.
 - **The test planet is not the real function.** Its cost per point, its spectrum and its bound
   stand in for R09's, whose Dendry channels and crater octaves the brainstorm estimates at 1 to 3 µs
   a point on their own. A spike that passes on the test planet passes for a function of the test
