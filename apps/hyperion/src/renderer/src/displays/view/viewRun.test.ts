@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
-import type { ViewBody } from "../../view/scene/model";
+import { normalise, scale, vec3 } from "../../geometry/vec3";
+import { differenceM } from "../../view/coords/position";
+import { sceneOrigins, type ViewBody } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
@@ -12,6 +14,7 @@ import {
   labelLines,
   labelStatements,
   markRows,
+  MISSING_READING,
   type ViewRun,
   startRun,
   stepRun,
@@ -242,6 +245,48 @@ describe("the list", () => {
       .filter((row) => row.target.kind === "body")
       .map((row) => row.kind);
     expect(new Set(bodyKinds)).toEqual(new Set(["DWARF PLANET", "UNRESOLVED CONTACT"]));
+  });
+
+  it("gives each craft its closure rate on the own ship, and a body none", () => {
+    // Each other craft closing on the resting own ship at 3.4 m/s along the line between them.
+    const kept = frameChangeScene();
+    const closing: KeptScene = {
+      ...kept,
+      sceneAt: (tS) => {
+        const scene = kept.sceneAt(tS);
+        const origins = sceneOrigins(scene);
+        const own = scene.craft.find((c) => c.id === scene.ownShip);
+        if (own === undefined) {
+          throw new Error("the frame-change scene has no own ship");
+        }
+        const craft = scene.craft.map((c) =>
+          c.id === own.id
+            ? { ...c, velocityMPerS: vec3(0, 0, 0) }
+            : {
+                ...c,
+                velocityMPerS: scale(
+                  normalise(differenceM(c.pose.position, own.pose.position, origins)),
+                  -3.4,
+                ),
+              },
+        );
+        return { ...scene, craft };
+      },
+    };
+    const rows = markRows(startRun(closing));
+    const craft = rows.filter((row) => row.target.kind === "craft");
+    expect([
+      craft.length > 0 && craft.every((row) => row.closure === "+3.40 m/s"),
+      rows.filter((row) => row.target.kind === "body").every((row) => row.closure === null),
+    ]).toEqual([true, true]);
+  });
+
+  it("shows a closure rate as missing where a velocity is not known", () => {
+    // The kept scenes give their craft no velocity.
+    const craft = markRows(startRun(frameChangeScene())).filter(
+      (row) => row.target.kind === "craft",
+    );
+    expect(craft.length > 0 && craft.every((row) => row.closure === MISSING_READING)).toBe(true);
   });
 
   it("labels its ranges FROM CAMERA where there is no own ship", () => {

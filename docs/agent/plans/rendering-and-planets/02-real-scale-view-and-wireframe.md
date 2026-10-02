@@ -1787,3 +1787,22 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   `ENABLE` then `INHIBIT` (tested in `ViewDisplay.test.tsx`), and the guide's exposure bullet and
   row, this plan's T15 text and the panel's TSDoc name the pair in that order. The row stays a draft
   for the owner.
+- **Fixed in RM1 validation (2026-10-02): the marks' labels and the count line (m6, m7, m8, m10).**
+  - **`FROM CAMERA` (m6).** The canvas labels read `row.range` and dropped the qualifier the list
+    adds with no own ship; both now read `rangeText(row)`, so every range from the camera says so
+    (Design note 17).
+  - **A missing closure rate (m7).** With an own ship but an unknown velocity the label's closure
+    rate disappeared. `MarkRow` gains `closure`, computed in `markRows` by the draw list's own rule
+    (`closureRateMPerS`, now exported from `symbology.ts`): `+3.40 m/s`, `—` where a velocity is not
+    known, shown in `--text-muted` (`.readout__missing`), and `null` for a body or with no own ship.
+    The labels read it from the row, and the list's options carry it in their accessible names
+    (`closure +3.40 m/s`, or `closure not known`), since the labels are hidden from assistive
+    technology. The kept scenes give their craft no velocity, so their labels now read `—`.
+  - **The count line (m8).** `STARS n DRAWN · …` was set as a statement in proportional B612; it
+    is now `ViewLabelBlock`'s `countLine`, an `output` in B612 Mono with tabular figures
+    (`.view-label__count`).
+  - **Labels follow their marks (m10).** The labels were placed from the 4 Hz published anchors,
+    so they trailed a moving camera's marks by up to 250 ms. `ViewMarkLabels` places each label
+    once as it mounts and hands it to the stage through `labelRef`; the drawing loop then moves
+    every label with its mark each frame (`markLabelTransform`), and only the text changes at 4 Hz.
+    Pending by eye with the rest of T15.
