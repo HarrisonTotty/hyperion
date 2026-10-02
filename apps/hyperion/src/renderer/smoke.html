@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      The smoke harness's page (R01.T9), never loaded by the client. Its policy lets requests leave
+      the page so that the harness's main process sees and cancels them (Design note 17): a CSP
+      would block them silently, and the offline check would prove nothing.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src *; img-src * data:"
+    />
+    <title>HYPERION smoke</title>
+  </head>
+  <body>
+    <script type="module" src="/src/smoke/page.ts"></script>
+  </body>
+</html>

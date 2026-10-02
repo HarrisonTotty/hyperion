@@ -1479,12 +1479,12 @@ Design note 17's codes.
 not `file:` or `data:`, through `session.defaultSession.webRequest.onBeforeRequest` over
 `<all_urls>`, and fails naming each URL with its resource type; a fixture page that fetches an
 external URL proves the check fails. The page renders each `WGSL_CATALOGUE` entry once and asserts
-the frame's properties and that the WGSL guard reported nothing. A test entry that uses a GLSL
-shader must fail with its name.
+the frame's properties and that no shader was refused. _Amended by Design note 24:_ a test entry
+whose WGSL does not compile must fail with its name (there is no GLSL path left to refuse).
 
 - Acceptance: `just test-render` passes and prints an empty list of cancelled requests for the
-  catalogue; the external-fetch fixture fails and prints its URL and resource type; the GLSL fixture
-  fails with `GlslShaderRefused` and its name, and its cancelled list is empty (no compiler fetch).
+  catalogue; the external-fetch fixture fails and prints its URL and resource type; the broken-WGSL
+  fixture fails with its name and the compiler's message, and its cancelled list is empty.
 
 **R01.T9.c The feature paths.** The runner runs the page twice: as SwiftShader offers it (no
 `shader-f16`, subgroups present), then with `CapabilityOverrides.withholdSubgroups`, which requests
@@ -1500,8 +1500,8 @@ The runs form a matrix of settings × capability paths (Design note 18); R01's o
 **R01.T9.d Three canvases on one device.** The page creates a 1280 × 720 cockpit canvas and two 320
 × 240 instrument canvases, each its own `RenderView` with its own camera, a one-pass post-process
 chain and depth. Each renders a pattern with a marker in its top-left quadrant; the readback asserts
-the marker is in the top-left of each (right way up, the `_disableEngineYFlip` pin's behavioural
-check), that each view's size is its own, and that resizing one instrument leaves the other two
+the marker is in the top-left of each (right way up: the adapter's own passes, in WebGPU's own
+orientation, Design note 24), that each view's size is its own, and that resizing one instrument leaves the other two
 views' readbacks and sizes unchanged.
 
 - Acceptance: `just test-render` passes these checks.
@@ -1542,7 +1542,8 @@ texels; a material made with `createMaterialAsync` draws on the first frame afte
 a frame submitted meanwhile does not wait on its compile; a compute pass writes an indirect-args
 buffer that a `DrawItem.indirect` draw and an indirect `dispatch` then consume, drawing the
 instance count the kernel wrote; with SwiftShader's `timestamp-query`, `onPassTimes` reports one
-entry per labelled pass, raw passes unbracketed and Babylon's bracketed, each finite and
+entry per labelled pass, none bracketed (every pass is the adapter's own, Design note 24), each
+finite and
 non-negative (values are not asserted: SwiftShader checks correctness, never speed).
 
 - Acceptance: `just test-render` passes these checks.
@@ -1552,7 +1553,9 @@ Design note 21: an occluder with `colourWrites: false` leaves the colour untouch
 drawn behind it; a line with `depthWrite: false` leaves depth at the clear value; two additive
 sprites over one texel sum in linear light; 64 instances of one quad, each placed from a
 per-instance attribute and a storage-buffer entry by `instance_index`, land at their 64 positions; a
-post-process reading `depth` and `hdr-colour` writes a texel that is a known function of both; a
+post-process reading `hdr-colour` and a per-frame uniform writes a texel that is a known function
+of both, and a change of the uniform changes it (decision items 10 and 11: depth is read by a
+full-screen draw, below); a
 `createPointSplat` pass of 1,000 unit points onto a 64 × 64 `rgba32float` target sums, per texel, to
 the count of points that land there, and on a run with `float32-blendable` withheld
 `createPointSplat` throws `Float32BlendUnavailable`. From T8.i: a full-screen draw into a second
@@ -1593,7 +1596,10 @@ runs on the development machine (RTX 3080), and again on the UHD 620 by the owne
 records the UHD 620's `targetRounding` (R07's probe expects `toward-zero` for both formats).
 
 - Acceptance: the figures recorded in this plan's as-built notes, the UHD 620's when the owner has
-  run it.
+  run it. Added by the owner-delegated hardware decision (item 7, 2026-09-30): on the RTX 3080 with
+  `--hyperion-gpu-timing`, `GraphicsStatus.timer` reads `full` and recorded pass times include
+  values that are not multiples of 65,536 ns; T10's twins run once there, the bit-exact pair equal
+  to the CPU total, with `subgroup_size` recorded; `targetRounding` is an explicit line.
 
 ### R01.T12 The Vulkan soak (open question 14)
 
@@ -1612,6 +1618,10 @@ catches `vkAcquireNextImageKHR` errors if the layer loads in the GPU sandbox. Re
 - Acceptance: the three runs recorded (restarts, hangs, DOM mismatches, validation messages); the
   switch set changed if the soak says `DefaultANGLEVulkan` is needed or harmful, in a commit that
   cites the record; open question 14 answered in the notes for the brainstorm's next revision.
+  Added by the hardware decision (item 7): the record states that the adapter is NVIDIA's
+  (`nvidia`/`ampere`, not llvmpipe or SwiftShader) and `getGPUFeatureStatus()`. By the owner's
+  ruling of 2026-10-01, nothing blanks, resizes or moves the owner's display: the soak runs hidden
+  and offscreen, and the display blank and `xdotool` resizes are the owner's, by hand.
 
 ### R01.T13 Same-origin child windows (open question 15, second half), by hand
 
@@ -1635,7 +1645,10 @@ and treat that one validation error from a closing child as expected, not as a f
 Run everything below and fill the as-built notes: the chunk sizes, the harness times, the soak and
 the three-canvas figures.
 
-- Acceptance: `just ci` and `just test-render` pass; the notes are complete.
+- Acceptance: `just ci` and `just test-render` pass; the notes are complete. Added by the hardware
+  decision (item 7): T2's crash-loop check (three `kill -9` of the GPU process relaunch once into
+  safe mode) on a built client on the RTX 3080, and the Risks entries that took the UHD 620 for
+  this machine rewritten from T11's and T12's records.
 
 ## Verification
 
@@ -2345,3 +2358,122 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `false`, for R05's and R12's records.
   - Pending for the status-wording lane: `GRAPHICS SHADER REFUSED: <name> is not WGSL` now reports
     a compile error, and `GlslShaderRefused` no longer exists.
+- **Deviations in T9, as built.**
+  - Files: `src/smoke/main.ts`, `preload.ts` and `result.ts` (the report's shape, its validation
+    and the verdict, unit-tested, shared as types with the page); `src/renderer/smoke.html` and
+    `src/renderer/src/smoke/` (`page.ts`, `harness.ts`, `frames.ts`, `blending.ts`, `work.ts`,
+    `catalogue.ts`); `scripts/testRender.sh`, which `just test-render` runs under the heavy-test
+    lock after `pnpm --filter hyperion build`. The build has the smoke main, preload and page as
+    second inputs of each of electron-vite's three builds; `tsconfig.node.json` includes
+    `src/smoke`.
+  - The switches are bash arrays in `testRender.sh`, the adapter pair and the headless set of
+    Design note 17, passed on Electron's command line; `--drop-adapter-switches` drops only the
+    pair (exit 2, "no adapter"), `--fixture=broken-wgsl` and `--fixture=external-fetch` add the
+    failing fixtures (exit 1), `--variant=` picks runs (`default`, `no-subgroups`; both by
+    default). The page reads its variant and fixture from the query string, which the main process
+    forwards from `--smoke-variant=` and `--smoke-fixture=`.
+  - `smoke.html`'s CSP allows `connect-src *` and `img-src *`, on purpose: a CSP would block a
+    request silently, before `webRequest` could cancel and name it (Design note 17). The client's
+    `index.html` is untouched.
+  - The page loads the engine through `loadRenderEngine` (so the wrapper's rebuild is what T9.f
+    exercises) and records every device its adapters hand out by wrapping
+    `navigator.gpu.requestAdapter`, so that the loss check can `destroy()` the engine's own.
+    `float32-blendable` is withheld on a second engine within each run rather than a third run.
+  - T9.b: the catalogue is still empty (R02 and later plans register their shaders), so the offline
+    run covers the page's own shaders; a material entry is compiled with `createMaterialAsync`, a
+    compute entry with `createComputeAsync`, a post-process run over a drawn frame. Drawing a
+    catalogued material needs a mesh of its layout, which an entry does not carry yet: **open** for
+    the first plan that registers a material (an optional per-entry fixture mesh is the candidate).
+  - T9.c's "fixture entry declaring a second setting is run at both": `CatalogueSetting` has only
+    `default` until R12.T7.a, so no second setting can be declared; the page already iterates each
+    entry's `settings`. **Pending R12.T7.a.**
+  - T9.f's bias check draws the line first and a coplanar triangle after it: biased away
+    (`depthBiasAway` constant 64, slope 1) the triangle fails greater-or-equal and the line stays;
+    unbiased it overwrites the line. WebGPU takes no bias on lines, so the bias is on the surface,
+    as R02 uses it.
+  - The packed cube gains `COPY_SRC` (no memory cost) so that the harness reads it back.
+  - The preload helper: without `codeSplitting` groups, the build puts Vite's preload helper in
+    the smoke entry itself, and the engine's chunk (`engine-*.js`, 108 kB minified, provisional)
+    imports only the shared `status` chunk; the client's entry imports neither. The groups were
+    not needed (T8.l).
+  - **Results (2026-09-30, Electron 44.4.3, SwiftShader, `DISPLAY` unset):** both runs pass
+    (`default`: subgroups with a minimum size of 4, `timestamp-query`, `float32-blendable`,
+    `rg11b10ufloat` renderable, no `shader-f16`; `no-subgroups`: subgroups absent);
+    SwiftShader's `targetRounding` is `nearest` for `rgba16float` and `toward-zero` for
+    `rg11b10ufloat`; pass times arrive `quantized`, 9 passes, none bracketed. Fixtures: broken WGSL
+    exits 1 with "material broken fixture failed to compile: 1:60 unresolved value 'oops'" and the
+    `shader-refused` fault; external fetch exits 1 with "cancelled requests [xhr
+    https://example.invalid/smoke.json, image https://example.invalid/smoke.png]";
+    `--drop-adapter-switches` exits 2 ("no adapter").
+  - **T9.e figures (provisional: a shared machine, load average 3.8 to 14.9 during the runs):** ten
+    runs of the recipe's two steps, build included, passed 10 of 10; the build 561–1,896 ms
+    (median about 600 ms), the harness's two runs 2,090–2,442 ms, total 2,651–3,998 ms, without
+    the heavy lock's wait. `select_checks.py` (the `validate` skill) now names `just test-render`
+    in its gate for changes under `view/engine/`, `view/shaders/`, `src/smoke/`,
+    `src/renderer/src/smoke/`, `smoke.html`, `testRender.sh` or any `.wgsl`. The proposal to move
+    the recipe into `ci` waits for one Electron upgrade with no harness failure.
+- **Deviations in T10, as built.**
+  - The twins live in `view/engine/twins.ts` (sources, inputs and CPU references) and are the
+    catalogue's first entries; the harness's check is `smoke/twins.ts`. There are three pairs, not
+    two: the bit-exact u32 sum twice, once in workgroups of 64 over 2¹⁶ inputs and once in
+    workgroups of 37 over 65,533 (`sum u32 ragged`), since a non-multiple invocation count needs a
+    workgroup no subgroup size divides; and the presentation-only f32 sum, one workgroup of 256
+    (strided sums, then a tree; its subgroup variant feeds the tree each subgroup's `subgroupAdd`
+    at its first lane, since WGSL relates no subgroup to `local_invocation_index`).
+  - The subgroup variants add each subgroup's sum with one `atomicAdd` and record the largest
+    `subgroup_size` seen with `atomicMax` in a second word, which the harness logs: SwiftShader
+    reports 4. Every `subgroupAdd` follows a bounds `if` in uniform control flow.
+  - "Both paths' bytes equal each other": each run takes one path, and both runs' totals equal the
+    CPU's `wrapping_add` total (128 and 127 wraps past 2³²), so they equal each other. The f32 sum
+    read with `tolerance` lay within `highamBound` on both paths on SwiftShader, and equal to the
+    `f64` sum there (98,298.53125); the ordinary read throws `PresentationOnlyReadback`.
+  - On the RTX 3080 (the whole harness, run by hand under the client's switches and
+    `DISPLAY=:0` in a hidden offscreen window, 2026-10-01): every check passes on both paths;
+    NVIDIA's `subgroup_size` is 32 (the device's minimum is 32 too), both u32 twins equal the CPU
+    total, and the f32 sum lies within the bound (equal to the `f64` sum again).
+- **T11, as built (2026-10-01, RTX 3080, Electron 44.4.3, the client's switches with
+  `--disable-dawn-features=timestamp_quantization`).** The scene is the harness's soak mode
+  (`--smoke-soak=<seconds>`, `src/smoke/soak.ts` and `src/renderer/src/smoke/soak.ts`): a
+  full-window cockpit and two instruments, each with a background, a marker in its top-left
+  quadrant and a one-pass post-process (an exposure-scaled tone curve), the instruments resized
+  between 320 × 240 and 400 × 300 every 10 s, a looping video and a DOM panel beside them. A first
+  run on screen was stopped by the owner; by the owner's ruling, the record is of a run **hidden
+  and offscreen**. Its frames are paced by offscreen rendering's 60 Hz, not by the projector's
+  vsync, and the window was not resized (T12's finding), so the on-screen pacing and window
+  resizes are **pending by hand for the owner**. The machine was loaded (`just ci` of another lane
+  alongside; load average 30 to 60), so every figure is provisional.
+  - `GraphicsStatus.timer` reads `full` under `--hyperion-gpu-timing`'s switch, and every recorded
+    pass time is off the 65,536 ns grid (11 of 11 passes in the hardware harness run); without it,
+    `quantized`, every time a multiple of 65,536 ns.
+  - `targetRounding` on the RTX 3080: **`toward-zero` for both `rgba16float` and
+    `rg11b10ufloat`**.
+  - GPU time per pass over 300 s (13,265 frames), median (p95), µs: cockpit at 1,606 × 906 DIP
+    (1,255 × 708 px at a device pixel ratio of 0.78125) 282 (467), its post-process 147 (313);
+    instruments 52 and 38 (74, 52), their post-processes 37 and 31 (67, 42). No pass is
+    bracketed.
+  - The frame's passes are the three views' own and their post-processes: no copy pass.
+  - Frame interval (offscreen, provisional): p50 16.7 ms, p95 50.0 ms, max 267 ms, no gap over
+    1 s; no loss, no fault; ten DOM captures matched.
+  - The capture at 150 s shows each view's marker in its top-left quadrant, the right way up.
+  - T10's twins on the 3080: see T10 as built (subgroup size 32, both u32 twins equal to the CPU
+    total, the f32 sum within the bound).
+- **T13, as built (2026-10-01, RTX 3080, Electron 44.4.3, a scratch prototype, not merged).** Run
+  hidden and offscreen, by the owner's ruling that nothing takes the projector: an opener and a
+  same-origin `window.open` child, the child's canvas a `RenderView` of the opener's engine,
+  drawn from the opener's `requestAnimationFrame`.
+  - The child stays in the opener's renderer process: `app.getAppMetrics()` shows one `Tab`
+    process before and after each child opens.
+  - Pacing, offscreen: both windows' `requestAnimationFrame` at 16.7 ms (p50 and p95 16.7–16.8 ms).
+  - The rule holds. With the child's `RenderView` disposed on its `pagehide`, closing the child
+    raised no error and no loss. Without it, every later submit to the closed child's context
+    raised "context configuration is invalid", followed by the invalid texture, view and command
+    buffer it causes: 404 uncaptured errors in 2 s at 60 frames a second. The device was not lost
+    and the opener kept drawing. **The rule for R07.T21:** drop the child's `RenderView` in the
+    child window's `pagehide` listener, before the opener's next frame; treat a "context
+    configuration is invalid" error from a closing child as expected, never as a fault; and never
+    submit to a view whose window has closed.
+  - Under the Vulkan surface (the client's default switches), creating or resizing a hidden
+    offscreen child restarted the GPU process (`vkAcquireNextImageKHR` OUT_OF_DATE, T12's
+    finding), so the runs above used `--disable-vulkan-surface`. A hidden offscreen child also
+    reports a 0 × 0 inner size, so its resize and its pacing on a second display are **pending
+    by hand for the owner**, on screen.
