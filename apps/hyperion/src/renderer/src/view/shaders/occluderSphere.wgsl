@@ -82,7 +82,8 @@ fn fragmentMain(v: SphereVarying) -> SphereDepth {
   out.colour = vec4f(0.0);
   // Pushed away by the slope over a cased stroke's half-width and its fringe, as the hull faces'
   // bias is (Design note 5), so that the whole width of the body's own graticule stays in front:
-  // the 4e-6 margin alone holds only the stroke's centreline.
-  out.depth = clamp(depth - SLOPE_SCALE * max(slopeX, slopeY), 0.0, 1.0);
+  // the 4e-6 margin alone holds only the stroke's centreline. The slope's magnitude, not its larger
+  // component, which falls up to sqrt(2) short where the gradient runs diagonally across the screen.
+  out.depth = clamp(depth - SLOPE_SCALE * length(vec2f(slopeX, slopeY)), 0.0, 1.0);
   return out;
 }

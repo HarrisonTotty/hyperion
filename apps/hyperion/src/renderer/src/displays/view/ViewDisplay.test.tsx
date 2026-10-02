@@ -341,6 +341,51 @@ describe("the VIEW display", () => {
     expect(Math.abs(drift() - still) > 100).toBe(true);
   });
 
+  it("shows the free camera's rate, and says so at the lowest step", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    expect(rate).toHaveTextContent("RATE 1.00 km/s");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{PageUp}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 3.16 km/s");
+    expect(screen.queryByText(/NOT AVAILABLE: PAGE/)).not.toBeInTheDocument();
+    for (let i = 0; i < 8; i += 1) {
+      // Each press is one step; they are sequential by nature.
+      // oxlint-disable-next-line no-await-in-loop
+      await user.keyboard("{PageDown}");
+    }
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 1.00 m/s");
+    expect(
+      screen.getByText("NOT AVAILABLE: PAGE DOWN, RATE at its lowest step"),
+    ).toBeInTheDocument();
+  });
+
+  it("moves a mark's label with its mark every frame, between readouts", async () => {
+    stubMatchMedia(true);
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    advance(300);
+    // The labels are hidden from assistive technology; the list names the same targets.
+    const name = screen.getAllByRole("option")[0]?.querySelector(".view-list__name")?.textContent;
+    const label = screen
+      .getAllByText(name ?? "", { exact: false })
+      .find((each) => each.classList.contains("view-marks__label"));
+    const before = label?.style.transform;
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowLeft>}");
+    // Three frames, short of the next 4 Hz readout.
+    advance(50);
+    expect([label?.isConnected, before !== undefined && label?.style.transform !== before]).toEqual(
+      [true, true],
+    );
+  });
+
   it("stops flying when its canvas loses focus", async () => {
     stubMatchMedia(true);
     const { user, advance, lastFrame } = setup();
@@ -371,10 +416,30 @@ describe("the VIEW display", () => {
     expect(screen.getByText("VIEW").parentElement?.textContent).toMatch(/FRAME CHANGE TEST/);
   });
 
+  it("keeps its engine across a change of scene, asking for no new adapter", async () => {
+    const { user, advance, engines } = setup();
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
+    await settle();
+    advance(300);
+    expect([engines.length, screen.queryByText("GRAPHICS ACQUIRING ADAPTER")]).toEqual([1, null]);
+  });
+
   it("says AUTO is not available while there is no image to meter", async () => {
     setup();
     await settle();
     expect(screen.getByText("AUTO NOT AVAILABLE: NO IMAGE TO METER")).toBeInTheDocument();
+  });
+
+  it("offers its exposure's congruent pair in the guide's order, ENABLE then INHIBIT", async () => {
+    setup();
+    await settle();
+    const names = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((name) => name === "ENABLE" || name === "INHIBIT");
+    expect(names).toEqual(["ENABLE", "INHIBIT"]);
   });
 });
 
@@ -422,8 +487,9 @@ describe("the VIEW display's interim stars", () => {
     advance(300);
     expect([
       lastFrame()?.draws.some((draw) => draw.material.name === "wireframe:starSprite"),
-      screen.getByText(/^STARS 1 DRAWN · 0 WITHOUT V · RADII 620\/360\/210\/60 ly$/),
-    ]).toEqual([true, expect.anything()]);
+      // A reading of numbers, so an `output` (B612 Mono), not a statement.
+      screen.getByText(/^STARS 1 DRAWN · 0 WITHOUT V · RADII 620\/360\/210\/60 ly$/).tagName,
+    ]).toEqual([true, "OUTPUT"]);
   });
 });
 

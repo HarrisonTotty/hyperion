@@ -3,6 +3,7 @@ import type { BodyIdHex, GalacticPosition, SystemIdHex, UniverseTime } from "@hy
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
 import {
+  BODY_MIN_SIZE_CLASS,
   CONTACT_SIZE_CLASS,
   MOON_SIZE_CLASS,
   PLANET_SIZE_CLASSES,
@@ -16,10 +17,10 @@ import type { Rotation3 } from "../coords/rotation";
 import type { HullOutline } from "./hull";
 
 /**
- * What a body is, as the wireframe marks it below 3 px: a planet (a dwarf planet among them), a
- * moon or a star, or an unresolved contact, whose kind the server withholds (R02.T17).
+ * What a body is, as the wireframe marks it below 3 px and the list names it: a planet, a dwarf
+ * planet, a moon or a star, or an unresolved contact, whose kind the server withholds (R02.T17).
  */
-export type ViewBodyKind = "star" | "planet" | "moon" | "unresolved";
+export type ViewBodyKind = "star" | "planet" | "dwarf_planet" | "moon" | "unresolved";
 
 /**
  * A body of the view's scene at the scene's time.
@@ -42,8 +43,14 @@ export interface ViewBody {
   readonly radiusM: number;
   /** Its Hill radius at pericentre, m, or `null` where it is not known. */
   readonly hillRadiusM: number | null;
-  /** Its centre, m from the system's barycentre along the galactic axes. */
+  /** Its centre as drawn, m from the system's barycentre along the galactic axes. */
   readonly centreM: Vec3;
+  /**
+   * Its geometric centre at the scene's time, m, where that differs from `centreM` (a server
+   * scene's body drawn where the ship sees it, R02.T17); absent where it is `centreM`. Frame
+   * selection measures from it (Design note 6).
+   */
+  readonly geometricCentreM?: Vec3;
   /** Its rotation from body-fixed to body axes, or `null` where rotation is not modelled. */
   readonly rotation: Rotation3 | null;
   /**
@@ -66,15 +73,20 @@ export interface BodyMarkSymbol {
 
 /**
  * The ship-wide symbol of each kind with no more known of the body (`lib/system/bodySymbols.ts`): a
- * planet the inverted triangle at a smaller planet's size, a moon the pentagon, a star the circle
- * at size class 2, an unresolved contact the hexagon. A server scene gives each body its own
- * (R02.T17: a giant's larger triangle, a host's own symbol).
+ * planet the inverted triangle at a smaller planet's size, a dwarf planet the same, its own class
+ * raised to the floor, a moon the pentagon, a star the circle at size class 2, an unresolved
+ * contact the hexagon. A server scene gives each body its own (R02.T17: a giant's larger triangle,
+ * a host's own symbol).
  */
 export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
   let symbol: BodyMarkSymbol;
   switch (kind) {
     case "planet":
       symbol = { shape: "triangle-down", sizeClass: PLANET_SIZE_CLASSES.planet };
+      break;
+    case "dwarf_planet":
+      // A dwarf planet's class, 0, is raised to the floor every body symbol is drawn at.
+      symbol = { shape: "triangle-down", sizeClass: BODY_MIN_SIZE_CLASS };
       break;
     case "moon":
       symbol = { shape: "pentagon", sizeClass: MOON_SIZE_CLASS };
@@ -199,10 +211,15 @@ export interface ViewScene {
 /**
  * Where every frame's origin and every craft of a scene is: the scene's {@link CameraOrigins}.
  *
+ * @param centres - `drawn` places each body at its `centreM`; `geometric` at its
+ *   `geometricCentreM` where it has one, for frame selection (Design note 6).
  * @throws Error from a lookup, when asked for a body or craft the scene does not have, or for the
  *   barycentre of a scene that does not know it.
  */
-export function sceneOrigins(scene: ViewScene): CameraOrigins {
+export function sceneOrigins(
+  scene: ViewScene,
+  centres: "drawn" | "geometric" = "drawn",
+): CameraOrigins {
   const bodies = new Map(scene.bodies.map((body) => [body.id, body]));
   const craft = new Map(scene.craft.map((c) => [c.id, c]));
   const bodyOf = (id: BodyIdHex): ViewBody => {
@@ -222,7 +239,10 @@ export function sceneOrigins(scene: ViewScene): CameraOrigins {
       }
       return scene.barycentre;
     },
-    bodyCentreM: (id) => bodyOf(id).centreM,
+    bodyCentreM: (id) => {
+      const body = bodyOf(id);
+      return centres === "geometric" ? (body.geometricCentreM ?? body.centreM) : body.centreM;
+    },
     bodyFixedRotation: (id) => bodyOf(id).rotation,
     craftPosition: (id) => {
       const found = craft.get(id);
@@ -255,6 +275,7 @@ export function cameraSceneOf(scene: ViewScene): CameraScene {
     system: scene.system,
     tidalRadiusM: scene.tidalRadiusM,
     origins: sceneOrigins(scene),
+    selectionOrigins: sceneOrigins(scene, "geometric"),
     frameBodies: scene.bodies.flatMap((body) =>
       body.kind !== "star" && body.hillRadiusM !== null
         ? [{ id: body.id, parent: body.parent, hillRadiusM: body.hillRadiusM }]

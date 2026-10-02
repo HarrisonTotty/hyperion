@@ -3,7 +3,7 @@ import { useId } from "react";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { FOV_STEPS_DEG } from "../../view/camera/projection";
 import type { CameraPreset } from "../../view/camera/state";
-import { PRESET_NAMES } from "./viewRun";
+import { freeRateReading, PRESET_NAMES } from "./viewRun";
 
 /** Props of {@link CameraControls}. */
 export interface CameraControlsProps {
@@ -12,6 +12,10 @@ export interface CameraControlsProps {
   readonly offered: ReadonlyArray<CameraPreset>;
   /** The horizontal field of view, degrees. */
   readonly fovDeg: number;
+  /** The free camera's rate step (`freeRateMPerS`). */
+  readonly rateStep: number;
+  /** The highest rate step the scene allows (`maxFreeRateStep`). */
+  readonly maxRateStep: number;
   /** The `EASED CAMERA MOVES` setting. */
   readonly easedMoves: boolean;
   /** Whether the operator asked for reduced motion, under which eased moves are not applied. */
@@ -32,8 +36,9 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
  * The view's camera controls (plan R02, R02.T15.c): the presets `SEAT`, `CHASE` and `FREE`, the
  * previous and next target, the field of view a step narrower or wider with its reading, and the
  * `EASED CAMERA MOVES` setting, each a button reachable by keyboard and showing its key; the field
- * of view's buttons are held back at the ends of its steps, and the setting says when reduced
- * motion stops it applying.
+ * of view's buttons are held back at the ends of its steps, the free camera's rate
+ * (stepped by `PAGE UP` and `PAGE DOWN` on the canvas) with a statement at either end of its steps,
+ * and the setting says when reduced motion stops it applying.
  *
  * @remarks
  * Display controls, which change only what the view shows (`.control`). A preset the scene does not
@@ -43,6 +48,8 @@ export function CameraControls({
   preset,
   offered,
   fovDeg,
+  rateStep,
+  maxRateStep,
   easedMoves,
   reducedMotion,
   onAction,
@@ -54,6 +61,8 @@ export function CameraControls({
   const reducedId = useId();
   const narrowest = fovDeg <= Math.min(...FOV_STEPS_DEG);
   const widest = fovDeg >= Math.max(...FOV_STEPS_DEG);
+  const slowest = rateStep <= 0;
+  const fastest = rateStep >= maxRateStep;
   const anyHeldBack = PRESET_KEYS.some(({ preset: each }) => !offered.includes(each));
   return (
     <section className="panel view-camera" aria-labelledby={titleId}>
@@ -149,6 +158,17 @@ export function CameraControls({
       {narrowest || widest ? (
         <p className="view-camera__reason" id={fovLimitId}>
           NOT AVAILABLE: FOV at its {narrowest ? "narrowest" : "widest"} step
+        </p>
+      ) : null}
+      <p className="view-camera__rate">
+        <output className="view-camera__rate-reading" aria-label="Free camera rate">
+          {freeRateReading(rateStep)}
+        </output>
+      </p>
+      {slowest || fastest ? (
+        <p className="view-camera__reason">
+          NOT AVAILABLE:{" "}
+          {fastest ? "PAGE UP, RATE at its highest" : "PAGE DOWN, RATE at its lowest"} step
         </p>
       ) : null}
       <div className="view-camera__setting">

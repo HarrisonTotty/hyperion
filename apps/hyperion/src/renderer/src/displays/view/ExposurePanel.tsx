@@ -69,9 +69,9 @@ function ExposureCommand({ label, result, onChange }: ExposureCommandProps) {
 /**
  * The view's exposure as an instrument (plan R02, R02.T15.c; Design note 11): the value with its
  * unit and automation level, `EV100 -1.0 MAN`, the triple under `MAN`, and the congruent pair
- * `INHIBIT` and `ENABLE`, each held back with its reason where it would be refused. There is no
- * button named `AUTO` (the guide's "Controls and commanding"); while there is no image to meter,
- * `AUTO NOT AVAILABLE` stands with `NO IMAGE TO METER`.
+ * `ENABLE` and `INHIBIT`, in the guide's order, each held back with its reason where it would be
+ * refused. There is no button named `AUTO` (the guide's "Controls and commanding"); while there is
+ * no image to meter, `AUTO NOT AVAILABLE` stands with `NO IMAGE TO METER`.
  *
  * @remarks
  * Display controls: the exposure is the view's own, not the ship's, so a command acts at once.
@@ -112,12 +112,12 @@ export function ExposurePanel({ exposure, meteredEv100, onChange }: ExposurePane
         <p className="view-exposure__reason">AUTO NOT AVAILABLE: NO IMAGE TO METER</p>
       ) : null}
       <div className="view-exposure__commands">
-        <ExposureCommand label="INHIBIT" result={inhibit(exposure)} onChange={onChange} />
         <ExposureCommand
           label="ENABLE"
           result={enable(exposure, meteredEv100)}
           onChange={onChange}
         />
+        <ExposureCommand label="INHIBIT" result={inhibit(exposure)} onChange={onChange} />
       </div>
     </section>
   );

@@ -178,6 +178,18 @@ describe("the server's scene as the view draws it", () => {
     ]);
   });
 
+  it("selects the camera's frame from geometric centres, never apparent ones", () => {
+    const model = modelOf(stateNearEarth());
+    const frame = frameOf(model);
+    const scene = sceneOf(model, frame);
+    const jupiter = frame.bodies.find((each) => each.id === FIXTURE_JUPITER);
+    const selection = cameraSceneOf(scene).selectionOrigins;
+    expect([selection.bodyCentreM(FIXTURE_JUPITER), selection.bodyCentreM(FIXTURE_EARTH)]).toEqual([
+      jupiter?.kind === "placed" ? jupiter.geometricM : null,
+      bodyOf(scene, FIXTURE_EARTH).centreM,
+    ]);
+  });
+
   it("draws a free camera's own local body, when it is another, at its apparent position", () => {
     const model = modelOf(stateNearEarth());
     const frame = frameOf(model);
@@ -290,9 +302,24 @@ describe("the server's scene as the view draws it", () => {
     ]).toEqual([`${FIXTURE_SYSTEM}.0000`, false]);
   });
 
+  it("keeps a dwarf planet apart from a planet", () => {
+    const model = modelOf(statePopulated());
+    const scene = sceneOf(model, frameOf(model));
+    expect(bodyOf(scene, `${FIXTURE_SYSTEM}.e001`).kind).toBe("dwarf_planet");
+  });
+
   it("cannot be drawn with the ship in no system", () => {
     const model = modelOf(stateInSpace());
     expect([serverSceneGap(model), serverSceneAtPush(model, PLACE)]).toEqual(["no_system", null]);
+  });
+
+  it("cannot be drawn when the system's tidal radius was not sent", () => {
+    const model = modelOf(stateNearEarth());
+    if (model.system === null) {
+      throw new Error("the fixture's model holds no system");
+    }
+    const unsent = { ...model, system: { ...model.system, tidalRadiusM: null } };
+    expect([serverSceneGap(model), serverSceneGap(unsent)]).toEqual([null, "no_tidal_radius"]);
   });
 
   it("is drawn at frameAt(nowMs) each frame", () => {

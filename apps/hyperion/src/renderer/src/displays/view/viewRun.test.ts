@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
-import type { ViewBody } from "../../view/scene/model";
+import { normalise, scale, vec3 } from "../../geometry/vec3";
+import { differenceM } from "../../view/coords/position";
+import { sceneOrigins, type ViewBody } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import {
   commandRun,
   frameName,
+  freeRateReading,
   labelLines,
   labelStatements,
   markRows,
@@ -96,6 +99,13 @@ describe("a view's run", () => {
   it("steps the field of view", () => {
     const narrower = done(commandRun(startRun(precisionScene()), { kind: "fov", step: -1 }, CUT));
     expect(narrower.camera.fovDeg).toBe(45);
+  });
+
+  it("reads the free camera's rate in m/s below 1 km/s and in km/s from there", () => {
+    expect(freeRateReading(0)).toBe("RATE 1.00 m/s");
+    expect(freeRateReading(5)).toBe("RATE 316 m/s");
+    expect(freeRateReading(6)).toBe("RATE 1.00 km/s");
+    expect(freeRateReading(7)).toBe("RATE 3.16 km/s");
   });
 
   it("aims the camera at the next target", () => {
@@ -214,6 +224,69 @@ describe("the list", () => {
     // A unit far from the range's own is left; the same unit is kept.
     const kept = markRows(run, new Map([[first.key, first.unit]]))[0];
     expect([again?.unit === other, kept?.unit]).toEqual([false, first.unit]);
+  });
+
+  it("names each body's kind as the nomenclature does", () => {
+    const kept = frameChangeScene();
+    const kinds: ReadonlyArray<ViewBody["kind"]> = ["dwarf_planet", "unresolved"];
+    const renamed: KeptScene = {
+      ...kept,
+      sceneAt: (tS) => {
+        const scene = kept.sceneAt(tS);
+        const bodies = scene.bodies.map((body, index) => ({
+          ...body,
+          kind: kinds[index % kinds.length] ?? body.kind,
+        }));
+        return { ...scene, bodies };
+      },
+    };
+    const bodyKinds = markRows(startRun(renamed))
+      .filter((row) => row.target.kind === "body")
+      .map((row) => row.kind);
+    expect(new Set(bodyKinds)).toEqual(new Set(["DWARF PLANET", "UNRESOLVED CONTACT"]));
+  });
+
+  it("gives each craft its closure rate on the own ship, and a body none", () => {
+    // Each other craft closing on the resting own ship at 3.4 m/s along the line between them.
+    const kept = frameChangeScene();
+    const closing: KeptScene = {
+      ...kept,
+      sceneAt: (tS) => {
+        const scene = kept.sceneAt(tS);
+        const origins = sceneOrigins(scene);
+        const own = scene.craft.find((c) => c.id === scene.ownShip);
+        if (own === undefined) {
+          throw new Error("the frame-change scene has no own ship");
+        }
+        const craft = scene.craft.map((c) =>
+          c.id === own.id
+            ? { ...c, velocityMPerS: vec3(0, 0, 0) }
+            : {
+                ...c,
+                velocityMPerS: scale(
+                  normalise(differenceM(c.pose.position, own.pose.position, origins)),
+                  -3.4,
+                ),
+              },
+        );
+        return { ...scene, craft };
+      },
+    };
+    const rows = markRows(startRun(closing));
+    const craft = rows.filter((row) => row.target.kind === "craft");
+    expect([
+      craft.length > 0 &&
+        craft.every((row) => row.closure.kind === "known" && row.closure.text === "+3.40 m/s"),
+      rows.filter((row) => row.target.kind === "body").every((row) => row.closure.kind === "none"),
+    ]).toEqual([true, true]);
+  });
+
+  it("shows a closure rate as missing where a velocity is not known", () => {
+    // The kept scenes give their craft no velocity.
+    const craft = markRows(startRun(frameChangeScene())).filter(
+      (row) => row.target.kind === "craft",
+    );
+    expect(craft.length > 0 && craft.every((row) => row.closure.kind === "unknown")).toBe(true);
   });
 
   it("labels its ranges FROM CAMERA where there is no own ship", () => {

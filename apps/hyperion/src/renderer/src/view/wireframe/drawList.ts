@@ -55,6 +55,12 @@ export const LOW_SETTING_MAX_SPRITES = 2_000;
  */
 export const HULL_OCCLUDER_BIAS = { constant: 128, slopeScale: 2 } as const;
 
+/**
+ * How far outside the view a mark may fall and still be anchored (labelled and pickable), rem: 2,
+ * the guide's touch target, so that a mark at the edge keeps its label. A choice of RM1 validation.
+ */
+export const ANCHOR_MARGIN_REM = 2;
+
 /** A batch of strokes of one width, colour and dash. */
 export interface LineBatch {
   /** The batch's stable name, the same from frame to frame. */
@@ -176,7 +182,7 @@ export interface WireframeDrawList {
   readonly lines: ReadonlyArray<LineBatch>;
   /** The star sprites. */
   readonly sprites: ReadonlyArray<StarSprite>;
-  /** The pickable marks. */
+  /** The pickable marks, those in the view or within {@link ANCHOR_MARGIN_REM} of its edge. */
   readonly anchors: ReadonlyArray<DrawAnchor>;
 }
 
@@ -506,7 +512,17 @@ export function buildWireframeDrawList(
     } else if (anchor.body !== null && bodyRegime(anchor.body.diameterPx) === "symbol") {
       label = { kind: "symbol" };
     }
-    anchors.push({ target, xPx: at.xPx, yPx: at.yPx, distanceM: norm(pointM), label });
+    // Only a mark within the view, or within a mark's reach of its edge, gets a DOM label and is
+    // pickable: one in front of the camera but outside the view would be laid out off the page.
+    const marginPx = ANCHOR_MARGIN_REM * options.remPx;
+    if (
+      at.xPx >= -marginPx &&
+      at.xPx <= viewport.widthPx + marginPx &&
+      at.yPx >= -marginPx &&
+      at.yPx <= viewport.heightPx + marginPx
+    ) {
+      anchors.push({ target, xPx: at.xPx, yPx: at.yPx, distanceM: norm(pointM), label });
+    }
   }
   const marks = symbologyMarks(
     {

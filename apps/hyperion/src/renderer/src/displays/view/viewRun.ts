@@ -10,11 +10,17 @@ import {
   type BodyDistanceUnit,
   formatBodyDistance,
   formatNumber,
+  formatSignificant,
   formatUniverseTimeDhms,
 } from "../../lib/format";
-import { norm } from "../../geometry/vec3";
+import { norm, sub } from "../../geometry/vec3";
 import { flightInput, type ViewKeyAction } from "../../view/camera/keys";
-import { changeFreeRate, MAX_FREE_STEP_S, stepFreeCamera } from "../../view/camera/freeCamera";
+import {
+  changeFreeRate,
+  freeRateMPerS,
+  MAX_FREE_STEP_S,
+  stepFreeCamera,
+} from "../../view/camera/freeCamera";
 import type { CameraFrame, CameraPose } from "../../view/camera/pose";
 import {
   advanceEasedMove,
@@ -39,10 +45,16 @@ import {
   type ExposureControl,
   exposureLevelReading,
 } from "../../view/photometry/exposure";
-import { cameraSceneOf, sceneOrigins, type ViewScene } from "../../view/scene/model";
+import {
+  cameraSceneOf,
+  sceneOrigins,
+  type ViewBodyKind,
+  type ViewScene,
+} from "../../view/scene/model";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
+import { closureRateMPerS } from "../../view/wireframe/symbology";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
 export interface SceneOption {
@@ -294,6 +306,19 @@ export interface LabelLine {
   readonly stale?: true;
 }
 
+/**
+ * The free camera's translation rate, the speed its flight keys fly it at, as the view reads it, three significant figures:
+ * `RATE 316 m/s`, then in km/s from 1 km/s, `RATE 1.00 km/s` (the guide's "Numbers").
+ *
+ * @param rateStep - The camera's rate step, {@link freeRateMPerS}'s argument.
+ */
+export function freeRateReading(rateStep: number): string {
+  const rateMPerS = freeRateMPerS(rateStep);
+  return rateMPerS < 1000
+    ? `RATE ${formatSignificant(rateMPerS)} m/s`
+    : `RATE ${formatSignificant(rateMPerS / 1000)} km/s`;
+}
+
 /** The exposure's reading: `EV100 -1.0 MAN`. */
 export function exposureReading(exposure: ExposureControl): string {
   return `EV100 ${formatNumber(controlEv100(exposure), 1)} ${exposureLevelReading(exposure)}`;
@@ -345,6 +370,18 @@ export function labelStatements(run: ViewRun): ReadonlyArray<string> {
   return statements;
 }
 
+/**
+ * Each body kind's name in the list's `KIND` column, as the guide's nomenclature names it (its
+ * `KIND` row): `PLANET`, `DWARF PLANET`, `MOON`, `UNRESOLVED CONTACT`, and `STAR`.
+ */
+export const BODY_KIND_NAMES: Readonly<Record<ViewBodyKind, string>> = {
+  star: "STAR",
+  planet: "PLANET",
+  dwarf_planet: "DWARF PLANET",
+  moon: "MOON",
+  unresolved: "UNRESOLVED CONTACT",
+};
+
 /** A row of the view's list: a target with its range. */
 export interface MarkRow {
   /** The row's key: the target's kind and ID. */
@@ -352,7 +389,7 @@ export interface MarkRow {
   readonly target: CameraTarget;
   /** Its designation, `TEST HULL` for a craft drawn by the test hull. */
   readonly name: string;
-  /** What it is: `PLANET`, `MOON`, `STAR` or `CRAFT`. */
+  /** What it is: one of {@link BODY_KIND_NAMES}, or `CRAFT`. */
   readonly kind: string;
   /** Its range, with its unit: `384 Mm`. */
   readonly range: string;
@@ -360,6 +397,34 @@ export interface MarkRow {
   readonly unit: BodyDistanceUnit;
   /** Whether the range is from the camera, there being no own ship (Design note 17). */
   readonly fromCamera: boolean;
+  /**
+   * A craft's closure rate on the own ship: `known`, with its sign, `+3.40 m/s`; `unknown`
+   * where its or the own ship's velocity is not known; `none` for a body, or with no own ship.
+   */
+  readonly closure: ClosureReading;
+}
+
+/**
+ * A list row's closure rate: `none` for a body or with no own ship to close on, `unknown` where its
+ * or the own ship's velocity is not known (shown as {@link MISSING_READING}), else `known`.
+ */
+export type ClosureReading =
+  | { readonly kind: "none" }
+  | { readonly kind: "unknown" }
+  | { readonly kind: "known"; readonly text: string };
+
+/** A reading the scene does not have: an em dash, shown in `--text-muted` (the guide's "Missing"). */
+export const MISSING_READING = "—";
+
+/** A closure rate with its sign, since direction matters (the guide's "Numbers"): `+3.40 m/s`. */
+function closureText(closureMPerS: number): string {
+  const sign = closureMPerS < 0 ? "-" : "+";
+  return `${sign}${formatSignificant(Math.abs(closureMPerS))} m/s`;
+}
+
+/** A row's range as the list and the canvas labels both read it, `FROM CAMERA` with no own ship. */
+export function rangeText(row: MarkRow): string {
+  return row.fromCamera ? `${row.range} FROM CAMERA` : row.range;
 }
 
 /** A target's key, stable from frame to frame. */
@@ -392,16 +457,30 @@ export function markRows(
       target.kind === "craft" ? scene.craft.find((c) => c.id === target.craft) : undefined;
     const key = targetKey(target);
     const distance = formatBodyDistance(rangeM / 1000, previousUnits.get(key) ?? null);
+    let closure: ClosureReading = { kind: "none" };
+    if (craft !== undefined && own !== undefined) {
+      const closureMPerS = closureRateMPerS(
+        differenceM(craft.pose.position, own.pose.position, origins),
+        own.velocityMPerS === null || craft.velocityMPerS === null
+          ? null
+          : sub(craft.velocityMPerS, own.velocityMPerS),
+      );
+      closure =
+        closureMPerS === null
+          ? { kind: "unknown" }
+          : { kind: "known", text: closureText(closureMPerS) };
+    }
     return {
       key,
       target,
       name:
         body?.designation ??
         (craft === undefined ? "" : `${craft.designation} · ${craft.hull.name}`),
-      kind: body === undefined ? "CRAFT" : body.kind.toUpperCase(),
+      kind: body === undefined ? "CRAFT" : BODY_KIND_NAMES[body.kind],
       range: `${distance.value} ${distance.unit}`,
       unit: distance.unit,
       fromCamera: own === undefined,
+      closure,
     };
   });
 }

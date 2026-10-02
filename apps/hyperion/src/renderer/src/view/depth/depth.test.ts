@@ -84,12 +84,32 @@ describe("transparentLayerOrder", () => {
     expect(transparentLayerOrder(layers, camera).map((l) => l.id)).toEqual([
       "terrain",
       "mars-air",
-      "earth-haze",
-      "earth-low-cloud",
-      "earth-rings",
       "earth-air",
       "earth-high-cloud",
+      "earth-rings",
+      "earth-haze",
+      "earth-low-cloud",
     ]);
+  });
+
+  it("orders one body's shells back to front along a ray that meets them all", () => {
+    // A ray 0.05 below the horizontal from 5 km up: the low cloud is met at about 67 km, the high
+    // cloud left at about 756 km and the air at about 1,469 km.
+    const d = EARTH_RADIUS_M + 5e3;
+    // The camera on the z axis, so p · u is d times the ray's z component.
+    const b = d * -0.05;
+    const hitM = (radiusM: number): number => {
+      const root = Math.sqrt(b * b - (d * d - radiusM * radiusM));
+      // Inside a shell the ray leaves it; outside, the near hit is the one drawn.
+      return radiusM >= d ? -b + root : -b - root;
+    };
+    const shells = layers.filter(
+      (l): l is Extract<DepthLayer, { kind: "shell" }> => l.kind === "shell" && l.body === EARTH,
+    );
+    const ordered = transparentLayerOrder(shells, camera);
+    const hits = ordered.map((l) => hitM(l.radiusM));
+    expect(hits.every((h) => Number.isFinite(h) && h > 0)).toBe(true);
+    expect(hits.toSorted((x, y) => y - x)).toEqual(hits);
   });
 
   it("depends on the layers and the camera alone, not their order", () => {

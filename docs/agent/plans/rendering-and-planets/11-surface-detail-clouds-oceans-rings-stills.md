@@ -247,8 +247,10 @@ ambiguous, the design note that reads it is named.
   `WGSL_CATALOGUE` every shader here is registered for its no-f16 and no-subgroup runs.
 - **R02:** the camera, camera-relative `f64` differencing and per-patch origins; `BodyFixedPosition`
   and its client mirror; the fixed reversed-Z infinite projection; `transparentLayerOrder`
-  (R02.T7.b: opaque first, then per body back to front, within a body the shells below the camera by
-  ascending altitude, then the rings' plane, then the shells above by descending altitude, each
+  (R02.T7.b: opaque first, then per body back to front, within a body the shells above the camera by
+  descending altitude, then the rings' plane, then the shells below by ascending altitude, as
+  corrected in RM1 validation; the rings' place between the two groups is only a heuristic, since a
+  ring plane can lie on either side of a shell along a ray; each
   testing and not writing depth); the photometric units and pre-exposure; AgX's `toneCurve` and its
   WGSL twin `agx`, which a still's PNG is encoded through; `ViewLabelBlock`; the nine guide drafts,
   of which item 2's decoration rule and flash threshold, item 7's annunciations and the
