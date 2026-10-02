@@ -240,9 +240,9 @@ describe("cuts and eased moves", () => {
 });
 
 describe("frame selection", () => {
-  // The scene draws the moon at FIXTURE_MOON_CENTRE_M, where the ship sees it; its geometric centre
-  // at the frame's time is 10⁸ m away, which the camera's selection never consults (Design note 6,
-  // as amended 2026-10-02).
+  // The scene draws the moon at FIXTURE_MOON_CENTRE_M, where the ship sees it; were its geometric
+  // centre 10⁸ m away, the camera's selection would not consult it, since a camera scene holds only
+  // drawn centres (Design note 6, as amended 2026-10-02; `fromServer.test.ts` shifts one).
   const scene = aCameraScene({ ownShip: null });
   const besideMoonM = vec3(0, 1e7, 0);
 
