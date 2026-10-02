@@ -1678,15 +1678,16 @@ src/renderer/src/displays/view src/renderer/src/App.test.tsx`. By hand (scratch 
   neither designation nor barycentre (R03.T12), so `App` hands the system last opened on `SYSTEM`
   (its `SystemTarget`'s designation of record and barycentre, as a `SystemPlace`) to
   `ViewSceneProvider`, whose `designate` names that system by its designation and any other by its
-  ID; bodies are named at each frame, so a designation learnt later relabels them. **This is short
-  of R03.T14's "must, by its chart's answers or a lookup"** (no request answers a system's
-  designation or position by its ID: `system_summary` carries neither), so a system not opened on
-  `SYSTEM` reads as its hex ID and is drawn without a barycentre: nothing is expressed in the
-  galactic frame (`ViewScene.barycentre` is now `GalacticPosition | null`), the interim stars
+  ID; bodies are named at each frame, so a designation learnt later relabels them. **This was short
+  of R03.T14's "must, by its chart's answers or a lookup"** until R03.T16 (no request answers a
+  system's designation or position by its ID: `system_summary` carries neither), so a system not
+  opened on `SYSTEM` read as its hex ID and was drawn without a barycentre: nothing is expressed in
+  the galactic frame (`ViewScene.barycentre` is now `GalacticPosition | null`), the interim stars
   (`useInterimStars`, whose `centre` may now be `null`) ask nothing until it is known, and the
-  label block's `STARS` reads `NOT AVAILABLE: the system's position is not known`. Pending the
-  owner: a client lookup, or the designation and barycentre carried on `SceneSystemDto` (additive,
-  as `tidal_radius_m` is). The free camera's clamp and rate read `ViewScene.tidalRadiusM`, which is
+  label block's `STARS` reads `NOT AVAILABLE: the system's position is not known`. Settled by
+  R03.T16 (delegated decision 2026-10-02): the scene carries the system's place
+  (`SceneSystemDto.place`), and the `knownSystem` path remains only as a fallback for a server
+  that does not send it. The free camera's clamp and rate read `ViewScene.tidalRadiusM`, which is
   the scene store's `tidal_radius_m` (`SceneSystem.tidalRadiusM`); a scene without it is not drawn
   (`SCENE NOT AVAILABLE: the system's tidal radius was not sent`). `ViewBodyKind` gains
   `unresolved` (the hexagon at the contact size class) for a body whose kind the server withholds;

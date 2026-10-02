@@ -1,3 +1,4 @@
+import type { ResponseBody, SystemIdHex } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
@@ -9,6 +10,7 @@ import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import type { FakeView } from "../../test/fakeRenderEngine";
 import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
+import { FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import {
   anOpenedUniverse,
   aStellarBrief,
@@ -16,8 +18,10 @@ import {
   aUniverseList,
 } from "../../test/galaxyFixtures";
 import {
+  SCENE_DESIGNATION,
   SCENE_TIDAL_RADIUS_M,
   sceneClock,
+  scenePlace,
   shipInSystem,
   sliceSceneSystem,
 } from "../../test/sceneFixture";
@@ -39,7 +43,7 @@ import { buildWireframeDrawList } from "../../view/wireframe/drawList";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
 import { ViewSceneProvider } from "./ViewSceneProvider";
-import { runPose, startRun, stepRun } from "./viewRun";
+import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
 
 const WIDTH_PX = 640;
 const HEIGHT_PX = 360;
@@ -484,22 +488,46 @@ async function openUniverse(view: Setup): Promise<void> {
   });
 }
 
-/** Answers the scene subscription with the ship 1 AU out in the slice's system. */
-async function sceneArrives(socket: FakeWebSocket): Promise<void> {
+/** A system ID other than the kept scenes' (`KEPT_SYSTEM`), which the slice's fixture shares. */
+const ELSEWHERE: SystemIdHex = "0200080020000005";
+
+/**
+ * Answers the scene subscription with the ship 1 AU out in the slice's system, or in the same
+ * system under another ID.
+ *
+ * @remarks
+ * Under another ID the answer is sent as text with every mention of the fixture's ID rewritten,
+ * as a server would write it, so that no parsed value needs a type assertion.
+ */
+async function sceneArrives(
+  socket: FakeWebSocket,
+  system: SystemIdHex = FIXTURE_SYSTEM,
+  stated: "place" | "no_place" = "place",
+): Promise<void> {
+  const { place: _place, ...withoutPlace } = sliceSceneSystem();
+  const answer: ResponseBody = {
+    kind: "subscribe",
+    subscription: 5,
+    state: {
+      topic: "scene",
+      sequence: 0,
+      clock: sceneClock(3_000),
+      ship: shipInSystem(3_000),
+      system: stated === "place" ? sliceSceneSystem() : withoutPlace,
+      tidal_radius_m: SCENE_TIDAL_RADIUS_M,
+      craft: [],
+    },
+  };
   await act(async () => {
-    socket.serverAnswers("subscribe", () => ({
-      kind: "subscribe",
-      subscription: 5,
-      state: {
-        topic: "scene",
-        sequence: 0,
-        clock: sceneClock(3_000),
-        ship: shipInSystem(3_000),
-        system: sliceSceneSystem(),
-        tidal_radius_m: SCENE_TIDAL_RADIUS_M,
-        craft: [],
-      },
-    }));
+    if (system === FIXTURE_SYSTEM) {
+      socket.serverAnswers("subscribe", () => answer);
+    } else {
+      const id = socket.requestsOfKind("subscribe").at(-1)?.id;
+      const text = JSON.stringify({ type: "response", id, body: answer });
+      socket.dispatchEvent(
+        new MessageEvent("message", { data: text.replaceAll(FIXTURE_SYSTEM, system) }),
+      );
+    }
     await vi.advanceTimersByTimeAsync(0);
   });
 }
@@ -534,6 +562,47 @@ describe("the VIEW display's server scene", () => {
       hullDistanceM(view.lastFrame()) < 20,
       view.socket.requestsOfKind("scene_cameras").at(-1)?.body.cameras.length,
     ]).toEqual([false, null, true, 1]);
+  });
+
+  it("names a system never opened on SYSTEM by the place the scene states, and asks its stars", async () => {
+    // The provider is told of no system (`knownSystem` is `null`): only the scene names it.
+    const view = setup();
+    await openUniverse(view);
+    const keptQueries = view.socket.requestsOfKind("systems_in_range").length;
+    // The fixture shares the kept scenes' system ID, whose stars are asked already; the scene
+    // here is in another system, as a real server's always is.
+    await sceneArrives(view.socket, ELSEWHERE);
+    await settle();
+    view.advance(300);
+    await settle();
+    const place = scenePlace();
+    const asked = view.socket.requestsOfKind("systems_in_range").slice(keptQueries);
+    expect([
+      screen.getAllByText(new RegExp(`^${SCENE_DESIGNATION} /`)).length > 0,
+      labelBlock().includes(STAR_SOURCE),
+      labelBlock().includes(STARS_WITHOUT_POSITION),
+      asked.length,
+      asked.every(
+        (request) =>
+          JSON.stringify(request.body.centre) === JSON.stringify(place.barycentre) &&
+          JSON.stringify(request.body.time) === JSON.stringify(place.time),
+      ),
+    ]).toEqual([true, true, false, 4, true]);
+  });
+
+  it("names a system from a server that states no place by its ID, with no stars", async () => {
+    const view = setup();
+    await openUniverse(view);
+    const keptQueries = view.socket.requestsOfKind("systems_in_range").length;
+    await sceneArrives(view.socket, ELSEWHERE, "no_place");
+    await settle();
+    view.advance(300);
+    await settle();
+    expect([
+      screen.getAllByText(new RegExp(`^${ELSEWHERE} /`)).length > 0,
+      labelBlock().includes(STARS_WITHOUT_POSITION),
+      view.socket.requestsOfKind("systems_in_range").length - keptQueries,
+    ]).toEqual([true, true, 0]);
   });
 
   it("shows a scene the server ended as stale while it is reopened", async () => {

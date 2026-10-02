@@ -23,6 +23,7 @@ import type {
   SceneSystemDto,
   SeenPositionDto,
   SystemIdHex,
+  SystemPlaceDto,
   UniverseTime,
 } from "@hyperion/protocol";
 import { METRES_PER_LIGHT_YEAR } from "@hyperion/protocol";
@@ -37,9 +38,13 @@ import type {
   ScenePosition,
   SceneSystem,
   SeenPosition,
+  SystemPlace,
 } from "./model";
 
-/** Gives a system's designation of record, which the scene's messages do not carry. */
+/**
+ * Gives a system's designation of record where the scene does not state its place: the fallback
+ * for a server that sends no `place` (R03.T16).
+ */
 export type Designate = (system: SystemIdHex) => string;
 
 /** A scene as the display can use it, or why it cannot. */
@@ -175,13 +180,27 @@ function toSeen(seen: SeenPositionDto): SeenPosition {
   return { apparentM: toVec3(seen.apparent_m), emitted: checkTime(seen.emitted, "seen") };
 }
 
+/** The system's place as the scene states it: a designation, a galactic position, a velocity, a time. */
+function toPlace(system: SystemIdHex, place: SystemPlaceDto): SystemPlace {
+  check(place.designation.length > 0, "system designation unusable");
+  check(allFinite(place.velocity_m_s), "system velocity unusable");
+  return {
+    system,
+    designation: place.designation,
+    barycentre: checkGalactic(place.barycentre),
+    velocityMPerS: toVec3(place.velocity_m_s),
+    time: checkTime(place.time, "system place"),
+  };
+}
+
 function toGrant(grant: BodyGrantDto): BodyGrant {
   return { level: grant.level, seen: grant.seen === undefined ? null : toSeen(grant.seen) };
 }
 
 /**
- * The scene's system, read: its hosts and bodies by plan 14's adapter, and one grant per body in
- * the bodies' order.
+ * The scene's system, read: its hosts and bodies by plan 14's adapter, one grant per body in the
+ * bodies' order, and its place, whose designation labels the bodies; without a place, `designate`
+ * names the system.
  */
 function toSystem(
   wire: SceneSystemDto,
@@ -189,7 +208,8 @@ function toSystem(
   designate: Designate,
 ): SceneSystem {
   const system = wire.system.hosts.system;
-  const read = toSystemBodiesModel(wire.system, designate(system));
+  const place = wire.place === undefined ? null : toPlace(system, wire.place);
+  const read = toSystemBodiesModel(wire.system, place?.designation ?? designate(system));
   if (read.kind === "fault") {
     throw new Unusable(read.fault);
   }
@@ -208,6 +228,7 @@ function toSystem(
     grants: new Map(wire.grants.map((grant) => [grant.body, toGrant(grant)])),
     hillRadiiM: hillRadii(wire.system.bodies),
     tidalRadiusM,
+    place,
   };
 }
 
@@ -297,7 +318,8 @@ function build(
  * arrival states another; a state that omits it leaves `tidalRadiusM` `null` until the next
  * arrival.
  *
- * @param designate - Names a system, as the chart's answers carry its designation of record.
+ * @param designate - Names a system whose place the scene does not state, as the chart's answers
+ *   carry its designation of record.
  */
 export function toSceneModel(state: SceneStateDto, designate: Designate): SceneModelResult {
   return build(state, designate, null);
@@ -318,6 +340,7 @@ function withBody(system: SceneSystemDto, body: SceneBodyDto): SceneSystemDto {
       ? { body: body.record.id, level: body.level }
       : { body: body.record.id, level: body.level, seen: body.seen };
   return {
+    ...system,
     system: {
       ...system.system,
       bodies: replaceById(system.system.bodies, body.record, (record) => record.id),

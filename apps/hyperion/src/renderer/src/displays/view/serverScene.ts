@@ -12,7 +12,8 @@ import {
   type SceneSnapshot,
   type SceneStaleReason,
 } from "../../lib/scene/useScene";
-import { serverSceneGap, type SystemPlace } from "../../view/scene/fromServer";
+import type { SystemPlace } from "../../lib/scene/model";
+import { serverSceneGap } from "../../view/scene/fromServer";
 import type { SceneProvenance } from "../../view/scene/model";
 import { SERVER_SCENE_NAME } from "./viewRun";
 
@@ -150,10 +151,20 @@ export function viewProvenance(
 }
 
 /**
- * Where the client places a server scene's system: the system it was told of (the `SYSTEM`
- * display's opening, whose target carries the chart's designation and position), or the system's
- * ID with no position.
+ * Where the client places a server scene's system: the place the scene states (R03.T16); from a
+ * server that does not state it, the system the client was told of (the `SYSTEM` display's
+ * opening, whose target carries the chart's designation and position); else the system's ID with
+ * no position.
  */
-export function systemPlace(system: SystemIdHex, known: SystemPlace | null): SystemPlace {
-  return known?.system === system ? known : { system, designation: system, barycentre: null };
+export function systemPlace(
+  system: SystemIdHex,
+  stated: SystemPlace | null,
+  known: SystemPlace | null,
+): SystemPlace {
+  if (stated !== null) {
+    return stated;
+  }
+  return known?.system === system
+    ? known
+    : { system, designation: system, barycentre: null, velocityMPerS: null, time: null };
 }

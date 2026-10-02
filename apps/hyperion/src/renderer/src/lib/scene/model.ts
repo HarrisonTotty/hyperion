@@ -67,6 +67,31 @@ export interface BodyGrant {
 }
 
 /**
+ * Where a scene's system is: its designation of record, which every body's extends, and its
+ * barycentre in the galactic frame, which the scene's bodies, all in the system's frame, do not
+ * state (rendering plan R03, R03.T16).
+ *
+ * @remarks
+ * The scene states it (`SceneSystemDto.place`); a place known only from the chart (the `SYSTEM`
+ * display's opening) has no velocity or time, and a system known by neither has its ID for a
+ * designation and no barycentre. `barycentreAt` (`place.ts`) carries it to another time.
+ */
+export interface SystemPlace {
+  readonly system: SystemIdHex;
+  /** The catalogue designation, or the system's ID where none is known. */
+  readonly designation: string;
+  /** The barycentre at {@link time}, or `null` where the client has not been told where it is. */
+  readonly barycentre: GalacticPosition | null;
+  /**
+   * The barycentre's velocity, m/s along the galactic axes, constant (plan 08, P08.T7.a); `null`
+   * for a place known only from the chart.
+   */
+  readonly velocityMPerS: Vec3 | null;
+  /** When `barycentre` holds; `null` for a place known only from the chart. */
+  readonly time: UniverseTime | null;
+}
+
+/**
  * The system the scene is in: its stars and hierarchy, its bodies each at its own grant, and the
  * grants.
  */
@@ -87,6 +112,11 @@ export interface SceneSystem {
    * state's when the scene was already in the system; `null` only from a state that omits it.
    */
   readonly tidalRadiusM: number | null;
+  /**
+   * Where the system is, as the scene states it (R03.T16); `null` from a server that does not
+   * send it, where the system is named by the `designate` the adapter was given.
+   */
+  readonly place: SystemPlace | null;
 }
 
 /** A craft in the scene: a draft of the sessions plan's, the least a renderer needs (Design note 4). */

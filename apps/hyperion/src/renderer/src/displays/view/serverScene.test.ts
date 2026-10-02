@@ -1,7 +1,8 @@
 import { galacticPositionFromLy } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import type { SceneModel } from "../../lib/scene/model";
+import { vec3 } from "../../geometry/vec3";
+import type { SceneModel, SystemPlace } from "../../lib/scene/model";
 import { toSceneModel } from "../../lib/scene/sceneWire";
 import type { SceneSnapshot, SceneStatus } from "../../lib/scene/useScene";
 import { FIXTURE_SYSTEM } from "../../test/planetaryFixture";
@@ -139,15 +140,41 @@ describe("where the scene VIEW draws comes from", () => {
 });
 
 describe("the place of a server scene's system", () => {
-  it("is the system the client was told of, or its ID with no position", () => {
-    const known = {
-      system: FIXTURE_SYSTEM,
-      designation: "H7K 4C0RFZ D-7",
-      barycentre: galacticPositionFromLy([1, 2, 3]),
+  const known: SystemPlace = {
+    system: FIXTURE_SYSTEM,
+    designation: "H7K 4C0RFZ D-7",
+    barycentre: galacticPositionFromLy([1, 2, 3]),
+    velocityMPerS: null,
+    time: null,
+  };
+
+  it("is the place the scene states, whatever the client was told of", () => {
+    const stated: SystemPlace = {
+      system: "0200080020000001",
+      designation: "Vorth AB-C e4-17",
+      barycentre: galacticPositionFromLy([4, 5, 6]),
+      velocityMPerS: vec3(1e4, 2e5, -3e3),
+      time: { seconds: 3_400, nanos: 0 },
     };
-    expect([systemPlace(FIXTURE_SYSTEM, known), systemPlace("0200080020000001", known)]).toEqual([
+    expect(systemPlace("0200080020000001", stated, known)).toBe(stated);
+    expect(systemPlace(FIXTURE_SYSTEM, { ...stated, system: FIXTURE_SYSTEM }, known)).not.toBe(
       known,
-      { system: "0200080020000001", designation: "0200080020000001", barycentre: null },
+    );
+  });
+
+  it("without one, is the system the client was told of, or its ID with no position", () => {
+    expect([
+      systemPlace(FIXTURE_SYSTEM, null, known),
+      systemPlace("0200080020000001", null, known),
+    ]).toEqual([
+      known,
+      {
+        system: "0200080020000001",
+        designation: "0200080020000001",
+        barycentre: null,
+        velocityMPerS: null,
+        time: null,
+      },
     ]);
   });
 });
