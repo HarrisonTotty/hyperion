@@ -51,8 +51,33 @@ DETERMINISM_CRATES = {"hyperion-sim", "hyperion-base", "hyperion-surface", "hype
 NO_EXPORT = 'TS_RS_EXPORT_DIR="$(mktemp -d)" '
 
 
+CATALOGUE = "apps/hyperion/src/renderer/src/view/engine/catalogue.ts"
+RELATIVE_IMPORT = re.compile(r'\bfrom\s+"(\.{1,2}/[^"]+)"')
+
+
 class ToolingError(Exception):
     pass
+
+
+def catalogue_sources(root: Path) -> set[str]:
+    """The files the shader catalogue imports, whose specs it renders (R01.T9.e).
+
+    A material's blend, cull, uniforms and bindings can live beside its feature (the wireframe's in
+    `view/wireframe/submit.ts`), so a change there routes `just test-render` as a shader's does.
+    """
+    path = root / CATALOGUE
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    sources: set[str] = set()
+    for spec in RELATIVE_IMPORT.findall(text):
+        resolved = (path.parent / spec).resolve()
+        for candidate in (resolved.with_suffix(".ts"), resolved.with_suffix(".tsx"), resolved / "index.ts"):
+            if candidate.is_file():
+                sources.add(candidate.relative_to(root.resolve()).as_posix())
+                break
+    return sources
 
 
 def git(root: Path, *args: str) -> list[str]:
@@ -289,7 +314,8 @@ def main() -> None:
     skipped: list[str] = []
     if client or infra:
         gate.append(("pnpm build", "the client must still build"))
-    render = [f for f in changed if RENDER_PATHS.search(f)]
+    catalogued = catalogue_sources(root)
+    render = [f for f in changed if RENDER_PATHS.search(f) or f in catalogued]
     if render:
         # The headless SwiftShader harness stays outside `just ci` (R01.T9.e); these paths run it.
         gate.append(("just test-render", f"{render[0]} touches the engine, the harness or a shader"))
