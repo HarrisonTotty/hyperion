@@ -7,8 +7,9 @@
  * standing; a refused software adapter, no WebGPU or no adapter, the safe mode and the disabled
  * state, and the wait for the adapter, are the console stating its own condition, in the `refused`
  * standing (plain text). None is an alert: the guide says alerts are raised by the server and a
- * console never invents one (R01 Design note 10). The words were signed off on 2026-09-30
- * (R01.T5.c); each is one constant here.
+ * console never invents one (R01 Design note 10). A refused shader (`GRAPHICS SHADER REFUSED`) and a
+ * view not re-created after a device loss (`GRAPHICS VIEW REFUSED`, decided 2026-10-02) are faults
+ * too. The words were signed off on 2026-09-30 (R01.T5.c); each is one constant here.
  */
 
 import { createContext, useContext, useSyncExternalStore } from "react";
@@ -31,8 +32,16 @@ export type GraphicsFault =
       readonly message: string;
     }
   | { readonly kind: "gpu-process-gone"; readonly count: number }
-  /** A shader did not compile on the GPU, and its draws are left out: a bug the console reports (Design note 12). */
-  | { readonly kind: "shader-refused"; readonly effectName: string };
+  /**
+   * A shader did not compile on the GPU, and its draws are left out: a bug the console reports
+   * (Design note 12). `effectName` is the effect's display name.
+   */
+  | { readonly kind: "shader-refused"; readonly effectName: string }
+  /**
+   * A view not re-created after a device loss draws nothing until it is released or the console
+   * relaunches (decided 2026-10-02). `viewName` is the name the view was created with.
+   */
+  | { readonly kind: "view-refused"; readonly viewName: string };
 
 /** The graphics' standing condition. */
 export type GraphicsCondition =
@@ -110,8 +119,12 @@ export type GraphicsEvent =
   | { readonly kind: "adapter-withdrawn" }
   /** The main process reported a GPU-process crash. */
   | { readonly kind: "gpu-process-gone"; readonly count: number }
-  /** A WGSL module failed `getCompilationInfo` (R01.T8.k). */
+  /** A WGSL module failed `getCompilationInfo` (R01.T8.k); `effectName` is the effect's display name. */
   | { readonly kind: "shader-refused"; readonly effectName: string }
+  /** A view's re-creation failed in a restore after a device loss. */
+  | { readonly kind: "view-refused"; readonly viewName: string }
+  /** A view whose re-creation failed was disposed. */
+  | { readonly kind: "view-released"; readonly viewName: string }
   /**
    * The engine made its device and read its capabilities, in which a feature the harness withheld
    * reads as absent (R01 Design note 24). Sent at each creation, a rebuild's included.
@@ -238,6 +251,28 @@ function afterShaderRefused(status: GraphicsStatus, effectName: string): Graphic
   return { ...status, fault: { kind: "shader-refused", effectName } };
 }
 
+/**
+ * The status after a view's re-creation failed: its fault, unless a fault already stands.
+ *
+ * @remarks
+ * As {@link afterShaderRefused}: the first refusal stands, and a device loss or a crashed GPU
+ * process outranks it. A restore that follows (`device-restored`) clears it, and one that fails
+ * again re-raises it.
+ */
+function afterViewRefused(status: GraphicsStatus, viewName: string): GraphicsStatus {
+  if (settled(status.condition) || status.fault !== null) {
+    return status;
+  }
+  return { ...status, fault: { kind: "view-refused", viewName } };
+}
+
+/** The status after a refused view is released: its own fault cleared, any other kept. */
+function afterViewReleased(status: GraphicsStatus, viewName: string): GraphicsStatus {
+  return status.fault?.kind === "view-refused" && status.fault.viewName === viewName
+    ? { ...status, fault: null }
+    : status;
+}
+
 function afterAdapterOutcome(status: GraphicsStatus, outcome: AdapterOutcome): GraphicsStatus {
   const next = withOutcome(status, outcome);
   return outcome.kind === "adapter" ? withoutProcessFault(next) : next;
@@ -334,6 +369,12 @@ export function reduceGraphicsStatus(status: GraphicsStatus, event: GraphicsEven
     case "shader-refused":
       next = afterShaderRefused(status, event.effectName);
       break;
+    case "view-refused":
+      next = afterViewRefused(status, event.viewName);
+      break;
+    case "view-released":
+      next = afterViewReleased(status, event.viewName);
+      break;
     case "target-rounding":
       next = { ...status, targetRounding: event.rounding };
       break;
@@ -365,6 +406,8 @@ export const GRAPHICS_WORDS = {
   processRestarted: "GRAPHICS PROCESS RESTARTED: re-acquiring",
   shaderRefused: (effectName: string): string =>
     `GRAPHICS SHADER REFUSED: ${effectName} did not compile, not drawn`,
+  viewRefused:
+    "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
   safeMode: "GRAPHICS SAFE MODE: views not available, relaunch to retry",
   disabledByLosses: (losses: number): string =>
     `GRAPHICS DISABLED: ${losses} device losses, relaunch to retry`,
@@ -382,6 +425,9 @@ function faultAnnunciation(fault: GraphicsFault): GraphicsAnnunciation {
       break;
     case "shader-refused":
       text = GRAPHICS_WORDS.shaderRefused(fault.effectName);
+      break;
+    case "view-refused":
+      text = GRAPHICS_WORDS.viewRefused;
       break;
   }
   return { text, standing: "fault" };
