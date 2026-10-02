@@ -432,7 +432,7 @@ it is recorded, and stays here so that the owner can review it.
   licence and are committed as derived tables with citation, with PHOENIX's 1 nm M-star table as a
   possible second derived table behind the same question, and the CIE data under CC BY-SA 4.0
   (R06.T3); the ASTM E-490 solar spectrum (ASTM's terms) and the CIE 1931 matching functions
-  (CC BY-SA 4.0) beside R05's `solar-factors.ts`, of which only derived constants are committed
+  (CC BY-SA 4.0) beside R05's `solarFactors.ts`, of which only derived constants are committed
   until the ruling (R05.T12.d). Filament's AgX is Apache-2.0 and gains a `NOTICE` entry in
   R02.T10.c, which R07 includes (R02 Design note 12).
 - **The level-of-detail selection bound** (R10.T4): whether selection takes the hard bound or
