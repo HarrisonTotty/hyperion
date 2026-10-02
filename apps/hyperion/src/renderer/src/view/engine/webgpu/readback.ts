@@ -23,15 +23,38 @@ export class WriterRecord {
     this.#writers.set(resource, kernel);
   }
 
-  /** Records that something other than a kernel has written `resource`: a draw or an upload. */
+  /**
+   * Records that something other than a kernel has replaced the whole of `resource`: a draw that
+   * clears it, or an upload that covers every byte or texel.
+   *
+   * @remarks
+   * A write of part of a resource, or one that adds to what is there (a splat), goes through
+   * {@link WriterRecord.wrotePart} instead: the rest still holds what its last kernel wrote, so a
+   * `presentation-only` mark stays.
+   */
   wroteOtherwise(resource: object): void {
     this.#writers.delete(resource);
   }
 
-  /** Records that `to` was copied from `from`, so that it carries `from`'s writer. */
-  copied(from: object, to: object): void {
-    const writer = this.#writers.get(from);
-    if (writer === undefined) {
+  /**
+   * Records a write of part of `resource`, by `kernel` or (`null`) by something else: it marks the
+   * resource `presentation-only` if that kernel is, and otherwise leaves the record as it was.
+   */
+  wrotePart(resource: object, kernel: KernelPair | null): void {
+    if (kernel?.readback === "presentation-only") {
+      this.#writers.set(resource, kernel);
+    }
+  }
+
+  /**
+   * Records that `to` was copied from `from`: the whole of `to`, so that it carries `from`'s
+   * writer, or (`whole` false) a part of it, as {@link WriterRecord.wrotePart} records.
+   */
+  copied(from: object, to: object, whole: boolean): void {
+    const writer = this.#writers.get(from) ?? null;
+    if (!whole) {
+      this.wrotePart(to, writer);
+    } else if (writer === null) {
       this.#writers.delete(to);
     } else {
       this.#writers.set(to, writer);
@@ -50,6 +73,43 @@ export class WriterRecord {
       throw new PresentationOnlyReadback(writer.name);
     }
   }
+}
+
+/** Whether a write of `bytes` at `offsetBytes` covers every byte of a buffer of `spec`. */
+export function coversBuffer(spec: BufferSpec, offsetBytes: number, bytes: number): boolean {
+  return offsetBytes === 0 && bytes >= spec.bytes;
+}
+
+/** A `GPUOrigin3D` as its three numbers, the absent ones 0. */
+function originOf(origin: GPUOrigin3D): readonly [number, number, number] {
+  if (Symbol.iterator in origin) {
+    const [x = 0, y = 0, z = 0] = [...origin];
+    return [x, y, z];
+  }
+  return [origin.x ?? 0, origin.y ?? 0, origin.z ?? 0];
+}
+
+/**
+ * Whether a write of `size` texels at `origin` of `level` covers every texel of a texture of
+ * `spec`: every layer of its one level.
+ */
+export function coversTexture(
+  spec: TextureSpec,
+  origin: GPUOrigin3D,
+  size: GPUExtent3D,
+  level: number,
+): boolean {
+  if (spec.mips !== 1 || level !== 0 || originOf(origin).some((axis) => axis !== 0)) {
+    return false;
+  }
+  const whole = extentOf(spec.size);
+  const written = extentOf(size);
+  const layers = spec.dimension === "cube" ? 6 : whole.depthOrArrayLayers;
+  return (
+    written.width >= whole.width &&
+    written.height >= whole.height &&
+    written.depthOrArrayLayers >= layers
+  );
 }
 
 /** Rows of a texel copy are 256-byte aligned in the buffer (WebGPU's `bytesPerRow` rule). */
