@@ -114,7 +114,7 @@ export type GraphicsEvent =
   | { readonly kind: "shader-refused"; readonly effectName: string }
   /**
    * The engine made its device and read its capabilities, in which a feature the harness withheld
-   * reads as absent (R01 Design note 7). Sent at each creation, a rebuild's included.
+   * reads as absent (R01 Design note 24). Sent at each creation, a rebuild's included.
    */
   | { readonly kind: "device-capabilities"; readonly capabilities: GpuCapabilities }
   /** The adapter's rounding probe answered (R01.T8.j). */
@@ -259,7 +259,7 @@ function withoutProcessFault(status: GraphicsStatus): GraphicsStatus {
  * @remarks
  * A granted adapter clears the crash's fault. Where an adapter had been granted already, the
  * condition, capabilities and timer are left as they are: a view's rebuild after the same crash
- * reports the device's own (`device-restored`, `device-capabilities`), which hold (Design note 7),
+ * reports the device's own (`device-restored`, `device-capabilities`), which hold (Design note 24),
  * and the two answers are not ordered. Where none had been, the new adapter's outcome is taken.
  * No adapter where one had been granted is the adapter withdrawn, as a rebuild handles it (Design
  * note 9). No adapter where none had been restates the condition and clears the fault: nothing is
