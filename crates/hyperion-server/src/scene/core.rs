@@ -184,12 +184,16 @@ struct Sent {
 }
 
 impl Sent {
-    /// A body listed as `listed`, placed by a seen position if `seen`.
+    /// A body listed as `listed` when evaluated at `at`, placed by a seen position if `seen`.
+    ///
+    /// A `valid_until` not after `at` is dropped: kept, it would name a time already passed, and
+    /// the topic, woken for it at once, would advance again and again without the clock moving
+    /// on. Only a fault in the record's validity could give one.
     #[must_use]
-    fn of(listed: ListedBody, seen: bool) -> Self {
+    fn of(listed: ListedBody, seen: bool, at: UniverseTime) -> Self {
         Self {
             level: listed.level,
-            valid_until: listed.valid_until,
+            valid_until: listed.valid_until.filter(|&until| until > at),
             seen,
         }
     }
@@ -466,7 +470,7 @@ impl SceneCore {
                 .map(|listed| {
                     (
                         listed.index,
-                        Sent::of(listed, seen_bodies.contains(&listed.index)),
+                        Sent::of(listed, seen_bodies.contains(&listed.index), t),
                     )
                 })
                 .collect(),
@@ -559,7 +563,7 @@ impl SceneCore {
                 Some((body, listed)) => {
                     system
                         .sent
-                        .insert(index, Sent::of(listed, body.seen.is_some()));
+                        .insert(index, Sent::of(listed, body.seen.is_some(), when));
                     bodies.push(body);
                 }
                 // A level that no longer resolves a body the client holds withdraws it, which
@@ -1496,6 +1500,28 @@ mod tests {
             planted.push(*index);
         }
         planted
+    }
+
+    #[test]
+    fn a_valid_until_not_after_its_own_time_is_not_kept() {
+        let listed = |valid_until| ListedBody {
+            index: BodyIndex::try_from(0x0100_u16).unwrap(),
+            level: DetailLevel::Full,
+            valid_until,
+        };
+        assert_eq!(
+            Sent::of(listed(Some(at(10))), false, at(10)).valid_until,
+            None
+        );
+        assert_eq!(
+            Sent::of(listed(Some(at(9))), false, at(10)).valid_until,
+            None
+        );
+        assert_eq!(
+            Sent::of(listed(Some(at(11))), false, at(10)).valid_until,
+            Some(at(11))
+        );
+        assert_eq!(Sent::of(listed(None), false, at(10)).valid_until, None);
     }
 
     #[test]

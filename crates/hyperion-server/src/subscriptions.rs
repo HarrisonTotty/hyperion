@@ -15,6 +15,7 @@
 //! the connection, which ends each topic's task and tells its [`Pusher`].
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -24,9 +25,9 @@ use hyperion_protocol::{
     ServerMessage,
 };
 use tokio::sync::{Notify, mpsc, oneshot, watch};
-use tokio::task::AbortHandle;
+use tokio::task::JoinHandle;
 
-use crate::compute::{CancelToken, CpuPool, Priority};
+use crate::compute::{CancelOnDrop, CancelToken, CpuPool, Priority};
 use crate::limits::{MAX_IN_FLIGHT_REQUESTS, MAX_SUBSCRIPTIONS};
 use crate::requests::to_frame;
 use crate::scene::is_large_notification;
@@ -147,15 +148,23 @@ impl Merge for ScenePush {
             self.bodies = later.bodies;
             return;
         }
+        if later.bodies.is_empty() {
+            return;
+        }
+        // Indexed once, so that a large push held for a slow reader merges in O(n + m), not
+        // O(n·m), under its lock.
+        let mut at: HashMap<BodyIdHex, usize> = self
+            .bodies
+            .iter()
+            .enumerate()
+            .map(|(index, body)| (body.record.id.clone(), index))
+            .collect();
         for body in later.bodies {
-            let id: &BodyIdHex = &body.record.id;
-            match self
-                .bodies
-                .iter_mut()
-                .find(|earlier| &earlier.record.id == id)
-            {
-                Some(earlier) => *earlier = body,
-                None => self.bodies.push(body),
+            if let Some(&index) = at.get(&body.record.id) {
+                self.bodies[index] = body;
+            } else {
+                at.insert(body.record.id.clone(), self.bodies.len());
+                self.bodies.push(body);
             }
         }
     }
@@ -200,8 +209,10 @@ enum TaskSlot {
     /// No task attached yet.
     #[default]
     Empty,
-    /// The topic's task, aborted when the subscription ends.
-    Attached(AbortHandle),
+    /// The topic's task, aborted when the subscription ends. Its handle is kept here, with the
+    /// subscription that owns the task, though nothing joins it: a task that panics has already
+    /// ended the subscription through its [`Pusher`] (see `scene::topic::spawn`).
+    Attached(JoinHandle<()>),
     /// The subscription has ended: a task attached now is aborted at once.
     Ended,
 }
@@ -276,7 +287,7 @@ impl Pusher {
 
     /// Hands the connection the topic's task, which it aborts when the subscription ends.
     /// A second task replaces the first, which is aborted.
-    pub(crate) fn attach(&self, task: AbortHandle) {
+    pub(crate) fn attach(&self, task: JoinHandle<()>) {
         let mut slot = self
             .shared
             .task
@@ -344,6 +355,8 @@ struct Subscription {
     stage: Stage,
     /// The last sequence sent: the state's 0, then one more per notification.
     sequence: u64,
+    /// Its next notification, once taken from the pending push.
+    outgoing: Outgoing,
     shared: Arc<Shared>,
     /// Where the connection routes the requests that name this subscription.
     commands: mpsc::Sender<SubscriptionCommand>,
@@ -367,6 +380,69 @@ impl Drop for Subscription {
     }
 }
 
+/// A live subscription's next notification, once the connection has taken it from the pending
+/// push.
+#[derive(Debug, Default)]
+enum Outgoing {
+    /// None taken: the next is made from the pending push.
+    #[default]
+    Idle,
+    /// Being serialised off the connection's path, on the CPU pool: its subscription sends
+    /// nothing, and is not ended, until it is back.
+    Serialising,
+    /// Serialised, and waiting for room in the outbound queue. It is kept serialised, so that a
+    /// slow reader's every wake does not serialise it again; changes merged meanwhile stay
+    /// pending, and are folded into it only once there is room for it. It holds its frame and its
+    /// body both, so a slow reader keeps an arrival twice over for each of its subscriptions, at
+    /// most [`MAX_SUBSCRIPTIONS`].
+    Waiting(Box<Ready>),
+}
+
+/// Whether [`Subscriptions::next_step`] may hand out a large notification to serialise: the
+/// connection serialises one at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Large {
+    /// None is being serialised: one may be handed out.
+    MaySerialise,
+    /// One is being serialised: another stays pending.
+    Hold,
+}
+
+/// What the connection does next for one live subscription (see [`Subscriptions::next_step`]).
+#[derive(Debug)]
+pub(crate) enum Step {
+    /// Queue this frame, already counted as sent.
+    Send(SubscriptionId, String),
+    /// Serialise this notification, then offer it with [`Subscriptions::offer`]. A large one is
+    /// already marked as serialising: the connection serialises it off its own path, and its
+    /// subscription sends nothing until it is offered.
+    Serialise(Unsent),
+    /// Its notification waits for room for this many bytes.
+    Waiting(SubscriptionId, usize),
+}
+
+impl Step {
+    /// The subscription it is for.
+    #[must_use]
+    pub(crate) fn id(&self) -> SubscriptionId {
+        match self {
+            Self::Send(id, _) | Self::Waiting(id, _) => *id,
+            Self::Serialise(unsent) => unsent.id,
+        }
+    }
+}
+
+/// What became of a notification offered with [`Subscriptions::offer`].
+#[derive(Debug)]
+pub(crate) enum Offered {
+    /// Queue this frame, counted as sent.
+    Send(String),
+    /// It waits, serialised, for room for this many bytes.
+    Waiting(usize),
+    /// Nothing to send: it could not be serialised, or its subscription has ended.
+    Nothing,
+}
+
 /// A notification taken from its subscription and not yet serialised.
 #[derive(Debug)]
 pub(crate) struct Unsent {
@@ -375,12 +451,6 @@ pub(crate) struct Unsent {
 }
 
 impl Unsent {
-    /// The subscription it is for.
-    #[must_use]
-    pub(crate) fn id(&self) -> SubscriptionId {
-        self.id
-    }
-
     /// Whether it is serialised on the CPU pool rather than the runtime (rendering plan R03,
     /// Design note 14): a scene notification carrying an arrival holds a whole system.
     #[must_use]
@@ -403,15 +473,19 @@ impl Unsent {
     }
 
     /// Serialises it on `pool`, as a large one is, or on a blocking thread if the pool refuses it
-    /// (its interactive queue full, or the pool shutting down): the connection never waits for
-    /// room in the pool, so that it goes on reading while the pool is busy, and never serialises
-    /// a whole system on the runtime.
-    pub(crate) async fn serialise_on(self, pool: &CpuPool) -> Ready {
+    /// (its interactive queue full, or the pool shutting down), so that a whole system is never
+    /// serialised on the runtime. The future borrows nothing: the connection polls it alongside
+    /// its socket, and so goes on reading while the job waits behind others on a busy pool.
+    pub(crate) async fn serialise_on(self, pool: Arc<CpuPool>) -> Ready {
         let Self { id, body } = self;
         // Lent to the job through a slot, so that a job the queue refuses gives the body back.
         let slot = Arc::new(Mutex::new(Some(body)));
         let lent = Arc::clone(&slot);
-        let submitted = pool.try_submit(Priority::Interactive, CancelToken::new(), move |_| {
+        let token = CancelToken::new();
+        // Skips the job if it is still queued when the connection drops this future: it closed,
+        // or the subscription ended.
+        let _cancel_on_drop = CancelOnDrop::new(token.clone());
+        let submitted = pool.try_submit(Priority::Interactive, token, move |_| {
             let body = lent
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -474,6 +548,7 @@ pub(crate) struct Ready {
 
 impl Ready {
     /// A notification that could not be serialised: nothing to send, nothing to restore.
+    #[must_use]
     fn empty(id: SubscriptionId) -> Self {
         Self {
             id,
@@ -484,13 +559,13 @@ impl Ready {
 
     /// Whether there is nothing to send.
     #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.body.is_none()
     }
 
     /// The frame's payload bytes, for the outbound budget.
     #[must_use]
-    pub(crate) fn frame_len(&self) -> usize {
+    fn frame_len(&self) -> usize {
         self.frame.len()
     }
 }
@@ -565,6 +640,7 @@ impl Subscriptions {
             Subscription {
                 stage: Stage::Opening(request),
                 sequence: 0,
+                outgoing: Outgoing::Idle,
                 shared: Arc::clone(&shared),
                 commands,
                 _ending: ending,
@@ -662,23 +738,27 @@ impl Subscriptions {
         self.wake.notified().await;
     }
 
-    /// The next live subscription's pending push, as the notification it would be sent as,
-    /// numbered with its next sequence but not yet serialised; `None` if nothing is pending. Every
-    /// subscription is asked in turn, from the one after `after`.
+    /// What to do next for the first live subscription, from the one after `after`, that has
+    /// something to send, or `None` if none has. `has_room` says whether the outbound queue has
+    /// room for a frame of so many bytes. While a large notification is being serialised, `large`
+    /// is [`Large::Hold`], and another stays pending until it is back.
+    ///
+    /// A notification waiting for room is sent as it was serialised once there is room for it and
+    /// nothing has been merged since; with changes merged since, it is folded with them and handed
+    /// out to serialise again, once, under the same sequence. A pending push is numbered with its
+    /// subscription's next sequence and handed out to serialise.
     #[must_use]
-    pub(crate) fn next_unsent(&self, after: Option<SubscriptionId>) -> Option<Unsent> {
+    pub(crate) fn next_step(
+        &mut self,
+        after: Option<SubscriptionId>,
+        has_room: impl Fn(usize) -> bool,
+        large: Large,
+    ) -> Option<Step> {
         let start = after.map_or(0, |id| id.0.saturating_add(1));
         self.live
-            .range(SubscriptionId(start)..)
+            .range_mut(SubscriptionId(start)..)
             .filter(|(_, subscription)| subscription.stage == Stage::Live)
-            .find_map(|(&id, subscription)| {
-                let push = subscription.shared.take()?;
-                let next = subscription.sequence.saturating_add(1);
-                Some(Unsent {
-                    id,
-                    body: push.into_body(next),
-                })
-            })
+            .find_map(|(&id, subscription)| subscription.next_step(id, &has_room, large))
     }
 
     /// The next live subscription whose topic gave it up, with nothing left pending, as the
@@ -705,7 +785,7 @@ impl Subscriptions {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .is_some();
-                if pending {
+                if pending || !matches!(subscription.outgoing, Outgoing::Idle) {
                     return None;
                 }
                 let frame = to_frame(&ServerMessage::SubscriptionEnded {
@@ -722,20 +802,70 @@ impl Subscriptions {
         self.live.remove(&id);
     }
 
-    /// Takes a ready notification's frame to queue, counting its sequence as sent.
+    /// Offers a serialised notification: its frame to queue, counted as sent, if there is room
+    /// for it, as `has_room` says; otherwise it is kept, serialised, until there is.
     #[must_use]
-    pub(crate) fn sent(&mut self, ready: Ready) -> String {
-        if let Some(subscription) = self.live.get_mut(&ready.id) {
+    pub(crate) fn offer(&mut self, ready: Ready, has_room: impl Fn(usize) -> bool) -> Offered {
+        let Some(subscription) = self.live.get_mut(&ready.id) else {
+            return Offered::Nothing;
+        };
+        subscription.outgoing = Outgoing::Idle;
+        if ready.is_empty() {
+            return Offered::Nothing;
+        }
+        let bytes = ready.frame_len();
+        if has_room(bytes) {
             subscription.sequence = subscription.sequence.saturating_add(1);
+            Offered::Send(ready.frame)
+        } else {
+            subscription.outgoing = Outgoing::Waiting(Box::new(ready));
+            Offered::Waiting(bytes)
         }
-        ready.frame
     }
+}
 
-    /// Puts back a ready notification that has no room, to be merged with what comes next.
-    pub(crate) fn not_sent(&self, ready: Ready) {
-        if let (Some(subscription), Some(body)) = (self.live.get(&ready.id), ready.body) {
-            subscription.shared.restore(PendingPush::from_body(body));
+impl Subscription {
+    /// [`Subscriptions::next_step`] for this subscription, numbered `id`.
+    fn next_step(
+        &mut self,
+        id: SubscriptionId,
+        has_room: &impl Fn(usize) -> bool,
+        large: Large,
+    ) -> Option<Step> {
+        let push = match std::mem::take(&mut self.outgoing) {
+            Outgoing::Serialising => {
+                self.outgoing = Outgoing::Serialising;
+                return None;
+            }
+            Outgoing::Waiting(ready) => {
+                let bytes = ready.frame_len();
+                if !has_room(bytes) {
+                    self.outgoing = Outgoing::Waiting(ready);
+                    return Some(Step::Waiting(id, bytes));
+                }
+                let Some(since) = self.shared.take() else {
+                    self.sequence = self.sequence.saturating_add(1);
+                    return Some(Step::Send(id, ready.frame));
+                };
+                let body = ready.body.expect("only a serialised notification waits");
+                let mut push = PendingPush::from_body(body);
+                push.merge(since);
+                push
+            }
+            Outgoing::Idle => self.shared.take()?,
+        };
+        let unsent = Unsent {
+            id,
+            body: push.into_body(self.sequence.saturating_add(1)),
+        };
+        if unsent.is_large() {
+            if large == Large::Hold {
+                self.shared.restore(PendingPush::from_body(unsent.body));
+                return None;
+            }
+            self.outgoing = Outgoing::Serialising;
         }
+        Some(Step::Serialise(unsent))
     }
 }
 
@@ -974,6 +1104,253 @@ mod tests {
         harness.stop().await;
     }
 
+    /// A push carrying an arrival, which is serialised on the pool.
+    fn arrival(seconds: i64) -> PendingPush {
+        PendingPush::Scene(ScenePush {
+            arrival: Some(SceneArrivalDto::NoSystem),
+            ..ScenePush::heartbeat(clock(seconds))
+        })
+    }
+
+    /// Waits until the pool has `queued` interactive jobs waiting. The pool publishes no change to
+    /// wait on, so this polls, yielding to the runtime between looks.
+    async fn queued_until(harness: &Harness, queued: usize) {
+        timeout(WAIT, async {
+            while harness.state().pool.counters().queued_interactive() != queued {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("timed out waiting for the pool's queue");
+    }
+
+    /// Holds the harness's one CPU worker with a job until the returned sender is dropped or sent
+    /// on; returns once the job runs, with the job's receiver.
+    async fn hold_the_pool(
+        harness: &Harness,
+    ) -> (std::sync::mpsc::Sender<()>, crate::compute::JobReceiver<()>) {
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (started, running) = oneshot::channel();
+        let slow = harness
+            .state()
+            .pool
+            .try_submit(Priority::Interactive, CancelToken::new(), move |_| {
+                started
+                    .send(())
+                    .expect("the test waits for the job to start");
+                // Released by a send or by the sender's drop: either ends the hold.
+                let _ = held.recv();
+            })
+            .unwrap();
+        timeout(WAIT, running).await.unwrap().unwrap();
+        (release, slow)
+    }
+
+    #[tokio::test]
+    async fn ping_is_answered_while_an_arrival_waits_behind_a_busy_pool() {
+        let (handler, _calls, mut openings) = Scripted::with_openings();
+        let harness = Harness::start(handler).await;
+        let mut client = harness.connect().await;
+        client.hello().await;
+        let (subscription, pusher) = subscribed(&mut client, &mut openings, 1).await;
+        let (release, slow) = hold_the_pool(&harness).await;
+        assert!(pusher.push(arrival(1)));
+        queued_until(&harness, 1).await;
+        // The arrival's job waits behind the slow one, and the connection reads on.
+        assert!(
+            client.ping(7).await.is_empty(),
+            "pong, with nothing before it"
+        );
+        release.send(()).unwrap();
+        slow.await.unwrap().unwrap();
+        let arrived = notification(&mut client, subscription).await;
+        assert_eq!(arrived.sequence, 1);
+        assert_eq!(arrived.arrival, Some(SceneArrivalDto::NoSystem));
+        client.close().await;
+        harness.stop().await;
+    }
+
+    #[tokio::test]
+    async fn an_arrival_whose_subscription_ends_while_it_is_serialised_is_dropped_and_frees_the_next()
+     {
+        let (handler, _calls, mut openings) = Scripted::with_openings();
+        let harness = Harness::start(handler).await;
+        let mut client = harness.connect().await;
+        client.hello().await;
+        let (first, ending) = subscribed(&mut client, &mut openings, 1).await;
+        let (second, staying) = subscribed(&mut client, &mut openings, 2).await;
+        let (release, slow) = hold_the_pool(&harness).await;
+        assert!(ending.push(arrival(1)));
+        queued_until(&harness, 1).await;
+        // The second's arrival stays pending while the first's is being serialised.
+        assert!(staying.push(arrival(2)));
+        client
+            .request(
+                3,
+                RequestBody::Unsubscribe(UnsubscribeRequest {
+                    subscription: first,
+                }),
+            )
+            .await;
+        assert!(matches!(
+            client.next_message().await,
+            ServerMessage::Response {
+                body: ResponseBody::Unsubscribe,
+                ..
+            }
+        ));
+        release.send(()).unwrap();
+        slow.await.unwrap().unwrap();
+        // Nothing for the first; the second's arrival follows.
+        let arrived = notification(&mut client, second).await;
+        assert_eq!((arrived.sequence, arrived.clock), (1, clock(2)));
+        assert!(client.ping(1).await.is_empty(), "nothing else was sent");
+        client.close().await;
+        harness.stop().await;
+    }
+
+    /// The outbound queue has room for any frame.
+    fn room(_bytes: usize) -> bool {
+        true
+    }
+
+    /// The outbound queue has room for no frame.
+    fn no_room(_bytes: usize) -> bool {
+        false
+    }
+
+    /// The next step for `subscriptions`, with room as `has_room` says.
+    fn step(subscriptions: &mut Subscriptions, has_room: fn(usize) -> bool) -> Option<Step> {
+        subscriptions.next_step(None, has_room, Large::MaySerialise)
+    }
+
+    /// The notification in `frame`.
+    fn parsed(frame: &str) -> SceneNotificationDto {
+        match serde_json::from_str(frame).unwrap() {
+            ServerMessage::Notification {
+                body: NotificationBody::Scene(notification),
+                ..
+            } => notification,
+            other => panic!("expected a notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_arrival_without_room_is_serialised_once_and_folded_with_later_changes_once_it_has_room() {
+        let mut subscriptions = Subscriptions::new();
+        let (id, pusher) = subscriptions.reserve(RequestId(1)).unwrap();
+        subscriptions.went_live(RequestId(1));
+        assert!(pusher.push(arrival(1)));
+        let Some(Step::Serialise(unsent)) = step(&mut subscriptions, no_room) else {
+            panic!("the arrival to serialise");
+        };
+        assert!(unsent.is_large());
+        // Being serialised: nothing else is taken for it, and it does not end meanwhile.
+        assert!(pusher.push(push(2, Vec::new())));
+        assert!(pusher.fail(RequestError {
+            code: ErrorCode::Internal,
+            message: "gone".to_owned(),
+            field: None,
+        }));
+        assert!(step(&mut subscriptions, room).is_none());
+        assert!(subscriptions.next_failed().is_none());
+        let Offered::Waiting(bytes) = subscriptions.offer(unsent.serialise(), |_| false) else {
+            panic!("no room for it");
+        };
+        // Every wake without room finds it waiting, serialised, and serialises nothing.
+        for _ in 0..3 {
+            match step(&mut subscriptions, no_room) {
+                Some(Step::Waiting(waiting, waits_for)) => {
+                    assert_eq!((waiting, waits_for), (id, bytes));
+                }
+                other => panic!("expected it waiting, got {other:?}"),
+            }
+            assert!(subscriptions.next_failed().is_none());
+        }
+        // With room, it is folded with the change pushed before the failure, once, under its
+        // own sequence.
+        let Some(Step::Serialise(merged)) = step(&mut subscriptions, room) else {
+            panic!("the arrival folded with the later change");
+        };
+        let Offered::Send(frame) = subscriptions.offer(merged.serialise(), |_| true) else {
+            panic!("sent, with room");
+        };
+        let sent = parsed(&frame);
+        assert_eq!(sent.sequence, 1);
+        assert_eq!(sent.arrival, Some(SceneArrivalDto::NoSystem));
+        assert_eq!(sent.clock, clock(2));
+        // Only now does the failure end it.
+        assert!(step(&mut subscriptions, room).is_none());
+        assert_eq!(
+            subscriptions.next_failed().map(|(ended, _)| ended),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn a_waiting_notification_with_nothing_merged_since_is_sent_as_it_was_serialised() {
+        let mut subscriptions = Subscriptions::new();
+        let (id, pusher) = subscriptions.reserve(RequestId(1)).unwrap();
+        subscriptions.went_live(RequestId(1));
+        assert!(pusher.push(push(1, vec![body(0x0100, 1.0)])));
+        let Some(Step::Serialise(unsent)) = step(&mut subscriptions, no_room) else {
+            panic!("the push to serialise");
+        };
+        assert!(!unsent.is_large());
+        let ready = unsent.serialise();
+        let expected = ready.frame.clone();
+        assert!(matches!(
+            subscriptions.offer(ready, |_| false),
+            Offered::Waiting(_)
+        ));
+        match step(&mut subscriptions, room) {
+            Some(Step::Send(sent_on, frame)) => {
+                assert_eq!(sent_on, id);
+                assert_eq!(frame, expected);
+            }
+            other => panic!("expected the frame as serialised, got {other:?}"),
+        }
+        // Counted as sent: the next is numbered on.
+        assert!(pusher.push(push(2, Vec::new())));
+        let Some(Step::Serialise(next)) = step(&mut subscriptions, room) else {
+            panic!("the next push");
+        };
+        let Offered::Send(frame) = subscriptions.offer(next.serialise(), |_| true) else {
+            panic!("sent, with room");
+        };
+        assert_eq!(parsed(&frame).sequence, 2);
+    }
+
+    #[test]
+    fn a_second_arrival_stays_pending_while_one_is_being_serialised() {
+        let mut subscriptions = Subscriptions::new();
+        let (first, one) = subscriptions.reserve(RequestId(1)).unwrap();
+        let (second, two) = subscriptions.reserve(RequestId(2)).unwrap();
+        subscriptions.went_live(RequestId(1));
+        subscriptions.went_live(RequestId(2));
+        assert!(one.push(arrival(1)));
+        assert!(two.push(arrival(1)));
+        let Some(Step::Serialise(unsent)) =
+            subscriptions.next_step(None, room, Large::MaySerialise)
+        else {
+            panic!("the first arrival");
+        };
+        assert!(unsent.is_large());
+        assert!(
+            subscriptions
+                .next_step(Some(first), room, Large::Hold)
+                .is_none(),
+            "the second stays pending"
+        );
+        let Offered::Send(_) = subscriptions.offer(unsent.serialise(), |_| true) else {
+            panic!("sent, with room");
+        };
+        match subscriptions.next_step(None, room, Large::MaySerialise) {
+            Some(step @ Step::Serialise(_)) => assert_eq!(step.id(), second),
+            other => panic!("expected the second arrival, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn a_push_made_while_opening_follows_the_subscribed_answer() {
         let (handler, _calls, mut openings) = Scripted::with_openings();
@@ -1183,17 +1560,21 @@ mod tests {
         let mut client = harness.connect().await;
         client.hello().await;
         let (_, pusher) = subscribed(&mut client, &mut openings, 1).await;
-        let topic = tokio::spawn(std::future::pending::<()>());
-        pusher.attach(topic.abort_handle());
+        // Held by the task until it is dropped, which an abort does.
+        let (alive, task_dropped) = oneshot::channel::<()>();
+        pusher.attach(tokio::spawn(async move {
+            let _alive = alive;
+            std::future::pending::<()>().await;
+        }));
         client.close().await;
         tokio::time::timeout(WAIT, pusher.ended())
             .await
             .expect("the subscription ends with its socket");
         assert!(!pusher.push(push(1, Vec::new())));
-        let ended = tokio::time::timeout(WAIT, topic)
+        let ended = tokio::time::timeout(WAIT, task_dropped)
             .await
             .expect("the topic's task is ended");
-        assert!(ended.unwrap_err().is_cancelled());
+        assert!(ended.is_err(), "the task ended unfinished");
         harness.stop().await;
     }
 
