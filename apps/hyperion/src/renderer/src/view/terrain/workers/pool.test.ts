@@ -108,6 +108,8 @@ function bakeOf(key: PatchKey, generation: number): BakedPatch {
     normals: new Float16Array(2),
     heightRangeM: [0, 0],
     boundingRadiusM: 1,
+    originHeightM: 0,
+    skirtDepthM: 1,
   };
 }
 
@@ -132,7 +134,7 @@ function poolOf(workers: number): {
       created.push(worker);
       return worker;
     },
-    bake: { vertexPath: "face-differences", normals: "mesh" },
+    bake: { vertexPath: "face-differences", normals: "mesh", ridges: "off" },
   });
   const baked: string[] = [];
   pool.onBaked((bake) => baked.push(patchKeyString(bake.key)));

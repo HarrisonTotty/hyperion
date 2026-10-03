@@ -15,6 +15,7 @@
  */
 
 import { TABLE_SIZES, type TableSizes } from "../atmosphere/hillaire";
+import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
 /** The view's quality setting: `high` on the recommended specification, `low` on the UHD 620. */
 export type QualitySetting = "high" | "low";
@@ -22,19 +23,9 @@ export type QualitySetting = "high" | "low";
 /** Every {@link QualitySetting}, in order from the highest, for tests and settings menus. */
 export const QUALITY_SETTINGS: ReadonlyArray<QualitySetting> = ["high", "low"];
 
-/** Where the terrain's normals are evaluated (R05 Design notes 5 and 25). */
-export type TerrainNormals =
-  /** Twice the mesh's resolution, 129 × 129 a patch: four times the gradients. */
-  | "double"
-  /** The mesh's own resolution, 65 × 65 a patch. */
-  | "mesh";
-
-/** How the vertex stage forms a terrain vertex's camera-relative position (R05 Design note 4). */
-export type TerrainVertexPath =
-  /** Offsets from the patch origin baked in `f64` by the worker and narrowed to `f32`. */
-  | "baked-offsets"
-  /** Direction differences formed from small quantities in the shader, from the heights alone. */
-  | "face-differences";
+/** Where the terrain's normals are evaluated, and how its vertices are formed: in
+ * `terrainKinds.ts`, which the height workers read too. */
+export type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
 /** The terrain's settings for one {@link QualitySetting} (R05 Design notes 4, 7, 10 and 26). */
 export interface TerrainSettings {
