@@ -12,7 +12,9 @@ import type { SystemPlace } from "../../lib/scene/model";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import { SETTINGS } from "../../view/quality/qualitySetting";
 import { cameraGalacticPosition } from "../../view/sky/camera";
+import type { BakeInput } from "../../view/sky/bake";
 import { cullSky } from "../../view/sky/cull";
+import { starIlluminanceRgbLx } from "../../view/sky/photometry";
 import { skyLabelValue } from "../../view/sky/label";
 import type { SkyCamera, SkyModel } from "../../view/sky/model";
 import { selectSkySprites, type SkySelection } from "../../view/sky/select";
@@ -34,6 +36,26 @@ export interface ViewSky {
   readonly labelValue: string | null;
   /** Whether a sky has been asked and not yet answered (R07's lighting label reads it). */
   readonly pending: boolean;
+}
+
+/** The baked stars of a view's sky as a bake takes them: directions and light per channel. */
+export function bakeInputOf(sky: DrawnSky, faceSizePx: number): BakeInput {
+  const { stars } = sky.model;
+  const count = sky.selection.baked.length;
+  const directions = new Float32Array(count * 3);
+  const illuminanceLx = new Float32Array(count * 3);
+  sky.selection.baked.forEach((index, at) => {
+    directions.set(stars.directions.subarray(index * 3, index * 3 + 3), at * 3);
+    illuminanceLx.set(
+      starIlluminanceRgbLx(
+        stars.vMag[index] ?? Number.POSITIVE_INFINITY,
+        stars.chroma[index * 2] ?? 0,
+        stars.chroma[index * 2 + 1] ?? 0,
+      ),
+      at * 3,
+    );
+  });
+  return { directions, illuminanceLx, faceSizePx, name: "sky cube: view" };
 }
 
 /** What the view's sky is made from. */
@@ -85,26 +107,29 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
   const { model, pending } = useSky(request, cameras);
   const role = run.camera.role;
   const fovDeg = run.camera.fovDeg;
-  // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's limit or its size changes.
-  return useMemo<ViewSky>(() => {
-    // A sky is this view's only for the system it was asked about, whose position is known.
-    if (
-      model === null ||
-      request === null ||
-      model.request.exclude_system !== request.exclude_system
-    ) {
-      return { drawn: null, labelValue: null, pending };
+  // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's limit or its size changes, so
+  // that the drawn sky keeps its identity from one published run to the next and is baked once.
+  const culled = useMemo(() => {
+    if (model === null) {
+      return null;
     }
     const { limit, labelV } = viewSkyLimit(model, role, exposure, fovDeg);
-    const culled = cullSky(model.stars, limit, model.response.band.face_texels);
-    const selection = selectSkySprites(model.stars, culled.kept, settings.spriteBudget, {
+    const kept = cullSky(model.stars, limit, model.response.band.face_texels);
+    const selection = selectSkySprites(model.stars, kept.kept, settings.spriteBudget, {
       fovDeg,
       widthPx,
     });
     return {
       drawn: { model, selection },
       labelValue: skyLabelValue(labelV, role, model.response.not_modelled),
-      pending,
     };
-  }, [model, pending, request, role, exposure, fovDeg, widthPx, settings.spriteBudget]);
+  }, [model, role, exposure, fovDeg, widthPx, settings.spriteBudget]);
+  // A sky is this view's only for the system it was asked about, whose position is known.
+  const ours =
+    culled !== null &&
+    request !== null &&
+    culled.drawn.model.request.exclude_system === request.exclude_system;
+  return ours
+    ? { drawn: culled.drawn, labelValue: culled.labelValue, pending }
+    : { drawn: null, labelValue: null, pending };
 }

@@ -1578,6 +1578,25 @@ cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `pa
   packer bit for bit over 10⁴ texels, the GPU splat against the CPU splat to 10⁻⁶, the whole bake
   against the CPU bake to one mantissa step at levels 0 and 5 (each cube's own scale undone),
   finiteness, and the two memory categories.
+- **Deviations in T14, as built (2026-10-03).** `view/sky/cache.ts` exports `SkyCubeCache`
+  (`acquire(view, request)`, `release(view)`, `size`) over `CubeRequest { stars, baked,
+bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cube is shared by
+  every view that bakes the same sky's stars (the same `SkyStars`, the same baked indices) and
+  released with its last view (T13.h's releases). A cube's stars are placed from its sky's
+  observer, so baking it again for a camera moved past the parallax rule would give the same
+  pixels: the re-bake comes with the new sky that `useSky`'s request rule asks from the new place,
+  and two views far apart (two cameras across the nuclear disc) ask skies of their own and hold a
+  cube each. A restore after a device loss forgets the cubes, which died with the device, and the
+  views bake again. The `VIEW` display acquires its cube each frame (the drawn sky memoised on the
+  model, the view's limit and its size, so that it keeps its identity across the 4 Hz published
+  runs and is baked once), draws it through `SkyCubeLayer`'s display variant in the wireframe's
+  background slot, does not bake a sky again after its bake failed until another sky or a
+  restore, and releases it on cleanup; a device without `float32-blendable` bakes at the low
+  setting's face size, read at each bake. Each view asks its own sky (`useSky` per view), so two
+  views share a cube only when they share a sky model: a client-wide sky for its views, the
+  brainstorm's one census per arrival, waits on the views' hosting (R07's main screen, and the
+  three-canvas proof by hand). The view's cube wiring has no test of its own (the fake view engine
+  makes no packed cube), only the cache's.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and

@@ -42,6 +42,7 @@ import type { CameraPose } from "../../view/camera/pose";
 import type { RenderView, ViewSize } from "../../view/engine/types";
 import {
   controlEv100,
+  exposureScale,
   DEFAULT_EXPOSURE,
   type ExposureControl,
 } from "../../view/photometry/exposure";
@@ -51,7 +52,10 @@ import {
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
 import { cameraSceneOf, type ViewScene, type ViewStar } from "../../view/scene/model";
+import type { BakedCube } from "../../view/sky/bake";
+import { skyCubeCacheOf } from "../../view/sky/cache";
 import { cameraFromObserverM } from "../../view/sky/camera";
+import { SkyCubeLayer } from "../../view/sky/cubeLayer";
 import { skySpriteStars } from "../../view/sky/sprites";
 import {
   buildWireframeDrawList,
@@ -68,7 +72,8 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
-import { type DrawnSky, useViewSky } from "./useViewSky";
+import { bakeInputOf, type DrawnSky, useViewSky } from "./useViewSky";
+import { SETTINGS } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -344,6 +349,42 @@ function ViewStage({
       return undefined;
     }
     const renderer = new WireframeRenderer(engine);
+    // The sky's baked cube (R06.T13.g, T14): shared through the device's cache, baked once per sky
+    // and set of baked stars, drawn every frame; a new sky, asked as the parallax rule says,
+    // brings a new cube.
+    const cubes = new SkyCubeLayer(engine);
+    const cache = skyCubeCacheOf(engine);
+    // A sky whose bake failed is not baked again until another sky or a restore.
+    let failedFor: DrawnSky | null = null;
+    const unsubscribeRestored = engine.onRestored(() => {
+      failedFor = null;
+    });
+    const cubeFor = (sky: DrawnSky | null): BakedCube | null => {
+      if (sky === null || sky === failedFor) {
+        cache.release(VIEW_NAME);
+        return null;
+      }
+      try {
+        return cache.acquire(VIEW_NAME, {
+          stars: sky.model.stars,
+          baked: sky.selection.baked,
+          // Read at the bake: a restore may have brought a device without float32-blendable.
+          bakeInput: () =>
+            bakeInputOf(
+              sky,
+              engine.capabilities.float32Blendable
+                ? SETTINGS.high.sky.faceSizePx
+                : SETTINGS.low.sky.faceSizePx,
+            ),
+        });
+      } catch (error: unknown) {
+        // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
+        console.error("the sky's cube could not be baked:", error);
+        failedFor = sky;
+        cache.release(VIEW_NAME);
+        return null;
+      }
+    };
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let sized: ViewSize | null = null;
@@ -386,7 +427,16 @@ function ViewStage({
           skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
         });
         anchors = list.anchors;
-        renderer.render(view, list, camera, viewport);
+        const cube = cubeFor(inputs.sky);
+        renderer.render(
+          view,
+          list,
+          camera,
+          viewport,
+          cube === null
+            ? []
+            : [cubes.draw(cube, "display", exposureScale(controlEv100(inputs.exposure)))],
+        );
         // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10). A
         // label whose mark this frame did not draw is hidden until the next readout removes it.
         const placed = new Set<string>();
@@ -415,6 +465,9 @@ function ViewStage({
     return () => {
       cancelAnimationFrame(frame);
       renderer.dispose();
+      cache.release(VIEW_NAME);
+      cubes.dispose();
+      unsubscribeRestored();
       view.dispose();
     };
   }, [engineState, canvas]);
