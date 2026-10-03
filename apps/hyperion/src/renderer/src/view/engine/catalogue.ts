@@ -23,7 +23,7 @@ import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
-import type { WgslMaterialSpec, WgslPostProcessSpec } from "./types";
+import type { PointSplatSpec, WgslMaterialSpec, WgslPostProcessSpec } from "./types";
 
 /** A named rendering setting at which the harness renders an entry. */
 export type CatalogueSetting = "default";
@@ -33,6 +33,8 @@ export type CatalogueEntry = (
   | { readonly kind: "material"; readonly spec: WgslMaterialSpec }
   | { readonly kind: "post-process"; readonly spec: WgslPostProcessSpec }
   | { readonly kind: "compute"; readonly spec: KernelPair }
+  // R06.T13.h: R06's bake splat, compiled by the harness through `createPointSplatAsync`.
+  | { readonly kind: "point-splat"; readonly spec: PointSplatSpec }
 ) & {
   /** The settings it renders at; `default` alone when absent. */
   readonly settings?: ReadonlyArray<CatalogueSetting>;
@@ -83,6 +85,27 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [...TERRAIN_MATERIALS, LI
   (spec) => ({ kind: "material", spec }),
 );
 
+/**
+ * R01's point splat as the harness's blending check draws it (R01.T9.i): the catalogue's one
+ * `point-splat` entry until R06.T13.g registers the sky's bake splat beside it (R06.T13.h).
+ */
+export const ENGINE_CHECK_SPLAT: PointSplatSpec = {
+  name: "smoke splat",
+  format: "rgba32float",
+  blend: "additive",
+  vertexWgsl: `
+@group(0) @binding(0) var<storage, read> points : array<vec2f>;
+@vertex fn main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
+  return vec4f(points[index], 0.5, 1.0);
+}`,
+  fragmentWgsl: `@fragment fn main() -> @location(0) vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }`,
+};
+
+/** The point splats (R06.T13.h). */
+const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "point-splat", spec: ENGINE_CHECK_SPLAT },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -91,4 +114,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...POST_ENTRIES,
   ...ATMOSPHERE_VIEW_ENTRIES,
   ...TERRAIN_ENTRIES,
+  ...SPLAT_ENTRIES,
 ];

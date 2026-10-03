@@ -446,8 +446,18 @@ export interface RenderEngine {
   createBuffer(spec: BufferSpec): BufferHandle;
   /** 2D, 3D or a cube; sampled and/or storage. */
   createTexture(spec: TextureSpec): TextureHandle;
-  /** R06's packed star cube: `rgb9e5ufloat`, every mip written by `copyBufferToTexture`. */
-  createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle;
+  /**
+   * R06's packed star cube: `rgb9e5ufloat`, every mip written by `copyBufferToTexture`.
+   *
+   * @param name - Its name in allocation events and faults; `packed star cube` when absent, so that
+   *   several views' cubes (R06.T14) report their own (R06.T13.h).
+   */
+  createPackedCube(
+    sizePx: number,
+    mips: number,
+    category: MemoryCategory,
+    name?: string,
+  ): TextureHandle;
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void;
   /** The same level written from a GPU buffer a kernel filled, with no readback (R06's bake). */
   writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void;
@@ -458,6 +468,32 @@ export interface RenderEngine {
    * compute splat (R01 Design note 21).
    */
   createPointSplat(spec: PointSplatSpec): PointSplatHandle;
+  /**
+   * The same splat, resolving once its pipeline is compiled, so that the harness's catalogue check
+   * sees a WGSL error as a rejection (R06.T13.h).
+   *
+   * @throws {@link Float32BlendUnavailable} without `float32-blendable`; Error, as a rejection,
+   *   naming the splat when its WGSL does not compile.
+   */
+  createPointSplatAsync(spec: PointSplatSpec): Promise<PointSplatHandle>;
+  /**
+   * Destroys a buffer this engine made, at once, raising its `destroyed` allocation event with the
+   * bytes it was made with (R06.T13.h: the bake's transient scratch, Design note 21).
+   *
+   * @remarks
+   * The handle is refused by every later call. A caller must not release a buffer a submitted
+   * frame still reads; WebGPU defers the destruction until the queue's work that uses it is done.
+   * `ResilientEngine` drops the release of a handle made by a lost engine, which died with it.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseBuffer(buffer: BufferHandle): void;
+  /**
+   * Destroys a texture this engine made through `createTexture` or `createPackedCube`, as
+   * {@link RenderEngine.releaseBuffer} does a buffer (R06.T14: a view's cube).
+   *
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseTexture(texture: TextureHandle): void;
   /**
    * Dispatches a kernel.
    *
