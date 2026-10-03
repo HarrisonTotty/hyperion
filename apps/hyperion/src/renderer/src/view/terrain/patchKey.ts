@@ -124,6 +124,23 @@ export function childKeys(k: PatchKey): readonly [PatchKey, PatchKey, PatchKey, 
   ];
 }
 
+/**
+ * A patch's index within its level, face · 2⁴⁸ + i · 2²⁴ + j: an exact integer below 2⁵¹, which
+ * numeric maps per level key patches by without building a string.
+ */
+export function patchKeyIndex(key: PatchKey): number {
+  return key.face * 2 ** 48 + key.i * 2 ** 24 + key.j;
+}
+
+/**
+ * The index ({@link patchKeyIndex}) of `key`'s ancestor at `level`, computed without building the
+ * ancestor's key.
+ */
+export function ancestorIndex(key: PatchKey, level: number): number {
+  const shift = 2 ** (key.level - level);
+  return key.face * 2 ** 48 + Math.floor(key.i / shift) * 2 ** 24 + Math.floor(key.j / shift);
+}
+
 /** The key's `hyperion_surface` `to_u64` word, for checks against the Rust goldens. */
 export function patchKeyWord(k: PatchKey): bigint {
   return (BigInt(k.face) << 53n) | (BigInt(k.level) << 48n) | (BigInt(k.i) << 24n) | BigInt(k.j);
