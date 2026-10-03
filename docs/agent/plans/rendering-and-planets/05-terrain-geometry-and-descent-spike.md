@@ -2771,3 +2771,20 @@ medium, sizes, figure)`.
   spacings, all bit for bit (19 tests, first run green). The digest needs the testkit's
   `f64_digest`, so `workers/f32Digest.ts` (T10.b's file) landed here with `fnv1a64`, `f64Digest`
   and `f32Digest`, checked against FNV's published vectors and the testkit's hand-computed value.
+- **Deviations in T7.a, as built (bounds and culling, 2026-10-03).** `PatchBounds` gains
+  `box: OrientedBox` (the centre's spheroid normal and two tangents, with half-extents) beside its
+  sphere, whose centre is the box's; the bounds sample the patch's boundary at every fourth vertex
+  and the centre vertex at both ends of the level's height range and pad by the largest chord
+  between neighbouring samples (about a sixteenth of the patch). Added beside the Provides names:
+  in `planet.ts` `LEVEL_TABLE_STRIDE`, `levelBoundM`, `levelHeightRangeM`, `lowestHeightM`,
+  `spheroidPoint`, `spheroidNormal` and `surfacePoint`; in `bounds.ts` `OrientedBox`,
+  `boxCorners`, `relativeBounds`, `distanceToBoxM` (selection's distance to the nearest point)
+  and `CameraRelativeBounds` (there, not in `cull.ts`); in `cull.ts` `Plane`, `FrustumCamera`,
+  `frustumOf` and `horizonCone`. `HorizonCone` holds the camera's position and R_occ = c + the
+  lowest height of any level (0 with no table); the test is off at or below R_occ. The frustum's
+  sphere stage is its own, not `sphereInFrustum`, which takes R02's `ProjectionCamera`.
+  `bandLimitM()` returns the mirrored `BAND_LIMIT_M`, since the render thread loads no
+  WebAssembly; `planet.wasm.test.ts` checks it, `FINEST_SPACING_M` and both level tables against
+  the module itself. `planetGeometry` refuses a figure not 0 < c ≤ a and a table not 100 finite
+  entries. Shared test fixtures: `src/test/terrainFixtures.ts` (`UNIT_BOUNDS`, `WGS84_FIGURE`,
+  `goldenLevelTable`, `selectionOf`).
