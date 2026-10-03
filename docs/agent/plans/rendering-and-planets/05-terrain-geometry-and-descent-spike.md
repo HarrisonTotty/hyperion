@@ -2417,6 +2417,13 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   table and the ridged bake's skirt depth changed, so `TEST_PLANET_VERSION` is 2 (every surface
   golden re-blessed; `EXPECTED_TEST_PLANET_VERSION` in `heightBake.ts` and `cube.test.ts`
   follow); `GENERATOR_VERSION` is unchanged.
+- **The drawn surface's height exported** (2026-10-03, for the spike). The wasm module's
+  `surfaceHeightM(x, y, z, ridges): number` is T4.c's `finest_surface_height` over the test
+  planet at a body-fixed direction (not necessarily unit), so the client never ports the
+  interpolant; it throws for a zero or non-finite direction. A new golden,
+  `tests/golden/collision.golden` (27 directions, ridges off and on, a face-edge vertex, an
+  interior vertex and a cube corner among them), pins it natively, and `heightWasm.test.ts`
+  checks the export against it bit for bit. New values only: no `TEST_PLANET_VERSION` bump.
 - **σ_n exported** (2026-10-03, for T13.a). `TestPlanet::omitted_sigma_m(level)` and the wasm
   module's `omittedSigmaM(level, ridges)` give σ_n, the RMS of the octaves level n omits: the
   octaves' variances summed in index order, a ridged octave counting at its mask's RMS
