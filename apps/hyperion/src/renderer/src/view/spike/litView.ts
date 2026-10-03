@@ -8,6 +8,11 @@
  * its scene target (decisions-r06-r07.md item 1), its histogram, bloom and tone mapping, and
  * replaces this view's shading, exposure and pass with its own. The target here is the spike's
  * measurement scratch, sized to the view and never shared.
+ *
+ * With an atmosphere (T13.b), the terrain target's colour and depth are laid under the sky by
+ * Hillaire's composite (T12.c), drawn into a second target, `<name>:spike-sky`, since a pass may
+ * not sample the depth of the target it draws into (R01's `DepthSelfSample`); the display pass
+ * then maps that one.
  */
 
 import {
@@ -40,6 +45,18 @@ export const SPIKE_DAY_TRIPLE: ExposureTriple = { aperture: 16, shutterS: 1 / 12
 
 /** The pass's label for the display pass in `PassTimes`. */
 export const LIT_VIEW_DISPLAY_LABEL = "spike display";
+
+/** The pass's label for the atmosphere's composite in `PassTimes`. */
+export const LIT_VIEW_ATMOSPHERE_LABEL = "atmosphere composite";
+
+/** What the atmosphere's composite is laid over: the terrain target's colour and depth. */
+export interface LitScene {
+  readonly colour: RenderTarget["colour"];
+  readonly depth: NonNullable<RenderTarget["depth"]>;
+}
+
+/** Makes the frame's atmosphere composite over the terrain target (`HillaireAtmosphere`'s). */
+export type LitComposite = (scene: LitScene) => DrawItem;
 
 /** The full-screen AgX material, drawing into a view's canvas or, in the harness, an HDR target. */
 export const LIT_AGX_MATERIAL: WgslMaterialSpec = {
@@ -81,12 +98,26 @@ export function spikeExposure(triple: ExposureTriple = SPIKE_DAY_TRIPLE): Exposu
   return result.control;
 }
 
+/** The terrain target's colour and depth. */
+function sceneOf(target: RenderTarget): LitScene {
+  const depth = target.depth;
+  if (depth === null) {
+    throw new Error(`the lit view's target ${target.name} was made without its depth`);
+  }
+  return { colour: target.colour, depth };
+}
+
 /** One view's lit drawing: its HDR target, the display pass and the exposure. */
 export class LitView {
   readonly #engine: RenderEngine;
   readonly #mesh: MeshHandle;
   readonly #target: RenderTarget;
-  readonly #textures: Readonly<{ hdrColour: RenderTarget["colour"] }>;
+  /** The sky's target, with an atmosphere; `null` without. */
+  readonly #sky: RenderTarget | null;
+  /** The terrain target's handles, renewed when a resize remakes its textures. */
+  #scene: LitScene;
+  /** The display pass's texture, likewise. */
+  #textures: Readonly<{ hdrColour: RenderTarget["colour"] }>;
   readonly #renderHeightPx: number | null;
   #renderSize: ViewSize;
   #exposure: ExposureControl;
@@ -97,8 +128,16 @@ export class LitView {
    * @param size - The view's presented size in device pixels.
    * @param renderHeightPx - The setting's render height (`TerrainSettings.renderHeightPx`): 720 on
    * the low setting, drawn at the view's aspect and presented upscaled; `null` for the view's own.
+   * @param atmosphere - Whether frames lay an atmosphere's composite over the terrain, into a
+   * second target the display pass then maps.
    */
-  constructor(engine: RenderEngine, name: string, size: ViewSize, renderHeightPx: number | null) {
+  constructor(
+    engine: RenderEngine,
+    name: string,
+    size: ViewSize,
+    renderHeightPx: number | null,
+    atmosphere = false,
+  ) {
     this.#engine = engine;
     this.#renderHeightPx = renderHeightPx;
     this.#renderSize = renderSizeOf(size, renderHeightPx);
@@ -118,7 +157,18 @@ export class LitView {
       depth: true,
       category: "render-targets",
     });
-    this.#textures = { hdrColour: this.#target.colour };
+    this.#scene = sceneOf(this.#target);
+    this.#sky = atmosphere
+      ? engine.createRenderTarget({
+          name: `${name}:spike-sky`,
+          size: this.#renderSize,
+          format: "rgba16float",
+          mips: 1,
+          depth: false,
+          category: "render-targets",
+        })
+      : null;
+    this.#textures = { hdrColour: (this.#sky ?? this.#target).colour };
   }
 
   /** The exposure the label reads, `EV100 15.0 MAN` by day. */
@@ -159,18 +209,32 @@ export class LitView {
   resize(size: ViewSize): void {
     this.#renderSize = renderSizeOf(size, this.#renderHeightPx);
     this.#target.resize(this.#renderSize);
+    this.#sky?.resize(this.#renderSize);
+    // A resize remakes a target's textures, and with them their handles.
+    this.#scene = sceneOf(this.#target);
+    this.#textures = { hdrColour: (this.#sky ?? this.#target).colour };
+    if (this.#display !== null) {
+      this.#display = { ...this.#display, textures: this.#textures };
+    }
   }
 
   /**
-   * Draws `draws` (the terrain pass's) lit into the HDR target, then the display pass into
-   * `output`; the display pass is left out until {@link ready} resolves.
+   * Draws `draws` (the terrain pass's) lit into the HDR target, then, with an atmosphere,
+   * `composite`'s draw over it into the sky's target, then the display pass into `output`; the
+   * display pass is left out until {@link ready} resolves.
+   *
+   * @throws Error if a view made with an atmosphere is given no composite, or one without is.
    */
   render(
     output: LitOutput,
     viewRotation: Float32Array,
     projection: Float32Array,
     draws: ReadonlyArray<DrawItem>,
+    composite: LitComposite | null = null,
   ): void {
+    if ((composite === null) !== (this.#sky === null)) {
+      throw new Error("a lit view draws a composite exactly when it was made with an atmosphere");
+    }
     this.#target.render({
       label: TERRAIN_PASS_LABEL,
       viewRotation,
@@ -178,6 +242,15 @@ export class LitView {
       draws,
       postProcesses: [],
     });
+    if (this.#sky !== null && composite !== null) {
+      this.#sky.render({
+        label: LIT_VIEW_ATMOSPHERE_LABEL,
+        viewRotation,
+        projection,
+        draws: [composite(this.#scene)],
+        postProcesses: [],
+      });
+    }
     output.render({
       label: LIT_VIEW_DISPLAY_LABEL,
       viewRotation,
@@ -192,8 +265,9 @@ export class LitView {
     return this.#target;
   }
 
-  /** Disposes the target. */
+  /** Disposes the targets. */
   dispose(): void {
     this.#target.dispose();
+    this.#sky?.dispose();
   }
 }

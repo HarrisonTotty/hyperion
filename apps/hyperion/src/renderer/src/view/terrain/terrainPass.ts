@@ -23,7 +23,11 @@ import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type { DrawItem, MaterialHandle, RenderEngine, ViewSize } from "../engine/types";
 import type { BufferHandle } from "../engine/types";
-import { type QualitySetting, TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import {
+  type QualitySetting,
+  TERRAIN_SETTINGS,
+  type TerrainSettings,
+} from "../quality/qualitySetting";
 import type { Vec3 } from "../../geometry/vec3";
 import {
   type TerrainAnnunciation,
@@ -31,11 +35,12 @@ import {
   type TerrainConditions,
   terrainConditions,
 } from "./annunciation";
+import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { terrainMaterialSpec } from "./gpu/material";
 import { type TerrainLayout, TerrainResources } from "./gpu/resources";
 import { ContactRecords, InstanceRecords } from "./gpu/uniforms";
-import { MAX_LEVEL, patchKeyString } from "./patchKey";
+import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
 import type { PlanetGeometry } from "./planet";
 import { finestPatchSizeM, type GroundContact, heldRadiusM, morphRampM } from "./grounded";
 import {
@@ -129,7 +134,28 @@ export interface TerrainPassOptions {
   readonly planet: PlanetGeometry;
   readonly ridges: TestPlanetRidges;
   readonly createPool: TerrainPoolFactory;
+  /**
+   * The terrain's settings, for the spike's variants (T13.c); defaults to
+   * `TERRAIN_SETTINGS[setting]`. `setting` still decides the low setting's `DETAIL LIMITED`.
+   */
+  readonly terrain?: TerrainSettings;
+  /**
+   * Whether each selection is recorded as a `terrain.select` `performance.measure` span, for the
+   * descent spike's trace (decision-r05-patch-demand.md, 4d). Off by default: each span is an
+   * entry the browser keeps, so only the spike's measurement runs pay for it.
+   */
+  readonly measureSelection?: boolean;
+  /** Called with each patch the cache stores and the GPU holds, for the spike's tallies. */
+  readonly onResident?: (key: PatchKey) => void;
+  /**
+   * Called with each selection's input and result, right after `selectPatches` and outside the
+   * `terrain.select` span, for the spike's second, calibrated pass (T13.c). Unset, it costs nothing.
+   */
+  readonly onSelect?: (input: SelectionInput, selection: Selection) => void;
 }
+
+/** The `performance.measure` name of one selection, when the pass measures it. */
+export const SELECT_MEASURE = "terrain.select";
 
 /** The state made per device: resources, cache and pool. */
 interface Device {
@@ -160,8 +186,8 @@ interface Selected {
   readonly grounded: ReadonlyArray<GroundContact>;
   readonly rangesVersion: number;
   /**
-   * The distance to the nearest selected patch not at the finest level, metres, at least one
-   * finest patch: the bounding spheres of patches with wide height ranges contain the camera.
+   * The distance to the box of the nearest selected patch not at the finest level, metres, at
+   * least one finest patch: a box with a wide height range can contain the camera.
    */
   readonly nearestM: number;
 }
@@ -217,9 +243,14 @@ export function morphRangeM(
 export class TerrainPass {
   readonly #engine: RenderEngine;
   readonly #setting: QualitySetting;
+  /** The terrain's settings, resolved once: the setting's own, or the spike's variant. */
+  readonly #terrain: TerrainSettings;
   readonly #planet: PlanetGeometry;
   readonly #ridges: TestPlanetRidges;
   readonly #createPool: TerrainPoolFactory;
+  readonly #measureSelection: boolean;
+  readonly #onResident: ((key: PatchKey) => void) | null;
+  readonly #onSelect: ((input: SelectionInput, selection: Selection) => void) | null;
   readonly #contacts = new ContactRecords();
   readonly #debounce = new TerrainAnnunciationDebounce();
   readonly #offRestored: () => void;
@@ -240,9 +271,13 @@ export class TerrainPass {
   constructor(options: TerrainPassOptions) {
     this.#engine = options.engine;
     this.#setting = options.setting;
+    this.#terrain = options.terrain ?? TERRAIN_SETTINGS[options.setting];
     this.#planet = options.planet;
     this.#ridges = options.ridges;
     this.#createPool = options.createPool;
+    this.#measureSelection = options.measureSelection ?? false;
+    this.#onResident = options.onResident ?? null;
+    this.#onSelect = options.onSelect ?? null;
     this.#device = this.#makeDevice();
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
@@ -313,13 +348,12 @@ export class TerrainPass {
 
   #makeDevice(resources?: TerrainResources): Device {
     const made =
-      resources ??
-      new TerrainResources(this.#engine, TERRAIN_SETTINGS[this.#setting], this.#planet.figure);
+      resources ?? new TerrainResources(this.#engine, this.#terrain, this.#planet.figure);
     const { layout } = made;
     const cache = new PatchCache(layout.slots);
     const pool = this.#createPool({
       vertexPath: layout.vertexPath,
-      normals: TERRAIN_SETTINGS[this.#setting].normals,
+      normals: this.#terrain.normals,
       ridges: this.#ridges,
     });
     const device: Device = {
@@ -366,6 +400,7 @@ export class TerrainPass {
     }
     this.#rangesVersion += 1;
     this.#demandDirty = true;
+    this.#onResident?.(bake.key);
   }
 
   /** The primary view as selection takes it: body-fixed, at τ ÷ (1 + m). */
@@ -379,7 +414,7 @@ export class TerrainPass {
       fovXRad: view.fovXRad,
       viewport: view.viewport,
       weight: 1,
-      tauPx: TERRAIN_SETTINGS[this.#setting].tauPx / (1 + RESELECT_FRACTION),
+      tauPx: this.#terrain.tauPx / (1 + RESELECT_FRACTION),
     };
   }
 
@@ -420,18 +455,25 @@ export class TerrainPass {
       heightRanges: this.#device.cache,
       skirtMarginM: WORKER_SKIRT_MARGIN_M,
     };
+    const startMs = this.#measureSelection ? performance.now() : 0;
     const selection = selectPatches(selectionInput);
+    if (this.#measureSelection) {
+      performance.measure(SELECT_MEASURE, { start: startMs, end: performance.now() });
+    }
+    this.#onSelect?.(selectionInput, selection);
     const patchM = finestPatchSizeM(this.#planet);
     let nearestM = Number.POSITIVE_INFINITY;
     for (const patch of selection.patches.values()) {
       if (patch.key.level < this.#planet.finestLevel) {
+        // The box, as selection measures a patch's distance: a coarse patch's bounding sphere
+        // often holds the camera, which would clamp the rule to one finest patch (lane B).
         nearestM = Math.min(
           nearestM,
-          distance(view.camera.positionM, patch.bounds.centre) - patch.bounds.radiusM,
+          distanceToBoxM(relativeBounds(patch.bounds, view.camera.positionM)),
         );
       }
     }
-    const morphView = { ...view, tauPx: TERRAIN_SETTINGS[this.#setting].tauPx };
+    const morphView = { ...view, tauPx: this.#terrain.tauPx };
     for (let level = 0; level <= MAX_LEVEL; level += 1) {
       const [start, end] = morphRangeM(this.#planet, level, morphView);
       this.#morph[2 * level] = start;

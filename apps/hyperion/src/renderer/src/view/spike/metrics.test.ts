@@ -92,6 +92,22 @@ describe("the spike's metrics", () => {
     ]);
   });
 
+  it("gives a frame every engine frame after the last one's, summing a label timed twice", () => {
+    const metrics = new SpikeMetrics({ ...OPTIONS, firstEngineFrame: 2 });
+    // The first frame resolved engine frames 3 to 5, the second 6 and 7.
+    metrics.frame(sample(5, 0));
+    metrics.frame(sample(7, 0.5));
+    metrics.passTimes(times(2, [["terrain", 9_000_000]]));
+    metrics.passTimes(times(3, [["terrain", 1_000_000]]));
+    metrics.passTimes(times(4, [["view:wireframe", 250_000]]));
+    metrics.passTimes(times(5, [["view:wireframe", 500_000]]));
+    metrics.passTimes(times(7, [["terrain", 2_000_000]]));
+    expect(metrics.report(EXTRA).frames.passes).toEqual([
+      { label: "terrain", row: "terrain", gpuMs: [1, 2] },
+      { label: "view:wireframe", row: "other", gpuMs: [0.75, null] },
+    ]);
+  });
+
   it("leaves a pass's later frames null until their times arrive", () => {
     const metrics = new SpikeMetrics(OPTIONS);
     metrics.frame(sample(1, 0));

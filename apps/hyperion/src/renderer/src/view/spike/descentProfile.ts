@@ -41,24 +41,78 @@ export interface DescentSegment {
   readonly verticalShape: VerticalShape;
   /**
    * Whether the segment is flown at its altitude above the highest terrain under the track
-   * (`DescentTerrain.trackMaxHeightM`) rather than above the site: the low fast pass.
+   * (`DescentTerrain.trackMaxHeightM`) rather than above the site: the low fast pass, the 300 m
+   * piece of the clearance ruling.
    */
   readonly clearsTrack: boolean;
+  /**
+   * How the segment's ground is cut into stretches and bounded (decision-r05-descent-clearance.md,
+   * rule 1), or `null` where the camera is over the site itself, whose height is exact (the
+   * vertical descent and the hover).
+   */
+  readonly stretches: SegmentStretches | null;
+}
+
+/** A segment's stretch rule (decision-r05-descent-clearance.md's table). */
+export interface SegmentStretches {
+  /** The pieces' length, s, a whole number; the last piece ends with the segment. */
+  readonly pieceS: number;
+  /** The bound level and the clearance C, metres. */
+  readonly level: number;
+  readonly clearanceM: number;
+  /**
+   * A coarser level for the pieces whose table clearance at their end is at least `aboveM`
+   * (the flare above 2 km: level 12, whose 2.3 km edge exceeds C).
+   */
+  readonly high?: { readonly aboveM: number; readonly level: number };
+  /** The last piece's own name, level and clearance (the slowdown's final approach). */
+  readonly last?: { readonly piece: string; readonly level: number; readonly clearanceM: number };
 }
 
 /**
  * The terrain the script is flown over, measured once by the caller before the run, so that the
- * path stays a pure function of the seed and these two numbers (the orchestrator's ruling,
- * 2026-10-03).
+ * path stays a pure function of the seed, the site's height and the per-stretch floors (the
+ * orchestrator's ruling and decision-r05-descent-clearance.md, 2026-10-03).
  */
 export interface DescentTerrain {
   /** The terrain's height at the landing site, metres above the spheroid; 0 by default. */
   readonly siteHeightM?: number;
   /**
    * An upper bound on the terrain's height under the low fast pass's ground track, metres above
-   * the spheroid (baked ranges plus ε over the patches under the track); 0 by default.
+   * the spheroid (baked ranges plus ε over the patches under the track); 0 by default. Kept for
+   * older callers: without `stretchMaxHeightsM` it is the low pass's floor and every other
+   * stretch's is the site's height; with it, it is ignored (the low pass's entry there is the
+   * readout's).
    */
   readonly trackMaxHeightM?: number;
+  /**
+   * F_k, a true upper bound on the finest mesh's height over the ground of `trackStretches(…)[k]`,
+   * metres above the spheroid, in the same order and of the same length. Absent, every stretch's
+   * floor is the site's height and the profile is the one without it, bit for bit.
+   */
+  readonly stretchMaxHeightsM?: ReadonlyArray<number>;
+}
+
+/**
+ * One stretch of the ground track and the bound it is flown over (decision-r05-descent-clearance.md,
+ * rule 1): the same for every terrain, since the track and the horizontal profile do not depend on
+ * it.
+ */
+export interface TrackStretch {
+  /** Its name: the segment's, numbered where the segment is split ("slowdown 3"), or "final approach". */
+  readonly piece: string;
+  /** The segment it is a piece of. */
+  readonly segment: string;
+  /** The along-track distance before the site at its start and end, metres; from > to ≥ 0. */
+  readonly fromRemainingM: number;
+  readonly toRemainingM: number;
+  /** Its script times, s, on whole seconds (so on the 64 Hz grid). */
+  readonly startS: number;
+  readonly endS: number;
+  /** The level whose patches its floor is taken over (ε_n plus the baked maximum). */
+  readonly level: number;
+  /** C, the clearance it is flown at above its floor at least, metres. */
+  readonly clearanceM: number;
 }
 
 /** How a segment's vertical speed runs (Design note 19's table). */
@@ -79,6 +133,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     endSpeedMps: 7670,
     verticalShape: "constant",
     clearsTrack: false,
+    stretches: { pieceS: 100, level: 4, clearanceM: 1000 },
   },
   {
     name: "descent arc",
@@ -89,6 +144,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     endSpeedMps: 1000,
     verticalShape: "constant",
     clearsTrack: false,
+    stretches: { pieceS: 100, level: 4, clearanceM: 1000 },
   },
   {
     name: "approach and flare",
@@ -99,6 +155,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     endSpeedMps: 300,
     verticalShape: "falling",
     clearsTrack: false,
+    stretches: { pieceS: 10, level: 14, clearanceM: 200, high: { aboveM: 2000, level: 12 } },
   },
   {
     name: "low fast pass",
@@ -109,6 +166,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     endSpeedMps: 300,
     verticalShape: "constant",
     clearsTrack: true,
+    stretches: { pieceS: 30, level: 14, clearanceM: 300 },
   },
   {
     name: "slowdown",
@@ -119,6 +177,12 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     endSpeedMps: 0,
     verticalShape: "constant",
     clearsTrack: false,
+    stretches: {
+      pieceS: 10,
+      level: 14,
+      clearanceM: 200,
+      last: { piece: "final approach", level: 16, clearanceM: 100 },
+    },
   },
   {
     name: "vertical descent",
@@ -129,6 +193,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     endSpeedMps: 0,
     verticalShape: "constant",
     clearsTrack: false,
+    stretches: null,
   },
   {
     name: "hover and touchdown",
@@ -139,6 +204,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     endSpeedMps: 0,
     verticalShape: "hover",
     clearsTrack: false,
+    stretches: null,
   },
 ];
 
@@ -202,28 +268,18 @@ class LinearProfile {
   }
 }
 
-/**
- * The segments with the track-clearing segment's altitudes, and its neighbours' ends that meet
- * them, raised by `liftM`: the low pass flies its altitude above the highest terrain under its
- * track, which lies `liftM` above the site's.
- */
-function liftOverTrack(
-  segments: ReadonlyArray<DescentSegment>,
-  liftM: number,
-): ReadonlyArray<DescentSegment> {
-  if (liftM === 0) {
-    return segments;
-  }
-  return segments.map((segment, i) => {
-    const raiseStart = segment.clearsTrack || (segments[i - 1]?.clearsTrack ?? false);
-    const raiseEnd = segment.clearsTrack || (segments[i + 1]?.clearsTrack ?? false);
-    return {
-      ...segment,
-      startAltitudeM: segment.startAltitudeM + (raiseStart ? liftM : 0),
-      endAltitudeM: segment.endAltitudeM + (raiseEnd ? liftM : 0),
-    };
-  });
-}
+/** What the vertical solve reads of a segment or of a split segment's piece. */
+type VerticalPiece = Pick<
+  DescentSegment,
+  "durationS" | "startAltitudeM" | "endAltitudeM" | "verticalShape"
+> & {
+  /**
+   * Whether this `constant` piece blends in from the previous piece's rate over its own first blend
+   * length, the previous one holding its rate to its end; otherwise the previous blends into it
+   * over its last.
+   */
+  readonly leadIn?: boolean;
+};
 
 /** The blend's length at the end of a segment of `durationS` (Design note 19). */
 export function blendS(durationS: number): number {
@@ -231,7 +287,7 @@ export function blendS(durationS: number): number {
 }
 
 /** The segments' start times, s, and the script's end. */
-function segmentStarts(segments: ReadonlyArray<DescentSegment>): number[] {
+function segmentStarts(segments: ReadonlyArray<{ readonly durationS: number }>): number[] {
   const starts = [0];
   for (const segment of segments) {
     starts.push((starts.at(-1) ?? 0) + segment.durationS);
@@ -253,7 +309,7 @@ function segmentStarts(segments: ReadonlyArray<DescentSegment>): number[] {
  * by about 18 m/s, the low fast pass by about 0.07 m/s) so that the blend's drop leaves its end
  * altitude exact.
  */
-function verticalKnots(segments: ReadonlyArray<DescentSegment>): Knot[] {
+function verticalKnots(segments: ReadonlyArray<VerticalPiece>): Knot[] {
   const starts = segmentStarts(segments);
   const n = segments.length;
   /** Each segment's starting rate, solved back to front. */
@@ -290,7 +346,70 @@ function verticalKnots(segments: ReadonlyArray<DescentSegment>): Knot[] {
       ];
       continue;
     }
-    const b = next === 0 && drop === 0 ? 0 : blendS(segment.durationS);
+    if (segments[i + 1]?.leadIn === true) {
+      // The next piece blends from this one's rate, so this one holds its own to its end.
+      if (segment.leadIn !== true) {
+        const c = drop / segment.durationS;
+        startRate[i] = c;
+        knotsBack[i] = [
+          { tS: t0, rate: c },
+          { tS: t1, rate: c },
+        ];
+        continue;
+      }
+    }
+    const b =
+      segments[i + 1]?.leadIn === true || (next === 0 && drop === 0)
+        ? 0
+        : blendS(segment.durationS);
+    if (segment.leadIn === true) {
+      // A run of pieces each blending in from the one before: solved forward from its first,
+      // which holds its rate, the last blending into the next piece's start as any other.
+      let r = i;
+      while (segments[r]?.leadIn === true) {
+        r -= 1;
+      }
+      const first = segments[r];
+      if (first === undefined || first.verticalShape !== "constant") {
+        throw new Error("a lead-in follows a constant piece");
+      }
+      let rate = (first.endAltitudeM - first.startAltitudeM) / first.durationS;
+      startRate[r] = rate;
+      knotsBack[r] = [
+        { tS: starts[r] ?? 0, rate },
+        { tS: (starts[r] ?? 0) + first.durationS, rate },
+      ];
+      for (let m = r + 1; m <= i; m += 1) {
+        const piece = segments[m];
+        const s0 = starts[m] ?? 0;
+        if (piece === undefined) {
+          throw new Error(`segment ${m} is missing`);
+        }
+        const s1 = s0 + piece.durationS;
+        const lead = blendS(piece.durationS);
+        const end = m === i ? b : 0;
+        const endRate = m === i ? next : 0;
+        const pieceDrop = piece.endAltitudeM - piece.startAltitudeM;
+        // The drop is c T + (previous − c) L ÷ 2 + (end rate − c) b ÷ 2.
+        const c =
+          (pieceDrop - (rate * lead) / 2 - (endRate * end) / 2) /
+          (piece.durationS - lead / 2 - end / 2);
+        startRate[m] = rate;
+        knotsBack[m] = [
+          { tS: s0, rate },
+          { tS: s0 + lead, rate: c },
+          ...(end === 0
+            ? [{ tS: s1, rate: c }]
+            : [
+                { tS: s1 - end, rate: c },
+                { tS: s1, rate: next },
+              ]),
+        ];
+        rate = c;
+      }
+      i = r;
+      continue;
+    }
     const c = (drop - (next * b) / 2) / (segment.durationS - b / 2);
     startRate[i] = c;
     knotsBack[i] =
@@ -320,9 +439,358 @@ function horizontalKnots(segments: ReadonlyArray<DescentSegment>): Knot[] {
   });
 }
 
+/**
+ * The stretch plan (decision-r05-descent-clearance.md, rule 1): each segment's pieces with their
+ * bound levels and clearances, from the table's own (unlifted) altitudes `datum`, so the same for
+ * every terrain.
+ */
+function planStretches(
+  segments: ReadonlyArray<DescentSegment>,
+  datum: LinearProfile,
+  horizontal: LinearProfile,
+  trackM: number,
+): TrackStretch[] {
+  const starts = segmentStarts(segments);
+  const out: TrackStretch[] = [];
+  for (const [i, segment] of segments.entries()) {
+    const rule = segment.stretches;
+    const t0 = starts[i] ?? 0;
+    if (rule === null) {
+      continue;
+    }
+    const count = Math.ceil(segment.durationS / rule.pieceS);
+    for (let k = 0; k < count; k += 1) {
+      const startS = t0 + k * rule.pieceS;
+      const endS = Math.min(t0 + (k + 1) * rule.pieceS, t0 + segment.durationS);
+      const isLast = k === count - 1;
+      const coarse =
+        rule.high !== undefined && datum.value(endS) >= rule.high.aboveM ? rule.high.level : null;
+      const last = isLast ? rule.last : undefined;
+      out.push({
+        piece: last?.piece ?? (count === 1 ? segment.name : `${segment.name} ${k + 1}`),
+        segment: segment.name,
+        fromRemainingM: trackM - horizontal.value(startS),
+        toRemainingM: trackM - horizontal.value(endS),
+        startS,
+        endS,
+        level: last?.level ?? coarse ?? rule.level,
+        clearanceM: last?.clearanceM ?? rule.clearanceM,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Thrown when the 64 Hz check still finds a piece below its clearance after the fourth lift
+ * (decision-r05-descent-clearance.md, rule 4): the seed's terrain cannot be cleared, which the spike
+ * refuses to fly (lane C's `DescentRefused`), unlike floors that do not match the plan.
+ */
+export class DescentUnclearable extends RangeError {
+  override readonly name = "DescentUnclearable";
+}
+
+/** How many times the interior check may lift a piece's boundaries before giving up (rule 4). */
+const MAX_LIFT_ROUNDS = 4;
+
+/** What the interior check adds to a deficit when it lifts, metres (rule 4). */
+const LIFT_MARGIN_M = 0.1;
+
+/**
+ * The deficit the interior check lets pass, metres: the rounding of the profile's integrals, so
+ * that a boundary sitting exactly at its floor plus C (the low pass at the site's 300 m) is not
+ * lifted for 10⁻¹³ m.
+ */
+export const FLOOR_TOLERANCE_M = 1e-6;
+
+/** The sampling rate of the interior check, Hz: the fixed-step run's (rule 4). */
+const CHECK_RATE_HZ = 64;
+
+/** Where a boundary lies inside a segment's pieces: its segment's end boundaries and its time fraction. */
+interface InteriorBoundary {
+  readonly first: number;
+  readonly end: number;
+  readonly fraction: number;
+}
+
+/** Each piece boundary inside a segment (between two of its pieces), or `null` at a segment's end. */
+function interiorBoundaries(
+  stretches: ReadonlyArray<TrackStretch>,
+): ReadonlyArray<InteriorBoundary | null> {
+  return Array.from({ length: stretches.length + 1 }, (_, b) => {
+    const left = stretches[b - 1];
+    const right = stretches[b];
+    if (left === undefined || right === undefined || left.segment !== right.segment) {
+      return null;
+    }
+    let first = b - 1;
+    while (stretches[first - 1]?.segment === right.segment) {
+      first -= 1;
+    }
+    let end = b;
+    while (stretches[end]?.segment === right.segment) {
+      end += 1;
+    }
+    const t0 = stretches[first]?.startS ?? 0;
+    const t1 = stretches[end - 1]?.endS ?? 0;
+    return { first, end, fraction: (right.startS - t0) / (t1 - t0) };
+  });
+}
+
+/**
+ * Raises each interior boundary to at least the lower of the highest boundary before it and the
+ * highest after it within its segment, its flown ends included, so that a split segment has no
+ * interior valley (the clearance ruling's follow-up, rule 2). It only ever raises.
+ */
+function fillValleys(boundary: number[], interior: ReadonlyArray<InteriorBoundary | null>): void {
+  for (const [b, at] of interior.entries()) {
+    if (at === null) {
+      continue;
+    }
+    let before = -Infinity;
+    for (let j = at.first; j <= b; j += 1) {
+      before = Math.max(before, boundary[j] ?? -Infinity);
+    }
+    let after = -Infinity;
+    for (let j = b; j <= at.end; j += 1) {
+      after = Math.max(after, boundary[j] ?? -Infinity);
+    }
+    boundary[b] = Math.max(boundary[b] ?? -Infinity, Math.min(before, after));
+  }
+}
+
+/** The vertical solve's result: the table's segments as flown, the pieces solved and the margins. */
+interface FlownProfile {
+  readonly segments: ReadonlyArray<DescentSegment>;
+  readonly vertical: LinearProfile;
+  readonly minFloorMarginM: number;
+}
+
+/**
+ * Flies the table over the floors (decision-r05-descent-clearance.md, rules 3 and 4), in metres
+ * above the site: each piece boundary b at A_b = max(table_b, f_L + C_L, f_R + C_R), the low pass
+ * level at the larger of its two, the vertical descent from the last boundary, stretched to keep
+ * its speed; a segment none of whose interior boundaries rose is flown whole, as the table has it,
+ * and a split one as `constant` pieces. Then the 64 Hz check lifts any piece below its clearance
+ * by the deficit and 0.1 m, at most four times.
+ *
+ * @throws RangeError if a piece is still below its clearance after the fourth lift.
+ */
+function flyOverFloors(
+  segments: ReadonlyArray<DescentSegment>,
+  stretches: ReadonlyArray<TrackStretch>,
+  floorsM: ReadonlyArray<number>,
+  datum: LinearProfile,
+): FlownProfile {
+  const starts = segmentStarts(segments);
+  const count = stretches.length;
+  // The table's clearance at each boundary: a segment's own altitude where the boundary is a
+  // segment's start or the stretches' end, so that an unlifted profile is the table's bit for bit.
+  const table = Array.from({ length: count + 1 }, (_, b) => {
+    const tS = b < count ? (stretches[b]?.startS ?? 0) : (stretches[count - 1]?.endS ?? 0);
+    const segment = segments[starts.indexOf(tS)];
+    return segment === undefined ? datum.value(tS) : segment.startAltitudeM;
+  });
+  const lowPass = stretches.findIndex(
+    (stretch) => segments.find((s) => s.name === stretch.segment)?.clearsTrack === true,
+  );
+  const interior = interiorBoundaries(stretches);
+  const raise: number[] = Array.from({ length: count + 1 }, () => 0);
+  for (let round = 0; ; round += 1) {
+    const lifted = (b: number, shapeM: number): number => {
+      const left = stretches[b - 1];
+      const right = stretches[b];
+      return (
+        Math.max(
+          shapeM,
+          left === undefined ? -Infinity : (floorsM[b - 1] ?? 0) + left.clearanceM,
+          right === undefined ? -Infinity : (floorsM[b] ?? 0) + right.clearanceM,
+        ) + (raise[b] ?? 0)
+      );
+    };
+    // The segments' ends first: rule 3 against the table, the low pass held level.
+    const boundary = table.map((tableM, b) => (interior[b] === null ? lifted(b, tableM) : NaN));
+    if (lowPass >= 0) {
+      const level = Math.max(boundary[lowPass] ?? 0, boundary[lowPass + 1] ?? 0);
+      boundary[lowPass] = level;
+      boundary[lowPass + 1] = level;
+    }
+    // Then each split segment's interior, against the table's shape re-anchored to the flown ends
+    // and with its valleys filled (the clearance ruling's follow-up).
+    const shape = table.map((tableM, b) => {
+      const at = interior[b];
+      if (at === null || at === undefined) {
+        return tableM;
+      }
+      const startLiftM = (boundary[at.first] ?? 0) - (table[at.first] ?? 0);
+      const endLiftM = (boundary[at.end] ?? 0) - (table[at.end] ?? 0);
+      return tableM + (1 - at.fraction) * startLiftM + at.fraction * endLiftM;
+    });
+    for (const [b, at] of interior.entries()) {
+      if (at !== null) {
+        boundary[b] = lifted(b, shape[b] ?? 0);
+      }
+    }
+    fillValleys(boundary, interior);
+    const flown = flySegments(segments, stretches, shape, boundary);
+    const vertical = new LinearProfile(
+      flown.pieces[0]?.startAltitudeM ?? 0,
+      verticalKnots(flown.pieces),
+    );
+    const margins = stretches.map((stretch, k) => {
+      let least = Infinity;
+      const samples = Math.round((stretch.endS - stretch.startS) * CHECK_RATE_HZ);
+      for (let n = 0; n <= samples; n += 1) {
+        const tS = stretch.startS + n / CHECK_RATE_HZ;
+        least = Math.min(least, vertical.value(tS) - (floorsM[k] ?? 0) - stretch.clearanceM);
+      }
+      return least;
+    });
+    const minFloorMarginM = Math.min(...margins);
+    if (minFloorMarginM >= -FLOOR_TOLERANCE_M) {
+      return { segments: flown.segments, vertical, minFloorMarginM };
+    }
+    if (round >= MAX_LIFT_ROUNDS) {
+      const worst = stretches[margins.indexOf(minFloorMarginM)]?.piece ?? "?";
+      throw new DescentUnclearable(
+        `the descent cannot clear its floors: ${worst} is ${(-minFloorMarginM).toFixed(2)} m short after ${MAX_LIFT_ROUNDS} lifts`,
+      );
+    }
+    for (const [k, margin] of margins.entries()) {
+      if (margin < -FLOOR_TOLERANCE_M) {
+        raise[k] = (raise[k] ?? 0) - margin + LIFT_MARGIN_M;
+        raise[k + 1] = (raise[k + 1] ?? 0) - margin + LIFT_MARGIN_M;
+      }
+    }
+  }
+}
+
+/**
+ * The table's segments and the vertical solve's pieces for the boundary altitudes `boundary` (above
+ * the site), `table` being what they would be with no floor binding (the table's own at a
+ * segment's ends, its shape re-anchored to the flown ends inside one): a segment is split only
+ * where an interior boundary differs from it.
+ */
+function flySegments(
+  segments: ReadonlyArray<DescentSegment>,
+  stretches: ReadonlyArray<TrackStretch>,
+  table: ReadonlyArray<number>,
+  boundary: ReadonlyArray<number>,
+): { readonly segments: DescentSegment[]; readonly pieces: VerticalPiece[] } {
+  const flown: DescentSegment[] = [];
+  const pieces: VerticalPiece[] = [];
+  /** Whether each piece is a split segment's, and whether it is a lifted low pass (see the end). */
+  const splitAt: boolean[] = [];
+  const liftedLowPass: boolean[] = [];
+  let previousEnd: number | null = null;
+  for (const segment of segments) {
+    const first = stretches.findIndex((s) => s.segment === segment.name);
+    if (first < 0) {
+      // Over the site: the vertical descent starts from the stretches' last boundary, and is
+      // stretched in time to keep its rate when that rose; the hover is the table's.
+      let out = segment;
+      if (previousEnd !== null && previousEnd !== segment.startAltitudeM) {
+        const scaleS =
+          (previousEnd - segment.endAltitudeM) / (segment.startAltitudeM - segment.endAltitudeM);
+        out = { ...segment, startAltitudeM: previousEnd, durationS: segment.durationS * scaleS };
+      }
+      previousEnd = null;
+      flown.push(out);
+      pieces.push(out);
+      splitAt.push(false);
+      liftedLowPass.push(false);
+      continue;
+    }
+    let last = first;
+    while (stretches[last + 1]?.segment === segment.name) {
+      last += 1;
+    }
+    const startM = boundary[first] ?? segment.startAltitudeM;
+    const endM = boundary[last + 1] ?? segment.endAltitudeM;
+    const out = { ...segment, startAltitudeM: startM, endAltitudeM: endM };
+    flown.push(out);
+    let split = false;
+    for (let b = first + 1; b <= last; b += 1) {
+      split ||= (boundary[b] ?? 0) !== (table[b] ?? 0);
+    }
+    if (split) {
+      for (let k = first; k <= last; k += 1) {
+        const stretch = stretches[k];
+        pieces.push({
+          durationS: (stretch?.endS ?? 0) - (stretch?.startS ?? 0),
+          startAltitudeM: boundary[k] ?? 0,
+          endAltitudeM: boundary[k + 1] ?? 0,
+          verticalShape: "constant",
+        });
+        splitAt.push(true);
+        liftedLowPass.push(false);
+      }
+    } else {
+      pieces.push(out);
+      splitAt.push(false);
+      // A lifted low pass holds level (rule 3: "level at A_lp"); the table's own, unlifted,
+      // keeps its gentle climb into the slowdown's blend, bit for bit.
+      liftedLowPass.push(segment.clearsTrack && (boundary[first] ?? 0) !== (table[first] ?? 0));
+    }
+    previousEnd = endM;
+  }
+  // Where a split piece (or the piece after a lifted low pass) is faster than the one before, it
+  // blends in from that one's rate instead of the slower one blending into it. Either way the
+  // blend bows the piece hosting it by about the other's rate × b ÷ 2, so hosting it in the faster
+  // piece keeps the bow to the slower rate's: otherwise a level piece before a fall bulges (95 m
+  // before the flare's last piece under a 2 km ridge) and a gentle one before a climb dips (30 m),
+  // which the follow-up's no-valley rule forbids. A lifted low pass is level, so it holds rate 0.
+  for (let k = 0; k + 1 < pieces.length; k += 1) {
+    const slow = pieces[k];
+    const fast = pieces[k + 1];
+    if (
+      slow !== undefined &&
+      fast !== undefined &&
+      slow.verticalShape === "constant" &&
+      fast.verticalShape === "constant" &&
+      ((splitAt[k + 1] ?? false) || (liftedLowPass[k] ?? false)) &&
+      Math.abs((fast.endAltitudeM - fast.startAltitudeM) / fast.durationS) >
+        Math.abs((slow.endAltitudeM - slow.startAltitudeM) / slow.durationS)
+    ) {
+      pieces[k + 1] = { ...fast, leadIn: true };
+    }
+  }
+  return { segments: flown, pieces };
+}
+
+/**
+ * Each stretch's floor less the site's height, metres: `stretchMaxHeightsM`'s, or for older callers
+ * `trackMaxHeightM` (0 by default) under the low pass alone and the site's height elsewhere.
+ */
+function floorsOf(
+  terrain: DescentTerrain,
+  stretches: ReadonlyArray<TrackStretch>,
+  segments: ReadonlyArray<DescentSegment>,
+): number[] {
+  const siteM = terrain.siteHeightM ?? 0;
+  const given = terrain.stretchMaxHeightsM;
+  if (given !== undefined) {
+    if (given.length !== stretches.length || !given.every(Number.isFinite)) {
+      throw new RangeError(
+        `a descent needs ${stretches.length} finite stretch floors, got ${given.length}`,
+      );
+    }
+    return given.map((floorM) => floorM - siteM);
+  }
+  // Today's default: the track's maximum at the datum, 0 m.
+  const track = terrain.trackMaxHeightM ?? 0;
+  return stretches.map((stretch) =>
+    segments.find((s) => s.name === stretch.segment)?.clearsTrack === true ? track - siteM : 0,
+  );
+}
+
 /** A landing site and the azimuth the descent approaches it along. */
 export interface LandingSite {
-  /** The latitude and longitude of the site's direction from the centre, rad. */
+  /**
+   * The site's parametric (reduced) latitude β and its longitude, rad: the site is the spheroid's
+   * point M·d over the unit direction d of latitude β, so its geodetic latitude is a little
+   * larger, 60.083° at β = 60°.
+   */
   readonly latitudeRad: number;
   readonly longitudeRad: number;
   /** The approach's azimuth at the site, clockwise from north, rad. */
@@ -347,6 +815,17 @@ export interface DescentPose {
    * note 19's table and the demand prediction read.
    */
   readonly clearanceM: number;
+  /**
+   * The floor under the camera, metres above the spheroid: the F_k of the stretch under way, or
+   * the site's height over the site (the vertical descent and the hover) and where no floor was
+   * given (decision-r05-descent-clearance.md).
+   */
+  readonly floorM: number;
+  /**
+   * The camera's height above that floor, metres: the honest h the demand prediction reads, equal
+   * to `clearanceM` on flat ground.
+   */
+  readonly heightAboveFloorM: number;
   /** Horizontal speed along the track and vertical speed, m/s. */
   readonly horizontalSpeedMps: number;
   readonly verticalSpeedMps: number;
@@ -355,9 +834,38 @@ export interface DescentPose {
    * placed (the site itself at touchdown).
    */
   readonly groundPointM: Vec3;
+  /**
+   * The unit direction d of the track's point beneath the camera, the one the camera and
+   * `groundPointM` stand over along the spheroid's normal (M·d + h·ν, R05 Design note 5). This is
+   * the direction a height query (`surfaceHeightM`) or a patch key (`xyzToFaceUv`) takes, not the
+   * geocentric direction of either point.
+   */
+  readonly groundDir: Vec3;
 }
 
-/** SplitMix64's step (Steele, Lea and Flood 2014): the next state and a 64-bit output. */
+/**
+ * The unit direction d of a body-fixed point p on the spheroid, p = M·d: d = M⁻¹p ÷ |M⁻¹p|, with
+ * M = diag(a, a, c) (R05 Design note 5). This is the direction the bake, the collision interpolant
+ * and the patch keys take; p ÷ |p|, the geocentric direction, is off by about f sin 2β ÷ 2 (f ≈ 1 ÷ 298
+ * the flattening, β the latitude), up to 0.1° at 45° and 0.036° (4 km) at seed 7's site, which
+ * lands a height query on other ground.
+ *
+ * @remarks
+ * Exact for a point on the spheroid. A point h above it along the normal maps to a direction off
+ * by about |h| f sin 2β ÷ a (up to 6 m on the ground at h = 1.8 km): take the direction the point was
+ * built from (`DescentPose.groundDir`) where there is one.
+ */
+export function datumDirection(figure: BodyFigure, p: Vec3): Vec3 {
+  return normalise(
+    vec3(p.x / figure.equatorialRadiusM, p.y / figure.equatorialRadiusM, p.z / figure.polarRadiusM),
+  );
+}
+
+/**
+ * SplitMix64's step, as Vigna's `splitmix64.c` and JDK 8's `SplittableRandom` have it: the golden
+ * gamma increment 0x9e3779b97f4a7c15 (Steele, Lea and Flood 2014, OOPSLA, Fig. 16) and Stafford's
+ * Mix13 output mixer (the paper's `mix64variant13`): the next state and a 64-bit output.
+ */
 function splitMix64(state: bigint): readonly [bigint, bigint] {
   const mask = (1n << 64n) - 1n;
   const next = (state + 0x9e37_79b9_7f4a_7c15n) & mask;
@@ -372,11 +880,15 @@ function unitOf(draw: bigint): number {
   return Number(draw >> 11n) / 2 ** 53;
 }
 
-/** The latitudes a site is drawn between, rad: the band where the test planet's faces meet both poles' axes least. */
+/**
+ * The parametric latitudes a site is drawn between, rad: ±60°, a geodetic ±60.083°, so that the
+ * scene's equinoctial Sun stands at least 29.9° above the site's horizon (lane C's scene).
+ */
 const SITE_LATITUDE_LIMIT_RAD = (60 * Math.PI) / 180;
 
 /**
- * The landing site and approach azimuth of a seed, uniform over the surface between ±60° latitude
+ * The landing site and approach azimuth of a seed, uniform in direction between ±60° parametric
+ * latitude (within 0.7% of uniform over the spheroid's surface)
  * and uniform in azimuth.
  *
  * @remarks
@@ -428,9 +940,22 @@ export class DescentProfile {
   /** The landing site's terrain height, metres above the spheroid. */
   readonly #siteHeightM: number;
 
+  /** The stretch plan, the same for every terrain (`trackStretches`). */
+  readonly stretches: ReadonlyArray<TrackStretch>;
+  /** Each stretch's floor F_k less the site's height, metres. */
+  readonly #floorsM: ReadonlyArray<number>;
   /**
-   * @param terrain - The site's height and the low pass's track maximum; the script's altitudes
-   *   are above the site, and the low pass flies its altitude above the track maximum instead.
+   * The least, over the 64 Hz poses of every stretch, of the height above its floor less its
+   * clearance C, metres: never below −{@link FLOOR_TOLERANCE_M} (decision-r05-descent-clearance.md,
+   * rule 4).
+   */
+  readonly minFloorMarginM: number;
+
+  /**
+   * @param terrain - The site's height and the stretches' floors; the script's altitudes are
+   *   above the site, lifted where a stretch's floor less its clearance would be above them.
+   * @throws RangeError if `terrain.stretchMaxHeightsM` does not match the stretch plan, and
+   *   {@link DescentUnclearable} (a `RangeError`) if a floor cannot be cleared in four lifts.
    */
   constructor(
     figure: BodyFigure,
@@ -440,16 +965,24 @@ export class DescentProfile {
   ) {
     this.figure = figure;
     this.site = site;
-    this.#siteHeightM = terrain.siteHeightM ?? 0;
-    const lift = Math.max(0, (terrain.trackMaxHeightM ?? 0) - this.#siteHeightM);
-    const segments = liftOverTrack(baseSegments, lift);
-    this.segments = segments;
-    const starts = segmentStarts(segments);
+    const siteHeightM = terrain.siteHeightM ?? 0;
+    this.#siteHeightM = siteHeightM;
+    const datum = new LinearProfile(
+      baseSegments[0]?.startAltitudeM ?? 0,
+      verticalKnots(baseSegments),
+    );
+    this.#horizontal = new LinearProfile(0, horizontalKnots(baseSegments));
+    this.#trackM = this.#horizontal.value(segmentStarts(baseSegments).at(-1) ?? 0);
+    const stretches = planStretches(baseSegments, datum, this.#horizontal, this.#trackM);
+    this.stretches = stretches;
+    this.#floorsM = floorsOf(terrain, stretches, baseSegments);
+    const flown = flyOverFloors(baseSegments, stretches, this.#floorsM, datum);
+    this.segments = flown.segments;
+    this.#vertical = flown.vertical;
+    this.minFloorMarginM = flown.minFloorMarginM;
+    const starts = segmentStarts(this.segments);
     this.#starts = starts;
     this.durationS = starts.at(-1) ?? 0;
-    this.#vertical = new LinearProfile(segments[0]?.startAltitudeM ?? 0, verticalKnots(segments));
-    this.#horizontal = new LinearProfile(0, horizontalKnots(segments));
-    this.#trackM = this.#horizontal.value(this.durationS);
     const { latitudeRad: lat, longitudeRad: lon, azimuthRad: az } = site;
     this.#siteDir = vec3(
       Math.cos(lat) * Math.cos(lon),
@@ -464,6 +997,11 @@ export class DescentProfile {
     );
     this.#heading = add(scale(north, Math.cos(az)), scale(east, Math.sin(az)));
     this.#arcRadiusM = (figure.equatorialRadiusM + figure.polarRadiusM) / 2;
+  }
+
+  /** The landing site's unit direction d (the spheroid point M·d, Design note 5). */
+  get siteDir(): Vec3 {
+    return this.#siteDir;
   }
 
   /** The segment under way at `tS`, clamped to the script. */
@@ -504,6 +1042,27 @@ export class DescentProfile {
     };
   }
 
+  /** The floor less the site's height at `tS`, metres: the stretch's, 0 over the site. */
+  #floorAboveSiteM(tS: number): number {
+    const stretches = this.stretches;
+    for (let k = 0; k < stretches.length; k += 1) {
+      const stretch = stretches[k];
+      if (stretch !== undefined && tS >= stretch.startS && tS < stretch.endS) {
+        return this.#floorsM[k] ?? 0;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * The ground track's unit direction d at `tS` (`DescentPose.groundDir`, the cheap part of
+   * {@link poseAt}): the same for every terrain.
+   */
+  groundDirAt(tS: number): Vec3 {
+    const t = Math.min(Math.max(tS, 0), this.durationS);
+    return this.#trackAt(this.#trackM - this.#horizontal.value(t)).dir;
+  }
+
   /** The camera's position at `tS`, body-fixed metres (the cheap half of {@link poseAt}). */
   positionAt(tS: number): Vec3 {
     const remaining = this.#trackM - this.#horizontal.value(tS);
@@ -521,6 +1080,7 @@ export class DescentProfile {
     const t = Math.min(Math.max(tS, 0), this.durationS);
     const clearanceM = this.#vertical.value(t);
     const altitudeM = this.#siteHeightM + clearanceM;
+    const floorAboveSiteM = this.#floorAboveSiteM(t);
     const horizontalSpeedMps = this.#horizontal.rate(t);
     const verticalSpeedMps = this.#vertical.rate(t);
     const { dir, tangent } = this.#trackAt(this.#trackM - this.#horizontal.value(t));
@@ -556,9 +1116,23 @@ export class DescentProfile {
       orientation,
       altitudeM,
       clearanceM,
+      floorM: this.#siteHeightM + floorAboveSiteM,
+      heightAboveFloorM: clearanceM - floorAboveSiteM,
       horizontalSpeedMps,
       verticalSpeedMps,
       groundPointM: vec3(g[0], g[1], g[2]),
+      groundDir: dir,
     };
   }
+}
+
+/**
+ * The stretch plan of a profile (decision-r05-descent-clearance.md, rule 1): the pieces of the
+ * ground track from the orbit to the site, with their bound levels and clearances, which tile the
+ * along-track distance to 0 and depend on the seed only. The caller bounds the finest mesh over
+ * each (lane C's `SurfaceQuery.maxHeightsM`) and passes the floors back as
+ * `DescentTerrain.stretchMaxHeightsM`.
+ */
+export function trackStretches(profile: DescentProfile): ReadonlyArray<TrackStretch> {
+  return profile.stretches;
 }

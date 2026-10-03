@@ -25,8 +25,9 @@ export const POINT_BELOW_PX = 3;
 
 /**
  * The distance inside which R08 runs a gas giant's full atmosphere passes, m (Design note 1): ten
- * scale heights spanning 2 px, 2.5 × 10⁸ m for Jupiter and 5.5 × 10⁸ m for Saturn at 1080p across
- * 60°, rounded up to one boundary.
+ * scale heights spanning 2 px, 2.2 × 10⁸ m for Jupiter and 4.9 × 10⁸ m for Saturn at 1080p across
+ * 60° at R02's centre-pixel scale (2.5 and 5.5 × 10⁸ m at the brainstorm's width ÷ field), rounded
+ * up to one boundary.
  */
 export const GAS_GIANT_FULL_PASS_BOUNDARY_M = 1e9;
 

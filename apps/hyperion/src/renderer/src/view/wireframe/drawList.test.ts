@@ -279,6 +279,24 @@ describe("buildWireframeDrawList", () => {
     ]);
   });
 
+  it("draws the sky's sprites in place of the interim stars once given them (R06.T13.c)", () => {
+    const withStars = {
+      ...scene(),
+      stars: [aViewStar({ direction: normalise(vec3(0.01, 0, -1)), absoluteV: 0 })],
+    };
+    const sky = {
+      id: "7",
+      direction: normalise(vec3(0, 0.02, -1)),
+      illuminanceRgbLx: [2e-6, 3e-6, 4e-6] as const,
+    };
+    const sprites = build({ skyStars: [sky] }, withStars).sprites;
+    expect(sprites.map((sprite) => sprite.id)).toEqual(["7"]);
+    expect(sprites[0]?.illuminanceLx).toBeCloseTo(
+      0.2126 * 2e-6 + 0.7152 * 3e-6 + 0.0722 * 4e-6,
+      15,
+    );
+  });
+
   it("caps sprites at 2,000 by flux at the low setting", () => {
     const many = {
       ...scene(),

@@ -11,6 +11,7 @@ import {
   serverUrlOf,
   userArgs,
 } from "./cli";
+import { DEFAULT_SPIKE_SEED } from "../preload/spikeLaunch";
 
 const VERSION = "1.2.3";
 
@@ -143,6 +144,115 @@ describe("the client's command line", () => {
 
   it("reports a usage error as an exit code of 1", () => {
     expect(refusal(["--port=0"]).exitCode).toBe(1);
+  });
+});
+
+describe("the descent spike's options", () => {
+  beforeEach(() => {
+    for (const stream of [process.stdout, process.stderr]) {
+      vi.spyOn(stream, "write").mockImplementation(() => true);
+    }
+  });
+
+  it("gives no spike on an ordinary launch", () => {
+    expect(parse([]).spike).toBeUndefined();
+  });
+
+  it("takes the flag alone with its defaults", () => {
+    expect(parse(["--descent-spike"]).spike).toEqual({
+      setting: "high",
+      seed: DEFAULT_SPIKE_SEED,
+      smoke: false,
+      out: null,
+      workers: null,
+      vertexPath: null,
+      normals: null,
+      ridged: "off",
+      dawnSafety: "on",
+      capture: null,
+    });
+  });
+
+  it("takes every option", () => {
+    expect(
+      parse([
+        "--descent-spike",
+        "--setting",
+        "low",
+        "--seed",
+        "18446744073709551615",
+        "--smoke",
+        "--out",
+        "/data/out",
+        "--workers",
+        "3",
+        "--vertex-path",
+        "face-differences",
+        "--normals",
+        "mesh",
+        "--ridged",
+        "on",
+        "--dawn-safety",
+        "off",
+        "--capture",
+        "/data/capture",
+      ]).spike,
+    ).toEqual({
+      setting: "low",
+      seed: "18446744073709551615",
+      smoke: true,
+      out: "/data/out",
+      workers: 3,
+      vertexPath: "face-differences",
+      normals: "mesh",
+      ridged: "on",
+      dawnSafety: "off",
+      capture: "/data/capture",
+    });
+  });
+
+  it.each([
+    ["--setting", "medium"],
+    ["--seed", "18446744073709551616"],
+    ["--seed", "-1"],
+    ["--seed", "07"],
+    ["--workers", "0"],
+    ["--workers", "65"],
+    ["--vertex-path", "offsets"],
+    ["--normals", "triple"],
+    ["--ridged", "yes"],
+    ["--dawn-safety", "maybe"],
+  ])("refuses %s %s", (name, value) => {
+    expect(refusal(["--descent-spike", name, value]).exitCode).toBe(1);
+  });
+
+  it("refuses baked offsets on the low setting, whose cache they do not fit", () => {
+    const error = refusal([
+      "--descent-spike",
+      "--setting",
+      "low",
+      "--vertex-path",
+      "baked-offsets",
+    ]);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("low setting");
+  });
+
+  it.each([
+    ["--setting", "low"],
+    ["--seed", "7"],
+    ["--smoke"],
+    ["--out", "/data/out"],
+    ["--workers", "2"],
+    ["--vertex-path", "baked-offsets"],
+    ["--normals", "mesh"],
+    ["--ridged", "on"],
+    ["--dawn-safety", "off"],
+    ["--capture", "/data/capture"],
+  ])("refuses %s without --descent-spike", (...option) => {
+    const error = refusal(option);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("--descent-spike");
   });
 });
 

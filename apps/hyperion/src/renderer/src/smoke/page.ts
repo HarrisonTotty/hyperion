@@ -32,7 +32,11 @@ import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
+import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
+import { checkPhotoreal } from "./photoreal";
+import { checkBodies, checkPhotorealFrame, checkSpriteDepth } from "./bodies";
 import { runSoak } from "./soak";
+import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
@@ -178,6 +182,12 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   );
   await checks.group("R07.T15 tone mapping and output", () => checkTonemap(engine, checks));
   await checks.group("R07.T4.c the lit-body BRDF", () => checkLitBody(engine, checks));
+  await checks.group("R07.T7 the photorealistic style", () => checkPhotoreal(engine, checks));
+  await checks.group("R07.T8.a point and disc bodies", () => checkBodies(engine, checks));
+  await checks.group("R07.T8.a sprite depth", () => checkSpriteDepth(engine, checks));
+  await checks.group("R07.T8.a the photorealistic frame", () =>
+    checkPhotorealFrame(engine, checks),
+  );
   await checks.group("R05.T12.c the atmosphere's frames", () =>
     checkAtmosphereFrames(engine, checks),
   );
@@ -185,6 +195,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     checkTerrainResources(engine, checks),
   );
   await checks.group("R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
+  await checks.group("R06.T13.d the sky's band", () => checkSkyBand(engine, checks));
+  await checks.group("R06.T13.e the host discs", () => checkSkyDisc(engine, checks));
+  await checks.group("R06.T13.g the sky's bake", () => checkSkyBake(engine, checks));
   let images: CapturedImage[] = [];
   if (captures) {
     await checks.group("R05.T12.c the comparison captures", async () => {
@@ -200,6 +213,12 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   if (captures) {
     await checks.group("R05.T11.c the terrain captures", async () => {
       images = [...images, ...(await captureTerrain(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await checks.group("R05.T13.b the spike captures", async () => {
+      images = [...images, ...(await captureSpike(engine, checks))];
     });
   }
 

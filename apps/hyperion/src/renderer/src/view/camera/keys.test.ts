@@ -35,6 +35,10 @@ describe("the view's single keys", () => {
     expect(viewKeyAction(press("-"))).toEqual({ kind: "fov", step: 1 });
   });
 
+  it("toggle the style on 4 (R07.T8.a)", () => {
+    expect(viewKeyAction(press("4"))).toEqual({ kind: "style", style: "toggle" });
+  });
+
   it("ignore presses with a modifier", () => {
     const modified = [
       press("1", { ctrlKey: true }),

@@ -459,8 +459,18 @@ export interface RenderEngine {
     name?: string,
   ): TextureHandle;
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void;
-  /** The same level written from a GPU buffer a kernel filled, with no readback (R06's bake). */
-  writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void;
+  /**
+   * The same level written from a GPU buffer a kernel filled, with no readback (R06's bake).
+   *
+   * @param face - One face, 0–5, which the buffer then holds alone (R06.T13.g, so that the bake's
+   *   staging is one face of one level); all six, face after face, when absent.
+   */
+  writePackedCubeLevelFromBuffer(
+    cube: TextureHandle,
+    level: number,
+    packed: BufferHandle,
+    face?: number,
+  ): void;
   /**
    * An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat).
    *

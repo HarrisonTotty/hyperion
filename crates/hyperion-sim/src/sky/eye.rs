@@ -879,4 +879,26 @@ mod tests {
             assert!(naked_eye_limit(&eye, &sky).value().is_finite());
         }
     }
+
+    /// The default eye is the cross-language fixture's, which the client's `DEFAULT_EYE_OBSERVER`
+    /// reads too (rendering plan R06, T13.e).
+    #[test]
+    fn the_default_eye_is_the_fixtures() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/protocol/fixtures/eye_observer.json"
+        ));
+        let field = |name: &str| -> f64 {
+            fixture
+                .split(&format!("\"{name}\":"))
+                .nth(1)
+                .and_then(|rest| rest.split(['\n', '}']).next())
+                .and_then(|v| v.trim().trim_end_matches(',').parse().ok())
+                .unwrap_or_else(|| panic!("the fixture holds {name}"))
+        };
+        let eye = EyeObserver::default();
+        assert_same_bits(eye.field_factor(), field("field_factor"));
+        assert_same_bits(eye.age_years(), field("age_years"));
+        assert_same_bits(eye.pigmentation(), field("pigmentation"));
+    }
 }

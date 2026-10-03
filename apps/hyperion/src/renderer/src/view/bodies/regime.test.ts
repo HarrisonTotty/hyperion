@@ -121,13 +121,16 @@ describe("the brainstorm's figures, re-derived", () => {
 
   it.each([
     // Scale heights, km: Jupiter 27, Saturn 59.5 (NASA planetary fact sheets).
-    ["Jupiter", 27e3, 2.5e8],
-    ["Saturn", 59.5e3, 5.5e8],
+    ["Jupiter", 27e3, 2.5e8, 2.245e8],
+    ["Saturn", 59.5e3, 5.5e8, 4.947e8],
   ] as const)(
-    "spans %s's ten scale heights over 2 px to the brainstorm's distance",
-    (_, heightM, distance) => {
-      expect(Math.abs((10 * heightM * linear) / 2 / distance - 1)).toBeLessThan(0.02);
-      expect(GAS_GIANT_FULL_PASS_BOUNDARY_M).toBeGreaterThan(distance);
+    "spans %s's ten scale heights over 2 px at both scales",
+    (_, heightM, distanceM, centreDistanceM) => {
+      expect(Math.abs((10 * heightM * linear) / 2 / distanceM - 1)).toBeLessThan(0.02);
+      // R02's centre-pixel scale, the reference (the orchestrator's ruling, 2026-10-03).
+      const atCentre = (10 * heightM * pxPerRad(viewport)) / 2;
+      expect(Math.abs(atCentre / centreDistanceM - 1)).toBeLessThan(1e-3);
+      expect(GAS_GIANT_FULL_PASS_BOUNDARY_M).toBeGreaterThan(distanceM);
       expect(GAS_GIANT_FULL_PASS_BOUNDARY_M).toBeGreaterThan(
         (10 * heightM * pxPerRad(viewport)) / 2,
       );

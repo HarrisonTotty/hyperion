@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
@@ -6,15 +6,19 @@ import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import type { Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
-import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
+import { terrainMaterialSpec } from "./gpu/material";
+import { terrainSlotLayout } from "./slotLayout";
 import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
 import { patchKeyString } from "./patchKey";
 import { planetGeometry } from "./planet";
-import type { PatchRequest } from "./select";
+import type { PatchRequest, Selection, SelectionInput } from "./select";
 import {
   morphRangeM,
   RESELECT_FRACTION,
+  SELECT_MEASURE,
   type TerrainFrameInput,
+  type TerrainPassOptions,
   TerrainPass,
   type TerrainPool,
   type TerrainView,
@@ -127,6 +131,7 @@ function inputAt(view: TerrainView, nowMs = 0): TerrainFrameInput {
 
 async function passOn(
   setting: "high" | "low",
+  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect" | "terrain"> = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
   const counting = await countingRenderEngine({
     maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
@@ -143,6 +148,7 @@ async function passOn(
       pools.push(pool);
       return pool;
     },
+    ...extra,
   });
   await pass.ready();
   return {
@@ -168,6 +174,10 @@ function writtenSlots(engine: CountingRenderEngine): number[] {
   }
   return slots;
 }
+
+afterEach(() => {
+  performance.clearMeasures(SELECT_MEASURE);
+});
 
 describe("the terrain pass", () => {
   it("submits one instanced draw whose instances are the drawn patches' slots", async () => {
@@ -248,6 +258,69 @@ describe("the terrain pass", () => {
     }
     const { buffers, textures, meshes, materials, renderTargets } = engine.counts;
     expect([buffers, textures, meshes, materials, renderTargets]).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it("records no selection span unless asked to", async () => {
+    const { pass } = await passOn("low");
+    pass.frame(inputAt(northPole(1_000_000)));
+    expect(performance.getEntriesByName(SELECT_MEASURE)).toHaveLength(0);
+  });
+
+  it("records a span for each selection when asked to", async () => {
+    const { pass } = await passOn("low", { measureSelection: true });
+    pass.frame(inputAt(northPole(1_000_000)));
+    expect(performance.getEntriesByName(SELECT_MEASURE)).toHaveLength(1);
+  });
+
+  it("tells each selection's input and result, and only when it selects", async () => {
+    const seen: Array<[SelectionInput, Selection]> = [];
+    const { pass } = await passOn("low", {
+      onSelect: (input, selection) => seen.push([input, selection]),
+    });
+    const first = pass.frame(inputAt(northPole(1_000_000)));
+    pass.frame(inputAt(northPole(1_000_000), 16));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.[1]).toBe(first.selection);
+    expect(seen[0]?.[0].maxPatches).toBe(pass.maxPatches);
+  });
+
+  it("tells of each patch it makes resident", async () => {
+    const resident: string[] = [];
+    const { pass, pool } = await passOn("low", {
+      onResident: (key) => resident.push(patchKeyString(key)),
+    });
+    pass.frame(inputAt(northPole(1_000_000)));
+    const demanded = pool().demand.map((r) => patchKeyString(r.key));
+    pool().bakeDemand(pass);
+    expect(resident).toEqual(demanded);
+  });
+
+  it("draws the spike's terrain variant: its vertex path, its normals and its slots", async () => {
+    const terrain = terrainSettingsFor("high", { vertexPath: "face-differences", normals: "mesh" });
+    const { pass, pool } = await passOn("high", { terrain });
+    expect([pool().settings.vertexPath, pool().settings.normals]).toEqual([
+      "face-differences",
+      "mesh",
+    ]);
+    expect(pass.layout.slots.slotCount).toBe(terrainSlotLayout(terrain).slotCount);
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    const frame = pass.frame(inputAt(view));
+    expect(frame.draw?.material.name).toBe(terrainMaterialSpec("face-differences").name);
+  });
+
+  it("keeps its variant through a device restore", async () => {
+    const terrain = terrainSettingsFor("high", { vertexPath: "face-differences", normals: "mesh" });
+    const { pass, pool, engine } = await passOn("high", { terrain });
+    const first = pool();
+    engine.restore();
+    expect(pool()).not.toBe(first);
+    expect([pool().settings.vertexPath, pool().settings.normals]).toEqual([
+      "face-differences",
+      "mesh",
+    ]);
+    expect(pass.layout.vertexPath).toBe("face-differences");
   });
 
   it("budgets half the high setting's BakedOffsets slots for selection", async () => {
@@ -409,6 +482,20 @@ describe("the terrain pass's selection cadence", () => {
     expect(pass.frame(inputAt(northPole(heightM * (1 - 2 * RESELECT_FRACTION)))).reselected).toBe(
       true,
     );
+  });
+
+  it("does not select a low camera again for a short move once streamed", async () => {
+    const { pass, pool } = await passOn("low");
+    const heightM = 1_500;
+    pass.frame(inputAt(northPole(heightM)));
+    for (let n = 1; n < 40 && pool().bakeDemand(pass) > 0; n += 1) {
+      pass.frame(inputAt(northPole(heightM), 16 * n));
+    }
+    pass.frame(inputAt(northPole(heightM), 16 * 41));
+    // 10 m is far below a tenth of the 1.5 km to the nearest box, and above a tenth of one finest
+    // patch (about 1.8 m), the rule's floor. The fake pool's flat bakes give spheres that hold no
+    // camera, so this does not tell the box from the sphere; the captures exercise that.
+    expect(pass.frame(inputAt(northPole(heightM - 10), 16 * 42)).reselected).toBe(false);
   });
 
   it("does not select again for a turn of less than a pixel", async () => {
