@@ -43,7 +43,10 @@ export interface SkyStars {
   readonly chroma: Float32Array;
   /** The eye's colour offset, mag, to 0.01. */
   readonly eyeOffsetMag: Float32Array;
-  /** The view camera's band term, mag, to 0.01. */
+  /**
+   * The view camera's band term, −2.5 log₁₀(η ÷ η☉), mag, to 1/32: a star is in a camera's view when
+   * V plus this is brighter than its limit.
+   */
   readonly cameraBandMag: Float32Array;
 }
 
@@ -139,7 +142,7 @@ export function decodeSkyStars(bytes: Uint8Array): SkyDecoded<SkyStars> {
     stars.chroma[star * 2] = view.getUint16(at + 18, true) / 65_535;
     stars.chroma[star * 2 + 1] = view.getUint16(at + 20, true) / 65_535;
     stars.eyeOffsetMag[star] = view.getInt8(at + 22) / 100;
-    stars.cameraBandMag[star] = view.getInt8(at + 23) / 100;
+    stars.cameraBandMag[star] = view.getInt8(at + 23) / 32;
   }
   return { ok: true, value: stars };
 }

@@ -23,7 +23,8 @@ pub(crate) struct SkyStarWire {
     pub(crate) chroma: [f64; 2],
     /// The eye's colour offset, mag; carried to 0.01 mag within ±1.27.
     pub(crate) eye_offset_mag: f64,
-    /// The view camera's band term, mag; carried to 0.01 mag within ±1.27.
+    /// The view camera's band term, −2.5 log₁₀(η ÷ η☉), mag; carried in 1/32 mag within −4.0 to
+    /// +3.97 (decision-camera-eta.md).
     pub(crate) camera_band_mag: f64,
 }
 
@@ -71,7 +72,7 @@ pub(crate) fn encode_sky_payload(stars: &[SkyStarWire], texels: &[SkyTexelWire])
             bytes.extend_from_slice(&unit_fraction(fraction).to_le_bytes());
         }
         bytes.extend_from_slice(&centimagnitudes(star.eye_offset_mag).to_le_bytes());
-        bytes.extend_from_slice(&centimagnitudes(star.camera_band_mag).to_le_bytes());
+        bytes.extend_from_slice(&thirty_seconds(star.camera_band_mag).to_le_bytes());
     }
     for texel in texels {
         bytes.extend_from_slice(&texel.luminance_cd_m2.to_le_bytes());
@@ -121,6 +122,16 @@ fn millimagnitudes(mag: f64) -> i16 {
 #[must_use]
 fn centimagnitudes(mag: f64) -> i8 {
     quantise(mag, 100.0, f64::from(i8::MIN), f64::from(i8::MAX)) as i8
+}
+
+/// A magnitude in units of 1/32, as an `i8`: −4.0 to +3.97, every step exact.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "quantise clamps to the i8 range and rounds to a whole number first"
+)]
+#[must_use]
+fn thirty_seconds(mag: f64) -> i8 {
+    quantise(mag, 32.0, f64::from(i8::MIN), f64::from(i8::MAX)) as i8
 }
 
 /// A fraction in [0, 1] in units of 1 ÷ 65,535, as a `u16`.
@@ -189,7 +200,7 @@ mod tests {
         0x00, 0x40, // 16,384 = round(0.25 × 65,535)
         0x66, 0x66, // 26,214 = 0.4 × 65,535
         0x0c, // 12 cmag
-        0xe7, // −25 cmag
+        0xf8, // −8 × 1/32 mag
     ];
 
     const PINNED_TEXELS: [u8; 24] = [
@@ -233,6 +244,12 @@ mod tests {
         assert_eq!(millimagnitudes(-40.0), i16::MIN);
         assert_eq!(millimagnitudes(f64::NAN), 0);
         assert_eq!(centimagnitudes(2.0), i8::MAX);
+        // The camera band term: −3.1 mag is −99.2 thirty-seconds, so −99, which decodes to
+        // −3.09375 exactly; −4.5 saturates at −128.
+        assert_eq!(thirty_seconds(-3.1), -99);
+        assert!((f64::from(thirty_seconds(-3.1)) / 32.0 - (-3.093_75)).abs() < f64::EPSILON);
+        assert_eq!(thirty_seconds(-4.5), i8::MIN);
+        assert_eq!(thirty_seconds(4.5), i8::MAX);
         assert_eq!(unit_fraction(1.5), u16::MAX);
         assert_eq!(unit_fraction(-0.1), 0);
         assert_eq!(ratio(7.0), u16::MAX);

@@ -18,7 +18,7 @@
 //! | 16–17 | the apparent V after extinction, millimagnitudes, `i16` |
 //! | 18–21 | the chroma after reddening, two `u16` fractions of 65,535 |
 //! | 22    | the eye's colour offset, centimagnitudes, `i8` |
-//! | 23    | the view camera's band term, centimagnitudes, `i8` |
+//! | 23    | the view camera's band term, −2.5 log₁₀(η ÷ η☉), units of 1/32 mag, `i8` (−4.0 to +3.97) |
 //!
 //! The chroma is the star's linear Rec. 709 chromaticity, r ÷ (r + g + b) and g ÷ (r + g + b),
 //! each in [0, 1]; b's is one less the two. A client recovers the colour of unit luminance by

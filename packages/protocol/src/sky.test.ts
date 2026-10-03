@@ -11,7 +11,7 @@ import {
 /** `crates/hyperion-server/src/bulk/sky.rs`'s `PINNED_STAR`, the bytes its encoder writes. */
 const PINNED_STAR = Uint8Array.from([
   0x9a, 0x99, 0x19, 0x3f, 0xcd, 0xcc, 0x4c, 0xbf, 0x00, 0x00, 0x00, 0x00, 0x9a, 0x99, 0x09, 0x41,
-  0x4c, 0xfa, 0x00, 0x40, 0x66, 0x66, 0x0c, 0xe7,
+  0x4c, 0xfa, 0x00, 0x40, 0x66, 0x66, 0x0c, 0xf8,
 ]);
 
 /** The same file's `PINNED_TEXELS`: one texel with the eye's limit, one without. */
@@ -33,7 +33,20 @@ describe("decodeSkyStars", () => {
     expect(stars.vMag[0]).toBe(Math.fround(-1.46));
     expect([...stars.chroma]).toEqual([Math.fround(16_384 / 65_535), Math.fround(26_214 / 65_535)]);
     expect(stars.eyeOffsetMag[0]).toBe(Math.fround(0.12));
-    expect(stars.cameraBandMag[0]).toBe(Math.fround(-0.25));
+    expect(stars.cameraBandMag[0]).toBe(-0.25);
+  });
+
+  it("decodes a camera band term in thirty-seconds of a magnitude, to the full i8 range", () => {
+    const bytes = new Uint8Array(PINNED_STAR);
+    bytes[23] = 0x9d; // −99
+    const low = decodeSkyStars(bytes);
+    bytes[23] = 0x80; // −128, where the server saturates −4.5
+    const floor = decodeSkyStars(bytes);
+    if (!low.ok || !floor.ok) {
+      throw new Error("the stars did not decode");
+    }
+    expect(low.value.cameraBandMag[0]).toBe(-3.093_75);
+    expect(floor.value.cameraBandMag[0]).toBe(-4);
   });
 
   it("refuses a truncated payload, naming its length", () => {

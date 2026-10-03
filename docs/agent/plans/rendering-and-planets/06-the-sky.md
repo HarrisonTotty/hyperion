@@ -681,8 +681,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
 17. **The wire.** A star is 24 bytes, little-endian: its unit direction from the observer as three
     `f32` (12; 0.012″ of rounding), its distance in light-years as `f32` (4; parallax sprites need
     it), its apparent V after extinction as `i16` millimagnitudes (2), its chroma after reddening as
-    two `u16` fractions (4), its eye colour offset and its camera band term as `i8` centimagnitudes
-    (2). A band texel is 12 bytes: luminance `f32`, chroma two `u16`, eye limit `i16`
+    two `u16` fractions (4), its eye colour offset as `i8` centimagnitudes and its camera band term
+    as `i8` in units of 1/32 mag, rounded half away from zero and saturating at −4.0 and +3.97 (2).
+    A band texel is 12 bytes: luminance `f32`, chroma two `u16`, eye limit `i16`
     millimagnitudes at the request's F (`i16::MIN` where the eye was not asked), and its ρ as `u16`
     × 10⁻⁴. Stars then texels form the response's one bulk payload, announced by R03's
     `BulkManifestDto` (with the response's `stars_bytes` and `band_bytes` splitting it) and carried
@@ -700,23 +701,29 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     view's field of view on a 36 mm sensor, N_b the sky's electrons per pixel (from the band texel)
     plus dark current and read noise, σ_r² = σ_pre² + (σ_post S_base ÷ S)², and the exposure
     triple's aperture, shutter and sensitivity from R02's exposure model, sensitivity as gain.
-    Defaults: N = 1.4, t = 1/30 s, η = 1.8, σ_pre = 1.2 e⁻, 5 e⁻ at base ISO, f_pk = 0.35, k = 3,
+    Defaults: N = 1.4, t = 1/30 s, η☉ = 3.0 (`CAMERA_ETA_SUN`, 3.02 for the solar spectrum), σ_pre = 1.2 e⁻, 5 e⁻ at base ISO, f_pk = 0.35, k = 3,
     1,920 px across the 36 mm sensor (18.75 µm pixels). η is electrons per V-band-equivalent
-    photon, not a quantum efficiency: an unfiltered silicon sensor collects about 400–950 nm at a
-    quantum efficiency near 0.5, so η ≈ 1.5–2 for a solar-type star; it is the same quantity as
-    Design note 6's camera band term, which sets it per spectrum. A Bayer green pixel would be η ≈
-    0.5–0.7, about 1.2 mag shallower. At 60° the sky gives only about 3.5 e⁻ a pixel, so read
+    photon, not a quantum efficiency; a star's is η☉ × 10^(−0.4 c) with c its camera band term
+    (Design note 6), and the sky's electrons use η☉. The default sensor is unfiltered
+    back-illuminated silicon, QE(λ) = 0.60 (1 − e^(−α(λ) 16 µm)) over 400–1,100 nm with α from Green
+    2008 (Sol. Energ. Mat. Sol. Cells 92, 1305; values via the CC0 refractiveindex.info database):
+    peak 0.60, 0.45 at 800 nm, 0.13 at 950 nm. Its Sun-relative terms match Gaia's measured
+    G−V(V−I) relation (Riello et al. 2021, A&A 649, A3, Table 5.7 of the EDR3 documentation) to 0.03
+    mag from O5V to M6V on Pickles 1998's spectra (re-computed 2026-10-02; decision-camera-eta.md).
+    A Bayer green pixel behind an IR cut would be η ≈ 0.5–0.7, about 1.6–1.8 mag shallower. At 60°
+    the sky gives only about 6 e⁻ a pixel, so read
     noise sets the limit, and since the aperture is f ÷ N with f = 18 mm ÷ tan(fov ÷ 2) the signal
-    grows as f². The defaults give V 9.4–9.55 at 60° over μ 22.4–24, 11.1–11.2 at 30° and 12.9–13.1
-    at 13° at high gain (8.8, 10.5 and 12.3 at base ISO); a 1/2.3″ sensor at 60° reaches only V
-    3.8–5.8 (re-checked 2026-09-29, high confidence on the arithmetic). The model gives V 5.5–6.1
-    for Global Meteor Network hardware (IMX291, 4 mm f/0.95, Earth's sky at μ 21, 25 fps), against
-    Vida et al. 2021's measured +6.0 ± 0.5, and 7.1–7.7 for CAMS (12 mm f/1.2) against Jenniskens
-    et al. 2011's +5.4 (Icarus 216, 40), so it is optimistic for old analogue cameras (medium
-    confidence). A bright planet in frame takes the limit to about V 2–3 only when about 12 of 21
+    grows as f². The defaults give V 9.85–10.1 at 60° over μ 22.4–24, 11.5–11.75 at 30° and
+    13.4–13.6 at 13° at high gain (9.4, 11.05 and 12.9 at base ISO; re-computed 2026-10-02 with η☉
+    3.02, the model reproducing the earlier figures exactly at 1.8); a 1/2.3″ sensor at 60° reaches
+    only V 3.8–5.8 (at η 1.8; re-checked 2026-09-29, high confidence on the arithmetic). The model
+    gives about V 6.1–6.7 for Global Meteor Network hardware (IMX291, 4 mm f/0.95, Earth's sky at μ 21, 25 fps), against
+    Vida et al. 2021's measured +6.0 ± 0.5, and 7.7–8.3 for CAMS (12 mm f/1.2) against Jenniskens
+    et al. 2011's +5.4 (Icarus 216, 40), so it is optimistic for old analogue cameras by about 2.5
+    mag (medium confidence). A bright planet in frame takes the limit to about V 2.5–3.5 only when about 12 of 21
     stops come from gain, which raises read noise in electrons (σ_post S_base ÷ S) rather than
     cutting photons, and 9 from shutter and aperture (6.8 mag); 21 stops all from photons would give
-    about −6.4. The brainstorm's "about V 10" is the 60° figure to half a magnitude; the plan's
+    about −5.9. The brainstorm's "about V 10" is the 60° figure to 0.1 mag; the plan's
     figure is always stated with the field of view.
 19. **Humphreys–Davidson, protostars and giants: the leans handed to plan 06** (researched
     2026-09-29, a physics ruling left to plan 06). The cause of the excess is in the code: under the
@@ -1041,7 +1048,8 @@ bindings.
 Tests: the wire forms of request and response; a hand-built star and texel encoded in Rust to
 pinned bytes, byte for byte, and the same pinned bytes decoded in TypeScript to the same values
 bit for bit, as R03.T10.a and T11 pin the header; `stars_bytes + band_bytes = bulk.bytes`; a
-truncated payload is an error naming its length. Acceptance: `cargo test -p hyperion-protocol
+truncated payload is an error naming its length; a camera band term of −3.1 encodes to −99 and
+decodes to −3.09375 exactly, and −4.5 saturates to −128. Acceptance: `cargo test -p hyperion-protocol
 sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protocol test`,
 `just ci`.
 
@@ -1103,10 +1111,12 @@ mag; stale on link loss; the worker's decode equals the main-thread decoder's. A
 ### R06.T13 Drawing the sky
 
 - **R06.T13.a Per-view limits and culling.** `cameraLimitV` over R02's `ExposureTriple` and
-  `DEFAULT_VIEW_CAMERA` (Design note 18), the cull and the band hand-off (Design note 20), each
-  star's display luminance from its V through R02's `illuminanceLx` and `pixelLuminance` at 2.54
-  µlx and the pixel's true solid angle. Tests: 60°, 30° and 13° give 9.5, 11.1 and 13.0 ± 0.3 in a
-  dark sky at high gain; 21 stops of exposure, 12 of them gain, lower the limit by at least 5 mag;
+  `DEFAULT_VIEW_CAMERA` (Design note 18; its `etaSun` equals `CAMERA_ETA_SUN` through a fixture
+  both sides read), the cull (a star is in a camera's view when V + its camera band term is
+  brighter than the limit) and the band hand-off (Design note 20), each star's display luminance
+  from its V through R02's `illuminanceLx` and `pixelLuminance` at 2.54 µlx and the pixel's true
+  solid angle. Tests: 60°, 30° and 13° give 9.95, 11.65 and 13.5 ± 0.3 in a dark sky at high gain
+  (9.4, 11.05, 12.9 ± 0.3 at base ISO); 21 stops of exposure, 12 of them gain, lower the limit by at least 5 mag;
   the limit falls with a brighter band texel; culled flux arrives in the band layer to 10⁻⁶
   relative. Files: `view/sky/{cameraLimit,cull,photometry}.ts`. Acceptance: `pnpm --filter
 hyperion exec vitest run src/renderer/src/view/sky`.
@@ -1383,7 +1393,8 @@ plan reserves no tag, prefix or stream.
   decoders return a result union (`SkyDecoded<T>`) of struct-of-arrays (`SkyStars`, `SkyBand`,
   eye limit NaN where absent), and `splitSkyPayload(payload, response)` splits by `stars_bytes`
   and `band_bytes`. Until T11 the server answers `sky` with `unsupported` under its own ID, as it
-  does `body_events`.
+  does `body_events`. The camera band term is Sun-relative and travels in 1/32 mag
+  (decision-camera-eta.md, applied here): `thirty_seconds` in the encoder, ÷ 32 in the decoder.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
@@ -1416,9 +1427,13 @@ plan reserves no tag, prefix or stream.
 - **The camera model's defaults** are a full-frame video camera of today at high gain; open
   question 16 leaves its parameters open, and the performance runs and the owner's sense of the
   main screen may move them. They are one table in `cameraLimit.ts`. The model is optimistic for
-  old analogue cameras by about 2 mag (CAMS, Design note 18), and the split of a large exposure
+  old analogue cameras by about 2.5 mag (CAMS, Design note 18), and the split of a large exposure
   change between gain and photons is R07's metering, which sets how far a bright planet takes the
-  limit (V 2–3 under Design note 18's split).
+  limit (V 2.5–3.5 under Design note 18's split).
+- **The camera cut is in V.** The census and `camera_limit_v` cut in V, so a star redder than the
+  Sun that only its camera band term lifts over a camera's limit is not listed (a late M dwarf up
+  to 2–3 mag below the cut); its light is in the band. Padding the flux bound by the most negative
+  term would cost more census than those stars are worth (decision-camera-eta.md).
 - **Binaries.** The flux bound and the envelope are exact for single-star systems today; once plan
   11 wires binary evolution in, R06.T16.b must land with it or the census can miss blue
   stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the candidates above 0.5 M☉, the
