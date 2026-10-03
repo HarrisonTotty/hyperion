@@ -1,6 +1,7 @@
 import type { SkyStars } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
+import { cubeTexelOf } from "./cube";
 import { cullSky, starIsSeen } from "./cull";
 import { starIlluminanceRgbLx } from "./photometry";
 
@@ -32,6 +33,27 @@ describe("cullSky", () => {
     const culled = cullSky(stars, { kind: "camera", limitV: 9.5 }, 8);
     expect([...culled.kept]).toEqual([0, 1, 2]);
     expect(culled.culledCount).toBe(1);
+  });
+
+  it("keeps a red star that its band term lifts over a camera's limit", () => {
+    const stars = starsOf([9.6], { cameraBand: -0.25 });
+    expect(starIsSeen(stars, 0, { kind: "camera", limitV: 9.5 })).toBe(true);
+  });
+
+  it("puts a culled star's light in the band texel of its direction, and nowhere else", () => {
+    const stars = starsOf([8]);
+    stars.directions.set([0, 0, -1]);
+    stars.chroma.set([0.5, 0.3]);
+    const culled = cullSky(stars, { kind: "camera", limitV: 7 }, 4);
+    const { face, column, row } = cubeTexelOf(0, 0, -1, 4);
+    const at = ((face * 4 + row) * 4 + column) * 3;
+    const light = starIlluminanceRgbLx(8, Math.fround(0.5), Math.fround(0.3));
+    expect([...culled.bandIlluminanceLx.subarray(at, at + 3)]).toEqual([...light]);
+    const elsewhere = culled.bandIlluminanceLx.reduce(
+      (total, value, index) => (index >= at && index < at + 3 ? total : total + value),
+      0,
+    );
+    expect(elsewhere).toBe(0);
   });
 
   it("keeps an eye's stars by the limit in their direction, moved by their colour offset", () => {

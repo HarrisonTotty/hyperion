@@ -100,7 +100,8 @@ export interface CameraLimitParts {
  * A view camera's limiting V magnitude, with its parts.
  *
  * @param fovDeg - The view's horizontal field of view, degrees, in (0, 180).
- * @param backgroundCdM2 - The sky's luminance behind the stars, cd/m², positive (the band texel's).
+ * @param backgroundCdM2 - The sky's luminance behind the stars, cd/m², 0 or more (the band
+ *   texel's).
  * @throws RangeError for a non-finite or non-positive input.
  */
 export function cameraLimitParts(
@@ -113,11 +114,14 @@ export function cameraLimitParts(
     ["aperture", exposure.aperture],
     ["shutter", exposure.shutterS],
     ["ISO", exposure.iso],
-    ["background", backgroundCdM2],
   ] as const) {
     if (!(Number.isFinite(value) && value > 0)) {
       throw new RangeError(`a camera limit needs a positive ${name}, not ${value}`);
     }
+  }
+  // A black background is physical: the sky adds nothing and read noise sets the limit.
+  if (!(Number.isFinite(backgroundCdM2) && backgroundCdM2 >= 0)) {
+    throw new RangeError(`a camera limit needs a background of 0 or more, not ${backgroundCdM2}`);
   }
   if (!(fovDeg > 0 && fovDeg < 180)) {
     throw new RangeError(`a camera limit needs a field of view in (0°, 180°), not ${fovDeg}`);
@@ -128,7 +132,9 @@ export function cameraLimitParts(
   const collected = areaM2 * sensor.etaSun * exposure.shutterS;
   const pixelArcsec = (sensor.widthM / sensor.widthPx / focalM) * ARCSEC_PER_RAD;
   const skyPhotonsPerArcsec2 =
-    V0_PHOTON_FLUX_PER_S_M2 * 10 ** (-0.4 * surfaceBrightnessV(backgroundCdM2));
+    backgroundCdM2 > 0
+      ? V0_PHOTON_FLUX_PER_S_M2 * 10 ** (-0.4 * surfaceBrightnessV(backgroundCdM2))
+      : 0;
   const skyElectrons = skyPhotonsPerArcsec2 * pixelArcsec ** 2 * collected;
   const readNoiseE = Math.sqrt(
     sensor.readNoisePreE ** 2 + ((sensor.readNoisePostE * sensor.baseIso) / exposure.iso) ** 2,
@@ -152,7 +158,7 @@ export function cameraLimitParts(
  * there at `MAX_CUT_V`.
  *
  * @param fovDeg - The view's horizontal field of view, degrees, in (0, 180).
- * @param backgroundCdM2 - The sky's luminance behind the stars, cd/m², positive.
+ * @param backgroundCdM2 - The sky's luminance behind the stars, cd/m², 0 or more.
  * @throws RangeError as {@link cameraLimitParts} does.
  */
 export function cameraLimitV(

@@ -1439,7 +1439,7 @@ plan reserves no tag, prefix or stream.
   camera with V + its camera band term < limit; the dropped stars' illuminance goes to the band's
   texels in `f64` (`bandIlluminanceLx`, three channels a texel). `photometry.ts` exports
   `unitLuminanceRgb` (the wire's chromaticity to unit luminance by Rec. 709's weights),
-  `starIlluminanceRgbLx` and `starPixelLuminanceRgb`.
+  `starIlluminanceRgbLx` and `starPixelLuminanceRgb`. A black background (0 cd/m²) is allowed and reads as read noise alone.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and

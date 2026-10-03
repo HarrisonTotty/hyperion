@@ -69,6 +69,14 @@ describe("cameraLimitV", () => {
     expect(base.readNoiseE).toBeCloseTo(5, 6);
   });
 
+  it("takes a black background as read noise alone, a little deeper than a dark sky", () => {
+    const black = cameraLimitParts(DEFAULT_VIEW_CAMERA, HIGH_GAIN, 60, 0);
+    expect(black.skyElectrons).toBe(0);
+    expect(black.limitV).toBeGreaterThan(
+      cameraLimitV(DEFAULT_VIEW_CAMERA, HIGH_GAIN, 60, skyOf(24)),
+    );
+  });
+
   it("refuses a field of view or an exposure out of range", () => {
     expect(() => cameraLimitV(DEFAULT_VIEW_CAMERA, HIGH_GAIN, 0, 1e-4)).toThrow(RangeError);
     expect(() =>

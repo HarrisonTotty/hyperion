@@ -37,20 +37,17 @@ export type ViewStarLimit =
 export interface CulledSky {
   /** The indices of the stars kept, in the payload's order (brightest first). */
   readonly kept: Uint32Array;
-  /** The stars dropped. */
+  /** The number of stars dropped. */
   readonly culledCount: number;
   /**
    * The dropped stars' illuminance per band texel, lx, three channels a texel, face after face
-   * (+X, −X, +Y, −Y, +Z, −Z), rows from the top: the band layer adds it to the band's light.
+   * (+X, −X, +Y, −Y, +Z, −Z), rows from the top: the band layer adds it to the band's light,
+   * divided by each texel's solid angle (`texelSolidAnglesSr` in `cube.ts`) to be a luminance.
    */
   readonly bandIlluminanceLx: Float64Array;
 }
 
-/**
- * Whether a view sees one star.
- *
- * @param index - The star's index in `stars`.
- */
+/** Whether a view sees one star of the sky, by its index. */
 export function starIsSeen(stars: SkyStars, index: number, limit: ViewStarLimit): boolean {
   const v = stars.vMag[index] ?? Number.POSITIVE_INFINITY;
   let seen: boolean;
@@ -60,7 +57,7 @@ export function starIsSeen(stars: SkyStars, index: number, limit: ViewStarLimit)
       const limitV = limit.limitAt(
         stars.directions[at] ?? 0,
         stars.directions[at + 1] ?? 0,
-        stars.directions[at + 2] ?? 1,
+        stars.directions[at + 2] ?? 0,
       );
       seen = Number.isNaN(limitV) || v < limitV + (stars.eyeOffsetMag[index] ?? 0);
       break;
