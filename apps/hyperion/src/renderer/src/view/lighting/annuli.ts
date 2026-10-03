@@ -9,7 +9,7 @@
  * decision-r07-dn6, 2026-10-03): the minimax flux-exact partition. An annulus's eclipsed area is
  * the difference of two exact circle–circle overlaps, so the term is continuous in every argument
  * and never bands. For the Sun (Maxted 2018, Table 2) the worst absolute error is 0.70% (B), 0.56%
- * (V) and 0.46% (R) at K = 4, and 2.7%, 2.1% and 1.8% at K = 2. Geometry is angular, in units of
+ * (V) and 0.46% (R) at K = 4, and 1.23%, 0.97% and 0.81% at K = 3 (the low setting). Geometry is angular, in units of
  * the star's angular radius, as seen from the lit point, and the disc is taken as flat in angle (an
  * error of order ρ² ÷ 12, about 1% at ρ = 19.5°, estimated).
  */
@@ -18,8 +18,12 @@ import { cross, dot, norm, normalise, sub, type Vec3 } from "../../geometry/vec3
 /** Annuli of the high setting. */
 export const DISC_ANNULI_HIGH = 4;
 
-/** Annuli of the low setting (3 is an owner's call, decision-r07-dn6). */
-export const DISC_ANNULI_LOW = 2;
+/**
+ * Annuli of the low setting: 3, by the orchestrator's ruling under the owner's delegation
+ * (2026-10-03), the Sun's worst error 0.8–1.2% against 1.7–2.7% at K = 2, for one more overlap
+ * term per lit texel while an eclipse is on.
+ */
+export const DISC_ANNULI_LOW = 3;
 
 /** A star's disc as the eclipse term needs it, one display channel's limb darkening. */
 export interface LimbDarkenedDisc {

@@ -144,7 +144,7 @@ export const STAR_CUT_RELATIVE = 1e-4; // Design note 4; R08 applies the same co
  *  above a local horizon of elevation `horizonRad` (0 on the smooth figure; R10's on terrain). */
 export function sphereIrradianceFactor(h: number, phiRad: number, horizonRad?: number): number;
 export const DISC_ANNULI_HIGH = 4; // limb-darkened annuli, edges by equal concentric error
-export const DISC_ANNULI_LOW = 2;
+export const DISC_ANNULI_LOW = 3; // the orchestrator's ruling, 2026-10-03 (was 2)
 /** Edges of K flux-exact annuli by equal concentric error for one channel's power-2 law
  *  I(μ)/I(1) = 1 − c(1 − μ^α), from `HostDiscDto`'s per-channel coefficients. */
 export function annulusEdges(c: number, alpha: number, k: number): AnnulusSet; // as built
@@ -717,7 +717,8 @@ and `--port`.
    into K annuli of uniform intensity, each with its exact flux and edges by equal concentric
    error, and takes each annulus's eclipsed area as the difference of two exact circle–circle
    overlaps: continuous, so it never bands; for the Sun 0.56% (V), 0.70% (B) worst absolute error
-   at K = 4 (high) and 2.1% (V), 2.7% (B) at K = 2 (low) (decision-r07-dn6, 2026-10-03; the law
+   at K = 4 (high) and 0.97% (V), 1.23% (B) at K = 3 (low; 2.1% and 2.7% at K = 2, before the
+   orchestrator's ruling of 2026-10-03 raised the low setting to 3) (decision-r07-dn6, 2026-10-03; the law
    I(μ)/I(1) = 1 − c(1 − μ^α) after Hestroffer 1997, A&A 327, 199, eq. 4, its coefficients from
    Maxted 2018, A&A 616, A39, Table 2). The product errs only where an
    eclipse's penumbra crosses the terminator band. Occluder lists are built on the CPU in `f64` from
@@ -1142,7 +1143,8 @@ body is ordered on its equatorial sphere; a disc overlapping a mesh body is prom
 - **R07.T6.b Annuli and overlaps.** `lighting/annuli.ts`: `annulusEdges`, `circleOverlapArea`,
   `eclipseVisible`. Tests: the eclipse term's worst absolute error, over a grid of radius ratios
   0.1–30 and 41 separations against the exact integral oracle, at most 0.73%, 0.58% and 0.48% for
-  the Sun's B, V and R at K = 4 and 2.8%, 2.2% and 1.85% at K = 2 (decision-r07-dn6); the equal
+  the Sun's B, V and R at K = 4, 1.30%, 1.02% and 0.85% at K = 3 (the low setting, the
+  orchestrator's ruling) and 2.8%, 2.2% and 1.85% at K = 2 (decision-r07-dn6); the equal
   dip predicting the grid's worst to 3 × 10⁻⁴; a concentric
   occultation against the closed form [(1 − c) μ_k² + 2c μ_k^(α+2) ÷ (α + 2)] ÷ [(1 − c) + 2c ÷ (α +
   2)], μ_k = √(1 − k²); a total eclipse exactly 0. Acceptance: `pnpm --filter hyperion exec vitest
@@ -1980,8 +1982,10 @@ count }`, at most four), not c and α.
     3.4% at K = 2. No flux-exact scheme reaches 1.5% at K = 2 for solar laws; freeing each
     annulus's flux (the total exact) with optimised intensities reaches 1.49% (V), 1.24% (R) and
     1.88% (B) at K = 2, but needs per-star numerical optimisation. **K = 3 with equal dip gives
-    0.8–1.2% for the Sun: raising `DISC_ANNULI_LOW` to 3 is the owner's call**, listed and not
-    made. The term treats the disc as flat in angle, an error of order ρ² ÷ 12, about 1% at
+    0.8–1.2% for the Sun: `DISC_ANNULI_LOW` is raised to 3 by the orchestrator's ruling under
+    the owner's delegation (2026-10-03)**, for one more overlap term per lit texel while an
+    eclipse is on; tested at the Sun's B 1.30%, V 1.02% and R 0.85% (about 5% over the measured
+    1.23, 0.97 and 0.81%), K = 2 kept as the scheme's own check. The term treats the disc as flat in angle, an error of order ρ² ÷ 12, about 1% at
     ρ = 19.5° (estimated, not measured), for close-in hosts.
   - **Exports and assumptions.** `eclipseVisible` adds the fractions each occluder hides, which
     assumes the occluders do not overlap one another, as holds for the shadow cones `occludersFor`

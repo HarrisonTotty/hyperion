@@ -125,18 +125,23 @@ describe("circleOverlapArea", () => {
 
 describe("the eclipse term against the exact integral", () => {
   // decision-r07-dn6's bounds, about 5% over its measured worst: 0.699, 0.556 and 0.462% for the
-  // Sun's B, V and R at K = 4; 2.696, 2.130 and 1.767% at K = 2.
+  // Sun's B, V and R at K = 4; 2.696, 2.130 and 1.767% at K = 2; and the orchestrator's K = 3
+  // bounds for the low setting, about 5% over 1.23, 0.97 and 0.81%.
   it.each([
     [SUN_B, DISC_ANNULI_HIGH, 0.0073],
     [SUN_V, DISC_ANNULI_HIGH, 0.0058],
     [SUN_R, DISC_ANNULI_HIGH, 0.0048],
     [GENERIC, DISC_ANNULI_HIGH, 0.0047],
     [MILD, DISC_ANNULI_HIGH, 0.0028],
-    [SUN_B, DISC_ANNULI_LOW, 0.028],
-    [SUN_V, DISC_ANNULI_LOW, 0.022],
-    [SUN_R, DISC_ANNULI_LOW, 0.0185],
-    [GENERIC, DISC_ANNULI_LOW, 0.0178],
-    [MILD, DISC_ANNULI_LOW, 0.0105],
+    [SUN_B, DISC_ANNULI_LOW, 0.013],
+    [SUN_V, DISC_ANNULI_LOW, 0.0102],
+    [SUN_R, DISC_ANNULI_LOW, 0.0085],
+    // K = 2, the low setting before the orchestrator's ruling, kept as the scheme's own check.
+    [SUN_B, 2, 0.028],
+    [SUN_V, 2, 0.022],
+    [SUN_R, 2, 0.0185],
+    [GENERIC, 2, 0.0178],
+    [MILD, 2, 0.0105],
   ] as const)("errs by at most its bound for %o at K = %i", (law, k, bound) => {
     expect(worstError(law, k)).toBeLessThanOrEqual(bound);
   });
