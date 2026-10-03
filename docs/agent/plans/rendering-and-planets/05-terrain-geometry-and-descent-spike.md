@@ -3391,6 +3391,8 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     fast pass, and its neighbours' ends that meet it, fly 300 m above `trackMaxHeightM`. Other
     segments do not follow the relief along the track, which is fine above the low pass's
     altitude; the vertical descent and the hover are over the site itself.
+    **Superseded (2026-10-03, decision-r05-descent-clearance.md):** the single track maximum gave
+    way to per-stretch floors, below.
   - `view/spike/rotation.ts`: `testPlanetRotationAt(tS)`, a spin about the body-fixed z axis at
     the Earth Rotation Angle's rate, ω = 2π × 1.00273781191135448 ÷ 86,400 s (IERS Conventions 2010,
     eq. 5.15), with the angle reduced from whole seconds. **Corrected (T13.a's re-check):** the
@@ -3439,16 +3441,17 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     `docs/measurements/descent-spike/<date>-demand-<rules>.{json,md}` with any truncation, the rate
     and the frames covered stated. The ridged planet's 4σ cells are labelled "statistical, not a
     bound on the ridged planet (bound.rs finding)".
-  - **Finding: D's factor of two** (windows re-measured 2026-10-03 after the direction fix). In
-    the windows (min(hard, 4σ_n), ridges off), demand ÷ D is, high then low: orbit coast 0 / 0
-    (D 0.9 and 0.04 a second, nothing new selected), descent arc 0.67 / 0.81, approach and flare
-    1.33 / 2.74, low fast pass 1.40 / 3.09, slowdown 0.34 / 0.99, vertical descent 0 / 0 (D 81
-    and 25), and the hover 0 against 0. The test asserts the five within a factor of two: high's
-    arc, approach and low pass, low's arc and slowdown. Two causes are clear. D assumes a ring all
+  - **Finding: D's factor of two** (windows re-measured 2026-10-03 after the direction fix and
+    over the stretches' floors, D at the height above the floor). In the windows (min(hard, 4σ_n),
+    ridges off), demand ÷ D is, high then low: orbit coast 0 / 0 (D 0.9 and 0.04 a second,
+    nothing new selected), descent arc 0.57 / 0.47, approach and flare 1.20 / 0.86, low fast pass
+    0.79 / 1.52, slowdown 0.61 / 1.67, vertical descent 0 / 0 (D 81 and 25), and the hover 0
+    against 0. The test asserts the seven within a factor of two: high's approach, low pass,
+    slowdown and arc, low's approach, low pass and slowdown. Two causes are clear. D assumes a ring all
     round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
     chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
     vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
-    vertical descent's window (about 80 m to 40 m). On the low setting D is also low, since below
+    vertical descent's window (about 54 m to 33 m). On the low setting D is also low, since below
     k ≈ 3 the quadtree's granularity floors the count (Design note 19's "about a quarter").
     **Proposed correction, not the gate:** D_frustum = Σ_L 4 k_L tan(φ_x ÷ 2) v ÷ S_L +
     (3π k² ÷ ln 2) |ḣ| ÷ h above the cap and the vertical term zero below it. The whole-descent
@@ -3463,3 +3466,53 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     against D's 311), `selectPatches` p50 116 ms. Lane B fixed it (5d90fab, the streaming gate,
     resident ancestors pinned, deepest evicted first); the hard cells' full record follows the
     collapse's fix.
+
+- **The scripted descent's terrain clearance** (decision-r05-descent-clearance.md, 2026-10-03). The
+  script is flown above per-stretch true bounds of the finest mesh. Each bound is the baked maximum
+  plus ε_n over a level-14 corridor, with level 12 above 2 km, level 4 for the arc and level 16 for
+  the last 250 m. The clearances are 300 m on the low pass, 200 m on the flare and slowdown, 100 m on
+  the final approach, and the table's own over the site, whose height is exact.
+
+  On rough seeds, boundaries are lifted and the vertical descent's top rises, with its 20 m/s kept.
+  The per-level demand then reads the height above the floor, and the results record each segment's
+  lift. So a lifted run measures different heights from the table, but its demand is predicted at the
+  heights actually flown.
+
+  Not covered:
+  - The bound is of the finest mesh, not of what is drawn. A stand-in ancestor, drawn while
+    streaming lags, which the low pass is designed to provoke, can stand up to its ε_L above the
+    finest surface (877 m at level 8 with ridges). So the camera can pass through a coarse stand-in
+    for a frame. That is a streaming failure the run already counts, not a script error.
+  - The hover's 1 m is against the drawn ground only once the forced region is resident
+    (`FORCED_REGION_RESIDENCY_S`).
+  - Slopes beside the site make the 3D distance in the vertical descent and hover smaller than the
+    vertical clearance (about 0.7 m at 1 m on a 45° slope).
+
+  As built (lane D, `descentProfile.ts`):
+  - `DescentSegment.stretches` holds each segment's rule as data (`SegmentStretches`: piece length,
+    level, C, the flare's level 12 above 2 km, the slowdown's last piece "final approach");
+    `trackStretches(profile)` returns the pieces (`TrackStretch`: piece, segment, from/to remaining
+    distance, start/end on whole seconds, level, C), planned on the table's unlifted altitudes, so
+    the same for every terrain: the orbit coast as one piece, the arc in nine of 100 s, the flare in
+    twelve of 10 s (pieces 1–8 at level 12, 9–12 at 14 on seed 7), the low pass, slowdown 1–5 and
+    the final approach.
+  - `DescentTerrain.stretchMaxHeightsM` is additive. Without it, `trackMaxHeightM` (0 by default,
+    as before) is the low pass's floor and every other floor is the site's height, which gives
+    today's profile bit for bit (checked against the previous profile at every 64 Hz pose before
+    the change; the test holds floors at the site equal to `trackMaxHeightM` at the site).
+    `liftOverTrack` is gone: rule 3's boundary altitudes subsume it.
+  - `DescentPose.floorM` and `heightAboveFloorM` (the clearance less the floor's height above the
+    site, so exactly `clearanceM` where the floor is the site), `DescentProfile.minFloorMarginM`,
+    `groundDirAt(tS)` (the track's direction alone, for the floors' keys) and the exported
+    `FLOOR_TOLERANCE_M` (10⁻⁶ m): the 64 Hz check lets a deficit that small pass, since a boundary
+    sitting exactly at its floor plus C (the low pass at the site's 300 m) is otherwise lifted for
+    the integrals' 10⁻¹³ m rounding. The constructor throws a `RangeError` for floors that do not
+    match the plan or are not finite, and after a fourth lift; raising a piece's two boundaries
+    lifts its whole piece, so in practice the rounds converge in one, and the test of an
+    unclearable floor uses an infinite one.
+  - The record (`demandRecord.ts`): `stretchKeys(profile, stretch)` takes the level's patches
+    under the track and their eight neighbours as lane C's `trackPatchKeys` does;
+    `measureTerrain` returns the floors (baked maximum plus ε_n); each cell records
+    `segmentLifts` and `minFloorMarginM`, each segment its least and greatest
+    `heightAboveFloorM`; the fixed-step D and the craft's contact read `heightAboveFloorM`. On seed 7
+    (ridges off) the low pass flies 318–323 m above its own floor, a neighbour's floor binding.

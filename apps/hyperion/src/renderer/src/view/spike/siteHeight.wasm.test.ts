@@ -13,7 +13,7 @@ import {
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
 import type { PatchKey } from "../terrain/patchKey";
-import { hardPlanet, measureTerrain, patchKeyAt, recordProfile } from "./demandRecord";
+import { hardPlanet, patchKeyAt, recordProfile, siteHeightOf } from "./demandRecord";
 import { datumDirection } from "./descentProfile";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
@@ -50,18 +50,17 @@ describe("the record's measured site height", () => {
 
   it("lies within the finest bake's range under the site, about 1.85 km below the datum", () => {
     const table = levelTable(Ridges.Off);
-    const terrain = measureTerrain(hardPlanet(table), {
-      rangeOf,
+    const siteHeightM = siteHeightOf(recordProfile(), {
       surfaceHeightM: ([x, y, z]) => surfaceHeightM(x, y, z, Ridges.Off),
     });
     const site = recordProfile().siteDir;
     const finest = hardPlanet(table).finestLevel;
     const [low, high] = rangeOf(patchKeyAt([site.x, site.y, site.z], finest));
-    expect(terrain.siteHeightM).toBeGreaterThanOrEqual(low);
-    expect(terrain.siteHeightM).toBeLessThanOrEqual(high);
+    expect(siteHeightM).toBeGreaterThanOrEqual(low);
+    expect(siteHeightM).toBeLessThanOrEqual(high);
     // Seed 7's site (lane B's `belowDatum.wasm.test.ts`); the geocentric direction gave −1,953.2 m.
-    expect(terrain.siteHeightM).toBeLessThan(-1_800);
-    expect(terrain.siteHeightM).toBeGreaterThan(-1_900);
+    expect(siteHeightM).toBeLessThan(-1_800);
+    expect(siteHeightM).toBeGreaterThan(-1_900);
     expect(omittedSigmaM(finest, Ridges.Off)).toBe(0);
   });
 

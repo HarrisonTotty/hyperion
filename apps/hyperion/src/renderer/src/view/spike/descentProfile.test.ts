@@ -9,7 +9,9 @@ import {
   datumDirection,
   DESCENT_SEGMENTS,
   DescentProfile,
+  FLOOR_TOLERANCE_M,
   landingSiteOf,
+  trackStretches,
 } from "./descentProfile";
 import { TEST_PLANET_RATE_RAD_PER_S, testPlanetRotationAt } from "./rotation";
 
@@ -141,5 +143,154 @@ describe("the scripted descent", () => {
   it("refuses a seed outside u64", () => {
     expect(() => landingSiteOf(-1n)).toThrow(RangeError);
     expect(() => landingSiteOf(1n << 64n)).toThrow(RangeError);
+  });
+});
+
+/** Every 64 Hz sample time of a profile. */
+function grid(profile: DescentProfile): number[] {
+  return Array.from({ length: Math.round(profile.durationS * 64) + 1 }, (_, n) => n / 64);
+}
+
+describe("the descent over the stretches' floors (decision-r05-descent-clearance.md)", () => {
+  const site = landingSiteOf(7n);
+  const SITE_M = -1845.8;
+  const plain = new DescentProfile(WGS84_FIGURE, site, { siteHeightM: SITE_M });
+  const stretches = trackStretches(plain);
+  const index = (piece: string): number => stretches.findIndex((s) => s.piece === piece);
+  /** Floors at the site, with `raised` pieces' floors that many metres above it. */
+  const floors = (raised: Readonly<Record<string, number>>): number[] =>
+    stretches.map(({ piece }) => SITE_M + (raised[piece] ?? 0));
+  const RIDGES: Readonly<Record<string, number>> = {
+    "approach and flare 9": 2000,
+    "approach and flare 10": 2000,
+    "approach and flare 11": 2000,
+    "slowdown 3": 800,
+    "final approach": 180,
+  };
+  const rough = new DescentProfile(WGS84_FIGURE, site, {
+    siteHeightM: SITE_M,
+    stretchMaxHeightsM: floors(RIDGES),
+  });
+
+  it("plans the same stretches for every terrain, tiling the track from the orbit to the site", () => {
+    expect(trackStretches(rough)).toEqual(stretches);
+    expect(stretches[0]?.fromRemainingM).toBeGreaterThan(4e6);
+    expect(stretches.at(-1)?.toRemainingM).toBe(0);
+    for (let k = 1; k < stretches.length; k += 1) {
+      expect(stretches[k]?.fromRemainingM).toBe(stretches[k - 1]?.toRemainingM);
+      expect(stretches[k]?.startS).toBe(stretches[k - 1]?.endS);
+      expect(Number.isInteger(stretches[k]?.startS)).toBe(true);
+    }
+    expect(stretches.map(({ piece }) => piece)).toContain("slowdown 5");
+    expect(stretches[index("final approach")]).toMatchObject({ level: 16, clearanceM: 100 });
+    expect(stretches[index("final approach")]?.fromRemainingM).toBeCloseTo(250, 6);
+    expect(stretches[index("low fast pass")]).toMatchObject({ level: 14, clearanceM: 300 });
+    expect(stretches[index("approach and flare 1")]).toMatchObject({ level: 12, clearanceM: 200 });
+    expect(stretches[index("approach and flare 12")]).toMatchObject({ level: 14, clearanceM: 200 });
+    expect(stretches[index("descent arc 9")]).toMatchObject({ level: 4, clearanceM: 1000 });
+  });
+
+  it("is today's profile, bit for bit, with every floor at the site's height", () => {
+    const atSite = new DescentProfile(WGS84_FIGURE, site, {
+      siteHeightM: SITE_M,
+      stretchMaxHeightsM: floors({}),
+    });
+    const today = new DescentProfile(WGS84_FIGURE, site, {
+      siteHeightM: SITE_M,
+      trackMaxHeightM: SITE_M,
+    });
+    expect(atSite.segments).toEqual(today.segments);
+    for (const t of grid(today)) {
+      expect(atSite.poseAt(t).positionM).toEqual(today.poseAt(t).positionM);
+    }
+    expect(atSite.minFloorMarginM).toBeGreaterThanOrEqual(-FLOOR_TOLERANCE_M);
+  });
+
+  it("keeps every pose its piece's clearance above the floor", () => {
+    expect(rough.minFloorMarginM).toBeGreaterThanOrEqual(-FLOOR_TOLERANCE_M);
+    for (const [k, stretch] of rough.stretches.entries()) {
+      for (let t = stretch.startS; t <= stretch.endS; t += 1 / 64) {
+        const pose = rough.poseAt(t);
+        const floorM = floors(RIDGES)[k] ?? NaN;
+        expect(pose.altitudeM - floorM).toBeGreaterThanOrEqual(
+          stretch.clearanceM - FLOOR_TOLERANCE_M,
+        );
+      }
+      const inside = rough.poseAt((stretch.startS + stretch.endS) / 2);
+      expect(inside.floorM).toBe(floors(RIDGES)[k]);
+      expect(inside.heightAboveFloorM).toBeCloseTo(inside.altitudeM - inside.floorM, 6);
+    }
+    const end = rough.poseAt(rough.durationS);
+    expect(end.floorM).toBe(SITE_M);
+    expect(end.heightAboveFloorM).toBeCloseTo(1, 9);
+  });
+
+  it("keeps position and velocity continuous over the lifted pieces", () => {
+    const h = 1e-4;
+    const edges = [
+      ...rough.stretches.flatMap(({ endS }) => [endS, endS - 1, endS - 5]),
+      ...rough.segmentSpans().map(({ endS }) => endS),
+    ];
+    for (const t of edges.filter((e) => e > h && e < rough.durationS - h)) {
+      const before = rough.poseAt(t - h);
+      const after = rough.poseAt(t + h);
+      expect(norm(sub(after.positionM, before.positionM))).toBeLessThan(2);
+      expect(norm(sub(after.velocityMps, before.velocityMps))).toBeLessThan(0.05);
+    }
+  });
+
+  it("keeps the ground track and the horizontal speed whatever the floors", () => {
+    for (const t of grid(plain)) {
+      const a = plain.poseAt(t);
+      const b = rough.poseAt(t);
+      expect(b.groundDir).toEqual(a.groundDir);
+      expect(b.horizontalSpeedMps).toBe(a.horizontalSpeedMps);
+    }
+  });
+
+  it("flies the low pass level at its floor plus 300 m where its neighbours do not bind", () => {
+    const pass = new DescentProfile(WGS84_FIGURE, site, {
+      siteHeightM: SITE_M,
+      stretchMaxHeightsM: floors({ "low fast pass": 500 }),
+    });
+    const span = pass.segmentSpans().find(({ name }) => name === "low fast pass");
+    const levelM = SITE_M + 800;
+    expect(pass.poseAt(span?.startS ?? NaN).altitudeM).toBeCloseTo(levelM, 3);
+    expect(pass.poseAt(span?.endS ?? NaN).altitudeM).toBeCloseTo(levelM, 3);
+    for (let t = span?.startS ?? NaN; t <= (span?.endS ?? NaN); t += 1 / 64) {
+      expect(pass.poseAt(t).altitudeM).toBeGreaterThanOrEqual(levelM - FLOOR_TOLERANCE_M);
+    }
+  });
+
+  it("stretches the vertical descent from a raised top, keeping its 20 m/s", () => {
+    const span = rough.segmentSpans().find(({ name }) => name === "vertical descent");
+    const top = rough.poseAt(span?.startS ?? NaN);
+    expect(top.clearanceM).toBeCloseTo(280, 6);
+    expect((span?.endS ?? NaN) - (span?.startS ?? NaN)).toBeCloseTo((10 * 278) / 198, 9);
+    for (let t = (span?.startS ?? NaN) + 0.25; t < (span?.endS ?? NaN) - 1; t += 0.25) {
+      expect(rough.poseAt(t).verticalSpeedMps).toBeGreaterThan(-21);
+      expect(rough.poseAt(t).verticalSpeedMps).toBeLessThan(-19);
+    }
+  });
+
+  it("leaves the last 50 s above the site as they were", () => {
+    for (let x = 0; x <= 50; x += 1 / 64) {
+      const a = plain.poseAt(plain.durationS - x);
+      const b = rough.poseAt(rough.durationS - x);
+      expect(b.clearanceM).toBeCloseTo(a.clearanceM, 9);
+      expect(norm(sub(b.positionM, a.positionM))).toBeLessThan(1e-6);
+    }
+  });
+
+  it("refuses floors that do not match the plan, or that cannot be cleared", () => {
+    expect(
+      () => new DescentProfile(WGS84_FIGURE, site, { stretchMaxHeightsM: floors({}).slice(1) }),
+    ).toThrow(RangeError);
+    expect(
+      () =>
+        new DescentProfile(WGS84_FIGURE, site, {
+          stretchMaxHeightsM: floors({ "slowdown 2": Infinity }),
+        }),
+    ).toThrow(RangeError);
   });
 });
