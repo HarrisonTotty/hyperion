@@ -76,7 +76,7 @@ const MIB = 1024 * 1024;
  */
 const HIGH_CACHE_BYTES = 400_000_000;
 
-/** The low setting's patch cache budget: 64 MiB, 1,323 slots of R05's low layout. */
+/** The low setting's patch cache budget: 64 MiB, 1,296 slots of R05's low layout. */
 const LOW_CACHE_BYTES = 64 * MIB;
 
 /**

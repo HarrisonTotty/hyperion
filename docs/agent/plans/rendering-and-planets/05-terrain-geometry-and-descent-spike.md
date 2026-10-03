@@ -2276,3 +2276,42 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   `TerrainVertexPath`, the unions of `TerrainSettings.normals` and `.vertexPath`. The shapes are
   `interface`s (the TypeScript rules), not the sketch's `type`s. The high cache budget is
   400,000,000 B (Design note 10's "about 400 MB"); the low is 64 MiB.
+- **Deviations in T8, as built (the patch cache, 2026-10-02).** T8 ran before T2 and T7.a, so it
+  wrote the types it reads from them: `PatchBounds` (`bounds.ts`, with `minHeightM` and
+  `maxHeightM` for the sketch's `minH` and `maxH`, the unit rule), `BodyFixedVec3` (`planet.ts`),
+  `SelectedPatch`, `PatchRequest` and `Selection` (`select.ts`, types only), and the key half of
+  T2's `patchKey.ts` (`Face`, `FACES`, `MAX_LEVEL`, `PatchKey`, `rootKey`, `patchKeyString`,
+  `parsePatchKeyString`, `isValidPatchKey`, `parentKey`, `childKeys`, with `patchKey.test.ts`);
+  T2 checks them against its golden. Added beside the Provides: `ResidentPatch`, `CachedPatch`,
+  `CacheInsert` (`stored` with the evicted key, or `refused`), `CachePressure`,
+  `PatchCache.insert`/`remove`/`retain`/`pressure`/`heldBytes`, `DrawnPatch`, and
+  `DrawSet { patches, slots: Uint32Array, standingIn, missing }`; `slotLayout(fields, budget)`,
+  `terrainSlotFields`, `terrainSlotLayout` and `MIN_SLOTS` (6) in `slotLayout.ts`. Choices: the six
+  roots are never evicted, so every selected patch keeps a resident ancestor once they are baked;
+  an ancestor standing in covers its resident descendants (drawn patches never overlap), and
+  `standingIn` counts them; draw pins cover every resident selected patch as well as the drawn
+  ones, so the siblings under a stand-in are kept until all arrive; a patch inserted between two
+  `retain`s takes the last selection's pins at once, so a forced patch is pinned on arrival; the
+  pins are reported as exceeding the slots when the forced patches (resident or not) and the other
+  pinned ones outnumber the slots, or an insert was refused, and the report survives the frame's
+  `retain`. **Design note 10 corrected (decided 2026-10-02 by the orchestrator): the slot counts
+  normals as stored, with the atlas's one-texel gutter**, 67² × 4 = 17,956 B at the mesh's
+  resolution and 131² × 4 = 68,644 B doubled, so the low slot is 51,756 B and 64 MiB holds 1,296
+  slots, not 1,323 (Design note 10's and T8's figure). `SlotLayout` is the one source of the slot
+  count; T11.a reads it and never recomputes it. The R10 test counts R10's
+  class weights and survey mask inside the horizon-map field until R10 adds fields of its own.
+  The acceptance filter `view/terrain/cache` leaves out `slotLayout.test.ts`; both run under
+  `view/terrain`.
+- **Deviations in T10.a, as built (the pool, 2026-10-02).** `WorkerLike` has `addEventListener`
+  and `removeEventListener` for `message` and `error` (oxlint's `prefer-add-event-listener`), not
+  `onmessage`. The constructor also takes `bake: BakeSettings` (the setting's vertex path and
+  normals, sent with every bake). Added: `onFailed` (a key whose bake failed is reported and not
+  requested again), `currentGeneration`, `queuedCount`, `inFlightCount`, `lostWorkers`,
+  `MAX_IN_FLIGHT_PER_WORKER` and `MAX_CONSECUTIVE_WORKER_FAILURES` (3: a worker failing three times
+  with no answer between is given up, not restarted forever), and `bakeTransferables` in
+  `messages.ts`. Requests go one a worker a round, least loaded first. Once a field is posted, a
+  worker is sent bakes only after acknowledging it, and a bake from an older field is baked again.
+  The pool keeps the field's bytes (about 15 MB on the render thread, beyond Design note 11's
+  count) to post them to a replacement worker. The scripted fake worker lives in `pool.test.ts`.
+  `Float16Array`'s lib (`es2025.float16`, the name TypeScript 7.0.2 has) joined both
+  `tsconfig.web.json` and `tsconfig.worker.json` here, ahead of T10.b, for `BakedPatch.normals`.
