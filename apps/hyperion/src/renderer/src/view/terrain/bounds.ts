@@ -75,10 +75,17 @@ const RING = boundaryVertices();
 
 /**
  * The bounding volume of patch `key`: a sphere and an oriented box enclosing the patch's surface
- * at every height its level's range allows (all zero with no level table).
+ * at every height in `heightRangeM`, by default its level's range (all zero with no level table).
+ *
+ * @param heightRangeM - The lowest and highest height the patch can reach, metres: a tighter range
+ *   inherited from a baked ancestor (selection's `heightRanges`), or the level's.
  */
-export function patchBounds(planet: PlanetGeometry, key: PatchKey): PatchBounds {
-  const [minHeightM, maxHeightM] = levelHeightRangeM(planet, key.level);
+export function patchBounds(
+  planet: PlanetGeometry,
+  key: PatchKey,
+  heightRangeM: readonly [number, number] = levelHeightRangeM(planet, key.level),
+): PatchBounds {
+  const [minHeightM, maxHeightM] = heightRangeM;
   const half = PATCH_QUADS / 2;
   const centreDir = vertexDir(key, half, half);
   const origin = toVec3(surfacePoint(planet.figure, centreDir, (minHeightM + maxHeightM) / 2));

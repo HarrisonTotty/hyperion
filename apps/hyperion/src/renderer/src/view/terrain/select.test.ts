@@ -11,15 +11,18 @@ import {
   childKeys,
   cornerNeighbours,
   EDGES,
+  FACES,
   edgeNeighbour,
   parentKey,
   type PatchKey,
   patchKeyString,
   rootKey,
 } from "./patchKey";
-import { planetGeometry, surfacePoint } from "./planet";
+import type { GroundContact } from "./grounded";
+import { levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
 import {
-  restrictQuadtree,
+  type HeightRangeLookup,
+  PatchLeafSet,
   SAGITTA_FACTOR,
   type Selection,
   selectionErrorM,
@@ -296,23 +299,23 @@ describe("the chords' sagitta", () => {
   });
 });
 
-/** A leaf set of `keys`, each split on demand into all four children. */
-function balanced(keys: readonly PatchKey[]): PatchKey[] {
-  const leaves = new Map(keys.map((key) => [patchKeyString(key), { key }]));
-  const internal = new Set<string>();
-  for (const key of keys) {
-    let up = parentKey(key);
-    while (up !== null) {
-      internal.add(patchKeyString(up));
-      up = parentKey(up);
-    }
+/**
+ * The leaves after splitting the six faces' roots down the path to `target`, each split balanced as
+ * selection balances it, every child kept.
+ */
+function splitDownTo(target: PatchKey): PatchKey[] {
+  const tree = new PatchLeafSet<PatchKey>();
+  for (const face of [0, 1, 2, 3, 4, 5] as const) {
+    tree.add(rootKey(face), rootKey(face));
   }
-  restrictQuadtree(leaves, internal, (child) => {
-    const leaf = { key: child };
-    leaves.set(patchKeyString(child), leaf);
-    return [leaf];
-  });
-  return [...leaves.values()].map((l) => l.key);
+  const path: PatchKey[] = [];
+  for (let up = parentKey(target); up !== null; up = parentKey(up)) {
+    path.unshift(up);
+  }
+  for (const key of path) {
+    tree.splitBalanced(key, (child) => child);
+  }
+  return [...tree.values()];
 }
 
 /** How many leaves are more than one level finer than a neighbour's covering leaf. */
@@ -322,6 +325,7 @@ function levelGaps(keys: readonly PatchKey[]): number {
       keys.map((k) => [patchKeyString(k), { key: k, bounds: UNIT_BOUNDS, forced: false }]),
     ),
     demand: [],
+    limited: false,
   };
   let gaps = 0;
   for (const k of keys) {
@@ -341,39 +345,170 @@ function levelGaps(keys: readonly PatchKey[]): number {
   return gaps;
 }
 
-/** The leaves of a face split down to `key` at its level, the rest of the face as coarse as can be. */
-function cutTo(key: PatchKey): PatchKey[] {
-  const keys: PatchKey[] = [];
-  let node: PatchKey = key;
-  let up = parentKey(node);
-  while (up !== null) {
-    for (const sibling of childKeys(up)) {
-      if (patchKeyString(sibling) !== patchKeyString(node)) {
-        keys.push(sibling);
-      }
-    }
-    node = up;
-    up = parentKey(node);
-  }
-  keys.push(key);
-  return keys;
-}
-
 describe("the restricted quadtree", () => {
-  it("splits a leaf two levels coarser than its neighbour across a face edge", () => {
-    // A cell of face 0 at level 4 on its +u edge, beside face 1's whole face.
-    const keys = [...cutTo({ face: 0, level: 4, i: 15, j: 7 }), rootKey(1)];
-    expect(levelGaps(keys)).toBeGreaterThan(0);
-    const out = balanced(keys);
+  it("splits the neighbouring face when a cell beside its edge is split two levels deeper", () => {
+    // A cell of face 0 at level 4 on its +u edge, which meets face 1.
+    const out = splitDownTo({ face: 0, level: 4, i: 15, j: 7 });
     expect(levelGaps(out)).toBe(0);
     expect(out.some((k) => k.face === 1 && k.level >= 3)).toBe(true);
   });
 
   it("splits about a cube corner, where three faces meet", () => {
-    const keys = [...cutTo({ face: 0, level: 5, i: 31, j: 31 }), rootKey(1), rootKey(2)];
-    expect(levelGaps(keys)).toBeGreaterThan(0);
-    const out = balanced(keys);
+    const out = splitDownTo({ face: 0, level: 5, i: 31, j: 31 });
     expect(levelGaps(out)).toBe(0);
+    expect(out.some((k) => k.face === 1 && k.level >= 4)).toBe(true);
     expect(out.some((k) => k.face === 2 && k.level >= 4)).toBe(true);
+  });
+
+  it("undoes a split and the balance it brought", () => {
+    const tree = new PatchLeafSet<PatchKey>();
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      tree.add(rootKey(face), rootKey(face));
+    }
+    for (const key of [rootKey(0), { face: 0 as const, level: 1, i: 1, j: 1 }]) {
+      tree.splitBalanced(key, (child) => child);
+    }
+    const before = [...tree.values()].map(patchKeyString);
+    tree.begin();
+    tree.splitBalanced({ face: 0, level: 2, i: 3, j: 3 }, (child) => child);
+    expect(tree.size).toBeGreaterThan(before.length + 3);
+    tree.rollback();
+    expect([...tree.values()].map(patchKeyString).toSorted()).toEqual(before.toSorted());
+    expect(tree.size).toBe(before.length);
+  });
+});
+
+describe("selection under a patch budget", () => {
+  const pose = (): ViewSelectionInput => view(LOW, lookingDown(LOW, 1.2));
+
+  it("never exceeds the budget, and says so when the budget stops a split", () => {
+    const capped = selectPatches({
+      planet: PLANET,
+      views: [pose()],
+      setting: "high",
+      grounded: [],
+      maxPatches: 200,
+    });
+    expect(capped.patches.size).toBeLessThanOrEqual(200);
+    expect(capped.limited).toBe(true);
+  });
+
+  it("equals the selection with no budget when the budget is not reached", () => {
+    const free = select([pose()]);
+    expect(free.limited).toBe(false);
+    const roomy = selectPatches({
+      planet: PLANET,
+      views: [pose()],
+      setting: "high",
+      grounded: [],
+      // A split can drop children no view sees, so a run may pass through more leaves than it ends with.
+      maxPatches: 2 * free.patches.size,
+    });
+    expect(roomy.limited).toBe(false);
+    expect([...roomy.patches.keys()]).toEqual([...free.patches.keys()]);
+  });
+
+  it("leaves a patch above τ only when limited", () => {
+    const capped = selectPatches({
+      planet: PLANET,
+      views: [pose()],
+      setting: "high",
+      grounded: [],
+      maxPatches: 300,
+    });
+    const v = pose();
+    const overTau = [...capped.patches.values()].some((p) => {
+      if (p.key.level >= PLANET.finestLevel) {
+        return false;
+      }
+      const rel = relativeBounds(p.bounds, v.camera.positionM);
+      const sees =
+        inFrustum(
+          rel,
+          frustumOf({
+            orientation: v.camera.orientation,
+            fovXRad: v.fovXRad,
+            viewport: v.viewport,
+          }),
+        ) && aboveHorizon(rel, horizonCone(PLANET, v.camera.positionM));
+      return (
+        sees &&
+        screenSpaceErrorPx(selectionErrorM(PLANET, p.key.level), distanceToBoxM(rel), v) > v.tauPx
+      );
+    });
+    expect([capped.limited, overTau]).toEqual([true, true]);
+  });
+
+  it("keeps every forced patch whatever the budget", () => {
+    const site = above(5);
+    const contact: GroundContact = { positionM: site, radiusM: 20 };
+    const free = selectPatches({
+      planet: PLANET,
+      views: [pose()],
+      setting: "high",
+      grounded: [contact],
+    });
+    const forced = [...free.patches.values()]
+      .filter((p) => p.forced)
+      .map((p) => patchKeyString(p.key));
+    expect(forced.length).toBeGreaterThan(4);
+    const tight = selectPatches({
+      planet: PLANET,
+      views: [pose()],
+      setting: "high",
+      grounded: [contact],
+      maxPatches: 10,
+    });
+    expect(forced.filter((k) => tight.patches.get(k)?.forced !== true)).toEqual([]);
+  });
+});
+
+/** A lookup of baked ranges in which `resident` are baked at their level's range. */
+function residentRanges(resident: readonly PatchKey[]): HeightRangeLookup {
+  const baked = new Map(
+    resident.map((k) => [patchKeyString(k), levelHeightRangeM(PLANET, k.level)]),
+  );
+  return { heightRangeM: (key) => baked.get(patchKeyString(key)) };
+}
+
+describe("demand", () => {
+  it("asks only for patches whose parent is baked, roots apart", () => {
+    const roots = FACES.map((f) => rootKey(f));
+    const resident = [...roots, ...roots.flatMap((r) => childKeys(r))];
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [view(LOW, lookingDown(LOW, 1.2))],
+      setting: "high",
+      grounded: [],
+      heightRanges: residentRanges(resident),
+    });
+    const bakedStrings = new Set(resident.map(patchKeyString));
+    expect(sel.demand.length).toBeGreaterThan(0);
+    for (const r of sel.demand) {
+      const parent = parentKey(r.key);
+      expect(parent === null || bakedStrings.has(patchKeyString(parent))).toBe(true);
+      expect(bakedStrings.has(patchKeyString(r.key))).toBe(false);
+    }
+  });
+
+  it("asks for the roots first when nothing is baked", () => {
+    const sel = select([view(LOW, lookingDown(LOW, 1.2))]);
+    expect(sel.demand.every((r) => r.key.level === 0)).toBe(true);
+  });
+
+  it("selects coarser where baked ranges tighten the bounds", () => {
+    const none = select([view(LOW, lookingDown(LOW, 1.2))]);
+    // Everything down to level 6 baked, at a range of ±100 m.
+    const tight: HeightRangeLookup = {
+      heightRangeM: (key) => (key.level <= 6 ? [-100, 100] : undefined),
+    };
+    const baked = selectPatches({
+      planet: PLANET,
+      views: [view(LOW, lookingDown(LOW, 1.2))],
+      setting: "high",
+      grounded: [],
+      heightRanges: tight,
+    });
+    expect(baked.patches.size).toBeLessThan(none.patches.size);
   });
 });

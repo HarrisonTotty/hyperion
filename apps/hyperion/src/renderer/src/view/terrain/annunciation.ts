@@ -53,7 +53,12 @@ export function coarserThan(selection: Selection, reference: Selection): boolean
   return false;
 }
 
-/** The two conditions of one frame, from the draw set, the selection and the reference. */
+/**
+ * The two conditions of one frame, from the draw set, the selection and the reference: `DETAIL
+ * LIMITED` where the selection is coarser than the reference, or the patch budget stopped it
+ * (`Selection.limited`), so that a caller on the high setting may pass the selection as its own
+ * reference rather than run an uncapped second selection.
+ */
 export function terrainConditions(
   draw: DrawSet,
   selection: Selection,
@@ -61,7 +66,8 @@ export function terrainConditions(
 ): TerrainConditions {
   return {
     streaming: draw.standingIn > 0 || draw.missing > 0,
-    detailLimited: coarserThan(selection, reference),
+    // A selection the patch budget stopped is coarser than its own τ asks (the patch-demand ruling).
+    detailLimited: selection.limited || coarserThan(selection, reference),
   };
 }
 

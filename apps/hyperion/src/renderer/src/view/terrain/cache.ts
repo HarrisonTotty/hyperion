@@ -16,7 +16,7 @@
 
 import type { BodyFixedVec3 } from "./planet";
 import type { SlotLayout } from "./slotLayout";
-import type { Selection } from "./select";
+import type { HeightRangeLookup, Selection } from "./select";
 import { type PatchKey, parentKey, patchKeyString } from "./patchKey";
 
 /** What the cache keeps of a baked patch besides the bytes in its slot. */
@@ -75,7 +75,7 @@ interface Entry {
  * two retains takes the pins the last retained selection gives its key, so a forced patch is pinned
  * from the moment it arrives.
  */
-export class PatchCache {
+export class PatchCache implements HeightRangeLookup {
   readonly layout: SlotLayout;
   private readonly entries = new Map<string, Entry>();
   private readonly freeSlots: number[] = [];
@@ -121,6 +121,14 @@ export class PatchCache {
   /** Whether the patch keyed by `keyString` is resident. */
   has(keyString: string): boolean {
     return this.entries.has(keyString);
+  }
+
+  /**
+   * The baked height range of a resident patch, metres, or `undefined` if it is not resident:
+   * selection's {@link HeightRangeLookup}, through which baked ancestors tighten bounds.
+   */
+  heightRangeM(key: PatchKey): readonly [number, number] | undefined {
+    return this.entries.get(patchKeyString(key))?.patch.heightRangeM;
   }
 
   /**
