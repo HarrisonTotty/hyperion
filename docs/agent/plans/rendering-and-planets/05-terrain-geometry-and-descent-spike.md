@@ -3415,7 +3415,18 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     ⌊slots ÷ 2⌋. The record's terrain (`measureTerrain`): the site's height is the module's
     `surfaceHeightM` (T4.c's collision interpolant) at the site's direction; the track maximum is the
     highest baked height plus ε_14 over the level-14 patches under the low pass's and the
-    slowdown's track, sampled every 250 m, a true bound. On seed 7 the site lies at −1,953.2 m.
+    slowdown's track, sampled every 250 m, a true bound. On seed 7 the site lies at −1,845.8 m.
+    **Corrected (2026-10-03, lane B's diagnosis):** every height query and patch key takes the
+    direction d of the spheroid point M·d (Design note 5), which the profile now exposes as
+    `DescentPose.groundDir` and `DescentProfile.siteDir`, with `datumDirection(figure, p)` =
+    M⁻¹p ÷ |M⁻¹p| for a point on the spheroid. The first record read the geocentric p ÷ |p|,
+    0.036° (4 km) off at seed 7's site, and found −1,953.2 m there: the camera hovered 107 m
+    underground looking down, so selection rightly culled everything. `siteHeight.wasm.test.ts`
+    holds the measured height inside the finest bake's range under the site.
+  - _The craft's contact_ (`craftContacts`): one contact at the ground point while
+    `isDescending` holds or the craft is grounded, its clearance within the held radius r_g (its
+    10 m plus one finest patch), so that an exact hover (vertical speed 0) keeps its forced
+    region (Design note 9's grounded bodies).
   - _Scope (orchestrator's ruling, 2026-10-03):_ the plan's whole-descent fixed-step test is split.
     The unit test (`demandRecord.test.ts`) pins the selection hash of short windows, 1 s measured
     after 1 s of warm-up, ending 2 s before each segment's end, on both settings, under
@@ -3428,23 +3439,25 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     `docs/measurements/descent-spike/<date>-demand-<rules>.{json,md}` with any truncation, the rate
     and the frames covered stated. The ridged planet's 4σ cells are labelled "statistical, not a
     bound on the ridged planet (bound.rs finding)".
-  - **Finding: D's factor of two.** In the windows (min(hard, 4σ_n), ridges off), the measured
-    demand lies within a factor of two of the per-level D on high's descent arc (0.67) and approach
-    and flare (1.39) and low's descent arc (0.81), which the test asserts. It misses on high's low
-    fast pass (2.08), low's approach (3.66) and low pass (3.41), and both settings' slowdown (0–0.09);
-    the vertical descent's and the hover's are void (the collapse below). Two causes are clear. D
-    assumes a ring all round, 4k patches along the leading edge, where the 60° frustum along the
-    track sees the edge's chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude D's
-    vertical term stays positive (h floored at the cap) while nothing new is selected. On the low
-    setting D is also low, since below k ≈ 3 the quadtree's granularity floors the count (Design
-    note 19's "about a quarter"). **Proposed correction, not the gate:** D_frustum =
-    Σ_L 4 k_L tan(φ_x ÷ 2) v ÷ S_L + (3π k² ÷ ln 2) |ḣ| ÷ h above the cap and the vertical term zero
-    below it. The whole-descent record has the per-segment figures. For T18 and T19.
-  - **Finding: the selection collapses near the ground** (2026-10-03, assigned to lane B): with
-    baked ranges, at the hover 1.6 m above the site's collision height (−1,953 m, below the datum),
-    the selection falls from 346 patches to none within 0.25 s, forced region included; without
-    ranges the same pose selects 10,585. The vertical descent's and the hover's windows pin that
-    sequence until the fix, and the full 4σ record waits on it.
+  - **Finding: D's factor of two** (windows re-measured 2026-10-03 after the direction fix). In
+    the windows (min(hard, 4σ_n), ridges off), demand ÷ D is, high then low: orbit coast 0 / 0
+    (D 0.9 and 0.04 a second, nothing new selected), descent arc 0.67 / 0.81, approach and flare
+    1.33 / 2.74, low fast pass 1.40 / 3.09, slowdown 0.34 / 0.99, vertical descent 0 / 0 (D 81
+    and 25), and the hover 0 against 0. The test asserts the five within a factor of two: high's
+    arc, approach and low pass, low's arc and slowdown. Two causes are clear. D assumes a ring all
+    round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
+    chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
+    vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
+    vertical descent's window (about 80 m to 40 m). On the low setting D is also low, since below
+    k ≈ 3 the quadtree's granularity floors the count (Design note 19's "about a quarter").
+    **Proposed correction, not the gate:** D_frustum = Σ_L 4 k_L tan(φ_x ÷ 2) v ÷ S_L +
+    (3π k² ÷ ln 2) |ḣ| ÷ h above the cap and the vertical term zero below it. The whole-descent
+    record has the per-segment figures. For T18 and T19.
+  - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
+    camera underground (the direction above), not selection: lane B's
+    `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With
+    the site at −1,845.8 m the windows select 66 patches (high) and 69 (low) at the hover, the
+    forced region included, and the vertical descent's and the hover's hashes are pinned.
   - **Finding: budgeted selection under the hard bound churns** (probe, 2026-10-03, high, low fast
     pass): 952 patches, `limited` 72% of frames, about 830 new keys a frame (53,000 a second
     against D's 311), `selectPatches` p50 116 ms. Lane B fixed it (5d90fab, the streaming gate,

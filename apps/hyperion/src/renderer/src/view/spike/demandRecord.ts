@@ -10,7 +10,7 @@
  */
 
 import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
-import { uvToSt, xyzToFaceUv } from "../terrain/cube";
+import { uvToSt, type Xyz, xyzToFaceUv } from "../terrain/cube";
 import { type PatchKey, patchKeyString } from "../terrain/patchKey";
 import { levelBoundM, type PlanetGeometry, planetGeometry } from "../terrain/planet";
 import { type SlotLayout, terrainSlotLayout } from "../terrain/slotLayout";
@@ -63,7 +63,8 @@ export interface SurfaceSource {
   /** A baked patch's lowest and highest height, metres. */
   readonly rangeOf: (key: PatchKey) => readonly [number, number];
   /**
-   * The drawn finest mesh's height at a unit direction, metres above the spheroid: the module's
+   * The drawn finest mesh's height at the unit direction d of the spheroid point M·d (not the
+   * geocentric direction; Design note 5), metres above the spheroid: the module's
    * `surfaceHeightM(x, y, z, ridges)`, T4.c's collision interpolant.
    */
   readonly surfaceHeightM: (dir: readonly [number, number, number]) => number;
@@ -294,18 +295,13 @@ export const TRACK_LEVEL = 14;
 /** The spacing the ground track is sampled at, metres: under half a level-14 patch. */
 const TRACK_STEP_M = 250;
 
-/** The unit direction of a position. */
-function unit(p: {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}): readonly [number, number, number] {
-  const r = Math.hypot(p.x, p.y, p.z);
-  return [p.x / r, p.y / r, p.z / r];
+/** A unit direction as the module's and the cube's triples take it. */
+function triple(d: { readonly x: number; readonly y: number; readonly z: number }): Xyz {
+  return [d.x, d.y, d.z];
 }
 
-/** The patch of `level` holding the unit direction `dir`. */
-export function patchKeyAt(dir: readonly [number, number, number], level: number): PatchKey {
+/** The patch of `level` holding the unit direction `dir` (d of the spheroid point M·d). */
+export function patchKeyAt(dir: Xyz, level: number): PatchKey {
   const { face, u, v } = xyzToFaceUv(dir);
   const n = 2 ** level;
   const index = (w: number): number => Math.min(n - 1, Math.max(0, Math.floor(uvToSt(w) * n)));
@@ -326,8 +322,10 @@ export function measureTerrain(
 ): Required<DescentTerrain> {
   const { rangeOf } = source;
   const flat = recordProfile();
-  const site = flat.poseAt(flat.durationS).groundPointM;
-  const siteHeightM = source.surfaceHeightM(unit(site));
+  // The interpolant and the patch keys take the direction d of the spheroid point M·d (Design
+  // note 5), which the profile carries: the geocentric direction of the same point lands 0.036°
+  // (4 km) away at seed 7's site, on ground 107 m lower.
+  const siteHeightM = source.surfaceHeightM(triple(flat.siteDir));
   let trackMaxHeightM = -Infinity;
   const seen = new Set<string>();
   for (const span of flat
@@ -335,7 +333,8 @@ export function measureTerrain(
     .filter(({ name }) => name === "low fast pass" || name === "slowdown")) {
     let lastM: { readonly x: number; readonly y: number; readonly z: number } | null = null;
     for (let tS = span.startS; tS <= span.endS; tS += 0.05) {
-      const ground = flat.poseAt(tS).groundPointM;
+      const pose = flat.poseAt(tS);
+      const ground = pose.groundPointM;
       if (
         lastM !== null &&
         Math.hypot(ground.x - lastM.x, ground.y - lastM.y, ground.z - lastM.z) < TRACK_STEP_M
@@ -343,7 +342,7 @@ export function measureTerrain(
         continue;
       }
       lastM = ground;
-      const key = patchKeyAt(unit(ground), TRACK_LEVEL);
+      const key = patchKeyAt(triple(pose.groundDir), TRACK_LEVEL);
       const keyString = patchKeyString(key);
       if (seen.has(keyString)) {
         continue;

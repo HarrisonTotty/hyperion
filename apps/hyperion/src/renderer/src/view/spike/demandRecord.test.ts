@@ -28,28 +28,27 @@ const SOURCE = {
 
 /**
  * Each window's selection-sequence hash under min(hard, 4σ_n), ridges off, as
- * `just descent-demand --write-fixture` printed them on 2026-10-03 (TEST_PLANET_VERSION 2, the terrain cache of 5d90fab). The vertical
- * descent's and the hover's are not asserted: they record the selection's collapse near the ground
- * (Risks, T13.a) and are pinned once lane B's fix lands.
+ * `just descent-demand --write-fixture` printed them on 2026-10-03 (TEST_PLANET_VERSION 2, the
+ * terrain cache of 5d90fab, the site's height read along the spheroid point's direction d).
  */
 const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
-    "orbit coast": "6f851b018a6ce6e5",
-    "descent arc": "f42af12198c44b2d",
-    "approach and flare": "2220ee350402b9fa",
-    "low fast pass": "97d8f781693e9eea",
-    slowdown: "5a62384443b55289",
-    "vertical descent": "65b2973f9c6a59c9",
-    "hover and touchdown": "c6fafd561a9413ce",
+    "orbit coast": "95585482dc0e857e",
+    "descent arc": "abe0feda7e266334",
+    "approach and flare": "677de6aa77f6bdcf",
+    "low fast pass": "944d9779b63b1e5e",
+    slowdown: "f78e46ce552d5db5",
+    "vertical descent": "8ee3da3059f87d15",
+    "hover and touchdown": "01b1b0a3ae9fae25",
   },
   low: {
     "orbit coast": "c9a36f3ba4350b99",
-    "descent arc": "f69f7cae59aa8fde",
-    "approach and flare": "a7f5be22369a05e9",
-    "low fast pass": "b8a337609dbe259e",
-    slowdown: "4dba4ad5c01113b3",
-    "vertical descent": "777ed3317336dc83",
-    "hover and touchdown": "629fb27ab7210d02",
+    "descent arc": "5706a45e7208ead2",
+    "approach and flare": "7436bf7146e49c9a",
+    "low fast pass": "6cd69adfa257ea09",
+    slowdown: "b2f7b6de8978aa71",
+    "vertical descent": "2570e11fd4e1f365",
+    "hover and touchdown": "a1556a759b69fd43",
   },
 };
 
@@ -60,13 +59,12 @@ const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 const WITHIN_TWO: ReadonlyArray<string> = [
   "high/descent arc",
   "high/approach and flare",
+  "high/low fast pass",
   "low/descent arc",
+  "low/slowdown",
 ];
 
 const PROFILE = recordProfile();
-
-/** The windows the selection's collapse near the ground voids until lane B's fix (Risks, T13.a). */
-const AWAITING_FIX: ReadonlySet<string> = new Set(["vertical descent", "hover and touchdown"]);
 
 describe("the ranges fixture", () => {
   it("holds the module's ridges-off level table, as the golden pins it", () => {
@@ -77,7 +75,7 @@ describe("the ranges fixture", () => {
 
 describe("the descent's fixed-step windows", () => {
   for (const settingView of SETTING_VIEWS) {
-    for (const window of testWindows(PROFILE).filter((w) => !AWAITING_FIX.has(w.segment))) {
+    for (const window of testWindows(PROFILE)) {
       it(`pins ${settingView.setting}'s ${window.segment} selection sequence`, () => {
         const cell = runCell({
           rule: "calibrated",

@@ -359,6 +359,31 @@ export interface DescentPose {
    * placed (the site itself at touchdown).
    */
   readonly groundPointM: Vec3;
+  /**
+   * The unit direction d of the track's point beneath the camera, the one the camera and
+   * `groundPointM` stand over along the spheroid's normal (M·d + h·ν, R05 Design note 5). This is
+   * the direction a height query (`surfaceHeightM`) or a patch key (`xyzToFaceUv`) takes, not the
+   * geocentric direction of either point.
+   */
+  readonly groundDir: Vec3;
+}
+
+/**
+ * The unit direction d of a body-fixed point p on the spheroid, p = M·d: d = M⁻¹p ÷ |M⁻¹p|, with
+ * M = diag(a, a, c) (R05 Design note 5). This is the direction the bake, the collision interpolant
+ * and the patch keys take; p ÷ |p|, the geocentric direction, is off by about f sin 2β ÷ 2 (f ≈ 1 ÷ 298
+ * the flattening, β the latitude), up to 0.1° at 45° and 0.036° (4 km) at seed 7's site, which
+ * lands a height query on other ground.
+ *
+ * @remarks
+ * Exact for a point on the spheroid. A point h above it along the normal maps to a direction off
+ * by about |h| f sin 2φ ÷ a (6 m on the ground at h = 1.8 km): take the direction the point was
+ * built from (`DescentPose.groundDir`) where there is one.
+ */
+export function datumDirection(figure: BodyFigure, p: Vec3): Vec3 {
+  return normalise(
+    vec3(p.x / figure.equatorialRadiusM, p.y / figure.equatorialRadiusM, p.z / figure.polarRadiusM),
+  );
 }
 
 /**
@@ -478,6 +503,11 @@ export class DescentProfile {
     this.#arcRadiusM = (figure.equatorialRadiusM + figure.polarRadiusM) / 2;
   }
 
+  /** The landing site's unit direction d (the spheroid point M·d, Design note 5). */
+  get siteDir(): Vec3 {
+    return this.#siteDir;
+  }
+
   /** The segment under way at `tS`, clamped to the script. */
   segmentAt(tS: number): DescentSegment {
     let i = 0;
@@ -571,6 +601,7 @@ export class DescentProfile {
       horizontalSpeedMps,
       verticalSpeedMps,
       groundPointM: vec3(g[0], g[1], g[2]),
+      groundDir: dir,
     };
   }
 }

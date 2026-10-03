@@ -19,16 +19,39 @@
 import { vec3 } from "../../geometry/vec3";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { DrawSetResolver, PatchCache } from "../terrain/cache";
-import { type GroundContact, isDescending } from "../terrain/grounded";
+import {
+  finestPatchSizeM,
+  type GroundContact,
+  heldRadiusM,
+  isDescending,
+} from "../terrain/grounded";
 import { type PatchKey, patchKeyString } from "../terrain/patchKey";
 import type { PlanetGeometry } from "../terrain/planet";
 import { type SelectionInput, selectPatches } from "../terrain/select";
 import type { SlotLayout } from "../terrain/slotLayout";
 import { type DemandView, perLevelDemand } from "./demand";
-import type { DescentProfile } from "./descentProfile";
+import type { DescentPose, DescentProfile } from "./descentProfile";
 
 /** The craft's bounding radius the run's contact takes, metres (provisional; the scene's own). */
 export const CRAFT_RADIUS_M = 10;
+
+/**
+ * The scripted craft as the selection's contacts (Design note 9): one contact at the ground point
+ * beneath it while it is descending (`isDescending`) or grounded, none otherwise.
+ *
+ * @remarks
+ * Grounded is the clearance within the held radius r_g, the craft's radius plus one finest patch:
+ * the held sphere about the craft then reaches the ground, as it does at an exact hover, where the
+ * vertical speed is 0 and `isDescending` does not hold. The contact sits on the ground, not at the
+ * camera, since the forced region's rule is 3-D (T11.c's note).
+ *
+ * @param patchSizeM - The finest patch's edge, metres (`finestPatchSizeM`).
+ */
+export function craftContacts(pose: DescentPose, patchSizeM: number): GroundContact[] {
+  const contact: GroundContact = { positionM: pose.groundPointM, radiusM: CRAFT_RADIUS_M };
+  const grounded = pose.clearanceM <= heldRadiusM(contact, patchSizeM);
+  return grounded || isDescending(pose.clearanceM, pose.verticalSpeedMps) ? [contact] : [];
+}
 
 /** What a fixed-step run reads. */
 export interface FixedStepOptions {
@@ -130,6 +153,7 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
   const hash = new Fnv64();
   const steps = Math.round((options.toS - options.fromS) * options.rateHz);
   const deadline = options.deadlineMs ?? Infinity;
+  const patchSizeM = finestPatchSizeM(planet);
   let bakeMs = 0;
   let truncated = false;
   for (let step = 0; step <= steps; step += 1) {
@@ -139,9 +163,7 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
     }
     const tS = options.fromS + step / options.rateHz;
     const pose = profile.poseAt(tS);
-    const grounded: GroundContact[] = isDescending(pose.clearanceM, pose.verticalSpeedMps)
-      ? [{ positionM: pose.groundPointM, radiusM: CRAFT_RADIUS_M }]
-      : [];
+    const grounded = craftContacts(pose, patchSizeM);
     const input: SelectionInput = {
       planet,
       views: [

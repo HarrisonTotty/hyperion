@@ -10,7 +10,8 @@ import {
   recordProfile,
   SETTING_VIEWS,
 } from "./demandRecord";
-import { type FixedStepOptions, runFixedStep, segmentFigures } from "./fixedStep";
+import { finestPatchSizeM } from "../terrain/grounded";
+import { craftContacts, type FixedStepOptions, runFixedStep, segmentFigures } from "./fixedStep";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 const PLANET = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
@@ -88,6 +89,29 @@ describe("the fixed-step run", () => {
       measured.reduce((sum, f) => sum + f.demanded, 0) / (5 / 8),
       9,
     );
+  });
+});
+
+describe("the craft's contact", () => {
+  const profile = recordProfile();
+  const patchSizeM = finestPatchSizeM(PLANET);
+  const at = (segment: string, fromEnd: number): ReturnType<typeof profile.poseAt> => {
+    const span = profile.segmentSpans().find(({ name }) => name === segment);
+    return profile.poseAt((span?.endS ?? NaN) - fromEnd);
+  };
+
+  it("holds at an exact hover, still and a metre up, where isDescending does not", () => {
+    const hover = profile.poseAt(profile.durationS);
+    expect(hover.verticalSpeedMps).toBe(0);
+    expect(craftContacts(hover, patchSizeM)).toEqual([
+      { positionM: hover.groundPointM, radiusM: 10 },
+    ]);
+  });
+
+  it("holds while descending, and not on the low fast pass or in orbit", () => {
+    expect(craftContacts(at("vertical descent", 5), patchSizeM)).toHaveLength(1);
+    expect(craftContacts(at("low fast pass", 10), patchSizeM)).toEqual([]);
+    expect(craftContacts(at("orbit coast", 10), patchSizeM)).toEqual([]);
   });
 });
 
