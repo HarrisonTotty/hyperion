@@ -279,8 +279,15 @@ export class ResilientEngine implements RenderEngine {
     return this.#currentAsync("readBuffer", (inner) => inner.readBuffer(buffer, access));
   }
 
-  readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer> {
-    return this.#currentAsync("readTexture", (inner) => inner.readTexture(texture, level, rect));
+  readTexture(
+    texture: TextureHandle,
+    level?: number,
+    rect?: TexelRect,
+    access?: "cpu" | "tolerance",
+  ): Promise<ArrayBuffer> {
+    return this.#currentAsync("readTexture", (inner) =>
+      inner.readTexture(texture, level, rect, access),
+    );
   }
 
   onPassTimes(listener: (times: PassTimes) => void): () => void {
