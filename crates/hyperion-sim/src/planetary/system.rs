@@ -99,6 +99,7 @@ use crate::planetary::belts::{
 };
 use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{VolatileDraws, VolatileInventory};
+use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::rotation::{BodyRotation, ObliquityLaw, SpinDraws, SpinInputs};
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, HabitableZone, HostLight, Illumination, MassFractions, PlacedBody,
@@ -562,6 +563,32 @@ impl Body {
         self.rotation.map_or(Section::NotModelled, |rotation| {
             Section::Ok(*rotation.frame())
         })
+    }
+
+    /// The record's figure section at `t` (P14.T46.d): the figure of the body's held rotation at
+    /// `t` on its bulk `bulk` and mass `mass` then, or [`Section::NotModelled`] where either is
+    /// missing. The caller gives a body not present, a ring, a belt and the halo
+    /// [`Section::NotApplicable`].
+    #[must_use]
+    fn figure_section(
+        &self,
+        bulk: Option<&BulkProperties>,
+        mass: EarthMasses,
+        t: UniverseTime,
+    ) -> Section<BodyFigure> {
+        let (Some(rotation), Some(bulk)) = (self.rotation, bulk) else {
+            return Section::NotModelled;
+        };
+        let frame = rotation.frame();
+        Section::Ok(BodyFigure::derive(&FigureInputs {
+            radius: Metres::from(bulk.radius()),
+            mass: Kilograms::from(mass),
+            class: bulk.class(),
+            fractions: bulk.fractions(),
+            rate: frame.rate().rate_at(t),
+            state: frame.state_at(t),
+            pole: frame.pole(),
+        }))
     }
 
     /// The bytes the body owns on the heap: a ring's gaps.
@@ -2078,12 +2105,12 @@ impl PlanetarySystem {
                 now.derived = Some(derived);
                 now.sky = sky;
                 now.nursery = self.nursery(epoch.ctx, body);
-                let builder = builder.derived(&derived);
-                let builder = match icy_member_bulk(body, &derived) {
-                    Some(bulk) => builder.bulk(Section::Ok(bulk)),
-                    None => builder,
-                };
+                let bulk = icy_member_bulk(body, &derived)
+                    .unwrap_or_else(|| BulkProperties::from(&derived));
                 builder
+                    .derived(&derived)
+                    .bulk(Section::Ok(bulk))
+                    .figure(body.figure_section(Some(&bulk), derived.mass(), epoch.t))
                     .orbit(Section::Ok(section))
                     .position(position)
                     .rotation(body.rotation_section())
@@ -2093,6 +2120,7 @@ impl PlanetarySystem {
                     .orbit(Section::NotApplicable)
                     .bulk(Section::NotApplicable)
                     .surface(Section::NotApplicable)
+                    .figure(Section::NotApplicable)
                     .rotation(Section::NotApplicable)
             }
         };
@@ -2164,6 +2192,7 @@ impl PlanetarySystem {
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
                 .hooks(Section::NotApplicable)
+                .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
             (Part::Moon(moon), true, Some(centre)) => {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
@@ -2175,6 +2204,7 @@ impl PlanetarySystem {
                             .with_drift(trajectory.drift().copied()),
                     ))
                     .position(centre.translated(trajectory.relative_state_at(t).0))
+                    .figure(body.figure_section(bulk.ok(), body.mass(), t))
                     .bulk(bulk)
                     .population(Section::NotApplicable)
                     .rotation(body.rotation_section())
@@ -2185,12 +2215,14 @@ impl PlanetarySystem {
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
                 .hooks(Section::NotApplicable)
+                .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
             (Part::Moon(_), _, _) => builder
                 .population(Section::NotApplicable)
                 .orbit(Section::NotApplicable)
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
+                .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
             (Part::Planet(_) | Part::Member(_), _, _) => {
                 unreachable!("a satellite is a moon or a ring")
@@ -2351,6 +2383,7 @@ impl PlanetarySystem {
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
             .hooks(Section::NotApplicable)
+            .figure(Section::NotApplicable)
             .rotation(Section::NotApplicable);
         let builder = match (at.state(), at.orbit()) {
             (BodyState::Present, Some(now)) => {
@@ -2446,6 +2479,7 @@ impl PlanetarySystem {
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
             .hooks(Section::NotApplicable)
+            .figure(Section::NotApplicable)
             .rotation(Section::NotApplicable)
             .population(now.map_or(Section::NotApplicable, |halo| {
                 Section::Ok(Population::CometaryHalo(halo))

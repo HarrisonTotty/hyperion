@@ -18,7 +18,7 @@ use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::index::{BodySlot, BodySub};
-use crate::planetary::params::HILL_STABLE_GAP;
+use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
 use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
 use crate::planetary::satellites::generate_satellites;
@@ -1947,4 +1947,92 @@ fn a_regular_moon_has_one_locking_time() {
         }
     }
     assert!(moons > 100, "{moons}");
+}
+
+/// P14.T46.d (d): the figure section's states by kind, and its level: `degrade(MassAndOrbit)`
+/// withholds the rotation and the figure, and `degrade(Bulk)` keeps them. A figure keeps the
+/// record's volume and its rotation's pole, and never exceeds the cap.
+#[test]
+fn the_figure_section_by_kind_and_level() {
+    let mut figures = 0;
+    for (ctx, system) in whole() {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let figure = record.figure();
+            match (record.rotation(), record.bulk()) {
+                (Section::NotApplicable, _) => assert_eq!(figure, &Section::NotApplicable),
+                (Section::Ok(frame), Section::Ok(bulk)) => {
+                    let Section::Ok(figure) = figure else {
+                        panic!("{:?}: a figure with a rotation and a bulk", record.index())
+                    };
+                    let radius = Metres::from(bulk.radius()).value();
+                    let spheroid = figure.spheroid();
+                    assert!((spheroid.volumetric_radius_m() / radius - 1.0).abs() < 1e-12);
+                    assert!((0.0..=FLATTENING_CAP).contains(&spheroid.flattening()));
+                    for (a, b) in figure.pole().into_iter().zip(frame.pole()) {
+                        assert_same_bits(a, b);
+                    }
+                    figures += 1;
+                }
+                _ => assert_eq!(figure, &Section::NotModelled, "{:?}", record.index()),
+            }
+            for section in [RecordSection::Rotation, RecordSection::Figure] {
+                assert_eq!(
+                    record
+                        .degrade(DetailLevel::MassAndOrbit)
+                        .section_state(section),
+                    SectionState::NotResolved
+                );
+                assert_eq!(
+                    record.degrade(DetailLevel::Bulk).section_state(section),
+                    record.section_state(section)
+                );
+            }
+        }
+    }
+    assert!(figures > 1_000, "{figures}");
+}
+
+/// P14.T46.c (c): a body's flattening is continuous in time across the clock window, except where
+/// its law locks between two times, a recorded state change.
+#[test]
+fn the_flattening_is_continuous_in_time() {
+    let step = CLOCK_WINDOW_H.as_seconds_f64() / 8.0;
+    let times: Vec<UniverseTime> = (-8_i32..=8)
+        .map(|k| {
+            UniverseTime::EPOCH
+                .checked_add(Span::from_seconds_f64(f64::from(k) * step).unwrap())
+                .unwrap()
+        })
+        .collect();
+    let mut checked = 0;
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(rotation) = system.rotation_of(ctx, body.index()).unwrap() else {
+                continue;
+            };
+            let flattening = |t: UniverseTime| {
+                let record = system.body_at(ctx, body.index(), t).unwrap();
+                record.figure().ok().map(|f| f.spheroid().flattening())
+            };
+            for pair in times.windows(2) {
+                let (Some(before), Some(after)) = (flattening(pair[0]), flattening(pair[1])) else {
+                    continue;
+                };
+                let locks = rotation
+                    .frame()
+                    .rate()
+                    .locks_at()
+                    .is_some_and(|at| pair[0] < at && at <= pair[1]);
+                if !locks {
+                    assert!(
+                        (after - before).abs() <= 0.01 * before.max(1e-6),
+                        "{:?}: {before} to {after}",
+                        body.index()
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 1_000, "{checked}");
 }

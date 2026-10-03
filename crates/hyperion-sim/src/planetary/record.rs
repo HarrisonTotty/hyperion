@@ -7,7 +7,7 @@
 //! | ----- | ---- |
 //! | [`Contact`](DetailLevel::Contact) | the identity with the kind unknown, and the position (the brainstorm's "unresolved contact") |
 //! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, the lists of moons and rings, and a population's extent; on a system, its belts and halo |
-//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b); on a system, the belts' members, as bodies and in each belt's list |
+//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b), and the figure, the reference spheroid (P14.T46.d); on a system, the belts' members, as bodies and in each belt's list |
 //! | [`Surface`](DetailLevel::Surface) | atmosphere, surface conditions and global figures (P14.T13, T24) |
 //! | [`Full`](DetailLevel::Full) | the hooks: surface seed, bulk composition, habitability, resources (P14.T23–T26) |
 //!
@@ -35,6 +35,7 @@ use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltPart, BeltSite};
+use crate::planetary::derive::figure::BodyFigure;
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
@@ -186,13 +187,15 @@ pub enum RecordSection {
     Surface,
     /// The hooks.
     Hooks,
+    /// The figure: the reference spheroid and its datum at the record's time (P14.T46.d).
+    Figure,
     /// The rotation: the body-fixed frame, the same at every record time (P14.T46.b).
     Rotation,
 }
 
 impl RecordSection {
     /// Every section, in the record's order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Label,
         Self::Mass,
         Self::Orbit,
@@ -202,6 +205,7 @@ impl RecordSection {
         Self::Bulk,
         Self::Surface,
         Self::Hooks,
+        Self::Figure,
         Self::Rotation,
     ];
 
@@ -215,7 +219,7 @@ impl RecordSection {
             | Self::Moons
             | Self::Rings
             | Self::Population => DetailLevel::MassAndOrbit,
-            Self::Bulk | Self::Rotation => DetailLevel::Bulk,
+            Self::Bulk | Self::Figure | Self::Rotation => DetailLevel::Bulk,
             Self::Surface => DetailLevel::Surface,
             Self::Hooks => DetailLevel::Full,
         }
@@ -234,6 +238,7 @@ impl fmt::Display for RecordSection {
             Self::Bulk => "bulk",
             Self::Surface => "surface",
             Self::Hooks => "hooks",
+            Self::Figure => "figure",
             Self::Rotation => "rotation",
         })
     }
@@ -862,6 +867,7 @@ pub struct BodyRecord {
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
+    figure: Section<BodyFigure>,
     rotation: Section<BodyFixedFrame>,
 }
 
@@ -881,6 +887,7 @@ impl BodyRecord {
             bulk: Section::NotModelled,
             surface: Section::NotModelled,
             hooks: Section::NotModelled,
+            figure: Section::NotModelled,
             rotation: Section::NotModelled,
         }
     }
@@ -959,6 +966,14 @@ impl BodyRecord {
         &self.hooks
     }
 
+    /// The figure at the record's time: the reference spheroid every height is measured from,
+    /// its pole, moment of inertia, law and datum (P14.T46.d). [`Section::NotApplicable`] where
+    /// the rotation is, and [`Section::NotModelled`] where the bulk or the rotation is.
+    #[must_use]
+    pub const fn figure(&self) -> &Section<BodyFigure> {
+        &self.figure
+    }
+
     /// The rotation: the body-fixed frame, its pole and the law that turns it, the same at every
     /// record time (P14.T46.b). [`Section::NotApplicable`] for a ring, a belt, the halo and a body
     /// not present at the record's time, and [`Section::NotModelled`] for a body of a system that
@@ -981,6 +996,7 @@ impl BodyRecord {
             RecordSection::Bulk => self.bulk.state(),
             RecordSection::Surface => self.surface.state(),
             RecordSection::Hooks => self.hooks.state(),
+            RecordSection::Figure => self.figure.state(),
             RecordSection::Rotation => self.rotation.state(),
         }
     }
@@ -1029,6 +1045,7 @@ impl BodyRecord {
             bulk: self.bulk.granted(at(RecordSection::Bulk), granted),
             surface: self.surface.granted(at(RecordSection::Surface), granted),
             hooks: self.hooks.granted(at(RecordSection::Hooks), granted),
+            figure: self.figure.granted(at(RecordSection::Figure), granted),
             rotation: self.rotation.granted(at(RecordSection::Rotation), granted),
         }
     }
@@ -1047,6 +1064,7 @@ pub struct BodyRecordBuilder {
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
+    figure: Section<BodyFigure>,
     rotation: Section<BodyFixedFrame>,
 }
 
@@ -1108,6 +1126,12 @@ impl BodyRecordBuilder {
         Self { hooks, ..self }
     }
 
+    /// The figure section (P14.T46.d).
+    #[must_use]
+    pub fn figure(self, figure: Section<BodyFigure>) -> Self {
+        Self { figure, ..self }
+    }
+
     /// The rotation section (P14.T46.b).
     #[must_use]
     pub fn rotation(self, rotation: Section<BodyFixedFrame>) -> Self {
@@ -1155,6 +1179,7 @@ impl BodyRecordBuilder {
             bulk: self.bulk,
             surface: self.surface,
             hooks: self.hooks,
+            figure: self.figure,
             rotation: self.rotation,
         };
         if record.population.ok().is_some_and(Population::withholds) {
