@@ -2268,3 +2268,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   T13.b's scene, T13.c's launch path and first IPC handlers, T14.a's and T15.a's device seam,
   T14.b's switch merge, and the hidden and by-hand halves of T10.b, T11.c, T12.c, T13.c, T14.c,
   T15.c and T17 were corrected. Nothing built changes. No task is pending re-validation.
+- **Deviations in T7.b, as built (the settings, 2026-10-02).** `view/quality/qualitySetting.ts`
+  landed first and alone, for R06.T13.f and R07; `selectPatches` and `screenSpaceErrorPx` follow
+  once T2's golden and T6's level table are built. `ViewSettings` has `terrain` only: T12.c adds
+  `atmosphere: TableSizes` with its values, as the task says. Added beside the Provides names:
+  `QUALITY_SETTINGS` (both settings in order, for tests and menus), and `TerrainNormals` and
+  `TerrainVertexPath`, the unions of `TerrainSettings.normals` and `.vertexPath`. The shapes are
+  `interface`s (the TypeScript rules), not the sketch's `type`s. The high cache budget is
+  400,000,000 B (Design note 10's "about 400 MB"); the low is 64 MiB.
