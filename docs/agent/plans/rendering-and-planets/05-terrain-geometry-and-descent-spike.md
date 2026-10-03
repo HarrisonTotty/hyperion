@@ -3591,10 +3591,11 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
   - **Finding: D's factor of two** (windows re-measured 2026-10-03 after the direction fix and
     over the stretches' floors, D at the height above the floor). In the windows (min(hard, 4σ_n),
     ridges off), demand ÷ D is, high then low: orbit coast 0 / 0 (D 0.9 and 0.04 a second,
-    nothing new selected), descent arc 0.57 / 0.47, approach and flare 1.20 / 0.86, low fast pass
-    0.79 / 1.52, slowdown 0.61 / 1.67, vertical descent 0 / 0 (D 81 and 25), and the hover 0
-    against 0. The test asserts the seven within a factor of two: high's approach, low pass,
-    slowdown and arc, low's approach, low pass and slowdown. Two causes are clear. D assumes a ring all
+    nothing new selected), descent arc 0.57 / 0.47, approach and flare 1.22 / 1.23, low fast pass
+    0.74 / 1.43, slowdown 0.30 / 1.28, vertical descent 0 / 0 (D 81 and 25), and the hover 0
+    against 0 (re-measured after the clearance follow-up, 2026-10-03). The test asserts the six
+    within a factor of two: high's arc, approach and low pass, low's approach, low pass and
+    slowdown. Two causes are clear. D assumes a ring all
     round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
     chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
     vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
@@ -3671,8 +3672,17 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     its climb, bit for bit (the test pins 64 Hz pose fingerprints taken from 003a6a3's profile).
     Old callers whose `trackMaxHeightM` lifted the low pass (including the default 0 m over a site
     below the datum) now fly it level, a change on purpose.
-  - **Open (asked of the orchestrator, 2026-10-03):** rule 3 compares a split segment's interior
-    boundaries with the unlifted table, so a lifted low pass beside a split slowdown saw-tooths
-    (slowdown 1 falls from the lifted level to near the table's ~283 m, slowdown 2 climbs to a
-    binding piece 3). Lean: take an interior boundary's table value as at least the straight line
-    in time between its segment's flown ends.
+  - **Split segments re-anchored, valleys filled** (decision-r05-descent-clearance.md,
+    follow-up, 2026-10-03, on lane D's question). Rule 3 compared a split segment's interior
+    boundaries with the unlifted table, so a lifted low pass beside a split slowdown saw-toothed.
+    As built: an interior boundary's shape is the table's shifted by its segment's two end lifts,
+    blended in time (`interiorBoundaries`), it is lifted against the floors from there, and
+    `fillValleys` raises it to the lower of the highest boundary before and after it in its
+    segment. A segment is split only where an interior boundary differs from that shape. Within a
+    split segment (and after a lifted low pass), a piece faster than the one before blends in from
+    that one's rate (`VerticalPiece.leadIn`, a forward solve over each such run inside the
+    back-to-front one) instead of the slower one blending into it: either way the blend bows its
+    host by about the other's rate × b ÷ 2, and a level piece before a 200 m/s fall bulged 95 m
+    (the flare under a 2 km ridge) and a gentle one before a 70 m/s climb dipped 30 m. The tests
+    hold every 64 Hz pose of a segment within 0.5 m of min(the highest before, the highest after)
+    in the ridges, lifted-low-pass and two-ridge-valley cases, and the 003a6a3 fingerprints.
