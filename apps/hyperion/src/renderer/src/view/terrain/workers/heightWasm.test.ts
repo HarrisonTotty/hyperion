@@ -179,7 +179,7 @@ describe("the height worker's module", () => {
   });
 
   it("rejects a module that bakes another test planet version", () => {
-    expect(staleModuleMessage({ ...module, testPlanetVersion: () => 2 })).toMatch(/version 2/);
+    expect(staleModuleMessage({ ...module, testPlanetVersion: () => 99 })).toMatch(/version 99/);
   });
 
   it("hands out a level table of four values for each level from 0 to 24", () => {

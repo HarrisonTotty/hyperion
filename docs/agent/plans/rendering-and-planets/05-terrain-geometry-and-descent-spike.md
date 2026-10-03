@@ -2405,6 +2405,18 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   distance is |F_n − F_f|), whose share within 1.25 × 4σ_n resolves about 3%, not R10's 99%: a
   recorded figure, not R10's test. σ_n is the omitted octaves' RMS at full weight (no fade
   weight: the morph is the fade, T3.b), its value at morph 0.
+- **T6's bound tightened per octave** (2026-10-03, decision-r05-patch-demand.md section 4c).
+  Each octave's interpolation error takes the least of three true bounds, since linear
+  interpolation is linear: curvature (Waldron 1998's ½ M r², as before), slope (`G_k h_L`, from
+  Jensen and the circumradius identity Σλᵢ|p − vᵢ|² = R² − |p − c|² on the right isosceles
+  triangles, R = Δ ÷ √2) and range (the width of the octave's value interval; for a ridged octave
+  σ_k (√(B² + ε²) − ε) ÷ r_rms). The derivation is in `src/test_planet/bound.rs`. Ridges off,
+  nothing changes but one last bit (level 14, from the new summation order). Ridges on, ε_n falls at
+  levels 5–12: k_9 from 230 to 51 (the decision's unmeasured estimate was about 40), and p99.9 ÷ ε
+  rises to 8–17% there. `level_bound_holds` still finds every sample below the bound. The level
+  table and the ridged bake's skirt depth changed, so `TEST_PLANET_VERSION` is 2 (every surface
+  golden re-blessed; `EXPECTED_TEST_PLANET_VERSION` in `heightBake.ts` and `cube.test.ts`
+  follow); `GENERATOR_VERSION` is unchanged.
 - **Decisions-r05.md item 6, the ridged planet** (ruled 2026-10-02 on this lane's question). With
   ridges on the hard bound is 10–50 times the 99.9th percentile at levels 5–12 (k_n up to 230,
   against about 15 with ridges off), so selection by it over-refines the ridged planet heavily.

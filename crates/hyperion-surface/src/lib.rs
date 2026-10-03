@@ -63,7 +63,7 @@ mod wasm;
 /// sphere's mapping or a patch bake's bytes. Where a golden test of this crate fails with the
 /// testkit's hint to "bump `GENERATOR_VERSION`", read "bump `TEST_PLANET_VERSION`". R09's real height
 /// function writes `GENERATOR_VERSION` into its own goldens.
-pub const TEST_PLANET_VERSION: u32 = 1;
+pub const TEST_PLANET_VERSION: u32 = 2;
 
 /// The generator version this build of the crate computes surfaces for.
 ///

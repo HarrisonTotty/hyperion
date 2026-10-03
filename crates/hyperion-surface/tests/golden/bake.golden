@@ -1,4 +1,4 @@
-# generator_version = 1
+# generator_version = 2
 bake 2 4 3 12 BakedOffsets Mesh Off
 heights 8450 0x0f7bf25f8c4c4f22
 offsets 25350 0xae548dbf094d9bb9
@@ -22,7 +22,7 @@ origin_height_m = 0x40a374f710ab4e6a  # 2490.482549050638
 height_range_m.low = 0x40a3431a40000000  # 2465.55126953125
 height_range_m.high = 0x40a3a691a0000000  # 2515.284423828125
 bounding_radius_m = 0x408a75e79cd1a56e  # 846.7380920771227
-skirt_depth_m = 0x40337ea8ff8cc639  # 19.49476620852349
+skirt_depth_m = 0x40337ea8ff8cc63a  # 19.494766208523494
 bake 1 19 300000 400000 BakedOffsets Double Off
 heights 8450 0xe0cf419763aebb2a
 offsets 25350 0xbef42ffa2163f698

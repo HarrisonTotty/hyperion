@@ -23,6 +23,7 @@ import {
   patchKeyWord,
 } from "./patchKey";
 import { f64Digest } from "./workers/f32Digest";
+import { EXPECTED_TEST_PLANET_VERSION } from "./workers/heightBake";
 
 const scratch = new DataView(new ArrayBuffer(8));
 
@@ -95,8 +96,8 @@ function patchBlocks(): { key: PatchKey; word: string; body: (readonly string[])
 }
 
 describe("the cube sphere's mirror against the Rust golden", () => {
-  it("is written under the test planet's version 1", () => {
-    expect(lines[0]).toBe("# generator_version = 1");
+  it("is written under the test planet's version", () => {
+    expect(lines[0]).toBe(`# generator_version = ${String(EXPECTED_TEST_PLANET_VERSION)}`);
   });
 
   it("warps and unwarps the 1,000 values bit for bit", () => {
