@@ -666,6 +666,28 @@ impl RotationLaw {
         self.locked_rate
     }
 
+    /// Every parameter [`angle_at`](Self::angle_at) reads (P14.T46.b), so that the wire carries
+    /// them and a client evaluates W(t) by the same closed forms (see [`RotationLawParts`]).
+    #[must_use]
+    pub fn parts(&self) -> RotationLawParts {
+        RotationLawParts {
+            initial_rate: self.initial_rate,
+            locked_rate: self.locked_rate,
+            age_at_epoch: Seconds::new(self.age_at_epoch),
+            locking_age: self
+                .locking_age
+                .is_finite()
+                .then_some(Seconds::new(self.locking_age)),
+            locks_at: self.locks_at,
+            resonance: self.resonance,
+            clock_period: self.clock.period(),
+            clock_mean_anomaly_at_epoch: self.clock.mean_anomaly_at_epoch(),
+            sub_primary_angle: Radians::new(self.sub_primary_angle),
+            phase_at_epoch: Radians::new(self.phase_at_epoch),
+            capture_phase: Radians::new(self.capture_phase),
+        }
+    }
+
     /// Whether the body is locked at `t`.
     #[must_use]
     pub fn state_at(&self, t: UniverseTime) -> SpinState {
@@ -733,6 +755,52 @@ impl RotationLaw {
             start * span
         }
     }
+}
+
+/// The parameters of a [`RotationLaw`], as [`RotationLaw::parts`] gives them (P14.T46.b): what a
+/// client needs to evaluate the rotation angle at any time without the orbit.
+///
+/// With s the seconds from the epoch to t, d = τ − `s_e` and Δ = max(s, 0):
+///
+/// - **Locked**, at or after `locks_at`: W = `sub_primary_angle` + p M(t), with p 1 or 3 for the
+///   [`resonance`](Self::resonance), and M(t) the clock's mean anomaly,
+///   `clock_mean_anomaly_at_epoch` + 2π s ÷ `clock_period`, the fraction of a period taken from
+///   the clock's whole seconds modulo the period before it rounds
+///   ([`KeplerElements::mean_anomaly_at`]), reduced into `[0, 2π)`.
+/// - **No lock in the clock's range** (`locks_at` `None`): W = `phase_at_epoch` + the swept angle from 0 to s.
+/// - **Before the lock**, d > 0: W = `phase_at_epoch` + the swept angle from 0 to s +
+///   `capture_phase` (Δ ÷ d)².
+/// - **Before the lock**, d ≤ 0 (a body locked by the epoch, read before its lock): W = the
+///   locked angle at `locks_at` less the swept angle from s to d.
+///
+/// The swept angle from a to b is ω(`s_e` + a) (b − a) + (`ω_L` − ω₀) (b − a)² ÷ 2τ, with
+/// ω(x) = ω₀ + (`ω_L` − ω₀) clamp(x ÷ τ, 0, 1), or ω₀ (b − a) where `locking_age` is `None`. W is
+/// reduced into `[0, 2π)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RotationLawParts {
+    /// The primordial spin rate ω₀, rad s⁻¹.
+    pub initial_rate: f64,
+    /// The locked spin rate `ω_L`, rad s⁻¹: n, or 1.5 n in the 3:2 state.
+    pub locked_rate: f64,
+    /// The system's age at the epoch, `s_e`.
+    pub age_at_epoch: Seconds,
+    /// The system age at which the body locks, τ; `None` for a body that never does.
+    pub locking_age: Option<Seconds>,
+    /// When the body locks, if within the clock's range.
+    pub locks_at: Option<UniverseTime>,
+    /// The state the body locks into.
+    pub resonance: SpinOrbitResonance,
+    /// The period of the locked angle's clock: the orbit's for a synchronous body, two orbits for
+    /// a 3:2 one.
+    pub clock_period: Seconds,
+    /// The clock's mean anomaly at the epoch, rad.
+    pub clock_mean_anomaly_at_epoch: Radians,
+    /// `W_p`, the angle at which the prime meridian faces the primary at pericentre, rad.
+    pub sub_primary_angle: Radians,
+    /// The drawn rotation angle at the epoch, rad, in `[0, 2π)`.
+    pub phase_at_epoch: Radians,
+    /// δ, the phase the capture into the resonance takes up before the lock, rad, in `[−π, π)`.
+    pub capture_phase: Radians,
 }
 
 /// A [`RotationLaw`] could not be built.
@@ -1168,6 +1236,83 @@ mod tests {
         UniverseTime::EPOCH
             .checked_add(Span::from_seconds_f64(seconds).unwrap())
             .unwrap()
+    }
+
+    /// W at `s` seconds from the epoch, from `parts` alone, by a plain re-implementation of the
+    /// closed forms [`RotationLawParts`] documents: what a client's twin computes.
+    fn angle_from_parts(parts: &RotationLawParts, s: f64) -> f64 {
+        let (w0, wl) = (parts.initial_rate, parts.locked_rate);
+        let se = parts.age_at_epoch.value();
+        let tau = parts.locking_age.map(Seconds::value);
+        let rate = |x: f64| tau.map_or(w0, |tau| w0 + (wl - w0) * (x / tau).clamp(0.0, 1.0));
+        let swept = |a: f64, b: f64| {
+            let span = b - a;
+            rate(se + a) * span + tau.map_or(0.0, |tau| (wl - w0) * span * span / (2.0 * tau))
+        };
+        let p = match parts.resonance {
+            SpinOrbitResonance::Synchronous => 1.0,
+            SpinOrbitResonance::ThreeToTwo => 3.0,
+        };
+        let locked = |s: f64| {
+            let period = parts.clock_period.value();
+            let m = parts.clock_mean_anomaly_at_epoch.value() + TAU * s.rem_euclid(period) / period;
+            parts.sub_primary_angle.value() + p * m.rem_euclid(TAU)
+        };
+        let w = match parts.locks_at.map(|t| t.since_epoch().as_seconds_f64()) {
+            None => parts.phase_at_epoch.value() + swept(0.0, s),
+            Some(lock) if s >= lock => locked(s),
+            Some(lock) => {
+                let d = tau.expect("a body that locks has a locking age") - se;
+                if d > 0.0 {
+                    let share = s.max(0.0) / d;
+                    parts.phase_at_epoch.value()
+                        + swept(0.0, s)
+                        + parts.capture_phase.value() * share * share
+                } else {
+                    locked(lock) - swept(s, d)
+                }
+            }
+        };
+        w.rem_euclid(TAU)
+    }
+
+    /// P14.T46.b (b): W from [`RotationLaw::parts`] by a plain re-implementation equals
+    /// [`RotationLaw::angle_at`] to 10⁻⁹ rad at five times either side of a lock inside the window
+    /// and across the epoch, on a despinning, a synchronous and a 3:2 body (Mercury's eccentricity).
+    #[test]
+    fn the_law_s_parts_reproduce_its_angle() {
+        let year = SECONDS_PER_JULIAN_YEAR;
+        let age = 1e9 * year;
+        let laws = [
+            ("despinning", law(f64::INFINITY, age, 0.02)),
+            (
+                "despinning, lock beyond the window",
+                law(age + 1e9 * year, age, 0.02),
+            ),
+            ("synchronous, ahead", law(age + 30.0 * year, age, 0.02)),
+            ("synchronous, behind", law(age - 30.0 * year, age, 0.02)),
+            ("3:2, ahead", law(age + 30.0 * year, age, 0.2056)),
+            ("3:2, behind", law(age - 30.0 * year, age, 0.2056)),
+        ];
+        let around_epoch = [-year, -86_400.0, -3_600.0, 0.0, 3_600.0, 86_400.0, year];
+        for (name, law) in laws {
+            let parts = law.parts();
+            let mut times: Vec<f64> = around_epoch.to_vec();
+            if let Some(lock) = law.locks_at() {
+                let lock = lock.since_epoch().as_seconds_f64();
+                for k in [1.0, 10.0, 1e3, 1e5, 1e7] {
+                    times.extend([lock - k, lock + k]);
+                }
+            }
+            for s in times {
+                let expected = law.angle_at(at(s)).value();
+                let twin = angle_from_parts(&parts, s);
+                assert!(
+                    centred(twin - expected).abs() < 1e-9,
+                    "{name} at {s} s: {twin} against {expected}"
+                );
+            }
+        }
     }
 
     /// The angle's step over `dt` at `t`, less what the rate sweeps, as a wrapped difference.

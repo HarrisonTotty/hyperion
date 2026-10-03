@@ -7,8 +7,8 @@
 //! | ----- | ---- |
 //! | [`Contact`](DetailLevel::Contact) | the identity with the kind unknown, and the position (the brainstorm's "unresolved contact") |
 //! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, the lists of moons and rings, and a population's extent; on a system, its belts and halo |
-//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; on a system, the belts' members, as bodies and in each belt's list |
-//! | [`Surface`](DetailLevel::Surface) | atmosphere, surface conditions, rotation and global figures (P14.T13, T14, T24) |
+//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b); on a system, the belts' members, as bodies and in each belt's list |
+//! | [`Surface`](DetailLevel::Surface) | atmosphere, surface conditions and global figures (P14.T13, T24) |
 //! | [`Full`](DetailLevel::Full) | the hooks: surface seed, bulk composition, habitability, resources (P14.T23–T26) |
 //!
 //! Every optional section carries one of four states (ruling 34 of 2026-09-22, item 3):
@@ -38,6 +38,7 @@ use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, Bel
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
+use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::index::{BodyIndex, BodySub};
 pub use crate::planetary::label::BodyLabel;
 use crate::planetary::placement::OrbitHost;
@@ -185,11 +186,13 @@ pub enum RecordSection {
     Surface,
     /// The hooks.
     Hooks,
+    /// The rotation: the body-fixed frame, the same at every record time (P14.T46.b).
+    Rotation,
 }
 
 impl RecordSection {
     /// Every section, in the record's order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Label,
         Self::Mass,
         Self::Orbit,
@@ -199,6 +202,7 @@ impl RecordSection {
         Self::Bulk,
         Self::Surface,
         Self::Hooks,
+        Self::Rotation,
     ];
 
     /// The least detail level that holds the section (design note 16).
@@ -211,7 +215,7 @@ impl RecordSection {
             | Self::Moons
             | Self::Rings
             | Self::Population => DetailLevel::MassAndOrbit,
-            Self::Bulk => DetailLevel::Bulk,
+            Self::Bulk | Self::Rotation => DetailLevel::Bulk,
             Self::Surface => DetailLevel::Surface,
             Self::Hooks => DetailLevel::Full,
         }
@@ -230,6 +234,7 @@ impl fmt::Display for RecordSection {
             Self::Bulk => "bulk",
             Self::Surface => "surface",
             Self::Hooks => "hooks",
+            Self::Rotation => "rotation",
         })
     }
 }
@@ -857,6 +862,7 @@ pub struct BodyRecord {
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
+    rotation: Section<BodyFixedFrame>,
 }
 
 impl BodyRecord {
@@ -875,6 +881,7 @@ impl BodyRecord {
             bulk: Section::NotModelled,
             surface: Section::NotModelled,
             hooks: Section::NotModelled,
+            rotation: Section::NotModelled,
         }
     }
 
@@ -952,6 +959,15 @@ impl BodyRecord {
         &self.hooks
     }
 
+    /// The rotation: the body-fixed frame, its pole and the law that turns it, the same at every
+    /// record time (P14.T46.b). [`Section::NotApplicable`] for a ring, a belt, the halo and a body
+    /// not present at the record's time, and [`Section::NotModelled`] for a body of a system that
+    /// [`generate_planets`](crate::planetary::generate_planets) made.
+    #[must_use]
+    pub const fn rotation(&self) -> &Section<BodyFixedFrame> {
+        &self.rotation
+    }
+
     /// The state of the section `section`.
     #[must_use]
     pub const fn section_state(&self, section: RecordSection) -> SectionState {
@@ -965,6 +981,7 @@ impl BodyRecord {
             RecordSection::Bulk => self.bulk.state(),
             RecordSection::Surface => self.surface.state(),
             RecordSection::Hooks => self.hooks.state(),
+            RecordSection::Rotation => self.rotation.state(),
         }
     }
 
@@ -1012,6 +1029,7 @@ impl BodyRecord {
             bulk: self.bulk.granted(at(RecordSection::Bulk), granted),
             surface: self.surface.granted(at(RecordSection::Surface), granted),
             hooks: self.hooks.granted(at(RecordSection::Hooks), granted),
+            rotation: self.rotation.granted(at(RecordSection::Rotation), granted),
         }
     }
 }
@@ -1029,6 +1047,7 @@ pub struct BodyRecordBuilder {
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
+    rotation: Section<BodyFixedFrame>,
 }
 
 impl BodyRecordBuilder {
@@ -1089,6 +1108,12 @@ impl BodyRecordBuilder {
         Self { hooks, ..self }
     }
 
+    /// The rotation section (P14.T46.b).
+    #[must_use]
+    pub fn rotation(self, rotation: Section<BodyFixedFrame>) -> Self {
+        Self { rotation, ..self }
+    }
+
     /// The sections that `derived` fills, as the vertical slice tags them: the mass and bulk
     /// [`Section::Ok`], and the surface [`Section::NotApplicable`] for a class with none (a giant)
     /// and [`Section::NotModelled`] otherwise, until P14.T13 computes it.
@@ -1130,6 +1155,7 @@ impl BodyRecordBuilder {
             bulk: self.bulk,
             surface: self.surface,
             hooks: self.hooks,
+            rotation: self.rotation,
         };
         if record.population.ok().is_some_and(Population::withholds) {
             return Err(BuildBodyRecordError::NotResolved(RecordSection::Population));

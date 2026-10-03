@@ -1834,3 +1834,117 @@ fn the_window_s_start_cuts_a_drift_cell_on_both_sides() {
     }
     assert!(checked > 50, "{checked}");
 }
+
+/// P14.T46.b (b): every body's held law is the one derived from its record at `parent_time`, bit
+/// for bit, whatever order the bodies are asked in; a whole system's records carry it as their
+/// rotation section, the same at the epoch and at +H, and a ring's, a belt's and the halo's is not
+/// applicable.
+#[test]
+fn the_rotation_law_is_held_and_on_every_record() {
+    let mut laws = 0;
+    for (ctx, system) in whole() {
+        let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
+        let held = |index: BodyIndex| system.rotation_of(ctx, index).unwrap();
+        for &index in &indices {
+            let body = system.body(index).unwrap();
+            let record = system.body_at(ctx, index, parent_time(ctx)).unwrap();
+            assert_eq!(
+                held(index),
+                system.derive_rotation(ctx, body, &record),
+                "{index:?}"
+            );
+        }
+        assert_order_independent(&indices, |&index| held(index));
+        for t in [UniverseTime::EPOCH, ClockWindow::END] {
+            for record in system.snapshot_at(ctx, t).bodies() {
+                let rotation = record.rotation();
+                match record.identity().kind() {
+                    BodyKind::Ring | BodyKind::Belt(_) | BodyKind::CometaryHalo => {
+                        assert_eq!(rotation, &Section::NotApplicable);
+                    }
+                    _ if record.identity().state() != BodyState::Present => {
+                        assert_eq!(rotation, &Section::NotApplicable);
+                    }
+                    _ => match held(record.index()) {
+                        Some(law) => {
+                            assert_eq!(rotation, &Section::Ok(*law.frame()));
+                            laws += 1;
+                        }
+                        None => assert_eq!(rotation, &Section::NotModelled),
+                    },
+                }
+            }
+        }
+    }
+    assert!(laws > 1_000, "{laws}");
+}
+
+/// P14.T46.b (b): a system [`generate_planets`] made holds no law, and its present planets'
+/// rotation is not modelled, so no body has two rotations by entry point.
+#[test]
+fn a_planets_only_system_holds_no_rotation() {
+    let mut planets = 0;
+    for (ctx, system) in generated() {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            assert_eq!(system.rotation_of(ctx, record.index()).unwrap(), None);
+            if record.identity().state() == BodyState::Present {
+                assert_eq!(record.rotation(), &Section::NotModelled);
+                planets += 1;
+            }
+        }
+    }
+    assert!(planets > 100, "{planets}");
+}
+
+/// P14.T46.a (a): a regular moon's locking time and its held law's are one law, at one moment of
+/// inertia: they differ only by their primordial periods, the moon derivation's fixed 15 h and the
+/// law's drawn one (τ ∝ ω), to 10⁻¹².
+#[test]
+fn a_regular_moon_has_one_locking_time() {
+    let mut moons = 0;
+    for (ctx, system) in whole() {
+        let snapshot = system.snapshot_at(ctx, parent_time(ctx));
+        for record in snapshot.bodies() {
+            if record.identity().kind() != BodyKind::Moon(MoonOrigin::Regular) {
+                continue;
+            }
+            let (Section::Ok(bulk), Section::Ok(mass), Some(rotation)) = (
+                record.bulk(),
+                record.mass(),
+                system.rotation_of(ctx, record.index()).unwrap(),
+            ) else {
+                continue;
+            };
+            let body = system.body(record.index()).unwrap();
+            let Part::Moon(moon) = &body.part else {
+                unreachable!("a regular moon is a moon")
+            };
+            let elements = moon
+                .satellite
+                .orbit_at(&moon.parent, ctx.age_at(parent_time(ctx)));
+            let mass = Kilograms::from(*mass);
+            let primary = Kilograms::new(
+                elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value(),
+            );
+            let tau = crate::planetary::moons::regular::locking_time(
+                primary,
+                mass,
+                Metres::from(bulk.radius()),
+                elements.semi_major_axis(),
+                bulk.class(),
+                &bulk.fractions(),
+            );
+            let fixed = crate::planetary::moons::regular::MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0;
+            let expected =
+                rotation.locking_time().value() * (rotation.primordial_period().value() / fixed);
+            assert!(
+                (tau.value() / expected - 1.0).abs() < 1e-12,
+                "{:?}: {} against {expected}",
+                record.index(),
+                tau.value()
+            );
+            moons += 1;
+        }
+    }
+    assert!(moons > 100, "{moons}");
+}
