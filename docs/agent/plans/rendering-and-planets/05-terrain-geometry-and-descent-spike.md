@@ -985,7 +985,9 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     brainstorm's "the forced switches make available, uncoarsened" gets wrong; measurement runs
     alone lift it through R01's `gpuTiming` option (`GPU_TIMING_SWITCH`), which the spike flag turns
     on before `ready` (R01 applies it, like `enable_subgroups_intel_gen9`, only in its Linux `vulkan`
-    mode, so a run elsewhere records `PassTimes.timer` as `quantized`). The safety toggles of Design note 22 are merged into both of R01's lists,
+    mode, so a run elsewhere records `PassTimes.timer` as `quantized`; accepted 2026-10-02,
+    decisions-r06-r07.md item 8: frame intervals are the pass criterion; a quantized run is
+    recorded as such). The safety toggles of Design note 22 are merged into both of R01's lists,
     `--enable-dawn-features` and `--disable-dawn-features`, with `mergeSwitchValue`, since appending
     a second switch would replace the first (R01 Design note 2). `gpuTiming` already puts
     `timestamp_quantization` in the disable list, so a run with timing on and safety off carries one
@@ -1988,7 +1990,9 @@ One high-setting run at 1080p is recorded for comparison, not judged.
 - Files: `docs/measurements/descent-spike/*.json` and `*.md`.
 - Acceptance: the four results files exist, each with every figure of Design note 18 and the
   machine's load average and governor; the summary states pass or fail against every row of
-  Design note 21's table.
+  Design note 21's table. Each results file records `PassTimes.timer`, the platform and the
+  launch mode; GPU-time rows on a `quantized` timer carry ±65.5 µs per pass and are marked
+  marginal within that tolerance of their limit (decisions-r06-r07.md item 8).
 
 **R05.T16.b The variants.** On one seed, each changing one factor from the baseline: a companion
 load on two threads (Design note 20); a cold pipeline cache; ridged terms on; Dawn's safety checks
@@ -2402,6 +2406,41 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   the skirts cover), and `vertex_f32.golden` prints vertices x, y ∈ {0, 1, 31, 32, 33, 63, 64} of
   each patch. T3.c's quiet-machine bench is re-measured in a quiet window the orchestrator
   schedules (decisions-r05.md item 7), not by the owner.
+- **Deviations in T14.b, as built** (2026-10-02).
+  - `main/spike.ts` exports `launchSwitches(options, spike)`: with `spike` undefined it returns
+    R01's `graphicsSwitches(options)` unchanged; otherwise it turns `gpuTiming` on and, with
+    `dawnSafety: "off"`, merges Design note 22's toggles (`DAWN_SAFETY_OFF_ENABLED`,
+    `DAWN_SAFETY_OFF_DISABLED`) into one `--enable-dawn-features` and one
+    `--disable-dawn-features` before `applyGraphicsSwitches`. R01's `LIST_SWITCHES` is now
+    exported from `graphics/switches.ts` for it. `index.ts` still calls `graphicsSwitches`: **T13.c
+    replaces that call with `launchSwitches(options, spike)`, with the parsed `--dawn-safety`,
+    before `ready`**; until then no launch carries the spike's switches.
+  - The safety toggles also go on `default`-mode and non-Linux launches, which have no R01 Vulkan
+    set (there `--enable-dawn-features` holds the five toggles alone); `safe` mode gets nothing.
+    `gpuTiming` still takes effect only in R01's Linux `vulkan` mode, so a run elsewhere records
+    `PassTimes.timer` as `quantized` (decisions-r06-r07.md item 8).
+  - The trace (`SpikeTrace`, `spikeTraceConfig`, `SPIKE_TRACE_CATEGORIES`) records Design note
+    18's categories plus `disabled-by-default-devtools.timeline` (its `RunTask` and `GPUTask`
+    slices) and `disabled-by-default-devtools.timeline.frame`, and leaves out `toplevel`, which
+    repeats `RunTask` and was about half a recorded trace's bytes. It is `record-until-full` with a
+    2 GiB buffer: about 1.1 MB/s was measured on a small WebGPU page, about 1.4 GB over the
+    21-minute descent; a full buffer shows as a short `span`. Chromium's tracing service is its
+    own utility process, so T14.c reports it apart from the app's memory.
+  - `main/reduceTrace.ts` (`TraceReducer`, `reduceTrace`, `reduceTraceFile`,
+    `readTraceEvents`) streams Chromium's one-event-a-line layout, since a descent's trace is too
+    large for one `JSON.parse`; `.prettierignore` keeps `src/main/fixtures/*.trace.json` in that
+    layout. Frames are the compositor's `PipelineReporter` slices (end = presentation; state
+    presented, dropped or not wanted), from the renderer with the most frames and its busiest
+    `layer_tree_host_id`, one interval a distinct presentation; a hidden window's frames are all
+    "not wanted", hence T14.c's null presentation figures. No trace category carries GPU time per
+    pass (that is T14.a's `onPassTimes`), so the "GPU-pass" figures are the GPU process's
+    `CrGpuMain` busy time and its `WebGPU`, `GPUTask` and `VulkanQueueSubmitHook` slices, the CPU
+    side of the command transport. The engine's self time is V8 CPU-profile samples whose leaf is
+    in the `engine-*.js` chunk (`ENGINE_CHUNK_PATTERN`; the built chunk is
+    `engine-<hash>.js`). User-timing spans carry their starts, so that T14.c can split
+    presentation intervals by segment marks.
+  - The test's trace (`src/main/fixtures/spike.trace.json`) was recorded on 2026-10-02 from
+    Electron 44.4.3 headless on SwiftShader and trimmed to 190 ms of the events read.
 - **Deviations in T12.a, as built** (2026-10-02).
   - _The solar inputs._ NREL is now NLR: E-490-00a is fetched from
     `https://www.nlr.gov/media/docs/libraries/grid/e490_00a_amo.xls?sfvrsn=ce97914b_1`, an `.xls`.
@@ -2502,3 +2541,233 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   `TerrainVertexPath`, the unions of `TerrainSettings.normals` and `.vertexPath`. The shapes are
   `interface`s (the TypeScript rules), not the sketch's `type`s. The high cache budget is
   400,000,000 B (Design note 10's "about 400 MB"); the low is 64 MiB.
+- **Deviations in T8, as built (the patch cache, 2026-10-02).** T8 ran before T2 and T7.a, so it
+  wrote the types it reads from them: `PatchBounds` (`bounds.ts`, with `minHeightM` and
+  `maxHeightM` for the sketch's `minH` and `maxH`, the unit rule), `BodyFixedVec3` (`planet.ts`),
+  `SelectedPatch`, `PatchRequest` and `Selection` (`select.ts`, types only), and the key half of
+  T2's `patchKey.ts` (`Face`, `FACES`, `MAX_LEVEL`, `PatchKey`, `rootKey`, `patchKeyString`,
+  `parsePatchKeyString`, `isValidPatchKey`, `parentKey`, `childKeys`, with `patchKey.test.ts`);
+  T2 checks them against its golden. Added beside the Provides: `ResidentPatch`, `CachedPatch`,
+  `CacheInsert` (`stored` with the evicted key, or `refused`), `CachePressure`,
+  `PatchCache.insert`/`remove`/`retain`/`pressure`/`heldBytes`, `DrawnPatch`, and
+  `DrawSet { patches, slots: Uint32Array, standingIn, missing }`; `slotLayout(fields, budget)`,
+  `terrainSlotFields`, `terrainSlotLayout` and `MIN_SLOTS` (6) in `slotLayout.ts`. Choices: the six
+  roots are never evicted, so every selected patch keeps a resident ancestor once they are baked;
+  an ancestor standing in covers its resident descendants (drawn patches never overlap), and
+  `standingIn` counts them; draw pins cover every resident selected patch as well as the drawn
+  ones, so the siblings under a stand-in are kept until all arrive; a patch inserted between two
+  `retain`s takes the last selection's pins at once, so a forced patch is pinned on arrival; the
+  pins are reported as exceeding the slots when the forced patches (resident or not) and the other
+  pinned ones outnumber the slots, or an insert was refused, and the report survives the frame's
+  `retain`. **Design note 10 corrected (decided 2026-10-02 by the orchestrator): the slot counts
+  normals as stored, with the atlas's one-texel gutter**, 67² × 4 = 17,956 B at the mesh's
+  resolution and 131² × 4 = 68,644 B doubled, so the low slot is 51,756 B and 64 MiB holds 1,296
+  slots, not 1,323 (Design note 10's and T8's figure). `SlotLayout` is the one source of the slot
+  count; T11.a reads it and never recomputes it. The R10 test counts R10's
+  class weights and survey mask inside the horizon-map field until R10 adds fields of its own.
+  The acceptance filter `view/terrain/cache` leaves out `slotLayout.test.ts`; both run under
+  `view/terrain`.
+- **Deviations in T10.a, as built (the pool, 2026-10-02).** `WorkerLike` has `addEventListener`
+  and `removeEventListener` for `message` and `error` (oxlint's `prefer-add-event-listener`), not
+  `onmessage`. The constructor also takes `bake: BakeSettings` (the setting's vertex path and
+  normals, sent with every bake). Added: `onFailed` (a key whose bake failed is reported and not
+  requested again), `currentGeneration`, `queuedCount`, `inFlightCount`, `lostWorkers`,
+  `MAX_IN_FLIGHT_PER_WORKER` and `MAX_CONSECUTIVE_WORKER_FAILURES` (3: a worker failing three times
+  with no answer between is given up, not restarted forever), and `bakeTransferables` in
+  `messages.ts`. Requests go one a worker a round, least loaded first. Once a field is posted, a
+  worker is sent bakes only after acknowledging it, and a bake from an older field is baked again.
+  The pool keeps the field's bytes (about 15 MB on the render thread, beyond Design note 11's
+  count) to post them to a replacement worker. The scripted fake worker lives in `pool.test.ts`.
+  `Float16Array`'s lib (`es2025.float16`, the name TypeScript 7.0.2 has) joined both
+  `tsconfig.web.json` and `tsconfig.worker.json` here, ahead of T10.b, for `BakedPatch.normals`.
+- **GPU timing elsewhere than Linux `vulkan` mode is quantized** (decisions-r06-r07.md item 8,
+  2026-10-02); frame intervals stay the criterion, and the follow-up (honouring
+  `--hyperion-gpu-timing` in `default` mode) is taken only if a marginal row matters.
+- **Deviations in T14.c, as built** (2026-10-02).
+  - The memory sampler (`sampleMemory`, `MemorySampler`), the results builder (`buildResults`),
+    the schema check (`validateResults`), the summary (`summaryMarkdown`), the machine's
+    description (`describeMachine`) and the writer (`writeResults`) are in `main/results.ts`, not
+    `main/spike.ts`; T13.c's IPC handlers in `spike.ts` call them. `main/fdinfo.ts` holds the DRM
+    fdinfo reader (`parseFdinfo`, `sumDrmClients`, `readDrmMemory`) and `nvidia-smi`'s
+    (`parseNvidiaSmi`, `readNvidiaSmi`). A total over DRM clients is given only when every client
+    gives one.
+  - The renderer's report, `DescentSpikeReport` with its `Spike*` types, is in `preload/api.ts`
+    (a T13.c file), and fixes T14.a's output: raw per-frame series (script time, rAF interval, the
+    frame callback's main-thread time, each pass's GPU time with its row, `terrain`,
+    `atmosphere` or `other`), streaming per segment, uploads, late pipelines, the adapter's peak
+    and the canvas size. The main process computes the percentiles (nearest rank), missed frames
+    and hitches (`frameStats`), so **T14.a builds no `view/spike/percentiles.ts`**: its percentile,
+    missed-frame and hitch tests are in `results.test.ts`, and T14.a's acceptance drops that
+    filter. T14.a marks each segment with one `performance.measure("spike.segment:<name>")` span
+    (`SEGMENT_MEASURE_PREFIX`), by which presentation intervals are split by segment. `bracketed`
+    is not carried (always `false`, R01 Design note 24).
+  - The headroom row's main-thread figure is each frame's whole `requestAnimationFrame` callback,
+    engine submission included (one span a frame, T14.a's contract). It leaves out the browser's
+    own work on the thread, so the row is a lower bound; the trace's `mainThread` split is
+    recorded beside it.
+  - T is `1000 / Display.displayFrequency`, doubled on `low`. A hidden run's T, presentation
+    intervals and every row read against T are null with "no window shown"; its rAF intervals
+    are still recorded. Frames come from presentation times when there are any, else from rAF.
+  - The memory headline is `nvidia-smi`'s device memory used less a baseline taken before the
+    launch (T13.c takes it), else the DRM fdinfo's resident peak, else the adapter's tally with a
+    note; the GPU process's own `nvidia-smi` figure is recorded beside it, since the device
+    figure counts the local LLM too. Only the first GPU `nvidia-smi` lists is read. The DRM
+    reading's own reason reaches the file. Chromium's tracing service is reported apart. GB is
+    10⁹ B.
+  - Files are `<date>-<machine>-<setting>.json` and `.md`, numbered `-2`, `-3` and so on for
+    repeats; `<machine>` is the host name, lower-cased, keeping `[a-z0-9-]`. The schema is
+    `hyperion.descent-spike.results` version 1, checked by `validateResults`, a TypeScript check;
+    T15.c's Rust writer has no schema file to test against, so its test checks the same required
+    parts and figures (or T15.c ships a JSON Schema generated from the check).
+  - The i915 and amdgpu fdinfo fixtures are written in the kernel's documented layout
+    (`drm-usage-stats.rst`; amdgpu in both its `drm-memory-*` and `drm-total-*` forms), since
+    neither device is on the development machine; the NVIDIA fdinfo and `nvidia-smi.xml` were
+    recorded there (RTX 3080, driver 615.71.09). The owner's UHD 620 runs (T16) read i915 for real.
+  - **Pending:** the hidden `just descent-spike --setting low` proof waits on T13.c (which waits on
+    T13.b) and is taken then; the visible run stays with the owner, its command in
+    `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7).
+- **Deviations in T12.c, as built** (2026-10-02).
+  - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
+    `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,
+    with these differences:
+    - The constructor takes the figure as a fourth argument: `new HillaireAtmosphere(engine,
+medium, sizes, figure)`.
+    - `drawFrame(camera, sun, scene)` takes the terrain target as `AtmosphereScene` (colour,
+      reversed-Z depth, near plane, pre-exposure scale). It dispatches the three per-frame kernels
+      and returns the composite as a `DrawItem` for the caller to submit into another target or
+      the view: the composite is a full-screen material draw, not a post-process, because a
+      post-process cannot read a depth texture (R01 as built).
+    - `SunState` is `{ directionBodyFixed, distanceAu, angularRadiusRad }`.
+    - Added: `geodeticOf` (Bowring's iteration), `tableRadiusM`, `SpheroidFigure`,
+      `aerialPerspectiveVolume()`, `tables`, and the kernel and material constants for the
+      catalogue.
+    - `atmosphereInputs` takes `SpheroidFigure` (`{ equatorialRadiusM, polarRadiusM }`), which
+      T7.a's `BodyFigure` satisfies structurally. `planet.ts` is lane B's and did not exist yet.
+  - _Which radius the tables use_ (the T12.b open point, settled here):
+    - The per-planet tables are built on the figure's mean radius, R₁ = (2a + c) ÷ 3.
+    - Every lookup reads them at the point's height above the datum (r_table = R₁ + h), with μ
+      against the spheroid's normal.
+    - The sky-view and aerial-perspective tables are built on the camera's own sphere, of radius
+      √(MN) (Design note 16).
+    - The ray march clips against the spheroid's shells: a + top and c + top for the atmosphere,
+      a and c for the ground. Each sample's height is taken along its radius, which differs from
+      the geodetic height by at most 2.1 m on WGS 84 up to 400 km. The sun's cosine is measured
+      against the normal of the similar spheroid through the sample, within 0.011° of the true
+      normal (science check, 2026-10-02).
+    - A test holds the grazing optical depth from the ground on the WGS 84 spheroid to within 0.5%
+      of the spherical oracle, at 0° and 45° and looking north and east, on both radii: √(MN)
+      (worst 0.17%) and R₁ (worst 0.28%). It compares with the `f64` oracle rather than the GPU table,
+      since a Node test has no GPU; T12.b's smoke check holds the table to the oracle to 1%.
+    - `shaders/view.wgsl` (not in the task's file list) holds the shared `AtmosphereView`, the
+      source term and the sky view's mapping, prepended to the three kernels and the composite.
+    - From above the atmosphere, a sky pixel whose ray meets the ground stores no transmittance
+      to space, so the sun's disc is never drawn through the planet.
+    - `geodeticOf` is the classical fixed-point iteration on φ and h. On WGS 84 it converges to
+      under 10⁻⁸ m. Above a flattening of about 0.04 it fails to converge, so R08 replaces it (with
+      Bowring 1976, for instance).
+  - _The phase functions_ are evaluated per term in the shaders. `packMedium` encodes each term's
+    phase in `Term.scattering.w` (0 none, 1 Rayleigh, 2 Cornette–Shanks) and its g in
+    `Term.absorption.w`; a test holds the packing.
+  - _The sizes_ follow Design note 16. Two steps a slice on both settings, and the ray-march step
+    counts, are this task's choices; T18 revisits them.
+
+    | Table              | High                       | Low                                                    |
+    | ------------------ | -------------------------- | ------------------------------------------------------ |
+    | Sky view           | 192 × 108, 30 steps (sebh) | 128 × 64, 16 steps                                     |
+    | Aerial perspective | 32³, to 32 km              | 32 × 32 × 16                                           |
+    | Ray march          | full resolution, 32 steps  | half resolution, 16 steps, with a depth-aware upsample |
+
+    "Aerial perspective on terrain only" is `aerialPerspectiveScope`. On high it is `scene`, which
+    publishes the volume for later plans' passes (`aerialPerspectiveVolume()`). On low it is
+    `terrain`, which publishes nothing, so the one deferred composite applies it to the terrain
+    alone.
+
+  - _The sky view's parameterisation_ is sebh's (`SkyViewLutParamsToUv`): the azimuth is measured
+    from the sun's over [0, π], and the horizon split is compressed by a square root. Bevy's is
+    world-fixed over 2π. As in sebh, the sky view has no ground bounce. The kernel and the
+    composite both clamp the camera's height to 1 m inside the shell (`skyViewHeight`). They form
+    r² − R² as h(2R + h) (`groundHitFromHeight`), which would otherwise cancel in `f32` near the
+    ground.
+  - _The aerial-perspective volume_ stores, per slice, the running in-scattered radiance (rgb) and
+    the mean transmittance (a), linear. This is sebh's choice; Bevy stores the logarithm and takes
+    transmittance from the transmittance table. The composite fades the first slice in from the
+    camera.
+  - _Luminance._
+    - The sky is scaled by `skyLuminanceScale()` ÷ d².
+    - Sunlight that the grey ground reflects into the ray march takes the sun's factors, not the
+      sky's (Bruneton 2017, `GetSunAndSkyIlluminance`), through the view's `sunOverSky`.
+    - The sun's disc is `solar.ts`'s per-channel illuminance ÷ the disc's solid angle ÷ d². It is
+      attenuated by the transmittance to space (the ray march's mean from above the atmosphere)
+      and clamped at 65,504 after pre-exposure.
+    - `SunState.angularRadiusRad` must be asin(R★ ÷ d), kept consistent with the distance by the
+      caller; 0 draws no disc. The smoke check's Sun is 0.0046505 rad (IAU 2015 B3 R⊙ᴺ at 1 au).
+  - _The settings._ `SETTINGS[s].atmosphere` is `TABLE_SIZES[s]`, which `qualitySetting.ts`
+    imports from `hillaire.ts` (appended).
+  - _Memory._
+    - `MemoryCategory` gains `atmosphere-view` (appended).
+    - The ray-march target grows to the largest output so far and is never remade smaller. The
+      engine has no public release of a texture, so a resize past the largest size leaves the
+      previous target allocated until the engine is disposed. The kernel and the composite address
+      the target by the current output's size.
+    - The sky-view and aerial-perspective textures are made once. They are freed only with the
+      engine.
+  - _The smoke harness._
+    - `smoke/atmosphere.ts` gains `checkAtmosphereFrames`. On both settings it renders from 2 m and
+      from 400 km, at noon and at the terminator, with every texel finite and within rgba16float,
+      and the noon sky from the ground bluer than red. A dark surface 500 m and 5 km away (the
+      volume's path) and 60 km away (the ray march's) must take on haze, more at 5 km and at 60 km
+      than at 500 m. At 5 km and beyond, the haze has nearly reached the horizon sky's brightness,
+      so the two paths are held to agree within 10%; they are not ordered. On SwiftShader on
+      2026-10-02, the high setting gave 0.140 at 5 km and 0.139 at 60 km in blue.
+    - `just test-render --captures=DIR` renders `HILLAIRE_REFERENCE` on Hillaire's 6,360 km sphere,
+      with no sun disc, as his comparison images have none: from the ground at noon and at sunset,
+      and from 400 km. It saves the frames as 8-bit PNGs, exposed to a mean of 0.18 and passed
+      through R02's AgX. The pieces that carry it:
+      - `apps/hyperion/scripts/testRender.sh` takes `--captures=DIR` and passes it to the harness
+        as the new `--smoke-captures` switch.
+      - The page's report gains an `images` field.
+      - `readSmokeImages` in `smoke/result.ts` checks each image's name, size and length. The main
+        process logs any image it rejects or fails to save, without losing the judged checks.
+  - _Left as found._ At half resolution, a far-surface pixel whose four nearest ray-march texels
+    are all sky gets no haze: a one-pixel fringe on silhouettes, on the low setting only.
+  - _By hand, for the owner._ The comparison with Hillaire 2020's published images (CGF 39(4), DOI
+    10.1111/cgf.14050) confirms the work but blocks nothing (decisions-r05.md item 7). The images
+    are kept local and untracked (decisions-r05.md item 4).
+  - _The lane's pre-screen_ (2026-10-02). It ran
+    `just test-render --captures=<scratchpad>/laneC-captures` on SwiftShader, headless, on both
+    variants. The run saved `hillaire-ground-noon`, `hillaire-ground-sunset` and
+    `hillaire-orbit` (320 × 180, one set a variant). The lane viewed them and saw:
+    - noon: a blue sky, lighter towards the horizon, with an aureole about the sun;
+    - sunset: an orange-to-rose band along the horizon, brightest under the sun, under a
+      grey-violet sky;
+    - orbit: the limb as a thin bright blue band over the lit disc, with black space above.
+
+    Below the horizon the ground is black, as in Hillaire's comparison scene (black ground, no
+    disc). Nothing looked wrong side up or discontinuous. The side-by-side with his figures
+    remains the owner's.
+
+  - _Aerial-perspective scope_ lives in `TableSizes` for now; R08.T9.a's `AERIAL_PERSPECTIVE_SCOPE`
+    takes it over or reads it.
+- **Deviations in T11.a, as built so far** (2026-10-02; the slot layout waits on T8's
+  `SlotLayout`, and the index buffer and instance records wait on T4's vertex order).
+  - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
+    `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
+    `maxStorageBufferBindingSize` and `maxBufferSize`, never above what it reports, capped at
+    `MAX_REQUESTED_BUFFER_BYTES`, 1 GiB.
+    - `GpuCapabilities` gains both limits. They are read from the device, as its features are,
+      so a rebuild after a device loss reports the rebuilt device's.
+    - `CapabilityOverrides.defaultLimits` raises nothing. It is how the harness runs the
+      `FaceDifferences` fallback once T11.a's layout exists.
+    - `FakeAdapter` takes both limits. Its devices get WebGPU's defaults unless more is required,
+      and reject a request beyond the adapter's.
+    - `GraphicsPanel` leaves the two limits out of its feature list.
+    - The RTX 3080's adapter limits are recorded with T11.a's layout.
+  - _`AllocationTally`_ (`view/terrain/gpu/allocationTally.ts`) adds `startFrame()`, which zeroes
+    the frame's upload count; the interface has no other notion of a frame. It also adds
+    `dispose()`, which stops listening.
+  - _The counting fake_ (`test/countingRenderEngine.ts`) landed with T12.b. It stands alone,
+    implementing `RenderEngine` and delegating views and faults to R01's `FakeRenderEngine`,
+    because that class's members return `never` and cannot be overridden. It also records
+    `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
+    `destroy()`.
+  - `MemoryCategory` gains `height-cache`, appended.

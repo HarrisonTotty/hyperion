@@ -86,6 +86,68 @@ export function readSmokeResult(value: unknown): SmokeResult | null {
 }
 
 /**
+ * An image the page hands the main process to save, for a look by a person (R05.T12.c's
+ * atmosphere comparison): RGBA, 8 bits a channel, row by row from the top, base64.
+ */
+export interface SmokeImage {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly rgba: string;
+}
+
+/** The largest side of a saved image, px. */
+export const SMOKE_IMAGE_MAX_SIDE = 4096;
+
+/** Whether `side` is a whole number of pixels within (0, {@link SMOKE_IMAGE_MAX_SIDE}]. */
+function isSide(side: unknown): side is number {
+  return Number.isInteger(side) && Number(side) > 0 && Number(side) <= SMOKE_IMAGE_MAX_SIDE;
+}
+
+/**
+ * Whether `value` is an image: a name of lower-case letters, digits and hyphens (so it cannot leave
+ * the captures' directory), sides within bounds, and base64 that decodes to width × height × 4
+ * bytes.
+ */
+function isImage(value: unknown): value is SmokeImage {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("name" in value) ||
+    typeof value.name !== "string" ||
+    !/^[a-z0-9-]+$/u.test(value.name) ||
+    !("width" in value) ||
+    !isSide(value.width) ||
+    !("height" in value) ||
+    !isSide(value.height) ||
+    !("rgba" in value) ||
+    typeof value.rgba !== "string" ||
+    !/^[A-Za-z0-9+/]*={0,2}$/u.test(value.rgba)
+  ) {
+    return false;
+  }
+  const padding = value.rgba.endsWith("==") ? 2 : value.rgba.endsWith("=") ? 1 : 0;
+  const bytes = (value.rgba.length / 4) * 3 - padding;
+  return value.rgba.length % 4 === 0 && bytes === value.width * value.height * 4;
+}
+
+/** The report's images, those that are well formed, and how many were not. */
+export function readSmokeImages(value: unknown): {
+  readonly images: ReadonlyArray<SmokeImage>;
+  readonly rejected: number;
+} {
+  if (typeof value !== "object" || value === null) {
+    return { images: [], rejected: 0 };
+  }
+  const images: unknown = Reflect.get(value, "images");
+  if (!Array.isArray(images)) {
+    return { images: [], rejected: 0 };
+  }
+  const valid = images.filter(isImage);
+  return { images: valid, rejected: images.length - valid.length };
+}
+
+/**
  * What the engine logs, on the page, for a GPU error nothing captured (`webgpu/deviceLoss.ts`'s
  * `logUncapturedErrors`), by which the main process counts them.
  */

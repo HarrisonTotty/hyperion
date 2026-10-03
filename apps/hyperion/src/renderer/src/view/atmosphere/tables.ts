@@ -14,7 +14,7 @@
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
 import type { ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
-import type { AtmosphereMedium, DensityProfile } from "./medium";
+import type { AtmosphereMedium, DensityProfile, PhaseFunction } from "./medium";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
@@ -69,6 +69,26 @@ export const MULTI_SCATTERING_KERNEL: KernelPair = {
 /** Floats in `Medium`: four scalars, the ground albedo, and three `vec4f` per term. */
 const MEDIUM_FLOATS = 4 + 4 + MAX_TERMS * 12;
 
+/**
+ * A phase function as `view.wgsl`'s `phaseOf` reads it, in `Term.scattering.w` and
+ * `Term.absorption.w`: 0 none, 1 Rayleigh, 2 Cornette–Shanks with its g.
+ */
+function phaseOf(phase: PhaseFunction): readonly [number, number] {
+  let packed: readonly [number, number];
+  switch (phase.kind) {
+    case "none":
+      packed = [0, 0];
+      break;
+    case "rayleigh":
+      packed = [1, 0];
+      break;
+    case "cornette-shanks":
+      packed = [2, phase.asymmetry];
+      break;
+  }
+  return packed;
+}
+
 function profileOf(profile: DensityProfile): readonly [number, number, number, number] {
   let packed: readonly [number, number, number, number];
   switch (profile.kind) {
@@ -104,8 +124,9 @@ export function packMedium(
   packed.set([...medium.groundAlbedo, 0], 4);
   for (const [i, term] of medium.terms.entries()) {
     const at = 8 + i * 12;
-    packed.set([...term.scattering, 0], at);
-    packed.set([...term.absorption, 0], at + 4);
+    const [phaseKind, asymmetry] = phaseOf(term.phase);
+    packed.set([...term.scattering, phaseKind], at);
+    packed.set([...term.absorption, asymmetry], at + 4);
     packed.set(profileOf(term.density), at + 8);
   }
   return packed;

@@ -215,3 +215,19 @@ export function pause(ms: number): Promise<void> {
     setTimeout(resolve, ms);
   });
 }
+
+/**
+ * The 16 bits of the half float at or just below a non-negative `value`: 0 for zero, a subnormal
+ * below 2⁻¹⁴.
+ */
+export function halfBits(value: number): number {
+  if (!(value > 0)) {
+    return 0;
+  }
+  if (value < 2 ** -14) {
+    return Math.floor(value / 2 ** -24);
+  }
+  const exponent = Math.floor(Math.log2(value));
+  const mantissa = Math.floor((value / 2 ** exponent - 1) * 1024);
+  return ((exponent + 15) << 10) | mantissa;
+}

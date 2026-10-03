@@ -3284,6 +3284,47 @@ body {
   gap: 0.5rem;
 }
 
+/* The exposure meter beside the exposure panel (plan R07, T13.b). */
+.view-meter__reading,
+.view-meter__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.view-meter__reading,
+.view-meter__reason {
+  margin: 0 0 0.5rem;
+}
+
+.view-meter__reason {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.view-meter__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0.5rem 0 0;
+  border: 0;
+  padding: 0;
+}
+
+.view-meter__modes > legend {
+  padding: 0;
+}
+
+/* The chosen meter is underlined, as the time control's step is: by shape, not colour alone. */
+.view-meter__modes > .control {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.view-meter__modes > .control[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
 /* Where the view would be, while its engine is made or cannot be. */
 .view__unavailable {
   flex: 1 1 auto;

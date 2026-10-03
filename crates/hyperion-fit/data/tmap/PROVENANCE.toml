@@ -1,0 +1,243 @@
+# TMAP (the Tuebingen NLTE Model-Atmosphere Package) H+He spectra of hot compact stars, from SVO's
+# "TMAP" collection: pure hydrogen (He mass fraction 0) at 90,000 and 100,000 K, log g 6.5-9, for
+# the hottest DA white dwarfs; He mass fraction 0.3 at 60,000-100,000 K, log g 5-9, for hot stars
+# that are not white dwarfs. A fetched dataset (plan 15, Design note 12): no licence is stated, so
+# only this file and `urls.txt` are committed. The raw files are downloaded into `crates/hyperion-
+# fit/data/cache/tmap/`, which git ignores: each line of `urls.txt` is a file name and the URL it
+# was downloaded from (SVO serves the ASCII form with `&format=ascii`). Read by `run star_colour`
+# (rendering plan R06, R06.T3.a).
+dataset = "tmap"
+class = "fetched"
+citation = "Werner, Deetjen, Dreizler, Nagel, Rauch and Schuh (2003), ASP Conf. Ser. 288, 31; Rauch and Deetjen (2003), ASP Conf. Ser. 288, 103: TMAP H+He model spectra"
+url = "http://svo2.cab.inta-csic.es/theory/newov2/index.php?models=tmap"
+retrieved = "2026-10-02"
+release = "57 models of SVO collection tmap in ASCII (Angstrom, erg/cm2/s/A), as served on that date: Hemass 0 at 90,000 and 100,000 K with log g 6.5-9, Hemass 0.3 at 60,000-100,000 K with log g 5-9"
+licence = "none stated by the model authors; the Spanish Virtual Observatory asks that work using its theoretical services acknowledge SVO"
+
+[[files]]
+name = "h_t090000_g6.50.txt"
+sha256 = "9c8364491c46b366b709345139a8a8d5de8c20e342be5e00799a61f335410bd2"
+
+[[files]]
+name = "h_t090000_g7.00.txt"
+sha256 = "98558a7954ca3f1f16fff85c52fe3faafbf4c947a5a790876bd112bb56f0d433"
+
+[[files]]
+name = "h_t090000_g7.50.txt"
+sha256 = "eff38117dc63190bd297212413a4dbf7c50f25498d00678817611aac3896d0dc"
+
+[[files]]
+name = "h_t090000_g8.00.txt"
+sha256 = "f8fbaa0ba1c0f6d5ae2d7ea3fb3a550cc4b2d47a76efc975a39e55d815505000"
+
+[[files]]
+name = "h_t090000_g8.50.txt"
+sha256 = "29b0ac9e45b149cec06410810be350b8e0984bb68315146f1760c8e470797266"
+
+[[files]]
+name = "h_t090000_g9.00.txt"
+sha256 = "8dc0c5584c8718fd44e9fd7c81c4c2e3e5f1366356216d5461e7412ed11f1105"
+
+[[files]]
+name = "h_t100000_g6.50.txt"
+sha256 = "0d2f395c8f0cc670337632d46944aaf7c5e7622b5f84790c3c38297161f7b5ef"
+
+[[files]]
+name = "h_t100000_g7.00.txt"
+sha256 = "02a5b4ea8e7674e0bea6ff2ae46344bd194a7d97685ad5892b461f393872e0b4"
+
+[[files]]
+name = "h_t100000_g7.50.txt"
+sha256 = "0eb4b827544b6bc1179266a3f95189bed9dfd89fe06df949daedac3bb570e116"
+
+[[files]]
+name = "h_t100000_g8.00.txt"
+sha256 = "5da794e1c9d62c45c4c7e5cdce6e82b2d8edad21b4c4dc14d9f34277bb48ff0f"
+
+[[files]]
+name = "h_t100000_g8.50.txt"
+sha256 = "b59799e97d261f2bdfd5691a51164f94ebeb5f19d07f3d668900a64511a29f25"
+
+[[files]]
+name = "h_t100000_g9.00.txt"
+sha256 = "8f0a0f901a3d5877bccef20856adb80323d433ec82902cedcc6ba6eea3f1d725"
+
+[[files]]
+name = "he30_t060000_g5.00.txt"
+sha256 = "0c4ee477e3eca56cdc53e1a268fa84ebf2aee518b8e608de816f8bc14ffecd36"
+
+[[files]]
+name = "he30_t060000_g5.50.txt"
+sha256 = "702e481967f1d87c8897b448202606a81d4f4e898b0ff27a73d8fca00c9b65d4"
+
+[[files]]
+name = "he30_t060000_g6.00.txt"
+sha256 = "1d7355f224f85db35b295f4fe27a349c137b7718ddaaa19e6952ac3f8ba696f5"
+
+[[files]]
+name = "he30_t060000_g6.50.txt"
+sha256 = "73158b7268a751cf3cc6741d120fb4e45cbd9711f6ee4c7481b99b35cc167842"
+
+[[files]]
+name = "he30_t060000_g7.00.txt"
+sha256 = "18c3af44c0c93405ba888780d249f4af7b8c3e555fd4c8841be7c8b3f6c29d23"
+
+[[files]]
+name = "he30_t060000_g7.50.txt"
+sha256 = "bf4b4891afe4e252d5ef7aed3b29aacc65b66d25f1411c7616b42832754bdd09"
+
+[[files]]
+name = "he30_t060000_g8.00.txt"
+sha256 = "e9f46c1f1da5de1d47e3451cd31f5ed4a3b64cb94f11d65b8b30b296273e58f1"
+
+[[files]]
+name = "he30_t060000_g8.50.txt"
+sha256 = "7590f1d2fe933f22122b9925d4421035eea12235a33646d915a758bd687598a3"
+
+[[files]]
+name = "he30_t060000_g9.00.txt"
+sha256 = "b2e63cdd88d41875552d4530050d23a201a72a1e1ae1b9019a6e3a146c9b121f"
+
+[[files]]
+name = "he30_t070000_g5.00.txt"
+sha256 = "bc430723edaec76042f847c273fbf26a0ec4ade924c27d545a043b3ba8f447a9"
+
+[[files]]
+name = "he30_t070000_g5.50.txt"
+sha256 = "5a59b856a8e0e13297898d6461318c4d5e435e77c97299f1d456f39fcd01e4e8"
+
+[[files]]
+name = "he30_t070000_g6.00.txt"
+sha256 = "48f2971cf3a404f1d92471ba1d5795f47c86886a71b05dbf80c9a1c4e1083e83"
+
+[[files]]
+name = "he30_t070000_g6.50.txt"
+sha256 = "f21de2be3c4cf1e87b0f772f73d86f9161f76ec86afe4bab6f8607ba99895d2f"
+
+[[files]]
+name = "he30_t070000_g7.00.txt"
+sha256 = "5bccae4b98d1a02fe36b1a7ae1b54655607889b6ef1192eba9fc876ffed40d0a"
+
+[[files]]
+name = "he30_t070000_g7.50.txt"
+sha256 = "5cc91c8244653e80eda3eb207a24006aba09b56a078c3a1e9fc399293978fbca"
+
+[[files]]
+name = "he30_t070000_g8.00.txt"
+sha256 = "6e930ba7eb15323c061523efd07e11602c1ce713cb29cf7cd4e40a0b04fdb86e"
+
+[[files]]
+name = "he30_t070000_g8.50.txt"
+sha256 = "45a3e83daa0364afa76cf2f154e98cfe0493e07b820702b5dfef709ee90569de"
+
+[[files]]
+name = "he30_t070000_g9.00.txt"
+sha256 = "9f692fc61038da7d54cef466efaa159c6fd252ce99fbd2b342cd682d41980231"
+
+[[files]]
+name = "he30_t080000_g5.00.txt"
+sha256 = "b818adb8f422ce929736b06b9b7b4caa8d731915097241892d91b9250bc5c30e"
+
+[[files]]
+name = "he30_t080000_g5.50.txt"
+sha256 = "95731dac9f63ed5eb20cf840200450e0b94557925466b6138b7c8bb158484256"
+
+[[files]]
+name = "he30_t080000_g6.00.txt"
+sha256 = "b362344a303a8bdd3b2e262b0515d8098dbe41933f4c4b8b90999ec4b2e3ec27"
+
+[[files]]
+name = "he30_t080000_g6.50.txt"
+sha256 = "c47443a0b201ccb26fa6dc8c3ce52f9afb57c7724683c1901c87eb16909bb17d"
+
+[[files]]
+name = "he30_t080000_g7.00.txt"
+sha256 = "c5b4f3cd47a9faebb3585354aa51bc6c4c6180ea834497f82bf4470aed9b3aa8"
+
+[[files]]
+name = "he30_t080000_g7.50.txt"
+sha256 = "08d7de3d43cfc06484a578b16ab336d457c4d32813603dfcac9b6f3af590ed90"
+
+[[files]]
+name = "he30_t080000_g8.00.txt"
+sha256 = "c3525f144616e12c3361ae3d8d71f48471fc0fbcbc8e0c40e9cef1d24073a2c6"
+
+[[files]]
+name = "he30_t080000_g8.50.txt"
+sha256 = "0ff8d9e08dfcf15be20a3edfb2924e758c9cc51c2772048b7ebc6e294fa9281d"
+
+[[files]]
+name = "he30_t080000_g9.00.txt"
+sha256 = "dd8cd8acc6955731badf7e65cf6be0c474c24cc2f9d76121a0226409efa0bf53"
+
+[[files]]
+name = "he30_t090000_g5.00.txt"
+sha256 = "5a4fba296659cd209050882a66207719fa8ce00b5e5ba60b167f7550c8425b08"
+
+[[files]]
+name = "he30_t090000_g5.50.txt"
+sha256 = "d26ce768f81d8cb027a28f9d6b7684fe3c2adb6722bd3af673bd3e2fb5fbdc72"
+
+[[files]]
+name = "he30_t090000_g6.00.txt"
+sha256 = "d3966fc824084d1cad5eb06ee4e91a2d1fe8a7e3d6fe42c42a1abe55b21be5cb"
+
+[[files]]
+name = "he30_t090000_g6.50.txt"
+sha256 = "0380beed9e2386b2b5cbfef50f4acd1530199da25396c47557c500285676756e"
+
+[[files]]
+name = "he30_t090000_g7.00.txt"
+sha256 = "ed507a05b1342d8e4b2087e7cb906a49169b83cc8adcc2f913fc49c95422c92a"
+
+[[files]]
+name = "he30_t090000_g7.50.txt"
+sha256 = "6ef5c7ccf81f49117724086eac4b2e2c890baf45c2717b9352f8a2a911ea6ad4"
+
+[[files]]
+name = "he30_t090000_g8.00.txt"
+sha256 = "0c845cfaad022ad48d6910267c853ea3a0ad3d8c4065e708ebd2a5f0801cfc20"
+
+[[files]]
+name = "he30_t090000_g8.50.txt"
+sha256 = "841885f0ca36367a056582460210bfe053116a52eb5e6ae830f62451567b3bdc"
+
+[[files]]
+name = "he30_t090000_g9.00.txt"
+sha256 = "a795b042fe82b5da37b389d3eb0033a8d3130f4e42961d6f85c58a60d95fc116"
+
+[[files]]
+name = "he30_t100000_g5.00.txt"
+sha256 = "31b0fe10041a7474ed5f9184c69e5ccae41a09ad1a12241191de2b97eaffb549"
+
+[[files]]
+name = "he30_t100000_g5.50.txt"
+sha256 = "f9ba9da8900724503be85030a404af69bf4a4664023adbcf3ebd184d671af021"
+
+[[files]]
+name = "he30_t100000_g6.00.txt"
+sha256 = "dcc86f0667b843709bd9ceecff9e7d005e5975ba709a1fd15a7122297e054a63"
+
+[[files]]
+name = "he30_t100000_g6.50.txt"
+sha256 = "c9624440cbb4e70f2bb8f73b0885f8d54e7a3e91870f6166c176e06ff3844ca0"
+
+[[files]]
+name = "he30_t100000_g7.00.txt"
+sha256 = "70bd5b1f3df1e2041f6531f3b65605b263aa3ac496b72dd3abf887f724086fa7"
+
+[[files]]
+name = "he30_t100000_g7.50.txt"
+sha256 = "ce20d95489609867447da006298760971229d905bd13b6f37aa6b87d420212a4"
+
+[[files]]
+name = "he30_t100000_g8.00.txt"
+sha256 = "949f890963f0ace31fff54b52cf8bc30b90c0061e9a07b67331bd8f9b469d256"
+
+[[files]]
+name = "he30_t100000_g8.50.txt"
+sha256 = "2f6d3a1cf6b38e7026d310c3e0da9c4efafce6a1c6e41591636891ef1a72c64f"
+
+[[files]]
+name = "he30_t100000_g9.00.txt"
+sha256 = "b914d2f43d11f95acdac34e7be52b3c7b175e5bf01a416e9a749dd3a415476b7"

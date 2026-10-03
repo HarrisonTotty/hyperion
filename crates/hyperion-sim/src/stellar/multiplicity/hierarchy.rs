@@ -215,6 +215,16 @@ impl StarIndex {
     pub const fn get(self) -> u8 {
         self.0
     }
+
+    /// The star of body index `body`, or `None` at or past [`STAR_BODY_INDEX_END`].
+    #[must_use]
+    pub const fn from_body(body: u8) -> Option<Self> {
+        if (body as u16) < STAR_BODY_INDEX_END {
+            Some(Self(body))
+        } else {
+            None
+        }
+    }
 }
 
 /// The index of a node in a [`SystemHierarchy`]'s depth-first list: 0 is the root.
@@ -2064,6 +2074,13 @@ mod tests {
                 depth_first(h, outer, out);
             }
         }
+    }
+
+    #[test]
+    fn a_star_index_is_any_body_below_the_end() {
+        assert_eq!(StarIndex::from_body(0), Some(StarIndex::PRIMARY));
+        assert_eq!(StarIndex::from_body(15).map(StarIndex::get), Some(15));
+        assert_eq!(StarIndex::from_body(16), None);
     }
 
     #[test]

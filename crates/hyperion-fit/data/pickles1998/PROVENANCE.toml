@@ -1,0 +1,78 @@
+# Sixteen spectra of Pickles' (1998) stellar flux library, from O5 V to M6 V and three giants, the
+# empirical check of the colour table (R06.T3.b): each file of `urls.txt` is fetched gzipped from
+# CDS and stored decompressed, and the hashes below are of the decompressed files. A fetched dataset
+# (plan 15, Design note 12): no licence is stated, so only this file and `urls.txt` are committed.
+# The raw files are downloaded into `crates/hyperion-fit/data/cache/pickles1998/`, which git
+# ignores: each line of `urls.txt` is a file name and the URL it was downloaded from. Read by `run
+# star_colour` (rendering plan R06, R06.T3.a).
+dataset = "pickles1998"
+class = "fetched"
+citation = "Pickles (1998), PASP 110, 863: a stellar spectral flux library, 1150-25000 A (VizieR J/PASP/110/863)"
+url = "https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/"
+retrieved = "2026-10-02"
+release = "the sixteen files listed, as CDS served them gzipped on that date, decompressed"
+licence = "none stated; CDS asks that VizieR be acknowledged and the paper cited"
+
+[[files]]
+name = "uka0v.dat"
+sha256 = "db2d0309c71d452aa1dce0b814b6eda6e10e7682deac36ea93d6047cbba82056"
+
+[[files]]
+name = "ukb0v.dat"
+sha256 = "5b8b8cc0f2d1cd312f4e5e1e93b0c7f22599b48200864160f4e32f36ba296d30"
+
+[[files]]
+name = "ukf5v.dat"
+sha256 = "1fb3ea35e74b0c33a87a938b0139a2aa7b035ef53dc533c6e43d17ed291133bd"
+
+[[files]]
+name = "ukg2v.dat"
+sha256 = "260d2674078cf36443ff5b243500b959df05366a713bcb55a66c356ebf92b0db"
+
+[[files]]
+name = "ukg8iii.dat"
+sha256 = "96314eb3ff29668748720c750cc22521c9067db73229f518077576311dc8e526"
+
+[[files]]
+name = "ukk0iii.dat"
+sha256 = "c037c62ee4ecbb11b101de19cf9e41eb3978bd0499c6a8355c00d7ca9394738d"
+
+[[files]]
+name = "ukk0v.dat"
+sha256 = "71d38a21f3bd29db8f640623d45cbef7943eedd9a5f0baad9ef35ab8927804fc"
+
+[[files]]
+name = "ukk5v.dat"
+sha256 = "c0248813a8405b0c8f8a9ff8fd8e3e8c29081440ca1d9bde9014b7ed8fdb3fcf"
+
+[[files]]
+name = "ukm0v.dat"
+sha256 = "b3050da9e55fc5b95b7c72bd85d4d6fdd7c8f51bb67b5c81787df75ccd8ca8dd"
+
+[[files]]
+name = "ukm2v.dat"
+sha256 = "6398a6e58b2a2b3746c704a70aa6594445a6fb9466b528069324a7a493b0cfa7"
+
+[[files]]
+name = "ukm3iii.dat"
+sha256 = "3db6b5026eb31589cc08787adf457fc1031bcc336bb05352a9ec8e12cc982130"
+
+[[files]]
+name = "ukm3v.dat"
+sha256 = "cc22a85fe330af013e3388b39141694c38aaa5663518f1031cc9a7552033fec4"
+
+[[files]]
+name = "ukm4v.dat"
+sha256 = "7fae5800abf627789b58fcc9dd165cba2ed3e4174ffc45101660e25983f94d6c"
+
+[[files]]
+name = "ukm5v.dat"
+sha256 = "2d3e499360a829c89c7aa606be1e9bcbb49e4c2dd027436d8468430b8dd55084"
+
+[[files]]
+name = "ukm6v.dat"
+sha256 = "a09c5e1b16b74156858ce02ef8fca17014796865a1497b6a09051b94955c8da1"
+
+[[files]]
+name = "uko5v.dat"
+sha256 = "5916639d9594303ed078f96501fd087da0953307ff251987a7a6ef9e75c6ae81"

@@ -1,0 +1,18 @@
+# Claret et al.'s (2020) power-2 limb-darkening coefficients for white dwarfs (DA, DA-NLTE, DB and
+# DBA models) in the Sloan, UBVRI, HiPERCAM, Kepler, TESS and Gaia passbands, table gh, fetched
+# gzipped from CDS and stored decompressed; the hash is of the decompressed file. Read by `run
+# limb_darkening` (rendering plan R06, R06.T4.a). A fetched dataset (plan 15, Design note 12): no
+# licence is stated, so only this file and `urls.txt` are committed. The raw files are downloaded
+# into `crates/hyperion-fit/data/cache/claret_2020_white_dwarfs/`, which git ignores: each line of
+# `urls.txt` is a file name and the URL it was downloaded from.
+dataset = "claret_2020_white_dwarfs"
+class = "fetched"
+citation = "Claret, Cukanovaite, Burdge, Tremblay, Parsons and Marsh (2020), A&A 634, A93: limb- and gravity-darkening coefficients of compact stars, table gh (VizieR J/A+A/634/A93)"
+url = "https://cdsarc.cds.unistra.fr/ftp/J/A+A/634/A93/"
+retrieved = "2026-10-02"
+release = "tablegh.dat as CDS served it on that date, decompressed"
+licence = "none stated; CDS asks that VizieR be acknowledged and the paper cited"
+
+[[files]]
+name = "tablegh.dat"
+sha256 = "25d988e43205795558f427d38dce8c7b9cc7f4524a9c75b91f888e5b78537ebb"
