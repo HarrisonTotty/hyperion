@@ -16,6 +16,7 @@ import {
   PROBE_CASE_BYTES,
   syntheticShare,
 } from "./litBodyProbe";
+import { annulusEdges } from "../lighting/annuli";
 import { lawFor } from "./phase";
 
 const LAW = lawFor([0.17, 0.14, 0.1], [0.5, 0.48, 0.46], "mercury");
@@ -107,9 +108,9 @@ describe("the lighting probe's cases", () => {
   const u32 = new Uint32Array(cases);
   const f32 = new Float32Array(cases);
 
-  it("packs each case in the kernel's 32 bytes, its kind first", () => {
+  it("packs each case in the kernel's 64 bytes, its kind first", () => {
     expect(cases.byteLength).toBe(3 * LIGHTING_CASE_BYTES);
-    expect([u32[0], u32[8], u32[16]]).toEqual([1, 2, 3]);
+    expect([u32[0], u32[16], u32[32]]).toEqual([1, 2, 3]);
   });
 
   it("packs a horizon case's H, φ and horizon", () => {
@@ -117,12 +118,18 @@ describe("the lighting probe's cases", () => {
   });
 
   it("packs an eclipse case's annuli and angles", () => {
-    expect(u32[9]).toBe(4);
-    expect([f32[10], f32[13], f32[14]]).toEqual([
+    expect(u32[17]).toBe(4);
+    expect([f32[18], f32[21], f32[22]]).toEqual([
       Math.fround(0.01),
       Math.fround(0.005),
       Math.fround(0.002),
     ]);
+  });
+
+  it("packs an eclipse case's annuli as the CPU places them", () => {
+    const { edges, flux } = annulusEdges(0.7, 0.6, 4);
+    expect(Array.from(f32.subarray(24, 28))).toEqual(Array.from(edges.subarray(1), Math.fround));
+    expect(Array.from(f32.subarray(28, 32))).toEqual(Array.from(flux, Math.fround));
   });
 
   it("expects the stubs' 1, 1 and 0", () => {

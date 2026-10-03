@@ -98,19 +98,23 @@ fn circle_overlap_area(r : f32, k : f32, z : f32) -> f32 {
   return s1 + s2;
 }
 
-fn power2_moment(c : f32, alpha : f32, mu : f32) -> f32 {
-  return (1.0 - c) * mu * mu * 0.5 + c * pow(mu, alpha + 2.0) / (alpha + 2.0);
+// A star disc's annuli for one channel (`annuli.ts`'s `AnnulusSet`, placed on the CPU per star
+// and channel by equal concentric error, decision-r07-dn6): `outer[j]` the outer radius of annulus
+// j in stellar radii (the first's inner radius is 0, the last's outer 1), `flux[j]` its exact share
+// of the disc's flux, `count` the number in use, at most four.
+struct DiscAnnuli {
+  outer : vec4f,
+  flux : vec4f,
+  count : u32,
 }
 
-// The eclipse term (Design note 6): the fraction of a power-2 disc's flux (I(μ)/I(1) =
-// 1 − c(1 − μ^α)) left visible by one occluder, both given as angular radii and the angle between
-// their centres, by `annuli` annuli uniform in μ, each eclipsed by the difference of two exact
-// overlaps. The TypeScript twin is `view/lighting/annuli.ts`'s `annulusVisibleFraction`.
+// The eclipse term (Design note 6): the fraction of the disc's flux left visible by one occluder,
+// the two given as angular radii and the angle between their centres; each uniform annulus is
+// eclipsed by the difference of two exact overlaps. The TypeScript twin is `view/lighting/
+// annuli.ts`'s `annulusVisibleFraction`.
 fn eclipse_visible(
   star_radius : f32,
-  limb_c : f32,
-  limb_alpha : f32,
-  annuli : u32,
+  annuli : DiscAnnuli,
   occluder_radius : f32,
   separation : f32,
 ) -> f32 {
@@ -119,22 +123,16 @@ fn eclipse_visible(
   if (z >= 1.0 + ratio) {
     return 1.0;
   }
-  let total = power2_moment(limb_c, limb_alpha, 1.0);
-  let k = f32(annuli);
   var hidden = 0.0;
   var inner_overlap = 0.0;
   var inner_edge = 0.0;
-  var mu_inner = 1.0;
-  for (var j = 1u; j <= annuli; j = j + 1u) {
-    let mu_outer = 1.0 - f32(j) / k;
-    let outer_edge = sqrt(1.0 - mu_outer * mu_outer);
+  for (var j = 0u; j < min(annuli.count, 4u); j = j + 1u) {
+    let outer_edge = annuli.outer[j];
     let outer_overlap = circle_overlap_area(outer_edge, ratio, z);
-    let flux = (power2_moment(limb_c, limb_alpha, mu_inner) - power2_moment(limb_c, limb_alpha, mu_outer)) / total;
     let area = LIT_PI * (outer_edge * outer_edge - inner_edge * inner_edge);
-    hidden = hidden + flux * (outer_overlap - inner_overlap) / area;
+    hidden = hidden + annuli.flux[j] * (outer_overlap - inner_overlap) / area;
     inner_overlap = outer_overlap;
     inner_edge = outer_edge;
-    mu_inner = mu_outer;
   }
   return max(0.0, 1.0 - hidden);
 }

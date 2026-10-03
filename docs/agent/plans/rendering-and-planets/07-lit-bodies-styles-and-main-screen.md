@@ -143,11 +143,11 @@ export const STAR_CUT_RELATIVE = 1e-4; // Design note 4; R08 applies the same co
 /** Irradiance factor from a uniform sphere of H = d ÷ R at angle φ to the normal (Howell),
  *  above a local horizon of elevation `horizonRad` (0 on the smooth figure; R10's on terrain). */
 export function sphereIrradianceFactor(h: number, phiRad: number, horizonRad?: number): number;
-export const DISC_ANNULI_HIGH = 4; // limb-darkened annuli, edges uniform in μ
+export const DISC_ANNULI_HIGH = 4; // limb-darkened annuli, edges by equal concentric error
 export const DISC_ANNULI_LOW = 2;
-/** Edges of K annuli uniform in μ for one channel's power-2 law I(μ)/I(1) = 1 − c(1 − μ^α),
- *  from `HostDiscDto`'s per-channel coefficients. */
-export function annulusEdges(c: number, alpha: number, k: number): Float64Array;
+/** Edges of K flux-exact annuli by equal concentric error for one channel's power-2 law
+ *  I(μ)/I(1) = 1 − c(1 − μ^α), from `HostDiscDto`'s per-channel coefficients. */
+export function annulusEdges(c: number, alpha: number, k: number): AnnulusSet; // as built
 export function circleOverlapArea(r: number, k: number, z: number): number; // exact
 export function eclipseVisible(
   disc: HostDiscDto,
@@ -704,18 +704,22 @@ and `--port`.
    albedo 0.3 (p = 0.2, q = 1.5, brighter at large phase than any real body), and the label block
    says `BODY ALBEDO: NOT YET MODELLED` (a phrase for the owner, R07.T16).
 6. **The horizon in closed form, eclipses by annuli** (researched 2026-09-29; Howell's catalogue of
-   radiation view factors, configurations B-41 and B-42,
+   radiation view factors, configuration B-43 (Cunningham 1961; Hauptmann 1968),
    <https://www.thermalradiation.net/tablecon.html>, formula transcribed from memory and verified by
    brute force to 2 × 10⁻³; Kreidberg 2015, PASP 127, 1161). The brainstorm's "sampled at a handful
    of points" is 13–26% wrong for small occluders at 4 to 8 samples and bands by 1 ÷ N, and needs
    about 256 samples for 1%. Instead a lit point's visibility is the product of two closed forms.
    The horizon term is the irradiance factor from a uniform sphere of H = d ÷ R★ at angle φ between
-   the normal and the star's centre, which is exact for a uniform disc and within 0.45% of the
-   limb-darkened one for a star 19.5° in radius; it softens the terminator and lights a close-in
+   the normal and the star's centre, which is exact for a uniform disc and within 0.47% of the
+   limb-darkened one for a star 19.5° in radius (polynomial law; 0.61% in B for the Sun's power-2
+   law); it softens the terminator and lights a close-in
    planet beyond its hemisphere (to 109.5° at 3 stellar radii). The eclipse term splits the disc
-   into K annuli of uniform intensity with edges uniform in μ, and takes each annulus's eclipsed
-   area as the difference of two exact circle–circle overlaps: continuous, so it never bands; 0.62%
-   worst absolute error at K = 4 (high) and 1.5% at K = 2 (low). The product errs only where an
+   into K annuli of uniform intensity, each with its exact flux and edges by equal concentric
+   error, and takes each annulus's eclipsed area as the difference of two exact circle–circle
+   overlaps: continuous, so it never bands; for the Sun 0.56% (V), 0.70% (B) worst absolute error
+   at K = 4 (high) and 2.1% (V), 2.7% (B) at K = 2 (low) (decision-r07-dn6, 2026-10-03; the law
+   I(μ)/I(1) = 1 − c(1 − μ^α) after Hestroffer 1997, A&A 327, 199, eq. 4, its coefficients from
+   Maxted 2018, A&A 616, A39, Table 2). The product errs only where an
    eclipse's penumbra crosses the terminator band. Occluder lists are built on the CPU in `f64` from
    shadow cones and are usually empty. At 1 au the soft terminator is 59.3 km wide on an Earth-sized
    body and lies below 0.5% of peak irradiance, black under a day-side exposure. Mandel and Agol
@@ -1129,14 +1133,17 @@ body is ordered on its equatorial sphere; a disc overlapping a mesh body is prom
 
 - **R07.T6.a The horizon.** `lighting/{sphereIrradiance,oracle}.ts` (Design note 6), with the local
   horizon argument. Tests: Howell's factor against brute force to 2 × 10⁻³ at H = 3, 11.5 and 215,
-  and its limb-darkening error at most 0.45% at 19.5°; the terminator 59.3 km wide on an airless
+  and its limb-darkening error at most 0.48% at 19.5° for the polynomial law and 0.62%, 0.49% and
+  0.40% for the Sun's B, V and R power-2 laws (decision-r07-dn6); the terminator 59.3 km wide on an airless
   body of 6,371 km at 1 au, and E ÷ E_zenith at the geometric terminator 9.87 × 10⁻⁴ for a uniform
   disc and 9.27 × 10⁻⁴ for the brainstorm's polynomial law; a planet at 3 stellar radii lit to
   109.5°; a local horizon of 5° removes the light of a star 4° up. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/lighting`.
 - **R07.T6.b Annuli and overlaps.** `lighting/annuli.ts`: `annulusEdges`, `circleOverlapArea`,
-  `eclipseVisible`. Tests: the eclipse term's worst absolute error at most 0.62% at K = 4 and 1.5%
-  at K = 2 over a grid of radius ratios 0.1–30 and 41 separations, against 400 annuli; a concentric
+  `eclipseVisible`. Tests: the eclipse term's worst absolute error, over a grid of radius ratios
+  0.1–30 and 41 separations against the exact integral oracle, at most 0.73%, 0.58% and 0.48% for
+  the Sun's B, V and R at K = 4 and 2.8%, 2.2% and 1.85% at K = 2 (decision-r07-dn6); the equal
+  dip predicting the grid's worst to 3 × 10⁻⁴; a concentric
   occultation against the closed form [(1 − c) μ_k² + 2c μ_k^(α+2) ÷ (α + 2)] ÷ [(1 − c) + 2c ÷ (α +
   2)], μ_k = √(1 − k²); a total eclipse exactly 0. Acceptance: `pnpm --filter hyperion exec vitest
 run src/renderer/src/view/lighting`.
@@ -1943,30 +1950,45 @@ test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with
   - **Figures.** H = 3, 11.5 and 215 agree with brute force to 2 × 10⁻³; the terminator is
     59.3 km wide at 1 au on 6,371 km; E ÷ E_zenith at the geometric terminator is 9.87 × 10⁻⁴
     (uniform) and 9.27 × 10⁻⁴ (the brainstorm's polynomial law); a planet at 3 stellar radii is lit
-    to 109.5°; a 5° horizon hides a star 4° up. **The limb-darkening error at 19.5° is 0.469%** of
-    the face-on value at φ = 90° with the brainstorm's solar polynomial, against Design note 6's
-    0.45%; the test bounds it at the measured 0.47%. Sent to the orchestrator for a science ruling
-    (`decision-r07-dn6.md`, pending).
-- **Deviations in T6.b, as built (pending `decision-r07-dn6.md`).**
-  - **`annulusEdges(c, alpha, k)`** returns an `AnnulusSet`: the K + 1 edges uniform in μ and each
-    annulus's exact share of the power-2 flux; `annulusVisibleFraction(annuli, ratio, separation)`
+    to 109.5°; a 5° horizon hides a star 4° up. **The limb-darkening error at 19.5°** is 0.469% of
+    the face-on value at φ = 90° with the brainstorm's polynomial (Design note 6's 0.45% is a
+    linear law's, u = 0.6), and 0.607%, 0.474% and 0.390% with the Sun's B, V and R power-2 laws
+    (Maxted 2018, Table 2); the tests bound them at 0.48%, 0.62%, 0.49% and 0.40%
+    (decision-r07-dn6, 2026-10-03). The error falls about as 1 ÷ H (Sun V: 1.28% at H = 1.5,
+    0.13% at H = 10). The terminator's 2 ÷ (3π H) of face-on is the H ≫ 1 limit, 3.5% low at H = 3.
+- **Deviations in T6.b, as built (decision-r07-dn6, 2026-10-03).**
+  - **`annulusEdges(c, alpha, k)`** returns an `AnnulusSet`: the K + 1 edges by equal concentric
+    error ("equal dip", the minimax flux-exact partition: a level bisected so that every annulus's
+    worst concentric error is equal, each edge the furthest at that level, per star and channel on
+    the CPU in `f64`), each annulus's exact share of the power-2 flux, and the level `dip`, the
+    predicted worst error; `annulusVisibleFraction(annuli, ratio, separation)`
     is the eclipse term in stellar radii, and `eclipseVisible(disc, from, occluders, k)` takes a
     `LimbDarkenedDisc` (centre, radius and one channel's c and α), not `HostDiscDto`, which
     carries no position. The annulus construction is the one function a scheme change touches.
-  - **The error bounds.** Against a 400-annulus oracle (`denseAnnulusVisibleFraction`) over radius
-    ratios 0.1–30 and 41 separations the worst case is always a concentric occulter, and it grows
-    with the darkening: 0.40% at K = 4 and 1.46% at K = 2 for c 0.5, α 0.5; 0.73% and 2.6% for the
-    Sun-like c 0.71, α 0.6 the tests use. Design note 6's 0.62% and 1.5% are not reached by any one
-    law; the tests hold the measured bounds while the science check
-    (`decision-r07-dn6.md`) looks for a scheme that meets them at fixed K.
-  - **The grid** is 41 ratios log-spaced over 0.1–30 by 41 separations over 0 to 1 + ratio, for
-    two laws: the Sun-like c 0.71, α 0.6 (bounds 0.74% and 2.7%) and c 0.8, α 0.45 (0.62% and
-    2.3%; its shallower profile errs less despite the deeper limb). `eclipseVisible` adds the
-    fractions each occluder hides, which assumes the occluders do not overlap one another, as holds
-    for the shadow cones `occludersFor` keeps; it measures the separation by atan2 of the cross and
-    dot products. `annulusVisibleFraction`, `AnnulusSet`, `LimbDarkenedDisc` and the oracle
-    `denseAnnulusVisibleFraction` (400 annuli uniform in radius, each with its exact flux, sharing
-    the separately tested `circleOverlapArea`) are exports beyond Provides.
+  - **The error bounds**, against the exact integral oracle `eclipseIntegralVisibleFraction`
+    ((1 − c) A(1) + c ∫₀¹ A(√(1 − t^(2/α))) dt, which the 400-annulus `denseAnnulusVisibleFraction`
+    meets to 10⁻⁵) over 41 ratios log-spaced over 0.1–30 by 41 separations over 0 to 1 + ratio:
+    the Sun's B, V and R (Maxted 2018, Table 2: 0.846/0.830, 0.771/0.707, 0.712/0.625) at most
+    0.73%, 0.58% and 0.48% at K = 4 and 2.8%, 2.2% and 1.85% at K = 2; c 0.71, α 0.6 (the R band,
+    not V as first labelled) 0.47% and 1.78%; c 0.5, α 0.5 0.28% and 1.05%. The equal dip predicts
+    the grid's worst to 3 × 10⁻⁴. The edges replace the first build's uniform-in-μ ones (0.73% and
+    2.6% for c 0.71, α 0.6). The WGSL `eclipse_visible(star_radius, annuli: DiscAnnuli,
+occluder_radius, separation)` takes the CPU's edges and fluxes (`DiscAnnuli { outer, flux,
+count }`, at most four), not c and α.
+  - **Still short of Design note 6 (for the owner).** K = 4 meets 0.62% for the Sun in V and R,
+    not B (0.70%); the worst in Maxted's grid is the B channel of a 4,500 K dwarf, 0.87% at K = 4 and
+    3.4% at K = 2. No flux-exact scheme reaches 1.5% at K = 2 for solar laws; freeing each
+    annulus's flux (the total exact) with optimised intensities reaches 1.49% (V), 1.24% (R) and
+    1.88% (B) at K = 2, but needs per-star numerical optimisation. **K = 3 with equal dip gives
+    0.8–1.2% for the Sun: raising `DISC_ANNULI_LOW` to 3 is the owner's call**, listed and not
+    made. The term treats the disc as flat in angle, an error of order ρ² ÷ 12, about 1% at
+    ρ = 19.5° (estimated, not measured), for close-in hosts.
+  - **Exports and assumptions.** `eclipseVisible` adds the fractions each occluder hides, which
+    assumes the occluders do not overlap one another, as holds for the shadow cones `occludersFor`
+    keeps; it measures the separation by atan2 of the cross and dot products.
+    `annulusVisibleFraction`, `AnnulusSet`, `LimbDarkenedDisc` and the oracles
+    `eclipseIntegralVisibleFraction`, `denseAnnulusVisibleFraction` and `power2Profile` are
+    exports beyond Provides.
 - **Deviations in T6.c, as built.**
   - **`occludersFor(body, stars, bodies)`** takes `LightingBody` and `LightingSphere` (centre and
     radius, m), not `SceneFrameBody` and `HostDiscDto`: neither carries both, the frame having no
@@ -1976,14 +1998,14 @@ test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with
     `umbraRadius` and `penumbraRadius` are exported for the tests: Earth's umbra 4,600 km and
     penumbra 8,175 km across at the Moon's distance; the Moon's umbra ends short of Earth.
   - **The WGSL** (`litBody.wgsl`): `sphere_irradiance(h, phi, horizon)` and `howell_view_factor`;
-    `eclipse_visible(star_radius, limb_c, limb_alpha, annuli, occluder_radius, separation)` for one
-    occluder in angular terms (the CPU builds the list and the angles); `circle_overlap_area`;
+    `eclipse_visible(star_radius, annuli: DiscAnnuli, occluder_radius, separation)` for one
+    occluder in angular terms (the CPU builds the list, the angles and the annuli, T6.b); `circle_overlap_area`;
     and the stubs `ring_shadow_on_body(p, sun) -> vec3f` (1), `atmosphere_sun_transmittance(
 altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (0), with R08.T9.b's
     and R11's full signatures. The lit point's lighting, which calls them, is T8.a's.
-  - **The probe.** `LIT_BODY_PROBE` gains a second case array, `LightingCase` (kind, annuli and six
-    values), so one kernel holds the whole library (an `auto` layout binds only what the entry
+  - **The probe.** `LIT_BODY_PROBE` gains a second case array, `LightingCase` (kind, annuli, six
+    values and the annuli's edges and fluxes, 64 bytes), so one kernel holds the whole library (an `auto` layout binds only what the entry
     point uses, and the engine binds every declared binding). The smoke harness checks five
     horizon factors and five eclipse terms against their TypeScript twins to 2 × 10⁻⁴ absolute
     (WGSL's `f32` `acos` and `atan` are allowed some 10⁻⁴), and the stubs' 1, 1 and 0 exactly.

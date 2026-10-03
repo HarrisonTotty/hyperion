@@ -122,14 +122,17 @@ export type LightingProbeCase =
       readonly starRadiusRad: number;
       readonly limbC: number;
       readonly limbAlpha: number;
-      readonly annuli: number;
+      readonly annuli: 1 | 2 | 3 | 4;
       readonly occluderRadiusRad: number;
       readonly separationRad: number;
     }
   | { readonly kind: "stubs" };
 
-/** Bytes per case in the kernel's `LightingCase` array: two 16-byte rows. */
-export const LIGHTING_CASE_BYTES = 32;
+/**
+ * Bytes per case in the kernel's `LightingCase` array: four 16-byte rows, the eclipse case's
+ * annuli in the last two.
+ */
+export const LIGHTING_CASE_BYTES = 64;
 
 /** The cases packed as the kernel's `array<LightingCase>`: kind, annuli, then up to six values. */
 export function packLightingProbeCases(cases: ReadonlyArray<LightingProbeCase>): ArrayBuffer {
@@ -156,6 +159,15 @@ export function packLightingProbeCases(cases: ReadonlyArray<LightingProbeCase>):
           ],
           base + 2,
         );
+        {
+          const { edges, flux } = annulusEdges(
+            Math.fround(probe.limbC),
+            Math.fround(probe.limbAlpha),
+            probe.annuli,
+          );
+          f32.set(edges.subarray(1), base + 8);
+          f32.set(flux, base + 12);
+        }
         break;
       case "stubs":
         u32[base] = 3;
@@ -227,6 +239,8 @@ struct LightingCase {
   p3 : f32,
   p4 : f32,
   p5 : f32,
+  outer : vec4f,
+  flux : vec4f,
 }
 
 @group(0) @binding(0) var<storage, read> cases : array<ProbeCase>;
@@ -241,7 +255,7 @@ fn run_lighting(index : u32) {
   if (c.kind == 1u) {
     value.x = sphere_irradiance(c.p0, c.p1, c.p2);
   } else if (c.kind == 2u) {
-    value.x = eclipse_visible(c.p0, c.p1, c.p2, c.annuli, c.p3, c.p4);
+    value.x = eclipse_visible(c.p0, DiscAnnuli(c.outer, c.flux, c.annuli), c.p3, c.p4);
   } else if (c.kind == 3u) {
     // Arbitrary arguments: the stubs ignore them.
     value.x = ring_shadow_on_body(vec3f(1.0, 2.0, 3.0), vec3f(0.0, 0.0, 1.0)).x;

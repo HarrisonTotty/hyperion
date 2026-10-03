@@ -11,55 +11,92 @@ import {
   type LimbDarkenedDisc,
   type Occluder,
 } from "./annuli";
-import { denseAnnulusVisibleFraction } from "./oracle";
+import { denseAnnulusVisibleFraction, eclipseIntegralVisibleFraction } from "./oracle";
+
+/** A power-2 law's c and α. */
+interface Power2 {
+  readonly c: number;
+  readonly alpha: number;
+}
 
 /**
- * Power-2 coefficients of a Sun-like star in V, c and α (Maxted 2018, A&A 616, A39, Fig. 1's
- * solar-type region; a representative pair for the error grid, not a fit).
+ * The Sun's power-2 laws per band, Maxted 2018, A&A 616, A39, Table 2 (CDS J/A+A/616/A39) at
+ * 5,750 K, log g 4.5, [Fe/H] 0 (decision-r07-dn6).
  */
-const SUN_LIKE = { c: 0.71, alpha: 0.6 } as const;
+const SUN_B: Power2 = { c: 0.846, alpha: 0.83 };
+// Maxted's V-band α, 0.707, only happens to resemble 1 ÷ √2.
+// oxlint-disable-next-line approx-constant
+const SUN_V: Power2 = { c: 0.771, alpha: 0.707 };
+const SUN_R: Power2 = { c: 0.712, alpha: 0.625 };
 
-/**
- * A cool star's deeper limb (c 0.8) with a shallower profile (α 0.45), for a second point of the
- * grid; its worst error is the smaller, since the error follows the profile's curvature near the
- * centre more than c.
- */
-const COOL = { c: 0.8, alpha: 0.45 } as const;
+/** Two generic laws of the ruling's table: a solar-type R-band pair and a mild one. */
+const GENERIC: Power2 = { c: 0.71, alpha: 0.6 };
+const MILD: Power2 = { c: 0.5, alpha: 0.5 };
 
-/** The grid of radius ratios, 0.1 to 30 log-spaced, and 41 separations over each overlap. */
-function worstError(c: number, alpha: number, k: number): number {
-  const annuli = annulusEdges(c, alpha, k);
-  let worst = 0;
+/** The grid's radius ratios, 0.1 to 30 log-spaced, and 41 separations over each overlap. */
+function grid(): Array<readonly [number, number]> {
+  const points: Array<readonly [number, number]> = [];
   for (let i = 0; i <= 40; i += 1) {
     const ratio = 0.1 * 300 ** (i / 40);
     for (let j = 0; j <= 40; j += 1) {
-      const separation = (j / 40) * (1 + ratio);
-      const error = Math.abs(
-        annulusVisibleFraction(annuli, ratio, separation) -
-          denseAnnulusVisibleFraction(c, alpha, ratio, separation),
-      );
-      worst = Math.max(worst, error);
+      points.push([ratio, (j / 40) * (1 + ratio)]);
     }
+  }
+  return points;
+}
+
+/** The term's worst absolute error over the grid against the exact integral. */
+function worstError(law: Power2, k: number): number {
+  const annuli = annulusEdges(law.c, law.alpha, k);
+  let worst = 0;
+  for (const [ratio, separation] of grid()) {
+    const error = Math.abs(
+      annulusVisibleFraction(annuli, ratio, separation) -
+        eclipseIntegralVisibleFraction(law.c, law.alpha, ratio, separation),
+    );
+    worst = Math.max(worst, error);
   }
   return worst;
 }
 
 describe("annulusEdges", () => {
-  it("spaces K edges uniformly in μ from the centre to the limb", () => {
-    const { edges } = annulusEdges(0.7, 0.6, 4);
+  it("runs K edges from the centre to the limb, rising", () => {
+    const { edges } = annulusEdges(SUN_V.c, SUN_V.alpha, 4);
     expect(edges).toHaveLength(5);
     expect(edges[0]).toBe(0);
     expect(edges[4]).toBe(1);
-    expect(edges[2]).toBeCloseTo(Math.sqrt(1 - 0.25), 15);
+    for (let j = 1; j <= 4; j += 1) {
+      expect(edges[j] ?? 0).toBeGreaterThan(edges[j - 1] ?? 1);
+    }
+  });
+
+  it("places the Sun's V-band edges at μ 0.813, 0.609 and 0.375", () => {
+    const { edges } = annulusEdges(SUN_V.c, SUN_V.alpha, 4);
+    const mu = [1, 2, 3].map((j) => Math.sqrt(1 - (edges[j] ?? 0) ** 2));
+    expect(mu[0]).toBeCloseTo(0.813, 2);
+    expect(mu[1]).toBeCloseTo(0.609, 2);
+    expect(mu[2]).toBeCloseTo(0.375, 2);
   });
 
   it("shares the disc's flux among the annuli, summing to one", () => {
-    const { flux } = annulusEdges(0.7, 0.6, 4);
+    const { flux } = annulusEdges(SUN_V.c, SUN_V.alpha, 4);
     expect(flux.reduce((sum, value) => sum + value, 0)).toBeCloseTo(1, 14);
     for (const share of flux) {
       expect(share).toBeGreaterThan(0);
     }
   });
+
+  it.each([
+    [SUN_B, 4],
+    [SUN_V, 2],
+    [MILD, 4],
+  ] as const)(
+    "predicts the grid's worst error by its equal dip, to 3 × 10⁻⁴ (%o, K %i)",
+    (law, k) => {
+      const { dip } = annulusEdges(law.c, law.alpha, k);
+      expect(Math.abs(worstError(law, k) - dip)).toBeLessThanOrEqual(3e-4);
+    },
+  );
 });
 
 describe("circleOverlapArea", () => {
@@ -86,46 +123,63 @@ describe("circleOverlapArea", () => {
   });
 });
 
-describe("the eclipse term against 400 annuli", () => {
-  // Design note 6 states 0.62% at K = 4 and 1.5% at K = 2. With flux-exact annuli uniform in μ
-  // the worst case is a concentric occulter (about 0.48 stellar radii at K = 4, 0.64 at K = 2),
-  // and it grows with the darkening: 0.40% and 1.46% at c 0.5, α 0.5; 0.73% and 2.6% for the
-  // Sun-like pair here. The bounds are the measured ones, recorded in the plan's Risks (T6.b).
+describe("the eclipse term against the exact integral", () => {
+  // decision-r07-dn6's bounds, about 5% over its measured worst: 0.699, 0.556 and 0.462% for the
+  // Sun's B, V and R at K = 4; 2.696, 2.130 and 1.767% at K = 2.
   it.each([
-    [SUN_LIKE, DISC_ANNULI_HIGH, 0.0074],
-    [COOL, DISC_ANNULI_HIGH, 0.0062],
-    [SUN_LIKE, DISC_ANNULI_LOW, 0.027],
-    [COOL, DISC_ANNULI_LOW, 0.023],
-  ] as const)("errs by at most the measured bound for %o at K = %i", (law, k, bound) => {
-    expect(worstError(law.c, law.alpha, k)).toBeLessThanOrEqual(bound);
+    [SUN_B, DISC_ANNULI_HIGH, 0.0073],
+    [SUN_V, DISC_ANNULI_HIGH, 0.0058],
+    [SUN_R, DISC_ANNULI_HIGH, 0.0048],
+    [GENERIC, DISC_ANNULI_HIGH, 0.0047],
+    [MILD, DISC_ANNULI_HIGH, 0.0028],
+    [SUN_B, DISC_ANNULI_LOW, 0.028],
+    [SUN_V, DISC_ANNULI_LOW, 0.022],
+    [SUN_R, DISC_ANNULI_LOW, 0.0185],
+    [GENERIC, DISC_ANNULI_LOW, 0.0178],
+    [MILD, DISC_ANNULI_LOW, 0.0105],
+  ] as const)("errs by at most its bound for %o at K = %i", (law, k, bound) => {
+    expect(worstError(law, k)).toBeLessThanOrEqual(bound);
+  });
+
+  it("is met by the 400-annulus sum to 10⁻⁵", () => {
+    let worst = 0;
+    for (const [ratio, separation] of grid().filter((_, index) => index % 7 === 0)) {
+      worst = Math.max(
+        worst,
+        Math.abs(
+          denseAnnulusVisibleFraction(SUN_V.c, SUN_V.alpha, ratio, separation) -
+            eclipseIntegralVisibleFraction(SUN_V.c, SUN_V.alpha, ratio, separation),
+        ),
+      );
+    }
+    expect(worst).toBeLessThan(1e-5);
   });
 
   it.each([0.2, 0.5, 0.9])(
     "matches the concentric closed form for an occulter of %f radii",
     (k) => {
       // Visible flux of a concentric occultation: [(1 − c) μ_k² + 2c μ_k^(α+2) ÷ (α + 2)] ÷
-      // [(1 − c) + 2c ÷ (α + 2)], μ_k = √(1 − k²); the dense sum meets it to 10⁻⁴ and the K = 4 term
-      // within its measured bound.
-      const { c, alpha } = SUN_LIKE;
+      // [(1 − c) + 2c ÷ (α + 2)], μ_k = √(1 − k²).
+      const { c, alpha } = SUN_V;
       const muK = Math.sqrt(1 - k * k);
       const closed =
         ((1 - c) * muK ** 2 + (2 * c * muK ** (alpha + 2)) / (alpha + 2)) /
         (1 - c + (2 * c) / (alpha + 2));
-      expect(Math.abs(denseAnnulusVisibleFraction(c, alpha, k, 0) - closed)).toBeLessThan(1e-4);
+      expect(Math.abs(eclipseIntegralVisibleFraction(c, alpha, k, 0) - closed)).toBeLessThan(1e-5);
       expect(
         Math.abs(annulusVisibleFraction(annulusEdges(c, alpha, 4), k, 0) - closed),
-      ).toBeLessThanOrEqual(0.0074);
+      ).toBeLessThanOrEqual(0.0058);
     },
   );
 
   it("leaves exactly nothing in a total eclipse", () => {
-    const annuli = annulusEdges(SUN_LIKE.c, SUN_LIKE.alpha, 4);
+    const annuli = annulusEdges(SUN_V.c, SUN_V.alpha, 4);
     expect(annulusVisibleFraction(annuli, 1.5, 0.3)).toBe(0);
     expect(annulusVisibleFraction(annuli, 1, 0)).toBe(0);
   });
 
   it("leaves everything when the occulter misses", () => {
-    const annuli = annulusEdges(SUN_LIKE.c, SUN_LIKE.alpha, 4);
+    const annuli = annulusEdges(SUN_V.c, SUN_V.alpha, 4);
     expect(annulusVisibleFraction(annuli, 0.3, 1.3)).toBe(1);
   });
 });
@@ -139,8 +193,8 @@ describe("eclipseVisible", () => {
   const sun: LimbDarkenedDisc = {
     centreM: vec3(0, 0, 0),
     radiusM: 6.957e8,
-    limbC: SUN_LIKE.c,
-    limbAlpha: SUN_LIKE.alpha,
+    limbC: SUN_V.c,
+    limbAlpha: SUN_V.alpha,
   };
   const point = vec3(1.496e11, 0, 0);
 

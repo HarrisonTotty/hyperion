@@ -3,21 +3,22 @@
  * front of it leave visible (plan R07, Design note 6).
  *
  * @remarks
- * The star's disc is split into K annuli with edges uniform in μ (μ_j = 1 − j ÷ K, radius
- * √(1 − μ_j²) in stellar radii), each of uniform intensity carrying its exact share of the power-2
- * law's flux, I(μ) ÷ I(1) = 1 − c (1 − μ^α) (Maxted 2018, A&A 616, A39). An annulus's eclipsed
- * area is the difference of two exact circle–circle overlaps, so the term is continuous in every
- * argument and never bands. Design note 6 states 0.62% worst absolute error at K = 4 and 1.5% at
- * K = 2; against a 400-annulus oracle the worst case, a concentric occulter, measures 0.73% and
- * 2.6% for a Sun-like power-2 law (c 0.71, α 0.6), pending decision-r07-dn6.
- * Geometry is angular, in units of the star's angular radius, as seen from the lit point.
+ * The star's disc is split into K annuli, each of uniform intensity carrying its exact share of the
+ * power-2 law's flux, I(μ) ÷ I(1) = 1 − c (1 − μ^α) (Hestroffer 1997, A&A 327, 199, eq. 4; Maxted
+ * 2018, A&A 616, A39, Sect. 1), with edges placed per law by equal concentric error ("equal dip",
+ * decision-r07-dn6, 2026-10-03): the minimax flux-exact partition. An annulus's eclipsed area is
+ * the difference of two exact circle–circle overlaps, so the term is continuous in every argument
+ * and never bands. For the Sun (Maxted 2018, Table 2) the worst absolute error is 0.70% (B), 0.56%
+ * (V) and 0.46% (R) at K = 4, and 2.7%, 2.1% and 1.8% at K = 2. Geometry is angular, in units of
+ * the star's angular radius, as seen from the lit point, and the disc is taken as flat in angle (an
+ * error of order ρ² ÷ 12, about 1% at ρ = 19.5°, estimated).
  */
 import { cross, dot, norm, normalise, sub, type Vec3 } from "../../geometry/vec3";
 
 /** Annuli of the high setting. */
 export const DISC_ANNULI_HIGH = 4;
 
-/** Annuli of the low setting. */
+/** Annuli of the low setting (3 is an owner's call, decision-r07-dn6). */
 export const DISC_ANNULI_LOW = 2;
 
 /** A star's disc as the eclipse term needs it, one display channel's limb darkening. */
@@ -43,6 +44,11 @@ export interface AnnulusSet {
   readonly edges: Float64Array;
   /** K fractions of the disc's flux, summing to 1, centre first. */
   readonly flux: Float64Array;
+  /**
+   * The worst concentric error of every annulus, equal across them: the term's predicted worst
+   * absolute error, which the plan's error grid meets to within 3 × 10⁻⁴.
+   */
+  readonly dip: number;
 }
 
 /** ∫₀^μ I(μ′) μ′ dμ′ for the power-2 law, per unit I(1). */
@@ -50,25 +56,87 @@ function power2Moment(c: number, alpha: number, mu: number): number {
   return ((1 - c) * mu * mu) / 2 + (c * mu ** (alpha + 2)) / (alpha + 2);
 }
 
+/** Bisection steps, for the level and for each edge. */
+const EQUAL_DIP_STEPS = 60;
+
 /**
- * The edges of K annuli uniform in μ and the share of the power-2 disc's flux in each.
+ * The flux inside area a = r² of a unit power-2 disc, Φ(a) = 1 − M(√(1 − a)) ÷ M(1); concave in a,
+ * its slope I(μ) ÷ 2M(1).
+ */
+function cumulativeFlux(c: number, alpha: number, a: number): number {
+  const total = power2Moment(c, alpha, 1);
+  return 1 - power2Moment(c, alpha, Math.sqrt(Math.max(0, 1 - a))) / total;
+}
+
+/**
+ * The worst concentric error of a uniform annulus over areas [a₀, a₁] holding its exact flux: the
+ * largest gap between Φ and its chord, at the area where the law's intensity equals the annulus's.
+ */
+function annulusDip(c: number, alpha: number, a0: number, a1: number): number {
+  if (a1 <= a0) {
+    return 0;
+  }
+  const f0 = cumulativeFlux(c, alpha, a0);
+  const slope = (cumulativeFlux(c, alpha, a1) - f0) / (a1 - a0);
+  const meanIntensity = 2 * power2Moment(c, alpha, 1) * slope;
+  const muStar = c > 0 ? Math.max(0, (meanIntensity - (1 - c)) / c) ** (1 / alpha) : 1;
+  const aStar = Math.min(Math.max(1 - muStar * muStar, a0), a1);
+  return cumulativeFlux(c, alpha, aStar) - f0 - slope * (aStar - a0);
+}
+
+/** The area edges that march outward from the centre with every annulus but the last at `level`. */
+function marchAtLevel(c: number, alpha: number, k: number, level: number): Float64Array {
+  const areas = new Float64Array(k + 1);
+  areas[k] = 1;
+  for (let j = 1; j < k; j += 1) {
+    const a0 = areas[j - 1] ?? 0;
+    let low = a0;
+    let high = 1;
+    for (let step = 0; step < EQUAL_DIP_STEPS; step += 1) {
+      const middle = (low + high) / 2;
+      if (annulusDip(c, alpha, a0, middle) <= level) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    areas[j] = low;
+  }
+  return areas;
+}
+
+/**
+ * K annuli of a power-2 disc with equal worst concentric error, each with its exact flux.
+ *
+ * @remarks
+ * Bisects a level D: marching out from the centre, each edge is the furthest at which its annulus's
+ * dip is at most D, and D rises while the last annulus's dip exceeds it (decision-r07-dn6). The
+ * result matches a Nelder–Mead minimax to 0.001%. Computed per star and channel on the CPU, in
+ * `f64`.
  *
  * @param c - The power-2 law's c, 0 to 1.
  * @param alpha - The power-2 law's α, positive.
  * @param k - The number of annuli, at least 1.
  */
 export function annulusEdges(c: number, alpha: number, k: number): AnnulusSet {
-  const edges = new Float64Array(k + 1);
-  const flux = new Float64Array(k);
-  const total = power2Moment(c, alpha, 1);
-  for (let j = 0; j <= k; j += 1) {
-    const mu = 1 - j / k;
-    edges[j] = Math.sqrt(1 - mu * mu);
-    if (j > 0) {
-      flux[j - 1] = (power2Moment(c, alpha, 1 - (j - 1) / k) - power2Moment(c, alpha, mu)) / total;
+  let low = 0;
+  let high = 0.5;
+  for (let step = 0; step < EQUAL_DIP_STEPS; step += 1) {
+    const level = (low + high) / 2;
+    const areas = marchAtLevel(c, alpha, k, level);
+    if (annulusDip(c, alpha, areas[k - 1] ?? 0, 1) > level) {
+      low = level;
+    } else {
+      high = level;
     }
   }
-  return { edges, flux };
+  const areas = marchAtLevel(c, alpha, k, high);
+  const edges = areas.map(Math.sqrt);
+  const flux = new Float64Array(k);
+  for (let j = 0; j < k; j += 1) {
+    flux[j] = cumulativeFlux(c, alpha, areas[j + 1] ?? 1) - cumulativeFlux(c, alpha, areas[j] ?? 0);
+  }
+  return { edges, flux, dip: high };
 }
 
 /** The area of a circle of radius `radius` beyond a chord `d` from its centre. */

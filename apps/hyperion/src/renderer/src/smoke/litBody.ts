@@ -85,9 +85,10 @@ const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
     [0.5, 1.4],
   ].map(([ratio = 0, separation = 0]): LightingProbeCase => ({
     kind: "eclipse",
+    // The Sun from 1 au, B band: Maxted 2018, Table 2 (CDS J/A+A/616/A39).
     starRadiusRad: 4.65e-3,
-    limbC: 0.71,
-    limbAlpha: 0.6,
+    limbC: 0.846,
+    limbAlpha: 0.83,
     annuli: 4,
     occluderRadiusRad: ratio * 4.65e-3,
     separationRad: separation * 4.65e-3,

@@ -183,3 +183,38 @@ export function denseAnnulusVisibleFraction(
   }
   return Math.max(0, 1 - hidden);
 }
+
+/** Midpoints of the eclipse integral oracle's quadrature in t = μ^α. */
+const ECLIPSE_INTEGRAL_STEPS = 8000;
+
+/**
+ * The exact fraction of a power-2 disc's flux left visible by a disc of radius `ratio` stellar
+ * radii at `separation` stellar radii from its centre (decision-r07-dn6).
+ *
+ * @remarks
+ * With A(r) the overlap of the occulter with the star's disc cut at radius r, the hidden flux is
+ * (1 − c) A(1) + c ∫₀¹ A(√(1 − t^(2 ÷ α))) dt (t = μ^α, the region where μ^α exceeds t), over the
+ * disc's total π [(1 − c) + 2c ÷ (α + 2)]; the integral by the midpoint rule over 8,000 steps.
+ * It agrees with {@link denseAnnulusVisibleFraction} to about 10⁻⁵.
+ */
+export function eclipseIntegralVisibleFraction(
+  c: number,
+  alpha: number,
+  ratio: number,
+  separation: number,
+): number {
+  let integral = 0;
+  for (let i = 0; i < ECLIPSE_INTEGRAL_STEPS; i += 1) {
+    const t = (i + 0.5) / ECLIPSE_INTEGRAL_STEPS;
+    integral += circleOverlapArea(Math.sqrt(Math.max(0, 1 - t ** (2 / alpha))), ratio, separation);
+  }
+  integral /= ECLIPSE_INTEGRAL_STEPS;
+  const hidden = (1 - c) * circleOverlapArea(1, ratio, separation) + c * integral;
+  const total = Math.PI * (1 - c + (2 * c) / (alpha + 2));
+  return Math.max(0, 1 - hidden / total);
+}
+
+/** A power-2 law I(μ) ÷ I(1) = 1 − c (1 − μ^α) as a {@link LimbProfile}. */
+export function power2Profile(c: number, alpha: number): LimbProfile {
+  return (mu) => 1 - c * (1 - mu ** alpha);
+}

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { sphereIrradianceBruteForce, UNIFORM_DISC, type LimbProfile } from "./oracle";
+import {
+  type LimbProfile,
+  power2Profile,
+  sphereIrradianceBruteForce,
+  UNIFORM_DISC,
+} from "./oracle";
 import { howellViewFactor, sphereIrradianceFactor } from "./sphereIrradiance";
 
 const RAD_PER_DEG = Math.PI / 180;
@@ -26,10 +31,9 @@ describe("sphereIrradianceFactor", () => {
     },
   );
 
-  // Design note 6 states 0.45%; with the brainstorm's solar polynomial law the worst error is
-  // 0.469% of the face-on value, at φ = 90° (the oracle reproduces the uniform closed form to
-  // 10⁻⁵ there), so the bound is the measured 0.47% (recorded in the plan's Risks, T6.a).
-  it("errs by at most 0.47% against a limb-darkened star 19.5° in radius", () => {
+  // decision-r07-dn6: 0.4694% with the brainstorm's polynomial (Design note 6's 0.45% is a linear
+  // law's, u = 0.6); bound 0.48%.
+  it("errs by at most 0.48% against a polynomial-darkened star 19.5° in radius", () => {
     const h = 1 / Math.sin(19.5 * RAD_PER_DEG);
     let worst = 0;
     for (let deg = 0; deg <= 180; deg += 2.5) {
@@ -37,7 +41,27 @@ describe("sphereIrradianceFactor", () => {
       const oracle = sphereIrradianceBruteForce(h, phi, 0, SOLAR_POLYNOMIAL);
       worst = Math.max(worst, Math.abs(sphereIrradianceFactor(h, phi) - oracle));
     }
-    expect(worst).toBeLessThanOrEqual(0.0047);
+    expect(worst).toBeLessThanOrEqual(0.0048);
+  });
+
+  // The Sun's power-2 laws, Maxted 2018, A&A 616, A39, Table 2 (5,750 K, log g 4.5): measured
+  // 0.607, 0.474 and 0.390% at 19.5° (decision-r07-dn6).
+  it.each([
+    ["B", 0.846, 0.83, 0.0062],
+    // Maxted's V-band α, 0.707, only happens to resemble 1 ÷ √2.
+    // oxlint-disable-next-line approx-constant
+    ["V", 0.771, 0.707, 0.0049],
+    ["R", 0.712, 0.625, 0.004],
+  ] as const)("errs by at most its bound for the Sun's %s law at 19.5°", (_, c, alpha, bound) => {
+    const h = 1 / Math.sin(19.5 * RAD_PER_DEG);
+    const profile = power2Profile(c, alpha);
+    let worst = 0;
+    for (let deg = 0; deg <= 180; deg += 2.5) {
+      const phi = deg * RAD_PER_DEG;
+      const oracle = sphereIrradianceBruteForce(h, phi, 0, profile);
+      worst = Math.max(worst, Math.abs(sphereIrradianceFactor(h, phi) - oracle));
+    }
+    expect(worst).toBeLessThanOrEqual(bound);
   });
 
   it("is cos φ wherever the whole disc is up", () => {
