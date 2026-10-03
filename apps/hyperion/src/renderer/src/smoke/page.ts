@@ -18,7 +18,12 @@ import {
   styleAvailability,
 } from "../view/engine/platform";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/status";
-import { checkAtmosphereTables } from "./atmosphere";
+import {
+  captureAtmosphere,
+  type CapturedImage,
+  checkAtmosphereFrames,
+  checkAtmosphereTables,
+} from "./atmosphere";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
@@ -35,6 +40,8 @@ interface Report {
   readonly capabilities: string | null;
   readonly checks: Checks["list"];
   readonly setupError: string | null;
+  /** R05.T12.c's comparison frames, when the run was asked for them. */
+  readonly images?: ReadonlyArray<CapturedImage>;
 }
 
 /** The page's variants and the capabilities each withholds. */
@@ -157,6 +164,20 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R05.T12.b the atmosphere's tables", () =>
     checkAtmosphereTables(engine, checks),
   );
+  await checks.group("R05.T12.c the atmosphere's frames", () =>
+    checkAtmosphereFrames(engine, checks),
+  );
+  let images: CapturedImage[] = [];
+  if (captures) {
+    await checks.group("R05.T12.c the comparison captures", async () => {
+      images = await captureAtmosphere(engine);
+      checks.check(
+        "R05.T12.c the comparison captures",
+        images.length > 0,
+        `${images.length} frames`,
+      );
+    });
+  }
 
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await checks.group("T9.i splat refused", async () => {
@@ -193,6 +214,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     capabilities,
     checks: checks.list,
     setupError: null,
+    images,
   };
 }
 
@@ -213,6 +235,8 @@ const variant = parameters.get("variant") ?? "default";
 const fixtureName = parameters.get("fixture") ?? "none";
 /** Whether the run lifted timestamp quantization, so that pass times read `full`. */
 const gpuTiming = parameters.get("gpuTiming") === "1";
+/** Whether the run renders R05.T12.c's comparison frames for the main process to save. */
+const captures = parameters.get("captures") === "1";
 const report = smokeReport();
 const fixture: SmokeFixture = isFixture(fixtureName) ? fixtureName : "none";
 /** The by-hand soak of T11 and T12 instead of the checks, for `seconds`. */

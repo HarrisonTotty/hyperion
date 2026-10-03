@@ -92,6 +92,16 @@ describe("packMedium", () => {
     expect([...rayleigh.subarray(8, 12)]).toEqual([0, 8_434.5, 0, 0]);
   });
 
+  it("packs each term's phase in scattering.w and its g in absorption.w", () => {
+    const packed = packMedium(EARTH_REFERENCE, 6_371_000, 1);
+    const term = (i: number): Float32Array => packed.subarray(8 + i * 12, 8 + (i + 1) * 12);
+    // Rayleigh, then the Cornette–Shanks aerosol, then ozone with no phase.
+    expect([term(0)[3], term(0)[7]]).toEqual([1, 0]);
+    expect(term(1)[3]).toBe(2);
+    expect(term(1)[7]).toBeCloseTo(0.584, 6);
+    expect([term(2)[3], term(2)[7]]).toEqual([0, 0]);
+  });
+
   it("is sized for the WGSL's MAX_TERMS terms whatever the medium", () => {
     expect(packMedium(HILLAIRE_REFERENCE, 1, 1)).toHaveLength(8 + MAX_TERMS * 12);
   });
