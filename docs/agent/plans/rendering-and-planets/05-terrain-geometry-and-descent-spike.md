@@ -2417,6 +2417,13 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   table and the ridged bake's skirt depth changed, so `TEST_PLANET_VERSION` is 2 (every surface
   golden re-blessed; `EXPECTED_TEST_PLANET_VERSION` in `heightBake.ts` and `cube.test.ts`
   follow); `GENERATOR_VERSION` is unchanged.
+- **The drawn surface's height exported** (2026-10-03, for the spike). The wasm module's
+  `surfaceHeightM(x, y, z, ridges): number` is T4.c's `finest_surface_height` over the test
+  planet at a body-fixed direction (not necessarily unit), so the client never ports the
+  interpolant; it throws for a zero or non-finite direction. A new golden,
+  `tests/golden/collision.golden` (27 directions, ridges off and on, a face-edge vertex, an
+  interior vertex and a cube corner among them), pins it natively, and `heightWasm.test.ts`
+  checks the export against it bit for bit. New values only: no `TEST_PLANET_VERSION` bump.
 - **σ_n exported** (2026-10-03, for T13.a). `TestPlanet::omitted_sigma_m(level)` and the wasm
   module's `omittedSigmaM(level, ridges)` give σ_n, the RMS of the octaves level n omits: the
   octaves' variances summed in index order, a ridged octave counting at its mask's RMS
@@ -3313,3 +3320,20 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   forced patch no view sees: it is selected and requested, and `retain` pins it, but the resolver
   leaves it out of the draw set and `maxPatches` does not count it. Forced patches a view sees
   count against `maxPatches` but are never refused.
+- **R05.T7 perf (b), as built (2026-10-03): selection toward 2 ms.** `viewGeometry.ts`
+  (`ViewGeometry`, `viewGeometry`, `viewExcess`) holds each view's planes, horizon and error
+  scale as plain numbers and tests a patch with no allocation; `viewGeometry.test.ts` holds it to
+  `inFrustum`, `aboveHorizon` and `distanceToBoxM` over 300 random cameras of 20 patches each.
+  No traversal node builds a key string (only the output map and nothing else); nodes carry a
+  parent pointer, which the demand's breadth-first walk follows. The bounds memo answers a patch
+  with nothing baked above it without computing its range. `PatchLeafSet` is now linked tree
+  nodes from the six roots plus a map per level by `patchKeyIndex` (`addRoot` replaces `add`), so
+  that the leaf over a neighbour's cell is usually one lookup at the parent's level rather than a
+  walk; leaves come out depth first from face 0, in `childKeys`' order. Rollback deletes the
+  children from the map. At the 1.5 km pose (ridges off, 1920 × 1080, fov_h 60°, τ = 1 px,
+  tilted 69°), warm, under Node 26 at load 15–23 on the development machine: budget 981, p50
+  2.8 ms and p95 5.4 ms (was about 11 ms and 15–28 ms); budget 1,952, 5.0 and 8.0 ms;
+  unbudgeted (12,731 patches), 37 and 44 ms. The 2 ms p95 is not yet met under this load; the
+  remaining per-node costs are the neighbour keys (8 objects a probe), `childKeys`' and the
+  children's arrays a split, and `patchBounds` for new nodes, which the ruling's item 4d also
+  names. A quiet-machine run is pending (Design note 27). Recorded, not asserted.
