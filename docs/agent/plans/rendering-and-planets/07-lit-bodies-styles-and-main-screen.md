@@ -2040,3 +2040,43 @@ altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     and stays R02's mark. `BodyPhotometry`, `AppearanceLabel` and the `BodyFigure` re-export live
     there. A `contact` frame entry has no summary here; it never occludes and is never eclipsed
     (`lightingBodyOf`, T6.c; decisions-r06-r07, item 4).
+- **Deviations in T5, as built.**
+  - **Inputs.** `litRegimes(bodies, camera, viewport, previous)` and `painterOrder(bodies, regimes,
+hosts)` take `LitSphere`s (identifier, centre from the camera in `f64`, equatorial radius) and
+    `HostSphere`s (star index, centre, radius) instead of `SceneFrameBody` and `HostDiscDto`, which
+    carry no radius and no position respectively; `camera` is R02's `ProjectionCamera`. Sizes use
+    R02's `angularDiameterPx` (the centre pixel's tan-based scale). A body new to the view starts as
+    a point; a `mesh` keeps the disc side of the hysteresis.
+  - **Promotion** is its own function, `promoteOverlapping(regimes, footprints, depthWriters)`,
+    over screen circles (`ScreenCircle`): a disc overlapping a mesh body or other depth-writing
+    geometry is promoted, and promotion spreads through chains of overlaps until nothing changes.
+    Its callers (T8.a, T9) supply the footprints.
+  - **The painter's ties** keep bodies before hosts and then identifiers' order, so the sequence
+    does not depend on input order. The truth for the 10⁴ random disjoint pairs is each shared ray's
+    first analytic hit (no marching is needed for spheres): no disagreement over some 5 × 10⁴ rays.
+  - **The brainstorm's figures** scale by width ÷ field (1,833 px/rad at 1080p across 60°): a
+    Jupiter of 3 px to 8.7 × 10¹⁰ m and ten scale heights over 2 px to 2.5 × 10⁸ m (Jupiter, 27 km)
+    and 5.5 × 10⁸ m (Saturn, 59.5 km), each reproduced to 2%. R02's projection uses the centre
+    pixel's 1,663 px/rad, which brings each distance in by 9.3% (Jupiter's disc to 7.9 × 10¹⁰ m);
+    `GAS_GIANT_FULL_PASS_BOUNDARY_M` keeps 10⁹ m, above both.
+  - **`BodyAppearance`** lives in `appearance/bodyAppearance.ts` with `bodyAppearance(body, wire,
+regime)` (`null` for a body without a figure, which stays R02's mark) and `discSurfaceOf`;
+    `DiscSurface` has its `uniform` case only, T8.b adding `class-map`. `aLitBody` is in
+    `test/litFixtures.ts`. No template is mapped to a body class here: the photometry is T2.a's
+    provisional law until plan 14's section (T2.b).
+  - **`painterOrder` takes no camera**: centres are already relative to it in `f64`.
+    `spherePower` and `litSphereOf(id, centreM, figure)` (the equatorial bounding sphere, which
+    callers, R08's included, use to build each `LitSphere`) are exported beside it; ties rank
+    bodies before hosts, then identifier or star index numerically.
+  - **Hysteresis** is applied to the 3 px threshold only (up at 3.3 px, down at 2.7 px);
+    `GAS_GIANT_FULL_PASS_BOUNDARY_M` is a constant whose hysteresis R08's caller applies, and the
+    tests hold it above both giants' derived distances at both scales. `litRegimes` never returns
+    `mesh`: a mesh comes from `promoteOverlapping` or, later, R10's hand-over. Footprints are
+    bounding circles, so promotion may over-promote an oblate body but never under-promote it.
+  - **Tests.** The pairs test fixes the camera at the origin and places the spheres at random
+    (only relative geometry matters), each a disc, a point or a host at random; the oblate test
+    places a moon whose power lies between Saturn's equatorial and mean spheres'; the
+    order-independence test starts from an empty `previous` map. The acceptance also runs
+    `src/renderer/src/view/appearance/bodyAppearance`, outside the `view/bodies` filter. **For the
+    owner**: the brainstorm's 9 × 10¹⁰, 2.5 × 10⁸ and 5.5 × 10⁸ m are at width ÷ field; at R02's
+    centre-pixel scale they are 9.3% nearer (the 10⁹ m boundary holds either way).

@@ -6,6 +6,8 @@
  */
 import type { HostDiscDto } from "@hyperion/protocol";
 
+import type { BodyAppearance } from "../view/appearance/bodyAppearance";
+import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import type { PhaseTemplateId } from "../view/appearance/law";
 import { PARSEC_M, V0_ILLUMINANCE_LX } from "../view/photometry/magnitude";
 
@@ -207,3 +209,18 @@ export const SOLAR_SYSTEM_PHOTOMETRY: ReadonlyArray<PlanetPhotometry> = [
 
 /** The Sun's Johnson magnitudes at 1 au, Mallama et al. 2017, Table 6 (Livingston 2001). */
 export const SUN_JOHNSON_MAG: JohnsonBvr = { b: -26.1, v: -26.75, r: -27.29 };
+
+/**
+ * A lit body's appearance for the shading tests (R07.T5): an Earth-sized sphere with the
+ * provisional photometry, labelled, on the disc regime unless overridden.
+ */
+export function aLitBody(overrides: Partial<BodyAppearance> = {}): BodyAppearance {
+  return {
+    body: "0200080020000000.0300",
+    figure: { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6, pole: null },
+    photometry: PROVISIONAL_PHOTOMETRY,
+    regime: "disc",
+    labels: ["BODY ALBEDO: NOT YET MODELLED"],
+    ...overrides,
+  };
+}
