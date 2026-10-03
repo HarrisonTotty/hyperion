@@ -43,6 +43,8 @@ compile_error!(
 
 pub mod cube;
 pub mod geometry;
+pub mod noise;
+pub mod num;
 pub mod tags;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
