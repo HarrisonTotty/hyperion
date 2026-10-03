@@ -8,12 +8,16 @@ import {
   demandSummary,
   fixtureRangeOf,
   parseRanges,
+  patchKeyAt,
   RIDGED_CALIBRATED_NOTE,
   recordProfile,
   runCell,
   SETTING_VIEWS,
+  stretchKeys,
   testWindows,
 } from "./demandRecord";
+import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile";
+import { cornerNeighbours, EDGES, edgeNeighbour, patchKeyString } from "../terrain/patchKey";
 
 const FIXTURE = parseRanges(ridgesOffRanges);
 
@@ -161,5 +165,30 @@ describe("the demand record", () => {
     expect(demandSummary([cellOf("calibrated", "on")], "2026-10-03T00:00:00Z")).toContain(
       RIDGED_CALIBRATED_NOTE,
     );
+  });
+});
+
+describe("stretchKeys", () => {
+  it("hold every 64 Hz pose's ground patch and its neighbours, stretch by stretch", () => {
+    const datum = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(5n));
+    const missed: string[] = [];
+    for (const stretch of trackStretches(datum)) {
+      const keys = new Set(stretchKeys(datum, stretch).map((key) => patchKeyString(key)));
+      for (let n = Math.ceil(stretch.startS * 64); n <= stretch.endS * 64; n += 1) {
+        const g = datum.groundDirAt(n / 64);
+        const key = patchKeyAt([g.x, g.y, g.z], stretch.level);
+        const around = [
+          key,
+          ...EDGES.map((edge) => edgeNeighbour(key, edge)),
+          ...cornerNeighbours(key),
+        ];
+        for (const each of around) {
+          if (each !== null && !keys.has(patchKeyString(each))) {
+            missed.push(`${stretch.piece} at ${n / 64} s: ${patchKeyString(each)}`);
+          }
+        }
+      }
+    }
+    expect(missed).toEqual([]);
   });
 });
