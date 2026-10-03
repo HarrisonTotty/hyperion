@@ -78,6 +78,7 @@ import {
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
+import { styleName } from "../../view/photoreal/style";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
@@ -521,7 +522,7 @@ function ViewStage({
             <ViewCanvas
               canvasRef={setCanvas}
               stageRef={stageRef}
-              accessibleName={`VIEW, WIREFRAME, ${PRESET_NAMES[shown.run.camera.preset]}`}
+              accessibleName={`VIEW, ${styleName(shown.run.camera.style)}, ${PRESET_NAMES[shown.run.camera.preset]}`}
               describedBy={legendId}
               onKeyDown={onCanvasKeyDown}
               onKeyUp={onCanvasKeyUp}

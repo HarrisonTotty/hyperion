@@ -3382,3 +3382,10 @@ body {
   flex-direction: column;
   min-height: 10rem;
 }
+
+/* A view's style switch (plan R07, T7): its buttons are the presets' (`.preset-buttons`). */
+.view-style__reason {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
