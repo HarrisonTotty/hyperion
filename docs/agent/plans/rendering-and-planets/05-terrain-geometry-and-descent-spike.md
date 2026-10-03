@@ -3122,6 +3122,23 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     23: 12,731 patches unbudgeted in about 75 ms, 1,952 (budget 1,952) in about 11 ms, 981 (budget 981) in about 5 ms. The ruling's 2 ms at p95 is not yet met; the remaining costs are the
     per-node key string (for the baked-range lookup and the output map), the camera-relative
     bounds objects and the neighbour arrays. Recorded, not asserted (Design note 27).
+- **T7.c's review, as built (2026-10-03).** `inheritedHeightRangeM` takes the bake's skirt margin
+  (`SelectionInput.skirtMarginM`, the worker's `skirtM`, default 0) and its `f32` steps from the
+  largest height the patch can reach, so that the range reaches the skirts' bottoms as the bake
+  hangs them (`select.wasm.test.ts` checks every edge vertex's skirt bottom at margins of 0 and
+  5 m). Selection floors a patch's distance at the near plane (0.1 m), so a camera inside a volume
+  gives a finite excess that a secondary view's weight still scales. `maxPatches` counts forced
+  patches but never refuses them, so a selection can exceed it by the forced region, its balance
+  and the six roots.
+- **Deviations in T7.d, as built (several views, 2026-10-03).** The union of the views is one
+  traversal (T7.b), and the demand is built in `select.ts` (T7.c's breadth-first rule).
+  `priority.ts` holds `compareRequests` (forced first, then the higher priority, then
+  `patchKeyString`), `PRIMARY_VIEW_WEIGHT` (1) and `SECONDARY_VIEW_WEIGHT` (0.25). A request's
+  priority is the largest w_view × ρ ÷ τ over the views of the patch drawn in its place, its
+  parent (a root's own). `priority.test.ts` builds demand with everything to level 2 baked, so
+  that it reaches level 3: two views at one pose request each patch once, a secondary view's
+  priorities are the primary's × 0.25 (the near-plane floor keeps them finite), forced patches
+  come first, and the order is `compareRequests`'s.
 - **Deviations in T11.b, as built** (2026-10-03).
   - _Three sources, two materials_ (`gpu/material.ts`, `terrainMaterialSpec`, `TERRAIN_MATERIALS`,
     `TERRAIN_BINDINGS`, `TERRAIN_PASS_LABEL`). `shaders/terrain.wgsl` holds the shared stages, the
@@ -3171,3 +3188,48 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     SwiftShader on 2026-10-03, both variants: 100% from 400 km and 68.8% from 10 m, every terrain
     pixel lit, no uncaptured GPU error. The terrain being drawn with `cullMode: "back"` also
     confirms the mesh's winding.
+- **T7.d's review, as built (2026-10-03).** A request's priority is now Design note 24's: the
+  largest w_view × ρ ÷ τ of the patch drawn in its place over the views that see the request and
+  want that patch split (where none does, a split the 2:1 balance made, over the views that see
+  both). Each traversal node keeps two view bitmasks (`seenBy`, `wantedBy`), not per-view arrays,
+  so selection takes at most `MAX_SELECTION_VIEWS` (31) views and throws past it; a request's
+  per-view excess is recomputed only for the demand. A forced region is selected, and requested,
+  whether or not a view sees it, so that it is resident before contact (Design note 9); it is also
+  drawn, the frustum culling nothing on the GPU. A forced request's priority is its own weighted
+  excess, which orders forced requests among themselves only. The tests now check
+  `compareRequests` directly, a second view at one pose adding nothing, a patch only a
+  secondary view wants ranked at the secondary's weight (a test that fails under the earlier
+  rule), a forced region no view sees, and the unforced demand's priorities never rising.
+- **R05.T7 perf (a), as built (2026-10-03): the draw set and the pins without allocation.**
+  `DrawSetResolver` (one per cache, `resolve(selection)`) returns the same `DrawSet` every call,
+  its records, `patches` array and `slots` buffer rewritten in place: `DrawSet` gains `count`,
+  `slots` is a buffer of the cache's slot count whose first `count` entries are the instances
+  (lane C: read `slots.subarray(0, count)` or upload `count` entries), and the drawn patches come
+  in the selection's order, each stand-in where it is first needed, with no sort.
+  `resolveDrawSet(selection, cache)` stays, making a resolver for the call. Lookups go by level
+  and `patchKeyIndex` (now in `patchKey.ts`, with `ancestorIndex`) through
+  `PatchCache.residentAt(level, index)`, and `CachedPatch` carries its `keyString`, so no key or
+  string is built per call. `retain` reuses its forced and selected sets and counts its pins into
+  fields. Iterating the cache's maps still makes V8's iterator objects; nothing else is allocated
+  per call after warm-up. Tests hold the set, its arrays and its records identical across calls.
+  _Unseen forced patches (the orchestrator, 2026-10-03)._ `SelectedPatch.seen` is false for a
+  forced patch no view sees: it is selected and requested, and `retain` pins it, but the resolver
+  leaves it out of the draw set and `maxPatches` does not count it. Forced patches a view sees
+  count against `maxPatches` but are never refused.
+- **R05.T7 perf (b), as built (2026-10-03): selection toward 2 ms.** `viewGeometry.ts`
+  (`ViewGeometry`, `viewGeometry`, `viewExcess`) holds each view's planes, horizon and error
+  scale as plain numbers and tests a patch with no allocation; `viewGeometry.test.ts` holds it to
+  `inFrustum`, `aboveHorizon` and `distanceToBoxM` over 300 random cameras of 20 patches each.
+  No traversal node builds a key string (only the output map and nothing else); nodes carry a
+  parent pointer, which the demand's breadth-first walk follows. The bounds memo answers a patch
+  with nothing baked above it without computing its range. `PatchLeafSet` is now linked tree
+  nodes from the six roots plus a map per level by `patchKeyIndex` (`addRoot` replaces `add`), so
+  that the leaf over a neighbour's cell is usually one lookup at the parent's level rather than a
+  walk; leaves come out depth first from face 0, in `childKeys`' order. Rollback deletes the
+  children from the map. At the 1.5 km pose (ridges off, 1920 × 1080, fov_h 60°, τ = 1 px,
+  tilted 69°), warm, under Node 26 at load 15–23 on the development machine: budget 981, p50
+  2.8 ms and p95 5.4 ms (was about 11 ms and 15–28 ms); budget 1,952, 5.0 and 8.0 ms;
+  unbudgeted (12,731 patches), 37 and 44 ms. The 2 ms p95 is not yet met under this load; the
+  remaining per-node costs are the neighbour keys (8 objects a probe), `childKeys`' and the
+  children's arrays a split, and `patchBounds` for new nodes, which the ruling's item 4d also
+  names. A quiet-machine run is pending (Design note 27). Recorded, not asserted.
