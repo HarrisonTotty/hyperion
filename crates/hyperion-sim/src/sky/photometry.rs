@@ -1,9 +1,12 @@
 //! A star's absolute V magnitude as the sky reads it, with the interims of galaxy plan 06's asks
 //! A3 and A4 in one place (rendering plan R06, Design note 7).
 //!
-//! - **A3, protostars dark in V.** A Class 0 or Class I protostar sits inside an envelope of
-//!   A<sub>V</sub> ≳ 100 (Class 0) to tens–100 (Class I) (André, Ward-Thompson and Barsony 1993;
-//!   Whitney et al. 2003), so it has no V magnitude. Plan 06's protostar phase,
+//! - **A3, protostars dark in V.** A Class 0 protostar sits inside an envelope of A<sub>V</sub>
+//!   ≳ 100 (André, Ward-Thompson and Barsony 1993; Whitney et al. 2003b, ApJ 598, 1079, §3), a
+//!   Class I one inside A<sub>V</sub> 32–225 towards most inclinations (Whitney et al. 2003a, ApJ
+//!   591, 1049, §2 and Fig. 3), so neither has a V magnitude here. A Class I source seen pole-on,
+//!   down its outflow cavity (A<sub>V</sub> about 1.5), would show; the interim treats every one as
+//!   dark, a few per cent of them wrongly (R06's Risks). Plan 06's protostar phase,
 //!   [`Phase::Protostar`], is exactly the accretion that
 //!   [`protostar_class`](crate::stellar::premain::protostar_class) calls Class 0 or I (it ends at
 //!   [`PROTOSTAR_DURATION`](crate::stellar::premain::PROTOSTAR_DURATION)), so the phase alone
@@ -18,6 +21,8 @@
 //! When plan 06 answers A3 and A4, these two functions switch to its photometry and nothing else
 //! here changes.
 
+use super::colour::{StarColour, star_colour, surface_gravity};
+use super::disc::grid_of;
 use crate::stellar::photometry::absolute_magnitude_v;
 use crate::stellar::{Phase, StarState};
 use crate::units::Magnitudes;
@@ -72,6 +77,18 @@ pub fn absolute_v_of_state(state: &StarState) -> Option<Magnitudes> {
         | Phase::PostAgb
         | Phase::Substellar => absolute_magnitude_v(state),
     }
+}
+
+/// The colour of `state` from the spectral table ([`star_colour`]): its effective temperature, its
+/// gravity from its own mass and radius ([`surface_gravity`], Design note 6) and the grid of its
+/// phase, as the host discs read them.
+#[must_use]
+pub fn colour_of_state(state: &StarState) -> StarColour {
+    star_colour(
+        state.effective_temperature(),
+        surface_gravity(state.mass(), state.radius()),
+        grid_of(state.phase()),
+    )
 }
 
 #[cfg(test)]
