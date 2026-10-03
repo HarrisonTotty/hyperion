@@ -75,8 +75,15 @@ check: gen-surface
     pnpm typecheck
 
 # Lint Rust (clippy) and TypeScript (oxlint, type-aware).
-lint: gen-surface
+lint: gen-surface _clippy _oxlint
+
+# Clippy over every target of the workspace. It compiles each one as `cargo check` does, so a
+# compile error fails it too: `ci` runs it in place of `check`'s `cargo check`.
+_clippy:
     cargo clippy --workspace --all-targets -- -D warnings
+
+# oxlint, type-aware; it reads the surface module's `.d.ts`, so `gen-surface` must have run.
+_oxlint:
     pnpm lint
 
 # Format everything in place.
@@ -103,15 +110,38 @@ _locked +cmd:
     exec 9>"{{ heavy_lock }}"
     if ! flock -n 9; then
         echo "waiting for another heavy test run to finish (lock {{ heavy_lock }})..." >&2
+        waited=$SECONDS
         flock 9
-        echo "lock taken, running: $*" >&2
+        echo "lock taken after $((SECONDS - waited)) s of waiting, running: $*" >&2
     fi
-    "$@"
+    held=$SECONDS
+    status=0
+    "$@" || status=$?
+    echo "heavy-test lock released after $((SECONDS - held)) s" >&2
+    exit "$status"
 
+# The native suites run under cargo-nextest, which schedules every test of every binary on one pool
+# of cores, where `cargo test` ran its 108 binaries one after another, each finishing on its longest
+# test with most cores idle: 419 s against 221 s in the lock for the same tests, doctests and vitest
+# included (2026-10-03, both under heavy shared load). Nextest runs each test in its own process, so
+# a fixture in a `OnceLock` is built once per test rather than once per binary; the suite is written
+# for that already (`test-slow` and the wasip1 suites run under nextest too). It runs no doctests,
+# so `cargo test --doc` follows; doctests cannot be built without being run, so they build inside
+# the lock, as they did under `cargo test`.
 # Run all tests (built first, then run under the heavy-test lock).
-test: gen-surface
-    cargo test --workspace --no-run
-    just _locked bash -c 'cargo test --workspace && pnpm test'
+test: gen-surface _test-build
+    just _locked just _test-run
+
+# Build the native test binaries, outside the heavy-test lock. Not after `gen-surface` itself: `ci`
+# builds while `tsc` and oxlint read the module that `gen-surface` would delete and rewrite.
+_test-build:
+    cargo nextest run --workspace --no-run
+
+# Run the native suites, the doctests and vitest; the caller holds the heavy-test lock.
+_test-run:
+    cargo nextest run --workspace
+    cargo test --workspace --doc
+    pnpm test
 
 # Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile, with cargo-nextest
 # (`cargo install cargo-nextest --locked`) so that every binary's tests share one pool of cores.
@@ -237,12 +267,20 @@ _relaxed-simd-refused:
     fi
     echo "the +relaxed-simd build is refused by its guard" >&2
 
-# Built first, then run under the heavy-test lock. The doctests wait for `test-wasm-slow`.
+# Built first, then run in one hold of the heavy-test lock. The doctests wait for `test-wasm-slow`.
 # The fast WebAssembly checks, run by `ci`: relaxed SIMD refused, wasip1, Clippy and the browser.
-test-wasm-fast: (_wasm-preflight "wasip1" "browser") _relaxed-simd-refused _browser-clippy
+test-wasm-fast: _relaxed-simd-refused _browser-clippy _wasm-fast-build
+    just _locked just _wasm-fast-run
+
+# The builds of `test-wasm-fast`, outside the heavy-test lock, and the browser target's test lists.
+_wasm-fast-build: (_wasm-preflight "wasip1" "browser")
     just _wasip1 {{ wasip1_nextest }} --no-run
-    just _locked just _wasip1 {{ wasip1_nextest }}
-    just test-wasm-browser
+    just _browser prepare
+
+# The fast WebAssembly suites, built already; the caller holds the heavy-test lock.
+_wasm-fast-run:
+    just _wasip1 {{ wasip1_nextest }}
+    just _browser run
 
 # Clippy for the browser target over the crates that run there, so that code compiled only there
 # (the testkit's embedded golden arm, the surface crate's `src/wasm.rs`) is linted under the
@@ -309,7 +347,16 @@ browser_timeout := "600"
 # test list with the native one less its `native_only` tests, since a plain `#[test]` compiles there
 # and is silently dropped (Design note 12); then it runs the tests under the heavy-test lock.
 # The browser target's suites, on Electron's V8: base, the surface crate, the testkit.
-test-wasm-browser: (_wasm-preflight "browser")
+test-wasm-browser: (_browser "prepare")
+    just _locked just _browser run
+
+# The browser target's suites in two steps: `prepare` proves the shim, builds both targets and
+# compares the test lists, outside the lock; `run` runs the tests, built already, and its caller
+# holds the heavy-test lock. Both lists come from one `cargo test` over the three crates at once,
+# with each test attributed to its crate by the binary it is listed from: a `cargo test -p` of one
+# crate resolves features for that crate alone, and so built every crate a second time for its list
+# (47 s of a cold `ci`, 2026-10-03), and again after every edit.
+_browser mode: (_wasm-preflight "browser")
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ justfile_directory() }}"
@@ -331,17 +378,52 @@ test-wasm-browser: (_wasm-preflight "browser")
     packages=()
     for crate in {{ browser_crates }}; do packages+=(-p "$crate"); done
     browser=(--target wasm32-unknown-unknown --profile slow-test --lib --tests)
+    case "{{ mode }}" in
+        run)
+            cargo test "${browser[@]}" "${packages[@]}"
+            exit 0
+            ;;
+        prepare) ;;
+        *)
+            echo "error: _browser: unknown mode {{ mode }}" >&2
+            exit 2
+            ;;
+    esac
     cargo test "${browser[@]}" "${packages[@]}" --no-run
     cargo test --lib --tests "${packages[@]}" --no-run
-    # The names of the tests in a `--list` output, sorted; `grep` finding none is not an error.
-    tests() { { grep -E ': test$' || true; } | sed -e 's/: test$//' | sort; }
+    # `crate test` lines, sorted, of a `cargo test <args> -- --list` over the three crates: each
+    # binary's `Running` line names its file, and the build's artifact messages map the file to its
+    # crate. Every other line goes to standard error, so that a failed build or runner shows there
+    # and stops the recipe with its own message, not as a difference between the lists.
+    lists() {
+        cargo test "$@" "${packages[@]}" --message-format=json-render-diagnostics -- --list 2>&1 \
+            | python3 -c '
+    import json, os, re, sys
+    crate_of, crate = {}, None
+    for line in sys.stdin:
+        line = line.rstrip("\n")
+        if line.startswith("{"):
+            message = json.loads(line)
+            if message.get("reason") == "compiler-artifact" and message.get("executable"):
+                crate_of[os.path.basename(message["executable"])] = os.path.basename(
+                    os.path.dirname(message["manifest_path"]))
+            continue
+        running = re.match(r"\s*Running .*\((.*)\)$", line)
+        if running:
+            crate = crate_of[os.path.basename(running.group(1))]
+        elif line.endswith(": test"):
+            print(crate, line[: -len(": test")])
+        elif line and not re.fullmatch(r"\d+ tests?, \d+ benchmarks?", line):
+            print(line, file=sys.stderr)
+    ' | sort
+    }
+    native_lists="$(lists --lib --tests)"
+    browser_lists="$(lists "${browser[@]}")"
+    # The names of one crate's tests in those lines; `grep` finding none is not an error.
+    tests() { { grep -E "^$1 " || true; } | cut -d ' ' -f 2-; }
     for crate in {{ browser_crates }}; do
-        # Each listing runs on its own, so that a failed build or runner stops the recipe here with
-        # its own message rather than showing as a difference between the lists.
-        native_list="$(cargo test -q --lib --tests -p "$crate" -- --list)"
-        browser_list="$(cargo test "${browser[@]}" -p "$crate" -- --list)"
-        native="$(tests <<<"$native_list" | { grep -v 'native_only::' || true; })"
-        on_browser="$(tests <<<"$browser_list")"
+        native="$(tests "$crate" <<<"$native_lists" | { grep -v 'native_only::' || true; })"
+        on_browser="$(tests "$crate" <<<"$browser_lists")"
         if [[ "$native" != "$on_browser" ]]; then
             echo "error: $crate's tests on wasm32-unknown-unknown differ from its native ones less native_only::" >&2
             echo "(a test file or module without the \`wasm_bindgen_test as test\` import, or a test compiled out outside a native_only module):" >&2
@@ -350,7 +432,6 @@ test-wasm-browser: (_wasm-preflight "browser")
         fi
         echo "$crate: $(grep -c . <<<"$native") tests on the browser target, as natively less native_only"
     done
-    just _locked cargo test "${browser[@]}" "${packages[@]}"
 
 # Run the Criterion benchmarks, e.g. `just bench -- samplers`.
 bench *args:
@@ -384,7 +465,11 @@ gen-protocol-check:
     set -euo pipefail
     fresh="$(mktemp -d)"
     trap 'rm -rf "$fresh"' EXIT
-    TS_RS_EXPORT_DIR="$fresh" cargo test --quiet -p hyperion-protocol export_bindings
+    # Over the workspace's library tests rather than `-p hyperion-protocol`, so that features resolve
+    # as for the workspace's test build and the build is that one, not a second build of the protocol
+    # and its dependencies with features of their own (41 s of a cold `ci`, 2026-10-03). Only the
+    # protocol's tests are named `export_bindings*`.
+    TS_RS_EXPORT_DIR="$fresh" cargo test --quiet --workspace --lib export_bindings
     diff -r "$fresh" packages/protocol/src/generated \
         || { echo "protocol bindings are stale: run 'just gen-protocol'" >&2; exit 1; }
 
@@ -393,8 +478,37 @@ build: gen-surface
     cargo build --workspace --release
     pnpm build
 
+# `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, in
+# three phases. First, beside the builds, the checks that need no cargo build directory of the
+# worktree (formatting, `tsc`, oxlint and the relaxed-SIMD refusal, which has a target directory of
+# its own), their output held until they finish. Second, the cargo steps one after another, since
+# they share the build directory's lock: Clippy, which compiles every target as `cargo check` would,
+# so `check`'s `cargo check` is not repeated; the bindings' check, before any test can rewrite the
+# bindings it compares; the fitted tables' check; then every test build. Third, one hold of the
+# heavy-test lock for all the suites, rather than three turns in the queue behind other worktrees.
 # The gate before a commit: everything but the slow tests, with the fast suites on WebAssembly.
-ci: fmt-check check lint test fit-check gen-protocol-check test-wasm-fast
+ci: gen-surface (_wasm-preflight "wasip1" "browser")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ justfile_directory() }}"
+    side_log="$(mktemp)"
+    trap 'rm -f "$side_log"' EXIT
+    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused >"$side_log" 2>&1 &
+    side=$!
+    status=0
+    just _clippy _browser-clippy gen-protocol-check fit-check _test-build _wasm-fast-build || status=$?
+    side_status=0
+    wait "$side" || side_status=$?
+    cat "$side_log"
+    if [[ "$status" -ne 0 || "$side_status" -ne 0 ]]; then
+        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript and the relaxed-SIMD refusal: exit $side_status)" >&2
+        exit 1
+    fi
+    just _locked just _test-run _wasm-fast-run
+
+# TypeScript's type check; the client's needs the surface module's `.d.ts`, from `gen-surface`.
+_typecheck-ts:
+    pnpm typecheck
 
 # `ci` plus the slow statistical tests, natively and on WebAssembly: the full gate.
 ci-slow: ci test-slow test-wasm-slow
