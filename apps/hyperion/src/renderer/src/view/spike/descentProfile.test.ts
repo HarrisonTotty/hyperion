@@ -10,6 +10,7 @@ import {
   DESCENT_SEGMENTS,
   DescentProfile,
   type DescentTerrain,
+  DescentUnclearable,
   FLOOR_TOLERANCE_M,
   type TrackStretch,
   landingSiteOf,
@@ -383,6 +384,12 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
       expect(h).toBeGreaterThanOrEqual(Math.min(levelM, third) - FLOOR_TOLERANCE_M);
       expect(h).toBeLessThanOrEqual((boundaries[i - 1] ?? Infinity) + FLOOR_TOLERANCE_M);
     }
+  });
+
+  it("names a floor it cannot clear by its own RangeError", () => {
+    const error = new DescentUnclearable("the descent cannot clear its floors");
+    expect(error).toBeInstanceOf(RangeError);
+    expect(error.name).toBe("DescentUnclearable");
   });
 
   // The fourth lift's RangeError is a guard: each lift raises a short piece's two boundaries, and so

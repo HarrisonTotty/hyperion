@@ -11,7 +11,11 @@
 import type { DescentSpikeReport, SpikeApi, SpikeLaunch } from "../../../../preload/api";
 import type { AllocationEvent } from "../engine/memory";
 import type { PassTimes, RenderEngine } from "../engine/types";
-import { SETTINGS } from "../quality/qualitySetting";
+import {
+  type TerrainSettings,
+  terrainSettingsFor,
+  type TerrainVariant,
+} from "../quality/qualitySetting";
 import type { SelectionInput } from "../terrain/select";
 import type { GpuCapture } from "./capture";
 import type { PipelineTally } from "./pipelineShim";
@@ -46,20 +50,12 @@ export interface SpikeControllerDeps {
   readonly log: (message: string, error?: unknown) => void;
 }
 
-/**
- * Why `launch` cannot run yet, or `null`: the terrain pass takes its vertex path and normals from
- * the setting alone, so another variant (T16's and T17's) is refused rather than run as the
- * setting's own.
- */
-export function unsupportedVariant(launch: SpikeLaunch): string | null {
-  const terrain = SETTINGS[launch.setting].terrain;
-  if (launch.vertexPath !== null && launch.vertexPath !== terrain.vertexPath) {
-    return `--vertex-path ${launch.vertexPath} is not wired yet (the ${launch.setting} setting's is ${terrain.vertexPath})`;
-  }
-  if (launch.normals !== null && launch.normals !== terrain.normals) {
-    return `--normals ${launch.normals} is not wired yet (the ${launch.setting} setting's is ${terrain.normals})`;
-  }
-  return null;
+/** The terrain variant `launch`'s `--vertex-path` and `--normals` ask for (nulls left out). */
+export function variantOf(launch: SpikeLaunch): TerrainVariant {
+  return {
+    ...(launch.vertexPath === null ? {} : { vertexPath: launch.vertexPath }),
+    ...(launch.normals === null ? {} : { normals: launch.normals }),
+  };
 }
 
 /** The capture's span: from where it starts, script seconds, and how many frames are left. */
@@ -80,6 +76,7 @@ export class SpikeController {
   #lastMemoryMs = Number.NEGATIVE_INFINITY;
   #measuring: Promise<void> | null = null;
   #capture: CaptureSpan | null = null;
+  #terrain: TerrainSettings | null = null;
 
   constructor(deps: SpikeControllerDeps) {
     this.#deps = deps;
@@ -105,11 +102,15 @@ export class SpikeController {
     };
   }
 
-  /** The descent is measured: recording and measuring begin, or a variant not wired is refused. */
+  /**
+   * The descent is measured: recording and measuring begin, or a variant the setting cannot take
+   * (low with baked offsets, which the command line refuses too) ends the run.
+   */
   prepared(descent: RecordedDescent): void {
-    const refusal = unsupportedVariant(this.#launch);
-    if (refusal !== null) {
-      this.fail(refusal);
+    try {
+      this.#terrain = terrainSettingsFor(this.#launch.setting, variantOf(this.#launch));
+    } catch (error: unknown) {
+      this.fail("the terrain variant does not fit the setting", error);
       return;
     }
     this.#recorder = new SpikeRecorder(descent, this.#launch.setting, this.#deps.gpu);
@@ -233,7 +234,13 @@ export class SpikeController {
         return;
       }
       await spike.stopTrace();
-      await spike.writeResults(recorder.report(this.#deps.canvas()));
+      const terrain = this.#terrain;
+      await spike.writeResults({
+        ...recorder.report(this.#deps.canvas()),
+        ...(terrain === null
+          ? {}
+          : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
+      });
       await spike.end({ status: "pass" });
     } catch (error: unknown) {
       this.#deps.log("the descent spike could not finish", error);

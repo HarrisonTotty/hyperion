@@ -28,7 +28,12 @@ import { EARTH_REFERENCE } from "../atmosphere/earth";
 import { HillaireAtmosphere, TABLE_SIZES } from "../atmosphere/hillaire";
 import { sunIlluminanceRgb } from "../atmosphere/solar";
 import { controlEv100 } from "../photometry/exposure";
-import { type QualitySetting, TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import {
+  type QualitySetting,
+  TERRAIN_SETTINGS,
+  terrainSettingsFor,
+  type TerrainVariant,
+} from "../quality/qualitySetting";
 import { cameraSceneOf, type ViewScene } from "../scene/model";
 import type { KeptScene } from "../scenes/kept";
 import type { TerrainAnnunciation } from "../terrain/annunciation";
@@ -339,6 +344,8 @@ export class SpikeRun {
       readonly setting: QualitySetting;
       readonly ridges: TestPlanetRidges;
       readonly createPool: TerrainPoolFactory;
+      /** The terrain variant of `--vertex-path` and `--normals` (T13.c); the setting's own if absent. */
+      readonly variant?: TerrainVariant;
     },
     canvases: Readonly<Record<keyof typeof SPIKE_VIEW_NAMES, HTMLCanvasElement>>,
     listeners: SpikeListeners = {},
@@ -362,6 +369,8 @@ export class SpikeRun {
       const terrain = new TerrainPass({
         engine,
         setting: options.setting,
+        // The setting's own terrain, or the variant T17's runs ask for (decision-r05-spike-ux.md).
+        terrain: terrainSettingsFor(options.setting, options.variant),
         planet: prepared.planet,
         ridges: options.ridges,
         createPool: (bake) => listenedPool(options.createPool(bake), listeners),

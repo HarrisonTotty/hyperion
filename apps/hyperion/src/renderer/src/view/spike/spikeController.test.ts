@@ -6,7 +6,7 @@ import type { PassTimes } from "../engine/types";
 import { planetGeometry } from "../terrain/planet";
 import { recordProfile } from "./demandRecord";
 import { PipelineTally } from "./pipelineShim";
-import { SMOKE_S, SpikeController, unsupportedVariant } from "./spikeController";
+import { SMOKE_S, SpikeController, variantOf } from "./spikeController";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 const LAUNCH: SpikeLaunch = {
@@ -138,6 +138,7 @@ describe("the spike's run control", () => {
     expect(ends).toEqual([{ status: "pass" }]);
     expect(reports[0]?.frames.scriptTimesS).toHaveLength(5);
     expect(reports[0]?.canvas).toEqual({ widthPx: 1280, heightPx: 720 });
+    expect(reports[0]?.terrain).toEqual({ vertexPath: "face-differences", normals: "mesh" });
     expect(controller.ended).toBe(true);
   });
 
@@ -163,15 +164,18 @@ describe("the spike's run control", () => {
     expect(ends).toEqual([{ status: "fail", reason: "no patch was baked in a worker" }]);
   });
 
-  it("refuses a terrain variant the pass cannot run yet", async () => {
-    const { controller, ends } = controllerOf({ ...LAUNCH, setting: "high", normals: "mesh" });
-    controller.prepared(DESCENT);
+  it("refuses a variant the setting cannot take, and records the one drawn", async () => {
+    const refused = controllerOf({ ...LAUNCH, setting: "low", vertexPath: "baked-offsets" });
+    refused.controller.prepared(DESCENT);
     await settle();
-    expect(ends[0]?.status).toBe("fail");
-    expect(unsupportedVariant({ ...LAUNCH, setting: "low", normals: "mesh" })).toBeNull();
-    expect(
-      unsupportedVariant({ ...LAUNCH, setting: "high", vertexPath: "face-differences" }),
-    ).toMatch(/not wired/);
+    expect(refused.ends[0]?.status).toBe("fail");
+    const run = controllerOf({ ...LAUNCH, setting: "high", vertexPath: "face-differences" });
+    run.controller.prepared(DESCENT);
+    run.controller.frame(frame(DESCENT.profile.durationS));
+    await settle();
+    expect(run.reports[0]?.terrain).toEqual({ vertexPath: "face-differences", normals: "double" });
+    expect(variantOf({ ...LAUNCH, normals: "mesh" })).toEqual({ normals: "mesh" });
+    expect(variantOf(LAUNCH)).toEqual({});
   });
 
   it("ends once, whatever follows", async () => {

@@ -138,7 +138,19 @@ export class SpikeSession {
     if (this.#run === null) {
       throw new Error("the spike wrote results before it started measuring");
     }
-    const run = await this.#run;
+    const described = await this.#run;
+    // The terrain variant the renderer drew with, beside the flags that asked for it.
+    const run =
+      report.terrain === undefined
+        ? described
+        : {
+            ...described,
+            options: {
+              ...described.options,
+              terrainVertexPath: report.terrain.vertexPath,
+              terrainNormals: report.terrain.normals,
+            },
+          };
     const results = buildResults({ run, report, trace: this.#trace, memory: this.#memory });
     const paths = await writeResults(this.#deps.outDir, results, this.#files.results);
     this.#deps.log(`descent spike: results in ${paths.json}`);

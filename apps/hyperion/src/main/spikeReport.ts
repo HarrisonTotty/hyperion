@@ -155,6 +155,12 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   const streamingList = listOf(value["streaming"], streaming);
   const late = listOf(value["latePipelines"], latePipeline);
   const canvas = value["canvas"];
+  const terrain = value["terrain"];
+  const terrainOk =
+    terrain === undefined ||
+    (isRecord(terrain) &&
+      (terrain["vertexPath"] === "baked-offsets" || terrain["vertexPath"] === "face-differences") &&
+      (terrain["normals"] === "double" || terrain["normals"] === "mesh"));
   const { warmupS, timer, untimedPasses, uploadBytes, adapterPeakBytes } = value;
   if (
     passes === null ||
@@ -169,7 +175,8 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     !isCount(adapterPeakBytes) ||
     !isRecord(canvas) ||
     !isCount(canvas["widthPx"]) ||
-    !isCount(canvas["heightPx"])
+    !isCount(canvas["heightPx"]) ||
+    !terrainOk
   ) {
     return null;
   }
@@ -185,6 +192,11 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     latePipelines: late,
     adapterPeakBytes,
     canvas: { widthPx: canvas["widthPx"], heightPx: canvas["heightPx"] },
+    ...(isRecord(terrain) &&
+    (terrain["vertexPath"] === "baked-offsets" || terrain["vertexPath"] === "face-differences") &&
+    (terrain["normals"] === "double" || terrain["normals"] === "mesh")
+      ? { terrain: { vertexPath: terrain["vertexPath"], normals: terrain["normals"] } }
+      : {}),
   };
 }
 

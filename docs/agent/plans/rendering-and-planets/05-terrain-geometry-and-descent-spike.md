@@ -3615,6 +3615,63 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     resident ancestors pinned, deepest evicted first); the hard cells' full record follows the
     collapse's fix.
 
+- **Deviations in T13.c, as built** (2026-10-03, lane D).
+  - _The command line._ `cli.ts` takes the plan's options with commander (`--ridged`, the plan's
+    name, not `--ridges`); `ClientArgs.spike` is `SpikeLaunch` (`preload/api.ts`): setting
+    (default high), seed (a u64 in decimal, default 7, T13.a's record seed), smoke, out, workers
+    (1–64), vertex path and normals (`null` for the setting's own), ridged (default off),
+    Dawn safety (default on) and capture. Each spike option without `--descent-spike` is a usage
+    error, as is `--setting low --vertex-path baked-offsets` (the low cache, Design note 4).
+  - _The hand-off._ `preload/spikeLaunch.ts` carries the options as one
+    `--hyperion-descent-spike=<JSON>` switch; `preload/spikeApi.ts`'s `spikeMember` gives
+    `HyperionApi.spike` only when it is there (tested on an ordinary argv). `SpikeApi`:
+    `launch`, `startTrace`, `stopTrace`, `sampleMemory` (the preload's
+    `process.getProcessMemoryInfo().private`, handed to the main process's sampler), `writeResults`,
+    `writeCapture`, `end`. One fixed channel each (`SPIKE_CHANNELS`, repeated in the preload and
+    tested equal).
+  - _The main process._ `main/ipcSender.ts`'s `isOwnPage(frame, pageUrl, mainFrame?)` is the smoke
+    harness's inline check factored out (the smoke harness uses it), and the spike's handlers also
+    require the window's own main frame. `main/spikeReport.ts` checks the report and the capture
+    (every series the frames' length, every figure finite). `registerSpikeHandlers` in
+    `main/spike.ts` rejects a foreign sender or unchecked arguments; `main/spikeSession.ts` holds
+    the run: the trace and the 1 Hz `MemorySampler` between start and stop, the trace written into
+    the run's profile and removed once reduced (it can reach 1.4 GB), a failed reduction a missing
+    figure with its reason, the results through `buildResults`/`writeResults`, the capture's
+    `capture.json` and `capture.bin`, and the exit status. `index.ts` applies `launchSwitches` in
+    place of `graphicsSwitches` (the spike always asks for `gpuTiming`), reads `nvidia-smi`'s
+    baseline before the window, sizes the window's content to 1920 × 1080 (high) or 1280 × 720
+    (low), keeps it hidden and offscreen for `--smoke` or `HYPERION_SPIKE_HIDDEN=1` (the recipe's
+    `--hidden`; headless Ozone's GPU process exits on a hardware adapter), and ends a run that
+    never ends after 3 min (smoke) or 45 min with status 3.
+  - _The renderer._ `view/spike/spikeHarness.ts`: `spikeGpu(gpu, capture, scriptTimeS)`, the
+    spike's `ViewEngineSource` over a wrapped `GPU` (`LoadEngineOptions.gpu` the same), whose
+    devices carry the pipeline tally, a `ResolveCounter` and the capture; `rowOf` and
+    `SPIKE_PASS_ROWS` (`meta.passRows`); `SpikeRecorder`, which feeds `SpikeMetrics`. **The
+    engine frame.** R01's timer numbers each resolve, one a `renderFrame`, so a spike frame of five
+    views spans several `PassTimes.frame` numbers. The resolve counter counts
+    `resolveQuerySet` on the device's encoders, which is that number as it is given out, so each
+    spike frame records the last one it reached and `SpikeMetrics.passTimes` assigns an engine
+    frame to the first spike frame whose last is at or after it (earlier ones, before the run,
+    to none), summing a label timed twice (the two `view:wireframe` passes). `patchesCalibrated`
+    re-runs `selectPatches` on each selection's own inputs under `boundedPlanet(…, "calibrated",
+σ)`. The adapter's peak is the recorder's own running total of created less destroyed bytes
+    (T11.a's tally keeps peaks per category). The predicted D of a segment is the mean of
+    `perLevelDemand` over its 1 Hz poses at the height above the floor.
+    `view/spike/spikeController.ts` runs the run: measuring from the measured descent, memory at
+    1 Hz, the capture (120 frames from 5 s into the low fast pass, or from 5 s in a smoke run,
+    started between frames in `onFrame`, ended early where the run ends first), and at the end
+    the trace stopped, the results written and a pass sent; a smoke run passes at 10 s if a patch
+    was baked in a worker. A terrain variant other than the setting's own is refused until lane C's
+    `terrainSettingsFor` override lands (decision-r05-spike-ux.md, "Spike variant flags").
+  - _The recipe._ `just descent-spike` runs `just build`, then `scripts/descentSpike.sh`: the
+    server as `cargo run --release -p hyperion-server -- --num-workers 2 --port 7879`
+    (`HYPERION_SPIKE_PORT`; release to reuse the build, and off the default port other lanes'
+    servers use), `--companion-load <n>` busy threads, the client on `out/` under `setsid timeout
+--kill-after=10` with a fresh `--user-data-dir`, every process group killed at the end. The
+    plan's `--cold-cache` needs a cache to keep across fresh profiles: the script keeps the
+    profile's `*Cache` directories in `target/descent-spike/gpu-cache`, copies them into each new
+    profile and back after, and `--cold-cache` empties them first.
+
 - **The scripted descent's terrain clearance** (decision-r05-descent-clearance.md, 2026-10-03). The
   script is flown above per-stretch true bounds of the finest mesh. Each bound is the baked maximum
   plus ε_n over a level-14 corridor, with level 12 above 2 km, level 4 for the arc and level 16 for

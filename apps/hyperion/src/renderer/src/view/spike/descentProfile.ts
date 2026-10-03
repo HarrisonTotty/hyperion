@@ -481,6 +481,15 @@ function planStretches(
   return out;
 }
 
+/**
+ * Thrown when the 64 Hz check still finds a piece below its clearance after the fourth lift
+ * (decision-r05-descent-clearance.md, rule 4): the seed's terrain cannot be cleared, which the spike
+ * refuses to fly (lane C's `DescentRefused`), unlike floors that do not match the plan.
+ */
+export class DescentUnclearable extends RangeError {
+  override readonly name = "DescentUnclearable";
+}
+
 /** How many times the interior check may lift a piece's boundaries before giving up (rule 4). */
 const MAX_LIFT_ROUNDS = 4;
 
@@ -643,7 +652,7 @@ function flyOverFloors(
     }
     if (round >= MAX_LIFT_ROUNDS) {
       const worst = stretches[margins.indexOf(minFloorMarginM)]?.piece ?? "?";
-      throw new RangeError(
+      throw new DescentUnclearable(
         `the descent cannot clear its floors: ${worst} is ${(-minFloorMarginM).toFixed(2)} m short after ${MAX_LIFT_ROUNDS} lifts`,
       );
     }
@@ -945,8 +954,8 @@ export class DescentProfile {
   /**
    * @param terrain - The site's height and the stretches' floors; the script's altitudes are
    *   above the site, lifted where a stretch's floor less its clearance would be above them.
-   * @throws RangeError if `terrain.stretchMaxHeightsM` does not match the stretch plan, or a
-   *   floor cannot be cleared in four lifts.
+   * @throws RangeError if `terrain.stretchMaxHeightsM` does not match the stretch plan, and
+   *   {@link DescentUnclearable} (a `RangeError`) if a floor cannot be cleared in four lifts.
    */
   constructor(
     figure: BodyFigure,

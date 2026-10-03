@@ -203,4 +203,9 @@ export interface DescentSpikeReport {
   readonly adapterPeakBytes: number;
   /** The view canvas's size in device pixels. */
   readonly canvas: { readonly widthPx: number; readonly heightPx: number };
+  /**
+   * The terrain's vertex path and normals the run drew with: the setting's own, or the variant
+   * `--vertex-path` and `--normals` chose (T13.c).
+   */
+  readonly terrain?: { readonly vertexPath: SpikeVertexPath; readonly normals: SpikeNormals };
 }

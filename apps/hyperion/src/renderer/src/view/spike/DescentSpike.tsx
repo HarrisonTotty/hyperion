@@ -21,7 +21,7 @@ import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { type CameraTarget, newCameraState } from "../camera/state";
 import type { ViewSize } from "../engine/types";
-import type { QualitySetting } from "../quality/qualitySetting";
+import type { QualitySetting, TerrainVariant } from "../quality/qualitySetting";
 import { cameraSceneOf } from "../scene/model";
 import type { PatchKey } from "../terrain/patchKey";
 import type { Selection, SelectionInput } from "../terrain/select";
@@ -72,6 +72,8 @@ export interface DescentSpikeProps {
   readonly ridges: TestPlanetRidges;
   /** How many height workers the pool runs (Design note 11; `--workers`). */
   readonly workers: number;
+  /** The terrain variant (`--vertex-path`, `--normals`; T13.c); the setting's own if absent. */
+  readonly variant?: TerrainVariant | undefined;
   /** Where the engine comes from: R01's, or T13.c's measured one, or a fake in a test. */
   readonly engineSource?: ViewEngineSource | undefined;
   readonly spikeWorkers?: SpikeWorkers | undefined;
@@ -195,12 +197,16 @@ export function DescentSpike({
   setting,
   ridges,
   workers,
+  variant,
   engineSource = DEFAULT_ENGINE_SOURCE,
   spikeWorkers = DEFAULT_SPIKE_WORKERS,
   prepare = prepareDescent,
   listeners,
 }: DescentSpikeProps) {
   const id = useId();
+  // The variant by its fields, so that a new object of the same variant does not restart the run.
+  const vertexPath = variant?.vertexPath;
+  const normals = variant?.normals;
   const listId = `${id}-targets`;
   const engineState = useViewEngine(engineSource);
   const [preparation, setPreparation] = useState<Preparation>({ kind: "measuring" });
@@ -298,7 +304,15 @@ export function DescentSpike({
       run = new SpikeRun(
         engineState.engine,
         prepared,
-        { setting, ridges, createPool: spikeWorkers.pool(workers) },
+        {
+          setting,
+          ridges,
+          createPool: spikeWorkers.pool(workers),
+          variant: {
+            ...(vertexPath === undefined ? {} : { vertexPath }),
+            ...(normals === undefined ? {} : { normals }),
+          },
+        },
         { main: mainCanvas, orbit: orbitCanvas, craft: craftCanvas },
         forwarding,
       );
@@ -382,6 +396,8 @@ export function DescentSpike({
     setting,
     ridges,
     workers,
+    vertexPath,
+    normals,
     spikeWorkers,
     forwarding,
   ]);
