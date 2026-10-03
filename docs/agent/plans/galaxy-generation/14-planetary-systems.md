@@ -3305,7 +3305,7 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
   Lommel–Seeliger's 16 (1 − ln 2) ÷ 3 ≈ 1.6366 at L = 0 and 1 to 10⁻⁹; q falls monotonically in s,
   and `exponent_for` inverts `phase_integral` to 10⁻⁹; Mercury's template gives q_V = 0.480 and
   Earth's 1.311 to 0.5% (computed from eqs. 2 and 5; Mercury's against Mallama et al. 2002's
-  0.478); every q is 0.4–1.7; q is the same at L = 0, 0.5 and 1 to 10⁻⁴ for every template. (b)
+  0.478); every q is 0.4–1.7; inside a template's range and where the clamp does not act, Φ_c is Φ_t^s at L = 0, 0.5 and 1 to 10⁻¹² (as built: past the range the law holds f while Φ_shape moves with L, so q at another L than the row's differs, by 3 × 10⁻⁴ for the Moon's curve and 0.10 for Mars's; each row's q is at its own L). (b)
   On `derive::tests::solar_system()` (the Solar System table), Mars selects `mars` with L = 0.5,
   Earth `earth`, Venus `venus`, Mercury `mercury` and each giant its own template; each
   analogue's p follows p_analogue × A_Bond ÷ A_ref to 10⁻¹², so Mercury, Venus, Earth, Mars,
@@ -6441,3 +6441,28 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     40 h spin (8 h reaches the cap).
   - _T46.d, the cap._ A capped figure's (a − c) ÷ a recomputed from its radii may round just above
     0.2; the section test allows 10⁻¹².
+- **Deviations in P14.T47.a–c, as built (Phase J lane).**
+  - _q and L._ q does not depend on L only inside a template's range and where the clamp does not
+    act. Past the range the law holds f while Φ_shape still moves with L, so q at another L than
+    the row's differs: up to 0.10 for Mars's curve (held past 50°) and 3 × 10⁻⁴ for the Moon's.
+    Test (a)'s "the same at L = 0, 0.5 and 1 to 10⁻⁴" is replaced by the in-range property to
+    10⁻¹², and each row's q is taken at its own L. R07.T4's "to 10⁻⁴" test of `lawFor` meets the
+    same limit; the orchestrator has been told.
+  - _`TemplateRow`._ `albedo` is `Bands`, not `Option<Bands>` (every row has one; one-band
+    analogues are grey). The row also carries `lunar_lambert_share` and the A6 field
+    `phase_integral`. The literals are q: Moon 0.626110, Mercury and magma 0.479802, Mars
+    1.084648, Venus 1.344240, Earth 1.310569, Jupiter 1.311719, Saturn 1.356623, Uranus
+    1.301738, Neptune 1.242006, airless ice 0.80 and snowball 1.01 (s 0.821537 and 0.667472),
+    which a test reproduces to 10⁻⁹. `BodyPhotometry::phase_integral` is `const`.
+  - _`PhotometryInputs`_ gains `equilibrium_temperature` for A8's hot-giant flag.
+  - _The Bond albedo_ is the state's on the material of the record's composition
+    (`SurfaceState::albedo`), not `DerivedBody::albedo`, so that a moon or an icy member whose
+    record composition differs from its derivation's is drawn with its record's material. For
+    every other body the two are the same.
+  - _Moons_ reach their atmosphere through the new `DerivedMoon::atmosphere`; the moon record
+    builds its bulk and photometry from one `moon_derived`, and the old `moon_bulk` helper is
+    removed.
+  - _Test (b)'s "p q ≤ 1 for every sampled body" and test (c)_ are one system test,
+    `the_photometry_section_by_kind_and_level`: `Ok` exactly where the bulk is, the `Bulk`
+    level, p q ≤ 1 per band, and every generated airless-ice body and snowball within 5% of a
+    ratio of 1.
