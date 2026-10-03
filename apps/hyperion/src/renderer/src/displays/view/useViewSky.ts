@@ -26,6 +26,11 @@ import { runPose, type ViewRun } from "./viewRun";
 export interface DrawnSky {
   readonly model: SkyModel;
   readonly selection: SkySelection;
+  /**
+   * The light of the stars the view culled, per band texel and channel, lx (`CulledSky`'s
+   * `bandIlluminanceLx`), which R06's band layer adds to the band (R07.T8.a draws it).
+   */
+  readonly bandIlluminanceLx: Float64Array;
 }
 
 /** The view's sky, or `null` while R02's interim field stands in. */
@@ -120,7 +125,7 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
       widthPx,
     });
     return {
-      drawn: { model, selection },
+      drawn: { model, selection, bandIlluminanceLx: kept.bandIlluminanceLx },
       labelValue: skyLabelValue(labelV, role, model.response.not_modelled),
     };
   }, [model, role, exposure, fovDeg, widthPx, settings.spriteBudget]);

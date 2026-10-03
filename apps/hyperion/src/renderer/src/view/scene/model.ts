@@ -1,4 +1,10 @@
-import type { BodyIdHex, GalacticPosition, SystemIdHex, UniverseTime } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  GalacticPosition,
+  HostDiscDto,
+  SystemIdHex,
+  UniverseTime,
+} from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
@@ -200,6 +206,11 @@ export interface ViewScene {
   readonly ownShip: CraftId | null;
   /** The pose a camera with no own ship starts at. */
   readonly defaultPose: CameraPose;
+  /**
+   * A kept scene's host discs, standing in for the sky's (R07.T8.a, decision-r07-t8a); a server
+   * scene leaves it unset and is lit by its held sky's `hosts`.
+   */
+  readonly hostDiscs?: ReadonlyArray<HostDiscDto>;
 }
 
 /**

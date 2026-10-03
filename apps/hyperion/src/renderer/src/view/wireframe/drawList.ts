@@ -591,6 +591,53 @@ export function buildWireframeDrawList(
 /** How far outside the view a sprite's star may fall and still light it: half its quad, px. */
 const SPRITE_MARGIN_PX = Math.ceil(PSF_QUAD_PX / 2);
 
+/** Where a sprite falls: px from the view's top left, and its reversed-Z depth (0 for a star). */
+export interface SpritePlace {
+  readonly xPx: number;
+  readonly yPx: number;
+  readonly depth: number;
+}
+
+/** A sprite's two `vec4f` as `starSprite.wgsl` reads them. */
+export type SpriteRecord = readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
+/**
+ * A sprite's record (decision-r07-t8a, item 2): its place and depth, then its pre-exposed light
+ * per unit of point-spread weight, E × the exposure scale ÷ Ω, Ω the solid angle of the pixel its
+ * direction falls in. R02's stars and R07's point bodies are packed by it alike.
+ *
+ * @param illuminanceRgbLx - Its illuminance per linear Rec. 709 channel, lx.
+ * @param exposure - The exposure scale (`exposureScale`), 1 ÷ (cd/m²).
+ * @param direction - Its direction from the camera, along the camera frame's axes; any length.
+ */
+export function spriteRecord(
+  place: SpritePlace,
+  illuminanceRgbLx: Rgb,
+  exposure: number,
+  direction: Vec3,
+  projection: ProjectionCamera,
+  viewport: Viewport,
+): SpriteRecord {
+  const perWeight = exposure / pixelSolidAngle(direction, projection, viewport);
+  const [r, g, b] = illuminanceRgbLx;
+  return exposedSpriteRecord(place, [r * perWeight, g * perWeight, b * perWeight]);
+}
+
+/** A sprite's record from its place and its pre-exposed light per unit of point-spread weight. */
+export function exposedSpriteRecord(place: SpritePlace, exposedRgb: Rgb): SpriteRecord {
+  const [r, g, b] = exposedRgb;
+  return [place.xPx, place.yPx, place.depth, 0, r, g, b, 0];
+}
+
 /** The scene's stars, or the sky's, as sprites, the brightest first, capped at the low setting. */
 function starSprites(
   scene: ViewScene,
@@ -614,14 +661,21 @@ function starSprites(
     ) {
       continue;
     }
-    const perWeight = exposure / pixelSolidAngle(direction, projection, viewport);
     const [r, g, b] = star.illuminanceRgbLx;
+    const record = spriteRecord(
+      { xPx: p.xPx, yPx: p.yPx, depth: 0 },
+      star.illuminanceRgbLx,
+      exposure,
+      direction,
+      projection,
+      viewport,
+    );
     sprites.push({
       id: star.id,
       directionF32: narrow(direction),
       xPx: p.xPx,
       yPx: p.yPx,
-      exposedRgb: [r * perWeight, g * perWeight, b * perWeight],
+      exposedRgb: [record[4], record[5], record[6]],
       // Rec. 709's luminance weights: the photopic illuminance the ranking keeps the brightest by.
       illuminanceLx: REC709_LUMA[0] * r + REC709_LUMA[1] * g + REC709_LUMA[2] * b,
     });

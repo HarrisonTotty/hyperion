@@ -1,8 +1,8 @@
 // The stars as sprites (plan R02, Design notes 10 and 12): a 7 x 7 px quad about each star's pixel,
 // each pixel lit by the star's pre-exposed colour times the pixel-integrated Gaussian point-spread
 // weight at the star's sub-pixel position, toned per sprite by `agxSprite` and added in linear
-// light through the canvas's sRGB view. Depth-tested at infinity (depth 0), so that an occluder
-// hides it; no depth write. Composed after frame.wgsl and toneCurve.wgsl.
+// light through the canvas's sRGB view. Depth-tested at the row's depth (0, infinity, for a star),
+// so that an occluder hides it; no depth write. Composed after frame.wgsl and toneCurve.wgsl.
 
 struct Draw {
   // Unused: each sprite carries its own position.
@@ -11,7 +11,9 @@ struct Draw {
 
 @group(1) @binding(0) var<uniform> draw: Draw;
 
-// Two per sprite: its position, px from the view's top left with its sub-pixel part, then 0, 0;
+// Two per sprite: its position, px from the view's top left with its sub-pixel part, then its
+// reversed-Z depth (0, at infinity, for a star; near / distance for R07's point bodies,
+// decision-r07-t8a item 2), then 0;
 // its pre-exposed linear Rec. 709 colour per unit of point-spread weight, then 0.
 @group(2) @binding(0) var<storage, read> sprites: array<vec4f>;
 
@@ -50,14 +52,15 @@ fn vertexMain(
   @location(0) corner: vec3f,
   @builtin(instance_index) instance: u32,
 ) -> SpriteVarying {
-  let at = sprites[instance * 2u].xy;
+  let place = sprites[instance * 2u];
+  let at = place.xy;
   // The star's own pixel and three on each side.
   let first = floor(at) - vec2f(floor(PSF_QUAD_PX * 0.5));
   let px = first + corner.xy * PSF_QUAD_PX;
   let ndc = vec2f(px.x / frame.viewport.x * 2.0 - 1.0, 1.0 - px.y / frame.viewport.y * 2.0);
   var out: SpriteVarying;
-  // Depth 0: at infinity under reversed-Z.
-  out.position = vec4f(ndc, 0.0, 1.0);
+  // The sprite's own depth: 0 (infinity under reversed-Z) for a star.
+  out.position = vec4f(ndc, place.z, 1.0);
   out.sprite = instance;
   return out;
 }

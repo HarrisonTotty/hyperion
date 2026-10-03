@@ -30,6 +30,7 @@ import {
   type CutDestination,
   type CutOptions,
   cutTo,
+  type RenderStyle,
   displayPose,
   followPreset,
   newCameraState,
@@ -38,6 +39,7 @@ import {
   stepFov,
   targetPosition,
 } from "../../view/camera/state";
+import type { AppearanceLabel } from "../../view/appearance/fromWire";
 import { relativeToCamera } from "../../view/coords/relative";
 import { differenceM, type ViewPosition } from "../../view/coords/position";
 import {
@@ -53,9 +55,12 @@ import {
 } from "../../view/scene/model";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
-import { styleName } from "../../view/photoreal/style";
+import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
+import type { StyleAvailability } from "../../view/engine/platform";
+import { PHASE_SCENE_NAME, phaseScene } from "../../view/scenes/phaseScene";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { type LightingState, lightingStatement } from "../../view/lighting/hostLights";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
@@ -64,10 +69,11 @@ export interface SceneOption {
   readonly make: () => KeptScene;
 }
 
-/** The kept scenes: `PRECISION TEST` and `FRAME CHANGE TEST`. */
+/** The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST` and `PHASE TEST` (R07.T8.a). */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
   { name: FRAME_CHANGE_SCENE_NAME, make: frameChangeScene },
+  { name: PHASE_SCENE_NAME, make: phaseScene },
 ];
 
 /** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */
@@ -186,6 +192,9 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
   return { ...run, tS, scene, camera: advanceEasedMove(flown, dtS) };
 }
 
+/** The styles a view offers before its adapter has answered: the wireframe alone. */
+export const WIREFRAME_ONLY: StyleAvailability = { wireframe: true, photorealistic: false };
+
 /** A command's outcome: the run after it, or why it was refused. */
 export type CommandResult =
   | { readonly kind: "done"; readonly run: ViewRun }
@@ -198,11 +207,17 @@ function cut(run: ViewRun, to: CutDestination, options: CutOptions): CommandResu
     : { kind: "done", run: { ...run, camera: result.state } };
 }
 
-/** The run after a camera command: a key's action or a control's (Design note 18's cuts). */
+/**
+ * The run after a camera command: a key's action or a control's (Design note 18's cuts).
+ *
+ * @param availability - The styles the adapter offers (R01's `styleAvailability`); a refused
+ *   style leaves the camera as it was (R07.T7's `withStyle`).
+ */
 export function commandRun(
   run: ViewRun,
   action: ViewKeyAction,
   options: CutOptions,
+  availability: StyleAvailability = WIREFRAME_ONLY,
 ): CommandResult {
   const cameraScene = cameraSceneOf(run.scene);
   let result: CommandResult;
@@ -229,6 +244,14 @@ export function commandRun(
         run: { ...run, camera: changeFreeRate(run.camera, action.step, cameraScene) },
       };
       break;
+    case "style": {
+      const style = action.style === "toggle" ? otherStyle(run.camera.style) : action.style;
+      result = {
+        kind: "done",
+        run: { ...run, camera: withStyle(run.camera, style, availability) },
+      };
+      break;
+    }
   }
   return result;
 }
@@ -381,6 +404,55 @@ export function labelStatements(
     statements.push(terrain);
   }
   return statements;
+}
+
+/** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */
+export function isLitKind(kind: ViewBodyKind): boolean {
+  let lit: boolean;
+  switch (kind) {
+    case "planet":
+    case "dwarf_planet":
+    case "moon":
+      lit = true;
+      break;
+    case "star":
+    case "unresolved":
+      lit = false;
+      break;
+  }
+  return lit;
+}
+
+/** The statement while the photorealistic style is chosen and its image is not yet drawn. */
+export const PHOTOREAL_PENDING = "PHOTOREALISTIC PENDING";
+
+/**
+ * The photorealistic style's statements under the label block (R07.T8.a), none in the wireframe:
+ * {@link PHOTOREAL_PENDING} while the view still draws its wireframe in its place (its pipelines
+ * compiling); then, while the scene has a body to light, the lighting line while no star lights it
+ * (decision-r07-t8a, item 1) and each label the drawn bodies carry (`BODY ALBEDO: NOT YET
+ * MODELLED` for the provisional photometry, Design note 5).
+ *
+ * @param drawn - The style the view's last frame was drawn in.
+ * @param labels - The appearance labels of the bodies the photorealistic frame lights.
+ */
+export function photorealStatements(
+  run: ViewRun,
+  lighting: LightingState,
+  drawn: RenderStyle,
+  labels: ReadonlyArray<AppearanceLabel>,
+): ReadonlyArray<string> {
+  if (run.camera.style !== "photorealistic") {
+    return [];
+  }
+  if (drawn !== "photorealistic") {
+    return [PHOTOREAL_PENDING];
+  }
+  if (!run.scene.bodies.some((body) => isLitKind(body.kind))) {
+    return [];
+  }
+  const line = lightingStatement(lighting);
+  return [...(line === null ? [] : [line]), ...new Set(labels)];
 }
 
 /**

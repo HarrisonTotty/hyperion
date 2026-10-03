@@ -285,9 +285,10 @@ export function painterOrder(
 ): PainterEntry[]; // back to front by tangent power, meshes excluded, Design note 2
 ```
 
-`shaders/bodyDisc.wgsl` (the analytic disc, spheroid by axis scaling), `shaders/bodyPoint.wgsl`
-(through R02's `starSprite.wgsl` and `psfPixelWeights`), `bodies/smoothMesh.ts` (R05's quadtree on
-the reference spheroid at zero height).
+`shaders/bodyDisc.wgsl` (the analytic disc, spheroid by axis scaling), point bodies as sprite
+records through R06's `SKY_SPRITE_HDR_MATERIAL` (`POINT SPRITES HDR`), R02's `starSprite.wgsl` with
+the identity tone step, the sprite row's `z` carrying depth (decision-r07-t8a, item 2),
+`bodies/smoothMesh.ts` (R05's quadtree on the reference spheroid at zero height).
 
 ### The photorealistic style and its passes (`photoreal/`, `post/`)
 
@@ -1182,7 +1183,8 @@ smoke harness renders an empty photorealistic frame with finite texels. Acceptan
 
 #### R07.T8 Point and disc bodies
 
-- **R07.T8.a Point and disc.** `shaders/{bodyDisc,bodyPoint}.wgsl`, `bodies/draw.ts`. The disc: a
+- **R07.T8.a Point and disc.** `shaders/bodyDisc.wgsl`, `bodies/draw.ts`, point bodies through R06's
+  `POINT SPRITES HDR` (decision-r07-t8a, item 2). The disc: a
   quad over the body's projected bound, ray against the spheroid (Design note 19) in the
   camera-relative direction normalised by distance so that no large numbers meet in `f32`,
   `body_brdf` per channel from a uniform `DiscSurface` under the horizon, eclipse and ring-shadow
@@ -2125,3 +2127,168 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     resizes it.
   - **The pixel-scale ruling** (the orchestrator, 2026-10-03) is folded into this commit: Design
     note 1 and T5's text give the centre-pixel distances (see T5's entry).
+- **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
+  - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
+    `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in
+    `bodies/discShading.ts` (`DiscRecord`, `packDiscRecords`, `rasteriseDisc`,
+    `compositeDiscPixels`), the oblate integrals in `bodies/oblate.ts`, the lights in
+    `lighting/hostLights.ts` and `lighting/hostDisc.ts`, and `shaders/bodyDisc.wgsl`, registered
+    in `WGSL_CATALOGUE` as `BODY DISCS` and `BODY DISC LIMBS`. Point bodies through R06's HDR
+    sprites, the sprite row's depth, the photorealistic frame's wiring and the mounting of
+    `StyleControl` and key `4` are part 2, after R06.T13 reached `rendering-and-planets`.
+  - **Lights (decision-r07-t8a, item 1).** `hostLights(scene, discs)` joins R06's discs to the
+    scene's stars by `HostDiscDto.star` as body index; `sceneHostDiscs` takes a kept scene's
+    `ViewScene.hostDiscs` and a server scene's held sky's `hosts`; `placeLights` places each at its
+    star's centre in the frame (never R06's aberrated placement). `planLitBodies` takes the placed
+    lights (`PlacedLight`): per body the brightest two past `STAR_CUT_RELATIVE`, and its
+    occluders, the two largest seen from it. A body no star lights draws colour 0 with class
+    `other`, and a point no light. The label lines `LIGHTING: PENDING` and
+    `LIGHTING: HOSTS NOT RECEIVED` (`lightingStatement`) are the orchestrator's wording under the
+    owner's delegation, drafted for the guide beside `TERRAIN: STREAMING`, and are shown from
+    part 2. `sunLikeHostDisc` (moved out of `test/`, `aHostDisc` calls it) has an illustrative
+    colour and the Sun's V limb law (Claret and Southworth 2022 at log g 4.5, α 0.6893; 0.6884 at
+    4.438) in every channel, so a kept scene's eclipse is achromatic until a fixture from R06's
+    `host_discs` exists.
+  - **The disc's two draws (decision-r07-t8a, item 3).** One source, two materials: the interior
+    (blend none) where all four corner rays meet the body (the silhouette is convex), writing the
+    pure-pixel class (`litBody` where every shaded point is lit directly above
+    `LIT_IRRADIANCE` = 10⁻⁵ of face-on, `unlitBody` where none is, `other` where they are mixed or
+    no star shines); the limb (premultiplied) where any corner lies outside or within
+    `LIMB_OVERLAP_PX` = 10⁻³ px inside the limb, keeping the class beneath. A pixel at the
+    threshold is drawn by both, never by neither.
+  - **Sampling.** 8 × 8 cells a pixel below 32 px, one inside and 4 × 4 on the limb above. Plain
+    point sampling missed the 1% at the 3 px switch for a crescent (15% at 150°, the lit sliver
+    0.2 px deep), and the ruling's fallback did worse (a 64-point R2 sequence 23–44%, a grid
+    rotated by atan ½ 32–39%). So near the limb each cell's profile across the limb's local normal
+    (a trapezoid, the convolution of boxes of widths h|n_x| and h|n_y|) weights its depth
+    integral, by three Gauss points in u = √δ per piece, exact where the light goes as
+    A + B√δ + Cδ, as μ and a crescent's μ₀ do at the limb; the count is not raised. The sweep
+    (centres on a 4 × 4 sub-pixel grid; phases 0°, 90° and 150°; f = 0 and 0.098; 3, 3.3 and 6 px)
+    is within 0.8% everywhere but 6 px at 150°, 1.6%, of which 1.1% is the point's own far-field
+    error (below): tested at 1%, and 2% there. A lunar law and a spheroid seen from 45° latitude
+    are within 1% at 3 px.
+  - **The ray in `f32`.** The hit is taken by cross products in the scaled space,
+    q′ = −(r̂ × u′) × r̂ − √((a ÷ D)² − |r̂ × u′|²) r̂, never b² − rr · power, which cancels to 7% for
+    a body 10⁻³ rad across (the first GPU run read 1.2–60% at 3 px against the twin's 0.4%).
+  - **The horizon term stands for μ₀** in `body_brdf`'s disc term (h = μ₀ wherever the whole star
+    is up), lighting the soft band; the Lommel–Seeliger term's μ₀ + μ is floored at the star's
+    angular radius so that it stays bounded at the limb in that band.
+  - **Oblate bodies.** p is defined against π a c equator-on (Mallama et al. 2017's Saturn), so a
+    spheroid's disc takes A′ = A [L + ⅔(1 − L)] ÷ [L + (1 − L) m(0)], m(β) = ∫ μ² dS ÷ ∫ μ dS at
+    zero phase (1.022 at f = 0.098, L = 0). A spheroid's point integrates the same law over its
+    figure, F = (E ÷ π)(a ÷ Δ)² A′ f(α) K (`spheroidGeometricIntegral`, 96 × 192 midpoint,
+    remembered by direction to 10⁻⁴), in place of the plan's π a b′ Φ(α), which errs by 4.2% at 90°
+    and 10.9% at 150° for f = 0.098 seen from 45° latitude. A sphere keeps the closed form.
+  - **The point is the far-field limit.** From a finite D the visible cap stops asin(a ÷ D) short
+    of the hemisphere and each element's weight μ ÷ r² changes by (a ÷ D)(3μ² − 1), which dims a
+    crescent: an `f64` surface integral puts the disc 0.05% (90°) and 0.55% (150°) below the
+    point at 3 px, 0.11% and 1.10% at 6 px, 0.53% and 5.4% at 30 px (science-checker, 2026-10-03).
+    Only the switch at 3 px matters to continuity.
+  - **Eclipses.** A disc's samples take the eclipse term of each of its (at most two) occluders,
+    their hidden fractions added; a point takes it from its centre. In a penumbra the two agree to
+    2% for a Moon-sized body 3 px across. An occluder beyond the star hides nothing; a point inside
+    one sees none of it.
+  - **Tests.** `view/bodies` (the sweep, the extents of a Saturn-like f = 0.098 disc at 100 px to
+    half a pixel, classes, eclipses, the plan's order, the records' layout, the renderer's draws,
+    table and buffers against R05's counting engine), `view/scenes/phaseScene.test.ts` (the limbs
+    and the geometric terminator, μ₀ = 0, of the 0°, 90° and 150° planets against an `f64` oracle to
+    half a pixel; the soft band's 0.25 px is not the terminator), `view/lighting/hostLights.test.ts`.
+    `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-03): a 20 px disc's 368
+    texels within 0.23 of their tolerance (0.4% relative + 10⁻⁴) of the twin, and within 0.15 in a
+    moon's shadow (89% of the light kept); classes 1, 2 and 3 as the twin's; at 3 px the summed
+    flux within 0.42% of the point's at 0°, 90° and 150° over four placements; the Saturn-like
+    extents 107.38 and 96.85 px against 107.38 and 96.86.
+  - **Risks (decision-r07-t8a).** Until R06.T11 serves `sky`, a live photorealistic view draws
+    its bodies unlit (colour 0, class `other`) under R02's cased marks with a `LIGHTING:` line. A
+    body under about 5 px offers `LIT` and `DARK` few pixels and a point none, so they report
+    `NO IMAGE TO METER`. R06's host disc stays hard-edged with class 0 on every touched pixel;
+    anti-aliasing it would need an alpha-writing blend mode in R01 (an owner option). Overlapping
+    limbs of two discs in one pixel carry the usual coverage-over error, under a pixel.
+- **Deviations in T8.a, as built (part 2: points, the photorealistic view and its mounting).**
+  - **One PSF (decision-r07-t8a, item 2).** Point bodies are sprite records through R06's
+    `POINT SPRITES HDR` (R02's `starSprite.wgsl`, the identity tone step); no `bodyPoint.wgsl` and
+    no `psf.wgsl`. The sprite row's `z` now carries reversed-Z depth: stars and small host discs
+    write 0 and point bodies near ÷ distance, checked through both sprite materials (a star behind
+    a plane 1 m ahead hidden, a point 0.5 m ahead drawn). `spriteRecord` and
+    `exposedSpriteRecord` are exported from `wireframe/drawList.ts` as a pure refactor; R02's stars
+    and R07's points are packed by them. One instanced draw per run of consecutive points, each run
+    with its own small buffer.
+  - **The photorealistic frame** (`photoreal/renderer.ts`, `PhotorealRenderer`, with
+    `displays/view/photorealFrame.ts`), in Design note 8's order of what is built: R06's band, its
+    baked cube's HDR draw and the star sprites (the sky's, or R02's interim field until it arrives,
+    and the host discs under three pixels) into the view's scene target as R06's `sky` pass
+    (`SKY_PASS_LABEL`, its slot now built); then, loading it, the painter's sequence as `discs`
+    (R06's host discs at their `host` entries, keyed by `HostDiscDto.star`, disc bodies and point
+    bodies); then the bloom chain, the tone-mapping pass onto the canvas in-pass with R06's glare
+    sources, and the wireframe's marks as the `symbology` pass loading it. The pipelines are
+    compiled asynchronously before the first frame and again after a device loss (a making a
+    restore overtakes is abandoned); until then the view draws its wireframe, its `STYLE` line and
+    canvas name stating the style drawn, with `PHOTOREALISTIC PENDING` under the label block. Where
+    the pipelines cannot be made the view returns to the wireframe and the control holds the style
+    back with the fault `GRAPHICS STYLE REFUSED: photorealistic style not made, relaunch to retry`,
+    in `--status-caution` while it lasts. The control's
+    reasons follow the graphics' condition (`styleRefusals`): the adapter's styles, the software
+    adapter's refusal, `GRAPHICS ACQUIRING ADAPTER` before the answer; it is shown only beside a
+    drawn view. The internal scale is 1 and the setting `high` until T17 and T18; the pre-exposure
+    is the frame's own exposure (the tone-mapping pass's exposure over it is 1).
+  - **Small host discs** (R06's sprites for discs under 3 px) are drawn with the star sprites at
+    depth 0 before the painter's sequence, not at their `host` entries (decision-r07-t8a, item 2
+    (d)): a disc body behind such a host would cover it, which needs the body several au beyond a
+    star some pixels across, far below a pixel.
+  - **Light positions (pending the orchestrator's ruling).** The view places each light, and builds
+    each occluder, at the scene's drawn centre: a server scene's `apparentM`, which carries the
+    camera's light time and aberration, so the light direction at a body may be off by v·τ★ ÷ d★,
+    up to about 10⁻⁴ rad, against decision-r07-t8a item 1's frame geometry through `lightingBodyOf`.
+    `ViewBody` holds no geometric centre. Latent until R06.T11 serves `sky`; kept scenes are
+    static, and `PHASE TEST` is exact.
+  - **The disc's law.** `DiscRecord` takes `BodyPhotometry.law` directly, `DiscSurface`'s
+    `uniform` case without the type; T8.b threads `DiscSurface` through the record and the shader.
+    `bodyDisc.wgsl` writes `body_brdf`'s lunar-Lambert expression inline, with the horizon factor
+    for μ₀ and the Lommel–Seeliger floor, so a change inside `body_brdf` must be mirrored there.
+    The view builds `LitBodyInput`, not `BodyAppearance`, until T2.b.
+  - **Sampling, as built (correcting part 1's "the count is not raised").** The grid stays 8 × 8
+    below 32 px and 4 × 4 on limb pixels above; each cell within two cell widths of the limb is
+    shaded at up to nine points (three Gauss points in each of its profile's three pieces) after
+    three limb-angle evaluations, and above 32 px the interior pixels within about 2 px of the limb
+    are integrated the same way and classed by those points. The cost goes to T17's bench.
+  - **Promotion** (`promoteOverlapping`) is not called: the frame has no depth-writing geometry
+    yet (no mesh bodies, terrain or lit hulls); T9 calls it with footprints.
+  - **The atmosphere stubs' arguments.** The disc passes altitude 0, latitude 0 and sun azimuth 0
+    to `atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`; R08.T9.b's caller supplies
+    the geodetic latitude from the spheroid normal and the azimuth from local north.
+  - **Mounting.** `StyleControl` sits after `CameraControls` in the side panel and takes the
+    refusals. The key `4` is `ViewKeyAction`'s `style` kind (`toggle`), in `VIEW_SINGLE_KEYS`
+    through `STYLE_TOGGLE_KEY`, and `commandRun` takes the adapter's `StyleAvailability`. The
+    canvas's key legend lists the flight keys only, so `4` is shown on its control, as the
+    presets' digits are (ux-reviewer, 2026-10-03). The label block's photorealistic statements are
+    `LIGHTING: PENDING` or `LIGHTING: HOSTS NOT RECEIVED` (`lightingState`, from `useViewSky`'s
+    `pending`) and the lit bodies' labels (`BODY ALBEDO: NOT YET MODELLED` while they take the
+    provisional photometry), shown only while the scene has a planet, dwarf planet or moon. The
+    guide has draft rows for `LIGHTING:`, `PHOTOREALISTIC PENDING`, `BODY ALBEDO: NOT YET
+MODELLED`, `PHASE TEST`, its bodies' labels and the failure's wording, for the owner. The kept
+    scene `PHASE TEST` is in the `SCENE` selector, with a Jupiter-sized `TEST GIANT` at 10¹⁰ m for
+    the by-hand Jupiter. `DrawnSky` gains `bandIlluminanceLx`, the cull's, for R06's band layer.
+    R06's `BandLayer` and `HostDiscLayer` are made again after a device loss, and the frame's path
+    in the loop catches a creation refused between a loss and its restore, drawing the wireframe
+    that frame. `test/fakeViewEngine.ts` answers the photorealistic renderer's creations.
+  - **Lit bodies in the view** are the scene's planets, dwarf planets and moons: spheres of
+    `ViewBody.radiusM`, the pole from the body-fixed rotation where there is one, with the
+    provisional photometry. The figure and photometry from the wire (`appearanceFromWire`) reach
+    the view with T2.b.
+  - **Tests.** `view/photoreal/renderer.test.ts` (nothing drawn before the pipelines; the sky pass,
+    then the bodies loading it; the tone map in-pass; the overlay loading; a restore remaking the
+    resources and a making it overtakes abandoned; dispose releasing buffers and textures),
+    `displays/view/{photorealFrame,styleRefusals}.test.ts`, the style command and statements in
+    `viewRun.test.ts`, `4` in `keys.test.ts`, and in `ViewDisplay.test.tsx` the mounted control,
+    the key, the control's button and the statements. `just test-render` (2026-10-03, `default`
+    and `no-subgroups`): the sprite-depth check through both materials, and a frame end to end on a
+    canvas (a planet 20 px across at 60° of phase: lit side green 200, sky 0). The smoke harness's
+    Saturn-like extents (part 1) are the TypeScript rasteriser's coverage, the GPU's texels checked
+    against it; its "100 px" is at the centre pixel's scale on a 128 px, 60° view, where the disc
+    spans about 52° and projects to 107.38 × 96.85 px.
+  - **The 6 px, 150° case** of the flux sweep is held at 2%, not decision-r07-t8a's 1%: the
+    far-field point is itself 1.1% off the exact integral there (for the owner to acknowledge).
+  - **By hand, for the owner**: `PHASE TEST` with `4` (the target keys stepping through the 0°,
+    90° and 150° planets and the `TEST GIANT`, a Jupiter from 10¹⁰ m) on the development machine
+    with `just client`, recorded in the as-built notes; `StyleControl`'s layout at 1920 × 1080 and
+    1280 × 720, and the marks' legibility over a bright disc.

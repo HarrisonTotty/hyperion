@@ -8,8 +8,8 @@
  * oceans; the histogram; bloom of the light above the display's range; the tone-mapping pass; the
  * symbology cased over the result. A style owns no scene, camera or projection, so switching style
  * is a change of pass list. The slots of R06, R08, R10 and R11 are listed with the labels their
- * plans give or (for R06, R08 and R11, whose passes are not built) the lane's provisional names,
- * marked `built: false` until those plans fill them; the settings share one order today, their
+ * plans give or (for R08 and R11, whose passes are not built) the lane's provisional names,
+ * marked `built: false` until those plans fill them (R06's sky, drawn by R07.T8.a's frame, is); the settings share one order today, their
  * differences being each pass's parameters (Design note 18).
  */
 import type { QualitySetting } from "../quality/qualitySetting";
@@ -30,6 +30,12 @@ export const PHOTOREAL_PASS_LABELS = {
   tonemap: TONEMAP_PASS,
   symbology: "symbology",
 } as const;
+
+/**
+ * R06's sky pass's label: its band, its baked cube and the star sprites, which R07.T8.a's frame
+ * draws first into the scene target.
+ */
+export const SKY_PASS_LABEL = "sky";
 
 /** The plan that owns a pass. */
 export type PassOwner = "R06" | "R07" | "R08" | "R10" | "R11";
@@ -71,7 +77,7 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
   }
   return {
     passes: [
-      slot("sky", "R06", false),
+      slot(SKY_PASS_LABEL, "R06", true),
       own(PHOTOREAL_PASS_LABELS.bodies),
       slot(TERRAIN_PASS_LABEL, "R10", true),
       own(PHOTOREAL_PASS_LABELS.discs),
