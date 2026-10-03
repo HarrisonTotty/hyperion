@@ -2818,3 +2818,46 @@ medium, sizes, figure)`.
     setting on a second engine with `defaultLimits`: `FaceDifferences`, 3,904 slots, 8,122 ×
     4,192 × 2. It passed on both variants on SwiftShader on 2026-10-03, with no uncaptured GPU
     error. T11.b adds its frames to the same file.
+- **Deviations in T11.b, as built** (2026-10-03).
+  - _Three sources, two materials_ (`gpu/material.ts`, `terrainMaterialSpec`, `TERRAIN_MATERIALS`,
+    `TERRAIN_BINDINGS`, `TERRAIN_PASS_LABEL`). `shaders/terrain.wgsl` holds the shared stages, the
+    `FaceDifferences` formula, the morph and hold, the skirts and the fragment stage;
+    `terrainBakedOffsets.wgsl` and `terrainFaceDifferences.wgsl` each define `ownOffset` and
+    `morphOffset`, the first also binding the offsets buffer. Each material is `frame.wgsl` +
+    `terrain.wgsl` + its path, by concatenation: `TERRAIN` (`face-differences`) and
+    `TERRAIN OFFSETS` (`baked-offsets`), both in `WGSL_CATALOGUE`. Bindings at `@group(2)`: heights
+    0, slot records 1, instances 2, contacts 3, normals 4 (`texture_2d_array`), offsets 5. The
+    `Draw` uniforms after `offsetFromCameraM` (zero): `bodyRotation` (the body-fixed axes into the
+    instance origins' frame), `sunDirection` (body-fixed), `sunRadiance` (albedo ÷ π × the sun's
+    illuminance per channel × the pre-exposure, which T11.c fills) and `atlas` (columns, tiles a
+    layer, a tile's stored texels, samples a side).
+  - _The morph_ is CDLOD's factor on the unmorphed vertex's distance from the camera over the
+    instance's morph range (0 where the range is empty), computed on the GPU in `f32` from the
+    instance origin plus the rotated own offset; shared vertices agree to the rounding of two
+    `f32` sums, not bit for bit, and the skirts cover the rest. It is then min'd with each contact's
+    hold, clamp((|v − c| − r_g) ÷ ramp, 0, 1) (a step at r_g when the ramp is 0), which T7's
+    `morphHold` and forced region must match. Contact centres are camera-relative in the instance
+    origins' frame (the body's rotated axes), not body-fixed; T11.c writes them so. Every vertex
+    loops over every contact, so T11.c should pass only the contacts near the drawn patches. A skirt vertex takes the morphed offset less the
+    skirt depth along the spheroid's normal at its edge vertex, ν₀ + (ν − ν₀), on both paths.
+  - _The normals are filtered by hand._ The fragment stage loads the four nearest samples
+    (`textureLoad`), decodes each as the bake's `decode_octahedral` does and blends the vectors
+    bilinearly. The pairs are discontinuous across the lower hemisphere's fold, along x = 0 and
+    y = 0 for z < 0 (four southern half-meridians of the body-fixed frame), where hardware
+    filtering of the pairs would decode to a wrong normal. So no sampler is bound, and the
+    atlas's gutter is unused by this pass.
+  - _Output._ Lambertian, `sunRadiance × max(n · s, 0)`, clamped at 65,504; alpha is
+    `METER_CLASS.litBody` (2).
+  - _The emulation_ (`gpu/vertexEmulation.ts`: `SlotTermsF32`, `faceDifferencePositionF32`,
+    `faceDifferenceMorphF32`, `directionDifferenceF32`, `normalDifferenceF32`) rounds each
+    operation with `Math.fround`. It agrees with `vertex_f32.golden`'s own and morph positions bit
+    for bit at all 588 vertices of the 12 patches; a test with one reordered operation fails. A
+    GPU may differ in the last bits: WGSL allows fused multiply-adds, 2.5 ULP in an `f32` division
+    and `sqrt` at `inverseSqrt`'s accuracy. Every inexact quotient is a small quantity, far inside
+    T4.b's 1 mm. The catalogue's display-name test is `view/engine/catalogue`, outside the
+    acceptance filter `view/terrain`.
+  - **Pending:** the frames check (the test planet from 400 km and from 10 m, every texel finite,
+    in `default` and `no-subgroups`) needs real bakes from T10.b's height worker (lane A). It is
+    added to `smoke/terrain.ts` in a follow-up commit once T10.b lands (the orchestrator's ruling,
+    2026-10-03). `just test-render` passed on 2026-10-03 with both materials compiled on both
+    variants.
