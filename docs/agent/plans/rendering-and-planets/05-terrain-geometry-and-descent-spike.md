@@ -2781,3 +2781,29 @@ medium, sizes, figure)`.
     `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
     `destroy()`.
   - `MemoryCategory` gains `height-cache`, appended.
+- **Deviations in T9, as built (the annunciations, 2026-10-03).** `annunciation.ts` adds, beside
+  `terrainAnnunciation`: `TerrainAnnunciation` (the two strings), `TerrainConditions` and
+  `terrainConditions` (the frame's two conditions before the debounce), `coarserThan` (some
+  reference patch covered by an ancestor in the selection), `ANNUNCIATION_ONSET_MS` (250) and
+  `ANNUNCIATION_CLEAR_MS` (1,000), and `TerrainAnnunciationDebounce`, one per view, whose `update`
+  takes a monotonic `nowMs` (the tests feed times directly rather than fake timers). `STREAMING`
+  also holds while a selected patch has no resident ancestor at all (`DrawSet.missing`), not only
+  while an ancestor stands in. `labelStatements(run, terrain = null)` appends the debounced line
+  after the existing statements and stays pure; `ViewDisplay` does not pass it yet, since no view
+  draws terrain: T11.c (the pass in a view) creates the per-view debounce and passes its line. The
+  tests build the low and reference selections by hand until `selectPatches` lands (T7.b). The
+  guide row and Design note 23 already carried decisions-r05 item 5's wording.
+- **Deviations in T2's TypeScript mirror, as built (2026-10-03).** `cube.ts` mirrors `cube.rs`
+  and `geometry.rs`: `stToUv`, `uvToSt`, `faceUvToXyz` (the unnormalised tuple), `unitDir`,
+  `faceUvToDir` (Provides' `Vec3` form), `faceOf`, `xyzToFaceUv`, `sampleDir` (64 or 128 a side),
+  `vertexDir`, `vertexSpacing`, `finestLevel`, `PATCH_QUADS`, `BAND_LIMIT_M`, `FINEST_SPACING_M`
+  and `MAX_FINEST_SPACING_M`, over an `Xyz` tuple. `patchKey.ts` gains Rust's integer cube
+  geometry: `patchKeyWord` (the `to_u64` word as a `bigint`, for the golden), `Edge`, `EDGES`,
+  `edgeNeighbour`, `edgeNeighbourAndBack`, `cornerNeighbours`, `sameKey`, `facePoint`,
+  `faceCoords`, `faceOfAxis`, `canonicalFace`, `Axis` and `unreachable` (which closes the numeric
+  switches, whose exhaustiveness oxlint's `consistent-return` cannot see). The golden is read
+  whole: the 1,000 warp values, the 50 patches' words, printed vertices and full-patch digests,
+  their edge and corner neighbours, the 24-crossing table and the 20 finest levels with their
+  spacings, all bit for bit (19 tests, first run green). The digest needs the testkit's
+  `f64_digest`, so `workers/f32Digest.ts` (T10.b's file) landed here with `fnv1a64`, `f64Digest`
+  and `f32Digest`, checked against FNV's published vectors and the testkit's hand-computed value.

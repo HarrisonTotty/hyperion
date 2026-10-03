@@ -154,6 +154,15 @@ describe("the label block", () => {
     ]);
   });
 
+  it("adds the terrain annunciation after the other statements while it is shown", () => {
+    const run = startRun(unrotated(frameChangeScene()));
+    expect(labelStatements(run, "TERRAIN: STREAMING")).toEqual([
+      "ROTATION NOT YET MODELLED",
+      "TERRAIN: STREAMING",
+    ]);
+    expect(labelStatements(run, null)).toEqual(["ROTATION NOT YET MODELLED"]);
+  });
+
   it("names the system and galactic frames", () => {
     const { scene } = startRun(precisionScene());
     expect([
