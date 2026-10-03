@@ -1806,3 +1806,20 @@ DARK`; the source shows the raw view id upper-cased until T7 names views as the 
   analytic AgX sigmoid or a LUT of our own could close it, provided star totals stay constant
   across sub-pixel positions. By hand, pending for the owner (needs T7's photorealistic view): a
   Sun-like star in frame with a lit planet, hues holding in the highlight. The bench is T17's.
+- **T14.b and T15 after review, as built** (2026-10-02). The tone-mapping pass's uniforms are typed
+  (`TonemapUniforms`, `tonemapUniforms`); `rectangleInsideLevel` keeps its outer integral as c⁴
+  times a function of ρ ÷ c at 0.05% steps, so a source whose radius changes every frame costs a
+  lookup and the store stays bounded; `packGlareSources` packs −1 as the level of a term a source
+  is a point for, so both twins take the same branch; `packGlareTerms` refuses more than one
+  Lorentz or root term; the dither leaves black at code 0 (dithering 0 scattered code-1 texels
+  over empty space, an eighth of them); the engine's choices are pure functions with tests
+  (`canvasPassFormat`, `sceneLoadOp`, `pipelineOutputs`). The bloom smoke check also compares the
+  encircled energy about the disc, device against twin, to 1% at six radii; its 1.5% energy check
+  adds the injected veil in closed form (L_ex Ω), the device's veil being checked against its twin
+  at five pixels. Every bloom submission is timed under `"bloom"`, several a frame: R12 sums them.
+  The CPU twin of the last step holds where the pass draws at the internal resolution; upscaled,
+  the pass tents U₁ to the canvas's pixels and thresholds the interpolated colour. `just
+test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with origin at
+  `7cb5d33`): every R07.T12, T14.b and T15 check passed but the T15 twin check, which failed on the
+  harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, to be re-run with the
+  owner's integrated `just ci` and `just test-render`.
