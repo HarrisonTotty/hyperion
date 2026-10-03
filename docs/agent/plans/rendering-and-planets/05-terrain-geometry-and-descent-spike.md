@@ -2268,3 +2268,38 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   T13.b's scene, T13.c's launch path and first IPC handlers, T14.a's and T15.a's device seam,
   T14.b's switch merge, and the hidden and by-hand halves of T10.b, T11.c, T12.c, T13.c, T14.c,
   T15.c and T17 were corrected. Nothing built changes. No task is pending re-validation.
+- **Deviations in T14.b, as built** (2026-10-02).
+  - `main/spike.ts` exports `launchSwitches(options, spike)`: with `spike` undefined it returns
+    R01's `graphicsSwitches(options)` unchanged; otherwise it turns `gpuTiming` on and, with
+    `dawnSafety: "off"`, merges Design note 22's toggles (`DAWN_SAFETY_OFF_ENABLED`,
+    `DAWN_SAFETY_OFF_DISABLED`) into one `--enable-dawn-features` and one
+    `--disable-dawn-features` before `applyGraphicsSwitches`. R01's `LIST_SWITCHES` is now
+    exported from `graphics/switches.ts` for it. `index.ts` still calls `graphicsSwitches`: **T13.c
+    replaces that call with `launchSwitches(options, spike)`, with the parsed `--dawn-safety`,
+    before `ready`**; until then no launch carries the spike's switches.
+  - The safety toggles also go on `default`-mode and non-Linux launches, which have no R01 Vulkan
+    set (there `--enable-dawn-features` holds the five toggles alone); `safe` mode gets nothing.
+    `gpuTiming` still takes effect only in R01's Linux `vulkan` mode, so a run elsewhere records
+    `PassTimes.timer` as `quantized` (decisions-r06-r07.md item 8).
+  - The trace (`SpikeTrace`, `spikeTraceConfig`, `SPIKE_TRACE_CATEGORIES`) records Design note
+    18's categories plus `disabled-by-default-devtools.timeline` (its `RunTask` and `GPUTask`
+    slices) and `disabled-by-default-devtools.timeline.frame`, and leaves out `toplevel`, which
+    repeats `RunTask` and was about half a recorded trace's bytes. It is `record-until-full` with a
+    2 GiB buffer: about 1.1 MB/s was measured on a small WebGPU page, about 1.4 GB over the
+    21-minute descent; a full buffer shows as a short `span`. Chromium's tracing service is its
+    own utility process, so T14.c reports it apart from the app's memory.
+  - `main/reduceTrace.ts` (`TraceReducer`, `reduceTrace`, `reduceTraceFile`,
+    `readTraceEvents`) streams Chromium's one-event-a-line layout, since a descent's trace is too
+    large for one `JSON.parse`; `.prettierignore` keeps `src/main/fixtures/*.trace.json` in that
+    layout. Frames are the compositor's `PipelineReporter` slices (end = presentation; state
+    presented, dropped or not wanted), from the renderer with the most frames and its busiest
+    `layer_tree_host_id`, one interval a distinct presentation; a hidden window's frames are all
+    "not wanted", hence T14.c's null presentation figures. No trace category carries GPU time per
+    pass (that is T14.a's `onPassTimes`), so the "GPU-pass" figures are the GPU process's
+    `CrGpuMain` busy time and its `WebGPU`, `GPUTask` and `VulkanQueueSubmitHook` slices, the CPU
+    side of the command transport. The engine's self time is V8 CPU-profile samples whose leaf is
+    in the `engine-*.js` chunk (`ENGINE_CHUNK_PATTERN`; the built chunk is
+    `engine-<hash>.js`). User-timing spans carry their starts, so that T14.c can split
+    presentation intervals by segment marks.
+  - The test's trace (`src/main/fixtures/spike.trace.json`) was recorded on 2026-10-02 from
+    Electron 44.4.3 headless on SwiftShader and trimmed to 190 ms of the events read.

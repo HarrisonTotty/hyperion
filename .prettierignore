@@ -9,3 +9,6 @@ Cargo.lock
 
 # Built by `just gen-surface` from crates/hyperion-surface
 apps/hyperion/src/renderer/src/generated/
+
+# Recorded Chromium traces keep Chromium's one-event-a-line layout, which the reader streams
+apps/hyperion/src/main/fixtures/*.trace.json
