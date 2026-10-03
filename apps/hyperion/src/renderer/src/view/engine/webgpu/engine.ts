@@ -105,6 +105,26 @@ import { PASSES_PER_FRAME, PassTimer } from "./timing";
 import { assertDrawStruct, OFFSET_MEMBER, uniformLayout } from "./uniforms";
 import { srgbViewFormat, WebGpuView } from "./view";
 
+/**
+ * The colour formats, with or without depth, a material's pipelines are made for ahead of its
+ * draws, for one of `createMaterialAsync`'s targets.
+ */
+export function pipelineOutputs(
+  target: RenderTargetFormat,
+  preferredCanvas: GPUTextureFormat,
+): Array<readonly [GPUTextureFormat, boolean]> {
+  if (target === "canvas") {
+    return [[srgbViewFormat(preferredCanvas), true]];
+  }
+  if (target === "canvas-in-pass") {
+    return [[preferredCanvas, true]];
+  }
+  return [
+    [target, true],
+    [target, false],
+  ];
+}
+
 /** A caught value as an `Error`, keeping it as the cause when it is not one. */
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error), { cause: error });
@@ -371,8 +391,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * made, before it resolves.
    *
    * @remarks
-   * A canvas target is the preferred canvas format's sRGB view with depth; a colour target is made
-   * both with and without depth, since a target may have either.
+   * A canvas target is the preferred canvas format's sRGB view with depth, `canvas-in-pass` the
+   * format itself with depth (R07.T15's pass, which encodes); a colour target is made both with and
+   * without depth, since a target may have either.
    */
   async createMaterialAsync(
     spec: WgslMaterialSpec,
@@ -386,14 +407,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       this.#reportShaderErrors(`material ${spec.name}`, spec.displayName, errors);
       throw new Error(`material ${spec.name} failed to compile: ${errors.join("; ")}`);
     }
-    const outputs = targets.flatMap((target): Array<readonly [GPUTextureFormat, boolean]> =>
-      target === "canvas"
-        ? [[srgbViewFormat(navigator.gpu.getPreferredCanvasFormat()), true]]
-        : [
-            [target, true],
-            [target, false],
-          ],
-    );
+    const preferred = navigator.gpu.getPreferredCanvasFormat();
+    const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
     await Promise.all(
       meshes.flatMap((mesh) =>
         outputs.map(([format, hasDepth]) =>

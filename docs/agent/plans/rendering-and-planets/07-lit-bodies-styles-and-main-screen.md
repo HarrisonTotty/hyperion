@@ -1217,7 +1217,8 @@ pre-exposed value, the meter class mapped to integer weights by `meterWeights`, 
 atomics with one global add per non-empty bin, read back with at most three reads in flight over
 a ring of three histogram buffers (R01's `readBuffer` makes its own staging buffer per call, so no
 mapped buffer is ever reused; if T12's bench shows that per-call staging costs, a staging ring is
-added to R01's readback in `view/engine/` under this task); a `KernelPair` with
+added to R01's readback in `view/engine/` under this task (approved 2026-10-02, item 6, through
+R01's guarded readback only)); a `KernelPair` with
 `readback: "bit-exact"` and no subgroup twin. Tests: a CPU histogram of a
 synthetic target equals the GPU's bin for bin in the smoke harness, on its `default` and
 `no-subgroups` variants; host-disc pixels are not counted under any meter; zeros land in
@@ -1275,7 +1276,9 @@ src/renderer/src/view/post`.
 `post/tonemap.wgsl`, `post/tonemap.ts` (Design notes 9 and 13): R02's `agx`, Filament's port as
 built by R02.T10.c with its header and `NOTICE` entry, included unchanged; the canvas's preferred
 format written through its non-sRGB view with the encoding in the pass (the option Design note 13
-adds to R01's engine, in `view/engine/`); static blue-noise TPDF dither of ±1 LSB in the encoded
+adds to R01's engine, in `view/engine/`; approved 2026-10-02, item 6: an opt-in per submission,
+default the sRGB view, every existing smoke check unchanged; tested by `just test-render` and the
+engine's Vitest suite; the overlay pass of T16 follows it); static blue-noise TPDF dither of ±1 LSB in the encoded
 domain; upscale from the internal resolution. Tests: `agx` against values computed once in `f64`
 from Filament's formula and pinned with their citation; monotone in luminance; an isolated star
 identical in both styles before the dither and within one code after it; the WGSL matches the
@@ -1296,8 +1299,10 @@ already). Draft, for the owner, the nomenclature entries this plan adds beyond R
 `METER LIT`, `METER DARK`, `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one
 edit of `docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. Tests: every overlay
 mark over the image has a casing stroke; plates are present for every readout; the console-ux
-skill's lint and contrast scripts pass. Acceptance: `just ci`; the guide edit is one commit for the
-owner.
+skill's lint and contrast scripts pass. Symbology over the tone-mapped image is a following
+canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view, in the same task as
+T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance: `just ci`; the guide
+edit is one commit for the owner.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -1685,3 +1690,199 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   - **The crescent.** The fixture gives q in V only, so Mercury's test splits q by ±5% (q_R 1.05
     q_V, q_B 0.95 q_V) on the fixture's p; B − V then grows by about 0.11 mag from opposition to
     100°, inside Design note 5's 0.1–0.2.
+- **Deviations in T14.a, as built** (2026-10-02). `post/glare.ts`, `post/bloom.ts` and an added
+  `post/nnls.ts` (Lawson and Hanson's non-negative least squares), each with tests.
+  `bloomKernel(setting: QualitySetting, role, radPerPx, eye: EyeObserver)`: first built on a
+  literal `"high" | "low"` stand-in, switched to R05.T7.b's `QualitySetting`
+  (`view/quality/qualitySetting.ts`) once it landed; `eye` is an argument as for `glareSpread`,
+  so that it builds before R06 (approved by the orchestrator). `BloomKernel` extends `BloomLevels { firstLevel, levels }`:
+  `weights[k]` multiplies mip level `firstLevel + k`, the low setting starting at level 1, quarter
+  resolution; the level counts are constants (`BLOOM_LEVELS`: 7 from level 0 high, 5 from level 1
+  low) until T17 makes them settings. **Design note 12's age factor is corrected** (science check,
+  2026-10-02): the CIE 135/1999 complete equation has age in both terms, [1 − 0.08 (A/70)⁴] on the
+  core and [1 + 1.6 (A/70)⁴] on the wide-angle term (McCann and Vonikakis 2018, eq. 2; Vos and van
+  den Berg 1997); "(A ÷ 62.5)⁴, wide term only" is CIE 146:2002's simpler equation. The code uses
+  the complete form, which gives T14.a's 1.047 and 1.010; the equation is valid to 100° and is
+  extrapolated beyond (1.2% of its energy). The threshold 2^`AGX_MAX_EV` = 16.29 is 156.4 L̄, not 157. The camera PSF is a Gaussian core of σ = 0.25′ holding 97% and a Harvey-type 1 ÷ (1 +
+  (θ/0.1°)²) tail holding 3%, within the 1–10% veiling glare index reported for commercial lenses;
+  the shape and knee are assumed (low confidence, as before). The fit matches encircled energy at
+  16 radii from 0 to 128 px with Σ w = 1; at 1080p across 60° the eye kernel is within 8.4% at
+  1 px, 4.4% at 4 px and 1% at 16 and 64 px; the CIE energy beyond the chain's reach (about 6%
+  beyond 128 px) is gathered into its widest levels, conserving energy but not the far veil. The
+  chain's last step, w₀ D₀ + up(U₁), runs inside the tone-mapping pass in `f32`, unrounded; every
+  other level is a rounded `rgba16float` write, `unknown` rounding modelled as toward zero.
+  `GlareSource.excessLuminance` is cd/m² (Provides and R06's contract): the mean luminance less
+  65,504 ÷ the pre-exposure scale. `glareSourceVeil` is the point form, L_ex Ω PSF(θ), exact in
+  energy but far too faint just outside a resolved disc's limb; ruled 2026-10-02 (orchestrator):
+  T14.b adds a near-limb term per CIE core term, the half-plane closed form 2ac²(π/2 − atan(d/c))
+  at distance d beyond the limb, as max(point, half-plane) (withdrawn 2026-10-02, its energy unbounded; replaced by the
+  equal-area rectangle, see T14.b as built), tested against a brute-force disc
+  quadrature, with a science check. `bloomKernel` costs some 35 ms per fit after a one-off
+  250–700 ms for the level responses (provisional, under load): its caller refits only when the
+  angular pixel scale changes materially, not each frame.
+- **Deviations in T12, as built** (2026-10-02). `post/histogram.{wgsl,ts}` and `post/meter.ts`
+  (`MeterMode`, `METER_CLASS`, `MeterClass`, `meterWeights`; R06.T13.e extends this file, never
+  redeclares). The kernel, `HISTOGRAM_KERNEL` (`exposure histogram`, reference only,
+  `bit-exact`, entry `main`), takes the HDR colour as a sampled `TextureHandle` (`hdr`; decision
+  2026-10-02, item 1: T7 wires the view's scene target), its `Params` uniform (`histogramParams`:
+  the four class weights, the size, the stride) and a 256-word `bins` buffer, and bins the Rec.
+  709 luminance (`METER_LUMA`, BT.709) of the pre-exposed value: bin 0 below 2⁻¹⁴ (and NaN in the
+  CPU twin; WGSL leaves the kernel's NaN case unspecified), bin 255 from 2¹⁶ and for +∞ (a pass
+  writing above 65,504; review fix, since a saturating `u32` of +∞ wrapped to bin 0), else 1 +
+  ⌊(log₂ L + 14) × 8.5⌋; the class is `round(alpha)`, half to even, clamped to [0, 3]. The low
+  setting's quarter-resolution input is a stride of 2 on each axis (`HistogramRequest.stride`),
+  not a separate downsample. Exports beyond Provides: `HistogramReader`, `HistogramRequest`,
+  `HistogramEngine` (the four engine calls the reader makes), `HISTOGRAM_RING` (3),
+  `HISTOGRAM_PASS` (`"histogram"`, `PHOTOREAL_PASS_LABELS.histogram` once T7 builds it),
+  `HISTOGRAM_WORKGROUP` (16 × 16, one bin per invocation), `HISTOGRAM_BINS_PER_STOP` (8.5),
+  `histogramWorkgroups`, `METER_LUMA`, the CPU twin `cpuHistogram` with `histogramBin`,
+  `binCentreLuminance` and `meterClassOf`. `HistogramReader` owns the ring of three storage
+  buffers: a frame finding all three still being read takes no histogram, results older than one
+  delivered are dropped, and the owner re-creates the reader in `onRestored`. Since R01's
+  `readBuffer` stages per call, no mapped buffer is ever reused; the test of "never maps a buffer
+  in use" checks instead, on a fake engine, that no slot is zeroed or dispatched into while its
+  read is pending. Registered in `WGSL_CATALOGUE` (`POST_ENTRIES`); the smoke check
+  (`smoke/histogram.ts`, on a 70 × 45 `rgba16float` texture of its own, luminances at bin
+  centres, with black and infinite texels) passes bin for bin under each meter at strides 1 and 2,
+  and through the reader's ring, on both `default` and `no-subgroups` (`just test-render`,
+  SwiftShader, 2026-10-02). **The bench is pending, and no staging ring was added to R01's
+  readback**: the RTX 3080 at 1920 × 1080 on a quiet machine, and the owner's UHD 620 at 1280 × 720
+  with stride 2 (640 × 360), both under `--hyperion-gpu-timing` with a uniform dark-sky input;
+  T17 builds the by-hand harness that drives `HistogramReader` and records the figures with the
+  other post-processing benches (the probe's 0.3–0.8 ms stays provisional), and if per-call
+  staging shows a cost T17 adds the staging ring through R01's guarded readback only (decision
+  2026-10-02, item 6).
+- **Deviations in T13.a, as built** (2026-10-02). `post/autoExposure.ts`: `meteredLuminance(h, window)`
+  (window [0, 1] by default; 0 when the window holds no counts), `smoothEv`, `programTriple`,
+  `ExposureProgram` (the `AUTO` program's N and t, a constructor argument: R06's
+  `DEFAULT_VIEW_CAMERA` where the controller is made), `AutoExposureOptions`, and `AutoExposure`
+  as a class (Provides sketched an interface with `step`), which also holds the operator's meter
+  (`setMeter`), takes R02's command results (`apply(ExposureCommandResult)`), and exposes
+  `meteredEv100` for R02's `setAuto` and `enable`. `step(h, dtS)` takes `undefined` on frames
+  with no new histogram: the meter holds its last value, and only after `METER_TIMEOUT_S` (0.5 s)
+  without one, or on a histogram with nothing to meter (a mean of 0, as under `LIT` with no lit
+  body), does it report `null` to R02's `onMetering`, the system inhibit `NO IMAGE TO METER`;
+  a system inhibit resumes `AUTO` from its held value and smooths from there. The smoothing is in
+  closed form over each step (linear to the band's edge, then exponential at rate speed ÷ 1.5),
+  so 30 Hz and 60 Hz agree to rounding; its speeds and band are Unreal's documented defaults
+  (Speed Up 3, Speed Down 1 f-stops/s, `ExponentialTransitionDistance` 1.5; science check
+  2026-10-02), no longer "from memory", still to be settled by eye. The star-entering test uses a
+  480 × 270 frame at 60° (the Sun at 1 au 2.1 px in radius, a planet 15% of the frame): the
+  metered value moves 0.01%, where in a 64 × 64 frame the disc's own 5% of the pixels, removed
+  from the count, moved it 6%; Design note 11's "4–5 stops above the average" holds for a body
+  covering about 3–6% of the metered pixels, and one under 0.64% reaches AgX's ceiling, as a
+  real averaging meter would. **For the owner** (science check): under `AUTO` the program's
+  sensitivity S = 5880 × 2^−EV100 at f/1.4 and 1/30 s spans ISO 0.18 (a sunlit planet, EV100 15) to 6 × 10⁶ (a dark sky, EV100 −10), far outside a real sensor; the lean is to record the
+  triple as nominal until R06's `cameraLimitV` models noise from S, then clamp S and let the
+  shutter take over.
+- **Deviations in T13.b, as built** (2026-10-02). `displays/view/MeterControl.tsx` (with
+  `meterLabel`) shows `EV100 9.6 AUTO` through R02's `exposureReading`, `METER AVG`, the source
+  view as `SOURCE VIEW`, and the meters `AVG`, `LIT` and `DARK` as pressed-state buttons in Design note 10's order (the guide has none yet; T16 drafts it),
+  reachable by Tab and pressed by Enter or Space; with no reading it says `NO IMAGE TO METER`
+  and holds the meters back (`aria-disabled`, focusable). It takes `meter`, an
+  `ExposureReading | null` and `onMeter(mode)`. **Not yet mounted in `ViewDisplay`**: no view
+  meters an image until T7 makes the photorealistic view and its `AutoExposure`; T7 mounts it
+  beside `ExposurePanel` (a few lines of `ViewDisplay`), so that no control stands on screen with
+  nothing behind it. The labels `METER AVG`, `METER LIT`, `METER DARK` are T16's guide draft. The
+  by-eye checks (a lit planet on black, a star entering the frame, the cockpit turning to a
+  planet), which settle the smoothing speeds, wait on T7 and are pending by hand for the owner:
+  `just client` with a photorealistic `VIEW` on the development machine.
+- **T13 after review, as built** (2026-10-02). `meteredAverage(h, window)` is what the controller
+  meters: `null` when no pixel counts, and for a frame whose counted pixels all fall below the
+  histogram's range (bin 0, as after a cut from a sunlit planet to a dark sky) the range's floor
+  2⁻¹⁴ ÷ the pre-exposure, an upper bound, so that the exposure steps darker and the frame comes
+  into range; metering its mean of 0 as nothing to meter locked `AUTO` in a system inhibit it
+  could not leave (a test drives the cut and the recovery). A histogram with nothing the meter
+  weighs (`LIT` with no lit body) is treated as no histogram: `AUTO` holds until
+  `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
+  definition of that status (a closed or absent source); T16's draft takes it up, the
+  alternative being a status of its own such as `NO LIT BODY`, for the owner. Under `AUTO`
+  `onMetering` receives the smoothed, applied EV100, so R02's `auto.ev100` is the applied value
+  and `meteredEv100` the metered one; a system inhibit resumes and smooths in the same step; the
+  operator's `setAuto` and `enable` take `meteredEv100` and set the exposure there at once,
+  unsmoothed (R02's commands as built). `setMeter` changes the reading's meter at once, and
+  histograms under its weights arrive one to three frames later. `MeterControl` takes the
+  operator's `meter` as its own prop, so the chosen meter shows (`METER LIT`, the button
+  underlined, as the time control's step is) while nothing is metered; held-back buttons are
+  described by `NO IMAGE TO METER`; the panel is titled `Exposure meter`, its buttons grouped
+  under the legend `SELECT`. **Left to T7**: mount `MeterControl` beside `ExposurePanel`,
+  subscribed to the view's `AutoExposure` through `useSyncExternalStore` and throttled to about
+  4 Hz at 0.1 EV, not passed down from `ViewDisplay`'s state; make the `AutoExposure` with R06's
+  `DEFAULT_VIEW_CAMERA`; pass `exposure.meter` and the stride into each `HistogramRequest`; and
+  set the next frame's pre-exposure from `reading().ev100`. **For T16's draft and the owner**:
+  the words `SOURCE`, `SELECT` and the panel title, beside `METER AVG`, `METER LIT` and `METER
+DARK`; the source shows the raw view id upper-cased until T7 names views as the label block
+  does.
+- **Deviations in T14.b, as built** (2026-10-02). `post/bloomDown.wgsl` and `post/bloomUp.wgsl`
+  are materials (`BLOOM_DOWN_MATERIAL` `GLARE DOWNSAMPLE`, `BLOOM_UP_MATERIAL` `GLARE UPSAMPLE`,
+  in `post/bloomChain.ts`) drawn on a full-screen triangle (`fullScreenTriangle`) into one
+  `rgba16float` target per level, not post-processes: a post-process's input is its own frame's
+  draws, and a chain level reads another target. Every tap is a bilinear sample of four
+  `textureLoad`s, clamped, so that the first pass thresholds per texel before filtering (the
+  threshold is not linear) and the passes match `bloomDown` and `bloomUpTent` sample for sample.
+  `BloomChain` (`create`, `run(hdrColour, thresholdPreExposed)`, `resize`, `setKernel`,
+  `levelOne`, `levelOneWeight`, `dispose`) takes the HDR colour as an argument (decision
+  2026-10-02, item 1) and times every pass under `BLOOM_PASS` (`"bloom"`, several submissions a
+  frame). The coarsest level is not rewritten at its weight: the first up pass weights it
+  (`coarseWeight`), and the CPU twin `bloomChain` was changed to match. `rgba16float` throughout,
+  since R01's probe reads `toward-zero` for `rg11b10ufloat` on both GPUs. The last step and the
+  glare sources live in `post/glare.wgsl`, a library the tone-mapping pass concatenates
+  (`bloom_excess`, `bloom_tent`, `glare_pixel_direction`, `glare_angle` by atan2 of cross and dot,
+  since acos loses small angles in `f32`, `glare_veil`); the sources are a storage buffer
+  (`packGlareSources(sources, preExposure, terms)`, 48 bytes each: direction in the scene's
+  camera-relative frame, which the pass turns by `frame.viewRotation`, radius, excess in the
+  target's units, solid angle, and each narrow term's inside level), the spread function five
+  `vec4f` uniforms (`packGlareTerms`). `glare.ts` gains `GlareSpreadTerms`,
+  `glareSpreadTerms(role, eye)` and `evaluateSpread`, one term form both twins evaluate (the
+  narrow `(1 + (θ/c)²)^−1.5` terms, Lorentz, root, quadratic, constant, Gaussian), and
+  `glareSourceSolidAngleSr` is written 4π sin²(ρ ÷ 2), which keeps a star's digits. **The
+  near-limb veil** (orchestrator's rulings, 2026-10-02: the half-plane max was withdrawn, its
+  energy being unbounded): each narrow term is integrated exactly over an equal-area rectangle
+  facing the pixel, x ∈ [θ − ρ, θ + ρ], |y| ≤ πρ ÷ 4 (`poissonOverRectangle`, the solid angle of
+  a rectangle from height c, Mathar 2005), in a cancellation-free form (science check: the plain
+  difference of two atans lost every `f32` digit far from small sources, up to 4,500× wrong);
+  inside the disc each such term takes the level that keeps the source's energy
+  (`rectangleInsideLevel`), where the clamped disc is white through AgX anyway; the broad terms
+  stay point-form. Against a brute-force quadrature over the disc, the Sun at 1 au at 1080p across
+  60°: +7% to +13% from a quarter of a pixel to 8 px beyond the limb, 0.2% at 64 px, the point
+  form alone 0.19–0.54 there; the veil integrates to L_ex Ω within 0.2% (the step at the limb).
+  Limits recorded: the broad terms as a point fall to −18% near the limb of a 10° source and −29%
+  at 19.5°; a camera view, with no narrow term, is the point form, 0.75 of the truth at the Sun's
+  limb (a Lorentz rectangle would fix both; for the owner with the camera PSF); and a body in
+  front of the disc (a transit) receives the inside level on its pixels. Smoke checks
+  (`smoke/bloom.ts`, 512 × 512, a clamped disc of 10 px): the device's chain equals its CPU twin
+  to 0.5%, stored plus injected energy equals the unclamped to 1.5%, and the WGSL veil equals its
+  twin to 1% at five pixels beyond the limb; a vitest emulates the WGSL rectangle in `f32`. **The
+  bench is pending** (under 1 ms, and 2–3 ms with tone mapping): T17's harness, on a quiet
+  machine under `--hyperion-gpu-timing`, the RTX 3080 at 1080p and the owner's UHD 620 at 720p.
+- **Deviations in T15, as built** (2026-10-02). `post/tonemap.wgsl` and `post/tonemap.ts`
+  (`TONEMAP_MATERIAL` `IMAGE`, `tonemapDraw`, the twin `tonemapTexel`, `srgbEncode`, `tpdf`) and
+  `post/blueNoise.ts` (`blueNoiseTile`, 64 × 64 by Ulichney's void-and-cluster from a fixed hash,
+  uploaded as `r16float`). The pass is a material on the full-screen triangle drawn onto the
+  canvas: it samples the HDR colour bilinearly at the canvas's resolution (the upscale), adds
+  w₀ excess(L) and the tent of `BloomChain.levelOne`, each glare source's veil, multiplies by the
+  exposure over the pre-exposure, applies `agxSprite` (AgX less its floor, as the wireframe's
+  sprites write it, so an isolated star on black is identical in both styles before the dither:
+  Design note 9 allowed the floor to stay, and taking it off makes the identity exact), encodes
+  by the sRGB curve and adds the TPDF dither, `tpdf` of a blue-noise threshold read at three
+  offsets for the three channels, ±1 LSB, static. **Engine extension** (decision 2026-10-02, item
+  6; R01's Risks carry the pointer): `FrameSubmission.encoding?: "srgb-view" | "in-pass"` (a
+  view writes through its canvas's own format under `in-pass`), `FrameSubmission.colourLoad?:
+"clear" | "load"` (a frame without post-processes keeps the colour and depth an earlier
+  submission drew, for T16's symbology), and `RenderTargetFormat` `"canvas-in-pass"` for
+  `createMaterialAsync`; defaults unchanged, every earlier smoke check unchanged (`view.ts`,
+  `drawing.ts`, `engine.ts`, `types.ts`, appended). Smoke checks (`smoke/tonemap.ts`): the pass
+  in WGSL equals `tonemapTexel` within one code at 512 pinned texels (a 20-stop grey ramp and
+  three colours), the dither moves no texel by more than one code and is unbiased over a flat
+  field, a half-resolution flat field upscales evenly, and a following `load` pass keeps the
+  image. **The encoding near black, settled** (orchestrator, 2026-10-02): Filament's `pow(v,
+2.2)` stays in R02's `agx`, both styles, R02 untouched. Against Blender's AgX Base sRGB on the
+  grey diagonal (its `AgX_Base_sRGB.cube`, GPL, read once and not committed; sixteen derived
+  codes are pinned in `tonemap.test.ts` with attribution), the pass is within 6 codes from −3 stops up and up to 16 in the toe, worst at −5 stops (7 against 23; 14 at −6, 13 at −4), shadow tones of a lit body as well as near black. Writing the sigmoid's output directly
+  as the encoded value halved the toe's gap (8 codes) but was rejected: its near-linear toe made
+  a faint star's displayed total vary with its sub-pixel position from 0.83 to 1.37 of the
+  centred star's (R02's constancy test, bounds 0.90–1.05), stars that would twinkle as the camera
+  moves. **Finding for R12's look audit**: the toe's gap is the seventh-order polynomial's; an
+  analytic AgX sigmoid or a LUT of our own could close it, provided star totals stay constant
+  across sub-pixel positions. By hand, pending for the owner (needs T7's photorealistic view): a
+  Sun-like star in frame with a lit planet, hues holding in the highlight. The bench is T17's.

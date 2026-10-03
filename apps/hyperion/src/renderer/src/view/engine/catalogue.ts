@@ -10,6 +10,9 @@
 
 import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
+import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
+import { HISTOGRAM_KERNEL } from "../post/histogram";
+import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type { WgslMaterialSpec, WgslPostProcessSpec } from "./types";
@@ -47,9 +50,18 @@ const ATMOSPHERE_TABLE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   MULTI_SCATTERING_KERNEL,
 ].map((spec) => ({ kind: "compute", spec }));
 
+/** R07's post-processing kernels and passes (plan R07, T12–T15). */
+const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "compute", spec: HISTOGRAM_KERNEL },
+  { kind: "material", spec: BLOOM_DOWN_MATERIAL },
+  { kind: "material", spec: BLOOM_UP_MATERIAL },
+  { kind: "material", spec: TONEMAP_MATERIAL },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
   ...WIREFRAME_ENTRIES,
   ...ATMOSPHERE_TABLE_ENTRIES,
+  ...POST_ENTRIES,
 ];
