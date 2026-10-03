@@ -782,6 +782,21 @@ impl Track {
             .filter(move |&age| age.is_finite() && from_age < age && age < to_age)
     }
 
+    /// Each segment's start and end age, years (the remnant's end infinite), with its knots' ages,
+    /// in the segments' order: the phases rendering plan R06's luminosity function cuts a life
+    /// into (its Design note 7).
+    pub(crate) fn segment_ages(
+        &self,
+    ) -> impl Iterator<Item = (f64, f64, impl Iterator<Item = f64> + '_)> + '_ {
+        self.segments.iter().map(|segment| {
+            (
+                segment.start,
+                segment.end,
+                segment.knots.iter().map(|knot| knot.age),
+            )
+        })
+    }
+
     /// The age at which the main sequence ends, if the track has been built past it: the start
     /// of the first segment after the last main-sequence one (the rotation of an evolved star
     /// reads the star there, P06.T25).

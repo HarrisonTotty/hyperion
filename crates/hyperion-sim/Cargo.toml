@@ -81,3 +81,7 @@ harness = false
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "sky"
+harness = false
