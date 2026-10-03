@@ -11,6 +11,7 @@ import {
   SETTING_VIEWS,
 } from "./demandRecord";
 import { finestPatchSizeM } from "../terrain/grounded";
+import { SPIKE_CRAFT_RADIUS_M } from "./spikeScene";
 import { craftContacts, type FixedStepOptions, runFixedStep, segmentFigures } from "./fixedStep";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
@@ -104,7 +105,7 @@ describe("the craft's contact", () => {
     const hover = profile.poseAt(profile.durationS);
     expect(hover.verticalSpeedMps).toBe(0);
     expect(craftContacts(hover, patchSizeM)).toEqual([
-      { positionM: hover.groundPointM, radiusM: 10 },
+      { positionM: hover.groundPointM, radiusM: SPIKE_CRAFT_RADIUS_M },
     ]);
   });
 

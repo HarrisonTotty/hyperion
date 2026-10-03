@@ -31,9 +31,7 @@ import { type SelectionInput, selectPatches } from "../terrain/select";
 import type { SlotLayout } from "../terrain/slotLayout";
 import { type DemandView, perLevelDemand } from "./demand";
 import type { DescentPose, DescentProfile } from "./descentProfile";
-
-/** The craft's bounding radius the run's contact takes, metres (provisional; the scene's own). */
-export const CRAFT_RADIUS_M = 10;
+import { SPIKE_CRAFT_RADIUS_M } from "./spikeScene";
 
 /**
  * The scripted craft as the selection's contacts (Design note 9): one contact at the ground point
@@ -41,7 +39,8 @@ export const CRAFT_RADIUS_M = 10;
  *
  * @remarks
  * Both read the height above the floor under the craft (`heightAboveFloorM`, the clearance ruling's
- * honest h, never above the true height). Grounded is that height within the held radius r_g, the craft's radius plus one finest patch:
+ * honest h, never above the true height). Grounded is that height within the held radius r_g, the craft's radius (the scene's hull, `SPIKE_CRAFT_RADIUS_M`) plus one
+ * finest patch:
  * the held sphere about the craft then reaches the ground, as it does at an exact hover, where the
  * vertical speed is 0 and `isDescending` does not hold. The contact sits on the ground, not at the
  * camera, since the forced region's rule is 3-D (T11.c's note).
@@ -49,7 +48,7 @@ export const CRAFT_RADIUS_M = 10;
  * @param patchSizeM - The finest patch's edge, metres (`finestPatchSizeM`).
  */
 export function craftContacts(pose: DescentPose, patchSizeM: number): GroundContact[] {
-  const contact: GroundContact = { positionM: pose.groundPointM, radiusM: CRAFT_RADIUS_M };
+  const contact: GroundContact = { positionM: pose.groundPointM, radiusM: SPIKE_CRAFT_RADIUS_M };
   const heightM = pose.heightAboveFloorM;
   const grounded = heightM <= heldRadiusM(contact, patchSizeM);
   return grounded || isDescending(heightM, pose.verticalSpeedMps) ? [contact] : [];
