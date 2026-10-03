@@ -322,7 +322,11 @@ function horizontalKnots(segments: ReadonlyArray<DescentSegment>): Knot[] {
 
 /** A landing site and the azimuth the descent approaches it along. */
 export interface LandingSite {
-  /** The latitude and longitude of the site's direction from the centre, rad. */
+  /**
+   * The site's parametric (reduced) latitude β and its longitude, rad: the site is the spheroid's
+   * point M·d over the unit direction d of latitude β, so its geodetic latitude is a little
+   * larger, 60.083° at β = 60°.
+   */
   readonly latitudeRad: number;
   readonly longitudeRad: number;
   /** The approach's azimuth at the site, clockwise from north, rad. */
@@ -357,7 +361,11 @@ export interface DescentPose {
   readonly groundPointM: Vec3;
 }
 
-/** SplitMix64's step (Steele, Lea and Flood 2014): the next state and a 64-bit output. */
+/**
+ * SplitMix64's step, as Vigna's `splitmix64.c` and JDK 8's `SplittableRandom` have it: the golden
+ * gamma increment 0x9e3779b97f4a7c15 (Steele, Lea and Flood 2014, OOPSLA, Fig. 16) and Stafford's
+ * Mix13 output mixer (the paper's `mix64variant13`): the next state and a 64-bit output.
+ */
 function splitMix64(state: bigint): readonly [bigint, bigint] {
   const mask = (1n << 64n) - 1n;
   const next = (state + 0x9e37_79b9_7f4a_7c15n) & mask;
@@ -372,11 +380,15 @@ function unitOf(draw: bigint): number {
   return Number(draw >> 11n) / 2 ** 53;
 }
 
-/** The latitudes a site is drawn between, rad: the band where the test planet's faces meet both poles' axes least. */
+/**
+ * The parametric latitudes a site is drawn between, rad: ±60°, a geodetic ±60.083°, so that the
+ * scene's equinoctial Sun stands at least 29.9° above the site's horizon (lane C's scene).
+ */
 const SITE_LATITUDE_LIMIT_RAD = (60 * Math.PI) / 180;
 
 /**
- * The landing site and approach azimuth of a seed, uniform over the surface between ±60° latitude
+ * The landing site and approach azimuth of a seed, uniform in direction between ±60° parametric
+ * latitude (within 0.7% of uniform over the spheroid's surface)
  * and uniform in azimuth.
  *
  * @remarks
