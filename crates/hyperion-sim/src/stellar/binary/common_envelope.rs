@@ -166,6 +166,16 @@ const RAPID_CONTACT_SHARE: f64 = 0.1;
 /// §3.2 and Fig. 2).
 pub(super) const TEMPORARY_CONTACT_OVERFILL: f64 = 0.10;
 
+/// Whether a merger may still pass through a common envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Envelope {
+    /// BSE's rule: a collision involving a giant-like star is a common envelope.
+    Ejectable,
+    /// The common envelope has run and found nothing to eject (a held bare core, ruling 129.4c):
+    /// the stars merge by the collision matrix alone.
+    Spent,
+}
+
 /// Nelson and Eggleton's (2001) case of a main-sequence contact (see [`Engine::contact`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ContactRegime {
@@ -185,6 +195,19 @@ impl Engine {
     /// A common envelope around member `d`, a giant-like donor, and its companion (BSE section
     /// 2.7.1).
     pub(super) fn common_envelope(&mut self, d: usize) {
+        // A common envelope is resolved once: whatever merger it ends in merges by the collision
+        // matrix and never re-enters it, by any route (`mix_with` reads the flag).
+        debug_assert!(
+            !self.in_common_envelope,
+            "a common envelope entered from inside another"
+        );
+        self.in_common_envelope = true;
+        self.resolve_common_envelope(d);
+        self.in_common_envelope = false;
+    }
+
+    /// The body of [`Engine::common_envelope`].
+    fn resolve_common_envelope(&mut self, d: usize) {
         let o = 1 - d;
         self.begin(SegmentKind::CommonEnvelope);
         self.close_segment();
@@ -208,9 +231,11 @@ impl Engine {
             binding += s2.mass * s2.envelope / (lambda * s2.radius);
         }
         // Nothing to eject from a held bare core (ruling 129.4c): no stripping changes it, so it
-        // would touch its companion again at once, envelope after envelope. It merges instead.
+        // would touch its companion again at once, envelope after envelope. It merges instead,
+        // and the merger must not hand it back to a common envelope (a giant-like bare core
+        // beside a main-sequence star otherwise recursed without end).
         if !positive(binding) && matches!(self.members[d], Member::Frozen { .. }) {
-            self.coalesce(None);
+            self.mix_with(Envelope::Spent);
             return;
         }
         let orbit_i = s1.core * s2.core / (2.0 * a_i);
@@ -433,11 +458,17 @@ impl Engine {
 
     /// A collision or coalescence without a common envelope: the two stars merge with their masses
     /// (BSE section 2.7.3), the product in the primary's place.
+    pub(super) fn mix(&mut self) {
+        self.mix_with(Envelope::Ejectable);
+    }
+
+    /// [`Engine::mix`], with `envelope` saying whether a giant-like star's collision may still go
+    /// to a common envelope (BSE's rule) or merges by the collision matrix alone.
     #[expect(
         clippy::too_many_lines,
         reason = "one arm per row of BSE's collision matrix (their table 2)"
     )]
-    pub(super) fn mix(&mut self) {
+    fn mix_with(&mut self, envelope: Envelope) {
         let (m0, t0) = self.current(0);
         let (m1, t1) = self.current(1);
         let (s0, s1) = (
@@ -542,8 +573,12 @@ impl Engine {
                 self.compact(kind, total)
             }
             _ => {
-                // A giant-like star is involved: BSE treats the collision as a common envelope.
-                if let Some(giant) = [k0, k1].iter().position(|k| k.is_giant_like()) {
+                // A giant-like star is involved: BSE treats the collision as a common envelope,
+                // unless that envelope is already spent.
+                if envelope == Envelope::Ejectable
+                    && !self.in_common_envelope
+                    && let Some(giant) = [k0, k1].iter().position(|k| k.is_giant_like())
+                {
                     self.common_envelope(giant);
                     return;
                 }

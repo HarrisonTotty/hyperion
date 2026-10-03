@@ -1,0 +1,161 @@
+//! The luminosity tables against realised cells (rendering plan R06, R06.T5.c).
+//!
+//! For blocks of 216 whole cells of each layer at the solar circle and in the bulge, the summed V
+//! light of every realised system, each star's state from `SystemStars::state_at(t).stars()`
+//! (pair-evolved since P11.T11), is held against the density field's integral over the block times
+//! each component's table, within a compound-Poisson interval (α = 10⁻³, z = 3.29, with the
+//! variance estimated by the realised Σ L²) plus 5% for the tables' track sampling, their median
+//! draws and their reference metallicity. The ratios of realised to tabulated counts brighter than
+//! M<sub>V</sub> −3 and −5 are printed per layer and not gated (decided 2026-10-02, item 3): a ratio
+//! above 1.3 in a layer whose cap is set by its bright end is a finding for R06.T7.
+
+#[expect(
+    dead_code,
+    reason = "these checks use the placement helpers of tests/common alone"
+)]
+mod common;
+
+use common::reference_box_component_integrals;
+use hyperion_sim::Seed;
+use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::imf::MassBand;
+use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+use hyperion_sim::id::Layer;
+use hyperion_sim::math;
+use hyperion_sim::sky::luminosity::LuminosityTables;
+use hyperion_sim::sky::photometry::absolute_v_of_state;
+use hyperion_sim::stellar::system::SystemStars;
+use hyperion_sim::time::{Span, UniverseTime};
+use hyperion_sim::units::Magnitudes;
+use hyperion_sim::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
+
+/// Cells along each edge of a block: 6³ = 216 cells.
+const BLOCK_CELLS: i32 = 6;
+
+/// The two-sided normal quantile at α = 10⁻³.
+const Z: f64 = 3.29;
+
+/// The allowance for the tables' approximations, a share of the expected light.
+const TRACK_SAMPLING: f64 = 0.05;
+
+/// What a block holds: the realised light and its square sum, and the stars brighter than −3 and
+/// −5.
+#[derive(Debug, Default)]
+struct Realised {
+    systems: u64,
+    light: f64,
+    light_squared: f64,
+    brighter_3: f64,
+    brighter_5: f64,
+}
+
+fn realise(galaxy: &Galaxy, keys: &[CellKey]) -> Realised {
+    let mut out = Realised::default();
+    let mut records: Vec<SystemRecord> = Vec::new();
+    for &key in keys {
+        generate_cell(galaxy, key, &mut records);
+        for record in &records {
+            out.systems += 1;
+            let stars = SystemStars::generate(galaxy, record);
+            let Some(state) = stars.state_at(UniverseTime::EPOCH) else {
+                continue;
+            };
+            let mut system_light = 0.0;
+            for star in state.stars() {
+                if let Some(v) = absolute_v_of_state(star) {
+                    system_light += math::exp10(-0.4 * (v.value() - SOLAR_ABSOLUTE_MAGNITUDE_V));
+                    if v.value() < -3.0 {
+                        out.brighter_3 += 1.0;
+                    }
+                    if v.value() < -5.0 {
+                        out.brighter_5 += 1.0;
+                    }
+                }
+            }
+            out.light += system_light;
+            out.light_squared += system_light * system_light;
+        }
+    }
+    out
+}
+
+#[test]
+#[ignore = "slow: realises some 10^4 systems with their tracks"]
+fn luminosity_matches_realised_cells() {
+    let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
+        .expect("the Milky Way-like parameters are valid");
+    let tables = LuminosityTables::build(&galaxy, UniverseTime::EPOCH);
+    let sites = [
+        ("solar circle", [0.0, 26_000.0, 0.0]),
+        ("bulge", [0.0, 3_000.0, 0.0]),
+    ];
+    let layers = [
+        Layer::A,
+        Layer::B,
+        Layer::C,
+        Layer::D,
+        Layer::E,
+        Layer::BrownDwarf,
+    ];
+    let mut failures = Vec::new();
+    for (name, at) in sites {
+        for layer in layers {
+            let size = i32::try_from(layer.cell_size_ly()).expect("cells are small");
+            let corner = at.map(|x: f64| {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "the sites are whole light-years inside the root cube"
+                )]
+                let x = x as i32;
+                x.div_euclid(size) - BLOCK_CELLS / 2
+            });
+            let mut keys = Vec::new();
+            for i in 0..BLOCK_CELLS {
+                for j in 0..BLOCK_CELLS {
+                    for k in 0..BLOCK_CELLS {
+                        keys.push(
+                            CellKey::new(layer, [corner[0] + i, corner[1] + j, corner[2] + k])
+                                .expect("the block lies in the root cube"),
+                        );
+                    }
+                }
+            }
+            let min_ly = corner.map(|c| c * size);
+            let edge = u32::try_from(BLOCK_CELLS * size).expect("positive");
+            let integrals = reference_box_component_integrals(&galaxy, min_ly, edge, 4 * 6);
+            let band = MassBand::from(layer);
+            let (mut light, mut bright_3, mut bright_5, mut systems) = (0.0, 0.0, 0.0, 0.0);
+            for id in galaxy.fields().component_ids() {
+                let component = galaxy.fields().component(id);
+                let n = integrals[id.index()] * galaxy.shares().component_share(band, component);
+                let table = tables.get(id, layer);
+                systems += n;
+                light += n * table.total_light(Span::ZERO).value();
+                bright_3 += n * table.count_brighter_than(Magnitudes::new(-3.0), Span::ZERO);
+                bright_5 += n * table.count_brighter_than(Magnitudes::new(-5.0), Span::ZERO);
+            }
+            let realised = realise(&galaxy, &keys);
+            let sigma = realised.light_squared.sqrt();
+            let allowed = Z * sigma + TRACK_SAMPLING * light;
+            eprintln!(
+                "{name} {layer:?}: {} systems (expected {systems:.1}); light {:.4e} against \
+                 {light:.4e} (± {allowed:.3e}); brighter than −3: {} against {bright_3:.3e}, \
+                 ratio {:.3}; brighter than −5: {} against {bright_5:.3e}, ratio {:.3}",
+                realised.systems,
+                realised.light,
+                realised.brighter_3,
+                realised.brighter_3 / bright_3,
+                realised.brighter_5,
+                realised.brighter_5 / bright_5,
+            );
+            if (realised.light - light).abs() > allowed {
+                failures.push(format!(
+                    "{name} {layer:?}: {} against {light} ± {allowed}",
+                    realised.light
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
