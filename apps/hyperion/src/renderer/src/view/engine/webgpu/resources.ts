@@ -58,14 +58,18 @@ export function viewDimensionOf(spec: TextureSpec): GPUTextureViewDimension {
   return VIEW_DIMENSIONS[spec.dimension];
 }
 
+/** The name a packed star cube takes when its caller names none. */
+export const PACKED_CUBE_NAME = "packed star cube";
+
 /** The specification of R06's packed star cube at a face size and mip count. */
 export function packedCubeSpec(
   sizePx: number,
   mips: number,
   category: MemoryCategory,
+  name: string = PACKED_CUBE_NAME,
 ): TextureSpec {
   return {
-    name: "packed star cube",
+    name,
     size: { width: sizePx, height: sizePx, depthOrArrayLayers: 6 },
     dimension: "cube",
     format: "rgb9e5ufloat",
@@ -84,6 +88,8 @@ export class ResourceRegistry {
   readonly #textures = new Map<TextureHandle, TextureRecord>();
   /** Every query set made, with its name. */
   readonly #querySets = new Map<GPUQuerySet, string>();
+  /** Every handle destroyed before disposal, so that a later use names the release. */
+  readonly #released = new WeakSet<BufferHandle | TextureHandle>();
 
   /**
    * Makes a registry on `device`.
@@ -153,6 +159,9 @@ export class ResourceRegistry {
   bufferOf(handle: BufferHandle): BufferRecord {
     const record = this.#buffers.get(handle);
     if (record === undefined) {
+      if (this.#released.has(handle)) {
+        throw new Error(`buffer ${handle.name} was released`);
+      }
       throw new Error(`buffer ${handle.name} was not made by this engine`);
     }
     return record;
@@ -162,6 +171,9 @@ export class ResourceRegistry {
   textureOf(handle: TextureHandle): TextureRecord {
     const record = this.#textures.get(handle);
     if (record === undefined) {
+      if (this.#released.has(handle)) {
+        throw new Error(`texture ${handle.name} was released`);
+      }
       throw new Error(`texture ${handle.name} was not made by this engine`);
     }
     return record;
@@ -234,19 +246,28 @@ export class ResourceRegistry {
    *
    * @remarks
    * The buffer holds six faces, face after face, each row padded to 256 bytes
-   * (`paddedBytesPerRow(size, 4)`), as `copyBufferToTexture` requires.
+   * (`paddedBytesPerRow(size, 4)`), as `copyBufferToTexture` requires; or, given `face`, that one
+   * face alone (R06.T13.g).
+   *
+   * @throws Error for a face outside 0–5, a buffer too small or without `COPY_SRC`.
    */
   encodePackedCubeLevelFromBuffer(
     encoder: Pick<GPUCommandEncoder, "copyBufferToTexture">,
     cube: TextureHandle,
     level: number,
     packed: BufferHandle,
+    face?: number,
   ): void {
     const faceTexels = this.#cubeLevelSize(cube, level);
     const { texture } = this.textureOf(cube);
     const { buffer, spec } = this.bufferOf(packed);
+    if (face !== undefined && !(Number.isInteger(face) && face >= 0 && face < 6)) {
+      throw new Error(`${cube.name} has no face ${face}`);
+    }
+    const faces = face === undefined ? 6 : 1;
     const bytesPerRow = paddedBytesPerRow(faceTexels, 4);
-    const needed = bytesPerRow * faceTexels * 5 + bytesPerRow * (faceTexels - 1) + faceTexels * 4;
+    const needed =
+      bytesPerRow * faceTexels * (faces - 1) + bytesPerRow * (faceTexels - 1) + faceTexels * 4;
     if (spec.bytes < needed) {
       throw new Error(`${packed.name} holds ${spec.bytes} bytes; level ${level} needs ${needed}`);
     }
@@ -255,8 +276,8 @@ export class ResourceRegistry {
     }
     encoder.copyBufferToTexture(
       { buffer, bytesPerRow, rowsPerImage: faceTexels },
-      { texture, mipLevel: level },
-      [faceTexels, faceTexels, 6],
+      { texture, mipLevel: level, origin: [0, 0, face ?? 0] },
+      [faceTexels, faceTexels, faces],
     );
   }
 
@@ -265,6 +286,7 @@ export class ResourceRegistry {
     const { spec, buffer } = this.bufferOf(handle);
     buffer.destroy();
     this.#buffers.delete(handle);
+    this.#released.add(handle);
     this.#emit({
       kind: "destroyed",
       name: handle.name,
@@ -278,6 +300,7 @@ export class ResourceRegistry {
     const { spec, texture, bytes } = this.textureOf(handle);
     texture.destroy();
     this.#textures.delete(handle);
+    this.#released.add(handle);
     this.#emit({ kind: "destroyed", name: handle.name, bytes, category: spec.category });
   }
 

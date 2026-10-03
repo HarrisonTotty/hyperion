@@ -132,7 +132,9 @@ fn realise(galaxy: &Galaxy, keys: &[CellKey]) -> Realised {
 fn luminosity_matches_realised_cells() {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
         .expect("the Milky Way-like parameters are valid");
-    let tables = LuminosityTables::build(&galaxy, UniverseTime::EPOCH);
+    let tables = LuminosityTables::build(&galaxy);
+    // The cells are realised at the epoch: the tables, built at +H, read their light there.
+    let now = tables.age_for(UniverseTime::EPOCH, Span::ZERO);
     let sites = [
         ("solar circle", [0.0, 26_000.0, 0.0]),
         ("bulge", [0.0, 3_000.0, 0.0]),
@@ -178,9 +180,9 @@ fn luminosity_matches_realised_cells() {
                 let n = integrals[id.index()] * galaxy.shares().component_share(band, component);
                 let table = tables.get_at(id, layer, &PointLy::new(at[0], at[1], at[2]));
                 systems += n;
-                light += n * table.total_light(Span::ZERO).value();
-                bright_3 += n * table.count_brighter_than(Magnitudes::new(-3.0), Span::ZERO);
-                bright_5 += n * table.count_brighter_than(Magnitudes::new(-5.0), Span::ZERO);
+                light += n * table.total_light(now).value();
+                bright_3 += n * table.count_brighter_than(Magnitudes::new(-3.0), now);
+                bright_5 += n * table.count_brighter_than(Magnitudes::new(-5.0), now);
             }
             let realised = realise(&galaxy, &keys);
             let sigma = realised.light_squared.sqrt();

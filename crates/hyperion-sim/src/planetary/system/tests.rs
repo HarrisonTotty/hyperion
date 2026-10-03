@@ -18,7 +18,7 @@ use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::index::{BodySlot, BodySub};
-use crate::planetary::params::HILL_STABLE_GAP;
+use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
 use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
 use crate::planetary::satellites::generate_satellites;
@@ -121,8 +121,16 @@ fn generate_planets_is_generate_with_its_satellites_removed() {
     for ((ctx, planets), (_, whole)) in generated().iter().zip(whole()) {
         assert_eq!(planets.zones(), whole.zones(), "{:?}", ctx.id());
         assert_eq!(planets.hosts(), whole.hosts());
-        let kept: Vec<&Body> = whole.planets().collect();
-        assert_eq!(kept, planets.bodies().iter().collect::<Vec<_>>());
+        // `generate` attaches the held rotation laws after phase D, and `generate_planets`
+        // holds none (P14.T46.b); every other part of a planet is the same.
+        let kept: Vec<Body> = whole
+            .planets()
+            .map(|body| Body {
+                rotation: None,
+                ..body.clone()
+            })
+            .collect();
+        assert_eq!(kept, planets.bodies());
         assert!(planets.belts().is_empty() && planets.halo().is_none());
         moons += whole
             .bodies()
@@ -1833,4 +1841,208 @@ fn the_window_s_start_cuts_a_drift_cell_on_both_sides() {
         checked += 1;
     }
     assert!(checked > 50, "{checked}");
+}
+
+/// P14.T46.b (b): every body's held law is the one derived from its record at `parent_time`, bit
+/// for bit, whatever order the bodies are asked in; a whole system's records carry it as their
+/// rotation section, the same at the epoch and at +H, and a ring's, a belt's and the halo's is not
+/// applicable.
+#[test]
+fn the_rotation_law_is_held_and_on_every_record() {
+    let mut laws = 0;
+    for (ctx, system) in whole() {
+        let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
+        let held = |index: BodyIndex| system.rotation_of(ctx, index).unwrap();
+        for &index in &indices {
+            let body = system.body(index).unwrap();
+            let record = system.body_at(ctx, index, parent_time(ctx)).unwrap();
+            assert_eq!(
+                held(index),
+                system.derive_rotation(ctx, body, &record),
+                "{index:?}"
+            );
+        }
+        assert_order_independent(&indices, |&index| held(index));
+        for t in [UniverseTime::EPOCH, ClockWindow::END] {
+            for record in system.snapshot_at(ctx, t).bodies() {
+                let rotation = record.rotation();
+                match record.identity().kind() {
+                    BodyKind::Ring | BodyKind::Belt(_) | BodyKind::CometaryHalo => {
+                        assert_eq!(rotation, &Section::NotApplicable);
+                    }
+                    _ if record.identity().state() != BodyState::Present => {
+                        assert_eq!(rotation, &Section::NotApplicable);
+                    }
+                    _ => match held(record.index()) {
+                        Some(law) => {
+                            assert_eq!(rotation, &Section::Ok(*law.frame()));
+                            laws += 1;
+                        }
+                        None => assert_eq!(rotation, &Section::NotModelled),
+                    },
+                }
+            }
+        }
+    }
+    assert!(laws > 1_000, "{laws}");
+}
+
+/// P14.T46.b (b): a system [`generate_planets`] made holds no law, and its present planets'
+/// rotation is not modelled, so no body has two rotations by entry point.
+#[test]
+fn a_planets_only_system_holds_no_rotation() {
+    let mut planets = 0;
+    for (ctx, system) in generated() {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            assert_eq!(system.rotation_of(ctx, record.index()).unwrap(), None);
+            if record.identity().state() == BodyState::Present {
+                assert_eq!(record.rotation(), &Section::NotModelled);
+                planets += 1;
+            }
+        }
+    }
+    assert!(planets > 100, "{planets}");
+}
+
+/// P14.T46.a (a): a regular moon's locking time and its held law's are one law, at one moment of
+/// inertia: they differ only by their primordial periods, the moon derivation's fixed 15 h and the
+/// law's drawn one (τ ∝ ω), to 10⁻¹².
+#[test]
+fn a_regular_moon_has_one_locking_time() {
+    let mut moons = 0;
+    for (ctx, system) in whole() {
+        let snapshot = system.snapshot_at(ctx, parent_time(ctx));
+        for record in snapshot.bodies() {
+            if record.identity().kind() != BodyKind::Moon(MoonOrigin::Regular) {
+                continue;
+            }
+            let (Section::Ok(bulk), Section::Ok(mass), Some(rotation)) = (
+                record.bulk(),
+                record.mass(),
+                system.rotation_of(ctx, record.index()).unwrap(),
+            ) else {
+                continue;
+            };
+            let body = system.body(record.index()).unwrap();
+            let Part::Moon(moon) = &body.part else {
+                unreachable!("a regular moon is a moon")
+            };
+            let elements = moon
+                .satellite
+                .orbit_at(&moon.parent, ctx.age_at(parent_time(ctx)));
+            let mass = Kilograms::from(*mass);
+            let primary = Kilograms::new(
+                elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value(),
+            );
+            let tau = crate::planetary::moons::regular::locking_time(
+                primary,
+                mass,
+                Metres::from(bulk.radius()),
+                elements.semi_major_axis(),
+                bulk.class(),
+                &bulk.fractions(),
+            );
+            let fixed = crate::planetary::moons::regular::MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0;
+            let expected =
+                rotation.locking_time().value() * (rotation.primordial_period().value() / fixed);
+            assert!(
+                (tau.value() / expected - 1.0).abs() < 1e-12,
+                "{:?}: {} against {expected}",
+                record.index(),
+                tau.value()
+            );
+            moons += 1;
+        }
+    }
+    assert!(moons > 100, "{moons}");
+}
+
+/// P14.T46.d (d): the figure section's states by kind, and its level: `degrade(MassAndOrbit)`
+/// withholds the rotation and the figure, and `degrade(Bulk)` keeps them. A figure keeps the
+/// record's volume and its rotation's pole, and never exceeds the cap.
+#[test]
+fn the_figure_section_by_kind_and_level() {
+    let mut figures = 0;
+    for (ctx, system) in whole() {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let figure = record.figure();
+            match (record.rotation(), record.bulk()) {
+                (Section::NotApplicable, _) => assert_eq!(figure, &Section::NotApplicable),
+                (Section::Ok(frame), Section::Ok(bulk)) => {
+                    let Section::Ok(figure) = figure else {
+                        panic!("{:?}: a figure with a rotation and a bulk", record.index())
+                    };
+                    let radius = Metres::from(bulk.radius()).value();
+                    let spheroid = figure.spheroid();
+                    assert!((spheroid.volumetric_radius_m() / radius - 1.0).abs() < 1e-12);
+                    // A capped figure's (a − c) ÷ a, recomputed from its radii, may round
+                    // just above the cap.
+                    assert!((0.0..=FLATTENING_CAP + 1e-12).contains(&spheroid.flattening()));
+                    for (a, b) in figure.pole().into_iter().zip(frame.pole()) {
+                        assert_same_bits(a, b);
+                    }
+                    figures += 1;
+                }
+                _ => assert_eq!(figure, &Section::NotModelled, "{:?}", record.index()),
+            }
+            for section in [RecordSection::Rotation, RecordSection::Figure] {
+                assert_eq!(
+                    record
+                        .degrade(DetailLevel::MassAndOrbit)
+                        .section_state(section),
+                    SectionState::NotResolved
+                );
+                assert_eq!(
+                    record.degrade(DetailLevel::Bulk).section_state(section),
+                    record.section_state(section)
+                );
+            }
+        }
+    }
+    assert!(figures > 1_000, "{figures}");
+}
+
+/// P14.T46.c (c): a body's flattening is continuous in time across the clock window, except where
+/// its law locks between two times, a recorded state change.
+#[test]
+fn the_flattening_is_continuous_in_time() {
+    let step = CLOCK_WINDOW_H.as_seconds_f64() / 8.0;
+    let times: Vec<UniverseTime> = (-8_i32..=8)
+        .map(|k| {
+            UniverseTime::EPOCH
+                .checked_add(Span::from_seconds_f64(f64::from(k) * step).unwrap())
+                .unwrap()
+        })
+        .collect();
+    let mut checked = 0;
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(rotation) = system.rotation_of(ctx, body.index()).unwrap() else {
+                continue;
+            };
+            let flattening = |t: UniverseTime| {
+                let record = system.body_at(ctx, body.index(), t).unwrap();
+                record.figure().ok().map(|f| f.spheroid().flattening())
+            };
+            for pair in times.windows(2) {
+                let (Some(before), Some(after)) = (flattening(pair[0]), flattening(pair[1])) else {
+                    continue;
+                };
+                let locks = rotation
+                    .frame()
+                    .rate()
+                    .locks_at()
+                    .is_some_and(|at| pair[0] < at && at <= pair[1]);
+                if !locks {
+                    assert!(
+                        (after - before).abs() <= 0.01 * before.max(1e-6),
+                        "{:?}: {before} to {after}",
+                        body.index()
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 1_000, "{checked}");
 }

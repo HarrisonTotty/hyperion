@@ -9,7 +9,10 @@ import { readTokens } from "../../spatial/paint";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import type { FakeView } from "../../test/fakeRenderEngine";
 import { FakeResizeObserver } from "../../test/FakeResizeObserver";
+import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
+import { skyPayload, skyResponse } from "../../test/skyFixtures";
+import { decodeSkyPayload, type SkyDecodeRequest } from "../../view/sky/decodePayload";
 import { FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import {
   anOpenedUniverse,
@@ -649,6 +652,26 @@ async function sceneArrives(
   });
 }
 
+/**
+ * A stand-in for the sky's decode worker, constructed as `Worker` is: it decodes each payload on
+ * this thread a microtask later.
+ */
+class InThreadSkyWorker {
+  readonly #events = new EventTarget();
+
+  addEventListener(type: string, listener: (event: Event) => void): void {
+    this.#events.addEventListener(type, { handleEvent: listener });
+  }
+
+  postMessage(message: SkyDecodeRequest): void {
+    queueMicrotask(() => {
+      this.#events.dispatchEvent(new MessageEvent("message", { data: decodeSkyPayload(message) }));
+    });
+  }
+
+  terminate(): void {}
+}
+
 function labelBlock(): string {
   return screen.getByText("VIEW").parentElement?.textContent ?? "";
 }
@@ -707,6 +730,37 @@ describe("the VIEW display's server scene", () => {
     ]).toEqual([true, true, false, 4, true]);
   });
 
+  it("labels the sky once it arrives, in the interim field's place", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket, ELSEWHERE);
+    await settle();
+    view.advance(300);
+    await settle();
+    const before = labelBlock();
+    const sky = view.socket.requestsOfKind("sky").at(-1);
+    if (sky === undefined) {
+      throw new Error("the view asks no sky");
+    }
+    const payload = skyPayload([{ direction: [0, 0, -1], distanceLy: 100, vMag: 1 }], 2, 7.4);
+    await act(async () => {
+      view.socket.serverSendsBinary(binaryFrame(sky.id, 0, 1, [...payload]));
+      view.socket.serverResponds(sky.id, { kind: "sky", ...skyResponse(sky.body, payload, 1, 2) });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    view.advance(300);
+    await settle();
+    const after = labelBlock();
+    expect([
+      before.includes(STAR_SOURCE),
+      sky.body.eye?.field_factor,
+      sky.body.exclude_system,
+      after.includes("V 7.4 mag EYE · CLUSTERS: NOT YET MODELLED"),
+      after.includes(STAR_SOURCE),
+    ]).toEqual([true, 1.4, ELSEWHERE, true, false]);
+  });
+
   it("names a system from a server that states no place by its ID, with no stars", async () => {
     const view = setup();
     await openUniverse(view);
@@ -719,7 +773,8 @@ describe("the VIEW display's server scene", () => {
       screen.getAllByText(new RegExp(`^${ELSEWHERE} /`)).length > 0,
       labelBlock().includes(STARS_WITHOUT_POSITION),
       view.socket.requestsOfKind("systems_in_range").length - keptQueries,
-    ]).toEqual([true, true, 0]);
+      view.socket.requestsOfKind("sky").length,
+    ]).toEqual([true, true, 0, 0]);
   });
 
   it("shows a scene the server ended as stale while it is reopened", async () => {

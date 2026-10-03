@@ -347,6 +347,39 @@ describe("WireframeRenderer", () => {
     ]);
   });
 
+  it("encodes the background after the occluders and before the sprites (R06.T13.g)", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const list: WireframeDrawList = {
+      ...EMPTY,
+      occluderSpheres: [
+        { id: "near", centreF32: new Float32Array([0, 0, -1e7]), radiusM: 1e6, altitudeM: 9e6 },
+      ],
+      sprites: [
+        {
+          id: "star",
+          directionF32: new Float32Array([0, 0, -1]),
+          xPx: 960,
+          yPx: 540,
+          exposedRgb: [1, 1, 1],
+          illuminanceLx: 1e-6,
+        },
+      ],
+    };
+    const cube = {
+      mesh: { kind: "mesh", name: "sky cube triangle" },
+      material: { kind: "material", name: "sky:cubeDisplay" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    } as const;
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [cube]);
+    expect(frame.draws.map((d) => d.material.name)).toEqual([
+      "wireframe:occluderSphere",
+      "sky:cubeDisplay",
+      "wireframe:starSprite",
+    ]);
+  });
+
   it("grows a buffer by doubling when a frame outgrows it", () => {
     const engine = new RecordingEngine();
     const renderer = new WireframeRenderer(engine);

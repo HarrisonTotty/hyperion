@@ -333,7 +333,7 @@ const HILLAIRE_PLANET: SpheroidFigure = { equatorialRadiusM: 6_360_000, polarRad
 const CAPTURE_SIZE = { widthPx: 320, heightPx: 180 } as const;
 
 /** The sRGB encoding of a display-linear value in [0, 1] (IEC 61966-2-1), to 8 bits. */
-function srgb8(linear: number): number {
+export function srgb8(linear: number): number {
   const v = linear <= 0.003_130_8 ? 12.92 * linear : 1.055 * linear ** (1 / 2.4) - 0.055;
   return Math.round(Math.min(Math.max(v, 0), 1) * 255);
 }
@@ -365,7 +365,8 @@ function toRgba8(texels: Float32Array): Uint8Array {
   return out;
 }
 
-function base64Of(bytes: Uint8Array): string {
+/** `bytes` as base64, for a {@link CapturedImage}. */
+export function base64Of(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));

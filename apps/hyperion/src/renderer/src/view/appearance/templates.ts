@@ -22,6 +22,7 @@
  * above it, Venus's (decision-phase-curves, 2026-10-02).
  */
 import type { PhaseTemplateId } from "./law";
+import { lambertPhase } from "./shapes";
 
 /** A measured V phase curve, normalised to one at opposition. */
 export interface PhaseTemplate {
@@ -200,6 +201,15 @@ export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> =
     150,
     1,
     `PROVISIONAL: the Moon's curve shape (${MOON_KS91}); q from Europa's 1.01 (Grundy et al. 2007, Science 318, 234) through s; cloud-free ice`,
+    true,
+  ),
+  // Design note 5's provisional photometry: a Lambert sphere, Φ = Φ_L, f = 1, held past 179°
+  // where Φ_L reaches 0 at 180°.
+  lambert: template(
+    (alphaDeg) => -2.5 * Math.log10(lambertPhase(alphaDeg / DEG_PER_RAD)),
+    179,
+    0,
+    "PROVISIONAL: a Lambert sphere, no measured curve (Design note 5's provisional photometry)",
     true,
   ),
   magma: template(

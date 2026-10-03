@@ -38,9 +38,11 @@ import {
   graphicsAnnunciation,
   useGraphicsStatus,
 } from "../../view/engine/status";
+import type { CameraPose } from "../../view/camera/pose";
 import type { RenderView, ViewSize } from "../../view/engine/types";
 import {
   controlEv100,
+  exposureScale,
   DEFAULT_EXPOSURE,
   type ExposureControl,
 } from "../../view/photometry/exposure";
@@ -49,8 +51,17 @@ import {
   serverSceneAtFrame,
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
-import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
-import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
+import { cameraSceneOf, type ViewScene, type ViewStar } from "../../view/scene/model";
+import type { BakedCube } from "../../view/sky/bake";
+import { skyCubeCacheOf } from "../../view/sky/cache";
+import { cameraFromObserverM } from "../../view/sky/camera";
+import { SkyCubeLayer } from "../../view/sky/cubeLayer";
+import { skySpriteStars } from "../../view/sky/sprites";
+import {
+  buildWireframeDrawList,
+  type DrawAnchor,
+  type SpriteStar,
+} from "../../view/wireframe/drawList";
 import { WireframeRenderer } from "../../view/wireframe/submit";
 import { CameraControls } from "./CameraControls";
 import { ExposurePanel } from "./ExposurePanel";
@@ -61,6 +72,8 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
+import { bakeInputOf, type DrawnSky, useViewSky } from "./useViewSky";
+import { SETTINGS } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -70,10 +83,12 @@ import {
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
+import { styleName } from "../../view/photoreal/style";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
   commandRun,
+  type LabelLine,
   labelLines,
   labelStatements,
   type MarkRow,
@@ -159,6 +174,8 @@ interface ViewStageProps {
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
+  /** The open universe, about which the sky is asked (R06), or `null`. */
+  readonly universe: UniverseIdHex | null;
 }
 
 /** What the drawing loop reads of the display, kept current by an effect. */
@@ -168,8 +185,10 @@ interface LoopInputs {
   readonly reducedMotion: boolean;
   readonly size: ElementSize | null;
   readonly tokens: ColourTokens | null;
-  /** The interim stars (R02.T16), drawn into every frame's scene. */
+  /** The interim stars (R02.T16), drawn into every frame's scene until the sky arrives. */
   readonly stars: ReadonlyArray<ViewStar>;
+  /** The sky (R06), drawn in the interim stars' place once it has arrived, or `null`. */
+  readonly sky: DrawnSky | null;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -227,6 +246,7 @@ function ViewStage({
   onEasedMovesChange,
   stars,
   countLine,
+  universe,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
@@ -253,7 +273,18 @@ function ViewStage({
     size,
     tokens: null,
     stars: [],
+    sky: null,
   });
+
+  // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
+  const viewSky = useViewSky({
+    universe,
+    place: server?.place ?? null,
+    run: shown.run,
+    exposure,
+    widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
+  });
+  const skyDrawn = viewSky.drawn;
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
@@ -279,8 +310,9 @@ function ViewStage({
       // and a detached element has no computed tokens.
       tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
       stars,
+      sky: skyDrawn,
     };
-  }, [exposure, selection, reducedMotion, size, canvas, stars]);
+  }, [exposure, selection, reducedMotion, size, canvas, stars, skyDrawn]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
   useLayoutEffect(() => {
@@ -318,6 +350,42 @@ function ViewStage({
       return undefined;
     }
     const renderer = new WireframeRenderer(engine);
+    // The sky's baked cube (R06.T13.g, T14): shared through the device's cache, baked once per sky
+    // and set of baked stars, drawn every frame; a new sky, asked as the parallax rule says,
+    // brings a new cube.
+    const cubes = new SkyCubeLayer(engine);
+    const cache = skyCubeCacheOf(engine);
+    // A sky whose bake failed is not baked again until another sky or a restore.
+    let failedFor: DrawnSky | null = null;
+    const unsubscribeRestored = engine.onRestored(() => {
+      failedFor = null;
+    });
+    const cubeFor = (sky: DrawnSky | null): BakedCube | null => {
+      if (sky === null || sky === failedFor) {
+        cache.release(VIEW_NAME);
+        return null;
+      }
+      try {
+        return cache.acquire(VIEW_NAME, {
+          stars: sky.model.stars,
+          baked: sky.selection.baked,
+          // Read at the bake: a restore may have brought a device without float32-blendable.
+          bakeInput: () =>
+            bakeInputOf(
+              sky,
+              engine.capabilities.float32Blendable
+                ? SETTINGS.high.sky.faceSizePx
+                : SETTINGS.low.sky.faceSizePx,
+            ),
+        });
+      } catch (error: unknown) {
+        // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
+        console.error("the sky's cube could not be baked:", error);
+        failedFor = sky;
+        cache.release(VIEW_NAME);
+        return null;
+      }
+    };
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let sized: ViewSize | null = null;
@@ -357,9 +425,19 @@ function ViewStage({
           selection: inputs.selection,
           destination: null,
           remPx: inputs.size.remPx * ratio,
+          skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
         });
         anchors = list.anchors;
-        renderer.render(view, list, camera, viewport);
+        const cube = cubeFor(inputs.sky);
+        renderer.render(
+          view,
+          list,
+          camera,
+          viewport,
+          cube === null
+            ? []
+            : [cubes.draw(cube, "display", exposureScale(controlEv100(inputs.exposure)))],
+        );
         // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10). A
         // label whose mark this frame did not draw is hidden until the next readout removes it.
         const placed = new Set<string>();
@@ -388,6 +466,9 @@ function ViewStage({
     return () => {
       cancelAnimationFrame(frame);
       renderer.dispose();
+      cache.release(VIEW_NAME);
+      cubes.dispose();
+      unsubscribeRestored();
       view.dispose();
     };
   }, [engineState, canvas]);
@@ -494,7 +575,7 @@ function ViewStage({
             <ViewCanvas
               canvasRef={setCanvas}
               stageRef={stageRef}
-              accessibleName={`VIEW, WIREFRAME, ${PRESET_NAMES[shown.run.camera.preset]}`}
+              accessibleName={`VIEW, ${styleName(shown.run.camera.style)}, ${PRESET_NAMES[shown.run.camera.preset]}`}
               describedBy={legendId}
               onKeyDown={onCanvasKeyDown}
               onKeyUp={onCanvasKeyUp}
@@ -509,9 +590,12 @@ function ViewStage({
                 labelRef={placeLabel}
               />
               <ViewLabelBlock
-                lines={labelLines(shown.run, exposure, server?.stale === true)}
+                lines={withSkyLine(
+                  labelLines(shown.run, exposure, server?.stale === true),
+                  viewSky.labelValue,
+                )}
                 statements={labelStatements(shown.run)}
-                countLine={countLine}
+                countLine={viewSky.labelValue === null ? countLine : null}
                 fault={fault}
               />
             </ViewCanvas>
@@ -554,6 +638,31 @@ function ViewStage({
       </div>
     </div>
   );
+}
+
+/**
+ * The sky's sprites from the camera this frame: the selection's stars placed from the camera's
+ * offset from the sky's observer, in `f64` (R06 Design note 20); `null` where the camera's
+ * galactic position is not known.
+ */
+function skySprites(
+  sky: DrawnSky,
+  pose: CameraPose,
+  scene: ViewScene,
+): ReadonlyArray<SpriteStar> | null {
+  const offset = cameraFromObserverM(pose, scene, sky.model.request.observer);
+  // A scene that has lost its system's position draws the interim stars, which say so.
+  return offset === null ? null : skySpriteStars(sky.model.stars, sky.selection.sprites, offset);
+}
+
+/** The label block's lines with the sky's `STARS` reading in place of R02's, once it has arrived. */
+function withSkyLine(
+  lines: ReadonlyArray<LabelLine>,
+  skyValue: string | null,
+): ReadonlyArray<LabelLine> {
+  return skyValue === null
+    ? lines
+    : lines.map((line) => (line.label === "STARS" ? { ...line, value: skyValue } : line));
 }
 
 /**
@@ -678,6 +787,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
         onEasedMovesChange={setEasedMoves}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
+        universe={universe}
       />
     </div>
   );

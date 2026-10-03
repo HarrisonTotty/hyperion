@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import golden from "../../../../../../../../crates/hyperion-surface/tests/golden/bake.golden?raw";
+import collisionGolden from "../../../../../../../../crates/hyperion-surface/tests/golden/collision.golden?raw";
 import geometrySource from "../../../../../../../../crates/hyperion-surface/src/geometry.rs?raw";
+import levelTableGolden from "../../../../../../../../crates/hyperion-surface/tests/golden/level_table.golden?raw";
 import libSource from "../../../../../../../../crates/hyperion-surface/src/lib.rs?raw";
 import {
   bakePatch,
@@ -9,8 +11,10 @@ import {
   finestSpacingM,
   initSync,
   levelTable,
+  omittedSigmaM,
   NormalScale,
   Ridges,
+  surfaceHeightM,
   testPlanetVersion,
   VertexPath,
 } from "../../../generated/surface/hyperion_surface";
@@ -180,6 +184,47 @@ describe("the height worker's module", () => {
 
   it("rejects a module that bakes another test planet version", () => {
     expect(staleModuleMessage({ ...module, testPlanetVersion: () => 99 })).toMatch(/version 99/);
+  });
+
+  it("hands out each level's omitted octaves' RMS as the native golden pins it", () => {
+    const lines = levelTableGolden.split("\n").filter((line) => line.startsWith("sigma "));
+    expect(lines).toHaveLength(2 * 25);
+    for (const line of lines) {
+      const [, ridges, level, hex] = line.split(" ");
+      const sigma = omittedSigmaM(Number(level), ridges === "on" ? Ridges.On : Ridges.Off);
+      expect(`0x${bitsHex(sigma)}`).toBe(hex);
+    }
+    expect(omittedSigmaM(18, Ridges.Off)).toBe(0);
+    expect(omittedSigmaM(4, Ridges.On)).toBeLessThan(omittedSigmaM(4, Ridges.Off));
+    expect(omittedSigmaM(9, Ridges.On)).toBe(omittedSigmaM(9, Ridges.Off));
+  });
+
+  it("gives the drawn finest mesh's height as the native collision interpolant does", () => {
+    const view = new DataView(new ArrayBuffer(8));
+    const fromHex = (hex: string | undefined): number => {
+      view.setBigUint64(0, BigInt(hex ?? "nan"));
+      return view.getFloat64(0);
+    };
+    const lines = collisionGolden.split("\n").filter((line) => line.startsWith("height "));
+    expect(lines).toHaveLength(2 * 27);
+    for (const line of lines) {
+      const [, ridges, x, y, z, h] = line.split(" ");
+      const height = surfaceHeightM(
+        fromHex(x),
+        fromHex(y),
+        fromHex(z),
+        ridges === "on" ? Ridges.On : Ridges.Off,
+      );
+      expect(`0x${bitsHex(height)}`).toBe(h);
+    }
+  });
+
+  it("refuses the height at a zero direction", () => {
+    expect(() => surfaceHeightM(0, 0, 0, Ridges.Off)).toThrow(/not finite and non-zero/);
+  });
+
+  it("refuses the omitted octaves' RMS of a level above 24", () => {
+    expect(() => omittedSigmaM(25, Ridges.Off)).toThrow(/above 24/);
   });
 
   it("hands out a level table of four values for each level from 0 to 24", () => {

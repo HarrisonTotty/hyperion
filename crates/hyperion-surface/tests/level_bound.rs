@@ -75,7 +75,6 @@ fn level_bound_holds() {
         let planet = TEST_PLANET.with_ridges(ridges);
         let a = planet.figure().equatorial_radius_m;
         let finest = finest_level(a);
-        let all = planet.octaves_at(finest).count();
         let mut rng = Lcg::new(0x0062_6f75_6e64);
         let mut cache = LatticeCache::new();
         println!("ridges {ridges:?}");
@@ -84,12 +83,7 @@ fn level_bound_holds() {
         );
         for level in 0..finest {
             let bound = planet.level_bound_m(level);
-            let own = planet.octaves_at(level).count();
-            let mut variance = 0.0;
-            for k in own..all {
-                variance += planet.sigma_m(k) * planet.sigma_m(k);
-            }
-            let sigma = variance.sqrt();
+            let sigma = planet.omitted_sigma_m(level);
             let mut samples = Vec::with_capacity(10_000);
             for _ in 0..16 {
                 let key = random_patch(level, &mut rng);

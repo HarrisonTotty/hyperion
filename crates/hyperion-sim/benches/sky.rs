@@ -16,7 +16,6 @@ use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::sky::luminosity::LuminosityTables;
-use hyperion_sim::time::UniverseTime;
 
 fn luminosity_tables(c: &mut Criterion) {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
@@ -24,7 +23,7 @@ fn luminosity_tables(c: &mut Criterion) {
     let mut group = c.benchmark_group("sky");
     group.sample_size(10);
     group.bench_function("luminosity_tables", |b| {
-        b.iter(|| LuminosityTables::build(black_box(&galaxy), UniverseTime::EPOCH));
+        b.iter(|| LuminosityTables::build(black_box(&galaxy)));
     });
     group.finish();
 }

@@ -576,8 +576,15 @@ export class WireframeRenderer {
    * The frame for a draw list: the list packed, its buffers written, its draws bound.
    *
    * @param viewport - The view's size, px, which the projection's aspect follows.
+   * @param background - Draws at infinity, such as R06's baked star cube, encoded after the
+   *   occluders (so that they hide them) and before the lines and sprites.
    */
-  frame(list: WireframeDrawList, camera: DrawCamera, viewport: Viewport): FrameSubmission {
+  frame(
+    list: WireframeDrawList,
+    camera: DrawCamera,
+    viewport: Viewport,
+    background: ReadonlyArray<DrawItem> = [],
+  ): FrameSubmission {
     const packed = packWireframe(list, camera, viewport);
     const buffers: Record<WireframeBuffer, BufferHandle> = {
       segments: this.#write("segments", packed.segments),
@@ -586,7 +593,7 @@ export class WireframeRenderer {
       sprites: this.#write("sprites", packed.sprites),
     };
     const { materials, meshes } = this.#resources;
-    const draws: DrawItem[] = packed.draws.map((draw) => {
+    const bound: DrawItem[] = packed.draws.map((draw) => {
       const bufferName = MATERIAL_BUFFER[draw.material];
       return {
         mesh: meshes[draw.mesh],
@@ -598,6 +605,16 @@ export class WireframeRenderer {
         storageBuffers: { [bufferName]: buffers[bufferName] },
       };
     });
+    // The occluders, then the background they hide, then everything else in its packed order.
+    const isOccluder = (index: number): boolean => {
+      const material = packed.draws[index]?.material;
+      return material === "occluderSphere" || material === "occluderHull";
+    };
+    const draws = [
+      ...bound.filter((_, index) => isOccluder(index)),
+      ...background,
+      ...bound.filter((_, index) => !isOccluder(index)),
+    ];
     return {
       label: WIREFRAME_PASS_LABEL,
       viewRotation: viewRotation4(camera.pose.orientation),
@@ -612,8 +629,14 @@ export class WireframeRenderer {
   }
 
   /** Packs, writes and renders one frame into `view`. */
-  render(view: RenderView, list: WireframeDrawList, camera: DrawCamera, viewport: Viewport): void {
-    view.render(this.frame(list, camera, viewport));
+  render(
+    view: RenderView,
+    list: WireframeDrawList,
+    camera: DrawCamera,
+    viewport: Viewport,
+    background: ReadonlyArray<DrawItem> = [],
+  ): void {
+    view.render(this.frame(list, camera, viewport, background));
   }
 
   /** Stops following the engine's restores; the engine owns and frees the handles. */
