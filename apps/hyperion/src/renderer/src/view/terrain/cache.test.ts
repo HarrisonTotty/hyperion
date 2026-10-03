@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
 import { selectionOf } from "../../test/terrainFixtures";
-import { PatchCache, type ResidentPatch, resolveDrawSet } from "./cache";
+import { DrawSetResolver, PatchCache, type ResidentPatch, resolveDrawSet } from "./cache";
 import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
 import type { Selection } from "./select";
 import { slotLayout } from "./slotLayout";
@@ -89,6 +89,39 @@ describe("the patch cache", () => {
     expect(cache.has(patchKeyString(A))).toBe(true);
   });
 
+  it("pins every resident ancestor of the selection, above a stand-in too", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [ROOT, A, AA]);
+    // AA's children are selected and unbaked: AA stands in for them, and A and the root above it
+    // are pinned too.
+    frame(cache, selectionOf(childKeys(AA)));
+    expect(cache.pressure().drawn).toBe(3);
+  });
+
+  it("evicts the deeper of two patches used as recently first", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A, B, AA, AB, ...childKeys(AA).slice(0, 2)]);
+    frame(cache, selectionOf([]));
+    const result = cache.insert(resident(C));
+    expect(result.kind === "stored" ? result.evicted : "refused").toBe(
+      patchKeyString(childKeys(AA)[0]),
+    );
+  });
+
+  it("evicts a pinned ancestor only after every unpinned patch", () => {
+    const cache = cacheOf(7);
+    insertAll(cache, [A, AA, ...childKeys(B).slice(0, 4), C]);
+    // AA's children are selected: AA and A are pinned as its ancestors; B's children and C are not.
+    frame(cache, selectionOf(childKeys(AA)));
+    const evicted = [D, ...childKeys(D)].map((k) => {
+      const result = cache.insert(resident(k));
+      return result.kind === "stored" ? result.evicted : "refused";
+    });
+    const unpinnedFirst = evicted.slice(0, 5);
+    expect(unpinnedFirst).not.toContain(patchKeyString(A));
+    expect(unpinnedFirst).not.toContain(patchKeyString(AA));
+  });
+
   it("evicts a drawn patch once only forced patches remain beside it", () => {
     const cache = cacheOf(6);
     const forced = [B, C, D, AA, AB];
@@ -170,13 +203,13 @@ describe("the patch cache", () => {
     const result = cache.insert(resident(AD));
     expect(result.kind === "stored" ? result.evicted : "refused").toBe(patchKeyString(A));
     const draw = resolveDrawSet(selection, cache);
-    expect(draw.patches.map((p) => [p.keyString, p.standIn])).toEqual([
-      ...forced
-        .map((k) => patchKeyString(k))
-        .toSorted()
-        .map((s) => [s, false]),
-      [patchKeyString(other), true],
-    ]);
+    const drawn = new Map(draw.patches.map((p) => [p.keyString, p.standIn]));
+    expect(drawn).toEqual(
+      new Map([
+        ...forced.map((k) => [patchKeyString(k), false] as const),
+        [patchKeyString(other), true],
+      ]),
+    );
   });
 
   it("reuses a freed slot", () => {
@@ -197,6 +230,15 @@ describe("the patch cache", () => {
     expect(cache.usedSlots).toBe(1);
   });
 
+  it("gives a resident patch's baked height range, and none once it is gone", () => {
+    const cache = cacheOf(6);
+    cache.insert({ ...resident(A), heightRangeM: [-120, 340] });
+    expect(cache.heightRangeM(A)).toEqual([-120, 340]);
+    expect(cache.heightRangeM(B)).toBeUndefined();
+    cache.remove(patchKeyString(A));
+    expect(cache.heightRangeM(A)).toBeUndefined();
+  });
+
   it("counts the GPU bytes it holds", () => {
     const cache = cacheOf(6);
     insertAll(cache, [A, B, C]);
@@ -210,13 +252,68 @@ describe("the patch cache", () => {
   });
 });
 
+describe("the draw set's resolver", () => {
+  it("returns the same set, arrays and records for an unchanged selection", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [ROOT, A, AA, AB]);
+    const resolver = new DrawSetResolver(cache);
+    const selection = selectionOf([AA, AB, AC, AD, B, C]);
+    const first = resolver.resolve(selection);
+    const records = [...first.patches];
+    const slots = first.slots;
+    const second = resolver.resolve(selection);
+    expect(second).toBe(first);
+    expect(second.slots).toBe(slots);
+    expect(second.patches).toBe(first.patches);
+    expect(second.patches.length).toBe(records.length);
+    second.patches.forEach((p, n) => {
+      expect(p).toBe(records[n]);
+    });
+  });
+
+  it("keeps its storage when the selection changes", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [ROOT, A, B, C, D, AA, AB, AC, AD]);
+    const resolver = new DrawSetResolver(cache);
+    const coarse = resolver.resolve(selectionOf([A, B, C, D]));
+    const slots = coarse.slots;
+    const fine = resolver.resolve(selectionOf([AA, AB, AC, AD, B, C, D]));
+    expect(fine).toBe(coarse);
+    expect(fine.slots).toBe(slots);
+    expect(fine.count).toBe(7);
+    expect([...fine.slots.subarray(0, fine.count)]).toEqual(fine.patches.map((p) => p.patch.slot));
+  });
+
+  it("keeps a forced patch no view sees resident but leaves it out of the draw", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [ROOT, A, AA]);
+    const base = selectionOf([AA, B], [AA]);
+    const unseen = new Map(base.patches);
+    const aa = unseen.get(patchKeyString(AA));
+    if (aa === undefined) {
+      throw new Error("no AA");
+    }
+    unseen.set(patchKeyString(AA), { ...aa, seen: false });
+    const selection: Selection = { ...base, patches: unseen };
+    const draw = resolveDrawSet(selection, cache);
+    expect(draw.patches.map((p) => p.keyString)).toEqual([patchKeyString(ROOT)]);
+    cache.retain(selection, draw);
+    expect(cache.pressure().forced).toBe(1);
+    for (let n = 0; n < 20; n += 1) {
+      cache.insert(resident({ face: 1, level: 10, i: n, j: 0 }));
+    }
+    expect(cache.has(patchKeyString(AA))).toBe(true);
+  });
+});
+
 describe("the draw set", () => {
   it("draws a resident patch as itself and lists its slot", () => {
     const cache = cacheOf(6);
     insertAll(cache, [A]);
     const draw = resolveDrawSet(selectionOf([A]), cache);
     expect(draw.patches.map((p) => [p.keyString, p.standIn])).toEqual([[patchKeyString(A), false]]);
-    expect([...draw.slots]).toEqual([cache.get(patchKeyString(A))?.slot]);
+    expect(draw.count).toBe(1);
+    expect([...draw.slots.subarray(0, draw.count)]).toEqual([cache.get(patchKeyString(A))?.slot]);
     expect(draw.standingIn).toBe(0);
   });
 
