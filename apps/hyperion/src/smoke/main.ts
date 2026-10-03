@@ -33,6 +33,7 @@ import {
   SMOKE_EXIT,
   SMOKE_RESULT_CHANNEL,
 } from "./result";
+import { isOwnPage } from "../main/ipcSender";
 import { startSoak } from "./soak";
 
 /** The value of `--<name>=value` on the command line, or `fallback`. */
@@ -165,8 +166,7 @@ void app
           })
         : (): Promise<void> => Promise.resolve();
     ipcMain.handle(SMOKE_RESULT_CHANNEL, async (event, report: unknown) => {
-      const url = event.senderFrame?.url.split("?")[0];
-      if (url !== PAGE_URL) {
+      if (!isOwnPage(event.senderFrame, PAGE_URL)) {
         return;
       }
       try {

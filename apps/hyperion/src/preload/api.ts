@@ -25,6 +25,71 @@ export interface GraphicsApi {
   onGpuProcessGone(listener: (event: GpuProcessGoneReport) => void): () => void;
 }
 
+/** The spike's quality setting (R05 Design note 26). */
+export type SpikeSettingName = "high" | "low";
+
+/** The terrain's vertex path (R05 Design note 4), the T16 and T17 variants. */
+export type SpikeVertexPath = "baked-offsets" | "face-differences";
+
+/** The terrain's normal resolution (R05 Design note 25). */
+export type SpikeNormals = "double" | "mesh";
+
+/** An on/off option. */
+export type SpikeSwitch = "on" | "off";
+
+/** The spike's options as the command line gave them (T13.c). */
+export interface SpikeLaunch {
+  readonly setting: SpikeSettingName;
+  /** The seed, a u64 in decimal (a string, since a `bigint` does not cross the bridge as one). */
+  readonly seed: string;
+  /** A 10 s run that writes no results file and exits with a status. */
+  readonly smoke: boolean;
+  /** Where the results file goes, or `null` for `docs/measurements/descent-spike/`. */
+  readonly out: string | null;
+  /** The height-worker count, or `null` for Design note 11's default. */
+  readonly workers: number | null;
+  /** The vertex path and normals, or `null` for the setting's own. */
+  readonly vertexPath: SpikeVertexPath | null;
+  readonly normals: SpikeNormals | null;
+  /** Whether the test planet's ridges are on. */
+  readonly ridged: SpikeSwitch;
+  /** Whether Dawn's safety checks stay on (Design note 22). */
+  readonly dawnSafety: SpikeSwitch;
+  /** The directory a GPU capture is written to (T15.a), or `null` for none. */
+  readonly capture: string | null;
+}
+
+/** Where a spike run's results file and its summary were written. */
+export interface SpikeResultsPaths {
+  readonly json: string;
+  readonly markdown: string;
+}
+
+/** How a spike run ends: the app exits with 0 for `pass` and 1 for `fail`. */
+export type SpikeEnd =
+  { readonly status: "pass" } | { readonly status: "fail"; readonly reason: string };
+
+/**
+ * The descent spike's narrow functions (plan R05, T13.c), present only when the client was
+ * launched with `--descent-spike`; the main process checks each call's sender and arguments.
+ */
+export interface SpikeApi {
+  /** The spike's options as the command line gave them. */
+  readonly launch: SpikeLaunch;
+  /** Starts the run's trace and its 1 Hz memory sampling (Design note 18). */
+  startTrace(): Promise<void>;
+  /** Stops them, and reduces the trace in the main process. */
+  stopTrace(): Promise<void>;
+  /** Hands the main process's sampler the renderer's own memory (`getProcessMemoryInfo`). */
+  sampleMemory(): Promise<void>;
+  /** Writes the results file of T14.c from the renderer's report. */
+  writeResults(report: DescentSpikeReport): Promise<SpikeResultsPaths>;
+  /** Writes a GPU capture (T15.a) as `capture.json` and `capture.bin` into `--capture`'s directory. */
+  writeCapture(capture: { readonly json: string; readonly bin: Uint8Array }): Promise<string>;
+  /** Ends the run, and the app with it. */
+  end(outcome: SpikeEnd): Promise<void>;
+}
+
 /** The API the preload script exposes to the renderer as `window.hyperion`. */
 export interface HyperionApi {
   readonly platform: string;
@@ -40,6 +105,8 @@ export interface HyperionApi {
     readonly chrome: string;
     readonly node: string;
   };
+  /** The descent spike's functions, present only on a `--descent-spike` launch. */
+  readonly spike?: SpikeApi;
 }
 
 declare global {
