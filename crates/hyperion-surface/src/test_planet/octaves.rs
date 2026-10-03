@@ -53,14 +53,30 @@ const SIGMA_ROLL_OVER_M: f64 = 27.1;
 const OFFSET_DRAW_BASE: u64 = 1 << 40;
 
 /// The lattice spacing of octave `k`, metres: 10,000 km ÷ 2^k, exact.
+///
+/// # Panics
+///
+/// If `k` is above [`FINEST_OCTAVE`].
 #[must_use]
 pub fn spacing_m(k: u8) -> f64 {
+    assert!(
+        k <= FINEST_OCTAVE,
+        "octave {k} is beyond the finest, {FINEST_OCTAVE}"
+    );
     COARSEST_SPACING_M / f64::from(1_u32 << k)
 }
 
 /// The nominal RMS height of octave `k`, metres, before the coarse octaves' rescale.
+///
+/// # Panics
+///
+/// If `k` is above [`FINEST_OCTAVE`].
 #[must_use]
 pub fn nominal_sigma_m(k: u8) -> f64 {
+    assert!(
+        k <= FINEST_OCTAVE,
+        "octave {k} is beyond the finest, {FINEST_OCTAVE}"
+    );
     if k <= ROLL_OVER_OCTAVE {
         SIGMA_0_M * math::exp2(-f64::from(k) / 2.0)
     } else {
@@ -71,12 +87,20 @@ pub fn nominal_sigma_m(k: u8) -> f64 {
 /// The rotation of octave `k`: that of the integer quaternion
 /// (k + 2, 1 + k mod 3, 2 + k mod 5, 1 + k mod 7), each entry an integer over the quaternion's
 /// squared norm.
+///
+/// # Panics
+///
+/// If `k` is above [`FINEST_OCTAVE`].
 #[must_use]
 #[expect(
     clippy::many_single_char_names,
     reason = "a quaternion (a, b, c, d) and its squared norm n, as the rotation formula names them"
 )]
 pub fn rotation(k: u8) -> [[f64; 3]; 3] {
+    assert!(
+        k <= FINEST_OCTAVE,
+        "octave {k} is beyond the finest, {FINEST_OCTAVE}"
+    );
     let index = i64::from(k);
     let (a, b, c, d) = (index + 2, 1 + index % 3, 2 + index % 5, 1 + index % 7);
     let n = a * a + b * b + c * c + d * d;
@@ -106,8 +130,16 @@ pub fn rotation(k: u8) -> [[f64; 3]; 3] {
 
 /// The lattice offset of octave `k` of the planet of `seed`, each axis uniform in [0, 1): the top
 /// 53 bits of words 2⁴⁰ + 4k + axis of the test planet's stream for object 0.
+///
+/// # Panics
+///
+/// If `k` is above [`FINEST_OCTAVE`].
 #[must_use]
 pub fn offset(seed: Seed, k: u8) -> [f64; 3] {
+    assert!(
+        k <= FINEST_OCTAVE,
+        "octave {k} is beyond the finest, {FINEST_OCTAVE}"
+    );
     let stream = Stream::open(seed, TEST_PLANET, ObjectKey::galaxy_item(0));
     [0_u64, 1, 2].map(|axis| {
         let word = stream.word_at(OFFSET_DRAW_BASE + 4 * u64::from(k) + axis);
@@ -121,8 +153,16 @@ pub fn offset(seed: Seed, k: u8) -> [f64; 3] {
 }
 
 /// Octave `k` of the planet of `seed`.
+///
+/// # Panics
+///
+/// If `k` is above [`FINEST_OCTAVE`].
 #[must_use]
 pub fn octave(seed: Seed, k: u8) -> Octave {
+    assert!(
+        k <= FINEST_OCTAVE,
+        "octave {k} is beyond the finest, {FINEST_OCTAVE}"
+    );
     Octave::new(k, spacing_m(k), rotation(k), offset(seed, k), seed)
 }
 

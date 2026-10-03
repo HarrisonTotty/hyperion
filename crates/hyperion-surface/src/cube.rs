@@ -239,6 +239,27 @@ pub const MAX_LEVEL: u8 = 24;
 /// Quads along a patch's side: a patch is 65 × 65 vertices (plan R05, Goal).
 pub const PATCH_QUADS: u32 = 64;
 
+/// A grid of samples over a patch: its 65 × 65 vertices, or the 129 × 129 of normals at twice
+/// the mesh's resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SampleGrid {
+    /// 64 quads a side, the mesh's vertices.
+    Mesh,
+    /// 128 quads a side.
+    Double,
+}
+
+impl SampleGrid {
+    /// The grid's quads a side.
+    #[must_use]
+    pub const fn quads(self) -> u32 {
+        match self {
+            Self::Mesh => PATCH_QUADS,
+            Self::Double => 2 * PATCH_QUADS,
+        }
+    }
+}
+
 /// One of a patch's four edges, named by the face coordinate that is constant along it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Edge {
@@ -566,20 +587,20 @@ impl PatchKey {
     /// If `x` or `y` is above [`PATCH_QUADS`].
     #[must_use]
     pub fn vertex_dir(self, x: u8, y: u8) -> [f64; 3] {
-        self.sample_dir(u32::from(x), u32::from(y), PATCH_QUADS)
+        self.sample_dir(u32::from(x), u32::from(y), SampleGrid::Mesh)
     }
 
-    /// The unit direction of sample (`x`, `y`) of a grid of `per_patch` × `per_patch` quads over
-    /// the patch, by [`vertex_dir`](Self::vertex_dir)'s canonical rule: the mesh's vertices at
-    /// 64, and the double-resolution normals' samples at 128, whose even samples are the mesh's
-    /// vertices bit for bit.
+    /// The unit direction of sample (`x`, `y`) of `grid` over the patch, by
+    /// [`vertex_dir`](Self::vertex_dir)'s canonical rule: the mesh's vertices on
+    /// [`SampleGrid::Mesh`], and the double-resolution normals' samples on [`SampleGrid::Double`],
+    /// whose even samples are the mesh's vertices bit for bit.
     ///
     /// # Panics
     ///
-    /// If `per_patch` is not 64 or 128, or `x` or `y` is above it.
+    /// If `x` or `y` is above the grid's quads a side.
     #[must_use]
-    pub fn sample_dir(self, x: u32, y: u32, per_patch: u32) -> [f64; 3] {
-        let (quads, along_u, along_v) = self.sample_lattice(x, y, per_patch);
+    pub fn sample_dir(self, x: u32, y: u32, grid: SampleGrid) -> [f64; 3] {
+        let (quads, along_u, along_v) = self.sample_lattice(x, y, grid.quads());
         let point = face_point(self.face, 2 * along_u - quads, 2 * along_v - quads, quads);
         let face = canonical_face(point, quads);
         let (u, v) = face_coords(face, point);
@@ -603,11 +624,8 @@ impl PatchKey {
     /// The sample lattice of the patch's level at `per_patch` quads a patch: its quads a face
     /// side, `per_patch` × 2^level, and the sample's lattice indices (a, b) on the patch's face,
     /// each 0 to that number.
+    #[must_use]
     fn sample_lattice(self, x: u32, y: u32, per_patch: u32) -> (i64, i64, i64) {
-        assert!(
-            per_patch == PATCH_QUADS || per_patch == 2 * PATCH_QUADS,
-            "a patch is sampled at 64 or 128 quads a side, not {per_patch}"
-        );
         assert!(
             x <= per_patch && y <= per_patch,
             "vertex ({x}, {y}) is outside a patch of {per_patch} quads"
@@ -1157,6 +1175,26 @@ mod tests {
             for group in corners.chunks(3) {
                 assert!(group.iter().all(|c| c.0 == group[0].0), "{group:?}");
                 assert!(group.iter().all(|c| c.1 == group[0].1), "{group:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_double_grids_even_samples_are_the_vertices_bit_for_bit() {
+        for key in [
+            PatchKey::new(Face::PosX, 0, 0, 0).unwrap(),
+            PatchKey::new(Face::NegZ, 7, 127, 0).unwrap(),
+            PatchKey::new(Face::PosY, 24, 5, (1 << 24) - 1).unwrap(),
+        ] {
+            for y in 0..=64_u8 {
+                for x in 0..=64_u8 {
+                    let even =
+                        key.sample_dir(2 * u32::from(x), 2 * u32::from(y), SampleGrid::Double);
+                    assert_eq!(
+                        even.map(hyperion_testkit::float::bits),
+                        key.vertex_dir(x, y).map(hyperion_testkit::float::bits)
+                    );
+                }
             }
         }
     }

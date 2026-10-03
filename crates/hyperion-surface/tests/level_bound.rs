@@ -19,7 +19,7 @@ use hyperion_surface::cube::{Face, FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, u
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::LatticeCache;
 use hyperion_surface::patch::collision::{finest_surface_height, mesh_height};
-use hyperion_surface::test_planet::{Ridges, TEST_PLANET, octaves};
+use hyperion_surface::test_planet::{Ridges, TEST_PLANET};
 use hyperion_testkit::lcg::Lcg;
 
 /// A random direction inside `key`.
@@ -117,6 +117,5 @@ fn level_bound_holds() {
                 println!("  finding: the 99.9th percentile is under a quarter of the bound");
             }
         }
-        let _ = octaves::FINEST_OCTAVE;
     }
 }

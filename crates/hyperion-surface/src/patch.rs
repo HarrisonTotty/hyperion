@@ -53,7 +53,7 @@ pub trait HeightSource {
     /// The caller's cache, one per bake.
     type Cache;
     /// Why a height could not be computed.
-    type Error;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// The datum heights are measured from (Design note 5).
     fn figure(&self) -> Spheroid;
@@ -102,6 +102,15 @@ pub enum NormalScale {
 }
 
 impl NormalScale {
+    /// The sample grid the normals are baked on.
+    #[must_use]
+    pub const fn grid(self) -> crate::cube::SampleGrid {
+        match self {
+            Self::Mesh => crate::cube::SampleGrid::Mesh,
+            Self::Double => crate::cube::SampleGrid::Double,
+        }
+    }
+
     /// Normals along a side: 65 or 129.
     #[must_use]
     pub const fn side(self) -> usize {
@@ -243,21 +252,25 @@ pub(crate) struct BakedVertices {
     clippy::manual_midpoint,
     reason = "the exact operations are fixed for bit-for-bit agreement with the client"
 )]
+#[must_use]
 fn mean(a: f64, b: f64) -> f64 {
     0.5 * (a + b)
 }
 
 /// `a − b`.
+#[must_use]
 fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
 /// `|a|`.
+#[must_use]
 fn norm(a: [f64; 3]) -> f64 {
     (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
 }
 
 /// The `f32` nearest `x`.
+#[must_use]
 fn narrow(x: f64) -> f32 {
     #[expect(
         clippy::cast_possible_truncation,
@@ -269,6 +282,7 @@ fn narrow(x: f64) -> f32 {
 }
 
 /// The spacing of `f32` values at |x|, an upper bound on the narrowing step, metres.
+#[must_use]
 fn f32_step(x: f64) -> f64 {
     // 2⁻²³ of the magnitude bounds the spacing of f32 values at or below it (ulp ≤ |x| 2⁻²³).
     x.abs() * f64::from(f32::EPSILON)
@@ -496,10 +510,10 @@ mod tests {
             let bake = bake_patch(&TEST_PLANET, key, &opts, &mut cache).unwrap();
             let side = scale.side();
             assert_eq!(bake.normals.len(), 2 * side * side);
-            let per = u32::try_from(side - 1).unwrap();
+            let per = scale.grid().quads();
             for y in (0..=per).step_by(7) {
                 for x in (0..=per).step_by(5) {
-                    let dir = key.sample_dir(x, y, per);
+                    let dir = key.sample_dir(x, y, scale.grid());
                     let s = TEST_PLANET.height(dir, key.level(), &mut cache);
                     let expected =
                         normals::surface_normal(&TEST_PLANET.figure(), dir, s.height_m, s.gradient);

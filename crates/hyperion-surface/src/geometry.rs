@@ -77,6 +77,7 @@ fn min_rate() -> f64 {
 }
 
 /// The step in s of `level`'s vertex lattice, 2^−(level + 6), exact.
+#[must_use]
 pub(crate) fn lattice_step(level: u8) -> f64 {
     let quads = u64::from(crate::cube::PATCH_QUADS) << level;
     #[expect(

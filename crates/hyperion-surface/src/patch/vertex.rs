@@ -47,7 +47,7 @@ pub struct PatchTerms {
     /// ν₀, the spheroid normal at the centre.
     pub nu0: [f64; 3],
     /// h₀, the centre's own height, metres.
-    pub h0: f64,
+    pub h0_m: f64,
     /// Whether the patch straddles s = ½ or t = ½ (level 0 only).
     pub straddles: bool,
 }
@@ -70,12 +70,13 @@ pub struct PatchTermsF32 {
     /// ν₀.
     pub nu0: [f32; 3],
     /// h₀, metres.
-    pub h0: f32,
+    pub h0_m: f32,
     /// Whether the patch straddles s = ½ or t = ½.
     pub straddles: bool,
 }
 
 /// The face's axes a, e₁ and e₂ by S2's convention (see [`crate::cube`]).
+#[must_use]
 const fn face_axes(face: Face) -> [[f64; 3]; 3] {
     match face {
         Face::PosX => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
@@ -87,6 +88,7 @@ const fn face_axes(face: Face) -> [[f64; 3]; 3] {
     }
 }
 
+#[must_use]
 fn narrow(x: f64) -> f32 {
     #[expect(
         clippy::cast_possible_truncation,
@@ -96,14 +98,15 @@ fn narrow(x: f64) -> f32 {
     y
 }
 
+#[must_use]
 fn narrow3(v: [f64; 3]) -> [f32; 3] {
     v.map(narrow)
 }
 
 impl PatchTerms {
-    /// The terms of `key` on `figure`, for an origin at height `h0` above the centre vertex.
+    /// The terms of `key` on `figure`, for an origin at height `h0_m` metres above the centre vertex.
     #[must_use]
-    pub fn new(key: PatchKey, figure: &Spheroid, h0: f64) -> Self {
+    pub fn new(key: PatchKey, figure: &Spheroid, h0_m: f64) -> Self {
         let level = key.level();
         let cells = f64::from(1_u32 << level);
         let st0 = [
@@ -129,7 +132,7 @@ impl PatchTerms {
             scale,
             m0,
             nu0: figure.normal(d0),
-            h0,
+            h0_m,
             straddles: level == 0,
         }
     }
@@ -145,7 +148,7 @@ impl PatchTerms {
             scale: narrow3(self.scale),
             m0: narrow3(self.m0),
             nu0: narrow3(self.nu0),
-            h0: narrow(self.h0),
+            h0_m: narrow(self.h0_m),
             straddles: self.straddles,
         }
     }
@@ -158,6 +161,7 @@ pub fn grid_offset(x: u8) -> f64 {
 }
 
 /// The warp's difference u(s₀ + δs) − u(s₀), in `f64`.
+#[must_use]
 fn warp_difference(s0: f64, ds: f64, straddles: bool) -> f64 {
     let s = s0 + ds;
     if straddles {
@@ -170,6 +174,7 @@ fn warp_difference(s0: f64, ds: f64, straddles: bool) -> f64 {
 }
 
 /// The small-difference identity: for p = p₀ + Δ, `p ÷ |p| − p₀ ÷ |p₀|`, in `f64`.
+#[must_use]
 fn unit_difference(p0: [f64; 3], delta: [f64; 3]) -> [f64; 3] {
     let dot = p0[0] * delta[0] + p0[1] * delta[1] + p0[2] * delta[2];
     let dd = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
@@ -181,9 +186,9 @@ fn unit_difference(p0: [f64; 3], delta: [f64; 3]) -> [f64; 3] {
     [0, 1, 2].map(|c| delta[c] / len + p0[c] * factor)
 }
 
-/// The position of vertex (`x`, `y`) at height `h` relative to the origin, in `f64`.
+/// The position of vertex (`x`, `y`) at height `h_m` metres relative to the origin, in `f64`.
 #[must_use]
-pub fn face_difference_position(terms: &PatchTerms, x: u8, y: u8, h: f64) -> [f64; 3] {
+pub fn face_difference_position(terms: &PatchTerms, x: u8, y: u8, h_m: f64) -> [f64; 3] {
     let du = warp_difference(terms.st0[0], grid_offset(x) * terms.step, terms.straddles);
     let dv = warp_difference(terms.st0[1], grid_offset(y) * terms.step, terms.straddles);
     let [a, e1, e2] = terms.axes;
@@ -192,11 +197,12 @@ pub fn face_difference_position(terms: &PatchTerms, x: u8, y: u8, h: f64) -> [f6
     let dd = unit_difference(n0, delta);
     let dm = [0, 1, 2].map(|c| dd[c] / terms.scale[c]);
     let dnu = unit_difference(terms.m0, dm);
-    let dh = h - terms.h0;
-    [0, 1, 2].map(|c| terms.scale[c] * dd[c] + h * dnu[c] + dh * terms.nu0[c])
+    let dh = h_m - terms.h0_m;
+    [0, 1, 2].map(|c| terms.scale[c] * dd[c] + h_m * dnu[c] + dh * terms.nu0[c])
 }
 
 /// [`warp_difference`] in `f32`, in the WGSL's order.
+#[must_use]
 fn warp_difference_f32(s0: f32, ds: f32, straddles: bool) -> f32 {
     let s = s0 + ds;
     if straddles {
@@ -209,6 +215,7 @@ fn warp_difference_f32(s0: f32, ds: f32, straddles: bool) -> f32 {
 }
 
 /// The warp in `f32`, in [`st_to_uv`]'s order.
+#[must_use]
 fn st_to_uv_f32(s: f32) -> f32 {
     if s >= 0.5 {
         (4.0 * s * s - 1.0) / 3.0
@@ -219,6 +226,7 @@ fn st_to_uv_f32(s: f32) -> f32 {
 }
 
 /// [`unit_difference`] in `f32`, in the WGSL's order.
+#[must_use]
 fn unit_difference_f32(p0: [f32; 3], delta: [f32; 3]) -> [f32; 3] {
     let dot = p0[0] * delta[0] + p0[1] * delta[1] + p0[2] * delta[2];
     let dd = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
@@ -233,7 +241,7 @@ fn unit_difference_f32(p0: [f32; 3], delta: [f32; 3]) -> [f32; 3] {
 /// The `f32` reference of [`face_difference_position`]: exactly the operations the WGSL performs,
 /// in the same order, on the `f32` uniforms, the grid offsets and the `f32` height.
 #[must_use]
-pub fn face_difference_position_f32(terms: &PatchTermsF32, x: u8, y: u8, h: f32) -> [f32; 3] {
+pub fn face_difference_position_f32(terms: &PatchTermsF32, x: u8, y: u8, h_m: f32) -> [f32; 3] {
     #[expect(
         clippy::cast_possible_truncation,
         reason = "a grid offset of −32 to 32 is exact in f32"
@@ -247,13 +255,17 @@ pub fn face_difference_position_f32(terms: &PatchTermsF32, x: u8, y: u8, h: f32)
     let dd = unit_difference_f32(n0, delta);
     let dm = [0, 1, 2].map(|c| dd[c] / terms.scale[c]);
     let dnu = unit_difference_f32(terms.m0, dm);
-    let dh = h - terms.h0;
-    [0, 1, 2].map(|c| terms.scale[c] * dd[c] + h * dnu[c] + dh * terms.nu0[c])
+    let dh = h_m - terms.h0_m;
+    [0, 1, 2].map(|c| terms.scale[c] * dd[c] + h_m * dnu[c] + dh * terms.nu0[c])
 }
 
 /// The `f32` morph target's position of vertex (`x`, `y`): at an even vertex the formula at its
 /// morph height, at an odd one the mean of the formula at its two even neighbours on the parent
 /// mesh's diagonal, at their morph heights, `h1(x, y)`.
+///
+/// # Panics
+///
+/// If `x` or `y` is above 64.
 #[must_use]
 pub fn face_difference_morph_f32(
     terms: &PatchTermsF32,
@@ -261,6 +273,7 @@ pub fn face_difference_morph_f32(
     y: u8,
     h1: impl Fn(u8, u8) -> f32,
 ) -> [f32; 3] {
+    assert!(x <= 64 && y <= 64, "vertex ({x}, {y}) is outside a patch");
     let at = |px: u8, py: u8| face_difference_position_f32(terms, px, py, h1(px, py));
     // A level-0 patch (the one that straddles s = ½) has no parent: its morph target is itself.
     if terms.straddles {
@@ -280,14 +293,20 @@ pub fn face_difference_morph_f32(
     [mean(0), mean(1), mean(2)]
 }
 
+#[cfg(test)]
 /// The naive `f32` position M·d + h·ν less the origin, as a shader must not form it: what the
 /// tests show both paths are needed against.
 #[must_use]
-pub fn naive_position_f32(figure: &Spheroid, dir: [f64; 3], h: f32, origin: [f64; 3]) -> [f32; 3] {
+pub fn naive_position_f32(
+    figure: &Spheroid,
+    dir: [f64; 3],
+    h_m: f32,
+    origin_m: [f64; 3],
+) -> [f32; 3] {
     let p = figure.point(dir).map(narrow);
     let nu = figure.normal(dir).map(narrow);
-    let o = origin.map(narrow);
-    [0, 1, 2].map(|c| p[c] + h * nu[c] - o[c])
+    let o = origin_m.map(narrow);
+    [0, 1, 2].map(|c| p[c] + h_m * nu[c] - o[c])
 }
 
 #[cfg(test)]

@@ -9,10 +9,11 @@
 //!
 //! # The bake's layout (plan R05, T5), which the TypeScript side mirrors
 //!
-//! `bakePatch(face, level, i, j, vertexPath, normals, ridged, skirtM)` bakes the test planet's
-//! patch (`face` 0–5 in S2's order, `level` 0–24, cell `i`, `j`; `vertexPath` 0 for
-//! `BakedOffsets` and 1 for `FaceDifferences`; `normals` 0 for the mesh's 65 × 65 and 1 for
-//! 129 × 129; `ridged` for the ridged octaves; `skirtM` an extra skirt margin in metres) and
+//! `bakePatch(face, level, i, j, vertexPath, normals, ridges, skirtM)` bakes the test planet's
+//! patch (`face` 0–5 in S2's order, `level` 0–24, cell `i`, `j`; `vertexPath` a `VertexPath`,
+//! `BakedOffsets` (0) or `FaceDifferences` (1); `normals` a `NormalScale`, `Mesh` (0) for the
+//! mesh's 65 × 65 or `Double` (1) for 129 × 129; `ridges` a `Ridges`, `Off` (0) or `On` (1);
+//! `skirtM` an extra skirt margin in metres) and
 //! returns a `BakedPatch` whose getters each copy one array out of linear memory into a new typed
 //! array the worker owns and may transfer:
 //!
@@ -27,7 +28,11 @@
 //!   `heightRangeM()` (`Float32Array` of 2, lowest then highest), `boundingRadiusM` and
 //!   `skirtDepthM`, metres.
 //!
-//! `levelTable(ridged)` returns a `Float64Array` of 25 × 4, level n at `4 n`: the level bound `ε_n`,
+//! `testPlanetVersion()` is the crate's `TEST_PLANET_VERSION`, which the client compares with the
+//! version its own tests were written against, as it does `generatorVersion()`: a change to the
+//! test planet bumps only that, so a stale module would otherwise go unseen.
+//!
+//! `levelTable(ridges)` returns a `Float64Array` of 25 × 4, level n at `4 n`: the level bound `ε_n`,
 //! the lowest and highest height, and the largest vertex spacing, metres (T6).
 
 use wasm_bindgen::JsError;
@@ -64,16 +69,56 @@ pub fn finest_spacing_m() -> f64 {
     FINEST_SPACING_M
 }
 
-/// The test planet with ridges on or off.
-fn planet(ridged: bool) -> crate::test_planet::TestPlanet {
-    TEST_PLANET.with_ridges(if ridged { Ridges::On } else { Ridges::Off })
+/// The test planet's version, `TEST_PLANET_VERSION` (see the module documentation).
+#[wasm_bindgen(js_name = testPlanetVersion)]
+#[must_use]
+pub fn test_planet_version() -> u32 {
+    crate::TEST_PLANET_VERSION
+}
+
+/// The vertex path, as the client names it.
+#[wasm_bindgen(js_name = VertexPath)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsVertexPath {
+    /// [`VertexPath::BakedOffsets`].
+    BakedOffsets = 0,
+    /// [`VertexPath::FaceDifferences`].
+    FaceDifferences = 1,
+}
+
+/// The normals' resolution, as the client names it.
+#[wasm_bindgen(js_name = NormalScale)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsNormalScale {
+    /// [`NormalScale::Mesh`].
+    Mesh = 0,
+    /// [`NormalScale::Double`].
+    Double = 1,
+}
+
+/// Whether the test planet's octaves 8 to 12 are ridged, as the client names it.
+#[wasm_bindgen(js_name = Ridges)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsRidges {
+    /// [`Ridges::Off`].
+    Off = 0,
+    /// [`Ridges::On`].
+    On = 1,
+}
+
+/// The test planet with `ridges`.
+fn planet(ridges: JsRidges) -> crate::test_planet::TestPlanet {
+    TEST_PLANET.with_ridges(match ridges {
+        JsRidges::Off => Ridges::Off,
+        JsRidges::On => Ridges::On,
+    })
 }
 
 /// The level table of the test planet (see the module documentation).
 #[wasm_bindgen(js_name = levelTable)]
 #[must_use]
-pub fn level_table(ridged: bool) -> Vec<f64> {
-    planet(ridged).level_table()
+pub fn level_table(ridges: JsRidges) -> Vec<f64> {
+    planet(ridges).level_table()
 }
 
 /// A baked patch, whose getters copy its arrays out (see the module documentation).
@@ -142,8 +187,8 @@ impl BakedPatch {
 ///
 /// # Errors
 ///
-/// A `JsError` naming the problem if the face, level, cell, path or normal scale is out of range,
-/// or the skirt margin is negative or not finite.
+/// A `JsError` naming the problem if the face, level or cell is out of range, or the skirt margin
+/// is negative or not finite.
 #[wasm_bindgen(js_name = bakePatch)]
 #[expect(
     clippy::too_many_arguments,
@@ -154,22 +199,20 @@ pub fn bake_patch(
     level: u8,
     i: u32,
     j: u32,
-    vertex_path: u8,
-    normals: u8,
-    ridged: bool,
+    vertex_path: JsVertexPath,
+    normals: JsNormalScale,
+    ridges: JsRidges,
     skirt_m: f64,
 ) -> Result<BakedPatch, JsError> {
     let face = Face::try_from(face).map_err(|e| JsError::new(&e.to_string()))?;
     let key = PatchKey::new(face, level, i, j).map_err(|e| JsError::new(&e.to_string()))?;
     let vertex_path = match vertex_path {
-        0 => VertexPath::BakedOffsets,
-        1 => VertexPath::FaceDifferences,
-        n => return Err(JsError::new(&format!("vertex path {n} is not 0 or 1"))),
+        JsVertexPath::BakedOffsets => VertexPath::BakedOffsets,
+        JsVertexPath::FaceDifferences => VertexPath::FaceDifferences,
     };
     let normals = match normals {
-        0 => NormalScale::Mesh,
-        1 => NormalScale::Double,
-        n => return Err(JsError::new(&format!("normal scale {n} is not 0 or 1"))),
+        JsNormalScale::Mesh => NormalScale::Mesh,
+        JsNormalScale::Double => NormalScale::Double,
     };
     if !(skirt_m.is_finite() && skirt_m >= 0.0) {
         return Err(JsError::new(&format!(
@@ -182,7 +225,7 @@ pub fn bake_patch(
         skirt_m,
     };
     let mut cache = LatticeCache::new();
-    let bake = match crate::patch::bake_patch(&planet(ridged), key, &opts, &mut cache) {
+    let bake = match crate::patch::bake_patch(&planet(ridges), key, &opts, &mut cache) {
         Ok(bake) => bake,
         Err(never) => match never {},
     };
@@ -202,13 +245,23 @@ mod tests {
 
     #[test]
     fn a_bake_has_the_documented_layout() {
-        let Ok(baked) = bake_patch(2, 7, 3, 4, 0, 1, false, 0.0) else {
+        let Ok(baked) = bake_patch(
+            2,
+            7,
+            3,
+            4,
+            JsVertexPath::BakedOffsets,
+            JsNormalScale::Double,
+            JsRidges::Off,
+            0.0,
+        ) else {
             panic!("a valid patch bakes");
         };
         assert_eq!(baked.heights().len(), 65 * 65 * 2);
         assert_eq!(baked.offsets().map(|o| o.len()), Some(65 * 65 * 6));
         assert_eq!(baked.normals().len(), 129 * 129 * 2);
         assert_eq!(baked.origin().len(), 3);
-        assert_eq!(level_table(false).len(), 25 * 4);
+        assert_eq!(level_table(JsRidges::Off).len(), 25 * 4);
+        assert_eq!(test_planet_version(), crate::TEST_PLANET_VERSION);
     }
 }

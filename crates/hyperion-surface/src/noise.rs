@@ -108,12 +108,13 @@ impl Octave {
     /// Octave `index` of the planet of `seed`, with lattice spacing `spacing_m` metres, rows of
     /// `rotation` and lattice `offset`.
     ///
-    /// `rotation` must be orthonormal: the cache's covering box ([`LatticeCache::cover`]) relies on
-    /// a ball staying a ball of the same radius.
+    /// `rotation` must be orthonormal, to 10⁻¹² in each row's products: the cache's covering box
+    /// ([`LatticeCache::cover`]) relies on a ball staying a ball of the same radius.
     ///
     /// # Panics
     ///
-    /// If `index` is above 31, or `spacing_m` is not finite and positive.
+    /// If `index` is above 31, `spacing_m` is not finite and positive, or `rotation` is not
+    /// orthonormal.
     #[must_use]
     pub fn new(
         index: u8,
@@ -127,6 +128,16 @@ impl Octave {
             spacing_m.is_finite() && spacing_m > 0.0,
             "an octave's lattice spacing must be finite and positive, got {spacing_m}"
         );
+        for (a, row_a) in rotation.iter().enumerate() {
+            for (b, row_b) in rotation.iter().enumerate() {
+                let dot = row_a[0] * row_b[0] + row_a[1] * row_b[1] + row_a[2] * row_b[2];
+                let expected = if a == b { 1.0 } else { 0.0 };
+                assert!(
+                    (dot - expected).abs() <= 1e-12,
+                    "an octave's rotation must be orthonormal, got {rotation:?}"
+                );
+            }
+        }
         Self {
             index,
             spacing_m,
@@ -150,6 +161,7 @@ impl Octave {
 
     /// The point `p_m` (metres, body-fixed) in the octave's lattice coordinates: R · p ÷ λ + o,
     /// each row's products summed in axis order.
+    #[must_use]
     fn lattice_point(&self, p_m: [f64; 3]) -> [f64; 3] {
         let [x, y, z] = p_m;
         let row = |n: usize| {
@@ -160,6 +172,7 @@ impl Octave {
     }
 
     /// A lattice gradient (∂/∂q) taken back to body-fixed metres: Rᵀ · g ÷ λ.
+    #[must_use]
     fn gradient_to_body(&self, g: [f64; 3]) -> [f64; 3] {
         let r = &self.rotation;
         let column = |n: usize| (r[0][n] * g[0] + r[1][n] * g[1] + r[2][n] * g[2]) / self.spacing_m;
@@ -168,6 +181,7 @@ impl Octave {
 
     /// The gradient index of lattice corner `corner`: the top four bits of its word (see the
     /// module documentation).
+    #[must_use]
     fn corner_gradient(&self, corner: [i64; 3]) -> u8 {
         let [i, j, k] = corner.map(twos_complement_32);
         let object = (u64::from(i) << 32) | u64::from(j);
@@ -179,6 +193,7 @@ impl Octave {
 }
 
 /// The low 32 bits of `n`'s two's complement.
+#[must_use]
 fn twos_complement_32(n: i64) -> u32 {
     #[expect(
         clippy::cast_possible_truncation,
@@ -192,8 +207,12 @@ fn twos_complement_32(n: i64) -> u32 {
 
 /// One octave's box of cached corners: its lowest corner, its extent along each axis, and the
 /// gradient index of each corner, [`UNFILLED`] until first use.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct CornerBox {
+    /// The octave the box was covered for: a box serves only the identical octave, so a cache
+    /// passed from one planet, seed or octave table to another never returns the other's
+    /// gradients.
+    octave: Octave,
     low: [i64; 3],
     extent: [u64; 3],
     indices: Vec<u8>,
@@ -204,9 +223,11 @@ const UNFILLED: u8 = u8::MAX;
 
 impl CornerBox {
     /// The entry of `corner`, or `None` outside the box.
+    #[must_use]
     fn slot(&self, corner: [i64; 3]) -> Option<usize> {
         let mut flat = 0_u64;
         for ((&c, &low), &extent) in corner.iter().zip(&self.low).zip(&self.extent) {
+            // A negative offset, which the conversion refuses, is a corner below the box.
             let offset = u64::try_from(c - low).ok()?;
             if offset >= extent {
                 return None;
@@ -218,7 +239,7 @@ impl CornerBox {
 }
 
 /// The caller's cache of lattice-corner gradients, one per bake (see the module documentation).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LatticeCache {
     /// Per octave index, the box [`cover`](Self::cover) set, if any.
     boxes: Vec<Option<CornerBox>>,
@@ -237,7 +258,8 @@ impl LatticeCache {
     ///
     /// # Panics
     ///
-    /// If `centre_m` or `radius_m` is not finite, or `radius_m` is negative.
+    /// If `centre_m` or `radius_m` is not finite, `radius_m` is negative, or the ball reaches a
+    /// lattice index beyond ±2³¹.
     pub fn cover(&mut self, octave: &Octave, centre_m: [f64; 3], radius_m: f64) {
         assert!(
             centre_m.iter().all(|c| c.is_finite()) && radius_m.is_finite() && radius_m >= 0.0,
@@ -261,6 +283,7 @@ impl LatticeCache {
         }
         self.boxes[slot] = match corners {
             Some(n) if n <= MAX_BOX_CORNERS => Some(CornerBox {
+                octave: *octave,
                 low,
                 extent,
                 indices: vec![UNFILLED; usize::try_from(n).expect("a capped box fits memory")],
@@ -275,6 +298,7 @@ impl LatticeCache {
             .boxes
             .get_mut(usize::from(octave.index))
             .and_then(Option::as_mut)
+            .filter(|b| b.octave == *octave)
             .and_then(|b| b.slot(corner).map(|s| &mut b.indices[s]));
         match cached {
             Some(entry) if *entry != UNFILLED => *entry,
@@ -289,6 +313,7 @@ impl LatticeCache {
 }
 
 /// The lattice index of the cell containing lattice coordinate `c`, ⌊c⌋.
+#[must_use]
 fn lattice_index(c: f64) -> i64 {
     let floor = c.floor();
     assert!(
@@ -304,6 +329,7 @@ fn lattice_index(c: f64) -> i64 {
 }
 
 /// The quintic fade 6t⁵ − 15t⁴ + 10t³ and its derivative 30t⁴ − 60t³ + 30t², Horner's form.
+#[must_use]
 fn fade(t: f64) -> (f64, f64) {
     let value = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
     let slope = 30.0 * t * t * (t * (t - 2.0) + 1.0);
@@ -484,6 +510,25 @@ mod tests {
             assert_eq!(
                 gradient_noise(*p, &o, &mut warm.borrow_mut()),
                 gradient_noise(*p, &o, &mut LatticeCache::new())
+            );
+        }
+    }
+
+    #[test]
+    fn a_cache_filled_for_one_octave_never_serves_another() {
+        let a = octave(7, 10.0);
+        let b = Octave::new(7, 10.0, ROTATION, [0.137, 0.512, 0.873], Seed::new(99));
+        let centre = [1_000.0, 2_000.0, 3_000.0];
+        let mut cache = LatticeCache::new();
+        cache.cover(&a, centre, 50.0);
+        let mut rng = Lcg::new(0x7365_6564);
+        for _ in 0..500 {
+            let d = random_point(&mut rng, 40.0);
+            let p = [centre[0] + d[0], centre[1] + d[1], centre[2] + d[2]];
+            let _ = gradient_noise(p, &a, &mut cache);
+            assert_eq!(
+                gradient_noise(p, &b, &mut cache),
+                gradient_noise(p, &b, &mut LatticeCache::new())
             );
         }
     }

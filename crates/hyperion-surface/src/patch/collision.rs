@@ -15,6 +15,7 @@
 use super::HeightSource;
 use crate::cube::{PATCH_QUADS, PatchKey, uv_to_st, xyz_to_face_uv};
 use crate::geometry::finest_level;
+use crate::num::assert_finite;
 
 /// The height of the collision surface at the unit direction `dir` (body-fixed), metres above the
 /// spheroid: the finest level's mesh, interpolated on its diagonal.
@@ -81,20 +82,20 @@ pub fn mesh_height<S: HeightSource>(
         Ok(source.height(cache, dir, level)?.height_m)
     };
     // At a vertex, its own height, bit for bit.
-    if let (Some(ga), Some(gb)) = (whole(s), whole(t)) {
-        return height_at(cache, ga, gb);
+    if let (Lattice::On(ga), Lattice::On(gb)) = (s, t) {
+        return height_at(cache, ga, gb).map(assert_finite);
     }
-    let (a, fa) = split(s, quads);
-    let (b, fb) = split(t, quads);
-    let h00 = height_at(cache, a, b)?;
-    let h11 = height_at(cache, a + 1, b + 1)?;
-    Ok(if fa >= fb {
-        let h10 = height_at(cache, a + 1, b)?;
+    let (a, fa) = split(s.coordinate(), quads);
+    let (b, fb) = split(t.coordinate(), quads);
+    let h00 = assert_finite(height_at(cache, a, b)?);
+    let h11 = assert_finite(height_at(cache, a + 1, b + 1)?);
+    Ok(assert_finite(if fa >= fb {
+        let h10 = assert_finite(height_at(cache, a + 1, b)?);
         h00 + fa * (h10 - h00) + fb * (h11 - h10)
     } else {
-        let h01 = height_at(cache, a, b + 1)?;
+        let h01 = assert_finite(height_at(cache, a, b + 1)?);
         h00 + fb * (h01 - h00) + fa * (h11 - h01)
-    })
+    }))
 }
 
 /// How close to a lattice line, in quads, a query is taken to be on it: a direction computed from
@@ -104,32 +105,50 @@ pub fn mesh_height<S: HeightSource>(
 /// Earth's finest level.
 const SNAP_QUADS: f64 = 1e-6;
 
-/// `c` moved onto the nearest lattice line if it is within [`SNAP_QUADS`] of it.
-fn snap(c: f64) -> f64 {
-    let nearest = c.round();
-    if (c - nearest).abs() <= SNAP_QUADS {
-        nearest
-    } else {
-        c
+/// A lattice coordinate: on a lattice line, by its index, or between two.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Lattice {
+    /// On line n.
+    On(u64),
+    /// Strictly between two lines.
+    Between(f64),
+}
+
+impl Lattice {
+    /// The coordinate as a number.
+    #[must_use]
+    fn coordinate(self) -> f64 {
+        match self {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a lattice index of at most 2^30 is exact in f64"
+            )]
+            Self::On(n) => n as f64,
+            Self::Between(c) => c,
+        }
     }
 }
 
-/// `c` as a lattice index if it is a whole number.
-fn whole(c: f64) -> Option<u64> {
-    if c.fract() == 0.0 && c >= 0.0 {
+/// `c` (in [0, 2^30]) moved onto the nearest lattice line if it is within [`SNAP_QUADS`] of it.
+#[must_use]
+fn snap(c: f64) -> Lattice {
+    let nearest = c.round();
+    if (c - nearest).abs() <= SNAP_QUADS && nearest >= 0.0 {
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
-            reason = "a whole lattice coordinate in [0, 2^30]"
+            reason = "a whole, non-negative lattice coordinate of at most 2^30"
         )]
-        let index = c as u64;
-        Some(index)
+        let index = nearest as u64;
+        Lattice::On(index)
     } else {
-        None
+        Lattice::Between(c)
     }
 }
+
 /// The quad index of lattice coordinate `c` in [0, `quads`] and the fraction within it; the far
 /// edge belongs to the last quad.
+#[must_use]
 fn split(c: f64, quads: u64) -> (u64, f64) {
     let floor = c.floor();
     #[expect(
