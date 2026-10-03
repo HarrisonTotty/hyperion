@@ -1,5 +1,5 @@
 //! The capture reader and the naga report against the checked-in capture in
-//! `tests/fixtures/small`: a triangle drawn into a canvas, a buffer written by the snapshot, a
+//! `tests/fixtures/small`: a triangle drawn into a canvas in two frames, a buffer written by the snapshot, a
 //! multisampled texture the snapshot skipped, and one module that is invalid on purpose.
 
 use std::path::{Path, PathBuf};
@@ -14,9 +14,9 @@ fn fixture() -> PathBuf {
 #[test]
 fn reads_the_calls_span_frames_and_surfaces() {
     let capture = Capture::read(&fixture()).expect("the fixture is a capture");
-    assert_eq!(capture.calls().len(), 15);
+    assert_eq!(capture.calls().len(), 24);
     assert_eq!(capture.span_start(), 6);
-    assert_eq!(capture.frames(), &[6]);
+    assert_eq!(capture.frames(), &[6, 15]);
     assert_eq!(
         capture.surfaces(),
         &[Surface {
@@ -28,6 +28,8 @@ fn reads_the_calls_span_frames_and_surfaces() {
     );
     assert_eq!(capture.skipped()[0].reason, "multisampled");
     assert_eq!(capture.features(), &["timestamp-query".to_owned()]);
+    assert_eq!(capture.meta()["setting"], "low");
+    assert_eq!(capture.meta()["passRows"]["triangle"], "terrain");
     let first = &capture.calls()[0];
     assert_eq!(
         (first.target, first.op.as_str(), first.result),

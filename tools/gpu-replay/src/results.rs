@@ -40,19 +40,19 @@ pub fn missing(reason: &str) -> Value {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameStats {
     /// Intervals.
-    pub count: usize,
+    pub(crate) count: usize,
     /// The 50th, 95th and 99th percentiles by nearest rank, and the largest, ms.
-    pub p50_ms: f64,
+    pub(crate) p50_ms: f64,
     /// See `p50_ms`.
-    pub p95_ms: f64,
+    pub(crate) p95_ms: f64,
     /// See `p50_ms`.
-    pub p99_ms: f64,
+    pub(crate) p99_ms: f64,
     /// See `p50_ms`.
-    pub max_ms: f64,
+    pub(crate) max_ms: f64,
     /// Intervals above 1.5 T, `None` without T.
-    pub missed: Option<usize>,
+    pub(crate) missed: Option<usize>,
     /// Intervals above 3 T, `None` without T.
-    pub hitches: Option<usize>,
+    pub(crate) hitches: Option<usize>,
 }
 
 /// The `p`th percentile of ascending `sorted` by nearest rank, or `None` for no values.
@@ -140,35 +140,58 @@ pub enum PassRow {
 #[derive(Debug, Clone)]
 pub struct ReplayFigures {
     /// When the replay started.
-    pub started_at: SystemTime,
+    pub(crate) started_at: SystemTime,
     /// The capture's directory.
-    pub capture: PathBuf,
+    pub(crate) capture: PathBuf,
     /// The setting the capture was taken at.
-    pub setting: Setting,
+    pub(crate) setting: Setting,
     /// The capture's seed, as it recorded it, or `"unknown"`.
-    pub seed: String,
+    pub(crate) seed: String,
     /// Whether frames were presented in a window (FIFO) or replayed offscreen.
-    pub presented: bool,
+    pub(crate) presented: bool,
     /// The display's refresh rate, Hz, for a presented replay.
-    pub display_hz: Option<f64>,
+    pub(crate) display_hz: Option<f64>,
     /// The adapter replayed on.
-    pub adapter: wgpu::AdapterInfo,
+    pub(crate) adapter: wgpu::AdapterInfo,
     /// Whether passes were timed (`TIMESTAMP_QUERY`).
-    pub timed: bool,
+    pub(crate) timed: bool,
     /// The main canvas's size, pixels.
-    pub canvas: (u32, u32),
+    pub(crate) canvas: (u32, u32),
     /// Intervals between presentations (presented) or GPU completions (offscreen), ms.
-    pub intervals_ms: Vec<f64>,
+    pub(crate) intervals_ms: Vec<f64>,
     /// Each frame's passes, label and GPU time, ms.
-    pub passes: Vec<Vec<(String, f64)>>,
+    pub(crate) passes: Vec<Vec<(String, f64)>>,
     /// The row of each pass label, from the capture.
-    pub rows: BTreeMap<String, PassRow>,
+    pub(crate) rows: BTreeMap<String, PassRow>,
     /// Passes beyond the timer's capacity.
-    pub untimed_passes: usize,
+    pub(crate) untimed_passes: usize,
     /// Bytes written by the span's uploads.
-    pub upload_bytes: u64,
+    pub(crate) upload_bytes: u64,
     /// Validation errors wgpu reported during the replay.
-    pub errors: Vec<String>,
+    pub(crate) errors: Vec<String>,
+    /// What the replay could not do as captured: the capture's own problems, features the
+    /// adapter lacks, a canvas format the window cannot present.
+    pub(crate) findings: Vec<String>,
+}
+
+impl ReplayFigures {
+    /// Whether frames were presented in a window.
+    #[must_use]
+    pub fn presented(&self) -> bool {
+        self.presented
+    }
+
+    /// wgpu's validation errors during the replay.
+    #[must_use]
+    pub fn errors(&self) -> &[String] {
+        &self.errors
+    }
+
+    /// What the replay could not do as captured.
+    #[must_use]
+    pub fn findings(&self) -> &[String] {
+        &self.findings
+    }
 }
 
 /// One row of the criterion.
@@ -315,9 +338,14 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         "an offscreen replay presents nothing"
     };
     let stats = frame_stats(&figures.intervals_ms, period_ms);
+    let no_interval = if figures.presented || figures.timed {
+        "no frame interval"
+    } else {
+        "an offscreen replay times frames by timestamp-query, which the adapter lacks"
+    };
     let stats_figure = stats
         .as_ref()
-        .map_or_else(|| missing("no frame interval"), |s| measured(stats_json(s)));
+        .map_or_else(|| missing(no_interval), |s| measured(stats_json(s)));
     let (presentation, completion) = if figures.presented {
         (
             stats_figure.clone(),
@@ -335,21 +363,22 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
     let mut terrain = Vec::new();
     let mut atmosphere = Vec::new();
     for frame in &figures.passes {
-        let (mut sum, mut t, mut a) = (0.0, 0.0, 0.0);
+        // A row's sum counts only frames with a pass of that row, as the client's writer does.
+        let (mut sum, mut t, mut a) = (0.0, None::<f64>, None::<f64>);
         for (label, ms) in frame {
             by_label.entry(label.as_str()).or_default().push(*ms);
             sum += ms;
             match figures.rows.get(label).copied().unwrap_or(PassRow::Other) {
-                PassRow::Terrain => t += ms,
-                PassRow::Atmosphere => a += ms,
+                PassRow::Terrain => t = Some(t.unwrap_or(0.0) + ms),
+                PassRow::Atmosphere => a = Some(a.unwrap_or(0.0) + ms),
                 PassRow::Other => {}
             }
         }
         if !frame.is_empty() {
             sums.push(sum);
-            terrain.push(t);
-            atmosphere.push(a);
         }
+        terrain.extend(t);
+        atmosphere.extend(a);
     }
     let timer_reason = "the adapter has no timestamp-query";
     let passes: Vec<Value> = by_label
@@ -374,9 +403,9 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         if !figures.timed {
             return Err(timer_reason.to_owned());
         }
-        p95(values).ok_or_else(|| format!("no timed {what} pass"))
+        p95(values).ok_or_else(|| format!("no timed {what}"))
     };
-    let sum_p95 = gpu_value(&mut sums, "");
+    let sum_p95 = gpu_value(&mut sums, "pass");
     let (terrain_limit, atmosphere_limit, p95_limit, memory_limit) = match figures.setting {
         Setting::High => (5.0, 1.0, period_ms.map(|t| t + 1.0), 3e9),
         Setting::Low => (14.0, 4.0, Some(35.0), 1e9),
@@ -457,7 +486,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             &format!("terrain GPU time ≤ {terrain_limit} ms at the 95th percentile"),
             Some(terrain_limit),
             "ms",
-            gpu_value(&mut terrain, "terrain"),
+            gpu_value(&mut terrain, "terrain pass"),
             None,
         ),
         row(
@@ -465,7 +494,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             &format!("atmosphere GPU time ≤ {atmosphere_limit} ms at the 95th percentile"),
             Some(atmosphere_limit),
             "ms",
-            gpu_value(&mut atmosphere, "atmosphere"),
+            gpu_value(&mut atmosphere, "atmosphere pass"),
             None,
         ),
         row(
@@ -515,12 +544,13 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
                 "v8": "none (native replay)",
             },
             "platform": std::env::consts::OS,
-            "launchMode": format!("native-replay ({:?})", figures.adapter.backend).to_lowercase(),
+            "launchMode": "native-replay",
             "setting": figures.setting.name(),
             "seed": figures.seed,
             "options": {
                 "capture": figures.capture.display().to_string(),
                 "presented": figures.presented,
+                "backend": format!("{:?}", figures.adapter.backend).to_lowercase(),
                 "validationErrors": figures.errors.len(),
             },
             "switches": [],
@@ -574,6 +604,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         "criteria": { "whole": whole, "segments": [], "overall": overall },
         "replay": {
             "validationErrors": figures.errors,
+            "findings": figures.findings,
         },
     })
 }
@@ -634,6 +665,64 @@ mod tests {
         .expect("stats");
         assert_eq!((stats.missed, stats.hitches), (Some(3), Some(1)));
         assert!((stats.p50_ms - 16.7).abs() < 1e-12);
+    }
+
+    fn figures(rows: BTreeMap<String, PassRow>) -> ReplayFigures {
+        ReplayFigures {
+            started_at: UNIX_EPOCH,
+            capture: PathBuf::from("capture"),
+            setting: Setting::High,
+            seed: "7".to_owned(),
+            presented: false,
+            display_hz: None,
+            adapter: wgpu::AdapterInfo {
+                name: "test".to_owned(),
+                vendor: 0,
+                device: 0,
+                device_type: wgpu::DeviceType::Other,
+                device_pci_bus_id: String::new(),
+                driver: String::new(),
+                driver_info: String::new(),
+                backend: wgpu::Backend::Noop,
+                subgroup_min_size: 0,
+                subgroup_max_size: 0,
+                transient_saves_memory: None,
+                limit_bucket: None,
+            },
+            timed: true,
+            canvas: (1920, 1080),
+            intervals_ms: vec![16.7, 16.7],
+            passes: vec![vec![("terrain".to_owned(), 4.0), ("tone".to_owned(), 0.5)]; 4],
+            rows,
+            untimed_passes: 0,
+            upload_bytes: 0,
+            errors: Vec::new(),
+            findings: Vec::new(),
+        }
+    }
+
+    fn row<'a>(results: &'a Value, id: &str) -> &'a Value {
+        results["criteria"]["whole"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["id"] == id))
+            .expect("the row")
+    }
+
+    #[test]
+    fn a_row_with_no_pass_of_its_own_is_not_measured() {
+        let results = results_json(&figures(BTreeMap::new()));
+        assert_eq!(row(&results, "terrain")["verdict"], "not-measured");
+        assert_eq!(row(&results, "terrain")["note"], "no timed terrain pass");
+    }
+
+    #[test]
+    fn a_rows_passes_are_judged_against_its_limit() {
+        let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
+        let results = results_json(&figures(rows));
+        assert_eq!(row(&results, "terrain")["value"], 4.0);
+        assert_eq!(row(&results, "terrain")["verdict"], "pass");
+        assert_eq!(row(&results, "headroom-gpu")["verdict"], "not-measured");
+        assert_eq!(results["gpu"]["sumP95Ms"]["value"], 4.5);
     }
 
     #[test]

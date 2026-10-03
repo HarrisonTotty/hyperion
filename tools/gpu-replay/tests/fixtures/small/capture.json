@@ -8,12 +8,38 @@
     "description": "a hand-written capture"
   },
   "features": ["timestamp-query"],
-  "limits": { "maxTextureDimension2D": 8192 },
-  "surfaces": [{ "id": 9, "width": 64, "height": 32, "format": "bgra8unorm" }],
-  "skipped": [{ "id": 4, "reason": "multisampled" }],
+  "limits": {
+    "maxTextureDimension2D": 8192
+  },
+  "surfaces": [
+    {
+      "id": 9,
+      "width": 64,
+      "height": 32,
+      "format": "bgra8unorm"
+    }
+  ],
+  "skipped": [
+    {
+      "id": 4,
+      "reason": "multisampled"
+    }
+  ],
   "spanStart": 6,
-  "frames": [6],
-  "blobs": [{ "offset": 0, "length": 16 }],
+  "frames": [6, 15],
+  "blobs": [
+    {
+      "offset": 0,
+      "length": 16
+    }
+  ],
+  "meta": {
+    "setting": "low",
+    "seed": "7",
+    "passRows": {
+      "triangle": "terrain"
+    }
+  },
   "calls": [
     {
       "target": 0,
@@ -29,21 +55,38 @@
     {
       "target": 0,
       "op": "createShaderModule",
-      "args": [{ "label": "broken on purpose", "code": "fn f() -> f32 { return 1u; }\n" }],
+      "args": [
+        {
+          "label": "broken on purpose",
+          "code": "fn f() -> f32 { return 1u; }\n"
+        }
+      ],
       "result": 3
     },
     {
       "target": 0,
       "op": "createTexture",
       "args": [
-        { "label": "msaa", "size": [64, 32], "format": "bgra8unorm", "sampleCount": 4, "usage": 16 }
+        {
+          "label": "msaa",
+          "size": [64, 32],
+          "format": "bgra8unorm",
+          "sampleCount": 4,
+          "usage": 16
+        }
       ],
       "result": 4
     },
     {
       "target": 0,
       "op": "createBuffer",
-      "args": [{ "label": "uniforms", "size": 16, "usage": 72 }],
+      "args": [
+        {
+          "label": "uniforms",
+          "size": 16,
+          "usage": 72
+        }
+      ],
       "result": 5
     },
     {
@@ -53,11 +96,22 @@
         {
           "label": "triangle",
           "layout": "auto",
-          "vertex": { "module": { "$ref": 2 }, "entryPoint": "vertexMain" },
+          "vertex": {
+            "module": {
+              "$ref": 2
+            },
+            "entryPoint": "vertexMain"
+          },
           "fragment": {
-            "module": { "$ref": 2 },
+            "module": {
+              "$ref": 2
+            },
             "entryPoint": "fragmentMain",
-            "targets": [{ "format": "bgra8unorm" }]
+            "targets": [
+              {
+                "format": "bgra8unorm"
+              }
+            ]
           }
         }
       ],
@@ -66,11 +120,45 @@
     {
       "target": 1,
       "op": "writeBuffer",
-      "args": [{ "$ref": 5 }, 0, { "$blob": 0, "$type": "Uint8Array" }]
+      "args": [
+        {
+          "$ref": 5
+        },
+        0,
+        {
+          "$blob": 0,
+          "$type": "Uint8Array"
+        },
+        0,
+        16
+      ]
     },
-    { "target": 0, "op": "createCommandEncoder", "args": [{ "label": "frame" }], "result": 7 },
-    { "target": 9, "op": "getCurrentTexture", "args": [], "result": 10 },
-    { "target": 10, "op": "createView", "args": [{ "$undefined": true }], "result": 11 },
+    {
+      "target": 0,
+      "op": "createCommandEncoder",
+      "args": [
+        {
+          "label": "frame"
+        }
+      ],
+      "result": 7
+    },
+    {
+      "target": 9,
+      "op": "getCurrentTexture",
+      "args": [],
+      "result": 10
+    },
+    {
+      "target": 10,
+      "op": "createView",
+      "args": [
+        {
+          "$undefined": true
+        }
+      ],
+      "result": 11
+    },
     {
       "target": 7,
       "op": "beginRenderPass",
@@ -79,7 +167,9 @@
           "label": "triangle",
           "colorAttachments": [
             {
-              "view": { "$ref": 11 },
+              "view": {
+                "$ref": 11
+              },
               "loadOp": "clear",
               "storeOp": "store",
               "clearValue": [0, 0, 0, 1]
@@ -89,10 +179,149 @@
       ],
       "result": 12
     },
-    { "target": 12, "op": "setPipeline", "args": [{ "$ref": 6 }] },
-    { "target": 12, "op": "draw", "args": [3, 1, { "$undefined": true }, { "$undefined": true }] },
-    { "target": 12, "op": "end", "args": [] },
-    { "target": 7, "op": "finish", "args": [{ "$undefined": true }], "result": 13 },
-    { "target": 1, "op": "submit", "args": [[{ "$ref": 13 }]] }
+    {
+      "target": 12,
+      "op": "setPipeline",
+      "args": [
+        {
+          "$ref": 6
+        }
+      ]
+    },
+    {
+      "target": 12,
+      "op": "draw",
+      "args": [
+        3,
+        1,
+        {
+          "$undefined": true
+        },
+        {
+          "$undefined": true
+        }
+      ]
+    },
+    {
+      "target": 12,
+      "op": "end",
+      "args": []
+    },
+    {
+      "target": 7,
+      "op": "finish",
+      "args": [
+        {
+          "$undefined": true
+        }
+      ],
+      "result": 13
+    },
+    {
+      "target": 1,
+      "op": "submit",
+      "args": [
+        [
+          {
+            "$ref": 13
+          }
+        ]
+      ]
+    },
+    {
+      "target": 0,
+      "op": "createCommandEncoder",
+      "args": [
+        {
+          "label": "frame"
+        }
+      ],
+      "result": 107
+    },
+    {
+      "target": 9,
+      "op": "getCurrentTexture",
+      "args": [],
+      "result": 110
+    },
+    {
+      "target": 110,
+      "op": "createView",
+      "args": [
+        {
+          "$undefined": true
+        }
+      ],
+      "result": 111
+    },
+    {
+      "target": 107,
+      "op": "beginRenderPass",
+      "args": [
+        {
+          "label": "triangle",
+          "colorAttachments": [
+            {
+              "view": {
+                "$ref": 111
+              },
+              "loadOp": "clear",
+              "storeOp": "store",
+              "clearValue": [0, 0, 0, 1]
+            }
+          ]
+        }
+      ],
+      "result": 112
+    },
+    {
+      "target": 112,
+      "op": "setPipeline",
+      "args": [
+        {
+          "$ref": 6
+        }
+      ]
+    },
+    {
+      "target": 112,
+      "op": "draw",
+      "args": [
+        3,
+        1,
+        {
+          "$undefined": true
+        },
+        {
+          "$undefined": true
+        }
+      ]
+    },
+    {
+      "target": 112,
+      "op": "end",
+      "args": []
+    },
+    {
+      "target": 107,
+      "op": "finish",
+      "args": [
+        {
+          "$undefined": true
+        }
+      ],
+      "result": 113
+    },
+    {
+      "target": 1,
+      "op": "submit",
+      "args": [
+        [
+          {
+            "$ref": 113
+          }
+        ]
+      ]
+    }
   ]
 }

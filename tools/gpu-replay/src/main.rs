@@ -83,12 +83,15 @@ fn main() -> anyhow::Result<ExitCode> {
             } else {
                 replay_offscreen(&read, &capture, setting)?
             };
-            if !figures.errors.is_empty() {
+            for finding in figures.findings() {
+                println!("finding: {finding}");
+            }
+            if !figures.errors().is_empty() {
                 println!(
                     "{} validation errors during the replay:",
-                    figures.errors.len()
+                    figures.errors().len()
                 );
-                for error in &figures.errors {
+                for error in figures.errors() {
                     println!("  {error}");
                 }
             }

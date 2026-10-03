@@ -104,7 +104,10 @@ struct PassTimer {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FramePassTimes {
     /// Each pass's label and its GPU time, ms.
-    pub passes: Vec<(String, f64)>,
+    pub(crate) passes: Vec<(String, f64)>,
+    /// The GPU's timestamp at the end of the frame's last timed pass, in its ticks, or `None`
+    /// without one: successive frames' ends give the interval the GPU sustains.
+    pub(crate) end_ticks: Option<u64>,
 }
 
 /// Holds a capture's objects on a device and replays its calls.
@@ -124,13 +127,21 @@ const TIMED_PASSES: u32 = 256;
 
 impl Replayer {
     /// A replayer on `device`, with an offscreen texture for every canvas of `surfaces`.
-    #[must_use]
-    pub fn new(device: wgpu::Device, queue: wgpu::Queue, surfaces: &[Surface]) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// When a canvas's format is not one wgpu knows.
+    pub fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        surfaces: &[Surface],
+    ) -> Result<Self, UnknownFormatError> {
         let mut offscreen = HashMap::new();
         let mut objects = HashMap::new();
         for surface in surfaces {
-            let format = enum_of::<wgpu::TextureFormat>(&Value::String(surface.format.clone()))
-                .unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
+            let format = texture_format(&surface.format).ok_or_else(|| UnknownFormatError {
+                format: surface.format.clone(),
+            })?;
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("offscreen canvas"),
                 size: wgpu::Extent3d {
@@ -170,7 +181,7 @@ impl Replayer {
                 labels: Vec::new(),
             });
         let period_ns = queue.get_timestamp_period();
-        Self {
+        Ok(Self {
             device,
             queue,
             objects,
@@ -178,7 +189,13 @@ impl Replayer {
             timer,
             period_ns,
             untimed: 0,
-        }
+        })
+    }
+
+    /// The length of one timestamp tick, ns.
+    #[must_use]
+    pub fn timestamp_period_ns(&self) -> f32 {
+        self.period_ns
     }
 
     /// Whether the replay times its passes (the adapter has `TIMESTAMP_QUERY`).
@@ -220,8 +237,9 @@ impl Replayer {
     }
 
     /// Resolves this frame's pass timestamps and returns a buffer to read them from after the
-    /// frame's work is done, with the labels in order; `None` without a timer or a timed pass.
-    pub fn finish_frame(&mut self) -> Option<(wgpu::Buffer, Vec<String>)> {
+    /// frame's work is done, with the labels in order and the submission that resolves them;
+    /// `None` without a timer or a timed pass.
+    pub fn finish_frame(&mut self) -> Option<(wgpu::Buffer, Vec<String>, wgpu::SubmissionIndex)> {
         let timer = self.timer.as_mut()?;
         if timer.labels.is_empty() {
             return None;
@@ -242,8 +260,8 @@ impl Replayer {
             });
         encoder.resolve_query_set(&timer.queries, 0..count, &timer.resolve, 0);
         encoder.copy_buffer_to_buffer(&timer.resolve, 0, &staging, 0, bytes);
-        self.queue.submit([encoder.finish()]);
-        Some((staging, labels))
+        let submission = self.queue.submit([encoder.finish()]);
+        Some((staging, labels, submission))
     }
 
     /// Reads back a frame's pass times from a buffer [`Replayer::finish_frame`] gave, once its
@@ -252,7 +270,10 @@ impl Replayer {
     pub fn read_pass_times(&self, staging: &wgpu::Buffer, labels: &[String]) -> FramePassTimes {
         let Ok(data) = staging.slice(..).get_mapped_range() else {
             // A buffer whose mapping failed has no times to give; the frame counts as untimed.
-            return FramePassTimes { passes: Vec::new() };
+            return FramePassTimes {
+                passes: Vec::new(),
+                end_ticks: None,
+            };
         };
         let stamps: Vec<u64> = data
             .as_chunks::<8>()
@@ -262,6 +283,9 @@ impl Replayer {
             .collect();
         drop(data);
         staging.unmap();
+        let end_ticks = (0..labels.len())
+            .filter_map(|i| stamps.get(2 * i + 1).copied())
+            .max();
         let passes = labels
             .iter()
             .enumerate()
@@ -277,7 +301,7 @@ impl Replayer {
                 (label.clone(), ns / 1e6)
             })
             .collect();
-        FramePassTimes { passes }
+        FramePassTimes { passes, end_ticks }
     }
 
     fn missing(index: usize, call: &Call, id: u64) -> ReplayCallError {
@@ -751,38 +775,32 @@ impl Replayer {
             "setVertexBuffer" => {
                 if let Some(id) = ref_of(args.get(1)?) {
                     let buffer = self.buffer(args, id)?;
-                    pass.set_vertex_buffer(
-                        args.u32_at(0)?,
-                        slice(buffer, args.optional_u64(2), args.optional_u64(3)),
-                    );
+                    let slice = args.slice(buffer, 2)?;
+                    pass.set_vertex_buffer(args.u32_at(0)?, slice);
                 }
             }
             "setIndexBuffer" => {
                 let buffer = self.buffer(args, args.reference(0)?)?;
                 let format = enum_of::<wgpu::IndexFormat>(args.get(1)?)
                     .ok_or_else(|| Self::bad(args.index, args.call, "an unknown index format"))?;
-                pass.set_index_buffer(
-                    slice(buffer, args.optional_u64(2), args.optional_u64(3)),
-                    format,
-                );
+                pass.set_index_buffer(args.slice(buffer, 2)?, format);
             }
             "draw" => {
-                let first_vertex = args.optional_u32(2).unwrap_or(0);
-                let first_instance = args.optional_u32(3).unwrap_or(0);
-                pass.draw(
-                    first_vertex..first_vertex + args.u32_at(0)?,
-                    first_instance..first_instance + args.optional_u32(1).unwrap_or(1),
-                );
+                let vertices = args.range(args.optional_u32(2).unwrap_or(0), args.u32_at(0)?)?;
+                let instances = args.range(
+                    args.optional_u32(3).unwrap_or(0),
+                    args.optional_u32(1).unwrap_or(1),
+                )?;
+                pass.draw(vertices, instances);
             }
             "drawIndexed" => {
-                let first_index = args.optional_u32(2).unwrap_or(0);
+                let indices = args.range(args.optional_u32(2).unwrap_or(0), args.u32_at(0)?)?;
                 let base_vertex = args.optional_i32(3).unwrap_or(0);
-                let first_instance = args.optional_u32(4).unwrap_or(0);
-                pass.draw_indexed(
-                    first_index..first_index + args.u32_at(0)?,
-                    base_vertex,
-                    first_instance..first_instance + args.optional_u32(1).unwrap_or(1),
-                );
+                let instances = args.range(
+                    args.optional_u32(4).unwrap_or(0),
+                    args.optional_u32(1).unwrap_or(1),
+                )?;
+                pass.draw_indexed(indices, base_vertex, instances);
             }
             "drawIndirect" => {
                 pass.draw_indirect(self.buffer(args, args.reference(0)?)?, args.u64_at(1)?);
@@ -944,8 +962,8 @@ impl Replayer {
         let view_formats: Vec<wgpu::TextureFormat> = descriptor
             .get("viewFormats")
             .and_then(Value::as_array)
-            .map(|list| list.iter().filter_map(enum_of).collect())
-            .unwrap_or_default();
+            .map_or(Some(Vec::new()), |list| list.iter().map(enum_of).collect())
+            .ok_or_else(|| Self::bad(args.index, args.call, "an unknown view format"))?;
         let label = args.label(0);
         Ok(self.device.create_texture(&wgpu::TextureDescriptor {
             label: label.as_deref(),
@@ -1198,7 +1216,9 @@ impl Replayer {
             .get("vertex")
             .ok_or_else(|| Self::bad(args.index, args.call, "no vertex stage"))?;
         let vertex_module = self.shader(args, vertex)?;
-        let vertex_constants = constants_of(vertex);
+        let vertex_constants = constants_of(vertex).ok_or_else(|| {
+            Self::bad(args.index, args.call, "a pipeline constant is not a number")
+        })?;
         let vertex_constant_refs: Vec<(&str, f64)> = vertex_constants
             .iter()
             .map(|(k, v)| (k.as_str(), *v))
@@ -1220,14 +1240,17 @@ impl Replayer {
                 .and_then(Value::as_array)
                 .map_or(&[][..], Vec::as_slice)
                 .iter()
-                .filter_map(|attribute| {
+                .map(|attribute| {
                     Some(wgpu::VertexAttribute {
                         format: attribute.get("format").and_then(enum_of)?,
                         offset: attribute.get("offset").and_then(Value::as_u64).unwrap_or(0),
                         shader_location: field_u32(attribute, "shaderLocation")?,
                     })
                 })
-                .collect();
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    Self::bad(args.index, args.call, "a vertex attribute does not parse")
+                })?;
             attributes.push(list);
             strides.push(Some((
                 layout
@@ -1295,7 +1318,12 @@ impl Replayer {
             Some(stage) => Some(self.shader(args, stage)?),
             None => None,
         };
-        let fragment_constants = fragment.map(constants_of).unwrap_or_default();
+        let fragment_constants =
+            fragment
+                .map_or(Some(Vec::new()), constants_of)
+                .ok_or_else(|| {
+                    Self::bad(args.index, args.call, "a pipeline constant is not a number")
+                })?;
         let fragment_constant_refs: Vec<(&str, f64)> = fragment_constants
             .iter()
             .map(|(k, v)| (k.as_str(), *v))
@@ -1353,7 +1381,9 @@ impl Replayer {
             .get("compute")
             .ok_or_else(|| Self::bad(args.index, args.call, "no compute stage"))?;
         let module = self.shader(args, stage)?;
-        let constants = constants_of(stage);
+        let constants = constants_of(stage).ok_or_else(|| {
+            Self::bad(args.index, args.call, "a pipeline constant is not a number")
+        })?;
         let constant_refs: Vec<(&str, f64)> =
             constants.iter().map(|(k, v)| (k.as_str(), *v)).collect();
         let label = args.label(0);
@@ -1430,6 +1460,32 @@ impl<'a> Args<'a> {
             .and_then(|v| i32::try_from(v).ok())
     }
 
+    /// `first..first + count`, refused where it would overflow.
+    fn range(&self, first: u32, count: u32) -> Result<std::ops::Range<u32>, ReplayCallError> {
+        first
+            .checked_add(count)
+            .map(|end| first..end)
+            .ok_or_else(|| self.bad("a range past the largest index"))
+    }
+
+    /// The part of `buffer` from argument `i` (offset) and `i + 1` (size), refused past its end,
+    /// where WebGPU reports a validation error and wgpu would panic.
+    fn slice<'b>(
+        &self,
+        buffer: &'b wgpu::Buffer,
+        i: usize,
+    ) -> Result<wgpu::BufferSlice<'b>, ReplayCallError> {
+        let start = self.optional_u64(i).unwrap_or(0);
+        let end = match self.optional_u64(i + 1) {
+            Some(size) => start.checked_add(size),
+            None => Some(buffer.size()),
+        };
+        match end {
+            Some(end) if start <= end && end <= buffer.size() => Ok(buffer.slice(start..end)),
+            _ => Err(self.bad("a buffer range past the buffer's end")),
+        }
+    }
+
     fn str_at(&self, i: usize) -> Option<&'a str> {
         self.values.get(i).and_then(Value::as_str)
     }
@@ -1468,11 +1524,14 @@ impl<'a> Args<'a> {
             return Ok(Vec::new());
         };
         if let Some(list) = value.as_array() {
-            return Ok(list
+            return list
                 .iter()
-                .filter_map(Value::as_u64)
-                .filter_map(|v| u32::try_from(v).ok())
-                .collect());
+                .map(|v| {
+                    v.as_u64()
+                        .and_then(|v| u32::try_from(v).ok())
+                        .ok_or_else(|| self.bad("a dynamic offset is not a u32"))
+                })
+                .collect();
         }
         let bytes = self.blob(2)?;
         let all: Vec<u32> = bytes
@@ -1489,10 +1548,11 @@ impl<'a> Args<'a> {
             .optional_u64(4)
             .and_then(|v| usize::try_from(v).ok())
             .unwrap_or(all.len().saturating_sub(start));
-        Ok(all
-            .get(start..start + length)
+        start
+            .checked_add(length)
+            .and_then(|end| all.get(start..end))
             .map(<[u32]>::to_vec)
-            .unwrap_or_default())
+            .ok_or_else(|| self.bad("the dynamic offsets lie outside their array"))
     }
 }
 
@@ -1514,15 +1574,21 @@ fn field_u32(value: &Value, key: &str) -> Option<u32> {
 
 /// An enum of wgpu's from WebGPU's name for it.
 fn enum_of<T: DeserializeOwned>(value: &Value) -> Option<T> {
-    serde_json::from_value(value.clone()).ok()
+    // An unknown name is `None`, which each caller turns into an error or WebGPU's default.
+    T::deserialize(value).ok()
 }
 
-fn slice(buffer: &wgpu::Buffer, offset: Option<u64>, size: Option<u64>) -> wgpu::BufferSlice<'_> {
-    let start = offset.unwrap_or(0);
-    match size {
-        Some(size) => buffer.slice(start..start + size),
-        None => buffer.slice(start..),
-    }
+/// A texture format from WebGPU's name for it.
+fn texture_format(name: &str) -> Option<wgpu::TextureFormat> {
+    enum_of(&Value::String(name.to_owned()))
+}
+
+/// A canvas format wgpu does not know.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the capture's canvas format {format} is not one wgpu knows")]
+pub struct UnknownFormatError {
+    /// The format's WebGPU name.
+    pub format: String,
 }
 
 fn extent(value: &Value) -> wgpu::Extent3d {
@@ -1623,16 +1689,16 @@ fn store_of(value: Option<&Value>) -> wgpu::StoreOp {
     }
 }
 
-fn constants_of(stage: &Value) -> Vec<(String, f64)> {
+/// A stage's pipeline-overridable constants, or `None` if one is not a number.
+fn constants_of(stage: &Value) -> Option<Vec<(String, f64)>> {
     stage
         .get("constants")
         .and_then(Value::as_object)
-        .map(|map| {
+        .map_or(Some(Vec::new()), |map| {
             map.iter()
-                .filter_map(|(k, v)| Some((k.clone(), v.as_f64()?)))
+                .map(|(k, v)| Some((k.clone(), v.as_f64()?)))
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn binding_type(entry: &Value) -> Option<wgpu::BindingType> {
@@ -1642,9 +1708,10 @@ fn binding_type(entry: &Value) -> Option<wgpu::BindingType> {
             .and_then(Value::as_str)
             .unwrap_or("uniform")
         {
+            "uniform" => wgpu::BufferBindingType::Uniform,
             "storage" => wgpu::BufferBindingType::Storage { read_only: false },
             "read-only-storage" => wgpu::BufferBindingType::Storage { read_only: true },
-            _ => wgpu::BufferBindingType::Uniform,
+            _ => return None,
         };
         return Some(wgpu::BindingType::Buffer {
             ty,
@@ -1676,7 +1743,8 @@ fn binding_type(entry: &Value) -> Option<wgpu::BindingType> {
             "depth" => wgpu::TextureSampleType::Depth,
             "sint" => wgpu::TextureSampleType::Sint,
             "uint" => wgpu::TextureSampleType::Uint,
-            _ => wgpu::TextureSampleType::Float { filterable: true },
+            "float" => wgpu::TextureSampleType::Float { filterable: true },
+            _ => return None,
         };
         return Some(wgpu::BindingType::Texture {
             sample_type,
@@ -1784,4 +1852,127 @@ fn colour_target_of(value: &Value) -> Option<wgpu::ColorTargetState> {
             field_u32(value, "writeMask").unwrap_or(0xF),
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// A capture of one call, `op` on the queue with `args`, and a blob of `blob`.
+    fn capture_of(args: &Value, blob: &[u8]) -> Capture {
+        let text = json!({
+            "schema": "hyperion.gpu-capture",
+            "version": 1,
+            "adapter": {},
+            "features": [],
+            "limits": {},
+            "surfaces": [],
+            "skipped": [],
+            "spanStart": 0,
+            "frames": [],
+            "blobs": [{ "offset": 0, "length": blob.len() }],
+            "calls": [{ "target": QUEUE_ID, "op": "test", "args": args }],
+        })
+        .to_string();
+        Capture::parse(&text, blob.to_vec()).expect("a valid capture")
+    }
+
+    fn with_args<T>(args: &Value, blob: &[u8], check: impl FnOnce(&Args<'_>) -> T) -> T {
+        let capture = capture_of(args, blob);
+        let call = &capture.calls()[0];
+        check(&Args {
+            capture: &capture,
+            values: &call.args,
+            index: 0,
+            call,
+        })
+    }
+
+    #[test]
+    fn extents_read_both_webgpu_forms_with_their_defaults() {
+        let from_list = extent(&json!([64, 32]));
+        let from_dict = extent(&json!({ "width": 64, "height": 32, "depthOrArrayLayers": 6 }));
+        assert_eq!(
+            (
+                from_list.width,
+                from_list.height,
+                from_list.depth_or_array_layers
+            ),
+            (64, 32, 1)
+        );
+        assert_eq!(from_dict.depth_or_array_layers, 6);
+    }
+
+    #[test]
+    fn binding_types_map_webgpu_names_and_refuse_unknown_ones() {
+        assert!(matches!(
+            binding_type(&json!({ "buffer": { "type": "read-only-storage" } })),
+            Some(wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                ..
+            })
+        ));
+        assert!(matches!(
+            binding_type(&json!({ "buffer": {} })),
+            Some(wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                ..
+            })
+        ));
+        assert!(binding_type(&json!({ "buffer": { "type": "mystery" } })).is_none());
+        assert!(binding_type(&json!({ "texture": { "sampleType": "mystery" } })).is_none());
+        assert!(matches!(
+            binding_type(
+                &json!({ "texture": { "sampleType": "depth", "viewDimension": "2d-array" } })
+            ),
+            Some(wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            })
+        ));
+    }
+
+    #[test]
+    fn draw_ranges_are_refused_where_they_would_overflow() {
+        with_args(&json!([]), &[], |args| {
+            assert_eq!(args.range(4, 3).expect("in range"), 4..7);
+            assert!(matches!(
+                args.range(u32::MAX, 2),
+                Err(ReplayCallError::BadArguments { .. })
+            ));
+        });
+    }
+
+    #[test]
+    fn dynamic_offsets_come_from_a_list_or_a_typed_array_slice() {
+        with_args(&json!([0, { "$ref": 2 }, [256, 512]]), &[], |args| {
+            assert_eq!(args.dynamic_offsets().expect("a list"), [256, 512]);
+        });
+        let bytes: Vec<u8> = [1u32, 2, 3, 4]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let blob = json!({ "$blob": 0, "$type": "Uint32Array" });
+        with_args(&json!([0, { "$ref": 2 }, blob, 1, 2]), &bytes, |args| {
+            assert_eq!(args.dynamic_offsets().expect("a slice"), [2, 3]);
+        });
+        with_args(&json!([0, { "$ref": 2 }, blob, 3, 2]), &bytes, |args| {
+            assert!(matches!(
+                args.dynamic_offsets(),
+                Err(ReplayCallError::BadArguments { .. })
+            ));
+        });
+    }
+
+    #[test]
+    fn an_absent_argument_is_webgpus_undefined() {
+        with_args(&json!([3, { "$undefined": true }]), &[], |args| {
+            assert_eq!(args.u32_at(0).expect("a count"), 3);
+            assert!(args.get(1).is_err());
+            assert_eq!(args.optional_u32(1), None);
+        });
+    }
 }

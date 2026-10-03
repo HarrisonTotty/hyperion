@@ -3,12 +3,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
 use crate::capture::{Capture, QUEUE_ID};
-use crate::replay::{FramePassTimes, FrameTarget, ReplayCallError, Replayer};
+use crate::replay::{FramePassTimes, FrameTarget, ReplayCallError, Replayer, UnknownFormatError};
 use crate::results::{PassRow, ReplayFigures, Setting};
 
 /// Why a replay could not run.
@@ -20,20 +20,44 @@ pub enum RunReplayError {
     /// The device could not be made.
     #[error("the device could not be made")]
     NoDevice(#[source] wgpu::RequestDeviceError),
+    /// A canvas's format is not one wgpu knows.
+    #[error(transparent)]
+    Format(#[from] UnknownFormatError),
     /// A call could not be replayed.
     #[error("the capture could not be replayed")]
     Call(#[from] ReplayCallError),
+    /// Waiting for the GPU failed or timed out.
+    #[error("waiting for the GPU failed")]
+    Poll(#[source] wgpu::PollError),
     /// The capture names no setting and none was given.
     #[error("the capture records no setting; pass --setting")]
     NoSetting,
     /// The window could not be made or drawn to.
-    #[error("the window failed: {0}")]
-    Window(String),
+    #[error("the window failed: {reason}")]
+    Window {
+        /// What failed.
+        reason: String,
+    },
 }
 
-/// The WebGPU feature names the capture lists, as wgpu's features.
-pub(crate) fn features_of(names: &[String]) -> wgpu::Features {
-    names
+impl RunReplayError {
+    pub(crate) fn window(reason: impl std::fmt::Display) -> Self {
+        Self::Window {
+            reason: reason.to_string(),
+        }
+    }
+}
+
+/// How long one wait for the GPU may take before the replay gives up.
+const GPU_WAIT: Duration = Duration::from_secs(30);
+
+/// Frames the replay lets the GPU queue before it waits for the oldest, as a browser does.
+const FRAMES_IN_FLIGHT: usize = 2;
+
+/// The WebGPU feature names the capture lists, as wgpu's features, and the names wgpu lacks.
+pub(crate) fn features_of(names: &[String]) -> (wgpu::Features, Vec<String>) {
+    let mut unknown = Vec::new();
+    let features = names
         .iter()
         .fold(wgpu::Features::empty(), |features, name| {
             features
@@ -49,18 +73,36 @@ pub(crate) fn features_of(names: &[String]) -> wgpu::Features {
                     "depth-clip-control" => wgpu::Features::DEPTH_CLIP_CONTROL,
                     "texture-compression-bc" => wgpu::Features::TEXTURE_COMPRESSION_BC,
                     "dual-source-blending" => wgpu::Features::DUAL_SOURCE_BLENDING,
-                    _ => wgpu::Features::empty(),
+                    _ => {
+                        unknown.push(name.clone());
+                        wgpu::Features::empty()
+                    }
                 }
-        })
+        });
+    (features, unknown)
 }
 
 /// The device a replay runs on: the adapter's limits, and the capture's features it has, with
-/// `TIMESTAMP_QUERY` for the replay's own pass timer.
+/// `TIMESTAMP_QUERY` for the replay's own pass timer. A capture feature the adapter or wgpu lacks
+/// is a finding, recorded in `findings`.
 pub(crate) fn device_for(
     adapter: &wgpu::Adapter,
     capture: &Capture,
+    findings: &mut Vec<String>,
 ) -> Result<(wgpu::Device, wgpu::Queue), RunReplayError> {
-    let wanted = features_of(capture.features()) | wgpu::Features::TIMESTAMP_QUERY;
+    let (captured, unknown) = features_of(capture.features());
+    for name in unknown {
+        findings.push(format!(
+            "the capture's feature {name} is not one the replay maps"
+        ));
+    }
+    let missing = captured - adapter.features();
+    if !missing.is_empty() {
+        findings.push(format!(
+            "the adapter lacks the capture's features {missing:?}"
+        ));
+    }
+    let wanted = captured | wgpu::Features::TIMESTAMP_QUERY;
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("gpu-replay"),
         required_features: wanted & adapter.features(),
@@ -117,9 +159,8 @@ pub(crate) fn upload_bytes(capture: &Capture) -> u64 {
                 .args
                 .iter()
                 .find_map(|arg| arg.get("$blob")?.as_u64())?;
-            capture
-                .blob(usize::try_from(blob).ok()?)
-                .map(|bytes| bytes.len() as u64)
+            let bytes = capture.blob(usize::try_from(blob).ok()?)?;
+            u64::try_from(bytes.len()).ok()
         })
         .sum()
 }
@@ -143,9 +184,6 @@ pub(crate) fn frame_ranges(capture: &Capture) -> Vec<std::ops::Range<usize>> {
         .collect()
 }
 
-/// The pass-time readings in flight, collected as their mappings complete.
-type Pending = Arc<Mutex<Vec<(wgpu::Buffer, Vec<String>, bool)>>>;
-
 pub(crate) fn collect_errors(device: &wgpu::Device) -> Arc<Mutex<Vec<String>>> {
     let errors = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&errors);
@@ -157,12 +195,107 @@ pub(crate) fn collect_errors(device: &wgpu::Device) -> Arc<Mutex<Vec<String>>> {
     errors
 }
 
+/// One frame's pass-time read-back: its staging buffer, labels and whether it has mapped.
+#[derive(Debug)]
+struct Reading {
+    staging: wgpu::Buffer,
+    labels: Vec<String>,
+    mapped: Arc<Mutex<bool>>,
+}
+
+/// The frames' pass-time read-backs and the submissions that mark each frame's end.
+#[derive(Debug, Default)]
+pub(crate) struct Frames {
+    readings: Vec<Reading>,
+    markers: Vec<wgpu::SubmissionIndex>,
+}
+
+impl Frames {
+    /// Ends a replayed frame: maps its pass times for reading, marks its end on the queue, and
+    /// waits for the frame [`FRAMES_IN_FLIGHT`] before it, so that the GPU never has more queued.
+    pub(crate) fn end_frame(
+        &mut self,
+        replayer: &mut Replayer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), RunReplayError> {
+        if let Some((staging, labels, _)) = replayer.finish_frame() {
+            let mapped = Arc::new(Mutex::new(false));
+            let flag = Arc::clone(&mapped);
+            staging.map_async(wgpu::MapMode::Read, .., move |result| {
+                *flag.lock().unwrap_or_else(PoisonError::into_inner) = result.is_ok();
+            });
+            self.readings.push(Reading {
+                staging,
+                labels,
+                mapped,
+            });
+        }
+        self.markers.push(queue.submit(std::iter::empty()));
+        if let Some(oldest) = self
+            .markers
+            .len()
+            .checked_sub(FRAMES_IN_FLIGHT + 1)
+            .and_then(|i| self.markers.get(i))
+        {
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(oldest.clone()),
+                    timeout: Some(GPU_WAIT),
+                })
+                .map_err(RunReplayError::Poll)?;
+        }
+        Ok(())
+    }
+
+    /// Waits for every frame, then reads the pass times of each frame that mapped.
+    pub(crate) fn finish(
+        self,
+        replayer: &Replayer,
+        device: &wgpu::Device,
+    ) -> Result<Vec<FramePassTimes>, RunReplayError> {
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(GPU_WAIT),
+            })
+            .map_err(RunReplayError::Poll)?;
+        Ok(self
+            .readings
+            .iter()
+            .filter(|reading| {
+                *reading
+                    .mapped
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+            })
+            .map(|reading| replayer.read_pass_times(&reading.staging, &reading.labels))
+            .collect())
+    }
+}
+
+/// The intervals between successive frames' GPU ends, ms: what the GPU sustains offscreen.
+pub(crate) fn gpu_intervals_ms(frames: &[FramePassTimes], period_ns: f32) -> Vec<f64> {
+    let ends: Vec<u64> = frames.iter().filter_map(|frame| frame.end_ticks).collect();
+    ends.windows(2)
+        .map(|pair| {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "an interval's ticks are far below 2^52, so the f64 is exact"
+            )]
+            let ticks = pair[1].saturating_sub(pair[0]) as f64;
+            ticks * f64::from(period_ns) / 1e6
+        })
+        .collect()
+}
+
 /// Replays a capture offscreen on the default high-performance adapter, every canvas an
-/// offscreen texture, timing each frame by when the GPU completes it.
+/// offscreen texture, timing each frame by the GPU's timestamp at the end of its last pass.
 ///
 /// # Errors
 ///
-/// When there is no adapter or device, or a call cannot be replayed.
+/// When there is no adapter or device, a canvas's format is unknown, a call cannot be replayed,
+/// or waiting for the GPU fails.
 pub fn replay_offscreen(
     capture: &Capture,
     capture_dir: &Path,
@@ -176,37 +309,17 @@ pub fn replay_offscreen(
         ..Default::default()
     }))
     .map_err(RunReplayError::NoAdapter)?;
-    let (device, queue) = device_for(&adapter, capture)?;
+    let mut findings = capture.problems().to_vec();
+    let (device, queue) = device_for(&adapter, capture, &mut findings)?;
     let errors = collect_errors(&device);
-    let mut replayer = Replayer::new(device.clone(), queue.clone(), capture.surfaces());
+    let mut replayer = Replayer::new(device.clone(), queue.clone(), capture.surfaces())?;
     replayer.replay(capture, 0..capture.span_start(), &FrameTarget::Offscreen)?;
-    let completions = Arc::new(Mutex::new(Vec::new()));
-    let pending: Pending = Arc::new(Mutex::new(Vec::new()));
+    let mut frames = Frames::default();
     for range in frame_ranges(capture) {
         replayer.replay(capture, range, &FrameTarget::Offscreen)?;
-        let readback = replayer.finish_frame();
-        let done = Arc::clone(&completions);
-        queue.on_submitted_work_done(move || {
-            done.lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(Instant::now());
-        });
-        if let Some((staging, labels)) = readback {
-            map_for_reading(&pending, &staging, labels);
-        }
-        // Drives the callbacks without waiting, so that frames queue as the GPU allows.
-        let _ = device.poll(wgpu::PollType::Poll);
+        frames.end_frame(&mut replayer, &device, &queue)?;
     }
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
-    let completions = completions
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
-    let intervals_ms = completions
-        .windows(2)
-        .map(|pair| (pair[1] - pair[0]).as_secs_f64() * 1000.0)
-        .collect();
-    let passes = read_all(&replayer, &pending);
+    let times = frames.finish(&replayer, &device)?;
     let main = main_surface(capture);
     Ok(ReplayFigures {
         started_at,
@@ -223,8 +336,8 @@ pub fn replay_offscreen(
         adapter: adapter.get_info(),
         timed: replayer.times_passes(),
         canvas: main.map_or((0, 0), |s| (s.width, s.height)),
-        intervals_ms,
-        passes,
+        intervals_ms: gpu_intervals_ms(&times, replayer.timestamp_period_ns()),
+        passes: times.into_iter().map(|frame| frame.passes).collect(),
         rows: rows_of(capture),
         untimed_passes: replayer.untimed_passes(),
         upload_bytes: upload_bytes(capture),
@@ -232,39 +345,8 @@ pub fn replay_offscreen(
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone(),
+        findings,
     })
-}
-
-pub(crate) fn map_for_reading(pending: &Pending, staging: &wgpu::Buffer, labels: Vec<String>) {
-    let index = {
-        let mut list = pending.lock().unwrap_or_else(PoisonError::into_inner);
-        list.push((staging.clone(), labels, false));
-        list.len() - 1
-    };
-    let ready = Arc::clone(pending);
-    staging.map_async(wgpu::MapMode::Read, .., move |result| {
-        if result.is_ok()
-            && let Some(entry) = ready
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get_mut(index)
-        {
-            entry.2 = true;
-        }
-    });
-}
-
-pub(crate) fn read_all(replayer: &Replayer, pending: &Pending) -> Vec<Vec<(String, f64)>> {
-    pending
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .iter()
-        .filter(|(_, _, mapped)| *mapped)
-        .map(|(staging, labels, _)| {
-            let FramePassTimes { passes } = replayer.read_pass_times(staging, labels);
-            passes
-        })
-        .collect()
 }
 
 /// Replays a capture in a window with FIFO presentation at the captured resolution, the main
@@ -280,6 +362,3 @@ pub fn replay_presented(
 ) -> Result<ReplayFigures, RunReplayError> {
     crate::window::run(capture, capture_dir, setting_of(capture, setting)?)
 }
-
-/// A frame's pending readings, for the window driver.
-pub(crate) type PendingReadings = Pending;

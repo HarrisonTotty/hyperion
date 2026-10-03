@@ -127,6 +127,9 @@ struct CaptureFile {
     /// (`passRows`).
     #[serde(default)]
     meta: serde_json::Map<String, Value>,
+    /// What the capture could not log faithfully.
+    #[serde(default)]
+    problems: Vec<String>,
 }
 
 /// A WGSL module the capture made.
@@ -174,7 +177,7 @@ impl Capture {
         })
     }
 
-    fn parse(text: &str, data: Vec<u8>) -> Result<Self, ParseError> {
+    pub(crate) fn parse(text: &str, data: Vec<u8>) -> Result<Self, ParseError> {
         let file: CaptureFile = serde_json::from_str(text).map_err(ParseError::Json)?;
         if file.schema != CAPTURE_SCHEMA || file.version != CAPTURE_VERSION {
             return Err(ParseError::Read(ReadCaptureError::Schema {
@@ -258,6 +261,12 @@ impl Capture {
         &self.file.meta
     }
 
+    /// What the capture could not log faithfully; empty for a capture a replay can trust.
+    #[must_use]
+    pub fn problems(&self) -> &[String] {
+        &self.file.problems
+    }
+
     /// The number of blobs.
     #[must_use]
     pub fn blob_count(&self) -> usize {
@@ -285,7 +294,7 @@ impl Capture {
 
 /// [`Capture::parse`]'s errors, before the file's path is known.
 #[derive(Debug)]
-enum ParseError {
+pub(crate) enum ParseError {
     Json(serde_json::Error),
     Read(ReadCaptureError),
 }

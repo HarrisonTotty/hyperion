@@ -1,6 +1,10 @@
 //! The presented replay: a winit window at the captured resolution, FIFO presentation, one
 //! captured frame a presentation (R05.T15.c). It shows a window, so on the development machine it
 //! is run by hand by the owner (R05 Risks; the lanes never show a window on `:0`).
+//!
+//! A frame's time is taken when `present` returns: under FIFO with at most two frames queued,
+//! `present` blocks until a swapchain image is free, so the intervals follow the display's
+//! cadence, as the browser's presentation times do.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -17,17 +21,22 @@ use crate::capture::Capture;
 use crate::replay::{FrameTarget, Replayer};
 use crate::results::{ReplayFigures, Setting};
 use crate::run::{
-    PendingReadings, RunReplayError, collect_errors, device_for, frame_ranges, main_surface,
-    map_for_reading, read_all, rows_of, upload_bytes,
+    Frames, RunReplayError, collect_errors, device_for, frame_ranges, main_surface, rows_of,
+    upload_bytes,
 };
+
+/// Acquisitions that may fail in a row before the replay gives up.
+const ACQUIRE_RETRIES: u32 = 8;
 
 /// The window's state once the event loop has resumed.
 struct Running {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
     replayer: Replayer,
+    frames: Frames,
     adapter: wgpu::AdapterInfo,
     errors: Arc<Mutex<Vec<String>>>,
     display_hz: Option<f64>,
@@ -39,15 +48,16 @@ struct App<'a> {
     running: Option<Running>,
     ranges: Vec<std::ops::Range<usize>>,
     next: usize,
+    failed_acquisitions: u32,
     presented_at: Vec<Instant>,
-    pending: PendingReadings,
+    findings: Vec<String>,
     failure: Option<RunReplayError>,
 }
 
 impl App<'_> {
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<Running, RunReplayError> {
         let main = main_surface(self.capture)
-            .ok_or_else(|| RunReplayError::Window("the capture drew to no canvas".to_owned()))?;
+            .ok_or_else(|| RunReplayError::window("the capture drew to no canvas"))?;
         let window = Arc::new(
             event_loop
                 .create_window(
@@ -56,12 +66,12 @@ impl App<'_> {
                         .with_resizable(false)
                         .with_inner_size(PhysicalSize::new(main.width, main.height)),
                 )
-                .map_err(|error| RunReplayError::Window(error.to_string()))?,
+                .map_err(RunReplayError::window)?,
         );
         let surface = self
             .instance
             .create_surface(Arc::clone(&window))
-            .map_err(|error| RunReplayError::Window(error.to_string()))?;
+            .map_err(RunReplayError::window)?;
         let adapter =
             pollster::block_on(self.instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -69,25 +79,29 @@ impl App<'_> {
                 ..Default::default()
             }))
             .map_err(RunReplayError::NoAdapter)?;
-        let (device, queue) = device_for(&adapter, self.capture)?;
+        let (device, queue) = device_for(&adapter, self.capture, &mut self.findings)?;
         let mut config = surface
             .get_default_config(&adapter, main.width, main.height)
-            .ok_or_else(|| RunReplayError::Window("the surface suits no adapter".to_owned()))?;
+            .ok_or_else(|| RunReplayError::window("the surface suits no adapter"))?;
         config.present_mode = wgpu::PresentMode::Fifo;
         config.desired_maximum_frame_latency = 2;
-        if let Some(format) =
-            serde_json::from_value::<wgpu::TextureFormat>(Value::String(main.format.clone())).ok()
-            && surface.get_capabilities(&adapter).formats.contains(&format)
-        {
-            config.format = format;
-        }
         let capabilities = surface.get_capabilities(&adapter);
+        let wanted =
+            serde_json::from_value::<wgpu::TextureFormat>(Value::String(main.format.clone()));
+        match wanted {
+            Ok(format) if capabilities.formats.contains(&format) => config.format = format,
+            _ => self.findings.push(format!(
+                "the window cannot present the capture's canvas format {}; it presents {:?}, so \
+                 pipelines drawing to the canvas fail validation",
+                main.format, config.format
+            )),
+        }
         config.usage = wgpu::TextureUsages::RENDER_ATTACHMENT
             | (capabilities.usages
                 & (wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC));
         surface.configure(&device, &config);
         let errors = collect_errors(&device);
-        let mut replayer = Replayer::new(device.clone(), queue.clone(), self.capture.surfaces());
+        let mut replayer = Replayer::new(device.clone(), queue.clone(), self.capture.surfaces())?;
         replayer.replay(
             self.capture,
             0..self.capture.span_start(),
@@ -100,9 +114,11 @@ impl App<'_> {
         Ok(Running {
             window,
             surface,
+            config,
             device,
             queue,
             replayer,
+            frames: Frames::default(),
             adapter: adapter.get_info(),
             errors,
             display_hz,
@@ -118,12 +134,24 @@ impl App<'_> {
             return Ok(true);
         };
         let main = main_surface(self.capture).map_or(0, |surface| surface.id);
-        let (wgpu::CurrentSurfaceTexture::Success(frame)
-        | wgpu::CurrentSurfaceTexture::Suboptimal(frame)) = running.surface.get_current_texture()
-        else {
-            // A skipped acquisition is retried on the next redraw.
-            return Ok(true);
+        let frame = match running.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            other => {
+                self.failed_acquisitions += 1;
+                if self.failed_acquisitions > ACQUIRE_RETRIES {
+                    return Err(RunReplayError::window(format!(
+                        "the window's surface gave no texture {ACQUIRE_RETRIES} times running \
+                         ({other:?})"
+                    )));
+                }
+                // An outdated or lost surface is configured again; the frame is retried on the
+                // next redraw.
+                running.surface.configure(&running.device, &running.config);
+                return Ok(true);
+            }
         };
+        self.failed_acquisitions = 0;
         running.replayer.replay(
             self.capture,
             range,
@@ -132,13 +160,12 @@ impl App<'_> {
                 texture: &frame.texture,
             },
         )?;
-        if let Some((staging, labels)) = running.replayer.finish_frame() {
-            map_for_reading(&self.pending, &staging, labels);
-        }
         running.window.pre_present_notify();
         running.queue.present(frame);
         self.presented_at.push(Instant::now());
-        let _ = running.device.poll(wgpu::PollType::Poll);
+        running
+            .frames
+            .end_frame(&mut running.replayer, &running.device, &running.queue)?;
         self.next += 1;
         Ok(true)
     }
@@ -188,7 +215,7 @@ pub(crate) fn run(
     setting: Setting,
 ) -> Result<ReplayFigures, RunReplayError> {
     let started_at = SystemTime::now();
-    let event_loop = EventLoop::new().map_err(|error| RunReplayError::Window(error.to_string()))?;
+    let event_loop = EventLoop::new().map_err(RunReplayError::window)?;
     let mut app = App {
         capture,
         instance: wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
@@ -197,26 +224,26 @@ pub(crate) fn run(
         running: None,
         ranges: frame_ranges(capture),
         next: 0,
+        failed_acquisitions: 0,
         presented_at: Vec::new(),
-        pending: Arc::new(Mutex::new(Vec::new())),
+        findings: capture.problems().to_vec(),
         failure: None,
     };
     event_loop
         .run_app(&mut app)
-        .map_err(|error| RunReplayError::Window(error.to_string()))?;
+        .map_err(RunReplayError::window)?;
     if let Some(error) = app.failure {
         return Err(error);
     }
     let running = app
         .running
-        .ok_or_else(|| RunReplayError::Window("the window never opened".to_owned()))?;
-    let _ = running.device.poll(wgpu::PollType::wait_indefinitely());
+        .ok_or_else(|| RunReplayError::window("the window never opened"))?;
+    let times = running.frames.finish(&running.replayer, &running.device)?;
     let intervals_ms = app
         .presented_at
         .windows(2)
         .map(|pair| (pair[1] - pair[0]).as_secs_f64() * 1000.0)
         .collect();
-    let passes = read_all(&running.replayer, &app.pending);
     let main = main_surface(capture);
     Ok(ReplayFigures {
         started_at,
@@ -234,7 +261,7 @@ pub(crate) fn run(
         timed: running.replayer.times_passes(),
         canvas: main.map_or((0, 0), |s| (s.width, s.height)),
         intervals_ms,
-        passes,
+        passes: times.into_iter().map(|frame| frame.passes).collect(),
         rows: rows_of(capture),
         untimed_passes: running.replayer.untimed_passes(),
         upload_bytes: upload_bytes(capture),
@@ -243,5 +270,6 @@ pub(crate) fn run(
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone(),
+        findings: app.findings,
     })
 }

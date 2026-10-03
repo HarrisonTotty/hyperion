@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use gpu_replay::capture::Capture;
-use gpu_replay::results::{RESULTS_SCHEMA, Setting, write_results};
+use gpu_replay::results::{RESULTS_SCHEMA, write_results};
 use gpu_replay::run::replay_offscreen;
 use serde_json::Value;
 
@@ -48,14 +48,16 @@ fn figure_problems(node: &Value, path: &str, problems: &mut Vec<String>) {
 #[test]
 fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     let capture = Capture::read(&fixture()).expect("the fixture is a capture");
-    let figures =
-        replay_offscreen(&capture, &fixture(), Some(Setting::Low)).expect("the replay runs");
-    assert!(!figures.presented);
-    // The module that is invalid on purpose is refused by wgpu as by naga.
+    let figures = replay_offscreen(&capture, &fixture(), None).expect("the replay runs");
+    assert!(!figures.presented());
+    // The module that is invalid on purpose is refused by wgpu as by naga, and nothing else is.
+    assert_eq!(figures.errors().len(), 1, "{:?}", figures.errors());
     assert!(
-        !figures.errors.is_empty(),
-        "the broken module should be reported"
+        figures.errors()[0].contains("broken on purpose"),
+        "{:?}",
+        figures.errors()
     );
+    assert_eq!(figures.findings(), &[] as &[String]);
     let dir = std::env::temp_dir().join(format!("gpu-replay-test-{}", std::process::id()));
     let path = write_results(&dir, &figures).expect("the results are written");
     let text = std::fs::read_to_string(&path).expect("the results are readable");
@@ -74,7 +76,9 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     ] {
         assert!(results["run"][key].is_string(), "run.{key} is a string");
     }
+    // The setting and seed come from the capture's `meta`.
     assert_eq!(results["run"]["setting"], "low");
+    assert_eq!(results["run"]["seed"], "7");
     assert!(results["run"]["machine"]["loadAverage"].is_array());
     assert!(results["run"]["switches"].is_array());
     for key in ["levels", "streaming"] {
@@ -107,6 +111,20 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
         "an offscreen replay presents nothing"
     );
     assert_eq!(results["frames"]["source"], "gpu-completion");
+    // Two frames, so one interval between their GPU ends.
+    assert_eq!(results["frames"]["gpuCompletion"]["value"]["count"], 1);
+    // The fixture's one pass is the terrain row's (its `passRows`), and the replay times it.
+    let terrain = rows
+        .iter()
+        .find(|row| row["id"] == "terrain")
+        .expect("a terrain row");
+    assert!(terrain["value"].is_number(), "{terrain}");
+    let atmosphere = rows
+        .iter()
+        .find(|row| row["id"] == "atmosphere")
+        .expect("an atmosphere row");
+    assert_eq!(atmosphere["verdict"], "not-measured");
+    assert_eq!(atmosphere["note"], "no timed atmosphere pass");
     let mut problems = Vec::new();
     figure_problems(&results, "", &mut problems);
     assert_eq!(problems, Vec::<String>::new());

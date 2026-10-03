@@ -55,17 +55,39 @@ impl ValidationReport {
     }
 }
 
+/// Why naga refused a WGSL module, with its message pointing at the source.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ValidateWgslError {
+    /// The module does not parse.
+    #[error("{message}")]
+    Parse {
+        /// naga's message, with the source line it points at.
+        message: String,
+    },
+    /// The module parses and does not validate.
+    #[error("{message}")]
+    Validate {
+        /// naga's message, with the source line it points at.
+        message: String,
+    },
+}
+
 /// Parses and validates one WGSL module, with every capability naga knows allowed (the device's
 /// own features decide what the browser compiled, and naga is asked only whether it can).
 ///
 /// # Errors
 ///
-/// naga's message when the module does not parse or does not validate.
-pub fn validate_wgsl(code: &str) -> Result<(), String> {
-    let module = naga::front::wgsl::parse_str(code).map_err(|error| error.emit_to_string(code))?;
+/// [`ValidateWgslError::Parse`] when the module does not parse, and
+/// [`ValidateWgslError::Validate`] when it does not validate.
+pub fn validate_wgsl(code: &str) -> Result<(), ValidateWgslError> {
+    let module = naga::front::wgsl::parse_str(code).map_err(|error| ValidateWgslError::Parse {
+        message: error.emit_to_string(code),
+    })?;
     Validator::new(ValidationFlags::all(), Capabilities::all())
         .validate(&module)
-        .map_err(|error| error.emit_to_string(code))?;
+        .map_err(|error| ValidateWgslError::Validate {
+            message: error.emit_to_string(code),
+        })?;
     Ok(())
 }
 
@@ -75,11 +97,11 @@ pub fn validate_capture(capture: &Capture) -> ValidationReport {
     let mut report = ValidationReport::default();
     for module in capture.shader_modules() {
         report.modules += 1;
-        if let Err(message) = validate_wgsl(module.code) {
+        if let Err(error) = validate_wgsl(module.code) {
             report.rejected.push(Rejection {
                 id: module.id,
                 label: module.label.to_owned(),
-                message,
+                message: error.to_string(),
             });
         }
     }
@@ -98,13 +120,20 @@ mod tests {
 
     #[test]
     fn rejects_a_module_that_does_not_parse() {
-        let message = validate_wgsl("fn broken( {").expect_err("a syntax error");
-        assert!(message.contains("error"), "{message}");
+        let error = validate_wgsl("fn broken( {").expect_err("a syntax error");
+        assert!(
+            matches!(error, ValidateWgslError::Parse { .. }),
+            "{error:?}"
+        );
     }
 
     #[test]
     fn rejects_a_module_that_does_not_validate() {
         let code = "fn f() -> f32 { return 1u; }";
-        assert!(validate_wgsl(code).is_err());
+        let error = validate_wgsl(code).expect_err("a type mismatch");
+        assert!(
+            matches!(error, ValidateWgslError::Validate { .. }),
+            "{error:?}"
+        );
     }
 }

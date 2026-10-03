@@ -2798,3 +2798,44 @@ medium, sizes, figure)`.
     `--capture` carries none (tested). `engineBoundary.test.ts` exempts `view/spike/capture.ts`
     and its test by name from the allocation rule (`isCaptureShim`; the plan named the shim alone,
     but its test drives a device directly).
+- **Deviations in T15.b and T15.c, as built** (2026-10-03).
+  - `tools/gpu-replay` (own `[workspace]`, wgpu and naga `=30.0.1`, winit 0.30, pollster) has
+    `src/lib.rs` and, beyond the plan's files, `src/run.rs` (the offscreen and presented drivers)
+    and `src/window.rs` (the winit window), so that `main.rs` stays thin. `gpu-replay validate
+<capture>` reads and validates; `gpu-replay replay <capture> [--present] [--setting high|low]
+[--out <dir>]` replays and writes `<date>-<machine>-<setting>-replay.json` (default
+    `docs/measurements/descent-spike/`). `just replay` runs `replay` in release.
+  - The replay recreates the capture's objects in wgpu from the WebGPU names in the log (wgpu's
+    `serde` feature reads them), adds `COPY_DST` to buffers and textures for the snapshot's
+    writes, and keeps passes open across calls (`forget_lifetime`). The capture's own query sets
+    and `resolveQuerySet` are not replayed: the replay times every pass itself with
+    `TIMESTAMP_QUERY` where the adapter has it, labelled as captured. A buffer created
+    `mappedAtCreation` starts as zeros (its mapped writes are not in the log). Arguments that do
+    not parse (a format, a vertex attribute, a binding type, a constant), and buffer ranges past a
+    buffer's end, stop the replay with the call named, rather than being defaulted. wgpu's
+    validation errors are collected and reported, not fatal; the capture's `problems`, capture
+    features the adapter or the replayer lacks, and a canvas format the window cannot present are
+    reported as `findings`.
+  - Offscreen, every canvas is an offscreen texture; frame intervals are the gaps between the
+    GPU timestamps at the end of successive frames' last passes, with at most two frames queued
+    (the replay waits on the frame two before), so they say what the GPU sustains; without
+    `TIMESTAMP_QUERY` they are null with that reason. Presented, the main (largest) canvas is the
+    window's surface with FIFO presentation, intervals are taken as `present` returns, and an
+    outdated or lost surface is configured again, up to eight failures in a row. A replay's
+    results file follows `main/results.ts`'s schema (version 1), whose types gained
+    `frames.source: "gpu-completion"`, the optional `frames.gpuCompletion` and the launch mode
+    `native-replay` (the backend is in `run.options.backend`); figures a native replay cannot have
+    (trace, main thread, memory, rAF) are null with their reason. A GPU row counts only frames
+    with a pass of that row, as the client's writer does.
+  - The checked-in capture (`tests/fixtures/small`) is hand-written in the client's format (two
+    frames, `meta` naming its setting, seed and pass rows), with one module invalid on purpose.
+    Unit tests pin the argument mapping (extents, binding types, ranges, dynamic offsets, absent
+    arguments) and the criterion's rows. Its replay test needs a GPU adapter (any wgpu backend) and runs
+    with `cargo test --manifest-path tools/gpu-replay/Cargo.toml`, display variables unset; it
+    passed on the RTX 3080 (Vulkan) on 2026-10-03. The root `Cargo.toml` has
+    `exclude = ["tools/*"]`, so neither `just lint` nor `just ci` checks the tool: its fmt, clippy
+    (`-D warnings`) and tests are run by hand with that manifest. Canvas textures of past frames
+    stay in the replay's object table for the run (a span is short).
+  - **Pending:** a capture of the real descent (T13.c's `--capture`), its offscreen replay on the
+    RTX 3080, and the presented replay, by hand for the owner:
+    `just replay <capture-dir> --present` (a visible window on `:0`).
