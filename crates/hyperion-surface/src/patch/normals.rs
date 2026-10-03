@@ -19,10 +19,12 @@
 //! reads float bits.
 
 use super::{HeightSource, NormalScale};
-use crate::cube::{PATCH_QUADS, PatchKey};
+use crate::cube::PatchKey;
+use crate::num::assert_finite;
 use crate::spheroid::Spheroid;
 
 /// +1 for x ≥ 0 (zeros of either sign included), −1 otherwise.
+#[must_use]
 fn sign_not_zero(x: f64) -> f64 {
     if x < 0.0 { -1.0 } else { 1.0 }
 }
@@ -59,10 +61,10 @@ pub fn decode_octahedral(e: [f64; 2]) -> [f64; 3] {
     [x / len, y / len, z / len]
 }
 
-/// The surface normal at the unit direction `dir` for a height `h` metres and its gradient
+/// The surface normal at the unit direction `dir` for a height `h_m` metres and its gradient
 /// `gradient` (body-fixed, per metre) on `figure` (see the module documentation).
 #[must_use]
-pub fn surface_normal(figure: &Spheroid, dir: [f64; 3], h: f64, gradient: [f64; 3]) -> [f64; 3] {
+pub fn surface_normal(figure: &Spheroid, dir: [f64; 3], h_m: f64, gradient: [f64; 3]) -> [f64; 3] {
     let nu = figure.normal(dir);
     let along = gradient[0] * nu[0] + gradient[1] * nu[1] + gradient[2] * nu[2];
     let tangent = [0, 1, 2].map(|a| gradient[a] - along * nu[a]);
@@ -70,7 +72,7 @@ pub fn surface_normal(figure: &Spheroid, dir: [f64; 3], h: f64, gradient: [f64; 
     let scaled = if size > 0.0 {
         let unit = tangent.map(|t| t / size);
         let rho = figure.section_radius_m(dir, unit);
-        let factor = rho / (rho + h);
+        let factor = rho / (rho + h_m);
         tangent.map(|t| t * factor)
     } else {
         tangent
@@ -92,17 +94,19 @@ pub(crate) fn bake_normals<S: HeightSource>(
     cache: &mut S::Cache,
 ) -> Result<Vec<f32>, S::Error> {
     let figure = source.figure();
-    let per_patch = match scale {
-        NormalScale::Mesh => PATCH_QUADS,
-        NormalScale::Double => 2 * PATCH_QUADS,
-    };
+    let per_patch = scale.grid().quads();
     let side = scale.side();
     let mut out = Vec::with_capacity(2 * side * side);
     for y in 0..=per_patch {
         for x in 0..=per_patch {
-            let dir = key.sample_dir(x, y, per_patch);
+            let dir = key.sample_dir(x, y, scale.grid());
             let sample = source.height(cache, dir, key.level())?;
-            let n = surface_normal(&figure, dir, sample.height_m, sample.gradient);
+            let n = surface_normal(
+                &figure,
+                dir,
+                assert_finite(sample.height_m),
+                sample.gradient.map(assert_finite),
+            );
             for c in encode_octahedral(n) {
                 #[expect(
                     clippy::cast_possible_truncation,

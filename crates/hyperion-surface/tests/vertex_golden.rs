@@ -127,7 +127,7 @@ fn the_vertex_reference_matches_its_golden() {
                 .chain(&terms.nu0)
                 .map(|v| hex(*v)),
         );
-        fields.push(hex(terms.h0));
+        fields.push(hex(terms.h0_m));
         fields.push(String::from(if terms.straddles { "1" } else { "0" }));
         w.line(&format!("terms {}", fields.join(" ")));
         let h1 = |x: u8, y: u8| narrow(morph_height(&figure, key, x, y));

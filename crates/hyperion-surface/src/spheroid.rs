@@ -10,6 +10,9 @@
 use hyperion_base::math;
 
 /// A rotational spheroid: equatorial radius a and polar radius c, metres.
+///
+/// Plain data with public fields, as P14.T46.e specifies the type; its constructors validate, and
+/// a figure written field by field must keep both radii finite and positive.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Spheroid {
     /// The equatorial radius a, metres.
@@ -40,8 +43,16 @@ impl std::error::Error for BuildSpheroidError {}
 
 impl Spheroid {
     /// The sphere of radius `radius_m` metres.
+    ///
+    /// # Panics
+    ///
+    /// If `radius_m` is not finite and positive.
     #[must_use]
     pub const fn sphere(radius_m: f64) -> Self {
+        assert!(
+            radius_m.is_finite() && radius_m > 0.0,
+            "a sphere's radius must be finite and positive"
+        );
         Self {
             equatorial_radius_m: radius_m,
             polar_radius_m: radius_m,

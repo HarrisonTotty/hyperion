@@ -67,7 +67,7 @@ use crate::noise::NOISE_RMS;
 
 /// C₁, the certified maximum of |∇noise| in lattice units, over all points and gradient choices.
 ///
-/// Certified like [`NOISE_BOUND`]: per axis, the largest |∂_i noise| any choice of the eight
+/// Certified like [`NOISE_BOUND`](crate::noise::NOISE_BOUND): per axis, the largest |∂_i noise| any choice of the eight
 /// corners' gradients gives at x is `U_i(x) = Σ_c max_g |∂_i (w_c (g · (x − c)))|`, so
 /// `|∇noise| ≤ |U(x)|`, which is searched on a grid of step 1/256 over the 1/48 of the cell its
 /// symmetry leaves and raised by a Lipschitz margin (`noise_derivative_bounds_certified`).
@@ -84,6 +84,7 @@ pub const PARAMETRIC_CURVATURE: f64 = 3.67;
 
 /// The bounds on the second derivative's norm and the gradient's norm of one octave's
 /// contribution, per metre² and per metre.
+#[must_use]
 fn octave_derivative_bounds(planet: &TestPlanet, k: u8) -> (f64, f64) {
     let lambda = octaves::spacing_m(k);
     let amp = planet.sigma_m(k) / NOISE_RMS;
@@ -102,6 +103,7 @@ fn octave_derivative_bounds(planet: &TestPlanet, k: u8) -> (f64, f64) {
 /// `‖H(w r)‖ ≤ ‖H_w‖ |r| + 2 |∇w| |∇r| + |w| ‖H_r‖` and `|∇(w r)| ≤ |∇w| |r| + |w| |∇r|`, with
 /// `|∇r| ≤ |∇n|`, `‖H_r‖ ≤ |∇n|² ÷ ε + ‖H_n‖`, `|w| ≤ 1`, and w's derivatives those of a smoothstep
 /// (slope at most 3/2, curvature at most 6) of `(n₂ + n₃) ÷ (4 σ_noise)`.
+#[must_use]
 fn ridged_derivative_bounds(planet: &TestPlanet, k: u8) -> (f64, f64) {
     let (c1, c2) = (NOISE_GRADIENT_BOUND, NOISE_CURVATURE_BOUND);
     let lambda = octaves::spacing_m(k);
@@ -165,6 +167,7 @@ impl TestPlanet {
 
     /// The bound on the linear-interpolation error of level `level`'s mesh of octaves 0 to
     /// `count − 1`, metres.
+    #[must_use]
     fn interpolation_bound_m(&self, level: u8, count: u8) -> f64 {
         let a = self.figure().equatorial_radius_m;
         let h = vertex_spacing(a, level).max_m;

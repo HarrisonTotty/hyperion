@@ -63,7 +63,11 @@ use hyperion_base::Seed;
 
 use crate::cube::PatchKey;
 use crate::geometry::vertex_spacing;
-use crate::noise::{LatticeCache, NOISE_BOUND, NOISE_RMS, Octave, gradient_noise};
+use crate::noise::{NOISE_BOUND, NOISE_RMS, Octave, gradient_noise};
+
+/// The per-bake cache of lattice gradients, which lives in [`crate::noise`]; re-exported here as
+/// the plan's Provides place it, the path R09.T4 moves it from.
+pub use crate::noise::LatticeCache;
 use crate::num::assert_finite;
 
 pub use crate::spheroid::Spheroid;
@@ -151,6 +155,7 @@ pub const RIDGE_RMS: f64 = 0.1488;
 
 /// The largest |r − [`RIDGE_MEAN`]| of a ridge term r = 1 − √(n² + ε²), with |n| at most
 /// [`NOISE_BOUND`].
+#[must_use]
 fn ridge_reach() -> f64 {
     let crest = 1.0 - RIDGE_EPSILON;
     let trough = 1.0 - (NOISE_BOUND * NOISE_BOUND + RIDGE_EPSILON * RIDGE_EPSILON).sqrt();
@@ -226,6 +231,7 @@ impl TestPlanet {
     }
 
     /// The largest |height| octave `k` can contribute, metres.
+    #[must_use]
     fn octave_bound_m(&self, k: u8) -> f64 {
         if self.ridges == Ridges::On && RIDGED.contains(&k) {
             self.sigma_m(k) * ridge_reach() / RIDGE_RMS
@@ -236,6 +242,10 @@ impl TestPlanet {
 
     /// The lowest and highest height level `level` can reach anywhere, metres: the sum of its
     /// octaves' certified bounds, for culling (Design note 8).
+    ///
+    /// # Panics
+    ///
+    /// If `level` is above [`crate::cube::MAX_LEVEL`].
     #[must_use]
     pub fn height_range_m(&self, level: u8) -> (f64, f64) {
         let set = self.octaves_at(level);
@@ -254,7 +264,8 @@ impl TestPlanet {
     ///
     /// # Panics
     ///
-    /// Never: a patch has 64 quads a side.
+    /// If the patch's ball reaches a lattice index beyond ±2³¹, which no body of a planet's size
+    /// does.
     pub fn cover_patch(&self, cache: &mut LatticeCache, key: PatchKey) {
         let quads = u8::try_from(crate::cube::PATCH_QUADS).expect("64 fits a u8");
         let centre = self.figure.point(key.vertex_dir(quads / 2, quads / 2));
@@ -271,6 +282,7 @@ impl TestPlanet {
     }
 
     /// Octave `k` of this planet.
+    #[must_use]
     fn octave(&self, k: u8) -> Octave {
         octaves::octave(self.seed, k)
     }
@@ -281,7 +293,8 @@ impl TestPlanet {
     ///
     /// # Panics
     ///
-    /// If `dir` is not finite, or a height is not finite (a bug).
+    /// If `dir` is not finite, `level` is above [`crate::cube::MAX_LEVEL`], or a height is not
+    /// finite (a bug).
     #[must_use]
     pub fn height(&self, dir: [f64; 3], level: u8, cache: &mut LatticeCache) -> HeightSample {
         self.sum_octaves(dir, self.octaves_at(level).count(), cache)
@@ -385,6 +398,7 @@ impl crate::patch::HeightSource for TestPlanet {
     }
 }
 
+#[cfg(test)]
 /// The fixed point set the coarse octaves' variance is measured over: a Fibonacci sphere of
 /// [`FIXED_POINTS`] unit directions, point i at z = 1 − (2i + 1) ÷ N and longitude i times the
 /// golden angle π (3 − √5), which samples the sphere evenly by area.
