@@ -2960,6 +2960,99 @@ medium, sizes, figure)`.
     SwiftShader on 2026-10-03, both variants: 100% from 400 km and 68.8% from 10 m, every terrain
     pixel lit, no uncaptured GPU error. The terrain being drawn with `cullMode: "back"` also
     confirms the mesh's winding.
+- **Deviations in T11.c, as built** (2026-10-03).
+  - _The pass_ (`view/terrain/terrainPass.ts`).
+    - `TerrainPass` holds one view's `TerrainResources`, `PatchCache` (over `layout.slots`) and
+      pool. All three are made per device and remade with a new pool after a device loss. A late
+      bake from the old pool is ignored.
+    - The pool comes from a `TerrainPoolFactory(bake)`, the layout's vertex path decided first;
+      `TerrainPool` is the subset the pass drives.
+    - `ready()` compiles `terrainMaterialSpec(layout.vertexPath)`.
+    - `frame(TerrainFrameInput)` returns `TerrainFrame`: the draw or `null`, the draw set, the
+      selection, `reselected`, the conditions and the debounced line.
+    - The camera comes as `TerrainView`: the body's `Rotation3`, the camera in the body's
+      non-rotating axes, and the orientation there. The pass rotates it into body-fixed axes for
+      selection (position by Rᵀ, orientation conj(q_R) · q).
+    - Patch origins and contacts are written as R · p less the camera, from `f64`, narrowed once.
+    - `bodyRotation` is R, column-major.
+    - A setting change is a new `TerrainPass`; the engine frees nothing before it is disposed.
+  - _The cadence_ (decision-r05-patch-demand.md 4d). Selection re-runs on any of:
+    - a change of viewport, field of view, contacts (compared by value, from a copy) or baked
+      ranges (any bake stored);
+    - a rotation, roll included, of more than one pixel's angle, 2 acos |q · q′| > fov_x ÷ W;
+    - a move of more than `RESELECT_FRACTION` (0.1) × the nearest selected non-finest patch's
+      sphere distance, floored at one finest patch (spheres of ±24.5 km height ranges contain a
+      low camera).
+
+    It selects at τ ÷ 1.1 with `maxPatches` = ⌊slots ÷ 2⌋ (981 high `BakedOffsets`, 1,952
+    fallback, 648 low) and the cache as `heightRanges`. The draw set, `retain`, the conditions and
+    the contacts near drawn patches are recomputed only when selection runs, so a frame at rest
+    reuses its `DrawSet`. The demand (T7.c's breadth-first list, less resident keys) goes to the
+    pool when selection runs or a bake lands.
+
+  - _The morph bands_ (`morphRangeM`, `MORPH_START_FRACTION` 0.7, a hand value).
+    - Level n's band runs from 0.7 of the way from d_n to d₍ₙ₋₁₎, ending at d₍ₙ₋₁₎, where d_k is
+      the distance at which `selectionErrorM(k)` subtends the setting's τ (not τ ÷ 1.1, so that a
+      coarse–fine edge stays at morph 1 between selections).
+    - Level 0 has none. The finest level's band is [0.7 d₍ₙ₋₁₎, d₍ₙ₋₁₎].
+    - The bands are computed per level when selection runs. Stand-ins take their own level's.
+    - Where the budget leaves a coarse patch beside a finer one inside the parent's band, CDLOD's
+      crack-freedom does not hold, and the skirts cover the gap.
+  - _Contacts._ Only contacts whose held radius plus ramp reaches a drawn patch's bounding sphere
+    are written. Each is written with T7.c's `heldRadiusM` and `morphRampM`. Both rules are 3-D, so a body above
+    the ground is passed as the surface point beneath it (T13.b's to do). Selection also takes
+    `skirtMarginM` = `WORKER_SKIRT_MARGIN_M` (0, as `heightBake.ts`'s `bakeKey` bakes).
+  - _The annunciation._ The pass owns the view's `TerrainAnnunciationDebounce`. `STREAMING` and
+    `DETAIL LIMITED` come from T9's `terrainConditions(draw, selection, selection)`, so `limited`
+    alone sets the latter, and on the low setting any drawn terrain sets it (Design note 26).
+    `limited` is measured against τ ÷ 1.1. T13.b passes the line to `labelStatements`.
+  - _Allocation._ A frame writes the instance and contact records from scalars
+    (`InstanceRecords.pushXyz`, `ContactRecords.pushXyz`, added) into buffers made once, and
+    returns one draw item made with the material. The counting engine checks that no buffer,
+    texture, mesh, material or target is made after warm-up, and a test checks that the
+    `DrawSet` is reused at rest. `resolveDrawSet` and `retain` (T8) still allocate when selection
+    runs, which is steady state during a descent, since a landed bake re-runs it. **Pending lane
+    B:** their allocation-free rewrite (the orchestrator, 2026-10-03).
+  - _The lit view_ (`view/spike/litView.ts`, `litAgx.wgsl`).
+    - `LitView` makes the spike's own `<view>:spike-hdr` `rgba16float` target with depth
+      (`render-targets`), at the render size `renderSizeOf(size, renderHeightPx)`: 720p at the
+      view's aspect on low, the presented size on high.
+    - It draws the terrain into it under `TERRAIN_PASS_LABEL`, then one full-screen triangle into
+      any `LitOutput`, labelled `spike display`. The triangle samples the target bilinearly
+      (upscaling low) and applies R02's `agx`.
+    - Selection's viewport is the render size, so τ is in rendered pixels: on low, τ = 2 px at
+      720p (Design note 26), about 3 px presented at 1080p. DN23's "the presented size" is
+      superseded for the low setting (the orchestrator's ruling, 2026-10-03).
+    - Design note 17 makes the spike its own scene. R07.T7, which owns the production HDR target
+      (decisions-r06-r07.md item 1), is not built, and R07 replaces this view. Confirmed by the
+      orchestrator (2026-10-03): item 1 covers the production photorealistic target, and this is
+      measurement scratch behind `--descent-spike`. If the spike is kept beyond RM2, R07.T7's
+      `createSceneTarget` replaces it.
+    - `SPIKE_DAY_TRIPLE` is f/16, 1/128 s, ISO 100: EV100 = log₂(256 × 128) = 15. `setExposure`
+      changes it per segment.
+    - The display material `SPIKE DISPLAY` joins the catalogue's terrain entries.
+    - "Inside R02's `VIEW`" is the `LitOutput` seam. T13.b wires `DescentSpike`'s view through it.
+  - _The captures_ (`captureTerrain`, group "R05.T11.c the terrain captures", under
+    `--smoke-captures`). The test planet, ridges off, is streamed through a three-worker
+    `HeightWorkerPool` and drawn through `LitView`, 480 × 270, over the cube's +x/+z face edge.
+    Two shots: from 400 km (high, 30° below the horizon) and from 2 m (low, 10° below, rendered at
+    the 720p rule). Each waits until nothing stands in, or 3 s pass with no new resident patch, or
+    120 s in all, and checks that it streamed everything. `srgb8` and `base64Of` are exported from
+    `smoke/atmosphere.ts`.
+  - **Result, 2026-10-03.**
+    - On the RTX 3080, hidden: an offscreen window never shown, R01's Vulkan switches, a fresh
+      `--user-data-dir`, the process group killed after. Headless Ozone's GPU process exits on a
+      hardware adapter.
+    - On SwiftShader under `just test-render --captures`, both variants.
+    - Both shots streamed everything: 44 patches from 400 km in about 1 s, 133 from 2 m in about
+      2 s, nothing standing in or missing, `limited` false, no uncaptured GPU error.
+    - The lane viewed the PNGs (kept local in the scratch directory). Both are the right way up,
+      grey terrain below and black sky above. From 400 km the limb curves across the upper quarter;
+      from 2 m the horizon lies about a quarter of the way down and the relief shows as fine
+      shading. No crack or gap shows along the +x/+z face edge in either.
+    - The RTX 3080 and SwiftShader images look the same.
+    - The on-screen look by a person stays pending by hand for the owner (decisions-r05.md item
+      7).
 - **Orchestrator rulings, 2026-10-03.** T13.c's text now says it wires T14.b's `launchSwitches` into
   `index.ts`; T14.a's files and acceptance drop `view/spike/percentiles.ts`, whose figures T14.c
   computes in the main process.
