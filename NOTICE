@@ -60,3 +60,127 @@ DOI: 10.1016/j.solmat.2008.06.009; as tabulated by the refractiveindex.info data
 (M. N. Polyanskiy, Sci. Data 11, 94 (2024)), which is dedicated to the public domain (CC0 1.0).
 Kept unmodified in crates/hyperion-fit/data/green2008_si/ (a tool input, not shipped); the
 camera band terms of crates/hyperion-sim/src/tables/star_colour.rs are computed from it.
+Bevy
+https://github.com/bevyengine/bevy
+
+Dual-licensed MIT or Apache-2.0; used here under the MIT licence:
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Ported from crates/bevy_pbr/src/atmosphere (transmittance_lut.wgsl, multiscattering_lut.wgsl,
+functions.wgsl, bruneton_functions.wgsl), tag v0.19.1, fetched 2026-10-02, into:
+
+  apps/hyperion/src/renderer/src/view/atmosphere/shaders/common.wgsl
+  apps/hyperion/src/renderer/src/view/atmosphere/shaders/transmittance.wgsl
+  apps/hyperion/src/renderer/src/view/atmosphere/shaders/multiScattering.wgsl
+
+Changes: the medium's terms are evaluated per sample in place of Bevy's density and scattering
+tables; every step is sampled at its midpoint; the multiple-scattering kernel follows sebh's
+reference where the two differ (the sun's direction, the ground's bounce, the stratified
+directions); names follow the project's WGSL style.
+
+--------------------------------------------------------------------------------
+Precomputed Atmospheric Scattering (Eric Bruneton)
+https://github.com/ebruneton/precomputed_atmospheric_scattering
+
+Copyright (c) 2017 Eric Bruneton
+Copyright (c) 2008 INRIA
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted
+provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions
+and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of
+conditions and the following disclaimer in the documentation and/or other materials provided with
+the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to
+endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The transmittance table's parameterisation and the shell intersections, through Bevy's port
+(atmosphere/functions.glsl), in:
+
+  apps/hyperion/src/renderer/src/view/atmosphere/shaders/common.wgsl
+  apps/hyperion/src/renderer/src/view/atmosphere/opticalDepth.ts
+
+The method of the spectral-radiance-to-luminance factors (atmosphere/model.cc,
+ComputeSpectralRadianceToLuminanceFactors) in apps/hyperion/src/tools/solarFactors.ts, and the
+ozone cross-section bins and ground albedo of atmosphere/demo/demo.cc in
+apps/hyperion/src/renderer/src/view/atmosphere/earth.ts.
+
+--------------------------------------------------------------------------------
+UnrealEngineSkyAtmosphere (Sébastien Hillaire)
+https://github.com/sebh/UnrealEngineSkyAtmosphere
+
+MIT License
+
+Copyright (c) 2020 Epic Games, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The multiple-scattering kernel's structure (Resources/RenderSkyRayMarching.hlsl, NewMultiScattCS
+and IntegrateScatteredLuminance) in
+apps/hyperion/src/renderer/src/view/atmosphere/shaders/multiScattering.wgsl, its table mapping in
+shaders/common.wgsl, and the Earth constants of Application/SkyAtmosphereCommon.cpp
+(SetupEarthAtmosphere) as HILLAIRE_REFERENCE in
+apps/hyperion/src/renderer/src/view/atmosphere/earth.ts. Master branch, fetched 2026-10-02.
+
+================================================================================
+Data
+
+Values derived from the following data sets are committed as constants with their citations; the
+data sets themselves are not committed (plan R05, R05.T12.d, ruled 2026-10-02).
+
+- Solar spectral irradiance values derived from ASTM E490-00a(2019), obtained from the U.S. DOE
+  National Laboratory of the Rockies (NLR, formerly NREL); credit DOE/NLR/Alliance. In
+  apps/hyperion/src/renderer/src/view/atmosphere/solar.ts.
+
+- CIE 2019, Colour-matching functions of CIE 1931 standard colorimetric observer, International
+  Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b, licensed under
+  CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). The values in
+  apps/hyperion/src/renderer/src/view/atmosphere/solar.ts are computed from it, integrated against
+  E-490; to the extent they are adapted material they are offered under CC BY-SA 4.0.
+
+- Ozone absorption cross-sections at 233 K: Serdyuchenko et al., Atmos. Meas. Tech. 7 (2014) 625;
+  Gorshelev et al., Atmos. Meas. Tech. 7 (2014) 609 (IUP Bremen), as binned by Bruneton 2017. In
+  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts.

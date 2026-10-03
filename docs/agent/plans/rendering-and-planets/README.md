@@ -414,8 +414,10 @@ it is recorded, and stays here so that the owner can review it.
   (R02's Risks, "As built, R02.T2.f"; R01's Risks, T5.c and the T5 follow-up; R04's Risks). With
   them, R02's smaller UX questions (other craft's cardinal ticks, uncased hull edges, the seat and
   chase on a jump, the operator's `INHIBIT`) are decided in R02's Design notes and Risks, and two
-  pass to R07 (its Risks). **Still awaiting:** R02's own nomenclature rows (R02.T2.f, T15, T17,
-  marked `_Draft (plan R02, …)_` in the guide); R06.T15's sky entries (`STARS`, `EYE`, `CAM`);
+  pass to R07 (its Risks). The `TERRAIN: STREAMING` and `TERRAIN: DETAIL LIMITED` row of
+  R02.T2.f is **Decided** (2026-10-02, delegated; the orchestration's `decisions-r05.md` item 5),
+  with "Where both hold, `STREAMING` is shown." **Still awaiting:** R02's other nomenclature
+  rows (R02.T2.f, T15, T17, marked `_Draft (plan R02, …)_` in the guide); R06.T15's sky entries (`STARS`, `EYE`, `CAM`);
   R07.T16's photorealistic entries and phrases (`BODY ALBEDO: NOT YET MODELLED`,
   `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the meters); R08.T2's five atmosphere labels
   (`ATMOSPHERE: NOT RESOLVED`, `ATMOSPHERE: NOT YET MODELLED`, `AEROSOLS: NOT YET MODELLED`,
@@ -432,8 +434,10 @@ it is recorded, and stays here so that the owner can review it.
   licence and are committed as derived tables with citation, with PHOENIX's 1 nm M-star table as a
   possible second derived table behind the same question, and the CIE data under CC BY-SA 4.0
   (R06.T3); the ASTM E-490 solar spectrum (ASTM's terms) and the CIE 1931 matching functions
-  (CC BY-SA 4.0) beside R05's `solarFactors.ts`, of which only derived constants are committed
-  until the ruling (R05.T12.d). Filament's AgX is Apache-2.0 and gains a `NOTICE` entry in
+  (CC BY-SA 4.0) beside R05's `solarFactors.ts`: **Decided** for R05.T12.d and Serdyuchenko's
+  data (2026-10-02, delegated; `decisions-r05.md` item 4): no raw table is committed, the
+  derived constants are, with attributions in `NOTICE`; R08.T4.b's reduced 1 nm ozone table may
+  be committed with citation. Filament's AgX is Apache-2.0 and gains a `NOTICE` entry in
   R02.T10.c, which R07 includes (R02 Design note 12).
 - **The level-of-detail selection bound** (R10.T4): whether selection takes the hard bound or
   min(hard, 4σ), ruled with T4.a's recorded ratios and the patch counts under both rules that

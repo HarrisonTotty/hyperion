@@ -2953,3 +2953,10 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
     the log line `material broken fixture (TEST FIXTURE) failed to compile`. No script compares the
     `LINK` text, so there was no expected text to change. _Awaiting the owner's sign-off
     (draft)._
+- **Changed after RM1 by R05.T12.b (2026-10-02, approved by the orchestrator).**
+  `RenderEngine.readTexture(texture, level?, rect?, access?)` gained an optional fourth parameter,
+  `access: "cpu" | "tolerance"`, which mirrors `readBuffer`'s. With `tolerance`, the smoke page can
+  read back a texture that a `presentation-only` kernel wrote last: R05's atmosphere tables, which
+  it holds to an `f64` oracle. The default stays `cpu`, so every other caller is still refused.
+  `engineBoundary.test.ts` already refuses a `tolerance` read outside `smoke/`. The change is
+  append-only, in `types.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.

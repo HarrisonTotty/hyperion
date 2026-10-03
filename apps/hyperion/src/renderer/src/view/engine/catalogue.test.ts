@@ -39,3 +39,14 @@ describe("the catalogue's display names", () => {
     ).toEqual([false, false, false, false]);
   });
 });
+
+describe("the catalogue's compute kernels", () => {
+  it("registers R05.T12.b's atmosphere tables", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(["atmosphere transmittance", "atmosphere multiple scattering"]),
+    );
+  });
+});

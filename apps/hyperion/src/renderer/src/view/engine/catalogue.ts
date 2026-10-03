@@ -8,6 +8,7 @@
  * `default`, and R12.T7.a adds the ladder's (R01 Design note 18).
  */
 
+import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
@@ -40,8 +41,15 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME
   (spec) => ({ kind: "material", spec }),
 );
 
+/** R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering. */
+const ATMOSPHERE_TABLE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  TRANSMITTANCE_KERNEL,
+  MULTI_SCATTERING_KERNEL,
+].map((spec) => ({ kind: "compute", spec }));
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
   ...WIREFRAME_ENTRIES,
+  ...ATMOSPHERE_TABLE_ENTRIES,
 ];
