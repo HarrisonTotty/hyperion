@@ -1548,6 +1548,36 @@ star })` and the disc sits at that body's drawn centre; a host the scene lacks i
   disc test both read. The harness's `checkSkyDisc` draws a disc and the band over it on a target
   of its own and checks the centre's luminance, the meter class kept under the band, the clamp,
   and nothing lit outside.
+- **Deviations in T13.g, as built (2026-10-03).** `view/sky/bake.ts` exports `bakeSkyCube(engine,
+input)` over `BakeInput { directions, illuminanceLx, faceSizePx, name }`, returning `BakedCube {
+cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `paddedRowTexels`,
+  `BAKE_SPLAT` and `BAKE_KERNELS` (clear, peak, mip, pack). On the GPU each face is splatted twice
+  into level 0 of the face's `rgba32float` chain, which is the splat's target (flux and a count):
+  a first pass over the six faces finds the brightest texel's luminance by an atomic maximum of
+  its `f32` bits, from which the kernels and the cube's draw take the power of two
+  (`bakeCommon.wgsl`'s `scaleExponent`, `mips.ts`'s `peakScaleExponent`); the second sums the mips
+  as flux and solid angle (the first step and level 0's pack reading the solid angles from a
+  buffer, computed in `f64` once per face size and narrowed, since the four-corner formula cancels
+  badly in `f32` at 3,072²) and packs each level into a staging buffer of one face of one level,
+  copied with `writePackedCubeLevelFromBuffer`'s new optional `face` (R01 extended, approved
+  append-only). The splat's points buffer starts with a header (face, size), rewritten before each
+  face's draw, so that one splat serves the six faces and a star off the face is clipped; level 0
+  is cleared by a kernel first, the splat loading its target. The transients at 3,072² are the
+  chain (201 MB), the solid angles (38 MB) and the staging (38 MB), so a bake's peak with the
+  300 MB cube is about 580 MB against Design note 21's 540; they are released in a `finally`,
+  with the cube and peak too on a failure. The peak is kept with the cube (`sky-cube`). The CPU
+  fallback holds the six faces at once (some 100 MB at the low setting's 1,024²; the high
+  setting's devices have `float32-blendable`). `cubeLayer.ts`'s `SkyCubeLayer` draws the cube in
+  its two variants, `CUBE_DISPLAY_MATERIAL` (`BAKED STARS`, toned by `agxSprite`, the
+  wireframe's) and `CUBE_HDR_MATERIAL` (`BAKED STARS HDR`, linear), a full-screen draw at infinity,
+  and makes its handles again on a device restore; the cube is a separate draw rather than part of
+  `BandLayer`'s, which T13.d's ruling text leaned to, keeping the band and the cube to their own
+  styles. R02's `WireframeRenderer.render` and `frame` gain an optional `background` list, encoded
+  after the occluders and before everything else. The view's use of the bake (baked once per sky,
+  shared between views) is T14's `SkyCubeCache`. The harness's `checkSkyBake` checks the WGSL
+  packer bit for bit over 10⁴ texels, the GPU splat against the CPU splat to 10⁻⁶, the whole bake
+  against the CPU bake to one mantissa step at levels 0 and 5 (each cube's own scale undone),
+  finiteness, and the two memory categories.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and

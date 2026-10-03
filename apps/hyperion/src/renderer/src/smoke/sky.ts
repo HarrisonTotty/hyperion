@@ -5,9 +5,23 @@
 
 import type { HostDiscDto, SkyBand } from "@hyperion/protocol";
 
+import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
+import type { AllocationEvent } from "../view/engine/memory";
 import type { RenderEngine } from "../view/engine/types";
+import {
+  BAKE_CLEAR_KERNEL,
+  BAKE_PACK_KERNEL,
+  BAKE_SPLAT,
+  type BakeInput,
+  bakeSkyCube,
+  bakeSkyCubeOnCpu,
+  paddedRowTexels,
+  releaseBakedCube,
+} from "../view/sky/bake";
 import { BandLayer } from "../view/sky/band";
 import { HostDiscLayer } from "../view/sky/disc";
+import { packRgb9e5, unpackRgb9e5 } from "../view/sky/pack";
+import { SPLAT_POINT_FLOATS, splatCpu } from "../view/sky/splatCpu";
 import { type Checks, frameOf, halfTexels, show, texel } from "./harness";
 
 /** The band's face side in the check, texels. */
@@ -173,4 +187,225 @@ export async function checkSkyDisc(engine: RenderEngine, checks: Checks): Promis
   );
   target.dispose();
   band.dispose();
+}
+
+/** A seeded generator in [0, 1), the same sequence on every run. */
+function lcg(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return state / 2_147_483_648;
+  };
+}
+
+/** `count` stars in seeded directions with light spread over four decades, as a bake takes them. */
+function bakeStars(count: number, faceSizePx: number): BakeInput {
+  const next = lcg(97);
+  const directions = Float32Array.from({ length: count * 3 }, () => next() * 2 - 1);
+  const illuminanceLx = Float32Array.from({ length: count * 3 }, () => 10 ** (next() * 4 - 9));
+  return { directions, illuminanceLx, faceSizePx, name: "sky cube: smoke" };
+}
+
+/**
+ * R06.T13.g: the bake on the GPU against its TypeScript references: the packer bit for bit, the
+ * splat to 10⁻⁶, the whole bake to one mantissa step of the CPU bake, every texel finite, and both
+ * memory categories in the allocation events.
+ */
+export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promise<void> {
+  if (!engine.capabilities.float32Blendable) {
+    checks.check("R06.T13.g the GPU bake needs float32-blendable", true, "not run on this device");
+    return;
+  }
+  // The packer: 10⁴ texels at a scale of 1 (a peak of 2¹⁵ gives k = 0), against `packRgb9e5`.
+  const side = 100;
+  const next = lcg(5);
+  const texels = Float32Array.from({ length: side * side * 4 }, (_, i) =>
+    i % 4 === 3 ? 1 : Math.fround(10 ** (next() * 14 - 9)),
+  );
+  const level = engine.createTexture({
+    name: "sky pack check",
+    size: [side, side],
+    dimension: "2d",
+    format: "rgba32float",
+    mips: 1,
+    usage: TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "sky-scratch",
+  });
+  engine.writeTexture(level, [0, 0, 0], [side, side, 1], texels);
+  const peak = engine.createBuffer({
+    name: "sky pack check peak",
+    bytes: 4,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "sky-scratch",
+  });
+  engine.writeBuffer(peak, 0, new Uint32Array(Float32Array.of(2 ** 15).buffer));
+  const stride = paddedRowTexels(side);
+  // Level 0's solid angles are not read above level 0; the binding needs a buffer all the same.
+  const omega = engine.createBuffer({
+    name: "sky pack check solid angles",
+    bytes: 4,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "sky-scratch",
+  });
+  engine.writeBuffer(omega, 0, Float32Array.of(1));
+  const packed = engine.createBuffer({
+    name: "sky pack check out",
+    bytes: stride * side * 4,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "sky-scratch",
+  });
+  engine.dispatch(
+    engine.createCompute(BAKE_PACK_KERNEL),
+    {
+      uniforms: { params: Uint32Array.of(side, stride, 0, 0) },
+      buffers: { peak, omega, packed },
+      sampled: {},
+      storage: { level: { texture: level, level: 0 } },
+    },
+    [Math.ceil(side / 8), Math.ceil(side / 8), 1],
+  );
+  const gpuPacked = new Uint32Array(await engine.readBuffer(packed));
+  let packWrong = 0;
+  for (let y = 0; y < side; y += 1) {
+    for (let x = 0; x < side; x += 1) {
+      const at = (y * side + x) * 4;
+      const want = packRgb9e5(texels[at] ?? 0, texels[at + 1] ?? 0, texels[at + 2] ?? 0);
+      if (gpuPacked[y * stride + x] !== want) {
+        packWrong += 1;
+      }
+    }
+  }
+  checks.check(
+    "R06.T13.g the WGSL packer equals the TypeScript packer for 10⁴ texels",
+    packWrong === 0,
+    `${packWrong} texels differ`,
+  );
+  engine.releaseTexture(level);
+  engine.releaseBuffer(peak);
+  engine.releaseBuffer(omega);
+  engine.releaseBuffer(packed);
+
+  // The splat: 2,000 seeded stars on each face of 32², against `splatCpu`.
+  const size = 32;
+  const input = bakeStars(2_000, size);
+  const count = input.directions.length / 3;
+  const points = new Float32Array(4 + count * SPLAT_POINT_FLOATS);
+  points[1] = size;
+  for (let star = 0; star < count; star += 1) {
+    const at = 4 + star * SPLAT_POINT_FLOATS;
+    points.set(input.directions.subarray(star * 3, star * 3 + 3), at);
+    points.set(input.illuminanceLx.subarray(star * 3, star * 3 + 3), at + 4);
+    points[at + 7] = 1;
+  }
+  const cpuFaces = splatCpu(points.subarray(4), size);
+  const pointBuffer = engine.createBuffer({
+    name: "sky splat check points",
+    bytes: points.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "sky-scratch",
+  });
+  engine.writeBuffer(pointBuffer, 0, points);
+  const scratch = engine.createTexture({
+    name: "sky splat check face",
+    size: [size, size],
+    dimension: "2d",
+    format: "rgba32float",
+    mips: 1,
+    usage:
+      TEXTURE_USAGE.RENDER_ATTACHMENT |
+      TEXTURE_USAGE.STORAGE_BINDING |
+      TEXTURE_USAGE.COPY_SRC |
+      TEXTURE_USAGE.COPY_DST,
+    category: "sky-scratch",
+  });
+  const clear = engine.createCompute(BAKE_CLEAR_KERNEL);
+  const splat = engine.createPointSplat(BAKE_SPLAT);
+  let worst = 0;
+  for (let face = 0; face < 6; face += 1) {
+    engine.dispatch(
+      clear,
+      {
+        uniforms: { params: Uint32Array.of(size, 0, 0, 0) },
+        buffers: {},
+        sampled: {},
+        storage: { face: { texture: scratch, level: 0 } },
+      },
+      [size / 8, size / 8, 1],
+    );
+    engine.writeBuffer(pointBuffer, 0, Float32Array.of(face, size, 0, 0));
+    splat.draw(scratch, pointBuffer, count);
+    // The harness's checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const gpuFace = new Float32Array(await engine.readTexture(scratch));
+    const cpuFace = cpuFaces[face] ?? new Float32Array(0);
+    gpuFace.forEach((value, i) => {
+      const want = cpuFace[i] ?? 0;
+      const scale = Math.max(Math.abs(want), 1e-30);
+      worst = Math.max(worst, Math.abs(value - want) / scale);
+    });
+  }
+  checks.check(
+    "R06.T13.g the GPU splat equals the CPU splat to 10⁻⁶ relative",
+    worst < 1e-6,
+    `worst ${worst.toExponential(2)}`,
+  );
+  splat.dispose();
+  engine.releaseBuffer(pointBuffer);
+  engine.releaseTexture(scratch);
+
+  // The whole bake, on the GPU and on the CPU, with the allocation events it raises.
+  const events: AllocationEvent[] = [];
+  const unlisten = engine.onAllocation((event) => events.push(event));
+  const gpu = bakeSkyCube(engine, input);
+  unlisten();
+  const cpu = bakeSkyCubeOnCpu(engine, { ...input, name: "sky cube: smoke reference" });
+  const categories = new Set(
+    events.flatMap((event) => ("category" in event ? [event.category] : [])),
+  );
+  checks.check(
+    "R06.T13.g the bake's allocation events name sky-cube and sky-scratch",
+    categories.has("sky-cube") && categories.has("sky-scratch"),
+    [...categories].join(", "),
+  );
+  let finite = true;
+  let steps = 0;
+  // Each cube's own scale is undone before they are compared: the two may choose powers of two a
+  // factor of two apart when the brightest texel lies at one.
+  const scaleOf = async (peakBuffer: typeof gpu.peak): Promise<number> => {
+    const bits = new Float32Array(await engine.readBuffer(peakBuffer, "tolerance"))[0] ?? 0;
+    const exponent = bits > 0 ? 15 - Math.ceil(Math.log2(bits)) : 0;
+    return 2 ** -exponent;
+  };
+  const [gpuScale, cpuScale] = await Promise.all([scaleOf(gpu.peak), scaleOf(cpu.peak)]);
+  const levels = await Promise.all(
+    [0, 5].flatMap((levelIndex) => [
+      engine.readTexture(gpu.cube, levelIndex),
+      engine.readTexture(cpu.cube, levelIndex),
+    ]),
+  );
+  for (let pair = 0; pair < levels.length; pair += 2) {
+    const gpuLevel = new Uint32Array(levels[pair] ?? new ArrayBuffer(0));
+    const cpuLevel = new Uint32Array(levels[pair + 1] ?? new ArrayBuffer(0));
+    gpuLevel.forEach((bits, i) => {
+      const a = unpackRgb9e5(bits).map((value) => value * gpuScale);
+      const b = unpackRgb9e5(cpuLevel[i] ?? 0).map((value) => value * cpuScale);
+      finite = finite && a.every(Number.isFinite);
+      a.forEach((value, channel) => {
+        const reference = b[channel] ?? 0;
+        // One mantissa step of the shared exponent: 2⁻⁸ of the largest channel.
+        const step = Math.max(...b) / 256;
+        if (Math.abs(value - reference) > step + 1e-30) {
+          steps += 1;
+        }
+      });
+    });
+  }
+  checks.check("R06.T13.g every texel of the baked cube read back is finite", finite, gpu.path);
+  checks.check(
+    "R06.T13.g the GPU bake equals the CPU bake to one mantissa step, levels 0 and 5",
+    steps === 0,
+    `${steps} channels differ by more`,
+  );
+  releaseBakedCube(engine, gpu);
+  releaseBakedCube(engine, cpu);
 }

@@ -246,19 +246,28 @@ export class ResourceRegistry {
    *
    * @remarks
    * The buffer holds six faces, face after face, each row padded to 256 bytes
-   * (`paddedBytesPerRow(size, 4)`), as `copyBufferToTexture` requires.
+   * (`paddedBytesPerRow(size, 4)`), as `copyBufferToTexture` requires; or, given `face`, that one
+   * face alone (R06.T13.g).
+   *
+   * @throws Error for a face outside 0–5, a buffer too small or without `COPY_SRC`.
    */
   encodePackedCubeLevelFromBuffer(
     encoder: Pick<GPUCommandEncoder, "copyBufferToTexture">,
     cube: TextureHandle,
     level: number,
     packed: BufferHandle,
+    face?: number,
   ): void {
     const faceTexels = this.#cubeLevelSize(cube, level);
     const { texture } = this.textureOf(cube);
     const { buffer, spec } = this.bufferOf(packed);
+    if (face !== undefined && !(Number.isInteger(face) && face >= 0 && face < 6)) {
+      throw new Error(`${cube.name} has no face ${face}`);
+    }
+    const faces = face === undefined ? 6 : 1;
     const bytesPerRow = paddedBytesPerRow(faceTexels, 4);
-    const needed = bytesPerRow * faceTexels * 5 + bytesPerRow * (faceTexels - 1) + faceTexels * 4;
+    const needed =
+      bytesPerRow * faceTexels * (faces - 1) + bytesPerRow * (faceTexels - 1) + faceTexels * 4;
     if (spec.bytes < needed) {
       throw new Error(`${packed.name} holds ${spec.bytes} bytes; level ${level} needs ${needed}`);
     }
@@ -267,8 +276,8 @@ export class ResourceRegistry {
     }
     encoder.copyBufferToTexture(
       { buffer, bytesPerRow, rowsPerImage: faceTexels },
-      { texture, mipLevel: level },
-      [faceTexels, faceTexels, 6],
+      { texture, mipLevel: level, origin: [0, 0, face ?? 0] },
+      [faceTexels, faceTexels, faces],
     );
   }
 

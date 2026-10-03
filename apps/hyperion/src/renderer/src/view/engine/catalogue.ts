@@ -19,7 +19,9 @@ import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
+import { BAKE_KERNELS, BAKE_SPLAT } from "../sky/bake";
 import { BAND_MATERIAL } from "../sky/band";
+import { CUBE_DISPLAY_MATERIAL, CUBE_HDR_MATERIAL } from "../sky/cubeLayer";
 import { DISC_MATERIAL } from "../sky/disc";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
@@ -109,11 +111,16 @@ const SKY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: SKY_SPRITE_HDR_MATERIAL },
   { kind: "material", spec: BAND_MATERIAL },
   { kind: "material", spec: DISC_MATERIAL },
+  { kind: "material", spec: CUBE_DISPLAY_MATERIAL },
+  { kind: "material", spec: CUBE_HDR_MATERIAL },
+  ...BAKE_KERNELS.map((spec): CatalogueEntry => ({ kind: "compute", spec })),
 ];
 
 /** The point splats (R06.T13.h). */
 const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "point-splat", spec: ENGINE_CHECK_SPLAT },
+  // R06.T13.g: the sky's bake splat.
+  { kind: "point-splat", spec: BAKE_SPLAT },
 ];
 
 /** Every shader the engine can create; later plans add theirs here. */
