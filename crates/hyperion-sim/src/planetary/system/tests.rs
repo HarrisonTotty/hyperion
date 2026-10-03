@@ -121,8 +121,16 @@ fn generate_planets_is_generate_with_its_satellites_removed() {
     for ((ctx, planets), (_, whole)) in generated().iter().zip(whole()) {
         assert_eq!(planets.zones(), whole.zones(), "{:?}", ctx.id());
         assert_eq!(planets.hosts(), whole.hosts());
-        let kept: Vec<&Body> = whole.planets().collect();
-        assert_eq!(kept, planets.bodies().iter().collect::<Vec<_>>());
+        // `generate` attaches the held rotation laws after phase D, and `generate_planets`
+        // holds none (P14.T46.b); every other part of a planet is the same.
+        let kept: Vec<Body> = whole
+            .planets()
+            .map(|body| Body {
+                rotation: None,
+                ..body.clone()
+            })
+            .collect();
+        assert_eq!(kept, planets.bodies());
         assert!(planets.belts().is_empty() && planets.halo().is_none());
         moons += whole
             .bodies()
@@ -1967,7 +1975,9 @@ fn the_figure_section_by_kind_and_level() {
                     let radius = Metres::from(bulk.radius()).value();
                     let spheroid = figure.spheroid();
                     assert!((spheroid.volumetric_radius_m() / radius - 1.0).abs() < 1e-12);
-                    assert!((0.0..=FLATTENING_CAP).contains(&spheroid.flattening()));
+                    // A capped figure's (a − c) ÷ a, recomputed from its radii, may round
+                    // just above the cap.
+                    assert!((0.0..=FLATTENING_CAP + 1e-12).contains(&spheroid.flattening()));
                     for (a, b) in figure.pole().into_iter().zip(frame.pole()) {
                         assert_same_bits(a, b);
                     }

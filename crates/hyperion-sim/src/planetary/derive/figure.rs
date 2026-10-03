@@ -543,15 +543,27 @@ mod tests {
         assert_eq!(Datum::of(PlanetClass::IceGiant), Datum::OneBar);
         assert_eq!(Datum::of(PlanetClass::Rocky), Datum::SolidSurface);
         assert_eq!(Datum::of(PlanetClass::Icy), Datum::SolidSurface);
+        // A 40 h spin keeps both figures under the cap, so their ratio is the tide's factor.
         let rock = MassFractions::solid(0.3, 0.7, 0.0);
+        let slow = FigureInputs {
+            rate: TAU / (40.0 * 3_600.0),
+            ..inputs(1_800.0, rock, PlanetClass::Rocky)
+        };
         let locked = BodyFigure::derive(&FigureInputs {
             state: SpinState::Locked(SpinOrbitResonance::Synchronous),
-            ..inputs(1_800.0, rock, PlanetClass::Rocky)
+            ..slow
         });
-        let free = BodyFigure::derive(&inputs(1_800.0, rock, PlanetClass::Rocky));
+        let free = BodyFigure::derive(&slow);
         assert_eq!(locked.law(), FigureLaw::RotationalAndTidal);
-        let ratio = locked.spheroid().flattening() / free.spheroid().flattening();
-        assert!((ratio - SYNCHRONOUS_TIDAL_FACTOR).abs() < 0.01, "{ratio}");
+        // q ∝ a³ ∝ 1 ÷ (1 − f) at a fixed volume, so the converged ratio is the factor times
+        // (1 − f_free) ÷ (1 − f_locked).
+        let (f_locked, f_free) = (locked.spheroid().flattening(), free.spheroid().flattening());
+        let expected = SYNCHRONOUS_TIDAL_FACTOR * (1.0 - f_free) / (1.0 - f_locked);
+        assert!(
+            (f_locked / f_free / expected - 1.0).abs() < 1e-9,
+            "{f_locked} {f_free}"
+        );
+        assert!((f_locked / f_free - SYNCHRONOUS_TIDAL_FACTOR).abs() < 0.02);
         let three_to_two = BodyFigure::derive(&FigureInputs {
             state: SpinState::Locked(SpinOrbitResonance::ThreeToTwo),
             ..inputs(1_800.0, rock, PlanetClass::Rocky)
