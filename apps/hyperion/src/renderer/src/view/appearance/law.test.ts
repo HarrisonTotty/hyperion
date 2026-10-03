@@ -7,6 +7,7 @@ import {
   phaseFactor,
   phaseFactorFromTable,
   phaseFactorTable,
+  phaseFactorTableOf,
   type PhaseTemplateId,
   type PhotometricLaw,
 } from "./law";
@@ -84,6 +85,25 @@ describe("phaseFactor", () => {
     expect(b).toBeCloseTo(phaseV ** 1.1 / shape, 12);
     // A steeper blue curve is a redder crescent.
     expect(b).toBeLessThan(r);
+  });
+});
+
+describe("phaseFactorTableOf", () => {
+  it("tabulates a law once and hands back the same table", () => {
+    const law = lawOf("venus", 0);
+    expect(phaseFactorTableOf(law)).toBe(phaseFactorTableOf(law));
+  });
+
+  it("holds the law's own table", () => {
+    const law = lawOf("saturn", 0);
+    expect(phaseFactorTableOf(law).rgb).toEqual(phaseFactorTable(law).rgb);
+  });
+
+  it("keeps a table per law", () => {
+    const steep: PhotometricLaw = { ...lawOf("saturn", 0), phaseExponent: [2, 2, 2] };
+    const steepTable = phaseFactorTableOf(steep);
+    expect(steepTable).not.toBe(phaseFactorTableOf(lawOf("saturn", 0)));
+    expect(steepTable.rgb).toEqual(phaseFactorTable(steep).rgb);
   });
 });
 

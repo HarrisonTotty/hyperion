@@ -96,6 +96,25 @@ export function phaseFactorTable(law: PhotometricLaw): PhaseFactorTable {
   return { rgb };
 }
 
+/** Each law's table, made once; laws are immutable values, so a law's table never changes. */
+const TABLES = new WeakMap<PhotometricLaw, PhaseFactorTable>();
+
+/**
+ * The law's table, tabulated on first use and kept while the law is.
+ *
+ * @remarks
+ * The reference BRDF reads f per pixel, so it must not re-tabulate per call.
+ */
+export function phaseFactorTableOf(law: PhotometricLaw): PhaseFactorTable {
+  const cached = TABLES.get(law);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const table = phaseFactorTable(law);
+  TABLES.set(law, table);
+  return table;
+}
+
 /**
  * f read from the table by linear interpolation, as the shader reads it.
  *
