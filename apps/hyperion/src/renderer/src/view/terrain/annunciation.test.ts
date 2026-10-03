@@ -121,20 +121,21 @@ describe("the terrain annunciation's debounce", () => {
     expect(lines.at(-1)).toBe("TERRAIN: STREAMING");
   });
 
-  it("never flickers under a condition toggling every frame", () => {
-    for (const shownFirst of [false, true]) {
-      const debounce = new TerrainAnnunciationDebounce();
-      let t = 0;
-      if (shownFirst) {
-        t = run(debounce, () => ({ streaming: true, detailLimited: false }), 0, 500).endMs;
-      }
-      const { lines } = run(
-        debounce,
-        (frame) => ({ streaming: frame % 2 === 0, detailLimited: false }),
-        t,
-        5_000,
-      );
-      expect(new Set(lines).size).toBe(1);
+  it.each([
+    ["hidden", false],
+    ["shown", true],
+  ])("never flickers under a condition toggling every frame from %s", (_, shownFirst) => {
+    const debounce = new TerrainAnnunciationDebounce();
+    let t = 0;
+    if (shownFirst) {
+      t = run(debounce, () => ({ streaming: true, detailLimited: false }), 0, 500).endMs;
     }
+    const { lines } = run(
+      debounce,
+      (frame) => ({ streaming: frame % 2 === 0, detailLimited: false }),
+      t,
+      5_000,
+    );
+    expect(new Set(lines).size).toBe(1);
   });
 });

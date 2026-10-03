@@ -2745,3 +2745,15 @@ medium, sizes, figure)`.
     `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
     `destroy()`.
   - `MemoryCategory` gains `height-cache`, appended.
+- **Deviations in T9, as built (the annunciations, 2026-10-03).** `annunciation.ts` adds, beside
+  `terrainAnnunciation`: `TerrainAnnunciation` (the two strings), `TerrainConditions` and
+  `terrainConditions` (the frame's two conditions before the debounce), `coarserThan` (some
+  reference patch covered by an ancestor in the selection), `ANNUNCIATION_ONSET_MS` (250) and
+  `ANNUNCIATION_CLEAR_MS` (1,000), and `TerrainAnnunciationDebounce`, one per view, whose `update`
+  takes a monotonic `nowMs` (the tests feed times directly rather than fake timers). `STREAMING`
+  also holds while a selected patch has no resident ancestor at all (`DrawSet.missing`), not only
+  while an ancestor stands in. `labelStatements(run, terrain = null)` appends the debounced line
+  after the existing statements and stays pure; `ViewDisplay` does not pass it yet, since no view
+  draws terrain: T11.c (the pass in a view) creates the per-view debounce and passes its line. The
+  tests build the low and reference selections by hand until `selectPatches` lands (T7.b). The
+  guide row and Design note 23 already carried decisions-r05 item 5's wording.
