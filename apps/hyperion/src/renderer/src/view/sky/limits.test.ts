@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { decodedSky, skyPayload } from "../../test/skyFixtures";
+import { cubeTexelOf } from "./cube";
 import { eyeLimitAt, fieldFactorOffsetMag } from "./limits";
 
 const DIRECTIONS: ReadonlyArray<readonly [number, number, number]> = [
@@ -36,5 +37,21 @@ describe("eyeLimitAt", () => {
 
   it("refuses a field factor that is not positive", () => {
     expect(() => fieldFactorOffsetMag(0, 1.4)).toThrow(RangeError);
+  });
+});
+
+describe("eyeLimitAt's texel", () => {
+  it("reads each direction's own texel, as the cube's face, row and column give it", () => {
+    const { band } = decodedSky(skyPayload([], 4, 6.6), 0);
+    // Give every texel its own limit: 5 + its index ÷ 100.
+    band.eyeLimitMag.forEach((_, index) => {
+      band.eyeLimitMag[index] = 5 + index / 100;
+    });
+    const source = { band, faceTexels: 4, requestFieldFactor: 1.4 };
+    for (const direction of DIRECTIONS) {
+      const { face, row, column } = cubeTexelOf(direction[0], direction[1], direction[2], 4);
+      const index = (face * 4 + row) * 4 + column;
+      expect(eyeLimitAt(source, direction, 1.4)).toBeCloseTo(5 + index / 100, 5);
+    }
   });
 });

@@ -453,6 +453,9 @@ pub(super) struct Engine {
     /// When the accretor first filled its lobe in the current transfer, years (Nelson and
     /// Eggleton's `t_contact`; ruling 114.2).
     pub(super) first_contact: Option<f64>,
+    /// Whether a common envelope is being resolved: a merger it leads to never starts another
+    /// (the guard against the recursion of a held bare core, ruling 129.4c).
+    pub(super) in_common_envelope: bool,
 }
 
 impl Engine {
@@ -488,6 +491,7 @@ impl Engine {
             contact_until: 0.0,
             overflow_onset: (0.0, 0.0),
             first_contact: None,
+            in_common_envelope: false,
         };
         for i in 0..2 {
             let (mass, tau) = engine.current(i);

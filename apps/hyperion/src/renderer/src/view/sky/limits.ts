@@ -43,6 +43,9 @@ export interface EyeLimitSource {
 /**
  * The eye's limiting V in a direction on the galactic axes, at the view's field factor; NaN where
  * the sky carries no eye limit.
+ *
+ * @throws RangeError for a field factor that is not finite and positive; Error for a zero or
+ *   non-finite direction.
  */
 export function eyeLimitAt(
   source: EyeLimitSource,

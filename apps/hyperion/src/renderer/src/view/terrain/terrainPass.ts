@@ -31,11 +31,12 @@ import {
   type TerrainConditions,
   terrainConditions,
 } from "./annunciation";
+import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { terrainMaterialSpec } from "./gpu/material";
 import { type TerrainLayout, TerrainResources } from "./gpu/resources";
 import { ContactRecords, InstanceRecords } from "./gpu/uniforms";
-import { MAX_LEVEL, patchKeyString } from "./patchKey";
+import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
 import type { PlanetGeometry } from "./planet";
 import { finestPatchSizeM, type GroundContact, heldRadiusM, morphRampM } from "./grounded";
 import {
@@ -129,7 +130,18 @@ export interface TerrainPassOptions {
   readonly planet: PlanetGeometry;
   readonly ridges: TestPlanetRidges;
   readonly createPool: TerrainPoolFactory;
+  /**
+   * Whether each selection is recorded as a `terrain.select` `performance.measure` span, for the
+   * descent spike's trace (decision-r05-patch-demand.md, 4d). Off by default: each span is an
+   * entry the browser keeps, so only the spike's measurement runs pay for it.
+   */
+  readonly measureSelection?: boolean;
+  /** Called with each patch the cache stores and the GPU holds, for the spike's tallies. */
+  readonly onResident?: (key: PatchKey) => void;
 }
+
+/** The `performance.measure` name of one selection, when the pass measures it. */
+export const SELECT_MEASURE = "terrain.select";
 
 /** The state made per device: resources, cache and pool. */
 interface Device {
@@ -160,8 +172,8 @@ interface Selected {
   readonly grounded: ReadonlyArray<GroundContact>;
   readonly rangesVersion: number;
   /**
-   * The distance to the nearest selected patch not at the finest level, metres, at least one
-   * finest patch: the bounding spheres of patches with wide height ranges contain the camera.
+   * The distance to the box of the nearest selected patch not at the finest level, metres, at
+   * least one finest patch: a box with a wide height range can contain the camera.
    */
   readonly nearestM: number;
 }
@@ -220,6 +232,8 @@ export class TerrainPass {
   readonly #planet: PlanetGeometry;
   readonly #ridges: TestPlanetRidges;
   readonly #createPool: TerrainPoolFactory;
+  readonly #measureSelection: boolean;
+  readonly #onResident: ((key: PatchKey) => void) | null;
   readonly #contacts = new ContactRecords();
   readonly #debounce = new TerrainAnnunciationDebounce();
   readonly #offRestored: () => void;
@@ -243,6 +257,8 @@ export class TerrainPass {
     this.#planet = options.planet;
     this.#ridges = options.ridges;
     this.#createPool = options.createPool;
+    this.#measureSelection = options.measureSelection ?? false;
+    this.#onResident = options.onResident ?? null;
     this.#device = this.#makeDevice();
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
@@ -366,6 +382,7 @@ export class TerrainPass {
     }
     this.#rangesVersion += 1;
     this.#demandDirty = true;
+    this.#onResident?.(bake.key);
   }
 
   /** The primary view as selection takes it: body-fixed, at τ ÷ (1 + m). */
@@ -420,14 +437,20 @@ export class TerrainPass {
       heightRanges: this.#device.cache,
       skirtMarginM: WORKER_SKIRT_MARGIN_M,
     };
+    const startMs = this.#measureSelection ? performance.now() : 0;
     const selection = selectPatches(selectionInput);
+    if (this.#measureSelection) {
+      performance.measure(SELECT_MEASURE, { start: startMs, end: performance.now() });
+    }
     const patchM = finestPatchSizeM(this.#planet);
     let nearestM = Number.POSITIVE_INFINITY;
     for (const patch of selection.patches.values()) {
       if (patch.key.level < this.#planet.finestLevel) {
+        // The box, as selection measures a patch's distance: a coarse patch's bounding sphere
+        // often holds the camera, which would clamp the rule to one finest patch (lane B).
         nearestM = Math.min(
           nearestM,
-          distance(view.camera.positionM, patch.bounds.centre) - patch.bounds.radiusM,
+          distanceToBoxM(relativeBounds(patch.bounds, view.camera.positionM)),
         );
       }
     }

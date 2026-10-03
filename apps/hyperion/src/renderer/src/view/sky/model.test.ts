@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { vec3 } from "../../geometry/vec3";
+import { galacticTranslated } from "../coords/position";
 import { decodedSky, skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
 import {
   bakedBeyondM,
@@ -28,7 +30,14 @@ function heldSky(years: number, distancesLy: ReadonlyArray<number>): SkyModel {
   };
 }
 
-const CAMERA: SkyCamera = { offsetFromObserverM: 0, fovDeg: 60, widthPx: 1_920 };
+const OBSERVER = skyRequest(0).observer;
+
+const CAMERA: SkyCamera = { position: OBSERVER, fovDeg: 60, widthPx: 1_920 };
+
+/** The camera moved `m` metres along +x from the sky's observer. */
+function movedBy(m: number): SkyCamera {
+  return { ...CAMERA, position: galacticTranslated(OBSERVER, vec3(m, 0, 0)) };
+}
 
 describe("skyRequestReason", () => {
   it("asks on arrival, with no sky held", () => {
@@ -50,6 +59,20 @@ describe("skyRequestReason", () => {
     );
   });
 
+  it("asks again for a deeper camera limit, a larger N_max or the eye, never for less", () => {
+    const held = heldSky(0, [100]);
+    const ask = (request: ReturnType<typeof skyRequest>) =>
+      skyRequestReason(held, { request, cameras: [CAMERA] });
+    expect(ask({ ...skyRequest(0), camera_limit_v: 10.5 })).toBe("limits");
+    expect(ask({ ...skyRequest(0), camera_limit_v: 9.52 })).toBeNull();
+    expect(ask({ ...skyRequest(0), camera_limit_v: 8 })).toBeNull();
+    expect(ask({ ...skyRequest(0), n_max: 5_000 })).toBe("limits");
+    expect(ask({ ...skyRequest(0), n_max: 10 })).toBeNull();
+    expect(
+      ask({ ...skyRequest(0), eye: { field_factor: 2, age_years: 25, pigmentation: 0.5 } }),
+    ).toBe("limits");
+  });
+
   it("asks again on a jump back before the sky's time", () => {
     const held = heldSky(10, [100]);
     expect(skyRequestReason(held, { request: skyRequest(9), cameras: [CAMERA] })).toBe("jump");
@@ -63,13 +86,13 @@ describe("skyRequestReason", () => {
     expect(
       skyRequestReason(held, {
         request: skyRequest(0),
-        cameras: [{ ...CAMERA, offsetFromObserverM: shiftM * 0.9 }],
+        cameras: [movedBy(shiftM * 0.9)],
       }),
     ).toBeNull();
     expect(
       skyRequestReason(held, {
         request: skyRequest(0),
-        cameras: [{ ...CAMERA, offsetFromObserverM: shiftM * 1.1 }],
+        cameras: [movedBy(shiftM * 1.1)],
       }),
     ).toBe("parallax");
   });
@@ -83,7 +106,7 @@ describe("skyRequestReason", () => {
     expect(
       skyRequestReason(held, {
         request: skyRequest(0),
-        cameras: [{ ...CAMERA, offsetFromObserverM: PARALLAX_BASELINE_M }],
+        cameras: [movedBy(PARALLAX_BASELINE_M)],
       }),
     ).toBeNull();
   });

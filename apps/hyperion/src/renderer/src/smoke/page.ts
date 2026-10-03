@@ -32,9 +32,11 @@ import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
+import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
 import { checkPhotoreal } from "./photoreal";
 import { checkBodies } from "./bodies";
 import { runSoak } from "./soak";
+import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
@@ -189,6 +191,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     checkTerrainResources(engine, checks),
   );
   await checks.group("R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
+  await checks.group("R06.T13.d the sky's band", () => checkSkyBand(engine, checks));
+  await checks.group("R06.T13.e the host discs", () => checkSkyDisc(engine, checks));
+  await checks.group("R06.T13.g the sky's bake", () => checkSkyBake(engine, checks));
   let images: CapturedImage[] = [];
   if (captures) {
     await checks.group("R05.T12.c the comparison captures", async () => {
@@ -204,6 +209,12 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   if (captures) {
     await checks.group("R05.T11.c the terrain captures", async () => {
       images = [...images, ...(await captureTerrain(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await checks.group("R05.T13.b the spike captures", async () => {
+      images = [...images, ...(await captureSpike(engine, checks))];
     });
   }
 

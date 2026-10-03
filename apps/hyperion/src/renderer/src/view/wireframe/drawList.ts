@@ -17,6 +17,7 @@ import { occluderRadius } from "../depth/depth";
 import { exposureScale } from "../photometry/exposure";
 import { apparentV, illuminanceLx, PSF_QUAD_PX } from "../photometry/magnitude";
 import { starColour } from "../photometry/starColour";
+import { REC709_LUMA } from "../sky/photometry";
 import type { Rgb } from "../photometry/toneCurve";
 import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
 import { angularDiameterPx, bodyRegime, graticule, ringEllipse } from "./bodies";
@@ -206,6 +207,37 @@ export interface DrawOptions {
   readonly destination: CameraTarget | null;
   /** The interface's rem, px, which symbol sizes follow. */
   readonly remPx: number;
+  /**
+   * The sky's sprites (R06.T13.c), drawn in place of the scene's interim stars once the sky has
+   * arrived; `undefined` or `null` draws the scene's stars.
+   */
+  readonly skyStars?: ReadonlyArray<SpriteStar> | null;
+}
+
+/** A star as the sprite path takes it: its direction from the camera and its light per channel. */
+export interface SpriteStar {
+  /** A stable name, for ranking ties. */
+  readonly id: string;
+  /** Its unit direction from the camera, along the galactic axes. */
+  readonly direction: Vec3;
+  /** Its illuminance per linear Rec. 709 channel, lx. */
+  readonly illuminanceRgbLx: Rgb;
+}
+
+/**
+ * The scene's interim stars as sprite stars: each one's V from its absolute V and distance, its
+ * colour of unit luminance from its temperature (R02.T16).
+ */
+function interimSpriteStars(scene: ViewScene): SpriteStar[] {
+  return scene.stars.map((star) => {
+    const e = illuminanceLx(apparentV(star.absoluteV, star.distanceM));
+    const colour = starColour(star.tEffK);
+    return {
+      id: star.id,
+      direction: star.direction,
+      illuminanceRgbLx: [colour[0] * e, colour[1] * e, colour[2] * e],
+    };
+  });
 }
 
 function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
@@ -559,7 +591,7 @@ export function buildWireframeDrawList(
 /** How far outside the view a sprite's star may fall and still light it: half its quad, px. */
 const SPRITE_MARGIN_PX = Math.ceil(PSF_QUAD_PX / 2);
 
-/** The scene's stars as sprites, the brightest first, capped at the low setting. */
+/** The scene's stars, or the sky's, as sprites, the brightest first, capped at the low setting. */
 function starSprites(
   scene: ViewScene,
   projection: ProjectionCamera,
@@ -568,9 +600,9 @@ function starSprites(
 ): StarSprite[] {
   const exposure = exposureScale(options.ev100);
   const sprites: StarSprite[] = [];
-  for (const star of scene.stars) {
-    // Stars are far enough that the direction from the barycentre is the direction from the camera
-    // (parallax across a system is under a tenth of a pixel beyond about 9 ly; Design note 19).
+  for (const star of options.skyStars ?? interimSpriteStars(scene)) {
+    // Interim stars are far enough that the direction from the barycentre is the direction from
+    // the camera (Design note 19); the sky's sprites come already placed from the camera.
     const direction = star.direction;
     const p = project(scale(direction, 1e3), projection, viewport);
     if (
@@ -582,16 +614,16 @@ function starSprites(
     ) {
       continue;
     }
-    const e = illuminanceLx(apparentV(star.absoluteV, star.distanceM));
-    const perWeight = (e / pixelSolidAngle(direction, projection, viewport)) * exposure;
-    const colour = starColour(star.tEffK);
+    const perWeight = exposure / pixelSolidAngle(direction, projection, viewport);
+    const [r, g, b] = star.illuminanceRgbLx;
     sprites.push({
       id: star.id,
       directionF32: narrow(direction),
       xPx: p.xPx,
       yPx: p.yPx,
-      exposedRgb: [colour[0] * perWeight, colour[1] * perWeight, colour[2] * perWeight],
-      illuminanceLx: e,
+      exposedRgb: [r * perWeight, g * perWeight, b * perWeight],
+      // Rec. 709's luminance weights: the photopic illuminance the ranking keeps the brightest by.
+      illuminanceLx: REC709_LUMA[0] * r + REC709_LUMA[1] * g + REC709_LUMA[2] * b,
     });
   }
   const ranked = sprites.toSorted(

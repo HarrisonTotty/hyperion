@@ -6419,3 +6419,25 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     are low (Sudarsky et al. 2000 class III; measured hot-Jupiter Bond albedos mostly ≲ 0.3). These
     affect temperatures now, and through `A_Bond ÷ A_ref` they will affect appearance once the
     table varies within a state.
+- **Deviations in P14.T46.a–d, as built (Phase J lane).**
+  - _T46.a test (a), bit for bit._ A regular moon's `DerivedMoon::locking_time` cannot equal its
+    held law's bit for bit: the moon derivation spins from a fixed 15 h primordial period
+    (`MOON_PRIMORDIAL_PERIOD_HOURS`) and the law from the drawn one. The test
+    (`a_regular_moon_has_one_locking_time`) asserts that the two locking times stand in the ratio
+    of the two periods to 10⁻¹², which is the "one law, one moment of inertia" the amendment asks.
+  - _T46.b benchmark (A3; provisional, measured under a load of 35–55)._ T33.a's mean `generate`
+    plus `snapshot_at` per field system went from 682 µs to 1,098 µs against the 1 ms target;
+    `generate` alone from 360 µs to 724 µs. Deriving through `body_at` per body gave 1,330 µs, so
+    the pass takes one `snapshot_at` at `parent_time`. The remedy the ruling names (deriving the
+    law from the bulk inputs alone, without the surface and atmosphere passes) is not built; the
+    finding went to the orchestrator. To be re-measured on a quiet machine.
+  - _T46.b, `generate_planets`._ Its planets hold no law, so the test that `generate_planets` is
+    `generate` without its satellites compares the planets with the held law cleared.
+  - _T46.c test (c), Neptune._ The task's 2% bound contradicts its own check (+3.7%): the test
+    holds Neptune to 5%.
+  - _T46.c, the synchronous factor's test._ f scales with q ∝ a³ ∝ 1 ÷ (1 − f) at a fixed
+    volume, so the converged ratio of a locked figure to a free one is 2.5 (1 − f_free) ÷
+    (1 − f_locked), not 2.5 exactly; the test asserts that to 10⁻⁹ on a 1,800 km rocky body at a
+    40 h spin (8 h reaches the cap).
+  - _T46.d, the cap._ A capped figure's (a − c) ÷ a recomputed from its radii may round just above
+    0.2; the section test allows 10⁻¹².
