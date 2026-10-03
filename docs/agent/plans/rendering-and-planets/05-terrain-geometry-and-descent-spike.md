@@ -980,7 +980,9 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     brainstorm's "the forced switches make available, uncoarsened" gets wrong; measurement runs
     alone lift it through R01's `gpuTiming` option (`GPU_TIMING_SWITCH`), which the spike flag turns
     on before `ready` (R01 applies it, like `enable_subgroups_intel_gen9`, only in its Linux `vulkan`
-    mode, so a run elsewhere records `PassTimes.timer` as `quantized`). The safety toggles of Design note 22 are merged into both of R01's lists,
+    mode, so a run elsewhere records `PassTimes.timer` as `quantized`; accepted 2026-10-02,
+    decisions-r06-r07.md item 8: frame intervals are the pass criterion; a quantized run is
+    recorded as such). The safety toggles of Design note 22 are merged into both of R01's lists,
     `--enable-dawn-features` and `--disable-dawn-features`, with `mergeSwitchValue`, since appending
     a second switch would replace the first (R01 Design note 2). `gpuTiming` already puts
     `timestamp_quantization` in the disable list, so a run with timing on and safety off carries one
@@ -1976,7 +1978,9 @@ One high-setting run at 1080p is recorded for comparison, not judged.
 - Files: `docs/measurements/descent-spike/*.json` and `*.md`.
 - Acceptance: the four results files exist, each with every figure of Design note 18 and the
   machine's load average and governor; the summary states pass or fail against every row of
-  Design note 21's table.
+  Design note 21's table. Each results file records `PassTimes.timer`, the platform and the
+  launch mode; GPU-time rows on a `quantized` timer carry ±65.5 µs per pass and are marked
+  marginal within that tolerance of their limit (decisions-r06-r07.md item 8).
 
 **R05.T16.b The variants.** On one seed, each changing one factor from the baseline: a companion
 load on two threads (Design note 20); a cold pipeline cache; ridged terms on; Dawn's safety checks
@@ -2311,3 +2315,49 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   `TerrainVertexPath`, the unions of `TerrainSettings.normals` and `.vertexPath`. The shapes are
   `interface`s (the TypeScript rules), not the sketch's `type`s. The high cache budget is
   400,000,000 B (Design note 10's "about 400 MB"); the low is 64 MiB.
+- **GPU timing elsewhere than Linux `vulkan` mode is quantized** (decisions-r06-r07.md item 8,
+  2026-10-02); frame intervals stay the criterion, and the follow-up (honouring
+  `--hyperion-gpu-timing` in `default` mode) is taken only if a marginal row matters.
+- **Deviations in T14.c, as built** (2026-10-02).
+  - The memory sampler (`sampleMemory`, `MemorySampler`), the results builder (`buildResults`),
+    the schema check (`validateResults`), the summary (`summaryMarkdown`), the machine's
+    description (`describeMachine`) and the writer (`writeResults`) are in `main/results.ts`, not
+    `main/spike.ts`; T13.c's IPC handlers in `spike.ts` call them. `main/fdinfo.ts` holds the DRM
+    fdinfo reader (`parseFdinfo`, `sumDrmClients`, `readDrmMemory`) and `nvidia-smi`'s
+    (`parseNvidiaSmi`, `readNvidiaSmi`). A total over DRM clients is given only when every client
+    gives one.
+  - The renderer's report, `DescentSpikeReport` with its `Spike*` types, is in `preload/api.ts`
+    (a T13.c file), and fixes T14.a's output: raw per-frame series (script time, rAF interval, the
+    frame callback's main-thread time, each pass's GPU time with its row, `terrain`,
+    `atmosphere` or `other`), streaming per segment, uploads, late pipelines, the adapter's peak
+    and the canvas size. The main process computes the percentiles (nearest rank), missed frames
+    and hitches (`frameStats`), so **T14.a builds no `view/spike/percentiles.ts`**: its percentile,
+    missed-frame and hitch tests are in `results.test.ts`, and T14.a's acceptance drops that
+    filter. T14.a marks each segment with one `performance.measure("spike.segment:<name>")` span
+    (`SEGMENT_MEASURE_PREFIX`), by which presentation intervals are split by segment. `bracketed`
+    is not carried (always `false`, R01 Design note 24).
+  - The headroom row's main-thread figure is each frame's whole `requestAnimationFrame` callback,
+    engine submission included (one span a frame, T14.a's contract). It leaves out the browser's
+    own work on the thread, so the row is a lower bound; the trace's `mainThread` split is
+    recorded beside it.
+  - T is `1000 / Display.displayFrequency`, doubled on `low`. A hidden run's T, presentation
+    intervals and every row read against T are null with "no window shown"; its rAF intervals
+    are still recorded. Frames come from presentation times when there are any, else from rAF.
+  - The memory headline is `nvidia-smi`'s device memory used less a baseline taken before the
+    launch (T13.c takes it), else the DRM fdinfo's resident peak, else the adapter's tally with a
+    note; the GPU process's own `nvidia-smi` figure is recorded beside it, since the device
+    figure counts the local LLM too. Only the first GPU `nvidia-smi` lists is read. The DRM
+    reading's own reason reaches the file. Chromium's tracing service is reported apart. GB is
+    10⁹ B.
+  - Files are `<date>-<machine>-<setting>.json` and `.md`, numbered `-2`, `-3` and so on for
+    repeats; `<machine>` is the host name, lower-cased, keeping `[a-z0-9-]`. The schema is
+    `hyperion.descent-spike.results` version 1, checked by `validateResults`, a TypeScript check;
+    T15.c's Rust writer has no schema file to test against, so its test checks the same required
+    parts and figures (or T15.c ships a JSON Schema generated from the check).
+  - The i915 and amdgpu fdinfo fixtures are written in the kernel's documented layout
+    (`drm-usage-stats.rst`; amdgpu in both its `drm-memory-*` and `drm-total-*` forms), since
+    neither device is on the development machine; the NVIDIA fdinfo and `nvidia-smi.xml` were
+    recorded there (RTX 3080, driver 615.71.09). The owner's UHD 620 runs (T16) read i915 for real.
+  - **Pending:** the hidden `just descent-spike --setting low` proof waits on T13.c (which waits on
+    T13.b) and is taken then; the visible run stays with the owner, its command in
+    `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7).
