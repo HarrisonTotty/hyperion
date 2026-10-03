@@ -213,11 +213,20 @@ export class CountingRenderEngine implements RenderEngine {
           category: spec.category,
         })
       : null;
+    // A resize remakes the target's textures, as the adapter's does: new handles, same names.
+    const handles = { colour, depth };
     return {
       name: spec.name,
-      colour,
-      depth,
-      resize: (): void => undefined,
+      get colour(): TextureHandle {
+        return handles.colour;
+      },
+      get depth(): TextureHandle | null {
+        return handles.depth;
+      },
+      resize: (): void => {
+        handles.colour = { ...handles.colour };
+        handles.depth = handles.depth === null ? null : { ...handles.depth };
+      },
       render: (frame: FrameSubmission): void => {
         this.counts.frames += 1;
         this.counts.draws += frame.draws.length;
