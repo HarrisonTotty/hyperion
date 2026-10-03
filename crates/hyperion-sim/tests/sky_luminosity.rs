@@ -17,10 +17,10 @@ mod common;
 
 use common::reference_box_component_integrals;
 use hyperion_sim::Seed;
-use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+use hyperion_sim::galaxy::{Galaxy, PointLy};
 use hyperion_sim::id::Layer;
 use hyperion_sim::math;
 use hyperion_sim::sky::luminosity::LuminosityTables;
@@ -29,6 +29,7 @@ use hyperion_sim::stellar::system::SystemStars;
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::Magnitudes;
 use hyperion_sim::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
+use hyperion_testkit::stats::{poisson_interval, poisson_two_sided_p};
 
 /// Cells along each edge of a block: 6³ = 216 cells.
 const BLOCK_CELLS: i32 = 6;
@@ -39,45 +40,91 @@ const Z: f64 = 3.29;
 /// The allowance for the tables' approximations, a share of the expected light.
 const TRACK_SAMPLING: f64 = 0.05;
 
-/// What a block holds: the realised light and its square sum, and the stars brighter than −3 and
-/// −5.
-#[derive(Debug, Default)]
+/// What a block holds: the realised light and its square sum, the light the same stars would have
+/// evolved alone (each star's single-star model, which the tables assume), and the stars brighter
+/// than −3 and −5.
+#[derive(Debug, Default, Clone, Copy)]
 struct Realised {
     systems: u64,
     light: f64,
     light_squared: f64,
-    brighter_3: f64,
-    brighter_5: f64,
+    single_light: f64,
+    brighter_3: u64,
+    brighter_5: u64,
 }
 
-fn realise(galaxy: &Galaxy, keys: &[CellKey]) -> Realised {
+/// A count as a float, for a ratio.
+fn count_f64(k: u64) -> f64 {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a count of stars, far below 2^53"
+    )]
+    let k = k as f64;
+    k
+}
+
+/// The V light of an absolute magnitude, L☉,V.
+fn light_of(v: f64) -> f64 {
+    math::exp10(-0.4 * (v - SOLAR_ABSOLUTE_MAGNITUDE_V))
+}
+
+fn realise_cell(galaxy: &Galaxy, key: CellKey) -> Realised {
     let mut out = Realised::default();
     let mut records: Vec<SystemRecord> = Vec::new();
-    for &key in keys {
-        generate_cell(galaxy, key, &mut records);
-        for record in &records {
-            out.systems += 1;
-            let stars = SystemStars::generate(galaxy, record);
-            let Some(state) = stars.state_at(UniverseTime::EPOCH) else {
-                continue;
-            };
-            let mut system_light = 0.0;
-            for star in state.stars() {
-                if let Some(v) = absolute_v_of_state(star) {
-                    system_light += math::exp10(-0.4 * (v.value() - SOLAR_ABSOLUTE_MAGNITUDE_V));
-                    if v.value() < -3.0 {
-                        out.brighter_3 += 1.0;
-                    }
-                    if v.value() < -5.0 {
-                        out.brighter_5 += 1.0;
-                    }
-                }
+    generate_cell(galaxy, key, &mut records);
+    for record in &records {
+        out.systems += 1;
+        let stars = SystemStars::generate(galaxy, record);
+        let Some(state) = stars.state_at(UniverseTime::EPOCH) else {
+            continue;
+        };
+        let mut system_light = 0.0;
+        for star in state.stars() {
+            if let Some(v) = absolute_v_of_state(star) {
+                system_light += light_of(v.value());
+                out.brighter_3 += u64::from(v.value() < -3.0);
+                out.brighter_5 += u64::from(v.value() < -5.0);
             }
-            out.light += system_light;
-            out.light_squared += system_light * system_light;
         }
+        for model in stars.stars() {
+            if let Some(v) = model
+                .state_at(UniverseTime::EPOCH)
+                .as_ref()
+                .and_then(absolute_v_of_state)
+            {
+                out.single_light += light_of(v.value());
+            }
+        }
+        out.light += system_light;
+        out.light_squared += system_light * system_light;
     }
     out
+}
+
+/// Every cell of `keys` realised, on eight threads, summed in the cells' order.
+fn realise(galaxy: &Galaxy, keys: &[CellKey]) -> Realised {
+    const THREADS: usize = 8;
+    let mut parts = vec![Realised::default(); keys.len()];
+    std::thread::scope(|scope| {
+        for (chunk_keys, chunk_parts) in keys
+            .chunks(keys.len().div_ceil(THREADS))
+            .zip(parts.chunks_mut(keys.len().div_ceil(THREADS)))
+        {
+            scope.spawn(move || {
+                for (&key, part) in chunk_keys.iter().zip(chunk_parts) {
+                    *part = realise_cell(galaxy, key);
+                }
+            });
+        }
+    });
+    parts.iter().fold(Realised::default(), |a, b| Realised {
+        systems: a.systems + b.systems,
+        light: a.light + b.light,
+        light_squared: a.light_squared + b.light_squared,
+        single_light: a.single_light + b.single_light,
+        brighter_3: a.brighter_3 + b.brighter_3,
+        brighter_5: a.brighter_5 + b.brighter_5,
+    })
 }
 
 #[test]
@@ -129,7 +176,7 @@ fn luminosity_matches_realised_cells() {
             for id in galaxy.fields().component_ids() {
                 let component = galaxy.fields().component(id);
                 let n = integrals[id.index()] * galaxy.shares().component_share(band, component);
-                let table = tables.get(id, layer);
+                let table = tables.get_at(id, layer, &PointLy::new(at[0], at[1], at[2]));
                 systems += n;
                 light += n * table.total_light(Span::ZERO).value();
                 bright_3 += n * table.count_brighter_than(Magnitudes::new(-3.0), Span::ZERO);
@@ -138,16 +185,28 @@ fn luminosity_matches_realised_cells() {
             let realised = realise(&galaxy, &keys);
             let sigma = realised.light_squared.sqrt();
             let allowed = Z * sigma + TRACK_SAMPLING * light;
+            let bright = |k: u64, expected: f64| {
+                if expected <= 0.0 {
+                    return format!("{k} against none");
+                }
+                // The 95% interval of the count the table expects, and the two-sided p of what was
+                // realised: the ratio is recorded, not gated (decided 2026-10-02, item 3).
+                let (lo, hi) = poisson_interval(expected, 0.05);
+                format!(
+                    "{k} against {expected:.3} (95% {lo}–{hi}), ratio {:.2}, p {:.3}",
+                    count_f64(k) / expected,
+                    poisson_two_sided_p(k, expected)
+                )
+            };
             eprintln!(
                 "{name} {layer:?}: {} systems (expected {systems:.1}); light {:.4e} against \
-                 {light:.4e} (± {allowed:.3e}); brighter than −3: {} against {bright_3:.3e}, \
-                 ratio {:.3}; brighter than −5: {} against {bright_5:.3e}, ratio {:.3}",
+                 {light:.4e} (± {allowed:.3e}), {:.4e} as single stars; brighter than −3: {}; \
+                 brighter than −5: {}",
                 realised.systems,
                 realised.light,
-                realised.brighter_3,
-                realised.brighter_3 / bright_3,
-                realised.brighter_5,
-                realised.brighter_5 / bright_5,
+                realised.single_light,
+                bright(realised.brighter_3, bright_3),
+                bright(realised.brighter_5, bright_5),
             );
             if (realised.light - light).abs() > allowed {
                 failures.push(format!(

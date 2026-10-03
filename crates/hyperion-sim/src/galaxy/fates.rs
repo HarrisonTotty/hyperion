@@ -259,6 +259,7 @@ fn companion_range(m: f64) -> (f64, f64) {
 
 /// The panel edges for the quadratures of this module: the stellar range's ends, the given
 /// breaks inside it, ascending and without repeats.
+#[must_use]
 pub(crate) fn panel_edges<'a>(breaks: impl IntoIterator<Item = &'a f64>) -> Vec<f64> {
     let mut edges: Vec<f64> = breaks
         .into_iter()
@@ -274,6 +275,7 @@ pub(crate) fn panel_edges<'a>(breaks: impl IntoIterator<Item = &'a f64>) -> Vec<
 }
 
 /// The mass whose lifetime is `age`, if one inside the stellar range has it.
+#[must_use]
 pub(crate) fn mass_with_lifetime(fates: &(impl StellarFates + ?Sized), age: f64) -> Option<f64> {
     let longest = fates.lifetime(MASS_LIMIT_LO).value();
     let shortest = fates.lifetime(MASS_LIMIT_HI).value();
@@ -291,6 +293,7 @@ pub(crate) fn mass_with_lifetime(fates: &(impl StellarFates + ?Sized), age: f64)
 
 /// The panels of the quadrature in `u = ln m`: the intervals between consecutive edges, each split
 /// into equal parts no wider than [`MAX_PANEL_LN_MASS`].
+#[must_use]
 pub(crate) fn ln_mass_panels(edges: &[f64]) -> Vec<(f64, f64)> {
     let mut panels = Vec::with_capacity(4 * edges.len());
     for pair in edges.windows(2) {
