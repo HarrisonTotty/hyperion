@@ -1,0 +1,15 @@
+# The optical constants of intrinsic silicon at 300 K of Green (2008), as the refractiveindex.info
+# database tabulates them (λ in µm, n, k; 0.25-1.45 µm): the absorption of the colour table's default
+# camera sensor (rendering plan R06, R06.T3.c; decision-camera-eta of 2026-10-02). The database is in
+# the public domain (CC0 1.0), so the file is committed unmodified. Read by `run star_colour`.
+dataset = "green2008_si"
+class = "committed"
+citation = "Green (2008), Sol. Energ. Mat. Sol. Cells 92, 1305, DOI 10.1016/j.solmat.2008.06.009: self-consistent optical parameters of intrinsic silicon at 300 K; via the refractiveindex.info database (Polyanskiy 2024, Sci. Data 11, 94)"
+url = "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/master/database/data/main/Si/nk/Green-2008.yml"
+retrieved = "2026-10-02"
+release = "database/data/main/Si/nk/Green-2008.yml on the database's master branch as served on that date"
+licence = "CC0 1.0 Universal (the database's LICENSE and the file's header)"
+
+[[files]]
+name = "Green-2008.yml"
+sha256 = "4b785ec47ca9a5ac71626dc90194115fba00575689a52c2baf1e78676c752ce4"

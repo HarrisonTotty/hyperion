@@ -30,3 +30,22 @@ Rec. 2020 conversions and the final clamp that Filament's colour grading applies
 mapper. Filament's AgX matrices are in turn taken from Blender's AgX
 (https://github.com/EaryChow/AgX_LUT_Gen, AgXBaseRec2020.py), and its sigmoid is adapted from
 iolite-engine's minimal AgX (https://iolite-engine.com/blog_posts/minimal_agx_implementation).
+
+--------------------------------------------------------------------------------
+Data: CIE colour-matching and luminous-efficiency functions
+https://creativecommons.org/licenses/by-sa/4.0/
+
+CIE 2019, Colour-matching functions of CIE 1931 standard colorimetric observer, International
+Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b
+CIE 2019, CIE spectral luminous efficiency for photopic vision, International Commission on
+Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.dktna2s3
+CIE 2019, CIE spectral luminous efficiency for scotopic vision, International Commission on
+Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.gr6w4b5g
+CIE 2022, CIE standard illuminant D65, International Commission on Illumination (CIE), Vienna, AT,
+DOI: 10.25039/CIE.DS.hjfjmt59
+
+Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0). The
+tables are kept unmodified in crates/hyperion-fit/data/cie_cmf/ (a tool input, not shipped). The
+values of crates/hyperion-sim/src/tables/star_colour.rs are computed from them (integrated against
+model stellar spectra); to the extent they are adapted material they are offered under CC BY-SA
+4.0.

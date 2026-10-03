@@ -107,6 +107,7 @@ pub struct StarColour { /* chroma: [f32; 2] (linear Rec. 709 r and g of unit lum
     lux_per_v0: f64, sp_ratio: f64, camera_band_mag: f64, extinction_ratio: [f64; 3],
     bake_spectrum: [f64; BAKE_WAVELENGTH_COUNT] (R08's ask; Design note 6) */ }
 pub const BAKE_WAVELENGTHS_NM: [f64; BAKE_WAVELENGTH_COUNT];   // R08's 15, mirrored (Design note 6)
+pub const CAMERA_ETA_SUN: f64;   // η☉, the default sensor's e⁻ per V-band photon for the Sun's row (Design note 18), ≈ 3.0
 pub enum AtmosphereGrid { MainSequence, Giant, WhiteDwarf }
 pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour;
 pub fn surface_gravity(mass: SolarMasses, radius: SolarRadii) -> f64;   // log₁₀ g, cgs
@@ -523,8 +524,11 @@ holds.
    against the CIE 1931 2° functions and the CIE 1924 V(λ) and 1951 V′(λ) (CIE datasets, CC BY-SA
    4.0, credited): chroma in linear Rec. 709 with a D65 white, desaturated towards white out of
    gamut (Walker's method); `lux_per_v0`, the photopic illuminance of a V = 0 star of that spectrum
-   over 2.54 µlx; ρ; the camera band term, the default sensor's electrons per V-band photon as a
-   magnitude; and each display channel's A_c ÷ A_V at R_V = 3.1 through plan 07's `extinction_ratio`
+   over 2.54 µlx; ρ; the camera band term, −2.5 log₁₀(η ÷ η☉), where η = ∫S·QE·λ dλ ÷ ∫S·R_V·λ dλ
+   is the default sensor's electrons per V-band photon (R_V Bessell and Murphy 2012's photonic V,
+   peak 1, which gives Φ₀ of Design note 18) and η☉ = `CAMERA_ETA_SUN`, the same quantity for the
+   table's 5,772 K, log g 4.438 row (so the Sun's term is 0; +0.11 at O5V, −0.70 at M2V, −2.14 at
+   M6V, about −3 at 2,300 K; decision-camera-eta.md); and each display channel's A_c ÷ A_V at R_V = 3.1 through plan 07's `extinction_ratio`
    at the channel's effective wavelength for that spectrum. For R08's spectral bakes (its Design
    note 5) each row also carries `bake_spectrum`, the spectrum's average over each of
    `BAKE_WAVELENGTH_COUNT` (15) bins of R08's `BAKE_WAVELENGTHS_NM`, normalised to unit photopic
@@ -871,10 +875,17 @@ surface_gravity, StarColour, AtmosphereGrid}`, bilinear in log T_eff and log g w
   `sky/colour.rs`, `crates/hyperion-fit/tables.lock`. Acceptance: `cargo test -p hyperion-sim
 sky::colour` and `just fit-check`.
 - **R06.T3.c The camera, reddening and bake columns.** The default sensor's response for
-  `camera_band_mag` (Design notes 6 and 18: η per spectrum), each channel's `extinction_ratio`, and
+  `camera_band_mag` (Design notes 6 and 18: η per spectrum), relative to `CAMERA_ETA_SUN`, which the
+  fit emits, from the default sensor of Design note 18 (Green 2008's k for silicon, CC0, committed
+  as an input with its citation and a `NOTICE` "Data" line), each channel's `extinction_ratio`, and
   `bake_spectrum` at `BAKE_WAVELENGTHS_NM` normalised to unit photopic illuminance (Design note 6);
   the task's revision is bumped and the table re-fitted. Tests: the 15-bin illuminance of every row
-  is 1 lx to 10⁻⁶ and within 1% of the exact integral; η for a 5,772 K spectrum lies in 1.5–2;
+  is 1 lx to 10⁻⁶ and within 1% of the exact integral; `CAMERA_ETA_SUN` lies in 2.9–3.15 and the
+  5,772 K, log g 4.438 row's `camera_band_mag` is 0 to 10⁻⁹; Pickles 1998's O5V, A0V, K5V, M2V, M5V
+  and M6V integrated by the same code give +0.11, +0.14, −0.30, −0.70, −1.58 and −2.14 ± 0.05; for
+  Pickles dwarfs O5V–M6V the Sun-relative term lies within 0.1 mag of Riello et al. 2021's
+  G−V(V−I_C) polynomial (coefficients −0.01597, −0.02809, −0.2483, 0.03656, −0.002939), V−I
+  synthetic through Bessell and Murphy 2012's I; every row's term lies in [−4.0, +3.97];
   `sky::colour::BAKE_WAVELENGTHS_NM` equals R08's constant (a fixture both sides read). Acceptance:
   `cargo test -p hyperion-fit star_colour`, `cargo test -p hyperion-sim sky::colour`,
   `just fit-check`.
@@ -1424,3 +1435,63 @@ plan reserves no tag, prefix or stream.
   plan's scope: it adds a second committed table from the same unlicensed grid at full resolution,
   which waits on the owner's data-licence ruling. The interim for R08's curves of growth is R08's to
   choose; the ask stays open in the roadmap's between-plans table (R06 owner, R08 asking).
+- **Deviations in T1, as built.** None: the R06 row of galaxy plan 04's reserved kinds and plan 06's
+  "Asked by rendering plan R06" heading with A1–A4 are drafted for the galaxy plans' owner
+  (`fb5b47c`).
+- **Deviations in T6.a, as built.** `generate_cell_where` draws each candidate's mass through
+  `placement::record::candidate_mass` (factored out of `SystemRecord::of_candidate` with the same
+  calls) and evaluates a kept candidate whole, drawing its mass word a second time. The 500-cell
+  test passes over cells within 2,000 ly of the centre, whose 10⁵ systems would take a debug build
+  minutes, and takes one bulge cell at 3,000 ly instead; it covers the five stellar and two
+  substellar layers at ten floors.
+- **Deviations in T3, as built** (rulings of 2026-10-02 by delegated decision, R06.T3 lane).
+  - _Sources._ ATLAS9, TLUSTY OSTAR2002, Koester's DA and TMAP spectra are the Spanish Virtual
+    Observatory's ASCII copies (collections `Kurucz2003` at [M/H] 0, `tlusty_ostarbin` at Z/Z0 1,
+    `koester2` at log g 6.5–9.5 by 0.5, `tmap` at He mass fraction 0 and 0.3); PHOENIX is the
+    Göttingen HiRes FITS. Levenhagen 2017 is not used (the plan's "Koester or Levenhagen"). The
+    grids: not white dwarfs, PHOENIX 2,300–3,400 K, ATLAS9 3,500–27,000 K, TLUSTY 27,500–55,000 K,
+    TMAP H+He (Y 0.3) 60,000–100,000 K, a blackbody at 120,000–500,000 K, log g 0–6 by 0.5; white
+    dwarfs, Koester 5,000–80,000 K, TMAP pure H at 90,000 and 100,000 K, the blackbody beyond, log
+    g 6.5–9.5 by 0.5. A node a model set does not hold takes the nearest gravity it holds at that
+    temperature (448 nodes in the first grid, 2 in the second). `AtmosphereGrid::MainSequence` and
+    `Giant` read the same grid, which spans log g 0–6.
+  - _Licences_ (decisions-r05.md item 4). Every spectral grid, Bessell and Murphy's V (also needed
+    as a fetched dataset, `bessell_murphy_2012`), Pickles' library (`pickles1998`, sixteen files)
+    and the three limb-darkening catalogues are fetched with checksums (`PROVENANCE.toml` and
+    `urls.txt` committed); the CIE tables (`cie_cmf`, CC BY-SA 4.0, CRLF kept, excluded from the
+    line-ending hook) and Green 2008's silicon (`green2008_si`, CC0, excluded from Prettier) are
+    committed raw; `NOTICE` gains a Data entry for the CIE. The smoke manifest needs only committed
+    data: a blackbody at every node and the photopic V(λ) standing in for the V band.
+  - _The V zero point_ is BCP98's −21.100 (offset 0.000) applied to Bessell and Murphy's photonic
+    V; their own zero point would put V = 0 0.016 mag brighter (§7.2 Tables 3 and 5). Kept, so
+    every `lux_per_v0` is 0.016 mag lower than under BM12's own.
+  - _Corrected figures._ `lux_per_v0` runs 0 to +0.10 mag above 2.54 µlx from O5 to M6 (Pickles'
+    own spectra: O5V 0.000, K5V 0.100, M2V 0.093, M5V 0.074), not "within 0.08": the tests take
+    |m| < 0.11. The Pickles colour check holds Δ(u′, v′) < 0.005 for A0V, F5V, G2V, K0V (Mamajek's
+    2022.04.16 T_eff, log g from its masses and radii) and G8III (Pickles' own adopted 5,012 K), with
+    four measured exceptions in the table's header: O5V 0.0072 < 0.008 (Martins et al. 2005 Table 1,
+    41,540 K; it lies off the models' locus at every temperature, likely residual reddening), M3III
+    0.0113 < 0.012 (its colour is a 4,240 K model's), M2V 0.0057 < 0.007 at 3,560 K (best fit
+    3,260 K), K0III 0.0050 < 0.006 at Pickles' 4,853 K (best fit 5,050 K). An M dwarf is less red
+    than its blackbody by 0.019, 0.015 and 0.011 in CIE 1960 uv at 2,900, 3,000 and 3,100 K (0.008
+    at 3,200 K), so the test takes 2,900–3,100 K.
+  - _T3.c as built_ (decision-camera-eta.md). `CAMERA_ETA_SUN` is 2.9557 (the ATLAS9 grid's,
+    geometrically interpolated at 5,772 K and log g 4.438 so the Sun's interpolated term is 0 to
+    10⁻¹⁵; Pickles G2V gives 3.02), and the shared fixture
+    `packages/protocol/fixtures/camera_eta_sun.json` pins it for the client's `etaSun`. The term is
+    stored unrounded and saturated at the wire's −4.0 and +3.97: only PHOENIX's 2,300 K rows at log
+    g 0–0.5 (−4.02) reach it. A channel's effective wavelength weights the spectrum by the positive
+    part of its Rec. 709 colour-matching function; the ratio is plan 07's law at it over the law at
+    the V band's photon-weighted effective wavelength. `BAKE_WAVELENGTHS_NM` is pinned by
+    `packages/protocol/fixtures/bake_wavelengths_nm.json` (R08 unbuilt; its constant reads the same
+    file). The bake spectra are a second `static` per grid (`NORMAL_BAKE`, `WHITE_DWARF_BAKE`).
+  - _Shape._ The task is the module `tasks/star_colour/` (`columns`, `photometry`, `pickles`,
+    `spectrum`), slow class. The table's rows are `static` arrays of eight-column `[f64; 8]` (`r`,
+    `g`, `lux_per_v0`, `sp_ratio`, `camera_band_mag`, red, green and blue `A_c ÷ A_V`), the bake
+    spectra `[f64; 15]`, written as plain source text, comma-separated with no spaces and with
+    `unreadable_literal` allowed, so that the file (497 KB) stays under the repository's 500 KB
+    hook; `sky::colour` reads the columns by index.
+    The Pickles comparison, the M-dwarf check and the bake integrals are in
+    `crates/hyperion-fit/tests/star_colour.rs` (they need the fetched data and say so when it is
+    absent); the sim's `sky::colour` tests pin the committed table. `sky/mod.rs` was created here
+    (T2 had not landed); expect a trivial merge with T2's.

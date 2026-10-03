@@ -66,6 +66,7 @@ pub mod observe;
 pub mod orbit;
 pub mod planetary;
 pub mod rng;
+pub mod sky;
 pub mod stellar;
 pub mod tables;
 pub mod time;

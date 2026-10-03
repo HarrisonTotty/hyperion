@@ -12,6 +12,7 @@ pub mod kick_rank;
 pub mod mge;
 pub mod period_correction;
 pub mod pulsars;
+pub mod star_colour;
 pub mod stellar_fates;
 pub mod stripping;
 pub mod type_ia_delay;
