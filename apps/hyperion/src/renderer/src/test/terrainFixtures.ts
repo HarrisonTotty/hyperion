@@ -55,5 +55,5 @@ export function selectionOf(
     const keyString = patchKeyString(key);
     patches.set(keyString, { key, bounds: UNIT_BOUNDS, forced: forcedStrings.has(keyString) });
   }
-  return { patches, demand: [] };
+  return { patches, demand: [], limited: false };
 }
