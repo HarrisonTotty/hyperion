@@ -164,8 +164,11 @@ Tell the user briefly:
 - The decisions you made (step 3) and the deviations you recorded (step 7).
 - What waits on the owner: confirmation items and open questions.
 - A commit message, or the commit itself if the user asked for commits. Make one commit per task
-  with a subject that starts with the task ID, such as `P02.T5.a Galaxy parameter draws`, so that
-  `--list` can mark it. When a plan asks for owner-confirmation edits in their own commit, keep
+  with a [Conventional Commits](https://www.conventionalcommits.org/) subject whose description
+  starts with the task ID, such as `feat(galaxy): P02.T5.a Galaxy parameter draws` or
+  `docs(plans): R06 Re-validate against the code`, so that `--list` can mark it. Use the usual types
+  (`feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`) and a short area as the
+  scope. When a plan asks for owner-confirmation edits in their own commit, keep
   them there.
 - The tasks this one unblocks, from the ordering notes.
 
