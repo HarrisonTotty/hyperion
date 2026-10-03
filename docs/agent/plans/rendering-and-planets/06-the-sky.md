@@ -1467,7 +1467,15 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   `createWorkerSkyDecoder`, returning `SkyView { model, failure, pending }`. The caller builds the
   request (observer, time, limits, N_max); `null` asks nothing. A request in flight for another
   arrival is cancelled; a failure is held and not retried until the next arrival (no timer: a
-  bulk census may take minutes). The test fixtures are `test/skyFixtures.ts`. **Moved to T13.c**
+  bulk census may take minutes), while a request the link cut off (`link_lost`, `aborted`,
+  `superseded`) is asked again once the link returns. A `SkyCamera` is the camera's galactic
+  `position` with its field of view and width, and the rule measures its offset from the held
+  sky's observer. The rule's fifth reason, `limits`, asks again when a view asks for more than the
+  held request did (a camera limit deeper by over 0.05 mag, a larger N_max, the eye or other eye
+  parameters, another cone); a shallower limit is the cull's. `useSky` returns no model for a held
+  sky of another arrival. `createWorkerSkyDecoder(start)` takes the worker's starter (tests pass a
+  fake) and settles waiting decodes on a load error, an unreadable reply or a failed post. The
+  test fixtures are `test/skyFixtures.ts`. **Moved to T13.c**
   (approved by the orchestrator 2026-10-03): wiring `useSky` into `ViewDisplay`, retiring R02's
   interim field and its label where the sky has arrived, and composing the request's observer
   from `barycentreAt` and the camera, so that the label never claims the sky while the view still
