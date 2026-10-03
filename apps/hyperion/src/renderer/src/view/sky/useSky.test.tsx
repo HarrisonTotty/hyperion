@@ -1,0 +1,125 @@
+import type { SkyRequest } from "@hyperion/protocol";
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { binaryFrame } from "../../test/binaryFrames";
+import { FakeWebSocket } from "../../test/FakeWebSocket";
+import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
+import { decodeSkyPayload } from "./decodePayload";
+import type { SkyCamera } from "./model";
+import { type SkyDecoder, useSky } from "./useSky";
+
+const CAMERAS: ReadonlyArray<SkyCamera> = [{ offsetFromObserverM: 0, fovDeg: 60, widthPx: 1_920 }];
+
+const STARS = [{ direction: [1, 0, 0], distanceLy: 8.6, vMag: -1.46 }] as const;
+
+/** A decoder on the test's own thread, as the worker's is, made once so its identity holds. */
+function inThreadDecoder(): SkyDecoder {
+  return {
+    decode: (request) => Promise.resolve(decodeSkyPayload(request)),
+    dispose: () => undefined,
+  };
+}
+
+function renderSky(initial: SkyRequest | null) {
+  const hook = renderHook((request: SkyRequest | null) => useSky(request, CAMERAS, OPTIONS), {
+    initialProps: initial,
+    wrapper: ServerLinkHarness,
+  });
+  const socket = FakeWebSocket.latest();
+  act(() => {
+    socket.serverWelcomes();
+  });
+  return { ...hook, socket };
+}
+
+const OPTIONS = { createDecoder: inThreadDecoder };
+
+/** Plays the server's answer to the latest sky request: its payload's frames, then its response. */
+async function answerSky(socket: FakeWebSocket): Promise<void> {
+  const sent = socket.requestsOfKind("sky").at(-1);
+  if (sent === undefined) {
+    throw new Error("no sky was asked");
+  }
+  const payload = skyPayload(STARS, 2, 6.6);
+  await act(async () => {
+    socket.serverSendsBinary(binaryFrame(sent.id, 0, 1, [...payload]));
+    socket.serverResponds(sent.id, {
+      kind: "sky",
+      ...skyResponse(sent.body, payload, STARS.length, 2),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+describe("useSky", () => {
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  it("asks for the sky on arrival and holds it once decoded", async () => {
+    const { result, socket } = renderSky(skyRequest(0));
+    expect(socket.requestsOfKind("sky")).toHaveLength(1);
+    expect(result.current.pending).toBe(true);
+    await answerSky(socket);
+    expect(result.current.pending).toBe(false);
+    expect(result.current.model?.stars.count).toBe(1);
+    expect(result.current.model?.band.count).toBe(24);
+    expect(result.current.model?.stale).toBe(false);
+  });
+
+  it("asks nothing where no request can be made", () => {
+    const { socket } = renderSky(null);
+    expect(socket.requestsOfKind("sky")).toHaveLength(0);
+  });
+
+  it("holds the sky as time passes within its validity, and asks again past it", async () => {
+    const { rerender, socket } = renderSky(skyRequest(0));
+    await answerSky(socket);
+    rerender(skyRequest(0.5));
+    expect(socket.requestsOfKind("sky")).toHaveLength(1);
+    rerender(skyRequest(1.5));
+    expect(socket.requestsOfKind("sky")).toHaveLength(2);
+  });
+
+  it("cancels a request in flight that another arrival supersedes", () => {
+    const { rerender, socket } = renderSky(skyRequest(0));
+    const first = socket.requestsOfKind("sky")[0];
+    rerender(skyRequest(0, "0200080020000001"));
+    expect(socket.cancelledIds()).toEqual([first?.id]);
+    expect(socket.requestsOfKind("sky")).toHaveLength(2);
+  });
+
+  it("keeps the sky through a lost link, marked stale", async () => {
+    const { result, socket } = renderSky(skyRequest(0));
+    await answerSky(socket);
+    act(() => {
+      socket.close();
+    });
+    expect(result.current.model?.stale).toBe(true);
+    expect(result.current.model?.stars.count).toBe(1);
+  });
+
+  it("holds a refusal without asking again until the next arrival", async () => {
+    const { result, rerender, socket } = renderSky(skyRequest(0));
+    const sent = socket.requestsOfKind("sky")[0];
+    if (sent === undefined) {
+      throw new Error("no sky was asked");
+    }
+    await act(async () => {
+      socket.serverRejects(sent.id, {
+        code: "bad_request",
+        message: "n_max too large",
+        field: null,
+      });
+      await Promise.resolve();
+    });
+    expect(result.current.failure).toBe("n_max too large");
+    rerender(skyRequest(0.1));
+    expect(socket.requestsOfKind("sky")).toHaveLength(1);
+    rerender(skyRequest(0.1, "0200080020000001"));
+    expect(socket.requestsOfKind("sky")).toHaveLength(2);
+  });
+});

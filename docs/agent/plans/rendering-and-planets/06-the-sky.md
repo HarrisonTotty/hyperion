@@ -1456,6 +1456,25 @@ plan reserves no tag, prefix or stream.
   R02's `STAR_SOURCE`/`STARS_WITHOUT_POSITION` where the view's sky is wired (T13.c, with the
   sprites). The low setting's fainter sprite magnitude is T13.c's selection; the values stay
   provisional until T17.
+- **Deviations in T12, as built (2026-10-03).** Built: `view/sky/model.ts` (`SkyModel` with
+  `request`, `response`, `stars`, `band`, `stale`; `skyRequestReason(held, { request, cameras })`
+  naming `arrival`, `expired`, `jump` or `parallax`; `SkyCamera`, `bakedBeyondM`,
+  `nearestStarBeyondM`, `PARALLAX_BASELINE_M`, `PARALLAX_THRESHOLD_PX`), `view/sky/limits.ts`
+  (`eyeLimitAt(source, direction, fieldFactor)` over `EyeLimitSource { band, faceTexels,
+requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodePayload.ts`
+  (`decodeSkyPayload`, `transferablesOf`, the pure work of `decode.worker.ts`, added to
+  `tsconfig.worker.json`'s `include`) and `useSky(request, cameras, { createDecoder })` with
+  `createWorkerSkyDecoder`, returning `SkyView { model, failure, pending }`. The caller builds the
+  request (observer, time, limits, N_max); `null` asks nothing. A request in flight for another
+  arrival is cancelled; a failure is held and not retried until the next arrival (no timer: a
+  bulk census may take minutes). The test fixtures are `test/skyFixtures.ts`. **Moved to T13.c**
+  (approved by the orchestrator 2026-10-03): wiring `useSky` into `ViewDisplay`, retiring R02's
+  interim field and its label where the sky has arrived, and composing the request's observer
+  from `barycentreAt` and the camera, so that the label never claims the sky while the view still
+  draws the interim field.
+- **T13.c takes T12's view wiring** (see T12's deviation): `ViewDisplay` asks the sky through
+  `useSky`, draws its sprites in place of the interim field's, and the label block reads
+  `skyLabelValue` where the sky has arrived.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
