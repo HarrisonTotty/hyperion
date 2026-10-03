@@ -3673,4 +3673,17 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     `measureTerrain` returns the floors (baked maximum plus ε_n); each cell records
     `segmentLifts` and `minFloorMarginM`, each segment its least and greatest
     `heightAboveFloorM`; the fixed-step D and the craft's contact read `heightAboveFloorM`. On seed 7
-    (ridges off) the low pass flies 318–323 m above its own floor, a neighbour's floor binding.
+    (ridges off) the low pass's own floor binds, and it flies level 300 m above it.
+  - _A lifted low pass holds level_ (review, 2026-10-03): the back-to-front solve gave a level
+    segment before a descending one a gentle climb to feed its end blend (1.9 m on the table's own
+    low pass, but about 22 m at a 500 m lift and 80 m at 2 km, since the slowdown then falls
+    faster). Where the low pass is lifted, it holds rate 0 and the piece after it starts from rest
+    and ramps to its rate over its blend length (`VerticalPiece.leadInS`); the unlifted table keeps
+    its climb, bit for bit (the test pins 64 Hz pose fingerprints taken from 003a6a3's profile).
+    Old callers whose `trackMaxHeightM` lifted the low pass (including the default 0 m over a site
+    below the datum) now fly it level, a change on purpose.
+  - **Open (asked of the orchestrator, 2026-10-03):** rule 3 compares a split segment's interior
+    boundaries with the unlifted table, so a lifted low pass beside a split slowdown saw-tooths
+    (slowdown 1 falls from the lifted level to near the table's ~283 m, slowdown 2 climbs to a
+    binding piece 3). Lean: take an interior boundary's table value as at least the straight line
+    in time between its segment's flown ends.

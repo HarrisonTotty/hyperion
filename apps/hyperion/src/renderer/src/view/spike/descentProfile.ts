@@ -272,7 +272,14 @@ class LinearProfile {
 type VerticalPiece = Pick<
   DescentSegment,
   "durationS" | "startAltitudeM" | "endAltitudeM" | "verticalShape"
->;
+> & {
+  /**
+   * A `constant` piece that starts from rest and ramps to its rate over this many seconds, so that
+   * the level piece before it holds rate 0 (a lifted low pass, which then stays level); absent,
+   * the earlier piece blends into it instead.
+   */
+  readonly leadInS?: number;
+};
 
 /** The blend's length at the end of a segment of `durationS` (Design note 19). */
 export function blendS(durationS: number): number {
@@ -340,6 +347,23 @@ function verticalKnots(segments: ReadonlyArray<VerticalPiece>): Knot[] {
       continue;
     }
     const b = next === 0 && drop === 0 ? 0 : blendS(segment.durationS);
+    const lead = segment.leadInS;
+    if (lead !== undefined) {
+      // From rest: the drop is c (T − L ÷ 2 − b) + (c + next) b ÷ 2.
+      const c = (drop - (next * b) / 2) / (segment.durationS - lead / 2 - b / 2);
+      startRate[i] = 0;
+      knotsBack[i] = [
+        { tS: t0, rate: 0 },
+        { tS: t0 + lead, rate: c },
+        ...(b === 0
+          ? [{ tS: t1, rate: c }]
+          : [
+              { tS: t1 - b, rate: c },
+              { tS: t1, rate: next },
+            ]),
+      ];
+      continue;
+    }
     const c = (drop - (next * b) / 2) / (segment.durationS - b / 2);
     startRate[i] = c;
     knotsBack[i] =
@@ -526,6 +550,9 @@ function flySegments(
   const flown: DescentSegment[] = [];
   const pieces: VerticalPiece[] = [];
   let previousEnd: number | null = null;
+  // A lifted low pass holds rate 0, and the piece after it starts from rest (rule 3: "level at
+  // A_lp"); the table's own, unlifted, keeps its gentle climb into the slowdown's blend, bit for bit.
+  let leadIn = false;
   for (const segment of segments) {
     const first = stretches.findIndex((s) => s.segment === segment.name);
     if (first < 0) {
@@ -554,19 +581,30 @@ function flySegments(
     for (let b = first + 1; b <= last; b += 1) {
       split ||= (boundary[b] ?? 0) !== (table[b] ?? 0);
     }
+    const ledIn = (piece: VerticalPiece, opening: boolean): VerticalPiece =>
+      opening && leadIn && piece.verticalShape === "constant"
+        ? { ...piece, leadInS: blendS(piece.durationS) }
+        : piece;
     if (split) {
       for (let k = first; k <= last; k += 1) {
         const stretch = stretches[k];
-        pieces.push({
-          durationS: (stretch?.endS ?? 0) - (stretch?.startS ?? 0),
-          startAltitudeM: boundary[k] ?? 0,
-          endAltitudeM: boundary[k + 1] ?? 0,
-          verticalShape: "constant",
-        });
+        const durationS = (stretch?.endS ?? 0) - (stretch?.startS ?? 0);
+        pieces.push(
+          ledIn(
+            {
+              durationS,
+              startAltitudeM: boundary[k] ?? 0,
+              endAltitudeM: boundary[k + 1] ?? 0,
+              verticalShape: "constant",
+            },
+            k === first,
+          ),
+        );
       }
     } else {
-      pieces.push(out);
+      pieces.push(ledIn(out, true));
     }
+    leadIn = segment.clearsTrack && (boundary[first] ?? 0) !== (table[first] ?? 0);
     previousEnd = endM;
   }
   return { segments: flown, pieces };
