@@ -157,6 +157,11 @@ pub const RIDGE_MEAN: f64 = 0.7692;
 /// The RMS of r − [`RIDGE_MEAN`] over space, pinned and recomputed by a test.
 pub const RIDGE_RMS: f64 = 0.1488;
 
+/// The RMS of the ridges' mask w over this planet, `√E[w²]`, measured over 10⁶ points and pinned
+/// (`the_ridge_mask_rms_is_pinned`): a ridged octave of RMS `σ_k` contributes `σ_k` times it, the
+/// mask and the octave being independent.
+pub const RIDGE_MASK_RMS: f64 = 0.6281;
+
 /// The largest |r − [`RIDGE_MEAN`]| of a ridge term r = 1 − √(n² + ε²), with |n| at most
 /// [`NOISE_BOUND`].
 #[must_use]
@@ -675,6 +680,44 @@ mod tests {
         println!("ridge mean {mean}, rms {rms}");
         assert!((mean - RIDGE_MEAN).abs() < 5e-4, "{mean} vs {RIDGE_MEAN}");
         assert!((rms - RIDGE_RMS).abs() < 5e-4, "{rms} vs {RIDGE_RMS}");
+    }
+
+    #[test]
+    #[ignore = "slow: measures the ridge mask's RMS over 10^6 points of the planet"]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "a count, a point, the mask, a noise value and a ridge term"
+    )]
+    fn the_ridge_mask_rms_is_pinned() {
+        let planet = TEST_PLANET.with_ridges(Ridges::On);
+        let table: Vec<Octave> = (0..=octaves::FINEST_OCTAVE)
+            .map(|k| octaves::octave(planet.seed, k))
+            .collect();
+        let mut cache = LatticeCache::new();
+        let mut rng = Lcg::new(0x6d61_736b);
+        let n = 1_000_000_u32;
+        let mut sum_sq = 0.0;
+        // And one ridged octave's whole term, w (r − r̄) ÷ r_rms, whose RMS is the mask's if the
+        // mask and the octave are independent, as their separate lattices make them.
+        let mut term_sq = 0.0;
+        for _ in 0..n {
+            let p = planet.figure().point(random_dir(&mut rng));
+            let (w, _) = ridge_mask(&table, p, &mut cache);
+            sum_sq += w * w;
+            let v = gradient_noise(p, &table[10], &mut cache).0;
+            let r = 1.0 - (v * v + RIDGE_EPSILON * RIDGE_EPSILON).sqrt();
+            let term = w * (r - RIDGE_MEAN) / RIDGE_RMS;
+            term_sq += term * term;
+        }
+        let count = f64::from(n);
+        let rms = (sum_sq / count).sqrt();
+        let term_rms = (term_sq / count).sqrt();
+        println!("ridge mask rms {rms}, ridged octave 10's term rms {term_rms}");
+        assert!(
+            (rms - RIDGE_MASK_RMS).abs() < 5e-4,
+            "{rms} vs {RIDGE_MASK_RMS}"
+        );
+        assert!((term_rms / RIDGE_MASK_RMS - 1.0).abs() < 0.02, "{term_rms}");
     }
 
     #[test]
