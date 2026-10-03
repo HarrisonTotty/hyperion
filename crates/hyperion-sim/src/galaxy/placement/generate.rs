@@ -78,7 +78,8 @@ pub fn generate_cell(galaxy: &Galaxy, key: CellKey, out: &mut Vec<SystemRecord>)
 /// not, or draws a word it would not, so no generated output depends on it.
 ///
 /// `keep` sees the mass of every candidate of the cell, thinned or not, in index order; the sky's
-/// census passes a mass floor. `out` is cleared first and reserved as [`generate_cell`] reserves it.
+/// census passes a mass floor. What it returns is part of a cell, so it must never be stored where
+/// a whole cell is expected, such as a [`CellCache`](super::CellCache). `out` is cleared first and reserved as [`generate_cell`] reserves it.
 ///
 /// # Panics
 ///

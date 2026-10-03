@@ -82,15 +82,29 @@ impl Sensor {
     /// [`ReadSensorError`] if no row is read or the rows do not span the sensor's band.
     pub fn from_green_2008(yml: &str) -> Result<Self, ReadSensorError> {
         let mut rows: Vec<(f64, f64)> = Vec::new();
-        for line in yml.lines() {
+        // The rows are the indented lines after `data: |`; the YAML's header precedes them.
+        let (before, block) = yml
+            .split_once("data: |")
+            .ok_or(ReadSensorError("Green 2008's file has no `data: |` block"))?;
+        // The block holds the lines indented deeper than its key, as YAML's literal block does.
+        let key_indent = before.len() - before.rfind('\n').map_or(0, |i| i + 1);
+        let indent = |l: &str| l.len() - l.trim_start().len();
+        let rows_text = block
+            .lines()
+            .skip(1)
+            .take_while(|l| l.trim().is_empty() || indent(l) > key_indent);
+        for line in rows_text.filter(|l| !l.trim().is_empty()) {
             let fields: Vec<f64> = line
                 .split_whitespace()
                 .map(str::parse)
                 .collect::<Result<_, _>>()
-                .unwrap_or_default();
-            if let [um, _n, k] = fields[..] {
-                rows.push((um * 1_000.0, k));
-            }
+                .map_err(|_| ReadSensorError("a row of Green 2008's data is not numbers"))?;
+            let [um, _n, k] = fields[..] else {
+                return Err(ReadSensorError(
+                    "a row of Green 2008's data is not λ, n and k",
+                ));
+            };
+            rows.push((um * 1_000.0, k));
         }
         if !rows.windows(2).all(|w| w[0].0 < w[1].0) {
             return Err(ReadSensorError("Green 2008's wavelengths do not rise"));
@@ -147,8 +161,10 @@ pub struct Extras {
 ///
 /// # Panics
 ///
-/// If plan 07's `extinction_ratio` refuses an effective wavelength, which lies within 360–1,100 nm
-/// and so within its range.
+/// If the spectrum has no flux in the V band or in one of the channels' positive lobes, whose
+/// effective wavelength is then not a number, which plan 07's `extinction_ratio` refuses: no
+/// stellar spectrum is dark over a whole optical band. An effective wavelength otherwise lies
+/// within 360–1,100 nm and so within the law's range.
 #[must_use]
 pub fn extras(observer: &Observer, sensor: &Sensor, spectrum: &Spectrum, bins: &[f64]) -> Extras {
     let mut electrons = 0.0;
@@ -204,7 +220,7 @@ impl fmt::Display for ReadSensorError {
 impl std::error::Error for ReadSensorError {}
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     #[test]
@@ -217,14 +233,31 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_sensor_follows_silicon() {
+    /// The default sensor from the committed dataset.
+    pub(in super::super) fn sensor() -> Sensor {
         let yml = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/data/green2008_si/Green-2008.yml"
         ))
         .unwrap();
-        let sensor = Sensor::from_green_2008(&yml).unwrap();
+        Sensor::from_green_2008(&yml).unwrap()
+    }
+
+    #[test]
+    fn a_malformed_silicon_table_is_refused() {
+        assert_eq!(
+            Sensor::from_green_2008("no data here"),
+            Err(ReadSensorError("Green 2008's file has no `data: |` block"))
+        );
+        assert_eq!(
+            Sensor::from_green_2008("DATA:\n  data: |\n    0.4 5.6 x\n  other: 1\n"),
+            Err(ReadSensorError("a row of Green 2008's data is not numbers"))
+        );
+    }
+
+    #[test]
+    fn the_sensor_follows_silicon() {
+        let sensor = sensor();
         let at = |nm: usize| sensor.qe()[nm - 360];
         // decision-camera-eta: peak 0.60, 0.45 at 800 nm, 0.13 at 950 nm.
         assert!((at(550) - 0.60).abs() < 0.005, "{}", at(550));

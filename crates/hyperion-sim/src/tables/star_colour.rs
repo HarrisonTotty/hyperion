@@ -18,14 +18,16 @@
 //!   45,000 K spans 1.001–1.100; η☉ 2.9557 (decision-camera-eta: 3.0 ± 0.1); Pickles (1998)
 //!   against the table at each type's temperature and gravity, Δ(u′, v′): A0V at 9700 K 0.0012
 //!   (under 0.005; passes), F5V at 6550 K 0.0012 (under 0.005; passes), G2V at 5770 K 0.0019
-//!   (under 0.005; passes), K0V at 5270 K 0.0032 (under 0.005; passes), G8III at 5012 K 0.0011
-//!   (under 0.005; passes), M2V at 3560 K 0.0057 (under 0.007; passes: an exception, it lies
-//!   0.006 from the table at its type's 3,560 K and matches a 3,260 K model), K0III at 4853 K
-//!   0.0050 (under 0.006; passes: an exception, it lies 0.005 from the table at its adopted 4,853
-//!   K and matches a 5,050 K model), O5V at 41540 K 0.0072 (under 0.008; passes: an exception, it
-//!   lies about 0.007 off the models' locus at every temperature, likely the residual reddening
-//!   of its source stars), M3III at 3631 K 0.0113 (under 0.012; passes: an exception, its colour
-//!   is a 4,240 K model's, not one near its adopted 3,631 K)
+//!   (under 0.005; passes), K0V at 5270 K 0.0032 (under 0.005; passes), K5V at 4440 K 0.0075
+//!   (under 0.008; passes: an exception, it lies 0.0075 from the table at its type's 4,440 K and
+//!   matches a 4,200 K model, near Pickles' own adopted 4,188 K), G8III at 5012 K 0.0011 (under
+//!   0.005; passes), M2V at 3560 K 0.0057 (under 0.007; passes: an exception, it lies 0.006 from
+//!   the table at its type's 3,560 K and matches a 3,260 K model), K0III at 4853 K 0.0050 (under
+//!   0.006; passes: an exception, it lies 0.005 from the table at its adopted 4,853 K and matches
+//!   a 5,050 K model), O5V at 41540 K 0.0072 (under 0.008; passes: an exception, it lies about
+//!   0.007 off the models' locus at every temperature, likely the residual reddening of its
+//!   source stars), M3III at 3631 K 0.0113 (under 0.012; passes: an exception, its colour is a
+//!   4,240 K model's, not one near its adopted 3,631 K)
 //!
 //! Each row integrates one model spectrum over 1 nm bins from 360 to 1,100 nm against the CIE 1931
 //! 2° colour-matching functions, the CIE 1924 V(λ) and the CIE 1951 V′(λ) (CIE datasets, CC BY-SA

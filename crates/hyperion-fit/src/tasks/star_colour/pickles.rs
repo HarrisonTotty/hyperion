@@ -27,14 +27,14 @@ pub struct PicklesType {
 /// The types compared, and their `T_eff` and log g.
 ///
 /// - Dwarfs: `T_eff` from Mamajek's table of 2022.04.16 (after Pecaut and Mamajek 2013, ApJS 208,
-///   9), log g from its masses and radii (A0 V 4.09, F5 V 4.23, G2 V 4.44, K0 V 4.56, M2 V 4.81).
+///   9), log g from its masses and radii (A0 V 4.09, F5 V 4.23, G2 V 4.44, K0 V 4.56, K5 V 4.62, M2 V 4.81).
 /// - O5 V: Martins, Schaerer and Hillier (2005, A&A 436, 1049), Table 1, the theoretical scale.
 /// - Giants: Pickles' own adopted `T_eff` (the library's `synphot.dat`, `LogTe`), and gravities
 ///   typical of the class (G8 III and K0 III 2.6–2.7, M3 III 1.1, about 1.3 M☉ at 70 R☉), which
 ///   are assumed, not sourced; the colours barely depend on them.
 ///
-/// The limit is the plan's 0.005 but for four measured exceptions (ruled 2026-10-02, R06's Risks).
-pub const PICKLES_TYPES: [PicklesType; 9] = [
+/// The limit is the plan's 0.005 but for five measured exceptions (ruled 2026-10-02, R06's Risks).
+pub const PICKLES_TYPES: [PicklesType; 10] = [
     PicklesType {
         file: "uka0v.dat",
         teff: 9_700.0,
@@ -66,6 +66,16 @@ pub const PICKLES_TYPES: [PicklesType; 9] = [
         giant: false,
         limit: 0.005,
         exception: None,
+    },
+    PicklesType {
+        file: "ukk5v.dat",
+        teff: 4_440.0,
+        log_g: 4.62,
+        giant: false,
+        limit: 0.008,
+        exception: Some(
+            "it lies 0.0075 from the table at its type's 4,440 K and matches a 4,200 K model, near Pickles' own adopted 4,188 K",
+        ),
     },
     PicklesType {
         file: "ukg8iii.dat",
@@ -125,14 +135,13 @@ pub fn parse_pickles(text: &str) -> Result<Spectrum, ReadSpectrumError> {
     let mut wavelength_nm = Vec::new();
     let mut flux = Vec::new();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let w: f64 = line
-            .get(..7)
-            .and_then(|f| f.trim().parse().ok())
-            .ok_or_else(|| ReadSpectrumError::new("a Pickles wavelength is malformed"))?;
+        let w: f64 = line.get(..7).and_then(|f| f.trim().parse().ok()).ok_or(
+            ReadSpectrumError::Malformed("a Pickles wavelength is malformed"),
+        )?;
         let f: f64 = line
             .get(7..17)
             .and_then(|f| f.trim().parse().ok())
-            .ok_or_else(|| ReadSpectrumError::new("a Pickles flux is malformed"))?;
+            .ok_or(ReadSpectrumError::Malformed("a Pickles flux is malformed"))?;
         wavelength_nm.push(w / 10.0);
         flux.push(f.max(0.0));
     }

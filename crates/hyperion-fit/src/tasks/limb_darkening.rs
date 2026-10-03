@@ -121,11 +121,13 @@ pub fn white_dwarf_teff_nodes() -> Vec<(u32, Catalogue)> {
 pub type Held = BTreeMap<(u32, i32), Coefficients>;
 
 /// A field of fixed columns, 1-based inclusive bytes as the catalogues' `ReadMe`s give them.
+#[must_use]
 fn field(line: &str, from: usize, to: usize) -> Option<f64> {
     line.get(from - 1..to)?.trim().parse().ok()
 }
 
 /// (`T_eff`, log g) as the map's key.
+#[must_use]
 fn key(teff: f64, log_g: f64) -> Option<(u32, i32)> {
     let t = u32::try_from(format!("{teff:.0}").parse::<i64>().ok()?).ok()?;
     let g = i32::try_from(format!("{:.0}", log_g * 100.0).parse::<i64>().ok()?).ok()?;
@@ -137,11 +139,14 @@ fn key(teff: f64, log_g: f64) -> Option<(u32, i32)> {
 ///
 /// # Errors
 ///
-/// A message naming the malformed line.
-pub fn parse_atlas(text: &str) -> Result<Held, String> {
+/// [`ParseLimbCatalogueError::MalformedLine`] naming the malformed line.
+pub fn parse_atlas(text: &str) -> Result<Held, ParseLimbCatalogueError> {
     let mut held = Held::new();
     for (n, line) in text.lines().enumerate() {
-        let bad = || format!("table3.dat line {} is malformed", n + 1);
+        let bad = || ParseLimbCatalogueError::MalformedLine {
+            file: "table3.dat",
+            line: n + 1,
+        };
         let (Some(log_g), Some(teff), Some(z), Some(vel)) = (
             field(line, 1, 5),
             field(line, 7, 12),
@@ -180,11 +185,14 @@ pub fn parse_atlas(text: &str) -> Result<Held, String> {
 ///
 /// # Errors
 ///
-/// A message naming the malformed line.
-pub fn parse_phoenix(text: &str) -> Result<Held, String> {
+/// [`ParseLimbCatalogueError::MalformedLine`] naming the malformed line.
+pub fn parse_phoenix(text: &str) -> Result<Held, ParseLimbCatalogueError> {
     let mut held = Held::new();
     for (n, line) in text.lines().enumerate() {
-        let bad = || format!("table9.dat line {} is malformed", n + 1);
+        let bad = || ParseLimbCatalogueError::MalformedLine {
+            file: "table9.dat",
+            line: n + 1,
+        };
         let (Some(log_g), Some(teff)) = (field(line, 1, 5), field(line, 7, 12)) else {
             return Err(bad());
         };
@@ -218,11 +226,15 @@ type BandPairs = [Option<(f64, f64)>; 3];
 ///
 /// # Errors
 ///
-/// A message naming the malformed line, or a model missing a band.
-pub fn parse_white_dwarfs(text: &str, model: &str) -> Result<Held, String> {
+/// [`ParseLimbCatalogueError::MalformedLine`] naming the malformed line, or
+/// [`ParseLimbCatalogueError::MissingBand`] for a model missing one of B, V and R.
+pub fn parse_white_dwarfs(text: &str, model: &str) -> Result<Held, ParseLimbCatalogueError> {
     let mut bands: BTreeMap<(u32, i32), BandPairs> = BTreeMap::new();
     for (n, line) in text.lines().enumerate() {
-        let bad = || format!("tablegh.dat line {} is malformed", n + 1);
+        let bad = || ParseLimbCatalogueError::MalformedLine {
+            file: "tablegh.dat",
+            line: n + 1,
+        };
         if line.get(..7).map(str::trim) != Some(model) {
             continue;
         }
@@ -246,7 +258,11 @@ pub fn parse_white_dwarfs(text: &str, model: &str) -> Result<Held, String> {
         .into_iter()
         .map(|(k, b)| match b {
             [Some(b), Some(v), Some(r)] => Ok((k, [b.0, b.1, v.0, v.1, r.0, r.1])),
-            _ => Err(format!("{model} at {k:?} lacks one of B, V and R")),
+            _ => Err(ParseLimbCatalogueError::MissingBand {
+                model: model.to_owned(),
+                teff_k: k.0,
+                log_g_centi: k.1,
+            }),
         })
         .collect()
 }
@@ -260,7 +276,7 @@ pub struct LimbGrid {
     pub log_g: Vec<f64>,
     /// c and α in B, V and R at each node.
     pub rows: Vec<Coefficients>,
-    /// How many nodes took the nearest gravity held, and how many were interpolated.
+    /// How many nodes took the nearest gravity held.
     pub clamped: usize,
     /// How many nodes were interpolated between two gravities held.
     pub interpolated: usize,
@@ -270,12 +286,12 @@ pub struct LimbGrid {
 ///
 /// # Errors
 ///
-/// A message if a catalogue holds nothing at a node's temperature.
+/// [`ParseLimbCatalogueError::NoModelAt`] if a catalogue holds nothing at a node's temperature.
 pub fn build(
     teff: Vec<(u32, Catalogue)>,
     log_g: &[f64],
     held: &BTreeMap<Catalogue, Held>,
-) -> Result<LimbGrid, String> {
+) -> Result<LimbGrid, ParseLimbCatalogueError> {
     let mut rows = Vec::new();
     let (mut clamped, mut interpolated) = (0, 0);
     for &(t, catalogue) in &teff {
@@ -286,7 +302,10 @@ pub fn build(
             .map(|(&(_, g), &c)| (g, c))
             .collect();
         let (Some(&(least, low)), Some(&(most, high))) = (at.first(), at.last()) else {
-            return Err(format!("{} holds nothing at {t} K", catalogue.label()));
+            return Err(ParseLimbCatalogueError::NoModelAt {
+                catalogue,
+                teff_k: t,
+            });
         };
         for &g in log_g {
             let c = centi(g);
@@ -318,6 +337,7 @@ pub fn build(
 }
 
 /// A gravity node in hundredths.
+#[must_use]
 fn centi(log_g: f64) -> i32 {
     let mut c = 0;
     while f64::from(c) < log_g * 100.0 - 0.5 {
@@ -341,9 +361,9 @@ pub struct LimbTable {
 ///
 /// [`RunTaskError`] if a catalogue cannot be read or is malformed.
 pub fn fit(manifest: &Manifest) -> Result<LimbTable, RunTaskError> {
-    let input = |why: String| RunTaskError::Input {
+    let input = |e: ParseLimbCatalogueError| RunTaskError::Input {
         task: NAME,
-        source: why.into(),
+        source: Box::new(e),
     };
     let text = |dataset: &str, file: &str| -> Result<String, RunTaskError> {
         let set = manifest.load_dataset(dataset)?;
@@ -351,7 +371,10 @@ pub fn fit(manifest: &Manifest) -> Result<LimbTable, RunTaskError> {
             .iter()
             .find(|(n, _)| n == file)
             .and_then(|(_, b)| String::from_utf8(b.clone()).ok())
-            .ok_or_else(|| input(format!("`{file}` of `{dataset}` is missing or not text")))
+            .ok_or_else(|| RunTaskError::Input {
+                task: NAME,
+                source: format!("`{file}` of `{dataset}` is missing or not text").into(),
+            })
     };
     let mut held = BTreeMap::new();
     held.insert(
@@ -405,6 +428,7 @@ pub fn solar_v(grid: &LimbGrid) -> (f64, f64) {
 }
 
 /// The interval of rising `nodes` holding `x`, and the clamped fraction along it.
+#[must_use]
 fn bracket(nodes: &[f64], x: f64) -> (usize, f64) {
     let last = nodes.len() - 2;
     let i = nodes
@@ -420,6 +444,7 @@ fn bracket(nodes: &[f64], x: f64) -> (usize, f64) {
 /// A grid's rows as a `static` array of `LimbRow`, one a line.
 fn rows_source(prefix: &str, what: &str, grid: &LimbGrid) -> String {
     let mut out = String::new();
+    // Writing to a String cannot fail.
     let _ = writeln!(
         out,
         "/// The {what} grid's rows, temperature-major: row `i × {} + j` is temperature node `i`,\n\
@@ -428,6 +453,7 @@ fn rows_source(prefix: &str, what: &str, grid: &LimbGrid) -> String {
         grid.rows.len()
     );
     for r in &grid.rows {
+        // Writing to a String cannot fail.
         let _ = writeln!(
             out,
             "    LimbRow {{ c_b: {}, alpha_b: {}, c_v: {}, alpha_v: {}, c_r: {}, alpha_r: {} }},",
@@ -506,6 +532,37 @@ provenance is `crates/hyperion-fit/data/<dataset>/PROVENANCE.toml`.",
         notes: notes.lines().map(str::to_owned).collect(),
         items,
     }
+}
+
+/// A limb-darkening catalogue could not be read or does not cover a grid.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseLimbCatalogueError {
+    /// A line is not of the catalogue's fixed columns.
+    #[error("{file} line {line} is malformed")]
+    MalformedLine {
+        /// The catalogue's file.
+        file: &'static str,
+        /// The line, from 1.
+        line: usize,
+    },
+    /// A white-dwarf model lacks one of B, V and R.
+    #[error("{model} at {teff_k} K, log g {log_g_centi} hundredths, lacks one of B, V and R")]
+    MissingBand {
+        /// The model set, `DA` or `DA-NLTE`.
+        model: String,
+        /// Its effective temperature, K.
+        teff_k: u32,
+        /// Its log g in hundredths.
+        log_g_centi: i32,
+    },
+    /// A catalogue holds no model at a grid node's temperature.
+    #[error("{} holds nothing at {teff_k} K", catalogue.label())]
+    NoModelAt {
+        /// The catalogue.
+        catalogue: Catalogue,
+        /// The node's temperature, K.
+        teff_k: u32,
+    },
 }
 
 /// The task: rendering plan R06's R06.T4.a, fast, revision [`VERSION`].
@@ -607,6 +664,63 @@ mod tests {
         .unwrap();
         assert_eq!(grid.rows, [[0.0; 6], [0.5; 6], [1.0; 6]]);
         assert_eq!((grid.clamped, grid.interpolated), (2, 1));
+    }
+
+    #[test]
+    fn the_phoenix_and_white_dwarf_columns_are_read() {
+        let mut line = " 4.50  3000.  0.0  2.0".to_owned();
+        line.push_str(&" ".repeat(400));
+        for (at, v) in [
+            (89, "  0.80000000"),
+            (245, "  0.60000000"),
+            (102, "  0.78420000"),
+            (258, "  0.69320000"),
+            (115, "  0.70000000"),
+            (271, "  0.50000000"),
+        ] {
+            line.replace_range(at - 1..at - 1 + v.len(), v);
+        }
+        let row = parse_phoenix(&line).unwrap()[&(3_000, 450)];
+        for (got, want) in row.iter().zip([0.8, 0.6, 0.7842, 0.6932, 0.7, 0.5]) {
+            assert!((got - want).abs() < 1e-12, "{row:?}");
+        }
+        let wd = |band: &str, g: &str| {
+            format!(
+                "DA       8.00  10000.0   0.0000  {g}  0.5000  0.0010 0.100000E-05  0.0000 {band:<3}"
+            )
+        };
+        let text = [wd("B", "0.9000"), wd("V", "0.8000"), wd("R", "0.7000")].join("\n");
+        let row = parse_white_dwarfs(&text, "DA").unwrap()[&(10_000, 800)];
+        for (got, want) in row.iter().zip([0.9, 0.5, 0.8, 0.5, 0.7, 0.5]) {
+            assert!((got - want).abs() < 1e-12, "{row:?}");
+        }
+        assert_eq!(
+            parse_white_dwarfs(&wd("B", "0.9000"), "DA"),
+            Err(ParseLimbCatalogueError::MissingBand {
+                model: "DA".to_owned(),
+                teff_k: 10_000,
+                log_g_centi: 800
+            })
+        );
+        assert_eq!(
+            parse_atlas("garbage"),
+            Err(ParseLimbCatalogueError::MalformedLine {
+                file: "table3.dat",
+                line: 1
+            })
+        );
+    }
+
+    #[test]
+    fn a_catalogue_without_a_nodes_temperature_is_refused() {
+        let held = BTreeMap::from([(Catalogue::Atlas, Held::new())]);
+        assert_eq!(
+            build(vec![(5_000, Catalogue::Atlas)], &[4.5], &held),
+            Err(ParseLimbCatalogueError::NoModelAt {
+                catalogue: Catalogue::Atlas,
+                teff_k: 5_000
+            })
+        );
     }
 
     #[test]

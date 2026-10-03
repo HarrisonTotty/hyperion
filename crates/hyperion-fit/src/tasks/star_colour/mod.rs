@@ -56,7 +56,7 @@ use crate::parallel::map_reduce_chunks;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 
 pub use columns::{BAKE_WAVELENGTH_COUNT, Extras, Sensor, bake_wavelengths_nm};
-pub use photometry::{ColourRow, Observer};
+pub use photometry::{ColourRow, Observer, VBandSource};
 pub use spectrum::{ReadSpectrumError, Spectrum};
 
 /// The task's revision, written into the table's header; bumped when anything below moves the
@@ -161,6 +161,7 @@ impl Source {
 }
 
 /// `"4.50"` as 450.
+#[must_use]
 fn centi(text: &str) -> Option<i32> {
     let (whole, frac) = text.split_once('.')?;
     let frac = format!("{frac:0<2}");
@@ -168,6 +169,7 @@ fn centi(text: &str) -> Option<i32> {
 }
 
 /// `0.5` as 50, for a gravity node.
+#[must_use]
 fn centi_of(log_g: f64) -> i32 {
     let mut c = 0;
     while f64::from(c) < log_g * 100.0 - 0.5 {
@@ -361,7 +363,7 @@ fn read_models(
             .iter()
             .find(|f| f.name == PHOENIX_WAVE)
             .ok_or_else(|| {
-                input(ReadSpectrumError::new(
+                input(ReadSpectrumError::Malformed(
                     "the PHOENIX wavelength file is not listed",
                 ))
             })?;
@@ -389,14 +391,15 @@ fn read_models(
         |range| -> Result<Vec<ModelRow>, RunTaskError> {
             let mut out = Vec::new();
             for i in range {
-                let (name, sha, model) = &files[usize::try_from(i).expect("an index fits")];
+                let (name, sha, model) =
+                    &files[usize::try_from(i).expect("i is below files.len(), a usize")];
                 let bytes = read_file(name, sha)?;
                 let spectrum = if let Some((lo, hi, nm)) = &phoenix_wave {
                     let flux = spectrum::read_fits_vector(&bytes).map_err(input)?;
                     let flux = flux
                         .get(*lo..*hi)
                         .ok_or_else(|| {
-                            input(ReadSpectrumError::new(
+                            input(ReadSpectrumError::Malformed(
                                 "a PHOENIX spectrum is shorter than its wavelengths",
                             ))
                         })?
@@ -404,7 +407,7 @@ fn read_models(
                     Spectrum::new(nm.clone(), flux).map_err(input)?
                 } else {
                     let text = std::str::from_utf8(&bytes).map_err(|_| {
-                        input(ReadSpectrumError::new("a spectrum file is not text"))
+                        input(ReadSpectrumError::Malformed("a spectrum file is not text"))
                     })?;
                     spectrum::parse_svo_ascii(text).map_err(input)?
                 };
@@ -578,6 +581,7 @@ fn grid_items(prefix: &str, what: &str, grid: &Grid, eta_sun: f64) -> Vec<TableI
 
 /// A value as the shortest decimal that reads back to it, with no digit separators: the table's
 /// arrays are compact for the repository's 500 KB file limit and allow `unreadable_literal`.
+#[must_use]
 fn plain(value: f64) -> String {
     format!("{value:?}")
 }
@@ -589,6 +593,7 @@ const ROW_ATTRIBUTES: &str = "#[rustfmt::skip]\n#[allow(\n    clippy::unreadable
 /// A grid's bake spectra as a `static` array, one row of fifteen a line, to seven significant digits, comma-separated with no spaces for the file-size limit.
 fn bake_source(prefix: &str, what: &str, grid: &Grid) -> String {
     let mut out = String::new();
+    // Writing to a String cannot fail.
     let _ = writeln!(
         out,
         "/// The {what} grid's bake spectra, in the order of its rows: each row's mean spectral\n\
@@ -610,6 +615,7 @@ fn bake_source(prefix: &str, what: &str, grid: &Grid) -> String {
                 )
             })
             .collect();
+        // Writing to a String cannot fail.
         let _ = writeln!(out, "    [{}],", values.join(","));
     }
     out.push_str("];\n");
@@ -621,6 +627,7 @@ fn bake_source(prefix: &str, what: &str, grid: &Grid) -> String {
 /// green and blue `A_c ÷ A_V`.
 fn rows_source(prefix: &str, what: &str, grid: &Grid, eta_sun: f64) -> String {
     let mut out = String::new();
+    // Writing to a String cannot fail.
     let _ = writeln!(
         out,
         "/// The {what} grid's rows, temperature-major: row `i × {} + j` is temperature node `i`,\n\
@@ -647,6 +654,7 @@ fn rows_source(prefix: &str, what: &str, grid: &Grid, eta_sun: f64) -> String {
             rounded(r.extras.extinction[2]),
         ]
         .map(plain);
+        // Writing to a String cannot fail.
         let _ = writeln!(out, "    [{}],", values.join(","));
     }
     out.push_str("];\n");
@@ -659,6 +667,7 @@ fn describe_sources(grid: &Grid) -> String {
     let mut start = 0;
     for i in 1..=grid.teff.len() {
         if i == grid.teff.len() || grid.teff[i].1 != grid.teff[start].1 {
+            // Writing to a String cannot fail.
             let _ = write!(
                 out,
                 "{}{} {}–{} K",
@@ -842,7 +851,17 @@ pub fn read_observer(manifest: &Manifest, v_band: VBand) -> Result<Observer, Run
 /// [`RunTaskError`] if a dataset cannot be read or a table is malformed.
 pub fn read_observer_from_dir(data_dir: &Path) -> Result<Observer, RunTaskError> {
     let cie = load_dataset(data_dir, "cie_cmf", None)?;
-    let bessell = load_dataset(data_dir, "bessell_murphy_2012", None).ok();
+    // Only a V band that is not fetched falls back to the stand-in; a file that fails its hash or
+    // a malformed provenance is an error.
+    let bessell = match load_dataset(data_dir, "bessell_murphy_2012", None) {
+        Ok(set) => Some(set),
+        Err(LoadDatasetError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            None
+        }
+        Err(e) => return Err(e.into()),
+    };
     observer_of(&cie, bessell.as_ref())
 }
 
@@ -864,7 +883,9 @@ fn observer_of(cie: &Dataset, bessell: Option<&Dataset>) -> Result<Observer, Run
         &file(cie, "CIE_sle_photopic.csv")?,
         &file(cie, "CIE_sle_scotopic.csv")?,
         &file(cie, "CIE_std_illum_D65.csv")?,
-        table1.as_deref(),
+        table1
+            .as_deref()
+            .map_or(VBandSource::CiePhotopic, VBandSource::BessellMurphy),
     )
     .map_err(|e| RunTaskError::Input {
         task: NAME,
@@ -1025,6 +1046,7 @@ fn pickles_acceptance(
     );
     for (ty, d) in pickles::PICKLES_TYPES.iter().zip(&deltas) {
         let verdict = if *d < ty.limit { "passes" } else { "FAILS" };
+        // Writing to a String cannot fail.
         let _ = write!(
             out,
             " {} at {} K {d:.4} (under {}; {verdict}{})",
@@ -1084,6 +1106,41 @@ mod tests {
             Some((2_300, 50))
         );
         assert_eq!(Source::Phoenix.model_of_file(PHOENIX_WAVE), None);
+    }
+
+    #[test]
+    fn a_grid_fills_an_edge_from_the_nearest_gravity_and_refuses_a_gap() {
+        let observer = photometry::tests::observer();
+        let sensor = columns::tests::sensor();
+        let row = |t: f64| table_row(&observer, &sensor, &Spectrum::blackbody(t));
+        let held = BTreeMap::from([(
+            Source::Atlas9,
+            BTreeMap::from([((5_000, 200), row(4_000.0)), ((5_000, 400), row(6_000.0))]),
+        )]);
+        let build = |log_g: &[f64]| {
+            build_grid(
+                vec![(5_000, Source::Atlas9)],
+                log_g,
+                &held,
+                &observer,
+                &sensor,
+                Spectra::Models,
+            )
+        };
+        let grid = build(&[1.0, 2.0, 4.0, 5.0]).unwrap();
+        assert_eq!(grid.rows[0], row(4_000.0));
+        assert_eq!(grid.rows[3], row(6_000.0));
+        assert_eq!(grid.clamped, [(5_000, 1.0, 2.0), (5_000, 5.0, 4.0)]);
+        assert!(matches!(build(&[3.0]), Err(RunTaskError::Input { .. })));
+        let none = build_grid(
+            vec![(9_000, Source::Atlas9)],
+            &[4.0],
+            &held,
+            &observer,
+            &sensor,
+            Spectra::Models,
+        );
+        assert!(matches!(none, Err(RunTaskError::Input { .. })));
     }
 
     #[test]

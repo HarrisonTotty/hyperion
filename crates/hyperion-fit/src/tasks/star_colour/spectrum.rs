@@ -45,27 +45,23 @@ impl Spectrum {
     /// strictly, a value is not finite, a flux is negative, or the samples do not cover every bin.
     pub fn new(wavelength_nm: Vec<f64>, flux: Vec<f64>) -> Result<Self, ReadSpectrumError> {
         if wavelength_nm.len() != flux.len() {
-            return Err(ReadSpectrumError::new(
-                "the wavelengths and fluxes differ in number",
-            ));
+            return Err(ReadSpectrumError::LengthMismatch);
         }
         if !wavelength_nm.iter().chain(&flux).all(|v| v.is_finite()) {
-            return Err(ReadSpectrumError::new("a value is not finite"));
+            return Err(ReadSpectrumError::NotFinite);
         }
         if flux.iter().any(|&f| f < 0.0) {
-            return Err(ReadSpectrumError::new("a flux is negative"));
+            return Err(ReadSpectrumError::NegativeFlux);
         }
         if !wavelength_nm.windows(2).all(|w| w[0] < w[1]) {
-            return Err(ReadSpectrumError::new("the wavelengths do not increase"));
+            return Err(ReadSpectrumError::NotIncreasing);
         }
         let first = f64::from(FIRST_BIN_NM) - 0.5;
         let last = f64::from(LAST_BIN_NM) + 0.5;
         match (wavelength_nm.first(), wavelength_nm.last()) {
             (Some(&lo), Some(&hi)) if lo <= first && hi >= last => {}
             _ => {
-                return Err(ReadSpectrumError::new(
-                    "the samples do not cover 359.5–1,100.5 nm",
-                ));
+                return Err(ReadSpectrumError::DoesNotCover);
             }
         }
         Ok(Self {
@@ -153,14 +149,16 @@ pub fn parse_svo_ascii(text: &str) -> Result<Spectrum, ReadSpectrumError> {
         }
         let mut fields = line.split_whitespace();
         let (Some(w), Some(f), None) = (fields.next(), fields.next(), fields.next()) else {
-            return Err(ReadSpectrumError::new("a data line is not two numbers"));
+            return Err(ReadSpectrumError::Malformed(
+                "a data line is not two numbers",
+            ));
         };
         let w: f64 = w
             .parse()
-            .map_err(|_| ReadSpectrumError::new("a wavelength is not a number"))?;
+            .map_err(|_| ReadSpectrumError::Malformed("a wavelength is not a number"))?;
         let f: f64 = f
             .parse()
-            .map_err(|_| ReadSpectrumError::new("a flux is not a number"))?;
+            .map_err(|_| ReadSpectrumError::Malformed("a flux is not a number"))?;
         wavelength_nm.push(w / 10.0);
         flux.push(f);
     }
@@ -188,7 +186,7 @@ pub fn read_fits_vector(bytes: &[u8]) -> Result<Vec<f64>, ReadSpectrumError> {
     let mut end = None;
     for (i, card) in bytes.chunks(CARD).enumerate() {
         let card = std::str::from_utf8(card)
-            .map_err(|_| ReadSpectrumError::new("a FITS header card is not text"))?;
+            .map_err(|_| ReadSpectrumError::Malformed("a FITS header card is not text"))?;
         let key = card.get(..8).unwrap_or(card).trim_end();
         if key == "END" {
             end = Some((i + 1) * CARD);
@@ -198,7 +196,9 @@ pub fn read_fits_vector(bytes: &[u8]) -> Result<Vec<f64>, ReadSpectrumError> {
             card.get(10..)
                 .and_then(|v| v.split('/').next())
                 .and_then(|v| v.trim().parse().ok())
-                .ok_or_else(|| ReadSpectrumError::new("a FITS integer keyword is malformed"))
+                .ok_or(ReadSpectrumError::Malformed(
+                    "a FITS integer keyword is malformed",
+                ))
         };
         match key {
             "BITPIX" => bitpix = Some(value()?),
@@ -207,28 +207,32 @@ pub fn read_fits_vector(bytes: &[u8]) -> Result<Vec<f64>, ReadSpectrumError> {
             _ => {}
         }
     }
-    let end = end.ok_or_else(|| ReadSpectrumError::new("the FITS header has no END card"))?;
+    let end = end.ok_or(ReadSpectrumError::Malformed(
+        "the FITS header has no END card",
+    ))?;
     if naxis != Some(1) {
-        return Err(ReadSpectrumError::new(
+        return Err(ReadSpectrumError::Malformed(
             "the FITS array is not one-dimensional",
         ));
     }
     let count = naxis1
         .and_then(|n| usize::try_from(n).ok())
-        .ok_or_else(|| ReadSpectrumError::new("the FITS array has no length"))?;
+        .ok_or(ReadSpectrumError::Malformed("the FITS array has no length"))?;
     let data = end.div_ceil(BLOCK) * BLOCK;
     let width = match bitpix {
         Some(-32) => 4,
         Some(-64) => 8,
         _ => {
-            return Err(ReadSpectrumError::new(
+            return Err(ReadSpectrumError::Malformed(
                 "the FITS array is not of IEEE floats",
             ));
         }
     };
     let body = bytes
         .get(data..data + count * width)
-        .ok_or_else(|| ReadSpectrumError::new("the FITS file is shorter than its array"))?;
+        .ok_or(ReadSpectrumError::Malformed(
+            "the FITS file is shorter than its array",
+        ))?;
     Ok(body
         .chunks_exact(width)
         .map(|chunk| match chunk.len() {
@@ -248,22 +252,32 @@ pub fn read_fits_vector(bytes: &[u8]) -> Result<Vec<f64>, ReadSpectrumError> {
 }
 
 /// A spectrum could not be read.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReadSpectrumError {
-    why: &'static str,
-}
-
-impl ReadSpectrumError {
-    /// An error saying `why`.
-    #[must_use]
-    pub const fn new(why: &'static str) -> Self {
-        Self { why }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ReadSpectrumError {
+    /// The wavelengths and fluxes differ in number.
+    LengthMismatch,
+    /// A wavelength or flux is not finite.
+    NotFinite,
+    /// A flux is negative.
+    NegativeFlux,
+    /// The wavelengths do not increase strictly.
+    NotIncreasing,
+    /// The samples do not cover the bins, 359.5–1,100.5 nm.
+    DoesNotCover,
+    /// The file is not of its format; the text says how.
+    Malformed(&'static str),
 }
 
 impl fmt::Display for ReadSpectrumError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.why)
+        match self {
+            Self::LengthMismatch => f.write_str("the wavelengths and fluxes differ in number"),
+            Self::NotFinite => f.write_str("a value is not finite"),
+            Self::NegativeFlux => f.write_str("a flux is negative"),
+            Self::NotIncreasing => f.write_str("the wavelengths do not increase"),
+            Self::DoesNotCover => f.write_str("the samples do not cover 359.5–1,100.5 nm"),
+            Self::Malformed(why) => f.write_str(why),
+        }
     }
 }
 
@@ -295,10 +309,26 @@ mod tests {
 
     #[test]
     fn a_short_or_disordered_spectrum_is_refused() {
-        assert!(Spectrum::new(vec![400.0, 1_200.0], vec![1.0, 1.0]).is_err());
-        assert!(Spectrum::new(vec![300.0, 1_200.0, 1_100.0], vec![1.0, 1.0, 1.0]).is_err());
-        assert!(Spectrum::new(vec![300.0, 1_200.0], vec![1.0, -1.0]).is_err());
-        assert!(Spectrum::new(vec![300.0, 1_200.0], vec![1.0]).is_err());
+        assert_eq!(
+            Spectrum::new(vec![400.0, 1_200.0], vec![1.0, 1.0]),
+            Err(ReadSpectrumError::DoesNotCover)
+        );
+        assert_eq!(
+            Spectrum::new(vec![300.0, 1_200.0, 1_100.0], vec![1.0, 1.0, 1.0]),
+            Err(ReadSpectrumError::NotIncreasing)
+        );
+        assert_eq!(
+            Spectrum::new(vec![300.0, 1_200.0], vec![1.0, -1.0]),
+            Err(ReadSpectrumError::NegativeFlux)
+        );
+        assert_eq!(
+            Spectrum::new(vec![300.0, 1_200.0], vec![1.0]),
+            Err(ReadSpectrumError::LengthMismatch)
+        );
+        assert_eq!(
+            Spectrum::new(vec![300.0, 1_200.0], vec![1.0, f64::NAN]),
+            Err(ReadSpectrumError::NotFinite)
+        );
     }
 
     #[test]
@@ -306,7 +336,12 @@ mod tests {
         let text = "# comment\n 3000.0  1.0e5 \n 6000 2.0e5\n12000 3.0e5\n";
         let s = parse_svo_ascii(text).unwrap();
         assert_eq!(s.wavelength_nm, [300.0, 600.0, 1_200.0]);
-        assert!(parse_svo_ascii("3000 1 2\n").is_err());
+        assert_eq!(
+            parse_svo_ascii("3000 1 2\n"),
+            Err(ReadSpectrumError::Malformed(
+                "a data line is not two numbers"
+            ))
+        );
     }
 
     #[test]
@@ -338,6 +373,11 @@ mod tests {
         bytes.extend_from_slice(&[0x3f, 0xc0, 0, 0, 0xc0, 0, 0, 0, 0x40, 0x50, 0, 0]);
         assert_eq!(read_fits_vector(&bytes).unwrap(), [1.5, -2.0, 3.25]);
         bytes.truncate(2_884);
-        assert!(read_fits_vector(&bytes).is_err());
+        assert_eq!(
+            read_fits_vector(&bytes),
+            Err(ReadSpectrumError::Malformed(
+                "the FITS file is shorter than its array"
+            ))
+        );
     }
 }

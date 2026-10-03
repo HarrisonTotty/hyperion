@@ -84,7 +84,7 @@ pub enum AtmosphereGrid {
 /// A star's colour as the sky draws it (Design note 6).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct StarColour {
-    chroma: [f32; 2],
+    red_green: [f64; 2],
     lux_per_v0: f64,
     sp_ratio: f64,
     camera_band_mag: f64,
@@ -93,11 +93,22 @@ pub struct StarColour {
 }
 
 impl StarColour {
-    /// The linear Rec. 709 red and green of the star's light at unit luminance; blue is
-    /// [`blue`](Self::blue).
+    /// The linear Rec. 709 red and green of the star's light at unit luminance, as the wire
+    /// carries them; blue is [`blue`](Self::blue). [`red_green`](Self::red_green) holds them
+    /// unrounded.
     #[must_use]
-    pub const fn chroma(&self) -> [f32; 2] {
-        self.chroma
+    pub fn chroma(&self) -> [f32; 2] {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the chroma is a display value of order one, and f32 is its declared type"
+        )]
+        self.red_green.map(|c| c as f32)
+    }
+
+    /// The linear Rec. 709 red and green at unit luminance, unrounded.
+    #[must_use]
+    pub const fn red_green(&self) -> [f64; 2] {
+        self.red_green
     }
 
     /// The linear Rec. 709 blue at unit luminance, from the red, the green and the Rec. 709
@@ -105,7 +116,7 @@ impl StarColour {
     #[must_use]
     pub fn blue(&self) -> f64 {
         let [yr, yg, yb] = LUMINANCE_RGB;
-        (1.0 - yr * f64::from(self.chroma[0]) - yg * f64::from(self.chroma[1])) / yb
+        (1.0 - yr * self.red_green[0] - yg * self.red_green[1]) / yb
     }
 
     /// The photopic illuminance of a star of this colour at V = 0, over 2.54 µlx: about one,
@@ -190,11 +201,7 @@ pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour
         let high = at(ti + 1, gi)[k] * (1.0 - gf) + at(ti + 1, gi + 1)[k] * gf;
         low * (1.0 - tf) + high * tf
     };
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "the chroma is a display value of order one, and f32 is its declared type"
-    )]
-    let chroma = [mix(column::R) as f32, mix(column::G) as f32];
+    let red_green = [mix(column::R), mix(column::G)];
     let bake_at = |a: usize, b: usize| bakes[a * width + b];
     let bake_spectrum = std::array::from_fn(|k| {
         let low = bake_at(ti, gi)[k] * (1.0 - gf) + bake_at(ti, gi + 1)[k] * gf;
@@ -202,7 +209,7 @@ pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour
         low * (1.0 - tf) + high * tf
     });
     StarColour {
-        chroma,
+        red_green,
         lux_per_v0: mix(column::LUX_PER_V0),
         sp_ratio: mix(column::SP_RATIO),
         camera_band_mag: mix(column::CAMERA_BAND_MAG),
@@ -213,6 +220,7 @@ pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour
 
 /// The interval of rising `nodes` that holds `x` and the fraction along it, clamped to the first
 /// or last interval's end; a NaN takes the first node.
+#[must_use]
 fn bracket(nodes: &[f64], x: f64) -> (usize, f64) {
     let last = nodes.len() - 2;
     let i = nodes
@@ -372,8 +380,8 @@ mod tests {
         }
     }
 
-    /// Every row's bake spectrum holds 1 lx over the fifteen bins, ȳ averaged over each bin, to
-    /// the table's rounding; the bins' mean V(λ) are the CIE 1924 function's (the fit pins them).
+    /// `BAKE_WAVELENGTHS_NM` is the cross-language fixture's, which R08's constant reads too (the
+    /// fit's own tests check that every row's bake spectrum holds 1 lx).
     #[test]
     fn the_bake_wavelengths_are_r08s_fixture() {
         let fixture = include_str!(concat!(

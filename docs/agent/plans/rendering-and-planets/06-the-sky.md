@@ -888,7 +888,8 @@ sky::colour` and `just fit-check`.
   Pickles dwarfs O5V–M6V the Sun-relative term lies within 0.1 mag of Riello et al. 2021's
   G−V(V−I_C) polynomial (coefficients −0.01597, −0.02809, −0.2483, 0.03656, −0.002939), V−I
   synthetic through Bessell and Murphy 2012's I; every row's term lies in [−4.0, +3.97];
-  `sky::colour::BAKE_WAVELENGTHS_NM` equals R08's constant (a fixture both sides read). Acceptance:
+  `sky::colour::BAKE_WAVELENGTHS_NM` equals R08's constant (a fixture both sides read). Files:
+  `crates/hyperion-fit/data/green2008_si/{Green-2008.yml,PROVENANCE.toml}`. Acceptance:
   `cargo test -p hyperion-fit star_colour`, `cargo test -p hyperion-sim sky::colour`,
   `just fit-check`.
 
@@ -1475,9 +1476,27 @@ plan reserves no tag, prefix or stream.
     four measured exceptions in the table's header: O5V 0.0072 < 0.008 (Martins et al. 2005 Table 1,
     41,540 K; it lies off the models' locus at every temperature, likely residual reddening), M3III
     0.0113 < 0.012 (its colour is a 4,240 K model's), M2V 0.0057 < 0.007 at 3,560 K (best fit
-    3,260 K), K0III 0.0050 < 0.006 at Pickles' 4,853 K (best fit 5,050 K). An M dwarf is less red
+    3,260 K), K0III 0.0050 < 0.006 at Pickles' 4,853 K (best fit 5,050 K); and, restored to the
+    plan's list after review, K5V 0.0075 < 0.008 at Mamajek's 4,440 K (best fit 4,200 K, Pickles'
+    own 4,188 K), a fifth exception. Evaluating every spectrum at Pickles' own adopted T_eff was
+    tried (the orchestrator's re-ruling): it leaves four exceptions (M2V 0.0057, K0III 0.0050, O5V
+    0.0075, M3III 0.0113) and puts G2V at 0.0046, so the five-exception set on Mamajek's dwarf scale
+    was kept, as that ruling provided. An M dwarf is less red
     than its blackbody by 0.019, 0.015 and 0.011 in CIE 1960 uv at 2,900, 3,000 and 3,100 K (0.008
-    at 3,200 K), so the test takes 2,900–3,100 K.
+    at 3,200 K), so the test takes 2,900–3,100 K. Pickles' lux check runs to M6V (0.067 mag, in
+    bracket).
+  - _Review fixes and records._ T3.a–c were fitted and committed as one change, so `star_colour`
+    stays at revision 0 (there was no earlier table to bump from). `StarColour`'s fields are private
+    with getters, adding `blue()`, `red_green()` (the unrounded chroma; `chroma()` narrows to `f32`)
+    and `tables::star_colour::LUMINANCE_RGB`; `extinction_ratio()` is red, green, blue, the table's
+    column order, while `HostDisc`'s arrays are B, V, R, so a consumer building `HostDiscDto`
+    reverses it. log g stays a bare `f64` (`star_colour`, `limb_coefficients`, `HostDisc::log_g`,
+    `surface_gravity`) as Provides sketches it, not base's `Dex`. The fit's integration tests are
+    named `star_colour_*`, so `cargo test -p hyperion-fit star_colour` selects them; T3.b's Pickles
+    checks run there, not under `cargo test -p hyperion-sim sky::colour`. The fetched V band falls
+    back to the photopic stand-in only when it is not fetched (a file failing its hash is an
+    error). `NOTICE` carries Green 2008 as well as the CIE. Golden pins of `sky::colour` and
+    `sky::disc`'s interpolation are left to T17's goldens (determinism audit).
   - _T3.c as built_ (decision-camera-eta.md). `CAMERA_ETA_SUN` is 2.9557 (the ATLAS9 grid's,
     geometrically interpolated at 5,772 K and log g 4.438 so the Sun's interpolated term is 0 to
     10⁻¹⁵; Pickles G2V gives 3.02), and the shared fixture

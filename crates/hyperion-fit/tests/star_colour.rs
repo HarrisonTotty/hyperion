@@ -58,7 +58,7 @@ fn fetched(what: &str) -> bool {
 }
 
 #[test]
-fn the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count() {
+fn star_colour_the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count() {
     let dir = tempfile::tempdir().unwrap();
     let mut texts = Vec::new();
     for threads in ["1", "3"] {
@@ -99,15 +99,23 @@ fn star_colour_table_is_reproduced() {
     if !fetched("the committed table") {
         return;
     }
-    let rendered = rerender(
-        registry(),
-        find("star_colour").expect("star_colour is registered"),
-        &Workspace::repository(),
-        NonZeroUsize::new(8).unwrap(),
-        GENERATOR_VERSION.get(),
-    )
-    .expect("the star_colour task runs on the fetched spectra")
-    .text;
+    let render = |threads: usize| {
+        rerender(
+            registry(),
+            find("star_colour").expect("star_colour is registered"),
+            &Workspace::repository(),
+            NonZeroUsize::new(threads).unwrap(),
+            GENERATOR_VERSION.get(),
+        )
+        .expect("the star_colour task runs on the fetched spectra")
+        .text
+    };
+    let rendered = render(8);
+    // The models are read in parallel; the thread count must not move a bit.
+    assert!(
+        render(1) == rendered,
+        "one thread renders another table than eight"
+    );
     if rendered != COMMITTED {
         let line = rendered
             .lines()
@@ -144,7 +152,7 @@ fn pickles(name: &str) -> Spectrum {
 /// O5 V and M3 III are measured exceptions (`tasks::star_colour::pickles::PICKLES_TYPES`, ruled
 /// 2026-10-02).
 #[test]
-fn the_table_agrees_with_pickles() {
+fn star_colour_the_table_agrees_with_pickles() {
     if !fetched("the Pickles comparison") {
         return;
     }
@@ -172,7 +180,7 @@ fn the_table_agrees_with_pickles() {
 /// the brainstorm's "up to 0.02 off in CIE 1960 uv for M dwarfs"), from 2,900 to 3,100 K, M5 V to
 /// M6 V (ruled 2026-10-02: at 3,200 K the difference is 0.008).
 #[test]
-fn an_m_dwarf_is_less_red_than_its_blackbody() {
+fn star_colour_an_m_dwarf_is_less_red_than_its_blackbody() {
     if !fetched("the M dwarf against its blackbody") {
         return;
     }
@@ -195,9 +203,9 @@ fn an_m_dwarf_is_less_red_than_its_blackbody() {
 }
 
 /// Pickles' own spectra put a star of V = 0 at 0 to +0.10 mag of photopic flux above 2.54 µlx from
-/// O5 V to M5 V (the brainstorm's "within 0.08", corrected 2026-10-02).
+/// O5 V to M6 V (the brainstorm's "within 0.08", corrected 2026-10-02).
 #[test]
-fn pickles_lux_per_v0_is_within_a_tenth_of_a_magnitude() {
+fn star_colour_pickles_lux_per_v0_is_within_a_tenth_of_a_magnitude() {
     if !fetched("Pickles' photopic flux") {
         return;
     }
@@ -209,6 +217,7 @@ fn pickles_lux_per_v0_is_within_a_tenth_of_a_magnitude() {
         "ukk5v.dat",
         "ukm2v.dat",
         "ukm5v.dat",
+        "ukm6v.dat",
     ] {
         let row = observer.row(&pickles(file).bin_means());
         let mag = 2.5 * hyperion_sim::math::log10(row.lux_per_v0);
@@ -225,7 +234,7 @@ fn sensor() -> Sensor {
 /// The fit's bake bins are the sim's mirror of R08's `BAKE_WAVELENGTHS_NM` (and so the fixture's,
 /// which the sim's own test reads).
 #[test]
-fn the_bake_bins_are_the_sims() {
+fn star_colour_the_bake_bins_are_the_sims() {
     for (a, b) in bake_wavelengths_nm().iter().zip(BAKE_WAVELENGTHS_NM) {
         assert!((a - b).abs() < 1e-9, "{a} against {b}");
     }
@@ -235,7 +244,7 @@ fn the_bake_bins_are_the_sims() {
 /// table, blackbodies from 2,300 K to 500,000 K and, when it is fetched, Pickles' library; and for
 /// the spectra, within 1% of the exact integral over 1 nm bins (R06.T3.c).
 #[test]
-fn every_bake_spectrum_holds_one_lux() {
+fn star_colour_every_bake_spectrum_holds_one_lux() {
     let observer = observer();
     let sensor = sensor();
     let y_means = observer.photopic_bin_means();
@@ -280,7 +289,7 @@ fn every_bake_spectrum_holds_one_lux() {
 /// The camera band term of Pickles' spectra, integrated by the task's own code against the
 /// committed η☉: decision-camera-eta's values ± 0.05 mag.
 #[test]
-fn pickles_camera_terms_are_the_rulings() {
+fn star_colour_pickles_camera_terms_are_the_rulings() {
     if !fetched("Pickles' camera terms") {
         return;
     }
@@ -343,7 +352,7 @@ fn v_minus_i(observer: &Observer, i_band: &[(f64, f64)], bins: &[f64]) -> f64 {
 /// (coefficients −0.01597, −0.02809, −0.2483, 0.03656, −0.002939; decision-camera-eta), with
 /// V − I synthetic through Bessell and Murphy's V and I, zero for Pickles' A0 V.
 #[test]
-fn the_camera_term_follows_gaias_g_minus_v() {
+fn star_colour_the_camera_term_follows_gaias_g_minus_v() {
     if !fetched("the camera term against Gaia's G − V") {
         return;
     }

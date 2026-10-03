@@ -40,6 +40,15 @@ const PRIMARIES_XY: [[f64; 2]; 3] = [[0.64, 0.33], [0.30, 0.60], [0.15, 0.06]];
 /// The Rec. 709 white, D65 (ITU-R BT.709-6, Part 1, item 1.4).
 const WHITE_XY: [f64; 2] = [0.3127, 0.3290];
 
+/// Where the observer's V band comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VBandSource<'a> {
+    /// Bessell and Murphy's (2012) Table 1, its text.
+    BessellMurphy(&'a str),
+    /// The CIE 1924 V(λ), photon-weighted: the stand-in from committed data alone.
+    CiePhotopic,
+}
+
 /// The weighting functions at each bin's centre.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Observer {
@@ -97,7 +106,7 @@ impl Observer {
         photopic_csv: &str,
         scotopic_csv: &str,
         d65_csv: &str,
-        bessell_table1: Option<&str>,
+        v_band: VBandSource<'_>,
     ) -> Result<Self, ReadObserverError> {
         let xyz_rows = csv_rows(xyz_csv, 3)?;
         let mut xyz = vec![[0.0; 3]; BIN_COUNT];
@@ -118,8 +127,8 @@ impl Observer {
         let photopic = column(photopic_csv)?;
         let scotopic = column(scotopic_csv)?;
         let d65 = column(d65_csv)?;
-        let v_photons = match bessell_table1 {
-            Some(table) => {
+        let v_photons = match v_band {
+            VBandSource::BessellMurphy(table) => {
                 let response = bessell_v(table)?;
                 (0..BIN_COUNT)
                     .map(|i| {
@@ -128,7 +137,7 @@ impl Observer {
                     })
                     .collect()
             }
-            None => (0..BIN_COUNT)
+            VBandSource::CiePhotopic => (0..BIN_COUNT)
                 .map(|i| photopic[i] * bin_centre_nm(i))
                 .collect(),
         };
@@ -284,6 +293,7 @@ pub fn uv_prime(xyz: [f64; 3]) -> [f64; 2] {
 }
 
 /// The bin of a CIE wavelength, if it is one of the table's.
+#[must_use]
 fn bin_of(nm: u32) -> Option<usize> {
     let i = usize::try_from(nm.checked_sub(FIRST_BIN_NM)?).ok()?;
     (i < BIN_COUNT).then_some(i)
@@ -344,6 +354,7 @@ fn bessell_v(text: &str) -> Result<Vec<(f64, f64)>, ReadObserverError> {
 }
 
 /// Linear interpolation in a rising table, zero outside it.
+#[must_use]
 fn interpolate(table: &[(f64, f64)], x: f64) -> f64 {
     let i = table.partition_point(|&(t, _)| t <= x);
     if i == 0 || i == table.len() {
@@ -356,6 +367,7 @@ fn interpolate(table: &[(f64, f64)], x: f64) -> f64 {
 
 /// The matrix from XYZ to linear Rec. 709, from the primaries' and D65's chromaticities
 /// (SMPTE RP 177-1993's construction).
+#[must_use]
 fn xyz_to_rec709() -> [[f64; 3]; 3] {
     let column = |[x, y]: [f64; 2]| [x / y, 1.0, (1.0 - x - y) / y];
     let p = PRIMARIES_XY.map(column);
@@ -377,6 +389,7 @@ fn xyz_to_rec709() -> [[f64; 3]; 3] {
 }
 
 /// The inverse of a 3 × 3 matrix by cofactors.
+#[must_use]
 fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     let c =
         |r0: usize, r1: usize, c0: usize, c1: usize| m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0];
@@ -420,7 +433,9 @@ pub(super) mod tests {
             &read("cie_cmf/CIE_sle_photopic.csv"),
             &read("cie_cmf/CIE_sle_scotopic.csv"),
             &read("cie_cmf/CIE_std_illum_D65.csv"),
-            bessell().as_deref(),
+            bessell()
+                .as_deref()
+                .map_or(VBandSource::CiePhotopic, VBandSource::BessellMurphy),
         )
         .unwrap()
     }

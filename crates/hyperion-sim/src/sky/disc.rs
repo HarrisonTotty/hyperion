@@ -31,17 +31,17 @@ use crate::units::{CandelasPerSquareMetre, Kelvin, Magnitudes, Metres, Radians};
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct LimbRow {
     /// c in B.
-    pub c_b: f64,
+    pub(crate) c_b: f64,
     /// α in B.
-    pub alpha_b: f64,
+    pub(crate) alpha_b: f64,
     /// c in V.
-    pub c_v: f64,
+    pub(crate) c_v: f64,
     /// α in V.
-    pub alpha_v: f64,
+    pub(crate) alpha_v: f64,
     /// c in R.
-    pub c_r: f64,
+    pub(crate) c_r: f64,
     /// α in R.
-    pub alpha_r: f64,
+    pub(crate) alpha_r: f64,
 }
 
 /// The power-2 limb-darkening law of one band: I(μ) ÷ I(1) = 1 − c (1 − μ^α).
@@ -201,6 +201,7 @@ impl HostDisc {
 
 /// The grid a star's tables are read from: white dwarfs their own, stars before or on the main
 /// sequence the dwarfs', every other living star the giants'.
+#[must_use]
 fn grid_of(phase: Phase) -> AtmosphereGrid {
     match phase {
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
@@ -228,6 +229,7 @@ fn grid_of(phase: Phase) -> AtmosphereGrid {
 /// A star's absolute V magnitude for its disc: plan 06's for a living star; for a white dwarf,
 /// which plan 06 leaves without one until ask A4, the bolometric magnitude less the dwarfs'
 /// correction at its temperature (`photometry`'s own caution: up to about 0.6 mag off at 4,000 K).
+#[must_use]
 fn disc_absolute_v(state: &StarState) -> Option<Magnitudes> {
     match grid_of(state.phase()) {
         AtmosphereGrid::WhiteDwarf => Some(
@@ -250,6 +252,35 @@ fn disc_absolute_v(state: &StarState) -> Option<Magnitudes> {
 /// The photopic mean follows from flux conservation, E = π L̄ (R ÷ d)² for a sphere: a star of
 /// absolute V `M` lights 2.54 µlx × `lux_per_v0` × 10^(−0.4 M) at 10 pc, so L̄ = that × (10 pc)² ÷
 /// (π R²).
+///
+/// # Panics
+///
+/// If the system has more stars than a hierarchy holds, which [`SystemStars`] never builds.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::sky::disc::{angular_radius, host_discs};
+/// use hyperion_sim::stellar::system::SystemStars;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::Metres;
+///
+/// let galaxy = Galaxy::new(Seed::new(19));
+/// let mut cell = Vec::new();
+/// generate_cell(&galaxy, CellKey::new(Layer::E, [0, 203, 0])?, &mut cell);
+/// let stars = SystemStars::generate(&galaxy, &cell[0]);
+/// // The discs the view draws for this system's stars, seen from 1 au.
+/// for disc in host_discs(&galaxy, &stars, UniverseTime::EPOCH) {
+///     let rho = angular_radius(disc.radius(), Metres::new(1.495_978_707e11));
+///     assert!(rho.value() > 0.0);
+///     assert!(disc.central_luminance()[1].value() > disc.mean_luminance()[1].value());
+/// }
+/// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
+/// ```
 #[must_use]
 pub fn host_discs(_galaxy: &Galaxy, stars: &SystemStars, t: UniverseTime) -> Vec<HostDisc> {
     let Some(state) = stars.state_at(t) else {
@@ -272,14 +303,17 @@ pub fn host_discs(_galaxy: &Galaxy, stars: &SystemStars, t: UniverseTime) -> Vec
                 V0_ILLUMINANCE_LX * colour.lux_per_v0() * math::exp10(-0.4 * m_v.value());
             let mean = at_ten_parsecs * ten_parsecs * ten_parsecs
                 / (std::f64::consts::PI * radius * radius);
-            let [r, g] = colour.chroma();
-            let channels = [colour.blue(), f64::from(g), f64::from(r)];
+            let [r, g] = colour.red_green();
+            let channels = [colour.blue(), g, r];
             let mean_luminance = channels.map(|c| CandelasPerSquareMetre::new(mean * c));
             let central_luminance = std::array::from_fn(|c| {
                 CandelasPerSquareMetre::new(mean_luminance[c].value() / limb[c].disc_average())
             });
             Some(HostDisc {
-                star: StarIndex::from_body(u8::try_from(i).ok()?)?,
+                star: u8::try_from(i)
+                    .ok()
+                    .and_then(StarIndex::from_body)
+                    .expect("a hierarchy holds at most STAR_BODY_INDEX_END (16) stars"),
                 radius: Metres::new(radius),
                 teff,
                 log_g,
@@ -299,15 +333,18 @@ pub fn angular_radius(radius: Metres, distance: Metres) -> Radians {
     Radians::new(math::asin((radius.value() / distance.value()).min(1.0)))
 }
 
-/// The Rec. 709 luminance of a disc's channels, B, V, R, cd m⁻².
+/// The Rec. 709 luminance of a disc's channels, B, V, R.
 #[must_use]
-pub fn channel_luminance(channels: [CandelasPerSquareMetre; 3]) -> f64 {
+pub fn channel_luminance(channels: [CandelasPerSquareMetre; 3]) -> CandelasPerSquareMetre {
     let [yr, yg, yb] = LUMINANCE_RGB;
-    yb * channels[0].value() + yg * channels[1].value() + yr * channels[2].value()
+    CandelasPerSquareMetre::new(
+        yb * channels[0].value() + yg * channels[1].value() + yr * channels[2].value(),
+    )
 }
 
 /// The interval of rising `nodes` that holds `x` and the fraction along it, clamped to the first
 /// or last interval's end; a NaN takes the first node.
+#[must_use]
 fn bracket(nodes: &[f64], x: f64) -> (usize, f64) {
     let last = nodes.len() - 2;
     let i = nodes
@@ -452,7 +489,7 @@ mod tests {
         let d = 1_000.0 * disc.radius().value();
         let rho = angular_radius(disc.radius(), Metres::new(d)).value();
         let from_disc = std::f64::consts::PI
-            * channel_luminance(disc.mean_luminance())
+            * channel_luminance(disc.mean_luminance()).value()
             * math::sin(rho)
             * math::sin(rho);
         let distance_modulus = 5.0 * math::log10(d / (10.0 * METRES_PER_PARSEC));
