@@ -3717,3 +3717,17 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     - `SpikeListeners.onSelect(input, selection)`, through the new
       `TerrainPassOptions.onSelect`, called after each `selectPatches` and outside the
       `terrain.select` span; unset, it costs nothing.
+- **The spike's terrain variants, as built (lane C, 2026-10-03; the spike variant flags ruling in
+  decision-r05-spike-ux.md).**
+  - `qualitySetting.ts` gains `TerrainVariant { vertexPath?, normals? }` and
+    `terrainSettingsFor(setting, variant?)`: `SETTINGS[setting].terrain` with only the given fields
+    replaced. It throws a `RangeError` for `low` with `baked-offsets`.
+  - `TerrainPassOptions.terrain` defaults to `TERRAIN_SETTINGS[setting]` and is resolved once in
+    the constructor. It is read for the resources, the pool's normals and both τ reads, after a
+    device restore too. `setting` still decides the low setting's `DETAIL LIMITED`.
+  - Tests:
+    - no variant gives the setting's own object;
+    - each field replaces only itself;
+    - the low setting with `baked-offsets` throws;
+    - a high variant of `face-differences` with mesh normals reaches the pool, the material and
+      `terrainSlotLayout`'s slot count, and keeps them through a restore.

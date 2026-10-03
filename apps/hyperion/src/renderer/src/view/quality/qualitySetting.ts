@@ -117,3 +117,33 @@ export const TERRAIN_SETTINGS: Readonly<Record<QualitySetting, TerrainSettings>>
   high: SETTINGS.high.terrain,
   low: SETTINGS.low.terrain,
 };
+
+/**
+ * A terrain variant for the spike's runs (T13.c's `--vertex-path` and `--normals`, T17's): the
+ * fields given replace the setting's own; nothing else is overridable.
+ */
+export interface TerrainVariant {
+  readonly vertexPath?: TerrainVertexPath;
+  readonly normals?: TerrainNormals;
+}
+
+/**
+ * `SETTINGS[setting].terrain` with the variant's fields replaced; an absent field keeps the
+ * setting's (the spike variant flags ruling, decision-r05-spike-ux.md).
+ *
+ * @throws RangeError for `low` with `baked-offsets`, which does not fit the low cache (Design note 4).
+ */
+export function terrainSettingsFor(
+  setting: QualitySetting,
+  variant: TerrainVariant = {},
+): TerrainSettings {
+  const base = SETTINGS[setting].terrain;
+  const vertexPath = variant.vertexPath ?? base.vertexPath;
+  if (setting === "low" && vertexPath === "baked-offsets") {
+    throw new RangeError("the low setting's cache does not fit the baked-offsets vertex path");
+  }
+  if (variant.vertexPath === undefined && variant.normals === undefined) {
+    return base;
+  }
+  return { ...base, vertexPath, normals: variant.normals ?? base.normals };
+}

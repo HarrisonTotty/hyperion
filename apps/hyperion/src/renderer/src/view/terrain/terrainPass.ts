@@ -23,7 +23,11 @@ import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type { DrawItem, MaterialHandle, RenderEngine, ViewSize } from "../engine/types";
 import type { BufferHandle } from "../engine/types";
-import { type QualitySetting, TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import {
+  type QualitySetting,
+  TERRAIN_SETTINGS,
+  type TerrainSettings,
+} from "../quality/qualitySetting";
 import type { Vec3 } from "../../geometry/vec3";
 import {
   type TerrainAnnunciation,
@@ -131,6 +135,11 @@ export interface TerrainPassOptions {
   readonly ridges: TestPlanetRidges;
   readonly createPool: TerrainPoolFactory;
   /**
+   * The terrain's settings, for the spike's variants (T13.c); defaults to
+   * `TERRAIN_SETTINGS[setting]`. `setting` still decides the low setting's `DETAIL LIMITED`.
+   */
+  readonly terrain?: TerrainSettings;
+  /**
    * Whether each selection is recorded as a `terrain.select` `performance.measure` span, for the
    * descent spike's trace (decision-r05-patch-demand.md, 4d). Off by default: each span is an
    * entry the browser keeps, so only the spike's measurement runs pay for it.
@@ -234,6 +243,8 @@ export function morphRangeM(
 export class TerrainPass {
   readonly #engine: RenderEngine;
   readonly #setting: QualitySetting;
+  /** The terrain's settings, resolved once: the setting's own, or the spike's variant. */
+  readonly #terrain: TerrainSettings;
   readonly #planet: PlanetGeometry;
   readonly #ridges: TestPlanetRidges;
   readonly #createPool: TerrainPoolFactory;
@@ -260,6 +271,7 @@ export class TerrainPass {
   constructor(options: TerrainPassOptions) {
     this.#engine = options.engine;
     this.#setting = options.setting;
+    this.#terrain = options.terrain ?? TERRAIN_SETTINGS[options.setting];
     this.#planet = options.planet;
     this.#ridges = options.ridges;
     this.#createPool = options.createPool;
@@ -336,13 +348,12 @@ export class TerrainPass {
 
   #makeDevice(resources?: TerrainResources): Device {
     const made =
-      resources ??
-      new TerrainResources(this.#engine, TERRAIN_SETTINGS[this.#setting], this.#planet.figure);
+      resources ?? new TerrainResources(this.#engine, this.#terrain, this.#planet.figure);
     const { layout } = made;
     const cache = new PatchCache(layout.slots);
     const pool = this.#createPool({
       vertexPath: layout.vertexPath,
-      normals: TERRAIN_SETTINGS[this.#setting].normals,
+      normals: this.#terrain.normals,
       ridges: this.#ridges,
     });
     const device: Device = {
@@ -403,7 +414,7 @@ export class TerrainPass {
       fovXRad: view.fovXRad,
       viewport: view.viewport,
       weight: 1,
-      tauPx: TERRAIN_SETTINGS[this.#setting].tauPx / (1 + RESELECT_FRACTION),
+      tauPx: this.#terrain.tauPx / (1 + RESELECT_FRACTION),
     };
   }
 
@@ -462,7 +473,7 @@ export class TerrainPass {
         );
       }
     }
-    const morphView = { ...view, tauPx: TERRAIN_SETTINGS[this.#setting].tauPx };
+    const morphView = { ...view, tauPx: this.#terrain.tauPx };
     for (let level = 0; level <= MAX_LEVEL; level += 1) {
       const [start, end] = morphRangeM(this.#planet, level, morphView);
       this.#morph[2 * level] = start;

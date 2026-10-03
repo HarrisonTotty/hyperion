@@ -6,7 +6,9 @@ import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import type { Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
-import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
+import { terrainMaterialSpec } from "./gpu/material";
+import { terrainSlotLayout } from "./slotLayout";
 import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
 import { patchKeyString } from "./patchKey";
 import { planetGeometry } from "./planet";
@@ -129,7 +131,7 @@ function inputAt(view: TerrainView, nowMs = 0): TerrainFrameInput {
 
 async function passOn(
   setting: "high" | "low",
-  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect"> = {},
+  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect" | "terrain"> = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
   const counting = await countingRenderEngine({
     maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
@@ -291,6 +293,34 @@ describe("the terrain pass", () => {
     const demanded = pool().demand.map((r) => patchKeyString(r.key));
     pool().bakeDemand(pass);
     expect(resident).toEqual(demanded);
+  });
+
+  it("draws the spike's terrain variant: its vertex path, its normals and its slots", async () => {
+    const terrain = terrainSettingsFor("high", { vertexPath: "face-differences", normals: "mesh" });
+    const { pass, pool } = await passOn("high", { terrain });
+    expect([pool().settings.vertexPath, pool().settings.normals]).toEqual([
+      "face-differences",
+      "mesh",
+    ]);
+    expect(pass.layout.slots.slotCount).toBe(terrainSlotLayout(terrain).slotCount);
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    const frame = pass.frame(inputAt(view));
+    expect(frame.draw?.material.name).toBe(terrainMaterialSpec("face-differences").name);
+  });
+
+  it("keeps its variant through a device restore", async () => {
+    const terrain = terrainSettingsFor("high", { vertexPath: "face-differences", normals: "mesh" });
+    const { pass, pool, engine } = await passOn("high", { terrain });
+    const first = pool();
+    engine.restore();
+    expect(pool()).not.toBe(first);
+    expect([pool().settings.vertexPath, pool().settings.normals]).toEqual([
+      "face-differences",
+      "mesh",
+    ]);
+    expect(pass.layout.vertexPath).toBe("face-differences");
   });
 
   it("budgets half the high setting's BakedOffsets slots for selection", async () => {
