@@ -742,8 +742,9 @@ re-checked against the cited source in that task, as the galaxy README's Figures
     limits (re-validated 2026-10-02): at most 256 array layers, so the normals take a 2D atlas
     (1,323 low slots or about 1,900 high ones exceed 256 layers), and at most 128 MiB a
     storage-buffer binding, which the heights (33.8 kB a slot, about 64 MB at 1,900 slots) meet
-    and `BakedOffsets` on the high budget (101 kB a slot, about 193 MB) does not; T11.a resolves
-    that (Risks, "Default device limits"). This plan's provisional budgets are 64
+    and `BakedOffsets` on the high budget (101 kB a slot, about 193 MB) does not; the device requests
+    up to 1 GiB a binding (decisions-r06-r07.md item 7), with `FaceDifferences` where it cannot
+    (Risks, "Default device limits"). This plan's provisional budgets are 64
     MiB on the low setting and about 400 MB on the discrete target (R10 Design note 15: 1.3 × the
     all-round peak at 100 m is about 1,900 slots, 390 MB; the frustum term alone, about 800 slots
     and 165 MB, would fit 256 MiB, and R10.T14.b chooses between them); R10 replaces them with its
@@ -1636,12 +1637,19 @@ counts with the rest.
 
 - Files: `view/terrain/gpu/resources.ts`, `view/terrain/gpu/uniforms.ts`,
   `view/terrain/gpu/allocationTally.ts`, their tests, `view/engine/memory.ts`,
-  `renderer/src/test/countingRenderEngine.ts`.
+  `renderer/src/test/countingRenderEngine.ts`; for the device limits (decisions-r06-r07.md item 7)
+  `view/engine/webgpu/engine.ts`, `view/engine/platform.ts`, `view/engine/types.ts`,
+  `test/fakeRenderEngine.ts`.
 - Tests: the index buffer's triangles use the (0, 0)–(1, 1) diagonal; an instance record's origin
   is the `f64` difference narrowed once; no buffer exceeds the device's storage-binding limit; a freed slot is overwritten in place, with no new allocation after
   warm-up; the byte tally matches the formats' sizes; `liveBytes` falls on a destruction while
-  `peakBytes` does not, and an unsubscribed listener hears nothing.
-- Acceptance: `pnpm --filter hyperion exec vitest run view/terrain/gpu`.
+  `peakBytes` does not, and an unsubscribed listener hears nothing; the request never exceeds the
+  adapter's limits and is capped at 2³⁰; the device's limits reach `GpuCapabilities`; with
+  `defaultLimits` the high layout chooses `FaceDifferences` and no buffer exceeds the binding
+  limit; a rebuild onto a FakeAdapter with 128 MiB re-derives the layout without a validation
+  error (decisions-r06-r07.md item 7).
+- Acceptance: `pnpm --filter hyperion exec vitest run view/terrain/gpu view/engine/webgpu/drawing
+view/engine/webgpu/engine view/atmosphere`; `just test-render`.
 
 **R05.T11.b The shaders.** `terrain.wgsl`: the vertex stage for both paths (Design note 4), the
 morph and its hold (Design note 6), reversed-Z output (R02); the fragment stage's Lambertian shading
@@ -2254,7 +2262,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   (Provides, T4.a, T4.c), which R10 implements over R09's `Synthesiser`. R08 changes this plan's
   atmosphere code in its own tasks: transmittance stored as optical depth, the ozone term through a
   curve of growth, and the channel wavelengths refitted (R08 Design notes 5 and 8).
-- **Default device limits** (found on re-validation, 2026-10-02). R01's engine requests its
+- **Default device limits** (found on re-validation, 2026-10-02). Decided 2026-10-02
+  (decisions-r06-r07.md item 7): option (a), `min(adapter, 1 GiB)` for
+  `maxStorageBufferBindingSize` and `maxBufferSize`, with `FaceDifferences` on the high setting
+  where the device's limit cannot hold `BakedOffsets`; not paging. Built in T11.a (its as-built
+  record below). The finding as first written: R01's engine requests its
   device with WebGPU's default limits: 128 MiB a storage-buffer binding, 256 MiB a buffer, 256
   texture-array layers, 8,192 texels a 2D side. The low layout and the high layout's heights fit;
   the normals fit as a 2D atlas, not an array; `BakedOffsets` at the high budget's about 1,900
@@ -2799,8 +2811,7 @@ medium, sizes, figure)`.
 
   - _Aerial-perspective scope_ lives in `TableSizes` for now; R08.T9.a's `AERIAL_PERSPECTIVE_SCOPE`
     takes it over or reads it.
-- **Deviations in T11.a, as built so far** (2026-10-02; the slot layout waits on T8's
-  `SlotLayout`, and the index buffer and instance records wait on T4's vertex order).
+- **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
     `maxStorageBufferBindingSize` and `maxBufferSize`, never above what it reports, capped at
@@ -2812,7 +2823,13 @@ medium, sizes, figure)`.
     - `FakeAdapter` takes both limits. Its devices get WebGPU's defaults unless more is required,
       and reject a request beyond the adapter's.
     - `GraphicsPanel` leaves the two limits out of its feature list.
-    - The RTX 3080's adapter limits are recorded with T11.a's layout.
+    - The RTX 3080's adapter limits, read in a hidden run on 2026-10-03 (an offscreen window
+      never shown, R01's Vulkan switches; NVIDIA, Ampere, driver 615.71.09):
+      `maxStorageBufferBindingSize` 2,147,483,644, `maxBufferSize` 4,294,967,292,
+      `maxTextureDimension2D` 16,384, `maxTextureArrayLayers` 2,048. The engine asks for 1 GiB of
+      each buffer limit, so the high setting keeps `BakedOffsets` there. Headless Ozone could not
+      be used: with a hardware adapter its GPU process exits (SIGSEGV), as R01 Design note 17 found
+      for windows without offscreen rendering.
   - _`AllocationTally`_ (`view/terrain/gpu/allocationTally.ts`) adds `startFrame()`, which zeroes
     the frame's upload count; the interface has no other notion of a frame. It also adds
     `dispose()`, which stops listening.
@@ -2889,3 +2906,59 @@ medium, sizes, figure)`.
   without allocation and the leaf walk stopped at the first interior node, a warm call takes
   about 80 ms on the loaded development machine (360 ms before): still more than a frame, so the
   per-frame cost is revisited when T11.c drives selection each frame.
+  - _The layout_ (`gpu/resources.ts`, `terrainLayout(terrain, limits)`, `TerrainLayout`) reads T8's
+    `SlotLayout` and the device's limits from `engine.capabilities`. Where the `BakedOffsets`
+    offsets at the slot count exceed min(`maxStorageBufferBindingSize`, `maxBufferSize`), it
+    takes `FaceDifferences` over the same byte budget, and `TerrainLayout.fallback` is
+    `binding-limit`, for T13 and T14 to put in the results file and the label. On the high setting
+    under default limits that is 3,904 slots, against 1,962 with `BakedOffsets`; the heights then
+    take 132.0 MB of the 128 MiB binding (98%). Item 7's "keeping the slot budget" is read as the
+    byte budget (the orchestrator's approval, 2026-10-03; if the slot count was meant, the
+    fallback holds 1,962 slots and one atlas layer). A layout whose buffers or atlas still do not
+    fit throws.
+  - _Per-slot records_ (`uniforms.ts`, `SLOT_RECORD_BYTES` 112, `writeSlotRecord`, `patchTerms`).
+    A storage buffer of one record a slot holds `PatchTermsF32`'s fields, the skirt depth and
+    `straddles`, written with the slot, in `height-cache`. It sits outside `SlotLayout`'s budget
+    (437 kB at 3,904 slots; approved by the orchestrator) and the tally counts it. `patchTerms` is
+    the client's twin of `PatchTerms::new`; a test holds its narrowed record to `vertex_f32.golden`'s
+    terms bit for bit on all twelve patches. Its private `stToUv` yields to T2's mirror.
+  - _The normals atlas_ (`normalsAtlasLayout`, `atlasTile`) is `rg16float`, each tile with a
+    one-texel gutter repeating its edge sample, and has as many 2D array layers as
+    `maxTextureDimension2D` requires (at most `MAX_TEXTURE_ARRAY_LAYERS`, WebGPU's 256, now in
+    `platform.ts`), the tiles spread evenly over them. At 8,192 texels: low 1,296 tiles of 67² in
+    8,174 × 737 × 1; high 1,962 of 131² in 8,122 × 4,192 × 1; the fallback's 3,904 in
+    8,122 × 4,192 × 2. The engine does not raise `maxTextureDimension2D`, so the RTX 3080 has the
+    same atlas. T11.b declares it `texture_2d_array`; R01's `drawing.ts` gains
+    `viewDimensionBinds`, so that a `2d-array` binding also takes a single-layer 2D texture (a
+    view WebGPU allows; approved by the orchestrator, pointer in R01's Risks). This replaces the
+    task's `viewDimension` `"2d"`.
+  - _The mesh_ (`patchMeshData`, `GRID_VERTICES`, `SKIRT_VERTICES`, `PATCH_INDICES`): `position`
+    carries (x, y, skirt), grid vertex (x, y) at 65 y + x (the bake's order), then 4 × 65 skirt
+    vertices, edge e anticlockwise from y = 0; quads split (0, 0)–(1, 1), anticlockwise seen from
+    outside, as are the skirts' quads (p, p′, q′), (p, q′, q).
+  - _The per-frame buffers_ (`InstanceRecords`, `ContactRecords`, `writeFrame`): instance records
+    of 32 B (origin less camera, slot, morph start and end), the instance buffer sized to the slot
+    count; a contacts buffer of a 16 B header (the count) and 32 B a contact (centre less camera,
+    held radius r_g, ramp), `MAX_CONTACTS` 1,024, more throws; the indirect arguments written once
+    with the index count, then only the instance count each frame. These three are category
+    `other`. `bytes()` keeps one view a record count, so a frame allocates nothing once its count
+    has been seen.
+  - _The upload_ (`SlotUpload`, `upload` → `SlotUploadResult`): it takes `originHeightM` and
+    `skirtDepthM` as its own fields until T10.b's `BakedPatch` carries them. Everything is checked
+    before the first write. A bake that predates the layout (a slot past a rebuilt layout's count,
+    or offsets the vertex path no longer takes) is `refused` with nothing written; an array of
+    the wrong length throws.
+  - _After a device loss_ `TerrainResources` remakes everything from the rebuilt device's limits
+    and `onRebuilt(layout)` tells the cache that every slot is empty. The engine has no public
+    release of a buffer or texture, so the handles live until the engine is disposed, as T12.c's
+    textures do; a setting change (T11.c) makes new ones beside them.
+  - _The counting fake_ refuses with `LimitExceeded` a buffer above `maxBufferSize`, a storage
+    buffer above `maxStorageBufferBindingSize`, or a 2D texture above `maxTextureDimension2D` or
+    256 layers, where a device would raise a validation error. It records `textureWritten`, takes
+    buffer limits (`countingRenderEngine(limits)`, `fakeDevice(limits)`) and restores onto
+    another device (`restore(device)`).
+  - _The smoke check_ `smoke/terrain.ts` (group "R05.T11.a the terrain's resources", appended to
+    `page.ts`) makes and writes both settings' resources on the harness's engine, then the high
+    setting on a second engine with `defaultLimits`: `FaceDifferences`, 3,904 slots, 8,122 ×
+    4,192 × 2. It passed on both variants on SwiftShader on 2026-10-03, with no uncaptured GPU
+    error. T11.b adds its frames to the same file.
