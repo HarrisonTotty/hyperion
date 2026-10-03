@@ -1769,3 +1769,35 @@ DARK`; the source shows the raw view id upper-cased until T7 names views as the 
   twin to 1% at five pixels beyond the limb; a vitest emulates the WGSL rectangle in `f32`. **The
   bench is pending** (under 1 ms, and 2–3 ms with tone mapping): T17's harness, on a quiet
   machine under `--hyperion-gpu-timing`, the RTX 3080 at 1080p and the owner's UHD 620 at 720p.
+- **Deviations in T15, as built** (2026-10-02). `post/tonemap.wgsl` and `post/tonemap.ts`
+  (`TONEMAP_MATERIAL` `IMAGE`, `tonemapDraw`, the twin `tonemapTexel`, `srgbEncode`, `tpdf`) and
+  `post/blueNoise.ts` (`blueNoiseTile`, 64 × 64 by Ulichney's void-and-cluster from a fixed hash,
+  uploaded as `r16float`). The pass is a material on the full-screen triangle drawn onto the
+  canvas: it samples the HDR colour bilinearly at the canvas's resolution (the upscale), adds
+  w₀ excess(L) and the tent of `BloomChain.levelOne`, each glare source's veil, multiplies by the
+  exposure over the pre-exposure, applies `agxSprite` (AgX less its floor, as the wireframe's
+  sprites write it, so an isolated star on black is identical in both styles before the dither:
+  Design note 9 allowed the floor to stay, and taking it off makes the identity exact), encodes
+  by the sRGB curve and adds the TPDF dither, `tpdf` of a blue-noise threshold read at three
+  offsets for the three channels, ±1 LSB, static. **Engine extension** (decision 2026-10-02, item
+  6; R01's Risks carry the pointer): `FrameSubmission.encoding?: "srgb-view" | "in-pass"` (a
+  view writes through its canvas's own format under `in-pass`), `FrameSubmission.colourLoad?:
+"clear" | "load"` (a frame without post-processes keeps the colour and depth an earlier
+  submission drew, for T16's symbology), and `RenderTargetFormat` `"canvas-in-pass"` for
+  `createMaterialAsync`; defaults unchanged, every earlier smoke check unchanged (`view.ts`,
+  `drawing.ts`, `engine.ts`, `types.ts`, appended). Smoke checks (`smoke/tonemap.ts`): the pass
+  in WGSL equals `tonemapTexel` within one code at 512 pinned texels (a 20-stop grey ramp and
+  three colours), the dither moves no texel by more than one code and is unbiased over a flat
+  field, a half-resolution flat field upscales evenly, and a following `load` pass keeps the
+  image. **The encoding near black, settled** (orchestrator, 2026-10-02): Filament's `pow(v,
+2.2)` stays in R02's `agx`, both styles, R02 untouched. Against Blender's AgX Base sRGB on the
+  grey diagonal (its `AgX_Base_sRGB.cube`, GPL, read once and not committed; sixteen derived
+  codes are pinned in `tonemap.test.ts` with attribution), the pass is within 6 codes from −3
+  stops up and 16 in the toe (−7 stops: 0.7 against 10.3). Writing the sigmoid's output directly
+  as the encoded value halved the toe's gap (8 codes) but was rejected: its near-linear toe made
+  a faint star's displayed total vary with its sub-pixel position from 0.83 to 1.37 of the
+  centred star's (R02's constancy test, bounds 0.90–1.05), stars that would twinkle as the camera
+  moves. **Finding for R12's look audit**: the toe's gap is the seventh-order polynomial's; an
+  analytic AgX sigmoid or a LUT of our own could close it, provided star totals stay constant
+  across sub-pixel positions. By hand, pending for the owner (needs T7's photorealistic view): a
+  Sun-like star in frame with a lit planet, hues holding in the highlight. The bench is T17's.

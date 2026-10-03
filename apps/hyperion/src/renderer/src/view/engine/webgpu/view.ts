@@ -117,7 +117,8 @@ export class WebGpuView implements RenderView {
     }
     const texture = this.#context.getCurrentTexture();
     const size = { widthPx: texture.width, heightPx: texture.height };
-    const colourFormat = srgbViewFormat(this.#format);
+    // `in-pass`: the canvas's own format, the pass encoding (R07.T15); the default, its sRGB view.
+    const colourFormat = frame.encoding === "in-pass" ? this.#format : srgbViewFormat(this.#format);
     this.#host.renderFrame(frame, {
       size,
       colour: texture.createView({ format: colourFormat }),

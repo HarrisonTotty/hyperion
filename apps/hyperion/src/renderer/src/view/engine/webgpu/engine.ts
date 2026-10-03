@@ -389,10 +389,12 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     const outputs = targets.flatMap((target): Array<readonly [GPUTextureFormat, boolean]> =>
       target === "canvas"
         ? [[srgbViewFormat(navigator.gpu.getPreferredCanvasFormat()), true]]
-        : [
-            [target, true],
-            [target, false],
-          ],
+        : target === "canvas-in-pass"
+          ? [[navigator.gpu.getPreferredCanvasFormat(), true]]
+          : [
+              [target, true],
+              [target, false],
+            ],
     );
     await Promise.all(
       meshes.flatMap((mesh) =>

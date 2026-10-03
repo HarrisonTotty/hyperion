@@ -11,6 +11,7 @@
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
+import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type { WgslMaterialSpec, WgslPostProcessSpec } from "./types";
@@ -47,6 +48,7 @@ const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: HISTOGRAM_KERNEL },
   { kind: "material", spec: BLOOM_DOWN_MATERIAL },
   { kind: "material", spec: BLOOM_UP_MATERIAL },
+  { kind: "material", spec: TONEMAP_MATERIAL },
 ];
 
 /** Every shader the engine can create; later plans add theirs here. */

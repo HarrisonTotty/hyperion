@@ -66,8 +66,11 @@ export interface TextureHandle {
   readonly name: string;
 }
 
-/** A render target's colour format, or a view's canvas. */
-export type RenderTargetFormat = ColourTargetFormat | "canvas";
+/**
+ * A render target's colour format, or a view's canvas: `canvas` through its `-srgb` view, and
+ * `canvas-in-pass` through its own format, for a submission with `encoding` `"in-pass"` (R07.T15).
+ */
+export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass";
 
 /** An offscreen colour target to create. */
 export interface RenderTargetSpec {
@@ -280,6 +283,19 @@ export interface FrameSubmission {
   readonly projection: Float32Array;
   readonly draws: ReadonlyArray<DrawItem>;
   readonly postProcesses: ReadonlyArray<PostProcessItem>;
+  /**
+   * How a view's canvas is written: `srgb-view`, the default, through its `-srgb` view, so that
+   * the store encodes; `in-pass` through the canvas's own format, the pass writing encoded values
+   * itself (R07's tone-mapping pass, which dithers after encoding; R07.T15, decision 2026-10-02,
+   * item 6). Offscreen targets ignore it.
+   */
+  readonly encoding?: "srgb-view" | "in-pass";
+  /**
+   * `clear`, the default, clears colour and depth before the draws; `load` keeps what an earlier
+   * submission to the same output drew, so that cased symbology follows the tone-mapping pass
+   * (R07.T16). Ignored where the frame has post-processes, whose chain always starts clear.
+   */
+  readonly colourLoad?: "clear" | "load";
 }
 
 /** One post-process in a frame, with its per-frame values, shaped like a {@link DrawItem}. */

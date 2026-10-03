@@ -318,17 +318,20 @@ export class Drawing {
 
     const sceneColour =
       intermediates === null ? output.colour : this.#viewOf(intermediates[0], "2d", false);
+    // A frame drawn over an earlier one keeps its colour and depth (R07.T16's symbology).
+    const load: GPULoadOp =
+      intermediates === null && frame.colourLoad === "load" ? "load" : "clear";
     const scene = encoder.beginRenderPass({
       label: frame.label,
       colorAttachments: [
-        { view: sceneColour, loadOp: "clear", storeOp: "store", clearValue: CLEAR_COLOUR },
+        { view: sceneColour, loadOp: load, storeOp: "store", clearValue: CLEAR_COLOUR },
       ],
       ...(output.depth === null
         ? {}
         : {
             depthStencilAttachment: {
               view: output.depth,
-              depthLoadOp: "clear",
+              depthLoadOp: load,
               depthStoreOp: "store",
               depthClearValue: 0,
             },
