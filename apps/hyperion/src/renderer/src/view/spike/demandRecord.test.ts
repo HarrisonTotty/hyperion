@@ -22,31 +22,33 @@ const SOURCE = {
   levelTable: FIXTURE.levelTable,
   omittedSigmaM: FIXTURE.omittedSigmaM,
   rangeOf: fixtureRangeOf(FIXTURE.ranges),
-  // The record asks the collision interpolant at the landing site alone.
+  // The record asks the collision interpolant at the landing site alone; the stretches' floors
+  // come from the fixture's ranges.
   surfaceHeightM: () => FIXTURE.siteHeightM,
 };
 
 /**
  * Each window's selection-sequence hash under min(hard, 4σ_n), ridges off, as
  * `just descent-demand --write-fixture` printed them on 2026-10-03 (TEST_PLANET_VERSION 2, the
- * terrain cache of 5d90fab, the site's height read along the spheroid point's direction d).
+ * terrain cache of 5d90fab, the site's height read along the spheroid point's direction d, the
+ * profile flown over the stretches' floors of decision-r05-descent-clearance.md).
  */
 const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
     "orbit coast": "95585482dc0e857e",
-    "descent arc": "abe0feda7e266334",
-    "approach and flare": "677de6aa77f6bdcf",
-    "low fast pass": "944d9779b63b1e5e",
-    slowdown: "f78e46ce552d5db5",
+    "descent arc": "26ca95e0a47c24e5",
+    "approach and flare": "646df768f487a849",
+    "low fast pass": "c903a1e0d2cb7a09",
+    slowdown: "6a697a5b96a83eb9",
     "vertical descent": "8ee3da3059f87d15",
     "hover and touchdown": "01b1b0a3ae9fae25",
   },
   low: {
     "orbit coast": "c9a36f3ba4350b99",
-    "descent arc": "5706a45e7208ead2",
-    "approach and flare": "7436bf7146e49c9a",
-    "low fast pass": "6cd69adfa257ea09",
-    slowdown: "b2f7b6de8978aa71",
+    "descent arc": "6d299f0001c65fb6",
+    "approach and flare": "c343a171ef205a69",
+    "low fast pass": "f0dc7850fe8bc983",
+    slowdown: "9d3e41629b0d2786",
     "vertical descent": "2570e11fd4e1f365",
     "hover and touchdown": "a1556a759b69fd43",
   },
@@ -60,7 +62,9 @@ const WITHIN_TWO: ReadonlyArray<string> = [
   "high/descent arc",
   "high/approach and flare",
   "high/low fast pass",
-  "low/descent arc",
+  "high/slowdown",
+  "low/approach and flare",
+  "low/low fast pass",
   "low/slowdown",
 ];
 

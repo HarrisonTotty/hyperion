@@ -40,7 +40,8 @@ export const CRAFT_RADIUS_M = 10;
  * beneath it while it is descending (`isDescending`) or grounded, none otherwise.
  *
  * @remarks
- * Grounded is the clearance within the held radius r_g, the craft's radius plus one finest patch:
+ * Both read the height above the floor under the craft (`heightAboveFloorM`, the clearance ruling's
+ * honest h, never above the true height). Grounded is that height within the held radius r_g, the craft's radius plus one finest patch:
  * the held sphere about the craft then reaches the ground, as it does at an exact hover, where the
  * vertical speed is 0 and `isDescending` does not hold. The contact sits on the ground, not at the
  * camera, since the forced region's rule is 3-D (T11.c's note).
@@ -49,8 +50,9 @@ export const CRAFT_RADIUS_M = 10;
  */
 export function craftContacts(pose: DescentPose, patchSizeM: number): GroundContact[] {
   const contact: GroundContact = { positionM: pose.groundPointM, radiusM: CRAFT_RADIUS_M };
-  const grounded = pose.clearanceM <= heldRadiusM(contact, patchSizeM);
-  return grounded || isDescending(pose.clearanceM, pose.verticalSpeedMps) ? [contact] : [];
+  const heightM = pose.heightAboveFloorM;
+  const grounded = heightM <= heldRadiusM(contact, patchSizeM);
+  return grounded || isDescending(heightM, pose.verticalSpeedMps) ? [contact] : [];
 }
 
 /** What a fixed-step run reads. */
@@ -99,8 +101,10 @@ export interface FixedStepFrame {
   readonly standingIn: number;
   readonly missing: number;
   readonly selectMs: number;
-  /** The per-level prediction at this frame, patches a second. */
+  /** The per-level prediction at this frame, patches a second, at the height above the floor. */
   readonly predictedPerS: number;
+  /** The camera's height above the floor under it, metres (`DescentPose.heightAboveFloorM`). */
+  readonly heightAboveFloorM: number;
 }
 
 /** A run's frames and its selection sequence's hash. */
@@ -216,7 +220,9 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
       standingIn: draw.standingIn,
       missing: draw.missing,
       selectMs,
-      predictedPerS: perLevelDemand(planet, { ...pose, altitudeM: pose.clearanceM }, view).perS,
+      predictedPerS: perLevelDemand(planet, { ...pose, altitudeM: pose.heightAboveFloorM }, view)
+        .perS,
+      heightAboveFloorM: pose.heightAboveFloorM,
     });
   }
   return { frames, hash: hash.hex(), truncated };
@@ -235,6 +241,9 @@ export interface SegmentFigures {
   readonly limitedFraction: number;
   /** The share of frames drawing some selected patch by a stand-in. */
   readonly standingInFraction: number;
+  /** The least and greatest height above the floor over the frames, metres. */
+  readonly minHeightAboveFloorM: number;
+  readonly maxHeightAboveFloorM: number;
   readonly selectMsP50: number;
   readonly selectMsP95: number;
   readonly selectMsMax: number;
@@ -266,6 +275,8 @@ export function segmentFigures(run: FixedStepRun, rateHz: number): SegmentFigure
       predictedPerS: sum((f) => f.predictedPerS) / frames.length,
       limitedFraction: frames.filter(({ limited }) => limited).length / frames.length,
       standingInFraction: frames.filter(({ standingIn }) => standingIn > 0).length / frames.length,
+      minHeightAboveFloorM: Math.min(...frames.map((f) => f.heightAboveFloorM)),
+      maxHeightAboveFloorM: Math.max(...frames.map((f) => f.heightAboveFloorM)),
       selectMsP50: nearestRank(times, 0.5),
       selectMsP95: nearestRank(times, 0.95),
       selectMsMax: times.at(-1) ?? 0,

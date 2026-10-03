@@ -10,12 +10,25 @@
  */
 
 import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
-import { uvToSt, type Xyz, xyzToFaceUv } from "../terrain/cube";
-import { type PatchKey, patchKeyString } from "../terrain/patchKey";
+import { PATCH_QUADS, uvToSt, vertexSpacing, type Xyz, xyzToFaceUv } from "../terrain/cube";
+import {
+  cornerNeighbours,
+  EDGES,
+  edgeNeighbour,
+  type PatchKey,
+  patchKeyString,
+} from "../terrain/patchKey";
 import { levelBoundM, type PlanetGeometry, planetGeometry } from "../terrain/planet";
 import { type SlotLayout, terrainSlotLayout } from "../terrain/slotLayout";
 import { type BoundRule, boundedPlanet, type DemandView } from "./demand";
-import { DescentProfile, type DescentTerrain, landingSiteOf } from "./descentProfile";
+import {
+  DESCENT_SEGMENTS,
+  DescentProfile,
+  type DescentTerrain,
+  landingSiteOf,
+  type TrackStretch,
+  trackStretches,
+} from "./descentProfile";
 import { type FixedStepRun, runFixedStep, type SegmentFigures, segmentFigures } from "./fixedStep";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
@@ -89,8 +102,35 @@ export interface DemandCell {
   readonly note: string | null;
   /** The terrain the descent was flown over, measured from the bakes (`measureTerrain`). */
   readonly terrain: Required<DescentTerrain>;
+  /** Each segment's boundary altitudes above the table's and its duration as flown (`segmentLifts`). */
+  readonly lifts: ReadonlyArray<SegmentLift>;
+  /** The least height above a stretch's floor less its clearance, metres (`minFloorMarginM`). */
+  readonly minFloorMarginM: number;
   readonly segments: ReadonlyArray<SegmentFigures>;
   readonly hash: string;
+}
+
+/** How far the clearance ruling lifted one segment above Design note 19's table. */
+export interface SegmentLift {
+  readonly segment: string;
+  /** Its start and end altitude above the table's, metres. */
+  readonly startLiftM: number;
+  readonly endLiftM: number;
+  /** Its duration as flown, s (the vertical descent's grows when its top rises). */
+  readonly durationS: number;
+}
+
+/** Each segment's lift above the table (decision-r05-descent-clearance.md's record). */
+export function segmentLifts(profile: DescentProfile): SegmentLift[] {
+  return profile.segments.map((segment) => {
+    const table = DESCENT_SEGMENTS.find(({ name }) => name === segment.name);
+    return {
+      segment: segment.name,
+      startLiftM: segment.startAltitudeM - (table?.startAltitudeM ?? NaN),
+      endLiftM: segment.endAltitudeM - (table?.endAltitudeM ?? NaN),
+      durationS: segment.durationS,
+    };
+  });
 }
 
 /** The note the ridged 4σ cells carry (the orchestrator's relay of lane A's finding, 2026-10-03). */
@@ -118,8 +158,9 @@ export function runCell(options: CellOptions): DemandCell {
   const hard = planetGeometry(TEST_PLANET_FIGURE, source.levelTable);
   const planet = boundedPlanet(hard, options.rule, source.omittedSigmaM);
   const terrain = measureTerrain(hard, source);
+  const profile = recordProfile(terrain);
   const run: FixedStepRun = runFixedStep({
-    profile: recordProfile(terrain),
+    profile,
     planet,
     setting: settingView.setting,
     view: settingView.view,
@@ -144,6 +185,8 @@ export function runCell(options: CellOptions): DemandCell {
     truncated: run.truncated,
     note: options.rule === "calibrated" && options.ridges === "on" ? RIDGED_CALIBRATED_NOTE : null,
     terrain,
+    lifts: segmentLifts(profile),
+    minFloorMarginM: profile.minFloorMarginM,
     segments: segmentFigures(run, options.rateHz),
     hash: run.hash,
   };
@@ -255,6 +298,19 @@ export function memoised(rangeOf: (key: PatchKey) => readonly [number, number]):
   };
 }
 
+/** The segments the ruling lifted, as text, or "none". */
+function liftsText(lifts: ReadonlyArray<SegmentLift>): string {
+  const lifted = lifts.filter(({ startLiftM, endLiftM }) => startLiftM !== 0 || endLiftM !== 0);
+  return lifted.length === 0
+    ? "none"
+    : lifted
+        .map(
+          (l) =>
+            `${l.segment} +${l.startLiftM.toFixed(1)} → +${l.endLiftM.toFixed(1)} m (${l.durationS.toFixed(1)} s)`,
+        )
+        .join(", ");
+}
+
 /** The record's Markdown summary. */
 export function demandSummary(cells: ReadonlyArray<DemandCell>, startedAt: string): string {
   const lines = [
@@ -272,11 +328,13 @@ export function demandSummary(cells: ReadonlyArray<DemandCell>, startedAt: strin
       "",
       `${cell.frames} frames at ${cell.rateHz} Hz over ${cell.coveredS[0].toFixed(1)}–${cell.coveredS[1].toFixed(1)} s${cell.truncated ? " (truncated at the wall-time cap)" : ""}; hash \`${cell.hash}\`.${cell.note === null ? "" : ` **${cell.note}.**`}`,
       "",
-      "| Segment | Patches (mean, max) | Demand /s | D /s | Demand ÷ D | Limited | Select p50 / p95 / max (ms) |",
-      "| --- | --- | --- | --- | --- | --- | --- |",
+      `Site ${cell.terrain.siteHeightM.toFixed(1)} m; least margin above the stretches' floors and clearances ${cell.minFloorMarginM.toFixed(1)} m; lifts above the table: ${liftsText(cell.lifts)}.`,
+      "",
+      "| Segment | Patches (mean, max) | Demand /s | D /s | Demand ÷ D | Limited | Height above floor (m) | Select p50 / p95 / max (ms) |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
       ...cell.segments.map(
         (s) =>
-          `| ${s.segment} | ${s.meanPatches.toFixed(0)}, ${s.maxPatches} | ${s.demandPerS.toFixed(1)} | ${s.predictedPerS.toFixed(1)} | ${s.predictedPerS > 0 ? (s.demandPerS / s.predictedPerS).toFixed(2) : "—"} | ${(100 * s.limitedFraction).toFixed(0)}% | ${s.selectMsP50.toFixed(1)} / ${s.selectMsP95.toFixed(1)} / ${s.selectMsMax.toFixed(1)} |`,
+          `| ${s.segment} | ${s.meanPatches.toFixed(0)}, ${s.maxPatches} | ${s.demandPerS.toFixed(1)} | ${s.predictedPerS.toFixed(1)} | ${s.predictedPerS > 0 ? (s.demandPerS / s.predictedPerS).toFixed(2) : "—"} | ${(100 * s.limitedFraction).toFixed(0)}% | ${s.minHeightAboveFloorM.toFixed(0)}–${s.maxHeightAboveFloorM.toFixed(0)} | ${s.selectMsP50.toFixed(1)} / ${s.selectMsP95.toFixed(1)} / ${s.selectMsMax.toFixed(1)} |`,
       ),
       "",
     );
@@ -288,12 +346,6 @@ export function demandSummary(cells: ReadonlyArray<DemandCell>, startedAt: strin
 export function recordProfile(terrain: DescentTerrain = {}): DescentProfile {
   return new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(RECORD_SEED), terrain);
 }
-
-/** The level whose patches the track's clearance is taken over: about 620 m on an Earth. */
-export const TRACK_LEVEL = 14;
-
-/** The spacing the ground track is sampled at, metres: under half a level-14 patch. */
-const TRACK_STEP_M = 250;
 
 /** A unit direction as the module's and the cube's triples take it. */
 function triple(d: { readonly x: number; readonly y: number; readonly z: number }): Xyz {
@@ -309,49 +361,82 @@ export function patchKeyAt(dir: Xyz, level: number): PatchKey {
 }
 
 /**
- * The record's terrain: the site's height from the module's collision interpolant at the site's
- * direction (T4.c's finest-mesh height, so the hover's metre is above the ground point itself), and
- * the track's maximum as the highest baked height plus ε_14 over the level-14 patches under the low
- * pass's and the slowdown's ground track, sampled every 250 m: a true upper bound on the terrain
- * there (Design note 15), which covers the slowdown too, since it descends from the low pass's
- * height.
+ * The patches of a stretch's bound level under its ground track, with their eight neighbours
+ * (seven at a cube corner), as decision-r05-descent-clearance.md has lane C's `trackPatchKeys`
+ * take them: the track sampled at most half the level's shortest patch edge apart along the ground,
+ * from the stretch's fastest point (with 1% for the arc's radius against the ground's), both ends
+ * included, so no patch it crosses is missed and the neighbours add one edge to either side.
+ */
+export function stretchKeys(profile: DescentProfile, stretch: TrackStretch): PatchKey[] {
+  const { level } = stretch;
+  const edgeM = PATCH_QUADS * vertexSpacing(profile.figure.polarRadiusM, level).minM;
+  const fastestMps = Math.max(
+    profile.poseAt(stretch.startS).horizontalSpeedMps,
+    profile.poseAt(stretch.endS).horizontalSpeedMps,
+    1,
+  );
+  const stepS = edgeM / 2 / (1.01 * fastestMps);
+  const steps = Math.ceil((stretch.endS - stretch.startS) / stepS);
+  const keys = new Map<string, PatchKey>();
+  const take = (key: PatchKey | null): void => {
+    if (key !== null) {
+      keys.set(patchKeyString(key), key);
+    }
+  };
+  for (let n = 0; n <= steps; n += 1) {
+    const tS = Math.min(stretch.startS + n * stepS, stretch.endS);
+    const key = patchKeyAt(triple(profile.groundDirAt(tS)), level);
+    take(key);
+    for (const edge of EDGES) {
+      take(edgeNeighbour(key, edge));
+    }
+    for (const corner of cornerNeighbours(key)) {
+      take(corner);
+    }
+  }
+  return [...keys.values()];
+}
+
+/**
+ * The landing site's height, metres above the spheroid: the collision interpolant along the site's
+ * direction d of the spheroid point M·d (Design note 5), which the profile carries. The geocentric
+ * direction of the same point lands 0.036° (4 km) away at seed 7's site, on ground 107 m lower.
+ */
+export function siteHeightOf(
+  profile: DescentProfile,
+  source: Pick<SurfaceSource, "surfaceHeightM">,
+): number {
+  return source.surfaceHeightM(triple(profile.siteDir));
+}
+
+/**
+ * The record's terrain (decision-r05-descent-clearance.md): the site's height from the module's
+ * collision interpolant along the site's direction d (T4.c's finest-mesh height, bit-exact, so the
+ * hover's metre is above the ground point itself), and each stretch's floor, the highest baked
+ * height plus ε_n over {@link stretchKeys} at its level: a true upper bound on the finest mesh
+ * there (Design note 15), since the mesh interpolates its vertices. `trackMaxHeightM` is the low
+ * pass's floor, for the readout.
  */
 export function measureTerrain(
   hard: PlanetGeometry,
   source: Pick<SurfaceSource, "rangeOf" | "surfaceHeightM">,
 ): Required<DescentTerrain> {
-  const { rangeOf } = source;
   const flat = recordProfile();
-  // The interpolant and the patch keys take the direction d of the spheroid point M·d (Design
-  // note 5), which the profile carries: the geocentric direction of the same point lands 0.036°
-  // (4 km) away at seed 7's site, on ground 107 m lower.
-  const siteHeightM = source.surfaceHeightM(triple(flat.siteDir));
-  let trackMaxHeightM = -Infinity;
-  const seen = new Set<string>();
-  for (const span of flat
-    .segmentSpans()
-    .filter(({ name }) => name === "low fast pass" || name === "slowdown")) {
-    let lastM: { readonly x: number; readonly y: number; readonly z: number } | null = null;
-    for (let tS = span.startS; tS <= span.endS; tS += 0.05) {
-      const pose = flat.poseAt(tS);
-      const ground = pose.groundPointM;
-      if (
-        lastM !== null &&
-        Math.hypot(ground.x - lastM.x, ground.y - lastM.y, ground.z - lastM.z) < TRACK_STEP_M
-      ) {
-        continue;
-      }
-      lastM = ground;
-      const key = patchKeyAt(triple(pose.groundDir), TRACK_LEVEL);
-      const keyString = patchKeyString(key);
-      if (seen.has(keyString)) {
-        continue;
-      }
-      seen.add(keyString);
-      trackMaxHeightM = Math.max(trackMaxHeightM, rangeOf(key)[1] + levelBoundM(hard, TRACK_LEVEL));
-    }
-  }
-  return { siteHeightM, trackMaxHeightM: Math.max(trackMaxHeightM, siteHeightM) };
+  const siteHeightM = siteHeightOf(flat, source);
+  const stretches = trackStretches(flat);
+  const stretchMaxHeightsM = stretches.map(
+    (stretch) =>
+      stretchKeys(flat, stretch).reduce(
+        (highest, key) => Math.max(highest, source.rangeOf(key)[1]),
+        -Infinity,
+      ) + levelBoundM(hard, stretch.level),
+  );
+  const lowPass = stretches.findIndex((s) => s.segment === "low fast pass");
+  return {
+    siteHeightM,
+    trackMaxHeightM: stretchMaxHeightsM[lowPass] ?? siteHeightM,
+    stretchMaxHeightsM,
+  };
 }
 
 /** The test planet's geometry under its hard bound, from the module's level table. */
