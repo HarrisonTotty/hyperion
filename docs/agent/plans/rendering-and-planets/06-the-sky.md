@@ -1444,6 +1444,18 @@ plan reserves no tag, prefix or stream.
   texels in `f64` (`bandIlluminanceLx`, three channels a texel). `photometry.ts` exports
   `unitLuminanceRgb` (the wire's chromaticity to unit luminance by Rec. 709's weights),
   `starIlluminanceRgbLx` and `starPixelLuminanceRgb`. A black background (0 cd/m²) is allowed and reads as read noise alone.
+- **Deviations in T13.f, as built (2026-10-03).** `view/sky/setting.ts` exports `SkySettings`
+  (`faceSizePx`, `spriteBudget`, `nMax`, `rebakeShiftPx`), `HIGH_SKY` (3,072, 4,096, 3 × 10⁵,
+  0.1 px) and `LOW_SKY` (1,024, 2,048, 10⁵, 0.1 px), wired as R05's `ViewSettings.sky` (appended
+  after `atmosphere`) with their values in `SETTINGS`, and `SKY_LAYERS` per `SkyStyle`
+  (`wireframe`: sprites and cube; `photorealistic`: all four), the decision record's item 1. The
+  file is `view/quality/qualitySetting.ts` as R05 built it. `view/sky/label.ts` exports
+  `skyLabelValue(limitV, limitKind, gaps)`, the `STARS` line's reading after its label (`V 7.4 EYE`,
+  then `CLUSTERS NOT MODELLED` for the feature and centre gaps, once, and `WD NOT MODELLED`, each
+  after a middle dot); it does not import `displays/`, and the label block chooses between it and
+  R02's `STAR_SOURCE`/`STARS_WITHOUT_POSITION` where the view's sky is wired (T13.c, with the
+  sprites). The low setting's fainter sprite magnitude is T13.c's selection; the values stay
+  provisional until T17.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
