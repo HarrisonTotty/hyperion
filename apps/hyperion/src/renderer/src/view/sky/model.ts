@@ -7,10 +7,13 @@
  * back before the time it was computed for, and when a camera has moved so far from the observer
  * that the nearest baked star would shift by a tenth of a pixel (its parallax, Design note 13).
  * Stars near enough to shift by more as the camera crosses the system are sprites, placed every
- * frame (Design note 20), and never baked, so they do not count here.
+ * frame (Design note 20), and never baked, so they do not count here. A view that asks for more
+ * than the held sky's request (a deeper camera limit, a larger N_max, the eye, a cone) asks again.
  */
 
 import {
+  type GalacticPosition,
+  MAX_SKY_STARS,
   METRES_PER_LIGHT_YEAR,
   type SkyBand,
   type SkyRequest,
@@ -18,6 +21,9 @@ import {
   type SkyStars,
   type UniverseTime,
 } from "@hyperion/protocol";
+
+import { norm } from "../../geometry/vec3";
+import { galacticDeltaM } from "../coords/position";
 
 /** One au, m (IAU 2012 Resolution B2). */
 const AU_M = 149_597_870_700;
@@ -42,10 +48,10 @@ export interface SkyModel {
   readonly stale: boolean;
 }
 
-/** A camera's geometry, as the parallax rule reads it. */
+/** A camera as the parallax rule reads it. */
 export interface SkyCamera {
-  /** How far the camera is from the sky's observer, m. */
-  readonly offsetFromObserverM: number;
+  /** Where the camera is; the rule measures its offset from the held sky's observer. */
+  readonly position: GalacticPosition;
   /** Its horizontal field of view, degrees. */
   readonly fovDeg: number;
   /** Its width, px. */
@@ -53,7 +59,7 @@ export interface SkyCamera {
 }
 
 /** Why a sky is asked again, or `null` while the one held stands. */
-export type SkyRequestReason = "arrival" | "expired" | "jump" | "parallax";
+export type SkyRequestReason = "arrival" | "expired" | "jump" | "limits" | "parallax";
 
 /** One pixel's angle across a camera, rad: its field of view over its width. */
 export function pixelAngleRad(camera: Pick<SkyCamera, "fovDeg" | "widthPx">): number {
@@ -89,6 +95,34 @@ function earlier(a: UniverseTime, b: UniverseTime): boolean {
   return a.seconds < b.seconds || (a.seconds === b.seconds && a.nanos < b.nanos);
 }
 
+/** The margin by which a camera's limit must deepen to ask again, mag: rounding is not a reason. */
+const LIMIT_MARGIN_MAG = 0.05;
+
+/**
+ * Whether `now` asks for stars the held sky's request did not: a deeper camera limit, a larger
+ * N_max, the eye where it was not asked or with other parameters, or another cone. A shallower
+ * limit or a smaller N_max is the views' cull, never a new census.
+ */
+function asksMore(now: SkyRequest, held: SkyRequest): boolean {
+  const deeper =
+    (now.camera_limit_v ?? Number.NEGATIVE_INFINITY) >
+    (held.camera_limit_v ?? Number.NEGATIVE_INFINITY) + LIMIT_MARGIN_MAG;
+  const more = (now.n_max ?? MAX_SKY_STARS) > (held.n_max ?? MAX_SKY_STARS);
+  const eye =
+    now.eye !== null &&
+    (held.eye === null ||
+      now.eye.field_factor !== held.eye.field_factor ||
+      now.eye.age_years !== held.eye.age_years ||
+      now.eye.pigmentation !== held.eye.pigmentation);
+  const cone =
+    (now.cone === null) !== (held.cone === null) ||
+    (now.cone !== null &&
+      held.cone !== null &&
+      (now.cone.half_angle_deg !== held.cone.half_angle_deg ||
+        now.cone.axis.some((component, axis) => component !== held.cone?.axis[axis])));
+  return deeper || more || eye || cone;
+}
+
 /** What the request rule reads of now. */
 export interface SkyNow {
   /** The request that would be sent now. */
@@ -117,9 +151,13 @@ export function skyRequestReason(held: SkyModel | null, now: SkyNow): SkyRequest
   if (earlier(time, held.request.time)) {
     return "jump";
   }
+  if (asksMore(now.request, held.request)) {
+    return "limits";
+  }
   for (const camera of now.cameras) {
     const nearestM = nearestStarBeyondM(held.stars, bakedBeyondM(camera));
-    const shiftPx = camera.offsetFromObserverM / nearestM / pixelAngleRad(camera);
+    const offsetM = norm(galacticDeltaM(held.request.observer, camera.position));
+    const shiftPx = offsetM / nearestM / pixelAngleRad(camera);
     if (shiftPx >= PARALLAX_THRESHOLD_PX) {
       return "parallax";
     }

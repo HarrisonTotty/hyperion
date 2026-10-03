@@ -1467,14 +1467,87 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   `createWorkerSkyDecoder`, returning `SkyView { model, failure, pending }`. The caller builds the
   request (observer, time, limits, N_max); `null` asks nothing. A request in flight for another
   arrival is cancelled; a failure is held and not retried until the next arrival (no timer: a
-  bulk census may take minutes). The test fixtures are `test/skyFixtures.ts`. **Moved to T13.c**
+  bulk census may take minutes), while a request the link cut off (`link_lost`, `aborted`,
+  `superseded`) is asked again once the link returns. A `SkyCamera` is the camera's galactic
+  `position` with its field of view and width, and the rule measures its offset from the held
+  sky's observer. The rule's fifth reason, `limits`, asks again when a view asks for more than the
+  held request did (a camera limit deeper by over 0.05 mag, a larger N_max, the eye or other eye
+  parameters, another cone); a shallower limit is the cull's. `useSky` returns no model for a held
+  sky of another arrival. `createWorkerSkyDecoder(start)` takes the worker's starter (tests pass a
+  fake) and settles waiting decodes on a load error, an unreadable reply or a failed post. The
+  test fixtures are `test/skyFixtures.ts`. **Moved to T13.c**
   (approved by the orchestrator 2026-10-03): wiring `useSky` into `ViewDisplay`, retiring R02's
   interim field and its label where the sky has arrived, and composing the request's observer
   from `barycentreAt` and the camera, so that the label never claims the sky while the view still
   draws the interim field.
-- **T13.c takes T12's view wiring** (see T12's deviation): `ViewDisplay` asks the sky through
-  `useSky`, draws its sprites in place of the interim field's, and the label block reads
-  `skyLabelValue` where the sky has arrived.
+- **Deviations in T13.c, as built (2026-10-03), with T12's view wiring.** `select.ts`
+  (`selectSkySprites(stars, kept, spriteBudget, camera)` → `SkySelection { sprites, baked }`:
+  the budget's brightest of the kept stars, and any star nearer than `bakedBeyondM`, about 9 ly at
+  1080p and 60°), `sprites.ts` (`skySpriteStars(stars, indices, cameraFromObserverM)`, each
+  star's position less the camera's offset in `f64`), `camera.ts` (`cameraGalacticPosition`,
+  `cameraFromObserverM`), `eye.ts` (`DEFAULT_EYE_OBSERVER`, `SkyEyeObserver`, `eyeDto`; T13.e
+  adds the fixture test against the Rust defaults), `viewSky.ts` (`viewSkyRequest`,
+  `viewSkyLimit`, `limitTriple`, `DARK_SKY_CD_M2`) and `spriteHdr.ts`
+  (`SKY_SPRITE_HDR_MATERIAL`, `STAR SPRITES HDR`, renamed `POINT SPRITES HDR` in T13.e since R07 draws point bodies through it: R02's `starSprite.wgsl` composed with an
+  identity `agxSprite` in place of `toneCurve.wgsl`'s, registered in `WGSL_CATALOGUE`). R02's
+  `DrawOptions` gains `skyStars` (`SpriteStar { id, direction, illuminanceRgbLx }`), which the
+  sprite path draws in place of the scene's interim stars; the interim stars pass through the
+  same `SpriteStar` form, so their sprites are unchanged. `displays/view/useViewSky.ts` asks the
+  sky on the published run (4 Hz) for the server's scene where its system's position is known,
+  culls it to the view's limit and selects its sprites; the stage draws them each frame and the
+  label block's `STARS` line reads `skyLabelValue` (R02's count line hidden) once it has arrived,
+  while R02's interim field and labels stand until then; `ViewSky.pending` (added in T13.e for
+  R07's lighting label) says a sky is asked and not answered. The `VIEW` display's role is `eye`, so
+  it asks the eye's limits and states their deepest; a camera view asks its noise-floor limit at
+  a dark sky of μ 24 (`DARK_SKY_CD_M2`) until the band layer (T13.d) gives a texel's background,
+  and at a manual exposure's triple or else R02's default `MAN` triple until R07 states the
+  metered triple. Until T13.g bakes the cube, the stars beyond the sprite budget are not drawn,
+  and the high setting's N_max and sprite budget are used, the view not yet taking a quality
+  setting. `useSky` makes its decoder only once a payload is in hand (and the effect still live),
+  so that a request never answered starts no worker. A sky is drawn and labelled only for the
+  system it was asked about while that system's position is known; otherwise the interim field and
+  its labels stand. `just test-render` compiles `STAR SPRITES HDR` (2026-10-03, exit 0).
+- **Deviations in T13.d, as built (2026-10-03).** `view/sky/band.ts` exports `BAND_MATERIAL`
+  (`STAR BAND`: a full-screen triangle at infinity whose fragment turns its view ray back to the
+  galactic axes by the transpose of `frame.viewRotation` and samples the band cube, bilinear,
+  additive with alpha 1, so R07's meter class is kept), `bandTexels(band, faceTexels,
+culledIlluminanceLx)` (each texel's luminance in its chromaticity's colour of unit luminance,
+  plus the culled stars' illuminance over the texel's exact solid angle, clamped at 65,504) and
+  `BandLayer` (`update`, which makes the `rgba16float` cube once per face size through
+  `createTexture` and uploads half floats, `draw(exposureScale)`, `dispose`, releasing the cube
+  through T13.h's `releaseTexture`). `half.ts` is the half-float encoder (`toHalfBits`,
+  `toHalfArray`, `fromHalfBits`, `HALF_MAX`), since `Float16Array` is not in every runtime the
+  tests run under. The band's HDR draw is the only variant (the wireframe draws no band); it is
+  registered in `WGSL_CATALOGUE` and checked by `smoke/sky.ts`'s `checkSkyBand` on an
+  `rgba16float` target the check makes. The band layer is not yet wired into a view: no view
+  draws into an HDR scene target until R07.T7.
+- **Deviations in T13.e, as built (2026-10-03).** `view/post/` already held R07's `METER_CLASS`
+  (`meter.ts`) and `GlareSource` (`glare.ts`), so this task declares neither and imports them.
+  `discFlux.ts` exports `angularRadiusRad`, `rgbOfBvr` (the wire's B, V, R to red, green, blue),
+  `discLuminanceRgb(host, mu)`, `discIlluminanceRgbLx(host, rho)` (π L̄ sin²ρ) and
+  `discExcessLuminanceRgb(host, exposureScale)` (the disc-averaged luminance above 65,504 ÷ the
+  scale, by 256 rings, R07's `excessLuminance`). `disc.ts` exports `DISC_MATERIAL` (`STAR DISCS`:
+  a full-screen triangle at infinity that discards outside the disc, sin θ from a cross product for
+  the Sun's 0.27° in `f32`, the law per channel, clamped at 65,504, alpha `METER_CLASS.hostDisc`
+  with no blend), `DISC_MIN_DIAMETER_PX` (3), `EYE_GLARE_REACH_RAD` (45°) and `HostDiscLayer`
+  (`frame(placements, camera, viewport, exposureScale)` → draws and the sprites of discs under
+  three pixels, of the same illuminance; `glareSources(camera, viewport, role)`, the plan's
+  signature with the view's role added, keeping a disc within the frame's half-diagonal, plus 45°
+  for the eye). A `HostPlacement` is `{ host, direction, distanceM }` from the camera, built by
+  `hostPlacements(scene, hosts, pose)` through R07's join (decision-r07-t8a.md, R06 coordination):
+  `HostDiscDto.star` is the star's body index, so its body is `formatBodyId({ system, bodyIndex:
+star })` and the disc sits at that body's drawn centre; a host the scene lacks is left out.
+  `DiscFrame.draws` are `DiscDraw { star, item }`, keyed for R07's painter order. The reach rule
+  measures the angle past the frame's nearer edge plane (left/right or top/bottom) less ρ: a camera
+  keeps a disc touching the frame, the eye one up to 45° beyond it. A host drawn as a sprite casts
+  no glare source, its light being in the sprite. The disc stays hard-edged (the same record,
+  item 3). The harness draws the band, not a sprite, over the disc to check the meter class is kept:
+  both are R01's `additive` mode.
+  `eye.ts` (from T13.c) is pinned to the sim's `EyeObserver::default()` by
+  `packages/protocol/fixtures/eye_observer.json`, which a Rust test in `sky/eye.rs` and the client's
+  disc test both read. The harness's `checkSkyDisc` draws a disc and the band over it on a target
+  of its own and checks the centre's luminance, the meter class kept under the band, the clamp,
+  and nothing lit outside.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and

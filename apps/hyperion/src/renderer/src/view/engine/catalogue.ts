@@ -20,6 +20,9 @@ import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
+import { BAND_MATERIAL } from "../sky/band";
+import { DISC_MATERIAL } from "../sky/disc";
+import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
@@ -102,6 +105,13 @@ export const ENGINE_CHECK_SPLAT: PointSplatSpec = {
   fragmentWgsl: `@fragment fn main() -> @location(0) vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }`,
 };
 
+/** The sky's passes (plan R06): the HDR twin of the star sprites (T13.c) and the band (T13.d). */
+const SKY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: SKY_SPRITE_HDR_MATERIAL },
+  { kind: "material", spec: BAND_MATERIAL },
+  { kind: "material", spec: DISC_MATERIAL },
+];
+
 /** The point splats (R06.T13.h). */
 const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "point-splat", spec: ENGINE_CHECK_SPLAT },
@@ -123,4 +133,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,
+  ...SKY_ENTRIES,
 ];
