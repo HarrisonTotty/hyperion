@@ -29,6 +29,7 @@ import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
+import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { runSoak } from "./soak";
 import { checkTerrainResources } from "./terrain";
@@ -164,6 +165,8 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
 
   await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
+
+  await checks.group("R05.T10.b the height worker", () => checkHeightWorker(checks));
 
   await checks.group("R05.T12.b the atmosphere's tables", () =>
     checkAtmosphereTables(engine, checks),
