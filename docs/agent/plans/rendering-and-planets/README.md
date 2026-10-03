@@ -416,8 +416,10 @@ it is recorded, and stays here so that the owner can review it.
   chase on a jump, the operator's `INHIBIT`) are decided in R02's Design notes and Risks, and two
   pass to R07 (its Risks). The `TERRAIN: STREAMING` and `TERRAIN: DETAIL LIMITED` row of
   R02.T2.f is **Decided** (2026-10-02, delegated; the orchestration's `decisions-r05.md` item 5),
-  with "Where both hold, `STREAMING` is shown." **Still awaiting:** R02's other nomenclature
-  rows (R02.T2.f, T15, T17, marked `_Draft (plan R02, …)_` in the guide); R06.T15's sky entries (`STARS`, `EYE`, `CAM`);
+  with "Where both hold, `STREAMING` is shown." R06.T15's sky nomenclature is **Decided**
+  (2026-10-03, delegated; `decision-r06-t15-guide.md`), with amendments (`STARS V 7.4 mag EYE`,
+  `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`, `INTEGRATED STARLIGHT`). **Still awaiting:**
+  R02's other nomenclature rows (R02.T2.f, T15, T17, marked `_Draft (plan R02, …)_` in the guide);
   R07.T16's photorealistic entries and phrases (`BODY ALBEDO: NOT YET MODELLED`,
   `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the meters); R08.T2's five atmosphere labels
   (`ATMOSPHERE: NOT RESOLVED`, `ATMOSPHERE: NOT YET MODELLED`, `AEROSOLS: NOT YET MODELLED`,

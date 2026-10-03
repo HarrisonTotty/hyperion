@@ -797,13 +797,16 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     asks an N_max of 10⁵. Those three figures are provisional starting values, not sourced: open
     question 16 leaves them open, and R06.T17 decides them from measurements. The budget is under
     0.5 ms at 720p, measured by hand and recorded.
-23. **Labels and honesty.** The view's label block carries one sky line, drafted for the owner as
-    guide nomenclature (R06.T15): the limit and its kind, `STARS V 7.4 EYE` or `STARS V 9.5 CAM`,
-    and, while any stand-in holds, what it is: `STARS: RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION`
-    (R02's stand-in, R02's Design note 16, until this plan lands), `CLUSTERS NOT MODELLED` (until
-    R06.T16), `WD NOT MODELLED` (until A4). The unresolved band is labelled as such in the DOM
-    list's view notes. The flash threshold binds the stars: pixel-integrated sprites are the
-    mechanism, and a test holds a moving star's summed energy within 1%.
+23. **Labels and honesty.** The view's label block carries one sky line, signed off as guide
+    nomenclature in R06.T15: the limit in `mag` and its kind, `STARS V 7.4 mag EYE` or
+    `STARS V 9.5 mag CAM`, and, while any stand-in holds, what it is:
+    `STARS: RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION` (R02's stand-in, R02's Design note 16,
+    until this plan lands), and what the sky leaves out as one composed note after a middle dot,
+    `CLUSTERS: NOT YET MODELLED` (until R06.T16), `WHITE DWARFS: NOT YET MODELLED` (until A4), or
+    both, `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`. The band is noted as
+    `INTEGRATED STARLIGHT` in the DOM list's view notes, in the photorealistic style only. The
+    flash threshold binds the stars: pixel-integrated sprites are the mechanism, and a test holds a
+    moving star's summed energy within 1%.
 
 ## Tasks
 
@@ -1258,7 +1261,9 @@ draft, and the owner's sign-off recorded in this plan.
   `SystemsInRange` handler; the sky handler builds the same sources over P09.T40's caches, and the
   census reads them: `FeatureMemberSource` and the centre's members through the `SystemSource`
   hook, with the same skips (a member's mass word is its own, so the floor applies), and
-  `FeatureGas` as the sightline's modifiers. The label's `CLUSTERS NOT MODELLED` is withdrawn.
+  `FeatureGas` as the sightline's modifiers. `CLUSTERS` leaves the label's composed
+  `NOT YET MODELLED` note (`CLUSTERS: NOT YET MODELLED` is withdrawn, and
+  `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED` becomes `WHITE DWARFS: NOT YET MODELLED`).
   Tests: the Pleiades-like cluster of a pinned seed appears as a clump of bright stars from 400 ly;
   the globular core's sky from its centre lists stars to V 6.5 within a factor of two of the
   brainstorm's about 4 × 10⁵ (its 47 Tuc row). Acceptance: `cargo test -p hyperion-sim
@@ -1376,7 +1381,10 @@ plan reserves no tag, prefix or stream.
   note 23 left unnamed (the lane's choice); R02's two interim rows are marked withdrawn on a view
   once the sky has arrived; the "Views" class gains the rule that the star limit is always a V magnitude with
   its kind, with any stand-in after a middle dot, and a paragraph that the unresolved band is
-  labelled and drawn only in the photorealistic style. **Awaiting the owner's sign-off.**
+  labelled and drawn only in the photorealistic style. **Signed off with amendments** (2026-10-03,
+  delegated; orchestration `decision-r06-t15-guide.md`): `mag` on the limit; the stand-ins in the
+  composed `<WHAT>: NOT YET MODELLED` form, `WD` spelled out; `UNRESOLVED STARS` renamed
+  `INTEGRATED STARLIGHT`; the table's stray `|` fixed.
 - **Deviations in T13.b, as built (2026-10-02).** A fourth file, `view/sky/cube.ts`, holds what
   the CPU splat, the mips and T13.g's WGSL share: `cubeTexelOf` (WebGPU's face order and (u, v)
   orientation, ties to x then y then z) and `texelSolidAnglesSr` (the exact atan2 texel area). The
