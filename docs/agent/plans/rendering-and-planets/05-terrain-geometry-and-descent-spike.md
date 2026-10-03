@@ -3176,3 +3176,15 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     SwiftShader on 2026-10-03, both variants: 100% from 400 km and 68.8% from 10 m, every terrain
     pixel lit, no uncaptured GPU error. The terrain being drawn with `cullMode: "back"` also
     confirms the mesh's winding.
+- **T7.d's review, as built (2026-10-03).** A request's priority is now Design note 24's: the
+  largest w_view × ρ ÷ τ of the patch drawn in its place over the views that see the request and
+  want that patch split (where none does, a split the 2:1 balance made, over the views that see
+  both). Each traversal node keeps two view bitmasks (`seenBy`, `wantedBy`), not per-view arrays,
+  so selection takes at most `MAX_SELECTION_VIEWS` (31) views and throws past it; a request's
+  per-view excess is recomputed only for the demand. A forced region is selected, and requested,
+  whether or not a view sees it, so that it is resident before contact (Design note 9); it is also
+  drawn, the frustum culling nothing on the GPU. A forced request's priority is its own weighted
+  excess, which orders forced requests among themselves only. The tests now check
+  `compareRequests` directly, a second view at one pose adding nothing, a patch only a
+  secondary view wants ranked at the secondary's weight (a test that fails under the earlier
+  rule), a forced region no view sees, and the unforced demand's priorities never rising.

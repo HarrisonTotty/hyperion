@@ -202,8 +202,15 @@ interface TraversalNode {
   readonly key: PatchKey;
   readonly keyString: string;
   readonly bounds: PatchBounds;
-  /** Whether any view sees the patch. */
+  /**
+   * Whether any view sees the patch, or it is in a forced region, which is selected whether or not
+   * a view sees it so that it is resident before contact (Design note 9).
+   */
   readonly visible: boolean;
+  /** The views that see it, a bit a view in input order. */
+  readonly seenBy: number;
+  /** The views that see it and find ρ > τ: the views that want it split, a bit a view. */
+  readonly wantedBy: number;
   /** The largest ρ ÷ τ over the views that see it; 0 where none does. */
   readonly excess: number;
   /** The largest w_view × ρ ÷ τ over the views that see it: the refinement and streaming order. */
@@ -331,19 +338,23 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     inheritedHeightRangeM(t.planet, key, baked, t.skirtMarginM),
   );
   const errorM = t.errorM[key.level] ?? 0;
-  let visible = false;
+  let seenBy = 0;
+  let wantedBy = 0;
   let excess = 0;
   let weighted = 0;
-  for (const v of t.views) {
-    const rel = relativeBounds(bounds, v.input.camera.positionM);
-    if (!inFrustum(rel, v.frustum) || !aboveHorizon(rel, v.horizon)) {
+  for (let n = 0; n < t.views.length; n += 1) {
+    const v = t.views[n];
+    if (v === undefined) {
       continue;
     }
-    visible = true;
-    // No nearer than the near plane: a camera inside a volume has the error of one 0.1 m away, so
-    // the excess stays finite and a secondary view's weight still ranks it (Design note 24).
-    const d = Math.max(distanceToBoxM(rel), NEAR_PLANE_M);
-    const e = (errorM * v.excessPerMetre) / d;
+    const e = viewExcess(v, bounds, errorM);
+    if (e === null) {
+      continue;
+    }
+    seenBy |= 1 << n;
+    if (e > 1) {
+      wantedBy |= 1 << n;
+    }
     excess = Math.max(excess, e);
     weighted = Math.max(weighted, v.input.weight * e);
   }
@@ -352,7 +363,9 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     key,
     keyString,
     bounds,
-    visible,
+    visible: seenBy !== 0 || forced,
+    seenBy,
+    wantedBy,
     excess,
     weighted,
     forced,
@@ -361,6 +374,50 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
   };
   level?.set(index, node);
   return node;
+}
+
+/** The most views selection takes at once: one bit each in a node's view masks. */
+export const MAX_SELECTION_VIEWS = 31;
+
+/**
+ * A view's ρ ÷ τ for a patch of bounds `bounds` at error `errorM`, or `null` where the view cannot
+ * see it.
+ */
+function viewExcess(v: PreparedView, bounds: PatchBounds, errorM: number): number | null {
+  const rel = relativeBounds(bounds, v.input.camera.positionM);
+  if (!inFrustum(rel, v.frustum) || !aboveHorizon(rel, v.horizon)) {
+    return null;
+  }
+  // No nearer than the near plane: a camera inside a volume has the error of one 0.1 m away, so
+  // the excess stays finite and a secondary view's weight still ranks it (Design note 24).
+  const d = Math.max(distanceToBoxM(rel), NEAR_PLANE_M);
+  return (errorM * v.excessPerMetre) / d;
+}
+
+/**
+ * A request's priority (Design note 24): the largest over the views that want it of
+ * w_view × ρ ÷ τ of `standIn`, the patch drawn in its place. The views that want it are those that
+ * see the request and want `standIn` split; where none does (a split the 2:1 balance made), those
+ * that see both.
+ */
+function requestPriority(t: Traversal, target: TraversalNode, standIn: TraversalNode): number {
+  let views = standIn.wantedBy & target.seenBy;
+  if (views === 0) {
+    views = standIn.seenBy & target.seenBy;
+  }
+  const errorM = t.errorM[standIn.key.level] ?? 0;
+  let priority = 0;
+  for (let n = 0; n < t.views.length; n += 1) {
+    const v = t.views[n];
+    if (v === undefined || (views & (1 << n)) === 0) {
+      continue;
+    }
+    const e = viewExcess(v, standIn.bounds, errorM);
+    if (e !== null) {
+      priority = Math.max(priority, v.input.weight * e);
+    }
+  }
+  return priority;
 }
 
 /** Whether a selected patch should be split: it is in a forced region, or a view finds ρ > τ. */
@@ -445,10 +502,17 @@ class CandidateHeap {
  * wherever a view that sees it finds ρ > τ or a grounded body's forced region reaches it, each
  * split balanced at once into a restricted quadtree, until nothing wants splitting or the next
  * split would take the selection past `maxPatches`, which then sets `limited`. Forced splits are
- * never refused.
+ * never refused, and a forced region is selected whether or not a view sees it.
+ *
+ * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views.
  */
 export function selectPatches(input: SelectionInput): Selection {
   const { planet } = input;
+  if (input.views.length > MAX_SELECTION_VIEWS) {
+    throw new RangeError(
+      `selection takes at most ${MAX_SELECTION_VIEWS} views, got ${input.views.length}`,
+    );
+  }
   const t: Traversal = {
     planet,
     views: input.views.map((v) => ({
@@ -549,7 +613,9 @@ function demandOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchRequest
     const standIn = parent === null ? undefined : nodeAt(parent);
     requests.set(target.keyString, {
       key: target.key,
-      priority: (standIn ?? target).weighted,
+      // A forced request outranks every other, so among forced ones its own error orders it.
+      priority:
+        forced || standIn === undefined ? target.weighted : requestPriority(t, target, standIn),
       forced,
     });
   }

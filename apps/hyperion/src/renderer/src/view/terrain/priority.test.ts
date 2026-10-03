@@ -6,8 +6,8 @@ import { lookAlong } from "../camera/quaternion";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { vertexDir } from "./cube";
 import type { GroundContact } from "./grounded";
-import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
-import { levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
+import { type PatchKey, patchKeyString } from "./patchKey";
+import { planetGeometry, surfacePoint } from "./planet";
 import { compareRequests, PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import {
   type HeightRangeLookup,
@@ -24,7 +24,8 @@ function above(altitudeM: number): Vec3 {
   return vec3(x, y, z);
 }
 
-function lookingDown(positionM: Vec3, tiltRad: number): Quaternion {
+/** Looking `tiltRad` from the nadir towards the local east. */
+function looking(positionM: Vec3, tiltRad: number): Quaternion {
   const up = normalise(positionM);
   const east = normalise(vec3(-up.y, up.x, 0));
   const c = Math.cos(tiltRad);
@@ -37,7 +38,7 @@ function lookingDown(positionM: Vec3, tiltRad: number): Quaternion {
 
 function view(positionM: Vec3, weight: number, tiltRad = 1.0): ViewSelectionInput {
   return {
-    camera: { positionM, orientation: lookingDown(positionM, tiltRad) },
+    camera: { positionM, orientation: looking(positionM, tiltRad) },
     fovXRad: Math.PI / 3,
     viewport: { widthPx: 1920, heightPx: 1080 },
     weight,
@@ -45,76 +46,104 @@ function view(positionM: Vec3, weight: number, tiltRad = 1.0): ViewSelectionInpu
   };
 }
 
-/** Every patch down to level 2 baked, at its level's range, so that demand reaches level 3. */
-const SHALLOW_BAKED: HeightRangeLookup = {
-  heightRangeM: (key) => (key.level <= 2 ? levelHeightRangeM(PLANET, key.level) : undefined),
-};
+/** Every patch down to `depth` baked, at ±100 m, so that demand reaches the level below. */
+function bakedTo(depth: number): HeightRangeLookup {
+  return { heightRangeM: (key) => (key.level <= depth ? [-100, 100] : undefined) };
+}
 
 function demand(
-  views: ViewSelectionInput[],
-  grounded: GroundContact[] = [],
+  views: ReadonlyArray<ViewSelectionInput>,
+  grounded: ReadonlyArray<GroundContact> = [],
+  depth = 8,
 ): readonly PatchRequest[] {
   return selectPatches({
     planet: PLANET,
     views,
     setting: "high",
     grounded,
-    heightRanges: SHALLOW_BAKED,
+    heightRanges: bakedTo(depth),
   }).demand;
 }
 
+function byKey(requests: readonly PatchRequest[]): Map<string, PatchRequest> {
+  return new Map(requests.map((r) => [patchKeyString(r.key), r]));
+}
+
+const KEY = (i: number): PatchKey => ({ face: 0, level: 5, i, j: 0 });
+
+describe("the request order", () => {
+  it("puts a forced request before an unforced one of higher priority", () => {
+    const forced = { key: KEY(1), priority: 0.1, forced: true };
+    const unforced = { key: KEY(0), priority: 9, forced: false };
+    expect([unforced, forced].toSorted(compareRequests)).toEqual([forced, unforced]);
+  });
+
+  it("puts the higher priority first", () => {
+    const low = { key: KEY(0), priority: 1, forced: false };
+    const high = { key: KEY(1), priority: 2, forced: false };
+    expect([low, high].toSorted(compareRequests)).toEqual([high, low]);
+  });
+
+  it("breaks a tie by patchKeyString", () => {
+    const a = { key: KEY(10), priority: 1, forced: false };
+    const b = { key: KEY(2), priority: 1, forced: false };
+    // "0/5/10/0" sorts before "0/5/2/0".
+    expect([b, a].toSorted(compareRequests)).toEqual([a, b]);
+  });
+});
+
 describe("streaming priority across views", () => {
-  const camera = above(3_000);
+  const low = above(3_000);
 
-  it("requests each patch once for two views at one pose", () => {
-    const requests = demand([
-      view(camera, PRIMARY_VIEW_WEIGHT),
-      view(camera, SECONDARY_VIEW_WEIGHT),
-    ]);
-    const keys = requests.map((r) => patchKeyString(r.key));
-    expect(keys.length).toBeGreaterThan(0);
-    expect(new Set(keys).size).toBe(keys.length);
+  it("adds nothing for a second view at the same pose", () => {
+    const one = demand([view(low, PRIMARY_VIEW_WEIGHT)]);
+    const two = demand([view(low, PRIMARY_VIEW_WEIGHT), view(low, SECONDARY_VIEW_WEIGHT)]);
+    expect(one.length).toBeGreaterThan(0);
+    expect(two).toEqual(one);
   });
 
-  it("ranks a secondary view's requests below the primary's at equal error", () => {
-    const primary = demand([view(camera, PRIMARY_VIEW_WEIGHT)]);
-    const secondary = demand([view(camera, SECONDARY_VIEW_WEIGHT)]);
-    expect(secondary.map((r) => patchKeyString(r.key))).toEqual(
-      primary.map((r) => patchKeyString(r.key)),
-    );
-    secondary.forEach((r, n) => {
-      expect(r.priority).toBeCloseTo((primary[n]?.priority ?? NaN) * SECONDARY_VIEW_WEIGHT, 9);
-    });
-    // Shown together, a patch only the secondary view wants comes after the primary's at equal error.
-    expect(Math.max(...secondary.map((r) => r.priority))).toBeLessThan(
-      Math.max(...primary.map((r) => r.priority)),
-    );
+  it("ranks a patch only a secondary view wants at the secondary's weight", () => {
+    // Both views at one pose; the primary's tolerance is three times the secondary's, so it sees
+    // every patch the secondary does but wants the last splits at only a third of its excess,
+    // which at the primary's weight of 1 would outrank the secondary's 0.25.
+    const primary = { ...view(low, PRIMARY_VIEW_WEIGHT), tauPx: 3 };
+    const secondary = view(low, SECONDARY_VIEW_WEIGHT);
+    const both = byKey(demand([primary, secondary], [], 12));
+    const alone = byKey(demand([secondary], [], 12));
+    const primaryAlone = byKey(demand([primary], [], 12));
+    const onlySecondary = [...alone.keys()].filter((k) => !primaryAlone.has(k) && both.has(k));
+    expect(onlySecondary.length).toBeGreaterThan(0);
+    for (const k of onlySecondary) {
+      expect(both.get(k)?.priority).toBe(alone.get(k)?.priority);
+    }
   });
 
-  it("puts forced-region patches before everything", () => {
+  it("ranks a secondary view's request below the primary's at equal error", () => {
+    const primary = byKey(demand([view(low, PRIMARY_VIEW_WEIGHT)]));
+    const secondary = byKey(demand([view(low, SECONDARY_VIEW_WEIGHT)]));
+    for (const [k, r] of secondary) {
+      expect(r.priority).toBe((primary.get(k)?.priority ?? NaN) * SECONDARY_VIEW_WEIGHT);
+    }
+  });
+
+  it("puts forced-region patches before everything, even one no view sees", () => {
     const contact: GroundContact = { positionM: above(5), radiusM: 20 };
-    const requests = demand([view(camera, PRIMARY_VIEW_WEIGHT)], [contact]);
-    const firstUnforced = requests.findIndex((r) => !r.forced);
+    // The camera looks up at the sky: no view sees the ground under the craft.
+    const requests = demand([view(low, PRIMARY_VIEW_WEIGHT, Math.PI)], [contact]);
+    const forced = requests.filter((r) => r.forced);
+    expect(forced.length).toBeGreaterThan(0);
     const lastForced = requests.findLastIndex((r) => r.forced);
-    expect(lastForced).toBeGreaterThanOrEqual(0);
-    expect(firstUnforced === -1 || lastForced < firstUnforced).toBe(true);
+    expect(requests.slice(0, lastForced + 1).every((r) => r.forced)).toBe(true);
   });
 
-  it("orders the demand by priority, ties by patchKeyString", () => {
+  it("orders the unforced demand by priority, highest first", () => {
     const requests = demand([
-      view(camera, PRIMARY_VIEW_WEIGHT),
-      view(above(9_000), SECONDARY_VIEW_WEIGHT, 0.3),
-    ]);
-    expect([...requests].toSorted(compareRequests)).toEqual(requests);
-    const tied: PatchRequest[] = FACES.flatMap((f) => childKeys(rootKey(f))).map((key) => ({
-      key,
-      priority: 1,
-      forced: false,
-    }));
-    const sorted = tied
-      .toReversed()
-      .toSorted(compareRequests)
-      .map((r) => patchKeyString(r.key));
-    expect(sorted).toEqual([...sorted].toSorted());
+      view(above(400_000), PRIMARY_VIEW_WEIGHT, 0),
+      view(low, SECONDARY_VIEW_WEIGHT),
+    ]).filter((r) => !r.forced);
+    expect(requests.length).toBeGreaterThan(1);
+    for (let n = 1; n < requests.length; n += 1) {
+      expect(requests[n]?.priority ?? NaN).toBeLessThanOrEqual(requests[n - 1]?.priority ?? NaN);
+    }
   });
 });
