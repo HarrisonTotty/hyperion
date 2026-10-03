@@ -1,0 +1,642 @@
+# The PHOENIX-ACES-AGSS-COND-2011 high-resolution spectra of Husser et al. (2013), solar
+# metallicity, alpha 0: 2,300-3,400 K in steps of 100 K at log g 0-6 in steps of 0.5, and the grid's
+# wavelength file (vacuum, Angstrom). A fetched dataset (plan 15, Design note 12): no licence is
+# stated, so only this file and `urls.txt` are committed. The raw files are downloaded into
+# `crates/hyperion-fit/data/cache/phoenix_husser2013/`, which git ignores: each line of `urls.txt`
+# is a file name and the URL it was downloaded from (SVO serves the ASCII form with
+# `&format=ascii`). Read by `run star_colour` (rendering plan R06, R06.T3.a).
+dataset = "phoenix_husser2013"
+class = "fetched"
+citation = "Husser, Wende-von Berg, Dreizler, Homeier, Reiners, Barman and Hauschildt (2013), A&A 553, A6: PHOENIX-ACES-AGSS-COND-2011, [Fe/H] = 0"
+url = "https://phoenix.astro.physik.uni-goettingen.de/data/HiResFITS/"
+retrieved = "2026-10-02"
+release = "the 156 HiRes FITS spectra lte02300-0.00-0.0 to lte03400-6.00-0.0 of PHOENIX-ACES-AGSS-COND-2011/Z-0.0 and WAVE_PHOENIX-ACES-AGSS-COND-2011.fits, as served on that date"
+licence = "none stated; the site asks users to cite Husser et al. (2013)"
+
+[[files]]
+name = "WAVE_PHOENIX-ACES-AGSS-COND-2011.fits"
+sha256 = "9befb317a6d37bf8cf031e9ef1ba8a942f2f13786c953348f437aaffadf60f73"
+
+[[files]]
+name = "lte02300-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "163608a1ee878ff4e84d02e140f49129def9a8daed1a4b55140b50d0b150e4c8"
+
+[[files]]
+name = "lte02300-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "a2adf9b81104afa11e4a3a9f63f02cd97008a2cf50e2fb3ad90a87a437a127c7"
+
+[[files]]
+name = "lte02300-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "b5a2d1fd456297b6723b7a5bab5f3bfe81f45826c580b5ca6a1d81113a0953fb"
+
+[[files]]
+name = "lte02300-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "bab38906c069a21cefb47a55a40f8be8fddea41957c8eba211f8a69b2f3f785a"
+
+[[files]]
+name = "lte02300-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "fc21bd9dbf89c92cd82540bb0d36e1cf796521f6c1723d4216a4bd1d7ea488d0"
+
+[[files]]
+name = "lte02300-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "47bd23c5a3442f39a9ce5484fe8237f04a17481d04cca643770bffb4982a6a5f"
+
+[[files]]
+name = "lte02300-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f2e7e3292a55eaa17144a824cc0bebd5c39a4b4587a7a92f7534625de6f53177"
+
+[[files]]
+name = "lte02300-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "529959a49483cf06633ce3e7b5b2c0e82e035a7b59d51b1f7a450149b6a15d58"
+
+[[files]]
+name = "lte02300-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "af27de0a55c3e63399a1ee177cc7667a38b918cd6e4ad8382d008b46cad7a4af"
+
+[[files]]
+name = "lte02300-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "ba86fee94209dccedf32c25f7076586b89118d4948b87c64491cc5810b128b6b"
+
+[[files]]
+name = "lte02300-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "13055a4de101ce814b5b82ca7c33fa54aed21257daf9d7e548d410c1edb5d8aa"
+
+[[files]]
+name = "lte02300-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "5d7f0018261f9601687453e14bec4329c36849f5c8955cbc740758966ab48fa3"
+
+[[files]]
+name = "lte02300-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "50cd5669b1bf3b8de739c721cdb7c9834ca5f5a68ccb8ce276aa37d12c5d9f45"
+
+[[files]]
+name = "lte02400-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "3c6fcd39004c684a9cc898d92c779ee22a12b3f5a12496f7a4dab2c4f70a0afa"
+
+[[files]]
+name = "lte02400-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "fcddb691f862041d9c04b10cf976dae2ea8720dfabbdac01083dfb4ff941a134"
+
+[[files]]
+name = "lte02400-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "e7190eb49a606250a666a7fce77b946c1ab8f7612958376da17c4cd81aa84695"
+
+[[files]]
+name = "lte02400-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "6b5662940fc3a50046e03aab6f72b5560b3bf693125d4d28c24cdd7a107c452e"
+
+[[files]]
+name = "lte02400-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "4e69386d303ac7f51106077dbdcd2e3197f0842e68f24a7c4b9938245866b1d1"
+
+[[files]]
+name = "lte02400-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "adc07583f8aa01e53f43fdac5e8aaa9d0371a911e52d83d223c0071dac18488a"
+
+[[files]]
+name = "lte02400-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "980e82cbbcd56af2b8cec1cc8b6abd690a39f2e3e42a7a78937c150e2d4e46df"
+
+[[files]]
+name = "lte02400-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "fd9ee2b169350bb380cdd9940bf935fd4cc2df94eac34bda1be1f9d459483b34"
+
+[[files]]
+name = "lte02400-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "41b3cd774421bc2193061af9058a224389fe3bbf829fe8b393dc4300685c97bc"
+
+[[files]]
+name = "lte02400-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "56e8292f0652f3e2f43c638b96a77dffb5aab31b2560ffbc3e384a17bd63d4d8"
+
+[[files]]
+name = "lte02400-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "2919d1344d771d059ed56d43a42950b7d53576f14be5c64e244209a76b6ba76e"
+
+[[files]]
+name = "lte02400-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "ad8c683ff48bfc53e13205a8c051c72d178a96d2e0e81ab5ec6a4d0ff004c509"
+
+[[files]]
+name = "lte02400-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "001a8d30e85188e3d1833b55fab2e98ba160a27230faa37ec07d1f5f22e59c0d"
+
+[[files]]
+name = "lte02500-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "c7f88dd6212f105a5c40302d3251e01babbbe34cd15a25e58355406a20ae0afc"
+
+[[files]]
+name = "lte02500-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "861adf61cec00545a0db86e5ba1edb13ff4534fcb2e3fda5f014899af629c53e"
+
+[[files]]
+name = "lte02500-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "9fdb2457399ac53414402c65f4b83ab235c1148fe7819f78e85331e3732319b1"
+
+[[files]]
+name = "lte02500-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "e8f57f8be3d9957e67902d6db5af57b4fdfa98d8fe68a3bbd2b1765fa0d968f0"
+
+[[files]]
+name = "lte02500-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1ab77cd247a8db31fcda8777a321aab05d369aa7a73abcd196fe7604ce5ab78c"
+
+[[files]]
+name = "lte02500-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1e5276a6f00384f6275ac3554f494e94c0d701591c310290876981ac36c1f51e"
+
+[[files]]
+name = "lte02500-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f68555900907048f4fe6edcd74778941a3b005c4aa1ccbbead720d36bd2afddc"
+
+[[files]]
+name = "lte02500-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "594c0e2efdbb7e0202c5f9c30fef86e4aeb86983695efed407107c413591b562"
+
+[[files]]
+name = "lte02500-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1dbb0fd0c0c356e231b1bb5b7aacaf87945cef5fcb6d75297bdc50bc63e54142"
+
+[[files]]
+name = "lte02500-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "2789c43690111255feb7b224052c77bb413e4189a503d6344e889343e78883bf"
+
+[[files]]
+name = "lte02500-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "342e38064fddbdd9ea6782fb1a467634d35d099e9e5978a0cb5e36cf4ea23675"
+
+[[files]]
+name = "lte02500-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "411f10314c760e46b3c4d730b808a1ca47d94ccc4b1a45f0a8e9311f8a599837"
+
+[[files]]
+name = "lte02500-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "e62b573420e18b42d35b32362bb00b56d90e9abf47cd75abe3a081f3f0fcd908"
+
+[[files]]
+name = "lte02600-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "a4e2840f34a6d4e6a6d2463e6064816139c020d475bcb70b75149725d7fec25a"
+
+[[files]]
+name = "lte02600-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "c34349d1202f2f15ec3d38f740c0bfc78d07f08fe7aa82d5572d0efdc434de12"
+
+[[files]]
+name = "lte02600-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "988c5bf91b95d8f3b83a068c12598e0cc61a4e3a97979dd58d8680c654283a50"
+
+[[files]]
+name = "lte02600-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "594b9cacdda7bcaa87739e07bcec4723b15e1e269d61bb48b89c7681daabc7ef"
+
+[[files]]
+name = "lte02600-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "55d0a5ce7e0f31eab073758a756c861eae0a6ab9c4586ab2f23156746710a254"
+
+[[files]]
+name = "lte02600-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "700ede61f0acb79d3e1e507dab0cc862f9d27f505e20497e937b25e5f1a50e2a"
+
+[[files]]
+name = "lte02600-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "488bae31aae6f8070f6a0063f37cb465e61c01a9d52cca9e9f84ddc60e0616dc"
+
+[[files]]
+name = "lte02600-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "ccd11c9f9434b52314fe7ab2877eb470c8ae25acc6c6f679a97879a4224e2347"
+
+[[files]]
+name = "lte02600-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "63f2d1e8ec7ce19a7265fe7627a523fe6a46f3a1629822145255775279e8230a"
+
+[[files]]
+name = "lte02600-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "d2e4802b2384ae270e3419159a5cdc141ea46f31a9af72e7c90469768e070d6f"
+
+[[files]]
+name = "lte02600-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1168842fcae2a23dad68793c0d8657481e1f9761003c450aba264dc897e3e37c"
+
+[[files]]
+name = "lte02600-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "6ad5656cb409a8c1b2c8b11ea5e70702177a5be8aa0a1f412144c3bff109e2cf"
+
+[[files]]
+name = "lte02600-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "2abd5b958ba7db18ebea14dec3021f86109fcdf6d79da89b0740a4f2577dccfe"
+
+[[files]]
+name = "lte02700-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "fff3ccaf08be9d71ceaf29331fc97d4bde9f0934982a969c361d74753a570166"
+
+[[files]]
+name = "lte02700-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "0fcdef41a85f2ec71aa05a53bdad790fd057aeddce98e912736701cde7d9a171"
+
+[[files]]
+name = "lte02700-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f6e7364943ce0ca43c75f24929c6779608008eb3358a3c7cc53d4a3325aa1e43"
+
+[[files]]
+name = "lte02700-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "21afe363ac5a37aec6d638e66b3c56a6a0367b04217dd56151de28f57a2ccaf9"
+
+[[files]]
+name = "lte02700-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "95eae88723be684ea5a203ea8e5703e4a8df9b21b017d465e21423c5a4673869"
+
+[[files]]
+name = "lte02700-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "03c52f10e7a2613c219846756c1f8d4193dbfa16efa830d25dcca1bb678d773a"
+
+[[files]]
+name = "lte02700-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "b51f80dce1068e6f1e4738f5fcf0f23cd48b60041b56cff624e03f0f45f7a254"
+
+[[files]]
+name = "lte02700-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "462cf8468e03410727ec6c867c487633ecbddaf2a988cf02bc9b2c3ba0334c36"
+
+[[files]]
+name = "lte02700-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "36e665e98e314d265c658d3681264277b2ce1fc8188237f8f9e869f86f1120f1"
+
+[[files]]
+name = "lte02700-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "466686b6b45ea0200a6356109f4c9e4a63537b090f55e639f1c7aa14bccd1237"
+
+[[files]]
+name = "lte02700-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "3c7e3759e834331d0ff482bf130a5c6651fd88d6fcd8fc24ff1dcc5ef4ab3382"
+
+[[files]]
+name = "lte02700-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "4c3078d777c11fc64ca715b501f1dba38ce3d23b4945ad994036ac7a66296707"
+
+[[files]]
+name = "lte02700-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "02ac87e61380da7276560b98440a7fffb4ce568b3239895e639fc760d8fd5e09"
+
+[[files]]
+name = "lte02800-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "6f67086fe360c35c267507db027f2601f41138a1a4c755bd38b2716da34956ac"
+
+[[files]]
+name = "lte02800-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "d05c2f979d59cf80cffb61efe343642831419fa41ce7840958f7a4b740234848"
+
+[[files]]
+name = "lte02800-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "dca1f882bf3facbf363198d6d6ebedd69d2e02009a23f2fd47992dfa4304ee6f"
+
+[[files]]
+name = "lte02800-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "dd971312e65b04c82a9e965e2a226745a515d40a8281d0c913938a9061c08cf4"
+
+[[files]]
+name = "lte02800-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "19a2e793758ba46ee63588b724c082c0213ffd2d0974ff2f55c7a1189ba03b2a"
+
+[[files]]
+name = "lte02800-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "b0d158ddbdaec020d8c48a387bceef11ed989b58792936a2862f90c13fda789d"
+
+[[files]]
+name = "lte02800-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "0c93f82f1fc5c30d09755ad8f9256543a1ad85da45519e220401f25f0355aa48"
+
+[[files]]
+name = "lte02800-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f192d3da684bb344514a824b82c1d40338842b5992d162287acc2c670d8fdc5d"
+
+[[files]]
+name = "lte02800-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "de57fe2b22069c7abe8a11064e6fefc6ddf06e98cebb696283b31f668551d5c6"
+
+[[files]]
+name = "lte02800-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1e0c21eeef230bcc48885356d0c4fa50f106aacb49762469f085af2cdb550d51"
+
+[[files]]
+name = "lte02800-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "31fdb848289696799869bbf21a59a54955fcbfd868ade349e8eb993e28db0566"
+
+[[files]]
+name = "lte02800-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "20af18b12c7f53131def3d42215a004c3e9c4422c60fb84fb911245b7c88a12f"
+
+[[files]]
+name = "lte02800-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "a859fec675160a587191e099f71298195be5ce6affdcbd6702081186d433e372"
+
+[[files]]
+name = "lte02900-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "657991d4889cad151556b900cb249b4f0610046eac736c80b2717b478c7a2955"
+
+[[files]]
+name = "lte02900-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "74953ef99f4ccb322218d94e74f190d203deea72bc0dde174d4a7c09d7d0e84c"
+
+[[files]]
+name = "lte02900-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "6c4d50d9ee51d2f74d6bdf85ab9492488999d432f5b3070839a814f802d57786"
+
+[[files]]
+name = "lte02900-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "015f9ba3c444d68ad4759e8ec7bd1a1e072bfd98609f65b206dd3824db0d314b"
+
+[[files]]
+name = "lte02900-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "59962165a2d543e48462e1fe53f2ffebb73fe9f8f386058c10590b24239eb442"
+
+[[files]]
+name = "lte02900-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "89e2c48844b71bb14657cec594bfe6b91f78ecf569047991922c02d0afaade5d"
+
+[[files]]
+name = "lte02900-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "fea7915ca4bc0ed28bbf63005de49e1e97477abe11741186b4d8cd753d842538"
+
+[[files]]
+name = "lte02900-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f9a4c96b4d755d7f7f1608e5cc921c2e6969de950ca14da6c4129bfc9c1c2d17"
+
+[[files]]
+name = "lte02900-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "0bba165092989be536565f0bfcc8fd715d86e7833cd31745fdec0404a2ba48ef"
+
+[[files]]
+name = "lte02900-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "30cd42862558bfdc935a6e5d9cc9db3ab5c010d72b7c35a782b5476c4ed4731e"
+
+[[files]]
+name = "lte02900-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "0fe6ea037adafae3f48a024579a97a26b1823b81fdd373b024eccbf327a06cfc"
+
+[[files]]
+name = "lte02900-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "09bd2295bdc4952e2500b201e86337b3ec4a8a0d36a64e1c38ff3148a73e7c64"
+
+[[files]]
+name = "lte02900-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "c3b952a99eb2b7be8c6b2d3f39fccf33d57e79a8cc3e6332dd84bca16926e0a7"
+
+[[files]]
+name = "lte03000-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "4b354404da6057d8d770aa97154729f6646a6ffc296db13c073a2c59f7fca57d"
+
+[[files]]
+name = "lte03000-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "cc113bb48dcd04ad9761cf9aa3163e2814a948d5384928de118d587fcaa8b1f6"
+
+[[files]]
+name = "lte03000-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1b38542c257ae7dce74d67429dd387f18823bd5d4606130bd0ac9bc2116f86dc"
+
+[[files]]
+name = "lte03000-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "936c3b468ea8176c9cbce402af19e5d084d11899c7b77fdec82197530e285c61"
+
+[[files]]
+name = "lte03000-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "a6964e111b360d588aa46d81f38048f79b4116e676a9a7998b7e68df4b0f21a6"
+
+[[files]]
+name = "lte03000-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "cfbb52b0a3eac216f290e3e0eaa5a6a54d664b40e4c35c56d72a05e37efe39cd"
+
+[[files]]
+name = "lte03000-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "98956771c3e34b463efd3323440c8cb568c210a89c608c6b4950bfa35150babd"
+
+[[files]]
+name = "lte03000-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "8beac1b3296847fc47f85a9563b893cfec13e84a18339860ccc5732730cb5d04"
+
+[[files]]
+name = "lte03000-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "0ff7d60782f0f8326bb7f44283d90e6e5b34048c17deae0680e20dc740fd27d4"
+
+[[files]]
+name = "lte03000-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "6d63bbada1a86b63a0b2ee9cf2aea43fb90408127a90614aae00c1c8f612ff62"
+
+[[files]]
+name = "lte03000-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "435840018bcd4ae1ea464cca260dca6a049016e5f7446481c9d77830ec63344c"
+
+[[files]]
+name = "lte03000-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "52dcd9ad2c841776f89ae61d31b68f851113db7629424aff3126c768fad302c0"
+
+[[files]]
+name = "lte03000-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "7b7dc82074d2c5775b710138b703234a40e9b4862ae009cff2d41ef6122765f1"
+
+[[files]]
+name = "lte03100-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "30308dc7e525265415da3608f274246967b82337bb7cae7619b982a110e95b87"
+
+[[files]]
+name = "lte03100-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "0275e3444214459fb6de18968f2cbe72820f796dea80a73607290f3018d28cc4"
+
+[[files]]
+name = "lte03100-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "eac5d57d1537b8cffd1ea77b208048af6f66da9caa284e3c7173403456bee631"
+
+[[files]]
+name = "lte03100-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "e65818d6f4333765f1622ade21da299c8b3e1e603cae99b612220c70d70c1af5"
+
+[[files]]
+name = "lte03100-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "cad26f286b5383e11d63dc91b84509d09c31cf24dec9dad11875ea54144e3c74"
+
+[[files]]
+name = "lte03100-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "9b6cec0d79bcb3e4d7db15d6d6cd367167e4334f41a5808ec409ccb895185ad3"
+
+[[files]]
+name = "lte03100-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "953922a4df8c40664f2c22b98582692f0c51c1357c2bc45a77ad82339477b58b"
+
+[[files]]
+name = "lte03100-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "5e30f048d8e05522006faf0c11d80f1a50e4bc184cfeb128cfdd57fcc3d05278"
+
+[[files]]
+name = "lte03100-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "cdb6d24d326fe869b00517d722dd89ea16287c3cf9b609ff6d4c0ef6c8dc6078"
+
+[[files]]
+name = "lte03100-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "7c9b450e5ee4eb6f947b3a1227355612254325c5d6f6702f9080b802297bbbfc"
+
+[[files]]
+name = "lte03100-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f776354b070a47422f4db50f178fca51a008f8eb91c08a1a193d09f25776197e"
+
+[[files]]
+name = "lte03100-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1b2e307ac8abaf041f0b143f507965fb798417bf7b1af825371dd8842bd6c299"
+
+[[files]]
+name = "lte03100-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f38d944d1762c096a5a89a9cc24585d0e1c0c3948c5c4c6142e8bf33757bfa66"
+
+[[files]]
+name = "lte03200-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f0aa9917809ddb8bc7d5f320d5412f2ef605dbb3e7f60a5a706e62d6e057f27d"
+
+[[files]]
+name = "lte03200-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "986295051fbb84256fb27e77a048ee2e28fcd8b7f40020feb4f871e921a51fb3"
+
+[[files]]
+name = "lte03200-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "409e0e9607deb9fca72eeb1b00ae9b1e6dafa4cccf0b2dc016cb0b50129ea7c0"
+
+[[files]]
+name = "lte03200-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "15bc66a51ee5d345b941457fb5b99f63709fe1b42c661fed8463cd9fcf340e14"
+
+[[files]]
+name = "lte03200-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "dbf02fdebcdba6e1ce2b708039452dd79d8a4424e6aca5c0fe9abdb2f8ee9f96"
+
+[[files]]
+name = "lte03200-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "35e8f88f157f886adc39634d5d7802f064c8bb02e58e6364bce0e29d0e719082"
+
+[[files]]
+name = "lte03200-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "55199c31dbdc088e515039599cc4899d9b8853e764410a920821022be0a714a9"
+
+[[files]]
+name = "lte03200-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "e0b28138e05af062fdfe712e4e7cf7a1b4b618f37a578062d34810d31fd3d0b2"
+
+[[files]]
+name = "lte03200-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "e7a81a1ae391f993ac8da13c68c7a37660a7ce58d9464e776e92b8dc46977af6"
+
+[[files]]
+name = "lte03200-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "b65cfb8e979d393555e5a31114492ef6f636ef1849f330a6377c211f426fa30b"
+
+[[files]]
+name = "lte03200-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "086eb19c6fa2378de72a4102287435f910c5af6cb7a7ae6c34d19ac47edb220a"
+
+[[files]]
+name = "lte03200-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "6902ea4d88957c9704480ef40bd0f760eaed5f08648d31b4b57f18c4376348c5"
+
+[[files]]
+name = "lte03200-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "4e6ff880953411d7a2a1521a35ce016fe8a19d229615f63e511673e5f5e2ee80"
+
+[[files]]
+name = "lte03300-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "53bc4d9f85cbec3500f10cff03fc98b0e11e55b712c7ede0aafdaa1a84a9be5d"
+
+[[files]]
+name = "lte03300-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "4e9e9f5e420f4d12e75c0c04cc5dd234b21fbe8d1ee6f618a2898b43778d636d"
+
+[[files]]
+name = "lte03300-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "f99a96183a6372a08f04542c5e2324ff637b539e8dd1898bf855c51e27190add"
+
+[[files]]
+name = "lte03300-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "b65e3dd8a291b269c8752a87f7bb49a978ff9220de3d9a344b42984ae8251f57"
+
+[[files]]
+name = "lte03300-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "441065075fd97fc5da40c7be0a0e2c06f387f62102991bf237252b15e6f27eef"
+
+[[files]]
+name = "lte03300-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "9160e60f087b6c72c50321184d5e56cb05497f944daa4b7e9eb9caa9b4baad97"
+
+[[files]]
+name = "lte03300-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "a90fac504004dccabcacc2f462336e893cd962d73325fb79bd1356e5ec293e6f"
+
+[[files]]
+name = "lte03300-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "55c13bd8781752184c7bbc5223929446766b627c516b769993a0ea4c74737542"
+
+[[files]]
+name = "lte03300-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "9531bb35205b0ff72d346080dc6b46d3f2eccf28446617776d4809e1da4f4ee5"
+
+[[files]]
+name = "lte03300-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "ac43a2768adba14337414c03c461873abe6d4fb59d091ed870360b8a5b377378"
+
+[[files]]
+name = "lte03300-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "50b8b3cd200b4f34fa6fba09b5075dcb696e8a4e44f2f5e88923dad1beefcfd6"
+
+[[files]]
+name = "lte03300-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "3ed65e4e3d83ced566d84ffbc7bce726f967e87958467ef8809f03c23cad3749"
+
+[[files]]
+name = "lte03300-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "7ded8a1b53a7c82cc24e6bc2b8e96ec57c78e4ec0f40f3106a2ba9401f090c3a"
+
+[[files]]
+name = "lte03400-0.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "817cf4af0e2a70fe532713cd413de2ee16738e2ee846d62b995cf441bf47fee2"
+
+[[files]]
+name = "lte03400-0.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "227512b6bd4b855be2dede81df29fa143b602be395f2cfb49522bb20609391de"
+
+[[files]]
+name = "lte03400-1.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "2750f21bb0dca4ced612a2ae2030cd102732281b1cbad051cbcaf35e8da1c034"
+
+[[files]]
+name = "lte03400-1.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "3feb6981ff1cfc2b67b5155a173168bcf2518f0ba28f32b0078c79a47795f8c7"
+
+[[files]]
+name = "lte03400-2.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "7fac2dd4615216ff7660489b27daaa2fc258ea2d03766c85d558620969befd37"
+
+[[files]]
+name = "lte03400-2.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "adef82e232e47dd95bd2f2af90bf5f3e8106f6cbd3d586c9a298a89f1e9a942c"
+
+[[files]]
+name = "lte03400-3.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "55d256123980baa63f48bcba4f52f50d50cd0531990b87c49c969edcbb4a5365"
+
+[[files]]
+name = "lte03400-3.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "e255a34f289c8544c21d6c9733d34665163ff6b92b3b1d81e32d5ff30813bed0"
+
+[[files]]
+name = "lte03400-4.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "1a3e9b126b34f485d99453e5c58918198fc464b41b9b8f9dd966aa80edad601f"
+
+[[files]]
+name = "lte03400-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "2f90fd0583c8569a4a4d296d062ca1509b3afcc1f23b93ebe85f286aa984b86b"
+
+[[files]]
+name = "lte03400-5.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "281c69051e21c705ba52f3db12808b81a7254b348154777736d91e16c34547d9"
+
+[[files]]
+name = "lte03400-5.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "d6839d01201e7f2826698dc03cf2d5f86c09006e8e787cc1819655e27732efda"
+
+[[files]]
+name = "lte03400-6.00-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits"
+sha256 = "0ab36f11fff0c2bf9ca09071f8adf977dd2f2e870f8ddc718d551a65e891c270"

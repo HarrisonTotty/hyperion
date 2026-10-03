@@ -1,0 +1,27 @@
+# The CIE's own tables at 1 nm, committed under their licence, CC BY-SA 4.0, with attribution: the
+# CIE 1931 2 degree colour-matching functions (360-830 nm), the CIE 1924 photopic luminous
+# efficiency V (360-830 nm), the CIE 1951 scotopic V' (380-780 nm) and CIE standard illuminant D65
+# (300-830 nm). Read by `run star_colour` (rendering plan R06, R06.T3.a).
+dataset = "cie_cmf"
+class = "committed"
+citation = "International Commission on Illumination (CIE): CIE 1931 colour-matching functions, 2 degree observer (2019), DOI 10.25039/CIE.DS.xvudnb9b; CIE spectral luminous efficiency for photopic vision (2019), DOI 10.25039/CIE.DS.dktna2s3; CIE spectral luminous efficiency for scotopic vision (2019), DOI 10.25039/CIE.DS.gr6w4b5g; CIE standard illuminant D65 (2022), DOI 10.25039/CIE.DS.hjfjmt59"
+url = "https://files.cie.co.at/Publications-datasets/"
+retrieved = "2026-10-02"
+release = "CIE_xyz_1931_2deg.csv, CIE_sle_photopic.csv, CIE_sle_scotopic.csv and CIE_std_illum_D65.csv as served on that date"
+licence = "Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0); (c) CIE, attributed in the citation"
+
+[[files]]
+name = "CIE_sle_photopic.csv"
+sha256 = "ee5d5d17922ae645d4af52cacf6a50bdb9385749f9d2181ca312eb2b08febac2"
+
+[[files]]
+name = "CIE_sle_scotopic.csv"
+sha256 = "6a75d3fdbcbf5e9e9a07478511933eefeda953f3e2cc14b74459e5a099ec3759"
+
+[[files]]
+name = "CIE_std_illum_D65.csv"
+sha256 = "e76f210bffff3d552ef7113025da5f325d5dfec200dd4b878b1a2f3a507032cb"
+
+[[files]]
+name = "CIE_xyz_1931_2deg.csv"
+sha256 = "fa663e3535a7e0763a745993a1f0a192eb0275ac46ad2d1befd7626841e713c1"

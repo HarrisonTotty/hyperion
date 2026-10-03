@@ -54,6 +54,7 @@ import {
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
@@ -358,14 +359,25 @@ export function labelLines(
   return lines;
 }
 
-/** The steady statements under the label block's lines, each while its condition holds. */
-export function labelStatements(run: ViewRun): ReadonlyArray<string> {
+/**
+ * The steady statements under the label block's lines, each while its condition holds.
+ *
+ * @param terrain - The view's debounced terrain annunciation (plan R05, T9), or `null` while
+ *   neither condition holds or the view draws no terrain.
+ */
+export function labelStatements(
+  run: ViewRun,
+  terrain: TerrainAnnunciation | null = null,
+): ReadonlyArray<string> {
   const statements: string[] = [];
   if (run.camera.preset !== "seat" && run.scene.ownShip !== null) {
     statements.push("POSITIONS AS SEEN FROM SHIP");
   }
   if (run.scene.bodies.some((body) => body.rotation === null)) {
     statements.push("ROTATION NOT YET MODELLED");
+  }
+  if (terrain !== null) {
+    statements.push(terrain);
   }
   return statements;
 }

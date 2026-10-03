@@ -45,6 +45,16 @@ function inSmokePage(path: string): boolean {
   return path.startsWith("smoke/") || path.includes("/smoke/");
 }
 
+/**
+ * Whether `path` is the descent spike's capture shim (R05.T15.a) or its test, the one module
+ * outside the adapter that may allocate on the device: it forwards the engine's own
+ * `createBuffer` and `createTexture` and makes the snapshot's staging buffers, for measurement
+ * runs only, and its test drives a device directly to check that.
+ */
+function isCaptureShim(path: string): boolean {
+  return path === "view/spike/capture.ts" || path === "view/spike/capture.test.ts";
+}
+
 /** Each rule `file` breaks, in words. */
 function violations(file: SourceFile): string[] {
   const found: string[] = [];
@@ -63,7 +73,11 @@ function violations(file: SourceFile): string[] {
   ) {
     found.push(`${file.path} names the engine module, which only loadEngine.ts may load`);
   }
-  if (!inEngineAdapter(file.path) && RAW_DEVICE_ALLOCATION.test(file.text)) {
+  if (
+    !inEngineAdapter(file.path) &&
+    !isCaptureShim(file.path) &&
+    RAW_DEVICE_ALLOCATION.test(file.text)
+  ) {
     found.push(`${file.path} allocates GPU memory outside the engine's one creation path`);
   }
   return found;
@@ -115,5 +129,11 @@ describe("the engine boundary", () => {
     expect(violations({ path: "view/engine/webgpu/resources.ts", text })).toEqual([]);
     const named = "this.gpuDevice.createTexture({ size: [1, 1], format: 'r8unorm', usage: 4 });";
     expect(violations({ path: "view/scene.ts", text: named })).toHaveLength(1);
+  });
+
+  it("exempts the spike's capture shim alone from the allocation rule", () => {
+    const text = "const buffer = device.createBuffer({ size: 4, usage: 1 });";
+    expect(violations({ path: "view/spike/capture.ts", text })).toEqual([]);
+    expect(violations({ path: "view/spike/metrics.ts", text })).toHaveLength(1);
   });
 });

@@ -1,0 +1,15 @@
+The four CSV files in this directory are the CIE's own datasets, committed unmodified under their
+licence, Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0,
+https://creativecommons.org/licenses/by-sa/4.0/):
+
+CIE 2019, Colour-matching functions of CIE 1931 standard colorimetric observer, International
+Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b (CIE_xyz_1931_2deg.csv)
+CIE 2019, CIE spectral luminous efficiency for photopic vision, International Commission on
+Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.dktna2s3 (CIE_sle_photopic.csv)
+CIE 2019, CIE spectral luminous efficiency for scotopic vision, International Commission on
+Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.gr6w4b5g (CIE_sle_scotopic.csv)
+CIE 2022, CIE standard illuminant D65, International Commission on Illumination (CIE), Vienna,
+AT, DOI: 10.25039/CIE.DS.hjfjmt59 (CIE_std_illum_D65.csv)
+
+They are a tool input of hyperion-fit and are not shipped in the app. Values derived from them
+(crates/hyperion-sim/src/tables/star_colour.rs) are credited in the repository's NOTICE.

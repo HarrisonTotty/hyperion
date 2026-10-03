@@ -303,5 +303,22 @@ pub const ENVELOPED_MOMENT_OF_INERTIA: f64 = 0.23;
 
 /// The moment of inertia of a gas giant in units of M R²: 0.25 (P14.T14.b), Jupiter's 0.254
 /// (Hubbard and Marley 1989, Icarus 78, 102; 0.2756 from Juno's field, Ni 2018, not re-read) with
-/// Saturn's 0.21 below. Below the plan's 0.33–0.4, as for [`ENVELOPED_MOMENT_OF_INERTIA`].
+/// Saturn's 0.21 below. Below the plan's 0.33–0.4, as for [`ENVELOPED_MOMENT_OF_INERTIA`]. A
+/// Jupiter-like giant's: at or below [`JUPITER_HEAVY_ELEMENT_FRACTION`] (P14.T46.a).
 pub const GAS_GIANT_MOMENT_OF_INERTIA: f64 = 0.25;
+
+/// The moment of inertia of a Saturn-like gas giant in units of M R²: 0.21, Saturn's 0.210 (NASA's
+/// Saturn fact sheet, C ÷ M a²; a more centrally condensed giant has the smaller factor, Hubbard
+/// and Marley 1989, Icarus 78, 102). A gas giant's factor falls linearly from
+/// [`GAS_GIANT_MOMENT_OF_INERTIA`] at [`JUPITER_HEAVY_ELEMENT_FRACTION`] to this at
+/// [`SATURN_HEAVY_ELEMENT_FRACTION`] and holds beyond (P14.T46.a, decision-p14-phase-j 1).
+pub const SATURN_LIKE_MOMENT_OF_INERTIA: f64 = 0.21;
+
+/// A giant's heavy-element mass fraction Z = 1 − envelope at 1 Jupiter mass: 0.182 17, Thorngren
+/// et al.'s (2016) 57.9 M⊕ ÷ 317.83 M⊕ (`composition::giant_heavy_elements`, which a test
+/// reproduces to 10⁻¹²).
+pub const JUPITER_HEAVY_ELEMENT_FRACTION: f64 = 0.182_173_773_012_805_7;
+
+/// A giant's heavy-element mass fraction Z at Saturn's 95.16 M⊕ by the same law: 0.291 57,
+/// 57.9 M⊕ × (95.16 ÷ 317.83)^0.61 ÷ 95.16 M⊕ (a test reproduces it to 10⁻¹²).
+pub const SATURN_HEAVY_ELEMENT_FRACTION: f64 = 0.291_570_634_037_780_8;

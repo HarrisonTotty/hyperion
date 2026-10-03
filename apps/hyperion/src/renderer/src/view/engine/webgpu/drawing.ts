@@ -46,6 +46,14 @@ import {
 /** The colour a pass clears to: black, opaque. */
 export const CLEAR_COLOUR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
 
+/**
+ * The load operation of a frame's draws' pass: `load` when it asks to keep what an earlier
+ * submission drew and has no post-processes, whose chain starts clear; `clear` otherwise.
+ */
+export function sceneLoadOp(frame: FrameSubmission, hasPostProcesses: boolean): GPULoadOp {
+  return !hasPostProcesses && frame.colourLoad === "load" ? "load" : "clear";
+}
+
 /** The format of a post-process chain's intermediates. */
 export const INTERMEDIATE_FORMAT: GPUTextureFormat = "rgba16float";
 
@@ -318,17 +326,19 @@ export class Drawing {
 
     const sceneColour =
       intermediates === null ? output.colour : this.#viewOf(intermediates[0], "2d", false);
+    // A frame drawn over an earlier one keeps its colour and depth (R07.T16's symbology).
+    const load = sceneLoadOp(frame, intermediates !== null);
     const scene = encoder.beginRenderPass({
       label: frame.label,
       colorAttachments: [
-        { view: sceneColour, loadOp: "clear", storeOp: "store", clearValue: CLEAR_COLOUR },
+        { view: sceneColour, loadOp: load, storeOp: "store", clearValue: CLEAR_COLOUR },
       ],
       ...(output.depth === null
         ? {}
         : {
             depthStencilAttachment: {
               view: output.depth,
-              depthLoadOp: "clear",
+              depthLoadOp: load,
               depthStoreOp: "store",
               depthClearValue: 0,
             },
@@ -554,7 +564,7 @@ export class Drawing {
     const { texture, spec } = this.#host.textureOf(handle);
     const declared = binding.viewDimension ?? "2d";
     const own = viewDimensionOf(spec);
-    if (own !== declared) {
+    if (!viewDimensionBinds(declared, own)) {
       throw new Error(
         `${owner} declares ${binding.name} as ${declared}, but ${handle.name} is ${own}`,
       );
@@ -613,6 +623,22 @@ function optionalTimestamps(writes: GPURenderPassTimestampWrites | undefined): {
   readonly timestampWrites?: GPURenderPassTimestampWrites;
 } {
   return writes === undefined ? {} : { timestampWrites: writes };
+}
+
+/**
+ * Whether a texture whose own view dimension is `own` binds where a layout declares `declared`.
+ *
+ * @remarks
+ * The same dimension always binds. A single-layer 2D texture (`own` `2d`) also binds as a
+ * one-layer `2d-array`, a view WebGPU allows (§6.1.4, `createView` with `arrayLayerCount` 1), so
+ * that a material declaring an array binds it whatever its layer count (R05.T11.a's normals atlas,
+ * whose layers depend on the device's limits). Nothing else is reinterpreted.
+ */
+export function viewDimensionBinds(
+  declared: GPUTextureViewDimension,
+  own: GPUTextureViewDimension,
+): boolean {
+  return own === declared || (declared === "2d-array" && own === "2d");
 }
 
 /** Encodes one resolved draw: direct, indexed or indirect, as its mesh and item say. */

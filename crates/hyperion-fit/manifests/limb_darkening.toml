@@ -1,0 +1,5 @@
+# The limb darkening of stars' discs (rendering plan R06, R06.T4.a, Design note 16): the power-2
+# coefficients of three VizieR catalogues on two grids. The task has no parameters; the grids are
+# constants of `src/tasks/limb_darkening.rs`.
+task = "limb_darkening"
+datasets = ["claret_2020_white_dwarfs", "claret_southworth_2022", "claret_southworth_2023"]
