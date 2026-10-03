@@ -525,7 +525,8 @@ its first task.
     `displays/view/viewRun.ts` (as `ROTATION NOT YET MODELLED` does), not from its label lines.
     `Frustum`, `HorizonCone` and `CameraRelativeBounds` are not R02's: T7.a defines them, and may
     reuse `sphereInFrustum` from `view/wireframe/cull.ts`. The two `TERRAIN:` lines are in the
-    guide's nomenclature row, still marked draft for the owner's sign-off.
+    guide's nomenclature row, signed off 2026-10-02 on the owner's delegation
+    (decisions-r05.md item 5).
   - _R04._ `hyperion-surface` has `src/lib.rs`, `src/tags.rs` (an empty `domain_tags! {}`) and
     `src/wasm.rs` (a private `mod wasm` on the browser target, exporting `generatorVersion` by
     `js_name`); no `tests/`, no `benches/`, and no dev-dependency on `hyperion-testkit` or
@@ -882,14 +883,17 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     R01 dropped Babylon (R01 Design note 24): it assumes forward depth with an infinite far plane,
     has exactly three media, rewrites the directional lights' colour and intensity every frame and
     is marked experimental. Earth's terms, each cited in T12.a:
-    - **Rayleigh**, exponential with an 8 km scale height, 4.85, 11.5 and 28.7 × 10⁻⁶ m⁻¹ at 680,
+    - **Rayleigh**, exponential with the US Standard Atmosphere's sea-level scale height, 8.43 km,
+      so that the column is Earth's (decisions-r05.md item 3), 4.85, 11.5 and 28.7 × 10⁻⁶ m⁻¹ at 680,
       550 and 440 nm, from Peck and Reeder 1972's refractivity with Bates 1984's King factor at
       288.15 K and 101,325 Pa (the US Standard Atmosphere's sea level, N = 2.547 × 10²⁵ m⁻³);
       recomputed, they match Bucholtz 1995's 4.51 × 10⁻²⁷ cm² at 550 nm to 0.1%. The tutorials'
       5.8, 13.5, 33.1 × 10⁻⁶ are a pure λ⁻⁴ law with no King factor and are not used. The
       recomputation lives in a test; R08 builds the per-gas formula.
-    - **Aerosol**, exponential with a 1.2 km scale height, Cornette–Shanks phase with g = 0.76
-      (Bruneton 2008, the brainstorm's value), an optical depth of 0.1 at 550 nm with Ångström
+    - **Aerosol**, exponential with a 1.2 km scale height, Cornette–Shanks phase with g = 0.584,
+      whose mean cosine, 0.65, is AERONET's continental asymmetry at 550 nm (Dubovik et al.
+      2002, Table 1); Bruneton 2008's 0.76 has a mean cosine of 0.81 and is not used
+      (decisions-r05.md item 1); an optical depth of 0.1 at 550 nm with Ångström
       exponent 1.3 and single-scattering albedo 0.92: Earth's measured continental aerosol
       (AERONET and MODIS climatologies), not Hillaire's reference, whose 5.3 × 10⁻³ at every
       wavelength is 20–40 times cleaner than a typical sky and whose flat spectrum is unphysical.
@@ -1129,7 +1133,8 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     shows and clear for 1 s before it goes, so that a patch arriving mid-frame cannot make the line
     flicker, which also keeps it within the guide's three-flashes-a-second limit. The wording is
     item 7 of the guide edits R02 drafts for the owner; this plan builds to the draft (in the
-    guide's nomenclature row, still marked draft on 2026-10-02). The line is one of the label
+    guide's nomenclature row, signed off 2026-10-02 on the owner's delegation, decisions-r05.md
+    item 5). The line is one of the label
     block's steady statements, from `labelStatements` in `displays/view/viewRun.ts`.
 24. **Streaming priority across views.** Demand is the union of every streaming view's selection.
     Each request's priority is the largest over the views that want it of w_view × (ρ ÷ τ), the
@@ -1678,8 +1683,8 @@ R02's `agx` in one full-screen pass and a `MAN` exposure.
 **R05.T12.a The medium.** `MediumTerm`, `AtmosphereMedium` and `EARTH_REFERENCE` (Design note 16),
 each constant with its citation re-checked: the three Rayleigh coefficients (Peck and Reeder 1972,
 Bates 1984, the US Standard Atmosphere 1976 for N), the aerosol's optical depth, Ångström exponent,
-single-scattering albedo, asymmetry and scale height (AERONET and MODIS climatologies; Bruneton
-2008 for g = 0.76), the ozone column and cross-sections (Serdyuchenko et al. 2014, as Bruneton
+single-scattering albedo, asymmetry and scale height (AERONET and MODIS climatologies; Dubovik
+et al. 2002 for the asymmetry), the ozone column and cross-sections (Serdyuchenko et al. 2014, as Bruneton
 2017 bins them), the top of the atmosphere and the ground albedo; Hillaire's reference medium as a
 second constant for comparison; and the Sun's per-channel top-of-atmosphere illuminance and the
 spectral-radiance-to-luminance factors (Bruneton 2017's method), computed by a script from the
@@ -2150,6 +2155,10 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
     figure, where sebh's reference code reaches 128 km; Hillaire's reference aerosol is 20–40 times
     cleaner than Earth's typical sky, so "Earth's reference atmosphere" is taken as Earth's measured
     aerosol, with Hillaire's as a comparison mode.
+  - The aerosol asymmetry (decisions-r05.md item 1): Cornette–Shanks g = 0.76 is a mean cosine of
+    0.81; Earth's measured 0.65 is g ≈ 0.58. Applied to the brainstorm on 2026-10-02.
+  - The Rayleigh column (decisions-r05.md item 3): an 8 km scale height at the sea-level density
+    leaves the column 5% short; the US Standard Atmosphere's 8.43 km carries it.
   - Horizon maps are sun-independent (R10's research), so the budget's "it needs rebaking only as
     the sun moves" is wrong: they are baked once with each patch.
   - The low setting's patch counts are about a quarter of the high setting's, not a ninth, because
@@ -2307,6 +2316,98 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
     presentation intervals by segment marks.
   - The test's trace (`src/main/fixtures/spike.trace.json`) was recorded on 2026-10-02 from
     Electron 44.4.3 headless on SwiftShader and trimmed to 190 ms of the events read.
+- **Deviations in T12.a, as built** (2026-10-02).
+  - _The solar inputs._ NREL is now NLR: E-490-00a is fetched from
+    `https://www.nlr.gov/media/docs/libraries/grid/e490_00a_amo.xls?sfvrsn=ce97914b_1`, an `.xls`.
+    The script reads a two-column CSV export of its `NewAM0` sheet (the procedure, both SHA-256s and
+    the CIE CSV's DOI and checksum are in `src/tools/solarFactors.ts`'s header) and refuses inputs
+    whose checksums differ. Neither input is committed (T12.d). No `just` recipe was added; the
+    script is `node apps/hyperion/scripts/solarFactors.mjs --e490 <csv> --cie <csv>`.
+  - _`solar.ts`'s shape._ It commits E-490's point samples at the three wavelengths, Bruneton's sun
+    (λ⁰) and sky (λ⁻³) factors in lm nm W⁻¹ and E-490's photopic illuminance (133,318 lx, 4% above
+    R02's 1.28 × 10⁵ lx for V = −26.76). It exposes `sunIlluminanceRgb()` (scaled so that its
+    Rec. 709 luminance is R02's) and `skyLuminanceScale()` (the factor from a table's radiance per
+    unit spectral irradiance to cd m⁻²), plus `rec709Luminance`. The XYZ-to-Rec. 709 matrix is the
+    seven-figure one `toneCurve.ts` carries, not Bruneton's four-figure IEC one.
+  - _The medium's shape._ `DensityProfile` is `exponential` or `tent`; `PhaseFunction` is `rayleigh`,
+    `cornette-shanks` or `none` (ozone). `AtmosphereMedium` is
+    `{ name, topHeightM, groundAlbedo, terms }` with no radius, since the tables take the figure (Design note 16). Added helpers:
+    `densityAt`, `columnLengthM`, `extinction`, `termNamed`, `CHANNEL_WAVELENGTHS_NM`.
+    `HILLAIRE_REFERENCE` is sebh's `SetupEarthAtmosphere`, with a black ground. R08's sketch of
+    these types (`cornetteShanks`, `topAltitudeM`, no `none` phase) follows R05 as built
+    (`cornette-shanks`, `topHeightM`, `none` for ozone) when R08 is re-validated.
+  - _The citations_ were checked by the science checker on 2026-10-02 and corrected: the aerosol
+    climatology (Remer 2008; Levy 2013), the Ångström exponent (Ångström 1929; Dubovik 2002), the
+    single-scattering albedo (Levy, Remer and Dubovik 2007), 300 DU and the Dobson unit (WMO/UNEP
+    2018), the ground albedo (Bruneton and Neyret 2008, Fig. 6).
+  - _Decided 2026-10-02 (delegated; the orchestration's `decisions-r05.md`)._
+    - Item 1: Earth's aerosol takes Cornette–Shanks g = 0.584, whose mean cosine, 0.650, is
+      AERONET's continental asymmetry at 550 nm (Dubovik et al. 2002, Table 1), in place of the
+      brainstorm's 0.76 (mean cosine 0.81); `HILLAIRE_REFERENCE` keeps 0.8. The brainstorm's
+      line is corrected. A test holds the mean cosine to 0.650 ± 0.002.
+    - Item 2: the ozone values stay Bruneton's and sebh's upward bins, so that both media share
+      Hillaire's ozone. Centred bins would be +10%, −6% and −19% at 680, 550 and 440 nm.
+    - Item 3: Earth's Rayleigh scale height is the US Standard Atmosphere 1976's sea-level
+      R*T₀ ÷ (M₀g₀) = 8,434.5 m, so that τ_R(550) = 0.0969 against Bodhaine et al. 1999's ≈ 0.097;
+      `HILLAIRE_REFERENCE` keeps 8 km. Tests recompute the height and hold τ_R(550) to 1% of
+      0.097. For R08: its tabulated profile is to reproduce Bodhaine's 0.097 to 1%.
+    - Item 4 (T12.d, ruled; the task is closed): neither raw input is committed (the E-490 table
+      is ASTM's; the CIE table is CC BY-SA 4.0 and not needed); the derived constants are, with
+      the attributions in `solar.ts` and `NOTICE`'s Data section (DOE/NLR, CIE, Serdyuchenko and
+      Gorshelev). `NOTICE` gains Bevy (MIT), Bruneton (BSD-3) and sebh (MIT); sebh's full MIT
+      text is in `multiScattering.wgsl`. Hillaire 2020's published images stay local and
+      untracked; only our own renders may be committed. Nothing packages `NOTICE` into the
+      built app yet: an ask of whichever plan adds packaging (R12).
+    - Item 5: the two `TERRAIN:` lines are signed off; the guide row loses its draft marker and
+      gains "Where both hold, `STREAMING` is shown." (applied here, with Design note 23 and
+      Consumes).
+- **Deviations in T12.b, as built** (2026-10-02).
+  - _The WGSL._ It is ported from Bevy 0.19.1 (tag `v0.19.1`; MIT notice and Bruneton's BSD notice
+    in `shaders/common.wgsl`), with sebh's MIT notice in full in `multiScattering.wgsl`, whose
+    structure is sebh's. It differs from Bevy as follows:
+    - The terms are evaluated per sample from a `Medium` uniform of at most 8 terms (`MAX_TERMS`;
+      `packMedium` refuses more), instead of Bevy 0.19's baked density and scattering tables.
+    - Every step is sampled at its midpoint. Bevy and sebh sample at 0.3 of each step and drop the
+      last step's remainder.
+    - Where Bevy's multiple-scattering kernel departs from sebh's, sebh is followed:
+      - the sun's direction;
+      - the ground bounce with its 1 ÷ π and the sun's transmittance read at the ground;
+      - sebh's 8 × 8 stratified directions.
+  - _Sampling._ Transmittance takes 256 steps a ray: at 128, one shallow texel from the ground was
+    1.2% off the oracle in blue on SwiftShader. Multiple scattering takes 32 steps a ray (sebh's
+    reference takes 20).
+  - _The sphere._ `AtmosphereTables(engine, medium, bottomRadiusM)` builds once per planet on a
+    sphere of one reference radius R_b (the smoke check uses WGS 84's mean radius R₁ =
+    6,371,008.8 m). A lookup in these tables reads height as r − R_b, so T12.c turns Design note
+    16's r = √(MN) + h into the table's own radius, r_table = R_b + h, with μ measured against
+    the spheroid normal; the curvature mismatch is what Design note 16 bounds. Which R_b (R₁ or
+    the Gaussian radius at some latitude) is T12.c's to settle and record.
+  - _The multiple-scattering table's mapping_ is sebh's (sub-texel remap, the sun's μ across, the
+    height up from 10 m above the ground). `multiScatteringRMuToUv` is in `common.wgsl` for T12.c.
+  - _The engine seam._ `RenderEngine.readTexture` gained an optional fourth parameter,
+    `access: "cpu" | "tolerance"`, mirroring `readBuffer`'s, so that the smoke page can read the
+    `presentation-only` tables (in `types.ts`, `webgpu/engine.ts` and `resilientEngine.ts`;
+    `engineBoundary.test.ts` already refuses `tolerance` outside `smoke/`). Approved by the
+    orchestrator on 2026-10-02 and recorded in R01's Risks.
+  - _The memory category._ `MemoryCategory` gained `atmosphere-tables`, appended.
+  - _The rebuild rule._ `setMedium` returns whether it rebuilt (by value: the medium and the
+    radius), keeps its key only once both dispatches are issued, and `builds` counts builds. On
+    the engine's `onRestored` the tables make their textures and kernels again and rebuild, so
+    `transmittance` and `multiScattering` are getters to read afresh; `dispose()` stops following
+    restores. The multiple-scattering kernel indexes its workgroup arrays by
+    `local_invocation_id`.
+  - _The counting fake lands here._ `renderer/src/test/countingRenderEngine.ts`
+    (`CountingRenderEngine`, `countingRenderEngine()`), named by T11.a, is built now for
+    `tables.test.ts` (build, no rebuild, rebuild on change, a failed pack, the restore); T11.a
+    extends it.
+  - _No engine test of the tolerance read._ `engineBoundary.test.ts` refuses a `tolerance` read
+    anywhere outside `smoke/`, tests included, so the smoke check is its test, as for
+    `readBuffer`'s.
+  - _The smoke check_ (`smoke/atmosphere.ts`, group "R05.T12.b the atmosphere's tables") holds
+    each of the 20 texels to 1% of the oracle's transmittance per channel. Below rgba16float's
+    least normal, 2⁻¹⁴, the bound is that absolute floor instead, since the stored value has lost
+    its relative precision there. The check also asserts that an ordinary readback is refused, and
+    passed on both variants on 2026-10-02.
 - **Deviations in T7.b, as built (the settings, 2026-10-02).** `view/quality/qualitySetting.ts`
   landed first and alone, for R06.T13.f and R07; `selectPatches` and `screenSpaceErrorPx` follow
   once T2's golden and T6's level table are built. `ViewSettings` has `terrain` only: T12.c adds

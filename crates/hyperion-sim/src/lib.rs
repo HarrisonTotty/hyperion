@@ -51,6 +51,11 @@
 //! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
 //!   the Roche, Hill and satellite-stability limits.
 //!
+//! The sky (rendering plan R06):
+//!
+//! - [`sky`]: the naked eye's threshold and glare; later the census of the stars an observer
+//!   sees, the unresolved band and the host stars' discs.
+//!
 //! [`math`], [`units`], [`version`] and the mechanism of [`rng`] live in `hyperion-base`, beneath
 //! this crate, and are re-exported here at their old paths. This crate's runtime dependencies are
 //! that crate and `hyperion-surface` (whose domain-tag registry the sim's own is checked disjoint
@@ -66,6 +71,7 @@ pub mod observe;
 pub mod orbit;
 pub mod planetary;
 pub mod rng;
+pub mod sky;
 pub mod stellar;
 pub mod tables;
 pub mod time;
