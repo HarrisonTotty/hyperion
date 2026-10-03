@@ -31,6 +31,7 @@ import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvase
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
+import { checkLitBody } from "./litBody";
 import { runSoak } from "./soak";
 import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
@@ -177,6 +178,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     checkBloom(engine, status.getSnapshot().targetRounding.rgba16float, checks),
   );
   await checks.group("R07.T15 tone mapping and output", () => checkTonemap(engine, checks));
+  await checks.group("R07.T4.c the lit-body BRDF", () => checkLitBody(engine, checks));
   await checks.group("R05.T12.c the atmosphere's frames", () =>
     checkAtmosphereFrames(engine, checks),
   );

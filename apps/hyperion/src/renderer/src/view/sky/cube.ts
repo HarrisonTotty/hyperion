@@ -6,24 +6,50 @@
  * Faces are in WebGPU's layer order, +X, −X, +Y, −Y, +Z, −Z, on the galactic axes, and a direction
  * maps to a face and its (u, v) as WebGPU's cube sampling does (WebGPU §"Cube map faces", after
  * the Vulkan and D3D tables): row 0 is the face's top. The bake's CPU splat and its WGSL splat
- * both follow this one mapping.
+ * both follow this one mapping, and compute it alike to the bit (see {@link cubeTexelOf}).
  */
 
-/** The faces of a cube, in WebGPU's layer order. */
+/** The number of faces of a cube. */
 export const CUBE_FACE_COUNT = 6;
+
+/** A cube face's layer: 0–5 for +X, −X, +Y, −Y, +Z, −Z. */
+export type CubeFace = 0 | 1 | 2 | 3 | 4 | 5;
 
 /** Where a direction lands on a cube of a given face size. */
 export interface CubeTexel {
-  /** 0–5: +X, −X, +Y, −Y, +Z, −Z. */
-  readonly face: number;
+  readonly face: CubeFace;
   readonly column: number;
   readonly row: number;
 }
 
 /**
+ * The texel along one face axis: the largest c in [0, size) with c × 2m ≤ (a + m) × size, each
+ * product and sum rounded to `f32`.
+ *
+ * @remarks
+ * WGSL's division may be off by 2.5 ulp but its addition and multiplication are correctly rounded,
+ * so the splat shader and this function both take an estimate and correct it by these comparisons
+ * alone; they then agree on every texel, edges included, which the GPU-against-CPU splat test of
+ * T13.g needs.
+ */
+function texelAlong(a: number, major: number, sizePx: number): number {
+  const f = Math.fround;
+  const span = f(2 * major);
+  const scaled = f(f(a + major) * sizePx);
+  let texel = Math.min(sizePx - 1, Math.max(0, Math.floor(scaled / span)));
+  while (texel > 0 && f(texel * span) > scaled) {
+    texel -= 1;
+  }
+  while (texel + 1 < sizePx && f((texel + 1) * span) <= scaled) {
+    texel += 1;
+  }
+  return texel;
+}
+
+/**
  * The face and texel a direction falls in.
  *
- * @param x - The direction's components, any length but not zero.
+ * @param x - The direction's components, `f32` values, any length but not zero.
  * @param sizePx - The face's side, texels.
  * @remarks
  * Ties between axes go to x, then y, then z. A direction exactly on a face's far edge is kept on
@@ -31,10 +57,13 @@ export interface CubeTexel {
  * @throws Error for a zero or non-finite direction.
  */
 export function cubeTexelOf(x: number, y: number, z: number, sizePx: number): CubeTexel {
+  if (!(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z))) {
+    throw new Error(`(${x}, ${y}, ${z}) is not a direction`);
+  }
   const ax = Math.abs(x);
   const ay = Math.abs(y);
   const az = Math.abs(z);
-  let face: number;
+  let face: CubeFace;
   let u: number;
   let v: number;
   let major: number;
@@ -54,15 +83,13 @@ export function cubeTexelOf(x: number, y: number, z: number, sizePx: number): Cu
     u = z >= 0 ? x : -x;
     v = -y;
   }
-  if (!(major > 0) || !Number.isFinite(major)) {
+  if (!(major > 0)) {
     throw new Error(`(${x}, ${y}, ${z}) is not a direction`);
   }
-  const s = (u / major + 1) / 2;
-  const t = (v / major + 1) / 2;
   return {
     face,
-    column: Math.min(sizePx - 1, Math.max(0, Math.floor(s * sizePx))),
-    row: Math.min(sizePx - 1, Math.max(0, Math.floor(t * sizePx))),
+    column: texelAlong(Math.fround(u), Math.fround(major), sizePx),
+    row: texelAlong(Math.fround(v), Math.fround(major), sizePx),
   };
 }
 

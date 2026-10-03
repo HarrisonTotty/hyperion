@@ -322,7 +322,11 @@ function horizontalKnots(segments: ReadonlyArray<DescentSegment>): Knot[] {
 
 /** A landing site and the azimuth the descent approaches it along. */
 export interface LandingSite {
-  /** The latitude and longitude of the site's direction from the centre, rad. */
+  /**
+   * The site's parametric (reduced) latitude β and its longitude, rad: the site is the spheroid's
+   * point M·d over the unit direction d of latitude β, so its geodetic latitude is a little
+   * larger, 60.083° at β = 60°.
+   */
   readonly latitudeRad: number;
   readonly longitudeRad: number;
   /** The approach's azimuth at the site, clockwise from north, rad. */
@@ -355,9 +359,38 @@ export interface DescentPose {
    * placed (the site itself at touchdown).
    */
   readonly groundPointM: Vec3;
+  /**
+   * The unit direction d of the track's point beneath the camera, the one the camera and
+   * `groundPointM` stand over along the spheroid's normal (M·d + h·ν, R05 Design note 5). This is
+   * the direction a height query (`surfaceHeightM`) or a patch key (`xyzToFaceUv`) takes, not the
+   * geocentric direction of either point.
+   */
+  readonly groundDir: Vec3;
 }
 
-/** SplitMix64's step (Steele, Lea and Flood 2014): the next state and a 64-bit output. */
+/**
+ * The unit direction d of a body-fixed point p on the spheroid, p = M·d: d = M⁻¹p ÷ |M⁻¹p|, with
+ * M = diag(a, a, c) (R05 Design note 5). This is the direction the bake, the collision interpolant
+ * and the patch keys take; p ÷ |p|, the geocentric direction, is off by about f sin 2β ÷ 2 (f ≈ 1 ÷ 298
+ * the flattening, β the latitude), up to 0.1° at 45° and 0.036° (4 km) at seed 7's site, which
+ * lands a height query on other ground.
+ *
+ * @remarks
+ * Exact for a point on the spheroid. A point h above it along the normal maps to a direction off
+ * by about |h| f sin 2φ ÷ a (6 m on the ground at h = 1.8 km): take the direction the point was
+ * built from (`DescentPose.groundDir`) where there is one.
+ */
+export function datumDirection(figure: BodyFigure, p: Vec3): Vec3 {
+  return normalise(
+    vec3(p.x / figure.equatorialRadiusM, p.y / figure.equatorialRadiusM, p.z / figure.polarRadiusM),
+  );
+}
+
+/**
+ * SplitMix64's step, as Vigna's `splitmix64.c` and JDK 8's `SplittableRandom` have it: the golden
+ * gamma increment 0x9e3779b97f4a7c15 (Steele, Lea and Flood 2014, OOPSLA, Fig. 16) and Stafford's
+ * Mix13 output mixer (the paper's `mix64variant13`): the next state and a 64-bit output.
+ */
 function splitMix64(state: bigint): readonly [bigint, bigint] {
   const mask = (1n << 64n) - 1n;
   const next = (state + 0x9e37_79b9_7f4a_7c15n) & mask;
@@ -372,11 +405,15 @@ function unitOf(draw: bigint): number {
   return Number(draw >> 11n) / 2 ** 53;
 }
 
-/** The latitudes a site is drawn between, rad: the band where the test planet's faces meet both poles' axes least. */
+/**
+ * The parametric latitudes a site is drawn between, rad: ±60°, a geodetic ±60.083°, so that the
+ * scene's equinoctial Sun stands at least 29.9° above the site's horizon (lane C's scene).
+ */
 const SITE_LATITUDE_LIMIT_RAD = (60 * Math.PI) / 180;
 
 /**
- * The landing site and approach azimuth of a seed, uniform over the surface between ±60° latitude
+ * The landing site and approach azimuth of a seed, uniform in direction between ±60° parametric
+ * latitude (within 0.7% of uniform over the spheroid's surface)
  * and uniform in azimuth.
  *
  * @remarks
@@ -464,6 +501,11 @@ export class DescentProfile {
     );
     this.#heading = add(scale(north, Math.cos(az)), scale(east, Math.sin(az)));
     this.#arcRadiusM = (figure.equatorialRadiusM + figure.polarRadiusM) / 2;
+  }
+
+  /** The landing site's unit direction d (the spheroid point M·d, Design note 5). */
+  get siteDir(): Vec3 {
+    return this.#siteDir;
   }
 
   /** The segment under way at `tS`, clamped to the script. */
@@ -559,6 +601,7 @@ export class DescentProfile {
       horizontalSpeedMps,
       verticalSpeedMps,
       groundPointM: vec3(g[0], g[1], g[2]),
+      groundDir: dir,
     };
   }
 }

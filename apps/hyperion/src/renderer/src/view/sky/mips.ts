@@ -17,6 +17,13 @@ import { CUBE_FACE_COUNT, texelSolidAnglesSr } from "./cube";
 /** The exponent the brightest texel is scaled to at most: 2¹⁵. */
 export const CUBE_PEAK_EXPONENT = 15;
 
+/** Refuses a face that is not `sizePx`² `rgba` texels. */
+function assertFace(face: Float32Array, sizePx: number): void {
+  if (face.length !== sizePx * sizePx * 4) {
+    throw new Error(`${face.length} floats are not a ${sizePx}² face of rgba texels`);
+  }
+}
+
 /**
  * The texels one mip step merges along each side: 2, or 3 for a 3-texel level (3,072's last step,
  * 3 → 1).
@@ -53,14 +60,19 @@ export function mipSizes(sizePx: number): number[] {
  * luminance, cd/m². Alpha is left as it is.
  *
  * @param face - One face's `rgba` texels, rows top to bottom.
+ * @throws Error when the face or the solid angles are not `sizePx`² texels.
  */
 export function divideBySolidAngle(
   face: Float32Array,
   sizePx: number,
   solidAnglesSr: Float64Array,
 ): void {
+  assertFace(face, sizePx);
+  if (solidAnglesSr.length !== sizePx * sizePx) {
+    throw new Error(`${solidAnglesSr.length} solid angles do not cover a ${sizePx}² face`);
+  }
   for (let texel = 0; texel < sizePx * sizePx; texel += 1) {
-    const omega = solidAnglesSr[texel] ?? 1;
+    const omega = solidAnglesSr[texel] ?? Number.NaN;
     for (let channel = 0; channel < 3; channel += 1) {
       const at = texel * 4 + channel;
       face[at] = (face[at] ?? 0) / omega;
@@ -79,7 +91,14 @@ export function peakScaleExponent(faces: ReadonlyArray<Float32Array>): number {
   let peak = 0;
   for (const face of faces) {
     for (let texel = 0; texel < face.length; texel += 4) {
-      peak = Math.max(peak, face[texel] ?? 0, face[texel + 1] ?? 0, face[texel + 2] ?? 0);
+      for (let channel = 0; channel < 3; channel += 1) {
+        const value = face[texel + channel] ?? 0;
+        // A non-finite texel is a bug upstream, which the bake's finiteness check reports; it
+        // must not set the scale of the rest.
+        if (Number.isFinite(value) && value > peak) {
+          peak = value;
+        }
+      }
     }
   }
   if (!(peak > 0) || !Number.isFinite(peak)) {
@@ -112,8 +131,10 @@ export function scaleByPowerOfTwo(face: Float32Array, exponent: number): void {
  * @param level0 - The face's `rgba` luminances, rows top to bottom.
  * @returns Every level, level 0 (the argument itself) first, down to 1 × 1. Alpha is averaged the
  *   same way.
+ * @throws Error when `level0` is not `sizePx`² `rgba` texels, or a level has no mip step.
  */
 export function faceMipChain(level0: Float32Array, sizePx: number): Float32Array[] {
+  assertFace(level0, sizePx);
   const levels = [level0];
   let size = sizePx;
   let texels = level0;
@@ -163,6 +184,9 @@ export function cubeLevels(faceChains: ReadonlyArray<ReadonlyArray<Float32Array>
     throw new Error(`a cube has ${CUBE_FACE_COUNT} faces, not ${faceChains.length}`);
   }
   const levelCount = faceChains[0]?.length ?? 0;
+  if (faceChains.some((chain) => chain.length !== levelCount)) {
+    throw new Error("a cube's faces have mip chains of different lengths");
+  }
   return Array.from({ length: levelCount }, (_, level) => {
     const faces = faceChains.map((chain) => {
       const face = chain[level];

@@ -17,6 +17,7 @@
     "src/renderer/src/view/spike/surfaceQuery.ts",
     "src/renderer/src/view/quality/terrainKinds.ts",
     "src/renderer/src/geometry/vec3.ts",
+    "src/renderer/src/view/sky/decodePayload.ts",
     "src/renderer/src/generated/surface/*.d.ts"
   ]
 }
