@@ -93,6 +93,17 @@ client *args: gen-surface
 place-ship *args:
     cd apps/hyperion && node scripts/placeShip.mjs "$@"
 
+# The descent's demand record (R05.T13.a, Design note 19): the scripted descent at a fixed step
+# through `selectPatches` with ranges from real bakes, in cells of {hard, min(hard, 4σ_n)} ×
+# {ridges off, on} × {high, low}, written to `docs/measurements/descent-spike/`. Options:
+# `--rules hard,calibrated`, `--ridges off,on`, `--settings high,low`, `--rate 64` (Hz),
+# `--cap-hours 2` (wall time, shared by the cells; a cell cut short says so), `--out <dir>`;
+# `--write-fixture` writes the unit test's ranges instead. CPU only; not part of `ci`.
+# Record the descent's patch demand, e.g. `just descent-demand --rules calibrated`.
+[positional-arguments]
+descent-demand *args: gen-surface
+    cd apps/hyperion && node --no-warnings scripts/descentDemand.mjs "$@"
+
 # Build the client and run the headless smoke harness on SwiftShader, once per capability path
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a

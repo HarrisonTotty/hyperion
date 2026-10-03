@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { norm, sub } from "../../geometry/vec3";
+import { normalise, norm, sub } from "../../geometry/vec3";
+import { surfacePoint } from "../terrain/planet";
 import { rotateToBody } from "../coords/rotation";
 import { WGS84_FIGURE } from "../../test/terrainFixtures";
-import { blendS, DESCENT_SEGMENTS, DescentProfile, landingSiteOf } from "./descentProfile";
+import {
+  blendS,
+  datumDirection,
+  DESCENT_SEGMENTS,
+  DescentProfile,
+  landingSiteOf,
+} from "./descentProfile";
 import { TEST_PLANET_RATE_RAD_PER_S, testPlanetRotationAt } from "./rotation";
 
 const PROFILE = new DescentProfile(WGS84_FIGURE, landingSiteOf(7n));
@@ -104,6 +111,31 @@ describe("the scripted descent", () => {
     const flat = PROFILE.poseAt(600);
     const lifted = raised.poseAt(600);
     expect(norm(sub(lifted.groundPointM, flat.groundPointM))).toBeCloseTo(1200, 3);
+  });
+
+  it("stands every pose over its ground direction d, the spheroid point M·d's", () => {
+    const raised = new DescentProfile(WGS84_FIGURE, landingSiteOf(7n), { siteHeightM: -1845 });
+    for (const t of [30, 600, 1000, 1100, 1150, 1225, 1230]) {
+      const pose = raised.poseAt(t);
+      const d = [pose.groundDir.x, pose.groundDir.y, pose.groundDir.z] as const;
+      const ground = surfacePoint(WGS84_FIGURE, d, -1845);
+      expect(
+        norm(sub(pose.groundPointM, { x: ground[0], y: ground[1], z: ground[2] })),
+      ).toBeLessThan(1e-6);
+      expect(norm(pose.groundDir)).toBeCloseTo(1, 15);
+    }
+    expect(raised.poseAt(raised.durationS).groundDir).toEqual(raised.siteDir);
+  });
+
+  it("recovers d from a spheroid point, where the geocentric direction is off by up to f ÷ 2", () => {
+    const d = PROFILE.siteDir;
+    const p = surfacePoint(WGS84_FIGURE, [d.x, d.y, d.z], 0);
+    const point = { x: p[0], y: p[1], z: p[2] };
+    expect(norm(sub(datumDirection(WGS84_FIGURE, point), d))).toBeLessThan(1e-15);
+    // p ÷ |p| is off by about f sin 2β ÷ 2: 0.036° at seed 7's site, 4 km along the ground.
+    const offRad = norm(sub(normalise(point), d));
+    expect(offRad).toBeGreaterThan(5e-4);
+    expect(offRad).toBeLessThan(1 / 298.257223563 / 2);
   });
 
   it("refuses a seed outside u64", () => {

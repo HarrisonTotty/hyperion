@@ -6,8 +6,9 @@
  *
  * @remarks
  * The rate is the Earth Rotation Angle's, 1.00273781191135448 turns a UT1 day (IERS Conventions
- * 2010, eq. 5.15): ω = 2π × 1.00273781191135448 ÷ 86,400 s = 7.292115146706979 × 10⁻⁵ rad/s, which
- * IERS Table 1.1 and WGS 84 (NIMA TR8350.2 §3.2.4) round to 7.292115 × 10⁻⁵; a period of
+ * 2010, eq. 5.14 and Table 1.1): ω = 2π × 1.00273781191135448 ÷ 86,400 s = 7.292115146706979 × 10⁻⁵ rad/s, which
+ * IERS Table 1.2 (GRS80) and WGS 84 (NIMA TR8350.2 §3.2.4, eq. 3-6) round to 7.292115 × 10⁻⁵ (eq. 3-7
+ * gives the unrounded 7292115.1467 × 10⁻¹¹); a period of
  * 86,164.0989 s, the stellar day. Re-checked in T13.a: the plan's 86,164.0905 s is the sidereal day,
  * measured against the precessing equinox rather than inertial space, 8.4 ms shorter; a body frame
  * that does not rotate turns with the stellar day. The angle is reduced from the whole seconds since
@@ -17,7 +18,7 @@
 import { vec3 } from "../../geometry/vec3";
 import { type Rotation3, rotation3FromRows } from "../coords/rotation";
 
-/** The test planet's rotation rate, rad/s: the Earth Rotation Angle's (IERS Conventions 2010, eq. 5.15). */
+/** The test planet's rotation rate, rad/s: the Earth Rotation Angle's (IERS Conventions 2010, eq. 5.14 and Table 1.1). */
 export const TEST_PLANET_RATE_RAD_PER_S = (2 * Math.PI * 1.002_737_811_911_354_6) / 86_400;
 
 /** The test planet's rotation period, s: 2π ÷ ω, the stellar day. */

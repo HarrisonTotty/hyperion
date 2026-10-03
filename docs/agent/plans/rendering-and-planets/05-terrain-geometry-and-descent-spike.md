@@ -852,7 +852,8 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 14. **The test planet turns.** A grounded or hovering camera must see still ground, so the scripted
     path is defined in body-fixed coordinates and turned into the body frame each frame by the
     planet's rotation. Until P14.T14.c's `body_fixed_at` exists the test planet carries a fixed pole
-    and a sidereal period of 86,164.0905 s (IERS; re-checked in T13.a) in the shape R02's rotation
+    and a stellar period of 86,164.0989 s (IERS Conventions 2010, eq. 5.14; corrected in T13.a from
+    the sidereal 86,164.0905 s, which is measured against the precessing equinox) in the shape R02's rotation
     interface takes, reducing the angle from the integer span since its epoch, as `body_fixed_at`
     will. That shape, as built, is a `Rotation3` evaluated at each frame's time (R02's
     `ViewBody.rotation`, read through `FrameOrigins.bodyFixedRotation`), built with
@@ -3381,3 +3382,95 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   camera give −1,846.9 to −1,844.3 m. Looking down from below the baked surface, every patch's
   box lies behind the camera, so the frustum rightly culls them all, and the contact, 107 m
   below the ground, forces nothing. No selection change.
+- **Deviations in T13.a, as built** (2026-10-03).
+  - `view/spike/descentProfile.ts`: `landingSiteOf(seed)` (SplitMix64 from the seed, uniform in
+    direction over ±60° parametric latitude, a geodetic ±60.083°, so the scene's Sun stands at least
+    29.9° high, and in azimuth), `DescentProfile(figure, site, terrain?)` with `durationS`,
+    `segmentAt`, `segmentSpans`, `positionAt` and `poseAt(tS): DescentPose`, and
+    `DESCENT_SEGMENTS`, the table as data with each segment's vertical shape. The vertical speeds
+    are re-fitted, not the durations: each boundary altitude holds exactly with the 5 s (1 s)
+    velocity blends, so a level segment before a descending one climbs gently (the orbit coast by
+    about 18 m/s, the low pass by about 0.07 m/s, more over raised terrain). The horizontal speed is
+    the ground track's on a great circle of the mean radius; the camera looks along the track,
+    pitched 30° down at 300 m/s and above, turning to the nadir at rest.
+  - _Terrain (orchestrator's ruling, 2026-10-03):_ `terrain` takes `siteHeightM` (the terrain's
+    height at the site) and `trackMaxHeightM` (an upper bound on the terrain under the low pass's
+    track, baked ranges plus ε over the patches under it), both measured once by the caller (lane
+    C's spike worker) so that the script stays a pure function of the seed and the two numbers.
+    Every altitude and `groundPointM` sit on the site's height (`DescentPose.altitudeM` above the
+    spheroid; the added `clearanceM` above the site, which the demand prediction reads); the low
+    fast pass, and its neighbours' ends that meet it, fly 300 m above `trackMaxHeightM`. Other
+    segments do not follow the relief along the track, which is fine above the low pass's
+    altitude; the vertical descent and the hover are over the site itself.
+  - `view/spike/rotation.ts`: `testPlanetRotationAt(tS)`, a spin about the body-fixed z axis at
+    the Earth Rotation Angle's rate, ω = 2π × 1.00273781191135448 ÷ 86,400 s (IERS Conventions 2010,
+    eq. 5.15), with the angle reduced from whole seconds. **Corrected (T13.a's re-check):** the
+    plan's 86,164.0905 s is the sidereal day, measured against the precessing equinox; a body frame
+    that does not rotate turns with the stellar day, 86,164.0989 s (orchestrator's ruling).
+  - `view/spike/demand.ts`: the closed form at k = 5 (`closedFormDemandPerS`, constants 8k² and
+    3πk² ÷ ln 2), the per-level prediction (`perLevelDemand`, `levelRatio`, `capAltitudeM`) and
+    `boundedPlanet(planet, rule, omittedSigmaM)`, the one place min(ε_n, 4σ_n) is built, keeping
+    the hard bound where σ_n = 0. σ_n is lane A's `omittedSigmaM(level, ridges)` export, passed in
+    by the caller (only workers and tests load the module); the interim table is gone.
+  - `view/spike/fixedStep.ts` (`runFixedStep`, `segmentFigures`) and `view/spike/demandRecord.ts`
+    (`runCell`, `measureTerrain`, `testWindows`, the fixture's format, `demandSummary`), with
+    `view/spike/testPlanetFigure.ts` (`TEST_PLANET_FIGURE`, WGS 84). The run uses the terrain's
+    own `PatchCache`, `DrawSetResolver` and `retain` (lane B's 5d90fab; an earlier cache of the run's
+    own, which kept no ancestors, made the selection churn), in the terrain pass's order: select
+    with the cache's baked ranges, resolve, retain, then bake. The pool is ideal: every request is
+    baked and inserted the same frame, with its real baked range; the demand's breadth-first rule
+    still costs a deep patch a frame per unbaked ancestor. So the measured demand is the patches
+    baked a second. Each frame records the patches, the bakes, `limited`, the stand-ins and missing
+    patches, the `selectPatches` time and D; bake time is kept out of the wall-time cap. Settings:
+    high 1080p, τ 1 px, low 720p, τ 2 px, 60°, each with its own `terrainSlotLayout` and a budget of
+    ⌊slots ÷ 2⌋. The record's terrain (`measureTerrain`): the site's height is the module's
+    `surfaceHeightM` (T4.c's collision interpolant) at the site's direction; the track maximum is the
+    highest baked height plus ε_14 over the level-14 patches under the low pass's and the
+    slowdown's track, sampled every 250 m, a true bound. On seed 7 the site lies at −1,845.8 m.
+    **Corrected (2026-10-03, lane B's diagnosis):** every height query and patch key takes the
+    direction d of the spheroid point M·d (Design note 5), which the profile now exposes as
+    `DescentPose.groundDir` and `DescentProfile.siteDir`, with `datumDirection(figure, p)` =
+    M⁻¹p ÷ |M⁻¹p| for a point on the spheroid. The first record read the geocentric p ÷ |p|,
+    0.036° (4 km) off at seed 7's site, and found −1,953.2 m there: the camera hovered 107 m
+    underground looking down, so selection rightly culled everything. `siteHeight.wasm.test.ts`
+    holds the measured height inside the finest bake's range under the site.
+  - _The craft's contact_ (`craftContacts`): one contact at the ground point while
+    `isDescending` holds or the craft is grounded, its clearance within the held radius r_g (its
+    10 m plus one finest patch), so that an exact hover (vertical speed 0) keeps its forced
+    region (Design note 9's grounded bodies).
+  - _Scope (orchestrator's ruling, 2026-10-03):_ the plan's whole-descent fixed-step test is split.
+    The unit test (`demandRecord.test.ts`) pins the selection hash of short windows, 1 s measured
+    after 1 s of warm-up, ending 2 s before each segment's end, on both settings, under
+    min(hard, 4σ_n), ridges off, reading baked ranges, the level table and σ_n from
+    `view/spike/fixtures/descentRanges.txt`, which `just descent-demand --write-fixture` writes
+    from the module (TEST_PLANET_VERSION 2; regenerate it with the module). The whole descent is
+    the command `just descent-demand` (`apps/hyperion/scripts/descentDemand.mjs`): cells
+    {hard, min(hard, 4σ_n)} × {ridges off, on} × {high, low}, a configurable rate (64 Hz by
+    default) and a wall-time cap (2 h, shared by the cells), writing
+    `docs/measurements/descent-spike/<date>-demand-<rules>.{json,md}` with any truncation, the rate
+    and the frames covered stated. The ridged planet's 4σ cells are labelled "statistical, not a
+    bound on the ridged planet (bound.rs finding)".
+  - **Finding: D's factor of two** (windows re-measured 2026-10-03 after the direction fix). In
+    the windows (min(hard, 4σ_n), ridges off), demand ÷ D is, high then low: orbit coast 0 / 0
+    (D 0.9 and 0.04 a second, nothing new selected), descent arc 0.67 / 0.81, approach and flare
+    1.33 / 2.74, low fast pass 1.40 / 3.09, slowdown 0.34 / 0.99, vertical descent 0 / 0 (D 81
+    and 25), and the hover 0 against 0. The test asserts the five within a factor of two: high's
+    arc, approach and low pass, low's arc and slowdown. Two causes are clear. D assumes a ring all
+    round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
+    chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
+    vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
+    vertical descent's window (about 80 m to 40 m). On the low setting D is also low, since below
+    k ≈ 3 the quadtree's granularity floors the count (Design note 19's "about a quarter").
+    **Proposed correction, not the gate:** D_frustum = Σ_L 4 k_L tan(φ_x ÷ 2) v ÷ S_L +
+    (3π k² ÷ ln 2) |ḣ| ÷ h above the cap and the vertical term zero below it. The whole-descent
+    record has the per-segment figures. For T18 and T19.
+  - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
+    camera underground (the direction above), not selection: lane B's
+    `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With
+    the site at −1,845.8 m the windows select 66 patches (high) and 69 (low) at the hover, the
+    forced region included, and the vertical descent's and the hover's hashes are pinned.
+  - **Finding: budgeted selection under the hard bound churns** (probe, 2026-10-03, high, low fast
+    pass): 952 patches, `limited` 72% of frames, about 830 new keys a frame (53,000 a second
+    against D's 311), `selectPatches` p50 116 ms. Lane B fixed it (5d90fab, the streaming gate,
+    resident ancestors pinned, deepest evicted first); the hard cells' full record follows the
+    collapse's fix.
