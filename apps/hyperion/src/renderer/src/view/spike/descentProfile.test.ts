@@ -9,6 +9,7 @@ import {
   datumDirection,
   DESCENT_SEGMENTS,
   DescentProfile,
+  type DescentTerrain,
   FLOOR_TOLERANCE_M,
   landingSiteOf,
   trackStretches,
@@ -146,6 +147,26 @@ describe("the scripted descent", () => {
   });
 });
 
+/**
+ * FNV-1a over the bits of every 64 Hz pose's position and clearance: a profile's fingerprint, to
+ * pin today's profile against the code that made it.
+ */
+function poseHash(profile: DescentProfile): string {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = (1n << 64n) - 1n;
+  const view = new DataView(new ArrayBuffer(8));
+  const steps = Math.round(profile.durationS * 64);
+  for (let n = 0; n <= steps; n += 1) {
+    const pose = profile.poseAt(n / 64);
+    for (const value of [pose.positionM.x, pose.positionM.y, pose.positionM.z, pose.clearanceM]) {
+      view.setFloat64(0, value);
+      hash = ((hash ^ view.getBigUint64(0)) * prime) & mask;
+    }
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
 /** Every 64 Hz sample time of a profile. */
 function grid(profile: DescentProfile): number[] {
   return Array.from({ length: Math.round(profile.durationS * 64) + 1 }, (_, n) => n / 64);
@@ -188,6 +209,20 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
     expect(stretches[index("approach and flare 1")]).toMatchObject({ level: 12, clearanceM: 200 });
     expect(stretches[index("approach and flare 12")]).toMatchObject({ level: 14, clearanceM: 200 });
     expect(stretches[index("descent arc 9")]).toMatchObject({ level: 4, clearanceM: 1000 });
+  });
+
+  it("is the profile before the ruling, bit for bit, where no floor lifts it", () => {
+    // Fingerprints of the 64 Hz poses that 003a6a3's profile (before the ruling) gave. A lifted low
+    // pass (the default track maximum, 0 m, above a site below the datum) now holds level, so
+    // those profiles changed on purpose.
+    const before: ReadonlyArray<readonly [DescentTerrain, string]> = [
+      [{}, "97246927f5515e5c"],
+      [{ siteHeightM: 1845.8 }, "0464f94febbca6d9"],
+      [{ siteHeightM: 1200, trackMaxHeightM: 1000 }, "4a035319bc790f00"],
+    ];
+    for (const [terrain, hash] of before) {
+      expect(poseHash(new DescentProfile(WGS84_FIGURE, site, terrain))).toBe(hash);
+    }
   });
 
   it("is today's profile, bit for bit, with every floor at the site's height", () => {
@@ -255,11 +290,12 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
     });
     const span = pass.segmentSpans().find(({ name }) => name === "low fast pass");
     const levelM = SITE_M + 800;
-    expect(pass.poseAt(span?.startS ?? NaN).altitudeM).toBeCloseTo(levelM, 3);
-    expect(pass.poseAt(span?.endS ?? NaN).altitudeM).toBeCloseTo(levelM, 3);
+    const heights: number[] = [];
     for (let t = span?.startS ?? NaN; t <= (span?.endS ?? NaN); t += 1 / 64) {
-      expect(pass.poseAt(t).altitudeM).toBeGreaterThanOrEqual(levelM - FLOOR_TOLERANCE_M);
+      heights.push(pass.poseAt(t).altitudeM);
     }
+    expect(Math.min(...heights)).toBeCloseTo(levelM, 3);
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1e-3);
   });
 
   it("stretches the vertical descent from a raised top, keeping its 20 m/s", () => {
@@ -282,7 +318,9 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
     }
   });
 
-  it("refuses floors that do not match the plan, or that cannot be cleared", () => {
+  // The fourth lift's RangeError is a guard: each lift raises a short piece's two boundaries, and so
+  // the whole piece, by its deficit, and no floor met in testing needed a second round.
+  it("refuses floors that do not match the plan, or are not finite", () => {
     expect(
       () => new DescentProfile(WGS84_FIGURE, site, { stretchMaxHeightsM: floors({}).slice(1) }),
     ).toThrow(RangeError);

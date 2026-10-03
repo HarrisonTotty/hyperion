@@ -37,8 +37,8 @@ const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
     "orbit coast": "95585482dc0e857e",
     "descent arc": "26ca95e0a47c24e5",
-    "approach and flare": "646df768f487a849",
-    "low fast pass": "f93024ac511f9d17",
+    "approach and flare": "6f6bbfda9841648b",
+    "low fast pass": "5af4f15ee2ca16cc",
     slowdown: "074616e348f1b6ab",
     "vertical descent": "7f86f5753748ba08",
     "hover and touchdown": "3815401074eed29e",
@@ -46,8 +46,8 @@ const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   low: {
     "orbit coast": "c9a36f3ba4350b99",
     "descent arc": "6d299f0001c65fb6",
-    "approach and flare": "c343a171ef205a69",
-    "low fast pass": "f31bee1083eb8b47",
+    "approach and flare": "7fb86ab0dc2e6f7f",
+    "low fast pass": "0e3991c21a0c6b9f",
     slowdown: "2835d6eec533f966",
     "vertical descent": "32c0390b8dfa7eae",
     "hover and touchdown": "1e59c48692289e86",
