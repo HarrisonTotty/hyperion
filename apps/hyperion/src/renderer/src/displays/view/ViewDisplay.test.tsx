@@ -756,7 +756,7 @@ describe("the VIEW display's server scene", () => {
       before.includes(STAR_SOURCE),
       sky.body.eye?.field_factor,
       sky.body.exclude_system,
-      after.includes("V 7.4 EYE · CLUSTERS NOT MODELLED"),
+      after.includes("V 7.4 mag EYE · CLUSTERS: NOT YET MODELLED"),
       after.includes(STAR_SOURCE),
     ]).toEqual([true, 1.4, ELSEWHERE, true, false]);
   });
