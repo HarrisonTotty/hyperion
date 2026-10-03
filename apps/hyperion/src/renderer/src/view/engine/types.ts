@@ -174,7 +174,8 @@ export interface TextureBindingSpec {
   readonly sampleType?: "float" | "unfilterable-float" | "depth" | "uint" | "sint";
   /**
    * `2d` by default; `2d-array` for layers, `3d` or `cube`. It must be the bound texture's own
-   * dimension, which the adapter checks at each bind.
+   * dimension, which the adapter checks at each bind, except that a `2d-array` binding also takes
+   * a single-layer 2D texture as a one-layer array (R05.T11.a).
    */
   readonly viewDimension?: "2d" | "2d-array" | "3d" | "cube";
 }

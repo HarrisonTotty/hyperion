@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeAdapter, type FakeDevice, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
+import { FakeAdapter, type FakeDevice, FakeGpu, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
@@ -284,3 +284,104 @@ function renderEmptyFrame(engine: WebGpuRenderEngine, label: string): void {
       postProcesses: [],
     });
 }
+
+/** A 4 × 4 sampled `rg16float` texture of `layers` layers. */
+function sampled(name: string, layers: number): TextureSpec {
+  return {
+    name,
+    size: { width: 4, height: 4, depthOrArrayLayers: layers },
+    dimension: "2d",
+    format: "rg16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  };
+}
+
+/** Draws `texture` once through a material that declares its binding as `viewDimension`. */
+async function drawWith(
+  engine: WebGpuRenderEngine,
+  texture: TextureHandle,
+  viewDimension: "2d" | "2d-array",
+): Promise<void> {
+  const mesh = engine.createMesh({
+    name: "triangle",
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    indices: null,
+    topology: "triangle-list",
+    attributes: {},
+  });
+  const material = await engine.createMaterialAsync(
+    {
+      name: `layers-${viewDimension}`,
+      displayName: "LAYERS",
+      vertexWgsl: "",
+      fragmentWgsl: "",
+      uniforms: [],
+      samplers: [],
+      textures: [{ name: "tiles", binding: 0, viewDimension }],
+      cullMode: "none",
+      depthWrite: false,
+      colourWrites: true,
+      blend: "none",
+    },
+    ["rgba16float"],
+    [mesh],
+  );
+  engine
+    .createRenderTarget({
+      name: "out",
+      size: { widthPx: 4, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: false,
+      category: "render-targets",
+    })
+    .render({
+      label: "out",
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [
+        {
+          mesh,
+          material,
+          offsetFromCameraM: new Float32Array(3),
+          uniforms: {},
+          textures: { tiles: texture },
+        },
+      ],
+      postProcesses: [],
+    });
+}
+
+describe("a texture bound where a 2d-array is declared", () => {
+  beforeEach(() => {
+    // The engine asks `navigator.gpu` for the canvas's format when it makes a material's pipelines.
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("views a single-layer 2D texture as a one-layer array", async () => {
+    const { engine, gpu } = await engineOn();
+    await drawWith(engine, engine.createTexture(sampled("atlas", 1)), "2d-array");
+    expect(gpu.textures.find((t) => t.label === "atlas")?.views).toContainEqual({
+      dimension: "2d-array",
+    });
+  });
+
+  it("gives the same texture a view of its own where a 2d is declared", async () => {
+    const { engine, gpu } = await engineOn();
+    const atlas = engine.createTexture(sampled("atlas", 1));
+    await drawWith(engine, atlas, "2d-array");
+    await drawWith(engine, atlas, "2d");
+    const views = gpu.textures.find((t) => t.label === "atlas")?.views ?? [];
+    expect(views).toContainEqual({ dimension: "2d-array" });
+    expect(views).toContainEqual({ dimension: "2d" });
+  });
+
+  it("still refuses a layered texture where a 2d is declared", async () => {
+    const { engine } = await engineOn();
+    await expect(
+      drawWith(engine, engine.createTexture(sampled("layers", 2)), "2d"),
+    ).rejects.toThrow(/declares tiles as 2d, but layers is 2d-array/u);
+  });
+});
