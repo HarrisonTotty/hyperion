@@ -3022,9 +3022,13 @@ medium, sizes, figure)`.
     (`InstanceRecords.pushXyz`, `ContactRecords.pushXyz`, added) into buffers made once, and
     returns one draw item made with the material. The counting engine checks that no buffer,
     texture, mesh, material or target is made after warm-up, and a test checks that the
-    `DrawSet` is reused at rest. `resolveDrawSet` and `retain` (T8) still allocate when selection
-    runs, which is steady state during a descent, since a landed bake re-runs it. **Pending lane
-    B:** their allocation-free rewrite (the orchestrator, 2026-10-03).
+    `DrawSet` is reused at rest. Since lane B's perf (a) (2026-10-03), the pass keeps one
+    `DrawSetResolver` per cache (made with the cache, remade after a device loss) and calls
+    `resolve(selection)` when selection runs: the same `DrawSet` rewritten in place, its first
+    `count` patches and slots drawn in selection order. An unseen forced patch
+    (`SelectedPatch.seen` false) is requested and pinned by `retain` but not drawn; a test puts a
+    contact on the far side of the planet and checks that none of its region is drawn while it is
+    requested. Selection itself still allocates (lane B's perf (b)).
   - _The lit view_ (`view/spike/litView.ts`, `litAgx.wgsl`).
     - `LitView` makes the spike's own `<view>:spike-hdr` `rgba16float` target with depth
       (`render-targets`), at the render size `renderSizeOf(size, renderHeightPx)`: 720p at the
