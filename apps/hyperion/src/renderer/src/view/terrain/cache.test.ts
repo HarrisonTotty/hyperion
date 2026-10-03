@@ -197,6 +197,15 @@ describe("the patch cache", () => {
     expect(cache.usedSlots).toBe(1);
   });
 
+  it("gives a resident patch's baked height range, and none once it is gone", () => {
+    const cache = cacheOf(6);
+    cache.insert({ ...resident(A), heightRangeM: [-120, 340] });
+    expect(cache.heightRangeM(A)).toEqual([-120, 340]);
+    expect(cache.heightRangeM(B)).toBeUndefined();
+    cache.remove(patchKeyString(A));
+    expect(cache.heightRangeM(A)).toBeUndefined();
+  });
+
   it("counts the GPU bytes it holds", () => {
     const cache = cacheOf(6);
     insertAll(cache, [A, B, C]);

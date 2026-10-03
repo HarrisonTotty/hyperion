@@ -3110,3 +3110,11 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     23: 12,731 patches unbudgeted in about 75 ms, 1,952 (budget 1,952) in about 11 ms, 981 (budget 981) in about 5 ms. The ruling's 2 ms at p95 is not yet met; the remaining costs are the
     per-node key string (for the baked-range lookup and the output map), the camera-relative
     bounds objects and the neighbour arrays. Recorded, not asserted (Design note 27).
+- **T7.c's review, as built (2026-10-03).** `inheritedHeightRangeM` takes the bake's skirt margin
+  (`SelectionInput.skirtMarginM`, the worker's `skirtM`, default 0) and its `f32` steps from the
+  largest height the patch can reach, so that the range reaches the skirts' bottoms as the bake
+  hangs them (`select.wasm.test.ts` checks every edge vertex's skirt bottom at margins of 0 and
+  5 m). Selection floors a patch's distance at the near plane (0.1 m), so a camera inside a volume
+  gives a finite excess that a secondary view's weight still scales. `maxPatches` counts forced
+  patches but never refuses them, so a selection can exceed it by the forced region, its balance
+  and the six roots.

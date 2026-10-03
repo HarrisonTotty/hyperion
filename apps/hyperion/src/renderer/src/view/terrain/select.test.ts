@@ -375,6 +375,13 @@ describe("the restricted quadtree", () => {
     tree.rollback();
     expect([...tree.values()].map(patchKeyString).toSorted()).toEqual(before.toSorted());
     expect(tree.size).toBe(before.length);
+    // The undone split's patch is a leaf again, so it covers its grandchildren's area.
+    expect(tree.coarserLeaf({ face: 0, level: 4, i: 12, j: 12 })).toEqual({
+      face: 0,
+      level: 2,
+      i: 3,
+      j: 3,
+    });
   });
 });
 
