@@ -1506,6 +1506,20 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   so that a request never answered starts no worker. A sky is drawn and labelled only for the
   system it was asked about while that system's position is known; otherwise the interim field and
   its labels stand. `just test-render` compiles `STAR SPRITES HDR` (2026-10-03, exit 0).
+- **Deviations in T13.d, as built (2026-10-03).** `view/sky/band.ts` exports `BAND_MATERIAL`
+  (`STAR BAND`: a full-screen triangle at infinity whose fragment turns its view ray back to the
+  galactic axes by the transpose of `frame.viewRotation` and samples the band cube, bilinear,
+  additive with alpha 1, so R07's meter class is kept), `bandTexels(band, faceTexels,
+culledIlluminanceLx)` (each texel's luminance in its chromaticity's colour of unit luminance,
+  plus the culled stars' illuminance over the texel's exact solid angle, clamped at 65,504) and
+  `BandLayer` (`update`, which makes the `rgba16float` cube once per face size through
+  `createTexture` and uploads half floats, `draw(exposureScale)`, `dispose`, releasing the cube
+  through T13.h's `releaseTexture`). `half.ts` is the half-float encoder (`toHalfBits`,
+  `toHalfArray`, `fromHalfBits`, `HALF_MAX`), since `Float16Array` is not in every runtime the
+  tests run under. The band's HDR draw is the only variant (the wireframe draws no band); it is
+  registered in `WGSL_CATALOGUE` and checked by `smoke/sky.ts`'s `checkSkyBand` on an
+  `rgba16float` target the check makes. The band layer is not yet wired into a view: no view
+  draws into an HDR scene target until R07.T7.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
