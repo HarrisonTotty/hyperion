@@ -57,11 +57,25 @@ export interface SpikeMetricsOptions {
   /** Which of Design note 21's GPU rows a pass label counts towards. */
   readonly rowOf: (label: string) => SpikePassRow;
   /** The predicted demand of a segment, a second, under each bound (Design note 19, T13.a). */
-  readonly predicted: (segment: string) => {
-    readonly hardPerS: number;
-    readonly calibratedPerS: number;
-  };
+  readonly predicted: (segment: string) => SegmentPrediction;
 }
+
+/** A segment's predicted patch demand under the hard bound and under min(hard, 4σ). */
+export interface SegmentPrediction {
+  readonly hardPerS: number;
+  readonly calibratedPerS: number;
+}
+
+/** What the report takes from outside the metrics: the shim's, the tally's and the view's. */
+export interface SpikeReportExtras {
+  readonly latePipelines: ReadonlyArray<SpikeLatePipeline>;
+  /** The adapter's peak bytes, from T11.a's `allocationTally`. */
+  readonly adapterPeakBytes: number;
+  readonly canvas: DescentSpikeReport["canvas"];
+}
+
+/** The timer states from best to worst; a run reports the worst it saw. */
+const TIMER_RANK: Readonly<Record<GpuTimer, number>> = { full: 0, quantized: 1, absent: 2 };
 
 /** Per-segment tallies. */
 interface SegmentTally {
@@ -87,6 +101,8 @@ export class SpikeMetrics {
   #lastRafMs: number | undefined;
   #lastScriptS: number | undefined;
   #timer: GpuTimer = "absent";
+  /** Whether any pass times have arrived. */
+  #timed = false;
   #untimedPasses = 0;
   #uploadBytes = 0;
 
@@ -130,9 +146,9 @@ export class SpikeMetrics {
       tally.frames += 1;
       tally.patchesHard += sample.patchesHard;
       tally.patchesCalibrated += sample.patchesCalibrated;
-      if (sample.streaming && this.#lastScriptS !== undefined) {
-        tally.streamingS += sample.scriptTimeS - this.#lastScriptS;
-      }
+    }
+    if (sample.streaming && this.#lastScriptS !== undefined) {
+      this.#addStreaming(this.#lastScriptS, sample.scriptTimeS);
     }
     this.#lastRafMs = sample.rafTimestampMs;
     this.#lastScriptS = sample.scriptTimeS;
@@ -140,7 +156,10 @@ export class SpikeMetrics {
 
   /** Records a frame's pass times, which R01 delivers after the frame. */
   passTimes(times: PassTimes): void {
-    this.#timer = times.timer;
+    if (!this.#timed || TIMER_RANK[times.timer] > TIMER_RANK[this.#timer]) {
+      this.#timer = times.timer;
+    }
+    this.#timed = true;
     const index = this.#frameOf.get(times.frame);
     if (index === undefined) {
       return;
@@ -170,17 +189,24 @@ export class SpikeMetrics {
     }
   }
 
+  /** Shares the streaming interval `[fromS, toS)` among the segments it overlaps. */
+  #addStreaming(fromS: number, toS: number): void {
+    for (const { name, startS, endS } of this.#options.segments) {
+      const overlapS = Math.min(toS, endS) - Math.max(fromS, startS);
+      const tally = this.#segments.get(name);
+      if (overlapS > 0 && tally !== undefined) {
+        tally.streamingS += overlapS;
+      }
+    }
+  }
+
   #tallyAt(scriptTimeS: number): SegmentTally | undefined {
     const name = this.segmentAt(scriptTimeS);
     return name === undefined ? undefined : this.#segments.get(name);
   }
 
   /** The run's report. */
-  report(extra: {
-    readonly latePipelines: ReadonlyArray<SpikeLatePipeline>;
-    readonly adapterPeakBytes: number;
-    readonly canvas: DescentSpikeReport["canvas"];
-  }): DescentSpikeReport {
+  report(extra: SpikeReportExtras): DescentSpikeReport {
     const streaming: SpikeStreamingSegment[] = this.#options.segments.map(
       ({ name, startS, endS }) => {
         const tally = this.#segments.get(name);

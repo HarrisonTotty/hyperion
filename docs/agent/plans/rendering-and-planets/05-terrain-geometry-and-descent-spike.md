@@ -1854,7 +1854,10 @@ rendering as `src/smoke/main.ts` uses it if a hidden window does not render), so
 it. The recipe follows `client` and `test-render`: `just build` (which runs
 `gen-surface`), the server started as `cargo run -p hyperion-server -- --num-workers 2` in the
 background, Electron on `out/` under `setsid timeout --kill-after=10` with a fresh
-`--user-data-dir`, and the process group killed at the end.
+`--user-data-dir`, and the process group killed at the end. `index.ts` calls T14.b's
+`launchSwitches(options, spike)` from `spike.ts` in place of `graphicsSwitches`, with the parsed
+`--dawn-safety`, before `ready`, so that a spike launch carries the measurement switches (orchestrator
+ruling, 2026-10-03).
 
 - Files: `apps/hyperion/src/main/cli.ts`, its test, `apps/hyperion/src/main/index.ts`,
   `apps/hyperion/src/main/spike.ts` (the IPC handlers and the sender check) and its test,
@@ -1885,13 +1888,14 @@ and passes the same wrapped `GPU` as `LoadEngineOptions.gpu` so that a rebuild a
 is shimmed too. R01's adapter itself is not edited. `PassTimes.timer` is recorded with the times
 (`full`, `quantized` or `absent`), and passes beyond the timer's 64 a frame are counted as untimed.
 
-- Files: `view/spike/metrics.ts`, `view/spike/percentiles.ts`, `view/spike/pipelineShim.ts`,
-  their tests.
+- Files: `view/spike/metrics.ts`, `view/spike/pipelineShim.ts`, their tests. The percentiles,
+  missed-frame and hitch counts are the main process's (`main/results.ts`, T14.c), so there is no
+  `view/spike/percentiles.ts` (orchestrator ruling, 2026-10-03).
 - Tests: the percentiles of fixed interval lists against hand-computed values, including the
-  missed-frame and hitch counts of Design note 21; the shim counts a creation after warm-up and
-  passes the call through unchanged; per-segment figures do not mix segments.
-- Acceptance: `pnpm --filter hyperion exec vitest run view/spike/metrics view/spike/percentiles
-view/spike/pipelineShim`.
+  missed-frame and hitch counts of Design note 21 (in `main/results.test.ts`); the shim counts a
+  creation after warm-up and passes the call through unchanged; per-segment figures do not mix
+  segments.
+- Acceptance: `pnpm --filter hyperion exec vitest run view/spike/metrics view/spike/pipelineShim`.
 
 **R05.T14.b The switches, the trace and the reducer.** In `spike.ts`: the measurement switches of
 Design note 18, set before `ready` when the flag is given. These are R01's `gpuTiming` and, when
@@ -2745,3 +2749,22 @@ medium, sizes, figure)`.
     `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
     `destroy()`.
   - `MemoryCategory` gains `height-cache`, appended.
+- **Orchestrator rulings, 2026-10-03.** T13.c's text now says it wires T14.b's `launchSwitches` into
+  `index.ts`; T14.a's files and acceptance drop `view/spike/percentiles.ts`, whose figures T14.c
+  computes in the main process.
+- **Deviations in T14.a, as built** (2026-10-03, partial).
+  - `view/spike/pipelineShim.ts`: `wrapGpu(gpu, wrapDevice)` (a plain object forwarding to the
+    browser's `GPU`, whose adapters' `requestDevice` is replaced on the instance), `shimPipelines`
+    and `PipelineTally` (`endWarmup`, `creations`, `late`), each creation stamped with the descent's script time, as `DescentSpikeReport.latePipelines` takes it. The device keeps its identity: methods
+    are replaced on the instance, not put behind a `Proxy`, since the browser's WebGPU calls
+    brand-check their arguments. An asynchronous creation that calls the synchronous form through
+    the instance is counted once.
+  - `view/spike/metrics.ts`: `SpikeMetrics` keeps the raw series T14.c's `DescentSpikeReport` takes
+    (`frame`, `passTimes` aligned by `PassTimes.frame`, `allocation` for uploads, `patches`,
+    `report`), `SEGMENT_MEASURE_PREFIX` (`spike.segment:`, which `main/results.ts` repeats: the
+    renderer and the main process share no module, so the two constants are kept equal by hand)
+    and `TIMED_PASSES_A_FRAME`. The report's timer is the worst state seen over the run, and a streaming interval that crosses a segment boundary is shared between the segments. The adapter's peak comes from T11.a's `allocationTally` through
+    `report`'s argument.
+  - **Pending T13.b:** the spike's `ViewEngineSource` (the wrapped `GPU` handed to
+    `requestAdapterOutcome` and as `LoadEngineOptions.gpu`), the `performance.measure` spans and the
+    per-frame calls into `SpikeMetrics`, which need the spike's scene and loop.

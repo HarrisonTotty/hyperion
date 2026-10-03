@@ -21,20 +21,21 @@ export interface PipelineCreation {
   readonly kind: "render" | "compute";
   /** Whether it was the asynchronous form. */
   readonly async: boolean;
-  /** When, on the tally's clock, ms. */
-  readonly atMs: number;
+  /** When, in the descent's script time, s. */
+  readonly scriptTimeS: number;
   /** Whether it came after the warm-up ended: a pipeline compiled mid-run, a likely hitch. */
   readonly late: boolean;
 }
 
 /** Counts pipeline creations, and marks those after the warm-up. */
 export class PipelineTally {
-  readonly #nowMs: () => number;
+  readonly #scriptTimeS: () => number;
   readonly #creations: PipelineCreation[] = [];
   #warm = false;
 
-  constructor(nowMs: () => number) {
-    this.#nowMs = nowMs;
+  /** @param scriptTimeS - The descent's script time now, s. */
+  constructor(scriptTimeS: () => number) {
+    this.#scriptTimeS = scriptTimeS;
   }
 
   /** Ends the warm-up: every creation from now on is late. */
@@ -48,7 +49,7 @@ export class PipelineTally {
       label: label ?? "",
       kind,
       async,
-      atMs: this.#nowMs(),
+      scriptTimeS: this.#scriptTimeS(),
       late: this.#warm,
     });
   }
@@ -103,21 +104,35 @@ export function shimPipelines(device: GPUDevice, tally: PipelineTally): GPUDevic
   const renderAsync = device.createRenderPipelineAsync.bind(device);
   const compute = device.createComputePipeline.bind(device);
   const computeAsync = device.createComputePipelineAsync.bind(device);
-  device.createRenderPipeline = (descriptor) => {
-    tally.record("render", false, descriptor.label);
-    return render(descriptor);
+  // An implementation whose asynchronous form calls the synchronous one through the instance (as
+  // the test fake does) would otherwise count one creation twice.
+  let inAsync = false;
+  const once = <T>(kind: PipelineCreation["kind"], label: string | undefined, make: () => T): T => {
+    if (!inAsync) {
+      tally.record(kind, false, label);
+    }
+    return make();
   };
-  device.createRenderPipelineAsync = (descriptor) => {
-    tally.record("render", true, descriptor.label);
-    return renderAsync(descriptor);
+  const outer = <T>(
+    kind: PipelineCreation["kind"],
+    label: string | undefined,
+    make: () => T,
+  ): T => {
+    tally.record(kind, true, label);
+    inAsync = true;
+    try {
+      return make();
+    } finally {
+      inAsync = false;
+    }
   };
-  device.createComputePipeline = (descriptor) => {
-    tally.record("compute", false, descriptor.label);
-    return compute(descriptor);
-  };
-  device.createComputePipelineAsync = (descriptor) => {
-    tally.record("compute", true, descriptor.label);
-    return computeAsync(descriptor);
-  };
+  device.createRenderPipeline = (descriptor) =>
+    once("render", descriptor.label, () => render(descriptor));
+  device.createRenderPipelineAsync = (descriptor) =>
+    outer("render", descriptor.label, () => renderAsync(descriptor));
+  device.createComputePipeline = (descriptor) =>
+    once("compute", descriptor.label, () => compute(descriptor));
+  device.createComputePipelineAsync = (descriptor) =>
+    outer("compute", descriptor.label, () => computeAsync(descriptor));
   return device;
 }

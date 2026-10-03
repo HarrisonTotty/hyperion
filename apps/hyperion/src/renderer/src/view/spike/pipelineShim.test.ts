@@ -43,20 +43,20 @@ describe("the wrapped GPU", () => {
 });
 
 describe("the pipeline shim", () => {
-  async function shimmed(): Promise<{
+  function shimmed(): {
     device: FakeDevice;
     tally: PipelineTally;
     time: ReturnType<typeof clock>;
-  }> {
+  } {
     const time = clock();
     const tally = new PipelineTally(time.read);
     const device = new FakeDevice(INTEL_UHD_620_INFO, [], adapter().limits);
     shimPipelines(device, tally);
-    return Promise.resolve({ device, tally, time });
+    return { device, tally, time };
   }
 
   it("passes each creation through unchanged", async () => {
-    const { device } = await shimmed();
+    const { device } = shimmed();
     const module = device.createShaderModule(SHADER);
     const descriptor: GPUComputePipelineDescriptor = {
       label: "k",
@@ -71,7 +71,7 @@ describe("the pipeline shim", () => {
   });
 
   it("counts a creation after the warm-up as late, with its label and kind", async () => {
-    const { device, tally, time } = await shimmed();
+    const { device, tally, time } = shimmed();
     const module = device.createShaderModule(SHADER);
     const render: GPURenderPipelineDescriptor = {
       label: "terrain",
@@ -80,13 +80,13 @@ describe("the pipeline shim", () => {
     };
     device.createRenderPipeline(render);
     tally.endWarmup();
-    time.now = 12_500;
+    time.now = 12.5;
     await device.createRenderPipelineAsync({ ...render, label: "atmosphere.sky" });
     device.createComputePipeline({ label: "normals", layout: "auto", compute: { module } });
     expect(tally.creations).toHaveLength(3);
     expect(tally.late()).toEqual([
-      { label: "atmosphere.sky", kind: "render", async: true, atMs: 12_500, late: true },
-      { label: "normals", kind: "compute", async: false, atMs: 12_500, late: true },
+      { label: "atmosphere.sky", kind: "render", async: true, scriptTimeS: 12.5, late: true },
+      { label: "normals", kind: "compute", async: false, scriptTimeS: 12.5, late: true },
     ]);
   });
 });
