@@ -61,6 +61,7 @@ const MAX_TERMS: u32 = 8u;
 
 // One term: per-channel coefficients at unit density, m^-1, and its density profile:
 // profile.x 0 for exponential (y the scale height, m), 1 for a tent (y bottom, z peak, w top, m).
+// The phase: scattering.w 0 none, 1 Rayleigh, 2 Cornette–Shanks with its g in absorption.w.
 struct Term {
   scattering : vec4f,
   absorption : vec4f,
@@ -122,7 +123,12 @@ fn distanceToBottom(m : Medium, r : f32, mu : f32) -> f32 {
 }
 
 fn intersectsGround(m : Medium, r : f32, mu : f32) -> bool {
-  return mu < 0.0 && r * r * (mu * mu - 1.0) + m.bottomRadiusM * m.bottomRadiusM >= 0.0;
+  return shellIntersectsGround(m.bottomRadiusM, r, mu);
+}
+
+// Whether a ray from radius r at zenith cosine mu meets a sphere of radius `bottom`.
+fn shellIntersectsGround(bottom : f32, r : f32, mu : f32) -> bool {
+  return mu < 0.0 && r * r * (mu * mu - 1.0) + bottom * bottom >= 0.0;
 }
 
 // The ray's length inside the atmosphere, to the ground or to the top.
@@ -151,10 +157,16 @@ fn transmittanceUvToRMu(m : Medium, uv : vec2f) -> vec2f {
 }
 
 fn transmittanceRMuToUv(m : Medium, r : f32, mu : f32) -> vec2f {
-  let bigH = sqrt(m.topRadiusM * m.topRadiusM - m.bottomRadiusM * m.bottomRadiusM);
-  let rho = sqrt(max(r * r - m.bottomRadiusM * m.bottomRadiusM, 0.0));
-  let d = distanceToTop(m, r, mu);
-  let dMin = m.topRadiusM - r;
+  return shellRMuToUv(m.bottomRadiusM, m.topRadiusM, r, mu);
+}
+
+// The transmittance table's (u, v) for (r, mu) on a shell of the given radii.
+fn shellRMuToUv(bottom : f32, top : f32, r : f32, mu : f32) -> vec2f {
+  let bigH = sqrt(top * top - bottom * bottom);
+  let rho = sqrt(max(r * r - bottom * bottom, 0.0));
+  let discriminant = max(r * r * (mu * mu - 1.0) + top * top, 0.0);
+  let d = max(-r * mu + sqrt(discriminant), 0.0);
+  let dMin = top - r;
   let dMax = rho + bigH;
   return vec2f((d - dMin) / (dMax - dMin), rho / bigH);
 }
@@ -181,7 +193,12 @@ fn multiScatteringUvToRMu(m : Medium, uv : vec2f, size : vec2f) -> vec2f {
 }
 
 fn multiScatteringRMuToUv(m : Medium, r : f32, muSun : f32, size : vec2f) -> vec2f {
-  let v = (r - m.bottomRadiusM - GROUND_OFFSET_M) / (m.topRadiusM - m.bottomRadiusM - GROUND_OFFSET_M);
+  return shellMultiScatteringRMuToUv(m.bottomRadiusM, m.topRadiusM, r, muSun, size);
+}
+
+// The multiple-scattering table's (u, v) for (r, mu_sun) on a shell of the given radii.
+fn shellMultiScatteringRMuToUv(bottom : f32, top : f32, r : f32, muSun : f32, size : vec2f) -> vec2f {
+  let v = (r - bottom - GROUND_OFFSET_M) / (top - bottom - GROUND_OFFSET_M);
   return unitToSubUvs(clamp(vec2f(muSun * 0.5 + 0.5, v), vec2f(0.0), vec2f(1.0)), size);
 }
 

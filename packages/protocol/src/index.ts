@@ -101,6 +101,16 @@ import type { SceneStateDto } from "./generated/SceneStateDto";
 import type { SceneSubscribeRequest } from "./generated/SceneSubscribeRequest";
 import type { SceneSystemDto } from "./generated/SceneSystemDto";
 import type { SeenPositionDto } from "./generated/SeenPositionDto";
+// The sky (rendering plan R06, R06.T10).
+import type { BandSpecDto } from "./generated/BandSpecDto";
+import type { ConeDto } from "./generated/ConeDto";
+import type { EyeDto } from "./generated/EyeDto";
+import type { HostDiscDto } from "./generated/HostDiscDto";
+import type { PowerTwoDto } from "./generated/PowerTwoDto";
+import type { SkyGapDto } from "./generated/SkyGapDto";
+import type { SkyLayerCensusDto } from "./generated/SkyLayerCensusDto";
+import type { SkyRequest } from "./generated/SkyRequest";
+import type { SkyResponse } from "./generated/SkyResponse";
 import type { SectionDto } from "./generated/SectionDto";
 import type { SeedHex } from "./generated/SeedHex";
 import type { ServerMessage } from "./generated/ServerMessage";
@@ -228,6 +238,15 @@ export type {
   SceneSystemDto,
   SeenPositionDto,
   SectionDto,
+  BandSpecDto,
+  ConeDto,
+  EyeDto,
+  HostDiscDto,
+  PowerTwoDto,
+  SkyGapDto,
+  SkyLayerCensusDto,
+  SkyRequest,
+  SkyResponse,
   SeedHex,
   ServerMessage,
   StarEventDto,
@@ -272,6 +291,19 @@ export {
   parseBinaryFrameHeader,
 } from "./bulk";
 export { decodeDensityMap, type DecodedDensityMap } from "./densityMap";
+export {
+  decodeSkyBand,
+  decodeSkyStars,
+  MAX_CUT_V,
+  MAX_SKY_STARS,
+  SKY_STAR_BYTES,
+  SKY_TEXEL_BYTES,
+  type SkyBand,
+  type SkyDecoded,
+  type SkyPayloadParts,
+  type SkyStars,
+  splitSkyPayload,
+} from "./sky";
 export {
   type BodyIdParts,
   formatBodyId,

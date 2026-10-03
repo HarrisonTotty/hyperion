@@ -14,6 +14,8 @@
  * {@link ViewSettings}, {@link SETTINGS}, {@link TerrainSettings} and {@link TERRAIN_SETTINGS}.
  */
 
+import { TABLE_SIZES, type TableSizes } from "../atmosphere/hillaire";
+
 /** The view's quality setting: `high` on the recommended specification, `low` on the UHD 620. */
 export type QualitySetting = "high" | "low";
 
@@ -66,6 +68,8 @@ export interface TerrainSettings {
 export interface ViewSettings {
   /** The terrain's settings (R05). */
   readonly terrain: TerrainSettings;
+  /** The atmosphere's table sizes and sample counts (R05.T12.c, Design note 16; R08 widens them). */
+  readonly atmosphere: TableSizes;
 }
 
 const MIB = 1024 * 1024;
@@ -76,7 +80,7 @@ const MIB = 1024 * 1024;
  */
 const HIGH_CACHE_BYTES = 400_000_000;
 
-/** The low setting's patch cache budget: 64 MiB, 1,323 slots of R05's low layout. */
+/** The low setting's patch cache budget: 64 MiB, 1,296 slots of R05's low layout. */
 const LOW_CACHE_BYTES = 64 * MIB;
 
 /**
@@ -98,6 +102,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       vertexPath: "baked-offsets",
       cacheBytes: HIGH_CACHE_BYTES,
     },
+    atmosphere: TABLE_SIZES.high,
   },
   low: {
     terrain: {
@@ -107,6 +112,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       vertexPath: "face-differences",
       cacheBytes: LOW_CACHE_BYTES,
     },
+    atmosphere: TABLE_SIZES.low,
   },
 };
 

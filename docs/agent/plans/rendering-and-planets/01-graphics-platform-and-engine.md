@@ -2960,3 +2960,10 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   it holds to an `f64` oracle. The default stays `cpu`, so every other caller is still refused.
   `engineBoundary.test.ts` already refuses a `tolerance` read outside `smoke/`. The change is
   append-only, in `types.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.
+- **Extended by R07.T15** (2026-10-02, decision item 6): `FrameSubmission.encoding` (`"in-pass"`
+  writes a view through its canvas's own format, for R07's tone-mapping pass, which dithers after
+  encoding), `FrameSubmission.colourLoad` (`"load"` keeps an earlier submission's colour and
+  depth, for R07.T16's symbology) and `RenderTargetFormat` `"canvas-in-pass"`; opt-in, defaults
+  unchanged. R07.T12 added no staging ring to the readback; its bench (R07.T17) decides. See R07's
+  Risks.
+- **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged.

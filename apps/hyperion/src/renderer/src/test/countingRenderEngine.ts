@@ -114,6 +114,8 @@ export class CountingRenderEngine implements RenderEngine {
   readonly dispatched: RecordedDispatch[] = [];
   /** Every buffer write, first first. */
   readonly writes: RecordedWrite[] = [];
+  /** Every texture made, render targets' included, first first. */
+  readonly textureSpecs: TextureSpec[] = [];
   /** Every frame submitted to a render target, first first (views record their own). */
   readonly targetFrames: FrameSubmission[] = [];
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
@@ -223,6 +225,7 @@ export class CountingRenderEngine implements RenderEngine {
 
   createTexture(spec: TextureSpec): TextureHandle {
     this.counts.textures += 1;
+    this.textureSpecs.push(spec);
     this.#emit({
       kind: "created",
       name: spec.name,

@@ -13,18 +13,22 @@
  * and `--smoke-soak=<seconds>` runs T11's and T12's soak scene instead of the checks, hidden and
  * offscreen unless `--smoke-show=1`. They reach the page in the query string. The main process
  * makes no request itself (Node's `fetch` would bypass Chromium's `webRequest`).
+ * `--smoke-captures=<dir>` asks the page for R05.T12.c's atmosphere comparison frames, which are
+ * saved there as PNGs, for a person to look at.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, session } from "electron";
 
 import {
   type CancelledRequest,
   isOfflineUrl,
   isUncapturedGpuError,
   judgeSmokeRun,
+  readSmokeImages,
   readSmokeResult,
   SMOKE_EXIT,
   SMOKE_RESULT_CHANNEL,
@@ -46,11 +50,49 @@ const show = argument("smoke-show", "0") === "1";
 const resize = argument("smoke-resize", "1") === "1";
 const video = argument("smoke-video", "");
 const capturePath = argument("smoke-capture", "");
+/** Where R05.T12.c's comparison frames are saved, or "" for none. */
+const capturesDir = argument("smoke-captures", "");
 const cancelled: CancelledRequest[] = [];
 /** The page's uncaptured GPU errors, as the engine logged them. */
 const gpuErrors: string[] = [];
 /** The page's own URL, without its query: the only frame allowed to report. */
 const PAGE_URL = pathToFileURL(join(__dirname, "../renderer/smoke.html")).href;
+
+/**
+ * Saves the report's images as `<name>-<variant>.png` in `dir` (`nativeImage` takes BGRA), a line
+ * each; an image that cannot be saved, and the count of malformed ones, are lines too, so that the
+ * judged checks are never lost to a capture.
+ */
+function saveImages(dir: string, report: unknown): string[] {
+  const { images, rejected } = readSmokeImages(report);
+  const lines = rejected > 0 ? [`CAPTURE REJECTED ${rejected} malformed images`] : [];
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (error: unknown) {
+    return [...lines, `CAPTURE FAILED ${dir}: ${String(error)}`];
+  }
+  for (const image of images) {
+    const path = join(dir, `${image.name}-${variant}.png`);
+    try {
+      const rgba = Buffer.from(image.rgba, "base64");
+      const bgra = Buffer.alloc(rgba.length);
+      for (let i = 0; i + 3 < rgba.length; i += 4) {
+        bgra[i] = rgba[i + 2] ?? 0;
+        bgra[i + 1] = rgba[i + 1] ?? 0;
+        bgra[i + 2] = rgba[i] ?? 0;
+        bgra[i + 3] = rgba[i + 3] ?? 255;
+      }
+      const png = nativeImage
+        .createFromBitmap(bgra, { width: image.width, height: image.height })
+        .toPNG();
+      writeFileSync(path, png);
+      lines.push(`CAPTURE ${path}`);
+    } catch (error: unknown) {
+      lines.push(`CAPTURE FAILED ${path}: ${String(error)}`);
+    }
+  }
+  return lines;
+}
 
 function finish(lines: ReadonlyArray<string>, exitCode: number): void {
   for (const line of lines) {
@@ -140,7 +182,8 @@ void app
           cancelled,
           fixture === "broken-wgsl" ? [] : gpuErrors,
         );
-        finish(lines, exitCode);
+        const saved = capturesDir === "" ? [] : saveImages(capturesDir, report);
+        finish([...lines, ...saved], exitCode);
       } catch (error: unknown) {
         finish([`SETUP the report could not be judged: ${String(error)}`], SMOKE_EXIT.setup);
       } finally {
@@ -161,6 +204,7 @@ void app
         fixture,
         gpuTiming,
         soak: String(soakSeconds),
+        captures: capturesDir === "" ? "0" : "1",
         ...(video === "" ? {} : { video: pathToFileURL(video).href }),
       },
     });

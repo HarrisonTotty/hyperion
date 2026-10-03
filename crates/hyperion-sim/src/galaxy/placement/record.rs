@@ -346,11 +346,7 @@ impl SystemRecord {
         epoch_position: GalacticPosition,
         component: ComponentId,
     ) -> Self {
-        let primary_initial_mass = match SystemKind::of_layer(key.layer()) {
-            SystemKind::Stellar => primary_initial_mass(galaxy, id, key.band()),
-            SystemKind::BrownDwarf => brown_dwarf_mass(galaxy, id),
-            SystemKind::RoguePlanet => rogue_planet_mass(galaxy, id),
-        };
+        let primary_initial_mass = candidate_mass(galaxy, key, id);
         let component_laws = galaxy.fields().component(component);
         let age_at_epoch = age_at_epoch(galaxy, id, component_laws);
         Self {
@@ -361,6 +357,21 @@ impl SystemRecord {
             primary_initial_mass,
             age_at_epoch,
         }
+    }
+}
+
+/// The initial mass a candidate of `key` with ID `id` takes if the thinning accepts it: the
+/// primary's in a stellar layer, the brown dwarf's or the rogue planet's in a substellar one.
+///
+/// It reads only the candidate's own mass stream, keyed by its ID, and the layer's band, never its
+/// position, its acceptance mark or its component, so it can be drawn before any of them (rendering
+/// plan R06, Design note 8): [`generate_cell_where`](super::generate_cell_where) draws it first.
+#[must_use]
+pub(super) fn candidate_mass(galaxy: &Galaxy, key: CellKey, id: SystemId) -> SolarMasses {
+    match SystemKind::of_layer(key.layer()) {
+        SystemKind::Stellar => primary_initial_mass(galaxy, id, key.band()),
+        SystemKind::BrownDwarf => brown_dwarf_mass(galaxy, id),
+        SystemKind::RoguePlanet => rogue_planet_mass(galaxy, id),
     }
 }
 

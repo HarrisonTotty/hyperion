@@ -1,0 +1,8 @@
+{
+  "description": "The centres of the fifteen bake bins, nm: 25.33 nm wide from 380 to 760 nm (rendering plan R08, Design note 5; R08 BAKE_WAVELENGTHS_NM, mirrored by hyperion_sim::sky::colour::BAKE_WAVELENGTHS_NM). Both sides test their constant against this file.",
+  "wavelengths_nm": [
+    392.6666666666667, 418.0, 443.3333333333333, 468.66666666666663, 494.0, 519.3333333333333,
+    544.6666666666666, 570.0, 595.3333333333333, 620.6666666666666, 646.0, 671.3333333333333,
+    696.6666666666666, 722.0, 747.3333333333333
+  ]
+}

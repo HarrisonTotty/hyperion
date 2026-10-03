@@ -868,9 +868,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     hard bound, as the brainstorm's test promises: T6's slow test asserts that no sampled
     difference ever exceeds it, and records the ratio of the 99.9th percentile to it per level, so
     that a loose bound cannot silently over-refine. A ratio below a quarter is a finding, not a
-    failure. Whether selection then takes a calibrated bound, such as R10's min(hard, 4σ), is the
-    owner's ruling, which the roadmap lists as awaiting the owner with R10.T4. Until the owner
-    rules, the hard bound selects, and a sampled maximum never enters the contract. The
+    failure. Whether selection then takes a calibrated bound, such as R10's min(hard, 4σ), is
+    ruled (2026-10-02, decisions-r05.md item 6): R05 selects by the hard bound everywhere,
+    the gate's runs included; R10.T4 applies min(hard, kσ) under the criterion recorded there. A
+    sampled maximum never enters R05's contract. The
     brainstorm's patch-to-distance ratio of about five is provisional until this bound exists, and
     T6 records the ratio it implies per level: for fractal relief ε_n falls more slowly than the
     patch size, so the ratio grows towards the finest levels, and demand with it.
@@ -1434,8 +1435,11 @@ through its own vertices on the same diagonal rule.
 - Files: `src/test_planet/bound.rs`, `src/wasm.rs`, `tests/level_bound.rs`,
   `tests/level_table_golden.rs`, `tests/golden/level_table.golden`.
 - Tests: no sample exceeds the bound at any level; the ratio of the 99.9th percentile to the
-  bound is recorded per level, and a ratio below a quarter is reported as a finding for the
-  owner's ruling on the selection bound (Design note 15), not failed; the implied
+  bound is recorded per level, and a ratio below a quarter is reported as a finding (Design note
+  15), not failed; per level also recorded (decisions-r05.md item 6): σ_n, the RMS of the omitted
+  octaves, √Σσ_k² with the fade weight of the newest included octave, the 99.9th percentile ÷
+  4σ_n, and the per-patch maximum over 65 × 65 vertices ÷ 4σ_n for the 10⁴ samples grouped by
+  patch; the implied
   patch-to-distance ratio k_n = ε_n ÷ (S_n τ θ_px) at τ = 1 px, 1080p and 60° is written out and
   recorded in the documentation for T13.a; the level-table golden on all three targets.
 - Acceptance: `just test-slow level_bound_holds` runs it; `just ci`; the ratios are in the module
@@ -1792,7 +1796,10 @@ bounds.
   for every segment and written out beside it, not asserted against the brainstorm; the fixed-step
   run of the whole descent through `selectPatches` and a simulated cache gives a selection
   sequence whose hash is pinned, and its measured demand, first-time-selected keys a second, lies
-  within a factor of two of the per-level D in every segment on both settings.
+  within a factor of two of the per-level D in every segment on both settings; the same run
+  records the patch counts and the predicted demand under both selection bounds, the hard ε_n and
+  min(hard, 4σ_n), as a second pass of the pure selection with ε as its parameter
+  (decisions-r05.md item 6).
 - Acceptance: `pnpm --filter hyperion exec vitest run view/spike`.
 
 **R05.T13.b The spike scene.** `spikeScene.ts` (the test planet, its rotation,
@@ -2066,7 +2073,10 @@ whether the rule fires. The verdict, with its figures, is written in this plan's
 points and summarised in `docs/measurements/descent-spike/README.md`, and an edit to the
 brainstorm's open question 2 (from **Lean** to **Closed**, or to what the runs show) is drafted
 for the owner, as are the brainstorm findings this plan reports (Risks and open points). If the
-rule fires, the owner is told before any later plan depends on the browser.
+rule fires, the owner is told before any later plan depends on the browser. If the discrete run
+fails on streaming demand and the demand under min(hard, 4σ_n) (T13.a) would meet the budget, the
+verdict names the selection bound as ours to fix; that is never a fired rule (decisions-r05.md
+item 6).
 
 - Files: this plan, `docs/measurements/descent-spike/README.md`.
 - Acceptance: the verdict names each criterion of Design note 21 with its measured value on each
@@ -2081,8 +2091,8 @@ rule fires, the owner is told before any later plan depends on the browser.
 - **Geometry:** shared edges are bitwise equal across faces (T1.b, T4.a); both vertex paths are
   under 1 mm from `f64` at level 19 and the naive form is not (T4.b); the collision interpolant is
   the drawn finest mesh (T4.c).
-- **Level of detail:** the hard bound holds, and its looseness per level is recorded for the
-  owner's ruling on the selection bound (T6);
+- **Level of detail:** the hard bound holds, and its looseness per level, with σ_n and the
+  ratios to 4σ_n, is recorded for R10.T4's mechanical rule (T6);
   selection meets τ, is balanced, is a pure function of its inputs and keeps the finest level under
   every grounded body on every setting and tolerance (T7); the morph is continuous at shared
   vertices and 1 at every level transition (T7.c).
@@ -2192,8 +2202,9 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   until T3 measures them.
 - **The hard bound may be loose.** If T6 finds it looser than four times the 99.9th percentile,
   selection over-refines and demand rises. Whether selection then takes a calibrated bound
-  (R10's min(hard, 4σ)) is the owner's ruling, which the roadmap lists with R10.T4; T6's recorded
-  ratios go to the owner, and the hard bound selects until the ruling.
+  (R10's min(hard, 4σ)) is ruled (2026-10-02, decisions-r05.md item 6): R05 selects by the hard
+  bound everywhere, gate runs included; R10.T4 applies min(hard, kσ) under the criterion recorded
+  there, from T6's and its own recorded figures.
 - **The descending thresholds** (Design note 9) are provisional: 1 km and 30 s, and
   `FORCED_REGION_RESIDENCY_S` 30 s, until T16 measures how long a forced region takes to become
   resident and T18 sets them.
@@ -2281,6 +2292,94 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   T13.b's scene, T13.c's launch path and first IPC handlers, T14.a's and T15.a's device seam,
   T14.b's switch merge, and the hidden and by-hand halves of T10.b, T11.c, T12.c, T13.c, T14.c,
   T15.c and T17 were corrected. Nothing built changes. No task is pending re-validation.
+- **Deviations in T1.a, as built.** The warp's round trip is exact at 0, ¼, ½, ¾ and 1, within
+  one ulp of s for s ≥ ½, and within 2⁻⁵³ absolute below ½: there the warp works in 1 − s, whose
+  ulp in [½, 1) is 2⁻⁵³, so s cannot be recovered more finely. `face_of` (crate-private) and
+  `unit_dir` hold the face rule and the normalisation; `Face` also converts with `TryFrom<u8>`
+  (`DecodeFaceError`). The module documentation lists the operations the TypeScript mirror must
+  keep bit for bit (`(4s)s − 1`, a division by 3, `sqrt(x² + y² + z²)` not `Math.hypot`, unary
+  negation's −0).
+- **Deviations in T1.b, as built.** `edge_neighbour` folds the step over the cube in exact integer
+  arithmetic (half-cell units on S2's axes) rather than reading a table per face pair; T2's
+  golden pins all 24 directed face crossings in its `table` section. Added:
+  `edge_neighbour_and_back` (the neighbour and the edge leading back, since two faces' axes
+  differ), `PatchKey::new` with `NewPatchKeyError` (wrapped by `DecodePatchKeyError::Range`), the
+  getters `face`, `level`, `i`, `j`, and `geometry::MAX_FINEST_SPACING_M` = 0.75 ×
+  `FINEST_SPACING_M` (0.375 m), which `finest_level` tests against. `vertex_spacing` uses closed
+  forms of the arc rate per unit s instead of a 2,048² grid: largest (4 ÷ 3)√(1 + 3u*) ÷ (1 + u*²)
+  at u* = (√31 − 2) ÷ 9, 1.704 897; smallest 2√2 ÷ 3 at an edge's midpoint; mean 1.459 214, an
+  integral a test recomputes; a 512² grid test checks all three. Pinned: the Moon (1,737.4 km)
+  is level 17 (largest spacing 0.353 m), Ceres (469.7 km) level 16 (0.191 m; level 15 misses by
+  1.8%, at 0.382 m). `MAX_LEVEL` and `PATCH_QUADS` live in `cube`, the spacing constants in
+  `geometry`.
+- **Deviations in T2's Rust half, as built.** For each of the 50 patches `cube_sphere.golden`
+  prints 81 vertices (x, y ∈ {0, 1, 8, 16, 32, 48, 56, 63, 64}) and a `digest` of all 4,225
+  directions, `hyperion_testkit::golden::f64_digest` (FNV-1a 64 over each `f64`'s little-endian
+  bits, added here beside T5's `f32_digest`), since every vertex would make the file about 30 MB;
+  as built it is 360 KB. The TypeScript mirror reproduces the digest over a `Float64Array`'s
+  bytes (BigInt arithmetic). The record format is in `tests/cube_golden.rs`'s module
+  documentation. A native-only test holds every surface golden to `TEST_PLANET_VERSION`, and the
+  sim-determinism skill's `golden_diff.py` now checks the surface crate's goldens against
+  `TEST_PLANET_VERSION` rather than `GENERATOR_VERSION`.
+- **Deviations in T3.a, as built.** `NOISE_BOUND` B = 1.0681 (grid maximum 1.036 35 at 1/256 of a
+  cell over the 1/48 its symmetry leaves, plus a Lipschitz margin of 0.0317) and `NOISE_RMS`
+  σ_noise = 0.2701 (10⁶ points; 0.270 12), both recomputed by `noise_bound_certified` and
+  `noise_rms_measured` under `just test-slow`. The gradient index is the corner word's top four
+  bits; the object word packs i and j as 32-bit two's complements and the draw number is
+  (octave << 32) | k; the octave offsets read words 2⁴⁰ + 4n + axis of object 0. `Octave` holds
+  the index, spacing, rotation, offset and seed; `LatticeCache::cover(octave, centre, radius)`
+  sets an octave's dense box (capped at 2²² corners). `num::max` and `min` refuse NaN.
+- **Deviations in T3.b, as built.** `Spheroid` lives in `hyperion_surface::spheroid` (P14.T46.e's
+  module), with R05's `point`, `normal`, `surface_point`, `curvature_radii_m`,
+  `section_radius_m` and `WGS84`; `test_planet` re-exports it. σ_h is Earth2014's TBI layer,
+  **2,508.2 m** (pyshtools 4.14.1, degrees 1–2160; Hirt and Rexer 2015 Table 2: 2,508.3 m), not
+  the design's 2.45 km; octaves 0–8 are rescaled together by the pinned `COARSE_RESCALE` =
+  1.055 66 over a 10⁴-point Fibonacci sphere, giving a realised 2,509.3 m. Octaves finer than 35
+  km hold 0.179% of the variance. The fade of the newest octave across the morph zone is the
+  morph itself (the morph target is the parent level's height, which lacks that octave), so the
+  height function has no fade of its own. Ridges: r = 1 − √(n² + ε²) with ε = 0.05, centred and
+  scaled by the pinned `RIDGE_MEAN` 0.7692 and `RIDGE_RMS` 0.1488, gated by a smoothstep of
+  ½ + (n₂ + n₃) ÷ (4 σ_noise). Rotations are those of integer quaternions (k + 2, 1 + k mod 3,
+  2 + k mod 5, 1 + k mod 7). Leakage above the 2 m band limit: **0.149 mm RMS** over 1,000
+  profiles at 0.125 m. Each octave's sample mean is tested for octaves 6–21 only: octaves 0–5
+  cover the sphere in a few cells, so their samples are not independent.
+- **Deviations in T3.c, as built.** Provisional bench (load average 19–28): **4.1 µs a point
+  cached, 7.6 µs uncached** (budget 10 µs); the quiet-machine run is pending for the owner.
+  `TestPlanet::cover_patch` prepares a bake's cache. Criterion is a dev-dependency off the
+  browser target, where the bench is an empty program.
+- **Deviations in T4.a, as built.** The patch origin is the surface point of vertex (32, 32) at
+  its own height (`PatchBake::origin_height_m` added), so that the `FaceDifferences` path's
+  (h − h₀) is small. `PatchBake` gains `skirt_depth_m` (ε_n plus the `f32` step of the largest
+  |h| plus `BakeOptions::skirt_m`). `HeightSource` gains `prepare_cache(cache, key)`, default
+  no-op. `PatchKey::sample_dir(x, y, per_patch)` (64 or 128) gives the double-resolution normals'
+  samples by the canonical rule. The level bound (T6's `level_bound_m`) landed with T4.a, which
+  the skirts and `HeightSource` need.
+- **Deviations in T4.b, as built.** `patch::vertex::{PatchTerms, PatchTermsF32,
+face_difference_position, face_difference_position_f32, face_difference_morph_f32,
+naive_position_f32}`. The warp's difference is 4 δs (s + s₀) ÷ 3 (or (2 − s − s₀)), with a
+  level-0 patch, which straddles s = ½, forming u(s) − u(s₀) directly; a morph target at an odd
+  vertex is the mean of the formula at its two even neighbours. Worst errors at level 19 over 100
+  patches: baked offsets 0.7 µm, face differences 0.48 mm (the `f32` height's own step), naive
+  0.89 m. The golden prints, per vertex, the two neighbours' morph heights an odd vertex reads.
+  `hyperion_testkit::float::bits_f32` added.
+- **Deviations in T4.c, as built.** The interpolation weights are the query's (s, t) fractions
+  within its quad, not barycentrics of the flat 3D triangle (a second-order difference); a query
+  within 10⁻⁶ of a quad of a lattice line is snapped onto it, so that a vertex's own direction
+  returns its height bit for bit. `collision::mesh_height(source, dir, level, cache)` exposes the
+  same interpolant at any level, for T6's test.
+- **Deviations in T5, as built.** `bakePatch(face, level, i, j, vertexPath, normals, ridged,
+skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatch` whose
+  getters copy each array out; the layout is in `src/wasm.rs`'s module documentation.
+  `levelTable(ridged)`. `f32_digest` beside T2's `f64_digest`.
+- **Deviations in T6, as built.** ε_n = the omitted octaves' maxima + ½ ‖H‖ h_n² + ¼ |∇F| κ a Δ²
+  for level n and for the finest (Waldron 1998's ½ M r² on the mesh's triangles, not Design note
+  15's one-dimensional h² ÷ 8, plus the warp's term), with C₁ = 6.70 and C₂ = 32.82 the noise's
+  certified gradient and Hessian bounds (grid at 1/512 plus Lipschitz margins) and κ = 3.67 the
+  face's parametric curvature. No sample exceeded it; ridges off, the 99.9th percentile is 0.27–0.33
+  of ε_n (level 18, which omits no octave, 0.04), 0.70–0.81 of 4σ_n, and every patch maximum is
+  within 1.25 × 4σ_n; ridges on, levels 5–12 are 2–10% (findings; the crests' curvature grows as
+  1 ÷ ε). k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
+  `src/test_planet/bound.rs`). The patch-grouped figures use 16 patches of 625 points per level.
 - **Deviations in T14.b, as built** (2026-10-02).
   - `main/spike.ts` exports `launchSwitches(options, spike)`: with `spike` undefined it returns
     R01's `graphicsSwitches(options)` unchanged; otherwise it turns `gpuTiming` on and, with
@@ -2416,6 +2515,45 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   `TerrainVertexPath`, the unions of `TerrainSettings.normals` and `.vertexPath`. The shapes are
   `interface`s (the TypeScript rules), not the sketch's `type`s. The high cache budget is
   400,000,000 B (Design note 10's "about 400 MB"); the low is 64 MiB.
+- **Deviations in T8, as built (the patch cache, 2026-10-02).** T8 ran before T2 and T7.a, so it
+  wrote the types it reads from them: `PatchBounds` (`bounds.ts`, with `minHeightM` and
+  `maxHeightM` for the sketch's `minH` and `maxH`, the unit rule), `BodyFixedVec3` (`planet.ts`),
+  `SelectedPatch`, `PatchRequest` and `Selection` (`select.ts`, types only), and the key half of
+  T2's `patchKey.ts` (`Face`, `FACES`, `MAX_LEVEL`, `PatchKey`, `rootKey`, `patchKeyString`,
+  `parsePatchKeyString`, `isValidPatchKey`, `parentKey`, `childKeys`, with `patchKey.test.ts`);
+  T2 checks them against its golden. Added beside the Provides: `ResidentPatch`, `CachedPatch`,
+  `CacheInsert` (`stored` with the evicted key, or `refused`), `CachePressure`,
+  `PatchCache.insert`/`remove`/`retain`/`pressure`/`heldBytes`, `DrawnPatch`, and
+  `DrawSet { patches, slots: Uint32Array, standingIn, missing }`; `slotLayout(fields, budget)`,
+  `terrainSlotFields`, `terrainSlotLayout` and `MIN_SLOTS` (6) in `slotLayout.ts`. Choices: the six
+  roots are never evicted, so every selected patch keeps a resident ancestor once they are baked;
+  an ancestor standing in covers its resident descendants (drawn patches never overlap), and
+  `standingIn` counts them; draw pins cover every resident selected patch as well as the drawn
+  ones, so the siblings under a stand-in are kept until all arrive; a patch inserted between two
+  `retain`s takes the last selection's pins at once, so a forced patch is pinned on arrival; the
+  pins are reported as exceeding the slots when the forced patches (resident or not) and the other
+  pinned ones outnumber the slots, or an insert was refused, and the report survives the frame's
+  `retain`. **Design note 10 corrected (decided 2026-10-02 by the orchestrator): the slot counts
+  normals as stored, with the atlas's one-texel gutter**, 67² × 4 = 17,956 B at the mesh's
+  resolution and 131² × 4 = 68,644 B doubled, so the low slot is 51,756 B and 64 MiB holds 1,296
+  slots, not 1,323 (Design note 10's and T8's figure). `SlotLayout` is the one source of the slot
+  count; T11.a reads it and never recomputes it. The R10 test counts R10's
+  class weights and survey mask inside the horizon-map field until R10 adds fields of its own.
+  The acceptance filter `view/terrain/cache` leaves out `slotLayout.test.ts`; both run under
+  `view/terrain`.
+- **Deviations in T10.a, as built (the pool, 2026-10-02).** `WorkerLike` has `addEventListener`
+  and `removeEventListener` for `message` and `error` (oxlint's `prefer-add-event-listener`), not
+  `onmessage`. The constructor also takes `bake: BakeSettings` (the setting's vertex path and
+  normals, sent with every bake). Added: `onFailed` (a key whose bake failed is reported and not
+  requested again), `currentGeneration`, `queuedCount`, `inFlightCount`, `lostWorkers`,
+  `MAX_IN_FLIGHT_PER_WORKER` and `MAX_CONSECUTIVE_WORKER_FAILURES` (3: a worker failing three times
+  with no answer between is given up, not restarted forever), and `bakeTransferables` in
+  `messages.ts`. Requests go one a worker a round, least loaded first. Once a field is posted, a
+  worker is sent bakes only after acknowledging it, and a bake from an older field is baked again.
+  The pool keeps the field's bytes (about 15 MB on the render thread, beyond Design note 11's
+  count) to post them to a replacement worker. The scripted fake worker lives in `pool.test.ts`.
+  `Float16Array`'s lib (`es2025.float16`, the name TypeScript 7.0.2 has) joined both
+  `tsconfig.web.json` and `tsconfig.worker.json` here, ahead of T10.b, for `BakedPatch.normals`.
 - **GPU timing elsewhere than Linux `vulkan` mode is quantized** (decisions-r06-r07.md item 8,
   2026-10-02); frame intervals stay the criterion, and the follow-up (honouring
   `--hyperion-gpu-timing` in `default` mode) is taken only if a marginal row matters.
@@ -2462,3 +2600,148 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   - **Pending:** the hidden `just descent-spike --setting low` proof waits on T13.c (which waits on
     T13.b) and is taken then; the visible run stays with the owner, its command in
     `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7).
+- **Deviations in T12.c, as built** (2026-10-02).
+  - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
+    `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,
+    with these differences:
+    - The constructor takes the figure as a fourth argument: `new HillaireAtmosphere(engine,
+medium, sizes, figure)`.
+    - `drawFrame(camera, sun, scene)` takes the terrain target as `AtmosphereScene` (colour,
+      reversed-Z depth, near plane, pre-exposure scale). It dispatches the three per-frame kernels
+      and returns the composite as a `DrawItem` for the caller to submit into another target or
+      the view: the composite is a full-screen material draw, not a post-process, because a
+      post-process cannot read a depth texture (R01 as built).
+    - `SunState` is `{ directionBodyFixed, distanceAu, angularRadiusRad }`.
+    - Added: `geodeticOf` (Bowring's iteration), `tableRadiusM`, `SpheroidFigure`,
+      `aerialPerspectiveVolume()`, `tables`, and the kernel and material constants for the
+      catalogue.
+    - `atmosphereInputs` takes `SpheroidFigure` (`{ equatorialRadiusM, polarRadiusM }`), which
+      T7.a's `BodyFigure` satisfies structurally. `planet.ts` is lane B's and did not exist yet.
+  - _Which radius the tables use_ (the T12.b open point, settled here):
+    - The per-planet tables are built on the figure's mean radius, R₁ = (2a + c) ÷ 3.
+    - Every lookup reads them at the point's height above the datum (r_table = R₁ + h), with μ
+      against the spheroid's normal.
+    - The sky-view and aerial-perspective tables are built on the camera's own sphere, of radius
+      √(MN) (Design note 16).
+    - The ray march clips against the spheroid's shells: a + top and c + top for the atmosphere,
+      a and c for the ground. Each sample's height is taken along its radius, which differs from
+      the geodetic height by at most 2.1 m on WGS 84 up to 400 km. The sun's cosine is measured
+      against the normal of the similar spheroid through the sample, within 0.011° of the true
+      normal (science check, 2026-10-02).
+    - A test holds the grazing optical depth from the ground on the WGS 84 spheroid to within 0.5%
+      of the spherical oracle, at 0° and 45° and looking north and east, on both radii: √(MN)
+      (worst 0.17%) and R₁ (worst 0.28%). It compares with the `f64` oracle rather than the GPU table,
+      since a Node test has no GPU; T12.b's smoke check holds the table to the oracle to 1%.
+    - `shaders/view.wgsl` (not in the task's file list) holds the shared `AtmosphereView`, the
+      source term and the sky view's mapping, prepended to the three kernels and the composite.
+    - From above the atmosphere, a sky pixel whose ray meets the ground stores no transmittance
+      to space, so the sun's disc is never drawn through the planet.
+    - `geodeticOf` is the classical fixed-point iteration on φ and h. On WGS 84 it converges to
+      under 10⁻⁸ m. Above a flattening of about 0.04 it fails to converge, so R08 replaces it (with
+      Bowring 1976, for instance).
+  - _The phase functions_ are evaluated per term in the shaders. `packMedium` encodes each term's
+    phase in `Term.scattering.w` (0 none, 1 Rayleigh, 2 Cornette–Shanks) and its g in
+    `Term.absorption.w`; a test holds the packing.
+  - _The sizes_ follow Design note 16. Two steps a slice on both settings, and the ray-march step
+    counts, are this task's choices; T18 revisits them.
+
+    | Table              | High                       | Low                                                    |
+    | ------------------ | -------------------------- | ------------------------------------------------------ |
+    | Sky view           | 192 × 108, 30 steps (sebh) | 128 × 64, 16 steps                                     |
+    | Aerial perspective | 32³, to 32 km              | 32 × 32 × 16                                           |
+    | Ray march          | full resolution, 32 steps  | half resolution, 16 steps, with a depth-aware upsample |
+
+    "Aerial perspective on terrain only" is `aerialPerspectiveScope`. On high it is `scene`, which
+    publishes the volume for later plans' passes (`aerialPerspectiveVolume()`). On low it is
+    `terrain`, which publishes nothing, so the one deferred composite applies it to the terrain
+    alone.
+
+  - _The sky view's parameterisation_ is sebh's (`SkyViewLutParamsToUv`): the azimuth is measured
+    from the sun's over [0, π], and the horizon split is compressed by a square root. Bevy's is
+    world-fixed over 2π. As in sebh, the sky view has no ground bounce. The kernel and the
+    composite both clamp the camera's height to 1 m inside the shell (`skyViewHeight`). They form
+    r² − R² as h(2R + h) (`groundHitFromHeight`), which would otherwise cancel in `f32` near the
+    ground.
+  - _The aerial-perspective volume_ stores, per slice, the running in-scattered radiance (rgb) and
+    the mean transmittance (a), linear. This is sebh's choice; Bevy stores the logarithm and takes
+    transmittance from the transmittance table. The composite fades the first slice in from the
+    camera.
+  - _Luminance._
+    - The sky is scaled by `skyLuminanceScale()` ÷ d².
+    - Sunlight that the grey ground reflects into the ray march takes the sun's factors, not the
+      sky's (Bruneton 2017, `GetSunAndSkyIlluminance`), through the view's `sunOverSky`.
+    - The sun's disc is `solar.ts`'s per-channel illuminance ÷ the disc's solid angle ÷ d². It is
+      attenuated by the transmittance to space (the ray march's mean from above the atmosphere)
+      and clamped at 65,504 after pre-exposure.
+    - `SunState.angularRadiusRad` must be asin(R★ ÷ d), kept consistent with the distance by the
+      caller; 0 draws no disc. The smoke check's Sun is 0.0046505 rad (IAU 2015 B3 R⊙ᴺ at 1 au).
+  - _The settings._ `SETTINGS[s].atmosphere` is `TABLE_SIZES[s]`, which `qualitySetting.ts`
+    imports from `hillaire.ts` (appended).
+  - _Memory._
+    - `MemoryCategory` gains `atmosphere-view` (appended).
+    - The ray-march target grows to the largest output so far and is never remade smaller. The
+      engine has no public release of a texture, so a resize past the largest size leaves the
+      previous target allocated until the engine is disposed. The kernel and the composite address
+      the target by the current output's size.
+    - The sky-view and aerial-perspective textures are made once. They are freed only with the
+      engine.
+  - _The smoke harness._
+    - `smoke/atmosphere.ts` gains `checkAtmosphereFrames`. On both settings it renders from 2 m and
+      from 400 km, at noon and at the terminator, with every texel finite and within rgba16float,
+      and the noon sky from the ground bluer than red. A dark surface 500 m and 5 km away (the
+      volume's path) and 60 km away (the ray march's) must take on haze, more at 5 km and at 60 km
+      than at 500 m. At 5 km and beyond, the haze has nearly reached the horizon sky's brightness,
+      so the two paths are held to agree within 10%; they are not ordered. On SwiftShader on
+      2026-10-02, the high setting gave 0.140 at 5 km and 0.139 at 60 km in blue.
+    - `just test-render --captures=DIR` renders `HILLAIRE_REFERENCE` on Hillaire's 6,360 km sphere,
+      with no sun disc, as his comparison images have none: from the ground at noon and at sunset,
+      and from 400 km. It saves the frames as 8-bit PNGs, exposed to a mean of 0.18 and passed
+      through R02's AgX. The pieces that carry it:
+      - `apps/hyperion/scripts/testRender.sh` takes `--captures=DIR` and passes it to the harness
+        as the new `--smoke-captures` switch.
+      - The page's report gains an `images` field.
+      - `readSmokeImages` in `smoke/result.ts` checks each image's name, size and length. The main
+        process logs any image it rejects or fails to save, without losing the judged checks.
+  - _Left as found._ At half resolution, a far-surface pixel whose four nearest ray-march texels
+    are all sky gets no haze: a one-pixel fringe on silhouettes, on the low setting only.
+  - _By hand, for the owner._ The comparison with Hillaire 2020's published images (CGF 39(4), DOI
+    10.1111/cgf.14050) confirms the work but blocks nothing (decisions-r05.md item 7). The images
+    are kept local and untracked (decisions-r05.md item 4).
+  - _The lane's pre-screen_ (2026-10-02). It ran
+    `just test-render --captures=<scratchpad>/laneC-captures` on SwiftShader, headless, on both
+    variants. The run saved `hillaire-ground-noon`, `hillaire-ground-sunset` and
+    `hillaire-orbit` (320 × 180, one set a variant). The lane viewed them and saw:
+    - noon: a blue sky, lighter towards the horizon, with an aureole about the sun;
+    - sunset: an orange-to-rose band along the horizon, brightest under the sun, under a
+      grey-violet sky;
+    - orbit: the limb as a thin bright blue band over the lit disc, with black space above.
+
+    Below the horizon the ground is black, as in Hillaire's comparison scene (black ground, no
+    disc). Nothing looked wrong side up or discontinuous. The side-by-side with his figures
+    remains the owner's.
+
+  - _Aerial-perspective scope_ lives in `TableSizes` for now; R08.T9.a's `AERIAL_PERSPECTIVE_SCOPE`
+    takes it over or reads it.
+- **Deviations in T11.a, as built so far** (2026-10-02; the slot layout waits on T8's
+  `SlotLayout`, and the index buffer and instance records wait on T4's vertex order).
+  - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
+    `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
+    `maxStorageBufferBindingSize` and `maxBufferSize`, never above what it reports, capped at
+    `MAX_REQUESTED_BUFFER_BYTES`, 1 GiB.
+    - `GpuCapabilities` gains both limits. They are read from the device, as its features are,
+      so a rebuild after a device loss reports the rebuilt device's.
+    - `CapabilityOverrides.defaultLimits` raises nothing. It is how the harness runs the
+      `FaceDifferences` fallback once T11.a's layout exists.
+    - `FakeAdapter` takes both limits. Its devices get WebGPU's defaults unless more is required,
+      and reject a request beyond the adapter's.
+    - `GraphicsPanel` leaves the two limits out of its feature list.
+    - The RTX 3080's adapter limits are recorded with T11.a's layout.
+  - _`AllocationTally`_ (`view/terrain/gpu/allocationTally.ts`) adds `startFrame()`, which zeroes
+    the frame's upload count; the interface has no other notion of a frame. It also adds
+    `dispose()`, which stops listening.
+  - _The counting fake_ (`test/countingRenderEngine.ts`) landed with T12.b. It stands alone,
+    implementing `RenderEngine` and delegating views and faults to R01's `FakeRenderEngine`,
+    because that class's members return `never` and cannot be overridden. It also records
+    `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
+    `destroy()`.
+  - `MemoryCategory` gains `height-cache`, appended.
