@@ -57,6 +57,17 @@ test-render *args:
     pnpm --filter hyperion build
     just _locked bash apps/hyperion/scripts/testRender.sh {{ args }}
 
+# Replay a descent-spike capture natively (R05.T15, Design note 22): `tools/gpu-replay`, outside
+# the workspace, so `ci` never builds wgpu. It validates the capture's WGSL with naga, replays its
+# frames offscreen on the default adapter and writes a results file into
+# `docs/measurements/descent-spike/` (`--out` elsewhere). `--present` replays in a window with FIFO
+# presentation instead: a visible window, so by hand only. `--setting high|low` where the capture
+# records none.
+# Replay a capture, e.g. `just replay /path/to/capture --present`.
+[positional-arguments]
+replay *args:
+    cargo run --release --manifest-path tools/gpu-replay/Cargo.toml -- replay "$@"
+
 # Typecheck Rust and TypeScript.
 check: gen-surface
     cargo check --workspace --all-targets

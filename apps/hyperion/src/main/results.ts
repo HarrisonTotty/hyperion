@@ -377,7 +377,8 @@ export interface DescentResults {
     readonly machine: MachineDescription;
     readonly versions: RunDescription["versions"];
     readonly platform: NodeJS.Platform;
-    readonly launchMode: GraphicsLaunchMode;
+    /** The client's launch mode, or `native-replay` for `tools/gpu-replay`'s results (T15.c). */
+    readonly launchMode: GraphicsLaunchMode | "native-replay";
     readonly setting: SpikeSetting;
     readonly seed: string;
     readonly options: RunDescription["options"];
@@ -395,10 +396,15 @@ export interface DescentResults {
   /** T6's level table as the run used it. */
   readonly levels: DescentSpikeReport["levels"];
   readonly frames: {
-    /** Where the criterion's intervals come from: presentation times, else `requestAnimationFrame`. */
-    readonly source: "presentation" | "raf";
+    /**
+     * Where the criterion's intervals come from: presentation times, else `requestAnimationFrame`;
+     * an offscreen native replay (T15.c) times the gaps between the GPU's ends of frames instead.
+     */
+    readonly source: "presentation" | "raf" | "gpu-completion";
     readonly presentation: Measured<FrameStats>;
     readonly raf: Measured<FrameStats>;
+    /** An offscreen native replay's intervals between the GPU's ends of successive frames. */
+    readonly gpuCompletion?: Measured<FrameStats>;
     readonly segments: ReadonlyArray<{
       readonly segment: string;
       readonly presentation: Measured<FrameStats>;
@@ -1221,10 +1227,29 @@ function textOr<T>(figure: Measured<T>, show: (value: T) => string): string {
   return figure.value === null ? `— (${figure.reason})` : show(figure.value);
 }
 
+/** The intervals a file's criterion reads, and where they come from, in words. */
+function intervalsOf(frames: DescentResults["frames"]): {
+  readonly source: string;
+  readonly stats: Measured<FrameStats>;
+} {
+  const sources: Readonly<
+    Record<DescentResults["frames"]["source"], { source: string; stats: Measured<FrameStats> }>
+  > = {
+    presentation: { source: "presentation times", stats: frames.presentation },
+    raf: { source: "requestAnimationFrame timestamps", stats: frames.raf },
+    "gpu-completion": {
+      source: "the GPU's ends of frames (an offscreen native replay)",
+      stats: frames.gpuCompletion ?? missing("the replay recorded no GPU intervals"),
+    },
+  };
+  return sources[frames.source];
+}
+
 /** The Markdown summary written beside a results file. */
 export function summaryMarkdown(results: DescentResults): string {
   const { run, criteria, memory, frames } = results;
   const fromPresentation = frames.source === "presentation";
+  const whole = intervalsOf(frames);
   const headline = memory.gpuHeadline;
   return [
     `# Descent spike: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
@@ -1250,7 +1275,7 @@ export function summaryMarkdown(results: DescentResults): string {
     "",
     "## Frames by segment",
     "",
-    `Intervals from ${fromPresentation ? "presentation times" : "requestAnimationFrame timestamps"}. Whole descent: ${describeStats(fromPresentation ? frames.presentation : frames.raf)}.`,
+    `Intervals from ${whole.source}. Whole descent: ${describeStats(whole.stats)}.`,
     "",
     "| Segment | Intervals | Verdicts (p50, p95, p99, missed, hitches) |",
     "| --- | --- | --- |",
