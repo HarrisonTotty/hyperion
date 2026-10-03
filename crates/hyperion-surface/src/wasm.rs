@@ -32,6 +32,18 @@
 //! version its own tests were written against, as it does `generatorVersion()`: a change to the
 //! test planet bumps only that, so a stale module would otherwise go unseen.
 //!
+//! `omittedSigmaM(level, ridges)` is `σ_n`, the RMS height of the octaves the level omits,
+//! metres: 0 from the finest level on, smaller with ridges on where a ridged octave is omitted
+//! (T6; decisions-r05.md item 6). A statistical figure for `min(ε_n, 4σ_n)`, never a bound.
+//!
+//! `surfaceHeightM(x, y, z, ridges)` is the height of the drawn finest mesh, metres above the
+//! spheroid, at the body-fixed direction (x, y, z), which need not be unit length: R05.T4.c's
+//! collision interpolant (`patch::collision::finest_surface_height`), the finest level's vertex
+//! heights interpolated on the mesh's (0, 0)–(1, 1) diagonal with the query's (s, t) weights, a
+//! query within 10⁻⁶ of a quad of a lattice line snapped onto it. Wherever the morph is 0 this is
+//! the drawn surface to the `f32` step of its heights. It throws for a zero or non-finite
+//! direction. Each call starts an empty lattice cache, about 3 × 22 octave evaluations.
+//!
 //! `levelTable(ridges)` returns a `Float64Array` of 25 × 4, level n at `4 n`: the level bound `ε_n`,
 //! the lowest and highest height, and the largest vertex spacing, metres (T6).
 
@@ -112,6 +124,42 @@ fn planet(ridges: JsRidges) -> crate::test_planet::TestPlanet {
         JsRidges::Off => Ridges::Off,
         JsRidges::On => Ridges::On,
     })
+}
+
+/// `σ_n`, the RMS height of the octaves level `level` omits, metres
+/// (`TestPlanet::omitted_sigma_m`; see the module documentation).
+///
+/// # Errors
+///
+/// A `JsError` if `level` is above 24.
+#[wasm_bindgen(js_name = omittedSigmaM)]
+pub fn omitted_sigma_m(level: u8, ridges: JsRidges) -> Result<f64, JsError> {
+    if level > crate::cube::MAX_LEVEL {
+        return Err(JsError::new(&format!("level {level} is above 24")));
+    }
+    Ok(planet(ridges).omitted_sigma_m(level))
+}
+
+/// The height of the drawn finest mesh at the body-fixed direction (`x`, `y`, `z`), metres above
+/// the spheroid: `patch::collision::finest_surface_height` over the test planet, the collision
+/// interpolant (see the module documentation).
+///
+/// # Errors
+///
+/// A `JsError` if the direction is zero or has a component that is not finite.
+#[wasm_bindgen(js_name = surfaceHeightM)]
+pub fn surface_height_m(x: f64, y: f64, z: f64, ridges: JsRidges) -> Result<f64, JsError> {
+    let dir = [x, y, z];
+    if !(dir.iter().all(|c| c.is_finite()) && dir.iter().any(|&c| c != 0.0)) {
+        return Err(JsError::new(&format!(
+            "direction ({x}, {y}, {z}) is not finite and non-zero"
+        )));
+    }
+    let mut cache = LatticeCache::new();
+    match crate::patch::collision::finest_surface_height(&planet(ridges), dir, &mut cache) {
+        Ok(h) => Ok(h),
+        Err(never) => match never {},
+    }
 }
 
 /// The level table of the test planet (see the module documentation).

@@ -34,7 +34,7 @@ import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
 import { checkPhotoreal } from "./photoreal";
 import { runSoak } from "./soak";
-import { checkTerrainFrames, checkTerrainResources } from "./terrain";
+import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
 import { checkWireframe } from "./wireframe";
@@ -196,6 +196,12 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
         images.length > 0,
         `${images.length} frames`,
       );
+    });
+  }
+
+  if (captures) {
+    await checks.group("R05.T11.c the terrain captures", async () => {
+      images = [...images, ...(await captureTerrain(engine, checks))];
     });
   }
 

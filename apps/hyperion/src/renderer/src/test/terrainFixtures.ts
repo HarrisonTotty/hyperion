@@ -53,7 +53,12 @@ export function selectionOf(
   const patches = new Map<string, SelectedPatch>();
   for (const key of keys) {
     const keyString = patchKeyString(key);
-    patches.set(keyString, { key, bounds: UNIT_BOUNDS, forced: forcedStrings.has(keyString) });
+    patches.set(keyString, {
+      key,
+      bounds: UNIT_BOUNDS,
+      forced: forcedStrings.has(keyString),
+      seen: true,
+    });
   }
   return { patches, demand: [], limited: false };
 }

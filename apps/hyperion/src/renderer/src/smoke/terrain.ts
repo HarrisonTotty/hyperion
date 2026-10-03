@@ -10,12 +10,24 @@
  * only if the layouts fit the devices they are made on.
  */
 
-import { quaternionFromRows } from "../view/camera/quaternion";
-import { viewRotation4 } from "../view/camera/projection";
+import { lookAlong, quaternionFromRows } from "../view/camera/quaternion";
+import {
+  NEAR_PLANE_M,
+  perspectiveReversedInfinite,
+  viewRotation4,
+} from "../view/camera/projection";
+import { goldenLevelTable, WGS84_FIGURE } from "../test/terrainFixtures";
+import { sunIlluminanceRgb } from "../view/atmosphere/solar";
+import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import { loadRenderEngine } from "../view/engine/loadEngine";
+import { LitView } from "../view/spike/litView";
+import { planetGeometry } from "../view/terrain/planet";
+import { type TerrainFrame, TerrainPass } from "../view/terrain/terrainPass";
+import { HeightWorkerPool } from "../view/terrain/workers/pool";
+import { base64Of, type CapturedImage, srgb8 } from "./atmosphere";
 import { requestAdapterOutcome } from "../view/engine/platform";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/status";
-import type { BufferHandle, RenderEngine } from "../view/engine/types";
+import type { BufferHandle, RenderEngine, RenderTarget } from "../view/engine/types";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { terrainMaterialSpec } from "../view/terrain/gpu/material";
 import { TerrainResources } from "../view/terrain/gpu/resources";
@@ -392,5 +404,175 @@ export async function checkTerrainFrames(engine: RenderEngine, checks: Checks): 
         `${detail}; finite ${String(finite)}, at least ${(100 * shot.minCover).toFixed(0)}% wanted`,
       );
     }
+  }
+}
+
+// --- R05.T11.c: the terrain captures ----------------------------------------------------------------
+
+/** The captures' size, pixels. */
+const CAPTURE = { widthPx: 480, heightPx: 270 } as const;
+
+/** The longest the captures wait for their patches, milliseconds. */
+const SETTLE_MS = 120_000;
+
+/** How long with no new resident patch counts as settled, milliseconds. */
+const QUIET_MS = 3_000;
+
+/** One capture: a camera over the edge between faces 0 (+x) and 2 (+z), looking along it. */
+interface CaptureShot {
+  readonly name: string;
+  readonly setting: "high" | "low";
+  readonly heightM: number;
+  /** Degrees below the horizon. */
+  readonly depressionDeg: number;
+}
+
+/**
+ * The plan's two looks (T11.c): from 400 km and from 2 m, each over the cube's +x/+z face edge, so
+ * that a crack along it would show, and tilted below the horizon, so that up is plain.
+ */
+const CAPTURES: ReadonlyArray<CaptureShot> = [
+  { name: "terrain-400km", setting: "high", heightM: 400_000, depressionDeg: 30 },
+  { name: "terrain-2m", setting: "low", heightM: 2, depressionDeg: 10 },
+];
+
+/**
+ * R05.T11.c's captures: the test planet drawn by the terrain pass, streamed by a height-worker
+ * pool, through the lit view's AgX, read back and encoded as 8-bit sRGB, for the lane to look at
+ * (the right way up, no crack along a face edge) and for the owner's on-screen look.
+ */
+export async function captureTerrain(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
+  for (const shot of CAPTURES) {
+    // The captures run in order: each streams, draws and reads back before the next.
+    // oxlint-disable-next-line no-await-in-loop
+    images.push(await captureShot(engine, shot, checks));
+  }
+  return images;
+}
+
+async function captureShot(
+  engine: RenderEngine,
+  shot: CaptureShot,
+  checks: Checks,
+): Promise<CapturedImage> {
+  const planet = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
+  const pass = new TerrainPass({
+    engine,
+    setting: shot.setting,
+    planet,
+    ridges: "off",
+    createPool: (bake) =>
+      new HeightWorkerPool({
+        workers: 3,
+        bake,
+        createWorker: () =>
+          new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
+            type: "module",
+          }),
+      }),
+  });
+  let lit: LitView | null = null;
+  let output: RenderTarget | null = null;
+  try {
+    lit = new LitView(engine, shot.name, CAPTURE, TERRAIN_SETTINGS[shot.setting].renderHeightPx);
+    output = engine.createRenderTarget({
+      name: `${shot.name}:display`,
+      size: CAPTURE,
+      format: "rgba16float",
+      mips: 1,
+      depth: false,
+      category: "render-targets",
+    });
+    await Promise.all([pass.ready(), lit.ready(["rgba16float"])]);
+    // The camera over the face edge, on the datum's normal there; the body does not turn.
+    const dir = unit({ x: 1, y: 0.05, z: 1 });
+    // The datum's point M·d and its normal M⁻¹d ÷ |M⁻¹d| (Design note 5).
+    const { equatorialRadiusM: a, polarRadiusM: c } = planet.figure;
+    const surface = { x: a * dir.x, y: a * dir.y, z: c * dir.z };
+    const nu = unit({ x: dir.x / a, y: dir.y / a, z: dir.z / c });
+    const cameraM = along(surface, 1, nu, shot.heightM);
+    const east = unit(cross({ x: 0, y: 0, z: 1 }, nu));
+    const north = cross(nu, east);
+    // Looking along the edge's direction (−y is along the +x/+z edge at y = 0), tilted down.
+    const ahead = unit(along(east, -1, north, 0));
+    const d = (shot.depressionDeg * Math.PI) / 180;
+    const forward = along(ahead, Math.cos(d), nu, -Math.sin(d));
+    const up = along(ahead, Math.sin(d), nu, Math.cos(d));
+    const orientation = lookAlong(forward, up);
+    const view = {
+      rotation: IDENTITY_ROTATION,
+      cameraM,
+      orientation,
+      fovXRad: Math.PI / 3,
+      // Selection and the terrain see the render size, which the display pass upscales.
+      viewport: lit.renderSize,
+    };
+    const projectionMatrix = perspectiveReversedInfinite(
+      view.fovXRad,
+      CAPTURE.widthPx / CAPTURE.heightPx,
+      NEAR_PLANE_M,
+    );
+    const viewRotation = viewRotation4(orientation);
+    const sun = unit(along(nu, 1, ahead, 0.6));
+    const started = performance.now();
+    let lastResident = started;
+    let resident = -1;
+    let frame: TerrainFrame | null = null;
+    let settled = false;
+    for (;;) {
+      const now = performance.now();
+      frame = pass.frame({
+        view,
+        grounded: [],
+        sunDirectionBodyFixed: sun,
+        sunIlluminanceLx: sunIlluminanceRgb(),
+        exposureScale: lit.exposureScale,
+        nowMs: now,
+      });
+      const drawn = frame.drawSet.patches.length - frame.drawSet.standingIn;
+      if (drawn !== resident) {
+        resident = drawn;
+        lastResident = now;
+      }
+      settled = frame.drawSet.standingIn === 0 && frame.drawSet.missing === 0;
+      if (settled || now - lastResident > QUIET_MS || now - started > SETTLE_MS) {
+        break;
+      }
+      // Streaming runs in the workers; give them the event loop between frames.
+      // oxlint-disable-next-line no-await-in-loop
+      await pause(50);
+    }
+    lit.render(output, viewRotation, projectionMatrix, frame.draw === null ? [] : [frame.draw]);
+    const texels = halfTexels(await engine.readTexture(output.colour));
+    const rgba = new Uint8Array(texels.length);
+    for (let i = 0; i < texels.length; i += 4) {
+      rgba[i] = srgb8(texels[i] ?? 0);
+      rgba[i + 1] = srgb8(texels[i + 1] ?? 0);
+      rgba[i + 2] = srgb8(texels[i + 2] ?? 0);
+      rgba[i + 3] = 255;
+    }
+    checks.check(
+      `R05.T11.c the ${shot.name} capture streamed its patches`,
+      settled,
+      `${frame.selection.patches.size} selected, ${frame.drawSet.patches.length} drawn, ` +
+        `${frame.drawSet.standingIn} standing in, ${frame.drawSet.missing} missing, ` +
+        `limited ${String(frame.selection.limited)}, after ` +
+        `${Math.round(performance.now() - started)} ms (${shot.setting}, render ` +
+        `${lit.renderSize.widthPx} × ${lit.renderSize.heightPx})`,
+    );
+    return {
+      name: shot.name,
+      width: CAPTURE.widthPx,
+      height: CAPTURE.heightPx,
+      rgba: base64Of(rgba),
+    };
+  } finally {
+    output?.dispose();
+    lit?.dispose();
+    pass.dispose();
   }
 }

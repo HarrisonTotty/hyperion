@@ -3,18 +3,20 @@
  * adapter as a real one does, and whose device loss the test raises.
  *
  * @remarks
- * Only views, faults, allocation listeners and disposal are faked; every other member throws,
- * naming itself.
+ * Only views, faults, allocation listeners, disposal, buffer handles and releases are faked;
+ * every other member throws, naming itself.
  */
 
-import type { AllocationEvent } from "../view/engine/memory";
+import type { AllocationEvent, BufferSpec } from "../view/engine/memory";
 import { deviceCapabilities } from "../view/engine/platform";
 import type { GraphicsFault } from "../view/engine/status";
 import type {
+  BufferHandle,
   CreateWebGpuEngine,
   FrameSubmission,
   RenderEngine,
   RenderView,
+  TextureHandle,
   ViewSize,
 } from "../view/engine/types";
 
@@ -61,6 +63,8 @@ export class FakeRenderEngine implements RenderEngine {
   readonly capabilities: RenderEngine["capabilities"];
   readonly depthPolicy = "reversed-z-float" as const;
   readonly views: FakeView[] = [];
+  /** The buffers and textures released, in order. */
+  readonly released: Array<BufferHandle | TextureHandle> = [];
   disposed = false;
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
@@ -148,8 +152,9 @@ export class FakeRenderEngine implements RenderEngine {
   createComputeAsync(): Promise<never> {
     return Promise.reject(notFaked("createComputeAsync"));
   }
-  createBuffer(): never {
-    throw notFaked("createBuffer");
+  /** A handle with no GPU memory behind it, for tests of what is done with handles. */
+  createBuffer(spec: BufferSpec): BufferHandle {
+    return Object.freeze({ kind: "buffer", name: spec.name, bytes: spec.bytes });
   }
   createTexture(): never {
     throw notFaked("createTexture");
@@ -165,6 +170,17 @@ export class FakeRenderEngine implements RenderEngine {
   }
   createPointSplat(): never {
     throw notFaked("createPointSplat");
+  }
+  createPointSplatAsync(): Promise<never> {
+    return Promise.reject(notFaked("createPointSplatAsync"));
+  }
+  /** Records a release, so a test sees what the resilient engine forwarded. */
+  releaseBuffer(buffer: BufferHandle): void {
+    this.released.push(buffer);
+  }
+  /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does. */
+  releaseTexture(texture: TextureHandle): void {
+    this.released.push(texture);
   }
   dispatch(): never {
     throw notFaked("dispatch");
