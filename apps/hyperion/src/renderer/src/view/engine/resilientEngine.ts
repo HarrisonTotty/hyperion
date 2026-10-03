@@ -146,6 +146,8 @@ export class ResilientEngine implements RenderEngine {
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   #inner: RenderEngine | null = null;
+  /** The buffers and textures the current engine made, whose releases are forwarded to it. */
+  #madeByCurrent = new WeakSet<BufferHandle | TextureHandle>();
   #capabilities: GpuCapabilities;
   #unsubscribe: Array<() => void> = [];
   #disposed = false;
@@ -226,15 +228,39 @@ export class ResilientEngine implements RenderEngine {
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
-    return this.#current("createBuffer").createBuffer(spec);
+    return this.#made(this.#current("createBuffer").createBuffer(spec));
   }
 
   createTexture(spec: TextureSpec): TextureHandle {
-    return this.#current("createTexture").createTexture(spec);
+    return this.#made(this.#current("createTexture").createTexture(spec));
   }
 
-  createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle {
-    return this.#current("createPackedCube").createPackedCube(sizePx, mips, category);
+  createPackedCube(
+    sizePx: number,
+    mips: number,
+    category: MemoryCategory,
+    name?: string,
+  ): TextureHandle {
+    return this.#made(
+      this.#current("createPackedCube").createPackedCube(sizePx, mips, category, name),
+    );
+  }
+
+  /**
+   * Releases a buffer the current engine made; the release of one a lost engine made is dropped,
+   * since it died with its device, as a write to it is.
+   */
+  releaseBuffer(buffer: BufferHandle): void {
+    if (this.#madeByCurrent.has(buffer)) {
+      this.#inner?.releaseBuffer(buffer);
+    }
+  }
+
+  /** Releases a texture, as {@link ResilientEngine.releaseBuffer} does a buffer. */
+  releaseTexture(texture: TextureHandle): void {
+    if (this.#madeByCurrent.has(texture)) {
+      this.#inner?.releaseTexture(texture);
+    }
   }
 
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
@@ -251,6 +277,12 @@ export class ResilientEngine implements RenderEngine {
 
   createPointSplat(spec: PointSplatSpec): PointSplatHandle {
     return this.#current("createPointSplat").createPointSplat(spec);
+  }
+
+  createPointSplatAsync(spec: PointSplatSpec): Promise<PointSplatHandle> {
+    return this.#currentAsync("createPointSplatAsync", (inner) =>
+      inner.createPointSplatAsync(spec),
+    );
   }
 
   dispatch(
@@ -338,6 +370,12 @@ export class ResilientEngine implements RenderEngine {
     return this.#inner;
   }
 
+  /** Notes a handle the current engine made, so that its release is forwarded. */
+  #made<T extends BufferHandle | TextureHandle>(handle: T): T {
+    this.#madeByCurrent.add(handle);
+    return handle;
+  }
+
   #currentAsync<T>(member: string, call: (inner: RenderEngine) => Promise<T>): Promise<T> {
     return this.#inner === null ? Promise.reject(new EngineUnavailable(member)) : call(this.#inner);
   }
@@ -345,6 +383,7 @@ export class ResilientEngine implements RenderEngine {
   /** Makes `inner` the current engine and forwards what it reports. */
   #adopt(inner: RenderEngine): void {
     this.#inner = inner;
+    this.#madeByCurrent = new WeakSet();
     this.#capabilities = inner.capabilities;
     this.#unsubscribe = [
       inner.onFault((fault) => {

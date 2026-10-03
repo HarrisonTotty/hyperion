@@ -12,7 +12,7 @@ import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tab
 import type { KernelPair } from "./kernels";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
-import type { WgslMaterialSpec, WgslPostProcessSpec } from "./types";
+import type { PointSplatSpec, WgslMaterialSpec, WgslPostProcessSpec } from "./types";
 
 /** A named rendering setting at which the harness renders an entry. */
 export type CatalogueSetting = "default";
@@ -22,6 +22,8 @@ export type CatalogueEntry = (
   | { readonly kind: "material"; readonly spec: WgslMaterialSpec }
   | { readonly kind: "post-process"; readonly spec: WgslPostProcessSpec }
   | { readonly kind: "compute"; readonly spec: KernelPair }
+  // R06.T13.h: R06's bake splat, compiled by the harness through `createPointSplatAsync`.
+  | { readonly kind: "point-splat"; readonly spec: PointSplatSpec }
 ) & {
   /** The settings it renders at; `default` alone when absent. */
   readonly settings?: ReadonlyArray<CatalogueSetting>;

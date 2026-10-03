@@ -85,6 +85,52 @@ describe("the one creation path", () => {
   });
 });
 
+describe("releases (R06.T13.h)", () => {
+  it("raise one destroyed event with the bytes a buffer was made with, and destroy it", async () => {
+    const { gpu, resources, events } = await registry();
+    const buffer = resources.createBuffer({
+      name: "bake scratch",
+      bytes: 4096,
+      usage: BUFFER_USAGE.STORAGE,
+      category: "other",
+    });
+    events.length = 0;
+    resources.destroyBuffer(buffer);
+    expect(events).toEqual([
+      { kind: "destroyed", name: "bake scratch", bytes: 4096, category: "other" },
+    ]);
+    expect(gpu.buffers.at(0)?.destroyed).toBe(true);
+  });
+
+  it("refuse a released handle on every later use, naming the release", async () => {
+    const { resources } = await registry();
+    const cube = resources.createTexture(packedCubeSpec(4, 1, "other"));
+    resources.destroyTexture(cube);
+    expect(() => resources.textureOf(cube)).toThrow(/packed star cube was released/u);
+    expect(() => {
+      resources.destroyTexture(cube);
+    }).toThrow(/was released/u);
+  });
+
+  it("leave a released texture out of the disposal's events", async () => {
+    const { resources, events } = await registry();
+    const cube = resources.createTexture(packedCubeSpec(2, 1, "other"));
+    resources.destroyTexture(cube);
+    events.length = 0;
+    resources.dispose();
+    expect(events).toEqual([]);
+  });
+});
+
+describe("the packed cube's name (R06.T13.h)", () => {
+  it("is the caller's, so that two views' cubes report their own", async () => {
+    const { resources, events } = await registry();
+    resources.createTexture(packedCubeSpec(2, 1, "other", "sky cube: cockpit"));
+    resources.createTexture(packedCubeSpec(2, 1, "other", "sky cube: main"));
+    expect(events.map((event) => event.name)).toEqual(["sky cube: cockpit", "sky cube: main"]);
+  });
+});
+
 describe("uploads", () => {
   it("raise one uploaded event per buffer write, with its bytes", async () => {
     const { gpu, resources, events } = await registry();

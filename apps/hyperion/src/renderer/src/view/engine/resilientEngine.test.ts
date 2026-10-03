@@ -321,6 +321,25 @@ describe("a device loss", () => {
     expect(events).toHaveBeenCalledWith({ kind: "destroyed", ...FAKE_ENGINE_MEMORY });
   });
 
+  it("forwards a release to the engine that made the handle (R06.T13.h)", async () => {
+    const { engine, module } = await load([adapter()]);
+    const buffer = engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" });
+    engine.releaseBuffer(buffer);
+    expect(nth(module, 0).released).toEqual([buffer]);
+  });
+
+  it("drops the release of a handle a lost engine made (R06.T13.h)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const buffer = engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" });
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    engine.releaseBuffer(buffer);
+    expect(nth(module, 0).released).toEqual([]);
+    expect(nth(module, 1).released).toEqual([]);
+  });
+
   it("drops writes and refuses creations while there is no device", async () => {
     const gpu = new HeldGpu([adapter()]);
     const { engine, module } = await load([], {}, gpu);

@@ -1402,6 +1402,32 @@ plan reserves no tag, prefix or stream.
   and `band_bytes`. Until T11 the server answers `sky` with `unsupported` under its own ID, as it
   does `body_events`. The camera band term is Sun-relative and travels in 1/32 mag
   (decision-camera-eta.md, applied here): `thirty_seconds` in the encoder, ÷ 32 in the decoder.
+- **Deviations in T13.h, as built (2026-10-02).** `RenderEngine` gains `releaseBuffer` and
+  `releaseTexture` (the registry's existing `destroyBuffer`/`destroyTexture`, which raise one
+  `destroyed` event with the bytes created; a released handle is refused by every later call with
+  "… was released"), an optional fourth argument `name` on `createPackedCube` (default
+  `PACKED_CUBE_NAME`, "packed star cube"), and `createPointSplatAsync(spec)`, added beyond the
+  task's list so that the harness's catalogue check sees a splat's WGSL error as a rejection, as
+  `createMaterialAsync` and `createComputeAsync` do; without `float32-blendable` the check records
+  the splat as not compiled rather than failing. `ResilientEngine` forwards a release only for a
+  handle the current engine made (a `WeakSet` reset on each adoption); the release of a lost
+  engine's handle is dropped, as a write to it is. Both test fakes implement the new members
+  (`FakeRenderEngine` now fakes `createBuffer` and records releases; R05's `CountingRenderEngine`
+  raises `destroyed` events). `WGSL_CATALOGUE` takes `{ kind: "point-splat", spec }`; no entry of
+  the kind exists until T13.g.
+- **Deviations in T13.a, as built (2026-10-02).** `cameraLimit.ts` exports `cameraLimitV`,
+  `cameraLimitParts` (the limit with its sky electrons, read noise and V = 0 peak electrons),
+  `DEFAULT_VIEW_CAMERA` (a `ViewCameraSensor` with `etaSun` 3.02 under decision-camera-eta.md; the
+  fixture tying it to `CAMERA_ETA_SUN` waits on T3.c, which the tables lane builds), `surfaceBrightnessV`
+  and `V0_PHOTON_FLUX_PER_S_M2`. Design note 18 names no dark current, and it is 0 (0.1 e⁻ s⁻¹
+  would add 0.003 e⁻ at 1/30 s). High gain in the tests is ISO 409,600, where the read noise is
+  σ_pre's alone; base is ISO 100. `cull.ts` exports `cullSky(stars, limit, bandFaceTexels)` with
+  `ViewStarLimit` (`eye` with `limitAt(x, y, z)`, NaN keeping every star, or `camera` with
+  `limitV`) and `starIsSeen`; an eye keeps a star with V < limit + its eye colour offset, a
+  camera with V + its camera band term < limit; the dropped stars' illuminance goes to the band's
+  texels in `f64` (`bandIlluminanceLx`, three channels a texel). `photometry.ts` exports
+  `unitLuminanceRgb` (the wire's chromaticity to unit luminance by Rec. 709's weights),
+  `starIlluminanceRgbLx` and `starPixelLuminanceRgb`.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and

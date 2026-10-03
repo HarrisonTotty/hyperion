@@ -189,6 +189,39 @@ describe("the readback guard", () => {
   });
 });
 
+describe("releases (R06.T13.h)", () => {
+  it("raise one destroyed event and refuse the handle afterwards", async () => {
+    const { engine } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const cube = engine.createPackedCube(4, 3, "other", "sky cube: main");
+    engine.releaseTexture(cube);
+    expect(events.at(-1)).toEqual({
+      kind: "destroyed",
+      name: "sky cube: main",
+      bytes: events.at(0)?.bytes,
+      category: "other",
+    });
+    expect(() => {
+      engine.writePackedCubeLevel(cube, 0, new Uint32Array(4 * 4 * 6));
+    }).toThrow(/was released/u);
+  });
+
+  it("release a buffer once, and refuse a second release", async () => {
+    const { engine } = await engineOn();
+    const buffer = engine.createBuffer({
+      name: "staging",
+      bytes: 256,
+      usage: BUFFER_USAGE.COPY_SRC,
+      category: "other",
+    });
+    engine.releaseBuffer(buffer);
+    expect(() => {
+      engine.releaseBuffer(buffer);
+    }).toThrow(/staging was released/u);
+  });
+});
+
 describe("the engine's pass times", () => {
   it("count the query set and the timer's buffers as allocations", async () => {
     const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: ["timestamp-query"] });

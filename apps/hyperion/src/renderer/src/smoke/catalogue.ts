@@ -55,6 +55,18 @@ export async function checkCatalogue(
             checks.check(name, true, `compiled on the ${kernel.path} path`);
             break;
           }
+          case "point-splat": {
+            // A splat needs float32-blendable; without it the bake's CPU splat stands in (R06
+            // Design note 21), and the run says so rather than failing.
+            if (!engine.capabilities.float32Blendable) {
+              checks.check(name, true, "not compiled: the device lacks float32-blendable");
+              break;
+            }
+            const splat = await engine.createPointSplatAsync(entry.spec);
+            splat.dispose();
+            checks.check(name, true, "compiled");
+            break;
+          }
           case "post-process": {
             const postProcess = engine.createPostProcess(entry.spec);
             const target = engine.createRenderTarget({
