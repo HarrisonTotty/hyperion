@@ -98,8 +98,11 @@ use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
 use crate::planetary::context::{SystemContext, XuvHistory};
-use crate::planetary::derive::atmosphere::{VolatileDraws, VolatileInventory};
+use crate::planetary::derive::atmosphere::{
+    Atmosphere, SurfaceMaterial, VolatileDraws, VolatileInventory,
+};
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
+use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
 use crate::planetary::derive::rotation::{BodyRotation, ObliquityLaw, SpinDraws, SpinInputs};
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, HabitableZone, HostLight, Illumination, MassFractions, PlacedBody,
@@ -599,6 +602,29 @@ impl Body {
             Part::Planet(_) | Part::Moon(_) | Part::Member(_) => 0,
         }
     }
+}
+
+/// The photometry of a present body whose bulk is `bulk` and whose last atmosphere pass is
+/// `atmosphere` (P14.T47.c): its surface state with the material of its record's composition,
+/// whose albedo is the state's on that material (P14.T13.c). A moon's and an icy member's
+/// composition is their record's, not the one their derivation assumed.
+#[must_use]
+fn photometry_of(atmosphere: &Atmosphere, bulk: &BulkProperties) -> BodyPhotometry {
+    let fractions = bulk.fractions();
+    let material = SurfaceMaterial::of(&fractions);
+    let state = atmosphere.state();
+    BodyPhotometry::derive(&PhotometryInputs {
+        state,
+        material,
+        surface_pressure: atmosphere.surface_pressure(),
+        cloud_fraction: atmosphere.cloud_fraction(),
+        surface_temperature: atmosphere.surface_temperature(),
+        equilibrium_temperature: bulk.equilibrium_temperature(),
+        surface_gravity: bulk.surface_gravity(),
+        class: bulk.class(),
+        fractions,
+        bond: state.albedo(material),
+    })
 }
 
 /// The density of a sphere of `mass` and `radius`.
@@ -2110,6 +2136,7 @@ impl PlanetarySystem {
                 builder
                     .derived(&derived)
                     .bulk(Section::Ok(bulk))
+                    .photometry(Section::Ok(photometry_of(derived.atmosphere(), &bulk)))
                     .figure(body.figure_section(Some(&bulk), derived.mass(), epoch.t))
                     .orbit(Section::Ok(section))
                     .position(position)
@@ -2120,6 +2147,7 @@ impl PlanetarySystem {
                     .orbit(Section::NotApplicable)
                     .bulk(Section::NotApplicable)
                     .surface(Section::NotApplicable)
+                    .photometry(Section::NotApplicable)
                     .figure(Section::NotApplicable)
                     .rotation(Section::NotApplicable)
             }
@@ -2192,12 +2220,20 @@ impl PlanetarySystem {
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
                 .hooks(Section::NotApplicable)
+                .photometry(Section::NotApplicable)
                 .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
             (Part::Moon(moon), true, Some(centre)) => {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
                 let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, parent.changes_at);
-                let bulk = Self::moon_bulk(epoch, moon, &orbit, parent);
+                let derived = Self::moon_derived(epoch, moon, &orbit, parent);
+                let bulk = derived
+                    .as_ref()
+                    .map(|derived| (Self::moon_bulk_of(moon, derived, parent), derived));
+                let photometry = bulk.map_or(Section::NotModelled, |(bulk, derived)| {
+                    Section::Ok(photometry_of(derived.atmosphere(), &bulk))
+                });
+                let bulk = bulk.map_or(Section::NotModelled, |(bulk, _)| Section::Ok(bulk));
                 builder
                     .orbit(Section::Ok(
                         BodyOrbit::new(*trajectory.elements(), valid_until)
@@ -2205,6 +2241,7 @@ impl PlanetarySystem {
                     ))
                     .position(centre.translated(trajectory.relative_state_at(t).0))
                     .figure(body.figure_section(bulk.ok(), body.mass(), t))
+                    .photometry(photometry)
                     .bulk(bulk)
                     .population(Section::NotApplicable)
                     .rotation(body.rotation_section())
@@ -2215,6 +2252,7 @@ impl PlanetarySystem {
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
                 .hooks(Section::NotApplicable)
+                .photometry(Section::NotApplicable)
                 .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
             (Part::Moon(_), _, _) => builder
@@ -2222,6 +2260,7 @@ impl PlanetarySystem {
                 .orbit(Section::NotApplicable)
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
+                .photometry(Section::NotApplicable)
                 .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
             (Part::Planet(_) | Part::Member(_), _, _) => {
@@ -2231,22 +2270,6 @@ impl PlanetarySystem {
         builder
             .build()
             .expect("a generated record withholds no section and has a known kind")
-    }
-
-    /// The bulk of the present moon `moon` on `orbit` at the epoch's time, whose parent is as
-    /// `parent` says (P14.T17.b): a regular moon's from its own derivation, a giant-impact moon's
-    /// of its own density and a capture's of its own radius, each with the flux and temperature
-    /// of the derivation.
-    #[must_use]
-    fn moon_bulk(
-        epoch: &Epoch<'_>,
-        moon: &MoonPart,
-        orbit: &KeplerElements,
-        parent: &ParentNow,
-    ) -> Section<BulkProperties> {
-        Self::moon_derived(epoch, moon, orbit, parent).map_or(Section::NotModelled, |derived| {
-            Section::Ok(Self::moon_bulk_of(moon, &derived, parent))
-        })
     }
 
     /// The derivation of the present moon `moon` on `orbit` at the epoch's time, whose parent is
@@ -2383,6 +2406,7 @@ impl PlanetarySystem {
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
             .hooks(Section::NotApplicable)
+            .photometry(Section::NotApplicable)
             .figure(Section::NotApplicable)
             .rotation(Section::NotApplicable);
         let builder = match (at.state(), at.orbit()) {
@@ -2479,6 +2503,7 @@ impl PlanetarySystem {
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
             .hooks(Section::NotApplicable)
+            .photometry(Section::NotApplicable)
             .figure(Section::NotApplicable)
             .rotation(Section::NotApplicable)
             .population(now.map_or(Section::NotApplicable, |halo| {
