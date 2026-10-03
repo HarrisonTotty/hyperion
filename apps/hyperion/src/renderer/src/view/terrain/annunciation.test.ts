@@ -74,6 +74,13 @@ describe("the terrain annunciation's conditions", () => {
     expect(terrainAnnunciation(drawOf(selection, GRANDCHILDREN), selection, selection)).toBeNull();
   });
 
+  it("is DETAIL LIMITED when the patch budget stopped the selection, its own reference", () => {
+    const capped = { ...selectionOf(GRANDCHILDREN), limited: true };
+    expect(terrainAnnunciation(drawOf(capped, GRANDCHILDREN), capped, capped)).toBe(
+      "TERRAIN: DETAIL LIMITED",
+    );
+  });
+
   it("is STREAMING when both hold", () => {
     const low = selectionOf(CHILDREN);
     const reference = selectionOf(GRANDCHILDREN);

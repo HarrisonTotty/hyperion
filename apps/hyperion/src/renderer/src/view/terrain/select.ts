@@ -14,6 +14,7 @@
  */
 
 import type { Quaternion } from "../camera/pose";
+import { NEAR_PLANE_M } from "../camera/projection";
 import type { ViewSize } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { distanceToBoxM, type PatchBounds, patchBounds, relativeBounds } from "./bounds";
@@ -39,6 +40,7 @@ import {
   rootKey,
 } from "./patchKey";
 import { finestPatchSizeM, type GroundContact, inForcedRegion } from "./grounded";
+import { compareRequests } from "./priority";
 import { type BodyFixedVec3, levelBoundM, levelHeightRangeM, type PlanetGeometry } from "./planet";
 
 /** A patch the selection asks to draw. */
@@ -109,10 +111,16 @@ export interface SelectionInput {
    */
   readonly heightRanges?: HeightRangeLookup;
   /**
-   * The most patches to select, forced ones apart; absent, no limit. The terrain pass passes half
-   * its slots (provisional; T18 sets it).
+   * The most patches to select; absent, no limit. Forced patches count against it but are never
+   * refused, so the selection can exceed it by the forced region and the balance it brings, and by
+   * the six roots. The terrain pass passes half its slots (provisional; T18 sets it).
    */
   readonly maxPatches?: number;
+  /**
+   * The skirt margin the height workers bake with, metres (the bake's `skirtM`): the bounds reach
+   * down to the skirts' bottoms. Absent, 0.
+   */
+  readonly skirtMarginM?: number;
 }
 
 /**
@@ -200,7 +208,7 @@ interface TraversalNode {
   readonly excess: number;
   /** The largest w_view × ρ ÷ τ over the views that see it: the refinement and streaming order. */
   readonly weighted: number;
-  /** Whether its bounding sphere reaches into a grounded body's forced region (Design note 9). */
+  /** Whether its bounding box comes within a grounded body's forced region (Design note 9). */
   readonly forced: boolean;
   /** Its nearest baked ancestor or itself, which its height range comes from; `null` if none. */
   readonly baked: BakedRange | null;
@@ -268,6 +276,8 @@ interface Traversal {
   readonly errorM: ReadonlyArray<number>;
   readonly grounded: ReadonlyArray<GroundContact>;
   readonly heightRanges: HeightRangeLookup | null;
+  /** The bake's skirt margin, metres. */
+  readonly skirtMarginM: number;
   /** The finest level's patch edge, metres: the forced region's unit. */
   readonly patchSizeM: number;
   /** Every node made this call, per level by {@link levelIndex}. */
@@ -285,6 +295,7 @@ export function inheritedHeightRangeM(
   planet: PlanetGeometry,
   key: PatchKey,
   baked: BakedRange | null,
+  skirtMarginM = 0,
 ): readonly [number, number] {
   const [levelLow, levelHigh] = levelHeightRangeM(planet, key.level);
   if (baked === null) {
@@ -292,10 +303,14 @@ export function inheritedHeightRangeM(
   }
   const n = key.level;
   const widen = levelBoundM(planet, baked.level) + levelBoundM(planet, Math.max(0, n - 1));
-  const roundLow = Math.abs(baked.lowM) * F32_RELATIVE_STEP;
-  const skirt = levelBoundM(planet, n) + roundLow;
-  const low = baked.lowM - roundLow - widen - skirt;
-  const high = baked.highM + Math.abs(baked.highM) * F32_RELATIVE_STEP + widen;
+  // The largest |h| the patch's own heights can reach, for the f32 steps: the bake's own
+  // `f32_step(largest_h)` in its skirt depth, and the rounding of the baked range.
+  const largest = Math.max(Math.abs(baked.lowM), Math.abs(baked.highM)) + widen;
+  const step = largest * F32_RELATIVE_STEP;
+  // The bake's skirt depth: ε_n, an f32 step of the largest height and the caller's margin.
+  const skirt = levelBoundM(planet, n) + step + skirtMarginM;
+  const low = baked.lowM - step - widen - skirt;
+  const high = baked.highM + step + widen;
   return [Math.max(levelLow, low), Math.min(levelHigh, high)];
 }
 
@@ -310,7 +325,11 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
   const own = t.heightRanges?.heightRangeM(key);
   const baked: BakedRange | null =
     own === undefined ? (parent?.baked ?? null) : { level: key.level, lowM: own[0], highM: own[1] };
-  const bounds = boundsOf(t.planet, key, inheritedHeightRangeM(t.planet, key, baked));
+  const bounds = boundsOf(
+    t.planet,
+    key,
+    inheritedHeightRangeM(t.planet, key, baked, t.skirtMarginM),
+  );
   const errorM = t.errorM[key.level] ?? 0;
   let visible = false;
   let excess = 0;
@@ -321,8 +340,10 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
       continue;
     }
     visible = true;
-    const d = distanceToBoxM(rel);
-    const e = d > 0 ? (errorM * v.excessPerMetre) / d : errorM > 0 ? Infinity : 0;
+    // No nearer than the near plane: a camera inside a volume has the error of one 0.1 m away, so
+    // the excess stays finite and a secondary view's weight still ranks it (Design note 24).
+    const d = Math.max(distanceToBoxM(rel), NEAR_PLANE_M);
+    const e = (errorM * v.excessPerMetre) / d;
     excess = Math.max(excess, e);
     weighted = Math.max(weighted, v.input.weight * e);
   }
@@ -443,6 +464,7 @@ export function selectPatches(input: SelectionInput): Selection {
     errorM: Array.from({ length: MAX_LEVEL + 1 }, (_, level) => selectionErrorM(planet, level)),
     grounded: input.grounded,
     heightRanges: input.heightRanges ?? null,
+    skirtMarginM: input.skirtMarginM ?? 0,
     patchSizeM: finestPatchSizeM(planet),
     nodes: Array.from({ length: MAX_LEVEL + 1 }, () => new Map()),
   };
@@ -531,17 +553,7 @@ function demandOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchRequest
       forced,
     });
   }
-  return [...requests.values()].toSorted((a, b) => {
-    if (a.forced !== b.forced) {
-      return a.forced ? -1 : 1;
-    }
-    if (a.priority !== b.priority) {
-      return b.priority - a.priority;
-    }
-    const ka = patchKeyString(a.key);
-    const kb = patchKeyString(b.key);
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
-  });
+  return [...requests.values()].toSorted(compareRequests);
 }
 
 /** The patches of a key's level sharing an edge or a corner with it. */

@@ -20,7 +20,10 @@ function wasmBytes(): Uint8Array {
 }
 
 /** The baked heights of `key` (own and morph target, interleaved) and its baked range, metres. */
-function bake(key: PatchKey): { heights: Float32Array; range: readonly [number, number] } {
+function bake(
+  key: PatchKey,
+  skirtM = 0,
+): { heights: Float32Array; range: readonly [number, number]; skirtDepthM: number } {
   const patch = bakePatch(
     key.face,
     key.level,
@@ -29,14 +32,32 @@ function bake(key: PatchKey): { heights: Float32Array; range: readonly [number, 
     VertexPath.FaceDifferences,
     NormalScale.Mesh,
     Ridges.Off,
-    0,
+    skirtM,
   );
   try {
     const [low, high] = patch.heightRangeM();
-    return { heights: patch.heights(), range: [low ?? NaN, high ?? NaN] };
+    return {
+      heights: patch.heights(),
+      range: [low ?? NaN, high ?? NaN],
+      skirtDepthM: patch.skirtDepthM,
+    };
   } finally {
     patch.free();
   }
+}
+
+/** The heights of the skirts' bottoms: each edge vertex's own height and morph target, less the skirt. */
+function skirtBottoms(heights: Float32Array, skirtDepthM: number): number[] {
+  const bottoms: number[] = [];
+  for (let y = 0; y <= 64; y += 1) {
+    for (let x = 0; x <= 64; x += 1) {
+      if (x === 0 || y === 0 || x === 64 || y === 64) {
+        const at = 2 * (65 * y + x);
+        bottoms.push((heights[at] ?? NaN) - skirtDepthM, (heights[at + 1] ?? NaN) - skirtDepthM);
+      }
+    }
+  }
+  return bottoms;
 }
 
 /** The ancestor of `key` at `level`. */
@@ -79,6 +100,21 @@ describe("height ranges inherited from a baked ancestor", () => {
       expect(escapes).toEqual([]);
     },
   );
+
+  it.each([0, 5])("reaches down to the skirts' bottoms with a skirt margin of %i m", (skirtM) => {
+    for (const leaf of leaves) {
+      const ancestor = ancestorAt(leaf, leaf.level - 2);
+      const { range } = bake(ancestor, skirtM);
+      const inherited = inheritedHeightRangeM(
+        planet,
+        leaf,
+        { level: ancestor.level, lowM: range[0], highM: range[1] },
+        skirtM,
+      );
+      const { heights, skirtDepthM } = bake(leaf, skirtM);
+      expect(skirtBottoms(heights, skirtDepthM).filter((h) => h < inherited[0])).toEqual([]);
+    }
+  });
 
   it("tightens a patch's range against its level's", () => {
     const leaf = leaves[0];
