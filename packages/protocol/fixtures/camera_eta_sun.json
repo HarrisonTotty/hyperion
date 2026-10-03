@@ -1,0 +1,4 @@
+{
+  "description": "eta_sun: the default camera sensor's electrons per V-band photon for the Sun (5,772 K, log g 4.438), from the fitted colour table (crates/hyperion-sim/src/tables/star_colour.rs, CAMERA_ETA_SUN; rendering plan R06 Design notes 6 and 18, decision-camera-eta of 2026-10-02). Every star's camera band term is relative to it. The sim's test and the client's DEFAULT_VIEW_CAMERA.etaSun test both read this file; a refit of star_colour that moves the value updates it. It is the ATLAS9 grid's value at 5,772 K and log g 4.438, which replaces decision-camera-eta's blackbody-based 3.02 (Pickles G2V gives 3.02 too); the ruling's range is 2.9-3.15.",
+  "camera_eta_sun": 2.955707565385169
+}

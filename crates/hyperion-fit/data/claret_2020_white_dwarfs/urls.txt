@@ -1,0 +1,1 @@
+tablegh.dat https://cdsarc.cds.unistra.fr/ftp/J/A+A/634/A93/tablegh.dat.gz

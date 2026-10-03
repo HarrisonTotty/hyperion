@@ -1,0 +1,2309 @@
+# The pure-hydrogen (DA) white-dwarf model spectra of Koester (2010), 5,000-80,000 K, at log g
+# 6.5-9.5 in steps of 0.5, as SVO serves them. A fetched dataset (plan 15, Design note 12): no
+# licence is stated, so only this file and `urls.txt` are committed. The raw files are downloaded
+# into `crates/hyperion-fit/data/cache/wd_koester_da/`, which git ignores: each line of `urls.txt`
+# is a file name and the URL it was downloaded from (SVO serves the ASCII form with
+# `&format=ascii`). Read by `run star_colour` (rendering plan R06, R06.T3.a).
+dataset = "wd_koester_da"
+class = "fetched"
+citation = "Koester (2010), Mem. Soc. Astron. Ital. 81, 921; Tremblay and Bergeron (2009), ApJ 696, 1755 (Stark broadening): DA model spectra"
+url = "http://svo2.cab.inta-csic.es/theory/newov2/index.php?models=koester2"
+retrieved = "2026-10-02"
+release = "the 574 models of SVO collection koester2 at log g 6.5, 7.0, ..., 9.5 in ASCII (Angstrom, erg/cm2/s/A), as served on that date"
+licence = "none stated by the model authors; the Spanish Virtual Observatory asks that work using its theoretical services acknowledge SVO"
+
+[[files]]
+name = "t005000_g6.50.txt"
+sha256 = "45e02705b7a32b1344d9863e9a7075bb25c09cf286794b6804176af9cad8d39f"
+
+[[files]]
+name = "t005000_g7.00.txt"
+sha256 = "140413e9a6780bb80e5049a2a874902d318443aad438614ad6a665e0da6aa696"
+
+[[files]]
+name = "t005000_g7.50.txt"
+sha256 = "4dbcc750bb36b867b340a1209b764ec80b364f2f404048b084396e635b2c91fb"
+
+[[files]]
+name = "t005000_g8.00.txt"
+sha256 = "0ecc30f3194bbf22a73598de1a2dc0b4f553db35a74f678fac2471fa66b44474"
+
+[[files]]
+name = "t005000_g8.50.txt"
+sha256 = "18b9f1a7455c9930b3eeeb7728486fbad8b561a3d2c0c1d26367080d854611b9"
+
+[[files]]
+name = "t005000_g9.00.txt"
+sha256 = "5be0f31523c4caf238fe830b35a09fbac4b6d002aea667d98dd5860823591dec"
+
+[[files]]
+name = "t005000_g9.50.txt"
+sha256 = "bf0255edb7fc4a9409dbe25bcbee24086a65eeb3d869e99566b05401f17284b7"
+
+[[files]]
+name = "t005250_g6.50.txt"
+sha256 = "862cd8b26892efd74ccb1a3c83a361218e6019b4c834b86cdb52c3412360dfc4"
+
+[[files]]
+name = "t005250_g7.00.txt"
+sha256 = "d2df3d2a2fc242446b4cbf1c9bcb8b104df37466fcd83f450ec3b7b6f0775547"
+
+[[files]]
+name = "t005250_g7.50.txt"
+sha256 = "aa6cc1b2c685a6e2052a9b8cee5075241bd1e17da90947694684b7fdf5784295"
+
+[[files]]
+name = "t005250_g8.00.txt"
+sha256 = "bf0d8a733544ddf1ae461ca02beb5b4170e2f10a0da6f31117f4af67c327bc68"
+
+[[files]]
+name = "t005250_g8.50.txt"
+sha256 = "7b05f23470310ac758828ba5b525f6de3ccbec9a2820e5595f4c6a21c872c507"
+
+[[files]]
+name = "t005250_g9.00.txt"
+sha256 = "e9a080ca76799e84833675a88ba0f1bc15ba05c1f6db67d580fae50235f9cdad"
+
+[[files]]
+name = "t005250_g9.50.txt"
+sha256 = "bb70bc000a6d5479891cdded253a340c9b03550649c50e8a5b9c8c17f5bbb9ac"
+
+[[files]]
+name = "t005500_g6.50.txt"
+sha256 = "ba4912f30dd31031125be90d6982020110ff58fe15f15b0458e9e144deb9fba1"
+
+[[files]]
+name = "t005500_g7.00.txt"
+sha256 = "0359348ef688b92d289af24c19b2a603d0b54c1d93eeada5f91bad7f3f7235fb"
+
+[[files]]
+name = "t005500_g7.50.txt"
+sha256 = "e277fa57198a4e8016bd22da0dbcf147525cde376732a3c11b4226633263763e"
+
+[[files]]
+name = "t005500_g8.00.txt"
+sha256 = "13633a22da82de5ff20ed204b9e33289608b930f1784a9ac48c4578c0ba47d83"
+
+[[files]]
+name = "t005500_g8.50.txt"
+sha256 = "e361ae9f228828af6a460149adbfecdd5b9ebc69792167e1af83c0cf90f9f326"
+
+[[files]]
+name = "t005500_g9.00.txt"
+sha256 = "c130eb0c512c13c0e2caf78a91100e7b8274db3f9c45bf2fe11d57e0fe31b6c0"
+
+[[files]]
+name = "t005500_g9.50.txt"
+sha256 = "3ba7d4fc189d311e979c1d61a6e360855100bb6bd3bf7990a1f69b4417e041fd"
+
+[[files]]
+name = "t005750_g6.50.txt"
+sha256 = "b6ea23633a7ddf07572827acbec69a254077df3efb3206e98668d0dcd027d3d3"
+
+[[files]]
+name = "t005750_g7.00.txt"
+sha256 = "463c08dee1333cb78e5a32570e70840174e7898ff5f0edcd36c4407ad0f206f3"
+
+[[files]]
+name = "t005750_g7.50.txt"
+sha256 = "dcf3687343669068970cba7e9f3b03ea9db91cf4fed3ac01d54d9d57fead182b"
+
+[[files]]
+name = "t005750_g8.00.txt"
+sha256 = "dc0d1b802bd987c92d6e5b9e5feefdcb46614dee75c79435204c2dd7af368d4c"
+
+[[files]]
+name = "t005750_g8.50.txt"
+sha256 = "6b91fa869cb80bda08f94ab6f61655098398e265f33a6f2580650bb63c6d47e6"
+
+[[files]]
+name = "t005750_g9.00.txt"
+sha256 = "e15d04dc7ae1bb247ffbfd7ac753415789a0e34925d01f0010d5634ff273e16c"
+
+[[files]]
+name = "t005750_g9.50.txt"
+sha256 = "16dbbb71912edd204d3e03659b9f5eca9498ed13c686d4690cecddb9112bab91"
+
+[[files]]
+name = "t006000_g6.50.txt"
+sha256 = "acff503fb3bdff5b26e81696a413e4849ebe992441fed94518edafde558453b4"
+
+[[files]]
+name = "t006000_g7.00.txt"
+sha256 = "29b93f652d4e81c6b6555ab2de7a3bf2a5b8947f5b8e5c92560000c7a07d5124"
+
+[[files]]
+name = "t006000_g7.50.txt"
+sha256 = "05e25da43a4656b30162772a1b1fad550e1f4600206d84b1d749aa1d9cf18aef"
+
+[[files]]
+name = "t006000_g8.00.txt"
+sha256 = "e2c6bbf9f5fde38e6bd57e78280d9010fc573383be95887136bc7d84430981c0"
+
+[[files]]
+name = "t006000_g8.50.txt"
+sha256 = "5e5a8166bdfc1ff98d1f2f7a5f2d4ed15efefb55040b0c9d70a5bf0510128231"
+
+[[files]]
+name = "t006000_g9.00.txt"
+sha256 = "fb25c87f5985f799ae3ebb8ffd6795bdce4911f446e9d49b2cbc8bc139cfded9"
+
+[[files]]
+name = "t006000_g9.50.txt"
+sha256 = "dcac99a476865020836e0532061f39505c73b5fc7d8f0c922e4433c582b04c55"
+
+[[files]]
+name = "t006250_g6.50.txt"
+sha256 = "dea4928ca93cfe05d0684c4bed0fc0fd96fd6cac1da7a6979e783761ad2cdd3a"
+
+[[files]]
+name = "t006250_g7.00.txt"
+sha256 = "00c98de5173a4f26b77b8cc2e264d88747a70390d3d88a4d0e2c3d1ccc31d10d"
+
+[[files]]
+name = "t006250_g7.50.txt"
+sha256 = "387b97823b0d68dedc622f0f85464eaf44749fcbc3a833766fb9a835d04715b9"
+
+[[files]]
+name = "t006250_g8.00.txt"
+sha256 = "d4a67f7f911d9f8da3898c6e849e67b88ddd002d4ee3f37182c21bcf14c84298"
+
+[[files]]
+name = "t006250_g8.50.txt"
+sha256 = "6845eb5abd1b9a050a7e7638faa5def039810003e1e994b0d3f35b03fbe72e81"
+
+[[files]]
+name = "t006250_g9.00.txt"
+sha256 = "e5adfd29bf6dc3c930714a137ed77ec21a7760d59688634e1f52441a10418c75"
+
+[[files]]
+name = "t006250_g9.50.txt"
+sha256 = "ab0282021f4b0f49ad05e3b5f3754316af0b9fc2b3bf8b86914de5305994549d"
+
+[[files]]
+name = "t006500_g6.50.txt"
+sha256 = "e2c23afb30e4d8398a6b7dc23ca42c604f065165d7e4607761c00b270710d34f"
+
+[[files]]
+name = "t006500_g7.00.txt"
+sha256 = "ad0886cd06843374fbbc987b4c89609ea36032022c07532ffd82216dc8128d4b"
+
+[[files]]
+name = "t006500_g7.50.txt"
+sha256 = "8a1e1123a2b43a41fd236426da4fe5b7145ba7d7d44435a84783857b0b5755a2"
+
+[[files]]
+name = "t006500_g8.00.txt"
+sha256 = "0f7a1b8a7c350c9751f9171083e351e62ca62d804ccb7bcecd3f6b73dd553232"
+
+[[files]]
+name = "t006500_g8.50.txt"
+sha256 = "85fc8cbe977785efa4e86ad69d8f8bbf7d9fd6e329009ce67a4401538ac8bb24"
+
+[[files]]
+name = "t006500_g9.00.txt"
+sha256 = "b71f6616cc175a0a58878b8abfadc86746513be09329f7e5f930dcf25cb0a4b0"
+
+[[files]]
+name = "t006500_g9.50.txt"
+sha256 = "47daa93fa5c6c7f697ee76696bdd5abb55d7fe40918efd5e2dd017a871d647aa"
+
+[[files]]
+name = "t006750_g6.50.txt"
+sha256 = "0d5fc8760a5c5659b9578562597a818baa12ea8ac02a26c06a9f5e80fcd81028"
+
+[[files]]
+name = "t006750_g7.00.txt"
+sha256 = "6243194c3b7abe850c6b23b060119154c73f33be7900f92f96b93db52a13a6ab"
+
+[[files]]
+name = "t006750_g7.50.txt"
+sha256 = "94a88508307783eaa1bb1aa77f6577ec825302ceb5d5bad2ddc1d641e4169e78"
+
+[[files]]
+name = "t006750_g8.00.txt"
+sha256 = "029377e752e1e1187b6a366c3e90dc004fc170a4139b88ffc814215792b6f218"
+
+[[files]]
+name = "t006750_g8.50.txt"
+sha256 = "15fb7efdef7eaa4ebb96c008299e5f30206a2996a47a379898dbdaa1f0cd5050"
+
+[[files]]
+name = "t006750_g9.00.txt"
+sha256 = "7f0b872c027ec663882103325bbff1620ddc1a0e0b97e03a1893f7ce719478dc"
+
+[[files]]
+name = "t006750_g9.50.txt"
+sha256 = "d50e83c1e9d9ca41347a71e912a0a1d35c28c1311b08e1d92800b111d77048e5"
+
+[[files]]
+name = "t007000_g6.50.txt"
+sha256 = "a5d0bfec6015b086cad2112a9e0bde3fa5188c610c04be343158c1bc39eff693"
+
+[[files]]
+name = "t007000_g7.00.txt"
+sha256 = "496cef0810cc4183616cf488881cb8908be4fac4326511e452d112211df3a6fb"
+
+[[files]]
+name = "t007000_g7.50.txt"
+sha256 = "089b2b3931ca32c30da3e098e1c9f023c074ebc465b06845a81a7a406122ea05"
+
+[[files]]
+name = "t007000_g8.00.txt"
+sha256 = "d0960baf083ecb5df55314bf8d5c0b40713bda5d8f533ee92f88a0588d18c7f2"
+
+[[files]]
+name = "t007000_g8.50.txt"
+sha256 = "ee003f57c852f10ffdceccccef67b1922cf53696c1a51d08a5c22cc41e2bb83f"
+
+[[files]]
+name = "t007000_g9.00.txt"
+sha256 = "654abc07cfe422327eb7f1c3717b2ce9807979405fb67a3e32e30d8473823114"
+
+[[files]]
+name = "t007000_g9.50.txt"
+sha256 = "507efa96467b47cd1d847c940f99894638aa1a7238f5266541f2945f1d2441ec"
+
+[[files]]
+name = "t007250_g6.50.txt"
+sha256 = "c145425c1d9e2e200ea4b331e02be8431fd20cf5a23ea6a8dfeb3b512b4630a4"
+
+[[files]]
+name = "t007250_g7.00.txt"
+sha256 = "40c638e675e6c810a37d3d628027632b2e5120c3f8620d2ed431d4c6235ab3f1"
+
+[[files]]
+name = "t007250_g7.50.txt"
+sha256 = "f6fb7bec07d432775f891e08ca2057df7ba99c68e24bd75f27844b8f724a7d0d"
+
+[[files]]
+name = "t007250_g8.00.txt"
+sha256 = "124cc571250641a4424ff86d952a595f0efd3f4643320cefe95593425b2e9818"
+
+[[files]]
+name = "t007250_g8.50.txt"
+sha256 = "6181874568fcf032bba0befe17427b4bd2f9f1dc9133b1f892b5a97a14153780"
+
+[[files]]
+name = "t007250_g9.00.txt"
+sha256 = "3fb1607eafc59e15b624fee517df701bdce525182bf4f6bc5bd27bc4bcff1c93"
+
+[[files]]
+name = "t007250_g9.50.txt"
+sha256 = "068ef138d11105036fab5097cc2e4ff93e85bc0557adfe86085e828207ba1c35"
+
+[[files]]
+name = "t007500_g6.50.txt"
+sha256 = "9c438dcf88556b32fc1589de6a2cca202be7f2774dd9f97a283805977ffc6f2b"
+
+[[files]]
+name = "t007500_g7.00.txt"
+sha256 = "117964cc18457a8b4bef1cda70d3e714e0b33a420619fb8c6b91eb72fb4803fd"
+
+[[files]]
+name = "t007500_g7.50.txt"
+sha256 = "aff65ffad0b5bcece5df2fc8f991f9e91df82a2de3958733e20a444ddafbd544"
+
+[[files]]
+name = "t007500_g8.00.txt"
+sha256 = "c894b4e499f58e97ecf437015df92a721bf85d3f9ac61760ebe9d1e34243d885"
+
+[[files]]
+name = "t007500_g8.50.txt"
+sha256 = "19457f0dd3b708120e8ecc6a66c21c9e26fabbb6923106c0e066e716aaecb38f"
+
+[[files]]
+name = "t007500_g9.00.txt"
+sha256 = "0c3c786c94dc9cc5dbcb99b2115ab20989cbe820e7ba9bfc7151ec3cf9120bfa"
+
+[[files]]
+name = "t007500_g9.50.txt"
+sha256 = "4782994137a4da9137fdbde9f2249d4486f077e65172e581671966822cd71c9b"
+
+[[files]]
+name = "t007750_g6.50.txt"
+sha256 = "13a0493ace783373118c16b457e4f27820618bcb5a97a754a8121c6fcde6c15a"
+
+[[files]]
+name = "t007750_g7.00.txt"
+sha256 = "e0e219d93ac1acf68070606897d973eb7433ef147f197ec0cae15972b8130c34"
+
+[[files]]
+name = "t007750_g7.50.txt"
+sha256 = "dbc075740020e751985a8a05904e6a94b94dc342a506bc18057099dc4a8acbf6"
+
+[[files]]
+name = "t007750_g8.00.txt"
+sha256 = "db821b7d10356e18779926172cffa9c957eb581997bcf3092d0ba2193f2058cf"
+
+[[files]]
+name = "t007750_g8.50.txt"
+sha256 = "df3ff6dc68e748e69396edd3a88dc952ad6e5a0a2371dc04cf7ee1510485d3fe"
+
+[[files]]
+name = "t007750_g9.00.txt"
+sha256 = "805db3a9a7ee073c84bf6db86566d62c82e3e9f0e8a0bee6942f2dd26a67c614"
+
+[[files]]
+name = "t007750_g9.50.txt"
+sha256 = "3de59b6d9b81b45f830daafc73dd908f0fdf661bf12c030364c8a12b19b8f7d9"
+
+[[files]]
+name = "t008000_g6.50.txt"
+sha256 = "2c1396c0191d0709300e64509be496ee6085a670e3265fa0e175124516fbab1d"
+
+[[files]]
+name = "t008000_g7.00.txt"
+sha256 = "57f1a0d264b653600e53b13bb74efb7730375de30570984a4cdd6c7777ef6c52"
+
+[[files]]
+name = "t008000_g7.50.txt"
+sha256 = "029cb1a9f333f2d766107a5e6c215cfdbf11c1f594f68df1977e97bf6495b06c"
+
+[[files]]
+name = "t008000_g8.00.txt"
+sha256 = "8d4e53056bff2f6d6baec87416b553e1bd2724154a6120722f5ab00fde0e0524"
+
+[[files]]
+name = "t008000_g8.50.txt"
+sha256 = "7c96b84d449d833650f65b4b04c851880a26b434035e3c46f012d0ab24f0540b"
+
+[[files]]
+name = "t008000_g9.00.txt"
+sha256 = "bb4967b43e4a553611d90501a0293b6d485447c9d1bd6a9c58c2e5f6b1cc9dd5"
+
+[[files]]
+name = "t008000_g9.50.txt"
+sha256 = "9e873e44380a9faf37673562ef0d381b2161a3aa1295787d1399d4ddcbaf2443"
+
+[[files]]
+name = "t008250_g6.50.txt"
+sha256 = "fa9d5aa7f27981d91180d06125cb7623708b81670963fa74b8ca29c17737b9bf"
+
+[[files]]
+name = "t008250_g7.00.txt"
+sha256 = "b67f0f7f40dac5436da395a5eb9611f38944574984b80d20059532ede69e2093"
+
+[[files]]
+name = "t008250_g7.50.txt"
+sha256 = "e9ef411e358ff6f315c7ea275278dc6697dceb2f10fc447c6358fd9be34b523d"
+
+[[files]]
+name = "t008250_g8.00.txt"
+sha256 = "ba57a93f7d355675b3027a8b7ac31b8c15d8e876b8b5cebd81151f505f2dd8ab"
+
+[[files]]
+name = "t008250_g8.50.txt"
+sha256 = "5a7bcf4cec2df6a14681a60b2edeed3f9a9e4c302d65f1623f5fc803e08ef904"
+
+[[files]]
+name = "t008250_g9.00.txt"
+sha256 = "5103872903c575b22864df49c02fcc902a038846ad2bbd47ec5ba6298710f759"
+
+[[files]]
+name = "t008250_g9.50.txt"
+sha256 = "6a50d1e601d7de021cac7ef25b8da4627abef468975d903447d14d20bbd6b5a6"
+
+[[files]]
+name = "t008500_g6.50.txt"
+sha256 = "06f791259c2f91a98ee233db8f3f9aea08d3d18e8e0dee3bd2f8d63326a761d3"
+
+[[files]]
+name = "t008500_g7.00.txt"
+sha256 = "33a513f65b846c82584a88c87545158349f1093e3cc3d514aa98eef6888fd8e6"
+
+[[files]]
+name = "t008500_g7.50.txt"
+sha256 = "a2166d312b649cb10cbe065631783f50c74c635e8bd5e1ca1e0e370579e137dc"
+
+[[files]]
+name = "t008500_g8.00.txt"
+sha256 = "7b145c4b3eb2450069022b2846755a94865c23ad45a2af3380c966ca83f0f11a"
+
+[[files]]
+name = "t008500_g8.50.txt"
+sha256 = "3babf8849c73a3b246148994144b954ae92714ac3a829921c831240d08e84c08"
+
+[[files]]
+name = "t008500_g9.00.txt"
+sha256 = "c3922209794db694f94cc9936827af9485f35cad16a3873504f0a337cd990fd4"
+
+[[files]]
+name = "t008500_g9.50.txt"
+sha256 = "a4049e6a4c6e67a898975baddef9b0cd9739f1a2dcbcda3581c7d44bfff17aeb"
+
+[[files]]
+name = "t008750_g6.50.txt"
+sha256 = "48f9345ac509932a79fbfd110372258b4a8a176ad1d52b9e008f7041cab80428"
+
+[[files]]
+name = "t008750_g7.00.txt"
+sha256 = "a007dc341b55e31f2d4a94c136867c5fd7713124075b26817c849c97b04e6f6a"
+
+[[files]]
+name = "t008750_g7.50.txt"
+sha256 = "6926028e8ebd6a00d07ff62efd974b581571686659ac5e9c3cc19548a75f1ec3"
+
+[[files]]
+name = "t008750_g8.00.txt"
+sha256 = "c3cb9ce47044b48f680799b28646cc5c7b78dc04cca2a24cbdd13ffd573d19cc"
+
+[[files]]
+name = "t008750_g8.50.txt"
+sha256 = "2e91744deec18225b65a848ceb4d32356eb4edcd8c9634c5f2fa7c1a808b210b"
+
+[[files]]
+name = "t008750_g9.00.txt"
+sha256 = "92c7fd0f624b61018aeba14654e65d92283ee50e68cb8c75f2a593033e886494"
+
+[[files]]
+name = "t008750_g9.50.txt"
+sha256 = "41614d8e4292717429b9a9cb9e842a1e87ba9246f2ac61c5f3916b331d73672e"
+
+[[files]]
+name = "t009000_g6.50.txt"
+sha256 = "3fbdfd926fff67283f66fe2b9eced7b5a9743c896a5174e4a71ae125af0efd46"
+
+[[files]]
+name = "t009000_g7.00.txt"
+sha256 = "4e9a0c1ab3b899add4d4066f51317f1bd8a59c3e6a88101d6ab19369a388cc85"
+
+[[files]]
+name = "t009000_g7.50.txt"
+sha256 = "9a2454f500ca21750d90bf35142e6862060cf5a26869d2e32752d7a84208868e"
+
+[[files]]
+name = "t009000_g8.00.txt"
+sha256 = "9d6450014a4e77b4409a8c0481a45496c7b7645fa78beaca02b2c764c1f52f0f"
+
+[[files]]
+name = "t009000_g8.50.txt"
+sha256 = "2727b0fadf1f08c8992ce9953872996868c5ee992a6aa1c1a095d398663d41d6"
+
+[[files]]
+name = "t009000_g9.00.txt"
+sha256 = "bb7340707773e4f8673765e69e3aed086040cf9b0ab46fbc7cb79c7fd54c8871"
+
+[[files]]
+name = "t009000_g9.50.txt"
+sha256 = "3fb29312ff406c82a9aad2ecc8dd7242595f7a246d57282367958cf447edf833"
+
+[[files]]
+name = "t009250_g6.50.txt"
+sha256 = "2086a7ba465b7de1b32c5ac3f49750f1ad9234b239ae0668b41ac70adc783435"
+
+[[files]]
+name = "t009250_g7.00.txt"
+sha256 = "e62ad389d309b8cf8ac6045513c9e0b4ce77a294fd1f2c1e99596956ceb3c6a5"
+
+[[files]]
+name = "t009250_g7.50.txt"
+sha256 = "32dcb32456d0d1012cf129373ae5d42bb9e592468ac8da46016b7f4fbb31184d"
+
+[[files]]
+name = "t009250_g8.00.txt"
+sha256 = "3e549dc313affe6f3464c28a624770f52b8a6107693f57cd229c663e5c522454"
+
+[[files]]
+name = "t009250_g8.50.txt"
+sha256 = "d1c0942528703839389fc84194871bc7140c316ea69d129483ce7a15efe2633a"
+
+[[files]]
+name = "t009250_g9.00.txt"
+sha256 = "2e20b8bece750cb8c86e5fc4d76d06deda924babddadfcded818977132194e75"
+
+[[files]]
+name = "t009250_g9.50.txt"
+sha256 = "de6c90db69897ed40a06ab72a86dcaaaf16fd0647c7c07a3651dd26622152c9c"
+
+[[files]]
+name = "t009500_g6.50.txt"
+sha256 = "28dd19aab5eb843a26785218cb43ebbfa7a03c7ff6be1c9f3e1e8d9e5103634b"
+
+[[files]]
+name = "t009500_g7.00.txt"
+sha256 = "2f355e6ced1b8e15617e264e51d26344dd25f7ce6747085cf48526c74710e55b"
+
+[[files]]
+name = "t009500_g7.50.txt"
+sha256 = "ca4e3d6b4ead79fb17d6da16e3a374fa184f3c485549bb72cb8092b01e79f763"
+
+[[files]]
+name = "t009500_g8.00.txt"
+sha256 = "d8b8e440529080da33ad854fe24b6710fcd8a2fabb0d3c98d00973638102bc73"
+
+[[files]]
+name = "t009500_g8.50.txt"
+sha256 = "eca5425e793901fdd6c41cf1acb1f876c7fa7d7f774862ce8a71e40b2c2f317a"
+
+[[files]]
+name = "t009500_g9.00.txt"
+sha256 = "8c0797d3787d1dff10a47b36cdc09ebb18a251f57968c40148efdf44812886dd"
+
+[[files]]
+name = "t009500_g9.50.txt"
+sha256 = "4bf9e4b9287e29f4ee5d3373f974b0174e423803722bf387984373bb6ae0751e"
+
+[[files]]
+name = "t009750_g6.50.txt"
+sha256 = "649307caf3b7cb3e99a0090ff473006ae71ef0851729c33c8234956f98086e89"
+
+[[files]]
+name = "t009750_g7.00.txt"
+sha256 = "56cae6dcb28975755d3554a4907178a59b63b47823331e1560d24160d157091b"
+
+[[files]]
+name = "t009750_g7.50.txt"
+sha256 = "59d8daada3f7cf123130fb5871d6d3ac558f15aec45f961e7795cbf47784a58f"
+
+[[files]]
+name = "t009750_g8.00.txt"
+sha256 = "06673b487b2a7bff8e4e22e47924542ef0d4657a7591022a606267a2e43db033"
+
+[[files]]
+name = "t009750_g8.50.txt"
+sha256 = "af14083c5ffefdf5d517a68dc29f77c5a15896f76a585c46865e5ea70512a2b0"
+
+[[files]]
+name = "t009750_g9.00.txt"
+sha256 = "902f7c8818c809e2be3dd84434510e99ab9b48af3a0ab4b9b3f4a64075505ce4"
+
+[[files]]
+name = "t009750_g9.50.txt"
+sha256 = "6842a7ca5e14379bf650d4e966046d8a3c0c99c9c089b7692c9e79a6f3dffd76"
+
+[[files]]
+name = "t010000_g6.50.txt"
+sha256 = "4969cfd6edaa7e150ca3877687048d05372c78c31fc7909f1b336208fc33ee5e"
+
+[[files]]
+name = "t010000_g7.00.txt"
+sha256 = "cdd483cf68effac89c5a04ac03e8220c20a7d00cecacc3d4c91170fe413d490a"
+
+[[files]]
+name = "t010000_g7.50.txt"
+sha256 = "8cea037f278f4274057e6e4847bdd5e21e177f6f33a54e09535ffdec0eac12c9"
+
+[[files]]
+name = "t010000_g8.00.txt"
+sha256 = "1fca7b8247aa2c2b0b4f5c8f16e6b69b36d77f1e604c801a6310a78aabdd2c38"
+
+[[files]]
+name = "t010000_g8.50.txt"
+sha256 = "5a82c41480396f9929ef8254e0c32f777e6bf65df6a9377f06cdd0276c651d30"
+
+[[files]]
+name = "t010000_g9.00.txt"
+sha256 = "a1a1a7e6c9c806fdab7692ea2066d6b1b23442bf81c31d2cfa6706de04d4a6e0"
+
+[[files]]
+name = "t010000_g9.50.txt"
+sha256 = "3cfaadba7cbbd7e7e9c56b9b7d2c4a9f2d0d865e146afcd7210335f667fdcada"
+
+[[files]]
+name = "t010250_g6.50.txt"
+sha256 = "4e0e06c927461e1c9f5cb203cd994c6c31b8236e7b32f2637efd4444157b9259"
+
+[[files]]
+name = "t010250_g7.00.txt"
+sha256 = "6057adb2689eedfb4c6e9c5d6255092cd6795408c5dfd74e65df1db0e83a16da"
+
+[[files]]
+name = "t010250_g7.50.txt"
+sha256 = "988d1d7986f6b967a79bb33c9d49185a91f8aa37b529f4cfd65592f2b87e6347"
+
+[[files]]
+name = "t010250_g8.00.txt"
+sha256 = "a1df4941dedc2eae40e45f58f286c3b22a3731f097c6c6940967ee869176d7f8"
+
+[[files]]
+name = "t010250_g8.50.txt"
+sha256 = "d9ce43b750a80659a4b555c7f860d03ab559596cf834ae10f8bd5488ff7002ca"
+
+[[files]]
+name = "t010250_g9.00.txt"
+sha256 = "ae60df4fb72b3beb4846794a18146a1d21cf427575b9afd0d4f6b1510f5bc6c8"
+
+[[files]]
+name = "t010250_g9.50.txt"
+sha256 = "be1ab52b7b1bc62567c763aa9c2b5d2753394f5f74d0f01dab69653d47afc742"
+
+[[files]]
+name = "t010500_g6.50.txt"
+sha256 = "e4037158cf3eb216290af49e13c5d63a3c6c06ce18df334c81200d47926433d3"
+
+[[files]]
+name = "t010500_g7.00.txt"
+sha256 = "308192b48aaa929126d94b73795a8dec8a63781295ffa62de49dfbdf5d57debf"
+
+[[files]]
+name = "t010500_g7.50.txt"
+sha256 = "64c565bb1b54e051571138c90be669954e793b96e3b03803df8a93548dc52b2a"
+
+[[files]]
+name = "t010500_g8.00.txt"
+sha256 = "ea66953d8abdc02931a2915dbf1b9f22435837952e1a1145714f5338b705c5e8"
+
+[[files]]
+name = "t010500_g8.50.txt"
+sha256 = "34aa62c7cd250951a37e3d2590b69b8c21a7d0eef58556f589f99040d144443c"
+
+[[files]]
+name = "t010500_g9.00.txt"
+sha256 = "4c83330cea31769acbe03622d42901948da757830e256486405ed5a9eb886649"
+
+[[files]]
+name = "t010500_g9.50.txt"
+sha256 = "b6c36a0e2691470622ea7b7dddb50f28f064ea2a3ab350e1201ab3b9d8ebf3dd"
+
+[[files]]
+name = "t010750_g6.50.txt"
+sha256 = "cd1670fbf03cc918c57ab4dbc08de967fcc8e074ae2046b84343b25575b42028"
+
+[[files]]
+name = "t010750_g7.00.txt"
+sha256 = "c0583d901ee10d0d71290ba649c781018b2981e9d12939d2eb24781d927de81a"
+
+[[files]]
+name = "t010750_g7.50.txt"
+sha256 = "d585d071ec85919487a64d14876f7b89c85c4df7c451ae9e328f8b53730a7c86"
+
+[[files]]
+name = "t010750_g8.00.txt"
+sha256 = "40e449ada32410db860741d4eff04286060b3dae5aa6f3df86a0ce8a1a50fb5a"
+
+[[files]]
+name = "t010750_g8.50.txt"
+sha256 = "26f87dcf40592dd8a6cc411d7a0815afa5633c1d3125438952eb297d97d35123"
+
+[[files]]
+name = "t010750_g9.00.txt"
+sha256 = "af1d596d7088d8e8921f716c0ea92d75e64d7562dd0c8b67840c6693231b8d1c"
+
+[[files]]
+name = "t010750_g9.50.txt"
+sha256 = "3e49bf5ef0121629b9181342d7681e460333c5a0a0097b8313510cc75afcdf0b"
+
+[[files]]
+name = "t011000_g6.50.txt"
+sha256 = "87ba5b589c7f0a4548dbac48745657aafcab84d3e2cc156001a8c8124c178fd2"
+
+[[files]]
+name = "t011000_g7.00.txt"
+sha256 = "2ddf9ade6bf3bed3aa43256a42b7eb069eb502207b5a955d91bbf22186c73a6e"
+
+[[files]]
+name = "t011000_g7.50.txt"
+sha256 = "6defe03eaa2411ae16e74f44c80bc698d2061bbd51f3041cf2efe0b263698815"
+
+[[files]]
+name = "t011000_g8.00.txt"
+sha256 = "5fb4ad8b6829659e644f299918acd7980df77d4f3da28a5388d3c6ac8aed6964"
+
+[[files]]
+name = "t011000_g8.50.txt"
+sha256 = "e614811a2919b0041d8eb98a8a2b7260c6f0c4198bb47c3e69f4ceea2e15b345"
+
+[[files]]
+name = "t011000_g9.00.txt"
+sha256 = "d1c72459cac782dca87b7ea26a98bff3bad9404db52d75769318422bc17f5f7e"
+
+[[files]]
+name = "t011000_g9.50.txt"
+sha256 = "c980ef540f5b0b5762e69730a0ba3df1987593693c528453d40bb2aa75927d0a"
+
+[[files]]
+name = "t011250_g6.50.txt"
+sha256 = "a9dd5be876e1c92fad3d45c30b6169080ae51e374049b420e6f4d3ead3d1b074"
+
+[[files]]
+name = "t011250_g7.00.txt"
+sha256 = "88437ba4fb048d0fe32eff0f4fa27a513c6c52721b02e1aff2f30e6cc391d6b5"
+
+[[files]]
+name = "t011250_g7.50.txt"
+sha256 = "a3a45b48114e124205ff01d3efb8d5815162ba91afc7736996e6c51f1ccb8e5b"
+
+[[files]]
+name = "t011250_g8.00.txt"
+sha256 = "1f1cfaa1179c84756f7671083fb26d0452c368f99ff903729e5d66ad14da90eb"
+
+[[files]]
+name = "t011250_g8.50.txt"
+sha256 = "a90849620b08bbd69d355794c6651d8780222c5c7e6e812136748b4a38788c1d"
+
+[[files]]
+name = "t011250_g9.00.txt"
+sha256 = "c6a28651abe5a0545c53ad52db6fa3436581b6e382e8fc9ba98e18f64522c307"
+
+[[files]]
+name = "t011250_g9.50.txt"
+sha256 = "9e5767ec6d40a0626561400f8a4d8ee3af00abbdf5dfd1edcbd5f9a41bfd6674"
+
+[[files]]
+name = "t011500_g6.50.txt"
+sha256 = "7637169b89b7c7fd8e830f2c9cf16e5fb6dc4b37e93bb58f02ae79c7cac13049"
+
+[[files]]
+name = "t011500_g7.00.txt"
+sha256 = "338d895a4438e865f9ca3e974c2119c296c47b45fbfc6b575d08cf6743a4085b"
+
+[[files]]
+name = "t011500_g7.50.txt"
+sha256 = "643ceec9431ec0fd05d3b6659b526ece32424ed123e6c23e192dd116284ca816"
+
+[[files]]
+name = "t011500_g8.00.txt"
+sha256 = "dee5cd5e38658c2eddcf5cb7ce6c910d2bda4d58f76a7b3830ddf65060859a49"
+
+[[files]]
+name = "t011500_g8.50.txt"
+sha256 = "39c681ba7c73ab6153542bb633d180ae1292e13a25dfaf881851c9837f4476a4"
+
+[[files]]
+name = "t011500_g9.00.txt"
+sha256 = "218642603cfc795ebc3094fd17dd3481318d8acfa58db9abedb2d99b0826acbf"
+
+[[files]]
+name = "t011500_g9.50.txt"
+sha256 = "0115f829817f99bfb1e3e58f22cd41deaf7c48c29163503ab9bb2e19f710bfa9"
+
+[[files]]
+name = "t011750_g6.50.txt"
+sha256 = "9dddbe85742bd404b26a79d91b1ee20daba57b7a08af4765cce924072df32b76"
+
+[[files]]
+name = "t011750_g7.00.txt"
+sha256 = "6da0b16495aeb034e3308679fe754b148d9cb80e3ea270be454fa11d20683764"
+
+[[files]]
+name = "t011750_g7.50.txt"
+sha256 = "088a599af2b2ea9729aaab4e7808dde408b28d2a8ef2d7f0669f88b727c13ade"
+
+[[files]]
+name = "t011750_g8.00.txt"
+sha256 = "97f4b9a90eb28f6cdf79f0811d080ef4f486c902b8fa7b6e8ffab4422be2d9aa"
+
+[[files]]
+name = "t011750_g8.50.txt"
+sha256 = "ad052e5d607bf8578cfdfe61e8ce716dead04b4053b8fa1295bd843b27be7aa4"
+
+[[files]]
+name = "t011750_g9.00.txt"
+sha256 = "41b7a6e98cb27e4ab5ec70b432280f4ce2f2ca4c93969cc252a993547a3e0790"
+
+[[files]]
+name = "t011750_g9.50.txt"
+sha256 = "da6e62290114740c248f3d2139475d9a8d1b887784c897b5e2f022b58ecac603"
+
+[[files]]
+name = "t012000_g6.50.txt"
+sha256 = "2d3c2cc1e941f750027cbc9bc10b954deabbec0174d1cfbee6775d0b912f0768"
+
+[[files]]
+name = "t012000_g7.00.txt"
+sha256 = "0c2f52ff7fe924cc7922bab9dd4c88ca52bc720996830911f11ab689e9301af4"
+
+[[files]]
+name = "t012000_g7.50.txt"
+sha256 = "8ce32315c107b24d4b6aedcf8994083e50ba398d4d0d4e0e03e43f4ad1ef9afe"
+
+[[files]]
+name = "t012000_g8.00.txt"
+sha256 = "7fe04920db50ed6d15f0aaf4d52f95aecdb64c0504ad43a35a492a521f163198"
+
+[[files]]
+name = "t012000_g8.50.txt"
+sha256 = "22bb5959bbce252a48e2db8c8f9997b2e4dae44d81222370036365c62f354ebc"
+
+[[files]]
+name = "t012000_g9.00.txt"
+sha256 = "de1e041ff30964f5f1bf6f48c7d2ad877792426a6d5c9b1243cc6dd821c492ac"
+
+[[files]]
+name = "t012000_g9.50.txt"
+sha256 = "f6048625692fafc1a79e197a3ce6f26648fedeb71e107492052f148233f12dc7"
+
+[[files]]
+name = "t012250_g6.50.txt"
+sha256 = "1233c1329d2269709e46faad3186f09ffae06279a95ab7c09e5835056bb5a9cb"
+
+[[files]]
+name = "t012250_g7.00.txt"
+sha256 = "6edd9b9f16cc1352783719837ace31a3f106d3c694ce0ad2a8a7b056ff0ae230"
+
+[[files]]
+name = "t012250_g7.50.txt"
+sha256 = "f77bfcd2a8821dc4d9f1279ff5e9ea0126fac9dbc9b5dd57e6cd3facd3447d78"
+
+[[files]]
+name = "t012250_g8.00.txt"
+sha256 = "cd3878c7b13a1280128f6aee871421fa562cec4a51a174bb6cc09b55549e0db2"
+
+[[files]]
+name = "t012250_g8.50.txt"
+sha256 = "bdbe18882c7116ce88a5b9736949ae96544bd1f9d8e99f4b4cf724e7d98c92a7"
+
+[[files]]
+name = "t012250_g9.00.txt"
+sha256 = "29bd93cb79a6549dcc7065706ef1f92474da3e4d537c8d130f7a7835afc3cb1d"
+
+[[files]]
+name = "t012250_g9.50.txt"
+sha256 = "dcc5473281d4b4f8a13f90482f39bcc3873700e34a0606700187d1820dea64f3"
+
+[[files]]
+name = "t012500_g6.50.txt"
+sha256 = "f59796db843aca403cce45ccc4d1ed018c33afef9214313dad5811dadb7f7cfb"
+
+[[files]]
+name = "t012500_g7.00.txt"
+sha256 = "8ab5bd3d2e7bc7e78c9fc0c6bc1ddbcd3e5f0bef237502ff425b5dd3c4539521"
+
+[[files]]
+name = "t012500_g7.50.txt"
+sha256 = "f80debdceadc00d888f7a40506f930152ff04fde9213b214a27394d968b30443"
+
+[[files]]
+name = "t012500_g8.00.txt"
+sha256 = "aa4c9b894db4e494f2fb360b8c1d1a583d832a9b5206e564f181eee900bcdc82"
+
+[[files]]
+name = "t012500_g8.50.txt"
+sha256 = "01917b7966a0adecac7355cbb6169638b1e77aa2b28d6645946c04f9c4a86792"
+
+[[files]]
+name = "t012500_g9.00.txt"
+sha256 = "9dc09178e8ce9eb19a07d57d63725ba6eb326a745edeb35898c255800fc20d6d"
+
+[[files]]
+name = "t012500_g9.50.txt"
+sha256 = "d71b5414edd6f7c2386129058fda9973e0b4a8f108f0c6fca69cf0baaa9538e1"
+
+[[files]]
+name = "t012750_g6.50.txt"
+sha256 = "256e7ec5c7c8b60e14d273b939bc77f43654cee26029bbab116a829d0287f30c"
+
+[[files]]
+name = "t012750_g7.00.txt"
+sha256 = "1f85f481519ae206d1104f199fb5c8594d1ccd091e5bb0ec1b226ffc99fab62f"
+
+[[files]]
+name = "t012750_g7.50.txt"
+sha256 = "23ec6e6579098f370c612fca2e5301440ed46613aac158bbec8ab02e35a3ae7e"
+
+[[files]]
+name = "t012750_g8.00.txt"
+sha256 = "e62ffc6182d2dbb80ec676c5f8b865c0b6959ee81b4af8e9aa4f9708035de03c"
+
+[[files]]
+name = "t012750_g8.50.txt"
+sha256 = "86103b115b491b472206088b236535011e2e4c2337a398e43de3d11c7e8cc2c1"
+
+[[files]]
+name = "t012750_g9.00.txt"
+sha256 = "23bfa02bae8a77b81eba24c3c254b6b39109ce3a903776516d5cc0074821a2ac"
+
+[[files]]
+name = "t012750_g9.50.txt"
+sha256 = "9b570f4f48f9cbc0bbcdfc680bbc899e35ae5b67818064a8fe29bf61b212324c"
+
+[[files]]
+name = "t013000_g6.50.txt"
+sha256 = "857a23e4262de9174b3641b58ae1846440f2545cd20ac23aabb6946487cbe5c0"
+
+[[files]]
+name = "t013000_g7.00.txt"
+sha256 = "94409de23f4a2d2ad2e0b60adeeb2478aa539f994006b190a1c790c307a89a88"
+
+[[files]]
+name = "t013000_g7.50.txt"
+sha256 = "4a27e7350d6eeef3b240f1c577a463e32836113823afced11629c65b2a1a3245"
+
+[[files]]
+name = "t013000_g8.00.txt"
+sha256 = "cbf21490997fb1601bda8ae5226822fba2d8f7ee4a3e3edb589901e20c235d24"
+
+[[files]]
+name = "t013000_g8.50.txt"
+sha256 = "d0a68575fa5d3136d8d7a9aa5877d7014392a62f9ba4897b1f9ad5104b0c625e"
+
+[[files]]
+name = "t013000_g9.00.txt"
+sha256 = "1fd8c175ae3200176f45131182744e838964741c0f0fd1e72e6398cf6df373d4"
+
+[[files]]
+name = "t013000_g9.50.txt"
+sha256 = "69e2bd5ccabfb33882c279ecdc5b9ceeabdf23de5adcfc2a602643a8ffdbab7e"
+
+[[files]]
+name = "t013250_g6.50.txt"
+sha256 = "cb63e880798b0ec6d309f2043e08e6eddc5d8e006ddf49895f7245eaa90b5859"
+
+[[files]]
+name = "t013250_g7.00.txt"
+sha256 = "f2b02afe6fd52f88b38aea5f9241f6abbaccbb8aca8452c93f03766771fce85b"
+
+[[files]]
+name = "t013250_g7.50.txt"
+sha256 = "545abe70b7db4e4b1581b460e4c232791595ed4736862bb2ee82c329fb059bf9"
+
+[[files]]
+name = "t013250_g8.00.txt"
+sha256 = "17c426a0465e34aac00e90314745396fca9b86723c560f8ddce8a20f43202837"
+
+[[files]]
+name = "t013250_g8.50.txt"
+sha256 = "028a0937aee701a8a72fe533bfd3e7a3856013216038c013230072bc52206bd1"
+
+[[files]]
+name = "t013250_g9.00.txt"
+sha256 = "cbe040990a86fea66640920afa05e4c49c3ccf27e65bbd637126f30b8bd17d2c"
+
+[[files]]
+name = "t013250_g9.50.txt"
+sha256 = "41908c329b5d2ee1b92dd5b226c78d0ae08ea5f744a05d528787c8856f031a20"
+
+[[files]]
+name = "t013500_g6.50.txt"
+sha256 = "3eeeded2ce132cb4e8c13e12d6d5db012c184eaaf6685a881cc2b9d6a36caf23"
+
+[[files]]
+name = "t013500_g7.00.txt"
+sha256 = "4e1a6d5c00633879dc98e79a3c358eccdb8645e0e30e9c3576f102224da4c472"
+
+[[files]]
+name = "t013500_g7.50.txt"
+sha256 = "394e512c93a5f798a1f0d7e3174e18bf0ef4d4fe924d09eeb3cba11beb64c624"
+
+[[files]]
+name = "t013500_g8.00.txt"
+sha256 = "fa5abd8137fa6d434bd718243c6cc9db2753eef7e185157c531a048f01c49fd7"
+
+[[files]]
+name = "t013500_g8.50.txt"
+sha256 = "02cd754ef884ba82330442faf0a42c79bef568a04c70c8250b9b8f27200da983"
+
+[[files]]
+name = "t013500_g9.00.txt"
+sha256 = "620c419dc646c11506f8c3722ae1cc4270920050a1fc84f85da04be883062659"
+
+[[files]]
+name = "t013500_g9.50.txt"
+sha256 = "8a60566841222b241f8ae86d0edaa84a08d7b75ab330b184bacf0e803314a199"
+
+[[files]]
+name = "t013750_g6.50.txt"
+sha256 = "4e74bc64de105acdbf8ab725c3668d0e1bdd7ba1f5539a7de672cc9f11eb738d"
+
+[[files]]
+name = "t013750_g7.00.txt"
+sha256 = "3ef35ee9c627f5374c4adf5540b1cfe89f7182ba99978dafd93631badc250bb2"
+
+[[files]]
+name = "t013750_g7.50.txt"
+sha256 = "76daf95d90f932749ceb5ec6702325e2bfced1146982958f5078556210fe6135"
+
+[[files]]
+name = "t013750_g8.00.txt"
+sha256 = "d9702dfdf2cf079d5052cf79229a73f9d88a6800a14a164599099cceb647a924"
+
+[[files]]
+name = "t013750_g8.50.txt"
+sha256 = "1410da47e597195abc4c35b064a4b91915f84947d2a95821c01adc115e74d12d"
+
+[[files]]
+name = "t013750_g9.00.txt"
+sha256 = "640b2a0071505e401def783ce4f63ec571ace76d5d8bd69d4a9e069cb59caefa"
+
+[[files]]
+name = "t013750_g9.50.txt"
+sha256 = "9f9f4fb90debf840093f9cfa168d7544e31441cbbe6b509856b552e07bcd8085"
+
+[[files]]
+name = "t014000_g6.50.txt"
+sha256 = "6e9ffdae5997451441ae90e9e98f70f5efa0c32f56d4472c8d255eff6b218a7f"
+
+[[files]]
+name = "t014000_g7.00.txt"
+sha256 = "23a75acc59ae1dff3bfc041ed50d571a1feb059133c433897cd7fb1e432b2e7b"
+
+[[files]]
+name = "t014000_g7.50.txt"
+sha256 = "6c89ac4d2cda76c51763339ec9679908497a6a1f6e4406e96da8f4e861347601"
+
+[[files]]
+name = "t014000_g8.00.txt"
+sha256 = "54ee4594e90f79f90b0d840ed871fa8c60ce27d5c5633b35c306676738816caa"
+
+[[files]]
+name = "t014000_g8.50.txt"
+sha256 = "4f4f7d59f526716e46f1a254ab953b8d0d9684fd97093c899015a25ca86317ee"
+
+[[files]]
+name = "t014000_g9.00.txt"
+sha256 = "5dbcce8bc5d3f93fbe86264aca87f43365e89530a05e09ce545c6c8334864f50"
+
+[[files]]
+name = "t014000_g9.50.txt"
+sha256 = "3d59221a596f18a6c09f7a1d255077663ae27adafa84662d281a276fd745e2d1"
+
+[[files]]
+name = "t014250_g6.50.txt"
+sha256 = "f9a9d84c41004d5c45901fc171c503f1e30770e541d86321fd3f6ecb4e6e2614"
+
+[[files]]
+name = "t014250_g7.00.txt"
+sha256 = "78707c80a3a35c0fac327428a3bc3634c7fbf09c35f4cbdd68f4998c4799a2cd"
+
+[[files]]
+name = "t014250_g7.50.txt"
+sha256 = "eec2d292e9c2266b897de1530e08e7efb6e1b5a0a447ecaedac059cef2a4fc81"
+
+[[files]]
+name = "t014250_g8.00.txt"
+sha256 = "2db717e2e4e390001becbad15f144b1a529957d9cbbb78d148fe15e5a6193120"
+
+[[files]]
+name = "t014250_g8.50.txt"
+sha256 = "ea5a65226efb9a849d1291c0dd6f59463740e52ff14ebfba06812ce40d958b77"
+
+[[files]]
+name = "t014250_g9.00.txt"
+sha256 = "2cd0dbe5ed5ea23245342244e562e361c247b0003ecf8b6d19d9ad903636aa5e"
+
+[[files]]
+name = "t014250_g9.50.txt"
+sha256 = "388a25deef25dd2c2f37a9b9281100266d6b83a2b2b752d01c86ed9d625a9b66"
+
+[[files]]
+name = "t014500_g6.50.txt"
+sha256 = "c1133ed0e7a1294f971710dc8ebb87fd50672a87c9cfc16f74c083d22c7351a3"
+
+[[files]]
+name = "t014500_g7.00.txt"
+sha256 = "2b0382a8f394f8308061ffdf103ff4269305e0610d752dc2d26cc68772ced80a"
+
+[[files]]
+name = "t014500_g7.50.txt"
+sha256 = "71266efd2d04b3b7794ceeb20570fd422d39446452d7340dea9fc6d760dbb5a4"
+
+[[files]]
+name = "t014500_g8.00.txt"
+sha256 = "10505c1532984bcc084c34e49f352515b899ab136dee4c41087e08e4f9cb53b2"
+
+[[files]]
+name = "t014500_g8.50.txt"
+sha256 = "746b179881c631a75622966eed28dc4c0cbaaf9dfc17879c3384eeea08cff443"
+
+[[files]]
+name = "t014500_g9.00.txt"
+sha256 = "2171529dd779a8c223acc5a6bf7f332eeb62a157e52a21dcd78b3acbb3f9f50b"
+
+[[files]]
+name = "t014500_g9.50.txt"
+sha256 = "5b3596cdf2a2092d89224df1e2607734510c1eb0455ea8f0b42b4cdc59e8c940"
+
+[[files]]
+name = "t014750_g6.50.txt"
+sha256 = "e1e12798fc2f1393b69c4bfe612c28c94f8ea1cd00475e4104bb64aea8699fab"
+
+[[files]]
+name = "t014750_g7.00.txt"
+sha256 = "289fded0df7865d983d52ff223973f5347dfbb957629fdd4ff84563c09937c5d"
+
+[[files]]
+name = "t014750_g7.50.txt"
+sha256 = "aa0beea24f379fc9e0efe8c0a8d41da3fcc0209d876180b6fec2857c4a99ace4"
+
+[[files]]
+name = "t014750_g8.00.txt"
+sha256 = "1ff4d82a70b327b9f854ae071eab2fca197f5f12507e40d06bc72b5514cadae9"
+
+[[files]]
+name = "t014750_g8.50.txt"
+sha256 = "611a532f27ca5201a56a1ecd4d602507c3a65db2621ea2dfc4bdd4c6ed8c89e2"
+
+[[files]]
+name = "t014750_g9.00.txt"
+sha256 = "d64ce4fd8cf6e8644eb87ce1763d7b0fb047a6949e0753a8e05d397e955ff66b"
+
+[[files]]
+name = "t014750_g9.50.txt"
+sha256 = "5162b490bb58b2a91f091fa4f551da3c6eedf486a66ecddff7eb7da78aabbb5b"
+
+[[files]]
+name = "t015000_g6.50.txt"
+sha256 = "1f316838825b6e878561a8783acf3d75bf0be9dee647f63b81fe519933be9fbf"
+
+[[files]]
+name = "t015000_g7.00.txt"
+sha256 = "187818a50cf580faa948c6901824cee3cf224492cab8f302b244b5cff903480b"
+
+[[files]]
+name = "t015000_g7.50.txt"
+sha256 = "9ee439b16327a3b8cb208cee8e2ae1c5d7009daa303794731d07d8e6f1a1538c"
+
+[[files]]
+name = "t015000_g8.00.txt"
+sha256 = "2f01f15dd7a92401cdd95f0ac915ceab24a92443e4617cd56eeb37eade29ed92"
+
+[[files]]
+name = "t015000_g8.50.txt"
+sha256 = "096180d0cca52ba1be0e44253a9f566ea6e61248a854262065fd584bc248e71c"
+
+[[files]]
+name = "t015000_g9.00.txt"
+sha256 = "e370443d834ba62315d5c8c2cf6b14d9920a098482fc0915437a0fc748423f9f"
+
+[[files]]
+name = "t015000_g9.50.txt"
+sha256 = "cd8a14534b0a14d029f14fdd4151dfea29f99b966d20e8b1267d2c3ab9de6a0b"
+
+[[files]]
+name = "t015250_g6.50.txt"
+sha256 = "b287b6cb0b3289db2ffac2e11ebb2d4913431d46175a4cd6a86e6ef54dc795db"
+
+[[files]]
+name = "t015250_g7.00.txt"
+sha256 = "9b5bd7baccd029d93eb65aeefea804d5f0f6da488e254e1e663c7e2577d264ba"
+
+[[files]]
+name = "t015250_g7.50.txt"
+sha256 = "4cf6ff251be42854b181336d67167dc7c0bb32e8d3d915985a3a5dd4b6658825"
+
+[[files]]
+name = "t015250_g8.00.txt"
+sha256 = "efa95f0709c64734b95f869081de9d1a30dc55ec5503c91c87fdb703ae16bbe3"
+
+[[files]]
+name = "t015250_g8.50.txt"
+sha256 = "ee2845aab8e8e2e7de429af0083bded310a4513e93fa388e15172c910023530c"
+
+[[files]]
+name = "t015250_g9.00.txt"
+sha256 = "9611bb186e117ef4f029fcdb88d62ec67bf4d1fb2478354f30345193618a9d36"
+
+[[files]]
+name = "t015250_g9.50.txt"
+sha256 = "a596382d7ca53dee139cbf39a59096f04e4fabfd3b9a003c93645fce061ccdcd"
+
+[[files]]
+name = "t015500_g6.50.txt"
+sha256 = "d075da95689d14c66a5194ac9453c78e657fa31629858b744bb837dcb96c4722"
+
+[[files]]
+name = "t015500_g7.00.txt"
+sha256 = "ecd0ff83315bfc6d588ce7e9ba2506fe7736d61b8f4c8c53cd818c71423ab6b6"
+
+[[files]]
+name = "t015500_g7.50.txt"
+sha256 = "b400e34f846f23a5b7dbe9e746263f22b2c3e4b1ef88ff87b32725e32ce33569"
+
+[[files]]
+name = "t015500_g8.00.txt"
+sha256 = "2a19cfa0396af3cd05579c106b28ffbf34df77bcefd377ed881ee5a5c8942938"
+
+[[files]]
+name = "t015500_g8.50.txt"
+sha256 = "72295b23e3d263eb6a740428f9903fcab878434c79c22a754474f953d0b7553f"
+
+[[files]]
+name = "t015500_g9.00.txt"
+sha256 = "6993c5cfddcc04e56b35a790fe53ae04622f39546b17abc70467d1ccc775ee1a"
+
+[[files]]
+name = "t015500_g9.50.txt"
+sha256 = "dfea47969d12e5daa45b46d2104060b3f78140da28b11c62282f6bad1de49fd7"
+
+[[files]]
+name = "t015750_g6.50.txt"
+sha256 = "2ad7f55827a1aeb7bef27cb05dc7e7d6fc8679e640e06dd45732005a24bb1a09"
+
+[[files]]
+name = "t015750_g7.00.txt"
+sha256 = "71d76b40ff59a995406b1cecd22ad775a5f45c92e6759207768aafb7372c4cb6"
+
+[[files]]
+name = "t015750_g7.50.txt"
+sha256 = "eb214a1e2f0db6b6bdbba94cfdb6553e65ac6a908373d0b0dc212443957b4866"
+
+[[files]]
+name = "t015750_g8.00.txt"
+sha256 = "4b4938100da65293244a123e916c5500f15a044b5b7ddfd01510d5d2ff2a4e60"
+
+[[files]]
+name = "t015750_g8.50.txt"
+sha256 = "ceebc7317621ecfb86c055f7be6e3dfdd9405cda95b7b14a134258c4f8170595"
+
+[[files]]
+name = "t015750_g9.00.txt"
+sha256 = "4ef7d1979e516651362d5c95ee521b65368cd3323bca3fe055a48d59a1caef75"
+
+[[files]]
+name = "t015750_g9.50.txt"
+sha256 = "47c95621cf480c7015cca949a42397e3f7ef7e6b1770ff5c97b38db489d967ec"
+
+[[files]]
+name = "t016000_g6.50.txt"
+sha256 = "6e1bcb95f170ab86695b543ff76c09f2273a692f97f02bb0e7d0a3f37eb6ec54"
+
+[[files]]
+name = "t016000_g7.00.txt"
+sha256 = "ed739b570a301cd5b890950406911336c2cc967cfe16dc85d19025a0a7625106"
+
+[[files]]
+name = "t016000_g7.50.txt"
+sha256 = "07e3251052de4cac8c6b9956be58b8ce95d414362ecc1791acea5d44cacc3e39"
+
+[[files]]
+name = "t016000_g8.00.txt"
+sha256 = "df276631ced0f9939f2396855520c6d83e9d55e0f8a97cfcd0cafe8f96f4f686"
+
+[[files]]
+name = "t016000_g8.50.txt"
+sha256 = "94852939b35676244103a6c34423e1d3ae8b7c0bd09dc1458f641ddcf3385f8e"
+
+[[files]]
+name = "t016000_g9.00.txt"
+sha256 = "4a658c4f1a8191b7b9990a6579d98bb73d1a393b581d330975c35d22c696e914"
+
+[[files]]
+name = "t016000_g9.50.txt"
+sha256 = "683b54a5e331a97ddbf0331fc2b909d6608364019ccce7cddb69586738a5524a"
+
+[[files]]
+name = "t016250_g6.50.txt"
+sha256 = "1c9e4a3faa689e806e737ef0ac676934cf2fd156638e0557267a25691fdc63b1"
+
+[[files]]
+name = "t016250_g7.00.txt"
+sha256 = "591b1416469f340119ac47b083dbfb1f3b18e899ced1cc8a34146fca932fdeff"
+
+[[files]]
+name = "t016250_g7.50.txt"
+sha256 = "31150563f59beb7eef989f9aefa3f7a265e6f82b31d5682938378d980f5645c3"
+
+[[files]]
+name = "t016250_g8.00.txt"
+sha256 = "3e3e0938c264b1807e987c22ff6d1ba2bcd32532fba334cdebf767d7298dfec0"
+
+[[files]]
+name = "t016250_g8.50.txt"
+sha256 = "0dfad65af2e59cbae2414434286520cd584f918e3fbae2574294e29f3923d962"
+
+[[files]]
+name = "t016250_g9.00.txt"
+sha256 = "90733617d440b8295c5ac0625935a7522d4c0fd8a415222ff1afaaf9fdc1a7f1"
+
+[[files]]
+name = "t016250_g9.50.txt"
+sha256 = "68c29519b40c21f727c1144e42c67dcde5c9c7feec6a61894a3f29d3caac57c8"
+
+[[files]]
+name = "t016500_g6.50.txt"
+sha256 = "94a1f860fbdbd6ed05698f5f550e55815c9a83eee5a23b30fb0c65ea2e67acae"
+
+[[files]]
+name = "t016500_g7.00.txt"
+sha256 = "23f9928b11ccd34f4ea207f1329982ccb6e7076bfc15549d349411744cf1f8da"
+
+[[files]]
+name = "t016500_g7.50.txt"
+sha256 = "2cb593fc8169b8726e4a0686437b2abc0d236948a6066b0d98f21abf5af86cc5"
+
+[[files]]
+name = "t016500_g8.00.txt"
+sha256 = "f7742184befc7fe4ff8dbafac64f2b012c6662dbbebf6f41c258808276a137ce"
+
+[[files]]
+name = "t016500_g8.50.txt"
+sha256 = "a4ca4c7a551eea8a004ae0668fc2bd14520de9394c1bcec99f9be40c8319bc67"
+
+[[files]]
+name = "t016500_g9.00.txt"
+sha256 = "657a73ec10a040e4b43d2728a197e2a40a95a5739773ab351ef847e7264a7a97"
+
+[[files]]
+name = "t016500_g9.50.txt"
+sha256 = "02de9900572d6315f5a84a06fad2890e231f6d8708526e1689d169ec459ccddd"
+
+[[files]]
+name = "t016750_g6.50.txt"
+sha256 = "75c91145a2c5d8d1b5fa0b505edc3d59280b84713cc2e6804bd3d536c6711970"
+
+[[files]]
+name = "t016750_g7.00.txt"
+sha256 = "1fda22fa252ae1b2bcce3c208145d56cb583a952b5719968f4ad7ee1d04fc342"
+
+[[files]]
+name = "t016750_g7.50.txt"
+sha256 = "caffc132cec0cc5c60185815e08d6dd7e24030f224613ad5165b84c1fdeafb92"
+
+[[files]]
+name = "t016750_g8.00.txt"
+sha256 = "04845acfdf6300570818816179a455394500b3de2bbdaedac1decb21d389152f"
+
+[[files]]
+name = "t016750_g8.50.txt"
+sha256 = "199c1480d9f77602583c6b36adc20ad448388cbae308d3924ab2cd72b0c17517"
+
+[[files]]
+name = "t016750_g9.00.txt"
+sha256 = "d283bd5303289d5b81ee3bff0f7de9eafd36d6cf75b3db5f04a987d28b8e0f6f"
+
+[[files]]
+name = "t016750_g9.50.txt"
+sha256 = "1ef78be3c77e0004025551ea246499aeaf9f1e9f50abc7c368c5ed2ecfba501a"
+
+[[files]]
+name = "t017000_g6.50.txt"
+sha256 = "7dbb36fbf23c0eb57d8e9eba5efb4759a6136508b22fb22820fc0ea306b2edcf"
+
+[[files]]
+name = "t017000_g7.00.txt"
+sha256 = "45c22a73eadaabd6d996b775a19c524eef9b7aeb9b0730695cb46e23dc0005f6"
+
+[[files]]
+name = "t017000_g7.50.txt"
+sha256 = "58c2fc0c374e1ce00d01c0d9eb3fdfa20611b3c260cab94488118fa1ef9d16d2"
+
+[[files]]
+name = "t017000_g8.00.txt"
+sha256 = "8541b337c567429a653be2bda3ad416921b5aae5dbcb5af832fdf4f08a19a59b"
+
+[[files]]
+name = "t017000_g8.50.txt"
+sha256 = "7781563094a919eaad44f0edf4880d0c17805c1c963bee250fcf1e9fbb3ceb4b"
+
+[[files]]
+name = "t017000_g9.00.txt"
+sha256 = "1ba83f71e733b7d98a1295bfcdc79e538b0b4ff0f5dd757c2ffd6402db45b305"
+
+[[files]]
+name = "t017000_g9.50.txt"
+sha256 = "910508ffdf6f4193d3d499d573fd72f6698c1202864f9fdce8629f449ff1cf93"
+
+[[files]]
+name = "t017250_g6.50.txt"
+sha256 = "c08e7c80ebdb53ad5e01b7e317255691792d8af40eb087263d25639e2e06fc96"
+
+[[files]]
+name = "t017250_g7.00.txt"
+sha256 = "75e49a1d8f94ea4d7cc52d40420b911d8b96b4b818c1ac257921abd6cf748994"
+
+[[files]]
+name = "t017250_g7.50.txt"
+sha256 = "84924c6d38efdf53e831064f153d7ff490468e17bfc966192d51c9bd5284c317"
+
+[[files]]
+name = "t017250_g8.00.txt"
+sha256 = "b96e30eac5d1a62324e3024f585ab9a3d2839ee942c407dd1d0835c10f7041a9"
+
+[[files]]
+name = "t017250_g8.50.txt"
+sha256 = "a3b4727ce150d398e5cd2b39c908c2f9d8408014a06e02b8498d1a8173246b6d"
+
+[[files]]
+name = "t017250_g9.00.txt"
+sha256 = "2e427b499040aed51ec35cdc184d461930ceb823545dbab4602353671247d2a2"
+
+[[files]]
+name = "t017250_g9.50.txt"
+sha256 = "aa46edb5b67c91401a1b9486afaec333a0fba8b8d7566c11d506597c4a5fd202"
+
+[[files]]
+name = "t017500_g6.50.txt"
+sha256 = "28c45a6e0126e3fbcf5e26b930a4d3c9722d819c628b1ec691770c8a42ea8bcc"
+
+[[files]]
+name = "t017500_g7.00.txt"
+sha256 = "a68ede826d853fec8575017d48ef78c39c7f92a6de32d58f3a6e51adc73ce7ad"
+
+[[files]]
+name = "t017500_g7.50.txt"
+sha256 = "94fcfc1cec4949b313864a03aefe0921943a64ff38e33368db920312a037bcdc"
+
+[[files]]
+name = "t017500_g8.00.txt"
+sha256 = "da111bab439a5e28674da4d73aa01baccd4235bb1ac4d58fedca60de64b763c8"
+
+[[files]]
+name = "t017500_g8.50.txt"
+sha256 = "13c8530cd7a7406ab91bb1db26c103b0c637d05b9052af9802032727ee49002d"
+
+[[files]]
+name = "t017500_g9.00.txt"
+sha256 = "167a32bcfc331096ceb3b76cd16e5f56583d1fb48da7a95c864cabcc58129f96"
+
+[[files]]
+name = "t017500_g9.50.txt"
+sha256 = "0fd12966df420134415c6875cd65a8d53a0ac77b47bfe86526e03857903955fd"
+
+[[files]]
+name = "t017750_g6.50.txt"
+sha256 = "1254a93bef413295892f3ba85349876a03d0c08f29c35a51774a17e71f5d9910"
+
+[[files]]
+name = "t017750_g7.00.txt"
+sha256 = "d276b269cfd11e6c0823b0c9ec60967d842c65c0580cf6c61d7260c0b13efb84"
+
+[[files]]
+name = "t017750_g7.50.txt"
+sha256 = "a1acf9f822e51dec260886b1b5c668c0ce5cb62afc04c94ef622a7d3fcc19881"
+
+[[files]]
+name = "t017750_g8.00.txt"
+sha256 = "b181c93c19597911bb57dfeb6cf77439a748f1e4c3e0e9cb94ef83c9f42da39d"
+
+[[files]]
+name = "t017750_g8.50.txt"
+sha256 = "40a66e5f15223837e5479128b1612ce95de4179eaf89963eba36fbc36a0d2f65"
+
+[[files]]
+name = "t017750_g9.00.txt"
+sha256 = "d6392730cef8b38d09471d3888209fd26483e2da746582bd3885fcae140d5091"
+
+[[files]]
+name = "t017750_g9.50.txt"
+sha256 = "9e3deb6aa763609a4702e5cb0d0eb0693629f5c7e84b26098103fb16bad06fde"
+
+[[files]]
+name = "t018000_g6.50.txt"
+sha256 = "4d8f5b9505e632cddd76c5a99ee0a5acf6088f38abf4811c927c07d7ed041c84"
+
+[[files]]
+name = "t018000_g7.00.txt"
+sha256 = "266a7fbce9ba66c9df9845198c4f887b8a90c8ce235b426ad23a676a831ef3a3"
+
+[[files]]
+name = "t018000_g7.50.txt"
+sha256 = "78a0093eca9dd9b029d4ae096bc6219a6be67bb8ea53e9b725fd09e2efa5b289"
+
+[[files]]
+name = "t018000_g8.00.txt"
+sha256 = "428ef340c2450a0af76fa2390cb0be80648fbef6302f79d369631c9df8da8d9c"
+
+[[files]]
+name = "t018000_g8.50.txt"
+sha256 = "0c68f32f59585b87a542a594a07ca8997f31289815f2a34653bd59e41e0ab9cc"
+
+[[files]]
+name = "t018000_g9.00.txt"
+sha256 = "3dc0ae79c96104d851ba86d94323cfacb570d585f7704777653d5b05694563ea"
+
+[[files]]
+name = "t018000_g9.50.txt"
+sha256 = "99e42ec6cd3c119a3665da553a1883f6592baf50b058284e4712ffaa944d4295"
+
+[[files]]
+name = "t018250_g6.50.txt"
+sha256 = "27047b6e50daacc389cc37f2c3f4abb94bc4f4b1aeb151820949c3adffcb9d20"
+
+[[files]]
+name = "t018250_g7.00.txt"
+sha256 = "5896d83f3b1a4d64dd0f0c890c091a81320d578fa1aa7f0152f86a62c10c1ae5"
+
+[[files]]
+name = "t018250_g7.50.txt"
+sha256 = "c4c68c59705ca1e935787b8e14c63020b058205ee3a653c4710baf41e8cb05a8"
+
+[[files]]
+name = "t018250_g8.00.txt"
+sha256 = "ff7fe4ddcbf39f695908f85614cda577f4de721043b1e7fc5adc86b4dd5b62ee"
+
+[[files]]
+name = "t018250_g8.50.txt"
+sha256 = "bd6f47070a9110e1886e84c9a2df4b208f3e9a70b389ec16bcfaf33b67202187"
+
+[[files]]
+name = "t018250_g9.00.txt"
+sha256 = "90f716413cb5576cf64cbbacadca34d919a1163fb1088d4452b823c7957b1860"
+
+[[files]]
+name = "t018250_g9.50.txt"
+sha256 = "732e00ffae06fb4749a8addcc741a4877f50d12e876c785f638af00c6655efc9"
+
+[[files]]
+name = "t018500_g6.50.txt"
+sha256 = "8b88b4dcc037b33e924cf4c5ad07ea02e1f7bdaf43f2adf61bec0ecf6e65e110"
+
+[[files]]
+name = "t018500_g7.00.txt"
+sha256 = "c6a47d3b912546f0b9caa28b2d59bb3758d497273780186fe08324e4edec8b0e"
+
+[[files]]
+name = "t018500_g7.50.txt"
+sha256 = "0502ac8a188095b55ca22791aa44812a27234283694ec94b6bbc0f759bd8b0ba"
+
+[[files]]
+name = "t018500_g8.00.txt"
+sha256 = "d2119d1225d03d0f1b6f6597dadd73f6dd1ef8d10fcd000a0136a181f60cbae3"
+
+[[files]]
+name = "t018500_g8.50.txt"
+sha256 = "c4d54c60d88c1a875e497a52c8c883e38faa79c9408f74859da3c2cfefa9ee83"
+
+[[files]]
+name = "t018500_g9.00.txt"
+sha256 = "5f723f0f8ed45b0d9e69799f0d3d120afe7e65ba54b27e4ba6be83a8e1c2760d"
+
+[[files]]
+name = "t018500_g9.50.txt"
+sha256 = "9b108bd2b990669606d3bd24d8a18bb7eb64073fadac0b51f629f2b8b0647ceb"
+
+[[files]]
+name = "t018750_g6.50.txt"
+sha256 = "ec858fa799a1bf49333ebffacc411b051364b89a6904c9b9d0167ddb3d0ae976"
+
+[[files]]
+name = "t018750_g7.00.txt"
+sha256 = "e407c09a50b500737cf073b5c1badecf885d31a6e1d7ce537ca9dc5ef8a0ca91"
+
+[[files]]
+name = "t018750_g7.50.txt"
+sha256 = "d33b7bfbbf9888d8513fe315e1ec67c3bbf1a7eb6b0ef0f3a63e9580889bffd3"
+
+[[files]]
+name = "t018750_g8.00.txt"
+sha256 = "3e37615b2c1043bb0d45695a6831ddae6559a4530ff321a3e5e3d364062c5c65"
+
+[[files]]
+name = "t018750_g8.50.txt"
+sha256 = "00a2a80b90986abeef2ba0b01520a3bc1e9b3da9aa1dc4c75664d996e4ec758b"
+
+[[files]]
+name = "t018750_g9.00.txt"
+sha256 = "128ef733a0c2daf34d370b819a6d821ff0301b3f782d8f8f76edf28217dc3929"
+
+[[files]]
+name = "t018750_g9.50.txt"
+sha256 = "fdc037c63cac83c27d25e26fd78acc4273e4a0e15caeddc9b91d51280e65ee9f"
+
+[[files]]
+name = "t019000_g6.50.txt"
+sha256 = "2b5a5e19202b2fff51a39e03f63197512989318cee87479615a9a69818737320"
+
+[[files]]
+name = "t019000_g7.00.txt"
+sha256 = "39e32129687bfada1ad6cbe4006c5119826b3a5acf90481755b9c191daa6f42f"
+
+[[files]]
+name = "t019000_g7.50.txt"
+sha256 = "5d1e561fa70d8b3e9906dde04e80faa232c2a584f03aaf83629076f2c63f8927"
+
+[[files]]
+name = "t019000_g8.00.txt"
+sha256 = "e623a3ebdf7b7cda9f824bbad0c2c847f9e4b36202df84938bcec2861c38e137"
+
+[[files]]
+name = "t019000_g8.50.txt"
+sha256 = "b29c35d02e8c50b37c7f8e13b572938cfae30c396467ddc6d0bbe56c4b1b948a"
+
+[[files]]
+name = "t019000_g9.00.txt"
+sha256 = "3bc5f8d4a6ce83a52e306fafae92afd650d4c3b157c6a3218436d1d16de18557"
+
+[[files]]
+name = "t019000_g9.50.txt"
+sha256 = "b95e15442f9f0968b483e269426a17807109a23d7c96bb4cb0bf93d8eaeebba8"
+
+[[files]]
+name = "t019250_g6.50.txt"
+sha256 = "d2da0cdd4ef6b29cbe448e72eeb50eae8b5a9f800ad34de1781ad2e9120c81d0"
+
+[[files]]
+name = "t019250_g7.00.txt"
+sha256 = "315846c07367969678f46947514717163a6e659f4e423ecbdac1ab13fd33c056"
+
+[[files]]
+name = "t019250_g7.50.txt"
+sha256 = "b64034b58e76c2ba4208bddda462e12e3c336a2c74b5827a3870d28873b45c59"
+
+[[files]]
+name = "t019250_g8.00.txt"
+sha256 = "023790bb7ae19750ec696c47a7b1c0683cac27c8232090b134c4688e76831777"
+
+[[files]]
+name = "t019250_g8.50.txt"
+sha256 = "334f18bfce81393ec789ee513f6b933c8197932be9b08299c2368538d5af710a"
+
+[[files]]
+name = "t019250_g9.00.txt"
+sha256 = "deb23cb142e1c5094694e5ff9d241dc0d4ba3e1dc89d2f1359c25ee20bfc4e15"
+
+[[files]]
+name = "t019250_g9.50.txt"
+sha256 = "7b52114e752c497a1a73568f930cad62047f250a6627baf94769c615a51e9248"
+
+[[files]]
+name = "t019500_g6.50.txt"
+sha256 = "f81ad1a91d31daaf0281b6baa0efe10eedef52b1bb432bd88212c9652b362776"
+
+[[files]]
+name = "t019500_g7.00.txt"
+sha256 = "4a32f08284b50fccf07f49fc4240d4359751f101aa3d9fb0b2466b200732a236"
+
+[[files]]
+name = "t019500_g7.50.txt"
+sha256 = "f7664b11b05a3836bb578ddf29ff0f331d808a464ff2ae30a335f17db9c36b7a"
+
+[[files]]
+name = "t019500_g8.00.txt"
+sha256 = "06c37d82e61b23adb514643389643c92ec81ccc419783a6cf89aecb1491f2060"
+
+[[files]]
+name = "t019500_g8.50.txt"
+sha256 = "22a08d908a0a6c5e1048fa741ff41cabda4c1477d08554aaec3eeaacc42968fa"
+
+[[files]]
+name = "t019500_g9.00.txt"
+sha256 = "80970f79cd58ef768d4e33960f78c840a0339e1b40800aa50f6330d6c58f1af5"
+
+[[files]]
+name = "t019500_g9.50.txt"
+sha256 = "c80f43df663704f33e8d7bb354ec2fb30f0d6d1d4f2a883e595221ad01b5dfd0"
+
+[[files]]
+name = "t019750_g6.50.txt"
+sha256 = "b6c382d6f64c1fe3b81342abd75cb6e18261223ec0a4cf1083c655b2b89a6821"
+
+[[files]]
+name = "t019750_g7.00.txt"
+sha256 = "649edc48d904ea219bf84c987042ee6070a21e52ae39063d682e5bdbbf278e93"
+
+[[files]]
+name = "t019750_g7.50.txt"
+sha256 = "18700531dc814e8a2547c66076eeff5b66756c8d7e7578d098fd3301d5eaabde"
+
+[[files]]
+name = "t019750_g8.00.txt"
+sha256 = "0dd8d38d60141124f6c3ac36155bcd105dfcc08ebbfd327dd025d63b807e59f6"
+
+[[files]]
+name = "t019750_g8.50.txt"
+sha256 = "712c9e0dd9ec68a90f1cefd1abcf56b883e3a7376bd71bfe06572b4bef912cf1"
+
+[[files]]
+name = "t019750_g9.00.txt"
+sha256 = "c5a8905fc13138c6bf514b5e3b5904504a70799f63fa1663789816b236403a86"
+
+[[files]]
+name = "t019750_g9.50.txt"
+sha256 = "3220d9686a466d85ddfe146ef85dfd37b025b2fb0a1f7a496ba79c2186aa672e"
+
+[[files]]
+name = "t020000_g6.50.txt"
+sha256 = "b07d5b1ccc278408cb8e8298a68ec5a543f3a3c3d0fb52692fedc3e58fe6a8da"
+
+[[files]]
+name = "t020000_g7.00.txt"
+sha256 = "85da1847aaad63b471abc0f211351468e1618d5899f3af2a3f5071f3ccd10ed1"
+
+[[files]]
+name = "t020000_g7.50.txt"
+sha256 = "2ac215880dae5afb4f3472636e0451b15056cdb211f09bc477fa25b0245e43be"
+
+[[files]]
+name = "t020000_g8.00.txt"
+sha256 = "71312e55afda9417ee24dcf4e96349e97208ffda0dd223513292b7b95a124c88"
+
+[[files]]
+name = "t020000_g8.50.txt"
+sha256 = "2dfde9e0f1d906ca6747a68d439614c19662d647dbe17ee328f5b0995a44c5ed"
+
+[[files]]
+name = "t020000_g9.00.txt"
+sha256 = "0362fd4556cb8908660f89e88440919e5fbb0ccc5887c20602575a261d30da07"
+
+[[files]]
+name = "t020000_g9.50.txt"
+sha256 = "6f6f8614e2b03e7ef518946bcbd7e8eaf435aa50a72675fdc4b115f1f1f4e27d"
+
+[[files]]
+name = "t021000_g6.50.txt"
+sha256 = "8fd86086c7d7106b34b40ac674c396e3c0eef0bc8db4e8490d307aa9eebc9472"
+
+[[files]]
+name = "t021000_g7.00.txt"
+sha256 = "9f562de4475091958c09214b5528c6bfb3ae069fe223755aee176df51b229a50"
+
+[[files]]
+name = "t021000_g7.50.txt"
+sha256 = "1647fda120601349e88ff270b8ed52b125e36e84e88449cd4d522b36e054bd0b"
+
+[[files]]
+name = "t021000_g8.00.txt"
+sha256 = "0e91b16207a2ee78f62e401016c63c138d7b86829b4345dc11d111452272dbee"
+
+[[files]]
+name = "t021000_g8.50.txt"
+sha256 = "2bb9987b167153cb3726a9fbfcc80a2906c1c55c1073ba857a4b760aea7b4927"
+
+[[files]]
+name = "t021000_g9.00.txt"
+sha256 = "c269f50d36aa7eac71dd7ef1c046927db7f6d4c8224f512403ada47e689163f7"
+
+[[files]]
+name = "t021000_g9.50.txt"
+sha256 = "58ab23fb72f1e76a88899e5dd0ff90354d07d0cad0f631cb57328c6a92ce7d42"
+
+[[files]]
+name = "t022000_g6.50.txt"
+sha256 = "8b711872083fbd7e24a90f42d9aac7246aebcfdb605a7a213f3a8b077160dc1c"
+
+[[files]]
+name = "t022000_g7.00.txt"
+sha256 = "886c9798b5cc573ce0873206c5a33b3546d9e8dba3cda919f6826f61257e9bbb"
+
+[[files]]
+name = "t022000_g7.50.txt"
+sha256 = "2240c51bd9c626ebca0d9ced3ac84627160573f20ddd24379cb89fde446dad29"
+
+[[files]]
+name = "t022000_g8.00.txt"
+sha256 = "bf7040ed9123d84cd5df7a5db35664e00feada426b07e7cf735abdfcd148461d"
+
+[[files]]
+name = "t022000_g8.50.txt"
+sha256 = "fe360dda9224ac6558cb29b167553aa19bb0fb92d7d31d1ed737914789c0fc2d"
+
+[[files]]
+name = "t022000_g9.00.txt"
+sha256 = "eaef11d7b1dd6cfbfdffa93c321b6553b6142c3c6daaa957b9af1e46ae45400e"
+
+[[files]]
+name = "t022000_g9.50.txt"
+sha256 = "cee3790ca69be86cb88656c0bec597126f89e0ad76aa9afc21a765ab4dfe3eea"
+
+[[files]]
+name = "t023000_g6.50.txt"
+sha256 = "07ae2734b945014b631534786415acecb2f18a4d725afb5528ba8595c26746d2"
+
+[[files]]
+name = "t023000_g7.00.txt"
+sha256 = "9685353b14f6d22493256c69aa774c4800ae1d6ef11565ad581e3155009391bb"
+
+[[files]]
+name = "t023000_g7.50.txt"
+sha256 = "3653f9be6e724939bfe3c298d304948a672e7a925a67b9b03436318c867fd470"
+
+[[files]]
+name = "t023000_g8.00.txt"
+sha256 = "b786aa55f8526d1cf3cad5e3a3c252bd92793ba32f7b509f4dea9db46cc01b9c"
+
+[[files]]
+name = "t023000_g8.50.txt"
+sha256 = "88bc9ba3d21fa4fbc88a087eeabd4fa64511072a1444a99e3b520e572b339741"
+
+[[files]]
+name = "t023000_g9.00.txt"
+sha256 = "29fb34f5f983659b5857a9e314ce5c8da3c0cac830ebb056edda5781abae1223"
+
+[[files]]
+name = "t023000_g9.50.txt"
+sha256 = "7d6110db1f91ac8026794088e8f72c242b8a025e7b3b4c50fba47f9987e39c7c"
+
+[[files]]
+name = "t024000_g6.50.txt"
+sha256 = "6b9e74b728d32c04e56cf462f58b639c236586c826548119d041632e9e5a7ca5"
+
+[[files]]
+name = "t024000_g7.00.txt"
+sha256 = "026c2a6204033b62bb7c0c828dc6a3ad6816134a41c85b3cebd190288e88da09"
+
+[[files]]
+name = "t024000_g7.50.txt"
+sha256 = "66ad78796c70e02b2a6397748a4ea5f4f41531f226b5ebeb53aa11309b996582"
+
+[[files]]
+name = "t024000_g8.00.txt"
+sha256 = "95edbcf5951fddfa35c2bafc5654bd9d6b2dba9db2c8e04de7027d7e04b1e520"
+
+[[files]]
+name = "t024000_g8.50.txt"
+sha256 = "c8982a42c56f1b9de310773af50c6f69c43f93ec416697d01d0a0b74b5f82c20"
+
+[[files]]
+name = "t024000_g9.00.txt"
+sha256 = "a16b1f1d150a007821ef8aa45feb687c08290de425d7cba2b7f68b76e2eab856"
+
+[[files]]
+name = "t024000_g9.50.txt"
+sha256 = "0b5869e50dcce7616ef84bf195fe4b0355002d6e4a3fb8000d801c49e10c1814"
+
+[[files]]
+name = "t025000_g6.50.txt"
+sha256 = "7dcae7d421dfd1bfd3d13f4b2cd83c1086fb9da4c1cdc6d5fbd3b3f4ec982b3a"
+
+[[files]]
+name = "t025000_g7.00.txt"
+sha256 = "13e69f528229c757f498d34f65e45230d5e33db3c19acc1e7b210a1c0f13868f"
+
+[[files]]
+name = "t025000_g7.50.txt"
+sha256 = "a9c9e763f873d98eb190409eb536a467d00b649ac58a542f0957ade7b71d373d"
+
+[[files]]
+name = "t025000_g8.00.txt"
+sha256 = "df535803c911c34a96d826ea9d38d60d5a00289101504720d0a5f5095f4cb3d3"
+
+[[files]]
+name = "t025000_g8.50.txt"
+sha256 = "883c04f130512255e872b9c45d3b7e38f61b5b4ec7be506b0ef883250981b507"
+
+[[files]]
+name = "t025000_g9.00.txt"
+sha256 = "d7d3430fd49d9153c4ab93265177d44d8b19673d7530e225e8bbb82db2ee93aa"
+
+[[files]]
+name = "t025000_g9.50.txt"
+sha256 = "634c2091bae297c41a7eefa79461db4030d87e3f6368fa46ab771ddd3bebf095"
+
+[[files]]
+name = "t026000_g6.50.txt"
+sha256 = "f518e9997aa4138432a7352dd5e61065bc990ce7daa92316ed26600a8682cf37"
+
+[[files]]
+name = "t026000_g7.00.txt"
+sha256 = "090228a6687f95736db172c0799d64e3c9bd447fdf142b530e9b3a7e239ab1ed"
+
+[[files]]
+name = "t026000_g7.50.txt"
+sha256 = "aac455d97d7f3749bf9097afbab9080df32729ecb9dd50897ece408956359697"
+
+[[files]]
+name = "t026000_g8.00.txt"
+sha256 = "7fb2419e157ae14953b1b2c6d9b1d8ae2a32f9926f5ecf74acad4656893f0188"
+
+[[files]]
+name = "t026000_g8.50.txt"
+sha256 = "16442310f005b3bd4175e9ea829f1e8deb17b9d88411990f0b5df4e6a7edcb06"
+
+[[files]]
+name = "t026000_g9.00.txt"
+sha256 = "e10498c13f70c65941e19945dab39f86006345303605010d308361f9fab088ca"
+
+[[files]]
+name = "t026000_g9.50.txt"
+sha256 = "3d6dff970370e5513919f514b1ceb6687909c18b5eb5547a5706d8bd30d71238"
+
+[[files]]
+name = "t027000_g6.50.txt"
+sha256 = "c549619fe5e7158e9f34436e925f334c005a7851eb5d2ca6aa33f8b8b0fb16d5"
+
+[[files]]
+name = "t027000_g7.00.txt"
+sha256 = "508daaa8b3cf3216043cb03c58bf9ca4dc3b309dac3b7c49c803dfbb44c31403"
+
+[[files]]
+name = "t027000_g7.50.txt"
+sha256 = "6949da6414385d32cf1d9b307cdb87c77d938ff516923c1f3c65a55430cff762"
+
+[[files]]
+name = "t027000_g8.00.txt"
+sha256 = "b0d3c649e1955cd8fc783030dbd702e18859e339b360530deaeb03c54d5658de"
+
+[[files]]
+name = "t027000_g8.50.txt"
+sha256 = "1e2da398aa4d0f10e4936800ffbf73c1734c6d6e3d1414b2bd7008c3aa9201ce"
+
+[[files]]
+name = "t027000_g9.00.txt"
+sha256 = "a2eac6236ded44d90ce17a0a48729ab1dd92fd4fd578ce1b8bdc73b81de34f6e"
+
+[[files]]
+name = "t027000_g9.50.txt"
+sha256 = "6c2dd06d7098c0988b7d579fa95f355ebd6f474ea9e2f6753a25720b80177b06"
+
+[[files]]
+name = "t028000_g6.50.txt"
+sha256 = "024e2be6dcc2c03ba97930e89768eb05979967dc658bdb45997827fdcaab2016"
+
+[[files]]
+name = "t028000_g7.00.txt"
+sha256 = "51a1896840fc5d811657b9b650b8a5183b0d7f3b36f4c91deb207dcf5883d026"
+
+[[files]]
+name = "t028000_g7.50.txt"
+sha256 = "06142c7b67d2d4d6c12a8718785f2d79db2b1ebced73d6eca70eb8a23d4ef461"
+
+[[files]]
+name = "t028000_g8.00.txt"
+sha256 = "7e4bdc2094b3da14af4813a094f27601922908ac71839d2343a741c607e60db8"
+
+[[files]]
+name = "t028000_g8.50.txt"
+sha256 = "846622a6b56918cff97ecd6611a8896476d50f2064c500025316fbfcc625b28e"
+
+[[files]]
+name = "t028000_g9.00.txt"
+sha256 = "aa10c069a7669a6de5319b5e82037eadc75f51347d6f6bdee3e087d7f9b18ab1"
+
+[[files]]
+name = "t028000_g9.50.txt"
+sha256 = "40efe4e53379a8908eed0067759d00ad4201aca01e48cc2945fa81cb46009de4"
+
+[[files]]
+name = "t029000_g6.50.txt"
+sha256 = "c4838985661bc0059d91003b7ed7d54b46683890faf0c9d1058f0934cdd31e29"
+
+[[files]]
+name = "t029000_g7.00.txt"
+sha256 = "20a5577edca7cd69e40a7a3d285f59d607df77c1e9d8e70bad2ed3dfe7048864"
+
+[[files]]
+name = "t029000_g7.50.txt"
+sha256 = "02715c957087cee3736bd71936042de4557d94fed58cdfe105562f0218d5a559"
+
+[[files]]
+name = "t029000_g8.00.txt"
+sha256 = "f85f47a059676dffa32bcac281a88d7494bcb9311645e9ac6e9dd519ad651e5f"
+
+[[files]]
+name = "t029000_g8.50.txt"
+sha256 = "00639099dd20e9ffa2b81163081da2ac7ad49053f022ada00c8bd0933b2ef4f2"
+
+[[files]]
+name = "t029000_g9.00.txt"
+sha256 = "7975ceb756a1b7532264ccec4b1669efb764c62eeb262b2deeff4f3275d76e5d"
+
+[[files]]
+name = "t029000_g9.50.txt"
+sha256 = "16bbcfe6d3a67fd8a8994b837e0ebe70b89e371a52cdf0fd97f0b673ba678916"
+
+[[files]]
+name = "t030000_g6.50.txt"
+sha256 = "1ba9a545224f666c9e08e188a414ca4f3b601a6f869134e6e86b8c8a8b55e402"
+
+[[files]]
+name = "t030000_g7.00.txt"
+sha256 = "dd10f87d532765056a0d2bfdb1c3a266bf68808a9f5c1c90c53b0313128d9861"
+
+[[files]]
+name = "t030000_g7.50.txt"
+sha256 = "9285b7c9614dd36a34ff1fdfd9c7a3103d6af8dba306553a8b4b3e47a09a9a22"
+
+[[files]]
+name = "t030000_g8.00.txt"
+sha256 = "f34916aac2b342e36f52ef8866689ce4b55070397b2102061dbd9bb0e67d36aa"
+
+[[files]]
+name = "t030000_g8.50.txt"
+sha256 = "61ba8560d3c431fa259eadbe835e7725dc5cfe606d72cb29d601c7a867101cd3"
+
+[[files]]
+name = "t030000_g9.00.txt"
+sha256 = "1b67433213314be5450bc06690b3898139b6871ac449e9e131764cded58c54f8"
+
+[[files]]
+name = "t030000_g9.50.txt"
+sha256 = "ceb84082d6cb35bd7f31e7e565f83d4ad9ccd568a7c16c889109266a0c0d0a07"
+
+[[files]]
+name = "t032000_g6.50.txt"
+sha256 = "3ec47023a429cd518a423e6d78ed83ac3a81f6a8e5496556133ff037c6e0a4f9"
+
+[[files]]
+name = "t032000_g7.00.txt"
+sha256 = "0024a2b0ba5b35ca2a8c1e8b61c79922b0e00498b81331480f79ea09c0b593c8"
+
+[[files]]
+name = "t032000_g7.50.txt"
+sha256 = "532985c2b1f46dcc8386470768741ace298daac62826ecac19ad68fd7bb70ebc"
+
+[[files]]
+name = "t032000_g8.00.txt"
+sha256 = "3bdb9f812c873ed338c92fab98295005c65334eeab3336320d27116503bc193d"
+
+[[files]]
+name = "t032000_g8.50.txt"
+sha256 = "c3b4675536222e988e78135760066b6a4be8f70c92addf3b3dc8150e274d5b49"
+
+[[files]]
+name = "t032000_g9.00.txt"
+sha256 = "c3bb820d6d722f9c83080d5c3a9e000584b235dcb0042f1e5074b5cb3d2ec67f"
+
+[[files]]
+name = "t032000_g9.50.txt"
+sha256 = "ee13b8630896241fd23e06436964409ac431caf096d753c0e26810ca1ec680d9"
+
+[[files]]
+name = "t034000_g6.50.txt"
+sha256 = "e1d42f358025ae24bb276e021f25630a63a6d39fdf19a60c9451769d31c5cf58"
+
+[[files]]
+name = "t034000_g7.00.txt"
+sha256 = "8e6e323139f0cbbe03d17f99e7862fa70165f01a8fcd29e2d75a09ee6c4bc1ff"
+
+[[files]]
+name = "t034000_g7.50.txt"
+sha256 = "04c769bc1d5acbf720c99a5c0e8d45266ef10f6f5682c99bc20ff78277be6d6d"
+
+[[files]]
+name = "t034000_g8.00.txt"
+sha256 = "eeec6b2aa4d37dfcffa3007b706a68a512d710906949d2ba933aa9c2fc56d521"
+
+[[files]]
+name = "t034000_g8.50.txt"
+sha256 = "35949fead00de6b240154ba13616f5a9544f8af07f6015cd540b99d4b67ab99f"
+
+[[files]]
+name = "t034000_g9.00.txt"
+sha256 = "7da23eb3e744972969b57dbcc2a257483b8e3430754987becd2d91f16f482987"
+
+[[files]]
+name = "t034000_g9.50.txt"
+sha256 = "c5965d7b11d30cef2ba2682b330377a73669cd18b88559b6f1afd4e31879b869"
+
+[[files]]
+name = "t035000_g6.50.txt"
+sha256 = "1e5bec7ad82c116ac34f1b511a412b195225431ff73f97b9d10c0d49f27b4c33"
+
+[[files]]
+name = "t035000_g7.00.txt"
+sha256 = "c51ce31443737a4ac8829a32c6c214aed4401b9410da2d9004697268ba122232"
+
+[[files]]
+name = "t035000_g7.50.txt"
+sha256 = "9a603578f0a113f4f8d2627b68f6aa230b8224c6d020b388fb34a41355f11ab5"
+
+[[files]]
+name = "t035000_g8.00.txt"
+sha256 = "0d39c6ecf9ccefd1e7853c1a9bcf1b6c3ca35a1c5e2880e8fefca428d9a91853"
+
+[[files]]
+name = "t035000_g8.50.txt"
+sha256 = "019c646c83283f5b8d87625745a2a7e32fcc7af20f0b1d1e7d1251ddf8f112db"
+
+[[files]]
+name = "t035000_g9.00.txt"
+sha256 = "4535aa01306800311605ed28035d7f54216ef77773ae8a177a6b3ddd10be52fe"
+
+[[files]]
+name = "t035000_g9.50.txt"
+sha256 = "76cf8055a15e1317a176f91a07483b493599894a83f5dba85fd4be532bf0ce50"
+
+[[files]]
+name = "t036000_g6.50.txt"
+sha256 = "dc2d23bf8301d2c4e7c2fbb45845762c70e2c8dc318206651cf45e9191890ddb"
+
+[[files]]
+name = "t036000_g7.00.txt"
+sha256 = "73cfe545d0b14a8aa8ead4695456853aad11f30f92b30f733d84f5a17259a648"
+
+[[files]]
+name = "t036000_g7.50.txt"
+sha256 = "8fbe78631c7bc7328c98a476e4584a3dd3ad8434924a13b1daf8c592297c6e55"
+
+[[files]]
+name = "t036000_g8.00.txt"
+sha256 = "8849f351b264f9b0f16c6f794f5e7c4ccea18bb3ad41b1d0a5fc7eb9f27b5454"
+
+[[files]]
+name = "t036000_g8.50.txt"
+sha256 = "4a3471e9b4aeb1e84e307e832594db5ddb23a289802c36e1250606f59701d72e"
+
+[[files]]
+name = "t036000_g9.00.txt"
+sha256 = "27e7b604c70e750dd32d55815ef1898d155fe56d313b1c67916d8afdc6fb497d"
+
+[[files]]
+name = "t036000_g9.50.txt"
+sha256 = "afaa8c93f2bce2591e27ffd484a68c3b25e2bec444ef15adb96e8cdbe7d486dc"
+
+[[files]]
+name = "t038000_g6.50.txt"
+sha256 = "c888eb29e8c9dcd55e00ef728793015e4ae59a1f7046c92553feb9bff43e435e"
+
+[[files]]
+name = "t038000_g7.00.txt"
+sha256 = "59eda8e109632fb13d42daf31fb2b036e9ea0daa2f7e7a0bc05fe499f71c36e5"
+
+[[files]]
+name = "t038000_g7.50.txt"
+sha256 = "fcc093c6dc096f8a50013fb1b2f3d459d5b7f8e404d44a0156756fc1b98f8a5d"
+
+[[files]]
+name = "t038000_g8.00.txt"
+sha256 = "6ca0aeb0e5617f60f6cbe7a2338cefa9f87bf6b4dd8218ac8b12c2f2da1e68b3"
+
+[[files]]
+name = "t038000_g8.50.txt"
+sha256 = "aa5df3dfe245e84dfd8b96fdcceee63e1685dd912602697a8290272cc95a5c62"
+
+[[files]]
+name = "t038000_g9.00.txt"
+sha256 = "da7804538fa966a9abb598211cfb20f8ed194fd4403dadebdfd860743843eaf2"
+
+[[files]]
+name = "t038000_g9.50.txt"
+sha256 = "51290c2e88f7a12b5f59668760319a7a4c03529ae53746430ae8743cb7abe45a"
+
+[[files]]
+name = "t040000_g6.50.txt"
+sha256 = "2b034858ea977654b46a18979c95d099a920144c7a0ccee21d0f6de5dd5394c9"
+
+[[files]]
+name = "t040000_g7.00.txt"
+sha256 = "cdfbb31852f03df06971e9599c2cd6c06be9425e08a535dba9c2ec089320eaa5"
+
+[[files]]
+name = "t040000_g7.50.txt"
+sha256 = "564471fd2288a3d3935b1ce64176fd6ab29402c9bc48497b610be69e5b6b03b7"
+
+[[files]]
+name = "t040000_g8.00.txt"
+sha256 = "a4dccba883120447059860610b8163a9973f66d13d1b77ce21245751015a21be"
+
+[[files]]
+name = "t040000_g8.50.txt"
+sha256 = "46112def746bee557d163e4b9c3bd912891b5bd602dce5bf043f6350f85d8e2e"
+
+[[files]]
+name = "t040000_g9.00.txt"
+sha256 = "173f3f7220d1b54b9cc844e75e76914286dcd357c456ac1215d11966d74bcc0e"
+
+[[files]]
+name = "t040000_g9.50.txt"
+sha256 = "9cf2e790379b768c7a7b5ee98f81daa98af485e6a4d98f1852e28a7a49c6970b"
+
+[[files]]
+name = "t045000_g6.50.txt"
+sha256 = "099cd24c961c4250f7f325256a56023c6803e13cbc0dff929cc07760e80c8edc"
+
+[[files]]
+name = "t045000_g7.00.txt"
+sha256 = "3a28ed40f002195a8324d822fbd45e47b186c8bc12a2e1fe9349a6bfd62c3eae"
+
+[[files]]
+name = "t045000_g7.50.txt"
+sha256 = "97625a88e3444ef16677dc210e570e42c440993a65d7994dd26e61fa0c6aeaf1"
+
+[[files]]
+name = "t045000_g8.00.txt"
+sha256 = "821549a5900a0f6e0dcbf1fdf1e83aadf5cda41a60eb4a50564bbc1fd824b41c"
+
+[[files]]
+name = "t045000_g8.50.txt"
+sha256 = "552e8163af4265cda676d88bcfad3e7fcd1326a3e3d9283ae87daded25760723"
+
+[[files]]
+name = "t045000_g9.00.txt"
+sha256 = "1ac104523848bdae196f4594e3dc31be9488f1d3be96d3d5730aba958ca8e16e"
+
+[[files]]
+name = "t045000_g9.50.txt"
+sha256 = "00e90fc90df85028e5287f53b194b415f24fdfd8c430f7163775d765f0e216ef"
+
+[[files]]
+name = "t050000_g6.50.txt"
+sha256 = "a22d2f1b83c4454b2f5644250f724c5610a61950043cc738c26fc9f52b05a5d1"
+
+[[files]]
+name = "t050000_g7.00.txt"
+sha256 = "a514bbe17a66fa347db7d482c93ea8895a1b4f24b80384c5e0b41a3d59fd175d"
+
+[[files]]
+name = "t050000_g7.50.txt"
+sha256 = "8db0a456448546b0021c5da90c64cc861e591b05fd39103e491008455542e259"
+
+[[files]]
+name = "t050000_g8.00.txt"
+sha256 = "4b8c5971b5af546761644f12d7e501384671775a0a244172c3f6eae07d0613ca"
+
+[[files]]
+name = "t050000_g8.50.txt"
+sha256 = "137bebe7a5806ce963ff2421b410a9268a42c761011870dd77114f495ed90dc8"
+
+[[files]]
+name = "t050000_g9.00.txt"
+sha256 = "d046a37aac42c896921a5bb0f823f6cc2500500cbb3c9b6927935bd91b6aa0b1"
+
+[[files]]
+name = "t050000_g9.50.txt"
+sha256 = "0e5322a86f5a77343de8db05162e47eb77f0c4f4fe21a1dae3a3835c9fc06943"
+
+[[files]]
+name = "t060000_g6.50.txt"
+sha256 = "3e2be330bae2efb8648cd8a6e0a260b4a017bab00f389d236c1fac50e5838624"
+
+[[files]]
+name = "t060000_g7.00.txt"
+sha256 = "dc981f01016904ccfa0cfbe5b89fd08e4812b77768211d9c9aa6b9975d9f3b76"
+
+[[files]]
+name = "t060000_g7.50.txt"
+sha256 = "e345a4332bf9433ac32f9d4f3898e7d5ffb45a726c4ef11f53d2aafdf648b53f"
+
+[[files]]
+name = "t060000_g8.00.txt"
+sha256 = "c230b5c2267cf736cbd29b19c7a8c5388edcfef490e212ec4bc1071ed5174372"
+
+[[files]]
+name = "t060000_g8.50.txt"
+sha256 = "f816500675a4e1e3fb5417c1bac819f2b10b922b4ac7ee2c10bff6c6fe948cc4"
+
+[[files]]
+name = "t060000_g9.00.txt"
+sha256 = "e231cc49048538bbb9a3b228151522519aec3a2808392294065e9152d71fbba6"
+
+[[files]]
+name = "t060000_g9.50.txt"
+sha256 = "31cb3b8330a3bfa4d7babc3dddbeb113db51c61039d2b6ee3bbb71bb44c58536"
+
+[[files]]
+name = "t070000_g6.50.txt"
+sha256 = "6b70a05a5ea9fc7bad8cf718d4aad275b6facdd4eacb37a60118a42fb2707735"
+
+[[files]]
+name = "t070000_g7.00.txt"
+sha256 = "9e3b40aaaec63fd139d46956a820c1f486fd60e0879df65b86f656dd6492801d"
+
+[[files]]
+name = "t070000_g7.50.txt"
+sha256 = "d6aca4a3036c5f4d5e37d52fdbc786ac18aa9dfaa18b10c0e788e025af2b1065"
+
+[[files]]
+name = "t070000_g8.00.txt"
+sha256 = "ee17d227222d9356f5dcaba99d5b86e9b461b54d4b75bb8efb82c3a81ca9ad34"
+
+[[files]]
+name = "t070000_g8.50.txt"
+sha256 = "1655e10ad1a4fa78f0edd8f7d3f7f71e6de98de4f0d951dfc0936b2ff785dfb5"
+
+[[files]]
+name = "t070000_g9.00.txt"
+sha256 = "6aceb92627cfa39f681f1286ceb4d678d6dc703cf1800c8fa4bdff8cd984722c"
+
+[[files]]
+name = "t070000_g9.50.txt"
+sha256 = "a88a39935d6cbe4f83cc76d9e2255cb5e1b32c7e45430c55dfaf4916b06361d0"
+
+[[files]]
+name = "t080000_g6.50.txt"
+sha256 = "d8e4e0872e1b8163f10684a468872072aad8c37edebe44c9e28dea1f389216b8"
+
+[[files]]
+name = "t080000_g7.00.txt"
+sha256 = "2a141e95a38273260be549005b5a4eb7c18a18ede73483d190c13238ac3d9c02"
+
+[[files]]
+name = "t080000_g7.50.txt"
+sha256 = "d6b1903f5570f20ddefc177dc938c9081028c2062a82fe97ccad48cce5c0e88d"
+
+[[files]]
+name = "t080000_g8.00.txt"
+sha256 = "f415249ed1f163a610a9e0091f1773acf85691dbe67f0de62ceb9dfe0b56835e"
+
+[[files]]
+name = "t080000_g8.50.txt"
+sha256 = "d9d29cc16185e3324502fd4118cf2915d4bc2d8bcad623b853ee29e44b2dd486"
+
+[[files]]
+name = "t080000_g9.00.txt"
+sha256 = "e52d1c783d4bcb43f3f0fba53094b061f59847ad4d7c192c08b8abf9271cc32e"
+
+[[files]]
+name = "t080000_g9.50.txt"
+sha256 = "f17e6760648c770a5d62e4e465c551c276c2150aa00c8f9639d9d723e2a84829"

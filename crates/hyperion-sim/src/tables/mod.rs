@@ -22,8 +22,10 @@ pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod helium;
 pub mod kick_rank;
+pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
+pub mod star_colour;
 pub mod stellar_fates_high;
 pub mod stellar_fates_low;
 pub mod stellar_fates_mid;
@@ -92,6 +94,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: true,
     },
     TableInfo {
+        name: "limb_darkening",
+        revision: 0,
+        since_generator_version: 19,
+        provisional: false,
+    },
+    TableInfo {
         name: "mge",
         revision: 1,
         since_generator_version: 11,
@@ -108,6 +116,12 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 0,
         since_generator_version: 15,
         provisional: true,
+    },
+    TableInfo {
+        name: "star_colour",
+        revision: 0,
+        since_generator_version: 19,
+        provisional: false,
     },
     TableInfo {
         name: "stellar_fates_high",

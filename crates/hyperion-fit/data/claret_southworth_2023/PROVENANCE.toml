@@ -1,0 +1,18 @@
+# Claret and Southworth's (2023) power-2 limb-darkening coefficients from spherical PHOENIX-COND
+# models (2,300-12,000 K, log g 0-6, solar metallicity) in the uvby and UBVRIJHK bands, Table 9 (the
+# first truncation method, M1). Read by `run limb_darkening` (rendering plan R06, R06.T4.a). A
+# fetched dataset (plan 15, Design note 12): no licence is stated, so only this file and `urls.txt`
+# are committed. The raw files are downloaded into `crates/hyperion-
+# fit/data/cache/claret_southworth_2023/`, which git ignores: each line of `urls.txt` is a file name
+# and the URL it was downloaded from.
+dataset = "claret_southworth_2023"
+class = "fetched"
+citation = "Claret and Southworth (2023), A&A 674, A63: power-2 and four-parameter limb-darkening coefficients from spherical PHOENIX-COND models, Table 9 (VizieR J/A+A/674/A63)"
+url = "https://cdsarc.cds.unistra.fr/ftp/J/A+A/674/A63/"
+retrieved = "2026-10-02"
+release = "table9.dat as CDS served it on that date"
+licence = "none stated; CDS asks that VizieR be acknowledged and the paper cited"
+
+[[files]]
+name = "table9.dat"
+sha256 = "894d010c5eb39155a8c3410170b0ed28e5c923907182acbb51642f110f27405e"
