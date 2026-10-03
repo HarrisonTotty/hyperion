@@ -322,7 +322,10 @@ function splitDownTo(target: PatchKey): PatchKey[] {
 function levelGaps(keys: readonly PatchKey[]): number {
   const sel: Selection = {
     patches: new Map(
-      keys.map((k) => [patchKeyString(k), { key: k, bounds: UNIT_BOUNDS, forced: false }]),
+      keys.map((k) => [
+        patchKeyString(k),
+        { key: k, bounds: UNIT_BOUNDS, forced: false, seen: true },
+      ]),
     ),
     demand: [],
     limited: false,

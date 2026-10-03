@@ -36,6 +36,7 @@ import {
   MAX_LEVEL,
   parentKey,
   type PatchKey,
+  patchKeyIndex,
   patchKeyString,
   rootKey,
 } from "./patchKey";
@@ -49,6 +50,12 @@ export interface SelectedPatch {
   readonly bounds: PatchBounds;
   /** Whether it lies in a grounded body's forced region, which the cache never evicts. */
   readonly forced: boolean;
+  /**
+   * Whether any view sees it. A forced patch no view sees is selected so that it is baked and kept
+   * resident before contact (Design note 9), but it is not drawn and does not count against
+   * `maxPatches`.
+   */
+  readonly seen: boolean;
 }
 
 /** A request to bake a patch, with its streaming priority (Design note 24). */
@@ -111,9 +118,10 @@ export interface SelectionInput {
    */
   readonly heightRanges?: HeightRangeLookup;
   /**
-   * The most patches to select; absent, no limit. Forced patches count against it but are never
-   * refused, so the selection can exceed it by the forced region and the balance it brings, and by
-   * the six roots. The terrain pass passes half its slots (provisional; T18 sets it).
+   * The most patches some view sees to select; absent, no limit. Forced patches a view sees count
+   * against it but are never refused, so the selection can exceed it by the forced region and the
+   * balance it brings, and by the six roots; forced patches no view sees (`SelectedPatch.seen`
+   * false) do not count. The terrain pass passes half its slots (provisional; T18 sets it).
    */
   readonly maxPatches?: number;
   /**
@@ -223,11 +231,6 @@ interface TraversalNode {
   readonly resident: boolean;
 }
 
-/** A patch's index within its level: face · 2⁴⁸ + i · 2²⁴ + j, an exact integer below 2⁵¹. */
-function levelIndex(key: PatchKey): number {
-  return key.face * 2 ** 48 + key.i * 2 ** 24 + key.j;
-}
-
 /** Bounds already computed, per planet and level, with the height range they were built for. */
 const boundsMemo = new WeakMap<
   PlanetGeometry,
@@ -251,7 +254,7 @@ function boundsOf(
   if (memo === undefined) {
     throw new Error(`level ${key.level} is not a quadtree level`);
   }
-  const index = levelIndex(key);
+  const index = patchKeyIndex(key);
   const known = memo.get(index);
   if (known !== undefined && known.lowM === range[0] && known.highM === range[1]) {
     return known.bounds;
@@ -287,7 +290,7 @@ interface Traversal {
   readonly skirtMarginM: number;
   /** The finest level's patch edge, metres: the forced region's unit. */
   readonly patchSizeM: number;
-  /** Every node made this call, per level by {@link levelIndex}. */
+  /** Every node made this call, per level by {@link patchKeyIndex}. */
   readonly nodes: ReadonlyArray<Map<number, TraversalNode>>;
 }
 
@@ -323,7 +326,7 @@ export function inheritedHeightRangeM(
 
 function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): TraversalNode {
   const level = t.nodes[key.level];
-  const index = levelIndex(key);
+  const index = patchKeyIndex(key);
   const known = level?.get(index);
   if (known !== undefined) {
     return known;
@@ -436,7 +439,7 @@ function before(a: TraversalNode, b: TraversalNode): boolean {
   if (a.key.level !== b.key.level) {
     return a.key.level < b.key.level;
   }
-  return levelIndex(a.key) < levelIndex(b.key);
+  return patchKeyIndex(a.key) < patchKeyIndex(b.key);
 }
 
 /** A binary max-heap of traversal nodes by {@link before}. */
@@ -533,7 +536,8 @@ export function selectPatches(input: SelectionInput): Selection {
     nodes: Array.from({ length: MAX_LEVEL + 1 }, () => new Map()),
   };
   const maxPatches = input.maxPatches ?? Infinity;
-  const tree = new PatchLeafSet<TraversalNode>();
+  // A forced patch no view sees is selected, to be kept resident, but neither drawn nor counted.
+  const tree = new PatchLeafSet<TraversalNode>((node) => node.seenBy !== 0);
   const heap = new CandidateHeap();
   const offer = (node: TraversalNode): void => {
     if (wantsRefining(planet, node)) {
@@ -541,7 +545,7 @@ export function selectPatches(input: SelectionInput): Selection {
     }
   };
   const childOf = (child: PatchKey, parent: PatchKey): TraversalNode | null => {
-    const p = t.nodes[parent.level]?.get(levelIndex(parent)) ?? null;
+    const p = t.nodes[parent.level]?.get(patchKeyIndex(parent)) ?? null;
     const node = nodeOf(t, child, p);
     return node.visible ? node : null;
   };
@@ -575,6 +579,7 @@ export function selectPatches(input: SelectionInput): Selection {
       key: node.key,
       bounds: node.bounds,
       forced: node.forced && node.key.level === planet.finestLevel,
+      seen: node.seenBy !== 0,
     });
   }
   return { patches, demand: demandOf(t, tree), limited };
@@ -590,7 +595,7 @@ export function selectPatches(input: SelectionInput): Selection {
 function demandOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchRequest[] {
   const requests = new Map<string, PatchRequest>();
   const nodeAt = (key: PatchKey): TraversalNode | undefined =>
-    t.nodes[key.level]?.get(levelIndex(key));
+    t.nodes[key.level]?.get(patchKeyIndex(key));
   for (const leaf of tree.values()) {
     if (leaf.resident) {
       continue;
@@ -653,7 +658,7 @@ function neighbours(key: PatchKey): PatchKey[] {
  * restricted quadtree as it is split, and able to undo a split and the balance it brought.
  *
  * @remarks
- * Keys are numeric within a level ({@link levelIndex}); the leaves come out in the order they were
+ * Keys are numeric within a level ({@link patchKeyIndex}); the leaves come out in the order they were
  * added, which a deterministic sequence of splits makes deterministic. Exported for its tests.
  */
 export class PatchLeafSet<T> {
@@ -663,8 +668,17 @@ export class PatchLeafSet<T> {
   private journal:
     { readonly key: PatchKey; readonly value: T; readonly children: PatchKey[] }[] | null = null;
   private count = 0;
+  private readonly counts: (value: T) => boolean;
 
-  /** How many leaves there are. */
+  /**
+   * @param counts - Whether a leaf counts towards {@link PatchLeafSet.size}: every leaf by default;
+   *   selection leaves out the forced patches no view sees, which are kept resident but not drawn.
+   */
+  constructor(counts: (value: T) => boolean = () => true) {
+    this.counts = counts;
+  }
+
+  /** How many leaves there are that count. */
   get size(): number {
     return this.count;
   }
@@ -672,20 +686,37 @@ export class PatchLeafSet<T> {
   /** Adds a leaf. */
   add(key: PatchKey, value: T): void {
     const level = this.levelOf(key);
-    if (!level.has(levelIndex(key))) {
+    const known = level.get(patchKeyIndex(key));
+    if (known !== undefined && this.counts(known.value)) {
+      this.count -= 1;
+    }
+    if (this.counts(value)) {
       this.count += 1;
     }
-    level.set(levelIndex(key), { key, value });
+    level.set(patchKeyIndex(key), { key, value });
+  }
+
+  /** Removes a leaf, if it is one. */
+  private removeLeaf(key: PatchKey): void {
+    const level = this.levelOf(key);
+    const known = level.get(patchKeyIndex(key));
+    if (known === undefined) {
+      return;
+    }
+    level.delete(patchKeyIndex(key));
+    if (this.counts(known.value)) {
+      this.count -= 1;
+    }
   }
 
   /** Whether `key` is a leaf. */
   isLeaf(key: PatchKey): boolean {
-    return this.levelOf(key).has(levelIndex(key));
+    return this.levelOf(key).has(patchKeyIndex(key));
   }
 
   /** Marks `key` as split, above the leaves, without a leaf of its own. */
   markInternal(key: PatchKey): void {
-    this.internal[key.level]?.add(levelIndex(key));
+    this.internal[key.level]?.add(patchKeyIndex(key));
   }
 
   /** The leaves' values, level by level, each level in the order its leaves were added. */
@@ -716,11 +747,9 @@ export class PatchLeafSet<T> {
         continue;
       }
       for (const child of entry.children) {
-        if (this.levelOf(child).delete(levelIndex(child))) {
-          this.count -= 1;
-        }
+        this.removeLeaf(child);
       }
-      this.internal[entry.key.level]?.delete(levelIndex(entry.key));
+      this.internal[entry.key.level]?.delete(patchKeyIndex(entry.key));
       this.add(entry.key, entry.value);
     }
     this.journal = null;
@@ -738,12 +767,11 @@ export class PatchLeafSet<T> {
     const added: { readonly key: PatchKey; readonly value: T }[] = [];
     const work: PatchKey[] = [];
     const split = (k: PatchKey): void => {
-      const leaf = this.levelOf(k).get(levelIndex(k));
+      const leaf = this.levelOf(k).get(patchKeyIndex(k));
       if (leaf === undefined) {
         return;
       }
-      this.levelOf(k).delete(levelIndex(k));
-      this.count -= 1;
+      this.removeLeaf(k);
       this.markInternal(k);
       const children: PatchKey[] = [];
       for (const child of childKeys(k)) {
@@ -783,7 +811,7 @@ export class PatchLeafSet<T> {
    */
   coarserLeaf(key: PatchKey): PatchKey | null {
     for (let up = parentKey(key); up !== null; up = parentKey(up)) {
-      const index = levelIndex(up);
+      const index = patchKeyIndex(up);
       const leaf = this.leaves[up.level]?.get(index);
       if (leaf !== undefined) {
         return leaf.key;
