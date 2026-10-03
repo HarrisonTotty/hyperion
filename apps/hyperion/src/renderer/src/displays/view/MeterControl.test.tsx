@@ -17,7 +17,7 @@ const READING: ExposureReading = {
 
 describe("MeterControl", () => {
   it("shows the exposure with its level, the meter and the view it meters", () => {
-    render(<MeterControl reading={READING} onMeter={() => undefined} />);
+    render(<MeterControl meter="average" reading={READING} onMeter={() => undefined} />);
     expect(screen.getByText("EV100 9.6 AUTO")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "METER" })).toHaveTextContent("AVG");
     expect(screen.getByRole("status", { name: "SOURCE" })).toHaveTextContent("VIEW");
@@ -27,7 +27,7 @@ describe("MeterControl", () => {
   it("selects each meter from the keyboard", async () => {
     const user = userEvent.setup();
     const onMeter = vi.fn<(mode: MeterMode) => void>();
-    render(<MeterControl reading={READING} onMeter={onMeter} />);
+    render(<MeterControl meter="average" reading={READING} onMeter={onMeter} />);
     await user.tab();
     expect(screen.getByRole("button", { name: "AVG" })).toHaveFocus();
     await user.keyboard("{Enter}");
@@ -46,10 +46,14 @@ describe("MeterControl", () => {
   it("holds the meters back while there is no image to meter", async () => {
     const user = userEvent.setup();
     const onMeter = vi.fn<(mode: MeterMode) => void>();
-    render(<MeterControl reading={null} onMeter={onMeter} />);
+    render(<MeterControl meter="lit" reading={null} onMeter={onMeter} />);
     expect(screen.getByText("NO IMAGE TO METER")).toBeInTheDocument();
     const lit = screen.getByRole("button", { name: "LIT" });
     expect(lit).toHaveAttribute("aria-disabled", "true");
+    expect(lit).toHaveAccessibleDescription("NO IMAGE TO METER");
+    // The operator's meter still shows while nothing is metered.
+    expect(lit).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status", { name: "METER" })).toHaveTextContent("LIT");
     await user.click(lit);
     expect(onMeter).not.toHaveBeenCalled();
   });

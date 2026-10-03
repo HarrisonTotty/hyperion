@@ -15,16 +15,8 @@ import type { ViewRole } from "../camera/state";
 import type { TargetRounding } from "../engine/status";
 import { AGX_MAX_EV, HALF_FLOAT_MAX } from "../photometry/toneCurve";
 import { glareSpreadFunction, type EyeObserver } from "./glare";
+import type { QualitySetting } from "../quality/qualitySetting";
 import { nnls } from "./nnls";
-
-/**
- * The render-quality setting the chain is built for.
- *
- * @remarks
- * Structurally R05's `QualitySetting` (`view/quality/`, R05.T7.b), which is not yet built; this
- * becomes that import when it lands.
- */
-export type BloomSetting = "high" | "low";
 
 /**
  * The bloom threshold in exposed units: 2^`AGX_MAX_EV` = 16.29, AgX's top of range, which the
@@ -56,7 +48,7 @@ export interface BloomLevels {
 }
 
 /** The chain's mip levels per setting: full resolution and 7 levels high, quarter and 5 low. */
-export const BLOOM_LEVELS: Readonly<Record<BloomSetting, BloomLevels>> = {
+export const BLOOM_LEVELS: Readonly<Record<QualitySetting, BloomLevels>> = {
   high: { firstLevel: 0, levels: 7 },
   low: { firstLevel: 1, levels: 5 },
 };
@@ -433,7 +425,7 @@ const SUM_CONSTRAINT_WEIGHT = 100;
  * @param radPerPx - The view's angular size of one internal-resolution pixel, rad.
  */
 export function bloomKernel(
-  setting: BloomSetting,
+  setting: QualitySetting,
   role: ViewRole,
   radPerPx: number,
   eye: EyeObserver,

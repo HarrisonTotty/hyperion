@@ -44,6 +44,7 @@ describe("histogramBin", () => {
   });
 
   it("maps each bin's centre back to that bin", () => {
+    expect(histogramBin(binCentreLuminance(77))).toBe(77);
     for (let bin = 1; bin < HISTOGRAM_BINS; bin += 1) {
       expect(histogramBin(binCentreLuminance(bin))).toBe(bin);
     }

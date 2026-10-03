@@ -1607,10 +1607,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   mark (T2.a); the lean is to keep it so until a contact carries a radius.
 - **Deviations in T14.a, as built** (2026-10-02). `post/glare.ts`, `post/bloom.ts` and an added
   `post/nnls.ts` (Lawson and Hanson's non-negative least squares), each with tests.
-  `bloomKernel(setting: BloomSetting, role, radPerPx, eye: EyeObserver)`: `BloomSetting` is the
-  literal `"high" | "low"`, structurally R05's unbuilt `QualitySetting`, and becomes that import
-  when R05.T7.b lands; `eye` is an argument as for `glareSpread`, so that it builds before R06
-  (both approved by the orchestrator). `BloomKernel` extends `BloomLevels { firstLevel, levels }`:
+  `bloomKernel(setting: QualitySetting, role, radPerPx, eye: EyeObserver)`: first built on a
+  literal `"high" | "low"` stand-in, switched to R05.T7.b's `QualitySetting`
+  (`view/quality/qualitySetting.ts`) once it landed; `eye` is an argument as for `glareSpread`,
+  so that it builds before R06 (approved by the orchestrator). `BloomKernel` extends `BloomLevels { firstLevel, levels }`:
   `weights[k]` multiplies mip level `firstLevel + k`, the low setting starting at level 1, quarter
   resolution; the level counts are constants (`BLOOM_LEVELS`: 7 from level 0 high, 5 from level 1
   low) until T17 makes them settings. **Design note 12's age factor is corrected** (science check,
@@ -1666,8 +1666,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   other post-processing benches (the probe's 0.3–0.8 ms stays provisional), and if per-call
   staging shows a cost T17 adds the staging ring through R01's guarded readback only (decision
   2026-10-02, item 6).
-- **Deviations in T13.a, as built** (2026-10-02). `post/autoExposure.ts`: `meteredLuminance(h,
-window = FULL_WINDOW)` (0 when the window holds no counts), `smoothEv`, `programTriple`,
+- **Deviations in T13.a, as built** (2026-10-02). `post/autoExposure.ts`: `meteredLuminance(h, window)`
+  (window [0, 1] by default; 0 when the window holds no counts), `smoothEv`, `programTriple`,
   `ExposureProgram` (the `AUTO` program's N and t, a constructor argument: R06's
   `DEFAULT_VIEW_CAMERA` where the controller is made), `AutoExposureOptions`, and `AutoExposure`
   as a class (Provides sketched an interface with `step`), which also holds the operator's meter
@@ -1691,9 +1691,9 @@ window = FULL_WINDOW)` (0 when the window holds no counts), `smoothEv`, `program
   shutter take over.
 - **Deviations in T13.b, as built** (2026-10-02). `displays/view/MeterControl.tsx` (with
   `meterLabel`) shows `EV100 9.6 AUTO` through R02's `exposureReading`, `METER AVG`, the source
-  view as `SOURCE VIEW`, and the meters `AVG`, `LIT` and `DARK` as pressed-state buttons in the
-  guide's order, reachable by Tab and pressed by Enter or Space; with no reading it says `NO
-IMAGE TO METER` and holds the meters back (`aria-disabled`, focusable). It takes an
+  view as `SOURCE VIEW`, and the meters `AVG`, `LIT` and `DARK` as pressed-state buttons in Design note 10's order (the guide has none yet; T16 drafts it),
+  reachable by Tab and pressed by Enter or Space; with no reading it says `NO IMAGE TO METER`
+  and holds the meters back (`aria-disabled`, focusable). It takes `meter`, an
   `ExposureReading | null` and `onMeter(mode)`. **Not yet mounted in `ViewDisplay`**: no view
   meters an image until T7 makes the photorealistic view and its `AutoExposure`; T7 mounts it
   beside `ExposurePanel` (a few lines of `ViewDisplay`), so that no control stands on screen with
@@ -1701,3 +1701,29 @@ IMAGE TO METER` and holds the meters back (`aria-disabled`, focusable). It takes
   by-eye checks (a lit planet on black, a star entering the frame, the cockpit turning to a
   planet), which settle the smoothing speeds, wait on T7 and are pending by hand for the owner:
   `just client` with a photorealistic `VIEW` on the development machine.
+- **T13 after review, as built** (2026-10-02). `meteredAverage(h, window)` is what the controller
+  meters: `null` when no pixel counts, and for a frame whose counted pixels all fall below the
+  histogram's range (bin 0, as after a cut from a sunlit planet to a dark sky) the range's floor
+  2⁻¹⁴ ÷ the pre-exposure, an upper bound, so that the exposure steps darker and the frame comes
+  into range; metering its mean of 0 as nothing to meter locked `AUTO` in a system inhibit it
+  could not leave (a test drives the cut and the recovery). A histogram with nothing the meter
+  weighs (`LIT` with no lit body) is treated as no histogram: `AUTO` holds until
+  `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
+  definition of that status (a closed or absent source); T16's draft takes it up, the
+  alternative being a status of its own such as `NO LIT BODY`, for the owner. Under `AUTO`
+  `onMetering` receives the smoothed, applied EV100, so R02's `auto.ev100` is the applied value
+  and `meteredEv100` the metered one; a system inhibit resumes and smooths in the same step; the
+  operator's `setAuto` and `enable` take `meteredEv100` and set the exposure there at once,
+  unsmoothed (R02's commands as built). `setMeter` changes the reading's meter at once, and
+  histograms under its weights arrive one to three frames later. `MeterControl` takes the
+  operator's `meter` as its own prop, so the chosen meter shows (`METER LIT`, the button
+  underlined, as the time control's step is) while nothing is metered; held-back buttons are
+  described by `NO IMAGE TO METER`; the panel is titled `Exposure meter`, its buttons grouped
+  under the legend `SELECT`. **Left to T7**: mount `MeterControl` beside `ExposurePanel`,
+  subscribed to the view's `AutoExposure` through `useSyncExternalStore` and throttled to about
+  4 Hz at 0.1 EV, not passed down from `ViewDisplay`'s state; make the `AutoExposure` with R06's
+  `DEFAULT_VIEW_CAMERA`; pass `exposure.meter` and the stride into each `HistogramRequest`; and
+  set the next frame's pre-exposure from `reading().ev100`. **For T16's draft and the owner**:
+  the words `SOURCE`, `SELECT` and the panel title, beside `METER AVG`, `METER LIT` and `METER
+DARK`; the source shows the raw view id upper-cased until T7 names views as the label block
+  does.

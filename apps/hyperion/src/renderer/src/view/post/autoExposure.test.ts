@@ -11,13 +11,7 @@ import {
 } from "../photometry/exposure";
 import { AGX_MAX_EV } from "../photometry/toneCurve";
 import { glareSourceVeil, type GlareSource } from "./glare";
-import {
-  binCentreLuminance,
-  cpuHistogram,
-  histogramBin,
-  HISTOGRAM_BINS,
-  type Histogram,
-} from "./histogram";
+import { binCentreLuminance, cpuHistogram, HISTOGRAM_BINS, type Histogram } from "./histogram";
 import {
   AutoExposure,
   meteredLuminance,
@@ -173,8 +167,8 @@ describe("the exposure", () => {
       meteredLuminance(frameHistogram(texels, "average"));
     const change = Math.abs(metered(after) / metered(before) - 1);
     expect(change).toBeLessThan(0.01);
-    // The veil, were it metered, would have moved the mean several stops.
-    expect(veil / (widthPx * heightPx) / metered(before)).toBeGreaterThan(4);
+    // The veil, were it metered, would have moved the mean more than 4 stops (Design note 12).
+    expect(Math.log2(veil / (widthPx * heightPx) / metered(before))).toBeGreaterThan(4);
   });
 
   it("reaches the same EV at 30 Hz and 60 Hz", () => {
@@ -202,7 +196,11 @@ describe("the exposure", () => {
     const texels: Array<readonly [number, number]> = [];
     for (let i = 0; i < 200; i += 1) {
       texels.push(
-        i < 50 ? [lit, METER_CLASS.litBody] : i < 100 ? [night, METER_CLASS.unlitBody] : [0, 1],
+        i < 50
+          ? [lit, METER_CLASS.litBody]
+          : i < 100
+            ? [night, METER_CLASS.unlitBody]
+            : [0, METER_CLASS.other],
       );
     }
     expect(meteredLuminance(frameHistogram(texels, "lit"))).toBeCloseTo(lit, 6);
@@ -245,6 +243,38 @@ describe("the exposure", () => {
     expect(exposure.control.kind).toBe("auto");
   });
 
+  it("recovers from a frame entirely below the histogram's range", () => {
+    // A cut from a sunlit planet to a dark sky: every pixel pre-exposes below 2⁻¹⁴.
+    const exposure = controller({ kind: "auto", ev100: 15 });
+    const skyCdM2 = 1e-3;
+    let reading = exposure.reading();
+    for (let frame = 0; frame < 60 * 40; frame += 1) {
+      const preExposure = 1 / (1.2 * 2 ** reading.ev100);
+      const h = frameHistogram(
+        [[skyCdM2 * preExposure, METER_CLASS.other]],
+        "average",
+        preExposure,
+      );
+      reading = exposure.step(h, 1 / 60);
+    }
+    expect(reading.control.kind).toBe("auto");
+    expect(reading.ev100).toBeCloseTo(ev100FromAverageLuminance(skyCdM2), 1);
+  });
+
+  it("holds AUTO through a histogram with nothing to meter, until the timeout", () => {
+    const exposure = controller();
+    run(exposure, histogram([[120, 10]]), 60, 5);
+    const empty = histogram([]);
+    exposure.step(empty, 1 / 60);
+    expect(exposure.control.kind).toBe("auto");
+    for (let t = 0; t <= METER_TIMEOUT_S; t += 1 / 60) {
+      exposure.step(empty, 1 / 60);
+    }
+    expect(exposure.control).toEqual(
+      expect.objectContaining({ kind: "inhibited", reason: "no_image_to_meter" }),
+    );
+  });
+
   it("is accepted by R02's setAuto once it meters", () => {
     const exposure = controller({ kind: "manual", triple: programTriple(PROGRAM, 3) });
     expect(exposure.apply(setAuto(exposure.meteredEv100))).toBe(false);
@@ -265,9 +295,5 @@ describe("smoothEv", () => {
     expect(one).toBeGreaterThan(0);
     expect(one).toBeLessThan(1);
     expect(smoothEv(0, 1, 100)).toBeCloseTo(1, 9);
-  });
-
-  it("bins a luminance at its bin's centre", () => {
-    expect(histogramBin(binCentreLuminance(77))).toBe(77);
   });
 });

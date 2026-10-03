@@ -17,7 +17,12 @@ import {
   type ExposureControl,
   type ExposureTriple,
 } from "../photometry/exposure";
-import { binCentreLuminance, HISTOGRAM_BINS, type Histogram } from "./histogram";
+import {
+  binCentreLuminance,
+  HISTOGRAM_BINS,
+  HISTOGRAM_MIN_LOG2,
+  type Histogram,
+} from "./histogram";
 import type { MeterMode } from "./meter";
 
 /** The fraction of the histogram's counts, from the darkest, that the mean takes: [0, 1] by default. */
@@ -61,6 +66,31 @@ export function meteredLuminance(h: Histogram, window: PercentileWindow = FULL_W
     }
   }
   return weight > 0 ? flux / weight / h.preExposure : 0;
+}
+
+/**
+ * The average a controller meters from a histogram, cd/m², or `null` when no pixel counts.
+ *
+ * @remarks
+ * A frame whose counted pixels all fall below the histogram's range (bin 0) meters at that range's
+ * floor, 2⁻¹⁴ ÷ the pre-exposure, an upper bound on its true mean, rather than at 0: the exposure
+ * then steps darker, the next pre-exposure follows, and the frame comes into range. A mean of 0
+ * would read as nothing to meter, and since the pre-exposure follows the held exposure the frame
+ * would never come back into range.
+ */
+export function meteredAverage(
+  h: Histogram,
+  window: PercentileWindow = FULL_WINDOW,
+): number | null {
+  let total = 0;
+  for (const n of h.bins) {
+    total += n;
+  }
+  if (total === 0) {
+    return null;
+  }
+  const average = meteredLuminance(h, window);
+  return average > 0 ? average : 2 ** HISTOGRAM_MIN_LOG2 / h.preExposure;
 }
 
 /**
@@ -222,15 +252,17 @@ export class AutoExposure {
    * @param dtS - The frame's duration, s.
    */
   step(h: Histogram | undefined, dtS: number): ExposureReading {
-    if (h === undefined) {
+    const average = h === undefined ? null : meteredAverage(h, this.#window);
+    if (average === null) {
+      // No histogram, or one with no pixel of a class the meter weighs (`LIT` with no lit body):
+      // the meter holds its value until the timeout, then reports nothing to meter.
       this.#sinceHistogramS += dtS;
       if (this.#sinceHistogramS > METER_TIMEOUT_S) {
         this.#targetEv = null;
       }
     } else {
       this.#sinceHistogramS = 0;
-      const average = meteredLuminance(h, this.#window);
-      this.#targetEv = average > 0 ? ev100FromAverageLuminance(average) : null;
+      this.#targetEv = ev100FromAverageLuminance(average);
     }
     const target = this.#targetEv;
     const control = this.#control;
@@ -245,7 +277,10 @@ export class AutoExposure {
       case "inhibited":
         // A system inhibit resumes `AUTO` from where it was held, and smooths from there; an
         // operator's is untouched.
-        this.#control = onMetering(control, target === null ? null : control.ev100);
+        this.#control = onMetering(
+          control,
+          target === null ? null : smoothEv(control.ev100, target, dtS),
+        );
         break;
       case "manual":
         break;
