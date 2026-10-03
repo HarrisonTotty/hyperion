@@ -22,6 +22,7 @@ import type { PlacedLight } from "../lighting/hostLights";
 import { hostAnnuli, LitBodyRenderer, type LitBodyInput, planLitBodies, pointFlux } from "./draw";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
+import type { DrawItem } from "../engine/types";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -252,7 +253,7 @@ describe("the plan", () => {
     expect(plan.regimes.get(far.id)).toBe("point");
     expect(plan.regimes.get(near.body.id)).toBe("disc");
     expect(plan.order.some((entry) => entry.kind === "host")).toBe(true);
-    expect(plan.steps.map((step) => step.kind)).toEqual(["points", "disc"]);
+    expect(plan.steps.map((step) => step.kind)).toEqual(["points", "host", "disc"]);
   });
 
   it("lights a body by its two brightest stars", () => {
@@ -490,19 +491,42 @@ describe("the renderer", () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     const plan = planOf();
-    const draws = renderer.draws(plan);
+    const hostDraw = renderer.draws(planOf())[0];
+    if (hostDraw === undefined) {
+      throw new Error("no draw");
+    }
+    const host: DrawItem = { ...hostDraw, material: { kind: "material", name: "sky:hostDisc" } };
+    const draws = renderer.draws(plan, new Map([[0, [host]]]));
     const kinds = draws.map((draw) =>
       draw.material.name.startsWith("bodies:disc")
         ? `${draw.material.name} ${String(draw.uniforms["edgePass"]?.[0])}`
-        : `points ${String(draw.instanceCount)}`,
+        : draw.material.name === "sky:hostDisc"
+          ? "host"
+          : `points ${String(draw.instanceCount)}`,
     );
-    const expected = plan.steps.flatMap((step) =>
-      step.kind === "disc"
-        ? ["bodies:disc 0", "bodies:discLimb 1"]
-        : [`points ${String(step.sprites.length)}`],
-    );
+    const expected = plan.steps.flatMap((step) => {
+      let names: string[];
+      switch (step.kind) {
+        case "disc":
+          names = ["bodies:disc 0", "bodies:discLimb 1"];
+          break;
+        case "host":
+          names = ["host"];
+          break;
+        case "points":
+          names = [`points ${String(step.sprites.length)}`];
+          break;
+      }
+      return names;
+    });
     expect(kinds).toEqual(expected);
-    expect(plan.steps.map((step) => step.kind)).toEqual(["points", "disc", "disc", "points"]);
+    expect(plan.steps.map((step) => step.kind)).toEqual([
+      "points",
+      "host",
+      "disc",
+      "disc",
+      "points",
+    ]);
     renderer.dispose();
   });
 

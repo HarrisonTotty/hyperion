@@ -1,6 +1,7 @@
 /**
  * The kept phase scene (plan R07, T8.a): three Earth-sized test planets about 106 px across at
- * 1080p and 60°, seen from one camera 1 au from a Sun-like star at phases 0°, 90° and 150°.
+ * 1080p and 60°, seen from one camera 1 au from a Sun-like star at phases 0°, 90° and 150°, and a
+ * Jupiter-sized test giant 10¹⁰ m away at 60°, about 23 px across (T8.a's by-hand Jupiter).
  *
  * @remarks
  * The camera sits 1 au from the star along +x, in the system frame, with no own ship; each planet is
@@ -35,6 +36,18 @@ export const PHASE_SCENE_PHASES_DEG = [0, 90, 150] as const;
 
 /** The planets, body indices 1 to 3, one per phase. */
 export const PHASE_PLANETS = [keptBody(1), keptBody(2), keptBody(3)] as const;
+
+/** The test giant, body index 4. */
+export const PHASE_GIANT = keptBody(4);
+
+/** The giant's radius, m: Jupiter's volumetric mean radius (NASA Jupiter Fact Sheet). */
+export const PHASE_GIANT_RADIUS_M = 6.9911e7;
+
+/** The giant's distance from the camera, m. */
+export const PHASE_GIANT_DISTANCE_M = 1e10;
+
+/** The giant's phase, degrees. */
+export const PHASE_GIANT_PHASE_DEG = 60;
 
 /** The camera's place, m from the barycentre: 1 au along +x. */
 export const PHASE_CAMERA_M: Vec3 = vec3(AU_M, 0, 0);
@@ -108,6 +121,21 @@ function phaseSceneAt(tS: number): ViewScene {
         orbitNormal: null,
       },
       ...PHASE_SCENE_PHASES_DEG.map((phaseDeg, index) => planet(index, phaseDeg)),
+      {
+        id: PHASE_GIANT,
+        parent: null,
+        kind: "planet",
+        designation: "TEST GIANT",
+        radiusM: PHASE_GIANT_RADIUS_M,
+        hillRadiusM: null,
+        centreM: add(
+          PHASE_CAMERA_M,
+          scale(phasePlanetDirection(PHASE_GIANT_PHASE_DEG), PHASE_GIANT_DISTANCE_M),
+        ),
+        rotation: null,
+        symbol: bodyKindSymbol("planet"),
+        orbitNormal: null,
+      },
     ],
     rings: [],
     orbits: [],

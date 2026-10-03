@@ -7,8 +7,10 @@ import { sceneOrigins, type ViewBody } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
+import { phaseScene } from "../../view/scenes/phaseScene";
 import {
   commandRun,
+  photorealStatements,
   frameName,
   freeRateReading,
   labelLines,
@@ -317,5 +319,53 @@ describe("the list", () => {
       },
     };
     expect(markRows(startRun(shipless)).every((row) => row.fromCamera)).toBe(true);
+  });
+});
+
+describe("the style", () => {
+  const BOTH = { wireframe: true, photorealistic: true };
+
+  it("toggles to the photorealistic style and back where the adapter offers it", () => {
+    const run = startRun(phaseScene());
+    const photoreal = done(commandRun(run, { kind: "style", style: "toggle" }, CUT, BOTH));
+    expect(photoreal.camera.style).toBe("photorealistic");
+    expect(photoreal.camera.pose).toEqual(run.camera.pose);
+    const back = done(commandRun(photoreal, { kind: "style", style: "toggle" }, CUT, BOTH));
+    expect(back.camera.style).toBe("wireframe");
+  });
+
+  it("stays in the wireframe on a software adapter", () => {
+    const run = startRun(phaseScene());
+    const refused = done(
+      commandRun(run, { kind: "style", style: "photorealistic" }, CUT, {
+        wireframe: true,
+        photorealistic: false,
+      }),
+    );
+    expect(refused.camera.style).toBe("wireframe");
+  });
+
+  it("states the lighting and the bodies' labels in the photorealistic style only", () => {
+    const run = startRun(phaseScene());
+    const albedo = ["BODY ALBEDO: NOT YET MODELLED"] as const;
+    expect(photorealStatements(run, "hosts-not-received", "wireframe", albedo)).toEqual([]);
+    const photoreal = done(commandRun(run, { kind: "style", style: "toggle" }, CUT, BOTH));
+    expect(photorealStatements(photoreal, "lit", "photorealistic", albedo)).toEqual(albedo);
+    expect(photorealStatements(photoreal, "pending", "photorealistic", albedo)).toEqual([
+      "LIGHTING: PENDING",
+      ...albedo,
+    ]);
+    expect(photorealStatements(photoreal, "hosts-not-received", "photorealistic", [])).toEqual([
+      "LIGHTING: HOSTS NOT RECEIVED",
+    ]);
+  });
+
+  it("says the photorealistic style is pending while the view still draws its wireframe", () => {
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    expect(photorealStatements(photoreal, "lit", "wireframe", [])).toEqual([
+      "PHOTOREALISTIC PENDING",
+    ]);
   });
 });

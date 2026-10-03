@@ -10,9 +10,10 @@
  * becomes a {@link DiscRecord}; a point a sprite of flux F = E p (a ÷ Δ)² Φ(α) per channel ({@link
  * pointFlux}, the law integrated over the figure for a spheroid), cut by the same eclipse term from
  * the body's centre, laid into R02's point-spread sprite. Host discs keep their
- * place in the order and are not drawn here (R06.T13.e's pass; the coordinator's ruling,
- * 2026-10-03). {@link LitBodyRenderer} binds the plan to the engine: one draw per disc for its
- * wholly covered pixels and one for its limb, one sprite draw per run of consecutive points.
+ * place in the order, where R06.T13.e's pass draws them (decision-r07-t8a, R06 coordination (d),
+ * 2026-10-03): a host's step places R06's disc draw. {@link LitBodyRenderer} binds the plan to the
+ * engine: one draw per disc for its wholly covered pixels and one for its limb, one sprite draw per
+ * run of consecutive points through R06's HDR sprite (`POINT SPRITES HDR`).
  */
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
@@ -36,17 +37,13 @@ import type {
   TextureHandle,
   WgslMaterialSpec,
 } from "../engine/types";
-import {
-  type ProjectionCamera,
-  pixelSolidAngle,
-  project,
-  type Viewport,
-} from "../camera/projection";
+import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { annulusEdges, type AnnulusSet, eclipseVisible } from "../lighting/annuli";
 import type { PlacedLight } from "../lighting/hostLights";
 import { shiningStars, starIlluminance, photopicIlluminance } from "../lighting/illuminance";
 import { type LightingBody, type LightingSphere, occludersFor } from "../lighting/occluders";
 import { PSF_QUAD_PX } from "../photometry/magnitude";
+import { type SpriteRecord, spriteRecord } from "../wireframe/drawList";
 import type { Rgb } from "../photometry/toneCurve";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
@@ -87,18 +84,18 @@ export interface BodyFrameOptions {
   readonly annuli: number;
 }
 
-/** A point body's sprite: R02's sprite row, its pixel and its pre-exposed light per PSF weight. */
+/** A point body's sprite: R02's sprite record, its depth its own (decision-r07-t8a, item 2). */
 export interface PointSprite {
   readonly id: BodyIdHex;
-  readonly xPx: number;
-  readonly yPx: number;
-  readonly exposedRgb: Rgb;
+  readonly record: SpriteRecord;
 }
 
 /** One step of the painter's sequence as it is drawn. */
 export type BodyStep =
   | { readonly kind: "disc"; readonly index: number }
-  | { readonly kind: "points"; readonly sprites: ReadonlyArray<PointSprite> };
+  | { readonly kind: "points"; readonly sprites: ReadonlyArray<PointSprite> }
+  /** A host star's place in the order, where R06's disc pass draws it (`HostDiscDto.star`). */
+  | { readonly kind: "host"; readonly star: number };
 
 /** One frame's lit bodies, ready to bind. */
 export interface BodyFramePlan {
@@ -342,12 +339,16 @@ function pointSpriteOf(
     return null;
   }
   const flux = pointFlux(body, hosts, occluders, options.annuli);
-  const perWeight = options.exposureScale / pixelSolidAngle(body.centreM, camera, viewport);
   return {
     id: body.id,
-    xPx: p.xPx,
-    yPx: p.yPx,
-    exposedRgb: [flux[0] * perWeight, flux[1] * perWeight, flux[2] * perWeight],
+    record: spriteRecord(
+      { xPx: p.xPx, yPx: p.yPx, depth: p.depth },
+      flux,
+      options.exposureScale,
+      body.centreM,
+      camera,
+      viewport,
+    ),
   };
 }
 
@@ -393,6 +394,8 @@ export function planLitBodies(
   };
   for (const entry of order) {
     if (entry.kind === "host") {
+      closeRun();
+      steps.push({ kind: "host", star: entry.star });
       continue;
     }
     const body = byId.get(entry.body);
@@ -592,52 +595,77 @@ export class LitBodyRenderer {
     this.#tableLaws = laws;
   }
 
-  /** The draws of a plan, in its painter's order, to add to the scene target's submission. */
-  draws(plan: BodyFramePlan): DrawItem[] {
+  /** A disc's two draws: its wholly covered pixels, then its limb. */
+  #discDraws(index: number): DrawItem[] {
+    const resources = this.#resources;
+    return (
+      [
+        [resources.interior, 0],
+        [resources.limb, 1],
+      ] as const
+    ).map(([material, edgePass]) => ({
+      mesh: resources.quad,
+      material,
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {
+        disc: new Float32Array([index]),
+        edgePass: new Float32Array([edgePass]),
+      },
+      textures: { phaseFactorTable: resources.table },
+      storageBuffers: { discs: resources.discs },
+    }));
+  }
+
+  /** A run of points' one instanced draw, from the run's own buffer. */
+  #pointDraw(sprites: ReadonlyArray<PointSprite>, run: number): DrawItem {
+    const resources = this.#resources;
+    const rows = new Float32Array(sprites.length * 8);
+    sprites.forEach((sprite, i) => {
+      rows.set(sprite.record, i * 8);
+    });
+    const existing =
+      resources.sprites[run] ?? this.#buffer(`bodies:sprites ${run}`, MIN_BUFFER_BYTES);
+    const buffer = this.#write(existing, rows);
+    resources.sprites[run] = buffer;
+    return {
+      mesh: resources.quad,
+      material: resources.sprite,
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+      instanceCount: sprites.length,
+      storageBuffers: { sprites: buffer },
+    };
+  }
+
+  /**
+   * The draws of a plan, in its painter's order, to add to the scene target's submission.
+   *
+   * @param hostDraws - R06's host-disc draws by star (`DiscFrame.draws`), placed at each host's
+   *   entry in the order; a host with none (a sprite, or off the view) draws nothing there.
+   */
+  draws(
+    plan: BodyFramePlan,
+    hostDraws: ReadonlyMap<number, ReadonlyArray<DrawItem>> = new Map(),
+  ): DrawItem[] {
     const resources = this.#resources;
     this.#writeTable(plan.laws);
     resources.discs = this.#write(resources.discs, packDiscRecords(plan.discs));
-    const offset = new Float32Array(3);
     const draws: DrawItem[] = [];
     let run = 0;
     for (const step of plan.steps) {
-      if (step.kind === "disc") {
-        for (const [material, edgePass] of [
-          [resources.interior, 0],
-          [resources.limb, 1],
-        ] as const) {
-          draws.push({
-            mesh: resources.quad,
-            material,
-            offsetFromCameraM: offset,
-            uniforms: {
-              disc: new Float32Array([step.index]),
-              edgePass: new Float32Array([edgePass]),
-            },
-            textures: { phaseFactorTable: resources.table },
-            storageBuffers: { discs: resources.discs },
-          });
-        }
-        continue;
+      switch (step.kind) {
+        case "host":
+          draws.push(...(hostDraws.get(step.star) ?? []));
+          break;
+        case "disc":
+          draws.push(...this.#discDraws(step.index));
+          break;
+        case "points":
+          draws.push(this.#pointDraw(step.sprites, run));
+          run += 1;
+          break;
       }
-      const rows = new Float32Array(step.sprites.length * 8);
-      step.sprites.forEach((sprite, i) => {
-        rows.set([sprite.xPx, sprite.yPx, 0, 0, ...sprite.exposedRgb, 0], i * 8);
-      });
-      const existing =
-        resources.sprites[run] ?? this.#buffer(`bodies:sprites ${run}`, MIN_BUFFER_BYTES);
-      const buffer = this.#write(existing, rows);
-      resources.sprites[run] = buffer;
-      run += 1;
-      draws.push({
-        mesh: resources.quad,
-        material: resources.sprite,
-        offsetFromCameraM: offset,
-        uniforms: {},
-        textures: {},
-        instanceCount: step.sprites.length,
-        storageBuffers: { sprites: buffer },
-      });
     }
     return draws;
   }

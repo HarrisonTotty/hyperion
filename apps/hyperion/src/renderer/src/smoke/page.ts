@@ -34,7 +34,7 @@ import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
 import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
 import { checkPhotoreal } from "./photoreal";
-import { checkBodies } from "./bodies";
+import { checkBodies, checkPhotorealFrame, checkSpriteDepth } from "./bodies";
 import { runSoak } from "./soak";
 import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
@@ -184,6 +184,10 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R07.T4.c the lit-body BRDF", () => checkLitBody(engine, checks));
   await checks.group("R07.T7 the photorealistic style", () => checkPhotoreal(engine, checks));
   await checks.group("R07.T8.a point and disc bodies", () => checkBodies(engine, checks));
+  await checks.group("R07.T8.a sprite depth", () => checkSpriteDepth(engine, checks));
+  await checks.group("R07.T8.a the photorealistic frame", () =>
+    checkPhotorealFrame(engine, checks),
+  );
   await checks.group("R05.T12.c the atmosphere's frames", () =>
     checkAtmosphereFrames(engine, checks),
   );

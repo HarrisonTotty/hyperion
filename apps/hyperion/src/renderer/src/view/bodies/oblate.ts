@@ -9,7 +9,7 @@
  * area π a c equator-on (Mallama et al. 2017's Saturn), so a spheroid's disc takes
  * A = p ÷ [L + (1 − L) m(0)]. Its point integrates the same law over the spheroid
  * ({@link spheroidGeometricIntegral}): no closed phase function describes a spheroid lit and seen
- * off its equator, where π a b′ Φ(α) errs by 4% at 90° and 12% at 150° of phase for f = 0.098 seen
+ * off its equator, where π a b′ Φ(α) errs by 4.2% at 90° and 10.9% at 150° of phase for f = 0.098 seen
  * from 45° latitude.
  */
 import { cross, dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";

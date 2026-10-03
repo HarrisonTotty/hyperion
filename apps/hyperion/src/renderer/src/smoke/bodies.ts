@@ -33,8 +33,20 @@ import { METER_CLASS } from "../view/post/meter";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
 import { createSceneTarget } from "../view/photoreal/sceneTarget";
 import { AU_M } from "../view/scenes/kept";
-import { WIREFRAME_MATERIALS } from "../view/wireframe/submit";
-import { type Checks, halfTexels } from "./harness";
+import { WIREFRAME_MATERIALS, WIREFRAME_MESHES } from "../view/wireframe/submit";
+import { BUFFER_USAGE } from "../view/engine/gpuFlags";
+import { PhotorealRenderer } from "../view/photoreal/renderer";
+import { SKY_SPRITE_HDR_MATERIAL } from "../view/sky/spriteHdr";
+import { addCanvas } from "./frames";
+import {
+  type Checks,
+  drawOf,
+  flatSpec,
+  frameOf,
+  fullScreenMesh,
+  halfTexels,
+  NEAR_M,
+} from "./harness";
 
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
 
@@ -322,4 +334,126 @@ async function checkExtents(
     Math.abs(across - width) < 0.5 && Math.abs(down - height) < 0.5 && agreement.worst <= 1,
     `across ${across.toFixed(3)} against ${width.toFixed(3)} px; down ${down.toFixed(3)} against ${height.toFixed(3)} px; the GPU's texels within ${agreement.worst.toFixed(3)} of the tolerance`,
   );
+}
+
+/** The sprite materials whose row's z is the sprite's depth (decision-r07-t8a, item 2). */
+const SPRITE_MATERIALS = [WIREFRAME_MATERIALS.starSprite, SKY_SPRITE_HDR_MATERIAL] as const;
+
+/**
+ * T8.a: a sprite's row carries its depth through both sprite materials: a star (depth 0) behind a
+ * depth-writing plane 1 m ahead is hidden, a body point at 0.5 m in front of it is drawn.
+ */
+export async function checkSpriteDepth(engine: RenderEngine, checks: Checks): Promise<void> {
+  const size = { widthPx: 32, heightPx: 32 };
+  const plane = engine.createMaterial(
+    flatSpec("smoke depth plane", { colourWrites: false, depthWrite: true }),
+  );
+  const planeMesh = fullScreenMesh(engine, "smoke depth plane mesh", -1);
+  const quad = engine.createMesh({ ...WIREFRAME_MESHES.quad, name: "smoke sprite quad" });
+  const sprites = engine.createBuffer({
+    name: "smoke sprite depth",
+    bytes: 64,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  const results: string[] = [];
+  let pass = true;
+  for (const spec of SPRITE_MATERIALS) {
+    const material = engine.createMaterial(spec);
+    for (const [depth, seen] of [
+      [0, false],
+      [NEAR_M / 0.5, true],
+    ] as const) {
+      engine.writeBuffer(sprites, 0, new Float32Array([16.5, 16.5, depth, 0, 1, 1, 1, 0]));
+      const target = createSceneTarget(engine, "smoke sprite depth", size);
+      try {
+        target.render(
+          frameOf(
+            PHOTOREAL_PASS_LABELS.discs,
+            [
+              drawOf(planeMesh, plane, [0, 0, 0, 0]),
+              {
+                mesh: quad,
+                material,
+                offsetFromCameraM: new Float32Array(3),
+                uniforms: {},
+                textures: {},
+                instanceCount: 1,
+                storageBuffers: { sprites },
+              },
+            ],
+            1,
+          ),
+        );
+        // The harness reads its targets back in order: each before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const texels = halfTexels(await engine.readTexture(target.colour));
+        const lit = (texels[(16 * size.widthPx + 16) * 4 + 1] ?? 0) > 0;
+        pass &&= lit === seen;
+        results.push(
+          `${spec.displayName} at depth ${depth.toFixed(2)}: ${lit ? "drawn" : "hidden"}`,
+        );
+      } finally {
+        target.dispose();
+      }
+    }
+  }
+  checks.check(
+    "T8.a a sprite's row carries its depth through both sprite materials",
+    pass,
+    results.join("; "),
+  );
+}
+
+/**
+ * T8.a: a photorealistic frame end to end on a canvas: a planet 20 px across lit at 60° of phase
+ * by a Sun 1 au away, through the scene target, bloom and the tone-mapping pass; its lit side is
+ * bright, the sky black.
+ */
+export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks): Promise<void> {
+  const viewport = { widthPx: 64, heightPx: 36 };
+  const view = engine.createView(addCanvas(), "smoke photoreal");
+  view.resize(viewport);
+  const renderer = new PhotorealRenderer(engine, "smoke photoreal");
+  try {
+    await renderer.prepare(viewport, "high", "eye", CAMERA);
+    const pxPerRad = viewport.widthPx / (2 * Math.tan(CAMERA.fovXRad / 2));
+    const distance = RADIUS_M / Math.sin(10 / pxPerRad);
+    const centreM = vec3(0, 0, -distance);
+    const towards = vec3(Math.sin(60 * RAD_PER_DEG), 0, Math.cos(60 * RAD_PER_DEG));
+    const plan = renderer.render(view, {
+      camera: CAMERA,
+      viewport,
+      role: "eye",
+      setting: "high",
+      exposureScale: 1e-4,
+      sky: [],
+      starSprites: [],
+      hostDraws: new Map(),
+      glareSources: [],
+      lights: [{ disc: sunLikeHostDisc(), centreM: add(centreM, scale(towards, AU_M)) }],
+      bodies: [
+        {
+          id: "0200080020000000.0001",
+          centreM,
+          figure: SPHERE,
+          photometry: PROVISIONAL_PHOTOMETRY,
+        },
+      ],
+      previousRegimes: new Map(),
+      overlay: null,
+    });
+    const bytes = await view.readBack();
+    const at = (x: number, y: number): number => bytes[(y * viewport.widthPx + x) * 4 + 1] ?? 0;
+    const litSide = at(36, 18);
+    const sky = at(2, 2);
+    checks.check(
+      "T8.a a photorealistic frame tones a lit planet onto the canvas over a black sky",
+      plan !== null && litSide > 64 && sky <= 2,
+      `planned ${String(plan !== null)}; lit side ${String(litSide)}, sky ${String(sky)} (green codes)`,
+    );
+  } finally {
+    renderer.dispose();
+    view.dispose();
+  }
 }

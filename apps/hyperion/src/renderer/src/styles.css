@@ -3452,3 +3452,8 @@ body {
   color: var(--text-muted);
   font-size: 0.875rem;
 }
+
+/* A fault of the console's own graphics, while it lasts: caution, never an alert. */
+.view-style__reason--fault {
+  color: var(--status-caution);
+}
