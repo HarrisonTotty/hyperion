@@ -36,7 +36,7 @@ const POINTS: [[f64; 3]; 6] = [
 fn caps_converge_in_rays() {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
         .expect("the Milky Way-like parameters are valid");
-    let tables = LuminosityTables::build(&galaxy, UniverseTime::EPOCH);
+    let tables = LuminosityTables::build(&galaxy);
     let envelope = BrightnessEnvelope::build(&galaxy);
     let cut = Magnitudes::new(7.95);
     let fine = CapResolution::new(3_072, 2 * RADIAL_STEPS_PER_DECADE).expect("non-zero");

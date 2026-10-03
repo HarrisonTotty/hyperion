@@ -31,9 +31,13 @@
 //!   bright phase, a post-AGB crossing or a blue loop, therefore counts for its duration and is
 //!   never missed between two samples. An object below 0.1 M☉ follows plan 06's cooling fits,
 //!   sampled evenly in log age.
-//! - **Time.** The ages are taken at the emitted time: a table holds snapshots at the query's time
-//!   less each of [`EMITTED_AGO_YEARS`], and [`LuminosityFunction`] interpolates linearly in the
-//!   light's age between them.
+//! - **Time.** The ages are taken at the emitted time. One table set serves a galaxy's whole clock
+//!   window: it is built at [`REFERENCE_TIME`], +H, and holds snapshots at that time less each of
+//!   [`EMITTED_AGO_YEARS`], between which [`LuminosityFunction`] interpolates linearly in the
+//!   light's age. A query at time t reads light of age a at the age
+//!   [`LuminosityTables::age_for`] gives, a + (t<sub>ref</sub> − t) (decided 2026-10-03).
+//!   Within ±H a population's light changes by about 10⁻⁵, so one reference time costs nothing in
+//!   accuracy.
 //! - **Darkness.** A protostar and a white dwarf are dark ([`super::photometry`], asks A3 and A4),
 //!   as are neutron stars, black holes and brown dwarfs cooler than plan 06's photometry reaches.
 //!
@@ -61,7 +65,7 @@ use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
 use crate::tables::gauss_legendre::GL16_WEIGHTS;
-use crate::time::{Span, UniverseTime};
+use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
 use crate::units::{HeliumExcess, Magnitudes, SolarLuminositiesV, SolarMasses, Years};
 
@@ -84,10 +88,16 @@ pub const MAGNITUDE_BINS: usize = 640;
 /// The equal parts each living phase of a track is cut into (Design note 7), besides its knots.
 pub const SAMPLES_PER_PHASE: u32 = 32;
 
-/// The light's ages at which a table holds a snapshot, Julian years: 0, 10³, 10⁴, 10⁵ and the
-/// light-crossing bound L = 2¹⁸ (Design note 7). Between them a table is linear in the light's
-/// age; beyond L it holds L's.
-pub const EMITTED_AGO_YEARS: [f64; 5] = [0.0, 1e3, 1e4, 1e5, 262_144.0];
+/// The light's ages at which a table holds a snapshot, Julian years: 0, 10³, 2 × 10³, 10⁴, 10⁵ and
+/// the light-crossing bound L = 2¹⁸ (Design note 7). Between them a table is linear in the light's
+/// age; beyond L it holds L's. The snapshot at 2 × 10³ years is the one [`REFERENCE_TIME`] adds: a
+/// query at −H reads the reference time's tables 2H older.
+pub const EMITTED_AGO_YEARS: [f64; 6] = [0.0, 1e3, 2e3, 1e4, 1e5, 262_144.0];
+
+/// The time every galaxy's tables are built for, +H ([`ClockWindow::END`]): the latest a query
+/// can ask, so that every query in the window reads a light age at or beyond its own
+/// ([`LuminosityTables::age_for`]).
+pub const REFERENCE_TIME: UniverseTime = ClockWindow::END;
 
 /// Three-point Gauss–Legendre's nodes on [0, 1], (1 ∓ √(3/5)) ÷ 2 and ½.
 const GL3_NODES: [f64; 3] = [0.112_701_665_379_258_31, 0.5, 0.887_298_334_620_741_7];
@@ -379,8 +389,8 @@ impl BuildOptions {
     };
 }
 
-/// Every component and layer of a galaxy's luminosity functions at one time (Design note 7):
-/// the server builds them once per galaxy and per time bucket and caches them.
+/// Every component and layer of a galaxy's luminosity functions (Design note 7), built at
+/// [`REFERENCE_TIME`]: the server builds them once per galaxy and caches them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LuminosityTables {
     time: UniverseTime,
@@ -410,15 +420,58 @@ struct ComponentBins {
 const RADIAL_STEP_LY: f64 = 250.0;
 
 impl LuminosityTables {
-    /// The tables of `galaxy` for light received at `time`: each snapshot holds the stars as they
-    /// were at `time` less its light age.
+    /// The tables of `galaxy`, for every query of its clock window: built at [`REFERENCE_TIME`],
+    /// each snapshot holding the stars as they were then less its light age, and read at a query's
+    /// time through [`age_for`](Self::age_for).
     ///
     /// It builds a track for each mass node at each of the galaxy's reference metallicities, some
-    /// thousand tracks: seconds of work, which the server does once per galaxy and time bucket.
+    /// thousand tracks: a minute or more of work on one thread, which the server does once per
+    /// galaxy.
+    ///
+    /// # Examples
+    ///
+    /// The light of layer C's stars fainter than M<sub>V</sub> 0 near the Sun, seen at the epoch
+    /// from 500 ly away (`no_run`: a full build takes a minute or more).
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::sky::luminosity::LuminosityTables;
+    /// use hyperion_sim::time::{Span, UniverseTime};
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?;
+    /// let tables = LuminosityTables::build(&galaxy);
+    /// let ago = tables.age_for(UniverseTime::EPOCH, Span::from_julian_years(500).ok_or("span")?);
+    /// let thin = galaxy.fields().component_ids().next().ok_or("a component")?;
+    /// let light = tables.get(thin, Layer::C).light_fainter_than(Magnitudes::new(0.0), ago);
+    /// assert!(light.value() > 0.0);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     #[must_use]
-    pub fn build(galaxy: &Galaxy, time: UniverseTime) -> Self {
+    pub fn build(galaxy: &Galaxy) -> Self {
         let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
-        Self::build_with(galaxy, time, &all, BuildOptions::STANDARD)
+        Self::build_with(galaxy, REFERENCE_TIME, &all, BuildOptions::STANDARD)
+    }
+
+    /// The light age at which these tables hold light that left its stars `emitted_ago` before
+    /// `t`: `emitted_ago` + (the tables' time − `t`), which every reader of a table passes as its
+    /// `emitted_ago`. Within the clock window `t` is at or before the tables' time; a later `t`
+    /// reads no younger than the tables' own present (the age held at zero).
+    #[must_use]
+    pub fn age_for(&self, t: UniverseTime, emitted_ago: Span) -> Span {
+        match self
+            .time
+            .checked_since(t)
+            .and_then(|lead| emitted_ago.checked_add(lead))
+        {
+            Some(age) if !age.is_negative() => age,
+            Some(_) => Span::ZERO,
+            // Only a span beyond ±2⁶³ s overflows, which no query's time and light age reach.
+            None => emitted_ago,
+        }
     }
 
     /// [`build`](Self::build) for `components` only (the others are left dark), with `options`.
@@ -534,7 +587,7 @@ impl LuminosityTables {
         }
     }
 
-    /// The time the tables were built for.
+    /// The time the tables were built for: [`REFERENCE_TIME`], or a test's own.
     #[must_use]
     pub const fn time(&self) -> UniverseTime {
         self.time
@@ -1359,6 +1412,65 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn tables_at_the_reference_time_read_at_the_epoch_as_a_build_there() {
+        // Every edge's light and count, read at the epoch through `age_for`, within 10⁻³ of the
+        // function's total light and stars of a build at the epoch (decided 2026-10-03).
+        let galaxy = milky_way_galaxy();
+        let id = component_of(galaxy, Population::YoungThinDisc);
+        let reference =
+            LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[id], BuildOptions::STANDARD);
+        let epoch = LuminosityTables::build_with(
+            galaxy,
+            UniverseTime::EPOCH,
+            &[id],
+            BuildOptions::STANDARD,
+        );
+        for years in [0_i64, 1_000, 30_000, 200_000] {
+            let ago = Span::from_julian_years(years).unwrap();
+            let shifted = reference.age_for(UniverseTime::EPOCH, ago);
+            for layer in [Layer::A, Layer::C, Layer::D, Layer::E] {
+                let (a, b) = (reference.get(id, layer), epoch.get(id, layer));
+                let light = b.total_light(ago).value();
+                let stars = b.stars_per_system(ago);
+                for k in 0..=MAGNITUDE_BINS {
+                    #[expect(clippy::cast_precision_loss, reason = "k ≤ 640")]
+                    let m = Magnitudes::new(BRIGHTEST_MAGNITUDE + MAGNITUDE_STEP * k as f64);
+                    let (la, lb) = (
+                        a.light_fainter_than(m, shifted).value(),
+                        b.light_fainter_than(m, ago).value(),
+                    );
+                    assert!(
+                        (la - lb).abs() <= 1e-3 * light,
+                        "{layer:?} edge {k}, {years} yr: {la} against {lb} of {light}"
+                    );
+                    let (ca, cb) = (
+                        a.count_brighter_than(m, shifted),
+                        b.count_brighter_than(m, ago),
+                    );
+                    assert!(
+                        (ca - cb).abs() <= 1e-3 * stars,
+                        "{layer:?} edge {k}, {years} yr: {ca} against {cb} of {stars}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn age_for_adds_the_lead_of_the_reference_time() {
+        let galaxy = milky_way_galaxy();
+        let tables =
+            LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[], BuildOptions::STANDARD);
+        let years = |y: i64| Span::from_julian_years(y).unwrap();
+        let at = |y: i64| UniverseTime::from_julian_years(y).unwrap();
+        assert_eq!(tables.age_for(at(0), years(500)), years(1_500));
+        assert_eq!(tables.age_for(at(-1_000), Span::ZERO), years(2_000));
+        assert_eq!(tables.age_for(REFERENCE_TIME, years(7)), years(7));
+        // Past the reference time the light is read no younger than the tables' present.
+        assert_eq!(tables.age_for(at(1_500), years(100)), Span::ZERO);
     }
 
     /// The stars brighter than V near the Sun from the tables and the density field alone, with no

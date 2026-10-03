@@ -378,7 +378,10 @@ fn count(
     #[expect(clippy::cast_precision_loss, reason = "a few thousand rays")]
     let weight = 4.0 * core::f64::consts::PI / resolution.rays as f64;
     for (i, &r) in radii.iter().enumerate() {
-        let ago = Span::from_seconds_f64(r * SECONDS_PER_JULIAN_YEAR).unwrap_or(Span::ZERO);
+        let ago = tables.age_for(
+            observer.time(),
+            Span::from_seconds_f64(r * SECONDS_PER_JULIAN_YEAR).unwrap_or(Span::ZERO),
+        );
         for (ray, direction) in rays.directions().enumerate() {
             let limit = cut.value() - distance_modulus(r) - rays.along(ray, r);
             let u = direction.components();
@@ -418,8 +421,8 @@ fn count(
 /// Each layer's cap for `observer` at `cut` (apparent V) at the standard resolution: see the
 /// [module](self) documentation.
 ///
-/// `tables` must be built for the observer's time; `cache` is the caller's noise cache for the
-/// rays.
+/// `tables` are the galaxy's, read at the observer's time through
+/// [`LuminosityTables::age_for`]; `cache` is the caller's noise cache for the rays.
 ///
 /// Measured at cut 7.95 (the eye's near the Sun), version 19, against the brainstorm's version-14
 /// estimates (C 3,000, D 4,300 and E 10,000 ly near the Sun; a few hundred to about 1,000 in the
