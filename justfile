@@ -104,7 +104,8 @@ test-render *args: gen-surface
     just _locked bash apps/hyperion/scripts/testRender.sh {{ args }}
 
 # Replay a descent-spike capture natively (R05.T15, Design note 22): `tools/gpu-replay`, outside
-# the workspace, so `ci` never builds wgpu. It validates the capture's WGSL with naga, replays its
+# the workspace, so that the workspace's builds never build wgpu (`ci` checks the tool in a target
+# directory of its own, `gpu-replay-check`). It validates the capture's WGSL with naga, replays its
 # frames offscreen on the default adapter and writes a results file into
 # `docs/measurements/descent-spike/` (`--out` elsewhere). `--present` replays in a window with FIFO
 # presentation instead: a visible window, so by hand only. `--setting high|low` where the capture
@@ -113,6 +114,30 @@ test-render *args: gen-surface
 [positional-arguments]
 replay *args:
     cargo run --release --manifest-path tools/gpu-replay/Cargo.toml -- replay "$@"
+
+# `cargo <args>` on `tools/gpu-replay`, in `target/tools`: its own build directory, so that its
+# builds run beside the workspace's without waiting on their lock, and wgpu never lands in theirs.
+[positional-arguments]
+_gpu-replay-cargo command *args:
+    cargo "$1" --locked --manifest-path "{{ justfile_directory() }}/tools/gpu-replay/Cargo.toml" \
+        --target-dir "{{ justfile_directory() }}/target/tools" "${@:2}"
+
+# Clippy over every target of the tool, then its tests less the one that needs a GPU adapter
+# (`tests/replay.rs`, ignored): the capture reader, naga's validation of the fixture's WGSL and
+# the results' schema, on the CPU in well under a second, so they run outside the heavy-test lock.
+# A cold build costs about a minute for each of Clippy and the tests (measured 2026-10-03 under
+# shared load), a few seconds after an edit. `ci` runs it beside the workspace's builds.
+# Lint and test tools/gpu-replay, less its GPU test.
+gpu-replay-check:
+    just _gpu-replay-cargo clippy --all-targets -- -D warnings
+    just _gpu-replay-cargo test
+
+# The tool's test that replays the fixture on the default GPU adapter, offscreen, with no window,
+# under the heavy-test lock. `ci-slow` runs it; it fails where no adapter is found.
+# Run tools/gpu-replay's GPU test (needs an adapter).
+test-gpu-replay:
+    just _gpu-replay-cargo test --no-run
+    just _locked just _gpu-replay-cargo test --test replay -- --ignored
 
 # Typecheck Rust and TypeScript.
 check: gen-surface
@@ -525,8 +550,8 @@ build: gen-surface
 
 # `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, in
 # three phases. First, beside the builds, the checks that need no cargo build directory of the
-# worktree (formatting, `tsc`, oxlint and the relaxed-SIMD refusal, which has a target directory of
-# its own), their output held until they finish. Second, the cargo steps one after another, since
+# worktree (formatting, `tsc`, oxlint, and the relaxed-SIMD refusal and `gpu-replay-check`, which
+# have target directories of their own), their output held until they finish. Second, the cargo steps one after another, since
 # they share the build directory's lock: Clippy, which compiles every target as `cargo check` would,
 # so `check`'s `cargo check` is not repeated; the bindings' check, before any test can rewrite the
 # bindings it compares; the fitted tables' check; then every test build. Third, one hold of the
@@ -538,7 +563,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     cd "{{ justfile_directory() }}"
     side_log="$(mktemp)"
     trap 'rm -f "$side_log"' EXIT
-    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused >"$side_log" 2>&1 &
+    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check >"$side_log" 2>&1 &
     side=$!
     status=0
     just _clippy _browser-clippy gen-protocol-check fit-check _test-build _wasm-fast-build || status=$?
@@ -546,7 +571,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     wait "$side" || side_status=$?
     cat "$side_log"
     if [[ "$status" -ne 0 || "$side_status" -ne 0 ]]; then
-        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript and the relaxed-SIMD refusal: exit $side_status)" >&2
+        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal and gpu-replay: exit $side_status)" >&2
         exit 1
     fi
     just _locked just _test-run _wasm-fast-run
@@ -556,4 +581,4 @@ _typecheck-ts:
     pnpm typecheck
 
 # `ci` plus the slow statistical tests, natively and on WebAssembly: the full gate.
-ci-slow: ci test-slow test-wasm-slow
+ci-slow: ci test-slow test-wasm-slow test-gpu-replay
