@@ -1089,7 +1089,9 @@ V-weighted sum is E_V; the direction error from neglecting the star-to-body ligh
 #### R07.T4 The BRDF and its phase function
 
 - **R07.T4.a Templates and the law.** `appearance/{law,templates}.ts` (Design note 5):
-  `PHASE_TEMPLATES` from Mallama and Hilton 2018's eqs. 2–17 inside their valid ranges (Mercury's
+  `PHASE_TEMPLATES` from Mallama and Hilton 2018's eqs. 2–17 inside their valid ranges and the
+  Moon's from Krisciunas and Schaefer 1991 eq. 9 (Allen 1973) to 150°, which `airless-ice` and
+  `snowball` borrow at L = 1 (decision-phase-curves, 2026-10-02) (Mercury's
   zeroth-order term −0.613, as that paper corrects the 2017 table), f tabulated at 0.5°, clamped at
   `PHASE_F_CLAMP` and held past each range; `PhotometricLaw` with its per-channel exponents.
   `test/litFixtures.ts` gains `SOLAR_SYSTEM_PHOTOMETRY`: p in B, V and R, B−V and V−R, V(1,0) and
@@ -1487,8 +1489,7 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   on a quiet one before any figure becomes "as built".
 - **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
   Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
-  Venus's curve unlabelled;
-  the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
+  Venus's curve unlabelled; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
   al. 2016 would settle Jupiter); and plan 14's airless-rock Bond albedo and Earth's albedo are
   checks for its owner (T1).
 - **The lens PSF** of camera views rests on recalled veiling-glare figures (low confidence); the
@@ -1500,8 +1501,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   arbitrary number; it would need a guide entry for the owner. Not built.
 - **The law's thresholds** (Design note 5: 100 Pa and 30 kPa, raised from 10 kPa so that the
   simulated Mars, 11 kPa, reaches the Mars template; the cloud term suspended until plan 14's cloud
-  fraction depends on the condensables, the README's open finding) are
-  judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
+  fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
+  draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
   clamp; the smooth blend of Design note 5 replaces the steps if the population shows jumps.
 - **Planetshine's uniform-disc approximation** shifts its terminator on the receiver by the
   neighbour's crescent offset, up to about 4° at Io; stated, not corrected.
@@ -1605,3 +1606,82 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   (smallest choice made, reversible): a `contact` body (apparent position only) is lit from its
   apparent direction without eclipse or planetshine and, with no resolved radius, stays R02's
   mark (T2.a); the lean is to keep it so until a contact carries a radius.
+- **Deviations in T4.a, as built.**
+  - **Files.** `appearance/law.ts` holds `PhaseTemplateId`, `PhotometricLaw`, `PHASE_F_CLAMP` and
+    the table: `phaseFactor(law, α)` (exact f, clamped, held past the range), `phaseFactorTable`
+    (361 texels at `PHASE_TABLE_STEP_RAD` 0.5°, r, g, b interleaved in a `Float32Array`) and
+    `phaseFactorFromTable` (linear, as the shader reads it). `appearance/shapes.ts`, a file the
+    plan does not name, holds the shapes' closed forms (`lambertPhase`, `lommelSeeligerPhase`,
+    `shapePhase`, `shapeGeometricAlbedo`) and `phaseIntegral` (Simpson, 7,200 intervals), since
+    the f table needs Φ_shape and `phase.ts` (T4.b) imports the table; T4.b's `phase.ts` keeps
+    `discIntegratedPhase` and `lawFor`. `Rgb` is in display order (r, g, b): index 0 is R, 2 is B.
+  - **`PhaseTemplate` gains two fields:** `provisional: boolean`, for T5 and T16's labels, and
+    `lommelSeeligerShare`, the L that goes with the curve by Design note 5 (1 for the Moon,
+    Mercury, airless ice, the snowball and magma, 0.5 for Mars, 0 otherwise), so that the
+    templates' keys and laws live in one place (`templates.ts`) and change cheaply (the
+    coordinator's request 2026-10-02).
+  - **Moon:** Mallama and Hilton 2018 has no Moon; `moon` is Krisciunas and Schaefer 1991's eq. 9,
+    Δm = 0.026 α + 4 × 10⁻⁹ α⁴, a fit to Allen 1973's table (p. 143, to 160°), held past 150°,
+    now in Design note 5's sources. q = 0.626 at L = 1.
+  - **Ranges and branches.** Mercury's eq. 2 is used below its observed 2.1°; Uranus's eq. 15 and
+    Neptune's eq. 17 from opposition, in place of the flat eqs. 14 and 16 (which drops the
+    paper's 0.021 and 0.015 mag steps at 3.1° and 1.9°); Mars is eq. 6 without L(λe) and L(Ls),
+    held past 50° (eq. 7 unused, the coordinator's approval 2026-10-02); Saturn is its globe
+    (eqs. 11–12, joined at 6°), the rings being R11's; Earth runs to 180° (MH2018 §4.3: Tinetti's
+    curve approaches zero there), and Mallama et al. 2017's Table A-3.1 tabulates a steeper fit of
+    the same curve (2.07 mag at 90° against eq. 5's 1.57); eq. 5, the almanac's, is taken.
+  - **Borrowed shapes (decision-phase-curves, 2026-10-02, after the phase-curve check's four
+    mismatches with galaxy's classes):** airless ice and the snowball take the Moon's curve at L = 1,
+    their q reached through s (Ganymede's 0.80 at s ≈ 0.82, ratio 0.98; Europa's 1.01 at s ≈ 0.67,
+    ratio 0.99, both inside T2.b's 5%); magma takes Mercury's, for the thin branch below 30 kPa
+    only. All three are `provisional` and labelled. The Moon's constant is `MOON_KS91`. q does not
+    depend on L inside a template's range; past it, where f is held while the shape varies with L,
+    it does (see T4.b).
+    The selection rule (30 kPa, the cloud term suspended) is T5's and T1's draft's, and no template
+    is wired to a body class yet. A sourced icy curve exists only as Hapke fits (Domingue and
+    Verbiscer 1997, Icarus 128, 49).
+  - **Fixture.** `SOLAR_SYSTEM_PHOTOMETRY` adds `templateV10Mag` (MH2018's zeroth-order terms, e.g.
+    Mercury's −0.613 beside Table 3's −0.69), `radiusKm` (the disc-equivalent √(a c) each Table 7
+    p_V implies: Jupiter 69,134 km, Uranus 25,264, Neptune 24,552, Mars 3,386, Saturn the paper's
+    57,240) and `template`; magnitude fields end in `Mag`; `SUN_JOHNSON_MAG` (Table 6) and
+    `JohnsonBvr` are exported beside it. q_V is computed at s = 1 with the clamp and hold: Mercury
+    0.480, Venus 1.344, Earth 1.311, Mars 1.085, Jupiter 1.312, Saturn 1.357, Uranus 1.302,
+    Neptune 1.242 (reproduced independently by the science check). The table's tests live in
+    `appearance/solarSystemPhotometry.test.ts`, inside the acceptance filter.
+  - **For T4.c.** WebGPU has no three-channel float format and `rgba32float` filters only with
+    `float32-filterable`, so the shader reads the table as RGBA texels by two `textureLoad`s and
+    interpolates itself; the table's 0.5° interpolation errs by up to 4 × 10⁻⁴ of a steep
+    crescent's f and 2 × 10⁻³ where Venus's f meets the clamp (the phase integral by 10⁻⁴), an
+    error the reference and the shader share.
+- **Deviations in T4.b, as built.**
+  - **f from the table.** `brdf` and `discIntegratedPhase` read f from the law's 0.5° table by
+    linear interpolation, as the shader will, so that the disc and the point integrate one f
+    (T4.c's 10⁻⁵ agreement needs it). They read it through `phaseFactorTableOf` (`law.ts`), which
+    tabulates each law once and caches it in a `WeakMap` keyed by the law object.
+  - **`lawFor(p, q, template)` takes L from the template**
+    (`PHASE_TEMPLATES[id].lommelSeeligerShare`), A = p ÷ [L + ⅔(1 − L)], and solves each
+    channel's s by 60 bisection steps (geometric midpoints) over s ∈ [1/16, 16], on the exact,
+    clamped and held f over a 0.1° Simpson grid sampled once per call. A q no exponent reaches takes the bracket's nearer end, the
+    closest law the template allows.
+  - **Extra exports.** `geometricAlbedo(law)` (`phase.ts`); `lighting/oracle.ts` is created here,
+    ahead of T6.a, with `discIntegral(reflectance, α, nodes = 200)` (Gauss–Legendre over
+    photometric longitude and latitude, on any `Reflectance`), `Reflectance`, `gaussLegendre` and
+    `GaussLegendreRule`.
+  - **The clamp's departure in q at s = 1**, exact f on both sides: Venus −0.317%, Earth −0.011%,
+    Uranus −0.008%, every other template 0.
+  - **q against L (the coordinator's correction of the ruling, 2026-10-02, from the Phase J lane;
+    plan 14's T47 makes the same change).** q is independent of L only inside a template's range,
+    where the clamp does not act; past it the law holds f while the shape still varies with L (the
+    spread of q over L = 0, 0.5 and 1 at s = 1: Mars 0.10, Jupiter 6.7 × 10⁻³, Neptune
+    4.8 × 10⁻³, Venus 3.6 × 10⁻³, the Moon 1.1 × 10⁻⁴; airless ice at s = 0.82, 3 × 10⁻⁴). The
+    ruling's "q equal at L = 0 and 1 to 10⁻⁴" is replaced by two tests: inside each range,
+    unclamped, the disc-integrated phase equals Φ_t^s for any L to 10⁻¹²; and each template's q is
+    solved at its own L.
+  - **The planets' V** is checked as MH2018's zeroth-order term plus the law's dimming against the
+    paper's equations written out in the test, for all eight planets, at 0.01 mag (tighter than
+    the plan's 0.01–0.03 and 0.035, since the law reproduces its template up to the table, s and
+    the clamp); Earth also in flux within 30% at 10–150°. p is checked by T4.a against V(1, 0) and
+    the radius, not here.
+  - **The crescent.** The fixture gives q in V only, so Mercury's test splits q by ±5% (q_R 1.05
+    q_V, q_B 0.95 q_V) on the fixture's p; B − V then grows by about 0.11 mag from opposition to
+    100°, inside Design note 5's 0.1–0.2.
