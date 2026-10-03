@@ -655,6 +655,11 @@ def show_acceptance(root: Path, task_id: str, feature: str | None) -> None:
             print(f"- {note}")
 
 
+# A subject names a task when it starts with the ID, optionally after a Conventional Commits
+# prefix such as `feat(sky): ` or `fix!: `.
+CONVENTIONAL_PREFIX = r"^(?:[a-z]+(?:\([^)]*\))?!?: )?"
+
+
 def commit_subjects(root: Path) -> str:
     try:
         out = subprocess.run(
@@ -683,7 +688,7 @@ def show_list(root: Path, plan_filter: str | None, feature: str | None) -> None:
             lines = plan.read_text(encoding="utf-8").splitlines()
             print(f"## {plan.relative_to(root)}")
             for mk in markers(lines):
-                named = re.search(r"^" + re.escape(mk.task_id) + r"(?![\w.])", log, re.M) is not None
+                named = re.search(CONVENTIONAL_PREFIX + re.escape(mk.task_id) + r"(?![\w.])", log, re.M) is not None
                 indent = "  " if mk.task_id.count(".") == 2 else ""
                 flag = "  [commit]" if named else ""
                 print(f"{indent}{mk.task_id}  {mk.title}{flag}")
