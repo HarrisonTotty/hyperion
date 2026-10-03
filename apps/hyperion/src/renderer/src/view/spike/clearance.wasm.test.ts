@@ -37,12 +37,19 @@ beforeAll(() => {
 /**
  * The runs the ruling checks (decision-r05-descent-clearance.md, lane C's tests): seeds 0 and 1
  * and seed 7, the rough site 1.85 km below the datum, each with ridges off and on. Each run bakes
- * some 600 patches, about 30 s on a loaded machine, so the suite runs the roughest one; the others
- * were run by hand (R05's Risks, "the clearance follow-up").
+ * some 600 patches, about 20 s on a loaded machine, so `just ci` runs the roughest alone and
+ * `just test-slow-client` (in `just ci-slow`) all six, under `HYPERION_SLOW_TESTS=1`.
  */
-const RUNS: ReadonlyArray<{ readonly seed: bigint; readonly ridges: TestPlanetRidges }> = [
+const ALL_RUNS: ReadonlyArray<{ readonly seed: bigint; readonly ridges: TestPlanetRidges }> = [
   { seed: 7n, ridges: "on" },
+  { seed: 0n, ridges: "off" },
+  { seed: 0n, ridges: "on" },
+  { seed: 1n, ridges: "off" },
+  { seed: 1n, ridges: "on" },
+  { seed: 7n, ridges: "off" },
 ];
+
+const RUNS = import.meta.env["HYPERION_SLOW_TESTS"] === "1" ? ALL_RUNS : ALL_RUNS.slice(0, 1);
 
 /** The profile `prepareDescent` flies, measured as it measures it, without the worker. */
 function measured(

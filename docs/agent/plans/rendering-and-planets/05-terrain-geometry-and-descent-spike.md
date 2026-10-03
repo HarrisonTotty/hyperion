@@ -3709,8 +3709,10 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     `TERRAIN NOT MEASURED`. The message prefix is the test (`isUnclearable`); a distinct error
     class from T13.a would be sturdier. No finite floor found by probing exhausts T13.a's four
     lifts, so the refused status is tested through `DescentSpike`'s `prepare` prop.
-  - The suite runs one of the ruling's six wasm runs, the roughest, for its cost. The other five
-    are by hand, pending the orchestrator's amendment.
+  - Scope (the orchestrator, 2026-10-03): `just ci` runs the roughest of the ruling's six wasm runs,
+    seed 7 with ridges on. `just test-slow-client`, added to `just ci-slow`, runs all six under
+    `HYPERION_SLOW_TESTS=1`. `isUnclearable` becomes an `instanceof` check once T13.a exports
+    `DescentUnclearable`.
   - Seams for T13.c (the orchestrator, 2026-10-03):
     - `PreparedDescent.omittedSigmaM`;
     - `SpikeListeners.onPrepared(prepared)`, called once the measurement is ready;
