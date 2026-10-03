@@ -2848,3 +2848,44 @@ medium, sizes, figure)`.
   spacings, all bit for bit (19 tests, first run green). The digest needs the testkit's
   `f64_digest`, so `workers/f32Digest.ts` (T10.b's file) landed here with `fnv1a64`, `f64Digest`
   and `f32Digest`, checked against FNV's published vectors and the testkit's hand-computed value.
+- **Deviations in T7.a, as built (bounds and culling, 2026-10-03).** `PatchBounds` gains
+  `box: OrientedBox` (the centre's spheroid normal and two tangents, with half-extents) beside its
+  sphere, whose centre is the box's; the bounds sample the patch's boundary at every fourth vertex
+  and the centre vertex at both ends of the level's height range and pad by the largest chord
+  between neighbouring samples (about a sixteenth of the patch). Added beside the Provides names:
+  in `planet.ts` `LEVEL_TABLE_STRIDE`, `levelBoundM`, `levelHeightRangeM`, `lowestHeightM`,
+  `spheroidPoint`, `spheroidNormal` and `surfacePoint`; in `bounds.ts` `OrientedBox`,
+  `boxCorners`, `relativeBounds`, `distanceToBoxM` (selection's distance to the nearest point)
+  and `CameraRelativeBounds` (there, not in `cull.ts`); in `cull.ts` `Plane`, `FrustumCamera`,
+  `frustumOf` and `horizonCone`. `HorizonCone` holds the camera's position and R_occ = c + the
+  lowest height of any level (0 with no table); the test is off at or below R_occ. The frustum's
+  sphere stage is its own, not `sphereInFrustum`, which takes R02's `ProjectionCamera`.
+  `bandLimitM()` returns the mirrored `BAND_LIMIT_M`, since the render thread loads no
+  WebAssembly; `planet.wasm.test.ts` checks it, `FINEST_SPACING_M` and both level tables against
+  the module itself. `planetGeometry` refuses a figure not 0 < c ≤ a and a table not 100 finite
+  entries. Shared test fixtures: `src/test/terrainFixtures.ts` (`UNIT_BOUNDS`, `WGS84_FIGURE`,
+  `goldenLevelTable`, `selectionOf`).
+- **Deviations in T7.b's selection, as built (2026-10-03).** `selectPatches` charges a level
+  `selectionErrorM` = ε_n + `chordSagittaM`, the flat triangles' sag below the datum, which ε_n, a
+  bound on heights, leaves out; without it a zero-height spheroid (R07's `mesh` regime) never
+  refines past the roots. Ruled by the science-checker (2026-10-03, relayed by the orchestrator):
+  sag_n = K h_n² ÷ (4 c² ÷ a), K = `SAGITTA_FACTOR` = 1.03. Linear interpolation's error is at most
+  r² ÷ (2 ρ_min) for r the smallest enclosing disc's radius (Waldron 1998, SIAM J. Numer. Anal.
+  35(3) 1191–1200, Thm 4.1 eq. (4.5)), ρ_min = c² ÷ a the spheroid's smallest radius of curvature,
+  and on the quadratic-warp cube sphere split on (0, 0)–(1, 1) r_n² ≤ 1.023 h_n² ÷ 2 (worst at
+  (s, t) ≈ (0.234, 0.766); `select.test.ts` measures 1.020–1.025 over a face's 64² cells), K
+  rounding that up to cover the height's stretch 1 + H ÷ ρ for |H| up to about 30 km; level 0
+  sags about 1.17 km on WGS 84, under a sixth of ε_0, and under a tenth of ε_n from level 1.
+  The distance is to the nearest point of the patch's oriented box. A patch is refined where any
+  view that sees it finds ρ > τ; one no view sees is not selected. The restricted quadtree is
+  enforced after the traversal by `restrictQuadtree` (exported, and tested on hand-built leaf
+  sets across a face edge and at a cube corner): a leaf two or more levels coarser than an edge or
+  corner neighbour is split, each child expanded as the traversal would. Bounds are memoised per
+  `PlanetGeometry` (a `WeakMap`, at most 131,072 a planet, the older half dropped past it), a pure
+  cache that changes no result. `GroundContact` sits in `select.ts` until T7.c moves it to
+  `grounded.ts`; `demand` is filled by T7.d. Finding: on the test planet's hard bound
+  (decisions-r05 item 6), a 1080p view at τ = 1 px from 1.5 km, tilted 69° from the nadir,
+  selects about 12,700 patches; with the per-level error and the horizon's corners computed
+  without allocation and the leaf walk stopped at the first interior node, a warm call takes
+  about 80 ms on the loaded development machine (360 ms before): still more than a frame, so the
+  per-frame cost is revisited when T11.c drives selection each frame.

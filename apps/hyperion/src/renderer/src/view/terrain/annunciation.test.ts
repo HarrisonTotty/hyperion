@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { selectionOf } from "../../test/terrainFixtures";
 import {
   ANNUNCIATION_CLEAR_MS,
   ANNUNCIATION_ONSET_MS,
@@ -9,21 +10,9 @@ import {
   terrainAnnunciation,
 } from "./annunciation";
 import { PatchCache, type DrawSet, resolveDrawSet } from "./cache";
-import { childKeys, type PatchKey, patchKeyString, rootKey } from "./patchKey";
-import type { SelectedPatch, Selection } from "./select";
+import { childKeys, type PatchKey, rootKey } from "./patchKey";
+import type { Selection } from "./select";
 import { slotLayout } from "./slotLayout";
-
-function selectionOf(keys: readonly PatchKey[]): Selection {
-  const patches = new Map<string, SelectedPatch>();
-  for (const key of keys) {
-    patches.set(patchKeyString(key), {
-      key,
-      bounds: { centre: vec3(0, 0, 0), radiusM: 1, minHeightM: 0, maxHeightM: 0 },
-      forced: false,
-    });
-  }
-  return { patches, demand: [] };
-}
 
 /** The draw set of `selection` with `resident` in a cache. */
 function drawOf(selection: Selection, resident: readonly PatchKey[]): DrawSet {
