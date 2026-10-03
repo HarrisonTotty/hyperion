@@ -10,6 +10,51 @@ _default:
 install:
     pnpm install
 
+# A new worktree starts with no `target/`, and its first `just ci` builds every dependency for
+# every profile and target. This gives it another worktree's build directory as a copy-on-write
+# clone (`cp --reflink=always`, which btrfs and XFS support): instant, and taking no space until
+# either copy changes. Dependencies from the registry are then fresh; the workspace's own crates
+# are rebuilt, since their paths differ. It refuses when `target/` exists, and when the filesystem
+# cannot clone it says so and copies nothing, since a plain copy would be tens of gigabytes. It
+# holds each of the source's cargo build-directory locks while copying, so that no build of the
+# source is caught half-written; a build there waits for the copy, and the copy for a build.
+# Seed this worktree's `target/` from another worktree's, e.g. `just seed-target ../agent-x`.
+seed-target source:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    here="{{ justfile_directory() }}"
+    src="$(realpath -e "{{ source }}")/target"
+    if [[ -e "$here/target" ]]; then
+        echo "error: $here/target exists; seed-target only seeds a worktree that has none" >&2
+        exit 1
+    fi
+    if [[ ! -d "$src" ]]; then
+        echo "error: $src is not a directory: name a worktree that has built" >&2
+        exit 1
+    fi
+    if [[ "$src" -ef "$here/target" ]]; then
+        echo "error: the source is this worktree" >&2
+        exit 1
+    fi
+    probe="$here/.seed-target-probe"
+    trap 'rm -rf "$probe" "$here/target.seeding"' EXIT
+    if ! cp --reflink=always "$(realpath -e "$here/justfile")" "$probe" 2>/dev/null; then
+        echo "error: this filesystem cannot clone files (cp --reflink=always failed), so nothing was copied;" >&2
+        echo "a plain copy would take as much space again: build from scratch with \`just ci\` instead" >&2
+        exit 1
+    fi
+    while IFS= read -r -d '' lock; do
+        exec {fd}<"$lock"
+        if ! flock -n "$fd"; then
+            echo "waiting for a build in the source to finish ($lock)..." >&2
+            flock "$fd"
+        fi
+    done < <(find "$src" -maxdepth 3 -name .cargo-lock -print0)
+    start=$SECONDS
+    cp -r --reflink=always --preserve=timestamps "$src" "$here/target.seeding"
+    mv "$here/target.seeding" "$here/target"
+    echo "seeded $here/target from $src in $((SECONDS - start)) s" >&2
+
 # Install the git pre-commit and pre-push hooks into this clone.
 hooks:
     uvx pre-commit install --install-hooks
