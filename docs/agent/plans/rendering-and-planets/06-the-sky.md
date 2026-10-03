@@ -1433,8 +1433,8 @@ plan reserves no tag, prefix or stream.
   `smoke/blending.ts`, until T13.g registers the sky's bake splat.
 - **Deviations in T13.a, as built (2026-10-02).** `cameraLimit.ts` exports `cameraLimitV`,
   `cameraLimitParts` (the limit with its sky electrons, read noise and V = 0 peak electrons),
-  `DEFAULT_VIEW_CAMERA` (a `ViewCameraSensor` with `etaSun` 3.02 under decision-camera-eta.md; the
-  fixture tying it to `CAMERA_ETA_SUN` waits on T3.c, which the tables lane builds), `surfaceBrightnessV`
+  `DEFAULT_VIEW_CAMERA` (a `ViewCameraSensor` with `etaSun` = `CAMERA_ETA_SUN`, 2.9557 from
+  T3.c's fit, pinned by `packages/protocol/fixtures/camera_eta_sun.json`), `surfaceBrightnessV`
   and `V0_PHOTON_FLUX_PER_S_M2`. Design note 18 names no dark current, and it is 0 (0.1 e⁻ s⁻¹
   would add 0.003 e⁻ at 1/30 s). High gain in the tests is ISO 409,600, where the read noise is
   σ_pre's alone; base is ISO 100. `cull.ts` exports `cullSky(stars, limit, bandFaceTexels)` with

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ExposureTriple } from "../photometry/exposure";
+import fixture from "../../../../../../../packages/protocol/fixtures/camera_eta_sun.json" with { type: "json" };
 import { cameraLimitParts, cameraLimitV, DEFAULT_VIEW_CAMERA } from "./cameraLimit";
 
 /** A sky of surface brightness μ, mag arcsec⁻², as a luminance: B = 10^((12.58 − μ) ÷ 2.5). */
@@ -10,6 +11,12 @@ function skyOf(mu: number): number {
 
 /** Design note 18's f/1.4 and 1/30 s at high gain, ISO 409,600, where read noise is σ_pre's alone. */
 const HIGH_GAIN: ExposureTriple = { aperture: 1.4, shutterS: 1 / 30, iso: 409_600 };
+
+describe("the default view camera", () => {
+  it("takes the colour table's CAMERA_ETA_SUN, the fixture the sim's test also reads", () => {
+    expect(DEFAULT_VIEW_CAMERA.etaSun).toBe(fixture.camera_eta_sun);
+  });
+});
 
 describe("cameraLimitV", () => {
   it("reaches V 9.95, 11.65 and 13.5 at 60°, 30° and 13° in a dark sky at high gain", () => {
