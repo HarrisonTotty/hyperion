@@ -1,0 +1,1 @@
+table9.dat https://cdsarc.cds.unistra.fr/ftp/J/A+A/674/A63/table9.dat

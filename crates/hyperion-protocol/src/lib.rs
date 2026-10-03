@@ -42,6 +42,7 @@ mod orbit;
 mod planetary;
 mod primitives;
 mod scene;
+mod sky;
 mod stellar;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -78,6 +79,11 @@ pub use scene::{
     SceneCamerasRequest, SceneClockDto, SceneClockStateDto, SceneCraftDto, SceneNotificationDto,
     SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SceneSystemDto,
     SeenPositionDto, SystemPlaceDto,
+};
+pub use sky::{
+    BandSpecDto, ConeDto, EyeDto, HostDiscDto, MAX_CUT_V, MAX_SKY_STARS, PowerTwoDto,
+    SKY_BAKE_BINS, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SkyGapDto, SkyLayerCensusDto, SkyRequest,
+    SkyResponse,
 };
 pub use stellar::{
     BinaryClassDto, CataclysmicKindDto, HighMassXrayBinaryKindDto, KickModeDto, NatalKickDto,

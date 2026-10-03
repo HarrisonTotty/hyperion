@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FakeTexture } from "../../../test/fakeGpu";
 import type { TextureSpec } from "../memory";
 import type { TextureHandle } from "../types";
-import { chainSteps, pipelineKey } from "./drawing";
+import { chainSteps, pipelineKey, viewDimensionBinds } from "./drawing";
 import { Intermediates } from "./intermediates";
 
 describe("a post-process chain", () => {
@@ -73,5 +73,16 @@ describe("a chain's intermediates", () => {
     expect(made).toHaveLength(4);
     intermediates.release();
     expect(destroyed).toHaveLength(4);
+  });
+});
+
+describe("a texture binding's view dimension", () => {
+  it("binds a single-layer 2D texture where an array is declared, and nothing else across kinds", () => {
+    expect(viewDimensionBinds("2d", "2d")).toBe(true);
+    expect(viewDimensionBinds("2d-array", "2d-array")).toBe(true);
+    expect(viewDimensionBinds("2d-array", "2d")).toBe(true);
+    expect(viewDimensionBinds("2d", "2d-array")).toBe(false);
+    expect(viewDimensionBinds("cube", "2d")).toBe(false);
+    expect(viewDimensionBinds("3d", "2d-array")).toBe(false);
   });
 });

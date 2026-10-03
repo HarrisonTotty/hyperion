@@ -23,6 +23,7 @@ use crate::scene::{
     SceneCamerasRequest, SceneNotificationDto, SceneShipRequest, SceneShipSet, SceneStateDto,
     SceneSubscribeRequest,
 };
+use crate::sky::{SkyRequest, SkyResponse};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
 
@@ -271,6 +272,8 @@ pub enum RequestBody {
     SceneShip(SceneShipRequest),
     /// Replace a scene subscription's cameras (rendering plan R03).
     SceneCameras(SceneCamerasRequest),
+    /// The stars and the band seen from a point at a time, answered in bulk (rendering plan R06).
+    Sky(SkyRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -309,6 +312,9 @@ pub enum ResponseBody {
     SceneShip(SceneShipSet),
     /// The cameras replaced.
     SceneCameras,
+    // Boxed: the hosts' discs make it the largest answer but one.
+    /// The sky computed, its stars and band in the binary frames before it.
+    Sky(Box<SkyResponse>),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -331,6 +337,7 @@ pub const REQUEST_KINDS: &[&str] = &[
     "unsubscribe",
     "scene_ship",
     "scene_cameras",
+    "sky",
 ];
 
 #[cfg(test)]
@@ -340,6 +347,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::bulk::BulkManifestDto;
     use crate::galaxy::{
         Census, MapPopulation, MapView, MassLayer, ParameterGroup, SystemsInRange,
     };
@@ -353,6 +361,7 @@ mod tests {
     use crate::scene::{
         CameraReportDto, FramePositionDto, KinematicsDto, SceneClockDto, SceneClockStateDto,
     };
+    use crate::sky::BandSpecDto;
     use crate::stellar::SystemExistenceDto;
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
@@ -386,6 +395,43 @@ mod tests {
             seed: SeedHex::from_u64(1234),
             generator_version: 2,
             status: UniverseStatus::Compatible,
+        }
+    }
+
+    /// A small sky request, for the walk.
+    fn sky_request() -> SkyRequest {
+        SkyRequest {
+            universe: universe(),
+            observer: GalacticPosition::default(),
+            time: UniverseTime::default(),
+            eye: None,
+            camera_limit_v: Some(9.5),
+            n_max: Some(1_000),
+            cone: None,
+            exclude_system: None,
+        }
+    }
+
+    /// An empty sky, for the walk.
+    fn sky_response() -> SkyResponse {
+        SkyResponse {
+            universe: universe(),
+            time: UniverseTime::default(),
+            observer: GalacticPosition::default(),
+            valid_until: UniverseTime::default(),
+            cut_v: 9.5,
+            census: Vec::new(),
+            listed: 0,
+            overflow: 0,
+            band: BandSpecDto { face_texels: 64 },
+            hosts: Vec::new(),
+            not_modelled: Vec::new(),
+            bulk: BulkManifestDto {
+                chunks: 0,
+                bytes: 0,
+            },
+            stars_bytes: 0,
+            band_bytes: 0,
         }
     }
 
@@ -484,7 +530,8 @@ mod tests {
                     }],
                 }))
             }
-            Some(RequestBody::SceneCameras(_)) => None,
+            Some(RequestBody::SceneCameras(_)) => Some(RequestBody::Sky(sky_request())),
+            Some(RequestBody::Sky(_)) => None,
         }
     }
 
@@ -598,7 +645,8 @@ mod tests {
                 clock: scene_clock(),
             })),
             Some(ResponseBody::SceneShip(_)) => Some(ResponseBody::SceneCameras),
-            Some(ResponseBody::SceneCameras) => None,
+            Some(ResponseBody::SceneCameras) => Some(ResponseBody::Sky(Box::new(sky_response()))),
+            Some(ResponseBody::Sky(_)) => None,
         }
     }
 
@@ -868,6 +916,7 @@ mod tests {
                 "unsubscribe",
                 "scene_ship",
                 "scene_cameras",
+                "sky",
             ]
         );
     }

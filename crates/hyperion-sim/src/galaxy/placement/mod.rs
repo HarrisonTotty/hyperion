@@ -36,7 +36,7 @@ use std::fmt;
 pub use cache::{CellCache, NoCache};
 pub use candidate::{CandidateOutcome, evaluate_candidate};
 pub use cell::{CellKey, candidate_count};
-pub use generate::{cell_heap_bytes, generate_cell};
+pub use generate::{cell_heap_bytes, generate_cell, generate_cell_where};
 #[cfg(test)]
 pub(crate) use headroom::largest_headroom_mean;
 pub use headroom::{check_index_headroom, rogue_planet_saturation_density};

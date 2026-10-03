@@ -1,0 +1,32 @@
+# The descent spike's native replayer (plan R05, T15.b and T15.c, Design note 22): it reads a
+# capture the client's capture shim wrote, validates every WGSL module with naga, and replays the
+# captured frames in wgpu. It is outside the HYPERION workspace (its own `[workspace]` table, and
+# the root manifest's `exclude = ["tools/*"]`), so `just ci` never builds wgpu; `just replay` runs
+# it. Versions follow the root workspace's where it has the crate.
+[package]
+name = "gpu-replay"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+naga = { version = "=30.0.1", features = ["wgsl-in"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+wgpu = { version = "=30.0.1", features = ["serde"] }
+winit = "0.30"
+pollster = "0.4"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

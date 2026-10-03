@@ -18,11 +18,22 @@ import {
   styleAvailability,
 } from "../view/engine/platform";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/status";
+import {
+  captureAtmosphere,
+  type CapturedImage,
+  checkAtmosphereFrames,
+  checkAtmosphereTables,
+} from "./atmosphere";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
+import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
+import { checkHeightWorker } from "./heightWorker";
+import { checkHistogram } from "./histogram";
 import { runSoak } from "./soak";
+import { checkTerrainFrames, checkTerrainResources } from "./terrain";
+import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
 import { checkWireframe } from "./wireframe";
 import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
@@ -34,6 +45,8 @@ interface Report {
   readonly capabilities: string | null;
   readonly checks: Checks["list"];
   readonly setupError: string | null;
+  /** R05.T12.c's comparison frames, when the run was asked for them. */
+  readonly images?: ReadonlyArray<CapturedImage>;
 }
 
 /** The page's variants and the capabilities each withholds. */
@@ -153,6 +166,35 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
 
   await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
 
+  await checks.group("R05.T10.b the height worker", () => checkHeightWorker(checks));
+
+  await checks.group("R05.T12.b the atmosphere's tables", () =>
+    checkAtmosphereTables(engine, checks),
+  );
+  await checks.group("R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
+  await checks.group("R07.T14.b bloom and glare", () =>
+    checkBloom(engine, status.getSnapshot().targetRounding.rgba16float, checks),
+  );
+  await checks.group("R07.T15 tone mapping and output", () => checkTonemap(engine, checks));
+  await checks.group("R05.T12.c the atmosphere's frames", () =>
+    checkAtmosphereFrames(engine, checks),
+  );
+  await checks.group("R05.T11.a the terrain's resources", () =>
+    checkTerrainResources(engine, checks),
+  );
+  await checks.group("R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
+  let images: CapturedImage[] = [];
+  if (captures) {
+    await checks.group("R05.T12.c the comparison captures", async () => {
+      images = await captureAtmosphere(engine);
+      checks.check(
+        "R05.T12.c the comparison captures",
+        images.length > 0,
+        `${images.length} frames`,
+      );
+    });
+  }
+
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await checks.group("T9.i splat refused", async () => {
     const second = await requestAdapterOutcome(navigator.gpu);
@@ -188,6 +230,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     capabilities,
     checks: checks.list,
     setupError: null,
+    images,
   };
 }
 
@@ -208,6 +251,8 @@ const variant = parameters.get("variant") ?? "default";
 const fixtureName = parameters.get("fixture") ?? "none";
 /** Whether the run lifted timestamp quantization, so that pass times read `full`. */
 const gpuTiming = parameters.get("gpuTiming") === "1";
+/** Whether the run renders R05.T12.c's comparison frames for the main process to save. */
+const captures = parameters.get("captures") === "1";
 const report = smokeReport();
 const fixture: SmokeFixture = isFixture(fixtureName) ? fixtureName : "none";
 /** The by-hand soak of T11 and T12 instead of the checks, for `seconds`. */

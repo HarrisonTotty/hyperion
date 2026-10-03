@@ -50,6 +50,17 @@ export function srgbViewFormat(format: GPUTextureFormat): GPUTextureFormat {
   throw new Error(`a canvas of format ${format} has no sRGB view`);
 }
 
+/**
+ * The format a view's pass writes its canvas through: the sRGB twin by default, so that the store
+ * encodes, or the canvas's own format under `encoding` `"in-pass"` (R07.T15).
+ */
+export function canvasPassFormat(
+  format: GPUTextureFormat,
+  encoding: FrameSubmission["encoding"],
+): GPUTextureFormat {
+  return encoding === "in-pass" ? format : srgbViewFormat(format);
+}
+
 /** A view's depth at a size: `depth32float`, attached only. */
 export function viewDepthSpec(name: string, size: ViewSize): TextureSpec {
   return {
@@ -117,7 +128,7 @@ export class WebGpuView implements RenderView {
     }
     const texture = this.#context.getCurrentTexture();
     const size = { widthPx: texture.width, heightPx: texture.height };
-    const colourFormat = srgbViewFormat(this.#format);
+    const colourFormat = canvasPassFormat(this.#format, frame.encoding);
     this.#host.renderFrame(frame, {
       size,
       colour: texture.createView({ format: colourFormat }),

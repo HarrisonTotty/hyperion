@@ -86,6 +86,17 @@ provisional = true
 acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.6000 and standard deviation 0.6774, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.06227"
 
 [[table]]
+name = "limb_darkening"
+path = "limb_darkening.rs"
+task = "limb_darkening"
+revision = 0
+inputs_sha256 = "ae773e492b32179a05225122a198410ae3d3ec162a02e87ed81c89720fe020aa"
+body_sha256 = "18c94690bbce5e8e6fc661f6e04d8f992505c0da4285d5f13682cf39390e0ce5"
+since_generator_version = 19
+provisional = false
+acceptance = "the Sun (5,772 K, log g 4.438) in V: c 0.7837, α 0.6884, disc average 0.7993 (Design note 16: 0.7837, 0.6893, 0.799)"
+
+[[table]]
 name = "mge"
 path = "mge.rs"
 task = "mge"
@@ -119,6 +130,18 @@ body_sha256 = "f24767a95fc390d8f535c334f5ff904f5c2198140ed8d6a49f7dd9af71c40bfd"
 since_generator_version = 15
 provisional = true
 acceptance = "fitted over 126 clusters (17 left out for want of a distance; 363 known pulsars): γ = 0.632 (0.5–0.9; passes), A = 38.0 at 47 Tucanae's Γ (30–50; passes), completeness distance 4.8 kpc; the implied total over the catalogue 1539 (2,000–8,000; FAILS); the table keeps plan 09's scratch A 40, γ 0.7 and cap 40 until a ruling"
+
+[[table]]
+name = "star_colour"
+path = "star_colour.rs"
+task = "star_colour"
+revision = 0
+inputs_sha256 = "22e9cc6a93635b9efa0a5b38fbbc1f642c2788a625be829d67d87a41591a6632"
+body_sha256 = "480e557298a2cbd040c72d8773f87c92fe1b30f1c91afbd9f3ab39a667f32ef6"
+fingerprint = [1.287912312603312, 1.0433846710183448, 0.9988500031135108, 0.8903220270199278]
+since_generator_version = 19
+provisional = false
+acceptance = "ρ of a 2,856 K blackbody 1.412 (Illuminant A: 1.41), of 5,772 K 2.316 (2.32); D65 to r = g = b within 2.4e-4; `lux_per_v0` over the dwarfs' rows (log g 4.5) from 2,300 to 45,000 K spans 1.001–1.100; η☉ 2.9557 (decision-camera-eta: 3.0 ± 0.1); Pickles (1998) against the table at each type's temperature and gravity, Δ(u′, v′): A0V at 9700 K 0.0012 (under 0.005; passes), F5V at 6550 K 0.0012 (under 0.005; passes), G2V at 5770 K 0.0019 (under 0.005; passes), K0V at 5270 K 0.0032 (under 0.005; passes), K5V at 4440 K 0.0075 (under 0.008; passes: an exception, it lies 0.0075 from the table at its type's 4,440 K and matches a 4,200 K model, near Pickles' own adopted 4,188 K), G8III at 5012 K 0.0011 (under 0.005; passes), M2V at 3560 K 0.0057 (under 0.007; passes: an exception, it lies 0.006 from the table at its type's 3,560 K and matches a 3,260 K model), K0III at 4853 K 0.0050 (under 0.006; passes: an exception, it lies 0.005 from the table at its adopted 4,853 K and matches a 5,050 K model), O5V at 41540 K 0.0072 (under 0.008; passes: an exception, it lies about 0.007 off the models' locus at every temperature, likely the residual reddening of its source stars), M3III at 3631 K 0.0113 (under 0.012; passes: an exception, its colour is a 4,240 K model's, not one near its adopted 3,631 K)"
 
 [[table]]
 name = "stellar_fates_high"

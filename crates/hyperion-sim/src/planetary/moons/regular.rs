@@ -61,7 +61,6 @@ use crate::planetary::derive::{
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
 use crate::planetary::moons::{MoonParent, decide, draw_rank, log_uniform, moon_orbit, rayleigh};
-use crate::planetary::params::{ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q};
 use crate::planetary::placement::spacing::{
     MAX_SPACING_REDRAWS, Neighbour, PAIR_SPACING_SIGMA, mutual_hill_factor, next_semi_major_axis,
     satisfies_floor, spacing_floor,
@@ -206,10 +205,6 @@ pub const ICE_MELTING_POINT: Kelvin = Kelvin::new(273.0);
 /// The density at which a moon's water fraction is spread into a layer: 1,000 kg m⁻³, liquid
 /// water's (ice is 920).
 pub const WATER_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(1_000.0);
-
-/// A regular moon's moment of inertia, in M R²: 0.35 (P14.T14.b's 0.33–0.4). The Galilean moons'
-/// are 0.311–0.378 (Schubert et al. 2004, in "Jupiter", table 13.1).
-pub const MOON_MOMENT_OF_INERTIA: f64 = 0.35;
 
 /// A moon's primordial rotation period before tides despin it: 15 h, P14.T14.a's median for a
 /// rocky body.
@@ -1129,25 +1124,30 @@ pub fn has_subsurface_ocean(
     shell < layer
 }
 
-/// The time a planet of mass `planet_mass` takes to lock the spin of a moon of mass `mass` and
-/// radius `radius` at semi-major axis `a`, from a period of [`MOON_PRIMORDIAL_PERIOD_HOURS`]:
-/// P14.T14.b's [`tidal_locking_time`](crate::planetary::derive::rotation::tidal_locking_time),
-/// with I = 0.35 M R² and a rocky body's k₂ = 0.3 and Q = 100 (after Gladman et al. 1996, Icarus
-/// 122, 166), for P14.T17.b's "all regular moons lock".
+/// The time a planet of mass `planet_mass` takes to lock the spin of a moon of mass `mass`,
+/// radius `radius`, class `class` and mass fractions `fractions` at semi-major axis `a`, from a
+/// period of [`MOON_PRIMORDIAL_PERIOD_HOURS`]: P14.T14.b's
+/// [`tidal_locking_time`](crate::planetary::derive::rotation::tidal_locking_time), with the
+/// moon's one moment of inertia,
+/// [`moment_of_inertia_factor`](crate::planetary::derive::rotation::moment_of_inertia_factor)
+/// (P14.T46.a, which retired the moons' own 0.35), and its class's tides, a rocky body's k₂ = 0.3
+/// and Q = 100 (after Gladman et al. 1996, Icarus 122, 166), for P14.T17.b's "all regular moons
+/// lock".
 ///
 /// # Panics
 ///
 /// If `mass` or `radius` is not positive and finite, which a derived moon's never is.
 #[must_use]
-pub fn locking_time(planet_mass: Kilograms, mass: Kilograms, radius: Metres, a: Metres) -> Seconds {
-    let moon = SpinningBody::new(
-        mass,
-        radius,
-        MOON_MOMENT_OF_INERTIA,
-        ROCKY_LOVE_NUMBER,
-        ROCKY_TIDAL_Q,
-    )
-    .expect("a moon's mass and radius are positive and finite");
+pub fn locking_time(
+    planet_mass: Kilograms,
+    mass: Kilograms,
+    radius: Metres,
+    a: Metres,
+    class: PlanetClass,
+    fractions: &MassFractions,
+) -> Seconds {
+    let moon = SpinningBody::of_class(mass, radius, class, fractions)
+        .expect("a moon's mass and radius are positive and finite");
     tidal_locking_time(
         &moon,
         Seconds::new(MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0),
@@ -1315,7 +1315,7 @@ pub fn derive_moon(
         body.equilibrium_temperature(),
         flux,
     );
-    Ok(DerivedMoon {
+    let mut derived = DerivedMoon {
         body,
         ice_fraction,
         radius,
@@ -1324,13 +1324,20 @@ pub fn derive_moon(
         heat_flux: flux,
         volcanism: Volcanism::of(flux),
         subsurface_ocean: ocean,
-        locking_time: locking_time(
-            Kilograms::from(parent.mass()),
-            Kilograms::from(moon.mass),
-            radius,
-            a,
-        ),
-    })
+        locking_time: Seconds::new(f64::INFINITY),
+    };
+    // The class and fractions the moon's record states (`PlanetClass::of`, as the system's bulk
+    // section takes them), so that the locking time is the stored rotation law's (P14.T46.a).
+    let fractions = derived.fractions();
+    derived.locking_time = locking_time(
+        Kilograms::from(parent.mass()),
+        Kilograms::from(moon.mass),
+        radius,
+        a,
+        PlanetClass::of(moon.mass, &fractions),
+        &fractions,
+    );
+    Ok(derived)
 }
 
 /// A moon could not be derived.
@@ -1869,18 +1876,23 @@ mod tests {
         let jupiter_kg = Kilograms::new(1.898_13e27);
         let saturn_kg = Kilograms::new(5.683_2e26);
         let uranus_kg = Kilograms::new(8.681_1e25);
-        for (planet, name, gm, radius_km, a_km) in [
-            (jupiter_kg, "Io", 5_959.9, 1_821.6, 421_800.0),
-            (jupiter_kg, "Callisto", 7_179.3, 2_410.3, 1_882_700.0),
-            (saturn_kg, "Titan", 8_978.1, 2_574.7, 1_221_900.0),
-            (saturn_kg, "Iapetus", 120.5, 734.5, 3_561_700.0),
-            (uranus_kg, "Oberon", 205.3, 761.4, 583_500.0),
+        let rock = MassFractions::solid(0.3, 0.7, 0.0);
+        let ice = MassFractions::solid(0.1, 0.4, 0.5);
+        for (planet, name, gm, radius_km, a_km, fractions) in [
+            (jupiter_kg, "Io", 5_959.9, 1_821.6, 421_800.0, rock),
+            (jupiter_kg, "Callisto", 7_179.3, 2_410.3, 1_882_700.0, ice),
+            (saturn_kg, "Titan", 8_978.1, 2_574.7, 1_221_900.0, ice),
+            (saturn_kg, "Iapetus", 120.5, 734.5, 3_561_700.0, ice),
+            (uranus_kg, "Oberon", 205.3, 761.4, 583_500.0, ice),
         ] {
+            let mass = gm_mass(gm * 1e9);
             let t = locking_time(
                 planet,
-                gm_mass(gm * 1e9),
+                mass,
                 Metres::new(radius_km * 1e3),
                 Metres::new(a_km * 1e3),
+                PlanetClass::of(EarthMasses::from(mass), &fractions),
+                &fractions,
             );
             assert!(
                 t.value() < 1e8 * 3.156e7,

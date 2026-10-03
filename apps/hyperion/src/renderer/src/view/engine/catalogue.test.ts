@@ -21,6 +21,10 @@ describe("the catalogue's display names", () => {
     );
   });
 
+  it("names both terrain vertex paths' materials on the console", () => {
+    expect(DISPLAY_NAMES).toEqual(expect.arrayContaining(["TERRAIN", "TERRAIN OFFSETS"]));
+  });
+
   it("gives every effect a name in the console's form", () => {
     expect(DISPLAY_NAMES.filter((name) => !DISPLAY_NAME.test(name))).toEqual([]);
   });
@@ -37,5 +41,16 @@ describe("the catalogue's display names", () => {
         (name) => DISPLAY_NAME.test(name),
       ),
     ).toEqual([false, false, false, false]);
+  });
+});
+
+describe("the catalogue's compute kernels", () => {
+  it("registers R05.T12.b's atmosphere tables", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(["atmosphere transmittance", "atmosphere multiple scattering"]),
+    );
   });
 });
