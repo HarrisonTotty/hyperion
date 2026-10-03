@@ -20,7 +20,8 @@ import { PHASE_TEMPLATES } from "./templates";
  *
  * @remarks
  * The Solar System analogues of Design note 5's rule (pressure and cloud fraction); the last three
- * are provisional stand-ins (`templates.ts`) and are labelled.
+ * are provisional stand-ins (`templates.ts`) and are labelled; `lambert` is the Lambert sphere of
+ * the provisional photometry a body without a photometric section takes (R07.T2.a).
  */
 export type PhaseTemplateId =
   | "moon"
@@ -34,7 +35,8 @@ export type PhaseTemplateId =
   | "neptune"
   | "airless-ice"
   | "snowball"
-  | "magma";
+  | "magma"
+  | "lambert";
 
 /** A body's lunar-Lambert law with a fitted phase factor (Design note 5). */
 export interface PhotometricLaw {

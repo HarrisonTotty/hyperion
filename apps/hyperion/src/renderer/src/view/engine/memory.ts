@@ -3,7 +3,8 @@
  *
  * @remarks
  * Every GPU buffer and texture is created through the engine's `createBuffer`, `createTexture` or
- * `createPackedCube`, each with a category, and every creation, destruction and upload raises an
+ * `createPackedCube`, each with a category, and released by `releaseBuffer` and `releaseTexture`
+ * or at disposal; every creation, destruction and upload raises an
  * {@link AllocationEvent}: R05's tally is built on them and R12 itemises them (R01 Design note 18).
  * Later plans add their categories to {@link MemoryCategory} here.
  */

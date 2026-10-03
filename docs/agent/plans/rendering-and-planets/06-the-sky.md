@@ -1387,7 +1387,12 @@ plan reserves no tag, prefix or stream.
   `scaleByPowerOfTwo`, `faceMipChain` (children weighted by their summed solid angle), `mipStep`,
   `mipSizes` and `cubeLevels` (faces joined for `writePackedCubeLevel`). The extension gives no
   worked numbers; the tests pin its limits (65,408, 2⁻²⁴, 1.0 = exponent 16 mantissa 256) and the
-  round-up case (0.99999 packs as 1.0).
+  round-up case (0.99999 packs as 1.0). Review fixes: both the texel a direction falls in and the packer's rounding
+  are computed so that `f32` and `f64` agree bit for bit, which T13.g's WGSL must copy: a texel is
+  the largest c with f32(c × 2m) ≤ f32(f32(a + m) × size), found from an estimate by those
+  comparisons alone (WGSL's division is not correctly rounded, its sums and products are), and a
+  mantissa is ⌊q⌋ plus one where q − ⌊q⌋ ≥ ½ (⌊q + ½⌋ rounds the sum in `f32`). `CubeFace` (0–5)
+  types the face; the mip functions refuse faces of the wrong size.
 - **Deviations in T10, as built (2026-10-02).** The wire's chroma (stars and texels) is the
   linear Rec. 709 chromaticity r ÷ (r + g + b), g ÷ (r + g + b), each in [0, 1] as Design note
   17's `u16` fractions require, not `StarColour::chroma`'s "r and g of unit luminance", which
@@ -1409,6 +1414,67 @@ plan reserves no tag, prefix or stream.
   and `band_bytes`. Until T11 the server answers `sky` with `unsupported` under its own ID, as it
   does `body_events`. The camera band term is Sun-relative and travels in 1/32 mag
   (decision-camera-eta.md, applied here): `thirty_seconds` in the encoder, ÷ 32 in the decoder.
+- **Deviations in T13.h, as built (2026-10-02).** `RenderEngine` gains `releaseBuffer` and
+  `releaseTexture` (the registry's existing `destroyBuffer`/`destroyTexture`, which raise one
+  `destroyed` event with the bytes created; a released handle is refused by every later call with
+  "… was released"), an optional fourth argument `name` on `createPackedCube` (default
+  `PACKED_CUBE_NAME`, "packed star cube"), and `createPointSplatAsync(spec)`, added beyond the
+  task's list so that the harness's catalogue check sees a splat's WGSL error as a rejection, as
+  `createMaterialAsync` and `createComputeAsync` do; without `float32-blendable` the check records
+  the splat as not compiled rather than failing (so on such a device, possibly the UHD 620, the
+  splat's WGSL is unchecked by the harness). The engine refuses to release a render target's colour
+  or depth ("belongs to a render target and is released with it"); its other internal textures and
+  buffers are never handed to callers. `ResilientEngine` keeps the engine that made each handle (a
+  `WeakMap`): a release reaches it if it is the current engine, is dropped if a lost engine made it
+  (it died with its device, as a write to it is), and throws for a handle it never made. Both test
+  fakes implement the new members (`FakeRenderEngine` now fakes `createBuffer` and records
+  releases; R05's `CountingRenderEngine` raises `destroyed` events). `WGSL_CATALOGUE` takes
+  `{ kind: "point-splat", spec }` and holds `ENGINE_CHECK_SPLAT`, R01's harness splat lifted from
+  `smoke/blending.ts`, until T13.g registers the sky's bake splat.
+- **Deviations in T13.a, as built (2026-10-02).** `cameraLimit.ts` exports `cameraLimitV`,
+  `cameraLimitParts` (the limit with its sky electrons, read noise and V = 0 peak electrons),
+  `DEFAULT_VIEW_CAMERA` (a `ViewCameraSensor` with `etaSun` = `CAMERA_ETA_SUN`, 2.9557 from
+  T3.c's fit, pinned by `packages/protocol/fixtures/camera_eta_sun.json`), `surfaceBrightnessV`
+  and `V0_PHOTON_FLUX_PER_S_M2`. Design note 18 names no dark current, and it is 0 (0.1 e⁻ s⁻¹
+  would add 0.003 e⁻ at 1/30 s). High gain in the tests is ISO 409,600, where the read noise is
+  σ_pre's alone; base is ISO 100. `cull.ts` exports `cullSky(stars, limit, bandFaceTexels)` with
+  `ViewStarLimit` (`eye` with `limitAt(x, y, z)`, NaN keeping every star, or `camera` with
+  `limitV`) and `starIsSeen`; an eye keeps a star with V < limit + its eye colour offset, a
+  camera with V + its camera band term < limit; the dropped stars' illuminance goes to the band's
+  texels in `f64` (`bandIlluminanceLx`, three channels a texel). `photometry.ts` exports
+  `unitLuminanceRgb` (the wire's chromaticity to unit luminance by Rec. 709's weights),
+  `starIlluminanceRgbLx` and `starPixelLuminanceRgb`. A black background (0 cd/m²) is allowed and reads as read noise alone.
+- **Deviations in T13.f, as built (2026-10-03).** `view/sky/setting.ts` exports `SkySettings`
+  (`faceSizePx`, `spriteBudget`, `nMax`, `rebakeShiftPx`), `HIGH_SKY` (3,072, 4,096, 3 × 10⁵,
+  0.1 px) and `LOW_SKY` (1,024, 2,048, 10⁵, 0.1 px), wired as R05's `ViewSettings.sky` (appended
+  after `atmosphere`) with their values in `SETTINGS`, and `SKY_LAYERS` per `SkyStyle`
+  (`wireframe`: sprites and cube; `photorealistic`: all four), the decision record's item 1. The
+  file is `view/quality/qualitySetting.ts` as R05 built it. `view/sky/label.ts` exports
+  `skyLabelValue(limitV, limitKind, gaps)`, the `STARS` line's reading after its label (`V 7.4 EYE`,
+  then `CLUSTERS NOT MODELLED` for the feature and centre gaps, once, and `WD NOT MODELLED`, each
+  after a middle dot); it does not import `displays/`, and the label block chooses between it and
+  R02's `STAR_SOURCE`/`STARS_WITHOUT_POSITION` where the view's sky is wired (T13.c, with the
+  sprites). The low setting's fainter sprite magnitude is T13.c's selection; the values stay
+  provisional until T17.
+- **Deviations in T12, as built (2026-10-03).** Built: `view/sky/model.ts` (`SkyModel` with
+  `request`, `response`, `stars`, `band`, `stale`; `skyRequestReason(held, { request, cameras })`
+  naming `arrival`, `expired`, `jump` or `parallax`; `SkyCamera`, `bakedBeyondM`,
+  `nearestStarBeyondM`, `PARALLAX_BASELINE_M`, `PARALLAX_THRESHOLD_PX`), `view/sky/limits.ts`
+  (`eyeLimitAt(source, direction, fieldFactor)` over `EyeLimitSource { band, faceTexels,
+requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodePayload.ts`
+  (`decodeSkyPayload`, `transferablesOf`, the pure work of `decode.worker.ts`, added to
+  `tsconfig.worker.json`'s `include`) and `useSky(request, cameras, { createDecoder })` with
+  `createWorkerSkyDecoder`, returning `SkyView { model, failure, pending }`. The caller builds the
+  request (observer, time, limits, N_max); `null` asks nothing. A request in flight for another
+  arrival is cancelled; a failure is held and not retried until the next arrival (no timer: a
+  bulk census may take minutes). The test fixtures are `test/skyFixtures.ts`. **Moved to T13.c**
+  (approved by the orchestrator 2026-10-03): wiring `useSky` into `ViewDisplay`, retiring R02's
+  interim field and its label where the sky has arrived, and composing the request's observer
+  from `barycentreAt` and the camera, so that the label never claims the sky while the view still
+  draws the interim field.
+- **T13.c takes T12's view wiring** (see T12's deviation): `ViewDisplay` asks the sky through
+  `useSky`, draws its sprites in place of the interim field's, and the label block reads
+  `skyLabelValue` where the sky has arrived.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and

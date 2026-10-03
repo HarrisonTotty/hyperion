@@ -25,10 +25,26 @@ describe("cubeTexelOf", () => {
     expect(cubeTexelOf(0.9, 1, 0.9, 4)).toEqual({ face: 2, column: 3, row: 3 });
     // −Z: u = −x, v = −y.
     expect(cubeTexelOf(0.9, -0.9, -1, 4)).toEqual({ face: 5, column: 0, row: 3 });
+    // −X: u = z, v = −y.
+    expect(cubeTexelOf(-1, 0.9, 0.9, 4)).toEqual({ face: 1, column: 3, row: 0 });
+    // −Y: u = x, v = −z.
+    expect(cubeTexelOf(0.9, -1, 0.9, 4)).toEqual({ face: 3, column: 3, row: 0 });
+    // +Z: u = x, v = −y.
+    expect(cubeTexelOf(-0.9, 0.9, 1, 4)).toEqual({ face: 4, column: 0, row: 0 });
   });
 
   it("refuses a zero direction", () => {
     expect(() => cubeTexelOf(0, 0, 0, 4)).toThrow(/not a direction/);
+  });
+
+  it("refuses a direction with a NaN component", () => {
+    expect(() => cubeTexelOf(Number.NaN, 1, 0, 4)).toThrow(/not a direction/);
+  });
+
+  it("puts a direction on a texel edge in the texel the f32 comparison gives", () => {
+    // u ÷ major = −0.5 exactly: the edge between columns 0 and 1 of a 4-texel face.
+    expect(cubeTexelOf(1, 0, 0.5, 4).column).toBe(1);
+    expect(cubeTexelOf(1, 0, Math.fround(0.5 + 2 ** -20), 4).column).toBe(0);
   });
 });
 

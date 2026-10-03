@@ -275,15 +275,55 @@ describe("the terrain pass", () => {
     expect(frame.conditions.detailLimited).toBe(true);
   });
 
-  it("keeps the frame's draw set while nothing changes", async () => {
+  it("does not select again, and draws the same slots, while nothing changes", async () => {
     const { pass, pool } = await passOn("low");
     const view = northPole(1_000_000);
     pass.frame(inputAt(view));
     pool().bakeDemand(pass);
     const first = pass.frame(inputAt(view));
+    const slots = Array.from(first.drawSet.slots.subarray(0, first.drawSet.count));
     const second = pass.frame(inputAt(view, 16));
     expect(second.reselected).toBe(false);
+    expect(Array.from(second.drawSet.slots.subarray(0, second.drawSet.count))).toEqual(slots);
+  });
+
+  it("rewrites one draw set in place across selections", async () => {
+    const { pass, pool } = await passOn("low");
+    const view = northPole(1_000_000);
+    const first = pass.frame(inputAt(view));
+    const { patches, slots } = first.drawSet;
+    pool().bakeDemand(pass);
+    const second = pass.frame(inputAt(view, 16));
+    expect(second.reselected).toBe(true);
     expect(second.drawSet).toBe(first.drawSet);
+    expect(second.drawSet.patches).toBe(patches);
+    expect(second.drawSet.slots).toBe(slots);
+    expect(second.drawSet.count).toBeGreaterThan(0);
+  });
+
+  it("requests a forced region no view sees and keeps it resident, but draws none of it", async () => {
+    const { pass, pool, engine } = await passOn("low");
+    const view = northPole(1_000_000);
+    // A craft on the south pole, on the far side from the camera.
+    const grounded = [{ positionM: { x: 0, y: 0, z: -PLANET.figure.polarRadiusM }, radiusM: 10 }];
+    let frame = pass.frame({ ...inputAt(view), grounded });
+    const baked = new Set<string>();
+    for (let n = 1; n < 8 && pool().demand.length > 0; n += 1) {
+      for (const request of pool().demand) {
+        baked.add(patchKeyString(request.key));
+      }
+      pool().bakeDemand(pass);
+      frame = pass.frame({ ...inputAt(view, 16 * n), grounded });
+    }
+    const unseen = [...frame.selection.patches.values()].filter((p) => !p.seen);
+    expect(unseen.length).toBeGreaterThan(0);
+    const unseenKeys = new Set(unseen.map((p) => patchKeyString(p.key)));
+    expect([...unseenKeys].every((k) => baked.has(k))).toBe(true);
+    // The demand leaves out resident patches, so none of the region has been evicted.
+    expect(pool().demand.filter((r) => unseenKeys.has(patchKeyString(r.key)))).toEqual([]);
+    const drawnKeys = frame.drawSet.patches.map((p) => p.keyString);
+    expect(drawnKeys.filter((k) => unseenKeys.has(k))).toEqual([]);
+    expect(writtenSlots(engine)).toHaveLength(frame.drawSet.count);
   });
 
   it("draws a turned body's patches at R · origin less the camera, with R as its rotation", async () => {

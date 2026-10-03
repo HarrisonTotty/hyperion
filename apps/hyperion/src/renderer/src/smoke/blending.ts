@@ -2,6 +2,7 @@
  * The smoke page's blending, material-state, resource and post-process checks (T9.g, T9.i).
  */
 
+import { ENGINE_CHECK_SPLAT } from "../view/engine/catalogue";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { RenderEngine } from "../view/engine/types";
 import { DepthSelfSample, Float32BlendUnavailable } from "../view/engine/types";
@@ -415,17 +416,7 @@ async function checkSplat(engine: RenderEngine, checks: Checks): Promise<void> {
     usage: TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC,
     category: "other",
   });
-  const splat = engine.createPointSplat({
-    name: "smoke splat",
-    format: "rgba32float",
-    blend: "additive",
-    vertexWgsl: `
-@group(0) @binding(0) var<storage, read> points : array<vec2f>;
-@vertex fn main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
-  return vec4f(points[index], 0.5, 1.0);
-}`,
-    fragmentWgsl: `@fragment fn main() -> @location(0) vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }`,
-  });
+  const splat = engine.createPointSplat(ENGINE_CHECK_SPLAT);
   splat.draw(face, buffer, count);
   const sums = new Float32Array(await engine.readTexture(face));
   let wrong = 0;

@@ -37,6 +37,12 @@ describe("packRgb9e5", () => {
     expect(unpackRgb9e5(packRgb9e5(1, 2 ** -10, 0))).toEqual([1, 0, 0]);
   });
 
+  it("rounds a mantissa just below a half down, as the WGSL packer does", () => {
+    // At red's exponent (step 2⁻⁸), green is (½ − 2⁻²⁵) steps: an f32 sum q + ½ would round to 1.
+    const green = Math.fround((0.5 - 2 ** -25) * 2 ** -8);
+    expect(unpackRgb9e5(packRgb9e5(1, green, 0))).toEqual([1, 0, 0]);
+  });
+
   it("takes NaN and negative channels as zero", () => {
     expect(packRgb9e5(Number.NaN, -1, 0)).toBe(0);
   });
