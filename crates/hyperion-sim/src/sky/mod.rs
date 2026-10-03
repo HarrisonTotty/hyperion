@@ -10,5 +10,7 @@
 //! random word.
 
 pub mod eye;
+pub mod luminosity;
+pub mod photometry;
 
 pub use eye::{EyeObserver, MAX_CUT_V, REFERENCE_SP_RATIO};
