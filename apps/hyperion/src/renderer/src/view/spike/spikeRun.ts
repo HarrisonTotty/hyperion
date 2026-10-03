@@ -233,6 +233,11 @@ export interface SpikeListeners {
   readonly onPrepared?: (prepared: PreparedDescent) => void;
   /** Each selection's input and result (TerrainPass's `onSelect`), for T13.c's second pass. */
   readonly onSelect?: (input: SelectionInput, selection: Selection) => void;
+  /**
+   * The run cannot go on, with the status the view shows: the descent refused, the terrain not
+   * measured, or the views not made (T13.c ends the run on it).
+   */
+  readonly onFailed?: (status: string) => void;
 }
 
 /** The canvases' sizes and what the instruments are drawn with. */

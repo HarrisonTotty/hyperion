@@ -58,14 +58,25 @@ export const SPIKE_PASS_ROWS: Readonly<Record<string, SpikePassRow>> = {
  */
 export class ResolveCounter {
   #count = 0;
+  /** The count when the latest device was wrapped: its timer numbers its frames from 1 again. */
+  #base = 0;
 
-  /** The resolves so far: the last timing frame number given out. */
+  /** The resolves so far, over every device: the run's last timing frame number. */
   get value(): number {
     return this.#count;
   }
 
+  /**
+   * A `PassTimes.frame` of the latest device's timer as the run's frame number: a rebuild after a
+   * device loss makes a new timer, which counts from 1 again (`ResilientEngine`).
+   */
+  runFrame(timerFrame: number): number {
+    return this.#base + timerFrame;
+  }
+
   /** `device`, its `createCommandEncoder` replaced on the instance to count each encoder's resolves. */
   wrap(device: GPUDevice): GPUDevice {
+    this.#base = this.#count;
     const create = device.createCommandEncoder.bind(device);
     device.createCommandEncoder = (descriptor?: GPUCommandEncoderDescriptor) => {
       const encoder = create(descriptor);
@@ -152,7 +163,7 @@ function meanDemand(
 export class SpikeRecorder {
   readonly #metrics: SpikeMetrics;
   readonly #calibrated: PlanetGeometry;
-  readonly #resolves: { readonly value: number };
+  readonly #resolves: Pick<ResolveCounter, "value" | "runFrame">;
   readonly #tally: PipelineTally;
   #lastScriptS = 0;
   #patchesCalibrated = 0;
@@ -165,7 +176,10 @@ export class SpikeRecorder {
   constructor(
     descent: RecordedDescent,
     setting: QualitySetting,
-    gpu: { readonly resolves: { readonly value: number }; readonly tally: PipelineTally },
+    gpu: {
+      readonly resolves: Pick<ResolveCounter, "value" | "runFrame">;
+      readonly tally: PipelineTally;
+    },
   ) {
     const { planet, profile, omittedSigmaM } = descent;
     this.#calibrated = boundedPlanet(planet, "calibrated", omittedSigmaM);
@@ -228,7 +242,7 @@ export class SpikeRecorder {
 
   /** The engine's pass times (`RenderEngine.onPassTimes`). */
   passTimes(times: PassTimes): void {
-    this.#metrics.passTimes(times);
+    this.#metrics.passTimes({ ...times, frame: this.#resolves.runFrame(times.frame) });
   }
 
   /** The engine's allocations (`RenderEngine.onAllocation`): uploads, and the live peak. */

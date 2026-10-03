@@ -27,7 +27,14 @@ import {
   TEST_PLANET_STATEMENT,
   VIEWS_NOT_MADE,
 } from "./DescentSpike";
-import { DescentRefused, type prepareDescent, type SpikeWorkers } from "./spikeRun";
+import {
+  DescentRefused,
+  type prepareDescent,
+  type SpikeListeners,
+  type SpikeWorkers,
+} from "./spikeRun";
+import type { TerrainVariant } from "../quality/qualitySetting";
+import type { BakeSettings } from "../terrain/workers/messages";
 import {
   answerSurfaceQuery,
   type SurfaceQueryModule,
@@ -198,6 +205,8 @@ function renderSpike(
     readonly engine?: ViewEngineSource;
     readonly workers?: SpikeWorkers;
     readonly prepare?: typeof prepareDescent;
+    readonly listeners?: SpikeListeners;
+    readonly variant?: TerrainVariant;
   } = {},
 ): ReturnType<typeof render> {
   return render(
@@ -210,6 +219,8 @@ function renderSpike(
         engineSource={options.engine ?? PENDING_ENGINE}
         spikeWorkers={options.workers ?? WORKERS}
         prepare={options.prepare}
+        listeners={options.listeners}
+        variant={options.variant}
       />
     </GraphicsStatusContext>,
   );
@@ -326,5 +337,61 @@ describe("DescentSpike", () => {
         ),
     });
     expect(await screen.findByText(DESCENT_REFUSED, undefined, { timeout: 20_000 })).toBeDefined();
+  }, 30_000);
+
+  it("tells its listeners each failure that ends the run, with the status it shows", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failed: string[] = [];
+    const listeners: SpikeListeners = { onFailed: (status) => failed.push(status) };
+    const refused = renderSpike({
+      listeners,
+      prepare: () =>
+        Promise.reject(
+          new DescentRefused(5n, new RangeError("the descent cannot clear its floors")),
+        ),
+    });
+    await screen.findByText(DESCENT_REFUSED, undefined, { timeout: 20_000 });
+    refused.unmount();
+    const unmeasured = renderSpike({
+      listeners,
+      workers: { ...WORKERS, query: () => new FailingQueryWorker() },
+    });
+    await screen.findByText(/^TERRAIN NOT MEASURED/);
+    unmeasured.unmount();
+    renderSpike({ listeners, engine: refusingEngine() });
+    await screen.findByText(VIEWS_NOT_MADE, undefined, { timeout: 20_000 });
+    expect(failed).toEqual([
+      DESCENT_REFUSED,
+      expect.stringMatching(/^TERRAIN NOT MEASURED/),
+      VIEWS_NOT_MADE,
+    ]);
+  }, 60_000);
+
+  it("hands its listeners the measured descent and each selection, and the pool the variant", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const made = readyEngine({ refuseFrames: false });
+    const prepared: number[] = [];
+    const selected: number[] = [];
+    const bakes: BakeSettings[] = [];
+    renderSpike({
+      engine: made.source,
+      workers: {
+        ...WORKERS,
+        pool: () => (bake) => {
+          bakes.push(bake);
+          return IDLE_POOL;
+        },
+      },
+      variant: { normals: "double" },
+      listeners: {
+        onPrepared: (descent) => prepared.push(descent.omittedSigmaM.length),
+        onSelect: (_input, selection) => selected.push(selection.patches.size),
+      },
+    });
+    await screen.findByText(/SELECTED/, undefined, { timeout: 20_000 });
+    expect(prepared).toEqual([25]);
+    expect(selected.length).toBeGreaterThan(0);
+    expect(bakes[0]).toMatchObject({ vertexPath: "face-differences", normals: "double" });
   }, 30_000);
 });
