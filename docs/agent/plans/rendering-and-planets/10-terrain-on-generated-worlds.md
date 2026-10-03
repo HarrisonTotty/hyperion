@@ -280,7 +280,8 @@ changed by the time this plan runs only the call sites here change.
   the scripted descent, `descentProfile.ts`, `metrics.ts` and the results files under
   `docs/measurements/descent-spike/`.
 - **R07:** in `shaders/litBody.wgsl`,
-  `struct LunarLambert { a: vec3f, l: f32, s: vec3f, template: u32 }`,
+  `struct LunarLambert { a: vec3f, l: f32, s: vec3f, table_row: u32 }` (`table_row`, not `template`, a
+  WGSL reserved word: the row of `phase_factor_table` holding the law's f, R07.T4.c as built),
   `body_brdf(law: LunarLambert, mu0, mu, alpha) -> vec3f` (R07.T4.c),
   `sphere_irradiance(h, phi, horizon) -> f32` with its local-horizon argument (R07.T6.a, T6.c) and
   `eclipse_visible`; `DiscSurface` and its `class-map` case
@@ -999,9 +1000,12 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   texel's geodetic height above `BodyFigure`'s spheroid, its geodetic latitude (from the spheroid
   normal against the pole) and, for the transmittance, each sun's azimuth from local north, as
   R08 Design note 17's signatures require. Each texel's law is a
-  `struct LunarLambert { a, l, s, template }` built from its palette and weights and passed to R07's
+  `struct LunarLambert { a, l, s, table_row }` built from its palette and weights and passed to R07's
   `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates and this task
-  uses unchanged. Files: `terrainMaterial.ts`, `shaders/terrainLit.wgsl`. Tests: a pure test that
+  uses unchanged. Each `phase_factor_table` row is tabulated for one (template, L, s), and a law
+  built per texel with another A or L changes only the disc term: build a row per (template, L, s)
+  the palette needs, or accept f from the nearest row's L (`brdfFromTable` is R07's TypeScript
+  reference); to settle when this plan is revalidated. Files: `terrainMaterial.ts`, `shaders/terrainLit.wgsl`. Tests: a pure test that
   the parameters a texel gets are the weighted sum of its palette's, and that the largest weight's
   class is the one a readout names; a `LunarLambert` built per texel from a one-class palette equals
   the per-body law of that class in R07.T4.c's twin; the smoke harness renders a generated world's
