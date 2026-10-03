@@ -8,9 +8,10 @@
  * (EXT_texture_shared_exponent, "Encoding of Special Internal Formats"), which WebGPU's
  * `rgb9e5ufloat` takes over (WebGPU §26.1.3, packed formats): clamp each channel to
  * [0, {@link RGB9E5_MAX}], take the shared exponent from the largest, round each channel to
- * nearest, and raise the exponent by one where the largest mantissa rounds up to 2⁹. Every step is
- * a division by a power of two, so the arithmetic is exact in `f32` as in `f64`, and the WGSL packer
- * can match this one bit for bit.
+ * nearest, and raise the exponent by one where the largest mantissa rounds up to 2⁹. Rounding is
+ * written as q = v ÷ 2^k, then ⌊q⌋ plus one where q − ⌊q⌋ ≥ ½: for an `f32` channel every step is
+ * exact in `f32` as in `f64`, whereas ⌊q + ½⌋ would round the sum in `f32` and differ just below a
+ * half. The WGSL packer computes it the same way and so matches this one bit for bit.
  */
 
 /** Mantissa bits per channel: N = 9. */
@@ -49,6 +50,12 @@ function floorLog2(x: number): number {
   return exponent;
 }
 
+/** q rounded to nearest, halves up, by its fraction: exact for any `f32` q. */
+function roundHalfUp(q: number): number {
+  const whole = Math.floor(q);
+  return q - whole >= 0.5 ? whole + 1 : whole;
+}
+
 /** A channel clamped to [0, {@link RGB9E5_MAX}], NaN and negatives taken as 0. */
 function clampChannel(value: number): number {
   return value > 0 ? Math.min(value, RGB9E5_MAX) : 0;
@@ -67,12 +74,10 @@ export function packRgb9e5(r: number, g: number, b: number): number {
   const largest = Math.max(red, green, blue);
   const floorExponent = largest > 0 ? floorLog2(largest) : -Infinity;
   const provisional = Math.max(-EXPONENT_BIAS - 1, floorExponent) + 1 + EXPONENT_BIAS;
-  const largestMantissa = Math.floor(
-    largest / 2 ** (provisional - EXPONENT_BIAS - MANTISSA_BITS) + 0.5,
-  );
+  const largestMantissa = roundHalfUp(largest / 2 ** (provisional - EXPONENT_BIAS - MANTISSA_BITS));
   const exponent = largestMantissa === 2 ** MANTISSA_BITS ? provisional + 1 : provisional;
   const step = 2 ** (exponent - EXPONENT_BIAS - MANTISSA_BITS);
-  const mantissa = (value: number): number => Math.floor(value / step + 0.5);
+  const mantissa = (value: number): number => roundHalfUp(value / step);
   return (mantissa(red) | (mantissa(green) << 9) | (mantissa(blue) << 18) | (exponent << 27)) >>> 0;
 }
 

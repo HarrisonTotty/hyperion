@@ -1375,7 +1375,12 @@ plan reserves no tag, prefix or stream.
   `scaleByPowerOfTwo`, `faceMipChain` (children weighted by their summed solid angle), `mipStep`,
   `mipSizes` and `cubeLevels` (faces joined for `writePackedCubeLevel`). The extension gives no
   worked numbers; the tests pin its limits (65,408, 2⁻²⁴, 1.0 = exponent 16 mantissa 256) and the
-  round-up case (0.99999 packs as 1.0).
+  round-up case (0.99999 packs as 1.0). Review fixes: both the texel a direction falls in and the packer's rounding
+  are computed so that `f32` and `f64` agree bit for bit, which T13.g's WGSL must copy: a texel is
+  the largest c with f32(c × 2m) ≤ f32(f32(a + m) × size), found from an estimate by those
+  comparisons alone (WGSL's division is not correctly rounded, its sums and products are), and a
+  mantissa is ⌊q⌋ plus one where q − ⌊q⌋ ≥ ½ (⌊q + ½⌋ rounds the sum in `f32`). `CubeFace` (0–5)
+  types the face; the mip functions refuse faces of the wrong size.
 - **Deviations in T10, as built (2026-10-02).** The wire's chroma (stars and texels) is the
   linear Rec. 709 chromaticity r ÷ (r + g + b), g ÷ (r + g + b), each in [0, 1] as Design note
   17's `u16` fractions require, not `StarColour::chroma`'s "r and g of unit luminance", which

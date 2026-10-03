@@ -39,8 +39,25 @@ describe("the cube's levels", () => {
     // The engine sizes level l as max(1, size >> l), and agrees at every level.
     expect(sizes.map((_, level) => Math.max(1, 3_072 >> level))).toEqual(sizes);
     expect(mipStep(3)).toBe(3);
+  });
+
+  it("steps 1,024 down by halves in 11 levels", () => {
     expect(mipSizes(1_024)).toHaveLength(11);
+  });
+
+  it("refuses a level side with no mip step", () => {
     expect(() => mipStep(5)).toThrow(/no mip step/);
+  });
+
+  it("refuses a face or solid angles of the wrong size", () => {
+    expect(() => faceMipChain(new Float32Array(4 * 4 * 4), 3)).toThrow(/not a 3² face/);
+    expect(() => divideBySolidAngle(new Float32Array(16), 2, texelSolidAnglesSr(3))).toThrow(
+      /do not cover/,
+    );
+  });
+
+  it("ignores a non-finite texel when it sets the scale", () => {
+    expect(peakScaleExponent([new Float32Array([Number.NaN, 1, 0, 0])])).toBe(15);
   });
 
   it("conserves each level's flux, Σ L Ω, to 10⁻⁶", () => {
