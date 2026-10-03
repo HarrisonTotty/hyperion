@@ -23,20 +23,10 @@ import {
   type Histogram,
 } from "../view/post/histogram";
 import type { MeterMode } from "../view/post/meter";
-import type { Checks } from "./harness";
+import { type Checks, halfBits } from "./harness";
 
 /** The synthetic target's size: not a multiple of the 16 × 16 workgroup on either axis. */
 const SIZE: ViewSize = { widthPx: 70, heightPx: 45 };
-
-/** The 16 bits of the normal half float at or just below `value`, 0 for zero. */
-export function halfBits(value: number): number {
-  if (!(value > 0)) {
-    return 0;
-  }
-  const exponent = Math.floor(Math.log2(value));
-  const mantissa = Math.floor((value / 2 ** exponent - 1) * 1024);
-  return ((exponent + 15) << 10) | mantissa;
-}
 
 /** A half float from its bits, positive values only. */
 function halfValue(bits: number): number {

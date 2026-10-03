@@ -331,7 +331,40 @@ export function poissonOverRectangle(
   return term.amplitude * c * c * 2 * difference;
 }
 
-const insideLevels = new Map<string, number>();
+/** Steps of ln(ρ ÷ c) per unit at which {@link rectangleInsideLevel}'s outer integral is kept. */
+const INSIDE_STEPS_PER_LN = 2000;
+
+const outerIntegrals = new Map<number, number>();
+
+/**
+ * ∫_{θ>ρ} R(θ) 2πθ dθ for a term of amplitude 1 and scale 1 about a source of radius s, R being
+ * {@link poissonOverRectangle}: Simpson's rule in ln(θ − ρ) beyond the limb, the θ⁻³ tail beyond
+ * in closed form.
+ */
+function outerIntegral(s: number): number {
+  const unit: SpreadTerm = { amplitude: 1, scaleRad: 1 };
+  const halfHeight = (Math.PI * s) / 4;
+  const intervals = 4000;
+  const low = Math.log(1e-6 * Math.min(s, 1));
+  const top = 1e4 * (s + 1);
+  const high = Math.log(top);
+  const step = (high - low) / intervals;
+  let sum = 0;
+  for (let i = 0; i <= intervals; i += 1) {
+    const beyond = Math.exp(low + i * step);
+    const theta = s + beyond;
+    const weight = i === 0 || i === intervals ? 1 : i % 2 === 1 ? 4 : 2;
+    sum +=
+      weight *
+      poissonOverRectangle(unit, beyond, theta + s, halfHeight) *
+      2 *
+      Math.PI *
+      theta *
+      beyond;
+  }
+  // Far out R(θ) → 4ρY ÷ θ³, so ∫ beyond the top is 2π × 4ρY ÷ top.
+  return (sum * step) / 3 + (2 * Math.PI * 4 * s * halfHeight) / (s + top);
+}
 
 /**
  * The level of one narrow term of amplitude 1 at a pixel inside its source's disc, sr⁻¹ × sr,
@@ -342,41 +375,29 @@ const insideLevels = new Map<string, number>();
  * The rectangle turns to face each pixel, so its integral over every pixel is not its area: a term
  * whose scale is near the source's radius gains a few per cent near the limb. Inside the disc the
  * image is the clamped disc, white through AgX whatever the veil adds, so the term's energy is
- * balanced there and the veil outside keeps the rectangle's accuracy. The level depends on ρ and c
- * alone, and is memoised: Simpson's rule in ln θ beyond the limb, the θ⁻³ tail in closed form.
+ * balanced there and the veil outside keeps the rectangle's accuracy. In the plane the outer
+ * integral is c⁴ times a function of ρ ÷ c alone, kept at steps of 0.05% in ρ ÷ c, so that a source
+ * whose radius changes every frame costs one lookup and the store stays bounded.
  */
 export function rectangleInsideLevel(rhoRad: number, scaleRad: number): number {
-  const key = `${rhoRad}:${scaleRad}`;
-  const known = insideLevels.get(key);
-  if (known !== undefined) {
-    return known;
+  const key = Math.round(Math.log(rhoRad / scaleRad) * INSIDE_STEPS_PER_LN);
+  let outer = outerIntegrals.get(key);
+  if (outer === undefined) {
+    outer = outerIntegral(Math.exp(key / INSIDE_STEPS_PER_LN));
+    outerIntegrals.set(key, outer);
   }
-  const unit: SpreadTerm = { amplitude: 1, scaleRad };
-  const halfHeight = (Math.PI * rhoRad) / 4;
-  const intervals = 4000;
-  // Beyond the limb, in ln(θ − ρ), from a millionth of the narrower scale.
-  const low = Math.log(1e-6 * Math.min(rhoRad, scaleRad));
-  const top = 1e4 * (rhoRad + scaleRad);
-  const high = Math.log(top);
-  const step = (high - low) / intervals;
-  let sum = 0;
-  for (let i = 0; i <= intervals; i += 1) {
-    const beyond = Math.exp(low + i * step);
-    const theta = rhoRad + beyond;
-    const weight = i === 0 || i === intervals ? 1 : i % 2 === 1 ? 4 : 2;
-    const r = poissonOverRectangle(unit, theta - rhoRad, theta + rhoRad, halfHeight);
-    sum += weight * r * 2 * Math.PI * theta * beyond;
-  }
-  // Far out R(θ) → 4ρY c³ ÷ θ³, so ∫ beyond the top is 2π × 4ρY c³ ÷ top.
-  const tail = (2 * Math.PI * 4 * rhoRad * halfHeight * scaleRad ** 3) / (rhoRad + top);
+  const c2 = scaleRad * scaleRad;
+  const s = rhoRad / scaleRad;
   const omega = 4 * Math.PI * Math.sin(rhoRad / 2) ** 2;
-  const outside = (sum * step) / 3 + tail;
-  const level = Math.max(
+  return Math.max(
     0,
-    (2 * Math.PI * scaleRad * scaleRad * omega - outside) / (Math.PI * rhoRad * rhoRad),
+    (2 * Math.PI * c2 * omega) / (Math.PI * rhoRad * rhoRad) - (c2 * outer) / (Math.PI * s * s),
   );
-  insideLevels.set(key, level);
-  return level;
+}
+
+/** How many ratios ρ ÷ c {@link rectangleInsideLevel} has integrated, for the tests. */
+export function insideLevelStoreSize(): number {
+  return outerIntegrals.size;
 }
 
 /**

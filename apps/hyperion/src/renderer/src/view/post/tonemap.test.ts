@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  AGX_MAX_EV,
-  AGX_MIN_EV,
-  agxSigmoid,
-  spriteToneCurve,
-  toneCurve,
-} from "../photometry/toneCurve";
+import { type Rgb, spriteToneCurve, toneCurve } from "../photometry/toneCurve";
 import { srgbEncode, tonemapTexel, tpdf } from "./tonemap";
 
-const grey = (v: number): readonly [number, number, number] => [v, v, v];
+const grey = (v: number): Rgb => [v, v, v];
 
 /**
  * Blender's AgX Base sRGB on the grey diagonal, 8-bit code × 255 at whole stops about 0.18 from −9
@@ -37,14 +31,31 @@ const BLENDER_GREY_CODES: ReadonlyArray<readonly [number, number]> = [
 ];
 
 describe("AgX in the tone-mapping pass", () => {
-  it("takes Filament's formula at pinned grey inputs", () => {
-    // Computed in f64 from Filament's AgxToneMapper (the sigmoid of log₂ x between AgxMinEv and
-    // AgxMaxEv, then pow 2.2), for grey, whose matrices cancel.
-    for (const x of [0.01, 0.18, 1, 4]) {
-      const e = (Math.log2(x) - AGX_MIN_EV) / (AGX_MAX_EV - AGX_MIN_EV);
-      expect(toneCurve(grey(x))[1]).toBeCloseTo(agxSigmoid(e) ** 2.2, 3);
+  it("takes Filament's AgX at pinned inputs", () => {
+    // Computed once in f64 by an independent reimplementation of Filament's AgxToneMapper and its
+    // ColorSpaceUtils matrices (https://github.com/google/filament/blob/main/filament/src/
+    // ToneMapper.cpp, fetched 2026-09-29), 2026-10-02: grey, a warm and a cool colour, a highlight.
+    const pins: ReadonlyArray<readonly [Rgb, Rgb]> = [
+      [grey(0.18), [0.214837, 0.214851, 0.214851]],
+      [
+        [3, 1, 0.2],
+        [0.860092, 0.595712, 0.38619],
+      ],
+      [
+        [0.02, 0.05, 0.4],
+        [0.02923, 0.110138, 0.428437],
+      ],
+      [
+        [50, 5, 1],
+        [0.982165, 0.940031, 0.878448],
+      ],
+    ];
+    for (const [input, expected] of pins) {
+      const out = toneCurve(input);
+      for (const c of [0, 1, 2] as const) {
+        expect(Math.abs(out[c] - expected[c])).toBeLessThan(2e-6);
+      }
     }
-    expect(Math.abs(toneCurve(grey(0.18))[1] - 0.2148)).toBeLessThan(1e-4);
   });
 
   it("is monotone in luminance above the toe's recovery", () => {

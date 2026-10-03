@@ -46,6 +46,14 @@ import {
 /** The colour a pass clears to: black, opaque. */
 export const CLEAR_COLOUR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
 
+/**
+ * The load operation of a frame's draws' pass: `load` when it asks to keep what an earlier
+ * submission drew and has no post-processes, whose chain starts clear; `clear` otherwise.
+ */
+export function sceneLoadOp(frame: FrameSubmission, hasPostProcesses: boolean): GPULoadOp {
+  return !hasPostProcesses && frame.colourLoad === "load" ? "load" : "clear";
+}
+
 /** The format of a post-process chain's intermediates. */
 export const INTERMEDIATE_FORMAT: GPUTextureFormat = "rgba16float";
 
@@ -319,8 +327,7 @@ export class Drawing {
     const sceneColour =
       intermediates === null ? output.colour : this.#viewOf(intermediates[0], "2d", false);
     // A frame drawn over an earlier one keeps its colour and depth (R07.T16's symbology).
-    const load: GPULoadOp =
-      intermediates === null && frame.colourLoad === "load" ? "load" : "clear";
+    const load = sceneLoadOp(frame, intermediates !== null);
     const scene = encoder.beginRenderPass({
       label: frame.label,
       colorAttachments: [

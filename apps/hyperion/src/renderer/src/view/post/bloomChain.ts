@@ -301,7 +301,8 @@ const GLARE_SOURCE_FLOATS = GLARE_SOURCE_BYTES / 4;
 /**
  * The glare sources as the tone-mapping pass's storage buffer holds them (`GlareSourceGpu` in
  * `glare.wgsl`): direction and angular radius, then the excess in the target's units (cd/m² × the
- * pre-exposure) and the solid angle, then each narrow term's level inside the disc.
+ * pre-exposure) and the solid angle, then each narrow term's level inside the disc, −1 where the
+ * source is a point for that term.
  *
  * @param preExposure - The target's pre-exposure scale, 1 ÷ (cd/m²).
  * @param terms - The view's spread function, whose narrow terms set the levels inside each disc.
@@ -317,8 +318,12 @@ export function packGlareSources(
     const rho = source.angularRadiusRad;
     const inside = (k: number): number => {
       const term = terms.poisson[k];
-      return term === undefined || rho < POINT_SOURCE_FRACTION * term.scaleRad
-        ? 0
+      if (term === undefined) {
+        return 0;
+      }
+      // −1 marks the point form, so that the pass takes the branch the twin takes.
+      return rho < POINT_SOURCE_FRACTION * term.scaleRad
+        ? -1
         : rectangleInsideLevel(rho, term.scaleRad);
     };
     out.set(
@@ -353,6 +358,9 @@ export function packGlareTerms(terms: GlareSpreadTerms): Readonly<Record<string,
   };
   if (terms.poisson.length > GLARE_POISSON_TERMS) {
     throw new Error(`a spread function has at most ${GLARE_POISSON_TERMS} narrow terms`);
+  }
+  if (terms.lorentz.length > 1 || terms.root.length > 1) {
+    throw new Error("a spread function has at most one Lorentz and one root term");
   }
   const lorentz = terms.lorentz[0];
   const root = terms.root[0];

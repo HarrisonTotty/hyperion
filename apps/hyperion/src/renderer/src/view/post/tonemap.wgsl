@@ -85,5 +85,7 @@ fn tpdf(u : f32) -> f32 {
     tpdf(textureLoad(blueNoise, (at + tile / 3u) % tile, 0).r),
     tpdf(textureLoad(blueNoise, (at + 2u * tile / 3u) % tile, 0).r),
   );
-  return vec4f(clamp(encoded + draw.dither * noise / 255.0, vec3f(0.0), vec3f(1.0)), 1.0);
+  // Black stays black: dithering a 0 would scatter code-1 texels over empty space.
+  let dither = select(draw.dither * noise / 255.0, vec3f(0.0), encoded <= vec3f(0.0));
+  return vec4f(clamp(encoded + dither, vec3f(0.0), vec3f(1.0)), 1.0);
 }

@@ -215,3 +215,13 @@ export function pause(ms: number): Promise<void> {
     setTimeout(resolve, ms);
   });
 }
+
+/** The 16 bits of the normal half float at or just below `value`, 0 for zero. */
+export function halfBits(value: number): number {
+  if (!(value > 0)) {
+    return 0;
+  }
+  const exponent = Math.floor(Math.log2(value));
+  const mantissa = Math.floor((value / 2 ** exponent - 1) * 1024);
+  return ((exponent + 15) << 10) | mantissa;
+}

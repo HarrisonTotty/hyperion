@@ -291,9 +291,11 @@ export interface FrameSubmission {
    */
   readonly encoding?: "srgb-view" | "in-pass";
   /**
-   * `clear`, the default, clears colour and depth before the draws; `load` keeps what an earlier
-   * submission to the same output drew, so that cased symbology follows the tone-mapping pass
-   * (R07.T16). Ignored where the frame has post-processes, whose chain always starts clear.
+   * `clear`, the default, clears colour and depth before the draws; `load` keeps the colour and
+   * depth an earlier submission to the same output drew, so that cased symbology follows the
+   * tone-mapping pass (R07.T16). Ignored where the frame has post-processes, whose chain always
+   * starts clear. On a view, the earlier submission must be in the same task: a canvas's texture
+   * expires once the task yields.
    */
   readonly colourLoad?: "clear" | "load";
 }

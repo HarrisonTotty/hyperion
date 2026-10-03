@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   cieGlareSpreadRaw,
   glareSpreadFunction,
+  evaluateSpread,
   glareSpreadTerms,
+  insideLevelStoreSize,
   poissonOverRectangle,
+  rectangleInsideLevel,
   glareSourceSolidAngleSr,
   glareSourceVeil,
   glareSpread,
@@ -183,5 +186,26 @@ describe("the rectangle in f32", () => {
         }
       }
     }
+  });
+});
+
+describe("the spread function's terms", () => {
+  it("are the CIE function over its integral, term for term", () => {
+    const terms = glareSpreadTerms("eye", EYE);
+    const norm = sphereIntegral((t) => cieGlareSpreadRaw(t, EYE));
+    for (const thetaDeg of [0, 0.001, 0.01, 0.1, 1, 10, 90]) {
+      const raw = cieGlareSpreadRaw(thetaDeg * DEG, EYE) / norm;
+      expect(evaluateSpread(terms, thetaDeg * DEG) / raw).toBeCloseTo(1, 9);
+    }
+  });
+});
+
+describe("the inside level's store", () => {
+  it("stays bounded while a source's radius changes every frame", () => {
+    const before = insideLevelStoreSize();
+    for (let frame = 0; frame < 10_000; frame += 1) {
+      rectangleInsideLevel(0.267 * DEG * (1 + frame * 1e-7), 0.045 * DEG);
+    }
+    expect(insideLevelStoreSize() - before).toBeLessThan(5);
   });
 });

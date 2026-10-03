@@ -7,7 +7,8 @@
 // One glare source, as `packGlareSources` packs it: the unit direction to its centre in the
 // scene's camera-relative frame and its angular radius, rad; its excess luminance per channel in
 // the target's units and its solid angle, sr; and each narrow term's level inside the disc for a
-// term of amplitude 1 (`rectangleInsideLevel`).
+// term of amplitude 1 (`rectangleInsideLevel`), or -1 where the source is a point for that term;
+// the fourth is unused.
 struct GlareSourceGpu {
   direction : vec3f,
   angularRadius : f32,
@@ -29,8 +30,6 @@ struct GlareTerms {
 }
 
 const GLARE_PI = 3.14159265358979;
-// `POINT_SOURCE_FRACTION` in `glare.ts`.
-const POINT_SOURCE_FRACTION = 0.01;
 
 // The light above the threshold, per channel: L - min(L, T).
 fn bloom_excess(value : vec3f, threshold : f32) -> vec3f {
@@ -90,15 +89,16 @@ fn glare_broad(terms : GlareTerms, theta : f32) -> f32 {
 }
 
 // One narrow term over the source: the rectangle's closed form beyond the limb and the level that
-// keeps the energy inside it, or the point form for a source below `POINT_SOURCE_FRACTION` of the
-// term's scale.
+// keeps the energy inside it, or the point form where the packed level is negative.
 fn glare_poisson(term : vec4f, theta : f32, rho : f32, solidAngle : f32, inside : f32) -> f32 {
   let a = term.x;
   let c = term.y;
   if (a == 0.0) {
     return 0.0;
   }
-  if (rho < POINT_SOURCE_FRACTION * c) {
+  // A negative level marks a source the CPU took as a point for this term, so that both twins take
+  // the same branch (`POINT_SOURCE_FRACTION` in `glare.ts` decides).
+  if (inside < 0.0) {
     let q = 1.0 + (theta / c) * (theta / c);
     return solidAngle * a / (q * sqrt(q));
   }

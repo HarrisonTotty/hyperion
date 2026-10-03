@@ -21,11 +21,13 @@ import {
   bloomImage,
   bloomKernel,
   bloomThreshold,
+  encircledEnergy,
   levelWeight,
 } from "../view/post/bloom";
 import {
   BloomChain,
   fullScreenTriangle,
+  GLARE_SOURCE_BYTES,
   packGlareSources,
   packGlareTerms,
 } from "../view/post/bloomChain";
@@ -36,11 +38,15 @@ import {
   type GlareSource,
 } from "../view/post/glare";
 import GLARE_WGSL from "../view/post/glare.wgsl?raw";
-import { type Checks, halfTexels, halfToNumber, show } from "./harness";
-import { halfBits } from "./histogram";
+import { type Checks, halfBits, halfTexels, halfToNumber, show } from "./harness";
 
 /** The check's frame: large enough that the chain's widest level keeps its energy inside it. */
 const SIZE: ViewSize = { widthPx: 512, heightPx: 512 };
+
+/** The disc's centre pixel on each axis. */
+function centreOf(): number {
+  return SIZE.widthPx / 2;
+}
 
 /** One pixel's angle, rad: 60° across 1920 px, the scale the kernel is fitted at. */
 const RAD_PER_PX = (60 * Math.PI) / 180 / 1920;
@@ -209,7 +215,7 @@ export async function checkBloom(
   };
   const sources = engine.createBuffer({
     name: "smoke glare sources",
-    bytes: 48,
+    bytes: GLARE_SOURCE_BYTES,
     usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
     category: "other",
   });
@@ -262,12 +268,29 @@ export async function checkBloom(
     excess.values[i] = bloomExcess(value, threshold);
     shown.values[i] = Math.min(value, threshold);
   });
-  const twin = bloomEnergy(shown) + bloomEnergy(bloomChain(excess, kernel, rounding));
+  const bloomed = bloomChain(excess, kernel, rounding);
+  const twinImage = bloomImage(SIZE.widthPx, SIZE.heightPx);
+  twinImage.values.forEach((_, i) => {
+    twinImage.values[i] = (shown.values[i] ?? 0) + (bloomed.values[i] ?? 0);
+  });
+  const twin = bloomEnergy(twinImage);
   const gpu = gpuRed.reduce((sum, v) => sum + v, 0);
   checks.check(
     "R07.T14.b the chain's light on the device equals its CPU twin's to 0.5%",
     Math.abs(gpu / twin - 1) < 0.005,
     `device ${gpu.toPrecision(7)}, twin ${twin.toPrecision(7)} (${rounding} rounding)`,
+  );
+  // Sample for sample, through the encircled energy about the disc: a half-texel offset or a
+  // swapped level would move it while keeping the total.
+  const gpuImage = { widthPx: SIZE.widthPx, heightPx: SIZE.heightPx, values: gpuRed };
+  const radii = [12, 16, 24, 48, 96, 192];
+  const deviceEE = encircledEnergy(gpuImage, centreOf(), centreOf(), radii);
+  const twinEE = encircledEnergy(twinImage, centreOf(), centreOf(), radii);
+  const off = radii.filter((_, k) => !(Math.abs((deviceEE[k] ?? 0) / (twinEE[k] ?? 1) - 1) < 0.01));
+  checks.check(
+    "R07.T14.b the chain's encircled energy on the device equals its twin's to 1%",
+    off.length === 0,
+    off.length === 0 ? `radii ${radii.join(", ")} px` : `off at ${off.join(", ")} px`,
   );
 
   // Stored and bloomed on the device, plus the injected veil in closed form (L_ex Ω over the

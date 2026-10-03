@@ -1215,7 +1215,8 @@ pre-exposed value, the meter class mapped to integer weights by `meterWeights`, 
 atomics with one global add per non-empty bin, read back with at most three reads in flight over
 a ring of three histogram buffers (R01's `readBuffer` makes its own staging buffer per call, so no
 mapped buffer is ever reused; if T12's bench shows that per-call staging costs, a staging ring is
-added to R01's readback in `view/engine/` under this task); a `KernelPair` with
+added to R01's readback in `view/engine/` under this task (approved 2026-10-02, item 6, through
+R01's guarded readback only)); a `KernelPair` with
 `readback: "bit-exact"` and no subgroup twin. Tests: a CPU histogram of a
 synthetic target equals the GPU's bin for bin in the smoke harness, on its `default` and
 `no-subgroups` variants; host-disc pixels are not counted under any meter; zeros land in
@@ -1273,7 +1274,9 @@ src/renderer/src/view/post`.
 `post/tonemap.wgsl`, `post/tonemap.ts` (Design notes 9 and 13): R02's `agx`, Filament's port as
 built by R02.T10.c with its header and `NOTICE` entry, included unchanged; the canvas's preferred
 format written through its non-sRGB view with the encoding in the pass (the option Design note 13
-adds to R01's engine, in `view/engine/`); static blue-noise TPDF dither of ±1 LSB in the encoded
+adds to R01's engine, in `view/engine/`; approved 2026-10-02, item 6: an opt-in per submission,
+default the sRGB view, every existing smoke check unchanged; tested by `just test-render` and the
+engine's Vitest suite; the overlay pass of T16 follows it); static blue-noise TPDF dither of ±1 LSB in the encoded
 domain; upscale from the internal resolution. Tests: `agx` against values computed once in `f64`
 from Filament's formula and pinned with their citation; monotone in luminance; an isolated star
 identical in both styles before the dither and within one code after it; the WGSL matches the
@@ -1294,8 +1297,10 @@ already). Draft, for the owner, the nomenclature entries this plan adds beyond R
 `METER LIT`, `METER DARK`, `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one
 edit of `docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. Tests: every overlay
 mark over the image has a casing stroke; plates are present for every readout; the console-ux
-skill's lint and contrast scripts pass. Acceptance: `just ci`; the guide edit is one commit for the
-owner.
+skill's lint and contrast scripts pass. Symbology over the tone-mapped image is a following
+canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view, in the same task as
+T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance: `just ci`; the guide
+edit is one commit for the owner.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -1630,7 +1635,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   65,504 ÷ the pre-exposure scale. `glareSourceVeil` is the point form, L_ex Ω PSF(θ), exact in
   energy but far too faint just outside a resolved disc's limb; ruled 2026-10-02 (orchestrator):
   T14.b adds a near-limb term per CIE core term, the half-plane closed form 2ac²(π/2 − atan(d/c))
-  at distance d beyond the limb, as max(point, half-plane), tested against a brute-force disc
+  at distance d beyond the limb, as max(point, half-plane) (withdrawn 2026-10-02, its energy unbounded; replaced by the
+  equal-area rectangle, see T14.b as built), tested against a brute-force disc
   quadrature, with a science check. `bloomKernel` costs some 35 ms per fit after a one-off
   250–700 ms for the level responses (provisional, under load): its caller refits only when the
   angular pixel scale changes materially, not each frame.
@@ -1792,8 +1798,7 @@ DARK`; the source shows the raw view id upper-cased until T7 names views as the 
   image. **The encoding near black, settled** (orchestrator, 2026-10-02): Filament's `pow(v,
 2.2)` stays in R02's `agx`, both styles, R02 untouched. Against Blender's AgX Base sRGB on the
   grey diagonal (its `AgX_Base_sRGB.cube`, GPL, read once and not committed; sixteen derived
-  codes are pinned in `tonemap.test.ts` with attribution), the pass is within 6 codes from −3
-  stops up and 16 in the toe (−7 stops: 0.7 against 10.3). Writing the sigmoid's output directly
+  codes are pinned in `tonemap.test.ts` with attribution), the pass is within 6 codes from −3 stops up and up to 16 in the toe, worst at −5 stops (7 against 23; 14 at −6, 13 at −4), shadow tones of a lit body as well as near black. Writing the sigmoid's output directly
   as the encoded value halved the toe's gap (8 codes) but was rejected: its near-linear toe made
   a faint star's displayed total vary with its sub-pixel position from 0.83 to 1.37 of the
   centred star's (R02's constancy test, bounds 0.90–1.05), stars that would twinkle as the camera

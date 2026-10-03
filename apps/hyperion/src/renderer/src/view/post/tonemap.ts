@@ -23,6 +23,8 @@ import type {
   WgslMaterialSpec,
 } from "../engine/types";
 import { type Rgb, spriteToneCurve } from "../photometry/toneCurve";
+import { packGlareTerms } from "./bloomChain";
+import type { GlareSpreadTerms } from "./glare";
 import GLARE_WGSL from "./glare.wgsl?raw";
 import TONEMAP_WGSL from "./tonemap.wgsl?raw";
 
@@ -89,8 +91,12 @@ export function tpdf(uniform: number): number {
  */
 export function tonemapTexel(light: Rgb, exposure: number, noise: Rgb | null): Rgb {
   const display = spriteToneCurve([light[0] * exposure, light[1] * exposure, light[2] * exposure]);
-  const encode = (channel: 0 | 1 | 2): number =>
-    Math.min(1, Math.max(0, srgbEncode(display[channel]) + (noise?.[channel] ?? 0) / 255));
+  // Black stays black: dithering a 0 would scatter code-1 texels over empty space.
+  const encode = (channel: 0 | 1 | 2): number => {
+    const encoded = srgbEncode(display[channel]);
+    const dither = encoded <= 0 ? 0 : (noise?.[channel] ?? 0) / 255;
+    return Math.min(1, Math.max(0, encoded + dither));
+  };
   return [encode(0), encode(1), encode(2)];
 }
 
@@ -104,7 +110,38 @@ export interface TonemapInputs {
   readonly bloomUp: TextureHandle;
   readonly blueNoise: TextureHandle;
   readonly glareSources: BufferHandle;
-  readonly uniforms: Readonly<Record<string, Float32Array>>;
+  readonly uniforms: TonemapUniforms;
+}
+
+/** The tone-mapping pass's uniforms, one member per `Draw` field of `tonemap.wgsl`. */
+export interface TonemapUniforms {
+  /** The exposure scale over the target's pre-exposure. */
+  readonly exposure: number;
+  /** The bloom threshold in the target's units (`bloomThreshold`). */
+  readonly threshold: number;
+  /** w₀, the kernel's weight of level 0 (`levelWeight(kernel, 0)`). */
+  readonly levelZeroWeight: number;
+  /** U₁'s weight (`BloomChain.levelOneWeight`). */
+  readonly levelOneWeight: number;
+  /** The glare sources in the buffer. */
+  readonly sourceCount: number;
+  /** The view's spread function (`glareSpreadTerms`). */
+  readonly terms: GlareSpreadTerms;
+  /** Whether to dither: off only for the harness's twin check. */
+  readonly dither: boolean;
+}
+
+/** The uniforms as the draw takes them, by `Draw` member name. */
+export function tonemapUniforms(values: TonemapUniforms): Readonly<Record<string, Float32Array>> {
+  return {
+    exposure: new Float32Array([values.exposure]),
+    threshold: new Float32Array([values.threshold]),
+    levelZeroWeight: new Float32Array([values.levelZeroWeight]),
+    levelOneWeight: new Float32Array([values.levelOneWeight]),
+    sourceCount: new Float32Array([values.sourceCount]),
+    dither: new Float32Array([values.dither ? 1 : 0]),
+    ...packGlareTerms(values.terms),
+  };
 }
 
 /** The tone-mapping pass's draw. */
@@ -113,7 +150,7 @@ export function tonemapDraw(inputs: TonemapInputs): DrawItem {
     mesh: inputs.mesh,
     material: inputs.material,
     offsetFromCameraM: new Float32Array(3),
-    uniforms: inputs.uniforms,
+    uniforms: tonemapUniforms(inputs.uniforms),
     textures: {
       hdrColour: inputs.hdrColour,
       bloomUp: inputs.bloomUp,

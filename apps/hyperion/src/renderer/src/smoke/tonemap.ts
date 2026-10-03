@@ -7,13 +7,12 @@
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { RenderEngine, TextureHandle, ViewSize } from "../view/engine/types";
 import type { Rgb } from "../view/photometry/toneCurve";
-import { fullScreenTriangle, packGlareTerms } from "../view/post/bloomChain";
+import { fullScreenTriangle, GLARE_SOURCE_BYTES } from "../view/post/bloomChain";
 import { BLUE_NOISE_SIDE, blueNoiseTile } from "../view/post/blueNoise";
 import { glareSpreadTerms } from "../view/post/glare";
 import { TONEMAP_MATERIAL, tonemapDraw, tonemapTexel } from "../view/post/tonemap";
 import { addCanvas } from "./frames";
-import { type Checks, halfToNumber, show } from "./harness";
-import { halfBits } from "./histogram";
+import { type Checks, halfBits, halfToNumber, show } from "./harness";
 
 /** The canvas's size, and the HDR input's at full and half resolution. */
 const CANVAS: ViewSize = { widthPx: 32, heightPx: 16 };
@@ -108,11 +107,11 @@ export async function checkTonemap(engine: RenderEngine, checks: Checks): Promis
   });
   const glareSources = engine.createBuffer({
     name: "smoke tonemap sources",
-    bytes: 48,
+    bytes: GLARE_SOURCE_BYTES,
     usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
     category: "other",
   });
-  const terms = packGlareTerms(glareSpreadTerms("eye", { ageYears: 25, pigmentation: 0.5 }));
+  const terms = glareSpreadTerms("eye", { ageYears: 25, pigmentation: 0.5 });
   const view = engine.createView(addCanvas(), "smoke tonemap view");
   view.resize(CANVAS);
 
@@ -125,13 +124,13 @@ export async function checkTonemap(engine: RenderEngine, checks: Checks): Promis
       blueNoise,
       glareSources,
       uniforms: {
-        exposure: new Float32Array([1]),
-        threshold: new Float32Array([1e9]),
-        levelZeroWeight: new Float32Array([0]),
-        levelOneWeight: new Float32Array([0]),
-        sourceCount: new Float32Array([0]),
-        dither: new Float32Array([dither]),
-        ...terms,
+        exposure: 1,
+        threshold: 1e9,
+        levelZeroWeight: 0,
+        levelOneWeight: 0,
+        sourceCount: 0,
+        terms,
+        dither: dither === 1,
       },
     });
   const frame = (hdr: TextureHandle, dither: number): Parameters<typeof view.render>[0] => ({

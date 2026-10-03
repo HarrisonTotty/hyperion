@@ -230,7 +230,10 @@ export function levelWeight(kernel: BloomKernel, level: number): number {
  * @remarks
  * Every intermediate level is a colour-attachment write and is rounded by `rounding`
  * ({@link roundToHalf}); the last step, w₀ D₀ + up(U₁), runs inside the tone-mapping pass in `f32`
- * and is not rounded. With `rounding` `null` the chain is exact, for the impulse responses.
+ * and is not rounded. With `rounding` `null` the chain is exact, for the impulse responses. The
+ * twin holds where the pass's output is at the internal resolution; when it upscales, the pass
+ * tents U₁ to the canvas's pixels and thresholds the bilinearly sampled HDR colour, which adds a
+ * little light at the edges of bright discs, since excess(interp(L)) ≤ interp(excess(L)).
  */
 export function bloomChain(
   excess: BloomImage,
