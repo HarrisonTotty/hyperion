@@ -304,11 +304,21 @@ impl Engine {
     /// is held at the bare core's state instead (plan 11, design note 16).
     #[must_use]
     pub(super) fn stripped_member(&self, i: usize) -> (Member, bool) {
-        let age = self.age;
-        let Some((track, offset)) = self.members[i].track() else {
+        let Some((_, offset)) = self.members[i].track() else {
             return (self.members[i].clone(), false);
         };
-        let track_age = (age - offset).max(0.0);
+        self.stripped_member_at(i, (self.age - offset).max(0.0))
+            .unwrap_or_else(|| (self.members[i].clone(), false))
+    }
+
+    /// [`Engine::stripped_member`] with the member's track read at `track_age` rather than at
+    /// the engine's age: for the pinned hold, which strips a bare core at its last living age
+    /// (P11.T4.g), where the track itself has already died. `None` where the member has no
+    /// envelope to lose and stays as it is.
+    #[must_use]
+    pub(super) fn stripped_member_at(&self, i: usize, track_age: f64) -> Option<(Member, bool)> {
+        let age = self.age;
+        let (track, offset) = self.members[i].track()?;
         let (mass, _) = self.current(i);
         let member = match track.remains_at(
             track_age,
@@ -323,14 +333,14 @@ impl Engine {
                     offset,
                 }
             }
-            Remains::Nothing => self.members[i].clone(),
+            Remains::Nothing => return None,
             Remains::HeliumStar(star) => Member::Track {
                 track: Arc::new(*star),
                 offset: age,
             },
-            Remains::Collapse { core, .. }
-                if i == 0 && self.pin.is_some_and(|p| p.death.age().value() > age) =>
-            {
+            Remains::Collapse {
+                core, core_radius, ..
+            } if i == 0 && self.pin.is_some_and(|p| p.death.age().value() > age) => {
                 let state = crate::stellar::StarState::new(crate::stellar::StarStateParts {
                     phase: core.phase(),
                     age: core.age(),
@@ -341,16 +351,16 @@ impl Engine {
                     mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
                     phase_fraction: core.phase_fraction(),
                 });
-                return (Member::Frozen { state }, false);
+                return Some((Member::Frozen { state, core_radius }, false));
             }
             Remains::Collapse { track, .. } => {
-                return (
+                return Some((
                     Member::Track {
                         track: Arc::new(*track),
                         offset: age,
                     },
                     true,
-                );
+                ));
             }
             Remains::WhiteDwarf {
                 phase,
@@ -363,7 +373,7 @@ impl Engine {
                 mass: Path::starting(age, mass.value()),
             },
         };
-        (member, false)
+        Some((member, false))
     }
 
     /// Member `i` stripped of its envelope now by its Roche lobe (the end of transfer from a

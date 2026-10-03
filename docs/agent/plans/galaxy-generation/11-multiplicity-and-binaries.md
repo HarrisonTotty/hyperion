@@ -782,6 +782,65 @@ subtask, and `just bench` reports the figure after T4.f.
 _As built (round 9, `bin11`): T4.a–f, unwired; nothing generated moves. See Risks, "Deviations in
 P11.T4, as built"._
 
+- **P11.T4.g The stripped hold and the stop order** (ruling p11-stripped-core, 2026-10-03, its
+  owner leans accepted: 129.4a amended, the detached stop order included, batched into the
+  version-20 bump with P14 Phase J, `swell`'s core left open; output moves). Hurley, Pols and
+  Tout (2000) §6 and Hurley, Tout and Pols (2002) §2.8: a star the binary carries whose mass is at
+  or below its core mass is a naked helium star or a white dwarf from that step.
+  - `supernova.rs` (`Engine::die`, the pinned hold): the held state is
+    `members[0].evaluate(ctx, 0, last_living(age − offset) + offset, mass, τ)`, the binary's
+    state and not the track's single-star state. If its envelope is ≤ 0, the member is first
+    replaced through `stripped_member` at that age (a helium star lives on with the pin still
+    waiting; a collapse is held at the core's state, as in 129.4c). `self.stripped[0]` is set.
+    Ruling 129.4a's text gains: "the last living state is the member's, at the binary's mass".
+  - `detached.rs` (`integrate`): the envelope ≤ 0 check on a `Shaped` member runs before any
+    `stop` is returned, and returns `Stop::Stripped(i)` in its place.
+  - `rlof.rs` (`transfer_phase`): after `accretor_events` and `donor_events`, a `Shaped` member
+    (accretor or donor) with envelope ≤ 0 is stripped (`strip`), and the pair goes on as
+    `quiet_kind` decides.
+  - `star.rs`: `Member::Frozen { state, core_radius }`. `frozen_structure` uses the held
+    structure's core radius (sse `core_radius`: R_ZHe(Mc), HPT eq. 78; the HeMS radius at τ in
+    CHeB; 5 R_WD(Mc) for degenerate cores; BSE §2.7.1), and 0.1 R is removed. A frozen state
+    built from `Remains::Collapse` takes the core track's structure.
+  - Tests (`stellar/binary/tests.rs`):
+    - **The example.** The record 0x81fd865fd000000f pair rebuilt as a `BinaryInput`. No segment
+      has a living star with M ≤ Mc in a hydrogen giant phase (HG to TPAGB). The primary is a
+      helium star (HeMS/HeHG/HeGB) from 15.457 Myr to its pinned collapse at 15.896 Myr, with
+      R < 3 R☉ throughout. No collision or common envelope after 15.69 Myr.
+    - **An invariant added to the 10³-pair suite.** At every segment's knots, no living member
+      whose phase is HG, FGB, CHeB, EAGB or TPAGB has M ≤ Mc + 10⁻⁹. No `Frozen` member has
+      R > R(track at its own mass) or Rc > R. Every `Frozen` member's Rc equals sse
+      `core_radius` for its phase and Mc.
+    - **Stop order.** A constructed pair where wind removes a `Shaped` star's envelope on the
+      step that lands on its phase boundary, and one on its pin: the strip comes first (one
+      segment fewer; the collapse's phase just before is HeMS/HeHG/HeGB).
+    - Keep 129.4c's and b64352e's tests (`a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing`
+      becomes `…_stays_a_helium_star`, golden re-blessed).
+  - **Goldens to re-bless** (at version 19, "for the version 20 batch"):
+    `stellar/binary_timelines` (expected to move broadly: segment counts from the stop order),
+    `stellar/held_bare_core_merger` (renamed if the test is), and any of `stellar/summaries`,
+    `stellar/hierarchies`, the planetary and server system goldens that move (expected to be few
+    or none). Run `golden_diff.py`, and record the counts of moved digests by cause, as ruling
+    129.4's note did.
+  - **Statistical checks** (slow, report and assert):
+    - `tests/binary_system.rs`: ruling 137's hydrogen-poor share (0.51 now) is re-measured. The
+      "Pinned preempting" collapses now count as helium stars, so expect +0.1–0.3 points. Ruling
+      123.5's marked-stripped 80% and merged 17% move by under 1 point. Ruling 140.9's ratios do
+      not move.
+    - `tests/binary_carve.rs`: redraw rates per layer within their current Poisson errors.
+    - `binary::` invariants: no pair reaches the segment cap; total mass never rises; no MS
+      star older than its lifetime.
+    - The R06 census (`tests/stellar_system.rs`, `a_hundred_thousand_systems_live_and_die_in_order`):
+      passes.
+  - **Acceptance:** `cargo test -p hyperion-sim binary::` and the tests above pass;
+    `cargo nextest run -p hyperion-sim --run-ignored only -E 'test(binary_system) | test(binary_carve)'`
+    passes with the figures recorded in Risks; determinism-auditor and science-checker reviews
+    clean; the version-20 commit (P14 Phase J's T46.f/T47.d) carries this task's goldens.
+  - **Finding left open (not this task):** `swell` (`rlof.rs`) places the new giant with
+    core = its whole mass. BSE `evolv2` keeps the accretor's core and gives it the accreted
+    envelope (`gntage`). Measured to change white-dwarf and helium-star accretors in 1.6% of
+    layer-D systems (epoch state 1.1%). Its ruling needs the BSE source checked first.
+
 ### P11.T5 Classes from state
 
 Build `BinaryClass`, `classify`: Algol and contact pairs; blue straggler (a main-sequence star above
@@ -2064,7 +2123,9 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
 - **Ruling 129.4 as built** (round 9b, `bin4f`, 2026-09-28; unwired, nothing generated moves; the
   `stellar/binary_timelines` golden moves, re-blessed at version 14 for the version 15 batch).
   - _129.4a, the pinned hold._ `Engine::die` holds a pinned primary whose own track dies first at
-    its last living state with the mass it has then (a star on its own track takes its track's
+    its last living state with the mass it has then (amended by P11.T4.g, 2026-10-03: the last
+    living state is the member's, at the binary's mass, and a bare core is stripped to its helium
+    star or white dwarf before any hold) (a star on its own track takes its track's
     living mass; the track's mass at the death is its remnant's, which the hold took before), and
     leaves the orbit as it is. Two more faults of the same kind were found and fixed: a detached
     step that lands on a star's own death took the remnant's mass at the step's end, so the orbit
@@ -2385,3 +2446,55 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   R_HeGB's 0.6–3 R☉, uncited). With a correct state the pair would stay detached and the main-
   sequence star would overflow its lobe instead. Fixing it moves generated timelines (a bump) and
   touches ruling 129.4a/c, so it waits on the owner.
+- **P11.T4.g as built** (Phase J lane, 2026-10-03; ruling p11-stripped-core with the owner's leans;
+  goldens blessed at version 19 for the version-20 batch, which P14 Phase J's T46.f/T47.d commit
+  bumps).
+  - _The hold_ is `Engine::hold` (`supernova.rs`): a carried star's state is
+    `Track::structure_at(last_living, M)`, which is `Member::evaluate`'s for a `Shaped` member read
+    at the track's age itself (adding and removing the offset could land an ulp on the death); a
+    star on its own track keeps `Track::state_at` bit for bit, its core radius from
+    `own_structure_at`. A structure with no envelope goes through the new
+    `Engine::stripped_member_at(i, track_age)` (`stripped_member` at the engine's age is that at
+    `age − offset`), which returns `None` where there is no envelope to lose; then the member is
+    frozen as before. `Remains::Collapse` gains `core_radius`, its core's structure's.
+  - _Marked stars_ (`marks.rs`) are frozen with a core radius of zero: they are never evolved, and
+    nothing reads it.
+  - _The golden._ `stellar/binary_timelines` moves in 225 of its 1,000 digests (118 with a new
+    segment count). With one change at a time on the new engine: 107 by the hold (R and L at the
+    binary's mass for the enveloped holds the ruling found slightly wrong), 6 more by the transfer
+    strip, 113 more by the detached stop order, 0 by the core radius. No other golden moved:
+    `stellar/held_bare_core_merger` is renamed `stellar/held_bare_core_helium_star` with its test.
+    The record's epoch is now two runaway neutron stars (1.485 and 1.372 M☉): the primary's
+    supernova at 15.896 Myr disrupts the pair, where the old engine merged it into one.
+  - _The example_ runs through `SystemStars::generate` in `tests/stellar_system.rs`, where the
+    regression already was, rather than as a rebuilt `BinaryInput`. Between 15.69 Myr and the
+    collapse `swell` turns the fed helium star into a core-helium-burning giant with a thin
+    envelope again and again (about every 0.03 Myr), each stripped back at once by the transfer
+    strip, so the test allows such a giant with M > Mc at each segment's start beside the helium
+    phases. R stays under 3 R☉ throughout. `swell`'s core is the finding left open.
+  - _The invariant_ (`check_no_bare_giant`, in the 60-pair and 10³-pair suites) checks M > Mc,
+    the engine's own test, not M > Mc + 10⁻⁹: a donor's wind or transfer can leave an envelope of
+    10⁻¹² M☉ at a step. It checks at each segment's start and at the knots of a carried star's mass
+    path, not between them: inside a step the core may outgrow the mass until the next step strips
+    it, as in BSE. It checks only stars the binary carries (`Shaped`): plan 06's own track ends its
+    thermally pulsing AGB at M = Mc. A held member's Rc is checked against sse's values (0,
+    R_ZHe(Mc), 5 R_WD(Mc), each held to R; core-helium burning skipped, its τ not being kept); the
+    ruling's "R ≤ R(track at its own mass)" is not checked, since `Frozen` holds no track.
+  - _The stop order test_ (`a_bare_star_at_its_phase_boundary_is_stripped_first`) builds the
+    boundary case: a 5 M☉ star carried 10⁻⁷ M☉ above its core 10 yr before the end of its gap,
+    whose core grows 4 × 10⁻⁷ M☉ in those 10 yr while the wind takes 10⁻¹⁰, so no strip is
+    predicted; it fails with the old order. The pin case is not built: it is the same branch.
+  - _Statistical checks_ (slow, all pass): ruling 137's hydrogen-poor share of core collapses
+    0.511 (0.51 before; the expected rise of 0.1–0.3 points did not show at this precision);
+    123.5's marked-stripped 1,407 of 1,753 (80.3%) and merged 295 (16.8%); `binary_carve` passes;
+    the 10³-pair invariants pass; the R06 census (`a_hundred_thousand_systems_live_and_die_in_order`)
+    passes.
+  - _Science check findings._ Citations corrected: the core-radius rule is HPT §6.3 (after
+    eq. 105) and SSE/BSE `hrdiag`, not BSE §2.7.1; the M ≤ Mc rule is HPT §6 and `hrdiag` as
+    `evolv2` calls it, not BSE §2.8. **Open, for the owner:** on the early AGB the sources give
+    Rc = min(R_HeHG(Mc, Lx, R_ZHe(Mc), L_THe), R_HeGB(Lx)) (HPT §6.3 after eq. 105; `hrdiag`
+    kw = 5), not R_ZHe(Mc) as sse's `core_radius` and the ruling's item 3 say: it grows with L to
+    2.4 R_ZHe at 10⁵ L☉ for a 4.88 M☉ core. It feeds the held EAGB stars' Rc (the common
+    envelope's core test and tides), though it moved no golden digest here. Also open: the strip
+    runs after `contact_check` in a detached step, where `evolv2` strips before its Roche and
+    collision tests (small: a bare carried star's radius is near its helium star's).

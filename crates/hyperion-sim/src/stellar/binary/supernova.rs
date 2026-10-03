@@ -58,31 +58,15 @@ impl Engine {
             return;
         };
         // A pinned primary does not die before plan 06's age: it is held at its last living
-        // state, with the mass it has then, and the orbit is left as it is (ruling 129.4a). A
-        // star on its own track has its track's mass there (the track's mass at the death itself
-        // is its remnant's); one the binary carries, the binary's.
+        // state, which is the member's own at the mass the binary gives it, and the orbit is left
+        // as it is (ruling 129.4a as amended by P11.T4.g). A star on its own track has its
+        // track's mass there (the track's mass at the death itself is its remnant's); one the
+        // binary carries, the binary's, with its radius at that mass (HPT section 7.1) and its
+        // luminosity through the small-envelope perturbation (HPT section 6.3). A star with no envelope left there is a naked helium star or a white dwarf
+        // (HPT section 6; BSE `hrdiag`): it is stripped first, and is held only if that
+        // leaves it with nothing to lose.
         if i == 0 && self.pin.is_some_and(|p| p.death.age().value() > self.age) {
-            let state = track.state_at(Years::new(last_living(self.age - offset)));
-            let mass = match &self.members[0] {
-                Member::Shaped { mass, .. } => mass.last(),
-                Member::Track { .. }
-                | Member::MainSequence { .. }
-                | Member::Cooling { .. }
-                | Member::Frozen { .. }
-                | Member::Remnant { .. }
-                | Member::Gone => state.mass().value(),
-            };
-            let held = crate::stellar::StarState::new(crate::stellar::StarStateParts {
-                phase: state.phase(),
-                age: state.age(),
-                mass: SolarMasses::new(mass),
-                core_mass: SolarMasses::new(state.core_mass().value().min(mass)),
-                luminosity: state.luminosity(),
-                radius: state.radius(),
-                mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
-                phase_fraction: state.phase_fraction(),
-            });
-            self.set_member(0, Member::Frozen { state: held });
+            self.hold(&track, offset);
             return;
         }
         let before = match &self.members[i] {
@@ -125,6 +109,69 @@ impl Engine {
         }
         let kick = self.companion_kick(i, &death, &remnant);
         self.explode(i, before, remnant, kick);
+    }
+
+    /// Holds the pinned primary, whose own track `track` (at `offset`) dies now, at its last
+    /// living state until plan 06's death age (ruling 129.4a; P11.T4.g). The state is the
+    /// member's structure at the last living age with the mass the binary gives it
+    /// ([`Member::evaluate`]'s, read at the track's age itself), and its core radius is that
+    /// structure's. A structure with no envelope (M ≤ Mc) is stripped first through
+    /// [`Engine::stripped_member_at`] at the same age: a helium star lives on with the pin still
+    /// waiting, and a bare core at or above the Chandrasekhar mass is held at the core's state
+    /// (ruling 129.4c).
+    fn hold(&mut self, track: &std::sync::Arc<sse::Track>, offset: f64) {
+        let living = last_living(self.age - offset);
+        let carried = match &self.members[0] {
+            Member::Shaped { mass, .. } => Some(mass.last()),
+            Member::Track { .. }
+            | Member::MainSequence { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => None,
+        };
+        let structure = match carried {
+            Some(mass) => Some(track.structure_at(living, mass.max(1e-6))),
+            None => track.own_structure_at(living),
+        };
+        if let Some(structure) = &structure
+            && structure.state.envelope_mass().value() <= 0.0
+            && let Some((member, collapses)) = self.stripped_member_at(0, living)
+        {
+            debug_assert!(
+                !collapses,
+                "a pinned primary's bare core is held, not exploded"
+            );
+            self.stripped[0] = true;
+            self.set_member(0, member);
+            self.kind = self.quiet_kind();
+            return;
+        }
+        // A star on its own track keeps its track's state bit for bit; one the binary carries
+        // takes its structure's at its own mass.
+        let state = match (carried, &structure) {
+            (Some(_), Some(structure)) => structure.state,
+            _ => track.state_at(Years::new(living)),
+        };
+        let mass = carried.unwrap_or_else(|| state.mass().value());
+        let held = crate::stellar::StarState::new(crate::stellar::StarStateParts {
+            phase: state.phase(),
+            age: state.age(),
+            mass: SolarMasses::new(mass),
+            core_mass: SolarMasses::new(state.core_mass().value().min(mass)),
+            luminosity: state.luminosity(),
+            radius: state.radius(),
+            mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
+            phase_fraction: state.phase_fraction(),
+        });
+        let core_radius = structure.map_or(crate::units::SolarRadii::ZERO, |s| s.core_radius);
+        self.set_member(
+            0,
+            Member::Frozen {
+                state: held,
+                core_radius,
+            },
+        );
     }
 
     /// The kick of member `i`'s `remnant` after its own `death` (plan 06's law, P06.T19), its

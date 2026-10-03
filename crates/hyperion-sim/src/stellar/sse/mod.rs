@@ -49,6 +49,8 @@ pub(crate) use track::{
     Fate, RemnantModel, Stage, bridged_origin, fate_of, is_companion_stripped, remnant_of,
 };
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
+#[cfg(test)]
+pub(crate) use track::helium_zams_radius;
 pub use track::{
     AgeInterval, Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, PhasePredicate, Track, TrackOptions,
 };
