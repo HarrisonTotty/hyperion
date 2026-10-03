@@ -1283,6 +1283,9 @@ Solar System values without a generator.
     its primary at every pericentre; `body_fixed_at` is a rotation (orthonormal to 10⁻¹²) at every
     time.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::rotation planetary::frames`.
+  - _Drafted for the owner (R07.T1, 2026-10-02):_ P14.T46.a would replace "I = 0.33–0.4 M R² by
+    class" with one moment of inertia per body that serves locking and flattening, and P14.T46.b
+    would put the body-fixed frame in the record at `Bulk` and on the wire. See Phase J.
 
 #### P14.T15 Roche limits, Hill spheres and satellite survival
 
@@ -2808,6 +2811,559 @@ nothing on the ship, and are styled as display controls, as the guide requires.
     giant barely moves, and nothing moves in `HOLD`.
 - _Slice:_ T44.a only. The first display opens held and steps; `RUN` and `HOLD` (T44.b) follow.
 
+### Phase J: rotation, figure and photometry on the wire (asked by rendering plan R07)
+
+**Accepted with amendments 2026-10-02 (decision-p14-phase-j), by a delegated decision.** Drafted by R07.T1 (2026-10-02) from
+rendering plan R07 ([Lit bodies](../rendering-and-planets/07-lit-bodies-styles-and-main-screen.md),
+Design notes 5 and 19 and task R07.T1) against this plan as built at `00f845b` (`GENERATOR_VERSION`
+19, `PROTOCOL_VERSION` 2). Nothing here is built or changes output until the owner accepts it; the
+orchestrator has a decision agent rule on it and then assigns the building. One principle is
+already decided (2026-10-02, item 5 of the rendering lanes' decisions): rotation and the pole go on
+the wire in the same subtask set as the flattening and the Saturn-like moment of inertia, under one
+`GENERATOR_VERSION` bump (driven by the moment of inertia, which moves the locking times) and one
+additive protocol change, and the wire carries the body-fixed frame's parameters, the locking
+transition included, so that the client evaluates the orientation at any emitted time. The open
+questions are listed at the end of the phase, each with the lean the draft is written to.
+
+What exists, checked in the code: P14.T14.a–c are built sim-side
+(`planetary/derive/rotation.rs`, `planetary/frames.rs`) and reached only through
+`PlanetarySystem::rotation_of`, which no record, DTO or golden reads, so the client's
+`ViewBody.rotation` is `null` for every body (`view/scene/fromServer.ts`). The moments of inertia
+are per class (`params.rs`: rocky 0.33, icy 0.34, sub-Neptune and ice giant 0.23, gas giant 0.25,
+provisional). `BulkPropertiesDto.radius_m` is the mean radius; there is no flattening, figure or
+datum anywhere. The surface state, `Atmosphere::{surface_pressure, cloud_fraction}` and the Bond
+albedo of the last atmosphere pass (`derive/atmosphere.rs`, `derive/irradiation.rs`) exist in the
+sim only; no geometric albedo or phase integral exists. `BodySummaryDto`, which R03's scene carries
+for every body (`SceneSystemDto`, `SceneBodyDto`), has no surface section; `BodySurfaceDto` is
+uninhabited.
+
+Two tasks. T46 is the decided set: the moment of inertia, rotation in the record, the flattening,
+the datum, and their wire types, pinned under the one bump. T47 is the photometric section, which
+joins T46.f's protocol change and bump if it is built by then and otherwise makes its own additive
+change and bump. Order: T46.a–e in order (T46.c reads T46.b's rate and pole), T47.a–c beside them,
+T46.f last, with T47.d inside T46.f, one bump (decision-p14-phase-j).
+
+#### P14.T46 Rotation and figure, on the wire under one bump
+
+- **P14.T46.a One moment of inertia per body, the bump's driver.** It serves both locking
+  (P14.T14.b) and flattening, and replaces P14.T14.b's "I = 0.33–0.4 M R² by class", which the
+  as-built constants already depart from. The rocky, icy and enveloped constants stay. A gas
+  giant's factor is blended in its heavy-element mass fraction Z = 1 − envelope (the composition
+  of P14.T11.d, Thorngren et al.'s `M_z` = 57.9 M⊕ (M ÷ `M_J`)^0.61, so Z is 0.18 at a Jupiter mass
+  and 0.29 at Saturn's): 0.25 at or below Jupiter's Z, 0.21 at or above Saturn's, linear between.
+  A more centrally condensed giant has the smaller factor (Hubbard and Marley 1989, Icarus 78, 102;
+  Saturn's 0.210 and Jupiter's 0.254 on NASA's fact sheets), and a blend leaves no step in the
+  flattening between two neighbouring giants. A Saturn-like giant's locking time falls by up to
+  16% (τ ∝ I), the output that moves. The criterion is open question 1. The regular moons' own
+  `MOON_MOMENT_OF_INERTIA` (0.35, `moons/regular.rs`) is retired, and `moons::regular::locking_time`
+  reads `moment_of_inertia_factor`, so a moon has one locking time (decision-p14-phase-j A1).
+- **P14.T46.b The rotation law is generated once and held, and is a `Bulk` section.** `generate`
+  derives each planet's, dwarf planet's, member's and moon's `BodyRotation` after the satellites
+  exist, by the as-built `rotation_of` path (the record at `parent_time`, the giant-impact test on
+  the children), and stores it on the body; `rotation_of` becomes a lookup with an unchanged
+  signature. A `generate_planets` system, which has no moons, holds none, and its records' rotation
+  is `NotModelled`, so no body has two rotations depending on which entry point made it.
+  `heap_bytes` (P14.T36.a) counts the stored laws. `BodyRecord` gains a `rotation` section holding
+  the `BodyFixedFrame` itself, the same at every record time, at the `Bulk` level, the level that
+  grants the radius, since a disc needs both (item 5's lean; this moves rotation out of design
+  note 16's `Surface` list, an amendment made with this subtask). It sits beside the surface section
+  rather than inside it, because `BodySummaryDto` (which the scene carries) has no surface section
+  and the surface section stays `NotModelled` until T24. A ring, a belt or the halo has
+  `NotApplicable`. `RotationLaw` exposes the parameters `angle_at` reads (`RotationLawParts`), so
+  that the wire carries them and a client evaluates W(t) by the same closed forms: the drawn phase
+  plus the linear despin's swept angle plus the capture term δ (Δ ÷ d)² before the lock, and
+  `W_p` + p `M_q`(t) on the epoch's elements after it. `FrameRotation::to_body_fixed_rotation`
+  returns `coords::BodyFixedRotation` (body-fixed to body, the transpose of the rows), as
+  `coords/body_fixed.rs` asks, so there is one rotation type. The pass that derives the law reads
+  only the mass, orbit and bulk sections and the elements; the record it builds has no rotation or
+  figure yet, and those are attached after it. T33.a's benchmark is recorded before and after the
+  change. A loss of the 1 ms target is a finding, and the remedy is deriving the law from the bulk
+  inputs alone (decision-p14-phase-j A2, A3).
+- **P14.T46.c Darwin–Radau flattening** (Murray and Dermott 1999, Solar System Dynamics, §4.6, the Darwin–Radau relation; the form of Bourda and Capitaine 2004, A&A 428, 691; the relation reproduces the planets as the check below shows). With the
+  rotational parameter q = ω² a³ ÷ GM at the equatorial radius a,
+
+  f = (5 ÷ 2) q ÷ [1 + (25 ÷ 4)(1 − (3 ÷ 2) C ÷ M a²)²],
+
+  the inverse of C ÷ M a² = (2 ÷ 3)[1 − (2 ÷ 5)√(5q ÷ 2f − 1)]. a is not known before f, so the law iterates from a = R_vol, with a = R_vol (1 − f)^(−⅓) and c = a (1 − f) (the volume kept), f clamped to the cap inside the loop, until a pass changes f by under 10⁻¹², at most 50 passes (Saturn takes 13, each pass shrinking the change about ninefold). ω is the rotation rate at the
+  record's time (`RotationLaw::rate_at`), M and R_vol the record's mass and mean radius at that
+  time, so f follows the despin and a giant's contraction continuously. The rules around it:
+  - **Hydrostatic only above a size.** Below 200 km in mean radius for an icy body
+    (`SurfaceMaterial::Ice`) and 300 km for the rest, a body is a sphere of its mean radius (the
+    `Sphere` law): it holds the shape its rock gives it, not the one its spin asks for (Lineweaver and Norman 2010, arXiv:1004.1091, the "potato radius": about 300 km for asteroids and 200 km for icy moons). The threshold gates roundness only; bodies above it can hold fossil figures (the Moon, Iapetus), which a hydrostatic law does not give. R07 asked about 250 km;
+    the split by material is decided (decision-p14-phase-j, 2).
+  - **A synchronous body's tide.** For a body locked 1:1, the static tide of its primary adds to
+    the spin's bulge. In first-order hydrostatic theory the tidal potential on a synchronous body is
+    three times the rotational one (GM_p ÷ a_orb³ = n² = ω²), giving axes in the ratio (a − c) : (b − c) : (a − b) = 4 : 1 : 3 (Dermott 1979, Icarus 37, 575; Murray and Dermott 1999, §4.7), so the
+    best axisymmetric spheroid about the pole, (a + b) ÷ 2 against c, is 2.5 times as flattened
+    as the spin alone makes it. The figure takes f × 2.5 for `SpinState::Locked(Synchronous)` (the
+    `RotationalAndTidal` law); the triaxial long axis toward the primary is not drawn (Risks). For Io with its measured C ÷ M R² of 0.378 (Anderson et al. 2001, JGR 106, 32963, to be confirmed at the build) and a 42.46 h spin, the spin alone gives a − c = 3.6 km and the factor 9.0 km, against 8.7 km from its axes 1,829.4, 1,819.4 and 1,815.7 km (Archinal et al. 2011, Celest. Mech. Dyn. Astron. 109, 101; Thomas et al. 1998, Icarus 135, 175, fit 1,829.7, 1,819.2 and 1,815.8 km); with the rocky class's 0.33, which the generator gives it once T46.a retires the moons' 0.35, 7.5 km (−13%). The step at the lock time is a recorded state change (P14.T16.b's
+    continuity test). The factor is decided (decision-p14-phase-j, 3).
+  - **A cap.** f is capped at 0.2 (the `Capped` law), as R07 asks, beyond which first-order
+    theory fails; the primordial period's break-up floor (P14.T14.a) keeps q under 1.
+  - **The check.** With the class factors (rocky 0.33, the blend's 0.25 and 0.21, enveloped 0.23)
+    and NASA's fact-sheet GM, mean radius and sidereal period, the law gives Earth 0.00334 (observed
+    0.00335, −0.5%), Mars 0.00442 (0.00589, −25%: the class's 0.33 against its 0.366 accounts for 11 points, the non-hydrostatic Tharsis load for the rest), Jupiter 0.06479
+    (0.06487, −0.1%), Saturn 0.09846 (0.09796, +0.5%; +17% at 0.25, which is why the Saturn-like
+    factor is asked), Uranus 0.02000 (0.02293, −13%: one ice-giant factor does not fit both; its observed f implies C ÷ M a² ≈ 0.27 against Neptune's 0.22; the period of Lamy et al. 2025 changes nothing) and Neptune 0.01772
+    (0.01708, +3.7%). Ceres (an icy 0.34, 9.074 h, mean radius 469.7 km) gives 0.066 against a measured 0.075 (−13%; its own factor is nearer 0.36, Park et al. 2016, Nature 537, 515, to be read). Saturn's fact-sheet period (10.656 h) is used; Mankovich et al. 2019's 10.561 h would give 0.1005 (+2.6%). The factor is C ÷ M a², the normalisation the fact sheets' giants and the relation share; locking reads the same number against the mean radius, a few per cent apart for the giants, which the locking time's Q and k₂ swamp.
+
+- **P14.T46.d The figure section.** `BodyRecord` gains `figure` at `Bulk`: the spheroid, its pole
+  (the rotation's), the moment-of-inertia factor, the law and the datum; `NotApplicable` for a
+  ring, a belt or the halo, `NotModelled` where the bulk or the rotation is.
+- **P14.T46.e The reference spheroid, the one height datum** (R07 Design note 19, ruled for the
+  rendering plans by the coordinator on 2026-09-29; R05 Design note 5, R09 Design note 17, R10).
+  A body's figure is the rotational spheroid (a, a, c) about its pole, and every height this plan
+  states or that a later generator derives from it — P14.T24.b's relief and an ocean world's sea
+  level, R09's coarse elevations, R10's terrain — is a geodetic height along that spheroid's
+  normal, not a radius from the centre: on an Earth a sphere of the mean radius would put sea level
+  7 km high at the equator and 14 km low at the poles (WGS 84: a = 6,378,137 m, 1 ÷ f =
+  298.257223563, c = 6,356,752.314 m, NIMA TR8350.2). A body with an envelope takes its 1-bar
+  level as the datum (`Datum::OneBar`), the level its radius is quoted at; every other body its
+  solid or liquid surface (`Datum::SolidSurface`). The record's `radius_m` stays the volumetric
+  mean radius, so density and gravity do not change. The type is R05's `Spheroid`, moved from
+  `hyperion_surface::test_planet` to a module of its own, `hyperion_surface::spheroid`, which
+  `test_planet` re-exports; whichever of R05.T3.b and this subtask lands first creates it, and
+  the sim (which depends on `hyperion-surface`, never the reverse) uses it. This plan adds only the
+  constructor from the volumetric radius and the accessors below; R05's point and normal functions
+  are R05's. The amendment to P14.T24.b's text ("relief … above the reference spheroid") lands
+  with this subtask. `from_volumetric` and `volumetric_radius_m` use
+  `hyperion_base::math::cbrt`. The wasm exports are unchanged, and `just gen-surface` is checked
+  unchanged (decision-p14-phase-j A5).
+- **P14.T46.f Wire types, pins and the one bump.** Two DTOs and two new fields on both
+  `BodySummaryDto` and `BodyRecordDto` (whose fields are the summary's and two more, so that a
+  list entry's code reads a whole record), optional on the wire,
+  `#[serde(default, skip_serializing_if = "Option::is_none")]` and `#[ts(optional)]`, as
+  `SceneSystemDto.place` is, so the change is additive and `PROTOCOL_VERSION` stays 2 by its own
+  rule; the server always sends them, and a client reads an absent field as an older server's
+  `not_modelled`. The rotation DTO is the frame: the pole and the equator's axes, and every
+  parameter of the law, including the locking time and the post-lock rate, so that a client
+  evaluates W(t) at any time in the clock window with no re-request. `just gen-protocol` writes
+  the TypeScript mirror; the server's `convert/planetary.rs` builds them, and the `every_body` walk
+  and the shared fixture gain them. `golden_systems_are_pinned` pins each body's frame (W at the
+  epoch and ±H, as T14's as-built note asked) and figure; the server's goldens that carry records
+  (`scene_systems.golden`) are regenerated; `frame/body_rotations.golden` pins, for the RM1 fixture
+  universe's three golden systems and a synthetic body that locks inside the window, each frame
+  and W at five times either side of the locking time and at ±1 h, ±1 d and ±1 yr of the epoch,
+  the fixture the client's twin is tested against to 10⁻⁹ rad (item 5), as
+  `frame/body_frames.golden` holds `view/camera/frames.ts`. One `GENERATOR_VERSION` bump for T46
+  (the next free version, 20 if no lane bumps in between, taken through the orchestrator; T47.d
+  rides in it, decision-p14-phase-j),
+  following the sim-determinism skill; `golden_diff.py` shows extensions only, since nothing pinned
+  reads the locking times the moment of inertia moves and no draw is added.
+- _Provides (sim):_
+
+  ```rust
+  // planetary/params.rs
+  pub const SATURN_LIKE_MOMENT_OF_INERTIA: f64 = 0.21;
+  pub const JUPITER_HEAVY_ELEMENT_FRACTION: f64;    // Z at 1 M_J from `giant_heavy_elements`
+  pub const SATURN_HEAVY_ELEMENT_FRACTION: f64;     // Z at Saturn's 95.16 M⊕, the same law
+  pub const HYDROSTATIC_RADIUS_ICE: Metres = Metres::new(2.0e5);
+  pub const HYDROSTATIC_RADIUS_ROCK: Metres = Metres::new(3.0e5);
+  pub const SYNCHRONOUS_TIDAL_FACTOR: f64 = 2.5;
+  pub const FLATTENING_CAP: f64 = 0.2;
+  // planetary/derive/rotation.rs: the signature changes, every caller passes the fractions
+  pub fn moment_of_inertia_factor(class: PlanetClass, fractions: &MassFractions) -> f64;
+  pub struct RotationLawParts {
+      pub initial_rate: f64,                 // ω₀, rad s⁻¹
+      pub locked_rate: f64,                  // n or 1.5 n, rad s⁻¹
+      pub age_at_epoch: Seconds,
+      pub locking_age: Option<Seconds>,      // τ; `None` for a body that never locks
+      pub locks_at: Option<UniverseTime>,    // within the clock's range
+      pub resonance: SpinOrbitResonance,
+      pub clock_period: Seconds,             // the orbit of q periods W_p + p M_q runs on
+      pub clock_mean_anomaly_at_epoch: Radians,
+      pub sub_primary_angle: Radians,        // W_p
+      pub phase_at_epoch: Radians,
+      pub capture_phase: Radians,            // δ
+  }
+  impl RotationLaw { pub fn parts(&self) -> RotationLawParts; }
+  // planetary/frames.rs
+  impl BodyFixedFrame {
+      pub const fn equator_quarter(&self) -> [f64; 3];   // pole × node, beside `equator_node`
+      pub const fn obliquity(&self) -> Radians;
+  }
+  impl FrameRotation { pub fn to_body_fixed_rotation(&self) -> BodyFixedRotation; }
+  // planetary/derive/figure.rs
+  pub fn rotational_parameter(rate: f64, equatorial_radius: Metres, mass: Kilograms) -> f64;
+  pub fn darwin_radau_flattening(q: f64, moment_factor: f64) -> f64;
+  pub enum FigureLaw { Sphere, Rotational, RotationalAndTidal, Capped }
+  pub enum Datum { SolidSurface, OneBar }
+  pub struct FigureInputs { pub radius: Metres, pub mass: Kilograms, pub class: PlanetClass,
+      pub fractions: MassFractions, pub rate: f64, pub state: SpinState, pub pole: [f64; 3] }
+  pub struct BodyFigure { /* spheroid, pole, moment_factor, law, datum */ }
+  impl BodyFigure {
+      pub fn derive(inputs: &FigureInputs) -> Self;
+      pub const fn spheroid(&self) -> Spheroid;
+      pub const fn pole(&self) -> [f64; 3];
+      pub const fn moment_factor(&self) -> f64;
+      pub const fn law(&self) -> FigureLaw;
+      pub const fn datum(&self) -> Datum;
+  }
+  // planetary/record.rs
+  pub enum RecordSection { /* …, */ Photometry, Figure, Rotation }   // ALL: [Self; 12], all `Bulk`
+  impl BodyRecord {
+      pub fn rotation(&self) -> &Section<BodyFixedFrame>;
+      pub fn figure(&self) -> &Section<BodyFigure>;
+  }
+  impl BodyRecordBuilder {
+      pub fn rotation(self, rotation: Section<BodyFixedFrame>) -> Self;
+      pub fn figure(self, figure: Section<BodyFigure>) -> Self;
+  }
+  // crates/hyperion-surface/src/spheroid.rs
+  pub struct Spheroid { pub equatorial_radius_m: f64, pub polar_radius_m: f64 }
+  impl Spheroid {
+      pub fn from_volumetric(radius_m: f64, flattening: f64) -> Result<Self, BuildSpheroidError>;
+      pub const fn sphere(radius_m: f64) -> Self;
+      pub fn flattening(&self) -> f64;                   // (a − c) ÷ a
+      pub fn volumetric_radius_m(&self) -> f64;          // (a² c)^⅓
+  }
+  ```
+
+  T47.c's `Photometry` section is the twelfth `RecordSection`; if T47 lands later, T46 adds
+  eleven and T47 the last.
+
+- _Provides (wire, in `crates/hyperion-protocol/src/planetary/record.rs`, mirrored by
+  `just gen-protocol` in `packages/protocol/src/generated/`):_
+
+  ```rust
+  #[serde(rename_all = "snake_case")]
+  pub enum SpinResonanceDto { Synchronous, ThreeToTwo }
+  pub struct BodyRotationDto {               // the body-fixed frame, P14.T14.c, design note 23
+      pub pole: [f64; 3],                    // unit, galactic axes
+      pub equator_node: [f64; 3],            // W is measured from it about the pole
+      pub equator_quarter: [f64; 3],         // pole × node
+      pub obliquity_rad: f64,
+      pub initial_rate_rad_s: f64,           // ω₀
+      pub locked_rate_rad_s: f64,            // the rate after the lock
+      pub age_at_epoch_s: f64,
+      pub locking_age_s: Option<f64>,        // τ from the system's birth; null: never locks
+      pub locks_at: Option<UniverseTime>,    // null: not within the clock's range
+      pub resonance: SpinResonanceDto,
+      pub clock_period_s: f64,               // the locked angle's clock, q orbital periods
+      pub clock_mean_anomaly_at_epoch_rad: f64,
+      pub sub_primary_angle_rad: f64,        // W_p
+      pub phase_at_epoch_rad: f64,
+      pub capture_phase_rad: f64,            // δ
+  }
+  #[serde(rename_all = "snake_case")] pub enum FigureLawDto { Sphere, Rotational,
+      RotationalAndTidal, Capped }
+  #[serde(rename_all = "snake_case")] pub enum FigureDatumDto { SolidSurface, OneBar }
+  pub struct BodyFigureDto {
+      pub equatorial_radius_m: f64,
+      pub polar_radius_m: f64,
+      pub flattening: f64,                   // (a − c) ÷ a
+      pub pole: [f64; 3],                    // the rotation's pole, the symmetry axis
+      pub moment_of_inertia_factor: f64,     // C ÷ M a², the one T46.a uses
+      pub law: FigureLawDto,
+      pub datum: FigureDatumDto,             // what heights are measured from
+  }
+  // on BodySummaryDto and BodyRecordDto, each
+  // #[serde(default, skip_serializing_if = "Option::is_none")] #[ts(optional)]
+  pub rotation: Option<SectionDto<BodyRotationDto>>,   // bulk
+  pub figure: Option<SectionDto<BodyFigureDto>>,       // bulk
+  ```
+
+  ```ts
+  // the generated mirror, abridged
+  export type BodyRotationDto = {
+    pole: [number, number, number];
+    equator_node: [number, number, number];
+    equator_quarter: [number, number, number];
+    obliquity_rad: number;
+    initial_rate_rad_s: number;
+    locked_rate_rad_s: number;
+    age_at_epoch_s: number;
+    locking_age_s: number | null;
+    locks_at: UniverseTime | null;
+    resonance: SpinResonanceDto;
+    clock_period_s: number;
+    clock_mean_anomaly_at_epoch_rad: number;
+    sub_primary_angle_rad: number;
+    phase_at_epoch_rad: number;
+    capture_phase_rad: number;
+  };
+  export type BodyFigureDto = {
+    equatorial_radius_m: number;
+    polar_radius_m: number;
+    flattening: number;
+    pole: [number, number, number];
+    moment_of_inertia_factor: number;
+    law: FigureLawDto;
+    datum: FigureDatumDto;
+  };
+  // BodySummaryDto and BodyRecordDto gain:
+  //   rotation?: SectionDto<BodyRotationDto>; figure?: SectionDto<BodyFigureDto>;
+  ```
+
+  The client's parsing and its twin of `body_fixed_at` are the rendering plans' (R07.T2.b for the
+  figure; the scene's `rotation` replaces `ViewBody.rotation`'s `null` through `rotation3FromRows`
+  in R03's `view/scene/fromServer.ts`, a task for the rendering lanes, listed in their report).
+  This plan touches no client file.
+
+- _Tests:_ (a) the factor is 0.25 at 1 M_J, 0.21 at Saturn's mass, continuous and monotone in Z
+  between, and the rocky, icy and enveloped constants are unchanged; the locking times of the
+  Moon, Io and Titan still satisfy P14.T14's tests; a regular moon's `DerivedMoon::locking_time`
+  equals its stored law's bit for bit. (b) `rotation_of` before and after the move
+  agrees bit for bit on every body of `sample_contexts(32, …)` other than Saturn-like giants; a
+  `generate_planets` record's rotation is `NotModelled`; W evaluated from `RotationLawParts` by a
+  plain re-implementation of the closed forms equals `RotationLaw::angle_at` to 10⁻⁹ rad at five
+  times either side of a lock inside the window and across the epoch, on a despinning, a
+  synchronous and a 3:2 body (Mercury from the Solar System table); `to_body_fixed_rotation` is the
+  transpose and passes `BodyFixedRotation::from_rows`'s checks. (c) The six-planet check above,
+  each within 2% except Mars and Uranus, whose stated departures are asserted to stay within 30%
+  and 15%; Ceres within 15%; the inverse relation returns the factor from (q, f) to 10⁻¹²; the iteration converges within 50 passes for every body, the cap included, with no NaN; f is 0 below the hydrostatic radius, never above the cap, and
+  continuous in time across ±H except at a recorded lock; Io's synchronous figure gives a − c between 8 and 10 km with its measured 0.378 supplied, and between 7 and 10 km at the class's 0.33. (d) The sections' states by kind; `degrade(MassAndOrbit)` makes both
+  `NotResolved` and `degrade(Bulk)` keeps them. (e) WGS 84 from
+  `from_volumetric(6,371,000.79 m, 1 ÷ 298.257223563)` to 1 mm in a and c; the volume kept to
+  10⁻¹²; a flattening outside [0, 1) or a radius that is not positive refused; a giant's datum is
+  `OneBar`. (f) One wire-form test per DTO, as `rust-dev.md` requires, and one per section state of
+  each new field; a summary without the fields still deserialises; `golden_diff.py` reports
+  extensions only; the Rust side of `body_rotations.golden` reproduces `angle_at` bit for bit.
+- _Files:_ `planetary/{params, system, record, frames}.rs`,
+  `planetary/derive/{rotation, figure, mod}.rs`, `planetary/moons/regular.rs`,
+  `crates/hyperion-surface/src/{spheroid, test_planet, lib}.rs`,
+  `crates/hyperion-protocol/src/{planetary/record, planetary, lib}.rs`,
+  `crates/hyperion-server/src/convert/planetary.rs`, `crates/hyperion-server/src/requests/mod.rs`
+  (the walk and `heap_bytes`), `crates/hyperion-base/src/version.rs`,
+  `crates/hyperion-sim/tests/golden/**`, `crates/hyperion-server/tests/golden/**`,
+  `packages/protocol/src/generated/`.
+- _Accept:_ `cargo test -p hyperion-surface spheroid`;
+  `cargo test -p hyperion-sim planetary::derive::rotation planetary::derive::figure` and
+  `planetary::frames planetary::record planetary::system`; T46.a–e move no golden; T46.f:
+  `cargo test -p hyperion-protocol`, `just gen-protocol-check`, `cargo test -p hyperion-server`,
+  `just ci`.
+
+#### P14.T47 The photometric section
+
+R07 Design note 5's law, computed on the server from what only the server holds, so that the
+section is the one photometric thing the client reads. I ÷ F = A f(α) [L 2μ₀ ÷ (μ₀ + μ) + (1 −
+L) μ₀], f(0) = 1, whose geometric albedo is p = A [L + ⅔ (1 − L)] (McEwen 1991, Icarus 92, 298); its disc-integrated phase
+function is Φ(α) = f(α) Φ_shape(α; L), with Φ_shape the p-weighted mix of Lommel–Seeliger's
+Φ_LS = 1 − sin(α ÷ 2) tan(α ÷ 2) ln cot(α ÷ 4) and Lambert's Φ_L = [sin α + (π − α) cos α] ÷ π
+(weights L and ⅔ (1 − L), normalised to 1 at α = 0). Per channel c ∈ {B, V, R}, f_c = Φ_t^(s_c) ÷
+Φ_shape, clamped at 4 (R07's `PHASE_F_CLAMP`) and held at its value at the template's last valid
+phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
+
+- **P14.T47.a The templates and the law.** `PhaseTemplate` and its table, one row per template:
+  the V phase curve Φ_t = 10^(−0.4 (V(α) − V(0))) from Mallama and Hilton 2018 (Astronomy and
+  Computing 25, 10, arXiv:1808.01973, eqs. 2–17; the globe-only forms for Saturn), its valid
+  range, the analogue's geometric albedos in B, V and R (Johnson R) from Mallama, Krobusek and
+  Pavlov 2017 (Icarus 282, 19, Table 7: Mercury 0.105, 0.142, 0.172; Venus 0.658, 0.689, 0.708;
+  Earth 0.512, 0.434, 0.418; Mars 0.088, 0.170, 0.288; Jupiter 0.443, 0.538, 0.495; Saturn 0.339,
+  0.499, 0.568; Uranus 0.561, 0.488, 0.202; Neptune 0.562, 0.442, 0.181), the per-channel exponents
+  and the reference Bond albedo. Valid ranges as the paper states them: Mercury observed over
+  2.1–169.5°; Venus to 179° (two pieces, joined at 163.7°); Earth (Tinetti et al. 2006's "realistic clouds" case, fitted by Mallama et al. 2017 with a spline and given as Mallama and Hilton 2018's eq. 5; no range is stated, taken over 0–180°); Mars to 50° (eq. 6;
+  eq. 7 to 120° is an average of Earth and Mercury, not data, and is not used, so the hold carries
+  Mars past 50°, as R07 states); Jupiter to 130°; Saturn's globe to 150°; Uranus to 154°; Neptune
+  to 133°. The Moon's curve is Krisciunas and Schaefer 1991 (PASP 103, 1033, eq. 9), V = −12.73 +
+  0.026 |α| + 4 × 10⁻⁹ α⁴ with α in degrees, a fit to the lunar table of Allen 1973
+  (_Astrophysical Quantities_, 3rd ed., p. 143), held past 150° (the fit gives 6.78 mag at 160°
+  against the table's 7.5) and without an opposition surge; the `moon`, `airless_ice` and
+  `snowball` templates share it. The exponents: s_B = s_V = s_R wherever the analogue has a single
+  band, as every curve here has; s is 1 for a template whose curve is its analogue's own, and for
+  a borrowed curve it is solved so that q_V is the analogue's measured q (below). Where an analogue has a measured colour phase curve (Mars, Mallama et al. 2017's Table A-4.2, B − V reddening by 0.13 mag at 50°; Venus, Table A-2.2; Mercury's coefficients there are V only and the Moon is not in the paper), s_B and s_R may be fitted (the owner's call) in closed
+  form at α_fit = min(100°, the valid limit), s_c = ln Φ_c,meas(α_fit) ÷ ln Φ_V(α_fit), so that a
+  crescent reddens by R07's 0.1–0.2 mag in B − V. q is a composite Simpson sum of 1,800 intervals
+  in a fixed order. `exponent_for` solves s for a target q by 60 steps of bisection on [0.1, 10],
+  since q falls monotonically in s. s and q are constants of each template (q does not depend on
+  L), stored as literals in `PHASE_TEMPLATES` (`exponents` and a new `phase_integral: Bands` field
+  of `TemplateRow`), which a test reproduces from `exponent_for` and `phase_integral` to 10⁻⁹.
+  `BodyPhotometry::derive` solves nothing per body (decision-p14-phase-j A6). q does not depend on L: Φ = Φ_t^s whatever L is, unless the
+  clamp acts, so L sets only the resolved disc's limb darkening and terminator (decision
+  phase-curves, computed: the Moon's curve gives q = 0.6261 at L = 1, 0.5 and 0).
+- **P14.T47.b The choice of template and the albedos** (decided 2026-10-02 by the rendering lanes'
+  decision agent, decision-phase-curves, section (b), on the check of that day that found the
+  as-built surface classes and R07's provisional templates disagreeing). The choice is built on
+  this plan's own classes, `SurfaceState` and, for an airless body, `SurfaceMaterial`
+  (`derive/atmosphere.rs`), whose albedos the state table already gives. Inputs: the record's
+  surface state and material, surface pressure, class and composition, and the Bond albedo of the
+  last atmosphere pass (moons through their `DerivedMoon`'s `DerivedBody`, which gains
+  `atmosphere()`; a belt member is `Airless` of its material, with that state's albedo). In this
+  order:
+  1. `GasEnvelope`: the giant of its class, L = 0. A `GasGiant` takes Jupiter's template below the midpoint of T46.a's blend, (Z_J + Z_S) ÷ 2 ≈ 0.237, and Saturn's at or beyond it; an `IceGiant` or
+     `SubNeptune` Neptune's (decided, decision-p14-phase-j, 5). A `GasEnvelope` body with an
+     equilibrium temperature above 150 K is `provisional` (no analogue; Sudarsky, Burrows and Pinto
+     2000, ApJ 538, 885, class II and up).
+  2. `RunawayGreenhouse`: `venus`, L = 0.
+  3. `MagmaOcean`: `magma` (Mercury's curve, L = 1, `provisional`) below 30 kPa; `venus`, L = 0,
+     at or above it (unlabelled: a thick magma ocean has no analogue either, a recorded
+     departure). Galaxy's magma albedo of 0.10 matches Mercury's, about 0.09.
+  4. `Snowball`: `snowball`, the Moon's curve, L = 1, `provisional`, routed by its state ahead of
+     any pressure rule. Its analogue is Europa: p_V 0.67, A_Bond 0.68, q 1.01 ± 0.04 (Grundy et al.
+     2007, Science 318, 234); s ≈ 0.67. The as-built snowball is cloud-free (cloud fraction 0), so
+     Earth's cloudy curve and Titan's hazy one are not used, and its air is R08's to draw.
+  5. `Airless` and `Rock`: `mercury`, L = 1 (decided, decision-p14-phase-j, 4).
+  6. `Airless` and `Ice`: `airless_ice`, the Moon's curve, L = 1, `provisional`. Its analogue is
+     Ganymede: p_V 0.43, A_Bond 0.35, q 0.80 (Squyres and Veverka 1981, Icarus 46, 137, and 1982,
+     Icarus 52, which find no significant colour dependence over 0.4–0.6 µm; Buratti 1991, Icarus
+     92, 312, gives 0.78); s ≈ 0.82. No disc-integrated V polynomial of an icy satellite is
+     published (Domingue and Verbiscer 1997, Icarus 128, 49, give Hapke fits only). L = 1 for both
+     bright ices: Buratti 1984 (Icarus 59, 392) finds Rhea and Dione lunar-like and no satellite
+     Lambertian, with L below 1 only for the brightest surfaces (p ≳ 0.9), which this plan makes
+     none of.
+  7. `Temperate`: `mars`, L = 0.5, if the surface pressure is under 30 kPa; otherwise `earth`,
+     L = 0. The 30 kPa replaces R07's 10 kPa by its own criterion, that the gas cannot hide the
+     ground: Rayleigh optical depth at 550 nm scales with the column P ÷ g, Earth's being about
+     0.097, so the Solar System table's Mars (11 kPa of nitrogen at 3.71 m s⁻², ruling 119.4) has
+     about 0.028 and a 30 kPa world at Earth's gravity about 0.029. R07's cloud condition
+     (c under 0.3) is suspended while `SurfaceState::cloud_fraction` is a constant of the state
+     (0.67 for every temperate world), and is restored when the cloud fraction depends on the
+     condensables (the open finding of the galaxy README, this plan's to build). R07's smooth
+     fallback moves its middle anchor to match: L = 1 at 100 Pa, 0.5 at 30 kPa, 0 at 100 kPa.
+
+  Albedos: for every template p_c = p_c,analogue × A_Bond ÷ A_ref, then capped so that
+  p_c q_c ≤ 1, where the analogue's p is Table 7's (Ganymede's and Europa's above; the Moon's
+  p_V 0.12, NASA's fact sheet). A_ref (`reference_bond`) is the Bond albedo the generator gives the
+  analogue body: moon and mercury 0.11, mars and earth 0.306, venus 0.76, the four giants 0.34,
+  airless_ice 0.35, magma 0.11 (Mercury's curve). snowball takes Europa's measured 0.68, since the
+  generator would not class Europa as a snowball (decision-p14-phase-j, 9). Each row's source keeps
+  the analogue's measured Bond albedo (Mercury 0.088, Mars 0.250, Jupiter 0.343, Saturn 0.342,
+  Uranus 0.300, Neptune 0.290). So every Solar System analogue in its own state is drawn with
+  Table 7's p. The state table's departures from the measured Bond albedos (Mercury, Mars, the ice
+  giants, hot giants) are findings for P14.T13.c's owner, which affect temperatures only. The stated ratio is p_V q_V ÷ A_Bond. p is defined against π a c, √(a c) being Mallama et al. 2017's radius for Saturn (their "average disk radius 57,240 km including oblateness", √(a c) for a = 60,268 and
+  c = 54,364 km; the equator-on reading is this plan's), which the client's point regime uses with T46's figure.
+
+- **P14.T47.c The section on the record.** `BodyRecord` gains `photometry` at `Bulk`; `Ok` for
+  every planet, dwarf planet, moon and member whose bulk is `Ok`, `NotApplicable` for a ring (whose
+  photometry is R11's Hapke model), a belt and the halo, `NotModelled` where the bulk is.
+- **P14.T47.d On the wire.** `BodyPhotometryDto` and the optional `photometry` field on both
+  `BodySummaryDto` and `BodyRecordDto`, as T46.f's fields are; the golden systems pin it;
+  `photometry/templates.golden` pins every template's Φ_c at 1° steps for L in {0, 0.5, 1} and its
+  q, which R07.T4.b's `lawFor` and `discIntegratedPhase` are tested against. Inside T46.f's
+  protocol change and bump if T47.a–c are built by then; otherwise an additive change of its own
+  and its own bump (new pinned output), coordinated through the orchestrator.
+- _Provides:_
+
+  ```rust
+  // planetary/derive/photometry.rs
+  pub struct Bands { pub b: f64, pub v: f64, pub r: f64 }
+  pub enum PhaseTemplate { Moon, Mercury, Mars, Venus, Earth, Jupiter, Saturn, Uranus, Neptune,
+      AirlessIce, Snowball, Magma }          // R07's `PhaseTemplateId`, in its order
+  pub struct TemplateRow { pub template: PhaseTemplate, pub albedo: Option<Bands>,
+      pub reference_bond: BondAlbedo, pub exponents: Bands, pub valid_to: Radians,
+      pub provisional: bool, pub source: &'static str }
+  pub const PHASE_TEMPLATES: [TemplateRow; 12];
+  pub const PHASE_F_CLAMP: f64 = 4.0;
+  pub fn template_phase(template: PhaseTemplate, alpha: Radians) -> f64;      // Φ_t, Φ_t(0) = 1
+  pub fn shape_phase(lunar_lambert_share: f64, alpha: Radians) -> f64;        // Φ_shape
+  pub fn channel_phase(template: PhaseTemplate, l: f64, s: f64, alpha: Radians) -> f64; // clamped
+  pub fn phase_integral(template: PhaseTemplate, l: f64, s: f64) -> f64;      // q
+  pub fn exponent_for(template: PhaseTemplate, l: f64, q: f64) -> f64;        // s, bisection
+  pub struct PhotometryInputs { pub state: SurfaceState, pub material: SurfaceMaterial,
+      pub surface_pressure: Option<Pascals>, pub cloud_fraction: f64,
+      pub surface_temperature: Kelvin, pub surface_gravity: MetresPerSecondSquared,
+      pub class: PlanetClass, pub fractions: MassFractions, pub bond: BondAlbedo }
+  pub struct BodyPhotometry { /* geometric_albedo: Bands, template, exponents: Bands,
+      lunar_lambert_share, bond_albedo, bond_ratio, provisional */ }
+  impl BodyPhotometry {
+      pub fn derive(inputs: &PhotometryInputs) -> Self;
+      pub const fn geometric_albedo(&self) -> Bands;
+      pub const fn template(&self) -> PhaseTemplate;
+      pub const fn exponents(&self) -> Bands;
+      pub const fn lunar_lambert_share(&self) -> f64;
+      pub const fn bond_albedo(&self) -> BondAlbedo;
+      pub const fn bond_ratio(&self) -> f64;              // p_V q_V ÷ A_Bond, a check only
+      pub const fn provisional(&self) -> bool;
+      pub fn phase_integral(&self) -> Bands;              // q per channel, from the law
+  }
+  impl BodyRecord { pub fn photometry(&self) -> &Section<BodyPhotometry>; }  // at `Bulk`
+  impl BodyRecordBuilder { pub fn photometry(self, p: Section<BodyPhotometry>) -> Self; }
+  // wire
+  pub struct BandsDto { pub b: f64, pub v: f64, pub r: f64 }
+  #[serde(rename_all = "snake_case")]
+  pub enum PhaseTemplateDto { Moon, Mercury, Mars, Venus, Earth, Jupiter, Saturn, Uranus,
+      Neptune, AirlessIce, Snowball, Magma }
+  pub struct BodyPhotometryDto {
+      pub geometric_albedo: BandsDto,       // p in B, V, R against π a c
+      pub phase_template: PhaseTemplateDto,
+      pub phase_exponent: BandsDto,         // s_B, s_V, s_R
+      pub lunar_lambert_share: f64,         // L, 0–1
+      pub bond_albedo: f64,                 // the state's, P14.T13.c
+      pub bond_ratio: f64,                  // p_V q_V ÷ A_Bond, a check only
+      pub provisional: bool,                // a borrowed curve (magma, airless ice, snowball)
+  }
+  // on BodySummaryDto and BodyRecordDto, optional as T46.f's:
+  pub photometry: Option<SectionDto<BodyPhotometryDto>>,  // bulk
+  ```
+
+  ```ts
+  export type BodyPhotometryDto = {
+    geometric_albedo: BandsDto;
+    phase_template: PhaseTemplateDto;
+    phase_exponent: BandsDto;
+    lunar_lambert_share: number;
+    bond_albedo: number;
+    bond_ratio: number;
+    provisional: boolean;
+  };
+  // BodySummaryDto and BodyRecordDto gain: photometry?: SectionDto<BodyPhotometryDto>;
+  ```
+
+  R07.T2.b maps it to `BodyPhotometry` (the wire's `airless_ice` to R07's `"airless-ice"`).
+
+- _Tests:_ (a) Φ_t(0) = 1 for every template; Φ_shape is 1 at 0; Lambert's q = 1.5 and
+  Lommel–Seeliger's 16 (1 − ln 2) ÷ 3 ≈ 1.6366 at L = 0 and 1 to 10⁻⁹; q falls monotonically in s,
+  and `exponent_for` inverts `phase_integral` to 10⁻⁹; Mercury's template gives q_V = 0.480 and
+  Earth's 1.311 to 0.5% (computed from eqs. 2 and 5; Mercury's against Mallama et al. 2002's
+  0.478); every q is 0.4–1.7; q is the same at L = 0, 0.5 and 1 to 10⁻⁴ for every template. (b)
+  On `derive::tests::solar_system()` (the Solar System table), Mars selects `mars` with L = 0.5,
+  Earth `earth`, Venus `venus`, Mercury `mercury` and each giant its own template; each
+  analogue's p follows p_analogue × A_Bond ÷ A_ref to 10⁻¹², so Mercury, Venus, Earth, Mars,
+  Jupiter, Saturn and Neptune of `solar_system()` reproduce Table 7's B, V and R to 10⁻¹², and
+  Uranus is drawn with Neptune's; a generated airless-ice body and a snowball each state a ratio
+  within 5% of 1 (0.43 × 0.80 ÷ 0.35 = 0.98 and 0.99); every analogue's stated ratio is asserted
+  and recorded, Mercury's (0.142 × 0.480 ÷ 0.11 = 0.62) and Earth's (0.434 × 1.311 ÷ 0.306 = 1.86)
+  among them; a gas giant at T_eq 300 K is `provisional`, one at 120 K is not; p_c q_c ≤ 1 for
+  every sampled body;
+  two calls agree bit for bit. (c) The section's states by kind and level. (d) A wire-form test per
+  DTO and per section state; `golden_diff.py` reports extensions only.
+- _Two checks for the owner_ (R07.T1's): (i) airless rock's Bond albedo of 0.11 against the
+  Moon's p_V 0.12 and a Mercury-like q of 0.48 gives a spherical albedo in V of 0.06, a ratio of
+  about 0.5 (Lane and Irvine 1973, AJ 78, 267, to be read for the Moon's own q); (ii) Earth's p_V
+  0.434 with Tinetti et al.'s curve gives A_V = 0.57 against a Bond albedo of 0.294 (Stephens et
+  al. 2015) or the table's 0.306, a ratio near 1.9. Both are asserted as findings, not failures,
+  and the state table's albedos are the owner's to revisit (P14.T13.c).
+- _Files:_ `planetary/derive/{photometry, mod}.rs`, `planetary/moons/regular.rs`
+  (`DerivedMoon::atmosphere`), `planetary/{record, system}.rs`; for T47.d the protocol, server,
+  golden and generated files of T46.f.
+- _Accept:_ `cargo test -p hyperion-sim planetary::derive::photometry planetary::record`; T47.a–c
+  move no golden; T47.d as T46.f.
+
+#### Open questions of Phase J, as decided (decision-p14-phase-j, 2026-10-02)
+
+1. **Accepted.** **Which giants are Saturn-like** (R07's "a criterion for the owner"). Lean: the blend in
+   heavy-element fraction of T46.a, 0.25 at Jupiter's Z to 0.21 at Saturn's. Alternatives: a step
+   at one Z or mass (simpler, but a 16% jump in f between neighbours), or a fixed 0.25 (Saturn
+   17% too flat). Not addressed: giants of several Jupiter masses tend toward an n = 1.5
+   polytrope's 0.205 as they grow more degenerate; the blend holds 0.25 above 1 M_J.
+2. **Accepted.** **The hydrostatic size.** Lean: 200 km for ice, 300 km for rock (Lineweaver and Norman 2010),
+   against R07's single "about 250 km". Bodies below are spheres; their real irregular shapes are
+   R09's.
+3. **Accepted.** **The synchronous tide.** Lean: take the 2.5 factor, which brings Io within 4% of its measured axes at its own 0.378 (13% short at the class's 0.33); without it every tidally locked moon is drawn 2.5 times too round. The triaxial long axis
+   is not drawn (a spheroid is the datum every rendering plan reads).
+4. **Accepted.** **Moon or Mercury for airless rock** (R07 names both). Lean: Mercury, whose curve is measured
+   over 2.1–169.5° with B, V and R albedos; the Moon's row stays as a test analogue.
+5. **Accepted.** **Uranus or Neptune for an ice giant or sub-Neptune.** Lean: Neptune for both; their Table 7 V albedos differ by about 10% (0.488 and 0.442) and both curves beyond 3° rest on Voyager alone.
+6. **The Mars template's criterion.** Decided (decision-phase-curves): 30 kPa, the cloud
+   condition suspended until the cloud fraction depends on the condensables, then restored.
+7. **Accepted.** **Where the rotation law lives.** Lean: generated once and held on the body (T46.b), which
+   costs one law per body in the cache; deriving it per record would double every record's cost,
+   since the law is read from the record at `parent_time`.
+8. **Which radius a giant's is.** Plan 13's cooling fits are quoted in Jupiter radii; the figure
+   treats the record's radius as the volumetric one at 1 bar. If a fit is normalised to an
+   equatorial radius, a giant's mean radius is about 2% too large (Jupiter's 69,911 km against
+   71,492 km); a check for P14.T11.d's owner. Decided: T46 reads the record's radius as
+   volumetric; the 2.2% excess of cool giants is P14.T11.d's to fix under its own bump (finding
+   F1).
+9. **The provisional templates' analogues.** Decided (decision-phase-curves): airless ice and
+   the snowball on the Moon's curve at L = 1 with q solved to Ganymede's 0.80 and Europa's 1.01;
+   `magma` the thin branch only. Open for the owner: whether A_analogue should be the analogue's
+   measured Bond albedo (the ruling, which scales Mercury, Mars and the ice giants by 1.17–1.25 as
+   built) or the albedo the state table gives the analogue (which reproduces Table 7 for every
+   Solar System analogue and leaves the scale to bodies that differ from theirs). Lean: the ruling,
+   with the state table's departures reported to P14.T13.c's owner. Decided: A_ref is the
+   generator's albedo for the analogue (Europa's measured 0.68 for the snowball).
+
 ## Verification
 
 The plan is done when all of the following hold.
@@ -2869,6 +3425,9 @@ it:
   block `0x0400`–`0x04FF` staying free for later body events. Surface seeds depend on `body.surface`
   and the `BodyId` alone, so the map generator's output survives any change to derivation.
 - `DetailLevel` as an ordered enum with room between levels on the wire (string names, not numbers).
+- Drafted for the owner (R07.T1, Phase J): P14.T46 makes one bump for the moment of inertia, the
+  rotation and figure sections and their pins, and one additive protocol change; P14.T47's
+  photometry rides in it (decision-p14-phase-j). Neither adds a draw or a domain tag.
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
   pulsar-planet probability, `SATELLITE_STABILITY_FRACTION`, the white dwarf pollution fit.
@@ -5844,3 +6403,19 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - _`formatEventTime`_ (P14.T35.d) tested `|seconds| ≤ H`, so a time a fraction of a second past
     +H read in the MET form, while `stepTime` holds that time beyond the window. It now uses
     `stepTime`'s edge: inside from −H to +H exactly, a time just after −H included.
+- **Phase J, accepted with amendments (decision-p14-phase-j, 2026-10-02).**
+  - The photometric template at `Bulk` reveals the surface state's family one level early;
+    accepted as observable (A9).
+  - Hot giants and warm sub-Neptunes are drawn with cold-giant templates and flagged provisional
+    until P14.T13.c gives them their own albedo (A8, F2).
+  - Giants above 1 M_J hold 0.25, though degenerate interiors tend toward 0.205.
+  - **Finding F1, for P14.T11.d (and plan 13).** Cool giants above 0.414 M_J take the coreless
+    Bobcat radius, 2.2% above Jupiter's volumetric radius at 1 M_J (ruling 8). The `radius.rs`
+    test pins the equatorial value. Fix this under its own bump.
+  - **Finding F2, for P14.T13.c.** The state table's Bond albedos depart from the analogues'
+    measured values: airless rock 0.11 against Mercury's 0.088 (the table's value is the Moon's);
+    temperate 0.306, which the Solar System's Mars takes against its 0.250; gas envelope 0.34
+    against Neptune's 0.290; and one 0.34 for every giant, hot ones included, whose Bond albedos
+    are low (Sudarsky et al. 2000 class III; measured hot-Jupiter Bond albedos mostly ≲ 0.3). These
+    affect temperatures now, and through `A_Bond ÷ A_ref` they will affect appearance once the
+    table varies within a state.

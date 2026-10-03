@@ -426,6 +426,7 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   | 12   | `resolve_system`, `subscribe`, `unsubscribe`, `alerts_observer`, `alerts_acknowledge` |
   | 14   | `system_bodies`, `body_detail`, `body_events`                                         |
   | R03  | `scene_ship`, `scene_cameras`                                                         |
+  | R06  | `sky` (size class large, `is_large`)                                                  |
 
   Plans 08, 11 and 13 add fields to existing kinds and no kind of their own. `galaxy_features` (plan
   09: the features drawn on the galaxy map) and `global_features` (plan 10: the entries of the
@@ -436,6 +437,11 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   `unsubscribe` stay plan 12's; R03 may build them, with `notification` and
   `subscription_ended` (the server's end of a subscription whose topic failed), to plan 12's design
   (P12.T9) if P12.T9 has not landed, with the scene as their first topic.
+
+  Row R06 is the rendering plan R06's (the sky), drafted by R06.T1 for this plan's owner and
+  awaiting acceptance. `sky` is in the large size class: the server's `is_large` returns true for
+  it, as that rule requires before the kind is built. Its stars and band travel as one bulk
+  payload on R03's binary frames, announced by R03's `BulkManifestDto` in the terminal response.
 
 - Server message type `notification`, for pushes. A subscription is opened by an ordinary request
   whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe`, the

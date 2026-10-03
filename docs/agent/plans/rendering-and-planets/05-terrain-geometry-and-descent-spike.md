@@ -193,9 +193,10 @@ pub fn finest_surface_height<S: HeightSource>(source: &S, dir: [f64; 3],
     cache: &mut S::Cache) -> Result<f64, S::Error>;          // the collision interpolant, DN 6
 ```
 
-The wasm entry point (T5) exports `bake_patch` to the height workers as owned typed arrays whose
-buffers the worker transfers (Design note 11), through the binding shape R04's loader established.
-T6 adds `level_table()`, which returns, per level from 0 to `MAX_LEVEL`, `level_bound_m`, the two
+The wasm entry point (T5, in R04's `src/wasm.rs`) exports `bake_patch` to the height workers as
+owned typed arrays whose buffers the worker transfers (Design note 11), through the binding shape
+R04's loader established, each export under a camel-case `js_name` as R04's `generatorVersion` is
+(`bakePatch`, `bandLimitM`, `finestSpacingM`, `levelTable`). T6 adds `level_table()`, which returns, per level from 0 to `MAX_LEVEL`, `level_bound_m`, the two
 ends of `height_range_m` and the largest vertex spacing as one `Float64Array`, so that the client's
 selection reads the bound at run time rather than from a test fixture.
 
@@ -257,7 +258,7 @@ type PlanetGeometry = {
   levels: Float64Array | null; // `level_table()`; null for R07's zero-height `mesh` regime
 };
 function planetGeometry(figure: BodyFigure, levelTable: Float64Array | null): PlanetGeometry;
-function bandLimitM(): number; // the wasm module's `band_limit_m()`, for R11 (DN 5)
+function bandLimitM(): number; // the wasm module's `bandLimitM` (Rust `band_limit_m()`), for R11 (DN 5)
 
 // bounds.ts, cull.ts
 type PatchBounds = { centre: BodyFixedVec3; radiusM: number; minH: number; maxH: number };
@@ -267,7 +268,9 @@ function aboveHorizon(b: CameraRelativeBounds, h: HorizonCone): boolean;
 
 // select.ts, grounded.ts
 type ViewSelectionInput = {
-  pose: CameraPose; // R02, rebased into the body's rotating frame
+  // R02's `CameraPose` has no rotating frame: its position relative to the body's centre and its
+  // orientation, rotated into the body-fixed axes with `rotateToBodyFixed` by the caller
+  camera: { positionM: BodyFixedVec3; orientation: Quaternion };
   fovXRad: number;
   viewport: ViewSize; // the presented size in device pixels (DN 23)
   weight: number; // 1 primary, 0.25 secondary (DN 24)
@@ -309,7 +312,9 @@ type BakedPatch = {
   boundingRadiusM: number;
 };
 class HeightWorkerPool {
-  constructor(opts: { workers: number; wasmUrl: URL });
+  // the factory makes `new Worker(new URL("./height.worker.ts", import.meta.url), { type: "module" })`;
+  // the worker imports its own `.wasm` through `?url`, as R04's probe worker does
+  constructor(opts: { workers: number; createWorker: () => WorkerLike });
   request(r: PatchRequest): void;
   reprioritise(demand: readonly PatchRequest[]): void; // each frame: re-score, drop the unwanted
   cancelStale(keep: ReadonlySet<string>): void;
@@ -318,7 +323,7 @@ class HeightWorkerPool {
 }
 
 // terrainPass.ts, shaders/terrain.wgsl: the pass through R01's adapter
-// annunciation.ts
+// annunciation.ts; the line reaches the label block through `labelStatements` (displays/view/viewRun.ts)
 function terrainAnnunciation(
   draw: DrawSet,
   sel: Selection,
@@ -341,13 +346,21 @@ const EARTH_REFERENCE: AtmosphereMedium; // Rayleigh, aerosol, ozone; cited cons
 class HillaireAtmosphere {
   constructor(engine: RenderEngine, medium: AtmosphereMedium, tables: TableSizes);
   setMedium(medium: AtmosphereMedium): void; // rebuilds the per-planet tables; the sun never does
-  drawFrame(view: ViewFrame, sun: SunState): void; // sky-view, aerial perspective, ray march
+  drawFrame(view: AtmosphereCamera, sun: SunState): void; // sky-view, aerial perspective, ray march
 }
+// not R02's `ViewFrame`, which names a coordinate frame: the camera in the body-fixed axes, as
+// selection's `ViewSelectionInput.camera`, with its field of view and presented size
+type AtmosphereCamera = {
+  positionM: BodyFixedVec3;
+  orientation: Quaternion;
+  fovXRad: number;
+  viewport: ViewSize;
+};
 const TABLE_SIZES: Record<QualitySetting, TableSizes>; // SETTINGS[s].atmosphere, for R08
 /** DN 16's lookup inputs at the camera, in `hillaire.ts` (T12.c): r = √(MN) + h, h the geodetic
  * height, and the spheroid normal μ is measured against. R08.T6.f widens the result with the
  * camera's geodetic latitude and gravity scale s = g(φ) ÷ g_ref (R08 Design note 17). */
-function atmosphereInputs(camera: ViewFrame, figure: BodyFigure): AtmosphereInputs;
+function atmosphereInputs(camera: AtmosphereCamera, figure: BodyFigure): AtmosphereInputs;
 type AtmosphereInputs = { radiusM: number; heightM: number; normal: Vec3 }; // R08 adds two fields
 ```
 
@@ -360,7 +373,9 @@ type AtmosphereInputs = { radiusM: number; heightM: number; normal: Vec3 }; // R
 `main/fdinfo.ts` (DRM fdinfo, summed over distinct client IDs) and `main/reduceTrace.ts` (the trace
 reducer); the client flag `--descent-spike` with the options of T13.c; the recipes
 `just descent-spike` and `just replay`; `tools/gpu-replay/`, a native wgpu replayer outside the
-workspace; and `renderer/src/test/fakeRenderEngine.ts`, a counting fake of R01's `RenderEngine`.
+workspace; and `renderer/src/test/countingRenderEngine.ts`, a counting fake of R01's
+`RenderEngine` (R01's own `test/fakeRenderEngine.ts`, the `ResilientEngine`'s fake, keeps its
+name and role).
 
 ### Results and records
 
@@ -447,10 +462,98 @@ its first task.
   WebAssembly.
 - **Galaxy plan 14:** nothing built. `body_fixed_at` (P14.T14.c) does not exist; the test planet
   carries its own rotation in the shape R02's rotation interface takes (Design note 14).
-- **Tree facts relied on** (checked 2026-09-29): `crates/hyperion-server/src/config.rs`'s
-  `--num-workers` / `HYPERION_WORKERS`, which the spike's single-player run caps; the client's
-  commander CLI in `apps/hyperion/src/main/cli.ts`, which gains the spike flag; the justfile's `ci`
-  recipe, which gains nothing of the spike's (Design note 20).
+- **Tree facts relied on** (checked 2026-09-29, re-checked 2026-10-02):
+  `crates/hyperion-server/src/config.rs`'s `--num-workers` / `HYPERION_WORKERS`, which the spike's
+  single-player run caps; the client's commander CLI in `apps/hyperion/src/main/cli.ts`
+  (`buildCommand`, `parseClientArgs`, `ClientArgs` of `address` and `port` only, each option read
+  by hand), which gains the spike flag; the justfile's `ci` recipe, which gains nothing of the
+  spike's (Design note 20).
+- **As built, re-validated 2026-10-02 at ce7aeb3** (the call sites below, and the tasks, use these
+  names; the sketches above are otherwise unchanged):
+  - _R01._ The engine is our own WebGPU adapter in `view/engine/webgpu/` (`createWebGpuEngine`),
+    Babylon having been dropped (R01 Design notes 23–24); shaders are standard WGSL: `@group(0)`
+    `Frame` from `view/shaders/frame.wgsl`, concatenated as a `?raw` import (as
+    `view/wireframe/submit.ts` does), `@group(1)` `Draw` (`offsetFromCameraM : vec3f`, then the
+    spec's `UniformSpec`s, checked against any `struct Draw` the source declares), `@group(2)` at
+    the declared bindings, entry points `vertexMain`/`fragmentMain` (a kernel's is `main`), each
+    registered in `WGSL_CATALOGUE` (`view/engine/catalogue.ts`, `CatalogueEntry` of kind
+    `material`, `post-process` or `compute`) with a `displayName`. Textures bind through
+    `TextureBindingSpec { name, binding, sampleType?, viewDimension? }`: a target's depth needs
+    `sampleType: "depth"`, the normals `"2d"` or `"2d-array"`, the aerial-perspective table
+    `"3d"`. `TextureSpec.dimension` is `"2d" | "3d" | "cube"`. `KernelPair` is
+    `{ name, reference, subgroup, readback: "bit-exact" | "presentation-only" }`
+    (`view/engine/kernels.ts`). Post-processes are `WgslPostProcessSpec` with
+    `PostProcessItem { postProcess, uniforms, textures? }`; `PostProcessInput` is `"hdr-colour"`
+    alone (the `depth` input was dropped, protocol decision 10), so a pass that reads depth binds
+    the target's depth through `textures`. `LoadEngineOptions` (with `importEngine` resolving
+    `{ createWebGpuEngine }`, and `gpu`, the entry point a rebuild asks) lives in `types.ts`;
+    `loadRenderEngine` returns a `ResilientEngine`. `MemoryCategory` is
+    `"render-targets" | "other"` today, and `AllocationEvent`'s `uploaded` kind carries no
+    category. A fallback adapter is the `software-adapter` condition with
+    `styleAvailability().photorealistic` false, not an error. The device is requested with
+    WebGPU's default limits (128 MiB a storage-buffer binding, 256 texture-array layers, 8,192
+    texels a 2D side), which bounds the slot layout (T11.a). No `GPUDevice` is reachable outside
+    `view/engine/webgpu/` (`engineBoundary.test.ts`); the measurement shims of T14.a and T15.a reach
+    it through `useViewEngine`'s `ViewEngineSource` parameter (`displays/view/useViewEngine.ts`),
+    by a wrapped `GPU` passed to `requestAdapterOutcome` and as `LoadEngineOptions.gpu`. The pass
+    timer times 64 passes a frame; `PassTimes.timer` is `full` only under
+    `--hyperion-gpu-timing`. `test/fakeRenderEngine.ts` exists already (R01's fake for
+    `ResilientEngine`, `FakeRenderEngine`, `FakeView`, `fakeEngineModule`) and counts nothing, as
+    does `test/fakeViewEngine.ts`; this plan's counting fake is a new file (T11.a). The smoke
+    harness's catalogue check (`renderer/src/smoke/catalogue.ts`) compiles each material and
+    draws only post-processes; a frame of a material is a hand-written check group called from
+    `renderer/src/smoke/page.ts`, as R02's `checkWireframe` is. In the main process,
+    `graphicsSwitches(options: GraphicsLaunchOptions)`, `applyGraphicsSwitches` (which merges all
+    four list switches) and `mergeSwitchValue` are in `main/graphics/switches.ts`;
+    `GPU_TIMING_SWITCH` is `"hyperion-gpu-timing"`, declared in `preload/graphicsLaunch.ts`; both
+    the timing toggle and `enable_subgroups_intel_gen9` apply only in R01's Linux `vulkan` mode.
+  - _R02._ `relativeToCamera(p, camera, origins: CameraOrigins)` and
+    `originMinusCamera(mesh: OriginRelative, camera, origins)`, whose `OriginRelative` is
+    `{ origin: ViewPosition; offsetsF32 }` (`view/coords/relative.ts`); `Rotation3`,
+    `rotation3FromRows`, `rotateToBody` and `rotateToBodyFixed` (`view/coords/rotation.ts`);
+    `FrameOrigins.bodyFixedRotation(body): Rotation3 | null`. Every `CameraPose` frame is
+    non-rotating (galactic, system, body or craft); there is no body-fixed camera frame, so
+    selection rotates the pose into the body-fixed axes itself. R02's `ViewFrame` is a coordinate
+    frame's kind, so this plan's atmosphere input is named `AtmosphereCamera` (Provides). A body's
+    rotation is a `Rotation3` evaluated at the scene's time (`ViewBody.rotation`), and
+    `frameChangeRotationAt` in `view/scenes/frameChange.ts` is the model for turning a pole and a
+    period into one. `preExpose` and `HDR_COLOUR_FORMAT` are in `view/photometry/toneCurve.ts`,
+    `agx` in `view/shaders/toneCurve.wgsl`; `ExposureControl`'s `manual` holds an
+    `ExposureTriple`, and the label block reads `EV100 15.0 MAN` from it. `TEST_HULL` is in
+    `view/scene/hull.ts`; a hand-built scene follows `KeptScene` (`view/scenes/kept.ts`) and
+    `frameChange.ts`. The label block's steady statements come from `labelStatements(run)` in
+    `displays/view/viewRun.ts` (as `ROTATION NOT YET MODELLED` does), not from its label lines.
+    `Frustum`, `HorizonCone` and `CameraRelativeBounds` are not R02's: T7.a defines them, and may
+    reuse `sphereInFrustum` from `view/wireframe/cull.ts`. The two `TERRAIN:` lines are in the
+    guide's nomenclature row, still marked draft for the owner's sign-off.
+  - _R04._ `hyperion-surface` has `src/lib.rs`, `src/tags.rs` (an empty `domain_tags! {}`) and
+    `src/wasm.rs` (a private `mod wasm` on the browser target, exporting `generatorVersion` by
+    `js_name`); no `tests/`, no `benches/`, and no dev-dependency on `hyperion-testkit` or
+    Criterion, which T1.a and T3.c add (dev-dependencies only, so the crate's runtime boundary,
+    `hyperion-base` alone, holds). Exports follow the `js_name` convention: `bakePatch`,
+    `levelTable`, `bandLimitM` and `finestSpacingM` in JavaScript for the Rust `bake_patch`,
+    `level_table`, `band_limit_m` and `finest_spacing_m`. `Stream::open(seed, tag, object)` with
+    `ObjectKey::galaxy_item(n)`; a draw number is a word index (`word_at`, `seek`). The testkit's
+    `golden!` macro takes a literal name on the browser target; `f32_digest` does not exist yet
+    (T5). `rng/tags.golden` is written by `domain_tags_are_pinned` in
+    `crates/hyperion-sim/tests/foundation_golden.rs`. `just test-slow <filter>` takes nextest
+    filters over `#[ignore = "slow: …"]` tests; `just bench -- <filter>` is a Criterion filter over
+    the workspace. The Node-environment module test pattern is `wasm/handleRequest.test.ts`: the
+    `.wasm` as a `?inline` import and `initSync({ module })`, since renderer code reads no files
+    through `node:*`. `surfaceImports.test.ts` lets only `*.worker.ts` files and tests import
+    `generated/surface/` and refuses any import of a `*.worker` module; `tsconfig.worker.json`
+    lists the worker-side modules it types (`*.worker.ts`, `wasm/handleRequest.ts`). R04's
+    loader is one-shot (it terminates its probe worker after the answer); the height workers are
+    the pool's own, and reuse its fault vocabulary (`describeLoadFailure`, `checkGeneratorVersion`).
+  - _The main process and the client's entry._ There is no `ipcMain` handler anywhere in
+    `src/main/` and no sender-checking helper; the one precedent is the smoke harness's inline
+    `event.senderFrame?.url` check in `src/smoke/main.ts`. Configuration reaches the preload only
+    through `additionalArguments` read back from `process.argv` (`serverUrlSwitch`,
+    `graphicsArguments`). `main.tsx` renders `App` unconditionally; no mode switch exists. Scripts
+    are `.mjs` files that run TypeScript through Vite's `runnerImport` (`scripts/placeShip.mjs`);
+    the repository's Node floor (22.12) does not strip types unflagged. `docs/measurements/` does
+    not exist yet. The vitest `logic` project runs every `*.test.ts` under Node unless listed in
+    `DOM_TESTS`; `*.test.tsx` run under jsdom.
 
 ## Design notes
 
@@ -547,8 +650,9 @@ re-checked against the cited source in that task, as the galaxy README's Figures
    whose outward normal is ν = M⁻¹d ÷ |M⁻¹d|, and a vertex sits at P = M·d + h·ν. A sphere is the
    case a = c. It is height above the datum, not radius, so its `f32` step at ±20 km is about 2 mm.
    `finest_level` takes the equatorial radius, where the spacing is largest (level 19 for the test
-   planet, as for 6,371 km). The wasm module also exports `band_limit_m()` and `finest_spacing_m()`,
-   `BAND_LIMIT_M` and `FINEST_SPACING_M`, for the client (T5; R11 reads the band limit). The second
+   planet, as for 6,371 km). The wasm module also exports `band_limit_m()` and `finest_spacing_m()`
+   (`bandLimitM` and `finestSpacingM` in JavaScript), `BAND_LIMIT_M` and `FINEST_SPACING_M`, for
+   the client (T5; R11 reads the band limit). The second
    channel is the morph target: at a vertex both of whose indices are even, the parent level's
    height there; at any other vertex, the parent mesh's own linear interpolation of its even
    neighbours, on the parent mesh's triangle diagonal (researched 2026-09-29; holding the parent
@@ -633,7 +737,12 @@ re-checked against the cited source in that task, as the galaxy README's Figures
     live in storage buffers indexed by slot and vertex in WGSL, tight and untiled, while normals,
     which want filtering, live in a 2D texture array or atlas with a one-texel gutter; and the
     terrain is one instanced draw over the shared 65 × 65 index buffer with a slot index per
-    instance, which also keeps the CPU's per-draw cost down. This plan's provisional budgets are 64
+    instance, which also keeps the CPU's per-draw cost down. R01's device has WebGPU's default
+    limits (re-validated 2026-10-02): at most 256 array layers, so the normals take a 2D atlas
+    (1,323 low slots or about 1,900 high ones exceed 256 layers), and at most 128 MiB a
+    storage-buffer binding, which the heights (33.8 kB a slot, about 64 MB at 1,900 slots) meet
+    and `BakedOffsets` on the high budget (101 kB a slot, about 193 MB) does not; T11.a resolves
+    that (Risks, "Default device limits"). This plan's provisional budgets are 64
     MiB on the low setting and about 400 MB on the discrete target (R10 Design note 15: 1.3 × the
     all-round peak at 100 m is about 1,900 slots, 390 MB; the frustum term alone, about 800 slots
     and 165 MB, would fit 256 MiB, and R10.T14.b chooses between them); R10 replaces them with its
@@ -743,9 +852,12 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     planet's rotation. Until P14.T14.c's `body_fixed_at` exists the test planet carries a fixed pole
     and a sidereal period of 86,164.0905 s (IERS; re-checked in T13.a) in the shape R02's rotation
     interface takes, reducing the angle from the integer span since its epoch, as `body_fixed_at`
-    will. Patch origins are body-fixed `f64` vectors (R02's `ViewPosition` of kind `body_fixed`)
+    will. That shape, as built, is a `Rotation3` evaluated at each frame's time (R02's
+    `ViewBody.rotation`, read through `FrameOrigins.bodyFixedRotation`), built with
+    `rotation3FromRows` as `frameChangeRotationAt` in `view/scenes/frameChange.ts` builds its own.
+    Patch origins are body-fixed `f64` vectors (R02's `ViewPosition` of kind `body_fixed`)
     rotated into the body frame in `f64` once a frame and then differenced against the camera
-    (R02).
+    (R02's `originMinusCamera`).
 15. **The level bound** (researched 2026-09-29). ε_n is a hard analytic bound on the distance
     between the level-n mesh and the finest one: the sum of the omitted octaves' certified maxima
     plus level n's linear-interpolation error, B ÷ σ_noise × Σσ_k over the omitted octaves plus
@@ -851,7 +963,9 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     second requested, baked and made resident, against the predicted demand (Design note 19); upload
     bytes from the engine's `writeBuffer` and `writeTexture` tally (R01's `uploaded` events);
     pipeline creations after warm-up, from a shim on `createRenderPipeline`, `createComputePipeline`
-    and their asynchronous forms, each late one logged with its label, cold and warm caches run
+    and their asynchronous forms (installed on the device through a wrapped `GPU` handed to the
+    spike's `ViewEngineSource`, since no device is reachable outside R01's adapter), each late one
+    logged with its label, cold and warm caches run
     separately; garbage-collection pauses per thread from V8's GC trace slices; and memory at 1 Hz:
     `app.getAppMetrics()` and the renderer's `process.getProcessMemoryInfo()`, the GPU process's DRM
     fdinfo (`drm-total-*`, `drm-resident-*`, summed over client IDs, since ANGLE and Dawn open their
@@ -865,7 +979,8 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     default (Dawn's `timestamp_quantization` toggle, mask `0xFFFF0000` on the low word), which the
     brainstorm's "the forced switches make available, uncoarsened" gets wrong; measurement runs
     alone lift it through R01's `gpuTiming` option (`GPU_TIMING_SWITCH`), which the spike flag turns
-    on before `ready`. The safety toggles of Design note 22 are merged into both of R01's lists,
+    on before `ready` (R01 applies it, like `enable_subgroups_intel_gen9`, only in its Linux `vulkan`
+    mode, so a run elsewhere records `PassTimes.timer` as `quantized`). The safety toggles of Design note 22 are merged into both of R01's lists,
     `--enable-dawn-features` and `--disable-dawn-features`, with `mergeSwitchValue`, since appending
     a second switch would replace the first (R01 Design note 2). `gpuTiming` already puts
     `timestamp_quantization` in the disable list, so a run with timing on and safety off carries one
@@ -926,7 +1041,9 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     spike runs in `just ci`, whose checks stay the CPU tests and the goldens on three targets. The
     SwiftShader smoke test (`just test-render`, R01's harness: every shader compiles and a frame
     completes with finite texels, with and without `shader-f16` and `subgroups`) gains the terrain
-    and atmosphere passes. It stays outside `just ci`, as the roadmap's conventions have it, and the
+    and atmosphere passes: the catalogue check compiles them, and their frames are hand-written
+    check groups in `renderer/src/smoke/`, called from `page.ts` as R02's `checkWireframe` is. It
+    stays outside `just ci`, as the roadmap's conventions have it, and the
     tasks that add those passes run it in their own gates (T11.b, T12.b, T12.c). The native replayer
     is `tools/gpu-replay/`, a Rust binary with its own `[workspace]` table outside `crates/`. The
     root manifest's `members = ["crates/*"]` and the replayer's own `[workspace]` table already keep
@@ -1009,7 +1126,9 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     its plate, with no status colour and no flashing; a condition must hold for 250 ms before it
     shows and clear for 1 s before it goes, so that a patch arriving mid-frame cannot make the line
     flicker, which also keeps it within the guide's three-flashes-a-second limit. The wording is
-    item 7 of the guide edits R02 drafts for the owner; this plan builds to the draft.
+    item 7 of the guide edits R02 drafts for the owner; this plan builds to the draft (in the
+    guide's nomenclature row, still marked draft on 2026-10-02). The line is one of the label
+    block's steady statements, from `labelStatements` in `displays/view/viewRun.ts`.
 24. **Streaming priority across views.** Demand is the union of every streaming view's selection.
     Each request's priority is the largest over the views that want it of w_view × (ρ ÷ τ), the
     screen-space error excess of the ancestor drawn in its place, with w_view 1 for the primary view
@@ -1049,14 +1168,40 @@ LIMITED` whenever terrain is in view. Full depth under grounded bodies on every 
 ## Tasks
 
 T1 to T6 are Rust in `crates/hyperion-surface/` and a chain: T1.a, then T1.b and T3.a side by side,
-then T2 and T3.b (which reads T1.b's spacing), T3.c, T4, T5 and T6. T7 to T9 are pure TypeScript and
-follow T2 and T6, whose level table they read. T10 needs T5, T8 and R04's WebAssembly load. T11
-needs T4, T7, T8 and T10, and R01's answers to this plan's asks (Consumes); T12 needs only R01 and
-R02, and T12.c the depth-texture ask, and can run beside everything from T1; T12.d, the owner's
-licence ruling, blocks nothing. T13 and T14 need T9 to T12.c. T15 follows T14. T16 and T17, the
-runs, need everything before them; T18 follows both, and T19 closes. Every Rust task runs under the
-sim-determinism skill's "Hazards across targets" section (R04.T6) and is audited by the determinism
-auditor; every renderer task that touches the label block follows the `console-ux` skill.
+then T2 and T3.b (which reads T1.b's spacing), T3.c, T4.a, then T4.b and T4.c side by side, T5 and
+T6. T7 to T9 are pure TypeScript and follow T2 and T6, whose level table they read. T10 needs T5,
+T8 and R04's WebAssembly load. T11 needs T4, T7, T8 and T10, and R01's answers to this plan's asks
+(Consumes); T12 needs only R01 and R02, and T12.c the depth-texture ask, and can run beside
+everything from T1; T12.d, the owner's licence ruling, blocks nothing. T13 and T14 need T9 to T12.c.
+T15 follows T14. T16 and T17, the runs, need everything before them; T18 follows both, and T19
+closes. Every Rust task runs under the sim-determinism skill's "Hazards across targets" section
+(R04.T6) and is audited by the determinism auditor; every renderer task that touches the label
+block follows the `console-ux` skill.
+
+Refined on re-validation (2026-10-02), from the code each task touches:
+
+- T7.a's `null`-table path and T7.b's `qualitySetting.ts` are what R07 and R06 wait on; T7.a needs
+  T6's golden only for its pinned-table test.
+- T8 needs only T7.b's `Selection` type; T10.a only T7.d's `PatchRequest` and T8's cache. T9 needs
+  T7 and T8.
+- T11.a needs T8's `SlotLayout` and nothing of T10; T11.b needs T4.b's golden and T11.a; T11.c
+  needs T7, T10 and T11.b.
+- T12.a and T12.b need nothing of this plan. T12.c also needs T7.b (it fills
+  `SETTINGS[s].atmosphere`) and T11.a (its tests use the counting fake).
+- T13.a needs only T6, T7 and T8 (its fixed-step run is CPU-only). T13.b needs T7.c, T11.c and
+  T12.c. T13.c needs T10.b and T13.b for its `--smoke` acceptance.
+- T14.b and T14.c are main-process code that needs no renderer task and may land before T13.c,
+  the first of them creating `main/spike.ts` (T13.c then adds its IPC handlers). T14.a needs T11.a
+  and T13.b. T15.a needs T13.c (`--capture`) and T14.a's shim seam; T15.b needs only T15.a's
+  capture format, and T15.c follows T15.b.
+- Steps that need a visible window, a real vsync, a quiet machine or a display change are pending
+  by hand for the owner, with their harness and exact commands prepared by the implementing
+  lane, which never shows a window on the development machine's display (`:0`): T11.c's and
+  T12.c's looks, T13.c's full descent, T14.c's visible run, T15.c's presented replay, T16 (the
+  owner's laptop), T17, and every timing that needs a quiet machine (T3.c's bench and the runs of
+  Design note 27). Hidden runs (`show: false` with offscreen rendering, or SwiftShader headless,
+  under `setsid timeout --kill-after=10` with a fresh `--user-data-dir`, the process group killed
+  after) are the lanes' own. T18 and T19 wait on T16 and T17.
 
 Rust files are under `crates/hyperion-surface/` and TypeScript files under
 `apps/hyperion/src/renderer/src/` unless a path says otherwise.
@@ -1066,9 +1211,12 @@ Rust files are under `crates/hyperion-surface/` and TypeScript files under
 **R05.T1.a The warp and the faces.** `cube::{Face, FaceUv, st_to_uv, uv_to_st, face_uv_to_xyz,
 xyz_to_face_uv}` per Design note 2, with the warp and its inverse cited to S2's `s2coords.h`
 (re-check the quadratic forms and the area constants there), and `TEST_PLANET_VERSION = 1` at the
-crate root, the header every surface golden writes (Design note 13).
+crate root, the header every surface golden writes (Design note 13). The crate gains
+`hyperion-testkit` as a dev-dependency here (it has none; the testkit depends on `libm` alone), so
+that later tasks do not each edit the manifest. Every test module carries R04's
+`wasm_bindgen_test as test` import.
 
-- Files: `src/cube.rs`, `src/lib.rs`.
+- Files: `src/cube.rs`, `src/lib.rs`, `Cargo.toml` (`[dev-dependencies]`).
 - Tests: `uv_to_st(st_to_uv(s))` returns s to one ulp over 10⁴ values and exactly at 0, ¼, ½, ¾ and
   1; `xyz_to_face_uv(face_uv_to_xyz(f))` round-trips to 10⁻¹⁵ in u and v away from face edges;
   every direction has exactly one face, ties on edges and corners resolved by the lowest index;
@@ -1111,7 +1259,10 @@ radii, written as hexadecimal bits by the testkit's writer under `TEST_PLANET_VE
 (Design note 13). R04's checks assert it on `wasm32-wasip1` and `wasm32-unknown-unknown`. The
 client's `view/terrain/cube.ts` and `patchKey.ts` mirror the Rust functions line for line, and a
 vitest reads the same golden file and asserts every value bit for bit (a `Float64Array` over the
-parsed bits).
+parsed bits). The vitest imports the golden as a `?raw` import, as R04's `handleRequest.test.ts`
+reads `version.rs`, since renderer code reads no files through `node:*`. The crate's first
+integration test follows R04 Design note 12: the `golden!` macro with a literal name (which the
+browser target embeds), the bless path in a `native_only` module.
 
 - Files: `tests/cube_golden.rs`, `tests/golden/cube_sphere.golden`, `view/terrain/cube.ts`,
   `view/terrain/patchKey.ts`, `view/terrain/cube.test.ts`.
@@ -1132,10 +1283,14 @@ module documentation of which integers go into the object word and the draw numb
 (grid search at 1/256 of a cell with a Lipschitz margin; 10⁶ random points for σ_noise) and pinned
 as constants that the test recomputes.
 
-- Files: `src/noise.rs`, `src/num.rs`, the surface crate's tag registry file (`src/tags.rs`), and
+- Files: `src/noise.rs`, `src/num.rs`, the surface crate's tag registry file (`src/tags.rs`, whose
+  `domain_tags! {}` gains `TEST_PLANET: SelfTest = "selftest.surface.test_planet";`), and
   `crates/hyperion-sim/tests/golden/rng/tags.golden`, which prints the three registries (R04
-  Design note 4) and is re-blessed for the new name with no `GENERATOR_VERSION` bump, as tag
-  additions have been before.
+  Design note 4; written by `domain_tags_are_pinned` in
+  `crates/hyperion-sim/tests/foundation_golden.rs`) and is re-blessed with `just bless` for the
+  new name with no `GENERATOR_VERSION` bump, as tag additions have been before. The lattice
+  stream is `Stream::open(seed, TEST_PLANET, ObjectKey::galaxy_item(packed))`, its draw number a
+  word index (`word_at`).
 - Tests: the gradient agrees with a central difference to 10⁻⁶ relative at 10⁴ points; the
   ensemble mean over 10⁶ points is zero within three standard errors; no value exceeds B; noise
   values over a patch-sized lattice box are identical whether the cache is filled in raster,
@@ -1144,7 +1299,8 @@ as constants that the test recomputes.
   the inputs are known at compile time (`black_box`), and `num::max` of the pair is +0.0 both
   ways; the tag registry's collision check still passes.
 - Acceptance: `cargo test -p hyperion-surface noise::` and `cargo test -p hyperion-surface num::`;
-  `just test-slow` runs `noise_bound_certified`.
+  `just test-slow noise_bound_certified` runs it (an `#[ignore = "slow: …"]` test, selected by the
+  nextest filter).
 
 **R05.T3.b The octave stack.** `Spheroid` and the test planet's WGS 84 figure (Design note 5,
 re-checked against NIMA TR8350.2), `TestPlanet`, `TEST_PLANET`, `height`, `octaves_at`,
@@ -1165,20 +1321,23 @@ fixed point set, and the ridged switch with its pinned mean.
   profiles sampled at 0.125 m, is recorded in the module documentation as an RMS in millimetres (a
   finding if it exceeds 1 cm).
 - Acceptance: `cargo test -p hyperion-surface test_planet::`; the statistics under
-  `just test-slow`.
+  `just test-slow test_planet::`.
 
 **R05.T3.c Goldens and cost.** A golden of `height` and its gradient at 500 fixed directions and
 levels, ridged on and off, asserted on native and both wasm targets through R04's checks, and a
 Criterion bench of a 65 × 65 bake's worth of points with and without the lattice cache.
 
 - Files: `tests/test_planet_golden.rs`, `tests/golden/test_planet.golden`,
-  `benches/test_planet.rs`.
+  `benches/test_planet.rs`, `Cargo.toml` (Criterion as a dev-dependency from the workspace, and
+  `[[bench]] name = "test_planet" harness = false`; the `[lib]`'s `bench = false` stays).
 - Tests: the golden; the bench.
 - Acceptance: `just ci` green on all three targets; `just bench -- test_planet` reports the
   microseconds a point with its gradient, recorded in the module documentation with the machine and
   its load average, measured on a quiet machine (Design note 27); a figure taken while other work
   shares the machine is marked provisional and re-measured. About 2 µs cached and 6 µs uncached are
-  the research estimate and 10 µs the budget; more than 10 µs is a finding for T16.
+  the research estimate and 10 µs the budget; more than 10 µs is a finding for T16. While other
+  lanes share the machine the lane records a provisional figure, and the quiet-machine run is
+  pending for the owner.
 
 ### R05.T4 The patch bake
 
@@ -1241,9 +1400,12 @@ patches, each array's `hyperion_testkit::golden::f32_digest` and the scalars' bi
 every target. The testkit gains `f32_digest`: FNV-1a 64 over each value's little-endian IEEE 754
 bits in order, documented so that a TypeScript twin over a `Float32Array`'s bytes reproduces it
 (T10.b); float bits are hashed there and nowhere in the surface crate (Design note 13). The entry
-also exports `band_limit_m()` and `finest_spacing_m()` (Design note 5).
+also exports `band_limit_m()` and `finest_spacing_m()` (Design note 5). Each export takes a
+camel-case `js_name` (`bakePatch`, `bandLimitM`, `finestSpacingM`), beside R04's
+`generatorVersion`, and `just gen-surface` regenerates the client's glue.
 
-- Files: `src/wasm.rs` (under `cfg(target_arch = "wasm32")`), `tests/bake_golden.rs`,
+- Files: `src/wasm.rs` (R04's private `mod wasm`, under
+  `cfg(all(target_arch = "wasm32", target_os = "unknown"))`, extended), `tests/bake_golden.rs`,
   `tests/golden/bake.golden`, `crates/hyperion-testkit/src/golden.rs`.
 - Tests: the golden on all three targets; `f32_digest` of a fixed slice against a hand-computed
   FNV-1a value, and a `-0.0` and `0.0` pair giving different digests; the two exported constants
@@ -1255,7 +1417,7 @@ also exports `band_limit_m()` and `finest_spacing_m()` (Design note 5).
 
 `TestPlanet::level_bound_m(n)`, its `HeightSource` bound: the analytic bound of Design note 15 per
 level from the octave table, B, σ_noise and the interpolation term, with its derivation in the
-documentation; the wasm entry's `level_table()` (Provides), which hands the client the bound, the
+documentation; the wasm entry's `level_table()` (Provides; `levelTable` in JavaScript), which hands the client the bound, the
 height range and the largest spacing per level at run time; a level-table golden
 (`tests/golden/level_table.golden`) that the client's test pins its parsed table against; and the
 slow test that measures the mesh-to-mesh distance |S_n(p) − S_f(p)| between each level's mesh and
@@ -1269,7 +1431,7 @@ through its own vertices on the same diagonal rule.
   owner's ruling on the selection bound (Design note 15), not failed; the implied
   patch-to-distance ratio k_n = ε_n ÷ (S_n τ θ_px) at τ = 1 px, 1080p and 60° is written out and
   recorded in the documentation for T13.a; the level-table golden on all three targets.
-- Acceptance: `just test-slow` runs `level_bound_holds`; `just ci`; the ratios are in the module
+- Acceptance: `just test-slow level_bound_holds` runs it; `just ci`; the ratios are in the module
   documentation.
 
 ### R05.T7 Selection
@@ -1279,7 +1441,9 @@ the figure and the wasm module's `level_table()` (T6), or with a null table for 
 reference spheroid with no height worker, which R07's `mesh` regime asked for (R07 Design notes 3
 and 19) and R07.T9 uses; `bandLimitM`; `patchBounds`, from the mirror and the table's per-level
 height ranges; and `inFrustum` and `aboveHorizon` (Design note 8), all in `f64` on camera-relative
-vectors from R02's differencing.
+vectors from R02's differencing. `Frustum`, `HorizonCone` and `CameraRelativeBounds` are this
+task's own types (R02 has none; its `sphereInFrustum` in `view/wireframe/cull.ts` may be reused for
+the sphere stage). The pinned-table test reads `level_table.golden` as a `?raw` import.
 
 - Files: `view/terrain/planet.ts`, `view/terrain/bounds.ts`, `view/terrain/cull.ts`, their tests.
 - Tests: `planetGeometry` over the table parsed from T6's `level_table.golden` reproduces every
@@ -1297,7 +1461,9 @@ vectors from R02's differencing.
 **R05.T7.b The selection.** `QualitySetting`, `ViewSettings`, `SETTINGS` and `TERRAIN_SETTINGS`
 (Design note 26), which selection first reads, with `atmosphere` typed and filled by T12.c;
 `selectPatches` and `screenSpaceErrorPx` (Design note 7), with the restricted quadtree enforced
-within and across faces.
+within and across faces. Each view's camera arrives in the body-fixed axes (Provides,
+`ViewSelectionInput.camera`): the caller rotates R02's non-rotating `CameraPose` with
+`rotateToBodyFixed` and the body's `Rotation3`.
 
 - Files: `view/quality/qualitySetting.ts`, its test, `view/terrain/select.ts`,
   `view/terrain/select.test.ts`.
@@ -1354,9 +1520,13 @@ lists each drawn patch's slot index for the instanced draw.
 
 ### R05.T9 The annunciations
 
-`terrainAnnunciation` and its debounce (Design note 23), shown in R02's label block.
+`terrainAnnunciation` and its debounce (Design note 23), shown in R02's label block as one of
+`labelStatements`'s steady statements, beside `ROTATION NOT YET MODELLED`. `ViewRun` carries no
+terrain state today, so the debounced line reaches `labelStatements` as a field of the run or a
+second argument, whichever keeps `labelStatements` pure.
 
-- Files: `view/terrain/annunciation.ts`, its test, R02's label-block component and its test.
+- Files: `view/terrain/annunciation.ts`, its test, `displays/view/viewRun.ts` (`labelStatements`)
+  and its test, and `displays/view/ViewLabelBlock.tsx`'s test.
 - Tests: a stand-in in the draw set gives `TERRAIN: STREAMING` after 250 ms, which clears 1 s after
   the last stand-in goes; the low setting with terrain in view gives `TERRAIN: DETAIL LIMITED`; the
   high setting with everything resident gives neither; both at once show `STREAMING`; the label
@@ -1374,7 +1544,7 @@ cancellation by removal, generation tags, results handed to the cache, and the f
 worker at a time.
 
 - Files: `view/terrain/workers/pool.ts`, `view/terrain/workers/messages.ts`, their tests with a
-  scripted fake worker.
+  scripted fake worker (after R04's `test/FakeSurfaceWorker.ts`).
 - Tests: requests reach idle workers in priority order; `reprioritise` reorders the queued
   requests and drops those no longer in the demand, without touching those in flight; a cancelled
   request never reaches a worker;
@@ -1384,28 +1554,41 @@ worker at a time.
   `terminate` on unmount leaves no listener behind.
 - Acceptance: `pnpm --filter hyperion exec vitest run view/terrain/workers`.
 
-**R05.T10.b The worker and its WebAssembly.** `height.worker.ts`, extending R04's loader and probe
-worker in `renderer/src/wasm/`: it loads the module `just gen-surface` produces (wasm-bindgen's web
-target) through `init` on a `?url` import, bakes, and copies and transfers the typed arrays. It
-relies on the renderer's `worker.format: "es"`, which R04.T10.c sets. A Node-environment vitest
-loads the same built `.wasm` from disk with `initSync` and checks three bakes against the native
-golden's digests (T5), through `f32Digest`, a TypeScript twin of the testkit's FNV-1a over a
-`Float32Array`'s bytes, itself checked against the testkit's hand-computed value. In the built
-app, started through `loadFile`, a worker bakes one patch and logs the module's content type and
-any policy violation, extending R04's own check of its probe worker; T13.c's `--smoke` mode later
-makes this a command that exits with a status. If module workers do
-not load from `file://`, this task serves the renderer from a privileged custom scheme through
-`protocol.handle` instead, with R01's and the owner's agreement, as Design note 11's fallback (R04's
-probe worker does load from `file://`, R04.T10.c). The file is `*.worker.ts`, so it compiles under
-`tsconfig.worker.json` and is one of the files the source guard lets import `generated/surface/`.
+**R05.T10.b The worker and its WebAssembly.** `height.worker.ts`, beside R04's probe worker in
+`renderer/src/wasm/`, whose pattern it follows: it loads the module `just gen-surface` produces
+(wasm-bindgen's web target) through `init({ module_or_path })` on a `?url` import of
+`generated/surface/hyperion_surface_bg.wasm`, checks the module's `generatorVersion` with R04's
+`checkGeneratorVersion`, reports a load failure through R04's `describeLoadFailure` (so a policy
+refusal reads `csp-refused`), bakes, and copies and transfers the typed arrays. R04's one-shot
+loader (`loadSurfaceModule`) and its probe worker stay as they are; the pool's factory starts the
+height workers. It relies on the renderer's `worker.format: "es"`, which R04.T10.c sets. A
+Node-environment vitest (the `logic` project) loads the same built `.wasm` as a `?inline` import
+with `initSync({ module })`, as R04's `handleRequest.test.ts` does, and checks three bakes against
+the native golden's digests (T5), through `f32Digest`, a TypeScript twin of the testkit's FNV-1a
+over a `Float32Array`'s bytes, itself checked against the testkit's hand-computed value. In the
+built app, started through `loadFile`, a worker bakes one patch and logs the module's content type
+and any policy violation, extending R04's own check of its probe worker; T13.c's `--smoke` mode
+later makes this a command that exits with a status. If module workers do not load from
+`file://`, this task serves the renderer from a privileged custom scheme through `protocol.handle`
+instead, with R01's and the owner's agreement, as Design note 11's fallback (R04's probe worker
+does load from `file://`, R04.T10.c). The file is `*.worker.ts`, so `tsconfig.web.json` excludes
+it, it compiles under `tsconfig.worker.json` and it is one of the files the source guard
+(`surfaceImports.test.ts`) lets import `generated/surface/`; the worker-side modules it imports
+(`messages.ts`, `f32Digest.ts`, the half-float packing) join `tsconfig.worker.json`'s `include`,
+as R04's `wasm/handleRequest.ts` did. `Float16Array` is not in either config's `es2023` lib, so
+both gain its declarations (the `esnext.float16` or `es2025` lib, whichever the pinned TypeScript
+names).
 
 - Files: `view/terrain/workers/height.worker.ts`, `view/terrain/workers/f32Digest.ts`,
-  `renderer/src/wasm/` (R04's loader, extended), `view/terrain/workers/wasm.node.test.ts`.
+  `view/terrain/workers/heightWasm.test.ts`, `apps/hyperion/tsconfig.worker.json`,
+  `apps/hyperion/tsconfig.web.json`.
 - Tests: the Node-environment wasm test; the built-app check.
-- Acceptance: `just gen-surface && pnpm --filter hyperion exec vitest run view/terrain/workers`; by
-  hand, recorded in the task's notes: the built app (`pnpm --filter hyperion build`, run from
-  `out/`) bakes a patch in a worker with no policy violation, under the unchanged policy
-  (R04.T10.a).
+- Acceptance: `just gen-surface && pnpm --filter hyperion exec vitest run view/terrain/workers`;
+  the built-app check, recorded in the task's notes: the built app (`just build`, which runs
+  `gen-surface`; then Electron on `out/`) bakes a patch in a worker with no policy violation,
+  under the unchanged policy (R04.T10.a). The lane runs it hidden (a window never shown, a fresh
+  `--user-data-dir`, read over the DevTools protocol, as R01.T14 checked its built client), never
+  on the owner's display.
 
 ### R05.T11 The terrain pass
 
@@ -1416,19 +1599,35 @@ the fixed diagonal, with skirts; the indirect-arguments buffer of the one instan
 (`DrawItem.indirect`), whose instance count `writeBuffer` sets each frame; the slot layout's storage
 buffers (heights and morph targets, and for `BakedOffsets` the offsets) and the normals' `rg16float`
 texture array, for either normal scale, written slot by slot, all under the `MemoryCategory`
-`height-cache`, which this task adds to R01's union (R12's name); a per-frame uniform per patch
-holding the `f32` narrowing of the `f64` camera-relative patch origin (R02's differencing, after
-rotating the body-fixed origin into the body frame), its morph range and the grounded contacts for
-`morphHold`; `AllocationTally` (Provides) over R01's `onAllocation`, the live and peak bytes per
-memory category and the upload bytes a frame through `writeBuffer` and `writeTexture`, which the
-metrics and R12 read; and `renderer/src/test/fakeRenderEngine.ts`, a fake of R01's `RenderEngine`
-over its `FakeGpu` that counts creations, writes, draws and per-frame allocations, for this task's
-tests and T11.c's and T12.c's.
+`height-cache`, which this task adds to R01's union in `view/engine/memory.ts` (R12's name); the
+per-frame instance data of the one instanced draw, which a per-draw uniform cannot carry: a
+storage buffer of one record per drawn patch, read by `instance_index`, holding its slot index,
+the `f32` narrowing of the `f64` camera-relative patch origin (R02's `originMinusCamera`, after
+rotating the body-fixed origin into the body frame) and its morph range, and a small storage
+buffer of the grounded contacts for `morphHold`, both rewritten with `writeBuffer` each frame
+(the `Draw` uniform's `offsetFromCameraM` is then zero); `AllocationTally` (Provides) over R01's
+`onAllocation`, the live and peak bytes per memory category and the upload bytes a frame through
+`writeBuffer` and `writeTexture`, which the metrics and R12 read; and
+`renderer/src/test/countingRenderEngine.ts`, a fake of R01's `RenderEngine` over its `FakeGpu`
+that counts creations, writes, draws and per-frame allocations, for this task's tests and T11.c's
+and T12.c's (R01's `test/fakeRenderEngine.ts` is a different fake, of the `ResilientEngine`'s
+inner engine, and is left alone; `test/fakeViewEngine.ts` may be its base).
+
+Against R01's device as built (Consumes, "As built"), which has WebGPU's default limits: the normals
+are one 2D `rg16float` atlas with a one-texel gutter (`TextureBindingSpec.viewDimension` `"2d"`),
+since 256 array layers hold fewer slots than either budget; every storage buffer stays within
+128 MiB a binding, which the `BakedOffsets` offsets at the high budget's about 1,900 slots exceed,
+so this task settles that before it builds the high layout (Risks, "Default device limits"). The
+tally starts from the engine's creation and ignores a release it never saw created (R01's
+`frame uniforms` buffer is made before a caller can listen, R01's Risks, m5); `uploaded` events
+carry no category and include the engine's own two uniform uploads a frame, which the tally
+counts with the rest.
 
 - Files: `view/terrain/gpu/resources.ts`, `view/terrain/gpu/uniforms.ts`,
-  `view/terrain/gpu/allocationTally.ts`, their tests, `renderer/src/test/fakeRenderEngine.ts`.
-- Tests: the index buffer's triangles use the (0, 0)–(1, 1) diagonal; the uniform's origin is the
-  `f64` difference narrowed once; a freed slot is overwritten in place, with no new allocation after
+  `view/terrain/gpu/allocationTally.ts`, their tests, `view/engine/memory.ts`,
+  `renderer/src/test/countingRenderEngine.ts`.
+- Tests: the index buffer's triangles use the (0, 0)–(1, 1) diagonal; an instance record's origin
+  is the `f64` difference narrowed once; no buffer exceeds the device's storage-binding limit; a freed slot is overwritten in place, with no new allocation after
   warm-up; the byte tally matches the formats' sizes; `liveBytes` falls on a destruction while
   `peakBytes` does not, and an unsubscribed listener hears nothing.
 - Acceptance: `pnpm --filter hyperion exec vitest run view/terrain/gpu`.
@@ -1438,14 +1637,21 @@ morph and its hold (Design note 6), reversed-Z output (R02); the fragment stage'
 of Design note 17 from the decoded normal texture, writing pre-exposed `rgba16float`. A TypeScript
 emulation of the `FaceDifferences` vertex arithmetic in `Math.fround`, operation for operation as
 the WGSL has it, is checked against T4.b's Rust `f32` reference through T4.b's
-`vertex_f32.golden`, which carries both the inputs and the outputs.
+`vertex_f32.golden`, which carries both the inputs and the outputs. The shader follows R01's
+convention (Consumes, "As built"): `frame.wgsl` concatenated ahead of it, the `Draw` struct as the
+spec's uniforms, the slot buffers, instance records, contacts and the normal atlas at `@group(2)`
+bindings declared by `storageBuffers` and `textures`, `vertexMain` and `fragmentMain`; it is
+registered in `WGSL_CATALOGUE` with a `displayName` in the guide's capitals (`TERRAIN`), whose
+display the catalogue's test checks.
 
 - Files: `view/terrain/shaders/terrain.wgsl`, `view/terrain/gpu/vertexEmulation.ts`, its test,
-  R01's smoke-harness list of passes.
-- Tests: the emulation agrees with the golden's `f32` outputs bit for bit; R01's offline render test
-  compiles the pass with the network disabled; R01's SwiftShader smoke test renders a frame of the
-  test planet from 400 km and from 10 m with every texel finite, without `shader-f16` and without
-  `subgroups`.
+  `view/engine/catalogue.ts`, and a check group in `renderer/src/smoke/` (`terrain.ts`) called from
+  `smoke/page.ts`.
+- Tests: the emulation agrees with the golden's `f32` outputs bit for bit; the harness's catalogue
+  check compiles the material with its external requests cancelled (R01's offline check; there is
+  no vitest that compiles WGSL); the terrain check group renders a frame of the test planet from
+  400 km and from 10 m with every texel finite, in the `default` and `no-subgroups` variants
+  (SwiftShader has no `shader-f16`).
 - Acceptance: `pnpm --filter hyperion exec vitest run view/terrain`; `just test-render` passes with
   the terrain pass registered in `WGSL_CATALOGUE`.
 
@@ -1454,13 +1660,16 @@ pool and the draw set, submitted inside R02's `VIEW` as the spike scene of Desig
 R02's `agx` in one full-screen pass and a `MAN` exposure.
 
 - Files: `view/terrain/terrainPass.ts`, `view/spike/litView.ts`, their tests.
-- Tests: with T11.a's fake engine, a frame submits one instanced draw whose instances are the drawn
-  patches' slot indices, none for culled ones;
+- Tests: with T11.a's counting engine, a frame submits one instanced draw whose instances are the
+  drawn patches' slot indices, none for culled ones;
   stand-ins are drawn with their own morph range; the per-frame work allocates no new objects after
-  warm-up (a counting fake); the exposure is shown as `MAN` with its EV100 in the label block.
-- Acceptance: `pnpm --filter hyperion exec vitest run view/terrain view/spike`; by hand, recorded in
-  the task's notes: the test planet from 400 km and from 2 m on the development machine, the right
-  way up, with no crack visible across a cube-face edge.
+  warm-up (a counting fake); the exposure is shown as `EV100 15.0 MAN` in the label block (a
+  `manual` `ExposureControl` whose triple gives EV100 15, through R02's `setManual`).
+- Acceptance: `pnpm --filter hyperion exec vitest run view/terrain view/spike`; the lane captures
+  the test planet from 400 km and from 2 m on the development machine hidden (a target read back
+  with `readTexture`, or the view's `readBack`, written to PNG) and checks it is the right way up
+  with no crack across a cube-face edge; the same look on screen, by a person, is pending by hand
+  for the owner.
 
 ### R05.T12 Earth's atmosphere
 
@@ -1478,7 +1687,9 @@ spectral-to-luminance factors with R07's `starIlluminance` and keeps `solar.ts` 
 check.
 
 - Files: `view/atmosphere/medium.ts`, `view/atmosphere/earth.ts`, `view/atmosphere/solar.ts`,
-  their tests, and `apps/hyperion/scripts/solar-factors.ts`, run by Node's type stripping. The
+  their tests, and the script: `apps/hyperion/src/tools/solarFactors.ts`, run by
+  `apps/hyperion/scripts/solarFactors.mjs` through Vite's `runnerImport`, as `placeShip.mjs` runs
+  its tool (the repository's Node floor does not strip types unflagged). The
   script's header names each input's download URL, version and checksum. The input tables are not
   committed until T12.d's ruling; only the derived constants are.
 - Tests: the Rayleigh coefficients recomputed in the test from the refractivity and King-factor
@@ -1492,14 +1703,21 @@ check.
 R01's adapter, ported from Bevy 0.19's WGSL with its licence notice and checked against sebh's
 reference code, rebuilt when the medium changes (not when the sun moves), at the sizes of Design
 note 16, allocated under the `MemoryCategory` `atmosphere-tables` (R12's name, added to R01's union
-here). An `f64` TypeScript integrator of optical depth along a ray is the oracle.
+here). An `f64` TypeScript integrator of optical depth along a ray is the oracle. Each kernel is a
+`KernelPair` (`reference` WGSL with entry point `main`, `subgroup: null`,
+`readback: "presentation-only"`) writing a 2D storage texture made by `createTexture`
+(`dimension: "2d"`, storage and sampled usage), dispatched with `ComputeBindings.storage`, and
+registered in `WGSL_CATALOGUE`.
 
 - Files: `view/atmosphere/shaders/transmittance.wgsl`, `multiScattering.wgsl`,
-  `view/atmosphere/tables.ts`, `view/atmosphere/opticalDepth.ts`, their tests.
+  `view/atmosphere/tables.ts`, `view/atmosphere/opticalDepth.ts`, their tests,
+  `view/engine/memory.ts`, `view/engine/catalogue.ts`, and a check group in `renderer/src/smoke/`
+  (`atmosphere.ts`) called from `smoke/page.ts`.
 - Tests: the oracle against closed forms for an exponential atmosphere at the zenith and the
   horizon; in R01's SwiftShader smoke harness, the transmittance table read back with R01's
   `readTexture` agrees with the oracle to 1% at 20 fixed (altitude, angle) texels, and every
-  texel of both tables is finite and within [0, 1] for transmittance. (R08.T6.c later stores
+  texel of both tables is finite and within [0, 1] for transmittance (the smoke page may read a
+  presentation-only texture; nothing else may). (R08.T6.c later stores
   transmittance as optical depth and rewrites this assertion to "every stored optical depth finite
   and non-negative"; R08 keeps this task's file names.)
 - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere`; `just test-render` passes
@@ -1511,10 +1729,18 @@ the deferred aerial-perspective pass over terrain that reads the reversed-Z dept
 where depth is at the far plane; the high and low sizes of Design note 16, the per-frame tables
 under the `MemoryCategory` `atmosphere-view` (R12's name, added to R01's union here); absolute
 luminance from the per-channel solar illuminance, and the sun's disc clamped after pre-exposure.
+This task also fills `SETTINGS[s].atmosphere` in T7.b's `view/quality/qualitySetting.ts`. R01's
+post-process `depth` input no longer exists (`PostProcessInput` is `"hdr-colour"` alone), so the
+deferred aerial-perspective composite reads the terrain target's reversed-Z depth through
+`PostProcessItem.textures` (or a full-screen draw's `DrawItem.textures`), declared as a
+`TextureBindingSpec` with `sampleType: "depth"` and read with `textureLoad`, beside the 3D table
+(`viewDimension: "3d"`); it draws into the view or another target, since R01 refuses a sample of
+the target being drawn into (`DepthSelfSample`, `ColourSelfSample`).
 
 - Files: `view/atmosphere/shaders/skyView.wgsl`, `aerialPerspective.wgsl`, `rayMarch.wgsl`,
-  `composite.wgsl`, `view/atmosphere/hillaire.ts`, their tests.
-- Tests: with T11.a's fake engine, the per-planet tables are not rebuilt when only the sun moves and
+  `composite.wgsl`, `view/atmosphere/hillaire.ts`, their tests, `view/quality/qualitySetting.ts`,
+  `view/engine/memory.ts`, `view/engine/catalogue.ts`, `renderer/src/smoke/atmosphere.ts`.
+- Tests: with T11.a's counting engine, the per-planet tables are not rebuilt when only the sun moves and
   are when the medium changes; the low setting allocates the low sizes and applies aerial
   perspective to terrain alone; the smoke harness renders a frame from 400 km and from 2 m at noon
   and at the terminator with every texel finite and none above `rgba16float`'s maximum; the offline
@@ -1528,11 +1754,12 @@ luminance from the per-channel solar illuminance, and the sun's disc clamped aft
 - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere`; `just test-render` passes;
   by hand, recorded: the comparison mode beside the published images of Hillaire 2020 from the
   ground at noon and sunset and from orbit, looked at by a person, as the brainstorm keeps image
-  comparison.
+  comparison. The lane renders those frames hidden and saves them as PNGs beside the references;
+  the look is pending by hand for the owner.
 
 **R05.T12.d The solar tables' licences, for the owner.** Draft for the owner, with the roadmap's
 other data licences: whether the ASTM E-490 solar spectrum (ASTM's terms) and the CIE 1931
-matching functions (CC BY-SA 4.0) may be committed beside `solar-factors.ts`, or only the derived
+matching functions (CC BY-SA 4.0) may be committed beside `solarFactors.ts`, or only the derived
 constants. Nothing is committed before the ruling, and the task ends when the owner signs off.
 
 - Files: this plan's Risks and open points; the script's header, once ruled.
@@ -1566,7 +1793,12 @@ bounds.
 craft as a `GroundContact` once `isDescending` holds) and `DescentSpike.tsx` (the full-window view,
 two small wireframe instrument canvases of R02's style drawing the planet's graticule, the craft's
 hull and the orbit, and one console panel, all on one device through R01's per-view contexts, with
-each canvas's DOM list).
+each canvas's DOM list). The scene is a `ViewScene` built by hand as `view/scenes/frameChange.ts`
+builds its rotating body and `body_fixed` lander (provenance `kept`, after `KeptScene`'s
+`sceneAt`/`cameraAt` shape), the craft's hull is R02's `TEST_HULL` (`view/scene/hull.ts`), and the
+instruments draw through R02's `buildWireframeDrawList` and the `WireframeRenderer` that
+`ViewDisplay` uses, each canvas made by `RenderEngine.createView(canvas, name)` on the engine
+`useViewEngine` gives.
 
 - Files: `view/spike/spikeScene.ts`, its test, `view/spike/DescentSpike.tsx`, its test.
 - Tests: the craft becomes a contact exactly when `isDescending` first holds on the scripted path;
@@ -1595,15 +1827,34 @@ and write the results file (Design note 18). `--smoke` runs 10 s of the descent,
 file and exits with a status, and it also bakes one patch in a worker, which is T10.b's built-app
 check as a command.
 
-- Files: `apps/hyperion/src/main/cli.ts`, its test, `apps/hyperion/src/main/spike.ts` (the IPC
-  handlers), `apps/hyperion/src/preload/api.ts`, `apps/hyperion/src/preload/index.ts`, `justfile`.
+As built around it (Consumes, "As built"): `ClientArgs` gains the spike's options, read by hand
+in `parseClientArgs` as `address` and `port` are; the main process passes them to the window as one
+`additionalArguments` switch (such as `--hyperion-descent-spike=<options>`), which the preload
+reads back from `process.argv` as `serverUrlFromArgv` does and which decides whether
+`HyperionApi` gains its `spike` member; `main.tsx` renders `DescentSpike` in place of `App` when
+that member is present. The main process has no `ipcMain` handler yet: `spike.ts` adds the first,
+each refusing a sender whose `event.senderFrame` is not the window's own page, after the smoke
+harness's inline check in `src/smoke/main.ts`, factored into a helper with its test. `--smoke`
+never shows its window (`show: false`, as R01.T14's hidden check of the built client ran; offscreen
+rendering as `src/smoke/main.ts` uses it if a hidden window does not render), so the lanes may run
+it. The recipe follows `client` and `test-render`: `just build` (which runs
+`gen-surface`), the server started as `cargo run -p hyperion-server -- --num-workers 2` in the
+background, Electron on `out/` under `setsid timeout --kill-after=10` with a fresh
+`--user-data-dir`, and the process group killed at the end.
+
+- Files: `apps/hyperion/src/main/cli.ts`, its test, `apps/hyperion/src/main/index.ts`,
+  `apps/hyperion/src/main/spike.ts` (the IPC handlers and the sender check) and its test,
+  `apps/hyperion/src/preload/api.ts`, `apps/hyperion/src/preload/index.ts`, a preload module for
+  the spike switch beside `serverUrl.ts`, `apps/hyperion/src/renderer/src/main.tsx`,
+  `apps/hyperion/src/renderer/src/test/stubHyperionApi.ts`, `justfile`.
 - Tests: the CLI parses the flag and each option, refuses a bad value of each, and refuses every
   spike option given without `--descent-spike`; the spike's IPC handlers refuse a sender that is
   not the window's own frame and arguments that do not validate; the ordinary launch exposes no
   spike function on the preload.
-- Acceptance: `pnpm --filter hyperion exec vitest run src/main/cli src/preload`;
-  `just descent-spike --smoke` exits 0; by hand, recorded: one full descent on the development
-  machine at the low setting, orbit to 1 m in one motion.
+- Acceptance: `pnpm --filter hyperion exec vitest run src/main/cli src/main/spike src/preload`;
+  `just descent-spike --smoke` exits 0 (hidden); by hand, pending for the owner (a visible window
+  on the development machine's display): one full descent on the development machine at the low
+  setting, orbit to 1 m in one motion, with the exact command recorded by the lane.
 
 ### R05.T14 The metrics harness
 
@@ -1613,7 +1864,12 @@ presentation time, per-pass GPU time from R01's `onPassTimes` (by `FrameSubmissi
 our per-frame code, T11.a's `AllocationTally`, a shim over `createRenderPipeline`,
 `createComputePipeline` and their asynchronous forms that counts and labels creations after warm-up,
 and patches requested, baked and made resident a second, each tagged with the script time and
-segment.
+segment. The shim reaches the device the only way R01 leaves open (Consumes, "As built"): the
+spike's `ViewEngineSource` for `useViewEngine` requests its adapter through a wrapped `GPU`
+(`requestAdapterOutcome(wrapped)`), whose adapter's `requestDevice` wraps the device it returns,
+and passes the same wrapped `GPU` as `LoadEngineOptions.gpu` so that a rebuild after a device loss
+is shimmed too. R01's adapter itself is not edited. `PassTimes.timer` is recorded with the times
+(`full`, `quantized` or `absent`), and passes beyond the timer's 64 a frame are counted as untimed.
 
 - Files: `view/spike/metrics.ts`, `view/spike/percentiles.ts`, `view/spike/pipelineShim.ts`,
   their tests.
@@ -1628,7 +1884,11 @@ Design note 18, set before `ready` when the flag is given. These are R01's `gpuT
 `--dawn-safety off` is given, the safety-toggle set of Design note 22, merged into both
 `--enable-dawn-features` and `--disable-dawn-features` with `mergeSwitchValue`. The task also
 covers `contentTracing` over the descent, and the reducer, which parses the trace's JSON events in
-the main process into frame, GPU-pass, main-thread and GC figures.
+the main process into frame, GPU-pass, main-thread and GC figures. The spike's switches are
+`ChromiumSwitch` entries added to `graphicsSwitches`' list before `applyGraphicsSwitches`, which
+already merges the four list switches with `mergeSwitchValue` (R01.T1 as built); the spike flag
+sets R01's `gpuTiming` as `--hyperion-gpu-timing` does. This task may land before T13.c, creating
+`main/spike.ts`, to which T13.c adds its IPC handlers.
 
 - Files: `apps/hyperion/src/main/spike.ts`, `apps/hyperion/src/main/reduceTrace.ts`, their tests.
 - Tests: the reducer against a small recorded trace, finding its GC slices per thread and its
@@ -1653,16 +1913,23 @@ including the per-level ε_n and k_n. It writes a Markdown summary beside the fi
 - Acceptance: `pnpm --filter hyperion exec vitest run src/main/fdinfo src/main/results`;
   `just descent-spike --setting low` on the development machine writes a results file with every
   figure present or null with a stated reason (on the RTX 3080 the fdinfo readings are null:
-  decided 2026-09-30 by a delegated decision, hardware item 2).
+  decided 2026-09-30 by a delegated decision, hardware item 2). The lane proves the file with a
+  hidden run, whose presentation-time figures are null with the reason "no window shown"; the
+  visible run, the one that counts, is pending by hand for the owner.
 
 ### R05.T15 The capture and the native replay
 
 **R05.T15.a The capture.** A measurement-only shim on `GPUDevice`, `GPUQueue` and the encoders,
 after webgpu_recorder's interception design, that writes WGSL sources, descriptors, uploads and
 each frame's commands over a fixed span of the descent as JSON with binary blobs, when
-`--capture <dir>` (T13.c) is given.
+`--capture <dir>` (T13.c) is given. It wraps the device through T14.a's seam, the wrapped `GPU`.
+Its forwarding wrappers of `createBuffer` and `createTexture` trip `engineBoundary.test.ts`'s rule
+against allocating outside R01's adapter, so the test gains a named exemption for
+`view/spike/capture.ts` alone, as it has one for the smoke page, rather than the rule being
+loosened.
 
-- Files: `view/spike/capture.ts`, its test against a fake device.
+- Files: `view/spike/capture.ts`, its test against a fake device (`FakeGpu`),
+  `view/engine/engineBoundary.test.ts`.
 - Tests: a scripted sequence of device calls round-trips through the capture's reader to the same
   calls and bytes; the shim is absent unless the flag is given.
 - Acceptance: `pnpm --filter hyperion exec vitest run view/spike/capture`.
@@ -1684,10 +1951,13 @@ presentation at the captured resolution, and write the same frame-interval and p
 as the results file, in its schema.
 
 - Files: `tools/gpu-replay/src/{replay,results}.rs`.
-- Tests: in the tool, a replay of the checked-in capture on the default adapter writes a results
-  file that parses against the schema.
+- Tests: in the tool, a replay of the checked-in capture on the default adapter, into an
+  offscreen texture with no window or presentation, writes a results file that parses against
+  the schema.
 - Acceptance: `just replay <capture>` replays the development machine's capture on its RTX 3080
-  and writes a results file; the owner does the same for a UHD 620 capture on the UHD 620.
+  and writes a results file; the owner does the same for a UHD 620 capture on the UHD 620. The
+  presented replay opens a window with FIFO presentation, so on the development machine it is
+  pending by hand for the owner, with the lane's capture and exact command recorded.
 
 ### R05.T16 The UHD 620 runs
 
@@ -1739,7 +2009,10 @@ Each change is one more recorded baseline run. If nothing misses, the task recor
 
 ### R05.T17 The discrete runs
 
-By hand on the development machine, on a quiet machine (Design note 27): its RTX 3080 (10 GiB,
+By hand on the development machine, by the owner, on a quiet machine (Design note 27); every run
+needs a visible window, a real vsync and the display's mode changed, which no lane does on the
+owner's display, so the implementing lane prepares the harness and the exact commands and the
+runs are pending for the owner. Its RTX 3080 (10 GiB,
 760 GB/s), the recommended specification, exceeds the RTX 4060 class (272 GB/s), and its one
 display, an Optoma UHD projector (native 3840 × 2160 at 60 Hz), is set to its 1080p 59.94 Hz mode
 for the runs, T being the measured vsync period (Design note 21; it has no exact 60 Hz mode; a
@@ -1815,7 +2088,7 @@ rule fires, the owner is told before any later plan depends on the browser.
   the replay and toggle comparisons, and the verdict (T19).
 - **By eye, recorded:** the descent from orbit to a metre above the ground in one motion, watching
   for pops, cracks between levels and at cube-face edges, and the moment `TERRAIN: STREAMING`
-  appears (T13.c, T16.a).
+  appears (T13.c, T16.a), by the owner.
 
 ## Generator version
 
@@ -1914,8 +2187,8 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
 - **The pass criterion's reserve** (Design note 21) counts only terrain and atmosphere against
   their rows' upper ends. If later plans' passes land above their own rows, the spike's pass does
   not carry over; R12's consolidated runs are where that shows.
-- **Names from R01, R02 and R04** were written in parallel with those plans and are re-validated
-  before T1. The asks in particular: that R04's loader and probe worker, and its `just gen-surface`
+- **Names from R01, R02 and R04** were written in parallel with those plans and were re-validated
+  before T1 (2026-10-02; Consumes, "As built", and the record below). The asks in particular: that R04's loader and probe worker, and its `just gen-surface`
   output, suit module workers under `file://` and a Node-environment test (`initSync` on the
   module's bytes). R01 now provides everything this plan asked of it: the instanced draw,
   `writeBuffer`, the per-pass times and the readback (its Design notes 18–20), and storage buffers
@@ -1957,3 +2230,49 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   (Provides, T4.a, T4.c), which R10 implements over R09's `Synthesiser`. R08 changes this plan's
   atmosphere code in its own tasks: transmittance stored as optical depth, the ozone term through a
   curve of growth, and the channel wavelengths refitted (R08 Design notes 5 and 8).
+- **Default device limits** (found on re-validation, 2026-10-02). R01's engine requests its
+  device with WebGPU's default limits: 128 MiB a storage-buffer binding, 256 MiB a buffer, 256
+  texture-array layers, 8,192 texels a 2D side. The low layout and the high layout's heights fit;
+  the normals fit as a 2D atlas, not an array; `BakedOffsets` at the high budget's about 1,900
+  slots (about 193 MB of offsets) does not fit one binding. T11.a settles it before building the
+  high layout, by one of: (a) R01's `createWebGpuEngine` asks for the adapter's
+  `maxStorageBufferBindingSize` and `maxBufferSize` (capped, say at 1 GiB), with a test, which
+  touches R01's adapter and so goes through the orchestrator; (b) the offsets split over pages of
+  at most 128 MiB, one instanced draw a page; (c) `BakedOffsets` capped on the high setting at the
+  slots that fit, about 1,300. The lean is (a): one request, no change to the draw, and both target
+  adapters offer far more. Until settled, T18's choice of vertex path for the high setting must
+  count it.
+- **Files shared with other lanes.** `view/engine/catalogue.ts` and `renderer/src/smoke/page.ts`
+  (T11.b, T12.b, T12.c, and R06's and R07's passes), `view/engine/memory.ts` (T11.a, T12.b, T12.c,
+  and R10's categories later), `crates/hyperion-sim/tests/golden/rng/tags.golden` (T3.a, and any
+  lane adding a tag), `displays/view/viewRun.ts` (T9, and R07's main screen), `justfile` (T13.c,
+  T15.b) and `view/quality/qualitySetting.ts` (T7.b, T12.c, then R06, R07, R08 and R12). Each is
+  appended to, never reordered; a conflict keeps both sides, and `tags.golden` is re-blessed after
+  a merge rather than merged by hand.
+- **Re-validated at ce7aeb3** (2026-10-02, after RM1 merged). Swept every Consumes item against
+  the code and folded in R01's, R02's and R04's as-built deviations and RM1's decision records
+  (Babylon dropped and the WGSL binding convention, the hardware decisions, the protocol
+  decision dropping the post-process `depth` input, the CSP ruled unchanged, `height.worker.ts`).
+  The brainstorm has changed since the plan was written only in the CSP passages, which the plan
+  already carried. What changed here: Consumes gained an "As built" entry with the real names;
+  Provides' sketches of `ViewSelectionInput` (a body-fixed camera, since R02's poses never rotate),
+  `HeightWorkerPool` (a worker factory), the atmosphere's camera (`AtmosphereCamera`, not R02's
+  `ViewFrame`), the wasm exports' JavaScript names and the counting fake's file
+  (`test/countingRenderEngine.ts`, R01's `fakeRenderEngine.ts` being another fake); Design notes
+  10, 14, 18, 20 and 23 gained the as-built seams; the task-order notes were refined and the
+  steps pending for the owner named; T1.a and T3.c add the surface crate's dev-dependencies; T3.a's
+  tag and stream, T5's and T6's exports, T7.a's own culling types, T9's `labelStatements`, T10.b's
+  worker against R04's loader as built (`?inline` and `initSync`, the worker tsconfig,
+  `Float16Array`'s lib), T11.a's instance storage buffer, normal atlas and tally, T11.b's and
+  T12.b's catalogue entries and smoke check groups, T12.a's script runner, T12.c's depth binding,
+  T13.b's scene, T13.c's launch path and first IPC handlers, T14.a's and T15.a's device seam,
+  T14.b's switch merge, and the hidden and by-hand halves of T10.b, T11.c, T12.c, T13.c, T14.c,
+  T15.c and T17 were corrected. Nothing built changes. No task is pending re-validation.
+- **Deviations in T7.b, as built (the settings, 2026-10-02).** `view/quality/qualitySetting.ts`
+  landed first and alone, for R06.T13.f and R07; `selectPatches` and `screenSpaceErrorPx` follow
+  once T2's golden and T6's level table are built. `ViewSettings` has `terrain` only: T12.c adds
+  `atmosphere: TableSizes` with its values, as the task says. Added beside the Provides names:
+  `QUALITY_SETTINGS` (both settings in order, for tests and menus), and `TerrainNormals` and
+  `TerrainVertexPath`, the unions of `TerrainSettings.normals` and `.vertexPath`. The shapes are
+  `interface`s (the TypeScript rules), not the sketch's `type`s. The high cache budget is
+  400,000,000 B (Design note 10's "about 400 MB"); the low is 64 MiB.
