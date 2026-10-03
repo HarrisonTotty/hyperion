@@ -293,6 +293,25 @@ export class InstanceRecords {
    * @throws RangeError past {@link capacity}, or for a slot that is not a whole number.
    */
   push(slot: number, originMinusCameraM: Vec3, morphStartM: number, morphEndM: number): void {
+    this.pushXyz(
+      slot,
+      originMinusCameraM.x,
+      originMinusCameraM.y,
+      originMinusCameraM.z,
+      morphStartM,
+      morphEndM,
+    );
+  }
+
+  /** {@link push} from the origin's components, so that a frame makes no vector per patch. */
+  pushXyz(
+    slot: number,
+    xM: number,
+    yM: number,
+    zM: number,
+    morphStartM: number,
+    morphEndM: number,
+  ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
     }
@@ -300,9 +319,9 @@ export class InstanceRecords {
       throw new RangeError(`slot ${slot} is not a whole number`);
     }
     const base = this.#count * F32_WORDS_PER_INSTANCE;
-    this.#f32[base] = originMinusCameraM.x;
-    this.#f32[base + 1] = originMinusCameraM.y;
-    this.#f32[base + 2] = originMinusCameraM.z;
+    this.#f32[base] = xM;
+    this.#f32[base + 1] = yM;
+    this.#f32[base + 2] = zM;
     this.#u32[base + 3] = slot;
     this.#f32[base + 4] = morphStartM;
     this.#f32[base + 5] = morphEndM;
@@ -351,6 +370,17 @@ export class ContactRecords {
    * finite.
    */
   push(centreMinusCameraM: Vec3, heldRadiusM: number, rampM: number): void {
+    this.pushXyz(
+      centreMinusCameraM.x,
+      centreMinusCameraM.y,
+      centreMinusCameraM.z,
+      heldRadiusM,
+      rampM,
+    );
+  }
+
+  /** {@link push} from the centre's components, so that a frame makes no vector per contact. */
+  pushXyz(xM: number, yM: number, zM: number, heldRadiusM: number, rampM: number): void {
     if (this.#count >= MAX_CONTACTS) {
       throw new RangeError(`more than ${MAX_CONTACTS} grounded contacts in a frame`);
     }
@@ -365,9 +395,9 @@ export class ContactRecords {
       );
     }
     const base = (CONTACTS_HEADER_BYTES + this.#count * CONTACT_RECORD_BYTES) / 4;
-    this.#f32[base] = centreMinusCameraM.x;
-    this.#f32[base + 1] = centreMinusCameraM.y;
-    this.#f32[base + 2] = centreMinusCameraM.z;
+    this.#f32[base] = xM;
+    this.#f32[base + 1] = yM;
+    this.#f32[base + 2] = zM;
     this.#f32[base + 3] = heldRadiusM;
     this.#f32[base + 4] = rampM;
     this.#f32[base + 5] = 0;
