@@ -76,6 +76,7 @@
 pub mod atmosphere;
 pub mod composition;
 pub mod envelope;
+pub mod figure;
 pub mod habitable_zone;
 pub mod irradiation;
 pub mod limits;
