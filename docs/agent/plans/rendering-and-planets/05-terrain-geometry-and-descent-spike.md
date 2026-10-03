@@ -2600,3 +2600,148 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   - **Pending:** the hidden `just descent-spike --setting low` proof waits on T13.c (which waits on
     T13.b) and is taken then; the visible run stays with the owner, its command in
     `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7).
+- **Deviations in T12.c, as built** (2026-10-02).
+  - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
+    `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,
+    with these differences:
+    - The constructor takes the figure as a fourth argument: `new HillaireAtmosphere(engine,
+medium, sizes, figure)`.
+    - `drawFrame(camera, sun, scene)` takes the terrain target as `AtmosphereScene` (colour,
+      reversed-Z depth, near plane, pre-exposure scale). It dispatches the three per-frame kernels
+      and returns the composite as a `DrawItem` for the caller to submit into another target or
+      the view: the composite is a full-screen material draw, not a post-process, because a
+      post-process cannot read a depth texture (R01 as built).
+    - `SunState` is `{ directionBodyFixed, distanceAu, angularRadiusRad }`.
+    - Added: `geodeticOf` (Bowring's iteration), `tableRadiusM`, `SpheroidFigure`,
+      `aerialPerspectiveVolume()`, `tables`, and the kernel and material constants for the
+      catalogue.
+    - `atmosphereInputs` takes `SpheroidFigure` (`{ equatorialRadiusM, polarRadiusM }`), which
+      T7.a's `BodyFigure` satisfies structurally. `planet.ts` is lane B's and did not exist yet.
+  - _Which radius the tables use_ (the T12.b open point, settled here):
+    - The per-planet tables are built on the figure's mean radius, R₁ = (2a + c) ÷ 3.
+    - Every lookup reads them at the point's height above the datum (r_table = R₁ + h), with μ
+      against the spheroid's normal.
+    - The sky-view and aerial-perspective tables are built on the camera's own sphere, of radius
+      √(MN) (Design note 16).
+    - The ray march clips against the spheroid's shells: a + top and c + top for the atmosphere,
+      a and c for the ground. Each sample's height is taken along its radius, which differs from
+      the geodetic height by at most 2.1 m on WGS 84 up to 400 km. The sun's cosine is measured
+      against the normal of the similar spheroid through the sample, within 0.011° of the true
+      normal (science check, 2026-10-02).
+    - A test holds the grazing optical depth from the ground on the WGS 84 spheroid to within 0.5%
+      of the spherical oracle, at 0° and 45° and looking north and east, on both radii: √(MN)
+      (worst 0.17%) and R₁ (worst 0.28%). It compares with the `f64` oracle rather than the GPU table,
+      since a Node test has no GPU; T12.b's smoke check holds the table to the oracle to 1%.
+    - `shaders/view.wgsl` (not in the task's file list) holds the shared `AtmosphereView`, the
+      source term and the sky view's mapping, prepended to the three kernels and the composite.
+    - From above the atmosphere, a sky pixel whose ray meets the ground stores no transmittance
+      to space, so the sun's disc is never drawn through the planet.
+    - `geodeticOf` is the classical fixed-point iteration on φ and h. On WGS 84 it converges to
+      under 10⁻⁸ m. Above a flattening of about 0.04 it fails to converge, so R08 replaces it (with
+      Bowring 1976, for instance).
+  - _The phase functions_ are evaluated per term in the shaders. `packMedium` encodes each term's
+    phase in `Term.scattering.w` (0 none, 1 Rayleigh, 2 Cornette–Shanks) and its g in
+    `Term.absorption.w`; a test holds the packing.
+  - _The sizes_ follow Design note 16. Two steps a slice on both settings, and the ray-march step
+    counts, are this task's choices; T18 revisits them.
+
+    | Table              | High                       | Low                                                    |
+    | ------------------ | -------------------------- | ------------------------------------------------------ |
+    | Sky view           | 192 × 108, 30 steps (sebh) | 128 × 64, 16 steps                                     |
+    | Aerial perspective | 32³, to 32 km              | 32 × 32 × 16                                           |
+    | Ray march          | full resolution, 32 steps  | half resolution, 16 steps, with a depth-aware upsample |
+
+    "Aerial perspective on terrain only" is `aerialPerspectiveScope`. On high it is `scene`, which
+    publishes the volume for later plans' passes (`aerialPerspectiveVolume()`). On low it is
+    `terrain`, which publishes nothing, so the one deferred composite applies it to the terrain
+    alone.
+
+  - _The sky view's parameterisation_ is sebh's (`SkyViewLutParamsToUv`): the azimuth is measured
+    from the sun's over [0, π], and the horizon split is compressed by a square root. Bevy's is
+    world-fixed over 2π. As in sebh, the sky view has no ground bounce. The kernel and the
+    composite both clamp the camera's height to 1 m inside the shell (`skyViewHeight`). They form
+    r² − R² as h(2R + h) (`groundHitFromHeight`), which would otherwise cancel in `f32` near the
+    ground.
+  - _The aerial-perspective volume_ stores, per slice, the running in-scattered radiance (rgb) and
+    the mean transmittance (a), linear. This is sebh's choice; Bevy stores the logarithm and takes
+    transmittance from the transmittance table. The composite fades the first slice in from the
+    camera.
+  - _Luminance._
+    - The sky is scaled by `skyLuminanceScale()` ÷ d².
+    - Sunlight that the grey ground reflects into the ray march takes the sun's factors, not the
+      sky's (Bruneton 2017, `GetSunAndSkyIlluminance`), through the view's `sunOverSky`.
+    - The sun's disc is `solar.ts`'s per-channel illuminance ÷ the disc's solid angle ÷ d². It is
+      attenuated by the transmittance to space (the ray march's mean from above the atmosphere)
+      and clamped at 65,504 after pre-exposure.
+    - `SunState.angularRadiusRad` must be asin(R★ ÷ d), kept consistent with the distance by the
+      caller; 0 draws no disc. The smoke check's Sun is 0.0046505 rad (IAU 2015 B3 R⊙ᴺ at 1 au).
+  - _The settings._ `SETTINGS[s].atmosphere` is `TABLE_SIZES[s]`, which `qualitySetting.ts`
+    imports from `hillaire.ts` (appended).
+  - _Memory._
+    - `MemoryCategory` gains `atmosphere-view` (appended).
+    - The ray-march target grows to the largest output so far and is never remade smaller. The
+      engine has no public release of a texture, so a resize past the largest size leaves the
+      previous target allocated until the engine is disposed. The kernel and the composite address
+      the target by the current output's size.
+    - The sky-view and aerial-perspective textures are made once. They are freed only with the
+      engine.
+  - _The smoke harness._
+    - `smoke/atmosphere.ts` gains `checkAtmosphereFrames`. On both settings it renders from 2 m and
+      from 400 km, at noon and at the terminator, with every texel finite and within rgba16float,
+      and the noon sky from the ground bluer than red. A dark surface 500 m and 5 km away (the
+      volume's path) and 60 km away (the ray march's) must take on haze, more at 5 km and at 60 km
+      than at 500 m. At 5 km and beyond, the haze has nearly reached the horizon sky's brightness,
+      so the two paths are held to agree within 10%; they are not ordered. On SwiftShader on
+      2026-10-02, the high setting gave 0.140 at 5 km and 0.139 at 60 km in blue.
+    - `just test-render --captures=DIR` renders `HILLAIRE_REFERENCE` on Hillaire's 6,360 km sphere,
+      with no sun disc, as his comparison images have none: from the ground at noon and at sunset,
+      and from 400 km. It saves the frames as 8-bit PNGs, exposed to a mean of 0.18 and passed
+      through R02's AgX. The pieces that carry it:
+      - `apps/hyperion/scripts/testRender.sh` takes `--captures=DIR` and passes it to the harness
+        as the new `--smoke-captures` switch.
+      - The page's report gains an `images` field.
+      - `readSmokeImages` in `smoke/result.ts` checks each image's name, size and length. The main
+        process logs any image it rejects or fails to save, without losing the judged checks.
+  - _Left as found._ At half resolution, a far-surface pixel whose four nearest ray-march texels
+    are all sky gets no haze: a one-pixel fringe on silhouettes, on the low setting only.
+  - _By hand, for the owner._ The comparison with Hillaire 2020's published images (CGF 39(4), DOI
+    10.1111/cgf.14050) confirms the work but blocks nothing (decisions-r05.md item 7). The images
+    are kept local and untracked (decisions-r05.md item 4).
+  - _The lane's pre-screen_ (2026-10-02). It ran
+    `just test-render --captures=<scratchpad>/laneC-captures` on SwiftShader, headless, on both
+    variants. The run saved `hillaire-ground-noon`, `hillaire-ground-sunset` and
+    `hillaire-orbit` (320 × 180, one set a variant). The lane viewed them and saw:
+    - noon: a blue sky, lighter towards the horizon, with an aureole about the sun;
+    - sunset: an orange-to-rose band along the horizon, brightest under the sun, under a
+      grey-violet sky;
+    - orbit: the limb as a thin bright blue band over the lit disc, with black space above.
+
+    Below the horizon the ground is black, as in Hillaire's comparison scene (black ground, no
+    disc). Nothing looked wrong side up or discontinuous. The side-by-side with his figures
+    remains the owner's.
+
+  - _Aerial-perspective scope_ lives in `TableSizes` for now; R08.T9.a's `AERIAL_PERSPECTIVE_SCOPE`
+    takes it over or reads it.
+- **Deviations in T11.a, as built so far** (2026-10-02; the slot layout waits on T8's
+  `SlotLayout`, and the index buffer and instance records wait on T4's vertex order).
+  - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
+    `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
+    `maxStorageBufferBindingSize` and `maxBufferSize`, never above what it reports, capped at
+    `MAX_REQUESTED_BUFFER_BYTES`, 1 GiB.
+    - `GpuCapabilities` gains both limits. They are read from the device, as its features are,
+      so a rebuild after a device loss reports the rebuilt device's.
+    - `CapabilityOverrides.defaultLimits` raises nothing. It is how the harness runs the
+      `FaceDifferences` fallback once T11.a's layout exists.
+    - `FakeAdapter` takes both limits. Its devices get WebGPU's defaults unless more is required,
+      and reject a request beyond the adapter's.
+    - `GraphicsPanel` leaves the two limits out of its feature list.
+    - The RTX 3080's adapter limits are recorded with T11.a's layout.
+  - _`AllocationTally`_ (`view/terrain/gpu/allocationTally.ts`) adds `startFrame()`, which zeroes
+    the frame's upload count; the interface has no other notion of a frame. It also adds
+    `dispose()`, which stops listening.
+  - _The counting fake_ (`test/countingRenderEngine.ts`) landed with T12.b. It stands alone,
+    implementing `RenderEngine` and delegating views and faults to R01's `FakeRenderEngine`,
+    because that class's members return `never` and cannot be overridden. It also records
+    `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
+    `destroy()`.
+  - `MemoryCategory` gains `height-cache`, appended.

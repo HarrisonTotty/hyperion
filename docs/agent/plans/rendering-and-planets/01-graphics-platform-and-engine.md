@@ -2966,3 +2966,4 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   depth, for R07.T16's symbology) and `RenderTargetFormat` `"canvas-in-pass"`; opt-in, defaults
   unchanged. R07.T12 added no staging ring to the readback; its bench (R07.T17) decides. See R07's
   Risks.
+- **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged.

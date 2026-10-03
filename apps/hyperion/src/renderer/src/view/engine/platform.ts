@@ -34,6 +34,10 @@ export interface GpuCapabilities {
   readonly maxTextureDimension2D: number;
   /** Invocations in the smallest subgroup, or `null` without the `subgroups` feature. */
   readonly subgroupMinSize: number | null;
+  /** Bytes a storage-buffer binding may span (R05.T11.a; decisions-r06-r07.md item 7). */
+  readonly maxStorageBufferBindingSize: number;
+  /** Bytes a buffer may hold. */
+  readonly maxBufferSize: number;
 }
 
 /** Which view styles the adapter may draw. */
@@ -81,6 +85,12 @@ export interface CapabilityOverrides {
   readonly withholdSubgroups: boolean;
   readonly withholdShaderF16: boolean;
   readonly withholdFloat32Blendable?: boolean;
+  /**
+   * Requests WebGPU's default limits rather than {@link requiredLimits}' raised ones, so that the
+   * harness runs R05's `FaceDifferences` fallback for the high setting (decisions-r06-r07.md
+   * item 7).
+   */
+  readonly defaultLimits?: boolean;
 }
 
 /** The adapter's identity and capabilities. */
@@ -107,6 +117,8 @@ export function summariseAdapter(adapter: GPUAdapter): {
       depthClipControl: features.has("depth-clip-control"),
       maxTextureDimension2D: limits.maxTextureDimension2D,
       subgroupMinSize: subgroups ? info.subgroupMinSize : null,
+      maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
+      maxBufferSize: limits.maxBufferSize,
     },
   };
 }
@@ -131,6 +143,8 @@ export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
     depthClipControl: features.has("depth-clip-control"),
     maxTextureDimension2D: limits.maxTextureDimension2D,
     subgroupMinSize: subgroups ? adapterInfo.subgroupMinSize : null,
+    maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
+    maxBufferSize: limits.maxBufferSize,
   };
 }
 
@@ -177,6 +191,35 @@ export async function requestAdapterOutcome(gpu: GPU | undefined): Promise<Adapt
   }
   const { summary, capabilities } = summariseAdapter(adapter);
   return { kind: "adapter", adapter, summary, capabilities, styles: styleAvailability(summary) };
+}
+
+/** The most bytes a raised buffer limit asks for: 1 GiB (decisions-r06-r07.md item 7). */
+export const MAX_REQUESTED_BUFFER_BYTES = 2 ** 30;
+
+/**
+ * The limits to require of the device: the adapter's storage-binding and buffer sizes, never more
+ * than it reports and at most {@link MAX_REQUESTED_BUFFER_BYTES}, so that R05's high-setting
+ * `BakedOffsets` layout fits one binding where the adapter allows (decisions-r06-r07.md item 7).
+ *
+ * @remarks
+ * A pure function of the adapter, so a rebuild after a device loss asks the same of the same
+ * hardware and less of a lesser adapter, and `requestDevice` cannot reject on limits. With the
+ * harness's `defaultLimits` override, nothing is raised.
+ */
+export function requiredLimits(
+  adapter: GPUAdapter,
+  overrides: CapabilityOverrides | undefined,
+): Record<string, number> {
+  if (overrides?.defaultLimits === true) {
+    return {};
+  }
+  return {
+    maxStorageBufferBindingSize: Math.min(
+      adapter.limits.maxStorageBufferBindingSize,
+      MAX_REQUESTED_BUFFER_BYTES,
+    ),
+    maxBufferSize: Math.min(adapter.limits.maxBufferSize, MAX_REQUESTED_BUFFER_BYTES),
+  };
 }
 
 /**

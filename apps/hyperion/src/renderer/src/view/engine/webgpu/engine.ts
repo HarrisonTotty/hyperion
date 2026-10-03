@@ -20,6 +20,7 @@ import {
   featuresNotEnabled,
   type GpuCapabilities,
   requiredFeatures,
+  requiredLimits,
 } from "../platform";
 import type {
   GraphicsFault,
@@ -838,6 +839,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   const device = await outcome.adapter.requestDevice({
     label: "hyperion",
     requiredFeatures: [...requested],
+    requiredLimits: requiredLimits(outcome.adapter, overrides),
   });
   const notEnabled = featuresNotEnabled(requested, device.features);
   if (notEnabled.length > 0) {
