@@ -19,6 +19,7 @@ import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
+import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type { WgslMaterialSpec, WgslPostProcessSpec } from "./types";
@@ -76,6 +77,12 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: COMPOSITE_MATERIAL },
 ];
 
+/** R05.T11.b's terrain pass, one material per vertex path. */
+const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = TERRAIN_MATERIALS.map((spec) => ({
+  kind: "material",
+  spec,
+}));
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -83,4 +90,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_TABLE_ENTRIES,
   ...POST_ENTRIES,
   ...ATMOSPHERE_VIEW_ENTRIES,
+  ...TERRAIN_ENTRIES,
 ];
