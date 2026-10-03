@@ -45,7 +45,10 @@ pub mod cube;
 pub mod geometry;
 pub mod noise;
 pub mod num;
+pub mod patch;
+pub mod spheroid;
 pub mod tags;
+pub mod test_planet;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;

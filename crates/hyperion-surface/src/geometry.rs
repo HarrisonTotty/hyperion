@@ -77,7 +77,7 @@ fn min_rate() -> f64 {
 }
 
 /// The step in s of `level`'s vertex lattice, 2^−(level + 6), exact.
-fn lattice_step(level: u8) -> f64 {
+pub(crate) fn lattice_step(level: u8) -> f64 {
     let quads = u64::from(crate::cube::PATCH_QUADS) << level;
     #[expect(
         clippy::cast_precision_loss,
@@ -156,9 +156,11 @@ mod tests {
     #[test]
     fn the_moon_and_ceres_are_pinned() {
         // The Moon's mean radius, 1,737.4 km (Archinal et al. 2018, the IAU WGCCRE report,
-        // Celestial Mechanics and Dynamical Astronomy 130, 22), and Ceres's mean radius, 469.7 km
-        // (Park et al. 2019, Icarus 319, 812), as plan R05, T1.b names them. Ceres's level 15
-        // misses the bound by 1.8%, at 0.382 m.
+        // Celestial Mechanics and Dynamical Astronomy 130, 22), and Ceres's, 469.7 km (469.73 km,
+        // the equivalent spherical radius of Raymond and Roatsch 2018, "Ceres Coordinate System
+        // Description", PDS DAWN-A-FC2-5-CERESSHAPESPC-V1.0, Table 1, "Dawn Final", from the
+        // stereophotoclinometry shape model of Park et al. 2019, Icarus 319, 812), as plan R05,
+        // T1.b names them. Ceres's level 15 misses the bound by 1.8%, at 0.382 m.
         assert_eq!(finest_level(1.7374e6), 17);
         assert_eq!(finest_level(4.697e5), 16);
     }

@@ -2308,3 +2308,62 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   documentation. A native-only test holds every surface golden to `TEST_PLANET_VERSION`, and the
   sim-determinism skill's `golden_diff.py` now checks the surface crate's goldens against
   `TEST_PLANET_VERSION` rather than `GENERATOR_VERSION`.
+- **Deviations in T3.a, as built.** `NOISE_BOUND` B = 1.0681 (grid maximum 1.036 35 at 1/256 of a
+  cell over the 1/48 its symmetry leaves, plus a Lipschitz margin of 0.0317) and `NOISE_RMS`
+  σ_noise = 0.2701 (10⁶ points; 0.270 12), both recomputed by `noise_bound_certified` and
+  `noise_rms_measured` under `just test-slow`. The gradient index is the corner word's top four
+  bits; the object word packs i and j as 32-bit two's complements and the draw number is
+  (octave << 32) | k; the octave offsets read words 2⁴⁰ + 4n + axis of object 0. `Octave` holds
+  the index, spacing, rotation, offset and seed; `LatticeCache::cover(octave, centre, radius)`
+  sets an octave's dense box (capped at 2²² corners). `num::max` and `min` refuse NaN.
+- **Deviations in T3.b, as built.** `Spheroid` lives in `hyperion_surface::spheroid` (P14.T46.e's
+  module), with R05's `point`, `normal`, `surface_point`, `curvature_radii_m`,
+  `section_radius_m` and `WGS84`; `test_planet` re-exports it. σ_h is Earth2014's TBI layer,
+  **2,508.2 m** (pyshtools 4.14.1, degrees 1–2160; Hirt and Rexer 2015 Table 2: 2,508.3 m), not
+  the design's 2.45 km; octaves 0–8 are rescaled together by the pinned `COARSE_RESCALE` =
+  1.055 66 over a 10⁴-point Fibonacci sphere, giving a realised 2,509.3 m. Octaves finer than 35
+  km hold 0.179% of the variance. The fade of the newest octave across the morph zone is the
+  morph itself (the morph target is the parent level's height, which lacks that octave), so the
+  height function has no fade of its own. Ridges: r = 1 − √(n² + ε²) with ε = 0.05, centred and
+  scaled by the pinned `RIDGE_MEAN` 0.7692 and `RIDGE_RMS` 0.1488, gated by a smoothstep of
+  ½ + (n₂ + n₃) ÷ (4 σ_noise). Rotations are those of integer quaternions (k + 2, 1 + k mod 3,
+  2 + k mod 5, 1 + k mod 7). Leakage above the 2 m band limit: **0.149 mm RMS** over 1,000
+  profiles at 0.125 m. Each octave's sample mean is tested for octaves 6–21 only: octaves 0–5
+  cover the sphere in a few cells, so their samples are not independent.
+- **Deviations in T3.c, as built.** Provisional bench (load average 19–28): **4.1 µs a point
+  cached, 7.6 µs uncached** (budget 10 µs); the quiet-machine run is pending for the owner.
+  `TestPlanet::cover_patch` prepares a bake's cache. Criterion is a dev-dependency off the
+  browser target, where the bench is an empty program.
+- **Deviations in T4.a, as built.** The patch origin is the surface point of vertex (32, 32) at
+  its own height (`PatchBake::origin_height_m` added), so that the `FaceDifferences` path's
+  (h − h₀) is small. `PatchBake` gains `skirt_depth_m` (ε_n plus the `f32` step of the largest
+  |h| plus `BakeOptions::skirt_m`). `HeightSource` gains `prepare_cache(cache, key)`, default
+  no-op. `PatchKey::sample_dir(x, y, per_patch)` (64 or 128) gives the double-resolution normals'
+  samples by the canonical rule. The level bound (T6's `level_bound_m`) landed with T4.a, which
+  the skirts and `HeightSource` need.
+- **Deviations in T4.b, as built.** `patch::vertex::{PatchTerms, PatchTermsF32,
+face_difference_position, face_difference_position_f32, face_difference_morph_f32,
+naive_position_f32}`. The warp's difference is 4 δs (s + s₀) ÷ 3 (or (2 − s − s₀)), with a
+  level-0 patch, which straddles s = ½, forming u(s) − u(s₀) directly; a morph target at an odd
+  vertex is the mean of the formula at its two even neighbours. Worst errors at level 19 over 100
+  patches: baked offsets 0.7 µm, face differences 0.48 mm (the `f32` height's own step), naive
+  0.89 m. The golden prints, per vertex, the two neighbours' morph heights an odd vertex reads.
+  `hyperion_testkit::float::bits_f32` added.
+- **Deviations in T4.c, as built.** The interpolation weights are the query's (s, t) fractions
+  within its quad, not barycentrics of the flat 3D triangle (a second-order difference); a query
+  within 10⁻⁶ of a quad of a lattice line is snapped onto it, so that a vertex's own direction
+  returns its height bit for bit. `collision::mesh_height(source, dir, level, cache)` exposes the
+  same interpolant at any level, for T6's test.
+- **Deviations in T5, as built.** `bakePatch(face, level, i, j, vertexPath, normals, ridged,
+skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatch` whose
+  getters copy each array out; the layout is in `src/wasm.rs`'s module documentation.
+  `levelTable(ridged)`. `f32_digest` beside T2's `f64_digest`.
+- **Deviations in T6, as built.** ε_n = the omitted octaves' maxima + ½ ‖H‖ h_n² + ¼ |∇F| κ a Δ²
+  for level n and for the finest (Waldron 1998's ½ M r² on the mesh's triangles, not Design note
+  15's one-dimensional h² ÷ 8, plus the warp's term), with C₁ = 6.70 and C₂ = 32.82 the noise's
+  certified gradient and Hessian bounds (grid at 1/512 plus Lipschitz margins) and κ = 3.67 the
+  face's parametric curvature. No sample exceeded it; ridges off, the 99.9th percentile is 0.27–0.33
+  of ε_n (level 18, which omits no octave, 0.04), 0.70–0.81 of 4σ_n, and every patch maximum is
+  within 1.25 × 4σ_n; ridges on, levels 5–12 are 2–10% (findings; the crests' curvature grows as
+  1 ÷ ε). k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
+  `src/test_planet/bound.rs`). The patch-grouped figures use 16 patches of 625 points per level.

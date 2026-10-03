@@ -382,11 +382,37 @@ pub fn f64_digest(values: &[f64]) -> u64 {
         .fold(FNV_OFFSET, |h, v| fnv1a(h, &v.to_le_bytes()))
 }
 
+/// A digest of `values` for a golden file: FNV-1a 64 over each value's IEEE 754 bits as four
+/// little-endian bytes, in order (plan R05, T5).
+///
+/// As [`f64_digest`], with the same offset basis and prime; a TypeScript twin reproduces it over
+/// the bytes of a `Float32Array` on a little-endian machine (R05.T10.b). A `-0.0` and a `0.0` give
+/// different digests.
+#[must_use]
+pub fn f32_digest(values: &[f32]) -> u64 {
+    values
+        .iter()
+        .fold(FNV_OFFSET, |h, v| fnv1a(h, &v.to_le_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    #[test]
+    fn f32_digest_hashes_each_values_little_endian_bits() {
+        assert_eq!(f32_digest(&[]), FNV_OFFSET);
+        // 1.0f32 is 0x3f800000: bytes 00 00 80 3f; FNV-1a by hand over them.
+        let mut h = FNV_OFFSET;
+        for b in [0x00_u8, 0x00, 0x80, 0x3f] {
+            h = (h ^ u64::from(b)).wrapping_mul(FNV_PRIME);
+        }
+        assert_eq!(f32_digest(&[1.0]), h);
+        assert_eq!(f32_digest(&[1.0]), 0x4b72_477f_9c5c_2f98);
+        assert_ne!(f32_digest(&[0.0]), f32_digest(&[-0.0]));
+    }
 
     #[test]
     fn fnv1a_matches_its_published_vectors() {

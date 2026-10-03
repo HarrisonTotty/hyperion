@@ -28,8 +28,8 @@
 //!   (Design note 2).
 //!
 //! Sources: S2 Geometry, `src/s2/s2coords.h` (the face axes, `STtoUV`, `UVtoST`, `GetFace`,
-//! `ValidFaceXYZtoUV`) and `src/s2/s2metrics.cc` (`kMinArea` = 8√2 ÷ 9 and `kMaxArea` = 2.635799,
-//! for the quadratic projection), github.com/google/s2geometry.
+//! `ValidFaceXYZtoUV`) and `src/s2/s2metrics.cc` (`kMinArea` = 8√2 ÷ 9 and
+//! `kMaxArea` = 2.635799256963161491, for the quadratic projection), github.com/google/s2geometry.
 
 /// One of the cube's six faces, in S2's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -566,7 +566,20 @@ impl PatchKey {
     /// If `x` or `y` is above [`PATCH_QUADS`].
     #[must_use]
     pub fn vertex_dir(self, x: u8, y: u8) -> [f64; 3] {
-        let (quads, along_u, along_v) = self.vertex_lattice(x, y);
+        self.sample_dir(u32::from(x), u32::from(y), PATCH_QUADS)
+    }
+
+    /// The unit direction of sample (`x`, `y`) of a grid of `per_patch` × `per_patch` quads over
+    /// the patch, by [`vertex_dir`](Self::vertex_dir)'s canonical rule: the mesh's vertices at
+    /// 64, and the double-resolution normals' samples at 128, whose even samples are the mesh's
+    /// vertices bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// If `per_patch` is not 64 or 128, or `x` or `y` is above it.
+    #[must_use]
+    pub fn sample_dir(self, x: u32, y: u32, per_patch: u32) -> [f64; 3] {
+        let (quads, along_u, along_v) = self.sample_lattice(x, y, per_patch);
         let point = face_point(self.face, 2 * along_u - quads, 2 * along_v - quads, quads);
         let face = canonical_face(point, quads);
         let (u, v) = face_coords(face, point);
@@ -583,18 +596,23 @@ impl PatchKey {
     /// rule: what the tests show the rule is needed against.
     #[cfg(test)]
     fn vertex_dir_on_own_face(self, x: u8, y: u8) -> [f64; 3] {
-        let (quads, a, b) = self.vertex_lattice(x, y);
+        let (quads, a, b) = self.sample_lattice(u32::from(x), u32::from(y), PATCH_QUADS);
         lattice_dir(self.face, a, b, quads)
     }
 
-    /// The vertex lattice of the patch's level: its quads a face side, 2^(level + 6), and the
-    /// vertex's lattice indices (a, b) on the patch's face, each 0 to that number.
-    fn vertex_lattice(self, x: u8, y: u8) -> (i64, i64, i64) {
+    /// The sample lattice of the patch's level at `per_patch` quads a patch: its quads a face
+    /// side, `per_patch` × 2^level, and the sample's lattice indices (a, b) on the patch's face,
+    /// each 0 to that number.
+    fn sample_lattice(self, x: u32, y: u32, per_patch: u32) -> (i64, i64, i64) {
         assert!(
-            u32::from(x) <= PATCH_QUADS && u32::from(y) <= PATCH_QUADS,
-            "vertex ({x}, {y}) is outside a patch of {PATCH_QUADS} quads"
+            per_patch == PATCH_QUADS || per_patch == 2 * PATCH_QUADS,
+            "a patch is sampled at 64 or 128 quads a side, not {per_patch}"
         );
-        let per_patch = i64::from(PATCH_QUADS);
+        assert!(
+            x <= per_patch && y <= per_patch,
+            "vertex ({x}, {y}) is outside a patch of {per_patch} quads"
+        );
+        let per_patch = i64::from(per_patch);
         let quads = per_patch << self.level;
         let a = i64::from(self.i) * per_patch + i64::from(x);
         let b = i64::from(self.j) * per_patch + i64::from(y);
@@ -930,8 +948,8 @@ mod tests {
             ((ratio - 2.0917) / 2.0917).abs() < 1e-4,
             "ratio at level 10 = {ratio}"
         );
-        // Below S2's limit, kMaxArea ÷ kMinArea = 2.635799 ÷ (8√2 ÷ 9).
-        let limit = 2.635_799 / (8.0 * 2.0_f64.sqrt() / 9.0);
+        // Below S2's limit, kMaxArea ÷ kMinArea = 2.635799256963161491 ÷ (8√2 ÷ 9).
+        let limit = 2.635_799_256_963_161_5 / (8.0 * 2.0_f64.sqrt() / 9.0);
         assert!(ratio < limit, "{ratio} ≥ {limit}");
         // The smallest cell is at an edge's midpoint: on the face's edge (i = 0 or j = 0 in this
         // quadrant, whose corner (0, 0) is the cube's) and next to its middle (index 511).
