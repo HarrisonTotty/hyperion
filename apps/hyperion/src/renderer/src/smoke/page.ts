@@ -19,6 +19,7 @@ import {
 } from "../view/engine/platform";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/status";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
+import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
@@ -155,6 +156,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
 
   await checks.group("R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
+  await checks.group("R07.T14.b bloom and glare", () =>
+    checkBloom(engine, status.getSnapshot().targetRounding.rgba16float, checks),
+  );
 
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await checks.group("T9.i splat refused", async () => {

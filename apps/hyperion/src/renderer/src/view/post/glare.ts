@@ -20,7 +20,10 @@ import type { Rgb } from "../photometry/toneCurve";
  * 45° outside the frame); R11's glint is another.
  */
 export interface GlareSource {
-  /** The unit direction to the source's centre, in the view's camera-relative frame. */
+  /**
+   * The unit direction to the source's centre, in the scene's camera-relative frame: the one
+   * `FrameSubmission.viewRotation` turns into view space.
+   */
   readonly direction: Vec3;
   /** The source's angular radius, rad; zero for a point. */
   readonly angularRadiusRad: number;
@@ -141,6 +144,114 @@ function eyeNorm(eye: EyeObserver): number {
 const cameraCoreNorm = sphereIntegral(cameraCoreRaw);
 const cameraTailNorm = sphereIntegral(cameraTailRaw);
 
+/** A term a ÷ (1 + (θ/c)²)^power of a spread function, its amplitude in sr⁻¹. */
+export interface SpreadTerm {
+  readonly amplitude: number;
+  /** c, rad. */
+  readonly scaleRad: number;
+}
+
+/**
+ * A view's normalised glare spread function as a sum of terms, sr⁻¹ with θ in rad: the form both
+ * the TypeScript and the tone-mapping pass's WGSL evaluate, so that they agree term for term.
+ *
+ * @remarks
+ * PSF(θ) = Σ poisson aᵢ (1 + (θ/cᵢ)²)^−1.5 + Σ lorentz aⱼ (1 + (θ/cⱼ)²)^−1 + Σ root aₖ (1 +
+ * (θ/cₖ)²)^−0.5 + q θ² + k + g exp(−θ² ÷ 2σ²). The `poisson` terms are the narrow ones whose
+ * integral over a resolved source has a closed form ({@link glareSourceVeil}).
+ */
+export interface GlareSpreadTerms {
+  /** At most {@link GLARE_POISSON_TERMS}. */
+  readonly poisson: ReadonlyArray<SpreadTerm>;
+  /** At most one. */
+  readonly lorentz: ReadonlyArray<SpreadTerm>;
+  /** At most one. */
+  readonly root: ReadonlyArray<SpreadTerm>;
+  /** q, sr⁻¹ rad⁻². */
+  readonly quadratic: number;
+  /** k, sr⁻¹. */
+  readonly constant: number;
+  /** g, sr⁻¹, and σ, rad. */
+  readonly gaussian: { readonly amplitude: number; readonly sigmaRad: number };
+}
+
+/** The most `poisson` terms a spread function has: the CIE function's three. */
+export const GLARE_POISSON_TERMS = 3;
+
+const RAD_PER_DEG = Math.PI / 180;
+
+/**
+ * The terms of a view's normalised spread function: the CIE function for `eye`, divided by its
+ * integral over the sphere, or the camera's core and tail.
+ */
+export function glareSpreadTerms(role: ViewRole, eye: EyeObserver): GlareSpreadTerms {
+  let terms: GlareSpreadTerms;
+  switch (role) {
+    case "eye": {
+      const n = eyeNorm(eye);
+      const age = (eye.ageYears / 70) ** 4;
+      const core = (1 - 0.08 * age) / n;
+      const wide = (1 + 1.6 * age) / n;
+      const p = eye.pigmentation;
+      terms = {
+        poisson: [
+          { amplitude: 9.2e6 * core, scaleRad: 0.0046 * RAD_PER_DEG },
+          { amplitude: 1.5e5 * core, scaleRad: 0.045 * RAD_PER_DEG },
+          { amplitude: 1300 * p * wide, scaleRad: 0.1 * RAD_PER_DEG },
+        ],
+        lorentz: [{ amplitude: 400 * wide, scaleRad: 0.1 * RAD_PER_DEG }],
+        root: [{ amplitude: 0.8 * p * wide, scaleRad: 0.1 * RAD_PER_DEG }],
+        // 3 × 10⁻⁸ θ² with θ in degrees.
+        quadratic: (3e-8 * wide) / (RAD_PER_DEG * RAD_PER_DEG),
+        constant: (2.5e-3 * p) / n,
+        gaussian: { amplitude: 0, sigmaRad: 1 },
+      };
+      break;
+    }
+    case "camera":
+      terms = {
+        poisson: [],
+        lorentz: [
+          {
+            amplitude: CAMERA_TAIL_FRACTION / cameraTailNorm,
+            scaleRad: CAMERA_TAIL_KNEE_RAD,
+          },
+        ],
+        root: [],
+        quadratic: 0,
+        constant: 0,
+        gaussian: {
+          amplitude: (1 - CAMERA_TAIL_FRACTION) / cameraCoreNorm,
+          sigmaRad: CAMERA_CORE_SIGMA_RAD,
+        },
+      };
+      break;
+  }
+  return terms;
+}
+
+/** The terms other than the `poisson` ones at θ, sr⁻¹: those a source is taken as a point for. */
+function broadSpread(terms: GlareSpreadTerms, thetaRad: number): number {
+  let sum = terms.quadratic * thetaRad * thetaRad + terms.constant;
+  for (const { amplitude, scaleRad } of terms.lorentz) {
+    sum += amplitude / (1 + (thetaRad / scaleRad) ** 2);
+  }
+  for (const { amplitude, scaleRad } of terms.root) {
+    sum += amplitude / Math.sqrt(1 + (thetaRad / scaleRad) ** 2);
+  }
+  const { amplitude, sigmaRad } = terms.gaussian;
+  return sum + amplitude * Math.exp(-0.5 * (thetaRad / sigmaRad) ** 2);
+}
+
+/** A spread function's value at θ from its terms, sr⁻¹. */
+export function evaluateSpread(terms: GlareSpreadTerms, thetaRad: number): number {
+  let sum = broadSpread(terms, thetaRad);
+  for (const { amplitude, scaleRad } of terms.poisson) {
+    sum += amplitude / (1 + (thetaRad / scaleRad) ** 2) ** 1.5;
+  }
+  return sum;
+}
+
 /**
  * The glare spread function of a view, sr⁻¹, normalised so that its integral over the sphere is 1:
  * the fraction of a point source's light scattered per steradian at `thetaRad` from it.
@@ -149,7 +260,7 @@ const cameraTailNorm = sphereIntegral(cameraTailRaw);
  * An eye view (`"eye"`) takes the CIE function ({@link cieGlareSpreadRaw}) for `eye`, renormalised;
  * the call sites pass R06's `DEFAULT_EYE_OBSERVER`, age 25 and pigmentation 0.5. A camera view
  * (`"camera"`) takes a Gaussian core holding 1 − {@link CAMERA_TAIL_FRACTION} of the energy and a
- * Harvey-type tail holding the rest, from memory and of low confidence; `eye` is unused there.
+ * Harvey-type tail holding the rest, of low confidence; `eye` is unused there.
  *
  * @param thetaRad - The angle from the source, rad, in [0, π].
  */
@@ -159,42 +270,135 @@ export function glareSpread(role: ViewRole, thetaRad: number, eye: EyeObserver):
 
 /**
  * {@link glareSpread} for one view role and observer, as a function of the angle alone, rad → sr⁻¹,
- * with its normalisation resolved once.
+ * with its terms resolved once.
  */
 export function glareSpreadFunction(
   role: ViewRole,
   eye: EyeObserver,
 ): (thetaRad: number) => number {
-  let spread: (thetaRad: number) => number;
-  switch (role) {
-    case "eye": {
-      const norm = eyeNorm(eye);
-      spread = (thetaRad) => cieGlareSpreadRaw(thetaRad, eye) / norm;
-      break;
-    }
-    case "camera":
-      spread = (thetaRad) =>
-        ((1 - CAMERA_TAIL_FRACTION) * cameraCoreRaw(thetaRad)) / cameraCoreNorm +
-        (CAMERA_TAIL_FRACTION * cameraTailRaw(thetaRad)) / cameraTailNorm;
-      break;
-  }
-  return spread;
+  const terms = glareSpreadTerms(role, eye);
+  return (thetaRad) => evaluateSpread(terms, thetaRad);
 }
 
-/** A source's solid angle, sr: 2π (1 − cos ρ) for its angular radius ρ. */
+/**
+ * A source's solid angle, sr: 2π (1 − cos ρ) for its angular radius ρ, written 4π sin²(ρ ÷ 2) so
+ * that a star's milliarcseconds keep their digits.
+ */
 export function glareSourceSolidAngleSr(source: GlareSource): number {
-  return 2 * Math.PI * (1 - Math.cos(source.angularRadiusRad));
+  const half = Math.sin(source.angularRadiusRad / 2);
+  return 4 * Math.PI * half * half;
+}
+
+/**
+ * A source smaller than this fraction of a term's scale is a point for that term: the rectangle's
+ * closed form loses its digits there, in `f32` above all, and the two agree.
+ */
+export const POINT_SOURCE_FRACTION = 0.01;
+
+/**
+ * ∫∫ a (1 + r²/c²)^−1.5 dA over the rectangle x ∈ [x₁, x₂], |y| ≤ Y, in the plane at the pixel,
+ * sr⁻¹ × rad²: a c² times the rectangle's solid angle seen from height c, 2 [F(x₂) − F(x₁)] with
+ * F(X) = atan(X Y ÷ (c √(c² + X² + Y²))).
+ *
+ * @remarks
+ * dΩ = h dA ÷ (h² + r²)^1.5 and the corner formula for a rectangle's solid angle (Mathar, "Solid
+ * angle of a rectangular plate", MPIA, 2005; checked here numerically). For x₁ ≥ 0, beyond the
+ * limb, the difference is taken without cancellation, which far from a small source loses every
+ * digit in `f32`: with s = √(k + x²), k = c² + Y² and u = x Y ÷ (c s), F(x₂) − F(x₁) = atan((Y ÷ c)
+ * (x₂² − x₁²) k ÷ ((x₂ s₁ + x₁ s₂) s₁ s₂) ÷ (1 + u₁ u₂)) (science check, 2026-10-02).
+ */
+export function poissonOverRectangle(
+  term: SpreadTerm,
+  x1Rad: number,
+  x2Rad: number,
+  halfHeightRad: number,
+): number {
+  const c = term.scaleRad;
+  const y = halfHeightRad;
+  const k = c * c + y * y;
+  const s1 = Math.sqrt(k + x1Rad * x1Rad);
+  const s2 = Math.sqrt(k + x2Rad * x2Rad);
+  let difference: number;
+  if (x1Rad >= 0) {
+    const u1 = (x1Rad * y) / (c * s1);
+    const u2 = (x2Rad * y) / (c * s2);
+    const spread = (x2Rad - x1Rad) * (x2Rad + x1Rad);
+    const numerator = ((y / c) * spread * k) / ((x2Rad * s1 + x1Rad * s2) * s1 * s2);
+    difference = Math.atan(numerator / (1 + u1 * u2));
+  } else {
+    difference = Math.atan((x2Rad * y) / (c * s2)) - Math.atan((x1Rad * y) / (c * s1));
+  }
+  return term.amplitude * c * c * 2 * difference;
+}
+
+const insideLevels = new Map<string, number>();
+
+/**
+ * The level of one narrow term of amplitude 1 at a pixel inside its source's disc, sr⁻¹ × sr,
+ * chosen so that the term holds the source's energy: (2π c² Ω − ∫_{θ>ρ} R(θ) 2πθ dθ) ÷ πρ², R
+ * being {@link poissonOverRectangle}, never below 0.
+ *
+ * @remarks
+ * The rectangle turns to face each pixel, so its integral over every pixel is not its area: a term
+ * whose scale is near the source's radius gains a few per cent near the limb. Inside the disc the
+ * image is the clamped disc, white through AgX whatever the veil adds, so the term's energy is
+ * balanced there and the veil outside keeps the rectangle's accuracy. The level depends on ρ and c
+ * alone, and is memoised: Simpson's rule in ln θ beyond the limb, the θ⁻³ tail in closed form.
+ */
+export function rectangleInsideLevel(rhoRad: number, scaleRad: number): number {
+  const key = `${rhoRad}:${scaleRad}`;
+  const known = insideLevels.get(key);
+  if (known !== undefined) {
+    return known;
+  }
+  const unit: SpreadTerm = { amplitude: 1, scaleRad };
+  const halfHeight = (Math.PI * rhoRad) / 4;
+  const intervals = 4000;
+  // Beyond the limb, in ln(θ − ρ), from a millionth of the narrower scale.
+  const low = Math.log(1e-6 * Math.min(rhoRad, scaleRad));
+  const top = 1e4 * (rhoRad + scaleRad);
+  const high = Math.log(top);
+  const step = (high - low) / intervals;
+  let sum = 0;
+  for (let i = 0; i <= intervals; i += 1) {
+    const beyond = Math.exp(low + i * step);
+    const theta = rhoRad + beyond;
+    const weight = i === 0 || i === intervals ? 1 : i % 2 === 1 ? 4 : 2;
+    const r = poissonOverRectangle(unit, theta - rhoRad, theta + rhoRad, halfHeight);
+    sum += weight * r * 2 * Math.PI * theta * beyond;
+  }
+  // Far out R(θ) → 4ρY c³ ÷ θ³, so ∫ beyond the top is 2π × 4ρY c³ ÷ top.
+  const tail = (2 * Math.PI * 4 * rhoRad * halfHeight * scaleRad ** 3) / (rhoRad + top);
+  const omega = 4 * Math.PI * Math.sin(rhoRad / 2) ** 2;
+  const outside = (sum * step) / 3 + tail;
+  const level = Math.max(
+    0,
+    (2 * Math.PI * scaleRad * scaleRad * omega - outside) / (Math.PI * rhoRad * rhoRad),
+  );
+  insideLevels.set(key, level);
+  return level;
 }
 
 /**
  * The veil a glare source adds at `thetaRad` from its centre, per channel, in the units of its
- * `excessLuminance`: the excess illuminance L_ex × Ω times the spread function.
+ * `excessLuminance` (cd/m²): its excess luminance times the spread function integrated over the
+ * source.
  *
  * @remarks
- * The source is treated as a point, which the clamped disc covers where the approximation fails;
- * over the sphere the veil integrates to exactly L_ex × Ω, so the stored disc and the injected
- * veil together hold the unclamped energy. The tone-mapping pass evaluates the same expression in
- * `f32` (R07.T14.b).
+ * Each narrow (`poisson`) term is integrated exactly over an equal-area rectangle that faces the
+ * pixel with its near edge on the limb, x ∈ [θ − ρ, θ + ρ] and |y| ≤ πρ ÷ 4
+ * ({@link poissonOverRectangle}), and inside the disc takes the level that keeps the source's
+ * energy ({@link rectangleInsideLevel}); the broad terms take the source as a point, L_ex Ω PSF(θ).
+ * Against a brute-force quadrature over the disc, for the Sun at 1 au at 1080p across 60°, it is
+ * within +7% to +13% from a quarter of a pixel to 8 px beyond the limb and 0.2% at 64 px, where the
+ * point form alone is 0.19 to 0.54 of the truth near the limb (plan R07, Risks, T14.b). The broad
+ * terms, taken as a point, hold to −4% for sources up to 3° across and fall to −18% at 10° and
+ * −29% at 19.5°; a camera view, which has no narrow term, is the point form throughout, 0.75 of
+ * the truth at the Sun's limb (science check, 2026-10-02). Far from
+ * the source it is the point form, so over the sphere it integrates to L_ex Ω and the stored disc
+ * and the injected veil together hold the unclamped energy. A source below
+ * {@link POINT_SOURCE_FRACTION} of a term's scale is a point for that term. The tone-mapping pass
+ * evaluates the same expression in `f32`.
  */
 export function glareSourceVeil(
   source: GlareSource,
@@ -202,10 +406,29 @@ export function glareSourceVeil(
   role: ViewRole,
   eye: EyeObserver,
 ): Rgb {
-  const factor = glareSourceSolidAngleSr(source) * glareSpread(role, thetaRad, eye);
+  return glareSourceVeilOf(source, thetaRad, glareSpreadTerms(role, eye));
+}
+
+/** {@link glareSourceVeil} for a view's resolved terms. */
+export function glareSourceVeilOf(
+  source: GlareSource,
+  thetaRad: number,
+  terms: GlareSpreadTerms,
+): Rgb {
+  const rho = source.angularRadiusRad;
+  const omega = glareSourceSolidAngleSr(source);
+  let perUnit = omega * broadSpread(terms, thetaRad);
+  for (const term of terms.poisson) {
+    perUnit +=
+      rho < POINT_SOURCE_FRACTION * term.scaleRad
+        ? (omega * term.amplitude) / (1 + (thetaRad / term.scaleRad) ** 2) ** 1.5
+        : thetaRad < rho
+          ? term.amplitude * rectangleInsideLevel(rho, term.scaleRad)
+          : poissonOverRectangle(term, thetaRad - rho, thetaRad + rho, (Math.PI * rho) / 4);
+  }
   return [
-    source.excessLuminance[0] * factor,
-    source.excessLuminance[1] * factor,
-    source.excessLuminance[2] * factor,
+    source.excessLuminance[0] * perUnit,
+    source.excessLuminance[1] * perUnit,
+    source.excessLuminance[2] * perUnit,
   ];
 }

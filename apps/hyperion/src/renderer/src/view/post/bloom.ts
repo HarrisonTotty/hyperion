@@ -248,7 +248,10 @@ export function bloomChain(
     }
     down.push(mapImage(bloomDown(previous), round));
   }
-  let up = mapImage(down[last] ?? excess, (v) => round(levelWeight(kernel, last) * v));
+  // The coarsest level is not written again at its weight: the first up pass reads its downsample
+  // and weights it (`coarseWeight` in `bloomUp.wgsl`).
+  let up = down[last] ?? excess;
+  let coarseWeight = levelWeight(kernel, last);
   for (let m = last - 1; m >= 0; m -= 1) {
     const level = down[m];
     if (level === undefined) {
@@ -256,10 +259,12 @@ export function bloomChain(
     }
     const upsampled = bloomUpTent(up, level.widthPx, level.heightPx);
     const weight = levelWeight(kernel, m);
+    const scale = coarseWeight;
     up = mapImage(upsampled, (v, k) => {
-      const sum = weight * (level.values[k] ?? 0) + v;
+      const sum = weight * (level.values[k] ?? 0) + scale * v;
       return m === 0 ? sum : round(sum);
     });
+    coarseWeight = 1;
   }
   return up;
 }

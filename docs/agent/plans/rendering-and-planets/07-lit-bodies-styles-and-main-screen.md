@@ -1727,3 +1727,45 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   the words `SOURCE`, `SELECT` and the panel title, beside `METER AVG`, `METER LIT` and `METER
 DARK`; the source shows the raw view id upper-cased until T7 names views as the label block
   does.
+- **Deviations in T14.b, as built** (2026-10-02). `post/bloomDown.wgsl` and `post/bloomUp.wgsl`
+  are materials (`BLOOM_DOWN_MATERIAL` `GLARE DOWNSAMPLE`, `BLOOM_UP_MATERIAL` `GLARE UPSAMPLE`,
+  in `post/bloomChain.ts`) drawn on a full-screen triangle (`fullScreenTriangle`) into one
+  `rgba16float` target per level, not post-processes: a post-process's input is its own frame's
+  draws, and a chain level reads another target. Every tap is a bilinear sample of four
+  `textureLoad`s, clamped, so that the first pass thresholds per texel before filtering (the
+  threshold is not linear) and the passes match `bloomDown` and `bloomUpTent` sample for sample.
+  `BloomChain` (`create`, `run(hdrColour, thresholdPreExposed)`, `resize`, `setKernel`,
+  `levelOne`, `levelOneWeight`, `dispose`) takes the HDR colour as an argument (decision
+  2026-10-02, item 1) and times every pass under `BLOOM_PASS` (`"bloom"`, several submissions a
+  frame). The coarsest level is not rewritten at its weight: the first up pass weights it
+  (`coarseWeight`), and the CPU twin `bloomChain` was changed to match. `rgba16float` throughout,
+  since R01's probe reads `toward-zero` for `rg11b10ufloat` on both GPUs. The last step and the
+  glare sources live in `post/glare.wgsl`, a library the tone-mapping pass concatenates
+  (`bloom_excess`, `bloom_tent`, `glare_pixel_direction`, `glare_angle` by atan2 of cross and dot,
+  since acos loses small angles in `f32`, `glare_veil`); the sources are a storage buffer
+  (`packGlareSources(sources, preExposure, terms)`, 48 bytes each: direction in the scene's
+  camera-relative frame, which the pass turns by `frame.viewRotation`, radius, excess in the
+  target's units, solid angle, and each narrow term's inside level), the spread function five
+  `vec4f` uniforms (`packGlareTerms`). `glare.ts` gains `GlareSpreadTerms`,
+  `glareSpreadTerms(role, eye)` and `evaluateSpread`, one term form both twins evaluate (the
+  narrow `(1 + (θ/c)²)^−1.5` terms, Lorentz, root, quadratic, constant, Gaussian), and
+  `glareSourceSolidAngleSr` is written 4π sin²(ρ ÷ 2), which keeps a star's digits. **The
+  near-limb veil** (orchestrator's rulings, 2026-10-02: the half-plane max was withdrawn, its
+  energy being unbounded): each narrow term is integrated exactly over an equal-area rectangle
+  facing the pixel, x ∈ [θ − ρ, θ + ρ], |y| ≤ πρ ÷ 4 (`poissonOverRectangle`, the solid angle of
+  a rectangle from height c, Mathar 2005), in a cancellation-free form (science check: the plain
+  difference of two atans lost every `f32` digit far from small sources, up to 4,500× wrong);
+  inside the disc each such term takes the level that keeps the source's energy
+  (`rectangleInsideLevel`), where the clamped disc is white through AgX anyway; the broad terms
+  stay point-form. Against a brute-force quadrature over the disc, the Sun at 1 au at 1080p across
+  60°: +7% to +13% from a quarter of a pixel to 8 px beyond the limb, 0.2% at 64 px, the point
+  form alone 0.19–0.54 there; the veil integrates to L_ex Ω within 0.2% (the step at the limb).
+  Limits recorded: the broad terms as a point fall to −18% near the limb of a 10° source and −29%
+  at 19.5°; a camera view, with no narrow term, is the point form, 0.75 of the truth at the Sun's
+  limb (a Lorentz rectangle would fix both; for the owner with the camera PSF); and a body in
+  front of the disc (a transit) receives the inside level on its pixels. Smoke checks
+  (`smoke/bloom.ts`, 512 × 512, a clamped disc of 10 px): the device's chain equals its CPU twin
+  to 0.5%, stored plus injected energy equals the unclamped to 1.5%, and the WGSL veil equals its
+  twin to 1% at five pixels beyond the limb; a vitest emulates the WGSL rectangle in `f32`. **The
+  bench is pending** (under 1 ms, and 2–3 ms with tone mapping): T17's harness, on a quiet
+  machine under `--hyperion-gpu-timing`, the RTX 3080 at 1080p and the owner's UHD 620 at 720p.

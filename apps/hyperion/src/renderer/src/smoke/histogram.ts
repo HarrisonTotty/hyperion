@@ -29,7 +29,7 @@ import type { Checks } from "./harness";
 const SIZE: ViewSize = { widthPx: 70, heightPx: 45 };
 
 /** The 16 bits of the normal half float at or just below `value`, 0 for zero. */
-function halfBits(value: number): number {
+export function halfBits(value: number): number {
   if (!(value > 0)) {
     return 0;
   }

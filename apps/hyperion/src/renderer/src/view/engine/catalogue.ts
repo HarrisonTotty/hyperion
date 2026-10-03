@@ -9,6 +9,7 @@
  */
 
 import type { KernelPair } from "./kernels";
+import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
@@ -42,7 +43,11 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME
 );
 
 /** R07's post-processing kernels and passes (plan R07, T12–T15). */
-const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [{ kind: "compute", spec: HISTOGRAM_KERNEL }];
+const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "compute", spec: HISTOGRAM_KERNEL },
+  { kind: "material", spec: BLOOM_DOWN_MATERIAL },
+  { kind: "material", spec: BLOOM_UP_MATERIAL },
+];
 
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
