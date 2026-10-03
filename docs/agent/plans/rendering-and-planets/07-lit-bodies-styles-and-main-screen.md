@@ -1903,3 +1903,20 @@ test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with
   `7cb5d33`): every R07.T12, T14.b and T15 check passed but the T15 twin check, which failed on the
   harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, to be re-run with the
   owner's integrated `just ci` and `just test-render`.
+- **Deviations in T4.c, as built.**
+  - **`LunarLambert`'s last field is `table_row`, not `template`:** `template` is a reserved word in
+    WGSL. It is the row of `phase_factor_table` that holds the law's f, one row per tabulated law
+    (template, L and s), so a caller building laws per texel (R10) points each at a row it made.
+  - **The table** is an `rgba32float` 2D texture, 361 texels per row (0° to 180° every 0.5°, f in
+    r, g, b, alpha 0), read by two `textureLoad`s and interpolated in the shader, as
+    `phaseFactorFromTable` does: `rgba32float` filters only with `float32-filterable`, and
+    `rgba16float` would err by about 10⁻³. `litBody.wgsl` declares no binding; its includer
+    declares `phase_factor_table : texture_2d<f32>`.
+  - **The probe.** A library of functions is no material, so `WGSL_CATALOGUE` holds it inside a
+    compute kernel, `LIT_BODY_PROBE` (`appearance/litBodyProbe.ts`, `readback: "bit-exact"`), that
+    calls `body_brdf` at pinned cases; `smoke/litBody.ts` compares its results with `brdf` to 10⁻⁵
+    relative at five geometries (four laws, off-sample phases, Venus's clamped crescent, and one
+    law built per texel from a synthetic A_N = 0.23 and L(α) = 1 − α ÷ 2π).
+  - **`just test-render`.** The first run (2026-10-03) refused the shader on `template`; after the
+    rename the check runs with T6.c's (one harness run for both, the heavy-test lock being held for
+    an hour at a time by the integration).
