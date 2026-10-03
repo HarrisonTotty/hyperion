@@ -2375,7 +2375,33 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   of ε_n (level 18, which omits no octave, 0.04), 0.70–0.81 of 4σ_n, and every patch maximum is
   within 1.25 × 4σ_n; ridges on, levels 5–12 are 2–10% (findings; the crests' curvature grows as
   1 ÷ ε). k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
-  `src/test_planet/bound.rs`). The patch-grouped figures use 16 patches of 625 points per level.
+  `src/test_planet/bound.rs`). The bound is checked at 16 patches × 625 random points per level;
+  the per-patch maxima of decisions-r05.md item 6 are taken over all 65 × 65 vertices of 32
+  further patches a level (where both meshes pass through their functions' values, so the
+  distance is |F_n − F_f|), whose share within 1.25 × 4σ_n resolves about 3%, not R10's 99%: a
+  recorded figure, not R10's test. σ_n is the omitted octaves' RMS at full weight (no fade
+  weight: the morph is the fade, T3.b), its value at morph 0.
+- **Decisions-r05.md item 6, the ridged planet** (ruled 2026-10-02 on this lane's question). With
+  ridges on the hard bound is 10–50 times the 99.9th percentile at levels 5–12 (k_n up to 230,
+  against about 15 with ridges off), so selection by it over-refines the ridged planet heavily.
+  Ruled: T13.a also records the patch counts and demand under min(hard, 4σ_n) for the ridged
+  planet, and T19 judges a ridged run's streaming failure caused only by that over-refinement as
+  "ours to fix", never a fired rule.
+- **Review fixes to T1–T6** (43c1613 and the commit after it). `LatticeCache` boxes serve only
+  the identical octave (a cache reused across planets or seeds never returns another's
+  gradients); every height is asserted finite in the normals and the collision interpolant too;
+  `cube::SampleGrid` (`Mesh`, `Double`) replaces `sample_dir`'s raw quads; the wasm exports take
+  `VertexPath`, `NormalScale` and `Ridges` enums, and `testPlanetVersion()` is exported so a stale
+  module is caught when the test planet changes; `Octave::new` refuses a rotation that is not
+  orthonormal; `Spheroid::sphere` refuses a non-positive radius; `HeightSource::Error` is bounded
+  by `std::error::Error + Send + Sync`; `test_planet` re-exports `LatticeCache` (its home is
+  `noise`), the path R09.T4 moves it from; `spheroid` also carries P14.T46.e's
+  `from_volumetric`, `flattening`, `volumetric_radius_m` and `BuildSpheroidError`, written by this
+  lane to the API the orchestrator gave (P14.T46.e adds no second copy). The `FaceDifferences`
+  formula forms a face-edge vertex from its own face's (u, v), not the canonical face's (an ulp
+  the skirts cover), and `vertex_f32.golden` prints vertices x, y ∈ {0, 1, 31, 32, 33, 63, 64} of
+  each patch. T3.c's quiet-machine bench is re-measured in a quiet window the orchestrator
+  schedules (decisions-r05.md item 7), not by the owner.
 - **Deviations in T12.a, as built** (2026-10-02).
   - _The solar inputs._ NREL is now NLR: E-490-00a is fetched from
     `https://www.nlr.gov/media/docs/libraries/grid/e490_00a_amo.xls?sfvrsn=ce97914b_1`, an `.xls`.
