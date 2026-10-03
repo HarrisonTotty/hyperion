@@ -10,16 +10,24 @@
  * is left alone. Bytes follow the engine's own rules: a buffer its `bytes`, a texture
  * {@link textureBytes}. Readbacks resolve to zeros of no length; packed cubes and splats are not
  * faked.
+ *
+ * Creations are held to the device's limits as WebGPU's validation would hold them: a buffer above
+ * `maxBufferSize`, a storage buffer above `maxStorageBufferBindingSize` (every binding here spans
+ * its whole buffer), or a 2D texture above `maxTextureDimension2D` or 256 layers throws
+ * {@link LimitExceeded}, where the device would raise a validation error and draw nothing.
  */
 
+import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { KernelPair } from "../view/engine/kernels";
 import {
   type AllocationEvent,
   type BufferSpec,
+  extentOf,
   type MemoryCategory,
   textureBytes,
   type TextureSpec,
 } from "../view/engine/memory";
+import { type GpuCapabilities, MAX_TEXTURE_ARRAY_LAYERS } from "../view/engine/platform";
 import type { GraphicsFault } from "../view/engine/status";
 import type {
   BufferHandle,
@@ -77,6 +85,23 @@ export interface RecordedWrite {
   readonly data: Uint8Array;
 }
 
+/** One recorded texture write. */
+export interface RecordedTextureWrite {
+  readonly texture: string;
+  readonly origin: GPUOrigin3D;
+  readonly size: GPUExtent3D;
+  /** A copy of the data written, as bytes. */
+  readonly data: Uint8Array;
+}
+
+/** A creation the device's limits would refuse with a validation error. */
+export class LimitExceeded extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LimitExceeded";
+  }
+}
+
 function zeroCounts(): EngineCounts {
   return {
     buffers: 0,
@@ -104,7 +129,6 @@ function notFaked(member: string): Error {
 
 /** A fake engine that answers creations with handles and counts everything. */
 export class CountingRenderEngine implements RenderEngine {
-  readonly capabilities: RenderEngine["capabilities"];
   readonly depthPolicy = "reversed-z-float" as const;
   /** R01's fake, which makes the views and raises the faults. */
   readonly inner: FakeRenderEngine;
@@ -114,6 +138,10 @@ export class CountingRenderEngine implements RenderEngine {
   readonly dispatched: RecordedDispatch[] = [];
   /** Every buffer write, first first. */
   readonly writes: RecordedWrite[] = [];
+  /** Every texture write, first first. */
+  readonly textureWritten: RecordedTextureWrite[] = [];
+  /** Every texture made, render targets' included, first first. */
+  readonly textureSpecs: TextureSpec[] = [];
   /** Every frame submitted to a render target, first first (views record their own). */
   readonly targetFrames: FrameSubmission[] = [];
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
@@ -123,10 +151,16 @@ export class CountingRenderEngine implements RenderEngine {
     BufferHandle | TextureHandle,
     { bytes: number; category: MemoryCategory }
   >();
+  #capabilities: GpuCapabilities;
 
   constructor(device: GPUDevice) {
     this.inner = new FakeRenderEngine(device);
-    this.capabilities = this.inner.capabilities;
+    this.#capabilities = this.inner.capabilities;
+  }
+
+  /** The device's capabilities: the first device's, or the one the last restore rebuilt onto. */
+  get capabilities(): GpuCapabilities {
+    return this.#capabilities;
   }
 
   /** Zeroes {@link CountingRenderEngine.counts}; the recorded lists are kept. */
@@ -134,8 +168,14 @@ export class CountingRenderEngine implements RenderEngine {
     this.counts = zeroCounts();
   }
 
-  /** Raises a restore after a device loss, as the resilient engine does once it has rebuilt. */
-  restore(): void {
+  /**
+   * Raises a restore after a device loss, as the resilient engine does once it has rebuilt, onto
+   * `device` when given (a lesser adapter's, say), whose capabilities hold from then on.
+   */
+  restore(device?: GPUDevice): void {
+    if (device !== undefined) {
+      this.#capabilities = new FakeRenderEngine(device).capabilities;
+    }
     for (const listener of this.#restoredListeners) {
       listener();
     }
@@ -221,6 +261,15 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
+    const { maxBufferSize, maxStorageBufferBindingSize } = this.#capabilities;
+    if (spec.bytes > maxBufferSize) {
+      throw new LimitExceeded(`buffer ${spec.name} of ${spec.bytes} B exceeds ${maxBufferSize} B`);
+    }
+    if ((spec.usage & BUFFER_USAGE.STORAGE) !== 0 && spec.bytes > maxStorageBufferBindingSize) {
+      throw new LimitExceeded(
+        `storage buffer ${spec.name} of ${spec.bytes} B exceeds a binding's ${maxStorageBufferBindingSize} B`,
+      );
+    }
     this.counts.buffers += 1;
     this.#emit({ kind: "created", name: spec.name, bytes: spec.bytes, category: spec.category });
     const handle: BufferHandle = { kind: "buffer", name: spec.name, bytes: spec.bytes };
@@ -229,7 +278,18 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createTexture(spec: TextureSpec): TextureHandle {
+    const { width, height, depthOrArrayLayers } = extentOf(spec.size);
+    const most = this.#capabilities.maxTextureDimension2D;
+    if (
+      spec.dimension !== "3d" &&
+      (width > most || height > most || depthOrArrayLayers > MAX_TEXTURE_ARRAY_LAYERS)
+    ) {
+      throw new LimitExceeded(
+        `texture ${spec.name} of ${width} × ${height} × ${depthOrArrayLayers} exceeds ${most}² × ${MAX_TEXTURE_ARRAY_LAYERS}`,
+      );
+    }
     this.counts.textures += 1;
+    this.textureSpecs.push(spec);
     const bytes = textureBytes(spec);
     this.#emit({ kind: "created", name: spec.name, bytes, category: spec.category });
     const handle: TextureHandle = { kind: "texture", name: spec.name };
@@ -299,11 +359,12 @@ export class CountingRenderEngine implements RenderEngine {
 
   writeTexture(
     texture: TextureHandle,
-    _origin: GPUOrigin3D,
-    _size: GPUExtent3D,
+    origin: GPUOrigin3D,
+    size: GPUExtent3D,
     data: ArrayBufferView,
   ): void {
     this.counts.textureWrites += 1;
+    this.textureWritten.push({ texture: texture.name, origin, size, data: copyOf(data) });
     this.#emit({ kind: "uploaded", name: texture.name, bytes: data.byteLength });
   }
 
@@ -344,8 +405,26 @@ export class CountingRenderEngine implements RenderEngine {
   }
 }
 
-/** A counting engine on a fake SwiftShader device, with no optional features. */
-export async function countingRenderEngine(): Promise<CountingRenderEngine> {
-  const adapter = new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] });
-  return new CountingRenderEngine(await adapter.requestDevice());
+/** The buffer limits a counting engine's device is granted. */
+export interface CountingLimits {
+  readonly maxStorageBufferBindingSize: number;
+  readonly maxBufferSize: number;
+}
+
+/**
+ * A counting engine on a fake SwiftShader device, with no optional features: with WebGPU's default
+ * limits, or with `limits` asked of an adapter that has them, as `createWebGpuEngine` asks
+ * (decisions-r06-r07.md item 7).
+ */
+export async function countingRenderEngine(limits?: CountingLimits): Promise<CountingRenderEngine> {
+  return new CountingRenderEngine(await fakeDevice(limits));
+}
+
+/** A fake SwiftShader device granted `limits`, or WebGPU's defaults; for a restore onto it. */
+export async function fakeDevice(limits?: CountingLimits): Promise<GPUDevice> {
+  if (limits === undefined) {
+    return new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] }).requestDevice();
+  }
+  const adapter = new FakeAdapter({ info: SWIFTSHADER_INFO, features: [], ...limits });
+  return adapter.requestDevice({ requiredLimits: { ...limits } });
 }

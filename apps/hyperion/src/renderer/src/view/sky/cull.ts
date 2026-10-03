@@ -53,6 +53,7 @@ export interface CulledSky {
  */
 export function starIsSeen(stars: SkyStars, index: number, limit: ViewStarLimit): boolean {
   const v = stars.vMag[index] ?? Number.POSITIVE_INFINITY;
+  let seen: boolean;
   switch (limit.kind) {
     case "eye": {
       const at = index * 3;
@@ -61,11 +62,14 @@ export function starIsSeen(stars: SkyStars, index: number, limit: ViewStarLimit)
         stars.directions[at + 1] ?? 0,
         stars.directions[at + 2] ?? 1,
       );
-      return Number.isNaN(limitV) || v < limitV + (stars.eyeOffsetMag[index] ?? 0);
+      seen = Number.isNaN(limitV) || v < limitV + (stars.eyeOffsetMag[index] ?? 0);
+      break;
     }
     case "camera":
-      return v + (stars.cameraBandMag[index] ?? 0) < limit.limitV;
+      seen = v + (stars.cameraBandMag[index] ?? 0) < limit.limitV;
+      break;
   }
+  return seen;
 }
 
 /**

@@ -1,0 +1,49 @@
+<?xml version="1.0" ?>
+<!DOCTYPE nvidia_smi_log SYSTEM "nvsmi_device_v13.dtd">
+<nvidia_smi_log>
+	<timestamp>Fri Oct  2 19:05:28 2026</timestamp>
+	<driver_version>615.71.09</driver_version>
+	<!-- driver_version is deprecated and will be removed in CUDA 14.0; use kmd_version instead -->
+	<cuda_version>13.4</cuda_version>
+	<!-- cuda_version is deprecated and will be removed in CUDA 14.0; use cuda_umd_version instead -->
+	<kmd_version>615.71.09</kmd_version>
+	<cuda_umd_version>13.4</cuda_umd_version>
+	<attached_gpus>1</attached_gpus>
+	<gpu id="00000000:08:00.0">
+		<product_name>NVIDIA GeForce RTX 3080</product_name>
+		<!-- trimmed to the elements fdinfo.ts reads -->
+		<fb_memory_usage>
+			<total>10240 MiB</total>
+			<reserved>320 MiB</reserved>
+			<used>168 MiB</used>
+			<free>9753 MiB</free>
+		</fb_memory_usage>
+		<processes>
+			<process_info>
+				<gpu_instance_id>N/A</gpu_instance_id>
+				<compute_instance_id>N/A</compute_instance_id>
+				<pid>1303</pid>
+				<type>G</type>
+				<process_name>/usr/lib/Xorg</process_name>
+				<used_memory>110 MiB</used_memory>
+			</process_info>
+			<process_info>
+				<gpu_instance_id>N/A</gpu_instance_id>
+				<compute_instance_id>N/A</compute_instance_id>
+				<pid>1439</pid>
+				<type>G</type>
+				<process_name>alacritty</process_name>
+				<used_memory>10 MiB</used_memory>
+			</process_info>
+			<process_info>
+				<gpu_instance_id>N/A</gpu_instance_id>
+				<compute_instance_id>N/A</compute_instance_id>
+				<pid>421400</pid>
+				<type>G</type>
+				<process_name>alacritty</process_name>
+				<used_memory>10 MiB</used_memory>
+			</process_info>
+		</processes>
+	</gpu>
+
+</nvidia_smi_log>

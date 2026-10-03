@@ -54,6 +54,10 @@ describe("the catalogue's display names", () => {
     );
   });
 
+  it("names both terrain vertex paths' materials on the console", () => {
+    expect(DISPLAY_NAMES).toEqual(expect.arrayContaining(["TERRAIN", "TERRAIN OFFSETS"]));
+  });
+
   it("gives every effect a name in the console's form", () => {
     expect(DISPLAY_NAMES.filter((name) => !DISPLAY_NAME.test(name))).toEqual([]);
   });

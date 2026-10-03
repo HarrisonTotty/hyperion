@@ -8,8 +8,19 @@
  * `default`, and R12.T7.a adds the ladder's (R01 Design note 18).
  */
 
+import {
+  AERIAL_PERSPECTIVE_KERNEL,
+  COMPOSITE_MATERIAL,
+  RAY_MARCH_KERNEL,
+  SKY_VIEW_KERNEL,
+} from "../atmosphere/hillaire";
 import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
+import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
+import { HISTOGRAM_KERNEL } from "../post/histogram";
+import { TONEMAP_MATERIAL } from "../post/tonemap";
+import { LIT_AGX_MATERIAL } from "../spike/litView";
+import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type { PointSplatSpec, WgslMaterialSpec, WgslPostProcessSpec } from "./types";
@@ -49,9 +60,37 @@ const ATMOSPHERE_TABLE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   MULTI_SCATTERING_KERNEL,
 ].map((spec) => ({ kind: "compute", spec }));
 
+/** R07's post-processing kernels and passes (plan R07, T12–T15). */
+const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "compute", spec: HISTOGRAM_KERNEL },
+  { kind: "material", spec: BLOOM_DOWN_MATERIAL },
+  { kind: "material", spec: BLOOM_UP_MATERIAL },
+  { kind: "material", spec: TONEMAP_MATERIAL },
+];
+
+/**
+ * R05.T12.c's per-frame atmosphere: the sky view, the aerial perspective and the ray march, and
+ * the composite that lays them over the terrain.
+ */
+const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  ...[SKY_VIEW_KERNEL, AERIAL_PERSPECTIVE_KERNEL, RAY_MARCH_KERNEL].map((spec): CatalogueEntry => ({
+    kind: "compute",
+    spec,
+  })),
+  { kind: "material", spec: COMPOSITE_MATERIAL },
+];
+
+/** R05.T11.b's terrain pass, one material per vertex path, and T11.c's lit view's display pass. */
+const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [...TERRAIN_MATERIALS, LIT_AGX_MATERIAL].map(
+  (spec) => ({ kind: "material", spec }),
+);
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
   ...WIREFRAME_ENTRIES,
   ...ATMOSPHERE_TABLE_ENTRIES,
+  ...POST_ENTRIES,
+  ...ATMOSPHERE_VIEW_ENTRIES,
+  ...TERRAIN_ENTRIES,
 ];

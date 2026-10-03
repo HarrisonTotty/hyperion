@@ -32,6 +32,36 @@ mapper. Filament's AgX matrices are in turn taken from Blender's AgX
 iolite-engine's minimal AgX (https://iolite-engine.com/blog_posts/minimal_agx_implementation).
 
 --------------------------------------------------------------------------------
+Data: CIE colour-matching and luminous-efficiency functions
+https://creativecommons.org/licenses/by-sa/4.0/
+
+CIE 2019, Colour-matching functions of CIE 1931 standard colorimetric observer, International
+Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b
+CIE 2019, CIE spectral luminous efficiency for photopic vision, International Commission on
+Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.dktna2s3
+CIE 2019, CIE spectral luminous efficiency for scotopic vision, International Commission on
+Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.gr6w4b5g
+CIE 2022, CIE standard illuminant D65, International Commission on Illumination (CIE), Vienna, AT,
+DOI: 10.25039/CIE.DS.hjfjmt59
+
+Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0). The
+tables are kept unmodified in crates/hyperion-fit/data/cie_cmf/ (a tool input, not shipped). The
+values of crates/hyperion-sim/src/tables/star_colour.rs are computed from them (integrated against
+model stellar spectra); to the extent they are adapted material they are offered under CC BY-SA
+4.0.
+
+--------------------------------------------------------------------------------
+Data: optical constants of silicon
+https://creativecommons.org/publicdomain/zero/1.0/
+
+M. A. Green, "Self-consistent optical parameters of intrinsic silicon at 300K including
+temperature coefficients", Sol. Energ. Mat. Sol. Cells 92, 1305-1310 (2008),
+DOI: 10.1016/j.solmat.2008.06.009; as tabulated by the refractiveindex.info database
+(M. N. Polyanskiy, Sci. Data 11, 94 (2024)), which is dedicated to the public domain (CC0 1.0).
+Kept unmodified in crates/hyperion-fit/data/green2008_si/ (a tool input, not shipped); the
+camera band terms of crates/hyperion-sim/src/tables/star_colour.rs are computed from it.
+
+--------------------------------------------------------------------------------
 Bevy
 https://github.com/bevyengine/bevy
 

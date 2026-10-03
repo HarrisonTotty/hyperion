@@ -13,8 +13,11 @@
  * What a GPU allocation is for, by the names R12.T3.a reports (R12 Design note 6).
  *
  * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b).
+ * - `atmosphere-view`: the per-frame sky-view, aerial-perspective and ray-march tables (R05.T12.c).
+ * - `height-cache`: the terrain's patch cache, its slot buffers and normals atlas (R05.T11.a).
  */
-export type MemoryCategory = "render-targets" | "other" | "atmosphere-tables";
+export type MemoryCategory =
+  "render-targets" | "other" | "atmosphere-tables" | "atmosphere-view" | "height-cache";
 
 /** A GPU buffer to create. */
 export interface BufferSpec {

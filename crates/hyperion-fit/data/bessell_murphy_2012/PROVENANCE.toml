@@ -1,0 +1,17 @@
+# The normalised photonic UBVRI responses of Bessell and Murphy (2012), Table 1, as CDS distributes
+# them (VizieR J/PASP/124/140); only the V columns are read. A fetched dataset (plan 15, Design note
+# 12): no licence is stated, so only this file and `urls.txt` are committed. The raw files are
+# downloaded into `crates/hyperion-fit/data/cache/bessell_murphy_2012/`, which git ignores: each
+# line of `urls.txt` is a file name and the URL it was downloaded from. Read by `run star_colour`
+# (rendering plan R06, R06.T3.a).
+dataset = "bessell_murphy_2012"
+class = "fetched"
+citation = "Bessell and Murphy (2012), PASP 124, 140: revised photonic passbands, Table 1 (VizieR J/PASP/124/140)"
+url = "https://cdsarc.cds.unistra.fr/ftp/J/PASP/124/140/"
+retrieved = "2026-10-02"
+release = "table1.dat as CDS served it on that date (dated 2013-02-11)"
+licence = "none stated; CDS asks that VizieR be acknowledged and the paper cited"
+
+[[files]]
+name = "table1.dat"
+sha256 = "2af9c19c397ddf3800e55791cabfb484dea170b4947a891d150da4f0fe51295e"

@@ -6,8 +6,10 @@
 //! wait for the server for every vertex. So both run this crate: natively in the server, and as a
 //! WebAssembly module in the client's workers. It holds, as their plans land, the shared height
 //! function (the rendering plans' R05 writes a provisional one for a hand-made test planet, R09 the
-//! real one), the material classes (R10) and the rocks (R11). Today it holds none of them, only the
-//! checks they will be written under.
+//! real one), the material classes (R10) and the rocks (R11). Today it holds R05's: the cube
+//! sphere ([`cube`], [`geometry`]), the provisional [`test_planet`] and its noise basis
+//! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), and the datum heights
+//! are measured from, the reference [`spheroid`] (plan 14's P14.T46.e).
 //!
 //! # The contract of the height function
 //!
@@ -41,10 +43,27 @@ compile_error!(
      client's terrain would not match the server's bit for bit"
 );
 
+pub mod cube;
+pub mod geometry;
+pub mod noise;
+pub mod num;
+pub mod patch;
+pub mod spheroid;
 pub mod tags;
+pub mod test_planet;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;
+
+/// The version of the provisional test planet, written into the header of every golden file of
+/// this crate in place of the generator version (plan R05, Design note 13).
+///
+/// The test planet (R05) belongs to no universe, so a change to it moves no universe's output and
+/// does not bump `GENERATOR_VERSION`; it bumps this instead, as does any change to the cube
+/// sphere's mapping or a patch bake's bytes. Where a golden test of this crate fails with the
+/// testkit's hint to "bump `GENERATOR_VERSION`", read "bump `TEST_PLANET_VERSION`". R09's real height
+/// function writes `GENERATOR_VERSION` into its own goldens.
+pub const TEST_PLANET_VERSION: u32 = 2;
 
 /// The generator version this build of the crate computes surfaces for.
 ///
