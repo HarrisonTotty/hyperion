@@ -33,6 +33,7 @@ import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
 import { runSoak } from "./soak";
+import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
@@ -200,6 +201,12 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   if (captures) {
     await checks.group("R05.T11.c the terrain captures", async () => {
       images = [...images, ...(await captureTerrain(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await checks.group("R05.T13.b the spike captures", async () => {
+      images = [...images, ...(await captureSpike(engine, checks))];
     });
   }
 
