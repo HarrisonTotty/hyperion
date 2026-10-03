@@ -25,7 +25,7 @@
 
 import { dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { CameraPose, Quaternion } from "../camera/pose";
-import { lookAlong, multiply, quaternionFromRows } from "../camera/quaternion";
+import { lookAlong, multiply, quaternionFromRows, rotate } from "../camera/quaternion";
 import type { ViewPosition } from "../coords/position";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import { TEST_HULL } from "../scene/hull";
@@ -47,9 +47,9 @@ import {
   heldRadiusM,
   isDescending,
 } from "../terrain/grounded";
-import { planetGeometry } from "../terrain/planet";
+import { planetGeometry, spheroidNormal } from "../terrain/planet";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
-import type { DescentProfile } from "./descentProfile";
+import type { DescentPose, DescentProfile } from "./descentProfile";
 import { testPlanetRotationAt } from "./rotation";
 
 /** The spike scene's name, as the label block's `SCENE` line shows it. */
@@ -255,11 +255,17 @@ export function siteDirection(profile: DescentProfile): Xyz {
   return [d.x, d.y, d.z];
 }
 
-/** The craft's path over the whole script, body-fixed, drawn as its predicted path. */
-function scriptedPath(profile: DescentProfile): ReadonlyArray<ViewPosition> {
+/**
+ * The craft's path still to fly, from `tS` to the end, body-fixed, drawn dashed as its predicted
+ * path: the flown part is no prediction, and at the end there is none (decision-r05-spike-ux.md).
+ */
+function remainingPath(profile: DescentProfile, tS: number): ReadonlyArray<ViewPosition> | null {
+  if (tS >= profile.durationS) {
+    return null;
+  }
   const path: ViewPosition[] = [];
   for (let n = 0; n < PATH_SAMPLES; n += 1) {
-    const t = (n / (PATH_SAMPLES - 1)) * profile.durationS;
+    const t = tS + (n / (PATH_SAMPLES - 1)) * (profile.durationS - tS);
     path.push({ kind: "body_fixed", body: SPIKE_PLANET, m: profile.positionAt(t) });
   }
   return path;
@@ -267,13 +273,12 @@ function scriptedPath(profile: DescentProfile): ReadonlyArray<ViewPosition> {
 
 /**
  * The descent spike as a kept scene: the star, the turning test planet and the scripted craft,
- * the own ship, with its path over the whole script as its predicted path; the camera is the
- * craft's own pose.
+ * the own ship, with its path still to fly as its predicted path; the camera is the craft's own
+ * pose.
  */
 export function spikeScene(profile: DescentProfile): KeptScene {
   const sunBody = sunDirectionBody(profile);
   const planetCentreM = scale(sunBody, -AU_M);
-  const path = scriptedPath(profile);
   return {
     name: SPIKE_SCENE_NAME,
     durationS: profile.durationS,
@@ -328,7 +333,11 @@ export function spikeScene(profile: DescentProfile): KeptScene {
               position: { kind: "body_fixed", body: SPIKE_PLANET, m: pose.positionM },
               attitude: camera.orientation,
             },
-            predictedPath: path.map((position) => ({ position, attitude: camera.orientation })),
+            predictedPath:
+              remainingPath(profile, tS)?.map((position) => ({
+                position,
+                attitude: camera.orientation,
+              })) ?? null,
             velocityMPerS: velocity,
           },
         ],
@@ -341,7 +350,13 @@ export function spikeScene(profile: DescentProfile): KeptScene {
 }
 
 /**
- * The orbit instrument's camera at `tS`: three planetary radii out over the craft, looking at the
+ * How many planetary radii out the orbit instrument stands: the disc's angular radius, asin(1 ÷ 7)
+ * = 8.2°, then fits the vertical field of a 60° view up to an aspect of about 3.5.
+ */
+export const ORBIT_INSTRUMENT_RADII = 7;
+
+/**
+ * The orbit instrument's camera at `tS`: {@link ORBIT_INSTRUMENT_RADII} planetary radii out over the craft, looking at the
  * planet's centre with the pole up (or the star's direction where the craft is over a pole), so
  * that the graticule, the craft and its path show together.
  */
@@ -350,11 +365,23 @@ export function orbitInstrumentPose(profile: DescentProfile, tS: number): Camera
   const out = normalise(craft);
   const pole = vec3(0, 0, 1);
   const up = Math.abs(dot(out, pole)) > 0.99 ? sunDirectionBody(profile) : pole;
-  const positionM = scale(out, 3 * TEST_PLANET_FIGURE.equatorialRadiusM);
+  const positionM = scale(out, ORBIT_INSTRUMENT_RADII * TEST_PLANET_FIGURE.equatorialRadiusM);
   const forward = scale(out, -1);
   return {
     frame: { kind: "body", body: SPIKE_PLANET },
     positionM,
     orientation: lookAlong(forward, normalise(sub(up, scale(forward, dot(up, forward))))),
   };
+}
+
+/**
+ * The scripted camera's elevation of view at `pose`, degrees: the angle of its forward axis above
+ * the local horizontal, the spheroid's tangent plane under it, `-90` at the nadir.
+ */
+export function cameraElevationDeg(pose: DescentPose): number {
+  const g = pose.groundDir;
+  const [nx, ny, nz] = spheroidNormal(TEST_PLANET_FIGURE, [g.x, g.y, g.z]);
+  const forward = rotate(pose.orientation, vec3(0, 0, -1));
+  const sine = forward.x * nx + forward.y * ny + forward.z * nz;
+  return (Math.asin(Math.min(1, Math.max(-1, sine))) * 180) / Math.PI;
 }

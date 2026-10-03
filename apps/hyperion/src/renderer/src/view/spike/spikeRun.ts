@@ -48,6 +48,7 @@ import { stretchKeys } from "./demandRecord";
 import {
   DescentProfile,
   type DescentPose,
+  DescentUnclearable,
   landingSiteOf,
   type TrackStretch,
   trackStretches,
@@ -61,6 +62,7 @@ import {
   orbitInstrumentPose,
   siteDirection,
   spikeCameraAt,
+  SPIKE_CRAFT,
   spikeContactAt,
   spikeScene,
   spikeSunState,
@@ -150,17 +152,6 @@ export class DescentRefused extends Error {
 }
 
 /**
- * Whether `error` is T13.a's refusal of floors it cannot clear within its lifts
- * (decision-r05-descent-clearance.md, rule 4), rather than a bug: T13.a raises it as a
- * `RangeError` whose message begins "the descent cannot clear its floors".
- */
-export function isUnclearable(error: unknown): boolean {
-  return (
-    error instanceof RangeError && error.message.startsWith("the descent cannot clear its floors")
-  );
-}
-
-/**
  * Measures the descent of `seed` against the test planet (decision-r05-descent-clearance.md): its
  * level table, the landing site's height along the site's direction d, and a floor under each of
  * T13.a's stretches, the highest baked vertex plus ε_n over the stretch's patches and their
@@ -194,7 +185,7 @@ export async function prepareDescent(query: SurfaceQuery, seed: bigint): Promise
   try {
     profile = new DescentProfile(TEST_PLANET_FIGURE, site, { siteHeightM, stretchMaxHeightsM });
   } catch (error: unknown) {
-    throw isUnclearable(error) ? new DescentRefused(seed, error) : error;
+    throw error instanceof DescentUnclearable ? new DescentRefused(seed, error) : error;
   }
   const lowPass = stretches.findIndex((stretch) => stretch.segment === "low fast pass");
   return {
@@ -484,10 +475,18 @@ export class SpikeRun {
     for (const key of ["orbit", "craft"] as const) {
       const size = input.sizes[key];
       const drawCamera = { pose: cameras[key].pose, fovXRad: INSTRUMENT_FOV_X_RAD };
-      const list = buildWireframeDrawList(scene, drawCamera, size, input.tokens, {
+      // The orbit instrument draws the craft as a target, its mark at a fixed size: as the own
+      // ship it would carry none, and its hull is far below a pixel seven planetary radii out.
+      const drawn = key === "orbit" ? { ...scene, ownShip: null } : scene;
+      const list = buildWireframeDrawList(drawn, drawCamera, size, input.tokens, {
         lowSetting: false,
         ev100,
-        selection: input.selection,
+        // The orbit marks the craft with the bracket reticle until another mark is chosen, so
+        // that it reads against the graticule seven planetary radii away.
+        selection:
+          key === "orbit" && input.selection === null
+            ? { kind: "craft", craft: SPIKE_CRAFT }
+            : input.selection,
         destination: null,
         remPx: input.remPx,
       });

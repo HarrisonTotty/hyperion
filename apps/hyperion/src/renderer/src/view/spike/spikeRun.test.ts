@@ -21,7 +21,6 @@ import { stretchKeys } from "./demandRecord";
 import {
   DescentRefused,
   defaultSpikeWorkers,
-  isUnclearable,
   prepareDescent,
   type PreparedDescent,
   type SpikeFrameInput,
@@ -288,18 +287,5 @@ describe("prepareDescent", () => {
     const prepared = prepareDescent(new SurfaceQuery(worker, "off"), 5n);
     await expect(prepared).rejects.toThrow(/not finite/);
     await expect(prepared).rejects.not.toBeInstanceOf(DescentRefused);
-  });
-});
-
-describe("isUnclearable", () => {
-  it("is T13.a's refusal of floors it cannot clear, and nothing else", () => {
-    const refusal = new RangeError(
-      "the descent cannot clear its floors: slowdown 2 is 3.00 m short after 4 lifts",
-    );
-    expect(isUnclearable(refusal)).toBe(true);
-    expect(isUnclearable(new RangeError("a descent needs 29 finite stretch floors, got 28"))).toBe(
-      false,
-    );
-    expect(isUnclearable(new Error("the descent cannot clear its floors"))).toBe(false);
   });
 });
