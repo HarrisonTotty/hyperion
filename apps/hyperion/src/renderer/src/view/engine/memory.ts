@@ -3,7 +3,8 @@
  *
  * @remarks
  * Every GPU buffer and texture is created through the engine's `createBuffer`, `createTexture` or
- * `createPackedCube`, each with a category, and every creation, destruction and upload raises an
+ * `createPackedCube`, each with a category, and released by `releaseBuffer` and `releaseTexture`
+ * or at disposal; every creation, destruction and upload raises an
  * {@link AllocationEvent}: R05's tally is built on them and R12 itemises them (R01 Design note 18).
  * Later plans add their categories to {@link MemoryCategory} here.
  */
@@ -14,9 +15,17 @@
  * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b).
  * - `atmosphere-view`: the per-frame sky-view, aerial-perspective and ray-march tables (R05.T12.c).
  * - `height-cache`: the terrain's patch cache, its slot buffers and normals atlas (R05.T11.a).
+ * - `sky-cube`: R06's baked star cube and the buffer of its scale (R06.T13.g).
+ * - `sky-scratch`: the sky bake's transients, released when it ends (R06.T13.g).
  */
 export type MemoryCategory =
-  "render-targets" | "other" | "atmosphere-tables" | "atmosphere-view" | "height-cache";
+  | "render-targets"
+  | "other"
+  | "atmosphere-tables"
+  | "atmosphere-view"
+  | "height-cache"
+  | "sky-cube"
+  | "sky-scratch";
 
 /** A GPU buffer to create. */
 export interface BufferSpec {

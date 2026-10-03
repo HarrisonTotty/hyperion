@@ -10,12 +10,15 @@
 //!
 //! `level <ridges> <n> <bound> <low> <high> <spacing>` for ridges `off` then `on` and n from 0 to
 //! 24: the level bound `ε_n`, the lowest and highest height, and the largest vertex spacing, metres,
-//! each as `0x` and its 16 hexadecimal digits of IEEE 754 bits, in the table's order.
+//! each as `0x` and its 16 hexadecimal digits of IEEE 754 bits, in the table's order. Then
+//! `sigma <ridges> <n> <sigma>` for ridges `off` then `on` and n from 0 to 24: `σ_n`, the omitted
+//! octaves' RMS, metres (`TestPlanet::omitted_sigma_m`, the wasm module's `omittedSigmaM`).
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use hyperion_surface::TEST_PLANET_VERSION;
+use hyperion_surface::cube::MAX_LEVEL;
 use hyperion_surface::test_planet::{Ridges, TEST_PLANET};
 use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
@@ -31,6 +34,13 @@ fn the_level_table_matches_its_golden() {
         for (n, row) in (0_u32..).zip(table.chunks(4)) {
             let hex: Vec<String> = row.iter().map(|v| format!("0x{:016x}", bits(*v))).collect();
             w.line(&format!("level {name} {n} {}", hex.join(" ")));
+        }
+    }
+    for (ridges, name) in [(Ridges::Off, "off"), (Ridges::On, "on")] {
+        let planet = TEST_PLANET.with_ridges(ridges);
+        for level in 0..=MAX_LEVEL {
+            let sigma = planet.omitted_sigma_m(level);
+            w.line(&format!("sigma {name} {level} 0x{:016x}", bits(sigma)));
         }
     }
     golden!("level_table", &w.finish());

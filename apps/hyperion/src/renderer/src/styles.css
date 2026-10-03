@@ -3115,6 +3115,69 @@ body {
   min-height: 0;
 }
 
+/* The descent spike fills the window and never scrolls: its lists scroll within themselves. */
+.spike {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.spike__work {
+  padding: 1rem;
+}
+
+/* The two wireframe instruments, side by side under the main view, each beside its label block. */
+.spike__instruments {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  height: 13rem;
+}
+
+.spike-instrument {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.spike-instrument__body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+.spike-instrument__stage {
+  min-height: 0;
+}
+
+/* The instrument's label block stands beside its canvas, not over it. */
+.spike-instrument__label .view-label {
+  position: static;
+  max-width: none;
+}
+
+.spike__panel {
+  flex: none;
+}
+
+.spike__targets {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.spike__list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* DOM text over the image sits on a --surface-0 plate of its own (the guide's "Outlines"). */
 .view-label {
   position: absolute;
@@ -3381,4 +3444,11 @@ body {
   flex: 1 1 0;
   flex-direction: column;
   min-height: 10rem;
+}
+
+/* A view's style switch (plan R07, T7): its buttons are the presets' (`.preset-buttons`). */
+.view-style__reason {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }

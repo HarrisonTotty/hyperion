@@ -1,8 +1,8 @@
 //! A replay of the checked-in capture on the default adapter, into offscreen textures with no
 //! window or presentation, writes a results file in the descent spike's schema (R05.T15.c).
 //!
-//! It needs a GPU adapter (any wgpu backend), so it runs with this tool's own tests, which
-//! `just ci` does not build.
+//! It needs a GPU adapter (any wgpu backend), so it is ignored in `just ci`, which builds and runs
+//! this tool's other tests, and run by `just test-gpu-replay`, in `just ci-slow`.
 
 use std::path::{Path, PathBuf};
 
@@ -46,6 +46,7 @@ fn figure_problems(node: &Value, path: &str, problems: &mut Vec<String>) {
 }
 
 #[test]
+#[ignore = "gpu: needs a GPU adapter; `just test-gpu-replay` runs it"]
 fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     let capture = Capture::read(&fixture()).expect("the fixture is a capture");
     let figures = replay_offscreen(&capture, &fixture(), None).expect("the replay runs");

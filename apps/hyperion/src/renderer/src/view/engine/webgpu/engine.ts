@@ -480,9 +480,35 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return this.#resources.createTexture(spec);
   }
 
-  createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle {
+  createPackedCube(
+    sizePx: number,
+    mips: number,
+    category: MemoryCategory,
+    name?: string,
+  ): TextureHandle {
     this.#assertLive();
-    return this.#resources.createTexture(packedCubeSpec(sizePx, mips, category));
+    return this.#resources.createTexture(packedCubeSpec(sizePx, mips, category, name));
+  }
+
+  releaseBuffer(buffer: BufferHandle): void {
+    this.#assertLive();
+    this.destroyBuffer(buffer);
+  }
+
+  /**
+   * @throws Error for a render target's colour or depth, which the target owns and releases at
+   *   its disposal, as well as for a handle the engine did not make or has released.
+   */
+  releaseTexture(texture: TextureHandle): void {
+    this.#assertLive();
+    for (const target of this.#targets) {
+      if (target.colour === texture || target.depth === texture) {
+        throw new Error(
+          `texture ${texture.name} belongs to a render target and is released with it`,
+        );
+      }
+    }
+    this.destroyTexture(texture);
   }
 
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
@@ -496,13 +522,23 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
   }
 
-  writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void {
+  writePackedCubeLevelFromBuffer(
+    cube: TextureHandle,
+    level: number,
+    packed: BufferHandle,
+    face?: number,
+  ): void {
     this.#assertLive();
     this.#submit(`${cube.name} level ${level}`, (encoder) => {
-      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed);
+      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed, face);
     });
-    // The cube carries the buffer's writer, so a presentation-only result stays refused.
-    this.#writers.copied(packed, cube, this.#resources.textureOf(cube).spec.mips === 1);
+    // The cube carries the buffer's writer, so a presentation-only result stays refused; one face
+    // of six is a part of it.
+    this.#writers.copied(
+      packed,
+      cube,
+      face === undefined && this.#resources.textureOf(cube).spec.mips === 1,
+    );
   }
 
   /**
@@ -513,17 +549,59 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   createPointSplat(spec: PointSplatSpec): PointSplatHandle {
     this.#assertLive();
     assertSplatSupported(this.capabilities);
-    const vertex = this.device.createShaderModule({
-      label: `${spec.name} vertex`,
-      code: spec.vertexWgsl,
-    });
-    const fragment = this.device.createShaderModule({
-      label: `${spec.name} fragment`,
-      code: spec.fragmentWgsl,
-    });
-    const pipeline = this.device.createRenderPipeline(
-      pointSplatPipelineDescriptor(spec, vertex, fragment),
+    const { vertex, fragment } = this.#splatModules(spec);
+    return this.#splatHandle(
+      spec,
+      this.device.createRenderPipeline(pointSplatPipelineDescriptor(spec, vertex, fragment)),
     );
+  }
+
+  /**
+   * R06's point splat, once its pipeline is compiled.
+   *
+   * @throws {@link Float32BlendUnavailable} without `float32-blendable`; Error, as a rejection,
+   *   naming the splat and the compiler's messages when its WGSL does not compile.
+   */
+  async createPointSplatAsync(spec: PointSplatSpec): Promise<PointSplatHandle> {
+    this.#assertLive();
+    assertSplatSupported(this.capabilities);
+    const { vertex, fragment } = this.#splatModules(spec);
+    try {
+      const pipeline = await this.device.createRenderPipelineAsync(
+        pointSplatPipelineDescriptor(spec, vertex, fragment),
+      );
+      return this.#splatHandle(spec, pipeline);
+    } catch (error: unknown) {
+      let errors: ReadonlyArray<string> = [];
+      try {
+        errors = [...(await compilationErrors(vertex)), ...(await compilationErrors(fragment))];
+      } catch {
+        // The compiler's messages could not be read (a lost device, say): the cause still says why.
+      }
+      const detail = errors.length > 0 ? errors.join("\n") : asError(error).message;
+      throw new Error(`splat ${spec.name} did not compile:\n${detail}`, { cause: error });
+    }
+  }
+
+  /** A splat's two shader modules. */
+  #splatModules(spec: PointSplatSpec): {
+    readonly vertex: GPUShaderModule;
+    readonly fragment: GPUShaderModule;
+  } {
+    return {
+      vertex: this.device.createShaderModule({
+        label: `${spec.name} vertex`,
+        code: spec.vertexWgsl,
+      }),
+      fragment: this.device.createShaderModule({
+        label: `${spec.name} fragment`,
+        code: spec.fragmentWgsl,
+      }),
+    };
+  }
+
+  /** The handle of a splat over its pipeline. */
+  #splatHandle(spec: PointSplatSpec, pipeline: GPURenderPipeline): PointSplatHandle {
     let disposed = false;
     return {
       draw: (target: TextureHandle, points: BufferHandle, count: number): void => {

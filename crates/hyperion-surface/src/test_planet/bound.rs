@@ -63,8 +63,9 @@
 //! 10⁴ points in 16 random patches; `σ_n` is the omitted octaves' RMS at full weight (the morph
 //! is the fade); the per-patch maximum is over all 65 × 65 vertices of 32 further patches, where
 //! the distance is `|F_n − F_f|`; `k_n = ε_n ÷ (S_n τ θ_px)` is the implied patch-to-distance
-//! ratio at τ = 1 px, 1080p and 60° (for T13.a). Every patch's maximum was within 1.25 × `4σ_n` at
-//! every level, both ways (R10.T4's criterion (ii), which 32 patches cannot resolve to 99%).
+//! ratio at τ = 1 px, 1080p and 60° (for T13.a); `σ_n` is [`TestPlanet::omitted_sigma_m`], in
+//! which a ridged octave counts at its mask's RMS. Ridges off, every patch's maximum was within
+//! 1.25 × `4σ_n` at every level (R10.T4's criterion (ii), which 32 patches cannot resolve to 99%).
 //!
 //! Ridges Off:
 //!
@@ -99,15 +100,15 @@
 //!
 //! | n  | `ε_n` (m) | p99.9 (m) | p99.9 ÷ ε | `σ_n` (m) | p99.9 ÷ 4σ | patch max ÷ 4σ | `k_n` |
 //! | -- | ------- | --------- | --------- | ------- | ---------- | -------------- | ----- |
-//! | 0  | 7,636   | 2,034     | 0.266     | 645     | 0.788      | 0.918          | 1.36  |
-//! | 1  | 5,484   | 1,375     | 0.251     | 455     | 0.756      | 0.929          | 1.96  |
-//! | 2  | 3,965   | 933       | 0.235     | 320     | 0.728      | 0.952          | 2.83  |
-//! | 3  | 2,894   | 627       | 0.217     | 225     | 0.698      | 1.048          | 4.14  |
-//! | 4  | 2,137   | 400       | 0.187     | 156     | 0.642      | 1.141          | 6.11  |
-//! | 5  | 2,019   | 332       | 0.164     | 106     | 0.783      | 1.113          | 11.5  |
-//! | 6  | 1,648   | 219       | 0.133     | 73.3    | 0.747      | 1.213          | 18.8  |
-//! | 7  | 1,240   | 149       | 0.120     | 49.4    | 0.753      | 1.090          | 28.4  |
-//! | 8  | 877     | 93.6      | 0.107     | 31.3    | 0.748      | 1.114          | 40.1  |
+//! | 0  | 7,636   | 2,034     | 0.266     | 634     | 0.802      | 0.934          | 1.36  |
+//! | 1  | 5,484   | 1,375     | 0.251     | 439     | 0.784      | 0.964          | 1.96  |
+//! | 2  | 3,965   | 933       | 0.235     | 297     | 0.786      | 1.028          | 2.83  |
+//! | 3  | 2,894   | 627       | 0.217     | 189     | 0.828      | 1.242          | 4.14  |
+//! | 4  | 2,137   | 400       | 0.187     | 98.6    | 1.015      | 1.803          | 6.11  |
+//! | 5  | 2,019   | 332       | 0.164     | 67.7    | 1.226      | 1.744          | 11.5  |
+//! | 6  | 1,648   | 219       | 0.133     | 47.6    | 1.150      | 1.867          | 18.8  |
+//! | 7  | 1,240   | 149       | 0.120     | 33.3    | 1.117      | 1.616          | 28.4  |
+//! | 8  | 877     | 93.6      | 0.107     | 23.1    | 1.012      | 1.507          | 40.1  |
 //! | 9  | 561     | 47        | 0.084     | 15.6    | 0.751      | 0.973          | 51.4  |
 //! | 10 | 277     | 23.4      | 0.085     | 7.82    | 0.748      | 0.948          | 50.6  |
 //! | 11 | 127     | 12.5      | 0.098     | 3.91    | 0.797      | 0.951          | 46.6  |
@@ -126,8 +127,14 @@
 //! 8–17% at levels 5–12 (findings): selection by the hard bound over-refines the ridged planet
 //! there. Decisions-r05.md item 6 keeps the hard bound in R05 and has T13.a record the demand
 //! under min(hard, `4σ_n`) for the ridged planet too.
+//!
+//! **A finding for that count and for R10.T4.** With ridges on, the ridged term is far from
+//! Gaussian: at levels 4 to 8, which omit a ridged octave, the 99.9th percentile is 1.0–1.23 ×
+//! `4σ_n`, patch maxima reach 1.87 × `4σ_n`, and only 59–88% of patches lie within 1.25 ×
+//! `4σ_n`. So `min(ε_n, 4σ_n)` is not a safe selection bound on the ridged planet: R10.T4's
+//! criteria (i) and (ii) both fail there, and its rule would raise k.
 
-use super::{RIDGE_EPSILON, RIDGE_RMS, RIDGED, Ridges, TestPlanet, octaves};
+use super::{RIDGE_EPSILON, RIDGE_MASK_RMS, RIDGE_RMS, RIDGED, Ridges, TestPlanet, octaves};
 use crate::geometry::{finest_level, lattice_step, vertex_spacing};
 use crate::noise::NOISE_RMS;
 use crate::num;
@@ -211,6 +218,40 @@ impl TestPlanet {
             omitted += self.octave_bound_m(k);
         }
         omitted + self.interpolation_bound_m(level, own) + self.interpolation_bound_m(finest, all)
+    }
+
+    /// `σ_n`, the RMS height of the octaves level `level` omits and the finest level includes,
+    /// metres: the spread of `|F_n − F_f|` that decisions-r05.md item 6 records beside `ε_n`, and
+    /// that R10.T4's rule and T13.a's second count read as `min(ε_n, 4σ_n)`.
+    ///
+    /// The octaves are independent, so their variances add, in index order:
+    /// `σ_n² = Σ_k (f_k σ_k)²` over the omitted octaves k, with `σ_k` the octave's RMS
+    /// ([`TestPlanet::sigma_m`]) and `f_k` 1 for a plain octave and [`RIDGE_MASK_RMS`] for a
+    /// ridged one, whose term `σ_k w (r − r̄) ÷ r_rms` has unit RMS in `(r − r̄) ÷ r_rms` times the
+    /// mask's. It is taken at morph 0, the newest octave at full weight (the morph is the fade). It
+    /// is 0 from the finest level on, which omits nothing; with ridges on it is smaller than with
+    /// them off at the levels that omit a ridged octave (octaves 8 to 12), and the same elsewhere.
+    /// A statistical figure, never a bound: selection and culling read `ε_n`.
+    ///
+    /// # Panics
+    ///
+    /// If `level` is above [`crate::cube::MAX_LEVEL`].
+    #[must_use]
+    pub fn omitted_sigma_m(&self, level: u8) -> f64 {
+        let finest = finest_level(self.figure().equatorial_radius_m);
+        let own = self.octaves_at(level).count();
+        let all = self.octaves_at(finest).count();
+        let mut variance = 0.0;
+        for k in own..all {
+            let factor = if self.ridges() == Ridges::On && RIDGED.contains(&k) {
+                RIDGE_MASK_RMS
+            } else {
+                1.0
+            };
+            let sigma = factor * self.sigma_m(k);
+            variance += sigma * sigma;
+        }
+        variance.sqrt()
     }
 
     /// The level table the client's selection reads at run time (plan R05, Provides): for each
