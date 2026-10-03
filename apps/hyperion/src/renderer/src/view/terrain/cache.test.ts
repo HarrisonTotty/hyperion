@@ -89,6 +89,39 @@ describe("the patch cache", () => {
     expect(cache.has(patchKeyString(A))).toBe(true);
   });
 
+  it("pins every resident ancestor of the selection, above a stand-in too", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [ROOT, A, AA]);
+    // AA's children are selected and unbaked: AA stands in for them, and A and the root above it
+    // are pinned too.
+    frame(cache, selectionOf(childKeys(AA)));
+    expect(cache.pressure().drawn).toBe(3);
+  });
+
+  it("evicts the deeper of two patches used as recently first", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A, B, AA, AB, ...childKeys(AA).slice(0, 2)]);
+    frame(cache, selectionOf([]));
+    const result = cache.insert(resident(C));
+    expect(result.kind === "stored" ? result.evicted : "refused").toBe(
+      patchKeyString(childKeys(AA)[0]),
+    );
+  });
+
+  it("evicts a pinned ancestor only after every unpinned patch", () => {
+    const cache = cacheOf(7);
+    insertAll(cache, [A, AA, ...childKeys(B).slice(0, 4), C]);
+    // AA's children are selected: AA and A are pinned as its ancestors; B's children and C are not.
+    frame(cache, selectionOf(childKeys(AA)));
+    const evicted = [D, ...childKeys(D)].map((k) => {
+      const result = cache.insert(resident(k));
+      return result.kind === "stored" ? result.evicted : "refused";
+    });
+    const unpinnedFirst = evicted.slice(0, 5);
+    expect(unpinnedFirst).not.toContain(patchKeyString(A));
+    expect(unpinnedFirst).not.toContain(patchKeyString(AA));
+  });
+
   it("evicts a drawn patch once only forced patches remain beside it", () => {
     const cache = cacheOf(6);
     const forced = [B, C, D, AA, AB];
