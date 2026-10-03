@@ -90,6 +90,25 @@ describe("useSky", () => {
     expect(result.current.model?.stale).toBe(false);
   });
 
+  it("starts no decoder for a request that is never answered, or cancelled before its answer", () => {
+    let made = 0;
+    const counting = (): SkyDecoder => {
+      made += 1;
+      return inThreadDecoder();
+    };
+    const hook = renderHook(
+      ({ request }: { readonly request: SkyRequest }) =>
+        useSky(request, CAMERAS, { createDecoder: counting }),
+      { initialProps: { request: skyRequest(0) }, wrapper: ServerLinkHarness },
+    );
+    act(() => {
+      FakeWebSocket.latest().serverWelcomes();
+    });
+    hook.rerender({ request: skyRequest(0, "0200080020000001") });
+    hook.unmount();
+    expect(made).toBe(0);
+  });
+
   it("asks nothing where no request can be made", () => {
     const { socket } = renderSky(null);
     expect(socket.requestsOfKind("sky")).toHaveLength(0);

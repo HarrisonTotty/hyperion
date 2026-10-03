@@ -1480,9 +1480,32 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   interim field and its label where the sky has arrived, and composing the request's observer
   from `barycentreAt` and the camera, so that the label never claims the sky while the view still
   draws the interim field.
-- **T13.c takes T12's view wiring** (see T12's deviation): `ViewDisplay` asks the sky through
-  `useSky`, draws its sprites in place of the interim field's, and the label block reads
-  `skyLabelValue` where the sky has arrived.
+- **Deviations in T13.c, as built (2026-10-03), with T12's view wiring.** `select.ts`
+  (`selectSkySprites(stars, kept, spriteBudget, camera)` → `SkySelection { sprites, baked }`:
+  the budget's brightest of the kept stars, and any star nearer than `bakedBeyondM`, about 9 ly at
+  1080p and 60°), `sprites.ts` (`skySpriteStars(stars, indices, cameraFromObserverM)`, each
+  star's position less the camera's offset in `f64`), `camera.ts` (`cameraGalacticPosition`,
+  `cameraFromObserverM`), `eye.ts` (`DEFAULT_EYE_OBSERVER`, `SkyEyeObserver`, `eyeDto`; T13.e
+  adds the fixture test against the Rust defaults), `viewSky.ts` (`viewSkyRequest`,
+  `viewSkyLimit`, `limitTriple`, `DARK_SKY_CD_M2`) and `spriteHdr.ts`
+  (`SKY_SPRITE_HDR_MATERIAL`, `STAR SPRITES HDR`: R02's `starSprite.wgsl` composed with an
+  identity `agxSprite` in place of `toneCurve.wgsl`'s, registered in `WGSL_CATALOGUE`). R02's
+  `DrawOptions` gains `skyStars` (`SpriteStar { id, direction, illuminanceRgbLx }`), which the
+  sprite path draws in place of the scene's interim stars; the interim stars pass through the
+  same `SpriteStar` form, so their sprites are unchanged. `displays/view/useViewSky.ts` asks the
+  sky on the published run (4 Hz) for the server's scene where its system's position is known,
+  culls it to the view's limit and selects its sprites; the stage draws them each frame and the
+  label block's `STARS` line reads `skyLabelValue` (R02's count line hidden) once it has arrived,
+  while R02's interim field and labels stand until then. The `VIEW` display's role is `eye`, so
+  it asks the eye's limits and states their deepest; a camera view asks its noise-floor limit at
+  a dark sky of μ 24 (`DARK_SKY_CD_M2`) until the band layer (T13.d) gives a texel's background,
+  and at a manual exposure's triple or else R02's default `MAN` triple until R07 states the
+  metered triple. Until T13.g bakes the cube, the stars beyond the sprite budget are not drawn,
+  and the high setting's N_max and sprite budget are used, the view not yet taking a quality
+  setting. `useSky` makes its decoder only once a payload is in hand (and the effect still live),
+  so that a request never answered starts no worker. A sky is drawn and labelled only for the
+  system it was asked about while that system's position is known; otherwise the interim field and
+  its labels stand. `just test-render` compiles `STAR SPRITES HDR` (2026-10-03, exit 0).
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and

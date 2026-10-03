@@ -193,7 +193,8 @@ export function useSky(
       return undefined;
     }
     let live = true;
-    const decoder = createDecoder();
+    // Made once the payload is in hand, so that a request never answered starts no worker.
+    let decoder: SkyDecoder | null = null;
     const pending = requests.requestBulk<"sky">({ kind: "sky", ...asked }, (r) => r.bulk);
     const settle = (settled: Settled): void => {
       if (!live) {
@@ -220,6 +221,11 @@ export function useSky(
             : { kind: "failed", failure: { request: asked, message: outcome.error.message } };
         }
         const response: ResponseFor<"sky"> = outcome.response;
+        if (!live) {
+          // Cleaned up while the payload arrived: start no worker that nothing would stop.
+          return { kind: "transient" };
+        }
+        decoder = createDecoder();
         const reply = await decoder.decode({
           chunks: outcome.chunks,
           starsBytes: response.stars_bytes,
@@ -245,7 +251,7 @@ export function useSky(
     return () => {
       live = false;
       pending.cancel();
-      decoder.dispose();
+      decoder?.dispose();
     };
   }, [asked, requests, createDecoder]);
 
