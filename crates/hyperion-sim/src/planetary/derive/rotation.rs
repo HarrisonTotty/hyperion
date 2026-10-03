@@ -43,12 +43,14 @@ use crate::id::BodyId;
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::PlanetClass;
+use crate::planetary::derive::composition::MassFractions;
 use crate::planetary::frames::{BodyFixedFrame, FrameSpin};
 use crate::planetary::params::{
     ENVELOPED_MOMENT_OF_INERTIA, GAS_GIANT_MOMENT_OF_INERTIA, GIANT_LOVE_NUMBER,
-    GIANT_PRIMORDIAL_PERIOD, GIANT_TIDAL_Q, ICY_MOMENT_OF_INERTIA, PRIMORDIAL_PERIOD_SCATTER_DEX,
-    QUIET_OBLIQUITY_SCALE, ROCKY_LOVE_NUMBER, ROCKY_MOMENT_OF_INERTIA, ROCKY_PRIMORDIAL_PERIOD,
-    ROCKY_TIDAL_Q, SPIN_ORBIT_RESONANCE_ECCENTRICITY,
+    GIANT_PRIMORDIAL_PERIOD, GIANT_TIDAL_Q, ICY_MOMENT_OF_INERTIA, JUPITER_HEAVY_ELEMENT_FRACTION,
+    PRIMORDIAL_PERIOD_SCATTER_DEX, QUIET_OBLIQUITY_SCALE, ROCKY_LOVE_NUMBER,
+    ROCKY_MOMENT_OF_INERTIA, ROCKY_PRIMORDIAL_PERIOD, ROCKY_TIDAL_Q, SATURN_HEAVY_ELEMENT_FRACTION,
+    SATURN_LIKE_MOMENT_OF_INERTIA, SPIN_ORBIT_RESONANCE_ECCENTRICITY,
 };
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
@@ -307,9 +309,10 @@ impl SpinningBody {
         })
     }
 
-    /// A body of mass `mass`, radius `radius` and class `class`, with its class's moment of
-    /// inertia ([`moment_of_inertia_factor`]) and tides: a rocky body's k₂ = 0.3 and Q = 100 for
-    /// every class with a surface, a giant's 0.4 and 10⁵ otherwise (Gladman et al. 1996).
+    /// A body of mass `mass`, radius `radius`, class `class` and mass fractions `fractions`,
+    /// with its moment of inertia ([`moment_of_inertia_factor`]) and its class's tides: a rocky
+    /// body's k₂ = 0.3 and Q = 100 for every class with a surface, a giant's 0.4 and 10⁵ otherwise
+    /// (Gladman et al. 1996).
     ///
     /// # Errors
     ///
@@ -318,6 +321,7 @@ impl SpinningBody {
         mass: Kilograms,
         radius: Metres,
         class: PlanetClass,
+        fractions: &MassFractions,
     ) -> Result<Self, BuildSpinningBodyError> {
         let (love_number, tidal_q) = if class.has_surface() {
             (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q)
@@ -327,7 +331,7 @@ impl SpinningBody {
         Self::new(
             mass,
             radius,
-            moment_of_inertia_factor(class),
+            moment_of_inertia_factor(class, fractions),
             love_number,
             tidal_q,
         )
@@ -397,16 +401,31 @@ impl fmt::Display for BuildSpinningBodyError {
 
 impl Error for BuildSpinningBodyError {}
 
-/// The moment of inertia of a body of class `class`, in units of M R² (P14.T14.b):
+/// The moment of inertia C ÷ M R² of a body of class `class` and mass fractions `fractions`, the
+/// one factor that serves both its locking and its flattening (P14.T14.b, P14.T46.a):
 /// [`ROCKY_MOMENT_OF_INERTIA`], [`ICY_MOMENT_OF_INERTIA`], [`ENVELOPED_MOMENT_OF_INERTIA`] for
-/// sub-Neptunes and ice giants, and [`GAS_GIANT_MOMENT_OF_INERTIA`].
+/// sub-Neptunes and ice giants, and for a gas giant a blend in its heavy-element fraction
+/// Z = 1 − envelope: [`GAS_GIANT_MOMENT_OF_INERTIA`] at or below
+/// [`JUPITER_HEAVY_ELEMENT_FRACTION`], [`SATURN_LIKE_MOMENT_OF_INERTIA`] at or above
+/// [`SATURN_HEAVY_ELEMENT_FRACTION`], linear between, so that two neighbouring giants differ by
+/// no step (decision-p14-phase-j, 1). Only a gas giant reads `fractions`.
+///
+/// Z is a function of mass as built (Thorngren et al.'s heavy elements), so the blend runs over
+/// about 0.30–1 Jupiter mass; it is written in Z so that it follows if composition gains scatter.
 #[must_use]
-pub const fn moment_of_inertia_factor(class: PlanetClass) -> f64 {
+pub fn moment_of_inertia_factor(class: PlanetClass, fractions: &MassFractions) -> f64 {
     match class {
         PlanetClass::Rocky => ROCKY_MOMENT_OF_INERTIA,
         PlanetClass::Icy => ICY_MOMENT_OF_INERTIA,
         PlanetClass::SubNeptune | PlanetClass::IceGiant => ENVELOPED_MOMENT_OF_INERTIA,
-        PlanetClass::GasGiant => GAS_GIANT_MOMENT_OF_INERTIA,
+        PlanetClass::GasGiant => {
+            let z = 1.0 - fractions.envelope();
+            let share = ((z - JUPITER_HEAVY_ELEMENT_FRACTION)
+                / (SATURN_HEAVY_ELEMENT_FRACTION - JUPITER_HEAVY_ELEMENT_FRACTION))
+                .clamp(0.0, 1.0);
+            GAS_GIANT_MOMENT_OF_INERTIA
+                + (SATURN_LIKE_MOMENT_OF_INERTIA - GAS_GIANT_MOMENT_OF_INERTIA) * share
+        }
     }
 }
 
@@ -421,12 +440,18 @@ pub const fn moment_of_inertia_factor(class: PlanetClass) -> f64 {
 /// Myr with a rocky body's k₂ and Q):
 ///
 /// ```
-/// use hyperion_sim::planetary::derive::PlanetClass;
 /// use hyperion_sim::planetary::derive::rotation::{SpinningBody, tidal_locking_time};
+/// use hyperion_sim::planetary::params::{ROCKY_LOVE_NUMBER, ROCKY_MOMENT_OF_INERTIA, ROCKY_TIDAL_Q};
 /// use hyperion_sim::units::consts::EARTH_MASS_KG;
 /// use hyperion_sim::units::{Kilograms, Metres, Seconds};
 ///
-/// let moon = SpinningBody::of_class(Kilograms::new(7.346e22), Metres::new(1.7374e6), PlanetClass::Rocky)?;
+/// let moon = SpinningBody::new(
+///     Kilograms::new(7.346e22),
+///     Metres::new(1.7374e6),
+///     ROCKY_MOMENT_OF_INERTIA,
+///     ROCKY_LOVE_NUMBER,
+///     ROCKY_TIDAL_Q,
+/// )?;
 /// let tau = tidal_locking_time(&moon, Seconds::new(54_000.0), Metres::new(3.844e8), Kilograms::new(EARTH_MASS_KG));
 /// assert!(tau.value() < 1e7 * 3.156e7);
 /// # Ok::<(), hyperion_sim::planetary::derive::rotation::BuildSpinningBodyError>(())
@@ -741,6 +766,9 @@ pub struct SpinInputs {
     pub obliquity_law: ObliquityLaw,
     /// The body's class, which sets its period law, moment of inertia and tides.
     pub class: PlanetClass,
+    /// The body's mass fractions, which set a gas giant's moment of inertia
+    /// ([`moment_of_inertia_factor`]).
+    pub fractions: MassFractions,
     /// The body's mass.
     pub mass: Kilograms,
     /// The body's radius.
@@ -775,7 +803,8 @@ impl BodyRotation {
     /// [`DeriveRotationError::Law`] for a locking time that is not positive, which a primary of
     /// positive mass never gives.
     pub fn derive(inputs: &SpinInputs) -> Result<Self, DeriveRotationError> {
-        let body = SpinningBody::of_class(inputs.mass, inputs.radius, inputs.class)?;
+        let body =
+            SpinningBody::of_class(inputs.mass, inputs.radius, inputs.class, &inputs.fractions)?;
         let drawn = primordial_period(SpinFamily::of(inputs.class), inputs.draws.period_rank);
         let floor = breakup_period(inputs.mass, inputs.radius);
         let period = Seconds::new(drawn.value().max(floor.value()));
@@ -903,17 +932,24 @@ mod tests {
     use super::*;
     use crate::id::SystemId;
     use crate::orbit::{Eccentricity, Orientation};
-    use crate::units::GravitationalParameter;
+    use crate::planetary::derive::composition::{
+        SnowLineSide, giant_composition, giant_heavy_elements,
+    };
+    use crate::planetary::derive::radius::CoreComposition;
     use crate::units::consts::{
         EARTH_MASS_KG, EARTH_RADIUS_M, JUPITER_MASS_KG, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR,
         SOLAR_MASS_KG,
     };
+    use crate::units::{EarthMasses, GravitationalParameter};
 
     const MYR: f64 = 1e6 * SECONDS_PER_JULIAN_YEAR;
     const GYR: f64 = 1e9 * SECONDS_PER_JULIAN_YEAR;
 
+    /// A solid body's fractions, which no class but a gas giant reads.
+    const SOLID: MassFractions = MassFractions::solid(0.3, 0.7, 0.0);
+
     fn body(mass: f64, radius: f64, class: PlanetClass) -> SpinningBody {
-        SpinningBody::of_class(Kilograms::new(mass), Metres::new(radius), class).unwrap()
+        SpinningBody::of_class(Kilograms::new(mass), Metres::new(radius), class, &SOLID).unwrap()
     }
 
     fn lock(b: &SpinningBody, a: f64, primary: f64) -> f64 {
@@ -1036,6 +1072,84 @@ mod tests {
         // A giant's tides are weaker still: Jupiter never locks.
         let jupiter = body(JUPITER_MASS_KG, 7.1492e7, PlanetClass::GasGiant);
         assert!(lock(&jupiter, 5.2 * METRES_PER_AU, sun) > 10.0 * GYR);
+    }
+
+    /// The fractions of a giant of `earth_masses` by Thorngren et al.'s heavy elements (0.3–13
+    /// `M_J`, the fit's range).
+    fn giant(earth_masses: f64) -> MassFractions {
+        giant_composition(EarthMasses::new(earth_masses), SnowLineSide::Beyond)
+            .unwrap()
+            .fractions()
+    }
+
+    /// The fractions of a body of heavy-element fraction `z` under a hydrogen and helium envelope.
+    fn heavy(z: f64) -> MassFractions {
+        MassFractions::of(CoreComposition::new(0.3, 0.5).unwrap(), 1.0 - z)
+    }
+
+    /// P14.T46.a (a): the heavy-element fractions of Jupiter and Saturn are those of
+    /// `giant_heavy_elements`, to 10⁻¹².
+    #[test]
+    fn the_blend_s_heavy_element_fractions_follow_thorngren() {
+        let jupiter = EarthMasses::from(crate::units::JupiterMasses::new(1.0));
+        let z_j = giant_heavy_elements(jupiter).value() / jupiter.value();
+        let z_s = giant_heavy_elements(EarthMasses::new(95.16)).value() / 95.16;
+        assert!(
+            (z_j - JUPITER_HEAVY_ELEMENT_FRACTION).abs() < 1e-12,
+            "{z_j}"
+        );
+        assert!((z_s - SATURN_HEAVY_ELEMENT_FRACTION).abs() < 1e-12, "{z_s}");
+    }
+
+    /// P14.T46.a (a): a gas giant's factor is 0.25 at 1 `M_J`, 0.21 at Saturn's Z, continuous
+    /// and monotone in Z between; the rocky, icy and enveloped constants are unchanged.
+    ///
+    /// Saturn's 95.16 M⊕ lies just below the heavy-element fit's 0.3 `M_J`, so its Z is set
+    /// directly; the fit's own giants run from 0.3 `M_J`, where the factor is within 10⁻³ of 0.21.
+    #[test]
+    fn one_moment_of_inertia_blends_jupiter_to_saturn() {
+        let by_z = |z: f64| moment_of_inertia_factor(PlanetClass::GasGiant, &heavy(z));
+        let by_mass = |m: f64| moment_of_inertia_factor(PlanetClass::GasGiant, &giant(m));
+        let jupiter = EarthMasses::from(crate::units::JupiterMasses::new(1.0)).value();
+        assert!(
+            (by_mass(jupiter) - 0.25).abs() < 1e-9,
+            "{}",
+            by_mass(jupiter)
+        );
+        assert!((by_mass(3.0 * jupiter) - 0.25).abs() < 1e-15);
+        assert!((by_z(SATURN_HEAVY_ELEMENT_FRACTION) - 0.21).abs() < 1e-12);
+        assert!((by_z(0.5) - 0.21).abs() < 1e-15);
+        assert!(
+            (by_mass(0.3 * jupiter) - 0.21).abs() < 1e-3,
+            "{}",
+            by_mass(0.3 * jupiter)
+        );
+        let mut previous = by_z(0.0);
+        for i in 1..=1_000 {
+            let z = f64::from(i) * 1e-3;
+            let f = by_z(z);
+            assert!(f <= previous, "not monotone at Z {z}");
+            assert!(previous - f < 1e-3, "a step of {} at Z {z}", previous - f);
+            previous = f;
+        }
+        let mut previous = by_mass(0.3 * jupiter);
+        let mut m = 0.3 * jupiter;
+        while m < 2.0 * jupiter {
+            m *= 1.001;
+            let f = by_mass(m);
+            assert!(f >= previous, "not monotone at {m} M⊕");
+            assert!(f - previous < 2e-4, "a step of {} at {m} M⊕", f - previous);
+            previous = f;
+        }
+        for (class, expected) in [
+            (PlanetClass::Rocky, 0.33),
+            (PlanetClass::Icy, 0.34),
+            (PlanetClass::SubNeptune, 0.23),
+            (PlanetClass::IceGiant, 0.23),
+        ] {
+            assert!((moment_of_inertia_factor(class, &SOLID) - expected).abs() < 1e-15);
+            assert!((moment_of_inertia_factor(class, &heavy(0.29)) - expected).abs() < 1e-15);
+        }
     }
 
     fn law(tau: f64, age: f64, e: f64) -> RotationLaw {

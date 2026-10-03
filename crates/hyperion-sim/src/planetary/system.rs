@@ -1893,6 +1893,7 @@ impl PlanetarySystem {
             draws: SpinDraws::for_body(self.seed, index.body_id(self.system)),
             obliquity_law,
             class: bulk.class(),
+            fractions: bulk.fractions(),
             mass,
             radius: Metres::from(bulk.radius()),
             orbit: elements,
