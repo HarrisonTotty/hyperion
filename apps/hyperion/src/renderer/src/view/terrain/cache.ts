@@ -7,8 +7,10 @@
  * eviction order, and the terrain pass (T11) writes each patch's bytes into the GPU buffers at the
  * slot it is given. Eviction is least recently used among unpinned patches. Two pins: a patch in a
  * grounded body's forced region is never evicted, whatever the budget; a patch in the current draw
- * set is evicted only after everything unpinned. The six roots are never evicted either, so that
- * once baked every selected patch has a resident ancestor to stand in for it.
+ * set, the selection or the selection's resident ancestors is evicted only after everything
+ * unpinned, and among patches used as recently the deepest goes first. The six roots are never
+ * evicted either, so that once baked every selected patch has a resident ancestor to stand in for
+ * it.
  *
  * {@link DrawSetResolver} (and {@link resolveDrawSet}) is what sees both the selection and the
  * cache: the selection stays a pure function of its inputs (Design note 7).
@@ -51,7 +53,10 @@ export type CacheInsert =
 export interface CachePressure {
   /** Patches of the last retained selection in the forced region, resident or not. */
   readonly forced: number;
-  /** Resident patches pinned by the last retained selection or draw set, outside the forced region. */
+  /**
+   * Resident patches pinned by the last retained selection, its ancestors or the draw set, outside
+   * the forced region.
+   */
   readonly drawn: number;
   /**
    * Whether the pins exceeded the slots at the last retain, or an insert has been refused since the
@@ -154,8 +159,8 @@ export class PatchCache implements HeightRangeLookup {
   /**
    * Stores a baked patch, in its own slot if it is already resident (a newer bake), else in a free
    * slot, else in the slot of the evicted patch: the least recently used unpinned one, then the
-   * least recently used of those the selection or the draw set pins. A forced or root patch is
-   * never evicted.
+   * least recently used of those the selection, its ancestors or the draw set pins, the deepest
+   * first among patches used as recently. A forced or root patch is never evicted.
    */
   insert(patch: ResidentPatch): CacheInsert {
     const keyString = patchKeyString(patch.key);
@@ -212,10 +217,12 @@ export class PatchCache implements HeightRangeLookup {
    * Sets the pins from this frame's selection and draw set and marks their patches as used.
    *
    * @remarks
-   * Forced pins are the patches the selection marks `forced`. Draw pins are the patches drawn and
+   * Forced pins are the patches the selection marks `forced`. Draw pins are the patches drawn;
    * every other selected patch that is resident, so that the siblings an ancestor stands in for
-   * are kept until all are resident. Both are replaced, not accumulated, so a patch leaving the
-   * selection and the draw set becomes evictable at once. The pins are reported as exceeding the
+   * are kept until all are resident; and every resident ancestor of a selected patch, whose baked
+   * range the selection's bounds read (the streaming gate) and which stands in for its
+   * descendants. Both are replaced, not accumulated, so a patch leaving the selection and the
+   * draw set becomes evictable at once. The pins are reported as exceeding the
    * slots when the forced patches, resident or not, and the other pinned resident patches outnumber
    * the slots, or when an insert was refused since the last retain.
    */
@@ -236,6 +243,25 @@ export class PatchCache implements HeightRangeLookup {
       entry.drawn = !entry.forced && selectedKeys.has(keyString);
       if (selectedKeys.has(keyString)) {
         entry.lastUsed = this.tick;
+      }
+    }
+    // The resident ancestors of the selection hold the bounds selection refines on and stand in
+    // for what is not baked: kept as the draw set is, or the selection collapses when they go.
+    // Run before the draw set's touches, so that an ancestor found already touched was touched by
+    // this walk, and everything above it already was too (the selection is a cut: no selected
+    // patch is another's ancestor).
+    for (const selected of selection.patches.values()) {
+      const key = selected.key;
+      for (let level = key.level - 1; level >= 0; level -= 1) {
+        const entry = this.byIndex[level]?.get(ancestorIndex(key, level));
+        if (entry === undefined) {
+          continue;
+        }
+        if (entry.lastUsed === this.tick) {
+          break;
+        }
+        entry.lastUsed = this.tick;
+        entry.drawn = !entry.forced;
       }
     }
     for (let n = 0; n < draw.count; n += 1) {
@@ -276,20 +302,28 @@ export class PatchCache implements HeightRangeLookup {
     let best: string | null = null;
     let bestRank = 0;
     let bestUsed = 0;
+    let bestLevel = 0;
     for (const [keyString, entry] of this.entries) {
       if (entry.forced || entry.patch.key.level === 0) {
         continue;
       }
       const rank = entry.drawn ? 1 : 0;
+      const level = entry.patch.key.level;
+      // Among patches used as recently, the deepest goes first: an ancestor holds the bounds and
+      // stands in for everything beneath it, so losing one costs a whole subtree (R05.T13.a's
+      // probe found the selection collapsing to the roots when ancestors went first).
       const better =
         best === null ||
         rank < bestRank ||
         (rank === bestRank &&
-          (entry.lastUsed < bestUsed || (entry.lastUsed === bestUsed && keyString < best)));
+          (entry.lastUsed < bestUsed ||
+            (entry.lastUsed === bestUsed &&
+              (level > bestLevel || (level === bestLevel && keyString < best)))));
       if (better) {
         best = keyString;
         bestRank = rank;
         bestUsed = entry.lastUsed;
+        bestLevel = level;
       }
     }
     return best;

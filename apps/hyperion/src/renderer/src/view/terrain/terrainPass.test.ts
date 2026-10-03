@@ -177,7 +177,9 @@ describe("the terrain pass", () => {
     pool().bakeDemand(pass);
     const frame = pass.frame(inputAt(view));
     expect(frame.draw?.indirect?.buffer.name).toBe("terrain indirect");
-    expect(writtenSlots(engine)).toEqual(Array.from(frame.drawSet.slots));
+    expect(writtenSlots(engine)).toEqual(
+      Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count)),
+    );
     expect(frame.drawSet.patches.length).toBeGreaterThan(0);
   });
 
@@ -257,10 +259,18 @@ describe("the terrain pass", () => {
   });
 
   it("selects no more patches than its budget, and says the budget bound", async () => {
-    const { pass } = await passOn("low");
-    // 1.5 km up, 69° from straight down: unbudgeted, the low setting wants about 2,100 patches.
-    const frame = pass.frame(inputAt(tilted(1_500, 1.2)));
+    const { pass, pool } = await passOn("high");
+    // 1.5 km up, 69° from straight down, at 1080p: even under the fake pool's flat bakes, whose
+    // ranges are tight, the high setting wants several thousand patches, beyond its budget of 981.
+    // Selection descends as bakes land (R05.T7's streaming gate), so the demand is baked until it
+    // empties.
+    const view = { ...tilted(1_500, 1.2), viewport: { widthPx: 1920, heightPx: 1080 } };
+    let frame = pass.frame(inputAt(view));
     expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
+    for (let n = 1; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+      frame = pass.frame(inputAt(view, 16 * n));
+      expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
+    }
     expect(frame.selection.limited).toBe(true);
     expect(frame.conditions.detailLimited).toBe(true);
   });
@@ -345,9 +355,14 @@ describe("the terrain pass's selection cadence", () => {
   });
 
   it("selects again once the camera moves past its fraction of the nearest patch", async () => {
-    const { pass } = await passOn("low");
+    const { pass, pool } = await passOn("low");
     const heightM = 1_000_000;
-    pass.frame(inputAt(northPole(heightM)));
+    // Streamed in first: selection descends as bakes land (R05.T7's streaming gate).
+    for (let n = 0; n < 20; n += 1) {
+      pass.frame(inputAt(northPole(heightM), 16 * n));
+      pool().bakeDemand(pass);
+    }
+    pass.frame(inputAt(northPole(heightM), 16 * 20));
     // The nearest selected patch is at least the height's distance below the camera, less the
     // relief, so a move of a thousandth of it is well within the fraction.
     expect(pass.frame(inputAt(northPole(heightM * 0.999))).reselected).toBe(false);
