@@ -2125,3 +2125,80 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     resizes it.
   - **The pixel-scale ruling** (the orchestrator, 2026-10-03) is folded into this commit: Design
     note 1 and T5's text give the centre-pixel distances (see T5's entry).
+- **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
+  - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
+    `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in
+    `bodies/discShading.ts` (`DiscRecord`, `packDiscRecords`, `rasteriseDisc`,
+    `compositeDiscPixels`), the oblate integrals in `bodies/oblate.ts`, the lights in
+    `lighting/hostLights.ts` and `lighting/hostDisc.ts`, and `shaders/bodyDisc.wgsl`, registered
+    in `WGSL_CATALOGUE` as `BODY DISCS` and `BODY DISC LIMBS`. Point bodies through R06's HDR
+    sprites, the sprite row's depth, the photorealistic frame's wiring and the mounting of
+    `StyleControl` and key `4` are part 2, after R06.T13 reached `rendering-and-planets`.
+  - **Lights (decision-r07-t8a, item 1).** `hostLights(scene, discs)` joins R06's discs to the
+    scene's stars by `HostDiscDto.star` as body index; `sceneHostDiscs` takes a kept scene's
+    `ViewScene.hostDiscs` and a server scene's held sky's `hosts`; `placeLights` places each at its
+    star's centre in the frame (never R06's aberrated placement). `planLitBodies` takes the placed
+    lights (`PlacedLight`): per body the brightest two past `STAR_CUT_RELATIVE`, and its
+    occluders, the two largest seen from it. A body no star lights draws colour 0 with class
+    `other`, and a point no light. The label lines `LIGHTING: PENDING` and
+    `LIGHTING: HOSTS NOT RECEIVED` (`lightingStatement`) are the orchestrator's wording under the
+    owner's delegation, drafted for the guide beside `TERRAIN: STREAMING`, and are shown from
+    part 2. `sunLikeHostDisc` (moved out of `test/`, `aHostDisc` calls it) has an illustrative
+    colour and the Sun's V limb law (Claret and Southworth 2022 at log g 4.5, α 0.6893; 0.6884 at
+    4.438) in every channel, so a kept scene's eclipse is achromatic until a fixture from R06's
+    `host_discs` exists.
+  - **The disc's two draws (decision-r07-t8a, item 3).** One source, two materials: the interior
+    (blend none) where all four corner rays meet the body (the silhouette is convex), writing the
+    pure-pixel class (`litBody` where every shaded point is lit directly above
+    `LIT_IRRADIANCE` = 10⁻⁵ of face-on, `unlitBody` where none is, `other` where they are mixed or
+    no star shines); the limb (premultiplied) where any corner lies outside or within
+    `LIMB_OVERLAP_PX` = 10⁻³ px inside the limb, keeping the class beneath. A pixel at the
+    threshold is drawn by both, never by neither.
+  - **Sampling.** 8 × 8 cells a pixel below 32 px, one inside and 4 × 4 on the limb above. Plain
+    point sampling missed the 1% at the 3 px switch for a crescent (15% at 150°, the lit sliver
+    0.2 px deep), and the ruling's fallback did worse (a 64-point R2 sequence 23–44%, a grid
+    rotated by atan ½ 32–39%). So near the limb each cell's profile across the limb's local normal
+    (a trapezoid, the convolution of boxes of widths h|n_x| and h|n_y|) weights its depth
+    integral, by three Gauss points in u = √δ per piece, exact where the light goes as
+    A + B√δ + Cδ, as μ and a crescent's μ₀ do at the limb; the count is not raised. The sweep
+    (centres on a 4 × 4 sub-pixel grid; phases 0°, 90° and 150°; f = 0 and 0.098; 3, 3.3 and 6 px)
+    is within 0.8% everywhere but 6 px at 150°, 1.6%, of which 1.1% is the point's own far-field
+    error (below): tested at 1%, and 2% there. A lunar law and a spheroid seen from 45° latitude
+    are within 1% at 3 px.
+  - **The ray in `f32`.** The hit is taken by cross products in the scaled space,
+    q′ = −(r̂ × u′) × r̂ − √((a ÷ D)² − |r̂ × u′|²) r̂, never b² − rr · power, which cancels to 7% for
+    a body 10⁻³ rad across (the first GPU run read 1.2–60% at 3 px against the twin's 0.4%).
+  - **The horizon term stands for μ₀** in `body_brdf`'s disc term (h = μ₀ wherever the whole star
+    is up), lighting the soft band; the Lommel–Seeliger term's μ₀ + μ is floored at the star's
+    angular radius so that it stays bounded at the limb in that band.
+  - **Oblate bodies.** p is defined against π a c equator-on (Mallama et al. 2017's Saturn), so a
+    spheroid's disc takes A′ = A [L + ⅔(1 − L)] ÷ [L + (1 − L) m(0)], m(β) = ∫ μ² dS ÷ ∫ μ dS at
+    zero phase (1.022 at f = 0.098, L = 0). A spheroid's point integrates the same law over its
+    figure, F = (E ÷ π)(a ÷ Δ)² A′ f(α) K (`spheroidGeometricIntegral`, 96 × 192 midpoint,
+    remembered by direction to 10⁻⁴), in place of the plan's π a b′ Φ(α), which errs by 4.2% at 90°
+    and 10.9% at 150° for f = 0.098 seen from 45° latitude. A sphere keeps the closed form.
+  - **The point is the far-field limit.** From a finite D the visible cap stops asin(a ÷ D) short
+    of the hemisphere and each element's weight μ ÷ r² changes by (a ÷ D)(3μ² − 1), which dims a
+    crescent: an `f64` surface integral puts the disc 0.05% (90°) and 0.55% (150°) below the
+    point at 3 px, 0.11% and 1.10% at 6 px, 0.53% and 5.4% at 30 px (science-checker, 2026-10-03).
+    Only the switch at 3 px matters to continuity.
+  - **Eclipses.** A disc's samples take the eclipse term of each of its (at most two) occluders,
+    their hidden fractions added; a point takes it from its centre. In a penumbra the two agree to
+    2% for a Moon-sized body 3 px across. An occluder beyond the star hides nothing; a point inside
+    one sees none of it.
+  - **Tests.** `view/bodies` (the sweep, the extents of a Saturn-like f = 0.098 disc at 100 px to
+    half a pixel, classes, eclipses, the plan's order, the records' layout, the renderer's draws,
+    table and buffers against R05's counting engine), `view/scenes/phaseScene.test.ts` (the limbs
+    and the geometric terminator, μ₀ = 0, of the 0°, 90° and 150° planets against an `f64` oracle to
+    half a pixel; the soft band's 0.25 px is not the terminator), `view/lighting/hostLights.test.ts`.
+    `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-03): a 20 px disc's 368
+    texels within 0.23 of their tolerance (0.4% relative + 10⁻⁴) of the twin, and within 0.15 in a
+    moon's shadow (89% of the light kept); classes 1, 2 and 3 as the twin's; at 3 px the summed
+    flux within 0.42% of the point's at 0°, 90° and 150° over four placements; the Saturn-like
+    extents 107.38 and 96.85 px against 107.38 and 96.86.
+  - **Risks (decision-r07-t8a).** Until R06.T11 serves `sky`, a live photorealistic view draws
+    its bodies unlit (colour 0, class `other`) under R02's cased marks with a `LIGHTING:` line. A
+    body under about 5 px offers `LIT` and `DARK` few pixels and a point none, so they report
+    `NO IMAGE TO METER`. R06's host disc stays hard-edged with class 0 on every touched pixel;
+    anti-aliasing it would need an alpha-writing blend mode in R01 (an owner option). Overlapping
+    limbs of two discs in one pixel carry the usual coverage-over error, under a pixel.
