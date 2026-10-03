@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { selectionOf } from "../../test/terrainFixtures";
 import { PatchCache, type ResidentPatch, resolveDrawSet } from "./cache";
 import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
-import type { Selection, SelectedPatch } from "./select";
+import type { Selection } from "./select";
 import { slotLayout } from "./slotLayout";
 
 /** A cache of `slots` slots of 100 B each. */
@@ -21,20 +22,6 @@ function resident(key: PatchKey, generation = 1): ResidentPatch {
     heightRangeM: [0, 0],
     boundingRadiusM: 1,
   };
-}
-
-function selectionOf(keys: readonly PatchKey[], forced: readonly PatchKey[] = []): Selection {
-  const forcedStrings = new Set(forced.map(patchKeyString));
-  const patches = new Map<string, SelectedPatch>();
-  for (const key of keys) {
-    const keyString = patchKeyString(key);
-    patches.set(keyString, {
-      key,
-      bounds: { centre: vec3(0, 0, 0), radiusM: 1, minHeightM: 0, maxHeightM: 0 },
-      forced: forcedStrings.has(keyString),
-    });
-  }
-  return { patches, demand: [] };
 }
 
 /** Records a frame: the draw set of `selection` as the cache holds it now, then the pins. */

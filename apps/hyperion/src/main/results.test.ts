@@ -446,6 +446,26 @@ describe("a results file", () => {
   });
 });
 
+describe("a native replay's results", () => {
+  it("summarise the GPU's frame intervals an offscreen replay records", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: measured(traceOf()),
+      memory: MEMORY,
+    });
+    const replay: DescentResults = {
+      ...results,
+      run: { ...results.run, launchMode: "native-replay" },
+      frames: { ...results.frames, source: "gpu-completion", gpuCompletion: results.frames.raf },
+    };
+    expect(validateResults(JSON.parse(JSON.stringify(replay)))).toEqual([]);
+    expect(summaryMarkdown(replay)).toContain(
+      "Intervals from the GPU's ends of frames (an offscreen native replay).",
+    );
+  });
+});
+
 describe("the schema check", () => {
   it("refuses a figure that is null without a reason", () => {
     const results = buildResults({

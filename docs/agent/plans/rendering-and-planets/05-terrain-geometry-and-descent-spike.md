@@ -1862,7 +1862,10 @@ rendering as `src/smoke/main.ts` uses it if a hidden window does not render), so
 it. The recipe follows `client` and `test-render`: `just build` (which runs
 `gen-surface`), the server started as `cargo run -p hyperion-server -- --num-workers 2` in the
 background, Electron on `out/` under `setsid timeout --kill-after=10` with a fresh
-`--user-data-dir`, and the process group killed at the end.
+`--user-data-dir`, and the process group killed at the end. `index.ts` calls T14.b's
+`launchSwitches(options, spike)` from `spike.ts` in place of `graphicsSwitches`, with the parsed
+`--dawn-safety`, before `ready`, so that a spike launch carries the measurement switches (orchestrator
+ruling, 2026-10-03).
 
 - Files: `apps/hyperion/src/main/cli.ts`, its test, `apps/hyperion/src/main/index.ts`,
   `apps/hyperion/src/main/spike.ts` (the IPC handlers and the sender check) and its test,
@@ -1893,13 +1896,14 @@ and passes the same wrapped `GPU` as `LoadEngineOptions.gpu` so that a rebuild a
 is shimmed too. R01's adapter itself is not edited. `PassTimes.timer` is recorded with the times
 (`full`, `quantized` or `absent`), and passes beyond the timer's 64 a frame are counted as untimed.
 
-- Files: `view/spike/metrics.ts`, `view/spike/percentiles.ts`, `view/spike/pipelineShim.ts`,
-  their tests.
+- Files: `view/spike/metrics.ts`, `view/spike/pipelineShim.ts`, their tests. The percentiles,
+  missed-frame and hitch counts are the main process's (`main/results.ts`, T14.c), so there is no
+  `view/spike/percentiles.ts` (orchestrator ruling, 2026-10-03).
 - Tests: the percentiles of fixed interval lists against hand-computed values, including the
-  missed-frame and hitch counts of Design note 21; the shim counts a creation after warm-up and
-  passes the call through unchanged; per-segment figures do not mix segments.
-- Acceptance: `pnpm --filter hyperion exec vitest run view/spike/metrics view/spike/percentiles
-view/spike/pipelineShim`.
+  missed-frame and hitch counts of Design note 21 (in `main/results.test.ts`); the shim counts a
+  creation after warm-up and passes the call through unchanged; per-segment figures do not mix
+  segments.
+- Acceptance: `pnpm --filter hyperion exec vitest run view/spike/metrics view/spike/pipelineShim`.
 
 **R05.T14.b The switches, the trace and the reducer.** In `spike.ts`: the measurement switches of
 Design note 18, set before `ready` when the flag is given. These are R01's `gpuTiming` and, when
@@ -2944,6 +2948,96 @@ medium, sizes, figure)`.
     SwiftShader on 2026-10-03, both variants: 100% from 400 km and 68.8% from 10 m, every terrain
     pixel lit, no uncaptured GPU error. The terrain being drawn with `cullMode: "back"` also
     confirms the mesh's winding.
+- **Orchestrator rulings, 2026-10-03.** T13.c's text now says it wires T14.b's `launchSwitches` into
+  `index.ts`; T14.a's files and acceptance drop `view/spike/percentiles.ts`, whose figures T14.c
+  computes in the main process.
+- **Deviations in T14.a, as built** (2026-10-03, partial).
+  - `view/spike/pipelineShim.ts`: `wrapGpu(gpu, wrapDevice)` (a plain object forwarding to the
+    browser's `GPU`, whose adapters' `requestDevice` is replaced on the instance), `shimPipelines`
+    and `PipelineTally` (`endWarmup`, `creations`, `late`), each creation stamped with the descent's script time, as `DescentSpikeReport.latePipelines` takes it. The device keeps its identity: methods
+    are replaced on the instance, not put behind a `Proxy`, since the browser's WebGPU calls
+    brand-check their arguments. An asynchronous creation that calls the synchronous form through
+    the instance is counted once.
+  - `view/spike/metrics.ts`: `SpikeMetrics` keeps the raw series T14.c's `DescentSpikeReport` takes
+    (`frame`, `passTimes` aligned by `PassTimes.frame`, `allocation` for uploads, `patches`,
+    `report`), `SEGMENT_MEASURE_PREFIX` (`spike.segment:`, which `main/results.ts` repeats: the
+    renderer and the main process share no module, so the two constants are kept equal by hand)
+    and `TIMED_PASSES_A_FRAME`. The report's timer is the worst state seen over the run, and a streaming interval that crosses a segment boundary is shared between the segments. The adapter's peak comes from T11.a's `allocationTally` through
+    `report`'s argument.
+  - **Pending T13.b:** the spike's `ViewEngineSource` (the wrapped `GPU` handed to
+    `requestAdapterOutcome` and as `LoadEngineOptions.gpu`), the `performance.measure` spans and the
+    per-frame calls into `SpikeMetrics`, which need the spike's scene and loop.
+- **Deviations in T15.a, as built** (2026-10-03).
+  - `view/spike/capture.ts`: `GpuCapture` (`wrapDevice`, `startSpan`, `frame`, `endSpan`,
+    `result`, `dispose`), `parseCapture`, `replayCapture` (the reference replayer the test uses) and the file
+    types. The log is generic: each call is `{ target, op, args, result }` by object ID (0 the
+    device, 1 its queue), arguments as JSON with `$ref`, `$blob` (+ `$type`), `$undefined` and
+    `$bigint`, so the format needs no schema per call. On disk a capture is `capture.json` and
+    `capture.bin` (blobs by offset and length) in the `--capture` directory; T13.c writes them.
+    The file also carries `meta` (`setting`, `seed`, `passRows`), which the replayer reads for its
+    results file.
+  - Before the span only creations, views, bind-group layouts and destructions are logged. At the
+    span's start every live buffer and texture is copied to staging buffers in one submission
+    (buffers and textures are created with `COPY_SRC` added while the shim is installed; the log
+    keeps the usage asked), and their bytes are placed in the log as writes at that point, so the
+    engine's calls during the read-back are kept; `result()` refuses until they are all in, and a
+    failed read-back destroys the staging buffers and rejects `startSpan`. Mappable buffers,
+    multisampled textures, depth and stencil formats (never a copy destination) and formats without
+    a texel size in the shim's table are listed in `skipped`; a buffer whose size is not a multiple
+    of four loses its last bytes. `startSpan` is called between frames: a span call on an object
+    whose creation the log lacks (an encoder open when the span started) is not logged but listed
+    in the file's `problems`, as is an argument naming one, so a capture says when a replay cannot
+    trust it. `writeBuffer` is logged as the bytes written,
+    with an explicit data offset of 0 and size.
+  - Canvases are surfaces: `GPUCanvasContext.prototype.getCurrentTexture` is wrapped from the
+    span's start to `endSpan` or `dispose` (`CaptureOptions.contexts`), each canvas logged with
+    its size and format; T13.c calls `dispose` when a run ends early.
+  - It installs through T14.a's seam: `spikeDeviceWrapper(tally, capture)` in `pipelineShim.ts`
+    applies the pipeline tally always and the capture only when given, so a run without
+    `--capture` carries none (tested). `engineBoundary.test.ts` exempts `view/spike/capture.ts`
+    and its test by name from the allocation rule (`isCaptureShim`; the plan named the shim alone,
+    but its test drives a device directly).
+- **Deviations in T15.b and T15.c, as built** (2026-10-03).
+  - `tools/gpu-replay` (own `[workspace]`, wgpu and naga `=30.0.1`, winit 0.30, pollster) has
+    `src/lib.rs` and, beyond the plan's files, `src/run.rs` (the offscreen and presented drivers)
+    and `src/window.rs` (the winit window), so that `main.rs` stays thin. `gpu-replay validate
+<capture>` reads and validates; `gpu-replay replay <capture> [--present] [--setting high|low]
+[--out <dir>]` replays and writes `<date>-<machine>-<setting>-replay.json` (default
+    `docs/measurements/descent-spike/`). `just replay` runs `replay` in release.
+  - The replay recreates the capture's objects in wgpu from the WebGPU names in the log (wgpu's
+    `serde` feature reads them), adds `COPY_DST` to buffers and textures for the snapshot's
+    writes, and keeps passes open across calls (`forget_lifetime`). The capture's own query sets
+    and `resolveQuerySet` are not replayed: the replay times every pass itself with
+    `TIMESTAMP_QUERY` where the adapter has it, labelled as captured. A buffer created
+    `mappedAtCreation` starts as zeros (its mapped writes are not in the log). Arguments that do
+    not parse (a format, a vertex attribute, a binding type, a constant), and buffer ranges past a
+    buffer's end, stop the replay with the call named, rather than being defaulted. wgpu's
+    validation errors are collected and reported, not fatal; the capture's `problems`, capture
+    features the adapter or the replayer lacks, and a canvas format the window cannot present are
+    reported as `findings`.
+  - Offscreen, every canvas is an offscreen texture; frame intervals are the gaps between the
+    GPU timestamps at the end of successive frames' last passes, with at most two frames queued
+    (the replay waits on the frame two before), so they say what the GPU sustains; without
+    `TIMESTAMP_QUERY` they are null with that reason. Presented, the main (largest) canvas is the
+    window's surface with FIFO presentation, intervals are taken as `present` returns, and an
+    outdated or lost surface is configured again, up to eight failures in a row. A replay's
+    results file follows `main/results.ts`'s schema (version 1), whose types gained
+    `frames.source: "gpu-completion"`, the optional `frames.gpuCompletion` and the launch mode
+    `native-replay` (the backend is in `run.options.backend`); figures a native replay cannot have
+    (trace, main thread, memory, rAF) are null with their reason. A GPU row counts only frames
+    with a pass of that row, as the client's writer does.
+  - The checked-in capture (`tests/fixtures/small`) is hand-written in the client's format (two
+    frames, `meta` naming its setting, seed and pass rows), with one module invalid on purpose.
+    Unit tests pin the argument mapping (extents, binding types, ranges, dynamic offsets, absent
+    arguments) and the criterion's rows. Its replay test needs a GPU adapter (any wgpu backend) and runs
+    with `cargo test --manifest-path tools/gpu-replay/Cargo.toml`, display variables unset; it
+    passed on the RTX 3080 (Vulkan) on 2026-10-03. The root `Cargo.toml` has
+    `exclude = ["tools/*"]`, so neither `just lint` nor `just ci` checks the tool: its fmt, clippy
+    (`-D warnings`) and tests are run by hand with that manifest. Canvas textures of past frames
+    stay in the replay's object table for the run (a span is short).
+  - **Pending:** a capture of the real descent (T13.c's `--capture`), its offscreen replay on the
+    RTX 3080, and the presented replay, by hand for the owner:
+    `just replay <capture-dir> --present` (a visible window on `:0`).
 - **Deviations in T9, as built (the annunciations, 2026-10-03).** `annunciation.ts` adds, beside
   `terrainAnnunciation`: `TerrainAnnunciation` (the two strings), `TerrainConditions` and
   `terrainConditions` (the frame's two conditions before the debounce), `coarserThan` (some
@@ -2970,3 +3064,44 @@ medium, sizes, figure)`.
   spacings, all bit for bit (19 tests, first run green). The digest needs the testkit's
   `f64_digest`, so `workers/f32Digest.ts` (T10.b's file) landed here with `fnv1a64`, `f64Digest`
   and `f32Digest`, checked against FNV's published vectors and the testkit's hand-computed value.
+- **Deviations in T7.a, as built (bounds and culling, 2026-10-03).** `PatchBounds` gains
+  `box: OrientedBox` (the centre's spheroid normal and two tangents, with half-extents) beside its
+  sphere, whose centre is the box's; the bounds sample the patch's boundary at every fourth vertex
+  and the centre vertex at both ends of the level's height range and pad by the largest chord
+  between neighbouring samples (about a sixteenth of the patch). Added beside the Provides names:
+  in `planet.ts` `LEVEL_TABLE_STRIDE`, `levelBoundM`, `levelHeightRangeM`, `lowestHeightM`,
+  `spheroidPoint`, `spheroidNormal` and `surfacePoint`; in `bounds.ts` `OrientedBox`,
+  `boxCorners`, `relativeBounds`, `distanceToBoxM` (selection's distance to the nearest point)
+  and `CameraRelativeBounds` (there, not in `cull.ts`); in `cull.ts` `Plane`, `FrustumCamera`,
+  `frustumOf` and `horizonCone`. `HorizonCone` holds the camera's position and R_occ = c + the
+  lowest height of any level (0 with no table); the test is off at or below R_occ. The frustum's
+  sphere stage is its own, not `sphereInFrustum`, which takes R02's `ProjectionCamera`.
+  `bandLimitM()` returns the mirrored `BAND_LIMIT_M`, since the render thread loads no
+  WebAssembly; `planet.wasm.test.ts` checks it, `FINEST_SPACING_M` and both level tables against
+  the module itself. `planetGeometry` refuses a figure not 0 < c ≤ a and a table not 100 finite
+  entries. Shared test fixtures: `src/test/terrainFixtures.ts` (`UNIT_BOUNDS`, `WGS84_FIGURE`,
+  `goldenLevelTable`, `selectionOf`).
+- **Deviations in T7.b's selection, as built (2026-10-03).** `selectPatches` charges a level
+  `selectionErrorM` = ε_n + `chordSagittaM`, the flat triangles' sag below the datum, which ε_n, a
+  bound on heights, leaves out; without it a zero-height spheroid (R07's `mesh` regime) never
+  refines past the roots. Ruled by the science-checker (2026-10-03, relayed by the orchestrator):
+  sag_n = K h_n² ÷ (4 c² ÷ a), K = `SAGITTA_FACTOR` = 1.03. Linear interpolation's error is at most
+  r² ÷ (2 ρ_min) for r the smallest enclosing disc's radius (Waldron 1998, SIAM J. Numer. Anal.
+  35(3) 1191–1200, Thm 4.1 eq. (4.5)), ρ_min = c² ÷ a the spheroid's smallest radius of curvature,
+  and on the quadratic-warp cube sphere split on (0, 0)–(1, 1) r_n² ≤ 1.023 h_n² ÷ 2 (worst at
+  (s, t) ≈ (0.234, 0.766); `select.test.ts` measures 1.020–1.025 over a face's 64² cells), K
+  rounding that up to cover the height's stretch 1 + H ÷ ρ for |H| up to about 30 km; level 0
+  sags about 1.17 km on WGS 84, under a sixth of ε_0, and under a tenth of ε_n from level 1.
+  The distance is to the nearest point of the patch's oriented box. A patch is refined where any
+  view that sees it finds ρ > τ; one no view sees is not selected. The restricted quadtree is
+  enforced after the traversal by `restrictQuadtree` (exported, and tested on hand-built leaf
+  sets across a face edge and at a cube corner): a leaf two or more levels coarser than an edge or
+  corner neighbour is split, each child expanded as the traversal would. Bounds are memoised per
+  `PlanetGeometry` (a `WeakMap`, at most 131,072 a planet, the older half dropped past it), a pure
+  cache that changes no result. `GroundContact` sits in `select.ts` until T7.c moves it to
+  `grounded.ts`; `demand` is filled by T7.d. Finding: on the test planet's hard bound
+  (decisions-r05 item 6), a 1080p view at τ = 1 px from 1.5 km, tilted 69° from the nadir,
+  selects about 12,700 patches; with the per-level error and the horizon's corners computed
+  without allocation and the leaf walk stopped at the first interior node, a warm call takes
+  about 80 ms on the loaded development machine (360 ms before): still more than a frame, so the
+  per-frame cost is revisited when T11.c drives selection each frame.
