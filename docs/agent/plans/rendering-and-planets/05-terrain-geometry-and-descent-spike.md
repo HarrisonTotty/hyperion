@@ -2757,3 +2757,17 @@ medium, sizes, figure)`.
   draws terrain: T11.c (the pass in a view) creates the per-view debounce and passes its line. The
   tests build the low and reference selections by hand until `selectPatches` lands (T7.b). The
   guide row and Design note 23 already carried decisions-r05 item 5's wording.
+- **Deviations in T2's TypeScript mirror, as built (2026-10-03).** `cube.ts` mirrors `cube.rs`
+  and `geometry.rs`: `stToUv`, `uvToSt`, `faceUvToXyz` (the unnormalised tuple), `unitDir`,
+  `faceUvToDir` (Provides' `Vec3` form), `faceOf`, `xyzToFaceUv`, `sampleDir` (64 or 128 a side),
+  `vertexDir`, `vertexSpacing`, `finestLevel`, `PATCH_QUADS`, `BAND_LIMIT_M`, `FINEST_SPACING_M`
+  and `MAX_FINEST_SPACING_M`, over an `Xyz` tuple. `patchKey.ts` gains Rust's integer cube
+  geometry: `patchKeyWord` (the `to_u64` word as a `bigint`, for the golden), `Edge`, `EDGES`,
+  `edgeNeighbour`, `edgeNeighbourAndBack`, `cornerNeighbours`, `sameKey`, `facePoint`,
+  `faceCoords`, `faceOfAxis`, `canonicalFace`, `Axis` and `unreachable` (which closes the numeric
+  switches, whose exhaustiveness oxlint's `consistent-return` cannot see). The golden is read
+  whole: the 1,000 warp values, the 50 patches' words, printed vertices and full-patch digests,
+  their edge and corner neighbours, the 24-crossing table and the 20 finest levels with their
+  spacings, all bit for bit (19 tests, first run green). The digest needs the testkit's
+  `f64_digest`, so `workers/f32Digest.ts` (T10.b's file) landed here with `fnv1a64`, `f64Digest`
+  and `f32Digest`, checked against FNV's published vectors and the testkit's hand-computed value.
