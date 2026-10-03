@@ -161,6 +161,16 @@ describe("patch selection", () => {
     );
   });
 
+  it("reuses each patch's bounds on a second call with unchanged input", () => {
+    const v = view(LOW, lookingDown(LOW, 1.2));
+    const first = select([v]);
+    const second = select([v]);
+    expect([...second.patches.keys()]).toEqual([...first.patches.keys()]);
+    for (const [k, p] of second.patches) {
+      expect(p.bounds).toBe(first.patches.get(k)?.bounds);
+    }
+  });
+
   it("gives the same selection for views in any order, called twice", () => {
     const a = view(LOW, lookingDown(LOW, 1.2));
     const b = view(ORBIT, lookingDown(ORBIT, 0.3), { weight: 0.25 });
@@ -306,7 +316,7 @@ describe("the chords' sagitta", () => {
 function splitDownTo(target: PatchKey): PatchKey[] {
   const tree = new PatchLeafSet<PatchKey>();
   for (const face of [0, 1, 2, 3, 4, 5] as const) {
-    tree.add(rootKey(face), rootKey(face));
+    tree.addRoot(rootKey(face), rootKey(face));
   }
   const path: PatchKey[] = [];
   for (let up = parentKey(target); up !== null; up = parentKey(up)) {
@@ -322,7 +332,10 @@ function splitDownTo(target: PatchKey): PatchKey[] {
 function levelGaps(keys: readonly PatchKey[]): number {
   const sel: Selection = {
     patches: new Map(
-      keys.map((k) => [patchKeyString(k), { key: k, bounds: UNIT_BOUNDS, forced: false }]),
+      keys.map((k) => [
+        patchKeyString(k),
+        { key: k, bounds: UNIT_BOUNDS, forced: false, seen: true },
+      ]),
     ),
     demand: [],
     limited: false,
@@ -363,7 +376,7 @@ describe("the restricted quadtree", () => {
   it("undoes a split and the balance it brought", () => {
     const tree = new PatchLeafSet<PatchKey>();
     for (const face of [0, 1, 2, 3, 4, 5] as const) {
-      tree.add(rootKey(face), rootKey(face));
+      tree.addRoot(rootKey(face), rootKey(face));
     }
     for (const key of [rootKey(0), { face: 0 as const, level: 1, i: 1, j: 1 }]) {
       tree.splitBalanced(key, (child) => child);
@@ -375,6 +388,13 @@ describe("the restricted quadtree", () => {
     tree.rollback();
     expect([...tree.values()].map(patchKeyString).toSorted()).toEqual(before.toSorted());
     expect(tree.size).toBe(before.length);
+    // The undone split's patch is a leaf again, so it covers its grandchildren's area.
+    expect(tree.coarserLeaf({ face: 0, level: 4, i: 12, j: 12 })).toEqual({
+      face: 0,
+      level: 2,
+      i: 3,
+      j: 3,
+    });
   });
 });
 

@@ -166,6 +166,27 @@ describe("the morph hold", () => {
     }
   });
 
+  it("agrees at every shared vertex of two neighbouring patches near a body", () => {
+    // Two finest patches side by side across the ramp, east of the body.
+    const key = finestKeyAt(CRAFT.positionM);
+    const pairs: [PatchKey, PatchKey][] = [0, 1, 2].map((d) => [
+      { ...key, i: key.i + d },
+      { ...key, i: key.i + d + 1 },
+    ]);
+    const ramp: number[] = [];
+    for (const [west, east] of pairs) {
+      for (let y = 0; y <= 64; y += 1) {
+        // The west patch's x = 64 column is the east patch's x = 0.
+        const fromWest = morphHold(ground(west, 64, y), [CRAFT], PATCH_M);
+        const fromEast = morphHold(ground(east, 0, y), [CRAFT], PATCH_M);
+        expect(fromWest).toBe(fromEast);
+        ramp.push(fromWest);
+      }
+    }
+    // The pairs reach into the ramp, where the hold is strictly between 0 and 1.
+    expect(ramp.some((k) => k > 0 && k < 1)).toBe(true);
+  });
+
   it("is 1 with no contact", () => {
     expect(morphHold(ground(), [], PATCH_M)).toBe(1);
   });
