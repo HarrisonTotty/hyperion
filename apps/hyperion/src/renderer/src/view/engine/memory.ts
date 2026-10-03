@@ -8,8 +8,12 @@
  * Later plans add their categories to {@link MemoryCategory} here.
  */
 
-/** What a GPU allocation is for. */
-export type MemoryCategory = "render-targets" | "other";
+/**
+ * What a GPU allocation is for, by the names R12.T3.a reports (R12 Design note 6).
+ *
+ * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b).
+ */
+export type MemoryCategory = "render-targets" | "other" | "atmosphere-tables";
 
 /** A GPU buffer to create. */
 export interface BufferSpec {

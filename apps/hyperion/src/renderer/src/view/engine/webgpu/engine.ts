@@ -638,10 +638,15 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
   }
 
-  readTexture(texture: TextureHandle, level = 0, rect?: TexelRect): Promise<ArrayBuffer> {
+  readTexture(
+    texture: TextureHandle,
+    level = 0,
+    rect?: TexelRect,
+    access: "cpu" | "tolerance" = "cpu",
+  ): Promise<ArrayBuffer> {
     try {
       this.#assertLive();
-      this.#writers.assertReadable(texture, "cpu");
+      this.#writers.assertReadable(texture, access);
       const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
       return readGpuTexture(this.device, gpuTexture, textureRead(spec, level, rect), (encode) => {
         this.#submit(`${texture.name} readback`, encode);

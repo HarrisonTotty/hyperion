@@ -1343,7 +1343,9 @@ from Dalgarno's cross-sections. Each refractive index is evaluated at the densit
 The scale height follows from temperature, mean molecular mass and gravity, which plan 14 provides
 with the pressure and the gas fractions (P14.T24.a). Earth's reference values anchor the
 implementation: a Rayleigh scale height near 8 km, an aerosol scale height near 1.2 km, and an aerosol
-asymmetry parameter about 0.76, which is Bruneton 2008's (Hillaire's default is 0.8). One caution for
+asymmetry (the phase function's mean cosine) near 0.65, AERONET's continental value at 550 nm; in
+Cornette–Shanks's form that is g ≈ 0.58, not Bruneton 2008's 0.76 (mean cosine 0.81) or Hillaire's
+0.8, which are kept only to compare with their images. One caution for
 whoever writes the code: **the widely copied Rayleigh coefficients are not the physical ones.**
 Derived from the formula at 288.15 K and 1013.25 hPa, Earth's are 4.85, 11.5 and 28.7 × 10⁻⁶ m⁻¹ at
 680, 550 and 440 nm, and the 550 nm cross-section matches Bucholtz 1995's 4.51 × 10⁻²⁷ cm². The set

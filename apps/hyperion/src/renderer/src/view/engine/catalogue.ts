@@ -8,6 +8,7 @@
  * `default`, and R12.T7.a adds the ladder's (R01 Design note 18).
  */
 
+import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
@@ -43,6 +44,12 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME
   (spec) => ({ kind: "material", spec }),
 );
 
+/** R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering. */
+const ATMOSPHERE_TABLE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  TRANSMITTANCE_KERNEL,
+  MULTI_SCATTERING_KERNEL,
+].map((spec) => ({ kind: "compute", spec }));
+
 /** R07's post-processing kernels and passes (plan R07, T12–T15). */
 const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: HISTOGRAM_KERNEL },
@@ -55,5 +62,6 @@ const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
   ...WIREFRAME_ENTRIES,
+  ...ATMOSPHERE_TABLE_ENTRIES,
   ...POST_ENTRIES,
 ];

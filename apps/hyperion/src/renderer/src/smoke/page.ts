@@ -18,6 +18,7 @@ import {
   styleAvailability,
 } from "../view/engine/platform";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/status";
+import { checkAtmosphereTables } from "./atmosphere";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
@@ -156,6 +157,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
 
   await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
 
+  await checks.group("R05.T12.b the atmosphere's tables", () =>
+    checkAtmosphereTables(engine, checks),
+  );
   await checks.group("R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
   await checks.group("R07.T14.b bloom and glare", () =>
     checkBloom(engine, status.getSnapshot().targetRounding.rgba16float, checks),
