@@ -1345,7 +1345,7 @@ Criterion bench of a 65 × 65 bake's worth of points with and without the lattic
   shares the machine is marked provisional and re-measured. About 2 µs cached and 6 µs uncached are
   the research estimate and 10 µs the budget; more than 10 µs is a finding for T16. While other
   lanes share the machine the lane records a provisional figure, and the quiet-machine run is
-  pending for the owner.
+  taken in a quiet window the orchestrator schedules (decisions-r05.md item 7).
 
 ### R05.T4 The patch bake
 
@@ -2343,8 +2343,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   2 + k mod 5, 1 + k mod 7). Leakage above the 2 m band limit: **0.149 mm RMS** over 1,000
   profiles at 0.125 m. Each octave's sample mean is tested for octaves 6–21 only: octaves 0–5
   cover the sphere in a few cells, so their samples are not independent.
-- **Deviations in T3.c, as built.** Provisional bench (load average 19–28): **4.1 µs a point
-  cached, 7.6 µs uncached** (budget 10 µs); the quiet-machine run is pending for the owner.
+- **Deviations in T3.c, as built.** Provisional bench (2026-10-03, load average 5–10), with each
+  planet's octave table built once per `LatticeCache` (`take_octaves`, `restore_octaves`;
+  bit-identical, every golden unchanged) rather than once a point: **4.1 µs a point cached,
+  4.6 µs uncached** (5.5 and 6.1 µs before the table; budget 10 µs); the quiet-machine run is taken in a quiet window the
+  orchestrator schedules (decisions-r05.md item 7).
   `TestPlanet::cover_patch` prepares a bake's cache. Criterion is a dev-dependency off the
   browser target, where the bench is an empty program.
 - **Deviations in T4.a, as built.** The patch origin is the surface point of vertex (32, 32) at
@@ -2377,8 +2380,9 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   certified gradient and Hessian bounds (grid at 1/512 plus Lipschitz margins) and κ = 3.67 the
   face's parametric curvature. No sample exceeded it; ridges off, the 99.9th percentile is 0.27–0.33
   of ε_n (level 18, which omits no octave, 0.04), 0.70–0.81 of 4σ_n, and every patch maximum is
-  within 1.25 × 4σ_n; ridges on, levels 5–12 are 2–10% (findings; the crests' curvature grows as
-  1 ÷ ε). k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
+  within 1.25 × 4σ_n; ridges on, the 99.9th percentile is under a quarter of ε_n at levels 2–15
+  and 2–4% at levels 5–10 (findings; the crests' curvature grows as 1 ÷ ε). Both tables are in
+  `src/test_planet/bound.rs`'s module documentation. k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
   `src/test_planet/bound.rs`). The bound is checked at 16 patches × 625 random points per level;
   the per-patch maxima of decisions-r05.md item 6 are taken over all 65 × 65 vertices of 32
   further patches a level (where both meshes pass through their functions' values, so the
@@ -2405,7 +2409,13 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   formula forms a face-edge vertex from its own face's (u, v), not the canonical face's (an ulp
   the skirts cover), and `vertex_f32.golden` prints vertices x, y ∈ {0, 1, 31, 32, 33, 63, 64} of
   each patch. T3.c's quiet-machine bench is re-measured in a quiet window the orchestrator
-  schedules (decisions-r05.md item 7), not by the owner.
+  schedules (decisions-r05.md item 7), not by the owner. `src/wasm.rs` has no tests of its own: `just test-wasm-browser`
+  requires the browser target's test list to equal the native one, and the module exists only on
+  the browser target. Its exports are one-line wrappers; the bake's array lengths are tested
+  natively (`patch` tests), and the bake golden runs under Electron's V8. The test planet's octave
+  table is now built once per `LatticeCache` (`take_octaves`, `restore_octaves`), bit-identical
+  (every golden unchanged), and a cache box is matched to its octave by seed on each lookup (the
+  whole octave in debug builds).
 - **Deviations in T14.b, as built** (2026-10-02).
   - `main/spike.ts` exports `launchSwitches(options, spike)`: with `spike` undefined it returns
     R01's `graphicsSwitches(options)` unchanged; otherwise it turns `gpuTiming` on and, with

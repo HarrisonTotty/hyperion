@@ -32,34 +32,72 @@
 //! At the finest level ε is 0; above it, at levels selection never reaches, it is the two
 //! interpolation terms alone.
 //!
-//! # Measured (T6, 2026-10-02; `level_bound_holds`, under `just test-slow`)
+//! # Measured (T6, 2026-10-03; `level_bound_holds`, under `just test-slow`)
 //!
-//! No sample exceeded the bound at any level, ridges off or on. Per level, 10⁴ samples in 16
-//! patches; `σ_n` is the omitted octaves' RMS, `k_n` the implied patch-to-distance ratio at τ = 1 px,
-//! 1080p and 60° (for T13.a). Ridges off:
+//! No sample exceeded the bound at any level, ridges off or on. Per level the bound is checked at
+//! 10⁴ points in 16 random patches; `σ_n` is the omitted octaves' RMS at full weight (the morph
+//! is the fade); the per-patch maximum is over all 65 × 65 vertices of 32 further patches, where
+//! the distance is `|F_n − F_f|`; `k_n = ε_n ÷ (S_n τ θ_px)` is the implied patch-to-distance
+//! ratio at τ = 1 px, 1080p and 60° (for T13.a). Every patch's maximum was within 1.25 × `4σ_n` at
+//! every level, both ways (R10.T4's criterion (ii), which 32 patches cannot resolve to 99%).
 //!
-//! | n  | `ε_n` (m) | p99.9 ÷ ε | `σ_n` (m) | p99.9 ÷ 4σ | patch max ÷ 4σ | `k_n`   |
-//! | -- | ------- | --------- | ------- | ---------- | -------------- | ----- |
-//! | 0  | 7,114   | 0.29      | 645     | 0.81       | 0.93           | 1.27  |
-//! | 2  | 3,444   | 0.29      | 320     | 0.78       | 0.90           | 2.46  |
-//! | 4  | 1,615   | 0.30      | 156     | 0.77       | 0.85           | 4.62  |
-//! | 6  | 715     | 0.32      | 73.3    | 0.79       | 0.84           | 8.18  |
-//! | 8  | 281     | 0.33      | 31.3    | 0.74       | 0.89           | 12.8  |
-//! | 10 | 80.4    | 0.30      | 7.82    | 0.77       | 0.87           | 14.7  |
-//! | 12 | 20.6    | 0.29      | 1.96    | 0.75       | 0.86           | 15.1  |
-//! | 14 | 5.06    | 0.28      | 0.488   | 0.73       | 0.93           | 14.8  |
-//! | 16 | 1.13    | 0.31      | 0.118   | 0.74       | 0.89           | 13.3  |
-//! | 17 | 0.476   | 0.31      | 0.0529  | 0.70       | 0.79           | 11.2  |
-//! | 18 | 0.148   | 0.037     | 0       | —          | —              | 6.95  |
+//! Ridges Off:
 //!
-//! The hard bound is about 3.5 times the 99.9th percentile, so it is not under a quarter (a
-//! finding) except at level 18, which omits no octave and differs from the finest only by
-//! interpolation, which the curvature bound overstates. Every patch's maximum is within
-//! 1.25 × `4σ_n`, as R10.T4's criterion (ii) asks. With ridges on, the ridged octaves' sharp crests
-//! (curvature growing as 1 ÷ ε) make the interpolation term dominate from level 5 to 12, where the
-//! 99.9th percentile is 2–10% of the bound (findings) and `k_n` reaches 230 at level 9: selection by
-//! the hard bound over-refines the ridged planet heavily there, which the spike's ridged runs will
-//! show as demand. Decisions-r05.md item 6 keeps the hard bound in R05 regardless.
+//! | n  | `ε_n` (m) | p99.9 (m) | p99.9 ÷ ε | `σ_n` (m) | p99.9 ÷ 4σ | patch max ÷ 4σ | `k_n` |
+//! | -- | ------- | --------- | --------- | ------- | ---------- | -------------- | ----- |
+//! | 0  | 7,114   | 2,081     | 0.292     | 645     | 0.806      | 0.943          | 1.27  |
+//! | 1  | 4,962   | 1,392     | 0.281     | 455     | 0.765      | 1.005          | 1.77  |
+//! | 2  | 3,444   | 1,014     | 0.294     | 320     | 0.791      | 1.018          | 2.46  |
+//! | 3  | 2,372   | 719       | 0.303     | 225     | 0.801      | 1.027          | 3.39  |
+//! | 4  | 1,615   | 470       | 0.291     | 156     | 0.754      | 1.035          | 4.62  |
+//! | 5  | 1,081   | 330       | 0.305     | 106     | 0.779      | 0.995          | 6.18  |
+//! | 6  | 715     | 225       | 0.314     | 73.3    | 0.767      | 0.988          | 8.18  |
+//! | 7  | 460     | 151       | 0.328     | 49.4    | 0.763      | 0.940          | 10.5  |
+//! | 8  | 281     | 97.5      | 0.347     | 31.3    | 0.780      | 0.986          | 12.8  |
+//! | 9  | 154     | 48.4      | 0.314     | 15.6    | 0.773      | 0.973          | 14.1  |
+//! | 10 | 80.4    | 23.3      | 0.290     | 7.82    | 0.745      | 0.948          | 14.7  |
+//! | 11 | 41      | 12.5      | 0.305     | 3.91    | 0.797      | 0.951          | 15    |
+//! | 12 | 20.6    | 6.05      | 0.293     | 1.96    | 0.773      | 0.953          | 15.1  |
+//! | 13 | 10.3    | 2.95      | 0.287     | 0.977   | 0.755      | 1.066          | 15    |
+//! | 14 | 5.06    | 1.41      | 0.278     | 0.488   | 0.720      | 0.968          | 14.8  |
+//! | 15 | 2.44    | 0.731     | 0.299     | 0.243   | 0.753      | 0.992          | 14.3  |
+//! | 16 | 1.13    | 0.354     | 0.312     | 0.118   | 0.747      | 0.929          | 13.3  |
+//! | 17 | 0.476   | 0.151     | 0.316     | 0.0529  | 0.712      | 0.885          | 11.2  |
+//! | 18 | 0.148   | 0.00493   | 0.033     | 0       | —          | —              | 6.95  |
+//!
+//! The hard bound is about 3–3.5 times the 99.9th percentile, so not under a quarter (a finding)
+//! except at level 18, which omits no octave and differs from the finest only by interpolation,
+//! which the curvature bound overstates.
+//!
+//! Ridges On:
+//!
+//! | n  | `ε_n` (m) | p99.9 (m) | p99.9 ÷ ε | `σ_n` (m) | p99.9 ÷ 4σ | patch max ÷ 4σ | `k_n` |
+//! | -- | ------- | --------- | --------- | ------- | ---------- | -------------- | ----- |
+//! | 0  | 7,636   | 2,034     | 0.266     | 645     | 0.788      | 0.918          | 1.36  |
+//! | 1  | 5,484   | 1,375     | 0.251     | 455     | 0.756      | 0.929          | 1.96  |
+//! | 2  | 3,965   | 933       | 0.235     | 320     | 0.728      | 0.952          | 2.83  |
+//! | 3  | 2,894   | 627       | 0.217     | 225     | 0.698      | 1.048          | 4.14  |
+//! | 4  | 2,137   | 400       | 0.187     | 156     | 0.642      | 1.141          | 6.11  |
+//! | 5  | 7,929   | 332       | 0.042     | 106     | 0.783      | 1.113          | 45.3  |
+//! | 6  | 6,896   | 219       | 0.032     | 73.3    | 0.747      | 1.213          | 78.9  |
+//! | 7  | 5,136   | 149       | 0.029     | 49.4    | 0.753      | 1.090          | 117   |
+//! | 8  | 3,638   | 93.6      | 0.026     | 31.3    | 0.748      | 1.114          | 166   |
+//! | 9  | 2,516   | 47        | 0.019     | 15.6    | 0.751      | 0.973          | 230   |
+//! | 10 | 671     | 23.4      | 0.035     | 7.82    | 0.748      | 0.948          | 123   |
+//! | 11 | 189     | 12.5      | 0.066     | 3.91    | 0.797      | 0.951          | 69    |
+//! | 12 | 57.5    | 6.04      | 0.105     | 1.96    | 0.772      | 0.953          | 42.1  |
+//! | 13 | 19.5    | 2.96      | 0.152     | 0.977   | 0.756      | 1.066          | 28.5  |
+//! | 14 | 7.37    | 1.4       | 0.191     | 0.488   | 0.720      | 0.968          | 21.6  |
+//! | 15 | 3.02    | 0.731     | 0.242     | 0.243   | 0.753      | 0.992          | 17.7  |
+//! | 16 | 1.28    | 0.354     | 0.277     | 0.118   | 0.747      | 0.929          | 15    |
+//! | 17 | 0.515   | 0.151     | 0.293     | 0.0529  | 0.712      | 0.885          | 12.1  |
+//! | 18 | 0.16    | 0.00493   | 0.031     | 0       | —          | —              | 7.48  |
+//!
+//! With ridges on, the ridged octaves' sharp crests (curvature growing as 1 ÷ ε) make the
+//! interpolation term dominate from level 2 to 15, where the 99.9th percentile is 2–24% of the
+//! bound (findings) and `k_n` reaches 230 at level 9: selection by the hard bound over-refines
+//! the ridged planet heavily there. Decisions-r05.md item 6 keeps the hard bound in R05 and has
+//! T13.a record the demand under min(hard, `4σ_n`) for the ridged planet too.
 
 use super::{RIDGE_EPSILON, RIDGE_RMS, RIDGED, Ridges, TestPlanet, octaves};
 use crate::geometry::{finest_level, lattice_step, vertex_spacing};

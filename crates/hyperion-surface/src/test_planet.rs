@@ -44,10 +44,14 @@
 //! # Cost (T3.c)
 //!
 //! `just bench -- test_planet` times the height and gradient at the 4,225 vertices of a level-19
-//! patch (`benches/test_planet.rs`). **Provisional** (Design note 27), taken 2026-10-02 on the
-//! development machine (Ryzen 7 3700X) with other lanes' builds running, load average 19 to 28:
-//! **4.1 µs a point with the lattice cache, 7.6 µs without**, against the research estimate of
-//! about 2 and 6 µs and the budget of 10 µs. The quiet-machine run is pending for the owner.
+//! patch (`benches/test_planet.rs`). **Provisional** (Design note 27), taken on the development
+//! machine (Ryzen 7 3700X) with other lanes' work starting, load average 5 to 10, 2026-10-03,
+//! once the octave table is built once per cache rather than once a point
+//! ([`LatticeCache::take_octaves`]): **4.1 µs a point with the lattice cache, 4.6 µs without**,
+//! against the research estimate of about 2 and 6 µs and the budget of 10 µs (before the table,
+//! 5.5 and 6.1 µs under the same load). It is re-measured in a quiet window the
+//! orchestrator schedules (no other lanes' tests or builds, load average recorded;
+//! decisions-r05.md item 7).
 //!
 //! # Ridges
 //!
@@ -309,17 +313,34 @@ impl TestPlanet {
 
     /// The sum of octaves 0 to `count − 1` at `dir`, in index order, and its gradient.
     fn sum_octaves(&self, dir: [f64; 3], count: u8, cache: &mut LatticeCache) -> HeightSample {
+        let table = cache.take_octaves(self.seed, || {
+            (0..=octaves::FINEST_OCTAVE)
+                .map(|k| self.octave(k))
+                .collect()
+        });
+        let sample = self.sum_octaves_of(&table, dir, count, cache);
+        cache.restore_octaves(self.seed, table);
+        sample
+    }
+
+    /// [`sum_octaves`](Self::sum_octaves) over the planet's octave `table`.
+    fn sum_octaves_of(
+        &self,
+        table: &[Octave],
+        dir: [f64; 3],
+        count: u8,
+        cache: &mut LatticeCache,
+    ) -> HeightSample {
         let p = self.figure.point(dir);
         let mask = if self.ridges == Ridges::On && count > *RIDGED.start() {
-            Some(self.ridge_mask(p, cache))
+            Some(ridge_mask(table, p, cache))
         } else {
             None
         };
         let mut height = 0.0;
         let mut gradient = [0.0; 3];
         for k in 0..count {
-            let octave = self.octave(k);
-            let (n, grad_n) = gradient_noise(p, &octave, cache);
+            let (n, grad_n) = gradient_noise(p, &table[usize::from(k)], cache);
             let sigma = self.sigma_m(k);
             let (value, grad) = match mask {
                 Some((w, grad_w)) if RIDGED.contains(&k) => {
@@ -347,22 +368,23 @@ impl TestPlanet {
             gradient: gradient.map(assert_finite),
         }
     }
+}
 
-    /// The ridges' mask at `p` (metres) and its gradient: a smoothstep of
-    /// s = ½ + (n₂ + n₃) ÷ (4 `σ_noise`), clamped to [0, 1].
-    fn ridge_mask(&self, p: [f64; 3], cache: &mut LatticeCache) -> (f64, [f64; 3]) {
-        let (n2, g2) = gradient_noise(p, &self.octave(2), cache);
-        let (n3, g3) = gradient_noise(p, &self.octave(3), cache);
-        let s = 0.5 + (n2 + n3) / (4.0 * NOISE_RMS);
-        if s <= 0.0 {
-            (0.0, [0.0; 3])
-        } else if s >= 1.0 {
-            (1.0, [0.0; 3])
-        } else {
-            let w = s * s * (3.0 - 2.0 * s);
-            let dw = 6.0 * s * (1.0 - s) / (4.0 * NOISE_RMS);
-            (w, [0, 1, 2].map(|a| dw * (g2[a] + g3[a])))
-        }
+/// The ridges' mask at `p` (metres) and its gradient, from octaves 2 and 3 of `table`: a
+/// smoothstep of s = ½ + (n₂ + n₃) ÷ (4 `σ_noise`), clamped to [0, 1].
+#[must_use]
+fn ridge_mask(table: &[Octave], p: [f64; 3], cache: &mut LatticeCache) -> (f64, [f64; 3]) {
+    let (n2, g2) = gradient_noise(p, &table[2], cache);
+    let (n3, g3) = gradient_noise(p, &table[3], cache);
+    let s = 0.5 + (n2 + n3) / (4.0 * NOISE_RMS);
+    if s <= 0.0 {
+        (0.0, [0.0; 3])
+    } else if s >= 1.0 {
+        (1.0, [0.0; 3])
+    } else {
+        let w = s * s * (3.0 - 2.0 * s);
+        let dw = 6.0 * s * (1.0 - s) / (4.0 * NOISE_RMS);
+        (w, [0, 1, 2].map(|a| dw * (g2[a] + g3[a])))
     }
 }
 
@@ -532,6 +554,25 @@ mod tests {
                 TEST_PLANET.height(*d, 12, &mut warm.borrow_mut()),
                 TEST_PLANET.height(*d, 12, &mut LatticeCache::new())
             );
+        }
+    }
+
+    #[test]
+    fn a_cache_shared_by_two_seeds_gives_each_its_own_heights() {
+        let other = TestPlanet {
+            seed: Seed::new(42),
+            ..TEST_PLANET
+        };
+        let mut shared = LatticeCache::new();
+        let mut rng = Lcg::new(0x7477_6f73);
+        for _ in 0..50 {
+            let d = random_dir(&mut rng);
+            for planet in [TEST_PLANET, other, TEST_PLANET] {
+                assert_eq!(
+                    planet.height(d, 19, &mut shared),
+                    planet.height(d, 19, &mut LatticeCache::new())
+                );
+            }
         }
     }
 
@@ -724,7 +765,11 @@ mod tests {
         }
         let rms_mm = (total / f64::from(profiles)).sqrt() * 1000.0;
         println!("leakage above the 2 m band limit: {rms_mm} mm RMS");
-        assert!(rms_mm.is_finite());
+        // A finding above 1 cm (plan R05, T3.b); measured 0.149 mm.
+        assert!(
+            rms_mm < 10.0,
+            "the leakage above the band limit is {rms_mm} mm RMS"
+        );
     }
 
     /// The sample mean and variance of `values`.
