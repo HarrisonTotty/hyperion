@@ -3370,3 +3370,14 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     budget test checks the budget holds and that `DETAIL LIMITED` follows `limited`
     (`select.test.ts` covers a binding budget). Selection in the flight, warm, under vitest at load
     46: about 15 ms p50 and 28 ms p95 (provisional).
+- **Selection below the datum (2026-10-03, after R05.T13.a's collapse report).** Selection with
+  the camera 1.6 m above ground 1.85 km below the WGS 84 datum works, with baked ranges and
+  without, looking down or ahead, and a contact forces its region even with no view on it
+  (`belowDatum.wasm.test.ts`, real bakes through the module). The probe's collapse to an empty
+  selection was its camera hovering about 107 m underground: the descent's site height
+  (−1,953.2 m, from `measureTerrain`) was taken along the geocentric direction p ÷ |p| of the
+  ground point, where the collision interpolant and the bake take the direction d with
+  p = M·d (Design note 5), so it read the terrain about 0.1–0.2° away; the bakes under the
+  camera give −1,846.9 to −1,844.3 m. Looking down from below the baked surface, every patch's
+  box lies behind the camera, so the frustum rightly culls them all, and the contact, 107 m
+  below the ground, forces nothing. No selection change.
