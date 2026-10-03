@@ -1424,3 +1424,38 @@ plan reserves no tag, prefix or stream.
   plan's scope: it adds a second committed table from the same unlicensed grid at full resolution,
   which waits on the owner's data-licence ruling. The interim for R08's curves of growth is R08's to
   choose; the ask stays open in the roadmap's between-plans table (R06 owner, R08 asking).
+- **The eye's darkest background (decided 2026-10-02, T2).** Design note 2's clamp at μ 27 (8.64 at
+  F = 1.4) is replaced by Crumey's own: the threshold is constant for a background, colour-corrected
+  to Blackwell's light, at or below 10⁻⁵ cd m⁻² (Crumey 2014, §2.3, eqs. 47–52; §3.2, eq. 71, ζ =
+  1.150 × 10⁻⁹ lx), the bound Design note 2 itself cites. The zero-background limit at F = 1.4 is
+  7.99, reached at μ 25.6 in starlight (ρ₀ 2.26); T2's figures 8.17 at μ 26 and 8.64 at μ 27 are
+  7.99. Design note 5's eye cut is at most about 7.99 + 0.45 + 0.1 = 8.54 (not 9.2); near the Sun,
+  whose darkest texel is about μ 24.3, T9.d's 7.96 ± 0.15 is unaffected. Recorded as a brainstorm
+  correction in the roadmap.
+- **Deviations in T2, as built.** `sky::eye` takes its background as a validated
+  `SkyBackground { luminance, sp_ratio: SpRatio }` (`SkyBackground::new`, `SpRatio::new`, both
+  `Result<_, BuildEyeError>`), so `threshold_illuminance(eye, &SkyBackground)`,
+  `naked_eye_limit(eye, &SkyBackground)` and `star_colour_offset(star: SpRatio, &SkyBackground)`
+  replace the sketches' `(background, background_sp_ratio)` pairs: NaN and negative inputs are
+  refused by type, and the star's offset needs the background's ratio for the MES2 weight.
+  `EyeObserver::new` returns `Result<_, BuildEyeError>` (field factor > 0, age ≥ 0, pigmentation
+  0–1.2); `veiling_luminance` and `surface_brightness` return `Option` (`None` for NaN or negative
+  input; a source beyond 100° gives zero). Added: `luminance(μ)`, `mesopic_weight`,
+  `blackwell_equivalent_factor` (which the limit map's glare weighting reads),
+  `magnitude_of_illuminance`, `illuminance_of_magnitude`, `DARKEST_BACKGROUND` (10⁻⁵ cd m⁻², a
+  `CandelasPerSquareMetre`), `BLACKWELL_SP_RATIO` (1.408) and, in base,
+  `SolarLuminositiesV::from_absolute_v` and `consts::SOLAR_ABSOLUTE_MAGNITUDE_V` (4.81, Willmer
+  2018). Two technical corrections (approved 2026-10-02): the mesopic fade weighs each light by its
+  MES2 mesopic luminance, (m + (1 − m) ρ C) ÷ (m + (1 − m) 1.408 C) with C = 683 ÷ 1699, the
+  equal-mesopic-luminance analogue of Crumey's eq. 6, in place of m + (1 − m) ρ ÷ 1.408, which
+  over-weighted the rods (the background moves by ≤ 0.005 mag, a red star's offset at μ 16 by about
+  0.16); and eq. 34 and eq. 53 differ by 0.026 mag at μ 20 and by under 0.02 only from μ 20.6, so
+  T2's test holds 0.03 on μ 20–20.5 and 0.02 beyond (Design note 2's "within 0.02 mag above μ 20"
+  is that much loose). MES2's weight takes CIE 191's end tests on the inputs (L<sub>s</sub> ≤ 0.005,
+  L<sub>p</sub> ≥ 5 cd m⁻²); a starlit background is scotopic below μ 19.2. The running minimum is
+  the threshold held at no less than eq. 34's value at the bump's dark edge, B_equiv = 0.021 567
+  cd m⁻² (local minimum of the limit, 5.2446 at F = 1.4; the bump peaks at 0.0471 and closes at
+  0.0650). Taking eq. 34's thresholds as those of the B − V = 0.7 star is documented as the plan's
+  convention (Crumey offers it "if this is considered the standard", §3.1; read literally his eqs.
+  6 and 16 put them at 2,850 K). The pigmentation bound 1.2 (CIE 146's very light eyes) was not
+  confirmed from a primary text by the science check (medium confidence).
