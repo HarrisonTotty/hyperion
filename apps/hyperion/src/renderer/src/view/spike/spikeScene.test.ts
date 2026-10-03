@@ -5,11 +5,10 @@ import { rotateToBody } from "../coords/rotation";
 import { isDescending } from "../terrain/grounded";
 import { patchKeyString } from "../terrain/patchKey";
 import { spheroidNormal, spheroidPoint } from "../terrain/planet";
-import { DescentProfile, landingSiteOf } from "./descentProfile";
+import { datumDirection, DescentProfile, landingSiteOf } from "./descentProfile";
 import { testPlanetRotationAt } from "./rotation";
 import {
   contactRule,
-  datumDirection,
   GROUNDED_CLEARANCE_M,
   siteDirection,
   SPIKE_CRAFT,
@@ -102,9 +101,9 @@ describe("the datum direction", () => {
     const d = normalise({ x: 0.3, y: -0.5, z: 0.81 });
     const p = spheroidPoint(TEST_PLANET_FIGURE, [d.x, d.y, d.z]);
     const back = datumDirection(TEST_PLANET_FIGURE, { x: p[0], y: p[1], z: p[2] });
-    expect(back[0]).toBeCloseTo(d.x, 14);
-    expect(back[1]).toBeCloseTo(d.y, 14);
-    expect(back[2]).toBeCloseTo(d.z, 14);
+    expect(back.x).toBeCloseTo(d.x, 14);
+    expect(back.y).toBeCloseTo(d.y, 14);
+    expect(back.z).toBeCloseTo(d.z, 14);
     // The geocentric direction of the same point differs, here by about 0.05° in z alone.
     const geocentric = normalise({ x: p[0], y: p[1], z: p[2] });
     expect(Math.abs(geocentric.z - d.z)).toBeGreaterThan(5e-4);
@@ -125,10 +124,8 @@ describe("the light", () => {
     for (const seed of [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n]) {
       const profile = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(seed));
       const end = profile.durationS;
-      const normal = spheroidNormal(
-        TEST_PLANET_FIGURE,
-        datumDirection(TEST_PLANET_FIGURE, profile.poseAt(end).groundPointM),
-      );
+      const g = profile.poseAt(end).groundDir;
+      const normal = spheroidNormal(TEST_PLANET_FIGURE, [g.x, g.y, g.z]);
       const up = normalise(
         rotateToBody(testPlanetRotationAt(end), { x: normal[0], y: normal[1], z: normal[2] }),
       );
@@ -149,8 +146,9 @@ describe("the track's patches", () => {
         return;
       }
       for (let t = span.startS; t <= span.endS; t += 0.05) {
-        const dir = datumDirection(TEST_PLANET_FIGURE, PROFILE.positionAt(t));
-        expect(keys.has(patchKeyString(patchKeyAt(dir, TRACK_BOUND_LEVEL)))).toBe(true);
+        // The track's own direction at the ground, not the camera's, which stands off the datum.
+        const g = PROFILE.poseAt(t).groundDir;
+        expect(keys.has(patchKeyString(patchKeyAt([g.x, g.y, g.z], TRACK_BOUND_LEVEL)))).toBe(true);
       }
     });
     expect(keys.size).toBeGreaterThan(9);

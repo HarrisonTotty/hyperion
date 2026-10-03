@@ -41,7 +41,12 @@ import {
 } from "../scenes/kept";
 import type { SunState } from "../atmosphere/hillaire";
 import { type Xyz, vertexSpacing, PATCH_QUADS } from "../terrain/cube";
-import { type GroundContact, isDescending } from "../terrain/grounded";
+import {
+  finestPatchSizeM,
+  type GroundContact,
+  heldRadiusM,
+  isDescending,
+} from "../terrain/grounded";
 import {
   cornerNeighbours,
   EDGES,
@@ -49,7 +54,7 @@ import {
   type PatchKey,
   patchKeyString,
 } from "../terrain/patchKey";
-import type { BodyFigure } from "../terrain/planet";
+import { type BodyFigure, planetGeometry } from "../terrain/planet";
 import type { DescentProfile, DescentSegment } from "./descentProfile";
 import { testPlanetRotationAt } from "./rotation";
 import { patchKeyAt } from "./surfaceQuery";
@@ -113,10 +118,14 @@ export const SPIKE_CRAFT_RADIUS_M = Math.max(
 );
 
 /**
- * The clearance at or below which the craft is grounded whatever its vertical speed, metres: its
- * own bounding radius, within which its hull reaches the ground's held region.
+ * The clearance at or below which the craft is grounded whatever its vertical speed, metres: the
+ * held radius r_g, its bounding radius plus one finest patch (Design note 9), within which its held
+ * sphere reaches the ground, as T13.a's `craftContacts` has it.
  */
-export const GROUNDED_CLEARANCE_M = SPIKE_CRAFT_RADIUS_M;
+export const GROUNDED_CLEARANCE_M = heldRadiusM(
+  { positionM: vec3(0, 0, 0), radiusM: SPIKE_CRAFT_RADIUS_M },
+  finestPatchSizeM(planetGeometry(TEST_PLANET_FIGURE, null)),
+);
 
 /** The level whose patches bound the terrain under the low pass's track (about 1.5 km across). */
 export const TRACK_BOUND_LEVEL = 12;
@@ -126,14 +135,6 @@ const PATH_SAMPLES = 256;
 
 /** The step the contact's onset is searched with, s: the fixed-step mode's 64 Hz (Design note 19). */
 const ONSET_STEP_S = 1 / 64;
-
-/** The unit direction `d` whose spheroid point M·d is `p`, or nearest it for a point off the datum. */
-export function datumDirection(figure: BodyFigure, p: Vec3): Xyz {
-  const m = normalise(
-    vec3(p.x / figure.equatorialRadiusM, p.y / figure.equatorialRadiusM, p.z / figure.polarRadiusM),
-  );
-  return [m.x, m.y, m.z];
-}
 
 /**
  * Whether the craft is grounded or descending at `tS` (Design note 9, on its clearance above the
@@ -303,7 +304,8 @@ export function trackPatchKeys(
     const steps = Math.ceil((span.endS - span.startS) / stepS);
     for (let n = 0; n <= steps; n += 1) {
       const t = Math.min(span.startS + n * stepS, span.endS);
-      const key = patchKeyAt(datumDirection(figure, profile.positionAt(t)), level);
+      const d = profile.poseAt(t).groundDir;
+      const key = patchKeyAt([d.x, d.y, d.z], level);
       take(key);
       for (const edge of EDGES) {
         take(edgeNeighbour(key, edge));
@@ -318,7 +320,8 @@ export function trackPatchKeys(
 
 /** The landing site's direction for the surface query: the datum point beneath the script's end. */
 export function siteDirection(profile: DescentProfile): Xyz {
-  return datumDirection(profile.figure, profile.poseAt(profile.durationS).groundPointM);
+  const d = profile.siteDir;
+  return [d.x, d.y, d.z];
 }
 
 /** The craft's path over the whole script, body-fixed, drawn as its predicted path. */

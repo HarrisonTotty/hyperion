@@ -3407,9 +3407,10 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   - _The contact._ The craft is a contact while it is grounded or descending (Design note 9),
     judged on `clearanceM`, the height above the site's terrain, not the datum:
     - descending by `isDescending`;
-    - or grounded, within `GROUNDED_CLEARANCE_M` of the ground (the hull's bounding radius,
-      11.06 m) at any vertical speed, so that an exact hover at zero speed is a contact (the
-      orchestrator, 2026-10-03).
+    - or grounded, within `GROUNDED_CLEARANCE_M` of the ground at any vertical speed: the held
+      radius r_g, the hull's bounding radius (11.06 m) plus one finest patch, as T13.a's
+      `craftContacts` has it, so that an exact hover is a contact (the orchestrator, 2026-10-03).
+      T13.a's run takes a provisional 10 m radius where the scene takes the hull's 11.06 m.
 
     It is also held from its last rising edge to the end of the script (`contactRule`: the 64 Hz
     fixed step, each edge then found by bisection). The level low pass is not a contact.
@@ -3417,9 +3418,10 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
       (T11.c's to-do), with the hull's bounding radius.
     - Far from the site, where the terrain under the craft is higher or lower, it holds no patch.
       The forced region works where the craft comes down.
-    - Every height query and patch key is taken at the bake's direction d of a datum point M·d
-      (`datumDirection`, Design note 5), never at the point's geocentric direction. Lane D's
-      collapse came from that mistake; a test pins it here.
+    - Every height query and patch key is taken at the bake's direction d (Design note 5): the
+      site's `DescentProfile.siteDir` and the track's `DescentPose.groundDir`, both T13.a's, never
+      a point's geocentric direction. Lane D's collapse came from that mistake; a test pins it
+      here.
 
   - _The light._ The star lies in the planet's equatorial plane over the site's meridian at
     touchdown: an equinox at local noon.
