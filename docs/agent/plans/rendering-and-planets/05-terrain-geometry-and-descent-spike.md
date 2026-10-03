@@ -3604,6 +3604,23 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     **Proposed correction, not the gate:** D_frustum = Σ_L 4 k_L tan(φ_x ÷ 2) v ÷ S_L +
     (3π k² ÷ ln 2) |ḣ| ÷ h above the cap and the vertical term zero below it. The whole-descent
     record has the per-segment figures. For T18 and T19.
+  - **Record: the whole descent under min(hard, 4σ_n)** (2026-10-03,
+    `docs/measurements/descent-spike/2026-10-03-demand-calibrated.{json,md}`, seed 7, 64 Hz,
+    78,721 frames a cell, none truncated, load 13–43, timings provisional). The site is at
+    −1,845.8 m (ridges off) and −1,644.6 m (on); the low pass is lifted 418.6 m (off) and 64.4 m
+    (on) by its floors, and every stretch keeps its clearance (least margin 0.0 m). `limited` is
+    0% everywhere, so the budget never binds under this rule. Demand ÷ D, whole segments, high
+    then low, ridges off: orbit coast 2.02 / 6.63 (D near 0), descent arc 0.75 / 1.78, approach and
+    flare 0.75 / 1.77, low fast pass 0.73 / 1.74, slowdown 1.19 / 7.07, vertical descent 0 / 0,
+    hover 0 / 0. Ridges on: 2.14 / 0, 0.72 / 1.99, 2.50 / 19.07, 0.71 / 1.92, 0.60 / 5.33, 0 / 0,
+    0 / 0. High's moving segments lie within a factor of two with ridges off, and all but the
+    approach with ridges on; the low setting's prediction is too low wherever the quadtree's
+    granularity floors its count (Design note 19's "about a quarter", worst in the ridged approach
+    and both slowdowns), and below the cap altitude (the vertical descent) nothing new is selected
+    while D stays positive, as the windows found. `selectPatches` p95 is 0.2–2.7 ms in every
+    segment, against the 2 ms budget of decision-r05-patch-demand.md 4d on high's approach and
+    slowdown at most (single calls reach 170 ms at the cold start and at segment changes,
+    provisional under load).
   - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
     camera underground (the direction above), not selection: lane B's
     `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With
@@ -3661,16 +3678,46 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     1 Hz, the capture (120 frames from 5 s into the low fast pass, or from 5 s in a smoke run,
     started between frames in `onFrame`, ended early where the run ends first), and at the end
     the trace stopped, the results written and a pass sent; a smoke run passes at 10 s if a patch
-    was baked in a worker. A terrain variant other than the setting's own is refused until lane C's
-    `terrainSettingsFor` override lands (decision-r05-spike-ux.md, "Spike variant flags").
+    was baked in a worker. `--vertex-path` and `--normals` reach the terrain pass as
+    `terrainSettingsFor(setting, variantOf(launch))`, through `SpikeRun`'s `variant` and
+    `DescentSpike`'s `variant` prop (compared by its fields, so that a new object does not restart
+    the run); a variant the setting cannot take ends the run as failed, and the report's optional
+    `terrain` (the vertex path and normals drawn with) becomes the results'
+    `run.options.terrainVertexPath` and `terrainNormals` (decision-r05-spike-ux.md, "Spike variant
+    flags"). `view/spike/SpikeApp.tsx` is the root on a spike launch (`main.tsx`): the graphics
+    status provider, then `DescentSpike` on the measured engine with the controller's listeners;
+    the engine source's `load` hands the engine to the controller for its pass times and
+    allocations. T13.a exports `DescentUnclearable` (a `RangeError`) for the fourth lift's
+    refusal, for lane C's `DescentRefused`.
   - _The recipe._ `just descent-spike` runs `just build`, then `scripts/descentSpike.sh`: the
     server as `cargo run --release -p hyperion-server -- --num-workers 2 --port 7879`
     (`HYPERION_SPIKE_PORT`; release to reuse the build, and off the default port other lanes'
-    servers use), `--companion-load <n>` busy threads, the client on `out/` under `setsid timeout
---kill-after=10` with a fresh `--user-data-dir`, every process group killed at the end. The
-    plan's `--cold-cache` needs a cache to keep across fresh profiles: the script keeps the
-    profile's `*Cache` directories in `target/descent-spike/gpu-cache`, copies them into each new
-    profile and back after, and `--cold-cache` empties them first.
+    servers use), `--companion-load <n>` busy threads, and the client on `out/` under
+    `setsid timeout --kill-after=10` with a fresh `--user-data-dir`, every process group killed at
+    the end. The plan's `--cold-cache` needs a cache kept across fresh profiles: the script keeps
+    the profile's `*Cache` directories in `target/descent-spike/gpu-cache`, copies them into each
+    new profile and back after, and `--cold-cache` empties them first.
+  - _Review fixes (2026-10-03)._ Every way a run cannot go on ends it at once, not at the
+    watchdog: `SpikeListeners.onFailed(status)` (the descent refused, the terrain not measured,
+    the views not made, from `DescentSpike`'s own catch sites), no adapter or an engine that could
+    not be made (the spike's engine source), and the safe mode or a renderer without WebGPU, which
+    ask for no adapter at all (`SpikeApp`). A window closed before the run ended exits 1, not the
+    ordinary quit's 0. `ResolveCounter` starts an epoch at each device it wraps, since a rebuild
+    after a device loss makes a new timer that numbers its frames from 1 again
+    (`runFrame(timerFrame)`). The report's canvas is the main view canvas's own drawing size, not
+    the window's. The NVIDIA baseline is read by the recipe before Electron starts and handed over
+    as `HYPERION_SPIKE_NVIDIA_BASELINE` (a file of `nvidia-smi -q -x`), since the GPU process can
+    start while the main process would still be reading it. The recipe passes
+    `--ozone-platform=x11` on a Wayland session, as `client` does, so that the client does not
+    relaunch itself and leave the script a first process's 0. A refused `end` is logged.
+  - **Acceptance, 2026-10-03:** `just descent-spike --smoke` (hidden, offscreen, RTX 3080, R01's
+    Vulkan switches, a fresh profile) exited 0 after 26 s at load 12–17 with a patch baked in a
+    worker, and again after the review fixes (26 s at load 25–29). The `vitest` acceptance
+    (`src/main/cli src/main/spike src/preload`) passes.
+  - **Pending (separate tasks):** T14.c's hidden `just descent-spike --setting low --hidden`
+    results file, and the first real capture (`--capture <dir>`) with its offscreen
+    `just replay <dir>`. By hand for the owner: the visible full descent
+    (`just descent-spike --setting low`) and the presented replay (`just replay <dir> --present`).
 
 - **The scripted descent's terrain clearance** (decision-r05-descent-clearance.md, 2026-10-03). The
   script is flown above per-stretch true bounds of the finest mesh. Each bound is the baked maximum

@@ -1,0 +1,720 @@
+{
+  "schema": "hyperion.descent-spike.demand",
+  "version": 1,
+  "startedAt": "2026-10-03T20:39:18.566Z",
+  "seed": "7",
+  "testPlanetVersion": 2,
+  "rateHz": 64,
+  "capHours": 1.85,
+  "loadAverage": [38.67, 37.23, 28.56],
+  "cells": [
+    {
+      "rule": "calibrated",
+      "ridges": "off",
+      "setting": "high",
+      "rateHz": 64,
+      "coveredS": [0, 1230],
+      "frames": 78721,
+      "truncated": false,
+      "note": null,
+      "terrain": {
+        "siteHeightM": -1845.838088505113,
+        "trackMaxHeightM": -1427.2134170949005,
+        "stretchMaxHeightsM": [
+          4859.031651918019, 5746.656163636769, 5746.656163636769, 3976.9911245742687,
+          4677.096105043019, 4677.096105043019, 4242.794591371144, 4242.794591371144,
+          4083.0140737930187, 4083.0140737930187, -1471.6827009720894, -1422.0469587845894,
+          -1394.3369978470894, -1347.1245955033394, -1420.0067976517769, -1450.1582869095894,
+          -1464.2928083939644, -1478.7874373002144, -1497.6333389699005, -1486.0022354542755,
+          -1508.007240337088, -1635.6077042042755, -1427.2134170949005, -1444.5461807667755,
+          -1594.159584087088, -1671.581703227713, -1821.868812602713, -1821.868812602713,
+          -1838.0748214743935
+        ]
+      },
+      "lifts": [
+        {
+          "segment": "orbit coast",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "descent arc",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 900
+        },
+        {
+          "segment": "approach and flare",
+          "startLiftM": 0,
+          "endLiftM": 418.6246714102126,
+          "durationS": 120
+        },
+        {
+          "segment": "low fast pass",
+          "startLiftM": 418.6246714102126,
+          "endLiftM": 418.6246714102126,
+          "durationS": 30
+        },
+        {
+          "segment": "slowdown",
+          "startLiftM": 418.6246714102126,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "vertical descent",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 10
+        },
+        {
+          "segment": "hover and touchdown",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 50
+        }
+      ],
+      "minFloorMarginM": 4.001776687800884e-11,
+      "segments": [
+        {
+          "segment": "orbit coast",
+          "frames": 3776,
+          "meanPatches": 65.2542372881356,
+          "maxPatches": 73,
+          "demandPerS": 1.6610169491525424,
+          "predictedPerS": 0.8217099836325266,
+          "limitedFraction": 0,
+          "standingInFraction": 0.008209745762711865,
+          "minHeightAboveFloorM": 393301.7211083586,
+          "maxHeightAboveFloorM": 394307.37627989426,
+          "selectMsP50": 0.35429300000396324,
+          "selectMsP95": 0.8798979999992298,
+          "selectMsMax": 100.8846709999998
+        },
+        {
+          "segment": "descent arc",
+          "frames": 57600,
+          "meanPatches": 114.37512152777778,
+          "maxPatches": 205,
+          "demandPerS": 2.6755555555555555,
+          "predictedPerS": 3.546383492437229,
+          "limitedFraction": 0,
+          "standingInFraction": 0.011770833333333333,
+          "minHeightAboveFloorM": 14076.171498601212,
+          "maxHeightAboveFloorM": 392407.50574785814,
+          "selectMsP50": 0.36121299999649636,
+          "selectMsP95": 0.9782280000072205,
+          "selectMsMax": 79.9830820000061
+        },
+        {
+          "segment": "approach and flare",
+          "frames": 7680,
+          "meanPatches": 174.36536458333333,
+          "maxPatches": 194,
+          "demandPerS": 29.375,
+          "predictedPerS": 39.41135034084682,
+          "limitedFraction": 0,
+          "standingInFraction": 0.12682291666666667,
+          "minHeightAboveFloorM": 508.3946140099033,
+          "maxHeightAboveFloorM": 19625.844612467015,
+          "selectMsP50": 0.8632069999584928,
+          "selectMsP95": 1.9214849999989383,
+          "selectMsMax": 63.86267199998838
+        },
+        {
+          "segment": "low fast pass",
+          "frames": 1920,
+          "meanPatches": 165.8109375,
+          "maxPatches": 197,
+          "demandPerS": 95.16666666666667,
+          "predictedPerS": 130.91366841899972,
+          "limitedFraction": 0,
+          "standingInFraction": 0.4635416666666667,
+          "minHeightAboveFloorM": 300.00000000004,
+          "maxHeightAboveFloorM": 300.00000000004,
+          "selectMsP50": 0.8755770000279881,
+          "selectMsP95": 2.360038999991957,
+          "selectMsMax": 34.29551799996989
+        },
+        {
+          "segment": "slowdown",
+          "frames": 3840,
+          "meanPatches": 129.81432291666667,
+          "maxPatches": 191,
+          "demandPerS": 72.16666666666667,
+          "predictedPerS": 60.55628356469081,
+          "limitedFraction": 0,
+          "standingInFraction": 0.32473958333333336,
+          "minHeightAboveFloorM": 192.562048056598,
+          "maxHeightAboveFloorM": 461.3924019080094,
+          "selectMsP50": 0.8782670000800863,
+          "selectMsP95": 2.5715199999976903,
+          "selectMsMax": 61.30419600009918
+        },
+        {
+          "segment": "vertical descent",
+          "frames": 640,
+          "meanPatches": 77.284375,
+          "maxPatches": 126,
+          "demandPerS": 0.1,
+          "predictedPerS": 70.65921385349196,
+          "limitedFraction": 0,
+          "standingInFraction": 0.0015625,
+          "minHeightAboveFloorM": 2.0033190275894253,
+          "maxHeightAboveFloorM": 200.00000000004007,
+          "selectMsP50": 0.5643139999592677,
+          "selectMsP95": 26.95390900003258,
+          "selectMsMax": 37.12380800000392
+        },
+        {
+          "segment": "hover and touchdown",
+          "frames": 3201,
+          "meanPatches": 66,
+          "maxPatches": 66,
+          "demandPerS": 0,
+          "predictedPerS": 0.078037322452581,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 1.0000000000400835,
+          "maxHeightAboveFloorM": 2.0000000000400835,
+          "selectMsP50": 0.5294739999808371,
+          "selectMsP95": 22.899207000038587,
+          "selectMsMax": 60.01403500000015
+        }
+      ],
+      "hash": "c6b4f6aac173984b"
+    },
+    {
+      "rule": "calibrated",
+      "ridges": "off",
+      "setting": "low",
+      "rateHz": 64,
+      "coveredS": [0, 1230],
+      "frames": 78721,
+      "truncated": false,
+      "note": null,
+      "terrain": {
+        "siteHeightM": -1845.838088505113,
+        "trackMaxHeightM": -1427.2134170949005,
+        "stretchMaxHeightsM": [
+          4859.031651918019, 5746.656163636769, 5746.656163636769, 3976.9911245742687,
+          4677.096105043019, 4677.096105043019, 4242.794591371144, 4242.794591371144,
+          4083.0140737930187, 4083.0140737930187, -1471.6827009720894, -1422.0469587845894,
+          -1394.3369978470894, -1347.1245955033394, -1420.0067976517769, -1450.1582869095894,
+          -1464.2928083939644, -1478.7874373002144, -1497.6333389699005, -1486.0022354542755,
+          -1508.007240337088, -1635.6077042042755, -1427.2134170949005, -1444.5461807667755,
+          -1594.159584087088, -1671.581703227713, -1821.868812602713, -1821.868812602713,
+          -1838.0748214743935
+        ]
+      },
+      "lifts": [
+        {
+          "segment": "orbit coast",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "descent arc",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 900
+        },
+        {
+          "segment": "approach and flare",
+          "startLiftM": 0,
+          "endLiftM": 418.6246714102126,
+          "durationS": 120
+        },
+        {
+          "segment": "low fast pass",
+          "startLiftM": 418.6246714102126,
+          "endLiftM": 418.6246714102126,
+          "durationS": 30
+        },
+        {
+          "segment": "slowdown",
+          "startLiftM": 418.6246714102126,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "vertical descent",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 10
+        },
+        {
+          "segment": "hover and touchdown",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 50
+        }
+      ],
+      "minFloorMarginM": 4.001776687800884e-11,
+      "segments": [
+        {
+          "segment": "orbit coast",
+          "frames": 3776,
+          "meanPatches": 19.5635593220339,
+          "maxPatches": 24,
+          "demandPerS": 0.0847457627118644,
+          "predictedPerS": 0.012789435815795527,
+          "limitedFraction": 0,
+          "standingInFraction": 0.0005296610169491525,
+          "minHeightAboveFloorM": 393301.7211083586,
+          "maxHeightAboveFloorM": 394307.37627989426,
+          "selectMsP50": 0.1314410000341013,
+          "selectMsP95": 0.21003099996596575,
+          "selectMsMax": 94.42087100003846
+        },
+        {
+          "segment": "descent arc",
+          "frames": 57600,
+          "meanPatches": 32.118125,
+          "maxPatches": 56,
+          "demandPerS": 0.4011111111111111,
+          "predictedPerS": 0.22473014697062738,
+          "limitedFraction": 0,
+          "standingInFraction": 0.0013541666666666667,
+          "minHeightAboveFloorM": 14076.171498601212,
+          "maxHeightAboveFloorM": 392407.50574785814,
+          "selectMsP50": 0.13662100001238286,
+          "selectMsP95": 0.1974519999930635,
+          "selectMsMax": 26.447684000013396
+        },
+        {
+          "segment": "approach and flare",
+          "frames": 7680,
+          "meanPatches": 47.21263020833333,
+          "maxPatches": 57,
+          "demandPerS": 7.858333333333333,
+          "predictedPerS": 4.447085567545688,
+          "limitedFraction": 0,
+          "standingInFraction": 0.028255208333333334,
+          "minHeightAboveFloorM": 508.3946140099033,
+          "maxHeightAboveFloorM": 19625.844612467015,
+          "selectMsP50": 0.25157199997920543,
+          "selectMsP95": 0.511733999941498,
+          "selectMsMax": 1.6073120000073686
+        },
+        {
+          "segment": "low fast pass",
+          "frames": 1920,
+          "meanPatches": 47.78072916666667,
+          "maxPatches": 64,
+          "demandPerS": 20.433333333333334,
+          "predictedPerS": 11.741773373882596,
+          "limitedFraction": 0,
+          "standingInFraction": 0.13385416666666666,
+          "minHeightAboveFloorM": 300.00000000004,
+          "maxHeightAboveFloorM": 300.00000000004,
+          "selectMsP50": 0.3019019999774173,
+          "selectMsP95": 0.5257940000155941,
+          "selectMsMax": 1.2072990000015125
+        },
+        {
+          "segment": "slowdown",
+          "frames": 3840,
+          "meanPatches": 78.96145833333334,
+          "maxPatches": 144,
+          "demandPerS": 49.733333333333334,
+          "predictedPerS": 7.029641585085581,
+          "limitedFraction": 0,
+          "standingInFraction": 0.13125,
+          "minHeightAboveFloorM": 192.562048056598,
+          "maxHeightAboveFloorM": 461.3924019080094,
+          "selectMsP50": 0.5222640000283718,
+          "selectMsP95": 1.3722109999507666,
+          "selectMsMax": 3.393257000017911
+        },
+        {
+          "segment": "vertical descent",
+          "frames": 640,
+          "meanPatches": 77.8796875,
+          "maxPatches": 108,
+          "demandPerS": 0,
+          "predictedPerS": 11.580422783142197,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 2.0033190275894253,
+          "maxHeightAboveFloorM": 200.00000000004007,
+          "selectMsP50": 0.4251129999756813,
+          "selectMsP95": 0.7374459999846295,
+          "selectMsMax": 1.008326999959536
+        },
+        {
+          "segment": "hover and touchdown",
+          "frames": 3201,
+          "meanPatches": 69,
+          "maxPatches": 69,
+          "demandPerS": 0,
+          "predictedPerS": 0.026012440817526888,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 1.0000000000400835,
+          "maxHeightAboveFloorM": 2.0000000000400835,
+          "selectMsP50": 0.3998930000234395,
+          "selectMsP95": 0.7065949999960139,
+          "selectMsMax": 1.221070000086911
+        }
+      ],
+      "hash": "2288439603e0b5c4"
+    },
+    {
+      "rule": "calibrated",
+      "ridges": "on",
+      "setting": "high",
+      "rateHz": 64,
+      "coveredS": [0, 1230],
+      "frames": 78721,
+      "truncated": false,
+      "note": "statistical, not a bound on the ridged planet (bound.rs finding)",
+      "terrain": {
+        "siteHeightM": -1644.5642972584033,
+        "trackMaxHeightM": -1580.1992569009535,
+        "stretchMaxHeightsM": [
+          5380.430899788605, 6268.055411507355, 6268.055411507355, 4498.390372444855,
+          5198.495352913605, 5198.495352913605, 4764.19383924173, 4764.19383924173,
+          4604.413321663605, 4604.413321663605, -1723.0986713344091, -1585.5433734828466,
+          -1544.7651752406591, -1379.4709857875341, -1306.3694232875341, -1306.3694232875341,
+          -1338.6174701625341, -1373.9739154750341, -1496.8567276040785, -1633.4856338540785,
+          -1615.942054752516, -1648.9160537759535, -1580.1992569009535, -1504.9141006509535,
+          -1469.7590713540785, -1541.914466861891, -1589.2668838540785, -1583.301185611891,
+          -1619.3341845627042
+        ]
+      },
+      "lifts": [
+        {
+          "segment": "orbit coast",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "descent arc",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 900
+        },
+        {
+          "segment": "approach and flare",
+          "startLiftM": 0,
+          "endLiftM": 64.36504035744974,
+          "durationS": 120
+        },
+        {
+          "segment": "low fast pass",
+          "startLiftM": 64.36504035744974,
+          "endLiftM": 64.36504035744974,
+          "durationS": 30
+        },
+        {
+          "segment": "slowdown",
+          "startLiftM": 64.36504035744974,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "vertical descent",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 10
+        },
+        {
+          "segment": "hover and touchdown",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 50
+        }
+      ],
+      "minFloorMarginM": 7.73070496506989e-12,
+      "segments": [
+        {
+          "segment": "orbit coast",
+          "frames": 3776,
+          "meanPatches": 42.63797669491525,
+          "maxPatches": 48,
+          "demandPerS": 0.423728813559322,
+          "predictedPerS": 0.1984382295933688,
+          "limitedFraction": 0,
+          "standingInFraction": 0.001853813559322034,
+          "minHeightAboveFloorM": 392981.5953951756,
+          "maxHeightAboveFloorM": 393987.2114200192,
+          "selectMsP50": 0.1768410000950098,
+          "selectMsP95": 0.25220200000330806,
+          "selectMsMax": 3.109764000051655
+        },
+        {
+          "segment": "descent arc",
+          "frames": 57600,
+          "meanPatches": 69.72168402777778,
+          "maxPatches": 194,
+          "demandPerS": 1.7122222222222223,
+          "predictedPerS": 2.3659197541294907,
+          "limitedFraction": 0,
+          "standingInFraction": 0.007378472222222222,
+          "minHeightAboveFloorM": 13756.138152539412,
+          "maxHeightAboveFloorM": 392087.38029123424,
+          "selectMsP50": 0.2772320000221953,
+          "selectMsP95": 1.1424389999592677,
+          "selectMsMax": 81.11165599990636
+        },
+        {
+          "segment": "approach and flare",
+          "frames": 7680,
+          "meanPatches": 185.61627604166668,
+          "maxPatches": 247,
+          "demandPerS": 101.99166666666666,
+          "predictedPerS": 40.87709645382424,
+          "limitedFraction": 0,
+          "standingInFraction": 0.14856770833333333,
+          "minHeightAboveFloorM": 368.7171297816826,
+          "maxHeightAboveFloorM": 20078.534374076015,
+          "selectMsP50": 0.8803360000019893,
+          "selectMsP95": 2.667363000102341,
+          "selectMsMax": 59.1405060000252
+        },
+        {
+          "segment": "low fast pass",
+          "frames": 1920,
+          "meanPatches": 166.07708333333332,
+          "maxPatches": 181,
+          "demandPerS": 93.1,
+          "predictedPerS": 130.84889022959408,
+          "limitedFraction": 0,
+          "standingInFraction": 0.434375,
+          "minHeightAboveFloorM": 300.00000000000773,
+          "maxHeightAboveFloorM": 300.00000000000773,
+          "selectMsP50": 0.9964990001171827,
+          "selectMsP95": 2.3411689999047667,
+          "selectMsMax": 22.823685999959707
+        },
+        {
+          "segment": "slowdown",
+          "frames": 3840,
+          "meanPatches": 126.26145833333334,
+          "maxPatches": 167,
+          "demandPerS": 96.95,
+          "predictedPerS": 162.84453373921679,
+          "limitedFraction": 0,
+          "standingInFraction": 0.4552083333333333,
+          "minHeightAboveFloorM": 175.09374282682856,
+          "maxHeightAboveFloorM": 272.15539550782023,
+          "selectMsP50": 0.7974169999361038,
+          "selectMsP95": 1.705803999910131,
+          "selectMsMax": 17.030517000006512
+        },
+        {
+          "segment": "vertical descent",
+          "frames": 640,
+          "meanPatches": 77.2578125,
+          "maxPatches": 127,
+          "demandPerS": 0,
+          "predictedPerS": 77.77312830370087,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 2.003319027557138,
+          "maxHeightAboveFloorM": 200.0000000000078,
+          "selectMsP50": 0.4295439999550581,
+          "selectMsP95": 0.6271750000305474,
+          "selectMsMax": 9.35052500013262
+        },
+        {
+          "segment": "hover and touchdown",
+          "frames": 3201,
+          "meanPatches": 66,
+          "maxPatches": 66,
+          "demandPerS": 0,
+          "predictedPerS": 0.08395649322042467,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 1.0000000000077964,
+          "maxHeightAboveFloorM": 2.0000000000077964,
+          "selectMsP50": 0.4043129999190569,
+          "selectMsP95": 0.42744300002232194,
+          "selectMsMax": 0.7546560000628233
+        }
+      ],
+      "hash": "8368900b66cac22f"
+    },
+    {
+      "rule": "calibrated",
+      "ridges": "on",
+      "setting": "low",
+      "rateHz": 64,
+      "coveredS": [0, 1230],
+      "frames": 78721,
+      "truncated": false,
+      "note": "statistical, not a bound on the ridged planet (bound.rs finding)",
+      "terrain": {
+        "siteHeightM": -1644.5642972584033,
+        "trackMaxHeightM": -1580.1992569009535,
+        "stretchMaxHeightsM": [
+          5380.430899788605, 6268.055411507355, 6268.055411507355, 4498.390372444855,
+          5198.495352913605, 5198.495352913605, 4764.19383924173, 4764.19383924173,
+          4604.413321663605, 4604.413321663605, -1723.0986713344091, -1585.5433734828466,
+          -1544.7651752406591, -1379.4709857875341, -1306.3694232875341, -1306.3694232875341,
+          -1338.6174701625341, -1373.9739154750341, -1496.8567276040785, -1633.4856338540785,
+          -1615.942054752516, -1648.9160537759535, -1580.1992569009535, -1504.9141006509535,
+          -1469.7590713540785, -1541.914466861891, -1589.2668838540785, -1583.301185611891,
+          -1619.3341845627042
+        ]
+      },
+      "lifts": [
+        {
+          "segment": "orbit coast",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "descent arc",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 900
+        },
+        {
+          "segment": "approach and flare",
+          "startLiftM": 0,
+          "endLiftM": 64.36504035744974,
+          "durationS": 120
+        },
+        {
+          "segment": "low fast pass",
+          "startLiftM": 64.36504035744974,
+          "endLiftM": 64.36504035744974,
+          "durationS": 30
+        },
+        {
+          "segment": "slowdown",
+          "startLiftM": 64.36504035744974,
+          "endLiftM": 0,
+          "durationS": 60
+        },
+        {
+          "segment": "vertical descent",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 10
+        },
+        {
+          "segment": "hover and touchdown",
+          "startLiftM": 0,
+          "endLiftM": 0,
+          "durationS": 50
+        }
+      ],
+      "minFloorMarginM": 7.73070496506989e-12,
+      "segments": [
+        {
+          "segment": "orbit coast",
+          "frames": 3776,
+          "meanPatches": 19.112023305084747,
+          "maxPatches": 21,
+          "demandPerS": 0,
+          "predictedPerS": 0.01118789820395452,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 392981.5953951756,
+          "maxHeightAboveFloorM": 393987.2114200192,
+          "selectMsP50": 0.2804920000489801,
+          "selectMsP95": 0.5340839999262244,
+          "selectMsMax": 170.29762299987487
+        },
+        {
+          "segment": "descent arc",
+          "frames": 57600,
+          "meanPatches": 24.337690972222223,
+          "maxPatches": 48,
+          "demandPerS": 0.2511111111111111,
+          "predictedPerS": 0.12590531556740947,
+          "limitedFraction": 0,
+          "standingInFraction": 0.0008506944444444444,
+          "minHeightAboveFloorM": 13756.138152539412,
+          "maxHeightAboveFloorM": 392087.38029123424,
+          "selectMsP50": 0.20182200009003282,
+          "selectMsP95": 0.3489630001131445,
+          "selectMsMax": 60.0199409998022
+        },
+        {
+          "segment": "approach and flare",
+          "frames": 7680,
+          "meanPatches": 60.598567708333334,
+          "maxPatches": 122,
+          "demandPerS": 93.25833333333334,
+          "predictedPerS": 4.891204051193644,
+          "limitedFraction": 0,
+          "standingInFraction": 0.04114583333333333,
+          "minHeightAboveFloorM": 368.7171297816826,
+          "maxHeightAboveFloorM": 20078.534374076015,
+          "selectMsP50": 0.46566400001756847,
+          "selectMsP95": 2.1411570000927895,
+          "selectMsMax": 50.81146400002763
+        },
+        {
+          "segment": "low fast pass",
+          "frames": 1920,
+          "meanPatches": 46.78541666666667,
+          "maxPatches": 58,
+          "demandPerS": 22.466666666666665,
+          "predictedPerS": 11.720180644082557,
+          "limitedFraction": 0,
+          "standingInFraction": 0.13802083333333334,
+          "minHeightAboveFloorM": 300.00000000000773,
+          "maxHeightAboveFloorM": 300.00000000000773,
+          "selectMsP50": 0.4184630000963807,
+          "selectMsP95": 1.3113900001626462,
+          "selectMsMax": 45.048407999798656
+        },
+        {
+          "segment": "slowdown",
+          "frames": 3840,
+          "meanPatches": 84.95755208333334,
+          "maxPatches": 135,
+          "demandPerS": 63.083333333333336,
+          "predictedPerS": 11.825721289079317,
+          "limitedFraction": 0,
+          "standingInFraction": 0.18958333333333333,
+          "minHeightAboveFloorM": 175.09374282682856,
+          "maxHeightAboveFloorM": 272.15539550782023,
+          "selectMsP50": 0.6802349998615682,
+          "selectMsP95": 1.6987640000879765,
+          "selectMsMax": 66.3662169999443
+        },
+        {
+          "segment": "vertical descent",
+          "frames": 640,
+          "meanPatches": 77.921875,
+          "maxPatches": 107,
+          "demandPerS": 0,
+          "predictedPerS": 12.786164033234321,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 2.003319027557138,
+          "maxHeightAboveFloorM": 200.0000000000078,
+          "selectMsP50": 0.5373139998409897,
+          "selectMsP95": 0.6597249999176711,
+          "selectMsMax": 1.0987489998806268
+        },
+        {
+          "segment": "hover and touchdown",
+          "frames": 3201,
+          "meanPatches": 69,
+          "maxPatches": 69,
+          "demandPerS": 0,
+          "predictedPerS": 0.02798549774014176,
+          "limitedFraction": 0,
+          "standingInFraction": 0,
+          "minHeightAboveFloorM": 1.0000000000077964,
+          "maxHeightAboveFloorM": 2.0000000000077964,
+          "selectMsP50": 0.3808430000208318,
+          "selectMsP95": 0.41305299988016486,
+          "selectMsMax": 0.885006999829784
+        }
+      ],
+      "hash": "3f3311eadcb946f4"
+    }
+  ]
+}
