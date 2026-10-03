@@ -52,8 +52,9 @@ place-ship *args:
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a
 # catalogued shader runs it. Arguments go to `apps/hyperion/scripts/testRender.sh`
-# (`--variant=`, `--fixture=broken-wgsl|external-fetch`, `--drop-adapter-switches`).
-test-render *args:
+# (`--variant=`, `--fixture=broken-wgsl|external-fetch`, `--drop-adapter-switches`). The surface
+# module is made first, so that the build bundles the current one rather than a stale one.
+test-render *args: gen-surface
     pnpm --filter hyperion build
     just _locked bash apps/hyperion/scripts/testRender.sh {{ args }}
 
@@ -272,9 +273,18 @@ gen-surface: (_wasm-preflight "bindgen")
     cargo build -q -p hyperion-surface --lib --target wasm32-unknown-unknown --release
     target="${CARGO_TARGET_DIR:-target}"
     out=apps/hyperion/src/renderer/src/generated/surface
-    rm -rf "$out"
-    wasm-bindgen --target web --out-dir "$out" \
+    # Generated beside the module and swapped in only when it differs, so that an unchanged module
+    # keeps its files' times and the caches keyed on them (tsc's, Vite's) stay valid.
+    fresh="$out.new"
+    rm -rf "$fresh"
+    wasm-bindgen --target web --out-dir "$fresh" \
         "$target/wasm32-unknown-unknown/release/hyperion_surface.wasm"
+    if diff -rq "$fresh" "$out" >/dev/null 2>&1; then
+        rm -rf "$fresh"
+    else
+        rm -rf "$out"
+        mv "$fresh" "$out"
+    fi
 
 # Run a command once the surface module is built: the git hooks' pnpm entries, since a fresh
 # worktree has no generated module and the client's typecheck, lint and tests need it.
