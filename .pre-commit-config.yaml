@@ -2,7 +2,7 @@
 # Run `just hooks` to install, or `just pre-commit` to run against every file.
 #
 # Fast checks run on commit; tests run on push. `just ci-slow` remains the full gate.
-default_install_hook_types: [pre-commit, pre-push]
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
 
 repos:
@@ -32,6 +32,19 @@ repos:
   # so hooks call them directly instead of using pre-commit-managed copies.
   - repo: local
     hooks:
+      # Owner's rule: no Claude Code session links in commit messages or files.
+      - id: no-session-links-msg
+        name: no Claude session links in the commit message
+        entry: '(?i)claude\.ai/code/session|^Claude-Session:'
+        language: pygrep
+        stages: [commit-msg]
+
+      - id: no-session-links-files
+        name: no Claude session links in files
+        entry: '(?i)claude\.ai/code/session'
+        language: pygrep
+        types: [text]
+
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all --
