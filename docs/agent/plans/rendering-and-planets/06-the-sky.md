@@ -1421,12 +1421,16 @@ plan reserves no tag, prefix or stream.
   `PACKED_CUBE_NAME`, "packed star cube"), and `createPointSplatAsync(spec)`, added beyond the
   task's list so that the harness's catalogue check sees a splat's WGSL error as a rejection, as
   `createMaterialAsync` and `createComputeAsync` do; without `float32-blendable` the check records
-  the splat as not compiled rather than failing. `ResilientEngine` forwards a release only for a
-  handle the current engine made (a `WeakSet` reset on each adoption); the release of a lost
-  engine's handle is dropped, as a write to it is. Both test fakes implement the new members
-  (`FakeRenderEngine` now fakes `createBuffer` and records releases; R05's `CountingRenderEngine`
-  raises `destroyed` events). `WGSL_CATALOGUE` takes `{ kind: "point-splat", spec }`; no entry of
-  the kind exists until T13.g.
+  the splat as not compiled rather than failing (so on such a device, possibly the UHD 620, the
+  splat's WGSL is unchecked by the harness). The engine refuses to release a render target's colour
+  or depth ("belongs to a render target and is released with it"); its other internal textures and
+  buffers are never handed to callers. `ResilientEngine` keeps the engine that made each handle (a
+  `WeakMap`): a release reaches it if it is the current engine, is dropped if a lost engine made it
+  (it died with its device, as a write to it is), and throws for a handle it never made. Both test
+  fakes implement the new members (`FakeRenderEngine` now fakes `createBuffer` and records
+  releases; R05's `CountingRenderEngine` raises `destroyed` events). `WGSL_CATALOGUE` takes
+  `{ kind: "point-splat", spec }` and holds `ENGINE_CHECK_SPLAT`, R01's harness splat lifted from
+  `smoke/blending.ts`, until T13.g registers the sky's bake splat.
 - **Deviations in T13.a, as built (2026-10-02).** `cameraLimit.ts` exports `cameraLimitV`,
   `cameraLimitParts` (the limit with its sky electrons, read noise and V = 0 peak electrons),
   `DEFAULT_VIEW_CAMERA` (a `ViewCameraSensor` with `etaSun` 3.02 under decision-camera-eta.md; the

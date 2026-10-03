@@ -5,7 +5,12 @@ import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
-import { type PassTimes, PresentationOnlyReadback, type TextureHandle } from "../types";
+import {
+  Float32BlendUnavailable,
+  type PassTimes,
+  PresentationOnlyReadback,
+  type TextureHandle,
+} from "../types";
 import { WebGpuRenderEngine } from "./engine";
 
 /** An engine over a fake device with `features`. */
@@ -219,6 +224,65 @@ describe("releases (R06.T13.h)", () => {
     expect(() => {
       engine.releaseBuffer(buffer);
     }).toThrow(/staging was released/u);
+  });
+
+  it("refuse a render target's colour, which the target releases, and leave the engine disposable", async () => {
+    const { engine } = await engineOn();
+    const target = engine.createRenderTarget({
+      name: "hdr",
+      size: { widthPx: 4, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    expect(() => {
+      engine.releaseTexture(target.colour);
+    }).toThrow(/belongs to a render target/u);
+    expect(() => {
+      engine.dispose();
+    }).not.toThrow();
+  });
+
+  it("name each packed cube as its caller asks", async () => {
+    const { engine } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    engine.createPackedCube(2, 1, "other", "sky cube: cockpit");
+    engine.createPackedCube(2, 1, "other", "sky cube: main");
+    expect(events.map((event) => event.name)).toEqual(["sky cube: cockpit", "sky cube: main"]);
+  });
+});
+
+describe("createPointSplatAsync (R06.T13.h)", () => {
+  const SPLAT = {
+    name: "broken splat",
+    vertexWgsl: "@vertex fn main() -> @builtin(position) vec4f { return oops; }",
+    fragmentWgsl: "@fragment fn main() -> @location(0) vec4f { return vec4f(1.0); }",
+    format: "rgba32float",
+    blend: "additive",
+  } as const;
+
+  it("rejects naming the splat and the compiler's messages when its WGSL does not compile", async () => {
+    const { engine, gpu } = await engineOn(["float32-blendable"]);
+    gpu.shaderErrors = (code) => (code.includes("oops") ? ["unresolved value 'oops'"] : []);
+    gpu.createRenderPipelineAsync = () => Promise.reject(new Error("pipeline creation failed"));
+    await expect(engine.createPointSplatAsync(SPLAT)).rejects.toThrow(
+      "splat broken splat did not compile:\n1:1 unresolved value 'oops'",
+    );
+  });
+
+  it("resolves a splat whose pipeline is made", async () => {
+    const { engine } = await engineOn(["float32-blendable"]);
+    const made = await engine.createPointSplatAsync({ ...SPLAT, name: "good splat" });
+    expect(typeof made.draw).toBe("function");
+  });
+
+  it("rejects with Float32BlendUnavailable without the feature", async () => {
+    const { engine } = await engineOn();
+    await expect(engine.createPointSplatAsync(SPLAT)).rejects.toBeInstanceOf(
+      Float32BlendUnavailable,
+    );
   });
 });
 

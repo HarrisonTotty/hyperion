@@ -495,8 +495,19 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     this.destroyBuffer(buffer);
   }
 
+  /**
+   * @throws Error for a render target's colour or depth, which the target owns and releases at
+   *   its disposal, as well as for a handle the engine did not make or has released.
+   */
   releaseTexture(texture: TextureHandle): void {
     this.#assertLive();
+    for (const target of this.#targets) {
+      if (target.colour === texture || target.depth === texture) {
+        throw new Error(
+          `texture ${texture.name} belongs to a render target and is released with it`,
+        );
+      }
+    }
     this.destroyTexture(texture);
   }
 
@@ -551,10 +562,14 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       );
       return this.#splatHandle(spec, pipeline);
     } catch (error: unknown) {
-      const errors = [...(await compilationErrors(vertex)), ...(await compilationErrors(fragment))];
-      throw new Error(`splat ${spec.name} did not compile:\n${errors.join("\n")}`, {
-        cause: error,
-      });
+      let errors: ReadonlyArray<string> = [];
+      try {
+        errors = [...(await compilationErrors(vertex)), ...(await compilationErrors(fragment))];
+      } catch {
+        // The compiler's messages could not be read (a lost device, say): the cause still says why.
+      }
+      const detail = errors.length > 0 ? errors.join("\n") : asError(error).message;
+      throw new Error(`splat ${spec.name} did not compile:\n${detail}`, { cause: error });
     }
   }
 

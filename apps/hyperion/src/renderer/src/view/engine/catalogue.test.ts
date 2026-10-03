@@ -32,18 +32,13 @@ const DISPLAY_NAMES: ReadonlyArray<string> = WGSL_CATALOGUE.flatMap((entry) => {
 });
 
 describe("the catalogue's kinds", () => {
-  it("takes a point splat, which carries no display name", () => {
-    const splat: CatalogueEntry = {
-      kind: "point-splat",
-      spec: {
-        name: "sky:splat",
-        vertexWgsl: "",
-        fragmentWgsl: "",
-        format: "rgba32float",
-        blend: "additive",
-      },
-    };
-    expect(displayNameOf(splat)).toBeNull();
+  it("holds a point splat in the splat's format and blend, with no display name", () => {
+    const splats = WGSL_CATALOGUE.filter((entry) => entry.kind === "point-splat");
+    expect(splats.length).toBeGreaterThan(0);
+    for (const entry of splats) {
+      expect(displayNameOf(entry)).toBeNull();
+      expect(entry.spec).toMatchObject({ format: "rgba32float", blend: "additive" });
+    }
   });
 });
 
