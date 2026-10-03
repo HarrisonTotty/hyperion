@@ -31,7 +31,7 @@ import { bakeTransferables } from "./messages";
 /** The version of the test planet this client's code was written against, the surface crate's
  * `TEST_PLANET_VERSION` (pinned to it by `heightWasm.test.ts`). A module that bakes another
  * version is stale: its heights are not the ones the client's tests and goldens describe. */
-export const EXPECTED_TEST_PLANET_VERSION = 1;
+export const EXPECTED_TEST_PLANET_VERSION = 2;
 
 /** The module's `VertexPath` enum values (`src/wasm.rs`'s `JsVertexPath`). */
 export const WASM_VERTEX_PATH = { "baked-offsets": 0, "face-differences": 1 } as const;

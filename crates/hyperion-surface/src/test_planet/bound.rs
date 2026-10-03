@@ -29,6 +29,31 @@
 //!   [`NOISE_CURVATURE_BOUND`]) in lattice units. A ridged octave's term follows from the chain
 //!   rule on `w · r` (see `ridged_derivative_bounds`).
 //!
+//! # Each octave takes the least of three bounds (2026-10-03)
+//!
+//! Linear interpolation is linear, so with `F_L = Σ_k g_k` over the level's octaves
+//! `|S_L − F_L| = |Σ_k (I g_k − g_k)| ≤ Σ_k |I g_k − g_k|`, and each octave's error may take the
+//! least of any true bounds on it (decision-r05-patch-demand.md, section 4c). For one octave g on
+//! one of the mesh's triangles, with `I g(p) = Σ_i λ_i g(v_i)`, `λ_i ≥ 0`, `Σ_i λ_i = 1`:
+//!
+//! - **curvature**, Waldron's `½ M r²` as above: `½ ‖H_k‖ h_L² + ¼ |∇g_k| κ a Δ²`;
+//! - **slope**: g as a function of (s, t) has, along any unit direction u of the parameter plane,
+//!   `|∂_u g| = |∇F_k · J u| ≤ G_k √2 ρ_max a`, `G_k` the octave's gradient bound, so along the
+//!   straight parameter segment from p to a vertex `|g(p) − g(v_i)| ≤ G_k √2 ρ_max a |p − v_i|`.
+//!   Then `|g(p) − I g(p)| = |Σ_i λ_i (g(p) − g(v_i))| ≤ G_k √2 ρ_max a Σ_i λ_i |p − v_i|`, and for
+//!   p in the triangle `Σ_i λ_i |p − v_i| ≤ (Σ_i λ_i |p − v_i|²)^½ = (R² − |p − c|²)^½ ≤ R`
+//!   (Jensen's inequality, then the identity `Σ_i λ_i |p − v_i|² = R² − |p − c|²` for the triangle's
+//!   circumcentre c and circumradius R, since p = `Σ_i` `λ_i` `v_i`), with `R = Δ ÷ √2` for the mesh's
+//!   right isosceles triangles. So the error is at most `G_k ρ_max a Δ = G_k h_L`;
+//! - **range**: `I g(p)` is a convex combination of values of g, so both it and `g(p)` lie in the
+//!   interval of the octave's certified values, and the error is at most its width `W_k`:
+//!   `2 B_k` for a plain octave (`B_k = σ_k B ÷ σ_noise`); for a ridged one, `w (r − r̄) ÷ r_rms`
+//!   with `w ∈ [0, 1]` and `r ∈ [1 − √(B² + ε²), 1 − ε]`, whose interval
+//!   `[1 − √(B² + ε²) − r̄, 1 − ε − r̄]` contains 0, so `W_k = σ_k (√(B² + ε²) − ε) ÷ r_rms`.
+//!
+//! The ridged octaves gain most: the curvature of a crest grows as 1 ÷ ε, while its slope and range
+//! stay those of the noise.
+//!
 //! At the finest level ε is 0; above it, at levels selection never reaches, it is the two
 //! interpolation terms alone.
 //!
@@ -65,7 +90,8 @@
 //! | 17 | 0.476   | 0.151     | 0.316     | 0.0529  | 0.712      | 0.885          | 11.2  |
 //! | 18 | 0.148   | 0.00493   | 0.033     | 0       | —          | —              | 6.95  |
 //!
-//! The hard bound is about 3–3.5 times the 99.9th percentile, so not under a quarter (a finding)
+//! Ridges off, the curvature bound is the least for every octave, so these figures are those of the
+//! curvature bound alone. The hard bound is about 3–3.5 times the 99.9th percentile, so not under a quarter (a finding)
 //! except at level 18, which omits no octave and differs from the finest only by interpolation,
 //! which the curvature bound overstates.
 //!
@@ -78,14 +104,14 @@
 //! | 2  | 3,965   | 933       | 0.235     | 320     | 0.728      | 0.952          | 2.83  |
 //! | 3  | 2,894   | 627       | 0.217     | 225     | 0.698      | 1.048          | 4.14  |
 //! | 4  | 2,137   | 400       | 0.187     | 156     | 0.642      | 1.141          | 6.11  |
-//! | 5  | 7,929   | 332       | 0.042     | 106     | 0.783      | 1.113          | 45.3  |
-//! | 6  | 6,896   | 219       | 0.032     | 73.3    | 0.747      | 1.213          | 78.9  |
-//! | 7  | 5,136   | 149       | 0.029     | 49.4    | 0.753      | 1.090          | 117   |
-//! | 8  | 3,638   | 93.6      | 0.026     | 31.3    | 0.748      | 1.114          | 166   |
-//! | 9  | 2,516   | 47        | 0.019     | 15.6    | 0.751      | 0.973          | 230   |
-//! | 10 | 671     | 23.4      | 0.035     | 7.82    | 0.748      | 0.948          | 123   |
-//! | 11 | 189     | 12.5      | 0.066     | 3.91    | 0.797      | 0.951          | 69    |
-//! | 12 | 57.5    | 6.04      | 0.105     | 1.96    | 0.772      | 0.953          | 42.1  |
+//! | 5  | 2,019   | 332       | 0.164     | 106     | 0.783      | 1.113          | 11.5  |
+//! | 6  | 1,648   | 219       | 0.133     | 73.3    | 0.747      | 1.213          | 18.8  |
+//! | 7  | 1,240   | 149       | 0.120     | 49.4    | 0.753      | 1.090          | 28.4  |
+//! | 8  | 877     | 93.6      | 0.107     | 31.3    | 0.748      | 1.114          | 40.1  |
+//! | 9  | 561     | 47        | 0.084     | 15.6    | 0.751      | 0.973          | 51.4  |
+//! | 10 | 277     | 23.4      | 0.085     | 7.82    | 0.748      | 0.948          | 50.6  |
+//! | 11 | 127     | 12.5      | 0.098     | 3.91    | 0.797      | 0.951          | 46.6  |
+//! | 12 | 53.8    | 6.04      | 0.112     | 1.96    | 0.772      | 0.953          | 39.4  |
 //! | 13 | 19.5    | 2.96      | 0.152     | 0.977   | 0.756      | 1.066          | 28.5  |
 //! | 14 | 7.37    | 1.4       | 0.191     | 0.488   | 0.720      | 0.968          | 21.6  |
 //! | 15 | 3.02    | 0.731     | 0.242     | 0.243   | 0.753      | 0.992          | 17.7  |
@@ -93,15 +119,18 @@
 //! | 17 | 0.515   | 0.151     | 0.293     | 0.0529  | 0.712      | 0.885          | 12.1  |
 //! | 18 | 0.16    | 0.00493   | 0.031     | 0       | —          | —              | 7.48  |
 //!
-//! With ridges on, the ridged octaves' sharp crests (curvature growing as 1 ÷ ε) make the
-//! interpolation term dominate from level 2 to 15, where the 99.9th percentile is 2–24% of the
-//! bound (findings) and `k_n` reaches 230 at level 9: selection by the hard bound over-refines
-//! the ridged planet heavily there. Decisions-r05.md item 6 keeps the hard bound in R05 and has
-//! T13.a record the demand under min(hard, `4σ_n`) for the ridged planet too.
+//! With ridges on, each octave's interpolation error takes the least of its curvature, slope and
+//! range bounds (above): the crests' curvature grows as 1 ÷ ε, so from level 5 to 12 the slope
+//! bound applies to the ridged octaves, and `k_n` peaks at 51 at level 9 (230 with the curvature
+//! bound alone). The 99.9th percentile is still under a quarter of the bound from level 2 to 15,
+//! 8–17% at levels 5–12 (findings): selection by the hard bound over-refines the ridged planet
+//! there. Decisions-r05.md item 6 keeps the hard bound in R05 and has T13.a record the demand
+//! under min(hard, `4σ_n`) for the ridged planet too.
 
 use super::{RIDGE_EPSILON, RIDGE_RMS, RIDGED, Ridges, TestPlanet, octaves};
 use crate::geometry::{finest_level, lattice_step, vertex_spacing};
 use crate::noise::NOISE_RMS;
+use crate::num;
 
 /// C₁, the certified maximum of |∇noise| in lattice units, over all points and gradient choices.
 ///
@@ -210,13 +239,16 @@ impl TestPlanet {
         let a = self.figure().equatorial_radius_m;
         let h = vertex_spacing(a, level).max_m;
         let step = lattice_step(level);
-        let (mut hess, mut grad) = (0.0, 0.0);
+        let mut total = 0.0;
         for k in 0..count {
-            let (kh, kg) = octave_derivative_bounds(self, k);
-            hess += kh;
-            grad += kg;
+            let (hess, grad) = octave_derivative_bounds(self, k);
+            let curvature =
+                0.5 * hess * h * h + 0.25 * grad * PARAMETRIC_CURVATURE * a * step * step;
+            let slope = h * grad;
+            let range = self.octave_width_m(k);
+            total += num::min(curvature, num::min(slope, range));
         }
-        0.5 * hess * h * h + 0.25 * grad * PARAMETRIC_CURVATURE * a * step * step
+        total
     }
 }
 

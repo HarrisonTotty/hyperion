@@ -234,6 +234,19 @@ impl TestPlanet {
         }
     }
 
+    /// The width of the interval of heights octave `k` can contribute, metres: `2 B_k` for a plain
+    /// octave, `σ_k (√(B² + ε²) − ε) ÷ RIDGE_RMS` for a ridged one (see `bound`'s documentation).
+    #[must_use]
+    pub(crate) fn octave_width_m(&self, k: u8) -> f64 {
+        if self.ridges == Ridges::On && RIDGED.contains(&k) {
+            let spread =
+                (NOISE_BOUND * NOISE_BOUND + RIDGE_EPSILON * RIDGE_EPSILON).sqrt() - RIDGE_EPSILON;
+            self.sigma_m(k) * spread / RIDGE_RMS
+        } else {
+            2.0 * self.octave_bound_m(k)
+        }
+    }
+
     /// The largest |height| octave `k` can contribute, metres.
     #[must_use]
     fn octave_bound_m(&self, k: u8) -> f64 {
