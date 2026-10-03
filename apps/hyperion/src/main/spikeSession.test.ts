@@ -129,8 +129,10 @@ describe("a spike run's session", () => {
 
   it("ends the app with the run's status", () => {
     const { session, exits } = sessionOf();
+    expect(session.ended).toBe(false);
     session.operations().end(1, "no patch baked");
     session.operations().end(0, null);
     expect(exits).toEqual([1, 0]);
+    expect(session.ended).toBe(true);
   });
 });

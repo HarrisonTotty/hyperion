@@ -72,6 +72,12 @@ export class SpikeSession {
   #memory: ReadonlyArray<MemorySample> = [];
   /** The renderer's last private-memory reading, bytes. */
   #rendererBytes: number | null = null;
+  #ended = false;
+
+  /** Whether the renderer has ended the run (`end`). */
+  get ended(): boolean {
+    return this.#ended;
+  }
 
   readonly #files: SpikeFiles;
 
@@ -96,6 +102,7 @@ export class SpikeSession {
       writeResults: (report) => this.#writeResults(report),
       writeCapture: (capture) => this.#writeCapture(capture),
       end: (code, reason) => {
+        this.#ended = true;
         this.#deps.log(
           code === 0 ? "descent spike: pass" : `descent spike: FAIL ${reason ?? "(no reason)"}`,
         );

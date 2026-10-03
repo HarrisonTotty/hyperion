@@ -57,6 +57,19 @@ describe("the spike's pass rows", () => {
   });
 });
 
+/** Makes one encoder on `dev` and resolves a query set with it, as R01's timer does a frame. */
+function resolveOn(dev: GPUDevice): void {
+  dev
+    .createCommandEncoder()
+    .resolveQuerySet(
+      dev.createQuerySet({ type: "timestamp", count: 2 }),
+      0,
+      2,
+      dev.createBuffer({ size: 16, usage: 0 }),
+      0,
+    );
+}
+
 describe("the resolve counter", () => {
   it("counts each resolve an encoder makes and passes it through", async () => {
     const counter = new ResolveCounter();
@@ -68,6 +81,23 @@ describe("the resolve counter", () => {
     encoder.resolveQuerySet(querySet, 0, 2, buffer, 0);
     dev.createCommandEncoder().resolveQuerySet(querySet, 0, 2, buffer, 0);
     expect(counter.value).toBe(2);
+  });
+
+  it("numbers a rebuilt device's timer frames after the lost one's", async () => {
+    const counter = new ResolveCounter();
+    const gpu = new FakeGpu([
+      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
+      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
+    ]);
+    const first = counter.wrap(await device(gpu));
+    resolveOn(first);
+    resolveOn(first);
+    expect(counter.runFrame(2)).toBe(2);
+    // The rebuilt engine's new timer numbers its first frame 1 again: the run's third.
+    const second = counter.wrap(await device(gpu));
+    resolveOn(second);
+    expect(counter.value).toBe(3);
+    expect(counter.runFrame(1)).toBe(3);
   });
 });
 
@@ -107,7 +137,7 @@ describe("the spike's recorder", () => {
 
   it("gives each frame the engine frames resolved since the one before", () => {
     // The counter stands at 0 when the run starts; each frame resolves three engine frames.
-    const counted = { value: 0 };
+    const counted = { value: 0, runFrame: (n: number) => n };
     const recorder = new SpikeRecorder(descent, "low", {
       resolves: counted,
       tally: new PipelineTally(() => 0),

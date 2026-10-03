@@ -5,8 +5,15 @@ import { goldenLevelTable } from "../../test/terrainFixtures";
 import type { PassTimes } from "../engine/types";
 import { planetGeometry } from "../terrain/planet";
 import { recordProfile } from "./demandRecord";
+import { GpuCapture } from "./capture";
 import { PipelineTally } from "./pipelineShim";
-import { SMOKE_S, SpikeController, variantOf } from "./spikeController";
+import {
+  CAPTURE_FRAMES,
+  SMOKE_S,
+  type SpanCapture,
+  SpikeController,
+  variantOf,
+} from "./spikeController";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 const LAUNCH: SpikeLaunch = {
@@ -70,16 +77,45 @@ function fakeSpike(launch: SpikeLaunch): {
   return { spike, calls, ends, reports };
 }
 
-function controllerOf(launch: SpikeLaunch): ReturnType<typeof fakeSpike> & {
+/** A capture that records what the controller asks of it. */
+function fakeCapture(): SpanCapture & { readonly log: string[] } {
+  const log: string[] = [];
+  return {
+    log,
+    startSpan: () => {
+      log.push("start");
+      return Promise.resolve();
+    },
+    frame: () => {
+      log.push("frame");
+    },
+    endSpan: () => {
+      log.push("end");
+    },
+    dispose: () => {
+      log.push("dispose");
+    },
+    result: () => {
+      log.push("result");
+      // An empty capture's own result: the controller only passes it on.
+      return new GpuCapture({ contexts: null, meta: {} }).result();
+    },
+  };
+}
+
+function controllerOf(
+  launch: SpikeLaunch,
+  capture: SpanCapture | null = null,
+): ReturnType<typeof fakeSpike> & {
   readonly controller: SpikeController;
-  readonly resolves: { value: number };
+  readonly resolves: { value: number; runFrame: (n: number) => number };
 } {
   const fake = fakeSpike(launch);
-  const resolves = { value: 0 };
+  const resolves = { value: 0, runFrame: (n: number) => n };
   const controller = new SpikeController({
     spike: fake.spike,
     gpu: { resolves, tally: new PipelineTally(() => 0) },
-    capture: null,
+    capture,
     canvas: () => ({ widthPx: 1280, heightPx: 720 }),
     log: () => undefined,
   });
@@ -186,5 +222,49 @@ describe("the spike's run control", () => {
     controller.frame(frame(SMOKE_S));
     await settle();
     expect(ends).toEqual([{ status: "fail", reason: "lost the device" }]);
+  });
+
+  it("captures a span from 5 s into a smoke run, and writes it before the end", async () => {
+    const capture = fakeCapture();
+    const { controller, calls } = controllerOf({ ...LAUNCH, smoke: true, capture: "/c" }, capture);
+    controller.prepared(DESCENT);
+    controller.patch("baked");
+    controller.frame(frame(4.9));
+    expect(capture.log).toEqual([]);
+    controller.frame(frame(5));
+    for (let n = 0; n < CAPTURE_FRAMES; n += 1) {
+      controller.frame(frame(5 + (n + 1) / 60));
+    }
+    await settle();
+    expect(capture.log.filter((e) => e === "frame")).toHaveLength(CAPTURE_FRAMES);
+    expect(capture.log.slice(-2)).toEqual(["end", "result"]);
+    expect(calls).toEqual(["writeCapture"]);
+    controller.frame(frame(SMOKE_S));
+    await settle();
+    expect(calls).toEqual(["writeCapture", "end"]);
+  });
+
+  it("ends and writes a span the run outlasts, where the run ends", async () => {
+    const capture = fakeCapture();
+    const { controller, calls } = controllerOf({ ...LAUNCH, smoke: true, capture: "/c" }, capture);
+    controller.prepared(DESCENT);
+    controller.patch("baked");
+    controller.frame(frame(5));
+    controller.frame(frame(6));
+    controller.frame(frame(SMOKE_S));
+    await settle();
+    expect(capture.log).toContain("end");
+    expect(calls).toEqual(["writeCapture", "end"]);
+  });
+
+  it("starts a full run's span 5 s into the low fast pass", () => {
+    const capture = fakeCapture();
+    const { controller } = controllerOf({ ...LAUNCH, capture: "/c" }, capture);
+    controller.prepared(DESCENT);
+    const pass = DESCENT.profile.segmentSpans().find(({ name }) => name === "low fast pass");
+    controller.frame(frame((pass?.startS ?? 0) + 4.9));
+    expect(capture.log).toEqual([]);
+    controller.frame(frame((pass?.startS ?? 0) + 5));
+    expect(capture.log).toEqual(["start"]);
   });
 });

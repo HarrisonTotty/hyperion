@@ -19,7 +19,7 @@ import {
 import type { SelectionInput } from "../terrain/select";
 import type { GpuCapture } from "./capture";
 import type { PipelineTally } from "./pipelineShim";
-import { type RecordedDescent, SpikeRecorder } from "./spikeHarness";
+import { type RecordedDescent, type ResolveCounter, SpikeRecorder } from "./spikeHarness";
 
 /** How long `--smoke` runs, script seconds. */
 export const SMOKE_S = 10;
@@ -40,11 +40,21 @@ export interface ControllerFrame {
   readonly streaming: boolean;
 }
 
+/** The capture's span controls and its result (`GpuCapture`'s). */
+export type SpanCapture = Pick<
+  GpuCapture,
+  "startSpan" | "frame" | "endSpan" | "dispose" | "result"
+>;
+
 /** What the controller is given. */
 export interface SpikeControllerDeps {
   readonly spike: SpikeApi;
-  readonly gpu: { readonly resolves: { readonly value: number }; readonly tally: PipelineTally };
-  readonly capture: GpuCapture | null;
+  readonly gpu: {
+    readonly resolves: Pick<ResolveCounter, "value" | "runFrame">;
+    readonly tally: PipelineTally;
+  };
+  /** T15.a's capture when `--capture` is given (the parts the controller drives). */
+  readonly capture: SpanCapture | null;
   /** The main view's canvas size, device pixels, for the report. */
   readonly canvas: () => DescentSpikeReport["canvas"];
   readonly log: (message: string, error?: unknown) => void;
@@ -165,7 +175,9 @@ export class SpikeController {
     this.#deps.log(`the descent spike failed: ${reason}`, error);
     this.#deps.capture?.dispose();
     const detail = error instanceof Error ? `: ${error.message}` : "";
-    this.#deps.spike.end({ status: "fail", reason: `${reason}${detail}` }).catch(() => undefined);
+    this.#deps.spike.end({ status: "fail", reason: `${reason}${detail}` }).catch((e: unknown) => {
+      this.#deps.log("the run's end was refused", e);
+    });
   }
 
   /** Starts, marks and ends the capture's span around the frames that follow. */
@@ -193,7 +205,7 @@ export class SpikeController {
   }
 
   /** Ends the capture's span and writes it, once its snapshot is read back. */
-  #endCapture(span: CaptureSpan, capture: GpuCapture): void {
+  #endCapture(span: CaptureSpan, capture: SpanCapture): void {
     const started = span.started;
     if (started === null || span.written !== null) {
       return;
@@ -245,7 +257,9 @@ export class SpikeController {
     } catch (error: unknown) {
       this.#deps.log("the descent spike could not finish", error);
       const reason = error instanceof Error ? error.message : String(error);
-      await spike.end({ status: "fail", reason }).catch(() => undefined);
+      await spike.end({ status: "fail", reason }).catch((e: unknown) => {
+        this.#deps.log("the run's end was refused", e);
+      });
     }
   }
 }

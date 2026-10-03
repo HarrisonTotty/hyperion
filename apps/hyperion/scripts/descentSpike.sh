@@ -81,13 +81,24 @@ else
     rm -rf -- "${cache_keep:?}"/*
 fi
 
-env_hidden=()
+env_run=()
 if [[ $hidden -eq 1 ]]; then
-    env_hidden=(HYPERION_SPIKE_HIDDEN=1)
+    env_run+=(HYPERION_SPIKE_HIDDEN=1)
+fi
+# The device's memory before the client starts, which the results subtract (Design note 18): read
+# here, since the GPU process may start before the main process could read it.
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -q -x >"$profile/nvidia-baseline.xml" 2>/dev/null; then
+    env_run+=("HYPERION_SPIKE_NVIDIA_BASELINE=$profile/nvidia-baseline.xml")
+fi
+# As the `client` recipe does: on Wayland the client would relaunch itself through XWayland, and
+# this script would take the first process's exit for the run's.
+x11=()
+if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+    x11=(--ozone-platform=x11)
 fi
 status=0
 start=$(date +%s)
-env "${env_hidden[@]}" setsid timeout --kill-after=10 "$limit" "$electron" \
+env "${env_run[@]}" setsid timeout --kill-after=10 "$limit" "$electron" "${x11[@]}" \
     "$here/out/main/index.js" --descent-spike --port "$port" "${spike_args[@]}" \
     "--user-data-dir=$profile" &
 client=$!

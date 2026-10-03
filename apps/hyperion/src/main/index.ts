@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -18,7 +19,7 @@ import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunc
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
 import { type ClientArgs, parseClientArgs, serverUrlOf, userArgs } from "./cli";
-import { readDrmMemory, readNvidiaSmi } from "./fdinfo";
+import { parseNvidiaSmi, readDrmMemory, readNvidiaSmi } from "./fdinfo";
 import {
   applyGraphicsSwitches,
   type ChromiumSwitch,
@@ -140,6 +141,28 @@ function createWindow(
   return window;
 }
 
+/** The variable naming the `nvidia-smi -q -x` reading the recipe took before the launch. */
+const SPIKE_NVIDIA_BASELINE_ENV = "HYPERION_SPIKE_NVIDIA_BASELINE";
+
+/**
+ * The device's memory before the client held any, bytes, which the results subtract (Design note
+ * 18): the recipe reads `nvidia-smi` before Electron starts, since the GPU process can start
+ * before the main process could; `null` without a reading (off NVIDIA, or not the recipe).
+ */
+function nvidiaBaseline(): number | null {
+  const path = process.env[SPIKE_NVIDIA_BASELINE_ENV];
+  if (path === undefined) {
+    return null;
+  }
+  try {
+    const reading = parseNvidiaSmi(readFileSync(path, "utf8"));
+    return reading.kind === "nvidia" ? (reading.gpus[0]?.usedBytes ?? null) : null;
+  } catch (error: unknown) {
+    console.error("descent spike: the nvidia-smi baseline could not be read:", error);
+    return null;
+  }
+}
+
 /** The page the window loads, against which the spike's handlers check their sender. */
 function pageUrl(): string {
   const devServerUrl = process.env["ELECTRON_RENDERER_URL"];
@@ -170,11 +193,12 @@ function startSpikeSession(
 ): void {
   const trace = new SpikeTrace(contentTracing);
   const startedAt = new Date();
-  let spikeSession: SpikeSession | null = null;
+  /** The renderer's last private-memory reading, bytes, for the sampler. */
+  let rendererBytes: number | null = null;
   const memory = new MemorySampler(
     {
       appMetrics: () => app.getAppMetrics(),
-      rendererPrivateBytes: () => Promise.resolve(spikeSession?.rendererPrivateBytes() ?? null),
+      rendererPrivateBytes: () => Promise.resolve(rendererBytes),
       drm: (pid) => readDrmMemory(pid, process.platform),
       nvidia: () => readNvidiaSmi(),
       nowMs: () => performance.now(),
@@ -183,7 +207,7 @@ function startSpikeSession(
       console.error("descent spike: a memory sample failed:", error);
     },
   );
-  spikeSession = new SpikeSession({
+  const spikeSession = new SpikeSession({
     launch,
     describe: async () => ({
       startedAt,
@@ -230,6 +254,9 @@ function startSpikeSession(
     },
     isSender: (event) => isOwnPage(event.senderFrame, page, window.webContents.mainFrame),
     ...spikeSession.operations(),
+    rendererMemory: (bytes) => {
+      rendererBytes = bytes;
+    },
   });
   const watchdog = setTimeout(() => {
     process.stdout.write("descent spike: WATCHDOG the run did not end\n");
@@ -241,6 +268,13 @@ function startSpikeSession(
   window.webContents.once("render-process-gone", (_event, details) => {
     process.stdout.write(`descent spike: FAIL the renderer exited (${details.reason})\n`);
     app.exit(1);
+  });
+  // A window closed before the run ended is a failed run, not the ordinary quit's 0.
+  window.once("closed", () => {
+    if (!spikeSession.ended) {
+      process.stdout.write("descent spike: FAIL the window was closed before the run ended\n");
+      app.exit(1);
+    }
   });
 }
 
@@ -292,10 +326,7 @@ async function main(): Promise<void> {
     return;
   }
   const { graphics, switches } = prepared;
-  // The device's memory before the client holds any, which the results subtract (Design note 18).
-  const baseline = args.spike === undefined ? null : await readNvidiaSmi();
-  const nvidiaBaselineBytes =
-    baseline?.kind === "nvidia" ? (baseline.gpus[0]?.usedBytes ?? null) : null;
+  const nvidiaBaselineBytes = args.spike === undefined ? null : nvidiaBaseline();
   // Watching from before `ready`, so that no crash of the GPU process goes uncounted.
   const gpuMonitor = new GpuProcessMonitor({
     app,

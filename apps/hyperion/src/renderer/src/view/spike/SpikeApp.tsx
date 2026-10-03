@@ -5,10 +5,10 @@ import { GraphicsStatusProvider } from "../engine/GraphicsStatusProvider";
 import { navigatorGpu } from "../engine/status";
 import type { TerrainVariant } from "../quality/qualitySetting";
 import { GpuCapture } from "./capture";
-import { DescentSpike } from "./DescentSpike";
+import { DescentSpike, MAIN_VIEW_NAME } from "./DescentSpike";
 import { SpikeController, variantOf } from "./spikeController";
 import { SPIKE_PASS_ROWS, spikeGpu } from "./spikeHarness";
-import { defaultSpikeWorkers, type SpikeListeners } from "./spikeRun";
+import { defaultSpikeWorkers, type SpikeListeners, type SpikeWorkers } from "./spikeRun";
 
 /** Props of {@link SpikeApp}. */
 export interface SpikeAppProps {
@@ -16,6 +16,8 @@ export interface SpikeAppProps {
   readonly spike: SpikeApi;
   /** `window.hyperion.graphics`. */
   readonly graphics: GraphicsApi;
+  /** The spike's workers: the browser's by default, fakes in a test. */
+  readonly spikeWorkers?: SpikeWorkers | undefined;
 }
 
 /** The run's measured engine, its control and its listeners, made once. */
@@ -42,10 +44,13 @@ function makeHarness(spike: SpikeApi): Harness {
     spike,
     gpu,
     capture,
-    canvas: () => ({
-      widthPx: Math.round(window.innerWidth * window.devicePixelRatio),
-      heightPx: Math.round(window.innerHeight * window.devicePixelRatio),
-    }),
+    // The main view's own canvas, whose drawing size the engine sets in device pixels.
+    canvas: () => {
+      const main = document.querySelector<HTMLCanvasElement>(
+        `canvas[aria-label="${MAIN_VIEW_NAME}"]`,
+      );
+      return { widthPx: main?.width ?? 0, heightPx: main?.height ?? 0 };
+    },
     log: (message, error) => {
       console.error(`descent spike: ${message}`, error);
     },
@@ -55,11 +60,22 @@ function makeHarness(spike: SpikeApi): Harness {
     gpu: {
       ...gpu,
       source: {
-        requestAdapter: gpu.source.requestAdapter,
+        requestAdapter: async () => {
+          const outcome = await gpu.source.requestAdapter();
+          if (outcome.kind !== "adapter") {
+            controller.fail(`no GPU adapter (${outcome.kind})`);
+          }
+          return outcome;
+        },
         load: async (outcome, status) => {
-          const engine = await load(outcome, status);
-          controller.engine(engine);
-          return engine;
+          try {
+            const engine = await load(outcome, status);
+            controller.engine(engine);
+            return engine;
+          } catch (error: unknown) {
+            controller.fail("the engine could not be made", error);
+            throw error;
+          }
         },
       },
     },
@@ -84,6 +100,9 @@ function makeHarness(spike: SpikeApi): Harness {
       onSelect: (input) => {
         controller.select(input);
       },
+      onFailed: (status) => {
+        controller.fail(status);
+      },
     },
   };
 }
@@ -94,9 +113,18 @@ function makeHarness(spike: SpikeApi): Harness {
  * between the descent's start and end, and the run ended with its results file or, for `--smoke`,
  * its status.
  */
-export function SpikeApp({ spike, graphics }: SpikeAppProps) {
+export function SpikeApp({ spike, graphics, spikeWorkers }: SpikeAppProps) {
   const [harness] = useState(() => makeHarness(spike));
   const { launch } = spike;
+  // A launch that can have no view asks for no adapter (`useViewEngine`), so nothing else would
+  // end its run: the safe mode and a renderer without WebGPU end it as failed at once.
+  useEffect(() => {
+    if (graphics.launchMode === "safe") {
+      harness.controller.fail("the graphics safe mode draws no WebGPU view");
+    } else if (navigatorGpu() === undefined) {
+      harness.controller.fail("this renderer has no WebGPU");
+    }
+  }, [harness, graphics]);
   // A run left by a closed window ends its capture's hold on the canvases.
   useEffect(() => () => harness.capture?.dispose(), [harness]);
   return (
@@ -108,6 +136,7 @@ export function SpikeApp({ spike, graphics }: SpikeAppProps) {
         workers={launch.workers ?? defaultSpikeWorkers(navigator.hardwareConcurrency)}
         variant={harness.variant}
         engineSource={harness.gpu.source}
+        spikeWorkers={spikeWorkers}
         listeners={harness.listeners}
       />
     </GraphicsStatusProvider>

@@ -49,7 +49,7 @@ const READOUT_INTERVAL_MS = 250;
 export const TEST_PLANET_STATEMENT = "TEST PLANET: provisional, dry and hand-parameterised";
 
 /** The main view's accessible name: its class, its style and its camera. */
-const MAIN_VIEW_NAME = "VIEW, SPIKE LIT, SCRIPTED";
+export const MAIN_VIEW_NAME = "VIEW, SPIKE LIT, SCRIPTED";
 
 /** The status where the terrain could not be measured; the cause goes to the log. */
 const NOT_MEASURED = "TERRAIN NOT MEASURED: surface query failed, relaunch to retry";
@@ -346,9 +346,11 @@ export function DescentSpike({
         if (!life.ended) {
           if (error instanceof DescentRefused) {
             console.error("the descent spike refuses to fly:", error);
+            inputsRef.current.listeners?.onFailed?.(DESCENT_REFUSED);
             setPreparation({ kind: "refused" });
           } else {
             console.error("the descent spike's terrain could not be measured:", error);
+            inputsRef.current.listeners?.onFailed?.(NOT_MEASURED);
             setPreparation({ kind: "failed" });
           }
         }
@@ -392,6 +394,7 @@ export function DescentSpike({
       );
     } catch (error: unknown) {
       console.error("the descent spike's views could not be made:", error);
+      inputsRef.current.listeners?.onFailed?.(VIEWS_NOT_MADE);
       // The engine's refusal is the external system's answer, known only once the canvases exist.
       // oxlint-disable-next-line react/set-state-in-effect
       setDrawFault(VIEWS_NOT_MADE);
@@ -404,6 +407,7 @@ export function DescentSpike({
     const fail = (what: string, error: unknown): void => {
       console.error(`the descent spike's ${what} failed:`, error);
       life.failed = true;
+      inputsRef.current.listeners?.onFailed?.(VIEWS_NOT_MADE);
       if (!life.ended) {
         setDrawFault(VIEWS_NOT_MADE);
         setPublished(null);
