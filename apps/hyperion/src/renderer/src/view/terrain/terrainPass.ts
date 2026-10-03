@@ -10,7 +10,8 @@
  * more than {@link RESELECT_FRACTION} of the distance to the nearest selected patch that is not at
  * the finest level. It selects at τ ÷ (1 + {@link RESELECT_FRACTION}), so that the drawn error
  * stays within τ between runs, and with a budget of half the cache's slots (4b). The draw set is
- * resolved, and the instance and contact records written, every frame into buffers made once.
+ * resolved when selection runs, in place by one `DrawSetResolver` per cache, and the instance and
+ * contact records are written every frame into buffers made once.
  *
  * Positions follow R02's differencing: patch origins and contacts are body-fixed `f64`, rotated
  * into the body's non-rotating axes, less the camera in those axes, and narrowed once into the
@@ -30,7 +31,7 @@ import {
   type TerrainConditions,
   terrainConditions,
 } from "./annunciation";
-import { type DrawSet, PatchCache, resolveDrawSet } from "./cache";
+import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { terrainMaterialSpec } from "./gpu/material";
 import { type TerrainLayout, TerrainResources } from "./gpu/resources";
 import { ContactRecords, InstanceRecords } from "./gpu/uniforms";
@@ -108,6 +109,10 @@ export interface TerrainFrameInput {
 export interface TerrainFrame {
   /** The instanced draw, or `null` before the material is ready or with nothing to draw. */
   readonly draw: DrawItem | null;
+  /**
+   * The pass's one draw set, rewritten in place when selection next runs: read it before the next
+   * {@link TerrainPass.frame} call, or copy it.
+   */
   readonly drawSet: DrawSet;
   readonly selection: Selection;
   /** Whether this frame ran selection. */
@@ -130,6 +135,8 @@ export interface TerrainPassOptions {
 interface Device {
   readonly resources: TerrainResources;
   readonly cache: PatchCache;
+  /** Resolves the cache's draw set in place, allocating nothing after warm-up (one per cache). */
+  readonly resolver: DrawSetResolver;
   readonly pool: TerrainPool;
   readonly offBaked: () => void;
   readonly instances: InstanceRecords;
@@ -318,6 +325,7 @@ export class TerrainPass {
     const device: Device = {
       resources: made,
       cache,
+      resolver: new DrawSetResolver(cache),
       pool,
       offBaked: pool.onBaked((bake) => {
         this.#store(device, bake);
@@ -430,14 +438,15 @@ export class TerrainPass {
       this.#morph[2 * level + 1] = end;
     }
     const device = this.#device;
-    const drawSet = resolveDrawSet(selection, device.cache);
+    // The same object every selection, rewritten in place; unseen forced patches are pinned by
+    // `retain` but not drawn.
+    const drawSet = device.resolver.resolve(selection);
     device.cache.retain(selection, drawSet);
     const limited = terrainConditions(drawSet, selection, selection);
     const conditions: TerrainConditions = {
       streaming: limited.streaming,
       // The low setting is coarser than the high one wherever terrain is drawn (Design note 26).
-      detailLimited:
-        limited.detailLimited || (this.#setting === "low" && drawSet.patches.length > 0),
+      detailLimited: limited.detailLimited || (this.#setting === "low" && drawSet.count > 0),
     };
     const grounded = input.grounded.map((c) => ({
       positionM: { ...c.positionM },
@@ -476,6 +485,7 @@ export class TerrainPass {
     const [r0, r1, r2] = input.view.rotation.rows;
     const morph = this.#morph;
     instances.clear();
+    // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`).
     for (const { patch } of drawSet.patches) {
       // R · origin − camera, component by component, so that a frame makes no vector a patch.
       const o = patch.originM;
