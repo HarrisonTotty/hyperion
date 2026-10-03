@@ -1,9 +1,20 @@
-//! The sky as an observer sees it (rendering plan R06): which stars are visible from a place and
-//! a time, how bright and what colour they are, the light of those too faint to list, and the
-//! discs of the observer's own stars.
+//! The sky an observer sees: which stars the galaxy holds brighter than a limit, how bright and
+//! what colour each appears at its retarded time, the unresolved band of the rest, and the
+//! naked eye's limit per direction (rendering plan R06).
 //!
-//! Everything here reads the galaxy and the committed tables and only reads: no output of the
-//! generator depends on it, and it opens no random stream.
+//! - [`eye`]: the naked eye's threshold against a background (Crumey 2014, eq. 34, with its colour
+//!   corrections) and the veiling glare of bright stars (CIE 146:2002), and [`MAX_CUT_V`], the
+//!   deepest cut a sky is asked to.
+//! - [`colour`]: a star's colour, photopic flux, scotopic ratio, camera band term, reddening and
+//!   bake spectrum from its temperature and gravity (the fitted `star_colour` table).
+//! - [`disc`]: the observer's own stars as limb-darkened discs (the fitted `limb_darkening`
+//!   table).
+//!
+//! Everything here only reads the galaxy: nothing changes generated output, and nothing draws a
+//! random word.
 
 pub mod colour;
 pub mod disc;
+pub mod eye;
+
+pub use eye::{EyeObserver, MAX_CUT_V, REFERENCE_SP_RATIO};
