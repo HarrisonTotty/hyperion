@@ -26,6 +26,8 @@ const CAPABILITIES: GpuCapabilities = {
   depthClipControl: false,
   maxTextureDimension2D: 8192,
   subgroupMinSize: null,
+  maxStorageBufferBindingSize: 134_217_728,
+  maxBufferSize: 268_435_456,
 };
 
 const WITH_SUBGROUPS: GpuCapabilities = { ...CAPABILITIES, subgroups: true, subgroupMinSize: 4 };

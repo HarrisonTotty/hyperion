@@ -35,7 +35,7 @@ export interface GraphicsLaunchOptions {
  * The switches whose value is a comma-separated list, which Chromium reads from the last copy on
  * the command line only, so that ours are merged into any value already there.
  */
-const LIST_SWITCHES: ReadonlySet<string> = new Set([
+export const LIST_SWITCHES: ReadonlySet<string> = new Set([
   "enable-features",
   "disable-features",
   "enable-dawn-features",

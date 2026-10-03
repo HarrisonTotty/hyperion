@@ -1,0 +1,1 @@
+table1.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/124/140/table1.dat

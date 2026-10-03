@@ -1,0 +1,16 @@
+uka0v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/uka0v.dat.gz
+ukb0v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukb0v.dat.gz
+ukf5v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukf5v.dat.gz
+ukg2v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukg2v.dat.gz
+ukg8iii.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukg8iii.dat.gz
+ukk0iii.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukk0iii.dat.gz
+ukk0v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukk0v.dat.gz
+ukk5v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukk5v.dat.gz
+ukm0v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukm0v.dat.gz
+ukm2v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukm2v.dat.gz
+ukm3iii.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukm3iii.dat.gz
+ukm3v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukm3v.dat.gz
+ukm4v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukm4v.dat.gz
+ukm5v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukm5v.dat.gz
+ukm6v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/ukm6v.dat.gz
+uko5v.dat https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/uko5v.dat.gz

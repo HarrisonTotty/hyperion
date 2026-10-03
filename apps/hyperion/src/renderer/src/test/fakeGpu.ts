@@ -654,6 +654,10 @@ export interface FakeAdapterOptions {
   readonly features: ReadonlyArray<GPUFeatureName>;
   /** Pixels on a side; WebGPU's default, 8192, when absent. */
   readonly maxTextureDimension2D?: number;
+  /** Bytes a storage binding may span; WebGPU's default, 128 MiB, when absent. */
+  readonly maxStorageBufferBindingSize?: number;
+  /** Bytes a buffer may hold; WebGPU's default, 256 MiB, when absent. */
+  readonly maxBufferSize?: number;
 }
 
 /**
@@ -674,6 +678,9 @@ export class FakeAdapter implements GPUAdapter {
     this.limits = {
       ...DEFAULT_LIMITS,
       maxTextureDimension2D: options.maxTextureDimension2D ?? DEFAULT_LIMITS.maxTextureDimension2D,
+      maxStorageBufferBindingSize:
+        options.maxStorageBufferBindingSize ?? DEFAULT_LIMITS.maxStorageBufferBindingSize,
+      maxBufferSize: options.maxBufferSize ?? DEFAULT_LIMITS.maxBufferSize,
     };
   }
 
@@ -684,7 +691,23 @@ export class FakeAdapter implements GPUAdapter {
         return Promise.reject(new TypeError(`the adapter lacks ${feature}`));
       }
     }
-    const device = new FakeDevice(this.info, required, this.limits);
+    // As the specification has it for the two buffer limits: the device gets WebGPU's default
+    // unless more is required, and a request beyond the adapter's rejects. (The other limits keep
+    // the adapter's, as every earlier test expects.)
+    const requiredLimits = descriptor?.requiredLimits ?? {};
+    const granted = { maxStorageBufferBindingSize: 0, maxBufferSize: 0 };
+    for (const name of ["maxStorageBufferBindingSize", "maxBufferSize"] as const) {
+      const asked = requiredLimits[name];
+      if (asked !== undefined && asked > this.limits[name]) {
+        return Promise.reject(new TypeError(`the adapter's ${name} is below ${asked}`));
+      }
+      granted[name] = asked ?? DEFAULT_LIMITS[name];
+    }
+    const device = new FakeDevice(this.info, required, {
+      ...DEFAULT_LIMITS,
+      maxTextureDimension2D: this.limits.maxTextureDimension2D,
+      ...granted,
+    });
     if (this.#consumed) {
       device.loseDevice("unknown", "the adapter was already consumed");
     }

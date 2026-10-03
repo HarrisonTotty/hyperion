@@ -107,6 +107,7 @@ pub struct StarColour { /* chroma: [f32; 2] (linear Rec. 709 r and g of unit lum
     lux_per_v0: f64, sp_ratio: f64, camera_band_mag: f64, extinction_ratio: [f64; 3],
     bake_spectrum: [f64; BAKE_WAVELENGTH_COUNT] (R08's ask; Design note 6) */ }
 pub const BAKE_WAVELENGTHS_NM: [f64; BAKE_WAVELENGTH_COUNT];   // R08's 15, mirrored (Design note 6)
+pub const CAMERA_ETA_SUN: f64;   // η☉, the default sensor's e⁻ per V-band photon for the Sun's row (Design note 18), ≈ 3.0
 pub enum AtmosphereGrid { MainSequence, Giant, WhiteDwarf }
 pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour;
 pub fn surface_gravity(mass: SolarMasses, radius: SolarRadii) -> f64;   // log₁₀ g, cgs
@@ -480,7 +481,9 @@ holds.
    Eq. 34 has no absolute threshold: as B → 0, ΔI tends to F(√a₁ + a₄)² B^½ and the limit
    diverges (V 15.3 at μ 40), and Blackwell's data constrain nothing below about 10⁻⁵ cd/m²
    (researched 2026-09-29; low confidence on that bound). So the background is clamped at μ 27
-   (F = 1.4, colour-corrected: 8.64), beyond which no texel's limit deepens.
+   (F = 1.4, colour-corrected: 8.64), beyond which no texel's limit deepens. _Decided 2026-10-02
+   (Risks, "The eye's darkest background"): Crumey's own clamp, a colour-corrected 10⁻⁵ cd m⁻²,
+   limit 7.99 at F = 1.4, reached at μ 25.6 in starlight._
 3. **The colour corrections.** The background is taken to Blackwell's 2,850 K light by B_equiv =
    (ρ₀ ÷ 1.408) B, with ρ₀ the band texel's scotopic-to-photopic ratio from the colour table (2.26
    for starlight gives the brainstorm's 0.4–0.5 mag; 0.51 computed). Each star's threshold moves by
@@ -508,9 +511,9 @@ holds.
    Design note 2; Leinert et al. 1998, A&AS 127, 1, for integrated starlight near μ 23.8 at the
    galactic pole): a coarse band pre-pass, `band_rows` from the luminosity tables alone at 16²
    texels a face with no census and a provisional cut of 7.85, gives each texel's background; the
-   eye's cut is then the colour-corrected Crumey limit at the darkest texel (μ clamped at 27) plus
+   eye's cut is then the colour-corrected Crumey limit at the darkest texel (clamped as Design note 2 says; 7.99 at most since 2026-10-02) plus
    the largest colour offset, +0.45 mag for a hot star, plus a pad of 0.1 mag, so at most about
-   9.2. If that cut is deeper than the provisional one the pre-pass runs once more at it; raising
+   9.2 (8.54 under the 2026-10-02 clamp). If that cut is deeper than the provisional one the pre-pass runs once more at it; raising
    the cut removes stars from the band only slightly, so one repeat converges. Glare is left out of
    the pre-pass, which is conservative, since glare only makes limits shallower. Near the Sun the
    rule gives about 7.4 + 0.45 + 0.1 at μ 24.3; the fixed 7.85 alone would be too shallow wherever
@@ -523,8 +526,11 @@ holds.
    against the CIE 1931 2° functions and the CIE 1924 V(λ) and 1951 V′(λ) (CIE datasets, CC BY-SA
    4.0, credited): chroma in linear Rec. 709 with a D65 white, desaturated towards white out of
    gamut (Walker's method); `lux_per_v0`, the photopic illuminance of a V = 0 star of that spectrum
-   over 2.54 µlx; ρ; the camera band term, the default sensor's electrons per V-band photon as a
-   magnitude; and each display channel's A_c ÷ A_V at R_V = 3.1 through plan 07's `extinction_ratio`
+   over 2.54 µlx; ρ; the camera band term, −2.5 log₁₀(η ÷ η☉), where η = ∫S·QE·λ dλ ÷ ∫S·R_V·λ dλ
+   is the default sensor's electrons per V-band photon (R_V Bessell and Murphy 2012's photonic V,
+   peak 1, which gives Φ₀ of Design note 18) and η☉ = `CAMERA_ETA_SUN`, the same quantity for the
+   table's 5,772 K, log g 4.438 row (so the Sun's term is 0; +0.11 at O5V, −0.70 at M2V, −2.14 at
+   M6V, about −3 at 2,300 K; decision-camera-eta.md); and each display channel's A_c ÷ A_V at R_V = 3.1 through plan 07's `extinction_ratio`
    at the channel's effective wavelength for that spectrum. For R08's spectral bakes (its Design
    note 5) each row also carries `bake_spectrum`, the spectrum's average over each of
    `BAKE_WAVELENGTH_COUNT` (15) bins of R08's `BAKE_WAVELENGTHS_NM`, normalised to unit photopic
@@ -681,8 +687,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
 17. **The wire.** A star is 24 bytes, little-endian: its unit direction from the observer as three
     `f32` (12; 0.012″ of rounding), its distance in light-years as `f32` (4; parallax sprites need
     it), its apparent V after extinction as `i16` millimagnitudes (2), its chroma after reddening as
-    two `u16` fractions (4), its eye colour offset and its camera band term as `i8` centimagnitudes
-    (2). A band texel is 12 bytes: luminance `f32`, chroma two `u16`, eye limit `i16`
+    two `u16` fractions (4), its eye colour offset as `i8` centimagnitudes and its camera band term
+    as `i8` in units of 1/32 mag, rounded half away from zero and saturating at −4.0 and +3.97 (2).
+    A band texel is 12 bytes: luminance `f32`, chroma two `u16`, eye limit `i16`
     millimagnitudes at the request's F (`i16::MIN` where the eye was not asked), and its ρ as `u16`
     × 10⁻⁴. Stars then texels form the response's one bulk payload, announced by R03's
     `BulkManifestDto` (with the response's `stars_bytes` and `band_bytes` splitting it) and carried
@@ -700,23 +707,29 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     view's field of view on a 36 mm sensor, N_b the sky's electrons per pixel (from the band texel)
     plus dark current and read noise, σ_r² = σ_pre² + (σ_post S_base ÷ S)², and the exposure
     triple's aperture, shutter and sensitivity from R02's exposure model, sensitivity as gain.
-    Defaults: N = 1.4, t = 1/30 s, η = 1.8, σ_pre = 1.2 e⁻, 5 e⁻ at base ISO, f_pk = 0.35, k = 3,
+    Defaults: N = 1.4, t = 1/30 s, η☉ = 3.0 (`CAMERA_ETA_SUN`, 3.02 for the solar spectrum), σ_pre = 1.2 e⁻, 5 e⁻ at base ISO, f_pk = 0.35, k = 3,
     1,920 px across the 36 mm sensor (18.75 µm pixels). η is electrons per V-band-equivalent
-    photon, not a quantum efficiency: an unfiltered silicon sensor collects about 400–950 nm at a
-    quantum efficiency near 0.5, so η ≈ 1.5–2 for a solar-type star; it is the same quantity as
-    Design note 6's camera band term, which sets it per spectrum. A Bayer green pixel would be η ≈
-    0.5–0.7, about 1.2 mag shallower. At 60° the sky gives only about 3.5 e⁻ a pixel, so read
+    photon, not a quantum efficiency; a star's is η☉ × 10^(−0.4 c) with c its camera band term
+    (Design note 6), and the sky's electrons use η☉. The default sensor is unfiltered
+    back-illuminated silicon, QE(λ) = 0.60 (1 − e^(−α(λ) 16 µm)) over 400–1,100 nm with α from Green
+    2008 (Sol. Energ. Mat. Sol. Cells 92, 1305; values via the CC0 refractiveindex.info database):
+    peak 0.60, 0.45 at 800 nm, 0.13 at 950 nm. Its Sun-relative terms match Gaia's measured
+    G−V(V−I) relation (Riello et al. 2021, A&A 649, A3, Table 5.7 of the EDR3 documentation) to 0.03
+    mag from O5V to M6V on Pickles 1998's spectra (re-computed 2026-10-02; decision-camera-eta.md).
+    A Bayer green pixel behind an IR cut would be η ≈ 0.5–0.7, about 1.6–1.8 mag shallower. At 60°
+    the sky gives only about 6 e⁻ a pixel, so read
     noise sets the limit, and since the aperture is f ÷ N with f = 18 mm ÷ tan(fov ÷ 2) the signal
-    grows as f². The defaults give V 9.4–9.55 at 60° over μ 22.4–24, 11.1–11.2 at 30° and 12.9–13.1
-    at 13° at high gain (8.8, 10.5 and 12.3 at base ISO); a 1/2.3″ sensor at 60° reaches only V
-    3.8–5.8 (re-checked 2026-09-29, high confidence on the arithmetic). The model gives V 5.5–6.1
-    for Global Meteor Network hardware (IMX291, 4 mm f/0.95, Earth's sky at μ 21, 25 fps), against
-    Vida et al. 2021's measured +6.0 ± 0.5, and 7.1–7.7 for CAMS (12 mm f/1.2) against Jenniskens
-    et al. 2011's +5.4 (Icarus 216, 40), so it is optimistic for old analogue cameras (medium
-    confidence). A bright planet in frame takes the limit to about V 2–3 only when about 12 of 21
+    grows as f². The defaults give V 9.85–10.1 at 60° over μ 22.4–24, 11.5–11.75 at 30° and
+    13.4–13.6 at 13° at high gain (9.4, 11.05 and 12.9 at base ISO; re-computed 2026-10-02 with η☉
+    3.02, the model reproducing the earlier figures exactly at 1.8); a 1/2.3″ sensor at 60° reaches
+    only V 3.8–5.8 (at η 1.8; re-checked 2026-09-29, high confidence on the arithmetic). The model
+    gives about V 6.1–6.7 for Global Meteor Network hardware (IMX291, 4 mm f/0.95, Earth's sky at μ 21, 25 fps), against
+    Vida et al. 2021's measured +6.0 ± 0.5, and 7.7–8.3 for CAMS (12 mm f/1.2) against Jenniskens
+    et al. 2011's +5.4 (Icarus 216, 40), so it is optimistic for old analogue cameras by about 2.5
+    mag (medium confidence). A bright planet in frame takes the limit to about V 2.5–3.5 only when about 12 of 21
     stops come from gain, which raises read noise in electrons (σ_post S_base ÷ S) rather than
     cutting photons, and 9 from shutter and aperture (6.8 mag); 21 stops all from photons would give
-    about −6.4. The brainstorm's "about V 10" is the 60° figure to half a magnitude; the plan's
+    about −5.9. The brainstorm's "about V 10" is the 60° figure to 0.1 mag; the plan's
     figure is always stated with the field of view.
 19. **Humphreys–Davidson, protostars and giants: the leans handed to plan 06** (researched
     2026-09-29, a physics ruling left to plan 06). The cause of the excess is in the code: under the
@@ -871,11 +884,19 @@ surface_gravity, StarColour, AtmosphereGrid}`, bilinear in log T_eff and log g w
   `sky/colour.rs`, `crates/hyperion-fit/tables.lock`. Acceptance: `cargo test -p hyperion-sim
 sky::colour` and `just fit-check`.
 - **R06.T3.c The camera, reddening and bake columns.** The default sensor's response for
-  `camera_band_mag` (Design notes 6 and 18: η per spectrum), each channel's `extinction_ratio`, and
+  `camera_band_mag` (Design notes 6 and 18: η per spectrum), relative to `CAMERA_ETA_SUN`, which the
+  fit emits, from the default sensor of Design note 18 (Green 2008's k for silicon, CC0, committed
+  as an input with its citation and a `NOTICE` "Data" line), each channel's `extinction_ratio`, and
   `bake_spectrum` at `BAKE_WAVELENGTHS_NM` normalised to unit photopic illuminance (Design note 6);
   the task's revision is bumped and the table re-fitted. Tests: the 15-bin illuminance of every row
-  is 1 lx to 10⁻⁶ and within 1% of the exact integral; η for a 5,772 K spectrum lies in 1.5–2;
-  `sky::colour::BAKE_WAVELENGTHS_NM` equals R08's constant (a fixture both sides read). Acceptance:
+  is 1 lx to 10⁻⁶ and within 1% of the exact integral; `CAMERA_ETA_SUN` lies in 2.9–3.15 and the
+  5,772 K, log g 4.438 row's `camera_band_mag` is 0 to 10⁻⁹; Pickles 1998's O5V, A0V, K5V, M2V, M5V
+  and M6V integrated by the same code give +0.11, +0.14, −0.30, −0.70, −1.58 and −2.14 ± 0.05; for
+  Pickles dwarfs O5V–M6V the Sun-relative term lies within 0.1 mag of Riello et al. 2021's
+  G−V(V−I_C) polynomial (coefficients −0.01597, −0.02809, −0.2483, 0.03656, −0.002939), V−I
+  synthetic through Bessell and Murphy 2012's I; every row's term lies in [−4.0, +3.97];
+  `sky::colour::BAKE_WAVELENGTHS_NM` equals R08's constant (a fixture both sides read). Files:
+  `crates/hyperion-fit/data/green2008_si/{Green-2008.yml,PROVENANCE.toml}`. Acceptance:
   `cargo test -p hyperion-fit star_colour`, `cargo test -p hyperion-sim sky::colour`,
   `just fit-check`.
 
@@ -1012,8 +1033,8 @@ hyperion-sim sky::band`.
   a V = −1.5 star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of
   the listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`.
 - **R06.T9.d The eye's cut.** `sky::limits::eye_cut` (Design note 5): the coarse pre-pass at 16²
-  texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit clamped at
-  μ 27, +0.45 and +0.1, and one repeat when the cut deepens. Tests: near the Sun the cut is 7.96 ±
+  texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit, clamped by
+  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), +0.45 and +0.1, and one repeat when the cut deepens. Tests: near the Sun the cut is 7.96 ±
   0.15; no texel of the full limit map, with glare, is deeper than the cut less the 0.45 colour
   offset; the repeat changes the cut by under 0.05 mag. Acceptance: `cargo test -p hyperion-sim
 sky::limits`.
@@ -1041,7 +1062,8 @@ bindings.
 Tests: the wire forms of request and response; a hand-built star and texel encoded in Rust to
 pinned bytes, byte for byte, and the same pinned bytes decoded in TypeScript to the same values
 bit for bit, as R03.T10.a and T11 pin the header; `stars_bytes + band_bytes = bulk.bytes`; a
-truncated payload is an error naming its length. Acceptance: `cargo test -p hyperion-protocol
+truncated payload is an error naming its length; a camera band term of −3.1 encodes to −99 and
+decodes to −3.09375 exactly, and −4.5 saturates to −128. Acceptance: `cargo test -p hyperion-protocol
 sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protocol test`,
 `just ci`.
 
@@ -1103,10 +1125,12 @@ mag; stale on link loss; the worker's decode equals the main-thread decoder's. A
 ### R06.T13 Drawing the sky
 
 - **R06.T13.a Per-view limits and culling.** `cameraLimitV` over R02's `ExposureTriple` and
-  `DEFAULT_VIEW_CAMERA` (Design note 18), the cull and the band hand-off (Design note 20), each
-  star's display luminance from its V through R02's `illuminanceLx` and `pixelLuminance` at 2.54
-  µlx and the pixel's true solid angle. Tests: 60°, 30° and 13° give 9.5, 11.1 and 13.0 ± 0.3 in a
-  dark sky at high gain; 21 stops of exposure, 12 of them gain, lower the limit by at least 5 mag;
+  `DEFAULT_VIEW_CAMERA` (Design note 18; its `etaSun` equals `CAMERA_ETA_SUN` through a fixture
+  both sides read), the cull (a star is in a camera's view when V + its camera band term is
+  brighter than the limit) and the band hand-off (Design note 20), each star's display luminance
+  from its V through R02's `illuminanceLx` and `pixelLuminance` at 2.54 µlx and the pixel's true
+  solid angle. Tests: 60°, 30° and 13° give 9.95, 11.65 and 13.5 ± 0.3 in a dark sky at high gain
+  (9.4, 11.05, 12.9 ± 0.3 at base ISO); 21 stops of exposure, 12 of them gain, lower the limit by at least 5 mag;
   the limit falls with a brighter band texel; culled flux arrives in the band layer to 10⁻⁶
   relative. Files: `view/sky/{cameraLimit,cull,photometry}.ts`. Acceptance: `pnpm --filter
 hyperion exec vitest run src/renderer/src/view/sky`.
@@ -1353,6 +1377,38 @@ plan reserves no tag, prefix or stream.
   once the sky has arrived; the "Views" class gains the rule that the star limit is always a V magnitude with
   its kind, with any stand-in after a middle dot, and a paragraph that the unresolved band is
   labelled and drawn only in the photorealistic style. **Awaiting the owner's sign-off.**
+- **Deviations in T13.b, as built (2026-10-02).** A fourth file, `view/sky/cube.ts`, holds what
+  the CPU splat, the mips and T13.g's WGSL share: `cubeTexelOf` (WebGPU's face order and (u, v)
+  orientation, ties to x then y then z) and `texelSolidAnglesSr` (the exact atan2 texel area). The
+  splat's point layout is pinned here for T13.g's GPU splat: `SPLAT_POINT_FLOATS` (8), direction
+  (x, y, z, 0) then illuminance (r, g, b, 1) in lx, so alpha sums the count. `pack.ts` exports
+  `packRgb9e5`, `unpackRgb9e5`, `packRgb9e5Texels`, `RGB9E5_MAX`, `RGB9E5_MIN_POSITIVE`; `mips.ts`
+  exports `divideBySolidAngle`, `peakScaleExponent` (brightest channel to (2¹⁴, 2¹⁵]),
+  `scaleByPowerOfTwo`, `faceMipChain` (children weighted by their summed solid angle), `mipStep`,
+  `mipSizes` and `cubeLevels` (faces joined for `writePackedCubeLevel`). The extension gives no
+  worked numbers; the tests pin its limits (65,408, 2⁻²⁴, 1.0 = exponent 16 mantissa 256) and the
+  round-up case (0.99999 packs as 1.0).
+- **Deviations in T10, as built (2026-10-02).** The wire's chroma (stars and texels) is the
+  linear Rec. 709 chromaticity r ÷ (r + g + b), g ÷ (r + g + b), each in [0, 1] as Design note
+  17's `u16` fractions require, not `StarColour::chroma`'s "r and g of unit luminance", which
+  exceeds 1 for red and blue stars; the client recovers unit luminance by dividing by
+  0.2126 r + 0.7152 g + 0.0722 b, and T11 converts. `HostDiscDto.chroma` keeps the pinned
+  `StarColour` meaning. Shapes the plan left open: `EyeDto` (`field_factor`, `age_years`,
+  `pigmentation`); `ConeDto` (`axis: [f64; 3]`, `half_angle_deg`); `BandSpecDto`
+  (`face_texels`); `SkyGapDto` (`feature_members`, `centre_members`, `white_dwarfs`);
+  `SkyLayerCensusDto` (`layer`, `cap_ly`, `rule_bound_ly`, `expected_beyond`, `cells`,
+  `candidates_opened`, `accepted`, `listed`, `without_photometry`, `feature_members_absent`; the
+  two `u64` counts as JSON numbers); `ResponseBody::Sky` is boxed. Constants beside `MAX_CUT_V`:
+  `MAX_SKY_STARS` (3 × 10⁵, the default and cap of `n_max`), `SKY_STAR_BYTES`,
+  `SKY_TEXEL_BYTES`, `SKY_BAKE_BINS` (15), restated in `packages/protocol/src/sky.ts` as R03's
+  frame constants are. The server's encoder takes `SkyStarWire` and `SkyTexelWire` and returns
+  `EncodedSky` (`bytes`, `stars_bytes`, `band_bytes`); quantised fields round to nearest and clamp
+  to their integer's range (NaN as 0), and an eye limit never takes the `i16::MIN` sentinel. The
+  decoders return a result union (`SkyDecoded<T>`) of struct-of-arrays (`SkyStars`, `SkyBand`,
+  eye limit NaN where absent), and `splitSkyPayload(payload, response)` splits by `stars_bytes`
+  and `band_bytes`. Until T11 the server answers `sky` with `unsupported` under its own ID, as it
+  does `body_events`. The camera band term is Sun-relative and travels in 1/32 mag
+  (decision-camera-eta.md, applied here): `thirty_seconds` in the encoder, ÷ 32 in the decoder.
 - **The luminosity function ignores binary evolution.** T5's quadrature, like `mean_present_mass`,
   treats primaries and companions as single stars, while the census since P11.T11 reads
   pair-evolved states. The band's faint light is unaffected to first order; blue stragglers and
@@ -1385,15 +1441,20 @@ plan reserves no tag, prefix or stream.
 - **The camera model's defaults** are a full-frame video camera of today at high gain; open
   question 16 leaves its parameters open, and the performance runs and the owner's sense of the
   main screen may move them. They are one table in `cameraLimit.ts`. The model is optimistic for
-  old analogue cameras by about 2 mag (CAMS, Design note 18), and the split of a large exposure
+  old analogue cameras by about 2.5 mag (CAMS, Design note 18), and the split of a large exposure
   change between gain and photons is R07's metering, which sets how far a bright planet takes the
-  limit (V 2–3 under Design note 18's split).
+  limit (V 2.5–3.5 under Design note 18's split).
+- **The camera cut is in V.** The census and `camera_limit_v` cut in V, so a star redder than the
+  Sun that only its camera band term lifts over a camera's limit is not listed (a late M dwarf up
+  to 2–3 mag below the cut); its light is in the band. Padding the flux bound by the most negative
+  term would cost more census than those stars are worth (decision-camera-eta.md).
 - **Binaries.** The flux bound and the envelope are exact for single-star systems today; once plan
   11 wires binary evolution in, R06.T16.b must land with it or the census can miss blue
   stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the candidates above 0.5 M☉, the
   research's estimate) is T17's to measure.
-- **The eye's cut** rests on Crumey's eq. 34 at the darkest pre-pass texel, clamped at μ 27 where
-  Blackwell's data give no constraint; a view darker than μ 27 is drawn to the clamp's limit.
+- **The eye's cut** rests on Crumey's eq. 34 at the darkest pre-pass texel, clamped at a
+  colour-corrected 10⁻⁵ cd m⁻² where Blackwell's data give no constraint (decided 2026-10-02; μ 25.6
+  in starlight); a view darker than that is drawn to the clamp's limit, 7.99 at F = 1.4.
 - **`float32-blendable`.** The GPU splat needs it; without it the CPU splat is exact but slower,
   and a bake on the high setting's 3,072² faces on the CPU is unmeasured (T17 records it).
 - **No zodiacal light**, because plan 14 has no zodiacal cloud; inside a dusty system the background
@@ -1424,3 +1485,148 @@ plan reserves no tag, prefix or stream.
   plan's scope: it adds a second committed table from the same unlicensed grid at full resolution,
   which waits on the owner's data-licence ruling. The interim for R08's curves of growth is R08's to
   choose; the ask stays open in the roadmap's between-plans table (R06 owner, R08 asking).
+- **Deviations in T1, as built.** None: the R06 row of galaxy plan 04's reserved kinds and plan 06's
+  "Asked by rendering plan R06" heading with A1–A4 are drafted for the galaxy plans' owner
+  (`fb5b47c`).
+- **Deviations in T6.a, as built.** `generate_cell_where` draws each candidate's mass through
+  `placement::record::candidate_mass` (factored out of `SystemRecord::of_candidate` with the same
+  calls) and evaluates a kept candidate whole, drawing its mass word a second time. The 500-cell
+  test passes over cells within 2,000 ly of the centre, whose 10⁵ systems would take a debug build
+  minutes, and takes one bulge cell at 3,000 ly instead; it covers the five stellar and two
+  substellar layers at ten floors.
+- **Deviations in T3, as built** (rulings of 2026-10-02 by delegated decision, R06.T3 lane).
+  - _Sources._ ATLAS9, TLUSTY OSTAR2002, Koester's DA and TMAP spectra are the Spanish Virtual
+    Observatory's ASCII copies (collections `Kurucz2003` at [M/H] 0, `tlusty_ostarbin` at Z/Z0 1,
+    `koester2` at log g 6.5–9.5 by 0.5, `tmap` at He mass fraction 0 and 0.3); PHOENIX is the
+    Göttingen HiRes FITS. Levenhagen 2017 is not used (the plan's "Koester or Levenhagen"). The
+    grids: not white dwarfs, PHOENIX 2,300–3,400 K, ATLAS9 3,500–27,000 K, TLUSTY 27,500–55,000 K,
+    TMAP H+He (Y 0.3) 60,000–100,000 K, a blackbody at 120,000–500,000 K, log g 0–6 by 0.5; white
+    dwarfs, Koester 5,000–80,000 K, TMAP pure H at 90,000 and 100,000 K, the blackbody beyond, log
+    g 6.5–9.5 by 0.5. A node a model set does not hold takes the nearest gravity it holds at that
+    temperature (448 nodes in the first grid, 2 in the second). `AtmosphereGrid::MainSequence` and
+    `Giant` read the same grid, which spans log g 0–6.
+  - _Licences_ (decisions-r05.md item 4). Every spectral grid, Bessell and Murphy's V (also needed
+    as a fetched dataset, `bessell_murphy_2012`), Pickles' library (`pickles1998`, sixteen files)
+    and the three limb-darkening catalogues are fetched with checksums (`PROVENANCE.toml` and
+    `urls.txt` committed); the CIE tables (`cie_cmf`, CC BY-SA 4.0, CRLF kept, excluded from the
+    line-ending hook) and Green 2008's silicon (`green2008_si`, CC0, excluded from Prettier) are
+    committed raw; `NOTICE` gains a Data entry for the CIE. The smoke manifest needs only committed
+    data: a blackbody at every node and the photopic V(λ) standing in for the V band.
+  - _The V zero point_ is BCP98's −21.100 (offset 0.000) applied to Bessell and Murphy's photonic
+    V; their own zero point would put V = 0 0.016 mag brighter (§7.2 Tables 3 and 5). Kept, so
+    every `lux_per_v0` is 0.016 mag lower than under BM12's own.
+  - _Corrected figures._ `lux_per_v0` runs 0 to +0.10 mag above 2.54 µlx from O5 to M6 (Pickles'
+    own spectra: O5V 0.000, K5V 0.100, M2V 0.093, M5V 0.074), not "within 0.08": the tests take
+    |m| < 0.11. The Pickles colour check holds Δ(u′, v′) < 0.005 for A0V, F5V, G2V, K0V (Mamajek's
+    2022.04.16 T_eff, log g from its masses and radii) and G8III (Pickles' own adopted 5,012 K), with
+    four measured exceptions in the table's header: O5V 0.0072 < 0.008 (Martins et al. 2005 Table 1,
+    41,540 K; it lies off the models' locus at every temperature, likely residual reddening), M3III
+    0.0113 < 0.012 (its colour is a 4,240 K model's), M2V 0.0057 < 0.007 at 3,560 K (best fit
+    3,260 K), K0III 0.0050 < 0.006 at Pickles' 4,853 K (best fit 5,050 K); and, restored to the
+    plan's list after review, K5V 0.0075 < 0.008 at Mamajek's 4,440 K (best fit 4,200 K, Pickles'
+    own 4,188 K), a fifth exception. Evaluating every spectrum at Pickles' own adopted T_eff was
+    tried (the orchestrator's re-ruling): it leaves four exceptions (M2V 0.0057, K0III 0.0050, O5V
+    0.0075, M3III 0.0113) and puts G2V at 0.0046, so the five-exception set on Mamajek's dwarf scale
+    was kept, as that ruling provided. An M dwarf is less red
+    than its blackbody by 0.019, 0.015 and 0.011 in CIE 1960 uv at 2,900, 3,000 and 3,100 K (0.008
+    at 3,200 K), so the test takes 2,900–3,100 K. Pickles' lux check runs to M6V (0.067 mag, in
+    bracket).
+  - _Review fixes and records._ T3.a–c were fitted and committed as one change, so `star_colour`
+    stays at revision 0 (there was no earlier table to bump from). `StarColour`'s fields are private
+    with getters, adding `blue()`, `red_green()` (the unrounded chroma; `chroma()` narrows to `f32`)
+    and `tables::star_colour::LUMINANCE_RGB`; `extinction_ratio()` is red, green, blue, the table's
+    column order, while `HostDisc`'s arrays are B, V, R, so a consumer building `HostDiscDto`
+    reverses it. log g stays a bare `f64` (`star_colour`, `limb_coefficients`, `HostDisc::log_g`,
+    `surface_gravity`) as Provides sketches it, not base's `Dex`. The fit's integration tests are
+    named `star_colour_*`, so `cargo test -p hyperion-fit star_colour` selects them; T3.b's Pickles
+    checks run there, not under `cargo test -p hyperion-sim sky::colour`. The fetched V band falls
+    back to the photopic stand-in only when it is not fetched (a file failing its hash is an
+    error). `NOTICE` carries Green 2008 as well as the CIE. Golden pins of `sky::colour` and
+    `sky::disc`'s interpolation are left to T17's goldens (determinism audit).
+  - _T3.c as built_ (decision-camera-eta.md). `CAMERA_ETA_SUN` is 2.9557 (the ATLAS9 grid's,
+    geometrically interpolated at 5,772 K and log g 4.438 so the Sun's interpolated term is 0 to
+    10⁻¹⁵; Pickles G2V gives 3.02), and the shared fixture
+    `packages/protocol/fixtures/camera_eta_sun.json` pins it for the client's `etaSun`. The term is
+    stored unrounded and saturated at the wire's −4.0 and +3.97: only PHOENIX's 2,300 K rows at log
+    g 0–0.5 (−4.02) reach it. A channel's effective wavelength weights the spectrum by the positive
+    part of its Rec. 709 colour-matching function; the ratio is plan 07's law at it over the law at
+    the V band's photon-weighted effective wavelength. `BAKE_WAVELENGTHS_NM` is pinned by
+    `packages/protocol/fixtures/bake_wavelengths_nm.json` (R08 unbuilt; its constant reads the same
+    file). The bake spectra are a second `static` per grid (`NORMAL_BAKE`, `WHITE_DWARF_BAKE`).
+  - _Shape._ The task is the module `tasks/star_colour/` (`columns`, `photometry`, `pickles`,
+    `spectrum`), slow class. The table's rows are `static` arrays of eight-column `[f64; 8]` (`r`,
+    `g`, `lux_per_v0`, `sp_ratio`, `camera_band_mag`, red, green and blue `A_c ÷ A_V`), the bake
+    spectra `[f64; 15]`, written as plain source text, comma-separated with no spaces and with
+    `unreadable_literal` allowed, so that the file (497 KB) stays under the repository's 500 KB
+    hook; `sky::colour` reads the columns by index.
+    The Pickles comparison, the M-dwarf check and the bake integrals are in
+    `crates/hyperion-fit/tests/star_colour.rs` (they need the fetched data and say so when it is
+    absent); the sim's `sky::colour` tests pin the committed table. `sky/mod.rs` was created here
+    (T2 had not landed); expect a trivial merge with T2's.
+- **Deviations in T4.a, as built.** `limb_darkening` is a fast task over three fetched VizieR
+  catalogues (`claret_southworth_2022` Table 3 at [M/H] 0 and 2 km/s, `claret_southworth_2023`
+  Table 9, the first truncation method M1, and `claret_2020_white_dwarfs` table gh, both stored
+  decompressed). Grids: PHOENIX-COND 2,300–3,900 K and ATLAS 4,000–50,000 K at log g 0–6 by 0.5
+  (ATLAS clamped above 5 and at each temperature's least gravity); white dwarfs DA in LTE
+  3,750–35,000 K and DA in non-LTE 40,000–100,000 K at log g 6.5–9.5 (the non-LTE grid's gaps,
+  such as log g 8.0, interpolated linearly in log g). Rows are `sky::disc::LimbRow` (c and α in
+  B, V, R) as `static` arrays. The solar row comes out c 0.7837, α 0.6884, disc average 0.7993.
+  The test "I(0.1) within 0.015 of Cox 2000's polynomial" is taken against Pierce and Slaughter
+  1977's quadratic at 5,522 Å (Table III, 0.390), the source of Cox's table, since Cox 2000 could
+  not be read; the power-2 law gives 0.377, inside the tolerance by 0.002, and the quadratic
+  itself overestimates the limb by about 0.01 against fifth-degree fits (Neckel and Labs 1994,
+  0.382 at 550 nm).
+- **Deviations in T4.b, as built.** `HostDisc`'s fields are private with getters. Its
+  `mean_luminance` per channel (B, V, R) is the photopic mean L̄ times the star's linear Rec. 709
+  blue, green and red at unit luminance, so the channels' Rec. 709 luminance
+  (`sky::disc::channel_luminance`, added) is L̄; the test "π × mean luminance × sin²ρ equals the
+  illuminance from V within 1% in V" is taken on that luminance. L̄ = 2.54 µlx × `lux_per_v0` ×
+  10^(−0.4 M_V) × (10 pc)² ÷ (π R²), with `sky::disc::V0_ILLUMINANCE_LX` (added; Allen's value).
+  M_V is plan 06's `absolute_magnitude_v`; a white dwarf, which plan 06 leaves without one until
+  A4, takes M_bol − BC_V(T_eff) from the dwarfs' corrections (up to about 0.6 mag off at 4,000 K,
+  `photometry`'s own caution). A star with no V (neutron star, black hole, merged-away, substellar)
+  has no disc. The grid follows the phase: white dwarfs theirs, protostar to main sequence the
+  dwarfs', every other living phase the giants'. Each star's state is `SystemStars::state_at(t)`
+  (pair-evolved); `host_discs` does not read its `galaxy` argument yet. `StarIndex::from_body`
+  (added to plan 11's `multiplicity::hierarchy`) gives the index.
+- **The eye's darkest background (decided 2026-10-02, T2).** Design note 2's clamp at μ 27 (8.64 at
+  F = 1.4) is replaced by Crumey's own: the threshold is constant for a background, colour-corrected
+  to Blackwell's light, at or below 10⁻⁵ cd m⁻² (Crumey 2014, §2.3, eqs. 47–52; §3.2, eq. 71, ζ =
+  1.150 × 10⁻⁹ lx), the bound Design note 2 itself cites. The zero-background limit at F = 1.4 is
+  7.99, reached at μ 25.6 in starlight (ρ₀ 2.26); T2's figures 8.17 at μ 26 and 8.64 at μ 27 are
+  7.99. Design note 5's eye cut is at most about 7.99 + 0.45 + 0.1 = 8.54 (not 9.2); near the Sun,
+  whose darkest texel is about μ 24.3, T9.d's 7.96 ± 0.15 is unaffected. Recorded as a brainstorm
+  correction in the roadmap.
+- **Deviations in T2, as built.** `sky::eye` takes its background as a validated
+  `SkyBackground { luminance, sp_ratio: SpRatio }` (`SkyBackground::new`, `SpRatio::new`, both
+  `Result<_, BuildEyeError>`), so `threshold_illuminance(eye, &SkyBackground)`,
+  `naked_eye_limit(eye, &SkyBackground)` and `star_colour_offset(star: SpRatio, &SkyBackground)`
+  replace the sketches' `(background, background_sp_ratio)` pairs: NaN and negative inputs are
+  refused by type, and the star's offset needs the background's ratio for the MES2 weight.
+  `EyeObserver::new` returns `Result<_, BuildEyeError>` (field factor > 0, age ≥ 0, pigmentation
+  0–1.2); `veiling_luminance` and `surface_brightness` return `Option` (`None` for NaN or negative
+  input; a source beyond 100° gives zero). Added: `luminance(μ)`, `mesopic_weight`,
+  `blackwell_equivalent_factor` (which the limit map's glare weighting reads),
+  `magnitude_of_illuminance`, `illuminance_of_magnitude`, `DARKEST_BACKGROUND` (10⁻⁵ cd m⁻², a
+  `CandelasPerSquareMetre`), `BLACKWELL_SP_RATIO` (1.408) and, in base,
+  `SolarLuminositiesV::from_absolute_v` and `consts::SOLAR_ABSOLUTE_MAGNITUDE_V` (4.81, Willmer
+  2018). Two technical corrections (approved 2026-10-02): the mesopic fade weighs each light by its
+  MES2 mesopic luminance, (m + (1 − m) ρ C) ÷ (m + (1 − m) 1.408 C) with C = 683 ÷ 1699, the
+  equal-mesopic-luminance analogue of Crumey's eq. 6, in place of m + (1 − m) ρ ÷ 1.408, which
+  over-weighted the rods (the background moves by ≤ 0.005 mag, a red star's offset at μ 16 by about
+  0.16); and eq. 34 and eq. 53 differ by 0.026 mag at μ 20 and by under 0.02 only from μ 20.6, so
+  T2's test holds 0.03 on μ 20–20.5 and 0.02 beyond (Design note 2's "within 0.02 mag above μ 20"
+  is that much loose). MES2's weight takes CIE 191's end tests on the inputs (L<sub>s</sub> ≤ 0.005,
+  L<sub>p</sub> ≥ 5 cd m⁻²); a starlit background is scotopic below μ 19.2. The running minimum is
+  the threshold held at no less than eq. 34's value at the bump's dark edge, B_equiv = 0.021 567
+  cd m⁻² (local minimum of the limit, 5.2446 at F = 1.4; the bump peaks at 0.0471 and closes at
+  0.0650). Taking eq. 34's thresholds as those of the B − V = 0.7 star is documented as the plan's
+  convention (Crumey offers it "if this is considered the standard", §3.1; read literally his eqs.
+  6 and 16 put them at 2,850 K). The pigmentation bound 1.2 (CIE 146's very light eyes) was not
+  confirmed from a primary text by the science check (medium confidence). With the MES2 fade the
+  starlit limits in mesopic backgrounds move off the plan's scotopic figures: 5.427 at μ 18.8 (plan
+  5.42) and 5.256 at μ 17.5 (plan 5.25 ± 0.01); T2's test holds every figure without a stated
+  bracket to ±0.01. After review: the field factor is accepted within 0.1–100, an S/P ratio within
+  0.01–100 and a background within 0–10¹² cd m⁻², so every limit is finite and `naked_eye_limit`
+  cannot panic; `veiling_luminance` refuses a negative angle; MES2's weight is a `PhotopicWeight`
+  newtype (0–1), which `mesopic_weight` returns and `blackwell_equivalent_factor` takes.

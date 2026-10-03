@@ -30,6 +30,8 @@ use hyperion_protocol::{BulkManifestDto, RequestId, ResponseBody};
 
 use crate::limits::MAX_BINARY_FRAME_BYTES;
 
+mod sky;
+
 /// The first four bytes of every binary frame.
 pub(crate) const MAGIC: [u8; 4] = *b"HYPB";
 

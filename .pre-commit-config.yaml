@@ -23,6 +23,8 @@ repos:
         exclude: ^packages/protocol/src/generated/
       - id: mixed-line-ending
         args: [--fix=lf]
+        # The CIE's tables are committed unmodified (CRLF), hashed by their PROVENANCE.toml.
+        exclude: ^crates/hyperion-fit/data/cie_cmf/
       - id: trailing-whitespace
         exclude: ^packages/protocol/src/generated/
 

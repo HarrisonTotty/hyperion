@@ -15,6 +15,18 @@ pub fn bits(value: f64) -> u64 {
     value.to_bits()
 }
 
+/// The IEEE 754 bit pattern of the single-precision `value`, for the goldens of `f32` arrays a
+/// GPU reads (plan R05, T4.b).
+///
+/// # Panics
+///
+/// If `value` is a NaN, whose bits are unspecified.
+#[must_use]
+pub fn bits_f32(value: f32) -> u32 {
+    assert!(!value.is_nan(), "the bits of a NaN are unspecified");
+    value.to_bits()
+}
+
 /// How many representable values lie between `a` and `b`: 0 when they are the same bits.
 ///
 /// Both values must be finite and of the same sign (or zero), which is all a last-place comparison
