@@ -3,7 +3,7 @@
   "compilerOptions": {
     "composite": true,
     "tsBuildInfoFile": "node_modules/.cache/tsc/web.tsbuildinfo",
-    "lib": ["es2023", "dom", "dom.iterable"],
+    "lib": ["es2023", "es2025.float16", "dom", "dom.iterable"],
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
