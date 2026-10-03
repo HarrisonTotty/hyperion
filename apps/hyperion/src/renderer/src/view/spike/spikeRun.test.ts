@@ -6,12 +6,23 @@ import { readTokens } from "../../spatial/paint";
 import { planetGeometry } from "../terrain/planet";
 import type { PatchRequest } from "../terrain/select";
 import type { TerrainPool } from "../terrain/terrainPass";
+import type { PatchKey } from "../terrain/patchKey";
 import type { BakedPatch } from "../terrain/workers/messages";
-import { DescentProfile, landingSiteOf } from "./descentProfile";
+import {
+  SurfaceQuery,
+  type SurfaceQueryReply,
+  type SurfaceQueryRequest,
+  type SurfaceQueryWorker,
+} from "./surfaceQuery";
+import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile";
 import { SEGMENT_MEASURE_PREFIX } from "./metrics";
 import { contactRule, TEST_PLANET_FIGURE } from "./spikeScene";
+import { stretchKeys } from "./demandRecord";
 import {
+  DescentRefused,
   defaultSpikeWorkers,
+  isUnclearable,
+  prepareDescent,
   type PreparedDescent,
   type SpikeFrameInput,
   type SpikeFrameSample,
@@ -26,7 +37,10 @@ const PREPARED: PreparedDescent = {
   profile: PROFILE,
   contact: contactRule(PROFILE),
   siteHeightM: 0,
+  stretches: trackStretches(PROFILE),
+  stretchMaxHeightsM: trackStretches(PROFILE).map(() => 0),
   trackMaxHeightM: 0,
+  omittedSigmaM: new Float64Array(25),
 };
 
 /** A pool that records the demand and bakes nothing. */
@@ -202,5 +216,90 @@ describe("the spike's run", () => {
 describe("the default worker count", () => {
   it("is a quarter of the threads, from one to three (Design note 11)", () => {
     expect([2, 4, 8, 12, 16, 32].map(defaultSpikeWorkers)).toEqual([1, 1, 2, 3, 3, 3]);
+  });
+});
+
+/** A query that answers from fixed values and records the floors' groups it was asked for. */
+class FixedQueryWorker implements SurfaceQueryWorker {
+  readonly groups: Array<ReadonlyArray<ReadonlyArray<PatchKey>>> = [];
+  readonly #listeners: ((event: MessageEvent<SurfaceQueryReply>) => void)[] = [];
+
+  constructor(readonly floorOf: (group: number) => number) {}
+
+  postMessage(message: SurfaceQueryRequest, _transfer: Transferable[]): void {
+    let reply: SurfaceQueryReply;
+    switch (message.kind) {
+      case "level-table":
+        reply = { kind: "level-table", id: message.id, table: goldenLevelTable("off") };
+        break;
+      case "omitted-sigma":
+        reply = { kind: "omitted-sigma", id: message.id, sigmaM: new Float64Array(25).fill(2) };
+        break;
+      case "height":
+        reply = { kind: "height", id: message.id, heightsM: Float64Array.of(-412) };
+        break;
+      case "max-heights":
+        this.groups.push(message.groups);
+        reply = {
+          kind: "max-heights",
+          id: message.id,
+          maxesM: Float64Array.from(message.groups, (_, k) => this.floorOf(k)),
+          baked: 0,
+        };
+        break;
+    }
+    queueMicrotask(() => {
+      for (const cb of this.#listeners) {
+        cb(new MessageEvent("message", { data: reply }));
+      }
+    });
+  }
+
+  addEventListener(type: "message" | "error", cb: never): void {
+    if (type === "message") {
+      this.#listeners.push(cb);
+    }
+  }
+
+  terminate(): void {}
+}
+
+describe("prepareDescent", () => {
+  it("asks one floor a stretch, over the stretch's keys, and flies over what it answers", async () => {
+    const worker = new FixedQueryWorker((k) => -412 + 10 * k);
+    const prepared = await prepareDescent(new SurfaceQuery(worker, "off"), 5n);
+    const stretches = trackStretches(PROFILE);
+    expect(prepared.stretches).toEqual(stretches);
+    expect(worker.groups).toHaveLength(1);
+    expect(worker.groups[0]).toEqual(stretches.map((stretch) => stretchKeys(PROFILE, stretch)));
+    expect(prepared.stretchMaxHeightsM).toEqual(stretches.map((_, k) => -412 + 10 * k));
+    expect(prepared.siteHeightM).toBe(-412);
+    expect(Array.from(prepared.omittedSigmaM)).toEqual(Array.from({ length: 25 }, () => 2));
+    const stretch = stretches.find((each) => each.piece === "slowdown 3");
+    if (stretch === undefined) {
+      throw new Error("the plan has no slowdown 3");
+    }
+    const k = stretches.indexOf(stretch);
+    expect(prepared.profile.poseAt((stretch.startS + stretch.endS) / 2).floorM).toBe(-412 + 10 * k);
+  });
+
+  it("takes a floor that is not finite for a measurement fault, not a refusal", async () => {
+    const worker = new FixedQueryWorker(() => Number.POSITIVE_INFINITY);
+    const prepared = prepareDescent(new SurfaceQuery(worker, "off"), 5n);
+    await expect(prepared).rejects.toThrow(/not finite/);
+    await expect(prepared).rejects.not.toBeInstanceOf(DescentRefused);
+  });
+});
+
+describe("isUnclearable", () => {
+  it("is T13.a's refusal of floors it cannot clear, and nothing else", () => {
+    const refusal = new RangeError(
+      "the descent cannot clear its floors: slowdown 2 is 3.00 m short after 4 lifts",
+    );
+    expect(isUnclearable(refusal)).toBe(true);
+    expect(isUnclearable(new RangeError("a descent needs 29 finite stretch floors, got 28"))).toBe(
+      false,
+    );
+    expect(isUnclearable(new Error("the descent cannot clear its floors"))).toBe(false);
   });
 });

@@ -24,10 +24,12 @@ import type { ViewSize } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { cameraSceneOf } from "../scene/model";
 import type { PatchKey } from "../terrain/patchKey";
+import type { Selection, SelectionInput } from "../terrain/select";
 import type { TestPlanetRidges } from "../terrain/workers/messages";
 import { spikeExposure } from "./litView";
 import {
   DEFAULT_SPIKE_WORKERS,
+  DescentRefused,
   type PreparedDescent,
   prepareDescent,
   type SpikeFrame,
@@ -52,6 +54,10 @@ const MAIN_VIEW_NAME = "VIEW, SPIKE LIT, SCRIPTED";
 /** The status where the terrain could not be measured; the cause goes to the log. */
 const NOT_MEASURED = "TERRAIN NOT MEASURED: surface query failed, relaunch to retry";
 
+/** The status where the script cannot clear the measured terrain (decision-r05-spike-ux.md). */
+export const DESCENT_REFUSED =
+  "DESCENT REFUSED: terrain cannot be cleared on this seed, relaunch with another seed";
+
 /** The status where the views or their materials could not be made, as `ViewDisplay` words it. */
 export const VIEWS_NOT_MADE = "GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry";
 
@@ -69,6 +75,8 @@ export interface DescentSpikeProps {
   /** Where the engine comes from: R01's, or T13.c's measured one, or a fake in a test. */
   readonly engineSource?: ViewEngineSource | undefined;
   readonly spikeWorkers?: SpikeWorkers | undefined;
+  /** How the descent is measured before it flies: `prepareDescent`, or a test's. */
+  readonly prepare?: typeof prepareDescent | undefined;
   /**
    * T13.c's metrics: each frame's sample and each patch's progress. Read at each call, so a new
    * object does not restart the run.
@@ -79,7 +87,9 @@ export interface DescentSpikeProps {
 type Preparation =
   | { readonly kind: "measuring" }
   | { readonly kind: "ready"; readonly prepared: PreparedDescent }
-  | { readonly kind: "failed" };
+  | { readonly kind: "failed" }
+  /** The terrain was measured, but the script cannot clear it (`DescentRefused`). */
+  | { readonly kind: "refused" };
 
 /** The canvas's drawing size, device pixels, from its stage's laid-out size. */
 function deviceSize(size: ElementSize | null): ViewSize | null {
@@ -187,6 +197,7 @@ export function DescentSpike({
   workers,
   engineSource = DEFAULT_ENGINE_SOURCE,
   spikeWorkers = DEFAULT_SPIKE_WORKERS,
+  prepare = prepareDescent,
   listeners,
 }: DescentSpikeProps) {
   const id = useId();
@@ -231,26 +242,35 @@ export function DescentSpike({
     onPatch: (event: SpikePatchEvent, key: PatchKey) => {
       inputsRef.current.listeners?.onPatch?.(event, key);
     },
+    onSelect: (input: SelectionInput, selected: Selection) => {
+      inputsRef.current.listeners?.onSelect?.(input, selected);
+    },
   }));
 
   // The terrain is measured once, in the surface query's worker, before the run starts.
   useEffect(() => {
     const query = new SurfaceQuery(spikeWorkers.query(), ridges);
     const life = { ended: false };
-    void prepareDescent(query, seed)
+    void prepare(query, seed)
       .finally(() => {
         query.dispose();
       })
       .then((prepared) => {
         if (!life.ended) {
+          inputsRef.current.listeners?.onPrepared?.(prepared);
           setPreparation({ kind: "ready", prepared });
         }
         return undefined;
       })
       .catch((error: unknown) => {
         if (!life.ended) {
-          console.error("the descent spike's terrain could not be measured:", error);
-          setPreparation({ kind: "failed" });
+          if (error instanceof DescentRefused) {
+            console.error("the descent spike refuses to fly:", error);
+            setPreparation({ kind: "refused" });
+          } else {
+            console.error("the descent spike's terrain could not be measured:", error);
+            setPreparation({ kind: "failed" });
+          }
         }
       });
     return () => {
@@ -258,7 +278,7 @@ export function DescentSpike({
       query.dispose();
       setPreparation({ kind: "measuring" });
     };
-  }, [spikeWorkers, ridges, seed]);
+  }, [spikeWorkers, ridges, seed, prepare]);
 
   const prepared = preparation.kind === "ready" ? preparation.prepared : null;
 
@@ -386,13 +406,15 @@ export function DescentSpike({
   const status: { readonly text: string; readonly standing: "waiting" | "fault" } | null =
     preparation.kind === "failed"
       ? { text: NOT_MEASURED, standing: "fault" }
-      : preparation.kind === "measuring"
-        ? { text: "TERRAIN MEASURING: the landing site and the low track", standing: "waiting" }
-        : engineState.kind === "unavailable"
-          ? { text: NO_ADAPTER, standing: "fault" }
-          : engineState.kind === "pending"
-            ? { text: "GRAPHICS ACQUIRING ADAPTER", standing: "waiting" }
-            : null;
+      : preparation.kind === "refused"
+        ? { text: DESCENT_REFUSED, standing: "fault" }
+        : preparation.kind === "measuring"
+          ? { text: "TERRAIN MEASURING: the landing site and the low track", standing: "waiting" }
+          : engineState.kind === "unavailable"
+            ? { text: NO_ADAPTER, standing: "fault" }
+            : engineState.kind === "pending"
+              ? { text: "GRAPHICS ACQUIRING ADAPTER", standing: "waiting" }
+              : null;
 
   const pose = published?.pose ?? null;
   const terrain = published?.terrain ?? null;

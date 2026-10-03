@@ -3392,17 +3392,17 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
       other source of it;
     - the landing site's height, from lane A's `surfaceHeightM` export: T4.c's collision
       interpolant, bit for bit with native;
-    - a true upper bound of the terrain under the low pass's track: each level-12 patch's highest
-      baked vertex plus ε₁₂.
+    - a floor under each of T13.a's stretches (`trackStretches`, decision-r05-descent-clearance.md):
+      the highest baked vertex plus ε_n over the stretch's patches at its bound level and their
+      eight neighbours (T13.a's `stretchKeys`), in one batch, `SurfaceQuery.maxHeightsM(groups)`,
+      each distinct patch baked once (about 600);
+    - σ_n of every level (`SurfaceQuery.omittedSigmaM`), for T13.c's calibrated pass.
 
-    It then builds T13.a's `DescentProfile` with `{ siteHeightM, trackMaxHeightM }`, so the
-    script stays a function of the seed.
-    - `trackPatchKeys(profile, bounded)` samples the chosen segments' ground track at most half
-      the level's shortest patch edge apart, at the segment's fastest speed, and takes each
-      sample's patch with its eight neighbours, so no patch under the track is missed. By default
-      `bounded` takes the `clearsTrack` segments.
-    - **Pending a ruling** (`decision-r05-descent-clearance.md`): nothing bounds the terrain under
-      the slowdown and the flare's last blend. The ruling is a one-line change of `bounded`.
+    It then builds T13.a's `DescentProfile` with `{ siteHeightM, stretchMaxHeightsM }`, so the
+    script stays a function of the seed and the measured numbers. A profile the floors make
+    unflyable throws, and `prepareDescent` raises `DescentRefused`: the spike refuses to fly and
+    says `DESCENT REFUSED: terrain cannot be cleared on this seed, relaunch with another seed`.
+    `trackPatchKeys` and `TRACK_BOUND_LEVEL` are gone.
 
   - _The contact._ The craft is a contact while it is grounded or descending (Design note 9),
     judged on `clearanceM`, the height above the site's terrain, not the datum:
@@ -3663,3 +3663,57 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     `segmentLifts` and `minFloorMarginM`, each segment its least and greatest
     `heightAboveFloorM`; the fixed-step D and the craft's contact read `heightAboveFloorM`. On seed 7
     (ridges off) the low pass flies 318–323 m above its own floor, a neighbour's floor binding.
+
+- **The scripted descent's terrain clearance** (decision-r05-descent-clearance.md, 2026-10-03). The
+  script is flown above per-stretch true bounds of the finest mesh. Each bound is the baked maximum
+  plus ε_n over a level-14 corridor, with level 12 above 2 km, level 4 for the arc and level 16 for
+  the last 250 m. The clearances are 300 m on the low pass, 200 m on the flare and slowdown, 100 m on
+  the final approach, and the table's own over the site, whose height is exact.
+
+  On rough seeds, boundaries are lifted and the vertical descent's top rises, with its 20 m/s kept.
+  The per-level demand then reads the height above the floor, and the results record each segment's
+  lift. So a lifted run measures different heights from the table, but its demand is predicted at the
+  heights actually flown.
+
+  Not covered:
+  - The bound is of the finest mesh, not of what is drawn. A stand-in ancestor, drawn while
+    streaming lags, which the low pass is designed to provoke, can stand up to its ε_L above the
+    finest surface (877 m at level 8 with ridges). So the camera can pass through a coarse stand-in
+    for a frame. That is a streaming failure the run already counts, not a script error.
+  - The hover's 1 m is against the drawn ground only once the forced region is resident
+    (`FORCED_REGION_RESIDENCY_S`).
+  - Slopes beside the site make the 3D distance in the vertical descent and hover smaller than the
+    vertical clearance (about 0.7 m at 1 m on a 45° slope).
+
+- **The clearance follow-up, as built (lane C, 2026-10-03).**
+  - `SurfaceQuery.maxHeightsM(groups)` (request `max-heights`) answers each group's floor in one
+    batch, baking each distinct key once, and refuses an empty group.
+  - T13.a's `stretchKeys` sampled the track half an edge apart only, so a pose whose patch the
+    track crossed at a corner between samples could miss its far neighbours. It now samples at
+    every 64 Hz pose too (a8a48eb, with a coverage test). The ranges fixture gains ten keys, and no
+    pinned hash moved.
+  - The contact reads `heightAboveFloorM`, as T13.a's demand record does.
+  - `clearance.wasm.test.ts` runs the ruling's checks on the real module, for seed 7 (the rough site,
+    1.85 km below the datum) with ridges on, in the suite:
+    - the finest mesh at every 64 Hz pose's ground direction, and half an edge to either side, lies
+      at or below the stretch's floor;
+    - the altitude above the finest mesh under the camera is at least the piece's C;
+    - touchdown is 1 m above the site, the table's value to 1e-6 m.
+
+    Each run bakes about 600 patches (about 20 s at load 50 or more). All six runs the ruling names,
+    seeds 0, 1 and 7 with ridges off and on, passed by hand on 2026-10-03. T13.a's lift solve meets
+    its floors to rounding (−4 × 10⁻¹¹ m), so the checks take its `FLOOR_TOLERANCE_M`.
+
+  - Only T13.a's lift-limit `RangeError` ("the descent cannot clear its floors") becomes
+    `DescentRefused`. Floors of the wrong count or not finite are a measurement fault and show
+    `TERRAIN NOT MEASURED`. The message prefix is the test (`isUnclearable`); a distinct error
+    class from T13.a would be sturdier. No finite floor found by probing exhausts T13.a's four
+    lifts, so the refused status is tested through `DescentSpike`'s `prepare` prop.
+  - The suite runs one of the ruling's six wasm runs, the roughest, for its cost. The other five
+    are by hand, pending the orchestrator's amendment.
+  - Seams for T13.c (the orchestrator, 2026-10-03):
+    - `PreparedDescent.omittedSigmaM`;
+    - `SpikeListeners.onPrepared(prepared)`, called once the measurement is ready;
+    - `SpikeListeners.onSelect(input, selection)`, through the new
+      `TerrainPassOptions.onSelect`, called after each `selectPatches` and outside the
+      `terrain.select` span; unset, it costs nothing.

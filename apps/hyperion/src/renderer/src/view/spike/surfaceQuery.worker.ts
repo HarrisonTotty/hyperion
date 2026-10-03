@@ -13,6 +13,7 @@
 import init, {
   bakePatch,
   levelTable,
+  omittedSigmaM,
   surfaceHeightM,
   testPlanetVersion,
 } from "../../generated/surface/hyperion_surface";
@@ -25,7 +26,7 @@ import {
   type SurfaceQueryRequest,
 } from "./surfaceQuery";
 
-const module: SurfaceQueryModule = { bakePatch, levelTable, surfaceHeightM };
+const module: SurfaceQueryModule = { bakePatch, levelTable, omittedSigmaM, surfaceHeightM };
 
 /** Loads the module, once; `null` once it can serve, or the error saying why it cannot. */
 async function load(): Promise<Error | null> {

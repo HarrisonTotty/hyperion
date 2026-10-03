@@ -40,24 +40,17 @@ import {
   keptTime,
 } from "../scenes/kept";
 import type { SunState } from "../atmosphere/hillaire";
-import { type Xyz, vertexSpacing, PATCH_QUADS } from "../terrain/cube";
+import type { Xyz } from "../terrain/cube";
 import {
   finestPatchSizeM,
   type GroundContact,
   heldRadiusM,
   isDescending,
 } from "../terrain/grounded";
-import {
-  cornerNeighbours,
-  EDGES,
-  edgeNeighbour,
-  type PatchKey,
-  patchKeyString,
-} from "../terrain/patchKey";
-import { type BodyFigure, planetGeometry } from "../terrain/planet";
-import type { DescentProfile, DescentSegment } from "./descentProfile";
+import { planetGeometry } from "../terrain/planet";
+import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
+import type { DescentProfile } from "./descentProfile";
 import { testPlanetRotationAt } from "./rotation";
-import { patchKeyAt } from "./surfaceQuery";
 
 /** The spike scene's name, as the label block's `SCENE` line shows it. */
 export const SPIKE_SCENE_NAME = "DESCENT SPIKE";
@@ -71,15 +64,8 @@ export const SPIKE_PLANET = keptBody(1);
 /** The scripted craft, the scene's own ship. */
 export const SPIKE_CRAFT = "spike-craft";
 
-/**
- * The test planet's figure: WGS 84's, a = 6,378,137 m and 1 ÷ f = 298.257223563 (NIMA TR8350.2,
- * 3rd edition, Table 3.1), as Design note 12 sets it.
- */
-export const TEST_PLANET_FIGURE: BodyFigure = {
-  equatorialRadiusM: 6_378_137,
-  polarRadiusM: 6_378_137 * (1 - 1 / 298.257_223_563),
-  pole: null,
-};
+/** The test planet's figure, WGS 84's (Design note 12): T13.a's, one definition for both. */
+export { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 /**
  * The synthetic coarse field each height worker holds, bytes: the brainstorm's 15 MB, the top of
@@ -127,9 +113,6 @@ export const GROUNDED_CLEARANCE_M = heldRadiusM(
   finestPatchSizeM(planetGeometry(TEST_PLANET_FIGURE, null)),
 );
 
-/** The level whose patches bound the terrain under the low pass's track (about 1.5 km across). */
-export const TRACK_BOUND_LEVEL = 12;
-
 /** How many points the scene's drawn path has, over the whole script. */
 const PATH_SAMPLES = 256;
 
@@ -137,15 +120,16 @@ const PATH_SAMPLES = 256;
 const ONSET_STEP_S = 1 / 64;
 
 /**
- * Whether the craft is grounded or descending at `tS` (Design note 9, on its clearance above the
- * site): descending by `isDescending`, or within {@link GROUNDED_CLEARANCE_M} of the ground, where
+ * Whether the craft is grounded or descending at `tS` (Design note 9, on its height above the
+ * floor under it, `heightAboveFloorM`): descending by `isDescending`, or within {@link GROUNDED_CLEARANCE_M} of the ground, where
  * a hover at zero vertical speed is a grounded body.
  */
 function descendingAt(profile: DescentProfile, tS: number): boolean {
   const pose = profile.poseAt(tS);
-  return (
-    isDescending(pose.clearanceM, pose.verticalSpeedMps) || pose.clearanceM <= GROUNDED_CLEARANCE_M
-  );
+  // The height above the floor under the craft, as T13.a's demand record judges it: the true
+  // height above the terrain, which over the site is the clearance.
+  const h = pose.heightAboveFloorM;
+  return isDescending(h, pose.verticalSpeedMps) || h <= GROUNDED_CLEARANCE_M;
 }
 
 /** When the scripted craft is a contact (Design note 9, held to the end once it last descends). */
@@ -263,59 +247,6 @@ export function spikeCameraAt(profile: DescentProfile, tS: number): CameraPose {
     positionM: rotateToBody(rotation, pose.positionM),
     orientation: multiply(rotationQuaternion(rotation), pose.orientation),
   };
-}
-
-/**
- * The patches of {@link TRACK_BOUND_LEVEL} under the ground track of the segments `bounded`
- * picks (by default the low pass, the segments that clear the track), with their neighbours, for
- * the surface query's bound.
- *
- * @remarks
- * The track is sampled at most half the level's shortest patch edge apart along the ground, from
- * its fastest point, and each sample's patch is taken with its eight neighbours (seven at a cube
- * corner): the track between two samples stays within one patch edge of the first, so no patch it
- * crosses is missed, and the neighbours add a margin of at least one patch edge to either side.
- * The ground track does not depend on the terrain (T13.a), so a profile made without it gives the
- * same keys as the one flown.
- */
-export function trackPatchKeys(
-  profile: DescentProfile,
-  bounded: (segment: DescentSegment) => boolean = (segment) => segment.clearsTrack,
-): ReadonlyArray<PatchKey> {
-  const level = TRACK_BOUND_LEVEL;
-  const figure = profile.figure;
-  const edgeM = PATCH_QUADS * vertexSpacing(figure.polarRadiusM, level).minM;
-  const keys = new Map<string, PatchKey>();
-  const take = (key: PatchKey | null): void => {
-    if (key !== null) {
-      keys.set(patchKeyString(key), key);
-    }
-  };
-  for (const [i, segment] of profile.segments.entries()) {
-    if (!bounded(segment)) {
-      continue;
-    }
-    const span = profile.segmentSpans()[i];
-    if (span === undefined) {
-      continue;
-    }
-    const fastestMps = Math.max(segment.startSpeedMps, segment.endSpeedMps, 1);
-    const stepS = edgeM / 2 / fastestMps;
-    const steps = Math.ceil((span.endS - span.startS) / stepS);
-    for (let n = 0; n <= steps; n += 1) {
-      const t = Math.min(span.startS + n * stepS, span.endS);
-      const d = profile.poseAt(t).groundDir;
-      const key = patchKeyAt([d.x, d.y, d.z], level);
-      take(key);
-      for (const edge of EDGES) {
-        take(edgeNeighbour(key, edge));
-      }
-      for (const corner of cornerNeighbours(key)) {
-        take(corner);
-      }
-    }
-  }
-  return [...keys.values()];
 }
 
 /** The landing site's direction for the surface query: the datum point beneath the script's end. */

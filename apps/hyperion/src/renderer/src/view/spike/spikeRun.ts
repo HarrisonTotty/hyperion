@@ -34,12 +34,19 @@ import type { KeptScene } from "../scenes/kept";
 import type { TerrainAnnunciation } from "../terrain/annunciation";
 import type { PatchKey } from "../terrain/patchKey";
 import { type PlanetGeometry, planetGeometry } from "../terrain/planet";
-import type { PatchRequest } from "../terrain/select";
+import type { PatchRequest, Selection, SelectionInput } from "../terrain/select";
 import { TerrainPass, type TerrainPool, type TerrainPoolFactory } from "../terrain/terrainPass";
 import type { BakedPatch, TestPlanetRidges } from "../terrain/workers/messages";
 import { buildWireframeDrawList } from "../wireframe/drawList";
 import { WireframeRenderer } from "../wireframe/submit";
-import { DescentProfile, type DescentPose, landingSiteOf } from "./descentProfile";
+import { stretchKeys } from "./demandRecord";
+import {
+  DescentProfile,
+  type DescentPose,
+  landingSiteOf,
+  type TrackStretch,
+  trackStretches,
+} from "./descentProfile";
 import { LitView } from "./litView";
 import { SEGMENT_MEASURE_PREFIX } from "./metrics";
 import { testPlanetRotationAt } from "./rotation";
@@ -55,7 +62,6 @@ import {
   sunDirectionBody,
   syntheticField,
   TEST_PLANET_FIGURE,
-  trackPatchKeys,
 } from "./spikeScene";
 import type { SurfaceQuery, SurfaceQueryWorker } from "./surfaceQuery";
 import { HeightWorkerPool } from "../terrain/workers/pool";
@@ -115,36 +121,86 @@ export interface PreparedDescent {
   readonly profile: DescentProfile;
   /** When the craft is a contact (Design note 9, held from its last descent). */
   readonly contact: ContactRule;
-  /** The landing site's terrain height, metres above the datum, and how it was answered. */
+  /** The landing site's terrain height, metres above the datum (T4.c's interpolant). */
   readonly siteHeightM: number;
-  /** The bound of the terrain under the low pass's track, metres above the datum. */
+  /** The track's stretches (T13.a's plan, the same for every terrain). */
+  readonly stretches: ReadonlyArray<TrackStretch>;
+  /** F_k for each stretch: a true upper bound of the finest mesh under it, metres above the datum. */
+  readonly stretchMaxHeightsM: ReadonlyArray<number>;
+  /** The low pass's floor, metres above the datum, for the readout. */
   readonly trackMaxHeightM: number;
+  /** σ_n for levels 0 to 24, metres (T6), for T13.c's min(hard, 4σ_n) pass. */
+  readonly omittedSigmaM: Float64Array;
 }
 
 /**
- * Measures the descent of `seed` against the test planet: its level table, the landing site's
- * height and the bound of the terrain under the low pass's track (`trackPatchKeys`), then the
- * profile flown over them.
+ * The script cannot be flown over the measured terrain: T13.a's profile found a floor it cannot
+ * clear (decision-r05-descent-clearance.md, rule 4), so the runner refuses to fly.
+ */
+export class DescentRefused extends Error {
+  constructor(seed: bigint, cause: unknown) {
+    super(`the descent of seed ${seed.toString()} cannot clear its terrain`, { cause });
+    this.name = "DescentRefused";
+  }
+}
+
+/**
+ * Whether `error` is T13.a's refusal of floors it cannot clear within its lifts
+ * (decision-r05-descent-clearance.md, rule 4), rather than a bug: T13.a raises it as a
+ * `RangeError` whose message begins "the descent cannot clear its floors".
+ */
+export function isUnclearable(error: unknown): boolean {
+  return (
+    error instanceof RangeError && error.message.startsWith("the descent cannot clear its floors")
+  );
+}
+
+/**
+ * Measures the descent of `seed` against the test planet (decision-r05-descent-clearance.md): its
+ * level table, the landing site's height along the site's direction d, and a floor under each of
+ * T13.a's stretches, the highest baked vertex plus ε_n over the stretch's patches and their
+ * neighbours (`stretchKeys`), in one batch; then the profile flown over them.
+ *
+ * @throws {@link DescentRefused} if the profile cannot clear the floors.
  */
 export async function prepareDescent(query: SurfaceQuery, seed: bigint): Promise<PreparedDescent> {
   const planet = planetGeometry(TEST_PLANET_FIGURE, await query.levelTable());
   const site = landingSiteOf(seed);
-  // The ground track does not depend on the terrain, so a profile over the bare datum gives it.
+  // The ground track and the stretches do not depend on the terrain: the bare datum's profile
+  // gives them.
   const datum = new DescentProfile(TEST_PLANET_FIGURE, site);
-  const [siteHeightM, trackMaxHeightM] = await Promise.all([
+  const stretches = trackStretches(datum);
+  const [siteHeightM, floors, omittedSigmaM] = await Promise.all([
     query.heightM(siteDirection(datum)),
-    query.maxHeightM(trackPatchKeys(datum)),
+    query.maxHeightsM(stretches.map((stretch) => stretchKeys(datum, stretch))),
+    query.omittedSigmaM(),
   ]);
-  const profile = new DescentProfile(TEST_PLANET_FIGURE, site, {
-    siteHeightM,
-    trackMaxHeightM,
-  });
+  const stretchMaxHeightsM = Array.from(floors);
+  if (
+    stretchMaxHeightsM.length !== stretches.length ||
+    !stretchMaxHeightsM.every(Number.isFinite)
+  ) {
+    // A measurement fault, not a refusal: the query must answer one finite floor a stretch.
+    throw new Error(
+      `the surface query answered ${stretchMaxHeightsM.length} floors for ${stretches.length} stretches, or a floor not finite`,
+    );
+  }
+  let profile: DescentProfile;
+  try {
+    profile = new DescentProfile(TEST_PLANET_FIGURE, site, { siteHeightM, stretchMaxHeightsM });
+  } catch (error: unknown) {
+    throw isUnclearable(error) ? new DescentRefused(seed, error) : error;
+  }
+  const lowPass = stretches.findIndex((stretch) => stretch.segment === "low fast pass");
   return {
     planet,
     profile,
     contact: contactRule(profile),
     siteHeightM,
-    trackMaxHeightM,
+    stretches,
+    stretchMaxHeightsM,
+    trackMaxHeightM: stretchMaxHeightsM[lowPass] ?? siteHeightM,
+    omittedSigmaM,
   };
 }
 
@@ -168,6 +224,10 @@ export interface SpikeFrameSample {
 export interface SpikeListeners {
   readonly onFrame?: (sample: SpikeFrameSample) => void;
   readonly onPatch?: (event: SpikePatchEvent, key: PatchKey) => void;
+  /** Called once the terrain is measured and the descent prepared, before the run flies. */
+  readonly onPrepared?: (prepared: PreparedDescent) => void;
+  /** Each selection's input and result (TerrainPass's `onSelect`), for T13.c's second pass. */
+  readonly onSelect?: (input: SelectionInput, selection: Selection) => void;
 }
 
 /** The canvases' sizes and what the instruments are drawn with. */
@@ -306,6 +366,7 @@ export class SpikeRun {
         ridges: options.ridges,
         createPool: (bake) => listenedPool(options.createPool(bake), listeners),
         measureSelection: true,
+        ...(listeners.onSelect === undefined ? {} : { onSelect: listeners.onSelect }),
         ...(onPatch === undefined
           ? {}
           : { onResident: (key: PatchKey) => onPatch("resident", key) }),

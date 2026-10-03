@@ -138,6 +138,11 @@ export interface TerrainPassOptions {
   readonly measureSelection?: boolean;
   /** Called with each patch the cache stores and the GPU holds, for the spike's tallies. */
   readonly onResident?: (key: PatchKey) => void;
+  /**
+   * Called with each selection's input and result, right after `selectPatches` and outside the
+   * `terrain.select` span, for the spike's second, calibrated pass (T13.c). Unset, it costs nothing.
+   */
+  readonly onSelect?: (input: SelectionInput, selection: Selection) => void;
 }
 
 /** The `performance.measure` name of one selection, when the pass measures it. */
@@ -234,6 +239,7 @@ export class TerrainPass {
   readonly #createPool: TerrainPoolFactory;
   readonly #measureSelection: boolean;
   readonly #onResident: ((key: PatchKey) => void) | null;
+  readonly #onSelect: ((input: SelectionInput, selection: Selection) => void) | null;
   readonly #contacts = new ContactRecords();
   readonly #debounce = new TerrainAnnunciationDebounce();
   readonly #offRestored: () => void;
@@ -259,6 +265,7 @@ export class TerrainPass {
     this.#createPool = options.createPool;
     this.#measureSelection = options.measureSelection ?? false;
     this.#onResident = options.onResident ?? null;
+    this.#onSelect = options.onSelect ?? null;
     this.#device = this.#makeDevice();
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
@@ -442,6 +449,7 @@ export class TerrainPass {
     if (this.#measureSelection) {
       performance.measure(SELECT_MEASURE, { start: startMs, end: performance.now() });
     }
+    this.#onSelect?.(selectionInput, selection);
     const patchM = finestPatchSizeM(this.#planet);
     let nearestM = Number.POSITIVE_INFINITY;
     for (const patch of selection.patches.values()) {

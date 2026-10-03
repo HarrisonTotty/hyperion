@@ -10,7 +10,7 @@ import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
 import { patchKeyString } from "./patchKey";
 import { planetGeometry } from "./planet";
-import type { PatchRequest } from "./select";
+import type { PatchRequest, Selection, SelectionInput } from "./select";
 import {
   morphRangeM,
   RESELECT_FRACTION,
@@ -129,7 +129,7 @@ function inputAt(view: TerrainView, nowMs = 0): TerrainFrameInput {
 
 async function passOn(
   setting: "high" | "low",
-  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident"> = {},
+  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect"> = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
   const counting = await countingRenderEngine({
     maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
@@ -268,6 +268,18 @@ describe("the terrain pass", () => {
     const { pass } = await passOn("low", { measureSelection: true });
     pass.frame(inputAt(northPole(1_000_000)));
     expect(performance.getEntriesByName(SELECT_MEASURE)).toHaveLength(1);
+  });
+
+  it("tells each selection's input and result, and only when it selects", async () => {
+    const seen: Array<[SelectionInput, Selection]> = [];
+    const { pass } = await passOn("low", {
+      onSelect: (input, selection) => seen.push([input, selection]),
+    });
+    const first = pass.frame(inputAt(northPole(1_000_000)));
+    pass.frame(inputAt(northPole(1_000_000), 16));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.[1]).toBe(first.selection);
+    expect(seen[0]?.[0].maxPatches).toBe(pass.maxPatches);
   });
 
   it("tells of each patch it makes resident", async () => {
