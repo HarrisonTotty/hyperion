@@ -120,13 +120,15 @@ impl LuminosityFunction {
     pub fn total_light(&self, emitted_ago: Span) -> SolarLuminositiesV;
 }
 pub struct LuminosityTables { /* every component × layer of a galaxy */ }
-impl LuminosityTables { pub fn build(galaxy: &Galaxy) -> Self;
+impl LuminosityTables { pub fn build(galaxy: &Galaxy) -> Self;   // once, at REFERENCE_TIME = +H
+    pub fn age_for(&self, t: UniverseTime, emitted_ago: Span) -> Span;   // a + (t_ref − t)
+    pub fn plan(galaxy: &Galaxy) -> TablesPlan;   // the job split the server runs (T5, T11.c)
     pub fn get(&self, component: ComponentId, layer: Layer) -> &LuminosityFunction;
     pub fn heap_bytes(&self) -> usize; }
 
 // sky::envelope — the skips (Design note 8)
 pub struct BrightnessEnvelope { /* per layer: brightest M_V by mass ceiling and age range */ }
-impl BrightnessEnvelope { pub fn build(galaxy: &Galaxy) -> Self;
+impl BrightnessEnvelope { pub fn build(galaxy: &Galaxy) -> Self;   // reads the fitted sky_envelope
     pub fn brightest(&self, layer: Layer, component: ComponentId, mass_at_most: SolarMasses,
         ages: (Years, Years)) -> Option<Magnitudes>;
     pub fn mass_floor(&self, layer: Layer, component: ComponentId, faintest: Magnitudes,
@@ -555,12 +557,16 @@ holds.
    panels in ln m with the same companions (`CompanionMasses`), with the present mass replaced by
    the V light, integrated over the age distribution against each track's own segments: each phase
    of a track at a mass node is sampled at 32 ages (and at its knots), so short bright phases — the
-   post-AGB crossing, the blue loops — are weighted by their duration and not missed. The age
-   distribution is taken at the emitted time: tables are built at the query's time less 0, 10³, 10⁴,
-   10⁵ and 2.62 × 10⁵ years and interpolated linearly in light age. Class 0/I is dark (A3's
-   interim), white dwarfs are dark until A4, and brown dwarfs follow plan 06's cooling fits. The
-   tables are per galaxy and per time bucket (Design note 13), cached by the server beside the
-   galaxy.
+   post-AGB crossing, the blue loops — are weighted by their duration and not missed. Binary
+   evolution enters through the pair-evolved difference of R06.T5.d's fitted table
+   (`sky_binary_light`): the light and colour take it in full, the counts only where it raises
+   them (Design note 9). The age distribution is taken at the emitted time: one table per galaxy
+   is built at the reference time t_ref = +H (+1,000 years, `CLOCK_WINDOW_H`), with snapshots at the
+   light ages 0, 10³, 2 × 10³, 10⁴, 10⁵ and 2.62 × 10⁵ years, interpolated linearly in light age; a
+   query at time t with light age a reads the age a + (t_ref − t), through
+   `LuminosityTables::age_for` (decided 2026-10-03, `decision-r06-tables.md`). Class 0/I is dark
+   (A3's interim), white dwarfs are dark until A4, and brown dwarfs follow plan 06's cooling fits.
+   The tables are one per galaxy (Design note 13), cached by the server beside the galaxy.
 8. **Skips, exact** (researched 2026-09-29 for the binary case; the code at `stellar/binary/mod.rs`,
    `rlof.rs`, `common_envelope.rs`; Hurley, Tout and Pols 2002 §2.7; Sana et al. 2012, Science 337,
    444). Plan 03's candidate draws its position, its acceptance mark and its component before its
@@ -570,7 +576,9 @@ holds.
    `BrightnessEnvelope::mass_floor`: the least primary initial mass m₁ whose system's brightest M_V
    at any age the cell's components can hold at the cell's emitted interval (at most about 220 years
    wide for a 128 ly cell) could pass the cut at the cell's least distance with no extinction. The
-   envelope is built from the tracks at the luminosity function's mass nodes, taking each track's
+   envelope depends on no galaxy, so it is a fitted, checked-in table, the `hyperion-fit` task
+   `sky_envelope` with fit-check and sim-fingerprint, stored in integer millimagnitudes rounded
+   brighter so that it stays a bound (decided 2026-10-03, `decision-r06-tables.md`). It is built from the tracks at the luminosity function's mass nodes, taking each track's
    extrema over its phase segments, then made a running maximum over mass, and remains a bound
    between nodes up to a margin of 0.3 mag that a slow test with dense masses validates. It is
    indexed by `max_star_mass(m₁)`, the most massive star the system can hold. When this plan was
@@ -592,7 +600,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    test would need the component, which needs the density the skip avoids (a departure for the
    roadmap's corrections). A skip never changes an answer: `brute_force_sky` is the oracle.
 9. **Caps, derived.** Each layer's radius is the least beyond which its expected number of stars
-   brighter than the cut falls below one, from its luminosity function, the density field and the
+   brighter than the cut falls below one, from its luminosity function (whose counts take
+   R06.T5.d's pair-evolved excess only, never its deficit, so the caps stay a conservative
+   estimate), the density field and
    each of `CAP_RAYS` (768) rays dimming the stars of its own solid angle by its own extinction
    profile (`extinction::profile`, `Realised`, `Quality::Full`; the census lists the realised
    field's stars, and a mean field undercounts where dust is patchy), and the rule's bound by the
@@ -646,8 +656,8 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     `valid_until` is the least of one Julian year and the time at which the fastest-moving listed
     star within 1 ly would move a tenth of a pixel at 1080p across 60°. The client re-requests past
     it, on a jump, and when a camera's galactic position moves so far that the nearest baked star
-    shifts by a tenth of a pixel (Design note 20). Luminosity tables are cached per galaxy and per
-    time bucket of 1,000 years, the clock window's scale.
+    shifts by a tenth of a pixel (Design note 20). Luminosity tables are one table per galaxy, at
+    t_ref = +H, which serves the whole ±H window (Design note 7; decided 2026-10-03).
 14. **The band's rays and the extinction profile.** The band map is a cube map on the galactic
     axes of `face_texels` (64) a face, one ray per texel centre, 24,576 rays, marched outward to the
     root cube's edge on distance nodes spaced geometrically from 0.01 ly (twelve a decade). Along
@@ -953,8 +963,49 @@ is_dark_in_v}` (A3's and A4's interims in one place). Tests: the total light per
   layer whose cap is set by its bright end is a finding for T7, which then scales that layer's
   expected count beyond by the measured ratio (decision record item 3). Acceptance: `just test-slow
 luminosity_matches_realised_cells` passes.
+- **R06.T5.d Pair-evolved light** (decided 2026-10-03, `decision-r06-tables.md`). A hyperion-fit
+  task `sky_binary_light` writes `tables::sky_binary_light` (sim-fingerprint, since-generator-version,
+  fit-check), independent of the galaxy: for each cell (layer C, D or E; \[Fe/H\] −2, −1, −0.5, 0
+  and +0.18; log-age bins of 0.2 dex across the layer's luminous ages up to 1.5 × 10¹⁰ yr) the mean
+  per born system of the layer of (pair-evolved − single-evolved) V light, colour sums and star
+  count, in 1-mag M_V bins (only those the layer populates), from ≥ 2 × 10⁴ systems a cell drawn
+  by the generator's own laws (the primary from the default mass function within the band,
+  companions and orbits from plan 11's laws, ages log-uniform within the bin), each read from
+  `SystemStars::state_at(t).stars()` and, single, from each `StarModel` alone, on the fit's own
+  statistical seed. `LuminosityTables::build` adds to each component bin and snapshot the
+  born-weighted sum over the age bins (the same `weight_of`) of the differences, linear in
+  \[Fe/H\] between nodes and over the component's three Gauss–Hermite nodes. Light and colour: each
+  1-mag bin's difference is spread over its 20 sub-bins in proportion to the single-star light there
+  (evenly where that is zero), the differential light clamped at 0, the cumulative sums recomputed.
+  Counts take only the increase: each edge holds the larger of the single and corrected counts, then
+  made non-decreasing (superseding item 3's ratio scaling). The envelope and the rule's bound are
+  untouched (T16.b). A non-default mass-function kind takes no correction (a deviation). Gates
+  (`cargo test -p hyperion-sim sky::luminosity`, and `luminosity_matches_realised_cells`): the fit's
+  born-weighted correction has a 1σ under 2% of each layer's light at the fixture's solar-circle and
+  bulge components; the clamped light is under 0.5% of each layer's light; in T5.c the corrected
+  tables' pair-against-single deficit per layer matches the cells' paired deficit within its
+  interval, the realised light stays within the existing interval, and each layer's residual is
+  recorded before and after. It does not block T8; it lands before T9.b's band gates and T17's
+  goldens (no `GENERATOR_VERSION` bump while no band or census output is served or has goldens).
+  The job split: `LuminosityTables::plan(galaxy) → TablesPlan`, whose jobs are the track samples
+  per (\[Fe/H\] node, chunk of mass nodes) and the accumulation per component bin, put together
+  by `assemble` in index order; the sim spawns no threads. Test `parallel_build_equals_serial`: any
+  partition and order of the jobs (`order::assert_order_independent`) gives `build`'s bits; and
+  tables at +H read at t = 0 through `age_for` equal a build at t = 0 within 10⁻³ of every bin's
+  light and count. Acceptance: `cargo test -p hyperion-sim sky::luminosity`, `just fit-check`,
+  `just test-slow luminosity_matches_realised_cells`.
+- **R06.T5.e Fewer nodes** (decided 2026-10-03). Try, in order: Gauss–Legendre order scaled with
+  each mass panel's width (narrow panels between close breaks take fewer than 16 nodes); \[Fe/H\]
+  nodes rounded to 0.1 dex instead of 0.05; `SAMPLES_PER_PHASE` 16 instead of 32. Keep each change
+  that passes all three gates: every bin of every component, layer and snapshot within 1% of its
+  function's total light (light) and total stars (count) against the full build; the caps within
+  one radial node at the six points of `caps_converge_in_rays`; T5.b and T5.c pass. Target ≤ 30
+  CPU-s a build on a quiet machine. Acceptance: `cargo test -p hyperion-sim sky::luminosity
+sky::caps` and the gates' measurements recorded in Risks.
 
-Files: `sky/{luminosity,photometry}.rs`, `crates/hyperion-sim/benches/sky.rs`.
+Files: `sky/{luminosity,photometry,binary_light}.rs`, `tables/{sky_binary_light,sky_envelope}.rs`,
+`crates/hyperion-fit/src/tasks/{sky_binary_light,sky_envelope}.rs`,
+`crates/hyperion-sim/benches/sky.rs`.
 
 ### R06.T6 Candidate skips
 
@@ -968,8 +1019,14 @@ placement::generate` and `just ci` (every golden unchanged).
   (Design note 8). Tests (slow): for 10⁴ masses drawn densely in each layer and ages across each
   component, no track is brighter than the envelope; the margin of 0.3 mag is never used by more
   than 0.1 mag. (The plan's third test, that V never falls with mass along the early phases, was
-  dropped, decided 2026-10-03: Design note 10's correction.) Acceptance: `cargo test -p
-hyperion-sim sky::envelope`, and `just test-slow envelope_bounds_dense_tracks` passes.
+  dropped, decided 2026-10-03: Design note 10's correction.) The envelope is a fitted table
+  (decided 2026-10-03, `decision-r06-tables.md`): the hyperion-fit task `sky_envelope` (fit-check,
+  sim-fingerprint) writes `tables::sky_envelope` from `build_with`, in integer millimagnitudes rounded
+  brighter (toward −∞) with a sentinel for "dark", so it stays a bound; `BrightnessEnvelope::build`
+  reads it at no cost, and the slow tests `envelope_bounds_dense_tracks` and
+  `envelope_bounds_pair_states` (T16.b) test the checked-in table. Acceptance: `cargo test -p
+hyperion-sim sky::envelope`, `just fit-check`, and `just test-slow envelope_bounds_dense_tracks`
+  passes.
 
 ### R06.T7 Layer caps
 
@@ -985,7 +1042,10 @@ at six points ((0, 26,000, 68), (0, 150, 0), (26,000, 0, 68), (−18,385, −18,
 and (0, 26,000, 2,000)), every layer's expected count beyond its cap, recounted with 3,072 rays and
 twice the radial steps, is under 1.5; if it fails, `CAP_RAYS` rises to 1,536 or 3,072, never the
 gate. The measured caps are recorded in the doc comment and in the notes of R06.T17 for open
-question 19. Files: `sky/caps.rs`, `galaxy/gas/extinction.rs` (`profile`). Acceptance: `cargo test
+question 19. Decided 2026-10-03 (`decision-r06-tables.md`): the rays are split into chunks the
+server runs as pool jobs, each with its own `NoiseCache`, the count serial in ray order (the bits
+unchanged); the caps are re-recorded after R06.T5.d and R06.T5.e; item 3's ratio scaling is
+replaced by T5.d's count excess. Files: `sky/caps.rs`, `galaxy/gas/extinction.rs` (`profile`). Acceptance: `cargo test
 -p hyperion-sim sky::caps`, `cargo test -p hyperion-sim gas::extinction` and `just test-slow
 caps_converge_in_rays`.
 
@@ -1003,7 +1063,8 @@ caps_converge_in_rays`.
   P11.T11), its position from `star_positions_at`'s `(BodyId, SystemPosition)` rows; the brief is
   `BriefModel::new` (`of_member` once T16.a brings members); a centre member is caught by
   `Drift::of_record`'s `TraceMotionError` before any brief is built, since `BriefModel::of_record`
-  panics for one. Tests: the observer's own system is absent; a system whose primary is a white
+  panics for one. The tables' light ages are read through `LuminosityTables::age_for(t, a)`
+  (one table per galaxy at t_ref = +H, decided 2026-10-03). Tests: the observer's own system is absent; a system whose primary is a white
   dwarf beside a bright companion lists the companion; a system whose primary is post-AGB beside a giant
   companion takes the envelope bound and lists the companion; a centre member is tallied, not
   listed. Acceptance: `cargo test -p hyperion-sim sky::census::cell`.
@@ -1036,7 +1097,8 @@ first arrival.
   `SIGHTLINE_QUALITY` (on `origin/galaxy-generation` only at re-validation). Tests: its last node equals `sightline` over the same segment to 10⁻¹²
   relative; it is monotone in distance; at `Mean` it reads no cache. Files:
   `galaxy/gas/extinction.rs`. Acceptance: `cargo test -p hyperion-sim gas::extinction`.
-- **R06.T9.b The band.** `sky::band::{CubeFace, BandSpec, BandTexel, band_rows}` (Design note 15).
+- **R06.T9.b The band.** `sky::band::{CubeFace, BandSpec, BandTexel, band_rows}` (Design note 15),
+  reading the tables' light ages through `LuminosityTables::age_for(t, a)` (decided 2026-10-03).
   Tests: the sum over rows equals one call over the face; an observer above the disc sees a band
   brighter towards the plane than towards the pole by the model's own integral; near the Sun the
   band's surface brightness lies within 0.5 mag of the brainstorm's 22.4 in the plane and 24 at the
@@ -1106,9 +1168,13 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   ask, and recorded. Acceptance: `cargo test -p hyperion-server sky` and `just ci`.
 - **R06.T11.c The band, the limits, the discs and the tables.** The band as bulk jobs by face and
   row, then the limit map, then `host_discs` of `exclude_system` at the request's time; the
-  luminosity tables and envelope built once per galaxy and time bucket under `SingleFlight` in a
-  `ByteLru`. Tests: a sky near the Sun returns the stars, texels and host discs the sim returns for
-  the same query; a second identical request shares the tables' build. Acceptance: `cargo test -p
+  luminosity tables built once per galaxy, keyed by `GalaxyKey` alone, under `SingleFlight` in a
+  `ByteLru` of their own budget, `HYPERION_SKY_TABLES_MB` (default 160, two galaxies; separate from
+  `HYPERION_SKY_CACHE_MB`), as `Priority::Bulk` pool jobs from `LuminosityTables::plan` (the
+  envelope is the fitted table, with nothing to build), and the caps as ray-chunk pool jobs
+  (decided 2026-10-03, `decision-r06-tables.md`). Tests: a sky near the Sun returns the stars,
+  texels and host discs the sim returns for the same query; a second identical request shares the
+  tables' build; a second sky in another time bucket shares the build. Acceptance: `cargo test -p
 hyperion-server --test sky`.
 
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
@@ -1322,7 +1388,14 @@ the Sun to V 7 (IDs, star indices, V to 10⁻⁶ mag), and `sky/band_face_row.go
 row, read by the testkit's golden harness. Record the per-record bound's pass rate (records
 generated ÷ records skipped) for single and multiple systems in each census bench, against T16.b's
 25% trigger (decision record item 2). Decide N_max and the sprite budget per setting from the
-measurements (open question 16) and record them. Each timing is taken on a quiet machine, as the
+measurements (open question 16) and record them. Record the tables' build in CPU and wall time, its
+heap and the cold first sky against the budget decided 2026-10-03 (`decision-r06-tables.md`): the
+per-galaxy tables at most 30 CPU-s on a quiet machine, and the cold first sky near the Sun at most
+10 s wall on the dev machine with the default workers; if either fails, propose the disk cache
+(keyed by `GalaxyKey` and a sim fingerprint) or deeper node cuts. Record T5.d's residuals and the
+band's pair correction at the decision's three harness points ((0, 26,000, 68), (0, 8,000, 0) and
+(0, 3,000, 0)). The fits `sky_binary_light` and `sky_envelope` join the check list (`just
+fit-check`). Each timing is taken on a quiet machine, as the
 roadmap's conventions require, or marked provisional. Acceptance: `just ci`, and the named `just test-slow` and `just
 bench -- sky` runs above complete.
 
@@ -1847,6 +1920,22 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   0.01–100 and a background within 0–10¹² cd m⁻², so every limit is finite and `naked_eye_limit`
   cannot panic; `veiling_luminance` refuses a negative angle; MES2's weight is a `PhotopicWeight`
   newtype (0–1), which `mesopic_weight` returns and `blackwell_equivalent_factor` takes.
+- **Binary light and the tables' cost (decided 2026-10-03, `decision-r06-tables.md`).**
+  R06.T5.c found pair-evolved light 9% and 21% below single-star light in the solar circle's
+  layers C and D, and 4%, 11% and 10% below it in the bulge's C, D and E. That is first-order,
+  against item 3's second-order estimate. Carried into the band's integral, the band would be 7–12%
+  (0.08–0.14 mag) too bright and redder. T5.d corrects the light with a fitted, galaxy-independent
+  table of pair-minus-single differences, by layer, age, \[Fe/H\] and 1-mag M_V bin. The counts the
+  caps read take only the excess, and the envelope and the rule's bound are untouched (T16.b).
+  Those tables are bounds, and a deficit cannot be allowed to loosen them. The fitted correction
+  is only as good as its sampling (gate: 1σ under 2% of a layer's light) and as plan 11's pair
+  laws. A galaxy with a non-default mass function takes no correction unless it is fitted.
+  On cost: a full table build took 64–142 s on one thread and holds about 55 MiB. The envelope,
+  which depends on no seed, is now a checked-in fit. The tables depend on the seed, so they are
+  built once per galaxy (one reference time, +H, serves the whole ±1,000-year window) as parallel
+  pool jobs, with node counts cut in T5.e under a 1% gate. The first sky of a session waits on that
+  build: about 5–10 s on the dev machine, and longer on a 4-core laptop. T17 checks it against
+  30 CPU-s and a 10 s cold first sky, with a sim-fingerprinted disk cache as the fallback.
 - **Deviations in T5, as built.** `sky::luminosity` and `sky::photometry` as Design note 7 sets
   them out, with these differences. Each living phase of a node's track is cut at its segment
   ends, its knots and 32 equal parts, and each part is read at three-point Gauss–Legendre's nodes
