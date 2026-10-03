@@ -40,6 +40,7 @@ import {
   rootKey,
 } from "./patchKey";
 import { finestPatchSizeM, type GroundContact, inForcedRegion } from "./grounded";
+import { compareRequests } from "./priority";
 import { type BodyFixedVec3, levelBoundM, levelHeightRangeM, type PlanetGeometry } from "./planet";
 
 /** A patch the selection asks to draw. */
@@ -552,17 +553,7 @@ function demandOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchRequest
       forced,
     });
   }
-  return [...requests.values()].toSorted((a, b) => {
-    if (a.forced !== b.forced) {
-      return a.forced ? -1 : 1;
-    }
-    if (a.priority !== b.priority) {
-      return b.priority - a.priority;
-    }
-    const ka = patchKeyString(a.key);
-    const kb = patchKeyString(b.key);
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
-  });
+  return [...requests.values()].toSorted(compareRequests);
 }
 
 /** The patches of a key's level sharing an edge or a corner with it. */

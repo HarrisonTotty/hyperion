@@ -3118,3 +3118,12 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   gives a finite excess that a secondary view's weight still scales. `maxPatches` counts forced
   patches but never refuses them, so a selection can exceed it by the forced region, its balance
   and the six roots.
+- **Deviations in T7.d, as built (several views, 2026-10-03).** The union of the views is one
+  traversal (T7.b), and the demand is built in `select.ts` (T7.c's breadth-first rule).
+  `priority.ts` holds `compareRequests` (forced first, then the higher priority, then
+  `patchKeyString`), `PRIMARY_VIEW_WEIGHT` (1) and `SECONDARY_VIEW_WEIGHT` (0.25). A request's
+  priority is the largest w_view × ρ ÷ τ over the views of the patch drawn in its place, its
+  parent (a root's own). `priority.test.ts` builds demand with everything to level 2 baked, so
+  that it reaches level 3: two views at one pose request each patch once, a secondary view's
+  priorities are the primary's × 0.25 (the near-plane floor keeps them finite), forced patches
+  come first, and the order is `compareRequests`'s.
