@@ -3117,3 +3117,45 @@ medium, sizes, figure)`.
   without allocation and the leaf walk stopped at the first interior node, a warm call takes
   about 80 ms on the loaded development machine (360 ms before): still more than a frame, so the
   per-frame cost is revisited when T11.c drives selection each frame.
+- **Deviations in T7.c, as built, with the patch-demand ruling (2026-10-03,
+  `decision-r05-patch-demand.md`, items 4a, 4b and 4d), which amend Design notes 7, 10, 23 and 24.**
+  - _The grounded rule._ `grounded.ts` holds `GroundContact` (moved from `select.ts`),
+    `FORCED_REGION_RESIDENCY_S` (30 s), `DESCENT_ALTITUDE_M` (1 km), `DESCENT_TIME_TO_CONTACT_S`
+    (30 s), `isDescending(altitudeM, verticalSpeedMps)` (positive upward), `finestPatchSizeM`
+    (64 of the finest level's largest spacings, 20.7 m on the test planet), `heldRadiusM`
+    (r_g = radius + one finest patch), `morphRampM` (one finest patch), `forcedRadiusM` (r_g + the
+    ramp + one more patch), `inForcedRegion` and `contactHold`. `morphHold(v, grounded,
+patchSizeM)` takes the finest patch size as a third argument. The hold is term for term lane
+    C's `terrain.wgsl` `morphFactor` (clamp((|v − c| − r_g) ÷ ramp, 0, 1), a step at r_g when the
+    ramp is 0), pinned by a test against the shader's expression evaluated in `f32`; lane C's
+    `vertexEmulation.ts` has no hold to pin against. A contact's forced region is measured from
+    the patch's box, not its bounding sphere: with the level's ±24.5 km height range a sphere
+    reaches tens of kilometres past the footprint and forced a 25 km disc to the finest level.
+    Both rules are three-dimensional, so a body above the ground is passed as a contact at the
+    surface beneath it (`GroundContact`'s documentation).
+  - _Inherited height ranges (4a)._ `SelectionInput.heightRanges` (a `HeightRangeLookup`, which
+    `PatchCache` implements through `heightRangeM(key)`) feeds `inheritedHeightRangeM`: the nearest
+    baked ancestor's range, rounded outward from `f32`, widened by ε_m + ε_{n−1} and below by the
+    skirt (ε_n and an `f32` step), within the level's range. `patchBounds` takes the range as an
+    optional third argument; the bounds memo is per level by numeric key, with the range it was
+    built for. `select.wasm.test.ts` bakes ancestors and descendants with the module and finds no
+    baked height outside the inherited range. Design note 7's inputs now include the baked ranges.
+  - _The budget (4b)._ `SelectionInput.maxPatches` (absent: no limit): selection refines from the
+    roots by a max-heap on (forced, w × ρ ÷ τ, level, key), each split balanced at once by
+    `PatchLeafSet.splitBalanced` (the restricted quadtree, now incremental, exported for its
+    tests, with `begin`/`commit`/`rollback`), and a split that takes the leaves past the budget is
+    undone and stops the run with `Selection.limited` true; forced splits are never refused. A run
+    may pass through more leaves than it ends with (a split drops children no view sees), so a
+    budget equal to the unbudgeted count can still stop it. `restrictQuadtree` is gone.
+    `terrainConditions` reads `limited` as `DETAIL LIMITED` (Design note 23), so the high setting
+    passes its selection as its own reference.
+  - _Breadth-first demand (Design note 24)._ For each selected patch not baked, the shallowest
+    unbaked patch on its way down whose parent is baked (or a root) is requested once, at the
+    largest w × ρ ÷ τ of its parent, the patch drawn in its place; a forced patch is requested
+    directly. With nothing baked the demand is the roots.
+  - _Cost (4d)._ Leaves keyed numerically per level, the per-level error computed once a call, no
+    per-view array a node, interior neighbours without the face fold. At the 1.5 km pose (ridges
+    off, 1920 × 1080, fov_h 60°, τ = 1 px, tilted 69°), warm, on the development machine at load
+    23: 12,731 patches unbudgeted in about 75 ms, 1,952 (budget 1,952) in about 11 ms, 981 (budget 981) in about 5 ms. The ruling's 2 ms at p95 is not yet met; the remaining costs are the
+    per-node key string (for the baked-range lookup and the output map), the camera-relative
+    bounds objects and the neighbour arrays. Recorded, not asserted (Design note 27).
