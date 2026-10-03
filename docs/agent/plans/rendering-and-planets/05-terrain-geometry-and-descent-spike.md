@@ -2369,3 +2369,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
     least normal, 2⁻¹⁴, the bound is that absolute floor instead, since the stored value has lost
     its relative precision there. The check also asserts that an ordinary readback is refused, and
     passed on both variants on 2026-10-02.
+- **Deviations in T7.b, as built (the settings, 2026-10-02).** `view/quality/qualitySetting.ts`
+  landed first and alone, for R06.T13.f and R07; `selectPatches` and `screenSpaceErrorPx` follow
+  once T2's golden and T6's level table are built. `ViewSettings` has `terrain` only: T12.c adds
+  `atmosphere: TableSizes` with its values, as the task says. Added beside the Provides names:
+  `QUALITY_SETTINGS` (both settings in order, for tests and menus), and `TerrainNormals` and
+  `TerrainVertexPath`, the unions of `TerrainSettings.normals` and `.vertexPath`. The shapes are
+  `interface`s (the TypeScript rules), not the sketch's `type`s. The high cache budget is
+  400,000,000 B (Design note 10's "about 400 MB"); the low is 64 MiB.
