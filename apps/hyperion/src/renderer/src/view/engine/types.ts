@@ -470,9 +470,16 @@ export interface RenderEngine {
   /**
    * CPU readback of a texture level or a region of it, colour or depth.
    *
+   * @param access - `tolerance` lifts the refusal for the smoke harness's tolerance checks, as
+   * {@link RenderEngine.readBuffer}'s does (R05.T12.b's transmittance table).
    * @throws {@link PresentationOnlyReadback} as {@link RenderEngine.readBuffer} does.
    */
-  readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer>;
+  readTexture(
+    texture: TextureHandle,
+    level?: number,
+    rect?: TexelRect,
+    access?: "cpu" | "tolerance",
+  ): Promise<ArrayBuffer>;
   /** Per-pass GPU time for each frame, once its query set resolves; silent without the feature. */
   onPassTimes(listener: (times: PassTimes) => void): () => void;
   /** Every creation, destruction and upload, with its byte size and category. */
