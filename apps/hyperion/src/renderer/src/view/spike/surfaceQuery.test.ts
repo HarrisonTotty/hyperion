@@ -4,6 +4,7 @@ import {
   bakePatch,
   initSync,
   levelTable,
+  omittedSigmaM,
   NormalScale,
   surfaceHeightM,
   Ridges,
@@ -14,7 +15,6 @@ import { vertexDir } from "../terrain/cube";
 import type { PatchKey } from "../terrain/patchKey";
 import {
   answerSurfaceQuery,
-  patchKeyAt,
   SurfaceQuery,
   type SurfaceQueryModule,
   type SurfaceQueryReply,
@@ -27,7 +27,7 @@ function wasmBytes(): Uint8Array {
   return Uint8Array.from(atob(wasmDataUrl.slice(comma + 1)), (c) => c.charCodeAt(0));
 }
 
-const module: SurfaceQueryModule = { bakePatch, levelTable, surfaceHeightM };
+const module: SurfaceQueryModule = { bakePatch, levelTable, omittedSigmaM, surfaceHeightM };
 
 /** The test planet's finest level on its WGS 84 figure. */
 const FINEST = 19;
@@ -55,13 +55,6 @@ beforeAll(() => {
   initSync({ module: wasmBytes() });
 });
 
-describe("patchKeyAt", () => {
-  it("finds the patch whose centre vertex gave the direction", () => {
-    const key = { face: 4, level: 12, i: 1_234, j: 3_001 } as const;
-    expect(patchKeyAt(vertexDir(key, 32, 32), 12)).toEqual(key);
-  });
-});
-
 describe("answerSurfaceQuery", () => {
   it("hands out the module's level table", () => {
     const reply = answerSurfaceQuery(module, { kind: "level-table", id: 3, ridges: "off" });
@@ -84,6 +77,15 @@ describe("answerSurfaceQuery", () => {
     expect(Math.fround(reply.heightsM[0] ?? Number.NaN)).toBe(vertexHeights(key)[50 * 65 + 10]);
   });
 
+  it("hands out σ_n of every level, as the module has it", () => {
+    const reply = answerSurfaceQuery(module, { kind: "omitted-sigma", id: 8, ridges: "on" });
+    expect(reply).toEqual({
+      kind: "omitted-sigma",
+      id: 8,
+      sigmaM: Float64Array.from({ length: 25 }, (_, level) => omittedSigmaM(level, Ridges.On)),
+    });
+  });
+
   it("answers each direction it is given", () => {
     const reply = answerSurfaceQuery(
       { ...module, surfaceHeightM: (x, y, z) => x + 10 * y + 100 * z },
@@ -92,24 +94,66 @@ describe("answerSurfaceQuery", () => {
     expect(reply).toEqual({ kind: "height", id: 2, heightsM: Float64Array.of(321, 123) });
   });
 
-  it("bounds the surface over patches by their highest vertex plus their level's bound", () => {
-    const keys = [
-      { face: 2, level: 10, i: 300, j: 400 },
-      { face: 2, level: 10, i: 301, j: 400 },
-    ] as const;
-    const reply = answerSurfaceQuery(module, { kind: "max-height", id: 4, ridges: "off", keys });
-    const epsilon10 = levelTable(Ridges.Off)[40] ?? Number.NaN;
-    const highest = Math.max(...keys.flatMap((key) => vertexHeights(key)));
-    expect(reply).toEqual({ kind: "max-height", id: 4, maxM: highest + epsilon10 });
-    expect(epsilon10).toBeGreaterThan(0);
+  it("bounds the surface over each group by its highest vertex plus its level's bound", () => {
+    const a = { face: 2, level: 10, i: 300, j: 400 } as const;
+    const b = { face: 2, level: 10, i: 301, j: 400 } as const;
+    const c = { face: 2, level: 12, i: 1_200, j: 1_600 } as const;
+    const reply = answerSurfaceQuery(module, {
+      kind: "max-heights",
+      id: 4,
+      ridges: "off",
+      groups: [[a, b], [c]],
+    });
+    const table = levelTable(Ridges.Off);
+    const highest = (key: PatchKey): number => Math.max(...vertexHeights(key));
+    expect(reply).toEqual({
+      kind: "max-heights",
+      id: 4,
+      maxesM: Float64Array.of(
+        Math.max(highest(a), highest(b)) + (table[40] ?? Number.NaN),
+        highest(c) + (table[48] ?? Number.NaN),
+      ),
+      baked: 3,
+    });
+  });
+
+  it("bakes a patch the groups share once", () => {
+    let bakes = 0;
+    const counting: SurfaceQueryModule = {
+      ...module,
+      bakePatch: (...args) => {
+        bakes += 1;
+        return module.bakePatch(...args);
+      },
+    };
+    const shared = { face: 1, level: 8, i: 10, j: 20 } as const;
+    const other = { face: 1, level: 8, i: 11, j: 20 } as const;
+    const reply = answerSurfaceQuery(counting, {
+      kind: "max-heights",
+      id: 6,
+      ridges: "off",
+      groups: [[shared, other], [shared], [other, shared]],
+    });
+    expect(reply.kind).toBe("max-heights");
+    expect(bakes).toBe(2);
+  });
+
+  it("refuses an empty group", () => {
+    const reply = answerSurfaceQuery(module, {
+      kind: "max-heights",
+      id: 7,
+      ridges: "off",
+      groups: [[]],
+    });
+    expect(reply.kind).toBe("failed");
   });
 
   it("answers a key the module refuses as failed", () => {
     const reply = answerSurfaceQuery(module, {
-      kind: "max-height",
+      kind: "max-heights",
       id: 5,
       ridges: "off",
-      keys: [{ face: 0, level: 2, i: 9, j: 0 }],
+      groups: [[{ face: 0, level: 2, i: 9, j: 0 }]],
     });
     expect(reply.kind).toBe("failed");
   });
@@ -159,10 +203,11 @@ describe("SurfaceQuery", () => {
     const query = new SurfaceQuery(new InlineWorker(), "off");
     const [table, bound] = await Promise.all([
       query.levelTable(),
-      query.maxHeightM([{ face: 1, level: 8, i: 10, j: 20 }]),
+      query.maxHeightsM([[{ face: 1, level: 8, i: 10, j: 20 }]]),
     ]);
     expect(table).toHaveLength(100);
-    expect(bound).toBeGreaterThan(-30_000);
+    expect(bound).toHaveLength(1);
+    expect(bound[0]).toBeGreaterThan(-30_000);
   });
 
   it("fails a question outstanding when the worker fails", async () => {

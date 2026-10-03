@@ -104,6 +104,19 @@ place-ship *args:
 descent-demand *args: gen-surface
     cd apps/hyperion && node --no-warnings scripts/descentDemand.mjs "$@"
 
+# The descent spike (R05.T13.c): builds everything, starts a local server with `--num-workers 2`
+# and runs the client's `--descent-spike` with the spike's options (`--setting high|low`,
+# `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`, `--vertex-path`, `--normals`,
+# `--ridged on|off`, `--dawn-safety on|off`, `--capture <dir>`) and the recipe's own:
+# `--companion-load <threads>` (Design note 20), `--cold-cache` (an empty GPU shader cache) and
+# `--hidden` (the window never shown). `--smoke` runs 10 s hidden and exits with a status. A run
+# writes its results under `docs/measurements/descent-spike/`. Not part of `ci`.
+# Run the descent spike, e.g. `just descent-spike --setting low` or `just descent-spike --smoke`.
+[positional-arguments]
+descent-spike *args:
+    just build
+    bash apps/hyperion/scripts/descentSpike.sh "$@"
+
 # Build the client and run the headless smoke harness on SwiftShader, once per capability path
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a
@@ -235,6 +248,12 @@ test-slow *args:
     cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only --no-run
     cargo build -q -p hyperion-fit
     just _locked bash -c '{{ slow_then_check }}' test-slow "$@"
+
+# The client's slow tests: the descent spike's terrain clearance on all six of its ruling's runs
+# (seeds 0, 1 and 7, ridges off and on, decision-r05-descent-clearance.md), some 600 real bakes a
+# run. `just ci` runs the roughest of them alone.
+test-slow-client: gen-surface
+    just _locked bash -c 'cd apps/hyperion && HYPERION_SLOW_TESTS=1 pnpm exec vitest run src/renderer/src/view/spike/clearance.wasm.test.ts'
 
 # The body of `test-slow`'s locked step: the slow tests with the recipe's arguments, then the timed
 # check.
@@ -592,4 +611,4 @@ _typecheck-ts:
     pnpm typecheck
 
 # `ci` plus the slow statistical tests, natively and on WebAssembly: the full gate.
-ci-slow: ci test-slow test-wasm-slow test-gpu-replay
+ci-slow: ci test-slow test-wasm-slow test-gpu-replay test-slow-client

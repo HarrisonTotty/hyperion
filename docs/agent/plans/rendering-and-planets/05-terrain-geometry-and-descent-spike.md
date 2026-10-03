@@ -3403,17 +3403,17 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
       other source of it;
     - the landing site's height, from lane A's `surfaceHeightM` export: T4.c's collision
       interpolant, bit for bit with native;
-    - a true upper bound of the terrain under the low pass's track: each level-12 patch's highest
-      baked vertex plus ε₁₂.
+    - a floor under each of T13.a's stretches (`trackStretches`, decision-r05-descent-clearance.md):
+      the highest baked vertex plus ε_n over the stretch's patches at its bound level and their
+      eight neighbours (T13.a's `stretchKeys`), in one batch, `SurfaceQuery.maxHeightsM(groups)`,
+      each distinct patch baked once (about 600);
+    - σ_n of every level (`SurfaceQuery.omittedSigmaM`), for T13.c's calibrated pass.
 
-    It then builds T13.a's `DescentProfile` with `{ siteHeightM, trackMaxHeightM }`, so the
-    script stays a function of the seed.
-    - `trackPatchKeys(profile, bounded)` samples the chosen segments' ground track at most half
-      the level's shortest patch edge apart, at the segment's fastest speed, and takes each
-      sample's patch with its eight neighbours, so no patch under the track is missed. By default
-      `bounded` takes the `clearsTrack` segments.
-    - **Pending a ruling** (`decision-r05-descent-clearance.md`): nothing bounds the terrain under
-      the slowdown and the flare's last blend. The ruling is a one-line change of `bounded`.
+    It then builds T13.a's `DescentProfile` with `{ siteHeightM, stretchMaxHeightsM }`, so the
+    script stays a function of the seed and the measured numbers. A profile the floors make
+    unflyable throws, and `prepareDescent` raises `DescentRefused`: the spike refuses to fly and
+    says `DESCENT REFUSED: terrain cannot be cleared on this seed, relaunch with another seed`.
+    `trackPatchKeys` and `TRACK_BOUND_LEVEL` are gone.
 
   - _The contact._ The craft is a contact while it is grounded or descending (Design note 9),
     judged on `clearanceM`, the height above the site's terrain, not the datum:
@@ -3456,15 +3456,15 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
       made by this engine". It now renews them on resize, and a regression test fails without
       the fix.
     - Two wireframe instruments sit side by side under the main view:
-      - `ORBIT`: three planetary radii over the craft, with the graticule, the craft and its path.
-        The path is the craft's `predictedPath`, 256 body-fixed points over the whole script.
+      - `ORBIT`: seven planetary radii over the craft (`ORBIT_INSTRUMENT_RADII`, so the disc fits a wide instrument), with the graticule, the craft and its path.
+        The path is the craft's `predictedPath`, 256 body-fixed points from now to the end.
       - `CRAFT`: R02's chase preset.
 
       Each has R02's label block beside its canvas, not over it, at R02's default 60° field of
       view.
 
     - Each canvas is focusable, named (`VIEW, SPIKE LIT, SCRIPTED`; `VIEW, WIREFRAME, ORBIT,
-FREE`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to the one list of
+SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to the one list of
       the scene's bodies and craft. All three lists would be identical. The list's selection is
       drawn as the bracket reticle on both instruments. The lit view draws no marks.
     - Each canvas's role is `img`, since it is a picture, not a control, and a lint suppression
@@ -3472,27 +3472,59 @@ FREE`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to the o
     - The main view's label block keeps R02's lines with `STYLE SPIKE LIT` and `CAMERA SCRIPTED`.
       It states `TEST PLANET: provisional, dry and hand-parameterised` and the debounced terrain
       line.
-    - The page fills the window under a header strip with the `TRAINING` banner, since it draws a
-      kept scene. Only the list scrolls.
-    - One console panel, `DESCENT`, shows at 4 Hz: the spike seed in 16-digit hex, the setting,
-      the segment, the script time in s, the clearance and site height in whole metres (one unit
-      at every altitude, so no switch to flicker), both speeds to 0.01 m/s, `GROUND CONTACT`
-      `YES`/`NO`, and the patch counts. Every reading shows `—` while no run draws: a run that
-      stops clears them rather than freezing them.
+    - The page fills the window under a header strip with the `MEASUREMENT` banner. Only the list
+      scrolls.
+    - One console panel, `DESCENT`, shows at 4 Hz:
+      - the spike seed in 16-digit hex, the `QUALITY` and the segment;
+      - the script time in s;
+      - `HEIGHT ABOVE SITE`: to 0.1 m below 10 m, whole metres to 10 km, then km to one decimal,
+        with hysteresis at 9.5 and 10.5 km;
+      - the ground speed, whole from 100 m/s; the vertical speed, signed, to 0.01 m/s;
+      - `CAMERA ELV`, signed;
+      - `SITE HEIGHT`, signed whole metres;
+      - `FINEST TERRAIN HELD` `YES`/`NO`;
+      - the patch counts, which break only at their `·`.
+
+      Each reading's field holds its longest value, right-aligned. Every reading shows `—` while
+      no run draws: a run that stops clears them rather than freezing them.
+
     - The statuses use fixed words with the remedy, and the cause goes to the log:
-      - `TERRAIN MEASURING: …`;
+      - `MEASURING TERRAIN: landing site and ground track`;
       - `TERRAIN NOT MEASURED: surface query failed, relaunch to retry`;
+      - `DESCENT REFUSED: terrain cannot be cleared on this seed, relaunch with another seed`;
       - `GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry` (`ViewDisplay`'s
         words);
       - `GRAPHICS NO ADAPTER: views not available, relaunch to retry`.
 
       A frame the engine refuses stops the run with the same fault.
 
-    - **Drafts for the owner, the guide's nomenclature list:** `DESCENT SPIKE`, `SPIKE LIT`,
-      `SCRIPTED`, `SPIKE SEED`, `SEGMENT` and its seven values, `SETTING`, `SCRIPT TIME`,
-      `CLEARANCE`, `SITE HEIGHT`, `GROUND CONTACT`, `TERRAIN MEASURING` and `TERRAIN NOT
-MEASURED`. The spike is built to these meanwhile. Whether a measurement view behind a flag
-      needs the `TRAINING` banner is also the owner's; it shows one for now.
+    - _The labels, decided 2026-10-03_ (decision-r05-spike-ux.md, on the owner's delegation):
+      - `MEASUREMENT` replaces `TRAINING`;
+      - `SETTING`, `CLEARANCE` and `GROUND CONTACT` become `QUALITY`, `HEIGHT ABOVE SITE` and
+        `FINEST TERRAIN HELD`;
+      - the measuring status leads with its verb;
+      - `CAMERA ELV` and `DESCENT REFUSED` are added.
+
+      The guide gains the measurement banner in Layout, the `SCENE` row's `DESCENT SPIKE`, and 18
+      drafted nomenclature rows.
+
+    - The orbit instrument's `CAMERA` reads `SCRIPTED`, not `FREE`. It keeps only `FRAME`, `TIME`,
+      `STYLE`, `CAMERA` and `FOV`, as the craft instrument does. It draws the craft as a target
+      mark at its fixed size: as the own ship the craft carried none, and its hull is below a
+      pixel at seven planetary radii.
+    - The predicted path runs from the script's time to its end, dashed; the flown part is not
+      drawn, and at the end there is none.
+    - Until another mark is chosen, the orbit instrument marks the craft with the bracket reticle,
+      so that it reads against the graticule.
+    - The patch counts stand one to a line, four lines always, so the panel never changes height.
+    - The side column is `clamp(27rem, 25vw, 30rem)`. Instrument label values never wrap, and an
+      instrument's canvas may narrow to 5rem.
+    - Checked on hidden, offscreen full-window screenshots at 1920 × 1080 and 1280 × 720 (an
+      Electron `--require` capture hook on the built app; never shown, fresh profile, process
+      group killed). Both fit with nothing cut off. At 1280 × 720 the orbit's canvas is narrow, and
+      its disc small.
+    - **Found for lane D:** at seed 7, the orbit coast shows a vertical speed of +18.37 m/s while
+      the height above the site climbs from 400.0 to 401.0 km. The coast should be level.
   - _The metrics seam_ (the orchestrator, 2026-10-03, agreed with lane D).
     - `DescentSpike` takes `engineSource` (T13.c passes the source that wraps the GPU through
       `pipelineShim` or `capture`) and `listeners`: `onFrame(SpikeFrameSample)` and
@@ -3602,10 +3634,11 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
   - **Finding: D's factor of two** (windows re-measured 2026-10-03 after the direction fix and
     over the stretches' floors, D at the height above the floor). In the windows (min(hard, 4σ_n),
     ridges off), demand ÷ D is, high then low: orbit coast 0 / 0 (D 0.9 and 0.04 a second,
-    nothing new selected), descent arc 0.57 / 0.47, approach and flare 1.20 / 0.86, low fast pass
-    0.79 / 1.52, slowdown 0.61 / 1.67, vertical descent 0 / 0 (D 81 and 25), and the hover 0
-    against 0. The test asserts the seven within a factor of two: high's approach, low pass,
-    slowdown and arc, low's approach, low pass and slowdown. Two causes are clear. D assumes a ring all
+    nothing new selected), descent arc 0.57 / 0.47, approach and flare 1.22 / 1.23, low fast pass
+    0.74 / 1.43, slowdown 0.30 / 1.28, vertical descent 0 / 0 (D 81 and 25), and the hover 0
+    against 0 (re-measured after the clearance follow-up, 2026-10-03). The test asserts the six
+    within a factor of two: high's arc, approach and low pass, low's approach, low pass and
+    slowdown. Two causes are clear. D assumes a ring all
     round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
     chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
     vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
@@ -3624,6 +3657,63 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     against D's 311), `selectPatches` p50 116 ms. Lane B fixed it (5d90fab, the streaming gate,
     resident ancestors pinned, deepest evicted first); the hard cells' full record follows the
     collapse's fix.
+
+- **Deviations in T13.c, as built** (2026-10-03, lane D).
+  - _The command line._ `cli.ts` takes the plan's options with commander (`--ridged`, the plan's
+    name, not `--ridges`); `ClientArgs.spike` is `SpikeLaunch` (`preload/api.ts`): setting
+    (default high), seed (a u64 in decimal, default 7, T13.a's record seed), smoke, out, workers
+    (1–64), vertex path and normals (`null` for the setting's own), ridged (default off),
+    Dawn safety (default on) and capture. Each spike option without `--descent-spike` is a usage
+    error, as is `--setting low --vertex-path baked-offsets` (the low cache, Design note 4).
+  - _The hand-off._ `preload/spikeLaunch.ts` carries the options as one
+    `--hyperion-descent-spike=<JSON>` switch; `preload/spikeApi.ts`'s `spikeMember` gives
+    `HyperionApi.spike` only when it is there (tested on an ordinary argv). `SpikeApi`:
+    `launch`, `startTrace`, `stopTrace`, `sampleMemory` (the preload's
+    `process.getProcessMemoryInfo().private`, handed to the main process's sampler), `writeResults`,
+    `writeCapture`, `end`. One fixed channel each (`SPIKE_CHANNELS`, repeated in the preload and
+    tested equal).
+  - _The main process._ `main/ipcSender.ts`'s `isOwnPage(frame, pageUrl, mainFrame?)` is the smoke
+    harness's inline check factored out (the smoke harness uses it), and the spike's handlers also
+    require the window's own main frame. `main/spikeReport.ts` checks the report and the capture
+    (every series the frames' length, every figure finite). `registerSpikeHandlers` in
+    `main/spike.ts` rejects a foreign sender or unchecked arguments; `main/spikeSession.ts` holds
+    the run: the trace and the 1 Hz `MemorySampler` between start and stop, the trace written into
+    the run's profile and removed once reduced (it can reach 1.4 GB), a failed reduction a missing
+    figure with its reason, the results through `buildResults`/`writeResults`, the capture's
+    `capture.json` and `capture.bin`, and the exit status. `index.ts` applies `launchSwitches` in
+    place of `graphicsSwitches` (the spike always asks for `gpuTiming`), reads `nvidia-smi`'s
+    baseline before the window, sizes the window's content to 1920 × 1080 (high) or 1280 × 720
+    (low), keeps it hidden and offscreen for `--smoke` or `HYPERION_SPIKE_HIDDEN=1` (the recipe's
+    `--hidden`; headless Ozone's GPU process exits on a hardware adapter), and ends a run that
+    never ends after 3 min (smoke) or 45 min with status 3.
+  - _The renderer._ `view/spike/spikeHarness.ts`: `spikeGpu(gpu, capture, scriptTimeS)`, the
+    spike's `ViewEngineSource` over a wrapped `GPU` (`LoadEngineOptions.gpu` the same), whose
+    devices carry the pipeline tally, a `ResolveCounter` and the capture; `rowOf` and
+    `SPIKE_PASS_ROWS` (`meta.passRows`); `SpikeRecorder`, which feeds `SpikeMetrics`. **The
+    engine frame.** R01's timer numbers each resolve, one a `renderFrame`, so a spike frame of five
+    views spans several `PassTimes.frame` numbers. The resolve counter counts
+    `resolveQuerySet` on the device's encoders, which is that number as it is given out, so each
+    spike frame records the last one it reached and `SpikeMetrics.passTimes` assigns an engine
+    frame to the first spike frame whose last is at or after it (earlier ones, before the run,
+    to none), summing a label timed twice (the two `view:wireframe` passes). `patchesCalibrated`
+    re-runs `selectPatches` on each selection's own inputs under `boundedPlanet(…, "calibrated",
+σ)`. The adapter's peak is the recorder's own running total of created less destroyed bytes
+    (T11.a's tally keeps peaks per category). The predicted D of a segment is the mean of
+    `perLevelDemand` over its 1 Hz poses at the height above the floor.
+    `view/spike/spikeController.ts` runs the run: measuring from the measured descent, memory at
+    1 Hz, the capture (120 frames from 5 s into the low fast pass, or from 5 s in a smoke run,
+    started between frames in `onFrame`, ended early where the run ends first), and at the end
+    the trace stopped, the results written and a pass sent; a smoke run passes at 10 s if a patch
+    was baked in a worker. A terrain variant other than the setting's own is refused until lane C's
+    `terrainSettingsFor` override lands (decision-r05-spike-ux.md, "Spike variant flags").
+  - _The recipe._ `just descent-spike` runs `just build`, then `scripts/descentSpike.sh`: the
+    server as `cargo run --release -p hyperion-server -- --num-workers 2 --port 7879`
+    (`HYPERION_SPIKE_PORT`; release to reuse the build, and off the default port other lanes'
+    servers use), `--companion-load <n>` busy threads, the client on `out/` under `setsid timeout
+--kill-after=10` with a fresh `--user-data-dir`, every process group killed at the end. The
+    plan's `--cold-cache` needs a cache to keep across fresh profiles: the script keeps the
+    profile's `*Cache` directories in `target/descent-spike/gpu-cache`, copies them into each new
+    profile and back after, and `--cold-cache` empties them first.
 
 - **The scripted descent's terrain clearance** (decision-r05-descent-clearance.md, 2026-10-03). The
   script is flown above per-stretch true bounds of the finest mesh. Each bound is the baked maximum
@@ -3682,8 +3772,64 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     its climb, bit for bit (the test pins 64 Hz pose fingerprints taken from 003a6a3's profile).
     Old callers whose `trackMaxHeightM` lifted the low pass (including the default 0 m over a site
     below the datum) now fly it level, a change on purpose.
-  - **Open (asked of the orchestrator, 2026-10-03):** rule 3 compares a split segment's interior
-    boundaries with the unlifted table, so a lifted low pass beside a split slowdown saw-tooths
-    (slowdown 1 falls from the lifted level to near the table's ~283 m, slowdown 2 climbs to a
-    binding piece 3). Lean: take an interior boundary's table value as at least the straight line
-    in time between its segment's flown ends.
+  - **Split segments re-anchored, valleys filled** (decision-r05-descent-clearance.md,
+    follow-up, 2026-10-03, on lane D's question). Rule 3 compared a split segment's interior
+    boundaries with the unlifted table, so a lifted low pass beside a split slowdown saw-toothed.
+    As built: an interior boundary's shape is the table's shifted by its segment's two end lifts,
+    blended in time (`interiorBoundaries`), it is lifted against the floors from there, and
+    `fillValleys` raises it to the lower of the highest boundary before and after it in its
+    segment. A segment is split only where an interior boundary differs from that shape. Within a
+    split segment (and after a lifted low pass), a piece faster than the one before blends in from
+    that one's rate (`VerticalPiece.leadIn`, a forward solve over each such run inside the
+    back-to-front one) instead of the slower one blending into it: either way the blend bows its
+    host by about the other's rate × b ÷ 2, and a level piece before a 200 m/s fall bulged 95 m
+    (the flare under a 2 km ridge) and a gentle one before a 70 m/s climb dipped 30 m. The tests
+    hold every 64 Hz pose of a segment within 0.5 m of min(the highest before, the highest after)
+    in the ridges, lifted-low-pass and two-ridge-valley cases, and the 003a6a3 fingerprints.
+
+- **The clearance follow-up, as built (lane C, 2026-10-03).**
+  - `SurfaceQuery.maxHeightsM(groups)` (request `max-heights`) answers each group's floor in one
+    batch, baking each distinct key once, and refuses an empty group.
+  - T13.a's `stretchKeys` sampled the track half an edge apart only, so a pose whose patch the
+    track crossed at a corner between samples could miss its far neighbours. It now samples at
+    every 64 Hz pose too (a8a48eb, with a coverage test). The ranges fixture gains ten keys, and no
+    pinned hash moved.
+  - The contact reads `heightAboveFloorM`, as T13.a's demand record does.
+  - `clearance.wasm.test.ts` runs the ruling's checks on the real module, for seed 7 (the rough site,
+    1.85 km below the datum) with ridges on, in the suite:
+    - the finest mesh at every 64 Hz pose's ground direction, and half an edge to either side, lies
+      at or below the stretch's floor;
+    - the altitude above the finest mesh under the camera is at least the piece's C;
+    - touchdown is 1 m above the site, the table's value to 1e-6 m.
+
+    Each run bakes about 600 patches (about 20 s at load 50 or more). All six runs the ruling names,
+    seeds 0, 1 and 7 with ridges off and on, passed by hand on 2026-10-03. T13.a's lift solve meets
+    its floors to rounding (−4 × 10⁻¹¹ m), so the checks take its `FLOOR_TOLERANCE_M`.
+
+  - Only T13.a's `DescentUnclearable` (its lift limit) becomes `DescentRefused`. Floors of the
+    wrong count or not finite are a measurement fault and show `TERRAIN NOT MEASURED`. No finite
+    floor found by probing exhausts T13.a's four lifts, so the refused status is tested through
+    `DescentSpike`'s `prepare` prop.
+  - Scope (the orchestrator, 2026-10-03): `just ci` runs the roughest of the ruling's six wasm runs,
+    seed 7 with ridges on. `just test-slow-client`, added to `just ci-slow`, runs all six under
+    `HYPERION_SLOW_TESTS=1`.
+  - Seams for T13.c (the orchestrator, 2026-10-03):
+    - `PreparedDescent.omittedSigmaM`;
+    - `SpikeListeners.onPrepared(prepared)`, called once the measurement is ready;
+    - `SpikeListeners.onSelect(input, selection)`, through the new
+      `TerrainPassOptions.onSelect`, called after each `selectPatches` and outside the
+      `terrain.select` span; unset, it costs nothing.
+- **The spike's terrain variants, as built (lane C, 2026-10-03; the spike variant flags ruling in
+  decision-r05-spike-ux.md).**
+  - `qualitySetting.ts` gains `TerrainVariant { vertexPath?, normals? }` and
+    `terrainSettingsFor(setting, variant?)`: `SETTINGS[setting].terrain` with only the given fields
+    replaced. It throws a `RangeError` for `low` with `baked-offsets`.
+  - `TerrainPassOptions.terrain` defaults to `TERRAIN_SETTINGS[setting]` and is resolved once in
+    the constructor. It is read for the resources, the pool's normals and both τ reads, after a
+    device restore too. `setting` still decides the low setting's `DETAIL LIMITED`.
+  - Tests:
+    - no variant gives the setting's own object;
+    - each field replaces only itself;
+    - the low setting with `baked-offsets` throws;
+    - a high variant of `face-differences` with mesh normals reaches the pool, the material and
+      `terrainSlotLayout`'s slot count, and keeps them through a restore.
