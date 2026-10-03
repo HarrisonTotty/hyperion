@@ -6,3 +6,4 @@
 //! generator depends on it, and it opens no random stream.
 
 pub mod colour;
+pub mod disc;

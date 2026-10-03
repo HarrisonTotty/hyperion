@@ -1495,3 +1495,16 @@ plan reserves no tag, prefix or stream.
     `crates/hyperion-fit/tests/star_colour.rs` (they need the fetched data and say so when it is
     absent); the sim's `sky::colour` tests pin the committed table. `sky/mod.rs` was created here
     (T2 had not landed); expect a trivial merge with T2's.
+- **Deviations in T4.a, as built.** `limb_darkening` is a fast task over three fetched VizieR
+  catalogues (`claret_southworth_2022` Table 3 at [M/H] 0 and 2 km/s, `claret_southworth_2023`
+  Table 9, the first truncation method M1, and `claret_2020_white_dwarfs` table gh, both stored
+  decompressed). Grids: PHOENIX-COND 2,300–3,900 K and ATLAS 4,000–50,000 K at log g 0–6 by 0.5
+  (ATLAS clamped above 5 and at each temperature's least gravity); white dwarfs DA in LTE
+  3,750–35,000 K and DA in non-LTE 40,000–100,000 K at log g 6.5–9.5 (the non-LTE grid's gaps,
+  such as log g 8.0, interpolated linearly in log g). Rows are `sky::disc::LimbRow` (c and α in
+  B, V, R) as `static` arrays. The solar row comes out c 0.7837, α 0.6884, disc average 0.7993.
+  The test "I(0.1) within 0.015 of Cox 2000's polynomial" is taken against Pierce and Slaughter
+  1977's quadratic at 5,522 Å (Table III, 0.390), the source of Cox's table, since Cox 2000 could
+  not be read; the power-2 law gives 0.377, inside the tolerance by 0.002, and the quadratic
+  itself overestimates the limb by about 0.01 against fifth-degree fits (Neckel and Labs 1994,
+  0.382 at 550 nm).

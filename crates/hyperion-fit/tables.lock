@@ -86,6 +86,17 @@ provisional = true
 acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.6000 and standard deviation 0.6774, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.06227"
 
 [[table]]
+name = "limb_darkening"
+path = "limb_darkening.rs"
+task = "limb_darkening"
+revision = 0
+inputs_sha256 = "ae773e492b32179a05225122a198410ae3d3ec162a02e87ed81c89720fe020aa"
+body_sha256 = "18c94690bbce5e8e6fc661f6e04d8f992505c0da4285d5f13682cf39390e0ce5"
+since_generator_version = 19
+provisional = false
+acceptance = "the Sun (5,772 K, log g 4.438) in V: c 0.7837, α 0.6884, disc average 0.7993 (Design note 16: 0.7837, 0.6893, 0.799)"
+
+[[table]]
 name = "mge"
 path = "mge.rs"
 task = "mge"
