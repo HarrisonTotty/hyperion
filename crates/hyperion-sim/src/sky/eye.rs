@@ -43,7 +43,7 @@ use crate::units::{CandelasPerSquareMetre, Degrees, Lux, Magnitudes, MagnitudesP
 
 /// The deepest cut a sky may be asked to, V = 11.0: a camera's limit is clamped there, because a
 /// narrow zoom deeper than it would ask for some 10⁶ stars; a deeper exposure asks for a cone
-/// (Design note 5). `hyperion_protocol::sky` re-states it.
+/// (Design note 5). The protocol re-states it (R06.T10).
 pub const MAX_CUT_V: f64 = 11.0;
 
 /// The S/P ratio of a star of B − V = 0.7, Cinzano's typical naked-eye star: 2.297, from Crumey's
@@ -98,34 +98,47 @@ const MES2_B: f64 = 0.3334;
 /// bounds the loop, so the weight is a fixed function of its inputs.
 const MES2_MAX_ITERATIONS: u32 = 64;
 
+/// The field factors an [`EyeObserver`] accepts.
+const FIELD_FACTOR_RANGE: (f64, f64) = (0.1, 100.0);
+
+/// The S/P ratios an [`SpRatio`] accepts.
+const SP_RATIO_RANGE: (f64, f64) = (0.01, 100.0);
+
+/// The brightest background a [`SkyBackground`] accepts, cd m⁻².
+const MAX_LUMINANCE: f64 = 1e12;
+
 /// CIE 146:2002's validity bounds of the glare angle, degrees: smaller angles are read as 0.1°, and
 /// a source beyond 100° adds no glare.
 const GLARE_MIN_ANGLE_DEG: f64 = 0.1;
 const GLARE_MAX_ANGLE_DEG: f64 = 100.0;
 
-/// An [`EyeObserver`] or an [`SpRatio`] could not be built from the values given.
+/// An [`EyeObserver`], an [`SpRatio`], a [`SkyBackground`] or a [`PhotopicWeight`] could not be
+/// built from the values given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildEyeError {
-    /// The field factor F is not finite and positive.
+    /// The field factor F is not within 0.1–100.
     FieldFactor,
     /// The age is not finite and non-negative.
     AgeYears,
     /// The pigmentation factor p is not finite and within CIE 146's 0–1.2.
     Pigmentation,
-    /// An S/P ratio is not finite and positive.
+    /// An S/P ratio is not within 0.01–100.
     SpRatio,
-    /// A background luminance is not finite and non-negative.
+    /// A background luminance is not within 0–10¹² cd m⁻².
     Luminance,
+    /// A photopic weight is not within 0–1.
+    PhotopicWeight,
 }
 
 impl fmt::Display for BuildEyeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::FieldFactor => "the field factor is not finite and positive",
+            Self::FieldFactor => "the field factor is not within 0.1 to 100",
             Self::AgeYears => "the age is not finite and non-negative",
             Self::Pigmentation => "the pigmentation is not finite and within 0 to 1.2",
-            Self::SpRatio => "the scotopic-to-photopic ratio is not finite and positive",
-            Self::Luminance => "the background luminance is not finite and non-negative",
+            Self::SpRatio => "the scotopic-to-photopic ratio is not within 0.01 to 100",
+            Self::Luminance => "the background luminance is not within 0 to 1e12 cd/m2",
+            Self::PhotopicWeight => "the photopic weight is not within 0 to 1",
         })
     }
 }
@@ -158,7 +171,8 @@ impl EyeObserver {
     ///
     /// # Errors
     ///
-    /// [`BuildEyeError::FieldFactor`] unless the field factor is finite and positive,
+    /// [`BuildEyeError::FieldFactor`] unless the field factor is within 0.1–100 (Crumey's
+    /// real-world range is 1.4–2.4, §3.1; the bounds keep every threshold finite),
     /// [`BuildEyeError::AgeYears`] unless the age is finite and non-negative, and
     /// [`BuildEyeError::Pigmentation`] unless the pigmentation is finite and within 0–1.2.
     pub fn new(
@@ -166,7 +180,7 @@ impl EyeObserver {
         age_years: f64,
         pigmentation: f64,
     ) -> Result<Self, BuildEyeError> {
-        if !(field_factor.is_finite() && field_factor > 0.0) {
+        if !(FIELD_FACTOR_RANGE.0..=FIELD_FACTOR_RANGE.1).contains(&field_factor) {
             return Err(BuildEyeError::FieldFactor);
         }
         if !(age_years.is_finite() && age_years >= 0.0) {
@@ -212,7 +226,7 @@ impl Default for EyeObserver {
     }
 }
 
-/// A scotopic-to-photopic ratio ρ, finite and positive (Crumey's eq. 5; CIE 191:2010's "S/P
+/// A scotopic-to-photopic ratio ρ, within 0.01–100 (Crumey's eq. 5; CIE 191:2010's "S/P
 /// ratio"): the light's scotopic luminance, weighted by V′(λ) at 1,700 lm W⁻¹, over its photopic
 /// luminance, weighted by V(λ) at 683 lm W⁻¹.
 ///
@@ -231,9 +245,11 @@ impl SpRatio {
     ///
     /// # Errors
     ///
-    /// [`BuildEyeError::SpRatio`] unless `value` is finite and positive.
+    /// [`BuildEyeError::SpRatio`] unless `value` is within 0.01–100: a light's ratio runs from
+    /// about 0.2 for a deep red source to under 4 for the hottest stars, and the bounds keep every
+    /// threshold finite.
     pub fn new(value: f64) -> Result<Self, BuildEyeError> {
-        if value.is_finite() && value > 0.0 {
+        if (SP_RATIO_RANGE.0..=SP_RATIO_RANGE.1).contains(&value) {
             Ok(Self(value))
         } else {
             Err(BuildEyeError::SpRatio)
@@ -247,8 +263,8 @@ impl SpRatio {
     }
 }
 
-/// The background a star is seen against: its photopic luminance, finite and non-negative, and
-/// its S/P ratio.
+/// The background a star is seen against: its photopic luminance, 0–10¹² cd m⁻² (the Sun's disc
+/// is 1.6 × 10⁹), and its S/P ratio.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SkyBackground {
     luminance: CandelasPerSquareMetre,
@@ -260,13 +276,13 @@ impl SkyBackground {
     ///
     /// # Errors
     ///
-    /// [`BuildEyeError::Luminance`] unless the luminance is finite and non-negative.
+    /// [`BuildEyeError::Luminance`] unless the luminance is within 0–10¹² cd m⁻².
     pub fn new(
         luminance: CandelasPerSquareMetre,
         sp_ratio: SpRatio,
     ) -> Result<Self, BuildEyeError> {
         let b = luminance.value();
-        if b.is_finite() && b >= 0.0 {
+        if (0.0..=MAX_LUMINANCE).contains(&b) {
             Ok(Self {
                 luminance,
                 sp_ratio,
@@ -301,12 +317,43 @@ pub fn luminance(surface_brightness: MagnitudesPerArcsec2) -> CandelasPerSquareM
 /// The surface brightness of a luminance: μ<sub>V</sub> = 12.58 − 2.5 log₁₀(B ÷ 1 cd m⁻²) (Crumey
 /// 2014, §1.2).
 ///
-/// `None` for a luminance that is negative or not a number; zero luminance is +∞.
+/// `None` for a luminance that is negative or not finite; zero luminance is +∞.
 #[must_use]
 pub fn surface_brightness(luminance: CandelasPerSquareMetre) -> Option<MagnitudesPerArcsec2> {
     let b = luminance.value();
-    (b >= 0.0)
+    (b.is_finite() && b >= 0.0)
         .then(|| MagnitudesPerArcsec2::new(SURFACE_BRIGHTNESS_ZERO_POINT - 2.5 * math::log10(b)))
+}
+
+/// MES2's photopic weight m, 0 (fully scotopic) to 1 (fully photopic): the share of a light's
+/// effect carried by the cones (CIE 191:2010).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct PhotopicWeight(f64);
+
+impl PhotopicWeight {
+    /// A fully scotopic eye, m = 0.
+    pub const SCOTOPIC: Self = Self(0.0);
+    /// A fully photopic eye, m = 1.
+    pub const PHOTOPIC: Self = Self(1.0);
+
+    /// The weight `value`.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildEyeError::PhotopicWeight`] unless `value` is within 0–1.
+    pub fn new(value: f64) -> Result<Self, BuildEyeError> {
+        if (0.0..=1.0).contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err(BuildEyeError::PhotopicWeight)
+        }
+    }
+
+    /// The weight.
+    #[must_use]
+    pub const fn value(self) -> f64 {
+        self.0
+    }
 }
 
 /// The photopic weight m of CIE 191:2010's MES2 mesopic system for a background, 0 (fully
@@ -320,14 +367,14 @@ pub fn surface_brightness(luminance: CandelasPerSquareMetre) -> Option<Magnitude
 /// eqs. 5–7 and 11–13). A starlit background (ρ = 2.26) darker than about μ<sub>V</sub> 19.2 is
 /// scotopic.
 #[must_use]
-pub fn mesopic_weight(background: &SkyBackground) -> f64 {
+pub fn mesopic_weight(background: &SkyBackground) -> PhotopicWeight {
     let photopic = background.luminance.value();
     let scotopic = background.sp_ratio.value() * photopic;
     if scotopic <= MES2_SCOTOPIC_BOUND {
-        return 0.0;
+        return PhotopicWeight::SCOTOPIC;
     }
     if photopic >= MES2_PHOTOPIC_BOUND {
-        return 1.0;
+        return PhotopicWeight::PHOTOPIC;
     }
     let mut m = 0.5;
     for _ in 0..MES2_MAX_ITERATIONS {
@@ -346,7 +393,7 @@ pub fn mesopic_weight(background: &SkyBackground) -> f64 {
             break;
         }
     }
-    m
+    PhotopicWeight(m)
 }
 
 /// How much more a light of ratio `sp_ratio` excites the eye than the same photopic luminance of
@@ -355,8 +402,8 @@ pub fn mesopic_weight(background: &SkyBackground) -> f64 {
 /// [module](self) documentation). It is ρ ÷ 1.408, Crumey's eq. 6, when scotopic and 1 when
 /// photopic. The limit map weights each glare source's illuminance by it.
 #[must_use]
-pub fn blackwell_equivalent_factor(sp_ratio: SpRatio, photopic_weight: f64) -> f64 {
-    let m = photopic_weight;
+pub fn blackwell_equivalent_factor(sp_ratio: SpRatio, photopic_weight: PhotopicWeight) -> f64 {
+    let m = photopic_weight.0;
     let rods = (1.0 - m) * MES2_V_PRIME_555;
     (m + rods * sp_ratio.value()) / (m + rods * BLACKWELL_SP_RATIO)
 }
@@ -420,8 +467,9 @@ pub fn illuminance_of_magnitude(v: Magnitudes) -> Lux {
 ///
 /// # Panics
 ///
-/// Never: the threshold is finite and positive for every background, the background being
-/// clamped at [`DARKEST_BACKGROUND`] and the field factor positive by construction.
+/// Never: the threshold is finite and positive for every background, since the colour-corrected
+/// luminance lies between [`DARKEST_BACKGROUND`] and 10¹⁴ cd m⁻² and the field factor within
+/// 0.1–100, by construction of [`SkyBackground`], [`SpRatio`] and [`EyeObserver`].
 ///
 /// # Examples
 ///
@@ -468,7 +516,37 @@ pub fn star_colour_offset(star: SpRatio, background: &SkyBackground) -> Magnitud
 /// θ in degrees, A the observer's age and p their pigmentation. Below 0.1°, the equation's lower
 /// bound, θ is read as 0.1°; beyond 100°, its upper bound, the source adds nothing.
 ///
-/// `None` for an illuminance that is negative or not finite, or an angle that is not finite.
+/// `None` for an illuminance or an angle that is negative or not finite.
+///
+/// # Examples
+///
+/// The glare of a bright star 1° from a faint one is added to the band behind the faint one, in
+/// the band's own light, before its limit is taken; a red star is then seen to a brighter
+/// magnitude than the reference star:
+///
+/// ```
+/// use hyperion_sim::sky::eye::{
+///     EyeObserver, SkyBackground, SpRatio, blackwell_equivalent_factor, illuminance_of_magnitude,
+///     luminance, mesopic_weight, naked_eye_limit, star_colour_offset, veiling_luminance,
+/// };
+/// use hyperion_sim::units::{Degrees, Magnitudes, MagnitudesPerArcsec2};
+///
+/// let eye = EyeObserver::default();
+/// let starlight = SpRatio::new(2.26)?;
+/// let band = SkyBackground::new(luminance(MagnitudesPerArcsec2::new(22.4)), starlight)?;
+/// // A V = −1.5 star of ratio 2.6, its veil weighed by the rods as the band's light is.
+/// let m = mesopic_weight(&band);
+/// let weight = blackwell_equivalent_factor(SpRatio::new(2.6)?, m)
+///     / blackwell_equivalent_factor(starlight, m);
+/// let glare = illuminance_of_magnitude(Magnitudes::new(-1.5)) * weight;
+/// let veil = veiling_luminance(&eye, glare, Degrees::new(1.0)).ok_or("a valid glare")?;
+/// let glared = SkyBackground::new(band.luminance() + veil, starlight)?;
+/// let limit = naked_eye_limit(&eye, &glared);
+/// assert!(limit < naked_eye_limit(&eye, &band));
+/// let red = limit + star_colour_offset(SpRatio::new(1.2)?, &glared);
+/// assert!(red < limit);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[must_use]
 pub fn veiling_luminance(
     eye: &EyeObserver,
@@ -476,8 +554,8 @@ pub fn veiling_luminance(
     angle: Degrees,
 ) -> Option<CandelasPerSquareMetre> {
     let e = illuminance.value();
-    let theta = angle.value().abs();
-    if !(e.is_finite() && e >= 0.0 && theta.is_finite()) {
+    let theta = angle.value();
+    if !(e.is_finite() && e >= 0.0 && theta.is_finite() && theta >= 0.0) {
         return None;
     }
     if theta > GLARE_MAX_ANGLE_DEG {
@@ -635,21 +713,30 @@ mod tests {
 
     #[test]
     fn the_mesopic_weight_runs_from_scotopic_to_photopic() {
-        assert!(mesopic_weight(&starlit(24.0)).abs() < 1e-15);
-        assert!(mesopic_weight(&starlit(19.3)).abs() < 1e-15);
-        assert!(mesopic_weight(&starlit(19.0)) > 0.0);
-        let mesopic = mesopic_weight(&starlit(16.0));
+        assert_eq!(mesopic_weight(&starlit(24.0)), PhotopicWeight::SCOTOPIC);
+        assert_eq!(mesopic_weight(&starlit(19.3)), PhotopicWeight::SCOTOPIC);
+        assert!(mesopic_weight(&starlit(19.0)).value() > 0.0);
+        let mesopic = mesopic_weight(&starlit(16.0)).value();
         assert!(mesopic > 0.0 && mesopic < 1.0, "{mesopic}");
         let day = SkyBackground::new(
             CandelasPerSquareMetre::new(100.0),
             SpRatio::new(2.26).unwrap(),
         )
         .unwrap();
-        assert!((mesopic_weight(&day) - 1.0).abs() < 1e-15);
+        assert_eq!(mesopic_weight(&day), PhotopicWeight::PHOTOPIC);
         // The factor is Crumey's eq. 6 when scotopic and 1 when photopic.
         let star = SpRatio::new(0.8).unwrap();
-        assert!((blackwell_equivalent_factor(star, 0.0) - 0.8 / 1.408).abs() < 1e-15);
-        assert!((blackwell_equivalent_factor(star, 1.0) - 1.0).abs() < 1e-15);
+        let scotopic = blackwell_equivalent_factor(star, PhotopicWeight::SCOTOPIC);
+        assert!((scotopic - 0.8 / 1.408).abs() < 1e-15);
+        assert!((blackwell_equivalent_factor(star, PhotopicWeight::PHOTOPIC) - 1.0).abs() < 1e-15);
+        assert_eq!(
+            PhotopicWeight::new(1.01),
+            Err(BuildEyeError::PhotopicWeight)
+        );
+        assert_eq!(
+            PhotopicWeight::new(f64::NAN),
+            Err(BuildEyeError::PhotopicWeight)
+        );
     }
 
     /// Design note 4's formula written out again, independently of the code.
@@ -704,6 +791,27 @@ mod tests {
             None
         );
         assert_eq!(
+            veiling_luminance(&eye, Lux::new(1.0), Degrees::new(-1.0)),
+            None
+        );
+        assert_eq!(
+            EyeObserver::new(5e-324, 25.0, 0.5),
+            Err(BuildEyeError::FieldFactor)
+        );
+        assert_eq!(
+            EyeObserver::new(1e307, 25.0, 0.5),
+            Err(BuildEyeError::FieldFactor)
+        );
+        assert_eq!(SpRatio::new(1e300), Err(BuildEyeError::SpRatio));
+        assert_eq!(
+            SkyBackground::new(CandelasPerSquareMetre::new(1e300), SpRatio::REFERENCE),
+            Err(BuildEyeError::Luminance)
+        );
+        assert_eq!(
+            surface_brightness(CandelasPerSquareMetre::new(f64::INFINITY)),
+            None
+        );
+        assert_eq!(
             EyeObserver::new(0.0, 25.0, 0.5),
             Err(BuildEyeError::FieldFactor)
         );
@@ -745,9 +853,30 @@ mod tests {
                 .value();
             assert!((back - mu).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn the_default_observer_is_f_1_4_aged_25_with_brown_eyes() {
         assert_eq!(
             EyeObserver::default(),
             EyeObserver::new(1.4, 25.0, 0.5).unwrap()
         );
+    }
+
+    #[test]
+    fn the_limit_is_finite_at_the_extremes_of_every_input() {
+        let extremes = [
+            (0.1, 0.0, 0.01),
+            (0.1, MAX_LUMINANCE, 100.0),
+            (100.0, 0.0, 100.0),
+            (100.0, MAX_LUMINANCE, 0.01),
+        ];
+        for (f, b, rho) in extremes {
+            let eye = EyeObserver::new(f, 25.0, 0.5).unwrap();
+            let sky =
+                SkyBackground::new(CandelasPerSquareMetre::new(b), SpRatio::new(rho).unwrap())
+                    .unwrap();
+            assert!(naked_eye_limit(&eye, &sky).value().is_finite());
+        }
     }
 }

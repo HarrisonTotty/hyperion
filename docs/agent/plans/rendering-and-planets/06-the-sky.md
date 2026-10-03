@@ -480,7 +480,9 @@ holds.
    Eq. 34 has no absolute threshold: as B → 0, ΔI tends to F(√a₁ + a₄)² B^½ and the limit
    diverges (V 15.3 at μ 40), and Blackwell's data constrain nothing below about 10⁻⁵ cd/m²
    (researched 2026-09-29; low confidence on that bound). So the background is clamped at μ 27
-   (F = 1.4, colour-corrected: 8.64), beyond which no texel's limit deepens.
+   (F = 1.4, colour-corrected: 8.64), beyond which no texel's limit deepens. _Decided 2026-10-02
+   (Risks, "The eye's darkest background"): Crumey's own clamp, a colour-corrected 10⁻⁵ cd m⁻²,
+   limit 7.99 at F = 1.4, reached at μ 25.6 in starlight._
 3. **The colour corrections.** The background is taken to Blackwell's 2,850 K light by B_equiv =
    (ρ₀ ÷ 1.408) B, with ρ₀ the band texel's scotopic-to-photopic ratio from the colour table (2.26
    for starlight gives the brainstorm's 0.4–0.5 mag; 0.51 computed). Each star's threshold moves by
@@ -508,9 +510,9 @@ holds.
    Design note 2; Leinert et al. 1998, A&AS 127, 1, for integrated starlight near μ 23.8 at the
    galactic pole): a coarse band pre-pass, `band_rows` from the luminosity tables alone at 16²
    texels a face with no census and a provisional cut of 7.85, gives each texel's background; the
-   eye's cut is then the colour-corrected Crumey limit at the darkest texel (μ clamped at 27) plus
+   eye's cut is then the colour-corrected Crumey limit at the darkest texel (clamped as Design note 2 says; 7.99 at most since 2026-10-02) plus
    the largest colour offset, +0.45 mag for a hot star, plus a pad of 0.1 mag, so at most about
-   9.2. If that cut is deeper than the provisional one the pre-pass runs once more at it; raising
+   9.2 (8.54 under the 2026-10-02 clamp). If that cut is deeper than the provisional one the pre-pass runs once more at it; raising
    the cut removes stars from the band only slightly, so one repeat converges. Glare is left out of
    the pre-pass, which is conservative, since glare only makes limits shallower. Near the Sun the
    rule gives about 7.4 + 0.45 + 0.1 at μ 24.3; the fixed 7.85 alone would be too shallow wherever
@@ -1012,8 +1014,8 @@ hyperion-sim sky::band`.
   a V = −1.5 star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of
   the listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`.
 - **R06.T9.d The eye's cut.** `sky::limits::eye_cut` (Design note 5): the coarse pre-pass at 16²
-  texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit clamped at
-  μ 27, +0.45 and +0.1, and one repeat when the cut deepens. Tests: near the Sun the cut is 7.96 ±
+  texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit, clamped by
+  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), +0.45 and +0.1, and one repeat when the cut deepens. Tests: near the Sun the cut is 7.96 ±
   0.15; no texel of the full limit map, with glare, is deeper than the cut less the 0.45 colour
   offset; the repeat changes the cut by under 0.05 mag. Acceptance: `cargo test -p hyperion-sim
 sky::limits`.
@@ -1392,8 +1394,9 @@ plan reserves no tag, prefix or stream.
   11 wires binary evolution in, R06.T16.b must land with it or the census can miss blue
   stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the candidates above 0.5 M☉, the
   research's estimate) is T17's to measure.
-- **The eye's cut** rests on Crumey's eq. 34 at the darkest pre-pass texel, clamped at μ 27 where
-  Blackwell's data give no constraint; a view darker than μ 27 is drawn to the clamp's limit.
+- **The eye's cut** rests on Crumey's eq. 34 at the darkest pre-pass texel, clamped at a
+  colour-corrected 10⁻⁵ cd m⁻² where Blackwell's data give no constraint (decided 2026-10-02; μ 25.6
+  in starlight); a view darker than that is drawn to the clamp's limit, 7.99 at F = 1.4.
 - **`float32-blendable`.** The GPU splat needs it; without it the CPU splat is exact but slower,
   and a bake on the high setting's 3,072² faces on the CPU is unmeasured (T17 records it).
 - **No zodiacal light**, because plan 14 has no zodiacal cloud; inside a dusty system the background
@@ -1458,4 +1461,10 @@ plan reserves no tag, prefix or stream.
   0.0650). Taking eq. 34's thresholds as those of the B − V = 0.7 star is documented as the plan's
   convention (Crumey offers it "if this is considered the standard", §3.1; read literally his eqs.
   6 and 16 put them at 2,850 K). The pigmentation bound 1.2 (CIE 146's very light eyes) was not
-  confirmed from a primary text by the science check (medium confidence).
+  confirmed from a primary text by the science check (medium confidence). With the MES2 fade the
+  starlit limits in mesopic backgrounds move off the plan's scotopic figures: 5.427 at μ 18.8 (plan
+  5.42) and 5.256 at μ 17.5 (plan 5.25 ± 0.01); T2's test holds every figure without a stated
+  bracket to ±0.01. After review: the field factor is accepted within 0.1–100, an S/P ratio within
+  0.01–100 and a background within 0–10¹² cd m⁻², so every limit is finite and `naked_eye_limit`
+  cannot panic; `veiling_luminance` refuses a negative angle; MES2's weight is a `PhotopicWeight`
+  newtype (0–1), which `mesopic_weight` returns and `blackwell_equivalent_factor` takes.
