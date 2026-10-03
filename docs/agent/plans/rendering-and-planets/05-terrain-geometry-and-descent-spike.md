@@ -2933,11 +2933,17 @@ medium, sizes, figure)`.
     and `sqrt` at `inverseSqrt`'s accuracy. Every inexact quotient is a small quantity, far inside
     T4.b's 1 mm. The catalogue's display-name test is `view/engine/catalogue`, outside the
     acceptance filter `view/terrain`.
-  - **Pending:** the frames check (the test planet from 400 km and from 10 m, every texel finite,
-    in `default` and `no-subgroups`) needs real bakes from T10.b's height worker (lane A). It is
-    added to `smoke/terrain.ts` in a follow-up commit once T10.b lands (the orchestrator's ruling,
-    2026-10-03). `just test-render` passed on 2026-10-03 with both materials compiled on both
-    variants.
+  - _The frames check_ (`smoke/terrain.ts`, `checkTerrainFrames`, group "R05.T11.b the terrain's
+    frames", after T10.b landed). A height worker bakes 5 × 5 test-planet patches (ridges off)
+    around the centre of face 2: level 5 for a camera 400 km above the centre patch's origin
+    looking straight down, level 18 for one 10 m above it looking 30° below the horizon. They are
+    drawn by both paths (high: `BakedOffsets`, double normals; low: `FaceDifferences`, mesh
+    normals) over a 64 MiB cache, not the setting's, since the engine frees nothing before it is
+    disposed. Each frame (64 × 48, R01's harness projection) must be finite everywhere, with the
+    terrain's meter class covering at least 90% of the frame from 400 km and 25% from 10 m. On
+    SwiftShader on 2026-10-03, both variants: 100% from 400 km and 68.8% from 10 m, every terrain
+    pixel lit, no uncaptured GPU error. The terrain being drawn with `cullMode: "back"` also
+    confirms the mesh's winding.
 - **Deviations in T9, as built (the annunciations, 2026-10-03).** `annunciation.ts` adds, beside
   `terrainAnnunciation`: `TerrainAnnunciation` (the two strings), `TerrainConditions` and
   `terrainConditions` (the frame's two conditions before the debounce), `coarserThan` (some
