@@ -410,9 +410,29 @@ function requestPriority(t: Traversal, target: TraversalNode, standIn: Traversal
   return priority;
 }
 
-/** Whether a selected patch should be split: it is in a forced region, or a view finds ρ > τ. */
-function wantsRefining(planet: PlanetGeometry, node: TraversalNode): boolean {
-  return node.visible && node.key.level < planet.finestLevel && (node.forced || node.excess > 1);
+/**
+ * Whether a selected patch should be split: it is in a forced region, or a view finds ρ > τ and,
+ * where baked ranges are given, it is baked itself (the streaming gate).
+ *
+ * @remarks
+ * The gate is the cure for selection chasing its own loose bounds (R05.T13.a's probe, 2026-10-03):
+ * an unbaked patch's bounds take the level's whole height range, so it looks far worse than its
+ * baked neighbours, and without the gate the patch budget is spent on refining under loose bounds,
+ * the refined patches tighten once baked, the budget moves to the next loose region, and the
+ * selection jumps from frame to frame. With it, selection reaches at most one level below what is
+ * baked, every split decided on a baked patch's own range, and descends as bakes land, which the
+ * breadth-first demand already orders; the frontier below is drawn by its baked parent, which
+ * `TERRAIN: STREAMING` reports. The bounds stay true bounds: the gate only stops a refinement, so
+ * the drawn error is never claimed to be smaller than it is. Forced regions are not gated.
+ */
+function wantsRefining(t: Traversal, node: TraversalNode): boolean {
+  if (!node.visible || node.key.level >= t.planet.finestLevel) {
+    return false;
+  }
+  if (node.forced) {
+    return true;
+  }
+  return node.excess > 1 && (t.heightRanges === null || node.resident);
 }
 
 /** Orders candidates for splitting: forced first, then the larger weighted error, then the key. */
@@ -525,7 +545,7 @@ export function selectPatches(input: SelectionInput): Selection {
   const tree = new PatchLeafSet<TraversalNode>((node) => node.seenBy !== 0);
   const heap = new CandidateHeap();
   const offer = (node: TraversalNode): void => {
-    if (wantsRefining(planet, node)) {
+    if (wantsRefining(t, node)) {
       heap.push(node);
     }
   };

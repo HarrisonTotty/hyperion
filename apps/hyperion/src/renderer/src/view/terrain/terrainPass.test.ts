@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
@@ -14,7 +14,9 @@ import type { PatchRequest } from "./select";
 import {
   morphRangeM,
   RESELECT_FRACTION,
+  SELECT_MEASURE,
   type TerrainFrameInput,
+  type TerrainPassOptions,
   TerrainPass,
   type TerrainPool,
   type TerrainView,
@@ -127,6 +129,7 @@ function inputAt(view: TerrainView, nowMs = 0): TerrainFrameInput {
 
 async function passOn(
   setting: "high" | "low",
+  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident"> = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
   const counting = await countingRenderEngine({
     maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
@@ -143,6 +146,7 @@ async function passOn(
       pools.push(pool);
       return pool;
     },
+    ...extra,
   });
   await pass.ready();
   return {
@@ -169,6 +173,10 @@ function writtenSlots(engine: CountingRenderEngine): number[] {
   return slots;
 }
 
+afterEach(() => {
+  performance.clearMeasures(SELECT_MEASURE);
+});
+
 describe("the terrain pass", () => {
   it("submits one instanced draw whose instances are the drawn patches' slots", async () => {
     const { pass, pool, engine } = await passOn("high");
@@ -177,7 +185,9 @@ describe("the terrain pass", () => {
     pool().bakeDemand(pass);
     const frame = pass.frame(inputAt(view));
     expect(frame.draw?.indirect?.buffer.name).toBe("terrain indirect");
-    expect(writtenSlots(engine)).toEqual(Array.from(frame.drawSet.slots));
+    expect(writtenSlots(engine)).toEqual(
+      Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count)),
+    );
     expect(frame.drawSet.patches.length).toBeGreaterThan(0);
   });
 
@@ -248,6 +258,29 @@ describe("the terrain pass", () => {
     expect([buffers, textures, meshes, materials, renderTargets]).toEqual([0, 0, 0, 0, 0]);
   });
 
+  it("records no selection span unless asked to", async () => {
+    const { pass } = await passOn("low");
+    pass.frame(inputAt(northPole(1_000_000)));
+    expect(performance.getEntriesByName(SELECT_MEASURE)).toHaveLength(0);
+  });
+
+  it("records a span for each selection when asked to", async () => {
+    const { pass } = await passOn("low", { measureSelection: true });
+    pass.frame(inputAt(northPole(1_000_000)));
+    expect(performance.getEntriesByName(SELECT_MEASURE)).toHaveLength(1);
+  });
+
+  it("tells of each patch it makes resident", async () => {
+    const resident: string[] = [];
+    const { pass, pool } = await passOn("low", {
+      onResident: (key) => resident.push(patchKeyString(key)),
+    });
+    pass.frame(inputAt(northPole(1_000_000)));
+    const demanded = pool().demand.map((r) => patchKeyString(r.key));
+    pool().bakeDemand(pass);
+    expect(resident).toEqual(demanded);
+  });
+
   it("budgets half the high setting's BakedOffsets slots for selection", async () => {
     expect((await passOn("high")).pass.maxPatches).toBe(981);
   });
@@ -257,23 +290,71 @@ describe("the terrain pass", () => {
   });
 
   it("selects no more patches than its budget, and says the budget bound", async () => {
-    const { pass } = await passOn("low");
-    // 1.5 km up, 69° from straight down: unbudgeted, the low setting wants about 2,100 patches.
-    const frame = pass.frame(inputAt(tilted(1_500, 1.2)));
+    const { pass, pool } = await passOn("high");
+    // 1.5 km up, 69° from straight down, at 1080p: even under the fake pool's flat bakes, whose
+    // ranges are tight, the high setting wants several thousand patches, beyond its budget of 981.
+    // Selection descends as bakes land (R05.T7's streaming gate), so the demand is baked until it
+    // empties.
+    const view = { ...tilted(1_500, 1.2), viewport: { widthPx: 1920, heightPx: 1080 } };
+    let frame = pass.frame(inputAt(view));
     expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
+    for (let n = 1; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+      frame = pass.frame(inputAt(view, 16 * n));
+      expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
+    }
     expect(frame.selection.limited).toBe(true);
     expect(frame.conditions.detailLimited).toBe(true);
   });
 
-  it("keeps the frame's draw set while nothing changes", async () => {
+  it("does not select again, and draws the same slots, while nothing changes", async () => {
     const { pass, pool } = await passOn("low");
     const view = northPole(1_000_000);
     pass.frame(inputAt(view));
     pool().bakeDemand(pass);
     const first = pass.frame(inputAt(view));
+    const slots = Array.from(first.drawSet.slots.subarray(0, first.drawSet.count));
     const second = pass.frame(inputAt(view, 16));
     expect(second.reselected).toBe(false);
+    expect(Array.from(second.drawSet.slots.subarray(0, second.drawSet.count))).toEqual(slots);
+  });
+
+  it("rewrites one draw set in place across selections", async () => {
+    const { pass, pool } = await passOn("low");
+    const view = northPole(1_000_000);
+    const first = pass.frame(inputAt(view));
+    const { patches, slots } = first.drawSet;
+    pool().bakeDemand(pass);
+    const second = pass.frame(inputAt(view, 16));
+    expect(second.reselected).toBe(true);
     expect(second.drawSet).toBe(first.drawSet);
+    expect(second.drawSet.patches).toBe(patches);
+    expect(second.drawSet.slots).toBe(slots);
+    expect(second.drawSet.count).toBeGreaterThan(0);
+  });
+
+  it("requests a forced region no view sees and keeps it resident, but draws none of it", async () => {
+    const { pass, pool, engine } = await passOn("low");
+    const view = northPole(1_000_000);
+    // A craft on the south pole, on the far side from the camera.
+    const grounded = [{ positionM: { x: 0, y: 0, z: -PLANET.figure.polarRadiusM }, radiusM: 10 }];
+    let frame = pass.frame({ ...inputAt(view), grounded });
+    const baked = new Set<string>();
+    for (let n = 1; n < 8 && pool().demand.length > 0; n += 1) {
+      for (const request of pool().demand) {
+        baked.add(patchKeyString(request.key));
+      }
+      pool().bakeDemand(pass);
+      frame = pass.frame({ ...inputAt(view, 16 * n), grounded });
+    }
+    const unseen = [...frame.selection.patches.values()].filter((p) => !p.seen);
+    expect(unseen.length).toBeGreaterThan(0);
+    const unseenKeys = new Set(unseen.map((p) => patchKeyString(p.key)));
+    expect([...unseenKeys].every((k) => baked.has(k))).toBe(true);
+    // The demand leaves out resident patches, so none of the region has been evicted.
+    expect(pool().demand.filter((r) => unseenKeys.has(patchKeyString(r.key)))).toEqual([]);
+    const drawnKeys = frame.drawSet.patches.map((p) => p.keyString);
+    expect(drawnKeys.filter((k) => unseenKeys.has(k))).toEqual([]);
+    expect(writtenSlots(engine)).toHaveLength(frame.drawSet.count);
   });
 
   it("draws a turned body's patches at R · origin less the camera, with R as its rotation", async () => {
@@ -345,15 +426,34 @@ describe("the terrain pass's selection cadence", () => {
   });
 
   it("selects again once the camera moves past its fraction of the nearest patch", async () => {
-    const { pass } = await passOn("low");
+    const { pass, pool } = await passOn("low");
     const heightM = 1_000_000;
-    pass.frame(inputAt(northPole(heightM)));
+    // Streamed in first: selection descends as bakes land (R05.T7's streaming gate).
+    for (let n = 0; n < 20; n += 1) {
+      pass.frame(inputAt(northPole(heightM), 16 * n));
+      pool().bakeDemand(pass);
+    }
+    pass.frame(inputAt(northPole(heightM), 16 * 20));
     // The nearest selected patch is at least the height's distance below the camera, less the
     // relief, so a move of a thousandth of it is well within the fraction.
     expect(pass.frame(inputAt(northPole(heightM * 0.999))).reselected).toBe(false);
     expect(pass.frame(inputAt(northPole(heightM * (1 - 2 * RESELECT_FRACTION)))).reselected).toBe(
       true,
     );
+  });
+
+  it("does not select a low camera again for a short move once streamed", async () => {
+    const { pass, pool } = await passOn("low");
+    const heightM = 1_500;
+    pass.frame(inputAt(northPole(heightM)));
+    for (let n = 1; n < 40 && pool().bakeDemand(pass) > 0; n += 1) {
+      pass.frame(inputAt(northPole(heightM), 16 * n));
+    }
+    pass.frame(inputAt(northPole(heightM), 16 * 41));
+    // 10 m is far below a tenth of the 1.5 km to the nearest box, and above a tenth of one finest
+    // patch (about 1.8 m), the rule's floor. The fake pool's flat bakes give spheres that hold no
+    // camera, so this does not tell the box from the sphere; the captures exercise that.
+    expect(pass.frame(inputAt(northPole(heightM - 10), 16 * 42)).reselected).toBe(false);
   });
 
   it("does not select again for a turn of less than a pixel", async () => {

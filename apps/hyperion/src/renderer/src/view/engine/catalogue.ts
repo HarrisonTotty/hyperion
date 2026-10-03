@@ -14,6 +14,7 @@ import {
   RAY_MARCH_KERNEL,
   SKY_VIEW_KERNEL,
 } from "../atmosphere/hillaire";
+import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
@@ -123,6 +124,12 @@ const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "point-splat", spec: BAKE_SPLAT },
 ];
 
+/**
+ * R07's lit-body shading library (`shaders/litBody.wgsl`, R07.T4.c and T6.c), compiled and run
+ * inside its probe kernel, since a library of functions is no material of its own.
+ */
+const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [{ kind: "compute", spec: LIT_BODY_PROBE }];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -132,5 +139,6 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_VIEW_ENTRIES,
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,
+  ...LIT_BODY_ENTRIES,
   ...SKY_ENTRIES,
 ];

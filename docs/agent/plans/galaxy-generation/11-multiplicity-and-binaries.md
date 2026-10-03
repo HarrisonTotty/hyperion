@@ -2360,3 +2360,28 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   star's velocity relative to the barycentre beside its position, the positions bit for bit
   `star_positions_at`'s (tested), the velocities the time derivative of the positions (tested by
   central differences). `star_positions_at` is untouched and no golden moved.
+- **Fixed after P11.T11 (2026-10-03, found by rendering plan R06.T5.c): the common envelope and
+  the merger recursed without end on a held bare core.** Ruling 129.4c's guard in
+  `Engine::common_envelope` sends a Frozen donor with no binding energy to a merger
+  (`coalesce(None)` → `mix`), but `mix`'s fallback sends any collision involving a giant-like star
+  back to a common envelope, with the same state, so a held EarlyAgb bare core (M = M_c = 4.88 M☉)
+  touching a 12.65 M☉ main-sequence star (record 0x81fd865fd000000f of seed 0x0926_0000, bulge,
+  layer E) recursed until the stack overflowed, in `SystemStars::generate` and so in every path
+  that generates a system's stars (scene, system summary, observed range queries, planetary
+  context, the sky's census). The existing 129.4c test passed only because its companion was a
+  neutron star, whose arm of `mix` comes first. Fix: the guard calls `mix_with(Envelope::Spent)`,
+  which merges by the collision matrix (BSE §2.7.3, M₃ = M₁ + M₂; Table 2 gives (5, 1) → 5), and an
+  engine flag `in_common_envelope`, set while a common envelope resolves, keeps any merger reached
+  from inside one from entering another, as BSE's `comenv` never calls itself (`debug_assert` on
+  re-entry). **No generator-version bump**: output moves only for inputs that aborted before (the
+  determinism audit traced every path into `mix` and `common_envelope`; no golden moved), and the
+  new golden `stellar/held_bare_core_merger` pins the record's stars at the epoch. **Open,
+  upstream, routed to the orchestrator:** the science check finds the held state itself
+  inconsistent: `die`'s pinned hold (`supernova.rs`) takes the phase and the 1,054 R☉ radius from
+  the single-star track and the mass from the binary, so a star stripped to its core is held as an
+  EarlyAgb supergiant with no envelope, where Hurley, Pols and Tout (2000, §6) make it a naked
+  helium giant of 0.6–3 R☉; `integrate` returns a death stop before its `Stop::Stripped` check on
+  the same step; and `frozen_structure` takes the core radius as 0.1 R (105 R☉ here, against
+  R_HeGB's 0.6–3 R☉, uncited). With a correct state the pair would stay detached and the main-
+  sequence star would overflow its lobe instead. Fixing it moves generated timelines (a bump) and
+  touches ruling 129.4a/c, so it waits on the owner.

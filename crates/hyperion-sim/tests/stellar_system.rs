@@ -606,3 +606,32 @@ fn living_stars_are_younger_than_their_lifetimes_and_remnants_older() {
 fn a_hundred_thousand_systems_live_and_die_in_order() {
     check_life_and_death(0x0629_b000_0000_0002, 100_000);
 }
+
+/// Regression (found by rendering plan R06.T5.c): a held bare core with nothing to eject, an early
+/// AGB core of 4.88 M☉ beside a 12.65 M☉ main-sequence companion at 15.9 Myr, used to pass from
+/// the common envelope to the merger and back without end (ruling 129.4c's guard), overflowing the
+/// stack. The pair now merges, and the system's four stars are there at the epoch.
+#[test]
+fn a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing() {
+    let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
+        .expect("the Milky Way-like parameters are valid");
+    let id = hyperion_sim::id::SystemId::from_raw(0x81fd_865f_d000_000f).expect("a grid ID");
+    let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
+    let stars = SystemStars::generate(&galaxy, &record);
+    assert_eq!(stars.star_count(), 4);
+    let state = stars
+        .state_at(UniverseTime::EPOCH)
+        .expect("the system exists");
+    assert_eq!(state.stars().len(), 4);
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    w.u64_hex("system", id.raw());
+    for (k, star) in state.stars().iter().enumerate() {
+        w.line(&format!("[{k}] {:?}", star.phase()));
+        w.f64(&format!("[{k}] mass"), star.mass().value());
+        w.f64(&format!("[{k}] core mass"), star.core_mass().value());
+        w.f64(&format!("[{k}] luminosity"), star.luminosity().value());
+        w.f64(&format!("[{k}] radius"), star.radius().value());
+    }
+    golden!("stellar/held_bare_core_merger", w.as_str());
+}

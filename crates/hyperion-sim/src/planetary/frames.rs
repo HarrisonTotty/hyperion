@@ -12,7 +12,7 @@
 //! the rotation from the inertial body frame to the fixed one at a time, as a
 //! [`FrameRotation`].
 
-use crate::coords::BodyPosition;
+use crate::coords::{BodyFixedRotation, BodyPosition};
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::rotation::{
@@ -31,6 +31,7 @@ pub struct BodyFixedFrame {
     pole: [f64; 3],
     node: [f64; 3],
     quarter: [f64; 3],
+    obliquity: Radians,
     w0: Radians,
     rate: RotationLaw,
 }
@@ -97,6 +98,7 @@ impl BodyFixedFrame {
             pole,
             node,
             quarter,
+            obliquity: spin.obliquity,
             w0: rate.angle_at(UniverseTime::EPOCH),
             rate,
         })
@@ -113,6 +115,20 @@ impl BodyFixedFrame {
     #[must_use]
     pub const fn equator_node(&self) -> [f64; 3] {
         self.node
+    }
+
+    /// The equator's axis a quarter-turn east of [`equator_node`](Self::equator_node), pole ×
+    /// node, a unit vector along the galactic axes: where the rotation angle is π ÷ 2 (P14.T46.b).
+    #[must_use]
+    pub const fn equator_quarter(&self) -> [f64; 3] {
+        self.quarter
+    }
+
+    /// The obliquity, rad, in `[0, π]`: the angle between the pole and the orbit's normal
+    /// (P14.T46.b).
+    #[must_use]
+    pub const fn obliquity(&self) -> Radians {
+        self.obliquity
     }
 
     /// The rotation angle W at the epoch, rad, in `[0, 2π)`.
@@ -181,6 +197,26 @@ impl FrameRotation {
     pub fn to_fixed(&self, position: &BodyPosition) -> [f64; 3] {
         let v = position.metres();
         self.0.map(|row| dot(row, v))
+    }
+
+    /// The same rotation as plan 01's [`BodyFixedRotation`], which maps body-fixed to body axes:
+    /// the transpose of [`matrix`](Self::matrix), so that there is one rotation type
+    /// (`coords/body_fixed.rs`, P14.T46.b).
+    ///
+    /// # Panics
+    ///
+    /// Never for a frame [`body_fixed_at`] gives, whose rows are orthonormal to well within
+    /// [`ROTATION_ORTHONORMAL_TOLERANCE`](crate::coords::ROTATION_ORTHONORMAL_TOLERANCE) and
+    /// right-handed.
+    #[must_use]
+    pub fn to_body_fixed_rotation(&self) -> BodyFixedRotation {
+        let m = self.0;
+        BodyFixedRotation::from_rows([
+            [m[0][0], m[1][0], m[2][0]],
+            [m[0][1], m[1][1], m[2][1]],
+            [m[0][2], m[1][2], m[2][2]],
+        ])
+        .expect("a body-fixed frame's axes are orthonormal and right-handed")
     }
 }
 
@@ -391,6 +427,35 @@ mod tests {
         for obliquity in [0.0, 0.3, 1.7, 3.1] {
             let pole = pole_of(&orbit, Radians::new(obliquity), Radians::new(0.9));
             assert!((math::acos(dot(pole, normal).clamp(-1.0, 1.0)) - obliquity).abs() < 1e-9);
+        }
+    }
+
+    /// P14.T46.b (b): `to_body_fixed_rotation` is the transpose of the frame's matrix, passes
+    /// `BodyFixedRotation::from_rows`'s checks, and maps a body-fixed axis to the inertial one.
+    #[test]
+    fn to_body_fixed_rotation_is_the_transpose() {
+        let orbit = orbit(0.05, 0.3);
+        let frame = frame(&orbit, 0.4, 4e9 + 100.0);
+        assert!((frame.obliquity().value() - 0.4).abs() < 1e-15);
+        let quarter = cross(frame.pole(), frame.equator_node());
+        for (a, b) in quarter.iter().zip(frame.equator_quarter()) {
+            assert!((a - b).abs() < 1e-15);
+        }
+        for k in -5_i32..5 {
+            let rotation = body_fixed_at(&frame, at(f64::from(k) * 3.1e9));
+            let m = rotation.matrix();
+            let r = rotation.to_body_fixed_rotation().rows();
+            for i in 0..3 {
+                for j in 0..3 {
+                    assert!((r[i][j] - m[j][i]).abs() < f64::MIN_POSITIVE);
+                }
+            }
+            let meridian = rotation
+                .to_body_fixed_rotation()
+                .to_body(&crate::coords::BodyFixedPosition::new([1.0, 0.0, 0.0]));
+            for (a, b) in meridian.metres().iter().zip(rotation.prime_meridian()) {
+                assert!((a - b).abs() < 1e-15);
+            }
         }
     }
 

@@ -852,7 +852,8 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 14. **The test planet turns.** A grounded or hovering camera must see still ground, so the scripted
     path is defined in body-fixed coordinates and turned into the body frame each frame by the
     planet's rotation. Until P14.T14.c's `body_fixed_at` exists the test planet carries a fixed pole
-    and a sidereal period of 86,164.0905 s (IERS; re-checked in T13.a) in the shape R02's rotation
+    and a stellar period of 86,164.0989 s (IERS Conventions 2010, eq. 5.14; corrected in T13.a from
+    the sidereal 86,164.0905 s, which is measured against the precessing equinox) in the shape R02's rotation
     interface takes, reducing the angle from the integer span since its epoch, as `body_fixed_at`
     will. That shape, as built, is a `Rotation3` evaluated at each frame's time (R02's
     `ViewBody.rotation`, read through `FrameOrigins.bodyFixedRotation`), built with
@@ -2417,6 +2418,13 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   table and the ridged bake's skirt depth changed, so `TEST_PLANET_VERSION` is 2 (every surface
   golden re-blessed; `EXPECTED_TEST_PLANET_VERSION` in `heightBake.ts` and `cube.test.ts`
   follow); `GENERATOR_VERSION` is unchanged.
+- **The drawn surface's height exported** (2026-10-03, for the spike). The wasm module's
+  `surfaceHeightM(x, y, z, ridges): number` is T4.c's `finest_surface_height` over the test
+  planet at a body-fixed direction (not necessarily unit), so the client never ports the
+  interpolant; it throws for a zero or non-finite direction. A new golden,
+  `tests/golden/collision.golden` (27 directions, ridges off and on, a face-edge vertex, an
+  interior vertex and a cube corner among them), pins it natively, and `heightWasm.test.ts`
+  checks the export against it bit for bit. New values only: no `TEST_PLANET_VERSION` bump.
 - **σ_n exported** (2026-10-03, for T13.a). `TestPlanet::omitted_sigma_m(level)` and the wasm
   module's `omittedSigmaM(level, ridges)` give σ_n, the RMS of the octaves level n omits: the
   octaves' variances summed in index order, a ridged octave counting at its mask's RMS
@@ -3022,9 +3030,13 @@ medium, sizes, figure)`.
     (`InstanceRecords.pushXyz`, `ContactRecords.pushXyz`, added) into buffers made once, and
     returns one draw item made with the material. The counting engine checks that no buffer,
     texture, mesh, material or target is made after warm-up, and a test checks that the
-    `DrawSet` is reused at rest. `resolveDrawSet` and `retain` (T8) still allocate when selection
-    runs, which is steady state during a descent, since a landed bake re-runs it. **Pending lane
-    B:** their allocation-free rewrite (the orchestrator, 2026-10-03).
+    `DrawSet` is reused at rest. Since lane B's perf (a) (2026-10-03), the pass keeps one
+    `DrawSetResolver` per cache (made with the cache, remade after a device loss) and calls
+    `resolve(selection)` when selection runs: the same `DrawSet` rewritten in place, its first
+    `count` patches and slots drawn in selection order. An unseen forced patch
+    (`SelectedPatch.seen` false) is requested and pinned by `retain` but not drawn; a test puts a
+    contact on the far side of the planet and checks that none of its region is drawn while it is
+    requested. Selection itself still allocates (lane B's perf (b)).
   - _The lit view_ (`view/spike/litView.ts`, `litAgx.wgsl`).
     - `LitView` makes the spike's own `<view>:spike-hdr` `rgba16float` target with depth
       (`render-targets`), at the render size `renderSizeOf(size, renderHeightPx)`: 720p at the
@@ -3081,9 +3093,9 @@ medium, sizes, figure)`.
     renderer and the main process share no module, so the two constants are kept equal by hand)
     and `TIMED_PASSES_A_FRAME`. The report's timer is the worst state seen over the run, and a streaming interval that crosses a segment boundary is shared between the segments. The adapter's peak comes from T11.a's `allocationTally` through
     `report`'s argument.
-  - **Pending T13.b:** the spike's `ViewEngineSource` (the wrapped `GPU` handed to
-    `requestAdapterOutcome` and as `LoadEngineOptions.gpu`), the `performance.measure` spans and the
-    per-frame calls into `SpikeMetrics`, which need the spike's scene and loop.
+  - **Settled by T13.b (2026-10-03):** the spans are T13.b's. The wrapped `GPU` reaches the spike
+    through `DescentSpikeProps.engineSource`, and `SpikeMetrics` is built over
+    `SpikeListeners`, both by T13.c (T13.b's record, "The metrics seam").
 - **Deviations in T15.a, as built** (2026-10-03).
   - `view/spike/capture.ts`: `GpuCapture` (`wrapDevice`, `startSpan`, `frame`, `endSpan`,
     `result`, `dispose`), `parseCapture`, `replayCapture` (the reference replayer the test uses) and the file
@@ -3326,3 +3338,352 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   remaining per-node costs are the neighbour keys (8 objects a probe), `childKeys`' and the
   children's arrays a split, and `patchBounds` for new nodes, which the ruling's item 4d also
   names. A quiet-machine run is pending (Design note 27). Recorded, not asserted.
+- **Selection's stability in motion, as built (2026-10-03, after R05.T13.a's probe).** Lane D's
+  fixed-step probe (low fast pass, 300 m/s at 300 m, budget 981, 1,962 slots) saw about 830 new
+  keys a frame and demand of 53,000 a second against D = 311. Reproduced in `motion.test.ts`'s
+  harness: with a cache that keeps only the selected patches (as the probe's simulated cache
+  does), about 650 of 980 patches change every frame. The cause: an unbaked patch's bounds take
+  its level's whole ±24.5 km height range, so it looks far worse than its baked neighbours; the
+  greedy budget is spent refining under those loose bounds, the refined patches tighten once
+  baked, the budget moves to the next loose region, and the cache, keeping no ancestors, loses
+  the tight ranges that held the last cut. Three changes, every bound still a true one:
+  - _The streaming gate_ (`wantsRefining`): where `heightRanges` is given, a patch is split for
+    its error only if it is baked itself, so selection reaches at most one level below what is
+    baked and every split is decided on a baked range; it descends as bakes land, the
+    breadth-first demand already ordering them, and the unbaked frontier is drawn by its baked
+    parent (`TERRAIN: STREAMING`). Forced regions are not gated. Without `heightRanges` nothing
+    changes. The gate only stops a refinement: it never claims a smaller error than the bound.
+  - _Ancestors are kept_ (`PatchCache.retain`): every resident ancestor of a selected patch is
+    draw-pinned and touched, since selection's bounds read its range and it stands in for its
+    descendants; the walk runs before the draw set's touches, so a stand-in does not end it
+    early (`cache.test.ts` pins the ancestors above a stand-in).
+  - _Deepest first among equals_ (`PatchCache` eviction): among patches used as recently, the
+    deepest is evicted first; with ancestors first, the selection collapsed to the six roots
+    whenever the slots barely held it (`motion.test.ts`'s second test fails without it).
+    With the real cache, 8 bakes a frame and the budget, the flight changes about 7–10 patches a
+    frame (at most about 20) out of 980; `motion.test.ts` bounds the mean below 3% and any frame
+    below 10%, and holds the selection above 90% of the budget at 1,100 slots. Hysteresis was not
+    needed. The fixed-step run's simulated cache must keep the selection's ancestors as
+    `PatchCache.retain` does (or use `PatchCache` and `DrawSetResolver` themselves), or the gate
+    collapses it. Lane C's `terrainPass.test.ts` was adapted: the draw set's slots read through
+    `count` (perf a), and two tests stream their demand in before asserting, since selection now
+    starts at the roots; with the fake pool's flat bakes the 1.5 km pose fits its budget, so the
+    budget test checks the budget holds and that `DETAIL LIMITED` follows `limited`
+    (`select.test.ts` covers a binding budget). Selection in the flight, warm, under vitest at load
+    46: about 15 ms p50 and 28 ms p95 (provisional).
+- **Selection below the datum (2026-10-03, after R05.T13.a's collapse report).** Selection with
+  the camera 1.6 m above ground 1.85 km below the WGS 84 datum works, with baked ranges and
+  without, looking down or ahead, and a contact forces its region even with no view on it
+  (`belowDatum.wasm.test.ts`, real bakes through the module). The probe's collapse to an empty
+  selection was its camera hovering about 107 m underground: the descent's site height
+  (−1,953.2 m, from `measureTerrain`) was taken along the geocentric direction p ÷ |p| of the
+  ground point, where the collision interpolant and the bake take the direction d with
+  p = M·d (Design note 5), so it read the terrain about 0.1–0.2° away; the bakes under the
+  camera give −1,846.9 to −1,844.3 m. Looking down from below the baked surface, every patch's
+  box lies behind the camera, so the frustum rightly culls them all, and the contact, 107 m
+  below the ground, forces nothing. No selection change.
+- **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
+  - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
+    tests. The build adds:
+    - `view/spike/spikeRun.ts` and its test: `prepareDescent`, `SpikeRun` (the frame loop's
+      drawing), `SpikeWorkers`, `DEFAULT_SPIKE_WORKERS`, `defaultSpikeWorkers` (Design note 11's
+      clamp(⌊threads ÷ 4⌋, 1, 3)) and the metrics seam. The test is in `vitest.config.mts`'s
+      `DOM_TESTS`, since it hands the engine canvases.
+    - `view/spike/surfaceQuery.ts` and `surfaceQuery.worker.ts` with a test: a spike-only module
+      worker. `surfaceQuery.ts` joins `tsconfig.worker.json`.
+    - `smoke/spike.ts`: the captures, group "R05.T13.b the spike captures" in `page.ts` under
+      `--smoke-captures`.
+    - `test/countingRenderEngine.ts`: a target's `resize` now remakes its colour and depth
+      handles, as the adapter's does.
+  - _The terrain is measured before the run_ (the orchestrator's ruling, 2026-10-03). T13.a's
+    altitudes were above the spheroid, and the test planet's relief is kilometres, so the hover and
+    the contact could lie inside the ground. `prepareDescent` asks the surface query worker for
+    three things:
+    - the level table (`levelTable`), for the planet's `PlanetGeometry`; the render thread has no
+      other source of it;
+    - the landing site's height, from lane A's `surfaceHeightM` export: T4.c's collision
+      interpolant, bit for bit with native;
+    - a true upper bound of the terrain under the low pass's track: each level-12 patch's highest
+      baked vertex plus ε₁₂.
+
+    It then builds T13.a's `DescentProfile` with `{ siteHeightM, trackMaxHeightM }`, so the
+    script stays a function of the seed.
+    - `trackPatchKeys(profile, bounded)` samples the chosen segments' ground track at most half
+      the level's shortest patch edge apart, at the segment's fastest speed, and takes each
+      sample's patch with its eight neighbours, so no patch under the track is missed. By default
+      `bounded` takes the `clearsTrack` segments.
+    - **Pending a ruling** (`decision-r05-descent-clearance.md`): nothing bounds the terrain under
+      the slowdown and the flare's last blend. The ruling is a one-line change of `bounded`.
+
+  - _The contact._ The craft is a contact while it is grounded or descending (Design note 9),
+    judged on `clearanceM`, the height above the site's terrain, not the datum:
+    - descending by `isDescending`;
+    - or grounded, within `GROUNDED_CLEARANCE_M` of the ground at any vertical speed: the held
+      radius r_g, the hull's bounding radius (11.06 m) plus one finest patch, as T13.a's
+      `craftContacts` has it, so that an exact hover is a contact (the orchestrator, 2026-10-03).
+      T13.a's run takes a provisional 10 m radius where the scene takes the hull's 11.06 m.
+
+    It is also held from its last rising edge to the end of the script (`contactRule`: the 64 Hz
+    fixed step, each edge then found by bisection). The level low pass is not a contact.
+    - The contact stands at `groundPointM`, the point at the site's height beneath the craft
+      (T11.c's to-do), with the hull's bounding radius.
+    - Far from the site, where the terrain under the craft is higher or lower, it holds no patch.
+      The forced region works where the craft comes down.
+    - Every height query and patch key is taken at the bake's direction d (Design note 5): the
+      site's `DescentProfile.siteDir` and the track's `DescentPose.groundDir`, both T13.a's, never
+      a point's geocentric direction. Lane D's collapse came from that mistake; a test pins it
+      here.
+
+  - _The light._ The star lies in the planet's equatorial plane over the site's meridian at
+    touchdown: an equinox at local noon.
+    - T13.a draws the parametric latitude within ±60°, whose geodetic latitude on WGS 84 is at
+      most 60.083°, so the Sun stands 29.9° or more above the horizon (science check,
+      2026-10-03).
+    - The planet stands 1 au from the star and is held still in the system: its orbital motion
+      over the 1,230 s script, about 0.014°, is neglected.
+    - The rotation is T13.a's `testPlanetRotationAt`, and the figure is WGS 84's
+      (`TEST_PLANET_FIGURE`).
+  - _`SYNTHETIC_FIELD_BYTES`_ is 15,000,000 (decimal MB, as R09 Design note 17's figures are).
+    `syntheticField()` writes every byte so that the pages are committed. Each pool posts it
+    (`DEFAULT_SPIKE_WORKERS.pool`).
+  - _The views._
+    - The main view is `LitView` with an atmosphere. `LitView` gains a constructor flag,
+      `atmosphere`: Hillaire's composite (T12.c) draws over the terrain target into a second
+      scratch target, `<view>:spike-sky`, labelled `atmosphere composite`
+      (`LIT_VIEW_ATMOSPHERE_LABEL`), and the display pass maps that target.
+    - **Fixed in T11.c's `LitView`:** a resize remakes a target's textures, and `LitView` kept the
+      old handles. The spike's first capture failed with "texture spike:spike-hdr:depth was not
+      made by this engine". It now renews them on resize, and a regression test fails without
+      the fix.
+    - Two wireframe instruments sit side by side under the main view:
+      - `ORBIT`: three planetary radii over the craft, with the graticule, the craft and its path.
+        The path is the craft's `predictedPath`, 256 body-fixed points over the whole script.
+      - `CRAFT`: R02's chase preset.
+
+      Each has R02's label block beside its canvas, not over it, at R02's default 60° field of
+      view.
+
+    - Each canvas is focusable, named (`VIEW, SPIKE LIT, SCRIPTED`; `VIEW, WIREFRAME, ORBIT,
+FREE`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to the one list of
+      the scene's bodies and craft. All three lists would be identical. The list's selection is
+      drawn as the bracket reticle on both instruments. The lit view draws no marks.
+    - Each canvas's role is `img`, since it is a picture, not a control, and a lint suppression
+      says why.
+    - The main view's label block keeps R02's lines with `STYLE SPIKE LIT` and `CAMERA SCRIPTED`.
+      It states `TEST PLANET: provisional, dry and hand-parameterised` and the debounced terrain
+      line.
+    - The page fills the window under a header strip with the `TRAINING` banner, since it draws a
+      kept scene. Only the list scrolls.
+    - One console panel, `DESCENT`, shows at 4 Hz: the spike seed in 16-digit hex, the setting,
+      the segment, the script time in s, the clearance and site height in whole metres (one unit
+      at every altitude, so no switch to flicker), both speeds to 0.01 m/s, `GROUND CONTACT`
+      `YES`/`NO`, and the patch counts. Every reading shows `—` while no run draws: a run that
+      stops clears them rather than freezing them.
+    - The statuses use fixed words with the remedy, and the cause goes to the log:
+      - `TERRAIN MEASURING: …`;
+      - `TERRAIN NOT MEASURED: surface query failed, relaunch to retry`;
+      - `GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry` (`ViewDisplay`'s
+        words);
+      - `GRAPHICS NO ADAPTER: views not available, relaunch to retry`.
+
+      A frame the engine refuses stops the run with the same fault.
+
+    - **Drafts for the owner, the guide's nomenclature list:** `DESCENT SPIKE`, `SPIKE LIT`,
+      `SCRIPTED`, `SPIKE SEED`, `SEGMENT` and its seven values, `SETTING`, `SCRIPT TIME`,
+      `CLEARANCE`, `SITE HEIGHT`, `GROUND CONTACT`, `TERRAIN MEASURING` and `TERRAIN NOT
+MEASURED`. The spike is built to these meanwhile. Whether a measurement view behind a flag
+      needs the `TRAINING` banner is also the owner's; it shows one for now.
+  - _The metrics seam_ (the orchestrator, 2026-10-03, agreed with lane D).
+    - `DescentSpike` takes `engineSource` (T13.c passes the source that wraps the GPU through
+      `pipelineShim` or `capture`) and `listeners`: `onFrame(SpikeFrameSample)` and
+      `onPatch("requested" | "baked" | "resident", key)`. "Requested" is a key's first request.
+    - The listeners are read through a ref, so a new object does not restart the run. T13.c
+      builds `SpikeMetrics` over them.
+    - `engineFrame` and `patchesCalibrated` stay T13.c's and T14's: the engine has no synchronous
+      frame counter.
+    - T13.c adds the `--vertex-path` and `--normals` props.
+    - Spike runs alone record `performance.measure` spans:
+      - `terrain.select`, through TerrainPass's new `measureSelection` option;
+      - `terrain.frame`;
+      - `spike.segment:<name>`, at each segment's end, with the last closed when the script ends
+        or the run is disposed.
+
+      Each span is an entry the browser keeps: measurement overhead. T11.c's "no object after
+      warm-up" holds for the ordinary pass, which measures nothing. TerrainPass also gains
+      `onResident`.
+  - _T11.c's reselection distance_ is now the box distance (`distanceToBoxM`), as selection
+    measures it. A coarse patch's bounding sphere often held the camera, which clamped the rule
+    to one finest patch and reselected on tiny moves (lane B's finding).
+  - **Result, 2026-10-03** (SwiftShader, `just test-render --captures`, both variants, no
+    uncaptured GPU error). Seed 5, ridges off. The site is 847.3 m and the track bound 957.9 m.
+    The contact starts at 1,025.4 s and is held from 1,105.4 s of 1,230 s. Three shots:
+    - the descent arc (high, 400 s): 46 patches;
+    - the low pass (low, 1,095 s, clearance 414 m): 48 patches;
+    - touchdown (low, end, clearance 1.0 m, contact held): 73 selected and 5 drawn, the rest the
+      unseen forced region.
+
+    Each streamed everything, with nothing standing in or missing and `limited` false, and both
+    instruments drew. The lane viewed the PNGs (kept in the scratch directory):
+    - the arc shows the curved limb with a blue rim under a black sky;
+    - the low pass, pitched 30° down, and the nadir hover show ground filling the frame;
+    - the orbit instrument shows the graticule and the craft's path.
+
+    The on-screen look stays pending for the owner.
+- **Deviations in T13.a, as built** (2026-10-03).
+  - `view/spike/descentProfile.ts`: `landingSiteOf(seed)` (SplitMix64 from the seed, uniform in
+    direction over ±60° parametric latitude, a geodetic ±60.083°, so the scene's Sun stands at least
+    29.9° high, and in azimuth), `DescentProfile(figure, site, terrain?)` with `durationS`,
+    `segmentAt`, `segmentSpans`, `positionAt` and `poseAt(tS): DescentPose`, and
+    `DESCENT_SEGMENTS`, the table as data with each segment's vertical shape. The vertical speeds
+    are re-fitted, not the durations: each boundary altitude holds exactly with the 5 s (1 s)
+    velocity blends, so a level segment before a descending one climbs gently (the orbit coast by
+    about 18 m/s, the low pass by about 0.07 m/s, more over raised terrain). The horizontal speed is
+    the ground track's on a great circle of the mean radius; the camera looks along the track,
+    pitched 30° down at 300 m/s and above, turning to the nadir at rest.
+  - _Terrain (orchestrator's ruling, 2026-10-03):_ `terrain` takes `siteHeightM` (the terrain's
+    height at the site) and `trackMaxHeightM` (an upper bound on the terrain under the low pass's
+    track, baked ranges plus ε over the patches under it), both measured once by the caller (lane
+    C's spike worker) so that the script stays a pure function of the seed and the two numbers.
+    Every altitude and `groundPointM` sit on the site's height (`DescentPose.altitudeM` above the
+    spheroid; the added `clearanceM` above the site, which the demand prediction reads); the low
+    fast pass, and its neighbours' ends that meet it, fly 300 m above `trackMaxHeightM`. Other
+    segments do not follow the relief along the track, which is fine above the low pass's
+    altitude; the vertical descent and the hover are over the site itself.
+    **Superseded (2026-10-03, decision-r05-descent-clearance.md):** the single track maximum gave
+    way to per-stretch floors, below.
+  - `view/spike/rotation.ts`: `testPlanetRotationAt(tS)`, a spin about the body-fixed z axis at
+    the Earth Rotation Angle's rate, ω = 2π × 1.00273781191135448 ÷ 86,400 s (IERS Conventions 2010,
+    eq. 5.15), with the angle reduced from whole seconds. **Corrected (T13.a's re-check):** the
+    plan's 86,164.0905 s is the sidereal day, measured against the precessing equinox; a body frame
+    that does not rotate turns with the stellar day, 86,164.0989 s (orchestrator's ruling).
+  - `view/spike/demand.ts`: the closed form at k = 5 (`closedFormDemandPerS`, constants 8k² and
+    3πk² ÷ ln 2), the per-level prediction (`perLevelDemand`, `levelRatio`, `capAltitudeM`) and
+    `boundedPlanet(planet, rule, omittedSigmaM)`, the one place min(ε_n, 4σ_n) is built, keeping
+    the hard bound where σ_n = 0. σ_n is lane A's `omittedSigmaM(level, ridges)` export, passed in
+    by the caller (only workers and tests load the module); the interim table is gone.
+  - `view/spike/fixedStep.ts` (`runFixedStep`, `segmentFigures`) and `view/spike/demandRecord.ts`
+    (`runCell`, `measureTerrain`, `testWindows`, the fixture's format, `demandSummary`), with
+    `view/spike/testPlanetFigure.ts` (`TEST_PLANET_FIGURE`, WGS 84). The run uses the terrain's
+    own `PatchCache`, `DrawSetResolver` and `retain` (lane B's 5d90fab; an earlier cache of the run's
+    own, which kept no ancestors, made the selection churn), in the terrain pass's order: select
+    with the cache's baked ranges, resolve, retain, then bake. The pool is ideal: every request is
+    baked and inserted the same frame, with its real baked range; the demand's breadth-first rule
+    still costs a deep patch a frame per unbaked ancestor. So the measured demand is the patches
+    baked a second. Each frame records the patches, the bakes, `limited`, the stand-ins and missing
+    patches, the `selectPatches` time and D; bake time is kept out of the wall-time cap. Settings:
+    high 1080p, τ 1 px, low 720p, τ 2 px, 60°, each with its own `terrainSlotLayout` and a budget of
+    ⌊slots ÷ 2⌋. The record's terrain (`measureTerrain`): the site's height is the module's
+    `surfaceHeightM` (T4.c's collision interpolant) at the site's direction; the track maximum is the
+    highest baked height plus ε_14 over the level-14 patches under the low pass's and the
+    slowdown's track, sampled every 250 m, a true bound. On seed 7 the site lies at −1,845.8 m.
+    **Corrected (2026-10-03, lane B's diagnosis):** every height query and patch key takes the
+    direction d of the spheroid point M·d (Design note 5), which the profile now exposes as
+    `DescentPose.groundDir` and `DescentProfile.siteDir`, with `datumDirection(figure, p)` =
+    M⁻¹p ÷ |M⁻¹p| for a point on the spheroid. The first record read the geocentric p ÷ |p|,
+    0.036° (4 km) off at seed 7's site, and found −1,953.2 m there: the camera hovered 107 m
+    underground looking down, so selection rightly culled everything. `siteHeight.wasm.test.ts`
+    holds the measured height inside the finest bake's range under the site.
+  - _The craft's contact_ (`craftContacts`): one contact at the ground point while
+    `isDescending` holds or the craft is grounded, its clearance within the held radius r_g (its
+    10 m plus one finest patch), so that an exact hover (vertical speed 0) keeps its forced
+    region (Design note 9's grounded bodies).
+  - _Scope (orchestrator's ruling, 2026-10-03):_ the plan's whole-descent fixed-step test is split.
+    The unit test (`demandRecord.test.ts`) pins the selection hash of short windows, 1 s measured
+    after 1 s of warm-up, ending 2 s before each segment's end, on both settings, under
+    min(hard, 4σ_n), ridges off, reading baked ranges, the level table and σ_n from
+    `view/spike/fixtures/descentRanges.txt`, which `just descent-demand --write-fixture` writes
+    from the module (TEST_PLANET_VERSION 2; regenerate it with the module). The whole descent is
+    the command `just descent-demand` (`apps/hyperion/scripts/descentDemand.mjs`): cells
+    {hard, min(hard, 4σ_n)} × {ridges off, on} × {high, low}, a configurable rate (64 Hz by
+    default) and a wall-time cap (2 h, shared by the cells), writing
+    `docs/measurements/descent-spike/<date>-demand-<rules>.{json,md}` with any truncation, the rate
+    and the frames covered stated. The ridged planet's 4σ cells are labelled "statistical, not a
+    bound on the ridged planet (bound.rs finding)".
+  - **Finding: D's factor of two** (windows re-measured 2026-10-03 after the direction fix and
+    over the stretches' floors, D at the height above the floor). In the windows (min(hard, 4σ_n),
+    ridges off), demand ÷ D is, high then low: orbit coast 0 / 0 (D 0.9 and 0.04 a second,
+    nothing new selected), descent arc 0.57 / 0.47, approach and flare 1.20 / 0.86, low fast pass
+    0.79 / 1.52, slowdown 0.61 / 1.67, vertical descent 0 / 0 (D 81 and 25), and the hover 0
+    against 0. The test asserts the seven within a factor of two: high's approach, low pass,
+    slowdown and arc, low's approach, low pass and slowdown. Two causes are clear. D assumes a ring all
+    round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
+    chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
+    vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
+    vertical descent's window (about 54 m to 33 m). On the low setting D is also low, since below
+    k ≈ 3 the quadtree's granularity floors the count (Design note 19's "about a quarter").
+    **Proposed correction, not the gate:** D_frustum = Σ_L 4 k_L tan(φ_x ÷ 2) v ÷ S_L +
+    (3π k² ÷ ln 2) |ḣ| ÷ h above the cap and the vertical term zero below it. The whole-descent
+    record has the per-segment figures. For T18 and T19.
+  - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
+    camera underground (the direction above), not selection: lane B's
+    `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With
+    the site at −1,845.8 m the windows select 66 patches (high) and 69 (low) at the hover, the
+    forced region included, and the vertical descent's and the hover's hashes are pinned.
+  - **Finding: budgeted selection under the hard bound churns** (probe, 2026-10-03, high, low fast
+    pass): 952 patches, `limited` 72% of frames, about 830 new keys a frame (53,000 a second
+    against D's 311), `selectPatches` p50 116 ms. Lane B fixed it (5d90fab, the streaming gate,
+    resident ancestors pinned, deepest evicted first); the hard cells' full record follows the
+    collapse's fix.
+
+- **The scripted descent's terrain clearance** (decision-r05-descent-clearance.md, 2026-10-03). The
+  script is flown above per-stretch true bounds of the finest mesh. Each bound is the baked maximum
+  plus ε_n over a level-14 corridor, with level 12 above 2 km, level 4 for the arc and level 16 for
+  the last 250 m. The clearances are 300 m on the low pass, 200 m on the flare and slowdown, 100 m on
+  the final approach, and the table's own over the site, whose height is exact.
+
+  On rough seeds, boundaries are lifted and the vertical descent's top rises, with its 20 m/s kept.
+  The per-level demand then reads the height above the floor, and the results record each segment's
+  lift. So a lifted run measures different heights from the table, but its demand is predicted at the
+  heights actually flown.
+
+  Not covered:
+  - The bound is of the finest mesh, not of what is drawn. A stand-in ancestor, drawn while
+    streaming lags, which the low pass is designed to provoke, can stand up to its ε_L above the
+    finest surface (877 m at level 8 with ridges). So the camera can pass through a coarse stand-in
+    for a frame. That is a streaming failure the run already counts, not a script error.
+  - The hover's 1 m is against the drawn ground only once the forced region is resident
+    (`FORCED_REGION_RESIDENCY_S`).
+  - Slopes beside the site make the 3D distance in the vertical descent and hover smaller than the
+    vertical clearance (about 0.7 m at 1 m on a 45° slope).
+
+  As built (lane D, `descentProfile.ts`):
+  - `DescentSegment.stretches` holds each segment's rule as data (`SegmentStretches`: piece length,
+    level, C, the flare's level 12 above 2 km, the slowdown's last piece "final approach");
+    `trackStretches(profile)` returns the pieces (`TrackStretch`: piece, segment, from/to remaining
+    distance, start/end on whole seconds, level, C), planned on the table's unlifted altitudes, so
+    the same for every terrain: the orbit coast as one piece, the arc in nine of 100 s, the flare in
+    twelve of 10 s (pieces 1–8 at level 12, 9–12 at 14 on seed 7), the low pass, slowdown 1–5 and
+    the final approach.
+  - `DescentTerrain.stretchMaxHeightsM` is additive. Without it, `trackMaxHeightM` (0 by default,
+    as before) is the low pass's floor and every other floor is the site's height, which gives
+    today's profile bit for bit (checked against the previous profile at every 64 Hz pose before
+    the change; the test holds floors at the site equal to `trackMaxHeightM` at the site).
+    `liftOverTrack` is gone: rule 3's boundary altitudes subsume it.
+  - `DescentPose.floorM` and `heightAboveFloorM` (the clearance less the floor's height above the
+    site, so exactly `clearanceM` where the floor is the site), `DescentProfile.minFloorMarginM`,
+    `groundDirAt(tS)` (the track's direction alone, for the floors' keys) and the exported
+    `FLOOR_TOLERANCE_M` (10⁻⁶ m): the 64 Hz check lets a deficit that small pass, since a boundary
+    sitting exactly at its floor plus C (the low pass at the site's 300 m) is otherwise lifted for
+    the integrals' 10⁻¹³ m rounding. The constructor throws a `RangeError` for floors that do not
+    match the plan or are not finite, and after a fourth lift; raising a piece's two boundaries
+    lifts its whole piece, so in practice the rounds converge in one, and the test of an
+    unclearable floor uses an infinite one.
+  - The record (`demandRecord.ts`): `stretchKeys(profile, stretch)` takes the level's patches
+    under the track and their eight neighbours as lane C's `trackPatchKeys` does;
+    `measureTerrain` returns the floors (baked maximum plus ε_n); each cell records
+    `segmentLifts` and `minFloorMarginM`, each segment its least and greatest
+    `heightAboveFloorM`; the fixed-step D and the craft's contact read `heightAboveFloorM`. On seed 7
+    (ridges off) the low pass's own floor binds, and it flies level 300 m above it.
+  - _A lifted low pass holds level_ (review, 2026-10-03): the back-to-front solve gave a level
+    segment before a descending one a gentle climb to feed its end blend (1.9 m on the table's own
+    low pass, but about 22 m at a 500 m lift and 80 m at 2 km, since the slowdown then falls
+    faster). Where the low pass is lifted, it holds rate 0 and the piece after it starts from rest
+    and ramps to its rate over its blend length (`VerticalPiece.leadInS`); the unlifted table keeps
+    its climb, bit for bit (the test pins 64 Hz pose fingerprints taken from 003a6a3's profile).
+    Old callers whose `trackMaxHeightM` lifted the low pass (including the default 0 m over a site
+    below the datum) now fly it level, a change on purpose.
+  - **Open (asked of the orchestrator, 2026-10-03):** rule 3 compares a split segment's interior
+    boundaries with the unlifted table, so a lifted low pass beside a split slowdown saw-tooths
+    (slowdown 1 falls from the lifted level to near the table's ~283 m, slowdown 2 climbs to a
+    binding piece 3). Lean: take an interior boundary's table value as at least the straight line
+    in time between its segment's flown ends.
