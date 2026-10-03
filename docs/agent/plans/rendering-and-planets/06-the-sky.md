@@ -1511,6 +1511,19 @@ plan reserves no tag, prefix or stream.
   not be read; the power-2 law gives 0.377, inside the tolerance by 0.002, and the quadratic
   itself overestimates the limb by about 0.01 against fifth-degree fits (Neckel and Labs 1994,
   0.382 at 550 nm).
+- **Deviations in T4.b, as built.** `HostDisc`'s fields are private with getters. Its
+  `mean_luminance` per channel (B, V, R) is the photopic mean L̄ times the star's linear Rec. 709
+  blue, green and red at unit luminance, so the channels' Rec. 709 luminance
+  (`sky::disc::channel_luminance`, added) is L̄; the test "π × mean luminance × sin²ρ equals the
+  illuminance from V within 1% in V" is taken on that luminance. L̄ = 2.54 µlx × `lux_per_v0` ×
+  10^(−0.4 M_V) × (10 pc)² ÷ (π R²), with `sky::disc::V0_ILLUMINANCE_LX` (added; Allen's value).
+  M_V is plan 06's `absolute_magnitude_v`; a white dwarf, which plan 06 leaves without one until
+  A4, takes M_bol − BC_V(T_eff) from the dwarfs' corrections (up to about 0.6 mag off at 4,000 K,
+  `photometry`'s own caution). A star with no V (neutron star, black hole, merged-away, substellar)
+  has no disc. The grid follows the phase: white dwarfs theirs, protostar to main sequence the
+  dwarfs', every other living phase the giants'. Each star's state is `SystemStars::state_at(t)`
+  (pair-evolved); `host_discs` does not read its `galaxy` argument yet. `StarIndex::from_body`
+  (added to plan 11's `multiplicity::hierarchy`) gives the index.
 - **The eye's darkest background (decided 2026-10-02, T2).** Design note 2's clamp at μ 27 (8.64 at
   F = 1.4) is replaced by Crumey's own: the threshold is constant for a background, colour-corrected
   to Blackwell's light, at or below 10⁻⁵ cd m⁻² (Crumey 2014, §2.3, eqs. 47–52; §3.2, eq. 71, ζ =
