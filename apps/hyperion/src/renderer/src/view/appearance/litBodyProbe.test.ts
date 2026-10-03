@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
-import { brdf } from "./brdf";
+import { brdf, brdfFromTable } from "./brdf";
 import { PHASE_TABLE_SAMPLES, PHASE_TABLE_STEP_RAD, phaseFactorTableOf } from "./law";
 import {
   type BrdfProbeCase,
   expectedBrdf,
+  expectedLighting,
+  LIGHTING_CASE_BYTES,
   LIT_BODY_PROBE,
   packBrdfProbeCases,
+  packLightingProbeCases,
   packPhaseFactorRows,
   PROBE_CASE_BYTES,
   syntheticShare,
@@ -79,6 +82,65 @@ describe("the lit-body probe", () => {
       a: [Math.fround(0.25), Math.fround(0.25) * 0.9, Math.fround(0.25) * 0.8] as const,
       lommelSeeligerShare: syntheticShare(alpha),
     };
-    expect(expected).toEqual(brdf(law, Math.fround(0.8), Math.fround(0.6), alpha));
+    // f from the borrowed row (Mercury's own L), the disc term from the per-texel A and L.
+    expect(expected).toEqual(
+      brdfFromTable(law, phaseFactorTableOf(LAW), Math.fround(0.8), Math.fround(0.6), alpha),
+    );
+    expect(expected).not.toEqual(brdf(law, Math.fround(0.8), Math.fround(0.6), alpha));
+  });
+});
+
+describe("the lighting probe's cases", () => {
+  const cases = packLightingProbeCases([
+    { kind: "sphere", h: 3, phiRad: 0.4, horizonRad: 0.1 },
+    {
+      kind: "eclipse",
+      starRadiusRad: 0.01,
+      limbC: 0.7,
+      limbAlpha: 0.6,
+      annuli: 4,
+      occluderRadiusRad: 0.005,
+      separationRad: 0.002,
+    },
+    { kind: "stubs" },
+  ]);
+  const u32 = new Uint32Array(cases);
+  const f32 = new Float32Array(cases);
+
+  it("packs each case in the kernel's 32 bytes, its kind first", () => {
+    expect(cases.byteLength).toBe(3 * LIGHTING_CASE_BYTES);
+    expect([u32[0], u32[8], u32[16]]).toEqual([1, 2, 3]);
+  });
+
+  it("packs a horizon case's H, φ and horizon", () => {
+    expect([f32[2], f32[3], f32[4]]).toEqual([3, Math.fround(0.4), Math.fround(0.1)]);
+  });
+
+  it("packs an eclipse case's annuli and angles", () => {
+    expect(u32[9]).toBe(4);
+    expect([f32[10], f32[13], f32[14]]).toEqual([
+      Math.fround(0.01),
+      Math.fround(0.005),
+      Math.fround(0.002),
+    ]);
+  });
+
+  it("expects the stubs' 1, 1 and 0", () => {
+    expect(expectedLighting([{ kind: "stubs" }])).toEqual([[1, 1, 0]]);
+  });
+
+  it("expects a total eclipse to leave nothing", () => {
+    const [eclipse] = expectedLighting([
+      {
+        kind: "eclipse",
+        starRadiusRad: 0.01,
+        limbC: 0.7,
+        limbAlpha: 0.6,
+        annuli: 4,
+        occluderRadiusRad: 0.02,
+        separationRad: 0,
+      },
+    ]);
+    expect(eclipse).toEqual([0]);
   });
 });

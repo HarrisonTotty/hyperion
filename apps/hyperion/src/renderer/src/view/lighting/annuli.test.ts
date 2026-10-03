@@ -9,6 +9,7 @@ import {
   DISC_ANNULI_LOW,
   eclipseVisible,
   type LimbDarkenedDisc,
+  type Occluder,
 } from "./annuli";
 import { denseAnnulusVisibleFraction } from "./oracle";
 
@@ -18,7 +19,11 @@ import { denseAnnulusVisibleFraction } from "./oracle";
  */
 const SUN_LIKE = { c: 0.71, alpha: 0.6 } as const;
 
-/** A cool star's stronger darkening, for a second point of the grid. */
+/**
+ * A cool star's deeper limb (c 0.8) with a shallower profile (α 0.45), for a second point of the
+ * grid; its worst error is the smaller, since the error follows the profile's curvature near the
+ * centre more than c.
+ */
 const COOL = { c: 0.8, alpha: 0.45 } as const;
 
 /** The grid of radius ratios, 0.1 to 30 log-spaced, and 41 separations over each overlap. */
@@ -58,10 +63,16 @@ describe("annulusEdges", () => {
 });
 
 describe("circleOverlapArea", () => {
-  it("is zero apart, the smaller circle's area inside, and symmetric", () => {
+  it("is zero when the circles are apart", () => {
     expect(circleOverlapArea(1, 0.5, 1.5)).toBe(0);
+  });
+
+  it("is the smaller circle's area when one lies inside the other", () => {
     expect(circleOverlapArea(1, 0.5, 0.2)).toBeCloseTo(Math.PI * 0.25, 15);
     expect(circleOverlapArea(0.5, 1, 0.2)).toBeCloseTo(Math.PI * 0.25, 15);
+  });
+
+  it("is symmetric in its two radii", () => {
     expect(circleOverlapArea(1, 0.7, 0.9)).toBeCloseTo(circleOverlapArea(0.7, 1, 0.9), 14);
   });
 
@@ -119,6 +130,11 @@ describe("the eclipse term against 400 annuli", () => {
   });
 });
 
+/** A 100 km body 3.8 × 10⁸ m sunward of the lit point, offset across the line of sight. */
+function transitAt(offsetM: number): Occluder {
+  return { centreM: vec3(1.496e11 - 3.8e8, offsetM, 0), radiusM: 1e5 };
+}
+
 describe("eclipseVisible", () => {
   const sun: LimbDarkenedDisc = {
     centreM: vec3(0, 0, 0),
@@ -128,9 +144,24 @@ describe("eclipseVisible", () => {
   };
   const point = vec3(1.496e11, 0, 0);
 
-  it("is one with no occluders, and with one behind the star", () => {
+  it("is one with no occluders", () => {
     expect(eclipseVisible(sun, point, [], 4)).toBe(1);
+  });
+
+  it("ignores an occluder beyond the star", () => {
     expect(eclipseVisible(sun, point, [{ centreM: vec3(-1e10, 0, 0), radiusM: 7e7 }], 4)).toBe(1);
+  });
+
+  it("is zero for a point inside an occluder", () => {
+    expect(eclipseVisible(sun, point, [{ centreM: point, radiusM: 1e6 }], 4)).toBe(0);
+  });
+
+  it("adds the losses of separate transits", () => {
+    const one = transitAt(4e5);
+    const other = transitAt(-4e5);
+    const lossOne = 1 - eclipseVisible(sun, point, [one], 4);
+    const lossOther = 1 - eclipseVisible(sun, point, [other], 4);
+    expect(eclipseVisible(sun, point, [one, other], 4)).toBeCloseTo(1 - lossOne - lossOther, 14);
   });
 
   it("is zero inside a body's umbra", () => {

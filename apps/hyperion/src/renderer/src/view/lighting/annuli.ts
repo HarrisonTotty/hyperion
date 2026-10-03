@@ -7,10 +7,12 @@
  * √(1 − μ_j²) in stellar radii), each of uniform intensity carrying its exact share of the power-2
  * law's flux, I(μ) ÷ I(1) = 1 − c (1 − μ^α) (Maxted 2018, A&A 616, A39). An annulus's eclipsed
  * area is the difference of two exact circle–circle overlaps, so the term is continuous in every
- * argument and never bands: 0.62% worst absolute error at K = 4 and 1.5% at K = 2 (Design note 6).
+ * argument and never bands. Design note 6 states 0.62% worst absolute error at K = 4 and 1.5% at
+ * K = 2; against a 400-annulus oracle the worst case, a concentric occulter, measures 0.73% and
+ * 2.6% for a Sun-like power-2 law (c 0.71, α 0.6), pending decision-r07-dn6.
  * Geometry is angular, in units of the star's angular radius, as seen from the lit point.
  */
-import { dot, norm, normalise, sub, type Vec3 } from "../../geometry/vec3";
+import { cross, dot, norm, normalise, sub, type Vec3 } from "../../geometry/vec3";
 
 /** Annuli of the high setting. */
 export const DISC_ANNULI_HIGH = 4;
@@ -119,44 +121,55 @@ export function annulusVisibleFraction(
 }
 
 /**
- * The fraction of one channel's flux from `disc` visible from `from` past `occluders`.
+ * The fraction of one channel's flux from `disc` visible from `fromM` past `occluders`.
  *
  * @remarks
  * Each occluder nearer than the star and within the sum of the two angular radii of its direction
  * hides the overlap of its disc with the star's; occluders are taken not to overlap one another,
- * which holds for the shadow cones `occludersFor` keeps (and their hidden fractions add). A point
- * inside an occluder sees nothing of the star.
+ * which holds for the shadow cones `occludersFor` (`occluders.ts`) keeps, and their hidden fractions add. A
+ * point inside an occluder sees nothing of the star.
  *
+ * @param fromM - The lit point, m, in the frame of the disc and the occluders.
  * @param k - The number of annuli, {@link DISC_ANNULI_HIGH} or {@link DISC_ANNULI_LOW}.
  */
 export function eclipseVisible(
   disc: LimbDarkenedDisc,
-  from: Vec3,
+  fromM: Vec3,
   occluders: ReadonlyArray<Occluder>,
   k: number,
 ): number {
-  const toStar = sub(disc.centreM, from);
-  const starDistance = norm(toStar);
-  const starRadius = Math.asin(Math.min(disc.radiusM / starDistance, 1));
+  const toStar = sub(disc.centreM, fromM);
+  const starDistanceM = norm(toStar);
+  const starRadiusRad = Math.asin(Math.min(disc.radiusM / starDistanceM, 1));
   const starDirection = normalise(toStar);
   const annuli = annulusEdges(disc.limbC, disc.limbAlpha, k);
   let visible = 1;
   for (const occluder of occluders) {
-    const toOccluder = sub(occluder.centreM, from);
-    const distance = norm(toOccluder);
-    if (distance <= occluder.radiusM) {
+    const toOccluder = sub(occluder.centreM, fromM);
+    const distanceM = norm(toOccluder);
+    if (distanceM <= occluder.radiusM) {
       return 0;
     }
-    if (distance >= starDistance) {
+    if (distanceM >= starDistanceM) {
       continue;
     }
-    const radius = Math.asin(occluder.radiusM / distance);
-    const cosine = Math.min(Math.max(dot(normalise(toOccluder), starDirection), -1), 1);
-    const separation = Math.acos(cosine);
-    if (separation >= radius + starRadius) {
+    const occluderRadiusRad = Math.asin(occluder.radiusM / distanceM);
+    // atan2 of the cross and dot products keeps small separations exact, where acos loses √ε.
+    const occluderDirection = normalise(toOccluder);
+    const separationRad = Math.atan2(
+      norm(cross(occluderDirection, starDirection)),
+      dot(occluderDirection, starDirection),
+    );
+    if (separationRad >= occluderRadiusRad + starRadiusRad) {
       continue;
     }
-    visible -= 1 - annulusVisibleFraction(annuli, radius / starRadius, separation / starRadius);
+    visible -=
+      1 -
+      annulusVisibleFraction(
+        annuli,
+        occluderRadiusRad / starRadiusRad,
+        separationRad / starRadiusRad,
+      );
   }
   return Math.max(0, visible);
 }

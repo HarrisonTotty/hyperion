@@ -11,7 +11,9 @@
  * - φ ≥ π − arccos(1/H), none of it: F = 0;
  * - between, F = [cos φ arccos Y − X sin φ √(1 − Y²)] ÷ (π H²) + arctan[sin φ √(1 − Y²) ÷ X] ÷ π.
  *
- * Exact for a uniform disc; within 0.45% of a limb-darkened one for a star 19.5° in radius. The
+ * Exact for a uniform disc; for a limb-darkened star 19.5° in radius it errs by 0.47% of the face-on
+ * value at φ = 90° with the brainstorm's solar law (Design note 6 states 0.45%; pending
+ * decision-r07-dn6). The
  * factor returned is H² F, the irradiance over that of the disc face-on (E = π L̄ sin²ρ), so that it
  * is cos φ wherever the whole disc is up. It softens the terminator, 2 ÷ (3π H) of the face-on
  * value at φ = 90°, and lights a close-in planet beyond its hemisphere, to 109.5° at H = 3.

@@ -6,13 +6,16 @@
  * `shaders/litBody.wgsl` is a library of functions, not a material, so the catalogue holds it
  * inside a compute kernel that calls each function at pinned inputs and writes the results: the
  * smoke harness compiles it on SwiftShader with every other shader, and `smoke/litBody.ts`
- * dispatches it and compares the read-back results with `brdf` at 10⁻⁵ relative. The kernel's
+ * dispatches it and compares the read-back results with `brdf` (T4.c) and with
+ * `sphereIrradianceFactor`, `annulusVisibleFraction` and the stubs' values (T6.c). The kernel's
  * results are a pure function of its inputs on one path, so its readback is `bit-exact`.
  */
 import type { KernelPair } from "../engine/kernels";
+import { annulusEdges, annulusVisibleFraction } from "../lighting/annuli";
+import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import type { Rgb } from "../photometry/toneCurve";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
-import { brdf } from "./brdf";
+import { brdfFromTable } from "./brdf";
 import { PHASE_TABLE_SAMPLES, phaseFactorTableOf, type PhotometricLaw } from "./law";
 
 /** One pinned evaluation of `body_brdf`. */
@@ -94,9 +97,11 @@ export function packPhaseFactorRows(laws: ReadonlyArray<PhotometricLaw>): Float3
 
 /** The reference's I/F for each case, at the case's inputs rounded to `f32` as the GPU reads them. */
 export function expectedBrdf(cases: ReadonlyArray<BrdfProbeCase>): Rgb[] {
+  // A per-texel law reads the row of the law it borrows, as the kernel does.
   return cases.map((probe) =>
-    brdf(
+    brdfFromTable(
       perTexelLaw(probe),
+      phaseFactorTableOf(probe.law),
       Math.fround(probe.mu0),
       Math.fround(probe.mu),
       Math.fround(probe.phaseRad),
@@ -104,7 +109,101 @@ export function expectedBrdf(cases: ReadonlyArray<BrdfProbeCase>): Rgb[] {
   );
 }
 
-/** The probe kernel: `body_brdf` at each case, r, g, b and 0 per result. */
+/** One pinned evaluation of the lighting terms or of the hooks' stubs (T6.c). */
+export type LightingProbeCase =
+  | {
+      readonly kind: "sphere";
+      readonly h: number;
+      readonly phiRad: number;
+      readonly horizonRad: number;
+    }
+  | {
+      readonly kind: "eclipse";
+      readonly starRadiusRad: number;
+      readonly limbC: number;
+      readonly limbAlpha: number;
+      readonly annuli: number;
+      readonly occluderRadiusRad: number;
+      readonly separationRad: number;
+    }
+  | { readonly kind: "stubs" };
+
+/** Bytes per case in the kernel's `LightingCase` array: two 16-byte rows. */
+export const LIGHTING_CASE_BYTES = 32;
+
+/** The cases packed as the kernel's `array<LightingCase>`: kind, annuli, then up to six values. */
+export function packLightingProbeCases(cases: ReadonlyArray<LightingProbeCase>): ArrayBuffer {
+  const bytes = new ArrayBuffer(cases.length * LIGHTING_CASE_BYTES);
+  const f32 = new Float32Array(bytes);
+  const u32 = new Uint32Array(bytes);
+  cases.forEach((probe, index) => {
+    const base = (index * LIGHTING_CASE_BYTES) / 4;
+    switch (probe.kind) {
+      case "sphere":
+        u32[base] = 1;
+        f32.set([probe.h, probe.phiRad, probe.horizonRad], base + 2);
+        break;
+      case "eclipse":
+        u32[base] = 2;
+        u32[base + 1] = probe.annuli;
+        f32.set(
+          [
+            probe.starRadiusRad,
+            probe.limbC,
+            probe.limbAlpha,
+            probe.occluderRadiusRad,
+            probe.separationRad,
+          ],
+          base + 2,
+        );
+        break;
+      case "stubs":
+        u32[base] = 3;
+        break;
+    }
+  });
+  return bytes;
+}
+
+/**
+ * The reference's values for each lighting case, at its inputs rounded to `f32`: the horizon
+ * factor, the eclipse term's visible fraction, or the stubs' 1, 1 and 0 (ring shadow, sun
+ * transmittance and sky irradiance, each's first channel).
+ */
+export function expectedLighting(cases: ReadonlyArray<LightingProbeCase>): number[][] {
+  return cases.map((probe) => {
+    let values: number[];
+    switch (probe.kind) {
+      case "sphere":
+        values = [
+          sphereIrradianceFactor(
+            Math.fround(probe.h),
+            Math.fround(probe.phiRad),
+            Math.fround(probe.horizonRad),
+          ),
+        ];
+        break;
+      case "eclipse":
+        values = [
+          annulusVisibleFraction(
+            annulusEdges(Math.fround(probe.limbC), Math.fround(probe.limbAlpha), probe.annuli),
+            Math.fround(probe.occluderRadiusRad) / Math.fround(probe.starRadiusRad),
+            Math.fround(probe.separationRad) / Math.fround(probe.starRadiusRad),
+          ),
+        ];
+        break;
+      case "stubs":
+        values = [1, 1, 0];
+        break;
+    }
+    return values;
+  });
+}
+
+/**
+ * The probe kernel: `body_brdf` at each BRDF case (r, g, b and 0 per result), and the lighting
+ * terms or the stubs at each lighting case (up to three values per result).
+ */
 export const LIT_BODY_PROBE: KernelPair = {
   name: "R07 lit body twin",
   reference: `${litBodyWgsl}
@@ -119,12 +218,44 @@ struct ProbeCase {
   per_texel : u32,
 }
 
+struct LightingCase {
+  kind : u32,
+  annuli : u32,
+  p0 : f32,
+  p1 : f32,
+  p2 : f32,
+  p3 : f32,
+  p4 : f32,
+  p5 : f32,
+}
+
 @group(0) @binding(0) var<storage, read> cases : array<ProbeCase>;
 @group(0) @binding(1) var<storage, read_write> results : array<vec4f>;
 @group(0) @binding(2) var phase_factor_table : texture_2d<f32>;
+@group(0) @binding(3) var<storage, read> lighting_cases : array<LightingCase>;
+@group(0) @binding(4) var<storage, read_write> lighting_results : array<vec4f>;
+
+fn run_lighting(index : u32) {
+  let c = lighting_cases[index];
+  var value = vec4f(0.0);
+  if (c.kind == 1u) {
+    value.x = sphere_irradiance(c.p0, c.p1, c.p2);
+  } else if (c.kind == 2u) {
+    value.x = eclipse_visible(c.p0, c.p1, c.p2, c.annuli, c.p3, c.p4);
+  } else if (c.kind == 3u) {
+    // Arbitrary arguments: the stubs ignore them.
+    value.x = ring_shadow_on_body(vec3f(1.0, 2.0, 3.0), vec3f(0.0, 0.0, 1.0)).x;
+    value.y = atmosphere_sun_transmittance(1000.0, 0.5, 0.3, 1.2).x;
+    value.z = atmosphere_sky_irradiance(1000.0, 0.5, 0.3).x;
+  }
+  lighting_results[index] = value;
+}
 
 @compute @workgroup_size(8)
 fn main(@builtin(global_invocation_id) id : vec3u) {
+  if (id.x < arrayLength(&lighting_cases)) {
+    run_lighting(id.x);
+  }
   if (id.x >= arrayLength(&cases)) {
     return;
   }

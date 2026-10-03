@@ -1,14 +1,19 @@
 /**
- * The smoke page's lit-body checks (plan R07, T4.c): `shaders/litBody.wgsl`'s `body_brdf`, run in
- * the catalogue's probe kernel on the run's adapter, equals `view/appearance/brdf.ts` at five pinned
- * geometries to 10⁻⁵ relative, one of them with a law built per texel.
+ * The smoke page's lit-body checks (plan R07, T4.c and T6.c): `shaders/litBody.wgsl`, run in the
+ * catalogue's probe kernel on the run's adapter. `body_brdf` equals `view/appearance/brdf.ts` at
+ * five pinned geometries to 10⁻⁵ relative, one of them with a law built per texel;
+ * `sphere_irradiance` and `eclipse_visible` equal their TypeScript twins (themselves checked
+ * against the `f64` oracles) at five points each; the R08 and R11 stubs return 1, 1 and 0.
  */
 
 import {
   type BrdfProbeCase,
   expectedBrdf,
+  expectedLighting,
+  type LightingProbeCase,
   LIT_BODY_PROBE,
   packBrdfProbeCases,
+  packLightingProbeCases,
   packPhaseFactorRows,
 } from "../view/appearance/litBodyProbe";
 import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../view/appearance/law";
@@ -55,7 +60,62 @@ function probeCases(): BrdfProbeCase[] {
   ];
 }
 
-/** T4.c: `body_brdf` against `brdf`. */
+/**
+ * The lighting terms' agreement with their twins, absolute on factors of order one: WGSL's `f32`
+ * `acos` and `atan` are allowed some 10⁻⁴ of error (WGSL §17.5.3's accuracy table), and both terms
+ * call them.
+ */
+const LIGHTING_TOLERANCE = 2e-4;
+
+/** One AU over the Sun's radius: H at 1 au. */
+const H_AT_1_AU = 1.495_978_707e11 / 6.957e8;
+
+/** T6.c: five horizon factors, five eclipse terms and the stubs. */
+const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
+  { kind: "sphere", h: 3, phiRad: 0.4, horizonRad: 0 },
+  { kind: "sphere", h: 3, phiRad: 100 * RAD_PER_DEG, horizonRad: 0 },
+  { kind: "sphere", h: 11.5, phiRad: 90 * RAD_PER_DEG, horizonRad: 0 },
+  { kind: "sphere", h: H_AT_1_AU, phiRad: 89.9 * RAD_PER_DEG, horizonRad: 0 },
+  { kind: "sphere", h: 11.5, phiRad: 70 * RAD_PER_DEG, horizonRad: 5 * RAD_PER_DEG },
+  ...[
+    [0.3, 0],
+    [0.3, 0.8],
+    [1, 0.5],
+    [2, 1.5],
+    [0.5, 1.4],
+  ].map(([ratio = 0, separation = 0]): LightingProbeCase => ({
+    kind: "eclipse",
+    starRadiusRad: 4.65e-3,
+    limbC: 0.71,
+    limbAlpha: 0.6,
+    annuli: 4,
+    occluderRadiusRad: ratio * 4.65e-3,
+    separationRad: separation * 4.65e-3,
+  })),
+  { kind: "stubs" },
+];
+
+/** T6.c: `sphere_irradiance`, `eclipse_visible` and the stubs against their references. */
+function checkLighting(checks: Checks, gpu: Float32Array): void {
+  const expected = expectedLighting(LIGHTING_CASES);
+  LIGHTING_CASES.forEach((probe, index) => {
+    const reference = expected[index] ?? [];
+    const read = reference.map((_, c) => gpu[4 * index + c] ?? Number.NaN);
+    const worst = Math.max(
+      ...reference.map((value, c) => Math.abs((read[c] ?? Number.NaN) - value)),
+    );
+    const exact = probe.kind === "stubs";
+    checks.check(
+      exact
+        ? "T6.c the stubs return 1, 1 and 0"
+        : `T6.c ${probe.kind === "sphere" ? "sphere_irradiance" : "eclipse_visible"} equals its reference to ${LIGHTING_TOLERANCE} at point ${index + 1}`,
+      exact ? worst === 0 : worst <= LIGHTING_TOLERANCE,
+      `GPU ${read.map((value) => value.toPrecision(7)).join(", ")} against ${reference.map((value) => value.toPrecision(7)).join(", ")}, off by ${worst.toExponential(2)}`,
+    );
+  });
+}
+
+/** T4.c: `body_brdf` against `brdf`; T6.c: the lighting terms and stubs. */
 export async function checkLitBody(engine: RenderEngine, checks: Checks): Promise<void> {
   const cases = probeCases();
   const kernel = await engine.createComputeAsync(LIT_BODY_PROBE);
@@ -87,17 +147,37 @@ export async function checkLitBody(engine: RenderEngine, checks: Checks): Promis
     { width: PHASE_TABLE_SAMPLES, height: LAWS.length },
     packPhaseFactorRows(LAWS),
   );
+  const lightingBytes = packLightingProbeCases(LIGHTING_CASES);
+  const lightingInput = engine.createBuffer({
+    name: "lit body probe lighting cases",
+    bytes: lightingBytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(lightingInput, 0, new Uint8Array(lightingBytes));
+  const lightingResults = engine.createBuffer({
+    name: "lit body probe lighting results",
+    bytes: LIGHTING_CASES.length * 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
   engine.dispatch(
     kernel,
     {
       uniforms: {},
-      buffers: { cases: input, results },
+      buffers: {
+        cases: input,
+        results,
+        lighting_cases: lightingInput,
+        lighting_results: lightingResults,
+      },
       sampled: { phase_factor_table: table },
       storage: {},
     },
-    [1, 1, 1],
+    [Math.ceil(Math.max(cases.length, LIGHTING_CASES.length) / 8), 1, 1],
     LIT_BODY_PROBE.name,
   );
+  checkLighting(checks, new Float32Array(await engine.readBuffer(lightingResults)));
   const gpu = new Float32Array(await engine.readBuffer(results));
   const expected = expectedBrdf(cases);
   expected.forEach((reference, index) => {

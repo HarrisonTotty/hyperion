@@ -47,14 +47,21 @@ describe("sphereIrradianceFactor", () => {
     }
   });
 
-  it("softens the terminator over 59.3 km on a body of 6,371 km at 1 au", () => {
-    // The penumbral band runs from where the disc's edge touches the plane to where it sets.
+  it("softens the terminator over a band 59.3 km wide on a body of 6,371 km at 1 au", () => {
+    // The band runs from where the disc's edge touches the plane to where it sets.
     const edge = Math.acos(1 / H_EARTH);
-    const widthKm = 6371 * (Math.PI - 2 * edge);
-    expect(widthKm).toBeCloseTo(59.3, 1);
+    expect(6371 * (Math.PI - 2 * edge)).toBeCloseTo(59.3, 1);
+  });
+
+  it("is continuous where the plane first cuts the disc", () => {
+    const edge = Math.acos(1 / H_EARTH);
     expect(sphereIrradianceFactor(H_EARTH, edge - 1e-9)).toBeCloseTo(Math.cos(edge), 8);
-    expect(sphereIrradianceFactor(H_EARTH, Math.PI - edge)).toBe(0);
-    expect(sphereIrradianceFactor(H_EARTH, Math.PI - edge - 1e-4)).toBeGreaterThan(0);
+  });
+
+  it("is zero once the disc has set, and lit just before", () => {
+    const set = Math.PI - Math.acos(1 / H_EARTH);
+    expect(sphereIrradianceFactor(H_EARTH, set)).toBe(0);
+    expect(sphereIrradianceFactor(H_EARTH, set - 1e-4)).toBeGreaterThan(0);
   });
 
   it("gives 9.87 × 10⁻⁴ of the zenith value at the geometric terminator for a uniform disc", () => {
@@ -112,8 +119,11 @@ describe("sphereIrradianceFactor", () => {
 });
 
 describe("howellViewFactor", () => {
-  it("is cos φ ÷ H² with the disc up and zero with it set", () => {
+  it("is cos φ ÷ H² with the whole disc up", () => {
     expect(howellViewFactor(4, 0.3)).toBeCloseTo(Math.cos(0.3) / 16, 15);
+  });
+
+  it("is zero with the disc set", () => {
     expect(howellViewFactor(4, 2.9)).toBe(0);
   });
 

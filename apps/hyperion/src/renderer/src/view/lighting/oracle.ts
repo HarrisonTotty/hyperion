@@ -151,6 +151,11 @@ const DENSE_ANNULI = 400;
  * radius `ratio` stellar radii at `separation` stellar radii from its centre, by 400 annuli
  * uniform in radius, each carrying its exact flux and eclipsed by exact circle overlaps (Design
  * note 6's reference for the K-annulus term).
+ *
+ * @remarks
+ * It shares `circleOverlapArea` with the term it checks; that function is tested on its own
+ * against closed forms (the lens, containment, continuity), and the concentric case, which needs
+ * no overlap, is checked against the law's closed form.
  */
 export function denseAnnulusVisibleFraction(
   c: number,
