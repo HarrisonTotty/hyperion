@@ -32,7 +32,7 @@ import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { runSoak } from "./soak";
-import { checkTerrainResources } from "./terrain";
+import { checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
 import { checkWireframe } from "./wireframe";
@@ -182,6 +182,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R05.T11.a the terrain's resources", () =>
     checkTerrainResources(engine, checks),
   );
+  await checks.group("R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
   let images: CapturedImage[] = [];
   if (captures) {
     await checks.group("R05.T12.c the comparison captures", async () => {

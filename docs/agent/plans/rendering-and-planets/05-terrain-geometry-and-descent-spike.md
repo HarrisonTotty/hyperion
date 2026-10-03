@@ -2855,6 +2855,62 @@ medium, sizes, figure)`.
     `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
     `destroy()`.
   - `MemoryCategory` gains `height-cache`, appended.
+  - _The layout_ (`gpu/resources.ts`, `terrainLayout(terrain, limits)`, `TerrainLayout`) reads T8's
+    `SlotLayout` and the device's limits from `engine.capabilities`. Where the `BakedOffsets`
+    offsets at the slot count exceed min(`maxStorageBufferBindingSize`, `maxBufferSize`), it
+    takes `FaceDifferences` over the same byte budget, and `TerrainLayout.fallback` is
+    `binding-limit`, for T13 and T14 to put in the results file and the label. On the high setting
+    under default limits that is 3,904 slots, against 1,962 with `BakedOffsets`; the heights then
+    take 132.0 MB of the 128 MiB binding (98%). Item 7's "keeping the slot budget" is read as the
+    byte budget (the orchestrator's approval, 2026-10-03; if the slot count was meant, the
+    fallback holds 1,962 slots and one atlas layer). A layout whose buffers or atlas still do not
+    fit throws.
+  - _Per-slot records_ (`uniforms.ts`, `SLOT_RECORD_BYTES` 112, `writeSlotRecord`, `patchTerms`).
+    A storage buffer of one record a slot holds `PatchTermsF32`'s fields, the skirt depth and
+    `straddles`, written with the slot, in `height-cache`. It sits outside `SlotLayout`'s budget
+    (437 kB at 3,904 slots; approved by the orchestrator) and the tally counts it. `patchTerms` is
+    the client's twin of `PatchTerms::new`; a test holds its narrowed record to `vertex_f32.golden`'s
+    terms bit for bit on all twelve patches. Its private `stToUv` yields to T2's mirror.
+  - _The normals atlas_ (`normalsAtlasLayout`, `atlasTile`) is `rg16float`, each tile with a
+    one-texel gutter repeating its edge sample, and has as many 2D array layers as
+    `maxTextureDimension2D` requires (at most `MAX_TEXTURE_ARRAY_LAYERS`, WebGPU's 256, now in
+    `platform.ts`), the tiles spread evenly over them. At 8,192 texels: low 1,296 tiles of 67² in
+    8,174 × 737 × 1; high 1,962 of 131² in 8,122 × 4,192 × 1; the fallback's 3,904 in
+    8,122 × 4,192 × 2. The engine does not raise `maxTextureDimension2D`, so the RTX 3080 has the
+    same atlas. T11.b declares it `texture_2d_array`; R01's `drawing.ts` gains
+    `viewDimensionBinds`, so that a `2d-array` binding also takes a single-layer 2D texture (a
+    view WebGPU allows; approved by the orchestrator, pointer in R01's Risks). This replaces the
+    task's `viewDimension` `"2d"`.
+  - _The mesh_ (`patchMeshData`, `GRID_VERTICES`, `SKIRT_VERTICES`, `PATCH_INDICES`): `position`
+    carries (x, y, skirt), grid vertex (x, y) at 65 y + x (the bake's order), then 4 × 65 skirt
+    vertices, edge e anticlockwise from y = 0; quads split (0, 0)–(1, 1), anticlockwise seen from
+    outside, as are the skirts' quads (p, p′, q′), (p, q′, q).
+  - _The per-frame buffers_ (`InstanceRecords`, `ContactRecords`, `writeFrame`): instance records
+    of 32 B (origin less camera, slot, morph start and end), the instance buffer sized to the slot
+    count; a contacts buffer of a 16 B header (the count) and 32 B a contact (centre less camera,
+    held radius r_g, ramp), `MAX_CONTACTS` 1,024, more throws; the indirect arguments written once
+    with the index count, then only the instance count each frame. These three are category
+    `other`. `bytes()` keeps one view a record count, so a frame allocates nothing once its count
+    has been seen.
+  - _The upload_ (`SlotUpload`, `upload` → `SlotUploadResult`): it takes `originHeightM` and
+    `skirtDepthM` as its own fields until T10.b's `BakedPatch` carries them. Everything is checked
+    before the first write. A bake that predates the layout (a slot past a rebuilt layout's count,
+    or offsets the vertex path no longer takes) is `refused` with nothing written; an array of
+    the wrong length throws.
+  - _After a device loss_ `TerrainResources` remakes everything from the rebuilt device's limits
+    and `onRebuilt(layout)` tells the cache that every slot is empty. The engine has no public
+    release of a buffer or texture, so the handles live until the engine is disposed, as T12.c's
+    textures do; a setting change (T11.c) makes new ones beside them.
+  - _The counting fake_ refuses with `LimitExceeded` a buffer above `maxBufferSize`, a storage
+    buffer above `maxStorageBufferBindingSize`, or a 2D texture above `maxTextureDimension2D` or
+    256 layers, where a device would raise a validation error. It records `textureWritten`, takes
+    buffer limits (`countingRenderEngine(limits)`, `fakeDevice(limits)`) and restores onto
+    another device (`restore(device)`).
+  - _The smoke check_ `smoke/terrain.ts` (group "R05.T11.a the terrain's resources", appended to
+    `page.ts`) makes and writes both settings' resources on the harness's engine, then the high
+    setting on a second engine with `defaultLimits`: `FaceDifferences`, 3,904 slots, 8,122 ×
+    4,192 × 2. It passed on both variants on SwiftShader on 2026-10-03, with no uncaptured GPU
+    error. T11.b adds its frames to the same file.
 - **Orchestrator rulings, 2026-10-03.** T13.c's text now says it wires T14.b's `launchSwitches` into
   `index.ts`; T14.a's files and acceptance drop `view/spike/percentiles.ts`, whose figures T14.c
   computes in the main process.
@@ -3012,62 +3068,6 @@ medium, sizes, figure)`.
   without allocation and the leaf walk stopped at the first interior node, a warm call takes
   about 80 ms on the loaded development machine (360 ms before): still more than a frame, so the
   per-frame cost is revisited when T11.c drives selection each frame.
-  - _The layout_ (`gpu/resources.ts`, `terrainLayout(terrain, limits)`, `TerrainLayout`) reads T8's
-    `SlotLayout` and the device's limits from `engine.capabilities`. Where the `BakedOffsets`
-    offsets at the slot count exceed min(`maxStorageBufferBindingSize`, `maxBufferSize`), it
-    takes `FaceDifferences` over the same byte budget, and `TerrainLayout.fallback` is
-    `binding-limit`, for T13 and T14 to put in the results file and the label. On the high setting
-    under default limits that is 3,904 slots, against 1,962 with `BakedOffsets`; the heights then
-    take 132.0 MB of the 128 MiB binding (98%). Item 7's "keeping the slot budget" is read as the
-    byte budget (the orchestrator's approval, 2026-10-03; if the slot count was meant, the
-    fallback holds 1,962 slots and one atlas layer). A layout whose buffers or atlas still do not
-    fit throws.
-  - _Per-slot records_ (`uniforms.ts`, `SLOT_RECORD_BYTES` 112, `writeSlotRecord`, `patchTerms`).
-    A storage buffer of one record a slot holds `PatchTermsF32`'s fields, the skirt depth and
-    `straddles`, written with the slot, in `height-cache`. It sits outside `SlotLayout`'s budget
-    (437 kB at 3,904 slots; approved by the orchestrator) and the tally counts it. `patchTerms` is
-    the client's twin of `PatchTerms::new`; a test holds its narrowed record to `vertex_f32.golden`'s
-    terms bit for bit on all twelve patches. Its private `stToUv` yields to T2's mirror.
-  - _The normals atlas_ (`normalsAtlasLayout`, `atlasTile`) is `rg16float`, each tile with a
-    one-texel gutter repeating its edge sample, and has as many 2D array layers as
-    `maxTextureDimension2D` requires (at most `MAX_TEXTURE_ARRAY_LAYERS`, WebGPU's 256, now in
-    `platform.ts`), the tiles spread evenly over them. At 8,192 texels: low 1,296 tiles of 67² in
-    8,174 × 737 × 1; high 1,962 of 131² in 8,122 × 4,192 × 1; the fallback's 3,904 in
-    8,122 × 4,192 × 2. The engine does not raise `maxTextureDimension2D`, so the RTX 3080 has the
-    same atlas. T11.b declares it `texture_2d_array`; R01's `drawing.ts` gains
-    `viewDimensionBinds`, so that a `2d-array` binding also takes a single-layer 2D texture (a
-    view WebGPU allows; approved by the orchestrator, pointer in R01's Risks). This replaces the
-    task's `viewDimension` `"2d"`.
-  - _The mesh_ (`patchMeshData`, `GRID_VERTICES`, `SKIRT_VERTICES`, `PATCH_INDICES`): `position`
-    carries (x, y, skirt), grid vertex (x, y) at 65 y + x (the bake's order), then 4 × 65 skirt
-    vertices, edge e anticlockwise from y = 0; quads split (0, 0)–(1, 1), anticlockwise seen from
-    outside, as are the skirts' quads (p, p′, q′), (p, q′, q).
-  - _The per-frame buffers_ (`InstanceRecords`, `ContactRecords`, `writeFrame`): instance records
-    of 32 B (origin less camera, slot, morph start and end), the instance buffer sized to the slot
-    count; a contacts buffer of a 16 B header (the count) and 32 B a contact (centre less camera,
-    held radius r_g, ramp), `MAX_CONTACTS` 1,024, more throws; the indirect arguments written once
-    with the index count, then only the instance count each frame. These three are category
-    `other`. `bytes()` keeps one view a record count, so a frame allocates nothing once its count
-    has been seen.
-  - _The upload_ (`SlotUpload`, `upload` → `SlotUploadResult`): it takes `originHeightM` and
-    `skirtDepthM` as its own fields until T10.b's `BakedPatch` carries them. Everything is checked
-    before the first write. A bake that predates the layout (a slot past a rebuilt layout's count,
-    or offsets the vertex path no longer takes) is `refused` with nothing written; an array of
-    the wrong length throws.
-  - _After a device loss_ `TerrainResources` remakes everything from the rebuilt device's limits
-    and `onRebuilt(layout)` tells the cache that every slot is empty. The engine has no public
-    release of a buffer or texture, so the handles live until the engine is disposed, as T12.c's
-    textures do; a setting change (T11.c) makes new ones beside them.
-  - _The counting fake_ refuses with `LimitExceeded` a buffer above `maxBufferSize`, a storage
-    buffer above `maxStorageBufferBindingSize`, or a 2D texture above `maxTextureDimension2D` or
-    256 layers, where a device would raise a validation error. It records `textureWritten`, takes
-    buffer limits (`countingRenderEngine(limits)`, `fakeDevice(limits)`) and restores onto
-    another device (`restore(device)`).
-  - _The smoke check_ `smoke/terrain.ts` (group "R05.T11.a the terrain's resources", appended to
-    `page.ts`) makes and writes both settings' resources on the harness's engine, then the high
-    setting on a second engine with `defaultLimits`: `FaceDifferences`, 3,904 slots, 8,122 ×
-    4,192 × 2. It passed on both variants on SwiftShader on 2026-10-03, with no uncaptured GPU
-    error. T11.b adds its frames to the same file.
 - **Deviations in T7.c, as built, with the patch-demand ruling (2026-10-03,
   `decision-r05-patch-demand.md`, items 4a, 4b and 4d), which amend Design notes 7, 10, 23 and 24.**
   - _The grounded rule._ `grounded.ts` holds `GroundContact` (moved from `select.ts`),
@@ -3127,3 +3127,52 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   that it reaches level 3: two views at one pose request each patch once, a secondary view's
   priorities are the primary's × 0.25 (the near-plane floor keeps them finite), forced patches
   come first, and the order is `compareRequests`'s.
+- **Deviations in T11.b, as built** (2026-10-03).
+  - _Three sources, two materials_ (`gpu/material.ts`, `terrainMaterialSpec`, `TERRAIN_MATERIALS`,
+    `TERRAIN_BINDINGS`, `TERRAIN_PASS_LABEL`). `shaders/terrain.wgsl` holds the shared stages, the
+    `FaceDifferences` formula, the morph and hold, the skirts and the fragment stage;
+    `terrainBakedOffsets.wgsl` and `terrainFaceDifferences.wgsl` each define `ownOffset` and
+    `morphOffset`, the first also binding the offsets buffer. Each material is `frame.wgsl` +
+    `terrain.wgsl` + its path, by concatenation: `TERRAIN` (`face-differences`) and
+    `TERRAIN OFFSETS` (`baked-offsets`), both in `WGSL_CATALOGUE`. Bindings at `@group(2)`: heights
+    0, slot records 1, instances 2, contacts 3, normals 4 (`texture_2d_array`), offsets 5. The
+    `Draw` uniforms after `offsetFromCameraM` (zero): `bodyRotation` (the body-fixed axes into the
+    instance origins' frame), `sunDirection` (body-fixed), `sunRadiance` (albedo ÷ π × the sun's
+    illuminance per channel × the pre-exposure, which T11.c fills) and `atlas` (columns, tiles a
+    layer, a tile's stored texels, samples a side).
+  - _The morph_ is CDLOD's factor on the unmorphed vertex's distance from the camera over the
+    instance's morph range (0 where the range is empty), computed on the GPU in `f32` from the
+    instance origin plus the rotated own offset; shared vertices agree to the rounding of two
+    `f32` sums, not bit for bit, and the skirts cover the rest. It is then min'd with each contact's
+    hold, clamp((|v − c| − r_g) ÷ ramp, 0, 1) (a step at r_g when the ramp is 0), which T7's
+    `morphHold` and forced region must match. Contact centres are camera-relative in the instance
+    origins' frame (the body's rotated axes), not body-fixed; T11.c writes them so. Every vertex
+    loops over every contact, so T11.c should pass only the contacts near the drawn patches. A skirt vertex takes the morphed offset less the
+    skirt depth along the spheroid's normal at its edge vertex, ν₀ + (ν − ν₀), on both paths.
+  - _The normals are filtered by hand._ The fragment stage loads the four nearest samples
+    (`textureLoad`), decodes each as the bake's `decode_octahedral` does and blends the vectors
+    bilinearly. The pairs are discontinuous across the lower hemisphere's fold, along x = 0 and
+    y = 0 for z < 0 (four southern half-meridians of the body-fixed frame), where hardware
+    filtering of the pairs would decode to a wrong normal. So no sampler is bound, and the
+    atlas's gutter is unused by this pass.
+  - _Output._ Lambertian, `sunRadiance × max(n · s, 0)`, clamped at 65,504; alpha is
+    `METER_CLASS.litBody` (2).
+  - _The emulation_ (`gpu/vertexEmulation.ts`: `SlotTermsF32`, `faceDifferencePositionF32`,
+    `faceDifferenceMorphF32`, `directionDifferenceF32`, `normalDifferenceF32`) rounds each
+    operation with `Math.fround`. It agrees with `vertex_f32.golden`'s own and morph positions bit
+    for bit at all 588 vertices of the 12 patches; a test with one reordered operation fails. A
+    GPU may differ in the last bits: WGSL allows fused multiply-adds, 2.5 ULP in an `f32` division
+    and `sqrt` at `inverseSqrt`'s accuracy. Every inexact quotient is a small quantity, far inside
+    T4.b's 1 mm. The catalogue's display-name test is `view/engine/catalogue`, outside the
+    acceptance filter `view/terrain`.
+  - _The frames check_ (`smoke/terrain.ts`, `checkTerrainFrames`, group "R05.T11.b the terrain's
+    frames", after T10.b landed). A height worker bakes 5 × 5 test-planet patches (ridges off)
+    around the centre of face 2: level 5 for a camera 400 km above the centre patch's origin
+    looking straight down, level 18 for one 10 m above it looking 30° below the horizon. They are
+    drawn by both paths (high: `BakedOffsets`, double normals; low: `FaceDifferences`, mesh
+    normals) over a 64 MiB cache, not the setting's, since the engine frees nothing before it is
+    disposed. Each frame (64 × 48, R01's harness projection) must be finite everywhere, with the
+    terrain's meter class covering at least 90% of the frame from 400 km and 25% from 10 m. On
+    SwiftShader on 2026-10-03, both variants: 100% from 400 km and 68.8% from 10 m, every terrain
+    pixel lit, no uncaptured GPU error. The terrain being drawn with `cullMode: "back"` also
+    confirms the mesh's winding.

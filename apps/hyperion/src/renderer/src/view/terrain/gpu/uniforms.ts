@@ -67,7 +67,8 @@ export const CONTACTS_HEADER_BYTES = 16;
  *
  * ```wgsl
  * struct Contact {
- *   centreM : vec3f,      // the contact's centre less the camera, metres, narrowed once
+ *   centreM : vec3f,      // the contact's centre less the camera, metres, in the instance
+ *                         // origins' frame (the body's rotated axes, not body-fixed); narrowed once
  *   heldRadiusM : f32,    // r_g: the morph is held at zero within it, metres
  *   rampM : f32,          // the width over which the hold rises to 1 beyond r_g, metres
  *   _pad0 : f32, _pad1 : f32, _pad2 : f32,
