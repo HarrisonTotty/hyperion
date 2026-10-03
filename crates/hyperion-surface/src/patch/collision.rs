@@ -281,18 +281,27 @@ mod tests {
 
     #[test]
     fn on_a_shared_edge_it_is_the_same_from_either_patch() {
-        // A direction on a face edge, reached from both faces' sides of it, and one on a patch
-        // edge inside a face.
+        // Along a face edge, approached from both faces' sides: the surface is continuous across
+        // it, to the f64 rounding of the two faces' interpolation weights.
         let mut cache = LatticeCache::new();
         let key = PatchKey::new(Face::PosX, 19, (1 << 19) - 1, 4_000).unwrap();
         let (neighbour, _) = key.edge_neighbour_and_back(Edge::UMax);
         assert_ne!(neighbour.face(), key.face());
         let on_edge = key.vertex_dir(64, 17);
-        let mid = unit_dir([0, 1, 2].map(|n| on_edge[n] + key.vertex_dir(64, 18)[n]));
+        let next = key.vertex_dir(64, 18);
+        let mid = unit_dir([0, 1, 2].map(|n| on_edge[n] + next[n]));
+        let inward = key.vertex_dir(63, 17);
+        let outward = neighbour.vertex_dir(1, 17);
         let h = finest_surface_height(&TEST_PLANET, mid, &mut cache).unwrap();
-        let flipped =
-            finest_surface_height(&TEST_PLANET, mid.map(|c| c * 3.0), &mut cache).unwrap();
-        assert_eq!(bits(h), bits(flipped));
+        for side in [inward, outward] {
+            // A step of 10⁻⁹ of the way towards a vertex off the edge on each side.
+            let near = unit_dir([0, 1, 2].map(|n| mid[n] + 1e-9 * (side[n] - mid[n])));
+            let hn = finest_surface_height(&TEST_PLANET, near, &mut cache).unwrap();
+            assert!(
+                (hn - h).abs() < 1e-3,
+                "{hn} against {h} across the face edge"
+            );
+        }
         let a = finest_surface_height(&TEST_PLANET, on_edge, &mut cache).unwrap();
         let vertices = bake_vertices(&TEST_PLANET, neighbour, &mut cache)
             .unwrap()

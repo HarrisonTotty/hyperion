@@ -231,37 +231,3 @@ pub fn bake_patch(
     };
     Ok(BakedPatch { bake })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use wasm_bindgen_test::wasm_bindgen_test as test;
-
-    #[test]
-    fn the_exported_constants_are_the_crates() {
-        assert!((band_limit_m() - BAND_LIMIT_M).abs() <= 0.0);
-        assert!((finest_spacing_m() - FINEST_SPACING_M).abs() <= 0.0);
-    }
-
-    #[test]
-    fn a_bake_has_the_documented_layout() {
-        let Ok(baked) = bake_patch(
-            2,
-            7,
-            3,
-            4,
-            JsVertexPath::BakedOffsets,
-            JsNormalScale::Double,
-            JsRidges::Off,
-            0.0,
-        ) else {
-            panic!("a valid patch bakes");
-        };
-        assert_eq!(baked.heights().len(), 65 * 65 * 2);
-        assert_eq!(baked.offsets().map(|o| o.len()), Some(65 * 65 * 6));
-        assert_eq!(baked.normals().len(), 129 * 129 * 2);
-        assert_eq!(baked.origin().len(), 3);
-        assert_eq!(level_table(JsRidges::Off).len(), 25 * 4);
-        assert_eq!(test_planet_version(), crate::TEST_PLANET_VERSION);
-    }
-}

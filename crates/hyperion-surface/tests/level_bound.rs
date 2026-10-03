@@ -2,15 +2,24 @@
 //! finest level's exceeds `ε_n`, and the figures R10.T4's rule reads are recorded
 //! (decisions-r05.md item 6).
 //!
-//! Per level n below the finest, 16 random level-n patches each take 625 random points inside
-//! them, 10⁴ samples a level, and the distance |`S_n(p`) − `S_f(p)|` is measured with the finest mesh
-//! through `finest_surface_height` and level n's through `mesh_height` on the same diagonal rule.
+//! Per level n below the finest:
+//!
+//! - **The bound.** 16 random level-n patches each take 625 random points inside them, 10⁴
+//!   samples a level, and the distance `|S_n(p) − S_f(p)|` is measured with the finest mesh
+//!   through `finest_surface_height` and level n's through `mesh_height`, on the same diagonal
+//!   rule. No sample may exceed `ε_n`.
+//! - **The per-patch maxima.** For 32 further random patches, every one of their 65 × 65 vertices:
+//!   at a level-n vertex both meshes pass through their own function's value (the finest lattice
+//!   contains the coarser), so the distance there is `|F_n − F_f|`. Each patch's maximum over its
+//!   4,225 vertices is divided by `4σ_n`. With 32 patches the share within 1.25 × `4σ_n` resolves
+//!   steps of about 3%, not R10's 99%; it is a recorded figure, not R10's test.
+//!
 //! Printed per level: the bound, the largest sample, the 99.9th percentile and its ratio to the
 //! bound (a ratio below a quarter is a finding, not a failure), `σ_n` (the RMS of the omitted
-//! octaves, √`Σσ_k²`), the 99.9th percentile ÷ `4σ_n`, the largest per-patch maximum ÷ `4σ_n` and the
-//! share of patches whose maximum is within 1.25 × `4σ_n`, and the implied patch-to-distance ratio
-//! `k_n` = `ε_n` ÷ (`S_n` τ `θ_px`) at τ = 1 px, 1080p and a 60° field of view, with `S_n` the level's patch
-//! size (64 times its mean vertex spacing).
+//! octaves at full weight, the morph being the fade), the 99.9th percentile ÷ `4σ_n`, the largest
+//! per-patch maximum ÷ `4σ_n`, the share of patches within 1.25 × `4σ_n`, and the implied
+//! patch-to-distance ratio `k_n = ε_n ÷ (S_n τ θ_px)` at τ = 1 px, 1080p and a 60° field of view,
+//! with `S_n` the level's patch size (64 times its mean vertex spacing).
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -19,7 +28,7 @@ use hyperion_surface::cube::{Face, FaceUv, PatchKey, face_uv_to_xyz, st_to_uv, u
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::LatticeCache;
 use hyperion_surface::patch::collision::{finest_surface_height, mesh_height};
-use hyperion_surface::test_planet::{Ridges, TEST_PLANET};
+use hyperion_surface::test_planet::{Ridges, TEST_PLANET, TestPlanet};
 use hyperion_testkit::lcg::Lcg;
 
 /// A random direction inside `key`.
@@ -34,8 +43,32 @@ fn point_in(key: PatchKey, rng: &mut Lcg) -> [f64; 3] {
     }))
 }
 
+/// A random patch of `level`.
+fn random_patch(level: u8, rng: &mut Lcg) -> PatchKey {
+    let last = (1_u64 << level) - 1;
+    let face = Face::from_index(u8::try_from(rng.next_below(6)).unwrap()).unwrap();
+    let i = u32::try_from(rng.next_below(last + 1)).unwrap();
+    let j = u32::try_from(rng.next_below(last + 1)).unwrap();
+    PatchKey::new(face, level, i, j).unwrap()
+}
+
+/// The largest `|F_n − F_f|` over the 65 × 65 vertices of `key`, metres.
+fn vertex_maximum(planet: &TestPlanet, key: PatchKey, finest: u8) -> f64 {
+    let mut cache = LatticeCache::new();
+    let mut worst = 0.0_f64;
+    for y in 0..=64_u8 {
+        for x in 0..=64_u8 {
+            let dir = key.vertex_dir(x, y);
+            let coarse = planet.height(dir, key.level(), &mut cache).height_m;
+            let fine = planet.height(dir, finest, &mut cache).height_m;
+            worst = worst.max((fine - coarse).abs());
+        }
+    }
+    worst
+}
+
 #[test]
-#[ignore = "slow: 10^4 mesh-to-mesh distances at every level, both ridge settings"]
+#[ignore = "slow: 10^4 mesh-to-mesh distances and 32 patches' vertices at every level"]
 fn level_bound_holds() {
     let theta_px = 2.0 * hyperion_base::math::tan(30.0_f64.to_radians()) / 1920.0;
     for ridges in [Ridges::Off, Ridges::On] {
@@ -57,15 +90,9 @@ fn level_bound_holds() {
                 variance += planet.sigma_m(k) * planet.sigma_m(k);
             }
             let sigma = variance.sqrt();
-            let last = (1_u64 << level) - 1;
             let mut samples = Vec::with_capacity(10_000);
-            let mut patch_maxima = Vec::with_capacity(16);
             for _ in 0..16 {
-                let face = Face::from_index(u8::try_from(rng.next_below(6)).unwrap()).unwrap();
-                let i = u32::try_from(rng.next_below(last + 1)).unwrap();
-                let j = u32::try_from(rng.next_below(last + 1)).unwrap();
-                let key = PatchKey::new(face, level, i, j).unwrap();
-                let mut patch_max = 0.0_f64;
+                let key = random_patch(level, &mut rng);
                 for _ in 0..625 {
                     let dir = point_in(key, &mut rng);
                     let fine = match finest_surface_height(&planet, dir, &mut cache) {
@@ -81,22 +108,31 @@ fn level_bound_holds() {
                         d <= bound,
                         "level {level}: |S_n − S_f| = {d} m exceeds the bound {bound} m at {dir:?}"
                     );
-                    patch_max = patch_max.max(d);
                     samples.push(d);
                 }
-                patch_maxima.push(patch_max);
             }
+            let patch_maxima: Vec<f64> = (0..32)
+                .map(|_| {
+                    let key = random_patch(level, &mut rng);
+                    let m = vertex_maximum(&planet, key, finest);
+                    assert!(
+                        m <= bound,
+                        "level {level}: a vertex is {m} m off, above {bound} m"
+                    );
+                    m
+                })
+                .collect();
             samples.sort_by(f64::total_cmp);
             let p999 = samples[samples.len() * 999 / 1000];
             let max = samples[samples.len() - 1];
             let four_sigma = 4.0 * sigma;
             let worst_patch = patch_maxima.iter().copied().fold(0.0, f64::max);
-            #[expect(clippy::cast_precision_loss, reason = "at most 16 patches")]
+            #[expect(clippy::cast_precision_loss, reason = "at most 32 patches")]
             let within = patch_maxima
                 .iter()
                 .filter(|m| **m <= 1.25 * four_sigma)
                 .count() as f64
-                / 16.0;
+                / 32.0;
             let patch_size = 64.0 * vertex_spacing(a, level).mean_m;
             let k_n = bound / (patch_size * theta_px);
             // A level with every octave omits none, so σ_n is 0 and its ratios are undefined.

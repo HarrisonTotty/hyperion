@@ -1345,7 +1345,7 @@ Criterion bench of a 65 × 65 bake's worth of points with and without the lattic
   shares the machine is marked provisional and re-measured. About 2 µs cached and 6 µs uncached are
   the research estimate and 10 µs the budget; more than 10 µs is a finding for T16. While other
   lanes share the machine the lane records a provisional figure, and the quiet-machine run is
-  pending for the owner.
+  taken in a quiet window the orchestrator schedules (decisions-r05.md item 7).
 
 ### R05.T4 The patch bake
 
@@ -2347,8 +2347,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   2 + k mod 5, 1 + k mod 7). Leakage above the 2 m band limit: **0.149 mm RMS** over 1,000
   profiles at 0.125 m. Each octave's sample mean is tested for octaves 6–21 only: octaves 0–5
   cover the sphere in a few cells, so their samples are not independent.
-- **Deviations in T3.c, as built.** Provisional bench (load average 19–28): **4.1 µs a point
-  cached, 7.6 µs uncached** (budget 10 µs); the quiet-machine run is pending for the owner.
+- **Deviations in T3.c, as built.** Provisional bench (2026-10-03, load average 5–10), with each
+  planet's octave table built once per `LatticeCache` (`take_octaves`, `restore_octaves`;
+  bit-identical, every golden unchanged) rather than once a point: **4.1 µs a point cached,
+  4.6 µs uncached** (5.5 and 6.1 µs before the table; budget 10 µs); the quiet-machine run is taken in a quiet window the
+  orchestrator schedules (decisions-r05.md item 7).
   `TestPlanet::cover_patch` prepares a bake's cache. Criterion is a dev-dependency off the
   browser target, where the bench is an empty program.
 - **Deviations in T4.a, as built.** The patch origin is the surface point of vertex (32, 32) at
@@ -2381,9 +2384,42 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   certified gradient and Hessian bounds (grid at 1/512 plus Lipschitz margins) and κ = 3.67 the
   face's parametric curvature. No sample exceeded it; ridges off, the 99.9th percentile is 0.27–0.33
   of ε_n (level 18, which omits no octave, 0.04), 0.70–0.81 of 4σ_n, and every patch maximum is
-  within 1.25 × 4σ_n; ridges on, levels 5–12 are 2–10% (findings; the crests' curvature grows as
-  1 ÷ ε). k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
-  `src/test_planet/bound.rs`). The patch-grouped figures use 16 patches of 625 points per level.
+  within 1.25 × 4σ_n; ridges on, the 99.9th percentile is under a quarter of ε_n at levels 2–15
+  and 2–4% at levels 5–10 (findings; the crests' curvature grows as 1 ÷ ε). Both tables are in
+  `src/test_planet/bound.rs`'s module documentation. k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
+  `src/test_planet/bound.rs`). The bound is checked at 16 patches × 625 random points per level;
+  the per-patch maxima of decisions-r05.md item 6 are taken over all 65 × 65 vertices of 32
+  further patches a level (where both meshes pass through their functions' values, so the
+  distance is |F_n − F_f|), whose share within 1.25 × 4σ_n resolves about 3%, not R10's 99%: a
+  recorded figure, not R10's test. σ_n is the omitted octaves' RMS at full weight (no fade
+  weight: the morph is the fade, T3.b), its value at morph 0.
+- **Decisions-r05.md item 6, the ridged planet** (ruled 2026-10-02 on this lane's question). With
+  ridges on the hard bound is 10–50 times the 99.9th percentile at levels 5–12 (k_n up to 230,
+  against about 15 with ridges off), so selection by it over-refines the ridged planet heavily.
+  Ruled: T13.a also records the patch counts and demand under min(hard, 4σ_n) for the ridged
+  planet, and T19 judges a ridged run's streaming failure caused only by that over-refinement as
+  "ours to fix", never a fired rule.
+- **Review fixes to T1–T6** (43c1613 and the commit after it). `LatticeCache` boxes serve only
+  the identical octave (a cache reused across planets or seeds never returns another's
+  gradients); every height is asserted finite in the normals and the collision interpolant too;
+  `cube::SampleGrid` (`Mesh`, `Double`) replaces `sample_dir`'s raw quads; the wasm exports take
+  `VertexPath`, `NormalScale` and `Ridges` enums, and `testPlanetVersion()` is exported so a stale
+  module is caught when the test planet changes; `Octave::new` refuses a rotation that is not
+  orthonormal; `Spheroid::sphere` refuses a non-positive radius; `HeightSource::Error` is bounded
+  by `std::error::Error + Send + Sync`; `test_planet` re-exports `LatticeCache` (its home is
+  `noise`), the path R09.T4 moves it from; `spheroid` also carries P14.T46.e's
+  `from_volumetric`, `flattening`, `volumetric_radius_m` and `BuildSpheroidError`, written by this
+  lane to the API the orchestrator gave (P14.T46.e adds no second copy). The `FaceDifferences`
+  formula forms a face-edge vertex from its own face's (u, v), not the canonical face's (an ulp
+  the skirts cover), and `vertex_f32.golden` prints vertices x, y ∈ {0, 1, 31, 32, 33, 63, 64} of
+  each patch. T3.c's quiet-machine bench is re-measured in a quiet window the orchestrator
+  schedules (decisions-r05.md item 7), not by the owner. `src/wasm.rs` has no tests of its own: `just test-wasm-browser`
+  requires the browser target's test list to equal the native one, and the module exists only on
+  the browser target. Its exports are one-line wrappers; the bake's array lengths are tested
+  natively (`patch` tests), and the bake golden runs under Electron's V8. The test planet's octave
+  table is now built once per `LatticeCache` (`take_octaves`, `restore_octaves`), bit-identical
+  (every golden unchanged), and a cache box is matched to its octave by seed on each lookup (the
+  whole octave in debug builds).
 - **Deviations in T14.b, as built** (2026-10-02).
   - `main/spike.ts` exports `launchSwitches(options, spike)`: with `spike` undefined it returns
     R01's `graphicsSwitches(options)` unchanged; otherwise it turns `gpuTiming` on and, with
@@ -2839,3 +2875,29 @@ medium, sizes, figure)`.
   - **Pending:** a capture of the real descent (T13.c's `--capture`), its offscreen replay on the
     RTX 3080, and the presented replay, by hand for the owner:
     `just replay <capture-dir> --present` (a visible window on `:0`).
+- **Deviations in T9, as built (the annunciations, 2026-10-03).** `annunciation.ts` adds, beside
+  `terrainAnnunciation`: `TerrainAnnunciation` (the two strings), `TerrainConditions` and
+  `terrainConditions` (the frame's two conditions before the debounce), `coarserThan` (some
+  reference patch covered by an ancestor in the selection), `ANNUNCIATION_ONSET_MS` (250) and
+  `ANNUNCIATION_CLEAR_MS` (1,000), and `TerrainAnnunciationDebounce`, one per view, whose `update`
+  takes a monotonic `nowMs` (the tests feed times directly rather than fake timers). `STREAMING`
+  also holds while a selected patch has no resident ancestor at all (`DrawSet.missing`), not only
+  while an ancestor stands in. `labelStatements(run, terrain = null)` appends the debounced line
+  after the existing statements and stays pure; `ViewDisplay` does not pass it yet, since no view
+  draws terrain: T11.c (the pass in a view) creates the per-view debounce and passes its line. The
+  tests build the low and reference selections by hand until `selectPatches` lands (T7.b). The
+  guide row and Design note 23 already carried decisions-r05 item 5's wording.
+- **Deviations in T2's TypeScript mirror, as built (2026-10-03).** `cube.ts` mirrors `cube.rs`
+  and `geometry.rs`: `stToUv`, `uvToSt`, `faceUvToXyz` (the unnormalised tuple), `unitDir`,
+  `faceUvToDir` (Provides' `Vec3` form), `faceOf`, `xyzToFaceUv`, `sampleDir` (64 or 128 a side),
+  `vertexDir`, `vertexSpacing`, `finestLevel`, `PATCH_QUADS`, `BAND_LIMIT_M`, `FINEST_SPACING_M`
+  and `MAX_FINEST_SPACING_M`, over an `Xyz` tuple. `patchKey.ts` gains Rust's integer cube
+  geometry: `patchKeyWord` (the `to_u64` word as a `bigint`, for the golden), `Edge`, `EDGES`,
+  `edgeNeighbour`, `edgeNeighbourAndBack`, `cornerNeighbours`, `sameKey`, `facePoint`,
+  `faceCoords`, `faceOfAxis`, `canonicalFace`, `Axis` and `unreachable` (which closes the numeric
+  switches, whose exhaustiveness oxlint's `consistent-return` cannot see). The golden is read
+  whole: the 1,000 warp values, the 50 patches' words, printed vertices and full-patch digests,
+  their edge and corner neighbours, the 24-crossing table and the 20 finest levels with their
+  spacings, all bit for bit (19 tests, first run green). The digest needs the testkit's
+  `f64_digest`, so `workers/f32Digest.ts` (T10.b's file) landed here with `fnv1a64`, `f64Digest`
+  and `f32Digest`, checked against FNV's published vectors and the testkit's hand-computed value.

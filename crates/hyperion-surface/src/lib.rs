@@ -6,9 +6,10 @@
 //! wait for the server for every vertex. So both run this crate: natively in the server, and as a
 //! WebAssembly module in the client's workers. It holds, as their plans land, the shared height
 //! function (the rendering plans' R05 writes a provisional one for a hand-made test planet, R09 the
-//! real one), the material classes (R10) and the rocks (R11). Today it holds none of them, only the
-//! checks they will be written under and the datum they are measured from, the reference
-//! [`spheroid`] (plan 14's P14.T46.e).
+//! real one), the material classes (R10) and the rocks (R11). Today it holds R05's: the cube
+//! sphere ([`cube`], [`geometry`]), the provisional [`test_planet`] and its noise basis
+//! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), and the datum heights
+//! are measured from, the reference [`spheroid`] (plan 14's P14.T46.e).
 //!
 //! # The contract of the height function
 //!
