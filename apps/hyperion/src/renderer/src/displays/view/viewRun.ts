@@ -53,6 +53,7 @@ import {
 } from "../../view/scene/model";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
+import { styleName } from "../../view/photoreal/style";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
@@ -344,7 +345,7 @@ export function labelLines(
   const lines: LabelLine[] = [
     { label: "FRAME", value: frameName(camera.pose.frame, scene) },
     stale ? { label: "TIME", value: time, stale: true } : { label: "TIME", value: time },
-    { label: "STYLE", value: "WIREFRAME" },
+    { label: "STYLE", value: styleName(camera.style) },
     { label: "CAMERA", value: PRESET_NAMES[camera.preset] },
     { label: "FOV", value: `${String(camera.fovDeg)}°` },
     { label: "EXPOSURE", value: exposureReading(exposure) },

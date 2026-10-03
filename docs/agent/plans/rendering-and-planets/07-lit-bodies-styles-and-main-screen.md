@@ -621,8 +621,9 @@ and `--port`.
    a `mesh` only when Design note 2 needs depth, or when R10 hands it to terrain. The
    `GAS_GIANT_FULL_PASS_BOUNDARY_M` of 10⁹ m is kept as the stated boundary inside which R08 runs a
    giant's full atmosphere passes; the brainstorm derives it from ten scale heights spanning 2 px,
-   which gives 2.5 × 10⁸ m for Jupiter and 5.5 × 10⁸ m for Saturn at 1080p across 60°, and R07.T5
-   re-derives both. Each threshold has a 10% hysteresis, so a body at the boundary does not flip
+   which gives 2.2 × 10⁸ m for Jupiter and 4.9 × 10⁸ m for Saturn at 1080p across 60°, and R07.T5
+   re-derives both (recomputed with R02's centre-pixel scale, 1,663 px/rad; the brainstorm used
+   width ÷ field and gives 2.5 and 5.5 × 10⁸ m: the orchestrator's ruling, 2026-10-03). Each threshold has a 10% hysteresis, so a body at the boundary does not flip
    every frame, and the set is a function of the camera, viewport, scene and previous set only,
    tested for order independence.
 2. **The disc quad has no depth of its own, so bodies are ordered analytically.** The brainstorm
@@ -735,7 +736,9 @@ and `--port`.
    radius through the same `sphere_irradiance`, never shadow-tested against third bodies. Its
    stated errors are the lit crescent's offset from the neighbour's centre (up to 0.4 R, about 4°
    for Jupiter seen from Io) and a finite-distance correction of order (R ÷ Δ)², about 3% at Io.
-8. **The photorealistic style is a pass list over R02's scene, camera and HDR target.** In order:
+8. **The photorealistic style is a pass list over R02's scene and camera and a per-view HDR target
+   that R07.T7 creates with R01's `createRenderTarget` in R02's `HDR_COLOUR_FORMAT` (R02 DN12: the
+   wireframe has none; decisions-r06-r07, item 1).** In order:
    R06's sky; mesh bodies (opaque, depth); host discs, disc bodies and point bodies in one painter
    order (Design note 2); R08's,
    R10's and R11's passes in their places when they exist; the histogram; bloom of the light above
@@ -1122,8 +1125,9 @@ V-weighted sum is E_V; the direction error from neglecting the star-to-body ligh
 `bodies/{regime,painter}.ts` and `appearance/bodyAppearance.ts` (Design notes 1, 2 and 19), and
 `aLitBody` in `test/litFixtures.ts`. `BodyAppearance` gathers T2.a's figure and photometry, the
 regime and the labels. Tests: the 3 px threshold at 720p, 1080p and 4K; the brainstorm's figures
-re-derived: a Jupiter disc at least 3 px to about 9 × 10¹⁰ m, ten scale heights at 2 px to 2.5 × 10⁸
-m for Jupiter and 5.5 × 10⁸ m for Saturn (scale heights from NASA's planetary fact sheets, cited in
+re-derived: a Jupiter disc at least 3 px to about 7.9 × 10¹⁰ m, ten scale heights at 2 px to
+2.2 × 10⁸ m for Jupiter and 4.9 × 10⁸ m for Saturn (recomputed with R02's centre-pixel scale; the
+brainstorm used width ÷ field and gives 9 × 10¹⁰, 2.5 × 10⁸ and 5.5 × 10⁸ m; scale heights from NASA's planetary fact sheets, cited in
 the test); hysteresis holds a body at the boundary; the regime map is independent of input order;
 painter order by power equals a ray-marched truth for 10⁴ random disjoint sphere pairs from random
 cameras, host stars and points included; a planet behind its star is ordered behind it; an oblate
@@ -1164,7 +1168,12 @@ run src/renderer/src/view/lighting`.
 (`view/camera/state.ts`),
 the pass list with empty slots for R08, R10 and R11, the style switch per view in
 `displays/view/StyleControl.tsx` (a display control, single-key binding shown), and the refusal on a
-fallback adapter through R01's `styleAvailability`. The HDR target is R02's. Tests: switching style
+fallback adapter through R01's `styleAvailability`. T7 creates each photorealistic view's HDR scene
+target, `photoreal/sceneTarget.ts` (`sceneTargetSpec`, `createSceneTarget`): `createRenderTarget` in
+`HDR_COLOUR_FORMAT` (`rgba16float`) at the view's internal resolution, with its own `depth32float`,
+one mip, category `render-targets`, named `<view>:hdr`, resized with the internal scale and disposed
+when the view leaves the style; no other task creates one (decisions-r06-r07, item 1); tests: the
+cleared alpha equals `METER_CLASS.other`. Tests: switching style
 leaves the camera, projection and every body's projected position identical (R02's test extended);
 the pass list for each setting, each entry labelled from `PHOTOREAL_PASS_LABELS` or by the owning
 plan, with no label repeated; the control disabled with its reason on a fallback adapter; the
@@ -2079,4 +2088,40 @@ regime)` (`null` for a body without a figure, which stays R02's mark) and `discS
     order-independence test starts from an empty `previous` map. The acceptance also runs
     `src/renderer/src/view/appearance/bodyAppearance`, outside the `view/bodies` filter. **For the
     owner**: the brainstorm's 9 × 10¹⁰, 2.5 × 10⁸ and 5.5 × 10⁸ m are at width ÷ field; at R02's
-    centre-pixel scale they are 9.3% nearer (the 10⁹ m boundary holds either way).
+    centre-pixel scale they are 9.3% nearer (the 10⁹ m boundary holds either way). _Decided
+    2026-10-03 by the orchestrator under the owner's delegation:_ R02's centre-pixel scale is the
+    reference; Design note 1 and T5's text now give 7.9 × 10¹⁰, 2.2 × 10⁸ and 4.9 × 10⁸ m, with a
+    note of the brainstorm's scale; the brainstorm is unchanged; the tests assert the centre-scale
+    values.
+- **Deviations in T7, as built.**
+  - **Files.** `photoreal/passes.ts` (`PHOTOREAL_PASS_LABELS`, which take the post passes' own
+    `HISTOGRAM_PASS`, `BLOOM_PASS` and `TONEMAP_PASS`; `PassList` of `PassEntry { label, owner,
+built }`; `photorealisticPasses(setting)`), `photoreal/style.ts` (`RENDER_STYLES`, `styleName`,
+    `styleRefusal`, `otherStyle`, `withStyle`, `STYLE_TOGGLE_KEY`) and `photoreal/sceneTarget.ts`,
+    in place of the plan's `photoreal/style.ts` alone. The pass list's other-plan slots carry R10's
+    built `terrain` label (R05's terrain pass, owner R10) and the lane's provisional names for the
+    unbuilt ones, `sky` (R06), `atmosphere` (R08), and `rings`, `clouds` and `ocean` (R11), each
+    `built: false`, which those plans rename when they fill them; both settings share one order.
+  - **The switch is built and unmounted** (the orchestrator's ruling, 2026-10-03): `StyleControl`
+    (`displays/view/StyleControl.tsx`, `renderStyle` prop) and the toggle key are not mounted in
+    `ViewDisplay` until R07.T8.a draws lit bodies, so that no view switches to an empty image; the
+    label block's `STYLE` line and the canvas's accessible name read the camera's style. A refused
+    style holds the button back with the guide's `GRAPHICS SOFTWARE ADAPTER: photorealistic style
+not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-10-03; digits
+    and brackets are the view's single keys, letters the flight keys): before T8.a mounts it, the
+    guide's key-assignment rules and the view and console keymaps are checked for a collision and
+    the ux-reviewer passes the control. The ux-reviewer's check (2026-10-03) found no collision
+    (VIEW's `1`–`3`, brackets and `+`/`-`; the flight letters; the console's `F1`–`F4`; SYSTEM's
+    `4`, a one-year time step, lives on another display, never live at once) and no key-assignment
+    rule in the guide beyond "single-key bindings shown on the control"; the legend is `4 STYLE`
+    on the buttons' group (`aria-keyshortcuts` there), as GALAXY's `K STARS`. For T8.a's mounting:
+    `ViewKeyAction` gains a style kind and `VIEW_SINGLE_KEYS` its `"4"` (and the comment above it),
+    `ViewDisplay`'s key legend is re-checked against the guide, and the panel's layout is checked
+    at 1920 × 1080 and 1280 × 720.
+  - **The style-switch test** checks that `withStyle` changes only the style (pose, field of view
+    and every other field equal), from which the projection, built from pose and field of view
+    alone, follows; R02's draw-list test needs no change. The smoke check renders an empty frame
+    into a scene target made by `createSceneTarget` (finite, black, alpha `METER_CLASS.other`) and
+    resizes it.
+  - **The pixel-scale ruling** (the orchestrator, 2026-10-03) is folded into this commit: Design
+    note 1 and T5's text give the centre-pixel distances (see T5's entry).

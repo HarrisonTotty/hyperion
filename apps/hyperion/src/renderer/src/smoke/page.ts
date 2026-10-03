@@ -32,6 +32,7 @@ import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
+import { checkPhotoreal } from "./photoreal";
 import { runSoak } from "./soak";
 import { checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
@@ -178,6 +179,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   );
   await checks.group("R07.T15 tone mapping and output", () => checkTonemap(engine, checks));
   await checks.group("R07.T4.c the lit-body BRDF", () => checkLitBody(engine, checks));
+  await checks.group("R07.T7 the photorealistic style", () => checkPhotoreal(engine, checks));
   await checks.group("R05.T12.c the atmosphere's frames", () =>
     checkAtmosphereFrames(engine, checks),
   );

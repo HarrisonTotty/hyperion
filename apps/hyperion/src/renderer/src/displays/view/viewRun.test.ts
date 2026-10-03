@@ -142,6 +142,15 @@ describe("the label block", () => {
     ]);
   });
 
+  it("reads the view's style from its camera (R07.T7)", () => {
+    const run = startRun(precisionScene());
+    const photorealistic = { ...run, camera: { ...run.camera, style: "photorealistic" as const } };
+    expect(labelLines(photorealistic, DEFAULT_EXPOSURE)).toContainEqual({
+      label: "STYLE",
+      value: "PHOTOREALISTIC",
+    });
+  });
+
   it("says POSITIONS AS SEEN FROM SHIP while the camera is off the hull, not at the seat", () => {
     const seat = startRun(precisionScene());
     const chase = done(commandRun(seat, { kind: "preset", preset: "chase" }, CUT));
