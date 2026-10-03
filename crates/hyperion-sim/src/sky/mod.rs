@@ -13,12 +13,15 @@
 //!   interims for protostars and white dwarfs.
 //! - [`luminosity`]: the cumulative luminosity function per component and layer, the light and
 //!   count of the stars a census does not list.
+//! - [`envelope`]: the brightest V any star of a mass can reach, which bounds a system before its
+//!   stars are generated.
 //!
 //! Everything here only reads the galaxy: nothing changes generated output, and nothing draws a
 //! random word.
 
 pub mod colour;
 pub mod disc;
+pub mod envelope;
 pub mod eye;
 pub mod luminosity;
 pub mod photometry;
