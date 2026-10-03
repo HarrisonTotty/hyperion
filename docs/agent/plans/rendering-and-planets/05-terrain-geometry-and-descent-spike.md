@@ -2590,6 +2590,47 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   count) to post them to a replacement worker. The scripted fake worker lives in `pool.test.ts`.
   `Float16Array`'s lib (`es2025.float16`, the name TypeScript 7.0.2 has) joined both
   `tsconfig.web.json` and `tsconfig.worker.json` here, ahead of T10.b, for `BakedPatch.normals`.
+- **Deviations in T10.b, as built (the height worker, 2026-10-03).**
+  - The worker's logic is `workers/heightBake.ts` (`answerRequest`, `bakeKey`, `packNormals`,
+    `staleModuleMessage`, and the `WASM_*` maps to the module's enums, which the test pins to the
+    generated glue); `height.worker.ts` only loads the module and forwards messages, as R04's
+    probe worker and `handleRequest.ts` do, so the Node test drives the same code.
+  - The worker checks the module's `testPlanetVersion()` against `EXPECTED_TEST_PLANET_VERSION`,
+    which a test pins to the crate's `TEST_PLANET_VERSION`, rather than `generatorVersion` with
+    `checkGeneratorVersion`: the test planet belongs to no universe, and the spike and the smoke
+    page have no server version to compare against. On the client, R04's loader still checks the
+    same module file's generator version against the server's.
+  - A load failure (worded by `describeLoadFailure`, so a policy refusal reads `csp-refused`), a
+    stale module and a trap (`WebAssembly.RuntimeError`) are raised as the worker's error with
+    `reportError`: the pool replaces the worker and gives up its place after
+    `MAX_CONSECUTIVE_WORKER_FAILURES`. A key the module refuses (a `JsError`) answers
+    `bake-failed`. Bakes pass `skirtM` 0.
+  - The coarse field is held as the worker's own copy in JavaScript (the structured clone it
+    receives), replaced by the next, for the worker's life, not copied into the module's memory:
+    the test planet does not read it, and the memory at rest is the same, which Design note 21's
+    memory row measures. R09 adds the export that copies it in.
+  - `BakeSettings` gains `ridges: TestPlanetRidges` (`"off" | "on"`, Design note 12); `BakedPatch`
+    gains `originHeightM` and `skirtDepthM` for T11.a (approved by the orchestrator).
+  - `TerrainNormals` and `TerrainVertexPath` moved to `view/quality/terrainKinds.ts`, a file with
+    no imports that `qualitySetting.ts` re-exports, so that `tsconfig.worker.json` can include
+    `messages.ts` without the render thread's quality modules; it changes lines inside the shared
+    `qualitySetting.ts`. The worker config also includes `heightBake.ts`, `patchKey.ts`,
+    `planet.ts`, `terrainKinds.ts` and `geometry/vec3.ts`.
+  - The built-app check is a smoke-harness group, "R05.T10.b the height worker"
+    (`smoke/heightWorker.ts`), run hidden by `just test-render` (SwiftShader, a fresh
+    `--user-data-dir`, the page loaded with `loadFile` from `out/`), which exits with a status,
+    rather than a one-off DevTools read. Its page, `smoke.html`, refuses WebAssembly on the render
+    thread as the client's does (`script-src 'self'`, no `'wasm-unsafe-eval'`); a policy refusal
+    fails the check as the worker's error. It does not log the module's content type (R04.T10.c saw
+    `application/wasm` by hand). **Result, 2026-10-03: passed** — a level-12 patch baked in a
+    module worker from `file://` (heights 8,450, offsets 25,350, normals 33,282, all finite). T13.c's
+    `--smoke` still bakes one patch on the client page. `just test-render` does not depend on
+    `gen-surface`, so a stale `generated/surface/` would run an old module; run `just gen-surface`
+    first (a justfile change for the orchestrator).
+  - `src/wasm.rs`'s removed browser-only tests are covered here: `heightWasm.test.ts` checks
+    `bandLimitM`, `finestSpacingM` and `testPlanetVersion` against the crate's sources, the level
+    table's length, the bake's layout, and the three golden bakes bit for bit, through the real
+    module under Node.
 - **GPU timing elsewhere than Linux `vulkan` mode is quantized** (decisions-r06-r07.md item 8,
   2026-10-02); frame intervals stay the criterion, and the follow-up (honouring
   `--hyperion-gpu-timing` in `default` mode) is taken only if a marginal row matters.

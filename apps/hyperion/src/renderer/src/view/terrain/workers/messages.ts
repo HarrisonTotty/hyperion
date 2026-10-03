@@ -8,7 +8,7 @@
  * copied; a field is cloned, once a worker, one worker at a time.
  */
 
-import type { TerrainNormals, TerrainVertexPath } from "../../quality/qualitySetting";
+import type { TerrainNormals, TerrainVertexPath } from "../../quality/terrainKinds";
 import type { PatchKey } from "../patchKey";
 import type { BodyFixedVec3 } from "../planet";
 
@@ -29,12 +29,27 @@ export interface BakedPatch {
   readonly heightRangeM: readonly [number, number];
   /** The bounding radius about the origin, metres. */
   readonly boundingRadiusM: number;
+  /**
+   * The origin's own height above the datum, metres: h₀ of the `face-differences` path
+   * (`PatchTerms`' h₀ in `hyperion_surface::patch::vertex`).
+   */
+  readonly originHeightM: number;
+  /** How far the skirts hang below the edge vertices along the datum's normal, metres. */
+  readonly skirtDepthM: number;
 }
 
-/** How a patch is baked: the setting's vertex path and normal resolution. */
+/**
+ * Whether the provisional test planet's octaves 8 to 12 are ridged (R05 Design note 12): the spike
+ * runs with and without them, since sharp crests are the worst case for pops. R09's surface
+ * generator replaces the test planet, and this with it.
+ */
+export type TestPlanetRidges = "off" | "on";
+
+/** How a patch is baked: the setting's vertex path and normal resolution, and the test planet's ridges. */
 export interface BakeSettings {
   readonly vertexPath: TerrainVertexPath;
   readonly normals: TerrainNormals;
+  readonly ridges: TestPlanetRidges;
 }
 
 /** A message from the pool to a height worker. */
