@@ -742,8 +742,9 @@ re-checked against the cited source in that task, as the galaxy README's Figures
     limits (re-validated 2026-10-02): at most 256 array layers, so the normals take a 2D atlas
     (1,323 low slots or about 1,900 high ones exceed 256 layers), and at most 128 MiB a
     storage-buffer binding, which the heights (33.8 kB a slot, about 64 MB at 1,900 slots) meet
-    and `BakedOffsets` on the high budget (101 kB a slot, about 193 MB) does not; T11.a resolves
-    that (Risks, "Default device limits"). This plan's provisional budgets are 64
+    and `BakedOffsets` on the high budget (101 kB a slot, about 193 MB) does not; the device requests
+    up to 1 GiB a binding (decisions-r06-r07.md item 7), with `FaceDifferences` where it cannot
+    (Risks, "Default device limits"). This plan's provisional budgets are 64
     MiB on the low setting and about 400 MB on the discrete target (R10 Design note 15: 1.3 × the
     all-round peak at 100 m is about 1,900 slots, 390 MB; the frustum term alone, about 800 slots
     and 165 MB, would fit 256 MiB, and R10.T14.b chooses between them); R10 replaces them with its
@@ -1345,7 +1346,7 @@ Criterion bench of a 65 × 65 bake's worth of points with and without the lattic
   shares the machine is marked provisional and re-measured. About 2 µs cached and 6 µs uncached are
   the research estimate and 10 µs the budget; more than 10 µs is a finding for T16. While other
   lanes share the machine the lane records a provisional figure, and the quiet-machine run is
-  pending for the owner.
+  taken in a quiet window the orchestrator schedules (decisions-r05.md item 7).
 
 ### R05.T4 The patch bake
 
@@ -1636,12 +1637,19 @@ counts with the rest.
 
 - Files: `view/terrain/gpu/resources.ts`, `view/terrain/gpu/uniforms.ts`,
   `view/terrain/gpu/allocationTally.ts`, their tests, `view/engine/memory.ts`,
-  `renderer/src/test/countingRenderEngine.ts`.
+  `renderer/src/test/countingRenderEngine.ts`; for the device limits (decisions-r06-r07.md item 7)
+  `view/engine/webgpu/engine.ts`, `view/engine/platform.ts`, `view/engine/types.ts`,
+  `test/fakeRenderEngine.ts`.
 - Tests: the index buffer's triangles use the (0, 0)–(1, 1) diagonal; an instance record's origin
   is the `f64` difference narrowed once; no buffer exceeds the device's storage-binding limit; a freed slot is overwritten in place, with no new allocation after
   warm-up; the byte tally matches the formats' sizes; `liveBytes` falls on a destruction while
-  `peakBytes` does not, and an unsubscribed listener hears nothing.
-- Acceptance: `pnpm --filter hyperion exec vitest run view/terrain/gpu`.
+  `peakBytes` does not, and an unsubscribed listener hears nothing; the request never exceeds the
+  adapter's limits and is capped at 2³⁰; the device's limits reach `GpuCapabilities`; with
+  `defaultLimits` the high layout chooses `FaceDifferences` and no buffer exceeds the binding
+  limit; a rebuild onto a FakeAdapter with 128 MiB re-derives the layout without a validation
+  error (decisions-r06-r07.md item 7).
+- Acceptance: `pnpm --filter hyperion exec vitest run view/terrain/gpu view/engine/webgpu/drawing
+view/engine/webgpu/engine view/atmosphere`; `just test-render`.
 
 **R05.T11.b The shaders.** `terrain.wgsl`: the vertex stage for both paths (Design note 4), the
 morph and its hold (Design note 6), reversed-Z output (R02); the fragment stage's Lambertian shading
@@ -1854,7 +1862,10 @@ rendering as `src/smoke/main.ts` uses it if a hidden window does not render), so
 it. The recipe follows `client` and `test-render`: `just build` (which runs
 `gen-surface`), the server started as `cargo run -p hyperion-server -- --num-workers 2` in the
 background, Electron on `out/` under `setsid timeout --kill-after=10` with a fresh
-`--user-data-dir`, and the process group killed at the end.
+`--user-data-dir`, and the process group killed at the end. `index.ts` calls T14.b's
+`launchSwitches(options, spike)` from `spike.ts` in place of `graphicsSwitches`, with the parsed
+`--dawn-safety`, before `ready`, so that a spike launch carries the measurement switches (orchestrator
+ruling, 2026-10-03).
 
 - Files: `apps/hyperion/src/main/cli.ts`, its test, `apps/hyperion/src/main/index.ts`,
   `apps/hyperion/src/main/spike.ts` (the IPC handlers and the sender check) and its test,
@@ -1885,13 +1896,14 @@ and passes the same wrapped `GPU` as `LoadEngineOptions.gpu` so that a rebuild a
 is shimmed too. R01's adapter itself is not edited. `PassTimes.timer` is recorded with the times
 (`full`, `quantized` or `absent`), and passes beyond the timer's 64 a frame are counted as untimed.
 
-- Files: `view/spike/metrics.ts`, `view/spike/percentiles.ts`, `view/spike/pipelineShim.ts`,
-  their tests.
+- Files: `view/spike/metrics.ts`, `view/spike/pipelineShim.ts`, their tests. The percentiles,
+  missed-frame and hitch counts are the main process's (`main/results.ts`, T14.c), so there is no
+  `view/spike/percentiles.ts` (orchestrator ruling, 2026-10-03).
 - Tests: the percentiles of fixed interval lists against hand-computed values, including the
-  missed-frame and hitch counts of Design note 21; the shim counts a creation after warm-up and
-  passes the call through unchanged; per-segment figures do not mix segments.
-- Acceptance: `pnpm --filter hyperion exec vitest run view/spike/metrics view/spike/percentiles
-view/spike/pipelineShim`.
+  missed-frame and hitch counts of Design note 21 (in `main/results.test.ts`); the shim counts a
+  creation after warm-up and passes the call through unchanged; per-segment figures do not mix
+  segments.
+- Acceptance: `pnpm --filter hyperion exec vitest run view/spike/metrics view/spike/pipelineShim`.
 
 **R05.T14.b The switches, the trace and the reducer.** In `spike.ts`: the measurement switches of
 Design note 18, set before `ready` when the flag is given. These are R01's `gpuTiming` and, when
@@ -2254,7 +2266,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   (Provides, T4.a, T4.c), which R10 implements over R09's `Synthesiser`. R08 changes this plan's
   atmosphere code in its own tasks: transmittance stored as optical depth, the ozone term through a
   curve of growth, and the channel wavelengths refitted (R08 Design notes 5 and 8).
-- **Default device limits** (found on re-validation, 2026-10-02). R01's engine requests its
+- **Default device limits** (found on re-validation, 2026-10-02). Decided 2026-10-02
+  (decisions-r06-r07.md item 7): option (a), `min(adapter, 1 GiB)` for
+  `maxStorageBufferBindingSize` and `maxBufferSize`, with `FaceDifferences` on the high setting
+  where the device's limit cannot hold `BakedOffsets`; not paging. Built in T11.a (its as-built
+  record below). The finding as first written: R01's engine requests its
   device with WebGPU's default limits: 128 MiB a storage-buffer binding, 256 MiB a buffer, 256
   texture-array layers, 8,192 texels a 2D side. The low layout and the high layout's heights fit;
   the normals fit as a 2D atlas, not an array; `BakedOffsets` at the high budget's about 1,900
@@ -2343,8 +2359,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   2 + k mod 5, 1 + k mod 7). Leakage above the 2 m band limit: **0.149 mm RMS** over 1,000
   profiles at 0.125 m. Each octave's sample mean is tested for octaves 6–21 only: octaves 0–5
   cover the sphere in a few cells, so their samples are not independent.
-- **Deviations in T3.c, as built.** Provisional bench (load average 19–28): **4.1 µs a point
-  cached, 7.6 µs uncached** (budget 10 µs); the quiet-machine run is pending for the owner.
+- **Deviations in T3.c, as built.** Provisional bench (2026-10-03, load average 5–10), with each
+  planet's octave table built once per `LatticeCache` (`take_octaves`, `restore_octaves`;
+  bit-identical, every golden unchanged) rather than once a point: **4.1 µs a point cached,
+  4.6 µs uncached** (5.5 and 6.1 µs before the table; budget 10 µs); the quiet-machine run is taken in a quiet window the
+  orchestrator schedules (decisions-r05.md item 7).
   `TestPlanet::cover_patch` prepares a bake's cache. Criterion is a dev-dependency off the
   browser target, where the bench is an empty program.
 - **Deviations in T4.a, as built.** The patch origin is the surface point of vertex (32, 32) at
@@ -2377,9 +2396,42 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   certified gradient and Hessian bounds (grid at 1/512 plus Lipschitz margins) and κ = 3.67 the
   face's parametric curvature. No sample exceeded it; ridges off, the 99.9th percentile is 0.27–0.33
   of ε_n (level 18, which omits no octave, 0.04), 0.70–0.81 of 4σ_n, and every patch maximum is
-  within 1.25 × 4σ_n; ridges on, levels 5–12 are 2–10% (findings; the crests' curvature grows as
-  1 ÷ ε). k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
-  `src/test_planet/bound.rs`). The patch-grouped figures use 16 patches of 625 points per level.
+  within 1.25 × 4σ_n; ridges on, the 99.9th percentile is under a quarter of ε_n at levels 2–15
+  and 2–4% at levels 5–10 (findings; the crests' curvature grows as 1 ÷ ε). Both tables are in
+  `src/test_planet/bound.rs`'s module documentation. k_n at 1080p, 60°: 1.3 at level 0 rising to about 15 at levels 10–14 (table in
+  `src/test_planet/bound.rs`). The bound is checked at 16 patches × 625 random points per level;
+  the per-patch maxima of decisions-r05.md item 6 are taken over all 65 × 65 vertices of 32
+  further patches a level (where both meshes pass through their functions' values, so the
+  distance is |F_n − F_f|), whose share within 1.25 × 4σ_n resolves about 3%, not R10's 99%: a
+  recorded figure, not R10's test. σ_n is the omitted octaves' RMS at full weight (no fade
+  weight: the morph is the fade, T3.b), its value at morph 0.
+- **Decisions-r05.md item 6, the ridged planet** (ruled 2026-10-02 on this lane's question). With
+  ridges on the hard bound is 10–50 times the 99.9th percentile at levels 5–12 (k_n up to 230,
+  against about 15 with ridges off), so selection by it over-refines the ridged planet heavily.
+  Ruled: T13.a also records the patch counts and demand under min(hard, 4σ_n) for the ridged
+  planet, and T19 judges a ridged run's streaming failure caused only by that over-refinement as
+  "ours to fix", never a fired rule.
+- **Review fixes to T1–T6** (43c1613 and the commit after it). `LatticeCache` boxes serve only
+  the identical octave (a cache reused across planets or seeds never returns another's
+  gradients); every height is asserted finite in the normals and the collision interpolant too;
+  `cube::SampleGrid` (`Mesh`, `Double`) replaces `sample_dir`'s raw quads; the wasm exports take
+  `VertexPath`, `NormalScale` and `Ridges` enums, and `testPlanetVersion()` is exported so a stale
+  module is caught when the test planet changes; `Octave::new` refuses a rotation that is not
+  orthonormal; `Spheroid::sphere` refuses a non-positive radius; `HeightSource::Error` is bounded
+  by `std::error::Error + Send + Sync`; `test_planet` re-exports `LatticeCache` (its home is
+  `noise`), the path R09.T4 moves it from; `spheroid` also carries P14.T46.e's
+  `from_volumetric`, `flattening`, `volumetric_radius_m` and `BuildSpheroidError`, written by this
+  lane to the API the orchestrator gave (P14.T46.e adds no second copy). The `FaceDifferences`
+  formula forms a face-edge vertex from its own face's (u, v), not the canonical face's (an ulp
+  the skirts cover), and `vertex_f32.golden` prints vertices x, y ∈ {0, 1, 31, 32, 33, 63, 64} of
+  each patch. T3.c's quiet-machine bench is re-measured in a quiet window the orchestrator
+  schedules (decisions-r05.md item 7), not by the owner. `src/wasm.rs` has no tests of its own: `just test-wasm-browser`
+  requires the browser target's test list to equal the native one, and the module exists only on
+  the browser target. Its exports are one-line wrappers; the bake's array lengths are tested
+  natively (`patch` tests), and the bake golden runs under Electron's V8. The test planet's octave
+  table is now built once per `LatticeCache` (`take_octaves`, `restore_octaves`), bit-identical
+  (every golden unchanged), and a cache box is matched to its octave by seed on each lookup (the
+  whole octave in debug builds).
 - **Deviations in T14.b, as built** (2026-10-02).
   - `main/spike.ts` exports `launchSwitches(options, spike)`: with `spike` undefined it returns
     R01's `graphicsSwitches(options)` unchanged; otherwise it turns `gpuTiming` on and, with
@@ -2554,6 +2606,47 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   count) to post them to a replacement worker. The scripted fake worker lives in `pool.test.ts`.
   `Float16Array`'s lib (`es2025.float16`, the name TypeScript 7.0.2 has) joined both
   `tsconfig.web.json` and `tsconfig.worker.json` here, ahead of T10.b, for `BakedPatch.normals`.
+- **Deviations in T10.b, as built (the height worker, 2026-10-03).**
+  - The worker's logic is `workers/heightBake.ts` (`answerRequest`, `bakeKey`, `packNormals`,
+    `staleModuleMessage`, and the `WASM_*` maps to the module's enums, which the test pins to the
+    generated glue); `height.worker.ts` only loads the module and forwards messages, as R04's
+    probe worker and `handleRequest.ts` do, so the Node test drives the same code.
+  - The worker checks the module's `testPlanetVersion()` against `EXPECTED_TEST_PLANET_VERSION`,
+    which a test pins to the crate's `TEST_PLANET_VERSION`, rather than `generatorVersion` with
+    `checkGeneratorVersion`: the test planet belongs to no universe, and the spike and the smoke
+    page have no server version to compare against. On the client, R04's loader still checks the
+    same module file's generator version against the server's.
+  - A load failure (worded by `describeLoadFailure`, so a policy refusal reads `csp-refused`), a
+    stale module and a trap (`WebAssembly.RuntimeError`) are raised as the worker's error with
+    `reportError`: the pool replaces the worker and gives up its place after
+    `MAX_CONSECUTIVE_WORKER_FAILURES`. A key the module refuses (a `JsError`) answers
+    `bake-failed`. Bakes pass `skirtM` 0.
+  - The coarse field is held as the worker's own copy in JavaScript (the structured clone it
+    receives), replaced by the next, for the worker's life, not copied into the module's memory:
+    the test planet does not read it, and the memory at rest is the same, which Design note 21's
+    memory row measures. R09 adds the export that copies it in.
+  - `BakeSettings` gains `ridges: TestPlanetRidges` (`"off" | "on"`, Design note 12); `BakedPatch`
+    gains `originHeightM` and `skirtDepthM` for T11.a (approved by the orchestrator).
+  - `TerrainNormals` and `TerrainVertexPath` moved to `view/quality/terrainKinds.ts`, a file with
+    no imports that `qualitySetting.ts` re-exports, so that `tsconfig.worker.json` can include
+    `messages.ts` without the render thread's quality modules; it changes lines inside the shared
+    `qualitySetting.ts`. The worker config also includes `heightBake.ts`, `patchKey.ts`,
+    `planet.ts`, `terrainKinds.ts` and `geometry/vec3.ts`.
+  - The built-app check is a smoke-harness group, "R05.T10.b the height worker"
+    (`smoke/heightWorker.ts`), run hidden by `just test-render` (SwiftShader, a fresh
+    `--user-data-dir`, the page loaded with `loadFile` from `out/`), which exits with a status,
+    rather than a one-off DevTools read. Its page, `smoke.html`, refuses WebAssembly on the render
+    thread as the client's does (`script-src 'self'`, no `'wasm-unsafe-eval'`); a policy refusal
+    fails the check as the worker's error. It does not log the module's content type (R04.T10.c saw
+    `application/wasm` by hand). **Result, 2026-10-03: passed** — a level-12 patch baked in a
+    module worker from `file://` (heights 8,450, offsets 25,350, normals 33,282, all finite). T13.c's
+    `--smoke` still bakes one patch on the client page. `just test-render` does not depend on
+    `gen-surface`, so a stale `generated/surface/` would run an old module; run `just gen-surface`
+    first (a justfile change for the orchestrator).
+  - `src/wasm.rs`'s removed browser-only tests are covered here: `heightWasm.test.ts` checks
+    `bandLimitM`, `finestSpacingM` and `testPlanetVersion` against the crate's sources, the level
+    table's length, the bake's layout, and the three golden bakes bit for bit, through the real
+    module under Node.
 - **GPU timing elsewhere than Linux `vulkan` mode is quantized** (decisions-r06-r07.md item 8,
   2026-10-02); frame intervals stay the criterion, and the follow-up (honouring
   `--hyperion-gpu-timing` in `default` mode) is taken only if a marginal row matters.
@@ -2722,8 +2815,7 @@ medium, sizes, figure)`.
 
   - _Aerial-perspective scope_ lives in `TableSizes` for now; R08.T9.a's `AERIAL_PERSPECTIVE_SCOPE`
     takes it over or reads it.
-- **Deviations in T11.a, as built so far** (2026-10-02; the slot layout waits on T8's
-  `SlotLayout`, and the index buffer and instance records wait on T4's vertex order).
+- **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
     `maxStorageBufferBindingSize` and `maxBufferSize`, never above what it reports, capped at
@@ -2735,7 +2827,13 @@ medium, sizes, figure)`.
     - `FakeAdapter` takes both limits. Its devices get WebGPU's defaults unless more is required,
       and reject a request beyond the adapter's.
     - `GraphicsPanel` leaves the two limits out of its feature list.
-    - The RTX 3080's adapter limits are recorded with T11.a's layout.
+    - The RTX 3080's adapter limits, read in a hidden run on 2026-10-03 (an offscreen window
+      never shown, R01's Vulkan switches; NVIDIA, Ampere, driver 615.71.09):
+      `maxStorageBufferBindingSize` 2,147,483,644, `maxBufferSize` 4,294,967,292,
+      `maxTextureDimension2D` 16,384, `maxTextureArrayLayers` 2,048. The engine asks for 1 GiB of
+      each buffer limit, so the high setting keeps `BakedOffsets` there. Headless Ozone could not
+      be used: with a hardware adapter its GPU process exits (SIGSEGV), as R01 Design note 17 found
+      for windows without offscreen rendering.
   - _`AllocationTally`_ (`view/terrain/gpu/allocationTally.ts`) adds `startFrame()`, which zeroes
     the frame's upload count; the interface has no other notion of a frame. It also adds
     `dispose()`, which stops listening.
@@ -2745,6 +2843,96 @@ medium, sizes, figure)`.
     `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
     `destroy()`.
   - `MemoryCategory` gains `height-cache`, appended.
+- **Orchestrator rulings, 2026-10-03.** T13.c's text now says it wires T14.b's `launchSwitches` into
+  `index.ts`; T14.a's files and acceptance drop `view/spike/percentiles.ts`, whose figures T14.c
+  computes in the main process.
+- **Deviations in T14.a, as built** (2026-10-03, partial).
+  - `view/spike/pipelineShim.ts`: `wrapGpu(gpu, wrapDevice)` (a plain object forwarding to the
+    browser's `GPU`, whose adapters' `requestDevice` is replaced on the instance), `shimPipelines`
+    and `PipelineTally` (`endWarmup`, `creations`, `late`), each creation stamped with the descent's script time, as `DescentSpikeReport.latePipelines` takes it. The device keeps its identity: methods
+    are replaced on the instance, not put behind a `Proxy`, since the browser's WebGPU calls
+    brand-check their arguments. An asynchronous creation that calls the synchronous form through
+    the instance is counted once.
+  - `view/spike/metrics.ts`: `SpikeMetrics` keeps the raw series T14.c's `DescentSpikeReport` takes
+    (`frame`, `passTimes` aligned by `PassTimes.frame`, `allocation` for uploads, `patches`,
+    `report`), `SEGMENT_MEASURE_PREFIX` (`spike.segment:`, which `main/results.ts` repeats: the
+    renderer and the main process share no module, so the two constants are kept equal by hand)
+    and `TIMED_PASSES_A_FRAME`. The report's timer is the worst state seen over the run, and a streaming interval that crosses a segment boundary is shared between the segments. The adapter's peak comes from T11.a's `allocationTally` through
+    `report`'s argument.
+  - **Pending T13.b:** the spike's `ViewEngineSource` (the wrapped `GPU` handed to
+    `requestAdapterOutcome` and as `LoadEngineOptions.gpu`), the `performance.measure` spans and the
+    per-frame calls into `SpikeMetrics`, which need the spike's scene and loop.
+- **Deviations in T15.a, as built** (2026-10-03).
+  - `view/spike/capture.ts`: `GpuCapture` (`wrapDevice`, `startSpan`, `frame`, `endSpan`,
+    `result`, `dispose`), `parseCapture`, `replayCapture` (the reference replayer the test uses) and the file
+    types. The log is generic: each call is `{ target, op, args, result }` by object ID (0 the
+    device, 1 its queue), arguments as JSON with `$ref`, `$blob` (+ `$type`), `$undefined` and
+    `$bigint`, so the format needs no schema per call. On disk a capture is `capture.json` and
+    `capture.bin` (blobs by offset and length) in the `--capture` directory; T13.c writes them.
+    The file also carries `meta` (`setting`, `seed`, `passRows`), which the replayer reads for its
+    results file.
+  - Before the span only creations, views, bind-group layouts and destructions are logged. At the
+    span's start every live buffer and texture is copied to staging buffers in one submission
+    (buffers and textures are created with `COPY_SRC` added while the shim is installed; the log
+    keeps the usage asked), and their bytes are placed in the log as writes at that point, so the
+    engine's calls during the read-back are kept; `result()` refuses until they are all in, and a
+    failed read-back destroys the staging buffers and rejects `startSpan`. Mappable buffers,
+    multisampled textures, depth and stencil formats (never a copy destination) and formats without
+    a texel size in the shim's table are listed in `skipped`; a buffer whose size is not a multiple
+    of four loses its last bytes. `startSpan` is called between frames: a span call on an object
+    whose creation the log lacks (an encoder open when the span started) is not logged but listed
+    in the file's `problems`, as is an argument naming one, so a capture says when a replay cannot
+    trust it. `writeBuffer` is logged as the bytes written,
+    with an explicit data offset of 0 and size.
+  - Canvases are surfaces: `GPUCanvasContext.prototype.getCurrentTexture` is wrapped from the
+    span's start to `endSpan` or `dispose` (`CaptureOptions.contexts`), each canvas logged with
+    its size and format; T13.c calls `dispose` when a run ends early.
+  - It installs through T14.a's seam: `spikeDeviceWrapper(tally, capture)` in `pipelineShim.ts`
+    applies the pipeline tally always and the capture only when given, so a run without
+    `--capture` carries none (tested). `engineBoundary.test.ts` exempts `view/spike/capture.ts`
+    and its test by name from the allocation rule (`isCaptureShim`; the plan named the shim alone,
+    but its test drives a device directly).
+- **Deviations in T15.b and T15.c, as built** (2026-10-03).
+  - `tools/gpu-replay` (own `[workspace]`, wgpu and naga `=30.0.1`, winit 0.30, pollster) has
+    `src/lib.rs` and, beyond the plan's files, `src/run.rs` (the offscreen and presented drivers)
+    and `src/window.rs` (the winit window), so that `main.rs` stays thin. `gpu-replay validate
+<capture>` reads and validates; `gpu-replay replay <capture> [--present] [--setting high|low]
+[--out <dir>]` replays and writes `<date>-<machine>-<setting>-replay.json` (default
+    `docs/measurements/descent-spike/`). `just replay` runs `replay` in release.
+  - The replay recreates the capture's objects in wgpu from the WebGPU names in the log (wgpu's
+    `serde` feature reads them), adds `COPY_DST` to buffers and textures for the snapshot's
+    writes, and keeps passes open across calls (`forget_lifetime`). The capture's own query sets
+    and `resolveQuerySet` are not replayed: the replay times every pass itself with
+    `TIMESTAMP_QUERY` where the adapter has it, labelled as captured. A buffer created
+    `mappedAtCreation` starts as zeros (its mapped writes are not in the log). Arguments that do
+    not parse (a format, a vertex attribute, a binding type, a constant), and buffer ranges past a
+    buffer's end, stop the replay with the call named, rather than being defaulted. wgpu's
+    validation errors are collected and reported, not fatal; the capture's `problems`, capture
+    features the adapter or the replayer lacks, and a canvas format the window cannot present are
+    reported as `findings`.
+  - Offscreen, every canvas is an offscreen texture; frame intervals are the gaps between the
+    GPU timestamps at the end of successive frames' last passes, with at most two frames queued
+    (the replay waits on the frame two before), so they say what the GPU sustains; without
+    `TIMESTAMP_QUERY` they are null with that reason. Presented, the main (largest) canvas is the
+    window's surface with FIFO presentation, intervals are taken as `present` returns, and an
+    outdated or lost surface is configured again, up to eight failures in a row. A replay's
+    results file follows `main/results.ts`'s schema (version 1), whose types gained
+    `frames.source: "gpu-completion"`, the optional `frames.gpuCompletion` and the launch mode
+    `native-replay` (the backend is in `run.options.backend`); figures a native replay cannot have
+    (trace, main thread, memory, rAF) are null with their reason. A GPU row counts only frames
+    with a pass of that row, as the client's writer does.
+  - The checked-in capture (`tests/fixtures/small`) is hand-written in the client's format (two
+    frames, `meta` naming its setting, seed and pass rows), with one module invalid on purpose.
+    Unit tests pin the argument mapping (extents, binding types, ranges, dynamic offsets, absent
+    arguments) and the criterion's rows. Its replay test needs a GPU adapter (any wgpu backend) and runs
+    with `cargo test --manifest-path tools/gpu-replay/Cargo.toml`, display variables unset; it
+    passed on the RTX 3080 (Vulkan) on 2026-10-03. The root `Cargo.toml` has
+    `exclude = ["tools/*"]`, so neither `just lint` nor `just ci` checks the tool: its fmt, clippy
+    (`-D warnings`) and tests are run by hand with that manifest. Canvas textures of past frames
+    stay in the replay's object table for the run (a span is short).
+  - **Pending:** a capture of the real descent (T13.c's `--capture`), its offscreen replay on the
+    RTX 3080, and the presented replay, by hand for the owner:
+    `just replay <capture-dir> --present` (a visible window on `:0`).
 - **Deviations in T9, as built (the annunciations, 2026-10-03).** `annunciation.ts` adds, beside
   `terrainAnnunciation`: `TerrainAnnunciation` (the two strings), `TerrainConditions` and
   `terrainConditions` (the frame's two conditions before the debounce), `coarserThan` (some
@@ -2812,6 +3000,62 @@ medium, sizes, figure)`.
   without allocation and the leaf walk stopped at the first interior node, a warm call takes
   about 80 ms on the loaded development machine (360 ms before): still more than a frame, so the
   per-frame cost is revisited when T11.c drives selection each frame.
+  - _The layout_ (`gpu/resources.ts`, `terrainLayout(terrain, limits)`, `TerrainLayout`) reads T8's
+    `SlotLayout` and the device's limits from `engine.capabilities`. Where the `BakedOffsets`
+    offsets at the slot count exceed min(`maxStorageBufferBindingSize`, `maxBufferSize`), it
+    takes `FaceDifferences` over the same byte budget, and `TerrainLayout.fallback` is
+    `binding-limit`, for T13 and T14 to put in the results file and the label. On the high setting
+    under default limits that is 3,904 slots, against 1,962 with `BakedOffsets`; the heights then
+    take 132.0 MB of the 128 MiB binding (98%). Item 7's "keeping the slot budget" is read as the
+    byte budget (the orchestrator's approval, 2026-10-03; if the slot count was meant, the
+    fallback holds 1,962 slots and one atlas layer). A layout whose buffers or atlas still do not
+    fit throws.
+  - _Per-slot records_ (`uniforms.ts`, `SLOT_RECORD_BYTES` 112, `writeSlotRecord`, `patchTerms`).
+    A storage buffer of one record a slot holds `PatchTermsF32`'s fields, the skirt depth and
+    `straddles`, written with the slot, in `height-cache`. It sits outside `SlotLayout`'s budget
+    (437 kB at 3,904 slots; approved by the orchestrator) and the tally counts it. `patchTerms` is
+    the client's twin of `PatchTerms::new`; a test holds its narrowed record to `vertex_f32.golden`'s
+    terms bit for bit on all twelve patches. Its private `stToUv` yields to T2's mirror.
+  - _The normals atlas_ (`normalsAtlasLayout`, `atlasTile`) is `rg16float`, each tile with a
+    one-texel gutter repeating its edge sample, and has as many 2D array layers as
+    `maxTextureDimension2D` requires (at most `MAX_TEXTURE_ARRAY_LAYERS`, WebGPU's 256, now in
+    `platform.ts`), the tiles spread evenly over them. At 8,192 texels: low 1,296 tiles of 67² in
+    8,174 × 737 × 1; high 1,962 of 131² in 8,122 × 4,192 × 1; the fallback's 3,904 in
+    8,122 × 4,192 × 2. The engine does not raise `maxTextureDimension2D`, so the RTX 3080 has the
+    same atlas. T11.b declares it `texture_2d_array`; R01's `drawing.ts` gains
+    `viewDimensionBinds`, so that a `2d-array` binding also takes a single-layer 2D texture (a
+    view WebGPU allows; approved by the orchestrator, pointer in R01's Risks). This replaces the
+    task's `viewDimension` `"2d"`.
+  - _The mesh_ (`patchMeshData`, `GRID_VERTICES`, `SKIRT_VERTICES`, `PATCH_INDICES`): `position`
+    carries (x, y, skirt), grid vertex (x, y) at 65 y + x (the bake's order), then 4 × 65 skirt
+    vertices, edge e anticlockwise from y = 0; quads split (0, 0)–(1, 1), anticlockwise seen from
+    outside, as are the skirts' quads (p, p′, q′), (p, q′, q).
+  - _The per-frame buffers_ (`InstanceRecords`, `ContactRecords`, `writeFrame`): instance records
+    of 32 B (origin less camera, slot, morph start and end), the instance buffer sized to the slot
+    count; a contacts buffer of a 16 B header (the count) and 32 B a contact (centre less camera,
+    held radius r_g, ramp), `MAX_CONTACTS` 1,024, more throws; the indirect arguments written once
+    with the index count, then only the instance count each frame. These three are category
+    `other`. `bytes()` keeps one view a record count, so a frame allocates nothing once its count
+    has been seen.
+  - _The upload_ (`SlotUpload`, `upload` → `SlotUploadResult`): it takes `originHeightM` and
+    `skirtDepthM` as its own fields until T10.b's `BakedPatch` carries them. Everything is checked
+    before the first write. A bake that predates the layout (a slot past a rebuilt layout's count,
+    or offsets the vertex path no longer takes) is `refused` with nothing written; an array of
+    the wrong length throws.
+  - _After a device loss_ `TerrainResources` remakes everything from the rebuilt device's limits
+    and `onRebuilt(layout)` tells the cache that every slot is empty. The engine has no public
+    release of a buffer or texture, so the handles live until the engine is disposed, as T12.c's
+    textures do; a setting change (T11.c) makes new ones beside them.
+  - _The counting fake_ refuses with `LimitExceeded` a buffer above `maxBufferSize`, a storage
+    buffer above `maxStorageBufferBindingSize`, or a 2D texture above `maxTextureDimension2D` or
+    256 layers, where a device would raise a validation error. It records `textureWritten`, takes
+    buffer limits (`countingRenderEngine(limits)`, `fakeDevice(limits)`) and restores onto
+    another device (`restore(device)`).
+  - _The smoke check_ `smoke/terrain.ts` (group "R05.T11.a the terrain's resources", appended to
+    `page.ts`) makes and writes both settings' resources on the harness's engine, then the high
+    setting on a second engine with `defaultLimits`: `FaceDifferences`, 3,904 slots, 8,122 ×
+    4,192 × 2. It passed on both variants on SwiftShader on 2026-10-03, with no uncaptured GPU
+    error. T11.b adds its frames to the same file.
 - **Deviations in T7.c, as built, with the patch-demand ruling (2026-10-03,
   `decision-r05-patch-demand.md`, items 4a, 4b and 4d), which amend Design notes 7, 10, 23 and 24.**
   - _The grounded rule._ `grounded.ts` holds `GroundContact` (moved from `select.ts`),

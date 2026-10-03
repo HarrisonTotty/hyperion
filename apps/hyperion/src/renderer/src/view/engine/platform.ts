@@ -193,6 +193,12 @@ export async function requestAdapterOutcome(gpu: GPU | undefined): Promise<Adapt
   return { kind: "adapter", adapter, summary, capabilities, styles: styleAvailability(summary) };
 }
 
+/**
+ * WebGPU's default `maxTextureArrayLayers` (W3C WebGPU §3.6.2), which the engine never raises: the
+ * most layers a 2D array texture may have on every device.
+ */
+export const MAX_TEXTURE_ARRAY_LAYERS = 256;
+
 /** The most bytes a raised buffer limit asks for: 1 GiB (decisions-r06-r07.md item 7). */
 export const MAX_REQUESTED_BUFFER_BYTES = 2 ** 30;
 

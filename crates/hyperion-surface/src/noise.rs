@@ -209,9 +209,11 @@ fn twos_complement_32(n: i64) -> u32 {
 /// gradient index of each corner, [`UNFILLED`] until first use.
 #[derive(Debug, Clone, PartialEq)]
 struct CornerBox {
-    /// The octave the box was covered for: a box serves only the identical octave, so a cache
-    /// passed from one planet, seed or octave table to another never returns the other's
-    /// gradients.
+    /// The octave the box was covered for. A box serves only an octave of the same index and
+    /// seed, so a cache passed from one planet or seed to another never returns the other's
+    /// gradients; the seed alone is compared on each lookup, which is cheap, and debug builds
+    /// check that the whole octave matches (one seed with two octave tables in one cache is the
+    /// caller's error).
     octave: Octave,
     low: [i64; 3],
     extent: [u64; 3],
@@ -239,10 +241,15 @@ impl CornerBox {
 }
 
 /// The caller's cache of lattice-corner gradients, one per bake (see the module documentation).
+///
+/// It also keeps a planet's octave table, built once per seed rather than once per point
+/// ([`take_octaves`](Self::take_octaves)): each octave's offset is two Threefry blocks.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LatticeCache {
     /// Per octave index, the box [`cover`](Self::cover) set, if any.
     boxes: Vec<Option<CornerBox>>,
+    /// The octave table last built, with the seed it was built for.
+    octaves: Option<(Seed, Vec<Octave>)>,
 }
 
 impl LatticeCache {
@@ -292,13 +299,38 @@ impl LatticeCache {
         };
     }
 
+    /// The octave table of the planet of `seed`, built by `build` unless this cache holds it, and
+    /// taken out of the cache so that the caller can read it while it lends the cache to
+    /// [`gradient_noise`]; give it back with [`restore_octaves`](Self::restore_octaves).
+    ///
+    /// `build` must be a pure function of `seed`, the same on every call: the table is reused for
+    /// every later call with that seed, so the octaves are those `build` would give.
+    pub fn take_octaves(&mut self, seed: Seed, build: impl FnOnce() -> Vec<Octave>) -> Vec<Octave> {
+        match self.octaves.take() {
+            Some((held, table)) if held == seed => table,
+            _ => build(),
+        }
+    }
+
+    /// Gives back a table [`take_octaves`](Self::take_octaves) took for `seed`.
+    pub fn restore_octaves(&mut self, seed: Seed, table: Vec<Octave>) {
+        self.octaves = Some((seed, table));
+    }
+
     /// The gradient index of `corner` of `octave`, from the cache where it covers the corner.
     fn gradient(&mut self, octave: &Octave, corner: [i64; 3]) -> u8 {
         let cached = self
             .boxes
             .get_mut(usize::from(octave.index))
             .and_then(Option::as_mut)
-            .filter(|b| b.octave == *octave)
+            .filter(|b| {
+                debug_assert!(
+                    b.octave.seed != octave.seed || b.octave == *octave,
+                    "a cache box covered for {:?} was read for {octave:?}",
+                    b.octave
+                );
+                b.octave.seed == octave.seed
+            })
             .and_then(|b| b.slot(corner).map(|s| &mut b.indices[s]));
         match cached {
             Some(entry) if *entry != UNFILLED => *entry,

@@ -473,14 +473,16 @@ mod tests {
                     };
                     let q = [0, 1, 2].map(|n| v.q1[n] + origin[n]);
                     let gap = norm(sub(q, p));
+                    // Both sides form the point from the same parent positions, relative to two
+                    // origins: a few ulps of a 6.4 × 10⁶ m coordinate (about 10⁻⁹ m each).
                     assert!(
-                        gap < 1e-6,
+                        gap < 1e-8,
                         "child {c} ({x}, {y}): {gap} m off the parent's mesh"
                     );
                     if x % 2 == 0 && y % 2 == 0 {
                         assert_eq!(bits(v.h1), bits(h));
                     } else {
-                        assert!((v.h1 - h).abs() <= 1e-9, "child {c} ({x}, {y})");
+                        assert_eq!(bits(v.h1), bits(h), "child {c} ({x}, {y})");
                     }
                 }
             }
@@ -600,7 +602,9 @@ mod tests {
                 for v in baked.vertices {
                     let p = [0, 1, 2].map(|n| v.q0[n] + origin[n]);
                     let shell = figure.surface_point(v.dir, h);
-                    assert!(norm(sub(p, shell)) < 1e-8 * figure.equatorial_radius_m);
+                    // The f64 rounding of q₀ and of adding the origin back: a few ulps of a.
+                    let ulps = norm(sub(p, shell)) / (f64::EPSILON * figure.equatorial_radius_m);
+                    assert!(ulps < 8.0, "{key:?}: {ulps} ulps off the shell");
                     assert_eq!(bits(v.h0), bits(h));
                 }
             }
