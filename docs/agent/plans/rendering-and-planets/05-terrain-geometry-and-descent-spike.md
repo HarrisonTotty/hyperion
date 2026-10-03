@@ -3392,17 +3392,17 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
       other source of it;
     - the landing site's height, from lane A's `surfaceHeightM` export: T4.c's collision
       interpolant, bit for bit with native;
-    - a true upper bound of the terrain under the low pass's track: each level-12 patch's highest
-      baked vertex plus ε₁₂.
+    - a floor under each of T13.a's stretches (`trackStretches`, decision-r05-descent-clearance.md):
+      the highest baked vertex plus ε_n over the stretch's patches at its bound level and their
+      eight neighbours (T13.a's `stretchKeys`), in one batch, `SurfaceQuery.maxHeightsM(groups)`,
+      each distinct patch baked once (about 600);
+    - σ_n of every level (`SurfaceQuery.omittedSigmaM`), for T13.c's calibrated pass.
 
-    It then builds T13.a's `DescentProfile` with `{ siteHeightM, trackMaxHeightM }`, so the
-    script stays a function of the seed.
-    - `trackPatchKeys(profile, bounded)` samples the chosen segments' ground track at most half
-      the level's shortest patch edge apart, at the segment's fastest speed, and takes each
-      sample's patch with its eight neighbours, so no patch under the track is missed. By default
-      `bounded` takes the `clearsTrack` segments.
-    - **Pending a ruling** (`decision-r05-descent-clearance.md`): nothing bounds the terrain under
-      the slowdown and the flare's last blend. The ruling is a one-line change of `bounded`.
+    It then builds T13.a's `DescentProfile` with `{ siteHeightM, stretchMaxHeightsM }`, so the
+    script stays a function of the seed and the measured numbers. A profile the floors make
+    unflyable throws, and `prepareDescent` raises `DescentRefused`: the spike refuses to fly and
+    says `DESCENT REFUSED: terrain cannot be cleared on this seed, relaunch with another seed`.
+    `trackPatchKeys` and `TRACK_BOUND_LEVEL` are gone.
 
   - _The contact._ The craft is a contact while it is grounded or descending (Design note 9),
     judged on `clearanceM`, the height above the site's terrain, not the datum:
@@ -3686,3 +3686,52 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     (the flare under a 2 km ridge) and a gentle one before a 70 m/s climb dipped 30 m. The tests
     hold every 64 Hz pose of a segment within 0.5 m of min(the highest before, the highest after)
     in the ridges, lifted-low-pass and two-ridge-valley cases, and the 003a6a3 fingerprints.
+
+- **The clearance follow-up, as built (lane C, 2026-10-03).**
+  - `SurfaceQuery.maxHeightsM(groups)` (request `max-heights`) answers each group's floor in one
+    batch, baking each distinct key once, and refuses an empty group.
+  - T13.a's `stretchKeys` sampled the track half an edge apart only, so a pose whose patch the
+    track crossed at a corner between samples could miss its far neighbours. It now samples at
+    every 64 Hz pose too (a8a48eb, with a coverage test). The ranges fixture gains ten keys, and no
+    pinned hash moved.
+  - The contact reads `heightAboveFloorM`, as T13.a's demand record does.
+  - `clearance.wasm.test.ts` runs the ruling's checks on the real module, for seed 7 (the rough site,
+    1.85 km below the datum) with ridges on, in the suite:
+    - the finest mesh at every 64 Hz pose's ground direction, and half an edge to either side, lies
+      at or below the stretch's floor;
+    - the altitude above the finest mesh under the camera is at least the piece's C;
+    - touchdown is 1 m above the site, the table's value to 1e-6 m.
+
+    Each run bakes about 600 patches (about 20 s at load 50 or more). All six runs the ruling names,
+    seeds 0, 1 and 7 with ridges off and on, passed by hand on 2026-10-03. T13.a's lift solve meets
+    its floors to rounding (−4 × 10⁻¹¹ m), so the checks take its `FLOOR_TOLERANCE_M`.
+
+  - Only T13.a's lift-limit `RangeError` ("the descent cannot clear its floors") becomes
+    `DescentRefused`. Floors of the wrong count or not finite are a measurement fault and show
+    `TERRAIN NOT MEASURED`. The message prefix is the test (`isUnclearable`); a distinct error
+    class from T13.a would be sturdier. No finite floor found by probing exhausts T13.a's four
+    lifts, so the refused status is tested through `DescentSpike`'s `prepare` prop.
+  - Scope (the orchestrator, 2026-10-03): `just ci` runs the roughest of the ruling's six wasm runs,
+    seed 7 with ridges on. `just test-slow-client`, added to `just ci-slow`, runs all six under
+    `HYPERION_SLOW_TESTS=1`. `isUnclearable` becomes an `instanceof` check once T13.a exports
+    `DescentUnclearable`.
+  - Seams for T13.c (the orchestrator, 2026-10-03):
+    - `PreparedDescent.omittedSigmaM`;
+    - `SpikeListeners.onPrepared(prepared)`, called once the measurement is ready;
+    - `SpikeListeners.onSelect(input, selection)`, through the new
+      `TerrainPassOptions.onSelect`, called after each `selectPatches` and outside the
+      `terrain.select` span; unset, it costs nothing.
+- **The spike's terrain variants, as built (lane C, 2026-10-03; the spike variant flags ruling in
+  decision-r05-spike-ux.md).**
+  - `qualitySetting.ts` gains `TerrainVariant { vertexPath?, normals? }` and
+    `terrainSettingsFor(setting, variant?)`: `SETTINGS[setting].terrain` with only the given fields
+    replaced. It throws a `RangeError` for `low` with `baked-offsets`.
+  - `TerrainPassOptions.terrain` defaults to `TERRAIN_SETTINGS[setting]` and is resolved once in
+    the constructor. It is read for the resources, the pool's normals and both τ reads, after a
+    device restore too. `setting` still decides the low setting's `DETAIL LIMITED`.
+  - Tests:
+    - no variant gives the setting's own object;
+    - each field replaces only itself;
+    - the low setting with `baked-offsets` throws;
+    - a high variant of `face-differences` with mesh normals reaches the pool, the material and
+      `terrainSlotLayout`'s slot count, and keeps them through a restore.

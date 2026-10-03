@@ -6,6 +6,7 @@ import {
   bakePatch,
   initSync,
   levelTable,
+  omittedSigmaM,
   surfaceHeightM,
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
@@ -20,10 +21,16 @@ import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import { FakeAdapter, FakeGpu, SWIFTSHADER_INFO } from "../../test/fakeGpu";
 import { requestAdapterOutcome } from "../engine/platform";
 import type { RenderView } from "../engine/types";
-import { DescentSpike, TEST_PLANET_STATEMENT, VIEWS_NOT_MADE } from "./DescentSpike";
-import type { SpikeWorkers } from "./spikeRun";
+import {
+  DESCENT_REFUSED,
+  DescentSpike,
+  TEST_PLANET_STATEMENT,
+  VIEWS_NOT_MADE,
+} from "./DescentSpike";
+import { DescentRefused, type prepareDescent, type SpikeWorkers } from "./spikeRun";
 import {
   answerSurfaceQuery,
+  type SurfaceQueryModule,
   type SurfaceQueryReply,
   type SurfaceQueryRequest,
   type SurfaceQueryWorker,
@@ -40,15 +47,36 @@ beforeAll(() => {
 
 /** The query's worker, answering with the real module on a microtask, as a message would arrive. */
 class InlineQueryWorker implements SurfaceQueryWorker {
+  /**
+   * The module's bake, or a stand-in whose every patch spans `flatM` (the floors then sit at
+   * `flatM` plus ε): the real floors take some 600 bakes, which these tests do not need.
+   */
+  readonly bakePatch: SurfaceQueryModule["bakePatch"];
+
+  constructor(flatM: number | null = 0) {
+    this.bakePatch =
+      flatM === null
+        ? bakePatch
+        : () => ({ heightRangeM: () => Float32Array.of(flatM, flatM), free: () => undefined });
+  }
+
   readonly #listeners: ((event: MessageEvent<SurfaceQueryReply>) => void)[] = [];
 
   postMessage(message: SurfaceQueryRequest, _transfer: Transferable[]): void {
-    const reply = answerSurfaceQuery({ bakePatch, levelTable, surfaceHeightM }, message);
+    const reply = answerSurfaceQuery(
+      { bakePatch: this.bakePatch, levelTable, omittedSigmaM, surfaceHeightM },
+      message,
+    );
     queueMicrotask(() => {
-      for (const cb of this.#listeners) {
-        cb(new MessageEvent("message", { data: reply }));
-      }
+      this.deliver(reply);
     });
+  }
+
+  /** Hands `reply` to the listeners, as a message from the worker. */
+  protected deliver(reply: SurfaceQueryReply): void {
+    for (const cb of this.#listeners) {
+      cb(new MessageEvent("message", { data: reply }));
+    }
   }
 
   addEventListener(type: "message" | "error", cb: never): void {
@@ -166,7 +194,11 @@ afterEach(() => {
 });
 
 function renderSpike(
-  options: { readonly engine?: ViewEngineSource; readonly workers?: SpikeWorkers } = {},
+  options: {
+    readonly engine?: ViewEngineSource;
+    readonly workers?: SpikeWorkers;
+    readonly prepare?: typeof prepareDescent;
+  } = {},
 ): ReturnType<typeof render> {
   return render(
     <GraphicsStatusContext value={new GraphicsStatusStore(initialGraphicsStatus("vulkan", false))}>
@@ -177,6 +209,7 @@ function renderSpike(
         workers={2}
         engineSource={options.engine ?? PENDING_ENGINE}
         spikeWorkers={options.workers ?? WORKERS}
+        prepare={options.prepare}
       />
     </GraphicsStatusContext>,
   );
@@ -281,5 +314,17 @@ describe("DescentSpike", () => {
     });
     expect(made.views().length).toBe(3);
     expect(samples.at(-1)).toBe(2);
+  }, 30_000);
+
+  it("refuses to fly when the script cannot clear the measured terrain", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // A measurement the script cannot fly, as T13.a's lift limit refuses it.
+    renderSpike({
+      prepare: () =>
+        Promise.reject(
+          new DescentRefused(5n, new RangeError("the descent cannot clear its floors")),
+        ),
+    });
+    expect(await screen.findByText(DESCENT_REFUSED, undefined, { timeout: 20_000 })).toBeDefined();
   }, 30_000);
 });

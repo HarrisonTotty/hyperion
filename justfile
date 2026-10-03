@@ -148,6 +148,12 @@ test-slow *args:
     cargo build -q -p hyperion-fit
     just _locked bash -c '{{ slow_then_check }}' test-slow "$@"
 
+# The client's slow tests: the descent spike's terrain clearance on all six of its ruling's runs
+# (seeds 0, 1 and 7, ridges off and on, decision-r05-descent-clearance.md), some 600 real bakes a
+# run. `just ci` runs the roughest of them alone.
+test-slow-client: gen-surface
+    just _locked bash -c 'cd apps/hyperion && HYPERION_SLOW_TESTS=1 pnpm exec vitest run src/renderer/src/view/spike/clearance.wasm.test.ts'
+
 # The body of `test-slow`'s locked step: the slow tests with the recipe's arguments, then the timed
 # check.
 slow_then_check := 'cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@" && start=$SECONDS && cargo run -q -p hyperion-fit -- check --rerun-fast && echo "hyperion-fit check --rerun-fast: $((SECONDS - start)) s" >&2'
@@ -411,4 +417,4 @@ build: gen-surface
 ci: fmt-check check lint test fit-check gen-protocol-check test-wasm-fast
 
 # `ci` plus the slow statistical tests, natively and on WebAssembly: the full gate.
-ci-slow: ci test-slow test-wasm-slow
+ci-slow: ci test-slow test-wasm-slow test-slow-client

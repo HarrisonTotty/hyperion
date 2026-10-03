@@ -85,10 +85,12 @@ export async function captureSpike(engine: RenderEngine, checks: Checks): Promis
   checks.check(
     "R05.T13.b the descent was measured against the terrain",
     Number.isFinite(prepared.siteHeightM) &&
+      prepared.profile.minFloorMarginM >= -1e-6 &&
       Number.isFinite(prepared.trackMaxHeightM) &&
       prepared.contact.firstOnsetS !== null,
     `site ${prepared.siteHeightM.toFixed(1)} m, track bound ` +
-      `${prepared.trackMaxHeightM.toFixed(1)} m, contact from ` +
+      `${prepared.trackMaxHeightM.toFixed(1)} m, ${prepared.stretches.length} stretch floors, ` +
+      `margin ${prepared.profile.minFloorMarginM.toFixed(3)} m, contact from ` +
       `${prepared.contact.firstOnsetS?.toFixed(3) ?? "never"} s, held from ` +
       `${prepared.contact.holdFromS?.toFixed(3) ?? "never"} s of ${prepared.profile.durationS} s, ` +
       `in ${Math.round(performance.now() - started)} ms`,
