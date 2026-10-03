@@ -2417,6 +2417,18 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   table and the ridged bake's skirt depth changed, so `TEST_PLANET_VERSION` is 2 (every surface
   golden re-blessed; `EXPECTED_TEST_PLANET_VERSION` in `heightBake.ts` and `cube.test.ts`
   follow); `GENERATOR_VERSION` is unchanged.
+- **σ_n exported** (2026-10-03, for T13.a). `TestPlanet::omitted_sigma_m(level)` and the wasm
+  module's `omittedSigmaM(level, ridges)` give σ_n, the RMS of the octaves level n omits: the
+  octaves' variances summed in index order, a ridged octave counting at its mask's RMS
+  (`RIDGE_MASK_RMS` = 0.6281, measured over 10⁶ points of the planet and pinned by
+  `the_ridge_mask_rms_is_pinned`), 0 from level 18 on. It is not the same with ridges on and off:
+  at levels 0–8, which omit a ridged octave, it is smaller with ridges on (98.6 m against 155.8 m
+  at level 4), and the same from level 9. `level_table.golden` gains `sigma` lines (new values
+  only, so no `TEST_PLANET_VERSION` bump), and `level_bound_holds` reads it. **A finding:** with
+  the ridged octaves at their true RMS, the ridged planet's error is far from Gaussian at levels
+  4–8 (p99.9 1.0–1.23 × 4σ_n, patch maxima up to 1.87 × 4σ_n, 59–88% of patches within
+  1.25 × 4σ_n), so min(ε_n, 4σ_n) is not a safe bound there; R10.T4's criteria (i) and (ii) would
+  both fail on it.
 - **Decisions-r05.md item 6, the ridged planet** (ruled 2026-10-02 on this lane's question). With
   ridges on the hard bound is 10–50 times the 99.9th percentile at levels 5–12 (k_n up to 230,
   against about 15 with ridges off), so selection by it over-refines the ridged planet heavily.

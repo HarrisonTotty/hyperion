@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import golden from "../../../../../../../../crates/hyperion-surface/tests/golden/bake.golden?raw";
 import geometrySource from "../../../../../../../../crates/hyperion-surface/src/geometry.rs?raw";
+import levelTableGolden from "../../../../../../../../crates/hyperion-surface/tests/golden/level_table.golden?raw";
 import libSource from "../../../../../../../../crates/hyperion-surface/src/lib.rs?raw";
 import {
   bakePatch,
@@ -9,6 +10,7 @@ import {
   finestSpacingM,
   initSync,
   levelTable,
+  omittedSigmaM,
   NormalScale,
   Ridges,
   testPlanetVersion,
@@ -180,6 +182,23 @@ describe("the height worker's module", () => {
 
   it("rejects a module that bakes another test planet version", () => {
     expect(staleModuleMessage({ ...module, testPlanetVersion: () => 99 })).toMatch(/version 99/);
+  });
+
+  it("hands out each level's omitted octaves' RMS as the native golden pins it", () => {
+    const lines = levelTableGolden.split("\n").filter((line) => line.startsWith("sigma "));
+    expect(lines).toHaveLength(2 * 25);
+    for (const line of lines) {
+      const [, ridges, level, hex] = line.split(" ");
+      const sigma = omittedSigmaM(Number(level), ridges === "on" ? Ridges.On : Ridges.Off);
+      expect(`0x${bitsHex(sigma)}`).toBe(hex);
+    }
+    expect(omittedSigmaM(18, Ridges.Off)).toBe(0);
+    expect(omittedSigmaM(4, Ridges.On)).toBeLessThan(omittedSigmaM(4, Ridges.Off));
+    expect(omittedSigmaM(9, Ridges.On)).toBe(omittedSigmaM(9, Ridges.Off));
+  });
+
+  it("refuses the omitted octaves' RMS of a level above 24", () => {
+    expect(() => omittedSigmaM(25, Ridges.Off)).toThrow(/above 24/);
   });
 
   it("hands out a level table of four values for each level from 0 to 24", () => {
