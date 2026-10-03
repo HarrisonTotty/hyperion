@@ -32,6 +32,8 @@ export interface ViewSky {
   readonly drawn: DrawnSky | null;
   /** The label block's `STARS` reading, or `null` while the interim field's stands. */
   readonly labelValue: string | null;
+  /** Whether a sky has been asked and not yet answered (R07's lighting label reads it). */
+  readonly pending: boolean;
 }
 
 /** What the view's sky is made from. */
@@ -80,7 +82,7 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
   const position = cameraGalacticPosition(runPose(run), run.scene);
   const cameras: ReadonlyArray<SkyCamera> =
     position === null ? [] : [{ position, fovDeg: run.camera.fovDeg, widthPx }];
-  const { model } = useSky(request, cameras);
+  const { model, pending } = useSky(request, cameras);
   const role = run.camera.role;
   const fovDeg = run.camera.fovDeg;
   // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's limit or its size changes.
@@ -91,7 +93,7 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
       request === null ||
       model.request.exclude_system !== request.exclude_system
     ) {
-      return { drawn: null, labelValue: null };
+      return { drawn: null, labelValue: null, pending };
     }
     const { limit, labelV } = viewSkyLimit(model, role, exposure, fovDeg);
     const culled = cullSky(model.stars, limit, model.response.band.face_texels);
@@ -102,6 +104,7 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
     return {
       drawn: { model, selection },
       labelValue: skyLabelValue(labelV, role, model.response.not_modelled),
+      pending,
     };
-  }, [model, request, role, exposure, fovDeg, widthPx, settings.spriteBudget]);
+  }, [model, pending, request, role, exposure, fovDeg, widthPx, settings.spriteBudget]);
 }

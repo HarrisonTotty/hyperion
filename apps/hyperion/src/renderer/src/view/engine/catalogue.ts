@@ -20,6 +20,7 @@ import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { BAND_MATERIAL } from "../sky/band";
+import { DISC_MATERIAL } from "../sky/disc";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
@@ -107,6 +108,7 @@ export const ENGINE_CHECK_SPLAT: PointSplatSpec = {
 const SKY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: SKY_SPRITE_HDR_MATERIAL },
   { kind: "material", spec: BAND_MATERIAL },
+  { kind: "material", spec: DISC_MATERIAL },
 ];
 
 /** The point splats (R06.T13.h). */

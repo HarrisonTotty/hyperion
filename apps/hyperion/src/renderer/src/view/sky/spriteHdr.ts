@@ -3,7 +3,8 @@
  * T13.c; decision record item 1 of 2026-10-02).
  *
  * @remarks
- * The same `starSprite.wgsl`, composed with an identity `agxSprite` in place of
+ * It draws R07's point bodies too (decision record R07.T8.a, item 2), hence its name. The same
+ * `starSprite.wgsl`, composed with an identity `agxSprite` in place of
  * `toneCurve.wgsl`'s, so the tone step is compiled out and each pixel writes its pre-exposed
  * linear light into an `rgba16float` target, which R07's tone-mapping pass tones once for the
  * whole image. R01's additive blend keeps the destination's alpha, R07's meter class. The
@@ -27,7 +28,7 @@ fn agxSprite(rgbLinear: vec3f) -> vec3f {
 export const SKY_SPRITE_HDR_MATERIAL: WgslMaterialSpec = {
   ...WIREFRAME_MATERIALS.starSprite,
   name: "sky:starSpriteHdr",
-  displayName: "STAR SPRITES HDR",
+  displayName: "POINT SPRITES HDR",
   vertexWgsl: frameWgsl + LINEAR_SPRITE_WGSL + starSpriteWgsl,
   fragmentWgsl: frameWgsl + LINEAR_SPRITE_WGSL + starSpriteWgsl,
   storageBuffers: [{ name: MATERIAL_BUFFER.starSprite, binding: 0 }],
