@@ -657,11 +657,11 @@ and `--port`.
 5. **The BRDF is a lunar-Lambert disc times a fitted phase function** (researched 2026-09-29;
    Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7; Mallama and Hilton 2018, Astronomy
    and Computing 25, 10, arXiv:1808.01973, eqs. 2–17; McEwen 1991, Icarus 92, 298, from memory;
-   added by decision-phase-curves, 2026-10-02: Krisciunas and Schaefer 1991, PASP 103, 1033, eq. 9,
-   after Allen 1973, _Astrophysical Quantities_, 3rd ed., p. 143, for the Moon; Squyres and Veverka
-   1981, Icarus 46, 137, and 1982, Icarus 52, and Buratti 1991, Icarus 92, 312, for Ganymede's q;
-   Grundy et al. 2007, Science 318, 234, for Europa's; Buratti 1984, Icarus 59, 392, for L at high
-   albedo).
+   added by decision-phase-curves, 2026-10-02: Krisciunas and Schaefer 1991, PASP 103, 1033, eq.
+   9, after Allen 1973, _Astrophysical Quantities_, 3rd ed., p. 143, for the Moon's curve; Squyres
+   and Veverka 1981, Icarus 46, 137, and 1982, Icarus 52, and Buratti 1991, Icarus 92, 312, for
+   Ganymede's q; Grundy et al. 2007, Science 318, 234, for Europa's; Buratti 1984, Icarus 59, 392,
+   for L at high albedo).
    Every measured phase integral in V lies between 0.48 (Mercury) and 1.36 (Saturn), below
    Lambert's 1.5 and Lommel–Seeliger's 1.64, so no law of fixed disc-integrated shape reaches p and
    q together; the law needs a free phase function. It is I/F = A · f(α) · [L · 2μ₀ ÷ (μ₀ + μ) +
@@ -672,17 +672,22 @@ and `--port`.
    Φ_t^s, s solved by bisection since q falls monotonically in s, per channel: s_B, s_V and s_R
    apply to the one V template, so that q differs by channel and a crescent reddens as Mercury's,
    the Moon's and Mars's do (B − V grows by some 0.1–0.2 mag from opposition to about 100°); where
-   the analogue has only a V curve the three are equal. L and the template are chosen from plan
-   14's surface pressure P and cloud fraction c, not from the surface state alone, since plan 14
-   classes Mars as temperate (researched 2026-09-29; Mallama et al. 2017's Mars and Earth curves;
-   Earth's Rayleigh optical depth about 0.1 at 550 nm against about 0.002 for Mars's 600 Pa, so
-   below about 10 kPa the gas cannot hide the ground; McEwen 1991 for Mars's L, from memory;
-   confidence medium, the thresholds being judgement): P under 100 Pa, the Moon's or Mercury's
-   template with L = 1; P under 10 kPa and c under 0.3, the Mars template with L = 0.5; runaway
-   greenhouse, Venus's; gas envelope, the giant of its class, L = 0; otherwise Earth's, L = 0; a
-   magma ocean takes the airless branch below 10 kPa and Venus's above. If steps between
-   neighbouring worlds look wrong in the population, L = (1 − c) L_surf(P), log-interpolated
-   through 1 at 100 Pa, 0.5 at 10 kPa and 0 at 100 kPa, replaces them. The Mars curve covers
+   the analogue has only a V curve the three are equal. L and the template are chosen from
+   plan 14's surface state, and within a state from its surface pressure P (decision-phase-curves,
+   2026-10-02, replacing the rule researched 2026-09-29 on Mallama et al. 2017's Mars and Earth
+   curves and McEwen 1991 for Mars's L; the Rayleigh optical depth at 550 nm scales with the column
+   P ÷ g, Earth's about 0.097, so below about 30 kPa the gas cannot hide the ground), in this
+   order: a gas envelope, the giant of its class, L = 0; a runaway greenhouse, Venus's, L = 0; a
+   magma ocean, `magma` (Mercury's curve, L = 1, provisional) under 30 kPa and Venus's at or above
+   it; a snowball, `snowball` (the Moon's curve, L = 1, provisional, q solved to Europa's 1.01);
+   airless rock, Mercury's, L = 1 (the Moon's kept as a test analogue); airless ice, `airless-ice` (the Moon's curve,
+   L = 1, provisional, q solved to Ganymede's 0.80); a temperate world under 30 kPa the Mars
+   template with L = 0.5, otherwise Earth's, L = 0. The cloud condition (c under 0.3) is suspended
+   while plan 14's cloud fraction is a constant of the state, and restored when it depends on the
+   condensables. q does not depend on L (Φ = Φ_t^s unless the clamp acts), so L sets only the
+   resolved disc's limb darkening. If steps between neighbouring worlds look wrong in the
+   population, L = (1 − c) L_surf(P), log-interpolated through 1 at 100 Pa, 0.5 at 30 kPa and 0 at
+   100 kPa, replaces them. The Mars curve covers
    phases to about 50° only, beyond which the clamp and hold carry it. f is clamped at 4 and held
    past the template's valid range (a Lambert crescent vanishes faster than a cloudy one: Venus's f
    would reach 61 at 170°), and the point regime integrates the same clamped law, so flux is
@@ -1016,9 +1021,10 @@ Draft, in `docs/agent/plans/galaxy-generation/14-planetary-systems.md`, a subtas
 a `photometry` section of `BodySummaryDto` at `Bulk` detail (Design note 5): `geometric_albedo` in
 B, V and R, a phase-curve template and its exponents s_B, s_V and s_R, the lunar-Lambert share L,
 and the stated ratio p_V q_V ÷ A_Bond; the template and L chosen from surface pressure and cloud
-fraction by Design note 5's rule (Moon or Mercury, Mars, Venus, Earth and the giants; airless ice
-Ganymede or Europa, snowball and magma provisional and labelled), p scaled by the state's Bond
-albedo over the template's and capped so that p q ≤ 1; its tests reproduce Mallama et al. 2017's
+fraction by Design note 5's rule as decision-phase-curves (2026-10-02) restates it (the surface
+state first; 30 kPa for the magma and Mars branches; airless ice and snowball on the Moon's curve
+with q solved to Ganymede's 0.80 and Europa's 1.01; magma the thin branch only), p = the
+analogue's p × A_Bond ÷ the generator's albedo for the analogue (Europa's measured 0.68 for the snowball; decision-p14-phase-j, 9), capped so that p q ≤ 1; its tests reproduce Mallama et al. 2017's
 Table 7 and the computed q to 0.5% and state each analogue's ratio. Add two checks for plan 14's
 owner: airless rock's Bond albedo of 0.11 against the Moon's p_V 0.12 and a Mercury-like q of 0.48,
 which give 0.06 (Lane and Irvine 1973 to be read); and Earth's p_V 0.434 with Tinetti's curve, which
@@ -1040,7 +1046,15 @@ and, since rotation reaches no DTO yet, the drafts name the pole and rotation on
 roadmap's existing ask of P14.T14 through P14.T35) as the flattening's companion, without which an
 oblate body has no axis. Both are a `GENERATOR_VERSION` bump of plan 14 and an additive protocol
 change (`just gen-protocol`), plan 14's to make. Acceptance: the drafted subtasks cite the sources
-above; `pnpm exec prettier --check` on both plan files.
+above; `pnpm exec prettier --check` on both plan files. Decided 2026-10-02 (item 5): the body-fixed
+frame (pole, W₀, rate and the locking time and post-lock rate, as `body_fixed_at` evaluates them)
+goes on the wire in the same plan 14 subtask set as the flattening, under one `GENERATOR_VERSION`
+bump (driven by the moment-of-inertia change) and one additive protocol change; the draft states
+the detail level that grants it (`bulk`, the level that grants `bulk.radius_m`, since a disc needs
+both). The client twin of `body_fixed_at` matches a Rust fixture to 10⁻⁹ rad at five times either
+side of the locking time. _Drafted (2026-10-02):_ plan 14's Phase J, P14.T46 (moment of inertia,
+rotation, flattening, datum, wire, one bump) and P14.T47 (photometry), marked "drafted for the
+owner (delegated decision pending)". Accepted with amendments 2026-10-02 (decision-p14-phase-j).
 
 #### R07.T2 The photometric section on the scene
 
@@ -1475,7 +1489,7 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   on a quiet one before any figure becomes "as built".
 - **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
   Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
-  Venus's curve unlabelled (decision-phase-curves, 2026-10-02). The q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
+  Venus's curve unlabelled; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
   al. 2016 would settle Jupiter); and plan 14's airless-rock Bond albedo and Earth's albedo are
   checks for its owner (T1).
 - **The lens PSF** of camera views rests on recalled veiling-glare figures (low confidence); the
@@ -1487,8 +1501,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   arbitrary number; it would need a guide entry for the owner. Not built.
 - **The law's thresholds** (Design note 5: 100 Pa and 30 kPa, raised from 10 kPa so that the
   simulated Mars, 11 kPa, reaches the Mars template; the cloud term suspended until plan 14's cloud
-  fraction depends on the condensables, `README` open finding; decision-phase-curves, 2026-10-02,
-  to be built in T5 and T1's draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
+  fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
+  draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
   clamp; the smooth blend of Design note 5 replaces the steps if the population shows jumps.
 - **Planetshine's uniform-disc approximation** shifts its terminator on the receiver by the
   neighbour's crescent offset, up to about 4° at Io; stated, not corrected.
