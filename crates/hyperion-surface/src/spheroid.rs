@@ -1,31 +1,18 @@
-//! The reference spheroid: a body's figure, and the one datum every height is measured from.
+//! A body's rotational spheroid, the one datum heights are measured from (plan 14, Phase J,
+//! P14.T46.e; plan R05, Design note 5).
 //!
-//! A body's figure is the rotational spheroid (a, a, c) about its pole: `a` the equatorial radius,
-//! `c` the polar. Every height a generator states or derives from it (plan 14's relief and an ocean
-//! world's sea level, the rendering plans' coarse elevations and terrain) is a geodetic height
-//! along this spheroid's normal, not a radius from the centre. On an Earth a sphere of the mean
-//! radius would put sea level 7 km high at the equator and 14 km low at the poles (WGS 84:
-//! a = 6,378,137 m, 1 ÷ f = 298.257223563, c = 6,356,752.314 m; NIMA TR8350.2, 3rd ed., 2000,
-//! Table 3.1 and Table 3.3). Decided for the rendering plans by the coordinator on 2026-09-29
-//! (R07 Design note 19, R05 Design note 5); plan 14's P14.T46.e gives every generated body one.
-//!
-//! The sim depends on this crate, never the reverse, so the type lives here and the sim's
-//! `BodyFigure` holds it. Plan 14 adds only the constructor from the volumetric radius and the
-//! accessors here; R05 adds the point and normal functions beside them.
-//!
-//! The volumetric (mean) radius is the radius of the sphere of equal volume, R = (a² c)^⅓, which
-//! is what a planet record's `radius_m` holds, so density and gravity read the same radius with or
-//! without a figure. Both cube roots go through [`hyperion_base::math::cbrt`], since the client runs
-//! this crate as WebAssembly and must agree with the server bit for bit.
-
-use std::error::Error;
-use std::fmt;
+//! A body's figure is the spheroid of revolution about its pole with equatorial radius a and
+//! polar radius c; height is measured along the spheroid's normal above it, and a sphere is the
+//! case a = c. This module was written by R05's lane before P14.T46.e's own landed, to the API the
+//! orchestrator described for it (`sphere`, `from_volumetric`, `flattening`,
+//! `volumetric_radius_m`); R05's geometry of the datum is the second `impl` block.
 
 use hyperion_base::math;
 
-/// A rotational spheroid (a, a, c) about a body's pole, in metres.
+/// A rotational spheroid: equatorial radius a and polar radius c, metres.
 ///
-/// An oblate body has `polar_radius_m` below `equatorial_radius_m`; a sphere has the two equal.
+/// Plain data with public fields, as P14.T46.e specifies the type; its constructors validate, and
+/// a figure written field by field must keep both radii finite and positive.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Spheroid {
     /// The equatorial radius a, metres.
@@ -34,71 +21,159 @@ pub struct Spheroid {
     pub polar_radius_m: f64,
 }
 
-impl Spheroid {
-    /// The spheroid of volumetric radius `radius_m` and flattening `flattening` = (a − c) ÷ a,
-    /// keeping the volume: a = R (1 − f)^(−⅓) and c = a (1 − f).
-    ///
-    /// # Errors
-    ///
-    /// [`BuildSpheroidError::RadiusNotPositive`] if `radius_m` is not positive and finite, and
-    /// [`BuildSpheroidError::FlatteningOutOfRange`] if `flattening` is outside [0, 1) (NaN
-    /// included).
-    pub fn from_volumetric(radius_m: f64, flattening: f64) -> Result<Self, BuildSpheroidError> {
-        if !(radius_m > 0.0 && radius_m.is_finite()) {
-            return Err(BuildSpheroidError::RadiusNotPositive);
-        }
-        if !(0.0..1.0).contains(&flattening) {
-            return Err(BuildSpheroidError::FlatteningOutOfRange);
-        }
-        let axis_ratio = 1.0 - flattening;
-        let equatorial_radius_m = radius_m / math::cbrt(axis_ratio);
-        Ok(Self {
-            equatorial_radius_m,
-            polar_radius_m: equatorial_radius_m * axis_ratio,
-        })
-    }
+/// Why a spheroid could not be built from a volumetric radius and a flattening.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildSpheroidError {
+    /// The radius is not finite and positive.
+    Radius(f64),
+    /// The flattening is not finite and in [0, 1).
+    Flattening(f64),
+}
 
-    /// The sphere of radius `radius_m`, a spheroid of flattening 0.
+impl std::fmt::Display for BuildSpheroidError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Radius(r) => write!(f, "volumetric radius {r} m is not finite and positive"),
+            Self::Flattening(x) => write!(f, "flattening {x} is not finite and in [0, 1)"),
+        }
+    }
+}
+
+impl std::error::Error for BuildSpheroidError {}
+
+impl Spheroid {
+    /// The sphere of radius `radius_m` metres.
+    ///
+    /// # Panics
+    ///
+    /// If `radius_m` is not finite and positive.
     #[must_use]
     pub const fn sphere(radius_m: f64) -> Self {
+        assert!(
+            radius_m.is_finite() && radius_m > 0.0,
+            "a sphere's radius must be finite and positive"
+        );
         Self {
             equatorial_radius_m: radius_m,
             polar_radius_m: radius_m,
         }
     }
 
-    /// The flattening (a − c) ÷ a, 0 for a sphere.
+    /// The spheroid of volumetric radius `radius_m` (the sphere of equal volume, a² c = R³) and
+    /// flattening `f` = (a − c) ÷ a: a = R ÷ ∛(1 − f), c = a (1 − f).
+    ///
+    /// # Errors
+    ///
+    /// [`BuildSpheroidError`] if the radius is not finite and positive or the flattening is not
+    /// finite and in [0, 1).
+    pub fn from_volumetric(radius_m: f64, f: f64) -> Result<Self, BuildSpheroidError> {
+        if !(radius_m.is_finite() && radius_m > 0.0) {
+            return Err(BuildSpheroidError::Radius(radius_m));
+        }
+        if !(f.is_finite() && (0.0..1.0).contains(&f)) {
+            return Err(BuildSpheroidError::Flattening(f));
+        }
+        let a = radius_m / math::cbrt(1.0 - f);
+        Ok(Self {
+            equatorial_radius_m: a,
+            polar_radius_m: a * (1.0 - f),
+        })
+    }
+
+    /// The flattening (a − c) ÷ a.
     #[must_use]
     pub fn flattening(&self) -> f64 {
         (self.equatorial_radius_m - self.polar_radius_m) / self.equatorial_radius_m
     }
 
-    /// The volumetric radius (a² c)^⅓, metres: the radius of the sphere of equal volume.
+    /// The volumetric radius ∛(a² c), metres.
     #[must_use]
     pub fn volumetric_radius_m(&self) -> f64 {
-        math::cbrt(self.equatorial_radius_m * self.equatorial_radius_m * self.polar_radius_m)
+        let a = self.equatorial_radius_m;
+        math::cbrt(a * a * self.polar_radius_m)
     }
 }
 
-/// A [`Spheroid`] could not be built.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BuildSpheroidError {
-    /// The volumetric radius was not positive and finite.
-    RadiusNotPositive,
-    /// The flattening was outside [0, 1).
-    FlatteningOutOfRange,
-}
+/// R05's geometry of the datum (plan R05, Design note 5): in the body-fixed frame with z along the
+/// pole, M = diag(a, a, c) maps a unit direction d to the spheroid point M·d, whose outward normal
+/// is ν = M⁻¹d ÷ |M⁻¹d|, and a point at height h above the datum along its normal is
+/// P = M·d + h·ν. A sphere is the case a = c.
+impl Spheroid {
+    /// WGS 84's ellipsoid: a = 6,378,137 m and f = 1 ÷ 298.257223563 (NIMA TR8350.2, 3rd edition,
+    /// 2000, Table 3.1), so c = a (1 − f) = 6,356,752.314 245 m, the semi-minor axis (b in
+    /// TR8350.2's Table 3.3, which lists 6,356,752.3142 m and uses c for another quantity). The
+    /// figure of R05's test planet.
+    pub const WGS84: Self = Self {
+        equatorial_radius_m: 6_378_137.0,
+        polar_radius_m: 6_378_137.0 * (1.0 - 1.0 / 298.257_223_563),
+    };
 
-impl fmt::Display for BuildSpheroidError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::RadiusNotPositive => "a spheroid's volumetric radius must be positive and finite",
-            Self::FlatteningOutOfRange => "a spheroid's flattening must lie in [0, 1)",
-        })
+    /// The spheroid point M·d for the unit direction `dir`, metres.
+    #[must_use]
+    pub fn point(&self, dir: [f64; 3]) -> [f64; 3] {
+        [
+            self.equatorial_radius_m * dir[0],
+            self.equatorial_radius_m * dir[1],
+            self.polar_radius_m * dir[2],
+        ]
+    }
+
+    /// The outward unit normal ν = M⁻¹d ÷ |M⁻¹d| at the spheroid point of the unit direction
+    /// `dir`.
+    #[must_use]
+    pub fn normal(&self, dir: [f64; 3]) -> [f64; 3] {
+        let m = [
+            dir[0] / self.equatorial_radius_m,
+            dir[1] / self.equatorial_radius_m,
+            dir[2] / self.polar_radius_m,
+        ];
+        let len = (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).sqrt();
+        [m[0] / len, m[1] / len, m[2] / len]
+    }
+
+    /// The point at height `h_m` metres above the spheroid along its normal, over the unit
+    /// direction `dir`: P = M·d + h·ν, metres.
+    #[must_use]
+    pub fn surface_point(&self, dir: [f64; 3], h_m: f64) -> [f64; 3] {
+        let p = self.point(dir);
+        let nu = self.normal(dir);
+        [p[0] + h_m * nu[0], p[1] + h_m * nu[1], p[2] + h_m * nu[2]]
+    }
+
+    /// The meridional and prime-vertical radii of curvature, M and N, metres, at the spheroid point
+    /// of the unit direction `dir`: with e² = 1 − c²/a² and the geodetic latitude's sine sin φ = `ν_z`,
+    /// M = a (1 − e²) ÷ (1 − e² sin²φ)^{3/2} and N = a ÷ (1 − e² sin²φ)^{1/2} (NIMA TR8350.2,
+    /// eq. 4-15 for N, and §7.4, p. 7-4, for M, which it calls `R_M`).
+    #[must_use]
+    pub fn curvature_radii_m(&self, dir: [f64; 3]) -> (f64, f64) {
+        let a = self.equatorial_radius_m;
+        let c = self.polar_radius_m;
+        let e2 = 1.0 - (c * c) / (a * a);
+        let sin_phi = self.normal(dir)[2];
+        let w2 = 1.0 - e2 * sin_phi * sin_phi;
+        let w = w2.sqrt();
+        (a * (1.0 - e2) / (w2 * w), a / w)
+    }
+
+    /// The radius of curvature, metres, of the normal section in the unit tangent direction
+    /// `tangent` at the spheroid point of `dir`: Euler's 1/ρ = cos²α ÷ M + sin²α ÷ N, with α the
+    /// direction's azimuth from the meridian.
+    #[must_use]
+    pub fn section_radius_m(&self, dir: [f64; 3], tangent: [f64; 3]) -> f64 {
+        let (m, n) = self.curvature_radii_m(dir);
+        let nu = self.normal(dir);
+        // East is ẑ × ν, undefined at a pole, where M = N and the azimuth does not matter.
+        let east = [-nu[1], nu[0], 0.0];
+        let east_len = (east[0] * east[0] + east[1] * east[1]).sqrt();
+        if east_len <= 0.0 {
+            return m;
+        }
+        let sin_alpha = (tangent[0] * east[0] + tangent[1] * east[1]) / east_len;
+        let sin2 = crate::num::min(sin_alpha * sin_alpha, 1.0);
+        let cos2 = 1.0 - sin2;
+        1.0 / (cos2 / m + sin2 / n)
     }
 }
-
-impl Error for BuildSpheroidError {}
 
 #[cfg(test)]
 mod tests {
@@ -106,77 +181,57 @@ mod tests {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// WGS 84's semi-major axis, metres (NIMA TR8350.2, Table 3.1).
-    const WGS84_A: f64 = 6_378_137.0;
-    /// WGS 84's inverse flattening (NIMA TR8350.2, Table 3.1).
-    const WGS84_INVERSE_F: f64 = 298.257_223_563;
-    /// WGS 84's semi-minor axis, metres (NIMA TR8350.2, Table 3.3).
-    const WGS84_C: f64 = 6_356_752.314_2;
-    /// The radius of the sphere of equal volume, metres (NIMA TR8350.2, Table 3.3: 6,371,000.7900).
-    const WGS84_VOLUMETRIC: f64 = 6_371_000.79;
-
-    /// The volumetric radius and the flattening rebuild WGS 84's axes to a millimetre.
     #[test]
-    fn wgs84_from_volumetric() {
-        let s = Spheroid::from_volumetric(WGS84_VOLUMETRIC, 1.0 / WGS84_INVERSE_F).unwrap();
-        assert!(
-            (s.equatorial_radius_m - WGS84_A).abs() < 1e-3,
-            "a = {}",
-            s.equatorial_radius_m
+    fn wgs84s_volumetric_radius_and_flattening() {
+        let w = Spheroid::WGS84;
+        assert!((w.flattening() - 1.0 / 298.257_223_563).abs() < 1e-15);
+        // The volumetric radius of WGS 84, 6,371,000.79 m (NIMA TR8350.2, Table 3.3).
+        assert!((w.volumetric_radius_m() - 6_371_000.79).abs() < 0.01);
+        let back = Spheroid::from_volumetric(w.volumetric_radius_m(), w.flattening()).unwrap();
+        assert!((back.equatorial_radius_m - w.equatorial_radius_m).abs() < 1e-6);
+        assert!((back.polar_radius_m - w.polar_radius_m).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bad_figures_are_refused() {
+        assert_eq!(
+            Spheroid::from_volumetric(-1.0, 0.0),
+            Err(BuildSpheroidError::Radius(-1.0))
         );
-        assert!(
-            (s.polar_radius_m - WGS84_C).abs() < 1e-3,
-            "c = {}",
-            s.polar_radius_m
+        assert_eq!(
+            Spheroid::from_volumetric(1.0, 1.0),
+            Err(BuildSpheroidError::Flattening(1.0))
         );
-        assert!((s.flattening() * WGS84_INVERSE_F - 1.0).abs() < 1e-12);
     }
 
-    /// The constructor keeps the volume: the volumetric radius returns to 10⁻¹².
     #[test]
-    fn volume_is_kept() {
-        for &(r, f) in &[
-            (6.371e6, 0.003_352_8),
-            (6.9911e7, 0.064_87),
-            (5.8232e7, 0.097_96),
-            (1.0e3, 0.0),
-            (2.0e5, 0.2),
-            (1.0, 0.999),
-        ] {
-            let s = Spheroid::from_volumetric(r, f).unwrap();
-            assert!(
-                (s.volumetric_radius_m() / r - 1.0).abs() < 1e-12,
-                "R {r}, f {f}"
-            );
-            assert!((s.flattening() - f).abs() < 1e-12, "R {r}, f {f}");
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the textbook names of the figure, its point, gradient and radii"
+    )]
+    fn the_normal_is_the_gradient_and_the_radii_are_wgs84s() {
+        let w = Spheroid::WGS84;
+        let d = crate::cube::unit_dir([0.3, -0.5, 0.8]);
+        let p = w.point(d);
+        let a2 = w.equatorial_radius_m * w.equatorial_radius_m;
+        let c2 = w.polar_radius_m * w.polar_radius_m;
+        let g = [p[0] / a2, p[1] / a2, p[2] / c2];
+        let len = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+        let nu = w.normal(d);
+        for k in 0..3 {
+            assert!((nu[k] - g[k] / len).abs() < 1e-15);
         }
-    }
-
-    /// A sphere has flattening 0 and its radius as both axes and as its volumetric radius.
-    #[test]
-    fn sphere_is_flattening_zero() {
-        let s = Spheroid::sphere(1_737_400.0);
-        assert!(s.flattening().abs() < f64::MIN_POSITIVE);
-        assert_eq!(s, Spheroid::from_volumetric(1_737_400.0, 0.0).unwrap());
-        assert!((s.volumetric_radius_m() - 1_737_400.0).abs() < 1e-6);
-    }
-
-    /// A flattening outside [0, 1) or a radius that is not positive and finite is refused.
-    #[test]
-    fn bad_inputs_are_refused() {
-        for f in [-1e-9, 1.0, 1.5, f64::NAN, f64::INFINITY] {
-            assert_eq!(
-                Spheroid::from_volumetric(1.0e6, f),
-                Err(BuildSpheroidError::FlatteningOutOfRange),
-                "f {f}"
-            );
-        }
-        for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert_eq!(
-                Spheroid::from_volumetric(r, 0.1),
-                Err(BuildSpheroidError::RadiusNotPositive),
-                "R {r}"
-            );
-        }
+        // At the equator M = a (1 − e²) and N = a; at the pole both are a² ÷ c.
+        let (m, n) = w.curvature_radii_m([1.0, 0.0, 0.0]);
+        let e2 = 1.0 - c2 / a2;
+        assert!((m - w.equatorial_radius_m * (1.0 - e2)).abs() < 1e-6);
+        assert!((n - w.equatorial_radius_m).abs() < 1e-6);
+        let (m, n) = w.curvature_radii_m([0.0, 0.0, 1.0]);
+        assert!((m - a2 / w.polar_radius_m).abs() < 1e-6 && (n - m).abs() < 1e-6);
+        // A sphere's every section has its radius.
+        let s = Spheroid::sphere(1_000.0);
+        assert!(
+            (s.section_radius_m(d, crate::cube::unit_dir([0.8, 0.0, -0.3])) - 1_000.0).abs() < 1e-9
+        );
     }
 }

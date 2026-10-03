@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeAdapter, type FakeDevice, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
+import { FakeAdapter, type FakeDevice, FakeGpu, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
-import { type PassTimes, PresentationOnlyReadback, type TextureHandle } from "../types";
+import {
+  Float32BlendUnavailable,
+  type PassTimes,
+  PresentationOnlyReadback,
+  type TextureHandle,
+} from "../types";
 import { WebGpuRenderEngine } from "./engine";
 
 /** An engine over a fake device with `features`. */
@@ -189,6 +194,98 @@ describe("the readback guard", () => {
   });
 });
 
+describe("releases (R06.T13.h)", () => {
+  it("raise one destroyed event and refuse the handle afterwards", async () => {
+    const { engine } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const cube = engine.createPackedCube(4, 3, "other", "sky cube: main");
+    engine.releaseTexture(cube);
+    expect(events.at(-1)).toEqual({
+      kind: "destroyed",
+      name: "sky cube: main",
+      bytes: events.at(0)?.bytes,
+      category: "other",
+    });
+    expect(() => {
+      engine.writePackedCubeLevel(cube, 0, new Uint32Array(4 * 4 * 6));
+    }).toThrow(/was released/u);
+  });
+
+  it("release a buffer once, and refuse a second release", async () => {
+    const { engine } = await engineOn();
+    const buffer = engine.createBuffer({
+      name: "staging",
+      bytes: 256,
+      usage: BUFFER_USAGE.COPY_SRC,
+      category: "other",
+    });
+    engine.releaseBuffer(buffer);
+    expect(() => {
+      engine.releaseBuffer(buffer);
+    }).toThrow(/staging was released/u);
+  });
+
+  it("refuse a render target's colour, which the target releases, and leave the engine disposable", async () => {
+    const { engine } = await engineOn();
+    const target = engine.createRenderTarget({
+      name: "hdr",
+      size: { widthPx: 4, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    expect(() => {
+      engine.releaseTexture(target.colour);
+    }).toThrow(/belongs to a render target/u);
+    expect(() => {
+      engine.dispose();
+    }).not.toThrow();
+  });
+
+  it("name each packed cube as its caller asks", async () => {
+    const { engine } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    engine.createPackedCube(2, 1, "other", "sky cube: cockpit");
+    engine.createPackedCube(2, 1, "other", "sky cube: main");
+    expect(events.map((event) => event.name)).toEqual(["sky cube: cockpit", "sky cube: main"]);
+  });
+});
+
+describe("createPointSplatAsync (R06.T13.h)", () => {
+  const SPLAT = {
+    name: "broken splat",
+    vertexWgsl: "@vertex fn main() -> @builtin(position) vec4f { return oops; }",
+    fragmentWgsl: "@fragment fn main() -> @location(0) vec4f { return vec4f(1.0); }",
+    format: "rgba32float",
+    blend: "additive",
+  } as const;
+
+  it("rejects naming the splat and the compiler's messages when its WGSL does not compile", async () => {
+    const { engine, gpu } = await engineOn(["float32-blendable"]);
+    gpu.shaderErrors = (code) => (code.includes("oops") ? ["unresolved value 'oops'"] : []);
+    gpu.createRenderPipelineAsync = () => Promise.reject(new Error("pipeline creation failed"));
+    await expect(engine.createPointSplatAsync(SPLAT)).rejects.toThrow(
+      "splat broken splat did not compile:\n1:1 unresolved value 'oops'",
+    );
+  });
+
+  it("resolves a splat whose pipeline is made", async () => {
+    const { engine } = await engineOn(["float32-blendable"]);
+    const made = await engine.createPointSplatAsync({ ...SPLAT, name: "good splat" });
+    expect(typeof made.draw).toBe("function");
+  });
+
+  it("rejects with Float32BlendUnavailable without the feature", async () => {
+    const { engine } = await engineOn();
+    await expect(engine.createPointSplatAsync(SPLAT)).rejects.toBeInstanceOf(
+      Float32BlendUnavailable,
+    );
+  });
+});
+
 describe("the engine's pass times", () => {
   it("count the query set and the timer's buffers as allocations", async () => {
     const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: ["timestamp-query"] });
@@ -284,3 +381,104 @@ function renderEmptyFrame(engine: WebGpuRenderEngine, label: string): void {
       postProcesses: [],
     });
 }
+
+/** A 4 × 4 sampled `rg16float` texture of `layers` layers. */
+function sampled(name: string, layers: number): TextureSpec {
+  return {
+    name,
+    size: { width: 4, height: 4, depthOrArrayLayers: layers },
+    dimension: "2d",
+    format: "rg16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  };
+}
+
+/** Draws `texture` once through a material that declares its binding as `viewDimension`. */
+async function drawWith(
+  engine: WebGpuRenderEngine,
+  texture: TextureHandle,
+  viewDimension: "2d" | "2d-array",
+): Promise<void> {
+  const mesh = engine.createMesh({
+    name: "triangle",
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    indices: null,
+    topology: "triangle-list",
+    attributes: {},
+  });
+  const material = await engine.createMaterialAsync(
+    {
+      name: `layers-${viewDimension}`,
+      displayName: "LAYERS",
+      vertexWgsl: "",
+      fragmentWgsl: "",
+      uniforms: [],
+      samplers: [],
+      textures: [{ name: "tiles", binding: 0, viewDimension }],
+      cullMode: "none",
+      depthWrite: false,
+      colourWrites: true,
+      blend: "none",
+    },
+    ["rgba16float"],
+    [mesh],
+  );
+  engine
+    .createRenderTarget({
+      name: "out",
+      size: { widthPx: 4, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: false,
+      category: "render-targets",
+    })
+    .render({
+      label: "out",
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [
+        {
+          mesh,
+          material,
+          offsetFromCameraM: new Float32Array(3),
+          uniforms: {},
+          textures: { tiles: texture },
+        },
+      ],
+      postProcesses: [],
+    });
+}
+
+describe("a texture bound where a 2d-array is declared", () => {
+  beforeEach(() => {
+    // The engine asks `navigator.gpu` for the canvas's format when it makes a material's pipelines.
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("views a single-layer 2D texture as a one-layer array", async () => {
+    const { engine, gpu } = await engineOn();
+    await drawWith(engine, engine.createTexture(sampled("atlas", 1)), "2d-array");
+    expect(gpu.textures.find((t) => t.label === "atlas")?.views).toContainEqual({
+      dimension: "2d-array",
+    });
+  });
+
+  it("gives the same texture a view of its own where a 2d is declared", async () => {
+    const { engine, gpu } = await engineOn();
+    const atlas = engine.createTexture(sampled("atlas", 1));
+    await drawWith(engine, atlas, "2d-array");
+    await drawWith(engine, atlas, "2d");
+    const views = gpu.textures.find((t) => t.label === "atlas")?.views ?? [];
+    expect(views).toContainEqual({ dimension: "2d-array" });
+    expect(views).toContainEqual({ dimension: "2d" });
+  });
+
+  it("still refuses a layered texture where a 2d is declared", async () => {
+    const { engine } = await engineOn();
+    await expect(
+      drawWith(engine, engine.createTexture(sampled("layers", 2)), "2d"),
+    ).rejects.toThrow(/declares tiles as 2d, but layers is 2d-array/u);
+  });
+});

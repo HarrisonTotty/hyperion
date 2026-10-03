@@ -20,6 +20,7 @@ import {
   featuresNotEnabled,
   type GpuCapabilities,
   requiredFeatures,
+  requiredLimits,
 } from "../platform";
 import type {
   GraphicsFault,
@@ -104,6 +105,26 @@ import { WebGpuRenderTarget } from "./target";
 import { PASSES_PER_FRAME, PassTimer } from "./timing";
 import { assertDrawStruct, OFFSET_MEMBER, uniformLayout } from "./uniforms";
 import { srgbViewFormat, WebGpuView } from "./view";
+
+/**
+ * The colour formats, with or without depth, a material's pipelines are made for ahead of its
+ * draws, for one of `createMaterialAsync`'s targets.
+ */
+export function pipelineOutputs(
+  target: RenderTargetFormat,
+  preferredCanvas: GPUTextureFormat,
+): Array<readonly [GPUTextureFormat, boolean]> {
+  if (target === "canvas") {
+    return [[srgbViewFormat(preferredCanvas), true]];
+  }
+  if (target === "canvas-in-pass") {
+    return [[preferredCanvas, true]];
+  }
+  return [
+    [target, true],
+    [target, false],
+  ];
+}
 
 /** A caught value as an `Error`, keeping it as the cause when it is not one. */
 function asError(error: unknown): Error {
@@ -371,8 +392,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * made, before it resolves.
    *
    * @remarks
-   * A canvas target is the preferred canvas format's sRGB view with depth; a colour target is made
-   * both with and without depth, since a target may have either.
+   * A canvas target is the preferred canvas format's sRGB view with depth, `canvas-in-pass` the
+   * format itself with depth (R07.T15's pass, which encodes); a colour target is made both with and
+   * without depth, since a target may have either.
    */
   async createMaterialAsync(
     spec: WgslMaterialSpec,
@@ -386,14 +408,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       this.#reportShaderErrors(`material ${spec.name}`, spec.displayName, errors);
       throw new Error(`material ${spec.name} failed to compile: ${errors.join("; ")}`);
     }
-    const outputs = targets.flatMap((target): Array<readonly [GPUTextureFormat, boolean]> =>
-      target === "canvas"
-        ? [[srgbViewFormat(navigator.gpu.getPreferredCanvasFormat()), true]]
-        : [
-            [target, true],
-            [target, false],
-          ],
-    );
+    const preferred = navigator.gpu.getPreferredCanvasFormat();
+    const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
     await Promise.all(
       meshes.flatMap((mesh) =>
         outputs.map(([format, hasDepth]) =>
@@ -464,9 +480,35 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return this.#resources.createTexture(spec);
   }
 
-  createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle {
+  createPackedCube(
+    sizePx: number,
+    mips: number,
+    category: MemoryCategory,
+    name?: string,
+  ): TextureHandle {
     this.#assertLive();
-    return this.#resources.createTexture(packedCubeSpec(sizePx, mips, category));
+    return this.#resources.createTexture(packedCubeSpec(sizePx, mips, category, name));
+  }
+
+  releaseBuffer(buffer: BufferHandle): void {
+    this.#assertLive();
+    this.destroyBuffer(buffer);
+  }
+
+  /**
+   * @throws Error for a render target's colour or depth, which the target owns and releases at
+   *   its disposal, as well as for a handle the engine did not make or has released.
+   */
+  releaseTexture(texture: TextureHandle): void {
+    this.#assertLive();
+    for (const target of this.#targets) {
+      if (target.colour === texture || target.depth === texture) {
+        throw new Error(
+          `texture ${texture.name} belongs to a render target and is released with it`,
+        );
+      }
+    }
+    this.destroyTexture(texture);
   }
 
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
@@ -497,17 +539,59 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   createPointSplat(spec: PointSplatSpec): PointSplatHandle {
     this.#assertLive();
     assertSplatSupported(this.capabilities);
-    const vertex = this.device.createShaderModule({
-      label: `${spec.name} vertex`,
-      code: spec.vertexWgsl,
-    });
-    const fragment = this.device.createShaderModule({
-      label: `${spec.name} fragment`,
-      code: spec.fragmentWgsl,
-    });
-    const pipeline = this.device.createRenderPipeline(
-      pointSplatPipelineDescriptor(spec, vertex, fragment),
+    const { vertex, fragment } = this.#splatModules(spec);
+    return this.#splatHandle(
+      spec,
+      this.device.createRenderPipeline(pointSplatPipelineDescriptor(spec, vertex, fragment)),
     );
+  }
+
+  /**
+   * R06's point splat, once its pipeline is compiled.
+   *
+   * @throws {@link Float32BlendUnavailable} without `float32-blendable`; Error, as a rejection,
+   *   naming the splat and the compiler's messages when its WGSL does not compile.
+   */
+  async createPointSplatAsync(spec: PointSplatSpec): Promise<PointSplatHandle> {
+    this.#assertLive();
+    assertSplatSupported(this.capabilities);
+    const { vertex, fragment } = this.#splatModules(spec);
+    try {
+      const pipeline = await this.device.createRenderPipelineAsync(
+        pointSplatPipelineDescriptor(spec, vertex, fragment),
+      );
+      return this.#splatHandle(spec, pipeline);
+    } catch (error: unknown) {
+      let errors: ReadonlyArray<string> = [];
+      try {
+        errors = [...(await compilationErrors(vertex)), ...(await compilationErrors(fragment))];
+      } catch {
+        // The compiler's messages could not be read (a lost device, say): the cause still says why.
+      }
+      const detail = errors.length > 0 ? errors.join("\n") : asError(error).message;
+      throw new Error(`splat ${spec.name} did not compile:\n${detail}`, { cause: error });
+    }
+  }
+
+  /** A splat's two shader modules. */
+  #splatModules(spec: PointSplatSpec): {
+    readonly vertex: GPUShaderModule;
+    readonly fragment: GPUShaderModule;
+  } {
+    return {
+      vertex: this.device.createShaderModule({
+        label: `${spec.name} vertex`,
+        code: spec.vertexWgsl,
+      }),
+      fragment: this.device.createShaderModule({
+        label: `${spec.name} fragment`,
+        code: spec.fragmentWgsl,
+      }),
+    };
+  }
+
+  /** The handle of a splat over its pipeline. */
+  #splatHandle(spec: PointSplatSpec, pipeline: GPURenderPipeline): PointSplatHandle {
     let disposed = false;
     return {
       draw: (target: TextureHandle, points: BufferHandle, count: number): void => {
@@ -623,10 +707,15 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
   }
 
-  readTexture(texture: TextureHandle, level = 0, rect?: TexelRect): Promise<ArrayBuffer> {
+  readTexture(
+    texture: TextureHandle,
+    level = 0,
+    rect?: TexelRect,
+    access: "cpu" | "tolerance" = "cpu",
+  ): Promise<ArrayBuffer> {
     try {
       this.#assertLive();
-      this.#writers.assertReadable(texture, "cpu");
+      this.#writers.assertReadable(texture, access);
       const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
       return readGpuTexture(this.device, gpuTexture, textureRead(spec, level, rect), (encode) => {
         this.#submit(`${texture.name} readback`, encode);
@@ -818,6 +907,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   const device = await outcome.adapter.requestDevice({
     label: "hyperion",
     requiredFeatures: [...requested],
+    requiredLimits: requiredLimits(outcome.adapter, overrides),
   });
   const notEnabled = featuresNotEnabled(requested, device.features);
   if (notEnabled.length > 0) {

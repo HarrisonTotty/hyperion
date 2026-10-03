@@ -11,7 +11,13 @@
 //! Empty until R05 and R09: the rules of every registry hold from the first entry (a tag is never
 //! renamed or removed, a new property group gets a new tag).
 
-hyperion_base::domain_tags! {}
+hyperion_base::domain_tags! {
+    // Plan R05: the terrain geometry and the descent spike.
+
+    /// The provisional test planet's lattice-corner gradients and octave offsets (R05, Design
+    /// note 13), outside every universe; R09's real height function replaces it.
+    TEST_PLANET: SelfTest = "selftest.surface.test_planet";
+}
 
 #[cfg(test)]
 mod tests {

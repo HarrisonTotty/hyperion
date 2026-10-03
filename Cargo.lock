@@ -753,7 +753,9 @@ dependencies = [
 name = "hyperion-surface"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "hyperion-base",
+ "hyperion-testkit",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]

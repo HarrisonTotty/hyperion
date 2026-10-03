@@ -143,11 +143,11 @@ export const STAR_CUT_RELATIVE = 1e-4; // Design note 4; R08 applies the same co
 /** Irradiance factor from a uniform sphere of H = d ÷ R at angle φ to the normal (Howell),
  *  above a local horizon of elevation `horizonRad` (0 on the smooth figure; R10's on terrain). */
 export function sphereIrradianceFactor(h: number, phiRad: number, horizonRad?: number): number;
-export const DISC_ANNULI_HIGH = 4; // limb-darkened annuli, edges uniform in μ
-export const DISC_ANNULI_LOW = 2;
-/** Edges of K annuli uniform in μ for one channel's power-2 law I(μ)/I(1) = 1 − c(1 − μ^α),
- *  from `HostDiscDto`'s per-channel coefficients. */
-export function annulusEdges(c: number, alpha: number, k: number): Float64Array;
+export const DISC_ANNULI_HIGH = 4; // limb-darkened annuli, edges by equal concentric error
+export const DISC_ANNULI_LOW = 3; // the orchestrator's ruling, 2026-10-03 (was 2)
+/** Edges of K flux-exact annuli by equal concentric error for one channel's power-2 law
+ *  I(μ)/I(1) = 1 − c(1 − μ^α), from `HostDiscDto`'s per-channel coefficients. */
+export function annulusEdges(c: number, alpha: number, k: number): AnnulusSet; // as built
 export function circleOverlapArea(r: number, k: number, z: number): number; // exact
 export function eclipseVisible(
   disc: HostDiscDto,
@@ -704,18 +704,23 @@ and `--port`.
    albedo 0.3 (p = 0.2, q = 1.5, brighter at large phase than any real body), and the label block
    says `BODY ALBEDO: NOT YET MODELLED` (a phrase for the owner, R07.T16).
 6. **The horizon in closed form, eclipses by annuli** (researched 2026-09-29; Howell's catalogue of
-   radiation view factors, configurations B-41 and B-42,
+   radiation view factors, configuration B-43 (Cunningham 1961; Hauptmann 1968),
    <https://www.thermalradiation.net/tablecon.html>, formula transcribed from memory and verified by
    brute force to 2 × 10⁻³; Kreidberg 2015, PASP 127, 1161). The brainstorm's "sampled at a handful
    of points" is 13–26% wrong for small occluders at 4 to 8 samples and bands by 1 ÷ N, and needs
    about 256 samples for 1%. Instead a lit point's visibility is the product of two closed forms.
    The horizon term is the irradiance factor from a uniform sphere of H = d ÷ R★ at angle φ between
-   the normal and the star's centre, which is exact for a uniform disc and within 0.45% of the
-   limb-darkened one for a star 19.5° in radius; it softens the terminator and lights a close-in
+   the normal and the star's centre, which is exact for a uniform disc and within 0.47% of the
+   limb-darkened one for a star 19.5° in radius (polynomial law; 0.61% in B for the Sun's power-2
+   law); it softens the terminator and lights a close-in
    planet beyond its hemisphere (to 109.5° at 3 stellar radii). The eclipse term splits the disc
-   into K annuli of uniform intensity with edges uniform in μ, and takes each annulus's eclipsed
-   area as the difference of two exact circle–circle overlaps: continuous, so it never bands; 0.62%
-   worst absolute error at K = 4 (high) and 1.5% at K = 2 (low). The product errs only where an
+   into K annuli of uniform intensity, each with its exact flux and edges by equal concentric
+   error, and takes each annulus's eclipsed area as the difference of two exact circle–circle
+   overlaps: continuous, so it never bands; for the Sun 0.56% (V), 0.70% (B) worst absolute error
+   at K = 4 (high) and 0.97% (V), 1.23% (B) at K = 3 (low; 2.1% and 2.7% at K = 2, before the
+   orchestrator's ruling of 2026-10-03 raised the low setting to 3) (decision-r07-dn6, 2026-10-03; the law
+   I(μ)/I(1) = 1 − c(1 − μ^α) after Hestroffer 1997, A&A 327, 199, eq. 4, its coefficients from
+   Maxted 2018, A&A 616, A39, Table 2). The product errs only where an
    eclipse's penumbra crosses the terminator band. Occluder lists are built on the CPU in `f64` from
    shadow cones and are usually empty. At 1 au the soft terminator is 59.3 km wide on an Earth-sized
    body and lies below 0.5% of peak irradiance, black under a day-side exposure. Mandel and Agol
@@ -1089,7 +1094,9 @@ V-weighted sum is E_V; the direction error from neglecting the star-to-body ligh
 #### R07.T4 The BRDF and its phase function
 
 - **R07.T4.a Templates and the law.** `appearance/{law,templates}.ts` (Design note 5):
-  `PHASE_TEMPLATES` from Mallama and Hilton 2018's eqs. 2–17 inside their valid ranges (Mercury's
+  `PHASE_TEMPLATES` from Mallama and Hilton 2018's eqs. 2–17 inside their valid ranges and the
+  Moon's from Krisciunas and Schaefer 1991 eq. 9 (Allen 1973) to 150°, which `airless-ice` and
+  `snowball` borrow at L = 1 (decision-phase-curves, 2026-10-02) (Mercury's
   zeroth-order term −0.613, as that paper corrects the 2017 table), f tabulated at 0.5°, clamped at
   `PHASE_F_CLAMP` and held past each range; `PhotometricLaw` with its per-channel exponents.
   `test/litFixtures.ts` gains `SOLAR_SYSTEM_PHOTOMETRY`: p in B, V and R, B−V and V−R, V(1,0) and
@@ -1127,14 +1134,18 @@ body is ordered on its equatorial sphere; a disc overlapping a mesh body is prom
 
 - **R07.T6.a The horizon.** `lighting/{sphereIrradiance,oracle}.ts` (Design note 6), with the local
   horizon argument. Tests: Howell's factor against brute force to 2 × 10⁻³ at H = 3, 11.5 and 215,
-  and its limb-darkening error at most 0.45% at 19.5°; the terminator 59.3 km wide on an airless
+  and its limb-darkening error at most 0.48% at 19.5° for the polynomial law and 0.62%, 0.49% and
+  0.40% for the Sun's B, V and R power-2 laws (decision-r07-dn6); the terminator 59.3 km wide on an airless
   body of 6,371 km at 1 au, and E ÷ E_zenith at the geometric terminator 9.87 × 10⁻⁴ for a uniform
   disc and 9.27 × 10⁻⁴ for the brainstorm's polynomial law; a planet at 3 stellar radii lit to
   109.5°; a local horizon of 5° removes the light of a star 4° up. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/lighting`.
 - **R07.T6.b Annuli and overlaps.** `lighting/annuli.ts`: `annulusEdges`, `circleOverlapArea`,
-  `eclipseVisible`. Tests: the eclipse term's worst absolute error at most 0.62% at K = 4 and 1.5%
-  at K = 2 over a grid of radius ratios 0.1–30 and 41 separations, against 400 annuli; a concentric
+  `eclipseVisible`. Tests: the eclipse term's worst absolute error, over a grid of radius ratios
+  0.1–30 and 41 separations against the exact integral oracle, at most 0.73%, 0.58% and 0.48% for
+  the Sun's B, V and R at K = 4, 1.30%, 1.02% and 0.85% at K = 3 (the low setting, the
+  orchestrator's ruling) and 2.8%, 2.2% and 1.85% at K = 2 (decision-r07-dn6); the equal
+  dip predicting the grid's worst to 3 × 10⁻⁴; a concentric
   occultation against the closed form [(1 − c) μ_k² + 2c μ_k^(α+2) ÷ (α + 2)] ÷ [(1 − c) + 2c ÷ (α +
   2)], μ_k = √(1 − k²); a total eclipse exactly 0. Acceptance: `pnpm --filter hyperion exec vitest
 run src/renderer/src/view/lighting`.
@@ -1215,7 +1226,8 @@ pre-exposed value, the meter class mapped to integer weights by `meterWeights`, 
 atomics with one global add per non-empty bin, read back with at most three reads in flight over
 a ring of three histogram buffers (R01's `readBuffer` makes its own staging buffer per call, so no
 mapped buffer is ever reused; if T12's bench shows that per-call staging costs, a staging ring is
-added to R01's readback in `view/engine/` under this task); a `KernelPair` with
+added to R01's readback in `view/engine/` under this task (approved 2026-10-02, item 6, through
+R01's guarded readback only)); a `KernelPair` with
 `readback: "bit-exact"` and no subgroup twin. Tests: a CPU histogram of a
 synthetic target equals the GPU's bin for bin in the smoke harness, on its `default` and
 `no-subgroups` variants; host-disc pixels are not counted under any meter; zeros land in
@@ -1273,7 +1285,9 @@ src/renderer/src/view/post`.
 `post/tonemap.wgsl`, `post/tonemap.ts` (Design notes 9 and 13): R02's `agx`, Filament's port as
 built by R02.T10.c with its header and `NOTICE` entry, included unchanged; the canvas's preferred
 format written through its non-sRGB view with the encoding in the pass (the option Design note 13
-adds to R01's engine, in `view/engine/`); static blue-noise TPDF dither of ±1 LSB in the encoded
+adds to R01's engine, in `view/engine/`; approved 2026-10-02, item 6: an opt-in per submission,
+default the sRGB view, every existing smoke check unchanged; tested by `just test-render` and the
+engine's Vitest suite; the overlay pass of T16 follows it); static blue-noise TPDF dither of ±1 LSB in the encoded
 domain; upscale from the internal resolution. Tests: `agx` against values computed once in `f64`
 from Filament's formula and pinned with their citation; monotone in luminance; an isolated star
 identical in both styles before the dither and within one code after it; the WGSL matches the
@@ -1294,8 +1308,10 @@ already). Draft, for the owner, the nomenclature entries this plan adds beyond R
 `METER LIT`, `METER DARK`, `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one
 edit of `docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. Tests: every overlay
 mark over the image has a casing stroke; plates are present for every readout; the console-ux
-skill's lint and contrast scripts pass. Acceptance: `just ci`; the guide edit is one commit for the
-owner.
+skill's lint and contrast scripts pass. Symbology over the tone-mapped image is a following
+canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view, in the same task as
+T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance: `just ci`; the guide
+edit is one commit for the owner.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -1487,8 +1503,7 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   on a quiet one before any figure becomes "as built".
 - **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
   Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
-  Venus's curve unlabelled;
-  the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
+  Venus's curve unlabelled; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
   al. 2016 would settle Jupiter); and plan 14's airless-rock Bond albedo and Earth's albedo are
   checks for its owner (T1).
 - **The lens PSF** of camera views rests on recalled veiling-glare figures (low confidence); the
@@ -1500,8 +1515,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   arbitrary number; it would need a guide entry for the owner. Not built.
 - **The law's thresholds** (Design note 5: 100 Pa and 30 kPa, raised from 10 kPa so that the
   simulated Mars, 11 kPa, reaches the Mars template; the cloud term suspended until plan 14's cloud
-  fraction depends on the condensables, the README's open finding) are
-  judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
+  fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
+  draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
   clamp; the smooth blend of Design note 5 replaces the steps if the population shows jumps.
 - **Planetshine's uniform-disc approximation** shifts its terminator on the receiver by the
   neighbour's crescent offset, up to about 4° at Io; stated, not corrected.
@@ -1605,3 +1620,463 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   (smallest choice made, reversible): a `contact` body (apparent position only) is lit from its
   apparent direction without eclipse or planetshine and, with no resolved radius, stays R02's
   mark (T2.a); the lean is to keep it so until a contact carries a radius.
+- **Deviations in T4.a, as built.**
+  - **Files.** `appearance/law.ts` holds `PhaseTemplateId`, `PhotometricLaw`, `PHASE_F_CLAMP` and
+    the table: `phaseFactor(law, α)` (exact f, clamped, held past the range), `phaseFactorTable`
+    (361 texels at `PHASE_TABLE_STEP_RAD` 0.5°, r, g, b interleaved in a `Float32Array`) and
+    `phaseFactorFromTable` (linear, as the shader reads it). `appearance/shapes.ts`, a file the
+    plan does not name, holds the shapes' closed forms (`lambertPhase`, `lommelSeeligerPhase`,
+    `shapePhase`, `shapeGeometricAlbedo`) and `phaseIntegral` (Simpson, 7,200 intervals), since
+    the f table needs Φ_shape and `phase.ts` (T4.b) imports the table; T4.b's `phase.ts` keeps
+    `discIntegratedPhase` and `lawFor`. `Rgb` is in display order (r, g, b): index 0 is R, 2 is B.
+  - **`PhaseTemplate` gains two fields:** `provisional: boolean`, for T5 and T16's labels, and
+    `lommelSeeligerShare`, the L that goes with the curve by Design note 5 (1 for the Moon,
+    Mercury, airless ice, the snowball and magma, 0.5 for Mars, 0 otherwise), so that the
+    templates' keys and laws live in one place (`templates.ts`) and change cheaply (the
+    coordinator's request 2026-10-02).
+  - **Moon:** Mallama and Hilton 2018 has no Moon; `moon` is Krisciunas and Schaefer 1991's eq. 9,
+    Δm = 0.026 α + 4 × 10⁻⁹ α⁴, a fit to Allen 1973's table (p. 143, to 160°), held past 150°,
+    now in Design note 5's sources. q = 0.626 at L = 1.
+  - **Ranges and branches.** Mercury's eq. 2 is used below its observed 2.1°; Uranus's eq. 15 and
+    Neptune's eq. 17 from opposition, in place of the flat eqs. 14 and 16 (which drops the
+    paper's 0.021 and 0.015 mag steps at 3.1° and 1.9°); Mars is eq. 6 without L(λe) and L(Ls),
+    held past 50° (eq. 7 unused, the coordinator's approval 2026-10-02); Saturn is its globe
+    (eqs. 11–12, joined at 6°), the rings being R11's; Earth runs to 180° (MH2018 §4.3: Tinetti's
+    curve approaches zero there), and Mallama et al. 2017's Table A-3.1 tabulates a steeper fit of
+    the same curve (2.07 mag at 90° against eq. 5's 1.57); eq. 5, the almanac's, is taken.
+  - **Borrowed shapes (decision-phase-curves, 2026-10-02, after the phase-curve check's four
+    mismatches with galaxy's classes):** airless ice and the snowball take the Moon's curve at L = 1,
+    their q reached through s (Ganymede's 0.80 at s ≈ 0.82, ratio 0.98; Europa's 1.01 at s ≈ 0.67,
+    ratio 0.99, both inside T2.b's 5%); magma takes Mercury's, for the thin branch below 30 kPa
+    only. All three are `provisional` and labelled. The Moon's constant is `MOON_KS91`. q does not
+    depend on L inside a template's range; past it, where f is held while the shape varies with L,
+    it does (see T4.b).
+    The selection rule (30 kPa, the cloud term suspended) is T5's and T1's draft's, and no template
+    is wired to a body class yet. A sourced icy curve exists only as Hapke fits (Domingue and
+    Verbiscer 1997, Icarus 128, 49).
+  - **Fixture.** `SOLAR_SYSTEM_PHOTOMETRY` adds `templateV10Mag` (MH2018's zeroth-order terms, e.g.
+    Mercury's −0.613 beside Table 3's −0.69), `radiusKm` (the disc-equivalent √(a c) each Table 7
+    p_V implies: Jupiter 69,134 km, Uranus 25,264, Neptune 24,552, Mars 3,386, Saturn the paper's
+    57,240) and `template`; magnitude fields end in `Mag`; `SUN_JOHNSON_MAG` (Table 6) and
+    `JohnsonBvr` are exported beside it. q_V is computed at s = 1 with the clamp and hold: Mercury
+    0.480, Venus 1.344, Earth 1.311, Mars 1.085, Jupiter 1.312, Saturn 1.357, Uranus 1.302,
+    Neptune 1.242 (reproduced independently by the science check). The table's tests live in
+    `appearance/solarSystemPhotometry.test.ts`, inside the acceptance filter.
+  - **For T4.c.** WebGPU has no three-channel float format and `rgba32float` filters only with
+    `float32-filterable`, so the shader reads the table as RGBA texels by two `textureLoad`s and
+    interpolates itself; the table's 0.5° interpolation errs by up to 4 × 10⁻⁴ of a steep
+    crescent's f and 2 × 10⁻³ where Venus's f meets the clamp (the phase integral by 10⁻⁴), an
+    error the reference and the shader share.
+- **Deviations in T4.b, as built.**
+  - **f from the table.** `brdf` and `discIntegratedPhase` read f from the law's 0.5° table by
+    linear interpolation, as the shader will, so that the disc and the point integrate one f
+    (T4.c's 10⁻⁵ agreement needs it). They read it through `phaseFactorTableOf` (`law.ts`), which
+    tabulates each law once and caches it in a `WeakMap` keyed by the law object.
+  - **`lawFor(p, q, template)` takes L from the template**
+    (`PHASE_TEMPLATES[id].lommelSeeligerShare`), A = p ÷ [L + ⅔(1 − L)], and solves each
+    channel's s by 60 bisection steps (geometric midpoints) over s ∈ [1/16, 16], on the exact,
+    clamped and held f over a 0.1° Simpson grid sampled once per call. A q no exponent reaches takes the bracket's nearer end, the
+    closest law the template allows.
+  - **Extra exports.** `geometricAlbedo(law)` (`phase.ts`); `lighting/oracle.ts` is created here,
+    ahead of T6.a, with `discIntegral(reflectance, α, nodes = 200)` (Gauss–Legendre over
+    photometric longitude and latitude, on any `Reflectance`), `Reflectance`, `gaussLegendre` and
+    `GaussLegendreRule`.
+  - **The clamp's departure in q at s = 1**, exact f on both sides: Venus −0.317%, Earth −0.011%,
+    Uranus −0.008%, every other template 0.
+  - **q against L (the coordinator's correction of the ruling, 2026-10-02, from the Phase J lane;
+    plan 14's T47 makes the same change).** q is independent of L only inside a template's range,
+    where the clamp does not act; past it the law holds f while the shape still varies with L (the
+    spread of q over L = 0, 0.5 and 1 at s = 1: Mars 0.10, Jupiter 6.7 × 10⁻³, Neptune
+    4.8 × 10⁻³, Venus 3.6 × 10⁻³, the Moon 1.1 × 10⁻⁴; airless ice at s = 0.82, 3 × 10⁻⁴). The
+    ruling's "q equal at L = 0 and 1 to 10⁻⁴" is replaced by two tests: inside each range,
+    unclamped, the disc-integrated phase equals Φ_t^s for any L to 10⁻¹²; and each template's q is
+    solved at its own L.
+  - **The planets' V** is checked as MH2018's zeroth-order term plus the law's dimming against the
+    paper's equations written out in the test, for all eight planets, at 0.01 mag (tighter than
+    the plan's 0.01–0.03 and 0.035, since the law reproduces its template up to the table, s and
+    the clamp); Earth also in flux within 30% at 10–150°. p is checked by T4.a against V(1, 0) and
+    the radius, not here.
+  - **The crescent.** The fixture gives q in V only, so Mercury's test splits q by ±5% (q_R 1.05
+    q_V, q_B 0.95 q_V) on the fixture's p; B − V then grows by about 0.11 mag from opposition to
+    100°, inside Design note 5's 0.1–0.2.
+- **Deviations in T14.a, as built** (2026-10-02). `post/glare.ts`, `post/bloom.ts` and an added
+  `post/nnls.ts` (Lawson and Hanson's non-negative least squares), each with tests.
+  `bloomKernel(setting: QualitySetting, role, radPerPx, eye: EyeObserver)`: first built on a
+  literal `"high" | "low"` stand-in, switched to R05.T7.b's `QualitySetting`
+  (`view/quality/qualitySetting.ts`) once it landed; `eye` is an argument as for `glareSpread`,
+  so that it builds before R06 (approved by the orchestrator). `BloomKernel` extends `BloomLevels { firstLevel, levels }`:
+  `weights[k]` multiplies mip level `firstLevel + k`, the low setting starting at level 1, quarter
+  resolution; the level counts are constants (`BLOOM_LEVELS`: 7 from level 0 high, 5 from level 1
+  low) until T17 makes them settings. **Design note 12's age factor is corrected** (science check,
+  2026-10-02): the CIE 135/1999 complete equation has age in both terms, [1 − 0.08 (A/70)⁴] on the
+  core and [1 + 1.6 (A/70)⁴] on the wide-angle term (McCann and Vonikakis 2018, eq. 2; Vos and van
+  den Berg 1997); "(A ÷ 62.5)⁴, wide term only" is CIE 146:2002's simpler equation. The code uses
+  the complete form, which gives T14.a's 1.047 and 1.010; the equation is valid to 100° and is
+  extrapolated beyond (1.2% of its energy). The threshold 2^`AGX_MAX_EV` = 16.29 is 156.4 L̄, not 157. The camera PSF is a Gaussian core of σ = 0.25′ holding 97% and a Harvey-type 1 ÷ (1 +
+  (θ/0.1°)²) tail holding 3%, within the 1–10% veiling glare index reported for commercial lenses;
+  the shape and knee are assumed (low confidence, as before). The fit matches encircled energy at
+  16 radii from 0 to 128 px with Σ w = 1; at 1080p across 60° the eye kernel is within 8.4% at
+  1 px, 4.4% at 4 px and 1% at 16 and 64 px; the CIE energy beyond the chain's reach (about 6%
+  beyond 128 px) is gathered into its widest levels, conserving energy but not the far veil. The
+  chain's last step, w₀ D₀ + up(U₁), runs inside the tone-mapping pass in `f32`, unrounded; every
+  other level is a rounded `rgba16float` write, `unknown` rounding modelled as toward zero.
+  `GlareSource.excessLuminance` is cd/m² (Provides and R06's contract): the mean luminance less
+  65,504 ÷ the pre-exposure scale. `glareSourceVeil` is the point form, L_ex Ω PSF(θ), exact in
+  energy but far too faint just outside a resolved disc's limb; ruled 2026-10-02 (orchestrator):
+  T14.b adds a near-limb term per CIE core term, the half-plane closed form 2ac²(π/2 − atan(d/c))
+  at distance d beyond the limb, as max(point, half-plane) (withdrawn 2026-10-02, its energy unbounded; replaced by the
+  equal-area rectangle, see T14.b as built), tested against a brute-force disc
+  quadrature, with a science check. `bloomKernel` costs some 35 ms per fit after a one-off
+  250–700 ms for the level responses (provisional, under load): its caller refits only when the
+  angular pixel scale changes materially, not each frame.
+- **Deviations in T12, as built** (2026-10-02). `post/histogram.{wgsl,ts}` and `post/meter.ts`
+  (`MeterMode`, `METER_CLASS`, `MeterClass`, `meterWeights`; R06.T13.e extends this file, never
+  redeclares). The kernel, `HISTOGRAM_KERNEL` (`exposure histogram`, reference only,
+  `bit-exact`, entry `main`), takes the HDR colour as a sampled `TextureHandle` (`hdr`; decision
+  2026-10-02, item 1: T7 wires the view's scene target), its `Params` uniform (`histogramParams`:
+  the four class weights, the size, the stride) and a 256-word `bins` buffer, and bins the Rec.
+  709 luminance (`METER_LUMA`, BT.709) of the pre-exposed value: bin 0 below 2⁻¹⁴ (and NaN in the
+  CPU twin; WGSL leaves the kernel's NaN case unspecified), bin 255 from 2¹⁶ and for +∞ (a pass
+  writing above 65,504; review fix, since a saturating `u32` of +∞ wrapped to bin 0), else 1 +
+  ⌊(log₂ L + 14) × 8.5⌋; the class is `round(alpha)`, half to even, clamped to [0, 3]. The low
+  setting's quarter-resolution input is a stride of 2 on each axis (`HistogramRequest.stride`),
+  not a separate downsample. Exports beyond Provides: `HistogramReader`, `HistogramRequest`,
+  `HistogramEngine` (the four engine calls the reader makes), `HISTOGRAM_RING` (3),
+  `HISTOGRAM_PASS` (`"histogram"`, `PHOTOREAL_PASS_LABELS.histogram` once T7 builds it),
+  `HISTOGRAM_WORKGROUP` (16 × 16, one bin per invocation), `HISTOGRAM_BINS_PER_STOP` (8.5),
+  `histogramWorkgroups`, `METER_LUMA`, the CPU twin `cpuHistogram` with `histogramBin`,
+  `binCentreLuminance` and `meterClassOf`. `HistogramReader` owns the ring of three storage
+  buffers: a frame finding all three still being read takes no histogram, results older than one
+  delivered are dropped, and the owner re-creates the reader in `onRestored`. Since R01's
+  `readBuffer` stages per call, no mapped buffer is ever reused; the test of "never maps a buffer
+  in use" checks instead, on a fake engine, that no slot is zeroed or dispatched into while its
+  read is pending. Registered in `WGSL_CATALOGUE` (`POST_ENTRIES`); the smoke check
+  (`smoke/histogram.ts`, on a 70 × 45 `rgba16float` texture of its own, luminances at bin
+  centres, with black and infinite texels) passes bin for bin under each meter at strides 1 and 2,
+  and through the reader's ring, on both `default` and `no-subgroups` (`just test-render`,
+  SwiftShader, 2026-10-02). **The bench is pending, and no staging ring was added to R01's
+  readback**: the RTX 3080 at 1920 × 1080 on a quiet machine, and the owner's UHD 620 at 1280 × 720
+  with stride 2 (640 × 360), both under `--hyperion-gpu-timing` with a uniform dark-sky input;
+  T17 builds the by-hand harness that drives `HistogramReader` and records the figures with the
+  other post-processing benches (the probe's 0.3–0.8 ms stays provisional), and if per-call
+  staging shows a cost T17 adds the staging ring through R01's guarded readback only (decision
+  2026-10-02, item 6).
+- **Deviations in T13.a, as built** (2026-10-02). `post/autoExposure.ts`: `meteredLuminance(h, window)`
+  (window [0, 1] by default; 0 when the window holds no counts), `smoothEv`, `programTriple`,
+  `ExposureProgram` (the `AUTO` program's N and t, a constructor argument: R06's
+  `DEFAULT_VIEW_CAMERA` where the controller is made), `AutoExposureOptions`, and `AutoExposure`
+  as a class (Provides sketched an interface with `step`), which also holds the operator's meter
+  (`setMeter`), takes R02's command results (`apply(ExposureCommandResult)`), and exposes
+  `meteredEv100` for R02's `setAuto` and `enable`. `step(h, dtS)` takes `undefined` on frames
+  with no new histogram: the meter holds its last value, and only after `METER_TIMEOUT_S` (0.5 s)
+  without one, or on a histogram with nothing to meter (a mean of 0, as under `LIT` with no lit
+  body), does it report `null` to R02's `onMetering`, the system inhibit `NO IMAGE TO METER`;
+  a system inhibit resumes `AUTO` from its held value and smooths from there. The smoothing is in
+  closed form over each step (linear to the band's edge, then exponential at rate speed ÷ 1.5),
+  so 30 Hz and 60 Hz agree to rounding; its speeds and band are Unreal's documented defaults
+  (Speed Up 3, Speed Down 1 f-stops/s, `ExponentialTransitionDistance` 1.5; science check
+  2026-10-02), no longer "from memory", still to be settled by eye. The star-entering test uses a
+  480 × 270 frame at 60° (the Sun at 1 au 2.1 px in radius, a planet 15% of the frame): the
+  metered value moves 0.01%, where in a 64 × 64 frame the disc's own 5% of the pixels, removed
+  from the count, moved it 6%; Design note 11's "4–5 stops above the average" holds for a body
+  covering about 3–6% of the metered pixels, and one under 0.64% reaches AgX's ceiling, as a
+  real averaging meter would. **For the owner** (science check): under `AUTO` the program's
+  sensitivity S = 5880 × 2^−EV100 at f/1.4 and 1/30 s spans ISO 0.18 (a sunlit planet, EV100 15) to 6 × 10⁶ (a dark sky, EV100 −10), far outside a real sensor; the lean is to record the
+  triple as nominal until R06's `cameraLimitV` models noise from S, then clamp S and let the
+  shutter take over.
+- **Deviations in T13.b, as built** (2026-10-02). `displays/view/MeterControl.tsx` (with
+  `meterLabel`) shows `EV100 9.6 AUTO` through R02's `exposureReading`, `METER AVG`, the source
+  view as `SOURCE VIEW`, and the meters `AVG`, `LIT` and `DARK` as pressed-state buttons in Design note 10's order (the guide has none yet; T16 drafts it),
+  reachable by Tab and pressed by Enter or Space; with no reading it says `NO IMAGE TO METER`
+  and holds the meters back (`aria-disabled`, focusable). It takes `meter`, an
+  `ExposureReading | null` and `onMeter(mode)`. **Not yet mounted in `ViewDisplay`**: no view
+  meters an image until T7 makes the photorealistic view and its `AutoExposure`; T7 mounts it
+  beside `ExposurePanel` (a few lines of `ViewDisplay`), so that no control stands on screen with
+  nothing behind it. The labels `METER AVG`, `METER LIT`, `METER DARK` are T16's guide draft. The
+  by-eye checks (a lit planet on black, a star entering the frame, the cockpit turning to a
+  planet), which settle the smoothing speeds, wait on T7 and are pending by hand for the owner:
+  `just client` with a photorealistic `VIEW` on the development machine.
+- **T13 after review, as built** (2026-10-02). `meteredAverage(h, window)` is what the controller
+  meters: `null` when no pixel counts, and for a frame whose counted pixels all fall below the
+  histogram's range (bin 0, as after a cut from a sunlit planet to a dark sky) the range's floor
+  2⁻¹⁴ ÷ the pre-exposure, an upper bound, so that the exposure steps darker and the frame comes
+  into range; metering its mean of 0 as nothing to meter locked `AUTO` in a system inhibit it
+  could not leave (a test drives the cut and the recovery). A histogram with nothing the meter
+  weighs (`LIT` with no lit body) is treated as no histogram: `AUTO` holds until
+  `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
+  definition of that status (a closed or absent source); T16's draft takes it up, the
+  alternative being a status of its own such as `NO LIT BODY`, for the owner. Under `AUTO`
+  `onMetering` receives the smoothed, applied EV100, so R02's `auto.ev100` is the applied value
+  and `meteredEv100` the metered one; a system inhibit resumes and smooths in the same step; the
+  operator's `setAuto` and `enable` take `meteredEv100` and set the exposure there at once,
+  unsmoothed (R02's commands as built). `setMeter` changes the reading's meter at once, and
+  histograms under its weights arrive one to three frames later. `MeterControl` takes the
+  operator's `meter` as its own prop, so the chosen meter shows (`METER LIT`, the button
+  underlined, as the time control's step is) while nothing is metered; held-back buttons are
+  described by `NO IMAGE TO METER`; the panel is titled `Exposure meter`, its buttons grouped
+  under the legend `SELECT`. **Left to T7**: mount `MeterControl` beside `ExposurePanel`,
+  subscribed to the view's `AutoExposure` through `useSyncExternalStore` and throttled to about
+  4 Hz at 0.1 EV, not passed down from `ViewDisplay`'s state; make the `AutoExposure` with R06's
+  `DEFAULT_VIEW_CAMERA`; pass `exposure.meter` and the stride into each `HistogramRequest`; and
+  set the next frame's pre-exposure from `reading().ev100`. **For T16's draft and the owner**:
+  the words `SOURCE`, `SELECT` and the panel title, beside `METER AVG`, `METER LIT` and `METER
+DARK`; the source shows the raw view id upper-cased until T7 names views as the label block
+  does.
+- **Deviations in T14.b, as built** (2026-10-02). `post/bloomDown.wgsl` and `post/bloomUp.wgsl`
+  are materials (`BLOOM_DOWN_MATERIAL` `GLARE DOWNSAMPLE`, `BLOOM_UP_MATERIAL` `GLARE UPSAMPLE`,
+  in `post/bloomChain.ts`) drawn on a full-screen triangle (`fullScreenTriangle`) into one
+  `rgba16float` target per level, not post-processes: a post-process's input is its own frame's
+  draws, and a chain level reads another target. Every tap is a bilinear sample of four
+  `textureLoad`s, clamped, so that the first pass thresholds per texel before filtering (the
+  threshold is not linear) and the passes match `bloomDown` and `bloomUpTent` sample for sample.
+  `BloomChain` (`create`, `run(hdrColour, thresholdPreExposed)`, `resize`, `setKernel`,
+  `levelOne`, `levelOneWeight`, `dispose`) takes the HDR colour as an argument (decision
+  2026-10-02, item 1) and times every pass under `BLOOM_PASS` (`"bloom"`, several submissions a
+  frame). The coarsest level is not rewritten at its weight: the first up pass weights it
+  (`coarseWeight`), and the CPU twin `bloomChain` was changed to match. `rgba16float` throughout,
+  since R01's probe reads `toward-zero` for `rg11b10ufloat` on both GPUs. The last step and the
+  glare sources live in `post/glare.wgsl`, a library the tone-mapping pass concatenates
+  (`bloom_excess`, `bloom_tent`, `glare_pixel_direction`, `glare_angle` by atan2 of cross and dot,
+  since acos loses small angles in `f32`, `glare_veil`); the sources are a storage buffer
+  (`packGlareSources(sources, preExposure, terms)`, 48 bytes each: direction in the scene's
+  camera-relative frame, which the pass turns by `frame.viewRotation`, radius, excess in the
+  target's units, solid angle, and each narrow term's inside level), the spread function five
+  `vec4f` uniforms (`packGlareTerms`). `glare.ts` gains `GlareSpreadTerms`,
+  `glareSpreadTerms(role, eye)` and `evaluateSpread`, one term form both twins evaluate (the
+  narrow `(1 + (θ/c)²)^−1.5` terms, Lorentz, root, quadratic, constant, Gaussian), and
+  `glareSourceSolidAngleSr` is written 4π sin²(ρ ÷ 2), which keeps a star's digits. **The
+  near-limb veil** (orchestrator's rulings, 2026-10-02: the half-plane max was withdrawn, its
+  energy being unbounded): each narrow term is integrated exactly over an equal-area rectangle
+  facing the pixel, x ∈ [θ − ρ, θ + ρ], |y| ≤ πρ ÷ 4 (`poissonOverRectangle`, the solid angle of
+  a rectangle from height c, Mathar 2005), in a cancellation-free form (science check: the plain
+  difference of two atans lost every `f32` digit far from small sources, up to 4,500× wrong);
+  inside the disc each such term takes the level that keeps the source's energy
+  (`rectangleInsideLevel`), where the clamped disc is white through AgX anyway; the broad terms
+  stay point-form. Against a brute-force quadrature over the disc, the Sun at 1 au at 1080p across
+  60°: +7% to +13% from a quarter of a pixel to 8 px beyond the limb, 0.2% at 64 px, the point
+  form alone 0.19–0.54 there; the veil integrates to L_ex Ω within 0.2% (the step at the limb).
+  Limits recorded: the broad terms as a point fall to −18% near the limb of a 10° source and −29%
+  at 19.5°; a camera view, with no narrow term, is the point form, 0.75 of the truth at the Sun's
+  limb (a Lorentz rectangle would fix both; for the owner with the camera PSF); and a body in
+  front of the disc (a transit) receives the inside level on its pixels. Smoke checks
+  (`smoke/bloom.ts`, 512 × 512, a clamped disc of 10 px): the device's chain equals its CPU twin
+  to 0.5%, stored plus injected energy equals the unclamped to 1.5%, and the WGSL veil equals its
+  twin to 1% at five pixels beyond the limb; a vitest emulates the WGSL rectangle in `f32`. **The
+  bench is pending** (under 1 ms, and 2–3 ms with tone mapping): T17's harness, on a quiet
+  machine under `--hyperion-gpu-timing`, the RTX 3080 at 1080p and the owner's UHD 620 at 720p.
+- **Deviations in T15, as built** (2026-10-02). `post/tonemap.wgsl` and `post/tonemap.ts`
+  (`TONEMAP_MATERIAL` `IMAGE`, `tonemapDraw`, the twin `tonemapTexel`, `srgbEncode`, `tpdf`) and
+  `post/blueNoise.ts` (`blueNoiseTile`, 64 × 64 by Ulichney's void-and-cluster from a fixed hash,
+  uploaded as `r16float`). The pass is a material on the full-screen triangle drawn onto the
+  canvas: it samples the HDR colour bilinearly at the canvas's resolution (the upscale), adds
+  w₀ excess(L) and the tent of `BloomChain.levelOne`, each glare source's veil, multiplies by the
+  exposure over the pre-exposure, applies `agxSprite` (AgX less its floor, as the wireframe's
+  sprites write it, so an isolated star on black is identical in both styles before the dither:
+  Design note 9 allowed the floor to stay, and taking it off makes the identity exact), encodes
+  by the sRGB curve and adds the TPDF dither, `tpdf` of a blue-noise threshold read at three
+  offsets for the three channels, ±1 LSB, static. **Engine extension** (decision 2026-10-02, item
+  6; R01's Risks carry the pointer): `FrameSubmission.encoding?: "srgb-view" | "in-pass"` (a
+  view writes through its canvas's own format under `in-pass`), `FrameSubmission.colourLoad?:
+"clear" | "load"` (a frame without post-processes keeps the colour and depth an earlier
+  submission drew, for T16's symbology), and `RenderTargetFormat` `"canvas-in-pass"` for
+  `createMaterialAsync`; defaults unchanged, every earlier smoke check unchanged (`view.ts`,
+  `drawing.ts`, `engine.ts`, `types.ts`, appended). Smoke checks (`smoke/tonemap.ts`): the pass
+  in WGSL equals `tonemapTexel` within one code at 512 pinned texels (a 20-stop grey ramp and
+  three colours), the dither moves no texel by more than one code and is unbiased over a flat
+  field, a half-resolution flat field upscales evenly, and a following `load` pass keeps the
+  image. **The encoding near black, settled** (orchestrator, 2026-10-02): Filament's `pow(v,
+2.2)` stays in R02's `agx`, both styles, R02 untouched. Against Blender's AgX Base sRGB on the
+  grey diagonal (its `AgX_Base_sRGB.cube`, GPL, read once and not committed; sixteen derived
+  codes are pinned in `tonemap.test.ts` with attribution), the pass is within 6 codes from −3 stops up and up to 16 in the toe, worst at −5 stops (7 against 23; 14 at −6, 13 at −4), shadow tones of a lit body as well as near black. Writing the sigmoid's output directly
+  as the encoded value halved the toe's gap (8 codes) but was rejected: its near-linear toe made
+  a faint star's displayed total vary with its sub-pixel position from 0.83 to 1.37 of the
+  centred star's (R02's constancy test, bounds 0.90–1.05), stars that would twinkle as the camera
+  moves. **Finding for R12's look audit**: the toe's gap is the seventh-order polynomial's; an
+  analytic AgX sigmoid or a LUT of our own could close it, provided star totals stay constant
+  across sub-pixel positions. By hand, pending for the owner (needs T7's photorealistic view): a
+  Sun-like star in frame with a lit planet, hues holding in the highlight. The bench is T17's.
+- **T14.b and T15 after review, as built** (2026-10-02). The tone-mapping pass's uniforms are typed
+  (`TonemapUniforms`, `tonemapUniforms`); `rectangleInsideLevel` keeps its outer integral as c⁴
+  times a function of ρ ÷ c at 0.05% steps, so a source whose radius changes every frame costs a
+  lookup and the store stays bounded; `packGlareSources` packs −1 as the level of a term a source
+  is a point for, so both twins take the same branch; `packGlareTerms` refuses more than one
+  Lorentz or root term; the dither leaves black at code 0 (dithering 0 scattered code-1 texels
+  over empty space, an eighth of them); the engine's choices are pure functions with tests
+  (`canvasPassFormat`, `sceneLoadOp`, `pipelineOutputs`). The bloom smoke check also compares the
+  encircled energy about the disc, device against twin, to 1% at six radii; its 1.5% energy check
+  adds the injected veil in closed form (L_ex Ω), the device's veil being checked against its twin
+  at five pixels. Every bloom submission is timed under `"bloom"`, several a frame: R12 sums them.
+  The CPU twin of the last step holds where the pass draws at the internal resolution; upscaled,
+  the pass tents U₁ to the canvas's pixels and thresholds the interpolated colour. `just
+test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with origin at
+  `7cb5d33`): every R07.T12, T14.b and T15 check passed but the T15 twin check, which failed on the
+  harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, to be re-run with the
+  owner's integrated `just ci` and `just test-render`.
+- **Deviations in T4.c, as built.**
+  - **`LunarLambert`'s last field is `table_row`, not `template`:** `template` is a reserved word in
+    WGSL. It is the row of `phase_factor_table` that holds the law's f, one row per tabulated law
+    (template, L and s), so a caller building laws per texel (R10) points each at a row it made.
+    A row's f is fixed when it is tabulated with its law's L and s; a law built per texel with
+    another A or L changes only the disc term, so R10 builds a row per (template, L, s) it needs,
+    or accepts f from a neighbouring L. `brdfFromTable(law, table, …)` is the reference for that
+    case (`brdf` reads the law's own table). R10's Consumes and R10.T10.b still name the field
+    `template`; they read `table_row` (passed to the orchestrator for R10's owner).
+  - **The table** is an `rgba32float` 2D texture, 361 texels per row (0° to 180° every 0.5°, f in
+    r, g, b, alpha 0), read by two `textureLoad`s and interpolated in the shader, as
+    `phaseFactorFromTable` does: `rgba32float` filters only with `float32-filterable`, and
+    `rgba16float` would err by about 10⁻³. `litBody.wgsl` declares no binding; its includer
+    declares `phase_factor_table : texture_2d<f32>`.
+  - **The probe.** A library of functions is no material, so `WGSL_CATALOGUE` holds it inside a
+    compute kernel, `LIT_BODY_PROBE` (`appearance/litBodyProbe.ts`, `readback: "bit-exact"`), that
+    calls `body_brdf` at pinned cases; `smoke/litBody.ts` compares its results with `brdf` to 10⁻⁵
+    relative at five geometries (four laws, off-sample phases, Venus's clamped crescent, and one
+    law built per texel from a synthetic A_N = 0.23 and L(α) = 1 − α ÷ 2π).
+  - **`just test-render`.** The first run (2026-10-03) refused the shader on `template`. After the
+    rename, review found the per-texel case's reference re-tabulating f with the per-texel L while
+    the kernel reads the borrowed row; `expectedBrdf` now reads the borrowed row (fixed with
+    T6.c). `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-03, with T6.c's
+    working tree over e641995): all five `body_brdf` checks pass, worst 1.3 × 10⁻⁷ relative; T6.c's
+    horizon factors within 9 × 10⁻⁵, eclipse terms within 2.3 × 10⁻⁵, and the stubs exact.
+- **Deviations in T6.a, as built.**
+  - **`sphereIrradianceFactor(h, phiRad, horizonRad = 0)`** returns H² F, Howell's view factor
+    over that of the sphere face-on, so it is cos φ wherever the whole disc is up; `howellViewFactor`
+    is exported beside it. A local horizon η > 0 is taken as a plane tilted by η towards the star:
+    the disc is cut at φ + η in Howell's form and the light through it weighed by the element's own
+    normal (a tangential term with the disc's directions taken as one, an error of order ρ² sin η);
+    a horizon below the tangent plane counts as 0. R10.T8.b replaces it with its horizon map.
+  - **The oracle** (`lighting/oracle.ts`): `sphereIrradianceBruteForce`, Gauss–Legendre in the
+    angle from the disc's centre and midpoint in azimuth, over any `LimbProfile`
+    (`UNIFORM_DISC`); it meets the uniform closed form to 10⁻⁵. Its horizon is a cone of
+    elevation η all round, which agrees with the tilted-plane model where the disc sits in the
+    star's azimuth, the only case tested.
+  - **Figures.** H = 3, 11.5 and 215 agree with brute force to 2 × 10⁻³; the terminator is
+    59.3 km wide at 1 au on 6,371 km; E ÷ E_zenith at the geometric terminator is 9.87 × 10⁻⁴
+    (uniform) and 9.27 × 10⁻⁴ (the brainstorm's polynomial law); a planet at 3 stellar radii is lit
+    to 109.5°; a 5° horizon hides a star 4° up. **The limb-darkening error at 19.5°** is 0.469% of
+    the face-on value at φ = 90° with the brainstorm's polynomial (Design note 6's 0.45% is a
+    linear law's, u = 0.6), and 0.607%, 0.474% and 0.390% with the Sun's B, V and R power-2 laws
+    (Maxted 2018, Table 2); the tests bound them at 0.48%, 0.62%, 0.49% and 0.40%
+    (decision-r07-dn6, 2026-10-03). The error falls about as 1 ÷ H (Sun V: 1.28% at H = 1.5,
+    0.13% at H = 10). The terminator's 2 ÷ (3π H) of face-on is the H ≫ 1 limit, 3.5% low at H = 3.
+- **Deviations in T6.b, as built (decision-r07-dn6, 2026-10-03).**
+  - **`annulusEdges(c, alpha, k)`** returns an `AnnulusSet`: the K + 1 edges by equal concentric
+    error ("equal dip", the minimax flux-exact partition: a level bisected so that every annulus's
+    worst concentric error is equal, each edge the furthest at that level, per star and channel on
+    the CPU in `f64`), each annulus's exact share of the power-2 flux, and the level `dip`, the
+    predicted worst error; `annulusVisibleFraction(annuli, ratio, separation)`
+    is the eclipse term in stellar radii, and `eclipseVisible(disc, from, occluders, k)` takes a
+    `LimbDarkenedDisc` (centre, radius and one channel's c and α), not `HostDiscDto`, which
+    carries no position. The annulus construction is the one function a scheme change touches.
+  - **The error bounds**, against the exact integral oracle `eclipseIntegralVisibleFraction`
+    ((1 − c) A(1) + c ∫₀¹ A(√(1 − t^(2/α))) dt, which the 400-annulus `denseAnnulusVisibleFraction`
+    meets to 10⁻⁵) over 41 ratios log-spaced over 0.1–30 by 41 separations over 0 to 1 + ratio:
+    the Sun's B, V and R (Maxted 2018, Table 2: 0.846/0.830, 0.771/0.707, 0.712/0.625) at most
+    0.73%, 0.58% and 0.48% at K = 4 and 2.8%, 2.2% and 1.85% at K = 2; c 0.71, α 0.6 (the R band,
+    not V as first labelled) 0.47% and 1.78%; c 0.5, α 0.5 0.28% and 1.05%. The equal dip predicts
+    the grid's worst to 3 × 10⁻⁴. The edges replace the first build's uniform-in-μ ones (0.73% and
+    2.6% for c 0.71, α 0.6). The WGSL `eclipse_visible(star_radius, annuli: DiscAnnuli,
+occluder_radius, separation)` takes the CPU's edges and fluxes (`DiscAnnuli { outer, flux,
+count }`, at most four), not c and α.
+  - **Still short of Design note 6 (for the owner).** K = 4 meets 0.62% for the Sun in V and R,
+    not B (0.70%); the worst in Maxted's grid is the B channel of a 4,500 K dwarf, 0.87% at K = 4 and
+    3.4% at K = 2. No flux-exact scheme reaches 1.5% at K = 2 for solar laws; freeing each
+    annulus's flux (the total exact) with optimised intensities reaches 1.49% (V), 1.24% (R) and
+    1.88% (B) at K = 2, but needs per-star numerical optimisation. **K = 3 with equal dip gives
+    0.8–1.2% for the Sun: `DISC_ANNULI_LOW` is raised to 3 by the orchestrator's ruling under
+    the owner's delegation (2026-10-03)**, for one more overlap term per lit texel while an
+    eclipse is on; tested at the Sun's B 1.30%, V 1.02% and R 0.85% (about 5% over the measured
+    1.23, 0.97 and 0.81%), K = 2 kept as the scheme's own check. The term treats the disc as flat in angle, an error of order ρ² ÷ 12, about 1% at
+    ρ = 19.5° (estimated, not measured), for close-in hosts.
+  - **Exports and assumptions.** `eclipseVisible` adds the fractions each occluder hides, which
+    assumes the occluders do not overlap one another, as holds for the shadow cones `occludersFor`
+    keeps; it measures the separation by atan2 of the cross and dot products.
+    `annulusVisibleFraction`, `AnnulusSet`, `LimbDarkenedDisc` and the oracles
+    `eclipseIntegralVisibleFraction`, `denseAnnulusVisibleFraction` and `power2Profile` are
+    exports beyond Provides.
+- **Deviations in T6.c, as built.**
+  - **`occludersFor(body, stars, bodies)`** takes `LightingBody` and `LightingSphere` (centre and
+    radius, m), not `SceneFrameBody` and `HostDiscDto`: neither carries both, the frame having no
+    radius and the disc no position. `lightingBodyOf(frame, radiusM)` makes a lighting body of a
+    `placed` entry at its geometric centre, and returns `null` for a `contact`, which never
+    occludes and is never eclipsed (decisions-r06-r07, item 4), or for a body of unknown radius.
+    `umbraRadius` and `penumbraRadius` are exported for the tests: Earth's umbra 4,600 km and
+    penumbra 8,175 km across at the Moon's distance; the Moon's umbra ends short of Earth.
+  - **The WGSL** (`litBody.wgsl`): `sphere_irradiance(h, phi, horizon)` and `howell_view_factor`;
+    `eclipse_visible(star_radius, annuli: DiscAnnuli, occluder_radius, separation)` for one
+    occluder in angular terms (the CPU builds the list, the angles and the annuli, T6.b); `circle_overlap_area`;
+    and the stubs `ring_shadow_on_body(p, sun) -> vec3f` (1), `atmosphere_sun_transmittance(
+altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
+    `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (0), with R08.T9.b's
+    and R11's full signatures. The lit point's lighting, which calls them, is T8.a's.
+  - **The probe.** `LIT_BODY_PROBE` gains a second case array, `LightingCase` (kind, annuli, six
+    values and the annuli's edges and fluxes, 64 bytes), so one kernel holds the whole library (an `auto` layout binds only what the entry
+    point uses, and the engine binds every declared binding). The smoke harness checks five
+    horizon factors and five eclipse terms against their TypeScript twins to 2 × 10⁻⁴ absolute
+    (WGSL's `f32` `acos` and `atan` are allowed some 10⁻⁴), and the stubs' 1, 1 and 0 exactly.
+- **Deviations in T3, as built.**
+  - **`starIlluminance(disc, distanceM)`** returns E_c = π L̄_c sin²ρ in display order (r, g, b)
+    from `HostDiscDto`'s B, V, R; inside the star sin ρ is held at 1. R06 builds the channels as
+    the photopic mean times the star's linear Rec. 709 colour at unit luminance, so the "V-weighted
+    sum" is the channels' Rec. 709 luminance, `photopicIlluminance`, with R06's own row
+    (`CHANNEL_LUMINANCE`, `star_colour.rs`'s `LUMINANCE_RGB`, which differs from Filament's row in
+    `starColour.ts` in the fourth decimal). `shiningStars(illuminances)` applies
+    `STAR_CUT_RELATIVE` to photopic illuminance and returns the kept indices.
+  - **`aHostDisc(overrides)`** (`test/litFixtures.ts`) builds a disc as R06's `host_discs` does,
+    from an absolute V (the Sun's 4.81, Willmer 2018) with `lux_per_v0` 1, the Sun's V-band limb
+    law in every channel (c 0.7837, α 0.6893, Claret and Southworth 2022 as R06 pins it) and an
+    illustrative warm white of unit luminance. The Sun at 1 au gives 1.287 × 10⁵ lx (the
+    brainstorm's 1.28 to 0.6%), and the disc form agrees with the magnitude form. The light-time
+    direction error is v ÷ c for the Sun's reflex speed about the Sun–Jupiter barycentre,
+    4.16 × 10⁻⁸ rad.
+- **Deviations in T2.a, as built.**
+  - **A thirteenth template, `lambert`** (approved by the coordinator, 2026-10-03): Φ_t is Lambert's
+    closed form to 179° (f held at 1 beyond, where Φ_L reaches 0), L = 0, provisional and labelled.
+    `PROVISIONAL_PHOTOMETRY` is `lawFor(0.2, 1.5, "lambert")`, an exact Lambert sphere (s = 1,
+    q = 1.5); no body class maps to the key.
+  - **`appearanceFromWire(body, rotation)`** (`appearance/fromWire.ts`) returns the photometry,
+    the figure and the labels: every body takes `PROVISIONAL_PHOTOMETRY` with
+    `BODY ALBEDO: NOT YET MODELLED`, and a sphere of `bulk.radius_m` whose pole is the body-fixed z
+    axis through `bodyFixedRotation` (`null` today); a body without a granted radius has no figure
+    and stays R02's mark. `BodyPhotometry`, `AppearanceLabel` and the `BodyFigure` re-export live
+    there. A `contact` frame entry has no summary here; it never occludes and is never eclipsed
+    (`lightingBodyOf`, T6.c; decisions-r06-r07, item 4).
+- **Deviations in T5, as built.**
+  - **Inputs.** `litRegimes(bodies, camera, viewport, previous)` and `painterOrder(bodies, regimes,
+hosts)` take `LitSphere`s (identifier, centre from the camera in `f64`, equatorial radius) and
+    `HostSphere`s (star index, centre, radius) instead of `SceneFrameBody` and `HostDiscDto`, which
+    carry no radius and no position respectively; `camera` is R02's `ProjectionCamera`. Sizes use
+    R02's `angularDiameterPx` (the centre pixel's tan-based scale). A body new to the view starts as
+    a point; a `mesh` keeps the disc side of the hysteresis.
+  - **Promotion** is its own function, `promoteOverlapping(regimes, footprints, depthWriters)`,
+    over screen circles (`ScreenCircle`): a disc overlapping a mesh body or other depth-writing
+    geometry is promoted, and promotion spreads through chains of overlaps until nothing changes.
+    Its callers (T8.a, T9) supply the footprints.
+  - **The painter's ties** keep bodies before hosts and then identifiers' order, so the sequence
+    does not depend on input order. The truth for the 10⁴ random disjoint pairs is each shared ray's
+    first analytic hit (no marching is needed for spheres): no disagreement over some 5 × 10⁴ rays.
+  - **The brainstorm's figures** scale by width ÷ field (1,833 px/rad at 1080p across 60°): a
+    Jupiter of 3 px to 8.7 × 10¹⁰ m and ten scale heights over 2 px to 2.5 × 10⁸ m (Jupiter, 27 km)
+    and 5.5 × 10⁸ m (Saturn, 59.5 km), each reproduced to 2%. R02's projection uses the centre
+    pixel's 1,663 px/rad, which brings each distance in by 9.3% (Jupiter's disc to 7.9 × 10¹⁰ m);
+    `GAS_GIANT_FULL_PASS_BOUNDARY_M` keeps 10⁹ m, above both.
+  - **`BodyAppearance`** lives in `appearance/bodyAppearance.ts` with `bodyAppearance(body, wire,
+regime)` (`null` for a body without a figure, which stays R02's mark) and `discSurfaceOf`;
+    `DiscSurface` has its `uniform` case only, T8.b adding `class-map`. `aLitBody` is in
+    `test/litFixtures.ts`. No template is mapped to a body class here: the photometry is T2.a's
+    provisional law until plan 14's section (T2.b).
+  - **`painterOrder` takes no camera**: centres are already relative to it in `f64`.
+    `spherePower` and `litSphereOf(id, centreM, figure)` (the equatorial bounding sphere, which
+    callers, R08's included, use to build each `LitSphere`) are exported beside it; ties rank
+    bodies before hosts, then identifier or star index numerically.
+  - **Hysteresis** is applied to the 3 px threshold only (up at 3.3 px, down at 2.7 px);
+    `GAS_GIANT_FULL_PASS_BOUNDARY_M` is a constant whose hysteresis R08's caller applies, and the
+    tests hold it above both giants' derived distances at both scales. `litRegimes` never returns
+    `mesh`: a mesh comes from `promoteOverlapping` or, later, R10's hand-over. Footprints are
+    bounding circles, so promotion may over-promote an oblate body but never under-promote it.
+  - **Tests.** The pairs test fixes the camera at the origin and places the spheres at random
+    (only relative geometry matters), each a disc, a point or a host at random; the oblate test
+    places a moon whose power lies between Saturn's equatorial and mean spheres'; the
+    order-independence test starts from an empty `previous` map. The acceptance also runs
+    `src/renderer/src/view/appearance/bodyAppearance`, outside the `view/bodies` filter. **For the
+    owner**: the brainstorm's 9 × 10¹⁰, 2.5 × 10⁸ and 5.5 × 10⁸ m are at width ÷ field; at R02's
+    centre-pixel scale they are 9.3% nearer (the 10⁹ m boundary holds either way).

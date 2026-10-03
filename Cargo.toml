@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# `tools/gpu-replay` has its own workspace (wgpu stays out of `just ci`, R05 Design note 20).
+exclude = ["tools/*"]
 
 [workspace.package]
 version = "0.1.0"

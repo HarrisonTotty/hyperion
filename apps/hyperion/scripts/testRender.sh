@@ -5,6 +5,9 @@
 # failed or a request went out, 2 a setup error (no adapter), 3 the watchdog.
 #
 #   testRender.sh [--variant=NAME]... [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches]
+#                 [--captures=DIR]
+#
+# --captures=DIR also renders R05.T12.c's atmosphere comparison frames and saves them in DIR as PNGs.
 #
 # --drop-adapter-switches removes only `--enable-unsafe-webgpu` and `--use-webgpu-adapter`, keeping
 # the headless Ozone, ANGLE and Vulkan switches, so that Electron starts and finds no adapter.
@@ -22,11 +25,13 @@ headless_switches=(--ozone-platform=headless --use-angle=swiftshader --enable-fe
 
 variants=()
 fixture=none
+captures=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
+        --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
         *) echo "testRender.sh: unknown argument $arg" >&2; exit 2 ;;
     esac
 done
@@ -53,7 +58,7 @@ for variant in "${variants[@]}"; do
     status=0
     env -u DISPLAY -u WAYLAND_DISPLAY setsid timeout --kill-after=10 300 "$electron" \
         "${adapter_switches[@]}" "${headless_switches[@]}" "--user-data-dir=$profile" \
-        "$here/out/main/smoke.js" --smoke-variant="$variant" --smoke-fixture="$fixture" &
+        "$here/out/main/smoke.js" --smoke-variant="$variant" --smoke-fixture="$fixture" "${captures[@]}" &
     group=$!
     wait "$group" || status=$?
     kill -KILL -- "-$group" 2>/dev/null || true

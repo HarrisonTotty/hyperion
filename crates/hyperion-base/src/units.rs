@@ -132,6 +132,12 @@ pub mod consts {
     /// that a host of L solar luminosities gives exactly L ÷ d² of it at d au.
     pub const SOLAR_CONSTANT_W_PER_M2: f64 =
         SOLAR_LUMINOSITY_W / (4.0 * core::f64::consts::PI * METRES_PER_AU * METRES_PER_AU);
+
+    /// The Sun's absolute magnitude in Johnson V, M<sub>V</sub>☉ = 4.81 on the Vega system (Willmer
+    /// 2018, ApJS 236, 47, table 3), the zero point of
+    /// [`SolarLuminositiesV`](super::SolarLuminositiesV): a star of absolute magnitude
+    /// M<sub>V</sub> emits 10^(−0.4 (M<sub>V</sub> − 4.81)) L☉,V.
+    pub const SOLAR_ABSOLUTE_MAGNITUDE_V: f64 = 4.81;
 }
 
 /// Defines a unit newtype over `f64`.
@@ -511,9 +517,44 @@ unit!(
     PerCm2
 );
 unit!(
-    /// An extinction or a colour excess in magnitudes, 2.5 log₁₀ of the ratio of two fluxes.
+    /// A magnitude, 2.5 log₁₀ of the ratio of two fluxes: an extinction or a colour excess, or an
+    /// absolute or apparent magnitude, whose reference flux is its band's zero point.
     Magnitudes
 );
+unit!(
+    /// An illuminance in lux, lumens per square metre: the photopic flux of a star at the eye. A
+    /// star of V = 0 gives 2.54 µlx (Cox 2000, _Allen's Astrophysical Quantities_, §15; Crumey
+    /// 2014, MNRAS 442, 2600, §1.2).
+    Lux
+);
+unit!(
+    /// A luminance in candelas per square metre, the photopic surface brightness of a background or
+    /// a disc. A surface brightness μ<sub>V</sub> in mag arcsec⁻² is 12.58 − 2.5 log₁₀ of this
+    /// (Crumey 2014, MNRAS 442, 2600, §1.2), so 2 × 10⁻⁴ cd m⁻² is μ<sub>V</sub> 21.83.
+    CandelasPerSquareMetre
+);
+unit!(
+    /// A surface brightness in V magnitudes per square arcsecond, μ<sub>V</sub>, the unit the night
+    /// sky's brightness is quoted in: larger is darker.
+    MagnitudesPerArcsec2
+);
+unit!(
+    /// A light in the Johnson V band in solar V luminosities, L☉,V: a star of absolute magnitude
+    /// M<sub>V</sub> emits 10^(−0.4 (M<sub>V</sub> − [`consts::SOLAR_ABSOLUTE_MAGNITUDE_V`])) of
+    /// them, so the Sun emits one. The unit of the sky's luminosity functions (rendering plan R06,
+    /// Design note 7).
+    SolarLuminositiesV
+);
+
+impl SolarLuminositiesV {
+    /// The V light of a star of absolute magnitude `absolute_v`.
+    #[must_use]
+    pub fn from_absolute_v(absolute_v: Magnitudes) -> Self {
+        Self(crate::math::exp10(
+            -0.4 * (absolute_v.value() - consts::SOLAR_ABSOLUTE_MAGNITUDE_V),
+        ))
+    }
+}
 unit!(
     /// A wavelength in micrometres, the unit the interstellar extinction law is written in
     /// (Cardelli, Clayton and Mathis 1989, whose argument is 1 ÷ λ in µm⁻¹).
@@ -746,6 +787,25 @@ mod tests {
         let sigma = 2.0 * crate::math::powi(pi, 5) * crate::math::powi(BOLTZMANN_CONSTANT, 4)
             / (15.0 * crate::math::powi(h, 3) * SPEED_OF_LIGHT * SPEED_OF_LIGHT);
         assert_relative(STEFAN_BOLTZMANN, sigma, 1e-9);
+    }
+
+    /// The Sun, at M<sub>V</sub>☉ = 4.81, emits one solar V luminosity, and five magnitudes are a
+    /// factor of a hundred.
+    #[test]
+    fn solar_v_luminosities_follow_the_absolute_magnitude() {
+        assert_same_bits(
+            SolarLuminositiesV::from_absolute_v(Magnitudes::new(SOLAR_ABSOLUTE_MAGNITUDE_V))
+                .value(),
+            1.0,
+        );
+        assert_relative(
+            SolarLuminositiesV::from_absolute_v(Magnitudes::new(-0.19)).value(),
+            100.0,
+            1e-14,
+        );
+        assert_same_bits(Lux::new(2.54e-6).value(), 2.54e-6);
+        assert_same_bits(CandelasPerSquareMetre::ZERO.value(), 0.0);
+        assert_same_bits(MagnitudesPerArcsec2::new(21.83).value(), 21.83);
     }
 
     #[test]

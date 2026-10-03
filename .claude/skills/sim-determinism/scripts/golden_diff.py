@@ -40,6 +40,20 @@ VERSION_FILES = ("crates/hyperion-base/src/version.rs", "crates/hyperion-sim/src
 # Plain pathspecs match `*` literally at directory boundaries; `:(glob)` makes it one level.
 GOLDEN_SPEC = ":(glob)crates/*/tests/golden/**"
 GOLDEN_PATH_RE = re.compile(r"^crates/[^/]+/tests/golden/.+\.golden$")
+# The surface crate's goldens pin the provisional test planet, which belongs to no universe, and
+# carry TEST_PLANET_VERSION in their header instead (rendering plan R05, Design note 13). When R09's
+# real height function writes GENERATOR_VERSION goldens there, they go under a path this prefix
+# does not match.
+TEST_PLANET_PREFIX = "crates/hyperion-surface/tests/golden/"
+TEST_PLANET_FILE = "crates/hyperion-surface/src/lib.rs"
+TEST_PLANET_RE = re.compile(r"pub const TEST_PLANET_VERSION: u32 = (\d+);")
+
+
+def test_planet_version_in(text: str | None) -> int | None:
+    if text is None:
+        return None
+    m = TEST_PLANET_RE.search(text)
+    return int(m.group(1)) if m else None
 
 
 def run(root: Path, *args: str) -> tuple[int, str]:
@@ -157,6 +171,10 @@ def main() -> int:
     old_version = first_version(lambda path: at_ref(root, args.base, path))
     new_version = first_version(read_head)
     print(f"GENERATOR_VERSION: {old_version} at {args.base} -> {new_version} in {head_name}")
+    old_planet = test_planet_version_in(at_ref(root, args.base, TEST_PLANET_FILE))
+    new_planet = test_planet_version_in(read_head(TEST_PLANET_FILE))
+    if old_planet is not None or new_planet is not None:
+        print(f"TEST_PLANET_VERSION: {old_planet} at {args.base} -> {new_planet} in {head_name}")
 
     entries: list[tuple[str, str]] = []
     if args.head:
@@ -212,12 +230,16 @@ def main() -> int:
             added.remove(targets[0])
 
     stale_header = []
-    if new_version is not None:
-        for path in sorted(every_golden):
-            text = read_head(path)
-            header = split_header(text)[0] if text is not None else None
-            if header != new_version:
-                stale_header.append((path, header))
+    for path in sorted(every_golden):
+        expected = new_planet if path.startswith(TEST_PLANET_PREFIX) else new_version
+        if expected is None:
+            continue
+        text = read_head(path)
+        header = split_header(text)[0] if text is not None else None
+        if header != expected:
+            stale_header.append((path, header))
+    planet_moved = [e for e in moved if e[0].startswith(TEST_PLANET_PREFIX)]
+    moved_universe = [e for e in moved if not e[0].startswith(TEST_PLANET_PREFIX)]
 
     if not (header_only or moved or extended or added or deleted or renamed):
         print("No golden files changed.")
@@ -253,12 +275,17 @@ def main() -> int:
                         "compare by hand.")
     if rise < 0:
         problems.append(f"GENERATOR_VERSION went down by {-rise}. A version number is never reused.")
-    if moved and readable and rise == 0:
+    if moved_universe and readable and rise == 0:
         problems.append("Pinned values changed but GENERATOR_VERSION was not bumped: bump it and run `just bless`,\n"
                         "    or, if the change was not meant to move output, find what moved it.")
     if stale_header:
         shown = "\n".join(f"      {path}: header {v}" for path, v in stale_header)
-        problems.append(f"Goldens whose header is not GENERATOR_VERSION {new_version} (run `just bless`):\n{shown}")
+        problems.append(f"Goldens whose header is not GENERATOR_VERSION {new_version}, or TEST_PLANET_VERSION "
+                        f"{new_planet} under {TEST_PLANET_PREFIX} (run `just bless`):\n{shown}")
+    if planet_moved and old_planet is not None and new_planet is not None and new_planet <= old_planet:
+        problems.append("Test-planet goldens moved but TEST_PLANET_VERSION was not bumped: bump it in "
+                        f"{TEST_PLANET_FILE} and run `just bless`,\n"
+                        "    or, if the change was not meant to move them, find what moved them.")
     if rise > 1:
         checks.append(f"GENERATOR_VERSION rose by {rise}. That is right only if the range spans {rise} tasks that\n"
                       "    each moved output; one task bumps once.")

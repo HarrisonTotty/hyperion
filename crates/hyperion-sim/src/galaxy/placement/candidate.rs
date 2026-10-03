@@ -144,7 +144,7 @@ fn catalogue_claims(_galaxy: &Galaxy, _record: &SystemRecord) -> bool {
 ///
 /// If `index` is at or above the layer's index capacity, which names no candidate.
 #[must_use]
-fn candidate_id(key: CellKey, index: u32) -> SystemId {
+pub(super) fn candidate_id(key: CellKey, index: u32) -> SystemId {
     key.candidate_id(index).unwrap_or_else(|| {
         panic!(
             "index {index} is past layer {}'s capacity of {}",

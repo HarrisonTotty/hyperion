@@ -146,6 +146,8 @@ export class ResilientEngine implements RenderEngine {
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   #inner: RenderEngine | null = null;
+  /** The engine that made each buffer and texture, so that a release reaches it or is dropped. */
+  readonly #makers = new WeakMap<BufferHandle | TextureHandle, RenderEngine>();
   #capabilities: GpuCapabilities;
   #unsubscribe: Array<() => void> = [];
   #disposed = false;
@@ -226,15 +228,56 @@ export class ResilientEngine implements RenderEngine {
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
-    return this.#current("createBuffer").createBuffer(spec);
+    return this.#made(this.#current("createBuffer").createBuffer(spec));
   }
 
   createTexture(spec: TextureSpec): TextureHandle {
-    return this.#current("createTexture").createTexture(spec);
+    return this.#made(this.#current("createTexture").createTexture(spec));
   }
 
-  createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle {
-    return this.#current("createPackedCube").createPackedCube(sizePx, mips, category);
+  createPackedCube(
+    sizePx: number,
+    mips: number,
+    category: MemoryCategory,
+    name?: string,
+  ): TextureHandle {
+    return this.#made(
+      this.#current("createPackedCube").createPackedCube(sizePx, mips, category, name),
+    );
+  }
+
+  /**
+   * Releases a buffer the current engine made; the release of one a lost engine made is dropped,
+   * since it died with its device, as a write to it is.
+   *
+   * @throws Error for a handle no engine of this one made, or one already released.
+   */
+  releaseBuffer(buffer: BufferHandle): void {
+    if (this.#releasedFromMaker("buffer", buffer)) {
+      this.#inner?.releaseBuffer(buffer);
+    }
+  }
+
+  /**
+   * Releases a texture, as {@link ResilientEngine.releaseBuffer} does a buffer.
+   *
+   * @throws Error as {@link ResilientEngine.releaseBuffer} does; a render target's colour or depth
+   *   is the target's and is never released here.
+   */
+  releaseTexture(texture: TextureHandle): void {
+    if (this.#releasedFromMaker("texture", texture)) {
+      this.#inner?.releaseTexture(texture);
+    }
+  }
+
+  /** Forgets a handle's maker and says whether it is the current engine, which then releases it. */
+  #releasedFromMaker(kind: string, handle: BufferHandle | TextureHandle): boolean {
+    const maker = this.#makers.get(handle);
+    if (maker === undefined) {
+      throw new Error(`${kind} ${handle.name} was not made through this engine, or was released`);
+    }
+    this.#makers.delete(handle);
+    return maker === this.#inner;
   }
 
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
@@ -251,6 +294,12 @@ export class ResilientEngine implements RenderEngine {
 
   createPointSplat(spec: PointSplatSpec): PointSplatHandle {
     return this.#current("createPointSplat").createPointSplat(spec);
+  }
+
+  createPointSplatAsync(spec: PointSplatSpec): Promise<PointSplatHandle> {
+    return this.#currentAsync("createPointSplatAsync", (inner) =>
+      inner.createPointSplatAsync(spec),
+    );
   }
 
   dispatch(
@@ -279,8 +328,15 @@ export class ResilientEngine implements RenderEngine {
     return this.#currentAsync("readBuffer", (inner) => inner.readBuffer(buffer, access));
   }
 
-  readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer> {
-    return this.#currentAsync("readTexture", (inner) => inner.readTexture(texture, level, rect));
+  readTexture(
+    texture: TextureHandle,
+    level?: number,
+    rect?: TexelRect,
+    access?: "cpu" | "tolerance",
+  ): Promise<ArrayBuffer> {
+    return this.#currentAsync("readTexture", (inner) =>
+      inner.readTexture(texture, level, rect, access),
+    );
   }
 
   onPassTimes(listener: (times: PassTimes) => void): () => void {
@@ -329,6 +385,14 @@ export class ResilientEngine implements RenderEngine {
       throw new EngineUnavailable(member);
     }
     return this.#inner;
+  }
+
+  /** Notes the current engine as a handle's maker, so that its release is forwarded. */
+  #made<T extends BufferHandle | TextureHandle>(handle: T): T {
+    if (this.#inner !== null) {
+      this.#makers.set(handle, this.#inner);
+    }
+    return handle;
   }
 
   #currentAsync<T>(member: string, call: (inner: RenderEngine) => Promise<T>): Promise<T> {

@@ -1,0 +1,23 @@
+# The colour table of the sky (rendering plan R06, R06.T3.a, Design note 6): every model spectrum of
+# the grids integrated against the CIE functions and Bessell and Murphy's V. The parameters are
+# constants of `src/tasks/star_colour/mod.rs`, recorded here so that the inputs hash covers them;
+# the task refuses a manifest that disagrees with its code.
+task = "star_colour"
+datasets = [
+    "atlas9_ck04",
+    "bessell_murphy_2012",
+    "cie_cmf",
+    "green2008_si",
+    "phoenix_husser2013",
+    "pickles1998",
+    "tlusty_ostar2002",
+    "tmap",
+    "wd_koester_da",
+]
+
+[params]
+spectra = "models"
+v_band = "bessell_murphy_2012"
+bins_nm = [360, 1100]
+normal_log_g = [0.0, 6.0]
+white_dwarf_log_g = [6.5, 9.5]

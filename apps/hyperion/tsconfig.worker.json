@@ -3,12 +3,20 @@
   "compilerOptions": {
     "composite": true,
     "tsBuildInfoFile": "node_modules/.cache/tsc/worker.tsbuildinfo",
-    "lib": ["es2023", "webworker"],
+    "lib": ["es2023", "es2025.float16", "webworker"],
     "types": ["vite/client"]
   },
   "include": [
     "src/renderer/src/**/*.worker.ts",
     "src/renderer/src/wasm/handleRequest.ts",
+    "src/renderer/src/view/terrain/workers/heightBake.ts",
+    "src/renderer/src/view/terrain/workers/messages.ts",
+    "src/renderer/src/view/terrain/patchKey.ts",
+    "src/renderer/src/view/terrain/planet.ts",
+    "src/renderer/src/view/terrain/cube.ts",
+    "src/renderer/src/view/quality/terrainKinds.ts",
+    "src/renderer/src/geometry/vec3.ts",
+    "src/renderer/src/view/sky/decodePayload.ts",
     "src/renderer/src/generated/surface/*.d.ts"
   ]
 }

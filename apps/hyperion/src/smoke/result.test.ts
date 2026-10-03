@@ -4,6 +4,7 @@ import {
   isOfflineUrl,
   isUncapturedGpuError,
   judgeSmokeRun,
+  readSmokeImages,
   readSmokeResult,
   SMOKE_EXIT,
   type SmokeResult,
@@ -80,5 +81,36 @@ describe("the offline rule", () => {
     expect(isOfflineUrl("data:text/plain,x")).toBe(true);
     expect(isOfflineUrl("https://example.invalid/")).toBe(false);
     expect(isOfflineUrl("devtools://devtools")).toBe(false);
+  });
+});
+
+describe("readSmokeImages", () => {
+  /** A 2 × 1 image's eight bytes, base64. */
+  const TWO_PIXELS = Buffer.from([1, 2, 3, 255, 4, 5, 6, 255]).toString("base64");
+  const image = { name: "hillaire-orbit", width: 2, height: 1, rgba: TWO_PIXELS };
+
+  it("reads well-formed images", () => {
+    expect(readSmokeImages({ images: [image] })).toEqual({ images: [image], rejected: 0 });
+  });
+
+  it("reads none from a report without images", () => {
+    expect(readSmokeImages({ variant: "default" })).toEqual({ images: [], rejected: 0 });
+  });
+
+  it("rejects a name that could leave the captures' directory", () => {
+    expect(readSmokeImages({ images: [{ ...image, name: "../escape" }] }).rejected).toBe(1);
+  });
+
+  it("rejects bytes that do not fill width × height × 4", () => {
+    expect(readSmokeImages({ images: [{ ...image, width: 3 }] }).rejected).toBe(1);
+    expect(
+      readSmokeImages({ images: [{ ...image, width: 0, height: 0, rgba: "" }] }).rejected,
+    ).toBe(1);
+  });
+
+  it("keeps the good images beside a bad one and counts the bad", () => {
+    const { images, rejected } = readSmokeImages({ images: [image, { ...image, rgba: "!!" }] });
+    expect(images).toEqual([image]);
+    expect(rejected).toBe(1);
   });
 });
