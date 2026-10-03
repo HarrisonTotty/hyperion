@@ -13,7 +13,7 @@ import type { Quaternion } from "../camera/pose";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { rotate } from "../camera/quaternion";
 import type { ViewSize } from "../engine/types";
-import { boxCorners, type CameraRelativeBounds } from "./bounds";
+import type { CameraRelativeBounds } from "./bounds";
 import { type BodyFixedVec3, lowestHeightM, type PlanetGeometry } from "./planet";
 
 /** A plane `dot(normal, p) + offsetM ≥ 0` on its inner side, p from the camera, metres. */
@@ -117,11 +117,21 @@ export function aboveHorizon(b: CameraRelativeBounds, h: HorizonCone): boolean {
   if (!(horizonSq > 0)) {
     return true;
   }
-  for (const corner of boxCorners(b.box)) {
-    // The corner from the camera, scaled; the difference was formed once, in f64, unscaled.
-    const vt = vec3(corner.x / r, corner.y / r, corner.z / r);
-    const vtDotVc = -dot(vt, c);
-    const occluded = vtDotVc > horizonSq && (vtDotVc * vtDotVc) / dot(vt, vt) > horizonSq;
+  // The box's corners from the camera, formed once in f64 and scaled, one at a time with no
+  // allocation: most visible patches pass on the first.
+  const { centre, axes, halfExtentsM } = b.box;
+  const [a0, a1, a2] = axes;
+  const [e0, e1, e2] = halfExtentsM;
+  for (let corner = 0; corner < 8; corner += 1) {
+    const s0 = (corner & 1) === 0 ? -e0 : e0;
+    const s1 = (corner & 2) === 0 ? -e1 : e1;
+    const s2 = (corner & 4) === 0 ? -e2 : e2;
+    const x = (centre.x + a0.x * s0 + a1.x * s1 + a2.x * s2) / r;
+    const y = (centre.y + a0.y * s0 + a1.y * s1 + a2.y * s2) / r;
+    const z = (centre.z + a0.z * s0 + a1.z * s1 + a2.z * s2) / r;
+    const vtDotVc = -(x * c.x + y * c.y + z * c.z);
+    const occluded =
+      vtDotVc > horizonSq && (vtDotVc * vtDotVc) / (x * x + y * y + z * z) > horizonSq;
     if (!occluded) {
       return true;
     }
