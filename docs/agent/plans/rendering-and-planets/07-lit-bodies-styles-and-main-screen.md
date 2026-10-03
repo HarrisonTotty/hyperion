@@ -143,11 +143,11 @@ export const STAR_CUT_RELATIVE = 1e-4; // Design note 4; R08 applies the same co
 /** Irradiance factor from a uniform sphere of H = d ÷ R at angle φ to the normal (Howell),
  *  above a local horizon of elevation `horizonRad` (0 on the smooth figure; R10's on terrain). */
 export function sphereIrradianceFactor(h: number, phiRad: number, horizonRad?: number): number;
-export const DISC_ANNULI_HIGH = 4; // limb-darkened annuli, edges uniform in μ
-export const DISC_ANNULI_LOW = 2;
-/** Edges of K annuli uniform in μ for one channel's power-2 law I(μ)/I(1) = 1 − c(1 − μ^α),
- *  from `HostDiscDto`'s per-channel coefficients. */
-export function annulusEdges(c: number, alpha: number, k: number): Float64Array;
+export const DISC_ANNULI_HIGH = 4; // limb-darkened annuli, edges by equal concentric error
+export const DISC_ANNULI_LOW = 3; // the orchestrator's ruling, 2026-10-03 (was 2)
+/** Edges of K flux-exact annuli by equal concentric error for one channel's power-2 law
+ *  I(μ)/I(1) = 1 − c(1 − μ^α), from `HostDiscDto`'s per-channel coefficients. */
+export function annulusEdges(c: number, alpha: number, k: number): AnnulusSet; // as built
 export function circleOverlapArea(r: number, k: number, z: number): number; // exact
 export function eclipseVisible(
   disc: HostDiscDto,
@@ -704,18 +704,23 @@ and `--port`.
    albedo 0.3 (p = 0.2, q = 1.5, brighter at large phase than any real body), and the label block
    says `BODY ALBEDO: NOT YET MODELLED` (a phrase for the owner, R07.T16).
 6. **The horizon in closed form, eclipses by annuli** (researched 2026-09-29; Howell's catalogue of
-   radiation view factors, configurations B-41 and B-42,
+   radiation view factors, configuration B-43 (Cunningham 1961; Hauptmann 1968),
    <https://www.thermalradiation.net/tablecon.html>, formula transcribed from memory and verified by
    brute force to 2 × 10⁻³; Kreidberg 2015, PASP 127, 1161). The brainstorm's "sampled at a handful
    of points" is 13–26% wrong for small occluders at 4 to 8 samples and bands by 1 ÷ N, and needs
    about 256 samples for 1%. Instead a lit point's visibility is the product of two closed forms.
    The horizon term is the irradiance factor from a uniform sphere of H = d ÷ R★ at angle φ between
-   the normal and the star's centre, which is exact for a uniform disc and within 0.45% of the
-   limb-darkened one for a star 19.5° in radius; it softens the terminator and lights a close-in
+   the normal and the star's centre, which is exact for a uniform disc and within 0.47% of the
+   limb-darkened one for a star 19.5° in radius (polynomial law; 0.61% in B for the Sun's power-2
+   law); it softens the terminator and lights a close-in
    planet beyond its hemisphere (to 109.5° at 3 stellar radii). The eclipse term splits the disc
-   into K annuli of uniform intensity with edges uniform in μ, and takes each annulus's eclipsed
-   area as the difference of two exact circle–circle overlaps: continuous, so it never bands; 0.62%
-   worst absolute error at K = 4 (high) and 1.5% at K = 2 (low). The product errs only where an
+   into K annuli of uniform intensity, each with its exact flux and edges by equal concentric
+   error, and takes each annulus's eclipsed area as the difference of two exact circle–circle
+   overlaps: continuous, so it never bands; for the Sun 0.56% (V), 0.70% (B) worst absolute error
+   at K = 4 (high) and 0.97% (V), 1.23% (B) at K = 3 (low; 2.1% and 2.7% at K = 2, before the
+   orchestrator's ruling of 2026-10-03 raised the low setting to 3) (decision-r07-dn6, 2026-10-03; the law
+   I(μ)/I(1) = 1 − c(1 − μ^α) after Hestroffer 1997, A&A 327, 199, eq. 4, its coefficients from
+   Maxted 2018, A&A 616, A39, Table 2). The product errs only where an
    eclipse's penumbra crosses the terminator band. Occluder lists are built on the CPU in `f64` from
    shadow cones and are usually empty. At 1 au the soft terminator is 59.3 km wide on an Earth-sized
    body and lies below 0.5% of peak irradiance, black under a day-side exposure. Mandel and Agol
@@ -1129,14 +1134,18 @@ body is ordered on its equatorial sphere; a disc overlapping a mesh body is prom
 
 - **R07.T6.a The horizon.** `lighting/{sphereIrradiance,oracle}.ts` (Design note 6), with the local
   horizon argument. Tests: Howell's factor against brute force to 2 × 10⁻³ at H = 3, 11.5 and 215,
-  and its limb-darkening error at most 0.45% at 19.5°; the terminator 59.3 km wide on an airless
+  and its limb-darkening error at most 0.48% at 19.5° for the polynomial law and 0.62%, 0.49% and
+  0.40% for the Sun's B, V and R power-2 laws (decision-r07-dn6); the terminator 59.3 km wide on an airless
   body of 6,371 km at 1 au, and E ÷ E_zenith at the geometric terminator 9.87 × 10⁻⁴ for a uniform
   disc and 9.27 × 10⁻⁴ for the brainstorm's polynomial law; a planet at 3 stellar radii lit to
   109.5°; a local horizon of 5° removes the light of a star 4° up. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/lighting`.
 - **R07.T6.b Annuli and overlaps.** `lighting/annuli.ts`: `annulusEdges`, `circleOverlapArea`,
-  `eclipseVisible`. Tests: the eclipse term's worst absolute error at most 0.62% at K = 4 and 1.5%
-  at K = 2 over a grid of radius ratios 0.1–30 and 41 separations, against 400 annuli; a concentric
+  `eclipseVisible`. Tests: the eclipse term's worst absolute error, over a grid of radius ratios
+  0.1–30 and 41 separations against the exact integral oracle, at most 0.73%, 0.58% and 0.48% for
+  the Sun's B, V and R at K = 4, 1.30%, 1.02% and 0.85% at K = 3 (the low setting, the
+  orchestrator's ruling) and 2.8%, 2.2% and 1.85% at K = 2 (decision-r07-dn6); the equal
+  dip predicting the grid's worst to 3 × 10⁻⁴; a concentric
   occultation against the closed form [(1 − c) μ_k² + 2c μ_k^(α+2) ÷ (α + 2)] ÷ [(1 − c) + 2c ÷ (α +
   2)], μ_k = √(1 − k²); a total eclipse exactly 0. Acceptance: `pnpm --filter hyperion exec vitest
 run src/renderer/src/view/lighting`.
@@ -1903,3 +1912,171 @@ test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with
   `7cb5d33`): every R07.T12, T14.b and T15 check passed but the T15 twin check, which failed on the
   harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, to be re-run with the
   owner's integrated `just ci` and `just test-render`.
+- **Deviations in T4.c, as built.**
+  - **`LunarLambert`'s last field is `table_row`, not `template`:** `template` is a reserved word in
+    WGSL. It is the row of `phase_factor_table` that holds the law's f, one row per tabulated law
+    (template, L and s), so a caller building laws per texel (R10) points each at a row it made.
+    A row's f is fixed when it is tabulated with its law's L and s; a law built per texel with
+    another A or L changes only the disc term, so R10 builds a row per (template, L, s) it needs,
+    or accepts f from a neighbouring L. `brdfFromTable(law, table, …)` is the reference for that
+    case (`brdf` reads the law's own table). R10's Consumes and R10.T10.b still name the field
+    `template`; they read `table_row` (passed to the orchestrator for R10's owner).
+  - **The table** is an `rgba32float` 2D texture, 361 texels per row (0° to 180° every 0.5°, f in
+    r, g, b, alpha 0), read by two `textureLoad`s and interpolated in the shader, as
+    `phaseFactorFromTable` does: `rgba32float` filters only with `float32-filterable`, and
+    `rgba16float` would err by about 10⁻³. `litBody.wgsl` declares no binding; its includer
+    declares `phase_factor_table : texture_2d<f32>`.
+  - **The probe.** A library of functions is no material, so `WGSL_CATALOGUE` holds it inside a
+    compute kernel, `LIT_BODY_PROBE` (`appearance/litBodyProbe.ts`, `readback: "bit-exact"`), that
+    calls `body_brdf` at pinned cases; `smoke/litBody.ts` compares its results with `brdf` to 10⁻⁵
+    relative at five geometries (four laws, off-sample phases, Venus's clamped crescent, and one
+    law built per texel from a synthetic A_N = 0.23 and L(α) = 1 − α ÷ 2π).
+  - **`just test-render`.** The first run (2026-10-03) refused the shader on `template`. After the
+    rename, review found the per-texel case's reference re-tabulating f with the per-texel L while
+    the kernel reads the borrowed row; `expectedBrdf` now reads the borrowed row (fixed with
+    T6.c). `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-03, with T6.c's
+    working tree over e641995): all five `body_brdf` checks pass, worst 1.3 × 10⁻⁷ relative; T6.c's
+    horizon factors within 9 × 10⁻⁵, eclipse terms within 2.3 × 10⁻⁵, and the stubs exact.
+- **Deviations in T6.a, as built.**
+  - **`sphereIrradianceFactor(h, phiRad, horizonRad = 0)`** returns H² F, Howell's view factor
+    over that of the sphere face-on, so it is cos φ wherever the whole disc is up; `howellViewFactor`
+    is exported beside it. A local horizon η > 0 is taken as a plane tilted by η towards the star:
+    the disc is cut at φ + η in Howell's form and the light through it weighed by the element's own
+    normal (a tangential term with the disc's directions taken as one, an error of order ρ² sin η);
+    a horizon below the tangent plane counts as 0. R10.T8.b replaces it with its horizon map.
+  - **The oracle** (`lighting/oracle.ts`): `sphereIrradianceBruteForce`, Gauss–Legendre in the
+    angle from the disc's centre and midpoint in azimuth, over any `LimbProfile`
+    (`UNIFORM_DISC`); it meets the uniform closed form to 10⁻⁵. Its horizon is a cone of
+    elevation η all round, which agrees with the tilted-plane model where the disc sits in the
+    star's azimuth, the only case tested.
+  - **Figures.** H = 3, 11.5 and 215 agree with brute force to 2 × 10⁻³; the terminator is
+    59.3 km wide at 1 au on 6,371 km; E ÷ E_zenith at the geometric terminator is 9.87 × 10⁻⁴
+    (uniform) and 9.27 × 10⁻⁴ (the brainstorm's polynomial law); a planet at 3 stellar radii is lit
+    to 109.5°; a 5° horizon hides a star 4° up. **The limb-darkening error at 19.5°** is 0.469% of
+    the face-on value at φ = 90° with the brainstorm's polynomial (Design note 6's 0.45% is a
+    linear law's, u = 0.6), and 0.607%, 0.474% and 0.390% with the Sun's B, V and R power-2 laws
+    (Maxted 2018, Table 2); the tests bound them at 0.48%, 0.62%, 0.49% and 0.40%
+    (decision-r07-dn6, 2026-10-03). The error falls about as 1 ÷ H (Sun V: 1.28% at H = 1.5,
+    0.13% at H = 10). The terminator's 2 ÷ (3π H) of face-on is the H ≫ 1 limit, 3.5% low at H = 3.
+- **Deviations in T6.b, as built (decision-r07-dn6, 2026-10-03).**
+  - **`annulusEdges(c, alpha, k)`** returns an `AnnulusSet`: the K + 1 edges by equal concentric
+    error ("equal dip", the minimax flux-exact partition: a level bisected so that every annulus's
+    worst concentric error is equal, each edge the furthest at that level, per star and channel on
+    the CPU in `f64`), each annulus's exact share of the power-2 flux, and the level `dip`, the
+    predicted worst error; `annulusVisibleFraction(annuli, ratio, separation)`
+    is the eclipse term in stellar radii, and `eclipseVisible(disc, from, occluders, k)` takes a
+    `LimbDarkenedDisc` (centre, radius and one channel's c and α), not `HostDiscDto`, which
+    carries no position. The annulus construction is the one function a scheme change touches.
+  - **The error bounds**, against the exact integral oracle `eclipseIntegralVisibleFraction`
+    ((1 − c) A(1) + c ∫₀¹ A(√(1 − t^(2/α))) dt, which the 400-annulus `denseAnnulusVisibleFraction`
+    meets to 10⁻⁵) over 41 ratios log-spaced over 0.1–30 by 41 separations over 0 to 1 + ratio:
+    the Sun's B, V and R (Maxted 2018, Table 2: 0.846/0.830, 0.771/0.707, 0.712/0.625) at most
+    0.73%, 0.58% and 0.48% at K = 4 and 2.8%, 2.2% and 1.85% at K = 2; c 0.71, α 0.6 (the R band,
+    not V as first labelled) 0.47% and 1.78%; c 0.5, α 0.5 0.28% and 1.05%. The equal dip predicts
+    the grid's worst to 3 × 10⁻⁴. The edges replace the first build's uniform-in-μ ones (0.73% and
+    2.6% for c 0.71, α 0.6). The WGSL `eclipse_visible(star_radius, annuli: DiscAnnuli,
+occluder_radius, separation)` takes the CPU's edges and fluxes (`DiscAnnuli { outer, flux,
+count }`, at most four), not c and α.
+  - **Still short of Design note 6 (for the owner).** K = 4 meets 0.62% for the Sun in V and R,
+    not B (0.70%); the worst in Maxted's grid is the B channel of a 4,500 K dwarf, 0.87% at K = 4 and
+    3.4% at K = 2. No flux-exact scheme reaches 1.5% at K = 2 for solar laws; freeing each
+    annulus's flux (the total exact) with optimised intensities reaches 1.49% (V), 1.24% (R) and
+    1.88% (B) at K = 2, but needs per-star numerical optimisation. **K = 3 with equal dip gives
+    0.8–1.2% for the Sun: `DISC_ANNULI_LOW` is raised to 3 by the orchestrator's ruling under
+    the owner's delegation (2026-10-03)**, for one more overlap term per lit texel while an
+    eclipse is on; tested at the Sun's B 1.30%, V 1.02% and R 0.85% (about 5% over the measured
+    1.23, 0.97 and 0.81%), K = 2 kept as the scheme's own check. The term treats the disc as flat in angle, an error of order ρ² ÷ 12, about 1% at
+    ρ = 19.5° (estimated, not measured), for close-in hosts.
+  - **Exports and assumptions.** `eclipseVisible` adds the fractions each occluder hides, which
+    assumes the occluders do not overlap one another, as holds for the shadow cones `occludersFor`
+    keeps; it measures the separation by atan2 of the cross and dot products.
+    `annulusVisibleFraction`, `AnnulusSet`, `LimbDarkenedDisc` and the oracles
+    `eclipseIntegralVisibleFraction`, `denseAnnulusVisibleFraction` and `power2Profile` are
+    exports beyond Provides.
+- **Deviations in T6.c, as built.**
+  - **`occludersFor(body, stars, bodies)`** takes `LightingBody` and `LightingSphere` (centre and
+    radius, m), not `SceneFrameBody` and `HostDiscDto`: neither carries both, the frame having no
+    radius and the disc no position. `lightingBodyOf(frame, radiusM)` makes a lighting body of a
+    `placed` entry at its geometric centre, and returns `null` for a `contact`, which never
+    occludes and is never eclipsed (decisions-r06-r07, item 4), or for a body of unknown radius.
+    `umbraRadius` and `penumbraRadius` are exported for the tests: Earth's umbra 4,600 km and
+    penumbra 8,175 km across at the Moon's distance; the Moon's umbra ends short of Earth.
+  - **The WGSL** (`litBody.wgsl`): `sphere_irradiance(h, phi, horizon)` and `howell_view_factor`;
+    `eclipse_visible(star_radius, annuli: DiscAnnuli, occluder_radius, separation)` for one
+    occluder in angular terms (the CPU builds the list, the angles and the annuli, T6.b); `circle_overlap_area`;
+    and the stubs `ring_shadow_on_body(p, sun) -> vec3f` (1), `atmosphere_sun_transmittance(
+altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
+    `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (0), with R08.T9.b's
+    and R11's full signatures. The lit point's lighting, which calls them, is T8.a's.
+  - **The probe.** `LIT_BODY_PROBE` gains a second case array, `LightingCase` (kind, annuli, six
+    values and the annuli's edges and fluxes, 64 bytes), so one kernel holds the whole library (an `auto` layout binds only what the entry
+    point uses, and the engine binds every declared binding). The smoke harness checks five
+    horizon factors and five eclipse terms against their TypeScript twins to 2 × 10⁻⁴ absolute
+    (WGSL's `f32` `acos` and `atan` are allowed some 10⁻⁴), and the stubs' 1, 1 and 0 exactly.
+- **Deviations in T3, as built.**
+  - **`starIlluminance(disc, distanceM)`** returns E_c = π L̄_c sin²ρ in display order (r, g, b)
+    from `HostDiscDto`'s B, V, R; inside the star sin ρ is held at 1. R06 builds the channels as
+    the photopic mean times the star's linear Rec. 709 colour at unit luminance, so the "V-weighted
+    sum" is the channels' Rec. 709 luminance, `photopicIlluminance`, with R06's own row
+    (`CHANNEL_LUMINANCE`, `star_colour.rs`'s `LUMINANCE_RGB`, which differs from Filament's row in
+    `starColour.ts` in the fourth decimal). `shiningStars(illuminances)` applies
+    `STAR_CUT_RELATIVE` to photopic illuminance and returns the kept indices.
+  - **`aHostDisc(overrides)`** (`test/litFixtures.ts`) builds a disc as R06's `host_discs` does,
+    from an absolute V (the Sun's 4.81, Willmer 2018) with `lux_per_v0` 1, the Sun's V-band limb
+    law in every channel (c 0.7837, α 0.6893, Claret and Southworth 2022 as R06 pins it) and an
+    illustrative warm white of unit luminance. The Sun at 1 au gives 1.287 × 10⁵ lx (the
+    brainstorm's 1.28 to 0.6%), and the disc form agrees with the magnitude form. The light-time
+    direction error is v ÷ c for the Sun's reflex speed about the Sun–Jupiter barycentre,
+    4.16 × 10⁻⁸ rad.
+- **Deviations in T2.a, as built.**
+  - **A thirteenth template, `lambert`** (approved by the coordinator, 2026-10-03): Φ_t is Lambert's
+    closed form to 179° (f held at 1 beyond, where Φ_L reaches 0), L = 0, provisional and labelled.
+    `PROVISIONAL_PHOTOMETRY` is `lawFor(0.2, 1.5, "lambert")`, an exact Lambert sphere (s = 1,
+    q = 1.5); no body class maps to the key.
+  - **`appearanceFromWire(body, rotation)`** (`appearance/fromWire.ts`) returns the photometry,
+    the figure and the labels: every body takes `PROVISIONAL_PHOTOMETRY` with
+    `BODY ALBEDO: NOT YET MODELLED`, and a sphere of `bulk.radius_m` whose pole is the body-fixed z
+    axis through `bodyFixedRotation` (`null` today); a body without a granted radius has no figure
+    and stays R02's mark. `BodyPhotometry`, `AppearanceLabel` and the `BodyFigure` re-export live
+    there. A `contact` frame entry has no summary here; it never occludes and is never eclipsed
+    (`lightingBodyOf`, T6.c; decisions-r06-r07, item 4).
+- **Deviations in T5, as built.**
+  - **Inputs.** `litRegimes(bodies, camera, viewport, previous)` and `painterOrder(bodies, regimes,
+hosts)` take `LitSphere`s (identifier, centre from the camera in `f64`, equatorial radius) and
+    `HostSphere`s (star index, centre, radius) instead of `SceneFrameBody` and `HostDiscDto`, which
+    carry no radius and no position respectively; `camera` is R02's `ProjectionCamera`. Sizes use
+    R02's `angularDiameterPx` (the centre pixel's tan-based scale). A body new to the view starts as
+    a point; a `mesh` keeps the disc side of the hysteresis.
+  - **Promotion** is its own function, `promoteOverlapping(regimes, footprints, depthWriters)`,
+    over screen circles (`ScreenCircle`): a disc overlapping a mesh body or other depth-writing
+    geometry is promoted, and promotion spreads through chains of overlaps until nothing changes.
+    Its callers (T8.a, T9) supply the footprints.
+  - **The painter's ties** keep bodies before hosts and then identifiers' order, so the sequence
+    does not depend on input order. The truth for the 10⁴ random disjoint pairs is each shared ray's
+    first analytic hit (no marching is needed for spheres): no disagreement over some 5 × 10⁴ rays.
+  - **The brainstorm's figures** scale by width ÷ field (1,833 px/rad at 1080p across 60°): a
+    Jupiter of 3 px to 8.7 × 10¹⁰ m and ten scale heights over 2 px to 2.5 × 10⁸ m (Jupiter, 27 km)
+    and 5.5 × 10⁸ m (Saturn, 59.5 km), each reproduced to 2%. R02's projection uses the centre
+    pixel's 1,663 px/rad, which brings each distance in by 9.3% (Jupiter's disc to 7.9 × 10¹⁰ m);
+    `GAS_GIANT_FULL_PASS_BOUNDARY_M` keeps 10⁹ m, above both.
+  - **`BodyAppearance`** lives in `appearance/bodyAppearance.ts` with `bodyAppearance(body, wire,
+regime)` (`null` for a body without a figure, which stays R02's mark) and `discSurfaceOf`;
+    `DiscSurface` has its `uniform` case only, T8.b adding `class-map`. `aLitBody` is in
+    `test/litFixtures.ts`. No template is mapped to a body class here: the photometry is T2.a's
+    provisional law until plan 14's section (T2.b).
+  - **`painterOrder` takes no camera**: centres are already relative to it in `f64`.
+    `spherePower` and `litSphereOf(id, centreM, figure)` (the equatorial bounding sphere, which
+    callers, R08's included, use to build each `LitSphere`) are exported beside it; ties rank
+    bodies before hosts, then identifier or star index numerically.
+  - **Hysteresis** is applied to the 3 px threshold only (up at 3.3 px, down at 2.7 px);
+    `GAS_GIANT_FULL_PASS_BOUNDARY_M` is a constant whose hysteresis R08's caller applies, and the
+    tests hold it above both giants' derived distances at both scales. `litRegimes` never returns
+    `mesh`: a mesh comes from `promoteOverlapping` or, later, R10's hand-over. Footprints are
+    bounding circles, so promotion may over-promote an oblate body but never under-promote it.
+  - **Tests.** The pairs test fixes the camera at the origin and places the spheres at random
+    (only relative geometry matters), each a disc, a point or a host at random; the oblate test
+    places a moon whose power lies between Saturn's equatorial and mean spheres'; the
+    order-independence test starts from an empty `previous` map. The acceptance also runs
+    `src/renderer/src/view/appearance/bodyAppearance`, outside the `view/bodies` filter. **For the
+    owner**: the brainstorm's 9 × 10¹⁰, 2.5 × 10⁸ and 5.5 × 10⁸ m are at width ÷ field; at R02's
+    centre-pixel scale they are 9.3% nearer (the 10⁹ m boundary holds either way).

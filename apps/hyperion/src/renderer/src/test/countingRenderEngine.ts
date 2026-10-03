@@ -146,6 +146,11 @@ export class CountingRenderEngine implements RenderEngine {
   readonly targetFrames: FrameSubmission[] = [];
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #restoredListeners = new Set<() => void>();
+  /** What each buffer and texture was made with, so that a release raises its bytes (R06.T13.h). */
+  readonly #made = new Map<
+    BufferHandle | TextureHandle,
+    { bytes: number; category: MemoryCategory }
+  >();
   #capabilities: GpuCapabilities;
 
   constructor(device: GPUDevice) {
@@ -267,7 +272,9 @@ export class CountingRenderEngine implements RenderEngine {
     }
     this.counts.buffers += 1;
     this.#emit({ kind: "created", name: spec.name, bytes: spec.bytes, category: spec.category });
-    return { kind: "buffer", name: spec.name, bytes: spec.bytes };
+    const handle: BufferHandle = { kind: "buffer", name: spec.name, bytes: spec.bytes };
+    this.#made.set(handle, { bytes: spec.bytes, category: spec.category });
+    return handle;
   }
 
   createTexture(spec: TextureSpec): TextureHandle {
@@ -283,13 +290,11 @@ export class CountingRenderEngine implements RenderEngine {
     }
     this.counts.textures += 1;
     this.textureSpecs.push(spec);
-    this.#emit({
-      kind: "created",
-      name: spec.name,
-      bytes: textureBytes(spec),
-      category: spec.category,
-    });
-    return { kind: "texture", name: spec.name };
+    const bytes = textureBytes(spec);
+    this.#emit({ kind: "created", name: spec.name, bytes, category: spec.category });
+    const handle: TextureHandle = { kind: "texture", name: spec.name };
+    this.#made.set(handle, { bytes, category: spec.category });
+    return handle;
   }
 
   createPackedCube(): TextureHandle {
@@ -306,6 +311,29 @@ export class CountingRenderEngine implements RenderEngine {
 
   createPointSplat(): PointSplatHandle {
     throw notFaked("createPointSplat");
+  }
+
+  createPointSplatAsync(): Promise<PointSplatHandle> {
+    return Promise.reject(notFaked("createPointSplatAsync"));
+  }
+
+  /** Raises the buffer's `destroyed` event, as the engine does (R06.T13.h). */
+  releaseBuffer(buffer: BufferHandle): void {
+    this.#release(buffer);
+  }
+
+  /** Raises the texture's `destroyed` event, as the engine does (R06.T13.h). */
+  releaseTexture(texture: TextureHandle): void {
+    this.#release(texture);
+  }
+
+  #release(handle: BufferHandle | TextureHandle): void {
+    const made = this.#made.get(handle);
+    if (made === undefined) {
+      throw new Error(`${handle.name} was not made by this engine, or was released`);
+    }
+    this.#made.delete(handle);
+    this.#emit({ kind: "destroyed", name: handle.name, ...made });
   }
 
   dispatch(

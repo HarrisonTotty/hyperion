@@ -2417,6 +2417,13 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   table and the ridged bake's skirt depth changed, so `TEST_PLANET_VERSION` is 2 (every surface
   golden re-blessed; `EXPECTED_TEST_PLANET_VERSION` in `heightBake.ts` and `cube.test.ts`
   follow); `GENERATOR_VERSION` is unchanged.
+- **The drawn surface's height exported** (2026-10-03, for the spike). The wasm module's
+  `surfaceHeightM(x, y, z, ridges): number` is T4.c's `finest_surface_height` over the test
+  planet at a body-fixed direction (not necessarily unit), so the client never ports the
+  interpolant; it throws for a zero or non-finite direction. A new golden,
+  `tests/golden/collision.golden` (27 directions, ridges off and on, a face-edge vertex, an
+  interior vertex and a cube corner among them), pins it natively, and `heightWasm.test.ts`
+  checks the export against it bit for bit. New values only: no `TEST_PLANET_VERSION` bump.
 - **σ_n exported** (2026-10-03, for T13.a). `TestPlanet::omitted_sigma_m(level)` and the wasm
   module's `omittedSigmaM(level, ridges)` give σ_n, the RMS of the octaves level n omits: the
   octaves' variances summed in index order, a ridged octave counting at its mask's RMS
@@ -3022,9 +3029,13 @@ medium, sizes, figure)`.
     (`InstanceRecords.pushXyz`, `ContactRecords.pushXyz`, added) into buffers made once, and
     returns one draw item made with the material. The counting engine checks that no buffer,
     texture, mesh, material or target is made after warm-up, and a test checks that the
-    `DrawSet` is reused at rest. `resolveDrawSet` and `retain` (T8) still allocate when selection
-    runs, which is steady state during a descent, since a landed bake re-runs it. **Pending lane
-    B:** their allocation-free rewrite (the orchestrator, 2026-10-03).
+    `DrawSet` is reused at rest. Since lane B's perf (a) (2026-10-03), the pass keeps one
+    `DrawSetResolver` per cache (made with the cache, remade after a device loss) and calls
+    `resolve(selection)` when selection runs: the same `DrawSet` rewritten in place, its first
+    `count` patches and slots drawn in selection order. An unseen forced patch
+    (`SelectedPatch.seen` false) is requested and pinned by `retain` but not drawn; a test puts a
+    contact on the far side of the planet and checks that none of its region is drawn while it is
+    requested. Selection itself still allocates (lane B's perf (b)).
   - _The lit view_ (`view/spike/litView.ts`, `litAgx.wgsl`).
     - `LitView` makes the spike's own `<view>:spike-hdr` `rgba16float` target with depth
       (`render-targets`), at the render size `renderSizeOf(size, renderHeightPx)`: 720p at the
@@ -3326,3 +3337,36 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   remaining per-node costs are the neighbour keys (8 objects a probe), `childKeys`' and the
   children's arrays a split, and `patchBounds` for new nodes, which the ruling's item 4d also
   names. A quiet-machine run is pending (Design note 27). Recorded, not asserted.
+- **Selection's stability in motion, as built (2026-10-03, after R05.T13.a's probe).** Lane D's
+  fixed-step probe (low fast pass, 300 m/s at 300 m, budget 981, 1,962 slots) saw about 830 new
+  keys a frame and demand of 53,000 a second against D = 311. Reproduced in `motion.test.ts`'s
+  harness: with a cache that keeps only the selected patches (as the probe's simulated cache
+  does), about 650 of 980 patches change every frame. The cause: an unbaked patch's bounds take
+  its level's whole ±24.5 km height range, so it looks far worse than its baked neighbours; the
+  greedy budget is spent refining under those loose bounds, the refined patches tighten once
+  baked, the budget moves to the next loose region, and the cache, keeping no ancestors, loses
+  the tight ranges that held the last cut. Three changes, every bound still a true one:
+  - _The streaming gate_ (`wantsRefining`): where `heightRanges` is given, a patch is split for
+    its error only if it is baked itself, so selection reaches at most one level below what is
+    baked and every split is decided on a baked range; it descends as bakes land, the
+    breadth-first demand already ordering them, and the unbaked frontier is drawn by its baked
+    parent (`TERRAIN: STREAMING`). Forced regions are not gated. Without `heightRanges` nothing
+    changes. The gate only stops a refinement: it never claims a smaller error than the bound.
+  - _Ancestors are kept_ (`PatchCache.retain`): every resident ancestor of a selected patch is
+    draw-pinned and touched, since selection's bounds read its range and it stands in for its
+    descendants; the walk runs before the draw set's touches, so a stand-in does not end it
+    early (`cache.test.ts` pins the ancestors above a stand-in).
+  - _Deepest first among equals_ (`PatchCache` eviction): among patches used as recently, the
+    deepest is evicted first; with ancestors first, the selection collapsed to the six roots
+    whenever the slots barely held it (`motion.test.ts`'s second test fails without it).
+    With the real cache, 8 bakes a frame and the budget, the flight changes about 7–10 patches a
+    frame (at most about 20) out of 980; `motion.test.ts` bounds the mean below 3% and any frame
+    below 10%, and holds the selection above 90% of the budget at 1,100 slots. Hysteresis was not
+    needed. The fixed-step run's simulated cache must keep the selection's ancestors as
+    `PatchCache.retain` does (or use `PatchCache` and `DrawSetResolver` themselves), or the gate
+    collapses it. Lane C's `terrainPass.test.ts` was adapted: the draw set's slots read through
+    `count` (perf a), and two tests stream their demand in before asserting, since selection now
+    starts at the roots; with the fake pool's flat bakes the 1.5 km pose fits its budget, so the
+    budget test checks the budget holds and that `DETAIL LIMITED` follows `limited`
+    (`select.test.ts` covers a binding budget). Selection in the flight, warm, under vitest at load
+    46: about 15 ms p50 and 28 ms p95 (provisional).

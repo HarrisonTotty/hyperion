@@ -77,9 +77,9 @@ describe("PHASE_TEMPLATES", () => {
     expect(dimmingMag(id, 90)).toBe(dimmingMag("moon", 90));
   });
 
-  it("flags exactly the three stand-in templates as provisional", () => {
+  it("flags the three stand-ins and the Lambert sphere as provisional", () => {
     const provisional = IDS.filter((id) => PHASE_TEMPLATES[id].provisional).toSorted();
-    expect(provisional).toEqual(["airless-ice", "magma", "snowball"]);
+    expect(provisional).toEqual(["airless-ice", "lambert", "magma", "snowball"]);
     for (const id of provisional) {
       expect(PHASE_TEMPLATES[id].source).toMatch(/^PROVISIONAL/u);
     }

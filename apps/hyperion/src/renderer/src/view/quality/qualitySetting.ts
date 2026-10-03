@@ -15,6 +15,7 @@
  */
 
 import { TABLE_SIZES, type TableSizes } from "../atmosphere/hillaire";
+import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
 import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
 /** The view's quality setting: `high` on the recommended specification, `low` on the UHD 620. */
@@ -61,6 +62,8 @@ export interface ViewSettings {
   readonly terrain: TerrainSettings;
   /** The atmosphere's table sizes and sample counts (R05.T12.c, Design note 16; R08 widens them). */
   readonly atmosphere: TableSizes;
+  /** The sky's cube, sprites, census size and re-bake cadence (R06.T13.f, Design note 22). */
+  readonly sky: SkySettings;
 }
 
 const MIB = 1024 * 1024;
@@ -94,6 +97,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       cacheBytes: HIGH_CACHE_BYTES,
     },
     atmosphere: TABLE_SIZES.high,
+    sky: HIGH_SKY,
   },
   low: {
     terrain: {
@@ -104,6 +108,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       cacheBytes: LOW_CACHE_BYTES,
     },
     atmosphere: TABLE_SIZES.low,
+    sky: LOW_SKY,
   },
 };
 

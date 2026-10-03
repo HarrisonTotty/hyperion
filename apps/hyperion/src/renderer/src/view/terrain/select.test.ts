@@ -491,6 +491,11 @@ function residentRanges(resident: readonly PatchKey[]): HeightRangeLookup {
   return { heightRangeM: (key) => baked.get(patchKeyString(key)) };
 }
 
+/** A lookup in which every patch down to `depth` is baked at ±100 m. */
+function bakedToDepth(depth: number): HeightRangeLookup {
+  return { heightRangeM: (key) => (key.level <= depth ? [-100, 100] : undefined) };
+}
+
 describe("demand", () => {
   it("asks only for patches whose parent is baked, roots apart", () => {
     const roots = FACES.map((f) => rootKey(f));
@@ -508,6 +513,20 @@ describe("demand", () => {
       const parent = parentKey(r.key);
       expect(parent === null || bakedStrings.has(patchKeyString(parent))).toBe(true);
       expect(bakedStrings.has(patchKeyString(r.key))).toBe(false);
+    }
+  });
+
+  it("selects no deeper than one level below what is baked, where ranges are given", () => {
+    for (const depth of [-1, 0, 3, 7]) {
+      const sel = selectPatches({
+        planet: PLANET,
+        views: [view(LOW, lookingDown(LOW, 1.2))],
+        setting: "high",
+        grounded: [],
+        heightRanges: bakedToDepth(depth),
+      });
+      const deepest = Math.max(...[...sel.patches.values()].map((p) => p.key.level));
+      expect(deepest).toBe(depth + 1);
     }
   });
 
