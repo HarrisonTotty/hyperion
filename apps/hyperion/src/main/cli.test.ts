@@ -226,6 +226,18 @@ describe("the descent spike's options", () => {
     expect(refusal(["--descent-spike", name, value]).exitCode).toBe(1);
   });
 
+  it("refuses baked offsets on the low setting, whose cache they do not fit", () => {
+    const error = refusal([
+      "--descent-spike",
+      "--setting",
+      "low",
+      "--vertex-path",
+      "baked-offsets",
+    ]);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("low setting");
+  });
+
   it.each([
     ["--setting", "low"],
     ["--seed", "7"],

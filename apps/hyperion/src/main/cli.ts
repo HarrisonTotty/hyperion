@@ -208,7 +208,12 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     }
     return { address, port };
   }
-  return { address, port, spike: spikeLaunchOf(options) };
+  const spike = spikeLaunchOf(options);
+  if (spike.setting === "low" && spike.vertexPath === "baked-offsets") {
+    // The low setting's cache does not fit `BakedOffsets` (R05 Design note 4).
+    command.error("error: --vertex-path baked-offsets does not fit the low setting's cache");
+  }
+  return { address, port, spike };
 }
 
 /** A commander attribute name as its option: `vertexPath` is `vertex-path`. */
