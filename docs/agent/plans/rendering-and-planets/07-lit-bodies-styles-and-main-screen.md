@@ -1920,3 +1920,32 @@ test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with
   - **`just test-render`.** The first run (2026-10-03) refused the shader on `template`; after the
     rename the check runs with T6.c's (one harness run for both, the heavy-test lock being held for
     an hour at a time by the integration).
+- **Deviations in T6.a, as built.**
+  - **`sphereIrradianceFactor(h, phiRad, horizonRad = 0)`** returns H² F, Howell's view factor
+    over that of the sphere face-on, so it is cos φ wherever the whole disc is up; `howellViewFactor`
+    is exported beside it. A local horizon η > 0 is taken as a plane tilted by η towards the star:
+    the disc is cut at φ + η in Howell's form and the light through it weighed by the element's own
+    normal (a tangential term with the disc's directions taken as one, an error of order ρ² sin η);
+    a horizon below the tangent plane counts as 0. R10.T8.b replaces it with its horizon map.
+  - **The oracle** (`lighting/oracle.ts`): `sphereIrradianceBruteForce`, Gauss–Legendre in the
+    angle from the disc's centre and midpoint in azimuth, over any `LimbProfile`
+    (`UNIFORM_DISC`); it meets the uniform closed form to 10⁻⁵.
+  - **Figures.** H = 3, 11.5 and 215 agree with brute force to 2 × 10⁻³; the terminator is
+    59.3 km wide at 1 au on 6,371 km; E ÷ E_zenith at the geometric terminator is 9.87 × 10⁻⁴
+    (uniform) and 9.27 × 10⁻⁴ (the brainstorm's polynomial law); a planet at 3 stellar radii is lit
+    to 109.5°; a 5° horizon hides a star 4° up. **The limb-darkening error at 19.5° is 0.469%** of
+    the face-on value at φ = 90° with the brainstorm's solar polynomial, against Design note 6's
+    0.45%; the test bounds it at the measured 0.47%. Sent to the orchestrator for a science ruling
+    (`decision-r07-dn6.md`, pending).
+- **Deviations in T6.b, as built (pending `decision-r07-dn6.md`).**
+  - **`annulusEdges(c, alpha, k)`** returns an `AnnulusSet`: the K + 1 edges uniform in μ and each
+    annulus's exact share of the power-2 flux; `annulusVisibleFraction(annuli, ratio, separation)`
+    is the eclipse term in stellar radii, and `eclipseVisible(disc, from, occluders, k)` takes a
+    `LimbDarkenedDisc` (centre, radius and one channel's c and α), not `HostDiscDto`, which
+    carries no position. The annulus construction is the one function a scheme change touches.
+  - **The error bounds.** Against a 400-annulus oracle (`denseAnnulusVisibleFraction`) over radius
+    ratios 0.1–30 and 41 separations the worst case is always a concentric occulter, and it grows
+    with the darkening: 0.40% at K = 4 and 1.46% at K = 2 for c 0.5, α 0.5; 0.73% and 2.6% for the
+    Sun-like c 0.71, α 0.6 the tests use. Design note 6's 0.62% and 1.5% are not reached by any one
+    law; the tests hold the measured bounds while the science check
+    (`decision-r07-dn6.md`) looks for a scheme that meets them at fixed K.
