@@ -45,7 +45,10 @@ const TIMER_WORDS = {
  */
 const FEATURE_NAMES: ReadonlyArray<
   readonly [
-    keyof Omit<GpuCapabilities, "maxTextureDimension2D" | "subgroupMinSize">,
+    keyof Omit<
+      GpuCapabilities,
+      "maxTextureDimension2D" | "subgroupMinSize" | "maxStorageBufferBindingSize" | "maxBufferSize"
+    >,
     GPUFeatureName,
   ]
 > = [

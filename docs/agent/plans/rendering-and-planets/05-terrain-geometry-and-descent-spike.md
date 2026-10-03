@@ -2499,3 +2499,26 @@ medium, sizes, figure)`.
 
   - _Aerial-perspective scope_ lives in `TableSizes` for now; R08.T9.a's `AERIAL_PERSPECTIVE_SCOPE`
     takes it over or reads it.
+- **Deviations in T11.a, as built so far** (2026-10-02; the slot layout waits on T8's
+  `SlotLayout`, and the index buffer and instance records wait on T4's vertex order).
+  - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
+    `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
+    `maxStorageBufferBindingSize` and `maxBufferSize`, never above what it reports, capped at
+    `MAX_REQUESTED_BUFFER_BYTES`, 1 GiB.
+    - `GpuCapabilities` gains both limits. They are read from the device, as its features are,
+      so a rebuild after a device loss reports the rebuilt device's.
+    - `CapabilityOverrides.defaultLimits` raises nothing. It is how the harness runs the
+      `FaceDifferences` fallback once T11.a's layout exists.
+    - `FakeAdapter` takes both limits. Its devices get WebGPU's defaults unless more is required,
+      and reject a request beyond the adapter's.
+    - `GraphicsPanel` leaves the two limits out of its feature list.
+    - The RTX 3080's adapter limits are recorded with T11.a's layout.
+  - _`AllocationTally`_ (`view/terrain/gpu/allocationTally.ts`) adds `startFrame()`, which zeroes
+    the frame's upload count; the interface has no other notion of a frame. It also adds
+    `dispose()`, which stops listening.
+  - _The counting fake_ (`test/countingRenderEngine.ts`) landed with T12.b. It stands alone,
+    implementing `RenderEngine` and delegating views and faults to R01's `FakeRenderEngine`,
+    because that class's members return `never` and cannot be overridden. It also records
+    `textureSpecs`, `dispatched`, `writes` and `targetFrames`, and offers `restore()` and
+    `destroy()`.
+  - `MemoryCategory` gains `height-cache`, appended.

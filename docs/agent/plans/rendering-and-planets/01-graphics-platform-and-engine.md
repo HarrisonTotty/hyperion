@@ -2960,3 +2960,4 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   it holds to an `f64` oracle. The default stays `cpu`, so every other caller is still refused.
   `engineBoundary.test.ts` already refuses a `tolerance` read outside `smoke/`. The change is
   append-only, in `types.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.
+- **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged.

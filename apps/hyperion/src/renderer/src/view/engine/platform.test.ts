@@ -6,7 +6,9 @@ import {
   deviceCapabilities,
   featuresNotEnabled,
   requestAdapterOutcome,
+  MAX_REQUESTED_BUFFER_BYTES,
   requiredFeatures,
+  requiredLimits,
   styleAvailability,
   summariseAdapter,
   WANTED_FEATURES,
@@ -113,6 +115,8 @@ describe("the capability summary", () => {
       depthClipControl: true,
       maxTextureDimension2D: 16_384,
       subgroupMinSize: 8,
+      maxStorageBufferBindingSize: 134_217_728,
+      maxBufferSize: 268_435_456,
     });
   });
 
@@ -194,6 +198,73 @@ describe("the device's capabilities", () => {
       featuresNotEnabled(["subgroups", "shader-f16", "timestamp-query"], new Set(["subgroups"])),
     ).toEqual(["shader-f16", "timestamp-query"]);
     expect(featuresNotEnabled(["subgroups"], new Set(["subgroups", "shader-f16"]))).toEqual([]);
+  });
+});
+
+describe("the required limits (decisions-r06-r07.md item 7)", () => {
+  const GIB = 2 ** 30;
+
+  it("ask for the adapter's storage-binding and buffer sizes, capped at 1 GiB", () => {
+    const big = new FakeAdapter({
+      info: INTEL_UHD_620_INFO,
+      features: [],
+      maxStorageBufferBindingSize: 4 * GIB,
+      maxBufferSize: 4 * GIB,
+    });
+    expect(requiredLimits(big, undefined)).toEqual({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    expect(MAX_REQUESTED_BUFFER_BYTES).toBe(GIB);
+  });
+
+  it("never ask more than the adapter reports", () => {
+    const small = new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] });
+    expect(requiredLimits(small, undefined)).toEqual({
+      maxStorageBufferBindingSize: 134_217_728,
+      maxBufferSize: 268_435_456,
+    });
+  });
+
+  it("raise nothing under the harness's default-limits override", () => {
+    const big = new FakeAdapter({
+      info: INTEL_UHD_620_INFO,
+      features: [],
+      maxStorageBufferBindingSize: GIB,
+      maxBufferSize: GIB,
+    });
+    const overrides = { withholdSubgroups: false, withholdShaderF16: false, defaultLimits: true };
+    expect(requiredLimits(big, overrides)).toEqual({});
+  });
+
+  it("reach the device's capabilities, and default without a request", async () => {
+    const options = {
+      info: INTEL_UHD_620_INFO,
+      features: [],
+      maxStorageBufferBindingSize: GIB,
+      maxBufferSize: 2 * GIB,
+    } as const;
+    const raised = new FakeAdapter(options);
+    const device = await raised.requestDevice({
+      requiredLimits: requiredLimits(raised, undefined),
+    });
+    expect(deviceCapabilities(device)).toMatchObject({
+      maxStorageBufferBindingSize: GIB,
+      maxBufferSize: GIB,
+    });
+    const plain = await new FakeAdapter(options).requestDevice({});
+    expect(deviceCapabilities(plain)).toMatchObject({
+      maxStorageBufferBindingSize: 134_217_728,
+      maxBufferSize: 268_435_456,
+    });
+  });
+
+  it("let a rebuild onto a lesser adapter ask less, so its request cannot fail", async () => {
+    const lesser = new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] });
+    const device = await lesser.requestDevice({
+      requiredLimits: requiredLimits(lesser, undefined),
+    });
+    expect(deviceCapabilities(device).maxStorageBufferBindingSize).toBe(134_217_728);
   });
 });
 
