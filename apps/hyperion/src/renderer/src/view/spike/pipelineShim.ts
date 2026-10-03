@@ -136,3 +136,22 @@ export function shimPipelines(device: GPUDevice, tally: PipelineTally): GPUDevic
     outer("compute", descriptor.label, () => computeAsync(descriptor));
   return device;
 }
+
+/** A shim that installs itself on a device, as the capture (T15.a) does. */
+export interface DeviceShim {
+  readonly wrapDevice: DeviceWrapper;
+}
+
+/**
+ * The spike's device wrapper for {@link wrapGpu}: the pipeline tally always, and the capture
+ * (`--capture`, T13.c) only when one is given, so that an ordinary spike run carries no capture.
+ */
+export function spikeDeviceWrapper(
+  tally: PipelineTally,
+  capture: DeviceShim | null,
+): DeviceWrapper {
+  return (device) => {
+    const shimmed = shimPipelines(device, tally);
+    return capture === null ? shimmed : capture.wrapDevice(shimmed);
+  };
+}

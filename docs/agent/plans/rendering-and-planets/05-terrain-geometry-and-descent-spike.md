@@ -2768,3 +2768,33 @@ medium, sizes, figure)`.
   - **Pending T13.b:** the spike's `ViewEngineSource` (the wrapped `GPU` handed to
     `requestAdapterOutcome` and as `LoadEngineOptions.gpu`), the `performance.measure` spans and the
     per-frame calls into `SpikeMetrics`, which need the spike's scene and loop.
+- **Deviations in T15.a, as built** (2026-10-03).
+  - `view/spike/capture.ts`: `GpuCapture` (`wrapDevice`, `startSpan`, `frame`, `endSpan`,
+    `result`, `dispose`), `parseCapture`, `replayCapture` (the reference replayer the test uses) and the file
+    types. The log is generic: each call is `{ target, op, args, result }` by object ID (0 the
+    device, 1 its queue), arguments as JSON with `$ref`, `$blob` (+ `$type`), `$undefined` and
+    `$bigint`, so the format needs no schema per call. On disk a capture is `capture.json` and
+    `capture.bin` (blobs by offset and length) in the `--capture` directory; T13.c writes them.
+    The file also carries `meta` (`setting`, `seed`, `passRows`), which the replayer reads for its
+    results file.
+  - Before the span only creations, views, bind-group layouts and destructions are logged. At the
+    span's start every live buffer and texture is copied to staging buffers in one submission
+    (buffers and textures are created with `COPY_SRC` added while the shim is installed; the log
+    keeps the usage asked), and their bytes are placed in the log as writes at that point, so the
+    engine's calls during the read-back are kept; `result()` refuses until they are all in, and a
+    failed read-back destroys the staging buffers and rejects `startSpan`. Mappable buffers,
+    multisampled textures, depth and stencil formats (never a copy destination) and formats without
+    a texel size in the shim's table are listed in `skipped`; a buffer whose size is not a multiple
+    of four loses its last bytes. `startSpan` is called between frames: a span call on an object
+    whose creation the log lacks (an encoder open when the span started) is not logged but listed
+    in the file's `problems`, as is an argument naming one, so a capture says when a replay cannot
+    trust it. `writeBuffer` is logged as the bytes written,
+    with an explicit data offset of 0 and size.
+  - Canvases are surfaces: `GPUCanvasContext.prototype.getCurrentTexture` is wrapped from the
+    span's start to `endSpan` or `dispose` (`CaptureOptions.contexts`), each canvas logged with
+    its size and format; T13.c calls `dispose` when a run ends early.
+  - It installs through T14.a's seam: `spikeDeviceWrapper(tally, capture)` in `pipelineShim.ts`
+    applies the pipeline tally always and the capture only when given, so a run without
+    `--capture` carries none (tested). `engineBoundary.test.ts` exempts `view/spike/capture.ts`
+    and its test by name from the allocation rule (`isCaptureShim`; the plan named the shim alone,
+    but its test drives a device directly).
