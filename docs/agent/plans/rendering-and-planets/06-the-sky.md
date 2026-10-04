@@ -2046,3 +2046,54 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   at the emitted time, not the primary's brief (ask A1's interim would cost a full generation
   outside ±H), with n the generator's `MAX_COMPANIONS + 1` for a grid system (carve redraws can
   change its count; a test holds no generated grid system above it) and 1 for a forced single.
+- **Deviations in T8.b, as built.** `sky::census::cell` holds `SkyStar`, `LayerTally`,
+  `CensusTallies`, `Bound`, `flux_bound`, `cell_floor`, `census_record` and `census_cell`, with
+  `EYE_OFFSET_BOUND_MAG`, `GRID_STAR_BOUND`, `star_offset_bound` and `cell_offset_bound`.
+  - `EYE_OFFSET_BOUND_MAG` is 0.6 mag, above every row of the colour table, whose hottest give about
+    0.43; the table is bilinear in ρ, so no colour exceeds its rows.
+  - `census_cell` returns its `CensusTallies` rather than only filling `out`. `census_record`, with
+    its `Bound`, is public so that the oracle measures each record as the census does, with
+    `Bound::Ignored`.
+  - The flux bound is n × the envelope's flux at `max_star_mass(m₁)` and the record's age at the
+    emitted time, as accepted for T8.a, but **n is `GRID_STAR_BOUND` = `MAX_COMPANIONS` + 2 = 5 for
+    a grid system, not `MAX_COMPANIONS` + 1** (accepted 2026-10-04). Plan 11's draw caps a
+    hierarchy at four stars, but P11.T2.d's brown-dwarf companion comes on top as a fifth body,
+    which `state_at(t).stars()` lists. A test holds every generated system to five bodies and to
+    four stars of 0.08 M☉ or more. A forced single takes n = 1. Since the census lists stars, not
+    systems, n = 1 would already bound each star, and n only adds margin.
+  - A record with no density component (a feature member's, from T16.a) takes no bound and is
+    always generated.
+  - **Added: the stars' offsets from their barycentre.** Plan 11 keeps every apocentre inside half
+    the system's tidal radius, which is some light-years near the Sun, so a companion can be nearer
+    the observer than its system. The flux bound takes the distance to the system's apparent
+    position, from which each star's is measured, less `star_offset_bound`. That is
+    (`GRID_STAR_BOUND` − 1) orbits × `TIDAL_CUT_SHARE` × the tidal radius at 5 m₁ at the epoch
+    position, and 0 for a forced single.
+  - The cell floor takes the cell's least distance less the motion pad and `cell_offset_bound`. The
+    pad is solved with the light's age, pad = β (|t − epoch| + far + offset) ÷ (1 − β), since a
+    record can lie a pad outside its box. `cell_offset_bound` is the same bound at the band's top
+    mass. It reads the new `PotentialTables::tidal_radius_bound_within`: the floored tidal radius at
+    the least Ω² at the cell's farthest radius from the centre and at every grid point inside it,
+    less 1% for the interpolation. A test checks it against the tidal radius at dense points over
+    the fixture and 24 drawn galaxies.
+  - The eye's colour offset is taken at full scotopic adaptation (μ 30), as the eye's cut is at the
+    darkest texel.
+  - The census reads no luminosity table, so it has no call to `age_for`. The tests' tables are
+    built for no component at `REFERENCE_TIME`.
+  - Each star's state is indexed by its body index from `star_positions_at`'s rows.
+  - The envelope still takes the age at the emitted time and `max_star_mass(m₁) = m₁`. Pair-evolved
+    stragglers are T16.b's; none broke the bound in the sample.
+  - Tests (`cargo test -p hyperion-sim sky::census::cell`):
+    - a white-dwarf primary lists its bright companion and tallies the dwarf;
+    - a post-AGB primary of 2 M☉, at the end of its crossing beside a near-twin giant that outshines
+      it, takes the envelope bound, and at a cut between the two only the giant is listed;
+    - a centre member is tallied, not listed;
+    - the observer's own system is absent;
+    - a forced single takes the envelope's own bound, and a grid system one 2.5 log₁₀ 5 brighter;
+    - every star's light lies under its flux bound, and every star lies within its offset bound,
+      over 400 records at each of seven to nine places and layers (dense slow variants at
+      3,000–4,000);
+    - the census of 15 cells near the Sun (A–E, at 0, 1 and 3 cells out, eye asked, cut 7) equals,
+      bit for bit, every record of those cells measured with no skip;
+    - cells censused in reverse order with a one-entry noise cache equal a warm forward run;
+    - the tallies add.

@@ -32,6 +32,10 @@ const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
 /// note 17; brainstorm, "Coordinates").
 const TIDAL_FLOOR: f64 = 0.05;
 
+/// The share by which [`PotentialTables::tidal_radius_bound_within`] lowers the least Ω² it
+/// finds at the grid points, for the interpolation between them.
+pub const TIDAL_BOUND_MARGIN: f64 = 0.01;
+
 /// The grid point `i` of either axis, ly: `2⁻⁴ × 2^(22 i ÷ 63)`, with both ends exact.
 fn grid_point(i: usize) -> f64 {
     match i {
@@ -455,6 +459,31 @@ impl PotentialTables {
         Metres::from(LightYears::new(math::cbrt(G * m.value() / denominator)))
     }
 
+    /// A bound on [`tidal_radius`](Self::tidal_radius) of a system of mass `m` anywhere within
+    /// the spherical radius `r` of the centre: (G m ÷ (0.05 `Ω²_min`))^⅓, the radius with its
+    /// denominator at the floor, in metres (rendering plan R06, R06.T8.b).
+    ///
+    /// The denominator is never below 0.05 Ω² at its own radius. `Ω²_min` is the least Ω² at `r`
+    /// and at every grid point within it, less [`TIDAL_BOUND_MARGIN`] for the interpolation
+    /// between points: Ω² = `v_c²` ÷ R² falls by some 40% from one grid point to the next wherever
+    /// the mean density enclosed falls outward, so no interpolated value between two points lies
+    /// that far below both (a test checks it over many drawn galaxies). Zero at `r` = 0.
+    #[must_use]
+    pub fn tidal_radius_bound_within(&self, m: SolarMasses, r: LightYears) -> Metres {
+        let r = r.value();
+        if r <= 0.0 {
+            return Metres::ZERO;
+        }
+        let least = (0..POINTS)
+            .map(grid_point)
+            .take_while(|&p| p < r)
+            .map(|p| self.frequencies_sq(p).0)
+            .fold(self.frequencies_sq(r).0, f64::min);
+        Metres::from(LightYears::new(math::cbrt(
+            G * m.value() / (TIDAL_FLOOR * least * (1.0 - TIDAL_BOUND_MARGIN)),
+        )))
+    }
+
     /// The bar's corotation radius: its corotation ratio times its half-length.
     #[must_use]
     pub fn bar_corotation(&self) -> LightYears {
@@ -639,6 +668,33 @@ mod tests {
             let exact = cubic(math::ln(x));
             let interpolated = interpolate(&values, &slopes, index, position);
             assert!((interpolated - exact).abs() < 1e-9 * exact.abs().max(1.0));
+        }
+    }
+
+    /// The floored radius bounds the tidal radius everywhere within a radius, for the fixture
+    /// and for galaxies drawn from many seeds, at points far denser than the grid.
+    #[test]
+    fn the_tidal_bound_within_a_radius_holds_inside_it() {
+        use crate::galaxy::imf::MassFunctionKind;
+        let mut models = vec![MassModel::new(&GalaxyParams::milky_way_like())];
+        for seed in 0..24_u64 {
+            let params =
+                GalaxyParams::from_seed(crate::Seed::new(seed), MassFunctionKind::default());
+            models.push(MassModel::new(&params));
+        }
+        let m = SolarMasses::new(4.0);
+        for model in &models {
+            let tables = PotentialTables::in_plane(model);
+            for r in [0.5, 150.0, 3_000.0, 8_000.0, 26_000.0, 60_000.0, 200_000.0] {
+                let bound = tables
+                    .tidal_radius_bound_within(m, LightYears::new(r))
+                    .value();
+                for k in 0..=400 {
+                    let at = r * f64::from(k) / 400.0;
+                    let p = PointLy::new(0.0, at, 0.0);
+                    assert!(tables.tidal_radius(m, &p).value() <= bound, "{r} at {at}");
+                }
+            }
         }
     }
 
