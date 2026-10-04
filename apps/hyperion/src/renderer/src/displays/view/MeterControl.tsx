@@ -34,8 +34,9 @@ export function meterLabel(mode: MeterMode): string {
  * @remarks
  * `AVG` meters everything but a star's disc, `LIT` only bodies' sunlit sides and `DARK` only their
  * night sides. The meter is the view's own, not the ship's: a display control that acts at once.
- * While nothing is metered the meter still shows with the reason, and its buttons still act, so
- * that a meter with nothing to weigh can be left (mounted by R07.T8.a beside a drawn image only).
+ * While nothing is metered the meter still shows with the reason, which describes the chosen
+ * meter's button only, and its buttons still act, so that a meter with nothing to weigh can be
+ * left by choosing another (mounted by R07.T8.a beside a drawn image only).
  */
 export function MeterControl({ meter, reading, onMeter }: MeterControlProps) {
   const titleId = useId();
@@ -84,8 +85,9 @@ export function MeterControl({ meter, reading, onMeter }: MeterControlProps) {
             className="control"
             aria-pressed={meter === mode}
             // Never held back: the control stands only beside a drawn image, and a meter with
-            // nothing to weigh (LIT with no lit body) must be left by choosing another.
-            aria-describedby={held ? reasonId : undefined}
+            // nothing to weigh (LIT with no lit body) must be left by choosing another. The reason
+            // describes the chosen meter only: choosing another is the remedy, not refused.
+            aria-describedby={held && meter === mode ? reasonId : undefined}
             onClick={() => {
               onMeter(mode);
             }}

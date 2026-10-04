@@ -124,7 +124,7 @@ describe("the exposure's automation levels", () => {
   });
 
   it("refuses ENABLE under AUTO", () => {
-    expect(enable(AUTO, 3)).toEqual({ kind: "refused", reason: "not_inhibited" });
+    expect(enable(AUTO, 3)).toEqual({ kind: "refused", reason: "already_auto" });
   });
 
   it("hands MAN to AUTO at the metered value on ENABLE, and only with an image to meter (R07.T8.a)", () => {

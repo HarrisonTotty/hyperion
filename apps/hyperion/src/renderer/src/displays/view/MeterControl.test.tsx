@@ -57,4 +57,16 @@ describe("MeterControl", () => {
     await user.click(screen.getByRole("button", { name: "AVG" }));
     expect(onMeter).toHaveBeenLastCalledWith("average");
   });
+
+  it("describes only the chosen meter with the reason while nothing is metered", () => {
+    render(<MeterControl meter="lit" reading={null} onMeter={() => undefined} />);
+    expect(
+      ["AVG", "LIT", "DARK"].map(
+        (name) => screen.getByRole("button", { name }).getAttribute("aria-describedby") !== null,
+      ),
+    ).toEqual([false, true, false]);
+    // Choosing another meter is the remedy, not a refused command.
+    expect(screen.getByRole("button", { name: "AVG" })).not.toHaveAccessibleDescription();
+    expect(screen.getByRole("button", { name: "DARK" })).not.toHaveAccessibleDescription();
+  });
 });

@@ -115,7 +115,7 @@ export type ExposureCommandResult =
   | { readonly kind: "accepted"; readonly control: ExposureControl }
   | {
       readonly kind: "refused";
-      readonly reason: "no_image_to_meter" | "not_automatic" | "not_inhibited" | "invalid_triple";
+      readonly reason: "no_image_to_meter" | "not_automatic" | "already_auto" | "invalid_triple";
     };
 
 /** The exposure value a control stands at, EV100. */
@@ -175,10 +175,9 @@ export function inhibit(control: ExposureControl): ExposureCommandResult {
 }
 
 /**
- * The operator's `ENABLE`: clears an inhibit, of either origin, back to `AUTO`, and from `MAN`
- * hands the exposure to `AUTO` at the metered value (R07.T8.a, the smallest reversible choice,
- * pending the owner: the guide names no other way out of `MAN`); refused with
- * `NO IMAGE TO METER` while there is no source, and outside `MAN` and `INHIBITED`.
+ * The operator's `ENABLE`: returns the exposure to `AUTO` at the metered value, from `MAN` or from
+ * an inhibit of either origin (the guide's `ENABLE` rows; R07.T8.a, decision-r07-t8a-meter);
+ * refused with `NO IMAGE TO METER` while there is no source, and under `AUTO`.
  *
  * @param meteredEv100 - The source's current metered value, or `null` where there is no source.
  */
@@ -187,7 +186,7 @@ export function enable(
   meteredEv100: number | null,
 ): ExposureCommandResult {
   if (control.kind === "auto") {
-    return { kind: "refused", reason: "not_inhibited" };
+    return { kind: "refused", reason: "already_auto" };
   }
   return setAuto(meteredEv100);
 }

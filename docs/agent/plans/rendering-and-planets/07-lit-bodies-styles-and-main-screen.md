@@ -1316,13 +1316,23 @@ image, with the hull faces' occluder bias (`occluder.wgsl`, `slopeScale` 2 as bu
 that the casing is covered (the UX decision, item 12; the sphere occluder's `SLOPE_SCALE` is 3
 already). Draft, for the owner, the nomenclature entries this plan adds beyond R02's nine items
 (`PHOTOREALISTIC` is already drafted by R02, beside `WIREFRAME`; `METER AVG`,
-`METER LIT`, `METER DARK`, `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one
-edit of `docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. Tests: every overlay
-mark over the image has a casing stroke; plates are present for every readout; the console-ux
-skill's lint and contrast scripts pass. Symbology over the tone-mapped image is a following
-canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view, in the same task as
-T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance: `just ci`; the guide
-edit is one commit for the owner.
+`METER LIT`, `METER DARK`, the meter's statuses `NO LIT SIDE`, `NO DARK SIDE` and
+`STAR DISC ONLY` with their remedy clauses (decision-r07-t8a-meter),
+`ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one edit of
+`docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. T16 also builds them:
+`AutoExposure` keeps why it has no metered value (`no-image`, a histogram timeout;
+`nothing-weighed`, histograms that weigh no pixel under the meter in force; `acquiring`, under
+`METER_TIMEOUT_S` since the image was first drawn or the meter changed with no value held). R02's
+`InhibitReason` gains `"nothing_weighed"` with its meter. `ExposurePanel` and `MeterControl` take
+the cause beside the metered value; while it is `acquiring`, neither shows a meter status or
+`NO IMAGE TO METER`, and `ENABLE` is held back with `NOT AVAILABLE: not yet metered`. Tests: under
+`LIT` with no lit body, a drawn image reads `NO LIT SIDE`, never `NO IMAGE TO METER`, after 0.5 s
+and not before; a meter change clears it at once; `AUTO` resumes when a lit body is metered. Its
+other tests: every overlay mark over the image has a casing stroke; plates are present for every
+readout; the console-ux skill's lint and contrast scripts pass. Symbology over the tone-mapped
+image is a following canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view,
+in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance:
+`just ci`; the guide edit is one commit for the owner.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -1524,6 +1534,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   see flare, so a realistic camera mode that meters it could be offered as an operator-selected
   meter (the research lean, 2026-09-29), not as a default and not with a cap, which would be an
   arbitrary number; it would need a guide entry for the owner. Not built.
+- **No way back to `MAN` (open, for the owner; observed in decision-r07-t8a-meter, not ruled).**
+  No control calls `setManual`, so `MAN` cannot be re-entered once it is left, and `INHIBIT` is
+  the operator's only hold. A `MAN` entry (the triple, or an EV100 set point, under the guide's
+  data-entry rules) is the owner's to decide; not built.
 - **The law's thresholds** (Design note 5: 100 Pa and 30 kPa, raised from 10 kPa so that the
   simulated Mars, 11 kPa, reaches the Mars template; the cloud term suspended until plan 14's cloud
   fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
@@ -1815,16 +1829,17 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   could not leave (a test drives the cut and the recovery). A histogram with nothing the meter
   weighs (`LIT` with no lit body) is treated as no histogram: `AUTO` holds until
   `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
-  definition of that status (a closed or absent source); T16's draft takes it up, the
-  alternative being a status of its own such as `NO LIT BODY`, for the owner. Under `AUTO`
-  `onMetering` receives the smoothed, applied EV100, so R02's `auto.ev100` is the applied value
-  and `meteredEv100` the metered one; a system inhibit resumes and smooths in the same step; the
-  operator's `setAuto` and `enable` take `meteredEv100` and set the exposure there at once,
-  unsmoothed (R02's commands as built). `setMeter` changes the reading's meter at once, and
-  histograms under its weights arrive one to three frames later. `MeterControl` takes the
+  definition of that status. T16 replaces it with the meter's own status, `NO LIT SIDE` and its
+  twins (decision-r07-t8a-meter). Under `AUTO` `onMetering` receives the smoothed, applied EV100,
+  so R02's `auto.ev100` is the applied value and `meteredEv100` the metered one; a system inhibit
+  resumes and smooths in the same step; the operator's `setAuto` and `enable` take
+  `meteredEv100` and set the exposure there at once, unsmoothed (R02's commands as built).
+  `setMeter` changes the reading's meter at once, and histograms under its weights arrive one to
+  three frames later. `MeterControl` takes the
   operator's `meter` as its own prop, so the chosen meter shows (`METER LIT`, the button
   underlined, as the time control's step is) while nothing is metered; held-back buttons are
-  described by `NO IMAGE TO METER`; the panel is titled `Exposure meter`, its buttons grouped
+  described by `NO IMAGE TO METER` (superseded: T8.a, parts 3 and 4, holds none back and describes
+  the pressed one only); the panel is titled `Exposure meter`, its buttons grouped
   under the legend `SELECT`. **Left to T7**: mount `MeterControl` beside `ExposurePanel`,
   subscribed to the view's `AutoExposure` through `useSyncExternalStore` and throttled to about
   4 Hz at 0.1 EV, not passed down from `ViewDisplay`'s state; make the `AutoExposure` with R06's
@@ -2325,17 +2340,20 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     so that `AUTO`'s steps do not cull the sky again. `ExposurePanel` takes the meter's own value
     (`AutoExposure.meteredEv100`), which `ENABLE` resumes at. `HistogramReader.dispose` releases its
     ring's three buffers.
-  - **`ENABLE` from `MAN` (for the owner).** R02's `enable` refused anything but `INHIBITED`, and
-    `INHIBIT` refuses `MAN`, so no command led from the default `MAN` to `AUTO` (ux-reviewer). As
-    the smallest reversible choice, `ENABLE` now hands `MAN` to `AUTO` at the metered value, held
-    back with `NO IMAGE TO METER` while nothing is metered; the guide names no command for it.
+  - **`ENABLE` from `MAN` (ruled, decision-r07-t8a-meter: kept; the guide's `ENABLE` rows
+    follow).** R02's `enable` refused anything but `INHIBITED`, and `INHIBIT` refuses `MAN`, so no
+    command led from the default `MAN` to `AUTO` (ux-reviewer). As the smallest reversible choice,
+    `ENABLE` now hands `MAN` to `AUTO` at the metered value, held back with `NO IMAGE TO METER`
+    while nothing is metered; the guide named no command for it.
   - **`MeterControl`'s buttons are never held back** now that it stands only beside a drawn image:
     with `LIT` chosen and no lit body (no star discs, a body under about 5 px, a point) its reading
     is `NO IMAGE TO METER`, and the way out is to choose another meter. `NO IMAGE TO METER` then
     shows beside a drawn image, for the chosen meter finding nothing to weigh and for the first
-    readout before a histogram arrives; whether the guide's row widens to say so, or T16 drafts a
-    status of its own (T13.a's `NO LIT BODY`), is for the owner. Focus on a meter button is lost
-    when the panel unmounts on a style change (a consider for T16).
+    readout before a histogram arrives. Ruled (decision-r07-t8a-meter): the case gets statuses of
+    its own, `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, built in T16. The transient before
+    the first histogram gets no word. Until T16, `NO IMAGE TO METER` stands for both, beyond the
+    guide's row. Focus on a meter button is lost when the panel unmounts on a style change (a
+    consider for T16).
   - **After review.** The loop tells an operator's command from its own publication by keeping
     what it last read of the display's control apart from what it last gave it, so a frame between
     a readout and React's commit cannot revert the smoothing; it gives the display a control only
@@ -2345,14 +2363,15 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     after an operator's `INHIBIT` resumes at the metered value. `HistogramReader.dispose` releases
     its ring's buffers. The meter's choice is held above the stage beside the exposure, so a new
     scene keeps it. **`ENABLE` now also hands `MAN` to `AUTO`** at the metered value (R02's
-    `enable`, the smallest reversible choice: the guide names no way out of `MAN`, and the
-    ux-reviewer found `AUTO` unreachable; for the owner). **`MeterControl`'s buttons are no
-    longer held back** while nothing is metered (it stands only beside a drawn image, and `LIT`
-    with no lit body must be left by choosing another); the reason still shows. For the owner:
-    `NO IMAGE TO METER` now also shows beside a drawn image whose chosen meter finds nothing to
-    weigh, and before the first histogram arrives; widen the guide's row or give that case its
-    own status (T16). Focus on a meter button is lost when the panel unmounts on a style change
-    (noted, not handled).
+    `enable`, the smallest reversible choice: the guide named no way out of `MAN`, and the
+    ux-reviewer found `AUTO` unreachable; ruled, decision-r07-t8a-meter: kept; the guide's `ENABLE`
+    rows follow). **`MeterControl`'s buttons are no longer held back** while nothing is metered (it
+    stands only beside a drawn image, and `LIT` with no lit body must be left by choosing another);
+    the reason still shows. Ruled (decision-r07-t8a-meter): the case gets statuses of its own,
+    `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, built in T16. The transient before the
+    first histogram gets no word. Until T16, `NO IMAGE TO METER` stands for both, beyond the
+    guide's row. Focus on a meter button is lost when the panel unmounts on a style change (noted,
+    not handled).
   - **Wording (decision-r07-t8a, follow-up (c), under the owner's delegation).**
     `GRAPHICS STYLE REFUSED: photorealistic style not created, relaunch to retry`
     (`PHOTOREAL_NOT_CREATED`), `PHOTOREALISTIC: PREPARING` (`PHOTOREAL_PREPARING`),
@@ -2367,6 +2386,24 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
   - **For the owner (ux-reviewer)**: `MeterControl`'s layout under the Style panel at 1920 × 1080
     and 1280 × 720, and the smoothing speeds by eye (T13.b's by-eye checks: a lit planet on black,
     a star entering the frame, the cockpit turning to a planet) with `just client` on `PHASE TEST`.
+- **Deviations in T8.a, as built (part 4: the meter follow-up, decision-r07-t8a-meter).**
+  - **The guide's `ENABLE` rows** follow the kept choice: the exposure bullet of "Data states"
+    (`ENABLE` also hands `MAN` to `AUTO`, at the metered value), the commanding bullet (from `MAN`
+    or from either inhibit) and the nomenclature row of `ENABLE`, `INHIBIT` (from `MAN` or
+    `INHIBITED`, drafted also by this plan's T8.a), in the ruling's words.
+  - **`ENABLE`'s refusal under `AUTO`** reads `NOT AVAILABLE: the exposure is AUTO`, the twin of
+    `INHIBIT`'s `NOT AVAILABLE: the exposure is MAN`. R02's reason `not_inhibited` is renamed
+    `already_auto`, the ruling's optional rename, since `MAN` is no longer refused.
+  - **`MeterControl`'s reason** describes the pressed meter button only (`aria-describedby`), not
+    all three: choosing another meter is the remedy, not a refused command.
+  - **Left to T16, by the ruling.** The statuses `NO LIT SIDE`, `NO DARK SIDE` and
+    `STAR DISC ONLY`, the `acquiring` window and `ENABLE`'s `NOT AVAILABLE: not yet metered` in
+    it all need `AutoExposure`'s cause, which T16 builds with its guide edit. Until then `ENABLE`
+    is held back with `NO IMAGE TO METER` before the first histogram, and both panels show it.
+  - **Tests.** `MeterControl.test.tsx`: with nothing metered, only the pressed button is described.
+    `ExposurePanel.test.tsx` (new): under `AUTO`, `ENABLE` is held back and described as
+    `NOT AVAILABLE: the exposure is AUTO`; under `MAN`, `INHIBIT` as
+    `NOT AVAILABLE: the exposure is MAN`. `exposure.test.ts` takes the renamed reason.
 - **Deviations in T8.b, as built (the class-map hook).**
   - **Files.** `bodies/discSurface.ts` (`MAX_DISC_CLASSES` 16, `CLASS_MAP_FORMAT` `rgba8unorm`,
     `CLASSES_PER_LAYER`, `classMapLayers`, `ClassMapTexels`, `ClassMapTexel`, `classMapTexelOf`,
