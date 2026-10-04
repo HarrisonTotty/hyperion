@@ -1001,7 +1001,7 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     measured against. A second, fixed-step mode samples it at 64 Hz for the CPU-only tests, whose
     selection sequence is then identical bit for bit. Its segments (provisional, T13.a):
 
-    | Segment             | Altitude        | Horizontal speed  | Vertical speed    | Duration | Brainstorm's formula, high |
+    | Segment             | Altitude        | Ground speed      | Vertical speed    | Duration | Brainstorm's formula, high |
     | ------------------- | --------------- | ----------------- | ----------------- | -------- | -------------------------- |
     | Orbit coast         | 400 km          | 7.67 km/s         | 0                 | 60 s     | 4 a second                 |
     | Descent arc         | 400 km to 20 km | 7.67 to 1 km/s    | about −420 m/s    | 900 s    | 4 to 16 a second           |
@@ -1013,9 +1013,29 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 
     The speeds are those between blends: the path joins consecutive segments by blending the
     velocity, a cubic Hermite in position, over the last 5 s of the earlier segment (1 s for a
-    segment shorter than 20 s), so that position and velocity are continuous at every boundary.
-    T13.a re-fits the durations so that the boundary altitudes hold with the blends included. The
-    path is a scripted camera, not a flight, so the blends' accelerations are not a craft's.
+    segment shorter than 20 s), or, after a level segment (the orbit coast, a lifted low pass),
+    over the first 5 s of the later one, so that position and velocity are continuous at every
+    boundary. T13.a re-fits the vertical speeds, not the durations, so that the boundary altitudes
+    hold with the blends included. A `constant` segment whose ends agree, before a descending one,
+    therefore climbs a little and its end blend takes the climb back. The unlifted low fast pass
+    climbs 0.076 m/s, to 1.9 m above 300 m. Lifted, as at every real-terrain site recorded so far,
+    it is flown level. The climb is kept (decision-r05-coast-speed.md): it is 0.04% of the pass's
+    predicted demand. The path is a scripted camera, not a flight, so the blends' accelerations are
+    not a craft's.
+
+    The ground speed is the body-fixed speed of the track's point beneath the camera. It is measured
+    on the sphere of radius (a + c) ÷ 2 (6,367.4 km on WGS 84) that the track's great circle is laid
+    out on. The camera's own body-fixed speed is (R + h) ÷ R times it, about 8.15 km/s at 400 km and
+    within 0.3% of it below 20 km. Demand reads the ground speed, since selection's rings sweep the
+    ground at the track point's rate. The coast's 7.67 km/s is kept as an upper bound
+    (decision-r05-coast-speed.md, 2026-10-04). A circular orbit 400 km up moves at 7.67 km/s
+    inertial (√(GM ÷ r), GM = 3.986004418 × 10¹⁴ m³ s⁻²). On the rotating test planet its
+    body-fixed ground speed lies between (n − ω) R ≈ 6.75 km/s, prograde equatorial, and
+    (n + ω) R ≈ 7.68 km/s, retrograde equatorial, with n = √(GM ÷ r³) and ω the planet's rotation.
+    7.22 km/s is a non-rotating planet's figure. The script flies the top of the band whatever the
+    approach azimuth, so the path is not a Keplerian orbit. It is circular in the inertial frame
+    only when heading west along the equator, and up to 13% above circular speed heading east. The
+    arc starts from the coast's ground speed.
 
     The last column is the brainstorm's (200 · v + 290 · |ḣ|) ÷ h at the segments' ends, with h
     floored at the 89 m cap; the per-level prediction below differs from it and is recorded beside
@@ -1790,9 +1810,9 @@ constants. Nothing is committed before the ruling, and the task ends when the ow
 
 **R05.T13.a The scripted descent.** `descentProfile.ts`, the path of Design note 19 as a pure
 function of script time in body-fixed coordinates over a landing site and azimuth drawn from the
-spike's seed, with its segments as data; the test planet's rotation of Design note 14 (the IERS
-sidereal day re-checked); and `demand.ts`, the prediction of Design note 19 from T6's per-level
-bounds.
+spike's seed, with its segments as data and its horizontal speeds Design note 19's ground speeds
+(the track point's, body-fixed); the test planet's rotation of Design note 14 (the IERS sidereal
+day re-checked); and `demand.ts`, the prediction of Design note 19 from T6's per-level bounds.
 
 - Files: `view/spike/descentProfile.ts`, `view/spike/rotation.ts`, `view/spike/demand.ts`, their
   tests.
@@ -2224,6 +2244,16 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
 - **The pass criterion's reserve** (Design note 21) counts only terrain and atmosphere against
   their rows' upper ends. If later plans' passes land above their own rows, the spike's pass does
   not carry over; R12's consolidated runs are where that shows.
+- **The scripted path is not an orbit** (ruled 2026-10-04, decision-r05-coast-speed.md). The
+  coast flies a ground speed of 7.67 km/s, the track point's, body-fixed. That is the top of the
+  band, 6.75 to 7.68 km/s, that a 400 km circular orbit's ground track covers on the rotating
+  test planet. Its demand, about 4 a second, is therefore an upper bound: at most 14% above a
+  prograde equatorial orbit's and 6% above a non-rotating planet's. The camera itself moves at
+  about 8.15 km/s body-fixed. In the inertial frame that is a circular orbit's speed only when
+  the track heads west along the equator, and up to 13% above it heading east. Matching an orbit
+  would tie the approach azimuth to an inclination and make the speed depend on the seed, and it
+  would not change the gate: the low fast pass's 200 a second, not the coast's 4, loads the
+  workers. The unlifted low pass's 0.076 m/s climb (Design note 19) is kept likewise.
 - **Names from R01, R02 and R04** were written in parallel with those plans and were re-validated
   before T1 (2026-10-02; Consumes, "As built", and the record below). The asks in particular: that R04's loader and probe worker, and its `just gen-surface`
   output, suit module workers under `file://` and a Node-environment test (`initSync` on the
@@ -3571,10 +3601,14 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     `DESCENT_SEGMENTS`, the table as data with each segment's vertical shape. The vertical speeds
     are re-fitted, not the durations: each boundary altitude holds exactly with the 5 s (1 s)
     velocity blends, so a level segment before a descending one climbs gently (the orbit coast by
-    about 18 m/s, the low pass by about 0.076 m/s, more over raised terrain). The horizontal speed is
-    the ground track's on a great circle of the mean radius; the camera looks along the track,
-    pitched 30° down at 300 m/s and above, turning to the nadir at rest. **Corrected
-    (2026-10-04):** the orbit coast is now flown level, and the arc blends in from it (below).
+    about 18 m/s, until it was flown level; the unlifted low pass by 0.076 m/s, 1.9 m at most, and
+    not at all when the slowdown is split or the pass lifted). The horizontal speed is the ground
+    speed of the track's point, body-fixed, on a great circle of radius (a + c) ÷ 2 = 6,367.4 km
+    (not the IUGG mean radius (2a + c) ÷ 3, 6,371.0 km). The camera at 400 km moves 6.3% faster
+    than that, and the coast's figure is kept as an upper bound (decision-r05-coast-speed.md); the
+    camera looks along the track, pitched 30° down at 300 m/s and above, turning to the nadir at
+    rest. **Corrected (2026-10-04):** the orbit coast is now flown level, and the arc blends in
+    from it (below).
   - _Terrain (orchestrator's ruling, 2026-10-03):_ `terrain` takes `siteHeightM` (the terrain's
     height at the site) and `trackMaxHeightM` (an upper bound on the terrain under the low pass's
     track, baked ranges plus ε over the patches under it), both measured once by the caller (lane
@@ -3708,11 +3742,12 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       the spheroid, along its normal over the ground direction d, plus the site's height. The
       vertical speed is therefore 0. The geocentric radius is not constant. At a constant height
       over an oblate spheroid, |p| changes as the track crosses latitudes, at a rate of up to
-      a f |sin 2φ dφ/dt| ≈ 26 m/s with the ground track at 7.67 km/s on the mean radius (the camera
-      moves at about 8.15 km/s at 400 km). At seed 7 the rate is 16.5 to 17.1 m/s, so |p| rises
-      1.01 km over the coast while its height stays 400 km: a geocentric check would still see a
-      "climb". A Keplerian circular orbit would keep |p| instead. The scripted camera holds its
-      height, as the table has it.
+      a f |sin 2φ dφ/dt| ≈ 26 m/s with the ground track at 7.67 km/s on the sphere of radius
+      (a + c) ÷ 2 (the camera moves at about 8.15 km/s body-fixed at 400 km, a retrograde
+      equatorial orbit's; see Design note 19 and decision-r05-coast-speed.md). At seed 7 the rate
+      is 16.5 to 17.1 m/s, so |p| rises 1.01 km over the coast while its height stays 400 km: a
+      geocentric check would still see a "climb". A Keplerian circular orbit would keep |p|
+      instead. The scripted camera holds its height, as the table has it.
     - _As built._
       - `VerticalShape` gains `level`, and the coast is `level`. A level segment holds its rate
         (its drop over its duration, 0 here) and hosts no blend.
