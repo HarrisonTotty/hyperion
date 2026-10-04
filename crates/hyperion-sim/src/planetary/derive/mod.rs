@@ -76,10 +76,12 @@
 pub mod atmosphere;
 pub mod composition;
 pub mod envelope;
+pub mod figure;
 pub mod habitable_zone;
 pub mod irradiation;
 pub mod limits;
 pub mod m_dwarfs;
+pub mod photometry;
 pub mod radius;
 pub mod rocky;
 pub mod rotation;

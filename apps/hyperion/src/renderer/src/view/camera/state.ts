@@ -21,10 +21,10 @@ import { type FrameChange, rebase, sameCameraFrame } from "./rebase";
 export type CameraPreset = "seat" | "chase" | "free";
 
 /**
- * How a view draws: `wireframe` only here; R07 adds `photorealistic`. A style chooses passes and
- * strokes and owns no scene, camera or projection (brainstorm, "Two styles of one renderer").
+ * How a view draws: R02's `wireframe`, or R07's `photorealistic` (R07.T7). A style chooses passes
+ * and strokes and owns no scene, camera or projection (brainstorm, "Two styles of one renderer").
  */
-export type RenderStyle = "wireframe";
+export type RenderStyle = "wireframe" | "photorealistic";
 
 /**
  * What a view stands for: `eye` for the single-player cockpit view, whose star limits are a human

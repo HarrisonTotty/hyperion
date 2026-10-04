@@ -212,6 +212,29 @@ describe("a packed cube level from a kernel's buffer", () => {
     ]);
   });
 
+  it("copies one face from a buffer that holds it alone (R06.T13.g)", async () => {
+    const { resources, cube, packed } = await cubeAndBuffer(256 + 2 * 4, BUFFER_USAGE.COPY_SRC);
+    const copies: unknown[] = [];
+    resources.encodePackedCubeLevelFromBuffer(
+      { copyBufferToTexture: (...args: unknown[]) => void copies.push(args) },
+      cube,
+      1,
+      packed,
+      4,
+    );
+    expect(copies).toEqual([
+      [
+        expect.objectContaining({ bytesPerRow: 256, rowsPerImage: 2 }),
+        expect.objectContaining({ mipLevel: 1, origin: [0, 0, 4] }),
+        [2, 2, 1],
+      ],
+    ]);
+    const encoder = { copyBufferToTexture: () => undefined };
+    expect(() => resources.encodePackedCubeLevelFromBuffer(encoder, cube, 1, packed, 6)).toThrow(
+      /no face 6/u,
+    );
+  });
+
   it("is refused from a buffer too small for the padded layout", async () => {
     const { resources, cube, packed } = await cubeAndBuffer(NEEDED - 1, BUFFER_USAGE.COPY_SRC);
     const encoder = { copyBufferToTexture: () => undefined };

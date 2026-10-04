@@ -9,12 +9,28 @@
 //!   bake spectrum from its temperature and gravity (the fitted `star_colour` table).
 //! - [`disc`]: the observer's own stars as limb-darkened discs (the fitted `limb_darkening`
 //!   table).
+//! - [`photometry`]: a star's absolute V and colour as the sky reads them, with plan 06's
+//!   interims for protostars and white dwarfs.
+//! - [`luminosity`]: the cumulative luminosity function per component and layer, the light and
+//!   count of the stars a census does not list.
+//! - [`envelope`]: the brightest V any star of a mass can reach, which bounds a system before its
+//!   stars are generated.
+//! - [`caps`]: how far out the census looks in each layer.
+//! - [`census`]: the stars an observer sees brighter than a cut: the query, its plan and the
+//!   per-cell cache.
 //!
 //! Everything here only reads the galaxy: nothing changes generated output, and nothing draws a
 //! random word.
 
+pub mod caps;
+pub mod census;
 pub mod colour;
 pub mod disc;
+pub mod envelope;
 pub mod eye;
+pub mod luminosity;
+pub mod photometry;
+#[cfg(test)]
+mod testing;
 
 pub use eye::{EyeObserver, MAX_CUT_V, REFERENCE_SP_RATIO};

@@ -88,7 +88,8 @@ function heightAt(d: Vec3, ridges: TestPlanetRidges): number {
 }
 
 describe.each(RUNS)("the descent of seed $seed, ridges $ridges", ({ seed, ridges }) => {
-  // Measured once for the block's tests: the bakes are its cost.
+  // Measured once for the block's tests: the bakes are its cost. Each check walks every 64 Hz pose
+  // through the module's interpolant, some 20 s on a loaded machine, hence the timeouts.
   let run: ReturnType<typeof measured>;
   beforeAll(() => {
     run = measured(seed, ridges);
@@ -117,7 +118,7 @@ describe.each(RUNS)("the descent of seed $seed, ridges $ridges", ({ seed, ridges
       }
     });
     expect(over).toEqual([]);
-  });
+  }, 120_000);
 
   it("flies at least each piece's clearance above the finest mesh under the camera", () => {
     const { profile, stretches } = run;
@@ -137,7 +138,7 @@ describe.each(RUNS)("the descent of seed $seed, ridges $ridges", ({ seed, ridges
     expect(short).toEqual([]);
     // T13.a solves the lifts to its own tolerance, rounding included.
     expect(profile.minFloorMarginM).toBeGreaterThanOrEqual(-FLOOR_TOLERANCE_M);
-  });
+  }, 120_000);
 
   it("touches down a metre above the site, as the table has it", () => {
     const { profile, siteHeightM } = run;

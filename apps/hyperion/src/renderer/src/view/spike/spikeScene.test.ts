@@ -7,6 +7,7 @@ import { spheroidNormal, spheroidPoint } from "../terrain/planet";
 import { datumDirection, DescentProfile, landingSiteOf } from "./descentProfile";
 import { testPlanetRotationAt } from "./rotation";
 import {
+  cameraElevationDeg,
   contactRule,
   GROUNDED_CLEARANCE_M,
   siteDirection,
@@ -156,6 +157,39 @@ describe("the scene", () => {
     }
     expect(Math.hypot(centre.x, centre.y, centre.z)).toBeCloseTo(149_597_870_700, 0);
     expect(dot(normalise(centre), sunDirectionBody(PROFILE))).toBeCloseTo(-1, 12);
+  });
+});
+
+describe("the predicted path", () => {
+  it("runs from the script's time to its end, and is gone at the end", () => {
+    const kept = spikeScene(PROFILE);
+    const t = 1_100;
+    const path = kept.sceneAt(t).craft[0]?.predictedPath ?? null;
+    if (path === null) {
+      throw new Error("the craft has no path to fly at 1,100 s");
+    }
+    expect(path[0]?.position).toEqual({
+      kind: "body_fixed",
+      body: SPIKE_PLANET,
+      m: PROFILE.positionAt(t),
+    });
+    expect(path.at(-1)?.position).toEqual({
+      kind: "body_fixed",
+      body: SPIKE_PLANET,
+      m: PROFILE.positionAt(PROFILE.durationS),
+    });
+    expect(kept.sceneAt(PROFILE.durationS).craft[0]?.predictedPath).toBeNull();
+  });
+});
+
+describe("the camera's elevation", () => {
+  it("is the nadir in the hover and 30° down in the low pass", () => {
+    expect(cameraElevationDeg(PROFILE.poseAt(PROFILE.durationS))).toBeCloseTo(-90, 6);
+    const span = PROFILE.segmentSpans().find((each) => each.name === "low fast pass");
+    if (span === undefined) {
+      throw new Error("the script has no low fast pass");
+    }
+    expect(cameraElevationDeg(PROFILE.poseAt((span.startS + span.endS) / 2))).toBeCloseTo(-30, 1);
   });
 });
 

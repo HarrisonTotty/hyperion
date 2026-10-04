@@ -3371,6 +3371,17 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     budget test checks the budget holds and that `DETAIL LIMITED` follows `limited`
     (`select.test.ts` covers a binding budget). Selection in the flight, warm, under vitest at load
     46: about 15 ms p50 and 28 ms p95 (provisional).
+- **Selection below the datum (2026-10-03, after R05.T13.a's collapse report).** Selection with
+  the camera 1.6 m above ground 1.85 km below the WGS 84 datum works, with baked ranges and
+  without, looking down or ahead, and a contact forces its region even with no view on it
+  (`belowDatum.wasm.test.ts`, real bakes through the module). The probe's collapse to an empty
+  selection was its camera hovering about 107 m underground: the descent's site height
+  (−1,953.2 m, from `measureTerrain`) was taken along the geocentric direction p ÷ |p| of the
+  ground point, where the collision interpolant and the bake take the direction d with
+  p = M·d (Design note 5), so it read the terrain about 0.1–0.2° away; the bakes under the
+  camera give −1,846.9 to −1,844.3 m. Looking down from below the baked surface, every patch's
+  box lies behind the camera, so the frustum rightly culls them all, and the contact, 107 m
+  below the ground, forces nothing. No selection change.
 - **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
   - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
     tests. The build adds:
@@ -3445,15 +3456,15 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
       made by this engine". It now renews them on resize, and a regression test fails without
       the fix.
     - Two wireframe instruments sit side by side under the main view:
-      - `ORBIT`: three planetary radii over the craft, with the graticule, the craft and its path.
-        The path is the craft's `predictedPath`, 256 body-fixed points over the whole script.
+      - `ORBIT`: seven planetary radii over the craft (`ORBIT_INSTRUMENT_RADII`, so the disc fits a wide instrument), with the graticule, the craft and its path.
+        The path is the craft's `predictedPath`, 256 body-fixed points from now to the end.
       - `CRAFT`: R02's chase preset.
 
       Each has R02's label block beside its canvas, not over it, at R02's default 60° field of
       view.
 
     - Each canvas is focusable, named (`VIEW, SPIKE LIT, SCRIPTED`; `VIEW, WIREFRAME, ORBIT,
-FREE`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to the one list of
+SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to the one list of
       the scene's bodies and craft. All three lists would be identical. The list's selection is
       drawn as the bracket reticle on both instruments. The lit view draws no marks.
     - Each canvas's role is `img`, since it is a picture, not a control, and a lint suppression
@@ -3461,27 +3472,59 @@ FREE`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to the o
     - The main view's label block keeps R02's lines with `STYLE SPIKE LIT` and `CAMERA SCRIPTED`.
       It states `TEST PLANET: provisional, dry and hand-parameterised` and the debounced terrain
       line.
-    - The page fills the window under a header strip with the `TRAINING` banner, since it draws a
-      kept scene. Only the list scrolls.
-    - One console panel, `DESCENT`, shows at 4 Hz: the spike seed in 16-digit hex, the setting,
-      the segment, the script time in s, the clearance and site height in whole metres (one unit
-      at every altitude, so no switch to flicker), both speeds to 0.01 m/s, `GROUND CONTACT`
-      `YES`/`NO`, and the patch counts. Every reading shows `—` while no run draws: a run that
-      stops clears them rather than freezing them.
+    - The page fills the window under a header strip with the `MEASUREMENT` banner. Only the list
+      scrolls.
+    - One console panel, `DESCENT`, shows at 4 Hz:
+      - the spike seed in 16-digit hex, the `QUALITY` and the segment;
+      - the script time in s;
+      - `HEIGHT ABOVE SITE`: to 0.1 m below 10 m, whole metres to 10 km, then km to one decimal,
+        with hysteresis at 9.5 and 10.5 km;
+      - the ground speed, whole from 100 m/s; the vertical speed, signed, to 0.01 m/s;
+      - `CAMERA ELV`, signed;
+      - `SITE HEIGHT`, signed whole metres;
+      - `FINEST TERRAIN HELD` `YES`/`NO`;
+      - the patch counts, which break only at their `·`.
+
+      Each reading's field holds its longest value, right-aligned. Every reading shows `—` while
+      no run draws: a run that stops clears them rather than freezing them.
+
     - The statuses use fixed words with the remedy, and the cause goes to the log:
-      - `TERRAIN MEASURING: …`;
+      - `MEASURING TERRAIN: landing site and ground track`;
       - `TERRAIN NOT MEASURED: surface query failed, relaunch to retry`;
+      - `DESCENT REFUSED: terrain cannot be cleared on this seed, relaunch with another seed`;
       - `GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry` (`ViewDisplay`'s
         words);
       - `GRAPHICS NO ADAPTER: views not available, relaunch to retry`.
 
       A frame the engine refuses stops the run with the same fault.
 
-    - **Drafts for the owner, the guide's nomenclature list:** `DESCENT SPIKE`, `SPIKE LIT`,
-      `SCRIPTED`, `SPIKE SEED`, `SEGMENT` and its seven values, `SETTING`, `SCRIPT TIME`,
-      `CLEARANCE`, `SITE HEIGHT`, `GROUND CONTACT`, `TERRAIN MEASURING` and `TERRAIN NOT
-MEASURED`. The spike is built to these meanwhile. Whether a measurement view behind a flag
-      needs the `TRAINING` banner is also the owner's; it shows one for now.
+    - _The labels, decided 2026-10-03_ (decision-r05-spike-ux.md, on the owner's delegation):
+      - `MEASUREMENT` replaces `TRAINING`;
+      - `SETTING`, `CLEARANCE` and `GROUND CONTACT` become `QUALITY`, `HEIGHT ABOVE SITE` and
+        `FINEST TERRAIN HELD`;
+      - the measuring status leads with its verb;
+      - `CAMERA ELV` and `DESCENT REFUSED` are added.
+
+      The guide gains the measurement banner in Layout, the `SCENE` row's `DESCENT SPIKE`, and 18
+      drafted nomenclature rows.
+
+    - The orbit instrument's `CAMERA` reads `SCRIPTED`, not `FREE`. It keeps only `FRAME`, `TIME`,
+      `STYLE`, `CAMERA` and `FOV`, as the craft instrument does. It draws the craft as a target
+      mark at its fixed size: as the own ship the craft carried none, and its hull is below a
+      pixel at seven planetary radii.
+    - The predicted path runs from the script's time to its end, dashed; the flown part is not
+      drawn, and at the end there is none.
+    - Until another mark is chosen, the orbit instrument marks the craft with the bracket reticle,
+      so that it reads against the graticule.
+    - The patch counts stand one to a line, four lines always, so the panel never changes height.
+    - The side column is `clamp(27rem, 25vw, 30rem)`. Instrument label values never wrap, and an
+      instrument's canvas may narrow to 5rem.
+    - Checked on hidden, offscreen full-window screenshots at 1920 × 1080 and 1280 × 720 (an
+      Electron `--require` capture hook on the built app; never shown, fresh profile, process
+      group killed). Both fit with nothing cut off. At 1280 × 720 the orbit's canvas is narrow, and
+      its disc small.
+    - **Found for lane D:** at seed 7, the orbit coast shows a vertical speed of +18.37 m/s while
+      the height above the site climbs from 400.0 to 401.0 km. The coast should be level.
   - _The metrics seam_ (the orchestrator, 2026-10-03, agreed with lane D).
     - `DescentSpike` takes `engineSource` (T13.c passes the source that wraps the GPU through
       `pipelineShim` or `capture`) and `listeners`: `onFrame(SpikeFrameSample)` and
@@ -3829,15 +3872,13 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     seeds 0, 1 and 7 with ridges off and on, passed by hand on 2026-10-03. T13.a's lift solve meets
     its floors to rounding (−4 × 10⁻¹¹ m), so the checks take its `FLOOR_TOLERANCE_M`.
 
-  - Only T13.a's lift-limit `RangeError` ("the descent cannot clear its floors") becomes
-    `DescentRefused`. Floors of the wrong count or not finite are a measurement fault and show
-    `TERRAIN NOT MEASURED`. The message prefix is the test (`isUnclearable`); a distinct error
-    class from T13.a would be sturdier. No finite floor found by probing exhausts T13.a's four
-    lifts, so the refused status is tested through `DescentSpike`'s `prepare` prop.
+  - Only T13.a's `DescentUnclearable` (its lift limit) becomes `DescentRefused`. Floors of the
+    wrong count or not finite are a measurement fault and show `TERRAIN NOT MEASURED`. No finite
+    floor found by probing exhausts T13.a's four lifts, so the refused status is tested through
+    `DescentSpike`'s `prepare` prop.
   - Scope (the orchestrator, 2026-10-03): `just ci` runs the roughest of the ruling's six wasm runs,
     seed 7 with ridges on. `just test-slow-client`, added to `just ci-slow`, runs all six under
-    `HYPERION_SLOW_TESTS=1`. `isUnclearable` becomes an `instanceof` check once T13.a exports
-    `DescentUnclearable`.
+    `HYPERION_SLOW_TESTS=1`.
   - Seams for T13.c (the orchestrator, 2026-10-03):
     - `PreparedDescent.omittedSigmaM`;
     - `SpikeListeners.onPrepared(prepared)`, called once the measurement is ready;

@@ -5,6 +5,21 @@
 # Each test runs in its own process, so a `OnceLock` shared between tests is built once per test,
 # not once per binary: slow tests that would share expensive data are written as one test instead.
 
+# The sky's luminosity tables take about 2 GB and 50 CPU-s to build (R06.T5, measured 2026-10-04),
+# and every test that reads them builds its own copy, since each test runs in its own process. On
+# 2026-10-03 sixteen of them at once, beside other lanes' builds, exhausted the machine's 32 GB and
+# froze it. Every such test is in this group, which runs at most two at a time.
+[test-groups]
+sky-tables = { max-threads = 2 }
+
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits)/) | binary(/^sky_/))"
+test-group = "sky-tables"
+
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits)/) | binary(/^sky_/))"
+test-group = "sky-tables"
+
 [profile.slow]
 # Report every failure of a 20-minute run, not only the first.
 fail-fast = false

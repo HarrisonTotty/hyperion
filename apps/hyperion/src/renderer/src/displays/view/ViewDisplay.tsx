@@ -1,4 +1,4 @@
-import type { UniverseIdHex, UniverseTime } from "@hyperion/protocol";
+import type { BodyIdHex, UniverseIdHex, UniverseTime } from "@hyperion/protocol";
 import {
   type KeyboardEvent,
   memo,
@@ -32,15 +32,23 @@ import {
   type ViewKeyAction,
   viewKeyAction,
 } from "../../view/camera/keys";
-import { type CameraTarget, offeredPresets, type ViewId, viewId } from "../../view/camera/state";
+import {
+  type CameraTarget,
+  offeredPresets,
+  type RenderStyle,
+  type ViewId,
+  viewId,
+} from "../../view/camera/state";
 import {
   type GraphicsAnnunciation,
   graphicsAnnunciation,
   useGraphicsStatus,
 } from "../../view/engine/status";
-import type { RenderView, ViewSize } from "../../view/engine/types";
+import type { CameraPose } from "../../view/camera/pose";
+import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import {
   controlEv100,
+  exposureScale,
   DEFAULT_EXPOSURE,
   type ExposureControl,
 } from "../../view/photometry/exposure";
@@ -49,10 +57,29 @@ import {
   serverSceneAtFrame,
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
-import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
-import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
+import { cameraSceneOf, type ViewScene, type ViewStar } from "../../view/scene/model";
+import type { BakedCube } from "../../view/sky/bake";
+import { skyCubeCacheOf } from "../../view/sky/cache";
+import { cameraFromObserverM } from "../../view/sky/camera";
+import { SkyCubeLayer } from "../../view/sky/cubeLayer";
+import { skySpriteStars } from "../../view/sky/sprites";
+import {
+  buildWireframeDrawList,
+  type DrawAnchor,
+  type SpriteStar,
+} from "../../view/wireframe/drawList";
 import { WireframeRenderer } from "../../view/wireframe/submit";
+import type { LitRegime } from "../../view/bodies/regime";
+import type { StyleAvailability } from "../../view/engine/platform";
+import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
+import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
+import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import { BandLayer } from "../../view/sky/band";
+import { HostDiscLayer } from "../../view/sky/disc";
 import { CameraControls } from "./CameraControls";
+import { litLabelsOf, photorealFrame } from "./photorealFrame";
+import { StyleControl } from "./StyleControl";
+import { availabilityOf, styleRefusals } from "./styleRefusals";
 import { ExposurePanel } from "./ExposurePanel";
 import {
   cameraAnnunciation,
@@ -61,6 +88,8 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
+import { bakeInputOf, type DrawnSky, useViewSky } from "./useViewSky";
+import { SETTINGS } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -70,10 +99,14 @@ import {
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
+import { styleName } from "../../view/photoreal/style";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
   commandRun,
+  type LabelLine,
+  photorealStatements,
+  WIREFRAME_ONLY,
   labelLines,
   labelStatements,
   type MarkRow,
@@ -159,6 +192,8 @@ interface ViewStageProps {
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
+  /** The open universe, about which the sky is asked (R06), or `null`. */
+  readonly universe: UniverseIdHex | null;
 }
 
 /** What the drawing loop reads of the display, kept current by an effect. */
@@ -168,8 +203,12 @@ interface LoopInputs {
   readonly reducedMotion: boolean;
   readonly size: ElementSize | null;
   readonly tokens: ColourTokens | null;
-  /** The interim stars (R02.T16), drawn into every frame's scene. */
+  /** The interim stars (R02.T16), drawn into every frame's scene until the sky arrives. */
   readonly stars: ReadonlyArray<ViewStar>;
+  /** The sky (R06), drawn in the interim stars' place once it has arrived, or `null`. */
+  readonly sky: DrawnSky | null;
+  /** The styles the adapter offers (R01's `styleAvailability`). */
+  readonly availability: StyleAvailability;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -177,6 +216,20 @@ interface Published {
   readonly run: ViewRun;
   /** The marks where the frame drew them, device px. */
   readonly anchors: ReadonlyArray<DrawAnchor>;
+  /** The style the frame was drawn in, which the label block states (R07.T8.a). */
+  readonly drawnStyle: RenderStyle;
+  /** The photorealistic view's standing (`PhotorealRenderer.status`). */
+  readonly photoreal: PhotorealStatus;
+}
+
+/** R06's layers the photorealistic frame draws through: the band and the host discs. */
+interface SkyLayers {
+  readonly band: BandLayer;
+  readonly discs: HostDiscLayer;
+}
+
+function skyLayersOf(engine: RenderEngine): SkyLayers {
+  return { band: new BandLayer(engine), discs: new HostDiscLayer(engine) };
 }
 
 /** A draw-list anchor as plan 05's `pick` reads it, its target's key its ID. */
@@ -227,18 +280,26 @@ function ViewStage({
   onEasedMovesChange,
   stars,
   countLine,
+  universe,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
   const serverRef = useRef<ServerInput | null>(null);
   const [initial] = useState(() => initialRun(source));
   const runRef = useRef<ViewRun>(initial);
-  const [published, setPublished] = useState<Published>({ run: initial, anchors: [] });
+  const [published, setPublished] = useState<Published>({
+    run: initial,
+    anchors: [],
+    drawnStyle: initial.camera.style,
+    photoreal: "idle",
+  });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
+  const refusals = styleRefusals(graphics, published.photoreal);
+  const availability = availabilityOf(refusals);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
@@ -253,7 +314,19 @@ function ViewStage({
     size,
     tokens: null,
     stars: [],
+    sky: null,
+    availability: WIREFRAME_ONLY,
   });
+
+  // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
+  const viewSky = useViewSky({
+    universe,
+    place: server?.place ?? null,
+    run: shown.run,
+    exposure,
+    widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
+  });
+  const skyDrawn = viewSky.drawn;
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
@@ -279,8 +352,10 @@ function ViewStage({
       // and a detached element has no computed tokens.
       tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
       stars,
+      sky: skyDrawn,
+      availability,
     };
-  }, [exposure, selection, reducedMotion, size, canvas, stars]);
+  }, [exposure, selection, reducedMotion, size, canvas, stars, skyDrawn, availability]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
   useLayoutEffect(() => {
@@ -318,6 +393,55 @@ function ViewStage({
       return undefined;
     }
     const renderer = new WireframeRenderer(engine);
+    // The photorealistic style (R07.T8.a): its frame, and R06's band and host-disc layers, made
+    // again after a device loss as every handle is.
+    const photoreal = new PhotorealRenderer(engine, VIEW_NAME);
+    let layers = skyLayersOf(engine);
+    let bandFor: DrawnSky | null = null;
+    let regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+    let drawnStyle: RenderStyle = "wireframe";
+    let frameFailed = false;
+    const unsubscribeLayers = engine.onRestored(() => {
+      layers = skyLayersOf(engine);
+      bandFor = null;
+      frameFailed = false;
+    });
+    // The sky's baked cube (R06.T13.g, T14): shared through the device's cache, baked once per sky
+    // and set of baked stars, drawn every frame; a new sky, asked as the parallax rule says,
+    // brings a new cube.
+    const cubes = new SkyCubeLayer(engine);
+    const cache = skyCubeCacheOf(engine);
+    // A sky whose bake failed is not baked again until another sky or a restore.
+    let failedFor: DrawnSky | null = null;
+    const unsubscribeRestored = engine.onRestored(() => {
+      failedFor = null;
+    });
+    const cubeFor = (sky: DrawnSky | null): BakedCube | null => {
+      if (sky === null || sky === failedFor) {
+        cache.release(VIEW_NAME);
+        return null;
+      }
+      try {
+        return cache.acquire(VIEW_NAME, {
+          stars: sky.model.stars,
+          baked: sky.selection.baked,
+          // Read at the bake: a restore may have brought a device without float32-blendable.
+          bakeInput: () =>
+            bakeInputOf(
+              sky,
+              engine.capabilities.float32Blendable
+                ? SETTINGS.high.sky.faceSizePx
+                : SETTINGS.low.sky.faceSizePx,
+            ),
+        });
+      } catch (error: unknown) {
+        // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
+        console.error("the sky's cube could not be baked:", error);
+        failedFor = sky;
+        cache.release(VIEW_NAME);
+        return null;
+      }
+    };
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let sized: ViewSize | null = null;
@@ -357,9 +481,73 @@ function ViewStage({
           selection: inputs.selection,
           destination: null,
           remPx: inputs.size.remPx * ratio,
+          skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
         });
         anchors = list.anchors;
-        renderer.render(view, list, camera, viewport);
+        const cube = cubeFor(inputs.sky);
+        const exposed = exposureScale(controlEv100(inputs.exposure));
+        let drawn = false;
+        if (run.camera.style === "photorealistic" && photoreal.status === "failed") {
+          // Its pipelines could not be made: the view returns to the wireframe, and the control
+          // holds the style back with the reason.
+          runRef.current = { ...run, camera: { ...run.camera, style: "wireframe" } };
+        } else if (run.camera.style === "photorealistic" && inputs.availability.photorealistic) {
+          try {
+            if (inputs.sky !== null && inputs.sky !== bandFor) {
+              layers.band.update(
+                inputs.sky.model.band,
+                inputs.sky.model.response.band.face_texels,
+                inputs.sky.bandIlluminanceLx,
+              );
+              bandFor = inputs.sky;
+            }
+            const plan = photoreal.render(
+              view,
+              photorealFrame({
+                run,
+                pose: camera.pose,
+                viewport,
+                setting: "high",
+                exposureScale: exposed,
+                list,
+                sky: inputs.sky,
+                band: inputs.sky === null ? null : layers.band,
+                discs: layers.discs,
+                cube: cube === null ? null : cubes.draw(cube, "hdr", exposed),
+                previousRegimes: regimes,
+                // The symbology over the image: the wireframe's marks, its sprites in the image.
+                overlay: {
+                  ...renderer.frame({ ...list, sprites: [] }, camera, viewport),
+                  label: PHOTOREAL_PASS_LABELS.symbology,
+                },
+              }),
+            );
+            if (plan !== null) {
+              regimes = plan.regimes;
+              drawn = true;
+              frameFailed = false;
+            }
+          } catch (error: unknown) {
+            // A creation refused between a device loss and its restore: this frame draws the
+            // wireframe, and the next tries again; said once until a frame draws or a restore.
+            if (!frameFailed) {
+              console.error("the photorealistic frame could not be drawn:", error);
+              frameFailed = true;
+            }
+            drawn = false;
+          }
+        }
+        // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
+        drawnStyle = drawn ? "photorealistic" : "wireframe";
+        if (!drawn) {
+          renderer.render(
+            view,
+            list,
+            camera,
+            viewport,
+            cube === null ? [] : [cubes.draw(cube, "display", exposed)],
+          );
+        }
         // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10). A
         // label whose mark this frame did not draw is hidden until the next readout removes it.
         const placed = new Set<string>();
@@ -380,7 +568,7 @@ function ViewStage({
       }
       if (nowMs - publishedMs >= READOUT_INTERVAL_MS) {
         publishedMs = nowMs;
-        setPublished({ run, anchors });
+        setPublished({ run, anchors, drawnStyle, photoreal: photoreal.status });
       }
       frame = requestAnimationFrame(tick);
     };
@@ -388,13 +576,24 @@ function ViewStage({
     return () => {
       cancelAnimationFrame(frame);
       renderer.dispose();
+      photoreal.dispose();
+      layers.band.dispose();
+      unsubscribeLayers();
+      cache.release(VIEW_NAME);
+      cubes.dispose();
+      unsubscribeRestored();
       view.dispose();
     };
   }, [engineState, canvas]);
 
   const command = useCallback(
     (action: ViewKeyAction): void => {
-      const result = commandRun(runRef.current, action, { easedMoves, reducedMotion });
+      const result = commandRun(
+        runRef.current,
+        action,
+        { easedMoves, reducedMotion },
+        availability,
+      );
       if (result.kind === "refused") {
         return;
       }
@@ -404,7 +603,7 @@ function ViewStage({
         setSelection(result.run.camera.target);
       }
     },
-    [easedMoves, reducedMotion],
+    [easedMoves, reducedMotion, availability],
   );
 
   // The view's single keys act from anywhere on the display but a text field (keys.ts).
@@ -494,7 +693,7 @@ function ViewStage({
             <ViewCanvas
               canvasRef={setCanvas}
               stageRef={stageRef}
-              accessibleName={`VIEW, WIREFRAME, ${PRESET_NAMES[shown.run.camera.preset]}`}
+              accessibleName={`VIEW, ${styleName(shown.drawnStyle)}, ${PRESET_NAMES[shown.run.camera.preset]}`}
               describedBy={legendId}
               onKeyDown={onCanvasKeyDown}
               onKeyUp={onCanvasKeyUp}
@@ -509,9 +708,32 @@ function ViewStage({
                 labelRef={placeLabel}
               />
               <ViewLabelBlock
-                lines={labelLines(shown.run, exposure, server?.stale === true)}
-                statements={labelStatements(shown.run)}
-                countLine={countLine}
+                lines={withDrawnStyle(
+                  withSkyLine(
+                    labelLines(shown.run, exposure, server?.stale === true),
+                    viewSky.labelValue,
+                  ),
+                  shown.drawnStyle,
+                )}
+                statements={[
+                  ...labelStatements(shown.run),
+                  ...photorealStatements(
+                    shown.run,
+                    lightingState(
+                      hostLights(
+                        shown.run.scene,
+                        sceneHostDiscs(
+                          shown.run.scene,
+                          viewSky.drawn?.model.response.hosts ?? null,
+                        ),
+                      ),
+                      viewSky.pending,
+                    ),
+                    shown.drawnStyle,
+                    litLabelsOf(shown.run.scene),
+                  ),
+                ]}
+                countLine={viewSky.labelValue === null ? countLine : null}
                 fault={fault}
               />
             </ViewCanvas>
@@ -550,10 +772,58 @@ function ViewStage({
           onAction={command}
           onEasedMovesChange={onEasedMovesChange}
         />
+        {engineLine === null ? (
+          <StyleControl
+            renderStyle={shown.run.camera.style}
+            refusals={refusals}
+            faulted={published.photoreal === "failed"}
+            onStyle={(style) => {
+              command({ kind: "style", style });
+            }}
+          />
+        ) : null}
         <ExposurePanel exposure={exposure} meteredEv100={null} onChange={onExposureChange} />
       </div>
     </div>
   );
+}
+
+/**
+ * The sky's sprites from the camera this frame: the selection's stars placed from the camera's
+ * offset from the sky's observer, in `f64` (R06 Design note 20); `null` where the camera's
+ * galactic position is not known.
+ */
+function skySprites(
+  sky: DrawnSky,
+  pose: CameraPose,
+  scene: ViewScene,
+): ReadonlyArray<SpriteStar> | null {
+  const offset = cameraFromObserverM(pose, scene, sky.model.request.observer);
+  // A scene that has lost its system's position draws the interim stars, which say so.
+  return offset === null ? null : skySpriteStars(sky.model.stars, sky.selection.sprites, offset);
+}
+
+/**
+ * The label block's lines with the `STYLE` the view drew, which a chosen style not yet drawn (its
+ * pipelines compiling) does not replace (R07.T8.a).
+ */
+function withDrawnStyle(
+  lines: ReadonlyArray<LabelLine>,
+  drawn: RenderStyle,
+): ReadonlyArray<LabelLine> {
+  return lines.map((line) =>
+    line.label === "STYLE" ? { ...line, value: styleName(drawn) } : line,
+  );
+}
+
+/** The label block's lines with the sky's `STARS` reading in place of R02's, once it has arrived. */
+function withSkyLine(
+  lines: ReadonlyArray<LabelLine>,
+  skyValue: string | null,
+): ReadonlyArray<LabelLine> {
+  return skyValue === null
+    ? lines
+    : lines.map((line) => (line.label === "STARS" ? { ...line, value: skyValue } : line));
 }
 
 /**
@@ -678,6 +948,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
         onEasedMovesChange={setEasedMoves}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
+        universe={universe}
       />
     </div>
   );

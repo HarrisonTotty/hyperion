@@ -15,11 +15,17 @@ import {
   SKY_VIEW_KERNEL,
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
+import { BODY_DISC_MATERIALS } from "../bodies/draw";
 import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
+import { BAKE_KERNELS, BAKE_SPLAT } from "../sky/bake";
+import { BAND_MATERIAL } from "../sky/band";
+import { CUBE_DISPLAY_MATERIAL, CUBE_HDR_MATERIAL } from "../sky/cubeLayer";
+import { DISC_MATERIAL } from "../sky/disc";
+import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
@@ -102,16 +108,33 @@ export const ENGINE_CHECK_SPLAT: PointSplatSpec = {
   fragmentWgsl: `@fragment fn main() -> @location(0) vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }`,
 };
 
+/** The sky's passes (plan R06): the HDR twin of the star sprites (T13.c) and the band (T13.d). */
+const SKY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: SKY_SPRITE_HDR_MATERIAL },
+  { kind: "material", spec: BAND_MATERIAL },
+  { kind: "material", spec: DISC_MATERIAL },
+  { kind: "material", spec: CUBE_DISPLAY_MATERIAL },
+  { kind: "material", spec: CUBE_HDR_MATERIAL },
+  ...BAKE_KERNELS.map((spec): CatalogueEntry => ({ kind: "compute", spec })),
+];
+
 /** The point splats (R06.T13.h). */
 const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "point-splat", spec: ENGINE_CHECK_SPLAT },
+  // R06.T13.g: the sky's bake splat.
+  { kind: "point-splat", spec: BAKE_SPLAT },
 ];
 
 /**
  * R07's lit-body shading library (`shaders/litBody.wgsl`, R07.T4.c and T6.c), compiled and run
  * inside its probe kernel, since a library of functions is no material of its own.
  */
-const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [{ kind: "compute", spec: LIT_BODY_PROBE }];
+const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "compute", spec: LIT_BODY_PROBE },
+  // R07.T8.a's disc regime: its wholly covered pixels and its limb, one source.
+  { kind: "material", spec: BODY_DISC_MATERIALS.interior },
+  { kind: "material", spec: BODY_DISC_MATERIALS.limb },
+];
 
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
@@ -123,4 +146,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_ENTRIES,
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,
+  ...SKY_ENTRIES,
 ];

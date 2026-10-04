@@ -284,11 +284,17 @@ export class ResilientEngine implements RenderEngine {
     this.#current("writePackedCubeLevel").writePackedCubeLevel(cube, level, packed);
   }
 
-  writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void {
+  writePackedCubeLevelFromBuffer(
+    cube: TextureHandle,
+    level: number,
+    packed: BufferHandle,
+    face?: number,
+  ): void {
     this.#current("writePackedCubeLevelFromBuffer").writePackedCubeLevelFromBuffer(
       cube,
       level,
       packed,
+      face,
     );
   }
 

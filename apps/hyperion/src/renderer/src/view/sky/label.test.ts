@@ -5,17 +5,23 @@ import { skyLabelValue } from "./label";
 
 describe("the sky line", () => {
   it("states the eye's limit with its kind", () => {
-    expect(skyLabelValue(7.42, "eye", [])).toBe("V 7.4 EYE");
+    expect(skyLabelValue(7.42, "eye", [])).toBe("V 7.4 mag EYE");
   });
 
   it("states a camera's limit with its kind", () => {
-    expect(skyLabelValue(9.96, "camera", [])).toBe("V 10.0 CAM");
+    expect(skyLabelValue(9.96, "camera", [])).toBe("V 10.0 mag CAM");
   });
 
-  it("names each stand-in after a middle dot, the centre's members as clusters once", () => {
+  it("composes the gaps into one note, in order, the centre's members as clusters once", () => {
     expect(
-      skyLabelValue(9.5, "camera", ["feature_members", "centre_members", "white_dwarfs"]),
-    ).toBe("V 9.5 CAM · CLUSTERS NOT MODELLED · WD NOT MODELLED");
+      skyLabelValue(9.5, "camera", ["white_dwarfs", "feature_members", "centre_members"]),
+    ).toBe("V 9.5 mag CAM · CLUSTERS AND WHITE DWARFS: NOT YET MODELLED");
+  });
+
+  it("names a single gap alone in the note", () => {
+    expect(skyLabelValue(9.5, "camera", ["white_dwarfs"])).toBe(
+      "V 9.5 mag CAM · WHITE DWARFS: NOT YET MODELLED",
+    );
   });
 
   it("leaves R02's interim readings as they were drafted", () => {

@@ -522,13 +522,23 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
   }
 
-  writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void {
+  writePackedCubeLevelFromBuffer(
+    cube: TextureHandle,
+    level: number,
+    packed: BufferHandle,
+    face?: number,
+  ): void {
     this.#assertLive();
     this.#submit(`${cube.name} level ${level}`, (encoder) => {
-      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed);
+      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed, face);
     });
-    // The cube carries the buffer's writer, so a presentation-only result stays refused.
-    this.#writers.copied(packed, cube, this.#resources.textureOf(cube).spec.mips === 1);
+    // The cube carries the buffer's writer, so a presentation-only result stays refused; one face
+    // of six is a part of it.
+    this.#writers.copied(
+      packed,
+      cube,
+      face === undefined && this.#resources.textureOf(cube).spec.mips === 1,
+    );
   }
 
   /**

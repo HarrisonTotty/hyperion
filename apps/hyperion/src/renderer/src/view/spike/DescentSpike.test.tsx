@@ -24,6 +24,10 @@ import type { RenderView } from "../engine/types";
 import {
   DESCENT_REFUSED,
   DescentSpike,
+  groundSpeedReading,
+  heightReading,
+  heightUnitFor,
+  patchesReading,
   TEST_PLANET_STATEMENT,
   VIEWS_NOT_MADE,
 } from "./DescentSpike";
@@ -231,7 +235,7 @@ describe("DescentSpike", () => {
     renderSpike();
     const names = [
       /^VIEW, SPIKE LIT, SCRIPTED$/,
-      /^VIEW, WIREFRAME, ORBIT/,
+      /^VIEW, WIREFRAME, ORBIT, SCRIPTED$/,
       /^VIEW, WIREFRAME, CRAFT/,
     ];
     for (const name of names) {
@@ -252,15 +256,15 @@ describe("DescentSpike", () => {
     expect(TEST_PLANET_STATEMENT).toMatch(/provisional, dry and hand-parameterised/);
   });
 
-  it("stands under the training banner, since it draws a kept test scene", () => {
+  it("stands under the measurement banner, flown by script and recording", () => {
     renderSpike();
-    expect(screen.getByRole("status", { name: "Mode" }).textContent).toBe("TRAINING");
+    expect(screen.getByRole("status", { name: "Mode" }).textContent).toBe("MEASUREMENT");
   });
 
   it("says it is measuring the terrain, then shows the site's height", async () => {
     renderSpike();
-    expect(screen.getByText(/TERRAIN MEASURING/)).toBeDefined();
-    const reading = await screen.findByText(/^-?[\d,]+ m$/, undefined, { timeout: 20_000 });
+    expect(screen.getByText("MEASURING TERRAIN: landing site and ground track")).toBeDefined();
+    const reading = await screen.findByText(/^[+-][\d,]+ m$/, undefined, { timeout: 20_000 });
     expect(reading.closest("dd")?.previousElementSibling?.textContent).toBe("Site Height");
   }, 30_000);
 
@@ -394,4 +398,56 @@ describe("DescentSpike", () => {
     expect(selected.length).toBeGreaterThan(0);
     expect(bakes[0]).toMatchObject({ vertexPath: "face-differences", normals: "double" });
   }, 30_000);
+
+  it("names its readings as the nomenclature does", () => {
+    renderSpike();
+    for (const label of [
+      "Spike Seed",
+      "Quality",
+      "Segment",
+      "Script Time",
+      "Height Above Site",
+      "Ground Speed",
+      "Vertical Speed",
+      "Camera ELV",
+      "Site Height",
+      "Finest Terrain Held",
+      "Patches",
+    ]) {
+      expect(screen.getByText(label, { selector: "dt" })).toBeDefined();
+    }
+  });
+});
+
+describe("the descent panel's readings", () => {
+  it("switches the height's unit with hysteresis", () => {
+    expect(heightUnitFor(10_000, "m")).toBe("m");
+    expect(heightUnitFor(10_600, "m")).toBe("km");
+    expect(heightUnitFor(10_000, "km")).toBe("km");
+    expect(heightUnitFor(9_400, "km")).toBe("m");
+  });
+
+  it("writes the height to the precision the operator can act on", () => {
+    expect(heightReading(1.94, "m")).toBe("1.9 m");
+    // Grouped from five digits, as `formatNumber` groups every reading.
+    expect(heightReading(9_850.4, "m")).toBe("9850 m");
+    expect(heightReading(-12_000, "m")).toBe("-12,000 m");
+    expect(heightReading(400_000, "km")).toBe("400.0 km");
+  });
+
+  it("writes ground speed whole from 100 m/s", () => {
+    expect(groundSpeedReading(7_670)).toBe("7670 m/s");
+    expect(groundSpeedReading(12.345)).toBe("12.35 m/s");
+  });
+
+  it("binds each patch count to its word, breaking only at the separators", () => {
+    const text = patchesReading({ selected: 73, drawn: 5, standingIn: 0, missing: 0 });
+    expect(text.split("\u00a0· ")).toEqual([
+      "73\u00a0SELECTED",
+      "5\u00a0DRAWN",
+      "0\u00a0STANDING\u00a0IN",
+      "0\u00a0MISSING",
+    ]);
+    expect(text.replaceAll("\u00a0· ", "")).not.toContain(" ");
+  });
 });

@@ -202,7 +202,7 @@ impl HostDisc {
 /// The grid a star's tables are read from: white dwarfs their own, stars before or on the main
 /// sequence the dwarfs', every other living star the giants'.
 #[must_use]
-fn grid_of(phase: Phase) -> AtmosphereGrid {
+pub(crate) fn grid_of(phase: Phase) -> AtmosphereGrid {
     match phase {
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
             AtmosphereGrid::WhiteDwarf
