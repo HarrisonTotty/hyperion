@@ -424,13 +424,13 @@ export function isLitKind(kind: ViewBodyKind): boolean {
 }
 
 /** The statement while the photorealistic style is chosen and its image is not yet drawn. */
-export const PHOTOREAL_PENDING = "PHOTOREALISTIC PENDING";
+export const PHOTOREAL_PREPARING = "PHOTOREALISTIC: PREPARING";
 
 /**
  * The photorealistic style's statements under the label block (R07.T8.a), none in the wireframe:
- * {@link PHOTOREAL_PENDING} while the view still draws its wireframe in its place (its pipelines
+ * {@link PHOTOREAL_PREPARING} while the view still draws its wireframe in its place (its pipelines
  * compiling); then, while the scene has a body to light, the lighting line while no star lights it
- * (decision-r07-t8a, item 1) and each label the drawn bodies carry (`BODY ALBEDO: NOT YET
+ * (decision-r07-t8a, item 1) and each label the drawn bodies carry (`BODY PHOTOMETRY: NOT YET
  * MODELLED` for the provisional photometry, Design note 5).
  *
  * @param drawn - The style the view's last frame was drawn in.
@@ -446,7 +446,7 @@ export function photorealStatements(
     return [];
   }
   if (drawn !== "photorealistic") {
-    return [PHOTOREAL_PENDING];
+    return [PHOTOREAL_PREPARING];
   }
   if (!run.scene.bodies.some((body) => isLitKind(body.kind))) {
     return [];

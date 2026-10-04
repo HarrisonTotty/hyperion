@@ -47,7 +47,7 @@ import { precisionScene } from "../../view/scenes/precision";
 import { buildWireframeDrawList } from "../../view/wireframe/drawList";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
-import { PHOTOREAL_NOT_MADE } from "./styleRefusals";
+import { PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
 
@@ -892,7 +892,7 @@ describe("the VIEW display's style (R07.T8.a)", () => {
     advance(300);
     expect([
       screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC/ }).tagName,
-      labelBlock().includes("BODY ALBEDO: NOT YET MODELLED"),
+      labelBlock().includes("BODY PHOTOMETRY: NOT YET MODELLED"),
       labelBlock().includes("LIGHTING:"),
       lastFrame()?.label,
     ]).toEqual(["CANVAS", true, false, "symbology"]);
@@ -922,7 +922,7 @@ describe("the VIEW display's style (R07.T8.a)", () => {
     advance(100);
     await settle();
     advance(300);
-    expect(labelBlock().includes("LIGHTING: HOSTS NOT RECEIVED")).toBe(true);
+    expect(labelBlock().includes("LIGHTING: STAR DISCS NOT RECEIVED")).toBe(true);
   });
 });
 
@@ -949,7 +949,58 @@ describe("the VIEW display's photorealistic style when its pipelines fail (R07.T
     expect([
       screen.getByRole("application", { name: /^VIEW, WIREFRAME/ }).tagName,
       screen.getByRole("button", { name: "PHOTOREALISTIC" }).getAttribute("aria-disabled"),
-      screen.getByText(PHOTOREAL_NOT_MADE).tagName,
+      screen.getByText(PHOTOREAL_NOT_CREATED).tagName,
     ]).toEqual(["CANVAS", "true", "P"]);
+  });
+});
+
+describe("the VIEW display's exposure meter (R07.T8.a)", () => {
+  it("mounts the meter beside the exposure only while the photorealistic image is drawn", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    expect(screen.queryByRole("region", { name: "Exposure meter" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    expect(
+      within(screen.getByRole("region", { name: "Exposure meter" })).getByText("NO IMAGE TO METER")
+        .tagName,
+    ).toBe("P");
+  });
+});
+
+/** The exposure panel's reading. */
+function exposureReadout(): string {
+  return (
+    within(screen.getByRole("region", { name: "Exposure" })).getAllByRole("status")[0]
+      ?.textContent ?? ""
+  );
+}
+
+describe("the VIEW display's AUTO exposure (R07.T8.a)", () => {
+  it("enters AUTO on ENABLE once the image is metered, and keeps an operator's INHIBIT", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    expect(exposureReadout()).toMatch(/^EV100 -?\d+\.\d AUTO$/);
+    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    advance(1000);
+    await settle();
+    advance(1000);
+    expect(exposureReadout()).toMatch(/INHIBITED · OPERATOR$/);
   });
 });

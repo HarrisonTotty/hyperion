@@ -1,20 +1,25 @@
 /**
- * The smoke page's lit-body checks (plan R07, T8.a): `shaders/bodyDisc.wgsl`'s two draws into an
- * `rgba16float` target the test makes, against `bodies/discShading.ts`' CPU rasteriser of the same
- * arithmetic: a disc's texels and meter classes; its summed flux against the point's at the 3 px
- * switch, over phases and sub-pixel placements; a Saturn-like f = 0.098 disc's extents at 100 px.
+ * The smoke page's lit-body checks (plan R07, T8.a and T8.b): `shaders/bodyDisc.wgsl`'s two draws
+ * into an `rgba16float` target the test makes, against `bodies/discShading.ts`' CPU rasteriser of
+ * the same arithmetic: a disc's texels and meter classes; its summed flux against the point's at
+ * the 3 px switch, over phases and sub-pixel placements; a Saturn-like f = 0.098 disc's extents at
+ * 100 px; a disc under a half-surveyed two-class map, and under a map of one class equal to the
+ * uniform law against the uniform disc.
  */
 
 import { add, scale, vec3 } from "../geometry/vec3";
+import type { ClassMapDiscSurface } from "../view/appearance/bodyAppearance";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
-import { phaseFactorTableOf } from "../view/appearance/law";
+import { lawFor } from "../view/appearance/phase";
 import {
   compositeDiscPixels,
   type CompositePixel,
   rasteriseDisc,
   viewRay,
 } from "../view/bodies/discShading";
+import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
 import { LitBodyRenderer, type LitBodyInput, planLitBodies, pointFlux } from "../view/bodies/draw";
+import { type Rotation3, rotateToBody, rotation3FromRows } from "../view/coords/rotation";
 import {
   NEAR_PLANE_M,
   perspectiveReversedInfinite,
@@ -46,6 +51,7 @@ import {
   fullScreenMesh,
   halfTexels,
   NEAR_M,
+  pause,
 } from "./harness";
 
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -65,6 +71,13 @@ const RAD_PER_DEG = Math.PI / 180;
 /** The agreement of a texel with the rasteriser: `rgba16float`'s rounding and `f32`'s shading. */
 const TEXEL_RELATIVE = 4e-3;
 const TEXEL_ABSOLUTE = 1e-4;
+
+/** A disc's class map as a draw takes it: its surface, its body's rotation and its texels. */
+interface MappedSurface {
+  readonly surface: ClassMapDiscSurface;
+  readonly rotation: Rotation3;
+  readonly texels: ClassMapTexels;
+}
 
 /** One drawn disc: the GPU's texels and the CPU's composite. */
 interface Drawn {
@@ -90,6 +103,7 @@ async function drawDisc(
   offsetPx: readonly [number, number] = [0, 0],
   camera: ProjectionCamera = CAMERA,
   occluder: BodyFigure | null = null,
+  mapped: MappedSurface | null = null,
 ): Promise<Drawn> {
   const pxPerRad = viewport.widthPx / (2 * Math.tan(camera.fovXRad / 2));
   const distance = figure.equatorialRadiusM / Math.sin(diameterPx / 2 / pxPerRad);
@@ -105,6 +119,7 @@ async function drawDisc(
     centreM,
     figure,
     photometry: PROVISIONAL_PHOTOMETRY,
+    ...(mapped === null ? {} : { surface: mapped.surface, rotation: mapped.rotation }),
   };
   const options = { camera, viewport, exposureScale: EXPOSURE, annuli: DISC_ANNULI_HIGH };
   // An occluder 3.844 × 10⁸ m towards the star and 3 × 10⁶ m aside, its shadow across the disc.
@@ -138,9 +153,7 @@ async function drawDisc(
     const expected =
       record === undefined
         ? []
-        : compositeDiscPixels(
-            rasteriseDisc(record, phaseFactorTableOf(record.law), camera, viewport),
-          );
+        : compositeDiscPixels(rasteriseDisc(record, camera, viewport, mapped?.texels ?? null));
     return { viewport, camera, texels, expected, body, hosts };
   } finally {
     target.dispose();
@@ -336,6 +349,146 @@ async function checkExtents(
   );
 }
 
+/** R = Rz(30°) Rx(55°): a pole tilted towards the camera and turned, so that several faces show. */
+const TILTED: Rotation3 = (() => {
+  const [cb, sb, cg, sg] = [
+    Math.cos(55 * RAD_PER_DEG),
+    Math.sin(55 * RAD_PER_DEG),
+    Math.cos(30 * RAD_PER_DEG),
+    Math.sin(30 * RAD_PER_DEG),
+  ];
+  return rotation3FromRows([
+    vec3(cg, -sg * cb, sg * sb),
+    vec3(sg, cg * cb, -cg * sb),
+    vec3(0, sb, cb),
+  ]);
+})();
+
+/** A body 10% oblate about the tilted pole. */
+const TILTED_OBLATE: BodyFigure = {
+  equatorialRadiusM: RADIUS_M,
+  polarRadiusM: 0.9 * RADIUS_M,
+  pole: rotateToBody(TILTED, vec3(0, 0, 1)),
+};
+
+/** The relative difference of two read-backs, at most, over the texels either lights. */
+function worstRelative(a: Float32Array, b: Float32Array): number {
+  let worst = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (i % 4 === 3) {
+      continue;
+    }
+    const x = a[i] ?? Number.NaN;
+    const y = b[i] ?? Number.NaN;
+    const magnitude = Math.max(Math.abs(x), Math.abs(y));
+    if (magnitude > 0 || !Number.isFinite(x) || !Number.isFinite(y)) {
+      worst = Math.max(worst, Math.abs(x - y) / magnitude);
+    }
+  }
+  return worst;
+}
+
+/**
+ * T8.b: a disc under a class map on the GPU: a half-surveyed two-class map (a dark lunar and a
+ * bright terrestrial class, the provisional Lambert law elsewhere) against the CPU rasteriser, and a
+ * map of one class equal to the uniform law against the uniform disc.
+ */
+export async function checkClassMap(engine: RenderEngine, checks: Checks): Promise<void> {
+  const uniform = PROVISIONAL_PHOTOMETRY.law;
+  // Half the cells surveyed (i + j even): class 0 where i and j are even, a quarter class 0 and
+  // three quarters class 1 where both are odd.
+  const twoClass = packClassMap(4, 2, ({ i, j }) =>
+    (i + j) % 2 !== 0 ? null : i % 2 === 0 ? [1, 0] : [0.25, 0.75],
+  );
+  const oneClass = packClassMap(4, 1, ({ i, j }) => ((i + j) % 2 === 0 ? [1] : null));
+  const viewport = { widthPx: 64, heightPx: 64 };
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  const made: ClassMapDiscSurface[] = [];
+  try {
+    const mapped = classMapSurface(
+      engine,
+      "smoke class map",
+      twoClass,
+      [
+        lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+        lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+      ],
+      uniform,
+    );
+    made.push(mapped);
+    // A law equal to the uniform one, not the same object.
+    const same = classMapSurface(
+      engine,
+      "smoke one-class map",
+      oneClass,
+      [lawFor([0.2, 0.2, 0.2], [1.5, 1.5, 1.5], "lambert")],
+      uniform,
+    );
+    made.push(same);
+    // 40 px across: one sample a pixel inside, 4 × 4 on the limb; 60° of phase.
+    const drawn = await drawDisc(
+      engine,
+      renderer,
+      viewport,
+      40,
+      60,
+      TILTED_OBLATE,
+      [0, 0],
+      CAMERA,
+      null,
+      {
+        surface: mapped,
+        rotation: TILTED,
+        texels: twoClass,
+      },
+    );
+    const agreement = texelAgreement(drawn);
+    checks.check(
+      "T8.b a disc under a half-surveyed two-class map equals the CPU rasteriser's",
+      agreement.worst <= 1 && agreement.classes && drawn.expected.length > 0,
+      `${String(drawn.expected.length)} pixels; worst error ${agreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(agreement.classes)}${agreement.mismatches.length > 0 ? `: ${agreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+    );
+    const results: string[] = [];
+    let worst = 0;
+    for (const diameterPx of [20, 40]) {
+      // The harness reads its targets back in order: each before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const plain = await drawDisc(engine, renderer, viewport, diameterPx, 60, TILTED_OBLATE);
+      // The mapped disc is drawn and read back after the plain one, in turn.
+      // oxlint-disable-next-line no-await-in-loop
+      const one = await drawDisc(
+        engine,
+        renderer,
+        viewport,
+        diameterPx,
+        60,
+        TILTED_OBLATE,
+        [0, 0],
+        CAMERA,
+        null,
+        {
+          surface: same,
+          rotation: TILTED,
+          texels: oneClass,
+        },
+      );
+      const relative = worstRelative(plain.texels, one.texels);
+      worst = Math.max(worst, relative);
+      results.push(`${String(diameterPx)} px: ${relative.toExponential(2)}`);
+    }
+    checks.check(
+      "T8.b a map of one class equal to the uniform law draws the uniform disc to 1e-5",
+      worst <= 1e-5,
+      `worst relative difference ${results.join("; ")}`,
+    );
+  } finally {
+    for (const surface of made) {
+      engine.releaseTexture(surface.weights);
+    }
+    renderer.dispose();
+  }
+}
+
 /** The sprite materials whose row's z is the sprite's depth (decision-r07-t8a, item 2). */
 const SPRITE_MATERIALS = [WIREFRAME_MATERIALS.starSprite, SKY_SPRITE_HDR_MATERIAL] as const;
 
@@ -442,7 +595,22 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
       ],
       previousRegimes: new Map(),
       overlay: null,
+      meter: "lit",
     });
+    // The frame's histogram under `LIT`, read back a frame or so late: the lit side counts.
+    let histogram = renderer.takeHistogram();
+    for (let attempt = 0; attempt < 200 && histogram === undefined; attempt += 1) {
+      // The read-back settles in its own time; the harness waits for it in turn.
+      // oxlint-disable-next-line no-await-in-loop
+      await pause(25);
+      histogram = renderer.takeHistogram();
+    }
+    const counted = histogram?.bins.reduce((sum, n) => sum + n, 0) ?? 0;
+    checks.check(
+      "T8.a the photorealistic frame's histogram meters the lit side under LIT",
+      counted > 0,
+      `${histogram === undefined ? "no histogram" : "a histogram"}: ${String(counted)} weighted counts`,
+    );
     const bytes = await view.readBack();
     const at = (x: number, y: number): number => bytes[(y * viewport.widthPx + x) * 4 + 1] ?? 0;
     const litSide = at(36, 18);

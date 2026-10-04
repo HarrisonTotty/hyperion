@@ -182,7 +182,7 @@ export function aLitBody(overrides: Partial<BodyAppearance> = {}): BodyAppearanc
     figure: { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6, pole: null },
     photometry: PROVISIONAL_PHOTOMETRY,
     regime: "disc",
-    labels: ["BODY ALBEDO: NOT YET MODELLED"],
+    labels: ["BODY PHOTOMETRY: NOT YET MODELLED"],
     ...overrides,
   };
 }

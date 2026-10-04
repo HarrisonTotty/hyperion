@@ -227,7 +227,7 @@ export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>>;
  * defines no second one.
  */
 export type { BodyFigure } from "../terrain/planet"; // { equatorialRadiusM; polarRadiusM; pole: Vec3 | null }
-export type AppearanceLabel = "BODY ALBEDO: NOT YET MODELLED";
+export type AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLED";
 export interface BodyAppearance {
   // what R08 and R10 read per body; built by R07.T5
   readonly body: BodyIdHex;
@@ -704,7 +704,7 @@ and `--port`.
    input the client reconciles. Until the
    section is on the wire a body takes `PROVISIONAL_PHOTOMETRY`, a Lambert sphere of spherical
    albedo 0.3 (p = 0.2, q = 1.5, brighter at large phase than any real body), and the label block
-   says `BODY ALBEDO: NOT YET MODELLED` (a phrase for the owner, R07.T16).
+   says `BODY PHOTOMETRY: NOT YET MODELLED` (a phrase for the owner, R07.T16).
 6. **The horizon in closed form, eclipses by annuli** (researched 2026-09-29; Howell's catalogue of
    radiation view factors, configuration B-43 (Cunningham 1961; Hauptmann 1968),
    <https://www.thermalradiation.net/tablecon.html>, formula transcribed from memory and verified by
@@ -1069,7 +1069,7 @@ owner (delegated decision pending)". Accepted with amendments 2026-10-02 (decisi
 
 - **R07.T2.a Absence, now.** `appearance/fromWire.ts` maps a body with no photometric section to
   `PROVISIONAL_PHOTOMETRY` (built here: Design note 5's Lambert sphere, p = 0.2, q = 1.5, through
-  T4.b's `lawFor`) with the `BODY ALBEDO: NOT YET MODELLED` label, and a body with no flattening to
+  T4.b's `lawFor`) with the `BODY PHOTOMETRY: NOT YET MODELLED` label, and a body with no flattening to
   a sphere of its `bulk.radius_m` as a `BodyFigure` (`pole` from `bodyFixedRotation`, `null` while
   plan 14 sends no rotation). A `contact` entry of R03's frame has an apparent position only: it
   is lit from its apparent direction with no eclipse or planetshine term, and with no resolved
@@ -1311,18 +1311,28 @@ recorded: a Sun-like star in frame with a lit planet, hues holding in the highli
 
 `photoreal/overlay.ts` (Design notes 16–17): R02's draw list with casing on in the photorealistic
 style; rings and hulls as cased marks until R11; DOM readouts on `--surface-0` plates; the label
-block gains the meter, the style and `BODY ALBEDO: NOT YET MODELLED`; hull edges cased over the
+block gains the meter, the style and `BODY PHOTOMETRY: NOT YET MODELLED`; hull edges cased over the
 image, with the hull faces' occluder bias (`occluder.wgsl`, `slopeScale` 2 as built) raised to 3 so
 that the casing is covered (the UX decision, item 12; the sphere occluder's `SLOPE_SCALE` is 3
 already). Draft, for the owner, the nomenclature entries this plan adds beyond R02's nine items
 (`PHOTOREALISTIC` is already drafted by R02, beside `WIREFRAME`; `METER AVG`,
-`METER LIT`, `METER DARK`, `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one
-edit of `docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. Tests: every overlay
-mark over the image has a casing stroke; plates are present for every readout; the console-ux
-skill's lint and contrast scripts pass. Symbology over the tone-mapped image is a following
-canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view, in the same task as
-T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance: `just ci`; the guide
-edit is one commit for the owner.
+`METER LIT`, `METER DARK`, the meter's statuses `NO LIT SIDE`, `NO DARK SIDE` and
+`STAR DISC ONLY` with their remedy clauses (decision-r07-t8a-meter),
+`ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one edit of
+`docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. T16 also builds them:
+`AutoExposure` keeps why it has no metered value (`no-image`, a histogram timeout;
+`nothing-weighed`, histograms that weigh no pixel under the meter in force; `acquiring`, under
+`METER_TIMEOUT_S` since the image was first drawn or the meter changed with no value held). R02's
+`InhibitReason` gains `"nothing_weighed"` with its meter. `ExposurePanel` and `MeterControl` take
+the cause beside the metered value; while it is `acquiring`, neither shows a meter status or
+`NO IMAGE TO METER`, and `ENABLE` is held back with `NOT AVAILABLE: not yet metered`. Tests: under
+`LIT` with no lit body, a drawn image reads `NO LIT SIDE`, never `NO IMAGE TO METER`, after 0.5 s
+and not before; a meter change clears it at once; `AUTO` resumes when a lit body is metered. Its
+other tests: every overlay mark over the image has a casing stroke; plates are present for every
+readout; the console-ux skill's lint and contrast scripts pass. Symbology over the tone-mapped
+image is a following canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view,
+in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance:
+`just ci`; the guide edit is one commit for the owner.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -1524,6 +1534,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   see flare, so a realistic camera mode that meters it could be offered as an operator-selected
   meter (the research lean, 2026-09-29), not as a default and not with a cap, which would be an
   arbitrary number; it would need a guide entry for the owner. Not built.
+- **No way back to `MAN` (open, for the owner; observed in decision-r07-t8a-meter, not ruled).**
+  No control calls `setManual`, so `MAN` cannot be re-entered once it is left, and `INHIBIT` is
+  the operator's only hold. A `MAN` entry (the triple, or an EV100 set point, under the guide's
+  data-entry rules) is the owner's to decide; not built.
 - **The law's thresholds** (Design note 5: 100 Pa and 30 kPa, raised from 10 kPa so that the
   simulated Mars, 11 kPa, reaches the Mars template; the cloud term suspended until plan 14's cloud
   fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
@@ -1815,16 +1829,17 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   could not leave (a test drives the cut and the recovery). A histogram with nothing the meter
   weighs (`LIT` with no lit body) is treated as no histogram: `AUTO` holds until
   `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
-  definition of that status (a closed or absent source); T16's draft takes it up, the
-  alternative being a status of its own such as `NO LIT BODY`, for the owner. Under `AUTO`
-  `onMetering` receives the smoothed, applied EV100, so R02's `auto.ev100` is the applied value
-  and `meteredEv100` the metered one; a system inhibit resumes and smooths in the same step; the
-  operator's `setAuto` and `enable` take `meteredEv100` and set the exposure there at once,
-  unsmoothed (R02's commands as built). `setMeter` changes the reading's meter at once, and
-  histograms under its weights arrive one to three frames later. `MeterControl` takes the
+  definition of that status. T16 replaces it with the meter's own status, `NO LIT SIDE` and its
+  twins (decision-r07-t8a-meter). Under `AUTO` `onMetering` receives the smoothed, applied EV100,
+  so R02's `auto.ev100` is the applied value and `meteredEv100` the metered one; a system inhibit
+  resumes and smooths in the same step; the operator's `setAuto` and `enable` take
+  `meteredEv100` and set the exposure there at once, unsmoothed (R02's commands as built).
+  `setMeter` changes the reading's meter at once, and histograms under its weights arrive one to
+  three frames later. `MeterControl` takes the
   operator's `meter` as its own prop, so the chosen meter shows (`METER LIT`, the button
   underlined, as the time control's step is) while nothing is metered; held-back buttons are
-  described by `NO IMAGE TO METER`; the panel is titled `Exposure meter`, its buttons grouped
+  described by `NO IMAGE TO METER` (superseded: T8.a, parts 3 and 4, holds none back and describes
+  the pressed one only); the panel is titled `Exposure meter`, its buttons grouped
   under the legend `SELECT`. **Left to T7**: mount `MeterControl` beside `ExposurePanel`,
   subscribed to the view's `AutoExposure` through `useSyncExternalStore` and throttled to about
   4 Hz at 0.1 EV, not passed down from `ViewDisplay`'s state; make the `AutoExposure` with R06's
@@ -2046,7 +2061,7 @@ altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     q = 1.5); no body class maps to the key.
   - **`appearanceFromWire(body, rotation)`** (`appearance/fromWire.ts`) returns the photometry,
     the figure and the labels: every body takes `PROVISIONAL_PHOTOMETRY` with
-    `BODY ALBEDO: NOT YET MODELLED`, and a sphere of `bulk.radius_m` whose pole is the body-fixed z
+    `BODY PHOTOMETRY: NOT YET MODELLED`, and a sphere of `bulk.radius_m` whose pole is the body-fixed z
     axis through `bodyFixedRotation` (`null` today); a body without a granted radius has no figure
     and stays R02's mark. `BodyPhotometry`, `AppearanceLabel` and the `BodyFigure` re-export live
     there. A `contact` frame entry has no summary here; it never occludes and is never eclipsed
@@ -2143,7 +2158,7 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     lights (`PlacedLight`): per body the brightest two past `STAR_CUT_RELATIVE`, and its
     occluders, the two largest seen from it. A body no star lights draws colour 0 with class
     `other`, and a point no light. The label lines `LIGHTING: PENDING` and
-    `LIGHTING: HOSTS NOT RECEIVED` (`lightingStatement`) are the orchestrator's wording under the
+    `LIGHTING: STAR DISCS NOT RECEIVED` (`lightingStatement`) are the orchestrator's wording under the
     owner's delegation, drafted for the guide beside `TERRAIN: STREAMING`, and are shown from
     part 2. `sunLikeHostDisc` (moved out of `test/`, `aHostDisc` calls it) has an illustrative
     colour and the Sun's V limb law (Claret and Southworth 2022 at log g 4.5, α 0.6893; 0.6884 at
@@ -2165,7 +2180,8 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     A + B√δ + Cδ, as μ and a crescent's μ₀ do at the limb; the count is not raised. The sweep
     (centres on a 4 × 4 sub-pixel grid; phases 0°, 90° and 150°; f = 0 and 0.098; 3, 3.3 and 6 px)
     is within 0.8% everywhere but 6 px at 150°, 1.6%, of which 1.1% is the point's own far-field
-    error (below): tested at 1%, and 2% there. A lunar law and a spheroid seen from 45° latitude
+    error (below), so that the 6 px rows meet the exact near-field integral at 1% instead (part 2,
+    follow-up (b)). A lunar law and a spheroid seen from 45° latitude
     are within 1% at 3 px.
   - **The ray in `f32`.** The hit is taken by cross products in the scaled space,
     q′ = −(r̂ × u′) × r̂ − √((a ÷ D)² − |r̂ × u′|²) r̂, never b² − rr · power, which cancels to 7% for
@@ -2223,9 +2239,9 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     sources, and the wireframe's marks as the `symbology` pass loading it. The pipelines are
     compiled asynchronously before the first frame and again after a device loss (a making a
     restore overtakes is abandoned); until then the view draws its wireframe, its `STYLE` line and
-    canvas name stating the style drawn, with `PHOTOREALISTIC PENDING` under the label block. Where
+    canvas name stating the style drawn, with `PHOTOREALISTIC: PREPARING` under the label block. Where
     the pipelines cannot be made the view returns to the wireframe and the control holds the style
-    back with the fault `GRAPHICS STYLE REFUSED: photorealistic style not made, relaunch to retry`,
+    back with the fault `GRAPHICS STYLE REFUSED: photorealistic style not created, relaunch to retry`,
     in `--status-caution` while it lasts. The control's
     reasons follow the graphics' condition (`styleRefusals`): the adapter's styles, the software
     adapter's refusal, `GRAPHICS ACQUIRING ADAPTER` before the answer; it is shown only beside a
@@ -2235,12 +2251,19 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     depth 0 before the painter's sequence, not at their `host` entries (decision-r07-t8a, item 2
     (d)): a disc body behind such a host would cover it, which needs the body several au beyond a
     star some pixels across, far below a pixel.
-  - **Light positions (pending the orchestrator's ruling).** The view places each light, and builds
-    each occluder, at the scene's drawn centre: a server scene's `apparentM`, which carries the
-    camera's light time and aberration, so the light direction at a body may be off by v·τ★ ÷ d★,
-    up to about 10⁻⁴ rad, against decision-r07-t8a item 1's frame geometry through `lightingBodyOf`.
-    `ViewBody` holds no geometric centre. Latent until R06.T11 serves `sky`; kept scenes are
-    static, and `PHASE TEST` is exact.
+  - **Light positions: a known limit until R07.T10.a** (decision-r07-t8a, follow-up (a)). The view
+    places each light, and builds each occluder, at the scene's drawn centre: a server scene's
+    `apparentM`, with the camera's light time and aberration. The ruling: drawing keeps the apparent
+    places, lighting takes retarded geometric positions (the lit body at its drawn time t_B, each
+    star or occluder at t_B − |r_X − r_B| ÷ c, without aberration, translated to the body's drawn
+    centre), built by R07.T10.a "Retarded lighting geometry", the first subtask of T10, with no
+    protocol change. The error until then: the light direction and terminator by at most about
+    10⁻⁴ rad (under 0.1 px for a disc under 1,000 px in radius); an eclipse's shadow by about v·δ,
+    δ between 0 and twice the occluder-to-body light time, up to some 77 km for the Moon's on Earth
+    (3–6 px on a 1,000 px Earth, against an umbra of at most 270 km), about 50 km for Io's on Jupiter
+    against an umbra of 3,600 km. The frame's `geometricM` (the time T, not t_B) is no substitute:
+    from 1 au it would put the Moon's shadow some 500 km off. Latent until R06.T11 serves `sky`;
+    kept scenes are static, and `PHASE TEST` is exact.
   - **The disc's law.** `DiscRecord` takes `BodyPhotometry.law` directly, `DiscSurface`'s
     `uniform` case without the type; T8.b threads `DiscSurface` through the record and the shader.
     `bodyDisc.wgsl` writes `body_brdf`'s lunar-Lambert expression inline, with the horizon factor
@@ -2261,11 +2284,10 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     through `STYLE_TOGGLE_KEY`, and `commandRun` takes the adapter's `StyleAvailability`. The
     canvas's key legend lists the flight keys only, so `4` is shown on its control, as the
     presets' digits are (ux-reviewer, 2026-10-03). The label block's photorealistic statements are
-    `LIGHTING: PENDING` or `LIGHTING: HOSTS NOT RECEIVED` (`lightingState`, from `useViewSky`'s
-    `pending`) and the lit bodies' labels (`BODY ALBEDO: NOT YET MODELLED` while they take the
+    `LIGHTING: PENDING` or `LIGHTING: STAR DISCS NOT RECEIVED` (`lightingState`, from `useViewSky`'s
+    `pending`) and the lit bodies' labels (`BODY PHOTOMETRY: NOT YET MODELLED` while they take the
     provisional photometry), shown only while the scene has a planet, dwarf planet or moon. The
-    guide has draft rows for `LIGHTING:`, `PHOTOREALISTIC PENDING`, `BODY ALBEDO: NOT YET
-MODELLED`, `PHASE TEST`, its bodies' labels and the failure's wording, for the owner. The kept
+    guide has draft rows for `LIGHTING:`, `PHOTOREALISTIC: PREPARING`, `BODY PHOTOMETRY: NOT YET MODELLED`, `PHASE TEST`, its bodies' labels and the failure's wording, for the owner. The kept
     scene `PHASE TEST` is in the `SCENE` selector, with a Jupiter-sized `TEST GIANT` at 10¹⁰ m for
     the by-hand Jupiter. `DrawnSky` gains `bandIlluminanceLx`, the cull's, for R06's band layer.
     R06's `BandLayer` and `HostDiscLayer` are made again after a device loss, and the frame's path
@@ -2286,9 +2308,206 @@ MODELLED`, `PHASE TEST`, its bodies' labels and the failure's wording, for the o
     Saturn-like extents (part 1) are the TypeScript rasteriser's coverage, the GPU's texels checked
     against it; its "100 px" is at the centre pixel's scale on a 128 px, 60° view, where the disc
     spans about 52° and projects to 107.38 × 96.85 px.
-  - **The 6 px, 150° case** of the flux sweep is held at 2%, not decision-r07-t8a's 1%: the
-    far-field point is itself 1.1% off the exact integral there (for the owner to acknowledge).
+  - **The 6 px rows** (decision-r07-t8a, follow-up (b)): 1% everywhere. At 3 and 3.3 px the disc
+    meets the point it switches with; at 6 px, where no point is drawn, the disc meets an exact
+    `f64` near-field surface integral of its own law (`nearFieldFlux` in `draw.test.ts`, 400 × 800
+    midpoint), and a test pins the far-field point's own error there, 1 − F_exact ÷ F_point =
+    6.1 a ÷ D at 150° and 0.59 a ÷ D at 90°, to 0.2%.
   - **By hand, for the owner**: `PHASE TEST` with `4` (the target keys stepping through the 0°,
     90° and 150° planets and the `TEST GIANT`, a Jupiter from 10¹⁰ m) on the development machine
     with `just client`, recorded in the as-built notes; `StyleControl`'s layout at 1920 × 1080 and
     1280 × 720, and the marks' legibility over a bright disc.
+- **Deviations in T8.a, as built (part 3: the metering, and the rulings' wording).**
+  - **The photorealistic view meters its image**, closing T13.b's note ("T7 mounts
+    `MeterControl`", which T7 left to T8.a). `PhotorealRenderer` makes a `HistogramReader` with
+    its pipelines (`HISTOGRAM_KERNEL`, compiled with them, made again after a device loss) and takes
+    the scene target's histogram each frame under the operator's meter (`PhotorealFrame.meter`;
+    stride 2 on the low setting), after the scene target's passes and before bloom;
+    `takeHistogram()` hands the latest read-back to the view. The stage's loop holds an
+    `AutoExposure` (`VIEW_AUTO_PROGRAM`, Design note 11's f/1.4 and 1/30 s, added to
+    `post/autoExposure.ts`): each frame it steps on the histogram that arrived (none while the
+    wireframe is drawn, which times the meter out, and a system inhibit holds `AUTO`), the frame is
+    pre-exposed and the wireframe's sprites exposed at its applied EV100, an operator's command
+    reaches it when the display's control changes to one it did not publish, and at the readout's
+    4 Hz the control it moved to reaches the display's state, with its reading. `MeterControl`
+    stands beside `ExposurePanel` while the photorealistic image is drawn, and `ExposurePanel`'s
+    `meteredEv100` is the reading's, so `AUTO` is offered once an image is metered and
+    `NO IMAGE TO METER` is true when it is not. The meter's choice is held above the stage beside
+    the exposure (`AVG` by default), so that a new scene keeps both. The loop tells an operator's
+    command from its own by what it last read of the display's control against what it last gave
+    it, and gives a control only when its readout would change (its level, or its EV100 to 0.1),
+    so that the display is not re-rendered at every step; `useViewSky` reads a manual triple only,
+    so that `AUTO`'s steps do not cull the sky again. `ExposurePanel` takes the meter's own value
+    (`AutoExposure.meteredEv100`), which `ENABLE` resumes at. `HistogramReader.dispose` releases its
+    ring's three buffers.
+  - **`ENABLE` from `MAN` (ruled, decision-r07-t8a-meter: kept; the guide's `ENABLE` rows
+    follow).** R02's `enable` refused anything but `INHIBITED`, and `INHIBIT` refuses `MAN`, so no
+    command led from the default `MAN` to `AUTO` (ux-reviewer). As the smallest reversible choice,
+    `ENABLE` now hands `MAN` to `AUTO` at the metered value, held back with `NO IMAGE TO METER`
+    while nothing is metered; the guide named no command for it.
+  - **`MeterControl`'s buttons are never held back** now that it stands only beside a drawn image:
+    with `LIT` chosen and no lit body (no star discs, a body under about 5 px, a point) its reading
+    is `NO IMAGE TO METER`, and the way out is to choose another meter. `NO IMAGE TO METER` then
+    shows beside a drawn image, for the chosen meter finding nothing to weigh and for the first
+    readout before a histogram arrives. Ruled (decision-r07-t8a-meter): the case gets statuses of
+    its own, `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, built in T16. The transient before
+    the first histogram gets no word. Until T16, `NO IMAGE TO METER` stands for both, beyond the
+    guide's row. Focus on a meter button is lost when the panel unmounts on a style change (a
+    consider for T16).
+  - **After review.** The loop tells an operator's command from its own publication by keeping
+    what it last read of the display's control apart from what it last gave it, so a frame between
+    a readout and React's commit cannot revert the smoothing; it gives the display a control only
+    when the readout would change (its level, or EV100 at one decimal), and `useViewSky` reads a
+    camera's limit only from a `MAN` triple, so `AUTO` does not re-cull the sky. `ExposurePanel`
+    takes the meter's own EV100 (`AutoExposure.meteredEv100`), not the applied one, so `ENABLE`
+    after an operator's `INHIBIT` resumes at the metered value. `HistogramReader.dispose` releases
+    its ring's buffers. The meter's choice is held above the stage beside the exposure, so a new
+    scene keeps it. **`ENABLE` now also hands `MAN` to `AUTO`** at the metered value (R02's
+    `enable`, the smallest reversible choice: the guide named no way out of `MAN`, and the
+    ux-reviewer found `AUTO` unreachable; ruled, decision-r07-t8a-meter: kept; the guide's `ENABLE`
+    rows follow). **`MeterControl`'s buttons are no longer held back** while nothing is metered (it
+    stands only beside a drawn image, and `LIT` with no lit body must be left by choosing another);
+    the reason still shows. Ruled (decision-r07-t8a-meter): the case gets statuses of its own,
+    `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, built in T16. The transient before the
+    first histogram gets no word. Until T16, `NO IMAGE TO METER` stands for both, beyond the
+    guide's row. Focus on a meter button is lost when the panel unmounts on a style change (noted,
+    not handled).
+  - **Wording (decision-r07-t8a, follow-up (c), under the owner's delegation).**
+    `GRAPHICS STYLE REFUSED: photorealistic style not created, relaunch to retry`
+    (`PHOTOREAL_NOT_CREATED`), `PHOTOREALISTIC: PREPARING` (`PHOTOREAL_PREPARING`),
+    `BODY PHOTOMETRY: NOT YET MODELLED` (the `AppearanceLabel`; Design note 5 and T2.a's text
+    follow) and `LIGHTING: STAR DISCS NOT RECEIVED`; `LIGHTING: PENDING` unchanged. The guide's
+    draft rows take the ruling's text.
+  - **Tests.** The renderer's histogram (dispatched once a frame under the frame's meter, read back
+    once, `takeHistogram` clearing it), the meter mounted only beside a drawn photorealistic image
+    in `ViewDisplay.test.tsx`, and in `just test-render` a frame's histogram under `LIT` counting
+    the lit side of a planet 20 px across (226 weighted counts). `test/fakeViewEngine.ts` answers
+    the kernel, its dispatch and its read-back (an empty histogram).
+  - **For the owner (ux-reviewer)**: `MeterControl`'s layout under the Style panel at 1920 × 1080
+    and 1280 × 720, and the smoothing speeds by eye (T13.b's by-eye checks: a lit planet on black,
+    a star entering the frame, the cockpit turning to a planet) with `just client` on `PHASE TEST`.
+- **Deviations in T8.a, as built (part 4: the meter follow-up, decision-r07-t8a-meter).**
+  - **The guide's `ENABLE` rows** follow the kept choice: the exposure bullet of "Data states"
+    (`ENABLE` also hands `MAN` to `AUTO`, at the metered value), the commanding bullet (from `MAN`
+    or from either inhibit) and the nomenclature row of `ENABLE`, `INHIBIT` (from `MAN` or
+    `INHIBITED`, drafted also by this plan's T8.a), in the ruling's words.
+  - **`ENABLE`'s refusal under `AUTO`** reads `NOT AVAILABLE: the exposure is AUTO`, the twin of
+    `INHIBIT`'s `NOT AVAILABLE: the exposure is MAN`. R02's reason `not_inhibited` is renamed
+    `already_auto`, the ruling's optional rename, since `MAN` is no longer refused.
+  - **`MeterControl`'s reason** describes the pressed meter button only (`aria-describedby`), not
+    all three: choosing another meter is the remedy, not a refused command.
+  - **Left to T16, by the ruling.** The statuses `NO LIT SIDE`, `NO DARK SIDE` and
+    `STAR DISC ONLY`, the `acquiring` window and `ENABLE`'s `NOT AVAILABLE: not yet metered` in
+    it all need `AutoExposure`'s cause, which T16 builds with its guide edit. Until then `ENABLE`
+    is held back with `NO IMAGE TO METER` before the first histogram, and both panels show it.
+  - **Tests.** `MeterControl.test.tsx`: with nothing metered, only the pressed button is described.
+    `ExposurePanel.test.tsx` (new): under `AUTO`, `ENABLE` is held back and described as
+    `NOT AVAILABLE: the exposure is AUTO`; under `MAN`, `INHIBIT` as
+    `NOT AVAILABLE: the exposure is MAN`. `exposure.test.ts` takes the renamed reason.
+- **Deviations in T8.b, as built (the class-map hook).**
+  - **Files.** `bodies/discSurface.ts` (`MAX_DISC_CLASSES` 16, `CLASS_MAP_FORMAT` `rgba8unorm`,
+    `CLASSES_PER_LAYER`, `classMapLayers`, `ClassMapTexels`, `ClassMapTexel`, `classMapTexelOf`,
+    `packClassMap`, `classWeightsAt`, `surfaceShares`, `discSurfaceLaws`, `classMapTextureSpec`
+    and `classMapSurface`, the construction R10.T10.d calls), with `ClassMapDiscSurface` beside
+    `UniformDiscSurface` in `appearance/bodyAppearance.ts`, Provides' shape unchanged (`weights`,
+    `laws`, `elsewhere`).
+  - **The map's layout**, which the plan left open: a 2D array of `rgba8unorm`, N × N texels a face
+    of R05's cube sphere. Texel (i, j) of face f is the cell s ∈ [i ÷ N, (i + 1) ÷ N),
+    t ∈ [j ÷ N, (j + 1) ÷ N) of `xyzToFaceUv`'s (u, v) under `uvToSt`, so with N = 2^L it is the
+    quadtree's cell (f, L, i, j), tested against `vertexDir` at level 2. Class k's weight is
+    channel k mod 4 of layer f + 6 ⌊k ÷ 4⌋, and the shader reads N by `textureDimensions`. At
+    most 16 laws per body (R10.T1's fifteen `MaterialClass`es; a body carrying all three
+    `FrostSpecies` would need 17), 24 layers.
+  - **Weights and shares.** An unsurveyed texel holds no weight. Each shaded sample takes each
+    class's weight as its share and gives `elsewhere` 1 − Σ w; weights summing past 1 are scaled
+    down to 1. `packClassMap` rounds a texel's weights to bytes that keep their sum (largest
+    remainder), so a surveyed texel leaves nothing to `elsewhere`, as R10.T2's bytes summing to
+    255 do.
+  - **Unfiltered.** The shader reads the texel the hit falls in (`textureLoad`), so no surveyed
+    pattern shows past the survey's own cells. On a large disc a coarse map's cells show as
+    blocks. Filtering would need a one-texel gutter at the face edges, and would carry surveyed
+    weight half a texel into unsurveyed ground. That choice is left to R10.T10.d and T10.e at the
+    hand-over.
+  - **Where a hit falls.** R05's spheroid point of the unit direction d is M d (`spheroidPoint`),
+    so d is the hit stretched along the pole by a ÷ c. It is read along the body-fixed axes of
+    `LitBodyInput.rotation` (R02's `Rotation3`, body-fixed to galactic): x and y are packed, and z
+    is their cross product. Under a class map the disc takes its pole from the rotation's z axis,
+    not from `figure.pole`, so the figure and the map cannot disagree.
+  - **Inputs.** `LitBodyInput` gains two optional fields:
+    - `surface`; where it is absent, the photometry's uniform law.
+    - `rotation`. A class map without one cannot be oriented, so its disc shades with `elsewhere`.
+  - **The record.** `DiscRecord` takes `surface` and `tableRows`, in place of `law`,
+    `albedoScale` and `tableRow`.
+    - `surface` is a `DrawnDiscSurface`: the `uniform` case, or an `OrientedClassMap` (the class
+      map with the body's `rotation`), so a record cannot hold a map it cannot orient.
+    - `tableRows` has one row per `discSurfaceLaws` entry, the uniform law or `elsewhere` first.
+    - Each law's A takes the `oblateAlbedoScale` of its own L.
+    - `rasteriseDisc(record, camera, viewport, classMap?)` reads each law's table itself, so it no
+      longer takes a `table` argument. It takes the map's texels, which the surface holds only as a
+      texture.
+    - `DISC_ROWS` goes from 24 to 46 (a record of 736 bytes, 384 before): rows 24–25 hold the
+      axes, 26–41 the classes' A and L, 42–45 their table rows, and row 5's w the class count.
+    - The disc materials gain `classWeights` at binding 2 (`2d-array`). A uniform disc binds the
+      renderer's one-texel `bodies:no class map`, which is never read.
+  - **The shader** takes the per-light terms (horizon, eclipse, phase angle) once per light. It
+    evaluates `body_brdf`'s inlined expression for each law with a share above 0: three at most on
+    the synthetic maps, up to nine under R10.T2's eight-class palette on a partly surveyed texel,
+    17 by the layout. Each costs one law evaluation per light per sample, which goes to T17's
+    bench. R08's sky term takes the shares' mean A. On a uniform surface the arithmetic is the
+    part-1 shader's (share 1, the mean A the law's).
+  - **Not wired into the view.** `litBodiesOf` passes no surface or rotation, so nothing is drawn
+    differently until R10 lands (Design note 24).
+  - **For R10 (passed to the orchestrator for R10's owner).**
+    - R10.T10.d also sets `LitBodyInput.rotation`, and passes `surface` and `rotation` through
+      `litBodiesOf` (`displays/view/photorealFrame.ts`), a file its text does not list.
+    - `packClassMap` and `classMapSurface` are built here, so T10.d supplies each texel's weights
+      (`weights_at` at the cell's centre, byte ÷ 255, `null` where unsurveyed) rather than writing
+      the construction. The caller owns the texture: it remakes it after a device loss and
+      releases it when the map is dropped.
+    - A live body's class map shades with `elsewhere` until plan 14 sends the body-fixed rotation
+      (`bodyFixedRotation` is `null` today).
+    - At most 16 laws per body.
+  - **Open: L(α) against a constant L (for the orchestrator and R10's owner).** R10's Design note 8
+    gives every class McEwen's phase-dependent L(α). The `class-map` case carries
+    `PhotometricLaw`s, whose `lommelSeeligerShare` is a constant, as Provides wrote it. So the disc
+    and the terrain agree at every phase only where L(α) equals that constant, which bears on
+    R10.T10.e's 1/3-stop check at 30° and 90°. T8.b built Provides' shape, the smallest reversible
+    choice. The lean is a per-law L(α) row beside f's in the phase table, read by the disc and the
+    terrain alike, added by R10.T10.d.
+  - **The point keeps the photometry's law (for R10.T10.d and the owner).** At the 3 px switch, a
+    patterned body's disc differs from its point by how far its visible hemisphere departs from the
+    mean, up to the contrast of its faces.
+    - Iapetus is an example. Its dark leading terrain is about a tenth as bright as its trailing
+      terrain (Squyres and Sagan 1983, Nature 303, 782; Spencer and Denk 2010, Science 327, 432).
+      Its faces seen whole differ about fivefold (mean geometric albedos 0.07 and 0.35; Morrison et
+      al. 1975, Icarus 24, 157).
+    - Against the mean of the two, the disc at the switch would be up to 1.7 times as bright as
+      the point when it faces the trailing side, some 0.6 mag. Facing the leading side, it would be
+      about a third as bright, some 1.2 mag fainter. These are estimates from those albedos, not
+      measured in the renderer, and they assume the point's law has the map's mean albedo.
+    - Integrating the map for the point (each frame, or tabulated by direction) is left to
+      R10.T10.d or a follow-up.
+  - **Tests** (`bodies/discSurface.test.ts`, on a synthetic two-class map with half its cells
+    surveyed, i + j even, the pole tilted 55° and turned 30°):
+    - At 40° of phase, each pixel of a 64 px, 10% oblate disc within 70% of its polar radius (one
+      sample each) equals the share-weighted sum of the uniform discs of its texel's laws, bound
+      10⁻¹² (worst 4 × 10⁻¹⁶). The texel is found by an independent `f64` ray–spheroid hit in
+      body-fixed axes, and each of the three laws is seen on more than 100 pixels.
+    - A half-surveyed map of one class whose law equals the uniform law (a distinct object) draws
+      the uniform disc to 10⁻⁵ at 20 and 64 px, 10% oblate, at 70° of phase.
+    - On a sphere 64 px across at zero phase, per channel: a 1 : 3 mix in every texel gives the
+      mixed flux to 10⁻⁹. The half-surveyed map at 16 texels a face is within 0.10% of the
+      area-weighted fluxes of the uniform law and the two classes (bound 0.3%), the areas taken
+      over 2 × 10⁵ Fibonacci directions.
+    - Layout, quantisation, shares, each refusal, the fall-back to `elsewhere` without a rotation,
+      the record's packing and the renderer's binding.
+  - **Smoke checks** (`smoke/bodies.ts`, `checkClassMap`):
+    - A 40 px, 10% oblate disc at 60° of phase under the half-surveyed two-class map (4 texels a
+      face) equals the CPU rasteriser within T8.a's texel tolerance, with its classes.
+    - The one-class map draws the uniform disc to 10⁻⁵ at 20 and 40 px.
+    - `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-04): every check
+      passes (446, none failing), T8.a's figures unchanged. The two-class disc's 1,357 pixels are
+      within 0.926 of the tolerance. In the twin, turning the body by 10⁻⁵ rad moves no pixel by more
+      than 0.094 of it, so no sample lies near a texel boundary. The margin is `f32` shading at a
+      limb sliver, not a texel flip. The one-class map's texels equal the uniform disc's exactly
+      (0 at 20 and 40 px).

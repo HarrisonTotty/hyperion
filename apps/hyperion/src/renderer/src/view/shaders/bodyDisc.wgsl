@@ -1,6 +1,8 @@
-// The disc regime of a lit body (plan R07, T8.a; Design notes 2, 6, 10, 19 and 24): one screen
-// rectangle the CPU bounds, each fragment's rays intersected with the body's spheroid and shaded by
-// `body_brdf`'s law under the horizon, eclipse, ring-shadow and atmosphere terms of `litBody.wgsl`.
+// The disc regime of a lit body (plan R07, T8.a and T8.b; Design notes 2, 6, 10, 19 and 24): one
+// screen rectangle the CPU bounds, each fragment's rays intersected with the body's spheroid and
+// shaded by `body_brdf`'s law under the horizon, eclipse, ring-shadow and atmosphere terms of
+// `litBody.wgsl`. The law is the disc's surface's (`DiscSurface`): one law, or under R10's class
+// map each class's law by its weight at the hit and the uniform law by what the weights leave.
 // Composed after frame.wgsl and litBody.wgsl. The TypeScript twin is `view/bodies/discShading.ts`.
 //
 // Every length reaches the GPU already divided: the body's centre as a unit direction with its
@@ -29,23 +31,39 @@ struct Draw {
 //   1  the centre's unit direction from the camera; w, a ÷ D;
 //   2  the pole's unit direction; w, c ÷ a;
 //   3  samples per axis in a wholly covered pixel and in a limb pixel; the lights; the occluders;
-//   4  the law's A per channel (r, g, b); w, L;
-//   5  the law's row of `phase_factor_table`; the annuli per channel; exposure ÷ π; 0;
+//   4  law 0's A per channel (r, g, b), scaled for the figure; w, its L: the uniform law, or a
+//      class map's `elsewhere`;
+//   5  law 0's row of `phase_factor_table`; the annuli per channel; exposure ÷ π; the class map's
+//      classes, 0 for a uniform surface;
 //   6 + 8j, light j: the star's unit direction from the body's centre, w its distance ÷ a; its
 //      illuminance face-on per channel (lx), w its radius ÷ a; then its annuli (`DiscAnnuli`'s outer
 //      edges and fluxes) for r, g and b, two rows each;
-//   22 + k, occluder k: its centre from the body's centre ÷ a; w, its radius ÷ a.
+//   22 + k, occluder k: its centre from the body's centre ÷ a; w, its radius ÷ a;
+//   24, 25  a class map's body-fixed x and y axes (z their cross product);
+//   26 + k, class k (law k + 1): its A per channel, scaled; w, its L;
+//   42 to 45  the classes' rows of `phase_factor_table`, four a row.
 @group(2) @binding(0) var<storage, read> discs : array<vec4f>;
 
 // The phase factors of the frame's laws, one row each (`litBody.wgsl`).
 @group(2) @binding(1) var phase_factor_table : texture_2d<f32>;
 
-const DISC_ROWS : u32 = 24u;
+// The disc's class map (`discSurface.ts`): N × N texels per face of R05's cube sphere, class k's
+// weight in channel k mod 4 of layer face + 6 ⌊k ÷ 4⌋, read unfiltered; any one texture where the
+// surface is uniform, unread.
+@group(2) @binding(2) var class_weights : texture_2d_array<f32>;
+
+const DISC_ROWS : u32 = 46u;
 const FIRST_LIGHT_ROW : u32 = 6u;
 const LIGHT_ROWS : u32 = 8u;
 const FIRST_OCCLUDER_ROW : u32 = 22u;
+const AXES_ROW : u32 = 24u;
+const FIRST_CLASS_ROW : u32 = 26u;
+const FIRST_CLASS_TABLE_ROW : u32 = 42u;
 const MAX_DISC_LIGHTS : u32 = 2u;
 const MAX_DISC_OCCLUDERS : u32 = 2u;
+// `MAX_DISC_CLASSES`, and the laws a disc shades with: law 0 and one per class.
+const MAX_DISC_CLASSES : u32 = 16u;
+const SURFACE_LAWS : u32 = 17u;
 
 // `METER_CLASS.litBody`, `unlitBody` and `other` (`view/post/meter.ts`).
 const METER_LIT_BODY : f32 = 2.0;
@@ -83,6 +101,10 @@ struct Body {
   radius : f32,
   // The scaled centre, M u.
   scaled_centre : vec3f,
+  // A class map's body-fixed axes; 0 for a uniform surface.
+  axis_x : vec3f,
+  axis_y : vec3f,
+  axis_z : vec3f,
 }
 
 fn stretch_along(body : Body, x : vec3f) -> vec3f {
@@ -98,7 +120,101 @@ fn body_of() -> Body {
   body.stretch = 1.0 / pole_row.w;
   body.radius = centre_row.w;
   body.scaled_centre = stretch_along(body, body.centre);
+  body.axis_x = to_view(disc_row(AXES_ROW).xyz);
+  body.axis_y = to_view(disc_row(AXES_ROW + 1u).xyz);
+  body.axis_z = cross(body.axis_x, body.axis_y);
   return body;
+}
+
+// S2's quadratic warp from a face coordinate u ∈ [−1, 1] to a cell coordinate s ∈ [0, 1]
+// (`uvToSt`, R05's cube sphere).
+fn uv_to_st(u : f32) -> f32 {
+  if (u >= 0.0) {
+    return 0.5 * sqrt(1.0 + 3.0 * u);
+  }
+  return 1.0 - 0.5 * sqrt(1.0 - 3.0 * u);
+}
+
+// A cell coordinate as a texel index of n.
+fn texel_index(s : f32, n : u32) -> u32 {
+  return u32(clamp(floor(s * f32(n)), 0.0, f32(n - 1u)));
+}
+
+// The class map's texel of a body-fixed direction: (i, j, face), R05's face of the largest
+// |component| (ties to the lowest face: +x 0, +y 1, +z 2, −x 3, −y 4, −z 5) and its (u, v) there
+// (`xyzToFaceUv`), warped and scaled by n (`classMapTexelOf`).
+fn class_map_texel(p : vec3f, n : u32) -> vec3u {
+  let faces = vec3u(select(3u, 0u, p.x > 0.0), select(4u, 1u, p.y > 0.0), select(5u, 2u, p.z > 0.0));
+  let size = abs(p);
+  var face = faces.x;
+  var largest = size.x;
+  for (var axis = 1u; axis < 3u; axis = axis + 1u) {
+    if (size[axis] > largest || (size[axis] == largest && faces[axis] < face)) {
+      face = faces[axis];
+      largest = size[axis];
+    }
+  }
+  var uv : vec2f;
+  switch face {
+    case 0u: { uv = vec2f(p.y / p.x, p.z / p.x); }
+    case 1u: { uv = vec2f(-p.x / p.y, p.z / p.y); }
+    case 2u: { uv = vec2f(-p.x / p.z, -p.y / p.z); }
+    case 3u: { uv = vec2f(p.z / p.x, p.y / p.x); }
+    case 4u: { uv = vec2f(p.z / p.y, -p.x / p.y); }
+    default: { uv = vec2f(-p.y / p.z, -p.x / p.z); }
+  }
+  return vec3u(texel_index(uv_to_st(uv.x), n), texel_index(uv_to_st(uv.y), n), face);
+}
+
+// The share of each of the disc's laws at the point `q` (from the body's centre ÷ a): law 0's
+// alone on a uniform surface; under a class map, each class's weight at the texel the point's
+// cube-sphere direction falls in (R05's spheroid point of the unit direction d is M d, so d is q
+// stretched along the pole), scaled down to sum to 1 where it sums to more, and law 0 (`elsewhere`)
+// what they leave (`surfaceShares`).
+fn surface_shares(body : Body, q : vec3f, classes : u32) -> array<f32, SURFACE_LAWS> {
+  var shares : array<f32, SURFACE_LAWS>;
+  shares[0] = 1.0;
+  if (classes == 0u) {
+    return shares;
+  }
+  let d = normalize(stretch_along(body, q));
+  let p = vec3f(dot(d, body.axis_x), dot(d, body.axis_y), dot(d, body.axis_z));
+  let texel = class_map_texel(p, textureDimensions(class_weights).x);
+  let count = min(classes, MAX_DISC_CLASSES);
+  var total = 0.0;
+  for (var group = 0u; group * 4u < count; group = group + 1u) {
+    let weights = textureLoad(class_weights, texel.xy, texel.z + 6u * group, 0);
+    for (var c = 0u; c < min(4u, count - group * 4u); c = c + 1u) {
+      shares[group * 4u + c + 1u] = weights[c];
+      total = total + weights[c];
+    }
+  }
+  if (total > 1.0) {
+    for (var k = 1u; k <= count; k = k + 1u) {
+      shares[k] = shares[k] / total;
+    }
+  }
+  shares[0] = select(1.0 - total, 0.0, total >= 1.0);
+  return shares;
+}
+
+// Law m of the disc: 0 from rows 4 and 5, class m − 1 from its rows.
+fn surface_law(m : u32) -> LunarLambert {
+  var law : LunarLambert;
+  law.s = vec3f(1.0);
+  if (m == 0u) {
+    let row = disc_row(4u);
+    law.a = row.xyz;
+    law.l = row.w;
+    law.table_row = u32(disc_row(5u).x);
+    return law;
+  }
+  let k = m - 1u;
+  let row = disc_row(FIRST_CLASS_ROW + k);
+  law.a = row.xyz;
+  law.l = row.w;
+  law.table_row = u32(disc_row(FIRST_CLASS_TABLE_ROW + k / 4u)[k % 4u]);
+  return law;
 }
 
 // Where a ray meets the spheroid: the point from the body's centre ÷ a in xyz, w 1; w 0 for a miss.
@@ -144,19 +260,22 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   let normal = normalize(q + (stretch2 - 1.0) * dot(q, body.pole) * body.pole);
   let mu = dot(normal, -ray);
   let counts = disc_row(3u);
-  let law_row = disc_row(4u);
   let misc = disc_row(5u);
-  var law : LunarLambert;
-  law.a = law_row.xyz;
-  law.l = law_row.w;
-  law.s = vec3f(1.0);
-  law.table_row = u32(misc.x);
   let annulus_count = u32(misc.y);
+  let laws = min(u32(misc.w), MAX_DISC_CLASSES) + 1u;
   var out : Shaded;
   out.radiance = vec3f(0.0);
   out.lit = false;
   if (mu <= 0.0) {
     return out;
+  }
+  var shares = surface_shares(body, q, laws - 1u);
+  // The surface's mean A, for R08's sky light on the Lambert share's flat term.
+  var mean_a = vec3f(0.0);
+  for (var m = 0u; m < laws; m = m + 1u) {
+    if (shares[m] > 0.0) {
+      mean_a = mean_a + shares[m] * surface_law(m).a;
+    }
   }
   let lights = min(u32(counts.z), MAX_DISC_LIGHTS);
   let occluders = min(u32(counts.w), MAX_DISC_OCCLUDERS);
@@ -181,9 +300,18 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     // `body_brdf` with the disc's μ₀ factor replaced by the horizon term, which equals μ₀ wherever
     // the whole star is up and lights the soft band past the terminator; the Lommel–Seeliger
     // term's μ₀ + μ floored at the star's angular radius, so that it stays bounded in that band.
+    // Each of the surface's laws by its share.
     let ls_denominator = max(max(mu0, 0.0) + mu, star_radius);
-    let disc_term = law.l * 2.0 * horizon / ls_denominator + (1.0 - law.l) * horizon;
-    let reflectance = law.a * phase_factor(law.table_row, alpha) * disc_term;
+    var reflectance = vec3f(0.0);
+    for (var m = 0u; m < laws; m = m + 1u) {
+      let share = shares[m];
+      if (!(share > 0.0)) {
+        continue;
+      }
+      let law = surface_law(m);
+      let disc_term = law.l * 2.0 * horizon / ls_denominator + (1.0 - law.l) * horizon;
+      reflectance = reflectance + share * law.a * phase_factor(law.table_row, alpha) * disc_term;
+    }
     // The eclipse term, each occluder's hidden fraction added (`eclipseVisible`).
     var visible = vec3f(1.0);
     for (var k = 0u; k < occluders; k = k + 1u) {
@@ -221,7 +349,7 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   }
   // R08's sky light, 0 until it lands, on the Lambert share's flat term.
   out.radiance = out.radiance
-    + law.a * atmosphere_sky_irradiance(0.0, first_mu0, 0.0) * misc.z;
+    + mean_a * atmosphere_sky_irradiance(0.0, first_mu0, 0.0) * misc.z;
   return out;
 }
 

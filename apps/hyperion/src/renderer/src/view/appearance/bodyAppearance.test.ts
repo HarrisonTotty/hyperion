@@ -7,7 +7,7 @@ import { PROVISIONAL_PHOTOMETRY, type WireAppearance } from "./fromWire";
 const WIRE: WireAppearance = {
   photometry: PROVISIONAL_PHOTOMETRY,
   figure: { equatorialRadiusM: 6.4e6, polarRadiusM: 6.4e6, pole: null },
-  labels: ["BODY ALBEDO: NOT YET MODELLED"],
+  labels: ["BODY PHOTOMETRY: NOT YET MODELLED"],
 };
 
 describe("bodyAppearance", () => {
@@ -17,7 +17,7 @@ describe("bodyAppearance", () => {
       figure: WIRE.figure,
       photometry: PROVISIONAL_PHOTOMETRY,
       regime: "point",
-      labels: ["BODY ALBEDO: NOT YET MODELLED"],
+      labels: ["BODY PHOTOMETRY: NOT YET MODELLED"],
     });
   });
 

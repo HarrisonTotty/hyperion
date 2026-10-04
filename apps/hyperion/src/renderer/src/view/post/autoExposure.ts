@@ -151,6 +151,12 @@ export interface ExposureProgram {
   readonly shutterS: number;
 }
 
+/**
+ * The `AUTO` program of a view: f/1.4 and 1/30 s, Design note 11's aperture and shutter (R06's
+ * `DEFAULT_VIEW_CAMERA`'s), the sensitivity solved.
+ */
+export const VIEW_AUTO_PROGRAM: ExposureProgram = { aperture: 1.4, shutterS: 1 / 30 };
+
 /** A view's exposure as R02's panel, R06's `cameraLimitV` and wireframe instrument views read it. */
 export interface ExposureReading {
   /** The applied EV100. */

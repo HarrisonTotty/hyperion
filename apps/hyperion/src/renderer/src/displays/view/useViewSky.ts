@@ -9,7 +9,7 @@ import { useMemo } from "react";
 
 import { barycentreAt } from "../../lib/scene/place";
 import type { SystemPlace } from "../../lib/scene/model";
-import type { ExposureControl } from "../../view/photometry/exposure";
+import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/exposure";
 import { SETTINGS } from "../../view/quality/qualitySetting";
 import { cameraGalacticPosition } from "../../view/sky/camera";
 import type { BakeInput } from "../../view/sky/bake";
@@ -88,7 +88,10 @@ const DEFAULT_WIDTH_PX = 1_920;
  * camera moves its nearest baked star by a tenth of a pixel.
  */
 export function useViewSky(input: ViewSkyInput): ViewSky {
-  const { universe, place, run, exposure } = input;
+  const { universe, place, run } = input;
+  // A camera's limit reads only a manual triple (`limitTriple`): under `AUTO` the control changes
+  // with every readout, and the sky must not be culled again for it (R07.T8.a's metering).
+  const exposure = input.exposure.kind === "manual" ? input.exposure : DEFAULT_EXPOSURE;
   const settings = SETTINGS.high.sky;
   const widthPx = input.widthPx ?? DEFAULT_WIDTH_PX;
   const time = run.scene.time;
