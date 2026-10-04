@@ -104,21 +104,17 @@ function fullPhaseLx(neighbour: ReflectingBody, radiusM: number, distanceM: numb
 
 describe("planetshine's illuminance", () => {
   it("lights the Moon at full Earth with 7.7 lx of earthshine, the closed form's", () => {
-    // The Moon between Sun and Earth, so Earth is full from it. Earth's p is Robinson 2026's (PSJ
-    // 7, 12, eq. 14: f = 0.23 in his band ratios 0.277 : 0.226 : 0.221), (r, g, b) 0.210, 0.215
-    // and 0.263 with q 1.312, on the current `earth` key; at full phase only p counts
-    // (decision-r07-earth-albedo; R07.T4.d moves the fixture's Mallama row). The Moon's shadow on
-    // Earth, a smaller body's, is left out.
-    const earth: ReflectingBody = {
-      ...EARTH,
-      photometry: photometryFor([0.21, 0.215, 0.263], [1.312, 1.312, 1.312], "earth"),
-    };
+    // The Moon between Sun and Earth, so Earth is full from it. Earth's p is the fixture's,
+    // Robinson 2026's (PSJ 7, 12, eq. 14: f = 0.23 in his band ratios 0.277 : 0.226 : 0.221),
+    // (r, g, b) 0.210, 0.215 and 0.263; at full phase only p counts (decision-r07-earth-albedo,
+    // R07.T4.d). The Moon's shadow on Earth, a smaller body's, is left out.
     const moon = moonAt(0);
-    const [source, ...rest] = sourcesOf(moon, [moon, earth], [SUN], 2);
+    const [source, ...rest] = sourcesOf(moon, [moon, EARTH], [SUN], 2);
     expect(rest).toHaveLength(0);
     const lux = photopicIlluminance(source?.illuminance ?? [0, 0, 0]);
-    expect(Math.abs(lux / fullPhaseLx(earth, 6.371e6, EARTH_MOON_M) - 1)).toBeLessThan(1e-9);
-    // The ruling's 7.66 lx, to its rounding: 7.668 lx under `sunLikeHostDisc`'s warm white.
+    expect(Math.abs(lux / fullPhaseLx(EARTH, 6.371e6, EARTH_MOON_M) - 1)).toBeLessThan(1e-9);
+    // 7.668 lx at the fixture's p to three places; the ruling's 7.66 (7.664) is at the unrounded
+    // split, under the same warm white of `sunLikeHostDisc`.
     expect(lux).toBeCloseTo(7.67, 2);
     // The task's band, 7.7 lx ± 15%: p_V 0.23 ± 0.02 and the weather.
     expect(lux).toBeGreaterThan(7.7 * 0.85);

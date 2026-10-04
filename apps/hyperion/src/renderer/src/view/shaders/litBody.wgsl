@@ -15,10 +15,12 @@ const LIT_PI : f32 = 3.14159265358979;
 const PHASE_TABLE_SAMPLES : u32 = 361u;
 const PHASE_TABLE_STEP_RAD : f32 = 0.00872664625997165;
 
-// A lunar-Lambert law, which a caller may build per texel (R10): the albedo scale A per channel,
-// the Lommel–Seeliger share L, the exponents s per channel that its table row was made with, and
-// `table_row`, the row of `phase_factor_table` holding its f (one row per tabulated law: template,
-// L and s). The shader reads f from the row; s rides along for callers that rebuild rows.
+// A lunar-Lambert law: the albedo scale A per channel, the Lommel–Seeliger share L, the exponents
+// s per channel that its table row was made with, and `table_row`, the row of `phase_factor_table`
+// holding its f (one row per tabulated law: template, L and s). The shader reads f from the row; s
+// rides along for callers that rebuild rows. A texel of several classes (R10) reflects the weighted
+// sum of its classes' `body_brdf`, each class keeping its own LunarLambert, never one law built
+// from weighted parameters (decision-r07-t8b).
 struct LunarLambert {
   a : vec3f,
   l : f32,
