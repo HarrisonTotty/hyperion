@@ -1,6 +1,6 @@
 /**
  * The disc regime's per-body record and the TypeScript twin of `shaders/bodyDisc.wgsl` (plan R07,
- * T8.a and T8.b; Design notes 2, 6, 10, 19 and 24).
+ * T8.a, T8.b and T11; Design notes 2, 6, 7, 10, 19 and 24).
  *
  * @remarks
  * A disc is one screen rectangle whose fragments intersect their rays with the body's spheroid
@@ -8,9 +8,10 @@
  * and shade each hit with the body's law: I/F = A f(α) [L · 2h ÷ (μ₀ + μ) + (1 − L) h], where h,
  * the horizon term (`sphereIrradianceFactor`), stands for the law's μ₀ and equals it wherever the
  * whole star is up; each star's light is cut by the eclipse term of up to two occluders and summed
- * over up to two stars. The law is its `DiscSurface`'s: one law, or under a class map each
- * class's law weighted by the class's share at the hit and the uniform law by what is left
- * (`discSurface.ts`). Every length is divided before it reaches `f32`: the centre is a unit
+ * over up to two stars, and up to two lit neighbours add their planetshine through the same law,
+ * each a uniform sphere through `planetshineIrradiance` (T11, Design note 7), never eclipsed. The
+ * law is its `DiscSurface`'s: one law, or under a class map each class's law weighted by the
+ * class's share at the hit and the uniform law by what is left (`discSurface.ts`). Every length is divided before it reaches `f32`: the centre is a unit
  * direction with a ÷ D, and every light and occluder is relative to the body's centre over a.
  * A pixel's n × n cells are {@link SMALL_DISC_SAMPLES} per axis on a disc under
  * {@link SMALL_DISC_PX}, so that its summed flux meets the point's at the 3 px switch; on a larger
@@ -27,7 +28,9 @@ import type { ClassMapDiscSurface, UniformDiscSurface } from "../appearance/body
 import { phaseFactorFromTable, type PhaseFactorTable, phaseFactorTableOf } from "../appearance/law";
 import { type ProjectionCamera, toViewAxes, type Viewport } from "../camera/projection";
 import type { AnnulusSet } from "../lighting/annuli";
+import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
 import { annulusVisibleFraction } from "../lighting/annuli";
+import { PLANETSHINE_SOURCES_HIGH, planetshineIrradiance } from "../lighting/planetshine";
 import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import type { Rgb } from "../photometry/toneCurve";
 import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
@@ -50,13 +53,16 @@ import { oblateAlbedoScale } from "./oblate";
 export const LIT_IRRADIANCE = 1e-5;
 
 /** `vec4f` rows per disc in the shader's `discs` buffer. */
-export const DISC_ROWS = 46;
+export const DISC_ROWS = 51;
 
-/** The stars that light one disc at most: the brightest two (Design note 4's multiple systems). */
-export const MAX_DISC_LIGHTS = 2;
+/** The stars that light one disc at most: the brightest two, `MAX_BODY_LIGHTS`. */
+export const MAX_DISC_LIGHTS = MAX_BODY_LIGHTS;
 
 /** The occluders one disc's light is cut by at most: the two largest seen from it. */
 export const MAX_DISC_OCCLUDERS = 2;
+
+/** The lit neighbours that light one disc by planetshine at most: the high setting's count. */
+export const MAX_DISC_SECONDARIES = PLANETSHINE_SOURCES_HIGH;
 
 /** A disc under this diameter, px, is sampled {@link SMALL_DISC_SAMPLES}² times in every pixel. */
 export const SMALL_DISC_PX = 32;
@@ -76,6 +82,9 @@ const FIRST_OCCLUDER_ROW = 22;
 const AXES_ROW = 24;
 const FIRST_CLASS_ROW = 26;
 const FIRST_CLASS_TABLE_ROW = FIRST_CLASS_ROW + MAX_DISC_CLASSES;
+const SECONDARY_COUNT_ROW = 46;
+const FIRST_SECONDARY_ROW = 47;
+const SECONDARY_ROWS = 2;
 
 /** One star lighting a disc, relative to the body's centre. */
 export interface DiscLight {
@@ -89,6 +98,18 @@ export interface DiscLight {
   readonly illuminance: Rgb;
   /** Its annuli per display channel (r, g, b), each of the frame's K. */
   readonly annuli: readonly [AnnulusSet, AnnulusSet, AnnulusSet];
+}
+
+/** One lit neighbour lighting a disc by planetshine, relative to the body's centre (Design note 7). */
+export interface DiscSecondary {
+  /** The neighbour's unit direction from the body's centre, along the galactic axes. */
+  readonly direction: Vec3;
+  /** Its distance from the body's centre ÷ a. */
+  readonly distance: number;
+  /** Its radius ÷ a. */
+  readonly radius: number;
+  /** Its illuminance face-on at the body's centre, lx, per display channel (r, g, b). */
+  readonly illuminance: Rgb;
 }
 
 /** One body that may eclipse a disc's stars, relative to the body's centre ÷ a. */
@@ -134,6 +155,8 @@ export interface DiscRecord {
   readonly exposureOverPi: number;
   readonly lights: ReadonlyArray<DiscLight>;
   readonly occluders: ReadonlyArray<DiscOccluder>;
+  /** Its planetshine sources (`planetshineSources`), the brightest first. */
+  readonly secondaries: ReadonlyArray<DiscSecondary>;
 }
 
 /** The pole's stretch M x = x + (a ÷ c − 1)(x · p) p. */
@@ -239,6 +262,14 @@ export function packDiscRecords(records: ReadonlyArray<DiscRecord>): Float32Arra
       const c = occluder.centre;
       put(FIRST_OCCLUDER_ROW + slot, [c.x, c.y, c.z, occluder.radius]);
     });
+    const secondaries = record.secondaries.slice(0, MAX_DISC_SECONDARIES);
+    put(SECONDARY_COUNT_ROW, [secondaries.length, 0, 0, 0]);
+    secondaries.forEach((source, j) => {
+      const first = FIRST_SECONDARY_ROW + j * SECONDARY_ROWS;
+      const d = source.direction;
+      put(first, [d.x, d.y, d.z, source.distance]);
+      put(first + 1, [...source.illuminance, source.radius]);
+    });
   });
   return out;
 }
@@ -258,6 +289,7 @@ interface ViewBody {
   readonly scaledCentre: Vec3;
   readonly lights: ReadonlyArray<{ readonly place: Vec3; readonly light: DiscLight }>;
   readonly occluders: ReadonlyArray<DiscOccluder>;
+  readonly secondaries: ReadonlyArray<{ readonly place: Vec3; readonly source: DiscSecondary }>;
   readonly laws: ReadonlyArray<ScaledLaw>;
   /** `null` for a uniform surface. */
   readonly classMap: ViewClassMap | null;
@@ -297,6 +329,9 @@ function viewBodyOf(
     occluders: record.occluders
       .slice(0, MAX_DISC_OCCLUDERS)
       .map((occluder) => ({ centre: toView(occluder.centre), radius: occluder.radius })),
+    secondaries: record.secondaries
+      .slice(0, MAX_DISC_SECONDARIES)
+      .map((source) => ({ place: scale(toView(source.direction), source.distance), source })),
   };
 }
 
@@ -354,6 +389,38 @@ function sharesAt(body: ViewBody, q: Vec3): number[] {
   return surfaceShares(classWeightsAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)]));
 }
 
+/**
+ * The reflectance I/F of the body's laws by their shares at a point lit by one source:
+ * A f(α) [L · 2h ÷ (μ₀ + μ) + (1 − L) h], with h the source's irradiance factor in place of μ₀
+ * (it equals μ₀ wherever the whole source is up, and lights the soft band past the terminator) and
+ * the Lommel–Seeliger term's μ₀ + μ floored at the source's angular radius, so that it stays
+ * bounded at the limb in that band; `surface_reflectance` and `lit_disc_term` in the shader.
+ */
+function surfaceReflectance(
+  laws: ReadonlyArray<ScaledLaw>,
+  shares: ReadonlyArray<number>,
+  h: number,
+  mu0: number,
+  mu: number,
+  alpha: number,
+  sourceRadius: number,
+): Rgb {
+  const lsDenominator = Math.max(Math.max(mu0, 0) + mu, sourceRadius);
+  const reflectance: [number, number, number] = [0, 0, 0];
+  laws.forEach((law, m) => {
+    const weight = shares[m] ?? 0;
+    if (!(weight > 0)) {
+      return;
+    }
+    const discTerm = (law.share * 2 * h) / lsDenominator + (1 - law.share) * h;
+    const f = phaseFactorFromTable(law.table, alpha);
+    for (const c of CHANNELS) {
+      reflectance[c] += weight * law.a[c] * f[c] * discTerm;
+    }
+  });
+  return reflectance;
+}
+
 function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   const stretch2 = body.stretch * body.stretch;
   const normal = normalise(stretchAlong(body.pole, stretch2, q));
@@ -378,22 +445,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     }
     const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
     const starRadius = Math.asin(Math.min(1, light.radius / distance));
-    // The Lommel–Seeliger term's μ₀ + μ, floored at the star's angular radius: past the geometric
-    // terminator, in the soft band, an extended star's term stays bounded at the limb.
-    const lsDenominator = Math.max(Math.max(mu0, 0) + mu, starRadius);
-    // Each law's reflectance I/F by its share: A f(α) [L · 2h ÷ (μ₀ + μ) + (1 − L) h].
-    const reflectance: [number, number, number] = [0, 0, 0];
-    body.laws.forEach((law, m) => {
-      const weight = shares[m] ?? 0;
-      if (!(weight > 0)) {
-        return;
-      }
-      const discTerm = (law.share * 2 * horizon) / lsDenominator + (1 - law.share) * horizon;
-      const f = phaseFactorFromTable(law.table, alpha);
-      for (const c of CHANNELS) {
-        reflectance[c] += weight * law.a[c] * f[c] * discTerm;
-      }
-    });
+    const reflectance = surfaceReflectance(body.laws, shares, horizon, mu0, mu, alpha, starRadius);
     let visible: [number, number, number] = [1, 1, 1];
     for (const occluder of body.occluders) {
       const toOccluder = sub(occluder.centre, q);
@@ -422,6 +474,31 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
       const v = Math.max(visible[c], 0);
       radiance[c] += light.illuminance[c] * record.exposureOverPi * reflectance[c] * v;
       lit ||= horizon > LIT_IRRADIANCE && v > LIT_IRRADIANCE;
+    }
+  }
+  // Planetshine (Design note 7): it lights the night side, which stays unlit for the meter.
+  for (const { place, source } of body.secondaries) {
+    const toSource = sub(place, q);
+    const irradiance = planetshineIrradiance(toSource, source.radius, source.distance, normal);
+    if (irradiance <= 0) {
+      continue;
+    }
+    const distance = norm(toSource);
+    const towards = scale(toSource, 1 / distance);
+    const mu0 = dot(normal, towards);
+    const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
+    const sourceRadius = Math.asin(Math.min(1, source.radius / distance));
+    const reflectance = surfaceReflectance(
+      body.laws,
+      shares,
+      irradiance,
+      mu0,
+      mu,
+      alpha,
+      sourceRadius,
+    );
+    for (const c of CHANNELS) {
+      radiance[c] += source.illuminance[c] * record.exposureOverPi * reflectance[c];
     }
   }
   return { radiance, lit };

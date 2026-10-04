@@ -3,7 +3,8 @@
  * catalogue's probe kernel on the run's adapter. `body_brdf` equals `view/appearance/brdf.ts` at
  * five pinned geometries to 10⁻⁵ relative, one of them with a law built per texel;
  * `sphere_irradiance` and `eclipse_visible` equal their TypeScript twins (themselves checked
- * against the `f64` oracles) at five points each; the R08 and R11 stubs return 1, 1 and 0.
+ * against the `f64` oracles) at five points each; the R08 and R11 stubs return 1, 1 and 0; and
+ * `planetshine_irradiance` equals `planetshineIrradiance` at four points (T11).
  */
 
 import {
@@ -16,6 +17,7 @@ import {
   packLightingProbeCases,
   packPhaseFactorRows,
 } from "../view/appearance/litBodyProbe";
+import { type Vec3, vec3 } from "../geometry/vec3";
 import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../view/appearance/law";
 import { lawFor } from "../view/appearance/phase";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
@@ -70,7 +72,45 @@ const LIGHTING_TOLERANCE = 2e-4;
 /** One AU over the Sun's radius: H at 1 au. */
 const H_AT_1_AU = 1.495_978_707e11 / 6.957e8;
 
-/** T6.c: five horizon factors, five eclipse terms and the stubs. */
+/** T11: planetshine's factor at a point whose normal lies `normalDeg` from x in the xy plane. */
+function planetshineCase(
+  toSource: Vec3,
+  sourceRadius: number,
+  centreDistance: number,
+  normalDeg: number,
+  horizonDeg: number,
+): LightingProbeCase {
+  return {
+    kind: "planetshine",
+    toSource,
+    sourceRadius,
+    centreDistance,
+    normal: vec3(Math.cos(normalDeg * RAD_PER_DEG), Math.sin(normalDeg * RAD_PER_DEG), 0),
+    horizonRad: horizonDeg * RAD_PER_DEG,
+  };
+}
+
+/** The check's name for a lighting case's term. */
+function lightingTermName(probe: LightingProbeCase): string {
+  let name: string;
+  switch (probe.kind) {
+    case "sphere":
+      name = "T6.c sphere_irradiance";
+      break;
+    case "eclipse":
+      name = "T6.c eclipse_visible";
+      break;
+    case "stubs":
+      name = "T6.c the stubs";
+      break;
+    case "planetshine":
+      name = "T11 planetshine_irradiance";
+      break;
+  }
+  return name;
+}
+
+/** T6.c: five horizon factors, five eclipse terms and the stubs; T11: four planetshine factors. */
 const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
   { kind: "sphere", h: 3, phiRad: 0.4, horizonRad: 0 },
   { kind: "sphere", h: 3, phiRad: 100 * RAD_PER_DEG, horizonRad: 0 },
@@ -94,9 +134,15 @@ const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
     separationRad: separation * 4.65e-3,
   })),
   { kind: "stubs" },
+  // T11: a neighbour 30 of its radii off, wholly up, then cut by the horizon, then at Earth from the
+  // Moon's scale (in lunar radii) in its soft band, then behind a local horizon of 3°.
+  planetshineCase(vec3(30, 0.5, 0), 1, 30, 40, 0),
+  planetshineCase(vec3(30, 0.5, 0), 1, 30, 91, 0),
+  planetshineCase(vec3(221.25, 0.6, 0), 3.667, 221.25, 90.5, 0),
+  planetshineCase(vec3(30, 0.5, 0), 1, 30, 80, 3),
 ];
 
-/** T6.c: `sphere_irradiance`, `eclipse_visible` and the stubs against their references. */
+/** T6.c: `sphere_irradiance`, `eclipse_visible` and the stubs; T11: `planetshine_irradiance`. */
 function checkLighting(checks: Checks, gpu: Float32Array): void {
   const expected = expectedLighting(LIGHTING_CASES);
   LIGHTING_CASES.forEach((probe, index) => {
@@ -109,7 +155,7 @@ function checkLighting(checks: Checks, gpu: Float32Array): void {
     checks.check(
       exact
         ? "T6.c the stubs return 1, 1 and 0"
-        : `T6.c ${probe.kind === "sphere" ? "sphere_irradiance" : "eclipse_visible"} equals its reference to ${LIGHTING_TOLERANCE} at point ${index + 1}`,
+        : `${lightingTermName(probe)} equals its reference to ${LIGHTING_TOLERANCE} at point ${index + 1}`,
       exact ? worst === 0 : worst <= LIGHTING_TOLERANCE,
       `GPU ${read.map((value) => value.toPrecision(7)).join(", ")} against ${reference.map((value) => value.toPrecision(7)).join(", ")}, off by ${worst.toExponential(2)}`,
     );

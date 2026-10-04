@@ -49,6 +49,7 @@ import type {
   ViewSize,
 } from "../engine/types";
 import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
+import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import type { PlacedLight } from "../lighting/hostLights";
 import { bloomKernel, bloomThreshold, levelWeight } from "../post/bloom";
 import {
@@ -365,6 +366,7 @@ export class PhotorealRenderer {
         viewport,
         exposureScale: frame.exposureScale,
         annuli: frame.setting === "low" ? DISC_ANNULI_LOW : DISC_ANNULI_HIGH,
+        planetshine: frame.setting === "low" ? PLANETSHINE_SOURCES_LOW : PLANETSHINE_SOURCES_HIGH,
       },
       frame.previousRegimes,
     );

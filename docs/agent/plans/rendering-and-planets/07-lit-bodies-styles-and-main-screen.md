@@ -165,15 +165,23 @@ export function occludersFor(
   bodies: ReadonlyArray<SceneFrameBody>,
 ): Occluder[]; // shadow-cone pre-test, f64
 export interface SecondarySource {
+  readonly body: BodyIdHex; // as built (T11): the neighbour
   readonly direction: Vec3;
   readonly angularRadiusRad: number;
+  readonly distanceM: number; // as built (T11)
+  readonly radiusM: number; // as built (T11)
   readonly illuminance: Rgb;
 }
+export function litNeighbours(
+  bodies: ReadonlyArray<ReflectingBody>,
+  hosts: ReadonlyArray<PlacedLight>,
+  annuli: number,
+): LitNeighbour[]; // as built (T11): each neighbour's starlight, once a frame
 export function planetshineSources(
-  body: SceneFrameBody,
-  lit: ReadonlyArray<SceneFrameBody>,
+  body: ReflectingBody,
+  lit: ReadonlyArray<LitNeighbour>,
   max: number,
-): SecondarySource[]; // Design note 7
+): SecondarySource[]; // Design note 7; as built (T11)
 ```
 
 `lighting/oracle.ts`: the `f64` oracles (dense annulus sums, brute-force sphere irradiance, the
@@ -750,13 +758,28 @@ and `--port`.
    2019's qpower2 is validated only below a radius ratio of 0.2 and is not used.
 7. **Planetshine is included** (researched 2026-09-29; figures computed from Design note 5's
    albedos). The brainstorm does not mention it; the realism ruling decides. It is the dominant
-   night-side light of every moon: earthshine on the Moon at full Earth is about 15 lx, 13 stops
-   below sunlight but 10³–10⁵ times the integrated starlight; Jupiter-shine on Io about 70 lx, 6
+   night-side light of every moon: earthshine on the Moon at full Earth is about 8 lx (7.7 lx with
+   the `earth` template, Robinson 2026's fit; 8.1 lx at his physical model's p;
+   decision-r07-earth-albedo), 14 stops below sunlight but some 3 × 10⁴ times the integrated
+   starlight (2.8 × 10⁻⁴ lx on a face-on element: Seares et al. 1925's 1,092 stars of V = 1.0 over
+   the sky, quoted by Roach and Megill 1961, ApJ 133, 228, ÷ 4); Jupiter-shine on Io about 70 lx, 6
    stops below. Each body is lit by at most two neighbours whose reflected illuminance
    E★ p (R ÷ Δ)² Φ(α) is largest (one on the low setting), each as a uniform sphere of its angular
-   radius through the same `sphere_irradiance`, never shadow-tested against third bodies. Its
-   stated errors are the lit crescent's offset from the neighbour's centre (up to 0.4 R, about 4°
-   for Jupiter seen from Io) and a finite-distance correction of order (R ÷ Δ)², about 3% at Io.
+   radius through the same `sphere_irradiance`, never shadow-tested against third bodies on its way
+   (the neighbour's own starlight is eclipsed: averaged over its lit disc as the body it lights sees
+   it, R07.T10.b; until then from its centre, of the bodies larger than it only, as T11 built it,
+   which leaves out a smaller body's shadow, up to 11% of earthshine in a central solar eclipse, and
+   fades a moon wider than the penumbra too fast, in 44 s rather than 254 s for Io). Its stated
+   errors (corrected by T11's science check, 2026-10-04, as is the starlight figure, first given as
+   10³–10⁵ times): the lit crescent's light centroid lies off the neighbour's centre, by 0.4 R at
+   60° of phase and 3π ÷ 16 ≈ 0.59 R at quarter phase for a Lambert sphere (5.7° for Jupiter seen
+   from Io), towards 0.9 R in a thin crescent (first given as "up to 0.4 R, about 4°"); and the
+   far-field E errs at first order in R ÷ Δ for a disc brighter at its centre: the exact illuminance
+   is 12% above it at full phase (76.8 lx against 68.7 lx in V) and 10% below it at quarter phase
+   for Jupiter seen from Io, and 1.2% above it for Earth seen from the Moon (first given as of order
+   (R ÷ Δ)², about 3% at Io). Beyond quarter phase the body sees less than the neighbour's
+   hemisphere, which hides the limb crescent: the exact is 34% below at 120°, 71% below at 150° and
+   nothing from 170.6° for Jupiter seen from Io, 10% below at 150° for Earth seen from the Moon.
 8. **The photorealistic style is a pass list over R02's scene and camera and a per-view HDR target
    that R07.T7 creates with R01's `createRenderTarget` in R02's `HDR_COLOUR_FORMAT` (R02 DN12: the
    wireframe has none; decisions-r06-r07, item 1).** In order:
@@ -1245,10 +1268,12 @@ covered by the moon's disc through the painter order. Acceptance: `just ci`, `ju
 
 `lighting/planetshine.ts` and its term in `litBody.wgsl` (Design note 7): `planetshineSources`
 returning direction, angular radius and illuminance per channel, through `sphere_irradiance`. Tests:
-earthshine on the Moon at full Earth 15.3 lx ± 20% (the spread of Earth's p); the full Moon on Earth
-0.32 lx from V = −12.74 to 5%; Jupiter-shine on Io at inferior conjunction about 70 lx ± 10%; a
-neighbour at new phase contributes about nothing; a body's sources are the two largest, one on the
-low setting. Acceptance: `pnpm test`, `just test-render`.
+earthshine on the Moon at full Earth 7.7 lx ± 15% (Robinson 2026's fit, f = 0.23 in Model 07's
+colours, as R07.T4.d's `earth` row; his physical model's 8.1 lx lies inside; the band covers
+p_V 0.23 ± 0.02 and the weather; decision-r07-earth-albedo); the full Moon on Earth 0.32 lx from
+V = −12.74 to 5%; Jupiter-shine on Io at inferior conjunction about 70 lx ± 10%; a neighbour at new
+phase contributes about nothing; a body's sources are the two largest, one on the low setting.
+Acceptance: `pnpm test`, `just test-render`.
 
 #### R07.T12 The exposure histogram
 
@@ -1610,7 +1635,12 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
   clamp; the smooth blend of Design note 5 replaces the steps if the population shows jumps.
 - **Planetshine's uniform-disc approximation** shifts its terminator on the receiver by the
-  neighbour's crescent offset, up to about 4° at Io; stated, not corrected.
+  neighbour's crescent offset, 5.7° at Io at quarter phase (0.59 R; T11's science check,
+  2026-10-04, first given as about 4°); stated, not corrected. Its far-field illuminance errs by
+  about 0.72 R ÷ Δ near full phase (at Io the exact is 12% above it at full phase, 10% below at
+  quarter), and past quarter phase by the limb crescent the body cannot see (at Io 34% below at
+  120°, 71% at 150°, all of it from 170.6°; 10% at 150° for Earth seen from the Moon). A
+  correction table in (α, sin ρ, L) would remove both; not built.
 - **Gas giants' cloud bands** are left by R11 to neither R08 nor itself, and R11 advises this plan;
   this plan draws a uniform,
   oblate giant and no plan generates bands. The roadmap's open item records a research lean that
@@ -2654,3 +2684,135 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       than 0.094 of it, so no sample lies near a texel boundary. The margin is `f32` shading at a
       limb sliver, not a texel flip. The one-class map's texels equal the uniform disc's exactly
       (0 at 20 and 40 px).
+- **Deviations in T11, as built (planetshine).**
+  - **Files and names.** The functions take `LitBodyInput`-shaped bodies and placed lights, not
+    `SceneFrameBody`, which carries no radius or photometry. `lighting/planetshine.ts` holds:
+    - `PLANETSHINE_SOURCES_HIGH` (2) and `PLANETSHINE_SOURCES_LOW` (1);
+    - `SecondarySource`, which gains `body` (the neighbour) and `distanceM`, so that each lit point
+      takes its own direction and inverse square;
+    - `ReflectingBody`;
+    - `LitNeighbour` and `litNeighbours(bodies, hosts, annuli)`, built once a frame: each
+      neighbour's starlight, its eclipse (below), its equivalent sphere and a bound;
+    - `planetshineSources(body, lit, max)`, where `lit` is the `LitNeighbour`s;
+    - `phaseMaximum(law)` and `planetshineIrradiance`, the TypeScript twin.
+    - `SecondarySource` also gains `radiusM`, so the disc record takes R directly.
+  - **Elsewhere.**
+    - `bodies/oblate.ts` gains `bodyReflection` (p Φ(α) for a sphere, the figure's integral for a
+      spheroid) and `figurePole`. The point and planetshine reflect through this one function, a
+      pure refactor of `pointFlux`.
+    - `lighting/hostLights.ts` gains `lightsAt`, `LightAtPoint` and `MAX_BODY_LIGHTS`, moved from
+      `draw.ts`' private `lightsOf`. `MAX_DISC_LIGHTS` is now its alias.
+    - `BodyFrameOptions` gains `planetshine`, the count. The renderer sets it from the setting.
+      `MAX_DISC_SECONDARIES` is `PLANETSHINE_SOURCES_HIGH`, so the disc cannot drop a source the
+      point keeps.
+    - `pointFlux(body, hosts, occluders, k, secondaries = [])` takes the body's sources as a fifth,
+      defaulted argument.
+    - `test/litFixtures.ts` gains `photometryFor(p, q, template)` (provenance `modelled`),
+      `planetPhotometry(name)` (a planet's p in B, V and R, its q_V in every channel) and
+      `MOON_GEOMETRIC_ALBEDO` (0.12).
+  - **The term in the shaders.**
+    - `litBody.wgsl` gains `planetshine_irradiance` (from the point to the source, the source's
+      radius, its distance from the centre, the normal, the horizon): `sphere_irradiance` at the
+      point's own H = d ÷ R, times (Δ ÷ d)².
+    - `litBody.wgsl` also gains `lit_disc_term(l, h, mu0, mu, source_radius)`, the lunar-Lambert
+      disc term under an extended source with the Lommel–Seeliger floor. The stars' inline
+      expression now calls it, with unchanged arithmetic.
+    - `bodyDisc.wgsl` gains `surface_reflectance`, shared by stars and planetshine, and a loop
+      over the sources.
+    - `DISC_ROWS` goes from 46 to 51. Row 46 holds the count, and rows 47–50 two sources (the
+      direction and distance ÷ a; the illuminance and radius ÷ a). `DiscRecord` gains
+      `secondaries` (`DiscSecondary`), and `MAX_DISC_SECONDARIES` is 2.
+  - **Model, as built.**
+    - Planetshine never sets a sample's `lit`, so a night side lit only by a neighbour keeps
+      `unlitBody` for `DARK`.
+    - It takes neither the eclipse term on its way nor R11's ring shadow. It does pass through
+      R08's `atmosphere_sun_transmittance` along its own direction: a stub of 1 today, for R08's
+      owner to keep or refuse.
+    - The point adds each source as a point source along its centre's direction. At the 3 px
+      switch the disc meets the point to 0.35% (Earth from the Moon, Lambert), 0.07% (the same,
+      lunar law), 0.10% (Jupiter from Io, Lambert) and 0.61% (the same, lunar law), at 90° and
+      150° of solar phase. The science check gives two terms:
+      - The point source against the extended one: −ρ²/4 at zero phase (−0.66% at Io), but the
+        true flux exceeds the point's by 1.9%, 10% and 103% at 120°, 150° and 170° at Io for a
+        Lambert receiver (0.9%, 4.6% and 44% for a lunar law).
+      - The receiver's own size, its lit hemisphere nearer the source: +3ε ÷ 4 at zero phase for
+        Lambert, ε = r ÷ Δ (0.34% for the Moon, 0.32% for Io).
+  - **The neighbour's starlight is eclipsed (a deviation; confirmed as an interim, replaced by
+    R07.T10.b, decision-r07-earth-albedo).** It takes the eclipse term from its centre, counting
+    only the bodies larger than the neighbour. This fixes two cases:
+    - In a total lunar eclipse, Design note 7 as first written left 0.31 lx of moonlight on
+      Earth's night side. The truth is about 10–50 µlx, light refracted by Earth's air, which no
+      plan draws yet (Hernitschek, Schmidt and Vollmer 2008, Applied Optics 47, H62, Table 2: 9.6
+      and 11.15 mag below full; 12–54 µlx from the abstract's −3.32 and −1.7 mag at
+      V = 0 = 2.54 µlx).
+    - It also fixes every full phase of a giant's moons seen from the giant.
+    - Its two errors, removed by R07.T10.b's disc-averaged eclipse:
+      - A smaller body's shadow is left out. From the neighbour's centre it would hide the whole
+        star where it hides a spot: about 0.1% of Jupiter-shine for Io's shadow, and up to 11% of
+        earthshine in a central solar eclipse (10.7% by brute force).
+      - Partial phases are taken at the neighbour's centre, so a moon wider than the planet's
+        penumbra fades too fast: in 44 s rather than 254 s for Io entering Jupiter's shadow. The
+        "larger than" test also never shadows a pair of equal moons in a mutual eclipse.
+    - The test of a moon in the umbra leaves no source.
+  - **Selection.**
+    - The candidates are ranked by the photopic light of their equivalent sphere, √(a c), with
+      ties broken by identifier, so the order of the inputs does not matter.
+    - A candidate whose bound (`phaseMaximum`, the law's largest p Φ over the 0.5° table, plus 1%)
+      cannot reach the `max`-th best so far is skipped. A test against brute force over 40 random
+      neighbours confirms the choice.
+    - A neighbour that reflects nothing is not a source.
+    - Only drawn bodies look for sources. The cost is about 2 ms a frame for 100 drawn bodies
+      under shared load: provisional, and for T17's bench.
+  - **Figures tested** (Sun-like disc, `sunLikeHostDisc`):
+    - Earthshine at full Earth is 7.668 lx (the ruling's 7.66, to rounding, under
+      `sunLikeHostDisc`'s warm white) with a local Earth photometry from
+      decision-r07-earth-albedo, (r, g, b) p 0.210, 0.215 and 0.263 and q 1.312 on the current
+      `earth` key: the closed form E★ p (R ÷ Δ)² to 10⁻⁹, inside the task's 7.7 lx ± 15%.
+      R07.T4.d points the test back at `planetPhotometry("Earth")` once it moves the fixture's
+      row.
+    - The full Moon is 0.3140 lx against 0.3168 lx from V = −12.74 (−0.9%), with p_V 0.12 (NASA's
+      fact sheet, without the opposition surge; Krisciunas and Schaefer 1991, p. 1035). Earth is
+      left out as an occluder there, because at zero phase the Moon is in its shadow.
+    - Jupiter-shine on Io at inferior conjunction is 66.7 lx, in Io's own shadow transit, with
+      Jupiter 6.5% oblate. That is within 10⁻³ of the closed form over √(a c) and 6.16 stops below
+      the sunlight. The plan's 70 lx ± 10% is kept.
+    - A neighbour at new phase gives under 10⁻¹² of full.
+    - The `view/bodies` tests: a lunar disc's night-side pixel equals E (Δ ÷ d)² × exposure ÷ π ×
+      `brdf` to 10⁻⁶, and the night side keeps `unlitBody`.
+    - The renderer takes two sources on `high` and one on `low`.
+  - **Earth's albedo: resolved (decision-r07-earth-albedo).** Mallama et al. 2017's p_V of 0.434,
+    which the fixture and Design note 5's `earth` row use, is superseded by measurement. Robinson
+    2026 (PSJ 7, 12, arXiv:2507.22258) gives a visual p of 0.242 (0.277, 0.226 and 0.221 in
+    0.1 µm bands) and q of 1.22. Mallama's 0.434 came from extrapolating EPOXI data through
+    Tinetti et al. 2006's model, whose Sun–observer azimuth is turned by 180°. The ruling takes
+    Robinson's eq. 14 fit, f = 0.23 in his band ratios, as the `earth` template. Earthshine at
+    full Earth is then 7.66 lx photopic, 8.06 lx at his physical model's p. T11 changes only its
+    own earthshine test. R07.T4.d moves the client's `earth` and the fixture's row, and
+    P14.T47.e the generator's, in the 20 → 21 bump. The ruling's other plan text (Design note
+    5's sources and ratio, T1, T4.d, T10.b, the Risks line on Earth's albedo, and plan 14) is
+    left to those tasks and the docs pass.
+  - **Existing tests.** T8.a's umbra test now runs with planetshine off, since it tests the
+    starlight's eclipse term. Its occluder exactly at new phase gives about 4.5 × 10⁻²³ lx, from the
+    rounding of sin π, and the occluder beyond the star some 10⁻¹⁰ of the sunlight.
+  - **Smoke checks.** The probe's `LightingCase` gains kind 4: `planetshine_irradiance` against
+    its twin at four points (wholly up, cut by the horizon, at Earth-from-the-Moon scale in the
+    soft band, and behind a 3° horizon), to 2 × 10⁻⁴. `smoke/bodies.ts`' `checkPlanetshine` draws a
+    Moon 20 px across at 150°, pre-exposed at 0.05, its night side lit by a full Earth, against
+    the CPU rasteriser. `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-04):
+    every check passes (456, none failing), T8.a's and T8.b's figures unchanged. The four
+    planetshine factors are within 9.6 × 10⁻⁵ of their twins. The moon's 368 pixels are within
+    0.258 of T8.a's texel tolerance, and all 280 unlit ones hold earthshine with the rasteriser's
+    classes.
+  - **Neighbours at drawn centres.** Neighbours are placed at the scene's drawn centres, as lights
+    and occluders are (T8.a's known limit, "Light positions"). T10.a's retarded geometry must also
+    place each neighbour at t_B − |r_N − r_B| ÷ c, and the neighbour's stars at its own retarded
+    time.
+  - **For R10 and T9.** A lit point's planetshine is `planetshine_irradiance` with the horizon
+    argument (0 on the smooth figure) and `lit_disc_term`, over the `SecondarySource`s of its body.
+  - **Possible follow-up (not built).** A table in (α, sin ρ, L) would correct the far-field
+    illuminance's errors: first order in R ÷ Δ near full phase, and past quarter phase the hidden
+    limb crescent (at Io, 34% below at 120°, 71% below at 150°, nothing from 170.6°).
+  - **Found, for T10 (not fixed here) → R07.T10.b (decision-r07-earth-albedo).** A point body
+    takes its eclipse from its centre, so a point Jupiter goes fully black during Io's shadow
+    transit: `pointFlux` gives 0 against 5.16 × 10⁻⁵ lx clear, measured 2026-10-04. R07.T10.b's
+    disc-averaged eclipse, shared by `pointFlux` and planetshine's neighbour, fixes it.

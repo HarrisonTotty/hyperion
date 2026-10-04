@@ -7,6 +7,7 @@ import { planLitBodies } from "../bodies/draw";
 import { lookAlong } from "../camera/quaternion";
 import { type ProjectionCamera, toViewAxes, type Viewport } from "../camera/projection";
 import { hostLights } from "../lighting/hostLights";
+import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import {
   PHASE_CAMERA_M,
   PHASE_PLANETS,
@@ -72,7 +73,13 @@ function drawPlanet(index: number) {
   const plan = planLitBodies(
     [{ id, centreM: planet, figure, photometry: PROVISIONAL_PHOTOMETRY }],
     [{ disc, centreM: star }],
-    { camera, viewport: VIEWPORT, exposureScale: 1e-4, annuli: 4 },
+    {
+      camera,
+      viewport: VIEWPORT,
+      exposureScale: 1e-4,
+      annuli: 4,
+      planetshine: PLANETSHINE_SOURCES_HIGH,
+    },
     new Map([[id, "disc"]]),
   );
   const record = plan.discs[0];

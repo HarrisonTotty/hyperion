@@ -17,6 +17,7 @@ import {
 } from "../coords/rotation";
 import type { TextureHandle } from "../engine/types";
 import type { PlacedLight } from "../lighting/hostLights";
+import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { AU_M } from "../scenes/kept";
 import { vertexDir } from "../terrain/cube";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
@@ -49,7 +50,13 @@ const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Ma
 const EXPOSURE = 1e-3;
 const RAD = Math.PI / 180;
 const PX_PER_RAD = VIEWPORT.widthPx / (2 * Math.tan(CAMERA.fovXRad / 2));
-const OPTIONS = { camera: CAMERA, viewport: VIEWPORT, exposureScale: EXPOSURE, annuli: 4 };
+const OPTIONS = {
+  camera: CAMERA,
+  viewport: VIEWPORT,
+  exposureScale: EXPOSURE,
+  annuli: 4,
+  planetshine: PLANETSHINE_SOURCES_HIGH,
+};
 const RADIUS_M = 6.371e6;
 
 /** A dark lunar law, a bright terrestrial one and the provisional Lambert law, for unsurveyed ground. */

@@ -4,7 +4,7 @@
  * the same arithmetic: a disc's texels and meter classes; its summed flux against the point's at
  * the 3 px switch, over phases and sub-pixel placements; a Saturn-like f = 0.098 disc's extents at
  * 100 px; a disc under a half-surveyed two-class map, and under a map of one class equal to the
- * uniform law against the uniform disc.
+ * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11).
  */
 
 import { add, scale, vec3 } from "../geometry/vec3";
@@ -34,6 +34,7 @@ import type { RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import type { PlacedLight } from "../view/lighting/hostLights";
+import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
 import { METER_CLASS } from "../view/post/meter";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
 import { createSceneTarget } from "../view/photoreal/sceneTarget";
@@ -79,6 +80,14 @@ interface MappedSurface {
   readonly texels: ClassMapTexels;
 }
 
+/** A draw's further inputs: its exposure, and a neighbour that lights it by planetshine. */
+interface DrawExtras {
+  /** The pre-exposure, 1 ÷ (cd/m²). */
+  readonly exposure?: number;
+  /** A neighbour on the body's anti-solar side, full from it: its radius and distance, m. */
+  readonly shine?: { readonly radiusM: number; readonly distanceM: number };
+}
+
 /** One drawn disc: the GPU's texels and the CPU's composite. */
 interface Drawn {
   readonly viewport: Viewport;
@@ -104,6 +113,7 @@ async function drawDisc(
   camera: ProjectionCamera = CAMERA,
   occluder: BodyFigure | null = null,
   mapped: MappedSurface | null = null,
+  extras: DrawExtras = {},
 ): Promise<Drawn> {
   const pxPerRad = viewport.widthPx / (2 * Math.tan(camera.fovXRad / 2));
   const distance = figure.equatorialRadiusM / Math.sin(diameterPx / 2 / pxPerRad);
@@ -121,7 +131,13 @@ async function drawDisc(
     photometry: PROVISIONAL_PHOTOMETRY,
     ...(mapped === null ? {} : { surface: mapped.surface, rotation: mapped.rotation }),
   };
-  const options = { camera, viewport, exposureScale: EXPOSURE, annuli: DISC_ANNULI_HIGH };
+  const options = {
+    camera,
+    viewport,
+    exposureScale: extras.exposure ?? EXPOSURE,
+    annuli: DISC_ANNULI_HIGH,
+    planetshine: PLANETSHINE_SOURCES_HIGH,
+  };
   // An occluder 3.844 × 10⁸ m towards the star and 3 × 10⁶ m aside, its shadow across the disc.
   const others: LitBodyInput[] =
     occluder === null
@@ -134,6 +150,15 @@ async function drawDisc(
             figure: occluder,
           },
         ];
+  if (extras.shine !== undefined) {
+    const { radiusM, distanceM } = extras.shine;
+    others.push({
+      id: "0200080020000000.0003",
+      centreM: add(centreM, scale(towards, -distanceM)),
+      figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
+      photometry: PROVISIONAL_PHOTOMETRY,
+    });
+  }
   const plan = planLitBodies([body, ...others], hosts, options, new Map([[body.id, "disc"]]));
   const target = createSceneTarget(engine, "smoke bodies", viewport);
   try {
@@ -221,9 +246,47 @@ export async function checkBodies(engine: RenderEngine, checks: Checks): Promise
     await checkTexels(engine, renderer, checks);
     await checkFlux(engine, renderer, checks);
     await checkExtents(engine, renderer, checks);
+    await checkPlanetshine(engine, renderer, checks);
   } finally {
     renderer.dispose();
   }
+}
+
+/**
+ * T11: a Moon-sized disc 20 px across at 150° of phase, its night side lit by an Earth-sized
+ * neighbour full from it 3.844 × 10⁸ m away, against the CPU rasteriser; the night side keeps the
+ * unlit class and holds earthshine's light. Pre-exposed at 0.05, so that earthshine's texels lie
+ * far above the absolute tolerance and the sunlit crescent below `rgba16float`'s ceiling.
+ */
+async function checkPlanetshine(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+): Promise<void> {
+  const moon: BodyFigure = { equatorialRadiusM: 1.7374e6, polarRadiusM: 1.7374e6, pole: null };
+  const drawn = await drawDisc(
+    engine,
+    renderer,
+    { widthPx: 48, heightPx: 48 },
+    20,
+    150,
+    moon,
+    [0, 0],
+    CAMERA,
+    null,
+    null,
+    { exposure: 0.05, shine: { radiusM: 6.371e6, distanceM: 3.844e8 } },
+  );
+  const { worst, classes, mismatches } = texelAgreement(drawn);
+  const night = drawn.expected.filter((p) => p.meterClass === METER_CLASS.unlitBody);
+  const shone = night.filter(
+    (p) => (drawn.texels[(p.yPx * drawn.viewport.widthPx + p.xPx) * 4 + 1] ?? 0) > 0,
+  );
+  checks.check(
+    "T11 a moon's night side lit by planetshine equals the CPU rasteriser's, and stays unlit",
+    worst <= 1 && classes && night.length > 0 && shone.length === night.length,
+    `${String(drawn.expected.length)} pixels; worst error ${worst.toFixed(3)} of the tolerance; ${String(shone.length)} of ${String(night.length)} unlit pixels lit by planetshine; classes as the rasteriser's ${String(classes)}${mismatches.length > 0 ? `: ${mismatches.slice(0, 6).join("; ")}` : ""}`,
+  );
 }
 
 async function checkTexels(
