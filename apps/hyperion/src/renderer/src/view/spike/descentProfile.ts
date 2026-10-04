@@ -4,20 +4,21 @@
  * azimuth drawn from the spike's seed.
  *
  * @remarks
- * The path is two kinematic profiles over the script: the horizontal speed along the ground track
- * and the altitude above the spheroid. Each is a velocity that is piecewise linear in time and
- * continuous, so position and velocity are continuous everywhere: where the table of Design note 19
- * changes vertical speed between segments, the velocity is blended linearly over the last 5 s of
- * the earlier segment (1 s for a segment shorter than 20 s), a cubic in position between the two.
- * The segments' vertical speeds are re-fitted (the plan's "T13.a re-fits") so that every boundary
- * altitude holds exactly with the blends included; the durations are the table's. A `level` segment
- * (the orbit coast) hosts no blend: it holds its altitude, and the next segment blends in from rest
- * over its own first 5 s instead. The path is a scripted camera, not a flight: the blends'
- * accelerations are not a craft's.
+ * The path is two kinematic profiles over the script: the ground speed (the body-fixed speed of the
+ * track's point beneath the camera, {@link ORBIT_GROUND_SPEED_MPS}) and the altitude above the
+ * spheroid. Each is a velocity that is piecewise linear in time and continuous, so position and
+ * velocity are continuous everywhere: where the table of Design note 19 changes vertical speed
+ * between segments, the velocity is blended linearly over the last 5 s of the earlier segment
+ * (1 s for a segment shorter than 20 s), a cubic in position between the two. The segments'
+ * vertical speeds are re-fitted (the plan's "T13.a re-fits") so that every boundary altitude holds
+ * exactly with the blends included; the durations are the table's. A `level` segment (the orbit
+ * coast) hosts no blend: it holds its altitude, and the next segment blends in from rest over its
+ * own first 5 s instead. The path is a scripted camera, not a flight: the blends' accelerations are
+ * not a craft's.
  *
  * The ground track is the great circle through the landing site along the approach azimuth; the
  * camera is `altitude` above the spheroid along its normal over the track's point. The camera looks
- * along the track, pitched down 30° while the horizontal speed is at least 300 m/s and turning to
+ * along the track, pitched down 30° while the ground speed is at least 300 m/s and turning to
  * the nadir as it falls to zero, so that the hover looks straight down.
  */
 
@@ -33,7 +34,11 @@ export interface DescentSegment {
   /** The altitude above the spheroid at the segment's start and end, metres. */
   readonly startAltitudeM: number;
   readonly endAltitudeM: number;
-  /** The horizontal speed at the segment's start and end, m/s, linear in between. */
+  /**
+   * The ground speed at the segment's start and end, m/s, linear in between: the body-fixed speed
+   * of the track's point beneath the camera, on the sphere of radius (a + c) ÷ 2 that the track is
+   * laid out on ({@link ORBIT_GROUND_SPEED_MPS}).
+   */
   readonly startSpeedMps: number;
   readonly endSpeedMps: number;
   /**
@@ -128,9 +133,28 @@ export interface TrackStretch {
  * above the spheroid along its normal, with no vertical speed. A `constant` segment hosts the blend
  * into the next over its own last, its rate re-fitted so that its end altitude still holds: a
  * level `constant` segment before a descending one therefore climbs a little (the unlifted low
- * fast pass, about 0.076 m/s).
+ * fast pass, 0.076 m/s and 1.9 m at most, and only before a slowdown flown whole: a split
+ * slowdown's first piece blends in from it, which then holds 0).
  */
 export type VerticalShape = "level" | "constant" | "falling" | "hover";
+
+/**
+ * The orbit coast's ground speed, m/s: the body-fixed speed of the track's point beneath the
+ * camera, on the sphere of radius (a + c) ÷ 2 that the track's great circle is laid out on (Design
+ * note 19; decision-r05-coast-speed.md, 2026-10-04).
+ *
+ * @remarks
+ * It is the top of the band a 400 km circular orbit's body-fixed ground speed covers on the
+ * rotating test planet, from (n − ω) R ≈ 6.75 km/s prograde equatorial to (n + ω) R ≈ 7.68 km/s
+ * retrograde equatorial (n = √(GM ÷ r³) the orbit's mean motion, ω the planet's rotation), and so a
+ * conservative bound on the coast's demand, which reads the ground speed. 7.22 km/s is a
+ * non-rotating planet's figure, not a more correct one. The camera itself moves (R + h) ÷ R times
+ * as fast, about 8.15 km/s body-fixed at 400 km, a retrograde equatorial orbit's. The script flies
+ * it whatever the approach azimuth, so the path is not a Keplerian orbit: in the inertial frame it
+ * is circular only heading west along the equator, and up to 13% above circular speed heading
+ * east. The coast holds it and the descent arc starts from it.
+ */
+export const ORBIT_GROUND_SPEED_MPS = 7670;
 
 /**
  * Design note 19's segments (provisional, re-fitted here): the orbit coast, the descent arc, the
@@ -143,8 +167,8 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     durationS: 60,
     startAltitudeM: 400_000,
     endAltitudeM: 400_000,
-    startSpeedMps: 7670,
-    endSpeedMps: 7670,
+    startSpeedMps: ORBIT_GROUND_SPEED_MPS,
+    endSpeedMps: ORBIT_GROUND_SPEED_MPS,
     // Design note 19's "vertical speed 0": the arc blends in from it rather than it climbing
     // 18.4 m/s to host the arc's −420 m/s blend.
     verticalShape: "level",
@@ -156,7 +180,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     durationS: 900,
     startAltitudeM: 400_000,
     endAltitudeM: 20_000,
-    startSpeedMps: 7670,
+    startSpeedMps: ORBIT_GROUND_SPEED_MPS,
     endSpeedMps: 1000,
     verticalShape: "constant",
     clearsTrack: false,
@@ -321,8 +345,10 @@ function segmentStarts(segments: ReadonlyArray<{ readonly durationS: number }>):
  * The rates are solved from the last segment back: the drop across segment i is
  * c_i (T_i − b_i) + (c_i + s_{i+1}) b_i ÷ 2, where s_{i+1} is the next segment's starting rate, so
  * c_i is linear in the known drop and s_{i+1}. A segment with no drop and a level neighbour holds
- * c = 0 and needs no blend; a level `constant` segment before a descending one climbs gently (the
- * unlifted low fast pass by about 0.076 m/s) so that the blend's drop leaves its end altitude exact.
+ * c = 0 and needs no blend; a level `constant` segment before a descending one climbs gently so
+ * that the blend's drop leaves its end altitude exact: the unlifted low fast pass by 0.076 m/s,
+ * 1.9 m at most, before a slowdown flown whole (a split slowdown's first piece blends in from the
+ * pass, which then holds 0; a lifted pass is `level`).
  * A `level` one holds its rate, its drop over its duration (0 for the orbit coast), to its end, and
  * the next blends in from it (`VerticalPiece.leadIn`): the orbit coast hosting the arc's −420 m/s
  * blend climbed 18.4 m/s, 1 km over its 60 s.
@@ -863,7 +889,10 @@ export interface DescentPose {
    * to `clearanceM` on flat ground.
    */
   readonly heightAboveFloorM: number;
-  /** Horizontal speed along the track and vertical speed, m/s. */
+  /**
+   * The ground speed, the body-fixed speed of the track's point beneath the camera
+   * (`DescentSegment.startSpeedMps`), and the vertical speed, m/s.
+   */
   readonly horizontalSpeedMps: number;
   readonly verticalSpeedMps: number;
   /**

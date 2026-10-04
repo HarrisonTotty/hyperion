@@ -39,7 +39,10 @@ export function verticalConstant(k: number): number {
 export interface DemandState {
   /** Altitude above the spheroid, metres. */
   readonly altitudeM: number;
-  /** Horizontal and vertical speed, m/s. */
+  /**
+   * The ground speed (the track point's, body-fixed: `DescentPose.horizontalSpeedMps`) and the
+   * vertical speed, m/s.
+   */
   readonly horizontalSpeedMps: number;
   readonly verticalSpeedMps: number;
 }
