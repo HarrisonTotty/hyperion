@@ -294,8 +294,8 @@ changed by the time this plan runs only the call sites here change.
   measured from, along its normal (R07's Design note 19); `BodyAppearance`, `LitRegime`
   (`"point" | "disc" | "mesh"`) and `lawFor(p: Rgb, q: Rgb, template: PhaseTemplateId)`; the star's
   angular radius per view. R07 creates those signatures with default inputs; this plan's T8.b (the
-  horizon from the horizon map), T10.b (a `LunarLambert` built per texel) and T10.d (the class map)
-  supply the inputs through them unchanged.
+  horizon from the horizon map), T10.b (a `LunarLambert` per class, their `body_brdf` summed per
+  texel by weight) and T10.d (the class map) supply the inputs through them unchanged.
 - **R08:** aerial perspective applied to the terrain pass's output; R08.T9.b's
   `surfaceLighting.wgsl` with
   `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` and
@@ -495,15 +495,14 @@ changed by the time this plan runs only the call sites here change.
    used per texel: its roughness term counts relief the mesh, normals and horizon map already
    resolve, and what it adds lies below the band limit. It is the law R07 adopts (its
    Design note 5), so R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)` carries it and this plan
-   builds a `LunarLambert` per texel from its classes' parameters (T10.b). Each law's L(α) is
-   tabulated beside its f, in the alpha channel of its `phase_factor_table` row, and f against that
-   L(α): Φ_shape(α; L) = [L(α) Φ_LS(α) + ⅔(1 − L(α)) Φ_Lam(α)] ÷ [L(0) + ⅔(1 − L(0))], so p and q
-   are unchanged and only the limb profile moves; `body_brdf` reads L from the row and
-   `LunarLambert.l` is L(0) (decision-r07-t8b). A texel reflects the weighted sum of its classes'
-   laws, each through its own row, as R07's disc sums its class map's, not one law built from
-   weighted parameters, which differs from the sum wherever classes of different A_N and L blend
-   (1.7× at μ₀ = 0.5, μ = 0.1 for an even blend of regolith at L = 1 and snow at L = 0). At zero
-   phase a
+   calls it once per class, with that class's `LunarLambert` (T10.b). Each law's L(α) is tabulated
+   beside its f, in the alpha channel of its `phase_factor_table` row, and f against that L(α):
+   Φ_shape(α; L) = [L(α) Φ_LS(α) + ⅔(1 − L(α)) Φ_Lam(α)] ÷ [L(0) + ⅔(1 − L(0))], so p and q are
+   unchanged and only the limb profile moves; `body_brdf` reads L from the row and `LunarLambert.l`
+   is L(0) (decision-r07-t8b). A texel reflects its classes' `body_brdf` radiances summed by weight,
+   each law through its own row, as R07's disc sums its class map's, not one law built from weighted
+   parameters, which differs from the sum wherever classes of different A_N and L blend (1.7× at
+   μ₀ = 0.5, μ = 0.1 for an even blend of regolith at L = 1 and snow at L = 0). At zero phase a
    uniform body's geometric albedo is p = A_N [L(0) + ⅔ (1 − L(0))], and averaged over viewing
    directions a patterned sphere's p is the plain area average of each element's, so the scale c on
    the class albedos that makes the body's p is the root of Σ a_i c A_N,i [L_i + ⅔ (1 − L_i)] = p
@@ -1013,38 +1012,45 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   `cargo test -p hyperion-sim --test surface_albedo_worlds` and
   `cargo test -p hyperion-server surface`.
 - **R10.T10.b The terrain shader.** `terrainMaterial.ts` and `shaders/terrainLit.wgsl`: the palette
-  and weights to `body_brdf`'s lunar-Lambert parameters (A_N × c, L(α) from A_N, f(α)), the normals
-  at the setting's resolution, the shadow term from T8 or T9, the hooks `terrain_decoration`,
-  `terrain_shadow_factor`, `terrain_ring_shadow` and `terrain_sky_factor` for R11 (each defaulting
-  to no effect), the direct sun through R08's `atmosphere_sun_transmittance` and the sky through its
-  `atmosphere_sky_irradiance`, and R08's aerial perspective on the output. Each call passes the
-  texel's geodetic height above `BodyFigure`'s spheroid, its geodetic latitude (from the spheroid
-  normal against the pole) and, for the transmittance, each sun's azimuth from local north, as
-  R08 Design note 17's signatures require. Each texel's law is a
-  `struct LunarLambert { a, l, s, table_row }` built from its palette and weights and passed to R07's
-  `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates and this task
-  uses unchanged. One `phase_factor_table` row per class law (its template, s and L(α)): f in r, g
-  and b, L(α) in a; `body_brdf` reads L(α) from the row, `LunarLambert.l` carries L(0), and a texel
-  sums its classes' `body_brdf` by weight, skipping zero weights, so no row is built per texel and
-  no f is taken from a neighbouring L (decision-r07-t8b). This task builds the channel in R07's
-  files: `PhotometricLaw` gains an optional `lommelSeeligerCurve` (absent: L constant at
-  `lommelSeeligerShare`, which is L(0)) in `appearance/law.ts`; Φ_shape with L(α) in `shapes.ts`,
-  `phase.ts` (`lawFor`'s q) and `brdf.ts`; the spheroid integral at L(α) and `oblateAlbedoScale` at
-  L(0) in `bodies/oblate.ts` and `bodies/draw.ts`; `shaders/litBody.wgsl` and
-  `shaders/bodyDisc.wgsl`. It moves R07's L = 1 templates (`moon`, `mercury`, `airless-ice`,
-  `snowball`, `magma`) to McEwen 1996's L(α), which changes no q, p or point flux. Files:
-  `terrainMaterial.ts`, `shaders/terrainLit.wgsl`; R07's `appearance/law.ts`, `shapes.ts`,
-  `phase.ts`, `brdf.ts` and `templates.ts`, `bodies/oblate.ts` and `bodies/draw.ts`,
-  `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`. Tests: a pure test that the parameters a texel
-  gets are the weighted sum of its palette's, and that the largest weight's class is the one a
-  readout names; a `LunarLambert` built per texel from a one-class palette equals the per-body law
-  of that class in R07.T4.c's twin; the smoke harness renders a generated world's patch set on
+  and weights to one lunar-Lambert law per class (A_N × c, L(0), and f(α) and L(α) from the class's
+  row) through `body_brdf`, summed by weight, the normals at the setting's resolution, the shadow
+  term from T8 or T9, the hooks `terrain_decoration`, `terrain_shadow_factor`, `terrain_ring_shadow`
+  and `terrain_sky_factor` for R11 (each defaulting to no effect), the direct sun through R08's
+  `atmosphere_sun_transmittance` and the sky through its `atmosphere_sky_irradiance`, and R08's
+  aerial perspective on the output. Each call passes the texel's geodetic height above
+  `BodyFigure`'s spheroid, its geodetic latitude (from the spheroid normal against the pole) and,
+  for the transmittance, each sun's azimuth from local north, as R08 Design note 17's signatures
+  require. Each class of the patch's palette has its own
+  `struct LunarLambert { a, l, s, table_row }` (a = A_N × c, l = L(0), the class's s and row),
+  passed to R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates
+  and this task uses unchanged. The texel reflects the classes' `body_brdf` radiances summed by its
+  weights, skipping zero weights, not one `LunarLambert` built from weighted parameters, which
+  differs from the sum by the covariance of A_N and L: 1.7× too bright at μ₀ = 0.5, μ = 0.1 for an
+  even blend of regolith and snow (Design note 8). One `phase_factor_table` row per class law (its
+  template, s and L(α)): f in r, g and b, L(α) in a; `body_brdf` reads L(α) from the row and
+  `LunarLambert.l` carries L(0), so no row is built per texel and no f is taken from a neighbouring
+  L (decision-r07-t8b). This task builds the channel in R07's files: `PhotometricLaw` gains an
+  optional `lommelSeeligerCurve` (absent: L constant at `lommelSeeligerShare`, which is L(0)) in
+  `appearance/law.ts`; Φ_shape with L(α) in `shapes.ts`, `phase.ts` (`lawFor`'s q) and `brdf.ts`;
+  the spheroid integral at L(α) and `oblateAlbedoScale` at L(0) in `bodies/oblate.ts` and
+  `bodies/draw.ts`; `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`. It moves R07's L = 1
+  templates (`moon`, `mercury`, `airless-ice`, `snowball`, `magma`) to McEwen 1996's L(α), which
+  changes no q, p or point flux. Files: `terrainMaterial.ts`, `shaders/terrainLit.wgsl`; R07's
+  `appearance/law.ts`, `shapes.ts`, `phase.ts`, `brdf.ts` and `templates.ts`, `bodies/oblate.ts` and
+  `bodies/draw.ts`, `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`. Tests: a pure test that a
+  texel of two classes in weights w and 1 − w reflects w r₁ + (1 − w) r₂ to 10⁻⁶, r₁ and r₂ being
+  the classes' own `body_brdf` radiances in R07.T4.c's twin, that for an even blend of regolith
+  (A_N 0.12, L 1) and snow (A_N 0.9, L 0) sharing one f(α), at μ₀ = 0.5, μ = 0.1 it is that sum and
+  not the 1.7× brighter law of the mixed parameters, that a zero weight adds nothing, and that the
+  largest weight's class is the one a readout names; a one-class palette's texel equals the per-body
+  law of that class in R07.T4.c's twin; the smoke harness renders a generated world's patch set on
   SwiftShader with every texel finite; a law without a curve draws R07's disc and twin unchanged
   (the row's alpha is its L); L(α) is 1 at 0°, 0.6084 at 30° and 0.1859 at 90°, and 0 from 103.9°;
   under it, the Moon template's p, q and point flux equal the constant-L law's to 10⁻⁴, and its
-  CPU-rasterised disc flux equals its point's to 1% at 30°, 90° and 120°; a texel of two classes in
-  weights w and 1 − w reflects w r₁ + (1 − w) r₂ to 10⁻⁶. Acceptance:
-  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the smoke run.
+  CPU-rasterised disc flux equals its point's to 1% at 30°, 90° and 120°. Acceptance:
+  `pnpm --filter hyperion test` (the client suite: the Files reach R07's `appearance/`, `bodies/`
+  and `shaders/`, which the view's `lighting`, `photoreal`, `post` and `scenes` tests also read) and
+  `just test-render` (the WGSL).
 - **R10.T10.c The survey edge.** The survey mask's discard, the skirts at the survey edge, and the
   reference surface drawn beneath with the inverse mask from the GPU coverage mask (Design note 12),
   in `terrainLit.wgsl` and the `mesh`-regime body's material; the edge mark over the image from

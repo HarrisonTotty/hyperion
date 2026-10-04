@@ -3218,17 +3218,23 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
      condensables (the open finding of the galaxy README, this plan's to build). R07's smooth
      fallback moves its middle anchor to match: L = 1 at 100 Pa, 0.5 at 30 kPa, 0 at 100 kPa.
 
-  Albedos: for every template p_c = p_c,analogue × A_Bond ÷ A_ref, then capped so that
-  p_c q_c ≤ 1, where the analogue's p is Table 7's (Ganymede's and Europa's above; the Moon's
-  p_V 0.12, NASA's fact sheet). A_ref (`reference_bond`) is the Bond albedo the generator gives the
-  analogue body: moon and mercury 0.11, mars and earth 0.306, venus 0.76, the four giants 0.34,
-  airless_ice 0.35, magma 0.11 (Mercury's curve). snowball takes Europa's measured 0.68, since the
-  generator would not class Europa as a snowball (decision-p14-phase-j, 9). Each row's source keeps
-  the analogue's measured Bond albedo (Mercury 0.088, Mars 0.250, Jupiter 0.343, Saturn 0.342,
-  Uranus 0.300, Neptune 0.290). So every Solar System analogue in its own state is drawn with
-  Table 7's p. The state table's departures from the measured Bond albedos (Mercury, Mars, the ice
-  giants, hot giants) are findings for P14.T13.c's owner, which affect temperatures only. The stated ratio is p_V q_V ÷ A_Bond. p is defined against π a c, √(a c) being Mallama et al. 2017's radius for Saturn (their "average disk radius 57,240 km including oblateness", √(a c) for a = 60,268 and
-  c = 54,364 km; the equator-on reading is this plan's), which the client's point regime uses with T46's figure.
+  Albedos: for every template p_c = p_c,analogue × A_Bond ÷ A_ref, then capped so that p_c q_c ≤ 1,
+  where the analogue's p is Table 7's (Earth's Robinson 2026's, below; Ganymede's and Europa's
+  above; the Moon's p_V 0.12, NASA's fact sheet). A_ref (`reference_bond`) is the Bond albedo the
+  generator gives the analogue body: moon and mercury 0.11, mars and earth 0.306, venus 0.76, the
+  four giants 0.34, airless_ice 0.35, magma 0.11 (Mercury's curve). snowball takes Europa's measured
+  0.68, since the generator would not class Europa as a snowball (decision-p14-phase-j, 9). Each
+  row's source keeps the analogue's measured Bond albedo (Mercury 0.088, Mars 0.250, Jupiter 0.343,
+  Saturn 0.342, Uranus 0.300, Neptune 0.290). So every Solar System analogue in its own state is
+  drawn with Table 7's p except Earth, which P14.T47.e moves to Robinson 2026's (P14.T47.a). Until
+  then its as-built row keeps Table 7's 0.512, 0.434 and 0.418, which came through
+  Tinetti et al. 2006's flipped model and which no client reads (R07.T2.b waits for P14.T47.e;
+  decision-r07-earth-albedo). The state table's departures from the measured Bond albedos (Mercury,
+  Mars, the ice giants, hot giants) are findings for P14.T13.c's owner, which affect temperatures
+  only. The stated ratio is p_V q_V ÷ A_Bond. p is defined against π a c, √(a c) being
+  Mallama et al. 2017's radius for Saturn (their "average disk radius 57,240 km including
+  oblateness", √(a c) for a = 60,268 and c = 54,364 km; the equator-on reading is this plan's),
+  which the client's point regime uses with T46's figure.
 
 - **P14.T47.c The section on the record.** `BodyRecord` gains `photometry` at `Bulk`; `Ok` for
   every planet, dwarf planet, moon and member whose bulk is `Ok`, `NotApplicable` for a ring (whose
