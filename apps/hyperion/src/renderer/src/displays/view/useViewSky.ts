@@ -63,6 +63,41 @@ export function bakeInputOf(sky: DrawnSky, faceSizePx: number): BakeInput {
   return { directions, illuminanceLx, faceSizePx, name: "sky cube: view" };
 }
 
+/** A view's culled sky: what its loop draws, and its label block's `STARS` reading. */
+export interface CulledViewSky {
+  readonly drawn: DrawnSky;
+  readonly labelValue: string;
+}
+
+/**
+ * A view's own cull of a sky (R06 Design note 20): the stars fainter than its limit, for its role,
+ * exposure and field of view, left to the band, the rest split between sprites and the bake at its
+ * width. Views of one sky share its census and differ in their cull (R06.T14), so an instrument
+ * culls the primary's sky for its own camera (R07.T19).
+ *
+ * @param exposure - A manual exposure's triple sets a camera's limit; any other control reads the
+ *   default (a camera's limit reads only a manual triple).
+ */
+export function cullViewSky(
+  model: SkyModel,
+  role: ViewRun["camera"]["role"],
+  exposure: ExposureControl,
+  fovDeg: number,
+  widthPx: number,
+): CulledViewSky {
+  const triple = exposure.kind === "manual" ? exposure : DEFAULT_EXPOSURE;
+  const { limit, labelV } = viewSkyLimit(model, role, triple, fovDeg);
+  const kept = cullSky(model.stars, limit, model.response.band.face_texels);
+  const selection = selectSkySprites(model.stars, kept.kept, SETTINGS.high.sky.spriteBudget, {
+    fovDeg,
+    widthPx,
+  });
+  return {
+    drawn: { model, selection, bandIlluminanceLx: kept.bandIlluminanceLx },
+    labelValue: skyLabelValue(labelV, role, model.response.not_modelled),
+  };
+}
+
 /** What the view's sky is made from. */
 export interface ViewSkyInput {
   /** The open universe, or `null`: nothing is asked. */
@@ -117,21 +152,10 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
   const fovDeg = run.camera.fovDeg;
   // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's limit or its size changes, so
   // that the drawn sky keeps its identity from one published run to the next and is baked once.
-  const culled = useMemo(() => {
-    if (model === null) {
-      return null;
-    }
-    const { limit, labelV } = viewSkyLimit(model, role, exposure, fovDeg);
-    const kept = cullSky(model.stars, limit, model.response.band.face_texels);
-    const selection = selectSkySprites(model.stars, kept.kept, settings.spriteBudget, {
-      fovDeg,
-      widthPx,
-    });
-    return {
-      drawn: { model, selection, bandIlluminanceLx: kept.bandIlluminanceLx },
-      labelValue: skyLabelValue(labelV, role, model.response.not_modelled),
-    };
-  }, [model, role, exposure, fovDeg, widthPx, settings.spriteBudget]);
+  const culled = useMemo(
+    () => (model === null ? null : cullViewSky(model, role, exposure, fovDeg, widthPx)),
+    [model, role, exposure, fovDeg, widthPx],
+  );
   // A sky is this view's only for the system it was asked about, whose position is known.
   const ours =
     culled !== null &&

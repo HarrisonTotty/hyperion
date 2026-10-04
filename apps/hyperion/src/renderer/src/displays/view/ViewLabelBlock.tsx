@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import type { LabelLine } from "./viewRun";
@@ -15,6 +17,36 @@ export interface ViewLabelBlockProps {
    * view's `GRAPHICS VIEW REFUSED: …`), or `null`.
    */
   readonly fault: string | null;
+  /** The block's ID, by which its view's canvas is described (R07.T19), or none. */
+  readonly id?: string | undefined;
+}
+
+/** The separator of a reading made of parts (the guide's "Voice and nomenclature"). */
+const PART_SEPARATOR = " · ";
+
+/**
+ * A reading's parts, each kept on one line where it fits, so that a narrow block breaks it at its
+ * middle dots first (decision-r07-t19, item 2a); a part longer than the block still wraps.
+ */
+function readingParts(value: string): ReactNode {
+  if (!value.includes(PART_SEPARATOR)) {
+    return value;
+  }
+  const seen = new Map<string, number>();
+  const nodes: ReactNode[] = [];
+  for (const part of value.split(PART_SEPARATOR)) {
+    if (nodes.length > 0) {
+      nodes.push(PART_SEPARATOR);
+    }
+    const count = seen.get(part) ?? 0;
+    seen.set(part, count + 1);
+    nodes.push(
+      <span className="view-label__part" key={`${part}:${String(count)}`}>
+        {part}
+      </span>,
+    );
+  }
+  return nodes;
 }
 
 /**
@@ -30,9 +62,9 @@ export interface ViewLabelBlockProps {
  * stars' count line is a reading of numbers, so an `output` in B612 Mono (the guide's
  * "Typography"), not a statement.
  */
-export function ViewLabelBlock({ lines, statements, countLine, fault }: ViewLabelBlockProps) {
+export function ViewLabelBlock({ lines, statements, countLine, fault, id }: ViewLabelBlockProps) {
   return (
-    <div className="view-label">
+    <div className="view-label" id={id}>
       <p className="view-label__class">VIEW</p>
       <dl className="view-label__lines">
         {lines.map((line) => (
@@ -40,7 +72,7 @@ export function ViewLabelBlock({ lines, statements, countLine, fault }: ViewLabe
             <dt className="field__label">{line.label}</dt>
             <dd>
               <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
-                {line.value}
+                {readingParts(line.value)}
               </output>
               {line.stale === true ? <StaleMark /> : null}
             </dd>

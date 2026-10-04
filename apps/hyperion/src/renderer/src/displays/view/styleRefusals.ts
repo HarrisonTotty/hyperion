@@ -3,6 +3,7 @@
  * standing (plan R07, T8.a): the reason the style control shows, in the guide's words, or `null`
  * where the style is offered.
  */
+import type { PhotorealisticPermission } from "../../view/budget/viewBudget";
 import type { RenderStyle } from "../../view/camera/state";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { type GraphicsStatus, graphicsAnnunciation } from "../../view/engine/status";
@@ -67,5 +68,20 @@ export function availabilityOf(refusals: StyleRefusals): StyleAvailability {
   return {
     wireframe: refusals.wireframe === null,
     photorealistic: refusals.photorealistic === null,
+  };
+}
+
+/**
+ * The refusals with the several views' budget's (plan R07, T19): the photorealistic style held
+ * back with `photorealisticAllowed`'s reason where the setting allows no more photorealistic views,
+ * the adapter's own refusal shown first where both hold.
+ */
+export function withPermission(
+  refusals: StyleRefusals,
+  permission: PhotorealisticPermission,
+): StyleRefusals {
+  return {
+    ...refusals,
+    photorealistic: refusals.photorealistic ?? (permission.allowed ? null : permission.reason),
   };
 }

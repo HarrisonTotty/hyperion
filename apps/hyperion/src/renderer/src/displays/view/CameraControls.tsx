@@ -7,6 +7,11 @@ import { freeRateReading, PRESET_NAMES } from "./viewRun";
 
 /** Props of {@link CameraControls}. */
 export interface CameraControlsProps {
+  /**
+   * The view the panel acts on, its system designator on the title row (`PRIMARY`,
+   * `INSTRUMENT 1`; R07.T19), or none.
+   */
+  readonly designator?: string | undefined;
   readonly preset: CameraPreset;
   /** The presets the scene offers: `FREE` alone where it has no own ship. */
   readonly offered: ReadonlyArray<CameraPreset>;
@@ -54,6 +59,7 @@ export function CameraControls({
   reducedMotion,
   onAction,
   onEasedMovesChange,
+  designator,
 }: CameraControlsProps) {
   const titleId = useId();
   const noShipId = useId();
@@ -68,6 +74,12 @@ export function CameraControls({
     <section className="panel view-camera" aria-labelledby={titleId}>
       <h2 className="panel__title" id={titleId}>
         Camera
+        {designator === undefined ? null : (
+          <>
+            {" "}
+            <span className="panel__designator">{designator}</span>
+          </>
+        )}
       </h2>
       <fieldset className="preset-buttons" aria-label="Camera presets">
         {PRESET_KEYS.map(({ preset: each, key }) => {

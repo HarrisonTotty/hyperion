@@ -2,10 +2,16 @@ import { useId } from "react";
 
 import type { ExposureReading } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
+import { viewDisplayName } from "./viewNames";
 import { exposureReading } from "./viewRun";
 
 /** Props of {@link MeterControl}. */
 export interface MeterControlProps {
+  /**
+   * The view the panel acts on, its system designator on the title row (`PRIMARY`,
+   * `INSTRUMENT 1`; R07.T19), or none.
+   */
+  readonly designator?: string | undefined;
   /** The operator's meter, which stands whether or not an image is metered now. */
   readonly meter: MeterMode;
   /** The metered exposure, or `null` while no photorealistic view meters an image. */
@@ -38,7 +44,7 @@ export function meterLabel(mode: MeterMode): string {
  * meter's button only, and its buttons still act, so that a meter with nothing to weigh can be
  * left by choosing another (mounted by R07.T8.a beside a drawn image only).
  */
-export function MeterControl({ meter, reading, onMeter }: MeterControlProps) {
+export function MeterControl({ meter, reading, onMeter, designator }: MeterControlProps) {
   const titleId = useId();
   const meterId = useId();
   const sourceId = useId();
@@ -48,6 +54,12 @@ export function MeterControl({ meter, reading, onMeter }: MeterControlProps) {
     <section className="panel view-meter" aria-labelledby={titleId}>
       <h2 className="panel__title" id={titleId}>
         Exposure meter
+        {designator === undefined ? null : (
+          <>
+            {" "}
+            <span className="panel__designator">{designator}</span>
+          </>
+        )}
       </h2>
       {reading === null ? (
         <p className="view-meter__reason" id={reasonId}>
@@ -63,7 +75,7 @@ export function MeterControl({ meter, reading, onMeter }: MeterControlProps) {
               SOURCE
             </span>{" "}
             <output className="view-meter__value" aria-labelledby={sourceId}>
-              {reading.source.toUpperCase()}
+              {viewDisplayName(reading.source)}
             </output>
           </p>
         </>

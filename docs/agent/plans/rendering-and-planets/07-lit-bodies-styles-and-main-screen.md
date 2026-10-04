@@ -1388,34 +1388,60 @@ timestamps are unavailable. Acceptance: `pnpm test`.
 
 #### R07.T19 Instrument views in `VIEW`
 
-`displays/view/InstrumentView.tsx`, `ViewDisplay.tsx` (Design notes 14 and 15): two slots, each
-with its own camera, style and target, R01's `createView(canvas, name)`, R02's DOM list and label
-block, and the exposure reading of the primary view; and T18's budgets wired into `VIEW`
-(decision-r07-t18, item 1). `VIEW` builds a `ViewSpec` for the primary and for each open
-instrument in slot order, and takes `viewBudgets(views, setting)` again whenever a view opens or
-closes, a camera's style changes or the setting changes, the setting coming from one `VIEW` input
-(`high` until the client offers `low`). Each view draws its budget's `style`, its label block's
-`STYLE` naming the style drawn, and is paced at its `rateHz`: a 60 Hz view every animation frame,
-a 30 Hz view every second one, a 30 Hz primary on every second vsync as R05 Design note 21 paces
-the low setting, and an instrument only in frames the primary draws. Each view's terrain demand
-carries its `streamPriority` (R05). A photorealistic view's scene target is made at its render
-resolution times its scale: the budget's `renderScale`, or, while its `control` is set, the
-`scale` of a `ResolutionController` made from `control` when it first appears, `retarget`ed when
-its target changes (an instrument opened or closed, the setting changed) and dropped when
-`control` returns to `null`. The controller is updated once a primary frame: `gpuFramesMs` holds
-`gpuTimeMs` of every view's `PassTimes` submitted from one primary frame to the next, one entry
-for each primary frame once all its resolves are in (none on some updates), or is `undefined`
-while `GraphicsStatus.timer` is `absent`; `intervalMs` is the interval between the primary's
-frames. The style control and the key `4` ask `photorealisticAllowed` before a switch to the
-photorealistic style; a refusal holds the button back with its reason, the adapter's refusal
-(`styleRefusal`) first where both hold. Tests (Vitest): each view focusable and named; keyboard
+`displays/view/InstrumentView.tsx`, `ViewDisplay.tsx` (Design notes 14 and 15): two slots, each with
+its own camera, style and target, R01's `createView(canvas, name)`, R02's DOM list and label block,
+and the exposure reading of the primary view; and T18's budgets wired into `VIEW` (decision-r07-t18,
+item 1). `VIEW` builds a `ViewSpec` for the primary and for each open instrument in slot order, and
+takes `viewBudgets(views, setting)` again whenever a view opens or closes, a camera's style changes
+or the setting changes, the setting coming from one `VIEW` input (`high` until the client offers
+`low`). Each view draws its budget's `style`, its label block's `STYLE` naming the style drawn, and
+is paced at its `rateHz`: a 60 Hz view every animation frame, a 30 Hz view every second one, a 30 Hz
+primary on every second vsync as R05 Design note 21 paces the low setting, and an instrument only in
+frames the primary draws. Each view's terrain demand carries its `streamPriority` (R05). A
+photorealistic view's scene target is made at its render resolution times its scale: the budget's
+`renderScale`, or, while its `control` is set, the `scale` of a `ResolutionController` made from
+`control` when it first appears, `retarget`ed when its target changes (an instrument opened or
+closed, the setting changed) and dropped when `control` returns to `null`. The controller is updated
+once a primary frame: `gpuFramesMs` holds `gpuTimeMs` of every view's `PassTimes` submitted from one
+primary frame to the next, one entry for each primary frame once all its resolves are in (none on
+some updates), or is `undefined` while `GraphicsStatus.timer` is `absent`; `intervalMs` is the
+interval between the primary's frames. The style control and the key `4` ask `photorealisticAllowed`
+before a switch to the photorealistic style; a refusal holds the button back with its reason, the
+adapter's refusal (`styleRefusal`) first where both hold. The engine numbers its timing frames
+through R01's `RenderEngine.passTimesFrame`, added here (decision-r07-t19, item 1): the timer's
+latest resolve number, 0 before any and while `ResilientEngine` has no engine, restarting from 0 at
+a restore; a resolve dropped while every buffer is in flight still takes its number, and
+`TIMING_FRAMES_IN_FLIGHT` is raised to 64, or to three frames' resolves of a photorealistic primary
+with two instruments if more; tested in the engine's Vitest suite and run under `just test-render`.
+`VIEW` reads it at the start of each primary frame; the previous frame's group is the numbers since
+the previous read, an empty range giving no entry, a complete group the sum of its reports'
+`gpuTimeMs`, a group still incomplete when a later one completes discarded, and every pending group
+discarded at `onRestored`. Layout (decision-r07-t19, item 2): the slots `INSTRUMENT 1` above
+`INSTRUMENT 2` stand over the stage's right edge, inset `0.5rem`, each a panel holding its label
+block (`VIEW`, `FRAME`, `TIME`, `STYLE`, `CAMERA`, `FOV`, `EXPOSURE`, `SOURCE`, `STARS` and the
+view's statements; `SCENE` on the primary's only) beside a 4:3 canvas of `15rem × 11.25rem`; no slot
+covers the primary's label block or annunciations, which take the width left of the open slots, and
+a slot with no room has its `OPEN` held back. A side-column panel `Instruments`, first in the
+column, holds an `OPEN`/`CLOSE` pair for each slot (both `CLOSE` when the display mounts) and the
+selector `CONTROLS` (`PRIMARY`, `INSTRUMENT 1`, `INSTRUMENT 2`, a closed instrument's held back with
+`NOT AVAILABLE: INSTRUMENT 1 is not open`), which points the `Targets`, `Camera` and `Style` panels,
+each designated with that view, and the single keys pressed off a canvas; a pointer press on a
+canvas or a view key pressed on a focused canvas sets `CONTROLS` to that view first, and closing the
+controlled instrument returns it to `PRIMARY`. The exposure is the primary's alone: the `Exposure`
+and meter panels are designated `PRIMARY`, and an instrument shows the primary's reading with
+`SOURCE PRIMARY`, `MeterControl`'s source taking the same view names. Canvases are named `VIEW,
+<style drawn>, <slot name>, <preset>`. Tests (Vitest): each view focusable and named; keyboard
 reaches every camera control in every view; the style control of a second view is disabled on low
-with `NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, and the key `4` refused there;
-a wireframe instrument shows the source of its exposure; against a fake engine, opening an
-instrument beside a photorealistic primary gives it a controller whose scale sizes the scene
-target, closing the instruments returns it to the bounds' max, a 30 Hz view draws in every second
-frame, an instrument's pass times count in the primary's frame, and an absent timer feeds
-`undefined`. Acceptance: `pnpm test`, `just ci`.
+with `NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, and the key `4` refused there; a
+wireframe instrument shows the source of its exposure; against a fake engine, opening an instrument
+beside a photorealistic primary gives it a controller whose scale sizes the scene target, closing
+the instruments returns it to the bounds' max, a 30 Hz view draws in every second frame, an
+instrument's pass times count in the primary's frame, and an absent timer feeds `undefined`;
+`passTimesFrame` grouping with a hole, a restore and an absent timer; Tab reaches each open
+instrument; a key on a focused instrument sets `CONTROLS` and acts on it, Tab past the canvases
+leaves `CONTROLS` alone; the designators follow `CONTROLS`; hidden screenshots at 1920×1080 and
+1280×720 with both instruments open, nothing overlapping a reading or clipped. Acceptance: `pnpm
+test`, `just ci`.
 
 #### R07.T20 Several views, by hand
 
@@ -1423,13 +1449,14 @@ With the real styles on the development machine (RTX 3080) and, by the owner, on
 on a quiet machine: a full-window photorealistic view and two wireframe instruments, each the right
 way up, no GPU time in copies, a resize of one leaving the others' attachments alone, the frame time
 with instruments open against the low setting's 33 ms on the UHD 620 (brainstorm, Testing), and the
-per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. On the UHD 620's
-low setting, also a wireframe primary with two wireframe instruments, and one with a
-photorealistic and a wireframe instrument, against R05 Design note 21's criteria at 60 Hz (T the
-display's measured vsync period). A miss of the first moves the low setting's wireframe primary to
-30 Hz as a `budget` field; a miss of the second alone puts the photorealistic instrument's scale
-under the controller, against the primary's period, rather than lowering the primary's rate
-(decision-r07-t18, items 4 and 5). Recorded in this plan. Acceptance: the record.
+per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. The pass timer's
+drop warning never appears in these runs (decision-r07-t19, item 1). On the UHD 620's low setting,
+also a wireframe primary with two wireframe instruments, and one with a photorealistic and a
+wireframe instrument, against R05 Design note 21's criteria at 60 Hz (T the display's measured vsync
+period). A miss of the first moves the low setting's wireframe primary to 30 Hz as a `budget` field;
+a miss of the second alone puts the photorealistic instrument's scale under the controller, against
+the primary's period, rather than lowering the primary's rate (decision-r07-t18, items 4 and 5).
+Recorded in this plan. Acceptance: the record.
 
 #### R07.T21 A child window on a second monitor
 
@@ -2285,6 +2312,102 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     T19 reads it from one input so that its tests give `low`, but no task built yet lets the
     running client choose `low`, which T17's and T20's UHD 620 runs need. T17 makes it selectable
     (the orchestrator's assignment, 2026-10-04; see "`VIEW`'s quality setting" above).
+- **Several views, stated limits (decision-r07-t19).** A photorealistic instrument is exposed by the
+  primary's reading, not metered from its own image (open). At 1280×720 two open instruments cover
+  most of the primary's image, the operator's choice. The spike's `ResolveCounter.runFrame` drifts
+  by one per dropped resolve now that a drop takes a number; the spike's own warning flags such
+  runs.
+- **Deviations in T19, as built** (2026-10-04).
+  - **Files.** `displays/view/InstrumentView.tsx` (a slot), `InstrumentsPanel.tsx` (the
+    `Instruments` panel), `InstrumentControls.tsx` (an instrument's `Targets`, `Camera` and `Style`
+    panels), `useInstruments.ts` (the slots' state, commands, skies and loop), `viewFrameDrawer.ts`
+    (`ViewFrameDrawer`, an instrument's frame in either style with R06's layers and cube, and
+    `skySprites`, which the primary now imports) and `viewNames.ts` (`PRIMARY_VIEW_ID`,
+    `PRIMARY_NAME`, `INSTRUMENT_SLOTS`, `instrumentName`, `instrumentViewId`, `viewDisplayName`);
+    `view/budget/framePacing.ts` (`drawsInFrame`, `PrimaryFrameTimes`, `PENDING_PRIMARY_FRAMES`,
+    `BudgetedScale`); `view/photoreal/internalScale.ts` (`internalViewport`, `spritesAtScale`);
+    `test/viewDisplayHarness.tsx` (`timedEngineSource`, `renderViewDisplay`, `nominalStore`,
+    `openUniverse`, `sceneArrives`). `viewRun.ts` gains `followRun`, `startInstrumentRun` and
+    `POSITIONS_FROM_SHIP`; `useViewSky.ts` `cullViewSky` (its cull, shared); `styleRefusals.ts`
+    `withPermission`; `ViewLabelBlock` an `id` and readings that break at their `·` first;
+    `CameraControls`, `StyleControl`, `ExposurePanel` and `MeterControl` an optional `designator`, a
+    span in the title, so their regions are named `Camera PRIMARY` and so on. R01:
+    `RenderEngine.passTimesFrame`, `PassTimer.frame`; the fakes' `passTimesFrame`, `reportPassTimes`
+    and `raiseRestored`.
+  - **The setting** is `ViewDisplay`'s prop `setting`, `high` by default, read by the budgets alone;
+    the sky and the photorealistic frame stay at `high` until T17 (accepted by the orchestrator as
+    the smallest reversible choice, 2026-10-04).
+  - **Two frame paths.** The primary keeps its own loop, which T8.a's metering shares; the
+    instruments draw through `ViewFrameDrawer`, whose frame code mirrors the primary's (the
+    wireframe list, R06's band, discs and cube, the photorealistic frame), so that the two lanes'
+    edits to `ViewDisplay.tsx` merged apart. One path for both is a follow-up. The primary's draw
+    reads the merged availability (the adapter's, then the budget's), which equals its budget's
+    `style`.
+  - **Pacing.** The primary's `requestAnimationFrame` loop counts animation frames and returns from
+    those `drawsInFrame` refuses its `rateHz`; the instruments are drawn from inside the primary's
+    frame (`InstrumentsFrame`) at their 30 Hz, in the same phase, and publish their readouts in the
+    primary's 4 Hz frame, so that React renders the stage once for all three.
+  - **The scene target.** `photorealFrame` takes the internal viewport, `internalViewport(viewport,
+    scale)` (the height at the width's factor), and the draw list's stars carried to it by
+    `spritesAtScale` (positions about the centre by k, light per point-spread weight by k²).
+    `PhotorealRenderer` is unchanged: its `#follow` resizes the target and the bloom chain, and
+    refits the bloom kernel at each new scale, about 35 ms (provisional; T20 records it). The render
+    resolution is the canvas's; the low setting's 720 rows are T17's. `BudgetedScale` also makes a
+    new controller should the bounds change (equal on both settings today).
+  - **Grouping.** `PrimaryFrameTimes.startFrame(engine.passTimesFrame)` at the start of each primary
+    frame; reports that arrive before their group ends are held until it does; at most
+    `PENDING_PRIMARY_FRAMES` (8) groups are awaited while no report arrives; a mark that goes back
+    starts over, as `onRestored` does.
+  - **`TIMING_FRAMES_IN_FLIGHT` is 135**: three frames of the heaviest the views allow, a
+    photorealistic primary with two photorealistic instruments, 45 resolves in the fake engine (15
+    each); with wireframe instruments 17, under 64 for three.
+  - **Instruments.** A run of R02's `camera` role following the primary's scene each frame
+    (`followRun`), opening at `CHASE` where there is an own ship, its camera reported to the
+    server's scene while open. Its exposure is the display's control, under `AUTO` the primary's
+    applied value as it reaches that state (4 Hz, 0.1 EV). Each culls the primary's sky for its own
+    camera (`cullViewSky` at its role, its field of view and its canvas's width; R06 Design note
+    20), so its `STARS` states its own limit and its cube is baked for its own selection. A
+    photorealistic instrument passes `meter: "average"`, and its renderer still takes a histogram
+    nothing reads (a cost for T20). Its canvas has no DOM mark labels (its list names the marks).
+    Its statements are decision-r07-t19's list (`POSITIONS AS SEEN FROM SHIP`, `PHOTOREALISTIC:
+    PREPARING`, its graphics fault); the scene's (its lighting, its bodies' labels, `ROTATION NOT
+    YET MODELLED`) stay the primary's, as the guide draft's "every line above but `SCENE`" leaves
+    open (for the owner). An instrument opened during a device loss makes its view at once and its
+    renderers at the restore. A new scene remounts the stage, so it closes the instruments. VIEW
+    draws no terrain yet, so no demand carries `streamPriority`; the plan that adds terrain to
+    `VIEW` takes each view's R05 weight from it.
+  - **The `Instruments` panel.** Legends floated beside their buttons, as the form choices do. A
+    reason is one line however many buttons it holds back (`NOT AVAILABLE: INSTRUMENT 1 and
+    INSTRUMENT 2 are not open` while both are closed, the ruling's wording for one), so that the
+    column keeps its height. While no view is drawn (the graphics' annunciation in the stage's
+    place) every `OPEN` is held back with `NOT AVAILABLE: no view can be drawn` and `CONTROLS` stays
+    `PRIMARY` (UX review). The room for one more slot is reckoned from the open slots' measured
+    column, a first slot at 16 rem, beside the primary's label block at a least 14 rem (UX review).
+    The focus return of the ruling's closing rule is not built: `CLOSE` takes the focus before the
+    slot closes, so the closed canvas never holds it.
+  - **Layout, as measured** (hidden window, never shown, Electron's `capturePage`, at 1920×1080 and
+    1280×720 CSS px; both instruments closed, both open over a kept scene, and all three
+    photorealistic in `PHASE TEST`). A slot is 555 px wide and 254 px tall over the kept scene (a
+    288 px label block of twelve lines at line height 1.2, `STARS` over three, beside the 240 × 180
+    px canvas), 233 px in `PHASE TEST`: two stand 33.25 rem, not the ruling's estimated 29.5 rem,
+    since the label block, not the canvas, sets the height. On the stage nothing overlaps a reading
+    or is clipped, at either size, in any of the three states. **Pending the owner:** at 1280×720
+    with both open the primary's label block is 230 px wide, and `FRAME`, `TIME`, `EXPOSURE` (`EV100
+    -1.0` and `MAN`) and `ROTATION NOT YET MODELLED` break at spaces too, against decision-r07-t19
+    2f's "no line breaks except at `·`"; and the slots pack upward, so `INSTRUMENT 2` opened alone
+    stands at the top until `INSTRUMENT 1` opens.
+  - **The side column (pending the owner).** It fits at 1920×1080 in the wireframe, both closed and
+    both open, after the column's gap went to 0.5 rem, its panels' block padding to 0.75 rem (the
+    `Instruments` panel's to 0.5 rem), their titles' margin to 0.25 rem and the targets list's least
+    height to two rows. It overflows at 1280×720, as it did before T19 (the `Exposure` panel already
+    stood below the stage's foot; `Instruments` pushes `Style` down too), and at 1920×1080 in the
+    photorealistic style once the meter panel shows, as it has since T8.a's metering. T19's by-hand
+    check ("nothing … clipped") is therefore unmet in the side column at those sizes; a rule for a
+    short page (G 252–255's rearrangement) is needed.
+  - **The DOM list (for the owner).** An instrument's list is the side column's while `CONTROLS`
+    points at it (decision-r07-t19, 2d), and focus alone does not move `CONTROLS`, so a focused
+    instrument canvas shows the primary's list until a key or a press on it; whether that meets the
+    brainstorm's "each view paired with its DOM list" is the owner's.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in

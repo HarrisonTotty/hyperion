@@ -8,8 +8,11 @@ import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
+import type { SystemIdHex } from "@hyperion/protocol";
+
 import {
   commandRun,
+  followRun,
   photorealStatements,
   frameName,
   freeRateReading,
@@ -17,6 +20,7 @@ import {
   labelStatements,
   markRows,
   type ViewRun,
+  startInstrumentRun,
   startRun,
   stepRun,
 } from "./viewRun";
@@ -367,5 +371,38 @@ describe("the style", () => {
     expect(photorealStatements(photoreal, "lit", "wireframe", [])).toEqual([
       "PHOTOREALISTIC: PREPARING",
     ]);
+  });
+});
+
+describe("an instrument's run (R07.T19)", () => {
+  it("opens as a camera at the chase preset of the primary's scene", () => {
+    const run = startInstrumentRun(startRun(precisionScene()));
+    expect([run.camera.role, run.camera.preset]).toEqual(["camera", "chase"]);
+  });
+
+  it("follows the scene its primary drew, at the primary's time", () => {
+    const primary = startRun(precisionScene());
+    const instrument = startInstrumentRun(primary);
+    const stepped = stepRun(primary, { ...STILL, dtS: 0.5 });
+    const followed = followRun(instrument, stepped, {
+      dtS: 0.5,
+      held: new Set(),
+      reducedMotion: true,
+    });
+    expect([followed.scene === stepped.scene, followed.tS]).toEqual([true, stepped.tS]);
+  });
+
+  it("moves a free instrument as on a jump when its primary's scene is in another system", () => {
+    const primary = startRun(precisionScene());
+    const free = done(
+      commandRun(startInstrumentRun(primary), { kind: "preset", preset: "free" }, CUT),
+    );
+    const elsewhere: SystemIdHex = "0200080020000005";
+    const moved = followRun(
+      free,
+      { ...primary, scene: { ...primary.scene, system: elsewhere } },
+      { dtS: 0, held: new Set(), reducedMotion: true },
+    );
+    expect([moved.camera.preset, moved.camera.target]).toEqual(["chase", null]);
   });
 });

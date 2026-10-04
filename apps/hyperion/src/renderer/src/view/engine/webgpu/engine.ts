@@ -739,6 +739,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return this.#timer.listen(listener);
   }
 
+  get passTimesFrame(): number {
+    return this.#timer.frame;
+  }
+
   onAllocation(listener: (event: AllocationEvent) => void): () => void {
     this.#allocationListeners.add(listener);
     return () => {

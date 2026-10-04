@@ -547,6 +547,19 @@ export interface RenderEngine {
   ): Promise<ArrayBuffer>;
   /** Per-pass GPU time for each frame, once its query set resolves; silent without the feature. */
   onPassTimes(listener: (times: PassTimes) => void): () => void;
+  /**
+   * The `PassTimes.frame` of the timer's latest resolve, 0 before any and without the feature
+   * (plan R07, T19).
+   *
+   * @remarks
+   * Each submission resolves its own timestamps, numbered from 1, as it is made; a caller that
+   * reads this between its submissions knows which of the times reported later are its own (VIEW
+   * groups every view's by the primary view's frame). A resolve dropped while every buffer is
+   * still being read takes its number too, and is never reported: a gap. `ResilientEngine`
+   * reports the current engine's, and 0 while it has none, so the count starts again from 0 at a
+   * restore.
+   */
+  readonly passTimesFrame: number;
   /** Every creation, destruction and upload, with its byte size and category. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
   /**
