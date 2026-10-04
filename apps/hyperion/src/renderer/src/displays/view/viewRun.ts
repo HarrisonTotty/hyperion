@@ -180,6 +180,16 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
       camera = onSystemChange(camera, cameraSceneOf(scene));
     }
   }
+  return { ...run, tS, scene, camera: flyCamera(camera, scene, dtS, input) };
+}
+
+/** A camera one frame on in `scene`: following its preset, flown by the held keys, eased. */
+function flyCamera(
+  camera: CameraState,
+  scene: ViewScene,
+  dtS: number,
+  input: Pick<FrameInput, "held" | "reducedMotion">,
+): CameraState {
   const cameraScene = cameraSceneOf(scene);
   const following = followPreset(camera, cameraScene);
   const flown = stepFreeCamera(
@@ -189,7 +199,59 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
     input.reducedMotion,
     cameraScene,
   ).state;
-  return { ...run, tS, scene, camera: advanceEasedMove(flown, dtS) };
+  return advanceEasedMove(flown, dtS);
+}
+
+/**
+ * An instrument view's run one frame on (plan R07, T19): the scene its primary view drew this
+ * frame, at the primary's script time, and the instrument's own camera stepped through it as
+ * {@link stepRun} steps one, flown by the keys held on the instrument's canvas.
+ *
+ * @remarks
+ * Where the primary's scene is in another system than the instrument last drew, or no longer
+ * holds the body or craft its camera is held to, the camera is moved as on a jump, as a server
+ * scene's is.
+ *
+ * @param input - The instrument's own frame: its time since it last drew (it draws at its own
+ *   rate) and its held keys.
+ */
+export function followRun(
+  run: ViewRun,
+  primary: ViewRun,
+  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion">,
+): ViewRun {
+  const dtS = Math.min(Math.max(input.dtS, 0), MAX_FREE_STEP_S);
+  const { scene } = primary;
+  let camera = run.camera;
+  if (scene.system !== run.scene.system || !frameHeld(camera, scene)) {
+    camera = onSystemChange(camera, cameraSceneOf(scene));
+  }
+  return {
+    source: primary.source,
+    tS: primary.tS,
+    scene,
+    camera: flyCamera(camera, scene, dtS, input),
+  };
+}
+
+/**
+ * An instrument view's run as it opens (plan R07, T19): the primary's scene, a camera of R02's
+ * `camera` role, at the `CHASE` preset where the scene has an own ship (beside a primary at its
+ * seat) and else as a new camera starts.
+ */
+export function startInstrumentRun(primary: ViewRun): ViewRun {
+  const fresh: ViewRun = {
+    source: primary.source,
+    tS: primary.tS,
+    scene: primary.scene,
+    camera: newCameraState(cameraSceneOf(primary.scene), "camera"),
+  };
+  const chase = commandRun(
+    fresh,
+    { kind: "preset", preset: "chase" },
+    { easedMoves: false, reducedMotion: true },
+  );
+  return chase.kind === "done" ? chase.run : fresh;
 }
 
 /** The styles a view offers before its adapter has answered: the wireframe alone. */
@@ -383,6 +445,9 @@ export function labelLines(
   return lines;
 }
 
+/** The statement of a view whose camera is off the hull: positions are as the ship sees them. */
+export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
+
 /**
  * The steady statements under the label block's lines, each while its condition holds.
  *
@@ -395,7 +460,7 @@ export function labelStatements(
 ): ReadonlyArray<string> {
   const statements: string[] = [];
   if (run.camera.preset !== "seat" && run.scene.ownShip !== null) {
-    statements.push("POSITIONS AS SEEN FROM SHIP");
+    statements.push(POSITIONS_FROM_SHIP);
   }
   if (run.scene.bodies.some((body) => body.rotation === null)) {
     statements.push("ROTATION NOT YET MODELLED");

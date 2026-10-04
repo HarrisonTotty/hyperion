@@ -105,6 +105,19 @@ describe("a device loss", () => {
     expect(status.getSnapshot().capabilities).toEqual(nth(module, 1).capabilities);
   });
 
+  it("reports the current engine's timing frame, from 0 again after the restore (R07.T19)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    nth(module, 0).passTimesFrame = 7;
+    const before = engine.passTimesFrame;
+    const restored = vi.fn<() => void>();
+    engine.onRestored(restored);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(restored).toHaveBeenCalledOnce();
+    });
+    expect([before, engine.passTimesFrame]).toEqual([7, 0]);
+  });
+
   it("tells the caller once the engine is restored", async () => {
     const { engine, module } = await load([adapter(), adapter()]);
     const restored = vi.fn<() => void>();

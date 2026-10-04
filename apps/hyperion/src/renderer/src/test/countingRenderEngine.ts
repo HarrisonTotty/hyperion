@@ -389,6 +389,11 @@ export class CountingRenderEngine implements RenderEngine {
     return () => undefined;
   }
 
+  /** R01's fake's, 0 unless a test moves it. */
+  get passTimesFrame(): number {
+    return this.inner.passTimesFrame;
+  }
+
   onAllocation(listener: (event: AllocationEvent) => void): () => void {
     this.#allocationListeners.add(listener);
     return () => {

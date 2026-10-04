@@ -38,10 +38,13 @@ export const PASSES_PER_FRAME = 64;
 
 /**
  * Resolve and staging pairs at most: resolves whose times may be in flight at once. Each view's
- * and target's render resolves its own, and a mapping settles a frame or more later, so three
- * canvases and a few targets at 60 Hz hold several at once; the pairs are 2 KiB each.
+ * and target's render resolves its own, the bloom chain one per level, and a mapping settles a
+ * frame or more later. A photorealistic `VIEW` frame resolves 15 times, so its heaviest frame, a
+ * photorealistic primary with two photorealistic instruments, 45; this holds three such frames
+ * (R07.T19, decision-r07-t19 item 1: 64, or three such frames if more). The pairs are made as
+ * they are needed, 2 KiB each.
  */
-export const TIMING_FRAMES_IN_FLIGHT = 16;
+export const TIMING_FRAMES_IN_FLIGHT = 135;
 
 /** Bytes of one pair's buffers: every query of a frame, 8 bytes each. */
 const RESOLVE_BYTES = PASSES_PER_FRAME * 2 * 8;
@@ -91,6 +94,14 @@ export class PassTimer {
     return this.#pending;
   }
 
+  /**
+   * The number of the latest resolve, which its times carry as `PassTimes.frame` (a dropped
+   * resolve's, none); 0 before any.
+   */
+  get frame(): number {
+    return this.#frame;
+  }
+
   /** Stops reporting and drops the listeners; the engine destroys the query set and buffers. */
   dispose(): void {
     this.#disposed = true;
@@ -137,7 +148,9 @@ export class PassTimer {
    *
    * @remarks
    * When every pair is still in flight, the frame's times are dropped, with one warning, rather
-   * than a buffer being made.
+   * than a buffer being made; the resolve still takes its number, so that a caller grouping
+   * resolves by number sees the drop as a gap rather than a frame with part of its time missing
+   * (R07.T19, decision-r07-t19 item 1).
    */
   resolve(
     encoder: Pick<GPUCommandEncoder, "resolveQuerySet" | "copyBufferToBuffer">,
@@ -147,6 +160,8 @@ export class PassTimer {
       return null;
     }
     this.#pending = [];
+    this.#frame += 1;
+    const frame = this.#frame;
     const pair = this.#free.pop() ?? this.#makePair();
     if (pair === null) {
       if (!this.#warnedInFlight) {
@@ -157,8 +172,6 @@ export class PassTimer {
       }
       return null;
     }
-    this.#frame += 1;
-    const frame = this.#frame;
     const bytes = passes.length * 2 * 8;
     encoder.resolveQuerySet(this.#querySet, 0, passes.length * 2, pair.resolved, 0);
     encoder.copyBufferToBuffer(pair.resolved, 0, pair.staging, 0, bytes);

@@ -11,6 +11,11 @@ import { exposureReading } from "./viewRun";
 
 /** Props of {@link ExposurePanel}. */
 export interface ExposurePanelProps {
+  /**
+   * The view the panel acts on, its system designator on the title row (`PRIMARY`,
+   * `INSTRUMENT 1`; R07.T19), or none.
+   */
+  readonly designator?: string | undefined;
   readonly exposure: ExposureControl;
   /**
    * The metering source's value, EV100, or `null` where there is none: always `null` for a
@@ -76,12 +81,23 @@ function ExposureCommand({ label, result, onChange }: ExposureCommandProps) {
  * @remarks
  * Display controls: the exposure is the view's own, not the ship's, so a command acts at once.
  */
-export function ExposurePanel({ exposure, meteredEv100, onChange }: ExposurePanelProps) {
+export function ExposurePanel({
+  exposure,
+  meteredEv100,
+  onChange,
+  designator,
+}: ExposurePanelProps) {
   const titleId = useId();
   return (
     <section className="panel view-exposure" aria-labelledby={titleId}>
       <h2 className="panel__title" id={titleId}>
         Exposure
+        {designator === undefined ? null : (
+          <>
+            {" "}
+            <span className="panel__designator">{designator}</span>
+          </>
+        )}
       </h2>
       <p className="view-exposure__reading">
         <output>{exposureReading(exposure)}</output>

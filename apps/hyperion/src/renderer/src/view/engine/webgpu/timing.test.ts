@@ -225,6 +225,17 @@ describe("the pass timer's buffers", () => {
     expect(console.warn).toHaveBeenCalledOnce();
   });
 
+  it("number a dropped resolve, so that it reads as a gap (R07.T19)", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const device = timerDevice([0n, 10n], "held");
+    const timer = new PassTimer(device, "quantized");
+    for (let frame = 0; frame <= TIMING_FRAMES_IN_FLIGHT; frame += 1) {
+      timer.writesFor("cockpit");
+      timer.resolve(recordingEncoder())?.();
+    }
+    expect(timer.frame).toBe(TIMING_FRAMES_IN_FLIGHT + 1);
+  });
+
   it("are reused after a read that failed", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const device = timerDevice([0n, 10n], "failing");
@@ -232,11 +243,15 @@ describe("the pass timer's buffers", () => {
     for (let frame = 1; frame <= TIMING_FRAMES_IN_FLIGHT + 2; frame += 1) {
       timer.writesFor("cockpit");
       timer.resolve(recordingEncoder())?.();
-      // Each frame waits for the one before it to fail, as frames a few apart do.
+      // Each frame waits for the one before it to fail, as frames a few apart do; polled each
+      // millisecond, since there are as many frames as pairs.
       // oxlint-disable-next-line no-await-in-loop
-      await vi.waitFor(() => {
-        expect(console.error).toHaveBeenCalledTimes(frame);
-      });
+      await vi.waitFor(
+        () => {
+          expect(console.error).toHaveBeenCalledTimes(frame);
+        },
+        { interval: 1 },
+      );
     }
     expect(device.buffers).toHaveLength(2);
   });
