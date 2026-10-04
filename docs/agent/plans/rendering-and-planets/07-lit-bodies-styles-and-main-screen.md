@@ -377,28 +377,48 @@ upscale, the encoding and the dither in one pass).
 ### Several views (`budget/`, `displays/view/`)
 
 ```ts
+export interface ViewSpec {
+  readonly id: ViewId;
+  readonly slot: "primary" | "instrument"; // `ViewSlot`
+  readonly style: RenderStyle; // the style the view's camera asks for
+}
+export interface ScaleControl {
+  readonly bounds: ScaleBounds;
+  readonly target: ResolutionTarget;
+}
 export interface ViewBudget {
   readonly renderScale: number;
   readonly rateHz: 60 | 30;
-  readonly style: RenderStyle;
+  readonly style: RenderStyle; // drawn
   readonly streamPriority: "primary" | "secondary";
+  readonly control: ScaleControl | null; // a photorealistic primary while instruments are open
 }
 export const PER_CANVAS_OVERHEAD_MS = 0.3; // provisional, Design note 14
 export function viewBudgets(
-  views: ReadonlyArray<ViewSpec>,
+  views: ReadonlyArray<ViewSpec>, // one primary and the open instruments, in slot order
   setting: QualitySetting,
-  instrumentsOpen: boolean,
-): Map<ViewId, ViewBudget>; // pure
+): ReadonlyMap<ViewId, ViewBudget>; // pure
 export function photorealisticAllowed(
   views: ReadonlyArray<ViewSpec>,
   setting: QualitySetting,
   candidate: ViewId,
-): { allowed: true } | { allowed: false; reason: "ONE PHOTOREALISTIC VIEW ON LOW SETTING" };
+):
+  | { allowed: true }
+  | { allowed: false; reason: "NOT AVAILABLE: QUALITY LOW allows one photorealistic view" };
+/** `ViewSettings.internalScaleBounds`, [0.5, 1.0] on both settings (note 14). */
+export type ScaleBounds = readonly [min: number, max: number];
+export interface ResolutionTarget {
+  readonly periodMs: number;
+  readonly gpuBudgetMs: number;
+}
 export class ResolutionController {
-  /** `bounds` is `ViewSettings.internalScaleBounds`, [0.5, 1.0] on both settings (note 14). */
-  constructor(bounds: readonly [min: number, max: number]);
-  update(gpuFrameMs: number | undefined, intervalMs: number): number;
-} // renderScale
+  constructor(bounds: ScaleBounds, target: ResolutionTarget);
+  get scale(): number;
+  retarget(target: ResolutionTarget): void; // keeps the scale
+  /** Each frame's `gpuTimeMs` once, or `undefined` where `GraphicsStatus.timer` is `"absent"`. */
+  update(gpuFramesMs: ReadonlyArray<number> | undefined, intervalMs: number): number; // renderScale
+}
+export function gpuTimeMs(times: ReadonlyArray<PassTimes>): number;
 ```
 
 `displays/view/InstrumentView.tsx`, `displays/view/StyleControl.tsx`,
@@ -1315,24 +1335,33 @@ block gains the meter, the style and `BODY ALBEDO: NOT YET MODELLED`; hull edges
 image, with the hull faces' occluder bias (`occluder.wgsl`, `slopeScale` 2 as built) raised to 3 so
 that the casing is covered (the UX decision, item 12; the sphere occluder's `SLOPE_SCALE` is 3
 already). Draft, for the owner, the nomenclature entries this plan adds beyond R02's nine items
-(`PHOTOREALISTIC` is already drafted by R02, beside `WIREFRAME`; `METER AVG`,
-`METER LIT`, `METER DARK`, `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the albedo phrase), as one
-edit of `docs/frontend/ux-guidelines.md` that ends in the owner's sign-off. Tests: every overlay
-mark over the image has a casing stroke; plates are present for every readout; the console-ux
-skill's lint and contrast scripts pass. Symbology over the tone-mapped image is a following
-canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view, in the same task as
-T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance: `just ci`; the guide
-edit is one commit for the owner.
+(`PHOTOREALISTIC` is already drafted by R02, beside `WIREFRAME`; `METER AVG`, `METER LIT`,
+`METER DARK`, the albedo phrase; the several views' refusal,
+`NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, is the guide's `NOT AVAILABLE` form
+and adds no entry, decision-r07-t18 item 6), as one edit of `docs/frontend/ux-guidelines.md` that
+ends in the owner's sign-off. Tests: every overlay mark over the image has a casing stroke; plates
+are present for every readout; the console-ux skill's lint and contrast scripts pass. Symbology
+over the tone-mapped image is a following canvas pass with `FrameSubmission.colourLoad` `"load"`
+through the sRGB view, in the same task as T15's pass (built by T15 under decision 2026-10-02,
+item 6). Acceptance: `just ci`; the guide edit is one commit for the owner.
 
 #### R07.T17 The low setting and benchmarks
 
-Add Design note 18's settings as fields of R05's `ViewSettings`, with their high and low values in
-`SETTINGS`, and Design note 14's `internalScaleBounds`, [0.5, 1.0] on both; record the benchmarks of
-T12, T14 and T15 and the whole style's frame time on the development machine's RTX 3080, which
-exceeds the RTX 4060 class of the brainstorm's Testing section, at 1080p, and, by the owner, on the
-UHD 620 at 720p, each on a quiet machine, under `--hyperion-gpu-timing`, in this plan as "as built"
-figures replacing the probes' provisional ones; R12 consolidates them. Acceptance: `just ci`; the
-figures recorded with their settings, flags, load and dates.
+Add the rest of Design note 18's settings as fields of R05's `ViewSettings`, with their high and
+low values in `SETTINGS`. T18 added Design note 14's `internalScaleBounds`, [0.5, 1.0] on both,
+and `budget { photorealisticRateHz, photorealisticViews }` (high 60 Hz and no limit; low 30 Hz and
+Design note 18's one photorealistic view), which T17 keeps as built (decision-r07-t18, item 2).
+Make `VIEW`'s quality setting selectable in the running client (the orchestrator's assignment,
+2026-10-04): `VIEW` hard-codes `high` today (`ViewDisplay.tsx` and `useViewSky.ts`), and the
+UHD 620 runs of this task and of T20 need `low`. The setting is the one `VIEW` input that its sky,
+its photorealistic frame and its budgets (T19) read; how the operator chooses it is the smallest
+reversible choice, recorded in Risks. Record the benchmarks of T12, T14 and T15 and the whole
+style's frame time on the development machine's RTX 3080, which exceeds the RTX 4060 class of the
+brainstorm's Testing section, at 1080p, and, by the owner, on the UHD 620 at 720p, each on a quiet
+machine, under `--hyperion-gpu-timing`, in this plan as "as built" figures replacing the probes'
+provisional ones; R12 consolidates them. Tests (Vitest): `VIEW` given `low` draws its sky and its
+photorealistic frame at the low setting's values. Acceptance: `pnpm test`, `just ci`; the figures
+recorded with their settings, flags, load and dates.
 
 ### Phase B: several views
 
@@ -1348,12 +1377,34 @@ timestamps are unavailable. Acceptance: `pnpm test`.
 
 #### R07.T19 Instrument views in `VIEW`
 
-`displays/view/InstrumentView.tsx`, `ViewDisplay.tsx` (Design note 15): two slots, each with its own
-camera, style and target, R01's `createView(canvas, name)`, R02's DOM list and label block, and the exposure
-reading of the primary view. Tests (Vitest): each view focusable and named; keyboard reaches every
-camera control in every view; the style control of a second view is disabled on low with its
-reason; a wireframe instrument shows the source of its exposure. Acceptance: `pnpm test`,
-`just ci`.
+`displays/view/InstrumentView.tsx`, `ViewDisplay.tsx` (Design notes 14 and 15): two slots, each
+with its own camera, style and target, R01's `createView(canvas, name)`, R02's DOM list and label
+block, and the exposure reading of the primary view; and T18's budgets wired into `VIEW`
+(decision-r07-t18, item 1). `VIEW` builds a `ViewSpec` for the primary and for each open
+instrument in slot order, and takes `viewBudgets(views, setting)` again whenever a view opens or
+closes, a camera's style changes or the setting changes, the setting coming from one `VIEW` input
+(`high` until the client offers `low`). Each view draws its budget's `style`, its label block's
+`STYLE` naming the style drawn, and is paced at its `rateHz`: a 60 Hz view every animation frame,
+a 30 Hz view every second one, a 30 Hz primary on every second vsync as R05 Design note 21 paces
+the low setting, and an instrument only in frames the primary draws. Each view's terrain demand
+carries its `streamPriority` (R05). A photorealistic view's scene target is made at its render
+resolution times its scale: the budget's `renderScale`, or, while its `control` is set, the
+`scale` of a `ResolutionController` made from `control` when it first appears, `retarget`ed when
+its target changes (an instrument opened or closed, the setting changed) and dropped when
+`control` returns to `null`. The controller is updated once a primary frame: `gpuFramesMs` holds
+`gpuTimeMs` of every view's `PassTimes` submitted from one primary frame to the next, one entry
+for each primary frame once all its resolves are in (none on some updates), or is `undefined`
+while `GraphicsStatus.timer` is `absent`; `intervalMs` is the interval between the primary's
+frames. The style control and the key `4` ask `photorealisticAllowed` before a switch to the
+photorealistic style; a refusal holds the button back with its reason, the adapter's refusal
+(`styleRefusal`) first where both hold. Tests (Vitest): each view focusable and named; keyboard
+reaches every camera control in every view; the style control of a second view is disabled on low
+with `NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, and the key `4` refused there;
+a wireframe instrument shows the source of its exposure; against a fake engine, opening an
+instrument beside a photorealistic primary gives it a controller whose scale sizes the scene
+target, closing the instruments returns it to the bounds' max, a 30 Hz view draws in every second
+frame, an instrument's pass times count in the primary's frame, and an absent timer feeds
+`undefined`. Acceptance: `pnpm test`, `just ci`.
 
 #### R07.T20 Several views, by hand
 
@@ -1361,8 +1412,13 @@ With the real styles on the development machine (RTX 3080) and, by the owner, on
 on a quiet machine: a full-window photorealistic view and two wireframe instruments, each the right
 way up, no GPU time in copies, a resize of one leaving the others' attachments alone, the frame time
 with instruments open against the low setting's 33 ms on the UHD 620 (brainstorm, Testing), and the
-per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. Recorded in this
-plan. Acceptance: the record.
+per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. On the UHD 620's
+low setting, also a wireframe primary with two wireframe instruments, and one with a
+photorealistic and a wireframe instrument, against R05 Design note 21's criteria at 60 Hz (T the
+display's measured vsync period). A miss of the first moves the low setting's wireframe primary to
+30 Hz as a `budget` field; a miss of the second alone puts the photorealistic instrument's scale
+under the controller, against the primary's period, rather than lowering the primary's rate
+(decision-r07-t18, items 4 and 5). Recorded in this plan. Acceptance: the record.
 
 #### R07.T21 A child window on a second monitor
 
@@ -1512,6 +1568,15 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
 - **Provisional timings.** Every timing from the research probes (histogram, present overhead,
   quantisation's effect) was measured while other work loaded the machine; T17 and T20 re-measure
   on a quiet one before any figure becomes "as built".
+- **`VIEW`'s quality setting is `high` throughout** (T17, the orchestrator's assignment,
+  2026-10-04). `ViewDisplay.tsx` hard-codes `"high"` for the photorealistic frame (line 510) and
+  bakes the sky at the high setting's face size wherever the device blends `float32` (433), and
+  `useViewSky.ts` takes `SETTINGS.high.sky` (92), so the running client cannot draw at `low`,
+  which T17's and T20's runs on the UHD 620 need. T17 makes the setting one `VIEW` input. How the
+  operator chooses it is open: the lean is a launch option, as the descent spike's
+  `--setting <high|low>` (R05.T13.c), since each measured run keeps one setting; a `QUALITY`
+  control in `VIEW` (the guide's draft label) would change it mid-run, which T18's `retarget`
+  bears, and would add its control to the guide (for the orchestrator).
 - **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
   Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
   Venus's curve unlabelled; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
@@ -2145,15 +2210,18 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     starts. A photorealistic primary alone renders at the bounds' max, uncontrolled; a wireframe
     view at 1, having no internal target (R02 Design note 12). The scale drops only as far as the
     measured GPU time needs. A photorealistic instrument (on low beside a wireframe primary, or
-    any on high) is never controlled, a stated limit.
+    any on high) is never controlled, a stated limit (decision-r07-t18, item 5): beside a
+    photorealistic primary its passes count in the primary's measured frame, and the case left, a
+    wireframe primary with a photorealistic instrument, is measured on the UHD 620 in T20.
   - **Rates.** A photorealistic primary at `budget.photorealisticRateHz`: 60 Hz, and 30 Hz on low
     (the low setting's 30 fps at 720p, paced to every second vsync, R05 Design note 21). A
     wireframe primary at 60 Hz on both settings, since the brainstorm's budget gives a wireframe
     view its own 16.7 ms frame on the UHD 620. Every instrument at 30 Hz and full scale, so that a
-    wireframe's strokes stay sharp, at R05's secondary streaming priority. **For the owner**: on
-    low beside a photorealistic primary at 30 Hz the instruments share its rate, and are below it
-    only by their smaller canvases (the brainstorm: "lower resolution or a lower rate"). The lean
-    is to keep it: they are wireframes with no internal scale, and 15 Hz would widen `rateHz`.
+    wireframe's strokes stay sharp, at R05's secondary streaming priority. **Decided**
+    (decision-r07-t18, item 4): on low beside a photorealistic primary at 30 Hz the instruments
+    share its rate and are below it by being wireframes on smaller canvases, which meets Design
+    note 14's "a lower scale or 30 Hz"; 15 Hz is not taken, and the wireframe primary's 60 Hz on
+    low is checked in T20.
   - **The budget.** `gpuBudgetMs` is `GPU_FRAME_SHARE` 0.8 of the nominal period (R05 Design note
     21's headroom row) less `PER_CANVAS_OVERHEAD_MS` per instrument canvas (`frameGpuBudgetMs`).
     The controller measures the frame's whole GPU time, every view's passes (`gpuTimeMs`), so the
@@ -2162,9 +2230,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (16.68 ms on the projector).
   - **The low setting's one photorealistic view** goes to the views asking for it in slot order,
     the primary first. `photorealisticAllowed` refuses every other view while one holds it, the
-    primary too while an instrument holds it, with `ONE PHOTOREALISTIC VIEW ON LOW SETTING`
-    (T16 drafts its row). The policy keeps no state, so the style control and the key `4` ask it
-    before a switch (T19).
+    primary too while an instrument holds it, with
+    `NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, the guide's `NOT AVAILABLE` form
+    (decision-r07-t18, item 6), which needs no row of its own. The policy keeps no state, so the
+    style control and the key `4` ask it before a switch (T19).
   - **The controller.** `new ResolutionController(bounds, target)` (the sketch has bounds only),
     with `retarget(target)` (keeping the scale, restarting the windows and waits, ignoring an
     equal target) and `scale`. `update(gpuFramesMs, intervalMs)` takes the GPU times of the frames
@@ -2172,7 +2241,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `undefined` where `GraphicsStatus.timer` is `absent`, in place of the sketch's single
     `number | undefined`, which could not tell a frame not yet resolved from no timer (TypeScript
     review). The caller groups a frame's resolves for `gpuTimeMs`: `PassTimes.frame` counts
-    resolves, not animation frames.
+    resolves, not animation frames. Kept, and Provides shows them (decision-r07-t18, item 3).
     - From GPU time, cost goes as the scale squared. Two of the last four frames over the budget
       drop the scale to where the worst would take 0.9 of it; a run of 30 under 0.75 raises it to
       where the run's worst would take 0.9, landing short of the top where a fixed part is large.
@@ -2189,12 +2258,17 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `budget: ViewBudgetSettings { photorealisticRateHz: 60 | 30, photorealisticViews: 1 | null }`
     (high 60 Hz and no limit, low 30 Hz and one): Design note 18's "one photorealistic view" and
     the low rate, placed by R05 Design note 26's rule. T17 adds the rest of Design note 18's.
+    T17's text says so (decision-r07-t18, item 2).
   - **Not wired.** Nothing in `ViewDisplay`, `photorealFrame` or `PhotorealRenderer` reads the
     budgets yet; the photorealistic frame still renders at scale 1 (T8.a's entry). T19 builds
     `ViewSpec`s from its slots, paces each view at its `rateHz`, sizes the scene target from the
     controller's scale, feeds it each frame's `gpuTimeMs` (or `undefined` under an absent timer),
-    and sends the style control and the key `4` through `photorealisticAllowed`; T19's text does
-    not yet say so (raised with the orchestrator).
+    and sends the style control and the key `4` through `photorealisticAllowed`; T19's text says
+    so (decision-r07-t18, item 1).
+  - **The setting in `VIEW`** is `high` throughout (`ViewDisplay.tsx` 510, `useViewSky.ts` 92):
+    T19 reads it from one input so that its tests give `low`, but no task built yet lets the
+    running client choose `low`, which T17's and T20's UHD 620 runs need. T17 makes it selectable
+    (the orchestrator's assignment, 2026-10-04; see "`VIEW`'s quality setting" above).
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in
