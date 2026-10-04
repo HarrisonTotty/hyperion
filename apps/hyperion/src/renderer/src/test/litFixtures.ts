@@ -40,17 +40,27 @@ export interface JohnsonBvr {
 export interface PlanetPhotometry {
   /** The planet's name. */
   readonly name: string;
-  /** Geometric albedo p per band, Mallama et al. 2017, Table 7 (Johnson R, not Cousins R_C). */
+  /**
+   * Geometric albedo p per band, Mallama et al. 2017, Table 7 (Johnson R, not Cousins R_C); Earth's
+   * from Robinson 2026 (see {@link SOLAR_SYSTEM_PHOTOMETRY}).
+   */
   readonly geometricAlbedo: JohnsonBvr;
-  /** B − V, magnitudes, from Mallama et al. 2017, Table 3's reference magnitudes. */
+  /**
+   * B − V, magnitudes, from Mallama et al. 2017, Table 3's reference magnitudes; Earth's from its
+   * band ratios and the Sun's colours.
+   */
   readonly bMinusVMag: number;
   /** V − R, magnitudes, from the same. */
   readonly vMinusRMag: number;
-  /** V(1, 0), magnitudes: Table 3's reference V at 1 au from Sun and observer, α = 0. */
+  /**
+   * V(1, 0), magnitudes: Table 3's reference V at 1 au from Sun and observer, α = 0; Earth's from
+   * its p_V and radius against the Sun's V of −26.75.
+   */
   readonly v10Mag: number;
   /**
    * The zeroth-order term of the planet's phase-curve equation in Mallama and Hilton 2018 (eqs. 2,
-   * 3, 5, 6, 8, 11, 15, 17), magnitudes: the V(1, 0) its template is anchored to.
+   * 3, 6, 8, 11, 15, 17), magnitudes: the V(1, 0) its template is anchored to; Earth's is its
+   * V(1, 0), since Robinson 2026's eq. 14 is normalised at opposition.
    */
   readonly templateV10Mag: number;
   /**
@@ -78,6 +88,17 @@ export interface PlanetPhotometry {
  * Tables 3 and 7; templates and their zeroth-order terms from Mallama and Hilton, Astronomy and
  * Computing 25 (2018) 10, arXiv:1808.01973. Mercury's Table 3 V(1, 0) of −0.69 is the 2017 value;
  * the 2018 paper's polynomial is anchored at −0.613 (its §3.1). Saturn's is the globe-only template.
+ *
+ * Earth's row is Robinson, Planetary Science Journal 7 (2026) 12, arXiv:2507.22258, §5 and eq. 14
+ * (decision-r07-earth-albedo, R07.T4.d), in place of Mallama et al. 2017's p_V of 0.434, which
+ * came through Tinetti et al. 2006's model (Robinson 2026, §6.1; Mallama and Hilton 2018, §4.3),
+ * whose Sun–observer azimuth is turned by 180° (Robinson et al. 2011, Astrobiology 11, 393, §3.4
+ * and Fig. 2). Its p is the eq. 14 fit's f = 0.23 split by Robinson's Model 07 band ratios
+ * 0.277 : 0.226 : 0.221, whose 0.1 µm-wide, solar-weighted 0.4–0.5, 0.5–0.6 and 0.6–0.7 µm bands
+ * stand for Johnson's B, V and R (R only in part, since Johnson's reaches past 0.8 µm). Its colours
+ * follow from those ratios and {@link SUN_JOHNSON_MAG} (B − V 0.429, V − R 0.516), and its
+ * V(1, 0) from p_V and the radius. q_V is 1.3116: the clamp acts from 139.0°, and eq. 14 alone
+ * gives 1.350 to 180°.
  */
 export const SOLAR_SYSTEM_PHOTOMETRY: ReadonlyArray<PlanetPhotometry> = [
   {
@@ -104,16 +125,14 @@ export const SOLAR_SYSTEM_PHOTOMETRY: ReadonlyArray<PlanetPhotometry> = [
   },
   {
     name: "Earth",
-    // Earth's measured p_V, 0.434, only happens to resemble log₁₀ e.
-    // oxlint-disable-next-line approx-constant
-    geometricAlbedo: { b: 0.512, v: 0.434, r: 0.418 },
-    bMinusVMag: 0.47,
-    vMinusRMag: 0.5,
-    v10Mag: -3.99,
-    templateV10Mag: -3.99,
+    geometricAlbedo: { b: 0.263, v: 0.215, r: 0.21 },
+    bMinusVMag: 0.43,
+    vMinusRMag: 0.52,
+    v10Mag: -3.23,
+    templateV10Mag: -3.23,
     radiusKm: 6371.0,
     template: "earth",
-    qV: 1.311,
+    qV: 1.312,
   },
   {
     name: "Mars",

@@ -45,6 +45,15 @@ function clampedPhaseIntegral(id: PhaseTemplateId): number {
   return phaseIntegral((alpha) => phaseFactor(law, alpha)[1] * shapePhase(share, alpha));
 }
 
+/**
+ * Robinson 2026's eq. 14 (PSJ 7, 12), written out: a Henyey–Greenstein function of g = −0.33 at the
+ * scattering angle 180° − α, normalised at opposition, unclamped and to 180°.
+ */
+function robinsonEq14(alphaRad: number): number {
+  const g = -0.33;
+  return ((1 + g) ** 2 / (1 + g ** 2 + 2 * g * Math.cos(alphaRad))) ** 1.5;
+}
+
 /** V dimming, mag, of a law against opposition. */
 function dimmingOf(law: PhotometricLaw, alphaDeg: number, channel: 0 | 1 | 2): number {
   return -2.5 * Math.log10(discIntegratedPhase(law, alphaDeg * RAD_PER_DEG)[channel]);
@@ -86,14 +95,16 @@ describe("lawFor", () => {
     expect(law.phaseExponent[1]).toBeCloseTo(1, 2);
   });
 
-  // The clamp at f = 4 lowers q only where a Lambert crescent would need more: Venus by 0.32%,
-  // Earth by 0.011% and Uranus by 0.008%; the rest never reach it. Both sides use the exact f.
+  // The clamp at f = 4 lowers q only where a Lambert crescent would need more: Earth by 0.66%
+  // (from 139.0°, most of it past its range's end at 144°, where the held f of 5.65 is cut to 4),
+  // Venus by 0.32% and Uranus by 0.008%; the rest never reach it. Both sides use the exact f, held
+  // past the range.
   it.each([
     ["moon", 0],
     ["mercury", 0],
     ["mars", 0],
     ["venus", -0.00317],
-    ["earth", -0.00011],
+    ["earth", -0.00656],
     ["jupiter", 0],
     ["saturn", 0],
     ["uranus", -0.00008],
@@ -185,7 +196,10 @@ describe("lawFor", () => {
   });
 });
 
-/** The paper's V(α) at r = Δ = 1 au, eqs. 2, 3, 5, 6 and 8–9, written out independently. */
+/**
+ * Mallama and Hilton 2018's V(α) at r = Δ = 1 au (eqs. 2, 3, 6, 8–9, 11–12, 15 and 17), and
+ * Earth's from Robinson 2026's eq. 14 at its V(1, 0) of −3.23, written out independently.
+ */
 const PAPER_V: Readonly<Partial<Record<string, (alphaDeg: number) => number>>> = {
   Mercury: (a) =>
     -0.613 +
@@ -196,7 +210,7 @@ const PAPER_V: Readonly<Partial<Record<string, (alphaDeg: number) => number>>> =
     1.6893e-9 * a ** 5 -
     3.0334e-12 * a ** 6,
   Venus: (a) => -4.384 - 1.044e-3 * a + 3.687e-4 * a ** 2 - 2.814e-6 * a ** 3 + 8.938e-9 * a ** 4,
-  Earth: (a) => -3.99 - 1.06e-3 * a + 2.054e-4 * a ** 2,
+  Earth: (a) => -3.23 - 2.5 * Math.log10(robinsonEq14(a * RAD_PER_DEG)),
   Mars: (a) => -1.601 + 0.02267 * a - 0.0001302 * a ** 2,
   Saturn: (a) =>
     a <= 6
@@ -245,7 +259,9 @@ describe("planets' V from their laws", () => {
     },
   );
 
-  it("matches Earth's equation in V flux to 30%", () => {
+  // R07.T4.d: the law at the fixture's p and q_V reproduces the eq. 14 fit (f = 0.23, whose V band
+  // takes p_V 0.215) wherever the clamp does not act, up to the table and s.
+  it("matches Earth's eq. 14 in V flux to 0.5% from 0° to 135°", () => {
     const earth = SOLAR_SYSTEM_PHOTOMETRY.find((candidate) => candidate.name === "Earth");
     const paper = PAPER_V["Earth"];
     if (earth === undefined || paper === undefined) {
@@ -253,9 +269,37 @@ describe("planets' V from their laws", () => {
     }
     const { r, v, b } = earth.geometricAlbedo;
     const law = lawFor([r, v, b], [earth.qV, earth.qV, earth.qV], "earth");
-    for (const alphaDeg of [10, 60, 110, 150]) {
+    for (let alphaDeg = 0; alphaDeg <= 135; alphaDeg += 5) {
       const modelled = earth.templateV10Mag + dimmingOf(law, alphaDeg, 1);
-      expect(Math.abs(10 ** (-0.4 * (modelled - paper(alphaDeg))) - 1)).toBeLessThan(0.3);
+      expect(Math.abs(10 ** (-0.4 * (modelled - paper(alphaDeg))) - 1)).toBeLessThan(0.005);
     }
+  });
+});
+
+describe("Earth after Robinson 2026 (R07.T4.d)", () => {
+  // Φ_t(0) = 1 is every template's test above.
+  it("integrates to q_V 1.3116 at s = 1, clamped and held, to 0.5%", () => {
+    expect(Math.abs(clampedPhaseIntegral("earth") / 1.3116 - 1)).toBeLessThan(0.005);
+  });
+
+  it("is clamped from 139.0°", () => {
+    const law: PhotometricLaw = {
+      a: [1, 1, 1],
+      lommelSeeligerShare: 0,
+      template: "earth",
+      phaseExponent: [1, 1, 1],
+    };
+    expect(phaseFactor(law, 138.9 * RAD_PER_DEG)[1]).toBeLessThan(PHASE_F_CLAMP);
+    expect(phaseFactor(law, 139.1 * RAD_PER_DEG)[1]).toBe(PHASE_F_CLAMP);
+  });
+
+  // The ruling's reference: eq. 14 alone, never clamped or held, stays at 0.128 at 180°.
+  it("would integrate to 1.350 over 0°–180° as eq. 14 alone", () => {
+    expect(phaseIntegral(robinsonEq14)).toBeCloseTo(1.35, 3);
+  });
+
+  it("gives 0.23 q within 3% of Robinson's visual spherical albedo of 0.294", () => {
+    // The fit's f = 0.23 times its clamped q is 0.302, 2.6% above his physical model's 0.294.
+    expect(Math.abs((0.23 * clampedPhaseIntegral("earth")) / 0.294 - 1)).toBeLessThan(0.03);
   });
 });

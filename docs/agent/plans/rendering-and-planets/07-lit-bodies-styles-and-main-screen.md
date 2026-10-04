@@ -1856,10 +1856,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     Neptune's eq. 17 from opposition, in place of the flat eqs. 14 and 16 (which drops the
     paper's 0.021 and 0.015 mag steps at 3.1° and 1.9°); Mars is eq. 6 without L(λe) and L(Ls),
     held past 50° (eq. 7 unused, the coordinator's approval 2026-10-02); Saturn is its globe
-    (eqs. 11–12, joined at 6°), the rings being R11's; Earth runs to 180° (MH2018 §4.3: Tinetti's
-    curve approaches zero there), and Mallama et al. 2017's Table A-3.1 tabulates a steeper fit of
-    the same curve (2.07 mag at 90° against eq. 5's 1.57); eq. 5, the almanac's, is taken. R07.T4.d
-    replaces it with Robinson 2026's eq. 14 to 144° (decision-r07-earth-albedo).
+    (eqs. 11–12, joined at 6°), the rings being R11's. Earth first ran eq. 5 to 180° (MH2018
+    §4.3: Tinetti's curve approaches zero there; Mallama et al. 2017's Table A-3.1 tabulates a
+    steeper fit of the same curve, 2.07 mag at 90° against eq. 5's 1.57); R07.T4.d replaced it
+    with Robinson 2026's eq. 14 to 144° (decision-r07-earth-albedo).
   - **Borrowed shapes (decision-phase-curves, 2026-10-02, after the phase-curve check's four
     mismatches with galaxy's classes):** airless ice and the snowball take the Moon's curve at L = 1,
     their q reached through s (Ganymede's 0.80 at s ≈ 0.82, ratio 0.98; Europa's 1.01 at s ≈ 0.67,
@@ -1875,9 +1875,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     p_V implies: Jupiter 69,134 km, Uranus 25,264, Neptune 24,552, Mars 3,386, Saturn the paper's
     57,240) and `template`; magnitude fields end in `Mag`; `SUN_JOHNSON_MAG` (Table 6) and
     `JohnsonBvr` are exported beside it. q_V is computed at s = 1 with the clamp and hold: Mercury
-    0.480, Venus 1.344, Earth 1.311 (1.312 after R07.T4.d), Mars 1.085, Jupiter 1.312, Saturn 1.357,
-    Uranus 1.302, Neptune 1.242 (reproduced independently by the science check). The table's tests
-    live in `appearance/solarSystemPhotometry.test.ts`, inside the acceptance filter.
+    0.480, Venus 1.344, Earth 1.312 (Robinson 2026's eq. 14, R07.T4.d; 1.311 on eq. 5), Mars
+    1.085, Jupiter 1.312, Saturn 1.357, Uranus 1.302, Neptune 1.242 (reproduced independently by
+    the science check). The table's tests live in `appearance/solarSystemPhotometry.test.ts`,
+    inside the acceptance filter. Earth's row is Robinson 2026's since R07.T4.d (see its
+    deviations).
   - **For T4.c.** WebGPU has no three-channel float format and `rgba32float` filters only with
     `float32-filterable`, so the shader reads the table as RGBA texels by two `textureLoad`s and
     interpolates itself; the table's 0.5° interpolation errs by up to 4 × 10⁻⁴ of a steep
@@ -1897,8 +1899,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     ahead of T6.a, with `discIntegral(reflectance, α, nodes = 200)` (Gauss–Legendre over
     photometric longitude and latitude, on any `Reflectance`), `Reflectance`, `gaussLegendre` and
     `GaussLegendreRule`.
-  - **The clamp's departure in q at s = 1**, exact f on both sides: Venus −0.317%, Earth −0.011%,
-    Uranus −0.008%, every other template 0.
+  - **The clamp's departure in q at s = 1**, exact f on both sides: Venus −0.317%, Earth −0.656%
+    (R07.T4.d's eq. 14, clamped from 139.0°; −0.011% on eq. 5), Uranus −0.008%, every other
+    template 0.
   - **q against L (the coordinator's correction of the ruling, 2026-10-02, from the Phase J lane;
     plan 14's T47 makes the same change).** q is independent of L only inside a template's range,
     where the clamp does not act; past it the law holds f while the shape still varies with L (the
@@ -1910,8 +1913,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   - **The planets' V** is checked as MH2018's zeroth-order term plus the law's dimming against the
     paper's equations written out in the test, for all eight planets, at 0.01 mag (tighter than
     the plan's 0.01–0.03 and 0.035, since the law reproduces its template up to the table, s and
-    the clamp); Earth also in flux within 30% at 10–150°. p is checked by T4.a against V(1, 0) and
-    the radius, not here.
+    the clamp); Earth in flux, within 30% at 10–150° against eq. 5 until R07.T4.d, then within
+    0.5% at 0–135° against Robinson 2026's eq. 14. p is checked by T4.a against V(1, 0) and the
+    radius, not here.
   - **The crescent.** The fixture gives q in V only, so Mercury's test splits q by ±5% (q_R 1.05
     q_V, q_B 0.95 q_V) on the fixture's p; B − V then grows by about 0.11 mag from opposition to
     100°, inside Design note 5's 0.1–0.2.
@@ -2864,12 +2868,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - Only drawn bodies look for sources. The cost is about 2 ms a frame for 100 drawn bodies
       under shared load: provisional, and for T17's bench.
   - **Figures tested** (Sun-like disc, `sunLikeHostDisc`):
-    - Earthshine at full Earth is 7.668 lx (the ruling's 7.66, to rounding, under
-      `sunLikeHostDisc`'s warm white) with a local Earth photometry from
-      decision-r07-earth-albedo, (r, g, b) p 0.210, 0.215 and 0.263 and q 1.312 on the current
-      `earth` key: the closed form E★ p (R ÷ Δ)² to 10⁻⁹, inside the task's 7.7 lx ± 15%.
-      R07.T4.d points the test back at `planetPhotometry("Earth")` once it moves the fixture's
-      row.
+    - Earthshine at full Earth is 7.668 lx at the fixture's p to three places, (r, g, b) 0.210,
+      0.215 and 0.263, and q 1.312; the ruling's 7.66 (7.664) is at the unrounded split, under the
+      same warm white of `sunLikeHostDisc` (T4.d's science check). It is the closed form
+      E★ p (R ÷ Δ)² to 10⁻⁹, inside the task's 7.7 lx ± 15%. T11 built it with a local copy of
+      decision-r07-earth-albedo's photometry; R07.T4.d moved the fixture's row to the same values
+      and pointed the test back at `planetPhotometry("Earth")`.
     - The full Moon is 0.3140 lx against 0.3168 lx from V = −12.74 (−0.9%), with p_V 0.12 (NASA's
       fact sheet, without the opposition surge; Krisciunas and Schaefer 1991, p. 1035). Earth is
       left out as an occluder there, because at zero phase the Moon is in its shadow.
@@ -2881,14 +2885,15 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `brdf` to 10⁻⁶, and the night side keeps `unlitBody`.
     - The renderer takes two sources on `high` and one on `low`.
   - **Earth's albedo: resolved (decision-r07-earth-albedo).** Mallama et al. 2017's p_V of 0.434,
-    which the fixture and Design note 5's `earth` row use, is superseded by measurement. Robinson
+    which the fixture and Design note 5's `earth` row used until R07.T4.d, is superseded by
+    measurement. Robinson
     2026 (PSJ 7, 12, arXiv:2507.22258) gives a visual p of 0.242 (0.277, 0.226 and 0.221 in
     0.1 µm bands) and q of 1.22. Mallama's 0.434 came from extrapolating EPOXI data through
     Tinetti et al. 2006's model, whose Sun–observer azimuth is turned by 180°. The ruling takes
     Robinson's eq. 14 fit, f = 0.23 in his band ratios, as the `earth` template. Earthshine at
-    full Earth is then 7.66 lx photopic, 8.06 lx at his physical model's p. T11 changes only its
-    own earthshine test. R07.T4.d moves the client's `earth` and the fixture's row, and
-    P14.T47.e the generator's, in the 20 → 21 bump. The ruling's other plan text (Design note
+    full Earth is then 7.66 lx photopic, 8.06 lx at his physical model's p. T11 changed only its
+    own earthshine test. R07.T4.d moved the client's `earth` and the fixture's row; P14.T47.e
+    moves the generator's, in the 20 → 21 bump. The ruling's other plan text (Design note
     5's sources and ratio, T1, T4.d, T10.b, the Risks line on Earth's albedo, and plan 14) is
     applied by the docs pass of 2026-10-04.
   - **Existing tests.** T8.a's umbra test now runs with planetshine off, since it tests the
@@ -2916,3 +2921,48 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     takes its eclipse from its centre, so a point Jupiter goes fully black during Io's shadow
     transit: `pointFlux` gives 0 against 5.16 × 10⁻⁵ lx clear, measured 2026-10-04. R07.T10.b's
     disc-averaged eclipse, shared by `pointFlux` and planetshine's neighbour, fixes it.
+- **Deviations in T4.d, as built (Earth after Robinson 2026, decision-r07-earth-albedo).**
+  - **The template.** `templates.ts`' `earth` is eq. 14 in its magnitude form, with
+    `EARTH_HG_ASYMMETRY` = −0.33, to 144°, L = 0, not provisional. Its source string cites eq. 14
+    (g, f = 0.23, the data's 5°–144°) and Robinson et al. 2011 for dropping eq. 5.
+  - **The fixture's row.** p 0.263, 0.215 and 0.21; B − V 0.43 and V − R 0.52; V(1, 0) and
+    `templateV10Mag` −3.23; radius 6,371 km; q_V 1.312.
+    - The colours come from Model 07's unrounded band ratios and `SUN_JOHNSON_MAG`: 0.429 and
+      0.516. The rounded p give a V − R of 0.514.
+    - T4.a's checks of p_V against V(1, 0) and the radius (0.5%) and of the colours against the
+      band ratios (3%) pass for the new row unchanged.
+  - **Figures, computed by `phaseIntegral` and reproduced by a Python port.**
+    - q_V at s = 1, clamped and held, is 1.31157. The clamp acts from 139.006°. Eq. 14 alone over
+      0°–180° gives 1.3501.
+    - The clamp-departure test's reference holds f unclamped past 144° (q 1.3202), not eq. 14 to
+      180°, so Earth's row there is −0.656%.
+    - The law solved to the fixture's q_V 1.312 has s = 0.99961. Its V departs from eq. 14 by at
+      most 0.073% over 0°–135°, at 135°.
+    - 0.23 q = 0.302, 2.6% above Robinson's 0.294; p_V q_V = 0.282.
+  - **Tests.**
+    - `templates.test.ts`: eq. 14's dimming at 30°, 90°, 120° and 144° by hand to 10⁻⁴ mag, and
+      the range, L, the flag and the source.
+    - `phase.test.ts`:
+      - Φ_t(0) = 1 and q_V 1.3116 to 0.5%;
+      - the clamp from 139.0° (f under 4 at 138.9°, at 4 by 139.1°), and eq. 14 alone giving 1.350;
+      - 0.23 q within 3% of 0.294;
+      - the clamp-departure row at −0.656%;
+      - Earth's V against eq. 14 to 0.5% every 5° from 0° to 135°. Eq. 14 is written there in its
+        Henyey–Greenstein form, independently of the template's magnitude form. This replaces
+        eq. 5's 30%.
+    - `planetshine.test.ts`' earthshine test reads `planetPhotometry("Earth")` again: 7.668 lx,
+      unchanged.
+  - **The golden.** No client code or test reads `photometry/templates.golden`. Its `earth` block
+    stays on eq. 5 (q 1.3105694) until P14.T47.e's 20 → 21 bump, after which the two must agree.
+    R07.T2.b waits for both.
+  - **Other users of the `earth` key.** `discSurface.test.ts` and `smoke/bodies.ts` keep their own
+    "bright terrestrial" class law (p 0.5, 0.45 and 0.4; q 1.3), now on eq. 14. T11's 3 px switch
+    test with Earth from the Moon (`draw.test.ts`) and the ranking's bound now run on the new row.
+    All pass unchanged.
+  - **Reviewed.** The science check (2026-10-04) re-derived every figure above, eq. 14's form from
+    Robinson's eqs. 5 and 14, and the citations, read from arXiv:2507.22258v2 (eq. 14's number in
+    the typeset PSJ article not seen). Its wording notes are applied: Robinson's bands are 0.1 µm
+    wide and solar-weighted, and stand for Johnson's R only in part (Johnson's R reaches past
+    0.8 µm, recalled from Bessell 2005, moderate confidence); the flipped azimuth is in Robinson
+    et al. 2011's Fig. 2 caption, in §3.4. The typescript review's two points (the departure
+    comment, one reason per test) are fixed.
