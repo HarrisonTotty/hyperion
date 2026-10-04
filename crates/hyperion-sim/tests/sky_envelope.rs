@@ -4,7 +4,11 @@
 //! - `envelope_bounds_dense_tracks`: for 10⁴ masses drawn in each layer's band, at a metallicity
 //!   and a Reimers η drawn across the envelope's span (\[Fe/H\] −2.3 to +0.4, η within ±3.5σ), and
 //!   at ages drawn across 10⁴ years to 13.5 Gyr, no star is brighter in V than the envelope, and
-//!   none uses more than 0.1 mag of its 0.3 mag margin.
+//!   none uses more than 0.1 mag of its 0.3 mag margin. It reads the checked-in table,
+//!   `tables::sky_envelope`, through `BrightnessEnvelope::build`.
+//! - `the_fitted_envelope_is_the_build_rounded_brighter`: the checked-in table is the envelope
+//!   [`BrightnessEnvelope::build_with`] builds from the tracks today, each value rounded brighter
+//!   by `to_millimag`, so a change to the tracks that the fit's fingerprint misses still fails here.
 //!
 //! The plan's second test, that V never falls with mass along the early phases at a fixed age (the
 //! premise of Design note 10's n × F₁ bound), was dropped (decided 2026-10-03): the premise is false
@@ -17,7 +21,9 @@ use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::id::Layer;
 use hyperion_sim::math;
-use hyperion_sim::sky::envelope::{BrightnessEnvelope, MARGIN_MAG};
+use hyperion_sim::sky::envelope::{
+    BrightnessEnvelope, FE_H_NODES, MARGIN_MAG, SAMPLES_PER_PHASE, from_millimag, to_millimag,
+};
 use hyperion_sim::sky::photometry::absolute_v_of_state;
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
@@ -123,4 +129,35 @@ fn envelope_bounds_dense_tracks() {
         violations.len()
     );
     assert!(violations.is_empty(), "{violations:#?}");
+}
+
+#[test]
+#[ignore = "slow: builds the envelope from some 9,000 tracks"]
+fn the_fitted_envelope_is_the_build_rounded_brighter() {
+    let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
+        .expect("the Milky Way-like parameters are valid");
+    let fitted = BrightnessEnvelope::build(&galaxy);
+    let built = BrightnessEnvelope::build_with(&FE_H_NODES, SAMPLES_PER_PHASE);
+    let ((fitted_masses, fitted_rows), (masses, rows)) = (fitted.rows(), built.rows());
+    assert_eq!(fitted_masses, masses);
+    assert_eq!(fitted_rows.len(), rows.len());
+    let mut moved = 0_u32;
+    for (j, (fitted_row, row)) in fitted_rows.iter().zip(rows).enumerate() {
+        for (k, (&stored, &v)) in fitted_row.iter().zip(row).enumerate() {
+            let expected = to_millimag(v).map_or(f64::INFINITY, from_millimag);
+            if stored.total_cmp(&expected).is_ne() {
+                moved += 1;
+                if moved <= 10 {
+                    eprintln!(
+                        "node {j} ({} M☉), bin {k}: table {stored}, build {v}",
+                        masses[j]
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(
+        moved, 0,
+        "bins where the table is not the build rounded brighter"
+    );
 }

@@ -1422,8 +1422,11 @@ bench -- sky` runs above complete.
 
 No change to generated output and no bump. `generate_cell_where` is `generate_cell` filtered, and
 the goldens prove it; the luminosity tables, the envelope, the caps and the census only read. The
-sky's own output is a function of the generator version and of the committed colour and
-limb-darkening tables, so its goldens (T17) are regenerated whenever either moves. Not adopted:
+sky's own output is a function of the generator version and of the committed colour,
+limb-darkening and envelope (`sky_envelope`, T6.b) tables, so its goldens (T17) are regenerated
+whenever any of them moves. The envelope's move to a fitted table (2026-10-04) made it up to 1 mmag
+brighter, which moves the caps' rule bound and so the caps and the census's planned cells, with no
+bump: no golden pins them and nothing serves them yet (`decision-r06-tables.md`, A.5). Not adopted:
 drawing a cell's mass words in sorted order, which the brainstorm offers as a generator-version
 change to skip light candidates without opening their streams; the mass-first walk already skips
 their position and density, and the benchmark decides whether the rest is worth a bump (Risks). The
@@ -1999,6 +2002,46 @@ ages)` as sketched; the envelope is one for every component (layer and component
   `early_v_rises_with_mass` was dropped (decided 2026-10-03; Design note 10's correction).
   `mass_floor` bisects on the primary's mass, monotone because the envelope is a running minimum
   and `max_star_mass` rises. Build: 11–22 s under load (provisional).
+- **T6.b's fitted envelope, as built (2026-10-04, `decision-r06-tables.md` B.1).** The
+  `hyperion-fit` task `sky_envelope` (class Fast, revision 0, since generator version 19) writes
+  `tables::sky_envelope`, 266 kB: `DARK` (`i32::MAX`, for +∞), `MASSES` (the 198 nodes of
+  `mass_nodes()`: 192 even in ln m plus the band edges and 0.1 M☉, after duplicates) and
+  `BRIGHTEST_MMAG: [[i32; 193]; 198]`, one node a line.
+  - **The sim side.** `BrightnessEnvelope::build(_galaxy)` keeps its signature and reads the
+    table. `build_with(fe_h, samples)` stays the generator, now `pub` and `#[doc(hidden)]`, as the
+    pieces the fit uses: `raw_node(m, fe_h, samples) -> [f64; 193]` (one node's own brightest per
+    bin), `BrightnessEnvelope::assemble(masses, raw)` (the spread, the running minimum and the
+    margin, in mass order), `mass_nodes()`, `rows()`, and `to_millimag` and `from_millimag`. The
+    fit builds the nodes on its pool, one a chunk, and assembles them in mass order. The output
+    is byte-identical on 1 and 16 threads: 13 s on one thread, about 1 s on 16.
+  - **Rounding.** `to_millimag` floors v × 1000, then lowers k while k ÷ 1000 > v, so every
+    stored value is 0–1 mmag brighter than the build and the table stays a bound.
+  - **Acceptance.** 9,240 tracks; 1,856 dark bins; brightest −12.850 mag.
+  - **Science check (2026-10-04).** The extremes bound this generator, not nature. The −12.85 at
+    150 M☉ and about −5.7 for old stars of at most 1 M☉ likely come from the tracks'
+    super-Eddington excursions after the main sequence and the η = 0 late giants. Both are 2–3 mag
+    brighter than observed steady stars. A refit is due when P06.T39's wind lands, and when
+    P15.T7 fits `tables::helium` (the envelope is built at ΔY = 0).
+  - **Loose but still a bound.** The envelope is about 2 mag loose for 0.1–0.19 M☉ at
+    3.5–28 Myr. Each long phase is cut into parts equal in linear age, so its first part carries
+    its young end's magnitude for some 15 Myr. That costs only skip efficiency. Cutting in log age
+    would tighten it.
+  - **Fingerprint.** The node count and ends, plus `raw_node` at 0.05, 0.1, 0.4, 1, 3, 25 and
+    100 M☉ at \[Fe/H\] −2.5 and 0 with 4 parts a phase: each node's brightest bin, its sum of
+    shining bins and their count. That is 60 tracks, which fit-check computes in every `just ci`.
+  - **Tests.** Lib:
+    - `the_fitted_table_is_on_the_mass_nodes_and_falls_with_mass`;
+    - `millimagnitudes_round_brighter`;
+    - `raw_nodes_are_order_independent` (`assert_order_independent`).
+
+    `sky::testing::milky_way_envelope` now copies the table and builds no galaxy. The slow
+    `envelope_bounds_dense_tracks` reads the table through `build`, and the new slow
+    `the_fitted_envelope_is_the_build_rounded_brighter` checks every bin against
+    `to_millimag(build_with(..))`. T16.b's `envelope_bounds_pair_states` is not built yet. It
+    will read the table through `build` too.
+
+  - **No `GENERATOR_VERSION` bump.** The envelope moves brighter by at most 1 mmag. No golden
+    and no served output reads it yet.
 - **The caps' extinction (decided 2026-10-03, `decision-r06-t7-caps.md`).** Design note 9 first
   dimmed every direction by the least extinction of 48 rays. Near the Sun that is the polar rays'
   extinction, and it gave C/D/E caps of 9,018 / 16,029 / 61,341 ly. Per-ray extinction in the mean
