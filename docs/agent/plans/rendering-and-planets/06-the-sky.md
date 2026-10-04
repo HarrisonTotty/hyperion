@@ -2137,3 +2137,59 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
     - listed plus overflow is the unbounded census at every `n_max` from 1 to 47;
     - a census merged again recounts its listed; the feature-member flag; a star in two parts and
       a NaN V are refused; the empty census.
+- **Deviations in T8.d, as built.** T8.a built `SkyCellCache`, `NoSkyCellCache`, `Served` and
+  `serve_from_entry`. T8.d adds no public item.
+  - `serve_from_entry` serves only when `floor >= held`, so a NaN on either side rebuilds. T8.a's
+    `floor < held` refusal let a NaN through, and an entry built at a NaN floor holds no record.
+  - The trait's doc lists what an implementation that keeps entries owes, with an example (a
+    one-entry cache keyed by seed and cell):
+    - it serves only through `serve_from_entry`, and keeps a rebuilt cell at the floor it was
+      rebuilt for, never at a NaN floor;
+    - it keys entries by galaxy as well as by cell, as `CellCache` does;
+    - it is bounded in bytes, each entry weighing at least `cell_heap_bytes` of its records
+      (T11.b's `ByteLru` under `HYPERION_SKY_CACHE_MB`). Eviction is always safe.
+  - The sim holds no keeping cache. The tests' `KeepBright` (test builds only) is built on the rule,
+    as the server's will be: one galaxy's entries in a `BTreeMap` behind a `Mutex`, shared through
+    `&self`, least recently used first out. It builds a missing cell outside the lock and replaces
+    an entry only with one of a lower floor.
+    - **Its memory bound:** at most `max_entries` entries, together weighing at most `max_bytes`.
+      An entry weighs its records' capacity × `size_of::<SystemRecord>()`, plus its key and its
+      own struct; the map's nodes are not counted. An entry heavier than the whole bound is served
+      and not kept. The orchestrator required a stated, tested bound of any cache.
+    - T11.b's server cache should pass the same scenarios: looser then tighter, a planted entry,
+      and `assert_order_independent` through a shared cache that evicts.
+  - **Measured on the fixture (2026-10-04),** along x through the Sun at cuts 6 to 9 with the
+    eye: every D and E cell's floor is its band's lower edge out to 800 ly (the farthest probed),
+    and every C cell's out to 200 ly. `cell_floor` takes the envelope over ages 0 to
+    `MAX_AGE_YEARS`, which allows a giant of the band's least mass. So two queries' floors part
+    only in A from about 100 ly, in B from about 200 ly and in C from about 400 ly (by 3% of the
+    band's log width at cut 6), and there a C–E cell's bright subset is the whole cell. T11.b's
+    default of 64 MB and the warm-cache bench should be read with that in mind. The brainstorm's
+    skip by age, under every component the cell can hold, is not in the plan.
+  - Tests (`cargo test -p hyperion-sim sky::census::cache`; 40 s on 2 threads under load) run over
+    25 cells along x through the Sun (A–C at 0, ±100, ±200 and ±800 ly; D and E at 0 and 200 ly).
+    They use three queries: cut 9 with the eye, cut 6, and cut 6 from 200 ly along x. Each census
+    is compared with the `NoSkyCellCache` census, its stars by `PartialEq` and every float's bits:
+    - the rule serves at or above the floor, at a record's own mass too, and refuses below it and
+      on a NaN, leaving `out` untouched;
+    - a tighter query after a looser one is served from every entry and filters some; a looser
+      one after a tighter one rebuilds some, which then serve the tighter again; the move after
+      the tighter both rebuilds and filters; a query 900 years before the epoch reads the entries;
+    - a planted entry of another cell's records is never read below its floor (the cell is rebuilt
+      and replaces it), and is read at or above it; a NaN on either side rebuilds;
+    - the bound holds after every lookup: least recently used first out; five entries alone and a
+      third of the bytes alone each evict without changing a reply; an entry heavier than the
+      bound is not kept;
+    - each (query, cell) part is order independent (`assert_order_independent`) through one
+      shared 8-entry cache that evicts, rebuilds and filters;
+    - two threads censusing different queries through one cache get the uncached bits. This test
+      is left out on wasm32-wasip1, which has no threads.
+  - A by-hand check, not committed: with the rule made to serve every floor, four of the then
+    five tests failed.
+  - Two of T8.b's doc links in `cell.rs` are mended: the module doc's link to
+    `SkyCellCache::bright_subset`, and `star_offset_bound`'s link to the private
+    `offset_bound_at`.
+  - Not built: the benches `sky/census_near_sun` (cold and warm cache) and
+    `sky/census_nuclear_disc` of T8's shared paragraph, which no subtask names. Lean: T8.e builds
+    them, after its observers, with a bench-local cache on `serve_from_entry`, since `KeepBright`
+    is test-only.
