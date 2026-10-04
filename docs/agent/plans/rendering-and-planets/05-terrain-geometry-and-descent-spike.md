@@ -3445,6 +3445,114 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     each case's budget, match those taken from selection before the field was added. They also
     guard the work on selection's cost (the ruling's item 4), and are re-recorded only when
     selection's output is meant to change.
+- **T8, as built (lane B, with F3 of `decision-r05-high-bound.md`, 2026-10-04): the cache keeps
+  the baked patches selection hides.**
+  - _The cause, not the ruling's guess._ The coarse patches that thrashed had not left the view.
+    Selection had reached them and culled them by their own baked ranges: a child a split left
+    out, or a split patch with nothing visible beneath it. Neither selected nor an ancestor of a
+    selected patch, such a patch was never touched by `retain`, so it aged from its bake and was
+    among the first evicted. Evicted, it took its ancestor's looser range (the patch-demand
+    ruling's 4a) and rose over the horizon. It was then selected and demanded again, and its
+    parent stood in for it and its siblings until the bake landed. Baked, it was hidden again.
+    The probe's 3 s warm-up from an empty cache put the cold start's hidden patches in phase, so
+    its one second was a burst (45–51); in a warm cache they cycle all through the approach (the
+    table below).
+  - _The fix._ `Selection.hiddenBaked` (`select.ts`, from `PatchLeafSet.bareKeys`) lists the
+    baked patches the traversal reached but left out, depth first from face 0. `PatchCache.retain`
+    marks them as used each frame they are hidden. They are not pinned and not counted in
+    `CachePressure.drawn`; among the unpinned patches used as recently, they go last. In Design
+    note 10's terms the rule is still least recently used among unpinned slots, with the hidden
+    patches counted as used and one more tie rule. Also, a patch the selection demanded is now
+    draw-pinned as it arrives, as selected and forced ones already were. Before, an ancestor
+    requested for its unbaked descendants stayed unpinned until the next retain, so once the
+    unpinned patches were used up, a later insert of the same frame could evict it. Otherwise
+    eviction is unchanged: deepest first among equals, forced patches and roots never. The
+    slots, `exceeded`, refusals and the memory bound are unchanged. T7's digests of the selected
+    keys and the demand still match: `hiddenBaked` adds an output and changes nothing selected.
+  - _Unpinned, not draw pins._ A version that pinned them like the draw set made one run worse:
+    608 coarse re-bakes against 39. That run is a scratch low pass like the test's, at 640 × 360
+    and τ = 1 px, tilted 1.5 rad, with 500 slots, which its pins and hidden patches overflow. There
+    the hidden patches pushed out the selection's own new leaves. Unpinned, that run is as before:
+    39 re-bakes and 25 frames of stand-ins either way.
+  - _The ruling's examples, not built._ Depth before recency among unpinned patches, measured
+    the same way over the high approach, cut the ridges-off coarse re-bakes to 52. But it raised
+    the level-14 evictions to 2,676 (off) and 6,880 (on), and the re-bakes of levels 13–18 within
+    1 s to 1,622 and 13,405. Bakes rose to 160 and 460 a second, and the ridged coarse re-bakes
+    to 4,848: freshly left fine patches went first and came straight back. Keeping levels ≤ L
+    resident does not fit either: the thrash reached level 12, where patches are not few.
+  - _Measured_ (CPU only; the ruling's probe loop of select, resolve, retain and bake every
+    request at once, an ideal pool, at 16 Hz with the hard bound and seed 7; the high setting's
+    981 patches and 1,962 slots unless noted). In the ruling's 2.4 km window
+    (`run2.mjs on|off high 1040`, 16 frames after a 3 s warm-up from empty):
+
+    | Before → after                                    | Ridges on      | Ridges off              |
+    | ------------------------------------------------- | -------------- | ----------------------- |
+    | Frames with a non-resident drawn leaf, level ≤ 12 | 12 → 0         | 6 → 1                   |
+    | Levels 2–12 evicted; re-baked                     | 51; 45 → 0; 0  | 19; 13 → 0; 0           |
+    | Level-14 evictions                                | 30 → 6         | 0 → 0                   |
+    | τ′ at the window's last frame                     | 11.4 px → 1.18 | 6.84 px → 1 (unlimited) |
+
+    The one frame left with ridges off is the first bake of a level-11 patch coming into view,
+    which had never been resident. Over the whole approach (960–1,080 s, 1,921 frames after a
+    20 s warm-up, with the frames counted over every seen selected leaf):
+
+    | Before → after                                          | High, on      | High, off     | Low, on       | Low, off    |
+    | ------------------------------------------------------- | ------------- | ------------- | ------------- | ----------- |
+    | Levels 2–12 re-baked within 1 s of eviction             | 2,168 → 0     | 545 → 0       | 714 → 0       | 26 → 0      |
+    | Frames drawing a once-resident level ≤ 12 by a stand-in | 967 → 7       | 387 → 5       | 527 → 6       | 34 → 0      |
+    | Its largest ρ, px of bound                              | 211 → 19      | 68 → 8.3      | 141 → 12.7    | 33 → none   |
+    | Level-14 evictions                                      | 2,406 → 2,178 | 2,187 → 2,166 | 1,077 → 1,070 | 352 → 357   |
+    | Bakes a second                                          | 278 → 239     | 127 → 122     | 138 → 119     | 23.3 → 23.0 |
+
+    The stand-ins left were of patches evicted 23–63 s before, out of the selection all that
+    time: the cache's capacity, not thrash. The first bakes of patches coming into view (61–126
+    frames a run) are unchanged. On low with ridges off, the level-14 evictions rose by 5 (1.4%),
+    outside the ruling's window: the hidden patches hold slots that fine patches used before.
+    Listing them costs about 0.1 ms of an 8.3 ms selection of 2,643 patches with 559 hidden
+    (vitest under load; provisional).
+
+  - _Headroom, for T18 and R10._ The hidden patches peaked at 530 (on) and 389 (off) of the high
+    setting's 1,962 slots, and at 354 and 197 of the low setting's 1,296. The draw pins peaked at
+    1,389 and 1,208 (high) and 929 and 250 (low), unchanged. Forced patches, draw pins and hidden
+    patches together peaked on a single frame at 1,922 and 1,537 (high) and 1,229 and 425 (low).
+    No run evicted a hidden patch or a draw pin, evicted a patch in the frame it was stored,
+    refused a bake or set `exceeded`. So ⌊slots ÷ 2⌋ holds against the coarse eviction in these
+    runs, but on the ridged high approach with only 40 slots to spare. The hidden patches are a
+    resident population that neither T18's ⌊slots ÷ 2⌋ nor R10's sizing rule counts, and R10's
+    layout of about 430 low slots was not measured.
+  - _The acceptance, as read._ F3 asks that "no steady-state frame has a non-resident drawn leaf
+    at level ≤ 12". It is read as no once-resident patch, evicted and drawn by a stand-in on its
+    return. With ridges off one frame remains, the first bake of a patch never resident. No
+    eviction rule can make such a patch resident: the ideal pool bakes after the frame's draw, so
+    every patch's first appearance is drawn by its parent for one frame (61–126 frames a run,
+    unchanged). `cache.test.ts`'s low pass counts once-resident patches for the same reason. Put
+    to the orchestrator with the commit, for the ruling's author.
+  - _How it was measured._ `run2.mjs` and `probe2.ts`, adapted from the ruling's scratch copies to
+    read this worktree, count every seen selected leaf a frame. `thrash.ts` and `run.mjs` run the
+    same loop over the whole approach, with the baked ranges memoised on disk. "Before" is the
+    same code with the selection's `hiddenBaked` and `demand` withheld from `retain`, which is
+    exactly the earlier rule. The depth-first variant replaces `PatchCache`'s victim choice in
+    the probe. Copies of the scripts and their results are in `.git/rm23-scratch/r05-t8-f3/`;
+    they run from a worktree's `target/f3-probe/`.
+  - _Tests._ `cache.test.ts`:
+    - a coarse ancestor of the drawn patches, and a hidden patch beside it, are kept while the
+      drawn patches churn;
+    - hidden patches go after every unpinned one and before the draw pins, age once no longer
+      hidden, and are not counted as pins;
+    - a demanded ancestor is pinned from the moment it arrives;
+    - under 300 frames of random selections and hidden sets, no slot is used twice or beyond the
+      count, and the bytes held follow the slots;
+    - the same patches are evicted whatever order they were stored in;
+    - a low pass of selection and the cache together (500 slots, an ideal pool, a sliding
+      contact) bakes no level ≤ 12 patch twice after a 16-frame warm-up, draws none by a
+      stand-in once it was resident, and evicts the same patches on a second run.
+
+    Without the fix, the churn test, the test of the hidden patches' place in the order, the
+    demanded-ancestor test and the low pass's re-bake test fail.
+    `select.test.ts`: `hiddenBaked` lists only baked patches neither selected nor above a
+    selected one, and every baked child of a split patch that is neither; the list is the same
+    for the same input and empty with no baked ranges; and `bareKeys` lists the children a split
+    left out and the splits with no leaf beneath.
 - **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
   - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
     tests. The build adds:

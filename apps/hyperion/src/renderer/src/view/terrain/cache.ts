@@ -8,9 +8,11 @@
  * slot it is given. Eviction is least recently used among unpinned patches. Two pins: a patch in a
  * grounded body's forced region is never evicted, whatever the budget; a patch in the current draw
  * set, the selection or the selection's resident ancestors is evicted only after everything
- * unpinned, and among patches used as recently the deepest goes first. The six roots are never
- * evicted either, so that once baked every selected patch has a resident ancestor to stand in for
- * it.
+ * unpinned, and among patches used as recently the deepest goes first. The baked patches the
+ * selection found hidden ({@link Selection.hiddenBaked}) are not pinned, but are used each frame
+ * they are hidden, and among the unpinned patches used as recently they go last. The six roots are
+ * never evicted either, so that once baked every selected patch has a resident ancestor to stand in
+ * for it.
  *
  * {@link DrawSetResolver} (and {@link resolveDrawSet}) is what sees both the selection and the
  * cache: the selection stays a pure function of its inputs (Design note 7).
@@ -70,6 +72,8 @@ interface Entry {
   lastUsed: number;
   forced: boolean;
   drawn: boolean;
+  /** One of the last retained selection's {@link Selection.hiddenBaked}, neither forced nor drawn. */
+  hidden: boolean;
 }
 
 /** The leaves' maps per level, by {@link patchKeyIndex}. */
@@ -85,7 +89,8 @@ function levelMaps<T>(): Map<number, T>[] {
  * {@link resolveDrawSet}, and then calls {@link PatchCache.retain} with the selection and the draw
  * set, which sets the pins and the recency for the next frame's evictions. A patch inserted between
  * two retains takes the pins the last retained selection gives its key, so a forced patch is pinned
- * from the moment it arrives.
+ * from the moment it arrives, and a patch it demanded is draw-pinned (an ancestor asked for its
+ * unbaked descendants, which the next retain pins as an ancestor).
  */
 export class PatchCache implements HeightRangeLookup {
   readonly layout: SlotLayout;
@@ -93,9 +98,13 @@ export class PatchCache implements HeightRangeLookup {
   /** The same entries per level by {@link patchKeyIndex}, for lookups that build no string. */
   private readonly byIndex: Map<number, Entry>[] = levelMaps();
   private readonly freeSlots: number[] = [];
-  /** The last retained selection's forced and selected keys, cleared and refilled each retain. */
+  /**
+   * The last retained selection's forced, selected and demanded keys, cleared and refilled each
+   * retain.
+   */
   private readonly forcedKeys = new Set<string>();
   private readonly selectedKeys = new Set<string>();
+  private readonly demandedKeys = new Set<string>();
   /** The resident patches pinned by the last retain outside the forced region. */
   private pinnedDrawn = 0;
   private tick = 0;
@@ -158,9 +167,10 @@ export class PatchCache implements HeightRangeLookup {
 
   /**
    * Stores a baked patch, in its own slot if it is already resident (a newer bake), else in a free
-   * slot, else in the slot of the evicted patch: the least recently used unpinned one, then the
-   * least recently used of those the selection, its ancestors or the draw set pins, the deepest
-   * first among patches used as recently. A forced or root patch is never evicted.
+   * slot, else in the slot of the evicted patch: the least recently used unpinned one, the hidden
+   * baked patches last among those used as recently, then the least recently used of those the
+   * selection, its ancestors or the draw set pins; the deepest first among patches used as
+   * recently. A forced or root patch is never evicted.
    */
   insert(patch: ResidentPatch): CacheInsert {
     const keyString = patchKeyString(patch.key);
@@ -190,7 +200,8 @@ export class PatchCache implements HeightRangeLookup {
       patch: { ...patch, slot, keyString },
       lastUsed: this.tick,
       forced,
-      drawn: !forced && this.selectedKeys.has(keyString),
+      drawn: !forced && (this.selectedKeys.has(keyString) || this.demandedKeys.has(keyString)),
+      hidden: false,
     };
     this.entries.set(keyString, entry);
     this.byIndex[patch.key.level]?.set(patchKeyIndex(patch.key), entry);
@@ -219,12 +230,15 @@ export class PatchCache implements HeightRangeLookup {
    * @remarks
    * Forced pins are the patches the selection marks `forced`. Draw pins are the patches drawn;
    * every other selected patch that is resident, so that the siblings an ancestor stands in for
-   * are kept until all are resident; and every resident ancestor of a selected patch, whose baked
+   * are kept until all are resident; every resident ancestor of a selected patch, whose baked
    * range the selection's bounds read (the streaming gate) and which stands in for its
-   * descendants. Both are replaced, not accumulated, so a patch leaving the selection and the
-   * draw set becomes evictable at once. The pins are reported as exceeding the
-   * slots when the forced patches, resident or not, and the other pinned resident patches outnumber
-   * the slots, or when an insert was refused since the last retain.
+   * descendants. The patches the selection demanded are draw-pinned as they arrive. The baked
+   * patches the selection found hidden ({@link Selection.hiddenBaked}), whose ranges its culling
+   * read, are not pinned: they are marked as used, and go last among the unpinned patches used as
+   * recently. All are replaced, not accumulated, so a patch leaving the selection and the draw set
+   * becomes evictable at once. The pins are reported
+   * as exceeding the slots when the forced patches, resident or not, and the other pinned resident
+   * patches outnumber the slots, or when an insert was refused since the last retain.
    */
   retain(selection: Selection, draw: DrawSet): void {
     this.tick += 1;
@@ -232,6 +246,10 @@ export class PatchCache implements HeightRangeLookup {
     const selectedKeys = this.selectedKeys;
     forcedKeys.clear();
     selectedKeys.clear();
+    this.demandedKeys.clear();
+    for (const request of selection.demand) {
+      this.demandedKeys.add(patchKeyString(request.key));
+    }
     for (const [keyString, selected] of selection.patches) {
       selectedKeys.add(keyString);
       if (selected.forced) {
@@ -241,6 +259,7 @@ export class PatchCache implements HeightRangeLookup {
     for (const [keyString, entry] of this.entries) {
       entry.forced = forcedKeys.has(keyString);
       entry.drawn = !entry.forced && selectedKeys.has(keyString);
+      entry.hidden = false;
       if (selectedKeys.has(keyString)) {
         entry.lastUsed = this.tick;
       }
@@ -262,6 +281,17 @@ export class PatchCache implements HeightRangeLookup {
         }
         entry.lastUsed = this.tick;
         entry.drawn = !entry.forced;
+      }
+    }
+    // The baked patches the selection found hidden, whose own ranges may be what hides them: left
+    // to age, they were evicted first, came back the next frame under their parents' looser
+    // ranges and were drawn by those parents (R05.T8, the high-bound ruling's F3). Not pinned, so
+    // that a cache whose pins fill it gives them up before the selection's own.
+    for (const key of selection.hiddenBaked) {
+      const entry = this.byIndex[key.level]?.get(patchKeyIndex(key));
+      if (entry !== undefined) {
+        entry.lastUsed = this.tick;
+        entry.hidden = !entry.forced && !entry.drawn;
       }
     }
     for (let n = 0; n < draw.count; n += 1) {
@@ -307,7 +337,7 @@ export class PatchCache implements HeightRangeLookup {
       if (entry.forced || entry.patch.key.level === 0) {
         continue;
       }
-      const rank = entry.drawn ? 1 : 0;
+      const rank = entry.drawn ? 2 : entry.hidden ? 1 : 0;
       const level = entry.patch.key.level;
       // Among patches used as recently, the deepest goes first: an ancestor holds the bounds and
       // stands in for everything beneath it, so losing one costs a whole subtree (R05.T13.a's

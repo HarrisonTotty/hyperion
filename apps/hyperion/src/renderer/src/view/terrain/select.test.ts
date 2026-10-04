@@ -343,6 +343,7 @@ function levelGaps(keys: readonly PatchKey[]): number {
     demand: [],
     limited: false,
     limitExcess: 0,
+    hiddenBaked: [],
   };
   let gaps = 0;
   for (const k of keys) {
@@ -814,5 +815,76 @@ describe("the budget's limit excess", () => {
 
   it.each(cases)("leaves the selection under the budget as recorded, with $name", (c) => {
     expect(selectionDigest(underBudget(c))).toBe(c.digests.budgeted);
+  });
+});
+
+/** The patches split above the selected ones: every ancestor of a selected patch. */
+function splitAbove(sel: Selection): Map<string, PatchKey> {
+  const split = new Map<string, PatchKey>();
+  for (const p of sel.patches.values()) {
+    for (let k = parentKey(p.key); k !== null; k = parentKey(k)) {
+      split.set(patchKeyString(k), k);
+    }
+  }
+  return split;
+}
+
+describe("the baked patches selection finds hidden (the high-bound ruling's F3)", () => {
+  const towardsHorizon = (): Selection =>
+    selectPatches({
+      planet: PLANET,
+      views: [view(LOW, lookingDown(LOW, 1.45))],
+      setting: "high",
+      grounded: [],
+      heightRanges: bakedToDepth(6),
+    });
+
+  it("lists only baked patches it neither selected nor split above a selected one", () => {
+    const sel = towardsHorizon();
+    const split = splitAbove(sel);
+    expect(sel.hiddenBaked.length).toBeGreaterThan(0);
+    for (const key of sel.hiddenBaked) {
+      const k = patchKeyString(key);
+      expect(key.level).toBeLessThanOrEqual(6);
+      expect(sel.patches.has(k)).toBe(false);
+      expect(split.has(k)).toBe(false);
+    }
+  });
+
+  it("lists every baked child of a split patch that it neither selected nor split", () => {
+    const sel = towardsHorizon();
+    const split = splitAbove(sel);
+    const hidden = new Set(sel.hiddenBaked.map(patchKeyString));
+    const missed: string[] = [];
+    for (const key of split.values()) {
+      for (const child of childKeys(key)) {
+        const c = patchKeyString(child);
+        if (child.level <= 6 && !sel.patches.has(c) && !split.has(c) && !hidden.has(c)) {
+          missed.push(c);
+        }
+      }
+    }
+    expect(missed).toEqual([]);
+  });
+
+  it("gives the same list, in the same order, for the same input", () => {
+    expect(towardsHorizon().hiddenBaked).toEqual(towardsHorizon().hiddenBaked);
+  });
+
+  it("lists nothing without baked ranges", () => {
+    expect(select([view(LOW, lookingDown(LOW, 1.45))]).hiddenBaked).toEqual([]);
+  });
+
+  it("finds bare the children a split left out and the splits with no leaf beneath", () => {
+    const root = rootKey(0);
+    const [c0, c1, c2, c3] = childKeys(root);
+    const tree = new PatchLeafSet<PatchKey>();
+    tree.addRoot(root, root);
+    tree.splitBalanced(root, (child) =>
+      patchKeyString(child) === patchKeyString(c0) ? child : null,
+    );
+    expect(tree.bareKeys()).toEqual([c1, c2, c3]);
+    tree.splitBalanced(c0, () => null);
+    expect(tree.bareKeys()).toEqual([...childKeys(c0), c0, c1, c2, c3, root]);
   });
 });
