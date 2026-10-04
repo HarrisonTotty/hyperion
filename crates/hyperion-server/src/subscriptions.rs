@@ -920,6 +920,9 @@ mod tests {
                 rings: SectionDto::NotResolved,
                 population: SectionDto::NotResolved,
                 bulk: SectionDto::NotResolved,
+                rotation: Some(SectionDto::NotResolved),
+                figure: Some(SectionDto::NotResolved),
+                photometry: Some(SectionDto::NotResolved),
             },
             seen: None,
         }

@@ -1,4 +1,4 @@
-# generator_version = 19
+# generator_version = 20
 kepler radial period, yr = 0x41b2cb1f55c3728a  # 315301717.7634665
 kepler azimuthal advance = 0x401921fb5443ae99  # 6.283185307150824
 kepler after 10⁸ yr: r = 0x40ea88676d0783b1  # 54339.23205924722

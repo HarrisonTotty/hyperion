@@ -1,4 +1,4 @@
-# generator_version = 19
+# generator_version = 20
 CORE_COLLAPSE = 0 (cell 512 ly, plan 09)
 TYPE_IA = 1 (cell 512 ly, plan 09)
 STELLAR_MERGER = 2 (cell 4096 ly, plan 11)

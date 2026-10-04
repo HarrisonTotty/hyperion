@@ -2498,3 +2498,14 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     envelope's core test and tides), though it moved no golden digest here. Also open: the strip
     runs after `contact_check` in a detached step, where `evolv2` strips before its Roche and
     collision tests (small: a bare carried star's radius is near its helium star's).
+  - _Known departure in version 20: the early-AGB core radius_ (ruling p11-stripped-core,
+    amendments 1 and 2, 2026-10-04). Version 20 ships with Rc = R_ZHe(Mc) on the early AGB. The
+    sources give R_HeGB(Mc,He, Lc) (HPT §6.3 after eq. 105, eqs 84–88; SSE/BSE `hrdiag` kw = 5),
+    but built with the engine's own early-AGB blend of Lc it is up to ~700 R_ZHe late on the phase
+    and breaks BSE §3.2's cataclysmic variable: at its first common envelope (78.9 Myr, Mc,He
+    1.494 M☉, R 259 R☉, a 503 → 4.83 R☉, core lobe 1.89 R☉) Rc becomes 69.5 R☉ against R_ZHe's
+    ~0.3, the cores coalesce, and a single 1.125 M☉ white dwarf is left. Amendment 2's rule (Lx
+    blended with SSE's τ = 3(t − t_BAGB) ÷ (t_n − t_BAGB), the same τ in `early_agb`'s remnant)
+    moves more output, so it is held out of version 20 as P11.T4.h, for the next bump, with the
+    §3.2 tests as gates. The work in progress is in
+    `.git/rm23-scratch/p14j/eagb-core-wip.patch`.
