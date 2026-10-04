@@ -2367,3 +2367,110 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
   - **For the owner (ux-reviewer)**: `MeterControl`'s layout under the Style panel at 1920 × 1080
     and 1280 × 720, and the smoothing speeds by eye (T13.b's by-eye checks: a lit planet on black,
     a star entering the frame, the cockpit turning to a planet) with `just client` on `PHASE TEST`.
+- **Deviations in T8.b, as built (the class-map hook).**
+  - **Files.** `bodies/discSurface.ts` (`MAX_DISC_CLASSES` 16, `CLASS_MAP_FORMAT` `rgba8unorm`,
+    `CLASSES_PER_LAYER`, `classMapLayers`, `ClassMapTexels`, `ClassMapTexel`, `classMapTexelOf`,
+    `packClassMap`, `classWeightsAt`, `surfaceShares`, `discSurfaceLaws`, `classMapTextureSpec`
+    and `classMapSurface`, the construction R10.T10.d calls), with `ClassMapDiscSurface` beside
+    `UniformDiscSurface` in `appearance/bodyAppearance.ts`, Provides' shape unchanged (`weights`,
+    `laws`, `elsewhere`).
+  - **The map's layout**, which the plan left open: a 2D array of `rgba8unorm`, N × N texels a face
+    of R05's cube sphere. Texel (i, j) of face f is the cell s ∈ [i ÷ N, (i + 1) ÷ N),
+    t ∈ [j ÷ N, (j + 1) ÷ N) of `xyzToFaceUv`'s (u, v) under `uvToSt`, so with N = 2^L it is the
+    quadtree's cell (f, L, i, j), tested against `vertexDir` at level 2. Class k's weight is
+    channel k mod 4 of layer f + 6 ⌊k ÷ 4⌋, and the shader reads N by `textureDimensions`. At
+    most 16 laws per body (R10.T1's fifteen `MaterialClass`es; a body carrying all three
+    `FrostSpecies` would need 17), 24 layers.
+  - **Weights and shares.** An unsurveyed texel holds no weight. Each shaded sample takes each
+    class's weight as its share and gives `elsewhere` 1 − Σ w; weights summing past 1 are scaled
+    down to 1. `packClassMap` rounds a texel's weights to bytes that keep their sum (largest
+    remainder), so a surveyed texel leaves nothing to `elsewhere`, as R10.T2's bytes summing to
+    255 do.
+  - **Unfiltered.** The shader reads the texel the hit falls in (`textureLoad`), so no surveyed
+    pattern shows past the survey's own cells. On a large disc a coarse map's cells show as
+    blocks. Filtering would need a one-texel gutter at the face edges, and would carry surveyed
+    weight half a texel into unsurveyed ground. That choice is left to R10.T10.d and T10.e at the
+    hand-over.
+  - **Where a hit falls.** R05's spheroid point of the unit direction d is M d (`spheroidPoint`),
+    so d is the hit stretched along the pole by a ÷ c. It is read along the body-fixed axes of
+    `LitBodyInput.rotation` (R02's `Rotation3`, body-fixed to galactic): x and y are packed, and z
+    is their cross product. Under a class map the disc takes its pole from the rotation's z axis,
+    not from `figure.pole`, so the figure and the map cannot disagree.
+  - **Inputs.** `LitBodyInput` gains two optional fields:
+    - `surface`; where it is absent, the photometry's uniform law.
+    - `rotation`. A class map without one cannot be oriented, so its disc shades with `elsewhere`.
+  - **The record.** `DiscRecord` takes `surface` and `tableRows`, in place of `law`,
+    `albedoScale` and `tableRow`.
+    - `surface` is a `DrawnDiscSurface`: the `uniform` case, or an `OrientedClassMap` (the class
+      map with the body's `rotation`), so a record cannot hold a map it cannot orient.
+    - `tableRows` has one row per `discSurfaceLaws` entry, the uniform law or `elsewhere` first.
+    - Each law's A takes the `oblateAlbedoScale` of its own L.
+    - `rasteriseDisc(record, camera, viewport, classMap?)` reads each law's table itself, so it no
+      longer takes a `table` argument. It takes the map's texels, which the surface holds only as a
+      texture.
+    - `DISC_ROWS` goes from 24 to 46 (a record of 736 bytes, 384 before): rows 24–25 hold the
+      axes, 26–41 the classes' A and L, 42–45 their table rows, and row 5's w the class count.
+    - The disc materials gain `classWeights` at binding 2 (`2d-array`). A uniform disc binds the
+      renderer's one-texel `bodies:no class map`, which is never read.
+  - **The shader** takes the per-light terms (horizon, eclipse, phase angle) once per light. It
+    evaluates `body_brdf`'s inlined expression for each law with a share above 0: three at most on
+    the synthetic maps, up to nine under R10.T2's eight-class palette on a partly surveyed texel,
+    17 by the layout. Each costs one law evaluation per light per sample, which goes to T17's
+    bench. R08's sky term takes the shares' mean A. On a uniform surface the arithmetic is the
+    part-1 shader's (share 1, the mean A the law's).
+  - **Not wired into the view.** `litBodiesOf` passes no surface or rotation, so nothing is drawn
+    differently until R10 lands (Design note 24).
+  - **For R10 (passed to the orchestrator for R10's owner).**
+    - R10.T10.d also sets `LitBodyInput.rotation`, and passes `surface` and `rotation` through
+      `litBodiesOf` (`displays/view/photorealFrame.ts`), a file its text does not list.
+    - `packClassMap` and `classMapSurface` are built here, so T10.d supplies each texel's weights
+      (`weights_at` at the cell's centre, byte ÷ 255, `null` where unsurveyed) rather than writing
+      the construction. The caller owns the texture: it remakes it after a device loss and
+      releases it when the map is dropped.
+    - A live body's class map shades with `elsewhere` until plan 14 sends the body-fixed rotation
+      (`bodyFixedRotation` is `null` today).
+    - At most 16 laws per body.
+  - **Open: L(α) against a constant L (for the orchestrator and R10's owner).** R10's Design note 8
+    gives every class McEwen's phase-dependent L(α). The `class-map` case carries
+    `PhotometricLaw`s, whose `lommelSeeligerShare` is a constant, as Provides wrote it. So the disc
+    and the terrain agree at every phase only where L(α) equals that constant, which bears on
+    R10.T10.e's 1/3-stop check at 30° and 90°. T8.b built Provides' shape, the smallest reversible
+    choice. The lean is a per-law L(α) row beside f's in the phase table, read by the disc and the
+    terrain alike, added by R10.T10.d.
+  - **The point keeps the photometry's law (for R10.T10.d and the owner).** At the 3 px switch, a
+    patterned body's disc differs from its point by how far its visible hemisphere departs from the
+    mean, up to the contrast of its faces.
+    - Iapetus is an example. Its dark leading terrain is about a tenth as bright as its trailing
+      terrain (Squyres and Sagan 1983, Nature 303, 782; Spencer and Denk 2010, Science 327, 432).
+      Its faces seen whole differ about fivefold (mean geometric albedos 0.07 and 0.35; Morrison et
+      al. 1975, Icarus 24, 157).
+    - Against the mean of the two, the disc at the switch would be up to 1.7 times as bright as
+      the point when it faces the trailing side, some 0.6 mag. Facing the leading side, it would be
+      about a third as bright, some 1.2 mag fainter. These are estimates from those albedos, not
+      measured in the renderer, and they assume the point's law has the map's mean albedo.
+    - Integrating the map for the point (each frame, or tabulated by direction) is left to
+      R10.T10.d or a follow-up.
+  - **Tests** (`bodies/discSurface.test.ts`, on a synthetic two-class map with half its cells
+    surveyed, i + j even, the pole tilted 55° and turned 30°):
+    - At 40° of phase, each pixel of a 64 px, 10% oblate disc within 70% of its polar radius (one
+      sample each) equals the share-weighted sum of the uniform discs of its texel's laws, bound
+      10⁻¹² (worst 4 × 10⁻¹⁶). The texel is found by an independent `f64` ray–spheroid hit in
+      body-fixed axes, and each of the three laws is seen on more than 100 pixels.
+    - A half-surveyed map of one class whose law equals the uniform law (a distinct object) draws
+      the uniform disc to 10⁻⁵ at 20 and 64 px, 10% oblate, at 70° of phase.
+    - On a sphere 64 px across at zero phase, per channel: a 1 : 3 mix in every texel gives the
+      mixed flux to 10⁻⁹. The half-surveyed map at 16 texels a face is within 0.10% of the
+      area-weighted fluxes of the uniform law and the two classes (bound 0.3%), the areas taken
+      over 2 × 10⁵ Fibonacci directions.
+    - Layout, quantisation, shares, each refusal, the fall-back to `elsewhere` without a rotation,
+      the record's packing and the renderer's binding.
+  - **Smoke checks** (`smoke/bodies.ts`, `checkClassMap`):
+    - A 40 px, 10% oblate disc at 60° of phase under the half-surveyed two-class map (4 texels a
+      face) equals the CPU rasteriser within T8.a's texel tolerance, with its classes.
+    - The one-class map draws the uniform disc to 10⁻⁵ at 20 and 40 px.
+    - `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-04): every check
+      passes (446, none failing), T8.a's figures unchanged. The two-class disc's 1,357 pixels are
+      within 0.926 of the tolerance. In the twin, turning the body by 10⁻⁵ rad moves no pixel by more
+      than 0.094 of it, so no sample lies near a texel boundary. The margin is `f32` shading at a
+      limb sliver, not a texel flip. The one-class map's texels equal the uniform disc's exactly
+      (0 at 20 and 40 px).

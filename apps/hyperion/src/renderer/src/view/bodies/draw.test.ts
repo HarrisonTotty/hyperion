@@ -72,7 +72,7 @@ function discFlux(
     throw new Error("the body was not drawn as a disc");
   }
   const flux: [number, number, number] = [0, 0, 0];
-  const drawn = rasteriseDisc(record, phaseFactorTableOf(record.law), CAMERA, VIEWPORT);
+  const drawn = rasteriseDisc(record, CAMERA, VIEWPORT);
   for (const pixel of compositeDiscPixels(drawn)) {
     const ray = viewRay(pixel.xPx + 0.5, pixel.yPx + 0.5, CAMERA, VIEWPORT);
     const omega = pixelSolidAngle(ray, CAMERA, VIEWPORT);
@@ -286,9 +286,7 @@ describe("the disc's geometry", () => {
     if (record === undefined) {
       throw new Error("no disc");
     }
-    const pixels = compositeDiscPixels(
-      rasteriseDisc(record, phaseFactorTableOf(record.law), CAMERA, VIEWPORT),
-    );
+    const pixels = compositeDiscPixels(rasteriseDisc(record, CAMERA, VIEWPORT));
     const centreX = VIEWPORT.widthPx / 2;
     const centreY = VIEWPORT.heightPx / 2;
     // The rows and columns either side of the centre line, whose coverage sums give the extents.
@@ -311,7 +309,7 @@ describe("the disc's geometry", () => {
     if (record === undefined) {
       throw new Error("no disc");
     }
-    const pixels = rasteriseDisc(record, phaseFactorTableOf(record.law), CAMERA, VIEWPORT);
+    const pixels = rasteriseDisc(record, CAMERA, VIEWPORT);
     const row = pixels.filter((p) => p.yPx === VIEWPORT.heightPx / 2);
     const cx = VIEWPORT.widthPx / 2;
     const at = (x: number) => row.find((p) => p.xPx === x);
@@ -334,7 +332,7 @@ describe("a body no star lights", () => {
     if (record === undefined) {
       throw new Error("no disc");
     }
-    const pixels = rasteriseDisc(record, phaseFactorTableOf(record.law), CAMERA, VIEWPORT);
+    const pixels = rasteriseDisc(record, CAMERA, VIEWPORT);
     const interior = pixels.filter((p) => p.draw === "interior");
     expect(interior.length).toBeGreaterThan(0);
     expect(interior.every((p) => p.meterClass === METER_CLASS.other)).toBe(true);
@@ -412,9 +410,9 @@ describe("the plan", () => {
       ]),
     );
     expect(plan.laws).toEqual([body.photometry.law, other.photometry.law]);
-    expect(plan.discs.map((record) => record.tableRow).toSorted((x, y) => x - y)).toEqual([
-      0, 0, 1,
-    ]);
+    expect(plan.discs.map((record) => record.tableRows[0] ?? -1).toSorted((x, y) => x - y)).toEqual(
+      [0, 0, 1],
+    );
   });
 
   it("takes a moon in front of the star as the planet's occluder", () => {
@@ -648,7 +646,7 @@ describe("the renderer", () => {
         released.push(event.name);
       }
     });
-    // Sixteen discs need 16 × 384 bytes, past the first 4,096.
+    // Sixteen discs need 16 × 736 bytes, past the first 4,096.
     const many = planOf(16);
     expect(many.discs).toHaveLength(16);
     renderer.draws(many);
