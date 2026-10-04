@@ -2127,6 +2127,74 @@ not available`. **The key `4` is a provisional ruling** (the orchestrator, 2026-
     resizes it.
   - **The pixel-scale ruling** (the orchestrator, 2026-10-03) is folded into this commit: Design
     note 1 and T5's text give the centre-pixel distances (see T5's entry).
+- **Deviations in T18, as built** (2026-10-04).
+  - **Files.** `budget/viewBudget.ts` (`ViewBudget`, `PER_CANVAS_OVERHEAD_MS`, `viewBudgets`,
+    `photorealisticAllowed`) and `budget/resolutionController.ts` (`ResolutionController`), each
+    with tests. Beyond Provides: `ViewSpec { id, slot, style }`, `ViewSlot` (`"primary" |
+"instrument"`), `ScaleControl`, `PhotorealisticPermission`, `ONE_PHOTOREALISTIC_VIEW`,
+    `GPU_FRAME_SHARE`, `INSTRUMENT_RATE_HZ`, `WIREFRAME_PRIMARY_RATE_HZ` and `frameGpuBudgetMs`;
+    `ScaleBounds`, `ResolutionTarget`, `CONTROLLER_TUNING` and `gpuTimeMs`.
+  - **`viewBudgets(views, setting)`** takes no `instrumentsOpen` and returns a `ReadonlyMap`:
+    `views` are the views shown, one primary and the open instruments in slot order, whether or
+    not a 30 Hz instrument draws in a given frame. Instruments are open exactly when some are
+    listed; a closed one has no budget and holds no photorealistic slot. R11's
+    `viewBudgets(views, setting, …)` reads as two arguments.
+  - **`ViewBudget.control: ScaleControl | null`** (the bounds and a `ResolutionTarget { periodMs,
+gpuBudgetMs }`) is set only for a photorealistic primary while instruments are open, Design
+    note 14 tying the drop to them; its `renderScale` is then the bounds' max, where the controller
+    starts. A photorealistic primary alone renders at the bounds' max, uncontrolled; a wireframe
+    view at 1, having no internal target (R02 Design note 12). The scale drops only as far as the
+    measured GPU time needs. A photorealistic instrument (on low beside a wireframe primary, or
+    any on high) is never controlled, a stated limit.
+  - **Rates.** A photorealistic primary at `budget.photorealisticRateHz`: 60 Hz, and 30 Hz on low
+    (the low setting's 30 fps at 720p, paced to every second vsync, R05 Design note 21). A
+    wireframe primary at 60 Hz on both settings, since the brainstorm's budget gives a wireframe
+    view its own 16.7 ms frame on the UHD 620. Every instrument at 30 Hz and full scale, so that a
+    wireframe's strokes stay sharp, at R05's secondary streaming priority. **For the owner**: on
+    low beside a photorealistic primary at 30 Hz the instruments share its rate, and are below it
+    only by their smaller canvases (the brainstorm: "lower resolution or a lower rate"). The lean
+    is to keep it: they are wireframes with no internal scale, and 15 Hz would widen `rateHz`.
+  - **The budget.** `gpuBudgetMs` is `GPU_FRAME_SHARE` 0.8 of the nominal period (R05 Design note
+    21's headroom row) less `PER_CANVAS_OVERHEAD_MS` per instrument canvas (`frameGpuBudgetMs`).
+    The controller measures the frame's whole GPU time, every view's passes (`gpuTimeMs`), so the
+    instruments' cost comes out of the primary's margin (brainstorm, "Several views in one
+    client") without an estimate of it. A caller may `retarget` from the measured vsync period
+    (16.68 ms on the projector).
+  - **The low setting's one photorealistic view** goes to the views asking for it in slot order,
+    the primary first. `photorealisticAllowed` refuses every other view while one holds it, the
+    primary too while an instrument holds it, with `ONE PHOTOREALISTIC VIEW ON LOW SETTING`
+    (T16 drafts its row). The policy keeps no state, so the style control and the key `4` ask it
+    before a switch (T19).
+  - **The controller.** `new ResolutionController(bounds, target)` (the sketch has bounds only),
+    with `retarget(target)` (keeping the scale, restarting the windows and waits, ignoring an
+    equal target) and `scale`. `update(gpuFramesMs, intervalMs)` takes the GPU times of the frames
+    resolved since the previous update, each frame once (none on some updates, two on others), or
+    `undefined` where `GraphicsStatus.timer` is `absent`, in place of the sketch's single
+    `number | undefined`, which could not tell a frame not yet resolved from no timer (TypeScript
+    review). The caller groups a frame's resolves for `gpuTimeMs`: `PassTimes.frame` counts
+    resolves, not animation frames.
+    - From GPU time, cost goes as the scale squared. Two of the last four frames over the budget
+      drop the scale to where the worst would take 0.9 of it; a run of 30 under 0.75 raises it to
+      where the run's worst would take 0.9, landing short of the top where a fixed part is large.
+      The 25% band is far wider than the 65,536 ns quantum: with twelve quantised passes the scale
+      settles within 0.02 of the exact run's and stays.
+    - From the interval, a frame over 1.5 periods is missed (R05 Design note 21); two misses in
+      four drop the scale by 0.85; 120 frames without one probe up by 1.1; a probe that misses
+      returns at once. On the synthetic vsync load, failed probes cost 0.16% of frames.
+    - After a change 6 updates settle (2 from the interval). A drop within eight first waits of a
+      rise fails it and doubles the next wait, up to 16 times; a rise that holds resets it.
+      `CONTROLLER_TUNING` is judgement on synthetic loads, to be checked on hardware with T20.
+  - **Settings, ahead of T17.** `ViewSettings` gains `internalScaleBounds`, [0.5, 1] on both, which
+    T17's text names, since T18's test takes it from `SETTINGS` and T17 is not built; and
+    `budget: ViewBudgetSettings { photorealisticRateHz: 60 | 30, photorealisticViews: 1 | null }`
+    (high 60 Hz and no limit, low 30 Hz and one): Design note 18's "one photorealistic view" and
+    the low rate, placed by R05 Design note 26's rule. T17 adds the rest of Design note 18's.
+  - **Not wired.** Nothing in `ViewDisplay`, `photorealFrame` or `PhotorealRenderer` reads the
+    budgets yet; the photorealistic frame still renders at scale 1 (T8.a's entry). T19 builds
+    `ViewSpec`s from its slots, paces each view at its `rateHz`, sizes the scene target from the
+    controller's scale, feeds it each frame's `gpuTimeMs` (or `undefined` under an absent timer),
+    and sends the style control and the key `4` through `photorealisticAllowed`; T19's text does
+    not yet say so (raised with the orchestrator).
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in

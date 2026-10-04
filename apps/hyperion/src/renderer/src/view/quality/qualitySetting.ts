@@ -64,6 +64,28 @@ export interface ViewSettings {
   readonly atmosphere: TableSizes;
   /** The sky's cube, sprites, census size and re-bake cadence (R06.T13.f, Design note 22). */
   readonly sky: SkySettings;
+  /**
+   * The least and greatest internal scale at which the resolution controller holds the
+   * photorealistic view, as a fraction of its render resolution on each axis: [0.5, 1.0] on both
+   * settings (R07 Design note 14). R12.T11 may move them.
+   */
+  readonly internalScaleBounds: readonly [min: number, max: number];
+  /** The several views' budget: the photorealistic rate and how many such views (R07.T18). */
+  readonly budget: ViewBudgetSettings;
+}
+
+/** What the per-view budget reads of a setting (R07 Design notes 14 and 18). */
+export interface ViewBudgetSettings {
+  /**
+   * The rate a photorealistic primary view is budgeted at: 60 Hz for the 1080p60 target, 30 Hz for
+   * the low setting's 30 fps at 720p, paced to every second vsync (R05 Design note 21).
+   */
+  readonly photorealisticRateHz: 60 | 30;
+  /**
+   * The most views drawn in the photorealistic style at once, or `null` for no limit: one on the
+   * low setting (R07 Design note 18), the only limit the refusal's wording allows.
+   */
+  readonly photorealisticViews: 1 | null;
 }
 
 const MIB = 1024 * 1024;
@@ -85,7 +107,10 @@ const LOW_CACHE_BYTES = 64 * MIB;
  * the `face-differences` vertex path (`baked-offsets` does not fit its 64 MiB cache) and a 64 MiB
  * cache. The high setting renders at the canvas's size with τ = 1 px, doubled normals and
  * `baked-offsets`, its precision holding by construction until R05.T18 chooses. Under a grounded
- * body every setting draws the finest level whatever these say (R05 Design note 9).
+ * body every setting draws the finest level whatever these say (R05 Design note 9). Both settings
+ * hold the photorealistic view's internal scale in [0.5, 1.0]; the low setting budgets a
+ * photorealistic primary view at 30 Hz and allows one photorealistic view (R07 Design notes 14 and
+ * 18).
  */
 export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
   high: {
@@ -98,6 +123,8 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     },
     atmosphere: TABLE_SIZES.high,
     sky: HIGH_SKY,
+    internalScaleBounds: [0.5, 1],
+    budget: { photorealisticRateHz: 60, photorealisticViews: null },
   },
   low: {
     terrain: {
@@ -109,6 +136,8 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     },
     atmosphere: TABLE_SIZES.low,
     sky: LOW_SKY,
+    internalScaleBounds: [0.5, 1],
+    budget: { photorealisticRateHz: 30, photorealisticViews: 1 },
   },
 };
 
