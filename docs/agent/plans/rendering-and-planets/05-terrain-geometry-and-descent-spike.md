@@ -3042,12 +3042,50 @@ medium, sizes, figure)`.
 
   - _The morph bands_ (`morphRangeM`, `MORPH_START_FRACTION` 0.7, a hand value).
     - Level n's band runs from 0.7 of the way from d_n to d₍ₙ₋₁₎, ending at d₍ₙ₋₁₎, where d_k is
-      the distance at which `selectionErrorM(k)` subtends the setting's τ (not τ ÷ 1.1, so that a
-      coarse–fine edge stays at morph 1 between selections).
+      the distance at which `selectionErrorM(k)` subtends the setting's τ (raised under the
+      budget, below; not τ ÷ 1.1, so that a coarse–fine edge stays at morph 1 between selections).
     - Level 0 has none. The finest level's band is [0.7 d₍ₙ₋₁₎, d₍ₙ₋₁₎].
     - The bands are computed per level when selection runs. Stand-ins take their own level's.
-    - Where the budget leaves a coarse patch beside a finer one inside the parent's band, CDLOD's
-      crack-freedom does not hold, and the skirts cover the gap.
+    - When selection is `limited`, the bands are computed at τ × max(1, `limitExcess` ÷ w)
+      (`decision-r05-high-bound.md`), so that a coarse–fine edge stays at morph 1 under the budget
+      too. The skirts remain the guard against `f32` hairlines.
+      - _As built (F2, 2026-10-04)._ `effectiveTauPx(τ, limitExcess, w)`, with w = 1 for the
+        pass's one view. `limitExcess` is measured against the τ_sel = τ ÷ 1.1 that selection runs
+        at, so every drawn baked leaf has ρ ≤ τ′ = τ_sel × max(1, `limitExcess` ÷ w), the τ′ of T7
+        and of T13.a's record. The bands, at 1.1 τ′, keep the margin of 1.1 over the leaves that
+        they have at τ without a budget. `limitExcess` is 0 when the budget does not bind (T7, as
+        built), so the bands are then at exactly τ, bit-identical to before, with no test of
+        `limited`. Unbaked leaves are held by the streaming gate, as before.
+      - _Tests (`terrainPass.test.ts`)._ At 2,000 km, unbudgeted, the written bands equal
+        `morphRangeM` at τ bit for bit. At 1.5 km, 69° from straight down at 1080p, the budget
+        binds (981 patches, `limitExcess` about 1.65). There the bands equal `morphRangeM` at
+        τ × `limitExcess`, and every vertex of the 148 coarse–fine edges has morph factor 1, the
+        nearest at 1.107 × its band's end. With the bands at τ, all 9,620 of them are below 1,
+        many at 0.
+        - The vertices are the cube sphere's `f64` points at the fake bakes' height of 0, under the
+          shader's `morphFactor` without contacts on the written `f32` bands, not
+          `vertexEmulation.ts`'s positions: the fake bakes carry no offsets, and the margin is far
+          beyond `f32` rounding.
+        - Only the bands read the new tolerance, so the unchanged suite pins every other output.
+          `just test-render --captures` (both variants, every shot unlimited) gives 28 PNGs
+          byte-identical to a build with the bands at τ.
+      - _What remains._
+        - Every band moves when τ′ does, at each selection. A vertex inside its band then steps in
+          morph factor by about (k + start ÷ (end − start)) × Δτ′ ÷ τ′, about 6 × Δτ′ ÷ τ′ for a
+          level whose bound halves. Selection re-runs on every stored bake, so while streaming
+          under the budget τ′ can change almost every frame.
+        - Where τ′ falls between two selections by more than the margin of 1.1, which a camera
+          move of up to 10% also draws on, a patch the looser budget now splits can start partly
+          morphed. Where τ′ rises as much, a merged patch's children may have been partly morphed.
+          Either is a pop of up to about the larger τ′ in bound terms, as every split under the
+          budget was before F2.
+        - F4's record could add the change of τ′ between consecutive selections, which sets those
+          steps. The ruling's by-hand look at T17's ridged high run is where any of it would show.
+        - The coarse side of an edge is not F2's. Crack-freedom also needs the coarse leaf's shared
+          vertices unmorphed, and near a low camera a coarse patch can span more depth than its
+          band allows. Unbudgeted, at 1.5 km and 640 × 360, some reach morph factor 1 towards their
+          own parent, and the skirts cover the step. In the budgeted 1080p case above all are at 0,
+          the nearest at 0.983 × its coarse band's start.
   - _Contacts._ Only contacts whose held radius plus ramp reaches a drawn patch's bounding sphere
     are written. Each is written with T7.c's `heldRadiusM` and `morphRampM`. Both rules are 3-D, so a body above
     the ground is passed as the surface point beneath it (T13.b's to do). Selection also takes
