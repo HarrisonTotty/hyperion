@@ -91,6 +91,18 @@ export interface Selection {
    * descent record.
    */
   readonly limitExcess: number;
+  /**
+   * The baked patches selection reached and found hidden, depth first from face 0: the children a
+   * split left out, which no view sees and no forced region reaches, and the split patches with
+   * nothing selected beneath them (R05.T8, the high-bound ruling's F3).
+   *
+   * @remarks
+   * Their own baked ranges may be what hides them, so the cache marks them as used, below the draw
+   * pins. Evicted, such a patch takes its ancestor's looser range, is selected again the next
+   * frame and is drawn by its parent, in place of its siblings, until it is baked again: the
+   * approach's coarse patches thrashed this way (decision-r05-high-bound.md, reason 3c).
+   */
+  readonly hiddenBaked: ReadonlyArray<PatchKey>;
 }
 
 /**
@@ -610,7 +622,22 @@ export function selectPatches(input: SelectionInput): Selection {
       seen: node.seenBy !== 0,
     });
   }
-  return { patches, demand: demandOf(t, tree), limited, limitExcess };
+  return {
+    patches,
+    demand: demandOf(t, tree),
+    limited,
+    limitExcess,
+    hiddenBaked: hiddenBakedOf(t, tree),
+  };
+}
+
+/** The baked patches among the tree's bare keys ({@link Selection.hiddenBaked}). */
+function hiddenBakedOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchKey[] {
+  const ranges = t.heightRanges;
+  if (ranges === null) {
+    return [];
+  }
+  return tree.bareKeys().filter((key) => ranges.heightRangeM(key) !== undefined);
 }
 
 /**
@@ -772,6 +799,46 @@ export class PatchLeafSet<T> {
         }
       }
     }
+  }
+
+  /**
+   * The keys the trees reach that hold no leaf, depth first from face 0: each child a split left
+   * out, and each split node with no leaf beneath it, after its children.
+   */
+  bareKeys(): PatchKey[] {
+    const bare: PatchKey[] = [];
+    for (const root of this.roots) {
+      if (root !== null) {
+        this.collectBare(root, bare);
+      }
+    }
+    return bare;
+  }
+
+  /** Adds the bare keys at and under `node` to `bare`; returns whether a leaf lies at or under it. */
+  private collectBare(node: TreeNode<T>, bare: PatchKey[]): boolean {
+    const children = node.children;
+    if (children === null) {
+      return true;
+    }
+    let keys: readonly PatchKey[] | null = null;
+    let leaf = false;
+    for (let n = 0; n < 4; n += 1) {
+      const child = children[n] ?? null;
+      if (child === null) {
+        keys ??= childKeys(node.key);
+        const key = keys[n];
+        if (key !== undefined) {
+          bare.push(key);
+        }
+      } else if (this.collectBare(child, bare)) {
+        leaf = true;
+      }
+    }
+    if (!leaf) {
+      bare.push(node.key);
+    }
+    return leaf;
   }
 
   /** Starts recording splits, so that {@link rollback} can undo them. */

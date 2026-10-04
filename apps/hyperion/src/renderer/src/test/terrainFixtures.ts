@@ -44,10 +44,14 @@ export function goldenLevelTable(ridges: "off" | "on"): Float64Array {
   return Float64Array.from(values);
 }
 
-/** A selection of `keys`, those in `forced` marked forced, with no demand. */
+/**
+ * A selection of `keys`, those in `forced` marked forced, with no demand, and `hiddenBaked` as the
+ * baked patches it found hidden.
+ */
 export function selectionOf(
   keys: readonly PatchKey[],
   forced: readonly PatchKey[] = [],
+  hiddenBaked: readonly PatchKey[] = [],
 ): Selection {
   const forcedStrings = new Set(forced.map(patchKeyString));
   const patches = new Map<string, SelectedPatch>();
@@ -60,5 +64,5 @@ export function selectionOf(
       seen: true,
     });
   }
-  return { patches, demand: [], limited: false, limitExcess: 0 };
+  return { patches, demand: [], limited: false, limitExcess: 0, hiddenBaked };
 }
