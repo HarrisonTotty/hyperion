@@ -7,6 +7,7 @@ import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
+import { histogramParams } from "../post/histogram";
 import { type PhotorealFrame, PhotorealRenderer } from "./renderer";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
@@ -44,6 +45,7 @@ function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
     ],
     previousRegimes: new Map(),
     overlay: null,
+    meter: "average",
   };
 }
 
@@ -184,5 +186,71 @@ describe("the photorealistic renderer when a pipeline is refused", () => {
     expect(engine.counts.materials).toBe(materials);
     expect(chainDisposed).toHaveBeenCalled();
     renderer.dispose();
+  });
+});
+
+/** Lets the read-backs settle. */
+async function settled(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+describe("the photorealistic renderer's histogram", () => {
+  async function ready(): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly renderer: PhotorealRenderer;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    return { engine, renderer };
+  }
+
+  it("is dispatched once a frame with the operator's meter's weights", async () => {
+    const { engine, renderer } = await ready();
+    renderer.render(new RecordingView(), { ...frameWith([]), meter: "lit" });
+    expect(
+      engine.dispatched.map((d) => [d.pass, Array.from(d.bindings.uniforms["params"] ?? [])]),
+    ).toEqual([["histogram", Array.from(histogramParams(VIEWPORT, "lit", 1))]]);
+    renderer.dispose();
+  });
+
+  it("is handed over once read back, under the frame's pre-exposure", async () => {
+    const { renderer } = await ready();
+    renderer.render(new RecordingView(), frameWith([]));
+    await settled();
+    expect([renderer.takeHistogram()?.preExposure, renderer.takeHistogram()]).toEqual([
+      1e-4,
+      undefined,
+    ]);
+    renderer.dispose();
+  });
+
+  it("is dropped by a device restore", async () => {
+    const { engine, renderer } = await ready();
+    renderer.render(new RecordingView(), frameWith([]));
+    engine.restore();
+    await settled();
+    expect(renderer.takeHistogram()).toBeUndefined();
+    renderer.dispose();
+  });
+
+  it("is dropped by a dispose, which releases the reader's buffers", async () => {
+    const { engine, renderer } = await ready();
+    const released: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        released.push(event.name);
+      }
+    });
+    renderer.render(new RecordingView(), frameWith([]));
+    renderer.dispose();
+    await settled();
+    expect(renderer.takeHistogram()).toBeUndefined();
+    expect(released.filter((name) => name.startsWith("test view histogram"))).toHaveLength(3);
   });
 });

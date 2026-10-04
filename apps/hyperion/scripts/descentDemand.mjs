@@ -5,12 +5,14 @@
 // script does both and runs the TypeScript through Vite's module runner, as `placeShip.mjs` does.
 //
 //   node scripts/descentDemand.mjs [--rules hard,calibrated] [--ridges off,on] [--settings high,low]
-//     [--rate 64] [--cap-hours 2] [--out <dir>] [--write-fixture]
+//     [--rate 64] [--cap-hours 2] [--wall-cap-hours <h>] [--out <dir>] [--write-fixture]
 //
 // --write-fixture runs only the unit test's windows (ridges off, min(hard, 4σ_n), both settings)
 // and writes the ranges the test reads, `src/renderer/src/view/spike/fixtures/descentRanges.txt`,
-// printing each window's hash. The cap is shared evenly between the cells; a cell cut at its share
-// says so in the record.
+// printing each window's hash. The cap is shared evenly between the cells and counts selection
+// time only, the bakes left out; `--wall-cap-hours` stops the whole run at that wall time, bakes
+// included, so that a run under an outer timeout always writes. A cell cut short says so in the
+// record, and the record is rewritten after every cell, so a killed run keeps the cells it ended.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -113,7 +115,26 @@ async function main(args) {
   const startedAt = new Date().toISOString();
   const cellCount = rules.length * ridgesList.length * settings.length;
   const shareMs = capMs / cellCount;
+  const wallMs = Number(option(args, "wall-cap-hours", "Infinity")) * 3_600_000;
+  const wallDeadlineMs = nowMs() + wallMs;
   const cells = [];
+  mkdirSync(out, { recursive: true });
+  const stem = `${startedAt.slice(0, 10)}-demand-${rules.join("+")}`;
+  const write = () => {
+    const json = {
+      schema: record.DEMAND_RECORD_SCHEMA,
+      version: record.DEMAND_RECORD_VERSION,
+      startedAt,
+      seed: String(record.RECORD_SEED),
+      testPlanetVersion: surface.testPlanetVersion(),
+      rateHz,
+      capHours: capMs / 3_600_000,
+      loadAverage: readFileSync("/proc/loadavg", "utf8").split(" ").slice(0, 3).map(Number),
+      cells,
+    };
+    writeFileSync(join(out, `${stem}.json`), `${JSON.stringify(json, null, 2)}\n`);
+    writeFileSync(join(out, `${stem}.md`), record.demandSummary(cells, startedAt));
+  };
   for (const ridges of ridgesList) {
     // One memo a ridges value: the bakes are the same patches whatever the rule and setting.
     const { source } = sourceOf(ridges);
@@ -132,29 +153,17 @@ async function main(args) {
           measureFromS: 1,
           nowMs,
           deadlineMs: cellStart + shareMs,
+          wallDeadlineMs,
         });
         cells.push(cell);
+        write();
         process.stdout.write(
           `${rule} ridges ${ridges} ${settingView.setting}: ${cell.frames} frames${cell.truncated === true ? " (truncated)" : ""} in ${((nowMs() - cellStart) / 1000).toFixed(0)} s\n`,
         );
       }
     }
   }
-  mkdirSync(out, { recursive: true });
-  const stem = `${startedAt.slice(0, 10)}-demand-${rules.join("+")}`;
-  const json = {
-    schema: record.DEMAND_RECORD_SCHEMA,
-    version: record.DEMAND_RECORD_VERSION,
-    startedAt,
-    seed: String(record.RECORD_SEED),
-    testPlanetVersion: surface.testPlanetVersion(),
-    rateHz,
-    capHours: capMs / 3_600_000,
-    loadAverage: readFileSync("/proc/loadavg", "utf8").split(" ").slice(0, 3).map(Number),
-    cells,
-  };
-  writeFileSync(join(out, `${stem}.json`), `${JSON.stringify(json, null, 2)}\n`);
-  writeFileSync(join(out, `${stem}.md`), record.demandSummary(cells, startedAt));
+  write();
   process.stdout.write(`record: ${join(out, stem)}.{json,md}\n`);
   return 0;
 }

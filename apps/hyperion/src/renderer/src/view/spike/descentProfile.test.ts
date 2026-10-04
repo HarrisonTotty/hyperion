@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { normalise, norm, sub } from "../../geometry/vec3";
-import { surfacePoint } from "../terrain/planet";
+import { dot, normalise, norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { spheroidNormal, surfacePoint } from "../terrain/planet";
 import { rotateToBody } from "../coords/rotation";
 import { WGS84_FIGURE } from "../../test/terrainFixtures";
 import {
@@ -9,12 +9,14 @@ import {
   datumDirection,
   DESCENT_SEGMENTS,
   DescentProfile,
+  type DescentSegment,
   type DescentTerrain,
   DescentUnclearable,
   FLOOR_TOLERANCE_M,
   type TrackStretch,
   landingSiteOf,
   trackStretches,
+  type VerticalShape,
 } from "./descentProfile";
 import { TEST_PLANET_RATE_RAD_PER_S, testPlanetRotationAt } from "./rotation";
 
@@ -39,9 +41,10 @@ describe("the scripted descent", () => {
   });
 
   it("keeps position and velocity continuous across every boundary and blend", () => {
-    const edges = PROFILE.segmentSpans().flatMap(({ endS, name }) => {
-      const segment = DESCENT_SEGMENTS.find((s) => s.name === name);
-      return [endS, endS - blendS(segment?.durationS ?? 0)];
+    // A blend ends a segment, or starts one after a level segment (the arc after the coast).
+    const edges = PROFILE.segmentSpans().flatMap(({ startS, endS, name }) => {
+      const b = blendS(DESCENT_SEGMENTS.find((s) => s.name === name)?.durationS ?? 0);
+      return [endS, endS - b, startS + b];
     });
     const h = 1e-4;
     for (const t of edges.filter((e) => e > h && e < PROFILE.durationS - h)) {
@@ -106,8 +109,7 @@ describe("the scripted descent", () => {
     expect(end.clearanceM).toBeCloseTo(1, 9);
     expect(norm(sub(end.positionM, end.groundPointM))).toBeCloseTo(1, 6);
     const pass = raised.segmentSpans().find(({ name }) => name === "low fast pass");
-    // It starts at 300 m above the track's highest and climbs gently, never below, so that its
-    // blend into the slowdown leaves the slowdown's start exact (the re-fit of Design note 19).
+    // Lifted, it holds level 300 m above the track's highest, the slowdown blending in from it.
     expect(raised.poseAt(pass?.startS ?? NaN).altitudeM).toBeCloseTo(1800, 6);
     for (let t = pass?.startS ?? NaN; t <= (pass?.endS ?? NaN); t += 0.5) {
       expect(raised.poseAt(t).altitudeM).toBeGreaterThanOrEqual(1800 - 1e-6);
@@ -146,6 +148,113 @@ describe("the scripted descent", () => {
   it("refuses a seed outside u64", () => {
     expect(() => landingSiteOf(-1n)).toThrow(RangeError);
     expect(() => landingSiteOf(1n << 64n)).toThrow(RangeError);
+  });
+});
+
+/** Design note 19's table with one segment's vertical shape changed. */
+function withShape(name: string, verticalShape: VerticalShape): ReadonlyArray<DescentSegment> {
+  const table = [...DESCENT_SEGMENTS];
+  const at = table.findIndex((segment) => segment.name === name);
+  const segment = table[at];
+  if (segment === undefined) {
+    throw new Error(`the table has no segment ${name}`);
+  }
+  table[at] = { ...segment, verticalShape };
+  return table;
+}
+
+/**
+ * The camera's height above the spheroid along the normal over its ground direction d, found from
+ * its position alone, and how far the position lies off that normal, metres: p = M·d + h·ν(d).
+ */
+function heightOverGround(pose: { readonly positionM: Vec3; readonly groundDir: Vec3 }): {
+  readonly heightM: number;
+  readonly offNormalM: number;
+} {
+  const d = [pose.groundDir.x, pose.groundDir.y, pose.groundDir.z] as const;
+  const g = surfacePoint(WGS84_FIGURE, d, 0);
+  const n = spheroidNormal(WGS84_FIGURE, d);
+  const nu = vec3(n[0], n[1], n[2]);
+  const up = sub(pose.positionM, vec3(g[0], g[1], g[2]));
+  const heightM = dot(up, nu);
+  return { heightM, offNormalM: norm(sub(up, scale(nu, heightM))) };
+}
+
+describe("the orbit coast", () => {
+  // Level means a constant height above the datum the path is flown over: the spheroid, along its
+  // normal ν over the ground direction d, plus the site's height. So the vertical speed is zero.
+  // It is not a constant geocentric radius: over an oblate spheroid, |p| at that height changes
+  // as the track crosses latitudes, at up to a f |sin 2φ dφ/dt| ≈ 26 m/s with the ground track at
+  // 7.67 km/s on the mean radius (16.5 to 17.1 m/s at seed 7, so |p| rises 1.01 km over the
+  // coast), where a Keplerian circular orbit's would not. The scripted camera holds its height,
+  // as Design note 19 has it.
+  const SITE_M = -1845.8;
+  const cases: ReadonlyArray<readonly [string, number, DescentProfile]> = [
+    [
+      "seed 7 over its site",
+      SITE_M,
+      new DescentProfile(WGS84_FIGURE, landingSiteOf(7n), { siteHeightM: SITE_M }),
+    ],
+    ["seed 0", 0, new DescentProfile(WGS84_FIGURE, landingSiteOf(0n))],
+    ["seed 5", 0, new DescentProfile(WGS84_FIGURE, landingSiteOf(5n))],
+  ];
+
+  for (const [name, siteM, profile] of cases) {
+    it(`is flown level at 400 km with no vertical speed (${name})`, () => {
+      const coast = profile.segmentSpans().find((span) => span.name === "orbit coast");
+      const steps = (coast?.endS ?? NaN) * 64;
+      expect(steps).toBe(60 * 64);
+      for (let n = 0; n <= steps; n += 1) {
+        const pose = profile.poseAt(n / 64);
+        // The profile is closed-form, not integrated, and the coast's rate is 0: its altitude is
+        // exact.
+        expect(pose.clearanceM).toBe(400_000);
+        expect(pose.verticalSpeedMps).toBe(0);
+        // From the position alone: 400 km above the site's height along the spheroid's normal, to
+        // the rounding of |p| ≈ 6.8 × 10⁶ m, whose ulp is 0.9 nm.
+        const { heightM, offNormalM } = heightOverGround(pose);
+        expect(Math.abs(heightM - (siteM + 400_000))).toBeLessThan(1e-6);
+        expect(offNormalM).toBeLessThan(1e-6);
+      }
+      // The velocity is a central difference over ±1 ms of exact positions. Its rounding is about
+      // 10 nm ÷ 2 ms = 5 µm/s, and its truncation |p‴| h² ÷ 6 about 2 nm/s, so 1 mm/s bounds it
+      // with room; the climb this replaced was 18.4 m/s. The coast's two ends are left out: one
+      // takes a one-sided step, the other straddles the arc's lead-in.
+      for (let n = 1; n < steps; n += 1) {
+        const pose = profile.poseAt(n / 64);
+        const d = pose.groundDir;
+        const nu = spheroidNormal(WGS84_FIGURE, [d.x, d.y, d.z]);
+        expect(Math.abs(dot(pose.velocityMps, vec3(nu[0], nu[1], nu[2])))).toBeLessThan(1e-3);
+      }
+    });
+  }
+
+  it("hands over to the descent arc, which blends in from rest over its first 5 s", () => {
+    const arc = PROFILE.segmentSpans().find((span) => span.name === "descent arc");
+    const t0 = arc?.startS ?? NaN;
+    const rate = PROFILE.poseAt(t0 + 5).verticalSpeedMps;
+    // The arc's −420 m/s between blends, a little faster for the 2.5 s its lead-in loses.
+    expect(rate).toBeLessThan(-420);
+    expect(rate).toBeGreaterThan(-425);
+    expect(PROFILE.poseAt(t0).verticalSpeedMps).toBe(0);
+    expect(PROFILE.poseAt(t0).clearanceM).toBe(400_000);
+    let previous = 0;
+    for (let n = 1; n <= 5 * 64; n += 1) {
+      const pose = PROFILE.poseAt(t0 + n / 64);
+      expect(pose.verticalSpeedMps).toBeLessThan(previous);
+      expect(pose.clearanceM).toBeLessThan(400_000);
+      previous = pose.verticalSpeedMps;
+    }
+    for (let t = t0 + 5; t <= (arc?.endS ?? NaN) - 5; t += 0.5) {
+      expect(PROFILE.poseAt(t).verticalSpeedMps).toBeCloseTo(rate, 9);
+    }
+  });
+
+  it("refuses a level segment before one that is not constant", () => {
+    const table = withShape("descent arc", "level");
+    expect(() => new DescentProfile(WGS84_FIGURE, landingSiteOf(7n), {}, table)).toThrow(
+      "a level segment must be followed by a constant one",
+    );
   });
 });
 
@@ -213,17 +322,52 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
     expect(stretches[index("descent arc 9")]).toMatchObject({ level: 4, clearanceM: 1000 });
   });
 
-  it("is the profile before the ruling, bit for bit, where no floor lifts it", () => {
-    // Fingerprints of the 64 Hz poses that 003a6a3's profile (before the ruling) gave. A lifted low
-    // pass (the default track maximum, 0 m, above a site below the datum) now holds level, so
-    // those profiles changed on purpose.
-    const before: ReadonlyArray<readonly [DescentTerrain, string]> = [
-      [{}, "97246927f5515e5c"],
-      [{ siteHeightM: 1845.8 }, "0464f94febbca6d9"],
-      [{ siteHeightM: 1200, trackMaxHeightM: 1000 }, "4a035319bc790f00"],
+  /** The table before its orbit coast was flown level: the coast hosting the arc's blend. */
+  const CLIMBING_COAST = withShape("orbit coast", "constant");
+  const UNLIFTED: ReadonlyArray<DescentTerrain> = [
+    {},
+    { siteHeightM: 1845.8 },
+    { siteHeightM: 1200, trackMaxHeightM: 1000 },
+  ];
+
+  it("flies the table with a climbing coast as before the ruling, bit for bit, where no floor lifts it", () => {
+    // Fingerprints of the 64 Hz poses that 003a6a3's profile (before the ruling) gave, its coast
+    // climbing 18.4 m/s into the arc's blend. A lifted low pass (the default track maximum, 0 m,
+    // above a site below the datum) now holds level, so those profiles changed on purpose.
+    const before = ["97246927f5515e5c", "0464f94febbca6d9", "4a035319bc790f00"];
+    for (const [k, terrain] of UNLIFTED.entries()) {
+      expect(poseHash(new DescentProfile(WGS84_FIGURE, site, terrain, CLIMBING_COAST))).toBe(
+        before[k],
+      );
+    }
+  });
+
+  it("changes only the coast and the arc by flying the coast level", () => {
+    // Today's fingerprints. From the approach on, the poses are the climbing coast's but for the
+    // rounding of the vertical integral, whose earlier knots moved.
+    const today = ["4b9b2c5a59b92386", "e37712068cbe2e8b", "4d2245eff68d5971"];
+    for (const [k, terrain] of UNLIFTED.entries()) {
+      const level = new DescentProfile(WGS84_FIGURE, site, terrain);
+      const climbing = new DescentProfile(WGS84_FIGURE, site, terrain, CLIMBING_COAST);
+      expect(poseHash(level)).toBe(today[k]);
+      const approach = level.segmentSpans().find((span) => span.name === "approach and flare");
+      for (const t of grid(level).filter((tS) => tS >= (approach?.startS ?? NaN))) {
+        const apartM = norm(sub(level.poseAt(t).positionM, climbing.poseAt(t).positionM));
+        expect(apartM).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it("flies a lifted low pass level, as before, bit for bit", () => {
+    // A lifted low pass is now a `level` segment, no longer a flag of `flySegments`: with the
+    // climbing coast, these profiles are 2fc6d2d's bit for bit.
+    const lifted: ReadonlyArray<readonly [Readonly<Record<string, number>>, string]> = [
+      [RIDGES, "3185eb4987d179ed"],
+      [{ "low fast pass": 1500, "slowdown 3": 800 }, "21eecb9ac7de97be"],
     ];
-    for (const [terrain, hash] of before) {
-      expect(poseHash(new DescentProfile(WGS84_FIGURE, site, terrain))).toBe(hash);
+    for (const [raised, hash] of lifted) {
+      const terrain = { siteHeightM: SITE_M, stretchMaxHeightsM: floors(raised) };
+      expect(poseHash(new DescentProfile(WGS84_FIGURE, site, terrain, CLIMBING_COAST))).toBe(hash);
     }
   });
 

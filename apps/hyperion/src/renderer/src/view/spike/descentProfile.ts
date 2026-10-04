@@ -4,18 +4,21 @@
  * azimuth drawn from the spike's seed.
  *
  * @remarks
- * The path is two kinematic profiles over the script: the horizontal speed along the ground track
- * and the altitude above the spheroid. Each is a velocity that is piecewise linear in time and
- * continuous, so position and velocity are continuous everywhere: where the table of Design note 19
- * changes vertical speed between segments, the velocity is blended linearly over the last 5 s of
- * the earlier segment (1 s for a segment shorter than 20 s), a cubic in position between the two.
- * The segments' vertical speeds are re-fitted (the plan's "T13.a re-fits") so that every boundary
- * altitude holds exactly with the blends included; the durations are the table's. The path is a
- * scripted camera, not a flight: the blends' accelerations are not a craft's.
+ * The path is two kinematic profiles over the script: the ground speed (the body-fixed speed of the
+ * track's point beneath the camera, {@link ORBIT_GROUND_SPEED_MPS}) and the altitude above the
+ * spheroid. Each is a velocity that is piecewise linear in time and continuous, so position and
+ * velocity are continuous everywhere: where the table of Design note 19 changes vertical speed
+ * between segments, the velocity is blended linearly over the last 5 s of the earlier segment
+ * (1 s for a segment shorter than 20 s), a cubic in position between the two. The segments'
+ * vertical speeds are re-fitted (the plan's "T13.a re-fits") so that every boundary altitude holds
+ * exactly with the blends included; the durations are the table's. A `level` segment (the orbit
+ * coast) hosts no blend: it holds its altitude, and the next segment blends in from rest over its
+ * own first 5 s instead. The path is a scripted camera, not a flight: the blends' accelerations are
+ * not a craft's.
  *
  * The ground track is the great circle through the landing site along the approach azimuth; the
  * camera is `altitude` above the spheroid along its normal over the track's point. The camera looks
- * along the track, pitched down 30° while the horizontal speed is at least 300 m/s and turning to
+ * along the track, pitched down 30° while the ground speed is at least 300 m/s and turning to
  * the nadir as it falls to zero, so that the hover looks straight down.
  */
 
@@ -31,12 +34,17 @@ export interface DescentSegment {
   /** The altitude above the spheroid at the segment's start and end, metres. */
   readonly startAltitudeM: number;
   readonly endAltitudeM: number;
-  /** The horizontal speed at the segment's start and end, m/s, linear in between. */
+  /**
+   * The ground speed at the segment's start and end, m/s, linear in between: the body-fixed speed
+   * of the track's point beneath the camera, on the sphere of radius (a + c) ÷ 2 that the track is
+   * laid out on ({@link ORBIT_GROUND_SPEED_MPS}).
+   */
   readonly startSpeedMps: number;
   readonly endSpeedMps: number;
   /**
-   * The vertical speed's shape: `constant` (then blended into the next segment's), `falling`
-   * (linear to the next segment's starting rate, the flare) or `hover` (0.05 m/s down, then still).
+   * The vertical speed's shape: `level` (one rate, 0 where its ends agree, the next segment
+   * blending in from it), `constant` (then blended into the next segment's), `falling` (linear to
+   * the next segment's starting rate, the flare) or `hover` (0.05 m/s down, then still).
    */
   readonly verticalShape: VerticalShape;
   /**
@@ -115,8 +123,38 @@ export interface TrackStretch {
   readonly clearanceM: number;
 }
 
-/** How a segment's vertical speed runs (Design note 19's table). */
-export type VerticalShape = "constant" | "falling" | "hover";
+/**
+ * How a segment's vertical speed runs (Design note 19's table).
+ *
+ * @remarks
+ * `level` hosts no blend: it holds one rate to its end, its drop over its duration, and the segment
+ * after it, which must be `constant`, blends in from that rate over its own first blend length.
+ * Where its two ends agree (the orbit coast, a lifted low pass) it is flown at a constant height
+ * above the spheroid along its normal, with no vertical speed. A `constant` segment hosts the blend
+ * into the next over its own last, its rate re-fitted so that its end altitude still holds: a
+ * level `constant` segment before a descending one therefore climbs a little (the unlifted low
+ * fast pass, 0.076 m/s and 1.9 m at most, and only before a slowdown flown whole: a split
+ * slowdown's first piece blends in from it, which then holds 0).
+ */
+export type VerticalShape = "level" | "constant" | "falling" | "hover";
+
+/**
+ * The orbit coast's ground speed, m/s: the body-fixed speed of the track's point beneath the
+ * camera, on the sphere of radius (a + c) ÷ 2 that the track's great circle is laid out on (Design
+ * note 19; decision-r05-coast-speed.md, 2026-10-04).
+ *
+ * @remarks
+ * It is the top of the band a 400 km circular orbit's body-fixed ground speed covers on the
+ * rotating test planet, from (n − ω) R ≈ 6.75 km/s prograde equatorial to (n + ω) R ≈ 7.68 km/s
+ * retrograde equatorial (n = √(GM ÷ r³) the orbit's mean motion, ω the planet's rotation), and so a
+ * conservative bound on the coast's demand, which reads the ground speed. 7.22 km/s is a
+ * non-rotating planet's figure, not a more correct one. The camera itself moves (R + h) ÷ R times
+ * as fast, about 8.15 km/s body-fixed at 400 km, a retrograde equatorial orbit's. The script flies
+ * it whatever the approach azimuth, so the path is not a Keplerian orbit: in the inertial frame it
+ * is circular only heading west along the equator, and up to 13% above circular speed heading
+ * east. The coast holds it and the descent arc starts from it.
+ */
+export const ORBIT_GROUND_SPEED_MPS = 7670;
 
 /**
  * Design note 19's segments (provisional, re-fitted here): the orbit coast, the descent arc, the
@@ -129,9 +167,11 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     durationS: 60,
     startAltitudeM: 400_000,
     endAltitudeM: 400_000,
-    startSpeedMps: 7670,
-    endSpeedMps: 7670,
-    verticalShape: "constant",
+    startSpeedMps: ORBIT_GROUND_SPEED_MPS,
+    endSpeedMps: ORBIT_GROUND_SPEED_MPS,
+    // Design note 19's "vertical speed 0": the arc blends in from it rather than it climbing
+    // 18.4 m/s to host the arc's −420 m/s blend.
+    verticalShape: "level",
     clearsTrack: false,
     stretches: { pieceS: 100, level: 4, clearanceM: 1000 },
   },
@@ -140,7 +180,7 @@ export const DESCENT_SEGMENTS: ReadonlyArray<DescentSegment> = [
     durationS: 900,
     startAltitudeM: 400_000,
     endAltitudeM: 20_000,
-    startSpeedMps: 7670,
+    startSpeedMps: ORBIT_GROUND_SPEED_MPS,
     endSpeedMps: 1000,
     verticalShape: "constant",
     clearsTrack: false,
@@ -276,7 +316,7 @@ type VerticalPiece = Pick<
   /**
    * Whether this `constant` piece blends in from the previous piece's rate over its own first blend
    * length, the previous one holding its rate to its end; otherwise the previous blends into it
-   * over its last.
+   * over its last. Always so after a `level` piece.
    */
   readonly leadIn?: boolean;
 };
@@ -305,11 +345,28 @@ function segmentStarts(segments: ReadonlyArray<{ readonly durationS: number }>):
  * The rates are solved from the last segment back: the drop across segment i is
  * c_i (T_i − b_i) + (c_i + s_{i+1}) b_i ÷ 2, where s_{i+1} is the next segment's starting rate, so
  * c_i is linear in the known drop and s_{i+1}. A segment with no drop and a level neighbour holds
- * c = 0 and needs no blend; a level segment before a descending one climbs gently (the orbit coast
- * by about 18 m/s, the low fast pass by about 0.07 m/s) so that the blend's drop leaves its end
- * altitude exact.
+ * c = 0 and needs no blend; a level `constant` segment before a descending one climbs gently so
+ * that the blend's drop leaves its end altitude exact: the unlifted low fast pass by 0.076 m/s,
+ * 1.9 m at most, before a slowdown flown whole (a split slowdown's first piece blends in from the
+ * pass, which then holds 0; a lifted pass is `level`).
+ * A `level` one holds its rate, its drop over its duration (0 for the orbit coast), to its end, and
+ * the next blends in from it (`VerticalPiece.leadIn`): the orbit coast hosting the arc's −420 m/s
+ * blend climbed 18.4 m/s, 1 km over its 60 s.
+ *
+ * @throws Error if a `level` piece is followed by one that is not `constant`.
  */
-function verticalKnots(segments: ReadonlyArray<VerticalPiece>): Knot[] {
+function verticalKnots(input: ReadonlyArray<VerticalPiece>): Knot[] {
+  const segments = input.map((piece, m): VerticalPiece => {
+    if (input[m - 1]?.verticalShape !== "level") {
+      return piece;
+    }
+    if (piece.verticalShape !== "constant") {
+      throw new Error(
+        "a level segment must be followed by a constant one, which blends in from it",
+      );
+    }
+    return piece.leadIn === true ? piece : { ...piece, leadIn: true };
+  });
   const starts = segmentStarts(segments);
   const n = segments.length;
   /** Each segment's starting rate, solved back to front. */
@@ -370,8 +427,11 @@ function verticalKnots(segments: ReadonlyArray<VerticalPiece>): Knot[] {
         r -= 1;
       }
       const first = segments[r];
-      if (first === undefined || first.verticalShape !== "constant") {
-        throw new Error("a lead-in follows a constant piece");
+      if (
+        first === undefined ||
+        (first.verticalShape !== "constant" && first.verticalShape !== "level")
+      ) {
+        throw new Error("a lead-in follows a constant or level piece");
       }
       let rate = (first.endAltitudeM - first.startAltitudeM) / first.durationS;
       startRate[r] = rate;
@@ -679,9 +739,8 @@ function flySegments(
 ): { readonly segments: DescentSegment[]; readonly pieces: VerticalPiece[] } {
   const flown: DescentSegment[] = [];
   const pieces: VerticalPiece[] = [];
-  /** Whether each piece is a split segment's, and whether it is a lifted low pass (see the end). */
+  /** Whether each piece is a split segment's (see the end). */
   const splitAt: boolean[] = [];
-  const liftedLowPass: boolean[] = [];
   let previousEnd: number | null = null;
   for (const segment of segments) {
     const first = stretches.findIndex((s) => s.segment === segment.name);
@@ -698,7 +757,6 @@ function flySegments(
       flown.push(out);
       pieces.push(out);
       splitAt.push(false);
-      liftedLowPass.push(false);
       continue;
     }
     let last = first;
@@ -707,7 +765,15 @@ function flySegments(
     }
     const startM = boundary[first] ?? segment.startAltitudeM;
     const endM = boundary[last + 1] ?? segment.endAltitudeM;
-    const out = { ...segment, startAltitudeM: startM, endAltitudeM: endM };
+    // A lifted low pass is level (rule 3: "level at A_lp"), so the slowdown blends in from it; the
+    // table's own, unlifted, keeps its gentle climb into the slowdown's blend, bit for bit.
+    const liftedLowPass = segment.clearsTrack && startM !== (table[first] ?? 0);
+    const out: DescentSegment = {
+      ...segment,
+      startAltitudeM: startM,
+      endAltitudeM: endM,
+      verticalShape: liftedLowPass ? "level" : segment.verticalShape,
+    };
     flown.push(out);
     let split = false;
     for (let b = first + 1; b <= last; b += 1) {
@@ -723,23 +789,20 @@ function flySegments(
           verticalShape: "constant",
         });
         splitAt.push(true);
-        liftedLowPass.push(false);
       }
     } else {
       pieces.push(out);
       splitAt.push(false);
-      // A lifted low pass holds level (rule 3: "level at A_lp"); the table's own, unlifted,
-      // keeps its gentle climb into the slowdown's blend, bit for bit.
-      liftedLowPass.push(segment.clearsTrack && (boundary[first] ?? 0) !== (table[first] ?? 0));
     }
     previousEnd = endM;
   }
-  // Where a split piece (or the piece after a lifted low pass) is faster than the one before, it
-  // blends in from that one's rate instead of the slower one blending into it. Either way the
-  // blend bows the piece hosting it by about the other's rate × b ÷ 2, so hosting it in the faster
-  // piece keeps the bow to the slower rate's: otherwise a level piece before a fall bulges (95 m
-  // before the flare's last piece under a 2 km ridge) and a gentle one before a climb dips (30 m),
-  // which the follow-up's no-valley rule forbids. A lifted low pass is level, so it holds rate 0.
+  // Where a split piece is faster than the one before, it blends in from that one's rate instead
+  // of the slower one blending into it. Either way the blend bows the piece hosting it by about the
+  // other's rate × b ÷ 2, so hosting it in the faster piece keeps the bow to the slower rate's:
+  // otherwise a level piece before a fall bulges (95 m before the flare's last piece under a 2 km
+  // ridge) and a gentle one before a climb dips (30 m), which the follow-up's no-valley rule
+  // forbids. The piece after a `level` one (the coast, a lifted low pass) always blends in from it
+  // (`verticalKnots`).
   for (let k = 0; k + 1 < pieces.length; k += 1) {
     const slow = pieces[k];
     const fast = pieces[k + 1];
@@ -748,7 +811,7 @@ function flySegments(
       fast !== undefined &&
       slow.verticalShape === "constant" &&
       fast.verticalShape === "constant" &&
-      ((splitAt[k + 1] ?? false) || (liftedLowPass[k] ?? false)) &&
+      (splitAt[k + 1] ?? false) &&
       Math.abs((fast.endAltitudeM - fast.startAltitudeM) / fast.durationS) >
         Math.abs((slow.endAltitudeM - slow.startAltitudeM) / slow.durationS)
     ) {
@@ -826,7 +889,10 @@ export interface DescentPose {
    * to `clearanceM` on flat ground.
    */
   readonly heightAboveFloorM: number;
-  /** Horizontal speed along the track and vertical speed, m/s. */
+  /**
+   * The ground speed, the body-fixed speed of the track's point beneath the camera
+   * (`DescentSegment.startSpeedMps`), and the vertical speed, m/s.
+   */
   readonly horizontalSpeedMps: number;
   readonly verticalSpeedMps: number;
   /**

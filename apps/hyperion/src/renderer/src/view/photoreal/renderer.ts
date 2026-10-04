@@ -10,9 +10,10 @@
  * (R06's pass, meter class 0), disc bodies and point bodies, back to front by power. Then the bloom
  * chain over the light above the display's range, the tone-mapping pass with each host disc's glare
  * source, encoded and dithered in the pass (`encoding: "in-pass"`), and a second canvas pass that
- * loads it for the cased symbology (`colourLoad: "load"`, decisions-r06-r07 item 6). Mesh bodies,
- * R08's, R10's and R11's passes join when they exist; the histogram and auto exposure join when the
- * view meters (T13's mounting). Its resources are made asynchronously, the pipelines compiled
+ * loads it for the cased symbology (`colourLoad: "load"`, decisions-r06-r07 item 6). Each frame
+ * takes the scene target's exposure histogram under the operator's meter (R07.T12), read back for
+ * the view's `AutoExposure` ({@link PhotorealRenderer.takeHistogram}). Mesh bodies, R08's, R10's
+ * and R11's passes join when they exist. Its resources are made asynchronously, the pipelines compiled
  * before the first frame, and again after a device loss; until then {@link
  * PhotorealRenderer.render} draws nothing and says so, and the view keeps its wireframe.
  */
@@ -36,6 +37,7 @@ import type { ViewRole } from "../camera/state";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type {
   BufferHandle,
+  ComputeHandle,
   DrawItem,
   FrameSubmission,
   MaterialHandle,
@@ -57,6 +59,8 @@ import {
 } from "../post/bloomChain";
 import { BLUE_NOISE_SIDE, blueNoiseTile } from "../post/blueNoise";
 import { type GlareSource, glareSpreadTerms } from "../post/glare";
+import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histogram";
+import type { MeterMode } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
@@ -90,6 +94,8 @@ export interface PhotorealFrame {
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /** The symbology's canvas pass, drawn loading the tone-mapped image, or `null`. */
   readonly overlay: FrameSubmission | null;
+  /** The operator's meter, whose weights the frame's histogram takes (Design note 10). */
+  readonly meter: MeterMode;
 }
 
 /** Where a {@link PhotorealRenderer} stands. */
@@ -110,6 +116,8 @@ interface Resources {
   readonly tonemap: MaterialHandle;
   readonly triangle: MeshHandle;
   readonly blueNoise: TextureHandle;
+  /** The scene target's exposure histogram, read back one to three frames late (R07.T12). */
+  readonly histograms: HistogramReader;
   glare: BufferHandle;
   glareCapacity: number;
   stars: BufferHandle;
@@ -131,6 +139,8 @@ export class PhotorealRenderer {
   #resources: Resources | null = null;
   #making: Promise<void> | null = null;
   #status: PhotorealStatus = "idle";
+  /** The latest histogram read back and not yet taken. */
+  #histogram: Histogram | undefined;
   /** Bumped by each restore, so that a making from before it is abandoned. */
   #generation = 0;
   #disposed = false;
@@ -145,7 +155,9 @@ export class PhotorealRenderer {
       // The handles died with the device; a making in flight is abandoned, and the next frame
       // makes them again.
       this.#generation += 1;
+      this.#resources?.histograms.dispose();
       this.#resources = null;
+      this.#histogram = undefined;
       this.#making = null;
       this.#status = "idle";
     });
@@ -190,14 +202,20 @@ export class PhotorealRenderer {
     const triangle = fullScreenTriangle(engine, `${this.#name} tonemap triangle`);
     const quad = engine.createMesh({ ...WIREFRAME_MESHES.quad, name: `${this.#name} sprite quad` });
     const radPx = radPerPx(camera, { widthPx: size.widthPx, heightPx: size.heightPx });
-    const kernel = bloomKernel(setting, role, radPx, DEFAULT_EYE_OBSERVER);
-    const making = BloomChain.create(engine, this.#name, size, kernel);
+    const making = BloomChain.create(
+      engine,
+      this.#name,
+      size,
+      bloomKernel(setting, role, radPx, DEFAULT_EYE_OBSERVER),
+    );
     let tonemap: MaterialHandle;
     let sprite: MaterialHandle;
+    let kernel: ComputeHandle;
     try {
-      [tonemap, sprite] = await Promise.all([
+      [tonemap, sprite, kernel] = await Promise.all([
         engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
         engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
+        engine.createComputeAsync(HISTOGRAM_KERNEL),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it.
@@ -238,6 +256,11 @@ export class PhotorealRenderer {
       tonemap,
       triangle,
       blueNoise,
+      histograms: new HistogramReader(engine, kernel, this.#name, (histogram) => {
+        if (generation === this.#generation) {
+          this.#histogram = histogram;
+        }
+      }),
       glare: this.#glareBuffer(GLARE_CAPACITY),
       glareCapacity: GLARE_CAPACITY,
       stars: this.#spriteBuffer(MIN_SPRITE_BYTES),
@@ -362,6 +385,13 @@ export class PhotorealRenderer {
       postProcesses: [],
       colourLoad: "load",
     });
+    resources.histograms.measure({
+      hdrColour: resources.target.colour,
+      size: resources.size,
+      mode: frame.meter,
+      stride: frame.setting === "low" ? 2 : 1,
+      preExposure: frame.exposureScale,
+    });
     // The pre-exposure is this frame's own exposure, so the pass's exposure over it is 1.
     const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);
     resources.bloom.run(resources.target.colour, threshold);
@@ -408,6 +438,16 @@ export class PhotorealRenderer {
     return plan;
   }
 
+  /**
+   * The latest histogram read back since the last call, for the view's `AutoExposure`, or
+   * `undefined` where none has arrived.
+   */
+  takeHistogram(): Histogram | undefined {
+    const histogram = this.#histogram;
+    this.#histogram = undefined;
+    return histogram;
+  }
+
   /** Stops following restores and releases the view's targets, buffers and textures. */
   dispose(): void {
     this.#disposed = true;
@@ -415,6 +455,7 @@ export class PhotorealRenderer {
     this.#bodies.dispose();
     const resources = this.#resources;
     if (resources !== null) {
+      resources.histograms.dispose();
       resources.target.dispose();
       resources.bloom.dispose();
       this.#engine.releaseBuffer(resources.glare);

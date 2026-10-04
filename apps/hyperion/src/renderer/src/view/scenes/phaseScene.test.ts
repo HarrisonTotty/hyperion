@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
-import { phaseFactorTableOf } from "../appearance/law";
 import { compositeDiscPixels, rasteriseDisc, viewRay } from "../bodies/discShading";
 import { planLitBodies } from "../bodies/draw";
 import { lookAlong } from "../camera/quaternion";
@@ -80,9 +79,7 @@ function drawPlanet(index: number) {
   if (record === undefined) {
     throw new Error("the planet is not a disc");
   }
-  const row = compositeDiscPixels(
-    rasteriseDisc(record, phaseFactorTableOf(record.law), camera, VIEWPORT),
-  )
+  const row = compositeDiscPixels(rasteriseDisc(record, camera, VIEWPORT))
     .filter((p) => p.yPx === ROW_PX)
     .toSorted((a, b) => a.xPx - b.xPx);
 

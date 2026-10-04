@@ -347,7 +347,7 @@ describe("the style", () => {
 
   it("states the lighting and the bodies' labels in the photorealistic style only", () => {
     const run = startRun(phaseScene());
-    const albedo = ["BODY ALBEDO: NOT YET MODELLED"] as const;
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
     expect(photorealStatements(run, "hosts-not-received", "wireframe", albedo)).toEqual([]);
     const photoreal = done(commandRun(run, { kind: "style", style: "toggle" }, CUT, BOTH));
     expect(photorealStatements(photoreal, "lit", "photorealistic", albedo)).toEqual(albedo);
@@ -356,7 +356,7 @@ describe("the style", () => {
       ...albedo,
     ]);
     expect(photorealStatements(photoreal, "hosts-not-received", "photorealistic", [])).toEqual([
-      "LIGHTING: HOSTS NOT RECEIVED",
+      "LIGHTING: STAR DISCS NOT RECEIVED",
     ]);
   });
 
@@ -365,7 +365,7 @@ describe("the style", () => {
       commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
     );
     expect(photorealStatements(photoreal, "lit", "wireframe", [])).toEqual([
-      "PHOTOREALISTIC PENDING",
+      "PHOTOREALISTIC: PREPARING",
     ]);
   });
 });

@@ -1,4 +1,4 @@
-# generator_version = 19
+# generator_version = 20
 # KeplerOrbit::propagate about the central black hole (plan 09, P09.T28.a).
 # Per case and time: position (ly) and velocity (m/s) on the galactic axes.
 # case[00]: near-circular at 1 ly

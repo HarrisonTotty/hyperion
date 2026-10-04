@@ -28,6 +28,7 @@ import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem, FrameSubmission } from "../../view/engine/types";
 import { hostLights, placeLights, sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { PhotorealFrame } from "../../view/photoreal/renderer";
+import type { MeterMode } from "../../view/post/meter";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
@@ -62,6 +63,8 @@ export interface PhotorealInputs {
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /** The symbology's canvas pass, or `null`. */
   readonly overlay: FrameSubmission | null;
+  /** The operator's meter. */
+  readonly meter: MeterMode;
 }
 
 /** A wireframe sprite as a record at infinity. */
@@ -76,7 +79,7 @@ function starRecord(sprite: WireframeDrawList["sprites"][number]): SpriteRecord 
 const SCENE_BODY_APPEARANCE: {
   readonly photometry: BodyPhotometry;
   readonly labels: ReadonlyArray<AppearanceLabel>;
-} = { photometry: PROVISIONAL_PHOTOMETRY, labels: ["BODY ALBEDO: NOT YET MODELLED"] };
+} = { photometry: PROVISIONAL_PHOTOMETRY, labels: ["BODY PHOTOMETRY: NOT YET MODELLED"] };
 
 /** The appearance labels of the bodies a scene's photorealistic frame lights, each once. */
 export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
@@ -164,5 +167,6 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     bodies: litBodiesOf(scene, pose),
     previousRegimes: inputs.previousRegimes,
     overlay: inputs.overlay,
+    meter: inputs.meter,
   };
 }

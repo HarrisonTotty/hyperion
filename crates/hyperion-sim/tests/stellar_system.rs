@@ -9,6 +9,7 @@ use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, gener
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::stellar::Phase;
+use hyperion_sim::stellar::binary::SegmentKind;
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::multiplicity::{
     MAX_COMPANIONS, MultiplicityContext, MultiplicityModel, RedrawAttempt, StarSlot,
@@ -607,18 +608,103 @@ fn a_hundred_thousand_systems_live_and_die_in_order() {
     check_life_and_death(0x0629_b000_0000_0002, 100_000);
 }
 
-/// Regression (found by rendering plan R06.T5.c): a held bare core with nothing to eject, an early
-/// AGB core of 4.88 M☉ beside a 12.65 M☉ main-sequence companion at 15.9 Myr, used to pass from
-/// the common envelope to the merger and back without end (ruling 129.4c's guard), overflowing the
-/// stack. The pair now merges, and the system's four stars are there at the epoch.
+/// Regression (found by rendering plan R06.T5.c), then P11.T4.g: record 0x81fd865fd000000f of
+/// seed `0x0926_0000` (15.05 + 12.65 M☉, bulge, layer E). A common envelope strips the primary to a
+/// 4.93 M☉ helium star at 15.457 Myr, and from 15.688 Myr the main-sequence star feeds it. Its
+/// held state was once an early-AGB supergiant of 1,054 R☉ with no envelope (M = Mc), which
+/// touched its companion and recursed through the common envelope and the merger. Now a star with
+/// no envelope is a helium star from that step (HPT section 6; BSE `hrdiag`): the primary stays
+/// compact (under 3 R☉) to its pinned collapse at 15.896 Myr, no living hydrogen giant has
+/// M ≤ Mc, and the pair meets no common envelope, contact or merger after 15.69 Myr. Between
+/// 15.69 Myr and the collapse `swell` (BSE's rule for a helium star fed hydrogen) still makes the
+/// accretor a core-helium-burning giant with a thin envelope again and again, each stripped back
+/// at once: `swell`'s core is the open finding of P11.T4.g, outside it.
 #[test]
-fn a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing() {
+fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
         .expect("the Milky Way-like parameters are valid");
     let id = hyperion_sim::id::SystemId::from_raw(0x81fd_865f_d000_000f).expect("a grid ID");
     let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
     let stars = SystemStars::generate(&galaxy, &record);
     assert_eq!(stars.star_count(), 4);
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|pair| {
+            let first = pair.timeline().state_at(Years::new(1.0e7));
+            (first.stars()[0].mass().value() - 15.0).abs() < 0.1
+        })
+        .expect("the 15 M☉ pair");
+    let timeline = pair.timeline();
+    let collapse = timeline
+        .supernovae()
+        .first()
+        .expect("the primary's collapse")
+        .age()
+        .value();
+    assert!((collapse / 15.896e6 - 1.0).abs() < 1e-4, "{collapse}");
+    let helium_from = 15.457e6;
+    let giant = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::HertzsprungGap
+                | Phase::FirstGiantBranch
+                | Phase::CoreHeliumBurning
+                | Phase::EarlyAgb
+                | Phase::ThermallyPulsingAgb
+        )
+    };
+    let mut checked = 0;
+    for segment in timeline.segments() {
+        let (from, to) = (segment.start().value(), segment.end().value());
+        if from > 15.69e6 && from < collapse {
+            assert!(
+                matches!(
+                    segment.kind(),
+                    SegmentKind::Detached | SegmentKind::StableTransfer { .. }
+                ),
+                "{:?} at {from} yr",
+                segment.kind()
+            );
+        }
+        for k in 0..=4_u32 {
+            let t = from + (to - from) * f64::from(k) / 4.0;
+            if !(helium_from..collapse).contains(&t) {
+                continue;
+            }
+            let primary = timeline.state_at(Years::new(t)).stars()[0];
+            assert!(
+                primary.radius().value() < 3.0,
+                "{:?} of {} R☉ at {t} yr",
+                primary.phase(),
+                primary.radius().value()
+            );
+            if giant(primary.phase()) {
+                assert_eq!(primary.phase(), Phase::CoreHeliumBurning, "at {t} yr");
+                // At the segment's start, a step; inside a step the core may outgrow the mass
+                // until the next one strips it.
+                if k == 0 {
+                    assert!(
+                        primary.mass().value() > primary.core_mass().value(),
+                        "at {t} yr"
+                    );
+                }
+            } else {
+                assert!(
+                    matches!(
+                        primary.phase(),
+                        Phase::HeliumMainSequence
+                            | Phase::HeliumHertzsprungGap
+                            | Phase::HeliumGiantBranch
+                    ),
+                    "{:?} at {t} yr",
+                    primary.phase()
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
     let state = stars
         .state_at(UniverseTime::EPOCH)
         .expect("the system exists");
@@ -633,5 +719,5 @@ fn a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing() {
         w.f64(&format!("[{k}] luminosity"), star.luminosity().value());
         w.f64(&format!("[{k}] radius"), star.radius().value());
     }
-    golden!("stellar/held_bare_core_merger", w.as_str());
+    golden!("stellar/held_bare_core_helium_star", w.as_str());
 }

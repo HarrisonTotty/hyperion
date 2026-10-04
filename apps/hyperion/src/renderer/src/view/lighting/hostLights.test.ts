@@ -43,11 +43,11 @@ describe("sceneHostDiscs", () => {
 });
 
 describe("the lighting statement", () => {
-  it("says nothing when lit, PENDING while the sky is asked, HOSTS NOT RECEIVED otherwise", () => {
+  it("says nothing when lit, PENDING while the sky is asked, STAR DISCS NOT RECEIVED otherwise", () => {
     const lit = hostLights(phase, phase.hostDiscs ?? []);
     expect(lightingStatement(lightingState(lit, true))).toBeNull();
     expect(lightingStatement(lightingState([], true))).toBe("LIGHTING: PENDING");
-    expect(lightingStatement(lightingState([], false))).toBe("LIGHTING: HOSTS NOT RECEIVED");
+    expect(lightingStatement(lightingState([], false))).toBe("LIGHTING: STAR DISCS NOT RECEIVED");
   });
 });
 
