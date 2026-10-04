@@ -9,23 +9,29 @@
 //! level asked for.
 
 use hyperion_protocol::{
-    ArchitectureClassDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto,
-    BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyGrantDto, BodyHooksDto, BodyIdHex,
-    BodyKindDto, BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
-    BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto, ErrorCode,
-    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto, PlanetClassDto,
-    PopulationDto, RequestError, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto,
-    SceneSystemDto, SectionDto, SeenPositionDto, SystemBodiesDto, SystemBodiesRequest,
-    SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, ZoneDto,
+    ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto,
+    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyGrantDto,
+    BodyHooksDto, BodyIdHex, BodyKindDto, BodyOrbitDto, BodyPhotometryDto, BodyRecordDto,
+    BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto, BulkPropertiesDto,
+    CometaryHaloDto, DestructionCauseDto, DetailLevelDto, ErrorCode, FigureDatumDto, FigureLawDto,
+    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto,
+    PhaseTemplateDto, PlanetClassDto, PopulationDto, RequestError, RingDto, RingGapDto,
+    RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto, SeenPositionDto,
+    SpinResonanceDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
+    SystemSummaryRequest, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
 use hyperion_sim::planetary::belts::{BeltComposition, BeltSite};
+use hyperion_sim::planetary::derive::figure::{BodyFigure, Datum, FigureLaw};
+use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry, PhaseTemplate};
+use hyperion_sim::planetary::derive::rotation::SpinOrbitResonance;
 use hyperion_sim::planetary::derive::{HabitableZone, PlanetClass};
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
+use hyperion_sim::planetary::frames::BodyFixedFrame;
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
@@ -37,7 +43,7 @@ use hyperion_sim::planetary::{
     BodyIndex, BodySub, PlanetarySystem, ResolveBodyError, SystemContext,
 };
 use hyperion_sim::time::{ClockWindow, UniverseTime};
-use hyperion_sim::units::{Kelvin, Kilograms, Metres};
+use hyperion_sim::units::{Kelvin, Kilograms, Metres, Seconds};
 
 use super::query_time;
 use super::stellar::{orbit_dto, unknown_system, wire_time};
@@ -593,6 +599,9 @@ fn body_summary(record: &BodyRecord) -> BodySummaryDto {
         rings: full.rings,
         population: full.population,
         bulk: full.bulk,
+        rotation: full.rotation,
+        figure: full.figure,
+        photometry: full.photometry,
     }
 }
 
@@ -625,6 +634,9 @@ fn body_record(record: &BodyRecord) -> BodyRecordDto {
             population_dto(system, population)
         }),
         bulk: section(record.bulk(), bulk),
+        rotation: Some(section(record.rotation(), rotation)),
+        figure: Some(section(record.figure(), figure)),
+        photometry: Some(section(record.photometry(), photometry)),
         surface: section(record.surface(), |&value| surface(value)),
         hooks: section(record.hooks(), |&value| hooks(value)),
     }
@@ -765,6 +777,94 @@ fn bulk(bulk: &BulkProperties) -> BulkPropertiesDto {
         },
         equilibrium_temperature_k: bulk.equilibrium_temperature().value(),
         effective_temperature_k: bulk.effective_temperature().map(Kelvin::value),
+    }
+}
+
+/// A body's frame and rotation law as the wire carries them, every parameter of `W(t)`
+/// ([`RotationLawParts`](hyperion_sim::planetary::derive::rotation::RotationLawParts)).
+#[must_use]
+fn rotation(frame: &BodyFixedFrame) -> BodyRotationDto {
+    let law = frame.rate().parts();
+    BodyRotationDto {
+        pole: frame.pole(),
+        equator_node: frame.equator_node(),
+        equator_quarter: frame.equator_quarter(),
+        obliquity_rad: frame.obliquity().value(),
+        initial_rate_rad_s: law.initial_rate,
+        locked_rate_rad_s: law.locked_rate,
+        age_at_epoch_s: law.age_at_epoch.value(),
+        locking_age_s: law.locking_age.map(Seconds::value),
+        locks_at: law.locks_at.map(wire_time),
+        resonance: match law.resonance {
+            SpinOrbitResonance::Synchronous => SpinResonanceDto::Synchronous,
+            SpinOrbitResonance::ThreeToTwo => SpinResonanceDto::ThreeToTwo,
+        },
+        clock_period_s: law.clock_period.value(),
+        clock_mean_anomaly_at_epoch_rad: law.clock_mean_anomaly_at_epoch.value(),
+        sub_primary_angle_rad: law.sub_primary_angle.value(),
+        phase_at_epoch_rad: law.phase_at_epoch.value(),
+        capture_phase_rad: law.capture_phase.value(),
+    }
+}
+
+/// A body's figure as the wire carries it, in metres.
+#[must_use]
+fn figure(figure: &BodyFigure) -> BodyFigureDto {
+    let spheroid = figure.spheroid();
+    BodyFigureDto {
+        equatorial_radius_m: spheroid.equatorial_radius_m,
+        polar_radius_m: spheroid.polar_radius_m,
+        flattening: spheroid.flattening(),
+        pole: figure.pole(),
+        moment_of_inertia_factor: figure.moment_factor(),
+        law: match figure.law() {
+            FigureLaw::Sphere => FigureLawDto::Sphere,
+            FigureLaw::Rotational => FigureLawDto::Rotational,
+            FigureLaw::RotationalAndTidal => FigureLawDto::RotationalAndTidal,
+            FigureLaw::Capped => FigureLawDto::Capped,
+        },
+        datum: match figure.datum() {
+            Datum::SolidSurface => FigureDatumDto::SolidSurface,
+            Datum::OneBar => FigureDatumDto::OneBar,
+        },
+    }
+}
+
+/// A body's photometry as the wire carries it.
+#[must_use]
+fn photometry(photometry: &BodyPhotometry) -> BodyPhotometryDto {
+    let bands = |bands: Bands| BandsDto {
+        b: bands.b,
+        v: bands.v,
+        r: bands.r,
+    };
+    BodyPhotometryDto {
+        geometric_albedo: bands(photometry.geometric_albedo()),
+        phase_template: phase_template(photometry.template()),
+        phase_exponent: bands(photometry.exponents()),
+        lunar_lambert_share: photometry.lunar_lambert_share(),
+        bond_albedo: photometry.bond_albedo().value(),
+        bond_ratio: photometry.bond_ratio(),
+        provisional: photometry.provisional(),
+    }
+}
+
+/// A phase-curve template, as the wire names it.
+#[must_use]
+fn phase_template(template: PhaseTemplate) -> PhaseTemplateDto {
+    match template {
+        PhaseTemplate::Moon => PhaseTemplateDto::Moon,
+        PhaseTemplate::Mercury => PhaseTemplateDto::Mercury,
+        PhaseTemplate::Mars => PhaseTemplateDto::Mars,
+        PhaseTemplate::Venus => PhaseTemplateDto::Venus,
+        PhaseTemplate::Earth => PhaseTemplateDto::Earth,
+        PhaseTemplate::Jupiter => PhaseTemplateDto::Jupiter,
+        PhaseTemplate::Saturn => PhaseTemplateDto::Saturn,
+        PhaseTemplate::Uranus => PhaseTemplateDto::Uranus,
+        PhaseTemplate::Neptune => PhaseTemplateDto::Neptune,
+        PhaseTemplate::AirlessIce => PhaseTemplateDto::AirlessIce,
+        PhaseTemplate::Snowball => PhaseTemplateDto::Snowball,
+        PhaseTemplate::Magma => PhaseTemplateDto::Magma,
     }
 }
 

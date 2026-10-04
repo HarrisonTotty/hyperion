@@ -580,6 +580,7 @@ fn check_invariants(input: &BinaryInput, until: Years) {
     }
     check_detached_widening(&timeline, &what);
     check_no_repeated_instants(&timeline, &what);
+    check_no_bare_giant(&timeline, &what);
     // Ruling 108.1: no contact pair lives below Rasio's (1995) mass ratio.
     for segment in timeline.segments() {
         if segment.kind() == SegmentKind::Contact {
@@ -609,6 +610,93 @@ fn check_invariants(input: &BinaryInput, until: Years) {
             what()
         );
         last = (total, age);
+    }
+}
+
+/// P11.T4.g: a star the binary carries with no envelope is a naked helium star or a white dwarf
+/// (HPT section 6; BSE `hrdiag`). At each segment's start and at every step inside it (the
+/// knots of a carried star's mass), no living star the binary carries in a hydrogen giant phase
+/// (HG to TPAGB) has M ≤ Mc, the engine's own test. The ruling's margin of 10⁻⁹ M☉ is not kept: a donor's wind or
+/// transfer can leave an envelope of 10⁻¹² M☉ at a step, which is not yet none. Between two steps
+/// the core may outgrow the mass, as in BSE, whose `hrdiag` acts at the next step. Every held
+/// (`Frozen`) member's core radius is no larger than its radius, and is one of sse's: zero,
+/// `R_ZHe(Mc)` or 5 `R_WD(Mc)`, each held to R (the core-helium-burning rule's τ is not kept on a held
+/// state).
+fn check_no_bare_giant(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
+    use crate::stellar::Phase;
+    use crate::stellar::remnant::RemnantRecipe;
+    use crate::stellar::remnant::structure::white_dwarf_radius;
+
+    let giant = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::HertzsprungGap
+                | Phase::FirstGiantBranch
+                | Phase::CoreHeliumBurning
+                | Phase::EarlyAgb
+                | Phase::ThermallyPulsingAgb
+        )
+    };
+    let until = timeline.until().value();
+    for segment in timeline.segments() {
+        let (start, end) = (segment.start().value(), segment.end().value().min(until));
+        let knots = segment.members().iter().flat_map(|member| match member {
+            super::star::Member::Shaped { mass, .. } => mass.knots(),
+            _ => &[],
+        });
+        let ages = core::iter::once(start).chain(
+            knots
+                .map(|knot| knot[0])
+                .filter(|&age| start <= age && age < end),
+        );
+        for t in ages {
+            let state = timeline.state_at(Years::new(t));
+            for (star, member) in state.stars().iter().zip(segment.members()) {
+                // A star on its own single-star track is plan 06's, whose last instant on the
+                // thermally pulsing AGB has M = Mc: only a star the binary carries is checked.
+                let carried = matches!(member, super::star::Member::Shaped { .. });
+                if carried && giant(star.phase()) {
+                    assert!(
+                        star.mass().value() > star.core_mass().value(),
+                        "a {:?} star of {} M☉ with a {} M☉ core at {t} yr: {}",
+                        star.phase(),
+                        star.mass().value(),
+                        star.core_mass().value(),
+                        what()
+                    );
+                }
+            }
+        }
+        for member in segment.members() {
+            let super::star::Member::Frozen { state, core_radius } = member else {
+                continue;
+            };
+            let (r, rc, mc) = (
+                state.radius().value(),
+                core_radius.value(),
+                state.core_mass().value(),
+            );
+            assert!(
+                rc <= r,
+                "a held core of {rc} R☉ in a star of {r} R☉: {}",
+                what()
+            );
+            if state.phase() == Phase::CoreHeliumBurning || mc <= 0.0 {
+                continue;
+            }
+            let candidates = [
+                0.0,
+                crate::stellar::sse::helium_zams_radius(mc).min(r),
+                (5.0 * white_dwarf_radius(RemnantRecipe::default(), SolarMasses::new(mc)).value())
+                    .min(r),
+            ];
+            assert!(
+                candidates.iter().any(|c| c.total_cmp(&rc).is_eq()),
+                "a held {:?} star's core radius {rc} R☉ is none of sse's {candidates:?}: {}",
+                state.phase(),
+                what()
+            );
+        }
     }
 }
 
@@ -1295,4 +1383,69 @@ fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
         "left at {left} yr: {}",
         describe(&timeline)
     );
+}
+
+/// P11.T4.g: a star the binary carries that has no envelope left on the step that lands on its
+/// phase boundary is stripped first (BSE's `hrdiag` before `evolv2`), not taken through the
+/// boundary: a 5 M☉ star carried at 10⁻⁷ M☉ above its core 10 yr before the end of its
+/// Hertzsprung gap, whose core grows by 4 × 10⁻⁷ M☉ in those 10 yr while its wind takes
+/// 10⁻¹⁰ M☉, leaves the step that lands on the boundary as a naked helium star, marked stripped.
+#[test]
+fn a_bare_star_at_its_phase_boundary_is_stripped_first() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+    use crate::stellar::sse::Track;
+
+    let input = pair(5.0, 1.0, 1.0e5, 0.0, 0.02);
+    let ctx = Arc::new(Context::of(&input));
+    let track = Arc::new(Track::full(
+        SolarMasses::new(5.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    ));
+    let gap = track
+        .age_in_phase(Phase::HertzsprungGap, 0.5)
+        .expect("a 5 M☉ star crosses the gap");
+    let (_, end) = track.phase_span(gap);
+    let t = end - 10.0;
+    let core = track.structure_at(t, 5.0).state.core_mass().value();
+    let core_at_end = track
+        .structure_at(end * (1.0 - 1e-15), 5.0)
+        .state
+        .core_mass()
+        .value();
+    assert!(
+        core_at_end > core + 1e-7,
+        "the core grows past the mass in the step"
+    );
+    let companion = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(t, 1.0),
+        tau: Path::starting(t, 0.1),
+    };
+    let bare = Member::Shaped {
+        track: Arc::clone(&track),
+        offset: 0.0,
+        mass: Path::starting(t, core + 1e-7),
+    };
+    let k = input.orbit();
+    let mut engine = Engine::new(
+        Arc::clone(&ctx),
+        t,
+        1.0e10,
+        [bare, companion],
+        LiveOrbit::new(t, 1.0e5, 0.0, *k.orientation(), k.mean_anomaly_at_epoch()),
+        None,
+    );
+    engine.detached_phase();
+    assert!(engine.stripped[0], "{}", engine.members[0].form());
+    let (m, tau) = engine.current(0);
+    let state = engine
+        .structure(0, engine.age, m, tau)
+        .expect("a helium star")
+        .state;
+    assert_eq!(state.phase(), Phase::HeliumMainSequence, "{state:?}");
 }

@@ -30,13 +30,16 @@ use hyperion_sim::planetary::architecture::{
     ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
     first_period_share,
 };
+use hyperion_sim::planetary::derive::figure::BodyFigure;
 use hyperion_sim::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
+use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry};
 use hyperion_sim::planetary::derive::{
     OrbitSense, hill_radius, maximum_surviving_moon_mass, roche_limit_fluid, roche_limit_rigid,
     satellite_stability_limit,
 };
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
+use hyperion_sim::planetary::frames::BodyFixedFrame;
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
     Neighbour, PlacedPlanet, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
@@ -1106,6 +1109,94 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
     }
     write_section_state(w, "surface", record.surface());
     write_section_state(w, "hooks", record.hooks());
+    // P14.T46.f and T47.d: the frame, the figure and the photometry the wire carries, after every
+    // older line, so that the older lines keep their keys.
+    match record.rotation() {
+        Section::Ok(frame) => write_rotation(w, frame),
+        other => write_section_state(w, "rotation", other),
+    }
+    match record.figure() {
+        Section::Ok(figure) => write_figure(w, figure),
+        other => write_section_state(w, "figure", other),
+    }
+    match record.photometry() {
+        Section::Ok(photometry) => write_photometry(w, photometry),
+        other => write_section_state(w, "photometry", other),
+    }
+}
+
+/// A unit vector's components, labelled `name_x` to `name_z`.
+fn write_vector(w: &mut GoldenWriter, name: &str, v: [f64; 3]) {
+    for (axis, x) in ["x", "y", "z"].into_iter().zip(v) {
+        w.f64(&format!("{name}_{axis}"), x);
+    }
+}
+
+/// A body's frame and every parameter of its rotation law (P14.T46.f), and W at the epoch and at
+/// ±H.
+fn write_rotation(w: &mut GoldenWriter, frame: &BodyFixedFrame) {
+    let law = frame.rate().parts();
+    w.line(&format!(
+        "rotation: {:?}, locks at {:?}",
+        law.resonance, law.locks_at
+    ));
+    write_vector(w, "pole", frame.pole());
+    write_vector(w, "equator_node", frame.equator_node());
+    write_vector(w, "equator_quarter", frame.equator_quarter());
+    w.f64("obliquity_rad", frame.obliquity().value());
+    w.f64("initial_rate_rad_s", law.initial_rate);
+    w.f64("locked_rate_rad_s", law.locked_rate);
+    w.f64("age_at_epoch_s", law.age_at_epoch.value());
+    w.f64(
+        "locking_age_s",
+        law.locking_age.map_or(f64::INFINITY, Seconds::value),
+    );
+    w.f64("clock_period_s", law.clock_period.value());
+    w.f64(
+        "clock_mean_anomaly_at_epoch_rad",
+        law.clock_mean_anomaly_at_epoch.value(),
+    );
+    w.f64("sub_primary_angle_rad", law.sub_primary_angle.value());
+    w.f64("phase_at_epoch_rad", law.phase_at_epoch.value());
+    w.f64("capture_phase_rad", law.capture_phase.value());
+    for (label, t) in [
+        ("w_start_rad", ClockWindow::START),
+        ("w_epoch_rad", UniverseTime::EPOCH),
+        ("w_end_rad", ClockWindow::END),
+    ] {
+        w.f64(label, frame.rate().angle_at(t).value());
+    }
+}
+
+/// A body's figure (P14.T46.d–f).
+fn write_figure(w: &mut GoldenWriter, figure: &BodyFigure) {
+    w.line(&format!("figure: {:?}, {:?}", figure.law(), figure.datum()));
+    let spheroid = figure.spheroid();
+    w.f64("equatorial_radius_m", spheroid.equatorial_radius_m);
+    w.f64("polar_radius_m", spheroid.polar_radius_m);
+    w.f64("flattening", spheroid.flattening());
+    write_vector(w, "figure_pole", figure.pole());
+    w.f64("moment_of_inertia_factor", figure.moment_factor());
+}
+
+/// A body's photometry (P14.T47.c–d).
+fn write_photometry(w: &mut GoldenWriter, photometry: &BodyPhotometry) {
+    w.line(&format!(
+        "photometry: {:?}, provisional {}",
+        photometry.template(),
+        photometry.provisional()
+    ));
+    let bands = |w: &mut GoldenWriter, name: &str, bands: Bands| {
+        w.f64(&format!("{name}_b"), bands.b);
+        w.f64(&format!("{name}_v"), bands.v);
+        w.f64(&format!("{name}_r"), bands.r);
+    };
+    bands(w, "geometric_albedo", photometry.geometric_albedo());
+    bands(w, "phase_exponent", photometry.exponents());
+    bands(w, "phase_integral", photometry.phase_integral());
+    w.f64("lunar_lambert_share", photometry.lunar_lambert_share());
+    w.f64("bond_albedo", photometry.bond_albedo().value());
+    w.f64("bond_ratio", photometry.bond_ratio());
 }
 
 fn write_snapshot(w: &mut GoldenWriter, name: &str, snapshot: &SystemSnapshot) {

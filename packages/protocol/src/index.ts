@@ -31,6 +31,14 @@ import type { BodyStateDto } from "./generated/BodyStateDto";
 import type { BodySummaryDto } from "./generated/BodySummaryDto";
 import type { BodySurfaceDto } from "./generated/BodySurfaceDto";
 import type { BulkPropertiesDto } from "./generated/BulkPropertiesDto";
+import type { BandsDto } from "./generated/BandsDto";
+import type { BodyFigureDto } from "./generated/BodyFigureDto";
+import type { BodyPhotometryDto } from "./generated/BodyPhotometryDto";
+import type { BodyRotationDto } from "./generated/BodyRotationDto";
+import type { FigureDatumDto } from "./generated/FigureDatumDto";
+import type { FigureLawDto } from "./generated/FigureLawDto";
+import type { PhaseTemplateDto } from "./generated/PhaseTemplateDto";
+import type { SpinResonanceDto } from "./generated/SpinResonanceDto";
 import type { Census } from "./generated/Census";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { CreateUniverseRequest } from "./generated/CreateUniverseRequest";
@@ -168,6 +176,14 @@ export type {
   BodySummaryDto,
   BodySurfaceDto,
   BulkPropertiesDto,
+  BandsDto,
+  BodyFigureDto,
+  BodyPhotometryDto,
+  BodyRotationDto,
+  FigureDatumDto,
+  FigureLawDto,
+  PhaseTemplateDto,
+  SpinResonanceDto,
   CataclysmicKindDto,
   Census,
   ClientMessage,

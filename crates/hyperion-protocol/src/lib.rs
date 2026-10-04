@@ -62,13 +62,15 @@ pub use galaxy::{
 pub use modelled::Modelled;
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
 pub use planetary::{
-    ArchitectureClassDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto,
-    BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest,
-    BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto,
-    BodySurfaceDto, BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto,
-    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto, PlanetClassDto,
-    PopulationDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SectionDto, SystemBodiesDto,
-    SystemBodiesRequest, SystemPlaneDto, ZoneDto,
+    ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto,
+    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEventDto, BodyEventsDto,
+    BodyEventsRequest, BodyFigureDto, BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyPhotometryDto,
+    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
+    BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto, FigureDatumDto,
+    FigureLawDto, HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto,
+    PhaseTemplateDto, PlanetClassDto, PopulationDto, RingDto, RingGapDto, RingKindDto,
+    RingMaterialDto, SectionDto, SpinResonanceDto, SystemBodiesDto, SystemBodiesRequest,
+    SystemPlaneDto, ZoneDto,
 };
 pub use primitives::{
     BodyIdHex, DetailSeedHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex,
