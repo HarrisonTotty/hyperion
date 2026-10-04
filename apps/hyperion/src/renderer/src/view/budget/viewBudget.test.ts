@@ -47,9 +47,11 @@ describe("photorealisticAllowed", () => {
     const views = [primary("photorealistic"), instrument(LEFT)];
     expect(photorealisticAllowed(views, "low", LEFT)).toEqual({
       allowed: false,
-      reason: "ONE PHOTOREALISTIC VIEW ON LOW SETTING",
+      reason: "NOT AVAILABLE: QUALITY LOW allows one photorealistic view",
     });
-    expect(ONE_PHOTOREALISTIC_VIEW).toBe("ONE PHOTOREALISTIC VIEW ON LOW SETTING");
+    expect(ONE_PHOTOREALISTIC_VIEW).toBe(
+      "NOT AVAILABLE: QUALITY LOW allows one photorealistic view",
+    );
   });
 
   it("allows the view that holds the low setting's one photorealistic view", () => {

@@ -81,8 +81,11 @@ export const INSTRUMENT_RATE_HZ = 30;
  */
 export const WIREFRAME_PRIMARY_RATE_HZ = 60;
 
-/** Why a view's photorealistic style is held back on the low setting (the guide's row, T16). */
-export const ONE_PHOTOREALISTIC_VIEW = "ONE PHOTOREALISTIC VIEW ON LOW SETTING";
+/**
+ * Why a view's photorealistic style is held back on the low setting (the guide's `NOT AVAILABLE`
+ * form).
+ */
+export const ONE_PHOTOREALISTIC_VIEW = "NOT AVAILABLE: QUALITY LOW allows one photorealistic view";
 
 /** Whether a view may be photorealistic, and the reason where it may not. */
 export type PhotorealisticPermission =
