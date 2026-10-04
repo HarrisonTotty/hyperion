@@ -2,14 +2,17 @@
  * Fixtures for the lit-body tests of plan R07: the Solar System's measured photometry.
  *
  * @remarks
- * R07.T4.a builds {@link SOLAR_SYSTEM_PHOTOMETRY}; R07.T3 adds `aHostDisc` and R07.T5 `aLitBody`.
+ * R07.T4.a builds {@link SOLAR_SYSTEM_PHOTOMETRY}; R07.T3 adds `aHostDisc`, R07.T5 `aLitBody`, and
+ * R07.T11 {@link photometryFor}, {@link planetPhotometry} and the Moon's albedo.
  */
 import type { HostDiscDto } from "@hyperion/protocol";
 
 import type { BodyAppearance } from "../view/appearance/bodyAppearance";
-import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
+import { type BodyPhotometry, PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import type { PhaseTemplateId } from "../view/appearance/law";
+import { lawFor } from "../view/appearance/phase";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
+import type { Rgb } from "../view/photometry/toneCurve";
 
 export { SUN_ABSOLUTE_V, SUN_RADIUS_M } from "../view/lighting/hostDisc";
 
@@ -186,3 +189,42 @@ export function aLitBody(overrides: Partial<BodyAppearance> = {}): BodyAppearanc
     ...overrides,
   };
 }
+
+/**
+ * A body's photometry from p and q per display channel (r, g, b) and its template, as plan 14's
+ * section will carry it: the law `lawFor` solves, `modelled`.
+ */
+export function photometryFor(p: Rgb, q: Rgb, template: PhaseTemplateId): BodyPhotometry {
+  return {
+    geometricAlbedo: p,
+    phaseIntegral: q,
+    law: lawFor(p, q, template),
+    bondRatioCheck: null,
+    provenance: "modelled",
+  };
+}
+
+/**
+ * A planet's photometry from {@link SOLAR_SYSTEM_PHOTOMETRY}: its p in B, V and R as the display's
+ * b, g and r, its q_V in every channel, and its template.
+ *
+ * @throws Error if the table has no planet of that name.
+ */
+export function planetPhotometry(name: string): BodyPhotometry {
+  const planet = SOLAR_SYSTEM_PHOTOMETRY.find((each) => each.name === name);
+  if (planet === undefined) {
+    throw new Error(`no planet ${name} in SOLAR_SYSTEM_PHOTOMETRY`);
+  }
+  const { b, v, r } = planet.geometricAlbedo;
+  return photometryFor([r, v, b], [planet.qV, planet.qV, planet.qV], planet.template);
+}
+
+/**
+ * The Moon's visual geometric albedo, 0.12 (NASA GSFC, Moon Fact Sheet, D. R. Williams), in every
+ * channel. The sheet's full Moon, V = −12.74 among its mean values at opposition (−12.73 in
+ * Krisciunas and Schaefer 1991, PASP 103, 1033, eq. 9), taken at the mean distance of 384,400 km,
+ * is a V(1, 0) of +0.21 at 1 au (derived here, as Allen's), which gives p_V = 0.121 against the
+ * Sun's −26.76. Both leave out the opposition surge, about 35% at exactly full (Krisciunas and
+ * Schaefer 1991, p. 1035); the sheet's own V(1, 0) of −0.08 includes it.
+ */
+export const MOON_GEOMETRIC_ALBEDO = 0.12;

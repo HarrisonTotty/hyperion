@@ -13,6 +13,10 @@
  * from 45° latitude.
  */
 import { cross, dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { phaseFactorFromTable, phaseFactorTableOf, type PhotometricLaw } from "../appearance/law";
+import { discIntegratedPhase, geometricAlbedo } from "../appearance/phase";
+import type { Rgb } from "../photometry/toneCurve";
+import type { BodyFigure } from "../terrain/planet";
 
 /** Quadrature intervals in the polar angle and in azimuth. */
 const THETA_STEPS = 96;
@@ -161,4 +165,52 @@ function integrate(share: number, cOverA: number, s: Vec3, v: Vec3): number {
     }
   }
   return k;
+}
+
+/** The pole a body of unknown rotation is drawn about: a sphere needs none. */
+const DEFAULT_POLE = vec3(0, 0, 1);
+
+/** A figure's unit pole, or +z for a body whose rotation is not known (drawn as a sphere). */
+export function figurePole(figure: BodyFigure): Vec3 {
+  return figure.pole === null ? DEFAULT_POLE : normalise(figure.pole);
+}
+
+/**
+ * The light a body reflects towards a distant observer, per channel, over the illuminance on it
+ * and (a ÷ Δ)²: p Φ(α) for a sphere, and for a spheroid its law integrated over its figure,
+ * A′ f(α) K ÷ π (A′ the disc's scaled A, {@link oblateAlbedoScale}; K {@link
+ * spheroidGeometricIntegral}). The point regime's flux and planetshine's illuminance are
+ * E (a ÷ Δ)² times this.
+ *
+ * @param towardsStar - The unit direction from the body to the light.
+ * @param towardsObserver - The unit direction from the body to the observer.
+ */
+export function bodyReflection(
+  figure: BodyFigure,
+  law: PhotometricLaw,
+  towardsStar: Vec3,
+  towardsObserver: Vec3,
+): Rgb {
+  const { equatorialRadiusM: a, polarRadiusM: c } = figure;
+  const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towardsStar, towardsObserver))));
+  if (c >= a) {
+    const p = geometricAlbedo(law);
+    const phase = discIntegratedPhase(law, alpha);
+    return [p[0] * phase[0], p[1] * phase[1], p[2] * phase[2]];
+  }
+  const albedo = oblateAlbedoScale(law.lommelSeeligerShare, c / a);
+  const f = phaseFactorFromTable(phaseFactorTableOf(law), alpha);
+  const geometric =
+    spheroidGeometricIntegral(
+      law.lommelSeeligerShare,
+      c / a,
+      figurePole(figure),
+      towardsStar,
+      towardsObserver,
+    ) / Math.PI;
+  return [
+    law.a[0] * albedo * f[0] * geometric,
+    law.a[1] * albedo * f[1] * geometric,
+    law.a[2] * albedo * f[2] * geometric,
+  ];
 }

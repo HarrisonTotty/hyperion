@@ -1,9 +1,10 @@
-// The disc regime of a lit body (plan R07, T8.a and T8.b; Design notes 2, 6, 10, 19 and 24): one
-// screen rectangle the CPU bounds, each fragment's rays intersected with the body's spheroid and
-// shaded by `body_brdf`'s law under the horizon, eclipse, ring-shadow and atmosphere terms of
-// `litBody.wgsl`. The law is the disc's surface's (`DiscSurface`): one law, or under R10's class
-// map each class's law by its weight at the hit and the uniform law by what the weights leave.
-// Composed after frame.wgsl and litBody.wgsl. The TypeScript twin is `view/bodies/discShading.ts`.
+// The disc regime of a lit body (plan R07, T8.a, T8.b and T11; Design notes 2, 6, 7, 10, 19 and
+// 24): one screen rectangle the CPU bounds, each fragment's rays intersected with the body's
+// spheroid and shaded by `body_brdf`'s law under the horizon, eclipse, ring-shadow and atmosphere
+// terms of `litBody.wgsl`, and by the planetshine of up to two lit neighbours. The law is the
+// disc's surface's (`DiscSurface`): one law, or under R10's class map each class's law by its
+// weight at the hit and the uniform law by what the weights leave. Composed after frame.wgsl and
+// litBody.wgsl. The TypeScript twin is `view/bodies/discShading.ts`.
 //
 // Every length reaches the GPU already divided: the body's centre as a unit direction with its
 // radii over its distance D, and every light and occluder relative to the body's centre over its
@@ -41,7 +42,10 @@ struct Draw {
 //   22 + k, occluder k: its centre from the body's centre ÷ a; w, its radius ÷ a;
 //   24, 25  a class map's body-fixed x and y axes (z their cross product);
 //   26 + k, class k (law k + 1): its A per channel, scaled; w, its L;
-//   42 to 45  the classes' rows of `phase_factor_table`, four a row.
+//   42 to 45  the classes' rows of `phase_factor_table`, four a row;
+//   46  the planetshine sources (x);
+//   47 + 2j, source j: the neighbour's unit direction from the body's centre, w its distance ÷ a;
+//      its illuminance face-on at the body's centre per channel (lx), w its radius ÷ a.
 @group(2) @binding(0) var<storage, read> discs : array<vec4f>;
 
 // The phase factors of the frame's laws, one row each (`litBody.wgsl`).
@@ -52,15 +56,19 @@ struct Draw {
 // surface is uniform, unread.
 @group(2) @binding(2) var class_weights : texture_2d_array<f32>;
 
-const DISC_ROWS : u32 = 46u;
+const DISC_ROWS : u32 = 51u;
 const FIRST_LIGHT_ROW : u32 = 6u;
 const LIGHT_ROWS : u32 = 8u;
 const FIRST_OCCLUDER_ROW : u32 = 22u;
 const AXES_ROW : u32 = 24u;
 const FIRST_CLASS_ROW : u32 = 26u;
 const FIRST_CLASS_TABLE_ROW : u32 = 42u;
+const SECONDARY_COUNT_ROW : u32 = 46u;
+const FIRST_SECONDARY_ROW : u32 = 47u;
+const SECONDARY_ROWS : u32 = 2u;
 const MAX_DISC_LIGHTS : u32 = 2u;
 const MAX_DISC_OCCLUDERS : u32 = 2u;
+const MAX_DISC_SECONDARIES : u32 = 2u;
 // `MAX_DISC_CLASSES`, and the laws a disc shades with: law 0 and one per class.
 const MAX_DISC_CLASSES : u32 = 16u;
 const SURFACE_LAWS : u32 = 17u;
@@ -248,6 +256,30 @@ fn light_annuli(j : u32, c : u32, count : u32) -> DiscAnnuli {
   return annuli;
 }
 
+// The reflectance I/F of the surface's laws by their shares at a point lit by one source of
+// irradiance factor `h` (`lit_disc_term`), at phase `alpha`.
+fn surface_reflectance(
+  shares : array<f32, SURFACE_LAWS>,
+  laws : u32,
+  h : f32,
+  mu0 : f32,
+  mu : f32,
+  alpha : f32,
+  source_radius : f32,
+) -> vec3f {
+  var reflectance = vec3f(0.0);
+  for (var m = 0u; m < laws; m = m + 1u) {
+    let share = shares[m];
+    if (!(share > 0.0)) {
+      continue;
+    }
+    let law = surface_law(m);
+    let disc_term = lit_disc_term(law.l, h, mu0, mu, source_radius);
+    reflectance = reflectance + share * law.a * phase_factor(law.table_row, alpha) * disc_term;
+  }
+  return reflectance;
+}
+
 // The light a sample reflects towards the camera, and whether any star lights it directly.
 struct Shaded {
   radiance : vec3f,
@@ -297,21 +329,9 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     }
     let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
     let star_radius = asin(min(1.0, light.w / distance));
-    // `body_brdf` with the disc's μ₀ factor replaced by the horizon term, which equals μ₀ wherever
-    // the whole star is up and lights the soft band past the terminator; the Lommel–Seeliger
-    // term's μ₀ + μ floored at the star's angular radius, so that it stays bounded in that band.
-    // Each of the surface's laws by its share.
-    let ls_denominator = max(max(mu0, 0.0) + mu, star_radius);
-    var reflectance = vec3f(0.0);
-    for (var m = 0u; m < laws; m = m + 1u) {
-      let share = shares[m];
-      if (!(share > 0.0)) {
-        continue;
-      }
-      let law = surface_law(m);
-      let disc_term = law.l * 2.0 * horizon / ls_denominator + (1.0 - law.l) * horizon;
-      reflectance = reflectance + share * law.a * phase_factor(law.table_row, alpha) * disc_term;
-    }
+    // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each of
+    // the surface's laws by its share.
+    let reflectance = surface_reflectance(shares, laws, horizon, mu0, mu, alpha, star_radius);
     // The eclipse term, each occluder's hidden fraction added (`eclipseVisible`).
     var visible = vec3f(1.0);
     for (var k = 0u; k < occluders; k = k + 1u) {
@@ -346,6 +366,27 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     out.radiance = out.radiance + light.xyz * misc.z * reflectance * visible * transmitted * ring;
     // Lit directly: the horizon and eclipse terms leave more than LIT_IRRADIANCE of face-on.
     out.lit = out.lit || (horizon > LIT_IRRADIANCE && any(visible > vec3f(LIT_IRRADIANCE)));
+  }
+  // Planetshine (Design note 7): each lit neighbour a uniform sphere, never shadow-tested against a
+  // third body nor by R11's ring shadow, through R08's transmittance along its own direction. It
+  // lights the night side, which stays unlit for the meter.
+  let secondaries = min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES);
+  for (var j = 0u; j < secondaries; j = j + 1u) {
+    let place = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS);
+    let source = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS + 1u);
+    let to_source = to_view(place.xyz) * place.w - q;
+    let irradiance = planetshine_irradiance(to_source, source.w, place.w, normal, 0.0);
+    if (irradiance <= 0.0) {
+      continue;
+    }
+    let distance = length(to_source);
+    let towards = to_source / distance;
+    let mu0 = dot(normal, towards);
+    let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
+    let source_radius = asin(min(1.0, source.w / distance));
+    let reflectance = surface_reflectance(shares, laws, irradiance, mu0, mu, alpha, source_radius);
+    let transmitted = atmosphere_sun_transmittance(0.0, mu0, 0.0, 0.0);
+    out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;
   }
   // R08's sky light, 0 until it lands, on the Lambert share's flat term.
   out.radiance = out.radiance

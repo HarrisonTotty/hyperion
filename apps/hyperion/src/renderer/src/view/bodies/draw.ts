@@ -9,7 +9,9 @@
  * (`annulusEdges`) and the bodies that may eclipse them (`occludersFor`, the two largest). A disc
  * becomes a {@link DiscRecord}; a point a sprite of flux F = E p (a ÷ Δ)² Φ(α) per channel ({@link
  * pointFlux}, the law integrated over the figure for a spheroid), cut by the same eclipse term from
- * the body's centre, laid into R02's point-spread sprite. Host discs keep their
+ * the body's centre, laid into R02's point-spread sprite. Each body is also lit by planetshine from
+ * the neighbours that light it most (`planetshineSources`, T11), on its disc per lit point and on
+ * its point as a point source. Host discs keep their
  * place in the order, where R06.T13.e's pass draws them (decision-r07-t8a, R06 coordination (d),
  * 2026-10-03): a host's step places R06's disc draw. {@link LitBodyRenderer} binds the plan to the
  * engine: one draw per disc for its wholly covered pixels and one for its limb, one sprite draw per
@@ -19,17 +21,11 @@
  */
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
-import { dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
-import {
-  PHASE_TABLE_SAMPLES,
-  phaseFactorFromTable,
-  phaseFactorTableOf,
-  type PhotometricLaw,
-} from "../appearance/law";
+import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
-import { discIntegratedPhase, geometricAlbedo } from "../appearance/phase";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type {
   BufferHandle,
@@ -43,9 +39,14 @@ import type {
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import { annulusEdges, type AnnulusSet, eclipseVisible } from "../lighting/annuli";
-import type { PlacedLight } from "../lighting/hostLights";
-import { shiningStars, starIlluminance, photopicIlluminance } from "../lighting/illuminance";
+import { type LightAtPoint, lightsAt, type PlacedLight } from "../lighting/hostLights";
 import { type LightingBody, type LightingSphere, occludersFor } from "../lighting/occluders";
+import {
+  type LitNeighbour,
+  litNeighbours,
+  planetshineSources,
+  type SecondarySource,
+} from "../lighting/planetshine";
 import { PSF_QUAD_PX } from "../photometry/magnitude";
 import { type SpriteRecord, spriteRecord } from "../wireframe/drawList";
 import type { Rgb } from "../photometry/toneCurve";
@@ -57,6 +58,7 @@ import {
   type DiscLight,
   type DiscOccluder,
   type DiscRecord,
+  type DiscSecondary,
   type DrawnDiscSurface,
   LIMB_SAMPLES,
   MAX_DISC_LIGHTS,
@@ -66,7 +68,7 @@ import {
   SMALL_DISC_SAMPLES,
 } from "./discShading";
 import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
-import { oblateAlbedoScale, spheroidGeometricIntegral } from "./oblate";
+import { bodyReflection, figurePole } from "./oblate";
 import { type HostSphere, type PainterEntry, painterOrder } from "./painter";
 import { type LitRegime, type LitSphere, litRegimes } from "./regime";
 import { angularDiameterPx } from "../wireframe/bodies";
@@ -97,6 +99,11 @@ export interface BodyFrameOptions {
   readonly exposureScale: number;
   /** The eclipse term's annuli: `DISC_ANNULI_HIGH` or `DISC_ANNULI_LOW`. */
   readonly annuli: number;
+  /**
+   * The neighbours that light each body by planetshine at most: `PLANETSHINE_SOURCES_HIGH`, or
+   * `PLANETSHINE_SOURCES_LOW` on the low setting.
+   */
+  readonly planetshine: number;
 }
 
 /** A point body's sprite: R02's sprite record, its depth its own (decision-r07-t8a, item 2). */
@@ -121,9 +128,6 @@ export interface BodyFramePlan {
   readonly laws: ReadonlyArray<PhotometricLaw>;
   readonly steps: ReadonlyArray<BodyStep>;
 }
-
-/** The pole a body of unknown rotation is drawn about: a sphere needs none. */
-const DEFAULT_POLE = vec3(0, 0, 1);
 
 /** A body whose centre is within this fraction of its radius is seen from inside, and not drawn. */
 const INSIDE_MARGIN = 1e-9;
@@ -158,33 +162,15 @@ export function hostAnnuli(
   return sets;
 }
 
-/** One star as it lights one body. */
-interface BodyLight {
-  readonly host: PlacedLight;
-  /** From the body's centre to the star's, m. */
-  readonly toStarM: Vec3;
-  readonly illuminance: Rgb;
-}
-
 /** The stars that light a body: past the cut, the brightest {@link MAX_DISC_LIGHTS}. */
-function lightsOf(body: LitBodyInput, hosts: ReadonlyArray<PlacedLight>): BodyLight[] {
-  const all = hosts.map((host) => {
-    const toStarM = sub(host.centreM, body.centreM);
-    return { host, toStarM, illuminance: starIlluminance(host.disc, norm(toStarM)) };
-  });
-  const kept = shiningStars(all.map((light) => light.illuminance)).flatMap((index) => {
-    const light = all[index];
-    return light === undefined ? [] : [light];
-  });
-  return kept
-    .toSorted((a, b) => photopicIlluminance(b.illuminance) - photopicIlluminance(a.illuminance))
-    .slice(0, MAX_DISC_LIGHTS);
+function lightsOf(body: LitBodyInput, hosts: ReadonlyArray<PlacedLight>): LightAtPoint[] {
+  return lightsAt(body.centreM, hosts, MAX_DISC_LIGHTS);
 }
 
 /** The bodies that may eclipse a body's lights, the largest seen from it first, at most two. */
 function occludersOf(
   body: LitBodyInput,
-  lights: ReadonlyArray<BodyLight>,
+  lights: ReadonlyArray<LightAtPoint>,
   lighting: ReadonlyArray<LightingBody>,
 ): LightingBody[] {
   const self: LightingBody = {
@@ -203,58 +189,32 @@ function occludersOf(
     .slice(0, MAX_DISC_OCCLUDERS);
 }
 
-/** The body's pole, or +z for a body whose rotation is not known (drawn as a sphere). */
-function poleOf(figure: BodyFigure): Vec3 {
-  return figure.pole === null ? DEFAULT_POLE : normalise(figure.pole);
-}
-
 /**
  * A point body's flux at the camera per display channel, lx, each star's cut by the eclipse term
  * from the body's centre: E p (a ÷ Δ)² Φ(α) for a sphere; for a spheroid the law integrated over
- * its figure, (E ÷ π)(a ÷ Δ)² A′ f(α) K (`spheroidGeometricIntegral`, A′ the disc's scaled A), so
- * that the point and the disc draw one flux.
+ * its figure, (E ÷ π)(a ÷ Δ)² A′ f(α) K (`bodyReflection`, A′ the disc's scaled A), so that the
+ * point and the disc draw one flux. Each planetshine source adds its own term, as a point source
+ * at its centre's direction and never eclipsed (Design note 7).
  *
  * @param occluders - The bodies that may eclipse its stars (`occludersFor`).
  * @param k - The eclipse term's annuli.
+ * @param secondaries - Its planetshine sources (`planetshineSources`).
  */
 export function pointFlux(
   body: LitBodyInput,
   hosts: ReadonlyArray<PlacedLight>,
   occluders: ReadonlyArray<LightingBody>,
   k: number,
+  secondaries: ReadonlyArray<SecondarySource> = [],
 ): Rgb {
-  const { equatorialRadiusM: a, polarRadiusM: c } = body.figure;
   const { law } = body.photometry;
   const distanceM = norm(body.centreM);
   const toCamera = scale(body.centreM, -1 / distanceM);
-  const solid = (a / distanceM) ** 2;
-  const p = geometricAlbedo(law);
-  const albedo = oblateAlbedoScale(law.lommelSeeligerShare, c / a);
+  const solid = (body.figure.equatorialRadiusM / distanceM) ** 2;
   const blockers = occluders.map(({ centreM, radiusM }) => ({ centreM, radiusM }));
   const flux: [number, number, number] = [0, 0, 0];
   for (const light of lightsOf(body, hosts)) {
-    const towards = normalise(light.toStarM);
-    const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towards, toCamera))));
-    let reflected: Rgb;
-    if (c >= a) {
-      const phase = discIntegratedPhase(law, alpha);
-      reflected = [p[0] * phase[0], p[1] * phase[1], p[2] * phase[2]];
-    } else {
-      const f = phaseFactorFromTable(phaseFactorTableOf(law), alpha);
-      const geometric =
-        spheroidGeometricIntegral(
-          law.lommelSeeligerShare,
-          c / a,
-          poleOf(body.figure),
-          towards,
-          toCamera,
-        ) / Math.PI;
-      reflected = [
-        law.a[0] * albedo * f[0] * geometric,
-        law.a[1] * albedo * f[1] * geometric,
-        law.a[2] * albedo * f[2] * geometric,
-      ];
-    }
+    const reflected = bodyReflection(body.figure, law, normalise(light.toStarM), toCamera);
     const [bLaw, vLaw, rLaw] = light.host.disc.limb;
     const laws = [rLaw, vLaw, bLaw] as const;
     for (const ch of [0, 1, 2] as const) {
@@ -273,6 +233,12 @@ export function pointFlux(
               k,
             );
       flux[ch] += light.illuminance[ch] * solid * reflected[ch] * visible;
+    }
+  }
+  for (const source of secondaries) {
+    const reflected = bodyReflection(body.figure, law, source.direction, toCamera);
+    for (const ch of [0, 1, 2] as const) {
+      flux[ch] += source.illuminance[ch] * solid * reflected[ch];
     }
   }
   return flux;
@@ -305,6 +271,7 @@ function discRecordOf(
   surface: DrawnDiscSurface,
   hosts: ReadonlyArray<PlacedLight>,
   occluders: ReadonlyArray<LightingBody>,
+  neighbours: ReadonlyArray<LitNeighbour>,
   tableRows: ReadonlyArray<number>,
   options: BodyFrameOptions,
 ): DiscRecord | null {
@@ -322,7 +289,7 @@ function discRecordOf(
   const pole =
     surface.kind === "class-map"
       ? rotateToBody(surface.rotation, vec3(0, 0, 1))
-      : poleOf(body.figure);
+      : figurePole(body.figure);
   const aOverD = a / distanceM;
   const small =
     angularDiameterPx(body.centreM, a, options.camera, options.viewport) < SMALL_DISC_PX;
@@ -340,6 +307,13 @@ function discRecordOf(
     centre: scale(sub(occluder.centreM, body.centreM), 1 / a),
     radius: occluder.radiusM / a,
   }));
+  const secondaries = planetshineSources(body, neighbours, options.planetshine);
+  const shine: DiscSecondary[] = secondaries.map((source) => ({
+    direction: source.direction,
+    distance: source.distanceM / a,
+    radius: source.radiusM / a,
+    illuminance: source.illuminance,
+  }));
   return {
     body: body.id,
     rect,
@@ -354,6 +328,7 @@ function discRecordOf(
     exposureOverPi: options.exposureScale / Math.PI,
     lights,
     occluders: blockers,
+    secondaries: shine,
   };
 }
 
@@ -365,6 +340,7 @@ function pointSpriteOf(
   body: LitBodyInput,
   hosts: ReadonlyArray<PlacedLight>,
   occluders: ReadonlyArray<LightingBody>,
+  neighbours: ReadonlyArray<LitNeighbour>,
   options: BodyFrameOptions,
 ): PointSprite | null {
   const { camera, viewport } = options;
@@ -378,7 +354,8 @@ function pointSpriteOf(
   ) {
     return null;
   }
-  const flux = pointFlux(body, hosts, occluders, options.annuli);
+  const secondaries = planetshineSources(body, neighbours, options.planetshine);
+  const flux = pointFlux(body, hosts, occluders, options.annuli, secondaries);
   return {
     id: body.id,
     record: spriteRecord(
@@ -422,6 +399,8 @@ export function planLitBodies(
     centreM,
     radiusM,
   }));
+  // Each body's starlight once, for the planetshine it gives the others.
+  const neighbours = litNeighbours(bodies, hosts, options.annuli);
   const laws: PhotometricLaw[] = [];
   const discs: DiscRecord[] = [];
   const steps: BodyStep[] = [];
@@ -444,7 +423,7 @@ export function planLitBodies(
     }
     const occluders = occludersOf(body, lightsOf(body, hosts), lighting);
     if (regimes.get(body.id) === "point") {
-      const sprite = pointSpriteOf(body, hosts, occluders, options);
+      const sprite = pointSpriteOf(body, hosts, occluders, neighbours, options);
       if (sprite !== null) {
         run.push(sprite);
       }
@@ -459,7 +438,7 @@ export function planLitBodies(
       }
       return row;
     });
-    const record = discRecordOf(body, drawn, hosts, occluders, rows, options);
+    const record = discRecordOf(body, drawn, hosts, occluders, neighbours, rows, options);
     if (record === null) {
       continue;
     }
