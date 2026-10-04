@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import type { Quaternion } from "../camera/pose";
+import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong, multiply, quaternionFromAxisAngle } from "../camera/quaternion";
 import { goldenLevelTable, UNIT_BOUNDS, WGS84_FIGURE } from "../../test/terrainFixtures";
-import { distanceToBoxM, patchBounds, relativeBounds } from "./bounds";
+import { distanceToBoxM, type PatchBounds, patchBounds, relativeBounds } from "./bounds";
 import { aboveHorizon, frustumOf, horizonCone, inFrustum } from "./cull";
 import { PATCH_QUADS, vertexDir, vertexSpacing, type Xyz } from "./cube";
 import {
@@ -22,9 +23,11 @@ import type { GroundContact } from "./grounded";
 import { levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
 import {
   type HeightRangeLookup,
+  inheritedHeightRangeM,
   PatchLeafSet,
   SAGITTA_FACTOR,
   type Selection,
+  type SelectionInput,
   selectionErrorM,
   selectPatches,
   screenSpaceErrorPx,
@@ -339,6 +342,7 @@ function levelGaps(keys: readonly PatchKey[]): number {
     ),
     demand: [],
     limited: false,
+    limitExcess: 0,
   };
   let gaps = 0;
   for (const k of keys) {
@@ -549,5 +553,266 @@ describe("demand", () => {
       heightRanges: tight,
     });
     expect(baked.patches.size).toBeLessThan(none.patches.size);
+  });
+});
+
+/**
+ * Each view's w × ρ ÷ τ for a patch at `level` with `bounds`, `null` where the view does not see
+ * it: ρ at the nearest point of the patch's box, floored at the near plane as selection floors it.
+ */
+function weightedExcesses(
+  bounds: PatchBounds,
+  level: number,
+  views: readonly ViewSelectionInput[],
+): (number | null)[] {
+  return views.map((v) => {
+    const rel = relativeBounds(bounds, v.camera.positionM);
+    const frustum = frustumOf({
+      orientation: v.camera.orientation,
+      fovXRad: v.fovXRad,
+      viewport: v.viewport,
+    });
+    if (!inFrustum(rel, frustum) || !aboveHorizon(rel, horizonCone(PLANET, v.camera.positionM))) {
+      return null;
+    }
+    const distanceM = Math.max(distanceToBoxM(rel), NEAR_PLANE_M);
+    return (v.weight * screenSpaceErrorPx(selectionErrorM(PLANET, level), distanceM, v)) / v.tauPx;
+  });
+}
+
+/** The patches of a key's level sharing an edge or a corner with it, across face edges too. */
+function levelNeighbours(key: PatchKey): PatchKey[] {
+  const around = EDGES.map((e) => edgeNeighbour(key, e));
+  for (const corner of cornerNeighbours(key)) {
+    if (corner !== null) {
+      around.push(corner);
+    }
+  }
+  return around;
+}
+
+/** The FNV-1a 32-bit hash of `lines`, each ended by a newline, in hexadecimal. */
+function fnv(lines: readonly string[]): string {
+  let hash = 0x811c9dc5;
+  for (const line of lines) {
+    for (const char of `${line}\n`) {
+      hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 0x01000193) >>> 0;
+    }
+  }
+  return hash.toString(16);
+}
+
+/**
+ * The selection's sorted patch keys and its demand's keys in order, as counts and FNV-1a 32-bit
+ * hashes, and `limited`.
+ */
+function selectionDigest(sel: Selection): string {
+  const keys = [...sel.patches.keys()].toSorted();
+  const demand = sel.demand.map((r) => patchKeyString(r.key));
+  return `${keys.length} ${fnv(keys)} ${demand.length} ${fnv(demand)} ${String(sel.limited)}`;
+}
+
+/** A selection to put under a budget that binds, as the case gives it. */
+interface BudgetCaseSpec {
+  readonly name: string;
+  readonly views: ReadonlyArray<ViewSelectionInput>;
+  /** A budget it reaches. */
+  readonly budget: number;
+  /**
+   * The deepest level baked, every patch to it at ±100 m (`bakedToDepth`), or `null` where the case
+   * gives no ranges.
+   */
+  readonly bakedDepth: number | null;
+  /** {@link selectionDigest} of the selection with no budget and under the budget, as recorded. */
+  readonly digests: { readonly free: string; readonly budgeted: string };
+}
+
+/** A case with its input built. */
+interface BudgetCase extends BudgetCaseSpec {
+  /** The input on the high setting with no budget, its ranges from `bakedDepth`. */
+  readonly free: SelectionInput;
+}
+
+/** The case with its input built from `spec`. */
+function budgetCase(spec: BudgetCaseSpec): BudgetCase {
+  const base: SelectionInput = { planet: PLANET, views: spec.views, setting: "high", grounded: [] };
+  return {
+    ...spec,
+    free:
+      spec.bakedDepth === null ? base : { ...base, heightRanges: bakedToDepth(spec.bakedDepth) },
+  };
+}
+
+/** Whether the case counts `key` as baked: every patch, where it gives no ranges. */
+function isBaked(c: BudgetCase, key: PatchKey): boolean {
+  return c.bakedDepth === null || key.level <= c.bakedDepth;
+}
+
+/**
+ * A split patch's bounds as selection builds them: from its level's range where the case gives no
+ * ranges, or else from its own baked range, since selection splits only baked patches then.
+ */
+function boundsOfSplit(c: BudgetCase, key: PatchKey): PatchBounds {
+  return c.bakedDepth === null
+    ? patchBounds(PLANET, key)
+    : patchBounds(
+        PLANET,
+        key,
+        inheritedHeightRangeM(PLANET, key, { level: key.level, lowM: -100, highM: 100 }),
+      );
+}
+
+/** The case's selection under its budget. */
+function underBudget(c: BudgetCase): Selection {
+  return selectPatches({ ...c.free, maxPatches: c.budget });
+}
+
+describe("the budget's limit excess", () => {
+  const primary = view(LOW, lookingDown(LOW, 1.2));
+  // A secondary view at the wireframe's tolerance, looking more steeply down.
+  const secondary = view(LOW, lookingDown(LOW, 0.4), { weight: 0.25, tauPx: 4 });
+  // The digests were recorded from selection before `limitExcess` was added (2026-10-04), and
+  // guard the work on selection's cost (decision-r05-high-bound.md, item 4): re-record them only
+  // when selection's output is meant to change.
+  const cases: readonly BudgetCase[] = [
+    budgetCase({
+      name: "one view and no baked ranges",
+      views: [primary],
+      budget: 300,
+      bakedDepth: null,
+      digests: {
+        free: "12731 98452de7 1 84bfd6f6 false",
+        budgeted: "300 e43ad952 3 3a5eda2e true",
+      },
+    }),
+    budgetCase({
+      name: "two views over ranges baked to level 7",
+      views: [primary, secondary],
+      budget: 200,
+      bakedDepth: 7,
+      digests: {
+        free: "287 5d6b78f0 159 ea8fbb82 false",
+        budgeted: "198 187cb71c 84 7a9121f2 true",
+      },
+    }),
+    // The refused split is one only the secondary view wants, its weighted excess under 1.
+    budgetCase({
+      name: "a primary view from orbit and a secondary from 1.5 km",
+      views: [
+        view(ORBIT, lookingDown(ORBIT, 0.3)),
+        view(LOW, lookingDown(LOW, 1.2), { weight: 0.25 }),
+      ],
+      budget: 2000,
+      bakedDepth: null,
+      digests: {
+        free: "13220 d29cc345 1 84bfd6f6 false",
+        budgeted: "1998 1bfeb10d 1 84bfd6f6 true",
+      },
+    }),
+  ];
+
+  it.each(cases)("is 0 with no budget, or one not reached, with $name", (c) => {
+    const free = selectPatches(c.free);
+    const roomy = selectPatches({ ...c.free, maxPatches: 2 * free.patches.size });
+    expect([free.limited, free.limitExcess, roomy.limited, roomy.limitExcess]).toEqual([
+      false,
+      0,
+      false,
+      0,
+    ]);
+  });
+
+  it.each(cases)("bounds every baked leaf's ρ by τ × max(1, excess ÷ w), with $name", (c) => {
+    const sel = underBudget(c);
+    expect(sel.limited).toBe(true);
+    expect(sel.limitExcess).toBeGreaterThan(0);
+    const over: string[] = [];
+    for (const p of sel.patches.values()) {
+      if (!p.seen || !isBaked(c, p.key)) {
+        continue;
+      }
+      weightedExcesses(p.bounds, p.key.level, c.free.views).forEach((weighted, n) => {
+        const v = c.free.views[n];
+        if (weighted === null || v === undefined) {
+          return;
+        }
+        const rhoPx = (weighted * v.tauPx) / v.weight;
+        const effectiveTauPx = v.tauPx * Math.max(1, sel.limitExcess / v.weight);
+        if (rhoPx > effectiveTauPx * (1 + 1e-9)) {
+          over.push(`${patchKeyString(p.key)} in view ${n}: ${rhoPx} px`);
+        }
+      });
+    }
+    expect(over).toEqual([]);
+  });
+
+  it.each(cases)(
+    "equals the largest weighted excess of a leaf still wanting a split, with $name",
+    (c) => {
+      const sel = underBudget(c);
+      expect(sel.limited).toBe(true);
+      // The greedy splits the largest weighted excess first, so the refused patch is the leaf that
+      // most wants a split, and stays one.
+      let largest = 0;
+      for (const p of sel.patches.values()) {
+        if (!p.seen || !isBaked(c, p.key) || p.key.level >= PLANET.finestLevel) {
+          continue;
+        }
+        const excesses = weightedExcesses(p.bounds, p.key.level, c.free.views);
+        const wanted = excesses.some((weighted, n) => {
+          const v = c.free.views[n];
+          return weighted !== null && v !== undefined && weighted / v.weight > 1;
+        });
+        if (wanted) {
+          largest = Math.max(largest, ...excesses.map((weighted) => weighted ?? 0));
+        }
+      }
+      expect(Math.abs(largest - sel.limitExcess) / sel.limitExcess).toBeLessThan(1e-9);
+    },
+  );
+
+  it.each(cases)(
+    "is at most the weighted excess of every split the balance did not make, with $name",
+    (c) => {
+      const sel = underBudget(c);
+      expect(sel.limited).toBe(true);
+      // Every split patch: every ancestor of a selected one.
+      const split = new Map<string, PatchKey>();
+      for (const p of sel.patches.values()) {
+        for (let k = parentKey(p.key); k !== null; k = parentKey(k)) {
+          split.set(patchKeyString(k), k);
+        }
+      }
+      const unexplained: string[] = [];
+      for (const key of split.values()) {
+        const weighted = weightedExcesses(boundsOfSplit(c, key), key.level, c.free.views);
+        if (Math.max(0, ...weighted.map((w) => w ?? 0)) >= sel.limitExcess * (1 - 1e-9)) {
+          continue;
+        }
+        // Only the balance splits a patch below the refused excess: one that a split patch a level
+        // finer touches, whose children it would otherwise meet two levels apart.
+        const own = patchKeyString(key);
+        const balanced = childKeys(key).some((child) =>
+          levelNeighbours(child).some((n) => {
+            const parent = parentKey(n);
+            return (
+              parent !== null && patchKeyString(parent) !== own && split.has(patchKeyString(n))
+            );
+          }),
+        );
+        if (!balanced) {
+          unexplained.push(patchKeyString(key));
+        }
+      }
+      expect(unexplained).toEqual([]);
+    },
+  );
+
+  it.each(cases)("leaves the selection with no budget as recorded, with $name", (c) => {
+    expect(selectionDigest(selectPatches(c.free))).toBe(c.digests.free);
+  });
+
+  it.each(cases)("leaves the selection under the budget as recorded, with $name", (c) => {
+    expect(selectionDigest(underBudget(c))).toBe(c.digests.budgeted);
   });
 });
