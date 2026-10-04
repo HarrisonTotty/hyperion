@@ -10,7 +10,9 @@ import {
   DESCENT_SEGMENTS,
   DescentProfile,
   type DescentTerrain,
+  DescentUnclearable,
   FLOOR_TOLERANCE_M,
+  type TrackStretch,
   landingSiteOf,
   trackStretches,
 } from "./descentProfile";
@@ -316,6 +318,78 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
       expect(b.clearanceM).toBeCloseTo(a.clearanceM, 9);
       expect(norm(sub(b.positionM, a.positionM))).toBeLessThan(1e-6);
     }
+  });
+
+  /** The follow-up's cases: a lifted low pass beside a binding slowdown 3, and a valley. */
+  const FOLLOW_UP: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+    ridges: RIDGES,
+    "lifted low pass": { "low fast pass": 1500, "slowdown 3": 800 },
+    valley: { "slowdown 2": 800, "slowdown 5": 800 },
+  };
+
+  for (const [name, raised] of Object.entries(FOLLOW_UP)) {
+    it(`has no valley inside a segment, clears every floor and stays continuous (${name})`, () => {
+      const profile = new DescentProfile(WGS84_FIGURE, site, {
+        siteHeightM: SITE_M,
+        stretchMaxHeightsM: floors(raised),
+      });
+      expect(profile.minFloorMarginM).toBeGreaterThanOrEqual(-FLOOR_TOLERANCE_M);
+      for (const span of profile.segmentSpans()) {
+        if (!profile.stretches.some(({ segment }) => segment === span.name)) {
+          continue;
+        }
+        const heights: number[] = [];
+        for (let t = span.startS; t <= span.endS; t += 1 / 64) {
+          heights.push(profile.poseAt(t).clearanceM);
+        }
+        // Running maxima from each end: a pose below both is in a valley.
+        const after = [...heights];
+        for (let i = after.length - 2; i >= 0; i -= 1) {
+          after[i] = Math.max(after[i] ?? -Infinity, after[i + 1] ?? -Infinity);
+        }
+        let before = -Infinity;
+        let worst = Infinity;
+        for (const [i, h] of heights.entries()) {
+          before = Math.max(before, h);
+          worst = Math.min(worst, h - Math.min(before, after[i] ?? h));
+        }
+        expect({ segment: span.name, ok: worst >= -0.5 }).toEqual({ segment: span.name, ok: true });
+      }
+      for (const t of profile.stretches.map(({ endS }) => endS).slice(0, -1)) {
+        const a = profile.poseAt(t - 1e-4);
+        const b = profile.poseAt(t + 1e-4);
+        expect(norm(sub(b.positionM, a.positionM))).toBeLessThan(2);
+        expect(norm(sub(b.velocityMps, a.velocityMps))).toBeLessThan(0.05);
+      }
+    });
+  }
+
+  it("descends from a lifted low pass to a binding slowdown 3 without dropping to the table", () => {
+    const profile = new DescentProfile(WGS84_FIGURE, site, {
+      siteHeightM: SITE_M,
+      stretchMaxHeightsM: floors(FOLLOW_UP["lifted low pass"] ?? {}),
+    });
+    const at = (piece: string): TrackStretch | undefined =>
+      profile.stretches.find((s) => s.piece === piece);
+    const levelM = profile.poseAt(at("low fast pass")?.startS ?? NaN).clearanceM;
+    expect(levelM).toBeCloseTo(1800, 6);
+    const third = profile.poseAt(at("slowdown 3")?.startS ?? NaN).clearanceM;
+    // Its floor plus C, or the slowdown's shape re-anchored to the lifted start where higher.
+    expect(third).toBeGreaterThanOrEqual(1000 - FLOOR_TOLERANCE_M);
+    const boundaries = ["slowdown 1", "slowdown 2"].flatMap((piece) => [
+      profile.poseAt(at(piece)?.startS ?? NaN).clearanceM,
+      profile.poseAt(at(piece)?.endS ?? NaN).clearanceM,
+    ]);
+    for (const [i, h] of boundaries.entries()) {
+      expect(h).toBeGreaterThanOrEqual(Math.min(levelM, third) - FLOOR_TOLERANCE_M);
+      expect(h).toBeLessThanOrEqual((boundaries[i - 1] ?? Infinity) + FLOOR_TOLERANCE_M);
+    }
+  });
+
+  it("names a floor it cannot clear by its own RangeError", () => {
+    const error = new DescentUnclearable("the descent cannot clear its floors");
+    expect(error).toBeInstanceOf(RangeError);
+    expect(error.name).toBe("DescentUnclearable");
   });
 
   // The fourth lift's RangeError is a guard: each lift raises a short piece's two boundaries, and so

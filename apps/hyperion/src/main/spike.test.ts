@@ -11,11 +11,15 @@ import {
   DAWN_SAFETY_OFF_ENABLED,
   type DawnSafety,
   launchSwitches,
+  registerSpikeHandlers,
+  SPIKE_CHANNELS,
+  type SpikeHandlerDeps,
   SPIKE_TRACE_CATEGORIES,
   SpikeTrace,
   type SpikeTracing,
   spikeTraceConfig,
 } from "./spike";
+import { smallReport } from "./fixtures/spikeReport";
 
 const PLATFORMS: ReadonlyArray<NodeJS.Platform> = ["linux", "win32", "darwin"];
 const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe"];
@@ -253,5 +257,92 @@ describe("the spike's trace", () => {
     expect(trace.recording).toBe(false);
     await trace.start();
     expect(trace.recording).toBe(true);
+  });
+});
+
+describe("the spike's IPC handlers", () => {
+  /** A fake IPC event: whether it comes from the spike's page. */
+  interface FakeEvent {
+    readonly own: boolean;
+  }
+  type Listener = (event: FakeEvent, ...args: unknown[]) => Promise<unknown>;
+  const OWN: FakeEvent = { own: true };
+  const FOREIGN: FakeEvent = { own: false };
+
+  function setUp(): {
+    readonly call: (channel: string, event: FakeEvent, ...args: unknown[]) => Promise<unknown>;
+    readonly deps: SpikeHandlerDeps<FakeEvent>;
+    readonly channels: ReadonlyArray<string>;
+  } {
+    const listeners = new Map<string, Listener>();
+    const deps: SpikeHandlerDeps<FakeEvent> = {
+      handle: (channel, listener) => {
+        listeners.set(channel, listener);
+      },
+      isSender: (event) => event.own,
+      startMeasuring: vi.fn<() => Promise<void>>(() => Promise.resolve()),
+      stopMeasuring: vi.fn<() => Promise<void>>(() => Promise.resolve()),
+      rendererMemory: vi.fn<(bytes: number) => void>(),
+      writeResults: vi.fn<SpikeHandlerDeps<FakeEvent>["writeResults"]>(() =>
+        Promise.resolve({ json: "a.json", markdown: "a.md" }),
+      ),
+      writeCapture: vi.fn<SpikeHandlerDeps<FakeEvent>["writeCapture"]>(() =>
+        Promise.resolve("/capture"),
+      ),
+      end: vi.fn<(code: number, reason: string | null) => void>(),
+    };
+    registerSpikeHandlers(deps);
+    return {
+      deps,
+      channels: [...listeners.keys()],
+      call: (channel, event, ...args) => {
+        const listener = listeners.get(channel);
+        if (listener === undefined) {
+          throw new Error(`no handler on ${channel}`);
+        }
+        return listener(event, ...args);
+      },
+    };
+  }
+
+  it("registers one handler a channel", () => {
+    const { channels } = setUp();
+    expect(channels.toSorted()).toEqual(Object.values(SPIKE_CHANNELS).toSorted());
+  });
+
+  it.each(Object.values(SPIKE_CHANNELS))("refuses %s from a foreign sender", async (channel) => {
+    const { call, deps } = setUp();
+    await expect(call(channel, FOREIGN, smallReport())).rejects.toThrow(/not the spike window/);
+    expect(deps.startMeasuring).not.toHaveBeenCalled();
+    expect(deps.writeResults).not.toHaveBeenCalled();
+    expect(deps.end).not.toHaveBeenCalled();
+  });
+
+  it("refuses arguments that do not check", async () => {
+    const { call, deps } = setUp();
+    await expect(call(SPIKE_CHANNELS.memory, OWN, -1)).rejects.toThrow(/byte count/);
+    await expect(call(SPIKE_CHANNELS.writeResults, OWN, { frames: 1 })).rejects.toThrow(/report/);
+    await expect(call(SPIKE_CHANNELS.writeCapture, OWN, { json: 1 })).rejects.toThrow(/capture/);
+    await expect(call(SPIKE_CHANNELS.end, OWN, { status: "fail" })).rejects.toThrow(/end/);
+    expect(deps.rendererMemory).not.toHaveBeenCalled();
+    expect(deps.writeResults).not.toHaveBeenCalled();
+    expect(deps.end).not.toHaveBeenCalled();
+  });
+
+  it("does each operation for the spike's own page", async () => {
+    const { call, deps } = setUp();
+    await call(SPIKE_CHANNELS.startTrace, OWN);
+    await call(SPIKE_CHANNELS.memory, OWN, 4096);
+    await expect(call(SPIKE_CHANNELS.writeResults, OWN, smallReport())).resolves.toEqual({
+      json: "a.json",
+      markdown: "a.md",
+    });
+    await call(SPIKE_CHANNELS.stopTrace, OWN);
+    await call(SPIKE_CHANNELS.end, OWN, { status: "fail", reason: "no bake" });
+    expect(deps.startMeasuring).toHaveBeenCalledOnce();
+    expect(deps.stopMeasuring).toHaveBeenCalledOnce();
+    expect(deps.rendererMemory).toHaveBeenCalledWith(4096);
+    expect(deps.writeResults).toHaveBeenCalledWith(smallReport());
+    expect(deps.end).toHaveBeenCalledWith(1, "no bake");
   });
 });

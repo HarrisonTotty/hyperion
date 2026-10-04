@@ -364,8 +364,9 @@ export function patchKeyAt(dir: Xyz, level: number): PatchKey {
  * The patches of a stretch's bound level under its ground track, with their eight neighbours
  * (seven at a cube corner), as decision-r05-descent-clearance.md has lane C's `trackPatchKeys`
  * take them: the track sampled at most half the level's shortest patch edge apart along the ground,
- * from the stretch's fastest point (with 1% for the arc's radius against the ground's), both ends
- * included, so no patch it crosses is missed and the neighbours add one edge to either side.
+ * from the stretch's fastest point (with 1% for the arc's radius against the ground's), and at least
+ * at every 64 Hz pose, both ends included, so every pose's patch is sampled with its 8 neighbours
+ * and the neighbours add one edge to either side.
  */
 export function stretchKeys(profile: DescentProfile, stretch: TrackStretch): PatchKey[] {
   const { level } = stretch;
@@ -375,7 +376,9 @@ export function stretchKeys(profile: DescentProfile, stretch: TrackStretch): Pat
     profile.poseAt(stretch.endS).horizontalSpeedMps,
     1,
   );
-  const stepS = edgeM / 2 / (1.01 * fastestMps);
+  // At most half an edge apart, and at every 64 Hz pose too, so that each pose's own patch is a
+  // sample's, with all 8 of its neighbours (a sample half an edge away could leave a corner cut).
+  const stepS = Math.min(edgeM / 2 / (1.01 * fastestMps), 1 / 64);
   const steps = Math.ceil((stretch.endS - stretch.startS) / stepS);
   const keys = new Map<string, PatchKey>();
   const take = (key: PatchKey | null): void => {

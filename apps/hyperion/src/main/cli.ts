@@ -9,12 +9,19 @@
  * | `--address` | `HYPERION_SERVER_ADDR` | `127.0.0.1` |
  * | `--port`    | `HYPERION_SERVER_PORT` | `7878`      |
  *
+ * `--descent-spike` opens the descent spike in place of the consoles (plan R05, T13.c), with its
+ * own options: `--setting high|low`, `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`,
+ * `--vertex-path baked-offsets|face-differences`, `--normals double|mesh`, `--ridged on|off`,
+ * `--dawn-safety on|off` and `--capture <dir>`. Each is refused without the flag.
+ *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
  * not the same thing.
  */
 
 import { Command, InvalidArgumentError, Option } from "commander";
+
+import { DEFAULT_SPIKE_SEED, isU64Decimal, type SpikeLaunch } from "../preload/spikeLaunch";
 
 /** The variable giving the address of the server to link to, for `--address`. */
 export const ENV_SERVER_ADDR = "HYPERION_SERVER_ADDR";
@@ -35,6 +42,47 @@ export interface ClientArgs {
   readonly address: string;
   /** Port the server listens on, 1 to 65535. */
   readonly port: number;
+  /** The descent spike's options when `--descent-spike` is given, else `undefined`. */
+  readonly spike?: SpikeLaunch;
+}
+
+/** The spike's options other than the flag itself, by their commander attribute names. */
+const SPIKE_OPTIONS = [
+  "setting",
+  "seed",
+  "smoke",
+  "out",
+  "workers",
+  "vertexPath",
+  "normals",
+  "ridged",
+  "dawnSafety",
+  "capture",
+] as const;
+
+/** Reads a `--seed` value: a u64 in decimal. */
+export function parseSeed(value: string): string {
+  if (!isU64Decimal(value)) {
+    throw new InvalidArgumentError("expected an unsigned 64-bit integer in decimal");
+  }
+  return value;
+}
+
+/** Reads a `--workers` value: 1 to 64 height workers. */
+export function parseWorkers(value: string): number {
+  const workers = /^\d{1,2}$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(workers) || workers < 1 || workers > 64) {
+    throw new InvalidArgumentError("expected a worker count from 1 to 64");
+  }
+  return workers;
+}
+
+/** Reads a directory argument: any non-empty path. */
+function parseDirectory(value: string): string {
+  if (value.length === 0) {
+    throw new InvalidArgumentError("expected a directory");
+  }
+  return value;
 }
 
 /**
@@ -104,6 +152,32 @@ export function buildCommand(version: string): Command {
         .env(ENV_SERVER_PORT)
         .argParser(parsePort),
     )
+    .addOption(
+      new Option("--descent-spike", "run the descent spike (plan R05) in place of the consoles"),
+    )
+    .addOption(
+      new Option("--setting <SETTING>", "the spike's quality setting").choices(["high", "low"]),
+    )
+    .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
+    .addOption(new Option("--smoke", "a 10 s spike run that exits with a status"))
+    .addOption(
+      new Option("--out <DIR>", "where the spike's results file goes").argParser(parseDirectory),
+    )
+    .addOption(
+      new Option("--workers <N>", "the spike's height-worker count").argParser(parseWorkers),
+    )
+    .addOption(
+      new Option("--vertex-path <PATH>", "the terrain's vertex path").choices([
+        "baked-offsets",
+        "face-differences",
+      ]),
+    )
+    .addOption(new Option("--normals <RES>", "the terrain's normals").choices(["double", "mesh"]))
+    .addOption(new Option("--ridged <ON>", "the test planet's ridges").choices(["on", "off"]))
+    .addOption(new Option("--dawn-safety <ON>", "Dawn's safety checks").choices(["on", "off"]))
+    .addOption(
+      new Option("--capture <DIR>", "capture the GPU calls of a span").argParser(parseDirectory),
+    )
     .exitOverride();
 }
 
@@ -116,16 +190,60 @@ export function buildCommand(version: string): Command {
  * asked for and has been written; its `exitCode` is the code to end the process with.
  */
 export function parseClientArgs(args: readonly string[], version: string): ClientArgs {
-  const options = buildCommand(version)
-    .parse([...args], { from: "user" })
-    .opts();
+  const command = buildCommand(version).parse([...args], { from: "user" });
+  const options = command.opts();
   // Both options have a default and a parser, so commander cannot yield another type here.
   const address: unknown = options["address"];
   const port: unknown = options["port"];
   if (typeof address !== "string" || typeof port !== "number") {
     throw new Error("the command line yielded no address and port");
   }
-  return { address, port };
+  if (options["descentSpike"] !== true) {
+    const stray = SPIKE_OPTIONS.find((name) => options[name] !== undefined);
+    if (stray !== undefined) {
+      // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
+      command.error(
+        `error: --${kebab(stray)} is an option of --descent-spike, which was not given`,
+      );
+    }
+    return { address, port };
+  }
+  const spike = spikeLaunchOf(options);
+  if (spike.setting === "low" && spike.vertexPath === "baked-offsets") {
+    // The low setting's cache does not fit `BakedOffsets` (R05 Design note 4).
+    command.error("error: --vertex-path baked-offsets does not fit the low setting's cache");
+  }
+  return { address, port, spike };
+}
+
+/** A commander attribute name as its option: `vertexPath` is `vertex-path`. */
+function kebab(name: string): string {
+  return name.replaceAll(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
+
+/** The spike's options, each parsed and checked by commander, with their defaults. */
+function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch {
+  const text = (name: string): string | null => {
+    const value = options[name];
+    return typeof value === "string" ? value : null;
+  };
+  const workers = options["workers"];
+  const setting = text("setting");
+  const vertexPath = text("vertexPath");
+  const normals = text("normals");
+  return {
+    setting: setting === "low" ? "low" : "high",
+    seed: text("seed") ?? DEFAULT_SPIKE_SEED,
+    smoke: options["smoke"] === true,
+    out: text("out"),
+    workers: typeof workers === "number" ? workers : null,
+    vertexPath:
+      vertexPath === "baked-offsets" || vertexPath === "face-differences" ? vertexPath : null,
+    normals: normals === "double" || normals === "mesh" ? normals : null,
+    ridged: text("ridged") === "on" ? "on" : "off",
+    dawnSafety: text("dawnSafety") === "off" ? "off" : "on",
+    capture: text("capture"),
+  };
 }
 
 /**

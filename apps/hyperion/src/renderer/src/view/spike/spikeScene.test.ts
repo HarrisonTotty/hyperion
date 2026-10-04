@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { dot, normalise } from "../../geometry/vec3";
 import { rotateToBody } from "../coords/rotation";
 import { isDescending } from "../terrain/grounded";
-import { patchKeyString } from "../terrain/patchKey";
 import { spheroidNormal, spheroidPoint } from "../terrain/planet";
 import { datumDirection, DescentProfile, landingSiteOf } from "./descentProfile";
 import { testPlanetRotationAt } from "./rotation";
 import {
+  cameraElevationDeg,
   contactRule,
   GROUNDED_CLEARANCE_M,
   siteDirection,
@@ -20,10 +20,7 @@ import {
   SYNTHETIC_FIELD_BYTES,
   syntheticField,
   TEST_PLANET_FIGURE,
-  TRACK_BOUND_LEVEL,
-  trackPatchKeys,
 } from "./spikeScene";
-import { patchKeyAt } from "./surfaceQuery";
 
 const PROFILE = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(5n), {
   siteHeightM: 812.5,
@@ -39,14 +36,14 @@ describe("the craft as a contact", () => {
     for (let n = 0; n / 64 <= (rule.firstOnsetS ?? Number.NaN); n += 1) {
       const t = n / 64;
       const pose = PROFILE.poseAt(t);
-      descended ||= isDescending(pose.clearanceM, pose.verticalSpeedMps);
+      descended ||= isDescending(pose.heightAboveFloorM, pose.verticalSpeedMps);
       expect(spikeContactAt(PROFILE, rule, t) !== null).toBe(descended);
     }
     const first = rule.firstOnsetS ?? Number.NaN;
     const before = PROFILE.poseAt(first - 1e-6);
     const at = PROFILE.poseAt(first);
-    expect(isDescending(before.clearanceM, before.verticalSpeedMps)).toBe(false);
-    expect(isDescending(at.clearanceM, at.verticalSpeedMps)).toBe(true);
+    expect(isDescending(before.heightAboveFloorM, before.verticalSpeedMps)).toBe(false);
+    expect(isDescending(at.heightAboveFloorM, at.verticalSpeedMps)).toBe(true);
     expect(spikeContactAt(PROFILE, rule, first)).not.toBeNull();
   });
 
@@ -55,7 +52,7 @@ describe("the craft as a contact", () => {
     for (let n = 0; n / 4 <= PROFILE.durationS; n += 1) {
       const t = n / 4;
       const pose = PROFILE.poseAt(t);
-      const descending = isDescending(pose.clearanceM, pose.verticalSpeedMps);
+      const descending = isDescending(pose.heightAboveFloorM, pose.verticalSpeedMps);
       expect(spikeContactAt(PROFILE, rule, t) !== null).toBe(descending || t >= hold);
     }
     expect(spikeContactAt(PROFILE, rule, PROFILE.durationS)).not.toBeNull();
@@ -68,7 +65,7 @@ describe("the craft as a contact", () => {
     const t = hover.durationS;
     const pose = hover.poseAt(t);
     expect(pose.verticalSpeedMps).toBe(0);
-    expect(isDescending(pose.clearanceM, pose.verticalSpeedMps)).toBe(false);
+    expect(isDescending(pose.heightAboveFloorM, pose.verticalSpeedMps)).toBe(false);
     // The rule alone, without the hold from the last descent.
     const unheld = { firstOnsetS: null, holdFromS: null };
     expect(spikeContactAt(hover, unheld, t)).not.toBeNull();
@@ -136,25 +133,6 @@ describe("the light", () => {
   });
 });
 
-describe("the track's patches", () => {
-  it("hold every point of the low pass's ground track, with a patch of margin", () => {
-    const keys = new Set(trackPatchKeys(PROFILE).map((key) => patchKeyString(key)));
-    const spans = PROFILE.segmentSpans();
-    PROFILE.segments.forEach((segment, i) => {
-      const span = spans[i];
-      if (!segment.clearsTrack || span === undefined) {
-        return;
-      }
-      for (let t = span.startS; t <= span.endS; t += 0.05) {
-        // The track's own direction at the ground, not the camera's, which stands off the datum.
-        const g = PROFILE.poseAt(t).groundDir;
-        expect(keys.has(patchKeyString(patchKeyAt([g.x, g.y, g.z], TRACK_BOUND_LEVEL)))).toBe(true);
-      }
-    });
-    expect(keys.size).toBeGreaterThan(9);
-  });
-});
-
 describe("the scene", () => {
   it("turns the planet and flies the craft on the script", () => {
     const t = 1_000;
@@ -179,6 +157,39 @@ describe("the scene", () => {
     }
     expect(Math.hypot(centre.x, centre.y, centre.z)).toBeCloseTo(149_597_870_700, 0);
     expect(dot(normalise(centre), sunDirectionBody(PROFILE))).toBeCloseTo(-1, 12);
+  });
+});
+
+describe("the predicted path", () => {
+  it("runs from the script's time to its end, and is gone at the end", () => {
+    const kept = spikeScene(PROFILE);
+    const t = 1_100;
+    const path = kept.sceneAt(t).craft[0]?.predictedPath ?? null;
+    if (path === null) {
+      throw new Error("the craft has no path to fly at 1,100 s");
+    }
+    expect(path[0]?.position).toEqual({
+      kind: "body_fixed",
+      body: SPIKE_PLANET,
+      m: PROFILE.positionAt(t),
+    });
+    expect(path.at(-1)?.position).toEqual({
+      kind: "body_fixed",
+      body: SPIKE_PLANET,
+      m: PROFILE.positionAt(PROFILE.durationS),
+    });
+    expect(kept.sceneAt(PROFILE.durationS).craft[0]?.predictedPath).toBeNull();
+  });
+});
+
+describe("the camera's elevation", () => {
+  it("is the nadir in the hover and 30° down in the low pass", () => {
+    expect(cameraElevationDeg(PROFILE.poseAt(PROFILE.durationS))).toBeCloseTo(-90, 6);
+    const span = PROFILE.segmentSpans().find((each) => each.name === "low fast pass");
+    if (span === undefined) {
+      throw new Error("the script has no low fast pass");
+    }
+    expect(cameraElevationDeg(PROFILE.poseAt((span.startS + span.endS) / 2))).toBeCloseTo(-30, 1);
   });
 });
 

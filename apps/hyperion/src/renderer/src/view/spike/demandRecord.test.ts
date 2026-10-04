@@ -8,12 +8,16 @@ import {
   demandSummary,
   fixtureRangeOf,
   parseRanges,
+  patchKeyAt,
   RIDGED_CALIBRATED_NOTE,
   recordProfile,
   runCell,
   SETTING_VIEWS,
+  stretchKeys,
   testWindows,
 } from "./demandRecord";
+import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile";
+import { cornerNeighbours, EDGES, edgeNeighbour, patchKeyString } from "../terrain/patchKey";
 
 const FIXTURE = parseRanges(ridgesOffRanges);
 
@@ -36,19 +40,19 @@ const SOURCE = {
 const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
     "orbit coast": "95585482dc0e857e",
-    "descent arc": "26ca95e0a47c24e5",
-    "approach and flare": "6f6bbfda9841648b",
+    "descent arc": "97e2ca6b8aee73b2",
+    "approach and flare": "dfd9239538b60509",
     "low fast pass": "5af4f15ee2ca16cc",
-    slowdown: "074616e348f1b6ab",
+    slowdown: "349b772887d62f19",
     "vertical descent": "7f86f5753748ba08",
     "hover and touchdown": "3815401074eed29e",
   },
   low: {
     "orbit coast": "c9a36f3ba4350b99",
-    "descent arc": "6d299f0001c65fb6",
-    "approach and flare": "7fb86ab0dc2e6f7f",
+    "descent arc": "5706a45e7208ead2",
+    "approach and flare": "b3481b07adaad58f",
     "low fast pass": "0e3991c21a0c6b9f",
-    slowdown: "2835d6eec533f966",
+    slowdown: "279852ec8d9689c5",
     "vertical descent": "32c0390b8dfa7eae",
     "hover and touchdown": "1e59c48692289e86",
   },
@@ -62,7 +66,6 @@ const WITHIN_TWO: ReadonlyArray<string> = [
   "high/descent arc",
   "high/approach and flare",
   "high/low fast pass",
-  "high/slowdown",
   "low/approach and flare",
   "low/low fast pass",
   "low/slowdown",
@@ -161,5 +164,30 @@ describe("the demand record", () => {
     expect(demandSummary([cellOf("calibrated", "on")], "2026-10-03T00:00:00Z")).toContain(
       RIDGED_CALIBRATED_NOTE,
     );
+  });
+});
+
+describe("stretchKeys", () => {
+  it("hold every 64 Hz pose's ground patch and its neighbours, stretch by stretch", () => {
+    const datum = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(5n));
+    const missed: string[] = [];
+    for (const stretch of trackStretches(datum)) {
+      const keys = new Set(stretchKeys(datum, stretch).map((key) => patchKeyString(key)));
+      for (let n = Math.ceil(stretch.startS * 64); n <= stretch.endS * 64; n += 1) {
+        const g = datum.groundDirAt(n / 64);
+        const key = patchKeyAt([g.x, g.y, g.z], stretch.level);
+        const around = [
+          key,
+          ...EDGES.map((edge) => edgeNeighbour(key, edge)),
+          ...cornerNeighbours(key),
+        ];
+        for (const each of around) {
+          if (each !== null && !keys.has(patchKeyString(each))) {
+            missed.push(`${stretch.piece} at ${n / 64} s: ${patchKeyString(each)}`);
+          }
+        }
+      }
+    }
+    expect(missed).toEqual([]);
   });
 });

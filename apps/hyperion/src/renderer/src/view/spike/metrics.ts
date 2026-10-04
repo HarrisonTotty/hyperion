@@ -30,7 +30,11 @@ export const TIMED_PASSES_A_FRAME = 64;
 
 /** One frame as the spike's loop sees it. */
 export interface FrameSample {
-  /** The engine's frame number, which its `PassTimes.frame` carries. */
+  /**
+   * The engine's last timing frame number by the end of this frame, which its `PassTimes.frame`
+   * carries. R01 numbers each resolve of its timer, one a `renderFrame`, so a spike frame of
+   * several views spans several: this frame owns those after the previous frame's last.
+   */
   readonly engineFrame: number;
   readonly scriptTimeS: number;
   /** The `requestAnimationFrame` timestamp, ms. */
@@ -58,6 +62,11 @@ export interface SpikeMetricsOptions {
   readonly rowOf: (label: string) => SpikePassRow;
   /** The predicted demand of a segment, a second, under each bound (Design note 19, T13.a). */
   readonly predicted: (segment: string) => SegmentPrediction;
+  /**
+   * The engine's last timing frame number before the run's first frame: earlier times (the
+   * materials' warm-up, a mip build) belong to no frame. 0 by default.
+   */
+  readonly firstEngineFrame?: number;
 }
 
 /** A segment's predicted patch demand under the hard bound and under min(hard, 4σ). */
@@ -94,8 +103,8 @@ export class SpikeMetrics {
   readonly #scriptTimesS: number[] = [];
   readonly #rafIntervalsMs: number[] = [];
   readonly #ourCodeMs: number[] = [];
-  /** The frame index of each engine frame number. */
-  readonly #frameOf = new Map<number, number>();
+  /** Each frame's last engine frame number, ascending. */
+  readonly #lastEngineFrame: number[] = [];
   readonly #passes = new Map<string, Array<number | null>>();
   readonly #segments = new Map<string, SegmentTally>();
   #lastRafMs: number | undefined;
@@ -130,8 +139,7 @@ export class SpikeMetrics {
 
   /** Records one frame. */
   frame(sample: FrameSample): void {
-    const index = this.#scriptTimesS.length;
-    this.#frameOf.set(sample.engineFrame, index);
+    this.#lastEngineFrame.push(sample.engineFrame);
     this.#scriptTimesS.push(sample.scriptTimeS);
     this.#rafIntervalsMs.push(
       this.#lastRafMs === undefined ? 0 : sample.rafTimestampMs - this.#lastRafMs,
@@ -160,7 +168,7 @@ export class SpikeMetrics {
       this.#timer = times.timer;
     }
     this.#timed = true;
-    const index = this.#frameOf.get(times.frame);
+    const index = this.#frameOfEngine(times.frame);
     if (index === undefined) {
       return;
     }
@@ -170,8 +178,28 @@ export class SpikeMetrics {
         series = Array.from({ length: this.#scriptTimesS.length }, () => null);
         this.#passes.set(label, series);
       }
-      series[index] = ns / 1e6;
+      // A label a frame times twice (the two instruments' `view:wireframe`) is summed.
+      series[index] = (series[index] ?? 0) + ns / 1e6;
     }
+  }
+
+  /** The frame owning an engine frame number: the first whose last is at or after it. */
+  #frameOfEngine(engineFrame: number): number | undefined {
+    const lasts = this.#lastEngineFrame;
+    if (engineFrame <= (this.#options.firstEngineFrame ?? 0) || lasts.length === 0) {
+      return undefined;
+    }
+    let lo = 0;
+    let hi = lasts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if ((lasts[mid] ?? Infinity) < engineFrame) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo < lasts.length ? lo : undefined;
   }
 
   /** Records an engine allocation event; uploads are tallied. */

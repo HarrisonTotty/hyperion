@@ -7,7 +7,7 @@
 //! | ----- | ---- |
 //! | [`Contact`](DetailLevel::Contact) | the identity with the kind unknown, and the position (the brainstorm's "unresolved contact") |
 //! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, the lists of moons and rings, and a population's extent; on a system, its belts and halo |
-//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b), and the figure, the reference spheroid (P14.T46.d); on a system, the belts' members, as bodies and in each belt's list |
+//! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b), the figure, the reference spheroid (P14.T46.d), and the photometry, the template and albedos the disc is drawn with (P14.T47.c); on a system, the belts' members, as bodies and in each belt's list |
 //! | [`Surface`](DetailLevel::Surface) | atmosphere, surface conditions and global figures (P14.T13, T24) |
 //! | [`Full`](DetailLevel::Full) | the hooks: surface seed, bulk composition, habitability, resources (P14.T23–T26) |
 //!
@@ -36,6 +36,7 @@ use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltPart, BeltSite};
 use crate::planetary::derive::figure::BodyFigure;
+use crate::planetary::derive::photometry::BodyPhotometry;
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
@@ -187,6 +188,9 @@ pub enum RecordSection {
     Surface,
     /// The hooks.
     Hooks,
+    /// The photometry: the phase-curve template and geometric albedos at the record's time
+    /// (P14.T47.c).
+    Photometry,
     /// The figure: the reference spheroid and its datum at the record's time (P14.T46.d).
     Figure,
     /// The rotation: the body-fixed frame, the same at every record time (P14.T46.b).
@@ -195,7 +199,7 @@ pub enum RecordSection {
 
 impl RecordSection {
     /// Every section, in the record's order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Label,
         Self::Mass,
         Self::Orbit,
@@ -205,6 +209,7 @@ impl RecordSection {
         Self::Bulk,
         Self::Surface,
         Self::Hooks,
+        Self::Photometry,
         Self::Figure,
         Self::Rotation,
     ];
@@ -219,7 +224,7 @@ impl RecordSection {
             | Self::Moons
             | Self::Rings
             | Self::Population => DetailLevel::MassAndOrbit,
-            Self::Bulk | Self::Figure | Self::Rotation => DetailLevel::Bulk,
+            Self::Bulk | Self::Photometry | Self::Figure | Self::Rotation => DetailLevel::Bulk,
             Self::Surface => DetailLevel::Surface,
             Self::Hooks => DetailLevel::Full,
         }
@@ -238,6 +243,7 @@ impl fmt::Display for RecordSection {
             Self::Bulk => "bulk",
             Self::Surface => "surface",
             Self::Hooks => "hooks",
+            Self::Photometry => "photometry",
             Self::Figure => "figure",
             Self::Rotation => "rotation",
         })
@@ -867,6 +873,7 @@ pub struct BodyRecord {
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
+    photometry: Section<BodyPhotometry>,
     figure: Section<BodyFigure>,
     rotation: Section<BodyFixedFrame>,
 }
@@ -887,6 +894,7 @@ impl BodyRecord {
             bulk: Section::NotModelled,
             surface: Section::NotModelled,
             hooks: Section::NotModelled,
+            photometry: Section::NotModelled,
             figure: Section::NotModelled,
             rotation: Section::NotModelled,
         }
@@ -966,6 +974,15 @@ impl BodyRecord {
         &self.hooks
     }
 
+    /// The photometry at the record's time: the phase-curve template, the geometric albedo in
+    /// B, V and R and the law's exponents (P14.T47.c). [`Section::NotApplicable`] for a ring
+    /// (whose photometry is R11's Hapke model), a belt, the halo and a body not present, and
+    /// [`Section::NotModelled`] where the bulk is.
+    #[must_use]
+    pub const fn photometry(&self) -> &Section<BodyPhotometry> {
+        &self.photometry
+    }
+
     /// The figure at the record's time: the reference spheroid every height is measured from,
     /// its pole, moment of inertia, law and datum (P14.T46.d). [`Section::NotApplicable`] where
     /// the rotation is, and [`Section::NotModelled`] where the bulk or the rotation is.
@@ -996,6 +1013,7 @@ impl BodyRecord {
             RecordSection::Bulk => self.bulk.state(),
             RecordSection::Surface => self.surface.state(),
             RecordSection::Hooks => self.hooks.state(),
+            RecordSection::Photometry => self.photometry.state(),
             RecordSection::Figure => self.figure.state(),
             RecordSection::Rotation => self.rotation.state(),
         }
@@ -1045,6 +1063,9 @@ impl BodyRecord {
             bulk: self.bulk.granted(at(RecordSection::Bulk), granted),
             surface: self.surface.granted(at(RecordSection::Surface), granted),
             hooks: self.hooks.granted(at(RecordSection::Hooks), granted),
+            photometry: self
+                .photometry
+                .granted(at(RecordSection::Photometry), granted),
             figure: self.figure.granted(at(RecordSection::Figure), granted),
             rotation: self.rotation.granted(at(RecordSection::Rotation), granted),
         }
@@ -1064,6 +1085,7 @@ pub struct BodyRecordBuilder {
     bulk: Section<BulkProperties>,
     surface: Section<Surface>,
     hooks: Section<Hooks>,
+    photometry: Section<BodyPhotometry>,
     figure: Section<BodyFigure>,
     rotation: Section<BodyFixedFrame>,
 }
@@ -1126,6 +1148,12 @@ impl BodyRecordBuilder {
         Self { hooks, ..self }
     }
 
+    /// The photometry section (P14.T47.c).
+    #[must_use]
+    pub fn photometry(self, photometry: Section<BodyPhotometry>) -> Self {
+        Self { photometry, ..self }
+    }
+
     /// The figure section (P14.T46.d).
     #[must_use]
     pub fn figure(self, figure: Section<BodyFigure>) -> Self {
@@ -1179,6 +1207,7 @@ impl BodyRecordBuilder {
             bulk: self.bulk,
             surface: self.surface,
             hooks: self.hooks,
+            photometry: self.photometry,
             figure: self.figure,
             rotation: self.rotation,
         };

@@ -367,6 +367,131 @@ pub fn horizon(
     max_range
 }
 
+/// The cumulative visual extinction from `origin` along `direction` at each distance of `nodes`
+/// (ascending, light-years), into `out` (cleared first): one march, as [`horizon`] marches, to the
+/// last node, recording the running dust column, so that a profile of n nodes costs one
+/// [`sightline`], not n (rendering plan R06, Design note 14).
+///
+/// Within a step the column is interpolated linearly. The march is from the origin outward, so,
+/// as for [`horizon`], it is an instrument's integral and not symmetric: its last value equals a
+/// [`sightline`] over the same segment to rounding, not bit for bit. Clouds among `modifiers` add
+/// their Plummer column from the origin to each node; holes are carved as [`sightline`] carves
+/// them. A node that is not finite or not positive reads zero, and one beyond 2¹⁹ ly the column
+/// to there. `cache` changes the cost, never the values; in [`NoiseMode::Mean`] it is not read.
+///
+/// # Panics
+///
+/// In debug builds, if `nodes` is not ascending.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "plan 07's interface, as horizon's: a line, its nodes, a mode, a quality, the modifiers, the caller's cache and the output"
+)]
+pub fn profile(
+    field: &GasField,
+    origin: &GalacticPosition,
+    direction: UnitVector,
+    nodes: &[LightYears],
+    mode: NoiseMode,
+    quality: Quality,
+    modifiers: &[GasModifier],
+    cache: &mut NoiseCache,
+    out: &mut Vec<Magnitudes>,
+) {
+    out.clear();
+    debug_assert!(
+        nodes.windows(2).all(|w| w[0].value() <= w[1].value()),
+        "a profile's nodes are ascending"
+    );
+    let clamp = |d: f64| {
+        if d.is_nan() || d <= 0.0 {
+            0.0
+        } else if d < HORIZON_LIMIT_LY {
+            d
+        } else {
+            HORIZON_LIMIT_LY
+        }
+    };
+    let Some(range) = nodes.last().map(|d| clamp(d.value())) else {
+        return;
+    };
+    let metres = direction
+        .components()
+        .map(|c| c * range * METRES_PER_LIGHT_YEAR);
+    let end = origin.translated(GalacticDisplacement::new(metres));
+    let Some(end) = end.filter(|_| range > 0.0) else {
+        out.extend(nodes.iter().map(|_| Magnitudes::ZERO));
+        return;
+    };
+    let line = Line::new(origin, &end);
+    let plan = Plan::new(field, &line, modifiers, quality);
+    let marcher = Marcher::new(field, &line, mode, plan.scale);
+    let fractions: Vec<f64> = nodes
+        .iter()
+        .map(|d| clamp(d.value()) / line.length_ly)
+        .collect();
+    let mut columns = vec![0.0; nodes.len()];
+    let mut next = 0;
+    let mut sums = Sums::default();
+    for (piece, steps) in plan.stepped() {
+        let dt = (piece.t1 - piece.t0) / f64::from(steps);
+        for step in 0..steps {
+            let start = piece.t0 + dt * f64::from(step);
+            // Every node at or before a step's start takes the column so far.
+            while next < fractions.len() && fractions[next] <= start {
+                columns[next] = sums.dust;
+                next += 1;
+            }
+            let before = sums.dust;
+            marcher.step(piece, steps, step, cache, &mut sums);
+            let stop = start + dt;
+            while next < fractions.len() && fractions[next] < stop {
+                let within = (fractions[next] - start) / dt;
+                columns[next] = before + (sums.dust - before) * within;
+                next += 1;
+            }
+        }
+    }
+    for column in &mut columns[next..] {
+        *column = sums.dust;
+    }
+    // Clouds in the canonical order, as sightline adds them, each from the origin to the node.
+    let mut clouds: Vec<Cloud> = modifiers
+        .iter()
+        .filter_map(|modifier| match *modifier {
+            GasModifier::Cloud {
+                centre,
+                core_radius,
+                central_density,
+                dust_per_hydrogen,
+            } => Some(Cloud {
+                centre,
+                core: core_radius.value(),
+                central: central_density.value(),
+                zeta: dust_per_hydrogen,
+            }),
+            GasModifier::Hole { .. } => None,
+        })
+        .collect();
+    clouds.sort_by(Cloud::order);
+    if !clouds.is_empty() {
+        for (column, &t) in columns.iter_mut().zip(&fractions) {
+            if t <= 0.0 {
+                continue;
+            }
+            let sub = Line::new(origin, &line.at(t.min(1.0)));
+            for cloud in &clouds {
+                *column +=
+                    cloud.zeta * plummer_column(&sub, &cloud.centre, cloud.core, cloud.central);
+            }
+        }
+    }
+    out.extend(
+        columns
+            .iter()
+            .map(|&dust| Magnitudes::new(dust / HYDROGEN_COLUMN_PER_MAG)),
+    );
+}
+
 /// A cloud's parts, as [`sightline`] sums its column.
 #[derive(Debug, Clone, Copy)]
 struct Cloud {
@@ -866,6 +991,72 @@ mod tests {
     use hyperion_testkit::lcg::Lcg;
 
     use super::*;
+
+    #[test]
+    fn a_profile_ends_on_the_sightline_and_rises_with_distance() {
+        use crate::galaxy::Galaxy;
+        let galaxy = Galaxy::new(crate::Seed::new(42));
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the cube");
+        let direction = UnitVector::from_components([-0.3, -0.9, 0.05]).expect("a direction");
+        let nodes: Vec<LightYears> = (0..=48)
+            .map(|k| LightYears::new(crate::math::exp10(f64::from(k) / 12.0)))
+            .collect();
+        for mode in [NoiseMode::Mean, NoiseMode::Realised] {
+            let mut cache = NoiseCache::with_capacity(1 << 14);
+            let mut out = Vec::new();
+            profile(
+                galaxy.gas(),
+                &sun,
+                direction,
+                &nodes,
+                mode,
+                Quality::Full,
+                &[],
+                &mut cache,
+                &mut out,
+            );
+            assert_eq!(out.len(), nodes.len());
+            assert!(
+                out.windows(2).all(|w| w[0].value() <= w[1].value()),
+                "{mode:?}"
+            );
+            let last = nodes[nodes.len() - 1].value();
+            let end = sun
+                .translated(GalacticDisplacement::new(
+                    direction
+                        .components()
+                        .map(|c| c * last * METRES_PER_LIGHT_YEAR),
+                ))
+                .expect("in the cube");
+            let line = sightline(
+                galaxy.gas(),
+                &sun,
+                &end,
+                mode,
+                Quality::Full,
+                &[],
+                &mut cache,
+            );
+            let (a, b) = (out[out.len() - 1].value(), line.a_v().value());
+            assert!(((a - b) / b).abs() < 1e-12, "{mode:?}: {a} against {b}");
+            if mode == NoiseMode::Mean {
+                // The mean field reads no cache: an empty one gives the same bits.
+                let mut again = Vec::new();
+                profile(
+                    galaxy.gas(),
+                    &sun,
+                    direction,
+                    &nodes,
+                    mode,
+                    Quality::Full,
+                    &[],
+                    &mut NoiseCache::with_capacity(0),
+                    &mut again,
+                );
+                assert_eq!(again, out);
+            }
+        }
+    }
     use crate::Seed;
     use crate::galaxy::fields::Fields;
     use crate::galaxy::gas::params::GasParams;

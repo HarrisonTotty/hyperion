@@ -1,5 +1,6 @@
 /**
- * The descent spike's main-process side (plan R05, T14.b): its measurement switches and its trace.
+ * The descent spike's main-process side (plan R05, T14.b and T13.c): its measurement switches, its
+ * trace and its IPC handlers.
  *
  * @remarks
  * Nothing here runs on an ordinary launch: the switches are added only when the spike flag is given
@@ -9,7 +10,9 @@
  * merges each list switch into the value already on the command line.
  */
 
-import type { ContentTracing, TraceConfig } from "electron";
+import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
+
+import type { DescentSpikeReport, SpikeEnd, SpikeResultsPaths } from "../preload/api";
 
 import {
   type ChromiumSwitch,
@@ -18,6 +21,7 @@ import {
   LIST_SWITCHES,
   mergeSwitchValue,
 } from "./graphics/switches";
+import { readDescentSpikeReport, readSpikeCapture, type SpikeCaptureFiles } from "./spikeReport";
 
 /** Whether Dawn's safety checks stay on for a spike run (`--dawn-safety`, T13.c). */
 export type DawnSafety = "on" | "off";
@@ -186,4 +190,102 @@ export class SpikeTrace {
     this.#recording = false;
     return this.#tracing.stopRecording(path);
   }
+}
+
+/** The spike's IPC channels, one per operation (T13.c); no channel name crosses the bridge. */
+export const SPIKE_CHANNELS = {
+  startTrace: "hyperion:spike:start-trace",
+  stopTrace: "hyperion:spike:stop-trace",
+  memory: "hyperion:spike:memory",
+  writeResults: "hyperion:spike:write-results",
+  writeCapture: "hyperion:spike:write-capture",
+  end: "hyperion:spike:end",
+} as const;
+
+/**
+ * What the spike's handlers do, injected so that a test drives them without Electron; `E` is the
+ * IPC event (`IpcMainInvokeEvent`).
+ */
+export interface SpikeHandlerDeps<E = IpcMainInvokeEvent> {
+  /** Registers a handler (`ipcMain.handle`). */
+  readonly handle: (
+    channel: string,
+    listener: (event: E, ...args: unknown[]) => Promise<unknown>,
+  ) => void;
+  /** Whether an event comes from the spike window's own page (`isOwnPage`). */
+  readonly isSender: (event: E) => boolean;
+  /** Starts and stops the trace and the 1 Hz memory sampler together. */
+  readonly startMeasuring: () => Promise<void>;
+  readonly stopMeasuring: () => Promise<void>;
+  /** Keeps the renderer's private bytes for the sampler's next sample. */
+  readonly rendererMemory: (bytes: number) => void;
+  /** Builds and writes the results file from a checked report. */
+  readonly writeResults: (report: DescentSpikeReport) => Promise<SpikeResultsPaths>;
+  /** Writes a checked capture, returning its directory. */
+  readonly writeCapture: (capture: SpikeCaptureFiles) => Promise<string>;
+  /** Ends the run with an exit status, and a reason for a failure. */
+  readonly end: (code: number, reason: string | null) => void;
+}
+
+/** Thrown back to the renderer for a call the main process refuses. */
+export class SpikeCallRefused extends Error {}
+
+/** `value` as an end of the run, or `null`. */
+export function readSpikeEnd(value: unknown): SpikeEnd | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const status: unknown = Reflect.get(value, "status");
+  const reason: unknown = Reflect.get(value, "reason");
+  if (status === "pass") {
+    return { status };
+  }
+  return status === "fail" && typeof reason === "string" ? { status, reason } : null;
+}
+
+/**
+ * Registers the spike's handlers (T13.c, Design note 18), each refusing a sender other than the
+ * spike window's own page and arguments that do not check, by rejecting the call.
+ */
+export function registerSpikeHandlers<E>(deps: SpikeHandlerDeps<E>): void {
+  const guarded = (
+    channel: string,
+    run: (args: ReadonlyArray<unknown>) => Promise<unknown>,
+  ): void => {
+    deps.handle(channel, async (event, ...args) => {
+      if (!deps.isSender(event)) {
+        throw new SpikeCallRefused(`${channel} refused: not the spike window's own page`);
+      }
+      return run(args);
+    });
+  };
+  guarded(SPIKE_CHANNELS.startTrace, () => deps.startMeasuring());
+  guarded(SPIKE_CHANNELS.stopTrace, () => deps.stopMeasuring());
+  guarded(SPIKE_CHANNELS.memory, async ([bytes]) => {
+    if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 0) {
+      throw new SpikeCallRefused(`${SPIKE_CHANNELS.memory} refused: not a byte count`);
+    }
+    deps.rendererMemory(bytes);
+  });
+  guarded(SPIKE_CHANNELS.writeResults, async ([value]) => {
+    const report = readDescentSpikeReport(value);
+    if (report === null) {
+      throw new SpikeCallRefused(`${SPIKE_CHANNELS.writeResults} refused: not a spike report`);
+    }
+    return deps.writeResults(report);
+  });
+  guarded(SPIKE_CHANNELS.writeCapture, async ([value]) => {
+    const capture = readSpikeCapture(value);
+    if (capture === null) {
+      throw new SpikeCallRefused(`${SPIKE_CHANNELS.writeCapture} refused: not a capture`);
+    }
+    return deps.writeCapture(capture);
+  });
+  guarded(SPIKE_CHANNELS.end, async ([value]) => {
+    const end = readSpikeEnd(value);
+    if (end === null) {
+      throw new SpikeCallRefused(`${SPIKE_CHANNELS.end} refused: not an end of the run`);
+    }
+    deps.end(end.status === "pass" ? 0 : 1, end.status === "pass" ? null : end.reason);
+  });
 }
