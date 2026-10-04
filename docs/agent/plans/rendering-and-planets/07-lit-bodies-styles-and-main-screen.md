@@ -193,7 +193,9 @@ disc integral of a law).
 export interface PhotometricLaw {
   // Design note 5
   readonly a: Rgb; // albedo scale per channel
-  readonly lommelSeeligerShare: number; // L, 0 (Lambert) to 1
+  // L(0), 0 (Lambert) to 1; R10.T10.b adds an optional L(α) curve in the phase row's alpha
+  // (decision-r07-t8b)
+  readonly lommelSeeligerShare: number;
   readonly template: PhaseTemplateId; // whose V curve f(α) is tabulated, clamped at 4
   readonly phaseExponent: Rgb; // s per channel in Φ_t(α)^s
 }
@@ -1123,7 +1125,9 @@ owner (delegated decision pending)". Accepted with amendments 2026-10-02 (decisi
 - **R07.T2.b The section, once plan 14 has built it.** After plan 14's subtask lands and
   `just gen-protocol` has run, `lib/system/bodiesWire.ts` and `lib/system/model.ts` parse
   `photometry` and the figure as `SectionDto`s, and `fromWire.ts` maps them to `BodyPhotometry` with
-  `provenance: "modelled"`, `bondRatioCheck` and `BodyFigure`. Tests: fixtures in each section
+  `provenance: "modelled"`, `bondRatioCheck` and `BodyFigure`; and `view/scene/fromServer.ts` reads
+  P14.T46.f's rotation section into the scene body's `rotation` through `rotation3FromRows`
+  (decision-p14-phase-j), which orients R10's class maps. Tests: fixtures in each section
   state; a stated ratio that disagrees with the law's q_V by more than 5% is logged for plan 14's
   owner. Acceptance: `pnpm test`, `just ci`.
 
@@ -1634,6 +1638,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
   draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
   clamp; the smooth blend of Design note 5 replaces the steps if the population shows jumps.
+- **Constant L on resolved discs** (decision-r07-t8b). The L = 1 templates' resolved discs depart
+  from the Moon's measured L(α) (McEwen 1996, LPSC XXVII, 841) at large phase. At equal flux the
+  flux-weighted RMS difference is 0.13 stop at 30° and 0.25 stop at 90°, and the cusps are up to
+  1.5 stop too bright. q, p and the point's flux are unaffected. R10.T10.b adds the L(α) channel
+  and moves these templates to McEwen's curve.
 - **Planetshine's uniform-disc approximation** shifts its terminator on the receiver by the
   neighbour's crescent offset, 5.7° at Io at quarter phase (0.59 R; T11's science check,
   2026-10-04, first given as about 4°); stated, not corrected. Its far-field illuminance errs by
@@ -1706,12 +1715,14 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   and completed by R10's own tasks in this plan's files, with the signatures unchanged: `body_brdf`
   with per-texel lunar-Lambert parameters (T4.c, completed by R10.T10.b); the disc sampling
   `classMap.ts` over surveyed texels through `DiscSurface`, with `lawFor(p, q, template)` elsewhere
-  (T8.b, completed by R10.T10.d); and `sphere_irradiance` with a per-sample local horizon whose
-  absence is the closed form (T6.a, completed by R10.T8.b). R11's ring shadow on the body is the
-  `ring_shadow_on_body` stub (T6.c). R12's stable `PassList` labels are `PHOTOREAL_PASS_LABELS`
-  (T7), and the resolution controller's bounds are the setting value
-  `ViewSettings.internalScaleBounds` (Design note 14, T17, T18). Not yet designed here: the
-  instrument panels' sizes in the cockpit layout, which R12 needs for its runs.
+  (T8.b, completed by R10.T10.d), which reads the map by a survey-masked bilinear reconstruction,
+  with the point integrating it (R10.T10.f) and the L(α) channel (R10.T10.b) (decision-r07-t8b); and
+  `sphere_irradiance` with a per-sample local horizon whose absence is the closed form (T6.a,
+  completed by R10.T8.b). R11's ring shadow on the body is the `ring_shadow_on_body` stub (T6.c).
+  R12's stable `PassList` labels are `PHOTOREAL_PASS_LABELS` (T7), and the resolution controller's
+  bounds are the setting value `ViewSettings.internalScaleBounds` (Design note 14, T17, T18). Not
+  yet designed here: the instrument panels' sizes in the cockpit layout, which R12 needs for its
+  runs.
 - **Re-validated at `ce7aeb3`** (2026-10-02, RM3; RM1 merged, R05 and R06 not built, `main`
   equal to the integration branch). Consumes swept against R01–R04 as built and their Risks: the
   "as built" notes in Consumes (R01's engine calls, `createView`'s name, per-call readback,
@@ -2600,7 +2611,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     pattern shows past the survey's own cells. On a large disc a coarse map's cells show as
     blocks. Filtering would need a one-texel gutter at the face edges, and would carry surveyed
     weight half a texel into unsurveyed ground. That choice is left to R10.T10.d and T10.e at the
-    hand-over.
+    hand-over. _Ruled 2026-10-04 (decision-r07-t8b):_ R10.T10.d replaces the nearest read with a
+    survey-masked bilinear one with face gutters.
   - **Where a hit falls.** R05's spheroid point of the unit direction d is M d (`spheroidPoint`),
     so d is the hit stretched along the pole by a ÷ c. It is read along the body-fixed axes of
     `LitBodyInput.rotation` (R02's `Rotation3`, body-fixed to galactic): x and y are packed, and z
@@ -2646,20 +2658,24 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     and the terrain agree at every phase only where L(α) equals that constant, which bears on
     R10.T10.e's 1/3-stop check at 30° and 90°. T8.b built Provides' shape, the smallest reversible
     choice. The lean is a per-law L(α) row beside f's in the phase table, read by the disc and the
-    terrain alike, added by R10.T10.d.
+    terrain alike, added by R10.T10.d. _Ruled 2026-10-04 (decision-r07-t8b):_ The L(α) curve goes in
+    the alpha channel of each law's own f row, built by R10.T10.b.
   - **The point keeps the photometry's law (for R10.T10.d and the owner).** At the 3 px switch, a
     patterned body's disc differs from its point by how far its visible hemisphere departs from the
     mean, up to the contrast of its faces.
     - Iapetus is an example. Its dark leading terrain is about a tenth as bright as its trailing
       terrain (Squyres and Sagan 1983, Nature 303, 782; Spencer and Denk 2010, Science 327, 432).
       Its faces seen whole differ about fivefold (mean geometric albedos 0.07 and 0.35; Morrison et
-      al. 1975, Icarus 24, 157).
+      al. 1975, Icarus 24, 157; to verify: the albedos are not in its abstract, decision-r07-t8b).
     - Against the mean of the two, the disc at the switch would be up to 1.7 times as bright as
       the point when it faces the trailing side, some 0.6 mag. Facing the leading side, it would be
       about a third as bright, some 1.2 mag fainter. These are estimates from those albedos, not
       measured in the renderer, and they assume the point's law has the map's mean albedo.
     - Integrating the map for the point (each frame, or tabulated by direction) is left to
       R10.T10.d or a follow-up.
+    - _Ruled 2026-10-04 (decision-r07-t8b):_ The point integrates the class map in a new R10.T10.f,
+      to T8.a's 1%. The Iapetus figures are about 1.4× and 0.28× against the area mean (calibrated
+      to Iapetus's V range of 10.2–11.9, from a secondary source: to verify).
   - **Tests** (`bodies/discSurface.test.ts`, on a synthetic two-class map with half its cells
     surveyed, i + j even, the pole tilted 55° and turned 30°):
     - At 40° of phase, each pixel of a 64 px, 10% oblate disc within 70% of its polar radius (one
