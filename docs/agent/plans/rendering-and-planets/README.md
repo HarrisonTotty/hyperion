@@ -420,8 +420,8 @@ it is recorded, and stays here so that the owner can review it.
   (2026-10-03, delegated; `decision-r06-t15-guide.md`), with amendments (`STARS V 7.4 mag EYE`,
   `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`, `INTEGRATED STARLIGHT`). **Still awaiting:**
   R02's other nomenclature rows (R02.T2.f, T15, T17, marked `_Draft (plan R02, …)_` in the guide);
-  R07.T16's photorealistic entries and phrases (`BODY PHOTOMETRY: NOT YET MODELLED`,
-  `ONE PHOTOREALISTIC VIEW ON LOW SETTING`, the meters); R08.T2's five atmosphere labels
+  R07.T16's photorealistic entries and phrases (`BODY PHOTOMETRY: NOT YET MODELLED`, the meters);
+  R08.T2's five atmosphere labels
   (`ATMOSPHERE: NOT RESOLVED`, `ATMOSPHERE: NOT YET MODELLED`, `AEROSOLS: NOT YET MODELLED`,
   `ATMOSPHERE: COMPUTING`, `ATMOSPHERE: APPROXIMATE`); R10.T13's readout notation
   (`~2140 m ± 180 m`, `ELEVATION`, `SLANT RANGE`, `DATUM`, contours); and R11's reading of item 2,
