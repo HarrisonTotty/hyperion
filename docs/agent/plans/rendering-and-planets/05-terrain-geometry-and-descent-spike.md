@@ -3412,6 +3412,39 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
   camera give −1,846.9 to −1,844.3 m. Looking down from below the baked surface, every patch's
   box lies behind the camera, so the frustum rightly culls them all, and the contact, 107 m
   below the ground, forces nothing. No selection change.
+- **T7, as built (lane B, with F1 of `decision-r05-high-bound.md`, 2026-10-04).**
+  `Selection.limitExcess`: the largest w_view × ρ ÷ τ_view of the split the budget refused, over
+  the views that see it, or 0 when not limited. Every drawn leaf (baked, where `heightRanges` are
+  given) meets τ × max(1, limitExcess ÷ w) in a view of weight w and tolerance τ.
+  - _0, not the ruling's 1, when not limited._ τ × max(1, limitExcess ÷ w) is then τ in every
+    view, so F2 needs no test of `limited`; 1 would give τ ÷ w (4τ) in a secondary view. For the
+    primary view the two agree, and T13.a reads the value over limited frames only.
+  - _τ × max(1, limitExcess ÷ w), not the ruling's τ × limitExcess._ The refused split's excess is
+    below 1 when only a secondary view wants it, and a secondary view's own ratio is
+    limitExcess ÷ w. T13.a's τ′ for the primary view is τ × max(1, limitExcess).
+  - _What holds._ Forced splits are made first and never refused, and the rest go in order of
+    weighted excess. So at the refusal, every baked leaf still wanting a split has a weighted
+    excess of at most limitExcess, the refused one included. Every other leaf meets τ or is at the
+    finest level. An unbaked leaf is held by the streaming gate, not the budget, and is drawn by
+    its baked ancestor (`TERRAIN: STREAMING`).
+  - _Tests (`select.test.ts`)._ Three cases:
+    - one view with no baked ranges (budget 300);
+    - a primary view plus a secondary at 0.25 and 4 px, over ranges baked to level 7 (budget 200);
+    - a primary view from orbit and a secondary at 0.25 from 1.5 km (budget 2,000). There the
+      refused split is one only the secondary wants, and limitExcess is about 0.91.
+
+    Each case checks:
+    - the excess is 0 with no budget, or with one not reached;
+    - under the budget, every baked leaf meets τ × max(1, limitExcess ÷ w) in every view that sees
+      it;
+    - the largest weighted excess of a baked leaf still wanting a split equals limitExcess;
+    - every split below it is touched by a split patch one level finer outside it, as a balance
+      split is.
+
+  - _Selection unchanged._ Digests of the selected keys and the demand, with no budget and under
+    each case's budget, match those taken from selection before the field was added. They also
+    guard the work on selection's cost (the ruling's item 4), and are re-recorded only when
+    selection's output is meant to change.
 - **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
   - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
     tests. The build adds:

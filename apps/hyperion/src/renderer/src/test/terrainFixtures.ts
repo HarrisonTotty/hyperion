@@ -60,5 +60,5 @@ export function selectionOf(
       seen: true,
     });
   }
-  return { patches, demand: [], limited: false };
+  return { patches, demand: [], limited: false, limitExcess: 0 };
 }

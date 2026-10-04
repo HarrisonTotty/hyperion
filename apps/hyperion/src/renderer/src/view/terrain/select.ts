@@ -70,6 +70,27 @@ export interface Selection {
    * 2026-10-03).
    */
   readonly limited: boolean;
+  /**
+   * The weighted excess w_view × ρ ÷ τ of the split `maxPatches` refused, from which each view's
+   * effective tolerance τ′ = τ × max(1, limitExcess ÷ w) follows; 0 where `limited` is false
+   * (decision-r05-high-bound.md, F1).
+   *
+   * @remarks
+   * It is dimensionless: the refused patch's largest, over the views that see it, of ρ ÷ the view's
+   * own `tauPx` times the view's weight, the order the greedy refines in. It can be below 1 while
+   * `limited` holds, where only a view of weight under 1 wanted the split, so τ′ is never
+   * τ × limitExcess alone.
+   *
+   * Selection splits the patch with the largest weighted excess first, forced patches before all,
+   * and stops at the first split the budget refuses. That patch stays a leaf, and every other leaf
+   * still wanting a split has a weighted excess no larger. So every leaf a view of weight w and
+   * tolerance τ sees has ρ ≤ τ′. Where `heightRanges` are given this holds for the baked leaves
+   * only: an unbaked leaf is held back by the streaming gate, not the budget, and is drawn by its
+   * baked ancestor (`TERRAIN: STREAMING`). It is 0 rather than 1 when not limited so that τ′ is τ
+   * for a secondary view too, where 1 would give τ ÷ w. It is for F2's morph bands and T13.a's
+   * descent record.
+   */
+  readonly limitExcess: number;
 }
 
 /**
@@ -511,8 +532,9 @@ class CandidateHeap {
  * of 2026-10-03): from the six roots, the patch with the largest weighted error is split first,
  * wherever a view that sees it finds ρ > τ or a grounded body's forced region reaches it, each
  * split balanced at once into a restricted quadtree, until nothing wants splitting or the next
- * split would take the selection past `maxPatches`, which then sets `limited`. Forced splits are
- * never refused, and a forced region is selected whether or not a view sees it.
+ * split would take the selection past `maxPatches`, which then sets `limited` and reports that
+ * split's weighted excess as `limitExcess`. Forced splits are never refused, and a forced region is
+ * selected whether or not a view sees it.
  *
  * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views.
  */
@@ -561,6 +583,7 @@ export function selectPatches(input: SelectionInput): Selection {
     }
   }
   let limited = false;
+  let limitExcess = 0;
   for (let node = heap.pop(); node !== undefined; node = heap.pop()) {
     if (!tree.isLeaf(node.key)) {
       continue;
@@ -570,6 +593,7 @@ export function selectPatches(input: SelectionInput): Selection {
     if (!node.forced && tree.size > maxPatches) {
       tree.rollback();
       limited = true;
+      limitExcess = node.weighted;
       break;
     }
     tree.commit();
@@ -586,7 +610,7 @@ export function selectPatches(input: SelectionInput): Selection {
       seen: node.seenBy !== 0,
     });
   }
-  return { patches, demand: demandOf(t, tree), limited };
+  return { patches, demand: demandOf(t, tree), limited, limitExcess };
 }
 
 /**
