@@ -268,43 +268,138 @@ export function canonicalFace(p: CubePoint, half: number): Face {
   return best;
 }
 
-function withAxis(p: CubePoint, axis: Axis, value: number): CubePoint {
-  switch (axis) {
+/** A cell of a level that {@link stepCellInto} writes: its face and its column and row. */
+export interface CellOut {
+  face: Face;
+  i: number;
+  j: number;
+}
+
+/**
+ * Writes into `out` the cell (i + `di`, j + `dj`) of the patch's level, folded onto the
+ * neighbouring face when it leaves this one, and returns `true`; returns `false`, writing nothing,
+ * when both coordinates leave it (a cube corner's diagonal).
+ *
+ * @remarks
+ * Rust's `step_cell`, exact integer geometry in half-cell units, with nothing allocated: the
+ * selection's balance steps to every new leaf's neighbours with it (R05.T7 perf (c)).
+ *
+ * @param di - The step in i, −1, 0 or 1.
+ * @param dj - The step in j, −1, 0 or 1.
+ */
+export function stepCellInto(out: CellOut, k: PatchKey, di: number, dj: number): boolean {
+  const half = 2 ** k.level;
+  const cu = 2 * k.i + 1 - half + 2 * di;
+  const cv = 2 * k.j + 1 - half + 2 * dj;
+  // `facePoint`'s point, axis by axis, with no array.
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  switch (k.face) {
     case 0:
-      return [value, p[1], p[2]];
+      x = half;
+      y = cu;
+      z = cv;
+      break;
     case 1:
-      return [p[0], value, p[2]];
+      x = -cu;
+      y = half;
+      z = cv;
+      break;
     case 2:
-      return [p[0], p[1], value];
+      x = -cu;
+      y = -cv;
+      z = half;
+      break;
+    case 3:
+      x = -half;
+      y = -cv;
+      z = -cu;
+      break;
+    case 4:
+      x = cv;
+      y = -half;
+      z = -cu;
+      break;
+    case 5:
+      x = cv;
+      y = cu;
+      z = -half;
+      break;
   }
-  return unreachable(axis);
+  const overX = Math.abs(x) > half;
+  const overY = Math.abs(y) > half;
+  const overZ = Math.abs(z) > half;
+  const over = (overX ? 1 : 0) + (overY ? 1 : 0) + (overZ ? 1 : 0);
+  if (over > 1) {
+    return false;
+  }
+  let face = k.face;
+  if (over === 1) {
+    // Onto the face the point left by: that axis back to the cube, this face's axis one cell in.
+    const own = faceAxis(k.face);
+    if (own === 0) {
+      x = Math.sign(x) * (half - 1);
+    } else if (own === 1) {
+      y = Math.sign(y) * (half - 1);
+    } else {
+      z = Math.sign(z) * (half - 1);
+    }
+    if (overX) {
+      x = Math.sign(x) * half;
+      face = faceOfAxis(0, x);
+    } else if (overY) {
+      y = Math.sign(y) * half;
+      face = faceOfAxis(1, y);
+    } else {
+      z = Math.sign(z) * half;
+      face = faceOfAxis(2, z);
+    }
+  }
+  // `faceCoords`' (u, v) on the face reached.
+  let u = 0;
+  let v = 0;
+  switch (face) {
+    case 0:
+      u = y;
+      v = z;
+      break;
+    case 1:
+      u = -x;
+      v = z;
+      break;
+    case 2:
+      u = -x;
+      v = -y;
+      break;
+    case 3:
+      u = -z;
+      v = -y;
+      break;
+    case 4:
+      u = -z;
+      v = x;
+      break;
+    case 5:
+      u = y;
+      v = x;
+      break;
+  }
+  out.face = face;
+  out.i = (u + half - 1) / 2;
+  out.j = (v + half - 1) / 2;
+  return true;
 }
 
 /**
  * The cell (i + `di`, j + `dj`) of the patch's level, folded onto the neighbouring face when it
- * leaves this one, or `null` when both coordinates leave it (a cube corner's diagonal): Rust's
- * `step_cell`, exact integer geometry in half-cell units.
+ * leaves this one, or `null` when both coordinates leave it (a cube corner's diagonal).
  */
 function stepCell(k: PatchKey, di: number, dj: number): PatchKey | null {
-  const half = 2 ** k.level;
-  const cu = 2 * k.i + 1 - half + 2 * di;
-  const cv = 2 * k.j + 1 - half + 2 * dj;
-  let p = facePoint(k.face, cu, cv, half);
-  const over = AXES.filter((a) => Math.abs(p[a]) > half);
-  const [first, second] = over;
-  let face: Face;
-  if (first === undefined) {
-    face = k.face;
-  } else if (second === undefined) {
-    const own = faceAxis(k.face);
-    p = withAxis(p, first, Math.sign(p[first]) * half);
-    p = withAxis(p, own, Math.sign(p[own]) * (half - 1));
-    face = faceOfAxis(first, p[first]);
-  } else {
-    return null;
-  }
-  const [u, v] = faceCoords(face, p);
-  return { face, level: k.level, i: (u + half - 1) / 2, j: (v + half - 1) / 2 };
+  const out: CellOut = { face: k.face, i: 0, j: 0 };
+  return stepCellInto(out, k, di, dj)
+    ? { face: out.face, level: k.level, i: out.i, j: out.j }
+    : null;
 }
 
 /** The patch of the same level across `edge`, on the neighbouring face across a face edge. */

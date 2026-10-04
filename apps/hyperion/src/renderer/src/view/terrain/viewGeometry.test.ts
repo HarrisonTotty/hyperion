@@ -9,7 +9,7 @@ import { distanceToBoxM, patchBounds, relativeBounds } from "./bounds";
 import { aboveHorizon, frustumOf, horizonCone, inFrustum } from "./cull";
 import { FACES, MAX_LEVEL, type PatchKey } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
-import { viewExcess, viewGeometry } from "./viewGeometry";
+import { distanceToBoxFromM, viewExcess, viewGeometry } from "./viewGeometry";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 
@@ -63,5 +63,41 @@ describe("a view's prepared geometry", () => {
     // Both outcomes are exercised.
     expect(seen).toBeGreaterThan(200);
     expect(culled).toBeGreaterThan(200);
+  });
+});
+
+describe("the distance to a patch's box from a point", () => {
+  it("is bounds.ts's to the number, over random points and patches", () => {
+    const random = seededRandom(0x64697374);
+    const mismatches: string[] = [];
+    let inside = 0;
+    for (let n = 0; n < 2_000; n += 1) {
+      const level = Math.floor(random() * (MAX_LEVEL - 4));
+      const side = 2 ** level;
+      const key: PatchKey = {
+        face: FACES[Math.floor(random() * 6)] ?? 0,
+        level,
+        i: Math.floor(random() * side),
+        j: Math.floor(random() * side),
+      };
+      const b = patchBounds(PLANET, key);
+      // Points about the patch, some inside its box, as a contact on the ground would be.
+      const spread = b.radiusM * (random() < 0.3 ? 0.2 : 3);
+      const point = vec3(
+        b.centre.x + (random() - 0.5) * spread,
+        b.centre.y + (random() - 0.5) * spread,
+        b.centre.z + (random() - 0.5) * spread,
+      );
+      const want = distanceToBoxM(relativeBounds(b, point));
+      const got = distanceToBoxFromM(b, point);
+      if (want === 0) {
+        inside += 1;
+      }
+      if (!Object.is(got, want)) {
+        mismatches.push(`${n}: ${got} ≠ ${want}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+    expect(inside).toBeGreaterThan(100);
   });
 });
