@@ -2002,6 +2002,55 @@ fn the_figure_section_by_kind_and_level() {
     assert!(figures > 1_000, "{figures}");
 }
 
+/// P14.T47.c (c) and T47.b (b): the photometry section's states by kind and level, `Ok` exactly
+/// where the bulk is; every sampled body's p q is at most 1 per band, and a generated airless-ice
+/// body or snowball states a ratio within 5% of 1.
+#[test]
+fn the_photometry_section_by_kind_and_level() {
+    use crate::planetary::derive::photometry::PhaseTemplate;
+    let (mut drawn, mut borrowed) = (0, 0);
+    for (ctx, system) in whole() {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let photometry = record.photometry();
+            match record.bulk() {
+                Section::Ok(_) => {
+                    let Section::Ok(photometry) = photometry else {
+                        panic!("{:?}: photometry with a bulk", record.index())
+                    };
+                    let (p, q) = (photometry.geometric_albedo(), photometry.phase_integral());
+                    for (p, q) in [(p.b, q.b), (p.v, q.v), (p.r, q.r)] {
+                        assert!(p > 0.0 && p * q <= 1.0 + 1e-12, "{:?}", record.index());
+                    }
+                    if matches!(
+                        photometry.template(),
+                        PhaseTemplate::AirlessIce | PhaseTemplate::Snowball
+                    ) {
+                        let ratio = photometry.bond_ratio();
+                        assert!((ratio - 1.0).abs() < 0.05, "{:?}: {ratio}", record.index());
+                        borrowed += 1;
+                    }
+                    drawn += 1;
+                }
+                Section::NotApplicable => assert_eq!(photometry, &Section::NotApplicable),
+                _ => assert_eq!(photometry, &Section::NotModelled, "{:?}", record.index()),
+            }
+            assert_eq!(
+                record
+                    .degrade(DetailLevel::MassAndOrbit)
+                    .section_state(RecordSection::Photometry),
+                SectionState::NotResolved
+            );
+            assert_eq!(
+                record
+                    .degrade(DetailLevel::Bulk)
+                    .section_state(RecordSection::Photometry),
+                record.section_state(RecordSection::Photometry)
+            );
+        }
+    }
+    assert!(drawn > 1_000 && borrowed > 10, "{drawn} {borrowed}");
+}
+
 /// P14.T46.c (c): a body's flattening is continuous in time across the clock window, except where
 /// its law locks between two times, a recorded state change.
 #[test]

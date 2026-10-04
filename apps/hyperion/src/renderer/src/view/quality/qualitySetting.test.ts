@@ -5,6 +5,7 @@ import {
   SETTINGS,
   TERRAIN_SETTINGS,
   type TerrainSettings,
+  terrainSettingsFor,
 } from "./qualitySetting";
 
 // One entry per field, so that a field added to `TerrainSettings` and missed here fails the typecheck.
@@ -53,5 +54,29 @@ describe("the quality settings", () => {
     for (const setting of QUALITY_SETTINGS) {
       expect(TERRAIN_SETTINGS[setting]).toBe(SETTINGS[setting].terrain);
     }
+  });
+
+  it("gives each setting's own terrain for no variant", () => {
+    for (const setting of QUALITY_SETTINGS) {
+      expect(terrainSettingsFor(setting)).toBe(SETTINGS[setting].terrain);
+      expect(terrainSettingsFor(setting, {})).toBe(SETTINGS[setting].terrain);
+    }
+  });
+
+  it("replaces only the variant's own fields", () => {
+    const high = SETTINGS.high.terrain;
+    expect(terrainSettingsFor("high", { vertexPath: "face-differences" })).toEqual({
+      ...high,
+      vertexPath: "face-differences",
+    });
+    expect(terrainSettingsFor("high", { normals: "mesh" })).toEqual({ ...high, normals: "mesh" });
+    expect(terrainSettingsFor("low", { normals: "double" })).toEqual({
+      ...SETTINGS.low.terrain,
+      normals: "double",
+    });
+  });
+
+  it("refuses the low setting with the baked-offsets path", () => {
+    expect(() => terrainSettingsFor("low", { vertexPath: "baked-offsets" })).toThrow(RangeError);
   });
 });

@@ -29,9 +29,9 @@ describe("photorealisticPasses", () => {
     expect(labels.slice(-4)).toEqual(["histogram", "bloom", "tonemap", "symbology"]);
   });
 
-  it("leaves the slots of plans not yet built empty", () => {
+  it("leaves the slots of plans not yet built empty, R06's sky built (R07.T8.a)", () => {
     const empty = photorealisticPasses("high").passes.filter((pass) => !pass.built);
-    expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R06", "R08", "R11"]));
+    expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R08", "R11"]));
   });
 });
 

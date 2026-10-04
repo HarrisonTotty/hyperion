@@ -274,11 +274,11 @@ type VerticalPiece = Pick<
   "durationS" | "startAltitudeM" | "endAltitudeM" | "verticalShape"
 > & {
   /**
-   * A `constant` piece that starts from rest and ramps to its rate over this many seconds, so that
-   * the level piece before it holds rate 0 (a lifted low pass, which then stays level); absent,
-   * the earlier piece blends into it instead.
+   * Whether this `constant` piece blends in from the previous piece's rate over its own first blend
+   * length, the previous one holding its rate to its end; otherwise the previous blends into it
+   * over its last.
    */
-  readonly leadInS?: number;
+  readonly leadIn?: boolean;
 };
 
 /** The blend's length at the end of a segment of `durationS` (Design note 19). */
@@ -346,22 +346,68 @@ function verticalKnots(segments: ReadonlyArray<VerticalPiece>): Knot[] {
       ];
       continue;
     }
-    const b = next === 0 && drop === 0 ? 0 : blendS(segment.durationS);
-    const lead = segment.leadInS;
-    if (lead !== undefined) {
-      // From rest: the drop is c (T − L ÷ 2 − b) + (c + next) b ÷ 2.
-      const c = (drop - (next * b) / 2) / (segment.durationS - lead / 2 - b / 2);
-      startRate[i] = 0;
-      knotsBack[i] = [
-        { tS: t0, rate: 0 },
-        { tS: t0 + lead, rate: c },
-        ...(b === 0
-          ? [{ tS: t1, rate: c }]
-          : [
-              { tS: t1 - b, rate: c },
-              { tS: t1, rate: next },
-            ]),
+    if (segments[i + 1]?.leadIn === true) {
+      // The next piece blends from this one's rate, so this one holds its own to its end.
+      if (segment.leadIn !== true) {
+        const c = drop / segment.durationS;
+        startRate[i] = c;
+        knotsBack[i] = [
+          { tS: t0, rate: c },
+          { tS: t1, rate: c },
+        ];
+        continue;
+      }
+    }
+    const b =
+      segments[i + 1]?.leadIn === true || (next === 0 && drop === 0)
+        ? 0
+        : blendS(segment.durationS);
+    if (segment.leadIn === true) {
+      // A run of pieces each blending in from the one before: solved forward from its first,
+      // which holds its rate, the last blending into the next piece's start as any other.
+      let r = i;
+      while (segments[r]?.leadIn === true) {
+        r -= 1;
+      }
+      const first = segments[r];
+      if (first === undefined || first.verticalShape !== "constant") {
+        throw new Error("a lead-in follows a constant piece");
+      }
+      let rate = (first.endAltitudeM - first.startAltitudeM) / first.durationS;
+      startRate[r] = rate;
+      knotsBack[r] = [
+        { tS: starts[r] ?? 0, rate },
+        { tS: (starts[r] ?? 0) + first.durationS, rate },
       ];
+      for (let m = r + 1; m <= i; m += 1) {
+        const piece = segments[m];
+        const s0 = starts[m] ?? 0;
+        if (piece === undefined) {
+          throw new Error(`segment ${m} is missing`);
+        }
+        const s1 = s0 + piece.durationS;
+        const lead = blendS(piece.durationS);
+        const end = m === i ? b : 0;
+        const endRate = m === i ? next : 0;
+        const pieceDrop = piece.endAltitudeM - piece.startAltitudeM;
+        // The drop is c T + (previous − c) L ÷ 2 + (end rate − c) b ÷ 2.
+        const c =
+          (pieceDrop - (rate * lead) / 2 - (endRate * end) / 2) /
+          (piece.durationS - lead / 2 - end / 2);
+        startRate[m] = rate;
+        knotsBack[m] = [
+          { tS: s0, rate },
+          { tS: s0 + lead, rate: c },
+          ...(end === 0
+            ? [{ tS: s1, rate: c }]
+            : [
+                { tS: s1 - end, rate: c },
+                { tS: s1, rate: next },
+              ]),
+        ];
+        rate = c;
+      }
+      i = r;
       continue;
     }
     const c = (drop - (next * b) / 2) / (segment.durationS - b / 2);
@@ -435,6 +481,15 @@ function planStretches(
   return out;
 }
 
+/**
+ * Thrown when the 64 Hz check still finds a piece below its clearance after the fourth lift
+ * (decision-r05-descent-clearance.md, rule 4): the seed's terrain cannot be cleared, which the spike
+ * refuses to fly (lane C's `DescentRefused`), unlike floors that do not match the plan.
+ */
+export class DescentUnclearable extends RangeError {
+  override readonly name = "DescentUnclearable";
+}
+
 /** How many times the interior check may lift a piece's boundaries before giving up (rule 4). */
 const MAX_LIFT_ROUNDS = 4;
 
@@ -450,6 +505,59 @@ export const FLOOR_TOLERANCE_M = 1e-6;
 
 /** The sampling rate of the interior check, Hz: the fixed-step run's (rule 4). */
 const CHECK_RATE_HZ = 64;
+
+/** Where a boundary lies inside a segment's pieces: its segment's end boundaries and its time fraction. */
+interface InteriorBoundary {
+  readonly first: number;
+  readonly end: number;
+  readonly fraction: number;
+}
+
+/** Each piece boundary inside a segment (between two of its pieces), or `null` at a segment's end. */
+function interiorBoundaries(
+  stretches: ReadonlyArray<TrackStretch>,
+): ReadonlyArray<InteriorBoundary | null> {
+  return Array.from({ length: stretches.length + 1 }, (_, b) => {
+    const left = stretches[b - 1];
+    const right = stretches[b];
+    if (left === undefined || right === undefined || left.segment !== right.segment) {
+      return null;
+    }
+    let first = b - 1;
+    while (stretches[first - 1]?.segment === right.segment) {
+      first -= 1;
+    }
+    let end = b;
+    while (stretches[end]?.segment === right.segment) {
+      end += 1;
+    }
+    const t0 = stretches[first]?.startS ?? 0;
+    const t1 = stretches[end - 1]?.endS ?? 0;
+    return { first, end, fraction: (right.startS - t0) / (t1 - t0) };
+  });
+}
+
+/**
+ * Raises each interior boundary to at least the lower of the highest boundary before it and the
+ * highest after it within its segment, its flown ends included, so that a split segment has no
+ * interior valley (the clearance ruling's follow-up, rule 2). It only ever raises.
+ */
+function fillValleys(boundary: number[], interior: ReadonlyArray<InteriorBoundary | null>): void {
+  for (const [b, at] of interior.entries()) {
+    if (at === null) {
+      continue;
+    }
+    let before = -Infinity;
+    for (let j = at.first; j <= b; j += 1) {
+      before = Math.max(before, boundary[j] ?? -Infinity);
+    }
+    let after = -Infinity;
+    for (let j = b; j <= at.end; j += 1) {
+      after = Math.max(after, boundary[j] ?? -Infinity);
+    }
+    boundary[b] = Math.max(boundary[b] ?? -Infinity, Math.min(before, after));
+  }
+}
 
 /** The vertical solve's result: the table's segments as flown, the pieces solved and the margins. */
 interface FlownProfile {
@@ -486,25 +594,45 @@ function flyOverFloors(
   const lowPass = stretches.findIndex(
     (stretch) => segments.find((s) => s.name === stretch.segment)?.clearsTrack === true,
   );
+  const interior = interiorBoundaries(stretches);
   const raise: number[] = Array.from({ length: count + 1 }, () => 0);
   for (let round = 0; ; round += 1) {
-    const boundary = table.map((tableM, b) => {
+    const lifted = (b: number, shapeM: number): number => {
       const left = stretches[b - 1];
       const right = stretches[b];
       return (
         Math.max(
-          tableM,
+          shapeM,
           left === undefined ? -Infinity : (floorsM[b - 1] ?? 0) + left.clearanceM,
           right === undefined ? -Infinity : (floorsM[b] ?? 0) + right.clearanceM,
         ) + (raise[b] ?? 0)
       );
-    });
+    };
+    // The segments' ends first: rule 3 against the table, the low pass held level.
+    const boundary = table.map((tableM, b) => (interior[b] === null ? lifted(b, tableM) : NaN));
     if (lowPass >= 0) {
       const level = Math.max(boundary[lowPass] ?? 0, boundary[lowPass + 1] ?? 0);
       boundary[lowPass] = level;
       boundary[lowPass + 1] = level;
     }
-    const flown = flySegments(segments, stretches, table, boundary);
+    // Then each split segment's interior, against the table's shape re-anchored to the flown ends
+    // and with its valleys filled (the clearance ruling's follow-up).
+    const shape = table.map((tableM, b) => {
+      const at = interior[b];
+      if (at === null || at === undefined) {
+        return tableM;
+      }
+      const startLiftM = (boundary[at.first] ?? 0) - (table[at.first] ?? 0);
+      const endLiftM = (boundary[at.end] ?? 0) - (table[at.end] ?? 0);
+      return tableM + (1 - at.fraction) * startLiftM + at.fraction * endLiftM;
+    });
+    for (const [b, at] of interior.entries()) {
+      if (at !== null) {
+        boundary[b] = lifted(b, shape[b] ?? 0);
+      }
+    }
+    fillValleys(boundary, interior);
+    const flown = flySegments(segments, stretches, shape, boundary);
     const vertical = new LinearProfile(
       flown.pieces[0]?.startAltitudeM ?? 0,
       verticalKnots(flown.pieces),
@@ -524,7 +652,7 @@ function flyOverFloors(
     }
     if (round >= MAX_LIFT_ROUNDS) {
       const worst = stretches[margins.indexOf(minFloorMarginM)]?.piece ?? "?";
-      throw new RangeError(
+      throw new DescentUnclearable(
         `the descent cannot clear its floors: ${worst} is ${(-minFloorMarginM).toFixed(2)} m short after ${MAX_LIFT_ROUNDS} lifts`,
       );
     }
@@ -539,7 +667,9 @@ function flyOverFloors(
 
 /**
  * The table's segments and the vertical solve's pieces for the boundary altitudes `boundary` (above
- * the site), `table` being the unlifted ones.
+ * the site), `table` being what they would be with no floor binding (the table's own at a
+ * segment's ends, its shape re-anchored to the flown ends inside one): a segment is split only
+ * where an interior boundary differs from it.
  */
 function flySegments(
   segments: ReadonlyArray<DescentSegment>,
@@ -549,10 +679,10 @@ function flySegments(
 ): { readonly segments: DescentSegment[]; readonly pieces: VerticalPiece[] } {
   const flown: DescentSegment[] = [];
   const pieces: VerticalPiece[] = [];
+  /** Whether each piece is a split segment's, and whether it is a lifted low pass (see the end). */
+  const splitAt: boolean[] = [];
+  const liftedLowPass: boolean[] = [];
   let previousEnd: number | null = null;
-  // A lifted low pass holds rate 0, and the piece after it starts from rest (rule 3: "level at
-  // A_lp"); the table's own, unlifted, keeps its gentle climb into the slowdown's blend, bit for bit.
-  let leadIn = false;
   for (const segment of segments) {
     const first = stretches.findIndex((s) => s.segment === segment.name);
     if (first < 0) {
@@ -567,6 +697,8 @@ function flySegments(
       previousEnd = null;
       flown.push(out);
       pieces.push(out);
+      splitAt.push(false);
+      liftedLowPass.push(false);
       continue;
     }
     let last = first;
@@ -581,31 +713,47 @@ function flySegments(
     for (let b = first + 1; b <= last; b += 1) {
       split ||= (boundary[b] ?? 0) !== (table[b] ?? 0);
     }
-    const ledIn = (piece: VerticalPiece, opening: boolean): VerticalPiece =>
-      opening && leadIn && piece.verticalShape === "constant"
-        ? { ...piece, leadInS: blendS(piece.durationS) }
-        : piece;
     if (split) {
       for (let k = first; k <= last; k += 1) {
         const stretch = stretches[k];
-        const durationS = (stretch?.endS ?? 0) - (stretch?.startS ?? 0);
-        pieces.push(
-          ledIn(
-            {
-              durationS,
-              startAltitudeM: boundary[k] ?? 0,
-              endAltitudeM: boundary[k + 1] ?? 0,
-              verticalShape: "constant",
-            },
-            k === first,
-          ),
-        );
+        pieces.push({
+          durationS: (stretch?.endS ?? 0) - (stretch?.startS ?? 0),
+          startAltitudeM: boundary[k] ?? 0,
+          endAltitudeM: boundary[k + 1] ?? 0,
+          verticalShape: "constant",
+        });
+        splitAt.push(true);
+        liftedLowPass.push(false);
       }
     } else {
-      pieces.push(ledIn(out, true));
+      pieces.push(out);
+      splitAt.push(false);
+      // A lifted low pass holds level (rule 3: "level at A_lp"); the table's own, unlifted,
+      // keeps its gentle climb into the slowdown's blend, bit for bit.
+      liftedLowPass.push(segment.clearsTrack && (boundary[first] ?? 0) !== (table[first] ?? 0));
     }
-    leadIn = segment.clearsTrack && (boundary[first] ?? 0) !== (table[first] ?? 0);
     previousEnd = endM;
+  }
+  // Where a split piece (or the piece after a lifted low pass) is faster than the one before, it
+  // blends in from that one's rate instead of the slower one blending into it. Either way the
+  // blend bows the piece hosting it by about the other's rate × b ÷ 2, so hosting it in the faster
+  // piece keeps the bow to the slower rate's: otherwise a level piece before a fall bulges (95 m
+  // before the flare's last piece under a 2 km ridge) and a gentle one before a climb dips (30 m),
+  // which the follow-up's no-valley rule forbids. A lifted low pass is level, so it holds rate 0.
+  for (let k = 0; k + 1 < pieces.length; k += 1) {
+    const slow = pieces[k];
+    const fast = pieces[k + 1];
+    if (
+      slow !== undefined &&
+      fast !== undefined &&
+      slow.verticalShape === "constant" &&
+      fast.verticalShape === "constant" &&
+      ((splitAt[k + 1] ?? false) || (liftedLowPass[k] ?? false)) &&
+      Math.abs((fast.endAltitudeM - fast.startAltitudeM) / fast.durationS) >
+        Math.abs((slow.endAltitudeM - slow.startAltitudeM) / slow.durationS)
+    ) {
+      pieces[k + 1] = { ...fast, leadIn: true };
+    }
   }
   return { segments: flown, pieces };
 }
@@ -806,8 +954,8 @@ export class DescentProfile {
   /**
    * @param terrain - The site's height and the stretches' floors; the script's altitudes are
    *   above the site, lifted where a stretch's floor less its clearance would be above them.
-   * @throws RangeError if `terrain.stretchMaxHeightsM` does not match the stretch plan, or a
-   *   floor cannot be cleared in four lifts.
+   * @throws RangeError if `terrain.stretchMaxHeightsM` does not match the stretch plan, and
+   *   {@link DescentUnclearable} (a `RangeError`) if a floor cannot be cleared in four lifts.
    */
   constructor(
     figure: BodyFigure,

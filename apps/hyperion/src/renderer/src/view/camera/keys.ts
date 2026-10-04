@@ -1,7 +1,8 @@
 import { vec3 } from "../../geometry/vec3";
 import { isTextEntry } from "../../lib/textEntry";
 import type { FreeCameraInput } from "./freeCamera";
-import type { CameraPreset } from "./state";
+import { STYLE_TOGGLE_KEY } from "../photoreal/style";
+import type { CameraPreset, RenderStyle } from "./state";
 
 /**
  * What the view's keys ask of its camera (plan R02, R02.T9.c).
@@ -14,7 +15,9 @@ export type ViewKeyAction =
   | { readonly kind: "preset"; readonly preset: CameraPreset }
   | { readonly kind: "target"; readonly step: -1 | 1 }
   | { readonly kind: "fov"; readonly step: -1 | 1 }
-  | { readonly kind: "rate"; readonly step: -1 | 1 };
+  | { readonly kind: "rate"; readonly step: -1 | 1 }
+  /** The view's style: one of R07's styles, or `toggle` to the other (the key `4`). */
+  | { readonly kind: "style"; readonly style: RenderStyle | "toggle" };
 
 /** The parts of a `KeyboardEvent` the bindings read. */
 export interface KeyPress {
@@ -36,8 +39,8 @@ export interface KeyPress {
 
 /**
  * The view's single keys, which act while `VIEW` is visible from any focus but a text field: `1`
- * `SEAT`, `2` `CHASE`, `3` `FREE`, `]` and `[` the next and previous target, `+` (or `=`) a
- * narrower field of view and `-` a wider one.
+ * `SEAT`, `2` `CHASE`, `3` `FREE`, `4` the other style (R07.T8.a, `STYLE_TOGGLE_KEY`), `]` and
+ * `[` the next and previous target, `+` (or `=`) a narrower field of view and `-` a wider one.
  *
  * @remarks
  * Split as plan 05's design note D3 splits the chart's. Digits and brackets leave the letters to
@@ -47,6 +50,7 @@ export const VIEW_SINGLE_KEYS: Readonly<Record<string, ViewKeyAction>> = {
   "1": { kind: "preset", preset: "seat" },
   "2": { kind: "preset", preset: "chase" },
   "3": { kind: "preset", preset: "free" },
+  [STYLE_TOGGLE_KEY]: { kind: "style", style: "toggle" },
   "]": { kind: "target", step: 1 },
   "[": { kind: "target", step: -1 },
   "+": { kind: "fov", step: -1 },

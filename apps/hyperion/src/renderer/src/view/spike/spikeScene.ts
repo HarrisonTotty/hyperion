@@ -25,7 +25,7 @@
 
 import { dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { CameraPose, Quaternion } from "../camera/pose";
-import { lookAlong, multiply, quaternionFromRows } from "../camera/quaternion";
+import { lookAlong, multiply, quaternionFromRows, rotate } from "../camera/quaternion";
 import type { ViewPosition } from "../coords/position";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import { TEST_HULL } from "../scene/hull";
@@ -40,24 +40,17 @@ import {
   keptTime,
 } from "../scenes/kept";
 import type { SunState } from "../atmosphere/hillaire";
-import { type Xyz, vertexSpacing, PATCH_QUADS } from "../terrain/cube";
+import type { Xyz } from "../terrain/cube";
 import {
   finestPatchSizeM,
   type GroundContact,
   heldRadiusM,
   isDescending,
 } from "../terrain/grounded";
-import {
-  cornerNeighbours,
-  EDGES,
-  edgeNeighbour,
-  type PatchKey,
-  patchKeyString,
-} from "../terrain/patchKey";
-import { type BodyFigure, planetGeometry } from "../terrain/planet";
-import type { DescentProfile, DescentSegment } from "./descentProfile";
+import { planetGeometry, spheroidNormal } from "../terrain/planet";
+import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
+import type { DescentPose, DescentProfile } from "./descentProfile";
 import { testPlanetRotationAt } from "./rotation";
-import { patchKeyAt } from "./surfaceQuery";
 
 /** The spike scene's name, as the label block's `SCENE` line shows it. */
 export const SPIKE_SCENE_NAME = "DESCENT SPIKE";
@@ -71,15 +64,8 @@ export const SPIKE_PLANET = keptBody(1);
 /** The scripted craft, the scene's own ship. */
 export const SPIKE_CRAFT = "spike-craft";
 
-/**
- * The test planet's figure: WGS 84's, a = 6,378,137 m and 1 ÷ f = 298.257223563 (NIMA TR8350.2,
- * 3rd edition, Table 3.1), as Design note 12 sets it.
- */
-export const TEST_PLANET_FIGURE: BodyFigure = {
-  equatorialRadiusM: 6_378_137,
-  polarRadiusM: 6_378_137 * (1 - 1 / 298.257_223_563),
-  pole: null,
-};
+/** The test planet's figure, WGS 84's (Design note 12): T13.a's, one definition for both. */
+export { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 /**
  * The synthetic coarse field each height worker holds, bytes: the brainstorm's 15 MB, the top of
@@ -127,9 +113,6 @@ export const GROUNDED_CLEARANCE_M = heldRadiusM(
   finestPatchSizeM(planetGeometry(TEST_PLANET_FIGURE, null)),
 );
 
-/** The level whose patches bound the terrain under the low pass's track (about 1.5 km across). */
-export const TRACK_BOUND_LEVEL = 12;
-
 /** How many points the scene's drawn path has, over the whole script. */
 const PATH_SAMPLES = 256;
 
@@ -137,15 +120,16 @@ const PATH_SAMPLES = 256;
 const ONSET_STEP_S = 1 / 64;
 
 /**
- * Whether the craft is grounded or descending at `tS` (Design note 9, on its clearance above the
- * site): descending by `isDescending`, or within {@link GROUNDED_CLEARANCE_M} of the ground, where
+ * Whether the craft is grounded or descending at `tS` (Design note 9, on its height above the
+ * floor under it, `heightAboveFloorM`): descending by `isDescending`, or within {@link GROUNDED_CLEARANCE_M} of the ground, where
  * a hover at zero vertical speed is a grounded body.
  */
 function descendingAt(profile: DescentProfile, tS: number): boolean {
   const pose = profile.poseAt(tS);
-  return (
-    isDescending(pose.clearanceM, pose.verticalSpeedMps) || pose.clearanceM <= GROUNDED_CLEARANCE_M
-  );
+  // The height above the floor under the craft, as T13.a's demand record judges it: the true
+  // height above the terrain, which over the site is the clearance.
+  const h = pose.heightAboveFloorM;
+  return isDescending(h, pose.verticalSpeedMps) || h <= GROUNDED_CLEARANCE_M;
 }
 
 /** When the scripted craft is a contact (Design note 9, held to the end once it last descends). */
@@ -265,70 +249,23 @@ export function spikeCameraAt(profile: DescentProfile, tS: number): CameraPose {
   };
 }
 
-/**
- * The patches of {@link TRACK_BOUND_LEVEL} under the ground track of the segments `bounded`
- * picks (by default the low pass, the segments that clear the track), with their neighbours, for
- * the surface query's bound.
- *
- * @remarks
- * The track is sampled at most half the level's shortest patch edge apart along the ground, from
- * its fastest point, and each sample's patch is taken with its eight neighbours (seven at a cube
- * corner): the track between two samples stays within one patch edge of the first, so no patch it
- * crosses is missed, and the neighbours add a margin of at least one patch edge to either side.
- * The ground track does not depend on the terrain (T13.a), so a profile made without it gives the
- * same keys as the one flown.
- */
-export function trackPatchKeys(
-  profile: DescentProfile,
-  bounded: (segment: DescentSegment) => boolean = (segment) => segment.clearsTrack,
-): ReadonlyArray<PatchKey> {
-  const level = TRACK_BOUND_LEVEL;
-  const figure = profile.figure;
-  const edgeM = PATCH_QUADS * vertexSpacing(figure.polarRadiusM, level).minM;
-  const keys = new Map<string, PatchKey>();
-  const take = (key: PatchKey | null): void => {
-    if (key !== null) {
-      keys.set(patchKeyString(key), key);
-    }
-  };
-  for (const [i, segment] of profile.segments.entries()) {
-    if (!bounded(segment)) {
-      continue;
-    }
-    const span = profile.segmentSpans()[i];
-    if (span === undefined) {
-      continue;
-    }
-    const fastestMps = Math.max(segment.startSpeedMps, segment.endSpeedMps, 1);
-    const stepS = edgeM / 2 / fastestMps;
-    const steps = Math.ceil((span.endS - span.startS) / stepS);
-    for (let n = 0; n <= steps; n += 1) {
-      const t = Math.min(span.startS + n * stepS, span.endS);
-      const d = profile.poseAt(t).groundDir;
-      const key = patchKeyAt([d.x, d.y, d.z], level);
-      take(key);
-      for (const edge of EDGES) {
-        take(edgeNeighbour(key, edge));
-      }
-      for (const corner of cornerNeighbours(key)) {
-        take(corner);
-      }
-    }
-  }
-  return [...keys.values()];
-}
-
 /** The landing site's direction for the surface query: the datum point beneath the script's end. */
 export function siteDirection(profile: DescentProfile): Xyz {
   const d = profile.siteDir;
   return [d.x, d.y, d.z];
 }
 
-/** The craft's path over the whole script, body-fixed, drawn as its predicted path. */
-function scriptedPath(profile: DescentProfile): ReadonlyArray<ViewPosition> {
+/**
+ * The craft's path still to fly, from `tS` to the end, body-fixed, drawn dashed as its predicted
+ * path: the flown part is no prediction, and at the end there is none (decision-r05-spike-ux.md).
+ */
+function remainingPath(profile: DescentProfile, tS: number): ReadonlyArray<ViewPosition> | null {
+  if (tS >= profile.durationS) {
+    return null;
+  }
   const path: ViewPosition[] = [];
   for (let n = 0; n < PATH_SAMPLES; n += 1) {
-    const t = (n / (PATH_SAMPLES - 1)) * profile.durationS;
+    const t = tS + (n / (PATH_SAMPLES - 1)) * (profile.durationS - tS);
     path.push({ kind: "body_fixed", body: SPIKE_PLANET, m: profile.positionAt(t) });
   }
   return path;
@@ -336,13 +273,12 @@ function scriptedPath(profile: DescentProfile): ReadonlyArray<ViewPosition> {
 
 /**
  * The descent spike as a kept scene: the star, the turning test planet and the scripted craft,
- * the own ship, with its path over the whole script as its predicted path; the camera is the
- * craft's own pose.
+ * the own ship, with its path still to fly as its predicted path; the camera is the craft's own
+ * pose.
  */
 export function spikeScene(profile: DescentProfile): KeptScene {
   const sunBody = sunDirectionBody(profile);
   const planetCentreM = scale(sunBody, -AU_M);
-  const path = scriptedPath(profile);
   return {
     name: SPIKE_SCENE_NAME,
     durationS: profile.durationS,
@@ -397,7 +333,11 @@ export function spikeScene(profile: DescentProfile): KeptScene {
               position: { kind: "body_fixed", body: SPIKE_PLANET, m: pose.positionM },
               attitude: camera.orientation,
             },
-            predictedPath: path.map((position) => ({ position, attitude: camera.orientation })),
+            predictedPath:
+              remainingPath(profile, tS)?.map((position) => ({
+                position,
+                attitude: camera.orientation,
+              })) ?? null,
             velocityMPerS: velocity,
           },
         ],
@@ -410,7 +350,13 @@ export function spikeScene(profile: DescentProfile): KeptScene {
 }
 
 /**
- * The orbit instrument's camera at `tS`: three planetary radii out over the craft, looking at the
+ * How many planetary radii out the orbit instrument stands: the disc's angular radius, asin(1 ÷ 7)
+ * = 8.2°, then fits the vertical field of a 60° view up to an aspect of about 3.5.
+ */
+export const ORBIT_INSTRUMENT_RADII = 7;
+
+/**
+ * The orbit instrument's camera at `tS`: {@link ORBIT_INSTRUMENT_RADII} planetary radii out over the craft, looking at the
  * planet's centre with the pole up (or the star's direction where the craft is over a pole), so
  * that the graticule, the craft and its path show together.
  */
@@ -419,11 +365,23 @@ export function orbitInstrumentPose(profile: DescentProfile, tS: number): Camera
   const out = normalise(craft);
   const pole = vec3(0, 0, 1);
   const up = Math.abs(dot(out, pole)) > 0.99 ? sunDirectionBody(profile) : pole;
-  const positionM = scale(out, 3 * TEST_PLANET_FIGURE.equatorialRadiusM);
+  const positionM = scale(out, ORBIT_INSTRUMENT_RADII * TEST_PLANET_FIGURE.equatorialRadiusM);
   const forward = scale(out, -1);
   return {
     frame: { kind: "body", body: SPIKE_PLANET },
     positionM,
     orientation: lookAlong(forward, normalise(sub(up, scale(forward, dot(up, forward))))),
   };
+}
+
+/**
+ * The scripted camera's elevation of view at `pose`, degrees: the angle of its forward axis above
+ * the local horizontal, the spheroid's tangent plane under it, `-90` at the nadir.
+ */
+export function cameraElevationDeg(pose: DescentPose): number {
+  const g = pose.groundDir;
+  const [nx, ny, nz] = spheroidNormal(TEST_PLANET_FIGURE, [g.x, g.y, g.z]);
+  const forward = rotate(pose.orientation, vec3(0, 0, -1));
+  const sine = forward.x * nx + forward.y * ny + forward.z * nz;
+  return (Math.asin(Math.min(1, Math.max(-1, sine))) * 180) / Math.PI;
 }

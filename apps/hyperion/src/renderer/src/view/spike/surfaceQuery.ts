@@ -4,21 +4,24 @@
  * direction, and a true upper bound of the surface over a set of patches.
  *
  * @remarks
- * The render thread cannot compile WebAssembly (R04.T10.a). The answers are measured once, before the descent starts, so that the scripted path stays a
- * pure function of the seed and these numbers (the orchestrator's ruling, 2026-10-03): the landing
- * site's height and the highest ground under the low part of the track.
+ * The render thread cannot compile WebAssembly (R04.T10.a). The answers are measured once, before
+ * the descent starts, so that the scripted path stays a pure function of the seed and these
+ * numbers (decision-r05-descent-clearance.md): the landing site's height and a floor under each
+ * stretch of the track.
  *
  * The height at a direction is R05.T4.c's collision interpolant, the module's `surfaceHeightM`:
  * the finest level's mesh, which is the ground the craft touches and the terrain drawn under it.
  *
- * The bound over patches is each patch's highest vertex plus the level bound ε_n of its level:
- * every vertex of level n lies on the level's mesh, whose distance from the finest surface is at
- * most ε_n (Design note 15), so no finest-level point of the patch lies above it.
+ * A floor over a group of patches is the highest baked vertex plus the level bound ε_n of its
+ * level, the greatest over the group: every vertex of level n lies within ε_n of the finest
+ * surface (Design note 15), and the finest mesh interpolates its own vertices, so no point of it
+ * over the group lies above the floor. A batch of groups bakes each patch once, however many groups
+ * share it.
  */
 
 import { WASM_NORMAL_SCALE, WASM_RIDGES, WASM_VERTEX_PATH } from "../terrain/workers/heightBake";
-import { type Xyz, uvToSt, xyzToFaceUv } from "../terrain/cube";
-import { type PatchKey, patchKeyString, unreachable } from "../terrain/patchKey";
+import type { Xyz } from "../terrain/cube";
+import { MAX_LEVEL, type PatchKey, patchKeyString, unreachable } from "../terrain/patchKey";
 import { LEVEL_TABLE_STRIDE } from "../terrain/planet";
 import type { TestPlanetRidges } from "../terrain/workers/messages";
 
@@ -35,6 +38,8 @@ export interface SurfaceQueryModule {
     ridges: number,
     skirtM: number,
   ) => { heightRangeM(): Float32Array; free(): void };
+  /** The RMS of the octaves level `level` omits, metres (T6's σ_n), for R10.T4's 4σ rule. */
+  readonly omittedSigmaM: (level: number, ridges: number) => number;
   /** R05.T4.c's collision interpolant at a body-fixed direction, metres above the datum. */
   readonly surfaceHeightM: (x: number, y: number, z: number, ridges: number) => number;
 }
@@ -42,6 +47,8 @@ export interface SurfaceQueryModule {
 /** A question to the query worker. */
 export type SurfaceQueryRequest =
   | { readonly kind: "level-table"; readonly id: number; readonly ridges: TestPlanetRidges }
+  /** σ_n of every level from 0 to {@link MAX_LEVEL}. */
+  | { readonly kind: "omitted-sigma"; readonly id: number; readonly ridges: TestPlanetRidges }
   /** The surface's height at each direction (body-fixed, x, y and z in turn). */
   | {
       readonly kind: "height";
@@ -49,32 +56,33 @@ export type SurfaceQueryRequest =
       readonly ridges: TestPlanetRidges;
       readonly dirs: Float64Array;
     }
-  /** A true upper bound of the finest surface over the patches. */
+  /** A true upper bound of the finest surface over each group of patches. */
   | {
-      readonly kind: "max-height";
+      readonly kind: "max-heights";
       readonly id: number;
       readonly ridges: TestPlanetRidges;
-      readonly keys: ReadonlyArray<PatchKey>;
+      readonly groups: ReadonlyArray<ReadonlyArray<PatchKey>>;
     };
 
 /** The worker's answer to a request of the same `id`. */
 export type SurfaceQueryReply =
   | { readonly kind: "level-table"; readonly id: number; readonly table: Float64Array }
+  /** σ_n for levels 0 to {@link MAX_LEVEL}, metres, at index n. */
+  | { readonly kind: "omitted-sigma"; readonly id: number; readonly sigmaM: Float64Array }
   | {
       readonly kind: "height";
       readonly id: number;
       readonly heightsM: Float64Array;
     }
-  | { readonly kind: "max-height"; readonly id: number; readonly maxM: number }
+  | {
+      readonly kind: "max-heights";
+      readonly id: number;
+      /** Each group's floor, metres above the datum, in the groups' order. */
+      readonly maxesM: Float64Array;
+      /** How many patches were baked: each distinct key once. */
+      readonly baked: number;
+    }
   | { readonly kind: "failed"; readonly id: number; readonly message: string };
-
-/** The key of the level-`level` patch whose area holds the direction `dir`, on its own face. */
-export function patchKeyAt(dir: Xyz, level: number): PatchKey {
-  const { face, u, v } = xyzToFaceUv(dir);
-  const side = 2 ** level;
-  const cell = (c: number): number => Math.min(side - 1, Math.max(0, Math.floor(uvToSt(c) * side)));
-  return { face, level, i: cell(u), j: cell(v) };
-}
 
 /** The highest baked vertex of `key`, metres above the datum. */
 function patchMaximumM(
@@ -132,23 +140,44 @@ export function answerSurfaceQuery(
           id: request.id,
           table: module.levelTable(WASM_RIDGES[request.ridges]),
         };
+      case "omitted-sigma":
+        return {
+          kind: "omitted-sigma",
+          id: request.id,
+          sigmaM: Float64Array.from({ length: MAX_LEVEL + 1 }, (_, level) =>
+            module.omittedSigmaM(level, WASM_RIDGES[request.ridges]),
+          ),
+        };
       case "height":
         return {
           kind: "height",
           id: request.id,
           heightsM: heights(module, request),
         };
-      case "max-height": {
+      case "max-heights": {
         const table = module.levelTable(WASM_RIDGES[request.ridges]);
-        let maxM = Number.NEGATIVE_INFINITY;
-        for (const key of request.keys) {
-          const epsilonM = table[LEVEL_TABLE_STRIDE * key.level];
-          if (epsilonM === undefined) {
-            throw new Error(`the level table has no level ${key.level}`);
+        const bounds = new Map<string, number>();
+        const maxesM = Float64Array.from(request.groups, (group) => {
+          if (group.length === 0) {
+            throw new Error("a group of patches to bound is empty");
           }
-          maxM = Math.max(maxM, patchMaximumM(module, key, request.ridges) + epsilonM);
-        }
-        return { kind: "max-height", id: request.id, maxM };
+          let maxM = Number.NEGATIVE_INFINITY;
+          for (const key of group) {
+            const name = patchKeyString(key);
+            let bound = bounds.get(name);
+            if (bound === undefined) {
+              const epsilonM = table[LEVEL_TABLE_STRIDE * key.level];
+              if (epsilonM === undefined) {
+                throw new Error(`the level table has no level ${key.level}`);
+              }
+              bound = patchMaximumM(module, key, request.ridges) + epsilonM;
+              bounds.set(name, bound);
+            }
+            maxM = Math.max(maxM, bound);
+          }
+          return maxM;
+        });
+        return { kind: "max-heights", id: request.id, maxesM, baked: bounds.size };
       }
     }
   } catch (error: unknown) {
@@ -209,6 +238,15 @@ export class SurfaceQuery {
     return reply.table;
   }
 
+  /** σ_n, the RMS of the octaves each level from 0 to 24 omits, metres, at index n. */
+  async omittedSigmaM(): Promise<Float64Array> {
+    const reply = await this.#ask({ kind: "omitted-sigma", id: 0, ridges: this.#ridges });
+    if (reply.kind !== "omitted-sigma") {
+      throw unexpected(reply);
+    }
+    return reply.sigmaM;
+  }
+
   /**
    * The surface's height at the body-fixed direction `dir`, metres above the datum: R05.T4.c's
    * collision interpolant.
@@ -230,13 +268,16 @@ export class SurfaceQuery {
     return heightM;
   }
 
-  /** A true upper bound of the finest surface over `keys`, metres above the datum. */
-  async maxHeightM(keys: ReadonlyArray<PatchKey>): Promise<number> {
-    const reply = await this.#ask({ kind: "max-height", id: 0, ridges: this.#ridges, keys });
-    if (reply.kind !== "max-height") {
+  /**
+   * A true upper bound of the finest surface over each group of `groups`, metres above the datum,
+   * in their order: one batch, each distinct patch baked once.
+   */
+  async maxHeightsM(groups: ReadonlyArray<ReadonlyArray<PatchKey>>): Promise<Float64Array> {
+    const reply = await this.#ask({ kind: "max-heights", id: 0, ridges: this.#ridges, groups });
+    if (reply.kind !== "max-heights") {
       throw unexpected(reply);
     }
-    return reply.maxM;
+    return reply.maxesM;
   }
 
   /** Stops the worker; questions outstanding fail. */

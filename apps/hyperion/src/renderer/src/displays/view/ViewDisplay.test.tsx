@@ -33,6 +33,8 @@ import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { rotate } from "../../view/camera/quaternion";
 import { fakeViewEngineSource } from "../../test/fakeViewEngine";
+import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
+import { requestAdapterOutcome } from "../../view/engine/platform";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
 import { DEFAULT_FOV_DEG } from "../../view/camera/projection";
 import {
@@ -45,6 +47,7 @@ import { precisionScene } from "../../view/scenes/precision";
 import { buildWireframeDrawList } from "../../view/wireframe/drawList";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
+import { PHOTOREAL_NOT_MADE } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
 
@@ -477,7 +480,9 @@ describe("the VIEW display", () => {
     await user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
     await settle();
     advance(300);
-    expect([engines.length, screen.queryByText("GRAPHICS ACQUIRING ADAPTER")]).toEqual([1, null]);
+    expect(engines.length).toBe(1);
+    // The view stands in its place (the style control may still say the adapter is acquired).
+    expect(screen.getByRole("application", { name: /^VIEW,/ }).tagName).toBe("CANVAS");
   });
 
   it("says AUTO is not available while there is no image to meter", async () => {
@@ -849,5 +854,102 @@ describe("the VIEW display's server scene", () => {
       view.socket.requestsOfKind("subscribe").length,
       screen.getByText("SCENE PENDING"),
     ]).toEqual([2, expect.anything()]);
+  });
+});
+
+/** A status store whose adapter has answered: a hardware adapter, both styles offered. */
+async function nominalStore(): Promise<GraphicsStatusStore> {
+  const store = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+  const outcome = await requestAdapterOutcome(
+    new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] })]),
+  );
+  store.dispatch({ kind: "adapter-outcome", outcome });
+  return store;
+}
+
+describe("the VIEW display's style (R07.T8.a)", () => {
+  it("shows the style control, the photorealistic style held back while the adapter offers only the wireframe", async () => {
+    const { advance } = setup();
+    await settle();
+    advance(100);
+    const panel = screen.getByRole("region", { name: "Style" });
+    expect([
+      within(panel).getByRole("button", { name: "WIREFRAME" }).getAttribute("aria-pressed"),
+      within(panel).getByRole("button", { name: "PHOTOREALISTIC" }).getAttribute("aria-disabled"),
+    ]).toEqual(["true", "true"]);
+  });
+
+  it("switches to the photorealistic style on 4, and states the provisional albedo", async () => {
+    const { user, advance, lastFrame } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
+    advance(100);
+    await settle();
+    advance(300);
+    expect([
+      screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC/ }).tagName,
+      labelBlock().includes("BODY ALBEDO: NOT YET MODELLED"),
+      labelBlock().includes("LIGHTING:"),
+      lastFrame()?.label,
+    ]).toEqual(["CANVAS", true, false, "symbology"]);
+  });
+
+  it("switches to the photorealistic style from its control", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    expect(screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC/ }).tagName).toBe(
+      "CANVAS",
+    );
+  });
+
+  it("states the lighting is not received for a kept scene without host discs", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PRECISION TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
+    advance(100);
+    await settle();
+    advance(300);
+    expect(labelBlock().includes("LIGHTING: HOSTS NOT RECEIVED")).toBe(true);
+  });
+});
+
+describe("the VIEW display's photorealistic style when its pipelines fail (R07.T8.a)", () => {
+  it("returns to the wireframe and holds the style back with the fault", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fake = fakeViewEngineSource();
+    const source: ViewEngineSource = {
+      ...fake.source,
+      load: async (outcome, status) => {
+        const engine = await fake.source.load(outcome, status);
+        return Object.assign(engine, {
+          createMaterialAsync: (): Promise<never> => Promise.reject(new Error("refused")),
+        });
+      },
+    };
+    const { user, advance } = setup({ store: await nominalStore(), source });
+    await settle();
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    expect([
+      screen.getByRole("application", { name: /^VIEW, WIREFRAME/ }).tagName,
+      screen.getByRole("button", { name: "PHOTOREALISTIC" }).getAttribute("aria-disabled"),
+      screen.getByText(PHOTOREAL_NOT_MADE).tagName,
+    ]).toEqual(["CANVAS", "true", "P"]);
   });
 });

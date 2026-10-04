@@ -903,6 +903,13 @@ impl DerivedMoon {
         self.body.equilibrium_temperature()
     }
 
+    /// The moon's atmosphere and surface at the time, from P14.T16's [`derive_body`] (P14.T13),
+    /// which its photometry reads (P14.T47.b).
+    #[must_use]
+    pub const fn atmosphere(&self) -> &crate::planetary::derive::atmosphere::Atmosphere {
+        self.body.atmosphere()
+    }
+
     /// The moon's own Hill radius about its planet, from P14.T16's [`derive_body`].
     #[must_use]
     pub const fn hill_radius(&self) -> Metres {

@@ -16,11 +16,14 @@
 //! - [`envelope`]: the brightest V any star of a mass can reach, which bounds a system before its
 //!   stars are generated.
 //! - [`caps`]: how far out the census looks in each layer.
+//! - [`census`]: the stars an observer sees brighter than a cut: the query, its plan and the
+//!   per-cell cache.
 //!
 //! Everything here only reads the galaxy: nothing changes generated output, and nothing draws a
 //! random word.
 
 pub mod caps;
+pub mod census;
 pub mod colour;
 pub mod disc;
 pub mod envelope;

@@ -15,6 +15,7 @@ import {
   SKY_VIEW_KERNEL,
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
+import { BODY_DISC_MATERIALS } from "../bodies/draw";
 import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
@@ -128,7 +129,12 @@ const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * R07's lit-body shading library (`shaders/litBody.wgsl`, R07.T4.c and T6.c), compiled and run
  * inside its probe kernel, since a library of functions is no material of its own.
  */
-const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [{ kind: "compute", spec: LIT_BODY_PROBE }];
+const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "compute", spec: LIT_BODY_PROBE },
+  // R07.T8.a's disc regime: its wholly covered pixels and its limb, one source.
+  { kind: "material", spec: BODY_DISC_MATERIALS.interior },
+  { kind: "material", spec: BODY_DISC_MATERIALS.limb },
+];
 
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [

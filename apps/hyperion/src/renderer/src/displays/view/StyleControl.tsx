@@ -1,20 +1,17 @@
 import { useId } from "react";
 
 import type { RenderStyle } from "../../view/camera/state";
-import type { StyleAvailability } from "../../view/engine/platform";
-import {
-  RENDER_STYLES,
-  STYLE_TOGGLE_KEY,
-  styleName,
-  styleRefusal,
-} from "../../view/photoreal/style";
+import { RENDER_STYLES, STYLE_TOGGLE_KEY, styleName } from "../../view/photoreal/style";
+import type { StyleRefusals } from "./styleRefusals";
 
 /** Props of {@link StyleControl}. */
 export interface StyleControlProps {
   /** The view's style. */
   readonly renderStyle: RenderStyle;
-  /** The styles the adapter offers (R01's `styleAvailability`). */
-  readonly availability: StyleAvailability;
+  /** Why each style is held back, `null` where it is offered (`styleRefusals`). */
+  readonly refusals: StyleRefusals;
+  /** Whether the reason is a fault of the graphics, shown in `--status-caution` while it lasts. */
+  readonly faulted: boolean;
   /** Called with the style chosen; a display control, so it acts at once. */
   readonly onStyle: (style: RenderStyle) => void;
 }
@@ -27,13 +24,18 @@ export interface StyleControlProps {
  * @remarks
  * A display control: it changes what the view draws, never the ship. A style the adapter refuses
  * (the photorealistic style on a software adapter) is held back and says why, in the guide's
- * words. Unmounted until R07.T8.a draws lit bodies, so that no view switches to an empty image
- * (the orchestrator's ruling, 2026-10-03).
+ * words: the graphics' condition, or the photorealistic view's failure to make its pipelines
+ * (`styleRefusals`). Mounted by R07.T8.a beside the camera controls.
  */
-export function StyleControl({ renderStyle, availability, onStyle }: StyleControlProps) {
+export function StyleControl({
+  renderStyle,
+  refusals: byStyle,
+  faulted,
+  onStyle,
+}: StyleControlProps) {
   const titleId = useId();
   const reasonId = useId();
-  const refusals = RENDER_STYLES.map((each) => styleRefusal(each, availability));
+  const refusals = RENDER_STYLES.map((each) => byStyle[each]);
   const reason = refusals.find((refusal) => refusal !== null) ?? null;
   return (
     <section className="panel view-style" aria-labelledby={titleId}>
@@ -67,7 +69,12 @@ export function StyleControl({ renderStyle, availability, onStyle }: StyleContro
         })}
       </fieldset>
       {reason === null ? null : (
-        <p className="view-style__reason" id={reasonId}>
+        <p
+          className={
+            faulted ? "view-style__reason view-style__reason--fault" : "view-style__reason"
+          }
+          id={reasonId}
+        >
           {reason}
         </p>
       )}

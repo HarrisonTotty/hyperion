@@ -2025,3 +2025,24 @@ CAPPED_LAYERS}` as decided, with `RayExtinctions` (each ray's realised `Full` pr
   `galaxy::gas::extinction::profile` was built here (its test, the last node equal to `sightline`
   to 10⁻¹², monotone, no cache read at `Mean`, is in `gas::extinction`); it takes the nodes as
   `&[LightYears]` and fills `&mut Vec<Magnitudes>`, as sketched.
+- **Deviations in T8.a, as built.** `sky::census::{SkyQuery, SkyQueryBuilder, Cone,
+BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX_N_MAX` (3 ×
+  10⁵) and a public `plan_cells(query, caps)`, the cells a census opens for given caps, which the
+  brute force shares so that both open the same cells. `with_caps_forced(radius)` is public, not
+  test-only (integration tests do not see `cfg(test)`), and returns `Result<_, BuildSkyQueryError>`
+  (`ForcedCap` unless the radius is finite, non-negative and within the root cube's diagonal,
+  `MAX_FORCED_CAP_LY`); `with_caps_forced_per_layer(&[(Layer, LightYears)])` forces each listed
+  layer and opens no cell for the rest (accepted 2026-10-03: the identity tests at the plan's
+  1,000 ly and 200 ly radii, about 10⁷ systems generated whole over every layer, are infeasible;
+  T8.e compares every layer at 150 ly near the Sun and 10 ly in the nuclear disc, and slowly the
+  plan's radii for C–E near the Sun and D–E in the nuclear disc, with a slow A/B check at a radius
+  a slow test can afford, since identity there tests that the envelope bounds every M dwarf). A
+  cell is kept for a cone when its bounding ball, padded, meets the cone. `SkyContext` is a plain
+  bundle of borrows with public fields, the census's one accessor to the tables (so the tables
+  lane's change of their source touches nothing here). The cell cache's trait, `NoSkyCellCache` and
+  the monotone rule, `serve_from_entry` returning `Served::{Served, Rebuild}`, are built here
+  because `SkyContext` holds a cache (T8.d adds the rest). Planned for T8.b, accepted 2026-10-03:
+  the per-record flux bound is n × the envelope's flux at `max_star_mass(m₁)` and the record's age
+  at the emitted time, not the primary's brief (ask A1's interim would cost a full generation
+  outside ±H), with n the generator's `MAX_COMPANIONS + 1` for a grid system (carve redraws can
+  change its count; a test holds no generated grid system above it) and 1 for a forced single.
