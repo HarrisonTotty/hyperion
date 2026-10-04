@@ -2097,3 +2097,43 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
       bit for bit, every record of those cells measured with no skip;
     - cells censused in reverse order with a one-entry noise cache equal a warm forward run;
     - the tallies add.
+- **Deviations in T8.c, as built.** `sky::census::merge` holds `SkyCensus` (`empty`, which is its
+  `Default`, and the getters `listed`, `overflow` and `tallies`), `merge_census` and `sky_order`.
+  - `merge_census(parts, n_max)` takes each part as one job's `(Vec<SkyStar>, CensusTallies)`,
+    from any `IntoIterator`, not the sketch's `Vec<Vec<SkyStar>>`. `census_cell` returns its
+    tallies (T8.b), so the merge adds them, and the split and order tests cover the tallies too.
+    The sum starts from the first part's tallies, so `feature_members_absent` is true if any part
+    lacks the members (the default's true, with no part); T16.a's parts can clear it.
+  - `sky_order` is public, for the band (T9) and the encoder (T11) to share. It orders by V
+    through `total_cmp`, brightest first, then by `SystemId`, then by `StarIndex`. Ordering by V
+    instead of by a computed flux keeps the order exact. No two stars share a system and an index,
+    so the order is strict and the sort is unstable, in place. The merge asserts, in release
+    builds too, that every V is finite (a NaN's sign, which places it in the order, differs
+    between targets) and that no star is in two parts at the same V. The listed are shrunk to fit
+    after the cut.
+  - **`CensusTallies` now carries `accepted` and `listed`.** T8.b's `LayerTally::listed`, the stars
+    kept, is renamed `accepted`. The new `listed` counts, per layer, the stars `merge_census` lists
+    within `n_max`; it is zero in a cell's or a job's tallies, and a merge recounts it.
+    `feature_members_absent` is one flag for the census, not one per layer. `candidates` (records
+    past the mass skip) and `centre_members` are kept beyond the sketch. For T11's DTO: `cells` →
+    `cells`, `generated` → `candidates_opened`, `accepted` → `accepted`, `listed` → `listed`,
+    `without_photometry` → `without_photometry` (each `u32` count narrowed); the census's flag goes
+    into every layer's `feature_members_absent`; `centre_members` > 0 → `SkyGapDto::CentreMembers`;
+    `without_photometry` > 0 → `SkyGapDto::WhiteDwarfs`.
+  - **`SkyStar` gains `layer()`**, its record's layer, so that the per-layer listed count also
+    holds for T16.a's feature members, whose IDs name no layer.
+  - Tests (`cargo test -p hyperion-sim sky::census::merge`):
+    - ten cells at the Sun (A–E, the Sun's own cell and the next along x, cut 9): each cell's part,
+      censused through a shared 64-entry noise cache, is order independent
+      (`assert_order_independent`) and equals the part a job's own cache gives;
+    - five splits into jobs (whole, one cell each forwards and backwards, interleaved, and uneven
+      parts reversed with an empty one) give the same census at `n_max` 1, a third of the stars and
+      unbounded, and at each of those cuts the census lists the brightest and counts the listed per
+      layer;
+    - 45 synthetic stars with 39 ties in V: six round-robin deals (1, 2, 3, 7, 45 and 60 jobs, each
+      part reversed) and the reversed list give the same bits; ties go by system, then star; a cut
+      inside a tie keeps the lower;
+    - `n_max` keeps the brightest and counts the listed per layer, at nine cuts;
+    - listed plus overflow is the unbounded census at every `n_max` from 1 to 47;
+    - a census merged again recounts its listed; the feature-member flag; a star in two parts and
+      a NaN V are refused; the empty census.

@@ -83,6 +83,7 @@ fn distance_modulus(d_ly: f64) -> f64 {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SkyStar {
     system: SystemId,
+    layer: Layer,
     star: StarIndex,
     apparent: GalacticPosition,
     distance: LightYears,
@@ -97,6 +98,13 @@ impl SkyStar {
     #[must_use]
     pub const fn system(&self) -> SystemId {
         self.system
+    }
+
+    /// The mass layer its system was censused in: its record's ([`SystemRecord::layer`]), which
+    /// for a grid system is its ID's.
+    #[must_use]
+    pub const fn layer(&self) -> Layer {
+        self.layer
     }
 
     /// The star's index in its system.
@@ -143,12 +151,35 @@ impl SkyStar {
     }
 }
 
-/// What one layer's cells held (Design note 10's tallies).
+#[cfg(test)]
+impl SkyStar {
+    /// Star `star` of grid system `system` at apparent V `v`, its other fields placeholders: for
+    /// the merge's order tests, which need ties in V that no census gives.
+    #[must_use]
+    pub(super) fn placeholder(system: SystemId, star: StarIndex, v: f64) -> Self {
+        Self {
+            system,
+            layer: system.layer().expect("a grid system"),
+            star,
+            apparent: GalacticPosition::from_light_years([0.0, 26_000.0, 68.0])
+                .expect("in the cube"),
+            distance: LightYears::new(1.0),
+            emitted: UniverseTime::EPOCH,
+            v: Magnitudes::new(v),
+            a_v: Magnitudes::ZERO,
+            colour: StarColour::default(),
+        }
+    }
+}
+
+/// What one layer's cells held (Design note 10's tallies), and how many of its stars a merge
+/// listed (Design note 11).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct LayerTally {
     cells: u64,
     candidates: u64,
     generated: u64,
+    accepted: u64,
     listed: u64,
     without_photometry: u64,
     centre_members: u64,
@@ -173,7 +204,14 @@ impl LayerTally {
         self.generated
     }
 
-    /// Stars kept.
+    /// Stars kept: brighter than the cut, plus their eye colour offset where the eye is asked.
+    #[must_use]
+    pub const fn accepted(&self) -> u64 {
+        self.accepted
+    }
+
+    /// Of the accepted, the stars [`merge_census`](super::merge_census) listed within `n_max`; the
+    /// rest are its overflow. Zero in a cell's or a job's tallies, before the merge.
     #[must_use]
     pub const fn listed(&self) -> u64 {
         self.listed
@@ -195,6 +233,7 @@ impl LayerTally {
         self.cells += other.cells;
         self.candidates += other.candidates;
         self.generated += other.generated;
+        self.accepted += other.accepted;
         self.listed += other.listed;
         self.without_photometry += other.without_photometry;
         self.centre_members += other.centre_members;
@@ -241,6 +280,25 @@ impl CensusTallies {
             a.add(b);
         }
         self.feature_members_absent |= other.feature_members_absent;
+    }
+
+    /// These tallies with plan 09's feature members present: for the merge's tests, until T16.a
+    /// brings the members.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) const fn with_feature_members_present(mut self) -> Self {
+        self.feature_members_absent = false;
+        self
+    }
+
+    /// Sets each layer's [`LayerTally::listed`] to the number of `listed` in it: the merge's.
+    pub(super) fn set_listed(&mut self, listed: &[SkyStar]) {
+        for tally in &mut self.layers {
+            tally.listed = 0;
+        }
+        for star in listed {
+            self.layer_mut(star.layer).listed += 1;
+        }
     }
 }
 
@@ -519,6 +577,7 @@ pub fn census_record(
         }
         out.push(SkyStar {
             system: record.id(),
+            layer,
             star: index,
             apparent,
             distance: LightYears::new(d),
@@ -527,7 +586,7 @@ pub fn census_record(
             a_v,
             colour,
         });
-        tally.layer_mut(layer).listed += 1;
+        tally.layer_mut(layer).accepted += 1;
     }
 }
 
@@ -889,7 +948,7 @@ mod tests {
         );
         assert!(tally.layer(Layer::D).without_photometry() >= 1);
         assert_eq!(
-            tally.layer(Layer::D).listed(),
+            tally.layer(Layer::D).accepted(),
             u64::try_from(out.len()).expect("few")
         );
     }
@@ -1105,7 +1164,8 @@ mod tests {
     fn tallies_add_every_layers_counts() {
         let mut a = CensusTallies::default();
         a.layer_mut(Layer::C).cells = 2;
-        a.layer_mut(Layer::C).listed = 5;
+        a.layer_mut(Layer::C).accepted = 5;
+        a.layer_mut(Layer::C).listed = 2;
         let mut b = CensusTallies::default();
         b.layer_mut(Layer::C).cells = 1;
         b.layer_mut(Layer::E).candidates = 7;
@@ -1114,7 +1174,10 @@ mod tests {
         b.layer_mut(Layer::A).centre_members = 4;
         a.add(&b);
         let c = a.layer(Layer::C);
-        assert_eq!((c.cells(), c.listed(), c.candidates()), (3, 5, 0));
+        assert_eq!(
+            (c.cells(), c.accepted(), c.listed(), c.candidates()),
+            (3, 5, 2, 0)
+        );
         let e = a.layer(Layer::E);
         assert_eq!(
             (e.candidates(), e.generated(), e.without_photometry()),
