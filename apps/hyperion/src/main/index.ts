@@ -47,7 +47,7 @@ function reportLoadFailure(error: unknown): void {
  */
 function resolveArgs(): ClientArgs | undefined {
   try {
-    return parseClientArgs(userArgs(process.argv, app.isPackaged), app.getVersion());
+    return parseClientArgs(userArgs(process.argv, app.isPackaged), __APP_VERSION__);
   } catch (error) {
     if (error instanceof CommanderError) {
       // The help, the version or the usage error has been written already.
@@ -213,7 +213,7 @@ function startSpikeSession(
       startedAt,
       machine: await describeMachine(nodeMachineSources(() => app.getGPUInfo("basic"))),
       versions: {
-        app: app.getVersion(),
+        app: __APP_VERSION__,
         electron: process.versions.electron,
         chromium: process.versions.chrome,
         node: process.versions.node,
