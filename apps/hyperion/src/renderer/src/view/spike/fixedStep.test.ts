@@ -80,6 +80,21 @@ describe("the fixed-step run", () => {
     expect(run.frames.length).toBeLessThan(9);
   });
 
+  it("stops at the wall deadline however long the bakes took", () => {
+    let clock = 0;
+    const run = orbitRun({
+      nowMs: () => clock,
+      rangeOf: (key) => {
+        clock += 10;
+        return levelHeightRangeM(PLANET, key.level);
+      },
+      deadlineMs: Infinity,
+      wallDeadlineMs: 15,
+    });
+    expect(run.truncated).toBe(true);
+    expect(run.frames.length).toBeLessThan(9);
+  });
+
   it("figures a segment over its measured frames alone", () => {
     const run = orbitRun();
     const [coast] = segmentFigures(run, 8);
