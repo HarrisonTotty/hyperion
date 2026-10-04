@@ -3525,6 +3525,8 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       its disc small.
     - **Found for lane D:** at seed 7, the orbit coast shows a vertical speed of +18.37 m/s while
       the height above the site climbs from 400.0 to 401.0 km. The coast should be level.
+      **Fixed (2026-10-04):** the coast is now a `level` segment (T13.a's "The orbit coast flies
+      level", below).
   - _The metrics seam_ (the orchestrator, 2026-10-03, agreed with lane D).
     - `DescentSpike` takes `engineSource` (T13.c passes the source that wraps the GPU through
       `pipelineShim` or `capture`) and `listeners`: `onFrame(SpikeFrameSample)` and
@@ -3569,9 +3571,10 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     `DESCENT_SEGMENTS`, the table as data with each segment's vertical shape. The vertical speeds
     are re-fitted, not the durations: each boundary altitude holds exactly with the 5 s (1 s)
     velocity blends, so a level segment before a descending one climbs gently (the orbit coast by
-    about 18 m/s, the low pass by about 0.07 m/s, more over raised terrain). The horizontal speed is
+    about 18 m/s, the low pass by about 0.076 m/s, more over raised terrain). The horizontal speed is
     the ground track's on a great circle of the mean radius; the camera looks along the track,
-    pitched 30° down at 300 m/s and above, turning to the nadir at rest.
+    pitched 30° down at 300 m/s and above, turning to the nadir at rest. **Corrected
+    (2026-10-04):** the orbit coast is now flown level, and the arc blends in from it (below).
   - _Terrain (orchestrator's ruling, 2026-10-03):_ `terrain` takes `siteHeightM` (the terrain's
     height at the site) and `trackMaxHeightM` (an upper bound on the terrain under the low pass's
     track, baked ranges plus ε over the patches under it), both measured once by the caller (lane
@@ -3664,6 +3667,25 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     segment, against the 2 ms budget of decision-r05-patch-demand.md 4d on high's approach and
     slowdown at most (single calls reach 170 ms at the cold start and at segment changes,
     provisional under load).
+  - **Record: the whole descent under the hard bound** (2026-10-04,
+    `docs/measurements/descent-spike/2026-10-04-demand-hard.{json,md}`, seed 7, none truncated).
+    The four cells ran as four parallel processes, each under its own selection-time and wall-time
+    caps (`--wall-cap-hours`, added after the machine's freeze killed a sequential run that writes
+    only at its end; the record is now also rewritten after every cell). Ridges on, high ran at
+    16 Hz, a stated sampling reduction. The orbit coast still has seed 7's ~18.4 m/s climb (a
+    T13.a fix is queued), so its figures may shift. Under the hard bound the budget binds only with
+    ridges on: high is `limited` 100% of the orbit coast and the arc and 74% of the approach (980 of
+    981 patches), low 48% of the arc and 25% of the approach; with ridges off it never binds. Demand
+    ÷ D, high then low, ridges off: coast 0.65 / 0.67, arc 0.62 / 0.82, approach 0.59 / 0.80, low
+    pass 1.15 / 1.31, slowdown 0.84 / 1.94; ridges on: 0.13 / 0.58, 0.11 / 0.50, 0.69 / 1.79,
+    0.97 / 1.16, 0.50 / 1.19; the vertical descent and the hover select nothing new (0) below
+    the cap altitude, as before. So under the hard bound D predicts every unbudgeted moving
+    segment within a factor of two on both settings, which the 4σ rule did not on low (its k is
+    small enough that the quadtree's granularity floors the count), and where the budget binds the
+    demand falls well under D, as a cap must. The low fast pass's demand peaks at 357 a second
+    (high, ridges off) and 374 (high, ridges on, 16 Hz) against D's 310 and 385. `selectPatches`
+    p95 is 0.3–13.1 ms, over the 2 ms budget on high in every moving segment (provisional; four
+    processes at once).
   - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
     camera underground (the direction above), not selection: lane B's
     `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With
@@ -3674,6 +3696,64 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     against D's 311), `selectPatches` p50 116 ms. Lane B fixed it (5d90fab, the streaming gate,
     resident ancestors pinned, deepest evicted first); the hard cells' full record follows the
     collapse's fix.
+  - **Fixed: the orbit coast flies level** (2026-10-04, lane D, on lane C's finding in T13.b).
+    - _The cause._ At seed 7 the coast climbed at +18.37 m/s, from 400.0 to 401.0 km above the
+      site. The cause was the vertical re-fit, not the geometry. The solve put the 5 s blend from
+      the coast's rate to the descent arc's −422.5 m/s inside the coast's last 5 s, where Design
+      note 19 places blends. To keep the coast's end at 400 km, it then re-fitted the coast's rate
+      to 422.5 × 2.5 ÷ 57.5 = 18.37 m/s. The figure is the same at every seed. The pose's
+      `verticalSpeedMps` and the velocity's component along the spheroid's normal agreed to
+      10⁻⁵ m/s, so no geocentric direction was mixed in.
+    - _What "level" means here._ The height above the datum the path is flown over is constant:
+      the spheroid, along its normal over the ground direction d, plus the site's height. The
+      vertical speed is therefore 0. The geocentric radius is not constant. At a constant height
+      over an oblate spheroid, |p| changes as the track crosses latitudes, at a rate of up to
+      a f |sin 2φ dφ/dt| ≈ 26 m/s with the ground track at 7.67 km/s on the mean radius (the camera
+      moves at about 8.15 km/s at 400 km). At seed 7 the rate is 16.5 to 17.1 m/s, so |p| rises
+      1.01 km over the coast while its height stays 400 km: a geocentric check would still see a
+      "climb". A Keplerian circular orbit would keep |p| instead. The scripted camera holds its
+      height, as the table has it.
+    - _As built._
+      - `VerticalShape` gains `level`, and the coast is `level`. A level segment holds its rate
+        (its drop over its duration, 0 here) and hosts no blend.
+      - The segment after a level one must be `constant`; the constructor throws otherwise. It
+        blends in from rest over its own first 5 s (`VerticalPiece.leadIn`). Design note 19's
+        "over the last 5 s of the earlier segment" no longer holds after a level segment.
+      - The arc's rate between blends becomes −423.7 m/s (was −422.5). The arc flies up to 1.05 km
+        higher just after its start. The gap closes linearly to about 3 m at its end blend and to 0
+        at its end.
+      - A lifted low pass is now a `level` segment too, replacing `flySegments`' own flag. Its
+        knots are the same, bit for bit, which the test pins.
+    - _Tests_ (`descentProfile.test.ts`). At seeds 7 (over its site, −1,845.8 m), 0 and 5, every
+      64 Hz pose of the coast has:
+      - `clearanceM` exactly 400 km and `verticalSpeedMps` exactly 0;
+      - the position 400 km above the site's height along the spheroid's normal, to 1 µm, and less
+        than 1 µm off that normal;
+      - the velocity's component along the normal below 1 mm/s.
+
+      The path is closed-form, not integrated. The tolerances cover the rounding of
+      |p| ≈ 6.8 × 10⁶ m (0.9 nm a ulp) and of `poseAt`'s ±1 ms central difference (about 5 µm/s;
+      truncation 2 nm/s). The bug was 18.37 m/s. Also tested:
+      - the arc starts from rest and reaches its rate after 5 s;
+      - 003a6a3's fingerprints still hold for the table with a climbing coast;
+      - from the approach on, today's poses lie within 1 µm of that table's.
+
+    - _Windows._ `--write-fixture` rewrote the fixture byte for byte (1,979 keys). Only high's
+      orbit-coast hash moved, from 95585482dc0e857e to c739aef5d81221ae. Unchanged: the other 13,
+      the factor-of-two windows (threshold unchanged) and lane C's clearance tests, which pass.
+    - **Stale for the coast.** The committed records
+      `docs/measurements/descent-spike/2026-10-03-demand-calibrated.{json,md}` and
+      `2026-10-04-demand-hard.{json,md}` were flown with the climbing coast. Not re-run (the
+      orchestrator's instruction).
+      - Their orbit-coast rows are stale in all four cells of each: patch counts, demand, D, the
+        height above the floor and the selection times.
+      - Their descent-arc rows were flown up to 1.05 km lower near the arc's start, so they may
+        shift slightly.
+      - From the approach on, they stand.
+    - _Left as it was._ The unlifted low fast pass is still `constant` and climbs 0.076 m/s
+      (1.9 m) into the slowdown's blend, by the same mechanism. In both of seed 7's records the low
+      pass is lifted, so it already flies level there. Making it `level` would move the flare and
+      the slowdown on every unlifted seed. For the orchestrator.
 
 - **Deviations in T13.c, as built** (2026-10-03, lane D).
   - _The command line._ `cli.ts` takes the plan's options with commander (`--ridged`, the plan's
