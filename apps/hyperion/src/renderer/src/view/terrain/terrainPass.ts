@@ -9,7 +9,8 @@
  * baked height ranges; an orientation change of more than one pixel's angle; or a camera move of
  * more than {@link RESELECT_FRACTION} of the distance to the nearest selected patch that is not at
  * the finest level. It selects at τ ÷ (1 + {@link RESELECT_FRACTION}), so that the drawn error
- * stays within τ between runs, and with a budget of half the cache's slots (4b). The draw set is
+ * stays within τ between runs, and with a budget of half the cache's slots (4b). The morph bands
+ * are computed at τ, raised where the budget binds ({@link effectiveTauPx}). The draw set is
  * resolved when selection runs, in place by one `DrawSetResolver` per cache, and the instance and
  * contact records are written every frame into buffers made once.
  *
@@ -239,6 +240,25 @@ export function morphRangeM(
   return [own + MORPH_START_FRACTION * (parent - own), parent];
 }
 
+/**
+ * The tolerance a view's morph bands are computed at, pixels: τ × max(1, `limitExcess` ÷ w) for
+ * the setting's τ and a view of weight w (decision-r05-high-bound.md, F2).
+ *
+ * @remarks
+ * Selection runs at τ_sel = τ ÷ (1 + {@link RESELECT_FRACTION}) and measures `limitExcess` against
+ * it, so every drawn baked leaf has ρ ≤ τ′ = τ_sel × max(1, `limitExcess` ÷ w), the effective
+ * tolerance of `Selection.limitExcess` and T13.a's record. The bands, at (1 + m) τ′, keep the
+ * margin over the leaves that they have at τ without a budget. A coarse leaf then lies beyond its
+ * finer neighbour's band, so their shared edge stays at morph 1 under the budget too, and a split's
+ * children start fully morphed. `limitExcess` is 0 when the budget does not bind, which makes the
+ * result exactly τ and the bands bit-identical to an unbudgeted selection's.
+ *
+ * @param weight - The view's streaming weight, greater than 0.
+ */
+export function effectiveTauPx(tauPx: number, limitExcess: number, weight: number): number {
+  return tauPx * Math.max(1, limitExcess / weight);
+}
+
 /** The terrain pass of one view. */
 export class TerrainPass {
   readonly #engine: RenderEngine;
@@ -260,7 +280,10 @@ export class TerrainPass {
     sunRadiance: new Float32Array(4),
     atlas: new Float32Array(4),
   };
-  /** Each level's morph band, start then end, for the last selection's view at the setting's τ. */
+  /**
+   * Each level's morph band, start then end, for the last selection's view at its tolerance
+   * ({@link effectiveTauPx}).
+   */
   readonly #morph = new Float64Array(2 * (MAX_LEVEL + 1));
   #rangesVersion = 0;
   #device: Device;
@@ -473,7 +496,11 @@ export class TerrainPass {
         );
       }
     }
-    const morphView = { ...view, tauPx: this.#terrain.tauPx };
+    // At the setting's τ, not the τ ÷ (1 + m) selection uses, raised where the budget binds.
+    const morphView = {
+      ...view,
+      tauPx: effectiveTauPx(this.#terrain.tauPx, selection.limitExcess, view.weight),
+    };
     for (let level = 0; level <= MAX_LEVEL; level += 1) {
       const [start, end] = morphRangeM(this.#planet, level, morphView);
       this.#morph[2 * level] = start;
