@@ -3707,6 +3707,104 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     selected one, and every baked child of a split patch that is neither; the list is the same
     for the same input and empty with no baked ranges; and `bareKeys` lists the children a split
     left out and the splits with no leaf beneath.
+- **R05.T7 perf (c), as built (lane B, 2026-10-04): the per-node costs perf (b) left.** This is the
+  next step toward 4d's 2 ms p95 (decision-r05-high-bound.md, reason 4). Selection's output is
+  unchanged bit for bit:
+  - the selected keys and their order;
+  - every number of every bound;
+  - the demand with its priorities;
+  - `limited`, `limitExcess` and F3's `hiddenBaked`.
+
+  It is built on F3's `hiddenBaked` (the entry above), and `bareKeys` reads the new node layout.
+  - _The neighbour probe._ It builds no keys.
+    - `stepCellInto` (`patchKey.ts`) writes a folded cell into a reused `CellOut`. `stepCell`, and
+      so `edgeNeighbour` and `cornerNeighbours`, now call it.
+    - The balance asks of each neighbour only for the leaf over its grandparent cell. It walks up
+      the leaf's own ancestors to the first that holds that cell (across a face edge, it starts
+      from that face's root), then down. Where that ancestor is the leaf's own grandparent there
+      is none, since the grandparent is split.
+    - Away from a face's edge, three of the eight neighbours decide. They are (Δi, 0), (0, Δj) and
+      (Δi, Δj) for the leaf's outward steps, tried in the order the eight-neighbour scan meets
+      them. Each of the other five lies in the parent's own cell or in the parent cell of one of
+      those three, so it answers the same.
+  - _No `childKeys` tuple and no children array a split._
+    - `PatchLeafSet`'s nodes hold their parent and four child fields. The per-level maps by
+      `patchKeyIndex` are gone.
+    - A split still makes its four keys and its child nodes, one at a time, and `splitBalanced`
+      returns one `leaves` array.
+    - The journal and the balance's work lists are reused.
+    - `PatchLeafSet.leafValues()` (new) returns the leaves as an array, and `values()` yields
+      from it. Selection reads it once, for the output map and the demand.
+  - _`patchBounds` in scalars._
+    - It runs over preallocated scratch, in the same `f64` operations and order, and allocates
+      only the bounds it returns. Selection still passes a new bound its `[lowM, highM]` tuple.
+    - `Math.hypot` is called only where the squared length is not below 1 − 10⁻¹² of the largest.
+      That gives the same maximum for finite metres, and a NaN still comes out as NaN.
+    - A call takes about 7.2 µs, down from 24.6 µs (load 3, provisional).
+  - _Smaller costs._
+    - The output map's key strings are kept in the bounds memo, so they are neither rebuilt nor
+      rehashed.
+    - The per-level error, ε_n and height ranges are computed once a planet.
+    - `inForcedRegion` (`grounded.ts`) is now a loop over `distanceToBoxFromM` (`viewGeometry.ts`).
+      It builds no `relativeBounds` objects and no closure. It is still the rule's one definition,
+      and selection skips it when there are no contacts.
+    - The demand's walk no longer stops at an ancestor already requested. Such an ancestor is
+      always the top of its unbaked chain, so the walk ends there anyway and the targets are
+      unchanged.
+    - Hidden children get no traversal node.
+  - _Tests._
+    - `select.test.ts` adds whole-output digests (with `hiddenBaked`), recorded before this work.
+      The first set is at the 1.5 km pose, at budgets of 981 and 1,952 and with none.
+    - The second is a 48-frame approach: 20 km to 300 m, a secondary view and a contact below
+      1 km, at budget 981, baking 128 requests a frame from the demand. Its digest folds every
+      frame's output.
+    - `select.test.ts` also adds a randomized check against the leaf set's former algorithm, kept
+      as a string-keyed map. The check covers left-out children, face edges, cube corners and
+      rollbacks.
+    - `bounds.test.ts` holds `patchBounds` to its former vector form, bit for bit, over 1,350
+      patches (every face and level, the corners and edges included), 3 planets and 3 ranges.
+    - `patchKey.test.ts` holds `stepCellInto` to the former array form of `stepCell`.
+      `cube.test.ts`'s Rust golden still holds the fold itself.
+    - `viewGeometry.test.ts` holds `distanceToBoxFromM` to `distanceToBoxM` of `relativeBounds`.
+    - F1's and F3's tests and the spike's pinned sequences pass unchanged.
+  - _Measured (provisional, Design note 27)._ The harness is `bench.ts`, `ab.mjs` and `build.mjs`
+    in `.git/rm23-scratch/r05-b/perfc/`. Its figures are taken at the perf (b) pose: 1.5 km, ridges
+    off, 1920 × 1080, fov_h 60°, τ = 1 px, tilted 69°, warm, Node 26. Each is the median of ten
+    interleaved runs of the old code (F3 merged) and the new, at loads 5.5–10.7, governor
+    schedutil.
+
+    | Run                        | p50 before → after     | p95 before → after     |
+    | -------------------------- | ---------------------- | ---------------------- |
+    | Budget 981                 | 2.28 → 0.82 ms (0.36×) | 3.67 → 1.54 ms (0.42×) |
+    | Budget 1,952               | 4.39 → 1.46 ms (0.33×) | 6.92 → 2.33 ms (0.34×) |
+    | No budget (12,731 patches) | 35.0 → 13.4 ms (0.38×) | 41.0 → 16.3 ms (0.40×) |
+    | `bench.ts`'s flight        | 2.71 → 1.09 ms (0.40×) | 4.38 → 1.82 ms (0.42×) |
+
+    `bench.ts`'s flight runs at budget 981 with baked ranges: 640 frames at 64 Hz from 6 km to
+    300 m at 200 m/s, one view, 16 bakes a frame.
+
+    T13.a's fixed-step windows on high were also run: the fixture's bakes, ridges off, the
+    min(hard, 4σ_n) second pass, the real `PatchCache`. Each figure is the median of six
+    interleaved runs, at loads 8.6–12.0. They about halve:
+    - the approach and flare goes from 0.67 / 1.08 ms (p50 / p95) to 0.32 / 0.43 ms;
+    - the low fast pass goes from 0.68 / 0.99 ms to 0.31 / 0.41 ms.
+
+  - _Still open._ At the perf (b) pose under this load, the budget-981 p95 is below 2 ms. These are
+    pending for the owner's quiet machine (T14/T17):
+    - a `terrain.select` run;
+    - high's ruled hard-bound windows with ridges off, which reason 4 measured at 2.3–6.2 ms p95;
+    - the same windows ridged, at up to 13 ms (`just descent-demand`'s hard cells, with real
+      bakes).
+
+    The remaining costs of a selection are intrinsic or the interface's:
+    - each view's excess test, about 15% of a call;
+    - the output map and its records, about 8%;
+    - the bounds memo's lookups by a non-Smi `patchKeyIndex`, about 6%;
+    - the heap's comparisons, about 6%.
+
+    The cache's own `heightRangeM` lookup costs about as much as the memo's, so selection fed by
+    `PatchCache` pays it as well.
+
 - **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
   - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
     tests. The build adds:

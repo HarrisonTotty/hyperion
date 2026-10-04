@@ -126,3 +126,29 @@ export function viewExcess(v: ViewGeometry, b: PatchBounds, errorM: number): num
   const d = Math.max(Math.sqrt(o0 * o0 + o1 * o1 + o2 * o2), NEAR_PLANE_M);
   return (errorM * v.excessPerMetre) / d;
 }
+
+/**
+ * The distance from `pointM`, body-fixed metres from the body's centre, to the nearest point of a
+ * patch's box, metres; 0 inside it.
+ *
+ * @remarks
+ * The same `f64` operations in the same order as {@link distanceToBoxM} of
+ * `relativeBounds(b, pointM)`, with nothing allocated: the forced-region test's distance (Design
+ * note 9).
+ */
+export function distanceToBoxFromM(b: PatchBounds, pointM: BodyFixedVec3): number {
+  const box = b.box;
+  const [a0, a1, a2] = box.axes;
+  const [e0, e1, e2] = box.halfExtentsM;
+  const cx = box.centre.x - pointM.x;
+  const cy = box.centre.y - pointM.y;
+  const cz = box.centre.z - pointM.z;
+  const o0 = Math.max(0, Math.abs(cx * a0.x + cy * a0.y + cz * a0.z) - e0);
+  const o1 = Math.max(0, Math.abs(cx * a1.x + cy * a1.y + cz * a1.z) - e1);
+  const o2 = Math.max(0, Math.abs(cx * a2.x + cy * a2.y + cz * a2.z) - e2);
+  let sum = 0;
+  sum += o0 * o0;
+  sum += o1 * o1;
+  sum += o2 * o2;
+  return Math.sqrt(sum);
+}
