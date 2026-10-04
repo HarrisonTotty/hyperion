@@ -1,0 +1,16 @@
+# The sky's brightness envelope (rendering plan R06, R06.T6.b; Design note 8; decided 2026-10-03,
+# decision-r06-tables.md): the brightest absolute V a star of at most each mass node reaches in each
+# age bin, from the generator's own tracks. The parameters are constants of
+# `hyperion_sim::sky::envelope`, recorded here so that the inputs hash covers them; the task refuses
+# a manifest that disagrees with the code.
+task = "sky_envelope"
+
+[params]
+mass_nodes = 192
+fe_h_nodes = [-2.5, -2.25, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.18]
+eta_draws = [-7.142857142857142, -3.5, 0.0, 3.5, 7.0]
+samples_per_phase = 32
+age_bins = 192
+max_age_years = 1.5e10
+age_spread_factor = 1.6
+margin_mag = 0.3
