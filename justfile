@@ -210,7 +210,15 @@ _locked +cmd:
     fi
     held=$SECONDS
     status=0
-    "$@" || status=$?
+    # Run in its own memory-capped cgroup where systemd allows it, so that a runaway heavy run is
+    # stopped (by the cap, or by systemd-oomd watching the user manager) instead of freezing the
+    # machine or taking the login session with it, as happened on 2026-10-03. `HEAVY_MEMORY_MAX`
+    # overrides the cap.
+    if command -v systemd-run >/dev/null && systemd-run --user --scope --quiet true 2>/dev/null; then
+        systemd-run --user --scope --quiet -p MemoryMax="${HEAVY_MEMORY_MAX:-22G}" -p MemorySwapMax=2G "$@" || status=$?
+    else
+        "$@" || status=$?
+    fi
     echo "heavy-test lock released after $((SECONDS - held)) s" >&2
     exit "$status"
 
