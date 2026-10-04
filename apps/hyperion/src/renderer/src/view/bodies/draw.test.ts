@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { add, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
 import { aHostDisc, aLitBody, SUN_RADIUS_M } from "../../test/litFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
-import { phaseFactorTableOf } from "../appearance/law";
+import { phaseFactorFromTable, phaseFactorTableOf } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { starIlluminance } from "../lighting/illuminance";
+import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
+import { oblateAlbedoScale } from "./oblate";
 import { AU_M } from "../scenes/kept";
 import { METER_CLASS } from "../post/meter";
 import {
@@ -81,14 +83,102 @@ function discFlux(
   return flux;
 }
 
+/** Midpoint intervals of the near-field oracle in the polar angle and in azimuth. */
+const ORACLE_THETA = 400;
+const ORACLE_PHI = 800;
+
+/**
+ * The body's exact flux at the camera per channel, lx, from a finite distance: the disc's own law
+ * (its horizon term, the Lommel–Seeliger floor and its oblate albedo scale) integrated over the
+ * visible, lit spheroid in `f64`, each element weighted by μ dA ÷ r² (decision-r07-t8a, follow-up
+ * (b)). No eclipses: the bodies tested have no occluders.
+ */
+function nearFieldFlux(
+  body: LitBodyInput,
+  hosts: ReadonlyArray<PlacedLight>,
+): [number, number, number] {
+  const { equatorialRadiusM: a, polarRadiusM: c } = body.figure;
+  const pole = body.figure.pole === null ? vec3(0, 0, 1) : normalise(body.figure.pole);
+  const seed = Math.abs(pole.x) < 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+  const ex = normalise(cross(seed, pole));
+  const ey = cross(pole, ex);
+  const { law } = body.photometry;
+  const table = phaseFactorTableOf(law);
+  const scaleA = oblateAlbedoScale(law.lommelSeeligerShare, c / a);
+  const flux: [number, number, number] = [0, 0, 0];
+  const dTheta = Math.PI / ORACLE_THETA;
+  const dPhi = (2 * Math.PI) / ORACLE_PHI;
+  for (const host of hosts) {
+    const e = starIlluminance(host.disc, norm(sub(host.centreM, body.centreM)));
+    for (let i = 0; i < ORACLE_THETA; i += 1) {
+      const theta = (i + 0.5) * dTheta;
+      const sinT = Math.sin(theta);
+      const cosT = Math.cos(theta);
+      for (let j = 0; j < ORACLE_PHI; j += 1) {
+        const phi = (j + 0.5) * dPhi;
+        const sx = sinT * Math.cos(phi);
+        const sy = sinT * Math.sin(phi);
+        const local = (u: number, v: number, w: number) =>
+          vec3(
+            u * ex.x + v * ey.x + w * pole.x,
+            u * ex.y + v * ey.y + w * pole.y,
+            u * ex.z + v * ey.z + w * pole.z,
+          );
+        const x = add(body.centreM, local(a * sx, a * sy, c * cosT));
+        const normal = normalise(local(sx / a, sy / a, cosT / c));
+        const area =
+          a * sinT * Math.sqrt(c * c * sinT * sinT + a * a * cosT * cosT) * dTheta * dPhi;
+        const r = norm(x);
+        const toCamera = scale(x, -1 / r);
+        const mu = dot(normal, toCamera);
+        if (mu <= 0) {
+          continue;
+        }
+        const toStar = sub(host.centreM, x);
+        const d = norm(toStar);
+        const towards = scale(toStar, 1 / d);
+        const mu0 = dot(normal, towards);
+        const horizon = sphereIrradianceFactor(
+          d / host.disc.radius_m,
+          Math.acos(Math.min(1, Math.max(-1, mu0))),
+        );
+        if (horizon <= 0) {
+          continue;
+        }
+        const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towards, toCamera))));
+        const f = phaseFactorFromTable(table, alpha);
+        const share = law.lommelSeeligerShare;
+        const floor = Math.asin(Math.min(1, host.disc.radius_m / d));
+        const discTerm =
+          (share * 2 * horizon) / Math.max(Math.max(mu0, 0) + mu, floor) + (1 - share) * horizon;
+        const weight = (mu * area) / (r * r) / Math.PI;
+        for (const ch of [0, 1, 2] as const) {
+          flux[ch] += e[ch] * law.a[ch] * scaleA * f[ch] * discTerm * weight;
+        }
+      }
+    }
+  }
+  return flux;
+}
+
 describe("the disc and the point at the 3 px switch", () => {
   const radius = 6.371e6;
   /** The distance at which the body is `px` across at the centre pixel's scale. */
   const distanceFor = (px: number): number => radius / Math.sin(px / 2 / PX_PER_RAD);
-  /** The worst |disc ÷ point − 1| per channel over 16 sub-pixel placements of the centre. */
-  const worstOver = (px: number, phaseDeg: number, body: Partial<LitBodyInput>): number => {
+  /**
+   * The worst |disc ÷ reference − 1| per channel over 16 sub-pixel placements of the centre: the
+   * point's flux at the switch (3 and 3.3 px), or the exact near-field surface integral where no
+   * point is drawn (decision-r07-t8a, follow-up (b)).
+   */
+  const worstOver = (
+    px: number,
+    phaseDeg: number,
+    body: Partial<LitBodyInput>,
+    reference: "point" | "near-field" = "point",
+  ): number => {
     const distance = distanceFor(px);
     let worst = 0;
+    let nearField: [number, number, number] | null = null;
     for (let i = 0; i < 4; i += 1) {
       for (let j = 0; j < 4; j += 1) {
         const offset = vec3(
@@ -103,9 +193,11 @@ describe("the disc and the point at the 3 px switch", () => {
           centreM: add(host.centreM, offset),
         }));
         const disc = discFlux(moved, hosts);
-        const point = pointFlux(moved, hosts, [], DISC_ANNULI_HIGH);
+        // The near field moves by under 10⁻⁴ over a pixel's offsets: taken once, centred.
+        nearField ??= reference === "point" ? null : nearFieldFlux(moved, hosts);
+        const truth = nearField ?? pointFlux(moved, hosts, [], DISC_ANNULI_HIGH);
         for (const c of [0, 1, 2] as const) {
-          worst = Math.max(worst, Math.abs(disc[c] / point[c] - 1));
+          worst = Math.max(worst, Math.abs(disc[c] / truth[c] - 1));
         }
       }
     }
@@ -121,18 +213,32 @@ describe("the disc and the point at the 3 px switch", () => {
   for (const [name, figure] of figures) {
     for (const px of [3, 3.3, 6]) {
       for (const phaseDeg of [0, 90, 150]) {
-        // At 6 px and 150° the far-field point is 1.1% above the disc's exact integral (an f64
-        // surface integral): from D the visible cap stops asin(a ÷ D) short of the hemisphere,
-        // and each element's weight μ ÷ r² changes by (a ÷ D)(3μ² − 1), which cancels for a
-        // uniform disc but dims a crescent at the limb, −6.1 a ÷ D at 150° and −0.59 a ÷ D at
-        // 90° for Lambert. The sampling adds 0.5%.
-        const tolerance = px === 6 && phaseDeg === 150 ? 0.02 : 0.01;
-        it(`sums to the point's flux within ${String(tolerance * 100)}% for ${name} at ${String(px)} px and ${String(phaseDeg)}°`, () => {
-          expect(worstOver(px, phaseDeg, { figure })).toBeLessThan(tolerance);
+        // At 3 and 3.3 px the disc meets the point it switches with; at 6 px, where no point is
+        // drawn, the exact near-field integral of the same law, the far-field point being the less
+        // accurate there (decision-r07-t8a, follow-up (b)).
+        const reference = px === 6 ? "near-field" : "point";
+        it(`sums to the ${reference} flux within 1% for ${name} at ${String(px)} px and ${String(phaseDeg)}°`, () => {
+          expect(worstOver(px, phaseDeg, { figure }, reference)).toBeLessThan(0.01);
         });
       }
     }
   }
+
+  it("pins the far-field point's own near-field error at 6 px: −6.1 a ÷ D at 150°, −0.59 a ÷ D at 90°", () => {
+    // From D the visible cap stops asin(a ÷ D) short of the hemisphere and each element's weight
+    // μ ÷ r² changes by (a ÷ D)(3μ² − 1), which dims a Lambert crescent at the limb.
+    const distance = distanceFor(6);
+    const aOverD = radius / distance;
+    for (const [phaseDeg, coefficient] of [
+      [150, 6.1],
+      [90, 0.59],
+    ] as const) {
+      const { body, hosts } = scene(distance, phaseDeg);
+      const point = pointFlux(body, hosts, [], DISC_ANNULI_HIGH)[1];
+      const exact = nearFieldFlux(body, hosts)[1];
+      expect(Math.abs(1 - exact / point - coefficient * aOverD)).toBeLessThan(0.002);
+    }
+  });
 
   it("holds for a lunar law (L = 1)", () => {
     const moon = {

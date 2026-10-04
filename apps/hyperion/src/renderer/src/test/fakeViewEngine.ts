@@ -7,8 +7,10 @@
 import type { ViewEngineSource } from "../displays/view/useViewEngine";
 import type { BufferSpec, TextureSpec } from "../view/engine/memory";
 import { requestAdapterOutcome } from "../view/engine/platform";
+import type { KernelPair } from "../view/engine/kernels";
 import type {
   BufferHandle,
+  ComputeHandle,
   MaterialHandle,
   MeshHandle,
   MeshSpec,
@@ -41,6 +43,15 @@ export function fakeViewEngine(device: GPUDevice): FakeViewEngine {
     createMaterialAsync: (spec: WgslMaterialSpec): Promise<MaterialHandle> =>
       Promise.resolve({ kind: "material", name: spec.name }),
     createTexture: (spec: TextureSpec): TextureHandle => ({ kind: "texture", name: spec.name }),
+    createComputeAsync: (pair: KernelPair): Promise<ComputeHandle> =>
+      Promise.resolve({ kind: "compute", name: pair.name, path: "reference" }),
+    dispatch: (): void => undefined,
+    // A histogram of a thousand counts in its middle bin: an image to meter.
+    readBuffer: (buffer: BufferHandle): Promise<ArrayBuffer> => {
+      const bins = new Uint32Array(buffer.bytes / 4);
+      bins[bins.length >> 1] = 1000;
+      return Promise.resolve(bins.buffer);
+    },
     writeTexture: (): void => undefined,
     releaseBuffer: (): void => undefined,
     releaseTexture: (): void => undefined,

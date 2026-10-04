@@ -123,8 +123,16 @@ describe("the exposure's automation levels", () => {
     });
   });
 
-  it("refuses ENABLE outside INHIBITED", () => {
+  it("refuses ENABLE under AUTO", () => {
     expect(enable(AUTO, 3)).toEqual({ kind: "refused", reason: "not_inhibited" });
+  });
+
+  it("hands MAN to AUTO at the metered value on ENABLE, and only with an image to meter (R07.T8.a)", () => {
+    expect(accepted(enable(DEFAULT_EXPOSURE, 6))).toEqual({ kind: "auto", ev100: 6 });
+    expect(enable(DEFAULT_EXPOSURE, null)).toEqual({
+      kind: "refused",
+      reason: "no_image_to_meter",
+    });
   });
 
   it("keeps a system inhibit while the source stays lost", () => {

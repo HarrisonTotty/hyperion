@@ -46,6 +46,7 @@ import {
   fullScreenMesh,
   halfTexels,
   NEAR_M,
+  pause,
 } from "./harness";
 
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -442,7 +443,22 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
       ],
       previousRegimes: new Map(),
       overlay: null,
+      meter: "lit",
     });
+    // The frame's histogram under `LIT`, read back a frame or so late: the lit side counts.
+    let histogram = renderer.takeHistogram();
+    for (let attempt = 0; attempt < 200 && histogram === undefined; attempt += 1) {
+      // The read-back settles in its own time; the harness waits for it in turn.
+      // oxlint-disable-next-line no-await-in-loop
+      await pause(25);
+      histogram = renderer.takeHistogram();
+    }
+    const counted = histogram?.bins.reduce((sum, n) => sum + n, 0) ?? 0;
+    checks.check(
+      "T8.a the photorealistic frame's histogram meters the lit side under LIT",
+      counted > 0,
+      `${histogram === undefined ? "no histogram" : "a histogram"}: ${String(counted)} weighted counts`,
+    );
     const bytes = await view.readBack();
     const at = (x: number, y: number): number => bytes[(y * viewport.widthPx + x) * 4 + 1] ?? 0;
     const litSide = at(36, 18);

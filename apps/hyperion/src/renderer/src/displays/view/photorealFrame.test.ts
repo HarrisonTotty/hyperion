@@ -45,6 +45,7 @@ async function frameOfPhaseScene(): Promise<ReturnType<typeof photorealFrame>> {
     cube: null,
     previousRegimes: new Map(),
     overlay: null,
+    meter: "average",
   });
 }
 

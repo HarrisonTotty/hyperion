@@ -7,7 +7,7 @@ import {
   initialGraphicsStatus,
   reduceGraphicsStatus,
 } from "../../view/engine/status";
-import { availabilityOf, PHOTOREAL_NOT_MADE, styleRefusals } from "./styleRefusals";
+import { availabilityOf, PHOTOREAL_NOT_CREATED, styleRefusals } from "./styleRefusals";
 
 async function answered(software: boolean): Promise<GraphicsStatus> {
   const outcome = await requestAdapterOutcome(
@@ -39,7 +39,9 @@ describe("styleRefusals", () => {
     expect(styleRefusals(initialGraphicsStatus("vulkan", false), "idle").photorealistic).toBe(
       "GRAPHICS ACQUIRING ADAPTER",
     );
-    expect(styleRefusals(await answered(false), "failed").photorealistic).toBe(PHOTOREAL_NOT_MADE);
+    expect(styleRefusals(await answered(false), "failed").photorealistic).toBe(
+      PHOTOREAL_NOT_CREATED,
+    );
   });
 
   it("holds both back in safe mode, where no view is drawn", () => {

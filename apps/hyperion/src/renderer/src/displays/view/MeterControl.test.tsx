@@ -43,18 +43,18 @@ describe("MeterControl", () => {
     expect(onMeter).toHaveBeenCalledTimes(3);
   });
 
-  it("holds the meters back while there is no image to meter", async () => {
+  it("keeps the meters choosable while nothing is metered, saying why", async () => {
     const user = userEvent.setup();
     const onMeter = vi.fn<(mode: MeterMode) => void>();
     render(<MeterControl meter="lit" reading={null} onMeter={onMeter} />);
     expect(screen.getByText("NO IMAGE TO METER")).toBeInTheDocument();
     const lit = screen.getByRole("button", { name: "LIT" });
-    expect(lit).toHaveAttribute("aria-disabled", "true");
+    expect(lit).not.toHaveAttribute("aria-disabled");
     expect(lit).toHaveAccessibleDescription("NO IMAGE TO METER");
     // The operator's meter still shows while nothing is metered.
     expect(lit).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("status", { name: "METER" })).toHaveTextContent("LIT");
-    await user.click(lit);
-    expect(onMeter).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "AVG" }));
+    expect(onMeter).toHaveBeenLastCalledWith("average");
   });
 });

@@ -78,7 +78,7 @@ export function lightingStatement(state: LightingState): string | null {
       line = "LIGHTING: PENDING";
       break;
     case "hosts-not-received":
-      line = "LIGHTING: HOSTS NOT RECEIVED";
+      line = "LIGHTING: STAR DISCS NOT RECEIVED";
       break;
   }
   return line;

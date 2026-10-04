@@ -175,8 +175,10 @@ export function inhibit(control: ExposureControl): ExposureCommandResult {
 }
 
 /**
- * The operator's `ENABLE`: clears an inhibit, of either origin, back to `AUTO`; refused with
- * `NO IMAGE TO METER` while there is no source.
+ * The operator's `ENABLE`: clears an inhibit, of either origin, back to `AUTO`, and from `MAN`
+ * hands the exposure to `AUTO` at the metered value (R07.T8.a, the smallest reversible choice,
+ * pending the owner: the guide names no other way out of `MAN`); refused with
+ * `NO IMAGE TO METER` while there is no source, and outside `MAN` and `INHIBITED`.
  *
  * @param meteredEv100 - The source's current metered value, or `null` where there is no source.
  */
@@ -184,7 +186,7 @@ export function enable(
   control: ExposureControl,
   meteredEv100: number | null,
 ): ExposureCommandResult {
-  if (control.kind !== "inhibited") {
+  if (control.kind === "auto") {
     return { kind: "refused", reason: "not_inhibited" };
   }
   return setAuto(meteredEv100);
