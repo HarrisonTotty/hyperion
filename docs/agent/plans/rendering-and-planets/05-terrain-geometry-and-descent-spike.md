@@ -3621,6 +3621,25 @@ MEASURED`. The spike is built to these meanwhile. Whether a measurement view beh
     segment, against the 2 ms budget of decision-r05-patch-demand.md 4d on high's approach and
     slowdown at most (single calls reach 170 ms at the cold start and at segment changes,
     provisional under load).
+  - **Record: the whole descent under the hard bound** (2026-10-04,
+    `docs/measurements/descent-spike/2026-10-04-demand-hard.{json,md}`, seed 7, none truncated).
+    The four cells ran as four parallel processes, each under its own selection-time and wall-time
+    caps (`--wall-cap-hours`, added after the machine's freeze killed a sequential run that writes
+    only at its end; the record is now also rewritten after every cell). Ridges on, high ran at
+    16 Hz, a stated sampling reduction. The orbit coast still has seed 7's ~18.4 m/s climb (a
+    T13.a fix is queued), so its figures may shift. Under the hard bound the budget binds only with
+    ridges on: high is `limited` 100% of the orbit coast and the arc and 74% of the approach (980 of
+    981 patches), low 48% of the arc and 25% of the approach; with ridges off it never binds. Demand
+    ÷ D, high then low, ridges off: coast 0.65 / 0.67, arc 0.62 / 0.82, approach 0.59 / 0.80, low
+    pass 1.15 / 1.31, slowdown 0.84 / 1.94; ridges on: 0.13 / 0.58, 0.11 / 0.50, 0.69 / 1.79,
+    0.97 / 1.16, 0.50 / 1.19; the vertical descent and the hover select nothing new (0) below
+    the cap altitude, as before. So under the hard bound D predicts every unbudgeted moving
+    segment within a factor of two on both settings, which the 4σ rule did not on low (its k is
+    small enough that the quadtree's granularity floors the count), and where the budget binds the
+    demand falls well under D, as a cap must. The low fast pass's demand peaks at 357 a second
+    (high, ridges off) and 374 (high, ridges on, 16 Hz) against D's 310 and 385. `selectPatches`
+    p95 is 0.3–13.1 ms, over the 2 ms budget on high in every moving segment (provisional; four
+    processes at once).
   - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
     camera underground (the direction above), not selection: lane B's
     `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With
