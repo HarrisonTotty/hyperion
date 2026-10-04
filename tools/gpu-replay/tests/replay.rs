@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use gpu_replay::capture::Capture;
-use gpu_replay::results::{RESULTS_SCHEMA, write_results};
+use gpu_replay::results::{RESULTS_SCHEMA, RESULTS_VERSION, write_results};
 use gpu_replay::run::replay_offscreen;
 use serde_json::Value;
 
@@ -66,7 +66,7 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     let results: Value = serde_json::from_str(&text).expect("the results are JSON");
 
     assert_eq!(results["schema"], RESULTS_SCHEMA);
-    assert_eq!(results["version"], 1);
+    assert_eq!(results["version"], RESULTS_VERSION);
     for key in [
         "startedAt",
         "platform",

@@ -1,5 +1,5 @@
 //! The replay's results file, in the descent spike's schema (`hyperion.descent-spike.results`
-//! version 1, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
+//! version 2, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
 //! same way (R05 Design notes 18, 21 and 22).
 //!
 //! A native replay has no trace, no `requestAnimationFrame`, no GPU process and no memory
@@ -19,6 +19,36 @@ use serde_json::{Value, json};
 
 /// The schema name the client's results files carry.
 pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
+
+/// The schema's version, the client's `RESULTS_VERSION`: version 2 stores the memory series as
+/// columns of whole KiB (decision-r05-results-size.md).
+pub const RESULTS_VERSION: u64 = 2;
+
+/// Why a native replay has no memory figure.
+const NO_MEMORY: &str = "the native replay does not measure memory";
+
+/// The memory series' reading columns (the client's `MemorySeries`), each null all run here.
+const MEMORY_COLUMNS: [&str; 8] = [
+    "appKiB",
+    "gpuProcessKiB",
+    "tracingKiB",
+    "rendererPrivateKiB",
+    "drmResidentKiB",
+    "drmTotalKiB",
+    "nvidiaDeviceKiB",
+    "nvidiaGpuProcessKiB",
+];
+
+/// A native replay's memory series: no sample, and every reading null with the reason.
+#[must_use]
+fn memory_series() -> Value {
+    let mut series = serde_json::Map::new();
+    series.insert("tMs".to_owned(), json!([]));
+    for column in MEMORY_COLUMNS {
+        series.insert(column.to_owned(), missing(NO_MEMORY));
+    }
+    Value::Object(series)
+}
 
 /// A figure, or `null` with the reason, as the schema writes it.
 #[must_use]
@@ -506,7 +536,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             },
             Some(memory_limit),
             "bytes",
-            Err("the native replay does not measure memory".to_owned()),
+            Err(NO_MEMORY.to_owned()),
             None,
         ),
     ];
@@ -532,7 +562,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
     let presented_reason = "a native replay has no trace";
     json!({
         "schema": RESULTS_SCHEMA,
-        "version": 1,
+        "version": RESULTS_VERSION,
         "run": {
             "startedAt": iso8601(figures.started_at),
             "machine": load,
@@ -591,14 +621,14 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         "uploads": { "bytes": figures.upload_bytes },
         "pipelines": { "late": [] },
         "memory": {
-            "samples": [],
-            "gpuHeadline": missing("the native replay does not measure memory"),
-            "peakAppBytes": missing("the native replay does not measure memory"),
+            "series": memory_series(),
+            "gpuHeadline": missing(NO_MEMORY),
+            "peakAppBytes": missing(NO_MEMORY),
             "peakTracingBytes": missing("a native replay has no trace"),
             "peakRendererPrivateBytes": missing("a native replay has no renderer"),
-            "peakDrmResidentBytes": missing("the native replay does not measure memory"),
-            "peakNvidiaDeviceLessBaselineBytes": missing("the native replay does not measure memory"),
-            "peakNvidiaGpuProcessBytes": missing("the native replay does not measure memory"),
+            "peakDrmResidentBytes": missing(NO_MEMORY),
+            "peakNvidiaDeviceLessBaselineBytes": missing(NO_MEMORY),
+            "peakNvidiaGpuProcessBytes": missing(NO_MEMORY),
             "adapterPeakBytes": 0,
         },
         "criteria": { "whole": whole, "segments": [], "overall": overall },
@@ -723,6 +753,29 @@ mod tests {
         assert_eq!(row(&results, "terrain")["verdict"], "pass");
         assert_eq!(row(&results, "headroom-gpu")["verdict"], "not-measured");
         assert_eq!(results["gpu"]["sumP95Ms"]["value"], 4.5);
+    }
+
+    #[test]
+    fn the_memory_series_has_no_sample_and_every_reading_null_with_its_reason() {
+        let results = results_json(&figures(BTreeMap::new()));
+        // The client's version and column names, written out: its `validateResults` reads them.
+        assert_eq!(results["version"], 2);
+        let none = json!({ "value": null, "reason": "the native replay does not measure memory" });
+        assert_eq!(
+            results["memory"]["series"],
+            json!({
+                "tMs": [],
+                "appKiB": none,
+                "gpuProcessKiB": none,
+                "tracingKiB": none,
+                "rendererPrivateKiB": none,
+                "drmResidentKiB": none,
+                "drmTotalKiB": none,
+                "nvidiaDeviceKiB": none,
+                "nvidiaGpuProcessKiB": none,
+            })
+        );
+        assert_eq!(results["memory"].get("samples"), None);
     }
 
     #[test]

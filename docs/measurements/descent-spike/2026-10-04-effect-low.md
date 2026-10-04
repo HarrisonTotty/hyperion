@@ -2,7 +2,7 @@
 
 - **Overall:** not-measured (provisional: not a quiet machine)
 - **Machine:** AMD Ryzen 7 3700X 8-Core Processor, 16 threads; GPU 4318:8710; governor schedutil; load average 10.40, 10.43, 10.63
-- **Versions:** app 44.4.3, Electron 44.4.3, Chromium 152.0.7977.130
+- **Versions:** app 0.1.0, Electron 44.4.3, Chromium 152.0.7977.130
 - **Launch:** linux, vulkan mode, timer full, seed 7, window hidden, canvas 806 × 431 px
 - **T:** — (no window shown); warm-up 10 s
 - **Trace:** — (the trace has no timed event)

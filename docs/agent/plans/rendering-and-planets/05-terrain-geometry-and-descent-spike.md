@@ -1951,12 +1951,22 @@ sets R01's `gpuTiming` as `--hyperion-gpu-timing` does. This task may land befor
 headline GPU memory on NVIDIA, whose driver gives no per-client figure through fdinfo; and the
 results writer. The writer produces the file of Design note 18, with the machine, driver, Electron
 and Chromium versions, setting, seed, options, switches, load average, governor and every figure,
-including the per-level ε_n and k_n. It writes a Markdown summary beside the file.
+including the per-level ε_n and k_n. It writes a Markdown summary beside the file. The memory
+series is stored as columns (results schema version 2): the sample times in whole milliseconds
+and one array of whole KiB per reading, which is lossless, since every source reports KiB or MiB.
+A reading absent for the whole run is written once as null with its reason. A reading absent at
+some samples is written as -1 there, with the sample ranges and the reason beside its column.
+There is no delta encoding. Each results file stays under the repository's 500 KiB limit for
+added files (`check-added-large-files`), which this form meets for runs of up to about two hours.
+The file is never excluded from the hook, and the series is never thinned or moved to a side file
+(decided 2026-10-04 by a delegated decision).
 
 - Files: `apps/hyperion/src/main/fdinfo.ts`, `apps/hyperion/src/main/results.ts`, their tests,
   `docs/measurements/descent-spike/README.md`.
 - Tests: the fdinfo parser against recorded fixtures from i915 and amdgpu, summing distinct
-  client IDs; the results writer's output parses against its schema.
+  client IDs; the results writer's output parses against its schema; each peak equals its
+  column's maximum; a gap's samples hold -1 and no other sample does; a 3,600-sample run's file,
+  formatted by Prettier, is under 512,000 bytes.
 - Acceptance: `pnpm --filter hyperion exec vitest run src/main/fdinfo src/main/results`;
   `just descent-spike --setting low` on the development machine writes a results file with every
   figure present or null with a stated reason (on the RTX 3080 the fdinfo readings are null:
@@ -2819,15 +2829,16 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
         report is not kept. The rule changes only the four figures the trace alone gives, so the
         result is what the fixed writer would have written. The summary shows none of them and
         is byte-identical.
-    - _The JSON is not committed yet._
-      - At 563 KB it exceeds the repository's 500 KB limit on added files
-        (`check-added-large-files`). Its 1,228 memory samples take 477 KB.
+    - _The JSON, committed in schema version 2._
+      - In version 1 it was 563 KB, over the repository's 500 KB limit on added files
+        (`check-added-large-files`). Its 1,228 memory samples took 477 KB.
       - decision-r05-results-size.md (2026-10-04) rules results schema version 2, with the
-        memory series as columns of whole KiB. Lane D's next task builds it and commits this
-        run's file, converted losslessly.
-      - Until then the corrected file is at `target/laneD/t14c/2026-10-04-effect-low.json`, and
-        formatted as `pretty.json`, the ruling's source. The file as written is beside it as
-        `.as-written.json`. The summary is committed.
+        memory series as columns of whole KiB (the deviation below). The committed
+        `2026-10-04-effect-low.json` is the corrected file converted to it, losslessly, with the
+        app's version corrected. Formatted, it is 109,109 B.
+      - The corrected v1 file stays uncommitted at `target/laneD/t14c/2026-10-04-effect-low.json`,
+        and formatted as `pretty.json`, the conversion's source. The file as written is beside it
+        as `.as-written.json`.
     - _Findings._
       - The tracing service crashed writing the trace (the Risks bullet below).
       - The renderer's private memory grew roughly linearly, from 0.26 GB at 60 s to 1.57 GB at
@@ -2835,13 +2846,76 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
         the height workers, and the measurement's own CPU-profiler category and raw per-frame
         series are candidates. It needs a look before T16, whose UHD 620 shares the laptop's
         system memory.
-      - `run.versions.app` records 44.4.3, Electron's own version, not the app's 0.1.0.
-        Probably `app.getVersion()` finds no `package.json` beside `out/main/index.js`.
+      - `run.versions.app` recorded 44.4.3, Electron's own version, not the app's 0.1.0:
+        `app.getVersion()` finds no `package.json` beside `out/main/index.js`. Fixed with
+        schema version 2 (the deviation below).
       - Chromium's basic GPU information gives no description, so the GPU appears in the file
         as its PCI IDs.
     - **Pending:** the visible run stays with the owner, its command in
       `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7). Its presentation
       figures need the trace's remedy first.
+  - Results schema version 2 (2026-10-04, delegated decision): v1's memory samples, an object
+    per second, made the T14.c hidden run's file 563,230 B, over the 500 KiB hook. Version 2
+    stores them as columns of whole KiB, which brings that run to about 105 kB and an hour's run
+    to about 257 kB. The T14.c file is a lossless conversion of the hidden run's output.
+    - _The form._ `memory.series` holds `tMs` and the columns `appKiB`, `gpuProcessKiB`,
+      `tracingKiB`, `rendererPrivateKiB`, `drmResidentKiB`, `drmTotalKiB`, `nvidiaDeviceKiB` and
+      `nvidiaGpuProcessKiB`. Each column is a figure like any other:
+      - present: `{ "value": { "samples": [...], "gaps": [...] }, "reason": null }`, with a gap
+        as `{ "from", "to", "reason" }`;
+      - missing all run: `{ "value": null, "reason": "..." }`. Where samples gave different
+        reasons, the column's reason lists each once, joined by "; ".
+    - _Built by_ `memorySeries` (`main/results.ts`). The in-memory `MemorySample` and the
+      sampler are unchanged. The peaks are their columns' maxima × 1024, which are exact, since
+      every source reports whole KiB. The peak less `nvidia-smi`'s baseline is the device
+      column's maximum less the baseline. The file does not hold the baseline, so
+      `validateResults` checks only that this peak is at most that maximum.
+    - _Checked by_ `validateResults`, which accepts version 2 only:
+      - times in whole ms;
+      - every column as long as the times;
+      - readings in whole KiB;
+      - -1 at a gap's samples and at no other;
+      - gaps in order, within the samples, each with a reason, and consecutive samples of one
+        reason in one gap;
+      - a column with no reading written as null, with a reason;
+      - each peak equal to its column's maximum × 1024, and null for a column with none.
+    - _The size warning._ The client does not ship Prettier, so `formatAsPrettier` reproduces
+      what Prettier changes in `JSON.stringify`'s indented form, which is what the writer writes:
+      - an array of primitives that fits goes on one line;
+      - an array of numbers that does not fit is packed to 100 columns;
+      - an exponent's `+` is dropped.
+
+      The tests hold its output byte-identical to Prettier 3.9.8's, with the repository's own
+      configuration, on three files: a long run, a run with gaps and a run with no samples.
+      `apps/hyperion` lists Prettier among its dev dependencies for them. `writeResults` warns with `console.warn`,
+      naming the formatted size, when it is over 512,000 B (`ADDED_FILE_LIMIT_BYTES`), and still
+      writes the whole file.
+
+    - _Sizes as built,_ formatted at a print width of 100:
+      - the T14.c file is 109,109 B, against the ruling's 105,329 B, since each column nests
+        its samples in `value`;
+      - the tests' 3,600-sample run is 250,626 B.
+    - _The replayer._ T15.c's replayer (`tools/gpu-replay/src/results.rs`) writes version 2 too,
+      approved by the orchestrator on 2026-10-04. Its series has no times, and every column is
+      null with "the native replay does not measure memory". Its unit test checks the series,
+      and its GPU test checks `RESULTS_VERSION`.
+    - _The app's version._ `run.versions.app` is now `__APP_VERSION__`, `package.json`'s
+      version, which the main process's build defines as the renderer's does
+      (`electron.vite.config.mts`, with a test in `main/appVersion.test.ts`).
+      `run.versions.electron` keeps Electron's. The client's `--version` had the same fault and
+      reads `__APP_VERSION__` too. In the T14.c file the app's version is
+      corrected to 0.1.0. The renderer bundle that run loaded, built at its start (12:31:31),
+      carries `__APP_VERSION__` as "0.1.0". The summary's versions line is regenerated, and
+      nothing else in the summary changed.
+    - _The conversion_ was a one-off script, not committed. It built the series with
+      `memorySeries` from the corrected file's samples, and checked the result against the
+      source:
+      - each of the 7,367 readings back from its column, exactly;
+      - each missing reading's reason;
+      - each time to within 0.5 ms.
+
+      It kept the peaks as they were. `validateResults` confirms that they equal the columns'
+      maxima × 1024. The only gap is the renderer's first sample, before the renderer reported.
 - **Finding: Chromium's tracing service crashes writing the whole descent's trace** (2026-10-04,
   T14.c's hidden run; for T14 and T16, and the owner's visible T14.c and T17 runs).
   - _What happened._
@@ -3334,7 +3408,8 @@ medium, sizes, figure)`.
     `TIMESTAMP_QUERY` they are null with that reason. Presented, the main (largest) canvas is the
     window's surface with FIFO presentation, intervals are taken as `present` returns, and an
     outdated or lost surface is configured again, up to eight failures in a row. A replay's
-    results file follows `main/results.ts`'s schema (version 1), whose types gained
+    results file follows `main/results.ts`'s schema (version 1; version 2 since 2026-10-04, see
+    T14.c's deviations), whose types gained
     `frames.source: "gpu-completion"`, the optional `frames.gpuCompletion` and the launch mode
     `native-replay` (the backend is in `run.options.backend`); figures a native replay cannot have
     (trace, main thread, memory, rAF) are null with their reason. A GPU row counts only frames
