@@ -48,6 +48,16 @@ export const TIMESTAMP_QUANTUM_MS = 0.065_536;
 /** The `performance.measure` name prefix of a segment's span, `spike.segment:<name>` (T14.a). */
 export const SEGMENT_MEASURE_PREFIX = "spike.segment:";
 
+/**
+ * Why every figure read from a trace with no timed event is missing.
+ *
+ * @remarks
+ * Such a trace measured nothing: on 2026-10-04 Chromium's tracing service crashed while writing a
+ * 1.71 GB trace and left the file without events. Its frame drops and GC pauses are then missing,
+ * not zero.
+ */
+export const EMPTY_TRACE_REASON = "the trace has no timed event";
+
 /** A figure, or `null` with the reason it is missing. */
 export type Measured<T> =
   { readonly value: T; readonly reason: null } | { readonly value: null; readonly reason: string };
@@ -674,9 +684,19 @@ function statsOrMissing(
   return stats === null ? missing(reason) : measured(stats);
 }
 
-/** Builds a results file from a run's description, the renderer's report, the trace and memory. */
+/**
+ * Builds a results file from a run's description, the renderer's report, the trace and memory.
+ *
+ * @remarks
+ * A trace with no timed event is taken as no trace: every figure read from it is missing with
+ * {@link EMPTY_TRACE_REASON}.
+ */
 export function buildResults(input: ResultsInput): DescentResults {
-  const { run, report, trace, memory } = input;
+  const { run, report, memory } = input;
+  const trace: Measured<TraceFigures> =
+    input.trace.value !== null && input.trace.value.span === null
+      ? missing(EMPTY_TRACE_REASON)
+      : input.trace;
   const setting = run.setting;
   const vsyncMs = run.displayHz === null || run.displayHz <= 0 ? null : 1000 / run.displayHz;
   const periodMs: Measured<number> = !run.shown
@@ -871,11 +891,12 @@ export function buildResults(input: ResultsInput): DescentResults {
   const overall = overallOf([...whole, ...segmentCriteria.flatMap(({ criteria }) => criteria)]);
 
   const scriptEndS = Math.max(0, ...report.segments.map(({ endS }) => endS));
+  // An empty trace was taken as none above; the span's own check only narrows its type.
   const traceFigure: DescentResults["run"]["trace"] =
     trace.value === null
       ? missing(trace.reason)
       : trace.value.span === null
-        ? missing("the trace has no timed event")
+        ? missing(EMPTY_TRACE_REASON)
         : measured({
             spanMs: (trace.value.span.lastUs - trace.value.span.firstUs) / 1000,
             truncated:
@@ -1076,7 +1097,8 @@ const VERDICTS: ReadonlySet<string> = new Set(["pass", "fail", "marginal", "not-
  * Checks a parsed results file against its schema.
  *
  * @returns The problems found, empty for a valid file. Beyond the shape of each required part,
- * every figure must be present or `null` with a stated reason.
+ * every figure must be present or `null` with a stated reason, and without a trace no figure read
+ * from the trace may be present.
  */
 export function validateResults(value: unknown): string[] {
   const problems: string[] = [];
@@ -1127,7 +1149,50 @@ export function validateResults(value: unknown): string[] {
     checkCriteria(criteria, problems);
   }
   checkFigures(value, "", problems);
+  checkTraceFigures(value, problems);
   return problems;
+}
+
+/** The figures {@link buildResults} reads from the trace alone, by path. */
+const TRACE_FIGURE_PATHS: ReadonlyArray<ReadonlyArray<string>> = [
+  ["frames", "dropped"],
+  ["gpu", "gpuProcess"],
+  ["mainThread", "split"],
+  ["mainThread", "gc"],
+];
+
+function childAt(node: unknown, path: ReadonlyArray<string>): unknown {
+  return path.reduce<unknown>((child, key) => (isRecord(child) ? child[key] : undefined), node);
+}
+
+/**
+ * Without a trace (`run.trace` null), every figure read from the trace is null too, so that an
+ * empty trace's zeros cannot pass for measurements. A native replay times its presentations
+ * without a trace, so only its other trace figures are checked.
+ */
+function checkTraceFigures(value: Readonly<Record<string, unknown>>, problems: string[]): void {
+  const trace = childAt(value, ["run", "trace"]);
+  if (!isRecord(trace) || trace["value"] !== null) {
+    return;
+  }
+  const figures: Array<readonly [string, unknown]> = TRACE_FIGURE_PATHS.map((path) => [
+    path.join("."),
+    childAt(value, path),
+  ]);
+  if (childAt(value, ["run", "launchMode"]) !== "native-replay") {
+    figures.push(["frames.presentation", childAt(value, ["frames", "presentation"])]);
+    const segments = childAt(value, ["frames", "segments"]);
+    if (Array.isArray(segments)) {
+      segments.forEach((segment: unknown, i) => {
+        figures.push([`frames.segments[${i}].presentation`, childAt(segment, ["presentation"])]);
+      });
+    }
+  }
+  for (const [path, figure] of figures) {
+    if (isRecord(figure) && figure["value"] !== null && figure["value"] !== undefined) {
+      problems.push(`${path} is measured without a trace (${String(trace["reason"])})`);
+    }
+  }
 }
 
 function checkCriteria(criteria: Readonly<Record<string, unknown>>, problems: string[]): void {

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DescentSpikeReport } from "../preload/api";
-import type { TraceFigures } from "./reduceTrace";
+import { type TraceFigures, TraceReducer } from "./reduceTrace";
 import {
   buildResults,
   type DescentResults,
   describeMachine,
+  EMPTY_TRACE_REASON,
   frameStats,
   type MachineDescription,
   measured,
@@ -444,6 +445,26 @@ describe("a results file", () => {
     expect(results.frames.source).toBe("raf");
     expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
   });
+
+  it("takes a trace with no timed event as no trace, not as zero drops and pauses", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      // What the reducer gives for a file with no events, as Chromium's crashed export left.
+      trace: measured(new TraceReducer().figures()),
+      memory: MEMORY,
+    });
+    const empty = missing(EMPTY_TRACE_REASON);
+    expect(results.run.trace).toEqual(empty);
+    expect(results.frames.presentation).toEqual(empty);
+    expect(results.frames.segments.map(({ presentation }) => presentation)).toEqual([empty, empty]);
+    expect(results.frames.dropped).toEqual(empty);
+    expect(results.gpu.gpuProcess).toEqual(empty);
+    expect(results.mainThread.split).toEqual(empty);
+    expect(results.mainThread.gc).toEqual(empty);
+    expect(results.frames.source).toBe("raf");
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
 });
 
 describe("a native replay's results", () => {
@@ -478,6 +499,68 @@ describe("the schema check", () => {
       JSON.stringify({ ...results, uploads: { bytes: { value: null, reason: "" } } }),
     );
     expect(validateResults(broken)).toEqual(["uploads.bytes is null without a reason"]);
+  });
+
+  it("refuses a figure read from the trace when there is no trace", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: missing("the trace was not recorded"),
+      memory: MEMORY,
+    });
+    const broken: unknown = JSON.parse(
+      JSON.stringify({
+        ...results,
+        frames: { ...results.frames, dropped: measured(0) },
+        mainThread: { ...results.mainThread, gc: measured([]) },
+      }),
+    );
+    expect(validateResults(broken)).toEqual([
+      "frames.dropped is measured without a trace (the trace was not recorded)",
+      "mainThread.gc is measured without a trace (the trace was not recorded)",
+    ]);
+  });
+
+  it("refuses a client run's presentation times when there is no trace", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: missing("the trace was not recorded"),
+      memory: MEMORY,
+    });
+    const [first, ...rest] = results.frames.segments;
+    if (first === undefined) {
+      throw new Error("the report has no segment");
+    }
+    const broken: unknown = JSON.parse(
+      JSON.stringify({
+        ...results,
+        frames: {
+          ...results.frames,
+          presentation: results.frames.raf,
+          segments: [{ ...first, presentation: first.raf }, ...rest],
+        },
+      }),
+    );
+    expect(validateResults(broken)).toEqual([
+      "frames.presentation is measured without a trace (the trace was not recorded)",
+      "frames.segments[0].presentation is measured without a trace (the trace was not recorded)",
+    ]);
+  });
+
+  it("accepts a native replay's own presentation times without a trace", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: missing("a native replay has no trace"),
+      memory: MEMORY,
+    });
+    const replay: DescentResults = {
+      ...results,
+      run: { ...results.run, launchMode: "native-replay" },
+      frames: { ...results.frames, source: "presentation", presentation: results.frames.raf },
+    };
+    expect(validateResults(JSON.parse(JSON.stringify(replay)))).toEqual([]);
   });
 
   it("refuses another schema", () => {

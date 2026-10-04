@@ -2752,9 +2752,125 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     (`drm-usage-stats.rst`; amdgpu in both its `drm-memory-*` and `drm-total-*` forms), since
     neither device is on the development machine; the NVIDIA fdinfo and `nvidia-smi.xml` were
     recorded there (RTX 3080, driver 615.71.09). The owner's UHD 620 runs (T16) read i915 for real.
-  - **Pending:** the hidden `just descent-spike --setting low` proof waits on T13.c (which waits on
-    T13.b) and is taken then; the visible run stays with the owner, its command in
-    `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7).
+  - **Result, 2026-10-04: the hidden low-setting run** (lane D,
+    `docs/measurements/descent-spike/2026-10-04-effect-low.md`).
+    - _The run._
+      - `bash target/laneD/smoke.sh --setting low --hidden`, the same as
+        `just descent-spike --setting low --hidden` with `TMPDIR` in the worktree. It ran on
+        af69a9e, whose level coast decision-r05-coast-speed.md cleared.
+      - The server was on port 7893 (`HYPERION_SPIKE_PORT`), off the default 7879 in case
+        another lane's smoke run started meanwhile. None did: no other spike process at 12:31,
+        12:36, 12:45 or 12:54.
+      - It exited 0 after 1,306 s (12:31:32 to 12:53:18 CDT) and sampled memory over 1,229 s.
+      - RTX 3080 (PCI 10de:2206), driver 615.71.09, Electron 44.4.3, Chromium 152.0.7977.130,
+        Linux `vulkan` mode, timer `full`, seed 7, ridges off, Dawn safety on, face differences,
+        mesh normals, hidden, canvas 806 × 431 px.
+      - **Timings provisional.** The load average was 10.4 at the start and about 19 at its
+        peak, with the machine shared by about ten agents. The file marks the run provisional,
+        and its overall verdict is `not-measured`.
+    - _The file._ `validateResults` passes. Every figure is present, or null with its reason:
+      - "no window shown": T, and the presentation figures whole and by segment;
+      - "no DRM client in the process's fdinfo (NVIDIA's driver writes none)": the DRM reading;
+      - "the trace has no timed event": the trace and every figure read from it (the finding
+        below).
+      - The rAF statistics' missed-frame and hitch counts are null inside their figure, since
+        they need T; their criterion rows carry "no window shown".
+    - _Figures._
+      - **Frames (rAF, after the warm-up):** 65,518 intervals; p50 16.70 ms, p95 33.30 ms,
+        p99 50.10 ms, max 133.3 ms. These are not read against T.
+      - **GPU time, 95th percentile:** terrain 0.57 ms (limit 14 ms, pass); atmosphere 3.73 ms
+        (limit 4 ms, pass at 93% of it; its view pass alone is 3.59 ms). The pass sum is
+        4.26 ms and our code's main-thread time 7.10 ms, neither read against T. No pass was
+        untimed, and no pipeline was created after the warm-up.
+      - **Memory:** the headline is 0.252 GB (`nvidia-smi` less its baseline; limit 1 GB,
+        pass). The GPU process alone held 192 MiB and the adapter's tally peaked at 75 MiB.
+        The app's processes peaked at 3.98 GB, with Chromium's tracing service at 1.71 GB apart.
+      - **Uploads:** 3.14 GB.
+      - **Streaming, patches a second, requested and baked against the hard bound's D:**
+
+        | Segment            | Requested | Baked |    D | `TERRAIN: STREAMING` (s) |
+        | ------------------ | --------: | ----: | ---: | -----------------------: |
+        | orbit coast        |       1.6 |   1.6 |  0.7 |                      1.1 |
+        | descent arc        |       0.8 |   0.8 |  2.1 |                     14.8 |
+        | approach and flare |      14.4 |  13.2 | 29.0 |                     35.7 |
+        | low fast pass      |      43.0 |  41.0 | 57.4 |                     22.7 |
+        | slowdown           |      48.5 |  40.6 | 34.8 |                     45.6 |
+        | vertical descent   |       0.0 |   0.0 | 21.4 |                      0.0 |
+        | hover              |       0.0 |   0.0 |  0.0 |                      0.0 |
+
+        Below the cap altitude the vertical descent selects nothing new, as T13.a's windows
+        found.
+
+      - This run flew the level coast, so its coast row is current. T13.a's two demand records
+        are `just descent-demand` runs and stay stale for the coast.
+    - _Fixed here: an empty trace's zeros._
+      - The trace held no events. The file as written still gave `frames.dropped` 0 and
+        `mainThread.gc` `[]` as if measured.
+      - `buildResults` now takes a trace with no timed event as no trace: every figure read from
+        it is null with `EMPTY_TRACE_REASON`.
+      - `validateResults` now refuses a trace figure present while `run.trace` is null. The
+        figures are the frames dropped, the GPU process, the main thread's split, its GC pauses
+        and the presentation figures. A native replay is exempt for its presentations, which it
+        times without a trace.
+      - Three tests fail on the old writer: the empty trace, the refused figures and a client
+        run's refused presentations. A fourth holds the native replay's exemption. Reviewed by
+        typescript-reviewer: no must-fix, and its should-fix (the presentation test) is applied.
+      - The run's results were regenerated by applying the rule to the saved file, since the raw
+        report is not kept. The rule changes only the four figures the trace alone gives, so the
+        result is what the fixed writer would have written. The summary shows none of them and
+        is byte-identical.
+    - _The JSON is not committed yet._
+      - At 563 KB it exceeds the repository's 500 KB limit on added files
+        (`check-added-large-files`). Its 1,228 memory samples take 477 KB.
+      - decision-r05-results-size.md (2026-10-04) rules results schema version 2, with the
+        memory series as columns of whole KiB. Lane D's next task builds it and commits this
+        run's file, converted losslessly.
+      - Until then the corrected file is at `target/laneD/t14c/2026-10-04-effect-low.json`, and
+        formatted as `pretty.json`, the ruling's source. The file as written is beside it as
+        `.as-written.json`. The summary is committed.
+    - _Findings._
+      - The tracing service crashed writing the trace (the Risks bullet below).
+      - The renderer's private memory grew roughly linearly, from 0.26 GB at 60 s to 1.57 GB at
+        the end (about 1.1 MB a second). The cause is not found. The renderer process includes
+        the height workers, and the measurement's own CPU-profiler category and raw per-frame
+        series are candidates. It needs a look before T16, whose UHD 620 shares the laptop's
+        system memory.
+      - `run.versions.app` records 44.4.3, Electron's own version, not the app's 0.1.0.
+        Probably `app.getVersion()` finds no `package.json` beside `out/main/index.js`.
+      - Chromium's basic GPU information gives no description, so the GPU appears in the file
+        as its PCI IDs.
+    - **Pending:** the visible run stays with the owner, its command in
+      `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7). Its presentation
+      figures need the trace's remedy first.
+- **Finding: Chromium's tracing service crashes writing the whole descent's trace** (2026-10-04,
+  T14.c's hidden run; for T14 and T16, and the owner's visible T14.c and T17 runs).
+  - _What happened._
+    - When the trace stopped, the tracing service (`tracing.mojom.TracingService`, a utility
+      process) held 1.71 GB. That is under `SPIKE_TRACE_BUFFER_KB`'s 2 GiB, so the buffer had
+      not filled.
+    - It took a SIGTRAP in `posix_memalign` at 12:52:48 (`coredumpctl info 427995`). That is
+      Chromium's crash on a failed allocation. The machine had about 23 GB of memory available
+      at 12:45, so the system was not short of memory.
+    - The file it left held no events. The run itself ended normally and wrote its results.
+  - _What it cost._
+    - None of the trace's figures were measured: presentation times, the frames Chromium
+      dropped, the GPU process's time, the main thread's split and GC pauses.
+    - A visible run would lose its presentation intervals, the criterion's source, and fall
+      back to rAF timestamps.
+  - _Size._ The trace grew at about 1.4 MB a second. `SPIKE_TRACE_BUFFER_KB`'s comment assumed
+    1.1, measured on a small page. Where inside Chromium the allocation failed is not confirmed;
+    the JSON export of a buffer this size is the likeliest place.
+  - _Likely remedies, to choose before the visible runs:_
+    - fewer categories (`disabled-by-default-v8.cpu_profiler` and
+      `disabled-by-default-devtools.timeline.frame` are the likeliest bulk, not yet measured);
+    - a smaller buffer, which records until full and so truncates rather than crashes, if the
+      export's size is the cause;
+    - a shorter traced span (one trace a segment, or a window, each reduced as it ends).
+
+    A short hidden run that stops its trace at a few sizes would find the threshold.
+
+  - _Already fixed._ The results writer takes such an empty trace as none (T14.c's record
+    above).
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
     `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,
@@ -3906,7 +4022,8 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     worker, and again after the review fixes (26 s at load 25–29). The `vitest` acceptance
     (`src/main/cli src/main/spike src/preload`) passes.
   - **Pending (separate tasks):** T14.c's hidden `just descent-spike --setting low --hidden`
-    results file, and the first real capture (`--capture <dir>`) with its offscreen
+    results file (taken 2026-10-04: T14.c's as-built record), and the first real capture
+    (`--capture <dir>`) with its offscreen
     `just replay <dir>`. By hand for the owner: the visible full descent
     (`just descent-spike --setting low`) and the presented replay (`just replay <dir> --present`).
 
