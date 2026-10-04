@@ -1978,6 +1978,29 @@ stars_per_system, dark_per_system, remnants_per_system}`, `LightColour` (flux-we
   **Found by T5.c:** record 0x81fd865fd000000f overflowed the stack in plan 11's binary engine
   (common envelope and merger recursing on a held bare core), fixed as a P11.T11 fix (plan 11's
   Risks); the held state's own inconsistency is with a decision agent.
+- **The tables' build memory and the tests' cost (fix, 2026-10-04).** With T5's metallicity nodes
+  and gradient bins, `build_with` held every metallicity's samples to the build's end, about
+  150 MB each (2,240 nodes at 32 samples a phase): 17 for the young thin disc's seven bins, some
+  30 for a full build. `doubling_the_samples_moves_no_bin_above_one_percent` peaked at 4.1 GB
+  natively and ran out of wasm32's 4 GiB on wasip1 (CI-13), and most table tests ran 5–20 times
+  longer than at CI-11. `build_with` now makes one metallicity's samples at a time, the lowest
+  \[Fe/H\] that any bin adds next, adds them to every bin whose next node it is, and drops them.
+  Each bin keeps its own snapshots' bins and adds its three nodes in their order, so the tables
+  are unchanged bit for bit: bit fingerprints of a full build at +H, a build at twice the samples
+  and a primaries-only build at −55,000 yr match the old code's. A build's peak is now one
+  metallicity's samples: 304 MiB across those three builds, against 4.2 GB. Each part's share
+  reads `born_cdf` once per end, not twice per part. That took a young thin-disc bin's
+  accumulation from 3.2–4.6 s to 1.8–1.9 s, and a full build from 136 s to 104 s (test profile,
+  under load). The unit tests that read only `get` build a gradient component's solar-circle bin
+  alone (`GradientBins::SolarCircle`, test-only), which is the full build's bin bit for bit: three
+  metallicities rather than 17. The slow test
+  `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit` pins that equality, and its build of
+  all seven bins at twice the samples guards the memory. The doubling test now takes 52 s and
+  289 MiB natively (217 s and 4.1 GB before), and 61 s and 365 MiB on wasip1. At CI-11 it took
+  28 s and 33 s, with one metallicity per component; the rest of the difference is the three
+  Gauss–Hermite nodes. T5.d's job split should keep this peak: each \[Fe/H\] node's samples job
+  adds its samples to the bins and drops them, rather than holding every node's samples for
+  per-bin jobs.
 - **The A3 interim's Class I sources (T5).** `is_dark_in_v` treats every Class I protostar as dark;
   a few per cent of them, seen pole-on down an outflow cavity (A<sub>V</sub> about 1.5; Whitney et
   al. 2003a, ApJ 591, 1049, §2 and Fig. 3), would show in V. Plan 06's A3 decides.

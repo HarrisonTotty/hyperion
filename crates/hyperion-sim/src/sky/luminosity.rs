@@ -369,6 +369,8 @@ pub(crate) struct BuildOptions {
     pub(crate) samples_per_phase: u32,
     /// Whether companions are counted.
     pub(crate) companions: Companions,
+    /// Which metallicity bins of a component with a radial gradient are built.
+    pub(crate) bins: GradientBins,
 }
 
 /// Whether a table counts the companions of its layer's primaries.
@@ -381,11 +383,24 @@ pub(crate) enum Companions {
     Omitted,
 }
 
+/// Which metallicity bins a component with a radial gradient builds ([`ComponentBins`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GradientBins {
+    /// Every bin, as the tables are built.
+    All,
+    /// The solar circle's bin alone, which [`LuminosityTables::get`] reads, then read at every
+    /// point: the full build's bin bit for bit, for the tests that read no other. The young thin
+    /// disc's seven bins take 17 metallicities' samples, its solar circle's three.
+    #[cfg(test)]
+    SolarCircle,
+}
+
 impl BuildOptions {
     /// The options the tables are built with.
     pub(crate) const STANDARD: Self = Self {
         samples_per_phase: SAMPLES_PER_PHASE,
         companions: Companions::Included,
+        bins: GradientBins::All,
     };
 }
 
@@ -490,7 +505,6 @@ impl LuminosityTables {
                 radial_means: Vec::new(),
             })
             .collect();
-        let mut built: Vec<Option<Vec<Vec<LuminosityFunction>>>> = vec![None; component_count];
         let grid = MassGrid::new(galaxy, options);
         // The oldest age any snapshot reads: a component's oldest at the epoch plus the build's
         // time from the epoch where that is later, and a margin of 2,000 years for the rounding
@@ -503,73 +517,66 @@ impl LuminosityTables {
             .fold(0.0, f64::max)
             + time.since_epoch().as_julian_years_f64().max(0.0)
             + 2_000.0;
-        let mut tracks: Vec<(f64, Vec<NodeSamples>)> = Vec::new();
         let brown_dwarfs = BrownDwarfGrid::new(galaxy.mass_function());
-        let mut brown_dwarf_samples: Vec<(f64, Vec<NodeSamples>)> = Vec::new();
         let shift_now = time.since_epoch().as_julian_years_f64();
+        let solar_radius_ly = SOLAR_RADIUS_LENGTHS * galaxy.params().thin_disc().length().value();
+        // Every listed component with its bins, in the tables' order.
+        let mut work: Vec<(ComponentId, Vec<BinWork>)> = Vec::with_capacity(components.len());
         for &id in components {
             let component = galaxy.fields().component(id);
             let means = metallicity_bins(galaxy, component);
-            let mut by_bin = Vec::with_capacity(means.len());
-            for &mean in &means {
-                let metallicities = metallicity_nodes(component, mean);
-                for &(fe_h, _) in &metallicities {
-                    if !tracks.iter().any(|(f, _)| f.total_cmp(&fe_h).is_eq()) {
-                        tracks.push((fe_h, grid.samples(fe_h, max_age, options)));
-                        brown_dwarf_samples.push((fe_h, brown_dwarfs.samples(fe_h, max_age)));
-                    }
-                }
-                let ages = component.ages();
-                let mut per_layer: Vec<Vec<Snapshot>> = vec![Vec::new(); LAYER_COUNT];
-                for &ago in &EMITTED_AGO_YEARS {
-                    // A star's age then is its age at the epoch plus `shift`.
-                    let shift = shift_now - ago;
-                    let weight_of = |lo: f64, hi: f64| {
-                        ages.born_cdf(Years::new(hi - shift))
-                            - ages.born_cdf(Years::new(lo - shift))
-                    };
-                    let mut bins: Vec<Bins> = (0..LAYER_COUNT).map(|_| Bins::new()).collect();
-                    let mut layers = Vec::with_capacity(LAYER_COUNT);
-                    for &(fe_h, share) in &metallicities {
-                        let k = tracks
-                            .iter()
-                            .position(|(f, _)| f.total_cmp(&fe_h).is_eq())
-                            .expect("the metallicity's samples were just made");
-                        let (samples, bd_samples) = (&tracks[k].1, &brown_dwarf_samples[k].1);
-                        for (node, node_samples) in grid.nodes.iter().zip(samples) {
-                            layers.clear();
-                            layers.extend(
-                                node.weights
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, w)| **w > 0.0)
-                                    .map(|(layer, &w)| (layer, share * w)),
-                            );
-                            node_samples.accumulate(&weight_of, &layers, &mut bins);
-                        }
-                        let bd = layer_index(Layer::BrownDwarf);
-                        for (&weight, node_samples) in brown_dwarfs.weights.iter().zip(bd_samples) {
-                            node_samples.accumulate(&weight_of, &[(bd, share * weight)], &mut bins);
-                        }
-                    }
-                    for (layer, b) in bins.iter().enumerate() {
-                        per_layer[layer].push(Snapshot::from_bins(b));
-                    }
-                }
-                let mut functions = vec![LuminosityFunction::zero(); LAYER_COUNT];
-                for (layer, snapshots) in per_layer.into_iter().enumerate() {
-                    if Layer::ALL[layer] == Layer::RoguePlanet {
-                        continue;
-                    }
-                    functions[layer] = LuminosityFunction { snapshots };
-                }
-                by_bin.push(functions);
-            }
-            if means.len() > 1 {
-                layout[id.index()].radial_means = radial_means(galaxy, component);
-            }
+            let radial = if means.len() > 1 {
+                radial_means(galaxy, component)
+            } else {
+                Vec::new()
+            };
+            let (means, radial) = match options.bins {
+                GradientBins::All => (means, radial),
+                #[cfg(test)]
+                GradientBins::SolarCircle => solar_circle_bin(means, radial, solar_radius_ly),
+            };
+            let bins = means
+                .iter()
+                .map(|&mean| BinWork::new(metallicity_nodes(component, mean)))
+                .collect();
+            work.push((id, bins));
+            layout[id.index()].radial_means = radial;
             layout[id.index()].means = means;
-            built[id.index()] = Some(by_bin);
+        }
+        // One metallicity's samples at a time, the lowest [Fe/H] that any bin adds next: made,
+        // added to every bin whose next node it is, and dropped. Each is some 150 MB (2,240 nodes
+        // at 32 samples a phase), and held to the build's end, as they were, the young thin
+        // disc's 17 at twice the samples took 4.1 GB, past wasm32's 4 GiB (2026-10-04). A bin's
+        // nodes ascend in [Fe/H] (`metallicity_nodes`), so each metallicity is made once, and
+        // every bin still adds its nodes in their own order, which keeps the bits of its sums.
+        while let Some(fe_h) = work
+            .iter()
+            .flat_map(|(_, bins)| bins)
+            .filter_map(BinWork::next_fe_h)
+            .min_by(f64::total_cmp)
+        {
+            let samples = MetallicitySamples {
+                stars: grid.samples(fe_h, max_age, options),
+                brown_dwarfs: brown_dwarfs.samples(fe_h, max_age),
+            };
+            for (id, bins) in &mut work {
+                let ages = galaxy.fields().component(*id).ages();
+                for bin in bins {
+                    while let Some(share) = bin.take_node(fe_h) {
+                        for (&ago, snapshot) in EMITTED_AGO_YEARS.iter().zip(&mut bin.snapshots) {
+                            // A star's age then is its age at the epoch plus `shift`.
+                            let shift = shift_now - ago;
+                            let born_cdf =
+                                |age: Years| ages.born_cdf(Years::new(age.value() - shift));
+                            samples.add(&grid, &brown_dwarfs, share, &born_cdf, snapshot);
+                        }
+                    }
+                }
+            }
+        }
+        let mut built: Vec<Option<Vec<Vec<LuminosityFunction>>>> = vec![None; component_count];
+        for (id, bins) in work {
+            built[id.index()] = Some(bins.into_iter().map(BinWork::into_functions).collect());
         }
         let mut functions = Vec::new();
         for (bins, built) in layout.iter_mut().zip(built) {
@@ -581,7 +588,7 @@ impl LuminosityTables {
         }
         Self {
             time,
-            solar_radius: SOLAR_RADIUS_LENGTHS * galaxy.params().thin_disc().length().value(),
+            solar_radius: solar_radius_ly,
             layout,
             functions,
         }
@@ -601,14 +608,7 @@ impl LuminosityTables {
     #[must_use]
     pub fn get(&self, component: ComponentId, layer: Layer) -> &LuminosityFunction {
         let bins = &self.layout[component.index()];
-        let bin = if bins.means.len() == 1 {
-            0
-        } else {
-            nearest(
-                &bins.means,
-                at_radius(&bins.radial_means, self.solar_radius),
-            )
-        };
+        let bin = bin_at_radius(&bins.means, &bins.radial_means, self.solar_radius);
         &self.functions[(bins.first + bin) * LAYER_COUNT + layer_index(layer)]
     }
 
@@ -621,12 +621,11 @@ impl LuminosityTables {
     #[must_use]
     pub fn get_at(&self, component: ComponentId, layer: Layer, p: &PointLy) -> &LuminosityFunction {
         let bins = &self.layout[component.index()];
-        let bin = if bins.means.len() == 1 {
-            0
-        } else {
-            let r = (p.x * p.x + p.y * p.y).sqrt();
-            nearest(&bins.means, at_radius(&bins.radial_means, r))
-        };
+        let bin = bin_at_radius(
+            &bins.means,
+            &bins.radial_means,
+            (p.x * p.x + p.y * p.y).sqrt(),
+        );
         &self.functions[(bins.first + bin) * LAYER_COUNT + layer_index(layer)]
     }
 
@@ -780,6 +779,34 @@ fn nearest(values: &[f64], x: f64) -> usize {
     }
 }
 
+/// The index of the bin that a point `radius_ly` from the axis reads, of a component's bins
+/// `means` and, for a gradient component, its `radial` means ([`ComponentBins`]).
+#[must_use]
+fn bin_at_radius(means: &[f64], radial: &[f64], radius_ly: f64) -> usize {
+    if means.len() == 1 {
+        0
+    } else {
+        nearest(means, at_radius(radial, radius_ly))
+    }
+}
+
+/// A component's bin `means` and `radial` means cut to the one bin that [`LuminosityTables::get`]
+/// reads at `solar_radius_ly` ([`GradientBins::SolarCircle`]); one bin is kept as it is.
+#[cfg(test)]
+#[must_use]
+fn solar_circle_bin(
+    means: Vec<f64>,
+    radial: Vec<f64>,
+    solar_radius_ly: f64,
+) -> (Vec<f64>, Vec<f64>) {
+    if means.len() > 1 {
+        let bin = bin_at_radius(&means, &radial, solar_radius_ly);
+        (vec![means[bin]], Vec::new())
+    } else {
+        (means, radial)
+    }
+}
+
 /// `layer`'s position in [`Layer::ALL`].
 #[must_use]
 fn layer_index(layer: Layer) -> usize {
@@ -902,15 +929,25 @@ struct NodeSamples {
 
 impl NodeSamples {
     /// Adds every part to the bins of `layers`, each `(layer, weight)` weighting the node's stars
-    /// per system of the layer, and every part by `weight_of` its age span.
+    /// per system of the layer, and every part by its share of the born systems: the rise across
+    /// its age span of `born_cdf`, the share of the systems whose stars are younger than an age at
+    /// the snapshot's emitted time.
     fn accumulate(
         &self,
-        weight_of: &impl Fn(f64, f64) -> f64,
+        born_cdf: &impl Fn(Years) -> f64,
         layers: &[(usize, f64)],
         bins: &mut [Bins],
     ) {
-        for (span, &seen) in self.ends.windows(2).zip(&self.seen) {
-            let share = weight_of(span[0], span[1]);
+        // Each end is read once, for the part it closes and the part it opens: half the calls,
+        // which took a young thin-disc bin's accumulation from 3.2-4.6 s to 1.8-1.9 s (test
+        // profile, 2026-10-04).
+        let mut ends = self.ends.iter().map(|&age| born_cdf(Years::new(age)));
+        let Some(mut lo) = ends.next() else {
+            return;
+        };
+        for (hi, &seen) in ends.zip(&self.seen) {
+            let share = hi - lo;
+            lo = hi;
             if share > 0.0 {
                 for &(layer, weight) in layers {
                     bins[layer].add(seen, weight * share);
@@ -1189,6 +1226,101 @@ impl BrownDwarfGrid {
     }
 }
 
+/// The lives at one metallicity of every node of the [`MassGrid`] and the [`BrownDwarfGrid`].
+#[derive(Debug, Clone, PartialEq)]
+struct MetallicitySamples {
+    stars: Vec<NodeSamples>,
+    brown_dwarfs: Vec<NodeSamples>,
+}
+
+impl MetallicitySamples {
+    /// Adds every node's stars to one snapshot's `bins`, each layer's weighted by `share`, the
+    /// metallicity node's weight, and every part by its share of the born systems (`born_cdf`, as
+    /// [`NodeSamples::accumulate`] reads it).
+    fn add(
+        &self,
+        grid: &MassGrid,
+        brown_dwarfs: &BrownDwarfGrid,
+        share: f64,
+        born_cdf: &impl Fn(Years) -> f64,
+        bins: &mut [Bins],
+    ) {
+        let mut layers = Vec::with_capacity(LAYER_COUNT);
+        for (node, node_samples) in grid.nodes.iter().zip(&self.stars) {
+            layers.clear();
+            layers.extend(
+                node.weights
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, w)| **w > 0.0)
+                    .map(|(layer, &w)| (layer, share * w)),
+            );
+            node_samples.accumulate(born_cdf, &layers, bins);
+        }
+        let bd = layer_index(Layer::BrownDwarf);
+        for (&weight, node_samples) in brown_dwarfs.weights.iter().zip(&self.brown_dwarfs) {
+            node_samples.accumulate(born_cdf, &[(bd, share * weight)], bins);
+        }
+    }
+}
+
+/// One component bin being built: its three metallicity nodes, how many of them it has added,
+/// and the bins of each of its snapshots, in [`EMITTED_AGO_YEARS`]'s order, by layer.
+#[derive(Debug, Clone)]
+struct BinWork {
+    metallicities: [(f64, f64); 3],
+    added: usize,
+    snapshots: Vec<Vec<Bins>>,
+}
+
+impl BinWork {
+    #[must_use]
+    fn new(metallicities: [(f64, f64); 3]) -> Self {
+        Self {
+            metallicities,
+            added: 0,
+            snapshots: EMITTED_AGO_YEARS
+                .iter()
+                .map(|_| (0..LAYER_COUNT).map(|_| Bins::new()).collect())
+                .collect(),
+        }
+    }
+
+    /// The \[Fe/H\] of the next node to add, if one is left.
+    #[must_use]
+    fn next_fe_h(&self) -> Option<f64> {
+        self.metallicities.get(self.added).map(|&(fe_h, _)| fe_h)
+    }
+
+    /// The weight of the next node if its \[Fe/H\] is `fe_h`, which it then counts as added.
+    fn take_node(&mut self, fe_h: f64) -> Option<f64> {
+        let &(next, share) = self.metallicities.get(self.added)?;
+        next.total_cmp(&fe_h).is_eq().then(|| {
+            self.added += 1;
+            share
+        })
+    }
+
+    /// The bin's functions by layer, the rogue planets' dark.
+    #[must_use]
+    fn into_functions(self) -> Vec<LuminosityFunction> {
+        let mut per_layer: Vec<Vec<Snapshot>> = vec![Vec::new(); LAYER_COUNT];
+        for bins in &self.snapshots {
+            for (layer, b) in bins.iter().enumerate() {
+                per_layer[layer].push(Snapshot::from_bins(b));
+            }
+        }
+        let mut functions = vec![LuminosityFunction::zero(); LAYER_COUNT];
+        for (layer, snapshots) in per_layer.into_iter().enumerate() {
+            if Layer::ALL[layer] == Layer::RoguePlanet {
+                continue;
+            }
+            functions[layer] = LuminosityFunction { snapshots };
+        }
+        functions
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1214,9 +1346,16 @@ mod tests {
         )
     }
 
+    /// The standard build of a component's solar-circle bin alone: the one bin
+    /// [`LuminosityTables::get`] reads, and the only one the tests here read.
+    const SOLAR_CIRCLE: BuildOptions = BuildOptions {
+        bins: GradientBins::SolarCircle,
+        ..BuildOptions::STANDARD
+    };
+
     const PRIMARIES: BuildOptions = BuildOptions {
-        samples_per_phase: SAMPLES_PER_PHASE,
         companions: Companions::Omitted,
+        ..SOLAR_CIRCLE
     };
 
     #[test]
@@ -1293,7 +1432,7 @@ mod tests {
         // a bin edge beside one sees its share cross as the samples move.
         let fine = BuildOptions {
             samples_per_phase: 2 * SAMPLES_PER_PHASE,
-            companions: Companions::Included,
+            ..SOLAR_CIRCLE
         };
         let cases = [
             (
@@ -1306,7 +1445,7 @@ mod tests {
             ),
         ];
         for (population, layers) in cases {
-            let (id, coarse) = tables(population, BuildOptions::STANDARD);
+            let (id, coarse) = tables(population, SOLAR_CIRCLE);
             let (_, finer) = tables(population, fine);
             for layer in layers {
                 let (a, b) = (coarse.get(id, layer), finer.get(id, layer));
@@ -1354,13 +1493,12 @@ mod tests {
         // Ages of 0.5–3 Myr: younger than any lifetime, the shortest some 3.3 Myr at 150 M☉.
         let ages = crate::galaxy::ages::AgeDistribution::uniform(Years::new(5e5), Years::new(3e6))
             .unwrap();
-        let weight_of =
-            |lo: f64, hi: f64| ages.born_cdf(Years::new(hi)) - ages.born_cdf(Years::new(lo));
+        let born_cdf = |age: Years| ages.born_cdf(age);
         let composition = composition_at(0.0);
         let mut bins = vec![Bins::new()];
         for mass in [8.0, 20.0, 60.0, 150.0] {
             let samples = NodeSamples::of_mass(mass, &composition, 1.4e10, SAMPLES_PER_PHASE);
-            samples.accumulate(&weight_of, &[(0, 1.0)], &mut bins);
+            samples.accumulate(&born_cdf, &[(0, 1.0)], &mut bins);
         }
         let snapshot = Snapshot::from_bins(&bins[0]);
         assert!(snapshot.remnants.abs() < 1e-300, "{}", snapshot.remnants);
@@ -1375,17 +1513,11 @@ mod tests {
     fn interpolation_between_snapshots_matches_a_table_built_there() {
         let galaxy = milky_way_galaxy();
         let id = component_of(galaxy, Population::YoungThinDisc);
-        let now = LuminosityTables::build_with(
-            galaxy,
-            UniverseTime::EPOCH,
-            &[id],
-            BuildOptions::STANDARD,
-        );
+        let now = LuminosityTables::build_with(galaxy, UniverseTime::EPOCH, &[id], SOLAR_CIRCLE);
         // Half-way through the buckets 10⁴–10⁵ and 10⁵–L years.
         for half in [55_000_i64, 181_072] {
             let then_time = UniverseTime::from_julian_years(-half).unwrap();
-            let then =
-                LuminosityTables::build_with(galaxy, then_time, &[id], BuildOptions::STANDARD);
+            let then = LuminosityTables::build_with(galaxy, then_time, &[id], SOLAR_CIRCLE);
             let ago = Span::from_julian_years(half).unwrap();
             for layer in [Layer::A, Layer::C, Layer::E] {
                 let (a, b) = (now.get(id, layer), then.get(id, layer));
@@ -1420,14 +1552,8 @@ mod tests {
         // function's total light and stars of a build at the epoch (decided 2026-10-03).
         let galaxy = milky_way_galaxy();
         let id = component_of(galaxy, Population::YoungThinDisc);
-        let reference =
-            LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[id], BuildOptions::STANDARD);
-        let epoch = LuminosityTables::build_with(
-            galaxy,
-            UniverseTime::EPOCH,
-            &[id],
-            BuildOptions::STANDARD,
-        );
+        let reference = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[id], SOLAR_CIRCLE);
+        let epoch = LuminosityTables::build_with(galaxy, UniverseTime::EPOCH, &[id], SOLAR_CIRCLE);
         for years in [0_i64, 1_000, 30_000, 200_000] {
             let ago = Span::from_julian_years(years).unwrap();
             let shifted = reference.age_for(UniverseTime::EPOCH, ago);
@@ -1546,12 +1672,7 @@ mod tests {
     fn the_light_of_m_dwarfs_is_redder_and_less_scotopic_than_that_of_b_stars() {
         let galaxy = milky_way_galaxy();
         let id = component_of(galaxy, Population::YoungThinDisc);
-        let tables = LuminosityTables::build_with(
-            galaxy,
-            UniverseTime::EPOCH,
-            &[id],
-            BuildOptions::STANDARD,
-        );
+        let tables = LuminosityTables::build_with(galaxy, UniverseTime::EPOCH, &[id], SOLAR_CIRCLE);
         let all = Magnitudes::new(BRIGHTEST_MAGNITUDE);
         let dwarfs = tables
             .get(id, Layer::A)
@@ -1583,7 +1704,7 @@ mod tests {
     #[test]
     fn every_star_is_counted_once() {
         let galaxy = milky_way_galaxy();
-        let (id, tables) = tables(Population::OldThinDisc, BuildOptions::STANDARD);
+        let (id, tables) = tables(Population::OldThinDisc, SOLAR_CIRCLE);
         let f = galaxy.mass_function();
         let fates = fates_for(Population::OldThinDisc);
         // Summed over the layers, weighted by their primaries, the stars per system are plan 02's.
@@ -1603,5 +1724,58 @@ mod tests {
             "{} against {expected}",
             stars / primaries
         );
+    }
+
+    /// The bits of every value a snapshot holds.
+    fn snapshot_bits(s: &Snapshot) -> Vec<u64> {
+        use hyperion_testkit::float::bits;
+        s.light_fainter
+            .iter()
+            .chain(&s.count_brighter)
+            .chain(s.colour_fainter.iter().flatten())
+            .chain(&[s.beyond, s.dark, s.remnants])
+            .map(|&v| bits(v))
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "slow: builds the young thin disc's seven metallicity bins at twice the samples"]
+    fn a_solar_circle_build_is_the_full_builds_bin_bit_for_bit() {
+        // The tests above read the solar circle's bin built alone (`SOLAR_CIRCLE`); this pins it to
+        // that bin of a build of every bin, whose sums must not depend on the bins beside it. At
+        // twice the samples it also guards the build's memory: holding every metallicity's samples
+        // to the end, as the build once did, took 4.1 GB here, past wasm32's 4 GiB (2026-10-04).
+        let galaxy = milky_way_galaxy();
+        let id = component_of(galaxy, Population::YoungThinDisc);
+        let fine = |bins| BuildOptions {
+            samples_per_phase: 2 * SAMPLES_PER_PHASE,
+            bins,
+            ..BuildOptions::STANDARD
+        };
+        let all =
+            LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[id], fine(GradientBins::All));
+        assert!(
+            all.layout[id.index()].means.len() > 1,
+            "the young thin disc has a radial gradient"
+        );
+        let solar = LuminosityTables::build_with(
+            galaxy,
+            REFERENCE_TIME,
+            &[id],
+            fine(GradientBins::SolarCircle),
+        );
+        for layer in Layer::ALL {
+            let (a, b) = (all.get(id, layer), solar.get(id, layer));
+            assert_eq!(a.snapshots.len(), b.snapshots.len(), "{layer:?}");
+            for (k, (sa, sb)) in a.snapshots.iter().zip(&b.snapshots).enumerate() {
+                let (x, y) = (snapshot_bits(sa), snapshot_bits(sb));
+                assert_eq!(x.len(), y.len(), "{layer:?} snapshot {k}");
+                let differs = x.iter().zip(&y).position(|(x, y)| x != y);
+                assert_eq!(
+                    differs, None,
+                    "{layer:?} snapshot {k}: the first value that differs"
+                );
+            }
+        }
     }
 }
