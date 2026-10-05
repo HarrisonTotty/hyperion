@@ -1,16 +1,17 @@
 /**
- * The descent spike's trace in windows of script time (plan R05, T14.d;
+ * The descent spike's trace in windows of script time (plan R05, T14.d and T14.e;
  * decision-r05-trace-windows.md): each window's reduced trace placed in script time, the frames
  * left out at its boundaries, and the windows' figures pooled into the results file's.
  *
  * @remarks
  * Chromium keeps one trace session at a time, and its tracing service crashed reading out a whole
- * descent's trace at the stop, so the trace is stopped and started again at fixed boundaries of
- * script time (T14.e). Each window is written to its own file and reduced alone after the run. A
- * boundary's gap runs from the stop request to the next start resolving, and its excluded interval
- * from the stop request to {@link TRACE_BOUNDARY_GUARD_S} after that: the frames in it are left out
- * of every per-frame figure, as the warm-up's are, and counted. Until T14.e drives the windows, a
- * run is one window with no boundary.
+ * descent's trace at the stop, so the renderer stops and starts the trace again at fixed
+ * boundaries of script time (`view/spike/traceWindows.ts`). Each window is written to its own file
+ * and reduced alone after the run. A boundary's gap runs from the stop request to the next start
+ * resolving, and its excluded interval from the stop request to the report's guard
+ * (`traceGuardS`) after that: the frames in it are left out of every per-frame figure, as the
+ * warm-up's are, and counted. A trace the renderer ended early (a cycle that failed or was still
+ * pending at the next boundary) ends in one failed window, from the failure to the run's end.
  *
  * The windows' figures pool by the ruling's merge rules:
  *
@@ -30,15 +31,6 @@ import type { TraceConfig } from "electron";
 import type { DescentSpikeReport, SpikeFrameSeries, SpikeTraceWindow } from "../preload/api";
 import { type Measured, measured, missing } from "./measured";
 import type { GpuProcessFigures, MainThreadFigures, TraceFigures } from "./reduceTrace";
-
-/**
- * How long after a window's start resolves its boundary's frames are still left out, s
- * (`TRACE_BOUNDARY_GUARD_S`): the start's own pause. Provisional until T14.f's runs confirm it.
- */
-export const TRACE_BOUNDARY_GUARD_S = 1;
-
-/** V8's CPU profiler's trace category, recorded only in a profiled run (`--trace-profile on`). */
-export const CPU_PROFILER_CATEGORY = "disabled-by-default-v8.cpu_profiler";
 
 /** Why an unprofiled run has no engine figure. */
 export const PROFILER_OFF_REASON =
@@ -66,8 +58,8 @@ export const FULL_BUFFER_PERCENT = 99;
 /** How a run's trace was recorded: one configuration for every window. */
 export interface TraceSettings {
   /**
-   * Whether {@link CPU_PROFILER_CATEGORY} is recorded. A profiled run is a diagnostic, never
-   * judged: its memory includes the profiler's samples.
+   * Whether V8's CPU profiler (`spike.ts`'s `SPIKE_PROFILER_CATEGORY`) is recorded. A profiled run
+   * is a diagnostic, never judged: its memory includes the profiler's samples.
    */
   readonly profiled: boolean;
   /** The categories recorded. */
@@ -76,18 +68,6 @@ export interface TraceSettings {
   readonly recordingMode: NonNullable<TraceConfig["recording_mode"]>;
   /** Each window's buffer ceiling, KiB (`trace_buffer_size_in_kb`). */
   readonly bufferKb: number;
-}
-
-/** A run's trace settings from the configuration its trace was started with. */
-export function traceSettingsOf(config: TraceConfig): TraceSettings {
-  const categories = config.included_categories ?? [];
-  return {
-    profiled: categories.includes(CPU_PROFILER_CATEGORY),
-    categories: [...categories],
-    // Chromium's default when none is given.
-    recordingMode: config.recording_mode ?? "record-until-full",
-    bufferKb: config.trace_buffer_size_in_kb ?? 0,
-  };
 }
 
 /** One window's file as the main process reduced it. */
@@ -148,12 +128,15 @@ export interface TraceBoundary {
 
 /** The results file's `run.trace` (results schema version 3). */
 export interface TraceRun extends TraceSettings {
-  /** {@link TRACE_BOUNDARY_GUARD_S} as the run used it, s. */
+  /** How long after each window's start its boundary's frames were still left out, s. */
   readonly guardS: number;
   readonly windows: ReadonlyArray<TraceWindowRecord>;
   /** One between each pair of windows. */
   readonly boundaries: ReadonlyArray<TraceBoundary>;
-  /** Script time after the warm-up, to the script's end, that is traced and not excluded, s. */
+  /**
+   * Script time after the warm-up, to the script's end, held by a window that did not fail and not
+   * excluded, s.
+   */
   readonly tracedS: number;
 }
 
@@ -212,7 +195,7 @@ export interface MergedTrace {
 /** What the merge reads of the renderer's report. */
 export interface TraceWindowsReport extends Pick<
   DescentSpikeReport,
-  "scriptStartMs" | "traceWindows" | "warmupS" | "segments"
+  "scriptStartMs" | "traceWindows" | "traceGuardS" | "warmupS" | "segments"
 > {
   readonly frames: Pick<SpikeFrameSeries, "scriptTimesS" | "rafIntervalsMs">;
 }
@@ -246,35 +229,79 @@ function seconds(ms: number): string {
   return (ms / 1000).toFixed(1);
 }
 
-/** A window's file against the time the renderer recorded it. */
-function checkWindow(file: TraceWindowFile, time: SpikeTraceWindow): Checked {
+/** A window's file read whole, before its span is checked against its recorded time. */
+type FileCheck =
+  | {
+      readonly kind: "whole";
+      readonly trace: TraceFigures;
+      readonly spanMs: number;
+      readonly offsetUs: number;
+      readonly bytes: number;
+    }
+  | { readonly kind: "failed"; readonly reason: string };
+
+function checkFile(file: TraceWindowFile): FileCheck {
   const trace = file.trace.value;
   if (trace === null) {
-    return failed(file.trace.reason);
+    return { kind: "failed", reason: file.trace.reason };
   }
-  if (trace.span === null) {
-    return failed(EMPTY_TRACE_REASON);
+  const { span, clockOffsetUs } = trace;
+  if (span === null) {
+    return { kind: "failed", reason: EMPTY_TRACE_REASON };
   }
-  if (trace.clockOffsetUs === null) {
-    return failed(NO_CLOCK_OFFSET_REASON);
+  if (clockOffsetUs === null) {
+    return { kind: "failed", reason: NO_CLOCK_OFFSET_REASON };
   }
   if (file.bytes === null) {
-    return failed("its file's size could not be read");
+    return { kind: "failed", reason: "its file's size could not be read" };
   }
-  const spanMs = (trace.span.lastUs - trace.span.firstUs) / 1000;
+  return {
+    kind: "whole",
+    trace,
+    spanMs: (span.lastUs - span.firstUs) / 1000,
+    offsetUs: clockOffsetUs,
+    bytes: file.bytes,
+  };
+}
+
+/** Why a window's buffer filled by its own reading, or `null`. */
+function bufferFailure(file: TraceWindowFile): string | null {
+  return file.bufferPercent !== null && file.bufferPercent >= FULL_BUFFER_PERCENT
+    ? `it filled its buffer: ${file.bufferPercent.toFixed(0)} % of it was used`
+    : null;
+}
+
+/**
+ * Why a window's file failed, by the checks that need no renderer times, or `null`: the file
+ * missing or not a trace, a trace with no event or no clock offset, or a buffer used to
+ * {@link FULL_BUFFER_PERCENT}. A smoke run, which writes no results, is failed on it.
+ */
+export function windowFileFailure(file: TraceWindowFile): string | null {
+  const check = checkFile(file);
+  return check.kind === "failed" ? check.reason : bufferFailure(file);
+}
+
+/** A window's file against the time the renderer recorded it. */
+function checkWindow(file: TraceWindowFile, time: SpikeTraceWindow): Checked {
+  const check = checkFile(file);
+  if (check.kind === "failed") {
+    return failed(check.reason);
+  }
+  const { trace, spanMs, offsetUs, bytes } = check;
   const recordedMs = time.stopRequestedMs - time.startedMs;
   if (spanMs < SHORT_SPAN_FRACTION * recordedMs) {
     return failed(
       `it filled its buffer: it spans ${seconds(spanMs)} s of the ${seconds(recordedMs)} s recorded`,
     );
   }
-  if (file.bufferPercent !== null && file.bufferPercent >= FULL_BUFFER_PERCENT) {
-    return failed(`it filled its buffer: ${file.bufferPercent.toFixed(0)} % of it was used`);
+  const full = bufferFailure(file);
+  if (full !== null) {
+    return failed(full);
   }
   return {
     trace,
-    offsetUs: trace.clockOffsetUs,
-    figures: { spanMs, bytes: file.bytes, bufferPercent: file.bufferPercent },
+    offsetUs,
+    figures: { spanMs, bytes, bufferPercent: file.bufferPercent },
     failure: null,
   };
 }
@@ -319,23 +346,26 @@ function within(fromS: number, toS: number, lowS: number, highS: number): number
  * The run's trace windows merged: each placed in script time, the frames at its boundaries left
  * out, and its figures pooled.
  *
- * @param recording - Its windows in the order the renderer's `report.traceWindows` lists them.
- * @param guardS - How long after each window's start its boundary's frames are still left out, s.
+ * @param recording - Its windows in the order the renderer's `report.traceWindows` lists them. A
+ * last window the renderer failed may have no file: the trace ended before it began.
  */
 export function mergeTraceWindows(
   recording: Measured<TraceRecording>,
   report: TraceWindowsReport,
-  guardS: number = TRACE_BOUNDARY_GUARD_S,
 ): MergedTrace {
   if (recording.value === null) {
     return noTrace(recording.reason);
   }
   const { settings, windows: files } = recording.value;
   const times = report.traceWindows;
+  const guardS = report.traceGuardS;
   if (times.length === 0) {
     return noTrace("the renderer reported no trace window");
   }
-  if (times.length !== files.length) {
+  const last = times.at(-1);
+  const endedUnwritten =
+    files.length === times.length - 1 && last !== undefined && last.failure !== null;
+  if (times.length !== files.length && !endedUnwritten) {
     return noTrace(
       `the renderer reported ${times.length} trace windows, and the main process wrote ${files.length}`,
     );
@@ -343,10 +373,12 @@ export function mergeTraceWindows(
   const scriptS = (perfMs: number): number => (perfMs - report.scriptStartMs) / 1000;
   const checked = sameRenderer(
     times.map((time, i) =>
-      checkWindow(
-        files[i] ?? { trace: missing("no trace file"), bytes: null, bufferPercent: null },
-        time,
-      ),
+      time.failure !== null
+        ? failed(time.failure)
+        : checkWindow(
+            files[i] ?? { trace: missing("no trace file"), bytes: null, bufferPercent: null },
+            time,
+          ),
     ),
   );
   const windows: TraceWindowRecord[] = times.map((time, index) => {
@@ -387,6 +419,9 @@ export function mergeTraceWindows(
   const scriptEndS = Math.max(0, ...report.segments.map(({ endS }) => endS));
   let tracedS = 0;
   for (const window of windows) {
+    if (window.figures.value === null) {
+      continue;
+    }
     tracedS += within(window.fromS, window.toS, warmupS, scriptEndS);
     for (const { fromS, toS } of exclusions) {
       tracedS -= within(

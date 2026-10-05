@@ -7,7 +7,8 @@
 #
 # Spike options (the client's, `src/main/cli.ts`): --setting high|low, --seed <u64>, --smoke,
 # --out <dir>, --workers <n>, --vertex-path baked-offsets|face-differences, --normals double|mesh,
-# --ridged on|off, --dawn-safety on|off, --capture <dir>.
+# --ridged on|off, --dawn-safety on|off, --capture <dir>, --trace-profile on|off (V8's CPU profiler
+# in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e).
 #
 # --companion-load <threads> runs that many busy threads beside the run, standing in for the
 # server's arrival work (Design note 20). --cold-cache starts with an empty Chromium GPU shader
@@ -15,15 +16,19 @@
 # into the run's profile and kept again after it, so that cold and warm caches are run apart.
 # --hidden never shows the window (offscreen rendering), as --smoke never does.
 #
-# Each run gets a fresh `--user-data-dir`, removed afterwards; the server, the companion load and
-# Electron run in process groups of their own under `timeout`, each group killed when the script
-# ends for any reason. The exit status is the client's: 0 pass, 1 fail, 3 the watchdog.
+# Each run gets a fresh `--user-data-dir` under target/descent-spike/, on disk and never under
+# TMPDIR, removed afterwards: the trace's window files wait there until the run ends, about 1.5 GB
+# for a descent, which a RAM-backed /tmp cannot hold (decision-r05-trace-windows.md). The server,
+# the companion load and Electron run in process groups of their own under `timeout`, each group
+# killed when the script ends for any reason. The exit status is the client's: 0 pass, 1 fail, 3
+# the watchdog.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 electron="$here/node_modules/.bin/electron"
-cache_keep="$repo/target/descent-spike/gpu-cache"
+runs="$repo/target/descent-spike"
+cache_keep="$runs/gpu-cache"
 port="${HYPERION_SPIKE_PORT:-7879}"
 
 companion=0
@@ -73,8 +78,8 @@ for (( i = 0; i < companion; i++ )); do
     groups+=("$!")
 done
 
-profile="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-spike.XXXXXX")"
 mkdir -p "$cache_keep"
+profile="$(mktemp -d "$runs/profile.XXXXXX")"
 if [[ $cold -eq 0 ]]; then
     cp -a "$cache_keep/." "$profile/"
 else

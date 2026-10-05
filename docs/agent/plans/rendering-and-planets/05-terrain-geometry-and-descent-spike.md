@@ -3350,6 +3350,70 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     next version bump must convert them again.
   - The three subtasks' text in this plan keeps the ruling's suggested subjects, T14.f's included.
 
+- **Deviations in T14.e, as built** (2026-10-05, the trace driven in windows).
+  - _Where things are._ `view/spike/traceWindows.ts` holds `traceBoundaries`, the four constants
+    and `TRACE_BUSY_SEGMENTS`. `main/spike.ts` holds `SPIKE_PROFILER_CATEGORY`, now the one copy
+    of the literal (`main/traceWindows.ts`'s `CPU_PROFILER_CATEGORY` is gone), `SpikeTraceOptions`,
+    `spikeTraceConfig({ profiled })` and `traceSettingsOf`, moved there from `traceWindows.ts` so
+    that the two do not import each other. `SpikeTrace(tracing, { profiled })` exposes `settings`,
+    the configuration every window records with, in place of `index.ts`'s second
+    `spikeTraceConfig()` call. Its `state` is `idle`, `recording` or `busy`, and it refuses any
+    call while another is in flight. The session refuses a cycle or a stop while it is busy, before
+    any window is begun. `bufferUsage()` keeps the plan's name and returns a percentage, as its
+    TSDoc says, where Electron gives a fraction. The session takes
+    `traceDir` (`userData`) in place of `tracePath` and `traceSettings`; `traceWindowFileName(k)`
+    counts from 0, as `run.trace.windows[].index` does. It logs one line per window: its bytes
+    and buffer use, or its failure. `SpikeLaunch.traceProfile` carries `--trace-profile` to
+    `run.options`. The results schema is unchanged (version 3).
+  - _The guard._ The two tsconfig projects can neither import each other's constants nor hold them
+    equal in a test, so the renderer's `TRACE_BOUNDARY_GUARD_S` is the one source. The report
+    carries it as `traceGuardS`, and `mergeTraceWindows(recording, report)` reads it from there;
+    the main process's `TRACE_BOUNDARY_GUARD_S` is gone. T14.f raises it in the renderer only.
+  - _A trace that ends early._ "The remaining windows are failed" is recorded as one failed last
+    window (`SpikeTraceWindow.failure`), from when the trace ended to the run's end, not one per
+    planned window. Each planned boundary the trace never reached would otherwise leave 1 s of
+    frames out with no stall in it. The boundary before the failed window excludes the whole
+    failed or pending cycle. The main process has no file for that window when the start failed,
+    and one when a late cycle started a recording that the last stop ended. `mergeTraceWindows`
+    accepts one file fewer than windows when the last window is failed, and ignores a failed
+    window's file. `readDescentSpikeReport` refuses a failure on any window but the last. A start
+    still pending at the first boundary ends the trace in the same way. `tracedS` now counts only
+    windows that did not fail. A failing last stop fails its window (its file is missing), not
+    the run.
+  - _The smoke traces._ T13.c's `--smoke` took no trace, so it could not show the cycle. A smoke
+    now cycles at 3 and 6 s (`SMOKE_TRACE_BOUNDARIES_S`). That exercises the IPC,
+    `getTraceBufferUsage`, the files, and their reduction and deletion. The session fails the
+    smoke's stop when a window's file fails (`windowFileFailure`: missing, unreadable, empty, no
+    clock offset, or buffer at 99 % or more), and the controller fails a smoke whose trace ended
+    early. A smoke still writes no results. A `--smoke --capture` run traces too, and its span
+    from 5 s crosses the cycle at 6 s, which the capture does not record.
+    - The hidden `just descent-spike --smoke` on the committed tree (2026-10-05, the high
+      setting, RTX 3080, load about 18) exited 0 after 30 s. Its windows were 18,457,209 B
+      (0.31 % of the buffer), 11,303,047 B (0.18 %) and 22,698,503 B (0.50 %), each reduced and
+      deleted, and the profile under `target/descent-spike/` was removed. A run before the
+      review's fixes gave 20,826,061, 12,255,570 and 22,194,612 B at 0.35, 0.19 and 0.49 %.
+  - _The buffer's units._ Electron's `getTraceBufferUsage().percentage` is Chromium's
+    `percent_full`, a fraction from 0 to 1 (CDP's `Tracing.bufferUsage.percentFull`), so
+    `bufferUsage()` scales it by 100. The smoke agrees with that: 0.50 % of 805 MB is about
+    4.0 MB in about 4 s, near the ruling's 1.15 MB/s. Read as a percentage, the buffer would have
+    held 100 times that.
+  - _Finding for T14.f: the window files are 5.6 to 7.8 times the buffer's use._ The ruling sized
+    the files deferred on disk at about 1.5 GB a descent, from the buffer's rate. If a descent's
+    windows keep the smoke's ratio, a 120 s window's JSON file is about 0.8 to 1.1 GB, and a run's
+    files total about 10 GB on disk until the reduction. That is in `target/descent-spike/`, with
+    310 GB free here. The smoke was the high setting's start, not a descent window. T14.f records
+    each window's bytes, and the reduction's time after the run, which is unmeasured and counts
+    against the 45-minute watchdog. Free disk is checked before each run, and for the owner's
+    laptop.
+  - _Files beyond the task's list:_
+    - `main/traceWindows.ts` and its test: the guard, the early end, `windowFileFailure` and
+      `tracedS`;
+    - `main/spikeReport.ts` and its test, `main/results.test.ts` and `main/fixtures/spikeReport.ts`:
+      `failure` and `traceGuardS`;
+    - `preload/spikeLaunch.ts` and its test: `traceProfile`;
+    - `view/spike/SpikeApp.test.tsx`: `stubHyperionApi.ts`'s new `TEST_SPIKE_LAUNCH`, which the
+      controller's test shares.
+
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
     `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,

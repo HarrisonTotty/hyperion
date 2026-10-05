@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SpikeApi, SpikeEnd } from "../../../../preload/api";
-import { TEST_GRAPHICS } from "../../test/stubHyperionApi";
+import { TEST_GRAPHICS, TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { SpikeApp } from "./SpikeApp";
 import type { SpikeWorkers } from "./spikeRun";
 import type { SurfaceQueryWorker } from "./surfaceQuery";
@@ -25,19 +25,9 @@ const WORKERS: SpikeWorkers = {
 
 function fakeSpike(ends: SpikeEnd[]): SpikeApi {
   return {
-    launch: {
-      setting: "low",
-      seed: "7",
-      smoke: true,
-      out: null,
-      workers: 1,
-      vertexPath: null,
-      normals: null,
-      ridged: "off",
-      dawnSafety: "on",
-      capture: null,
-    },
+    launch: { ...TEST_SPIKE_LAUNCH, smoke: true, workers: 1 },
     startTrace: () => Promise.resolve(),
+    cycleTrace: () => Promise.resolve(),
     stopTrace: () => Promise.resolve(),
     sampleMemory: () => Promise.resolve(),
     writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),

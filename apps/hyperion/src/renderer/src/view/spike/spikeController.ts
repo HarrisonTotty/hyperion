@@ -1,14 +1,25 @@
 /**
- * The descent spike's run control in the renderer (plan R05, T13.c): it answers the run's
- * listeners, starts and stops the main process's measuring, captures a span of frames when
- * `--capture` is given, and ends the run with its results or, for `--smoke`, its status.
+ * The descent spike's run control in the renderer (plan R05, T13.c, T14.e): it answers the run's
+ * listeners, starts and stops the main process's measuring, cycles the trace at its windows'
+ * boundaries, captures a span of frames when `--capture` is given, and ends the run with its
+ * results or, for `--smoke`, its status.
  *
  * @remarks
  * Pure of React and of the browser's globals: `SpikeApp` gives it the preload's functions, the
  * measured GPU and a clock, so that a test drives a whole run with fakes.
+ *
+ * The trace is cycled when the script first passes each boundary (`traceBoundaries`), without the
+ * frame awaiting it. A cycle that fails, or that is still pending at the next boundary, ends the
+ * trace but not the run: one last window, failed with the reason, stands for the rest of the run,
+ * so that no boundary the trace never reached leaves frames out.
  */
 
-import type { DescentSpikeReport, SpikeApi, SpikeLaunch } from "../../../../preload/api";
+import type {
+  DescentSpikeReport,
+  SpikeApi,
+  SpikeLaunch,
+  SpikeTraceWindow,
+} from "../../../../preload/api";
 import type { AllocationEvent } from "../engine/memory";
 import type { PassTimes, RenderEngine } from "../engine/types";
 import {
@@ -20,9 +31,17 @@ import type { SelectionInput } from "../terrain/select";
 import type { GpuCapture } from "./capture";
 import type { PipelineTally } from "./pipelineShim";
 import { type RecordedDescent, type ResolveCounter, SpikeRecorder } from "./spikeHarness";
+import { TRACE_BOUNDARY_GUARD_S, traceBoundaries } from "./traceWindows";
 
 /** How long `--smoke` runs, script seconds. */
 export const SMOKE_S = 10;
+
+/**
+ * Where a smoke run cycles its trace, script seconds: three windows in its 10 s, so that the smoke
+ * proves the cycle, the window files and their reduction end to end (T14.e), where the descent's
+ * first boundary, at 120 s, is beyond it.
+ */
+export const SMOKE_TRACE_BOUNDARIES_S: ReadonlyArray<number> = [3, 6];
 
 /** How many frames a capture spans (T15.a's fixed span). */
 export const CAPTURE_FRAMES = 120;
@@ -72,6 +91,23 @@ export function variantOf(launch: SpikeLaunch): TerrainVariant {
   };
 }
 
+/** A trace window's times as the controller records them, `null` until known. */
+interface WindowTimes {
+  readonly startedMs: number;
+  stopRequestedMs: number | null;
+  readonly failure: string | null;
+}
+
+/** The trace operation in flight: its start, or its cycle at a boundary, script seconds. */
+interface PendingTrace {
+  readonly atBoundaryS: number | null;
+}
+
+/** An error's message for a reason, with a leading colon, or nothing. */
+function detailOf(error: unknown): string {
+  return error instanceof Error ? `: ${error.message}` : "";
+}
+
 /** The capture's span: from where it starts, script seconds, and how many frames are left. */
 interface CaptureSpan {
   readonly fromS: number;
@@ -91,8 +127,18 @@ export class SpikeController {
   #measuring: Promise<void> | null = null;
   #capture: CaptureSpan | null = null;
   #terrain: TerrainSettings | null = null;
-  /** When the trace's start resolved, ms; `null` until it has. */
-  #traceStartedMs: number | null = null;
+  /** Where the trace is cycled, script seconds, ascending. */
+  #boundariesS: ReadonlyArray<number> = [];
+  /** The next boundary in {@link SpikeController.#boundariesS} the script has not passed. */
+  #nextBoundary = 0;
+  /** The trace's windows so far, each from its start resolving. */
+  readonly #windows: WindowTimes[] = [];
+  /** The start or cycle in flight, or `null`. */
+  #pending: PendingTrace | null = null;
+  /** The last cycle, settled (its failure handled), for the finish to await. */
+  #cycled: Promise<void> = Promise.resolve();
+  /** Why the trace ended before the run, or `null`. */
+  #traceEnded: string | null = null;
 
   constructor(deps: SpikeControllerDeps) {
     this.#deps = deps;
@@ -129,6 +175,14 @@ export class SpikeController {
       this.fail("the terrain variant does not fit the setting", error);
       return;
     }
+    try {
+      this.#boundariesS = this.#launch.smoke
+        ? SMOKE_TRACE_BOUNDARIES_S
+        : traceBoundaries(descent.profile.segmentSpans());
+    } catch (error: unknown) {
+      this.fail("the trace's windows could not be placed", error);
+      return;
+    }
     this.#recorder = new SpikeRecorder(descent, this.#launch.setting, this.#deps.gpu);
     this.#durationS = this.#launch.smoke ? SMOKE_S : descent.profile.durationS;
     if (this.#deps.capture !== null) {
@@ -137,16 +191,84 @@ export class SpikeController {
       const fromS = this.#launch.smoke ? SMOKE_S / 2 : (pass?.startS ?? 0) + 5;
       this.#capture = { fromS, started: null, framesLeft: CAPTURE_FRAMES, written: null };
     }
-    this.#measuring = this.#launch.smoke ? Promise.resolve() : this.#startTrace();
+    this.#measuring = this.#startTrace();
     this.#measuring.catch((error: unknown) => {
       this.fail("the trace did not start", error);
     });
   }
 
-  /** Starts the trace: its one window (T14.d) runs from the start resolving to the stop's request. */
+  /** Starts the trace: its first window runs from the start resolving to the first boundary. */
   async #startTrace(): Promise<void> {
-    await this.#deps.spike.startTrace();
-    this.#traceStartedMs = this.#deps.nowMs();
+    this.#pending = { atBoundaryS: null };
+    try {
+      await this.#deps.spike.startTrace();
+      this.#opened();
+    } finally {
+      this.#pending = null;
+    }
+  }
+
+  /** A window has begun, its start resolved now, unless the trace has ended. */
+  #opened(): void {
+    if (this.#traceEnded === null) {
+      this.#windows.push({ startedMs: this.#deps.nowMs(), stopRequestedMs: null, failure: null });
+    }
+  }
+
+  /**
+   * Ends the trace before the run, once: no further cycle, and one last window, failed with
+   * `reason`, from now to the run's end.
+   */
+  #endTrace(reason: string): void {
+    if (this.#traceEnded !== null) {
+      return;
+    }
+    this.#traceEnded = reason;
+    this.#deps.log(`the trace ended before the run: ${reason}`);
+    this.#windows.push({ startedMs: this.#deps.nowMs(), stopRequestedMs: null, failure: reason });
+  }
+
+  /** Cycles the trace when the script first passes its next boundary. */
+  #traceFrame(scriptTimeS: number): void {
+    const boundaryS = this.#boundariesS[this.#nextBoundary];
+    if (
+      this.#traceEnded !== null ||
+      boundaryS === undefined ||
+      scriptTimeS < boundaryS ||
+      scriptTimeS >= this.#durationS
+    ) {
+      return;
+    }
+    this.#nextBoundary += 1;
+    const pending = this.#pending;
+    if (pending !== null) {
+      const what =
+        pending.atBoundaryS === null ? "start" : `cycle at ${String(pending.atBoundaryS)} s`;
+      this.#endTrace(
+        `the trace's ${what} was still pending at the boundary at ${String(boundaryS)} s`,
+      );
+      return;
+    }
+    const current = this.#windows.at(-1);
+    if (current === undefined) {
+      // The start failed, which has ended the run.
+      return;
+    }
+    current.stopRequestedMs = this.#deps.nowMs();
+    this.#cycled = this.#cycle(boundaryS);
+  }
+
+  /** Cycles the trace at a boundary, opening the next window or ending the trace; never rejects. */
+  async #cycle(boundaryS: number): Promise<void> {
+    this.#pending = { atBoundaryS: boundaryS };
+    try {
+      await this.#deps.spike.cycleTrace();
+      this.#opened();
+    } catch (error: unknown) {
+      this.#endTrace(`the trace's cycle at ${String(boundaryS)} s failed${detailOf(error)}`);
+    } finally {
+      this.#pending = null;
+    }
   }
 
   /** A selection's inputs, counted again under min(hard, 4σ_n). */
@@ -173,6 +295,7 @@ export class SpikeController {
       });
     }
     this.#captureFrame(sample.scriptTimeS);
+    this.#traceFrame(sample.scriptTimeS);
     if (sample.scriptTimeS >= this.#durationS) {
       void this.#finish(recorder, sample.scriptStartMs);
     }
@@ -186,10 +309,11 @@ export class SpikeController {
     this.#ended = true;
     this.#deps.log(`the descent spike failed: ${reason}`, error);
     this.#deps.capture?.dispose();
-    const detail = error instanceof Error ? `: ${error.message}` : "";
-    this.#deps.spike.end({ status: "fail", reason: `${reason}${detail}` }).catch((e: unknown) => {
-      this.#deps.log("the run's end was refused", e);
-    });
+    this.#deps.spike
+      .end({ status: "fail", reason: `${reason}${detailOf(error)}` })
+      .catch((e: unknown) => {
+        this.#deps.log("the run's end was refused", e);
+      });
   }
 
   /** Starts, marks and ends the capture's span around the frames that follow. */
@@ -242,6 +366,8 @@ export class SpikeController {
     const spike = this.#deps.spike;
     try {
       await this.#measuring;
+      // A cycle still in flight settles first, so that the main process stops one recording.
+      await this.#cycled;
       const span = this.#capture;
       const capture = this.#deps.capture;
       if (span !== null && capture !== null) {
@@ -249,25 +375,34 @@ export class SpikeController {
         this.#endCapture(span, capture);
         await span.written;
       }
+      const stopRequestedMs = this.#deps.nowMs();
+      const last = this.#windows.at(-1);
+      if (last !== undefined && last.stopRequestedMs === null) {
+        last.stopRequestedMs = stopRequestedMs;
+      }
+      await spike.stopTrace();
       if (this.#launch.smoke) {
+        const ended = this.#traceEnded;
         await spike.end(
-          recorder.bakedPatches > 0
-            ? { status: "pass" }
-            : { status: "fail", reason: "no patch was baked in a worker" },
+          ended !== null
+            ? { status: "fail", reason: ended }
+            : recorder.bakedPatches > 0
+              ? { status: "pass" }
+              : { status: "fail", reason: "no patch was baked in a worker" },
         );
         return;
       }
-      const startedMs = this.#traceStartedMs;
-      if (startedMs === null) {
-        throw new Error("the trace's start resolved without its time recorded");
-      }
-      const stopRequestedMs = this.#deps.nowMs();
-      await spike.stopTrace();
+      const traceWindows: SpikeTraceWindow[] = this.#windows.map((window) => ({
+        startedMs: window.startedMs,
+        stopRequestedMs: window.stopRequestedMs ?? stopRequestedMs,
+        failure: window.failure,
+      }));
       const terrain = this.#terrain;
       await spike.writeResults({
         ...recorder.report(this.#deps.canvas()),
         scriptStartMs,
-        traceWindows: [{ startedMs, stopRequestedMs }],
+        traceWindows,
+        traceGuardS: TRACE_BOUNDARY_GUARD_S,
         ...(terrain === null
           ? {}
           : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
