@@ -181,7 +181,6 @@ impl From<ResponseBody> for Answer {
 mod tests {
     use super::*;
     use crate::limits::BULK_QUEUED_BYTES;
-    use crate::limits::TCP_NOTSENT_LOWAT_BYTES;
     use crate::requests::Handlers;
     use crate::testing::Harness;
 
@@ -279,7 +278,10 @@ mod tests {
         let harness = Harness::start(Handlers).await;
         let mut client = harness.connect().await;
         client.hello().await;
-        assert_eq!(harness.accepted_lowat(), TCP_NOTSENT_LOWAT_BYTES);
+        assert_eq!(
+            harness.accepted_lowat(),
+            crate::limits::TCP_NOTSENT_LOWAT_BYTES
+        );
         client.close().await;
         harness.stop().await;
     }
