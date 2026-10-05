@@ -966,13 +966,13 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     `PassTimes` keyed by each `FrameSubmission.label` (every pass is the adapter's own, so none is
     bracketed, R01 Design note 24; timestamps inside passes need `--enable-unsafe-webgpu`, which is
     never set); main-thread time split into our code (`performance.measure` spans), the engine
-    adapter (CPU-profiler self time in its lazily imported `engine-*.js` chunk) and idle; patches a
-    second requested, baked and made resident, against the predicted demand (Design note 19); upload
-    bytes from the engine's `writeBuffer` and `writeTexture` tally (R01's `uploaded` events);
-    pipeline creations after warm-up, from a shim on `createRenderPipeline`, `createComputePipeline`
-    and their asynchronous forms (installed on the device through a wrapped `GPU` handed to the
-    spike's `ViewEngineSource`, since no device is reachable outside R01's adapter), each late one
-    logged with its label, cold and warm caches run
+    adapter (CPU-profiler self time in its lazily imported `engine-*.js` chunk, recorded in profiled
+    runs only, below) and idle; patches a second requested, baked and made resident, against the
+    predicted demand (Design note 19); upload bytes from the engine's `writeBuffer` and
+    `writeTexture` tally (R01's `uploaded` events); pipeline creations after warm-up, from a shim on
+    `createRenderPipeline`, `createComputePipeline` and their asynchronous forms (installed on the
+    device through a wrapped `GPU` handed to the spike's `ViewEngineSource`, since no device is
+    reachable outside R01's adapter), each late one logged with its label, cold and warm caches run
     separately; garbage-collection pauses per thread from V8's GC trace slices; and memory at 1 Hz:
     `app.getAppMetrics()` and the renderer's `process.getProcessMemoryInfo()`, the GPU process's DRM
     fdinfo (`drm-total-*`, `drm-resident-*`, summed over client IDs, since ANGLE and Dawn open their
@@ -981,18 +981,29 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     process; researched for R12, its Design note 6), and the adapter's own tally of buffers and
     textures, against the 1 GB ceiling. The trace comes from Electron's `contentTracing` in the main
     process, over categories that include `devtools.timeline`, `disabled-by-default-v8.gc`,
-    `disabled-by-default-v8.cpu_profiler`, `blink.user_timing` and `gpu`, and is reduced to the
-    results file in the main process (T14.b). Chromium quantises WebGPU timestamps to 65.5 µs by
-    default (Dawn's `timestamp_quantization` toggle, mask `0xFFFF0000` on the low word), which the
-    brainstorm's "the forced switches make available, uncoarsened" gets wrong; measurement runs
-    alone lift it through R01's `gpuTiming` option (`GPU_TIMING_SWITCH`), which the spike flag turns
-    on before `ready` (R01 applies it, like `enable_subgroups_intel_gen9`, only in its Linux `vulkan`
-    mode, so a run elsewhere records `PassTimes.timer` as `quantized`; accepted 2026-10-02,
-    decisions-r06-r07.md item 8: frame intervals are the pass criterion; a quantized run is
-    recorded as such). The safety toggles of Design note 22 are merged into both of R01's lists,
-    `--enable-dawn-features` and `--disable-dawn-features`, with `mergeSwitchValue`, since appending
-    a second switch would replace the first (R01 Design note 2). `gpuTiming` already puts
-    `timestamp_quantization` in the disable list, so a run with timing on and safety off carries one
+    `blink.user_timing` and `gpu`, and is reduced to the results file in the main process (T14.b).
+    It is taken in windows of script time with a 768 MiB `record-until-full` buffer each, since the
+    tracing service crashed at the stop of a whole descent's trace (Risks). Windows are at most
+    120 s, apart from one window of at most 240 s that holds the approach and flare, the low fast
+    pass, the slowdown and the vertical descent unbroken, and no boundary lies within 10 s of a
+    segment change. Chromium keeps one trace session at a time, so windows never overlap. The frames
+    from a boundary's stop to 1 s after the next window starts are left out of every per-frame
+    figure and counted (T14.d, T14.e). `disabled-by-default-v8.cpu_profiler` is recorded only in a
+    profiled run (`--trace-profile on`), a diagnostic that is never judged. V8 samples each isolate
+    every 100 µs and keeps every sample in the renderer until the trace stops, about 0.31 MB/s an
+    isolate, so in a timed run it would inflate the renderer's memory in proportion to the worker
+    count and interrupt every isolate 10,000 times a second (decided 2026-10-04 by a delegated
+    decision). Chromium quantises WebGPU timestamps to 65.5 µs by default (Dawn's
+    `timestamp_quantization` toggle, mask `0xFFFF0000` on the low word), which the brainstorm's "the
+    forced switches make available, uncoarsened" gets wrong; measurement runs alone lift it through
+    R01's `gpuTiming` option (`GPU_TIMING_SWITCH`), which the spike flag turns on before `ready`
+    (R01 applies it, like `enable_subgroups_intel_gen9`, only in its Linux `vulkan` mode, so a run
+    elsewhere records `PassTimes.timer` as `quantized`; accepted 2026-10-02, decisions-r06-r07.md
+    item 8: frame intervals are the pass criterion; a quantized run is recorded as such). The safety
+    toggles of Design note 22 are merged into both of R01's lists, `--enable-dawn-features` and
+    `--disable-dawn-features`, with `mergeSwitchValue`, since appending a second switch would
+    replace the first (R01 Design note 2). `gpuTiming` already puts `timestamp_quantization` in the
+    disable list, so a run with timing on and safety off carries one
     `--disable-dawn-features=timestamp_quantization,lazy_clear_resource_on_first_use`.
 19. **The scripted descent and its predicted demand** (researched 2026-09-29). The path is a pure
     function of script time in body-fixed coordinates over a landing site and approach azimuth
@@ -1224,6 +1235,9 @@ Refined on re-validation (2026-10-02), from the code each task touches:
   the first of them creating `main/spike.ts` (T13.c then adds its IPC handlers). T14.a needs T11.a
   and T13.b. T15.a needs T13.c (`--capture`) and T14.a's shim seam; T15.b needs only T15.a's
   capture format, and T15.c follows T15.b.
+- T14.d, T14.e and T14.f (the trace's windows, 2026-10-04) follow T14.c and T15's first capture, in
+  that order. T14.c's visible run, T16 and T17 wait for T14.f. They need nothing of T13.a's demand
+  records, which take no trace, and those need nothing of them.
 - Steps that need a visible window, a real vsync, a quiet machine or a display change are pending
   by hand for the owner, with their harness and exact commands prepared by the implementing
   lane, which never shows a window on the development machine's display (`:0`): T11.c's and
@@ -1972,7 +1986,167 @@ The file is never excluded from the hook, and the series is never thinned or mov
   figure present or null with a stated reason (on the RTX 3080 the fdinfo readings are null:
   decided 2026-09-30 by a delegated decision, hardware item 2). The lane proves the file with a
   hidden run, whose presentation-time figures are null with the reason "no window shown"; the
-  visible run, the one that counts, is pending by hand for the owner.
+  visible run, the one that counts, is pending by hand for the owner. Its trace is windowed and
+  unprofiled (T14.d, T14.e). The lane's proof of the windowed file is T14.f's hidden runs, and the
+  visible run waits for T14.f.
+
+**R05.T14.d The trace's windows: merge and results version 3.** This is pure main-process code and
+the schema. It changes no runtime behaviour beyond the file's shape: until T14.e, a run is one
+window with no boundaries.
+
+- Each window's trace is reduced alone.
+  - `reduceTrace.ts` adds the window's clock offset: the median of `ts − 1000 × args.startTime`
+    over its `blink.user_timing` begin events, or null without one.
+  - It keeps the end time of each dropped frame.
+- `mergeTraceWindows` in a new `main/traceWindows.ts` pools the windows' figures under the rules of
+  `decision-r05-trace-windows.md`:
+  - presentation intervals only within a window, placed in script time by its offset;
+  - the boundaries' excluded intervals, from the renderer's window times and the 1-s guard, left
+    out of every per-frame figure;
+  - times and counts summed and maxima maximal;
+  - any failed window making every trace figure null with its reason.
+- Results schema version 3:
+  - `run.trace` with its windows, boundaries and traced time;
+  - `frames.excludedFrames`, whole and per segment;
+  - `mainThread.split` without the engine's figures, and `mainThread.engine` apart, null with its
+    reason in an unprofiled run;
+  - `validateResults` accepting version 3 only;
+  - the summary;
+  - the `-profiled` file name.
+- The renderer's report gains `scriptStartMs` and its trace windows' times. The controller records
+  the times of its one window.
+- The replayer writes version 3.
+- The committed version 2 files are converted to version 3 losslessly.
+
+- Files:
+  - `apps/hyperion/src/main/reduceTrace.ts`, `apps/hyperion/src/main/traceWindows.ts`,
+    `apps/hyperion/src/main/results.ts`, `apps/hyperion/src/main/spikeSession.ts`,
+    `apps/hyperion/src/main/spikeReport.ts`, their tests;
+  - `apps/hyperion/src/main/fixtures/spikeReport.ts`, `apps/hyperion/src/preload/api.ts`;
+  - `view/spike/spikeController.ts` and `view/spike/spikeRun.ts` (`scriptStartMs` only), their
+    tests;
+  - `tools/gpu-replay/src/results.rs`;
+  - `docs/measurements/descent-spike/README.md`, and the committed results files and summaries.
+- Tests:
+  - from `src/main/fixtures/spike.trace.json`, the clock offset's events agree within 0.2 ms;
+  - two windows with a gap give no interval across it, and their pooled percentiles and counts
+    equal a hand computation;
+  - a frame inside a boundary's excluded interval is absent from the rAF, presentation, pass and
+    our-code figures, and is counted in its segment's `excludedFrames`;
+  - a presentation is assigned to the segment of its script time;
+  - busy times, GC and GPU-process slices are the windows' sums, and maxima their maximum;
+  - each kind of failed window makes every trace figure null with "trace window k of n: …": a
+    missing or empty file, no clock offset, a short span or `bufferPercent` ≥ 99, and another
+    renderer;
+  - `mainThread.engine` is null with the profiler-off reason in an unprofiled run, and
+    `validateResults` refuses it present there;
+  - `validateResults` refuses version 2, a boundary count other than the windows less one, and
+    unordered or overlapping exclusions;
+  - a 3,600-sample run with ten windows, formatted by Prettier, is under 512,000 bytes;
+  - the replayer's unit test checks version 3 and its null `engine`.
+- Acceptance:
+  - `pnpm --filter hyperion exec vitest run src/main/reduceTrace src/main/traceWindows
+src/main/results src/main/spikeReport src/main/spikeSession view/spike/spikeController`;
+  - `just gpu-replay-check`;
+  - every committed results file validates as version 3 and is under 512,000 B.
+- Suggested subject: `feat(spike): R05.T14.d Merge trace windows into results version 3`.
+
+**R05.T14.e Driving the windows.**
+
+- `view/spike/traceWindows.ts` holds `traceBoundaries(segmentSpans)` and its constants:
+  - `TRACE_WINDOW_MAX_S` 120, `TRACE_BUSY_WINDOW_MAX_S` 240, `TRACE_CHANGE_CLEARANCE_S` 10 and
+    `TRACE_BOUNDARY_GUARD_S` 1;
+  - the busy segments: "approach and flare", "low fast pass", "slowdown", "vertical descent".
+
+  Boundaries are placed greedily from the start, each as late as allowed. None lies within the
+  clearance of a segment change or inside the busy stretch widened by the clearance.
+
+- The controller cycles the trace when the script first passes each boundary, without awaiting it
+  in the frame, and records each window's `startedMs` and `stopRequestedMs`. A cycle that fails, or
+  that is still pending at the next boundary, ends the trace (not the run): the remaining windows
+  are failed with the reason.
+- In the main process:
+  - a `cycleTrace` channel and handler;
+  - `SpikeTrace.cycle(path)`, which stops to `path` and then starts;
+  - `SpikeTrace.bufferUsage()`, through `getTraceBufferUsage`, read before every stop;
+  - `SPIKE_TRACE_CATEGORIES` without `disabled-by-default-v8.cpu_profiler`, and
+    `SPIKE_PROFILER_CATEGORY` added by `spikeTraceConfig({ profiled })`;
+  - `SPIKE_TRACE_BUFFER_KB` = 786,432 with `record-until-full`;
+  - the session writing `spike-trace-<k>.json` per window under `userData`, then reducing and
+    deleting each in order after the last stop.
+- The client option `--trace-profile on|off` (default off), recorded in `run.options`.
+- `descentSpike.sh` makes the run's profile under `target/descent-spike/` on disk, never under
+  `TMPDIR`, and removes it as now. It and the `justfile` comment document `--trace-profile`.
+- Nothing on screen changes: no label or console element marks a window, and the UX guide is
+  untouched.
+
+- Files:
+  - `view/spike/traceWindows.ts`, `view/spike/spikeController.ts`, their tests;
+  - `apps/hyperion/src/preload/api.ts`, `apps/hyperion/src/preload/spikeApi.ts`, its test;
+  - `apps/hyperion/src/main/spike.ts`, `apps/hyperion/src/main/spikeSession.ts`,
+    `apps/hyperion/src/main/cli.ts`, `apps/hyperion/src/main/index.ts`, their tests;
+  - `apps/hyperion/src/renderer/src/test/stubHyperionApi.ts`,
+    `apps/hyperion/scripts/descentSpike.sh`, `justfile`.
+- Tests:
+  - for today's profile, `traceBoundaries` gives exactly 120, 240, 360, 480, 600, 720, 840, 950
+    and 1,190 s;
+  - every window is ≤ 120 s except the one holding the busy segments, which is ≤ 240 s, and
+    every boundary is ≥ 10 s from every segment change;
+  - a profile whose busy stretch with its clearances exceeds 240 s throws;
+  - the controller, on a fake clock, makes one cycle per boundary and reports every window's
+    times;
+  - a refused cycle ends the trace with its reason and the run goes on;
+  - a pending cycle at the next boundary is refused;
+  - `spikeTraceConfig()` excludes the profiler's category, and `spikeTraceConfig({ profiled:
+true })` includes it, both with 786,432 KB and `record-until-full`;
+  - `cycle` stops to its path before it starts, and a start while recording is still refused;
+  - the session reduces three window files in order, deletes each, and fails only the window
+    whose reduction throws;
+  - the CLI parses `--trace-profile on|off`, refuses another value, and refuses it without
+    `--descent-spike`;
+  - the ordinary launch exposes no `cycleTrace`.
+- Acceptance:
+  - `pnpm --filter hyperion exec vitest run view/spike/traceWindows view/spike/spikeController
+src/main/spike src/main/spikeSession src/main/cli src/preload`;
+  - `just descent-spike --smoke` exits 0, hidden.
+- Suggested subject: `feat(spike): R05.T14.e Take the trace in windows of script time`.
+
+**R05.T14.f The windowed hidden runs.**
+
+- Three hidden runs on the RTX 3080, one after another. None overlaps another spike run or F4's
+  hard cells, and `free -g` must show ≥ 6 GB available first:
+  - `--setting low --hidden` (T14.c's results run, re-taken);
+  - `--setting high --hidden` (the default three workers, 4 isolates; it proves the high
+    setting's window sizes before T17);
+  - `--setting low --hidden --trace-profile on`.
+- Each must give:
+  - every window reduced, and no new tracing-service dump in `coredumpctl`;
+  - each window's bytes and `bufferPercent`, with the largest ≤ 50%;
+  - the tracing service's peak ≤ 2 × the largest window's working set plus 100 MB;
+  - in the unprofiled runs, the renderer's private memory growing ≤ 0.1 MB/s from 60 s to the
+    end;
+  - every figure present or null with a stated reason, with `mainThread.engine` present only in
+    the profiled run.
+- **The guard is confirmed** when, pooled over every boundary of the two unprofiled runs, at most
+  2% of rAF intervals in the 5 s after the guard exceed their window's 99th percentile. Otherwise
+  it is raised by whole seconds until that holds, up to 5 s. Beyond that, report to the
+  orchestrator.
+- Each boundary's gap and stall go in T14.c's as-built record. The timings are provisional (a
+  loaded machine).
+- The owner's first visible runs are checked the same way before the next: T14.c's visible run,
+  then T17's first run. Every window must be reduced and the largest `bufferPercent` must be ≤ 50%,
+  or the windows are re-ruled.
+- Files:
+  - `docs/measurements/descent-spike/<date>-<machine>-low.json`, `-high.json` and
+    `-low-profiled.json`, and their `.md`;
+  - `TRACE_BOUNDARY_GUARD_S` in `view/spike/traceWindows.ts`, if raised;
+  - this plan's T14.c as-built record and Risks;
+  - `docs/measurements/descent-spike/README.md`'s commands.
+- Acceptance:
+  - the three files validate as version 3, each under 512,000 B (the hook on, never skipped);
+  - the checks above hold, or their failure is reported with figures;
+  - the visible-run commands in the README are current, for the owner.
+- Suggested subject: `test(spike): R05.T14.f Record the windowed hidden runs`.
 
 ### R05.T15 The capture and the native replay
 
@@ -2021,8 +2195,9 @@ as the results file, in its schema.
 By hand on the owner's UHD 620 laptop, by the owner, recorded, each run on a quiet machine (Design
 note 27) with its results file and summary under `docs/measurements/descent-spike/`. The low
 setting's harness and results file are first proved on the development machine (T14), so that the
-owner's runs need no debugging. The runs are one baseline
-and then one-factor changes from it, not a matrix.
+owner's runs need no debugging. The runs are one baseline and then one-factor changes from it, not a
+matrix. Every run is windowed and unprofiled (T14.e), so that a variant differs from the baseline in
+its one factor alone.
 
 **R05.T16.a The baseline.** The low setting at 720p paced to 30 fps with the two instruments and
 the console open, the local server running with `--num-workers 2`, the default two height
@@ -2086,7 +2261,13 @@ records the GPU-time headroom per pass beside the frame intervals. The runs are:
 - one capture replayed natively on the same machine by `just replay`.
 
 Every timed run pins `--workers 3`, so the memory row is read from the timed runs and there is no
-separate memory run (decided 2026-09-30 by a delegated decision, hardware item 4).
+separate memory run (decided 2026-09-30 by a delegated decision, hardware item 4). Every timed run
+is windowed and unprofiled (T14.e). The first T17 run's windows are checked before the others: every
+window is reduced and none is above half its buffer (`bufferPercent` ≤ 50). Otherwise the runs stop,
+and the windows are re-ruled. If a timed run misses a frame row or the main-thread headroom row, one
+more run on the same seed with `--trace-profile on` gives T19 the engine adapter's share of the main
+thread. It is a diagnostic, not judged, and the only profiled run the owner makes (decided
+2026-10-04 by a delegated decision).
 
 The machine, driver and display are recorded with the results.
 
@@ -2118,8 +2299,9 @@ brainstorm's open question 2 (from **Lean** to **Closed**, or to what the runs s
 for the owner, as are the brainstorm findings this plan reports (Risks and open points). If the
 rule fires, the owner is told before any later plan depends on the browser. If the discrete run
 fails on streaming demand and the demand under min(hard, 4σ_n) (T13.a) would meet the budget, the
-verdict names the selection bound as ours to fix; that is never a fired rule (decisions-r05.md
-item 6).
+verdict names the selection bound as ours to fix; that is never a fired rule (decisions-r05.md item
+6). The engine adapter's share of the main thread comes from a profiled run: T17's if one was
+needed, else T14.f's hidden one, which is provisional. Timed runs carry none.
 
 - Files: this plan, `docs/measurements/descent-spike/README.md`.
 - Acceptance: the verdict names each criterion of Design note 21 with its measured value on each
@@ -2523,7 +2705,11 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     repeats `RunTask` and was about half a recorded trace's bytes. It is `record-until-full` with a
     2 GiB buffer: about 1.1 MB/s was measured on a small WebGPU page, about 1.4 GB over the
     21-minute descent; a full buffer shows as a short `span`. Chromium's tracing service is its
-    own utility process, so T14.c reports it apart from the app's memory.
+    own utility process, so T14.c reports it apart from the app's memory. Superseded (2026-10-04,
+    delegated decision `decision-r05-trace-windows.md`): a whole descent's trace crashed the tracing
+    service at its stop (1.35–1.71 GB), so the trace is windowed with a 768 MiB buffer per window,
+    and `disabled-by-default-v8.cpu_profiler` is recorded only with `--trace-profile on`
+    (T14.d–T14.f).
   - `main/reduceTrace.ts` (`TraceReducer`, `reduceTrace`, `reduceTraceFile`,
     `readTraceEvents`) streams Chromium's one-event-a-line layout, since a descent's trace is too
     large for one `JSON.parse`; `.prettierignore` keeps `src/main/fixtures/*.trace.json` in that
@@ -2950,6 +3136,17 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     - Without the profiler, two full hidden descents (G and H) still lost their traces. At about
       1.35 GB, each tracing service took a SIGTRAP at the stop (pids 619777 and 662220,
       `coredumpctl`). Dropping that category alone is no remedy.
+  - _Ruled_ (2026-10-04, delegated decision `decision-r05-trace-windows.md`): the cause is the
+    stop's read-out. The service's working set roughly doubled at the stop (G: 1.41 to 2.76 GB, H:
+    1.35 to 2.55 GB, then SIGTRAP), and a stop frees it (E: back to about 70 MB after each of its
+    60-s windows). The trace is therefore windowed. Windows are at most 120 s, with one unbroken
+    window of at most 240 s over the approach, the low fast pass, the slowdown and the vertical
+    descent. Each has a 768 MiB `record-until-full` buffer, and the files are reduced after the run.
+    At the measured 1.15 MB/s without the profiler, a window holds about 138 MB, or about 276 MB for
+    the long one, against the 1.35 GB that crashed. Even a full buffer's stop (about 1.75 GB) stays
+    under the 2.55–2.76 GB at which G's and H's services were still alive. Windows cannot overlap,
+    since Chromium runs one trace session at a time. The frames of each gap and of 1 s after it are
+    left out and counted (T14.d, T14.e, T14.f).
 - **Finding: the renderer's memory growth is the trace's CPU profiler, and the cache kept each
   bake's arrays** (2026-10-04, T14.c's hidden run; for T14's trace remedy and T16).
   - _The question._ In T14.c's hidden run, the renderer's private memory grew about 1.1 MB/s, to
@@ -3049,7 +3246,13 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
       the main thread's engine split (`engineSelfMs` and `sampledMs`, Design note 18).
     - Keep it, and read the renderer's figure as including it.
 
-    The lean is windowed traces, since the trace's crash needs them anyway.
+    _Ruled_ (2026-10-04, delegated decision `decision-r05-trace-windows.md`): both. The trace is
+    windowed, as the crash needs, and the profiler leaves every timed run. Its cost scales with the
+    worker count that T16.b's memory run, T17's worker comparison and T18 vary, and a variant must
+    differ from its baseline in one factor. The engine adapter's share comes from a profiled run
+    (`--trace-profile on`), which is diagnostic and never judged. Memory measured in an unprofiled
+    windowed run needs no correction and no separate untraced run: the renderer grew 0.04 MB/s with
+    the other categories against 0.07 MB/s with no trace, and the tracing service is reported apart.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
