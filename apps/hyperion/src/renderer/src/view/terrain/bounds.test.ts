@@ -3,7 +3,17 @@ import { describe, expect, it } from "vitest";
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { seededRandom } from "../../test/seededRandom";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
-import { distanceToBoxM, patchBounds, relativeBounds, type PatchBounds } from "./bounds";
+import {
+  distanceToBoxM,
+  PACKED_BOUNDS_LENGTH,
+  packPatchBounds,
+  PATCH_GEOMETRY_LENGTH,
+  patchBounds,
+  patchGeometryInto,
+  relativeBounds,
+  type PatchBounds,
+  unpackPatchBounds,
+} from "./bounds";
 import { PATCH_QUADS, vertexDir, type Xyz } from "./cube";
 import { FACES, MAX_LEVEL, type PatchKey, rootKey } from "./patchKey";
 import {
@@ -248,6 +258,40 @@ describe("a patch's bounds, built in scalars", () => {
       }
     }
     expect(keys.length).toBe(6 * 25 * 9);
+    expect(mismatches).toEqual([]);
+  });
+
+  it("are the same numbers built from a patch's geometry kept for several height ranges", () => {
+    const random = seededRandom(0x67656f6d);
+    const planet = planetGeometry(WGS84_FIGURE, goldenLevelTable("on"));
+    const geometry = new Float64Array(PATCH_GEOMETRY_LENGTH);
+    const packed = new Float64Array(PACKED_BOUNDS_LENGTH);
+    const mismatches: string[] = [];
+    for (let n = 0; n < 200; n += 1) {
+      const level = Math.floor(random() * (MAX_LEVEL + 1));
+      const side = 2 ** level;
+      const key: PatchKey = {
+        face: FACES[n % 6] ?? 0,
+        level,
+        i: n % 7 === 0 ? side - 1 : Math.floor(random() * side),
+        j: n % 5 === 0 ? 0 : Math.floor(random() * side),
+      };
+      patchGeometryInto(geometry, planet, key);
+      const [low, high] = levelHeightRangeM(planet, key.level);
+      // The level's range, then tighter ones as bakes land, all from the one geometry.
+      for (const range of [
+        [low, high],
+        [-300 - random() * 900, 200 + random() * 900],
+        [-12.25, 40.5],
+      ] as const) {
+        packPatchBounds(packed, geometry, range[0], range[1]);
+        const got = boundsNumbers(unpackPatchBounds(packed));
+        const want = boundsNumbers(referenceBounds(planet, key, range));
+        if (!got.every((x, m) => Object.is(x, want[m]))) {
+          mismatches.push(`${key.face}/${key.level}/${key.i}/${key.j} [${range.join(", ")}]`);
+        }
+      }
+    }
     expect(mismatches).toEqual([]);
   });
 

@@ -21,11 +21,18 @@ import {
   rootKey,
 } from "./patchKey";
 import type { GroundContact } from "./grounded";
-import { levelBoundM, levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
+import {
+  levelBoundM,
+  levelHeightRangeM,
+  type PlanetGeometry,
+  planetGeometry,
+  surfacePoint,
+} from "./planet";
 import {
   type HeightRangeLookup,
   inheritedHeightRangeM,
   PatchLeafSet,
+  pruneSelectionMemo,
   SAGITTA_FACTOR,
   type Selection,
   type SelectionInput,
@@ -1012,6 +1019,16 @@ function splitAbove(sel: Selection): Map<string, PatchKey> {
   return split;
 }
 
+/** A filter of left-out children for {@link PatchLeafSet.bareKeys}, by the parent and the place. */
+function keepsLeftOut(parent: PatchKey, n: number): boolean {
+  return (parent.i + parent.j + n) % 3 !== 0;
+}
+
+/** A filter of bare split patches for {@link PatchLeafSet.bareKeys}, by level. */
+function keepsBareSplit(key: PatchKey): boolean {
+  return key.level % 2 === 0;
+}
+
 describe("the baked patches selection finds hidden (the high-bound ruling's F3)", () => {
   const towardsHorizon = (): Selection =>
     selectPatches({
@@ -1069,6 +1086,51 @@ describe("the baked patches selection finds hidden (the high-bound ruling's F3)"
     expect(tree.bareKeys()).toEqual([c1, c2, c3]);
     tree.splitBalanced(c0, () => null);
     expect(tree.bareKeys()).toEqual([...childKeys(c0), c0, c1, c2, c3, root]);
+  });
+
+  it("lists, through a filter, the bare keys it keeps and no others, in the same order", () => {
+    const random = seededRandom(0x62617265);
+    const tree = new PatchLeafSet<PatchKey>();
+    for (const face of FACES) {
+      tree.addRoot(rootKey(face), rootKey(face));
+    }
+    // Splits down to level 7 near a cube corner, leaving children out at random, and notes which.
+    const leftOut = new Set<string>();
+    const makeChild = (child: PatchKey): PatchKey | null => {
+      if (child.level > 2 && random() < 0.3) {
+        leftOut.add(patchKeyString(child));
+        return null;
+      }
+      return child;
+    };
+    for (const target of [
+      { face: 0, level: 7, i: 1, j: 126 },
+      { face: 2, level: 6, i: 40, j: 3 },
+    ] as const) {
+      for (let leaf = tree.coarserLeaf(target); leaf !== null; leaf = tree.coarserLeaf(target)) {
+        tree.splitBalanced(leaf, makeChild);
+      }
+    }
+    // Two splits that keep no child, so bare split patches.
+    const keepsNone = (child: PatchKey): null => {
+      leftOut.add(patchKeyString(child));
+      return null;
+    };
+    tree.splitBalanced(rootKey(4), keepsNone);
+    tree.splitBalanced(rootKey(5), keepsNone);
+    const all = tree.bareKeys();
+    const want = all.filter((key) => {
+      const parent = parentKey(key);
+      return leftOut.has(patchKeyString(key)) && parent !== null
+        ? keepsLeftOut(parent, (key.i & 1) + 2 * (key.j & 1))
+        : keepsBareSplit(key);
+    });
+    expect(tree.bareKeys({ leftOut: keepsLeftOut, split: keepsBareSplit })).toEqual(want);
+    // Both kinds of bare key are found, and the filter keeps some of each.
+    expect(all.filter((key) => leftOut.has(patchKeyString(key))).length).toBeGreaterThan(5);
+    expect(all.filter((key) => !leftOut.has(patchKeyString(key))).length).toBeGreaterThan(0);
+    expect(want.length).toBeGreaterThan(0);
+    expect(want.length).toBeLessThan(all.length);
   });
 });
 
@@ -1214,5 +1276,44 @@ describe("selection's output, bit for bit", () => {
 
   it("is as recorded frame by frame along an approach, its bakes following its demand", () => {
     expect(approachDigest()).toBe("48 8a892427");
+  });
+});
+
+/** One view's selection on `planet` at a budget of 981. */
+function selectOn(planet: PlanetGeometry, v: ViewSelectionInput): Selection {
+  return selectPatches({ planet, views: [v], setting: "high", grounded: [], maxPatches: 981 });
+}
+
+describe("the bounds memo", () => {
+  const near = view(LOW, lookingDown(LOW, 1.2));
+  const far = view(ORBIT, lookingDown(ORBIT, 0.3));
+  // Each test takes a planet of its own, so that its memo starts empty and no other call touches it.
+
+  it("keeps through a prune the bounds the last calls read", () => {
+    const planet = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
+    const selectFrom = (v: ViewSelectionInput): Selection => selectOn(planet, v);
+    const first = selectFrom(near);
+    expect(pruneSelectionMemo(planet)).toBeGreaterThan(first.patches.size);
+    const kept = selectFrom(near);
+    for (const [k, p] of kept.patches) {
+      expect(p.bounds).toBe(first.patches.get(k)?.bounds);
+    }
+  });
+
+  it("selects the same after a prune drops the bounds it read long ago", () => {
+    const planet = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
+    const selectFrom = (v: ViewSelectionInput): Selection => selectOn(planet, v);
+    const first = selectFrom(near);
+    // Long enough that, of what the near view read, only the coarse cells both views read are kept.
+    for (let n = 0; n < 70; n += 1) {
+      selectFrom(far);
+    }
+    pruneSelectionMemo(planet);
+    const again = selectFrom(near);
+    expect(outputDigest(again)).toBe(outputDigest(first));
+    const rebuilt = [...again.patches].filter(
+      ([k, p]) => p.bounds !== first.patches.get(k)?.bounds,
+    );
+    expect(rebuilt.length).toBeGreaterThan(again.patches.size / 2);
   });
 });

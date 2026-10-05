@@ -10,7 +10,15 @@
  */
 
 import { NEAR_PLANE_M } from "../camera/projection";
-import type { PatchBounds } from "./bounds";
+import {
+  PACKED_AXES,
+  PACKED_BOUNDS_LENGTH,
+  PACKED_CENTRE,
+  PACKED_HALF_EXTENTS,
+  PACKED_RADIUS,
+  packBounds,
+  type PatchBounds,
+} from "./bounds";
 import type { Frustum } from "./cull";
 import type { BodyFixedVec3 } from "./planet";
 
@@ -65,50 +73,95 @@ export function viewGeometry(
   };
 }
 
+/** Scratch for packing a {@link PatchBounds} for the packed forms; used within one call. */
+const PACKED = new Float64Array(PACKED_BOUNDS_LENGTH);
+
+/**
+ * The packed layout's offsets and the near plane, bound once here. The packed forms read them on
+ * every call, and under a module runner (the descent record runs under Vite's) each read of an
+ * imported binding is a getter call.
+ */
+const CENTRE = PACKED_CENTRE;
+const RADIUS = PACKED_RADIUS;
+const AXES = PACKED_AXES;
+const HALF = PACKED_HALF_EXTENTS;
+const NEAR_M = NEAR_PLANE_M;
+
 /**
  * A view's ρ ÷ τ for a patch of bounds `b` at error `errorM` metres, or −1 where the view cannot
  * see it (outside its frustum or below its horizon). The distance is floored at the near plane,
  * so that a camera inside a volume gives a finite excess.
  */
 export function viewExcess(v: ViewGeometry, b: PatchBounds, errorM: number): number {
-  const box = b.box;
-  const [a0, a1, a2] = box.axes;
-  const [e0, e1, e2] = box.halfExtentsM;
+  packBounds(PACKED, b);
+  return viewExcessPacked(v, PACKED, errorM);
+}
+
+/**
+ * {@link viewExcess} of packed bounds `p` ({@link PACKED_BOUNDS_LENGTH}'s layout): the one form of
+ * the test, which selection calls on the bounds it keeps packed (R05.T7 perf (d)).
+ */
+export function viewExcessPacked(v: ViewGeometry, p: Float64Array, errorM: number): number {
+  const a0x = p[AXES] ?? 0;
+  const a0y = p[AXES + 1] ?? 0;
+  const a0z = p[AXES + 2] ?? 0;
+  const a1x = p[AXES + 3] ?? 0;
+  const a1y = p[AXES + 4] ?? 0;
+  const a1z = p[AXES + 5] ?? 0;
+  const a2x = p[AXES + 6] ?? 0;
+  const a2y = p[AXES + 7] ?? 0;
+  const a2z = p[AXES + 8] ?? 0;
+  const e0 = p[HALF] ?? 0;
+  const e1 = p[HALF + 1] ?? 0;
+  const e2 = p[HALF + 2] ?? 0;
   // The box's centre (also the sphere's) from the camera, formed once in f64.
-  const cx = box.centre.x - v.cameraX;
-  const cy = box.centre.y - v.cameraY;
-  const cz = box.centre.z - v.cameraZ;
-  const r = b.radiusM;
+  const cx = (p[CENTRE] ?? 0) - v.cameraX;
+  const cy = (p[CENTRE + 1] ?? 0) - v.cameraY;
+  const cz = (p[CENTRE + 2] ?? 0) - v.cameraZ;
+  const r = p[RADIUS] ?? 0;
   const planes = v.planes;
   if (cx * cx + cy * cy + cz * cz > r * r) {
-    for (let p = 0; p < planes.length; p += 4) {
-      const nx = planes[p] ?? 0;
-      const ny = planes[p + 1] ?? 0;
-      const nz = planes[p + 2] ?? 0;
-      const centre = nx * cx + ny * cy + nz * cz + (planes[p + 3] ?? 0);
+    for (let q = 0; q < planes.length; q += 4) {
+      const nx = planes[q] ?? 0;
+      const ny = planes[q + 1] ?? 0;
+      const nz = planes[q + 2] ?? 0;
+      const centre = nx * cx + ny * cy + nz * cz + (planes[q + 3] ?? 0);
       if (centre < -r) {
         return -1;
       }
-      const reach =
-        centre +
-        Math.abs(nx * a0.x + ny * a0.y + nz * a0.z) * e0 +
-        Math.abs(nx * a1.x + ny * a1.y + nz * a1.z) * e1 +
-        Math.abs(nx * a2.x + ny * a2.y + nz * a2.z) * e2;
-      if (reach < 0) {
-        return -1;
+      // The box's reach past the plane is the centre's plus terms none of which is negative (the
+      // half-extents never are), so it can fall below 0 only where the centre's does.
+      if (centre < 0) {
+        const reach =
+          centre +
+          Math.abs(nx * a0x + ny * a0y + nz * a0z) * e0 +
+          Math.abs(nx * a1x + ny * a1y + nz * a1z) * e1 +
+          Math.abs(nx * a2x + ny * a2y + nz * a2z) * e2;
+        if (reach < 0) {
+          return -1;
+        }
       }
     }
   }
+  // The centre's offsets along the axes, which the horizon's corner order and the distance share.
+  const along0 = cx * a0x + cy * a0y + cz * a0z;
+  const along1 = cx * a1x + cy * a1y + cz * a1z;
+  const along2 = cx * a2x + cy * a2y + cz * a2z;
   if (v.horizonSq > 0) {
     const ro = v.occluderRadiusM;
+    // Visible where any corner is: tried from the top corner nearest the camera, which a patch
+    // above the horizon most often shows, so that the scan stops sooner. The answer is the same
+    // whatever the order.
+    const near1 = along1 > 0 ? -e1 : e1;
+    const near2 = along2 > 0 ? -e2 : e2;
     let visible = false;
     for (let corner = 0; corner < 8 && !visible; corner += 1) {
-      const s0 = (corner & 1) === 0 ? -e0 : e0;
-      const s1 = (corner & 2) === 0 ? -e1 : e1;
-      const s2 = (corner & 4) === 0 ? -e2 : e2;
-      const x = (cx + a0.x * s0 + a1.x * s1 + a2.x * s2) / ro;
-      const y = (cy + a0.y * s0 + a1.y * s1 + a2.y * s2) / ro;
-      const z = (cz + a0.z * s0 + a1.z * s1 + a2.z * s2) / ro;
+      const s0 = (corner & 1) === 0 ? e0 : -e0;
+      const s1 = (corner & 2) === 0 ? near1 : -near1;
+      const s2 = (corner & 4) === 0 ? near2 : -near2;
+      const x = (cx + a0x * s0 + a1x * s1 + a2x * s2) / ro;
+      const y = (cy + a0y * s0 + a1y * s1 + a2y * s2) / ro;
+      const z = (cz + a0z * s0 + a1z * s1 + a2z * s2) / ro;
       const vtDotVc = -(x * v.scaledX + y * v.scaledY + z * v.scaledZ);
       visible = !(
         vtDotVc > v.horizonSq && (vtDotVc * vtDotVc) / (x * x + y * y + z * z) > v.horizonSq
@@ -118,12 +171,12 @@ export function viewExcess(v: ViewGeometry, b: PatchBounds, errorM: number): num
       return -1;
     }
   }
-  const o0 = Math.max(0, Math.abs(cx * a0.x + cy * a0.y + cz * a0.z) - e0);
-  const o1 = Math.max(0, Math.abs(cx * a1.x + cy * a1.y + cz * a1.z) - e1);
-  const o2 = Math.max(0, Math.abs(cx * a2.x + cy * a2.y + cz * a2.z) - e2);
+  const o0 = Math.max(0, Math.abs(along0) - e0);
+  const o1 = Math.max(0, Math.abs(along1) - e1);
+  const o2 = Math.max(0, Math.abs(along2) - e2);
   // No nearer than the near plane: a camera inside a volume has the error of one 0.1 m away, so
   // the excess stays finite and a secondary view's weight still ranks it (Design note 24).
-  const d = Math.max(Math.sqrt(o0 * o0 + o1 * o1 + o2 * o2), NEAR_PLANE_M);
+  const d = Math.max(Math.sqrt(o0 * o0 + o1 * o1 + o2 * o2), NEAR_M);
   return (errorM * v.excessPerMetre) / d;
 }
 
@@ -137,15 +190,30 @@ export function viewExcess(v: ViewGeometry, b: PatchBounds, errorM: number): num
  * note 9).
  */
 export function distanceToBoxFromM(b: PatchBounds, pointM: BodyFixedVec3): number {
-  const box = b.box;
-  const [a0, a1, a2] = box.axes;
-  const [e0, e1, e2] = box.halfExtentsM;
-  const cx = box.centre.x - pointM.x;
-  const cy = box.centre.y - pointM.y;
-  const cz = box.centre.z - pointM.z;
-  const o0 = Math.max(0, Math.abs(cx * a0.x + cy * a0.y + cz * a0.z) - e0);
-  const o1 = Math.max(0, Math.abs(cx * a1.x + cy * a1.y + cz * a1.z) - e1);
-  const o2 = Math.max(0, Math.abs(cx * a2.x + cy * a2.y + cz * a2.z) - e2);
+  packBounds(PACKED, b);
+  return distanceToPackedBoxFromM(PACKED, pointM);
+}
+
+/** {@link distanceToBoxFromM} of packed bounds `p` ({@link PACKED_BOUNDS_LENGTH}'s layout). */
+export function distanceToPackedBoxFromM(p: Float64Array, pointM: BodyFixedVec3): number {
+  const cx = (p[CENTRE] ?? 0) - pointM.x;
+  const cy = (p[CENTRE + 1] ?? 0) - pointM.y;
+  const cz = (p[CENTRE + 2] ?? 0) - pointM.z;
+  const o0 = Math.max(
+    0,
+    Math.abs(cx * (p[AXES] ?? 0) + cy * (p[AXES + 1] ?? 0) + cz * (p[AXES + 2] ?? 0)) -
+      (p[HALF] ?? 0),
+  );
+  const o1 = Math.max(
+    0,
+    Math.abs(cx * (p[AXES + 3] ?? 0) + cy * (p[AXES + 4] ?? 0) + cz * (p[AXES + 5] ?? 0)) -
+      (p[HALF + 1] ?? 0),
+  );
+  const o2 = Math.max(
+    0,
+    Math.abs(cx * (p[AXES + 6] ?? 0) + cy * (p[AXES + 7] ?? 0) + cz * (p[AXES + 8] ?? 0)) -
+      (p[HALF + 2] ?? 0),
+  );
   let sum = 0;
   sum += o0 * o0;
   sum += o1 * o1;
