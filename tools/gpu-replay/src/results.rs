@@ -1,13 +1,15 @@
 //! The replay's results file, in the descent spike's schema (`hyperion.descent-spike.results`
-//! version 2, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
+//! version 3, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
 //! same way (R05 Design notes 18, 21 and 22).
 //!
 //! A native replay has no trace, no `requestAnimationFrame`, no GPU process and no memory
-//! readings: those figures are null with the reason. Its frame intervals are the presentation
-//! intervals of a presented replay, or, offscreen, the intervals between the GPU's completions of
-//! successive frames (`frames.gpuCompletion`, a replay-only field), which say what the GPU sustains
-//! with nothing presented. Percentiles are by nearest rank and the criterion's rows are Design note
-//! 21's, as the client's writer reads them.
+//! readings: those figures are null with the reason. With no trace there are no trace windows, so
+//! no frame is left out at their boundaries (`frames.excludedFrames` is 0) and the engine's
+//! sampled time (`mainThread.engine`) is null (decision-r05-trace-windows.md). A replay's frame
+//! intervals are the presentation intervals of a presented replay, or, offscreen, the intervals
+//! between the GPU's completions of successive frames (`frames.gpuCompletion`, a replay-only
+//! field), which say what the GPU sustains with nothing presented. Percentiles are by nearest rank
+//! and the criterion's rows are Design note 21's, as the client's writer reads them.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -20,12 +22,17 @@ use serde_json::{Value, json};
 /// The schema name the client's results files carry.
 pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
 
-/// The schema's version, the client's `RESULTS_VERSION`: version 2 stores the memory series as
-/// columns of whole KiB (decision-r05-results-size.md).
-pub const RESULTS_VERSION: u64 = 2;
+/// The schema's version, the client's `RESULTS_VERSION`.
+///
+/// Version 2 stores the memory series as columns of whole KiB (decision-r05-results-size.md), and
+/// version 3 takes the client's trace in windows (decision-r05-trace-windows.md).
+pub const RESULTS_VERSION: u64 = 3;
 
 /// Why a native replay has no memory figure.
 const NO_MEMORY: &str = "the native replay does not measure memory";
+
+/// Why a native replay has no figure read from a trace.
+const NO_TRACE: &str = "a native replay has no trace";
 
 /// The memory series' reading columns (the client's `MemorySeries`), each null all run here.
 const MEMORY_COLUMNS: [&str; 8] = [
@@ -559,7 +566,6 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         .and_then(|l| l.get(0))
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
-    let presented_reason = "a native replay has no trace";
     json!({
         "schema": RESULTS_SCHEMA,
         "version": RESULTS_VERSION,
@@ -593,7 +599,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
                 "provisional": load_1 >= 1.0,
                 "note": (load_1 >= 1.0).then(|| format!("load average {load_1:.2} at the start (Design note 27 asks under 1): provisional")),
             },
-            "trace": missing(presented_reason),
+            "trace": missing(NO_TRACE),
         },
         "levels": [],
         "frames": {
@@ -602,7 +608,8 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             "raf": missing("a native replay has no requestAnimationFrame"),
             "gpuCompletion": completion,
             "segments": [],
-            "dropped": missing(presented_reason),
+            "dropped": missing(NO_TRACE),
+            "excludedFrames": 0,
         },
         "gpu": {
             "timer": if figures.timed { "full" } else { "absent" },
@@ -614,8 +621,9 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         },
         "mainThread": {
             "ourCodeP95Ms": missing("a native replay has no main-thread figure"),
-            "split": missing(presented_reason),
-            "gc": missing(presented_reason),
+            "split": missing(NO_TRACE),
+            "engine": missing(NO_TRACE),
+            "gc": missing(NO_TRACE),
         },
         "streaming": [],
         "uploads": { "bytes": figures.upload_bytes },
@@ -624,7 +632,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             "series": memory_series(),
             "gpuHeadline": missing(NO_MEMORY),
             "peakAppBytes": missing(NO_MEMORY),
-            "peakTracingBytes": missing("a native replay has no trace"),
+            "peakTracingBytes": missing(NO_TRACE),
             "peakRendererPrivateBytes": missing("a native replay has no renderer"),
             "peakDrmResidentBytes": missing(NO_MEMORY),
             "peakNvidiaDeviceLessBaselineBytes": missing(NO_MEMORY),
@@ -759,7 +767,7 @@ mod tests {
     fn the_memory_series_has_no_sample_and_every_reading_null_with_its_reason() {
         let results = results_json(&figures(BTreeMap::new()));
         // The client's version and column names, written out: its `validateResults` reads them.
-        assert_eq!(results["version"], 2);
+        assert_eq!(results["version"], 3);
         let none = json!({ "value": null, "reason": "the native replay does not measure memory" });
         assert_eq!(
             results["memory"]["series"],
@@ -776,6 +784,16 @@ mod tests {
             })
         );
         assert_eq!(results["memory"].get("samples"), None);
+    }
+
+    #[test]
+    fn the_file_is_version_3_with_no_trace_window_and_no_engine_figure() {
+        let results = results_json(&figures(BTreeMap::new()));
+        let no_trace = json!({ "value": null, "reason": "a native replay has no trace" });
+        assert_eq!(results["version"], 3);
+        assert_eq!(results["run"]["trace"], no_trace);
+        assert_eq!(results["mainThread"]["engine"], no_trace);
+        assert_eq!(results["frames"]["excludedFrames"], 0);
     }
 
     #[test]

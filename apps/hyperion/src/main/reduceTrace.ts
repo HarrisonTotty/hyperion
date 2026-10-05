@@ -18,7 +18,9 @@
  *   `VulkanQueueSubmitHook` slices, the CPU side of Chromium's command transport and Dawn;
  * - GC: every complete slice in a `v8.gc` category, and `MinorGC` and `MajorGC`, merged per thread
  *   so that nested phases count once;
- * - `performance.measure` spans: `blink.user_timing` async begin and end pairs;
+ * - `performance.measure` spans: `blink.user_timing` async begin and end pairs, whose begins also
+ *   carry the span's start in `performance.now()` ms (`args.startTime`), which sets the trace's
+ *   clock against the page's ({@link TraceFigures.clockOffsetUs});
  * - the engine adapter's self time: V8's CPU profile chunks of the renderer's main thread, whose
  *   samples at a leaf in the lazily imported `engine-*.js` chunk are counted.
  *
@@ -64,6 +66,8 @@ export interface FrameFigures {
   readonly intervalsMs: ReadonlyArray<number>;
   readonly presented: number;
   readonly dropped: number;
+  /** The end of each dropped frame, in the trace's clock, µs, ascending, one a dropped frame. */
+  readonly droppedAtUs: ReadonlyArray<number>;
   /** Frames the compositor began and did not need to draw, as a hidden window's are. */
   readonly noUpdate: number;
 }
@@ -125,6 +129,13 @@ export interface GpuProcessFigures {
 export interface TraceFigures {
   /** The first and last event times, µs, or `null` for a trace with no timed event. */
   readonly span: { readonly firstUs: number; readonly lastUs: number } | null;
+  /**
+   * The trace's clock less the page's, µs: a trace time is `clockOffsetUs + 1000 × t` for a
+   * `performance.now()` time t in ms. The median of `ts − 1000 × args.startTime` over the
+   * `blink.user_timing` begins on the renderer's main thread, whose `performance.now()` the page's
+   * own times are on (a worker's clock has its own origin); `null` without one.
+   */
+  readonly clockOffsetUs: number | null;
   readonly frames: FrameFigures;
   readonly mainThread: MainThreadFigures | null;
   readonly gpuProcess: GpuProcessFigures | null;
@@ -254,6 +265,17 @@ function mergedLengthsUs(intervals: ReadonlyArray<Interval>): number[] {
   return lengths;
 }
 
+/** The median of values that are not empty: the mean of the middle two for an even count. */
+function median(values: ReadonlyArray<number>): number | null {
+  const sorted = values.toSorted((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const upper = sorted[mid];
+  if (upper === undefined) {
+    return null;
+  }
+  return sorted.length % 2 === 1 ? upper : ((sorted[mid - 1] ?? upper) + upper) / 2;
+}
+
 function summarise(durationsMs: ReadonlyArray<number>): DurationSummary {
   let totalMs = 0;
   let maxMs = 0;
@@ -325,6 +347,8 @@ export class TraceReducer {
   /** Per process, per compositor: frame ends. */
   readonly #frames = new Map<number, Map<number, FrameEnd[]>>();
   readonly #userTiming = new Map<string, Array<readonly [number, number]>>();
+  /** Per thread, each user-timing begin's `ts − 1000 × args.startTime`, µs. */
+  readonly #clockOffsets = new Map<string, number[]>();
   readonly #profiles = new Map<string, ProfileState>();
   #firstUs = Number.POSITIVE_INFINITY;
   #lastUs = Number.NEGATIVE_INFINITY;
@@ -395,6 +419,10 @@ export class TraceReducer {
       const state = isRecord(reporter) ? stringOf(reporter["state"]) : undefined;
       const host = isRecord(reporter) ? numberOf(reporter["layer_tree_host_id"]) : undefined;
       this.#begins.set(key, { tid: event.tid, ts: event.ts, state, host });
+      const startMs = isMeasure ? numberOf(event.args["startTime"]) : undefined;
+      if (startMs !== undefined) {
+        pushTo(this.#clockOffsets, threadKey(event.pid, event.tid), event.ts - 1000 * startMs);
+      }
       return;
     }
     const begin = this.#begins.get(key);
@@ -471,8 +499,15 @@ export class TraceReducer {
     const span =
       this.#firstUs <= this.#lastUs ? { firstUs: this.#firstUs, lastUs: this.#lastUs } : null;
     const rendererPid = this.#rendererPid();
+    const mainTid =
+      rendererPid === null ? undefined : this.#threadOf(rendererPid, "CrRendererMain");
+    const offsets =
+      rendererPid === null || mainTid === undefined
+        ? undefined
+        : this.#clockOffsets.get(threadKey(rendererPid, mainTid));
     return {
       span,
+      clockOffsetUs: offsets === undefined ? null : median(offsets),
       frames: this.#frameFigures(rendererPid),
       mainThread: this.#mainThread(rendererPid, span),
       gpuProcess: this.#gpuProcess(),
@@ -525,13 +560,13 @@ export class TraceReducer {
       }
     }
     const presented = new Set<number>();
-    let dropped = 0;
+    const droppedAtUs: number[] = [];
     let noUpdate = 0;
     for (const [ts, state] of ends) {
       if (state === "STATE_PRESENTED_ALL" || state === "STATE_PRESENTED_PARTIAL") {
         presented.add(ts);
       } else if (state === "STATE_DROPPED") {
-        dropped += 1;
+        droppedAtUs.push(ts);
       } else {
         noUpdate += 1;
       }
@@ -546,7 +581,8 @@ export class TraceReducer {
       presentedAtUs,
       intervalsMs,
       presented: presentedAtUs.length,
-      dropped,
+      dropped: droppedAtUs.length,
+      droppedAtUs: droppedAtUs.toSorted((a, b) => a - b),
       noUpdate,
     };
   }

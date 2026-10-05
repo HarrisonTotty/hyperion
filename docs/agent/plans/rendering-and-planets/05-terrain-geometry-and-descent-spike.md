@@ -3254,6 +3254,66 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     windowed run needs no correction and no separate untraced run: the renderer grew 0.04 MB/s with
     the other categories against 0.07 MB/s with no trace, and the tracing service is reported apart.
 
+- **Deviations in T14.d, as built** (2026-10-05, the trace's windows and results schema version 3).
+  - _Where things are._ `main/traceWindows.ts` holds `mergeTraceWindows`, the window and boundary
+    types (`TraceRun`, `TraceWindowRecord`, `TraceBoundary`), what the session hands it
+    (`TraceRecording`, `TraceWindowFile`, `TraceSettings`), `traceSettingsOf(config)`, and the
+    constants `TRACE_BOUNDARY_GUARD_S` (1), `CPU_PROFILER_CATEGORY`, `PROFILER_OFF_REASON`,
+    `NO_CLOCK_OFFSET_REASON`, `SHORT_SPAN_FRACTION` (0.95) and `FULL_BUFFER_PERCENT` (99).
+    `EMPTY_TRACE_REASON` moved there from `results.ts`. `Measured`, `measured` and `missing` moved
+    to a new `main/measured.ts`, which `results.ts` re-exports, so that `results.ts` and
+    `traceWindows.ts` do not import each other. `results.ts` no longer exports
+    `SEGMENT_MEASURE_PREFIX`: presentations are assigned by script time, and the renderer's
+    `metrics.ts` keeps its own copy for the marks.
+  - _For T14.e._ The main process's `TRACE_BOUNDARY_GUARD_S` is in `main/traceWindows.ts`, since
+    the main process cannot import the renderer's. T14.e's copy in `view/spike/traceWindows.ts`
+    must agree with it, or the report must carry the guard. T14.e's `SPIKE_PROFILER_CATEGORY` is
+    `CPU_PROFILER_CATEGORY`'s value: `profiled` is read from the categories recorded. Until T14.e
+    drops that category from `SPIKE_TRACE_CATEGORIES`, every run records the profiler and so is a
+    profiled run, named `-profiled` (no run is made between T14.d and T14.e). `bufferPercent` is
+    null until T14.e's `bufferUsage()`. The session (`SpikeSessionDeps.traceSettings`, wired in
+    `index.ts` as `traceSettingsOf(spikeTraceConfig())`) records one window from the start to the
+    stop, reading its file's size (`SpikeFiles.size`) before reducing it.
+  - _The clock offset_ is the median over the begins on the renderer's main thread alone, since
+    a worker's `performance.now()` has its own origin; for an even count it is the mean of the
+    middle two. The fixture's eight begins agree within 0.2 ms.
+  - _Exclusions._ A frame is left out when its own script time lies from a boundary's
+    `stopRequestedS` up to its `excludedToS`, as the warm-up leaves out a frame by its own time. A
+    boundary's `excludedFrames` and `maxRafIntervalMs` count the frames after the warm-up only, so
+    `frames.excludedFrames` is the boundaries' sum, which `validateResults` checks. Presentation
+    intervals keep the ruling's rule (both ends after the warm-up and outside every exclusion), so
+    the warm-up now drops the interval that starts in it too: v2 kept the first interval ending
+    after it. `frames.dropped` counts only drops after the warm-up and outside the exclusions; v2
+    counted the whole trace.
+  - _A window's figures_ are null exactly when it failed, with its reason. `validateResults`
+    refuses a window with figures whose span is under 95 % of its length or whose buffer use is
+    99 % or more, and any trace figure present when a window failed. A window with no GPU process
+    leaves `gpu.gpuProcess` null with "trace window k of n: the trace has no GPU process" but fails
+    nothing; a GPU process whose ID changes between windows (a restart) is summed under the first
+    one's IDs. When the renderer reports no window, or another number than the main process wrote,
+    `run.trace` is null with the reason and nothing is left out.
+  - _The summary_ heads a profiled run with the ruling's PROFILED line, and its Trace line gives
+    the windows, the traced time, whether profiled, the boundaries' frames and largest stall, the
+    largest file and buffer use, and each failed window. The frames line adds the excluded frames
+    when there is a trace.
+  - _Files beyond the task's list:_ `main/measured.ts`, `main/fixtures/traces.ts` (the tests'
+    window traces), `main/index.ts` (the settings), `view/spike/SpikeApp.tsx` (the controller's
+    `nowMs`, `performance.now()`), and `view/spike/metrics.ts` and `spikeHarness.ts`, whose
+    reports are now `SpikeMetricsReport`, the report less `scriptStartMs` and `traceWindows`, which
+    the controller adds. `SpikeRun`'s frame sample carries `scriptStartMs`.
+  - _Sizes,_ formatted by Prettier: a 3,600-sample run with ten windows is 255,015 B, against
+    250,800 B with no trace, so the windows add about 4.2 kB.
+  - _The committed files._ `2026-10-04-effect-low.json`, `2026-10-05-effect-low.json` and
+    `2026-10-05-effect-low-replay.json` were converted by a one-off script, not committed. Each is
+    lossless: removing the new parts (`frames.excludedFrames` and each segment's, 0, and
+    `mainThread.engine`, null with the trace's own reason) gives the v2 file back. The replay file
+    was edited as text, keeping serde_json's number text (`14.0`) and its sorted keys. Their
+    sizes are 109,428, 109,429 and 8,938 B. The summaries are unchanged: regenerated and
+    formatted, they are byte-identical, so no `.md` changed. A test in `results.test.ts` now
+    validates every committed results file as the current version and within 512,000 B, so the
+    next version bump must convert them again.
+  - The three subtasks' text in this plan keeps the ruling's suggested subjects, T14.f's included.
+
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
     `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,

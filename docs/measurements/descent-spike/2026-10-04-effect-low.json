@@ -1,6 +1,6 @@
 {
   "schema": "hyperion.descent-spike.results",
-  "version": 2,
+  "version": 3,
   "run": {
     "startedAt": "2026-10-04T17:31:32.401Z",
     "machine": {
@@ -209,7 +209,8 @@
             "hitches": null
           },
           "reason": null
-        }
+        },
+        "excludedFrames": 0
       },
       {
         "segment": "descent arc",
@@ -229,7 +230,8 @@
             "hitches": null
           },
           "reason": null
-        }
+        },
+        "excludedFrames": 0
       },
       {
         "segment": "approach and flare",
@@ -249,7 +251,8 @@
             "hitches": null
           },
           "reason": null
-        }
+        },
+        "excludedFrames": 0
       },
       {
         "segment": "low fast pass",
@@ -269,7 +272,8 @@
             "hitches": null
           },
           "reason": null
-        }
+        },
+        "excludedFrames": 0
       },
       {
         "segment": "slowdown",
@@ -289,7 +293,8 @@
             "hitches": null
           },
           "reason": null
-        }
+        },
+        "excludedFrames": 0
       },
       {
         "segment": "vertical descent",
@@ -309,7 +314,8 @@
             "hitches": null
           },
           "reason": null
-        }
+        },
+        "excludedFrames": 0
       },
       {
         "segment": "hover and touchdown",
@@ -329,13 +335,15 @@
             "hitches": null
           },
           "reason": null
-        }
+        },
+        "excludedFrames": 0
       }
     ],
     "dropped": {
       "value": null,
       "reason": "the trace has no timed event"
-    }
+    },
+    "excludedFrames": 0
   },
   "gpu": {
     "timer": "full",
@@ -401,6 +409,10 @@
       "reason": null
     },
     "split": {
+      "value": null,
+      "reason": "the trace has no timed event"
+    },
+    "engine": {
       "value": null,
       "reason": "the trace has no timed event"
     },

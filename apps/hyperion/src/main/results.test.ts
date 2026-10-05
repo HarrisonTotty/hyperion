@@ -1,16 +1,18 @@
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { format, resolveConfig } from "prettier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DescentSpikeReport } from "../preload/api";
+import { PROFILED, recordingOf, UNPROFILED, windowFile, windowTrace } from "./fixtures/traces";
+import type { Measured } from "./measured";
 import { type TraceFigures, TraceReducer } from "./reduceTrace";
 import {
   ADDED_FILE_LIMIT_BYTES,
   buildResults,
   type DescentResults,
   describeMachine,
-  EMPTY_TRACE_REASON,
   formatAsPrettier,
   frameStats,
   type MachineDescription,
@@ -21,16 +23,24 @@ import {
   type MemorySources,
   missing,
   nearestRank,
+  RESULTS_SCHEMA,
   RESULTS_VERSION,
   type ResultsFiles,
   type RunDescription,
   sampleMemory,
-  SEGMENT_MEASURE_PREFIX,
   summaryMarkdown,
   TIMESTAMP_QUANTUM_MS,
   validateResults,
   writeResults,
 } from "./results";
+import {
+  EMPTY_TRACE_REASON,
+  NO_CLOCK_OFFSET_REASON,
+  PROFILER_OFF_REASON,
+  type TraceRecording,
+  type TraceSettings,
+  type TraceWindowFile,
+} from "./traceWindows";
 
 const MIB = 1024 ** 2;
 
@@ -73,11 +83,16 @@ function runOf(overrides: Partial<RunDescription> = {}): RunDescription {
   };
 }
 
-/** Twenty frames a second of script time over two segments, 10 s each, after a 10 s warm-up. */
+/**
+ * Twenty frames a second of script time over two segments, 10 s each, after a 10 s warm-up; the
+ * script starts at 1,000 ms, and its one trace window runs from −0.1 s to 30.1 s.
+ */
 function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeReport {
   const scriptTimesS = Array.from({ length: 600 }, (_, i) => i / 20);
   const rafIntervalsMs = scriptTimesS.map((_, i) => (i === 0 ? 0 : i % 100 === 0 ? 120 : 33.3));
   return {
+    scriptStartMs: 1000,
+    traceWindows: [{ startedMs: 900, stopRequestedMs: 31_100 }],
     warmupS: 10,
     segments: [
       { name: "orbit coast", startS: 0, endS: 20 },
@@ -124,58 +139,82 @@ function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeRepo
   };
 }
 
-/** A trace whose presentations come every 33.3 ms over the run, with segment marks. */
-function traceOf(): TraceFigures {
-  const startUs = 1_000_000;
-  const presentedAtUs = Array.from(
-    { length: 900 },
-    (_, i) => startUs + Math.round((i * 100_000) / 3),
-  );
+/** Page ms at script time `s`, for {@link reportOf}'s script. */
+function at(s: number): number {
+  return 1000 + 1000 * s;
+}
+
+/**
+ * The one window's trace: presentations every 33.3 ms over the run, 5 ms after the frames, and
+ * frames dropped at 5, 15 and 25 s.
+ */
+function windowOf(): TraceFigures {
+  return windowTrace({
+    offsetUs: 7e9,
+    fromMs: at(-0.1),
+    toMs: at(30.1),
+    presentedMs: Array.from({ length: 900 }, (_, i) => at(0.005 + i / 30)),
+    droppedMs: [5, 15, 25].map(at),
+  });
+}
+
+/** {@link windowOf} as the run's one window. */
+function traceOf(settings: TraceSettings = UNPROFILED): Measured<TraceRecording> {
+  return recordingOf([windowFile(windowOf())], settings);
+}
+
+/** Two windows with a boundary at 15 s: the trace stopped there, and started again at 15.5 s. */
+const TWO_WINDOWS: DescentSpikeReport["traceWindows"] = [
+  { startedMs: at(-0.1), stopRequestedMs: at(15) },
+  { startedMs: at(15.5), stopRequestedMs: at(30.1) },
+];
+
+/**
+ * The windows of {@link TWO_WINDOWS}: the first presenting every 33.3 ms to 15 s, the second twice
+ * 500 ms apart in its exclusion, to 16.5 s, then every 33.3 ms.
+ */
+function twoWindowTraces(): [TraceFigures, TraceFigures] {
+  return [
+    windowTrace({
+      offsetUs: 7e9,
+      fromMs: at(-0.1),
+      toMs: at(15),
+      presentedMs: Array.from({ length: 450 }, (_, i) => at(0.005 + i / 30)),
+    }),
+    windowTrace({
+      offsetUs: 9e9,
+      fromMs: at(15.5),
+      toMs: at(30.1),
+      presentedMs: [15.505, 16.005, ...Array.from({ length: 404 }, (_, k) => 16.505 + k / 30)].map(
+        at,
+      ),
+    }),
+  ];
+}
+
+/**
+ * {@link reportOf}'s report in two windows, its frames in the boundary's exclusion, [15, 16.5) s,
+ * slow: 500 ms rAF intervals, 40 ms of our code and 50 ms of terrain.
+ */
+function twoWindowReport(): DescentSpikeReport {
+  const base = reportOf({ traceWindows: TWO_WINDOWS });
+  const inExclusion = base.frames.scriptTimesS.map((t) => t >= 15 && t < 16.5);
   return {
-    span: { firstUs: startUs, lastUs: startUs + 30_000_000 },
+    ...base,
     frames: {
-      pid: 1,
-      layerTreeHostId: 1,
-      presentedAtUs,
-      intervalsMs: [],
-      presented: presentedAtUs.length,
-      dropped: 2,
-      noUpdate: 0,
+      ...base.frames,
+      rafIntervalsMs: base.frames.rafIntervalsMs.map((ms, i) =>
+        inExclusion[i] === true ? 500 : ms,
+      ),
+      ourCodeMs: base.frames.ourCodeMs.map((ms, i) => (inExclusion[i] === true ? 40 : ms)),
+      passes: base.frames.passes.map((pass) =>
+        pass.row === "terrain"
+          ? Object.assign({}, pass, {
+              gpuMs: pass.gpuMs.map((ms, i) => (inExclusion[i] === true ? 50 : ms)),
+            })
+          : pass,
+      ),
     },
-    mainThread: null,
-    gpuProcess: null,
-    threads: [
-      {
-        pid: 1,
-        tid: 2,
-        process: "Renderer",
-        thread: "CrRendererMain",
-        busyMs: 900,
-        gc: { count: 3, totalMs: 6, maxMs: 3 },
-      },
-    ],
-    userTiming: [
-      {
-        name: `${SEGMENT_MEASURE_PREFIX}orbit coast`,
-        pid: 1,
-        tid: 2,
-        startsUs: [startUs],
-        durationsMs: [20_000],
-        count: 1,
-        totalMs: 20_000,
-        maxMs: 20_000,
-      },
-      {
-        name: `${SEGMENT_MEASURE_PREFIX}descent arc`,
-        pid: 1,
-        tid: 2,
-        startsUs: [startUs + 20_000_000],
-        durationsMs: [10_000],
-        count: 1,
-        totalMs: 10_000,
-        maxMs: 10_000,
-      },
-    ],
   };
 }
 
@@ -316,7 +355,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     const paths = await writeResults("/runs", results, files);
@@ -334,7 +373,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     await writeResults("/runs", results, files);
@@ -346,23 +385,26 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(results.run.periodMs).toEqual(measured(2000 / 60));
     expect(results.frames.source).toBe("presentation");
-    // 900 presentations over 30 s; those ending in the first 10 s are the warm-up.
-    expect(results.frames.presentation.value?.count).toBe(600);
+    // 900 presentations over 30 s, at 0.005 s + i / 30; an interval with an end in the first 10 s
+    // is the warm-up's, which leaves 301 → 899, each in the segment of its end.
+    expect(results.frames.presentation.value?.count).toBe(599);
     expect(
       results.frames.segments.map(({ segment, presentation }) => [
         segment,
         presentation.value?.count,
       ]),
     ).toEqual([
-      ["orbit coast", 300],
+      ["orbit coast", 299],
       ["descent arc", 300],
     ]);
+    // The drop at 5 s is the warm-up's.
     expect(results.frames.dropped).toEqual(measured(2));
+    expect(results.frames.excludedFrames).toBe(0);
     expect(rowOf(results, "p50")).toMatchObject({ verdict: "pass" });
     expect(results.criteria.segments.map(({ segment }) => segment)).toEqual([
       "orbit coast",
@@ -374,7 +416,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf({ shown: false, displayHz: null }),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(results.frames.presentation).toEqual(missing("no window shown"));
@@ -395,7 +437,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf({ platform: "win32", launchMode: "default" }),
       report: reportOf({ timer: "quantized" }),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(results.run).toMatchObject({
@@ -421,14 +463,14 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf(),
       report: atLimit,
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(rowOf(results, "terrain")).toMatchObject({ limit: 14, verdict: "marginal" });
     const exact = buildResults({
       run: runOf(),
       report: { ...atLimit, timer: "full" },
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(rowOf(exact, "terrain")).toMatchObject({ verdict: "fail" });
@@ -438,7 +480,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf({ setting: "high" }),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(rowOf(results, "terrain")).toMatchObject({ limit: 5, value: 6, verdict: "fail" });
@@ -450,7 +492,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(results.streaming).toEqual([
@@ -467,7 +509,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(results.memory.gpuHeadline).toEqual(
@@ -483,7 +525,7 @@ describe("a results file", () => {
     const results = buildResults({
       run: runOf({ nvidiaBaselineBytes: null }),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: [sample(0, null)],
     });
     expect(results.memory.gpuHeadline).toEqual(
@@ -492,17 +534,15 @@ describe("a results file", () => {
     expect(rowOf(results, "memory").note).toBe("read from the adapter's tally: no driver reading");
   });
 
-  it("marks a run on a busy machine provisional, and a short trace truncated", () => {
+  it("marks a run on a busy machine provisional", () => {
     const busy = { ...MACHINE, loadAverage: [14.2, 12, 10] as const };
-    const trace = traceOf();
     const results = buildResults({
       run: runOf({ machine: busy }),
       report: reportOf(),
-      trace: measured({ ...trace, span: { firstUs: 0, lastUs: 20_000_000 } }),
+      trace: traceOf(),
       memory: MEMORY,
     });
     expect(results.run.quiet.provisional).toBe(true);
-    expect(results.run.trace).toEqual(measured({ spanMs: 20_000, truncated: true }));
     expect(summaryMarkdown(results)).toContain("provisional");
   });
 
@@ -523,19 +563,235 @@ describe("a results file", () => {
       run: runOf(),
       report: reportOf(),
       // What the reducer gives for a file with no events, as Chromium's crashed export left.
-      trace: measured(new TraceReducer().figures()),
+      trace: recordingOf([windowFile(new TraceReducer().figures())]),
       memory: MEMORY,
     });
-    const empty = missing(EMPTY_TRACE_REASON);
-    expect(results.run.trace).toEqual(empty);
+    const empty = missing(`trace window 1 of 1: ${EMPTY_TRACE_REASON}`);
+    expect(results.run.trace.value?.windows[0]?.figures).toEqual(missing(EMPTY_TRACE_REASON));
     expect(results.frames.presentation).toEqual(empty);
     expect(results.frames.segments.map(({ presentation }) => presentation)).toEqual([empty, empty]);
     expect(results.frames.dropped).toEqual(empty);
     expect(results.gpu.gpuProcess).toEqual(empty);
     expect(results.mainThread.split).toEqual(empty);
+    expect(results.mainThread.engine).toEqual(empty);
     expect(results.mainThread.gc).toEqual(empty);
     expect(results.frames.source).toBe("raf");
     expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+});
+
+/** The figures read from a trace, by path, as one line each. */
+function traceFigures(results: DescentResults): Readonly<Record<string, unknown>> {
+  return {
+    "frames.presentation": results.frames.presentation,
+    ...Object.fromEntries(
+      results.frames.segments.map(({ segment, presentation }) => [
+        `frames.segments[${segment}].presentation`,
+        presentation,
+      ]),
+    ),
+    "frames.dropped": results.frames.dropped,
+    "gpu.gpuProcess": results.gpu.gpuProcess,
+    "mainThread.split": results.mainThread.split,
+    "mainThread.engine": results.mainThread.engine,
+    "mainThread.gc": results.mainThread.gc,
+  };
+}
+
+/** {@link twoWindowReport}'s results, from `windows`, unprofiled unless `settings` says otherwise. */
+function twoWindowResults(
+  windows: ReadonlyArray<TraceWindowFile> = twoWindowTraces().map(windowFile),
+  settings: TraceSettings = UNPROFILED,
+): DescentResults {
+  return buildResults({
+    run: runOf(),
+    report: twoWindowReport(),
+    trace: recordingOf(windows, settings),
+    memory: MEMORY,
+  });
+}
+
+describe("a results file of a windowed trace", () => {
+  it("leaves a frame in a boundary's exclusion out of every per-frame figure and counts it", () => {
+    const results = twoWindowResults();
+    // The 30 frames at 15, 15.05, …, 16.45 s are the boundary's.
+    expect(results.run.trace.value?.boundaries).toEqual([
+      expect.objectContaining({ excludedFrames: 30, maxRafIntervalMs: 500 }),
+    ]);
+    expect(results.frames.excludedFrames).toBe(30);
+    expect(
+      results.frames.segments.map(({ segment, excludedFrames }) => [segment, excludedFrames]),
+    ).toEqual([
+      ["orbit coast", 30],
+      ["descent arc", 0],
+    ]);
+    // The rAF figures: 400 frames after the warm-up, less the 30; their 500 ms intervals gone.
+    expect(results.frames.raf.value).toMatchObject({ count: 370, maxMs: 120 });
+    expect(results.frames.segments[0]?.raf.value).toMatchObject({ count: 170, maxMs: 120 });
+    // Our code's 40 ms and the terrain's 50 ms are the excluded frames' alone.
+    expect(results.mainThread.ourCodeP95Ms).toEqual(measured(4));
+    expect(rowOf(results, "terrain").value).toBe(6);
+    expect(results.gpu.passes.value?.find(({ label }) => label === "terrain")).toMatchObject({
+      frames: 370,
+      p99Ms: 6,
+    });
+    expect(results.gpu.sumP95Ms).toEqual(measured(8));
+    // Presentations: the first window's 301 → 449, the second's from 16.505 s on; none across the
+    // gap, and not the second window's two 500 ms apart in the exclusion.
+    expect(results.frames.presentation.value?.count).toBe(149 + 403);
+    expect(results.frames.presentation.value?.maxMs).toBeLessThan(34);
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("pools the windows' presentation intervals by the segment of their ends' script time", () => {
+    const results = twoWindowResults();
+    // 16.505 + k / 30 s ends in the orbit coast to k = 104.
+    expect(
+      results.frames.segments.map(({ segment, presentation }) => [
+        segment,
+        presentation.value?.count,
+      ]),
+    ).toEqual([
+      ["orbit coast", 149 + 104],
+      ["descent arc", 403 - 104],
+    ]);
+  });
+
+  it.each<readonly [string, (second: TraceFigures) => TraceWindowFile, string]>([
+    [
+      "a missing file",
+      () => ({
+        trace: missing("its file could not be read: ENOENT"),
+        bytes: null,
+        bufferPercent: null,
+      }),
+      "its file could not be read: ENOENT",
+    ],
+    [
+      "a file that is not a trace",
+      () => ({
+        trace: missing("the trace could not be reduced: spike-trace-1.json is not a trace"),
+        bytes: 12,
+        bufferPercent: null,
+      }),
+      "the trace could not be reduced: spike-trace-1.json is not a trace",
+    ],
+    ["an empty file", () => windowFile(new TraceReducer().figures()), EMPTY_TRACE_REASON],
+    [
+      "no clock offset",
+      (second) => windowFile({ ...second, clockOffsetUs: null }),
+      NO_CLOCK_OFFSET_REASON,
+    ],
+    [
+      "a short span",
+      (second) =>
+        windowFile({
+          ...second,
+          span: { firstUs: second.span?.firstUs ?? 0, lastUs: (second.span?.firstUs ?? 0) + 9e6 },
+        }),
+      "it filled its buffer: it spans 9.0 s of the 14.6 s recorded",
+    ],
+    [
+      "a full buffer",
+      (second) => ({ ...windowFile(second), bufferPercent: 99 }),
+      "it filled its buffer: 99 % of it was used",
+    ],
+    [
+      "another renderer",
+      (second) => windowFile({ ...second, frames: { ...second.frames, pid: 9 } }),
+      "it shows another renderer than trace window 1: renderer 9, main thread 2, compositor 1, against renderer 1, main thread 2, compositor 1",
+    ],
+  ])("makes every trace figure missing for a window with %s", (_case, broken, reason) => {
+    const [first, second] = twoWindowTraces();
+    const results = twoWindowResults([windowFile(first), broken(second)], PROFILED);
+    const fromTrace = traceFigures(results);
+    const expected = missing(`trace window 2 of 2: ${reason}`);
+    expect(fromTrace).toEqual(
+      Object.fromEntries(Object.keys(fromTrace).map((path) => [path, expected])),
+    );
+    // The windows still show which one failed.
+    expect(results.run.trace.value?.windows.map(({ figures }) => figures.value === null)).toEqual([
+      false,
+      true,
+    ]);
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("leaves the engine's figures out of an unprofiled run, and refuses them there", () => {
+    const results = twoWindowResults();
+    expect(results.mainThread.engine).toEqual(missing(PROFILER_OFF_REASON));
+    expect(results.mainThread.split.value).not.toHaveProperty("engineSelfMs");
+    const broken: unknown = JSON.parse(
+      JSON.stringify({
+        ...results,
+        mainThread: { ...results.mainThread, engine: measured({ selfMs: 1, sampledMs: 2 }) },
+      }),
+    );
+    expect(validateResults(broken)).toEqual(["mainThread.engine is measured in an unprofiled run"]);
+  });
+
+  it("records a profiled run's engine figures, summed over its windows", () => {
+    const results = twoWindowResults(undefined, PROFILED);
+    expect(results.run.trace.value?.profiled).toBe(true);
+    expect(results.mainThread.engine).toEqual(measured({ selfMs: 20, sampledMs: 80 }));
+  });
+
+  it("names a profiled run's file apart, numbering a second as any other", async () => {
+    const results = twoWindowResults(undefined, PROFILED);
+    const files = memoryFiles();
+    const first = await writeResults("/runs", results, files);
+    const second = await writeResults("/runs", results, files);
+    expect([first.json, second.json]).toEqual([
+      "/runs/2026-10-02-devbox-low-profiled.json",
+      "/runs/2026-10-02-devbox-low-profiled-2.json",
+    ]);
+  });
+
+  it("heads a profiled run's summary as a diagnostic, not judged", () => {
+    expect(summaryMarkdown(twoWindowResults(undefined, PROFILED))).toContain(
+      "**PROFILED: diagnostic, not judged; renderer and app memory include the CPU profiler's samples.**",
+    );
+    expect(summaryMarkdown(twoWindowResults())).not.toContain("PROFILED");
+  });
+
+  it("names a failed window in the summary's trace line", () => {
+    const [first, second] = twoWindowTraces();
+    const summary = summaryMarkdown(
+      twoWindowResults([windowFile(first), windowFile({ ...second, clockOffsetUs: null })]),
+    );
+    expect(summary).toContain(`; window 2 failed: ${NO_CLOCK_OFFSET_REASON}`);
+  });
+
+  it("summarises the windows, their boundaries and the frames left out", () => {
+    const summary = summaryMarkdown(twoWindowResults());
+    expect(summary).toContain(
+      "- **Trace:** 2 windows, 18.5 s traced after the warm-up, unprofiled; 1 boundary left out 30 frames (largest stall 500.00 ms); largest file 1 MiB, buffer use up to 10 %",
+    );
+    expect(summary).toContain("Frames left out at the trace's window boundaries: 30.");
+  });
+
+  it("keeps a 3,600-sample run with ten windows under 512,000 bytes once Prettier formats it", async () => {
+    const windowMs = 360_000;
+    const traceWindows = Array.from({ length: 10 }, (_, k) => ({
+      startedMs: at(k * 360 + (k === 0 ? -0.1 : 2)),
+      stopRequestedMs: at((k + 1) * 360),
+    }));
+    const results = buildResults({
+      run: runOf({ shown: false, displayHz: null }),
+      report: reportOf({
+        traceWindows,
+        segments: [{ name: "orbit coast", startS: 0, endS: 3600 }],
+      }),
+      trace: recordingOf(
+        traceWindows.map(({ startedMs }) =>
+          windowFile(windowTrace({ offsetUs: 7e9, fromMs: startedMs, toMs: startedMs + windowMs })),
+        ),
+      ),
+      memory: longRun(3600),
+    });
+    expect(results.run.trace.value?.boundaries).toHaveLength(9);
+    const formatted = await prettier(`${JSON.stringify(results, null, 2)}\n`);
+    expect(Buffer.byteLength(formatted, "utf8")).toBeLessThan(512_000);
   });
 });
 
@@ -544,7 +800,7 @@ describe("the memory series", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: gappedMemory(),
     });
     const { series } = results.memory;
@@ -614,7 +870,7 @@ describe("the memory series", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: longRun(8000),
     });
     const paths = await writeResults("/runs", results, files);
@@ -633,7 +889,7 @@ describe("the memory series", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     await writeResults("/runs", results, memoryFiles());
@@ -646,7 +902,7 @@ describe("a native replay's results", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     const replay: DescentResults = {
@@ -666,7 +922,7 @@ function withSeries(overrides: Readonly<Record<string, unknown>>): unknown {
   const results = buildResults({
     run: runOf(),
     report: reportOf(),
-    trace: measured(traceOf()),
+    trace: traceOf(),
     memory: gappedMemory(),
   });
   return JSON.parse(
@@ -691,12 +947,38 @@ function renderer(samples: ReadonlyArray<unknown>, gaps: ReadonlyArray<unknown> 
   return measured({ samples, gaps });
 }
 
+/** An edit of a parsed file: the path to a field, and its new value or {@link DELETE}. */
+type Edit = readonly [ReadonlyArray<string | number>, unknown];
+
+/** An {@link Edit}'s value that removes its field. */
+const DELETE = Symbol("delete");
+
+/** Sets, or with {@link DELETE} removes, the field at `path` of a parsed file. */
+function editAt(file: unknown, path: ReadonlyArray<string | number>, value: unknown): void {
+  const parent = path
+    .slice(0, -1)
+    .reduce<unknown>(
+      (node, key) =>
+        typeof node === "object" && node !== null ? Reflect.get(node, key) : undefined,
+      file,
+    );
+  const key = path.at(-1);
+  if (typeof parent !== "object" || parent === null || key === undefined) {
+    throw new Error(`no field at ${path.join(".")}`);
+  }
+  if (value === DELETE) {
+    Reflect.deleteProperty(parent, key);
+  } else {
+    Reflect.set(parent, key, value);
+  }
+}
+
 describe("the schema check", () => {
   it("refuses a figure that is null without a reason", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     const broken: unknown = JSON.parse(
@@ -777,7 +1059,7 @@ describe("the schema check", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     const { series: _series, ...peaks } = results.memory;
@@ -925,7 +1207,7 @@ describe("the schema check", () => {
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     const broken: unknown = JSON.parse(
@@ -938,12 +1220,190 @@ describe("the schema check", () => {
     expect(validateResults([])).toEqual(["the file is not an object"]);
   });
 
+  it("refuses version 2", () => {
+    const results = twoWindowResults();
+    expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 2 })))).toEqual([
+      "version is not 3",
+    ]);
+  });
+
+  it("refuses a boundary count other than the windows less one", () => {
+    const results = twoWindowResults();
+    const trace = results.run.trace.value;
+    if (trace === null) {
+      throw new Error("the run has no trace");
+    }
+    const broken: unknown = JSON.parse(
+      JSON.stringify({
+        ...results,
+        run: { ...results.run, trace: measured({ ...trace, boundaries: [] }) },
+      }),
+    );
+    expect(validateResults(broken)).toEqual([
+      "run.trace.value has 0 boundaries for 2 windows, not one between each pair",
+      "frames.excludedFrames is 30, not the 0 the boundaries left out",
+    ]);
+  });
+
+  it.each<readonly [string, ReadonlyArray<Edit>, ReadonlyArray<string>]>([
+    [
+      "a window that filled its buffer but is not marked failed",
+      [[["run", "trace", "value", "windows", 0, "figures", "value", "bufferPercent"], 99]],
+      ["run.trace.value.windows[0] filled its buffer, but is not marked failed"],
+    ],
+    [
+      "a window whose span is short of its length but is not marked failed",
+      [[["run", "trace", "value", "windows", 1, "figures", "value", "spanMs"], 1000]],
+      ["run.trace.value.windows[1] filled its buffer, but is not marked failed"],
+    ],
+    [
+      "a window's figures that are not a span, a size and a buffer's use",
+      [[["run", "trace", "value", "windows", 0, "figures", "value", "bytes"], 1.5]],
+      ["run.trace.value.windows[0].figures is not a span, a size and a buffer's use"],
+    ],
+    [
+      "a window out of its place",
+      [[["run", "trace", "value", "windows", 1, "index"], 5]],
+      ["run.trace.value.windows[1] is not a window from its start to its stop"],
+    ],
+    [
+      "windows that overlap",
+      [[["run", "trace", "value", "windows", 1, "fromS"], 14]],
+      // Starting earlier, the window is also longer than its trace's span.
+      [
+        "run.trace.value.windows[1] begins before the window before it stops",
+        "run.trace.value.windows[1] filled its buffer, but is not marked failed",
+        "run.trace.value.boundaries[0] is not the gap between windows 0 and 1, excluded to the guard after it",
+      ],
+    ],
+    [
+      "no windows",
+      [
+        [["run", "trace", "value", "windows"], []],
+        [["run", "trace", "value", "boundaries"], []],
+        [["frames", "excludedFrames"], 0],
+        [["frames", "segments", 0, "excludedFrames"], 0],
+      ],
+      ["run.trace.value.windows is not a list of windows"],
+    ],
+    [
+      "a boundary that is not one",
+      [[["run", "trace", "value", "boundaries", 0], 5]],
+      [
+        "run.trace.value.boundaries[0] is not a boundary",
+        "frames.excludedFrames is 30, not the 0 the boundaries left out",
+      ],
+    ],
+    [
+      "a boundary away from its windows' gap",
+      [[["run", "trace", "value", "boundaries", 0, "resumedS"], 15.6]],
+      [
+        "run.trace.value.boundaries[0] is not the gap between windows 0 and 1, excluded to the guard after it",
+      ],
+    ],
+    [
+      "a boundary without its count",
+      [[["run", "trace", "value", "boundaries", 0, "excludedFrames"], -1]],
+      [
+        "run.trace.value.boundaries[0] does not count its frames and their largest interval",
+        "frames.excludedFrames is 30, not the 0 the boundaries left out",
+      ],
+    ],
+    [
+      "trace settings that are not",
+      [[["run", "trace", "value", "profiled"], "yes"]],
+      ["run.trace.value does not say how the trace was recorded"],
+    ],
+    [
+      "excluded frames that are not a count",
+      [[["frames", "excludedFrames"], 1.5]],
+      ["frames.excludedFrames is not a count"],
+    ],
+    [
+      "a segment's excluded frames that are not a count",
+      [[["frames", "segments", 1, "excludedFrames"], null]],
+      ["frames.segments[1].excludedFrames is not a count"],
+    ],
+    [
+      "segments that leave out more frames than the whole run",
+      [[["frames", "segments", 1, "excludedFrames"], 5]],
+      ["the segments' excluded frames are more than the whole run's"],
+    ],
+    [
+      "the engine's figures left in the split",
+      [[["mainThread", "split", "value", "engineSelfMs"], 1]],
+      ["mainThread.split holds the engine's figures, which belong in mainThread.engine"],
+    ],
+    ["no engine figure", [[["mainThread", "engine"], DELETE]], ["mainThread.engine is missing"]],
+    [
+      "an engine figure that is not a sampled self time",
+      [
+        [["mainThread", "engine"], { value: { selfMs: -1, sampledMs: 2 }, reason: null }],
+        [["run", "trace", "value", "profiled"], true],
+      ],
+      ["mainThread.engine is not a sampled self time"],
+    ],
+  ])("refuses a windowed run's file with %s", (_case, edits, problems) => {
+    const file: unknown = JSON.parse(JSON.stringify(twoWindowResults()));
+    for (const [path, value] of edits) {
+      editAt(file, path, value);
+    }
+    expect(validateResults(file)).toEqual(problems);
+  });
+
+  it("refuses exclusions out of order or overlapping", () => {
+    // Three windows: the second stops 0.5 s after it starts, inside the first boundary's guard.
+    const traceWindows = [
+      { startedMs: at(-0.1), stopRequestedMs: at(15) },
+      { startedMs: at(15.5), stopRequestedMs: at(16) },
+      { startedMs: at(16.2), stopRequestedMs: at(30.1) },
+    ];
+    const overlapping = buildResults({
+      run: runOf(),
+      report: reportOf({ traceWindows }),
+      trace: recordingOf(
+        traceWindows.map(({ startedMs, stopRequestedMs }) =>
+          windowFile(windowTrace({ offsetUs: 7e9, fromMs: startedMs, toMs: stopRequestedMs })),
+        ),
+      ),
+      memory: MEMORY,
+    });
+    // Overlapping exclusions count the frames they share twice, which the sum check sees too.
+    expect(validateResults(JSON.parse(JSON.stringify(overlapping)))).toEqual([
+      "run.trace.value.boundaries[1]'s exclusion begins before the one before it ends",
+      "frames.excludedFrames is 44, not the 54 the boundaries left out",
+    ]);
+    const results = twoWindowResults();
+    const trace = results.run.trace.value;
+    const [boundary] = trace?.boundaries ?? [];
+    if (trace === null || boundary === undefined) {
+      throw new Error("the run has no boundary");
+    }
+    const late = { ...boundary, stopRequestedS: 17, resumedS: 17.5, excludedToS: 18.5 };
+    const unordered: unknown = JSON.parse(
+      JSON.stringify({
+        ...results,
+        run: {
+          ...results.run,
+          trace: measured({
+            ...trace,
+            windows: [...trace.windows, { ...trace.windows[1], index: 2 }],
+            boundaries: [late, { ...boundary, afterWindow: 1 }],
+          }),
+        },
+      }),
+    );
+    expect(validateResults(unordered)).toContain(
+      "run.trace.value.boundaries[1]'s exclusion begins before the one before it ends",
+    );
+  });
+
   it("stops the writer before it writes a file that does not match", async () => {
     const files = memoryFiles();
     const results = buildResults({
       run: runOf(),
       report: reportOf(),
-      trace: measured(traceOf()),
+      trace: traceOf(),
       memory: MEMORY,
     });
     const broken = { ...results, run: { ...results.run, setting: "medium" } };
@@ -952,6 +1412,37 @@ describe("the schema check", () => {
       "run.setting is neither high nor low",
     );
     expect(files.written.size).toBe(0);
+  });
+});
+
+describe("the committed results files", () => {
+  const dir = join(__dirname, "../../../../docs/measurements/descent-spike");
+
+  it("each validate as the current version and stay within the added-file limit", async () => {
+    const names = (await readdir(dir)).filter((name) => name.endsWith(".json")).toSorted();
+    const files = await Promise.all(
+      names.map(async (name) => {
+        const text = await readFile(join(dir, name), "utf8");
+        const parsed: unknown = JSON.parse(text);
+        return { name, text, parsed };
+      }),
+    );
+    // The descent-demand records beside them have a schema of their own.
+    const results = files.filter(
+      ({ parsed }) =>
+        typeof parsed === "object" &&
+        parsed !== null &&
+        Reflect.get(parsed, "schema") === RESULTS_SCHEMA,
+    );
+    expect(results.length).toBeGreaterThan(0);
+    expect(
+      Object.fromEntries(results.map(({ name, parsed }) => [name, validateResults(parsed)])),
+    ).toEqual(Object.fromEntries(results.map(({ name }) => [name, []])));
+    expect(
+      results
+        .filter(({ text }) => Buffer.byteLength(text, "utf8") > ADDED_FILE_LIMIT_BYTES)
+        .map(({ name }) => name),
+    ).toEqual([]);
   });
 });
 

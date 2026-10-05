@@ -30,8 +30,9 @@ import {
 import { isOwnPage } from "./ipcSender";
 import { reduceTraceFile } from "./reduceTrace";
 import { describeMachine, MemorySampler, nodeMachineSources } from "./results";
-import { launchSwitches, registerSpikeHandlers, SpikeTrace } from "./spike";
+import { launchSwitches, registerSpikeHandlers, SpikeTrace, spikeTraceConfig } from "./spike";
 import { SpikeSession } from "./spikeSession";
+import { traceSettingsOf } from "./traceWindows";
 import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
@@ -236,6 +237,8 @@ function startSpikeSession(
       nvidiaBaselineBytes,
     }),
     trace,
+    // The configuration `SpikeTrace.start` records with.
+    traceSettings: traceSettingsOf(spikeTraceConfig()),
     tracePath: join(app.getPath("userData"), "spike-trace.json"),
     reduce: (path) => reduceTraceFile(path),
     memory,

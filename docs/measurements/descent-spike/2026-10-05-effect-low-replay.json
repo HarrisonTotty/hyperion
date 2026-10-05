@@ -110,6 +110,7 @@
       "reason": "a native replay has no trace",
       "value": null
     },
+    "excludedFrames": 0,
     "gpuCompletion": {
       "reason": null,
       "value": {
@@ -194,6 +195,10 @@
   },
   "levels": [],
   "mainThread": {
+    "engine": {
+      "reason": "a native replay has no trace",
+      "value": null
+    },
     "gc": {
       "reason": "a native replay has no trace",
       "value": null
@@ -348,5 +353,5 @@
   "uploads": {
     "bytes": 8055072
   },
-  "version": 2
+  "version": 3
 }
