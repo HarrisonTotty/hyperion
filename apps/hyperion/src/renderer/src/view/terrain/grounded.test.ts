@@ -5,12 +5,15 @@ import type { Quaternion } from "../camera/pose";
 import { lookAlong } from "../camera/quaternion";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { vertexDir, xyzToFaceUv, uvToSt } from "./cube";
+import { distanceToBoxM, patchBounds, relativeBounds } from "./bounds";
 import {
   contactHold,
   FORCED_REGION_RESIDENCY_S,
   finestPatchSizeM,
+  forcedRadiusM,
   type GroundContact,
   heldRadiusM,
+  inForcedRegion,
   isDescending,
   morphHold,
 } from "./grounded";
@@ -189,6 +192,36 @@ describe("the morph hold", () => {
 
   it("is 1 with no contact", () => {
     expect(morphHold(ground(), [], PATCH_M)).toBe(1);
+  });
+});
+
+describe("the forced region", () => {
+  it("holds exactly the patches whose box comes within a contact's forced radius", () => {
+    const middle = finestKeyAt(CRAFT.positionM);
+    const far: GroundContact = { positionM: ground(SITE, 32, 32, 5_000), radiusM: 20 };
+    let inside = 0;
+    let outside = 0;
+    const wrong: string[] = [];
+    for (let di = -8; di <= 8; di += 1) {
+      for (let dj = -8; dj <= 8; dj += 1) {
+        const b = patchBounds(PLANET, { ...middle, i: middle.i + di, j: middle.j + dj });
+        const within = [CRAFT, far].some(
+          (g) => distanceToBoxM(relativeBounds(b, g.positionM)) <= forcedRadiusM(g, PATCH_M),
+        );
+        if (within) {
+          inside += 1;
+        } else {
+          outside += 1;
+        }
+        if (inForcedRegion(b, [CRAFT, far], PATCH_M) !== within) {
+          wrong.push(`${di}, ${dj}`);
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(inside).toBeGreaterThan(4);
+    expect(outside).toBeGreaterThan(100);
+    expect(inForcedRegion(patchBounds(PLANET, middle), [], PATCH_M)).toBe(false);
   });
 });
 

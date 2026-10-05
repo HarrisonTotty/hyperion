@@ -4377,6 +4377,147 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     The cache's own `heightRangeM` lookup costs about as much as the memo's, so selection fed by
     `PatchCache` pays it as well.
 
+- **R05.T7 perf (d), as built (lane B, 2026-10-05): the ridged approach under 2 ms.** The record's
+  ridged high approach (hard bound, 16 Hz) measured 2.8–3.2 ms p95 on the record's path at loads
+  6–17 (lane B's probe, after F4's 29.2 ms was found to be CPU starvation). That is under DN21's
+  13.3 ms but above 4d's 2 ms. This step brings it to 1.43 ms, with selection's output unchanged
+  bit for bit, as perf (c) defined it.
+  - _Profile first._ The approach's frames, ridges on (V8's sampler at 50 µs, from t = 960 s):
+    - the excess test, 16% of a call;
+    - bounds builds, 19%, two thirds of it the ring's directions;
+    - the memo's `Map` lookups by a non-Smi index, 10%;
+    - the cache's `heightRangeM`, 10%, by the same kind of `Map`;
+    - the balance's walks, about 15%;
+    - the heap, 5%;
+    - `hiddenBaked`'s walk and second lookups, 4%;
+    - the output map, 5%.
+
+    About 60 bounds a contact frame are built: 34 new keys, and 27 whose range tightened as a bake
+    landed, on the same key a frame or two later.
+
+  - _What changed._
+    - _The bounds memo is a tree._ Each patch has a cell, kept from call to call and reached from its
+      parent's cell, so a child's bounds need no lookup. The memo's semantics (when the range must
+      be found, when it matches) are the old one's. Past 131,072 cells a call drops the cells none
+      of the last 64 calls read, then waits for twice the cells kept (`pruneSelectionMemo`,
+      exported for its tests). The old memo dropped the older half of a level at 32,768.
+    - _Bounds are packed._ A cell keeps its bounds as 18 numbers in a `Float64Array`, and the
+      excess test, the forced-region rule and the requests' priorities read that form:
+      `viewExcessPacked`, `inForcedRegionPacked` and `distanceToPackedBoxFromM`.
+      `viewExcess`, `inForcedRegion` and `distanceToBoxFromM` pack a `PatchBounds` and call them, so
+      each rule still has one form. The `PatchBounds` object is made only for a drawn patch, and
+      kept while its range holds.
+    - _A patch's geometry is kept._ `patchBounds` is now `patchGeometryInto` (the ring's spheroid
+      points and normals, the centre's frame), then `packPatchBounds` (the heights on), then
+      `unpackPatchBounds`. Selection keeps the last 512 geometries (1.7 MB), so a bounds rebuilt for
+      a tightened range skips about two thirds of the build. On the approach 41% of builds reuse
+      one.
+    - _The ring's warps once a patch._ The 17 columns' s and the 17 rows' t are computed once a
+      build, not twice a vertex. A vertex on a face's edge, whose canonical face may be another,
+      still takes the whole path.
+    - _The patch cache looks up by a typed table._ `PatchKeyTable` (new, `patchKeyTable.ts`)
+      hashes a key's two 32-bit words into an open-addressed `Int32Array`, with linear probing and
+      backward-shift deletion, in place of the per-level `Map`s by `patchKeyIndex`. The draw set's
+      `residentAt(level, index)` is now `residentOver(key, level)`, a key's ancestor at a level, so
+      no index is encoded and decoded again. `insert` refuses a key deeper than `MAX_LEVEL` with a
+      `RangeError` before it changes anything, since such a key does not fit the table's words.
+    - _No second walks._ A traversal node is marked split as its children are made, so the main
+      loop's `isLeaf` walk is gone. The baked children a split leaves out are a bit mask on their
+      parent, set when `nodeOf` looked them up, so `hiddenBaked` is `bareKeys` through a filter
+      (`BareKeyFilter`, new), with no second lookup and no keys built for unbaked ones.
+    - _Smaller costs._
+      - The heap keeps each slot's forced flag and weighted excess in typed arrays beside it, with
+        the same comparisons in the same order.
+      - The leaf set's journal and scratch are count-indexed rather than truncated.
+      - A drawn patch's `SelectedPatch` is kept on its cell while its bounds, `forced` and `seen`
+        hold.
+      - The horizon test tries the top corner nearest the camera first, and the frustum test
+        takes a plane's box reach only where the centre is behind the plane. A box's reach is the
+        centre's plus terms that are never negative, so neither changes an answer.
+    - _The module runner's getters._ Under Vite's module runner, which the record's harness and
+      `just descent-demand` run selection under, each read of an imported binding is a getter
+      call. The game's renderer, bundled or native ESM, does not pay this. The hot modules
+      therefore bind such imports once, at module level:
+      - the packed layout's offsets and `NEAR_PLANE_M` in `viewGeometry.ts`;
+      - `viewExcessPacked`, `inForcedRegionPacked`, `patchKeyIndex` and `MAX_LEVEL` in
+        `select.ts`;
+      - `distanceToPackedBoxFromM` in `grounded.ts`;
+      - `stToUv` in `bounds.ts`.
+
+      Read through the getters, the packed test was slower than the old one: 28% of a call against
+      16%. The function aliases alone are worth 8–11% on the approach.
+  - _Bit for bit._
+    - `pab.mjs` runs runFixedStep's frame loop for the old code and the new side by side, each
+      with its own module instance, memo and `PatchCache`. Every frame it selects with both, in
+      alternating order, and compares the two outputs whole: every key in the map's order, every
+      bound number by `Object.is` (with the sphere's centre being the box's), `forced` and `seen`,
+      the demand's keys, priorities and flags in order, `limited`, `limitExcess` and `hiddenBaked`.
+    - It found no difference in the three high hard-bound cells over the whole descent (0–1,230
+      s): ridges on at 16 Hz (19,681 frames), and ridges off at 16 Hz (19,681) and 64 Hz (78,721).
+      That is 118,083 frames in all. The ridged cell's key hash is the record's `7c53b786241b137a`,
+      and the 64 Hz cell's is its `ec4300c0eecb583f`.
+    - The unit tests' whole-output digests, recorded before perf (c), pass unchanged.
+    - New tests:
+      - `viewGeometry.test.ts` holds the excess test to perf (c)'s form bit for bit, over 10,000
+        patches seen from 400 cameras near the ground, in orbit and inside patches;
+      - `bounds.test.ts` builds bounds from one kept geometry for three ranges against the
+        vector oracle;
+      - `patchKeyTable.test.ts` checks the table against a `Map` over 40,000 random operations;
+      - `select.test.ts` lists filtered bare keys against the filtered list, and checks the
+        memo's prune: kept bounds stay the same objects, and the output after a prune is the
+        same digest;
+      - `grounded.test.ts` holds `inForcedRegion` to the box distance over 289 patches about a
+        contact.
+  - _Measured (provisional, Design note 27)._ The timed A/B is `ab.sh` in
+    `.git/rm23-scratch/r05-b/perfd/`. It runs on the record's path: `rec.mjs` is Vite's runner,
+    runFixedStep as runCell calls it, hard bound, high, the saved ranges and no bakes.
+    - Old and new ran interleaved by round, each as its own process at nice 0.
+    - All of it ran under `just _locked` (972 s), at loads 1.2–5.1. One old round of the
+      ridges-off 16 Hz cell met a load of 11.7.
+    - The governor was schedutil.
+    - Each figure is the median of three rounds; at 64 Hz it is the mean of two.
+    - CPU is the thread's own: `process.cpuUsage()` then `process.threadCpuUsage()` (see the
+      finding below).
+    - Wall time is within 0.04 ms of CPU time at p95 in every approach cell.
+
+    `selectPatches`, CPU p50 / p95 ms, old → new:
+
+    | Segment             | Ridges on, 16 Hz          | Ridges off, 16 Hz         | Ridges off, 64 Hz         |
+    | ------------------- | ------------------------- | ------------------------- | ------------------------- |
+    | orbit coast         | 1.14 / 1.44 → 0.66 / 0.80 | 0.53 / 0.77 → 0.31 / 0.41 | 0.50 / 0.61 → 0.30 / 0.36 |
+    | descent arc         | 1.14 / 1.53 → 0.68 / 0.81 | 0.74 / 1.30 → 0.44 / 0.68 | 0.76 / 1.22 → 0.44 / 0.67 |
+    | approach and flare  | 1.61 / 2.68 → 0.87 / 1.43 | 1.33 / 2.54 → 0.68 / 0.85 | 1.09 / 1.75 → 0.63 / 0.75 |
+    | low fast pass       | 1.43 / 1.76 → 0.75 / 1.09 | 1.34 / 1.69 → 0.70 / 0.87 | 0.94 / 1.19 → 0.53 / 0.65 |
+    | slowdown            | 0.64 / 1.11 → 0.33 / 0.58 | 0.77 / 1.43 → 0.40 / 0.70 | 0.58 / 1.02 → 0.32 / 0.57 |
+    | vertical descent    | 0.22 / 0.30 → 0.12 / 0.17 | 0.22 / 0.31 → 0.12 / 0.17 | 0.23 / 0.31 → 0.12 / 0.17 |
+    | hover and touchdown | 0.20 / 0.20 → 0.10 / 0.10 | 0.20 / 0.20 → 0.10 / 0.10 | 0.21 / 0.21 → 0.10 / 0.11 |
+    - The ridged approach's rounds: old 2.61–2.74 ms p95, new 1.34–1.47 ms.
+    - The old ridges-off approach at 16 Hz varied more, from 1.81 to 2.54 ms (5.58 under the load
+      of 11.7). The new one stays between 0.85 and 0.87 ms.
+    - `pab.mjs`'s paired ratios, measured on the same frames in one process at loads 2–16, agree
+      with the A/B. On the approach's p95: 0.48 ridged, 0.47 and 0.54 ridges off.
+    - In the game's form the gain is smaller, since the old code's getter overhead is gone too.
+      With both variants bundled by esbuild and paired, the ridged approach goes from 2.75 to
+      1.77 ms p95 (0.65×). Bundled and run alone at loads 13–21, it goes from 3.59–3.69 to
+      1.51–1.71 ms wall.
+
+  - _Finding, for the record's timings: `process.threadCpuUsage()` alone is tick-grained here._
+    - The kernel runs tick-based CPU accounting: no `nohz_full`, so no vtime. Its
+      `getrusage(RUSAGE_THREAD)` reads the thread's runtime as of the last scheduler update.
+    - So a 0.37 ms loop reads 0 or 0.997 ms, and the record's frames came out in multiples of
+      about 1 ms.
+    - `process.cpuUsage()` (`RUSAGE_SELF`) updates the running thread's runtime first. Called just
+      before, it makes the thread's reading exact: the same loop reads 0.372 ms. The pair costs
+      about 1.5 µs.
+  - _Still open._
+    - _Quiet-machine runs._ The loads of 1–5 are near quiet but not quiet. The owner's runs stay
+      pending (T14/T17).
+    - _The prune's cost._ A prune walks every cell, about 131,000 of them. In a long flight that
+      would cost a few milliseconds in the one call that prunes. The record never reaches the limit.
+    - _The record's harness._ The module runner's getters still tax the rest of the record's path
+      (the cache, the draw set) and any selection code not bound once. Bundling the record's
+      runner, or saying so beside its timings, is for lane D or the orchestrator.
+
 - **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
   - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
     tests. The build adds:
