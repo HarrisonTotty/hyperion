@@ -213,9 +213,12 @@ _locked +cmd:
     # Run in its own memory-capped cgroup where systemd allows it, so that a runaway heavy run is
     # stopped (by the cap, or by systemd-oomd watching the user manager) instead of freezing the
     # machine or taking the login session with it, as happened on 2026-10-03. `HEAVY_MEMORY_MAX`
-    # overrides the cap.
+    # overrides the cap, and `HEAVY_SLICE` names a user slice to run it in (such as one that bounds
+    # all of a session's agent work together).
     if command -v systemd-run >/dev/null && systemd-run --user --scope --quiet true 2>/dev/null; then
-        systemd-run --user --scope --quiet -p MemoryMax="${HEAVY_MEMORY_MAX:-22G}" -p MemorySwapMax=2G "$@" || status=$?
+        slice=()
+        if [ -n "${HEAVY_SLICE:-}" ]; then slice=(--slice="$HEAVY_SLICE"); fi
+        systemd-run --user --scope --quiet "${slice[@]}" -p MemoryMax="${HEAVY_MEMORY_MAX:-22G}" -p MemorySwapMax=2G "$@" || status=$?
     else
         "$@" || status=$?
     fi
