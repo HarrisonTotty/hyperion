@@ -1,5 +1,11 @@
 # Descent demand record, 2026-10-05
 
+**Superseded** by [`2026-10-05-demand-calibrated-2.md`](2026-10-05-demand-calibrated-2.md) (record
+version 3, R05.T13.a's follow-up of decision-r05-record-tau.md): selected at the setting's τ, not
+the terrain pass's τ ÷ 1.1. Its segments' patch counts run up to 23% low and their demand from 3%
+high to 23% low; the budget binds at neither tolerance (decision-r05-record-tau.md). This record is
+kept because decision-r05-high-bound.md, F4's handoff and the plan cite it.
+
 Notes:
 
 - Flown with the level orbit coast (af69a9e), Selection.limitExcess (F1), the morph bands at τ′ (F2), the cache keeping the baked patches selection hides (F3) and selection's perf (c). Supersedes 2026-10-03-demand-calibrated.

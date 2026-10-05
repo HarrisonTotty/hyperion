@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useId, useState } from "react";
 
 import { formatBearingDeg, formatLengthLy, formatNumber, formatSigned } from "../../lib/format";
 import { type CentreLy, ROOT_CUBE_HALF_LY } from "../../lib/galaxy/model";
-import { isEmptyEntry, isTextEntry } from "../../lib/textEntry";
+import { isEmptyEntry, isTextEntry, showSelected } from "../../lib/textEntry";
 import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 
@@ -180,7 +180,9 @@ interface CentreEntryProps {
  * face excluded), is refused with a message naming its field, and leaves the cursor where it was; a
  * move of the cursor along that axis replaces it. Each field's way out enters nothing
  * (decision-r07-t13d): `Escape` drops what was typed there and its refusal and shows the cursor's
- * coordinate again, and a field entered empty does the same and is never refused.
+ * coordinate again, selected so that typing replaces it (decision-r07-t19b-exposure-fit, item 6),
+ * and `Enter` on the field emptied does the same; left emptied, it shows the coordinate. Neither is
+ * refused.
  * Under them, the cursor's `RADIUS`, `ANGLE` and `HEIGHT` in the `GALACTIC` frame, grouped under
  * that heading as the guide asks; the angle is missing on the galactic axis, where it is undefined
  * (D11). The whole position is announced when the cursor moves. `CENTRE CHART`, or the key `C`
@@ -351,7 +353,11 @@ export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEn
                     // `Enter` enters what was typed; centring is CENTRE CHART's and `C`'s alone.
                     if (event.key === "Enter") {
                       event.preventDefault();
+                      const typed = current[axis].draft;
                       enter();
+                      if (typed !== null && isEmptyEntry(typed.text)) {
+                        showSelected(event.currentTarget, shown(axis));
+                      }
                     } else if (event.key === "Escape") {
                       // Drops what was typed here and its refusal, entering nothing.
                       event.preventDefault();
@@ -359,6 +365,7 @@ export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEn
                         ...previous,
                         [axis]: { draft: null, entered: previous[axis].entered },
                       }));
+                      showSelected(event.currentTarget, shown(axis));
                     }
                   }}
                   onBlur={() => {

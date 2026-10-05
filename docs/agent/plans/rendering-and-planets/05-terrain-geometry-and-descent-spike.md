@@ -1069,9 +1069,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     high setting's, not a ninth, and its demand is probably above a ninth too; T13.a's fixed-step
     run measures the ratio rather than assuming it. Two predictions are therefore kept apart: the
     closed form at a fixed k = 5, which must reproduce the brainstorm's worked figures, and the
-    per-level D from T6's bounds, which is the one the runs are measured against. The measured
-    demand, first-time-selected keys a second with the cache's semantics stated, must lie within a
-    factor of two of the per-level D (T13.a), and the recorded figure is patches a second sustained
+    per-level D from T6's bounds, which is the one the runs are measured against, at the tolerance
+    selection runs at, τ ÷ 1.1 in the terrain pass (T11.c). The measured demand,
+    first-time-selected keys a second with the cache's semantics stated, must lie within a factor
+    of two of the per-level D (T13.a), and the recorded figure is patches a second sustained
     against it, as the brainstorm's descent test asks.
 
 20. **Where the spike lives.** In the client, behind a command-line flag, `--descent-spike`, that
@@ -2285,9 +2286,12 @@ R10), the worker counts (Design note 11) and, if T16 redesigned it, the low sett
 bound is not among them: both settings select by the hard ε_n plus the sagitta
 (`decision-r05-high-bound.md`). The high setting's vertex path is also read against T13.a's
 effective tolerance. On the ridged planet, `FaceDifferences`' budget of 1,952 lowers τ′ from
-2.1–3.0 px to 1.0–2.3 px (probe, 2026-10-04). ⌊slots ÷ 2⌋ is confirmed or changed against the
-cache's eviction of coarse patches (Risks). The code's defaults change in one commit; the plan's
-Design notes gain "as built" lines.
+2.1–3.0 px to 1.0–2.3 px (probe, 2026-10-04). With ridges off, `BakedOffsets`' 981 binds over the
+late arc at τ ÷ 1.1 (decision-r05-record-tau.md, probe 2026-10-05; the re-run of 2026-10-05: 34%
+of the arc's frames and 30% of the approach's, τ′ at most 0.96 px), so the high setting's vertex
+path also decides whether `DETAIL LIMITED` shows on the default planet. ⌊slots ÷ 2⌋ is confirmed
+or changed against the cache's eviction of coarse patches (Risks). The code's defaults change in
+one commit; the plan's Design notes gain "as built" lines.
 
 - Files: the constants' modules in `view/terrain/` and `view/atmosphere/`, this plan.
 - Tests: the existing tests, updated only where a default is asserted.
@@ -2435,9 +2439,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   (R10's min(hard, 4σ)) is ruled (2026-10-02, decisions-r05.md item 6): R05 selects by the hard
   bound everywhere, gate runs included; R10.T4 applies min(hard, kσ) under the criterion recorded
   there, from T6's and its own recorded figures. Re-ruled for both settings on the whole-descent
-  records (2026-10-04, `decision-r05-high-bound.md`): unchanged. With ridges off, the hard bound
-  never meets the budget (high at most 915 of 981, low 167 of 648), so the high setting draws
-  within τ with no label. With ridges on, min(hard, 4σ_n) is not a bound: at levels 4–8, p99.9
+  records (2026-10-04, `decision-r05-high-bound.md`): unchanged. With ridges off, at the pass's
+  τ ÷ 1.1 the high setting meets the `BakedOffsets` budget over 34% of the arc's frames and 30%
+  of the approach's, with τ′ at most 0.96 px ≤ τ (decision-r05-record-tau.md, the re-run of
+  2026-10-05). The drawn bound stays within τ at each selection, but `DETAIL LIMITED` shows there.
+  Low never meets its budget. With ridges on, min(hard, 4σ_n) is not a bound: at levels 4–8, p99.9
   reaches 1.23 × 4σ_n and the patch maxima 1.87 × 4σ_n, and σ_n leaves out the included crests'
   interpolation error, which ε_n carries at levels 9–12. The budgeted hard selection's τ′ of
   2–3 px corresponds to about 0.4–1.0 px of measured error. So the high setting shows
@@ -4704,7 +4710,14 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     0.74 / 1.43, slowdown 0.30 / 1.28, vertical descent 0 / 0 (D 81 and 25), and the hover 0
     against 0 (re-measured after the clearance follow-up, 2026-10-03). The test asserts the six
     within a factor of two: high's arc, approach and low pass, low's approach, low pass and
-    slowdown. Two causes are clear. D assumes a ring all
+    slowdown. **Re-measured at τ ÷ 1.1** (2026-10-05, decision-r05-record-tau.md, D at the same
+    tolerance), high then low: orbit coast 4.41 / 0 (D 0.9 and 0.01 a second), descent arc
+    0.49 / 0 (D 17.9 and 2.4), approach and flare 1.32 / 1.33, low fast pass 0.64 / 1.68,
+    slowdown 0.61 / 1.09, vertical descent 0 / 0 and the hover 0 against 0. The test now asserts
+    high's approach, low pass and slowdown, and low's approach, low pass and slowdown. High's arc
+    misses at 0.494: its window's demand is unchanged at 8.9 a second while D rose 16%, and the
+    window is far from the budget (about 210 patches), so the cause is the frustum's chord below.
+    High's slowdown came within (0.30 → 0.61). Two causes are clear. D assumes a ring all
     round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
     chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
     vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
@@ -4763,6 +4776,7 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   - **Record: F4's figures over the whole descent** (2026-10-05, F4 of
     `decision-r05-high-bound.md`; `docs/measurements/descent-spike/2026-10-05-demand-hard.{json,md}`
     and `2026-10-05-demand-calibrated.{json,md}`, record version 2, seed 7, no cell truncated).
+    **Superseded** by the re-run at the pass's τ ÷ 1.1 (below), since it selected at τ.
     - _What was run._ All eight cells were re-run in full, with the level coast, F1–F3 and
       selection's perf (c). Ridges on, high ran at 16 Hz again. Each cell ran as its own process,
       nice, at most four at once, without the heavy-test lock (CPU only). The high hard cells were
@@ -4792,10 +4806,13 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       leaves of level 12 or coarser. F4 asks for "a stand-in at level 12 or coarser". A stand-in
       also draws the resident patches beneath it, since balance and forced splits are not gated,
       and it covers level-13 leaves. Counting the draw set's stand-ins is the wider reading.
-    - _Not changed: the record's tolerance._ The record selects at the setting's τ, but the
-      terrain pass selects at τ ÷ 1.1 (`RESELECT_FRACTION`, T11.c). The record's patch counts
-      and demand are therefore somewhat below the pass's. For the orchestrator: aligning them
-      would move every pinned window hash.
+    - _The record's tolerance_ (decision-r05-record-tau.md, 2026-10-05): the record selects at
+      the pass's τ_sel = τ ÷ (1 + `RESELECT_FRACTION`), and D is computed at the same tolerance
+      in the record and the spike's results. A probe found that at τ the record ran 12–22% low
+      in patches and 0–19% in demand where unlimited. It also missed that the high setting's
+      ridges-off arc hits the 981-patch budget (100% limited at t 703–957 s, τ′ 0.92–0.96 px).
+      Frames the budget already limits select the same either way (the greedy orders by ρ), so
+      their τ′ is unchanged. Superseded by the re-run of 2026-10-05 (record version 3, below).
     - _τ′, hard bound, ridges on._ The probe's 2.1–3.0 px holds. With ridges off neither setting
       is ever limited.
 
@@ -4864,6 +4881,122 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       - High, ridges off: coast 4.7 ms, arc 2.4, approach 8.3, low pass 8.1, slowdown 6.5.
       - High, ridges on: 3.9, 5.2, 29.2, 4.6 and 1.7.
       - Low: 1.7 ms at most in every segment.
+      - Lane B reproduced the ridged high cell bit for bit (2026-10-05): its approach p95 is
+        2.8–3.2 ms on the record's path at load 6–17 (ridges off 1.7–1.8 ms); the 29.2 ms was
+        the cell's nice-10 process starved by the nice-0 integration `just ci` runs (one nice-0
+        competitor on its core gives 28.96 / 55.72 ms). Record version 3 therefore times each
+        selection on the thread's CPU clock too (below).
+  - **Record: the whole descent at the pass's τ ÷ 1.1** (2026-10-05,
+    `decision-r05-record-tau.md`;
+    `docs/measurements/descent-spike/2026-10-05-demand-hard-2.{json,md}` and
+    `2026-10-05-demand-calibrated-2.{json,md}`, record version 3, seed 7, no cell truncated). It
+    supersedes F4's two records, which are kept with a banner because the high-bound ruling, F4's
+    handoff and this plan cite them.
+    - _The tooling_ (24cd2cf, 8c8910f).
+      - `RESELECT_FRACTION` and `selectionTolerancePx(τ)` = τ ÷ (1 + `RESELECT_FRACTION`) moved to
+        `view/terrain/selectionTolerance.ts`, which does not load the engine. The terrain pass,
+        `fixedStep.ts` and `spikeHarness.ts` take τ_sel from it, the pass's by the same
+        expression, bit for bit. `BAND_MARGIN` is now 1 + `RESELECT_FRACTION`, so its equality
+        test went.
+      - The record selects at τ_sel, its τ′ is τ_sel × max(1, `limitExcess` ÷ w), and D is
+        computed at τ_sel. `SETTING_VIEWS` keeps the settings' τ of 1 and 2 px (Design note 7).
+      - It still selects every frame, without the pass's cadence. The pass's selection at a frame
+        is the record's at a pose at most 0.1 × d_min earlier, which moves the demand in time, not
+        in size. The record's header says so.
+      - Version 3 adds, per cell, τ and τ_sel (`tauPx`, `selectionTauPx`). Per segment it adds
+        the share of the limited frames whose τ′ exceeds τ (`limitedOverTauFraction`, null where
+        none is limited), and `selectPatches`' time on the thread's CPU clock beside its
+        wall-clock time (`selectCpuMs`, with its p50, p95 and maximum). The CPU clock is
+        `process.threadCpuUsage`, user and system, which the script passes in, since renderer code
+        does not reach `process`. The summary calls the wall-clock times upper bounds under load.
+      - Tests hold the pass's and the record's selection τ to
+        `TERRAIN_SETTINGS[s].tauPx / (1 + RESELECT_FRACTION)` on both settings, the unlimited
+        frames' τ′ to τ_sel, and the frames' and the spike's D to `perLevelDemand` at τ_sel.
+    - _Deviation: the spike's k_n moves with D._ `SpikeRecorder` computes D under both bounds,
+      and each level's k_n, at τ_sel. The ruling names D alone, but D's per-level term is
+      4 k_L v ÷ S_L, and Design note 18 records the k_n that selection's τ rests on. The results'
+      k_n are therefore 1.1 × T6's at the setting's τ, and the cap k S_finest is about 98 m on
+      high, not 89 m. The committed `2026-10-05-effect-low*` results carry D and k_n at τ under the
+      same results schema. They are provisional harness proofs and are not re-run.
+    - _The pinned windows, re-blessed._ With the selection τ forced back to the setting's τ (a
+      local edit, reverted), all 14 hashes pinned before reproduced, both against the module and
+      against the fixture, and `--write-fixture` rewrote the fixture byte for byte. So the
+      tolerance is the only input that moved. At τ_sel, 12 of the 14 hashes moved; high's vertical
+      descent and hover did not, since their selections are the same at either tolerance. The
+      fixture grew from 108,446 to 121,270 B (+11.8%, against the ruling's expected 20%), with
+      lines only added. For `WITHIN_TWO`, see "Finding: D's factor of two" above.
+    - _What was run._ All eight cells, as F4 ran them: seed 7, 64 Hz, ridges on and high at
+      16 Hz, each cell its own process, nice, at most four at once, without the heavy-test lock.
+      New this time:
+      - each cell ran in its own scope capped at 5 GiB with no swap (`common.md`, CAP EVERY RUN),
+        under caps of 2 h (selection) and 4 h (wall), and a kill at 4 h 5 min;
+      - RSS stayed at 0.3–0.6 GiB a cell;
+      - the cells ran twice, at 24cd2cf and then at 8c8910f with the CPU clock, and every figure but
+        the times agreed, the eight hashes included, so the clock does not move selection. The
+        record is the second run.
+      - The files are named `-2`, since `recordStem` dates a record by its start.
+    - _Where the budget binds, hard bound._ `limited` in F4's record, then in this one; after the
+      semicolon, the share of the limited frames whose τ′ exceeds τ:
+
+      | Cell             | Descent arc       | Approach and flare | Other segments          |
+      | ---------------- | ----------------- | ------------------ | ----------------------- |
+      | high, ridges off | 0% → 34%; 0%      | 0% → 30%; 0%       | 0%                      |
+      | low, ridges off  | 0%                | 0%                 | 0%                      |
+      | high, ridges on  | 100% → 100%; 100% | 74% → 84%; 88%     | coast 100% → 100%; 100% |
+      | low, ridges on   | 48% → 58%; 82%    | 25% → 29%; 88%     | 0%                      |
+      - _High, ridges off._ The budget binds on 34% of the arc's frames (about 310 s of its
+        900 s, the probe's t 703–957 s among them), at τ′ 0.94 / 0.96 / 0.96 px (p50 / p95 /
+        max), and on 30% of the approach's, at 0.92 px. τ′ never exceeds τ, so the drawn bound
+        stays within 1 px at each selection, but `DETAIL LIMITED` shows there. With τ′ above
+        τ_sel, the cadence no longer holds ρ ≤ τ between selections: τ′ ÷ 0.9 is about 1.07 px
+        (decision-r05-record-tau.md).
+      - _Ridges on._ F4's τ′ stands where the budget already bound. High's coast is
+        2.07 / 2.11 / 2.11 px and its arc 2.56 / 3.27 / 3.34 px, both identical. The approach's
+        p50 fell from 1.94 to 1.62 px, as more of its frames are limited, by less, and its
+        maximum stays 2.66 px. Low's arc is 2.39 / 2.77 / 2.81 px and its approach
+        2.22 / 2.25 / 2.26 px.
+      - _min(hard, 4σ_n)._ 0% everywhere, as before.
+
+    - _Unlimited segments._ Whole segments' patch counts rose 0–23%, the ridged low coast's 30%
+      (271 → 354). Demand rose −3% to +23%, and the ridged low coast's doubled (7.4 → 15.9 a
+      second). On high with ridges off: the coast 455 → 554 patches (+22%) and 8.7 → 10.4 a
+      second; the low pass 547 → 632 (+16%) and 347.5 → 376.6 a second; the slowdown 298 → 329
+      (+10%) and 153.9 → 159.2. The low fast pass now peaks at 377 a second on high (ridges off)
+      and 382 (ridges on, 16 Hz).
+    - _Demand ÷ D, hard bound_ (high then low, both at τ_sel):
+
+      | Segment            | Ridges off  | Ridges on   |
+      | ------------------ | ----------- | ----------- |
+      | orbit coast        | 0.72 / 1.26 | 0.12 / 1.15 |
+      | descent arc        | 0.60 / 0.79 | 0.09 / 0.45 |
+      | approach and flare | 0.56 / 0.76 | 0.54 / 1.49 |
+      | low fast pass      | 1.10 / 1.35 | 0.90 / 0.67 |
+      | slowdown           | 0.75 / 1.68 | 0.46 / 1.17 |
+
+      D still predicts every unbudgeted moving segment within a factor of two on both settings,
+      but for high's ridged slowdown, now 0.46 (0.50 before). Low's ridged low pass moved most,
+      from 1.13 to 0.67. At τ_sel one more level, 17, meets D's k_L S_L ≥ h at the pass's 300 m
+      above its floor, and its term alone is 55 of D's 141 a second (79 at τ). D's level rule
+      steps with τ wherever a level sits near that threshold, so the ruling's "within a few
+      percent" does not hold there. For T18 and T19, with the frustum correction above.
+
+    - _min(hard, 4σ_n), demand ÷ D_ (high then low): ridges off, coast 1.95 / 0 (D 0.0), arc
+      0.73 / 1.58, approach 0.73 / 1.57, low pass 0.73 / 1.78 and slowdown 0.90 / 5.91; ridges
+      on, 2.35 / 0 (D 0.0), 0.69 / 1.80, 2.04 / 15.06, 0.68 / 1.81 and 0.59 / 4.86.
+    - _`selectPatches`, hard bound, CPU then wall-clock p95_ (ms, loads of 2–19, four processes
+      at once). On this machine's kernel (`CONFIG_HZ=1000`) the thread's CPU clock advances in
+      steps of about 1 ms, and `/proc/thread-self/schedstat` steps with it; Node has no
+      `CLOCK_THREAD_CPUTIME_ID`. So the CPU percentiles hold to about ±1 ms: enough to tell
+      selection's work from a starved process's waits, not the last millisecond of 4d's 2 ms.
+      - High, ridges off: coast 1.0 / 1.0, arc 2.0 / 2.1, approach 3.9 / 3.8, low pass
+        3.0 / 3.6, slowdown 3.0 / 2.6.
+      - High, ridges on (16 Hz): 2.0 / 2.2, 3.0 / 2.9, 5.0 / 5.3, 3.0 / 2.8 and 2.0 / 1.6. The
+        approach's 5.0 ms is at τ_sel with 84% of its frames limited; lane B's 2.8–3.2 ms was at
+        τ.
+      - Low: CPU p95 at most 2.2 ms in every segment (wall at most 2.8 ms).
+      - The largest single selections reach 528 ms on the wall clock but at most 26 ms of CPU
+        on high and 51 ms on low. The rest of a wall-clock maximum is time the thread spent off
+        its core.
   - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
     camera underground (the direction above), not selection: lane B's
     `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With

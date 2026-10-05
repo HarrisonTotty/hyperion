@@ -10,7 +10,7 @@ import {
   formatUniverseTimeYr,
 } from "../../lib/format";
 import { CLOCK_WINDOW_YR } from "../../lib/galaxy/model";
-import { isEmptyEntry, isTextEntry } from "../../lib/textEntry";
+import { isEmptyEntry, isTextEntry, showSelected } from "../../lib/textEntry";
 import { RADIUS_STEPS_LY } from "../../spatial/scale";
 import {
   formatBandMsun,
@@ -85,7 +85,9 @@ interface NumberFieldProps {
  *
  * @remarks
  * Its way out enters nothing (decision-r07-t13d): `Escape` drops what was typed and any refusal and
- * shows the value again, and a field entered empty does the same and is never refused.
+ * shows the value again, selected so that typing replaces it (decision-r07-t19b-exposure-fit,
+ * item 6), and `Enter` on the field emptied does the same; left emptied, it shows the value.
+ * Neither is refused.
  */
 function NumberField({
   label,
@@ -172,9 +174,13 @@ function NumberField({
           if (event.key === "Enter") {
             event.preventDefault();
             enter();
+            if (draft !== null && isEmptyEntry(draft)) {
+              showSelected(event.currentTarget, text);
+            }
           } else if (event.key === "Escape") {
             event.preventDefault();
             drop();
+            showSelected(event.currentTarget, text);
           }
         }}
         onBlur={enter}

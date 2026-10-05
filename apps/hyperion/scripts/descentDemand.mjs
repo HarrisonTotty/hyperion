@@ -16,6 +16,8 @@
 // record, and the record is rewritten after every cell, so a killed run keeps the cells it ended.
 // Each --note is a line of the record's notes. --merge runs nothing: it writes one record into
 // --out from the records given, their cells in that order, as the cells run one process each.
+// Selection is timed on the wall clock and on this thread's CPU clock (`process.threadCpuUsage`):
+// under load the first counts the waits for a core, the second the selection's own work.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +54,18 @@ function writeRecord(record, out, stem, file) {
 const loadAverage = () => readFileSync("/proc/loadavg", "utf8").split(" ").slice(0, 3).map(Number);
 
 const nowMs = () => performance.now();
+
+/**
+ * This thread's CPU time, user and system, ms: what the selection itself costs under load. Node
+ * before 23.9 lacks `process.threadCpuUsage`; the record's CPU times are then null.
+ */
+const cpuNowMs =
+  typeof process.threadCpuUsage === "function"
+    ? () => {
+        const { user, system } = process.threadCpuUsage();
+        return (user + system) / 1000;
+      }
+    : undefined;
 
 async function main(args) {
   const surface = await import(join(app, "src/renderer/src/generated/surface/hyperion_surface.js"));
@@ -117,6 +131,7 @@ async function main(args) {
           toS: window.toS,
           measureFromS: window.measureFromS,
           nowMs,
+          ...(cpuNowMs === undefined ? {} : { cpuNowMs }),
           deadlineMs: Infinity,
         });
         process.stdout.write(
@@ -181,6 +196,7 @@ async function main(args) {
           toS: durationS,
           measureFromS: 1,
           nowMs,
+          ...(cpuNowMs === undefined ? {} : { cpuNowMs }),
           deadlineMs: cellStart + shareMs,
           wallDeadlineMs,
         });
