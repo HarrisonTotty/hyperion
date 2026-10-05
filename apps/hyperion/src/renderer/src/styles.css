@@ -3427,6 +3427,15 @@ body {
   gap: 0.5rem;
 }
 
+/*
+ * `INHIBIT`'s consequence (plan R07, T13.d's follow-up), in a held-back reason's place and look: it
+ * takes the row's room beside the button and wraps there, never lending the side column its width.
+ */
+.view-exposure__reason--consequence {
+  flex: 1 1 0;
+  contain: inline-size;
+}
+
 /* The exposure meter beside the exposure panel (plan R07, T13.b). */
 .view-meter__reading,
 .view-meter__value {

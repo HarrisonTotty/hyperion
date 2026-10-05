@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useId, useState } from "react";
 
 import { formatBearingDeg, formatLengthLy, formatNumber, formatSigned } from "../../lib/format";
 import { type CentreLy, ROOT_CUBE_HALF_LY } from "../../lib/galaxy/model";
-import { isTextEntry } from "../../lib/textEntry";
+import { isEmptyEntry, isTextEntry } from "../../lib/textEntry";
 import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 
@@ -178,14 +178,17 @@ interface CentreEntryProps {
  * for the longest, `-65,535.9999`, with `ly` beside it.
  * A value that is not a number, or lies outside the root cube (−65,536 ly up to 65,536 ly, that
  * face excluded), is refused with a message naming its field, and leaves the cursor where it was; a
- * move of the cursor along that axis replaces it. Under them, the cursor's `RADIUS`, `ANGLE` and
- * `HEIGHT` in the `GALACTIC` frame, grouped under that heading as the guide asks; the angle is
- * missing on the galactic axis, where it is undefined (D11). The whole position is announced when
- * the cursor moves. `CENTRE CHART`, or the key `C` pressed outside a text field without a modifier
- * (D3), publishes the cursor as the chart centre; both are held back, saying why, while an entry is
- * refused or while the chart cannot be centred, as when the link is down, whose reason the panel
- * then shows. The key's listener is on the document for as long as the entry is mounted, which
- * under `Activity` is while `GALAXY` is shown with a universe open.
+ * move of the cursor along that axis replaces it. Each field's way out enters nothing
+ * (decision-r07-t13d): `Escape` drops what was typed there and its refusal and shows the cursor's
+ * coordinate again, and a field entered empty does the same and is never refused.
+ * Under them, the cursor's `RADIUS`, `ANGLE` and `HEIGHT` in the `GALACTIC` frame, grouped under
+ * that heading as the guide asks; the angle is missing on the galactic axis, where it is undefined
+ * (D11). The whole position is announced when the cursor moves. `CENTRE CHART`, or the key `C`
+ * pressed outside a text field without a modifier (D3), publishes the cursor as the chart centre;
+ * both are held back, saying why, while an entry is refused or while the chart cannot be centred,
+ * as when the link is down, whose reason the panel then shows. The key's listener is on the
+ * document for as long as the entry is mounted, which under `Activity` is while `GALAXY` is shown
+ * with a universe open.
  */
 export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEntryProps) {
   const titleId = useId();
@@ -220,8 +223,13 @@ export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEn
     let accepted = true;
     const next: Record<Axis, FieldState> = { ...current };
     for (const { axis } of AXES) {
-      const { draft } = current[axis];
+      const { draft, entered: shownEntry } = current[axis];
       if (draft === null) {
+        continue;
+      }
+      if (isEmptyEntry(draft.text)) {
+        // No entry: the field shows the cursor's coordinate again, as on `Escape`.
+        next[axis] = { draft: null, entered: shownEntry };
         continue;
       }
       const entry = parseCoordinate(draft.text);
@@ -344,6 +352,13 @@ export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEn
                     if (event.key === "Enter") {
                       event.preventDefault();
                       enter();
+                    } else if (event.key === "Escape") {
+                      // Drops what was typed here and its refusal, entering nothing.
+                      event.preventDefault();
+                      setFields((previous) => ({
+                        ...previous,
+                        [axis]: { draft: null, entered: previous[axis].entered },
+                      }));
                     }
                   }}
                   onBlur={() => {

@@ -1440,7 +1440,18 @@ src/renderer/src/view/post src/renderer/src/view/sky src/renderer/src/displays/v
   ISO (the triple in force, else `DEFAULT_MAN_TRIPLE`'s), the shutter solved"; its tests:
   `setManualEv100` round-trips `DEFAULT_MAN_TRIPLE` at −1 and gives the program's triple to 10⁻¹²
   across the span, from `AUTO` at 9.6 f/1.4, 1.96 × 2^−9.6 s, ISO 100. The `MAN` field sits after
-  T13.c's four rows.
+  T13.c's four rows. Its follow-up (decision-r07-t13d): every field that enters on `Enter` or when
+  left (the `MAN` field, `CURSOR`'s `X`, `Y`, `Z`, the chart's `DRIVE RANGE` and `CHART TIME`)
+  takes `Escape`, which drops what was typed and any refusal and shows its value again, the `MAN`
+  field's fill, selected, while it holds focus, and does the same for empty text, which is never
+  refused; the `MAN` field's fill stays the reading's digits outside the span, where its entry is
+  refused, and leaving the field drops a refused fill; `INHIBIT` states
+  `Then AUTO resumes only on ENABLE` beside the button, as its description, under `AUTO` and a
+  system inhibit, not under the operator's. Tests: `Escape` and empty text clear a refusal with no
+  command in each field kind; an emptied `MAN` field under `MAN` keeps its value; a fill at −15.3
+  is refused and dropped on leaving, and one at −14.04 enters −14.0; `INHIBIT`'s description at
+  each level. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view
+src/renderer/src/displays/galaxy`, the console-ux skill's scripts.
 - **R07.T13.e The sky's limit follows the camera** (decision-r07-exposure-camera). R06's
   `viewSky.ts`: the request's `camera_limit_v` and the cull take the view camera's deepest triple
   (f/1.4, 1/30 s, ISO 409,600: V 10.06 at 60°, 11.72 at 30°, 13.58 at 13° under μ 24) at every
@@ -1510,7 +1521,9 @@ that ends in the owner's sign-off. T16 also builds them:
 `InhibitReason` gains `"nothing_weighed"` with its meter. `ExposurePanel` and `MeterControl` take
 the cause beside the metered value; while it is `acquiring`, neither shows a meter status or
 `NO IMAGE TO METER`, and `ENABLE` is held back with `NOT AVAILABLE: not yet metered`; the `MAN`
-field (T13.d) is never held back, `acquiring` included. Tests: under
+field (T13.d) is never held back, `acquiring` included, and `INHIBIT` states
+`Then AUTO resumes only on ENABLE` under each new system inhibit as under `NO IMAGE TO METER`
+(decision-r07-t13d). Tests: under
 `LIT` with no lit body, a drawn image reads `NO LIT SIDE`, never `NO IMAGE TO METER`, after 0.5 s
 and not before; a meter change clears it at once; `AUTO` resumes when a lit body is metered. Its
 other tests: every overlay mark over the image has a casing stroke; plates are present for every
@@ -3276,15 +3289,21 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     should-fix points are fixed but the three open below: tests of a refusal that `ENABLE` drops, of
     `MAN` from the operator's inhibit and of the mouseup guard; `userEvent.setup()` before `render`;
     the selection's colour, `METERED`'s width and the field's `.form-field` wrapper.
-  - **Open (for a decision agent):**
-    - a refused entry under `AUTO` or an inhibit is cleared only by entering a valid value, which
-      sets `MAN`, since emptying the field and leaving it is refused as not a number, as in
-      `CURSOR`; options: an empty field enters nothing and returns to `—`, `Escape` drops the draft,
-      both, or as built (built);
-    - `AUTO` is not bounded to −14.0 to 42.0, so beyond the span `Tab` then `Enter` is refused;
-      options: clamp the fill to the span, or keep the refusal (built);
-    - `INHIBIT` still states no consequence, the ruling's unruled aside, which the UX review raised
-      now that the `MAN` field carries its line.
+  - **Ruled (decision-r07-t13d):**
+    - every field that enters on `Enter` or when left takes `Escape`, which drops a typed or
+      refused entry and shows its value again, and enters empty text as nothing (T13.d's
+      follow-up, which also changes `CURSOR`'s and the chart's fields, the guide's entry rule
+      being ship-wide); the refusal words are unchanged;
+    - the `MAN` field's fill stays the exposure as it stands outside the span and is refused there
+      as a typed value is, a refused fill dropped on leaving: a clamped fill would show a value the
+      exposure does not have and step the image unasked, and `INHIBIT` holds any value; a frame of
+      exact zeros, which drove `AUTO` without end, is to meter no darker than EV100 −14 (T13.a's
+      follow-up, not yet built), so that the fill keeps its width;
+    - `INHIBIT` states `Then AUTO resumes only on ENABLE` beside the button under `AUTO` and a
+      system inhibit (the guide's consequence rule), on the button's row: no height in T19.b's
+      26rem column, at most about 10 px as built and in T19.b's 20rem column B (measured: none as
+      built, 12 px in column B; T13.d's follow-up's deviations);
+    - the entry and commanding bullets' new sentences are drafts for the owner, as the rows are.
 - **Deviations in T13.e, as built (the sky's limit follows the camera, decision-r07-exposure-camera
   (c)).**
   - **`shownTriple` is R02's.** `shownTriple(control)` lives in `photometry/exposure.ts` beside
@@ -3369,3 +3388,77 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **Gate.** No `just ci` (the Day 2 protocol). No `just test-render`: no shader, `view/engine/` or
     `src/smoke/` file changed, and the smoke harness draws no culled sky, so no rendered output or
     star count of the harness changes.
+- **Deviations in T13.d's follow-up, as built (decision-r07-t13d, items 1–3).**
+  - **One empty-text test.** `lib/textEntry.ts` gains `isEmptyEntry(text)` (empty or spaces only),
+    which the `MAN` field, `CURSOR` and `NumberField` share, where the ruling has each check
+    `text.trim() === ""`, so that the ship-wide rule is written once.
+  - **The statement's class.** `styles.css` gains `.view-exposure__reason--consequence`
+    (`flex: 1 1 0` and `contain: inline-size`) beside the reason's class. A flex item under
+    `contain: inline-size` has no content width and would shrink to nothing, so `flex: 1 1 0` gives
+    it the row's room beside the button, where it wraps. The held-back reasons are unchanged (no
+    `contain`, as built). `ExposureCommand`'s `consequence` is typed `string | undefined`, so that
+    `ExposurePanel` can pass `undefined` under `exactOptionalPropertyTypes`.
+  - **The `MAN` field.** A refusal leaves the draft as it is: a typed text stays the draft, and a
+    refused fill, never made one, is marked only. Leaving the field with no draft clears the
+    refusal, since the only untyped refusal is a fill's. `Escape` and an empty `Enter` take the fill
+    again by the same path as focus, written to the input and selected.
+  - **`CURSOR`.** `Escape` drops its own field's draft only; a refusal in another field stands, and
+    so does `CENTRE CHART`'s hold for it. An emptied field keeps the precision of the coordinate it
+    shows.
+  - **The chart's fields.** `NumberField`'s empty check comes before the link's hold, so a field
+    emptied before the hold (`NO CARRIER`) arrives still returns to its value when left; `Escape`
+    drops a draft typed before the hold too. Neither sends anything. The ruling does not say.
+  - **Tests.** As ruled, with the `INHIBIT` description under `AUTO` and under `NO IMAGE TO METER`
+    as two tests, plus six: `Escape` leaves the focus in `CURSOR`'s field; `DRIVE RANGE` emptied
+    with `Enter` enters nothing; text of spaces only enters nothing in each field kind (three); and
+    a `DRIVE RANGE` emptied before the link's hold returns to its value when left. The `AUTO` test
+    also asserts that `INHIBIT` is not held back. Of the 22 new tests, seventeen fail at 49f029d.
+    The other five pin built behaviour: `Escape` with nothing typed, the fill at −14.04, the
+    operator's inhibit, `MAN`'s reason alone and the `MAN` field's line.
+  - **Measured, offscreen (never shown).** `.git/rm23-scratch/r07-shading/layout/run-t13d-fu.sh`
+    and `hook-t13d-fu.js` run the app with an offscreen window, as the views lane's T19.b hook
+    does, so no native window exists. T13.d's harness (`run-t13d.sh`) made its hidden window on
+    `:0`, which the ruling's acceptance rules out. At 1920 × 1080:
+    - as built, `INHIBIT`'s row stays 32 px with the statement on one line (18 px), under `AUTO`
+      (262.5 px beside the button, the column 394 px) and trapped in the wireframe (316.5 px, the
+      column 448 px); the panel stands 315 and 323 px, as at T13.d. The columns are T13.d's too,
+      set under `AUTO` by `ENABLE`'s held-back reason and when trapped by the panel's reading and
+      reasons (T13.d's open item), none of which has `contain`: the statement does not widen it;
+    - in T19.b's 26rem column the statement takes one line in 284.9 px, the row 32 px, and the
+      panel stands 315, 360 and 382 px (`AUTO`, trapped, trapped with a refusal), as at T13.d: no
+      added height;
+    - in T19.b's 20rem column B it takes two lines, the row 44 px, 12 px more (the panel 357 px
+      under `AUTO`, 408 px trapped), where the ruling estimated about 10 px. Of the 12 px, 8 are
+      the reason's 0.5rem bottom margin, which the row centres with the text;
+    - in the running app, `Escape` on a refused `abc` while trapped takes the fill, `6.5`,
+      selected and unrefused, and leaving then shows `—`. The offscreen page never has focus, so
+      the harness sends the leave's `focusout` itself.
+  - **Plan text.** The ruled Risks item says a frame of exact zeros "now meters no darker than
+    EV100 −14"; it reads "is to meter … (T13.a's follow-up, not yet built)" until that follow-up
+    lands, which restores the ruled words. The T13 entry's sentence on the floor (at "a test drives
+    the cut and the recovery") is the T13.a follow-up's, and is not added here. Until then a frame
+    of zeros can still drive the fill past its 5ch.
+  - **Guide.** The `MAN` (field) row is now the nomenclature table's widest, so Prettier re-pads
+    the table: besides the separator and the two rows, 238 rows change in whitespace only. The two
+    bullets' new sentences and the two rows are drafts for the owner.
+  - **Open (for the orchestrator, from the UX review; not built).**
+    - The reason's 0.5rem bottom margin, which the statement shares, sits it about 4 px above the
+      button label's centre line, as it does the held-back reasons beside `ENABLE` and `INHIBIT`.
+      Zeroing it inside `.view-exposure__command` would align them and make column B's two-line row
+      36 px (+4 px). Options: as built (the ruling's "the reason's place and look"), or no bottom
+      margin on every note in a command row, `AUTO NOT AVAILABLE` keeping its own.
+    - After `Escape`, the `MAN` field selects its fill, so typing replaces it, but `CURSOR`'s and the
+      chart's fields leave the caret after the restored value, so typing appends to it, as on their
+      focus. Options: as built (each field's focus behaviour), or `Escape` selects the restored
+      value in every field.
+  - **For the owner (the ruling's unruled aside).** `INHIBIT` under `INHIBITED · OPERATOR` is now
+    the only level where it is offered with nothing beside it (accepted as a no-op). Whether it
+    should be held back with `NOT AVAILABLE: the exposure is INHIBITED` (about 300 px, which wraps
+    in the as-built column) is left as built.
+  - **Gate.** The acceptance command (920 tests), the app's vitest (4,832), `just check lint`,
+    Prettier and the console-ux skill's scripts. No `just test-render`, since no shader, `view/engine/` or
+    `src/smoke/` file changed, and no `just ci` (the Day 2 protocol).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, with no must-fix. Fixed:
+    tests of spaces-only text and of the hold's order, the chart tests' role queries, the panel's
+    summary sentence, `enter`'s redundant flag dropped, and this entry's wording. The UX review's
+    two points are open above.
