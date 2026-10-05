@@ -2129,8 +2129,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   histogram's range (bin 0, as after a cut from a sunlit planet to a dark sky) the range's floor
   2⁻¹⁴ ÷ the pre-exposure, an upper bound, so that the exposure steps darker and the frame comes
   into range; metering its mean of 0 as nothing to meter locked `AUTO` in a system inhibit it
-  could not leave (a test drives the cut and the recovery). A histogram with nothing the meter
-  weighs (`LIT` with no lit body) is treated as no histogram: `AUTO` holds until
+  could not leave (a test drives the cut and the recovery). A frame of exact zeros never comes
+  into range, so the floor is bounded below at EV100 −14, R02's `MAN_EV100_MIN`: max(2⁻¹⁴ ÷ the
+  pre-exposure, 2⁻¹⁷ cd/m²) (decision-r07-t13d; T13.a's follow-up), which leaves every frame with
+  light in it to its light. A histogram with nothing the meter weighs (`LIT` with no lit body) is
+  treated as no histogram: `AUTO` holds until
   `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
   definition of that status. T16 replaces it with the meter's own status, `NO LIT SIDE` and its
   twins (decision-r07-t8a-meter). Under `AUTO` `onMetering` receives the smoothed, applied EV100,
@@ -3297,8 +3300,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the `MAN` field's fill stays the exposure as it stands outside the span and is refused there
       as a typed value is, a refused fill dropped on leaving: a clamped fill would show a value the
       exposure does not have and step the image unasked, and `INHIBIT` holds any value; a frame of
-      exact zeros, which drove `AUTO` without end, is to meter no darker than EV100 −14 (T13.a's
-      follow-up, not yet built), so that the fill keeps its width;
+      exact zeros, which drove `AUTO` without end, now meters no darker than EV100 −14 (T13.a's
+      follow-up), so the fill keeps its width;
     - `INHIBIT` states `Then AUTO resumes only on ENABLE` beside the button under `AUTO` and a
       system inhibit (the guide's consequence rule), on the button's row: no height in T19.b's
       26rem column, at most about 10 px as built and in T19.b's 20rem column B (measured: none as
@@ -3434,10 +3437,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       selected and unrefused, and leaving then shows `—`. The offscreen page never has focus, so
       the harness sends the leave's `focusout` itself.
   - **Plan text.** The ruled Risks item says a frame of exact zeros "now meters no darker than
-    EV100 −14"; it reads "is to meter … (T13.a's follow-up, not yet built)" until that follow-up
-    lands, which restores the ruled words. The T13 entry's sentence on the floor (at "a test drives
-    the cut and the recovery") is the T13.a follow-up's, and is not added here. Until then a frame
-    of zeros can still drive the fill past its 5ch.
+    EV100 −14"; it read "is to meter … (T13.a's follow-up, not yet built)" until that follow-up
+    landed and restored the ruled words. The T13 entry's sentence on the floor (at "a test drives
+    the cut and the recovery") is the T13.a follow-up's, and is not added here.
   - **Guide.** The `MAN` (field) row is now the nomenclature table's widest, so Prettier re-pads
     the table: besides the separator and the two rows, 238 rows change in whitespace only. The two
     bullets' new sentences and the two rows are drafts for the owner.
@@ -3462,3 +3464,59 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     tests of spaces-only text and of the hold's order, the chart tests' role queries, the panel's
     summary sentence, `enter`'s redundant flag dropped, and this entry's wording. The UX review's
     two points are open above.
+- **Deviations in T13.a's follow-up, as built (decision-r07-t13d, item 2's guard).**
+  - **As ruled.** `post/autoExposure.ts` gains `EMPTY_FRAME_CD_M2`, 2⁻¹⁷ cd/m², computed from
+    `MAN_EV100_MIN` and `METER_CALIBRATION_K` (2⁻¹⁴ × 12.5 ÷ 100, exact in binary). When the
+    metered mean is 0, `meteredAverage` returns max(2⁻¹⁴ ÷ the pre-exposure,
+    `EMPTY_FRAME_CD_M2`). Its remarks give the crossover, an applied EV100 of −3.26, and the
+    range's floor at −14, 4.5 × 10⁻⁹ cd/m².
+  - **Tests.** The ruling's three, the frame of zeros as one case per start, plus two:
+    - the constant, exactly 2⁻¹⁷ cd/m² and EV100 −14;
+    - `meteredAverage` itself: the range's floor at 9.6 and −3.2 (as built), the crossover, and
+      `EMPTY_FRAME_CD_M2` at −3.3 and −20;
+    - the frame of zeros runs the closed loop, each frame's pre-exposure taken from the applied
+      EV100 as `ViewDisplay` sets it. From 9.6 and from −20 it stays within 0.05 EV of −14 over the
+      120 s at 60 Hz that follow a 60 s settle, and from 9.6 it is never darker than −14. At
+      6f7c15c it ends at −170.4 from 9.6;
+    - the faint pixel is one at 10⁻⁸ cd/m² among 99 zeros, from 9.6. It comes into range near
+      −12.8, above the floor, and settles within 0.1 EV of log₂(8 × 10⁻¹⁰), −30.2. It passes
+      before and after the fix, pinning what the guard must keep;
+    - "recovers from a frame entirely below the histogram's range" is unchanged and passes.
+  - **Noted for the orchestrator: what the guard holds at −14.** It reads the metered mean, so it
+    takes any frame whose counted pixels (those the meter weighs) all lie under the histogram's
+    range, light or none. Such a frame is held at −14 when its counted pixels stay under the range
+    on the way there:
+    - from above, when every counted pixel is below 4.5 × 10⁻⁹ cd/m², the range's floor at −14.
+      Before, the range's floor stepped it darker until it came into range and metered by its
+      light: a uniform 4 × 10⁻⁹ cd/m² frame settled near −24.9, drawn at about 1 ÷ 9.6 of the
+      white point;
+    - from below −14, when every counted pixel is below 2⁻¹⁴ ÷ the pre-exposure,
+      1.2 × 2^(EV100 − 14) cd/m², since brightening lowers the pre-exposure. Before, a uniform
+      10⁻¹² cd/m² frame at −20 was walked down to −36.8; now it is brightened to −14;
+    - a counted pixel that comes into range on the way meters by its light, below −14 included
+      (the faint-pixel test).
+  - **What a held frame shows.** Its counted pixels' luminance lies 1.5 stops or more under AgX's
+    floor (2⁻¹²·⁴⁷), so they are drawn black. Pixels the meter does not weigh are drawn at −14:
+    the host's disc (class 0) under any meter, and the lit side and the stars under `DARK` when
+    the night side is exactly 0 (no planetshine). Before, the exposure ran on without end under
+    them, toward the `f32` overflow.
+  - **The ruled words overstate it (open, for the orchestrator).** The ruling's "the image changes
+    only for a frame whose every pixel is below 4.5 × 10⁻⁹ cd/m²" holds only with "counted" added
+    and with the case from below. Its "such a frame is black at either exposure" holds for exact
+    zeros alone, and only of the counted pixels. The T13 entry's ruled sentence, inserted
+    verbatim, overstates it in the same way: "which leaves every frame with light in it to its
+    light". Options: keep the ruled words (built), or amend them to "which leaves to its light
+    every frame with a counted pixel in range on its way to −14". The frames concerned are over
+    2,000 times fainter than the brainstorm's darkest scene, 10⁻⁵ cd/m², and meter far darker than
+    the view camera's deepest setting, f/1.4, 1/30 s and ISO 409,600 at EV100 −6.12, beyond which
+    the exposure is a digital push. The exception is the frame with uncounted light, which the
+    guard now bounds.
+  - **Gate.** The acceptance command (85 tests), the app's vitest (4,837), `just check lint` and
+    Prettier. No `just test-render`: no shader, `view/engine/` or `src/smoke/` file changed, and
+    the guard changes only a frame with no counted pixel in the histogram's range below EV100
+    −3.26. No `just ci` (the Day 2 protocol).
+  - **Reviewed** by the TypeScript reviewer and the science-checker, with one must-fix: these
+    remarks and the note above said "reached from a brighter exposure" and "every pixel", where the
+    guard also holds a frame from below and reads only the counted pixels. Fixed, as are a unit in
+    a test's name, one case per start, the constant's own test, a comment's tolerance and "the
+    counted pixels' luminance" for AgX's per-channel floor. Every figure checked out.

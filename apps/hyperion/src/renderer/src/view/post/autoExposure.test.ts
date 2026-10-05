@@ -6,6 +6,7 @@ import {
   ev100FromTriple,
   exposureScale,
   inhibit,
+  MAN_EV100_MIN,
   programTriple,
   setAuto,
   type ExposureControl,
@@ -14,7 +15,14 @@ import {
 import { AGX_MAX_EV } from "../photometry/toneCurve";
 import { glareSourceVeil, type GlareSource } from "./glare";
 import { binCentreLuminance, cpuHistogram, HISTOGRAM_BINS, type Histogram } from "./histogram";
-import { AutoExposure, meteredLuminance, METER_TIMEOUT_S, smoothEv } from "./autoExposure";
+import {
+  AutoExposure,
+  EMPTY_FRAME_CD_M2,
+  meteredAverage,
+  meteredLuminance,
+  METER_TIMEOUT_S,
+  smoothEv,
+} from "./autoExposure";
 import { METER_CLASS, type MeterMode } from "./meter";
 
 const SOURCE = viewId("main");
@@ -50,6 +58,21 @@ function run(exposure: AutoExposure, h: Histogram, hz: number, seconds: number):
     ev = exposure.step(h, 1 / hz).ev100;
   }
   return ev;
+}
+
+/** A frame of exact zeros as the kernel bins it, pre-exposed at the applied `ev100`. */
+function zerosAt(ev100: number): Histogram {
+  const preExposure = exposureScale(ev100);
+  return frameHistogram(
+    Array.from({ length: 16 }, (): readonly [number, number] => [0, METER_CLASS.other]),
+    "average",
+    preExposure,
+  );
+}
+
+/** The bottom of the histogram's range at the applied `ev100`, cd/m²: 2⁻¹⁴ ÷ the pre-exposure. */
+function rangeFloorAt(ev100: number): number {
+  return 2 ** -14 / exposureScale(ev100);
 }
 
 function controller(control: ExposureControl = AUTO, meter: MeterMode = "average"): AutoExposure {
@@ -89,6 +112,23 @@ describe("meteredLuminance", () => {
 
   it("is zero for an empty histogram", () => {
     expect(meteredLuminance(histogram([]))).toBe(0);
+  });
+});
+
+describe("meteredAverage", () => {
+  it("floors a frame of zeros at 2⁻¹⁷ cd/m², EV100 −14 under log₂(8 L̄)", () => {
+    expect(EMPTY_FRAME_CD_M2).toBe(2 ** -17);
+    expect(ev100FromAverageLuminance(EMPTY_FRAME_CD_M2)).toBe(MAN_EV100_MIN);
+  });
+
+  it("meters a frame of zeros at the range's floor, but no darker than EV100 −14", () => {
+    // Above an applied −3.26 the range's floor, 2⁻¹⁴ ÷ the pre-exposure, is the larger, as built.
+    expect(meteredAverage(zerosAt(9.6))).toBe(rangeFloorAt(9.6));
+    expect(meteredAverage(zerosAt(-3.2))).toBe(rangeFloorAt(-3.2));
+    // They cross at log₂(2⁻³ ÷ 1.2) = −3.263.
+    expect(rangeFloorAt(-3 - Math.log2(1.2)) / EMPTY_FRAME_CD_M2).toBeCloseTo(1, 12);
+    expect(meteredAverage(zerosAt(-3.3))).toBe(EMPTY_FRAME_CD_M2);
+    expect(meteredAverage(zerosAt(-20))).toBe(EMPTY_FRAME_CD_M2);
   });
 });
 
@@ -261,6 +301,53 @@ describe("the exposure", () => {
     }
     expect(reading.control.kind).toBe("auto");
     expect(reading.ev100).toBeCloseTo(ev100FromAverageLuminance(skyCdM2), 1);
+  });
+
+  it.each([9.6, -20])(
+    "settles a frame of exact zeros from EV100 %s at −14 and holds it",
+    (start) => {
+      // Black ground filling the view: every pixel exactly 0, so in bin 0 at any exposure.
+      const exposure = controller({ kind: "auto", ev100: start });
+      let reading = exposure.reading();
+      let darkest = reading.ev100;
+      let worstHeld = 0;
+      for (let frame = 0; frame < 60 * (60 + 120); frame += 1) {
+        reading = exposure.step(zerosAt(reading.ev100), 1 / 60);
+        darkest = Math.min(darkest, reading.ev100);
+        if (frame >= 60 * 60) {
+          worstHeld = Math.max(worstHeld, Math.abs(reading.ev100 - MAN_EV100_MIN));
+        }
+      }
+      expect(reading.control.kind).toBe("auto");
+      // Settled within the first 60 s, then within 0.05 EV of −14 over the next 120 s at 60 Hz.
+      expect(worstHeld).toBeLessThan(0.05);
+      // Never darker than the floor, from above or below.
+      expect(darkest).toBeGreaterThanOrEqual(Math.min(start, MAN_EV100_MIN));
+      expect(exposure.meteredEv100).toBeCloseTo(MAN_EV100_MIN, 12);
+    },
+  );
+
+  it("meters a frame of zeros with one faint pixel by its light, below EV100 −14", () => {
+    // One pixel at 10⁻⁸ cd/m² among 99 at 0: a mean of 10⁻¹⁰ cd/m², EV100 log₂(8 × 10⁻¹⁰) = −30.2.
+    // The pixel comes into the histogram's range below about EV100 −12.8, above the floor.
+    const pixelCdM2 = 1e-8;
+    const meanCdM2 = pixelCdM2 / 100;
+    const exposure = controller({ kind: "auto", ev100: 9.6 });
+    let reading = exposure.reading();
+    for (let frame = 0; frame < 60 * 120; frame += 1) {
+      const preExposure = exposureScale(reading.ev100);
+      const texels: Array<readonly [number, number]> = [
+        [pixelCdM2 * preExposure, METER_CLASS.other],
+      ];
+      for (let i = 1; i < 100; i += 1) {
+        texels.push([0, METER_CLASS.other]);
+      }
+      reading = exposure.step(frameHistogram(texels, "average", preExposure), 1 / 60);
+    }
+    expect(reading.control.kind).toBe("auto");
+    expect(reading.ev100).toBeLessThan(MAN_EV100_MIN - 15);
+    // Off the true mean by at most the bin's half-width, 0.059 stop; 0.1 leaves a margin.
+    expect(Math.abs(reading.ev100 - ev100FromAverageLuminance(meanCdM2))).toBeLessThan(0.1);
   });
 
   it("holds AUTO through a histogram with nothing to meter, until the timeout", () => {
