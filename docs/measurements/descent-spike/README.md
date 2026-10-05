@@ -18,6 +18,13 @@ One run is two files, written by the client's main process at the end of the run
 
 `<machine>` is the host name, lower-cased, with anything but `a`–`z`, `0`–`9` and `-` dropped.
 
+A native replay of a run's capture (R05.T15, `just replay <capture>`) writes
+`<date>-<machine>-<setting>-replay.json` in the same schema. Its frames are timed by the GPU's
+completions offscreen, or by presentation with `--present`. Each pass is timed by the replay's own
+timestamps. Every figure a replay cannot have (the trace, the main thread, memory, rAF) is null,
+with its reason. The capture (`--capture <dir>`: `capture.json` and `capture.bin`) is hundreds of
+megabytes and is never committed.
+
 ## What a results file holds
 
 Every figure is `{ "value": …, "reason": null }`, or `{ "value": null, "reason": "…" }` with the

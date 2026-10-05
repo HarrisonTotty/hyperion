@@ -1,0 +1,352 @@
+{
+  "criteria": {
+    "overall": "not-measured",
+    "segments": [],
+    "whole": [
+      {
+        "criterion": "50th percentile ≤ T + 0.5 ms",
+        "id": "p50",
+        "limit": null,
+        "note": "no period T",
+        "tolerance": 0,
+        "unit": "ms",
+        "value": 0.641024,
+        "verdict": "not-measured"
+      },
+      {
+        "criterion": "95th percentile ≤ 35 ms",
+        "id": "p95",
+        "limit": null,
+        "note": "no period T",
+        "tolerance": 0,
+        "unit": "ms",
+        "value": 1.291264,
+        "verdict": "not-measured"
+      },
+      {
+        "criterion": "99th percentile ≤ 2T",
+        "id": "p99",
+        "limit": null,
+        "note": "no period T",
+        "tolerance": 0,
+        "unit": "ms",
+        "value": 2.180096,
+        "verdict": "not-measured"
+      },
+      {
+        "criterion": "≤ 1% of intervals above 1.5 T",
+        "id": "missed",
+        "limit": 0.01,
+        "note": "an offscreen replay presents nothing",
+        "tolerance": 0,
+        "unit": "fraction",
+        "value": null,
+        "verdict": "not-measured"
+      },
+      {
+        "criterion": "none above 3 T",
+        "id": "hitches",
+        "limit": 0.0,
+        "note": "an offscreen replay presents nothing",
+        "tolerance": 0,
+        "unit": "count",
+        "value": null,
+        "verdict": "not-measured"
+      },
+      {
+        "criterion": "main thread ≤ 0.8 T at the 95th percentile",
+        "id": "headroom-main",
+        "limit": null,
+        "note": "a native replay has no main-thread figure",
+        "tolerance": 0,
+        "unit": "ms",
+        "value": null,
+        "verdict": "not-measured"
+      },
+      {
+        "criterion": "GPU pass sum ≤ 0.8 T at the 95th percentile",
+        "id": "headroom-gpu",
+        "limit": null,
+        "note": "no period T",
+        "tolerance": 0,
+        "unit": "ms",
+        "value": 0.271424,
+        "verdict": "not-measured"
+      },
+      {
+        "criterion": "terrain GPU time ≤ 14 ms at the 95th percentile",
+        "id": "terrain",
+        "limit": 14.0,
+        "note": null,
+        "tolerance": 0,
+        "unit": "ms",
+        "value": 0.084992,
+        "verdict": "pass"
+      },
+      {
+        "criterion": "atmosphere GPU time ≤ 4 ms at the 95th percentile",
+        "id": "atmosphere",
+        "limit": 4.0,
+        "note": null,
+        "tolerance": 0,
+        "unit": "ms",
+        "value": 0.165184,
+        "verdict": "pass"
+      },
+      {
+        "criterion": "GPU resident ≤ 1 GB",
+        "id": "memory",
+        "limit": 1000000000.0,
+        "note": "the native replay does not measure memory",
+        "tolerance": 0,
+        "unit": "bytes",
+        "value": null,
+        "verdict": "not-measured"
+      }
+    ]
+  },
+  "frames": {
+    "dropped": {
+      "reason": "a native replay has no trace",
+      "value": null
+    },
+    "gpuCompletion": {
+      "reason": null,
+      "value": {
+        "count": 118,
+        "hitches": null,
+        "maxMs": 2.262016,
+        "missed": null,
+        "missedFraction": null,
+        "p50Ms": 0.641024,
+        "p95Ms": 1.291264,
+        "p99Ms": 2.180096
+      }
+    },
+    "presentation": {
+      "reason": "an offscreen replay presents nothing",
+      "value": null
+    },
+    "raf": {
+      "reason": "a native replay has no requestAnimationFrame",
+      "value": null
+    },
+    "segments": [],
+    "source": "gpu-completion"
+  },
+  "gpu": {
+    "gpuProcess": {
+      "reason": "a native replay has no GPU process",
+      "value": null
+    },
+    "passes": {
+      "reason": null,
+      "value": [
+        {
+          "frames": 119,
+          "label": "atmosphere composite",
+          "p50Ms": 0.008192,
+          "p95Ms": 0.008192,
+          "p99Ms": 0.009216,
+          "row": "atmosphere"
+        },
+        {
+          "frames": 357,
+          "label": "atmosphere view",
+          "p50Ms": 0.054688,
+          "p95Ms": 0.096768,
+          "p99Ms": 0.097568,
+          "row": "atmosphere"
+        },
+        {
+          "frames": 119,
+          "label": "spike display",
+          "p50Ms": 0.006144,
+          "p95Ms": 0.007168,
+          "p99Ms": 0.007168,
+          "row": "other"
+        },
+        {
+          "frames": 119,
+          "label": "terrain",
+          "p50Ms": 0.08192,
+          "p95Ms": 0.084992,
+          "p99Ms": 0.084992,
+          "row": "terrain"
+        },
+        {
+          "frames": 238,
+          "label": "view:wireframe",
+          "p50Ms": 0.007168,
+          "p95Ms": 0.009216,
+          "p99Ms": 0.01024,
+          "row": "other"
+        }
+      ]
+    },
+    "sumP95Ms": {
+      "reason": null,
+      "value": 0.271424
+    },
+    "timer": "full",
+    "tolerancePerPassMs": 0,
+    "untimedPasses": 0
+  },
+  "levels": [],
+  "mainThread": {
+    "gc": {
+      "reason": "a native replay has no trace",
+      "value": null
+    },
+    "ourCodeP95Ms": {
+      "reason": "a native replay has no main-thread figure",
+      "value": null
+    },
+    "split": {
+      "reason": "a native replay has no trace",
+      "value": null
+    }
+  },
+  "memory": {
+    "adapterPeakBytes": 0,
+    "gpuHeadline": {
+      "reason": "the native replay does not measure memory",
+      "value": null
+    },
+    "peakAppBytes": {
+      "reason": "the native replay does not measure memory",
+      "value": null
+    },
+    "peakDrmResidentBytes": {
+      "reason": "the native replay does not measure memory",
+      "value": null
+    },
+    "peakNvidiaDeviceLessBaselineBytes": {
+      "reason": "the native replay does not measure memory",
+      "value": null
+    },
+    "peakNvidiaGpuProcessBytes": {
+      "reason": "the native replay does not measure memory",
+      "value": null
+    },
+    "peakRendererPrivateBytes": {
+      "reason": "a native replay has no renderer",
+      "value": null
+    },
+    "peakTracingBytes": {
+      "reason": "a native replay has no trace",
+      "value": null
+    },
+    "series": {
+      "appKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      },
+      "drmResidentKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      },
+      "drmTotalKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      },
+      "gpuProcessKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      },
+      "nvidiaDeviceKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      },
+      "nvidiaGpuProcessKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      },
+      "rendererPrivateKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      },
+      "tMs": [],
+      "tracingKiB": {
+        "reason": "the native replay does not measure memory",
+        "value": null
+      }
+    }
+  },
+  "pipelines": {
+    "late": []
+  },
+  "replay": {
+    "findings": [
+      "the capture's feature core-features-and-limits is not one the replay maps",
+      "the capture's feature float32-blendable is not one the replay maps"
+    ],
+    "validationErrors": []
+  },
+  "run": {
+    "canvas": {
+      "heightPx": 431,
+      "widthPx": 806
+    },
+    "launchMode": "native-replay",
+    "machine": {
+      "cpu": "AMD Ryzen 7 3700X 8-Core Processor",
+      "governor": {
+        "reason": null,
+        "value": "schedutil"
+      },
+      "gpu": {
+        "reason": null,
+        "value": {
+          "description": "NVIDIA GeForce RTX 3080",
+          "deviceId": 8710,
+          "driverVersion": "NVIDIA 615.71.09",
+          "vendorId": 4318
+        }
+      },
+      "loadAverage": [8.59, 16.55, 19.31],
+      "logicalCores": 16,
+      "memoryBytes": 33555202048,
+      "name": "effect"
+    },
+    "options": {
+      "backend": "vulkan",
+      "capture": "target/laneD/capture",
+      "presented": false,
+      "validationErrors": 0
+    },
+    "periodMs": {
+      "reason": "an offscreen replay presents nothing",
+      "value": null
+    },
+    "platform": "linux",
+    "quiet": {
+      "note": "load average 8.59 at the start (Design note 27 asks under 1): provisional",
+      "provisional": true
+    },
+    "seed": "7",
+    "setting": "low",
+    "shown": false,
+    "startedAt": "2026-10-05T13:53:26.000Z",
+    "switches": [],
+    "timer": "full",
+    "trace": {
+      "reason": "a native replay has no trace",
+      "value": null
+    },
+    "versions": {
+      "app": "gpu-replay 0.1.0",
+      "chromium": "none (native replay)",
+      "electron": "none (native replay)",
+      "node": "none (native replay)",
+      "v8": "none (native replay)"
+    },
+    "warmupS": 0
+  },
+  "schema": "hyperion.descent-spike.results",
+  "streaming": [],
+  "uploads": {
+    "bytes": 8055072
+  },
+  "version": 2
+}
