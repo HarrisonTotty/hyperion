@@ -257,6 +257,21 @@ export function controlEv100(control: ExposureControl): number {
 }
 
 /**
+ * The view camera's setting at a control: `MAN`'s own triple, else {@link VIEW_CAMERA}'s at the
+ * control's EV100 (decision-r07-exposure-camera).
+ *
+ * @remarks
+ * The exposure panel's `APERTURE`, `SHUTTER`, `ND` and `ISO` rows show it (R07.T13.c), and the
+ * sky label's `STARS V … mag CAM` states the camera's limit at it (R07.T13.e), so that the two
+ * read one setting.
+ */
+export function shownTriple(control: ExposureControl): ExposureTriple {
+  return control.kind === "manual"
+    ? control.triple
+    : programTriple(VIEW_CAMERA, controlEv100(control));
+}
+
+/**
  * `MAN` at a triple, from any level, by the operator; refused where a member of the triple is not
  * finite and positive, or its ND is negative or not finite.
  */

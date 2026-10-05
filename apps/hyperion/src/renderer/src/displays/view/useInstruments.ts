@@ -38,14 +38,14 @@ import type { StyleAvailability } from "../../view/engine/platform";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import { useGraphicsStatus } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
-import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/exposure";
+import type { ExposureControl } from "../../view/photometry/exposure";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
-import { type CulledViewSky, cullViewSky, type DrawnSky } from "./useViewSky";
+import { type CulledViewSky, cullViewSky, type DrawnSky, viewSkyLabel } from "./useViewSky";
 import type { ViewEngineState } from "./useViewEngine";
 import { ViewFrameDrawer } from "./viewFrameDrawer";
 import {
@@ -130,7 +130,10 @@ export interface InstrumentsInput {
    * culls it for its own camera (R06 Design note 20).
    */
   readonly sky: SkyModel | null;
-  /** The primary's exposure, which sets a camera's star limit where it is manual. */
+  /**
+   * The primary's exposure as its readout shows it, at which each instrument's `STARS` states its
+   * camera's limit (R07.T13.e).
+   */
   readonly exposure: ExposureControl;
 }
 
@@ -281,7 +284,8 @@ function useSlotDrawer(
 
 /**
  * A slot's own cull of the primary's sky, at its camera's role, field of view and canvas width,
- * remade only when one of them, the sky or a manual exposure changes.
+ * remade only when one of them or the sky changes, and its `STARS` reading at the primary's
+ * exposure (R07.T13.e).
  */
 function useSlotSky(
   sky: SkyModel | null,
@@ -289,19 +293,20 @@ function useSlotSky(
   state: SlotState,
   size: ElementSize | null,
 ): CulledViewSky | null {
-  // A camera's limit reads only a manual triple: under `AUTO` the control changes at every readout.
-  const limitExposure = exposure.kind === "manual" ? exposure : DEFAULT_EXPOSURE;
   const camera = state.open ? (state.shown?.run.camera ?? null) : null;
   const role = camera?.role ?? null;
   const fovDeg = camera?.fovDeg ?? null;
   const widthPx = size === null ? null : Math.round(size.widthPx * size.devicePixelRatio);
-  return useMemo(
+  const drawn = useMemo(
     () =>
       sky === null || role === null || fovDeg === null || widthPx === null
         ? null
-        : cullViewSky(sky, role, limitExposure, fovDeg, widthPx),
-    [sky, role, limitExposure, fovDeg, widthPx],
+        : cullViewSky(sky, role, fovDeg, widthPx),
+    [sky, role, fovDeg, widthPx],
   );
+  return drawn === null || role === null || fovDeg === null
+    ? null
+    : { drawn, labelValue: viewSkyLabel(drawn.model, role, exposure, fovDeg) };
 }
 
 /** The instruments of a `VIEW` stage. */
@@ -315,6 +320,9 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const stageTwo = useElementSize();
   const skyOne = useSlotSky(sky, exposure, stateOf(slots, 1), stageOne.size);
   const skyTwo = useSlotSky(sky, exposure, stateOf(slots, 2), stageTwo.size);
+  // The loops read the drawn skies, which keep their identity while only the label moves.
+  const drawnOne = skyOne?.drawn ?? null;
+  const drawnTwo = skyTwo?.drawn ?? null;
   const runs = useRef(new Map<InstrumentSlot, ViewRun>());
   const held = useRef(new Map<InstrumentSlot, Set<string>>());
   const loopsRef = useRef(new Map<InstrumentSlot, SlotLoop>());
@@ -330,7 +338,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   useLayoutEffect(() => {
     const canvases = [canvasOne, canvasTwo];
     const sizes = [stageOne.size, stageTwo.size];
-    const skies = [skyOne, skyTwo];
+    const skies = [drawnOne, drawnTwo];
     inputsRef.current = new Map(
       INSTRUMENT_SLOTS.map((slot) => {
         const state = stateOf(slots, slot);
@@ -344,7 +352,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             // A canvas just unmounted is still held until its ref's update lands.
             tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
             availability: availability(slot),
-            sky: skies[slot - 1]?.drawn ?? null,
+            sky: skies[slot - 1] ?? null,
           },
         ];
       }),
@@ -356,8 +364,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     canvasTwo,
     stageOne.size,
     stageTwo.size,
-    skyOne,
-    skyTwo,
+    drawnOne,
+    drawnTwo,
     availability,
     reducedMotion,
   ]);

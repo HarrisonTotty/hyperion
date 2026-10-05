@@ -1,6 +1,8 @@
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { binaryFrame } from "../../test/binaryFrames";
+import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
 import {
   nominalStore,
   openUniverse,
@@ -496,11 +498,50 @@ async function serverScene(): Promise<Setup> {
   return view;
 }
 
+/** Answers the primary's sky request with one bright star, and lets the decode settle. */
+async function skyArrives(view: Setup): Promise<void> {
+  const sky = view.socket.requestsOfKind("sky").at(-1);
+  if (sky === undefined) {
+    throw new Error("the view asks no sky");
+  }
+  const payload = skyPayload([{ direction: [0, 0, -1], distanceLy: 100, vMag: 1 }], 2, 7.4);
+  await act(async () => {
+    view.socket.serverSendsBinary(binaryFrame(sky.id, 0, 1, [...payload]));
+    view.socket.serverResponds(sky.id, { kind: "sky", ...skyResponse(sky.body, payload, 1, 2) });
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  view.advance(300);
+  await settle();
+}
+
+/** An instrument's `STARS` reading on its label block. */
+function instrumentStars(name: string): string {
+  return (
+    /STARS\s*(V -?\d+\.\d mag CAM)/.exec(screen.getByRole("region", { name }).textContent)?.[1] ??
+    ""
+  );
+}
+
 describe("VIEW's instruments in the server's scene (R07.T19)", () => {
   it("reports an open instrument's camera beside the primary's", async () => {
     const view = await serverScene();
     await openInstrument(view, "INSTRUMENT 1");
     expect(await nextReport(view)).toBe(2);
+  });
+
+  it("states an instrument's camera limit at the primary's exposure (R07.T13.e)", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await skyArrives(view);
+    await openInstrument(view, "INSTRUMENT 1");
+    const atDefault = instrumentStars("INSTRUMENT 1");
+    await view.user.click(screen.getByRole("textbox", { name: "MAN" }));
+    await view.user.keyboard("15{Enter}");
+    view.advance(300);
+    expect([atDefault, instrumentStars("INSTRUMENT 1")]).toEqual([
+      "V 10.1 mag CAM",
+      "V 2.6 mag CAM",
+    ]);
   });
 
   it("withdraws an instrument's camera when it closes", async () => {
