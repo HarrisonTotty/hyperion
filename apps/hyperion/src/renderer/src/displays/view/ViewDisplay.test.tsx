@@ -47,7 +47,7 @@ import { precisionScene } from "../../view/scenes/precision";
 import { buildWireframeDrawList } from "../../view/wireframe/drawList";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
-import { PHOTOREAL_NOT_CREATED } from "./styleRefusals";
+import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
 
@@ -145,6 +145,112 @@ function lineDraws(frame: FrameSubmission | undefined): number {
   return frame?.draws.filter((draw) => draw.material.name === "wireframe:lines").length ?? 0;
 }
 
+/** The style panel's buttons: each one's name, whether it is held back and whether it is pressed. */
+function styleButtons(): Array<[string, string | null, string | null]> {
+  return within(screen.getByRole("region", { name: "Style PRIMARY" }))
+    .getAllByRole("button")
+    .map((button) => [
+      button.textContent,
+      button.getAttribute("aria-disabled"),
+      button.getAttribute("aria-pressed"),
+    ]);
+}
+
+/** An engine source whose engine refuses the stage's canvas: the views cannot be made. */
+function refusingViewSource(): ViewEngineSource {
+  const fake = fakeViewEngineSource();
+  return {
+    ...fake.source,
+    load: async (outcome, status) => {
+      const engine = await fake.source.load(outcome, status);
+      engine.createView = () => {
+        throw new Error("the canvas gave no context");
+      };
+      return engine;
+    },
+  };
+}
+
+/** The side column's panels, each by its region's name, in the ruled order. */
+const SIDE_PANELS = [
+  "Instruments",
+  "Targets PRIMARY",
+  "Camera PRIMARY",
+  "Style PRIMARY",
+  "Exposure PRIMARY",
+];
+
+/** Whether each of {@link SIDE_PANELS} stands, and after the one before it in the document. */
+function sidePanelsInOrder(): boolean {
+  const panels = SIDE_PANELS.map((name) => screen.getByRole("region", { name }));
+  return panels.every(
+    (panel, index) =>
+      index === 0 ||
+      ((panels[index - 1]?.compareDocumentPosition(panel) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+  );
+}
+
+const HELD_BACK = [
+  ["WIREFRAME", "true", "true"],
+  ["PHOTOREALISTIC", "true", "false"],
+];
+
+/** Whether both style buttons are described by why no view is drawn. */
+function bothHeldBackByNoView(): boolean {
+  return within(screen.getByRole("region", { name: "Style PRIMARY" }))
+    .getAllByRole("button")
+    .every((button) => {
+      const ids = button.getAttribute("aria-describedby")?.split(" ") ?? [];
+      return ids.some((id) => document.getElementById(id)?.textContent === NO_VIEW_DRAWN);
+    });
+}
+
+describe("VIEW's style panel while no view is drawn (R07.T19.b's follow-up)", () => {
+  it("stands while the engine is made, the camera's style pressed and both held back", () => {
+    setup();
+    expect([styleButtons(), bothHeldBackByNoView()]).toEqual([HELD_BACK, true]);
+  });
+
+  it("stands where the views could not be made, held back with no view drawn", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setup({
+      source: refusingViewSource(),
+    });
+    await settle();
+    expect([screen.queryByRole("application"), styleButtons(), bothHeldBackByNoView()]).toEqual([
+      null,
+      HELD_BACK,
+      true,
+    ]);
+  });
+
+  it("refuses the key 4 where the views could not be made, as its panel says", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { user, advance } = setup({
+      store: await nominalStore(),
+      source: refusingViewSource(),
+    });
+    await settle();
+    await user.keyboard("4");
+    advance(100);
+    expect(styleButtons()).toEqual(HELD_BACK);
+  });
+
+  it("moves no panel when the engine is made", async () => {
+    const { advance } = setup();
+    const pending = sidePanelsInOrder();
+    await settle();
+    advance(100);
+    expect(screen.getByRole("application")).toBeInTheDocument();
+    expect([pending, sidePanelsInOrder()]).toEqual([true, true]);
+    expect(
+      within(screen.getByRole("region", { name: "Style PRIMARY" })).queryByText(NO_VIEW_DRAWN),
+    ).toBeNull();
+  });
+});
+
 describe("the VIEW display", () => {
   it("reads GRAPHICS ACQUIRING ADAPTER in the view's place until its engine is made", () => {
     setup();
@@ -204,19 +310,9 @@ describe("the VIEW display", () => {
   });
 
   it("says the view could not be made where the engine refuses its canvas", async () => {
-    const fake = fakeViewEngineSource();
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     setup({
-      source: {
-        ...fake.source,
-        load: async (outcome, status) => {
-          const engine = await fake.source.load(outcome, status);
-          engine.createView = () => {
-            throw new Error("the canvas gave no context");
-          };
-          return engine;
-        },
-      },
+      source: refusingViewSource(),
     });
     await settle();
     expect([

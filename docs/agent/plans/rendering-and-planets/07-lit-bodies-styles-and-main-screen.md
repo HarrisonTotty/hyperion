@@ -1505,13 +1505,14 @@ recorded: a Sun-like star in frame with a lit planet, hues holding in the highli
 `photoreal/overlay.ts` (Design notes 16–17): R02's draw list with casing on in the photorealistic
 style; rings and hulls as cased marks until R11; DOM readouts on `--surface-0` plates; the label
 block gains the style and `BODY PHOTOMETRY: NOT YET MODELLED` (its `METER` line is built by T19.b,
-decision-r07-t19-layout; T16 keeps its nomenclature rows); hull edges cased over the
+decision-r07-t19-layout, and its `METER` and `AVG` rows are drafted by T19.b's follow-up,
+decision-r07-t19b-exposure-fit); hull edges cased over the
 image, with the hull faces' occluder bias (`occluder.wgsl`, `slopeScale` 2 as built) raised to 3 so
 that the casing is covered (the UX decision, item 12; the sphere occluder's `SLOPE_SCALE` is 3
 already). Draft, for the owner, the nomenclature entries this plan adds beyond R02's nine items
-(`PHOTOREALISTIC` is already drafted by R02, beside `WIREFRAME`; `METER AVG`,
-`METER LIT`, `METER DARK`, the meter's statuses `NO LIT SIDE`, `NO DARK SIDE` and
-`STAR DISC ONLY` with their remedy clauses (decision-r07-t8a-meter),
+(`PHOTOREALISTIC` is already drafted by R02, beside `WIREFRAME`; the meter's statuses
+`NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY` with their remedy clauses (decision-r07-t8a-meter)
+in their own Status row, to which the `METER` row then points,
 the albedo phrase; the several views' refusal,
 `NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, is the guide's `NOT AVAILABLE` form
 and adds no entry, decision-r07-t18 item 6), as one edit of `docs/frontend/ux-guidelines.md`
@@ -1672,6 +1673,35 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
   and with the camera's limit reasons standing; measured, the column's `scrollHeight` equal to
   its `clientHeight`, no text truncated (`DESIG` included), no slot over a reading or the other
   slot, and at 1920×1080 no value line broken but at `·`. Acceptance: `pnpm test`, `just ci`.
+
+  Its follow-up (decision-r07-t19b-exposure-fit, items 1–5), after T19.c and T13.d's follow-up: in
+  the full layout `Style` (the `CONTROLS` view's) heads column B, so that column A holds
+  `Instruments`, `Targets` and `Camera` and column B `Style`, `Exposure` and `Exposure meter`, the
+  order, the tab order and the compact column unchanged, and `Style` stands in every engine state,
+  its buttons held back with `NOT AVAILABLE: no view is drawn` while no view can be drawn (in
+  compact its button stands too); the least height is the taller column's tallest state with the
+  list at two rows, measured and rounded up to 0.25rem, never above 52.5rem, so that a maximised
+  1920 × 1080 window (a box of about 53.5rem) is full. The side column sets `line-height: 1.25`,
+  so that its heights hold on every platform and scale. In the compact layout its parts stand
+  0.25rem apart, and the exposure's camera setting stands in two rows of two members, `APERTURE`
+  and `SHUTTER`, then `ND` and `ISO`, each member a `dt` and `dd` wrapped together, its label
+  0.75rem from its value and the members 1.5rem apart. The `MAN` field's consequence reads `An
+  entry sets MAN: AUTO resumes only on ENABLE`; the exposure panel's and the meter's readings break
+  as the label block's do, at `·` first; `ENABLE` and `INHIBIT` keep a row each, their reason or
+  consequence beside them with no bottom margin, so that it centres on the button's label, the rows
+  0.75rem apart in the full layout's column B, where both can wrap. The
+  guide drafts the `METER` and `AVG` rows. Tests: the threshold and its 52.5rem bound; `Style`
+  first in column B, for `PRIMARY` and an instrument, and standing in every engine state; the
+  order unchanged; the consequence's words; the readings' parts. By hand, hidden: with `EXPOSURE`
+  open at 1280 × 720 and 1920 × 1080 at 125% and 150%, photorealistic under `AUTO`,
+  `INHIBITED · OPERATOR` and `MAN` and wireframe trapped, each with and without a refused entry,
+  and with an own ship trapped, refused or not; in full at 1920 × 1080, at a 53.5rem box and at the
+  least height, with `CONTROLS` on an instrument too; measured, the column's `scrollHeight` equal
+  to its `clientHeight`, no control below its foot, nothing truncated, each setting member's label
+  0.75rem from its value and 1.5rem from the value before it, and in compact and at the 53.5rem box
+  the same with a 0.5rem probe after the open panel. T16, and any later task that adds to a side
+  panel, re-takes these captures, keeping the probe passing and the least height at most 52.5rem,
+  or asks for a ruling. Acceptance: `pnpm test`, `just ci`.
 - **R07.T19.c One frame path.** `viewFrameDrawer.ts`, `ViewDisplay.tsx` (decision-r07-t19-layout,
   follow-ups): the primary draws through `ViewFrameDrawer` as the instruments do, with T8.a's
   metering taken only by the exposure's source; a photorealistic instrument's renderer takes no
@@ -1710,8 +1740,8 @@ Recorded in this plan. Acceptance: the record.
   with its verdict, and the per-canvas overhead's upper bound beside the provisional 0.3 ms. The
   checklist is in that directory's README. The UHD 620 run's sky and photorealistic frame stay at
   `high` until T17 (see "Deviations in the T20 and T21 harnesses"). When the records land, each
-  run's verdicts are entered here as one line, and `PER_CANVAS_OVERHEAD_MS` changes on the owner's
-  ruling of which figure it takes.
+  run's verdicts are entered here as one line. `PER_CANVAS_OVERHEAD_MS` stays at 0.3 ms until
+  then (ruled 2026-10-05), and changes on the owner's ruling of which figure it takes.
 
 #### R07.T21 A child window on a second monitor
 
@@ -2746,10 +2776,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     tallest state measures 882 px at 1920 × 1080 (`Instruments` 204 with both closed, `Targets` 174
     at two rows under the two-line `RANGE FROM CAMERA` head, `Camera` 339 with `NO OWN SHIP`, both
     limit reasons and reduced motion, `Style` 99 plus a two-line refusal such as the software
-    adapter's, 141, and three gaps). 1920 × 1080 at 100% (a 57.5 rem box) is full. **Stated limit,
-    for the owner:** a window whose `.view` box is under 55.25 rem tall, such as a maximised
-    1920 × 1080 window under a title bar and a desktop panel (about 53.5 rem), takes the compact
-    layout. The layout is full before the box is measured, as the galaxy page's is.
+    adapter's, 141, and three gaps). 1920 × 1080 at 100% (a 57.5 rem box) is full. **Ruled
+    (decision-r07-t19b-exposure-fit, item 2; T19.b's follow-up):** not accepted. `Style` heads
+    column B and stands in every engine state, which leaves column A's tallest at 733 px
+    (45.8 rem). The least height is measured anew, never above 52.5 rem, so that a maximised
+    1920 × 1080 window is full. The layout is full before the box is measured, as the galaxy
+    page's is.
   - **Room for the designations.** VIEW's side panels take 0.75 rem inline padding (1.25 rem
     before) and the list's columns stand 0.25 rem apart, so that `TEST PLANET 150°` (145 px at the
     list's 1 rem) keeps its width beside `KIND` at 12ch and `RANGE` at 9ch. With no own ship
@@ -2759,9 +2791,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     0.25 rem from their names, its buttons 0.25 rem apart and without end padding, so that the four
     names stand on one line: 406 px of the 416 with `EXPOSURE METER` (at 0.15em and 0.75 rem it
     wrapped). Its buttons carry the ship's disclosure mark (`DisclosureGlyph`), the open one's
-    pointing down; `CAMERA` pressed while open stays open. `STYLE` stands, as `EXPOSURE METER`
-    does, only while its panel would (a view can be drawn); a panel that goes gives its place to
-    `CAMERA`, and its focus to its own button or, where that went too, to `CAMERA`'s.
+    pointing down; `CAMERA` pressed while open stays open. `EXPOSURE METER` stands only while its
+    panel would, and `STYLE` now in every engine state (decision-r07-t19b-exposure-fit, item 2); a
+    panel that goes gives its place to `CAMERA`, and its focus to its own button or, where that
+    went too, to `CAMERA`'s.
   - **Focus.** The side column's focus events track the folding panel that holds the focus. It is
     forgotten when the focus leaves the column for another control, or for nothing by the
     operator's hand, so that a later switch to the compact layout opens `CAMERA`.
@@ -2780,11 +2813,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **An instrument's statements.** All of them, `POSITIONS AS SEEN FROM SHIP` and
     `PHOTOREALISTIC: PREPARING` too, run under its label block and canvas, outside `.view-label`
     but in the canvas's description. `PHOTOREALISTIC: PREPARING` is the view's own and is never
-    dropped for the primary's. **For the owner:** the guide's Views bullet says the label block
-    carries them; "under its label block and canvas", the plan's words, could be added.
+    dropped for the primary's. Ruled (decision-r07-t19b-exposure-fit, item 3): the guide's Views
+    bullet now sets them as the label block's, under its lines and the canvas across the slot, a
+    draft for the owner.
   - **The label block's additions.** `METER` stands after `EXPOSURE`; `EASED CAMERA MOVES` after
-    `ROTATION NOT YET MODELLED`, before the photorealistic statements. `AVG`, `LIT` and `DARK` on
-    the label block wait for T16's nomenclature rows. The rate keys outside `FREE` are refused
+    `ROTATION NOT YET MODELLED`, before the photorealistic statements. The `METER` and `AVG` rows
+    are drafted by T19.b's follow-up (decision-r07-t19b-exposure-fit, item 4), ahead of T16. The
+    rate keys outside `FREE` are refused
     without a word; the camera panel's rate reasons still name the step limits (the UX review's
     suggestion of a reason for the preset is left: the ruling keeps the panel's `RATE` as built).
   - **Tests.** jsdom lays nothing out: the slots' corners, the breaks, the fit, the clipping and
@@ -2807,18 +2842,154 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     T13.c's camera setting and T13.d's `MAN` field and `METERED` line (merged before the captures)
     fit in full, where column B holds `Exposure` at its tallest, 400 px, and the columns keep 416
     and 320 px under `INHIBITED · NO IMAGE TO METER`; and in compact at 125%.
-  - **Open, for the orchestrator (T13.d's panel in the compact layout).** The exposure panel stands
+  - **Ruled (decision-r07-t19b-exposure-fit, items 1 and 5; T19.b's follow-up): T13.d's panel in
+    the compact layout.** The exposure panel stands
     352 px wireframe at `INHIBITED · NO IMAGE TO METER` and 374 px with a refused entry's line. With
     `EXPOSURE` open, measured: at 1280 × 720 with an own ship (`PRECISION TEST`) the first fits and
     the second runs 17 px past the column's foot; with no own ship (`PHASE TEST`, which adds the
     `NO OWN SHIP` standing line and the two-line list head) 40 and 62 px; at 150% 0 and 0 with an
     own ship, 21 and 42 px without. Where it runs past, `INHIBIT` (and at 62 px `ENABLE`) stands
-    below the clip. The ruling budgeted the panel at about 290–300 px. Options, not built: the
-    camera setting as two rows of two in the 26 rem column (about 46 px); `ENABLE` and `INHIBIT`
-    side by side (about 32 px); the reading's parts kept whole, so that
-    `EV100 11.7 INHIBITED · NO IMAGE TO METER` breaks at its `·` (one line less where the second
-    part fits); and the compact column's gaps at 0.25 rem (12 px). Widening the column is not one:
-    the stage would fall under the 50.5 rem two slots need.
+    below the clip. The ruling budgeted the panel at about 290–300 px. Ruled:
+
+    - The camera setting stands in two rows of two members (44 px).
+    - The compact gaps are 0.25 rem (16 px with a standing line).
+    - The `MAN` field's consequence is reworded to one line (18 px).
+    - The side column has its own `line-height: 1.25`, so that the heights hold on every platform
+      and scale.
+
+    That leaves about 16 px spare in the worst state, with at least 8 px required (a 0.5 rem probe
+    after the open panel).
+
+    - `ENABLE` and `INHIBIT` side by side is rejected: their notes would leave their buttons and,
+      under `AUTO` or a system inhibit, cost 16 px.
+    - The notes beside them lose the reason's bottom margin, so that they centre on the label, and
+      in column B the rows stand 0.75 rem apart.
+    - The reading kept in parts saves nothing in either column, and is built for its breaks.
+    - The reading stays 1rem: it is not one of `VIEW`'s primary readouts.
+    - Widening the column is impossible: the stage would fall under the 50.5 rem two slots need.
+
+    `INHIBIT`'s consequence (decision-r07-t13d) stands on its row in one line here, 250 px in 301.
+    The guide's Views bullet, the commanding bullet and the `MAN` (field) row are reworded, and the
+    `METER` and `AVG` rows added. All are drafts for the owner: the bullets carry no tag, by the
+    guide's convention, and are recorded here. As built, see "Deviations in T19.b's follow-up, as
+    built".
+- **Deviations in T19.b's follow-up, as built** (2026-10-05; decision-r07-t19b-exposure-fit,
+  items 1–5, with decision-r07-owner-ux-signoff's two amendments to its guide text).
+  - **Files.** Beyond the ruling's list: `styleRefusals.ts` (`NO_VIEW_DRAWN`,
+    `NO_VIEW_REFUSALS`) and `viewLayout.ts`'s `FULL_MIN_HEIGHT_BOUND_REM`. `SideFolds` loses
+    `styleId` and `styleHidden`, and `InstrumentControls` loses `refusals` and `faulted` with its
+    style panel, which `ViewDisplay` sets at the head of column B for the `CONTROLS` view.
+  - **No view drawn.** While no view can be drawn the primary's style refusals are
+    `NO_VIEW_REFUSALS` for every input, the style panel and the key `4` alike. The ruling took the
+    key as refused there as built. It was not where the engine refused the stage's canvas under a
+    nominal adapter: `4` switched the style with nothing drawn. A regression test covers it.
+  - **The least height is 45.75 rem** (732 px), against the ruling's about 46 rem. Column A's
+    tallest state is 729 px: `Instruments` 202.5 px with both closed, `Targets` 173 px at two rows
+    under its two-line `RANGE FROM CAMERA` head, `Camera` 337.5 px at the camera's worst, and two
+    gaps. Column B's is 728.5 px. That is `Style` 99.5 px plus 43 px for a two-line refusal this
+    machine cannot raise (`QUALITY LOW`'s on an instrument under `CONTROLS`, or the software
+    adapter's; each measured at two lines in the panel as laid out), the exposure at
+    `INHIBITED · OPERATOR` with a refused entry, 362 px, the meter with `METERED`, 208 px, and two
+    gaps. The parts are in `FULL_MIN_HEIGHT_REM`'s TSDoc. The 1600 × 900 opening window stays
+    compact by its width (98 rem of 98.5).
+  - **For T19.d, the next task to add to column B.** Its held-back `INHIBIT` note under
+    `INHIBITED · OPERATOR` (at most about 20 px, decision-r07-owner-ux-signoff) falls in column B's
+    tallest state, which then passes 732 px. T19.d re-measures and raises `FULL_MIN_HEIGHT_REM`,
+    within 52.5 rem.
+  - **Targets' floor in the full layout.** `.view-targets`' 10 rem floor is under two rows when
+    the head takes two lines (173 px). From the least height up, the list keeps two rows by
+    construction: at the least height, `Targets` stands at 176 px in the camera's worst. Below it
+    the layout is compact. Left as built.
+  - **The harness** (hidden, not committed; `.git/rm23-scratch/r07-views/shots-t19b/`, with
+    `summarise.py`). `run.sh` takes `--slice=agents.slice`, `--disable-vulkan-surface` and
+    `--force-device-scale-factor=1`, and the hook refuses a relaunch.
+    - Each hidden-window resize restarted the GPU process under the Vulkan surface ("Hidden-window
+      resizes restart the GPU process"). Three restarts made the app's crash loop, which
+      relaunched it into safe mode outside the run.
+    - The session's display scale, 0.78125, made the window's content size jitter by a few px on
+      each resize. At a forced scale of 1 the page takes the size asked for exactly: 1280 × 720,
+      a 562 px box, where T19.b's page was 1280 × 718, a 560 px box.
+  - **By hand, measured** (hidden, offscreen windows, never shown; 2026-10-05, the RTX 3080 under
+    load).
+    - **The runs:**
+      - `compact720`, 1280 × 720, a 562 px box;
+      - `zoom150`, 1920 × 1080 at 150% (1280 × 720 CSS px), a 565 px box;
+      - `zoom125`, 1920 × 1080 at 125% (1536 × 864 CSS px), a 708 px box;
+      - `ownship720` and `ownship150`, E5 and E6 in `PRECISION TEST`;
+      - `full`, 1920 × 1080, a 922 px box;
+      - `max1080`, a 1920 × 1014 page and an 856 px box (53.5 rem);
+      - `atfull`, a 732 px box, the least height;
+      - `belowfull`, a 731 px box, which is compact.
+    - **Every state of every run passes:**
+      - the column's `scrollHeight` equals its `clientHeight`;
+      - nothing passes its foot, no control stands below it, and `ENABLE` and `INHIBIT` are shown;
+      - nothing is truncated, with `.visually-hidden` text left out;
+      - the work area's and the column's `scrollTop` stay 0 after each Tab sweep;
+      - the 0.5 rem probe passes in compact, and at the 53.5 rem box in column B and in `Camera`.
+    - **Compact, `EXPOSURE` open: the panel, `Targets` and the spare**, in px. The spare is the
+      largest probe, raised in 1 px steps, with which the column's `scrollHeight` still equals its
+      `clientHeight`.
+
+      | State | 1280 × 720 | 150% | 125% | Own ship, 720p | Own ship, 150% |
+      | --- | --- | --- | --- | --- | --- |
+      | E1 `AUTO` | 244 / 218.5 / 85 | 243.3 / 222.5 / 90 | 243.6 / 365.7 / 233 | — | — |
+      | E2 `AUTO`, refused | 265.5 / 197 / 64 | 264.8 / 201 / 69 | 265.1 / 344.2 / 211 | — | — |
+      | E3 `INHIBITED · OPERATOR`, refused | 265.5 / 197 / 64 | 264.8 / 201 / 69 | 265.1 / 344.2 / 211 | — | — |
+      | E4 `MAN`, refused | 244 / 218.5 / 85 | 243.3 / 222.5 / 90 | 243.6 / 365.7 / 233 | — | — |
+      | E5 trapped | 289.5 / 173 / 40 | 288.8 / 177 / 45 | 289.1 / 320.2 / 187 | 289.5 / 194.5 / 81 | 288.8 / 198.5 / 86 |
+      | E6 trapped, refused | 311 / 151.5 / 18 | 310.3 / 155.5 / 23 | 310.6 / 298.7 / 166 | 311 / 173 / 60 | 310.3 / 177 / 65 |
+
+      E6 is the worst at every size. At T19.b's 560 px box its 18 px is 16 px, as the ruling
+      reckoned, against the 8 px required, and its panel stands at 311 px, the ruling's figure. Of
+      T19.b's own states the least spare is the camera's worst: 21 px at 720p, 26 px at 150% and
+      169 px at 125%.
+    - **Compact, measured in E1–E6:**
+      - the `MAN` field's consequence is one 17.5 px line;
+      - `INHIBIT`'s row is 32 px with its statement on it;
+      - the setting stands in two rows;
+      - each `dd` stands 12 px after its own `dt`;
+      - each row's second label stands 60.4 px and 123.4 px after the output before it (the `dd`'s
+        9ch);
+      - with an own ship, `ISO 409,600 ↑` is pegged, its `↑` drawn and nothing truncated;
+      - the trapped reading breaks `EV100 11.7 INHIBITED ·` | `NO IMAGE TO METER`;
+      - each note centres on its button's label, 0 px off.
+    - **Full:**
+      - column B is headed by `Style PRIMARY`, and by `Style INSTRUMENT 1` under
+        `CONTROLS INSTRUMENT 1`;
+      - in column B the exposure panel stands at 326.5, 348, 362, 306, 386.5 and 408 px in E1–E6,
+        and the column at 612.5, 634, 685.5, 609.5, 494 and 515.5 px. Its tallest measured state
+        is E3, 685.5 px; the ruling reckoned about 680 px beside a drawn image, taking the refused
+        panel at about 320;
+      - under `AUTO` (E1) both notes wrap in column B, in 35 px rows 12 px (0.75 rem) apart;
+      - at the 53.5 rem box the spare is 140 px in column A (the camera's worst) and 170 px in
+        column B (E3);
+      - at the least height every state passes with no probe, with 16 px to column A's clip and 46
+        px in column B.
+  - **Left for T19.d, the next task to edit `ExposurePanel.tsx` (the UX review's consider).** The
+    standing line `AUTO NOT AVAILABLE: NO IMAGE TO METER` still breaks inside its status in column
+    B (`… NO IMAGE TO` | `METER`), where the reading above now keeps it whole. T19.d sets
+    `INHIBITED · OPERATOR` unbroken in its new note, and can hold `NO IMAGE TO METER` the same way,
+    at no height.
+  - **Tests.**
+    - `viewLayout.test.ts`: the threshold both ways; a maximised 1920 × 1080 box is full, and the
+      1600 × 900 opening window compact; the least height within its 52.5 rem bound.
+    - `ViewDisplayLayout.test.tsx`: the six panels in their order, `Style` in column B; column B
+      headed by the `CONTROLS` view's style, for `PRIMARY` and an instrument; `STYLE` offered in
+      compact while no view can be drawn; and no style fault shown once the graphics are ruled out
+      after one.
+    - `ExposurePanel.test.tsx`: the consequence's words; each label wrapped with its own value, in
+      order; the trapped reading in two parts, the text unchanged.
+    - `MeterControl.test.tsx`: the reading in parts under `INHIBITED · OPERATOR`; `NO IMAGE TO
+      METER`, not a reading, while nothing is metered.
+    - `ViewDisplay.test.tsx`: `Style` standing while the engine is made and where the views cannot
+      be made, both buttons held back by `NOT AVAILABLE: no view is drawn`; the key `4` refused
+      there (a regression test, which failed before); no panel moving when the engine is made.
+  - **Guide** (`docs(guide)`, for the owner). The Views bullet sets an instrument's lines beside
+    its canvas and its statements under the lines and the canvas across the slot, and adds `METER`
+    to the primary's lines (decision-r07-owner-ux-signoff). The commanding bullet and the `MAN`
+    (field) row read `An entry sets MAN: AUTO resumes only on ENABLE`, and the row's tag adds
+    R07.T19.b. The `METER` row, with the sign-off's `EXPOSURE METER` panel name, and the `AVG` row
+    follow `METERED`. Prettier re-padded the nomenclature table; that change is whitespace only.
 - **Deviations in T19.c, as built** (2026-10-05).
   - **Files.** `viewFrameDrawer.ts`: `ViewFrameInputs.meter` (`MeterMode | null`),
     `ViewFrameDrawer.takeHistogram` and `makeViewFrameDrawer`, which makes a view's drawer at once
@@ -2911,7 +3082,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     the hidden smoke (about half a full window's pixels) and 822 × 544 px of 1280 × 720 in the
     compact layout. T20's "full-window photorealistic view" (and the brainstorm's and R12.T5.a's
     full-window canvas) is read as the primary at `VIEW`'s stage; the record gives every canvas's
-    size, and the 33 ms comparison on the UHD 620 is the lighter for it (for the owner).
+    size, and the 33 ms comparison on the UHD 620 is the lighter for it (ruled 2026-10-05: the
+    stage, as built; see "Ruled" below).
   - **The window is sized in device pixels.** A check's window asks for 1920 × 1080 or 1280 × 720
     device pixels, its DIP size the pixels over the display's scale (2458 × 1382 DIP at both
     machines' 0.78125), so that its canvases are Design note 21's 1080p and 720p; it keeps the
@@ -2946,7 +3118,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     and the GPU process's slices of the traced categories named `copy` or `blit` are counted a
     frame by phase beside it: a count that grows with the instruments would be a copy a canvas
     outside the views' passes.
-  - **The per-canvas overhead: an upper bound, the figure pending the owner's ruling.** The pass
+  - **The per-canvas overhead: an upper bound; 0.3 ms kept until the shown runs (ruled).** The pass
     timer sees only the views' passes; presenting a canvas is Chromium's work. The record's figure
     is the GPU process's main-thread time a primary draw, with the two instruments open less
     without, per canvas, for the photorealistic and the wireframe primary (the larger kept), with
@@ -2970,7 +3142,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     T17 removes) and is provisional.
   - **No server, and both shown runs the owner's.** The runs draw the kept `PHASE TEST` with no
     server, so the UHD 620's low cases carry none of the local server's load that decision-r07-t18
-    item 4's single-player case assumes (for the owner). T20 puts the RTX 3080 run on the
+    item 4's single-player case assumes (ruled 2026-10-05: no server; see "Ruled" below). T20 puts
+    the RTX 3080 run on the
     development machine; a shown run takes a display, which the lanes never do, and a hidden run
     has no presentation times, so the RTX 3080's run is the owner's too.
   - **T21's prototype, rebuilt.** R01.T13 ran a scratch prototype that was never committed and no
@@ -3019,18 +3192,20 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     display, a `VX2450 SERIES` at 60.00 Hz, 2458 × 1383 DIP at a scale of 0.78125 (1920 × 1080
     px), not the projector at 59.94 Hz on `:0` that the README describes (for the orchestrator).
     Each run reads T from the display it is shown on and records it.
-  - **Pending the owner's ruling** (asked through the orchestrator), each with the lane's lean:
-    - which figure replaces `PER_CANVAS_OVERHEAD_MS`: presentation alone or the instruments' whole
-      cost in the GPU process, per primary frame or per instrument draw, one value for both settings
-      or one each. Lean: keep 0.3 ms until the owner's shown runs give the upper bound on both
-      machines; keep it where the bounds stay near it, and otherwise make it a setting's field,
-      the UHD 620's figure for low and the RTX 3080's for high;
-    - whether T20's cockpit and low cases measure the primary at the window's size or at `VIEW`'s
-      stage. Lean: the stage, as `VIEW` is built and played, with the canvas sizes recorded;
-    - whether the UHD 620's low cases run beside the local server. Lean: not for T20, whose cases
-      are the views' own cost; the server's share is R12's budget run;
-    - whether a UHD 620 run is taken before T17 or waits for it. Lean: wait for T17, since a
-      low-setting record before it draws the sky and frame at high.
+  - **Ruled** (2026-10-05; adopted by the orchestrator under the owner's delegation, from the
+    lane's leans):
+    - `PER_CANVAS_OVERHEAD_MS` stays at 0.3 ms until the owner's shown runs land. Which figure
+      replaces it then stays open for the owner: presentation alone or the instruments' whole cost
+      in the GPU process, per primary frame or per instrument draw, one value for both settings or
+      one each. The lane's lean: keep it where the shown runs' upper bounds stay near it on both
+      machines, and otherwise make it a setting's field, the UHD 620's figure for low and the
+      RTX 3080's for high;
+    - T20's cockpit and low cases measure the primary at `VIEW`'s stage, as built (as `VIEW` is
+      built and played), with the canvas sizes recorded, not at the window's size;
+    - the UHD 620's low cases run without the local server: T20's cases are the views' own cost,
+      and the server's share is R12's budget run;
+    - the UHD 620 run waits for T17, since a low-setting record before it draws the sky and the
+      frame at high (`LOW_BEFORE_T17`).
   - **Tests.** `cli.test.ts` (the flag and its options, refused with the spike's own and with
     `--descent-spike`), `viewsCheckLaunch.test.ts`, `viewsCheckApi.test.ts` (the channels equal
     the main process's), `viewsCheckRecord.test.ts`, `viewsCheckResults.test.ts` (each finding's

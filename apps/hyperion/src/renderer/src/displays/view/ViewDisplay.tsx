@@ -76,7 +76,13 @@ import type { MeterMode } from "../../view/post/meter";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
 import { litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
-import { availabilityOf, type StyleRefusals, styleRefusals, withPermission } from "./styleRefusals";
+import {
+  availabilityOf,
+  NO_VIEW_REFUSALS,
+  type StyleRefusals,
+  styleRefusals,
+  withPermission,
+} from "./styleRefusals";
 import { InstrumentControls } from "./InstrumentControls";
 import { InstrumentsPanel } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
@@ -528,15 +534,19 @@ function ViewStage({
     ...instruments.specs,
   ];
   const budgets = viewBudgets(specs, setting);
-  const refusals = withPermission(
-    styleRefusals(graphics, published.photoreal),
-    photorealisticAllowed(specs, setting, VIEW_ID),
-  );
+  // While no view can be drawn both styles are held back, by the style panel and the key 4 alike,
+  // whatever the adapter offers (decision-r07-t19b-exposure-fit, item 2).
+  const drawing = engineState.kind === "ready" && !viewRefused;
+  const refusals = drawing
+    ? withPermission(
+        styleRefusals(graphics, published.photoreal),
+        photorealisticAllowed(specs, setting, VIEW_ID),
+      )
+    : NO_VIEW_REFUSALS;
   const availability = availabilityOf(refusals);
   // Each instrument with its style refusals (its adapter's first, then the budget's), drawn style
   // and graphics fault, worked out here once from the specs, the setting and the graphics. While no
   // view can be drawn the instruments are held, as their canvases are not mounted.
-  const drawing = engineState.kind === "ready" && !viewRefused;
   const instrumentViews: ReadonlyArray<InstrumentViewState> = instruments.slots.map((slot) => {
     const adapter = styleRefusals(graphics, slot.shown?.photoreal ?? "idle");
     // A closed instrument has no budget to ask, and nothing to switch.
@@ -982,11 +992,11 @@ function ViewStage({
   // The folding panel that holds the focus, as the side column's focus events tell it.
   const [focusedFold, setFocusedFold] = useState<FoldPanel | null>(null);
   const [foldLayout, setFoldLayout] = useState(layout);
-  // The panels that stand: the meter's beside a drawn photorealistic image, the style's once a view
-  // can be drawn. One that goes gives its place to CAMERA; on a switch to the compact layout, the
-  // panel holding the focus is the one open.
-  const stands = (panel: FoldPanel): boolean =>
-    panel === "meter" ? meterStands : panel !== "style" || engineLine === null;
+  // The panels that stand: every one but the meter's, which stands beside a drawn photorealistic
+  // image only; the style's stands in every engine state (decision-r07-t19b-exposure-fit, item 2).
+  // One that goes gives its place to CAMERA; on a switch to the compact layout, the panel holding
+  // the focus is the one open.
+  const stands = (panel: FoldPanel): boolean => panel !== "meter" || meterStands;
   const focusOpens =
     foldLayout !== layout && layout === "compact" && focusedFold !== null && stands(focusedFold)
       ? focusedFold
@@ -1053,12 +1063,16 @@ function ViewStage({
     }
   }, [compact, focusedFold, opened, foldButtonsRef]);
 
-  // The CONTROLS view's camera and style, which a folded panel's standing lines describe.
+  // The CONTROLS view's camera and style, which a folded panel's standing lines describe. Its style
+  // panel heads the second column and stands in every engine state, so that nothing under it moves
+  // when the adapter answers or a fault takes the views: while no view can be drawn it shows the
+  // camera's style with both buttons held back, the stage stating the cause
+  // (decision-r07-t19b-exposure-fit, item 2).
   const controlledRun = controlledShown?.run ?? shown.run;
   const controlledRefusals = operatedView?.refusals ?? refusals;
   const controlledFaulted =
     controlledShown === null
-      ? published.photoreal === "failed"
+      ? drawing && published.photoreal === "failed"
       : controlledShown.photoreal === "failed";
   // The first style's refusal, as the style control shows it.
   const styleReason = controlledRefusals.wireframe ?? controlledRefusals.photorealistic;
@@ -1101,8 +1115,6 @@ function ViewStage({
   const sideFolds: SideFolds = {
     cameraId: foldIds.camera,
     cameraHidden: folded("camera"),
-    styleId: foldIds.style,
-    styleHidden: folded("style"),
     row: foldRow,
   };
 
@@ -1259,19 +1271,6 @@ function ViewStage({
                 id={sideFolds.cameraId}
                 hidden={sideFolds.cameraHidden}
               />
-              {engineLine === null ? (
-                <StyleControl
-                  renderStyle={shown.run.camera.style}
-                  refusals={refusals}
-                  faulted={published.photoreal === "failed"}
-                  onStyle={(style) => {
-                    command({ kind: "style", style });
-                  }}
-                  designator={PRIMARY_NAME}
-                  id={sideFolds.styleId}
-                  hidden={sideFolds.styleHidden}
-                />
-              ) : null}
             </>
           ) : (
             <InstrumentControls
@@ -1282,8 +1281,6 @@ function ViewStage({
               stale={stale}
               easedMoves={easedMoves}
               reducedMotion={reducedMotion}
-              refusals={operatedView.refusals}
-              faulted={controlledShown.photoreal === "failed"}
               onAction={(action) => {
                 commandView(operatedView.slot.id, action);
               }}
@@ -1296,6 +1293,17 @@ function ViewStage({
           )}
         </div>
         <div className="view__column view__column--b">
+          <StyleControl
+            renderStyle={controlledRun.camera.style}
+            refusals={controlledRefusals}
+            faulted={controlledFaulted}
+            onStyle={(style) => {
+              commandView(controlsView, { kind: "style", style });
+            }}
+            designator={operatedView === null ? PRIMARY_NAME : operatedView.slot.name}
+            id={foldIds.style}
+            hidden={folded("style")}
+          />
           <ExposurePanel
             exposure={exposure}
             meteredEv100={shown.meteredEv100}

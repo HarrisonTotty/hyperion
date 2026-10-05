@@ -16,6 +16,13 @@ const READING: ExposureReading = {
   source: viewId("view"),
 };
 
+/** The meter's reading, an `output` set in parts (`readingParts`), by its whole text. */
+function readingOutput(text: string): HTMLElement {
+  return screen.getByText(
+    (_, element) => element?.tagName === "OUTPUT" && element.textContent === text,
+  );
+}
+
 describe("MeterControl", () => {
   it("shows the exposure with its level, the meter and the view it meters, by its name", () => {
     render(
@@ -26,7 +33,7 @@ describe("MeterControl", () => {
         onMeter={() => undefined}
       />,
     );
-    expect(screen.getByText("EV100 9.6 AUTO")).toBeInTheDocument();
+    expect(readingOutput("EV100 9.6 AUTO")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "METER" })).toHaveTextContent("AVG");
     expect(screen.getByRole("status", { name: "SOURCE" })).toHaveTextContent("PRIMARY");
     expect(screen.getByRole("button", { name: "AVG" })).toHaveAttribute("aria-pressed", "true");
@@ -116,5 +123,31 @@ describe("MeterControl", () => {
       expect(screen.queryByRole("status", { name: "METERED" })).toBeNull();
       unmount();
     }
+  });
+
+  it("sets its reading in parts, so that it breaks at its middle dot (R07.T19.b's follow-up)", () => {
+    render(
+      <MeterControl
+        meter="average"
+        reading={{ ...READING, control: { kind: "inhibited", ev100: 9.6, reason: "operator" } }}
+        meteredEv100={9.6}
+        onMeter={() => undefined}
+      />,
+    );
+    const output = readingOutput("EV100 9.6 INHIBITED · OPERATOR");
+    expect(
+      [...output.querySelectorAll(".view-label__part")].map((part) => part.textContent),
+    ).toEqual(["EV100 9.6 INHIBITED", "OPERATOR"]);
+  });
+
+  it("shows NO IMAGE TO METER, not a reading, while nothing is metered", () => {
+    render(
+      <MeterControl meter="average" reading={null} meteredEv100={null} onMeter={() => undefined} />,
+    );
+    expect([
+      screen.getByText("NO IMAGE TO METER").tagName,
+      screen.queryByText(/^EV100/u),
+      document.querySelector(".view-label__part"),
+    ]).toEqual(["P", null, null]);
   });
 });

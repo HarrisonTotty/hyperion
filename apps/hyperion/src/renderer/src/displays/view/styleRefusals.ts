@@ -20,6 +20,20 @@ export type StyleRefusals = Readonly<Record<RenderStyle, string | null>>;
 export const PHOTOREAL_NOT_CREATED =
   "GRAPHICS STYLE REFUSED: photorealistic style not created, relaunch to retry";
 
+/**
+ * Why both styles are held back while no view can be drawn: the adapter being acquired, the views
+ * not made, a graphics fault. The style panel stands then too, so that the panels under it never
+ * move when the adapter answers; the stage states the cause itself (decision-r07-t19b-exposure-fit,
+ * item 2; the guide's `NOT AVAILABLE` form, decision-r07-t18 item 6).
+ */
+export const NO_VIEW_DRAWN = "NOT AVAILABLE: no view is drawn";
+
+/** Both styles' refusals while no view can be drawn ({@link NO_VIEW_DRAWN}). */
+export const NO_VIEW_REFUSALS: StyleRefusals = {
+  wireframe: NO_VIEW_DRAWN,
+  photorealistic: NO_VIEW_DRAWN,
+};
+
 /** The reason a state without a drawable view gives: the graphics' own annunciation. */
 const NO_VIEWS = "GRAPHICS NOT AVAILABLE";
 

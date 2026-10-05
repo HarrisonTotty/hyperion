@@ -15,6 +15,7 @@ import {
   shownTriple,
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
+import { readingParts } from "./ViewLabelBlock";
 import { exposureReading } from "./viewRun";
 
 /** Props of {@link ExposurePanel}. */
@@ -97,8 +98,12 @@ function manualEntry(text: string): ExposureCommandResult {
  */
 const ENABLE_ONLY = "AUTO resumes only on ENABLE";
 
-/** What entering a value does, which the `MAN` field states while the exposure is not `MAN`. */
-const MAN_CONSEQUENCE = `Entering a value sets MAN: ${ENABLE_ONLY}`;
+/**
+ * What entering a value does, which the `MAN` field states while the exposure is not `MAN`. "An
+ * entry" is exactly what sets `MAN`: empty text and `Escape` enter nothing (decision-r07-t13d). It
+ * takes one line in the compact layout's 26rem column (decision-r07-t19b-exposure-fit, item 1(e)).
+ */
+const MAN_CONSEQUENCE = `An entry sets MAN: ${ENABLE_ONLY}`;
 
 /**
  * What `INHIBIT` does, which it states beside its button under `AUTO` and under a system inhibit,
@@ -176,6 +181,13 @@ interface CameraSettingProps {
 /**
  * The camera's `APERTURE`, `SHUTTER`, `ND` and `ISO`, a member beyond the view camera's range
  * pegged at its end with the guide's off-scale `↑` (decision-r07-exposure-camera, item d).
+ *
+ * @remarks
+ * Each member, a label with its value, is wrapped as a unit, in the setting's order. The full
+ * layout sets one member to a row; the compact layout two to a row, `APERTURE` and `SHUTTER`, then
+ * `ND` and `ISO`, each label 0.75rem from its own value and the members 1.5rem apart, so that a
+ * label never stands nearer the next member's value than its own (decision-r07-t19b-exposure-fit,
+ * item 1(a)).
  */
 function CameraSetting({ triple }: CameraSettingProps) {
   const ndEv = triple.ndEv ?? 0;
@@ -183,34 +195,42 @@ function CameraSetting({ triple }: CameraSettingProps) {
   const isoPegged = triple.iso > VIEW_CAMERA.maxIso;
   return (
     <dl className="readout view-exposure__triple">
-      <dt>APERTURE</dt>
-      <dd>
-        <output>f/{formatNumber(triple.aperture, 1)}</output>
-      </dd>
-      <dt>SHUTTER</dt>
-      <dd>
-        <output>{formatSignificant(triple.shutterS)} s</output>
-      </dd>
-      <dt>ND</dt>
-      <dd>
-        <output>
-          {ndEv === 0 ? (
-            "CLEAR"
-          ) : (
-            <>
-              {formatNumber(ndPegged ? VIEW_CAMERA.maxNdEv : ndEv, 1)} EV
-              {ndPegged ? <OffScaleHigh /> : null}
-            </>
-          )}
-        </output>
-      </dd>
-      <dt>ISO</dt>
-      <dd>
-        <output>
-          {formatNumber(isoPegged ? VIEW_CAMERA.maxIso : triple.iso, 0)}
-          {isoPegged ? <OffScaleHigh /> : null}
-        </output>
-      </dd>
+      <div className="view-exposure__member">
+        <dt>APERTURE</dt>
+        <dd>
+          <output>f/{formatNumber(triple.aperture, 1)}</output>
+        </dd>
+      </div>
+      <div className="view-exposure__member">
+        <dt>SHUTTER</dt>
+        <dd>
+          <output>{formatSignificant(triple.shutterS)} s</output>
+        </dd>
+      </div>
+      <div className="view-exposure__member">
+        <dt>ND</dt>
+        <dd>
+          <output>
+            {ndEv === 0 ? (
+              "CLEAR"
+            ) : (
+              <>
+                {formatNumber(ndPegged ? VIEW_CAMERA.maxNdEv : ndEv, 1)} EV
+                {ndPegged ? <OffScaleHigh /> : null}
+              </>
+            )}
+          </output>
+        </dd>
+      </div>
+      <div className="view-exposure__member">
+        <dt>ISO</dt>
+        <dd>
+          <output>
+            {formatNumber(isoPegged ? VIEW_CAMERA.maxIso : triple.iso, 0)}
+            {isoPegged ? <OffScaleHigh /> : null}
+          </output>
+        </dd>
+      </div>
     </dl>
   );
 }
@@ -433,7 +453,7 @@ export function ExposurePanel({
         )}
       </h2>
       <p className="view-exposure__reading">
-        <output>{exposureReading(exposure)}</output>
+        <output>{readingParts(exposureReading(exposure))}</output>
       </p>
       <CameraSetting triple={shownTriple(exposure)} />
       <ManualEntry exposure={exposure} onChange={onChange} />
