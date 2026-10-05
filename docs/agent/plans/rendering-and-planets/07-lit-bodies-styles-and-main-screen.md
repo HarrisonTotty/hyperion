@@ -2600,8 +2600,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `Instruments` panel), `InstrumentControls.tsx` (an instrument's `Targets`, `Camera` and `Style`
     panels), `useInstruments.ts` (the slots' state, commands, skies and loop), `viewFrameDrawer.ts`
     (`ViewFrameDrawer`, an instrument's frame in either style with R06's layers and cube, and
-    `skySprites`, which the primary now imports) and `viewNames.ts` (`PRIMARY_VIEW_ID`,
-    `PRIMARY_NAME`, `INSTRUMENT_SLOTS`, `instrumentName`, `instrumentViewId`, `viewDisplayName`);
+    `skySprites`, which the primary now imports (until T19.c)) and `viewNames.ts`
+    (`PRIMARY_VIEW_ID`, `PRIMARY_NAME`, `INSTRUMENT_SLOTS`, `instrumentName`, `instrumentViewId`,
+    `viewDisplayName`);
     `view/budget/framePacing.ts` (`drawsInFrame`, `PrimaryFrameTimes`, `PENDING_PRIMARY_FRAMES`,
     `BudgetedScale`); `view/photoreal/internalScale.ts` (`internalViewport`, `spritesAtScale`);
     `test/viewDisplayHarness.tsx` (`timedEngineSource`, `renderViewDisplay`, `nominalStore`,
@@ -2620,7 +2621,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     wireframe list, R06's band, discs and cube, the photorealistic frame), so that the two lanes'
     edits to `ViewDisplay.tsx` merged apart. One path for both is a follow-up. The primary's draw
     reads the merged availability (the adapter's, then the budget's), which equals its budget's
-    `style`.
+    `style`. **Made one by T19.c** (see "Deviations in T19.c, as built").
   - **Pacing.** The primary's `requestAnimationFrame` loop counts animation frames and returns from
     those `drawsInFrame` refuses its `rateHz`; the instruments are drawn from inside the primary's
     frame (`InstrumentsFrame`) at their 30 Hz, in the same phase, and publish their readouts in the
@@ -2646,7 +2647,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     camera (`cullViewSky` at its role, its field of view and its canvas's width; R06 Design note
     20), so its `STARS` states its own limit and its cube is baked for its own selection. A
     photorealistic instrument passes `meter: "average"`, and its renderer still takes a histogram
-    nothing reads (a cost for T20). Its canvas has no DOM mark labels (its list names the marks).
+    nothing reads (a cost for T20; T19.c removes it). Its canvas has no DOM mark labels (its list
+    names the marks).
     Its statements are decision-r07-t19's list (`POSITIONS AS SEEN FROM SHIP`, `PHOTOREALISTIC:
     PREPARING`, its graphics fault); the scene's (its lighting, its bodies' labels, `ROTATION NOT
     YET MODELLED`) stay the primary's, and T19.b gives an instrument the photorealistic
@@ -2789,6 +2791,71 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `EV100 11.7 INHIBITED · NO IMAGE TO METER` breaks at its `·` (one line less where the second
     part fits); and the compact column's gaps at 0.25 rem (12 px). Widening the column is not one:
     the stage would fall under the 50.5 rem two slots need.
+- **Deviations in T19.c, as built** (2026-10-05).
+  - **Files.** `viewFrameDrawer.ts`: `ViewFrameInputs.meter` (`MeterMode | null`),
+    `ViewFrameDrawer.takeHistogram` and `makeViewFrameDrawer`, which makes a view's drawer at once
+    or, where the engine has no device, at its restore. `ViewDisplay.tsx`: the primary's loop
+    draws through a `ViewFrameDrawer` (`placeMarkLabels` moves the marks' labels, as before).
+    Beyond the task's list: `useInstruments.ts` (a slot's drawer through `makeViewFrameDrawer`,
+    `meter: null`); `view/photoreal/renderer.ts` (`PhotorealFrame.meter` is `MeterMode | null`, and
+    a frame with `null` dispatches no histogram) and `photorealFrame.ts` (its input); and
+    `test/viewDisplayHarness.tsx` (`Submission`, `submittedBy`, `TimedEngineSource.submissions`:
+    every canvas pass, target pass and dispatch, a dispatch numbered as no resolve).
+  - **What stays the primary's.** Its loop keeps what only the primary does: the pacing, the
+    `PrimaryFrameTimes` grouping, the `BudgetedScale` controller, its `AutoExposure` (it takes the
+    drawer's histogram, and the drawer draws at its applied control, `reading.control`), the
+    return to the wireframe when its pipelines fail, the DOM mark labels, the 4 Hz publish and the
+    instruments' frame. The drawer draws the budget's `style` for every view, as T19 says each view
+    does: the primary's with the merged availability (the adapter's, then the budget's), an
+    instrument's with its adapter's. An instrument still draws at the display's control, which
+    under `AUTO` follows the primary's applied value at 4 Hz and 0.1 EV.
+  - **No histogram on an instrument** per frame: its frames carry `meter: null`, so its renderer
+    dispatches none and reads none back. Design note 8's histogram is the exposure source's pass
+    alone: an instrument's photorealistic passes are the sky, the discs, bloom, the tone mapping and
+    the symbology. The renderer still makes its `HistogramReader` (three 1 KiB buffers) and
+    compiles the kernel while it is made, unused on an instrument; not making them would need a
+    renderer option, left since their cost is memory alone.
+  - **The primary during a device loss.** A stage mounted while the device is lost (a new scene)
+    made its renderers in the effect, which threw `EngineUnavailable`; through
+    `makeViewFrameDrawer` it now waits and draws from the restore, as an instrument opened then
+    does. The drawer is made in a microtask after the restore's dispatch, not inside it:
+    `onRestored`'s listeners run from a live set, so a drawer made inside would have its renderers'
+    new listeners told of the same restore, and each would make its handles a second time, dropping
+    the first (an instrument's did so since T19; plan-conformance review). A first making that
+    fails but for a loss disposes of the view before it throws, and a release before the restore
+    disposes of the view alone.
+  - **The rule** "until it lands, a task that changes what the primary's frame draws changes
+    `ViewFrameDrawer` alike" is retired: a change to the frame is made once, in `ViewFrameDrawer`
+    (or `photorealFrame` and R07's renderer), and reaches every view.
+  - **Tests.** `renderer.test.ts`: a frame with no meter dispatches no histogram and hands none
+    over. `viewFrameDrawer.test.ts` (new, against the counting engine): a drawer asked for during a
+    loss is made once after the restore, making each handle once (made inside the dispatch, it made
+    every buffer, material, mesh and texture twice), and one released before the restore is never
+    made and its view disposed of. `InstrumentView.test.tsx` (against the timed fake engine): the
+    primary and `INSTRUMENT 1` at `CHASE`, both photorealistic, on stages of one size, submit the
+    same passes in the same order with the same draws' materials but the primary's histogram (one
+    preset, field of view and pose; their roles, the primary's `eye` and an instrument's `camera`,
+    differ only in the passes' uniforms, the bloom kernel's weights and the glare terms); a
+    photorealistic instrument dispatches no histogram; a stage mounted during a loss draws once
+    restored, and one that goes before the restore disposes of its view. Each new test fails on the
+    code before T19.c (8433e20, the merge of 49f029d). T8.a's metering tests pass unchanged.
+  - **Cost per instrument frame, measured** (provisional: hidden, the app's window made offscreen by
+    a capture hook, never shown; on the RTX 3080 under shared load, load average 9–16; Chromium's
+    `--disable-dawn-features=timestamp_quantization`; a 1920 × 1078 page, `PHASE TEST`, all three
+    views photorealistic in `FREE`, the primary's target 1120 × 898 px and each instrument's
+    240 × 180; six alternating 8 s phases of one build, each instrument's meter `"average"`
+    (before) or `null` (after), through temporary counters that were never committed; each view's
+    GPU time the sum of the resolves its `draw` numbered, its CPU time `performance.now()` about its
+    `draw`, at 0.1 ms resolution, without the read-back's callback). Before: GPU 1.870–1.873 ms per
+    instrument frame, its histogram 0.0106–0.0108 ms; CPU 1.18–1.33 ms. After: GPU 1.866–1.886 ms,
+    no histogram; CPU 1.10–1.33 ms. The histogram's 0.011 ms lies under the phases' spread, and the
+    CPU's 0.05 ms or so under the load's. Of an instrument's 1.87 ms, the `discs` pass takes
+    1.74 ms (the primary's 2.44 ms over 23 times the pixels): a cost per draw, not per pixel, of
+    `PHASE TEST`'s bodies, for T20 and the shading lane. The primary, whose code path changed but
+    not its passes: GPU 2.77–2.81 ms per frame (its histogram 0.024 ms) against 2.66–2.80 ms for
+    the inline loop before, measured the same way; CPU 7.8–8.3 ms per draw against 7.1–10.9 ms,
+    within the load's spread. T20 measures on a quiet machine.
+  - **Gate.** No `just ci` (the Day 2 protocol). `just test-render`, since R07's renderer changed.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in

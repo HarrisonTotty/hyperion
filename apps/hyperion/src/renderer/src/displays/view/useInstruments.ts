@@ -6,10 +6,11 @@
  * @remarks
  * Each instrument follows the scene its primary drew in the same frame (`followRun`), at its own
  * rate: its budget's 30 Hz, in frames the primary draws (`drawsInFrame`), so that its passes are
- * counted in the primary's frame. It draws at the primary's exposure, which its label block says
- * (`SOURCE PRIMARY`, Design note 11), and culls the sky for its own camera. Its camera is reported
- * to the server's scene while it is open, as the primary's is. Its readouts change at most four
- * times a second.
+ * counted in the primary's frame, and it draws through the primary's own frame path
+ * (`ViewFrameDrawer`) but for the histogram, which it does not take. It draws at the primary's
+ * exposure, which its label block says (`SOURCE PRIMARY`, Design note 11), and culls the sky for
+ * its own camera. Its camera is reported to the server's scene while it is open, as the primary's
+ * is. Its readouts change at most four times a second.
  */
 import {
   type RefObject,
@@ -35,7 +36,6 @@ import {
 } from "../../view/camera/keys";
 import type { CameraTarget, RenderStyle, ViewId } from "../../view/camera/state";
 import type { StyleAvailability } from "../../view/engine/platform";
-import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import { useGraphicsStatus } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
 import type { ExposureControl } from "../../view/photometry/exposure";
@@ -47,7 +47,7 @@ import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
 import { type CulledViewSky, cullViewSky, type DrawnSky, viewSkyLabel } from "./useViewSky";
 import type { ViewEngineState } from "./useViewEngine";
-import { ViewFrameDrawer } from "./viewFrameDrawer";
+import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
 import {
   INSTRUMENT_SLOTS,
   type InstrumentSlot,
@@ -252,39 +252,13 @@ function useSlotDrawer(
       onRefused(slot);
       return undefined;
     }
-    let drawer: ViewFrameDrawer | null = null;
-    const make = (): void => {
-      try {
-        drawer = new ViewFrameDrawer(engine, view, name);
-      } catch (error: unknown) {
-        if (error instanceof EngineUnavailable) {
-          // Opened during a device loss: the view waits, and the drawer is made at the restore.
-          return;
-        }
-        throw error;
-      }
-      loops.set(slot, {
-        drawer,
-        lastMs: null,
-        anchors: [],
-        drawnStyle: "wireframe",
-      });
-    };
-    make();
-    const unsubscribe = engine.onRestored(() => {
-      if (drawer === null) {
-        make();
-      }
+    // Opened during a device loss, the view waits and its drawer is made at the restore.
+    const release = makeViewFrameDrawer(engine, view, name, (drawer) => {
+      loops.set(slot, { drawer, lastMs: null, anchors: [], drawnStyle: "wireframe" });
     });
     return () => {
-      unsubscribe();
       loops.delete(slot);
-      // The drawer disposes of the view with itself; one never made leaves the view to dispose.
-      if (drawer === null) {
-        view.dispose();
-      } else {
-        drawer.dispose();
-      }
+      release();
     };
   }, [slot, engineState, canvas, loopsRef, onRefused]);
 }
@@ -532,6 +506,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         style: budget.style,
         renderScale: budget.renderScale,
         availability: inputs.availability,
+        // The primary is the exposure's source: an instrument meters nothing (Design note 11).
+        meter: null,
       });
       if (drawn !== null) {
         loop.anchors = drawn.anchors;
