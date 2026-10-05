@@ -1,6 +1,8 @@
 //! The capture reader and the naga report against the checked-in capture in
-//! `tests/fixtures/small`: a triangle drawn into a canvas in two frames, a buffer written by the snapshot, a
-//! multisampled texture the snapshot skipped, and one module that is invalid on purpose.
+//! `tests/fixtures/small`: a triangle drawn into a canvas in two frames (the first also clearing
+//! it through its sRGB view), a buffer written by the snapshot, a multisampled texture the
+//! snapshot skipped with a view of it that nothing uses, and one module that is invalid on
+//! purpose.
 
 use std::path::{Path, PathBuf};
 
@@ -14,9 +16,9 @@ fn fixture() -> PathBuf {
 #[test]
 fn reads_the_calls_span_frames_and_surfaces() {
     let capture = Capture::read(&fixture()).expect("the fixture is a capture");
-    assert_eq!(capture.calls().len(), 24);
-    assert_eq!(capture.span_start(), 6);
-    assert_eq!(capture.frames(), &[6, 15]);
+    assert_eq!(capture.calls().len(), 28);
+    assert_eq!(capture.span_start(), 7);
+    assert_eq!(capture.frames(), &[7, 19]);
     assert_eq!(
         capture.surfaces(),
         &[Surface {
@@ -37,6 +39,13 @@ fn reads_the_calls_span_frames_and_surfaces() {
     );
     let submit = capture.calls().last().expect("calls");
     assert_eq!((submit.target, submit.op.as_str()), (QUEUE_ID, "submit"));
+}
+
+#[test]
+fn the_setup_leaves_out_the_view_nothing_uses() {
+    let capture = Capture::read(&fixture()).expect("the fixture is a capture");
+    assert_eq!(capture.calls()[6].op, "createView");
+    assert_eq!(capture.setup_calls(), &[0, 1, 2, 3, 4, 5]);
 }
 
 #[test]

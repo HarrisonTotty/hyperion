@@ -157,7 +157,7 @@ impl Replayer {
                     | wgpu::TextureUsages::COPY_SRC
                     | wgpu::TextureUsages::COPY_DST
                     | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
+                view_formats: &canvas_view_formats(format),
             });
             offscreen.insert(surface.id, texture);
             objects.insert(surface.id, Object::Surface(surface.id));
@@ -232,6 +232,21 @@ impl Replayer {
                 break;
             };
             self.call(capture, index, call, target)?;
+        }
+        Ok(())
+    }
+
+    /// Replays the calls before the span ([`Capture::setup_calls`]): every one, less the views,
+    /// bind groups and pipelines' bind-group layouts the engine made and dropped before it.
+    ///
+    /// # Errors
+    ///
+    /// The first call that cannot be replayed.
+    pub fn replay_setup(&mut self, capture: &Capture) -> Result<(), ReplayCallError> {
+        for &index in capture.setup_calls() {
+            if let Some(call) = capture.calls().get(index) {
+                self.call(capture, index, call, &FrameTarget::Offscreen)?;
+            }
         }
         Ok(())
     }
@@ -1578,6 +1593,21 @@ fn enum_of<T: DeserializeOwned>(value: &Value) -> Option<T> {
     T::deserialize(value).ok()
 }
 
+/// The view formats a canvas's texture allows besides its own: its sRGB form, if it has one.
+///
+/// The engine configures every canvas so (`view/engine/webgpu/view.ts`, `srgbViewFormat`) and
+/// draws its display pass through the sRGB view; the capture logs a canvas's size and format but
+/// not its configuration.
+#[must_use]
+pub(crate) fn canvas_view_formats(format: wgpu::TextureFormat) -> Vec<wgpu::TextureFormat> {
+    let srgb = format.add_srgb_suffix();
+    if srgb == format {
+        Vec::new()
+    } else {
+        vec![srgb]
+    }
+}
+
 /// A texture format from WebGPU's name for it.
 fn texture_format(name: &str) -> Option<wgpu::TextureFormat> {
     enum_of(&Value::String(name.to_owned()))
@@ -1888,6 +1918,20 @@ mod tests {
             index: 0,
             call,
         })
+    }
+
+    #[test]
+    fn a_canvas_allows_its_srgb_view_as_the_engine_configures_it() {
+        assert_eq!(
+            canvas_view_formats(wgpu::TextureFormat::Rgba8Unorm),
+            vec![wgpu::TextureFormat::Rgba8UnormSrgb]
+        );
+        assert_eq!(
+            canvas_view_formats(wgpu::TextureFormat::Bgra8Unorm),
+            vec![wgpu::TextureFormat::Bgra8UnormSrgb]
+        );
+        assert!(canvas_view_formats(wgpu::TextureFormat::Bgra8UnormSrgb).is_empty());
+        assert!(canvas_view_formats(wgpu::TextureFormat::Rgba16Float).is_empty());
     }
 
     #[test]
