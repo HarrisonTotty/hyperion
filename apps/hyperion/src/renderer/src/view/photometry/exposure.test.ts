@@ -11,12 +11,16 @@ import {
   exposureLevelReading,
   exposureScale,
   type ExposureControl,
+  type ExposureTriple,
   inhibit,
+  MAN_EV100_MAX,
+  MAN_EV100_MIN,
   METER_CALIBRATION_K,
   onMetering,
   programTriple,
   setAuto,
   setManual,
+  setManualEv100,
   VIEW_CAMERA,
 } from "./exposure";
 
@@ -287,5 +291,61 @@ describe("the exposure's automation levels", () => {
       { kind: "auto", ev100: 7 },
       DEFAULT_EXPOSURE,
     ]);
+  });
+});
+
+/** The triple an accepted command sets `MAN` at. */
+function manualTriple(result: ReturnType<typeof setManualEv100>): ExposureTriple {
+  const control = accepted(result);
+  if (control.kind !== "manual") {
+    throw new Error(`expected MAN, got ${control.kind}`);
+  }
+  return control.triple;
+}
+
+describe("the operator's MAN entry (R07.T13.d)", () => {
+  it("spans the scene from the galactic band's faintest background to an O star's disc", () => {
+    // BS's 10⁻⁵ to 3 × 10¹¹ cd/m², metered at R02's log₂(L̄ × 8), then rounded outward.
+    expect(ev100FromAverageLuminance(1e-5)).toBeCloseTo(-13.61, 2);
+    expect(ev100FromAverageLuminance(3e11)).toBeCloseTo(41.13, 2);
+    expect([MAN_EV100_MIN, MAN_EV100_MAX]).toEqual([-14, 42]);
+  });
+
+  it("gives back the default MAN triple at EV100 −1 to 1E-12", () => {
+    const triple = manualTriple(setManualEv100(DEFAULT_MAN_EV100));
+    expect(triple.aperture).toBe(DEFAULT_MAN_TRIPLE.aperture);
+    expect(agree(triple.shutterS, DEFAULT_MAN_TRIPLE.shutterS, 1e-12)).toBe(true);
+    expect(agree(triple.iso, DEFAULT_MAN_TRIPLE.iso, 1e-12)).toBe(true);
+    expect(triple.ndEv).toBeUndefined();
+  });
+
+  it("sets the view camera's triple at EV100 9.6: f/1.4, 1.96 × 2^−9.6 s, ISO 100", () => {
+    const triple = manualTriple(setManualEv100(9.6));
+    expect([triple.aperture, triple.iso, triple.ndEv]).toEqual([1.4, 100, undefined]);
+    expect(agree(triple.shutterS, 1.96 * 2 ** -9.6, 1e-12)).toBe(true);
+  });
+
+  it("sets the program's triple to 1E-12 across the span, its EV100 given back", () => {
+    for (const ev100 of [-14, -10, JOINS.push, -1, 0, JOINS.shutter, 10, JOINS.nd, 15, 34, 42]) {
+      const triple = manualTriple(setManualEv100(ev100));
+      const program = programTriple(VIEW_CAMERA, ev100);
+      expect(triple.aperture).toBe(program.aperture);
+      expect(agree(triple.shutterS, program.shutterS, 1e-12)).toBe(true);
+      expect(agree(triple.iso, program.iso, 1e-12)).toBe(true);
+      expect(Math.abs((triple.ndEv ?? 0) - (program.ndEv ?? 0))).toBeLessThan(1e-12);
+      expect(Math.abs(ev100FromTriple(triple) - ev100)).toBeLessThan(1e-12);
+    }
+  });
+
+  it("refuses an EV100 outside −14 to 42, or not finite", () => {
+    for (const ev100 of [
+      -14.1,
+      42.1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+    ]) {
+      expect(setManualEv100(ev100)).toEqual({ kind: "refused", reason: "invalid_ev100" });
+    }
   });
 });

@@ -1007,3 +1007,44 @@ describe("the VIEW display's AUTO exposure (R07.T8.a)", () => {
     expect(exposureReadout()).toMatch(/INHIBITED · OPERATOR$/);
   });
 });
+
+describe("the VIEW display's way back to MAN (R07.T13.d)", () => {
+  it("sets MAN in the wireframe after the photorealistic style, and ENABLE takes AUTO once metered", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    await user.click(screen.getByRole("button", { name: "WIREFRAME" }));
+    // The wireframe draws no image to meter: the system inhibits AUTO once the meter times out.
+    advance(1000);
+    await settle();
+    advance(1000);
+    const trapped = exposureReadout();
+    await user.click(screen.getByRole("textbox", { name: "MAN" }));
+    await user.keyboard("8.6{Enter}");
+    advance(300);
+    const manual = exposureReadout();
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    expect([trapped, manual, exposureReadout()]).toEqual([
+      expect.stringMatching(/INHIBITED · NO IMAGE TO METER$/),
+      "EV100 8.6 MAN",
+      expect.stringMatching(/^EV100 -?\d+\.\d AUTO$/),
+    ]);
+  });
+});

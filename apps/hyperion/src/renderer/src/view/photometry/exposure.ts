@@ -53,6 +53,24 @@ export const SATURATION_CONSTANT = 78;
 export const DEFAULT_MAN_EV100 = -1;
 
 /**
+ * The least `MAN` exposure the operator may enter, EV100: −14 (decision-r07-man-exposure).
+ *
+ * @remarks
+ * The foot of the brainstorm's scene span, the galactic band's faintest background at about
+ * 10⁻⁵ cd/m², metered at R02's EV100 = log₂(L̄ × 8) (−13.6), rounded outward.
+ */
+export const MAN_EV100_MIN = -14;
+
+/**
+ * The greatest `MAN` exposure the operator may enter, EV100: 42 (decision-r07-man-exposure).
+ *
+ * @remarks
+ * The top of the brainstorm's scene span, an O star's disc centre at about 3 × 10¹¹ cd/m², metered
+ * at log₂(L̄ × 8) (41.1), rounded outward. The view camera's ND is dense enough for it.
+ */
+export const MAN_EV100_MAX = 42;
+
+/**
  * A view camera's exposure program: its fixed lens and its ranges, which set its triple as a
  * function of EV100 alone, under `AUTO`, `INHIBITED` and `MAN` alike (decision-r07-exposure-camera).
  */
@@ -78,12 +96,6 @@ const VIEW_APERTURE = 1.4;
 const VIEW_MIN_SHUTTER_S = 1 / 8_000;
 
 /**
- * The exposure the view camera's ND filter is dense enough for, EV100: 42, the top of the span a
- * `MAN` exposure may be entered in (decision-r07-man-exposure).
- */
-const VIEW_ND_TOP_EV100 = 42;
-
-/**
  * The view camera (decision-r07-exposure-camera): R06's sensor (`DEFAULT_VIEW_CAMERA`) behind a
  * fixed f/1.4 lens, a shutter of 1/30 to 1/8,000 s, ISO 100 to 409,600 and a variable ND filter to
  * 28.06 EV (optical density 8.45).
@@ -91,9 +103,10 @@ const VIEW_ND_TOP_EV100 = 42;
  * @remarks
  * f/1.4 and 1/30 s are R06 Design note 18's N and t, the live frame at 30 fps. 1/8,000 s is the
  * shortest movie shutter of Sony's α7S III and FX6. ISO 409,600 is the high gain of Design note 18,
- * 12 stops above base, the expanded top of the α7S III and the FX6. The ND's densest is what EV100
- * 42 needs at 1/8,000 s and ISO 100, so that no `MAN` exposure is beyond it; the FX6 carries a variable ND, and
- * a camera imaging a star's disc an OD 5.0 solar filter, as MER's Pancam and MSL's Mastcam do.
+ * 12 stops above base, the expanded top of the α7S III and the FX6. The ND's densest is what
+ * {@link MAN_EV100_MAX}, 42, needs at 1/8,000 s and ISO 100, so that no `MAN` exposure is beyond
+ * it; the FX6 carries a variable ND, and a camera imaging a star's disc an OD 5.0 solar filter, as
+ * MER's Pancam and MSL's Mastcam do.
  */
 export const VIEW_CAMERA: ExposureProgram = {
   aperture: VIEW_APERTURE,
@@ -101,7 +114,7 @@ export const VIEW_CAMERA: ExposureProgram = {
   minShutterS: VIEW_MIN_SHUTTER_S,
   baseIso: 100,
   maxIso: 409_600,
-  maxNdEv: VIEW_ND_TOP_EV100 - Math.log2((VIEW_APERTURE * VIEW_APERTURE) / VIEW_MIN_SHUTTER_S),
+  maxNdEv: MAN_EV100_MAX - Math.log2((VIEW_APERTURE * VIEW_APERTURE) / VIEW_MIN_SHUTTER_S),
 };
 
 /**
@@ -204,11 +217,12 @@ export type InhibitReason = "operator" | "no_image_to_meter";
  * The exposure's automation level and value (Design note 11).
  *
  * @remarks
- * `manual` is set from a triple by the operator. `auto` follows the photorealistic view the view
- * accompanies (R07), holding its last metered value. `inhibited` means the automatic function is
- * prevented from acting: the exposure is held at its last metered value, with who inhibited it and
- * why. A system inhibit (the source closed or faulted) returns to `auto` by itself when the source
- * returns; an operator's does not.
+ * `manual` is set by the operator, from an EV100 entered, at the view camera's triple
+ * ({@link setManualEv100}), or from a triple ({@link setManual}). `auto` follows the photorealistic
+ * view the view accompanies (R07), holding its last metered value. `inhibited` means the automatic
+ * function is prevented from acting: the exposure is held at its last metered value, with who
+ * inhibited it and why. A system inhibit (the source closed or faulted) returns to `auto` by itself
+ * when the source returns; an operator's does not.
  */
 export type ExposureControl =
   | { readonly kind: "manual"; readonly triple: ExposureTriple }
@@ -223,7 +237,8 @@ export type ExposureCommandResult =
   | { readonly kind: "accepted"; readonly control: ExposureControl }
   | {
       readonly kind: "refused";
-      readonly reason: "no_image_to_meter" | "not_automatic" | "already_auto" | "invalid_triple";
+      readonly reason:
+        "no_image_to_meter" | "not_automatic" | "already_auto" | "invalid_triple" | "invalid_ev100";
     };
 
 /** The exposure value a control stands at, EV100. */
@@ -250,6 +265,26 @@ export function setManual(triple: ExposureTriple): ExposureCommandResult {
     return { kind: "refused", reason: "invalid_triple" };
   }
   return { kind: "accepted", control: { kind: "manual", triple } };
+}
+
+/**
+ * `MAN` at an exposure the operator enters, from any level (decision-r07-man-exposure): the view
+ * camera's triple at that EV100 (decision-r07-exposure-camera); refused with `invalid_ev100` where
+ * it is not finite or lies outside {@link MAN_EV100_MIN} to {@link MAN_EV100_MAX}.
+ *
+ * @remarks
+ * The level it is entered from does not change the triple: one camera serves every level, so the
+ * entry's setting is the one `AUTO` would show at that EV100. It is not smoothed and not pending,
+ * since the exposure is the view's own, a display control.
+ */
+export function setManualEv100(ev100: number): ExposureCommandResult {
+  if (!(Number.isFinite(ev100) && ev100 >= MAN_EV100_MIN && ev100 <= MAN_EV100_MAX)) {
+    return { kind: "refused", reason: "invalid_ev100" };
+  }
+  return {
+    kind: "accepted",
+    control: { kind: "manual", triple: programTriple(VIEW_CAMERA, ev100) },
+  };
 }
 
 /**

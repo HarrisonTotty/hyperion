@@ -3219,3 +3219,69 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **Open (for a decision agent):** whether an ND under 0.05 EV (EV100 13.94 to about 13.99)
     reads `CLEAR` or `0.0 EV`; the ruling's "`CLEAR`, or the attenuation in `EV` at one decimal"
     allows both, and `0.0 EV` is built.
+- **Deviations in T13.d, as built (the way back to `MAN`, decision-r07-man-exposure as amended by
+  decision-r07-exposure-camera).**
+  - **Files.** R02's `photometry/exposure.ts` gains `MAN_EV100_MIN` (−14), `MAN_EV100_MAX` (42),
+    `setManualEv100` and the refusal `invalid_ev100`; T13.c's private `VIEW_ND_TOP_EV100` gives way
+    to `MAN_EV100_MAX`, `maxNdEv` unchanged (28.0634 EV). `ExposurePanel` gains a private
+    `ManualEntry`, the `MAN` field; `MeterControl` gains `meteredEv100: number | null`, which
+    `ViewDisplay` passes from `shown.meteredEv100`. Provides lists none of them, as in T13.c.
+  - **`setManualEv100(ev100)` takes no control.** The ruling's `(control, ev100)` needed the control
+    only for the superseded "keep the `MAN` camera's aperture and ISO": with one camera the triple
+    is `programTriple(VIEW_CAMERA, ev100)` from every level. So "accepted from every level" is
+    tested at the panel (`AUTO`, both inhibits and `MAN`), and the 9.6 test calls it with the EV100
+    alone.
+  - **Parsing is `CURSOR`'s.** Grouping commas are dropped, the sign may be `+`, `-` or `−`, and the
+    value is rounded to one decimal before the span is checked, so 42.04 enters as 42.0 and −14.05
+    as −14.0 (`Math.round` takes halves up). Text that is not a number is refused at the panel with
+    the same `invalid_ev100` words.
+  - **The field.** The fill is taken once, at focus (the ruling's "on focus"), and does not follow
+    `AUTO` while the field holds focus untyped. It is also written to the input in the focus
+    handler, so that its selection holds, and a press that focuses the field cancels its mouseup's
+    default, which would collapse the selection in Chromium (tested by the event's
+    `defaultPrevented`). A refused text stays, `aria-invalid`, until it is edited or `MAN`'s value
+    changes elsewhere (an entry, or `ENABLE` from `MAN`), as `CURSOR` keeps its draft. The field is
+    described by its unit, its hint, the consequence line and the refusal; its `—` is `--text-muted`
+    on `--surface-2` (6.04:1). Text selected in any `.form-field__input` is now `--accent` under
+    `--surface-0` (10.37:1), not the platform's highlight, since this field is the first to select
+    on focus.
+  - **`METERED`** stands after the meter's reading and before `SOURCE`, where the ruling names no
+    place, its value 11ch wide for `EV100 -13.6`.
+  - **The side column (adds to T13.c's open item, which R07.T19.b settles).** The consequence line
+    and the refusal take `contain: inline-size`, so that they never widen the content-sized column.
+    Measured in a hidden window (never shown) over a kept scene with both instruments closed, the
+    panel heights depending on the column's width only (the same at 1280 × 720):
+    - at the as-built 387 px column the exposure panel grows by 40 px under `MAN` (the field's 2rem
+      row and its margin), by 80 px at another level (the consequence line takes two lines) and by
+      22 px more with a refusal; the meter grows by 18 px with `METERED`;
+    - at 1920 × 1080 the column's content now runs 102 px past its foot under the default `MAN`
+      (62 px after T13.c);
+    - in T19.b's 26rem compact column the exposure panel stands 301 px under `MAN` in the wireframe,
+      315 px beside a drawn image at `AUTO`, 360 px trapped in the wireframe
+      (`INHIBITED · NO IMAGE TO METER`) and 382 px with a refusal there, at today's 0.75rem block
+      padding (T19.b's 0.5rem takes 8 px off), where decision-r07-t19-layout estimated 290–300 px;
+    - in T19.b's 20rem column B the hint wraps under the field (the row needs 281 px of the 277 px
+      there), so the field adds 58 px under `MAN` and 98 px at another level.
+  - **Guide.** The new rows' draft tags name R07.T13.d where the ruling, written before the rename,
+    said T13.c, and the `AUTO`, `MAN`, `INHIBITED` row's tag gains "and plan R07, R07.T13.d", as
+    T13.c tagged the `EV100` row. The `MAN` field row has no "keeps the `MAN` camera's aperture and
+    ISO" clause (decision-r07-exposure-camera): the `APERTURE`, `SHUTTER`, `ND`, `ISO` row's "takes
+    the same setting" says it. The "Exposure is an instrument" bullet's tail is reflowed. All are
+    drafts for the owner.
+  - **README.** The cross-plan row for `ExposureReading.triple` (T13.c's entry left it to the
+    orchestrator) now names `VIEW_CAMERA` and `programTriple` (T13.c) and T13.e.
+  - **Gate.** No `just ci` (the Day 2 protocol) and no `just test-render`: no shader, `view/engine/`
+    or `src/smoke/` file changed, and no rendered value.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, with no must-fix. Their
+    should-fix points are fixed but the three open below: tests of a refusal that `ENABLE` drops, of
+    `MAN` from the operator's inhibit and of the mouseup guard; `userEvent.setup()` before `render`;
+    the selection's colour, `METERED`'s width and the field's `.form-field` wrapper.
+  - **Open (for a decision agent):**
+    - a refused entry under `AUTO` or an inhibit is cleared only by entering a valid value, which
+      sets `MAN`, since emptying the field and leaving it is refused as not a number, as in
+      `CURSOR`; options: an empty field enters nothing and returns to `—`, `Escape` drops the draft,
+      both, or as built (built);
+    - `AUTO` is not bounded to −14.0 to 42.0, so beyond the span `Tab` then `Enter` is refused;
+      options: clamp the fill to the span, or keep the refusal (built);
+    - `INHIBIT` still states no consequence, the ruling's unruled aside, which the UX review raised
+      now that the `MAN` field carries its line.

@@ -814,6 +814,15 @@ body {
   text-align: right;
 }
 
+/*
+ * Text selected in a field, as the `MAN` field selects its fill on focus: `--accent`, the guide's
+ * selected, under `--surface-0` text (10.37:1), not the platform's highlight.
+ */
+.form-field__input::selection {
+  background: var(--accent);
+  color: var(--surface-0);
+}
+
 .form-field__input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -3359,6 +3368,53 @@ body {
   min-width: 9ch;
 }
 
+/*
+ * The `MAN` field (plan R07, T13.d), a `.form-field`: its label, value and unit on one line with the
+ * format hint, as the chart's number fields are, and under it the consequence and any refusal.
+ */
+.view-exposure__man-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
+}
+
+.view-exposure__man-field > .form-field__label {
+  white-space: nowrap;
+}
+
+/* Room for the longest value, -14.0, in the field's own monospaced figures. */
+.view-exposure__man-input {
+  width: calc(5ch + 1rem + 2px);
+}
+
+/* No operator value at another level: the guide's missing value, `—` in `--text-muted`. */
+.view-exposure__man-input--missing {
+  color: var(--text-muted);
+}
+
+.view-exposure__man-unit {
+  color: var(--text-muted);
+}
+
+.view-exposure__man-hint {
+  text-align: left;
+}
+
+/*
+ * The consequence and the refusal are sentences: they wrap inside the panel and never lend the
+ * side column their unwrapped width.
+ */
+.view-exposure__consequence,
+.view-exposure__man-error {
+  contain: inline-size;
+  margin: 0.25rem 0 0;
+}
+
+.view-exposure__consequence {
+  color: var(--text-muted);
+}
+
 .view-exposure__commands {
   display: flex;
   flex-direction: column;
@@ -3376,6 +3432,12 @@ body {
 .view-meter__value {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* Room for the longest metered value, `EV100 -13.6`, so that the field keeps its width. */
+.view-meter__metered {
+  display: inline-block;
+  min-width: 11ch;
 }
 
 .view-meter__reading,

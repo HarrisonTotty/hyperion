@@ -1235,6 +1235,7 @@ function ViewStage({
           <MeterControl
             meter={meter}
             reading={shown.reading}
+            meteredEv100={shown.meteredEv100}
             onMeter={onMeterChange}
             designator={PRIMARY_NAME}
           />
