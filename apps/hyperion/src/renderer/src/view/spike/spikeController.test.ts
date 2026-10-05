@@ -243,7 +243,8 @@ describe("the spike's run control", () => {
     run.clock.ms = -2000;
     run.controller.prepared(DESCENT);
     await flyBoundaries(run, BOUNDARIES, DESCENT.profile.durationS);
-    expect(run.calls.filter((c) => c === "cycleTrace")).toHaveLength(9);
+    // Eight boundaries, the last at 950 s: nine windows.
+    expect(run.calls.filter((c) => c === "cycleTrace")).toHaveLength(8);
     expect(untraced(run.calls)).toEqual(["writeResults", "end"]);
     const starts = [-2000, ...BOUNDARIES.map((b) => b * 1000 + 300)];
     const stops = [...BOUNDARIES.map((b) => b * 1000), DESCENT.profile.durationS * 1000];
@@ -350,7 +351,7 @@ describe("the spike's run control", () => {
     expect(run.calls).toEqual(["end"]);
     expect(run.ends[0]).toMatchObject({ status: "fail" });
     expect(run.ends[0]?.status === "fail" ? run.ends[0].reason : "").toMatch(
-      /^the trace's windows could not be placed: the busy stretch with its clearances is 270 s/,
+      /^the trace's windows could not be placed: the last window, .* is 310 s, more than the 300 s/,
     );
   });
 

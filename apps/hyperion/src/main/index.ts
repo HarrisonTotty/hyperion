@@ -237,7 +237,7 @@ function startSpikeSession(
     }),
     trace,
     traceDir: app.getPath("userData"),
-    reduce: (path) => reduceTraceFile(path),
+    reduce: (path, categories) => reduceTraceFile(path, { categories }),
     memory,
     outDir: launch.out ?? resolve(process.cwd(), "docs/measurements/descent-spike"),
     exit: (code) => {

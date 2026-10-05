@@ -1,21 +1,38 @@
-import { type DurationSummary, GPU_PROCESS_SLICES, type TraceFigures } from "../reduceTrace";
+import type { SpikeFrameSeries } from "../../preload/api";
+import { type DurationSummary, recordedGpuSlices, type TraceFigures } from "../reduceTrace";
 import { type Measured, measured } from "../measured";
 import type { TraceRecording, TraceSettings, TraceWindowFile } from "../traceWindows";
 
-/** An unprofiled run's settings, as T14.e's default trace records them. */
+/** An unprofiled run's settings, as T14.g's default trace records them: no `gpu`, no profiler. */
 export const UNPROFILED: TraceSettings = {
+  format: "json",
   profiled: false,
-  categories: ["devtools.timeline", "disabled-by-default-v8.gc", "blink.user_timing", "gpu"],
+  categories: [
+    "devtools.timeline",
+    "disabled-by-default-devtools.timeline",
+    "disabled-by-default-devtools.timeline.frame",
+    "disabled-by-default-v8.gc",
+    "blink.user_timing",
+  ],
   recordingMode: "record-until-full",
   bufferKb: 786_432,
 };
 
-/** A profiled run's: the same, with V8's CPU profiler. */
+/** A profiled run's: the same, with `gpu` and V8's CPU profiler. */
 export const PROFILED: TraceSettings = {
   ...UNPROFILED,
   profiled: true,
-  categories: [...UNPROFILED.categories, "disabled-by-default-v8.cpu_profiler"],
+  categories: [...UNPROFILED.categories, "gpu", "disabled-by-default-v8.cpu_profiler"],
 };
+
+/** The renderer's frames a window's `spike.frame` spans are made from: a report's. */
+export interface FrameSource {
+  readonly scriptStartMs: number;
+  readonly frames: Pick<SpikeFrameSeries, "scriptTimesS" | "ourCodeMs">;
+}
+
+/** How long after its frame's `requestAnimationFrame` time a made frame span starts, ms. */
+export const FRAME_SPAN_LAG_MS = 0.1;
 
 /** What a test gives of one window's reduced trace. */
 export interface WindowTraceOptions {
@@ -34,9 +51,32 @@ export interface WindowTraceOptions {
   readonly engine?: { readonly selfMs: number; readonly sampledMs: number } | null;
   /** The main thread's GC pauses. */
   readonly gc?: DurationSummary;
-  /** The GPU process's busy time and each of its slices, ms. */
+  /** The GPU process's busy time, and its `GPUTask` slices, ms. */
   readonly gpuBusyMs?: number;
   readonly gpuSlice?: DurationSummary;
+  /** The categories recorded, which list the GPU process's slices; {@link UNPROFILED}'s by default. */
+  readonly categories?: ReadonlyArray<string>;
+  /**
+   * The frames whose `spike.frame` spans the window holds: one for each frame whose rAF time lies
+   * in `[fromMs, toMs]`, starting {@link FRAME_SPAN_LAG_MS} after it and lasting its `ourCodeMs`.
+   * None without.
+   */
+  readonly frames?: FrameSource;
+}
+
+/** The frames of `source` whose rAF times lie in `[fromMs, toMs]`, as their spans: page ms. */
+export function frameSpansOf(
+  source: FrameSource,
+  fromMs: number,
+  toMs: number,
+): Array<{ readonly startMs: number; readonly durationMs: number }> {
+  const { scriptTimesS, ourCodeMs } = source.frames;
+  return scriptTimesS.flatMap((t, i) => {
+    const rafMs = source.scriptStartMs + 1000 * t;
+    return rafMs >= fromMs && rafMs <= toMs
+      ? [{ startMs: rafMs + FRAME_SPAN_LAG_MS, durationMs: ourCodeMs[i] ?? 0 }]
+      : [];
+  });
 }
 
 /**
@@ -45,6 +85,8 @@ export interface WindowTraceOptions {
  */
 export function windowTrace(options: WindowTraceOptions): TraceFigures {
   const us = (ms: number): number => Math.round(options.offsetUs + 1000 * ms);
+  const spans =
+    options.frames === undefined ? [] : frameSpansOf(options.frames, options.fromMs, options.toMs);
   const presentedAtUs = (options.presentedMs ?? []).map(us);
   const droppedAtUs = (options.droppedMs ?? []).map(us);
   const wallMs = options.toMs - options.fromMs;
@@ -70,6 +112,10 @@ export function windowTrace(options: WindowTraceOptions): TraceFigures {
       wallMs,
       busyMs,
       ourCodeMs: options.ourCodeMs ?? 50,
+      frameSpans: {
+        startsUs: spans.map(({ startMs }) => us(startMs)),
+        durationsMs: spans.map(({ durationMs }) => durationMs),
+      },
       engineSelfMs: engine?.selfMs ?? null,
       sampledMs: engine?.sampledMs ?? null,
       idleMs: wallMs - busyMs,
@@ -78,10 +124,10 @@ export function windowTrace(options: WindowTraceOptions): TraceFigures {
       pid: 3,
       tid: 4,
       busyMs: options.gpuBusyMs ?? 20,
-      slices: GPU_PROCESS_SLICES.map((name) =>
+      slices: recordedGpuSlices(options.categories ?? UNPROFILED.categories).map((name) =>
         Object.assign(
           { name },
-          name === "WebGPU"
+          name === "GPUTask"
             ? (options.gpuSlice ?? { count: 2, totalMs: 4, maxMs: 3 })
             : { count: 0, totalMs: 0, maxMs: 0 },
         ),

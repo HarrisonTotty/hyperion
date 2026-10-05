@@ -1,5 +1,5 @@
 //! The replay's results file, in the descent spike's schema (`hyperion.descent-spike.results`
-//! version 3, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
+//! version 4, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
 //! same way (R05 Design notes 18, 21 and 22).
 //!
 //! A native replay has no trace, no `requestAnimationFrame`, no GPU process and no memory
@@ -24,9 +24,14 @@ pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
 
 /// The schema's version, the client's `RESULTS_VERSION`.
 ///
-/// Version 2 stores the memory series as columns of whole KiB (decision-r05-results-size.md), and
-/// version 3 takes the client's trace in windows (decision-r05-trace-windows.md).
-pub const RESULTS_VERSION: u64 = 3;
+/// Version 2 stores the memory series as columns of whole KiB (decision-r05-results-size.md),
+/// version 3 takes the client's trace in windows (decision-r05-trace-windows.md), and version 4
+/// (decision-r05-trace-windows-2.md) adds the trace's format, counts `mainThread.split`'s our code
+/// by the per-frame `spike.frame` spans, lists only the GPU-process slices of the recorded
+/// categories, and fails a window whose frame spans disagree with the renderer's frames. A replay
+/// has no trace, so it writes `run.trace`, `mainThread.split` and `gpu.gpuProcess` as null and
+/// meets none of those checks.
+pub const RESULTS_VERSION: u64 = 4;
 
 /// Why a native replay has no memory figure.
 const NO_MEMORY: &str = "the native replay does not measure memory";
@@ -767,7 +772,7 @@ mod tests {
     fn the_memory_series_has_no_sample_and_every_reading_null_with_its_reason() {
         let results = results_json(&figures(BTreeMap::new()));
         // The client's version and column names, written out: its `validateResults` reads them.
-        assert_eq!(results["version"], 3);
+        assert_eq!(results["version"], 4);
         let none = json!({ "value": null, "reason": "the native replay does not measure memory" });
         assert_eq!(
             results["memory"]["series"],
@@ -787,12 +792,18 @@ mod tests {
     }
 
     #[test]
-    fn the_file_is_version_3_with_no_trace_window_and_no_engine_figure() {
+    fn the_file_is_version_4_with_no_trace_window_and_no_engine_figure() {
         let results = results_json(&figures(BTreeMap::new()));
         let no_trace = json!({ "value": null, "reason": "a native replay has no trace" });
-        assert_eq!(results["version"], 3);
+        assert_eq!(results["version"], 4);
         assert_eq!(results["run"]["trace"], no_trace);
         assert_eq!(results["mainThread"]["engine"], no_trace);
+        // Version 4's split and GPU-process slices are the trace's, so a replay writes neither.
+        assert_eq!(results["mainThread"]["split"], no_trace);
+        assert_eq!(
+            results["gpu"]["gpuProcess"],
+            json!({ "value": null, "reason": "a native replay has no GPU process" })
+        );
         assert_eq!(results["frames"]["excludedFrames"], 0);
     }
 

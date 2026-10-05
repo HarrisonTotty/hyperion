@@ -22,7 +22,7 @@ import {
   mergeSwitchValue,
 } from "./graphics/switches";
 import { readDescentSpikeReport, readSpikeCapture, type SpikeCaptureFiles } from "./spikeReport";
-import type { TraceSettings } from "./traceWindows";
+import type { TraceFormat, TraceSettings } from "./traceWindows";
 
 /** Whether Dawn's safety checks stay on for a spike run (`--dawn-safety`, T13.c). */
 export type DawnSafety = "on" | "off";
@@ -100,14 +100,15 @@ export function launchSwitches(
 }
 
 /**
- * The trace categories of every spike run (Design note 18): the timeline's frames, tasks and GPU
- * tasks, V8's GC slices, the page's `performance.measure` spans and the GPU process's WebGPU work.
+ * The trace categories of every spike run (Design note 18): the timeline's frames, tasks and the
+ * GPU process's tasks (`GPUTask`), V8's GC slices and the page's `performance.measure` spans.
  *
  * @remarks
  * `toplevel` is left out: it repeats the timeline's `RunTask` slices and was about half of a
  * recorded trace's bytes (2026-10-02, Electron 44.4.3, a small WebGPU page on SwiftShader). V8's
- * CPU profiler ({@link SPIKE_PROFILER_CATEGORY}) is left out too, and recorded only in a profiled
- * run (decision-r05-trace-windows.md).
+ * CPU profiler ({@link SPIKE_PROFILER_CATEGORY}) and {@link SPIKE_GPU_CATEGORY} are left out too,
+ * and recorded only in a profiled run (decision-r05-trace-windows.md,
+ * decision-r05-trace-windows-2.md).
  */
 export const SPIKE_TRACE_CATEGORIES: ReadonlyArray<string> = [
   "devtools.timeline",
@@ -115,8 +116,19 @@ export const SPIKE_TRACE_CATEGORIES: ReadonlyArray<string> = [
   "disabled-by-default-devtools.timeline.frame",
   "disabled-by-default-v8.gc",
   "blink.user_timing",
-  "gpu",
 ];
+
+/**
+ * The GPU process's own trace category, recorded only in a profiled run (`--trace-profile on`).
+ *
+ * @remarks
+ * It was 58.8 % of a JSON window's bytes and about 46 % of a protobuf one's (T14.f's measurements,
+ * 2026-10-05), for two slice names, `WebGPU` and `VulkanQueueSubmitHook`, which split the GPU
+ * process's busy time into Dawn's command execution and queue submission: a diagnostic's detail,
+ * which no criterion reads. A timed run keeps the GPU process's busy time and its `GPUTask` slices
+ * from the timeline (decision-r05-trace-windows-2.md, ruling 2).
+ */
+export const SPIKE_GPU_CATEGORY = "gpu";
 
 /**
  * V8's CPU profiler's trace category, recorded only in a profiled run (`--trace-profile on`), a
@@ -134,21 +146,29 @@ export const SPIKE_PROFILER_CATEGORY = "disabled-by-default-v8.cpu_profiler";
  * Each trace window's buffer ceiling, KiB: 768 MiB, with `record-until-full`.
  *
  * @remarks
- * A ceiling, not a reservation (decision-r05-trace-windows.md). Without the profiler a hidden low
- * run's trace grew at about 1.15 MB/s, so a 120 s window holds about 138 MB and the busy 240 s one
- * about 276 MB, a third of the buffer. The tracing service crashed at the stop of a whole
- * descent's trace (1.35–1.71 GB), its working set doubling while it read the buffer out; even a
- * full 768 MiB buffer's stop (about 1.75 GB) stays under the 2.55–2.76 GB at which those services
- * were still alive. The buffer stops recording when full rather than dropping the start, so a
- * window that filled shows as a span short of its recorded time.
+ * A ceiling, not a reservation (decision-r05-trace-windows.md). The tracing service crashed at the
+ * stop of a whole descent's trace (1.35–1.71 GB), since Chromium builds a JSON export whole in
+ * memory, 4.3–5.7 times the buffer's bytes (decision-r05-trace-windows-2.md, from T14.f's
+ * measurements); each window's buffer holds a fraction of a descent's trace. The buffer stops recording
+ * when full rather than dropping the start, so a window that filled shows as a span short of its
+ * recorded time.
  */
 export const SPIKE_TRACE_BUFFER_KB = 768 * 1024;
 
 /** What the trace's configuration depends on. */
 export interface SpikeTraceOptions {
-  /** Whether {@link SPIKE_PROFILER_CATEGORY} is recorded (`--trace-profile on`). */
+  /**
+   * Whether {@link SPIKE_GPU_CATEGORY} and {@link SPIKE_PROFILER_CATEGORY} are recorded
+   * (`--trace-profile on`).
+   */
   readonly profiled: boolean;
 }
+
+/**
+ * The format {@link SpikeTrace} writes each window in: JSON, the only one Electron's
+ * `contentTracing` writes (R05.T14.i moves the trace to a Perfetto protobuf stream over CDP).
+ */
+export const SPIKE_TRACE_FORMAT: TraceFormat = "json";
 
 /** The tracing configuration of every window of a spike run. */
 export function spikeTraceConfig(options: SpikeTraceOptions = { profiled: false }): TraceConfig {
@@ -157,16 +177,20 @@ export function spikeTraceConfig(options: SpikeTraceOptions = { profiled: false 
     trace_buffer_size_in_kb: SPIKE_TRACE_BUFFER_KB,
     included_categories: [
       ...SPIKE_TRACE_CATEGORIES,
-      ...(options.profiled ? [SPIKE_PROFILER_CATEGORY] : []),
+      ...(options.profiled ? [SPIKE_GPU_CATEGORY, SPIKE_PROFILER_CATEGORY] : []),
     ],
     excluded_categories: ["*"],
   };
 }
 
-/** A run's trace settings, as its results file records them, from the configuration it records. */
-export function traceSettingsOf(config: TraceConfig): TraceSettings {
+/**
+ * A run's trace settings, as its results file records them, from the configuration it records and
+ * the format its windows are written in.
+ */
+export function traceSettingsOf(config: TraceConfig, format: TraceFormat): TraceSettings {
   const categories = config.included_categories ?? [];
   return {
+    format,
     profiled: categories.includes(SPIKE_PROFILER_CATEGORY),
     categories: [...categories],
     // Chromium's default when none is given.
@@ -203,7 +227,7 @@ export class SpikeTrace {
   constructor(tracing: SpikeTracing, options: SpikeTraceOptions = { profiled: false }) {
     this.#tracing = tracing;
     this.#config = spikeTraceConfig(options);
-    this.settings = traceSettingsOf(this.#config);
+    this.settings = traceSettingsOf(this.#config, SPIKE_TRACE_FORMAT);
   }
 
   /** Where the trace is: `busy` while a start, stop or cycle is in flight. */

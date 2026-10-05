@@ -1,6 +1,7 @@
 /**
- * The descent spike's trace in windows of script time (plan R05, T14.d and T14.e;
- * decision-r05-trace-windows.md): each window's reduced trace placed in script time, the frames
+ * The descent spike's trace in windows of script time (plan R05, T14.d, T14.e and T14.g;
+ * decision-r05-trace-windows.md and decision-r05-trace-windows-2.md): each window's reduced trace
+ * placed in script time and checked frame by frame against the renderer's own series, the frames
  * left out at its boundaries, and the windows' figures pooled into the results file's.
  *
  * @remarks
@@ -23,14 +24,20 @@
  *   pooled intervals (`results.ts`), never averaged over windows;
  * - one failed window makes every figure read from the trace missing with "trace window k of n:
  *   <reason>": a file that is missing or not a trace, a trace with no event or no clock offset, a
- *   window that filled its buffer, or one that shows another renderer than the others.
+ *   window that filled its buffer, one whose frame spans disagree with the renderer's frames
+ *   ({@link frameSpanFailure}), or one that shows another renderer than the others.
  */
 
 import type { TraceConfig } from "electron";
 
 import type { DescentSpikeReport, SpikeFrameSeries, SpikeTraceWindow } from "../preload/api";
 import { type Measured, measured, missing } from "./measured";
-import type { GpuProcessFigures, MainThreadFigures, TraceFigures } from "./reduceTrace";
+import {
+  type GpuProcessFigures,
+  type MainThreadFigures,
+  recordedGpuSlices,
+  type TraceFigures,
+} from "./reduceTrace";
 
 /** Why an unprofiled run has no engine figure. */
 export const PROFILER_OFF_REASON =
@@ -55,8 +62,31 @@ export const SHORT_SPAN_FRACTION = 0.95;
 /** A window whose buffer was used to this share or more, %, filled it. */
 export const FULL_BUFFER_PERCENT = 99;
 
+/**
+ * How far inside its window a frame's `requestAnimationFrame` time must lie for the window's frame
+ * spans to be checked against it, ms (decision-r05-trace-windows-2.md, results version 4).
+ */
+export const FRAME_CHECK_MARGIN_MS = 500;
+
+/**
+ * How far before its frame's `requestAnimationFrame` time a frame span may start, ms: the spread
+ * of the window's clock offset (T14.d's fixture: its begins agree within 0.2 ms).
+ */
+export const FRAME_SPAN_EARLY_MS = 0.2;
+
+/** How far a frame span's duration may differ from the renderer's `ourCodeMs` for it, ms. */
+export const FRAME_SPAN_TOLERANCE_MS = 0.01;
+
+/**
+ * How a window's trace is written: Chromium's JSON (Electron's `contentTracing`), or a Perfetto
+ * protobuf stream (CDP, from R05.T14.i).
+ */
+export type TraceFormat = "json" | "perfetto-proto";
+
 /** How a run's trace was recorded: one configuration for every window. */
 export interface TraceSettings {
+  /** The format every window is written in. */
+  readonly format: TraceFormat;
   /**
    * Whether V8's CPU profiler (`spike.ts`'s `SPIKE_PROFILER_CATEGORY`) is recorded. A profiled run
    * is a diagnostic, never judged: its memory includes the profiler's samples.
@@ -126,7 +156,7 @@ export interface TraceBoundary {
   readonly maxRafIntervalMs: number | null;
 }
 
-/** The results file's `run.trace` (results schema version 3). */
+/** The results file's `run.trace` (results schema version 4). */
 export interface TraceRun extends TraceSettings {
   /** How long after each window's start its boundary's frames were still left out, s. */
   readonly guardS: number;
@@ -147,7 +177,7 @@ export interface ScriptInterval {
 }
 
 /** The renderer's main thread's time, summed over the windows. */
-export type MainThreadSplit = Omit<MainThreadFigures, "engineSelfMs" | "sampledMs">;
+export type MainThreadSplit = Omit<MainThreadFigures, "engineSelfMs" | "sampledMs" | "frameSpans">;
 
 /** The engine adapter's sampled self time, from a profiled run's CPU profile. */
 export interface EngineFigures {
@@ -197,7 +227,7 @@ export interface TraceWindowsReport extends Pick<
   DescentSpikeReport,
   "scriptStartMs" | "traceWindows" | "traceGuardS" | "warmupS" | "segments"
 > {
-  readonly frames: Pick<SpikeFrameSeries, "scriptTimesS" | "rafIntervalsMs">;
+  readonly frames: Pick<SpikeFrameSeries, "scriptTimesS" | "rafIntervalsMs" | "ourCodeMs">;
 }
 
 /** A window that passed its checks: its trace, the trace's clock offset, and its file's figures. */
@@ -281,8 +311,76 @@ export function windowFileFailure(file: TraceWindowFile): string | null {
   return check.kind === "failed" ? check.reason : bufferFailure(file);
 }
 
-/** A window's file against the time the renderer recorded it. */
-function checkWindow(file: TraceWindowFile, time: SpikeTraceWindow): Checked {
+/**
+ * Why a window's frame spans disagree with the renderer's frames, or `null` when they agree.
+ *
+ * @remarks
+ * Each frame whose `requestAnimationFrame` time (`scriptStartMs` + 1000 × its script time) lies at
+ * least {@link FRAME_CHECK_MARGIN_MS} inside the window's `[startedMs, stopRequestedMs]` must have
+ * exactly one span on the renderer's main thread whose start, placed on the page's clock by the
+ * window's offset, lies from its rAF time less {@link FRAME_SPAN_EARLY_MS} to the next frame's
+ * less the same; its duration must be the report's `ourCodeMs` for the frame within
+ * {@link FRAME_SPAN_TOLERANCE_MS}. The frames' stretches meet without overlapping, so that no span
+ * counts for two frames.
+ *
+ * The series' last frame has no next frame, and the page draws on after it, its frames unrecorded,
+ * so it is not checked. Its script time is held at the script's end, so its rAF time, which ends
+ * the stretch of the frame before it, is that frame's plus the last rAF interval.
+ */
+export function frameSpanFailure(
+  trace: TraceFigures,
+  offsetUs: number,
+  time: SpikeTraceWindow,
+  report: Pick<TraceWindowsReport, "scriptStartMs" | "frames">,
+): string | null {
+  const { scriptTimesS, rafIntervalsMs, ourCodeMs } = report.frames;
+  const last = scriptTimesS.length - 1;
+  const scriptRafMs = (i: number): number =>
+    report.scriptStartMs + 1000 * (scriptTimesS[i] ?? Number.NaN);
+  const rafMs = (i: number): number =>
+    i === last && i > 0 ? scriptRafMs(i - 1) + (rafIntervalsMs[i] ?? Number.NaN) : scriptRafMs(i);
+  const spans = trace.mainThread?.frameSpans ?? { startsUs: [], durationsMs: [] };
+  const startsMs = spans.startsUs.map((us) => (us - offsetUs) / 1000);
+  let checked = 0;
+  let disagreeing = 0;
+  let next = 0;
+  for (let i = 0; i < last; i += 1) {
+    const atMs = rafMs(i);
+    if (
+      atMs < time.startedMs + FRAME_CHECK_MARGIN_MS ||
+      atMs > time.stopRequestedMs - FRAME_CHECK_MARGIN_MS
+    ) {
+      continue;
+    }
+    checked += 1;
+    const fromMs = atMs - FRAME_SPAN_EARLY_MS;
+    const toMs = rafMs(i + 1) - FRAME_SPAN_EARLY_MS;
+    while (next < startsMs.length && (startsMs[next] ?? 0) < fromMs) {
+      next += 1;
+    }
+    let count = 0;
+    let durationMs = Number.NaN;
+    while (next < startsMs.length && (startsMs[next] ?? 0) < toMs) {
+      durationMs = spans.durationsMs[next] ?? Number.NaN;
+      count += 1;
+      next += 1;
+    }
+    const expectedMs = ourCodeMs[i] ?? Number.NaN;
+    if (count !== 1 || !(Math.abs(durationMs - expectedMs) <= FRAME_SPAN_TOLERANCE_MS)) {
+      disagreeing += 1;
+    }
+  }
+  return disagreeing === 0
+    ? null
+    : `the trace's frame spans disagree with the renderer's (${disagreeing} of ${checked} frames)`;
+}
+
+/** A window's file against the time the renderer recorded it and the renderer's frames. */
+function checkWindow(
+  file: TraceWindowFile,
+  time: SpikeTraceWindow,
+  report: TraceWindowsReport,
+): Checked {
   const check = checkFile(file);
   if (check.kind === "failed") {
     return failed(check.reason);
@@ -297,6 +395,10 @@ function checkWindow(file: TraceWindowFile, time: SpikeTraceWindow): Checked {
   const full = bufferFailure(file);
   if (full !== null) {
     return failed(full);
+  }
+  const disagree = frameSpanFailure(trace, offsetUs, time, report);
+  if (disagree !== null) {
+    return failed(disagree);
   }
   return {
     trace,
@@ -378,6 +480,7 @@ export function mergeTraceWindows(
         : checkWindow(
             files[i] ?? { trace: missing("no trace file"), bytes: null, bufferPercent: null },
             time,
+            report,
           ),
     ),
   );
@@ -496,7 +599,8 @@ function pool(
           pid: firstGpu.pid,
           tid: firstGpu.tid,
           busyMs: gpus.reduce((sum, gpu) => sum + gpu.busyMs, 0),
-          slices: firstGpu.slices.map(({ name }) => {
+          // The recorded categories' names alone: a name not recorded is absent, never a 0.
+          slices: recordedGpuSlices(settings.categories).map((name) => {
             const of = gpus.flatMap(({ slices }) => slices.filter((slice) => slice.name === name));
             return {
               name,

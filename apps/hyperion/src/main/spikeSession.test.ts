@@ -6,7 +6,8 @@ import { measured, type RunDescription, validateResults } from "./results";
 import type { TraceFigures } from "./reduceTrace";
 import { SpikeSession, type SpikeSessionDeps, traceWindowFileName } from "./spikeSession";
 import { smallReport } from "./fixtures/spikeReport";
-import { UNPROFILED, windowTrace } from "./fixtures/traces";
+import { PROFILED, UNPROFILED, windowTrace } from "./fixtures/traces";
+import type { TraceSettings } from "./traceWindows";
 
 const LAUNCH: SpikeLaunch = {
   setting: "low",
@@ -49,7 +50,7 @@ const RUN: RunDescription = {
 type CycleOutcome = "whole" | "stop fails" | "start fails";
 
 /** A trace that records its calls, its buffer an eighth used before every stop. */
-function fakeTrace(): SpikeSessionDeps["trace"] & {
+function fakeTrace(settings: TraceSettings = UNPROFILED): SpikeSessionDeps["trace"] & {
   readonly calls: string[];
   failStop: boolean;
   /** Holds the trace busy, as a start, stop or cycle in flight does. */
@@ -67,7 +68,7 @@ function fakeTrace(): SpikeSessionDeps["trace"] & {
     failStop: false,
     busy: false,
     nextCycle: "whole",
-    settings: UNPROFILED,
+    settings,
     get state() {
       return this.busy ? "busy" : state;
     },
@@ -115,13 +116,14 @@ function sessionOf(
   reduce: SpikeSessionDeps["reduce"] = () => Promise.reject(new Error("bad")),
   size?: (path: string) => Promise<number>,
   launch: SpikeLaunch = LAUNCH,
+  settings: TraceSettings = UNPROFILED,
 ) {
   const written = new Map<string, string | Uint8Array>();
   const removed: string[] = [];
   const exits: number[] = [];
   const logs: string[] = [];
   const memoryStart = vi.fn<() => void>();
-  const trace = fakeTrace();
+  const trace = fakeTrace(settings);
   const sizeOf =
     size ??
     ((path: string) =>
@@ -235,6 +237,25 @@ describe("a spike run's session", () => {
     const text = String(written.get(paths.json));
     expect(validateResults(JSON.parse(text))).toEqual([]);
     expect(text).toContain("trace window 1 of 1: its file could not be read: ENOENT: no such file");
+  });
+
+  it("reduces each window with the categories its trace recorded", async () => {
+    const seen: Array<ReadonlyArray<string>> = [];
+    const { session } = sessionOf(
+      (_path, categories) => {
+        seen.push(categories);
+        return Promise.resolve(goodTrace());
+      },
+      undefined,
+      LAUNCH,
+      PROFILED,
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    // A profiled run's, with gpu: not the timed runs' constant.
+    expect(seen).toEqual([PROFILED.categories, PROFILED.categories]);
   });
 
   it("writes a window per cycle, then reduces and deletes each in order, failing only the one whose reduction throws", async () => {

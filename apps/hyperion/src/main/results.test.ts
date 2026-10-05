@@ -146,14 +146,15 @@ function at(s: number): number {
 }
 
 /**
- * The one window's trace: presentations every 33.3 ms over the run, 5 ms after the frames, and
- * frames dropped at 5, 15 and 25 s.
+ * The one window's trace: presentations every 33.3 ms over the run, 5 ms after the frames, frames
+ * dropped at 5, 15 and 25 s, and a frame span for each of {@link reportOf}'s frames.
  */
 function windowOf(): TraceFigures {
   return windowTrace({
     offsetUs: 7e9,
     fromMs: at(-0.1),
     toMs: at(30.1),
+    frames: reportOf(),
     presentedMs: Array.from({ length: 900 }, (_, i) => at(0.005 + i / 30)),
     droppedMs: [5, 15, 25].map(at),
   });
@@ -172,7 +173,8 @@ const TWO_WINDOWS: DescentSpikeReport["traceWindows"] = [
 
 /**
  * The windows of {@link TWO_WINDOWS}: the first presenting every 33.3 ms to 15 s, the second twice
- * 500 ms apart in its exclusion, to 16.5 s, then every 33.3 ms.
+ * 500 ms apart in its exclusion, to 16.5 s, then every 33.3 ms; each with a frame span for each of
+ * {@link twoWindowReport}'s frames.
  */
 function twoWindowTraces(): [TraceFigures, TraceFigures] {
   return [
@@ -180,12 +182,14 @@ function twoWindowTraces(): [TraceFigures, TraceFigures] {
       offsetUs: 7e9,
       fromMs: at(-0.1),
       toMs: at(15),
+      frames: twoWindowReport(),
       presentedMs: Array.from({ length: 450 }, (_, i) => at(0.005 + i / 30)),
     }),
     windowTrace({
       offsetUs: 9e9,
       fromMs: at(15.5),
       toMs: at(30.1),
+      frames: twoWindowReport(),
       presentedMs: [15.505, 16.005, ...Array.from({ length: 404 }, (_, k) => 16.505 + k / 30)].map(
         at,
       ),
@@ -564,7 +568,9 @@ describe("a results file", () => {
       run: runOf(),
       report: reportOf(),
       // What the reducer gives for a file with no events, as Chromium's crashed export left.
-      trace: recordingOf([windowFile(new TraceReducer().figures())]),
+      trace: recordingOf([
+        windowFile(new TraceReducer({ categories: UNPROFILED.categories }).figures()),
+      ]),
       memory: MEMORY,
     });
     const empty = missing(`trace window 1 of 1: ${EMPTY_TRACE_REASON}`);
@@ -610,6 +616,11 @@ function twoWindowResults(
     trace: recordingOf(windows, settings),
     memory: MEMORY,
   });
+}
+
+/** The names of a results file's GPU-process slices, in order. */
+function sliceNames(results: DescentResults): ReadonlyArray<string> | undefined {
+  return results.gpu.gpuProcess.value?.slices.map(({ name }) => name);
 }
 
 describe("a results file of a windowed trace", () => {
@@ -677,7 +688,11 @@ describe("a results file of a windowed trace", () => {
       }),
       "the trace could not be reduced: spike-trace-1.json is not a trace",
     ],
-    ["an empty file", () => windowFile(new TraceReducer().figures()), EMPTY_TRACE_REASON],
+    [
+      "an empty file",
+      () => windowFile(new TraceReducer({ categories: UNPROFILED.categories }).figures()),
+      EMPTY_TRACE_REASON,
+    ],
     [
       "no clock offset",
       (second) => windowFile({ ...second, clockOffsetUs: null }),
@@ -698,6 +713,19 @@ describe("a results file of a windowed trace", () => {
       "it filled its buffer: 99 % of it was used",
     ],
     [
+      "frame spans that disagree with the renderer's frames",
+      (second) =>
+        windowFile({
+          ...second,
+          mainThread:
+            second.mainThread === null
+              ? null
+              : { ...second.mainThread, frameSpans: { startsUs: [], durationsMs: [] } },
+        }),
+      // The second window checks the frames from 16.0 s to 29.6 s, 0.5 s inside [15.5, 30.1] s.
+      "the trace's frame spans disagree with the renderer's (273 of 273 frames)",
+    ],
+    [
       "another renderer",
       (second) => windowFile({ ...second, frames: { ...second.frames, pid: 9 } }),
       "it shows another renderer than trace window 1: renderer 9, main thread 2, compositor 1, against renderer 1, main thread 2, compositor 1",
@@ -716,6 +744,19 @@ describe("a results file of a windowed trace", () => {
       true,
     ]);
     expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("lists GPUTask alone in an unprofiled run, and all three GPU-process slices in a profiled one", () => {
+    const unprofiled = twoWindowResults();
+    const profiled = twoWindowResults(undefined, PROFILED);
+    expect(sliceNames(unprofiled)).toEqual(["GPUTask"]);
+    expect(sliceNames(profiled)).toEqual(["WebGPU", "GPUTask", "VulkanQueueSubmitHook"]);
+    expect(validateResults(JSON.parse(JSON.stringify(unprofiled)))).toEqual([]);
+    expect(validateResults(JSON.parse(JSON.stringify(profiled)))).toEqual([]);
+  });
+
+  it("records the trace's format", () => {
+    expect(twoWindowResults().run.trace.value?.format).toBe("json");
   });
 
   it("leaves the engine's figures out of an unprofiled run, and refuses them there", () => {
@@ -766,7 +807,7 @@ describe("a results file of a windowed trace", () => {
   it("summarises the windows, their boundaries and the frames left out", () => {
     const summary = summaryMarkdown(twoWindowResults());
     expect(summary).toContain(
-      "- **Trace:** 2 windows, 18.5 s traced after the warm-up, unprofiled; 1 boundary left out 30 frames (largest stall 500.00 ms); largest file 1 MiB, buffer use up to 10 %",
+      "- **Trace:** 2 json windows, 18.5 s traced after the warm-up, unprofiled; 1 boundary left out 30 frames (largest stall 500.00 ms); largest file 1 MiB, buffer use up to 10 %",
     );
     expect(summary).toContain("Frames left out at the trace's window boundaries: 30.");
   });
@@ -786,7 +827,14 @@ describe("a results file of a windowed trace", () => {
       }),
       trace: recordingOf(
         traceWindows.map(({ startedMs }) =>
-          windowFile(windowTrace({ offsetUs: 7e9, fromMs: startedMs, toMs: startedMs + windowMs })),
+          windowFile(
+            windowTrace({
+              offsetUs: 7e9,
+              fromMs: startedMs,
+              toMs: startedMs + windowMs,
+              frames: reportOf(),
+            }),
+          ),
         ),
       ),
       memory: longRun(3600),
@@ -1222,10 +1270,11 @@ describe("the schema check", () => {
     expect(validateResults([])).toEqual(["the file is not an object"]);
   });
 
-  it("refuses version 2", () => {
+  it("refuses version 3", () => {
     const results = twoWindowResults();
-    expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 2 })))).toEqual([
-      "version is not 3",
+    expect(RESULTS_VERSION).toBe(4);
+    expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 3 })))).toEqual([
+      "version is not 4",
     ]);
   });
 
@@ -1317,6 +1366,41 @@ describe("the schema check", () => {
       ["run.trace.value does not say how the trace was recorded"],
     ],
     [
+      "a trace without its format",
+      [[["run", "trace", "value", "format"], DELETE]],
+      ["run.trace.value.format is neither json nor perfetto-proto"],
+    ],
+    [
+      "a trace in another format",
+      [[["run", "trace", "value", "format"], "protobuf"]],
+      ["run.trace.value.format is neither json nor perfetto-proto"],
+    ],
+    [
+      "a WebGPU slice without gpu among the categories",
+      [
+        [
+          ["gpu", "gpuProcess", "value", "slices", 1],
+          { name: "WebGPU", count: 0, totalMs: 0, maxMs: 0 },
+        ],
+      ],
+      ["gpu.gpuProcess.value.slices holds WebGPU, but its category gpu was not recorded"],
+    ],
+    [
+      "a GPU-process slice the reducer does not summarise",
+      [
+        [
+          ["gpu", "gpuProcess", "value", "slices", 1],
+          { name: "CommandBuffer", count: 0, totalMs: 0, maxMs: 0 },
+        ],
+      ],
+      ["gpu.gpuProcess.value.slices holds CommandBuffer, which the reducer does not summarise"],
+    ],
+    [
+      "no GPUTask slice, whose category was recorded",
+      [[["gpu", "gpuProcess", "value", "slices"], []]],
+      ["gpu.gpuProcess.value.slices lacks GPUTask, whose category was recorded"],
+    ],
+    [
       "excluded frames that are not a count",
       [[["frames", "excludedFrames"], 1.5]],
       ["frames.excludedFrames is not a count"],
@@ -1365,7 +1449,14 @@ describe("the schema check", () => {
       report: reportOf({ traceWindows }),
       trace: recordingOf(
         traceWindows.map(({ startedMs, stopRequestedMs }) =>
-          windowFile(windowTrace({ offsetUs: 7e9, fromMs: startedMs, toMs: stopRequestedMs })),
+          windowFile(
+            windowTrace({
+              offsetUs: 7e9,
+              fromMs: startedMs,
+              toMs: stopRequestedMs,
+              frames: reportOf(),
+            }),
+          ),
         ),
       ),
       memory: MEMORY,

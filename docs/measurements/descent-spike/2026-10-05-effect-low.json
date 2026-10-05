@@ -1,6 +1,6 @@
 {
   "schema": "hyperion.descent-spike.results",
-  "version": 3,
+  "version": 4,
   "run": {
     "startedAt": "2026-10-05T02:16:01.868Z",
     "machine": {

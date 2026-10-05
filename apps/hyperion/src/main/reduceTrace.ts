@@ -15,12 +15,14 @@
  *   (`STATE_PRESENTED_ALL`, `STATE_PRESENTED_PARTIAL`), dropped (`STATE_DROPPED`) or not wanted;
  * - thread busy time: the timeline's `RunTask` slices, merged where they nest;
  * - the GPU process: its `CrGpuMain` thread's tasks and its `WebGPU`, `GPUTask` and
- *   `VulkanQueueSubmitHook` slices, the CPU side of Chromium's command transport and Dawn;
+ *   `VulkanQueueSubmitHook` slices, the CPU side of Chromium's command transport and Dawn, each
+ *   summarised only when its category was recorded ({@link GPU_PROCESS_SLICES});
  * - GC: every complete slice in a `v8.gc` category, and `MinorGC` and `MajorGC`, merged per thread
  *   so that nested phases count once;
  * - `performance.measure` spans: `blink.user_timing` async begin and end pairs, whose begins also
  *   carry the span's start in `performance.now()` ms (`args.startTime`), which sets the trace's
- *   clock against the page's ({@link TraceFigures.clockOffsetUs});
+ *   clock against the page's ({@link TraceFigures.clockOffsetUs}). The main thread's
+ *   {@link FRAME_MEASURE} spans, one a frame, are "our code";
  * - the engine adapter's self time: V8's CPU profile chunks of the renderer's main thread, whose
  *   samples at a leaf in the lazily imported `engine-*.js` chunk are counted.
  *
@@ -34,12 +36,42 @@ import { createInterface } from "node:readline";
 /** Matches the URL of the renderer's lazily imported engine chunk, `engine-<hash>.js`. */
 export const ENGINE_CHUNK_PATTERN = /\/engine-[\w-]+\.js$/;
 
-/** The GPU process's slices summarised by name. */
-export const GPU_PROCESS_SLICES: ReadonlyArray<string> = [
-  "WebGPU",
-  "GPUTask",
-  "VulkanQueueSubmitHook",
+/**
+ * The `performance.measure` name of the renderer's span around each frame's whole callback
+ * (`view/spike/spikeRun.ts`'s `FRAME_MEASURE`; R05.T14.g, decision-r05-trace-windows-2.md).
+ *
+ * @remarks
+ * The renderer's copy cannot be imported across the two tsconfig projects, so a test on each side
+ * pins the literal.
+ */
+export const FRAME_MEASURE = "spike.frame";
+
+/** One GPU-process slice the reducer summarises, and the trace category that records it. */
+export interface GpuProcessSlice {
+  readonly name: string;
+  readonly category: string;
+}
+
+/**
+ * The GPU process's slices summarised by name, in the order the results list them, each with the
+ * category it is recorded in.
+ *
+ * @remarks
+ * `GPUTask` is the timeline's, which every run records; `WebGPU` and `VulkanQueueSubmitHook` are
+ * `gpu`'s, which only a profiled run records (decision-r05-trace-windows-2.md, ruling 2).
+ */
+export const GPU_PROCESS_SLICES: ReadonlyArray<GpuProcessSlice> = [
+  { name: "WebGPU", category: "gpu" },
+  { name: "GPUTask", category: "disabled-by-default-devtools.timeline" },
+  { name: "VulkanQueueSubmitHook", category: "gpu" },
 ];
+
+/** The names of {@link GPU_PROCESS_SLICES} whose category is among `categories`, in order. */
+export function recordedGpuSlices(categories: ReadonlyArray<string>): string[] {
+  return GPU_PROCESS_SLICES.filter(({ category }) => categories.includes(category)).map(
+    ({ name }) => name,
+  );
+}
 
 /** Count, sum and largest of a set of durations. */
 export interface DurationSummary {
@@ -84,15 +116,19 @@ export interface ThreadFigures {
   readonly gc: DurationSummary;
 }
 
-/** One `performance.measure` name's spans on one thread. */
-export interface UserTimingFigures extends DurationSummary {
-  readonly name: string;
-  readonly pid: number;
-  readonly tid: number;
+/** Spans of one `performance.measure` name, in order of their starts. */
+export interface SpanList {
   /** Every span's start, in the trace's clock, µs, ascending. */
   readonly startsUs: ReadonlyArray<number>;
   /** Every span's duration, ms, in order of its start. */
   readonly durationsMs: ReadonlyArray<number>;
+}
+
+/** One `performance.measure` name's spans on one thread. */
+export interface UserTimingFigures extends DurationSummary, SpanList {
+  readonly name: string;
+  readonly pid: number;
+  readonly tid: number;
 }
 
 /** The renderer's main thread, split as Design note 18 asks. */
@@ -103,8 +139,14 @@ export interface MainThreadFigures {
   readonly wallMs: number;
   /** The union of its tasks, ms. */
   readonly busyMs: number;
-  /** The union of its `performance.measure` spans: our own per-frame code, ms. */
+  /**
+   * The union of its {@link FRAME_MEASURE} spans, one around each frame's callback: our own
+   * per-frame code, ms. Other spans (`terrain.frame`, `terrain.select`, the segments') are left
+   * out.
+   */
   readonly ourCodeMs: number;
+  /** Its {@link FRAME_MEASURE} spans, for the check against the renderer's own frames. */
+  readonly frameSpans: SpanList;
   /**
    * Sampled self time in the engine chunk, ms; `null` without a CPU profile of the thread. Where
    * our spans enclose engine calls it lies inside `ourCodeMs` as well.
@@ -121,7 +163,10 @@ export interface GpuProcessFigures {
   readonly pid: number;
   readonly tid: number;
   readonly busyMs: number;
-  /** {@link GPU_PROCESS_SLICES} by name, absent names with a count of 0. */
+  /**
+   * {@link GPU_PROCESS_SLICES} by name: those whose category was recorded, each with a count of 0
+   * when the trace has none; a name not recorded is absent.
+   */
   readonly slices: ReadonlyArray<DurationSummary & { readonly name: string }>;
 }
 
@@ -147,6 +192,8 @@ export interface TraceFigures {
 
 /** Options of a reduction. */
 export interface ReduceOptions {
+  /** The categories the trace recorded, which say which GPU-process slices it can hold. */
+  readonly categories: ReadonlyArray<string>;
   /**
    * Matches the engine chunk's script URL; {@link ENGINE_CHUNK_PATTERN} by default. A `g` or `y`
    * flag is dropped, since it would make each test start where the last one stopped.
@@ -338,6 +385,8 @@ type FrameEnd = readonly [endUs: number, state: string | undefined];
  */
 export class TraceReducer {
   readonly #engineChunk: RegExp;
+  /** The GPU-process slices the trace's categories record. */
+  readonly #gpuSliceNames: ReadonlyArray<string>;
   readonly #threadNames = new Map<string, string>();
   readonly #processNames = new Map<number, string>();
   readonly #tasks = new Map<string, Interval[]>();
@@ -353,9 +402,10 @@ export class TraceReducer {
   #firstUs = Number.POSITIVE_INFINITY;
   #lastUs = Number.NEGATIVE_INFINITY;
 
-  constructor(options: ReduceOptions = {}) {
+  constructor(options: ReduceOptions) {
     const pattern = options.engineChunk ?? ENGINE_CHUNK_PATTERN;
     this.#engineChunk = new RegExp(pattern.source, pattern.flags.replaceAll(/[gy]/g, ""));
+    this.#gpuSliceNames = recordedGpuSlices(options.categories);
   }
 
   /** Adds one event, as parsed JSON; anything that is not an event is ignored. */
@@ -381,7 +431,7 @@ export class TraceReducer {
       if (isGcSlice(event)) {
         pushTo(this.#gc, key, interval);
       }
-      if (GPU_PROCESS_SLICES.includes(event.name)) {
+      if (this.#gpuSliceNames.includes(event.name)) {
         pushTo(this.#gpuSlices, `${key}:${event.name}`, event.dur / 1000);
       }
       return;
@@ -595,13 +645,9 @@ export class TraceReducer {
     const key = threadKey(pid, tid);
     const wallMs = span === null ? 0 : (span.lastUs - span.firstUs) / 1000;
     const busyMs = unionLengthUs(this.#tasks.get(key) ?? []) / 1000;
-    const spans: Interval[] = [];
-    for (const [userKey, pairs] of this.#userTiming) {
-      const [p, t] = userKey.split("\u0000");
-      if (Number(p) === pid && Number(t) === tid) {
-        spans.push(...pairs);
-      }
-    }
+    const spans = (this.#userTiming.get(`${pid}\u0000${tid}\u0000${FRAME_MEASURE}`) ?? []).toSorted(
+      (a, b) => a[0] - b[0],
+    );
     const profile = [...this.#profiles]
       .filter(([profileKey, state]) => profileKey.startsWith(`${pid}:`) && state.tid === tid)
       .map(([, state]) => state)[0];
@@ -611,6 +657,10 @@ export class TraceReducer {
       wallMs,
       busyMs,
       ourCodeMs: unionLengthUs(spans) / 1000,
+      frameSpans: {
+        startsUs: spans.map(([start]) => start),
+        durationsMs: spans.map(([start, end]) => (end - start) / 1000),
+      },
       engineSelfMs: profile === undefined ? null : profile.engineUs / 1000,
       sampledMs: profile === undefined ? null : profile.sampledUs / 1000,
       idleMs: Math.max(0, wallMs - busyMs),
@@ -628,7 +678,7 @@ export class TraceReducer {
       pid,
       tid,
       busyMs: unionLengthUs(this.#tasks.get(key) ?? []) / 1000,
-      slices: GPU_PROCESS_SLICES.map((name) =>
+      slices: this.#gpuSliceNames.map((name) =>
         Object.assign({ name }, summarise(this.#gpuSlices.get(`${key}:${name}`) ?? [])),
       ),
     };
@@ -752,7 +802,7 @@ async function readWholeTrace(path: string): Promise<ReadonlyArray<unknown>> {
 /** Reduces events, from memory or from {@link readTraceEvents}. */
 export async function reduceTrace(
   events: Iterable<unknown> | AsyncIterable<unknown>,
-  options: ReduceOptions = {},
+  options: ReduceOptions,
 ): Promise<TraceFigures> {
   const reducer = new TraceReducer(options);
   for await (const event of events) {
@@ -762,6 +812,6 @@ export async function reduceTrace(
 }
 
 /** Reduces a trace file written by {@link SpikeTrace}'s `stop`. */
-export function reduceTraceFile(path: string, options: ReduceOptions = {}): Promise<TraceFigures> {
+export function reduceTraceFile(path: string, options: ReduceOptions): Promise<TraceFigures> {
   return reduceTrace(readTraceEvents(path), options);
 }
