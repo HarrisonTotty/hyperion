@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { sphereFootprint } from "../bodies/regime";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
@@ -43,6 +44,7 @@ function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
     bodies: [
       { id: lit.body, centreM: vec3(0, 0, -1e8), figure: lit.figure, photometry: lit.photometry },
     ],
+    depthWriters: [],
     previousRegimes: new Map(),
     overlay: null,
     meter: "average",
@@ -83,6 +85,39 @@ describe("the photorealistic renderer", () => {
       ...passes.slice(2),
     ]);
     expect(view.frames.map((f) => [f.label, f.encoding])).toEqual([["tonemap", "in-pass"]]);
+    renderer.dispose();
+  });
+
+  it("draws mesh bodies with depth in the bodies pass, between the sky and the painter's sequence", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const frame = frameWith([]);
+    const [planet] = frame.bodies;
+    if (planet === undefined) {
+      throw new Error("no body");
+    }
+    // A depth writer over the planet, standing for R10's terrain.
+    const writer = sphereFootprint(
+      planet.centreM,
+      planet.figure.equatorialRadiusM,
+      camera,
+      VIEWPORT,
+    );
+    const plan = renderer.render(view, { ...frame, depthWriters: writer === null ? [] : [writer] });
+    expect(plan?.regimes.get(planet.id)).toBe("mesh");
+    const passes = engine.targetFrames.map((f) => [
+      f.label,
+      f.colourLoad ?? "clear",
+      f.draws.map((draw) => draw.material.name),
+    ]);
+    expect(passes.slice(0, 3)).toEqual([
+      [SKY_PASS_LABEL, "clear", ["sky:starSpriteHdr"]],
+      [PHOTOREAL_PASS_LABELS.bodies, "load", ["bodies:smoothMesh"]],
+      [PHOTOREAL_PASS_LABELS.discs, "load", ["bodies:discLimb"]],
+    ]);
     renderer.dispose();
   });
 

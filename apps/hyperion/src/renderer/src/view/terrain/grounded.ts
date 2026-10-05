@@ -13,10 +13,10 @@
  */
 
 import { sub, dot } from "../../geometry/vec3";
-import type { PatchBounds } from "./bounds";
+import { PACKED_BOUNDS_LENGTH, packBounds, type PatchBounds } from "./bounds";
 import { PATCH_QUADS, vertexSpacing } from "./cube";
 import type { BodyFixedVec3, PlanetGeometry } from "./planet";
-import { distanceToBoxFromM } from "./viewGeometry";
+import { distanceToPackedBoxFromM } from "./viewGeometry";
 
 /**
  * A grounded or descending body: a sphere about its position (Design note 9).
@@ -91,6 +91,16 @@ export function morphRampM(patchSizeM: number): number {
 }
 
 /**
+ * {@link distanceToPackedBoxFromM}, bound once: selection asks the rule of every patch, and under a
+ * module runner (the descent record's harness runs selection under Vite's) each read of an
+ * imported binding is a getter call.
+ */
+const distanceOf = distanceToPackedBoxFromM;
+
+/** Scratch for packing a {@link PatchBounds} for {@link inForcedRegionPacked}; used within one call. */
+const PACKED = new Float64Array(PACKED_BOUNDS_LENGTH);
+
+/**
  * Whether a patch's bounding box comes within a contact's forced radius of any contact
  * (Design note 9).
  *
@@ -103,13 +113,23 @@ export function inForcedRegion(
   grounded: ReadonlyArray<GroundContact>,
   patchSizeM: number,
 ): boolean {
-  // A loop over `distanceToBoxFromM`, with nothing allocated: selection asks it of every patch.
+  packBounds(PACKED, bounds);
+  return inForcedRegionPacked(PACKED, grounded, patchSizeM);
+}
+
+/**
+ * {@link inForcedRegion} of packed bounds `p` ({@link PACKED_BOUNDS_LENGTH}'s layout): the rule's
+ * one form, which selection asks of every patch on the bounds it keeps packed.
+ */
+export function inForcedRegionPacked(
+  p: Float64Array,
+  grounded: ReadonlyArray<GroundContact>,
+  patchSizeM: number,
+): boolean {
+  // A loop over `distanceToPackedBoxFromM`, with nothing allocated.
   for (let n = 0; n < grounded.length; n += 1) {
     const g = grounded[n];
-    if (
-      g !== undefined &&
-      distanceToBoxFromM(bounds, g.positionM) <= forcedRadiusM(g, patchSizeM)
-    ) {
+    if (g !== undefined && distanceOf(p, g.positionM) <= forcedRadiusM(g, patchSizeM)) {
       return true;
     }
   }

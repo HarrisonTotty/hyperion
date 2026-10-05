@@ -1,17 +1,13 @@
 // The terrain pass (plan R05, R05.T11.b, Design notes 4 to 6 and 17): one instanced draw of the
 // shared 65 × 65 mesh with skirts, an instance per drawn patch, read from the cache's slots.
-// Composed after frame.wgsl and before one of the two vertex paths, terrainBakedOffsets.wgsl or
+// Composed after frame.wgsl and patchVertex.wgsl (`SlotRecord` and the `FaceDifferences`
+// arithmetic) and before one of the two vertex paths, terrainBakedOffsets.wgsl or
 // terrainFaceDifferences.wgsl, which define `ownOffset` and `morphOffset`.
 //
 // Every position here is relative: a vertex's offset from its patch origin, in the body-fixed
 // axes, from the path; the origin less the camera, in the frame the view draws in, from the
 // instance record (narrowed once from f64 on the CPU). The absolute position M·d + h·ν is never
 // formed in f32, whose step is half a metre at an Earth's radius (Design note 4).
-//
-// The direction and normal differences follow `hyperion_surface::patch::vertex`'s f32 reference
-// operation for operation, so that `vertexEmulation.ts` checks them against T4.b's golden. A GPU
-// may still differ in the last bits (fused multiply-adds, WGSL's 2.5 ULP division and its sqrt),
-// far inside T4.b's 1 mm bound.
 
 const VERTICES_PER_SIDE : u32 = 65u;
 const PATCH_VERTICES : u32 = 4225u;
@@ -31,19 +27,6 @@ struct Draw {
   sunRadiance : vec4f,
   // The normals atlas: tiles across a layer, tiles a layer, a tile's stored texels, samples a side.
   atlas : vec4f,
-}
-
-// uniforms.ts's SLOT_RECORD_BYTES: PatchTermsF32 and the skirt depth.
-struct SlotRecord {
-  axisA : vec3f, s0 : f32,
-  axisE1 : vec3f, t0 : f32,
-  axisE2 : vec3f, u0 : f32,
-  scale : vec3f, v0 : f32,
-  m0 : vec3f, step : f32,
-  nu0 : vec3f, h0M : f32,
-  skirtDepthM : f32,
-  straddles : u32,
-  pad : vec2u,
 }
 
 // uniforms.ts's INSTANCE_RECORD_BYTES.
@@ -96,63 +79,6 @@ struct VertexOut {
 // The vertex's own height (0) or morph height (1).
 fn heightAt(slot : u32, x : u32, y : u32, which : u32) -> f32 {
   return heights[(slot * PATCH_VERTICES + y * VERTICES_PER_SIDE + x) * 2u + which];
-}
-
-// The cube sphere's warp, `st_to_uv_f32`.
-fn stToUv(s : f32) -> f32 {
-  if (s >= 0.5) {
-    return (4.0 * s * s - 1.0) / 3.0;
-  }
-  let r = 1.0 - s;
-  return (1.0 - 4.0 * r * r) / 3.0;
-}
-
-// u(s₀ + δs) − u(s₀), `warp_difference_f32`.
-fn warpDifference(s0 : f32, ds : f32, straddles : bool) -> f32 {
-  let s = s0 + ds;
-  if (straddles) {
-    return stToUv(s) - stToUv(s0);
-  }
-  if (s0 >= 0.5) {
-    return 4.0 * ds * (s + s0) / 3.0;
-  }
-  return 4.0 * ds * (2.0 - s - s0) / 3.0;
-}
-
-// p ÷ |p| − p₀ ÷ |p₀| for p = p₀ + Δ, `unit_difference_f32`, with no difference of nearly equal
-// numbers formed.
-fn unitDifference(p0 : vec3f, delta : vec3f) -> vec3f {
-  let dotP = p0.x * delta.x + p0.y * delta.y + p0.z * delta.z;
-  let dd = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
-  let len0Sq = p0.x * p0.x + p0.y * p0.y + p0.z * p0.z;
-  let len0 = sqrt(len0Sq);
-  let len = sqrt(len0Sq + 2.0 * dotP + dd);
-  let diff = -(2.0 * dotP + dd);
-  let factor = diff / (len * len0 * (len + len0));
-  return delta / len + p0 * factor;
-}
-
-// d − d₀, the vertex direction's difference from the patch centre's.
-fn directionDifference(rec : SlotRecord, x : u32, y : u32) -> vec3f {
-  let straddles = rec.straddles != 0u;
-  let du = warpDifference(rec.s0, (f32(x) - 32.0) * rec.step, straddles);
-  let dv = warpDifference(rec.t0, (f32(y) - 32.0) * rec.step, straddles);
-  let n0 = rec.axisA + rec.u0 * rec.axisE1 + rec.v0 * rec.axisE2;
-  let delta = du * rec.axisE1 + dv * rec.axisE2;
-  return unitDifference(n0, delta);
-}
-
-// ν − ν₀, the spheroid normal's difference, from d − d₀.
-fn normalDifference(rec : SlotRecord, dd : vec3f) -> vec3f {
-  return unitDifference(rec.m0, dd / rec.scale);
-}
-
-// P − P₀ at height h: M (d − d₀) + h (ν − ν₀) + (h − h₀) ν₀, `face_difference_position_f32`.
-fn faceDifferencePosition(rec : SlotRecord, x : u32, y : u32, h : f32) -> vec3f {
-  let dd = directionDifference(rec, x, y);
-  let dnu = normalDifference(rec, dd);
-  let dh = h - rec.h0M;
-  return rec.scale * dd + h * dnu + dh * rec.nu0;
 }
 
 // CDLOD's morph factor from the unmorphed vertex's distance (Design note 6), held at zero near

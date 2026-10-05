@@ -79,6 +79,7 @@ function drawPlanet(index: number) {
       exposureScale: 1e-4,
       annuli: 4,
       planetshine: PLANETSHINE_SOURCES_HIGH,
+      setting: "high" as const,
     },
     new Map([[id, "disc"]]),
   );

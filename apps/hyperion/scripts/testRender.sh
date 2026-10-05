@@ -7,7 +7,8 @@
 #   testRender.sh [--variant=NAME]... [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches]
 #                 [--captures=DIR]
 #
-# --captures=DIR also renders R05.T12.c's atmosphere comparison frames and saves them in DIR as PNGs.
+# --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R05.T11.c's
+# terrain, R05.T13.b's spike, R07.T9's occultation) and saves them in DIR as PNGs.
 #
 # --drop-adapter-switches removes only `--enable-unsafe-webgpu` and `--use-webgpu-adapter`, keeping
 # the headless Ozone, ANGLE and Vulkan switches, so that Electron starts and finds no adapter.

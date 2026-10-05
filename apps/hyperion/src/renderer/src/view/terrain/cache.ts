@@ -21,7 +21,8 @@
 import type { BodyFixedVec3 } from "./planet";
 import type { SlotLayout } from "./slotLayout";
 import type { HeightRangeLookup, Selection } from "./select";
-import { ancestorIndex, MAX_LEVEL, type PatchKey, patchKeyIndex, patchKeyString } from "./patchKey";
+import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
+import { PatchKeyTable } from "./patchKeyTable";
 
 /** What the cache keeps of a baked patch besides the bytes in its slot. */
 export interface ResidentPatch {
@@ -82,11 +83,6 @@ function cachedPatch(patch: ResidentPatch, slot: number, keyString: string): Cac
   return { key, generation, originM, heightRangeM, boundingRadiusM, slot, keyString };
 }
 
-/** The leaves' maps per level, by {@link patchKeyIndex}. */
-function levelMaps<T>(): Map<number, T>[] {
-  return Array.from({ length: MAX_LEVEL + 1 }, () => new Map<number, T>());
-}
-
 /**
  * The fixed-slot patch cache of one body.
  *
@@ -101,8 +97,8 @@ function levelMaps<T>(): Map<number, T>[] {
 export class PatchCache implements HeightRangeLookup {
   readonly layout: SlotLayout;
   private readonly entries = new Map<string, Entry>();
-  /** The same entries per level by {@link patchKeyIndex}, for lookups that build no string. */
-  private readonly byIndex: Map<number, Entry>[] = levelMaps();
+  /** The same entries by key, for lookups that build no string and box no number. */
+  private readonly byKey = new PatchKeyTable<Entry>();
   private readonly freeSlots: number[] = [];
   /**
    * The last retained selection's forced, selected and demanded keys, cleared and refilled each
@@ -151,11 +147,12 @@ export class PatchCache implements HeightRangeLookup {
   }
 
   /**
-   * The cached patch at `level` with index `index` ({@link patchKeyIndex}), if it is resident: the
-   * draw set's lookup, which builds no string.
+   * The cached patch at `level`, at most `key`'s own, over `key`'s area (its ancestor there, or
+   * itself), if it is resident: the draw set's lookup, which builds no key or string.
    */
-  residentAt(level: number, index: number): CachedPatch | undefined {
-    return this.byIndex[level]?.get(index)?.patch;
+  residentOver(key: PatchKey, level: number): CachedPatch | undefined {
+    const shift = key.level - level;
+    return this.byKey.getAt(key.face, level, key.i >> shift, key.j >> shift)?.patch;
   }
 
   /** Whether the patch keyed by `keyString` is resident. */
@@ -168,7 +165,7 @@ export class PatchCache implements HeightRangeLookup {
    * selection's {@link HeightRangeLookup}, through which baked ancestors tighten bounds.
    */
   heightRangeM(key: PatchKey): readonly [number, number] | undefined {
-    return this.byIndex[key.level]?.get(patchKeyIndex(key))?.patch.heightRangeM;
+    return this.byKey.get(key)?.patch.heightRangeM;
   }
 
   /**
@@ -183,8 +180,13 @@ export class PatchCache implements HeightRangeLookup {
    * bake, whose heights, offsets and normals its slot already holds, and keeping them here would
    * hold about 51 KB a patch in the renderer, about 66 MB with the low setting's 1,296 slots full
    * (R05.T14.c's memory probe).
+   *
+   * @throws RangeError for a key deeper than {@link MAX_LEVEL}, before anything is changed.
    */
   insert(patch: ResidentPatch): CacheInsert {
+    if (patch.key.level > MAX_LEVEL) {
+      throw new RangeError(`level ${patch.key.level} is not a quadtree level`);
+    }
     const keyString = patchKeyString(patch.key);
     const present = this.entries.get(keyString);
     if (present !== undefined) {
@@ -216,7 +218,7 @@ export class PatchCache implements HeightRangeLookup {
       hidden: false,
     };
     this.entries.set(keyString, entry);
-    this.byIndex[patch.key.level]?.set(patchKeyIndex(patch.key), entry);
+    this.byKey.set(patch.key, entry);
     return { kind: "stored", slot, evicted };
   }
 
@@ -233,7 +235,7 @@ export class PatchCache implements HeightRangeLookup {
 
   private forget(keyString: string, entry: Entry): void {
     this.entries.delete(keyString);
-    this.byIndex[entry.patch.key.level]?.delete(patchKeyIndex(entry.patch.key));
+    this.byKey.delete(entry.patch.key);
   }
 
   /**
@@ -284,7 +286,8 @@ export class PatchCache implements HeightRangeLookup {
     for (const selected of selection.patches.values()) {
       const key = selected.key;
       for (let level = key.level - 1; level >= 0; level -= 1) {
-        const entry = this.byIndex[level]?.get(ancestorIndex(key, level));
+        const shift = key.level - level;
+        const entry = this.byKey.getAt(key.face, level, key.i >> shift, key.j >> shift);
         if (entry === undefined) {
           continue;
         }
@@ -300,7 +303,7 @@ export class PatchCache implements HeightRangeLookup {
     // ranges and were drawn by those parents (R05.T8, the high-bound ruling's F3). Not pinned, so
     // that a cache whose pins fill it gives them up before the selection's own.
     for (const key of selection.hiddenBaked) {
-      const entry = this.byIndex[key.level]?.get(patchKeyIndex(key));
+      const entry = this.byKey.get(key);
       if (entry !== undefined) {
         entry.lastUsed = this.tick;
         entry.hidden = !entry.forced && !entry.drawn;
@@ -429,9 +432,9 @@ interface ResolvedSet {
  * @remarks
  * An ancestor standing in covers its whole area, so a resident selected patch beneath it is drawn
  * through the ancestor rather than on top of it; the drawn patches never overlap. It reads the
- * cache and changes nothing; {@link PatchCache.retain} records the frame's use. Lookups go by
- * level and {@link patchKeyIndex}, so no key or string is built; the records, the arrays and the
- * map of chosen patches are kept and reused, and no sort is run.
+ * cache and changes nothing; {@link PatchCache.retain} records the frame's use. Lookups go by a
+ * key's ancestor at a level ({@link PatchCache.residentOver}), so no key or string is built; the
+ * records, the arrays and the map of chosen patches are kept and reused, and no sort is run.
  */
 export class DrawSetResolver {
   private readonly cache: PatchCache;
@@ -470,7 +473,7 @@ export class DrawSetResolver {
       let found: CachedPatch | undefined;
       let standIn = false;
       for (let level = key.level; level >= 0; level -= 1) {
-        found = cache.residentAt(level, ancestorIndex(key, level));
+        found = cache.residentOver(key, level);
         if (found !== undefined) {
           standIn = level < key.level;
           break;
@@ -523,7 +526,7 @@ export class DrawSetResolver {
 
   private hasChosenAncestor(key: PatchKey): boolean {
     for (let level = key.level - 1; level >= 0; level -= 1) {
-      const patch = this.cache.residentAt(level, ancestorIndex(key, level));
+      const patch = this.cache.residentOver(key, level);
       if (patch !== undefined && this.chosen.has(patch)) {
         return true;
       }

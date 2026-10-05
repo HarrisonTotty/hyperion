@@ -21,12 +21,7 @@ import type {
   ViewsCheckWindow,
 } from "../preload/api";
 import { type Measured, measured, missing } from "./measured";
-import {
-  GPU_PROCESS_SLICES,
-  readTraceEvents,
-  TraceReducer,
-  type TraceFigures,
-} from "./reduceTrace";
+import { readTraceEvents, recordedGpuSlices, TraceReducer, type TraceFigures } from "./reduceTrace";
 import { readSpikeEnd } from "./spike";
 import { readViewsCheckRecord } from "./viewsCheckRecord";
 import {
@@ -78,6 +73,9 @@ export function viewsCheckTraceConfig(): TraceConfig {
   };
 }
 
+/** The GPU process's slices that {@link VIEWS_CHECK_TRACE_CATEGORIES} record, by name. */
+const GPU_SLICE_NAMES: ReadonlyArray<string> = recordedGpuSlices(VIEWS_CHECK_TRACE_CATEGORIES);
+
 /** A slice's name that says it copies. */
 const COPY_SLICE = /copy|blit/iu;
 
@@ -112,7 +110,7 @@ function clippedUnionUs(spans: ReadonlyArray<Span>, fromUs: number, toUs: number
 /**
  * The spans of a trace that the check reads within its measured window: every thread's `RunTask`
  * slices (its busy time, as R05's reducer takes it), and every process's slices of R05's GPU
- * names (`GPU_PROCESS_SLICES`) and those named as copies, a begin without its end as an instant.
+ * names (`GPU_SLICE_NAMES`) and those named as copies, a begin without its end as an instant.
  */
 export class WindowScan {
   readonly #tasks = new Map<string, Span[]>();
@@ -148,7 +146,7 @@ export class WindowScan {
       tasks.push(span);
       this.#tasks.set(key, tasks);
     }
-    if (GPU_PROCESS_SLICES.includes(name) || COPY_SLICE.test(name)) {
+    if (GPU_SLICE_NAMES.includes(name) || COPY_SLICE.test(name)) {
       const key = `${String(pid)}\u0000${name}`;
       const slices = this.#slices.get(key) ?? [];
       slices.push(span);
@@ -194,7 +192,7 @@ export interface ReducedWindow {
 
 /** Reads a trace file once, through R05's reducer and the check's scan. */
 export async function reduceWindowFile(path: string): Promise<ReducedWindow> {
-  const reducer = new TraceReducer();
+  const reducer = new TraceReducer({ categories: VIEWS_CHECK_TRACE_CATEGORIES });
   const scan = new WindowScan();
   for await (const event of readTraceEvents(path)) {
     reducer.add(event);
@@ -241,7 +239,7 @@ export function phaseTraceFigures(
         : measured({
             busyMs: reduced.scan.busyMs(gpuProcess.pid, gpuProcess.tid, fromUs, toUs),
             slices: reduced.scan.slices(gpuProcess.pid, fromUs, toUs, (name) =>
-              GPU_PROCESS_SLICES.includes(name),
+              GPU_SLICE_NAMES.includes(name),
             ),
             copySlices: reduced.scan.slices(gpuProcess.pid, fromUs, toUs, (name) =>
               COPY_SLICE.test(name),

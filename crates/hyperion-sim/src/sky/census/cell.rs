@@ -3,29 +3,44 @@
 //!
 //! For each record the mass skip keeps
 //! ([`SkyCellCache::bright_subset`](super::cache::SkyCellCache::bright_subset) above the cell's
-//! floor, [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; a member of
+//! floor, [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; its light is
+//! bounded by [`flux_bound`] before its motion is built, at its epoch position's distance less the
+//! cell's pad and offset and over the ages the light's travel then allows (R06.T8.f); a member of
 //! the galactic centre, whose orbit is not built ([`TraceMotionError`]), is tallied and left out
 //! before anything else is built; the system is found at its retarded time ([`retarded`] on
-//! [`Drift::of_record`]); its light is bounded by [`flux_bound`]; and only if the bound can pass the
-//! cut is the system generated ([`SystemStars::generate`]), each star read from the pair-evolved
-//! [`SystemStars::state_at`]'s stars at the emitted time, placed by [`star_positions_at`] about the
-//! system's apparent position, dimmed by its distance and one [`sightline`] to the observer, and
-//! kept if its V is brighter than the cut, plus its eye colour offset where the eye is asked.
+//! [`Drift::of_record`]); its light is bounded again at the emitted time and the apparent
+//! position; and only if the bound can pass the cut is the system generated
+//! ([`SystemStars::generate`]), each star read from the pair-evolved [`SystemStars::state_at`]'s
+//! stars at the emitted time, placed by [`star_positions_at`] about the system's apparent position,
+//! dimmed by its distance and, unless that alone already puts it past the cut, one [`sightline`] to
+//! the observer, and kept if its V is brighter than the cut, plus its eye colour offset where the
+//! eye is asked.
+//!
+//! Each skip is exact: it drops only what the census would drop after it, so the census's stars
+//! are bit for bit those of the brute force, which generates every system and measures every star
+//! ([`Bound::Ignored`]). The bound is the brightest single star's (Design note 10): the census
+//! keeps each star alone, so a system is listable only if one of its stars is.
 //!
 //! The flux bound reads the envelope rather than the primary's brief: the brief is the primary's
 //! single-star model, tested over the clock window only (ask A1), so for any star farther than
 //! 1,000 ly it would cost a full generation; the envelope bound is cheaper and still a bound, so
-//! the skip never changes an answer (R06's Risks).
+//! the skip never changes an answer (R06's Risks). Plan 11's pairs can merge two stars into one
+//! of up to twice the primary's mass, or feed one, and a main-sequence merger or accretor then
+//! shines as a younger star of its new mass. So a grid system's bound and the cell's floor both
+//! read the envelope at [`max_star_mass`] of the primary over ages from zero (R06.T16.b; see
+//! [`flux_bound`]).
 //!
 //! A star of a multiple system is not at its system's barycentre: plan 11 keeps every apocentre
 //! inside half the system's tidal radius ([`TIDAL_CUT_SHARE`]), which near the Sun is some light
-//! years. Both the flux bound and the cell's floor take a star as near the observer as that
-//! allows ([`star_offset_bound`], [`cell_offset_bound`]).
+//! years. Both the flux bound and the cell's floor take a star as near the observer as the cell's
+//! bound allows ([`CellOffsets`], which bounds every record's [`star_offset_bound`]), read once per
+//! cell (R06.T8.f).
 //!
 //! The census reads no luminosity table: its skips read the envelope, and each star's own state.
 //! Readers of the tables (the caps, the band) pass their light ages through
 //! [`LuminosityTables::age_for`](crate::sky::luminosity::LuminosityTables::age_for).
 
+use core::f64::consts::LN_2;
 use std::sync::LazyLock;
 
 use crate::coords::{GalacticPosition, SystemPosition};
@@ -33,6 +48,7 @@ use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::gas::extinction::{NoiseMode, Quality, sightline};
 use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::imf::MassBand;
+use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, SystemKind, SystemRecord};
 use crate::galaxy::query::{pad_for, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
@@ -49,7 +65,7 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, Magnitudes, SolarMasses, Years};
 
 use super::super::colour::StarColour;
-use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, max_star_mass};
+use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, always_single, max_star_mass};
 use super::super::eye::{SkyBackground, SpRatio, luminance, star_colour_offset};
 use super::super::photometry::{absolute_v_of_state, colour_of_state};
 use super::query::{SkyContext, SkyQuery};
@@ -303,13 +319,36 @@ impl CensusTallies {
     }
 }
 
-/// Whether a record's flux bound is applied before its system is generated.
+/// Whether a record's skips are taken: its flux bound before its system is generated, and each
+/// star's cut before its sightline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Bound {
-    /// The census's: a system whose bound cannot pass the cut is not generated.
+    /// The census's: a system whose bound cannot pass the cut is not generated, and a star that
+    /// cannot pass it with no extinction takes no sightline.
     Applied,
-    /// The brute force's: every system is generated.
+    /// The brute force's: every system is generated and every star measured.
     Ignored,
+}
+
+/// A star's apparent V at `d_ly` light-years with no extinction: `m_v` plus the distance modulus.
+/// The census adds its extinction to this, so a star this alone puts past [`kept_to`] stays past
+/// it.
+#[must_use]
+fn unextinguished_v(m_v: Magnitudes, d_ly: f64) -> f64 {
+    m_v.value() + distance_modulus(d_ly.max(1e-6))
+}
+
+/// The faintest apparent V a star of `colour` is kept to for `query`: the cut, plus the star's eye
+/// colour offset where the eye is asked.
+#[must_use]
+fn kept_to(query: &SkyQuery, colour: &StarColour) -> f64 {
+    let offset = if query.eye().is_some() {
+        SpRatio::new(colour.sp_ratio())
+            .map_or(0.0, |rho| star_colour_offset(rho, &SCOTOPIC_SKY).value())
+    } else {
+        0.0
+    };
+    query.cut().value() + offset
 }
 
 /// The faintest absolute V a system's brightest possible star could have and still be listed at
@@ -334,7 +373,8 @@ pub const GRID_STAR_BOUND: u8 = MAX_COMPANIONS as u8 + 2;
 
 /// The most stars a system of `record` can hold: one for a forced single (a free-floating brown
 /// dwarf, which takes no companion of any kind), [`GRID_STAR_BOUND`] otherwise (a grid system's
-/// redraws can change its count, so its first attempt's is not a bound).
+/// redraws can change its count, so its first attempt's is not a bound). A grid record is a forced
+/// single exactly when its layer is [`always_single`], which a test checks.
 #[must_use]
 fn star_bound(record: &SystemRecord) -> u8 {
     match grid_multiplicity(record) {
@@ -371,30 +411,170 @@ pub fn star_offset_bound(galaxy: &Galaxy, record: &SystemRecord) -> LightYears {
 /// [`star_offset_bound`] for every record `key` can hold: the heaviest primary of its layer's
 /// band, and the tidal radius bounded over the cell's whole extent from the galactic centre
 /// ([`tidal_radius_bound_within`](crate::galaxy::potential::PotentialTables::tidal_radius_bound_within)
-/// at its farthest corner).
+/// at its farthest corner); zero for a layer whose systems are all single ([`always_single`]),
+/// whose one star is its barycentre. The census reads [`CellOffsets`] instead, which bounds every
+/// record's offset too, and is at least this wherever the circular frequency does not rise between
+/// the cell's corner and the table's node.
 #[must_use]
 pub fn cell_offset_bound(galaxy: &Galaxy, key: CellKey) -> LightYears {
-    let o = key.origin_ly();
+    if always_single(key.layer()) {
+        return LightYears::ZERO;
+    }
+    let radius = galaxy.potential().tidal_radius_bound_within(
+        offset_mass(key.layer()),
+        LightYears::new(farthest_from_centre_ly(key)),
+    );
+    LightYears::new(offset_bound_at(LightYears::from(radius).value()))
+}
+
+/// The mass whose tidal radius bounds every system of `layer`'s: [`GRID_STAR_BOUND`] times the
+/// heaviest primary of its band, since no companion outweighs its primary.
+#[must_use]
+fn offset_mass(layer: Layer) -> SolarMasses {
+    SolarMasses::new(f64::from(GRID_STAR_BOUND) * MassBand::from(layer).hi())
+}
+
+/// The distance of `key`'s farthest corner from the galactic centre, ly.
+#[must_use]
+fn farthest_from_centre_ly(key: CellKey) -> f64 {
     let size = f64::from(key.size_ly());
     let mut far_sq = 0.0;
-    for &lo in &o {
+    for &lo in &key.origin_ly() {
         let lo = f64::from(lo);
         let far = lo.abs().max((lo + size).abs());
         far_sq += far * far;
     }
-    let mass = SolarMasses::new(f64::from(GRID_STAR_BOUND) * MassBand::from(key.layer()).hi());
-    let radius = galaxy
-        .potential()
-        .tidal_radius_bound_within(mass, LightYears::new(far_sq.sqrt()));
-    LightYears::new(offset_bound_at(LightYears::from(radius).value()))
+    far_sq.sqrt()
 }
 
-/// The bound on a system's V light, as an absolute magnitude, before its stars are generated:
-/// n × the envelope's flux at [`max_star_mass`] of the primary and the system's age at `emitted`
-/// (decided 2026-10-02, item 2, for multiple systems; for a single star, as a forced single is,
-/// n is 1; n is [`GRID_STAR_BOUND`] for a grid system). `None` where no star of the system can
-/// shine in V, the system is not yet born, or its record has no density component (one not placed
-/// by the grid, which [`census_record`] then generates unbounded).
+/// The nodes per octave of galactocentric distance on which [`CellOffsets`] holds its bounds: some
+/// 4.4% apart, so a cell's bound is at most that much farther out than its own corner.
+const OFFSET_NODES_PER_OCTAVE: u32 = 16;
+
+/// The first node, ly: 2⁻⁴, the potential tables' first grid point.
+const OFFSET_FIRST_NODE_LY: f64 = 0.0625;
+
+/// The octaves from the first node to the last, 2¹⁷ ly, beyond the root cube's farthest corner
+/// from the centre (2¹⁶ √3, about 113,500 ly).
+const OFFSET_OCTAVES: u32 = 21;
+
+/// Per galaxy and layer, a bound on how far any star of a cell's systems lies from its
+/// barycentre, read in O(1) a cell (R06.T8.f): [`cell_offset_bound`] costs some 40 µs, since its
+/// tidal-radius bound scans the potential's grid points.
+///
+/// It holds, on galactocentric distance nodes [`OFFSET_NODES_PER_OCTAVE`] to the octave, the
+/// running maximum of [`cell_offset_bound`]'s quantity at each node, and gives a cell the value at
+/// the first node at or beyond its farthest corner from the centre. The tidal-radius bound within a
+/// radius bounds the tidal radius of every point inside it, so the value bounds every record's
+/// [`star_offset_bound`] in the cell; and it is never less than [`cell_offset_bound`] of the cell
+/// wherever that grows with distance from the centre, as it does wherever the circular frequency
+/// falls outward (a test checks it at many cells). A layer whose systems are all single holds zero.
+///
+/// It depends on the galaxy's potential alone, which its parameters fix, so a server builds it once
+/// per galaxy, beside the luminosity tables, and every census job of that galaxy reads it through
+/// its [`SkyContext`](super::SkyContext). Another galaxy's bounds could be too small for this one's
+/// stars, so it keeps the parameters it was built for, and the census checks them in debug builds
+/// ([`is_for`](Self::is_for)).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CellOffsets {
+    /// The parameters of the galaxy whose bounds these are.
+    params: GalaxyParams,
+    /// The nodes, ly, ascending.
+    nodes: Vec<f64>,
+    /// Per layer of [`Layer::ALL`], the bound at each node, ly; empty for a layer whose systems
+    /// are all single.
+    offsets: [Vec<f64>; Layer::ALL.len()],
+}
+
+impl CellOffsets {
+    /// The bounds of `galaxy`'s cells: some 1,700 tidal-radius bounds, built once per galaxy.
+    #[must_use]
+    pub fn build(galaxy: &Galaxy) -> Self {
+        let count = OFFSET_OCTAVES * OFFSET_NODES_PER_OCTAVE + 1;
+        let nodes: Vec<f64> = (0..count)
+            .map(|k| {
+                OFFSET_FIRST_NODE_LY
+                    * math::exp(LN_2 * f64::from(k) / f64::from(OFFSET_NODES_PER_OCTAVE))
+            })
+            .collect();
+        let offsets = Layer::ALL.map(|layer| {
+            if always_single(layer) {
+                return Vec::new();
+            }
+            let mass = offset_mass(layer);
+            let mut running = 0.0_f64;
+            nodes
+                .iter()
+                .map(|&r| {
+                    let radius = galaxy
+                        .potential()
+                        .tidal_radius_bound_within(mass, LightYears::new(r));
+                    running = running.max(offset_bound_at(LightYears::from(radius).value()));
+                    running
+                })
+                .collect()
+        });
+        Self {
+            params: galaxy.params().clone(),
+            nodes,
+            offsets,
+        }
+    }
+
+    /// Whether these are `galaxy`'s bounds: built for its parameters, which fix its potential.
+    #[must_use]
+    pub fn is_for(&self, galaxy: &Galaxy) -> bool {
+        self.params == *galaxy.params()
+    }
+
+    /// The bound for `key`'s systems: how far any of their stars can lie from its barycentre.
+    #[must_use]
+    pub fn of(&self, key: CellKey) -> LightYears {
+        let row = &self.offsets[usize::from(key.layer().value())];
+        if row.is_empty() {
+            return LightYears::ZERO;
+        }
+        let far = farthest_from_centre_ly(key);
+        // Every cell of the root cube lies within the last node.
+        let k = self
+            .nodes
+            .partition_point(|&node| node < far)
+            .min(self.nodes.len() - 1);
+        LightYears::new(row[k])
+    }
+
+    /// The bytes the bounds own on the heap.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        (self.nodes.capacity() + self.offsets.iter().map(Vec::capacity).sum::<usize>())
+            * size_of::<f64>()
+    }
+}
+
+/// The bound on the V light of any one star of a system, as an absolute magnitude, before its
+/// stars are generated (decided 2026-10-02, item 2; R06.T16.b; R06.T8.f).
+///
+/// It is the brightest single star's, with no factor for the system's count: the census keeps each
+/// star alone (Design note 10), so a system none of whose stars could pass the cut lists nothing,
+/// whatever their sum. Were the census ever to list an unresolved system's blended light, the bound
+/// would return to a flux sum over its stars.
+///
+/// - **A grid system of stars**, whose pairs may have interacted: the envelope at
+///   [`max_star_mass`] of the primary (twice its mass, a merger's or an accretor's) and over
+///   every age from zero to the system's at `emitted`. A main-sequence merger takes BSE's
+///   fractional age at the pair's mass (eq. 80), and a main-sequence accretor keeps or lowers its
+///   fractional age at its new mass (Hurley, Tout and Pols 2002, MNRAS 329, 897, §2.6.6), so each
+///   shines as a younger star of its new mass. A donor keeps its fractional age at a lower mass,
+///   which can put its own track's age past the system's, and an evolved accretor keeps its
+///   track's luminosity with its radius from its new mass (Hurley, Pols and Tout 2000, §7.1).
+///   Neither is taken to be brighter in V than a single star of at most 2 m₁ at an age within the
+///   system's; the slow test `envelope_bounds_pair_states` checks it.
+/// - **A single star**, as a forced single is (a free-floating brown dwarf, never in a pair): the
+///   envelope's flux at the primary's own mass and age.
+///
+/// `None` where no star of the system can shine in V, the system is not yet born, or its record
+/// has no density component (one not placed by the grid, which [`census_record`] then generates
+/// unbounded).
 #[must_use]
 pub fn flux_bound(
     envelope: &BrightnessEnvelope,
@@ -402,80 +582,223 @@ pub fn flux_bound(
     emitted: UniverseTime,
 ) -> Option<Magnitudes> {
     let age = record.age_at(emitted);
-    if age.value() <= 0.0 {
+    flux_bound_over(envelope, record, (age, age))
+}
+
+/// [`flux_bound`] over every emitted time at which the system's age lies within `ages` (years,
+/// inclusive): never fainter than it at any of them, and `None` only where it is `None` at each.
+#[must_use]
+fn flux_bound_over(
+    envelope: &BrightnessEnvelope,
+    record: &SystemRecord,
+    (young, old): (Years, Years),
+) -> Option<Magnitudes> {
+    if old.value() <= 0.0 {
         return None;
     }
     let component = record.component()?;
-    let n = star_bound(record);
-    let brightest = envelope.brightest(
-        record.layer(),
-        component,
-        max_star_mass(record.primary_initial_mass()),
-        (age, age),
-    )?;
-    Some(Magnitudes::new(
-        brightest.value() - 2.5 * math::log10(f64::from(n)),
-    ))
+    let m1 = record.primary_initial_mass();
+    let (mass, ages) = if star_bound(record) == 1 {
+        (m1, (young, old))
+    } else {
+        (max_star_mass(m1), (Years::ZERO, old))
+    };
+    envelope.brightest(record.layer(), component, mass, ages)
+}
+
+/// How far the light of a cell's stars can have come, for one query: what the cell's floor and its
+/// records' bounds before and after their drift read, computed once per cell (R06.T8.f).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CellReach {
+    /// The least distance any star of the cell can have from the observer when its light left
+    /// it, ly: the box's nearest point less the pad and the offset, at least zero.
+    least: f64,
+    /// How far a record can have moved from its epoch position by any time its light can have
+    /// left it, ly.
+    pad: f64,
+    /// How far a star can lie from its system's barycentre, ly ([`CellOffsets::of`]).
+    offset: f64,
+}
+
+impl CellReach {
+    /// The reach of `key` for `query`.
+    ///
+    /// A record lies within its pad of the box and its stars within their offset of the record,
+    /// so a listed star's light left it at most far + offset + pad before `t`, and the pad is β
+    /// times |`t_emit` − epoch|: solved together, pad = β (|t − epoch| + far + offset) ÷ (1 − β).
+    /// The same pad bounds where the record is at the retardation's first guess, from which the
+    /// light's age is taken ([`retarded`]): that guess's light time, the present distance, is at
+    /// most far + β |t − epoch|, within the same sum.
+    ///
+    /// It rests, as the range query's padding and the cells' floors do, on every grid record moving
+    /// slower than its layer's [`pad_speed`]: plan 08's draw holds every speed below the least of
+    /// the escape speed and 1,000 km/s (`galaxy::kinematics::draw`), and layer E pads at
+    /// 3,000 km/s.
+    #[must_use]
+    fn of(offsets: &CellOffsets, key: CellKey, query: &SkyQuery) -> Self {
+        let apex = query.observer().position().to_light_years_f64();
+        let o = key.origin_ly();
+        let size = f64::from(key.size_ly());
+        let mut near_sq = 0.0;
+        let mut far_sq = 0.0;
+        for (&lo, &a) in o.iter().zip(&apex) {
+            let lo = f64::from(lo);
+            let hi = lo + size;
+            let near = a.clamp(lo, hi) - a;
+            let far = (a - lo).abs().max((hi - a).abs());
+            near_sq += near * near;
+            far_sq += far * far;
+        }
+        let t = query.observer().time();
+        let speed = pad_speed(key.layer());
+        let year = UniverseTime::EPOCH
+            .checked_add(Span::from_julian_years(1).expect("a year is a span"))
+            .expect("a year after the epoch is a time");
+        let beta = pad_for(year, speed).value();
+        let offset = offsets.of(key).value();
+        let lead = t.since_epoch().as_julian_years_f64().abs();
+        let pad = beta * (lead + far_sq.sqrt() + offset) / (1.0 - beta);
+        Self {
+            least: (near_sq.sqrt() - pad - offset).max(0.0),
+            pad,
+            offset,
+        }
+    }
+}
+
+/// The years by which the bound before the drift widens the light's age either way, beyond the
+/// pad: far more than the rounding of the light's age (to the nanosecond) and of the ages (some
+/// 10⁻⁶ years at 10¹⁰), so that the ages it reads hold every age the bound after the drift can.
+const BEFORE_DRIFT_SLACK_YEARS: f64 = 1.0;
+
+/// The share of the epoch distance by which the bound before the drift brings the system nearer,
+/// beyond the pad: far more than the rounding of the distances (cell-integer arithmetic, some
+/// 10⁻¹⁶ of them), so that its distance is never beyond the one the bound after the drift reads.
+const BEFORE_DRIFT_SLACK_SHARE: f64 = 1e-9;
+
+/// Whether `record`'s flux bound can pass the cut before its drift is built (R06.T8.f): the bound
+/// over the system's ages across every light time its distance allows, at its epoch position's
+/// distance less the cell's pad and offset. A record that fails would fail after its retardation
+/// too, where [`census_record`] tests the bound at the emitted time and the apparent position:
+/// its pad bounds how far the record moves by the emitted time and by the retardation's first
+/// guess, so its light's age lies within the pad of its epoch distance and its apparent position
+/// is no nearer than that distance less the pad.
+#[must_use]
+fn passes_before_drift(
+    envelope: &BrightnessEnvelope,
+    record: &SystemRecord,
+    query: &SkyQuery,
+    reach: &CellReach,
+) -> bool {
+    let observer = query.observer();
+    let d_epoch = observer
+        .position()
+        .distance_to(record.epoch_position())
+        .value()
+        / METRES_PER_LIGHT_YEAR;
+    // A light-year is a Julian year of light, so the light's age in years is its distance in ly.
+    let now = record.age_at(observer.time()).value();
+    let ages = (
+        Years::new(now - (d_epoch + reach.pad) - BEFORE_DRIFT_SLACK_YEARS),
+        Years::new(now - (d_epoch - reach.pad).max(0.0) + BEFORE_DRIFT_SLACK_YEARS),
+    );
+    let Some(m) = flux_bound_over(envelope, record, ages) else {
+        return false;
+    };
+    let nearest = d_epoch * (1.0 - BEFORE_DRIFT_SLACK_SHARE) - reach.pad - reach.offset;
+    m.value() <= faintest_listable(query, nearest)
+}
+
+/// The extinction in V from a star at `apparent` to the observer at `observer_at`: one
+/// [`sightline`] through the realised field and the modifiers near the segment (`modifiers` is
+/// the caller's buffer), never negative.
+///
+/// The extinction is a sum of non-negative columns, but a modifier cloud's column is a difference
+/// of two values of its antiderivative, which can round below zero far from the cloud. Held at
+/// zero, the cut before the sightline is exact whatever the modifiers. The brute force measures
+/// the same way, and a NaN still shows.
+fn star_extinction(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    apparent: &GalacticPosition,
+    observer_at: &GalacticPosition,
+    modifiers: &mut Vec<GasModifier>,
+) -> Magnitudes {
+    modifiers.clear();
+    ctx.modifiers
+        .modifiers_near_segment(apparent, observer_at, modifiers);
+    let a_v = sightline(
+        galaxy.gas(),
+        apparent,
+        observer_at,
+        NoiseMode::Realised,
+        STAR_SIGHTLINE_QUALITY,
+        modifiers,
+        &mut ctx.noise,
+    )
+    .a_v();
+    if a_v.value() < 0.0 {
+        Magnitudes::ZERO
+    } else {
+        a_v
+    }
 }
 
 /// The mass floor of `key` for `query`: the least primary mass whose system could hold a star
 /// listable at the cell's least distance from the observer, its records' motion over the light's
-/// age and its stars' offsets from their barycentres allowed for, at the grid's [`flux_bound`] of
-/// [`GRID_STAR_BOUND`] stars. The envelope is the same for every component, so the galaxy's first
-/// is asked.
+/// age and its stars' offsets from their barycentres allowed for ([`CellOffsets`]), at the bound
+/// of one star, as [`flux_bound`]'s. Like that bound, it reads the envelope at [`max_star_mass`]
+/// of each primary, twice its mass, over every age (through [`BrightnessEnvelope::mass_floor`]),
+/// so a primary is kept whenever a merger or an accretor it could make might be listed; a layer
+/// whose systems are all single, the brown dwarfs', reads each primary's own mass. The envelope is
+/// the same for every component, so the galaxy's first is asked. It reads one value a mass node
+/// and a table of `ctx`'s: under a microsecond a cell, 0.15–0.51 µs on T16.b's 648 cells near the
+/// Sun (R06.T8.f, as built).
 ///
 /// # Panics
 ///
 /// If the galaxy has no density component, which no galaxy is built without.
 #[must_use]
 pub fn cell_floor(
+    galaxy: &Galaxy,
+    ctx: &SkyContext<'_>,
+    key: CellKey,
+    query: &SkyQuery,
+) -> SolarMasses {
+    debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");
+    floor_at(
+        galaxy,
+        ctx.envelope,
+        key,
+        query,
+        &CellReach::of(ctx.offsets, key, query),
+    )
+}
+
+/// [`cell_floor`] of `key` at its `reach`.
+fn floor_at(
+    galaxy: &Galaxy,
     envelope: &BrightnessEnvelope,
     key: CellKey,
     query: &SkyQuery,
-    galaxy: &Galaxy,
+    reach: &CellReach,
 ) -> SolarMasses {
-    let apex = query.observer().position().to_light_years_f64();
-    let o = key.origin_ly();
-    let size = f64::from(key.size_ly());
-    let mut near_sq = 0.0;
-    let mut far_sq = 0.0;
-    for (&lo, &a) in o.iter().zip(&apex) {
-        let lo = f64::from(lo);
-        let hi = lo + size;
-        let near = a.clamp(lo, hi) - a;
-        let far = (a - lo).abs().max((hi - a).abs());
-        near_sq += near * near;
-        far_sq += far * far;
-    }
-    // A record lies within its pad of the box and its stars within their offset of the record, so
-    // a listed star's light left it at most far + offset + pad before `t`, and the pad is β times
-    // |t_emit − epoch|: solved together, pad = β (|t − epoch| + far + offset) ÷ (1 − β).
-    let t = query.observer().time();
-    let speed = pad_speed(key.layer());
-    let year = UniverseTime::EPOCH
-        .checked_add(Span::from_julian_years(1).expect("a year is a span"))
-        .expect("a year after the epoch is a time");
-    let beta = pad_for(year, speed).value();
-    let offset = cell_offset_bound(galaxy, key).value();
-    let lead = t.since_epoch().as_julian_years_f64().abs();
-    let pad = beta * (lead + far_sq.sqrt() + offset) / (1.0 - beta);
-    let least = (near_sq.sqrt() - pad - offset).max(0.0);
     let component = galaxy
         .fields()
         .component_ids()
         .next()
         .expect("a galaxy has components");
-    let faintest = faintest_listable(query, least) + 2.5 * math::log10(f64::from(GRID_STAR_BOUND));
     envelope.mass_floor(
         key.layer(),
         component,
-        Magnitudes::new(faintest),
+        Magnitudes::new(faintest_listable(query, reach.least)),
         (Years::ZERO, Years::new(MAX_AGE_YEARS)),
     )
 }
 
 /// The stars of one record kept for `query` (see the [module](self) documentation), appended to
-/// `out`, with its counts in `tally`. `bound` says whether the flux bound may skip it.
+/// `out`, with its counts in `tally`. `bound` says whether the skips are taken: under
+/// [`Bound::Applied`] a grid record is bounded as its cell's census bounds it.
 ///
 /// # Panics
 ///
@@ -489,7 +812,44 @@ pub fn census_record(
     tally: &mut CensusTallies,
     out: &mut Vec<SkyStar>,
 ) {
+    debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");
+    let reach = match bound {
+        Bound::Applied => CellKey::of(record.id())
+            .ok()
+            .map(|key| CellReach::of(ctx.offsets, key, query)),
+        Bound::Ignored => None,
+    };
+    record_stars(
+        galaxy,
+        ctx,
+        record,
+        query,
+        (bound, reach.as_ref()),
+        tally,
+        out,
+    );
+}
+
+/// [`census_record`] with its cell's reach, which bounds the record's light when given and the
+/// record has a density component.
+fn record_stars(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    record: &SystemRecord,
+    query: &SkyQuery,
+    (bound, reach): (Bound, Option<&CellReach>),
+    tally: &mut CensusTallies,
+    out: &mut Vec<SkyStar>,
+) {
     if query.exclude() == Some(record.id()) || record.kind() == SystemKind::RoguePlanet {
+        return;
+    }
+    // A record no density component placed (a feature member's, once T16.a brings them) has no
+    // envelope bound here and is always generated, so both modes agree.
+    let reach = reach.filter(|_| record.component().is_some());
+    if let Some(reach) = reach
+        && !passes_before_drift(ctx.envelope, record, query, reach)
+    {
         return;
     }
     let layer = record.layer();
@@ -510,14 +870,11 @@ pub fn census_record(
         .distance_to(r.apparent_position())
         .value()
         / METRES_PER_LIGHT_YEAR;
-    // A record no density component placed (a feature member's, once T16.a brings them) has no
-    // envelope bound here and is always generated, so both modes agree.
-    if bound == Bound::Applied && record.component().is_some() {
+    if let Some(reach) = reach {
         let Some(m) = flux_bound(ctx.envelope, record, emitted) else {
             return;
         };
-        let nearest = d_system - star_offset_bound(galaxy, record).value();
-        if m.value() > faintest_listable(query, nearest) {
+        if m.value() > faintest_listable(query, d_system - reach.offset) {
             return;
         }
     }
@@ -531,7 +888,6 @@ pub fn census_record(
     star_positions_at(stars.hierarchy(), emitted, &mut positions);
     let observer_at = observer.position();
     let mut modifiers: Vec<GasModifier> = Vec::new();
-    let dark_sky = &*SCOTOPIC_SKY;
     for (body, place) in &positions {
         let index = u8::try_from(body.body_index())
             .ok()
@@ -553,28 +909,17 @@ pub fn census_record(
             continue;
         };
         let d = observer_at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
-        modifiers.clear();
-        ctx.modifiers
-            .modifiers_near_segment(&apparent, observer_at, &mut modifiers);
-        let a_v = sightline(
-            galaxy.gas(),
-            &apparent,
-            observer_at,
-            NoiseMode::Realised,
-            STAR_SIGHTLINE_QUALITY,
-            &modifiers,
-            &mut ctx.noise,
-        )
-        .a_v();
-        let v = m_v.value() + distance_modulus(d.max(1e-6)) + a_v.value();
+        let unextinguished = unextinguished_v(m_v, d);
         let colour = colour_of_state(star);
-        let offset = if query.eye().is_some() {
-            SpRatio::new(colour.sp_ratio())
-                .map_or(0.0, |rho| star_colour_offset(rho, dark_sky).value())
-        } else {
-            0.0
-        };
-        if v > query.cut().value() + offset {
+        let limit = kept_to(query, &colour);
+        // A_V is never negative (below), and adding it never lowers a float: a star past the cut
+        // before its extinction stays past it, so it takes no sightline (R06.T8.f).
+        if bound == Bound::Applied && unextinguished > limit {
+            continue;
+        }
+        let a_v = star_extinction(galaxy, ctx, &apparent, observer_at, &mut modifiers);
+        let v = unextinguished + a_v.value();
+        if v > limit {
             continue;
         }
         out.push(SkyStar {
@@ -605,7 +950,7 @@ pub fn census_record(
 /// use hyperion_sim::observe::Observer;
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::sky::census::{
-///     CensusTallies, NoSkyCellCache, SkyContext, SkyQuery, census_cell, census_plan,
+///     CellOffsets, CensusTallies, NoSkyCellCache, SkyContext, SkyQuery, census_cell, census_plan,
 /// };
 /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
 /// use hyperion_sim::sky::luminosity::LuminosityTables;
@@ -614,6 +959,7 @@ pub fn census_record(
 ///
 /// let galaxy = Galaxy::new(Seed::new(11));
 /// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let offsets = CellOffsets::build(&galaxy);
 /// let at = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
 /// let query = SkyQuery::builder(Observer::new(at, UniverseTime::EPOCH)?, Magnitudes::new(6.5))
 ///     .build()?;
@@ -622,6 +968,7 @@ pub fn census_record(
 /// let mut ctx = SkyContext {
 ///     tables: &tables,
 ///     envelope: &envelope,
+///     offsets: &offsets,
 ///     noise,
 ///     cells: &NoSkyCellCache,
 ///     sources: &[],
@@ -629,7 +976,7 @@ pub fn census_record(
 /// };
 /// // A server runs the cells as jobs, each with its own context, and merges the parts.
 /// let (mut stars, mut tallies) = (Vec::new(), CensusTallies::default());
-/// for &key in plan.cells() {
+/// for key in plan.cells() {
 ///     tallies.add(&census_cell(&galaxy, &mut ctx, key, &query, &mut stars));
 /// }
 /// assert!(!stars.is_empty());
@@ -645,12 +992,22 @@ pub fn census_cell(
     let mut tally = CensusTallies::default();
     let layer = key.layer();
     tally.layer_mut(layer).cells += 1;
-    let floor = cell_floor(ctx.envelope, key, query, galaxy);
+    debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");
+    let reach = CellReach::of(ctx.offsets, key, query);
+    let floor = floor_at(galaxy, ctx.envelope, key, query, &reach);
     let mut records = Vec::new();
     ctx.cells.bright_subset(galaxy, key, floor, &mut records);
     tally.layer_mut(layer).candidates += u64::try_from(records.len()).unwrap_or(u64::MAX);
     for record in &records {
-        census_record(galaxy, ctx, record, query, Bound::Applied, &mut tally, out);
+        record_stars(
+            galaxy,
+            ctx,
+            record,
+            query,
+            (Bound::Applied, Some(&reach)),
+            &mut tally,
+            out,
+        );
     }
     tally
 }
@@ -665,7 +1022,7 @@ mod tests {
     use crate::id::CentreMemberId;
     use crate::observe::Observer;
     use crate::sky::census::cache::NoSkyCellCache;
-    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope};
+    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
 
     /// The Sun's place in the fixture, ly.
     const SUN: [f64; 3] = [0.0, 26_000.0, 68.0];
@@ -677,6 +1034,7 @@ mod tests {
         SkyContext {
             tables: milky_way_dark_tables(),
             envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
             noise: NoiseCache::with_capacity(1 << 12),
             cells: &NoSkyCellCache,
             sources: &[],
@@ -803,6 +1161,11 @@ mod tests {
                 let n = stars.star_count();
                 assert_eq!(usize::from(n), stars.stars().len());
                 assert!(n <= star_bound(&record), "{record:?} holds {n}");
+                assert_eq!(
+                    star_bound(&record) == 1,
+                    always_single(layer),
+                    "{record:?}: a forced single exactly in a layer of singles"
+                );
                 let stellar = stars
                     .stars()
                     .iter()
@@ -817,6 +1180,8 @@ mod tests {
                     own <= cell_bound,
                     "{record:?}: {own} over the cell's {cell_bound}"
                 );
+                let table = milky_way_offsets().of(cell).value();
+                assert!(cell_bound <= table, "{record:?}: {cell_bound} over {table}");
                 star_positions_at(stars.hierarchy(), UniverseTime::EPOCH, &mut positions);
                 for (_, place) in &positions {
                     let r = place.metres().iter().map(|x| x * x).sum::<f64>().sqrt()
@@ -1112,19 +1477,21 @@ mod tests {
                 .flatten();
             assert_eq!(flux_bound(envelope, record, t), expected, "{record:?}");
         }
-        // A grid system takes the bound of GRID_STAR_BOUND stars, 2.5 log₁₀ 5 brighter.
+        // A grid system takes the bound of one star of twice its primary's mass at any age up to
+        // its own (R06.T16.b), with no factor for its count, since each star is kept alone
+        // (R06.T8.f).
         let star = records_near(Layer::C, SUN, 1)[0];
         let age = star.age_at(UniverseTime::EPOCH);
         let one = envelope
             .brightest(
                 star.layer(),
                 star.component().expect("a grid record"),
-                star.primary_initial_mass(),
-                (age, age),
+                max_star_mass(star.primary_initial_mass()),
+                (Years::ZERO, age),
             )
             .expect("a C star shines");
         let bound = flux_bound(envelope, &star, UniverseTime::EPOCH).expect("it shines");
-        assert!((one.value() - bound.value() - 2.5 * math::log10(5.0)).abs() < 1e-12);
+        hyperion_testkit::float::assert_same_bits(one.value(), bound.value());
     }
 
     /// The same cells censused twice, in reverse order and with a cold noise cache of one entry
@@ -1213,6 +1580,11 @@ mod tests {
 
     /// The census of a cell, skips and all, equals every record of the cell measured with no
     /// skip: the floor and the flux bound never change an answer.
+    ///
+    /// Since R06.T16.b's bound, at twice the primary's mass over ages from zero, no stellar
+    /// record of the cells at 0, 1 and 3 cells out is skipped, so the brown dwarfs' cells there
+    /// (a forced single's bound) and a block of A's 288–320 ly out (the floor, and a multiple
+    /// system's bound) are censused too, where skips remain to be checked.
     #[test]
     fn a_cells_census_equals_its_unskipped_records() {
         let galaxy = milky_way_galaxy();
@@ -1223,12 +1595,28 @@ mod tests {
             .expect("a valid query");
         let mut ctx = context();
         let mut cells = Vec::new();
-        for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+        for layer in [
+            Layer::A,
+            Layer::B,
+            Layer::C,
+            Layer::D,
+            Layer::E,
+            Layer::BrownDwarf,
+        ] {
             let size = f64::from(layer.cell_size_ly());
             for step in [0.0, 1.0, 3.0] {
                 let p = [SUN[0] + step * size, SUN[1], SUN[2]];
                 cells.push(CellKey::containing(layer, &position(p)).expect("in the cube"));
             }
+        }
+        // A's cells 36–40 cells (288–320 ly) out along x, five rows of them along y.
+        for (x, y) in (36..=40).flat_map(|x| (-2..=2).map(move |y| (x, y))) {
+            let p = [
+                SUN[0] + f64::from(x) * 8.0,
+                SUN[1] + f64::from(y) * 8.0,
+                SUN[2],
+            ];
+            cells.push(CellKey::containing(Layer::A, &position(p)).expect("in the cube"));
         }
         let (mut listed, mut skipped) = (0_usize, 0_u64);
         let mut records = Vec::new();
@@ -1257,6 +1645,193 @@ mod tests {
         assert!(
             listed > 0 && skipped > 0,
             "{listed} listed, {skipped} skipped"
+        );
+    }
+
+    /// The offset table is never below the exact bound of the cell it answers for, at 10⁴ random
+    /// cells of every layer from the galactic centre to the root cube's corners (R06.T8.f), and it
+    /// is tight: a node is some 4% farther out than the cell's corner at most.
+    #[test]
+    fn the_offset_table_is_at_least_the_exact_bound() {
+        let galaxy = milky_way_galaxy();
+        let offsets = milky_way_offsets();
+        let layers = [
+            Layer::A,
+            Layer::B,
+            Layer::C,
+            Layer::D,
+            Layer::E,
+            Layer::BrownDwarf,
+        ];
+        let mut u = crate::sky::testing::uniforms(0x000f_f5e7);
+        let mut next = || u.next().expect("endless");
+        let mut worst = 1.0_f64;
+        for k in 0..10_000_usize {
+            let layer = layers[k % layers.len()];
+            // Distances even in log from a light-year to beyond the cube's faces, in any
+            // direction, held inside the cube.
+            let r = math::exp(math::ln(1.0) + next() * math::ln(1.2e5));
+            let (cos_t, phi) = (2.0 * next() - 1.0, 2.0 * core::f64::consts::PI * next());
+            let sin_t = (1.0 - cos_t * cos_t).sqrt();
+            let inside = 65_000.0;
+            let p = [
+                (r * sin_t * math::cos(phi)).clamp(-inside, inside),
+                (r * sin_t * math::sin(phi)).clamp(-inside, inside),
+                (r * cos_t).clamp(-inside, inside),
+            ];
+            let key = CellKey::containing(layer, &position(p)).expect("in the cube");
+            let exact = cell_offset_bound(galaxy, key).value();
+            let table = offsets.of(key).value();
+            assert!(exact <= table, "{key:?}: the table's {table} under {exact}");
+            if always_single(layer) {
+                hyperion_testkit::float::assert_same_bits(table, 0.0);
+            } else {
+                worst = worst.max(table / exact);
+            }
+        }
+        eprintln!("the offset table is at most {worst} times the exact bound");
+        assert!(worst < 1.05, "the table is {worst} times the exact bound");
+    }
+
+    /// The bound before the drift never rejects a record whose bound after its retardation
+    /// passes, over some 10⁴ records of every layer seen by observers at, near and 250 ly from the
+    /// Sun, at the epoch and up to 900 years from it, in a galaxy whose systems move (R06.T8.f).
+    #[test]
+    fn the_bound_before_the_drift_never_rejects_what_the_bound_after_it_passes() {
+        let moving = Galaxy::from_params(
+            milky_way_galaxy().seed(),
+            crate::galaxy::params::GalaxyParams::milky_way_like(),
+        )
+        .expect("the fixture builds")
+        .with_full_potential();
+        let envelope = milky_way_envelope();
+        let offsets = CellOffsets::build(&moving);
+        let at = |ly: [f64; 3], years: i64| {
+            let t = UniverseTime::from_julian_years(years).expect("in the window");
+            Observer::new(position(ly), t).expect("an observer")
+        };
+        let observers = [
+            at(SUN, 0),
+            at([SUN[0] + 250.0, SUN[1], SUN[2]], 900),
+            at([SUN[0] - 120.0, SUN[1] + 40.0, SUN[2]], -700),
+        ];
+        let groups = [
+            (Layer::A, 1_500),
+            (Layer::B, 1_000),
+            (Layer::BrownDwarf, 800),
+            (Layer::C, 600),
+            (Layer::D, 300),
+            (Layer::E, 200),
+        ];
+        let mut records = Vec::new();
+        for (layer, n) in groups {
+            records.extend(records_near(layer, SUN, n));
+        }
+        let (mut checked, mut rejected, mut passed) = (0_u32, 0_u32, 0_u32);
+        for observer in observers {
+            let query = SkyQuery::builder(observer, Magnitudes::new(7.95))
+                .eye(crate::sky::eye::EyeObserver::default())
+                .build()
+                .expect("a valid query");
+            for record in &records {
+                let key = CellKey::of(record.id()).expect("a grid record");
+                let reach = CellReach::of(&offsets, key, &query);
+                let before = passes_before_drift(envelope, record, &query, &reach);
+                let drift = Drift::of_record(&moving, record).expect("a grid record moves");
+                let r = retarded(query.observer(), &drift);
+                let d = query
+                    .observer()
+                    .position()
+                    .distance_to(r.apparent_position())
+                    .value()
+                    / METRES_PER_LIGHT_YEAR;
+                let after = flux_bound(envelope, record, r.emitted())
+                    .is_some_and(|m| m.value() <= faintest_listable(&query, d - reach.offset));
+                assert!(before || !after, "{record:?} for {observer:?}");
+                checked += 1;
+                rejected += u32::from(!before);
+                passed += u32::from(after);
+            }
+        }
+        assert!(checked >= 10_000, "{checked}");
+        assert!(
+            rejected > 500 && passed > 500,
+            "{rejected} rejected, {passed} passed"
+        );
+    }
+
+    /// Over the stars of 10⁴ generated systems of every layer, near the Sun and in the bulge, no
+    /// star that the cut before its sightline drops would have passed the cut after it: `A_V` is
+    /// never negative, and adding it never lowers a magnitude (R06.T8.f).
+    #[test]
+    fn the_sightline_cut_never_drops_a_star_the_cut_keeps() {
+        let galaxy = milky_way_galaxy();
+        let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(7.95))
+            .eye(crate::sky::eye::EyeObserver::default())
+            .build()
+            .expect("a valid query");
+        let mut noise = NoiseCache::with_capacity(1 << 12);
+        let groups = [
+            (Layer::A, SUN, 3_300),
+            (Layer::B, SUN, 3_100),
+            (Layer::BrownDwarf, SUN, 500),
+            (Layer::C, SUN, 2_400),
+            (Layer::C, BULGE, 200),
+            (Layer::D, SUN, 400),
+            (Layer::E, SUN, 150),
+            (Layer::E, BULGE, 150),
+        ];
+        let (mut systems, mut dropped, mut kept) = (0_u32, 0_u32, 0_u32);
+        let mut positions = Vec::new();
+        for (layer, at, n) in groups {
+            for record in records_near(layer, at, n) {
+                let drift = Drift::of_record(galaxy, &record).expect("a grid record");
+                let r = retarded(query.observer(), &drift);
+                let stars = SystemStars::generate(galaxy, &record);
+                let Some(state) = stars.state_at(r.emitted()) else {
+                    continue;
+                };
+                systems += 1;
+                star_positions_at(stars.hierarchy(), r.emitted(), &mut positions);
+                for (body, place) in &positions {
+                    let index = usize::from(body.body_index());
+                    let star = &state.stars()[index];
+                    let Some(m_v) = absolute_v_of_state(star) else {
+                        continue;
+                    };
+                    let apparent = place
+                        .to_galactic(r.apparent_position())
+                        .expect("in the cube");
+                    let at = query.observer().position();
+                    let d = at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
+                    let before = unextinguished_v(m_v, d);
+                    let limit = kept_to(&query, &colour_of_state(star));
+                    let a_v = sightline(
+                        galaxy.gas(),
+                        &apparent,
+                        at,
+                        NoiseMode::Realised,
+                        STAR_SIGHTLINE_QUALITY,
+                        &[],
+                        &mut noise,
+                    )
+                    .a_v()
+                    .value();
+                    let v = before + a_v;
+                    assert!(a_v >= 0.0 && v >= before, "{record:?}: A_V {a_v}");
+                    if before > limit {
+                        assert!(v > limit, "{record:?}");
+                        dropped += 1;
+                    } else {
+                        kept += u32::from(v <= limit);
+                    }
+                }
+            }
+        }
+        assert!(systems >= 10_000, "{systems} systems");
+        assert!(
+            dropped > 1_000 && kept > 10,
+            "{dropped} dropped, {kept} kept"
         );
     }
 }

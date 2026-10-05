@@ -170,6 +170,7 @@ describe("the descent spike's options", () => {
       ridged: "off",
       dawnSafety: "on",
       capture: null,
+      traceProfile: "off",
     });
   });
 
@@ -196,6 +197,8 @@ describe("the descent spike's options", () => {
         "off",
         "--capture",
         "/data/capture",
+        "--trace-profile",
+        "on",
       ]).spike,
     ).toEqual({
       setting: "low",
@@ -208,6 +211,7 @@ describe("the descent spike's options", () => {
       ridged: "on",
       dawnSafety: "off",
       capture: "/data/capture",
+      traceProfile: "on",
     });
   });
 
@@ -222,6 +226,7 @@ describe("the descent spike's options", () => {
     ["--normals", "triple"],
     ["--ridged", "yes"],
     ["--dawn-safety", "maybe"],
+    ["--trace-profile", "yes"],
   ])("refuses %s %s", (name, value) => {
     expect(refusal(["--descent-spike", name, value]).exitCode).toBe(1);
   });
@@ -249,6 +254,7 @@ describe("the descent spike's options", () => {
     ["--ridged", "on"],
     ["--dawn-safety", "off"],
     ["--capture", "/data/capture"],
+    ["--trace-profile", "on"],
   ])("refuses %s without --descent-spike", (...option) => {
     const error = refusal(option);
     expect(error.exitCode).toBe(1);

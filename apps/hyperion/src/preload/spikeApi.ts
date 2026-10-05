@@ -13,6 +13,7 @@ import { spikeLaunchFromArgv } from "./spikeLaunch";
 /** The spike's channels (`main/spike.ts`'s `SPIKE_CHANNELS`). */
 export const SPIKE_CHANNEL_NAMES = {
   startTrace: "hyperion:spike:start-trace",
+  cycleTrace: "hyperion:spike:cycle-trace",
   stopTrace: "hyperion:spike:stop-trace",
   memory: "hyperion:spike:memory",
   writeResults: "hyperion:spike:write-results",
@@ -43,6 +44,9 @@ export function spikeApi(launch: SpikeLaunch, deps: SpikeApiDeps): SpikeApi {
     launch,
     startTrace: async () => {
       await invoke(SPIKE_CHANNEL_NAMES.startTrace);
+    },
+    cycleTrace: async () => {
+      await invoke(SPIKE_CHANNEL_NAMES.cycleTrace);
     },
     stopTrace: async () => {
       await invoke(SPIKE_CHANNEL_NAMES.stopTrace);

@@ -4,7 +4,15 @@ import { join } from "node:path";
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { readTraceEvents, reduceTrace, reduceTraceFile, type TraceFigures } from "./reduceTrace";
+import {
+  FRAME_MEASURE,
+  readTraceEvents,
+  recordedGpuSlices,
+  reduceTrace,
+  reduceTraceFile,
+  type TraceFigures,
+} from "./reduceTrace";
+import { spikeTraceConfig } from "./spike";
 
 /**
  * A trace recorded on 2026-10-02 from Electron 44.4.3 (a WebGPU page on SwiftShader, headless and
@@ -13,6 +21,12 @@ import { readTraceEvents, reduceTrace, reduceTraceFile, type TraceFigures } from
  * renumbered and its script URLs rewritten. Chromium's layout, one event a line, is kept.
  */
 const FIXTURE = join(__dirname, "fixtures/spike.trace.json");
+
+/** A timed run's categories: without `gpu` or the CPU profiler. */
+const TIMED = { categories: spikeTraceConfig().included_categories ?? [] };
+
+/** A profiled run's: with `gpu` and the CPU profiler, as the fixture was recorded. */
+const PROFILED = { categories: spikeTraceConfig({ profiled: true }).included_categories ?? [] };
 
 /** A parsed event's field, or `undefined`. */
 function field(value: unknown, key: string): unknown {
@@ -23,11 +37,16 @@ function field(value: unknown, key: string): unknown {
 const RENDERER_PID = 1500;
 const RENDERER_MAIN_TID = 1518;
 
+/** The names of a trace's GPU-process slices, in order. */
+function sliceNames(trace: TraceFigures): ReadonlyArray<string> | undefined {
+  return trace.gpuProcess?.slices.map(({ name }) => name);
+}
+
 describe("the trace reducer on a recorded trace", () => {
   let figures: TraceFigures | undefined;
 
   beforeAll(async () => {
-    figures = await reduceTraceFile(FIXTURE);
+    figures = await reduceTraceFile(FIXTURE, PROFILED);
   });
 
   function reduced(): TraceFigures {
@@ -111,7 +130,7 @@ describe("the trace reducer on a recorded trace", () => {
   });
 
   it("splits the main thread into our code, the engine chunk and idle", () => {
-    const { mainThread, span } = reduced();
+    const { mainThread, span, userTiming } = reduced();
     expect(span).not.toBeNull();
     expect(mainThread?.pid).toBe(RENDERER_PID);
     expect(mainThread?.tid).toBe(RENDERER_MAIN_TID);
@@ -122,8 +141,14 @@ describe("the trace reducer on a recorded trace", () => {
       (mainThread?.wallMs ?? 0) - (mainThread?.busyMs ?? 0),
       9,
     );
-    // The measured spans enclose the engine script's work, which the profile samples.
-    expect(mainThread?.ourCodeMs).toBeGreaterThan(0);
+    // The frame spans enclose the engine script's work, which the profile samples. They do not
+    // overlap, so our code is their sum, and the main thread keeps each.
+    const frames = userTiming.find(({ name }) => name === FRAME_MEASURE);
+    expect(mainThread?.ourCodeMs).toBeCloseTo(frames?.totalMs ?? Number.NaN, 9);
+    expect(mainThread?.frameSpans).toEqual({
+      startsUs: frames?.startsUs,
+      durationsMs: frames?.durationsMs,
+    });
     expect(mainThread?.engineSelfMs).toBeGreaterThan(0);
     expect(mainThread?.engineSelfMs).toBeLessThanOrEqual(mainThread?.sampledMs ?? 0);
   });
@@ -134,6 +159,18 @@ describe("the trace reducer on a recorded trace", () => {
     const webGpu = gpuProcess?.slices.find(({ name }) => name === "WebGPU");
     expect(webGpu?.count).toBe(10);
     expect(webGpu?.totalMs).toBeCloseTo(85.87, 6);
+  });
+
+  it("lists the GPU process's slices of the recorded categories alone: GPUTask without gpu", async () => {
+    expect(sliceNames(reduced())).toEqual(["WebGPU", "GPUTask", "VulkanQueueSubmitHook"]);
+    const timed = await reduceTraceFile(FIXTURE, TIMED);
+    expect(sliceNames(timed)).toEqual(["GPUTask"]);
+    // The fixture's 24 GPUTask slices, the same with or without gpu.
+    expect(timed.gpuProcess?.slices[0]?.count).toBe(24);
+    expect(timed.gpuProcess?.slices).toEqual(
+      reduced().gpuProcess?.slices.filter(({ name }) => name === "GPUTask"),
+    );
+    expect(timed.gpuProcess?.busyMs).toBe(reduced().gpuProcess?.busyMs);
   });
 
   it("reads the same events streamed as parsed whole", async () => {
@@ -221,17 +258,68 @@ async function all(path: string): Promise<unknown[]> {
   return events;
 }
 
-describe("the trace reducer on hand-made events", () => {
-  it("takes frame intervals from presentation times, in time order, once a presentation", async () => {
-    const figures = await reduceTrace([
-      ...META,
-      ...frame("0x3", 30_000, 50_000, "STATE_PRESENTED_ALL"),
-      ...frame("0x1", 0, 16_700, "STATE_PRESENTED_ALL"),
-      ...frame("0x2", 16_700, 33_400, "STATE_PRESENTED_PARTIAL"),
-      ...frame("0x6", 40_000, 50_000, "STATE_PRESENTED_ALL"),
-      ...frame("0x4", 50_000, 60_000, "STATE_DROPPED"),
-      ...frame("0x5", 60_000, 70_000, "STATE_NO_UPDATE_DESIRED"),
+/** A `performance.measure` span on renderer 1's main thread, from `startUs` to `endUs`. */
+function measure(name: string, startUs: number, endUs: number, id: string): unknown[] {
+  const at = { cat: "blink.user_timing", name, pid: 1, tid: 10, id2: { local: id } };
+  return [
+    { ...at, ph: "b", ts: startUs, args: { startTime: startUs / 1000 } },
+    { ...at, ph: "e", ts: endUs, args: {} },
+  ];
+}
+
+describe("the frame span's name", () => {
+  it("is the renderer's", () => {
+    // `view/spike/spikeRun.ts` holds its own copy of the literal, pinned by its test too.
+    expect(FRAME_MEASURE).toBe("spike.frame");
+  });
+});
+
+describe("the GPU process's slices", () => {
+  it("are GPUTask without gpu among the categories, and all three with it", () => {
+    expect(recordedGpuSlices(TIMED.categories)).toEqual(["GPUTask"]);
+    expect(recordedGpuSlices(PROFILED.categories)).toEqual([
+      "WebGPU",
+      "GPUTask",
+      "VulkanQueueSubmitHook",
     ]);
+  });
+});
+
+describe("the trace reducer on hand-made events", () => {
+  it("counts our code by the frame spans alone, not the segment's or the terrain's spans", async () => {
+    // A 60-s segment span around three frames, each with its terrain span inside it.
+    const figures = await reduceTrace(
+      [
+        ...META,
+        ...measure("spike.segment:orbit coast", 0, 60_000_000, "0x1"),
+        ...measure("spike.frame", 1_000_000, 1_004_000, "0x2"),
+        ...measure("terrain.frame", 1_001_000, 1_003_000, "0x3"),
+        ...measure("spike.frame", 1_016_700, 1_019_700, "0x2"),
+        ...measure("terrain.frame", 1_017_000, 1_018_000, "0x3"),
+        ...measure("spike.frame", 1_033_400, 1_038_400, "0x2"),
+      ],
+      TIMED,
+    );
+    expect(figures.mainThread?.ourCodeMs).toBe(12);
+    expect(figures.mainThread?.frameSpans).toEqual({
+      startsUs: [1_000_000, 1_016_700, 1_033_400],
+      durationsMs: [4, 3, 5],
+    });
+  });
+
+  it("takes frame intervals from presentation times, in time order, once a presentation", async () => {
+    const figures = await reduceTrace(
+      [
+        ...META,
+        ...frame("0x3", 30_000, 50_000, "STATE_PRESENTED_ALL"),
+        ...frame("0x1", 0, 16_700, "STATE_PRESENTED_ALL"),
+        ...frame("0x2", 16_700, 33_400, "STATE_PRESENTED_PARTIAL"),
+        ...frame("0x6", 40_000, 50_000, "STATE_PRESENTED_ALL"),
+        ...frame("0x4", 50_000, 60_000, "STATE_DROPPED"),
+        ...frame("0x5", 60_000, 70_000, "STATE_NO_UPDATE_DESIRED"),
+      ],
+      TIMED,
+    );
     expect(figures.frames.presentedAtUs).toEqual([16_700, 33_400, 50_000]);
     expect(figures.frames.intervalsMs).toEqual([16.7, 16.6]);
     expect(figures.frames).toMatchObject({ presented: 3, dropped: 1, noUpdate: 1 });
@@ -239,70 +327,75 @@ describe("the trace reducer on hand-made events", () => {
   });
 
   it("takes the clock offset from the main thread's spans alone, a worker's having its own clock", async () => {
-    const figures = await reduceTrace([
-      ...META,
-      { ph: "M", name: "thread_name", pid: 1, tid: 12, args: { name: "DedicatedWorker thread" } },
-      begin(10, 5_100_000, 100, "0x1"),
-      begin(10, 5_200_080, 200.03, "0x2"),
-      begin(10, 5_300_090, 300, "0x3"),
-      begin(12, 9_000_000, 1, "0x4"),
-    ]);
+    const figures = await reduceTrace(
+      [
+        ...META,
+        { ph: "M", name: "thread_name", pid: 1, tid: 12, args: { name: "DedicatedWorker thread" } },
+        begin(10, 5_100_000, 100, "0x1"),
+        begin(10, 5_200_080, 200.03, "0x2"),
+        begin(10, 5_300_090, 300, "0x3"),
+        begin(12, 9_000_000, 1, "0x4"),
+      ],
+      TIMED,
+    );
     // Offsets 5,000,000, 5,000,050 and 5,000,090 µs on the main thread: their median.
     expect(figures.clockOffsetUs).toBeCloseTo(5_000_050, 3);
   });
 
   it("gives no clock offset without a span on the main thread", async () => {
-    const figures = await reduceTrace([...META, task(1_000, 10_000)]);
+    const figures = await reduceTrace([...META, task(1_000, 10_000)], TIMED);
     expect(figures.clockOffsetUs).toBeNull();
   });
 
   it("counts nested tasks once in a thread's busy time", async () => {
-    const figures = await reduceTrace([
-      ...META,
-      task(1_000, 10_000),
-      task(3_000, 3_000),
-      task(21_000, 5_000),
-    ]);
+    const figures = await reduceTrace(
+      [...META, task(1_000, 10_000), task(3_000, 3_000), task(21_000, 5_000)],
+      TIMED,
+    );
     expect(figures.mainThread?.busyMs).toBe(15);
     expect(figures.mainThread?.wallMs).toBe(25);
     expect(figures.mainThread?.idleMs).toBe(10);
   });
 
   it("attributes each profile delta to the sample before it", async () => {
-    const figures = await reduceTrace([
-      ...META,
-      { ph: "P", name: "Profile", pid: 1, tid: 10, ts: 1, id: "0x1", args: { data: {} } },
-      {
-        ph: "P",
-        name: "ProfileChunk",
-        pid: 1,
-        tid: 99,
-        ts: 2,
-        id: "0x1",
-        args: {
-          data: {
-            cpuProfile: {
-              nodes: [
-                node(1, ""),
-                node(2, "file:///app/out/renderer/assets/engine-Ab12_c.js"),
-                node(3, "file:///app/out/renderer/assets/index-Zz.js"),
-              ],
-              samples: [2, 3, 2, 1],
+    const figures = await reduceTrace(
+      [
+        ...META,
+        { ph: "P", name: "Profile", pid: 1, tid: 10, ts: 1, id: "0x1", args: { data: {} } },
+        {
+          ph: "P",
+          name: "ProfileChunk",
+          pid: 1,
+          tid: 99,
+          ts: 2,
+          id: "0x1",
+          args: {
+            data: {
+              cpuProfile: {
+                nodes: [
+                  node(1, ""),
+                  node(2, "file:///app/out/renderer/assets/engine-Ab12_c.js"),
+                  node(3, "file:///app/out/renderer/assets/index-Zz.js"),
+                ],
+                samples: [2, 3, 2, 1],
+              },
+              timeDeltas: [5, 100, 40, 7],
             },
-            timeDeltas: [5, 100, 40, 7],
           },
         },
-      },
-    ]);
+      ],
+      PROFILED,
+    );
     // Node 2 runs 100 µs then 7 µs; node 3 runs 40 µs.
     expect(figures.mainThread?.engineSelfMs).toBeCloseTo(0.107, 9);
     expect(figures.mainThread?.sampledMs).toBeCloseTo(0.147, 9);
   });
 
   it("gives no main thread and no frames for a trace without a renderer", async () => {
-    const figures = await reduceTrace([
-      { ph: "X", name: "RunTask", pid: 2, tid: 2, ts: 5, dur: 1 },
-    ]);
+    const figures = await reduceTrace(
+      [{ ph: "X", name: "RunTask", pid: 2, tid: 2, ts: 5, dur: 1 }],
+      TIMED,
+    );
     expect(figures.mainThread).toBeNull();
     expect(figures.gpuProcess).toBeNull();
     expect(figures.frames).toMatchObject({ pid: null, presented: 0, intervalsMs: [] });

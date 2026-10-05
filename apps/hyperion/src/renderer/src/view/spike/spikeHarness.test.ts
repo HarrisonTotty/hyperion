@@ -4,9 +4,12 @@ import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import { planetGeometry } from "../terrain/planet";
 import type { SelectionInput } from "../terrain/select";
+import { selectionTolerancePx } from "../terrain/selectionTolerance";
+import { boundedPlanet, type DemandView, levelRatio } from "./demand";
 import { recordProfile, SETTING_VIEWS } from "./demandRecord";
 import { PipelineTally } from "./pipelineShim";
 import {
+  meanDemand,
   ResolveCounter,
   rowOf,
   SPIKE_PASS_ROWS,
@@ -169,6 +172,46 @@ describe("the spike's recorder", () => {
       recordProfile()
         .segmentSpans()
         .map(({ name }) => name),
+    );
+  });
+
+  /** The high setting's report, and its view at the terrain pass's τ_sel. */
+  const highAtSelection = (): {
+    report: ReturnType<SpikeRecorder["report"]>;
+    atSelection: DemandView;
+  } => {
+    const view = SETTING_VIEWS[0]?.view;
+    if (view === undefined) {
+      throw new Error("no high setting");
+    }
+    const report = new SpikeRecorder(descent, "high", {
+      resolves: new ResolveCounter(),
+      tally: new PipelineTally(() => 0),
+    }).report({ widthPx: 1, heightPx: 1 });
+    return { report, atSelection: { ...view, tauPx: selectionTolerancePx(view.tauPx) } };
+  };
+
+  it("predicts each segment's D at the terrain pass's τ_sel", () => {
+    const { report, atSelection } = highAtSelection();
+    const profile = recordProfile();
+    expect(report.streaming.map(({ predictedHardPerS }) => predictedHardPerS)).toEqual(
+      profile.segmentSpans().map((span) => meanDemand(PLANET, profile, span, atSelection)),
+    );
+  });
+
+  it("predicts each segment's D under min(hard, 4σ_n) at the terrain pass's τ_sel", () => {
+    const { report, atSelection } = highAtSelection();
+    const profile = recordProfile();
+    const calibrated = boundedPlanet(PLANET, "calibrated", SIGMA);
+    expect(report.streaming.map(({ predictedCalibratedPerS }) => predictedCalibratedPerS)).toEqual(
+      profile.segmentSpans().map((span) => meanDemand(calibrated, profile, span, atSelection)),
+    );
+  });
+
+  it("gives each level's k at the terrain pass's τ_sel", () => {
+    const { report, atSelection } = highAtSelection();
+    expect(report.levels.map(({ k }) => k)).toEqual(
+      report.levels.map(({ level }) => levelRatio(PLANET, level, atSelection)),
     );
   });
 

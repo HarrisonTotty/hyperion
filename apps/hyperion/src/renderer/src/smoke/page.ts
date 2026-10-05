@@ -32,6 +32,7 @@ import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import { checkLitBody } from "./litBody";
+import { captureOccultation, checkMeshBodies } from "./meshBodies";
 import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
 import { checkPhotoreal } from "./photoreal";
 import { checkBodies, checkClassMap, checkPhotorealFrame, checkSpriteDepth } from "./bodies";
@@ -187,6 +188,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R07.T8.a point and disc bodies", () => checkBodies(engine, checks));
   await checks.group("R07.T8.a sprite depth", () => checkSpriteDepth(engine, checks));
   await checks.group("R07.T8.b the class-map hook", () => checkClassMap(engine, checks));
+  await checks.group("R07.T9 mesh bodies", () => checkMeshBodies(engine, checks));
   await checks.group("R07.T8.a the photorealistic frame", () =>
     checkPhotorealFrame(engine, checks),
   );
@@ -221,6 +223,18 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   if (captures) {
     await checks.group("R05.T13.b the spike captures", async () => {
       images = [...images, ...(await captureSpike(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await checks.group("R07.T9 the occultation captures", async () => {
+      const frames = await captureOccultation(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R07.T9 the occultation captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
     });
   }
 

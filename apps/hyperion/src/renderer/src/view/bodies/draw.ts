@@ -18,12 +18,22 @@
  * run of consecutive points through R06's HDR sprite (`POINT SPRITES HDR`). A disc shades from its
  * `DiscSurface` (T8.b): its photometry's uniform law, or R10's class map with a law per class; a
  * point keeps the photometry's law.
+ *
+ * A disc whose footprint overlaps geometry that writes depth (a mesh body, R10's terrain, a craft,
+ * given as {@link BodyFrameOptions.depthWriters}) is promoted to the mesh regime for the frame
+ * (Design note 2, `promoteOverlapping`, T9): its smooth figure (`smoothMesh.ts`) draws its wholly
+ * covered pixels with depth in the `bodies` pass, before the painter's sequence, and its limb is the
+ * disc's limb draw at its place in the sequence, on the limb's plane. Both shade from its disc
+ * record, so a promoted disc and its mesh draw the same light.
  */
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
+import type { QualitySetting } from "../quality/qualitySetting";
+import { patchMeshData } from "../terrain/gpu/resources";
+import patchVertexWgsl from "../terrain/shaders/patchVertex.wgsl?raw";
 import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
@@ -53,6 +63,8 @@ import type { Rgb } from "../photometry/toneCurve";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
+import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
 import { sphereScreenRect, WIREFRAME_MESHES } from "../wireframe/submit";
 import {
   type DiscLight,
@@ -70,7 +82,23 @@ import {
 import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { bodyReflection, figurePole } from "./oblate";
 import { type HostSphere, type PainterEntry, painterOrder } from "./painter";
-import { type LitRegime, type LitSphere, litRegimes } from "./regime";
+import {
+  type LitRegime,
+  type LitSphere,
+  litRegimes,
+  promoteOverlapping,
+  type ScreenCircle,
+  sphereFootprint,
+} from "./regime";
+import {
+  DISC_LIMB_DEPTHS,
+  type LimbDepths,
+  limbDepths,
+  packSmoothMeshes,
+  rotationColumns,
+  type SmoothMesh,
+  smoothMeshOf,
+} from "./smoothMesh";
 import { angularDiameterPx } from "../wireframe/bodies";
 
 /** A lit body of the frame. */
@@ -104,6 +132,23 @@ export interface BodyFrameOptions {
    * `PLANETSHINE_SOURCES_LOW` on the low setting.
    */
   readonly planetshine: number;
+  /**
+   * The footprints of the view's other geometry that writes depth (R10's terrain, a lit craft): a
+   * disc overlapping one, or a mesh body, is drawn as a mesh (Design note 2). Absent, none.
+   */
+  readonly depthWriters?: ReadonlyArray<ScreenCircle>;
+  /** The view's quality setting, which a mesh body's selection takes. */
+  readonly setting: QualitySetting;
+}
+
+/** A body drawn as a mesh this frame (T9). */
+export interface MeshBodyPlan {
+  /** Its record in {@link BodyFramePlan.discs}, which its figure's pixels and its limb shade with. */
+  readonly index: number;
+  /** Its smooth figure on the view. */
+  readonly mesh: SmoothMesh;
+  /** Its limb draw's corner depths, on the limb's plane. */
+  readonly limbDepths: LimbDepths;
 }
 
 /** A point body's sprite: R02's sprite record, its depth its own (decision-r07-t8a, item 2). */
@@ -117,13 +162,19 @@ export type BodyStep =
   | { readonly kind: "disc"; readonly index: number }
   | { readonly kind: "points"; readonly sprites: ReadonlyArray<PointSprite> }
   /** A host star's place in the order, where R06's disc pass draws it (`HostDiscDto.star`). */
-  | { readonly kind: "host"; readonly star: number };
+  | { readonly kind: "host"; readonly star: number }
+  /** A mesh body's limb, `meshes[mesh]`'s, at its place in the order (T9). */
+  | { readonly kind: "limb"; readonly mesh: number };
 
 /** One frame's lit bodies, ready to bind. */
 export interface BodyFramePlan {
   readonly regimes: ReadonlyMap<BodyIdHex, LitRegime>;
+  /** The painter's sequence the steps follow, a mesh body in it for its limb. */
   readonly order: ReadonlyArray<PainterEntry>;
+  /** Each disc's record, and each mesh body's, which its figure and its limb shade with. */
   readonly discs: ReadonlyArray<DiscRecord>;
+  /** The bodies drawn as meshes, in the order's. */
+  readonly meshes: ReadonlyArray<MeshBodyPlan>;
   /** The phase table's rows, the frame's distinct laws in first use, a class map's included. */
   readonly laws: ReadonlyArray<PhotometricLaw>;
   readonly steps: ReadonlyArray<BodyStep>;
@@ -370,7 +421,14 @@ function pointSpriteOf(
 }
 
 /**
- * The frame's lit bodies: regimes, the painter's sequence, disc records and point sprites.
+ * The frame's lit bodies: regimes, the painter's sequence, disc records, smooth figures and point
+ * sprites.
+ *
+ * @remarks
+ * A disc whose footprint overlaps one of `options.depthWriters` or a mesh body is promoted to a
+ * mesh (`promoteOverlapping`). A mesh body's limb is drawn in the sequence as a disc's is, so the
+ * order takes it as a disc (Design note 2); its figure's pixels are drawn before the sequence, with
+ * depth.
  *
  * @param hosts - The host stars, which light the bodies and keep their place in the order.
  * @param previous - Each body's regime on the previous frame, for the hysteresis.
@@ -386,13 +444,33 @@ export function planLitBodies(
     centreM: body.centreM,
     radiusM: body.figure.equatorialRadiusM,
   }));
-  const regimes = litRegimes(spheres, options.camera, options.viewport, previous);
+  const footprints = new Map<BodyIdHex, ScreenCircle>();
+  for (const sphere of spheres) {
+    const footprint = sphereFootprint(
+      sphere.centreM,
+      sphere.radiusM,
+      options.camera,
+      options.viewport,
+    );
+    if (footprint !== null) {
+      footprints.set(sphere.id, footprint);
+    }
+  }
+  const regimes = promoteOverlapping(
+    litRegimes(spheres, options.camera, options.viewport, previous),
+    footprints,
+    options.depthWriters ?? [],
+  );
   const hostSpheres: HostSphere[] = hosts.map((host) => ({
     star: host.disc.star,
     centreM: host.centreM,
     radiusM: host.disc.radius_m,
   }));
-  const order = painterOrder(spheres, regimes, hostSpheres);
+  // A mesh body's limb takes its place in the sequence as a disc's does.
+  const ordered = new Map<BodyIdHex, LitRegime>(
+    [...regimes].map(([id, regime]) => [id, regime === "mesh" ? "disc" : regime]),
+  );
+  const order = painterOrder(spheres, ordered, hostSpheres);
   const byId = new Map(bodies.map((body) => [body.id, body]));
   const lighting: LightingBody[] = spheres.map(({ id, centreM, radiusM }) => ({
     id,
@@ -403,6 +481,7 @@ export function planLitBodies(
   const neighbours = litNeighbours(bodies, hosts, options.annuli);
   const laws: PhotometricLaw[] = [];
   const discs: DiscRecord[] = [];
+  const meshes: MeshBodyPlan[] = [];
   const steps: BodyStep[] = [];
   let run: PointSprite[] = [];
   const closeRun = (): void => {
@@ -443,19 +522,54 @@ export function planLitBodies(
       continue;
     }
     closeRun();
-    steps.push({ kind: "disc", index: discs.length });
+    if (regimes.get(body.id) === "mesh") {
+      const { camera, viewport } = options;
+      steps.push({ kind: "limb", mesh: meshes.length });
+      meshes.push({
+        index: discs.length,
+        mesh: smoothMeshOf(
+          body.id,
+          body.centreM,
+          body.figure,
+          record.pole,
+          camera,
+          viewport,
+          options.setting,
+        ),
+        limbDepths: limbDepths(
+          body.centreM,
+          body.figure,
+          record.pole,
+          record.rect,
+          camera,
+          viewport,
+        ),
+      });
+    } else {
+      steps.push({ kind: "disc", index: discs.length });
+    }
     discs.push(record);
   }
   closeRun();
-  return { regimes, order, discs, laws, steps };
+  return { regimes, order, discs, meshes, laws, steps };
 }
 
-const DISC_SOURCE = frameWgsl + litBodyWgsl + bodyDiscWgsl;
+const DISC_SOURCE = frameWgsl + litBodyWgsl + bodyDiscWgsl + bodyDiscDrawWgsl;
 
 /** The disc's textures: the frame's phase table, and its class map (any texture where uniform). */
 const DISC_TEXTURES = [
   { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
   { name: "classWeights", binding: 2, viewDimension: "2d-array" },
+] as const;
+
+/**
+ * The disc draws' uniforms: the record, the draw (0 its wholly covered pixels, 1 its limb), and its
+ * rectangle's corner depths (0 for a disc body; a mesh body's limb plane's, T9).
+ */
+const DISC_UNIFORMS = [
+  { name: "disc", type: "u32" },
+  { name: "edgePass", type: "u32" },
+  { name: "depths", type: "vec4f" },
 ] as const;
 
 /** The disc's two materials: its wholly covered pixels, opaque, and its limb, premultiplied. */
@@ -465,10 +579,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     displayName: "BODY DISCS",
     vertexWgsl: DISC_SOURCE,
     fragmentWgsl: DISC_SOURCE,
-    uniforms: [
-      { name: "disc", type: "u32" },
-      { name: "edgePass", type: "u32" },
-    ],
+    uniforms: DISC_UNIFORMS,
     samplers: [],
     textures: DISC_TEXTURES,
     storageBuffers: [{ name: "discs", binding: 0 }],
@@ -482,10 +593,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     displayName: "BODY DISC LIMBS",
     vertexWgsl: DISC_SOURCE,
     fragmentWgsl: DISC_SOURCE,
-    uniforms: [
-      { name: "disc", type: "u32" },
-      { name: "edgePass", type: "u32" },
-    ],
+    uniforms: DISC_UNIFORMS,
     samplers: [],
     textures: DISC_TEXTURES,
     storageBuffers: [{ name: "discs", binding: 0 }],
@@ -494,6 +602,37 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     colourWrites: true,
     blend: "premultiplied",
   },
+};
+
+const SMOOTH_MESH_SOURCE =
+  frameWgsl + litBodyWgsl + bodyDiscWgsl + patchVertexWgsl + smoothMeshWgsl;
+
+/**
+ * The mesh regime's material (T9): R05's patches of a body's spheroid at zero height, one
+ * instanced draw a body, opaque with depth, shading the pixels the body covers wholly from its
+ * disc record (`shaders/smoothMesh.wgsl`).
+ */
+export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
+  name: "bodies:smoothMesh",
+  displayName: "BODY MESHES",
+  vertexWgsl: SMOOTH_MESH_SOURCE,
+  fragmentWgsl: SMOOTH_MESH_SOURCE,
+  uniforms: [
+    { name: "disc", type: "u32" },
+    { name: "firstInstance", type: "u32" },
+    { name: "bodyRotation", type: "mat4x4f" },
+  ],
+  samplers: [],
+  textures: DISC_TEXTURES,
+  storageBuffers: [
+    { name: "discs", binding: 0 },
+    { name: "slots", binding: 3 },
+    { name: "instances", binding: 4 },
+  ],
+  cullMode: "back",
+  depthWrite: true,
+  colourWrites: true,
+  blend: "none",
 };
 
 /** The smallest buffer made, bytes; each grows by doubling. */
@@ -525,22 +664,34 @@ interface DeviceResources {
   tableRows: number;
   /** A texel of no weight, bound where a disc's surface is uniform and never read. */
   readonly noClassMap: TextureHandle;
+  /** The mesh regime's material and R05's 65 × 65 patch with skirts (T9). */
+  readonly mesh: MaterialHandle;
+  readonly patch: MeshHandle;
+  /** The frame's smooth figures' slot and instance records. */
+  slots: BufferHandle;
+  instances: BufferHandle;
 }
 
 /**
  * Binds a frame's lit-body plan to the engine (plan R07, T8.a).
  *
  * @remarks
- * It makes its materials, the quad, the disc buffer and the phase table on construction and again
- * after a device loss; buffers grow by doubling and the table by rows. Each disc is two draws, its
- * wholly covered pixels and then its limb; each run of points one draw of `spriteMaterial`, an HDR
- * twin of R02's star sprite reading `sprites` at binding 0.
+ * It makes its materials, the quad, the patch, the disc buffer and the phase table on construction
+ * and again after a device loss; buffers grow by doubling and the table by rows. Each disc is two
+ * draws, its wholly covered pixels and then its limb; each run of points one draw of
+ * `spriteMaterial`, an HDR twin of R02's star sprite reading `sprites` at binding 0. A mesh body is
+ * one instanced draw of its figure ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass) and
+ * its limb's draw in the sequence. A plan's records are written once, by whichever of the two is
+ * called first for it, so both must be called for a plan before its passes are submitted.
  */
 export class LitBodyRenderer {
   readonly #engine: LitBodyEngine;
   readonly #spriteMaterial: WgslMaterialSpec;
   #resources: DeviceResources;
   #tableLaws: ReadonlyArray<PhotometricLaw> = [];
+  /** The plan whose records were written last, and each of its meshes' first instance. */
+  #written: { readonly plan: BodyFramePlan; readonly firstInstance: ReadonlyArray<number> } | null =
+    null;
   readonly #unsubscribe: () => void;
 
   constructor(engine: LitBodyEngine, spriteMaterial: WgslMaterialSpec) {
@@ -550,6 +701,7 @@ export class LitBodyRenderer {
     this.#unsubscribe = engine.onRestored(() => {
       this.#resources = this.#create();
       this.#tableLaws = [];
+      this.#written = null;
     });
   }
 
@@ -573,6 +725,15 @@ export class LitBodyRenderer {
         usage: TEXTURE_USAGE.TEXTURE_BINDING,
         category: "other",
       }),
+      mesh: engine.createMaterial(SMOOTH_MESH_MATERIAL),
+      patch: engine.createMesh({
+        name: "bodies:smooth patch",
+        ...patchMeshData(),
+        topology: "triangle-list",
+        attributes: {},
+      }),
+      slots: this.#buffer("bodies:mesh slots", MIN_BUFFER_BYTES),
+      instances: this.#buffer("bodies:mesh instances", MIN_BUFFER_BYTES),
     };
   }
 
@@ -635,26 +796,90 @@ export class LitBodyRenderer {
     this.#tableLaws = laws;
   }
 
-  /** A disc's two draws: its wholly covered pixels, then its limb. */
-  #discDraws(index: number, surface: DrawnDiscSurface): DrawItem[] {
+  /** The class map a record's draws bind: its own, or the texel of no weight. */
+  #classWeights(surface: DrawnDiscSurface): TextureHandle {
+    return surface.kind === "class-map" ? surface.weights : this.#resources.noClassMap;
+  }
+
+  /** One of a disc's two draws: 0 its wholly covered pixels, 1 its limb, at `depths`. */
+  #discDraw(
+    index: number,
+    surface: DrawnDiscSurface,
+    edgePass: 0 | 1,
+    depths: LimbDepths,
+  ): DrawItem {
     const resources = this.#resources;
-    const classWeights = surface.kind === "class-map" ? surface.weights : resources.noClassMap;
-    return (
-      [
-        [resources.interior, 0],
-        [resources.limb, 1],
-      ] as const
-    ).map(([material, edgePass]) => ({
+    return {
       mesh: resources.quad,
-      material,
+      material: edgePass === 0 ? resources.interior : resources.limb,
       offsetFromCameraM: new Float32Array(3),
       uniforms: {
         disc: new Float32Array([index]),
         edgePass: new Float32Array([edgePass]),
+        depths: new Float32Array(depths),
       },
-      textures: { phaseFactorTable: resources.table, classWeights },
+      textures: { phaseFactorTable: resources.table, classWeights: this.#classWeights(surface) },
       storageBuffers: { discs: resources.discs },
-    }));
+    };
+  }
+
+  /** Writes a plan's phase table, records and smooth figures, once per plan. */
+  #upload(plan: BodyFramePlan): ReadonlyArray<number> {
+    if (this.#written?.plan === plan) {
+      return this.#written.firstInstance;
+    }
+    const resources = this.#resources;
+    this.#writeTable(plan.laws);
+    resources.discs = this.#write(resources.discs, packDiscRecords(plan.discs));
+    const records = packSmoothMeshes(plan.meshes.map(({ mesh }) => mesh));
+    resources.slots = this.#write(resources.slots, records.slots);
+    resources.instances = this.#write(resources.instances, records.instances);
+    this.#written = { plan, firstInstance: records.firstInstance };
+    return records.firstInstance;
+  }
+
+  /**
+   * The draws of a plan's mesh bodies, one instanced draw of its figure each, for the `bodies`
+   * pass: opaque, with depth, before the painter's sequence (Design note 8).
+   */
+  meshDraws(plan: BodyFramePlan): DrawItem[] {
+    const firstInstance = this.#upload(plan);
+    const resources = this.#resources;
+    return plan.meshes.flatMap((body, i) => {
+      const record = plan.discs[body.index];
+      if (record === undefined) {
+        throw new Error(`the plan's mesh ${i} has no record ${body.index}`);
+      }
+      const first = firstInstance[i];
+      if (first === undefined) {
+        throw new Error(`the plan's mesh ${i} has no first instance`);
+      }
+      if (body.mesh.patches.length === 0) {
+        return [];
+      }
+      return [
+        {
+          mesh: resources.patch,
+          material: resources.mesh,
+          offsetFromCameraM: new Float32Array(3),
+          uniforms: {
+            disc: new Float32Array([body.index]),
+            firstInstance: new Float32Array([first]),
+            bodyRotation: rotationColumns(body.mesh.axes),
+          },
+          textures: {
+            phaseFactorTable: resources.table,
+            classWeights: this.#classWeights(record.surface),
+          },
+          storageBuffers: {
+            discs: resources.discs,
+            slots: resources.slots,
+            instances: resources.instances,
+          },
+          instanceCount: body.mesh.patches.length,
+        },
+      ];
+    });
   }
 
   /** A run of points' one instanced draw, from the run's own buffer. */
@@ -680,7 +905,9 @@ export class LitBodyRenderer {
   }
 
   /**
-   * The draws of a plan, in its painter's order, to add to the scene target's submission.
+   * The draws of a plan, in its painter's order, to add to the scene target's submission: each
+   * disc's two draws, each run of points, each host's draws and each mesh body's limb (its figure
+   * is {@link LitBodyRenderer.meshDraws}', drawn before).
    *
    * @param hostDraws - R06's host-disc draws by star (`DiscFrame.draws`), placed at each host's
    *   entry in the order; a host with none (a sprite, or off the view) draws nothing there.
@@ -689,9 +916,7 @@ export class LitBodyRenderer {
     plan: BodyFramePlan,
     hostDraws: ReadonlyMap<number, ReadonlyArray<DrawItem>> = new Map(),
   ): DrawItem[] {
-    const resources = this.#resources;
-    this.#writeTable(plan.laws);
-    resources.discs = this.#write(resources.discs, packDiscRecords(plan.discs));
+    this.#upload(plan);
     const draws: DrawItem[] = [];
     let run = 0;
     for (const step of plan.steps) {
@@ -704,7 +929,19 @@ export class LitBodyRenderer {
           if (record === undefined) {
             throw new Error(`the plan's disc step ${step.index} has no record`);
           }
-          draws.push(...this.#discDraws(step.index, record.surface));
+          draws.push(
+            this.#discDraw(step.index, record.surface, 0, DISC_LIMB_DEPTHS),
+            this.#discDraw(step.index, record.surface, 1, DISC_LIMB_DEPTHS),
+          );
+          break;
+        }
+        case "limb": {
+          const body = plan.meshes[step.mesh];
+          const record = body === undefined ? undefined : plan.discs[body.index];
+          if (body === undefined || record === undefined) {
+            throw new Error(`the plan's limb step ${step.mesh} has no mesh or record`);
+          }
+          draws.push(this.#discDraw(body.index, record.surface, 1, body.limbDepths));
           break;
         }
         case "points":

@@ -57,6 +57,11 @@ export interface SpikeLaunch {
   readonly dawnSafety: SpikeSwitch;
   /** The directory a GPU capture is written to (T15.a), or `null` for none. */
   readonly capture: string | null;
+  /**
+   * Whether the trace records V8's CPU profiler (`--trace-profile`, T14.e): a profiled run is a
+   * diagnostic, never judged (decision-r05-trace-windows.md).
+   */
+  readonly traceProfile: SpikeSwitch;
 }
 
 /** Where a spike run's results file and its summary were written. */
@@ -78,7 +83,12 @@ export interface SpikeApi {
   readonly launch: SpikeLaunch;
   /** Starts the run's trace and its 1 Hz memory sampling (Design note 18). */
   startTrace(): Promise<void>;
-  /** Stops them, and reduces the trace in the main process. */
+  /**
+   * Ends the trace's window at a boundary and begins the next (T14.e): the main process writes
+   * the window's file, and starts recording again.
+   */
+  cycleTrace(): Promise<void>;
+  /** Stops the trace and the 1 Hz memory sampling, and reduces the trace's windows in the main process. */
   stopTrace(): Promise<void>;
   /** Hands the main process's sampler the renderer's own memory (`getProcessMemoryInfo`). */
   sampleMemory(): Promise<void>;
@@ -181,15 +191,21 @@ export interface SpikeLatePipeline {
 }
 
 /**
- * One window of the run's trace, in `performance.now()` ms (R05.T14.d): Chromium keeps one trace
- * session at a time, so the trace is stopped and started again between windows, which never
+ * One window of the run's trace, in `performance.now()` ms (R05.T14.d, T14.e): Chromium keeps one
+ * trace session at a time, so the trace is stopped and started again between windows, which never
  * overlap (decision-r05-trace-windows.md).
  */
 export interface SpikeTraceWindow {
-  /** When its start resolved. */
+  /** When its start resolved; for a failed last window, when the trace ended. */
   readonly startedMs: number;
   /** When its stop was asked for. */
   readonly stopRequestedMs: number;
+  /**
+   * Why the renderer failed it, or `null`. A cycle that failed, or was still pending at the next
+   * boundary, ends the trace: one last window, failed with the reason, stands for the rest of the
+   * run.
+   */
+  readonly failure: string | null;
 }
 
 /**
@@ -202,8 +218,16 @@ export interface DescentSpikeReport {
    * `requestAnimationFrame` timestamp, from which `SpikeRun` counts script time (T14.d).
    */
   readonly scriptStartMs: number;
-  /** The trace's windows in order; the main process wrote one trace file for each. */
+  /**
+   * The trace's windows in order; the main process wrote one trace file for each, but perhaps not
+   * for a failed last one.
+   */
   readonly traceWindows: ReadonlyArray<SpikeTraceWindow>;
+  /**
+   * How long after each window's start its boundary's frames are still left out, s: the
+   * renderer's `TRACE_BOUNDARY_GUARD_S`, which the main process's merge applies.
+   */
+  readonly traceGuardS: number;
   readonly warmupS: number;
   readonly segments: ReadonlyArray<SpikeSegmentSpan>;
   /** T6's level table: per level, the bound ε_n, m, and the ratio k_n. */

@@ -12,7 +12,9 @@
  * `--descent-spike` opens the descent spike in place of the consoles (plan R05, T13.c), with its
  * own options: `--setting high|low`, `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`,
  * `--vertex-path baked-offsets|face-differences`, `--normals double|mesh`, `--ridged on|off`,
- * `--dawn-safety on|off` and `--capture <dir>`. Each is refused without the flag.
+ * `--dawn-safety on|off`, `--capture <dir>` and `--trace-profile on|off` (T14.e: V8's CPU profiler
+ * in the trace, off by default; a profiled run is a diagnostic, never judged). Each is refused
+ * without the flag.
  *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
@@ -65,6 +67,7 @@ const SPIKE_OPTIONS = [
   "ridged",
   "dawnSafety",
   "capture",
+  "traceProfile",
 ] as const;
 
 /** The spike's options that `--views-check` takes too. */
@@ -196,6 +199,12 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option("--capture <DIR>", "capture the GPU calls of a span").argParser(parseDirectory),
     )
+    .addOption(
+      new Option("--trace-profile <ON>", "V8's CPU profiler in the spike's trace").choices([
+        "on",
+        "off",
+      ]),
+    )
     .exitOverride();
 }
 
@@ -284,6 +293,7 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
     ridged: text("ridged") === "on" ? "on" : "off",
     dawnSafety: text("dawnSafety") === "off" ? "off" : "on",
     capture: text("capture"),
+    traceProfile: text("traceProfile") === "on" ? "on" : "off",
   };
 }
 

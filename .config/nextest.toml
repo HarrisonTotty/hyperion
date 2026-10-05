@@ -5,12 +5,13 @@
 # Each test runs in its own process, so a `OnceLock` shared between tests is built once per test,
 # not once per binary: slow tests that would share expensive data are written as one test instead.
 
-# The sky's luminosity tables take about 2 GB and 50 CPU-s to build (R06.T5, measured 2026-10-04),
-# and every test that reads them builds its own copy, since each test runs in its own process. On
-# 2026-10-03 sixteen of them at once, beside other lanes' builds, exhausted the machine's 32 GB and
-# froze it. Every such test is in this group, which runs at most two at a time.
+# Every test that reads the sky's luminosity tables builds its own copy, since each test runs in its
+# own process. On 2026-10-03 sixteen of them at once, at about 2 GB a build, beside other lanes'
+# builds, exhausted the machine's 32 GB and froze it, so every such test is in this group. Building
+# one metallicity at a time (a934837) cut a build to about 300 MiB (2026-10-05), so the group now
+# runs six at a time: about 2 GB together.
 [test-groups]
-sky-tables = { max-threads = 2 }
+sky-tables = { max-threads = 6 }
 
 [[profile.default.overrides]]
 filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits)/) | binary(/^sky_/))"
@@ -35,15 +36,6 @@ threads-required = 8
 fail-fast = false
 # A slow test is flagged after 2 minutes; none is ever killed.
 slow-timeout = "120s"
-# Two of the sky census's identity tests (R06.T8.e) are known to fail until R06.T16.b (merger
-# products outshine the flux bound at m₁); T16.b removes this exclusion. Every filter passed to
-# `just test-slow` is intersected with it.
-default-filter = """
-not (package(hyperion-sim) & binary(=sky_census) & (
-    test(=the_census_is_its_oracle_for_the_dwarfs_near_the_sun)
-    | test(=the_census_is_its_oracle_1000_ly_from_the_sun)
-))
-"""
 
 # The budget of the 512-pixel density maps is stated in `math::exp` calls timed at the pool's
 # width, and the test asserts that the pool is seen running a band on every worker at once. It

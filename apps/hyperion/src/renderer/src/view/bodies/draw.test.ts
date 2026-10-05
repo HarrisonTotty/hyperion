@@ -45,6 +45,8 @@ import {
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import type { DrawItem } from "../engine/types";
+import { sphereFootprint } from "./regime";
+import { DISC_LIMB_DEPTHS, rotationColumns } from "./smoothMesh";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -81,6 +83,7 @@ const OPTIONS = {
   exposureScale: EXPOSURE,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
+  setting: "high" as const,
 };
 
 /**
@@ -839,6 +842,9 @@ describe("the renderer", () => {
         case "points":
           names = [`points ${String(step.sprites.length)}`];
           break;
+        case "limb":
+          names = ["bodies:discLimb 1"];
+          break;
       }
       return names;
     });
@@ -876,12 +882,156 @@ describe("the renderer", () => {
   it("makes its resources again after a device loss and rewrites the table", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
-    renderer.draws(planOf());
+    // One plan before and after the loss: its records must be written again to the new buffers.
+    const plan = planOf();
+    renderer.draws(plan);
     const materials = engine.counts.materials;
     engine.restore();
-    expect(engine.counts.materials).toBe(materials + 3);
-    renderer.draws(planOf());
+    // The disc's two, the sprite's and the mesh regime's.
+    expect(engine.counts.materials).toBe(materials + 4);
+    const writes = engine.writes.length;
+    renderer.draws(plan);
     expect(engine.textureWritten.filter((w) => w.texture === "bodies:phase table")).toHaveLength(2);
+    expect(engine.writes.slice(writes).map((w) => w.buffer)).toContain("bodies:discs");
+    renderer.dispose();
+  });
+});
+
+/** A disc draw's corner depths. */
+function depthsOf(draw: DrawItem): number[] {
+  return Array.from(draw.uniforms["depths"] ?? []);
+}
+
+describe("mesh bodies (T9)", () => {
+  /** A planet 40 px across lit at 30°, a moon beyond it, and a third body clear of both. */
+  function sceneOfThree(): {
+    readonly bodies: LitBodyInput[];
+    readonly hosts: PlacedLight[];
+  } {
+    const { body, hosts } = scene(6.371e6 / Math.sin(20 / PX_PER_RAD), 30);
+    const moon: LitBodyInput = {
+      ...body,
+      id: "0200080020000000.0302",
+      centreM: add(body.centreM, vec3(5e6, 0, -3e7)),
+      figure: { equatorialRadiusM: 1.7e6, polarRadiusM: 1.7e6, pole: null },
+    };
+    const clear: LitBodyInput = {
+      ...body,
+      id: "0200080020000000.0303",
+      centreM: add(body.centreM, vec3(-8e7, 0, 0)),
+    };
+    return { bodies: [body, moon, clear], hosts };
+  }
+
+  /** The three bodies' plan with a depth writer over the planet, standing for R10's terrain. */
+  function promotedPlan(): ReturnType<typeof planLitBodies> {
+    const { bodies, hosts } = sceneOfThree();
+    const [planet] = bodies;
+    const writer =
+      planet === undefined ? null : sphereFootprint(planet.centreM, 6.371e6, CAMERA, VIEWPORT);
+    return planLitBodies(
+      bodies,
+      hosts,
+      { ...OPTIONS, depthWriters: writer === null ? [] : [writer] },
+      new Map(bodies.map((b) => [b.id, "disc" as const])),
+    );
+  }
+
+  const [PLANET, MOON, CLEAR] = sceneOfThree().bodies.map((b) => b.id);
+
+  it("promotes a disc over a depth writer, and a disc overlapping it, but not one clear of both", () => {
+    const plan = promotedPlan();
+    expect(
+      [PLANET, MOON, CLEAR].map((id) => (id === undefined ? id : plan.regimes.get(id))),
+    ).toEqual(["mesh", "mesh", "disc"]);
+  });
+
+  it("gives each mesh body its record and its smooth figure", () => {
+    const plan = promotedPlan();
+    expect(new Set(plan.meshes.map((m) => plan.discs[m.index]?.body))).toEqual(
+      new Set([PLANET, MOON]),
+    );
+    expect(plan.meshes.every((m) => m.mesh.patches.length > 0)).toBe(true);
+  });
+
+  it("places each mesh body's limb in the painter's sequence, the farther first", () => {
+    const plan = promotedPlan();
+    const limbs = plan.steps.flatMap((step) =>
+      step.kind === "limb" ? [plan.discs[plan.meshes[step.mesh]?.index ?? -1]?.body] : [],
+    );
+    expect(limbs).toEqual([MOON, PLANET]);
+    expect(plan.steps.filter((step) => step.kind === "disc")).toHaveLength(1);
+  });
+
+  it("promotes nothing without a depth writer", () => {
+    const { bodies, hosts } = sceneOfThree();
+    const plan = planLitBodies(bodies, hosts, OPTIONS, new Map());
+    expect([plan.meshes, [...plan.regimes.values()].filter((r) => r === "mesh")]).toEqual([[], []]);
+  });
+
+  it("draws each mesh body's figure in one instanced draw of its patches", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = promotedPlan();
+    const draws = renderer.meshDraws(plan);
+    let first = 0;
+    const expected = plan.meshes.map((body) => {
+      const shape = {
+        material: "bodies:smoothMesh",
+        instances: body.mesh.patches.length,
+        disc: body.index,
+        firstInstance: first,
+        rotation: Array.from(rotationColumns(body.mesh.axes)),
+        buffers: ["discs", "slots", "instances"],
+      };
+      first += body.mesh.patches.length;
+      return shape;
+    });
+    expect(
+      draws.map((draw) => ({
+        material: draw.material.name,
+        instances: draw.instanceCount,
+        disc: draw.uniforms["disc"]?.[0],
+        firstInstance: draw.uniforms["firstInstance"]?.[0],
+        rotation: Array.from(draw.uniforms["bodyRotation"] ?? []),
+        buffers: Object.keys(draw.storageBuffers ?? {}),
+      })),
+    ).toEqual(expected);
+    expect(engine.writes.map((w) => w.buffer)).toEqual(
+      expect.arrayContaining(["bodies:mesh slots", "bodies:mesh instances"]),
+    );
+    renderer.dispose();
+  });
+
+  it("draws each mesh body's limb in the sequence at its limb plane's depths, and a disc's at 0", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = promotedPlan();
+    const sequence = renderer.draws(plan);
+    const limbs = sequence.filter(
+      (draw) => draw.material.name === "bodies:discLimb" && depthsOf(draw).some((d) => d !== 0),
+    );
+    expect(limbs.map(depthsOf)).toEqual(
+      plan.steps.flatMap((step) =>
+        step.kind === "limb"
+          ? [Array.from(new Float32Array(plan.meshes[step.mesh]?.limbDepths ?? []))]
+          : [],
+      ),
+    );
+    expect(sequence.filter((draw) => draw.material.name === "bodies:disc").map(depthsOf)).toEqual([
+      Array.from(DISC_LIMB_DEPTHS),
+    ]);
+    renderer.dispose();
+  });
+
+  it("writes a plan's records once for its figures and its sequence", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = promotedPlan();
+    renderer.meshDraws(plan);
+    const writes = engine.writes.length;
+    renderer.draws(plan);
+    expect(engine.writes.length).toBe(writes);
     renderer.dispose();
   });
 });

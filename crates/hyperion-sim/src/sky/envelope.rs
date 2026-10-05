@@ -40,15 +40,25 @@
 //! [`BrightnessEnvelope::build_with`] and fit-check's byte-for-byte rerun.
 //!
 //! Plan 11's binary evolution moves mass within a pair and rejuvenates or merges stars:
-//! [`max_star_mass`] says how massive a star a system can hold (R06.T16.b widens it).
+//! [`max_star_mass`] says how massive a star a system can hold, twice its primary's initial mass
+//! (R06.T16.b), and a system whose pairs may have interacted is bounded over every age from zero
+//! to its own, since a main-sequence merger or accretor shines as a younger star of its new mass
+//! (the census's `flux_bound` gives the reasoning for the other pair-evolved states). A layer whose
+//! every system is single ([`always_single`]: the free-floating brown dwarfs) holds no pair, so its
+//! heaviest star is its primary ([`max_star_mass_in`], R06.T8.f).
+//!
+//! The cell floor asks about every age at once, so the envelope also keeps each node's brightest
+//! magnitude over every age bin, and [`BrightnessEnvelope::mass_floor`] reads that one value a node
+//! for the question (R06.T8.f), bit for bit what a scan of the bins gives.
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
+use crate::galaxy::placement::SystemKind;
 use crate::id::Layer;
 use crate::math;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
-use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track};
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
 use crate::tables::sky_envelope;
@@ -117,12 +127,44 @@ pub const AGE_SPREAD_FACTOR: f64 = 1.6;
 /// samples and its compositions (Design note 8; the dense slow test measures what is used).
 pub const MARGIN_MAG: f64 = 0.3;
 
-/// The mass of the heaviest star `primary_initial`'s system can hold: the primary's initial mass
-/// while every star evolves alone, since no companion is drawn heavier than its primary.
-/// R06.T16.b widens it for plan 11's pairs.
+/// The mass of the heaviest star `primary_initial`'s system can hold, M☉: twice the primary's
+/// initial mass, and at most the tracks' top, [`MAX_INITIAL_MASS`] (150 M☉) (Design note 8;
+/// R06.T16.b).
+///
+/// Plan 11's engine evolves only pairs of two stars (P11.T11), whose mass can only move between
+/// its two members or leave the pair, and no companion is drawn heavier than its primary. So a
+/// merger or an accretor holds at most m₁ + m₂ ≤ 2 m₁. A merger product heavier than 150 M☉
+/// follows the 150 M☉ track (`track_mass`). A main-sequence accretor above it takes the closed
+/// forms extrapolated past their range (BSE's formulae hold to 100 M☉, Hurley, Tout and Pols
+/// 2002, §1), and the top node bounds it through the 150 M☉ track's later phases and the margin.
+/// A NaN mass reads 150 M☉, the brightest node, which skips nothing.
 #[must_use]
 pub fn max_star_mass(primary_initial: SolarMasses) -> SolarMasses {
-    primary_initial
+    SolarMasses::new((2.0 * primary_initial.value()).min(MAX_INITIAL_MASS.value()))
+}
+
+/// Whether every system of `layer` is single: a free-floating brown dwarf or a rogue planet, which
+/// plan 11's multiplicity is not applied to (`stellar::system::grid_multiplicity` makes each a
+/// forced single; plan 13's Risks, "Brown dwarfs are single"). A test holds the census's records
+/// to it, layer by layer.
+#[must_use]
+pub const fn always_single(layer: Layer) -> bool {
+    match SystemKind::of_layer(layer) {
+        SystemKind::Stellar => false,
+        SystemKind::BrownDwarf | SystemKind::RoguePlanet => true,
+    }
+}
+
+/// The mass of the heaviest star a system of `layer` with a primary of `primary_initial` can
+/// hold, M☉: the primary's own where every system of the layer is single ([`always_single`]), and
+/// [`max_star_mass`] otherwise, since a pair can merge or feed one star (R06.T8.f).
+#[must_use]
+pub fn max_star_mass_in(layer: Layer, primary_initial: SolarMasses) -> SolarMasses {
+    if always_single(layer) {
+        primary_initial
+    } else {
+        max_star_mass(primary_initial)
+    }
 }
 
 /// The brightest absolute V magnitude stars of at most a given mass reach over a range of ages
@@ -134,6 +176,10 @@ pub struct BrightnessEnvelope {
     /// Per node, per age bin, the brightest M<sub>V</sub> of this node and every lighter one,
     /// margin included; +∞ where none shines.
     brightest: Vec<[f64; AGE_BINS + 1]>,
+    /// Per node, its row's brightest over every age bin, folded as [`brightest`](Self::brightest)
+    /// folds a range: what the cell floor's question, every age at once, reads (R06.T8.f). Like
+    /// each bin, it never rises with mass.
+    brightest_ever: Vec<f64>,
 }
 
 impl BrightnessEnvelope {
@@ -155,12 +201,38 @@ impl BrightnessEnvelope {
     /// The envelope of the fitted table, which [`build`](Self::build) returns for every galaxy.
     #[must_use]
     pub(crate) fn fitted() -> Self {
-        Self {
-            masses: sky_envelope::MASSES.to_vec(),
-            brightest: sky_envelope::BRIGHTEST_MMAG
+        Self::from_rows(
+            sky_envelope::MASSES.to_vec(),
+            sky_envelope::BRIGHTEST_MMAG
                 .iter()
                 .map(|row| row.map(from_millimag))
                 .collect(),
+        )
+    }
+
+    /// The envelope of `masses` and their rows, with each row's brightest over every age.
+    ///
+    /// # Panics
+    ///
+    /// If a node's brightest over every age is brighter than the next node's, which the running
+    /// minimum over mass of [`assemble`](Self::assemble) and of the fitted table rules out, and on
+    /// which [`mass_floor`](Self::mass_floor)'s reading of one value a node rests.
+    #[must_use]
+    fn from_rows(masses: Vec<f64>, brightest: Vec<[f64; AGE_BINS + 1]>) -> Self {
+        let brightest_ever: Vec<f64> = brightest
+            .iter()
+            .map(|row| row.iter().fold(f64::INFINITY, |a, &b| a.min(b)))
+            .collect();
+        assert!(
+            brightest_ever
+                .windows(2)
+                .all(|w| w[1].partial_cmp(&w[0]) != Some(core::cmp::Ordering::Greater)),
+            "an envelope never fades with mass"
+        );
+        Self {
+            masses,
+            brightest,
+            brightest_ever,
         }
     }
 
@@ -217,7 +289,7 @@ impl BrightnessEnvelope {
                 *v -= MARGIN_MAG;
             }
         }
-        Self { masses, brightest }
+        Self::from_rows(masses, brightest)
     }
 
     /// The nodes' masses, M☉, ascending, and per node and age bin the brightest M<sub>V</sub>,
@@ -255,8 +327,14 @@ impl BrightnessEnvelope {
     /// fainter, so a census skips it. The band's upper edge where no primary of the band can, and
     /// its lower edge where every one can.
     ///
-    /// A system's brightest star is at most [`max_star_mass`] of its primary; the floor is the
-    /// heaviest node below the first that passes, mapped back through it.
+    /// A system's brightest star is at most [`max_star_mass_in`] of its layer and primary: twice
+    /// its mass where a pair can merge or feed one star, and its own where the layer's systems are
+    /// all single, as the brown dwarfs' are. A primary can hold a star as bright as `faintest` when
+    /// a star of up to that mass can be, and the floor is the lightest such primary.
+    ///
+    /// Asked about every age at once, as the census's cell floor asks, it reads one value a node,
+    /// its brightest over every age bin, and gives bit for bit what a scan of the bins gives
+    /// (R06.T8.f): the bisection is the same, and so is each of its answers.
     #[must_use]
     pub fn mass_floor(
         &self,
@@ -266,35 +344,56 @@ impl BrightnessEnvelope {
         ages: (Years, Years),
     ) -> SolarMasses {
         let band = MassBand::from(layer);
-        let (lo, hi) = (band.lo(), band.hi());
-        let passes = |m1: f64| {
-            self.brightest(layer, component, max_star_mass(SolarMasses::new(m1)), ages)
-                .is_some_and(|v| v.value() <= faintest.value())
-        };
-        if passes(lo) {
-            return SolarMasses::new(lo);
+        let star_mass = |m1: f64| max_star_mass_in(layer, SolarMasses::new(m1)).value();
+        if age_bin_range(ages) != Some((0, AGE_BINS)) {
+            return bisect_floor(band, |m1| {
+                self.brightest(layer, component, SolarMasses::new(star_mass(m1)), ages)
+                    .is_some_and(|v| v.value() <= faintest.value())
+            });
         }
-        if !passes(hi) {
-            return SolarMasses::new(hi);
-        }
-        // Bisect on the primary's mass: `passes` is monotone in it, the envelope being a running
-        // minimum over mass and `max_star_mass` rising.
-        let (mut below, mut above) = (lo, hi);
-        for _ in 0..48 {
-            let mid = (below * above).sqrt();
-            if passes(mid) {
-                above = mid;
-            } else {
-                below = mid;
+        // Every age: a node passes when its brightest ever is finite and at most `faintest`, and
+        // since that never rises with mass, the nodes that pass are those from `first` on. A
+        // primary passes when the node at or above its star mass does, so when the node below
+        // `first` is lighter than that mass: the scan's answer at every step of the bisection.
+        let first = self
+            .brightest_ever
+            .partition_point(|&v| !(v.is_finite() && v <= faintest.value()));
+        match first {
+            0 => bisect_floor(band, |_| true),
+            f if f >= self.masses.len() => bisect_floor(band, |_| false),
+            f => {
+                let below = self.masses[f - 1];
+                bisect_floor(band, |m1| below < star_mass(m1))
             }
         }
-        SolarMasses::new(below)
+    }
+
+    /// [`mass_floor`](Self::mass_floor) by its scan of the age bins alone, whatever the ages: the
+    /// reading it is held to bit for bit.
+    #[cfg(test)]
+    #[must_use]
+    fn mass_floor_by_scan(
+        &self,
+        layer: Layer,
+        component: ComponentId,
+        faintest: Magnitudes,
+        ages: (Years, Years),
+    ) -> SolarMasses {
+        bisect_floor(MassBand::from(layer), |m1| {
+            self.brightest(
+                layer,
+                component,
+                max_star_mass_in(layer, SolarMasses::new(m1)),
+                ages,
+            )
+            .is_some_and(|v| v.value() <= faintest.value())
+        })
     }
 
     /// The bytes the envelope owns on the heap.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        self.masses.capacity() * size_of::<f64>()
+        (self.masses.capacity() + self.brightest_ever.capacity()) * size_of::<f64>()
             + self.brightest.capacity() * size_of::<[f64; AGE_BINS + 1]>()
     }
 
@@ -305,6 +404,32 @@ impl BrightnessEnvelope {
             .partition_point(|&node| node < m)
             .min(self.masses.len() - 1)
     }
+}
+
+/// The least primary mass of `band` that `passes`, by bisection in log mass, as
+/// [`BrightnessEnvelope::mass_floor`] defines it: the band's lower edge if it passes, its upper
+/// edge if that does not, and otherwise the last mass found not to pass after 48 halvings.
+/// `passes` is monotone in the primary's mass, the envelope being a running minimum over mass and
+/// a system's heaviest star rising with its primary.
+#[must_use]
+fn bisect_floor(band: MassBand, passes: impl Fn(f64) -> bool) -> SolarMasses {
+    let (lo, hi) = (band.lo(), band.hi());
+    if passes(lo) {
+        return SolarMasses::new(lo);
+    }
+    if !passes(hi) {
+        return SolarMasses::new(hi);
+    }
+    let (mut below, mut above) = (lo, hi);
+    for _ in 0..48 {
+        let mid = (below * above).sqrt();
+        if passes(mid) {
+            above = mid;
+        } else {
+            below = mid;
+        }
+    }
+    SolarMasses::new(below)
 }
 
 /// The envelope's mass nodes: even in ln m over 0.0124–150 M☉, with every band edge added.
@@ -674,7 +799,163 @@ mod tests {
     }
 
     #[test]
-    fn max_star_mass_is_the_primary_mass_while_stars_evolve_alone() {
-        assert_eq!(max_star_mass(SolarMasses::new(3.0)), SolarMasses::new(3.0));
+    fn max_star_mass_is_twice_the_primary_up_to_the_tracks_top() {
+        assert_eq!(
+            max_star_mass(SolarMasses::new(0.638)),
+            SolarMasses::new(1.276)
+        );
+        assert_eq!(max_star_mass(SolarMasses::new(3.0)), SolarMasses::new(6.0));
+        assert_eq!(
+            max_star_mass(SolarMasses::new(75.0)),
+            SolarMasses::new(150.0)
+        );
+        assert_eq!(max_star_mass(SolarMasses::new(120.0)), MAX_INITIAL_MASS);
+        assert_eq!(max_star_mass(SolarMasses::new(150.0)), MAX_INITIAL_MASS);
+    }
+
+    /// The floor inverts the envelope at [`max_star_mass`]: a primary just above it could hold a
+    /// star of twice its mass as bright as the faintest listable, and one just below could not.
+    /// For some cuts the primary's own mass would not pass there, so the floor is lower than that
+    /// mass alone would make it.
+    #[test]
+    fn the_mass_floor_admits_every_primary_whose_merger_could_pass() {
+        let e = envelope();
+        let c = any_component();
+        let ages = years(0.0, MAX_AGE_YEARS);
+        let shines = |m: f64, faintest: f64| {
+            e.brightest(Layer::A, c, SolarMasses::new(m), ages)
+                .is_some_and(|v| v.value() <= faintest)
+        };
+        let (mut inside, mut lowered) = (0, 0);
+        for faintest in [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0] {
+            let floor = e
+                .mass_floor(Layer::A, c, Magnitudes::new(faintest), ages)
+                .value();
+            if floor <= MassBand::A.lo() || floor >= MassBand::A.hi() {
+                continue;
+            }
+            inside += 1;
+            let above = max_star_mass(SolarMasses::new(floor * (1.0 + 1e-9))).value();
+            let below = max_star_mass(SolarMasses::new(floor * (1.0 - 1e-6))).value();
+            assert!(shines(above, faintest), "{faintest}: above {floor}");
+            assert!(!shines(below, faintest), "{faintest}: below {floor}");
+            lowered += usize::from(!shines(floor * (1.0 + 1e-9), faintest));
+        }
+        assert!(inside > 0, "no cut puts A's floor inside its band");
+        assert!(lowered > 0, "the widened mass never lowers A's floor");
+    }
+
+    /// The floor over every age reads one value a node and gives the scan's answer bit for bit,
+    /// at 10⁴ random queries over every layer (R06.T8.f), among them faintest magnitudes on the
+    /// nodes' own values, where a comparison could tip.
+    #[test]
+    fn the_floor_over_every_age_is_the_scan_bit_for_bit() {
+        let e = envelope();
+        let c = any_component();
+        let every_age = years(0.0, MAX_AGE_YEARS);
+        let layers = [
+            Layer::A,
+            Layer::B,
+            Layer::C,
+            Layer::D,
+            Layer::E,
+            Layer::BrownDwarf,
+        ];
+        let (masses, _) = e.rows();
+        let mut u = crate::sky::testing::uniforms(0x7a8f);
+        let mut inside = 0;
+        for k in 0..10_000_usize {
+            let layer = layers[k % layers.len()];
+            let faintest = if k % 7 == 0 {
+                // A node's brightest ever, exactly.
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss,
+                    reason = "an index below the node count, some 200"
+                )]
+                let j = (u.next().expect("endless") * masses.len() as f64) as usize;
+                e.brightest_ever[j.min(masses.len() - 1)]
+            } else {
+                -16.0 + 40.0 * u.next().expect("endless")
+            };
+            let faintest = Magnitudes::new(faintest);
+            let fast = e.mass_floor(layer, c, faintest, every_age);
+            let scan = e.mass_floor_by_scan(layer, c, faintest, every_age);
+            assert_eq!(
+                hyperion_testkit::float::bits(fast.value()),
+                hyperion_testkit::float::bits(scan.value()),
+                "{layer:?} at {faintest:?}: {fast:?} against {scan:?}"
+            );
+            let band = MassBand::from(layer);
+            inside += usize::from(fast.value() > band.lo() && fast.value() < band.hi());
+        }
+        // Most queries bisect, so the comparison is made at every step of many bisections.
+        assert!(inside > 1_000, "{inside} floors inside their bands");
+        // A narrower range of ages takes the scan itself.
+        let some_ages = years(1e8, 1e10);
+        let f = Magnitudes::new(3.0);
+        assert_eq!(
+            e.mass_floor(Layer::C, c, f, some_ages),
+            e.mass_floor_by_scan(Layer::C, c, f, some_ages)
+        );
+    }
+
+    #[test]
+    fn a_systems_heaviest_star_is_its_primary_where_every_system_is_single() {
+        let m = SolarMasses::new(0.05);
+        assert!(always_single(Layer::BrownDwarf) && always_single(Layer::RoguePlanet));
+        assert_eq!(max_star_mass_in(Layer::BrownDwarf, m), m);
+        for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+            assert!(!always_single(layer), "{layer:?}");
+            let m1 = SolarMasses::new(MassBand::from(layer).lo());
+            assert_eq!(max_star_mass_in(layer, m1), max_star_mass(m1), "{layer:?}");
+        }
+    }
+
+    /// The brown dwarfs' floor inverts the envelope at each primary's own mass, which is higher
+    /// for some cuts than the floor at twice it would be (R06.T16.b's open item, closed in
+    /// R06.T8.f): their systems are single, so no merger or accretor of twice the mass exists.
+    #[test]
+    fn the_brown_dwarfs_floor_reads_each_primarys_own_mass() {
+        let e = envelope();
+        let c = any_component();
+        let ages = years(0.0, MAX_AGE_YEARS);
+        let band = MassBand::BrownDwarf;
+        let shines = |m: f64, faintest: f64| {
+            e.brightest(Layer::BrownDwarf, c, SolarMasses::new(m), ages)
+                .is_some_and(|v| v.value() <= faintest)
+        };
+        let mut raised = 0;
+        for faintest in [20.0, 18.0, 16.0, 14.0, 12.0, 10.0, 8.0] {
+            let floor = e
+                .mass_floor(Layer::BrownDwarf, c, Magnitudes::new(faintest), ages)
+                .value();
+            if floor <= band.lo() || floor >= band.hi() {
+                continue;
+            }
+            assert!(
+                shines(floor * (1.0 + 1e-9), faintest),
+                "{faintest}: {floor}"
+            );
+            assert!(
+                !shines(floor * (1.0 - 1e-6), faintest),
+                "{faintest}: {floor}"
+            );
+            // Read at twice each primary's mass, as before R06.T8.f, the floor would be lower.
+            let doubled = bisect_floor(band, |m1| {
+                e.brightest(
+                    Layer::BrownDwarf,
+                    c,
+                    max_star_mass(SolarMasses::new(m1)),
+                    ages,
+                )
+                .is_some_and(|v| v.value() <= faintest)
+            })
+            .value();
+            assert!(doubled <= floor, "{faintest}: {doubled} above {floor}");
+            raised += usize::from(doubled < floor);
+        }
+        assert!(raised > 0, "the primary's own mass never raises the floor");
     }
 }

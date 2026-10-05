@@ -17,12 +17,7 @@
 import { add, dot, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { PATCH_QUADS, stToUv } from "./cube";
 import type { Face, PatchKey } from "./patchKey";
-import {
-  type BodyFigure,
-  type BodyFixedVec3,
-  levelHeightRangeM,
-  type PlanetGeometry,
-} from "./planet";
+import { type BodyFixedVec3, levelHeightRangeM, type PlanetGeometry } from "./planet";
 
 /** An oriented box: a centre, three orthonormal axes and the half-extent along each, metres. */
 export interface OrientedBox {
@@ -44,6 +39,12 @@ export interface PatchBounds {
   /** The oriented box: the centre's spheroid normal and two tangents, body-fixed metres. */
   readonly box: OrientedBox;
 }
+
+/**
+ * {@link stToUv}, bound once: a build calls it 34 times, and under a module runner (the descent
+ * record's harness runs selection under Vite's) each read of an imported binding is a getter call.
+ */
+const warp = stToUv;
 
 /** The step between the boundary vertices sampled, in vertices. */
 const SAMPLE_STEP = 4;
@@ -72,15 +73,56 @@ function boundaryVertices(): readonly [Int32Array, Int32Array] {
 
 const [RING_X, RING_Y] = boundaryVertices();
 
+/** The points the bounds are built from on the spheroid: each ring vertex, then the centre's. */
+const SPHEROID_POINTS = RING_X.length + 1;
+
 /** The points the bounds are built from: each ring vertex at the top and the bottom, then the centre's. */
-const POINTS = 2 * RING_X.length + 2;
+const POINTS = 2 * SPHEROID_POINTS;
 
 /**
- * Scratch for {@link patchBounds}: a direction, x, y and z, and the points, three numbers a
- * point. Used within one call, which nothing re-enters.
+ * The numbers of a patch's geometry, which does not depend on its height range
+ * ({@link patchGeometryInto}): the spheroid point M·d under the centre, the centre's spheroid
+ * normal ν and the box's tangents t1 and t2, three numbers each, then each point's M·d and ν, six
+ * numbers a point, the ring's in order and then the centre's.
+ */
+export const PATCH_GEOMETRY_LENGTH = 12 + 6 * SPHEROID_POINTS;
+
+/** Where the points start in a patch's geometry. */
+const GEOMETRY_POINTS = 12;
+
+/**
+ * The numbers of a patch's packed bounds ({@link packPatchBounds}): the box's centre (also the
+ * sphere's), the sphere's radius, the lowest and highest heights, the box's axes ν, t1 and t2, and
+ * its half-extents along them, at the offsets `PACKED_*` name.
+ */
+export const PACKED_BOUNDS_LENGTH = 18;
+/** The packed bounds' centre, x, y and z, body-fixed metres. */
+export const PACKED_CENTRE = 0;
+/** The packed bounds' sphere radius, metres. */
+export const PACKED_RADIUS = 3;
+/** The packed bounds' lowest and then highest height, metres. */
+export const PACKED_HEIGHTS = 4;
+/** The packed bounds' three axes, three numbers each. */
+export const PACKED_AXES = 6;
+/** The packed bounds' three half-extents, metres. */
+export const PACKED_HALF_EXTENTS = 15;
+
+/*
+ * Scratch, each array used within one call of the function it serves, which nothing re-enters:
+ * - DIR, a direction's x, y and z: the direction helpers, for patchGeometryInto;
+ * - RING_S and RING_T, the sampled columns' s and rows' t, and RING_EDGE_S and RING_EDGE_T, 1 for a
+ *   column or row on the face's edge: patchGeometryInto;
+ * - XYZ, the points at both heights, three numbers a point: packPatchBounds;
+ * - GEOMETRY and PACKED, a patch's geometry and its packed bounds: patchBounds.
  */
 const DIR = new Float64Array(3);
+const RING_S = new Float64Array(PATCH_QUADS / SAMPLE_STEP + 1);
+const RING_T = new Float64Array(PATCH_QUADS / SAMPLE_STEP + 1);
+const RING_EDGE_S = new Uint8Array(RING_S.length);
+const RING_EDGE_T = new Uint8Array(RING_T.length);
 const XYZ = new Float64Array(3 * POINTS);
+const GEOMETRY = new Float64Array(PATCH_GEOMETRY_LENGTH);
+const PACKED = new Float64Array(PACKED_BOUNDS_LENGTH);
 
 /**
  * `canonicalFace` of the integer point (`px`, `py`, `pz`) on the cube of half-width `half`: the
@@ -108,6 +150,52 @@ function canonicalFaceOf(px: number, py: number, pz: number, half: number): Face
     return 5;
   }
   throw new Error(`point (${px}, ${py}, ${pz}) is not on the cube of half-width ${half}`);
+}
+
+/**
+ * Writes into {@link DIR} the unit direction of face coordinates (`s`, `t`) on `face`: `latticeDir`'s
+ * `faceUvToXyz` and `unitDir`, the norm summed left to right, never `Math.hypot`.
+ */
+function faceDirIntoScratch(face: Face, s: number, t: number): void {
+  let dx = 0;
+  let dy = 0;
+  let dz = 0;
+  switch (face) {
+    case 0:
+      dx = 1;
+      dy = s;
+      dz = t;
+      break;
+    case 1:
+      dx = -s;
+      dy = 1;
+      dz = t;
+      break;
+    case 2:
+      dx = -s;
+      dy = -t;
+      dz = 1;
+      break;
+    case 3:
+      dx = -1;
+      dy = -t;
+      dz = -s;
+      break;
+    case 4:
+      dx = t;
+      dy = -1;
+      dz = -s;
+      break;
+    case 5:
+      dx = t;
+      dy = s;
+      dz = -1;
+      break;
+  }
+  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  DIR[0] = dx / length;
+  DIR[1] = dy / length;
+  DIR[2] = dz / length;
 }
 
 /**
@@ -185,48 +273,138 @@ function vertexDirIntoScratch(key: PatchKey, x: number, y: number): void {
       v = px;
       break;
   }
-  const s = stToUv((u + quads) / 2 / quads);
-  const t = stToUv((v + quads) / 2 / quads);
-  let dx = 0;
-  let dy = 0;
-  let dz = 0;
-  switch (face) {
-    case 0:
-      dx = 1;
-      dy = s;
-      dz = t;
-      break;
-    case 1:
-      dx = -s;
-      dy = 1;
-      dz = t;
-      break;
-    case 2:
-      dx = -s;
-      dy = -t;
-      dz = 1;
-      break;
-    case 3:
-      dx = -1;
-      dy = -t;
-      dz = -s;
-      break;
-    case 4:
-      dx = t;
-      dy = -1;
-      dz = -s;
-      break;
-    case 5:
-      dx = t;
-      dy = s;
-      dz = -1;
-      break;
+  faceDirIntoScratch(face, warp((u + quads) / 2 / quads), warp((v + quads) / 2 / quads));
+}
+
+/**
+ * Fills {@link RING_S} and {@link RING_T} for `key`, on the cube of half-width `quads`: the warped s
+ * of each sampled column x and t of each sampled row y, as {@link vertexDirIntoScratch} computes
+ * them for a vertex on the patch's own face, and {@link RING_EDGE_S} and {@link RING_EDGE_T}.
+ */
+function ringWarpsIntoScratch(key: PatchKey, quads: number): void {
+  // Exact integers, as in vertexDirIntoScratch.
+  const column = key.i * PATCH_QUADS;
+  const row = key.j * PATCH_QUADS;
+  for (let n = 0; n < RING_S.length; n += 1) {
+    const cu = 2 * (column + n * SAMPLE_STEP) - quads;
+    const cv = 2 * (row + n * SAMPLE_STEP) - quads;
+    RING_S[n] = warp((cu + quads) / 2 / quads);
+    RING_T[n] = warp((cv + quads) / 2 / quads);
+    RING_EDGE_S[n] = cu > -quads && cu < quads ? 0 : 1;
+    RING_EDGE_T[n] = cv > -quads && cv < quads ? 0 : 1;
   }
-  // `unitDir`: the norm summed left to right, never `Math.hypot`.
-  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  DIR[0] = dx / length;
-  DIR[1] = dy / length;
-  DIR[2] = dz / length;
+}
+
+/**
+ * Writes into {@link DIR} `vertexDir(key, x, y)` for a sampled vertex (x and y multiples of
+ * {@link SAMPLE_STEP}), from {@link ringWarpsIntoScratch}'s warps for `key`.
+ *
+ * @remarks
+ * Off the face's edges a vertex's canonical face is the patch's own, and its face coordinates are
+ * its own column and row, so its s and t are the tables' numbers, computed by the same operations;
+ * a vertex on a face's edge takes {@link vertexDirIntoScratch}'s whole path.
+ */
+function sampleDirIntoScratch(key: PatchKey, x: number, y: number): void {
+  const column = x / SAMPLE_STEP;
+  const row = y / SAMPLE_STEP;
+  if (RING_EDGE_S[column] !== 0 || RING_EDGE_T[row] !== 0) {
+    vertexDirIntoScratch(key, x, y);
+    return;
+  }
+  faceDirIntoScratch(key.face, RING_S[column] ?? 0, RING_T[row] ?? 0);
+}
+
+/**
+ * Writes at `at` in `g` the spheroid point M·d of unit direction (`d0`, `d1`, `d2`), metres, and
+ * its normal ν = M⁻¹d ÷ |M⁻¹d|, in `planet.ts`'s operations and order, for the spheroid of
+ * semi-axes `equatorialRadiusM` and `polarRadiusM`.
+ */
+function spheroidPointInto(
+  g: Float64Array,
+  at: number,
+  d0: number,
+  d1: number,
+  d2: number,
+  equatorialRadiusM: number,
+  polarRadiusM: number,
+): void {
+  const m0 = d0 / equatorialRadiusM;
+  const m1 = d1 / equatorialRadiusM;
+  const m2 = d2 / polarRadiusM;
+  const len = Math.sqrt(m0 * m0 + m1 * m1 + m2 * m2);
+  g[at] = equatorialRadiusM * d0;
+  g[at + 1] = equatorialRadiusM * d1;
+  g[at + 2] = polarRadiusM * d2;
+  g[at + 3] = m0 / len;
+  g[at + 4] = m1 / len;
+  g[at + 5] = m2 / len;
+}
+
+/**
+ * Writes into `g` (of {@link PATCH_GEOMETRY_LENGTH} numbers) patch `key`'s geometry on `planet`,
+ * the part of its bounds that its height range does not change.
+ *
+ * @throws RangeError where the patch's tangent cannot be normalised.
+ */
+export function patchGeometryInto(g: Float64Array, planet: PlanetGeometry, key: PatchKey): void {
+  const a = planet.figure.equatorialRadiusM;
+  const c = planet.figure.polarRadiusM;
+  const quads = PATCH_QUADS * 2 ** key.level;
+  ringWarpsIntoScratch(key, quads);
+  const half = PATCH_QUADS / 2;
+  // The centre's spheroid normal ν = M⁻¹d ÷ |M⁻¹d| and its spheroid point M·d.
+  sampleDirIntoScratch(key, half, half);
+  const cd0 = DIR[0] ?? 0;
+  const cd1 = DIR[1] ?? 0;
+  const cd2 = DIR[2] ?? 0;
+  const cm0 = cd0 / a;
+  const cm1 = cd1 / a;
+  const cm2 = cd2 / c;
+  const clen = Math.sqrt(cm0 * cm0 + cm1 * cm1 + cm2 * cm2);
+  const nx = cm0 / clen;
+  const ny = cm1 / clen;
+  const nz = cm2 / clen;
+  // The tangent t1 along the patch's u, the across vector less its part along ν, and t2 = ν × t1.
+  sampleDirIntoScratch(key, PATCH_QUADS, half);
+  const ex = DIR[0] ?? 0;
+  const ey = DIR[1] ?? 0;
+  const ez = DIR[2] ?? 0;
+  sampleDirIntoScratch(key, 0, half);
+  const acx = ex - (DIR[0] ?? 0);
+  const acy = ey - (DIR[1] ?? 0);
+  const acz = ez - (DIR[2] ?? 0);
+  const along = acx * nx + acy * ny + acz * nz;
+  const wx = acx - nx * along;
+  const wy = acy - ny * along;
+  const wz = acz - nz * along;
+  const wlen = Math.hypot(wx, wy, wz);
+  if (!(wlen > 0) || !Number.isFinite(wlen)) {
+    throw new RangeError(`cannot normalise a vector of length ${String(wlen)}`);
+  }
+  const inverse = 1 / wlen;
+  const t1x = wx * inverse;
+  const t1y = wy * inverse;
+  const t1z = wz * inverse;
+  g[0] = a * cd0;
+  g[1] = a * cd1;
+  g[2] = c * cd2;
+  g[3] = nx;
+  g[4] = ny;
+  g[5] = nz;
+  g[6] = t1x;
+  g[7] = t1y;
+  g[8] = t1z;
+  g[9] = ny * t1z - nz * t1y;
+  g[10] = nz * t1x - nx * t1z;
+  g[11] = nx * t1y - ny * t1x;
+  // Each ring vertex's spheroid point and normal, then the centre's.
+  let at = GEOMETRY_POINTS;
+  for (let n = 0; n < RING_X.length; n += 1) {
+    sampleDirIntoScratch(key, RING_X[n] ?? 0, RING_Y[n] ?? 0);
+    spheroidPointInto(g, at, DIR[0] ?? 0, DIR[1] ?? 0, DIR[2] ?? 0, a, c);
+    at += 6;
+  }
+  spheroidPointInto(g, at, cd0, cd1, cd2, a, c);
 }
 
 /**
@@ -234,8 +412,8 @@ function vertexDirIntoScratch(key: PatchKey, x: number, y: number): void {
  * the largest squared length.
  *
  * @remarks
- * `patchBounds` takes the largest `Math.hypot` of a set of differences, and calls it only for the
- * differences whose squared length x² + y² + z² is not below this fraction of the largest: the
+ * `packPatchBounds` takes the largest `Math.hypot` of a set of differences, and calls it only for
+ * the differences whose squared length x² + y² + z² is not below this fraction of the largest: the
  * squares are within 4 ulps of the true squared lengths and `Math.hypot` within a few ulps of the
  * true length, so any other difference is shorter than the longest by thousands of ulps and its
  * `Math.hypot` cannot be the largest or equal it. For finite metres the result is the same number
@@ -261,117 +439,47 @@ function squaredFrom(a: number, x: number, y: number, z: number): number {
 }
 
 /**
- * Writes into {@link XYZ} at `at` `surfacePoint(figure, d, h)` at the top and then the bottom of the
- * range, M·d + h·ν with ν = M⁻¹d ÷ |M⁻¹d|, in `planet.ts`'s operations and order.
+ * Writes into `out` (of {@link PACKED_BOUNDS_LENGTH} numbers) the bounds of the patch whose
+ * geometry ({@link patchGeometryInto}) is `g`, at every height from `minHeightM` to `maxHeightM`,
+ * metres: {@link patchBounds}' numbers, packed.
  */
-function writePoints(
-  at: number,
-  d0: number,
-  d1: number,
-  d2: number,
-  figure: BodyFigure,
+export function packPatchBounds(
+  out: Float64Array,
+  g: Float64Array,
   minHeightM: number,
   maxHeightM: number,
 ): void {
-  const a = figure.equatorialRadiusM;
-  const c = figure.polarRadiusM;
-  const m0 = d0 / a;
-  const m1 = d1 / a;
-  const m2 = d2 / c;
-  const len = Math.sqrt(m0 * m0 + m1 * m1 + m2 * m2);
-  const nu0 = m0 / len;
-  const nu1 = m1 / len;
-  const nu2 = m2 / len;
-  const p0 = a * d0;
-  const p1 = a * d1;
-  const p2 = c * d2;
-  XYZ[at] = p0 + maxHeightM * nu0;
-  XYZ[at + 1] = p1 + maxHeightM * nu1;
-  XYZ[at + 2] = p2 + maxHeightM * nu2;
-  XYZ[at + 3] = p0 + minHeightM * nu0;
-  XYZ[at + 4] = p1 + minHeightM * nu1;
-  XYZ[at + 5] = p2 + minHeightM * nu2;
-}
-
-/**
- * The bounding volume of patch `key`: a sphere and an oriented box enclosing the patch's surface
- * at every height in `heightRangeM`, by default its level's range (all zero with no level table).
- *
- * @remarks
- * Built in scalars over preallocated scratch, so that a call allocates only the bounds it returns
- * (R05.T7 perf (c)): the same `f64` operations, in the same order, as the vector form it replaced,
- * which `bounds.test.ts` keeps as its oracle, bit for bit.
- *
- * @param heightRangeM - The lowest and highest height the patch can reach, metres: a tighter range
- *   inherited from a baked ancestor (selection's `heightRanges`), or the level's.
- */
-export function patchBounds(
-  planet: PlanetGeometry,
-  key: PatchKey,
-  heightRangeM: readonly [number, number] = levelHeightRangeM(planet, key.level),
-): PatchBounds {
-  const [minHeightM, maxHeightM] = heightRangeM;
-  const a = planet.figure.equatorialRadiusM;
-  const c = planet.figure.polarRadiusM;
-  const half = PATCH_QUADS / 2;
-  // The centre's spheroid normal ν = M⁻¹d ÷ |M⁻¹d| and the origin M·d + h·ν at the mid height.
-  vertexDirIntoScratch(key, half, half);
-  const cd0 = DIR[0] ?? 0;
-  const cd1 = DIR[1] ?? 0;
-  const cd2 = DIR[2] ?? 0;
-  const cm0 = cd0 / a;
-  const cm1 = cd1 / a;
-  const cm2 = cd2 / c;
-  const clen = Math.sqrt(cm0 * cm0 + cm1 * cm1 + cm2 * cm2);
-  const nx = cm0 / clen;
-  const ny = cm1 / clen;
-  const nz = cm2 / clen;
+  const nx = g[3] ?? 0;
+  const ny = g[4] ?? 0;
+  const nz = g[5] ?? 0;
+  const t1x = g[6] ?? 0;
+  const t1y = g[7] ?? 0;
+  const t1z = g[8] ?? 0;
+  const t2x = g[9] ?? 0;
+  const t2y = g[10] ?? 0;
+  const t2z = g[11] ?? 0;
+  // The origin M·d + h·ν at the centre's mid height.
   const midM = (minHeightM + maxHeightM) / 2;
-  const ox = a * cd0 + midM * nx;
-  const oy = a * cd1 + midM * ny;
-  const oz = c * cd2 + midM * nz;
-  // The tangent t1 along the patch's u, the across vector less its part along ν, and t2 = ν × t1.
-  vertexDirIntoScratch(key, PATCH_QUADS, half);
-  const ex = DIR[0] ?? 0;
-  const ey = DIR[1] ?? 0;
-  const ez = DIR[2] ?? 0;
-  vertexDirIntoScratch(key, 0, half);
-  const acx = ex - (DIR[0] ?? 0);
-  const acy = ey - (DIR[1] ?? 0);
-  const acz = ez - (DIR[2] ?? 0);
-  const along = acx * nx + acy * ny + acz * nz;
-  const wx = acx - nx * along;
-  const wy = acy - ny * along;
-  const wz = acz - nz * along;
-  const wlen = Math.hypot(wx, wy, wz);
-  if (!(wlen > 0) || !Number.isFinite(wlen)) {
-    throw new RangeError(`cannot normalise a vector of length ${String(wlen)}`);
-  }
-  const inverse = 1 / wlen;
-  const t1x = wx * inverse;
-  const t1y = wy * inverse;
-  const t1z = wz * inverse;
-  const t2x = ny * t1z - nz * t1y;
-  const t2y = nz * t1x - nx * t1z;
-  const t2z = nx * t1y - ny * t1x;
-
-  // Each ring vertex's top and bottom, then the centre's.
+  const ox = (g[0] ?? 0) + midM * nx;
+  const oy = (g[1] ?? 0) + midM * ny;
+  const oz = (g[2] ?? 0) + midM * nz;
+  // Each point at the top and then the bottom of the range, M·d + h·ν.
   let count = 0;
-  for (let n = 0; n < RING_X.length; n += 1) {
-    vertexDirIntoScratch(key, RING_X[n] ?? 0, RING_Y[n] ?? 0);
-    writePoints(
-      count,
-      DIR[0] ?? 0,
-      DIR[1] ?? 0,
-      DIR[2] ?? 0,
-      planet.figure,
-      minHeightM,
-      maxHeightM,
-    );
+  for (let at = GEOMETRY_POINTS; at < PATCH_GEOMETRY_LENGTH; at += 6) {
+    const p0 = g[at] ?? 0;
+    const p1 = g[at + 1] ?? 0;
+    const p2 = g[at + 2] ?? 0;
+    const nu0 = g[at + 3] ?? 0;
+    const nu1 = g[at + 4] ?? 0;
+    const nu2 = g[at + 5] ?? 0;
+    XYZ[count] = p0 + maxHeightM * nu0;
+    XYZ[count + 1] = p1 + maxHeightM * nu1;
+    XYZ[count + 2] = p2 + maxHeightM * nu2;
+    XYZ[count + 3] = p0 + minHeightM * nu0;
+    XYZ[count + 4] = p1 + minHeightM * nu1;
+    XYZ[count + 5] = p2 + minHeightM * nu2;
     count += 6;
   }
-  writePoints(count, cd0, cd1, cd2, planet.figure, minHeightM, maxHeightM);
-  count += 6;
   // The largest chord between neighbouring tops, the ring's six numbers a vertex apart.
   const ringEnd = 6 * RING_X.length;
   let largestSq = 0;
@@ -432,22 +540,95 @@ export function patchBounds(
       );
     }
   }
-  const boxCentre = vec3(bx, by, bz);
+  out[PACKED_CENTRE] = bx;
+  out[PACKED_CENTRE + 1] = by;
+  out[PACKED_CENTRE + 2] = bz;
+  out[PACKED_RADIUS] = radiusM + marginM;
+  out[PACKED_HEIGHTS] = minHeightM;
+  out[PACKED_HEIGHTS + 1] = maxHeightM;
+  out[PACKED_AXES] = nx;
+  out[PACKED_AXES + 1] = ny;
+  out[PACKED_AXES + 2] = nz;
+  out[PACKED_AXES + 3] = t1x;
+  out[PACKED_AXES + 4] = t1y;
+  out[PACKED_AXES + 5] = t1z;
+  out[PACKED_AXES + 6] = t2x;
+  out[PACKED_AXES + 7] = t2y;
+  out[PACKED_AXES + 8] = t2z;
+  out[PACKED_HALF_EXTENTS] = (hi0 - lo0) / 2 + marginM;
+  out[PACKED_HALF_EXTENTS + 1] = (hi1 - lo1) / 2 + marginM;
+  out[PACKED_HALF_EXTENTS + 2] = (hi2 - lo2) / 2 + marginM;
+}
+
+/** The {@link PatchBounds} of packed bounds `p`, its sphere's centre the box's own vector. */
+export function unpackPatchBounds(p: Float64Array): PatchBounds {
+  const centre = vec3(p[PACKED_CENTRE] ?? 0, p[PACKED_CENTRE + 1] ?? 0, p[PACKED_CENTRE + 2] ?? 0);
   return {
-    centre: boxCentre,
-    radiusM: radiusM + marginM,
-    minHeightM,
-    maxHeightM,
+    centre,
+    radiusM: p[PACKED_RADIUS] ?? 0,
+    minHeightM: p[PACKED_HEIGHTS] ?? 0,
+    maxHeightM: p[PACKED_HEIGHTS + 1] ?? 0,
     box: {
-      centre: boxCentre,
-      axes: [vec3(nx, ny, nz), vec3(t1x, t1y, t1z), vec3(t2x, t2y, t2z)],
+      centre,
+      axes: [
+        vec3(p[PACKED_AXES] ?? 0, p[PACKED_AXES + 1] ?? 0, p[PACKED_AXES + 2] ?? 0),
+        vec3(p[PACKED_AXES + 3] ?? 0, p[PACKED_AXES + 4] ?? 0, p[PACKED_AXES + 5] ?? 0),
+        vec3(p[PACKED_AXES + 6] ?? 0, p[PACKED_AXES + 7] ?? 0, p[PACKED_AXES + 8] ?? 0),
+      ],
       halfExtentsM: [
-        (hi0 - lo0) / 2 + marginM,
-        (hi1 - lo1) / 2 + marginM,
-        (hi2 - lo2) / 2 + marginM,
+        p[PACKED_HALF_EXTENTS] ?? 0,
+        p[PACKED_HALF_EXTENTS + 1] ?? 0,
+        p[PACKED_HALF_EXTENTS + 2] ?? 0,
       ],
     },
   };
+}
+
+/**
+ * Writes into `out` (of {@link PACKED_BOUNDS_LENGTH} numbers) the numbers of bounds `b` that the
+ * culling, error and forced-region tests read, as {@link packPatchBounds} lays them out: the box's
+ * centre stands for the sphere's too, as {@link patchBounds} builds them.
+ */
+export function packBounds(out: Float64Array, b: PatchBounds): void {
+  const { centre, axes, halfExtentsM } = b.box;
+  out[PACKED_CENTRE] = centre.x;
+  out[PACKED_CENTRE + 1] = centre.y;
+  out[PACKED_CENTRE + 2] = centre.z;
+  out[PACKED_RADIUS] = b.radiusM;
+  out[PACKED_HEIGHTS] = b.minHeightM;
+  out[PACKED_HEIGHTS + 1] = b.maxHeightM;
+  for (let k = 0; k < 3; k += 1) {
+    const axis = axes[k];
+    out[PACKED_AXES + 3 * k] = axis?.x ?? 0;
+    out[PACKED_AXES + 3 * k + 1] = axis?.y ?? 0;
+    out[PACKED_AXES + 3 * k + 2] = axis?.z ?? 0;
+    out[PACKED_HALF_EXTENTS + k] = halfExtentsM[k] ?? 0;
+  }
+}
+
+/**
+ * The bounding volume of patch `key`: a sphere and an oriented box enclosing the patch's surface
+ * at every height in `heightRangeM`, by default its level's range (all zero with no level table).
+ *
+ * @remarks
+ * Built in scalars over preallocated scratch, so that a call allocates only the bounds it returns
+ * (R05.T7 perf (c)): the same `f64` operations, in the same order, as the vector form it replaced,
+ * which `bounds.test.ts` keeps as its oracle, bit for bit. It is {@link patchGeometryInto} and then
+ * {@link packPatchBounds}, which selection calls apart so that a patch's geometry serves several
+ * height ranges (R05.T7 perf (d)).
+ *
+ * @param heightRangeM - The lowest and highest height the patch can reach, metres: a tighter range
+ *   inherited from a baked ancestor (selection's `heightRanges`), or the level's.
+ */
+export function patchBounds(
+  planet: PlanetGeometry,
+  key: PatchKey,
+  heightRangeM: readonly [number, number] = levelHeightRangeM(planet, key.level),
+): PatchBounds {
+  const [minHeightM, maxHeightM] = heightRangeM;
+  patchGeometryInto(GEOMETRY, planet, key);
+  packPatchBounds(PACKED, GEOMETRY, minHeightM, maxHeightM);
+  return unpackPatchBounds(PACKED);
 }
 
 /** The eight corners of a box, body-fixed metres. */

@@ -15,6 +15,7 @@ const LAUNCH: SpikeLaunch = {
   ridged: "off",
   dawnSafety: "on",
   capture: null,
+  traceProfile: "off",
 };
 
 describe("the preload's spike functions", () => {
@@ -22,6 +23,15 @@ describe("the preload's spike functions", () => {
     const deps = { invoke: () => Promise.resolve(), privateKib: () => Promise.resolve(0) };
     expect(spikeMember(["--hyperion-server-url=ws://127.0.0.1:7878/ws"], deps)).toEqual({});
     expect(spikeMember([spikeSwitch(LAUNCH)], deps).spike?.launch).toEqual(LAUNCH);
+  });
+
+  it("expose no trace cycle on an ordinary launch", () => {
+    const deps = { invoke: () => Promise.resolve(), privateKib: () => Promise.resolve(0) };
+    const ordinary = spikeMember(["--hyperion-server-url=ws://127.0.0.1:7878/ws"], deps);
+    expect(Object.keys(ordinary)).toEqual([]);
+    expect(Object.keys(spikeMember([spikeSwitch(LAUNCH)], deps).spike ?? {})).toContain(
+      "cycleTrace",
+    );
   });
 
   it("use the main process's channels", () => {
@@ -36,10 +46,12 @@ describe("the preload's spike functions", () => {
     );
     const api = spikeApi(LAUNCH, { invoke, privateKib: () => Promise.resolve(2.5) });
     await api.startTrace();
+    await api.cycleTrace();
     await api.sampleMemory();
     await api.end({ status: "pass" });
     expect(invoke.mock.calls).toEqual([
       [SPIKE_CHANNEL_NAMES.startTrace],
+      [SPIKE_CHANNEL_NAMES.cycleTrace],
       [SPIKE_CHANNEL_NAMES.memory, 2560],
       [SPIKE_CHANNEL_NAMES.end, { status: "pass" }],
     ]);

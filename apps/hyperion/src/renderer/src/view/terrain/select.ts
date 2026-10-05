@@ -16,7 +16,14 @@
 import type { Quaternion } from "../camera/pose";
 import type { ViewSize } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
-import { type PatchBounds, patchBounds } from "./bounds";
+import {
+  PACKED_BOUNDS_LENGTH,
+  packPatchBounds,
+  PATCH_GEOMETRY_LENGTH,
+  type PatchBounds,
+  patchGeometryInto,
+  unpackPatchBounds,
+} from "./bounds";
 import { vertexSpacing } from "./cube";
 import { frustumOf, horizonCone } from "./cull";
 import {
@@ -31,10 +38,20 @@ import {
   rootKey,
   stepCellInto,
 } from "./patchKey";
-import { finestPatchSizeM, type GroundContact, inForcedRegion } from "./grounded";
+import { finestPatchSizeM, type GroundContact, inForcedRegionPacked } from "./grounded";
 import { compareRequests } from "./priority";
 import { type BodyFixedVec3, levelBoundM, levelHeightRangeM, type PlanetGeometry } from "./planet";
-import { type ViewGeometry, viewExcess, viewGeometry } from "./viewGeometry";
+import { type ViewGeometry, viewExcessPacked, viewGeometry } from "./viewGeometry";
+
+/*
+ * The imports selection reads for every node, split or comparison, bound once. Under a module
+ * runner, as the descent record's harness runs selection (Vite's), each read of an imported binding
+ * is a getter call; those cost about a tenth of a selection there (R05.T7 perf (d)).
+ */
+const excessOf = viewExcessPacked;
+const forcedAt = inForcedRegionPacked;
+const keyIndex = patchKeyIndex;
+const DEEPEST_LEVEL = MAX_LEVEL;
 
 /** A patch the selection asks to draw. */
 export interface SelectedPatch {
@@ -235,9 +252,8 @@ export interface BakedRange {
  */
 interface TraversalNode {
   readonly key: PatchKey;
-  readonly bounds: PatchBounds;
-  /** Its bounds' memo entry, which keeps its key string. */
-  readonly memo: BoundsMemoEntry;
+  /** Its place in the bounds memo, which holds its bounds and keeps its key string. */
+  readonly cell: MemoCell;
   /** The views that see it, a bit a view in input order. */
   readonly seenBy: number;
   /** The views that see it and find ρ > τ: the views that want it split, a bit a view. */
@@ -254,20 +270,95 @@ interface TraversalNode {
   readonly resident: boolean;
   /** The node it was split from, `null` for a root. */
   readonly parent: TraversalNode | null;
+  /**
+   * Whether it has been split this call: set as its children are made, so that a candidate split
+   * already, by the balance or as itself, is passed over with no walk of the tree.
+   */
+  split: boolean;
+  /**
+   * The children its split left out that are baked, a bit a child in `childKeys`' order: what
+   * {@link Selection.hiddenBaked} lists of them, found when they were looked up.
+   */
+  hiddenBaked: number;
 }
 
-/** A patch's bounds already computed, with the height range they were built for. */
-interface BoundsMemoEntry {
-  readonly lowM: number;
-  readonly highM: number;
-  /** The baked range it was built from, `null` for the level's own. */
-  readonly baked: BakedRange | null;
-  readonly bounds: PatchBounds;
+/**
+ * A patch's place in the bounds memo, kept from call to call (R05.T7 perf (d)): its bounds over the
+ * height range they were last built for, and its children's places, so that a child's is found
+ * from its parent's with no lookup.
+ */
+interface MemoCell {
+  readonly key: PatchKey;
+  /** Its bounds, packed ({@link PACKED_BOUNDS_LENGTH}'s layout), once {@link MemoCell.built}. */
+  readonly packed: Float64Array;
+  built: boolean;
+  /** The height range the bounds were built for, metres. */
+  lowM: number;
+  highM: number;
+  /** Whether that range was the level's own, with nothing baked above. */
+  levelRange: boolean;
+  /** The bounds as an object, made when first drawn and kept while the range holds. */
+  bounds: PatchBounds | null;
   /**
    * Its {@link patchKeyString}, once a selection has drawn it: kept, so that the output map's key
    * is neither built nor hashed again (V8 keeps a string's hash with it).
    */
   keyString: string | null;
+  /** The slot of {@link MemoState.geometry} holding its geometry, or −1 where none does. */
+  geometrySlot: number;
+  /** The last call that read it, for the memo's prune. */
+  usedAt: number;
+  /** What the last selection to draw it drew, kept while the drawn fields hold. */
+  selected: SelectedPatch | null;
+  /** Its children's places in `childKeys`' order, `null` where not yet made. */
+  child0: MemoCell | null;
+  child1: MemoCell | null;
+  child2: MemoCell | null;
+  child3: MemoCell | null;
+}
+
+function memoCell(key: PatchKey): MemoCell {
+  return {
+    key,
+    packed: new Float64Array(PACKED_BOUNDS_LENGTH),
+    built: false,
+    lowM: 0,
+    highM: 0,
+    levelRange: false,
+    bounds: null,
+    keyString: null,
+    geometrySlot: -1,
+    usedAt: 0,
+    selected: null,
+    child0: null,
+    child1: null,
+    child2: null,
+    child3: null,
+  };
+}
+
+/**
+ * The patches whose geometry ({@link patchGeometryInto}) is kept, latest first: a patch's bounds
+ * are often built again a frame or two after their first build, once it or its parent is baked
+ * and its height range tightens, and the geometry is about two thirds of a build's cost.
+ */
+const GEOMETRY_SLOTS = 512;
+
+/** The bounds memo of one planet, kept from call to call: what selection reads of it is a function of the inputs alone. */
+interface MemoState {
+  /** The six roots' places, by face. */
+  readonly roots: ReadonlyArray<MemoCell>;
+  /** The cells below the roots. */
+  cells: number;
+  /** Past this many cells the next call prunes the memo. */
+  limit: number;
+  /** The calls so far. */
+  call: number;
+  /** The kept geometries, {@link GEOMETRY_SLOTS} of them, each with the cell it is of. */
+  readonly geometry: Float64Array[];
+  readonly geometryOwners: (MemoCell | null)[];
+  /** The slot the next geometry goes in. */
+  nextGeometry: number;
 }
 
 /** What selection reads of a planet on every call, computed once a planet (it is immutable). */
@@ -278,8 +369,8 @@ interface PlanetTables {
   readonly levelBoundM: ReadonlyArray<number>;
   readonly levelLowM: ReadonlyArray<number>;
   readonly levelHighM: ReadonlyArray<number>;
-  /** Bounds already computed, a map a level by {@link patchKeyIndex}. */
-  readonly memo: ReadonlyArray<Map<number, BoundsMemoEntry>>;
+  /** Bounds already built. */
+  readonly memo: MemoState;
 }
 
 const planetTables = new WeakMap<PlanetGeometry, PlanetTables>();
@@ -294,27 +385,121 @@ function tablesOf(planet: PlanetGeometry): PlanetTables {
       levelBoundM: Array.from(levels, (_, level) => levelBoundM(planet, level)),
       levelLowM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[0]),
       levelHighM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[1]),
-      memo: Array.from(levels, () => new Map<number, BoundsMemoEntry>()),
+      memo: {
+        roots: FACES.map((face) => memoCell(rootKey(face))),
+        cells: 0,
+        limit: MEMO_CELL_LIMIT,
+        call: 0,
+        geometry: [],
+        geometryOwners: Array.from({ length: GEOMETRY_SLOTS }, () => null),
+        nextGeometry: 0,
+      },
     };
     planetTables.set(planet, tables);
   }
   return tables;
 }
 
-/** The most bounds kept a level per planet; past it the older half is dropped. */
-const BOUNDS_MEMO_LIMIT = 1 << 15;
+/**
+ * The fewest cells at which a planet's bounds memo prunes; after a prune it waits for twice the
+ * cells kept, so that a memo every recent call reads is not walked again at once.
+ */
+const MEMO_CELL_LIMIT = 1 << 17;
 
-/** The memo's entry for patch `key`'s bounds over its height range, made where it has none. */
-function boundsOf(t: Traversal, key: PatchKey, baked: BakedRange | null): BoundsMemoEntry {
-  const memo = t.memo[key.level];
-  if (memo === undefined) {
-    throw new Error(`level ${key.level} is not a quadtree level`);
+/** The latest calls whose cells a prune keeps. */
+const MEMO_RECENT_CALLS = 64;
+
+/**
+ * Prunes `planet`'s bounds memo as a selection does once it holds more cells than its limit: drops
+ * the cells none of the last {@link MEMO_RECENT_CALLS} calls read, or failing that, those the last
+ * call did not read, and sets the next limit. Returns the cells kept below the six roots.
+ *
+ * @remarks
+ * Exported for its tests, which cannot reach {@link MEMO_CELL_LIMIT}'s cells cheaply. What
+ * selection returns does not depend on it.
+ */
+export function pruneSelectionMemo(planet: PlanetGeometry): number {
+  return pruneMemo(tablesOf(planet).memo);
+}
+
+/** {@link pruneSelectionMemo} of a planet's memo. */
+function pruneMemo(memo: MemoState): number {
+  let kept = dropUnreadSince(memo, memo.call - MEMO_RECENT_CALLS + 1);
+  if (kept > MEMO_CELL_LIMIT) {
+    kept = dropUnreadSince(memo, memo.call);
   }
-  const index = patchKeyIndex(key);
-  const known = memo.get(index);
-  // The range only when the memo cannot answer with the level's own (nothing baked above it).
-  if (known !== undefined && baked === null && known.baked === null) {
+  memo.limit = Math.max(MEMO_CELL_LIMIT, 2 * kept);
+  return kept;
+}
+
+/**
+ * Drops every cell below the roots last read before call `since`, whole subtrees, since a cell is
+ * read only after its parent; returns the cells kept and counts them as the memo's.
+ */
+function dropUnreadSince(memo: MemoState, since: number): number {
+  let kept = 0;
+  const stack: MemoCell[] = [...memo.roots];
+  for (let cell = stack.pop(); cell !== undefined; cell = stack.pop()) {
+    if (cell.child0 !== null && cell.child0.usedAt < since) {
+      cell.child0 = null;
+    }
+    if (cell.child1 !== null && cell.child1.usedAt < since) {
+      cell.child1 = null;
+    }
+    if (cell.child2 !== null && cell.child2.usedAt < since) {
+      cell.child2 = null;
+    }
+    if (cell.child3 !== null && cell.child3.usedAt < since) {
+      cell.child3 = null;
+    }
+    for (const child of [cell.child0, cell.child1, cell.child2, cell.child3]) {
+      if (child !== null) {
+        kept += 1;
+        stack.push(child);
+      }
+    }
+  }
+  memo.cells = kept;
+  return kept;
+}
+
+/** The memo cell of patch `key`, a root or a child of `parent`'s, made where there is none. */
+function cellOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): MemoCell {
+  if (parent === null) {
+    const root = t.memo.roots[key.face];
+    if (root === undefined) {
+      throw new Error(`face ${key.face} has no root`);
+    }
+    return root;
+  }
+  const up = parent.cell;
+  const n = (key.i & 1) | ((key.j & 1) << 1);
+  const known = n === 0 ? up.child0 : n === 1 ? up.child1 : n === 2 ? up.child2 : up.child3;
+  if (known !== null) {
     return known;
+  }
+  const cell = memoCell(key);
+  if (n === 0) {
+    up.child0 = cell;
+  } else if (n === 1) {
+    up.child1 = cell;
+  } else if (n === 2) {
+    up.child2 = cell;
+  } else {
+    up.child3 = cell;
+  }
+  t.memo.cells += 1;
+  return cell;
+}
+
+/**
+ * Builds `cell`'s bounds over patch `key`'s height range, from its nearest baked ancestor `baked`,
+ * where the memo does not hold them for that range already.
+ */
+function buildBounds(t: Traversal, cell: MemoCell, key: PatchKey, baked: BakedRange | null): void {
+  // The range only when the memo cannot answer with the level's own (nothing baked above it).
+  if (cell.built && baked === null && cell.levelRange) {
+    return;
   }
   let lowM = t.levelLowM[key.level] ?? 0;
   let highM = t.levelHighM[key.level] ?? 0;
@@ -332,29 +517,48 @@ function boundsOf(t: Traversal, key: PatchKey, baked: BakedRange | null): Bounds
     lowM = range[0] ?? lowM;
     highM = range[1] ?? highM;
   }
-  if (known !== undefined && known.lowM === lowM && known.highM === highM) {
-    return known;
+  if (cell.built && cell.lowM === lowM && cell.highM === highM) {
+    return;
   }
-  if (memo.size >= BOUNDS_MEMO_LIMIT) {
-    // Maps keep insertion order: drop the older half, so a moving camera never pays a cold start.
-    let drop = memo.size / 2;
-    for (const k of memo.keys()) {
-      if (drop <= 0) {
-        break;
-      }
-      memo.delete(k);
-      drop -= 1;
+  packPatchBounds(cell.packed, geometryOf(t.memo, t.planet, cell), lowM, highM);
+  cell.built = true;
+  cell.lowM = lowM;
+  cell.highM = highM;
+  cell.levelRange = baked === null;
+  cell.bounds = null;
+}
+
+/** `cell`'s patch geometry, kept from an earlier build or made now in the oldest slot. */
+function geometryOf(memo: MemoState, planet: PlanetGeometry, cell: MemoCell): Float64Array {
+  const slot = cell.geometrySlot;
+  if (slot >= 0 && memo.geometryOwners[slot] === cell) {
+    const kept = memo.geometry[slot];
+    if (kept !== undefined) {
+      return kept;
     }
   }
-  const entry: BoundsMemoEntry = {
-    lowM,
-    highM,
-    baked,
-    bounds: patchBounds(t.planet, key, [lowM, highM]),
-    keyString: known?.keyString ?? null,
-  };
-  memo.set(index, entry);
-  return entry;
+  const next = memo.nextGeometry;
+  memo.nextGeometry = (next + 1) % GEOMETRY_SLOTS;
+  const previous = memo.geometryOwners[next] ?? null;
+  if (previous !== null) {
+    previous.geometrySlot = -1;
+    memo.geometryOwners[next] = null;
+  }
+  let geometry = memo.geometry[next];
+  if (geometry === undefined) {
+    geometry = new Float64Array(PATCH_GEOMETRY_LENGTH);
+    memo.geometry[next] = geometry;
+  }
+  patchGeometryInto(geometry, planet, cell.key);
+  memo.geometryOwners[next] = cell;
+  cell.geometrySlot = next;
+  return geometry;
+}
+
+/** `cell`'s bounds as an object, made from its packed numbers on first use and kept. */
+function boundsOfCell(cell: MemoCell): PatchBounds {
+  cell.bounds ??= unpackPatchBounds(cell.packed);
+  return cell.bounds;
 }
 
 /** One `f32` step's relative size: a baked height rounded to `f32` is within this of its value. */
@@ -432,11 +636,13 @@ function inheritedRangeInto(
 
 /** The traversal node of patch `key`, or `null` where no view sees it and no forced region reaches it. */
 function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): TraversalNode | null {
+  const cell = cellOf(t, key, parent);
+  cell.usedAt = t.memo.call;
   const own = t.heightRanges?.heightRangeM(key);
   const baked: BakedRange | null =
     own === undefined ? (parent?.baked ?? null) : { level: key.level, lowM: own[0], highM: own[1] };
-  const memo = boundsOf(t, key, baked);
-  const bounds = memo.bounds;
+  buildBounds(t, cell, key, baked);
+  const packed = cell.packed;
   const errorM = t.errorM[key.level] ?? 0;
   let seenBy = 0;
   let wantedBy = 0;
@@ -448,7 +654,7 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
       continue;
     }
     // Negative where the view cannot see the patch.
-    const e = viewExcess(v.geometry, bounds, errorM);
+    const e = excessOf(v.geometry, packed, errorM);
     if (e < 0) {
       continue;
     }
@@ -459,14 +665,16 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     excess = Math.max(excess, e);
     weighted = Math.max(weighted, v.input.weight * e);
   }
-  const forced = t.grounded.length > 0 && inForcedRegion(bounds, t.grounded, t.patchSizeM);
+  const forced = t.grounded.length > 0 && forcedAt(packed, t.grounded, t.patchSizeM);
   if (seenBy === 0 && !forced) {
+    if (own !== undefined && parent !== null) {
+      parent.hiddenBaked |= 1 << ((key.i & 1) | ((key.j & 1) << 1));
+    }
     return null;
   }
   return {
     key,
-    bounds,
-    memo,
+    cell,
     seenBy,
     wantedBy,
     excess,
@@ -475,6 +683,8 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     baked,
     resident: own !== undefined,
     parent,
+    split: false,
+    hiddenBaked: 0,
   };
 }
 
@@ -500,7 +710,7 @@ function requestPriority(t: Traversal, target: TraversalNode, standIn: Traversal
       continue;
     }
     // Negative where the view cannot see the patch.
-    const e = viewExcess(v.geometry, standIn.bounds, errorM);
+    const e = excessOf(v.geometry, standIn.cell.packed, errorM);
     if (!(e < 0)) {
       priority = Math.max(priority, v.input.weight * e);
     }
@@ -533,74 +743,140 @@ function wantsRefining(t: Traversal, node: TraversalNode): boolean {
   return node.excess > 1 && (t.heightRanges === null || node.resident);
 }
 
-/** Orders candidates for splitting: forced first, then the larger weighted error, then the key. */
-function before(a: TraversalNode, b: TraversalNode): boolean {
-  if (a.forced !== b.forced) {
-    return a.forced;
-  }
-  if (a.weighted !== b.weighted) {
-    return a.weighted > b.weighted;
-  }
+/**
+ * Whether candidate `a` goes before `b` where both are as forced and as weighted as each other:
+ * the coarser first, then the smaller `patchKeyIndex`.
+ */
+function keyBefore(a: TraversalNode, b: TraversalNode): boolean {
   if (a.key.level !== b.key.level) {
     return a.key.level < b.key.level;
   }
-  return patchKeyIndex(a.key) < patchKeyIndex(b.key);
+  return keyIndex(a.key) < keyIndex(b.key);
 }
 
-/** A binary max-heap of traversal nodes by {@link before}. */
+/**
+ * A binary max-heap of the candidates for splitting: forced first, then the larger weighted error,
+ * then by {@link keyBefore}.
+ *
+ * @remarks
+ * Each slot's forced flag and weighted excess are kept beside it in typed arrays, so that most
+ * comparisons read two adjacent numbers rather than two nodes (R05.T7 perf (d)), comparison for
+ * comparison as the heap of nodes did.
+ */
 class CandidateHeap {
   private readonly items: TraversalNode[] = [];
+  private forced = new Uint8Array(1024);
+  private weighted = new Float64Array(1024);
+  private length = 0;
 
   get size(): number {
-    return this.items.length;
+    return this.length;
+  }
+
+  /** Whether the node in slot `a` goes before the node in slot `b`. */
+  private before(a: number, b: number): boolean {
+    const forced = this.forced;
+    const fa = forced[a] ?? 0;
+    const fb = forced[b] ?? 0;
+    if (fa !== fb) {
+      return fa === 1;
+    }
+    const weighted = this.weighted;
+    const wa = weighted[a] ?? 0;
+    const wb = weighted[b] ?? 0;
+    if (wa !== wb) {
+      return wa > wb;
+    }
+    const na = this.items[a];
+    const nb = this.items[b];
+    return na !== undefined && nb !== undefined && keyBefore(na, nb);
+  }
+
+  /** Puts `node` in slot `at`. */
+  private place(at: number, node: TraversalNode): void {
+    this.items[at] = node;
+    this.forced[at] = node.forced ? 1 : 0;
+    this.weighted[at] = node.weighted;
+  }
+
+  /** Moves the node in slot `from` to slot `to`. */
+  private move(from: number, to: number): void {
+    const node = this.items[from];
+    if (node !== undefined) {
+      this.items[to] = node;
+    }
+    this.forced[to] = this.forced[from] ?? 0;
+    this.weighted[to] = this.weighted[from] ?? 0;
   }
 
   push(node: TraversalNode): void {
-    const items = this.items;
-    items.push(node);
-    let at = items.length - 1;
+    if (this.length === this.weighted.length) {
+      const forced = new Uint8Array(2 * this.length);
+      forced.set(this.forced);
+      this.forced = forced;
+      const weighted = new Float64Array(2 * this.length);
+      weighted.set(this.weighted);
+      this.weighted = weighted;
+    }
+    let at = this.length;
+    this.length += 1;
+    this.place(at, node);
     while (at > 0) {
       const up = (at - 1) >> 1;
-      const parent = items[up];
-      if (parent === undefined || !before(node, parent)) {
+      if (!this.before(at, up)) {
         break;
       }
-      items[at] = parent;
+      this.swap(at, up);
       at = up;
     }
-    items[at] = node;
   }
 
   pop(): TraversalNode | undefined {
-    const items = this.items;
-    const top = items[0];
-    const last = items.pop();
-    if (top === undefined || last === undefined || items.length === 0) {
+    if (this.length === 0) {
+      return undefined;
+    }
+    const top = this.items[0];
+    this.length -= 1;
+    const last = this.length;
+    if (last === 0) {
       return top;
     }
+    this.move(last, 0);
     let at = 0;
     for (;;) {
       const left = 2 * at + 1;
-      if (left >= items.length) {
+      if (left >= last) {
         break;
       }
       const right = left + 1;
-      const leftItem = items[left];
-      const rightItem = items[right];
-      let child = left;
-      let childItem = leftItem;
-      if (rightItem !== undefined && leftItem !== undefined && before(rightItem, leftItem)) {
-        child = right;
-        childItem = rightItem;
-      }
-      if (childItem === undefined || !before(childItem, last)) {
+      const child = right < last && this.before(right, left) ? right : left;
+      if (!this.before(child, at)) {
         break;
       }
-      items[at] = childItem;
+      this.swap(child, at);
       at = child;
     }
-    items[at] = last;
     return top;
+  }
+
+  /** Swaps the nodes in slots `a` and `b`, with their sort keys, so that the arrays stay in step. */
+  private swap(a: number, b: number): void {
+    const items = this.items;
+    const node = items[a];
+    const other = items[b];
+    if (node === undefined || other === undefined) {
+      return;
+    }
+    items[a] = other;
+    items[b] = node;
+    const forced = this.forced;
+    const f = forced[a] ?? 0;
+    forced[a] = forced[b] ?? 0;
+    forced[b] = f;
+    const weighted = this.weighted;
+    const w = weighted[a] ?? 0;
+    weighted[a] = weighted[b] ?? 0;
+    weighted[b] = w;
   }
 }
 
@@ -622,6 +898,12 @@ export function selectPatches(input: SelectionInput): Selection {
       `selection takes at most ${MAX_SELECTION_VIEWS} views, got ${input.views.length}`,
     );
   }
+  const tables = tablesOf(planet);
+  const memo = tables.memo;
+  if (memo.cells > memo.limit) {
+    pruneMemo(memo);
+  }
+  memo.call += 1;
   const t: Traversal = {
     planet,
     views: input.views.map((v) => ({
@@ -633,7 +915,7 @@ export function selectPatches(input: SelectionInput): Selection {
         v.viewport.widthPx / (2 * Math.tan(v.fovXRad / 2) * v.tauPx),
       ),
     })),
-    ...tablesOf(planet),
+    ...tables,
     range: new Float64Array(2),
     grounded: input.grounded,
     heightRanges: input.heightRanges ?? null,
@@ -649,8 +931,10 @@ export function selectPatches(input: SelectionInput): Selection {
       heap.push(node);
     }
   };
-  const childOf = (child: PatchKey, parent: TraversalNode): TraversalNode | null =>
-    nodeOf(t, child, parent);
+  const childOf = (child: PatchKey, parent: TraversalNode): TraversalNode | null => {
+    parent.split = true;
+    return nodeOf(t, child, parent);
+  };
   for (const face of FACES) {
     const root = nodeOf(t, rootKey(face), null);
     if (root !== null) {
@@ -661,7 +945,8 @@ export function selectPatches(input: SelectionInput): Selection {
   let limited = false;
   let limitExcess = 0;
   for (let node = heap.pop(); node !== undefined; node = heap.pop()) {
-    if (!tree.isLeaf(node.key)) {
+    // Every candidate is in the tree, and nothing leaves it before the loop ends.
+    if (node.split) {
       continue;
     }
     tree.begin();
@@ -680,13 +965,22 @@ export function selectPatches(input: SelectionInput): Selection {
   const leaves = tree.leafValues();
   const patches = new Map<string, SelectedPatch>();
   for (const node of leaves) {
-    node.memo.keyString ??= patchKeyString(node.key);
-    patches.set(node.memo.keyString, {
-      key: node.key,
-      bounds: node.bounds,
-      forced: node.forced && node.key.level === planet.finestLevel,
-      seen: node.seenBy !== 0,
-    });
+    const cell = node.cell;
+    cell.keyString ??= patchKeyString(node.key);
+    const bounds = boundsOfCell(cell);
+    const forced = node.forced && node.key.level === planet.finestLevel;
+    const seen = node.seenBy !== 0;
+    let selected = cell.selected;
+    if (
+      selected === null ||
+      selected.bounds !== bounds ||
+      selected.forced !== forced ||
+      selected.seen !== seen
+    ) {
+      selected = { key: node.key, bounds, forced, seen };
+      cell.selected = selected;
+    }
+    patches.set(cell.keyString, selected);
   }
   return {
     patches,
@@ -699,11 +993,15 @@ export function selectPatches(input: SelectionInput): Selection {
 
 /** The baked patches among the tree's bare keys ({@link Selection.hiddenBaked}). */
 function hiddenBakedOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchKey[] {
-  const ranges = t.heightRanges;
-  if (ranges === null) {
+  if (t.heightRanges === null) {
     return [];
   }
-  return tree.bareKeys().filter((key) => ranges.heightRangeM(key) !== undefined);
+  // Each bare key's bake was looked up as selection reached it: the left-out children's by nodeOf,
+  // the split patches' as their own `resident`.
+  return tree.bareKeys({
+    leftOut: (parent, n) => (parent.hiddenBaked & (1 << n)) !== 0,
+    split: (node) => node.resident,
+  });
 }
 
 /**
@@ -745,6 +1043,14 @@ function demandOf(t: Traversal, leaves: ReadonlyArray<TraversalNode>): PatchRequ
 /** The steps (di, dj) to a cell's eight neighbours, in the order the balance tries them. */
 const NEIGHBOUR_DI: ReadonlyArray<number> = [-1, 1, 0, 0, -1, 1, 1, -1];
 const NEIGHBOUR_DJ: ReadonlyArray<number> = [0, 0, -1, 1, -1, -1, 1, 1];
+
+/** Which of {@link PatchLeafSet.bareKeys}' keys to list. */
+export interface BareKeyFilter<T> {
+  /** Whether to list child `n` (in `childKeys`' order) that the split of the node of `parent` left out. */
+  leftOut(parent: T, n: number): boolean;
+  /** Whether to list the split node of `value`, which has no leaf beneath it. */
+  split(value: T): boolean;
+}
 
 /** A node of {@link PatchLeafSet}'s trees: a leaf, or split into the children kept. */
 interface TreeNode<T> {
@@ -798,14 +1104,19 @@ function childAt<T>(node: TreeNode<T>, n: number): TreeNode<T> | null {
  */
 export class PatchLeafSet<T> {
   private readonly roots: (TreeNode<T> | null)[] = [null, null, null, null, null, null];
-  /** The splits since {@link begin}, in order, while recording. */
+  /**
+   * The splits since {@link begin}, in order, while recording: the first `journalLength` entries.
+   * The scratch arrays are reused, never truncated, so that clearing one is a store.
+   */
   private readonly journal: TreeNode<T>[] = [];
+  private journalLength = 0;
   private recording = false;
   private count = 0;
   private readonly counts: (value: T) => boolean;
   /** {@link splitBalanced}'s scratch: the new leaves to check, and every node it added. */
   private readonly work: TreeNode<T>[] = [];
   private readonly added: TreeNode<T>[] = [];
+  private addedLength = 0;
   /** The neighbour cell {@link stepCellInto} writes. */
   private readonly cell: CellOut = { face: 0, i: 0, j: 0 };
 
@@ -888,20 +1199,25 @@ export class PatchLeafSet<T> {
 
   /**
    * The keys the trees reach that hold no leaf, depth first from face 0: each child a split left
-   * out, and each split node with no leaf beneath it, after its children.
+   * out, and each split node with no leaf beneath it, after its children; with `keep`, only those
+   * it keeps.
    */
-  bareKeys(): PatchKey[] {
+  bareKeys(keep?: BareKeyFilter<T>): PatchKey[] {
     const bare: PatchKey[] = [];
     for (const root of this.roots) {
       if (root !== null) {
-        this.collectBare(root, bare);
+        this.collectBare(root, bare, keep);
       }
     }
     return bare;
   }
 
   /** Adds the bare keys at and under `node` to `bare`; returns whether a leaf lies at or under it. */
-  private collectBare(node: TreeNode<T>, bare: PatchKey[]): boolean {
+  private collectBare(
+    node: TreeNode<T>,
+    bare: PatchKey[],
+    keep: BareKeyFilter<T> | undefined,
+  ): boolean {
     if (!node.split) {
       return true;
     }
@@ -910,16 +1226,18 @@ export class PatchLeafSet<T> {
     for (let n = 0; n < 4; n += 1) {
       const child = childAt(node, n);
       if (child === null) {
-        keys ??= childKeys(node.key);
-        const key = keys[n];
-        if (key !== undefined) {
-          bare.push(key);
+        if (keep === undefined || keep.leftOut(node.value, n)) {
+          keys ??= childKeys(node.key);
+          const key = keys[n];
+          if (key !== undefined) {
+            bare.push(key);
+          }
         }
-      } else if (this.collectBare(child, bare)) {
+      } else if (this.collectBare(child, bare, keep)) {
         leaf = true;
       }
     }
-    if (!leaf) {
+    if (!leaf && (keep === undefined || keep.split(node.value))) {
       bare.push(node.key);
     }
     return leaf;
@@ -927,24 +1245,20 @@ export class PatchLeafSet<T> {
 
   /** Starts recording splits, so that {@link rollback} can undo them. */
   begin(): void {
-    if (this.journal.length > 0) {
-      this.journal.length = 0;
-    }
+    this.journalLength = 0;
     this.recording = true;
   }
 
   /** Keeps the splits since {@link begin}. */
   commit(): void {
-    if (this.journal.length > 0) {
-      this.journal.length = 0;
-    }
+    this.journalLength = 0;
     this.recording = false;
   }
 
   /** Undoes every split since {@link begin}, latest first. */
   rollback(): void {
     const journal = this.journal;
-    for (let n = journal.length - 1; n >= 0; n -= 1) {
+    for (let n = this.journalLength - 1; n >= 0; n -= 1) {
       const node = journal[n];
       if (node === undefined || !node.split) {
         continue;
@@ -973,7 +1287,7 @@ export class PatchLeafSet<T> {
       return;
     }
     const { face, level, i, j } = node.key;
-    if (level >= MAX_LEVEL) {
+    if (level >= DEEPEST_LEVEL) {
       throw new Error(
         `patch ${patchKeyString(node.key)} is at the deepest level and has no children`,
       );
@@ -989,7 +1303,8 @@ export class PatchLeafSet<T> {
     node.child3 = this.child(node, { face, level: below, i: 2 * i + 1, j: 2 * j + 1 }, makeChild);
     node.split = true;
     if (this.recording) {
-      this.journal.push(node);
+      this.journal[this.journalLength] = node;
+      this.journalLength += 1;
     }
   }
 
@@ -1017,7 +1332,8 @@ export class PatchLeafSet<T> {
     for (let n = 0; n < 4; n += 1) {
       const child = childAt(node, n);
       if (child !== null) {
-        this.added.push(child);
+        this.added[this.addedLength] = child;
+        this.addedLength += 1;
         this.work.push(child);
       }
     }
@@ -1051,14 +1367,13 @@ export class PatchLeafSet<T> {
       }
     }
     const leaves: T[] = [];
-    for (const node of added) {
-      if (!node.split) {
+    for (let n = 0; n < this.addedLength; n += 1) {
+      const node = added[n];
+      if (node !== undefined && !node.split) {
         leaves.push(node.value);
       }
     }
-    if (added.length > 0) {
-      added.length = 0;
-    }
+    this.addedLength = 0;
     return leaves;
   }
 
@@ -1080,7 +1395,7 @@ export class PatchLeafSet<T> {
     if (level < 2) {
       return null;
     }
-    const last = 2 ** level - 1;
+    const last = (1 << level) - 1;
     if (key.i > 0 && key.j > 0 && key.i < last && key.j < last) {
       // The outward steps: towards i − 1 from an even column, i + 1 from an odd one, and so for j.
       const di = (key.i & 1) === 0 ? -1 : 1;

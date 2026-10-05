@@ -9,6 +9,17 @@ describe("the spike report's check", () => {
     expect(readDescentSpikeReport(smallReport())).toEqual(smallReport());
   });
 
+  it("passes a report whose last trace window the renderer failed, with its reason", () => {
+    const ended: DescentSpikeReport = {
+      ...smallReport(),
+      traceWindows: [
+        { startedMs: 900, stopRequestedMs: 31_000, failure: null },
+        { startedMs: 31_500, stopRequestedMs: 61_100, failure: "the trace's cycle at 30 s failed" },
+      ],
+    };
+    expect(readDescentSpikeReport(ended)).toEqual(ended);
+  });
+
   it.each<[string, (r: DescentSpikeReport) => unknown]>([
     ["a non-object", () => "report"],
     ["a series of another length", (r) => ({ ...r, frames: { ...r.frames, ourCodeMs: [4] } })],
@@ -30,18 +41,43 @@ describe("the spike report's check", () => {
     ["no script start", (r) => ({ ...r, scriptStartMs: undefined })],
     [
       "a trace window stopped before it started",
-      (r) => ({ ...r, traceWindows: [{ startedMs: 10, stopRequestedMs: 5 }] }),
+      (r) => ({ ...r, traceWindows: [{ startedMs: 10, stopRequestedMs: 5, failure: null }] }),
     ],
     [
       "trace windows that overlap",
       (r) => ({
         ...r,
         traceWindows: [
-          { startedMs: 0, stopRequestedMs: 100 },
-          { startedMs: 99, stopRequestedMs: 200 },
+          { startedMs: 0, stopRequestedMs: 100, failure: null },
+          { startedMs: 99, stopRequestedMs: 200, failure: null },
         ],
       }),
     ],
+    [
+      "a failed trace window before the last",
+      (r) => ({
+        ...r,
+        traceWindows: [
+          { startedMs: 0, stopRequestedMs: 100, failure: "the cycle failed" },
+          { startedMs: 200, stopRequestedMs: 300, failure: null },
+        ],
+      }),
+    ],
+    [
+      "an empty failure",
+      (r) => ({ ...r, traceWindows: [{ startedMs: 0, stopRequestedMs: 100, failure: "" }] }),
+    ],
+    [
+      "a failure that is not text",
+      (r) => ({ ...r, traceWindows: [{ startedMs: 0, stopRequestedMs: 100, failure: 3 }] }),
+    ],
+    [
+      "a trace window with no failure field",
+      (r) => ({ ...r, traceWindows: [{ startedMs: 0, stopRequestedMs: 100 }] }),
+    ],
+    ["no guard", (r) => ({ ...r, traceGuardS: undefined })],
+    ["a negative guard", (r) => ({ ...r, traceGuardS: -1 })],
+    ["a guard that is not finite", (r) => ({ ...r, traceGuardS: Number.NaN })],
   ])("refuses %s", (_, broken) => {
     expect(readDescentSpikeReport(broken(smallReport()))).toBeNull();
   });

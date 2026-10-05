@@ -107,9 +107,12 @@ descent-demand *args: gen-surface
 # The descent spike (R05.T13.c): builds everything, starts a local server with `--num-workers 2`
 # and runs the client's `--descent-spike` with the spike's options (`--setting high|low`,
 # `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`, `--vertex-path`, `--normals`,
-# `--ridged on|off`, `--dawn-safety on|off`, `--capture <dir>`) and the recipe's own:
-# `--companion-load <threads>` (Design note 20), `--cold-cache` (an empty GPU shader cache) and
-# `--hidden` (the window never shown). `--smoke` runs 10 s hidden and exits with a status. A run
+# `--ridged on|off`, `--dawn-safety on|off`, `--capture <dir>`, `--trace-profile on|off`) and the
+# recipe's own: `--companion-load <threads>` (Design note 20), `--cold-cache` (an empty GPU shader
+# cache) and `--hidden` (the window never shown). The trace is taken in windows of script time
+# (R05.T14.e), with V8's CPU profiler only under `--trace-profile on`, a diagnostic run that is
+# never judged. `--smoke` runs 10 s hidden, its trace in three windows, and exits with a status. A
+# run's profile, where its trace windows wait, is under `target/descent-spike/`, on disk. A run
 # writes its results under `docs/measurements/descent-spike/`. Not part of `ci`.
 # Run the descent spike, e.g. `just descent-spike --setting low` or `just descent-spike --smoke`.
 [positional-arguments]

@@ -14,10 +14,14 @@ import {
   registerSpikeHandlers,
   SPIKE_CHANNELS,
   type SpikeHandlerDeps,
+  SPIKE_GPU_CATEGORY,
+  SPIKE_PROFILER_CATEGORY,
+  SPIKE_TRACE_BUFFER_KB,
   SPIKE_TRACE_CATEGORIES,
   SpikeTrace,
   type SpikeTracing,
   spikeTraceConfig,
+  traceSettingsOf,
 } from "./spike";
 import { smallReport } from "./fixtures/spikeReport";
 
@@ -204,32 +208,87 @@ describe("the spike's measurement switches", () => {
   });
 });
 
-/** A `contentTracing` that records its calls. */
+/** A `contentTracing` that records its calls in order, its buffer a fifth used. */
 function fakeTracing(): SpikeTracing & {
   readonly startRecording: Mock<SpikeTracing["startRecording"]>;
   readonly stopRecording: Mock<SpikeTracing["stopRecording"]>;
+  readonly getTraceBufferUsage: Mock<SpikeTracing["getTraceBufferUsage"]>;
+  readonly calls: string[];
 } {
+  const calls: string[] = [];
   return {
-    startRecording: vi.fn<SpikeTracing["startRecording"]>(() => Promise.resolve()),
-    stopRecording: vi.fn<SpikeTracing["stopRecording"]>((path) => Promise.resolve(path ?? "")),
+    calls,
+    startRecording: vi.fn<SpikeTracing["startRecording"]>(() => {
+      calls.push("start");
+      return Promise.resolve();
+    }),
+    stopRecording: vi.fn<SpikeTracing["stopRecording"]>((path) => {
+      calls.push(`stop ${path ?? ""}`);
+      return Promise.resolve(path ?? "");
+    }),
+    getTraceBufferUsage: vi.fn<SpikeTracing["getTraceBufferUsage"]>(() =>
+      Promise.resolve({ value: 0, percentage: 0.2 }),
+    ),
   };
 }
 
 describe("the spike's trace", () => {
-  it("records Design note 18's categories, and only those", () => {
+  it("records a timed run's five categories, without gpu or the CPU profiler, and only those", () => {
     const config = spikeTraceConfig();
+    expect(config.included_categories).toEqual([
+      "devtools.timeline",
+      "disabled-by-default-devtools.timeline",
+      "disabled-by-default-devtools.timeline.frame",
+      "disabled-by-default-v8.gc",
+      "blink.user_timing",
+    ]);
     expect(config.included_categories).toEqual([...SPIKE_TRACE_CATEGORIES]);
     expect(config.excluded_categories).toEqual(["*"]);
-    expect(config.recording_mode).toBe("record-until-full");
-    for (const category of [
-      "devtools.timeline",
-      "disabled-by-default-v8.gc",
-      "disabled-by-default-v8.cpu_profiler",
-      "blink.user_timing",
+  });
+
+  it("adds gpu and the CPU profiler in a profiled run, with the same 768 MiB until-full buffer", () => {
+    const profiled = spikeTraceConfig({ profiled: true });
+    expect(profiled.included_categories).toEqual([
+      ...SPIKE_TRACE_CATEGORIES,
       "gpu",
-    ]) {
-      expect(SPIKE_TRACE_CATEGORIES).toContain(category);
+      "disabled-by-default-v8.cpu_profiler",
+    ]);
+    expect([SPIKE_GPU_CATEGORY, SPIKE_PROFILER_CATEGORY]).toEqual([
+      "gpu",
+      "disabled-by-default-v8.cpu_profiler",
+    ]);
+    for (const config of [spikeTraceConfig(), profiled]) {
+      expect(config.trace_buffer_size_in_kb).toBe(786_432);
+      expect(config.recording_mode).toBe("record-until-full");
     }
+    expect(SPIKE_TRACE_BUFFER_KB).toBe(786_432);
+  });
+
+  it("calls a run profiled when the CPU profiler's category is recorded", () => {
+    expect(traceSettingsOf(spikeTraceConfig({ profiled: true }), "json")).toEqual({
+      format: "json",
+      profiled: true,
+      categories: [...SPIKE_TRACE_CATEGORIES, SPIKE_GPU_CATEGORY, SPIKE_PROFILER_CATEGORY],
+      recordingMode: "record-until-full",
+      bufferKb: 786_432,
+    });
+    expect(traceSettingsOf({ included_categories: ["gpu"] }, "perfetto-proto")).toEqual({
+      format: "perfetto-proto",
+      profiled: false,
+      categories: ["gpu"],
+      recordingMode: "record-until-full",
+      bufferKb: 0,
+    });
+  });
+
+  it("exposes the settings it records every window with, in contentTracing's JSON", async () => {
+    const tracing = fakeTracing();
+    const trace = new SpikeTrace(tracing, { profiled: true });
+    expect(trace.settings).toEqual(traceSettingsOf(spikeTraceConfig({ profiled: true }), "json"));
+    expect(new SpikeTrace(tracing).settings.profiled).toBe(false);
+    expect(new SpikeTrace(tracing).settings.format).toBe("json");
+    await trace.start();
+    expect(tracing.startRecording).toHaveBeenCalledWith(spikeTraceConfig({ profiled: true }));
   });
 
   it("starts once and stops into the path given", async () => {
@@ -244,9 +303,70 @@ describe("the spike's trace", () => {
     expect(trace.recording).toBe(false);
   });
 
-  it("refuses a stop with nothing recording", async () => {
+  it("cycles by stopping to its path before it starts, and still refuses a start", async () => {
+    const tracing = fakeTracing();
+    const trace = new SpikeTrace(tracing);
+    await trace.start();
+    await expect(trace.cycle("/p/spike-trace-0.json")).resolves.toBe("/p/spike-trace-0.json");
+    expect(tracing.calls).toEqual(["start", "stop /p/spike-trace-0.json", "start"]);
+    expect(trace.recording).toBe(true);
+    await expect(trace.start()).rejects.toThrow("already recording");
+    await expect(trace.stop("/p/spike-trace-1.json")).resolves.toBe("/p/spike-trace-1.json");
+  });
+
+  it("refuses any call while a cycle is in flight", async () => {
+    const tracing = fakeTracing();
+    const held: { release: (() => void) | null } = { release: null };
+    const trace = new SpikeTrace(tracing);
+    await trace.start();
+    tracing.stopRecording.mockImplementationOnce(
+      (path) =>
+        new Promise((resolve) => {
+          held.release = () => {
+            resolve(path ?? "");
+          };
+        }),
+    );
+    const cycling = trace.cycle("/p/a.json");
+    expect(trace.state).toBe("busy");
+    expect(trace.recording).toBe(false);
+    await expect(trace.start()).rejects.toThrow("busy");
+    await expect(trace.stop("/p/b.json")).rejects.toThrow("busy");
+    await expect(trace.cycle("/p/b.json")).rejects.toThrow("busy");
+    held.release?.();
+    await expect(cycling).resolves.toBe("/p/a.json");
+  });
+
+  it("refuses a stop or a cycle with nothing recording", async () => {
     const trace = new SpikeTrace(fakeTracing());
     await expect(trace.stop("/runs/descent.trace.json")).rejects.toThrow("not recording");
+    await expect(trace.cycle("/runs/descent.trace.json")).rejects.toThrow("not recording");
+  });
+
+  it("ends stopped when a cycle's stop or start fails", async () => {
+    const tracing = fakeTracing();
+    const trace = new SpikeTrace(tracing);
+    await trace.start();
+    tracing.stopRecording.mockRejectedValueOnce(new Error("service gone"));
+    await expect(trace.cycle("/p/a.json")).rejects.toThrow("did not stop");
+    expect(trace.recording).toBe(false);
+    await trace.start();
+    tracing.startRecording.mockRejectedValueOnce(new Error("service gone"));
+    await expect(trace.cycle("/p/b.json")).rejects.toThrow("did not start");
+    expect(trace.recording).toBe(false);
+  });
+
+  it("ends stopped when its stop fails, with Chromium's error as the cause", async () => {
+    const tracing = fakeTracing();
+    const trace = new SpikeTrace(tracing);
+    await trace.start();
+    const gone = new Error("service gone");
+    tracing.stopRecording.mockRejectedValueOnce(gone);
+    await expect(trace.stop("/p/a.json")).rejects.toMatchObject({
+      message: "the spike's trace did not stop",
+      cause: gone,
+    });
+    expect(trace.state).toBe("idle");
   });
 
   it("can start again after a start that failed", async () => {
@@ -257,6 +377,18 @@ describe("the spike's trace", () => {
     expect(trace.recording).toBe(false);
     await trace.start();
     expect(trace.recording).toBe(true);
+  });
+
+  it("reads the buffer's use as a percentage while recording, and none otherwise", async () => {
+    const tracing = fakeTracing();
+    const trace = new SpikeTrace(tracing);
+    await expect(trace.bufferUsage()).resolves.toBeNull();
+    await trace.start();
+    await expect(trace.bufferUsage()).resolves.toBeCloseTo(20, 12);
+    tracing.getTraceBufferUsage.mockRejectedValueOnce(new Error("no reading"));
+    await expect(trace.bufferUsage()).resolves.toBeNull();
+    tracing.getTraceBufferUsage.mockResolvedValueOnce({ value: 0, percentage: Number.NaN });
+    await expect(trace.bufferUsage()).resolves.toBeNull();
   });
 });
 
@@ -282,6 +414,7 @@ describe("the spike's IPC handlers", () => {
       isSender: (event) => event.own,
       startMeasuring: vi.fn<() => Promise<void>>(() => Promise.resolve()),
       stopMeasuring: vi.fn<() => Promise<void>>(() => Promise.resolve()),
+      cycleTrace: vi.fn<() => Promise<void>>(() => Promise.resolve()),
       rendererMemory: vi.fn<(bytes: number) => void>(),
       writeResults: vi.fn<SpikeHandlerDeps<FakeEvent>["writeResults"]>(() =>
         Promise.resolve({ json: "a.json", markdown: "a.md" }),
@@ -314,6 +447,7 @@ describe("the spike's IPC handlers", () => {
     const { call, deps } = setUp();
     await expect(call(channel, FOREIGN, smallReport())).rejects.toThrow(/not the spike window/);
     expect(deps.startMeasuring).not.toHaveBeenCalled();
+    expect(deps.cycleTrace).not.toHaveBeenCalled();
     expect(deps.writeResults).not.toHaveBeenCalled();
     expect(deps.end).not.toHaveBeenCalled();
   });
@@ -332,6 +466,7 @@ describe("the spike's IPC handlers", () => {
   it("does each operation for the spike's own page", async () => {
     const { call, deps } = setUp();
     await call(SPIKE_CHANNELS.startTrace, OWN);
+    await call(SPIKE_CHANNELS.cycleTrace, OWN);
     await call(SPIKE_CHANNELS.memory, OWN, 4096);
     await expect(call(SPIKE_CHANNELS.writeResults, OWN, smallReport())).resolves.toEqual({
       json: "a.json",
@@ -340,6 +475,7 @@ describe("the spike's IPC handlers", () => {
     await call(SPIKE_CHANNELS.stopTrace, OWN);
     await call(SPIKE_CHANNELS.end, OWN, { status: "fail", reason: "no bake" });
     expect(deps.startMeasuring).toHaveBeenCalledOnce();
+    expect(deps.cycleTrace).toHaveBeenCalledOnce();
     expect(deps.stopMeasuring).toHaveBeenCalledOnce();
     expect(deps.rendererMemory).toHaveBeenCalledWith(4096);
     expect(deps.writeResults).toHaveBeenCalledWith(smallReport());

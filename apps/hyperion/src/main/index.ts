@@ -33,9 +33,8 @@ import {
 import { isOwnPage } from "./ipcSender";
 import { reduceTraceFile } from "./reduceTrace";
 import { describeMachine, MemorySampler, nodeMachineSources } from "./results";
-import { launchSwitches, registerSpikeHandlers, SpikeTrace, spikeTraceConfig } from "./spike";
+import { launchSwitches, registerSpikeHandlers, SpikeTrace } from "./spike";
 import { SpikeSession } from "./spikeSession";
-import { traceSettingsOf } from "./traceWindows";
 import { reduceWindowFile, registerViewsCheckHandlers, ViewsCheckSession } from "./viewsCheck";
 import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
@@ -230,7 +229,7 @@ function startSpikeSession(
   hidden: boolean,
   nvidiaBaselineBytes: number | null,
 ): void {
-  const trace = new SpikeTrace(contentTracing);
+  const trace = new SpikeTrace(contentTracing, { profiled: launch.traceProfile === "on" });
   const startedAt = new Date();
   /** The renderer's last private-memory reading, bytes, for the sampler. */
   let rendererBytes: number | null = null;
@@ -275,10 +274,8 @@ function startSpikeSession(
       nvidiaBaselineBytes,
     }),
     trace,
-    // The configuration `SpikeTrace.start` records with.
-    traceSettings: traceSettingsOf(spikeTraceConfig()),
-    tracePath: join(app.getPath("userData"), "spike-trace.json"),
-    reduce: (path) => reduceTraceFile(path),
+    traceDir: app.getPath("userData"),
+    reduce: (path, categories) => reduceTraceFile(path, { categories }),
     memory,
     outDir: launch.out ?? resolve(process.cwd(), "docs/measurements/descent-spike"),
     exit: (code) => {

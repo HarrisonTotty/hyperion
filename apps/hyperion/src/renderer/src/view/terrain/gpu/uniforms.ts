@@ -7,7 +7,8 @@
  * from a storage buffer by `instance_index`, and the `Draw` uniform's `offsetFromCameraM` is zero.
  * Every layout here is WGSL's storage layout (W3C WGSL §14.4, "Memory Layout"): a `vec3f` aligns
  * to 16 bytes and takes 12, so a scalar packs into its fourth word. The WGSL structs that read them
- * (T11.b's `terrain.wgsl`) are quoted in each constant's documentation.
+ * (T11.b's `terrain.wgsl`, and `patchVertex.wgsl` for the slot record) are quoted in each
+ * constant's documentation.
  *
  * Every `f64` value is narrowed to `f32` exactly once, by the store into a `Float32Array`
  * (round to nearest, ties to even, as `Math.fround`).
