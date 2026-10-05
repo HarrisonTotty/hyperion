@@ -14,7 +14,8 @@ import { vertexDir } from "./cube";
 import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
 import { type Selection, selectPatches } from "./select";
-import { slotLayout } from "./slotLayout";
+import { PATCH_VERTICES_PER_SIDE, slotLayout } from "./slotLayout";
+import type { BakedPatch } from "./workers/messages";
 
 /** A cache of `slots` slots of 100 B each. */
 function cacheOf(slots: number): PatchCache {
@@ -30,6 +31,18 @@ function resident(key: PatchKey, generation = 1): ResidentPatch {
     originM: vec3(0, 0, 0),
     heightRangeM: [0, 0],
     boundingRadiusM: 1,
+  };
+}
+
+/** A worker's bake of `key` as the terrain pass hands it over, arrays and all. */
+function bakeOf(key: PatchKey, generation = 1): BakedPatch {
+  return {
+    ...resident(key, generation),
+    heights: new Float32Array(PATCH_VERTICES_PER_SIDE ** 2 * 2),
+    offsets: null,
+    normals: new Float16Array(PATCH_VERTICES_PER_SIDE ** 2 * 2),
+    originHeightM: 0,
+    skirtDepthM: 1,
   };
 }
 
@@ -253,6 +266,27 @@ describe("the patch cache", () => {
     expect(cache.insert(resident(A, 2))).toEqual({ kind: "stored", slot, evicted: null });
     expect(cache.get(patchKeyString(A))?.generation).toBe(2);
     expect(cache.usedSlots).toBe(1);
+  });
+
+  it("keeps none of a bake's arrays, which its slot already holds", () => {
+    const cache = cacheOf(6);
+    cache.insert(bakeOf(A));
+    expect(cache.get(patchKeyString(A))).toStrictEqual({
+      ...resident(A),
+      slot: 0,
+      keyString: patchKeyString(A),
+    });
+  });
+
+  it("keeps none of a newer bake's arrays either", () => {
+    const cache = cacheOf(6);
+    cache.insert(bakeOf(A));
+    cache.insert(bakeOf(A, 2));
+    expect(cache.get(patchKeyString(A))).toStrictEqual({
+      ...resident(A, 2),
+      slot: 0,
+      keyString: patchKeyString(A),
+    });
   });
 
   it("gives a resident patch's baked height range, and none once it is gone", () => {
