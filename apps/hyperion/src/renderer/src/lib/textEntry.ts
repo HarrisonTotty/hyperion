@@ -38,3 +38,18 @@ export function isTextEntry(target: EventTarget | null): boolean {
 export function isEmptyEntry(text: string): boolean {
   return text.trim() === "";
 }
+
+/**
+ * Shows `text` in a field that holds focus, all of it selected, so that typing replaces it.
+ *
+ * @remarks
+ * The guide's data-entry rule (decision-r07-t19b-exposure-fit, item 6): after `Escape`, or `Enter`
+ * on an emptied field, a field holds its value again, selected, as the keyboard found it. The text
+ * is written to the input before it is selected, so that the selection holds through the render
+ * that shows the same value: React leaves a value the input already holds, and its selection with
+ * it.
+ */
+export function showSelected(input: HTMLInputElement, text: string): void {
+  input.value = text;
+  input.select();
+}

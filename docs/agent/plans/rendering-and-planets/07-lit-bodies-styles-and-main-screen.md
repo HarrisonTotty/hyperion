@@ -2131,8 +2131,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   into range; metering its mean of 0 as nothing to meter locked `AUTO` in a system inhibit it
   could not leave (a test drives the cut and the recovery). A frame of exact zeros never comes
   into range, so the floor is bounded below at EV100 −14, R02's `MAN_EV100_MIN`: max(2⁻¹⁴ ÷ the
-  pre-exposure, 2⁻¹⁷ cd/m²) (decision-r07-t13d; T13.a's follow-up), which leaves every frame with
-  light in it to its light. A histogram with nothing the meter weighs (`LIT` with no lit body) is
+  pre-exposure, 2⁻¹⁷ cd/m²) (decision-r07-t13d; T13.a's follow-up), which leaves to its light every
+  frame with a counted pixel in range on its way to −14. A histogram with nothing the meter weighs
+  (`LIT` with no lit body) is
   treated as no histogram: `AUTO` holds until
   `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
   definition of that status. T16 replaces it with the meter's own status, `NO LIT SIDE` and its
@@ -3306,7 +3307,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       system inhibit (the guide's consequence rule), on the button's row: no height in T19.b's
       26rem column, at most about 10 px as built and in T19.b's 20rem column B (measured: none as
       built, 12 px in column B; T13.d's follow-up's deviations);
-    - the entry and commanding bullets' new sentences are drafts for the owner, as the rows are.
+    - the entry and commanding bullets' new sentences are drafts for the owner, as the rows are,
+      and so is the entry bullet's "selected" (decision-r07-t19b-exposure-fit, item 6; T13.d's
+      second follow-up).
 - **Deviations in T13.e, as built (the sky's limit follows the camera, decision-r07-exposure-camera
   (c)).**
   - **`shownTriple` is R02's.** `shownTriple(control)` lives in `photometry/exposure.ts` beside
@@ -3443,16 +3446,14 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **Guide.** The `MAN` (field) row is now the nomenclature table's widest, so Prettier re-pads
     the table: besides the separator and the two rows, 238 rows change in whitespace only. The two
     bullets' new sentences and the two rows are drafts for the owner.
-  - **Open (for the orchestrator, from the UX review; not built).**
-    - The reason's 0.5rem bottom margin, which the statement shares, sits it about 4 px above the
-      button label's centre line, as it does the held-back reasons beside `ENABLE` and `INHIBIT`.
-      Zeroing it inside `.view-exposure__command` would align them and make column B's two-line row
-      36 px (+4 px). Options: as built (the ruling's "the reason's place and look"), or no bottom
-      margin on every note in a command row, `AUTO NOT AVAILABLE` keeping its own.
-    - After `Escape`, the `MAN` field selects its fill, so typing replaces it, but `CURSOR`'s and the
-      chart's fields leave the caret after the restored value, so typing appends to it, as on their
-      focus. Options: as built (each field's focus behaviour), or `Escape` selects the restored
-      value in every field.
+  - **From the UX review (decision-r07-t19b-exposure-fit).**
+    - Ruled (item 5; built by T19.b's follow-up): the reason's 0.5rem bottom margin, which the
+      statement shares, sits it about 4 px above the button label's centre line, as it does the
+      held-back reasons beside `ENABLE` and `INHIBIT`; a note in a command row has none.
+    - Ruled (decision-r07-t19b-exposure-fit, item 6): `Escape` selects the restored value in every
+      such field. As built here, the `MAN` field selected its fill, so typing replaced it, but
+      `CURSOR`'s and the chart's fields left the caret after the restored value, so typing appended
+      to it. Built by T13.d's second follow-up.
   - **For the owner (the ruling's unruled aside).** `INHIBIT` under `INHIBITED · OPERATOR` is now
     the only level where it is offered with nothing beside it (accepted as a no-op). Whether it
     should be held back with `NOT AVAILABLE: the exposure is INHIBITED` (about 300 px, which wraps
@@ -3500,17 +3501,17 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     the host's disc (class 0) under any meter, and the lit side and the stars under `DARK` when
     the night side is exactly 0 (no planetshine). Before, the exposure ran on without end under
     them, toward the `f32` overflow.
-  - **The ruled words overstate it (open, for the orchestrator).** The ruling's "the image changes
-    only for a frame whose every pixel is below 4.5 × 10⁻⁹ cd/m²" holds only with "counted" added
-    and with the case from below. Its "such a frame is black at either exposure" holds for exact
-    zeros alone, and only of the counted pixels. The T13 entry's ruled sentence, inserted
-    verbatim, overstates it in the same way: "which leaves every frame with light in it to its
-    light". Options: keep the ruled words (built), or amend them to "which leaves to its light
-    every frame with a counted pixel in range on its way to −14". The frames concerned are over
-    2,000 times fainter than the brainstorm's darkest scene, 10⁻⁵ cd/m², and meter far darker than
-    the view camera's deepest setting, f/1.4, 1/30 s and ISO 409,600 at EV100 −6.12, beyond which
-    the exposure is a digital push. The exception is the frame with uncounted light, which the
-    guard now bounds.
+  - **The ruled words overstated it (amended by the orchestrator, 2026-10-05).** The ruling's "the
+    image changes only for a frame whose every pixel is below 4.5 × 10⁻⁹ cd/m²" holds only with
+    "counted" added and with the case from below. Its "such a frame is black at either exposure"
+    holds for exact zeros alone, and only of the counted pixels. The T13 entry's ruled sentence,
+    inserted verbatim, overstated it in the same way: "which leaves every frame with light in it to
+    its light". It now reads "which leaves to its light every frame with a counted pixel in range
+    on its way to −14" (T13.d's second follow-up). The frames it holds at −14 are over 2,000 times
+    fainter than the brainstorm's darkest scene, 10⁻⁵ cd/m², and meter far darker than the view
+    camera's deepest setting, f/1.4, 1/30 s and ISO 409,600 at EV100 −6.12, beyond which the
+    exposure is a digital push. The exception is the frame with uncounted light, which the guard
+    now bounds.
   - **Gate.** The acceptance command (85 tests), the app's vitest (4,837), `just check lint` and
     Prettier. No `just test-render`: no shader, `view/engine/` or `src/smoke/` file changed, and
     the guard changes only a frame with no counted pixel in the histogram's range below EV100
@@ -3520,3 +3521,41 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     guard also holds a frame from below and reads only the counted pixels. Fixed, as are a unit in
     a test's name, one case per start, the constant's own test, a comment's tolerance and "the
     counted pixels' luminance" for AgX's per-channel floor. Every figure checked out.
+- **Deviations in T13.d's second follow-up, as built (decision-r07-t19b-exposure-fit, item 6).**
+  - **One helper.** `lib/textEntry.ts` gains `showSelected(input, text)`: it writes the value to
+    the input, then selects it, as the ruling asks ("as the `MAN` field's `takeFill` does"), so
+    that the selection survives the render that shows the same value. `CURSOR`'s fields,
+    `NumberField` and the `MAN` field's `takeFill` share it. The `MAN` field's behaviour and tests
+    are unchanged.
+  - **`CURSOR`.** `Escape` selects its field's coordinate whether or not anything was typed there.
+    `Enter` selects it when that field's own text was empty or spaces only; it still enters the
+    other fields' drafts, as built.
+  - **The chart's fields.** The same in `NumberField`, whose empty check comes before the link's
+    hold as built: an emptied field under `NO CARRIER` takes `Enter`, enters nothing and is
+    selected, and `Escape` selects while held back too. The ruling does not say.
+  - **Tests.** The ruling's three, as four tests (`X` refused then `Escape`, `Y` emptied then
+    `Enter`, and `DRIVE RANGE` both ways), plus four: `Escape` with nothing typed selects the
+    whole value wherever a click left the caret (`Z`, `CHART TIME`), and leaving after `Escape`
+    enters what was typed then, not the value with it appended (`Z` 3, where ca91a18 entered
+    12.03; `CHART TIME` 3, where `+12.503` entered 12.5). All eight fail at ca91a18.
+  - **Plan 05's pointer.** Besides the ruled ", selected", its heading names this ruling and both
+    of T13.d's follow-ups, so that it does not credit the selection to the first.
+  - **Plan text.** The T13 entry's ruled sentence on the meter's floor is amended, the
+    orchestrator's ruling on T13.a's follow-up's open point; that follow-up's deviations record it.
+  - **Gate.** The acceptance command (928 tests), the app's vitest (4,845), `just check lint`,
+    Prettier and the console-ux skill's scripts. No `just test-render`: no shader, `view/engine/`
+    or `src/smoke/` file changed. No `just ci` (the Day 2 protocol).
+  - **Reviewed** by the TypeScript and UX reviewers, with no must-fix or should-fix. The UX
+    review's one point is open below.
+  - **Open (for the orchestrator, from the UX review; the ruled words are built).** The guide's
+    bullet says a field "enters its value with `Enter` or when it is left", so its "and so does
+    entering it emptied" now also says that leaving an emptied field selects its value, where the
+    ruling leaves leaving unchanged. Nothing shows it, since the focus has gone, but the sentence
+    sets a requirement. The `MAN` (field) row and the fields' remarks keep the two apart. Options:
+    as ruled, or "…selected so that typing replaces it, and so does `Enter` on it emptied; left
+    emptied, it shows the value. Neither is refused." A draft for the owner either way.
+  - **By hand, for the owner** (a focused, visible window; jsdom gives only the selection's
+    offsets): `Escape` and an emptied `Enter` in each of the five fields, the value highlighted in
+    `--accent` and replaced by the next key, also after a click that left the caret inside the
+    value, at 1280 × 720 and 1920 × 1080; what a screen reader says when `Escape` restores and
+    selects the value.

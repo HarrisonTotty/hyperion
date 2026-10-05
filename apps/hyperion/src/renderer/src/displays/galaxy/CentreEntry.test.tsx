@@ -307,6 +307,50 @@ describe("CentreEntry", () => {
     expect(onCursor).not.toHaveBeenCalled();
   });
 
+  it("selects the coordinate a refusal's Escape restores, so that typing replaces it", async () => {
+    const { user, onCursor } = renderEntry();
+    await user.clear(field("X"));
+    await user.type(field("X"), "70000{Enter}");
+
+    await user.keyboard("{Escape}");
+    const selection = [field("X").selectionStart, field("X").selectionEnd];
+    await user.keyboard("5");
+
+    expect([selection, field("X").value]).toEqual([[0, "26,000.0".length], "5"]);
+    expect(onCursor).not.toHaveBeenCalled();
+  });
+
+  it("selects the coordinate on Escape with nothing typed, wherever the caret was", async () => {
+    const { user } = renderEntry();
+    await user.pointer({ keys: "[MouseLeft]", target: field("Z"), offset: 1 });
+
+    await user.keyboard("{Escape}");
+
+    expect([field("Z").selectionStart, field("Z").selectionEnd]).toEqual([0, "12.0".length]);
+  });
+
+  it("selects the coordinate again when an emptied field is entered with Enter", async () => {
+    const { user, onCursor } = renderEntry();
+    await user.clear(field("Y"));
+
+    await user.keyboard("{Enter}");
+    const selection = [field("Y").selectionStart, field("Y").selectionEnd];
+    await user.keyboard("5");
+
+    expect([selection, field("Y").value]).toEqual([[0, "0.0".length], "5"]);
+    expect(onCursor).not.toHaveBeenCalled();
+  });
+
+  it("enters what is typed after Escape on leaving, not the coordinate with it appended", async () => {
+    const { user, onCursor } = renderEntry();
+    await user.click(field("Z"));
+    await user.keyboard("9{Escape}3");
+
+    await user.tab();
+
+    expect(onCursor.mock.calls).toEqual([[[26_000, 0, 3]]]);
+  });
+
   it("announces the whole position as the cursor moves", async () => {
     const { user } = renderEntry();
 

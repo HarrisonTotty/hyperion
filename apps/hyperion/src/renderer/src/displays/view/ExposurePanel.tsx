@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from "react";
 
 import { formatNumber, formatSignificant } from "../../lib/format";
-import { isEmptyEntry } from "../../lib/textEntry";
+import { isEmptyEntry, showSelected } from "../../lib/textEntry";
 import {
   controlEv100,
   type ExposureCommandResult,
@@ -270,10 +270,7 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
   const takeFill = (input: HTMLInputElement): void => {
     const text = formatNumber(controlEv100(exposure), MAN_DECIMALS);
     setFill(text);
-    // Written to the input as well, so that the selection below holds: React leaves a value the
-    // input already holds, and its selection with it.
-    input.value = text;
-    input.select();
+    showSelected(input, text);
   };
 
   // Enters what the field shows, typed or the fill: `MAN` at its value, or its refusal; empty text

@@ -384,8 +384,8 @@ Four classes, shared by the whole ship:
 - Data entry fields show their expected format and unit, reject invalid input with a
   message that says what is valid, right-align numbers and left-align text. A field that enters
   its value with `Enter` or when it is left has a way out that enters nothing: `Escape` drops what
-  was typed and any refusal and shows the field's value again, and so does entering it emptied.
-  Neither is refused.
+  was typed and any refusal and shows the field's value again, selected so that typing replaces it,
+  and so does entering it emptied. Neither is refused.
 - Every console is fully operable from the keyboard. Frequent actions have single-key
   bindings shown on the control. Focus is always visible as a `2px` `--accent` outline.
 - Pointer targets are at least `2rem` square. Consoles may run on touch screens, so no

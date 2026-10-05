@@ -42,8 +42,12 @@ function renderControls(overrides: Partial<ControlsProps> = {}) {
 }
 
 /** A number field by its label: `DRIVE RANGE` or `CHART TIME`. */
-function numberField(name: "DRIVE RANGE" | "CHART TIME"): HTMLElement {
-  return screen.getByRole("textbox", { name });
+function numberField(name: "DRIVE RANGE" | "CHART TIME"): HTMLInputElement {
+  const element = screen.getByRole("textbox", { name });
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error(`the ${name} field is not an input`);
+  }
+  return element;
 }
 
 function radius(): HTMLSelectElement {
@@ -232,6 +236,57 @@ describe("ChartControls", () => {
     expect(numberField("CHART TIME")).toHaveValue("+12.50");
     expect(numberField("CHART TIME")).not.toHaveAttribute("aria-invalid");
     expect(onTime).not.toHaveBeenCalled();
+  });
+
+  it("selects the drive range a refusal's Escape restores, so that typing replaces it", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+    const field = numberField("DRIVE RANGE");
+    await user.clear(field);
+    await user.type(field, "900{Enter}");
+
+    await user.keyboard("{Escape}");
+    const selection = [field.selectionStart, field.selectionEnd];
+    await user.keyboard("5");
+
+    expect([selection, field.value]).toEqual([[0, "50".length], "5"]);
+    expect(onDriveRange).not.toHaveBeenCalled();
+  });
+
+  it("selects the drive range again when the emptied field is entered with Enter", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+    const field = numberField("DRIVE RANGE");
+    await user.clear(field);
+
+    await user.keyboard("{Enter}");
+    const selection = [field.selectionStart, field.selectionEnd];
+    await user.keyboard("5");
+
+    expect([selection, field.value]).toEqual([[0, "50".length], "5"]);
+    expect(onDriveRange).not.toHaveBeenCalled();
+  });
+
+  it("selects the chart time on Escape with nothing typed, wherever the caret was", async () => {
+    const user = userEvent.setup();
+    renderControls({ timeYr: 12.5 });
+    const field = numberField("CHART TIME");
+    await user.pointer({ keys: "[MouseLeft]", target: field, offset: 2 });
+
+    await user.keyboard("{Escape}");
+
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, "+12.50".length]);
+  });
+
+  it("enters what is typed after Escape on leaving, not the chart time with it appended", async () => {
+    const user = userEvent.setup();
+    const { onTime } = renderControls({ timeYr: 12.5 });
+    await user.click(numberField("CHART TIME"));
+    await user.keyboard("9{Escape}3");
+
+    await user.tab();
+
+    expect(onTime.mock.calls).toEqual([[3]]);
   });
 
   it("drops a drive range emptied before the link's hold arrived when it is left", async () => {
