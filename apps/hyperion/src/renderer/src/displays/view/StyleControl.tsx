@@ -6,6 +6,10 @@ import type { StyleRefusals } from "./styleRefusals";
 
 /** Props of {@link StyleControl}. */
 export interface StyleControlProps {
+  /** The panel's ID, by which a disclosure button controls it (R07.T19.b), or none. */
+  readonly id?: string | undefined;
+  /** Whether the panel is folded behind its disclosure button in the compact layout (R07.T19.b). */
+  readonly hidden?: boolean | undefined;
   /**
    * The view the panel acts on, its system designator on the title row (`PRIMARY`,
    * `INSTRUMENT 1`; R07.T19), or none.
@@ -38,13 +42,15 @@ export function StyleControl({
   faulted,
   onStyle,
   designator,
+  id,
+  hidden,
 }: StyleControlProps) {
   const titleId = useId();
   const reasonId = useId();
   const refusals = RENDER_STYLES.map((each) => byStyle[each]);
   const reason = refusals.find((refusal) => refusal !== null) ?? null;
   return (
-    <section className="panel view-style" aria-labelledby={titleId}>
+    <section className="panel view-style" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
         Style
         {designator === undefined ? null : (

@@ -25,13 +25,48 @@ export interface ViewLabelBlockProps {
 const PART_SEPARATOR = " · ";
 
 /**
+ * The runs of a reading that never break (decision-r07-t19-layout, item 2), longest first: `UT`
+ * with its first group (`UT +0 yr`), a star limit with its kind (`V 9.5 mag CAM`), an exposure
+ * value with its band (`EV100 -1.0`), a clock reading (`000/00:00:01`) and a number with its sign
+ * and unit (`1.00 km/s`, `12,480 km`); a number with a unit it touches (`60°`) has no break in it.
+ */
+const UNBREAKABLE =
+  /UT [+-]?\d[\d,.]* yr|V -?\d[\d.]* mag (?:EYE|CAM)|EV100 -?\d[\d.]*|\d{3}\/\d{2}:\d{2}:\d{2}|[+-]?\d[\d,.]*(?:E[+-]?\d+)? (?:km\/s|m\/s|kyr|Myr|Gyr|yr|mag|AU|Gm|Mm|km|m|ly|s)(?![\w/])/g;
+
+/**
+ * A part of a reading with its unbreakable runs each set on one line, so that it breaks only at
+ * the spaces between them.
+ */
+function partRuns(part: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  let from = 0;
+  for (const match of part.matchAll(UNBREAKABLE)) {
+    if (match.index > from) {
+      nodes.push(part.slice(from, match.index));
+    }
+    nodes.push(
+      <span className="view-label__run" key={match.index}>
+        {match[0]}
+      </span>,
+    );
+    from = match.index + match[0].length;
+  }
+  if (nodes.length === 0) {
+    return part;
+  }
+  if (from < part.length) {
+    nodes.push(part.slice(from));
+  }
+  return nodes;
+}
+
+/**
  * A reading's parts, each kept on one line where it fits, so that a narrow block breaks it at its
- * middle dots first (decision-r07-t19, item 2a); a part longer than the block still wraps.
+ * middle dots first (decision-r07-t19, item 2a) and then at a space between its unbreakable runs
+ * (decision-r07-t19-layout, item 2): `EV100 -1.0 MAN` stays whole where it fits and breaks before
+ * its level only where it cannot; a part longer than the block still wraps between its words.
  */
 function readingParts(value: string): ReactNode {
-  if (!value.includes(PART_SEPARATOR)) {
-    return value;
-  }
   const seen = new Map<string, number>();
   const nodes: ReactNode[] = [];
   for (const part of value.split(PART_SEPARATOR)) {
@@ -42,7 +77,7 @@ function readingParts(value: string): ReactNode {
     seen.set(part, count + 1);
     nodes.push(
       <span className="view-label__part" key={`${part}:${String(count)}`}>
-        {part}
+        {partRuns(part)}
       </span>,
     );
   }
@@ -55,6 +90,9 @@ function readingParts(value: string): ReactNode {
  * text on a `--surface-0` plate over the canvas, never drawn into it.
  *
  * @remarks
+ * A reading breaks at its middle dots first, then at a space, never inside a quantity, between a
+ * star limit and its kind, after `UT` or inside a clock reading, and its continuation lines hang
+ * under the value (decision-r07-t19-layout, item 2).
  * Each reading is an `output`; none is announced as it changes, since they change continuously. A
  * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"). A
  * graphics fault is set as `StatusLine`'s fault, in `--status-caution`, apart from the steady

@@ -3026,13 +3026,15 @@ body {
 }
 
 /*
- * The VIEW display (plan R02, R02.T15): the scene bar over the view and its side column, the view
- * taking what the side column's 24rem leaves.
+ * The VIEW display (plan R02, R02.T15): the scene bar over the view and its side columns, the view
+ * taking what they leave. Clipped, never scrolled: a control focused below the foot of a column
+ * too long for a window under the least size cannot move the console frame (R07.T19.b).
  */
 .console__work--view {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   align-content: stretch;
+  overflow: clip;
 }
 
 .view-display {
@@ -3065,10 +3067,15 @@ body {
   gap: 0.25rem 1rem;
 }
 
+/*
+ * The stage beside its side column (R07.T19.b; decision-r07-t19-layout, item 1): in the full
+ * layout two columns, 26rem and 20rem; in the compact one a single 26rem column.
+ */
 .view {
   display: grid;
   flex: 1 1 0;
-  grid-template-columns: minmax(0, 1fr) minmax(24rem, auto);
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   gap: 1rem;
   min-height: 0;
 }
@@ -3116,12 +3123,40 @@ body {
   letter-spacing: 0.1em;
 }
 
-/* The list takes what the controls leave, and scrolls within itself; the column never does. */
+/*
+ * The list takes what the controls leave, and scrolls within itself; the column never does, and is
+ * clipped rather than scrolled, so that no focused control can scroll it.
+ */
 .view__side {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  width: 26rem;
   min-height: 0;
+  overflow: clip;
+  /* Room for the focus ring of a control at the column's edge. */
+  overflow-clip-margin: 0.25rem;
+}
+
+/* The full layout: the first column, then the primary's exposure in the second. */
+.view--full .view__side {
+  display: grid;
+  grid-template-columns: 26rem 20rem;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1rem;
+  width: auto;
+}
+
+.view__column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+/* The compact layout: both columns' panels in one, in the same order. */
+.view--compact .view__column {
+  display: contents;
 }
 
 /* The descent spike fills the window and never scrolls: its lists scroll within themselves. */
@@ -3258,6 +3293,15 @@ body {
   min-height: 6.5rem;
 }
 
+/* In VIEW's compact layout, at its least its head, one row and its position (R07.T19.b). */
+.view--compact .view-list {
+  min-height: 4.5rem;
+}
+
+.view--compact .view-list__scroll {
+  min-height: 2rem;
+}
+
 .view-list__head,
 .view-list__row {
   display: grid;
@@ -3270,6 +3314,27 @@ body {
 .view-list__head {
   color: var(--text-muted);
   letter-spacing: 0.15em;
+}
+
+.view-list__range-head {
+  grid-column: 3;
+  text-align: right;
+}
+
+/* In VIEW's 26rem column the list's columns stand closer, so that its designations keep room. */
+.view__column .view-list__head,
+.view__column .view-list__row {
+  column-gap: 0.25rem;
+}
+
+/*
+ * With no own ship the range column's head reads RANGE FROM CAMERA, its second line under RANGE
+ * and running back under KIND's empty head, so that the rows' designations keep their width.
+ */
+.view-list__range-head--from {
+  grid-row: 2;
+  grid-column: 2 / 4;
+  justify-self: end;
 }
 
 .view-list__scroll {
@@ -3541,6 +3606,36 @@ body {
   min-height: 10rem;
 }
 
+/* In the compact layout the list keeps at least its head, a row and its position (above). */
+.view--compact .view-targets {
+  min-height: auto;
+}
+
+/*
+ * The compact layout's row of disclosure buttons under the list (decision-r07-t19-layout, item 1b):
+ * display controls, each naming its panel, the open one's chevron pointing down. Set a little
+ * tighter than other controls, at the guide's least letter spacing, so that the four names stand
+ * on one line in the 26rem column, `EXPOSURE METER` included (about 407 px of 416, measured).
+ */
+.view-folds {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 0.25rem;
+}
+
+.view-folds > .view-folds__button {
+  gap: 0.25rem;
+  padding-right: 0;
+  letter-spacing: 0.1em;
+}
+
+/* A folded panel's fault or status, standing under the row while its panel is folded. */
+.view__side .view-folds__standing {
+  flex: none;
+  margin: 0;
+}
+
 /* A view's style switch (plan R07, T7): its buttons are the presets' (`.preset-buttons`). */
 .view-style__reason {
   margin: 0.5rem 0 0;
@@ -3563,21 +3658,37 @@ body {
   color: var(--text);
 }
 
-/* A reading's parts each stay on one line where they fit, so a narrow block breaks at its dots. */
+/*
+ * A reading's parts each stay on one line where they fit, so a narrow block breaks at its dots.
+ * Set at the line's top, so that a part broken within itself keeps its label beside its first line
+ * (an inline block's baseline is its last line's).
+ */
 .view-label__part {
   display: inline-block;
   max-width: 100%;
+  vertical-align: top;
+}
+
+/*
+ * A run of a reading that never breaks: a quantity with its sign, unit, band or prefix, a star
+ * limit with its kind, `UT` with its first group, a clock reading (decision-r07-t19-layout, 2).
+ */
+.view-label__run {
+  white-space: nowrap;
 }
 
 /*
  * The instrument views' fixed slots over the primary view's right edge (R07 Design note 15,
- * decision-r07-t19 item 2a): INSTRUMENT 1 above INSTRUMENT 2, inset 0.5rem from the stage and from
- * each other, a closed slot taking no room.
+ * decision-r07-t19 item 2a): INSTRUMENT 1 at the stage's top right and INSTRUMENT 2 at its foot,
+ * each inset 0.5rem, so that neither moves when the other opens or closes
+ * (decision-r07-t19-layout, item 3); a closed slot takes no room. Where the stage cannot hold both
+ * corners, INSTRUMENT 2 stands directly under INSTRUMENT 1, never over it.
  */
 .view-instruments {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
+  bottom: 0.5rem;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -3586,8 +3697,27 @@ body {
 
 /* An open slot: an opaque panel, which takes the pointer that the overlay it stands in does not. */
 .view-instrument {
+  flex: none;
   padding: 0.5rem;
   pointer-events: auto;
+}
+
+.view-instrument--slot-2 {
+  margin-top: auto;
+}
+
+/*
+ * An instrument's statements run the slot's width under its label block and canvas, wrapping
+ * within it rather than widening it (decision-r07-t19-layout, item 5).
+ */
+.view-instrument__statements {
+  contain: inline-size;
+  font-size: 0.875rem;
+  line-height: 1.2;
+}
+
+.view-instrument__statements > .view-label__statement {
+  margin-top: 0.25rem;
 }
 
 .view-instrument__title {
@@ -3632,28 +3762,40 @@ body {
 }
 
 /*
- * VIEW's side column holds the instruments panel above the view's own (R07.T19): its panels sit a
- * little tighter than the default, so that the wireframe's column fits at 1920 × 1080.
+ * VIEW's side panels sit a little tighter than the default (R07.T19), and in the compact layout
+ * tighter still (R07.T19.b). Each takes its column's width and never widens it: a wide line wraps
+ * within its panel rather than lending the column its unwrapped width.
  */
-.view__side > .panel {
-  padding-block: 0.75rem;
+.view__column > .panel {
+  contain: inline-size;
+  padding: 0.75rem;
+}
+
+.view--compact .view__column > .panel {
+  padding-block: 0.5rem;
 }
 
 .view__side .panel__title {
   margin-bottom: 0.25rem;
 }
 
-/*
- * The instruments panel takes the side column's width and never widens it: its rows wrap within
- * it rather than lending it their unwrapped width.
- */
-.view-instruments-panel {
-  contain: inline-size;
+/* The instruments panel sits tighter still: the column is full at 1920 × 1080. */
+.view__column > .view-instruments-panel {
+  padding-block: 0.5rem;
 }
 
-/* The instruments panel sits tighter still: the column is full at 1920 × 1080. */
-.view__side > .view-instruments-panel {
-  padding-block: 0.5rem;
+/* Folded, in the compact layout, the instruments panel is its title row: a 2rem disclosure. */
+.view--compact .view__column > .view-instruments-panel--folded {
+  padding-block: 0;
+}
+
+.view-instruments-panel--folded .view-instruments-panel__title {
+  margin: 0;
+}
+
+/* Upper case as every panel title is; the text stays mixed case for the accessible name. */
+.view-instruments-panel__title .control {
+  text-transform: inherit;
 }
 
 /* The instruments panel's rows: each label on the left of its buttons, which may wrap. */

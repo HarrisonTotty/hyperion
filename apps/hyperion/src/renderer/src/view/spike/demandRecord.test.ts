@@ -5,10 +5,18 @@ import { levelHeightRangeM, planetGeometry } from "../terrain/planet";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 import ridgesOffRanges from "./fixtures/descentRanges.txt?raw";
 import {
+  DEMAND_RECORD_SCHEMA,
+  DEMAND_RECORD_VERSION,
+  type DemandRecordFile,
   demandSummary,
   fixtureRangeOf,
+  mergeRecords,
   parseRanges,
   patchKeyAt,
+  RECORD_SEED,
+  type RecordedCell,
+  recordRules,
+  recordStem,
   RIDGED_CALIBRATED_NOTE,
   recordProfile,
   runCell,
@@ -165,6 +173,151 @@ describe("the demand record", () => {
     expect(demandSummary([cellOf("calibrated", "on")], "2026-10-03T00:00:00Z")).toContain(
       RIDGED_CALIBRATED_NOTE,
     );
+  });
+});
+
+/** The orbit coast's row of a summary's second table. */
+function budgetRowOf(summary: string): string | undefined {
+  return summary.split("\n").filter((line) => line.startsWith("| orbit coast"))[1];
+}
+
+/** A record file of this version holding `cells`. */
+function fileOf(startedAt: string, cells: RecordedCell[]): DemandRecordFile {
+  return {
+    schema: DEMAND_RECORD_SCHEMA,
+    version: DEMAND_RECORD_VERSION,
+    startedAt,
+    seed: String(RECORD_SEED),
+    testPlanetVersion: 2,
+    notes: [],
+    cells,
+  };
+}
+
+describe("the record's file (version 2)", () => {
+  const [high] = SETTING_VIEWS;
+  /** A short orbit-coast cell of `rule`, under a budget of `maxPatches`, as the script records it. */
+  const cellOf = (rule: "hard" | "calibrated", maxPatches: number): RecordedCell => {
+    if (high === undefined) {
+      throw new Error("no high setting");
+    }
+    const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
+    const cell = runCell({
+      rule,
+      ridges: "off",
+      settingView: { ...high, maxPatches },
+      source: {
+        ...SOURCE,
+        rangeOf: (key) => levelHeightRangeM(planet, key.level),
+      },
+      rateHz: 16,
+      fromS: 10,
+      toS: 12,
+      measureFromS: 11,
+      nowMs: () => 0,
+      deadlineMs: Infinity,
+    });
+    return { ...cell, capHours: 0.5, wallCapHours: null, wallS: 1, loadAverage: [1, 2, 3] };
+  };
+
+  /** Two records, the hard cell's started later, merged in that order. */
+  const merged = (): DemandRecordFile =>
+    mergeRecords(
+      [
+        fileOf("2026-10-04T15:00:00.000Z", [cellOf("hard", 40)]),
+        fileOf("2026-10-04T14:00:00.000Z", [cellOf("calibrated", 981)]),
+      ],
+      ["four processes at once"],
+    );
+
+  it("merges the processes' cells in the order given", () => {
+    expect(merged().cells.map(({ rule }) => rule)).toEqual(["hard", "calibrated"]);
+  });
+
+  it("dates a merged record from its earliest start", () => {
+    expect(merged().startedAt).toBe("2026-10-04T14:00:00.000Z");
+  });
+
+  it("gives a merged record the notes passed, not its parts'", () => {
+    expect(merged().notes).toEqual(["four processes at once"]);
+  });
+
+  it("names a merged record from its cells' rules in order", () => {
+    const file = merged();
+    expect(recordStem(file.startedAt, recordRules(file))).toBe("2026-10-04-demand-hard+calibrated");
+  });
+
+  it("names a run's record from the rules it runs, whatever cells it has written", () => {
+    expect(recordStem("2026-10-04T14:00:00.000Z", ["hard", "calibrated"])).toBe(
+      "2026-10-04-demand-hard+calibrated",
+    );
+  });
+
+  it("refuses to merge a record of another version", () => {
+    const cell = cellOf("hard", 981);
+    const old = { ...fileOf("2026-10-03T00:00:00.000Z", [cell]), version: 1 };
+    expect(() => mergeRecords([fileOf("2026-10-04T00:00:00.000Z", [cell]), old], [])).toThrow(
+      /version 1/,
+    );
+  });
+
+  it("refuses to merge records of two seeds", () => {
+    const cell = cellOf("hard", 981);
+    const other = { ...fileOf("2026-10-04T00:00:00.000Z", [cell]), seed: "5" };
+    expect(() => mergeRecords([fileOf("2026-10-04T00:00:00.000Z", [cell]), other], [])).toThrow(
+      /seed 5/,
+    );
+  });
+
+  it("summarises τ′'s percentiles where the budget binds", () => {
+    const limited = cellOf("hard", 40);
+    const [coast] = limited.segments;
+    expect(coast?.tauPrimePxMax ?? 0).toBeGreaterThan(1);
+    expect(budgetRowOf(demandSummary([limited], "2026-10-04T00:00:00Z"))).toContain(
+      `| ${(coast?.tauPrimePxP50 ?? NaN).toFixed(2)} / ${(coast?.tauPrimePxP95 ?? NaN).toFixed(2)} / `,
+    );
+  });
+
+  it("summarises no τ′ where the budget never binds", () => {
+    expect(budgetRowOf(demandSummary([cellOf("hard", 981)], "2026-10-04T00:00:00Z"))).toMatch(
+      /^\| orbit coast \| — \| — \| — \| — \|/,
+    );
+  });
+
+  it("summarises the coarse stand-ins' share of frames and their returns'", () => {
+    const cell = cellOf("hard", 981);
+    const [coast] = cell.segments;
+    expect(budgetRowOf(demandSummary([cell], "2026-10-04T00:00:00Z"))).toContain(
+      `| ${(100 * (coast?.coarseStandInFraction ?? NaN)).toFixed(1)}% (${(100 * (coast?.coarseReturnFraction ?? NaN)).toFixed(1)}%) |`,
+    );
+  });
+
+  it("lists the record's notes", () => {
+    expect(demandSummary([], "2026-10-04T00:00:00Z", ["a note"])).toContain("- a note");
+  });
+});
+
+describe("the forced region's bakes", () => {
+  it("are part of the demand in high's approach, where the craft descends", () => {
+    const [high] = SETTING_VIEWS;
+    const window = testWindows(PROFILE).find((w) => w.segment === "approach and flare");
+    if (high === undefined || window === undefined) {
+      throw new Error("no approach window");
+    }
+    const [figures] = runCell({
+      rule: "calibrated",
+      ridges: "off",
+      settingView: high,
+      source: SOURCE,
+      rateHz: 64,
+      fromS: window.fromS,
+      toS: window.toS,
+      measureFromS: window.measureFromS,
+      nowMs: () => 0,
+      deadlineMs: Infinity,
+    }).segments;
+    expect(figures?.forcedDemandPerS).toBeGreaterThan(0);
+    expect(figures?.forcedDemandPerS).toBeLessThanOrEqual(figures?.demandPerS ?? 0);
   });
 });
 

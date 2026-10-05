@@ -1,10 +1,11 @@
 //! One cell of the census: its bright systems, each star placed and measured at its retarded time
 //! (rendering plan R06, R06.T8.b; Design note 10).
 //!
-//! For each record the mass skip keeps ([`SkyCellCache::bright_subset`] above the cell's floor,
-//! [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; a member of the
-//! galactic centre, whose orbit is not built ([`TraceMotionError`]), is tallied and left out before
-//! anything else is built; the system is found at its retarded time ([`retarded`] on
+//! For each record the mass skip keeps
+//! ([`SkyCellCache::bright_subset`](super::cache::SkyCellCache::bright_subset) above the cell's
+//! floor, [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; a member of
+//! the galactic centre, whose orbit is not built ([`TraceMotionError`]), is tallied and left out
+//! before anything else is built; the system is found at its retarded time ([`retarded`] on
 //! [`Drift::of_record`]); its light is bounded by [`flux_bound`]; and only if the bound can pass the
 //! cut is the system generated ([`SystemStars::generate`]), each star read from the pair-evolved
 //! [`SystemStars::state_at`]'s stars at the emitted time, placed by [`star_positions_at`] about the
@@ -14,7 +15,11 @@
 //! The flux bound reads the envelope rather than the primary's brief: the brief is the primary's
 //! single-star model, tested over the clock window only (ask A1), so for any star farther than
 //! 1,000 ly it would cost a full generation; the envelope bound is cheaper and still a bound, so
-//! the skip never changes an answer (R06's Risks).
+//! the skip never changes an answer (R06's Risks). Plan 11's pairs can merge two stars into one
+//! of up to twice the primary's mass, or feed one, and a main-sequence merger or accretor then
+//! shines as a younger star of its new mass. So a grid system's bound and the cell's floor both
+//! read the envelope at [`max_star_mass`] of the primary over ages from zero (R06.T16.b; see
+//! [`flux_bound`]).
 //!
 //! A star of a multiple system is not at its system's barycentre: plan 11 keeps every apocentre
 //! inside half the system's tidal radius ([`TIDAL_CUT_SHARE`]), which near the Sun is some light
@@ -351,9 +356,10 @@ fn offset_bound_at(tidal_radius_ly: f64) -> f64 {
     f64::from(GRID_STAR_BOUND - 1) * TIDAL_CUT_SHARE * tidal_radius_ly
 }
 
-/// The farthest any star of `record`'s system can lie from its barycentre (see
-/// [`offset_bound_at`]), at the tidal radius of [`GRID_STAR_BOUND`] × m₁ at its epoch position (no
-/// companion outweighs its primary): zero for a forced single.
+/// The farthest any star of `record`'s system can lie from its barycentre, at the tidal radius of
+/// [`GRID_STAR_BOUND`] × m₁ at its epoch position (no companion outweighs its primary): the depth
+/// of the deepest hierarchy ([`GRID_STAR_BOUND`] − 1 orbits) times the tidal cut every apocentre
+/// lies inside ([`TIDAL_CUT_SHARE`]) times that radius, and zero for a forced single.
 #[must_use]
 pub fn star_offset_bound(galaxy: &Galaxy, record: &SystemRecord) -> LightYears {
     if star_bound(record) == 1 {
@@ -387,12 +393,26 @@ pub fn cell_offset_bound(galaxy: &Galaxy, key: CellKey) -> LightYears {
     LightYears::new(offset_bound_at(LightYears::from(radius).value()))
 }
 
-/// The bound on a system's V light, as an absolute magnitude, before its stars are generated:
-/// n × the envelope's flux at [`max_star_mass`] of the primary and the system's age at `emitted`
-/// (decided 2026-10-02, item 2, for multiple systems; for a single star, as a forced single is,
-/// n is 1; n is [`GRID_STAR_BOUND`] for a grid system). `None` where no star of the system can
-/// shine in V, the system is not yet born, or its record has no density component (one not placed
-/// by the grid, which [`census_record`] then generates unbounded).
+/// The bound on a system's V light, as an absolute magnitude, before its stars are generated
+/// (decided 2026-10-02, item 2; R06.T16.b).
+///
+/// - **A grid system of stars**, whose count is not known before it is generated and whose pairs
+///   may have interacted: n × the envelope's flux, n being [`GRID_STAR_BOUND`], at
+///   [`max_star_mass`] of the primary (twice its mass, a merger's or an accretor's) and over
+///   every age from zero to the system's at `emitted`. A main-sequence merger takes BSE's
+///   fractional age at the pair's mass (eq. 80), and a main-sequence accretor keeps or lowers its
+///   fractional age at its new mass (Hurley, Tout and Pols 2002, MNRAS 329, 897, §2.6.6), so each
+///   shines as a younger star of its new mass. A donor keeps its fractional age at a lower mass,
+///   which can put its own track's age past the system's, and an evolved accretor keeps its
+///   track's luminosity with its radius from its new mass (Hurley, Pols and Tout 2000, §7.1).
+///   Neither is taken to be brighter in V than a single star of at most 2 m₁ at an age within the
+///   system's; the slow test `envelope_bounds_pair_states` checks it.
+/// - **A single star**, as a forced single is (a free-floating brown dwarf, never in a pair): the
+///   envelope's flux at the primary's own mass and age.
+///
+/// `None` where no star of the system can shine in V, the system is not yet born, or its record
+/// has no density component (one not placed by the grid, which [`census_record`] then generates
+/// unbounded).
 #[must_use]
 pub fn flux_bound(
     envelope: &BrightnessEnvelope,
@@ -405,12 +425,13 @@ pub fn flux_bound(
     }
     let component = record.component()?;
     let n = star_bound(record);
-    let brightest = envelope.brightest(
-        record.layer(),
-        component,
-        max_star_mass(record.primary_initial_mass()),
-        (age, age),
-    )?;
+    let m1 = record.primary_initial_mass();
+    let (mass, ages) = if n == 1 {
+        (m1, (age, age))
+    } else {
+        (max_star_mass(m1), (Years::ZERO, age))
+    };
+    let brightest = envelope.brightest(record.layer(), component, mass, ages)?;
     Some(Magnitudes::new(
         brightest.value() - 2.5 * math::log10(f64::from(n)),
     ))
@@ -419,8 +440,10 @@ pub fn flux_bound(
 /// The mass floor of `key` for `query`: the least primary mass whose system could hold a star
 /// listable at the cell's least distance from the observer, its records' motion over the light's
 /// age and its stars' offsets from their barycentres allowed for, at the grid's [`flux_bound`] of
-/// [`GRID_STAR_BOUND`] stars. The envelope is the same for every component, so the galaxy's first
-/// is asked.
+/// [`GRID_STAR_BOUND`] stars. Like that bound, it reads the envelope at [`max_star_mass`] of each
+/// primary, twice its mass (through [`BrightnessEnvelope::mass_floor`]), over every age, so a
+/// primary is kept whenever a merger or an accretor it could make might be listed. The envelope
+/// is the same for every component, so the galaxy's first is asked.
 ///
 /// # Panics
 ///
@@ -1110,15 +1133,16 @@ mod tests {
                 .flatten();
             assert_eq!(flux_bound(envelope, record, t), expected, "{record:?}");
         }
-        // A grid system takes the bound of GRID_STAR_BOUND stars, 2.5 log₁₀ 5 brighter.
+        // A grid system takes the bound of GRID_STAR_BOUND stars, 2.5 log₁₀ 5 brighter than one
+        // star of twice its primary's mass at any age up to its own (R06.T16.b).
         let star = records_near(Layer::C, SUN, 1)[0];
         let age = star.age_at(UniverseTime::EPOCH);
         let one = envelope
             .brightest(
                 star.layer(),
                 star.component().expect("a grid record"),
-                star.primary_initial_mass(),
-                (age, age),
+                max_star_mass(star.primary_initial_mass()),
+                (Years::ZERO, age),
             )
             .expect("a C star shines");
         let bound = flux_bound(envelope, &star, UniverseTime::EPOCH).expect("it shines");
@@ -1211,6 +1235,11 @@ mod tests {
 
     /// The census of a cell, skips and all, equals every record of the cell measured with no
     /// skip: the floor and the flux bound never change an answer.
+    ///
+    /// Since R06.T16.b's bound, at twice the primary's mass over ages from zero, no stellar
+    /// record of the cells at 0, 1 and 3 cells out is skipped, so the brown dwarfs' cells there
+    /// (a forced single's bound) and a block of A's 288–320 ly out (the floor, and a multiple
+    /// system's bound) are censused too, where skips remain to be checked.
     #[test]
     fn a_cells_census_equals_its_unskipped_records() {
         let galaxy = milky_way_galaxy();
@@ -1221,12 +1250,28 @@ mod tests {
             .expect("a valid query");
         let mut ctx = context();
         let mut cells = Vec::new();
-        for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+        for layer in [
+            Layer::A,
+            Layer::B,
+            Layer::C,
+            Layer::D,
+            Layer::E,
+            Layer::BrownDwarf,
+        ] {
             let size = f64::from(layer.cell_size_ly());
             for step in [0.0, 1.0, 3.0] {
                 let p = [SUN[0] + step * size, SUN[1], SUN[2]];
                 cells.push(CellKey::containing(layer, &position(p)).expect("in the cube"));
             }
+        }
+        // A's cells 36–40 cells (288–320 ly) out along x, five rows of them along y.
+        for (x, y) in (36..=40).flat_map(|x| (-2..=2).map(move |y| (x, y))) {
+            let p = [
+                SUN[0] + f64::from(x) * 8.0,
+                SUN[1] + f64::from(y) * 8.0,
+                SUN[2],
+            ];
+            cells.push(CellKey::containing(Layer::A, &position(p)).expect("in the cube"));
         }
         let (mut listed, mut skipped) = (0_usize, 0_u64);
         let mut records = Vec::new();

@@ -1,5 +1,13 @@
 # Descent demand record, 2026-10-03
 
+**Superseded** by [`2026-10-05-demand-calibrated.md`](2026-10-05-demand-calibrated.md) (record
+version 2, R05.T13.a's F4 of decision-r05-high-bound.md). This record was flown before the level
+orbit coast (af69a9e) and before the cache stopped evicting the baked patches selection hides (F3,
+cc96486):
+
+- every orbit-coast row is stale;
+- every descent-arc row is stale too, since the arc was flown up to 1.05 km lower near its start.
+
 Seed 7. Fixed-step runs of the scripted descent through `selectPatches` and a
 simulated cache (R05.T13.a): patches selected, measured demand (first-time-selected keys a
 second), the per-level prediction D, the share of frames `limited`, and the selection time.

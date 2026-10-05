@@ -11,6 +11,7 @@ import {
   settle,
   STAGE_HEIGHT_PX,
   STAGE_WIDTH_PX,
+  submittedBy,
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
@@ -23,6 +24,8 @@ import type {
   ViewSize,
   WgslMaterialSpec,
 } from "../../view/engine/types";
+import { SKY_PASS_LABEL } from "../../view/photoreal/passes";
+import { HISTOGRAM_PASS } from "../../view/post/histogram";
 import { TONEMAP_PASS } from "../../view/post/tonemap";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import type { ViewEngineSource } from "./useViewEngine";
@@ -87,8 +90,11 @@ function controlsButton(name: string): HTMLElement {
   return within(screen.getByRole("group", { name: "CONTROLS" })).getByRole("button", { name });
 }
 
-/** Switches the primary to the photorealistic style by its key and lets its pipelines be made. */
-async function photorealPrimary({ user, advance }: Setup): Promise<void> {
+/**
+ * Switches the `CONTROLS` view, the primary until another is chosen, to the photorealistic style by
+ * its key and lets its pipelines be made.
+ */
+async function photorealControls({ user, advance }: Setup): Promise<void> {
   await user.keyboard("4");
   advance(100);
   await settle();
@@ -136,6 +142,49 @@ function controlsView(): string {
       .getAllByRole("button")
       .find((button) => button.getAttribute("aria-pressed") === "true")?.textContent ?? ""
   );
+}
+
+/**
+ * A source of the timed engines whose material creations refuse, as during a device loss, while
+ * `lose(true)` holds.
+ */
+function lossySource(fake: ReturnType<typeof timedEngineSource>): {
+  readonly source: ViewEngineSource;
+  readonly lose: (lost: boolean) => void;
+} {
+  let lost = false;
+  return {
+    source: {
+      ...fake.source,
+      load: async (outcome, status) => {
+        const engine = await fake.source.load(outcome, status);
+        const createMaterial = engine.createMaterial.bind(engine);
+        return Object.assign(engine, {
+          createMaterial: (spec: WgslMaterialSpec): MaterialHandle => {
+            if (lost) {
+              throw new EngineUnavailable("createMaterial");
+            }
+            return createMaterial(spec);
+          },
+        });
+      },
+    },
+    lose: (next) => {
+      lost = next;
+    },
+  };
+}
+
+/**
+ * The passes of the last frame the view `name` submitted, from its scene target's sky pass on:
+ * each pass's label and its draws' materials.
+ */
+function lastFramePasses(view: Setup, name: string): Array<[string, ReadonlyArray<string>]> {
+  const passes = view.fake.submissions.filter((each) => submittedBy(each) === name);
+  const start = passes.findLastIndex((each) => each.label === SKY_PASS_LABEL);
+  return passes
+    .slice(Math.max(0, start))
+    .map((each): [string, ReadonlyArray<string>] => [each.label, each.materials]);
 }
 
 /** Each canvas's accessible name, the primary's first. */
@@ -192,7 +241,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
 
   it("holds a second view's photorealistic style back on low with its reason", async () => {
     const view = await setup({ store: await nominalStore(), setting: "low" });
-    await photorealPrimary(view);
+    await photorealControls(view);
     await openInstrument(view, "INSTRUMENT 1");
     await view.user.click(controlsButton("INSTRUMENT 1"));
     view.advance(100);
@@ -205,7 +254,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
 
   it("refuses a second view's key 4 on low, the CONTROLS instrument staying a wireframe", async () => {
     const view = await setup({ store: await nominalStore(), setting: "low" });
-    await photorealPrimary(view);
+    await photorealControls(view);
     await openInstrument(view, "INSTRUMENT 1");
     await view.user.click(controlsButton("INSTRUMENT 1"));
     view.advance(100);
@@ -311,41 +360,27 @@ describe("VIEW's instrument views (R07.T19)", () => {
 
   it("draws an instrument opened during a device loss once the engine is restored", async () => {
     const fake = timedEngineSource();
-    let lost = false;
-    const source: ViewEngineSource = {
-      ...fake.source,
-      load: async (outcome, status) => {
-        const engine = await fake.source.load(outcome, status);
-        const createMaterial = engine.createMaterial.bind(engine);
-        return Object.assign(engine, {
-          createMaterial: (spec: WgslMaterialSpec): MaterialHandle => {
-            if (lost) {
-              throw new EngineUnavailable("createMaterial");
-            }
-            return createMaterial(spec);
-          },
-        });
-      },
-    };
+    const lossy = lossySource(fake);
     const view = renderViewDisplay({
       store: new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
-      source,
+      source: lossy.source,
       engines: fake.engines,
     });
     await settle();
     view.advance(100);
     // The device is lost as the instrument opens: its view is made, its renderers are not.
-    lost = true;
+    lossy.lose(true);
     await view.user.click(
       within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
         name: "OPEN",
       }),
     );
     view.advance(100);
-    lost = false;
+    lossy.lose(false);
     act(() => {
       fake.engines.at(-1)?.raiseRestored();
     });
+    await settle();
     view.advance(300);
     const instruments = view.views().filter((each) => each.name === "instrument-1");
     expect([instruments.length, (instruments[0]?.frames.length ?? 0) > 0]).toEqual([1, true]);
@@ -404,7 +439,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
 describe("VIEW's budgets against a fake engine (R07.T19)", () => {
   it("sizes a photorealistic primary's scene target from its controller's scale once an instrument opens", async () => {
     const view = await setup({ store: await nominalStore(["timestamp-query"]) });
-    await photorealPrimary(view);
+    await photorealControls(view);
     const before = sceneTargetSize(view);
     await openInstrument(view, "INSTRUMENT 1");
     // Every frame twice its budget: the controller lowers the scale.
@@ -419,7 +454,7 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
 
   it("returns the scene target to the bounds' max once the instruments close", async () => {
     const view = await setup({ store: await nominalStore(["timestamp-query"]) });
-    await photorealPrimary(view);
+    await photorealControls(view);
     await openInstrument(view, "INSTRUMENT 1");
     runFrames(view, 40, () => 5);
     const lowered = sceneTargetSize(view);
@@ -430,7 +465,7 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
 
   it("counts an instrument's pass times in the primary's frame", async () => {
     const view = await setup({ store: await nominalStore(["timestamp-query"]) });
-    await photorealPrimary(view);
+    await photorealControls(view);
     await openInstrument(view, "INSTRUMENT 1");
     // The primary's own passes are cheap; the instrument's alone take the frame over its budget.
     runFrames(view, 40, (name) => (name.startsWith("instrument-") ? 30 : 0.01));
@@ -439,7 +474,7 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
 
   it("feeds the controller the frame interval, not pass times, while the timer is absent", async () => {
     const view = await setup({ store: await nominalStore() });
-    await photorealPrimary(view);
+    await photorealControls(view);
     await openInstrument(view, "INSTRUMENT 1");
     // Times arriving under an absent timer are not read; the fake frames meet every vsync.
     runFrames(view, 40, () => 30);
@@ -459,7 +494,7 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
 
   it("draws a 30 Hz photorealistic primary in every second animation frame on low", async () => {
     const view = await setup({ store: await nominalStore(), setting: "low" });
-    await photorealPrimary(view);
+    await photorealControls(view);
     const tonemapped = (): number =>
       view
         .views()
@@ -468,6 +503,90 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
     const before = tonemapped();
     view.advance(16 * 20);
     expect(tonemapped() - before).toBe(10);
+  });
+});
+
+describe("VIEW's one frame path (R07.T19.c)", () => {
+  it("draws an instrument's frame in the primary's passes, but for the histogram", async () => {
+    const view = await setup({ store: await nominalStore() });
+    // Both views at CHASE, photorealistic, on stages of one size.
+    await view.user.keyboard("2");
+    await photorealControls(view);
+    await openInstrument(view, "INSTRUMENT 1");
+    await view.user.click(controlsButton("INSTRUMENT 1"));
+    await photorealControls(view);
+    // The histograms in flight are read back, so that the primary's next frames take theirs.
+    await settle();
+    view.advance(16 * 2);
+    const primary = lastFramePasses(view, "view");
+    expect([
+      primary.some(([label]) => label === HISTOGRAM_PASS),
+      lastFramePasses(view, "instrument-1"),
+    ]).toEqual([true, primary.filter(([label]) => label !== HISTOGRAM_PASS)]);
+  });
+
+  it("takes no histogram on a photorealistic instrument", async () => {
+    const view = await setup({ store: await nominalStore() });
+    await openInstrument(view, "INSTRUMENT 1");
+    await view.user.click(controlsButton("INSTRUMENT 1"));
+    await photorealControls(view);
+    view.advance(16 * 10);
+    const labels = new Set(
+      view.fake.submissions
+        .filter((each) => submittedBy(each) === "instrument-1")
+        .map((each) => each.label),
+    );
+    expect([labels.has(TONEMAP_PASS), labels.has(HISTOGRAM_PASS)]).toEqual([true, false]);
+  });
+
+  it("disposes of a primary's view waiting for a restore when its stage goes", async () => {
+    const fake = timedEngineSource();
+    const lossy = lossySource(fake);
+    const view = renderViewDisplay({
+      store: new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+      source: lossy.source,
+      engines: fake.engines,
+    });
+    await settle();
+    view.advance(100);
+    lossy.lose(true);
+    await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    view.advance(100);
+    const waiting = view.views().filter((each) => each.name === "view")[1];
+    // Another scene remounts the stage before the restore.
+    await view.user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
+    view.advance(100);
+    expect(waiting?.disposed).toBe(true);
+  });
+
+  it("makes the primary's renderers at the restore where its stage mounts during a device loss", async () => {
+    const fake = timedEngineSource();
+    const lossy = lossySource(fake);
+    const view = renderViewDisplay({
+      store: new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+      source: lossy.source,
+      engines: fake.engines,
+    });
+    await settle();
+    view.advance(100);
+    // A new scene remounts the stage while the device is lost: its view is made, its renderers
+    // are not.
+    lossy.lose(true);
+    await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    view.advance(100);
+    const remounted = view.views().filter((each) => each.name === "view");
+    const waiting = remounted[1]?.frames.length;
+    lossy.lose(false);
+    act(() => {
+      fake.engines.at(-1)?.raiseRestored();
+    });
+    await settle();
+    view.advance(300);
+    expect([remounted.length, waiting, (remounted[1]?.frames.length ?? 0) > 0]).toEqual([
+      2,
+      0,
+      true,
+    ]);
   });
 });
 

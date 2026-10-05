@@ -1,5 +1,6 @@
-import type { BodyIdHex, UniverseIdHex, UniverseTime } from "@hyperion/protocol";
+import type { UniverseIdHex, UniverseTime } from "@hyperion/protocol";
 import {
+  type FocusEvent,
   type KeyboardEvent,
   memo,
   useCallback,
@@ -12,6 +13,7 @@ import {
   useState,
 } from "react";
 
+import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { BodyDistanceUnit } from "../../lib/format";
@@ -52,9 +54,8 @@ import {
   type GraphicsStatus,
   useGraphicsStatus,
 } from "../../view/engine/status";
-import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
+import type { RenderView } from "../../view/engine/types";
 import {
-  exposureScale,
   controlEv100,
   DEFAULT_EXPOSURE,
   type ExposureControl,
@@ -66,23 +67,14 @@ import {
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
 import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
-import type { BakedCube } from "../../view/sky/bake";
-import { skyCubeCacheOf } from "../../view/sky/cache";
-import { SkyCubeLayer } from "../../view/sky/cubeLayer";
-import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
-import { WireframeRenderer } from "../../view/wireframe/submit";
-import type { LitRegime } from "../../view/bodies/regime";
+import type { DrawAnchor } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
-import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
-import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
-import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type ExposureReading } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
-import { BandLayer } from "../../view/sky/band";
-import { HostDiscLayer } from "../../view/sky/disc";
-import { CameraControls } from "./CameraControls";
-import { litLabelsOf, photorealFrame } from "./photorealFrame";
+import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
+import { litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import { availabilityOf, type StyleRefusals, styleRefusals, withPermission } from "./styleRefusals";
 import { InstrumentControls } from "./InstrumentControls";
@@ -90,8 +82,8 @@ import { InstrumentsPanel } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
 import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
 import { PRIMARY_NAME, PRIMARY_VIEW_ID, PRIMARY_VIEW_NAME } from "./viewNames";
-import { ExposurePanel } from "./ExposurePanel";
-import { MeterControl } from "./MeterControl";
+import { AUTO_NOT_AVAILABLE, ExposurePanel } from "./ExposurePanel";
+import { MeterControl, meterLabel } from "./MeterControl";
 import {
   cameraAnnunciation,
   serverSceneStanding,
@@ -99,8 +91,8 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
-import { bakeInputOf, type DrawnSky, useViewSky } from "./useViewSky";
-import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
+import { type DrawnSky, useViewSky } from "./useViewSky";
+import type { QualitySetting } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -108,14 +100,23 @@ import {
   type ViewEngineState,
 } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
-import { skySprites } from "./viewFrameDrawer";
+import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
+  DEFAULT_FOLD,
+  FOLD_BUTTONS,
+  type FoldPanel,
+  type SideFolds,
+  toggledFold,
+  viewLayout,
+} from "./viewLayout";
+import {
   commandRun,
+  EASED_MOVES_STATEMENT,
   type LabelLine,
   photorealStatements,
   WIREFRAME_ONLY,
@@ -124,6 +125,7 @@ import {
   type MarkRow,
   markRows,
   PRESET_NAMES,
+  rangesFromCamera,
   runPose,
   SCENE_OPTIONS,
   type SceneOption,
@@ -167,22 +169,26 @@ const INSTRUMENT_INSET_REM = 0.5;
 const PRIMARY_LABEL_MIN_REM = 14;
 
 /**
- * Whether the stage has room for one more instrument slot below the `open` ones, beside the
+ * Whether the stage has room for one more instrument slot beside the `open` ones, beside the
  * primary's label block at its least width; `true` before the stage is laid out.
  *
- * @param column - The open slots' column as laid out, whose height a new slot is taken to match
- *   (a slot's label block, not its canvas, sets its height), or `null` before it is measured.
+ * @remarks
+ * The slots stand at the stage's top right and its foot (decision-r07-t19-layout, item 3), so the
+ * room is the stage's height less the open slots' and the insets about them; a new slot is taken
+ * to be as tall as those open (a slot's label block, not its canvas, sets its height).
+ *
+ * @param open - The open slots' panels as laid out, each `null` before it is measured.
  */
-function roomForSlot(stage: ElementSize | null, column: ElementSize | null, open: number): boolean {
+function roomForSlot(stage: ElementSize | null, open: ReadonlyArray<ElementSize | null>): boolean {
   if (stage === null || stage.remPx <= 0) {
     return true;
   }
   const inset = INSTRUMENT_INSET_REM * stage.remPx;
-  const usedPx = open === 0 || column === null ? 0 : column.heightPx + inset;
+  const defaultPx = INSTRUMENT_SLOT_REM.heightRem * stage.remPx;
+  const heightsPx = open.map((panel) => panel?.heightPx ?? defaultPx);
+  const usedPx = heightsPx.reduce((sum, heightPx) => sum + heightPx + inset, 0);
   const slotPx =
-    open === 0 || column === null
-      ? INSTRUMENT_SLOT_REM.heightRem * stage.remPx
-      : column.heightPx / open;
+    heightsPx.length === 0 ? defaultPx : (usedPx - inset * heightsPx.length) / heightsPx.length;
   const widthRem = stage.widthPx / stage.remPx;
   return (
     inset + usedPx + slotPx + inset <= stage.heightPx &&
@@ -208,6 +214,18 @@ const NO_STARS: ReadonlyArray<ViewStar> = [];
 
 /** The pointer's reach to a mark, rem: half the guide's 2 rem target, as plan 05's pick has it. */
 const PICK_REM = 1;
+
+/** The camera presets, every one of which a scene with an own ship offers. */
+const PRESET_COUNT = Object.keys(PRESET_NAMES).length;
+
+/** The folding panels, in the side column's order. */
+const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
+  "instruments",
+  "camera",
+  "style",
+  "exposure",
+  "meter",
+];
 
 /** The engine's standing while it is not ready: being made, until an adapter answers. */
 const ACQUIRING: { readonly text: string; readonly standing: StatusStanding } = {
@@ -364,14 +382,32 @@ function exposureShownChanged(shown: ExposureControl, next: ExposureControl): bo
   );
 }
 
-/** R06's layers the photorealistic frame draws through: the band and the host discs. */
-interface SkyLayers {
-  readonly band: BandLayer;
-  readonly discs: HostDiscLayer;
-}
-
-function skyLayersOf(engine: RenderEngine): SkyLayers {
-  return { band: new BandLayer(engine), discs: new HostDiscLayer(engine) };
+/**
+ * Moves each mark's label with its mark, at the frame rate; its text changes at 4 Hz (RM1 m10). A
+ * label whose mark this frame did not draw is hidden until the next readout removes it.
+ *
+ * @param labels - The marks' labels by their target's key.
+ */
+function placeMarkLabels(
+  labels: ReadonlyMap<string, HTMLElement>,
+  anchors: ReadonlyArray<DrawAnchor>,
+  devicePixelRatio: number,
+): void {
+  const placed = new Set<string>();
+  for (const anchor of anchors) {
+    const key = targetKey(anchor.target);
+    const node = anchor.label === null ? undefined : labels.get(key);
+    if (node !== undefined) {
+      node.style.transform = markLabelTransform(anchor, devicePixelRatio);
+      node.style.visibility = "";
+      placed.add(key);
+    }
+  }
+  for (const [key, node] of labels) {
+    if (!placed.has(key)) {
+      node.style.visibility = "hidden";
+    }
+  }
 }
 
 /** A draw-list anchor as plan 05's `pick` reads it, its target's key its ID. */
@@ -446,8 +482,6 @@ function ViewStage({
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
   const { ref: stageRef, size } = useElementSize();
-  // The open instrument slots' column, by which the room for one more is reckoned (R07.T19).
-  const { ref: slotsRef, size: slotsSize } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
   const [viewRefused, setViewRefused] = useState(false);
@@ -615,10 +649,12 @@ function ViewStage({
       setViewRefused(true);
       return undefined;
     }
-    const renderer = new WireframeRenderer(engine);
-    // The photorealistic style (R07.T8.a): its frame, and R06's band and host-disc layers, made
-    // again after a device loss as every handle is.
-    const photoreal = new PhotorealRenderer(engine, VIEW_NAME);
+    // The view's frames, in either style, through the frame path every view draws by (R07.T19.c),
+    // made at the restore where the engine has no device as the stage mounts.
+    let drawer: ViewFrameDrawer | null = null;
+    const releaseDrawer = makeViewFrameDrawer(engine, view, VIEW_NAME, (made) => {
+      drawer = made;
+    });
     // Each of the primary's frames with every view's GPU time in it, and its internal scale from
     // its budget and resolution controller (R07.T19; decision-r07-t18, item 1).
     const primaryTimes = new PrimaryFrameTimes(engine.passTimesFrame);
@@ -632,52 +668,7 @@ function ViewStage({
     // Animation frames since the loop started, by which each view's rate is paced.
     let animationFrame = -1;
     let primaryMs: number | null = null;
-    let layers = skyLayersOf(engine);
-    let bandFor: DrawnSky | null = null;
-    let regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
     let drawnStyle: RenderStyle = "wireframe";
-    let frameFailed = false;
-    const unsubscribeLayers = engine.onRestored(() => {
-      layers = skyLayersOf(engine);
-      bandFor = null;
-      frameFailed = false;
-    });
-    // The sky's baked cube (R06.T13.g, T14): shared through the device's cache, baked once per sky
-    // and set of baked stars, drawn every frame; a new sky, asked as the parallax rule says,
-    // brings a new cube.
-    const cubes = new SkyCubeLayer(engine);
-    const cache = skyCubeCacheOf(engine);
-    // A sky whose bake failed is not baked again until another sky or a restore.
-    let failedFor: DrawnSky | null = null;
-    const unsubscribeRestored = engine.onRestored(() => {
-      failedFor = null;
-    });
-    const cubeFor = (sky: DrawnSky | null): BakedCube | null => {
-      if (sky === null || sky === failedFor) {
-        cache.release(VIEW_NAME);
-        return null;
-      }
-      try {
-        return cache.acquire(VIEW_NAME, {
-          stars: sky.model.stars,
-          baked: sky.selection.baked,
-          // Read at the bake: a restore may have brought a device without float32-blendable.
-          bakeInput: () =>
-            bakeInputOf(
-              sky,
-              engine.capabilities.float32Blendable
-                ? SETTINGS.high.sky.faceSizePx
-                : SETTINGS.low.sky.faceSizePx,
-            ),
-        });
-      } catch (error: unknown) {
-        // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
-        console.error("the sky's cube could not be baked:", error);
-        failedFor = sky;
-        cache.release(VIEW_NAME);
-        return null;
-      }
-    };
     // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
     // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
     // applied to it when the display's control changes to one the controller did not publish.
@@ -693,7 +684,6 @@ function ViewStage({
     let givenExposure = seenExposure;
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
-    let sized: ViewSize | null = null;
     let anchors: ReadonlyArray<DrawAnchor> = [];
     let frame = 0;
     const tick = (nowMs: number): void => {
@@ -738,115 +728,37 @@ function ViewStage({
       }
       // Last frame's histogram, if one arrived, under the exposure it was taken with; none while
       // the view draws its wireframe, which then times the meter out.
-      const histogram = photoreal.takeHistogram();
+      const histogram = drawer?.takeHistogram();
       const reading = auto.step(drawnStyle === "photorealistic" ? histogram : undefined, dtS);
       if (run.source.kind === "server" && current !== null) {
         current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
       }
-      if (inputs.size !== null && inputs.tokens !== null && inputs.size.widthPx > 0) {
-        const ratio = inputs.size.devicePixelRatio;
-        const viewport = {
-          widthPx: Math.max(1, Math.round(inputs.size.widthPx * ratio)),
-          heightPx: Math.max(1, Math.round(inputs.size.heightPx * ratio)),
-        };
-        if (sized?.widthPx !== viewport.widthPx || sized.heightPx !== viewport.heightPx) {
-          view.resize(viewport);
-          sized = viewport;
-        }
-        const camera = { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
-        const scene = { ...run.scene, stars: inputs.stars };
-        const list = buildWireframeDrawList(scene, camera, viewport, inputs.tokens, {
-          lowSetting: false,
-          ev100: reading.ev100,
-          selection: inputs.selection,
-          destination: null,
-          remPx: inputs.size.remPx * ratio,
-          skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
-        });
-        anchors = list.anchors;
-        const cube = cubeFor(inputs.sky);
-        const exposed = exposureScale(reading.ev100);
-        let drawn = false;
-        if (run.camera.style === "photorealistic" && photoreal.status === "failed") {
+      if (drawer !== null) {
+        if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
           // Its pipelines could not be made: the view returns to the wireframe, and the control
           // holds the style back with the reason.
           runRef.current = { ...run, camera: { ...run.camera, style: "wireframe" } };
-        } else if (run.camera.style === "photorealistic" && inputs.availability.photorealistic) {
-          try {
-            if (inputs.sky !== null && inputs.sky !== bandFor) {
-              layers.band.update(
-                inputs.sky.model.band,
-                inputs.sky.model.response.band.face_texels,
-                inputs.sky.bandIlluminanceLx,
-              );
-              bandFor = inputs.sky;
-            }
-            // The scene target at the render resolution times the budget's or controller's scale.
-            const internal = internalViewport(viewport, renderScale);
-            const plan = photoreal.render(
-              view,
-              photorealFrame({
-                run,
-                pose: camera.pose,
-                viewport: internal,
-                setting: "high",
-                exposureScale: exposed,
-                list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
-                sky: inputs.sky,
-                band: inputs.sky === null ? null : layers.band,
-                discs: layers.discs,
-                cube: cube === null ? null : cubes.draw(cube, "hdr", exposed),
-                previousRegimes: regimes,
-                meter: auto.meter,
-                // The symbology over the image: the wireframe's marks, its sprites in the image.
-                overlay: {
-                  ...renderer.frame({ ...list, sprites: [] }, camera, viewport),
-                  label: PHOTOREAL_PASS_LABELS.symbology,
-                },
-              }),
-            );
-            if (plan !== null) {
-              regimes = plan.regimes;
-              drawn = true;
-              frameFailed = false;
-            }
-          } catch (error: unknown) {
-            // A creation refused between a device loss and its restore: this frame draws the
-            // wireframe, and the next tries again; said once until a frame draws or a restore.
-            if (!frameFailed) {
-              console.error("the photorealistic frame could not be drawn:", error);
-              frameFailed = true;
-            }
-            drawn = false;
-          }
         }
-        // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
-        drawnStyle = drawn ? "photorealistic" : "wireframe";
-        if (!drawn) {
-          renderer.render(
-            view,
-            list,
-            camera,
-            viewport,
-            cube === null ? [] : [cubes.draw(cube, "display", exposed)],
-          );
-        }
-        // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10). A
-        // label whose mark this frame did not draw is hidden until the next readout removes it.
-        const placed = new Set<string>();
-        for (const anchor of anchors) {
-          const key = targetKey(anchor.target);
-          const node = anchor.label === null ? undefined : labelsRef.current.get(key);
-          if (node !== undefined) {
-            node.style.transform = markLabelTransform(anchor, ratio);
-            node.style.visibility = "";
-            placed.add(key);
-          }
-        }
-        for (const [key, node] of labelsRef.current) {
-          if (!placed.has(key)) {
-            node.style.visibility = "hidden";
-          }
+        const drawn = drawer.draw({
+          run,
+          size: inputs.size,
+          tokens: inputs.tokens,
+          exposure: reading.control,
+          stars: inputs.stars,
+          sky: inputs.sky,
+          selection: inputs.selection,
+          style: primaryBudget.style,
+          // The scene target at the render resolution times the budget's or controller's scale.
+          renderScale,
+          availability: inputs.availability,
+          // The exposure's source: its frames take the histogram its meter reads (Design note 11).
+          meter: auto.meter,
+        });
+        if (drawn !== null && inputs.size !== null) {
+          anchors = drawn.anchors;
+          // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
+          drawnStyle = drawn.drawnStyle;
+          placeMarkLabels(labelsRef.current, anchors, inputs.size.devicePixelRatio);
         }
       }
       // The readouts change at 4 Hz, every view's in the same frame, so React renders them once.
@@ -875,7 +787,7 @@ function ViewStage({
           run,
           anchors,
           drawnStyle,
-          photoreal: photoreal.status,
+          photoreal: drawer?.photorealStatus ?? "idle",
           reading: auto.meteredEv100 === null ? null : auto.reading(),
           meteredEv100: auto.meteredEv100,
         });
@@ -887,14 +799,8 @@ function ViewStage({
       cancelAnimationFrame(frame);
       unsubscribeTimes();
       unsubscribeTimesRestored();
-      renderer.dispose();
-      photoreal.dispose();
-      layers.band.dispose();
-      unsubscribeLayers();
-      cache.release(VIEW_NAME);
-      cubes.dispose();
-      unsubscribeRestored();
-      view.dispose();
+      // The drawer disposes of the view with itself.
+      releaseDrawer();
     };
   }, [engineState, canvas]);
 
@@ -1033,7 +939,7 @@ function ViewStage({
           annunciation === null || graphics.condition.kind === "acquiring"
           ? NOT_MADE
           : annunciation;
-  const openSlots = instruments.slots.filter((slot) => slot.open).length;
+  const openPanels = instruments.slots.flatMap((slot) => (slot.open ? [slot.panelSize] : []));
   // Closing the CONTROLS instrument returns CONTROLS to PRIMARY. Its canvas never holds the focus
   // then, since CLOSE takes it.
   const closeInstrument = (id: ViewId): void => {
@@ -1057,9 +963,151 @@ function ViewStage({
   );
   const litLabels = litLabelsOf(shown.run.scene);
   const stale = server?.stale === true;
+  // The meter's control stands beside a drawn photorealistic image only, and the primary's block
+  // states the meter while it does (decision-r07-t19-layout, item 1b).
+  const meterStands = shown.drawnStyle === "photorealistic";
+  const primaryPhotoreal = photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels);
+  const primaryStatements = [
+    ...labelStatements(shown.run),
+    ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
+    ...primaryPhotoreal,
+  ];
+
+  // The layout, from the `.view` box's size alone (R07.T19.b; decision-r07-t19-layout, item 1).
+  const { ref: viewBoxRef, size: viewBox } = useElementSize();
+  const layout = viewLayout(viewBox);
+  const compact = layout === "compact";
+  // In the compact layout exactly one of the folding panels is open, CAMERA by default.
+  const [fold, setFold] = useState<FoldPanel>(DEFAULT_FOLD);
+  // The folding panel that holds the focus, as the side column's focus events tell it.
+  const [focusedFold, setFocusedFold] = useState<FoldPanel | null>(null);
+  const [foldLayout, setFoldLayout] = useState(layout);
+  // The panels that stand: the meter's beside a drawn photorealistic image, the style's once a view
+  // can be drawn. One that goes gives its place to CAMERA; on a switch to the compact layout, the
+  // panel holding the focus is the one open.
+  const stands = (panel: FoldPanel): boolean =>
+    panel === "meter" ? meterStands : panel !== "style" || engineLine === null;
+  const focusOpens =
+    foldLayout !== layout && layout === "compact" && focusedFold !== null && stands(focusedFold)
+      ? focusedFold
+      : null;
+  const opened: FoldPanel = focusOpens ?? (stands(fold) ? fold : DEFAULT_FOLD);
+  if (opened !== fold) {
+    setFold(opened);
+  }
+  if (foldLayout !== layout) {
+    setFoldLayout(layout);
+  }
+  const folded = (panel: FoldPanel): boolean => compact && opened !== panel;
+  const foldIds: Readonly<Record<FoldPanel, string>> = {
+    instruments: `${legendId}-instruments`,
+    camera: `${legendId}-camera`,
+    style: `${legendId}-style`,
+    exposure: `${legendId}-exposure`,
+    meter: `${legendId}-meter`,
+  };
+  const foldOf = (target: EventTarget | null): FoldPanel | null => {
+    const section = target instanceof Element ? target.closest("section") : null;
+    return FOLD_PANELS.find((panel) => section !== null && section.id === foldIds[panel]) ?? null;
+  };
+  const onSideFocus = (event: FocusEvent<HTMLDivElement>): void => {
+    setFocusedFold(foldOf(event.target));
+  };
+  const onSideBlur = (event: FocusEvent<HTMLDivElement>): void => {
+    // The focus left the column for another control, or for nothing by the operator's own hand (a
+    // press off any control, another window), not because its control was folded or went away.
+    const { relatedTarget, target, currentTarget } = event;
+    const leftForControl = relatedTarget instanceof Node && !currentTarget.contains(relatedTarget);
+    const leftForNothing =
+      relatedTarget === null && target.isConnected && target.closest("[hidden]") === null;
+    if (leftForControl || leftForNothing) {
+      setFocusedFold(null);
+    }
+  };
+  // The disclosure buttons, by their panel, to which the focus goes when its panel folds.
+  const foldButtonsRef = useRef(new Map<FoldPanel, HTMLButtonElement>());
+  const foldButtonRef =
+    (panel: FoldPanel) =>
+    (button: HTMLButtonElement | null): void => {
+      if (button === null) {
+        foldButtonsRef.current.delete(panel);
+      } else {
+        foldButtonsRef.current.set(panel, button);
+      }
+    };
+  // The focus inside a panel that folds goes to that panel's disclosure button, and a panel that
+  // goes away (the meter, on a style switch) gives its focus to CAMERA's.
+  useLayoutEffect(() => {
+    if (!compact || focusedFold === null || focusedFold === opened) {
+      return;
+    }
+    const active = document.activeElement;
+    const lost =
+      active === null ||
+      active === document.body ||
+      !active.isConnected ||
+      active.closest("[hidden]") !== null;
+    if (lost) {
+      const buttons = foldButtonsRef.current;
+      (buttons.get(focusedFold) ?? buttons.get(DEFAULT_FOLD))?.focus();
+    }
+  }, [compact, focusedFold, opened, foldButtonsRef]);
+
+  // The CONTROLS view's camera and style, which a folded panel's standing lines describe.
+  const controlledRun = controlledShown?.run ?? shown.run;
+  const controlledRefusals = operatedView?.refusals ?? refusals;
+  const controlledFaulted =
+    controlledShown === null
+      ? published.photoreal === "failed"
+      : controlledShown.photoreal === "failed";
+  // The first style's refusal, as the style control shows it.
+  const styleReason = controlledRefusals.wireframe ?? controlledRefusals.photorealistic;
+  const noOwnShip = offeredPresets(cameraSceneOf(controlledRun.scene)).length < PRESET_COUNT;
+  // The compact layout's row of disclosure buttons, and under it the faults and statuses of the
+  // panels folded (decision-r07-t19-layout, item 1b); the limit reasons fold with their controls.
+  const foldRow = compact ? (
+    <>
+      <div className="view-folds">
+        {FOLD_BUTTONS.filter(({ panel }) => stands(panel)).map(({ panel, label }) => (
+          <button
+            key={panel}
+            ref={foldButtonRef(panel)}
+            type="button"
+            className="control disclosure view-folds__button"
+            aria-expanded={opened === panel}
+            aria-controls={foldIds[panel]}
+            onClick={() => {
+              setFold(toggledFold(opened, panel));
+            }}
+          >
+            <DisclosureGlyph expanded={opened === panel} />
+            {label}
+          </button>
+        ))}
+      </div>
+      {folded("camera") && noOwnShip ? (
+        <p className="view-camera__reason view-folds__standing">{NO_OWN_SHIP}</p>
+      ) : null}
+      {folded("style") && controlledFaulted && styleReason !== null ? (
+        <p className="view-style__reason view-style__reason--fault view-folds__standing">
+          {styleReason}
+        </p>
+      ) : null}
+      {folded("exposure") && shown.meteredEv100 === null ? (
+        <p className="view-exposure__reason view-folds__standing">{AUTO_NOT_AVAILABLE}</p>
+      ) : null}
+    </>
+  ) : null;
+  const sideFolds: SideFolds = {
+    cameraId: foldIds.camera,
+    cameraHidden: folded("camera"),
+    styleId: foldIds.style,
+    styleHidden: folded("style"),
+    row: foldRow,
+  };
 
   return (
-    <div className="view">
+    <div className={`view view--${layout}`} ref={viewBoxRef}>
       <div className="view__main">
         {engineLine === null ? (
           <>
@@ -1087,18 +1135,18 @@ function ViewStage({
               />
               <ViewLabelBlock
                 id={`${legendId}-label`}
-                lines={withDrawnStyle(
-                  withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
-                  shown.drawnStyle,
+                lines={withMeterLine(
+                  withDrawnStyle(
+                    withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
+                    shown.drawnStyle,
+                  ),
+                  meterStands ? meter : null,
                 )}
-                statements={[
-                  ...labelStatements(shown.run),
-                  ...photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels),
-                ]}
+                statements={primaryStatements}
                 countLine={viewSky.labelValue === null ? countLine : null}
                 fault={fault}
               />
-              <div className="view-instruments" ref={slotsRef}>
+              <div className="view-instruments">
                 {instrumentViews.map(({ slot, budgetStyle, fault: slotFault }) =>
                   slot.open ? (
                     <InstrumentView
@@ -1109,6 +1157,7 @@ function ViewStage({
                       stale={stale}
                       lighting={lighting}
                       litLabels={litLabels}
+                      primaryPhotorealStatements={primaryPhotoreal}
                       fault={slotFault}
                       legendId={legendId}
                       onKeyDown={(event) => {
@@ -1144,105 +1193,147 @@ function ViewStage({
           </div>
         )}
       </div>
-      <div className="view__side">
-        <InstrumentsPanel
-          primary={{ id: VIEW_ID, name: PRIMARY_NAME }}
-          slots={instruments.slots.map((slot) => ({
-            id: slot.id,
-            name: slot.name,
-            open: slot.open,
-            // Room for one more slot below those open (a slot that is open stays open).
-            room: roomForSlot(size, slotsSize, openSlots),
-          }))}
-          operated={controlsView}
-          unavailable={engineLine !== null}
-          onOpen={(id) => {
-            const slot = instruments.slots.find((each) => each.id === id);
-            if (slot !== undefined) {
-              instruments.open(slot.slot);
+      <div className="view__side" onFocus={onSideFocus} onBlur={onSideBlur}>
+        <div className="view__column view__column--a">
+          <InstrumentsPanel
+            id={foldIds.instruments}
+            fold={
+              compact
+                ? {
+                    folded: folded("instruments"),
+                    onToggle: () => {
+                      setFold(toggledFold(opened, "instruments"));
+                    },
+                  }
+                : undefined
             }
-          }}
-          onClose={closeInstrument}
-          onOperate={setOperated}
-        />
-        {operatedView === null || controlledShown === null ? (
-          <>
-            <section className="panel view-targets" aria-labelledby={`${legendId}-targets`}>
-              <h2 className="panel__title" id={`${legendId}-targets`}>
-                Targets{stale ? <StaleMark /> : null}{" "}
-                <span className="panel__designator">{PRIMARY_NAME}</span>
-              </h2>
-              <ViewMarkList
-                rows={rows}
-                stale={stale}
-                selectedKey={selection === null ? null : targetKey(selection)}
-                onSelect={(row) => {
-                  setSelection(row.target);
-                }}
+            toggleRef={compact ? foldButtonRef("instruments") : undefined}
+            primary={{ id: VIEW_ID, name: PRIMARY_NAME }}
+            slots={instruments.slots.map((slot) => ({
+              id: slot.id,
+              name: slot.name,
+              open: slot.open,
+              // Room for one more slot beside those open (a slot that is open stays open).
+              room: roomForSlot(size, openPanels),
+            }))}
+            operated={controlsView}
+            unavailable={engineLine !== null}
+            onOpen={(id) => {
+              const slot = instruments.slots.find((each) => each.id === id);
+              if (slot !== undefined) {
+                instruments.open(slot.slot);
+              }
+            }}
+            onClose={closeInstrument}
+            onOperate={setOperated}
+          />
+          {operatedView === null || controlledShown === null ? (
+            <>
+              <section className="panel view-targets" aria-labelledby={`${legendId}-targets`}>
+                <h2 className="panel__title" id={`${legendId}-targets`}>
+                  Targets{stale ? <StaleMark /> : null}{" "}
+                  <span className="panel__designator">{PRIMARY_NAME}</span>
+                </h2>
+                <ViewMarkList
+                  rows={rows}
+                  fromCamera={rangesFromCamera(shown.run.scene)}
+                  stale={stale}
+                  selectedKey={selection === null ? null : targetKey(selection)}
+                  onSelect={(row) => {
+                    setSelection(row.target);
+                  }}
+                />
+              </section>
+              {foldRow}
+              <CameraControls
+                preset={shown.run.camera.preset}
+                offered={offeredPresets(cameraSceneOf(shown.run.scene))}
+                fovDeg={shown.run.camera.fovDeg}
+                rateStep={shown.run.camera.free.rateStep}
+                maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
+                easedMoves={easedMoves}
+                reducedMotion={reducedMotion}
+                onAction={command}
+                onEasedMovesChange={onEasedMovesChange}
+                designator={PRIMARY_NAME}
+                id={sideFolds.cameraId}
+                hidden={sideFolds.cameraHidden}
               />
-            </section>
-            <CameraControls
-              preset={shown.run.camera.preset}
-              offered={offeredPresets(cameraSceneOf(shown.run.scene))}
-              fovDeg={shown.run.camera.fovDeg}
-              rateStep={shown.run.camera.free.rateStep}
-              maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
+              {engineLine === null ? (
+                <StyleControl
+                  renderStyle={shown.run.camera.style}
+                  refusals={refusals}
+                  faulted={published.photoreal === "failed"}
+                  onStyle={(style) => {
+                    command({ kind: "style", style });
+                  }}
+                  designator={PRIMARY_NAME}
+                  id={sideFolds.styleId}
+                  hidden={sideFolds.styleHidden}
+                />
+              ) : null}
+            </>
+          ) : (
+            <InstrumentControls
+              key={operatedView.slot.id}
+              designator={operatedView.slot.name}
+              shown={controlledShown}
+              selection={operatedView.slot.selection}
+              stale={stale}
               easedMoves={easedMoves}
               reducedMotion={reducedMotion}
-              onAction={command}
+              refusals={operatedView.refusals}
+              faulted={controlledShown.photoreal === "failed"}
+              onAction={(action) => {
+                commandView(operatedView.slot.id, action);
+              }}
               onEasedMovesChange={onEasedMovesChange}
-              designator={PRIMARY_NAME}
+              onSelect={(target) => {
+                instruments.select(operatedView.slot.slot, target);
+              }}
+              folds={sideFolds}
             />
-            {engineLine === null ? (
-              <StyleControl
-                renderStyle={shown.run.camera.style}
-                refusals={refusals}
-                faulted={published.photoreal === "failed"}
-                onStyle={(style) => {
-                  command({ kind: "style", style });
-                }}
-                designator={PRIMARY_NAME}
-              />
-            ) : null}
-          </>
-        ) : (
-          <InstrumentControls
-            key={operatedView.slot.id}
-            designator={operatedView.slot.name}
-            shown={controlledShown}
-            selection={operatedView.slot.selection}
-            stale={stale}
-            easedMoves={easedMoves}
-            reducedMotion={reducedMotion}
-            refusals={operatedView.refusals}
-            faulted={controlledShown.photoreal === "failed"}
-            onAction={(action) => {
-              commandView(operatedView.slot.id, action);
-            }}
-            onEasedMovesChange={onEasedMovesChange}
-            onSelect={(target) => {
-              instruments.select(operatedView.slot.slot, target);
-            }}
-          />
-        )}
-        <ExposurePanel
-          exposure={exposure}
-          meteredEv100={shown.meteredEv100}
-          onChange={onExposureChange}
-          designator={PRIMARY_NAME}
-        />
-        {shown.drawnStyle === "photorealistic" ? (
-          <MeterControl
-            meter={meter}
-            reading={shown.reading}
+          )}
+        </div>
+        <div className="view__column view__column--b">
+          <ExposurePanel
+            exposure={exposure}
             meteredEv100={shown.meteredEv100}
-            onMeter={onMeterChange}
+            onChange={onExposureChange}
             designator={PRIMARY_NAME}
+            id={foldIds.exposure}
+            hidden={folded("exposure")}
           />
-        ) : null}
+          {meterStands ? (
+            <MeterControl
+              meter={meter}
+              reading={shown.reading}
+              meteredEv100={shown.meteredEv100}
+              onMeter={onMeterChange}
+              designator={PRIMARY_NAME}
+              id={foldIds.meter}
+              hidden={folded("meter")}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );
+}
+
+/**
+ * The label block's lines with the operator's meter after the exposure, `METER AVG`, while the
+ * meter's control stands (`meter` not `null`; decision-r07-t19-layout, item 1b).
+ */
+function withMeterLine(
+  lines: ReadonlyArray<LabelLine>,
+  meter: MeterMode | null,
+): ReadonlyArray<LabelLine> {
+  return meter === null
+    ? lines
+    : lines.flatMap((line) =>
+        line.label === "EXPOSURE" ? [line, { label: "METER", value: meterLabel(meter) }] : [line],
+      );
 }
 
 /**

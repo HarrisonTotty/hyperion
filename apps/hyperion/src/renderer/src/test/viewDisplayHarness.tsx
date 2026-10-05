@@ -20,7 +20,15 @@ import {
   GraphicsStatusStore,
   initialGraphicsStatus,
 } from "../view/engine/status";
-import type { RenderTarget, RenderTargetSpec, RenderView, ViewSize } from "../view/engine/types";
+import type {
+  ComputeBindings,
+  ComputeHandle,
+  FrameSubmission,
+  RenderTarget,
+  RenderTargetSpec,
+  RenderView,
+  ViewSize,
+} from "../view/engine/types";
 import type { QualitySetting } from "../view/quality/qualitySetting";
 import { fakeFramesAndTimeouts } from "./fakeFramesAndTimeouts";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "./fakeGpu";
@@ -48,10 +56,68 @@ export const STAGE_HEIGHT_PX = 720;
 export const SLOT_WIDTH_PX = 555;
 export const SLOT_HEIGHT_PX = 254;
 
+/**
+ * The `.view` box's laid-out size in the tests unless a test gives another, CSS px: about the box
+ * of a 1920 × 1080 window at 100%, which takes VIEW's full layout (R07.T19.b).
+ */
+export const FULL_VIEW_PX = { widthPx: 1888, heightPx: 923 } as const;
+
+/** The `.view` box of a 1280 × 720 window at 100%, CSS px, which takes VIEW's compact layout. */
+export const COMPACT_VIEW_PX = { widthPx: 1248, heightPx: 563 } as const;
+
+/** A laid-out size, CSS px. */
+export interface LaidOutPx {
+  readonly widthPx: number;
+  readonly heightPx: number;
+}
+
+/** A box laid out at the origin. */
+function rect({ widthPx, heightPx }: LaidOutPx): DOMRect {
+  return DOMRect.fromRect({ x: 0, y: 0, width: widthPx, height: heightPx });
+}
+
+/**
+ * Lays every element out at `stagePx`, but for the `.view` box, at `viewPx()`, and each open
+ * instrument slot, at {@link SLOT_WIDTH_PX} by {@link SLOT_HEIGHT_PX}.
+ */
+export function stubViewLayout(stagePx: LaidOutPx, viewPx: () => LaidOutPx): void {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function laidOut(
+    this: HTMLElement,
+  ) {
+    if (this.classList.contains("view")) {
+      return rect(viewPx());
+    }
+    return this.classList.contains("view-instrument")
+      ? rect({ widthPx: SLOT_WIDTH_PX, heightPx: SLOT_HEIGHT_PX })
+      : rect(stagePx);
+  });
+}
+
 /** A render target the timed engine made: its spec and every size it was given, first first. */
 export interface RecordedTarget {
   readonly spec: RenderTargetSpec;
   readonly sizes: ViewSize[];
+}
+
+/**
+ * A submission the timed engine recorded: a canvas pass, a render target's pass or a dispatch,
+ * in the order made (R07.T19.c).
+ */
+export interface Submission {
+  /**
+   * What made it: the view's or the target's name, or a dispatch's first buffer's (the histogram's
+   * `<view> histogram <i>`).
+   */
+  readonly by: string;
+  /** The pass's label (`FrameSubmission.label`, or a dispatch's pass). */
+  readonly label: string;
+  /** Its draws' materials, in order; none for a dispatch. */
+  readonly materials: ReadonlyArray<string>;
+}
+
+/** A submission's view: the name `by` begins with, up to a `:` or a space. */
+export function submittedBy(submission: Submission): string {
+  return submission.by.split(/[: ]/)[0] ?? submission.by;
 }
 
 /** A submission the timed engine numbered as a resolve, by the view or target that made it. */
@@ -66,6 +132,8 @@ export interface TimedEngineSource {
   readonly engines: FakeViewEngine[];
   /** The render targets made, first first. */
   readonly targets: RecordedTarget[];
+  /** Every submission, first first; a dispatch is recorded but numbered as no resolve. */
+  readonly submissions: ReadonlyArray<Submission>;
   /**
    * Reports the times of every resolve not yet reported, one pass each of `costMs(name)`, `name`
    * the view's or target's that submitted it, as R01's timer does once their reads settle.
@@ -77,11 +145,20 @@ export interface TimedEngineSource {
 export function timedEngineSource(): TimedEngineSource {
   const fake = fakeViewEngineSource();
   const targets: RecordedTarget[] = [];
+  const submissions: Submission[] = [];
   const pending: Resolve[] = [];
   const engines: FakeViewEngine[] = [];
+  const submitted = (by: string, frame: FrameSubmission): void => {
+    submissions.push({
+      by,
+      label: frame.label,
+      materials: frame.draws.map((draw) => draw.material.name),
+    });
+  };
   return {
     engines,
     targets,
+    submissions,
     deliver: (costMs) => {
       const engine = engines.at(-1);
       for (const { frame, name } of pending.splice(0)) {
@@ -113,6 +190,7 @@ export function timedEngineSource(): TimedEngineSource {
             const draw = view.render.bind(view);
             view.render = (frame) => {
               draw(frame);
+              submitted(name, frame);
               resolved(name);
             };
             return view;
@@ -129,9 +207,22 @@ export function timedEngineSource(): TimedEngineSource {
               },
               render: (frame): void => {
                 target.render(frame);
+                submitted(spec.name, frame);
                 resolved(spec.name);
               },
             };
+          },
+          dispatch: (
+            kernel: ComputeHandle,
+            bindings: ComputeBindings,
+            _workgroups: unknown,
+            pass?: string,
+          ): void => {
+            submissions.push({
+              by: Object.values(bindings.buffers)[0]?.name ?? kernel.name,
+              label: pass ?? "compute",
+              materials: [],
+            });
           },
         });
       },
@@ -156,6 +247,8 @@ export interface ViewDisplayHarness {
   readonly user: ReturnType<typeof userEvent.setup>;
   /** Advances the fake clock, animation frames included, after laying out again. */
   readonly advance: (ms: number) => void;
+  /** Lays the `.view` box out at another size, as a window resize does, and lays out again. */
+  readonly resizeView: (viewPx: LaidOutPx) => void;
   /** Every view the engines made, first first. */
   readonly views: () => FakeView[];
   /** The server link's socket, which the test answers as the server. */
@@ -169,30 +262,16 @@ export function renderViewDisplay(options: {
   readonly engines: ReadonlyArray<FakeViewEngine>;
   readonly setting?: QualitySetting;
   /** Every element's laid-out size, CSS px: {@link STAGE_WIDTH_PX} by {@link STAGE_HEIGHT_PX}. */
-  readonly stagePx?: { readonly widthPx: number; readonly heightPx: number };
+  readonly stagePx?: LaidOutPx;
+  /** The `.view` box's laid-out size, CSS px: {@link FULL_VIEW_PX}, the full layout. */
+  readonly viewPx?: LaidOutPx;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
-  const stage = DOMRect.fromRect({
-    x: 0,
-    y: 0,
-    width: options.stagePx?.widthPx ?? STAGE_WIDTH_PX,
-    height: options.stagePx?.heightPx ?? STAGE_HEIGHT_PX,
-  });
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function rect(
-    this: HTMLElement,
-  ) {
-    // The open slots' column is as tall as its slots and the gaps between them; all else is the
-    // stage.
-    const slots = this.classList.contains("view-instruments") ? this.children.length : null;
-    return slots === null
-      ? stage
-      : DOMRect.fromRect({
-          x: 0,
-          y: 0,
-          width: slots === 0 ? 0 : SLOT_WIDTH_PX,
-          height: slots === 0 ? 0 : slots * SLOT_HEIGHT_PX + (slots - 1) * 8,
-        });
-  });
+  let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
+  stubViewLayout(
+    options.stagePx ?? { widthPx: STAGE_WIDTH_PX, heightPx: STAGE_HEIGHT_PX },
+    () => viewPx,
+  );
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const user = userEvent.setup({ advanceTimers });
   render(
@@ -203,7 +282,10 @@ export function renderViewDisplay(options: {
           <ViewSceneProvider active knownSystem={null}>
             {() => (
               <Activity mode="visible">
-                <ViewDisplay engineSource={options.source} setting={options.setting} />
+                {/* In the console frame's work area, as `ConsoleFrame` lays VIEW out. */}
+                <main className="console__work console__work--view">
+                  <ViewDisplay engineSource={options.source} setting={options.setting} />
+                </main>
               </Activity>
             )}
           </ViewSceneProvider>
@@ -221,6 +303,12 @@ export function renderViewDisplay(options: {
       act(() => {
         FakeResizeObserver.resizeAll();
         vi.advanceTimersByTime(ms);
+      });
+    },
+    resizeView: (next) => {
+      viewPx = next;
+      act(() => {
+        FakeResizeObserver.resizeAll();
       });
     },
     views: () => options.engines.flatMap((engine) => engine.views),

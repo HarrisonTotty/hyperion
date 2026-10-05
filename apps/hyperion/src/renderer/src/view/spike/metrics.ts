@@ -1,14 +1,15 @@
 /**
  * The descent spike's per-frame measurements in the renderer (plan R05, T14.a, Design note 18),
  * gathered into the report the main process turns into the results file (T14.c's
- * `DescentSpikeReport`).
+ * `DescentSpikeReport`, less what `SpikeController` adds).
  *
  * @remarks
  * The renderer keeps raw series and counts; the percentiles, missed frames and hitches are the
  * main process's (`main/results.ts`), so that one convention serves the presentation times from
  * the trace and the series here. Each segment is marked in the trace with one
- * `performance.measure` span named {@link SEGMENT_MEASURE_PREFIX}`<name>`, by which the main
- * process splits presentation intervals.
+ * `performance.measure` span named {@link SEGMENT_MEASURE_PREFIX}`<name>`, for reading the trace
+ * by eye: the main process assigns presentations to segments by their script time
+ * (`main/traceWindows.ts`, T14.d), not by these marks.
  */
 
 import type {
@@ -22,7 +23,7 @@ import type { GpuTimer } from "../engine/status";
 import type { AllocationEvent } from "../engine/memory";
 import type { PassTimes } from "../engine/types";
 
-/** The `performance.measure` name prefix of a segment's span (`main/results.ts` reads it). */
+/** The `performance.measure` name prefix of a segment's span, which marks it in the trace. */
 export const SEGMENT_MEASURE_PREFIX = "spike.segment:";
 
 /** The passes R01's timer times in a frame; more are untimed (Consumes, "As built"). */
@@ -83,6 +84,12 @@ export interface SpikeReportExtras {
   readonly canvas: DescentSpikeReport["canvas"];
 }
 
+/**
+ * The report as the metrics give it: all of it but where script time starts and the trace's
+ * windows, which the run's control adds (`SpikeController`).
+ */
+export type SpikeMetricsReport = Omit<DescentSpikeReport, "scriptStartMs" | "traceWindows">;
+
 /** The timer states from best to worst; a run reports the worst it saw. */
 const TIMER_RANK: Readonly<Record<GpuTimer, number>> = { full: 0, quantized: 1, absent: 2 };
 
@@ -97,7 +104,7 @@ interface SegmentTally {
   streamingS: number;
 }
 
-/** Gathers a run's figures, frame by frame, into a {@link DescentSpikeReport}. */
+/** Gathers a run's figures, frame by frame, into a {@link SpikeMetricsReport}. */
 export class SpikeMetrics {
   readonly #options: SpikeMetricsOptions;
   readonly #scriptTimesS: number[] = [];
@@ -234,7 +241,7 @@ export class SpikeMetrics {
   }
 
   /** The run's report. */
-  report(extra: SpikeReportExtras): DescentSpikeReport {
+  report(extra: SpikeReportExtras): SpikeMetricsReport {
     const streaming: SpikeStreamingSegment[] = this.#options.segments.map(
       ({ name, startS, endS }) => {
         const tally = this.#segments.get(name);

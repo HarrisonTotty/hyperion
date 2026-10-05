@@ -24,7 +24,12 @@ import type { GpuCapture } from "./capture";
 import { SETTING_VIEWS } from "./demandRecord";
 import { boundedPlanet, type DemandView, levelRatio, perLevelDemand } from "./demand";
 import type { DescentProfile } from "./descentProfile";
-import { type FrameSample, type PatchEvent, SpikeMetrics } from "./metrics";
+import {
+  type FrameSample,
+  type PatchEvent,
+  SpikeMetrics,
+  type SpikeMetricsReport,
+} from "./metrics";
 import { PipelineTally, shimPipelines, wrapGpu } from "./pipelineShim";
 
 /** The warm-up the criterion leaves out, s (Design note 21), and the pipeline tally's too. */
@@ -256,8 +261,8 @@ export class SpikeRecorder {
     }
   }
 
-  /** The run's report for the results file. */
-  report(canvas: DescentSpikeReport["canvas"]): DescentSpikeReport {
+  /** The run's report for the results file, less what the run's control adds. */
+  report(canvas: DescentSpikeReport["canvas"]): SpikeMetricsReport {
     const latePipelines: SpikeLatePipeline[] = this.#tally.late().map((creation) => ({
       label: creation.label.length > 0 ? creation.label : "(unlabelled)",
       kind: creation.kind,

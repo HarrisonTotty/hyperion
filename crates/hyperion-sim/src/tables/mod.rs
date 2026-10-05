@@ -25,6 +25,23 @@ pub mod kick_rank;
 pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
+// The three `sky_binary_light` tables are written whole by `hyperion-fit`, so their one lint
+// allowance is on their modules.
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod sky_binary_light_c;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod sky_binary_light_d;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod sky_binary_light_e;
 pub mod sky_envelope;
 pub mod star_colour;
 pub mod stellar_fates_high;
@@ -117,6 +134,24 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 0,
         since_generator_version: 15,
         provisional: true,
+    },
+    TableInfo {
+        name: "sky_binary_light_c",
+        revision: 0,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
+        name: "sky_binary_light_d",
+        revision: 0,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
+        name: "sky_binary_light_e",
+        revision: 0,
+        since_generator_version: 20,
+        provisional: false,
     },
     TableInfo {
         name: "sky_envelope",

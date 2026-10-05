@@ -20,6 +20,9 @@
  *   marked provisional.
  * - Chromium's tracing service is the measurement's own process, so its memory is reported apart
  *   from the app's.
+ * - The trace is taken in windows of script time (decision-r05-trace-windows.md,
+ *   `traceWindows.ts`): the frames at each window's boundary are left out of every per-frame
+ *   figure and counted, and a profiled run (`run.trace.profiled`) is a diagnostic, never judged.
  */
 
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -35,7 +38,21 @@ import type {
   SpikePassTimer,
 } from "../preload/api";
 import type { DrmMemoryReading, NvidiaReading } from "./fdinfo";
-import type { TraceFigures } from "./reduceTrace";
+import { type Measured, measured, missing } from "./measured";
+import type { GpuProcessFigures } from "./reduceTrace";
+import {
+  type EngineFigures,
+  FULL_BUFFER_PERCENT,
+  type GcFigures,
+  type MainThreadSplit,
+  mergeTraceWindows,
+  SHORT_SPAN_FRACTION,
+  type ScriptInterval,
+  type TraceRecording,
+  type TraceRun,
+} from "./traceWindows";
+
+export { type Measured, measured, missing } from "./measured";
 
 /** The file's schema name and version, which T15.c's replayer writes too. */
 export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
@@ -44,9 +61,13 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  *
  * @remarks
  * Version 2 stores the memory series as columns of whole KiB (decision-r05-results-size.md); v1's
- * object a sample made a 20-minute run's file larger than the repository accepts.
+ * object a sample made a 20-minute run's file larger than the repository accepts. Version 3 takes
+ * the trace in windows (decision-r05-trace-windows.md): `run.trace` lists the windows and their
+ * boundaries, `frames.excludedFrames` counts the frames left out at the boundaries, and the
+ * engine's sampled self time moves from `mainThread.split` to `mainThread.engine`, present in a
+ * profiled run only.
  */
-export const RESULTS_VERSION = 2;
+export const RESULTS_VERSION = 3;
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -59,33 +80,6 @@ const PRETTIER_PRINT_WIDTH = 100;
 
 /** Dawn's timestamp quantum, 65,536 ns (`timestamp_quantization`, Design note 18), ms. */
 export const TIMESTAMP_QUANTUM_MS = 0.065_536;
-
-/** The `performance.measure` name prefix of a segment's span, `spike.segment:<name>` (T14.a). */
-export const SEGMENT_MEASURE_PREFIX = "spike.segment:";
-
-/**
- * Why every figure read from a trace with no timed event is missing.
- *
- * @remarks
- * Such a trace measured nothing: on 2026-10-04 Chromium's tracing service crashed while writing a
- * 1.71 GB trace and left the file without events. Its frame drops and GC pauses are then missing,
- * not zero.
- */
-export const EMPTY_TRACE_REASON = "the trace has no timed event";
-
-/** A figure, or `null` with the reason it is missing. */
-export type Measured<T> =
-  { readonly value: T; readonly reason: null } | { readonly value: null; readonly reason: string };
-
-/** A present figure. */
-export function measured<T>(value: T): Measured<T> {
-  return { value, reason: null };
-}
-
-/** A missing figure and why. */
-export function missing(reason: string): Measured<never> {
-  return { value: null, reason };
-}
 
 /** Frame intervals summarised as Design note 21 reads them. */
 export interface FrameStats {
@@ -556,8 +550,8 @@ export interface DescentResults {
     readonly warmupS: number;
     readonly canvas: DescentSpikeReport["canvas"];
     readonly quiet: { readonly provisional: boolean; readonly note: string | null };
-    /** The trace's span, ms, and whether it is shorter than the scripted descent. */
-    readonly trace: Measured<{ readonly spanMs: number; readonly truncated: boolean }>;
+    /** The trace's windows and boundaries, or why the run has no trace. */
+    readonly trace: Measured<TraceRun>;
   };
   /** T6's level table as the run used it. */
   readonly levels: DescentSpikeReport["levels"];
@@ -575,8 +569,17 @@ export interface DescentResults {
       readonly segment: string;
       readonly presentation: Measured<FrameStats>;
       readonly raf: Measured<FrameStats>;
+      /** The segment's frames left out at the trace's window boundaries. */
+      readonly excludedFrames: number;
     }>;
+    /** Frames Chromium dropped, after the warm-up and outside every boundary's exclusion. */
     readonly dropped: Measured<number>;
+    /**
+     * Frames after the warm-up left out at the trace's window boundaries, beside the warm-up's,
+     * from every per-frame figure: the rAF and presentation statistics, the pass times, their sums
+     * and our code's.
+     */
+    readonly excludedFrames: number;
   };
   readonly gpu: {
     readonly timer: SpikePassTimer;
@@ -587,21 +590,16 @@ export interface DescentResults {
     /** The sum of a frame's timed passes, at the 95th percentile, ms. */
     readonly sumP95Ms: Measured<number>;
     /** The GPU process's main thread: the CPU side of Chromium's command transport and Dawn. */
-    readonly gpuProcess: Measured<NonNullable<TraceFigures["gpuProcess"]>>;
+    readonly gpuProcess: Measured<GpuProcessFigures>;
   };
   readonly mainThread: {
     /** Our code's time a frame (`performance.measure`), at the 95th percentile, ms. */
     readonly ourCodeP95Ms: Measured<number>;
-    readonly split: Measured<NonNullable<TraceFigures["mainThread"]>>;
-    readonly gc: Measured<
-      ReadonlyArray<{
-        readonly process: string | null;
-        readonly thread: string | null;
-        readonly count: number;
-        readonly totalMs: number;
-        readonly maxMs: number;
-      }>
-    >;
+    /** The renderer main thread's wall, busy, our-code and idle time, summed over the windows. */
+    readonly split: Measured<MainThreadSplit>;
+    /** The engine adapter's sampled self time: a profiled run's alone. */
+    readonly engine: Measured<EngineFigures>;
+    readonly gc: Measured<ReadonlyArray<GcFigures>>;
   };
   readonly streaming: ReadonlyArray<StreamingFigures>;
   readonly uploads: { readonly bytes: number };
@@ -642,8 +640,8 @@ export interface DescentResults {
 export interface ResultsInput {
   readonly run: RunDescription;
   readonly report: DescentSpikeReport;
-  /** The reduced trace, or why there is none. */
-  readonly trace: Measured<TraceFigures>;
+  /** The trace's windows, each reduced, or why there is no trace. */
+  readonly trace: Measured<TraceRecording>;
   readonly memory: ReadonlyArray<MemorySample>;
 }
 
@@ -764,19 +762,45 @@ function overallOf(criteria: ReadonlyArray<Criterion>): Verdict {
   return verdicts.has("marginal") ? "marginal" : "pass";
 }
 
-/** The indices of frames at or after the warm-up, and within `[startS, endS)` when given. */
+/**
+ * The indices of frames at or after the warm-up, outside every one of the trace's exclusions, and
+ * within `[startS, endS)` when given.
+ */
 function frameIndices(
   scriptTimesS: ReadonlyArray<number>,
   warmupS: number,
+  isExcluded: (t: number) => boolean,
   span?: { readonly startS: number; readonly endS: number },
 ): number[] {
   const indices: number[] = [];
   scriptTimesS.forEach((t, i) => {
-    if (t >= warmupS && (span === undefined || (t >= span.startS && t < span.endS))) {
+    if (
+      t >= warmupS &&
+      !isExcluded(t) &&
+      (span === undefined || (t >= span.startS && t < span.endS))
+    ) {
       indices.push(i);
     }
   });
   return indices;
+}
+
+/** The frames at or after the warm-up that an exclusion leaves out, within `span` when given. */
+function excludedCount(
+  scriptTimesS: ReadonlyArray<number>,
+  warmupS: number,
+  isExcluded: (t: number) => boolean,
+  span?: { readonly startS: number; readonly endS: number },
+): number {
+  return scriptTimesS.filter(
+    (t) =>
+      t >= warmupS && isExcluded(t) && (span === undefined || (t >= span.startS && t < span.endS)),
+  ).length;
+}
+
+/** Whether a script time lies in one of `exclusions`. */
+function excludedBy(exclusions: ReadonlyArray<ScriptInterval>): (t: number) => boolean {
+  return (t) => exclusions.some(({ fromS, toS }) => t >= fromS && t < toS);
 }
 
 function pick<T>(values: ReadonlyArray<T>, indices: ReadonlyArray<number>): T[] {
@@ -788,43 +812,6 @@ function pick<T>(values: ReadonlyArray<T>, indices: ReadonlyArray<number>): T[] 
     }
   }
   return picked;
-}
-
-/** The presentation intervals of a trace, by segment, after the warm-up. */
-function presentationIntervals(
-  trace: TraceFigures,
-  warmupS: number,
-): { readonly whole: number[]; readonly bySegment: Map<string, number[]> | null } {
-  const marks = trace.userTiming
-    .filter(({ name }) => name.startsWith(SEGMENT_MEASURE_PREFIX))
-    .flatMap(({ name, startsUs, durationsMs }) =>
-      startsUs.map((startUs, i) => ({
-        segment: name.slice(SEGMENT_MEASURE_PREFIX.length),
-        startUs,
-        endUs: startUs + (durationsMs[i] ?? 0) * 1000,
-      })),
-    )
-    .toSorted((a, b) => a.startUs - b.startUs);
-  const presented = trace.frames.presentedAtUs;
-  const descentStartUs = marks[0]?.startUs ?? presented[0] ?? 0;
-  const warmEndUs = descentStartUs + warmupS * 1e6;
-  const whole: number[] = [];
-  const bySegment = marks.length === 0 ? null : new Map<string, number[]>();
-  for (let i = 1; i < presented.length; i += 1) {
-    const endUs = presented[i] ?? 0;
-    const intervalMs = (endUs - (presented[i - 1] ?? endUs)) / 1000;
-    if (endUs < warmEndUs) {
-      continue;
-    }
-    whole.push(intervalMs);
-    const mark = marks.find(({ startUs, endUs: markEnd }) => endUs >= startUs && endUs < markEnd);
-    if (bySegment !== null && mark !== undefined) {
-      const list = bySegment.get(mark.segment) ?? [];
-      list.push(intervalMs);
-      bySegment.set(mark.segment, list);
-    }
-  }
-  return { whole, bySegment };
 }
 
 function statsOrMissing(
@@ -840,15 +827,15 @@ function statsOrMissing(
  * Builds a results file from a run's description, the renderer's report, the trace and memory.
  *
  * @remarks
- * A trace with no timed event is taken as no trace: every figure read from it is missing with
- * {@link EMPTY_TRACE_REASON}.
+ * The trace's windows are merged first (`mergeTraceWindows`): the frames in a boundary's exclusion
+ * are left out of every per-frame figure, and a failed window, one with no timed event among them
+ * (`EMPTY_TRACE_REASON`), makes every figure read from the trace missing with its reason.
  */
 export function buildResults(input: ResultsInput): DescentResults {
   const { run, report, memory } = input;
-  const trace: Measured<TraceFigures> =
-    input.trace.value !== null && input.trace.value.span === null
-      ? missing(EMPTY_TRACE_REASON)
-      : input.trace;
+  const merged = mergeTraceWindows(input.trace, report);
+  const pooled = merged.figures;
+  const isExcluded = excludedBy(merged.exclusions);
   const setting = run.setting;
   const vsyncMs = run.displayHz === null || run.displayHz <= 0 ? null : 1000 / run.displayHz;
   const periodMs: Measured<number> = !run.shown
@@ -858,9 +845,10 @@ export function buildResults(input: ResultsInput): DescentResults {
       : measured(setting === "low" ? 2 * vsyncMs : vsyncMs);
   const t = periodMs.value;
 
-  // Frames: presentation times from the trace, else the rAF timestamps.
+  // Frames: presentation times from the trace, else the rAF timestamps; the frames at the trace's
+  // window boundaries left out of both, as the warm-up's are.
   const frames = report.frames;
-  const warm = frameIndices(frames.scriptTimesS, report.warmupS);
+  const warm = frameIndices(frames.scriptTimesS, report.warmupS, isExcluded);
   const rafWhole = statsOrMissing(
     pick(frames.rafIntervalsMs, warm),
     t,
@@ -868,34 +856,38 @@ export function buildResults(input: ResultsInput): DescentResults {
   );
   const presentationReason = !run.shown
     ? "no window shown"
-    : trace.value === null
-      ? trace.reason
+    : pooled.value === null
+      ? pooled.reason
       : "no presented frame after the warm-up";
-  const presented =
-    run.shown && trace.value !== null ? presentationIntervals(trace.value, report.warmupS) : null;
+  const presented = run.shown ? pooled.value : null;
   const presentationWhole =
     presented === null
       ? missing(presentationReason)
-      : statsOrMissing(presented.whole, t, presentationReason);
+      : statsOrMissing(presented.presentationMs, t, presentationReason);
   const source = presentationWhole.value === null ? "raf" : "presentation";
   const segments = report.segments.map((span) => {
-    const indices = frameIndices(frames.scriptTimesS, report.warmupS, span);
+    const indices = frameIndices(frames.scriptTimesS, report.warmupS, isExcluded, span);
     const raf = statsOrMissing(
       pick(frames.rafIntervalsMs, indices),
       t,
       "no frame in the segment after the warm-up",
     );
-    const list = presented?.bySegment?.get(span.name);
     const presentation =
       presented === null
         ? missing(presentationReason)
-        : presented.bySegment === null
-          ? missing("the trace has no segment marks")
-          : statsOrMissing(list ?? [], t, "no presented frame in the segment");
-    return { segment: span.name, presentation, raf };
+        : statsOrMissing(
+            presented.presentationBySegmentMs.get(span.name) ?? [],
+            t,
+            "no presented frame in the segment",
+          );
+    return {
+      segment: span.name,
+      presentation,
+      raf,
+      excludedFrames: excludedCount(frames.scriptTimesS, report.warmupS, isExcluded, span),
+    };
   });
-  const dropped =
-    trace.value === null ? missing(trace.reason) : measured(trace.value.frames.dropped);
+  const dropped = pooled.value === null ? missing(pooled.reason) : measured(pooled.value.dropped);
 
   const tolerancePerPassMs = report.timer === "quantized" ? TIMESTAMP_QUANTUM_MS : 0;
   const timerReason = "the pass timer is absent (no timestamp-query)";
@@ -1037,18 +1029,6 @@ export function buildResults(input: ResultsInput): DescentResults {
   }));
   const overall = overallOf([...whole, ...segmentCriteria.flatMap(({ criteria }) => criteria)]);
 
-  const scriptEndS = Math.max(0, ...report.segments.map(({ endS }) => endS));
-  // An empty trace was taken as none above; the span's own check only narrows its type.
-  const traceFigure: DescentResults["run"]["trace"] =
-    trace.value === null
-      ? missing(trace.reason)
-      : trace.value.span === null
-        ? missing(EMPTY_TRACE_REASON)
-        : measured({
-            spanMs: (trace.value.span.lastUs - trace.value.span.firstUs) / 1000,
-            truncated:
-              (trace.value.span.lastUs - trace.value.span.firstUs) / 1e6 < 0.95 * scriptEndS,
-          });
   const load = run.machine.loadAverage[0];
   const provisional = load >= 1;
 
@@ -1076,7 +1056,7 @@ export function buildResults(input: ResultsInput): DescentResults {
           ? `load average ${load.toFixed(2)} at the start (Design note 27 asks under 1): provisional`
           : null,
       },
-      trace: traceFigure,
+      trace: merged.run,
     },
     levels: report.levels,
     frames: {
@@ -1085,6 +1065,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       raf: rafWhole,
       segments,
       dropped,
+      excludedFrames: excludedCount(frames.scriptTimesS, report.warmupS, isExcluded),
     },
     gpu: {
       timer: report.timer,
@@ -1092,29 +1073,13 @@ export function buildResults(input: ResultsInput): DescentResults {
       untimedPasses: report.untimedPasses,
       passes,
       sumP95Ms,
-      gpuProcess:
-        trace.value === null
-          ? missing(trace.reason)
-          : trace.value.gpuProcess === null
-            ? missing("the trace has no GPU process")
-            : measured(trace.value.gpuProcess),
+      gpuProcess: pooled.value === null ? missing(pooled.reason) : pooled.value.gpuProcess,
     },
     mainThread: {
       ourCodeP95Ms,
-      split:
-        trace.value === null
-          ? missing(trace.reason)
-          : trace.value.mainThread === null
-            ? missing("the trace has no renderer main thread")
-            : measured(trace.value.mainThread),
-      gc:
-        trace.value === null
-          ? missing(trace.reason)
-          : measured(
-              trace.value.threads
-                .filter(({ gc }) => gc.count > 0)
-                .map(({ process, thread, gc }) => Object.assign({ process, thread }, gc)),
-            ),
+      split: pooled.value === null ? missing(pooled.reason) : pooled.value.split,
+      engine: pooled.value === null ? missing(pooled.reason) : pooled.value.engine,
+      gc: pooled.value === null ? missing(pooled.reason) : measured(pooled.value.gc),
     },
     streaming: report.streaming.map((segment) =>
       Object.assign({}, segment, {
@@ -1232,9 +1197,12 @@ const VERDICTS: ReadonlySet<string> = new Set(["pass", "fail", "marginal", "not-
  * Checks a parsed results file against its schema.
  *
  * @returns The problems found, empty for a valid file. Beyond the shape of each required part,
- * every figure must be present or `null` with a stated reason, without a trace no figure read
- * from the trace may be present, and the memory series must be whole: every column as long as the
- * times, readings in whole KiB, -1 at its gaps' samples alone, and each peak its column's maximum.
+ * every figure must be present or `null` with a stated reason; without a trace, or with a failed
+ * window, no figure read from the trace may be present, nor the engine's in an unprofiled run; the
+ * trace's windows must be in order with one boundary between each pair, whose exclusions neither
+ * overlap nor fall out of order and whose frames are the file's excluded frames; and the memory
+ * series must be whole: every column as long as the times, readings in whole KiB, -1 at its gaps'
+ * samples alone, and each peak its column's maximum.
  */
 export function validateResults(value: unknown): string[] {
   const problems: string[] = [];
@@ -1289,7 +1257,10 @@ export function validateResults(value: unknown): string[] {
     checkMemory(memory, problems);
   }
   checkFigures(value, "", problems);
-  checkTraceFigures(value, problems);
+  const trace = checkTrace(childAt(value, ["run", "trace"]), problems);
+  checkTraceFigures(value, trace, problems);
+  checkExcludedFrames(value, trace, problems);
+  checkMainThread(value, trace, problems);
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
 }
@@ -1441,6 +1412,7 @@ const TRACE_FIGURE_PATHS: ReadonlyArray<ReadonlyArray<string>> = [
   ["frames", "dropped"],
   ["gpu", "gpuProcess"],
   ["mainThread", "split"],
+  ["mainThread", "engine"],
   ["mainThread", "gc"],
 ];
 
@@ -1448,14 +1420,172 @@ function childAt(node: unknown, path: ReadonlyArray<string>): unknown {
   return path.reduce<unknown>((child, key) => (isRecord(child) ? child[key] : undefined), node);
 }
 
+/** What the rest of the check needs of `run.trace`. */
+interface TraceState {
+  /**
+   * Why no figure read from the trace may be present, as the end of "<figure> is measured…", or
+   * `null` when they may be.
+   */
+  readonly withoutFigures: string | null;
+  /** Whether the run is profiled; `false` without a trace. */
+  readonly profiled: boolean;
+  /** The frames its boundaries leave out; 0 without a trace. */
+  readonly boundaryFrames: number;
+}
+
+/** Times written from one computation, compared to a nanosecond. */
+function sameS(a: unknown, b: unknown): boolean {
+  return typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1e-9;
+}
+
+function isFiniteAtLeast(value: unknown, min: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min;
+}
+
+/** One window's figures, if it has them: its span, file size and buffer use, against its length. */
+function checkWindowFigures(
+  window: Readonly<Record<string, unknown>>,
+  path: string,
+  problems: string[],
+): void {
+  const figures = childAt(window, ["figures", "value"]);
+  if (!isRecord(figures)) {
+    return;
+  }
+  const { spanMs, bytes, bufferPercent } = figures;
+  if (
+    !isFiniteAtLeast(spanMs, 0) ||
+    !isWhole(bytes, 0) ||
+    (bufferPercent !== null && !isFiniteAtLeast(bufferPercent, 0))
+  ) {
+    problems.push(`${path}.figures is not a span, a size and a buffer's use`);
+    return;
+  }
+  const { fromS, toS } = window;
+  const recordedMs =
+    typeof fromS === "number" && typeof toS === "number" ? 1000 * (toS - fromS) : 0;
+  if (
+    spanMs < SHORT_SPAN_FRACTION * recordedMs ||
+    (bufferPercent !== null && bufferPercent >= FULL_BUFFER_PERCENT)
+  ) {
+    problems.push(`${path} filled its buffer, but is not marked failed`);
+  }
+}
+
 /**
- * Without a trace (`run.trace` null), every figure read from the trace is null too, so that an
- * empty trace's zeros cannot pass for measurements. A native replay times its presentations
- * without a trace, so only its other trace figures are checked.
+ * `run.trace`: its settings, its windows in order, and one boundary between each pair at their
+ * times, whose exclusions are in order and do not overlap.
  */
-function checkTraceFigures(value: Readonly<Record<string, unknown>>, problems: string[]): void {
-  const trace = childAt(value, ["run", "trace"]);
-  if (!isRecord(trace) || trace["value"] !== null) {
+function checkTrace(trace: unknown, problems: string[]): TraceState {
+  if (!isRecord(trace)) {
+    problems.push("run.trace is missing");
+    return { withoutFigures: " without run.trace", profiled: false, boundaryFrames: 0 };
+  }
+  const value = trace["value"];
+  if (!isRecord(value)) {
+    if (value !== null) {
+      problems.push("run.trace.value is not a trace");
+    }
+    return {
+      withoutFigures: ` without a trace (${String(trace["reason"])})`,
+      profiled: false,
+      boundaryFrames: 0,
+    };
+  }
+  const path = "run.trace.value";
+  const { profiled, categories, recordingMode, bufferKb, guardS, tracedS } = value;
+  if (
+    typeof profiled !== "boolean" ||
+    !Array.isArray(categories) ||
+    !categories.every((category: unknown) => typeof category === "string") ||
+    typeof recordingMode !== "string" ||
+    !isWhole(bufferKb, 0) ||
+    !isFiniteAtLeast(guardS, 0) ||
+    !isFiniteAtLeast(tracedS, 0)
+  ) {
+    problems.push(`${path} does not say how the trace was recorded`);
+  }
+  const windows = Array.isArray(value["windows"]) ? value["windows"] : [];
+  const boundaries = Array.isArray(value["boundaries"]) ? value["boundaries"] : [];
+  if (windows.length === 0) {
+    problems.push(`${path}.windows is not a list of windows`);
+  }
+  let failed: string | null = null;
+  for (const [i, window] of windows.entries()) {
+    const at = `${path}.windows[${i}]`;
+    if (
+      !isRecord(window) ||
+      window["index"] !== i ||
+      typeof window["fromS"] !== "number" ||
+      typeof window["toS"] !== "number" ||
+      window["fromS"] > window["toS"] ||
+      !isRecord(window["figures"])
+    ) {
+      problems.push(`${at} is not a window from its start to its stop`);
+      continue;
+    }
+    const beforeToS = childAt(windows[i - 1], ["toS"]);
+    if (typeof beforeToS === "number" && window["fromS"] < beforeToS) {
+      problems.push(`${at} begins before the window before it stops`);
+    }
+    if (failed === null && childAt(window, ["figures", "value"]) === null) {
+      failed = `, but ${at} failed`;
+    }
+    checkWindowFigures(window, at, problems);
+  }
+  if (boundaries.length !== Math.max(windows.length - 1, 0)) {
+    problems.push(
+      `${path} has ${boundaries.length} boundaries for ${windows.length} windows, not one between each pair`,
+    );
+  }
+  let boundaryFrames = 0;
+  for (const [k, boundary] of boundaries.entries()) {
+    const at = `${path}.boundaries[${k}]`;
+    if (!isRecord(boundary)) {
+      problems.push(`${at} is not a boundary`);
+      continue;
+    }
+    const { afterWindow, stopRequestedS, resumedS, excludedToS, excludedFrames } = boundary;
+    const maxRaf = boundary["maxRafIntervalMs"];
+    if (
+      afterWindow !== k ||
+      !sameS(stopRequestedS, childAt(windows[k], ["toS"])) ||
+      !sameS(resumedS, childAt(windows[k + 1], ["fromS"])) ||
+      typeof resumedS !== "number" ||
+      !sameS(excludedToS, resumedS + (typeof guardS === "number" ? guardS : Number.NaN))
+    ) {
+      problems.push(
+        `${at} is not the gap between windows ${k} and ${k + 1}, excluded to the guard after it`,
+      );
+    }
+    const beforeToS = childAt(boundaries[k - 1], ["excludedToS"]);
+    if (
+      typeof stopRequestedS === "number" &&
+      typeof beforeToS === "number" &&
+      stopRequestedS < beforeToS
+    ) {
+      problems.push(`${at}'s exclusion begins before the one before it ends`);
+    }
+    if (!isWhole(excludedFrames, 0) || (maxRaf !== null && !isFiniteAtLeast(maxRaf, 0))) {
+      problems.push(`${at} does not count its frames and their largest interval`);
+      continue;
+    }
+    boundaryFrames += excludedFrames;
+  }
+  return { withoutFigures: failed, profiled: profiled === true, boundaryFrames };
+}
+
+/**
+ * Without a trace (`run.trace` null), or with a failed window, every figure read from the trace is
+ * null too, so that an empty trace's zeros cannot pass for measurements. A native replay times its
+ * presentations without a trace, so only its other trace figures are checked.
+ */
+function checkTraceFigures(
+  value: Readonly<Record<string, unknown>>,
+  trace: TraceState,
+  problems: string[],
+): void {
+  if (trace.withoutFigures === null) {
     return;
   }
   const figures: Array<readonly [string, unknown]> = TRACE_FIGURE_PATHS.map((path) => [
@@ -1473,8 +1603,70 @@ function checkTraceFigures(value: Readonly<Record<string, unknown>>, problems: s
   }
   for (const [path, figure] of figures) {
     if (isRecord(figure) && figure["value"] !== null && figure["value"] !== undefined) {
-      problems.push(`${path} is measured without a trace (${String(trace["reason"])})`);
+      problems.push(`${path} is measured${trace.withoutFigures}`);
     }
+  }
+}
+
+/** The frames left out at the boundaries: the boundaries' count, and each segment's within it. */
+function checkExcludedFrames(
+  value: Readonly<Record<string, unknown>>,
+  trace: TraceState,
+  problems: string[],
+): void {
+  const whole = childAt(value, ["frames", "excludedFrames"]);
+  if (!isWhole(whole, 0)) {
+    problems.push("frames.excludedFrames is not a count");
+    return;
+  }
+  if (whole !== trace.boundaryFrames) {
+    problems.push(
+      `frames.excludedFrames is ${whole}, not the ${trace.boundaryFrames} the boundaries left out`,
+    );
+  }
+  const segments = childAt(value, ["frames", "segments"]);
+  let inSegments = 0;
+  for (const [i, segment] of (Array.isArray(segments) ? segments : []).entries()) {
+    const count = childAt(segment, ["excludedFrames"]);
+    if (!isWhole(count, 0)) {
+      problems.push(`frames.segments[${i}].excludedFrames is not a count`);
+      return;
+    }
+    inSegments += count;
+  }
+  if (inSegments > whole) {
+    problems.push("the segments' excluded frames are more than the whole run's");
+  }
+}
+
+/** The main thread's split without the engine's figures, which are a profiled run's alone. */
+function checkMainThread(
+  value: Readonly<Record<string, unknown>>,
+  trace: TraceState,
+  problems: string[],
+): void {
+  const split = childAt(value, ["mainThread", "split", "value"]);
+  if (isRecord(split) && ("engineSelfMs" in split || "sampledMs" in split)) {
+    problems.push("mainThread.split holds the engine's figures, which belong in mainThread.engine");
+  }
+  const engine = childAt(value, ["mainThread", "engine"]);
+  if (!isRecord(engine)) {
+    problems.push("mainThread.engine is missing");
+    return;
+  }
+  const figures = engine["value"];
+  if (figures === null) {
+    return;
+  }
+  if (
+    !isRecord(figures) ||
+    !isFiniteAtLeast(figures["selfMs"], 0) ||
+    !isFiniteAtLeast(figures["sampledMs"], 0)
+  ) {
+    problems.push("mainThread.engine is not a sampled self time");
+  }
+  if (trace.withoutFigures === null && !trace.profiled) {
+    problems.push("mainThread.engine is measured in an unprofiled run");
   }
 }
 
@@ -1593,6 +1785,36 @@ function intervalsOf(frames: DescentResults["frames"]): {
   return sources[frames.source];
 }
 
+/** The trace's windows in words: how many, the time traced, the boundaries' cost, failures. */
+function describeTrace(trace: TraceRun): string {
+  const files = trace.windows.flatMap(({ figures }) =>
+    figures.value === null ? [] : [figures.value],
+  );
+  const largestBytes = files.reduce((max, { bytes }) => Math.max(max, bytes), 0);
+  const buffers = files.flatMap(({ bufferPercent }) =>
+    bufferPercent === null ? [] : [bufferPercent],
+  );
+  const stalls = trace.boundaries.flatMap(({ maxRafIntervalMs }) =>
+    maxRafIntervalMs === null ? [] : [maxRafIntervalMs],
+  );
+  const excluded = trace.boundaries.reduce((sum, { excludedFrames }) => sum + excludedFrames, 0);
+  const count = trace.windows.length;
+  return [
+    `${count} ${count === 1 ? "window" : "windows"}, ${trace.tracedS.toFixed(1)} s traced after the warm-up, ${trace.profiled ? "profiled" : "unprofiled"}`,
+    trace.boundaries.length === 0
+      ? "no boundary"
+      : `${trace.boundaries.length} ${trace.boundaries.length === 1 ? "boundary" : "boundaries"} left out ${excluded} frames${stalls.length === 0 ? "" : ` (largest stall ${formatMs(Math.max(...stalls))} ms)`}`,
+    `largest file ${mib(largestBytes)}, buffer use ${buffers.length === 0 ? "not reported" : `up to ${Math.max(...buffers).toFixed(0)} %`}`,
+    ...trace.windows.flatMap(({ index, figures }) =>
+      figures.value === null ? [`window ${index + 1} failed: ${figures.reason}`] : [],
+    ),
+  ].join("; ");
+}
+
+/** The heading of a profiled run's summary: its figures are a diagnostic's. */
+const PROFILED_HEADING =
+  "**PROFILED: diagnostic, not judged; renderer and app memory include the CPU profiler's samples.**";
+
 /** The Markdown summary written beside a results file. */
 export function summaryMarkdown(results: DescentResults): string {
   const { run, criteria, memory, frames } = results;
@@ -1602,12 +1824,13 @@ export function summaryMarkdown(results: DescentResults): string {
   return [
     `# Descent spike: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
     "",
+    ...(run.trace.value?.profiled === true ? [PROFILED_HEADING, ""] : []),
     `- **Overall:** ${criteria.overall}${run.quiet.provisional ? " (provisional: not a quiet machine)" : ""}`,
     `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${run.machine.loadAverage.map((load) => load.toFixed(2)).join(", ")}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
     `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,
-    `- **Trace:** ${textOr(run.trace, (trace) => `${(trace.spanMs / 1000).toFixed(1)} s${trace.truncated ? ", truncated" : ""}`)}`,
+    `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Options:** ${Object.entries(run.options)
       .map(([key, value]) => `\`--${key} ${String(value)}\``)
       .join(" ")}`,
@@ -1623,7 +1846,7 @@ export function summaryMarkdown(results: DescentResults): string {
     "",
     "## Frames by segment",
     "",
-    `Intervals from ${whole.source}. Whole descent: ${describeStats(whole.stats)}.`,
+    `Intervals from ${whole.source}. Whole descent: ${describeStats(whole.stats)}.${run.trace.value === null ? "" : ` Frames left out at the trace's window boundaries: ${frames.excludedFrames}.`}`,
     "",
     "| Segment | Intervals | Verdicts (p50, p95, p99, missed, hitches) |",
     "| --- | --- | --- |",
@@ -1759,7 +1982,8 @@ const NODE_RESULTS_FILES: ResultsFiles = {
 
 /**
  * Writes a results file and its summary into `dir` as `<date>-<machine>-<setting>.json` and
- * `.md`, adding `-2`, `-3` and so on when a run of the same day, machine and setting is there.
+ * `.md`, adding `-2`, `-3` and so on when a run of the same day, machine and setting is there. A
+ * profiled run's are `<date>-<machine>-<setting>-profiled.json` and `.md`, numbered the same way.
  *
  * @remarks
  * A file that Prettier would format to more than {@link ADDED_FILE_LIMIT_BYTES} is still written
@@ -1780,7 +2004,8 @@ export async function writeResults(
     throw new Error(`the results do not match their schema: ${problems.join("; ")}`);
   }
   await files.mkdir(dir);
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}`;
+  const profiled = results.run.trace.value?.profiled === true ? "-profiled" : "";
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}${profiled}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${i + 1}`,
   );

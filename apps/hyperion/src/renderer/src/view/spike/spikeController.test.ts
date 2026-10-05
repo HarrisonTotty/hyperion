@@ -109,23 +109,29 @@ function controllerOf(
 ): ReturnType<typeof fakeSpike> & {
   readonly controller: SpikeController;
   readonly resolves: { value: number; runFrame: (n: number) => number };
+  /** The controller's `performance.now()`, ms, which a test moves. */
+  readonly clock: { ms: number };
 } {
   const fake = fakeSpike(launch);
   const resolves = { value: 0, runFrame: (n: number) => n };
+  const clock = { ms: 0 };
   const controller = new SpikeController({
     spike: fake.spike,
     gpu: { resolves, tally: new PipelineTally(() => 0) },
     capture,
     canvas: () => ({ widthPx: 1280, heightPx: 720 }),
+    nowMs: () => clock.ms,
     log: () => undefined,
   });
-  return { ...fake, controller, resolves };
+  return { ...fake, controller, resolves, clock };
 }
 
-function frame(scriptTimeS: number) {
+/** A frame at a script time, its script starting at `scriptStartMs`. */
+function frame(scriptTimeS: number, scriptStartMs = 0) {
   return {
     scriptTimeS,
-    rafTimestampMs: scriptTimeS * 1000,
+    rafTimestampMs: scriptStartMs + scriptTimeS * 1000,
+    scriptStartMs,
     callbackMs: 3,
     passesSubmitted: 5,
     patchesHard: 100,
@@ -176,6 +182,19 @@ describe("the spike's run control", () => {
     expect(reports[0]?.canvas).toEqual({ widthPx: 1280, heightPx: 720 });
     expect(reports[0]?.terrain).toEqual({ vertexPath: "face-differences", normals: "mesh" });
     expect(controller.ended).toBe(true);
+  });
+
+  it("reports where script time starts and its one trace window's start and stop request", async () => {
+    const { controller, reports, clock } = controllerOf(LAUNCH);
+    clock.ms = 50;
+    controller.prepared(DESCENT);
+    await settle();
+    controller.frame(frame(0, 120));
+    clock.ms = 1_300_000;
+    controller.frame(frame(DESCENT.profile.durationS, 120));
+    await settle();
+    expect(reports[0]?.scriptStartMs).toBe(120);
+    expect(reports[0]?.traceWindows).toEqual([{ startedMs: 50, stopRequestedMs: 1_300_000 }]);
   });
 
   it("passes a smoke run that baked a patch, at 10 s, with no trace or results", async () => {

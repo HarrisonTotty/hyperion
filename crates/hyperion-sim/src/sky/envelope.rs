@@ -40,7 +40,10 @@
 //! [`BrightnessEnvelope::build_with`] and fit-check's byte-for-byte rerun.
 //!
 //! Plan 11's binary evolution moves mass within a pair and rejuvenates or merges stars:
-//! [`max_star_mass`] says how massive a star a system can hold (R06.T16.b widens it).
+//! [`max_star_mass`] says how massive a star a system can hold, twice its primary's initial mass
+//! (R06.T16.b), and a system whose pairs may have interacted is bounded over every age from zero
+//! to its own, since a main-sequence merger or accretor shines as a younger star of its new mass
+//! (the census's `flux_bound` gives the reasoning for the other pair-evolved states).
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::fields::ComponentId;
@@ -48,7 +51,7 @@ use crate::galaxy::imf::MassBand;
 use crate::id::Layer;
 use crate::math;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
-use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Track};
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
 use crate::tables::sky_envelope;
@@ -117,12 +120,20 @@ pub const AGE_SPREAD_FACTOR: f64 = 1.6;
 /// samples and its compositions (Design note 8; the dense slow test measures what is used).
 pub const MARGIN_MAG: f64 = 0.3;
 
-/// The mass of the heaviest star `primary_initial`'s system can hold: the primary's initial mass
-/// while every star evolves alone, since no companion is drawn heavier than its primary.
-/// R06.T16.b widens it for plan 11's pairs.
+/// The mass of the heaviest star `primary_initial`'s system can hold, M☉: twice the primary's
+/// initial mass, and at most the tracks' top, [`MAX_INITIAL_MASS`] (150 M☉) (Design note 8;
+/// R06.T16.b).
+///
+/// Plan 11's engine evolves only pairs of two stars (P11.T11), whose mass can only move between
+/// its two members or leave the pair, and no companion is drawn heavier than its primary. So a
+/// merger or an accretor holds at most m₁ + m₂ ≤ 2 m₁. A merger product heavier than 150 M☉
+/// follows the 150 M☉ track (`track_mass`). A main-sequence accretor above it takes the closed
+/// forms extrapolated past their range (BSE's formulae hold to 100 M☉, Hurley, Tout and Pols
+/// 2002, §1), and the top node bounds it through the 150 M☉ track's later phases and the margin.
+/// A NaN mass reads 150 M☉, the brightest node, which skips nothing.
 #[must_use]
 pub fn max_star_mass(primary_initial: SolarMasses) -> SolarMasses {
-    primary_initial
+    SolarMasses::new((2.0 * primary_initial.value()).min(MAX_INITIAL_MASS.value()))
 }
 
 /// The brightest absolute V magnitude stars of at most a given mass reach over a range of ages
@@ -255,8 +266,10 @@ impl BrightnessEnvelope {
     /// fainter, so a census skips it. The band's upper edge where no primary of the band can, and
     /// its lower edge where every one can.
     ///
-    /// A system's brightest star is at most [`max_star_mass`] of its primary; the floor is the
-    /// heaviest node below the first that passes, mapped back through it.
+    /// A system's brightest star is at most [`max_star_mass`] of its primary, twice its mass: a
+    /// primary can hold a star as bright as `faintest` when a star of up to twice its mass can be,
+    /// and the floor is the lightest such primary. It takes that mass for every layer, the brown
+    /// dwarfs' too, whose systems are single, so their floor is lower than they need.
     #[must_use]
     pub fn mass_floor(
         &self,
@@ -674,7 +687,49 @@ mod tests {
     }
 
     #[test]
-    fn max_star_mass_is_the_primary_mass_while_stars_evolve_alone() {
-        assert_eq!(max_star_mass(SolarMasses::new(3.0)), SolarMasses::new(3.0));
+    fn max_star_mass_is_twice_the_primary_up_to_the_tracks_top() {
+        assert_eq!(
+            max_star_mass(SolarMasses::new(0.638)),
+            SolarMasses::new(1.276)
+        );
+        assert_eq!(max_star_mass(SolarMasses::new(3.0)), SolarMasses::new(6.0));
+        assert_eq!(
+            max_star_mass(SolarMasses::new(75.0)),
+            SolarMasses::new(150.0)
+        );
+        assert_eq!(max_star_mass(SolarMasses::new(120.0)), MAX_INITIAL_MASS);
+        assert_eq!(max_star_mass(SolarMasses::new(150.0)), MAX_INITIAL_MASS);
+    }
+
+    /// The floor inverts the envelope at [`max_star_mass`]: a primary just above it could hold a
+    /// star of twice its mass as bright as the faintest listable, and one just below could not.
+    /// For some cuts the primary's own mass would not pass there, so the floor is lower than that
+    /// mass alone would make it.
+    #[test]
+    fn the_mass_floor_admits_every_primary_whose_merger_could_pass() {
+        let e = envelope();
+        let c = any_component();
+        let ages = years(0.0, MAX_AGE_YEARS);
+        let shines = |m: f64, faintest: f64| {
+            e.brightest(Layer::A, c, SolarMasses::new(m), ages)
+                .is_some_and(|v| v.value() <= faintest)
+        };
+        let (mut inside, mut lowered) = (0, 0);
+        for faintest in [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0] {
+            let floor = e
+                .mass_floor(Layer::A, c, Magnitudes::new(faintest), ages)
+                .value();
+            if floor <= MassBand::A.lo() || floor >= MassBand::A.hi() {
+                continue;
+            }
+            inside += 1;
+            let above = max_star_mass(SolarMasses::new(floor * (1.0 + 1e-9))).value();
+            let below = max_star_mass(SolarMasses::new(floor * (1.0 - 1e-6))).value();
+            assert!(shines(above, faintest), "{faintest}: above {floor}");
+            assert!(!shines(below, faintest), "{faintest}: below {floor}");
+            lowered += usize::from(!shines(floor * (1.0 + 1e-9), faintest));
+        }
+        assert!(inside > 0, "no cut puts A's floor inside its band");
+        assert!(lowered > 0, "the widened mass never lowers A's floor");
     }
 }

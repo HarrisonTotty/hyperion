@@ -5,6 +5,7 @@ import { DEFAULT_SPIKE_SEED } from "../preload/spikeLaunch";
 import { measured, type RunDescription, validateResults } from "./results";
 import { SpikeSession, type SpikeSessionDeps } from "./spikeSession";
 import { smallReport } from "./fixtures/spikeReport";
+import { UNPROFILED, windowTrace } from "./fixtures/traces";
 
 const LAUNCH: SpikeLaunch = {
   setting: "low",
@@ -42,8 +43,11 @@ const RUN: RunDescription = {
   nvidiaBaselineBytes: null,
 };
 
-/** A session over fakes, with what it wrote and how it ended. */
-function sessionOf(reduce: SpikeSessionDeps["reduce"] = () => Promise.reject(new Error("bad"))) {
+/** A session over fakes, with what it wrote and how it ended; its trace files are 4 kB. */
+function sessionOf(
+  reduce: SpikeSessionDeps["reduce"] = () => Promise.reject(new Error("bad")),
+  size: (path: string) => Promise<number> = () => Promise.resolve(4096),
+) {
   const written = new Map<string, string | Uint8Array>();
   const removed: string[] = [];
   const exits: number[] = [];
@@ -52,6 +56,7 @@ function sessionOf(reduce: SpikeSessionDeps["reduce"] = () => Promise.reject(new
     launch: LAUNCH,
     describe: () => Promise.resolve(RUN),
     trace: { start: () => Promise.resolve(), stop: (path) => Promise.resolve(path) },
+    traceSettings: UNPROFILED,
     tracePath: "/profile/spike-trace.json",
     reduce,
     memory: { start: memoryStart, stop: () => Promise.resolve([]) },
@@ -70,6 +75,7 @@ function sessionOf(reduce: SpikeSessionDeps["reduce"] = () => Promise.reject(new
         removed.push(path);
         return Promise.resolve();
       },
+      size,
       results: {
         mkdir: () => Promise.resolve(),
         exists: (path) => Promise.resolve(written.has(path)),
@@ -100,7 +106,53 @@ describe("a spike run's session", () => {
     const results: unknown = JSON.parse(String(text));
     expect(validateResults(results)).toEqual([]);
     // A trace that could not be reduced is a missing figure with its reason, not a failed run.
-    expect(String(text)).toContain("the trace could not be reduced: bad");
+    expect(String(text)).toContain("trace window 1 of 1: the trace could not be reduced: bad");
+  });
+
+  it("records its one window: the file's size, and its figures pooled", async () => {
+    // The report's window runs from 900 to 61,100 ms, its script from 1,000 ms.
+    const trace = windowTrace({ offsetUs: 7e9, fromMs: 900, toMs: 61_100 });
+    const { session, written, removed } = sessionOf(() => Promise.resolve(trace));
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    expect(removed).toEqual(["/profile/spike-trace.json"]);
+    const paths = await ops.writeResults(smallReport());
+    const results: unknown = JSON.parse(String(written.get(paths.json)));
+    expect(validateResults(results)).toEqual([]);
+    expect(results).toMatchObject({
+      run: {
+        trace: {
+          value: {
+            profiled: false,
+            windows: [
+              {
+                index: 0,
+                fromS: -0.1,
+                toS: 60.1,
+                figures: { value: { spanMs: 60_200, bytes: 4096, bufferPercent: null } },
+              },
+            ],
+            boundaries: [],
+          },
+        },
+      },
+      mainThread: { split: { value: { busyMs: 100 } } },
+    });
+  });
+
+  it("fails the window whose file cannot be read, with the reason", async () => {
+    const { session, written } = sessionOf(
+      () => Promise.reject(new Error("not reached")),
+      () => Promise.reject(new Error("ENOENT: no such file")),
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const paths = await ops.writeResults(smallReport());
+    const text = String(written.get(paths.json));
+    expect(validateResults(JSON.parse(text))).toEqual([]);
+    expect(text).toContain("trace window 1 of 1: its file could not be read: ENOENT: no such file");
   });
 
   it("measures again after a stop, but not twice at once", async () => {

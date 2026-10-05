@@ -133,8 +133,8 @@ impl BrightnessEnvelope { pub fn build(galaxy: &Galaxy) -> Self;   // reads the 
         ages: (Years, Years)) -> Option<Magnitudes>;
     pub fn mass_floor(&self, layer: Layer, component: ComponentId, faintest: Magnitudes,
         ages: (Years, Years)) -> SolarMasses; }
-pub fn max_star_mass(primary_initial: SolarMasses) -> SolarMasses;  // m₁ now; min(2 m₁, 150) once
-                                                                    // plan 11 wires binaries
+pub fn max_star_mass(primary_initial: SolarMasses) -> SolarMasses;  // min(2 m₁, 150) since
+                                                                    // R06.T16.b (m₁ before)
 
 // sky::caps (Design note 9)
 pub struct LayerCap { /* layer, radius: LightYears, rule_bound: LightYears,
@@ -252,7 +252,7 @@ with additive blending into an `rgba32float` target (Consumes).
 
 ### Test helpers
 
-`crates/hyperion-sim/tests/common/sky.rs` (built in R06.T8.b): `brute_force_sky(galaxy, query,
+`crates/hyperion-sim/tests/common/sky.rs` (built in R06.T8.e): `brute_force_sky(galaxy, query,
 radius)` (every system of every cell of every layer within `radius` of the observer, padded as the
 range query pads, with no skip; the census it is compared with runs with every cap forced to
 `radius` through `SkyQuery::with_caps_forced`), `observer_near_sun(galaxy)`,
@@ -975,32 +975,46 @@ luminosity_matches_realised_cells` passes.
   fit-check), independent of the galaxy: for each cell (layer C, D or E; \[Fe/H\] −2, −1, −0.5, 0
   and +0.18; log-age bins of 0.2 dex across the layer's luminous ages up to 1.5 × 10¹⁰ yr) the mean
   per born system of the layer of (pair-evolved − single-evolved) V light, colour sums and star
-  count, in 1-mag M_V bins (only those the layer populates), from ≥ 2 × 10⁴ systems a cell drawn
+  count, in 1-mag M_V bins (only those the layer populates), from ≥ 2 × 10⁴ systems a cell (2 × 10⁵
+  in layer C, decided 2026-10-04) drawn
   by the generator's own laws (the primary from the default mass function within the band,
   companions and orbits from plan 11's laws, ages log-uniform within the bin), each read from
   `SystemStars::state_at(t).stars()` and, single, from each `StarModel` alone, on the fit's own
   statistical seed. `LuminosityTables::build` adds to each component bin and snapshot the
-  born-weighted sum over the age bins (the same `weight_of`) of the differences, linear in
-  \[Fe/H\] between nodes and over the component's three Gauss–Hermite nodes. Light and colour: each
+  born-weighted sum over the age bins (the same born-system weights) of the differences, linear in
+  \[Fe/H\] between nodes and over the component's three Gauss–Hermite nodes, in the bin's finish
+  step in `TablesPlan::assemble`, once its single-star sums hold every node. Light and colour: each
   1-mag bin's difference is spread over its 20 sub-bins in proportion to the single-star light there
   (evenly where that is zero), the differential light clamped at 0, the cumulative sums recomputed.
   Counts take only the increase: each edge holds the larger of the single and corrected counts, then
   made non-decreasing (superseding item 3's ratio scaling). The envelope and the rule's bound are
   untouched (T16.b). A non-default mass-function kind takes no correction (a deviation). Gates
   (`cargo test -p hyperion-sim sky::luminosity`, and `luminosity_matches_realised_cells`): the fit's
-  born-weighted correction has a 1σ under 2% of each layer's light at the fixture's solar-circle and
-  bulge components; the clamped light is under 0.5% of each layer's light; in T5.c the corrected
+  born-weighted correction has a 1σ under 2% of each layer's light, and the clamped light is under
+  0.5% of it, at T5.c's two sites, per layer, summed over the components there by their systems
+  (decided 2026-10-04, "T5.d gate reading"); and, as a component guard, for every component bin of
+  the fixture's build, its 1σ and its clamped light summed over C, D and E are under 2% and 0.5% of
+  the bin's light over all its layers, each layer weighted by its share of the component's systems
+  (a bin that fails takes more systems in the cells that carry its error, never a smaller
+  correction); in T5.c the corrected
   tables' pair-against-single deficit per layer matches the cells' paired deficit within its
   interval, the realised light stays within the existing interval, and each layer's residual is
   recorded before and after. It does not block T8; it lands before T9.b's band gates and T17's
   goldens (no `GENERATOR_VERSION` bump while no band or census output is served or has goldens).
-  The job split: `LuminosityTables::plan(galaxy) → TablesPlan`, whose jobs are the track samples
-  per (\[Fe/H\] node, chunk of mass nodes) and the accumulation per component bin, put together
-  by `assemble` in index order; the sim spawns no threads. Test `parallel_build_equals_serial`: any
-  partition and order of the jobs (`order::assert_order_independent`) gives `build`'s bits; and
+  The job split: `LuminosityTables::plan(galaxy) → TablesPlan`, in stages, one metallicity at a
+  time (as built, 2026-10-04): each stage, an \[Fe/H\] node from the lowest, makes its track
+  samples per chunk of mass nodes (`sample_jobs`, `run_samples`, `track_samples`), then adds them
+  to each component bin that reads the node, one accumulation job per bin (`accumulate_jobs`,
+  `run_accumulate`), into the bin's running sums (`BinSums`, from `bin_sums`), which the caller
+  holds and which refuse a bin's nodes out of order; the stage's samples are then dropped.
+  `assemble` finishes each bin and puts the bins in index order; the sim spawns no threads. Test
+  `parallel_build_equals_serial`: any partition and order of the jobs, stages sampled ahead of
+  their turn and any threads (`order::assert_order_independent`) give `build`'s bits; and
   tables at +H read at t = 0 through `age_for` equal a build at t = 0 within 10⁻³ of every bin's
   light and count. Acceptance: `cargo test -p hyperion-sim sky::luminosity`, `just fit-check`,
-  `just test-slow luminosity_matches_realised_cells`.
+  `just test-slow luminosity_matches_realised_cells`. As built (2026-10-04): three fit tasks, one a
+  layer (`sky_binary_light_c`, `_d` and `_e`, each its own table under the 500 kB limit), and the
+  two fit gates held per site and layer; the record is in Risks ("T5.d's pair-evolved light").
 - **R06.T5.e Fewer nodes** (decided 2026-10-03). Try, in order: Gauss–Legendre order scaled with
   each mass panel's width (narrow panels between close breaks take fewer than 16 nodes); \[Fe/H\]
   nodes rounded to 0.1 dex instead of 0.05; `SAMPLES_PER_PHASE` 16 instead of 32. Keep each change
@@ -1041,8 +1055,11 @@ hyperion-sim sky::envelope`, `just fit-check`, and `just test-slow envelope_boun
 parameters, the current generator version (19), cut 7.95 (the eye's near the Sun, 7.4 + 0.45 +
 0.1), as decided 2026-10-03 (`decision-r06-t7-caps.md`): at the Sun (0, 26,000, 68) and in the
 nuclear disc (0, 150, 0), every cap at or inside its rule bound with 0 ≤ `expected_beyond` < 1;
-near the Sun A and B under 100 ly, and C, D and E each within a factor of **three** of 3,000, 4,300
-and 10,000 ly (a sanity bracket, not a confirmation of the brainstorm's version-14 figures); in
+near the Sun A and B under 100 ly, and D and E each within a factor of **three** of 4,300 and
+10,000 ly (a sanity bracket, not a confirmation of the brainstorm's version-14 figures), while C,
+whose cap rests on rare bright phases of pair channels since T5.d's count excess, keeps only its
+floor, at least 1,000 ly, with its rule bound as its ceiling (decided 2026-10-04, "T5.d caps after
+the pair correction"; no cap value is pinned); in
 the nuclear disc E under 1,500 ly, and each of C, D and E smaller than near the Sun; a ray's last
 profile node equals `sightline` (`Realised`, `Full`) to 10⁻¹². Slow test `caps_converge_in_rays`:
 at six points ((0, 26,000, 68), (0, 150, 0), (26,000, 0, 68), (−18,385, −18,385, 68), (0, 8,000, 0)
@@ -1370,16 +1387,30 @@ sky::census::features` and `just ci`.
   unchanged; (slow) `envelope_bounds_pair_states`: over ≥ 10⁴ realised multiple systems in old and
   young cells of each layer, every star of `SystemStars::state_at(t).stars()` is no brighter in V
   than the envelope at `max_star_mass(m₁)` with ages from zero, within the 0.3 mag margin.
-  Acceptance: `cargo test -p hyperion-sim --test sky_census`, `just test-slow
-envelope_bounds_pair_states` and `just ci`.
+  **Found by T8.e's oracle (2026-10-04):** two of T8.e's slow identity tests fail until this
+  subtask, each on a merger product the flux bound at m₁ skips (Risks, "Merger products outshine
+  the flux bound"). Those two systems, evolved merger products (an evolved blue straggler each, now
+  red giants), are the pinned mergers to use; an unevolved straggler is still to be pinned for the
+  main-sequence case. This subtask removes their exclusion from `.config/nextest.toml`'s
+  `[profile.slow]` `default-filter`, with its comment. It drops "fails until R06.T16.b" from the
+  two tests' ignore reasons, and the paragraph saying so from `tests/sky_census.rs`'s module doc.
+  It changes no assertion, and their identity checks then pass unchanged. Two of their checks are
+  not identities: that the census skips some systems, and, in the A/B test, that A and B each do.
+  With the bound widened to 2 m₁ over ages from zero, they could fail. If one does, that is a
+  finding on the widened bound's cost, to be reported, not an edit to make. Acceptance:
+  `cargo test -p hyperion-sim --test sky_census`, `just test-slow envelope_bounds_pair_states
+the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
+the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc` (with the exclusion removed) and `just
+ci`.
 
 ### R06.T17 Verification pass
 
 Run the slow tests and benches this plan creates (by name, not the whole slow suite or every bench,
 as the RM2/RM3 lanes' rules require: `just test-slow luminosity_matches_realised_cells
-envelope_bounds_dense_tracks envelope_bounds_pair_states caps_converge_in_rays`, `just bench --
-sky`) and record the figures
-in the doc comments that own them and in this plan: the caps (at the six points of
+envelope_bounds_dense_tracks envelope_bounds_pair_states caps_converge_in_rays
+the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
+the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, `just bench -- sky`) and record the
+figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
 "a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
 and post-AGB crossings, D post-AGB and bright giants through clear windows, E supergiants; handed
@@ -1400,9 +1431,11 @@ heap and the cold first sky against the budget decided 2026-10-03 (`decision-r06
 per-galaxy tables at most 30 CPU-s on a quiet machine, and the cold first sky near the Sun at most
 10 s wall on the dev machine with the default workers; if either fails, propose the disk cache
 (keyed by `GalaxyKey` and a sim fingerprint) or deeper node cuts. Record T5.d's residuals and the
-band's pair correction at the decision's three harness points ((0, 26,000, 68), (0, 8,000, 0) and
-(0, 3,000, 0)). The fits `sky_binary_light` and `sky_envelope` join the check list (`just
-fit-check`). Each timing is taken on a quiet machine, as the
+band's pair correction with its 1σ (from `LuminosityFunction::pair_light_sigma`) at the decision's
+three harness points ((0, 26,000, 68), (0, 8,000, 0) and (0, 3,000, 0)) and at a halo point, (0,
+26,000, 15,000) ly (decided 2026-10-04, "T5.d gate reading"); a 1σ over 2% of the band's light at
+any of the four is a finding. The fits `sky_binary_light_c`, `_d` and `_e` and `sky_envelope` join
+the check list (`just fit-check`). Each timing is taken on a quiet machine, as the
 roadmap's conventions require, or marked provisional. Acceptance: `just ci`, and the named `just test-slow` and `just
 bench -- sky` runs above complete.
 
@@ -1430,10 +1463,12 @@ bench -- sky` runs above complete.
 No change to generated output and no bump. `generate_cell_where` is `generate_cell` filtered, and
 the goldens prove it; the luminosity tables, the envelope, the caps and the census only read. The
 sky's own output is a function of the generator version and of the committed colour,
-limb-darkening and envelope (`sky_envelope`, T6.b) tables, so its goldens (T17) are regenerated
-whenever any of them moves. The envelope's move to a fitted table (2026-10-04) made it up to 1 mmag
-brighter, which moves the caps' rule bound and so the caps and the census's planned cells, with no
-bump: no golden pins them and nothing serves them yet (`decision-r06-tables.md`, A.5). Not adopted:
+limb-darkening, envelope (`sky_envelope`, T6.b) and pair-evolved light (`sky_binary_light_c`, `_d`
+and `_e`, T5.d) tables, so its goldens (T17) are regenerated whenever any of them moves. The
+envelope's move to a fitted table (2026-10-04) made it up to 1 mmag brighter, which moves the caps'
+rule bound and so the caps and the census's planned cells, with no bump: no golden pins them and
+nothing serves them yet (`decision-r06-tables.md`, A.5). T5.d's correction (2026-10-04) moves the
+luminosity tables' light, colour and counts in layers C, D and E, with no bump for the same reason. Not adopted:
 drawing a cell's mass words in sorted order, which the brainstorm offers as a generator-version
 change to skip light candidates without opening their streams; the mass-first walk already skips
 their position and density, and the benchmark decides whether the rest is worth a bump (Risks). The
@@ -1726,6 +1761,53 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   single-player it shares the machine with a descent. If the inner bulge is too slow, the fallbacks
   are, in order: the sorted mass words above (a bump); a coarser cap rule for layers whose
   candidates dominate; caching the census by observer cell across sessions in memory.
+- **Merger products outshine the flux bound until T16.b (found by T8.e's oracle, 2026-10-04).**
+  The per-record flux bound reads the envelope at `max_star_mass(m₁)` = m₁ and the record's age.
+  But plan 11's pair evolution (P11.T11) can merge a pair into one star of up to 2 m₁, which then
+  evolves as the heavier star it has become. Two of T8.e's slow identity tests, near the Sun at
+  cut 7.95 with the eye, each miss one such star. The cell floors were at their bands' lower
+  edges, so the per-record bound skipped both:
+  - **B within 500 ly:** system `0x21fe56487ff00001`, cell B (−14, 1608, −2), m₁ 0.638 M☉. Its
+    pair merged into one 1.187 M☉ first-giant-branch star (the other `NoRemnant`) of M_V 2.17,
+    listed at V 7.53 from 354 ly. The flux bound was M_V 3.78.
+  - **C within 1,000 ly:** system `0x42046c99ff00000a`, cell C (17, 806, −4), m₁ 0.758 M☉. It
+    merged into a 1.229 M☉ first-giant-branch star of M_V 0.85, listed at V 7.44 from 620 ly. The
+    flux bound was M_V 2.70.
+
+  So the plan's expectation that T8.e's identity tests pass before T16.b did not hold. T8.b's
+  sample found no straggler above the bound, but a sphere of 10⁵–10⁶ systems holds some.
+  Decided by the orchestrator (2026-10-04): T8.e commits the two tests unchanged, ignored with a
+  reason naming T16.b, and excluded by name from the slow profile (`.config/nextest.toml`,
+  `[profile.slow]`'s `default-filter`). T16.b widens the bound, removes the exclusion, and both
+  pass unchanged. No tolerance moved. The fast identity tests, and the nuclear disc's slow one,
+  hold no such star and pass. Until T16.b, a census can miss a merged giant of an M, K or G dwarf
+  system: here one of 36 listed B stars within 500 ly, and one of 21,210 listed C stars within
+  1,000 ly.
+
+  **Closed by T16.b (2026-10-05).** The bound now reads the envelope at twice m₁ over ages from
+  zero. The two systems' bounds move from M<sub>V</sub> 3.78 and 2.70 to −7.78 and −7.95. Both
+  tests are back in the slow profile and pass unchanged, except the A/B test's check that B skips
+  some systems, which is now a printed figure (see "Deviations in T16.b, as built").
+
+- **The mass skip barely bites near the Sun (found in T8.d, 2026-10-04; ruled: no change now).**
+  `cell_floor` reads the envelope over every age, 0 to `MAX_AGE_YEARS`, which allows a giant of a
+  band's least mass. So near the Sun every C–E cell's floor is its band's lower edge out to
+  hundreds of light-years (D and E to at least 800 ly, C to 200 ly, at cuts 6 to 9 with the eye),
+  and the floor rises only for A beyond about 100 ly, B beyond about 200 ly and C beyond about
+  400 ly. Inside that, a cell's bright subset is the whole cell, and each record is skipped only one
+  at a time, by its flux bound at its own age, after its drift and retarded time. T8.e's identity
+  tests show it: within 150 ly at cut 11, layers B to E generated every system. **Candidate
+  remedy:** the brainstorm's age skip (open question 13). A candidate's age word is independent of
+  the component picked, so it can be tested under every population component the cell can hold,
+  over the cell's light-time interval, before the density is evaluated: a candidate too faint at
+  each of its possible ages is skipped in the walk, as a light one is by the mass skip, rather than
+  after its record, drift and retarded time are built. Design note 8 declined this skip as
+  needing the component, a departure marked for the roadmap's corrections. The brainstorm's
+  reading needs no component, since it tests them all. Design note 8 also meant the floor's age
+  range to be the cell's components', but as built `cell_floor` takes every age. Whether the
+  departure stands is the owner's to rule. T17's warm-cache bench
+  (`sky/census_near_sun/warm`) measures the present floor against `HYPERION_SKY_CACHE_MB` = 64 and
+  decides whether the remedy is due.
 - **Extinction per candidate.** Each star that passes the skip takes one `sightline`. Plan 07's
   noise is log-normal with no floor, so no cheaper exact lower bound exists; in the nuclear disc,
   where the zero-extinction test passes almost everything, this may dominate. A per-direction
@@ -1754,8 +1836,10 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   term would cost more census than those stars are worth (decision-camera-eta.md).
 - **Binaries.** The flux bound and the envelope are exact for single-star systems today; once plan
   11 wires binary evolution in, R06.T16.b must land with it or the census can miss blue
-  stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the candidates above 0.5 M☉, the
-  research's estimate) is T17's to measure.
+  stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the
+  candidates above 0.5 M☉, the research's estimate) is T17's to measure. _T16.b landed
+  2026-10-05. Its cost is far above that estimate where B and C stars dominate, since 2 m₁ over
+  every age reaches the envelope's late giants ("Deviations in T16.b, as built")._
 - **The eye's cut** rests on Crumey's eq. 34 at the darkest pre-pass texel, clamped at a
   colour-corrected 10⁻⁵ cd m⁻² where Blackwell's data give no constraint (decided 2026-10-02; μ 25.6
   in starlight); a view darker than that is drawn to the clamp's limit, 7.99 at F = 1.4.
@@ -1935,10 +2019,13 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   cannot panic; `veiling_luminance` refuses a negative angle; MES2's weight is a `PhotopicWeight`
   newtype (0–1), which `mesopic_weight` returns and `blackwell_equivalent_factor` takes.
 - **Binary light and the tables' cost (decided 2026-10-03, `decision-r06-tables.md`).**
-  R06.T5.c found pair-evolved light 9% and 21% below single-star light in the solar circle's
-  layers C and D, and 4%, 11% and 10% below it in the bulge's C, D and E. That is first-order,
-  against item 3's second-order estimate. Carried into the band's integral, the band would be 7–12%
-  (0.08–0.14 mag) too bright and redder. T5.d corrects the light with a fitted, galaxy-independent
+  R06.T5.c's sample found pair-evolved light 9% and 21% below single-star light in the solar
+  circle's layers C and D, and 4%, 11% and 10% below it in the bulge's C, D and E. That is
+  first-order, against item 3's second-order estimate. T5.d's fit (2.6 × 10⁶ systems a layer in D and E, 2.6 × 10⁷ in
+  C) puts it at 2.1%, 10.2% and 21.2% in the solar circle's C, D and E, and 3.2%, 9.7% and 13.3%
+  in the bulge's, so the uncorrected band near the Sun would be about 3–5% (0.03–0.06 mag) too
+  bright and redder (the gate reading's 2–4%, with C's raised sample), which T17 measures at its
+  points. T5.d corrects the light with a fitted, galaxy-independent
   table of pair-minus-single differences, by layer, age, \[Fe/H\] and 1-mag M_V bin. The counts the
   caps read take only the excess, and the envelope and the rule's bound are untouched (T16.b).
   Those tables are bounds, and a deficit cannot be allowed to loosen them. The fitted correction
@@ -1992,6 +2079,210 @@ stars_per_system, dark_per_system, remnants_per_system}`, `LightColour` (flux-we
   **Found by T5.c:** record 0x81fd865fd000000f overflowed the stack in plan 11's binary engine
   (common envelope and merger recursing on a held bare core), fixed as a P11.T11 fix (plan 11's
   Risks); the held state's own inconsistency is with a decision agent.
+- **The tables' build memory and the tests' cost (fix, 2026-10-04).** With T5's metallicity nodes
+  and gradient bins, `build_with` held every metallicity's samples to the build's end, about
+  150 MB each (2,240 nodes at 32 samples a phase): 17 for the young thin disc's seven bins, 22
+  for a full build. `doubling_the_samples_moves_no_bin_above_one_percent` peaked at 4.1 GB
+  natively and ran out of wasm32's 4 GiB on wasip1 (CI-13), and most table tests ran 5–20 times
+  longer than at CI-11. `build_with` now makes one metallicity's samples at a time, the lowest
+  \[Fe/H\] that any bin adds next, adds them to every bin whose next node it is, and drops them.
+  Each bin keeps its own snapshots' bins and adds its three nodes in their order, so the tables
+  are unchanged bit for bit: bit fingerprints of a full build at +H, a build at twice the samples
+  and a primaries-only build at −55,000 yr match the old code's. A build's peak is now one
+  metallicity's samples: 304 MiB across those three builds, against 4.2 GB. Each part's share
+  reads `born_cdf` once per end, not twice per part. That took a young thin-disc bin's
+  accumulation from 3.2–4.6 s to 1.8–1.9 s, and a full build from 136 s to 104 s (test profile,
+  under load). The unit tests that read only `get` build a gradient component's solar-circle bin
+  alone (`GradientBins::SolarCircle`, test-only), which is the full build's bin bit for bit: three
+  metallicities rather than 17. The slow test
+  `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit` pins that equality, and its build of
+  all seven bins at twice the samples guards the memory. The doubling test now takes 52 s and
+  289 MiB natively (217 s and 4.1 GB before), and 61 s and 365 MiB on wasip1. At CI-11 it took
+  28 s and 33 s, with one metallicity per component; the rest of the difference is the three
+  Gauss–Hermite nodes. T5.d's job split keeps this peak (next item).
+- **The job split in stages (T5.d merged with the memory fix, 2026-10-04).**
+  - **Before.** T5.d's split (062e32c) made every \[Fe/H\] node's samples, then built each
+    component bin from all of them, so it held every node's samples at once. A full build peaked
+    at 2.7 GB serially and 2.6 GB on 16 threads.
+  - **How it works now.** `TablesPlan` runs in stages, one metallicity at a time from the lowest
+    \[Fe/H\]. The Milky Way fixture has 22 stages and 53 bins.
+    - A stage's sample jobs are unchanged.
+    - Its accumulation jobs, one per bin that reads the node, add into that bin's running
+      `BinSums`. The caller holds those sums from `bin_sums` to `assemble`, and they panic if a
+      bin's nodes come out of order. After that the stage's samples can be dropped.
+    - `assemble` finishes each bin. T5.d's pair correction goes in that finish step, applied to
+      the bin's complete single-star sums.
+  - **Deviation from the T5.d sketch** (approved by the orchestrator the same day).
+    - `track_samples` takes one stage's chunks.
+    - `run_accumulate` adds to the caller's sums instead of returning a bin's tables.
+    - `BinTables` is gone.
+  - **Bits.** Three builds give the same fingerprint and the same `heap_bytes` at 7772faf, at
+    062e32c's integration head (d400869) and after the merge:
+
+    | Build                                                  | Fingerprint        | `heap_bytes` |
+    | ------------------------------------------------------ | ------------------ | ------------ |
+    | Full, at +H                                            | `36d76d03f1cc651a` | 68,775,072   |
+    | Young thin disc's seven bins, twice the samples, at +H | `f794503ac9529263` | 29,828,064   |
+    | Primaries only, every component, at −55,000 yr         | `0bdedce256b01507` | 68,775,072   |
+
+    Both versions' pool builds on 16 threads give the full build's fingerprint, and so does the
+    merge's pool build with lookahead.
+
+  - **Peak RSS, serial** (MiB, test profile, under shared load):
+
+    | Build             | 062e32c | 7772faf | Merge |
+    | ----------------- | ------- | ------- | ----- |
+    | Full              | 2,735   | 273     | 279   |
+    | Twice the samples | 3,346   | 304     | 295   |
+    | Primaries         | 2,708   | 249     | 238   |
+
+    The peaks are `getrusage`'s maximum RSS of the test process and its children, the figure
+    GNU `time -v` prints (it is not installed here). Each test below ran alone:
+    - natively, the doubling test peaked at 4,072 MiB and took 228 s at 062e32c's integration
+      head, against 304 MiB and 53 s after the merge;
+    - on wasip1, after the merge, the doubling test passed in 65 s at 363 MiB;
+    - `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit` passed in 120 s at 307 MiB.
+
+  - **The pool.** It holds:
+    - one stage's samples, shared by its threads: 151 MiB at 32 samples a phase;
+    - every bin's sums, about 65 MiB;
+    - per thread, a sample chunk of at most 64 nodes, about 4 MiB.
+
+    On 16 threads the staged pool took 23.2 s wall and 237 MiB. 062e32c's took 18.8 s and
+    2.6 GB. Within a stage only the bins that read its node accumulate (1–22 jobs), so
+    accumulation took 13.2 s of the staged pool's time, against 9.7 s for 062e32c's.
+    Sampling stage k + 1 while stage k accumulates holds two stages' samples and gives the same
+    bits: 18.8 s and 439 MiB.
+
+  - **T11.c follow-up.** The server's pool should schedule that one-stage lookahead. The sim
+    spawns no threads, so the schedule belongs to the caller.
+  - **The test.** `parallel_build_equals_serial` still pins the halo's serial build to the
+    pre-split fingerprint, `0x6ca2_bafb_4c81_c7b4` (fae1c11). Its parallel part now builds the
+    bulge and the long bar, which share two of their four stages. It samples every stage ahead of
+    its turn, runs each stage's jobs reversed on four threads, and checks the result against
+    their serial build.
+  - **Guards.** `run_accumulate` panics on a bin's nodes out of order and on another stage's
+    samples, and `track_samples` panics on another stage's chunk; each has a `should_panic` test.
+- **T5.d's pair-evolved light, as built (2026-10-04/05, `decision-r06-tables.md` A, "T5.d gate
+  reading" and "T5.d caps after the pair correction").**
+  - **One task a layer (a deviation).** The ruling's one `sky_binary_light` task is three,
+    `sky_binary_light_c`, `_d` and `_e` (class Slow, revision 0, since generator version 20),
+    each writing `tables::sky_binary_light_<layer>` (193, 185 and 216 kB), as `stellar_fates_{low,
+mid,high}` are split: their some 68,000 values do not fit the 500 kB
+    `check-added-large-files` limit in one file. One struct (`SkyBinaryLightTask { layer:
+FitLayer }`, in `crates/hyperion-fit/src/tasks/sky_binary_light.rs`), three statics in
+    `REGISTRY`, three manifests and three `.smoke.toml`s (two systems a cell). The manifests
+    repeat the code's constants (the cell layout, the luminosity tables' bin edges and the task's
+    chunk of 250 systems), enforced by `expect_params`.
+  - **The table.** Per layer: `FIRST_BIN` (the first 1-mag bin held, counted from M_V −12);
+    `DELTA: [[[f64; 6]; W]; 130]`, per cell (\[Fe/H\] node, then age bin) and held bin, the mean
+    per born system of pair-evolved less single-evolved V light, the four colour sums and the star
+    count; and `LIGHT_SE: [f64; 130]`, each cell's standard error of its mean total-light
+    difference. Four significant digits. Held: C from M_V −7, D from −8 and E from −12, each to
+    +20. The cells' ages are 25 bins of 0.2 dex from 10⁵ to 10¹⁰ years and one to 1.5 × 10¹⁰,
+    the same for every layer: "the layer's luminous ages" are taken as every age from 10⁵ years
+    (younger stars are Class 0 protostars, dark in V; the protostar phase runs to 5 × 10⁵ years,
+    `PROTOSTAR_DURATION`), since a layer-E system's companions shine for gigayears after its
+    primary dies. Their modules carry `#[allow(clippy::approx_constant)]` in `tables/mod.rs`,
+    since the files are written whole.
+  - **The sampling** is the sim's (`sky::binary_light`, new): `fit_galaxy` (the Milky Way-like
+    parameters under the fit's own seed, `GALAXY_SEED` 0x5b1a_0005_0000_5eed), `fit_record`,
+    `system_difference`, `CellSums` and `cell_sums`, with the cell layout's constants and
+    `age_edge`. A cell's n-th system takes the candidate ID cell × 2²⁴ + n along +x from the
+    solar circle's cell row in the primary's band layer, `SystemOrigin::Grid` of component 0, the
+    point (0, 26,000, 0) ly, the primary from `quantile_in` within the band and the age
+    log-uniform in its bin on the R2 low-discrepancy sequence (`sample_point`: Roberts, M. 2018,
+    "The Unreasonable Effectiveness of Quasirandom Sequences", Extreme Learning, from ½, in exact
+    integer arithmetic at the middles of 2⁻⁵² steps, so no stream and no domain tag), the node's
+    composition with ΔY = 0 and `SystemStars::generate_with(.., MultiplicityContext::Free)`.
+    Pair-evolved stars are read from `state_at(EPOCH).stars()` and single ones from each
+    `stars()[i].state_at(EPOCH)`, binned by the tables' own `Seen::of` (now `pub(super)`). Systems
+    a cell: 2 × 10⁴ in D and E and 2 × 10⁵ in C, whose cap rests on rare bright pair phases
+    ("T5.d caps"). Pair evolution changed 1.10% (C), 6.98% (D) and 12.78% (E) of them. The fit
+    takes `raised_cells = [[cell, systems], …]` for a cell that carries a component bin's error
+    past the guard (`Sampling`); none is needed.
+  - **Cost, memory and determinism.** Chunks of 250 systems summed in index order on
+    `map_reduce_chunks`, so any thread count gives the same bytes; reruns of C and D reproduced
+    their bodies byte for byte, and the smoke run is the same on 1 and 3 threads. At version 20,
+    under loads of 25–45 (provisional): C 1,166 s on 8 threads (2.6 × 10⁷ systems), D 637 s on 8,
+    E 1,797 s on 14. The fit's RSS is about 17 MB; it builds no luminosity tables, so its cost does
+    not depend on the build's memory fix. With the correction the fixture's full serial build
+    peaks at 216 MiB (getrusage maxrss of the gate test alone, after the memory fix a934837), the
+    `sky::` suite on 2 threads at 559 MiB, and T5.c's slow test at 221 MiB.
+  - **Fingerprint.** Per layer, two cells where its primaries are giants, at solar and a tenth
+    solar \[Fe/H\] (C: age bins 21 and 24, 640 systems each; D: 16 and 17, 96; E: 11 and 12, 48),
+    and one young cell where the protostars are, age bin 2 at solar \[Fe/H\], 2,000 systems (the
+    caps ruling, so that fit-check sees plan 11's protostar fix): each of a bin's six summed
+    differences, the light difference times its bin's index (where the light lands), its
+    absolute value and the systems changed. About 1.5 s a layer in fit-check.
+  - **The build.** `TablesPlan::correct_for_pairs` is the first part of `assemble`'s finish step
+    for each bin, once its every metallicity stage is in: it adds the correction to the bin's
+    single-star `Bins` at each snapshot, before the cumulative sums. Each cell's coefficient is
+    the bin's born share in the cell's age bin then (the same `born_cdf`) times each
+    Gauss–Hermite node's weight, split linearly between the bracketing \[Fe/H\] nodes (held at −2
+    and +0.18), so two nodes on one cell count its error once. Light and colour are spread over
+    the 20 sub-bins by the single-star light (evenly where there is none); a sub-bin's light is
+    held at zero, with its colour sums then zero, and each colour sum is held at zero. Counts
+    spread the count difference by the single-star counts; each edge takes the larger of the
+    single and corrected cumulative counts, then a running maximum. Only under
+    `MassFunctionKind::default()`, which the fit drew from: a Kroupa galaxy takes none (the
+    ruling's deviation). Each snapshot keeps the applied light, its standard error and the clamped
+    light: `LuminosityFunction::{pair_light, pair_light_sigma}` are new, which T5.c reads and T17
+    records the band's correction and 1σ from. `parallel_build_equals_serial`'s pin moved from
+    `0x6ca2_bafb_4c81_c7b4` to `0x8c44_443c_67ac_13bf` (the correction, and `bits` hashing the
+    snapshots' pair fields).
+  - **Gates** (`the_pair_correction_is_known_to_two_percent_and_clamps_under_half_a_percent`).
+    Per site and layer ("T5.d gate reading"): the 1σ under 2% and the clamped light under 0.5% of
+    each layer's light at T5.c's two sites, summed over the components by their systems there (the
+    fit's error is shared, so it adds linearly). Measured (correction, 1σ, clamped): solar circle
+    C −2.07%, 0.29%, 0.000%; D −10.16%, 0.72%, 0.019%; E −21.21%, 1.11%, 0.008%; bulge C −3.24%,
+    0.29%, 0.000%; D −9.70%, 0.82%, 0.034%; E −13.32%, 0.55%, 0.019%. The component guard, every
+    one of the fixture's 53 component bins with its layers weighted by its systems and C, D and E
+    folded together: the largest 1σ is 1.17% (the old thin disc at \[Fe/H\] −1) and the largest
+    clamp 0.32% (the old thin disc at −0.5; the thick disc 0.29%, the halo at −0.6 0.17%), all
+    within 2% and 0.5%. At 2 × 10⁴ systems in C one bin had failed (the old thin disc at −0.5,
+    2.38%), 64% of its error from one C cell, which raising C cleared. A failing bin's message
+    names the cells that carry its error (`binary_light::cell_errors`, test-only). Read per
+    component and layer, old components' D and E reach a 1σ of 3–35% and clamps up to 22%, on a
+    few per cent of the sites' D and E light.
+  - **T5.c after the correction** (`luminosity_matches_realised_cells` passes, 772 s at load
+    25–30). Realised against tabulated light, single-star tables then corrected: solar circle C
+    −6.4% → −4.4%, D −28.6% → −20.4%, E +15.5% → +47.7%; bulge C −6.7% → −3.6%, D −9.6% →
+    +0.5%, E −17.6% → −4.5%; A, B and the brown dwarfs are not corrected (+2.9%, −2.4%, +5.6%;
+    −4.2%, +0.7%, −6.3%). The new gate holds the cells' paired deficit against the tables' within
+    Z √(Σ d² + σ²), with d each system's pair-evolved less single-star light and σ the fit's: solar
+    circle C 9.4% against 2.1%, D 21.0% against 10.3%, E −1.0% against 21.8%; bulge C 3.8%
+    against 3.3%, D 10.5% against 10.1%, E 10.2% against 13.8%, all within. The solar circle's E
+    rests on 7,089 systems whose light is a handful of bright stars (6 brighter than −3), and is
+    evidence of nothing either way.
+  - **Caps after the correction** (cut 7.95; `caps_near_the_sun_and_in_the_nuclear_disc`, whose C
+    bracket is now its 1,000 ly floor and its rule bound, as "T5.d caps" rules; D and E keep ×3).
+    Near the Sun C 6,764 → 8,193 ly, D 8,193 → 9,925, E 21,369 (unchanged); nuclear disc C 116, D
+    204 → 205, E 362. At 2 × 10⁴ systems C's cap had been 13,232 ly on one fit system (a giant
+    branch and helium-star core merger whose helium giant reaches M_V −6 to −7 for some 10⁵ yr).
+    **For T17:** C's cap is set by rare pair-channel phases whose fitted rate rests on few
+    systems: the table's net excess of stars brighter than the cut less the cap's modulus (M_V
+    −4.05) is some 3 stars of C's 2.6 × 10⁷ fit systems (D: 31 below −4.47; E: 286 below −6.13),
+    and C's cap moved by two radial nodes on them. T17 re-derives open question 19's C figure with
+    this; the six points of `caps_converge_in_rays` are recorded in `layer_caps`' doc comment.
+  - **Finding: the correction is smaller than the ruling's first estimate near the Sun.** The
+    ruling scaled T5.c's one sample, 9% and 21% in the solar circle's C and D; the fit gives 2.1%
+    and 10.2%. With the ruling's harness shares (all sky C 0.775, D 0.161, E 0.038) the
+    uncorrected band near the Sun is about 4% (0.04 mag) too bright over the whole sky, 5% in the
+    plane and 3% at high latitude, and D carries as much of it as C. T17 measures it at its four
+    points. These figures measure the generator against itself: the literature brackets them
+    (Li and Han 2008, ApJ 685, 225, about 11% less flux in 1–15 Gyr populations of 100% binaries;
+    Eldridge and Stanway 2009, MNRAS 400, 1019, fewer red supergiants), without a V deficit per
+    mass band to test them against.
+  - **Found: protostar mergers (a plan 11 bug, for its 20 → 21 batch).** A pair whose
+    pre-main-sequence radii overlap is merged at age 0 and shown, until the product reaches the
+    main sequence, as a 0.010 M☉ Substellar object (M_V 17.4) beside a NoRemnant: for example
+    the fit's D cell 80, index 144 (ID 0x6214596800000090), whose 0.755 and 0.425 M☉ stars read
+    that way at 10⁶ and 3 × 10⁷ yr and as a 1.18 M☉ merger product at 10⁹ yr. It puts differences
+    of about 10⁻³ L☉,V and +0.003 to +0.025 stars a system at M_V 17–19 in the young cells:
+    negligible light, nothing for the caps. The young fingerprint cell marks the tables stale when
+    plan 11 fixes it, and they are refitted then.
+  - **No `GENERATOR_VERSION` bump.** Nothing served or golden reads the tables yet (A.5).
 - **The A3 interim's Class I sources (T5).** `is_dark_in_v` treats every Class I protostar as dark;
   a few per cent of them, seen pole-on down an outflow cavity (A<sub>V</sub> about 1.5; Whitney et
   al. 2003a, ApJ 591, 1049, §2 and Fig. 3), would show in V. Plan 06's A3 decides.
@@ -2090,10 +2381,11 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   1,000 ly and 200 ly radii, about 10⁷ systems generated whole over every layer, are infeasible;
   T8.e compares every layer at 150 ly near the Sun and 10 ly in the nuclear disc, and slowly the
   plan's radii for C–E near the Sun and D–E in the nuclear disc, with a slow A/B check at a radius
-  a slow test can afford, since identity there tests that the envelope bounds every M dwarf). A
-  cell is kept for a cone when its bounding ball, padded, meets the cone. `SkyContext` is a plain
-  bundle of borrows with public fields, the census's one accessor to the tables (so the tables
-  lane's change of their source touches nothing here). The cell cache's trait, `NoSkyCellCache` and
+  a slow test can afford, since identity there tests that the envelope bounds every M dwarf;
+  narrowed in the nuclear disc by T8.e's record). A cell is kept for a cone when its bounding
+  ball, padded, meets the cone. `SkyContext` is a plain bundle of borrows with public fields, the
+  census's one accessor to the tables (so the tables lane's change of their source touches nothing
+  here). The cell cache's trait, `NoSkyCellCache` and
   the monotone rule, `serve_from_entry` returning `Served::{Served, Rebuild}`, are built here
   because `SkyContext` holds a cache (T8.d adds the rest). Planned for T8.b, accepted 2026-10-03:
   the per-record flux bound is n × the envelope's flux at `max_star_mass(m₁)` and the record's age
@@ -2191,3 +2483,322 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
     - listed plus overflow is the unbounded census at every `n_max` from 1 to 47;
     - a census merged again recounts its listed; the feature-member flag; a star in two parts and
       a NaN V are refused; the empty census.
+- **Deviations in T8.d, as built.** T8.a built `SkyCellCache`, `NoSkyCellCache`, `Served` and
+  `serve_from_entry`. T8.d adds no public item.
+  - `serve_from_entry` serves only when `floor >= held`, so a NaN on either side rebuilds. T8.a's
+    `floor < held` refusal let a NaN through, and an entry built at a NaN floor holds no record.
+  - The trait's doc lists what an implementation that keeps entries owes, with an example (a
+    one-entry cache keyed by seed and cell):
+    - it serves only through `serve_from_entry`, and keeps a rebuilt cell at the floor it was
+      rebuilt for, never at a NaN floor;
+    - it keys entries by galaxy as well as by cell, as `CellCache` does;
+    - it is bounded in bytes, each entry weighing at least `cell_heap_bytes` of its records
+      (T11.b's `ByteLru` under `HYPERION_SKY_CACHE_MB`). Eviction is always safe.
+  - The sim holds no keeping cache. The tests' `KeepBright` (test builds only) is built on the rule,
+    as the server's will be: one galaxy's entries in a `BTreeMap` behind a `Mutex`, shared through
+    `&self`, least recently used first out. It builds a missing cell outside the lock and replaces
+    an entry only with one of a lower floor.
+    - **Its memory bound:** at most `max_entries` entries, together weighing at most `max_bytes`.
+      An entry weighs its records' capacity × `size_of::<SystemRecord>()`, plus its key and its
+      own struct; the map's nodes are not counted. An entry heavier than the whole bound is served
+      and not kept. The orchestrator required a stated, tested bound of any cache.
+    - T11.b's server cache should pass the same scenarios: looser then tighter, a planted entry,
+      and `assert_order_independent` through a shared cache that evicts.
+  - **Measured on the fixture (2026-10-04),** along x through the Sun at cuts 6 to 9 with the
+    eye: every D and E cell's floor is its band's lower edge out to 800 ly (the farthest probed),
+    and every C cell's out to 200 ly. `cell_floor` takes the envelope over ages 0 to
+    `MAX_AGE_YEARS`, which allows a giant of the band's least mass. So two queries' floors part
+    only in A from about 100 ly, in B from about 200 ly and in C from about 400 ly (by 3% of the
+    band's log width at cut 6), and there a C–E cell's bright subset is the whole cell. T11.b's
+    default of 64 MB and the warm-cache bench should be read with that in mind. The brainstorm's
+    skip by age, under every component the cell can hold, is not in the plan.
+  - Tests (`cargo test -p hyperion-sim sky::census::cache`; 40 s on 2 threads under load) run over
+    25 cells along x through the Sun (A–C at 0, ±100, ±200 and ±800 ly; D and E at 0 and 200 ly).
+    They use three queries: cut 9 with the eye, cut 6, and cut 6 from 200 ly along x. Each census
+    is compared with the `NoSkyCellCache` census, its stars by `PartialEq` and every float's bits:
+    - the rule serves at or above the floor, at a record's own mass too, and refuses below it and
+      on a NaN, leaving `out` untouched;
+    - a tighter query after a looser one is served from every entry and filters some; a looser
+      one after a tighter one rebuilds some, which then serve the tighter again; the move after
+      the tighter both rebuilds and filters; a query 900 years before the epoch reads the entries;
+    - a planted entry of another cell's records is never read below its floor (the cell is rebuilt
+      and replaces it), and is read at or above it; a NaN on either side rebuilds;
+    - the bound holds after every lookup: least recently used first out; five entries alone and a
+      third of the bytes alone each evict without changing a reply; an entry heavier than the
+      bound is not kept;
+    - each (query, cell) part is order independent (`assert_order_independent`) through one
+      shared 8-entry cache that evicts, rebuilds and filters;
+    - two threads censusing different queries through one cache get the uncached bits. This test
+      is left out on wasm32-wasip1, which has no threads.
+  - A by-hand check, not committed: with the rule made to serve every floor, four of the then
+    five tests failed.
+  - Two of T8.b's doc links in `cell.rs` are mended: the module doc's link to
+    `SkyCellCache::bright_subset`, and `star_offset_bound`'s link to the private
+    `offset_bound_at`.
+  - Not built: the benches `sky/census_near_sun` (cold and warm cache) and
+    `sky/census_nuclear_disc` of T8's shared paragraph, which no subtask names. Lean: T8.e builds
+    them, after its observers, with a bench-local cache on `serve_from_entry`, since `KeepBright`
+    is test-only.
+- **Deviations in T8.e, as built.** `crates/hyperion-sim/tests/common/sky.rs` and
+  `tests/sky_census.rs`, with one public addition to the sim and the benches T8's shared paragraph
+  names.
+  - **Added: `LuminosityTables::dark(galaxy)`** (orchestrator, 2026-10-04). The integration tests
+    cannot call the `pub(crate)` `build_with`, and a census with forced caps reads no table. It
+    returns tables for no component, built at `REFERENCE_TIME`, every function zero. It has a doc
+    example, and `the_dark_tables_hold_no_star_at_the_reference_time` checks it: every component
+    and layer, read by `get` and by `get_at` at both test places, at light ages 0 to 400,000 years
+    through `age_for`, holds no light, count, star, dark star, remnant or colour.
+    `sky/testing.rs`'s `milky_way_dark_tables()` now calls it.
+  - **The helpers:**
+    - `brute_force_sky(galaxy, query, radius)`, as the Test helpers name it. Beside it,
+      `brute_force_parts` and `census_parts` take `(galaxy, query, radii)` and return one
+      `(stars, tallies)` part per cell, so that a test merges them at two `n_max`.
+    - `observer_near_sun(galaxy)` stands at (0, 26,000, 68) ly, and
+      `observer_in_nuclear_disc(galaxy)` at (0, 150, 0) ly, both at the epoch. Each asserts that
+      its place fits the galaxy: the bar ends short of 26,000 ly, and the nuclear disc's scale
+      length is beyond 150 ly.
+    - Both sides open the cells of the census's own plan for the forced caps (`census_plan` after
+      `with_caps_forced_per_layer`, whose cells are `plan_cells`', which T8.a made public for the
+      brute force to share), so they differ only in the skips. The oracle measures every record of
+      `generate_cell` with `census_record(…, Bound::Ignored, …)`.
+    - Both read `LuminosityTables::dark` and the fitted envelope. They run the cells on up to
+      eight threads, or one on wasm32, and put the parts back in the plan's order.
+    - The queries are taken by value.
+  - **The identity tests' scope** (amending the accepted deviation of 2026-10-03). The systems in
+    the opened cells were counted on the fixture first:
+
+    | Test | Place        | Layers within                          | Cut (eye) | Systems          |
+    | ---- | ------------ | -------------------------------------- | --------- | ---------------- |
+    | fast | Sun          | every layer, 150 ly                    | 11        | 39,600           |
+    | fast | Sun          | every layer, 40 ly (`brute_force_sky`) | 11        | within the above |
+    | fast | nuclear disc | A and B, 1.5 ly                        | 11        | 49,534           |
+    | slow | Sun          | A 300 ly, B 500 ly                     | 7.95      | 246,600          |
+    | slow | Sun          | C, D and E, 1,000 ly                   | 7.95      | 1.40 M           |
+    | slow | nuclear disc | D and E, 20 ly                         | 7.95      | 0.88 M           |
+    - **The nuclear disc is narrower than accepted.** Every layer within 10 ly opens 1.9 M systems
+      there, since a D cell holds about 96,000 and an E cell about 124,000. D and E within the
+      plan's 200 ly would open 17.3 M, about 15,000 CPU-seconds for the oracle alone at the 0.9 ms
+      a system measured under load. So the fast test takes A and B within 1.5 ly, and the slow one
+      D and E within 20 ly. Each is the four cells of its layer that meet at the place, which lies
+      on the cell boundaries x = 0 and z = 0. Reported to the orchestrator with this record.
+    - Each test compares the listed and the overflow star for star, by `PartialEq` and by every
+      float's bits (the apparent position's offset in metres as held). It compares them at the
+      query's `n_max` and at a third of the listed, where the overflow is not empty. It compares
+      each layer's accepted and listed, and asserts that the census lists stars and skips systems.
+      The A/B check asserts both A and B skip some.
+    - The nuclear disc's slow test passes (2026-10-05, under load average 15–21): D generated
+      383,434 of 383,439 systems and E 494,726 of 494,729, listing 5,323 and 1,010 stars. It took
+      53 minutes on eight threads, about 14 ms a system per thread for each side. Its eight cells
+      are the unit of parallel work, so no more threads would shorten it. That is heavy for the
+      slow suite, and T17 should weigh it.
+    - Measured in the fast tests (2026-10-04, under load). Within 150 ly of the Sun, B to E
+      generated every system (T8.d's finding on the floors). A generated 10,767 of 18,469, and the
+      brown dwarfs none of 8,268 (1,073 candidates). In the nuclear disc, A generated 20,328 of
+      21,450 and B all 28,084. The three fast identity tests took 10 s on two test threads,
+      eight workers each.
+    - **Not compared in the nuclear disc: layers C and the brown dwarfs.** Near the Sun both are
+      compared within 150 ly. At the nuclear-disc place, their four cells alone hold some 280,000 C
+      systems (C under 8 ly) and 63,000 brown dwarfs (under 6 ly). That is left for a later rerun
+      of the oracle (T16.b or T17) rather than added to a lock-bound slow suite now.
+    - **The slow identity tests run by name.** `cargo test -p hyperion-sim --test sky_census` runs
+      the four fast tests. `just test-slow the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`
+      runs the nuclear disc's slow test. The two near the Sun fail until T16.b (Risks, "Merger
+      products outshine the flux bound") and are excluded from the slow profile by name until then.
+      T17's list names all three. _T16.b removed the exclusion; all three run by name._
+    - `tests/common/mod.rs` declares `pub mod sky`, so every integration binary that includes
+      `common` compiles the oracle. Each already carries `#[expect(dead_code)]`. Beside the named
+      helpers, `sky.rs` exports `every_layer`, `float_bits`, `assert_same_stars`, `Part`, `THREADS`,
+      `SUN_LY` and `NUCLEAR_DISC_LY`.
+    - nextest reserves eight slots for each `sky_census` test (`threads-required`), since each runs
+      eight threads of its own.
+
+  - **On wasm32-wasip1,** which has no threads, the oracle runs on one thread. There the fast
+    identity tests at 150 ly and in the nuclear disc are ignored as slow, so `just test-wasm-slow`
+    runs them as a 32-bit check. The 40 ly test of `brute_force_sky` stays in the fast suite, and
+    the slow ones are compiled out, since they would take hours.
+  - **Built here: the benches** `sky/census_near_sun/cold`, `sky/census_near_sun/warm` and
+    `sky/census_nuclear_disc` (`benches/sky.rs`), which no subtask named (orchestrator, 2026-10-04).
+    - Each census runs much as the server will run it. The plan, with its caps, runs on one thread.
+      The server will split the caps' rays into pool jobs (T7's decision), so the printed wall time
+      overstates its own. Then chunks of 256 cells run on the machine's threads less one, each job
+      with its own noise cache, and `merge_census` joins them.
+    - The figure is CPU time: the plan's plus every job's, summed over the threads. The cut is
+      V 7.95 with the eye, the eye's cut near the Sun (7.4 + 0.45 + 0.1), until T9's `eye_cut`. The
+      nuclear disc takes it too. Its own eye cut will be shallower, so its figure is an upper bound.
+      The brainstorm's 400–800 CPU-s are the inner bulge's under the near-Sun caps held fixed, so
+      they are not a target like for like.
+    - The bench-local cell cache is built on `serve_from_entry`. It evicts the least recently used
+      first, and is bounded by `HYPERION_SKY_CACHE_MB` (default 64 MiB; a malformed value panics).
+      Its entries share their records, so a lookup filters them outside the lock.
+    - The cold census starts each iteration with an empty cache. The warm one reads the cache that
+      one census of the same query left.
+    - Each prints its first census's caps, cells, candidates, generated, accepted, listed and the
+      cache's counts.
+    - **Run once, provisionally (2026-10-05):** `sky/census_near_sun/cold`, one census in
+      criterion's `--test` mode under the heavy-test lock, was stopped unfinished after 20 minutes
+      on the orchestrator's word. By then it had taken **≥ 14,000 CPU-s** (14,750 CPU-s of the
+      process, of which the tables' build is some 300): 15 workers, cut 7.95 with the eye, RSS
+      1.6 GB, on a machine shared with other lanes. The brainstorm's target is 5–10 CPU-s and
+      some 6 × 10⁷ candidates on first arrival (open question 13), so it misses by over a thousand
+      times. No per-stage split was printed, since the run did not finish. The likely causes:
+      - the caps are about twice the brainstorm's (T7's record: C 6,764, D 8,193, E 21,369 ly
+        against 3,000, 4,300 and 10,000), about ten times the volume and the candidates;
+      - T8.d's floor finding: C–E floors are their bands' lower edges out to hundreds of
+        light-years, so every C–E record there is drifted and retarded before its flux bound
+        skips it;
+      - each generated system costs about 1 ms near the Sun, and up to 14 ms in the nuclear disc
+        (the identity tests' timings).
+
+      The warm and nuclear-disc benches are not run, and are left for T17 or the owner on a quiet
+      machine. The orchestrator puts the census's cost to its own investigation (see "The
+      census's cost" and "The mass skip barely bites near the Sun").
+- **Deviations in T16.b, as built (2026-10-05).** The bound for binaries, as Design notes 8 and
+  10 and decision item 2 set it, with one choice of the lane's and three test checks changed by
+  ruling.
+  - **The rule.** `max_star_mass(m₁)` is min(2 m₁, 150 M☉), the cap being `sse::MAX_INITIAL_MASS`.
+    Plan 11's engine runs only pairs of two stars (`run_pairs`), and no companion outweighs its
+    primary, so m₁ + m₂ ≤ 2 m₁. The engine builds no track above 150 M☉ (`track_mass`).
+    `flux_bound` reads the envelope at `max_star_mass(m₁)` over ages from zero to the system's
+    for a grid system (n = `GRID_STAR_BOUND`). It reads the primary's own mass and age for a
+    forced single (n = 1), which is never in a pair. `cell_floor`'s code is unchanged: it reads
+    the widened mass through `BrightnessEnvelope::mass_floor`, which already took every age.
+  - **The lane's choice: the floor takes 2 m₁ in every layer.** That includes the brown dwarfs,
+    whose systems are forced singles and need only m₁. Their floor is lower than needed: within
+    150 ly at cut 11, 5,102 candidates against 1,073 before. None is generated either way, since
+    their flux bound keeps m₁. A layer-aware mass in `mass_floor` would win that back, and is
+    left to the cost ruling.
+  - **The caps.** The rule bound reads `max_star_mass` of the band's top, so it moves, but no cap
+    moves at the fast test's two points: caps are count-limited.
+
+    | Layer | Rule bound near the Sun, before → after (ly) | Nuclear disc (ly) |
+    | ----- | -------------------------------------------- | ----------------- |
+    | A     | 105 → 17,595                                 | 20 → 573          |
+    | B     | 199 → 21,616                                 | 25 → 704          |
+    | C     | 28,404 → 50,603                              | 925 → 1,649       |
+    | D     | 58,854 → 67,698                              | 1,917 → 2,206     |
+    | E     | 120,000 → 120,000                            | 14,707 → 14,707   |
+    | BD    | 7 → 20                                       | 5 → 9             |
+
+    The caps are the same before and after: A 11, B 68, C 6,764, D 8,193 and E 21,369 ly near
+    the Sun, and in the nuclear disc A 13, B 17, C 116, D 205 and E 362 ly. `layer_caps`'s doc
+    table gives the nuclear disc's D as 204 ly. HEAD reads 205 too, so the table predates T16.b
+    (it was measured before the fitted envelope); T17 re-records it.
+
+  - **How loose the bound is.** At 2 m₁ over every age, a B or C primary's bound reaches the
+    envelope's late giants at η = 0 (about −5.7 for stars of at most 1 M☉, T6.b's science check),
+    less 2.5 log₁₀ 5. The two pinned systems' bounds go from M<sub>V</sub> 3.78 and 2.70 to −7.78
+    and −7.95, so a B or C record is almost never skipped inside any cap. Records past the mass
+    skip and then the flux bound, at HEAD and after, from T8.e's place near the Sun (cut 7.95,
+    eye), counted by a probe that mirrors `census_record`'s skip without generating (it gives
+    T8.e's own nuclear-disc counts exactly):
+
+    | Sphere      | Records   | Past the floor        | Past the bound      |
+    | ----------- | --------- | --------------------- | ------------------- |
+    | A, 300 ly   | 138,945   | 37,978 → 92,021       | 987 → 79,038        |
+    | B, 500 ly   | 110,151   | 74,887 → 110,151      | 20,562 → 110,151    |
+    | C, 1,000 ly | 1,097,274 | 1,092,043 → 1,097,274 | 951,125 → 1,097,259 |
+    | D, 1,000 ly | 238,967   | all → all             | all → all           |
+    | E, 1,000 ly | 74,777    | all → all             | 74,776 → 74,776     |
+
+  - **The cost, measured.** The sample is 648 fixed cells near the Sun. At each distance along x,
+    a 3 × 3 × 3 block of cells: A to 300 ly, B to 500, the brown dwarfs to 60, C to 6,000, D to
+    8,000 and E to 20,000. The query is cut 7.95 with the eye. `census_cell` runs on one thread,
+    and the figure is the least wall time of three runs. The builds ran alternately, twice each,
+    in the debug profile with the sim at opt-level 2, at load 4–12, so the times are provisional:
+
+    | Layer | Cells | Records | Past the floor | Generated     | ms a cell     |
+    | ----- | ----- | ------- | -------------- | ------------- | ------------- |
+    | A     | 108   | 62      | 35 → 48        | 17 → 45       | 0.055 → 0.065 |
+    | B     | 108   | 112     | 97 → 112       | 65 → 112      | 0.077 → 0.103 |
+    | BD    | 81    | 160     | 113 → 136      | 0 → 0         | 0.051 → 0.052 |
+    | C     | 135   | 1,247   | 1,217 → 1,247  | 1,065 → 1,235 | 6.60 → 6.68   |
+    | D     | 108   | 1,589   | 1,589 → 1,589  | 1,588 → 1,589 | 63.4 → 62.7   |
+    | E     | 108   | 2,977   | 2,977 → 2,977  | 2,977 → 2,977 | 251.7 → 251.4 |
+    | All   | 648   | 6,147   | 6,028 → 6,109  | 5,712 → 5,958 | 53.9 → 53.8   |
+
+    Near the Sun, T16.b barely moves the census's cost. D and E were generated whole already. The
+    C systems it newly generates are cheap ones, so C's cost a cell beyond 1,000 ly rises 2–3%.
+    The cost rises steeply only in A and B, in relative terms, and their caps are 11 and 68 ly. But
+    the floor and the bound now skip almost no B or C record, so the census's cost (T8.e's cold
+    bench, `decision-r06-census-cost.md`) cannot be cut by tightening its skips without a rule
+    that knows which pairs can interact.
+
+  - **Three checks changed by ruling** (orchestrator, 2026-10-05; `decision-r06-census-cost.md`
+    takes the figures). They are cost checks, not identities, and each site's comment names the
+    decision. No identity check and no tolerance moved.
+    - The fast `the_census_is_its_oracle_in_the_nuclear_disc` passes `Skips::Recorded` to
+      `agree`. It now prints that the census generates 49,534 of 49,534 systems: A and B within
+      1.5 ly skip none, where A skipped 1,122 of 21,450 before.
+    - In the slow A/B test, B's per-layer check is printed, not asserted. B now generates
+      110,151 of 110,151 systems, against 20,562 before. A's check holds: A generates 79,038 of
+      138,945, against 987 before.
+    - T8.b's `a_cells_census_equals_its_unskipped_records` keeps its `skipped > 0`. Its 15 cells
+      (A–E at 0, 1 and 3 cells from the Sun, cut 7) no longer skip anything ("30 listed,
+      0 skipped"), so it gains cells where skips remain. These are the brown dwarfs' at 0, 1
+      and 3 cells out (seven records, each skipped by a forced single's bound), and a 5 × 5 block
+      of A cells 288–320 ly along x. The block's records are skipped by the floor, and one
+      candidate by a multiple system's bound.
+  - **The tests.**
+    - The `[profile.slow]` `default-filter` and its comment are gone from `.config/nextest.toml`,
+      and "fails until R06.T16.b" is gone from both ignore reasons and from the module doc.
+      The three slow tests ran by name, unlocked and capped, in the slow-test profile with
+      `--test-threads 2` (2026-10-05, load 12–18, provisional), and each passed:
+      - `the_census_is_its_oracle_1000_ly_from_the_sun`, in 858 s. The census generates
+        1,411,002 of 1,411,018 systems: C 1,097,259 of 1,097,274, D all 238,967, E 74,776 of
+        74,777. It accepts C 21,210, D 7,760 and E 1,247 stars, the oracle's counts, with the
+        C merger.
+      - `the_census_is_its_oracle_for_the_dwarfs_near_the_sun`, in 9.5 s. The census generates
+        189,189 of 249,096 systems and accepts A 3 and B 36 stars, the B merger among them.
+      - `envelope_bounds_pair_states`, in 49 s.
+    - The pinned mergers are fast tests in `tests/sky_census.rs`. Each censuses its system's cell
+      beside its oracle (the new `census_parts_of` and `brute_force_parts_of` in
+      `tests/common/sky.rs`, for given cells) and checks four things:
+      - the two agree bit for bit;
+      - the merger product is listed, heavier than m₁ and at most `max_star_mass(m₁)`, its
+        companion `NoRemnant`;
+      - it is brighter than the bound at m₁ and its age, which would have skipped it for the
+        query;
+      - it lies within the widened bound.
+    - `the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them` takes T8.e's two
+      giants at the eye's cut. `a_main_sequence_merger_is_listed_as_its_oracle_lists_it` takes the
+      unevolved case the plan left to pin: `0x41feeca200000000`, C near the Sun, a 0.90 M☉
+      primary and its near twin merged into a 1.80 M☉ main-sequence star of M<sub>V</sub> 1.98
+      (bound at m₁ 2.35), V 5.87 from 191 ly. The query is a camera cut of 5.95 with no eye,
+      inside the window (5.87, 6.02) where the bound at m₁ skips it.
+    - That system is 267 Myr old, not "of an old cell" as the plan's test reads. Nor is it a blue
+      straggler in Sandage's sense, brighter than the turnoff, which lies near 3.4 M☉ at 267 Myr
+      (science check). It is a merger product above every single star of its primary's mass and
+      age. A search of
+      8,000 records in each of A, B and C, near the Sun, at (0, 8,000, 0) and in the bulge, found
+      it the only main-sequence star above its primary's mass brighter than the bound at m₁.
+      Mass gainers are rare (0–8 per 8,000 records), and in old cells the envelope at m₁ and the
+      system's age already holds the turnoff's giants, as Design note 8 expected.
+    - Unit tests: `max_star_mass_is_twice_the_primary_up_to_the_tracks_top`;
+      `the_mass_floor_admits_every_primary_whose_merger_could_pass` (the floor inverts the
+      envelope at `max_star_mass`, and some cut puts A's floor below where m₁ alone would);
+      `a_forced_single_takes_its_own_envelope_bound`, whose grid half now reads 2 m₁ from zero.
+    - The slow `envelope_bounds_pair_states` (`tests/sky_envelope.rs`): 1,000 multiple systems
+      of each stellar layer near the Sun and 1,000 in the bulge (10⁴), at the epoch and 900 years
+      before. Every pair-evolved star must be no brighter than the envelope at `max_star_mass`
+      over ages from zero, margin included and without the n factor.
+      - It finds no violation, and no star uses any of the 0.3 mag margin. The sample's closest
+        star is 2.12 mag fainter than the envelope before its margin (D in the bulge).
+      - Mass gainers are few: 12 star states above their primary's mass in the 10⁴ multiples,
+        and none beyond the bound at m₁. The engine ran a pair in 0–5 of each 1,000 multiples in
+        A and B, 323–408 in C, and 950–997 in D and E.
+      - The three pinned mergers are therefore checked too (`PINNED_MERGERS`). Each is beyond
+        the bound at m₁ at both times, and their closest is 0.31 mag fainter than the envelope
+        before its margin.
+  - **Science check (2026-10-05).** It found no must-fix. Its fixes are applied:
+    - "Shines as a younger star of its new mass" is true only of main-sequence mergers and
+      accretors (BSE eq. 80 and §2.6.6). A donor keeps its fractional age at a lower mass, so its
+      own track's age can pass the system's by up to some 40 times. An evolved accretor keeps its
+      track's luminosity. `flux_bound`'s doc now says so. Each is fainter than a single star of at
+      most 2 m₁ at an age within the system's, which `envelope_bounds_pair_states` checks
+      empirically.
+    - A main-sequence accretor above 150 M☉ is not held to the 150 M☉ track. Its closed forms are
+      extrapolated, and the top node bounds it through that track's later phases and the margin.
+    - If plan 11 ever evolves a merged pair with its third star, the ceiling becomes 3 m₁.
+  - **Not done here (ruled):** plan 11's public interaction test, which would let pairs that
+    cannot interact keep n × F₁ at m₁ and their own age. It is the lever decision item 2 names
+    for T17, handed to the cost ruling.
