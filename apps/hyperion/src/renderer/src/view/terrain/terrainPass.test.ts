@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
+import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import type { Vec3 } from "../../geometry/vec3";
@@ -9,13 +10,25 @@ import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
 import { terrainMaterialSpec } from "./gpu/material";
 import { terrainSlotLayout } from "./slotLayout";
+import { distanceToBoxM, relativeBounds } from "./bounds";
 import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
+import { finestPatchSizeM } from "./grounded";
 import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
 import { type Edge, EDGES, edgeNeighbour, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
-import type { PatchRequest, Selection, SelectionInput } from "./select";
-import { RESELECT_FRACTION, selectionTolerancePx } from "./selectionTolerance";
+import {
+  type PatchRequest,
+  screenSpaceErrorPx,
+  type Selection,
+  type SelectionInput,
+  selectionErrorM,
+} from "./select";
+import {
+  RESELECT_FRACTION,
+  RESELECT_MOVE_FRACTION,
+  selectionTolerancePx,
+} from "./selectionTolerance";
 import {
   effectiveTauPx,
   morphRangeM,
@@ -27,6 +40,7 @@ import {
   type TerrainPool,
   type TerrainView,
 } from "./terrainPass";
+import { distanceToBoxFromM } from "./viewGeometry";
 import type { BakedPatch, BakeSettings } from "./workers/messages";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
@@ -508,10 +522,42 @@ describe("the terrain pass's selection cadence", () => {
       pass.frame(inputAt(northPole(heightM), 16 * n));
     }
     pass.frame(inputAt(northPole(heightM), 16 * 41));
-    // 10 m is far below a tenth of the 1.5 km to the nearest box, and above a tenth of one finest
-    // patch (about 1.8 m), the rule's floor. The fake pool's flat bakes give spheres that hold no
-    // camera, so this does not tell the box from the sphere; the captures exercise that.
+    // 10 m is far below m ÷ (1 + m) of the 1.5 km to the nearest box (about 136 m), and above it
+    // of one finest patch (about 1.9 m), the rule's floor. The fake pool's flat bakes give spheres
+    // that hold no camera, so this does not tell the box from the sphere; the captures exercise
+    // that.
     expect(pass.frame(inputAt(northPole(heightM - 10), 16 * 42)).reselected).toBe(false);
+  });
+
+  it("holds every drawn leaf within τ up to a move of m ÷ (1 + m) of the nearest box", async () => {
+    const { pass, pool } = await passOn("low");
+    const heightM = 1_500;
+    const frame = streamed(pass, pool, northPole(heightM));
+    expect([frame.selection.limited, frame.drawSet.standingIn, frame.drawSet.missing]).toEqual([
+      false,
+      0,
+      0,
+    ]);
+    const dMinM = nearestBoxM(frame.selection, northPole(heightM).cameraM);
+    // Just short of the move that selects again: the farthest the pass draws this selection from.
+    const farthest = northPole(heightM - RESELECT_MOVE_FRACTION * (1 - 1e-6) * dMinM);
+    expect(drawnErrorPx(frame.selection, northPole(heightM))).toBeLessThanOrEqual(
+      selectionTolerancePx(TERRAIN_SETTINGS.low.tauPx),
+    );
+    expect(pass.frame(inputAt(farthest, 16 * 100)).reselected).toBe(false);
+    expect(drawnErrorPx(frame.selection, farthest)).toBeLessThanOrEqual(TERRAIN_SETTINGS.low.tauPx);
+  });
+
+  it("selects again on a move past m ÷ (1 + m) of the nearest box, short of m", async () => {
+    const { pass, pool } = await passOn("low");
+    const heightM = 1_500;
+    const frame = streamed(pass, pool, northPole(heightM));
+    const dMinM = nearestBoxM(frame.selection, northPole(heightM).cameraM);
+    // Halfway between the two: the former rule, m of d_min, drew the old selection on from here.
+    const fraction = (RESELECT_MOVE_FRACTION + RESELECT_FRACTION) / 2;
+    expect(pass.frame(inputAt(northPole(heightM - fraction * dMinM), 16 * 100)).reselected).toBe(
+      true,
+    );
   });
 
   it("does not select again for a turn of less than a pixel", async () => {
@@ -669,6 +715,45 @@ function streamed(pass: TerrainPass, pool: () => FakePool, view: TerrainView): T
     frame = pass.frame(inputAt(view, 16 * n));
   }
   return frame;
+}
+
+/**
+ * The pass's d_min: the box distance from `cameraM` to the nearest selected patch not at the
+ * finest level, floored at one finest patch, metres.
+ */
+function nearestBoxM(selection: Selection, cameraM: Vec3): number {
+  let nearestM = Number.POSITIVE_INFINITY;
+  for (const patch of selection.patches.values()) {
+    if (patch.key.level < PLANET.finestLevel) {
+      nearestM = Math.min(nearestM, distanceToBoxM(relativeBounds(patch.bounds, cameraM)));
+    }
+  }
+  return Math.max(nearestM, finestPatchSizeM(PLANET));
+}
+
+/**
+ * The largest ρ any selected patch `view` sees draws from `view`'s camera, pixels: its level's
+ * selection error at its box's distance, floored at the near plane, as selection measures it.
+ */
+function drawnErrorPx(selection: Selection, view: TerrainView): number {
+  const selectionView = {
+    camera: { positionM: view.cameraM, orientation: view.orientation },
+    fovXRad: view.fovXRad,
+    viewport: view.viewport,
+    weight: 1,
+    tauPx: TERRAIN_SETTINGS.low.tauPx,
+  };
+  let largestPx = 0;
+  for (const patch of selection.patches.values()) {
+    if (patch.seen) {
+      const distanceM = Math.max(distanceToBoxFromM(patch.bounds, view.cameraM), NEAR_PLANE_M);
+      largestPx = Math.max(
+        largestPx,
+        screenSpaceErrorPx(selectionErrorM(PLANET, patch.key.level), distanceM, selectionView),
+      );
+    }
+  }
+  return largestPx;
 }
 
 /** The morph band last written for each drawn patch, by key string, as the shader reads it. */
