@@ -125,6 +125,21 @@ describe("the fixed-step run", () => {
     expect(run.frames.length).toBeLessThan(9);
   });
 
+  it("times each selection on the thread's CPU clock too, where one is given", () => {
+    let cpuMs = 0;
+    const run = orbitRun({
+      cpuNowMs: () => {
+        cpuMs += 3;
+        return cpuMs;
+      },
+    });
+    expect(run.frames.map(({ selectCpuMs }) => selectCpuMs)).toEqual(run.frames.map(() => 3));
+  });
+
+  it("leaves the selection's CPU time null without a CPU clock", () => {
+    expect(orbitRun().frames.every(({ selectCpuMs }) => selectCpuMs === null)).toBe(true);
+  });
+
   it("figures a segment over its measured frames alone", () => {
     const run = orbitRun();
     const [coast] = segmentFigures(run, 8);
@@ -156,6 +171,7 @@ function frameOf(overrides: Partial<FixedStepFrame>): FixedStepFrame {
     coarseReturnRhoPx: 0,
     forcedDemanded: 0,
     selectMs: 0,
+    selectCpuMs: null,
     predictedPerS: 0,
     heightAboveFloorM: 400_000,
     ...overrides,
@@ -459,6 +475,24 @@ describe("the budget's figures over a segment (decision-r05-high-bound.md, F4)",
   it("takes the largest ρ the coarse stand-ins draw, and those for returns", () => {
     const figures = figuresOf(standInFrames());
     expect([figures.coarseStandInMaxRhoPx, figures.coarseReturnMaxRhoPx]).toEqual([7, 6]);
+  });
+
+  it("takes the selection's CPU-time percentiles beside its wall-clock ones", () => {
+    const figures = figuresOf(
+      [4, 1, 3, 2].map((cpu) => frameOf({ selectMs: 10 * cpu, selectCpuMs: cpu })),
+    );
+    expect([figures.selectCpuMsP50, figures.selectCpuMsP95, figures.selectCpuMsMax]).toEqual([
+      2, 4, 4,
+    ]);
+  });
+
+  it("leaves the selection's CPU-time percentiles null where no frame has one", () => {
+    const figures = figuresOf([frameOf({ selectMs: 5 }), frameOf({ selectMs: 7 })]);
+    expect([figures.selectCpuMsP50, figures.selectCpuMsP95, figures.selectCpuMsMax]).toEqual([
+      null,
+      null,
+      null,
+    ]);
   });
 
   it("takes the forced bakes a second over the segment's span", () => {

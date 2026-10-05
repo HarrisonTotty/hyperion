@@ -331,6 +331,41 @@ describe("the record's file (version 3)", () => {
     );
   });
 
+  it("summarises the selection's CPU time beside its wall-clock time", () => {
+    if (high === undefined) {
+      throw new Error("no high setting");
+    }
+    const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
+    let cpuMs = 0;
+    const cell = runCell({
+      rule: "hard",
+      ridges: "off",
+      settingView: high,
+      source: { ...SOURCE, rangeOf: (key) => levelHeightRangeM(planet, key.level) },
+      rateHz: 16,
+      fromS: 10,
+      toS: 11,
+      measureFromS: 10.5,
+      nowMs: () => 0,
+      cpuNowMs: () => {
+        cpuMs += 1.25;
+        return cpuMs;
+      },
+      deadlineMs: Infinity,
+    });
+    const firstRow = demandSummary([cell], "2026-10-05T00:00:00Z")
+      .split("\n")
+      .find((line) => line.startsWith("| orbit coast"));
+    expect(firstRow).toMatch(/\| 0\.0 \/ 0\.0 \/ 0\.0 \| 1\.3 \/ 1\.3 \/ 1\.3 \|$/);
+  });
+
+  it("summarises no CPU time for a run without a CPU clock", () => {
+    const row = demandSummary([cellOf("hard", 981)], "2026-10-05T00:00:00Z")
+      .split("\n")
+      .find((line) => line.startsWith("| orbit coast"));
+    expect(row).toMatch(/\| — \|$/);
+  });
+
   it("summarises the share of limited frames whose τ′ exceeds τ", () => {
     const limited = cellOf("hard", 40);
     const [coast] = limited.segments;

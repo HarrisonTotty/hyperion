@@ -12,8 +12,10 @@
  * rule still makes a deep patch wait a frame for each unbaked ancestor. So the measured demand is
  * the patches baked a second under an ideal pool, the plan's first-time-selected keys a second
  * with the cache's semantics. Each frame records the patches selected, the bakes, `limited`, the
- * draw set's stand-ins and missing patches, and how long `selectPatches` took; the bakes' own time
- * is kept out of the wall-time deadline, so that the cells' coverage compares.
+ * draw set's stand-ins and missing patches, and how long `selectPatches` took, on the wall clock
+ * and on the thread's CPU clock where the caller gives one; the bakes' own time is kept out of the
+ * wall-time deadline, so that the cells' coverage compares. Under load the wall-clock times are
+ * upper bounds: a process waiting for a core counts the wait, which its CPU time does not.
  *
  * It also records what decision-r05-high-bound.md's F4 asks of the record: the budget's effective
  * tolerance τ′ (`Selection.limitExcess`), the coarse stand-ins drawn, and the forced region's
@@ -224,6 +226,12 @@ export interface FixedStepOptions {
   /** The clock `selectPatches` and the bakes are timed by, ms. */
   readonly nowMs: () => number;
   /**
+   * The thread's CPU-time clock `selectPatches` is also timed by, ms: user and system time, as
+   * Node's `process.threadCpuUsage` gives it (the record's script). None by default, the CPU
+   * times then null.
+   */
+  readonly cpuNowMs?: () => number;
+  /**
    * The wall time on `nowMs`'s clock after which the run stops, cut short, the bakes' time not
    * counted; none by default.
    */
@@ -264,7 +272,12 @@ export interface FixedStepFrame {
   readonly coarseReturnRhoPx: number;
   /** Patches of a grounded body's forced region requested and baked this frame. */
   readonly forcedDemanded: number;
+  /**
+   * How long `selectPatches` took on the wall clock, and on the thread's CPU clock, ms; the CPU
+   * time null without `cpuNowMs`.
+   */
   readonly selectMs: number;
+  readonly selectCpuMs: number | null;
   /**
    * The per-level prediction at this frame, patches a second, at the height above the floor and at
    * τ_sel, the tolerance the frame selected at.
@@ -361,7 +374,9 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
       ...(options.maxPatches === undefined ? {} : { maxPatches: options.maxPatches }),
     };
     const start = options.nowMs();
+    const cpuStart = options.cpuNowMs?.() ?? null;
     const selection = selectPatches(input);
+    const cpuEnd = options.cpuNowMs?.() ?? null;
     const selectMs = options.nowMs() - start;
     for (const keyString of selection.patches.keys()) {
       hash.text(keyString);
@@ -409,6 +424,7 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
       coarseReturnRhoPx: coarse.returnRhoPx,
       forcedDemanded,
       selectMs,
+      selectCpuMs: cpuStart === null || cpuEnd === null ? null : cpuEnd - cpuStart,
       predictedPerS: perLevelDemand(
         planet,
         { ...pose, altitudeM: pose.heightAboveFloorM },
@@ -475,9 +491,20 @@ export interface SegmentFigures {
   /** The least and greatest height above the floor over the frames, metres. */
   readonly minHeightAboveFloorM: number;
   readonly maxHeightAboveFloorM: number;
+  /**
+   * `selectPatches`' wall-clock time, ms: the 50th and 95th percentiles (nearest rank) and the
+   * largest; upper bounds under load.
+   */
   readonly selectMsP50: number;
   readonly selectMsP95: number;
   readonly selectMsMax: number;
+  /**
+   * The same on the thread's CPU clock, the selection's own work, ms; null where the run had no
+   * CPU clock.
+   */
+  readonly selectCpuMsP50: number | null;
+  readonly selectCpuMsP95: number | null;
+  readonly selectCpuMsMax: number | null;
 }
 
 function nearestRank(sorted: ReadonlyArray<number>, p: number): number {
@@ -541,6 +568,7 @@ export function segmentFigures(run: FixedStepRun, rateHz: number): SegmentFigure
   return [...bySegment].map(([segment, { frames, steps }]) => {
     const spanS = frames.length / rateHz;
     const times = spread(frames.map(({ selectMs }) => selectMs));
+    const cpuTimes = spread(frames.flatMap(({ selectCpuMs }) => selectCpuMs ?? []));
     const sum = (pick: (f: FixedStepFrame) => number): number =>
       frames.reduce((total, f) => total + pick(f), 0);
     const share = (holds: (f: FixedStepFrame) => boolean): number =>
@@ -589,6 +617,9 @@ export function segmentFigures(run: FixedStepRun, rateHz: number): SegmentFigure
       selectMsP50: times.p50 ?? 0,
       selectMsP95: times.p95 ?? 0,
       selectMsMax: times.max ?? 0,
+      selectCpuMsP50: cpuTimes.p50,
+      selectCpuMsP95: cpuTimes.p95,
+      selectCpuMsMax: cpuTimes.max,
     };
   });
 }

@@ -52,7 +52,9 @@ export const DEMAND_RECORD_SCHEMA = "hyperion.descent-spike.demand";
  *
  * Version 3 (decision-r05-record-tau.md): the cells select, and compute D, at the terrain pass's
  * τ_sel = τ ÷ (1 + `RESELECT_FRACTION`), not at τ; each cell carries τ and τ_sel, and each segment
- * adds the share of its limited frames whose τ′ exceeds τ.
+ * adds the share of its limited frames whose τ′ exceeds τ, and the selection's time on the
+ * thread's CPU clock beside its wall-clock time (lane B's finding that wall-clock times under load
+ * measure the machine, 2026-10-05).
  */
 export const DEMAND_RECORD_VERSION = 3;
 
@@ -250,6 +252,8 @@ export interface CellOptions {
   readonly toS: number;
   readonly measureFromS: number;
   readonly nowMs: () => number;
+  /** The thread's CPU-time clock, ms (`FixedStepOptions.cpuNowMs`); none by default. */
+  readonly cpuNowMs?: () => number;
   /** The wall time, on `nowMs`'s clock, after which the run stops. */
   readonly deadlineMs: number;
   /** The wall time, bakes included, after which the run stops; none by default. */
@@ -276,6 +280,7 @@ export function runCell(options: CellOptions): DemandCell {
     layout: settingView.layout,
     rangeOf: source.rangeOf,
     nowMs: options.nowMs,
+    ...(options.cpuNowMs === undefined ? {} : { cpuNowMs: options.cpuNowMs }),
     deadlineMs: options.deadlineMs,
     ...(options.wallDeadlineMs === undefined ? {} : { wallDeadlineMs: options.wallDeadlineMs }),
   });
@@ -458,7 +463,9 @@ export function demandSummary(
     `Seed ${RECORD_SEED}. Fixed-step runs of the scripted descent through \`selectPatches\` and a`,
     "simulated cache (R05.T13.a): patches selected, measured demand (first-time-selected keys a",
     "second), the per-level prediction D, the share of frames `limited`, and the selection time.",
-    "Timings are provisional unless the machine was quiet (Design note 27).",
+    "Timings are provisional unless the machine was quiet (Design note 27). The selection's wall-clock",
+    "times are upper bounds under load, since a nice process waiting for a core counts the wait; its",
+    "time on the thread's CPU clock (`process.threadCpuUsage`, user and system) is its own work.",
     "",
     `Selected at τ ÷ ${1 + RESELECT_FRACTION}, the terrain pass's τ_sel; D at the same tolerance; selected every`,
     "frame, without the pass's cadence (decision-r05-record-tau.md). The pass's selection at a frame",
@@ -490,11 +497,11 @@ export function demandSummary(
       "",
       `Site ${cell.terrain.siteHeightM.toFixed(1)} m; least margin above the stretches' floors and clearances ${cell.minFloorMarginM.toFixed(1)} m; lifts above the table: ${liftsText(cell.lifts)}.`,
       "",
-      "| Segment | Patches (mean, max) | Demand /s | D /s | Demand ÷ D | Limited | Of them, τ′ > τ | Height above floor (m) | Select p50 / p95 / max (ms) |",
-      "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| Segment | Patches (mean, max) | Demand /s | D /s | Demand ÷ D | Limited | Of them, τ′ > τ | Height above floor (m) | Select wall p50 / p95 / max (ms) | Select CPU p50 / p95 / max (ms) |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
       ...cell.segments.map(
         (s) =>
-          `| ${s.segment} | ${s.meanPatches.toFixed(0)}, ${s.maxPatches} | ${s.demandPerS.toFixed(1)} | ${s.predictedPerS.toFixed(1)} | ${s.predictedPerS > 0 ? (s.demandPerS / s.predictedPerS).toFixed(2) : "—"} | ${(100 * s.limitedFraction).toFixed(0)}% | ${percent(s.limitedOverTauFraction)} | ${s.minHeightAboveFloorM.toFixed(0)}–${s.maxHeightAboveFloorM.toFixed(0)} | ${s.selectMsP50.toFixed(1)} / ${s.selectMsP95.toFixed(1)} / ${s.selectMsMax.toFixed(1)} |`,
+          `| ${s.segment} | ${s.meanPatches.toFixed(0)}, ${s.maxPatches} | ${s.demandPerS.toFixed(1)} | ${s.predictedPerS.toFixed(1)} | ${s.predictedPerS > 0 ? (s.demandPerS / s.predictedPerS).toFixed(2) : "—"} | ${(100 * s.limitedFraction).toFixed(0)}% | ${percent(s.limitedOverTauFraction)} | ${s.minHeightAboveFloorM.toFixed(0)}–${s.maxHeightAboveFloorM.toFixed(0)} | ${s.selectMsP50.toFixed(1)} / ${s.selectMsP95.toFixed(1)} / ${s.selectMsMax.toFixed(1)} | ${figures([s.selectCpuMsP50, s.selectCpuMsP95, s.selectCpuMsMax], 1)} |`,
       ),
       "",
       `| Segment | τ′ p50 / p95 / max (px) | Δτ′ p95 / max (px) | Δτ′ ÷ τ′ p95 / max | Steps over ${BAND_MARGIN} | Coarse stand-ins (returns) | Their largest ρ (returns) (px) | Forced bakes /s |`,
