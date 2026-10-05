@@ -1162,7 +1162,9 @@ passes its four retention bands, change the default here with the bump. Acceptan
 This plan changes generated output in T1.d, T2.c, T2.d, T6, T7, T8, T10 and T15, each with its own
 bump and regenerated goldens. T11 moves output too, as built: a paired star's summary is its pair's
 state (round 9c, `bin5b`, whose T2.d, T7 and T11 take one bump in the orchestrator's version 16
-batch). T1.d moves every star once, because the mean mass per system changes
+batch). T4.g and T4.h move output too, as built: T4.g in P14 Phase J's version 20 batch, T4.h
+(the early AGB's core radius and remnant at SSE's τ) in the version 21 batch with P14.T47.e. T1.d
+moves every star once, because the mean mass per system changes
 the system count (plan 02 lists it among its known future bumps). After that no primary moves: IDs,
 positions, primary masses, ages, primary draws, death times and kicks are untouched, except that T7
 redraws about 10⁻⁴ of grid systems (as built it removes none). It reserves: body indices 0–15 for the stellar level, which is
@@ -2498,21 +2500,111 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     envelope's core test and tides), though it moved no golden digest here. Also open: the strip
     runs after `contact_check` in a detached step, where `evolv2` strips before its Roche and
     collision tests (small: a bare carried star's radius is near its helium star's).
-  - _Known departure in version 20: the early-AGB core radius_ (ruling p11-stripped-core,
-    amendments 1 and 2, 2026-10-04). Version 20 ships with Rc = R_ZHe(Mc) on the early AGB. The
-    sources give R_HeGB(Mc,He, Lc) (HPT §6.3 after eq. 105, eqs 84–88; SSE/BSE `hrdiag` kw = 5),
-    but built with the engine's own early-AGB blend of Lc it is up to ~700 R_ZHe late on the phase
-    and breaks BSE §3.2's cataclysmic variable: at its first common envelope (78.9 Myr, Mc,He
-    1.494 M☉, R 259 R☉, a 503 → 4.83 R☉, core lobe 1.89 R☉) Rc becomes 69.5 R☉ against R_ZHe's
-    ~0.3, the cores coalesce, and a single 1.125 M☉ white dwarf is left. Amendment 2's rule (Lx
-    blended with SSE's τ = 3(t − t_BAGB) ÷ (t_n − t_BAGB), the same τ in `early_agb`'s remnant)
-    moves more output, so it is held out of version 20 as P11.T4.h, for the next bump, with the
-    §3.2 tests as gates. The work in progress is in
-    `.git/rm23-scratch/p14j/eagb-core-wip.patch`.
-- **The local V light is low, and the pair light (a pointer from rendering plan R06, 2026-10-06,
-  `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
-  the fixture's V light is 26% under Flynn et al. 2006's 0.056 ± 10% L☉ pc⁻³ (plan 02's Risks,
-  "The local V light is low"). A calibration finding for plans 02 and 06, and for this plan through
-  the pair light: R06's luminosity function is the generator's own quadrature of IMF × SFH ×
-  tracks, with R06.T5.d's pair correction drawn by this plan's laws. A fix is a
-  `GENERATOR_VERSION` change.
+  - _Version 20's early-AGB core radius_ (ruling p11-stripped-core, amendments 1 and 2,
+    2026-10-04). Version 20 ships with Rc = R_ZHe(Mc) on the early AGB, a known departure. P11.T4.h
+    (below) builds the sources' rule for version 21.
+- **P11.T4.h as built** (Phase J lane, 2026-10-04; ruling p11-stripped-core, amendments 1 and 2).
+  The early AGB's core radius and its small-envelope remnant at SSE's τ. **Built for version 21,
+  committed with its goldens re-blessed at version 20 and held out of integration** until the 20 →
+  21 bump lands with it (with P14.T47.e, `decision-r07-earth-albedo.md`; P11.T4.g's precedent).
+  - _The rule_ (HPT §6.3 after eq. 105, eqs 84–88; SSE `hrdiag` kw = 5, lines 728–736; `star`).
+    The remnant is the naked helium star of the helium core, `Mc,He`, at Lx = L_THe (L_rel ÷
+    L_THe)^τ while τ < 1, then L_rel. L_rel is equation 84's relation at the carbon–oxygen core.
+    Its radius is R_HeGB = min(R₁, R₂). τ = 3 (t − t_BAGB) ÷ (t_n − t_BAGB), with t_n SSE's nuclear
+    end at the current mass (`EarlyAgb::nuclear_end`). That is when the thermally pulsing AGB's
+    relation (A_H,He, from `tscls(13)` and L_DU; for type 5 SSE takes Mt itself, without
+    third dredge-up) would bring the core to Mt, capped at `tscls(14)`. `tscls(14)` is when the core
+    reaches `Mc,SN`: on the early AGB's relation if `Mc,SN` ≤ `Mc,DU`, otherwise on the pulses'
+    at (`Mc,SN` − λ `Mc,DU`) ÷ (1 − λ), and no earlier than t_BAGB. τ is 0 from 100 M☉, where
+    SSE's t_n is helium ignition.
+    - **Deviation from `star.f` as written:** Mt is held to at least `Mc,BAGB`. SSE's type 5
+      never sees Mt ≤ `Mc,BAGB` (`hrdiag` 393–396 makes the star a naked helium star first). The
+      track evaluates such a star on its way to the envelope's loss, and there the literal rule
+      (t_n ≤ t_BAGB below `Mc,DU`, so τ = 0) stepped τ from ≥ 1 to 0, and the wind with it.
+    - That step hung the R06 census and filled the machine's memory: plan 06's envelope
+      integrator has no knot cap past its grid (plan 06's Risks; the record is
+      0x61f85aa800000001, a 0.84 M☉ companion stripped by its wind on the early AGB). With the
+      hold, the census passes in 183 s at about 8 MiB peak.
+    - `stellar_system.rs` `a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate` pins the
+      record, and `the_nuclear_end_is_sses` checks that t_n and τ have no step at `Mc,BAGB`.
+    - `EarlyAgb` gains `pulse_times` and `t_mc_max`.
+    - `track/model.rs` has `early_agb_core(phase, helium, clock, mt)` (and `…_at_tau`). It is
+      shared by `early_agb`'s remnant and by `binary::core_radius`'s EAGB arm, unconditionally.
+    - `EARLY_AGB_REMNANT_BLEND` is removed. It was the first third of the engine's own EAGB span,
+      and SSE's t_n spans the thermally pulsing AGB too.
+    - Against SSE's published landmarks, t_n at constant mass is `tscls(14)` to 10⁻¹².
+    - At the base of the AGB, Rc = R_ZHe(Mc), where core helium burning leaves it. It rises across
+      the phase, to 150 R☉ for 5 M☉ and 3.3 R☉ for 8 M☉ by the phase's end.
+    - The science check (against `star.f`, `hrdiag.f`, `zfuncs.f`, `evolv1/2.f` and `comenv.f`)
+      found no departures.
+  - _The gate, BSE §3.2's cataclysmic variable._ Both tests pass
+    (`binary::tests::the_papers_cataclysmic_variable_reproduces_its_sequence`, `classify`'s
+    `the_papers_cataclysmic_variable_is_one`). **At the first common envelope (78.914 Myr) τ =
+    0.5579.** The giant's Rc is 0.942 R☉ against the core's lobe of 1.904 R☉ on the orbit the
+    envelope leaves (a_f = 4.868 R☉), and the core would fill the lobe from τ = 0.6742. The margin
+    is thin: 0.12 in τ. A primary that entered the envelope later on its early AGB would coalesce
+    (a single 6 M☉ star's early AGB ends at τ = 0.76). The test logs these figures and asserts Rc <
+    lobe. With the engine's own blend (the parked WIP), Rc was 69.5 R☉ there.
+  - _Goldens_ (`golden_diff.py --base 97c969c`: 28 with changed values, one new, header at 20).
+    - New: `stellar/early_agb_remnant`
+      (`track::binary::tests::the_early_agb_remnant_at_sses_tau_is_pinned`). It pins t_n, τ, Lc and
+      Rc bit for bit at three masses and metallicities, at two masses each, at five points of the
+      phase. No older golden samples a thin early AGB.
+    - `stellar/binary_timelines`: 961 of 1,000 digests (23 with a new segment count). Most of
+      that is the digest hashing each track's full `Debug`, which now prints the two new
+      `EarlyAgb` fields. With the tracks' `Debug` left out, 299 pairs move:
+      - 115 by the remnant blend alone, none with a new segment count;
+      - 251 by the core radius alone, all 23 segment-count changes (tides read R − Rc, the
+        common envelope's coalescence test reads Rc);
+      - 67 by both.
+    - `stellar/summaries`: one death time, 3 × 10⁻¹⁴ relative (a star with a thin envelope on its
+      early AGB), from the remnant blend.
+    - The galaxy chain, at the last bits, from the remnant blend alone (measured: the core radius
+      alone moves none of it). `fates::mean_present_mass` reads plan 06's tracks, so the mean
+      system mass moves by about 8 × 10⁻¹⁴, and with it the system count and the population, gas,
+      black-hole and cluster masses (≤ 5.5 × 10⁻¹²). Downstream steps amplify that continuously:
+      up to 3.5 × 10⁻¹⁰ in `global_list/orbit` after 9,114 steps, 10⁻¹⁰ in `global_list/dwarfs`
+      and 2–3 × 10⁻¹¹ in the server's expected counts and the fields' deep tails. Before the
+      `Mc,BAGB` hold, τ's step had moved `galaxy_class_table` by up to 3.4 × 10⁻⁹; it is 5.5 ×
+      10⁻¹² now. No line count changed outside `binary_timelines`. Moved:
+      - `galaxy_params`, `galaxy_fields`, `galaxy_bounds`, `galaxy_map`, `galaxy_potential`,
+        `galaxy_handle`, `galaxy_class_table`, `galaxy_velocity`;
+      - `galaxy/features/{cells,centre,centre_members,members}`,
+        `galaxy/global_list/{dwarfs,orbit}`;
+      - `gas/{extinction,field,map,params,sightlines}`;
+      - `catalogue_classes/supernova`, `placement/substellar`, `planetary/context`, `query/range`;
+      - the server's `galaxy_parameters`, `systems_in_range` and `systems_in_range_briefs`.
+    - So T4.h also moves plan 06's single-star output, not only the binary engine's.
+  - _Two other plans' tests at their rounding floor_ (orchestrator's rulings, 2026-10-04). The
+    galaxy's last-bit change tipped them; their safety checks and the code they test are unchanged:
+    - `galaxy::potential::monopole::tests::the_table_holds_the_gaussians_mass_and_density`
+      (plan 09). At 2 × 10⁵ ly ΔM ÷ M ≈ 3 × 10⁻¹⁰ over h = 10⁻⁴, so one ulp of ln M is about
+      2 × 10⁻⁵ of noise, and the check went from 1.7 × 10⁻⁶ to 1.16 × 10⁻⁵ against 10⁻⁵. Beyond
+      10⁵ ly it now takes the Richardson-extrapolated difference at h = 4 × 10⁻³ (6 × 10⁻⁷ at base
+      and here), with the tolerance kept.
+    - `tests/galaxy_bounds.rs` `envelopes_never_exceed_their_bounds` (plan 02's P02.T8.a).
+      Changes are in the tightness half only:
+      - The normal range allows 4 |ln corner| ε beyond 10⁻¹²: a k-ulp disagreement in the exponent
+        is k |x| ε relative, and `BOUND_MARGIN` leaves 0.9 × 10⁻¹³. It reached 1.08 × 10⁻¹² at
+        ln corner = −634.
+      - The subnormal range allows a disc 2⌈n0⌉ units beyond its 64: each path rounds the
+        subnormal factor once before × n0. It reached 81 units for the nuclear disc, n0 = 105, at
+        3.5 × 10⁻³¹¹.
+      - Pointers are in plans 02's and 09's Risks.
+  - _Tests added_ (`agb.rs`):
+    - `the_nuclear_end_is_sses`: SSE's landmarks; t_n falls with the mass; the pulses' relation
+      reaches max(Mt, `Mc,BAGB`) at t_n; no step at `Mc,BAGB`.
+    - `a_supernova_early_agb_ends_at_its_nuclear_end`: 10–25 M☉ reach τ = 3 at the end; for the
+      floored 60 M☉ at Z ≤ 10⁻³, t_n comes after the end; from 100 M☉, τ ≡ 0.
+  - _Tests added_ (`track/binary.rs`): `the_early_agb_core_radius_is_the_helium_stars_at_sses_tau`.
+    The remnant a hair above the core has Rc's radius, Rc = R_ZHe at the base, Rc rises, and it
+    stays under the bound.
+  - _Invariant._ `check_no_bare_giant` brackets a frozen EAGB member's Rc by the helium giant's at
+    its brightest (`early_agb_core_radius_bound`). The held state keeps no τ to check exactly. The
+    bound assumes the carbon–oxygen core inside the helium core, which the 1.05 floor breaks at
+    60 M☉ and Z ≤ 10⁻³ at constant mass. No held star has met that case.
+  - _Slow suites_ (run capped, all pass):
+    - `binary_system`: ruling 137's hydrogen-poor share of core collapses 0.511 (0.511 at T4.g);
+      123.5's marked-stripped 1,408 of 1,753 (80.3%) and merged 294 (16.8%).
+    - `binary_carve` passes, and so do the 10³-pair invariants.
+    - The R06 census passes in 197 s.

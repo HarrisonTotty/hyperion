@@ -608,6 +608,39 @@ fn a_hundred_thousand_systems_live_and_die_in_order() {
     check_life_and_death(0x0629_b000_0000_0002, 100_000);
 }
 
+/// Regression (P11.T4.h): record 0x61f85aa800000001 of the census's galaxy. Its 0.84 M☉
+/// companion loses its envelope to its wind on the early AGB. The early AGB's remnant τ once fell
+/// from at least 1 to 0 as the mass passed the helium core, where SSE's type 5 never goes, and the
+/// mass-loss integrator stepped towards the envelope's loss without end, a knot at each pass, until
+/// the machine ran out of memory. Each star's fate is found, and the companion dies when its
+/// envelope is gone, its carbon–oxygen core inside its helium core.
+#[test]
+fn a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate() {
+    use hyperion_sim::stellar::remnant::{DeathKind, Stripping};
+
+    let galaxy = milky_way();
+    let id = hyperion_sim::id::SystemId::from_raw(0x61f8_5aa8_0000_0001).expect("a grid ID");
+    let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
+    let stars = SystemStars::generate(&galaxy, &record);
+    assert_eq!(stars.star_count(), 3);
+    let deaths: Vec<_> = stars
+        .stars()
+        .iter()
+        .map(|model| model.death().expect("a star dies"))
+        .collect();
+    let stripped = deaths
+        .iter()
+        .find(|death| death.progenitor().co_core_mass() < death.progenitor().helium_core_mass())
+        .expect("the companion loses its envelope on its early AGB");
+    assert_eq!(stripped.kind(), DeathKind::EnvelopeLoss, "{stripped:?}");
+    assert_eq!(
+        stripped.progenitor().stripping(),
+        Stripping::Wind,
+        "{stripped:?}"
+    );
+    assert!(stripped.age().value() > 1e10, "{stripped:?}");
+}
+
 /// Regression (found by rendering plan R06.T5.c), then P11.T4.g: record 0x81fd865fd000000f of
 /// seed `0x0926_0000` (15.05 + 12.65 M☉, bulge, layer E). A common envelope strips the primary to a
 /// 4.93 M☉ helium star at 15.457 Myr, and from 15.688 Myr the main-sequence star feeds it. Its

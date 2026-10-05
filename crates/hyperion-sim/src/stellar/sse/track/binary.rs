@@ -37,7 +37,7 @@ use super::super::helium::{self, HeliumStar};
 use super::super::ms::{self, MainSequence};
 use super::super::wind;
 use super::build::{Builder, Entry, Keep, Resolution};
-use super::model::{HeliumCore, Model};
+use super::model::{HeliumCore, Model, early_agb_core};
 use super::{
     Coordinate, HeliumHook, HeliumTable, MAX_INITIAL_MASS, Track, TrackOptions, reimers_eta,
 };
@@ -321,6 +321,38 @@ impl Track {
             degenerate_core: helium_core == Some(HeliumCore::Degenerate),
             burnt: burnt_fraction(&segment.model, coord),
             phase_end: segment.end,
+        }
+    }
+
+    /// The early AGB's core remnant at `age`, years, for current mass `mass`, M☉, if the star is
+    /// on its early AGB there: SSE's fractional age τ
+    /// ([`EarlyAgb::remnant_tau`](super::super::agb::EarlyAgb::remnant_tau)), and the remnant's
+    /// radius, R☉, as a function of τ (not held to the star's radius). For the tests that log the
+    /// margin of BSE section 3.2's common envelope.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn early_agb_remnant(
+        &self,
+        age: f64,
+        mass: f64,
+    ) -> Option<(f64, impl Fn(f64) -> f64 + '_)> {
+        let age = self.checked_age(Years::new(age));
+        let segment = self.segment_at(age);
+        match &segment.model {
+            Model::EarlyAgb {
+                phase,
+                helium,
+                span,
+            } => {
+                let clock = span.at(segment.coordinate_and_mass(age).0);
+                let radius = move |tau: f64| {
+                    super::model::early_agb_core_at_tau(phase, helium, clock, tau)
+                        .radius
+                        .value()
+                };
+                Some((phase.remnant_tau(clock, SolarMasses::new(mass)), radius))
+            }
+            _ => None,
         }
     }
 
@@ -976,7 +1008,36 @@ pub(crate) fn helium_zams_radius(m: f64) -> f64 {
     }
 }
 
-/// The core radius of a star in `model` with `state` at coordinate `coord` ([`Structure::core_radius`]).
+/// The largest core radius of an early-AGB star whose helium core is `mc` M☉, R☉: the helium
+/// star's `R_HeGB` = min(R₁, R₂) (HPT equations 85–88) at the brightest core luminosity its remnant
+/// takes, the larger of `L_THe` and equation 84's relation at the whole helium core (HPT section
+/// 6.3), which bounds [`early_agb_core`]'s radius from above at any τ, since both radii rise with
+/// `Lc`, for a carbon–oxygen core inside its helium core (HPT section 5.4). The 1.05 floor on
+/// `Mc,SN` (`EarlyAgb::new`) takes the carbon–oxygen core
+/// past the helium core at 60 M☉ and Z ≤ 10⁻³ at constant mass, where the bound does not hold;
+/// no held star has met it. For P11's held-member invariant (ruling p11-stripped-core, amendments
+/// 1 and 2).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn early_agb_core_radius_bound(mc: f64) -> f64 {
+    let star = HeliumStar::new(SolarMasses::new(mc));
+    let brightest = star
+        .l_tms()
+        .value()
+        .max(star.relation().luminosity(SolarMasses::new(mc)).value());
+    star.shell_radius(SolarLuminosities::new(brightest)).value()
+}
+
+/// The core radius of a star in `model` with `state` at coordinate `coord` ([`Structure::core_radius`]),
+/// capped at the star's radius.
+///
+/// The rule is BSE section 2.7.1's, HPT section 6.3 (after equation 105) and SSE/BSE `hrdiag`:
+/// none on a main sequence; `R_ZHe`(Mc) (HPT equation 78) for a non-degenerate helium core on the
+/// Hertzsprung gap or the giant branch and across the flash; the helium main sequence's radius at
+/// τ in core helium burning; on the early AGB the helium star of the helium core at the core's
+/// luminosity, `R_HeGB`(`Mc,He`, `Lc`) of HPT equations 84–88, with SSE's τ for `Lc` (`hrdiag`'s
+/// kw = 5, the remnant [`early_agb_core`] gives); and 5 `R_WD`(Mc) (HPT equation 91) for a
+/// degenerate core.
 #[must_use]
 fn core_radius(model: &Model, state: &StarState, coord: f64, c: &ZCoeffs) -> SolarRadii {
     let mc = state.core_mass().value();
@@ -1000,7 +1061,17 @@ fn core_radius(model: &Model, state: &StarState, coord: f64, c: &ZCoeffs) -> Sol
             HeliumCore::NonDegenerate => helium_zams_radius(mc),
             HeliumCore::Degenerate => degenerate(mc),
         },
-        Model::FlashBridge { .. } | Model::EarlyAgb { .. } => helium_zams_radius(mc),
+        Model::FlashBridge { .. } => helium_zams_radius(mc),
+        // The helium star of the helium core at the core's luminosity (HPT section 6.3 after
+        // equation 105, equations 84–88; SSE/BSE `hrdiag`, kw = 5), the early AGB's
+        // small-envelope remnant at SSE's τ: late on the phase `R_ZHe`(Mc) is far too small.
+        Model::EarlyAgb {
+            phase,
+            helium,
+            span,
+        } => early_agb_core(phase, helium, span.at(coord), state.mass())
+            .radius
+            .value(),
         Model::CoreHeliumBurning { .. } => {
             let (_, r) =
                 helium::main_sequence_point(SolarMasses::new(mc.max(1e-3)), coord.clamp(0.0, 1.0));
@@ -1205,6 +1276,130 @@ mod tests {
             assert!(structure.core_radius.value() <= state.radius().value());
             assert!(structure.envelope.mass <= state.mass().value());
         }
+    }
+
+    /// Ruling p11-stripped-core's amendments: on the early AGB the core radius is the helium
+    /// star's of the helium core at the core's luminosity, `R_HeGB`(`Mc,He`, `Lc`) = min(R₁, R₂)
+    /// (HPT section 6.3 after equation 105, equations 84–88; `hrdiag` kw = 5), not `R_ZHe`(Mc),
+    /// with `Lc` blended at SSE's τ. It is the radius of the remnant the small-envelope perturbation
+    /// tends to (a star carried a hair above its core has it), `R_ZHe`(Mc) at the base of the AGB
+    /// as core helium burning leaves it, it rises with the phase to far above that, and it never
+    /// exceeds the star's radius or the helium giant's at its brightest.
+    #[test]
+    fn the_early_agb_core_radius_is_the_helium_stars_at_sses_tau() {
+        for m in [5.0, 6.0, 8.0, 12.0] {
+            let track = Track::full(SolarMasses::new(m), &solar(), &StarDraws::median());
+            let on_it = |age: f64| track.state_at(Years::new(age)).phase() == Phase::EarlyAgb;
+            let death = track.death().expect("full").age().value();
+            let step = death / 20_000.0;
+            let coarse: Vec<f64> = (0..20_000)
+                .map(|i| step * f64::from(i))
+                .filter(|&age| on_it(age))
+                .collect();
+            let (Some(&enters), Some(&leaves)) = (coarse.first(), coarse.last()) else {
+                panic!("{m} M☉ has no early AGB");
+            };
+            let (from, to) = (enters - step, leaves + step);
+            let ages: Vec<f64> = (0..=4_000)
+                .map(|i| from + (to - from) * f64::from(i) / 4_000.0)
+                .filter(|&age| on_it(age))
+                .collect();
+            assert!(ages.len() > 2, "{m} M☉ has an early AGB");
+            let mut last = 0.0;
+            for &age in &ages {
+                let state = track.state_at(Years::new(age));
+                let (r, mc) = (state.radius().value(), state.core_mass().value());
+                let structure = track.structure_at(age, state.mass().value());
+                let rc = structure.core_radius.value();
+                let bound = early_agb_core_radius_bound(mc).min(r);
+                assert!(
+                    rc > 0.0 && rc <= bound * (1.0 + 1e-12),
+                    "{m} M☉ at {age} yr: {rc} > {bound}"
+                );
+                assert!(rc >= last, "{m} M☉ at {age} yr: Rc falls, {last} → {rc}");
+                last = rc;
+                // A hair above its core the star is its remnant (HPT equations 97–100).
+                let bare = track.structure_at(age, mc * (1.0 + 1e-9));
+                assert!(
+                    (bare.state.radius().value() / bare.core_radius.value() - 1.0).abs() < 1e-6,
+                    "{m} M☉ at {age} yr: the remnant's radius {} against the core's {}",
+                    bare.state.radius().value(),
+                    bare.core_radius.value()
+                );
+            }
+            let first =
+                track.structure_at(ages[0], track.state_at(Years::new(ages[0])).mass().value());
+            let helium = HeliumStar::new(first.state.core_mass());
+            let (tau, _) = track
+                .early_agb_remnant(ages[0], first.state.mass().value())
+                .expect("on the early AGB");
+            assert!((0.0..0.05).contains(&tau), "{m} M☉: τ = {tau} at the base");
+            // At L_THe the helium star's radius is `R_ZHe` (equation 86), where core helium
+            // burning leaves the core.
+            let base = helium.shell_radius(helium.l_tms()).value();
+            let mc = first.state.core_mass().value();
+            assert!(
+                (base / helium_zams_radius(mc) - 1.0).abs() < 1e-12,
+                "{m} M☉: R(L_THe) = {base}"
+            );
+            assert!(
+                (first.core_radius.value() / base - 1.0).abs() < 1e-3,
+                "{m} M☉: Rc = {} at the base of the AGB against R(L_THe) = {base}",
+                first.core_radius.value()
+            );
+            assert!(
+                last > 5.0 * helium_zams_radius(mc),
+                "{m} M☉: late on the early AGB Rc is {last} R☉ against R_ZHe's {}",
+                helium_zams_radius(mc)
+            );
+        }
+    }
+
+    /// The early AGB's remnant at SSE's τ, bit for bit: SSE's nuclear end at the star's mass and
+    /// halfway down to `Mc,DU`, and τ, `Lc` and the remnant's radius at five points of the phase,
+    /// for stars that reach the thermal pulses and that end in a supernova, at three metallicities
+    /// (ruling p11-stripped-core, amendment 2).
+    #[test]
+    fn the_early_agb_remnant_at_sses_tau_is_pinned() {
+        use hyperion_testkit::golden::GoldenWriter;
+
+        use super::super::super::agb::EarlyAgb;
+        use crate::units::{Megayears, MetalFraction};
+
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        for z in [1e-4, 4e-3, 0.02] {
+            let c = ZCoeffs::new(MetalFraction::new(z));
+            for m in [3.0, 6.0, 12.0] {
+                let early = EarlyAgb::new(SolarMasses::new(m), &c);
+                let helium = HeliumStar::new(early.mc_bagb());
+                let label = format!("Z {z} M {m}");
+                let lighter = f64::midpoint(m, early.mc_du().value());
+                w.f64(
+                    &format!("{label} t_n"),
+                    early.nuclear_end(SolarMasses::new(m)).value(),
+                );
+                w.f64(
+                    &format!("{label} t_n at {lighter}"),
+                    early.nuclear_end(SolarMasses::new(lighter)).value(),
+                );
+                let (t0, t1) = (early.t_start().value(), early.t_end().value());
+                for k in 0..=4 {
+                    let clock = Megayears::new(t0 + (t1 - t0) * f64::from(k) / 4.0);
+                    for mt in [m, lighter] {
+                        let core = early_agb_core(&early, &helium, clock, SolarMasses::new(mt));
+                        let at = format!("{label} x {k}/4 Mt {mt}");
+                        w.f64(
+                            &format!("{at} tau"),
+                            early.remnant_tau(clock, SolarMasses::new(mt)),
+                        );
+                        w.f64(&format!("{at} Lc"), core.luminosity.value());
+                        w.f64(&format!("{at} Rc"), core.radius.value());
+                    }
+                }
+            }
+        }
+        hyperion_testkit::golden!("stellar/early_agb_remnant", w.as_str());
     }
 
     /// Stripped on the giant branch above `M_HeF`, a star leaves a zero-age helium star of its

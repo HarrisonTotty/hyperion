@@ -49,8 +49,6 @@ pub(crate) use track::{
     Fate, RemnantModel, Stage, bridged_origin, fate_of, is_companion_stripped, remnant_of,
 };
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
-#[cfg(test)]
-pub(crate) use track::helium_zams_radius;
 pub use track::{
     AgeInterval, Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, PhasePredicate, Track, TrackOptions,
 };
@@ -59,6 +57,8 @@ pub(crate) use track::{
     giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,
     main_sequence_structure, new_star_mass,
 };
+#[cfg(test)]
+pub(crate) use track::{early_agb_core_radius_bound, helium_zams_radius};
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.
 #[cfg_attr(

@@ -248,8 +248,12 @@ fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
         let bound = component.envelope_bound(cell);
         let corner = envelope_sup(component, cell);
         if corner >= f64::MIN_POSITIVE {
+            // The bound and this reconstruction may round the envelope's exponent x = ln corner
+            // apart by k units in the last place, a relative k |x| ε, where `BOUND_MARGIN`'s 2⁻⁴⁰
+            // leaves about 0.9 × 10⁻¹³ under 10⁻¹² (1.7 × 10⁻¹³ seen at x = −634): 4 |x| ε more.
+            let floor = 4.0 * math::ln(corner).abs() * f64::EPSILON;
             assert!(
-                (bound / corner - 1.0).abs() <= 1e-12,
+                (bound / corner - 1.0).abs() <= 1e-12 + floor,
                 "component {i} in {cell:?}: bound {bound:e} against the corner's {corner:e}"
             );
         } else if corner > 0.0 {
@@ -262,11 +266,18 @@ fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
             // against the envelope itself, exactly. The nuclear disc's holed inner part (plan 02,
             // R26) goes subnormal before its amplitude of some thousands per ly³ multiplies it, so
             // a rounding of one unit in its exponential becomes tens: the two differed by nine
-            // units at 3 × 10⁻³¹¹ and by 32 at 4 × 10⁻³²⁰. Sixty-four units are allowed either way.
+            // units at 3 × 10⁻³¹¹, by 32 at 4 × 10⁻³²⁰ and by 81 at 3.5 × 10⁻³¹¹ (P11.T4.h).
+            // Sixty-four units are allowed either way, and the bound may stand above by more:
+            // each path rounds the subnormal factor once, by up to a unit, before × A (n0): 2⌈A⌉.
             let unit = f64::MIN_POSITIVE * f64::EPSILON;
             let slack = 64.0 * unit;
+            let amplitude = match component.shape() {
+                Shape::Disc(disc) => disc.n0(),
+                Shape::Bulge(_) | Shape::Bar(_) | Shape::Halo(_) => 0.0,
+            };
+            let above = slack + 2.0 * amplitude.ceil() * unit;
             assert!(
-                corner <= bound + slack && bound - corner <= 1e-12 * corner + slack,
+                corner <= bound + slack && bound - corner <= 1e-12 * corner + above,
                 "component {i} in {cell:?}: bound {bound:e} against the subnormal corner's \
                  {corner:e}"
             );

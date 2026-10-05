@@ -2533,3 +2533,15 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     brown dwarfs' fullest cell rises from some 20,000 to 74,036 of 2¹⁹. By ruling 125 those cells
     saturate in place and nothing else moves, but the brainstorm's "the Milky Way's does not reach
     it" no longer holds; the tests are pinned provisionally to the measured state.
+- **The monopole's density check beyond 10⁵ ly (P11.T4.h, 2026-10-04).**
+  `the_table_holds_the_gaussians_mass_and_density` takes its finite difference beyond 10⁵ ly
+  Richardson-extrapolated at h = 4 × 10⁻³, with the 10⁻⁵ tolerance kept: at h = 10⁻⁴ it sat at its
+  rounding floor and failed on P11.T4.h's last-bit change to the galaxy's parameters. See plan 11's
+  Risks, "P11.T4.h as built".
+- **The envelope bounds' tightness check at its rounding floor (P11.T4.h, 2026-10-04).**
+  `envelopes_never_exceed_their_bounds` (`tests/galaxy_bounds.rs`, plan 02's P02.T8.a) allows the
+  exponent's rounding, 4 |ln corner| ε, beyond its 10⁻¹² in the normal range, and a disc's
+  2⌈n0⌉ subnormal units beyond its 64 in the subnormal range, in the tightness half only (safety
+  stays exact; `bounds.rs` is untouched). The same change to the galaxy's parameters took it to
+  1.08 × 10⁻¹² at ln corner = −634 and to 81 units for the nuclear disc at 3.5 × 10⁻³¹¹. See plan
+  11's Risks, "P11.T4.h as built".

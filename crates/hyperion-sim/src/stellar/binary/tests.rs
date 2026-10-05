@@ -239,6 +239,50 @@ fn the_papers_algol_reproduces_its_sequence() {
     assert!(!timeline.hit_segment_cap());
 }
 
+/// SSE's τ of an early-AGB member's core remnant at `age`, years, its core radius, R☉, and the τ
+/// at which the remnant's radius would reach `lobe` R☉, `None` if it never does by τ = 1, where the
+/// blend ends (for the margin of BSE section 3.2's common envelope); `None` off the early AGB.
+fn early_agb_core_at(
+    member: &super::star::Member,
+    age: f64,
+    lobe: f64,
+) -> Option<(f64, f64, Option<f64>)> {
+    use super::star::Member;
+    let (track, track_age, mass) = match member {
+        Member::Track { track, offset } => {
+            let track_age = age - offset;
+            let mass = track.state_at(Years::new(track_age)).mass().value();
+            (track, track_age, mass)
+        }
+        Member::Shaped {
+            track,
+            offset,
+            mass,
+        } => (track, age - offset, mass.at(age)),
+        Member::MainSequence { .. }
+        | Member::Cooling { .. }
+        | Member::Frozen { .. }
+        | Member::Remnant { .. }
+        | Member::Gone => return None,
+    };
+    let (tau, radius) = track.early_agb_remnant(track_age, mass)?;
+    let rc = track.structure_at(track_age, mass).core_radius.value();
+    // The remnant's radius rises with τ up to 1: bisect for the τ at which it reaches the lobe.
+    let filling = (radius(1.0) >= lobe).then(|| {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..60 {
+            let mid = f64::midpoint(lo, hi);
+            if radius(mid) < lobe {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    });
+    Some((tau, rc, filling))
+}
+
 /// BSE section 3.2's cataclysmic variable (6.0 + 1.3 M☉, 630 d, `α_CE` = 1): the primary fills its
 /// lobe on the early AGB at 78 Myr, a common envelope leaves a helium giant of 1.5 M☉ that soon
 /// fills its lobe again, and a second leaves a carbon–oxygen white dwarf of 0.94 M☉ with the
@@ -263,6 +307,40 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
         (7.5e7..8.2e7).contains(&entry.age().value()),
         "{:?}",
         entry.age()
+    );
+    // The margin of the first common envelope (ruling p11-stripped-core, amendment 2): the
+    // giant's core radius, which SSE's τ sets, against the core's Roche lobe on the orbit the
+    // envelope leaves. The cores coalesce, and the sequence is lost, if it fills the lobe.
+    let ce = &timeline.segments()[first];
+    // The pair as the envelope leaves it, read from the next segment itself: the timeline's state
+    // at that age is the second envelope's, which follows at once.
+    let next = &timeline.segments()[first + 1];
+    let at = next.start().value();
+    let a_f = next
+        .paths()
+        .0
+        .expect("the cores survive the first common envelope")
+        .axis
+        .at(at);
+    let mass = |i: usize| {
+        next.members()[i]
+            .state_at(timeline.context(), i, at)
+            .mass()
+            .value()
+    };
+    let lobe = super::evolve::roche_lobe(mass(0), mass(1), a_f);
+    let (tau, rc, filling) = early_agb_core_at(&ce.members()[0], ce.start().value(), lobe)
+        .expect("the primary enters the common envelope on its early AGB");
+    eprintln!(
+        "BSE section 3.2, first common envelope at {:.3} Myr: SSE's τ = {tau:.4}, core radius \
+         {rc:.4} R☉ against the core's lobe of {lobe:.4} R☉ (a_f = {a_f:.4} R☉), which the core \
+         would fill from τ = {filling:.4?}",
+        entry.age().value() / 1e6
+    );
+    assert!(
+        rc < lobe,
+        "the core fills its lobe: {}",
+        describe(&timeline)
     );
     let second =
         find(&stages, first + 1, |k, _| *k == SegmentKind::CommonEnvelope).expect("a second one");
@@ -682,6 +760,20 @@ fn check_no_bare_giant(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
                 what()
             );
             if state.phase() == Phase::CoreHeliumBurning || mc <= 0.0 {
+                continue;
+            }
+            if state.phase() == Phase::EarlyAgb {
+                // The helium star of the helium core at the core's luminosity,
+                // R_HeGB(Mc,He, Lc) = min(R₁, R₂) (HPT section 6.3 after equation 105; `hrdiag`
+                // kw = 5), which Lc's blend at SSE's τ puts anywhere up to its brightest (ruling
+                // p11-stripped-core, amendments 1 and 2): the held state keeps no τ to check it by.
+                let bound = crate::stellar::sse::early_agb_core_radius_bound(mc).min(r);
+                assert!(
+                    rc > 0.0 && rc <= bound * (1.0 + 1e-12),
+                    "a held early-AGB star's core radius {rc} R☉ is not a helium giant's of a \
+                     {mc} M☉ core (at most {bound} R☉): {}",
+                    what()
+                );
                 continue;
             }
             let candidates = [

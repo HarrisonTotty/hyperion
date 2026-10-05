@@ -2237,8 +2237,6 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
   Mark size follows the chart's size classes, and the panel says `SYMBOLS NOT TO SCALE` as the chart
   does. Selecting a point selects the system everywhere. The canvas has an accessible name and is
   not focusable: keyboard access is through the shared list. It redraws on demand, never on a loop.
-  _Its frame, pegs and marks are drawn by `paint.ts` at R07.T16.f's widths
-  (decision-thin-line-contrast)._
 - **Files:** `apps/hyperion/src/renderer/src/displays/galaxy/HrDiagram.tsx`,
   `lib/galaxy/hrProjection.ts`, tests (with plan 05's `RecordingContext2D`).
 - **Tests:** projection maps the Sun to the expected pixel; picking tolerance of at least `1rem`;
@@ -2814,7 +2812,7 @@ domain_tags_are_pinned`, since `events` alone misses the registry tests and the 
   - _Determinism._ No platform transcendental bypasses `math`, nothing `usize`-dependent reaches
     output, and the `Lattice` cache lives for one call. Latent: a release build lets a NaN into a
     `StarState`, whose range checks are debug assertions.
-- **P06.T35.b's outline, as built alone (round 7, `ui`).** Only the `ringed-circle` value of `SymbolShape` and its outline are built, for plan 14's `SYSTEM` display; `starSymbols.ts`, the `STARS` filter and the legend wait for the stellar wire types. `SymbolOutline` gains a third kind, `{ kind: "ringed-circle", discRadius }`, with `discRadius` `RINGED_DISC_SHARE` = 1/3 of the ring's radius; the painter fills the disc alone, then adds the ring to the path and strokes both once, so open and filled differ only by the fill (tested in the draw list and on a recorded canvas). **Deviation, for the orchestrator to rule:** the task asks that it read open against filled at the smallest `SIZE_CLASS_REM`, which no ringed circle can: at size class 0 (8 px at 100%) the ring's and the disc's 1.5 px outlines take 6 px, leaving 2 px for the gap round the disc and the open disc's hole, which cannot both be a pixel wide. The third splits it evenly, 2 px each at size class 2 and 1.2 px at 80%, and the test asserts both at least the outline's width at class 2 — the smallest class a giant is expected to take, since D17 ties size to the initial-mass layer and giants should come from layer C (0.75–2.5 M☉) and above in a galaxy of the Milky Way's age; `starSymbols.ts` should confirm that when it lands, or plan 06 should give giants a size class floor. _Since R07.T16.f, below a device-pixel ratio of 4/3, the ring moves out three times as far as the disc, so its hole and gap stand as built at every ratio, and a ringed circle grows up to 2δ more than other marks (decision-thin-line-contrast)._
+- **P06.T35.b's outline, as built alone (round 7, `ui`).** Only the `ringed-circle` value of `SymbolShape` and its outline are built, for plan 14's `SYSTEM` display; `starSymbols.ts`, the `STARS` filter and the legend wait for the stellar wire types. `SymbolOutline` gains a third kind, `{ kind: "ringed-circle", discRadius }`, with `discRadius` `RINGED_DISC_SHARE` = 1/3 of the ring's radius; the painter fills the disc alone, then adds the ring to the path and strokes both once, so open and filled differ only by the fill (tested in the draw list and on a recorded canvas). **Deviation, for the orchestrator to rule:** the task asks that it read open against filled at the smallest `SIZE_CLASS_REM`, which no ringed circle can: at size class 0 (8 px at 100%) the ring's and the disc's 1.5 px outlines take 6 px, leaving 2 px for the gap round the disc and the open disc's hole, which cannot both be a pixel wide. The third splits it evenly, 2 px each at size class 2 and 1.2 px at 80%, and the test asserts both at least the outline's width at class 2 — the smallest class a giant is expected to take, since D17 ties size to the initial-mass layer and giants should come from layer C (0.75–2.5 M☉) and above in a galaxy of the Milky Way's age; `starSymbols.ts` should confirm that when it lands, or plan 06 should give giants a size class floor.
 - **Deviations in T15.c, as built (`planet`, round 7; rulings 33 and 38).** Only the disc-lifetime
   law is built, because plan 14's disc is its first caller: `stellar::premain::disc_lifetime` of a
   mass and a rank, in `Megayears`, with `disc_lifetime_mean(mass)` and the constants
@@ -4345,97 +4343,18 @@ generator-version change made here, not in R06.
   response reports (and the view labels `WD NOT MODELLED`); M giants are as bright as this plan
   says. **Switched by:** R06.T5.a's `sky::photometry::absolute_v_of_state`, which then reads this
   plan's V for white dwarfs; R06's census and luminosity function follow it with no other change.
-- **The envelope integrator's past-the-grid branch had no knot cap (found by P11.T4.h,
-  2026-10-04; resolved 2026-10-05 by a guard that moves no output, see "Resolved, as built"
-  below).** In `track/build.rs` `envelope_knots`, a knot past the clustered grid steps in age to
-  twice the envelope's remaining life at its present rate of loss. Nothing capped that branch, so
-  if each step falls short the loop pushes a knot every pass, without end.
+- **The envelope integrator's past-the-grid branch has no knot cap (found by P11.T4.h,
+  2026-10-04; a guard is queued as its own task).** In `track/build.rs` `envelope_knots`, a knot
+  past the clustered grid steps in age to twice the envelope's remaining life at its present rate
+  of loss. `MAX_KNOT_FACTOR` caps only the grid branch, so if each step falls short the loop pushes
+  a knot every pass, without end.
   - Each step falls short when the rate of loss drops as the mass nears the core. P11.T4.h's work
     in progress caused that: the early AGB's remnant τ stepped from ≥ 1 to 0 at M = Mc, and its
     wind with it. It hung the R06 census and filled the machine's memory (about 5 MiB/s).
   - Repro: record 0x61f85aa800000001 of seed 0x0600_0029_b000_5eed (the census's galaxy), whose
     0.84 M☉ companion loses its envelope to its wind on the early AGB; run `StarModel::lifetime`
     with the step restored.
-  - P11.T4.h removed the step (on the Phase J branch until the 20→21 bump); `stellar_system.rs`
+  - P11.T4.h removed the step; `stellar_system.rs`
     `a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate` pins the record.
-  - _Resolved, as built (2026-10-05)._ The guard fails loudly, naming the star, instead of
-    growing, and is bit-identical on every current record.
-    - _What the stall was_ (re-measured with the step restored). It was not a Zeno series of
-      shrinking steps.
-      - The envelope sat at 3.3 × 10⁻¹⁵ M☉ on 0.5102 M☉, about 30 units in the mass's last place,
-        at 2.59 × 10¹⁰ yr.
-      - Each knot's 2e ÷ f, 2.65 × 10⁻⁶ yr, rounded up to one unit in the age's last place, 3.81 ×
-        10⁻⁶ yr.
-      - The midpoints, below the core, saw a wind too weak to move the mass.
-      - So each knot moved the age by one unit, 1.4 × 10⁵ yr short of the span's end: about 4 ×
-        10¹⁰ knots, or some 3 TB.
-    - _The bound._ `MAX_KNOTS_PAST_GRID` = 28 covers steps that resolve the phase's laws.
-      - The worst wind whose rate falls no faster than the envelope is a rate in proportion to it.
-        It leaves 0.153 of the envelope per interval of 4 midpoint steps.
-      - From 150 M☉ such a wind reaches 2⁻⁵⁴ of a 10⁻³ M☉ core in 27 short intervals; one more
-        makes 28. A test checks this against the resolution and its doubling.
-    - _The stall allowance._ Past the 28 knots the build may go on while the age stays within
-      `EnvelopeClock::still_years` of the 28th knot's. That covers stalls at the age's rounding.
-      - `still_years` is 2 × 2⁻⁵² × the clock's larger end (Myr) × 10⁶ × the stretch: how long the
-        phase's clock can stand still, in years of age.
-      - A core read through that clock can stand still where the clock, on the track of the
-        star's effective initial mass, runs ahead of the age. Once the clock moves, the core
-        catches up by more than the envelope left.
-      - A wind continuous over the step cannot stall: it moves the mass by more than the envelope.
-      - Each knot moves the age by at least one unit in its last place, so the window allows at
-        most 1 + `still_years` ÷ (2⁻⁵³ t) knots more: 23 at a clock 5.5 times the age.
-      - The window is checked in age, not by dividing by it, so a zero or NaN age cannot switch
-        the guard off. That was the determinism auditor's point against a first draft that counted
-        knots.
-    - _Why the allowance is needed_ (measured on the R06 census, then the instrumentation removed).
-      - 161 envelope phases take more than one knot past the grid, between 5.2 × 10⁵ and 10⁶ of
-        them in all: 136 take 2, 18 take 3, 5 take 4 and 2 take 5. All are on the thermally pulsing
-        AGB or in core helium burning.
-      - All of them have clocks 3.5–7 times the age at the phase's start, envelopes of
-        10⁻¹⁶–10⁻¹³ M☉, and steps of one or two units of the age.
-      - The 5-knot core-helium-burning case has a clock 5.5 times the age, and its core stood still
-        for about 8 units of the age.
-      - A flat 28 would have left the galaxy as a whole a margin only up to clocks of about 7 times
-        the age.
-    - _The error._ `envelope_knots` returns `IntegrateEnvelopeError::Stalled`. It carries the knots,
-      the phase and its entry, the last knot's age, mass and envelope, and the span's end, in
-      `Years` and `SolarMasses`.
-      - It is propagated with `?` through `envelope_segment`, the six envelope phases and
-        `Builder::phase` to `Builder::run_from`.
-      - `run_from` panics. A stall is a bug in a phase's laws, and the track constructors and
-        their 157 call sites stay infallible.
-      - The message names the star by the mass it enters its life with, its composition, its
-        Reimers η, the options, the resolution and the companion-stripped mark.
-      - With the step restored, record 0x61f85aa800000001 fails in 0.7 s under a 1 GB cap, at 45
-        knots, 28 and 17 more within the allowance. The message reads: "the track of a star
-        entering its life with 0.8411980660928929 M☉ (Composition { z: MetalFraction(0.025711…),
-        fe_h: Dex(0.109089…), helium_excess: HeliumExcess(0.0) }, ReimersEta(0.467527…),
-        TrackOptions { wind: Modern, remnant: MandelMuller2020, bridges: Physical }, Resolution {
-        knots: 16, pulsing_knots: 32, steps: 4 }, companion-stripped mark false) stalled: the
-        EarlyAgb phase entered at 2.589473034261505e10 yr with 0.5112103126692104 M☉ still had an
-        envelope after 45 knots past its grid: 3.3306690738754696e-15 M☉ of 0.5101685949439533 M☉
-        at 2.5899760324016014e10 yr, 1.405475198135376e5 yr before its span's end".
-    - _Tests_, in `build.rs`, on synthetic laws:
-      - A wind that drops a million-fold at the core, on a clock 5 times the age, trips the guard
-        at 44 knots, 28 + 1 + 15, after 8 derivative evaluations a knot. The age moves one unit a
-        knot, and the span's end lies over 10¹⁰ knots away. Without the guard the same case ran
-        2 × 10⁶ knots unchanged; the test's laws now refuse more than 10⁴ evaluations, so a guard
-        that failed fails the test instead of filling memory.
-      - The same star with a continuous wind ends in one knot.
-      - A core read through a clock 13.5 times the age stalls for more than 28 knots and ends
-        within the allowance.
-      - The proportional wind from 150 M☉ ends in 26 knots.
-    - _Output._ `golden_diff` shows 0 moved, and `GENERATOR_VERSION` is unchanged.
-    - _Also found._ `MAX_KNOT_FACTOR` can never fire.
-      - Each interval on the grid passes at least one more of its values, so the grid branch takes
-        at most n knots, and `built.len() > 2n` is never true there.
-      - It is left as it is, since removing it would move nothing.
-- **The local V light is low (a pointer from rendering plan R06, 2026-10-06,
-  `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
-  the fixture's V light is 0.0417 L☉ pc⁻³, 26% under Flynn et al. 2006's 0.056 ± 10%, uniformly
-  across magnitudes, so the deficit is light per unit mass in the turnoff stars and clump giants
-  (M_V 4 to 0), and the column's light is 21% (0.26 mag) low. A calibration finding for plans 02
-  and 06 (and plan 11 for the pair light): the tracks' turnoff and clump light is one of the four
-  candidates, with plan 02's SFH, young disc height and Chabrier's scale. The measurement, and the
-  comparison of the fixture's Φ(M_V) with Hipparcos/CNS5 that parts them, are in plan 02's Risks,
-  "The local V light is low". A fix is a `GENERATOR_VERSION` change.
+  - The queued guard fails loudly, naming the record, instead of growing, and is bit-identical
+    on every current record.
