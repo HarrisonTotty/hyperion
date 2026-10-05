@@ -1,33 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import type { DescentSpikeReport, SpikeApi, SpikeEnd, SpikeLaunch } from "../../../../preload/api";
+import { TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import type { PassTimes } from "../engine/types";
 import { planetGeometry } from "../terrain/planet";
-import { recordProfile } from "./demandRecord";
+import { RECORD_SEED, recordProfile } from "./demandRecord";
+import { DESCENT_SEGMENTS, DescentProfile, landingSiteOf } from "./descentProfile";
 import { GpuCapture } from "./capture";
 import { PipelineTally } from "./pipelineShim";
 import {
   CAPTURE_FRAMES,
   SMOKE_S,
+  SMOKE_TRACE_BOUNDARIES_S,
   type SpanCapture,
   SpikeController,
   variantOf,
 } from "./spikeController";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
+import { TRACE_BOUNDARY_GUARD_S, traceBoundaries } from "./traceWindows";
 
-const LAUNCH: SpikeLaunch = {
-  setting: "low",
-  seed: "7",
-  smoke: false,
-  out: null,
-  workers: null,
-  vertexPath: null,
-  normals: null,
-  ridged: "off",
-  dawnSafety: "on",
-  capture: null,
-};
+const LAUNCH: SpikeLaunch = TEST_SPIKE_LAUNCH;
 
 const DESCENT = {
   planet: planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off")),
@@ -35,21 +28,28 @@ const DESCENT = {
   omittedSigmaM: Array.from({ length: 25 }, () => 1e9),
 };
 
-/** A fake preload, recording each call. */
+/** A fake preload, recording each call; each cycle answers as the next queued answer says. */
 function fakeSpike(launch: SpikeLaunch): {
   readonly spike: SpikeApi;
   readonly calls: string[];
   readonly ends: SpikeEnd[];
   readonly reports: DescentSpikeReport[];
+  /** How the next cycles answer, in order; a cycle beyond them resolves. */
+  readonly cycles: Array<() => Promise<void>>;
 } {
   const calls: string[] = [];
   const ends: SpikeEnd[] = [];
   const reports: DescentSpikeReport[] = [];
+  const cycles: Array<() => Promise<void>> = [];
   const spike: SpikeApi = {
     launch,
     startTrace: () => {
       calls.push("startTrace");
       return Promise.resolve();
+    },
+    cycleTrace: () => {
+      calls.push("cycleTrace");
+      return (cycles.shift() ?? (() => Promise.resolve()))();
     },
     stopTrace: () => {
       calls.push("stopTrace");
@@ -74,7 +74,7 @@ function fakeSpike(launch: SpikeLaunch): {
       return Promise.resolve();
     },
   };
-  return { spike, calls, ends, reports };
+  return { spike, calls, ends, reports, cycles };
 }
 
 /** A capture that records what the controller asks of it. */
@@ -146,6 +146,39 @@ function settle(): Promise<void> {
   });
 }
 
+/** The calls other than the trace's and the memory sampler's. */
+function untraced(calls: ReadonlyArray<string>): string[] {
+  return calls.filter((c) => !c.endsWith("Trace") && c !== "sampleMemory");
+}
+
+/** Today's boundaries, s. */
+const BOUNDARIES = traceBoundaries(DESCENT.profile.segmentSpans());
+
+/**
+ * Flies a prepared run on the fake clock: its start answered, a frame at 0, then one at each
+ * boundary, its cycle answered 300 ms later, and one at `endS`, the clock at each frame's script
+ * time (script start 0).
+ */
+async function flyBoundaries(
+  run: ReturnType<typeof controllerOf>,
+  boundariesS: ReadonlyArray<number>,
+  endS: number,
+): Promise<void> {
+  await settle();
+  run.controller.frame(frame(0));
+  for (const b of boundariesS) {
+    run.clock.ms = b * 1000;
+    run.controller.frame(frame(b));
+    run.clock.ms = b * 1000 + 300;
+    // Each cycle is answered before the next boundary's frame, as a run's are.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+  run.clock.ms = endS * 1000;
+  run.controller.frame(frame(endS));
+  await settle();
+}
+
 describe("the spike's run control", () => {
   it("measures the whole descent, then writes its results and ends with a pass", async () => {
     const { controller, calls, ends, reports, resolves } = controllerOf(LAUNCH);
@@ -158,6 +191,8 @@ describe("the spike's run control", () => {
       onAllocation: () => () => undefined,
     });
     controller.prepared(DESCENT);
+    // The trace's start resolves before the first frame, as it does in a run.
+    await settle();
     for (const t of [0, 0.5, 1.2, 600, DESCENT.profile.durationS]) {
       resolves.value += 3;
       controller.frame(frame(t));
@@ -170,8 +205,10 @@ describe("the spike's run control", () => {
       });
     }
     await settle();
+    // The frame at 600 s passes the first boundary, at 120 s.
     expect(calls.filter((c) => c !== "sampleMemory")).toEqual([
       "startTrace",
+      "cycleTrace",
       "stopTrace",
       "writeResults",
       "end",
@@ -184,36 +221,188 @@ describe("the spike's run control", () => {
     expect(controller.ended).toBe(true);
   });
 
-  it("reports where script time starts and its one trace window's start and stop request", async () => {
+  it("reports where script time starts, the guard, and a window that no boundary cut", async () => {
     const { controller, reports, clock } = controllerOf(LAUNCH);
     clock.ms = 50;
     controller.prepared(DESCENT);
     await settle();
     controller.frame(frame(0, 120));
     clock.ms = 1_300_000;
+    // A frame at the script's end passes no boundary: the run ends there.
     controller.frame(frame(DESCENT.profile.durationS, 120));
     await settle();
     expect(reports[0]?.scriptStartMs).toBe(120);
-    expect(reports[0]?.traceWindows).toEqual([{ startedMs: 50, stopRequestedMs: 1_300_000 }]);
+    expect(reports[0]?.traceGuardS).toBe(TRACE_BOUNDARY_GUARD_S);
+    expect(reports[0]?.traceWindows).toEqual([
+      { startedMs: 50, stopRequestedMs: 1_300_000, failure: null },
+    ]);
   });
 
-  it("passes a smoke run that baked a patch, at 10 s, with no trace or results", async () => {
-    const { controller, calls, ends } = controllerOf({ ...LAUNCH, smoke: true });
-    controller.prepared(DESCENT);
-    controller.frame(frame(0));
-    controller.patch("requested");
-    controller.patch("baked");
-    controller.frame(frame(SMOKE_S - 0.1));
-    expect(ends).toEqual([]);
-    controller.frame(frame(SMOKE_S));
+  it("cycles the trace once per boundary, and reports every window's times", async () => {
+    const run = controllerOf(LAUNCH);
+    run.clock.ms = -2000;
+    run.controller.prepared(DESCENT);
+    await flyBoundaries(run, BOUNDARIES, DESCENT.profile.durationS);
+    expect(run.calls.filter((c) => c === "cycleTrace")).toHaveLength(9);
+    expect(untraced(run.calls)).toEqual(["writeResults", "end"]);
+    const starts = [-2000, ...BOUNDARIES.map((b) => b * 1000 + 300)];
+    const stops = [...BOUNDARIES.map((b) => b * 1000), DESCENT.profile.durationS * 1000];
+    expect(run.reports[0]?.traceWindows).toEqual(
+      starts.map((startedMs, k) => ({ startedMs, stopRequestedMs: stops[k], failure: null })),
+    );
+    expect(run.ends).toEqual([{ status: "pass" }]);
+  });
+
+  it("ends the trace, not the run, when a cycle is refused", async () => {
+    const run = controllerOf(LAUNCH);
+    run.cycles.push(() => Promise.reject(new Error("the tracing service is gone")));
+    run.controller.prepared(DESCENT);
+    await flyBoundaries(run, BOUNDARIES, DESCENT.profile.durationS);
+    // No cycle follows the refused one.
+    expect(run.calls.filter((c) => c === "cycleTrace")).toHaveLength(1);
+    const reason = "the trace's cycle at 120 s failed: the tracing service is gone";
+    expect(run.reports[0]?.traceWindows).toEqual([
+      { startedMs: 0, stopRequestedMs: 120_000, failure: null },
+      { startedMs: 120_300, stopRequestedMs: 1_230_000, failure: reason },
+    ]);
+    expect(run.ends).toEqual([{ status: "pass" }]);
+  });
+
+  it("refuses to cycle while the last cycle is pending, ending the trace", async () => {
+    const run = controllerOf(LAUNCH);
+    const held: { release: (() => void) | null } = { release: null };
+    run.cycles.push(
+      () =>
+        new Promise((resolve) => {
+          held.release = resolve;
+        }),
+    );
+    run.controller.prepared(DESCENT);
     await settle();
-    expect(calls).toEqual(["end"]);
-    expect(ends).toEqual([{ status: "pass" }]);
+    run.controller.frame(frame(0));
+    run.clock.ms = 120_000;
+    run.controller.frame(frame(120));
+    await settle();
+    run.clock.ms = 240_000;
+    run.controller.frame(frame(240));
+    expect(held.release).not.toBeNull();
+    held.release?.();
+    await settle();
+    run.clock.ms = 1_230_000;
+    run.controller.frame(frame(DESCENT.profile.durationS));
+    await settle();
+    expect(run.calls.filter((c) => c === "cycleTrace")).toHaveLength(1);
+    expect(run.reports[0]?.traceWindows).toEqual([
+      { startedMs: 0, stopRequestedMs: 120_000, failure: null },
+      {
+        startedMs: 240_000,
+        stopRequestedMs: 1_230_000,
+        failure: "the trace's cycle at 120 s was still pending at the boundary at 240 s",
+      },
+    ]);
+    expect(run.ends).toEqual([{ status: "pass" }]);
+  });
+
+  it("stops the trace only once a cycle still in flight at the script's end has settled", async () => {
+    const run = controllerOf(LAUNCH);
+    const held: { release: (() => void) | null } = { release: null };
+    run.controller.prepared(DESCENT);
+    const last = BOUNDARIES.at(-1) ?? 0;
+    await flyBoundaries(run, BOUNDARIES.slice(0, -1), last - 1);
+    run.cycles.push(
+      () =>
+        new Promise((resolve) => {
+          held.release = resolve;
+        }),
+    );
+    run.clock.ms = last * 1000;
+    run.controller.frame(frame(last));
+    run.clock.ms = 1_230_000;
+    run.controller.frame(frame(DESCENT.profile.durationS));
+    await settle();
+    expect(run.calls).not.toContain("stopTrace");
+    run.clock.ms = 1_231_000;
+    held.release?.();
+    await settle();
+    expect(run.calls.slice(-3)).toEqual(["stopTrace", "writeResults", "end"]);
+    // The last window began when its late cycle resolved, and stopped at once.
+    expect(run.reports[0]?.traceWindows.at(-1)).toEqual({
+      startedMs: 1_231_000,
+      stopRequestedMs: 1_231_000,
+      failure: null,
+    });
+  });
+
+  it("ends the run when the profile's windows cannot be placed", async () => {
+    const long = new DescentProfile(
+      DESCENT.profile.figure,
+      landingSiteOf(RECORD_SEED),
+      {},
+      DESCENT_SEGMENTS.map((segment) =>
+        segment.name === "approach and flare"
+          ? Object.assign({}, segment, { durationS: 150 })
+          : segment,
+      ),
+    );
+    const run = controllerOf(LAUNCH);
+    run.controller.prepared({ ...DESCENT, profile: long });
+    await settle();
+    expect(run.calls).toEqual(["end"]);
+    expect(run.ends[0]).toMatchObject({ status: "fail" });
+    expect(run.ends[0]?.status === "fail" ? run.ends[0].reason : "").toMatch(
+      /^the trace's windows could not be placed: the busy stretch with its clearances is 270 s/,
+    );
+  });
+
+  it("ends the trace when its start is still pending at the first boundary", async () => {
+    const run = controllerOf(LAUNCH);
+    run.controller.prepared(DESCENT);
+    // The start's answer has not run yet when the script passes 120 s.
+    run.controller.frame(frame(0));
+    run.clock.ms = 120_000;
+    run.controller.frame(frame(120));
+    await settle();
+    run.clock.ms = 1_230_000;
+    run.controller.frame(frame(DESCENT.profile.durationS));
+    await settle();
+    expect(run.calls.filter((c) => c === "cycleTrace")).toEqual([]);
+    expect(run.reports[0]?.traceWindows).toEqual([
+      {
+        startedMs: 120_000,
+        stopRequestedMs: 1_230_000,
+        failure: "the trace's start was still pending at the boundary at 120 s",
+      },
+    ]);
+  });
+
+  it("passes a smoke run that baked a patch, at 10 s, its trace in three windows", async () => {
+    const run = controllerOf({ ...LAUNCH, smoke: true });
+    run.controller.prepared(DESCENT);
+    run.controller.patch("baked");
+    await flyBoundaries(run, SMOKE_TRACE_BOUNDARIES_S, SMOKE_S - 0.1);
+    expect(run.ends).toEqual([]);
+    run.controller.frame(frame(SMOKE_S));
+    await settle();
+    expect(run.calls).toEqual(["startTrace", "cycleTrace", "cycleTrace", "stopTrace", "end"]);
+    expect(run.ends).toEqual([{ status: "pass" }]);
+    expect(run.reports).toEqual([]);
+  });
+
+  it("fails a smoke run whose trace ended early, with the reason", async () => {
+    const run = controllerOf({ ...LAUNCH, smoke: true });
+    run.cycles.push(() => Promise.reject(new Error("the tracing service is gone")));
+    run.controller.prepared(DESCENT);
+    run.controller.patch("baked");
+    await flyBoundaries(run, SMOKE_TRACE_BOUNDARIES_S, SMOKE_S);
+    expect(run.ends).toEqual([
+      { status: "fail", reason: "the trace's cycle at 3 s failed: the tracing service is gone" },
+    ]);
   });
 
   it("fails a smoke run that baked nothing", async () => {
     const { controller, ends } = controllerOf({ ...LAUNCH, smoke: true });
     controller.prepared(DESCENT);
+    await settle();
     controller.frame(frame(SMOKE_S));
     await settle();
     expect(ends).toEqual([{ status: "fail", reason: "no patch was baked in a worker" }]);
@@ -257,10 +446,10 @@ describe("the spike's run control", () => {
     await settle();
     expect(capture.log.filter((e) => e === "frame")).toHaveLength(CAPTURE_FRAMES);
     expect(capture.log.slice(-2)).toEqual(["end", "result"]);
-    expect(calls).toEqual(["writeCapture"]);
+    expect(untraced(calls)).toEqual(["writeCapture"]);
     controller.frame(frame(SMOKE_S));
     await settle();
-    expect(calls).toEqual(["writeCapture", "end"]);
+    expect(untraced(calls)).toEqual(["writeCapture", "end"]);
   });
 
   it("ends and writes a span the run outlasts, where the run ends", async () => {
@@ -273,7 +462,7 @@ describe("the spike's run control", () => {
     controller.frame(frame(SMOKE_S));
     await settle();
     expect(capture.log).toContain("end");
-    expect(calls).toEqual(["writeCapture", "end"]);
+    expect(untraced(calls)).toEqual(["writeCapture", "end"]);
   });
 
   it("starts a full run's span 5 s into the low fast pass", () => {

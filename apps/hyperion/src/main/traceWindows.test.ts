@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { PROFILED, recordingOf, UNPROFILED, windowFile, windowTrace } from "./fixtures/traces";
 import { measured, missing } from "./measured";
 import {
-  CPU_PROFILER_CATEGORY,
+  EMPTY_TRACE_REASON,
   mergeTraceWindows,
+  NO_CLOCK_OFFSET_REASON,
   type PooledTraceFigures,
   PROFILER_OFF_REASON,
-  TRACE_BOUNDARY_GUARD_S,
-  traceSettingsOf,
   type TraceWindowsReport,
+  windowFileFailure,
 } from "./traceWindows";
 
 /**
@@ -23,9 +23,10 @@ function report(): TraceWindowsReport {
   return {
     scriptStartMs: 1000,
     traceWindows: [
-      { startedMs: 900, stopRequestedMs: 11_000 },
-      { startedMs: 11_500, stopRequestedMs: 21_000 },
+      { startedMs: 900, stopRequestedMs: 11_000, failure: null },
+      { startedMs: 11_500, stopRequestedMs: 21_000, failure: null },
     ],
+    traceGuardS: 1,
     warmupS: 1,
     segments: [
       { name: "a", startS: 0, endS: 10 },
@@ -92,7 +93,7 @@ describe("the trace's windows, merged", () => {
       [0, -0.1, 10],
       [1, 10.5, 20],
     ]);
-    expect(run?.guardS).toBe(TRACE_BOUNDARY_GUARD_S);
+    expect(run?.guardS).toBe(1);
     // Frames at 10, 10.25, …, 11.25 s; the stall is the frame after the gap.
     expect(run?.boundaries).toEqual([
       {
@@ -201,7 +202,7 @@ describe("the trace's windows, merged", () => {
   it("is one window and no boundary before the trace is cycled", () => {
     const one: TraceWindowsReport = {
       ...report(),
-      traceWindows: [{ startedMs: 900, stopRequestedMs: 21_100 }],
+      traceWindows: [{ startedMs: 900, stopRequestedMs: 21_100, failure: null }],
     };
     const trace = windowTrace({ offsetUs: 7e9, fromMs: at(-0.1), toMs: at(20.1) });
     const merged = mergeTraceWindows(recordingOf([windowFile(trace)]), one);
@@ -236,19 +237,83 @@ describe("the trace's windows, merged", () => {
   });
 });
 
-describe("a run's trace settings", () => {
-  it("call a run profiled when the CPU profiler's category is recorded", () => {
-    const settings = traceSettingsOf({
-      recording_mode: "record-until-full",
-      trace_buffer_size_in_kb: 786_432,
-      included_categories: ["gpu", CPU_PROFILER_CATEGORY],
+describe("a trace the renderer ended early", () => {
+  /** The second window failed by the renderer: its cycle at 10 s was refused. */
+  function ended(): TraceWindowsReport {
+    const base = report();
+    const [first] = base.traceWindows;
+    if (first === undefined) {
+      throw new Error("no first window");
+    }
+    return {
+      ...base,
+      traceWindows: [
+        first,
+        { startedMs: 11_500, stopRequestedMs: 21_000, failure: "the trace's cycle at 10 s failed" },
+      ],
+    };
+  }
+
+  it("fails every trace figure with the reason, its last window needing no file", () => {
+    const [first] = twoWindows();
+    if (first === undefined) {
+      throw new Error("no first window");
+    }
+    const merged = mergeTraceWindows(recordingOf([windowFile(first)]), ended());
+    const reason = "trace window 2 of 2: the trace's cycle at 10 s failed";
+    expect(merged.figures).toEqual(missing(reason));
+    expect(merged.run.value?.windows.map(({ figures }) => figures.reason)).toEqual([
+      null,
+      "the trace's cycle at 10 s failed",
+    ]);
+    // The boundary's frames are still left out; only the reduced window counts as traced.
+    expect(merged.exclusions).toEqual([{ fromS: 10, toS: 11.5 }]);
+    expect(merged.run.value?.tracedS).toBeCloseTo(9, 9);
+  });
+
+  it("ignores a file the main process still wrote for the failed window", () => {
+    const merged = mergeTraceWindows(recordingOf(twoWindows().map(windowFile)), ended());
+    expect(merged.figures.reason).toBe("trace window 2 of 2: the trace's cycle at 10 s failed");
+  });
+
+  it("has no trace when a window the renderer did not fail has no file", () => {
+    const [first] = twoWindows();
+    if (first === undefined) {
+      throw new Error("no first window");
+    }
+    const merged = mergeTraceWindows(recordingOf([windowFile(first)]), report());
+    expect(merged.run.reason).toBe(
+      "the renderer reported 2 trace windows, and the main process wrote 1",
+    );
+  });
+});
+
+describe("the boundaries' guard", () => {
+  it("is the report's", () => {
+    const merged = mergeTraceWindows(recordingOf(twoWindows().map(windowFile)), {
+      ...report(),
+      traceGuardS: 2,
     });
-    expect(settings).toEqual({
-      profiled: true,
-      categories: ["gpu", CPU_PROFILER_CATEGORY],
-      recordingMode: "record-until-full",
-      bufferKb: 786_432,
-    });
-    expect(traceSettingsOf({ included_categories: ["gpu"] }).profiled).toBe(false);
+    expect(merged.run.value?.guardS).toBe(2);
+    expect(merged.exclusions).toEqual([{ fromS: 10, toS: 12.5 }]);
+  });
+});
+
+describe("a window's file alone", () => {
+  it("fails without a trace, an event, a clock offset or a size, or with a full buffer", () => {
+    const trace = windowTrace({ offsetUs: 7e9, fromMs: at(0), toMs: at(3) });
+    const good = windowFile(trace);
+    expect(windowFileFailure(good)).toBeNull();
+    expect(windowFileFailure({ ...good, trace: missing("its file could not be read: x") })).toBe(
+      "its file could not be read: x",
+    );
+    expect(windowFileFailure(windowFile({ ...trace, span: null }))).toBe(EMPTY_TRACE_REASON);
+    expect(windowFileFailure(windowFile({ ...trace, clockOffsetUs: null }))).toBe(
+      NO_CLOCK_OFFSET_REASON,
+    );
+    expect(windowFileFailure({ ...good, bytes: null })).toBe("its file's size could not be read");
+    expect(windowFileFailure({ ...good, bufferPercent: 99 })).toBe(
+      "it filled its buffer: 99 % of it was used",
+    );
   });
 });

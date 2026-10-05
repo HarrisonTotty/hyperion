@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-import type { GraphicsApi, HyperionApi, SpikeApi } from "../../../preload/api";
+import type { GraphicsApi, HyperionApi, SpikeApi, SpikeLaunch } from "../../../preload/api";
 
 /** The server the stubbed preload reports the client was launched to link to. */
 export const TEST_SERVER_URL = "ws://127.0.0.1:7878/ws";
@@ -10,6 +10,24 @@ export const TEST_GRAPHICS: GraphicsApi = {
   launchMode: "vulkan",
   gpuTiming: false,
   onGpuProcessGone: () => () => undefined,
+};
+
+/**
+ * A descent-spike launch as the command line gives it with `--setting low` and every other option
+ * at its default: a full run, unprofiled, with no capture.
+ */
+export const TEST_SPIKE_LAUNCH: SpikeLaunch = {
+  setting: "low",
+  seed: "7",
+  smoke: false,
+  out: null,
+  workers: null,
+  vertexPath: null,
+  normals: null,
+  ridged: "off",
+  dawnSafety: "on",
+  capture: null,
+  traceProfile: "off",
 };
 
 /**
