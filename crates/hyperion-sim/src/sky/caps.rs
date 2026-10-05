@@ -12,12 +12,13 @@
 //! as 10^(−0.6 A), convex in A.
 //!
 //! A cap never passes the layer's **rule bound**, the distance at which the brightest star the
-//! envelope allows the layer ([`BrightnessEnvelope::brightest`]) falls to the cut with the
-//! **least** extinction of any ray. Neither is a strict bound: a clear window narrower than the
-//! rays' spacing, about 7°, could still show stars beyond them. Each cap therefore carries the
-//! expected number of the layer's stars brighter than the cut beyond it, under one by
-//! construction, which the response states; the slow test `caps_converge_in_rays` holds it under
-//! 1.5 against 3,072 rays and twice the radial steps.
+//! envelope allows the layer ([`BrightnessEnvelope::brightest`] at [`max_star_mass`] of the band's
+//! top, twice it since R06.T16.b, at any age) falls to the cut with the **least** extinction of
+//! any ray. Neither is a strict bound: a clear window narrower than the rays' spacing, about 7°,
+//! could still show stars beyond them. Each cap therefore carries the expected number of the
+//! layer's stars brighter than the cut beyond it, under one by construction, which the response
+//! states; the slow test `caps_converge_in_rays` holds it under 1.5 against 3,072 rays and twice
+//! the radial steps.
 //!
 //! The count is a quadrature over the rays and [`CapResolution::STANDARD`]'s 24 steps a decade in
 //! radius from 1 ly, summed from the rule bound inward by the trapezoid rule.
