@@ -13,11 +13,14 @@
  * place in the order, where R06.T13.e's pass draws them (decision-r07-t8a, R06 coordination (d),
  * 2026-10-03): a host's step places R06's disc draw. {@link LitBodyRenderer} binds the plan to the
  * engine: one draw per disc for its wholly covered pixels and one for its limb, one sprite draw per
- * run of consecutive points through R06's HDR sprite (`POINT SPRITES HDR`).
+ * run of consecutive points through R06's HDR sprite (`POINT SPRITES HDR`). A disc shades from its
+ * `DiscSurface` (T8.b): its photometry's uniform law, or R10's class map with a law per class; a
+ * point keeps the photometry's law.
  */
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import type { DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import {
   PHASE_TABLE_SAMPLES,
@@ -38,6 +41,7 @@ import type {
   WgslMaterialSpec,
 } from "../engine/types";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
+import { type Rotation3, rotateToBody } from "../coords/rotation";
 import { annulusEdges, type AnnulusSet, eclipseVisible } from "../lighting/annuli";
 import type { PlacedLight } from "../lighting/hostLights";
 import { shiningStars, starIlluminance, photopicIlluminance } from "../lighting/illuminance";
@@ -53,6 +57,7 @@ import {
   type DiscLight,
   type DiscOccluder,
   type DiscRecord,
+  type DrawnDiscSurface,
   LIMB_SAMPLES,
   MAX_DISC_LIGHTS,
   MAX_DISC_OCCLUDERS,
@@ -60,6 +65,7 @@ import {
   SMALL_DISC_PX,
   SMALL_DISC_SAMPLES,
 } from "./discShading";
+import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { oblateAlbedoScale, spheroidGeometricIntegral } from "./oblate";
 import { type HostSphere, type PainterEntry, painterOrder } from "./painter";
 import { type LitRegime, type LitSphere, litRegimes } from "./regime";
@@ -70,8 +76,17 @@ export interface LitBodyInput {
   readonly id: BodyIdHex;
   /** Its centre from the camera, m along the galactic axes, in `f64`. */
   readonly centreM: Vec3;
+  /** Its figure; a disc under a class map is drawn about the rotation's z axis instead of its pole. */
   readonly figure: BodyFigure;
+  /** Its photometry, which its point and, without a `surface`, its disc shade with. */
   readonly photometry: BodyPhotometry;
+  /** What its disc shades with (Design note 24); absent, the photometry's uniform law. */
+  readonly surface?: DiscSurface;
+  /**
+   * Its rotation from body-fixed to galactic axes, which orients a class map; absent where it is
+   * not known, when a class map's disc shades with its `elsewhere` law.
+   */
+  readonly rotation?: Rotation3;
 }
 
 /** What the plan needs of the view. */
@@ -102,7 +117,7 @@ export interface BodyFramePlan {
   readonly regimes: ReadonlyMap<BodyIdHex, LitRegime>;
   readonly order: ReadonlyArray<PainterEntry>;
   readonly discs: ReadonlyArray<DiscRecord>;
-  /** The phase table's rows, the frame's distinct laws in first use. */
+  /** The phase table's rows, the frame's distinct laws in first use, a class map's included. */
   readonly laws: ReadonlyArray<PhotometricLaw>;
   readonly steps: ReadonlyArray<BodyStep>;
 }
@@ -263,12 +278,34 @@ export function pointFlux(
   return flux;
 }
 
+/**
+ * The surface a body's disc shades with: its own, or its photometry's uniform law; a class map
+ * whose body has no known rotation cannot be oriented, and shades with its `elsewhere` law.
+ */
+function drawnSurface(body: LitBodyInput): DrawnDiscSurface {
+  const surface = body.surface ?? { kind: "uniform", law: body.photometry.law };
+  let drawn: DrawnDiscSurface;
+  switch (surface.kind) {
+    case "uniform":
+      drawn = surface;
+      break;
+    case "class-map":
+      drawn =
+        body.rotation === undefined
+          ? { kind: "uniform", law: surface.elsewhere }
+          : { ...surface, rotation: body.rotation };
+      break;
+  }
+  return drawn;
+}
+
 /** The disc record of a body drawn as a disc, or `null` where it is off the view or about the camera. */
 function discRecordOf(
   body: LitBodyInput,
+  surface: DrawnDiscSurface,
   hosts: ReadonlyArray<PlacedLight>,
   occluders: ReadonlyArray<LightingBody>,
-  tableRow: number,
+  tableRows: ReadonlyArray<number>,
   options: BodyFrameOptions,
 ): DiscRecord | null {
   const { equatorialRadiusM: a, polarRadiusM: c } = body.figure;
@@ -281,7 +318,11 @@ function discRecordOf(
     return null;
   }
   const direction = scale(body.centreM, 1 / distanceM);
-  const pole = poleOf(body.figure);
+  // A class map is oriented by the rotation, whose z axis is then the pole the figure is drawn about.
+  const pole =
+    surface.kind === "class-map"
+      ? rotateToBody(surface.rotation, vec3(0, 0, 1))
+      : poleOf(body.figure);
   const aOverD = a / distanceM;
   const small =
     angularDiameterPx(body.centreM, a, options.camera, options.viewport) < SMALL_DISC_PX;
@@ -308,9 +349,8 @@ function discRecordOf(
     polarOverEquatorial: c / a,
     interiorSamples: small ? SMALL_DISC_SAMPLES : 1,
     limbSamples: small ? SMALL_DISC_SAMPLES : LIMB_SAMPLES,
-    law: body.photometry.law,
-    albedoScale: oblateAlbedoScale(body.photometry.law.lommelSeeligerShare, c / a),
-    tableRow,
+    surface,
+    tableRows,
     exposureOverPi: options.exposureScale / Math.PI,
     lights,
     occluders: blockers,
@@ -410,12 +450,16 @@ export function planLitBodies(
       }
       continue;
     }
-    let row = laws.indexOf(body.photometry.law);
-    if (row < 0) {
-      row = laws.length;
-      laws.push(body.photometry.law);
-    }
-    const record = discRecordOf(body, hosts, occluders, row, options);
+    const drawn = drawnSurface(body);
+    const rows = discSurfaceLaws(drawn).map((law) => {
+      let row = laws.indexOf(law);
+      if (row < 0) {
+        row = laws.length;
+        laws.push(law);
+      }
+      return row;
+    });
+    const record = discRecordOf(body, drawn, hosts, occluders, rows, options);
     if (record === null) {
       continue;
     }
@@ -429,6 +473,12 @@ export function planLitBodies(
 
 const DISC_SOURCE = frameWgsl + litBodyWgsl + bodyDiscWgsl;
 
+/** The disc's textures: the frame's phase table, and its class map (any texture where uniform). */
+const DISC_TEXTURES = [
+  { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
+  { name: "classWeights", binding: 2, viewDimension: "2d-array" },
+] as const;
+
 /** The disc's two materials: its wholly covered pixels, opaque, and its limb, premultiplied. */
 export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> = {
   interior: {
@@ -441,7 +491,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
       { name: "edgePass", type: "u32" },
     ],
     samplers: [],
-    textures: [{ name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" }],
+    textures: DISC_TEXTURES,
     storageBuffers: [{ name: "discs", binding: 0 }],
     cullMode: "none",
     depthWrite: false,
@@ -458,7 +508,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
       { name: "edgePass", type: "u32" },
     ],
     samplers: [],
-    textures: [{ name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" }],
+    textures: DISC_TEXTURES,
     storageBuffers: [{ name: "discs", binding: 0 }],
     cullMode: "none",
     depthWrite: false,
@@ -494,6 +544,8 @@ interface DeviceResources {
   readonly sprites: BufferHandle[];
   table: TextureHandle;
   tableRows: number;
+  /** A texel of no weight, bound where a disc's surface is uniform and never read. */
+  readonly noClassMap: TextureHandle;
 }
 
 /**
@@ -533,6 +585,15 @@ export class LitBodyRenderer {
       sprites: [],
       table: this.#table(1),
       tableRows: 1,
+      noClassMap: engine.createTexture({
+        name: "bodies:no class map",
+        size: { width: 1, height: 1 },
+        dimension: "2d",
+        format: CLASS_MAP_FORMAT,
+        mips: 1,
+        usage: TEXTURE_USAGE.TEXTURE_BINDING,
+        category: "other",
+      }),
     };
   }
 
@@ -596,8 +657,9 @@ export class LitBodyRenderer {
   }
 
   /** A disc's two draws: its wholly covered pixels, then its limb. */
-  #discDraws(index: number): DrawItem[] {
+  #discDraws(index: number, surface: DrawnDiscSurface): DrawItem[] {
     const resources = this.#resources;
+    const classWeights = surface.kind === "class-map" ? surface.weights : resources.noClassMap;
     return (
       [
         [resources.interior, 0],
@@ -611,7 +673,7 @@ export class LitBodyRenderer {
         disc: new Float32Array([index]),
         edgePass: new Float32Array([edgePass]),
       },
-      textures: { phaseFactorTable: resources.table },
+      textures: { phaseFactorTable: resources.table, classWeights },
       storageBuffers: { discs: resources.discs },
     }));
   }
@@ -658,9 +720,14 @@ export class LitBodyRenderer {
         case "host":
           draws.push(...(hostDraws.get(step.star) ?? []));
           break;
-        case "disc":
-          draws.push(...this.#discDraws(step.index));
+        case "disc": {
+          const record = plan.discs[step.index];
+          if (record === undefined) {
+            throw new Error(`the plan's disc step ${step.index} has no record`);
+          }
+          draws.push(...this.#discDraws(step.index, record.surface));
           break;
+        }
         case "points":
           draws.push(this.#pointDraw(step.sprites, run));
           run += 1;

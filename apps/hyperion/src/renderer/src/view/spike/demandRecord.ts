@@ -150,6 +150,8 @@ export interface CellOptions {
   readonly nowMs: () => number;
   /** The wall time, on `nowMs`'s clock, after which the run stops. */
   readonly deadlineMs: number;
+  /** The wall time, bakes included, after which the run stops; none by default. */
+  readonly wallDeadlineMs?: number;
 }
 
 /** Runs one cell of the record. */
@@ -173,6 +175,7 @@ export function runCell(options: CellOptions): DemandCell {
     rangeOf: source.rangeOf,
     nowMs: options.nowMs,
     deadlineMs: options.deadlineMs,
+    ...(options.wallDeadlineMs === undefined ? {} : { wallDeadlineMs: options.wallDeadlineMs }),
   });
   const last = run.frames.at(-1)?.tS ?? options.fromS;
   return {

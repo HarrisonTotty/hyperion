@@ -50,6 +50,20 @@ describe("the quality settings", () => {
     expect(SETTINGS.high.terrain.cacheBytes).toBeGreaterThan(SETTINGS.low.terrain.cacheBytes);
   });
 
+  it("holds the photorealistic view's internal scale in [0.5, 1.0] on both settings", () => {
+    for (const setting of QUALITY_SETTINGS) {
+      expect(SETTINGS[setting].internalScaleBounds).toEqual([0.5, 1]);
+    }
+  });
+
+  it("budgets the low setting's photorealistic view at 30 Hz, and only one", () => {
+    expect(SETTINGS.low.budget).toEqual({ photorealisticRateHz: 30, photorealisticViews: 1 });
+  });
+
+  it("budgets the high setting's photorealistic views at 60 Hz, without a limit", () => {
+    expect(SETTINGS.high.budget).toEqual({ photorealisticRateHz: 60, photorealisticViews: null });
+  });
+
   it("makes TERRAIN_SETTINGS the terrain field of SETTINGS", () => {
     for (const setting of QUALITY_SETTINGS) {
       expect(TERRAIN_SETTINGS[setting]).toBe(SETTINGS[setting].terrain);

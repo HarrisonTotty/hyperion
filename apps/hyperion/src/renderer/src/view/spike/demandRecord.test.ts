@@ -35,11 +35,12 @@ const SOURCE = {
  * Each window's selection-sequence hash under min(hard, 4σ_n), ridges off, as
  * `just descent-demand --write-fixture` printed them on 2026-10-03 (TEST_PLANET_VERSION 2, the
  * terrain cache of 5d90fab, the site's height read along the spheroid point's direction d, the
- * profile flown over the stretches' floors of decision-r05-descent-clearance.md).
+ * profile flown over the stretches' floors of decision-r05-descent-clearance.md), and on 2026-10-04
+ * with the orbit coast flown level, which moved high's coast alone.
  */
 const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
-    "orbit coast": "95585482dc0e857e",
+    "orbit coast": "c739aef5d81221ae",
     "descent arc": "97e2ca6b8aee73b2",
     "approach and flare": "dfd9239538b60509",
     "low fast pass": "5af4f15ee2ca16cc",

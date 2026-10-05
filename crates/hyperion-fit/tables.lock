@@ -132,6 +132,18 @@ provisional = true
 acceptance = "fitted over 126 clusters (17 left out for want of a distance; 363 known pulsars): γ = 0.632 (0.5–0.9; passes), A = 38.0 at 47 Tucanae's Γ (30–50; passes), completeness distance 4.8 kpc; the implied total over the catalogue 1539 (2,000–8,000; FAILS); the table keeps plan 09's scratch A 40, γ 0.7 and cap 40 until a ruling"
 
 [[table]]
+name = "sky_envelope"
+path = "sky_envelope.rs"
+task = "sky_envelope"
+revision = 0
+inputs_sha256 = "00377553328a5b60882b41de374419edba60f6a5c54f3ecb00b69718eb5f4526"
+body_sha256 = "8841e95158b9b9d6cce97bd51a8509e601386bc715eba3c2b86f58d8b917c61f"
+fingerprint = [198.0, 0.01240972504160122, 150.0, 13.027943055377502, 1993.4781831135954, 133.0, 10.575633729507718, 2368.9939198679826, 193.0, 6.267617009745397, 1120.9128833378002, 140.0, -5.411961658162702, 505.6570579529913, 129.0, -6.793861382632567, 88.43501502549661, 88.0, -8.90197030109447, -162.3651081653379, 40.0, -11.728990488164943, -184.84175081816403, 29.0, 13.026173102302929, 2255.3841823514726, 150.0, 10.925813147852466, 2453.6402372068605, 193.0, 6.2676170289564626, 1184.0868225594265, 140.0, -4.296032284572494, 645.9453638455362, 138.0, -5.6895332473556595, 62.13218991923444, 94.0, -8.451132076011069, -181.42412128769683, 38.0, -10.471742109188583, -203.55765805416397, 29.0]
+since_generator_version = 19
+provisional = false
+acceptance = "198 mass nodes × 193 age bins from 9240 tracks; 1856 bins dark; every stored value brighter than the build's by 0.000000 to 0.001000 mag (never fainter, so the table bounds the build); brightest -12.850 mag"
+
+[[table]]
 name = "star_colour"
 path = "star_colour.rs"
 task = "star_colour"

@@ -27,7 +27,7 @@ const REFUSAL_WORDS: Readonly<
 > = {
   no_image_to_meter: "NO IMAGE TO METER",
   not_automatic: "NOT AVAILABLE: the exposure is MAN",
-  not_inhibited: "NOT AVAILABLE: the exposure is not INHIBITED",
+  already_auto: "NOT AVAILABLE: the exposure is AUTO",
   invalid_triple: "NOT AVAILABLE: the triple is not valid",
 };
 

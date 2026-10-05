@@ -422,6 +422,14 @@ impl Engine {
             if self.donor_events(d) {
                 return;
             }
+            // A star the binary carries, donor or accretor, with no envelope left is a helium star
+            // or a white dwarf from this step, before any other stop (HPT section 6; BSE `hrdiag`
+            // as `evolv2` calls it; P11.T4.g): it is stripped, and the pair goes on as
+            // `quiet_kind` decides.
+            if let Some(i) = [d, a_idx].into_iter().find(|&i| self.bare_shaped(i)) {
+                self.strip(i);
+                return;
+            }
             if let Some(stop) = stop {
                 match stop {
                     super::detached::Stop::Until => return,
@@ -448,6 +456,18 @@ impl Engine {
                 }
             }
         }
+    }
+
+    /// Whether member `i` is a star the binary carries ([`Member::Shaped`]) that is living with no
+    /// envelope left at the engine's age (M ≤ Mc).
+    #[must_use]
+    fn bare_shaped(&self, i: usize) -> bool {
+        if !matches!(self.members[i], Member::Shaped { .. }) {
+            return false;
+        }
+        let (m, tau) = self.current(i);
+        self.structure(i, self.age, m, tau)
+            .is_some_and(|s| s.state.envelope_mass().value() <= 0.0 && s.state.phase().is_living())
     }
 
     /// The step's length during transfer from member `d` and the event it lands on.

@@ -134,6 +134,7 @@ class ReadbackEngine implements HistogramEngine {
     reject: (error: Error) => void;
   }> = [];
   readonly dispatched: BufferHandle[] = [];
+  readonly released: BufferHandle[] = [];
   readonly violations: string[] = [];
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -160,6 +161,9 @@ class ReadbackEngine implements HistogramEngine {
     return new Promise((resolve, reject) => {
       this.pending.push({ buffer, settle: resolve, reject });
     });
+  }
+  releaseBuffer(buffer: BufferHandle): void {
+    this.released.push(buffer);
   }
   /** Fails the read at `index` of those pending. */
   fail(index: number): void {
@@ -253,5 +257,13 @@ describe("HistogramReader", () => {
     await flush();
     expect(seen).toEqual([]);
     expect(reader.measure(REQUEST)).toBe(false);
+  });
+
+  it("releases its ring's buffers once when disposed (R07.T8.a)", () => {
+    const engine = new ReadbackEngine();
+    const reader = new HistogramReader(engine, KERNEL, "view", () => undefined);
+    reader.dispose();
+    reader.dispose();
+    expect(engine.released).toEqual(engine.created);
   });
 });

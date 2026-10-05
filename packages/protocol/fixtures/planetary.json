@@ -1,5 +1,5 @@
 {
-  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number at the full precision of its f64, since the server parses floats exactly (serde_json's float_roundtrip, ruling 64.7): the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled. system_bodies_populated exercises every kind, state and section state a later generator version gives, and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels.",
+  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number at the full precision of its f64, since the server parses floats exactly (serde_json's float_roundtrip, ruling 64.7): the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled; the Earth carries the rotation, figure and photometry sections (P14.T46.f, T47.d, illustrative values), and the giant keeps the form of a server before them, without the three keys. system_bodies_populated exercises every kind, state and section state a later generator version gives, and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels.",
   "system_bodies_request": {
     "type": "request",
     "id": 21,
@@ -158,6 +158,58 @@
               },
               "equilibrium_temperature_k": 254.6,
               "effective_temperature_k": null
+            }
+          },
+          "rotation": {
+            "state": "ok",
+            "value": {
+              "pole": [0.0, -0.3977402913763763, 0.9174983560485345],
+              "equator_node": [1.0, 0.0, 0.0],
+              "equator_quarter": [0.0, 0.9174983560485345, 0.3977402913763763],
+              "obliquity_rad": 0.409,
+              "initial_rate_rad_s": 7.292115e-5,
+              "locked_rate_rad_s": 1.9909866e-7,
+              "age_at_epoch_s": 1.44e17,
+              "locking_age_s": null,
+              "locks_at": null,
+              "resonance": "synchronous",
+              "clock_period_s": 31558148.628135167,
+              "clock_mean_anomaly_at_epoch_rad": 0.5,
+              "sub_primary_angle_rad": 1.25,
+              "phase_at_epoch_rad": 4.894961212735792,
+              "capture_phase_rad": -0.75
+            }
+          },
+          "figure": {
+            "state": "ok",
+            "value": {
+              "equatorial_radius_m": 6378137.0,
+              "polar_radius_m": 6356752.314245179,
+              "flattening": 0.0033528106647474805,
+              "pole": [0.0, -0.3977402913763763, 0.9174983560485345],
+              "moment_of_inertia_factor": 0.33,
+              "law": "rotational",
+              "datum": "solid_surface"
+            }
+          },
+          "photometry": {
+            "state": "ok",
+            "value": {
+              "geometric_albedo": {
+                "b": 0.44,
+                "v": 0.434,
+                "r": 0.411
+              },
+              "phase_template": "earth",
+              "phase_exponent": {
+                "b": 1.0,
+                "v": 1.0,
+                "r": 1.0
+              },
+              "lunar_lambert_share": 0.0,
+              "bond_albedo": 0.306,
+              "bond_ratio": 1.85943,
+              "provisional": false
             }
           }
         },
@@ -1008,6 +1060,58 @@
             "effective_temperature_k": null
           }
         },
+        "rotation": {
+          "state": "ok",
+          "value": {
+            "pole": [0.0, -0.3977402913763763, 0.9174983560485345],
+            "equator_node": [1.0, 0.0, 0.0],
+            "equator_quarter": [0.0, 0.9174983560485345, 0.3977402913763763],
+            "obliquity_rad": 0.409,
+            "initial_rate_rad_s": 7.292115e-5,
+            "locked_rate_rad_s": 1.9909866e-7,
+            "age_at_epoch_s": 1.44e17,
+            "locking_age_s": null,
+            "locks_at": null,
+            "resonance": "synchronous",
+            "clock_period_s": 31558148.628135167,
+            "clock_mean_anomaly_at_epoch_rad": 0.5,
+            "sub_primary_angle_rad": 1.25,
+            "phase_at_epoch_rad": 4.894961212735792,
+            "capture_phase_rad": -0.75
+          }
+        },
+        "figure": {
+          "state": "ok",
+          "value": {
+            "equatorial_radius_m": 6378137.0,
+            "polar_radius_m": 6356752.314245179,
+            "flattening": 0.0033528106647474805,
+            "pole": [0.0, -0.3977402913763763, 0.9174983560485345],
+            "moment_of_inertia_factor": 0.33,
+            "law": "rotational",
+            "datum": "solid_surface"
+          }
+        },
+        "photometry": {
+          "state": "ok",
+          "value": {
+            "geometric_albedo": {
+              "b": 0.44,
+              "v": 0.434,
+              "r": 0.411
+            },
+            "phase_template": "earth",
+            "phase_exponent": {
+              "b": 1.0,
+              "v": 1.0,
+              "r": 1.0
+            },
+            "lunar_lambert_share": 0.0,
+            "bond_albedo": 0.306,
+            "bond_ratio": 1.85943,
+            "provisional": false
+          }
+        },
         "surface": {
           "state": "not_modelled"
         },
@@ -1080,6 +1184,15 @@
         "bulk": {
           "state": "not_resolved"
         },
+        "rotation": {
+          "state": "not_resolved"
+        },
+        "figure": {
+          "state": "not_resolved"
+        },
+        "photometry": {
+          "state": "not_resolved"
+        },
         "surface": {
           "state": "not_resolved"
         },
@@ -1132,6 +1245,15 @@
           "state": "not_resolved"
         },
         "bulk": {
+          "state": "not_resolved"
+        },
+        "rotation": {
+          "state": "not_resolved"
+        },
+        "figure": {
+          "state": "not_resolved"
+        },
+        "photometry": {
           "state": "not_resolved"
         },
         "surface": {

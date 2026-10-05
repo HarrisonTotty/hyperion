@@ -25,7 +25,21 @@
 //!   is entered in every age bin it overlaps.
 //!
 //! Dark states (protostars, white dwarfs and the rest of [`super::photometry`]'s rules) enter
-//! nothing. Plan 11's binary evolution moves mass within a pair and rejuvenates or merges stars:
+//! nothing. The envelope bounds this generator's stars, not nature's: its extremes, M<sub>V</sub>
+//! −12.85 at 150 M☉ and about −5.7 for old stars of at most 1 M☉, most likely come from the
+//! tracks' super-Eddington excursions after the main sequence at low Z and from the η = 0 draws'
+//! late giants, and they move when the tracks do.
+//!
+//! The envelope depends on no galaxy, so it is built offline, by `hyperion-fit`'s task
+//! `sky_envelope` from [`raw_node`] and [`BrightnessEnvelope::assemble`], and checked in as
+//! [`tables::sky_envelope`](crate::tables::sky_envelope), each magnitude in integer
+//! millimagnitudes rounded brighter ([`to_millimag`]) so that it stays a bound (decided
+//! 2026-10-03, `decision-r06-tables.md`). [`BrightnessEnvelope::build`] reads that table. A change
+//! to the tracks that would leave it stale fails the fit's sim fingerprint in `just fit-check`
+//! (probe nodes at \[Fe/H\] −2.5 and 0), and, for any track, the slow comparison with
+//! [`BrightnessEnvelope::build_with`] and fit-check's byte-for-byte rerun.
+//!
+//! Plan 11's binary evolution moves mass within a pair and rejuvenates or merges stars:
 //! [`max_star_mass`] says how massive a star a system can hold (R06.T16.b widens it).
 
 use crate::galaxy::Galaxy;
@@ -37,6 +51,7 @@ use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
+use crate::tables::sky_envelope;
 use crate::units::{Dex, HeliumExcess, Magnitudes, SolarMasses, Years};
 
 use super::photometry::absolute_v_of_state;
@@ -46,8 +61,11 @@ pub const MASS_NODES: usize = 192;
 
 /// The \[Fe/H\] at which the envelope's tracks are built: from the tracks' metal-poor clamp (Z =
 /// 10⁻⁴, \[Fe/H\] ≈ −2.30, which −2.5 reads) to their metal-rich one (Z = 0.03, +0.18), every
-/// quarter dex. The tracks read nothing of a composition beyond its clamped Z, so these cover
-/// every star.
+/// quarter dex. The tracks read nothing of a composition beyond its clamped Z and its helium
+/// excess, which the provisional `tables::helium` (P06.T17, the identity) leaves without effect,
+/// so these cover every star. When plan 15's P15.T7 fits that table, a helium-rich star reaches
+/// its giant phases earlier, and the fitted envelope (`hyperion-fit`'s `sky_envelope`) must be
+/// rebuilt with helium-excess nodes.
 pub const FE_H_NODES: [f64; 12] = [
     -2.5, -2.25, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.18,
 ];
@@ -119,52 +137,65 @@ pub struct BrightnessEnvelope {
 }
 
 impl BrightnessEnvelope {
-    /// The envelope for the stars of `galaxy`. It reads nothing of the galaxy's but what every
-    /// galaxy shares, the tracks: some four thousand of them, seconds of work, which the server
-    /// does once.
+    /// The envelope for the stars of `galaxy`, read from the fitted table
+    /// [`tables::sky_envelope`](crate::tables::sky_envelope) at no cost.
+    ///
+    /// The envelope reads nothing of the galaxy's but what every galaxy shares, the tracks, so
+    /// `hyperion-fit`'s task `sky_envelope` builds it once from [`build_with`](Self::build_with)
+    /// at [`FE_H_NODES`] and [`SAMPLES_PER_PHASE`] and stores it in integer millimagnitudes,
+    /// each rounded brighter ([`to_millimag`]), so the table bounds whatever the build bounds
+    /// (decided 2026-10-03, `decision-r06-tables.md`).
     #[must_use]
     pub fn build(_galaxy: &Galaxy) -> Self {
         // The tracks are the generator's, not the galaxy's; the parameter keeps the server's
         // cache keyed as the luminosity tables are, should a galaxy ever carry its own physics.
-        Self::build_with(&FE_H_NODES, SAMPLES_PER_PHASE)
+        Self::fitted()
     }
 
-    /// [`build`](Self::build) at the metallicities `fe_h` with `samples_per_phase` parts per
-    /// phase.
+    /// The envelope of the fitted table, which [`build`](Self::build) returns for every galaxy.
     #[must_use]
-    pub(crate) fn build_with(fe_h: &[f64], samples_per_phase: u32) -> Self {
+    pub(crate) fn fitted() -> Self {
+        Self {
+            masses: sky_envelope::MASSES.to_vec(),
+            brightest: sky_envelope::BRIGHTEST_MMAG
+                .iter()
+                .map(|row| row.map(from_millimag))
+                .collect(),
+        }
+    }
+
+    /// The envelope built from the tracks at the metallicities `fe_h` with `samples_per_phase`
+    /// parts per phase: [`raw_node`] at every node of [`mass_nodes`], then
+    /// [`assemble`](Self::assemble). At [`FE_H_NODES`] and [`SAMPLES_PER_PHASE`] it is the fitted
+    /// table's generator: 9,240 tracks, some 13 CPU-seconds in a release build.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn build_with(fe_h: &[f64], samples_per_phase: u32) -> Self {
         let masses = mass_nodes();
-        let mut brightest: Vec<[f64; AGE_BINS + 1]> = masses
+        let raw = masses
             .iter()
-            .map(|&m| {
-                let mut bins = [f64::INFINITY; AGE_BINS + 1];
-                for &z in fe_h {
-                    let composition = Composition::from_fe_h(Dex::new(z), HeliumExcess::ZERO);
-                    if m <= MIN_INITIAL_MASS.value() {
-                        // At 0.1 M☉ itself the tracks and the cooling fits meet, and stars just
-                        // below it follow the fits, which are brighter there.
-                        enter_cooling(m.min(COOLING_TOP), &composition, &mut bins);
-                        if m < MIN_INITIAL_MASS.value() {
-                            continue;
-                        }
-                    }
-                    for &eta in &ETA_DRAWS {
-                        let draws = StarDraws::from_parts(StarDrawsParts {
-                            eta: StandardNormal::new(eta).expect("finite"),
-                            ..StarDrawsParts::MEDIAN
-                        });
-                        let track = Track::to_age(
-                            SolarMasses::new(m),
-                            &composition,
-                            &draws,
-                            Years::new(MAX_AGE_YEARS),
-                        );
-                        enter_track(&track, samples_per_phase, &mut bins);
-                    }
-                }
-                bins
-            })
+            .map(|&m| raw_node(m, fe_h, samples_per_phase))
             .collect();
+        Self::assemble(masses, raw)
+    }
+
+    /// The envelope from each node's own brightest magnitudes, `raw[j]` being [`raw_node`] at
+    /// `masses[j]`: each node's are spread over ages within [`AGE_SPREAD_FACTOR`], made a running
+    /// minimum over mass and brightened by [`MARGIN_MAG`]. Nodes may be built in any order or in
+    /// parallel; this reads them in mass order.
+    ///
+    /// # Panics
+    ///
+    /// If `masses` and `raw` differ in length, or `masses` is empty or not increasing.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn assemble(masses: Vec<f64>, raw: Vec<[f64; AGE_BINS + 1]>) -> Self {
+        assert_eq!(masses.len(), raw.len(), "one row per mass node");
+        assert!(
+            !masses.is_empty() && masses.windows(2).all(|w| w[0] < w[1]),
+            "the mass nodes increase"
+        );
+        let mut brightest = raw;
         let spread = age_spread_bins();
         for bins in &mut brightest {
             let narrow = *bins;
@@ -187,6 +218,14 @@ impl BrightnessEnvelope {
             }
         }
         Self { masses, brightest }
+    }
+
+    /// The nodes' masses, M☉, ascending, and per node and age bin the brightest M<sub>V</sub>,
+    /// margin included (+∞ where none shines): what the fitted table stores.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn rows(&self) -> (&[f64], &[[f64; AGE_BINS + 1]]) {
+        (&self.masses, &self.brightest)
     }
 
     /// The brightest absolute V magnitude, margin included, of any star of at most
@@ -269,8 +308,9 @@ impl BrightnessEnvelope {
 }
 
 /// The envelope's mass nodes: even in ln m over 0.0124–150 M☉, with every band edge added.
+#[doc(hidden)]
 #[must_use]
-fn mass_nodes() -> Vec<f64> {
+pub fn mass_nodes() -> Vec<f64> {
     let (lo, hi) = (MassBand::BrownDwarf.lo(), MassBand::E.hi());
     let (ln_lo, ln_hi) = (math::ln(lo), math::ln(hi));
     #[expect(
@@ -297,6 +337,80 @@ fn mass_nodes() -> Vec<f64> {
     masses.sort_by(f64::total_cmp);
     masses.dedup();
     masses
+}
+
+/// One mass node's own brightest absolute V magnitude per age bin, before the spread over ages,
+/// the running minimum over mass and the margin ([`BrightnessEnvelope::assemble`]): the brightest
+/// of the tracks of mass `m` at the metallicities `fe_h` and every draw of [`ETA_DRAWS`], each
+/// phase cut into `samples_per_phase` parts, and of the cooling fits at and below 0.1 M☉; +∞ in
+/// a bin where none shines. A pure function of its arguments, which the fit builds node by node
+/// in parallel.
+#[doc(hidden)]
+#[must_use]
+pub fn raw_node(m: f64, fe_h: &[f64], samples_per_phase: u32) -> [f64; AGE_BINS + 1] {
+    let mut bins = [f64::INFINITY; AGE_BINS + 1];
+    for &z in fe_h {
+        let composition = Composition::from_fe_h(Dex::new(z), HeliumExcess::ZERO);
+        if m <= MIN_INITIAL_MASS.value() {
+            // At 0.1 M☉ itself the tracks and the cooling fits meet, and stars just below it
+            // follow the fits, which are brighter there.
+            enter_cooling(m.min(COOLING_TOP), &composition, &mut bins);
+            if m < MIN_INITIAL_MASS.value() {
+                continue;
+            }
+        }
+        for &eta in &ETA_DRAWS {
+            let draws = StarDraws::from_parts(StarDrawsParts {
+                eta: StandardNormal::new(eta).expect("finite"),
+                ..StarDrawsParts::MEDIAN
+            });
+            let track = Track::to_age(
+                SolarMasses::new(m),
+                &composition,
+                &draws,
+                Years::new(MAX_AGE_YEARS),
+            );
+            enter_track(&track, samples_per_phase, &mut bins);
+        }
+    }
+    bins
+}
+
+/// The fitted table's value for `v`, an envelope's magnitude: `v` in integer millimagnitudes
+/// rounded toward −∞, and lowered further should [`from_millimag`] of it not be at most `v`, so
+/// the table is never fainter than the build and stays a bound; `None` for +∞, a bin where none
+/// shines, which the table writes as its `DARK`.
+///
+/// # Panics
+///
+/// If `v` is NaN, −∞, or beyond ±2 × 10⁶ mag.
+#[doc(hidden)]
+#[must_use]
+pub fn to_millimag(v: f64) -> Option<i32> {
+    if v == f64::INFINITY {
+        return None;
+    }
+    assert!(v.is_finite() && v.abs() < 2e6, "an envelope magnitude: {v}");
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "|v| < 2e6 mag, so |1000 v| < 2^31, and floor makes it an integer"
+    )]
+    let mut k = (v * 1000.0).floor() as i32;
+    while from_millimag(k) > v {
+        k -= 1;
+    }
+    Some(k)
+}
+
+/// The magnitude of a fitted table's value `k`, millimagnitudes, +∞ for its `DARK`.
+#[doc(hidden)]
+#[must_use]
+pub fn from_millimag(k: i32) -> f64 {
+    if k == sky_envelope::DARK {
+        f64::INFINITY
+    } else {
+        f64::from(k) / 1000.0
+    }
 }
 
 /// The bin holding `age`, years.
@@ -498,6 +612,65 @@ mod tests {
     #[test]
     fn the_span_of_metallicities_covers_every_population() {
         assert!(covers_reference_metallicities());
+    }
+
+    /// The fitted table sits on the build's own mass nodes, bit for bit, and is a running
+    /// minimum over mass, so a heavier node is never fainter and a dark bin has only dark lighter
+    /// nodes.
+    #[test]
+    fn the_fitted_table_is_on_the_mass_nodes_and_falls_with_mass() {
+        let e = BrightnessEnvelope::fitted();
+        let (masses, rows) = e.rows();
+        let nodes = mass_nodes();
+        assert_eq!(masses.len(), nodes.len());
+        assert!(
+            masses
+                .iter()
+                .zip(&nodes)
+                .all(|(a, b)| a.total_cmp(b).is_eq()),
+            "the table's masses are mass_nodes()"
+        );
+        assert_eq!(rows.len(), masses.len());
+        for pair in rows.windows(2) {
+            for (heavier, lighter) in pair[1].iter().zip(&pair[0]) {
+                assert!(heavier <= lighter, "{heavier} after {lighter}");
+            }
+        }
+        assert!(rows.iter().flatten().all(|v| !v.is_nan()));
+    }
+
+    /// `to_millimag` rounds brighter, by under a millimagnitude plus a rounding, and
+    /// `from_millimag` reads it back; +∞ is the table's `DARK`.
+    #[test]
+    fn millimagnitudes_round_brighter() {
+        for v in [
+            -12.85,
+            -0.0005,
+            0.0,
+            0.001,
+            4.83,
+            7.0 / 3.0,
+            16.663,
+            29.999_999_9,
+        ] {
+            let k = to_millimag(v).expect("finite");
+            let stored = from_millimag(k);
+            assert!(stored <= v, "{stored} above {v}");
+            assert!(v - stored < 0.001 + 1e-12, "{stored} far below {v}");
+        }
+        assert_eq!(to_millimag(f64::INFINITY), None);
+        assert_eq!(to_millimag(4.83), Some(4830));
+        assert!(from_millimag(sky_envelope::DARK).is_infinite());
+    }
+
+    /// A raw node is the same whatever was built before it, so the fit may build the nodes in any
+    /// order or in parallel before assembling them in mass order (the slow
+    /// `the_fitted_envelope_is_the_build_rounded_brighter` compares the result with the build).
+    #[test]
+    fn raw_nodes_are_order_independent() {
+        hyperion_testkit::order::assert_order_independent(&[0.05, 0.1, 0.3, 1.0], |&m| {
+            raw_node(m, &[0.0], 2)
+        });
     }
 
     #[test]

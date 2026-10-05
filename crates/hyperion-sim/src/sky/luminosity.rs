@@ -49,9 +49,12 @@
 //!
 //! Nothing here draws a random word or changes generated output: the tables only read.
 
+use std::ops::Range;
+
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
 use crate::galaxy::Population;
+use crate::galaxy::ages::AgeDistribution;
 use crate::galaxy::fates::{
     StellarFates, companion_share_below, fates_for, ln_mass_panels, mass_with_lifetime, panel_edges,
 };
@@ -497,101 +500,21 @@ impl LuminosityTables {
         components: &[ComponentId],
         options: BuildOptions,
     ) -> Self {
-        let component_count = galaxy.fields().components().len();
-        let mut layout: Vec<ComponentBins> = (0..component_count)
-            .map(|_| ComponentBins {
-                first: 0,
-                means: vec![0.0],
-                radial_means: Vec::new(),
-            })
-            .collect();
-        let grid = MassGrid::new(galaxy, options);
-        // The oldest age any snapshot reads: a component's oldest at the epoch plus the build's
-        // time from the epoch where that is later, and a margin of 2,000 years for the rounding
-        // of the snapshots' light ages.
-        let max_age = galaxy
-            .fields()
-            .components()
-            .iter()
-            .map(|c| c.ages().max().value())
-            .fold(0.0, f64::max)
-            + time.since_epoch().as_julian_years_f64().max(0.0)
-            + 2_000.0;
-        let brown_dwarfs = BrownDwarfGrid::new(galaxy.mass_function());
-        let shift_now = time.since_epoch().as_julian_years_f64();
-        let solar_radius_ly = SOLAR_RADIUS_LENGTHS * galaxy.params().thin_disc().length().value();
-        // Every listed component with its bins, in the tables' order.
-        let mut work: Vec<(ComponentId, Vec<BinWork>)> = Vec::with_capacity(components.len());
-        for &id in components {
-            let component = galaxy.fields().component(id);
-            let means = metallicity_bins(galaxy, component);
-            let radial = if means.len() > 1 {
-                radial_means(galaxy, component)
-            } else {
-                Vec::new()
-            };
-            let (means, radial) = match options.bins {
-                GradientBins::All => (means, radial),
-                #[cfg(test)]
-                GradientBins::SolarCircle => solar_circle_bin(means, radial, solar_radius_ly),
-            };
-            let bins = means
-                .iter()
-                .map(|&mean| BinWork::new(metallicity_nodes(component, mean)))
-                .collect();
-            work.push((id, bins));
-            layout[id.index()].radial_means = radial;
-            layout[id.index()].means = means;
-        }
-        // One metallicity's samples at a time, the lowest [Fe/H] that any bin adds next: made,
-        // added to every bin whose next node it is, and dropped. Each is some 150 MB (2,240 nodes
-        // at 32 samples a phase), and held to the build's end, as they were, the young thin
-        // disc's 17 at twice the samples took 4.1 GB, past wasm32's 4 GiB (2026-10-04). A bin's
-        // nodes ascend in [Fe/H] (`metallicity_nodes`), so each metallicity is made once, and
-        // every bin still adds its nodes in their own order, which keeps the bits of its sums.
-        while let Some(fe_h) = work
-            .iter()
-            .flat_map(|(_, bins)| bins)
-            .filter_map(BinWork::next_fe_h)
-            .min_by(f64::total_cmp)
-        {
-            let samples = MetallicitySamples {
-                stars: grid.samples(fe_h, max_age, options),
-                brown_dwarfs: brown_dwarfs.samples(fe_h, max_age),
-            };
-            for (id, bins) in &mut work {
-                let ages = galaxy.fields().component(*id).ages();
-                for bin in bins {
-                    while let Some(share) = bin.take_node(fe_h) {
-                        for (&ago, snapshot) in EMITTED_AGO_YEARS.iter().zip(&mut bin.snapshots) {
-                            // A star's age then is its age at the epoch plus `shift`.
-                            let shift = shift_now - ago;
-                            let born_cdf =
-                                |age: Years| ages.born_cdf(Years::new(age.value() - shift));
-                            samples.add(&grid, &brown_dwarfs, share, &born_cdf, snapshot);
-                        }
-                    }
-                }
-            }
-        }
-        let mut built: Vec<Option<Vec<Vec<LuminosityFunction>>>> = vec![None; component_count];
-        for (id, bins) in work {
-            built[id.index()] = Some(bins.into_iter().map(BinWork::into_functions).collect());
-        }
-        let mut functions = Vec::new();
-        for (bins, built) in layout.iter_mut().zip(built) {
-            bins.first = functions.len() / LAYER_COUNT;
-            match built {
-                Some(by_bin) => functions.extend(by_bin.into_iter().flatten()),
-                None => functions.extend((0..LAYER_COUNT).map(|_| LuminosityFunction::zero())),
-            }
-        }
-        Self {
-            time,
-            solar_radius: solar_radius_ly,
-            layout,
-            functions,
-        }
+        TablesPlan::new(galaxy, time, components, options, SAMPLE_JOB_NODES).run_serially()
+    }
+
+    /// The work of [`build`](Self::build) split into jobs, for a caller that runs them on its own
+    /// threads (the server's pool, R06.T11.c; the sim spawns none): see [`TablesPlan`].
+    #[must_use]
+    pub fn plan(galaxy: &Galaxy) -> TablesPlan {
+        let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
+        TablesPlan::new(
+            galaxy,
+            REFERENCE_TIME,
+            &all,
+            BuildOptions::STANDARD,
+            SAMPLE_JOB_NODES,
+        )
     }
 
     /// The time the tables were built for: [`REFERENCE_TIME`], or a test's own.
@@ -639,6 +562,588 @@ impl LuminosityTables {
                 .map(LuminosityFunction::heap_bytes)
                 .sum::<usize>()
     }
+}
+
+/// The mass nodes of one [`SampleJob`] at most: some forty jobs per \[Fe/H\] node, each some tenths
+/// of a second of tracks.
+const SAMPLE_JOB_NODES: usize = 64;
+
+/// [`LuminosityTables::build`] as jobs (decided 2026-10-03, `decision-r06-tables.md`), one
+/// metallicity at a time. The plan's [`Stage`]s are its \[Fe/H\] nodes, from the lowest. Each stage
+/// makes that metallicity's track samples, per chunk of mass nodes ([`SampleJob`]), put together by
+/// [`track_samples`](Self::track_samples). It then adds them to every component bin that reads
+/// the node ([`AccumulateJob`]), into the bin's running sums ([`BinSums`]), which the caller holds
+/// from [`bin_sums`](Self::bin_sums) to [`assemble`](Self::assemble). Once its accumulation jobs
+/// have run, a stage's samples are no longer needed and can be dropped.
+///
+/// One metallicity's samples are some 150 MiB at 32 samples a phase, and the Milky Way's tables
+/// read 22 metallicities. Held to the build's end, as the split first did, they took a full build
+/// to 2.7 GB. Stage by stage it peaks at 280 MiB (test profile, 2026-10-04). Within a stage only
+/// the bins that read its node accumulate, 1 to 22 of the Milky Way's 53, so a pool keeps its
+/// threads busy by sampling the next stage while this one accumulates. That holds two stages'
+/// samples and changes no bit. On 16 threads, under shared load, it took 18.8 s and 439 MiB,
+/// against 23.2 s and 237 MiB stage by stage and the first split's 18.8 s and 2.6 GB.
+///
+/// Every job is a pure function of the plan and its inputs. The chunks are put back in their jobs'
+/// order, and every bin adds its nodes in their own order (an accumulation job panics otherwise),
+/// so the tables are `build`'s, bit for bit, whatever threads run the jobs and in whatever order
+/// they finish: the stages' sample jobs in any order, even ahead of their turn, and the
+/// accumulation jobs of different bins in any order.
+///
+/// # Examples
+///
+/// The jobs run in turn here; a server hands each to its pool (`no_run`: a full build takes a
+/// minute or more of CPU).
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+///
+/// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?;
+/// let plan = LuminosityTables::plan(&galaxy);
+/// let mut sums = plan.bin_sums();
+/// for stage in plan.stages() {
+///     let chunks: Vec<_> = plan.sample_jobs(stage).map(|job| plan.run_samples(job)).collect();
+///     let samples = plan.track_samples(chunks);
+///     for job in plan.accumulate_jobs(stage) {
+///         plan.run_accumulate(&samples, job, &mut sums[job.bin()]);
+///     }
+///     // The stage's samples are dropped here, before the next stage's are made.
+/// }
+/// let tables = plan.assemble(sums);
+/// assert_eq!(tables, LuminosityTables::build(&galaxy));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct TablesPlan {
+    time: UniverseTime,
+    options: BuildOptions,
+    solar_radius: f64,
+    grid: MassGrid,
+    brown_dwarfs: BrownDwarfGrid,
+    /// The oldest age any snapshot reads, years.
+    max_age: f64,
+    /// The stages, in their order.
+    stages: Vec<PlannedStage>,
+    /// The mass nodes of a sample job at most.
+    job_nodes: usize,
+    /// Per component of the galaxy, by index: its bins' means and radial means, or `None` for one
+    /// left dark.
+    layout: Vec<Option<(Vec<f64>, Vec<f64>)>>,
+    /// The bins to accumulate, in the tables' order.
+    bins: Vec<PlannedBin>,
+}
+
+/// One component bin of a [`TablesPlan`].
+#[derive(Debug, Clone, PartialEq)]
+struct PlannedBin {
+    ages: AgeDistribution,
+    /// The Gauss–Hermite nodes, \[Fe/H\] and weight, ascending ([`metallicity_nodes`]).
+    metallicities: [(f64, f64); 3],
+}
+
+/// One stage of a [`TablesPlan`]: a metallicity and the bins that add it.
+#[derive(Debug, Clone, PartialEq)]
+struct PlannedStage {
+    fe_h: f64,
+    /// One job per bin whose next nodes are the stage's, in the bins' order.
+    jobs: Vec<AccumulateJob>,
+}
+
+/// One metallicity of a [`TablesPlan`]: the samples of its \[Fe/H\] node and their accumulation
+/// into the bins that read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Stage {
+    index: usize,
+}
+
+impl Stage {
+    /// The stage's place among the plan's stages.
+    #[must_use]
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+}
+
+/// One job of track samples: the mass nodes `nodes` (the stars' nodes, then the brown dwarfs')
+/// at the \[Fe/H\] node of the plan's stage `stage`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SampleJob {
+    stage: usize,
+    index: usize,
+    nodes: Range<usize>,
+}
+
+impl SampleJob {
+    /// The job's place among its stage's sample jobs.
+    #[must_use]
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
+    /// The stage the job samples for.
+    #[must_use]
+    pub const fn stage(&self) -> Stage {
+        Stage { index: self.stage }
+    }
+}
+
+/// What a [`SampleJob`] made.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SampleChunk {
+    stage: usize,
+    job: usize,
+    samples: Vec<NodeSamples>,
+}
+
+impl SampleChunk {
+    /// The stage the chunk is of.
+    #[must_use]
+    pub const fn stage(&self) -> Stage {
+        Stage { index: self.stage }
+    }
+
+    /// The bytes the chunk owns on the heap.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        samples_heap_bytes(&self.samples)
+    }
+}
+
+/// One stage's track samples: the stars' nodes, then the brown dwarfs'.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackSamples {
+    stage: usize,
+    samples: Vec<NodeSamples>,
+}
+
+impl TrackSamples {
+    /// The stage the samples are of.
+    #[must_use]
+    pub const fn stage(&self) -> Stage {
+        Stage { index: self.stage }
+    }
+
+    /// The bytes the samples own on the heap.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        samples_heap_bytes(&self.samples)
+    }
+
+    /// Adds every node's stars to one snapshot's `bins`, each layer's weighted by `share`, the
+    /// metallicity node's weight, and every part by its share of the born systems (`born_cdf`, as
+    /// [`NodeSamples::accumulate`] reads it).
+    fn add(
+        &self,
+        grid: &MassGrid,
+        brown_dwarfs: &BrownDwarfGrid,
+        share: f64,
+        born_cdf: &impl Fn(Years) -> f64,
+        bins: &mut [Bins],
+    ) {
+        let (stars, bd_samples) = self.samples.split_at(grid.nodes.len());
+        let mut layers = Vec::with_capacity(LAYER_COUNT);
+        for (node, node_samples) in grid.nodes.iter().zip(stars) {
+            layers.clear();
+            layers.extend(
+                node.weights
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, w)| **w > 0.0)
+                    .map(|(layer, &w)| (layer, share * w)),
+            );
+            node_samples.accumulate(born_cdf, &layers, bins);
+        }
+        let bd = layer_index(Layer::BrownDwarf);
+        for (&weight, node_samples) in brown_dwarfs.weights.iter().zip(bd_samples) {
+            node_samples.accumulate(born_cdf, &[(bd, share * weight)], bins);
+        }
+    }
+}
+
+/// The heap bytes of `samples`.
+#[must_use]
+fn samples_heap_bytes(samples: &Vec<NodeSamples>) -> usize {
+    samples.capacity() * size_of::<NodeSamples>()
+        + samples.iter().map(NodeSamples::heap_bytes).sum::<usize>()
+}
+
+/// One job of accumulation: the nodes `first..end` of the plan's component bin `bin`, all at its
+/// stage's \[Fe/H\].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AccumulateJob {
+    stage: usize,
+    bin: usize,
+    first: usize,
+    end: usize,
+}
+
+impl AccumulateJob {
+    /// The stage whose samples the job adds.
+    #[must_use]
+    pub const fn stage(&self) -> Stage {
+        Stage { index: self.stage }
+    }
+
+    /// The bin the job adds to: its place among [`TablesPlan::bin_sums`].
+    #[must_use]
+    pub const fn bin(&self) -> usize {
+        self.bin
+    }
+}
+
+/// One component bin's running sums: per snapshot, in [`EMITTED_AGO_YEARS`]'s order, and per
+/// layer, the bins of its stars, and how many of its metallicity nodes it has added.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BinSums {
+    bin: usize,
+    added: usize,
+    snapshots: Vec<Vec<Bins>>,
+}
+
+impl BinSums {
+    #[must_use]
+    fn new(bin: usize) -> Self {
+        Self {
+            bin,
+            added: 0,
+            snapshots: EMITTED_AGO_YEARS
+                .iter()
+                .map(|_| (0..LAYER_COUNT).map(|_| Bins::new()).collect())
+                .collect(),
+        }
+    }
+
+    /// The bin the sums are of: their place among [`TablesPlan::bin_sums`].
+    #[must_use]
+    pub const fn bin(&self) -> usize {
+        self.bin
+    }
+
+    /// The bin's functions by layer, the rogue planets' dark: the finish step of
+    /// [`TablesPlan::assemble`], once every node is in.
+    #[must_use]
+    fn into_functions(self) -> Vec<LuminosityFunction> {
+        let mut per_layer: Vec<Vec<Snapshot>> = vec![Vec::new(); LAYER_COUNT];
+        for bins in &self.snapshots {
+            for (layer, b) in bins.iter().enumerate() {
+                per_layer[layer].push(Snapshot::from_bins(b));
+            }
+        }
+        let mut functions = vec![LuminosityFunction::zero(); LAYER_COUNT];
+        for (layer, snapshots) in per_layer.into_iter().enumerate() {
+            if Layer::ALL[layer] == Layer::RoguePlanet {
+                continue;
+            }
+            functions[layer] = LuminosityFunction { snapshots };
+        }
+        functions
+    }
+}
+
+impl TablesPlan {
+    /// The plan of [`LuminosityTables::build_with`], with sample jobs of at most `job_nodes` mass
+    /// nodes.
+    #[must_use]
+    fn new(
+        galaxy: &Galaxy,
+        time: UniverseTime,
+        components: &[ComponentId],
+        options: BuildOptions,
+        job_nodes: usize,
+    ) -> Self {
+        let mut layout: Vec<Option<(Vec<f64>, Vec<f64>)>> =
+            vec![None; galaxy.fields().components().len()];
+        // The oldest age any snapshot reads: a component's oldest at the epoch plus the build's
+        // time from the epoch where that is later, and a margin of 2,000 years for the rounding
+        // of the snapshots' light ages.
+        let max_age = galaxy
+            .fields()
+            .components()
+            .iter()
+            .map(|c| c.ages().max().value())
+            .fold(0.0, f64::max)
+            + time.since_epoch().as_julian_years_f64().max(0.0)
+            + 2_000.0;
+        debug_assert!(
+            components
+                .iter()
+                .enumerate()
+                .all(|(i, id)| !components[..i].contains(id)),
+            "each component once"
+        );
+        let solar_radius = SOLAR_RADIUS_LENGTHS * galaxy.params().thin_disc().length().value();
+        let mut planned: Vec<(usize, Vec<PlannedBin>)> = Vec::new();
+        for &id in components {
+            let component = galaxy.fields().component(id);
+            let means = metallicity_bins(galaxy, component);
+            let radial = if means.len() > 1 {
+                radial_means(galaxy, component)
+            } else {
+                Vec::new()
+            };
+            let (means, radial) = match options.bins {
+                GradientBins::All => (means, radial),
+                #[cfg(test)]
+                GradientBins::SolarCircle => solar_circle_bin(means, radial, solar_radius),
+            };
+            let by_bin = means
+                .iter()
+                .map(|&mean| PlannedBin {
+                    ages: component.ages().clone(),
+                    metallicities: metallicity_nodes(component, mean),
+                })
+                .collect();
+            layout[id.index()] = Some((means, radial));
+            planned.push((id.index(), by_bin));
+        }
+        // The bins in the tables' order: by component index.
+        planned.sort_by_key(|(index, _)| *index);
+        let bins: Vec<PlannedBin> = planned.into_iter().flat_map(|(_, bins)| bins).collect();
+        Self {
+            time,
+            options,
+            solar_radius,
+            grid: MassGrid::new(galaxy, options),
+            brown_dwarfs: BrownDwarfGrid::new(galaxy.mass_function()),
+            max_age,
+            stages: stages_of(&bins),
+            job_nodes: job_nodes.max(1),
+            layout,
+            bins,
+        }
+    }
+
+    /// The mass nodes per \[Fe/H\] node: the stars', then the brown dwarfs'.
+    fn nodes_per_fe_h(&self) -> usize {
+        self.grid.nodes.len() + self.brown_dwarfs.masses.len()
+    }
+
+    /// The stages, in the order their accumulation jobs run: by \[Fe/H\], from the lowest.
+    pub fn stages(&self) -> impl Iterator<Item = Stage> + use<> {
+        (0..self.stages.len()).map(|index| Stage { index })
+    }
+
+    /// The sample jobs of `stage`, in index order: its \[Fe/H\] node's mass nodes in chunks. They
+    /// may run in any order and at any time, ahead of the stage's turn too.
+    pub fn sample_jobs(&self, stage: Stage) -> impl Iterator<Item = SampleJob> + use<> {
+        let (per, job_nodes) = (self.nodes_per_fe_h(), self.job_nodes);
+        (0..per.div_ceil(job_nodes)).map(move |index| {
+            let start = index * job_nodes;
+            SampleJob {
+                stage: stage.index,
+                index,
+                nodes: start..(start + job_nodes).min(per),
+            }
+        })
+    }
+
+    /// Runs one sample job: the tracks of its mass nodes at its stage's metallicity, cut into parts.
+    ///
+    /// # Panics
+    ///
+    /// If `job` is not one of this plan's.
+    #[must_use]
+    pub fn run_samples(&self, job: SampleJob) -> SampleChunk {
+        let composition = composition_at(self.stages[job.stage].fe_h);
+        let stars = self.grid.nodes.len();
+        let samples = job
+            .nodes
+            .map(|k| {
+                if k < stars {
+                    NodeSamples::of_mass(
+                        self.grid.nodes[k].mass,
+                        &composition,
+                        self.max_age,
+                        self.options.samples_per_phase,
+                    )
+                } else {
+                    NodeSamples::of_cooling(
+                        self.brown_dwarfs.masses[k - stars],
+                        &composition,
+                        self.max_age,
+                    )
+                }
+            })
+            .collect();
+        SampleChunk {
+            stage: job.stage,
+            job: job.index,
+            samples,
+        }
+    }
+
+    /// One stage's samples from each of its sample jobs' chunks, in any order, put back in the
+    /// jobs' order.
+    ///
+    /// # Panics
+    ///
+    /// If `chunks` are not exactly one of each of one stage's sample jobs.
+    #[must_use]
+    pub fn track_samples(&self, chunks: impl IntoIterator<Item = SampleChunk>) -> TrackSamples {
+        let mut chunks: Vec<SampleChunk> = chunks.into_iter().collect();
+        chunks.sort_by_key(|c| c.job);
+        let per = self.nodes_per_fe_h();
+        let stage = chunks.first().map_or(usize::MAX, |c| c.stage);
+        assert!(
+            stage < self.stages.len()
+                && chunks.len() == per.div_ceil(self.job_nodes)
+                && chunks
+                    .iter()
+                    .enumerate()
+                    .all(|(i, c)| c.job == i && c.stage == stage),
+            "one chunk of each of a stage's sample jobs"
+        );
+        let mut samples = Vec::with_capacity(per);
+        for chunk in chunks {
+            samples.extend(chunk.samples);
+        }
+        TrackSamples { stage, samples }
+    }
+
+    /// The accumulation jobs of `stage`: one per component bin whose next nodes are at its
+    /// \[Fe/H\]. Those of different bins may run in any order; a bin's own run stage by stage.
+    pub fn accumulate_jobs(&self, stage: Stage) -> impl Iterator<Item = AccumulateJob> + '_ {
+        self.stages[stage.index].jobs.iter().copied()
+    }
+
+    /// Every bin's sums, empty, in the bins' order: the place of a job's [`AccumulateJob::bin`].
+    #[must_use]
+    pub fn bin_sums(&self) -> Vec<BinSums> {
+        (0..self.bins.len()).map(BinSums::new).collect()
+    }
+
+    /// Runs one accumulation job: adds its stage's `samples` to its bin's `sums`, every layer and
+    /// snapshot.
+    ///
+    /// # Panics
+    ///
+    /// If `samples` are not the job's stage's, or `sums` are not the job's bin's or have not added
+    /// the bin's earlier stages, whose order the sums' bits depend on.
+    pub fn run_accumulate(&self, samples: &TrackSamples, job: AccumulateJob, sums: &mut BinSums) {
+        assert!(
+            sums.bin == job.bin && sums.added == job.first,
+            "a bin adds its metallicity nodes in their order"
+        );
+        assert!(
+            samples.stage == job.stage && samples.samples.len() == self.nodes_per_fe_h(),
+            "the samples are of the job's stage"
+        );
+        let planned = &self.bins[job.bin];
+        let shift_now = self.time.since_epoch().as_julian_years_f64();
+        for &(_, share) in &planned.metallicities[job.first..job.end] {
+            for (&ago, snapshot) in EMITTED_AGO_YEARS.iter().zip(&mut sums.snapshots) {
+                // A star's age then is its age at the epoch plus `shift`.
+                let shift = shift_now - ago;
+                let born_cdf = |age: Years| planned.ages.born_cdf(Years::new(age.value() - shift));
+                samples.add(&self.grid, &self.brown_dwarfs, share, &born_cdf, snapshot);
+            }
+        }
+        sums.added = job.end;
+    }
+
+    /// The tables from every bin's sums, in any order, once each has added all its nodes: each
+    /// bin's functions are finished from its sums, then put in the tables' order.
+    ///
+    /// # Panics
+    ///
+    /// If `sums` are not exactly one of each of this plan's bins, each with every node added.
+    #[must_use]
+    pub fn assemble(&self, sums: impl IntoIterator<Item = BinSums>) -> LuminosityTables {
+        let mut sums: Vec<BinSums> = sums.into_iter().collect();
+        sums.sort_by_key(|s| s.bin);
+        assert!(
+            sums.len() == self.bins.len()
+                && sums
+                    .iter()
+                    .enumerate()
+                    .all(|(i, s)| { s.bin == i && s.added == self.bins[i].metallicities.len() }),
+            "every node of each of the plan's bins"
+        );
+        let mut sums = sums.into_iter();
+        let mut layout = Vec::with_capacity(self.layout.len());
+        let mut functions = Vec::new();
+        for planned in &self.layout {
+            let first = functions.len() / LAYER_COUNT;
+            if let Some((means, radial_means)) = planned {
+                for _ in means {
+                    let bin = sums.next().expect("the plan's bins match its layout");
+                    functions.extend(bin.into_functions());
+                }
+                layout.push(ComponentBins {
+                    first,
+                    means: means.clone(),
+                    radial_means: radial_means.clone(),
+                });
+            } else {
+                functions.extend((0..LAYER_COUNT).map(|_| LuminosityFunction::zero()));
+                layout.push(ComponentBins {
+                    first,
+                    means: vec![0.0],
+                    radial_means: Vec::new(),
+                });
+            }
+        }
+        LuminosityTables {
+            time: self.time,
+            solar_radius: self.solar_radius,
+            layout,
+            functions,
+        }
+    }
+
+    /// Every job in turn, one stage's samples at a time: [`LuminosityTables::build_with`].
+    fn run_serially(&self) -> LuminosityTables {
+        let mut sums = self.bin_sums();
+        for stage in self.stages() {
+            let samples =
+                self.track_samples(self.sample_jobs(stage).map(|job| self.run_samples(job)));
+            for job in self.accumulate_jobs(stage) {
+                self.run_accumulate(&samples, job, &mut sums[job.bin]);
+            }
+        }
+        self.assemble(sums)
+    }
+}
+
+/// The stages of `bins`: one metallicity at a time, the lowest \[Fe/H\] that any bin adds next,
+/// with a job for each bin whose next nodes are at it. A bin's nodes ascend
+/// ([`metallicity_nodes`]), so each \[Fe/H\] is one stage, and every bin adds its nodes in their
+/// own order, which keeps the bits of its sums.
+#[must_use]
+fn stages_of(bins: &[PlannedBin]) -> Vec<PlannedStage> {
+    let mut added = vec![0; bins.len()];
+    let mut stages = Vec::new();
+    while let Some(fe_h) = bins
+        .iter()
+        .zip(&added)
+        .filter_map(|(bin, &k)| bin.metallicities.get(k).map(|&(fe_h, _)| fe_h))
+        .min_by(f64::total_cmp)
+    {
+        let mut jobs = Vec::new();
+        for (index, (bin, k)) in bins.iter().zip(&mut added).enumerate() {
+            let first = *k;
+            while bin
+                .metallicities
+                .get(*k)
+                .is_some_and(|&(next, _)| next.total_cmp(&fe_h).is_eq())
+            {
+                *k += 1;
+            }
+            if *k > first {
+                jobs.push(AccumulateJob {
+                    stage: stages.len(),
+                    bin: index,
+                    first,
+                    end: *k,
+                });
+            }
+        }
+        stages.push(PlannedStage { fe_h, jobs });
+    }
+    stages
 }
 
 /// The step \[Fe/H\] nodes are rounded to, dex, so that components of near metallicities share
@@ -814,7 +1319,7 @@ fn layer_index(layer: Layer) -> usize {
 }
 
 /// One snapshot's bins, being filled.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Bins {
     light: Vec<f64>,
     count: Vec<f64>,
@@ -928,6 +1433,10 @@ struct NodeSamples {
 }
 
 impl NodeSamples {
+    fn heap_bytes(&self) -> usize {
+        self.ends.capacity() * size_of::<f64>() + self.seen.capacity() * size_of::<Seen>()
+    }
+
     /// Adds every part to the bins of `layers`, each `(layer, weight)` weighting the node's stars
     /// per system of the layer, and every part by its share of the born systems: the rise across
     /// its age span of `born_cdf`, the share of the systems whose stars are younger than an age at
@@ -1128,17 +1637,6 @@ impl MassGrid {
         }
         Self { nodes }
     }
-
-    /// Every node's life at metallicity `fe_h`.
-    fn samples(&self, fe_h: f64, max_age: f64, options: BuildOptions) -> Vec<NodeSamples> {
-        let composition = composition_at(fe_h);
-        self.nodes
-            .iter()
-            .map(|node| {
-                NodeSamples::of_mass(node.mass, &composition, max_age, options.samples_per_phase)
-            })
-            .collect()
-    }
 }
 
 /// The composition at the reference metallicity `fe_h`, with no helium excess.
@@ -1215,109 +1713,6 @@ impl BrownDwarfGrid {
             weights.push(f.substellar_integral(a, b) / total);
         }
         Self { masses, weights }
-    }
-
-    fn samples(&self, fe_h: f64, max_age: f64) -> Vec<NodeSamples> {
-        let composition = composition_at(fe_h);
-        self.masses
-            .iter()
-            .map(|&m| NodeSamples::of_cooling(m, &composition, max_age))
-            .collect()
-    }
-}
-
-/// The lives at one metallicity of every node of the [`MassGrid`] and the [`BrownDwarfGrid`].
-#[derive(Debug, Clone, PartialEq)]
-struct MetallicitySamples {
-    stars: Vec<NodeSamples>,
-    brown_dwarfs: Vec<NodeSamples>,
-}
-
-impl MetallicitySamples {
-    /// Adds every node's stars to one snapshot's `bins`, each layer's weighted by `share`, the
-    /// metallicity node's weight, and every part by its share of the born systems (`born_cdf`, as
-    /// [`NodeSamples::accumulate`] reads it).
-    fn add(
-        &self,
-        grid: &MassGrid,
-        brown_dwarfs: &BrownDwarfGrid,
-        share: f64,
-        born_cdf: &impl Fn(Years) -> f64,
-        bins: &mut [Bins],
-    ) {
-        let mut layers = Vec::with_capacity(LAYER_COUNT);
-        for (node, node_samples) in grid.nodes.iter().zip(&self.stars) {
-            layers.clear();
-            layers.extend(
-                node.weights
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, w)| **w > 0.0)
-                    .map(|(layer, &w)| (layer, share * w)),
-            );
-            node_samples.accumulate(born_cdf, &layers, bins);
-        }
-        let bd = layer_index(Layer::BrownDwarf);
-        for (&weight, node_samples) in brown_dwarfs.weights.iter().zip(&self.brown_dwarfs) {
-            node_samples.accumulate(born_cdf, &[(bd, share * weight)], bins);
-        }
-    }
-}
-
-/// One component bin being built: its three metallicity nodes, how many of them it has added,
-/// and the bins of each of its snapshots, in [`EMITTED_AGO_YEARS`]'s order, by layer.
-#[derive(Debug, Clone)]
-struct BinWork {
-    metallicities: [(f64, f64); 3],
-    added: usize,
-    snapshots: Vec<Vec<Bins>>,
-}
-
-impl BinWork {
-    #[must_use]
-    fn new(metallicities: [(f64, f64); 3]) -> Self {
-        Self {
-            metallicities,
-            added: 0,
-            snapshots: EMITTED_AGO_YEARS
-                .iter()
-                .map(|_| (0..LAYER_COUNT).map(|_| Bins::new()).collect())
-                .collect(),
-        }
-    }
-
-    /// The \[Fe/H\] of the next node to add, if one is left.
-    #[must_use]
-    fn next_fe_h(&self) -> Option<f64> {
-        self.metallicities.get(self.added).map(|&(fe_h, _)| fe_h)
-    }
-
-    /// The weight of the next node if its \[Fe/H\] is `fe_h`, which it then counts as added.
-    fn take_node(&mut self, fe_h: f64) -> Option<f64> {
-        let &(next, share) = self.metallicities.get(self.added)?;
-        next.total_cmp(&fe_h).is_eq().then(|| {
-            self.added += 1;
-            share
-        })
-    }
-
-    /// The bin's functions by layer, the rogue planets' dark.
-    #[must_use]
-    fn into_functions(self) -> Vec<LuminosityFunction> {
-        let mut per_layer: Vec<Vec<Snapshot>> = vec![Vec::new(); LAYER_COUNT];
-        for bins in &self.snapshots {
-            for (layer, b) in bins.iter().enumerate() {
-                per_layer[layer].push(Snapshot::from_bins(b));
-            }
-        }
-        let mut functions = vec![LuminosityFunction::zero(); LAYER_COUNT];
-        for (layer, snapshots) in per_layer.into_iter().enumerate() {
-            if Layer::ALL[layer] == Layer::RoguePlanet {
-                continue;
-            }
-            functions[layer] = LuminosityFunction { snapshots };
-        }
-        functions
     }
 }
 
@@ -1544,6 +1939,235 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Every value of the tables, as bits, in their order.
+    fn bits(tables: &LuminosityTables) -> Vec<u64> {
+        let mut out = vec![
+            tables.time.seconds().cast_unsigned(),
+            hyperion_testkit::float::bits(tables.solar_radius),
+        ];
+        for bins in &tables.layout {
+            out.push(u64::try_from(bins.first).unwrap());
+            out.extend(
+                bins.means
+                    .iter()
+                    .chain(&bins.radial_means)
+                    .map(|&v| hyperion_testkit::float::bits(v)),
+            );
+        }
+        for function in &tables.functions {
+            for s in &function.snapshots {
+                out.extend(
+                    s.light_fainter
+                        .iter()
+                        .chain(&s.count_brighter)
+                        .chain(s.colour_fainter.iter().flatten())
+                        .chain([&s.beyond, &s.dark, &s.remnants])
+                        .map(|&v| hyperion_testkit::float::bits(v)),
+                );
+            }
+        }
+        out
+    }
+
+    /// The pieces of `jobs` run through `run`, handed back in the order they finish: on four
+    /// threads natively, each taking every fourth job, and in turn under wasm32-wasip1, which has
+    /// no threads.
+    fn spread<J: Clone + Send + Sync, R: Send>(
+        jobs: &[J],
+        run: &(impl Fn(J) -> R + Sync),
+    ) -> Vec<R> {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let out = std::sync::Mutex::new(Vec::new());
+            std::thread::scope(|scope| {
+                for t in 0..4 {
+                    let out = &out;
+                    scope.spawn(move || {
+                        for job in jobs.iter().skip(t).step_by(4) {
+                            let r = run(job.clone());
+                            out.lock().unwrap().push(r);
+                        }
+                    });
+                }
+            });
+            out.into_inner().unwrap()
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            jobs.iter().map(|job| run(job.clone())).collect()
+        }
+    }
+
+    /// FNV-1a over the tables' bits: the fingerprint `parallel_build_equals_serial` pins.
+    fn fingerprint(tables: &LuminosityTables) -> u64 {
+        bits(tables)
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, &v| {
+                v.to_le_bytes()
+                    .iter()
+                    .fold(h, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+            })
+    }
+
+    /// [`fingerprint`] of the halo's coarse build in `parallel_build_equals_serial`, made by the
+    /// serial loop before the job split (fae1c11): neither the split nor its stages changed a bit.
+    const SERIAL_FINGERPRINT: u64 = 0x6ca2_bafb_4c81_c7b4;
+
+    #[test]
+    fn parallel_build_equals_serial() {
+        // Any partition of the sample jobs (their chunk size), any order, stages sampled ahead of
+        // their turn and any threads give `build`'s bits (decided 2026-10-03), at a coarse
+        // sampling and for components whose few metallicity nodes keep the test short: the halo
+        // against the pre-split build, then the bulge and the long bar, which share two of their
+        // four stages, [Fe/H] 0 and +0.18.
+        let galaxy = milky_way_galaxy();
+        let options = BuildOptions {
+            samples_per_phase: 2,
+            ..BuildOptions::STANDARD
+        };
+        let halo = component_of(galaxy, Population::Halo);
+        let halo = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[halo], options);
+        assert_eq!(fingerprint(&halo), SERIAL_FINGERPRINT);
+        let ids = [Population::Bulge, Population::LongBar].map(|p| component_of(galaxy, p));
+        let serial = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &ids, options);
+        // Chunks of 7 mass nodes rather than the serial build's 64: every stage's sample jobs at
+        // once, ahead of their turn, run reversed on four threads.
+        let plan = TablesPlan::new(galaxy, REFERENCE_TIME, &ids, options, 7);
+        let stages: Vec<Stage> = plan.stages().collect();
+        assert!(
+            stages.iter().any(|&s| plan.accumulate_jobs(s).count() > 1)
+                && stages.iter().any(|&s| plan.accumulate_jobs(s).count() == 1),
+            "some stages add to both bins and some to one"
+        );
+        let mut sample_jobs: Vec<SampleJob> =
+            stages.iter().flat_map(|&s| plan.sample_jobs(s)).collect();
+        sample_jobs.reverse();
+        let mut chunks = spread(&sample_jobs, &|job| plan.run_samples(job));
+        let mut samples = Vec::with_capacity(stages.len());
+        for &stage in &stages {
+            let (mine, rest): (Vec<SampleChunk>, Vec<SampleChunk>) =
+                chunks.into_iter().partition(|c| c.stage() == stage);
+            chunks = rest;
+            samples.push(plan.track_samples(mine));
+        }
+        // Each stage's accumulation jobs reversed on four threads, each with its bin's sums, and
+        // the sums assembled in reverse.
+        let mut sums = plan.bin_sums();
+        let mut jobs = Vec::new();
+        for (&stage, samples) in stages.iter().zip(&samples) {
+            let mut stage_jobs: Vec<(AccumulateJob, BinSums)> = plan
+                .accumulate_jobs(stage)
+                .map(|job| (job, sums[job.bin()].clone()))
+                .collect();
+            stage_jobs.reverse();
+            jobs.extend(stage_jobs.iter().cloned());
+            let run = |(job, mut bin): (AccumulateJob, BinSums)| {
+                plan.run_accumulate(samples, job, &mut bin);
+                bin
+            };
+            for bin in spread(&stage_jobs, &run) {
+                let k = bin.bin();
+                sums[k] = bin;
+            }
+        }
+        sums.reverse();
+        let parallel = plan.assemble(sums);
+        assert!(bits(&parallel) == bits(&serial), "the bits differ");
+        // Each accumulation job's result, from its bin's sums before it, does not depend on which
+        // ran before it.
+        hyperion_testkit::order::assert_order_independent(&jobs, |(job, bin)| {
+            let mut bin = bin.clone();
+            plan.run_accumulate(&samples[job.stage().index()], *job, &mut bin);
+            bin
+        });
+    }
+
+    /// The plan of the bulge's tables, whose one bin adds three metallicities.
+    fn bulge_plan() -> TablesPlan {
+        let galaxy = milky_way_galaxy();
+        let id = component_of(galaxy, Population::Bulge);
+        let plan = TablesPlan::new(
+            galaxy,
+            REFERENCE_TIME,
+            &[id],
+            BuildOptions::STANDARD,
+            SAMPLE_JOB_NODES,
+        );
+        assert!(
+            plan.stages().count() > 1,
+            "the bulge has more than one metallicity"
+        );
+        plan
+    }
+
+    #[test]
+    #[should_panic(expected = "every node of each of the plan's bins")]
+    fn assembling_without_every_bin_panics() {
+        let _ = bulge_plan().assemble(Vec::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "every node of each of the plan's bins")]
+    fn assembling_before_every_node_is_added_panics() {
+        let plan = bulge_plan();
+        let _ = plan.assemble(plan.bin_sums());
+    }
+
+    #[test]
+    #[should_panic(expected = "a bin adds its metallicity nodes in their order")]
+    fn adding_a_bins_nodes_out_of_order_panics() {
+        // The bin's last stage before its first; the check comes before any sample is read.
+        let plan = bulge_plan();
+        let last = plan.stages().last().expect("a stage");
+        let job = plan
+            .accumulate_jobs(last)
+            .next()
+            .expect("the bin adds its last node");
+        let samples = TrackSamples {
+            stage: job.stage,
+            samples: Vec::new(),
+        };
+        let mut sums = plan.bin_sums();
+        plan.run_accumulate(&samples, job, &mut sums[job.bin()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "the samples are of the job's stage")]
+    fn adding_another_stages_samples_panics() {
+        let plan = bulge_plan();
+        let mut stages = plan.stages();
+        let (first, second) = (stages.next().unwrap(), stages.next().unwrap());
+        let job = plan
+            .accumulate_jobs(first)
+            .next()
+            .expect("the bin adds its first node");
+        let samples = TrackSamples {
+            stage: second.index(),
+            samples: Vec::new(),
+        };
+        let mut sums = plan.bin_sums();
+        plan.run_accumulate(&samples, job, &mut sums[job.bin()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "one chunk of each of a stage's sample jobs")]
+    fn one_stages_samples_take_no_other_stages_chunk() {
+        // The first stage's chunks, one of them the second stage's; none is read.
+        let plan = bulge_plan();
+        let mut stages = plan.stages();
+        let (first, second) = (stages.next().unwrap(), stages.next().unwrap());
+        let mut chunks: Vec<SampleChunk> = plan
+            .sample_jobs(first)
+            .map(|job| SampleChunk {
+                stage: job.stage,
+                job: job.index,
+                samples: Vec::new(),
+            })
+            .collect();
+        chunks[0].stage = second.index();
+        let _ = plan.track_samples(chunks);
     }
 
     #[test]

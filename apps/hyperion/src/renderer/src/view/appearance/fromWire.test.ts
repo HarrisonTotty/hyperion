@@ -52,7 +52,7 @@ describe("appearanceFromWire", () => {
   it("gives a body from today's summary the provisional law and label", () => {
     const appearance = appearanceFromWire(fixtureEarth(), null);
     expect(appearance.photometry).toBe(PROVISIONAL_PHOTOMETRY);
-    expect(appearance.labels).toEqual(["BODY ALBEDO: NOT YET MODELLED"]);
+    expect(appearance.labels).toEqual(["BODY PHOTOMETRY: NOT YET MODELLED"]);
   });
 
   it("makes its figure a sphere of its mean radius with a null pole", () => {

@@ -484,9 +484,11 @@ impl Track {
             draws,
             age_max,
         );
+        let core = self.structure_at(age, mc);
         Remains::Collapse {
             track: Box::new(track),
-            core: self.structure_at(age, mc).state,
+            core: core.state,
+            core_radius: core.core_radius,
         }
     }
 
@@ -623,8 +625,13 @@ pub(crate) enum Remains {
     /// (ruling 129.4c): the core collapses now, companion-stripped, as Tauris, Langer and
     /// Podsiadlowski's (2015) ultra-stripped supernova. `track` is its helium-star track from the
     /// stripping, which dies at its start with plan 06's remnant; `core` is the core's state at
-    /// the stripping, its last living one.
-    Collapse { track: Box<Track>, core: StarState },
+    /// the stripping, its last living one, and `core_radius` its structure's core radius there
+    /// (P11.T4.g).
+    Collapse {
+        track: Box<Track>,
+        core: StarState,
+        core_radius: SolarRadii,
+    },
     /// A white dwarf of `phase` and `mass` below the Chandrasekhar mass, from a star of
     /// `last_luminosity` then, which its cooling law is matched to
     /// (`white_dwarf::cooling_origin`).
@@ -959,7 +966,7 @@ pub(crate) fn giant_radius_exponent(comp: &Composition) -> f64 {
 }
 
 /// The helium zero-age main sequence's radius of a helium star of mass `m`, R☉ (HPT equation 78),
-/// a non-degenerate helium core's radius (BSE section 2.7.1).
+/// a non-degenerate helium core's radius (HPT section 6.3; SSE/BSE `hrdiag`).
 #[must_use]
 pub(crate) fn helium_zams_radius(m: f64) -> f64 {
     if m > 0.0 {
@@ -1266,7 +1273,9 @@ mod tests {
                 "{m}: core {core:?}"
             );
             match star.remains_at(age, state.mass().value(), &draws, None) {
-                Remains::Collapse { track, core: bare } => {
+                Remains::Collapse {
+                    track, core: bare, ..
+                } => {
                     assert!(collapses, "{m}");
                     let death = track.death().expect("the bare core's track ends");
                     assert!(death.kind().is_sudden(), "{m}: {death:?}");

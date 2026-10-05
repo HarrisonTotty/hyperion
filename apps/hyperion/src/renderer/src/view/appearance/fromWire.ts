@@ -4,7 +4,7 @@
  *
  * @remarks
  * Plan 14 sends no photometric section and no flattening yet (R07.T1 asks for both), so every body
- * takes {@link PROVISIONAL_PHOTOMETRY}, labelled `BODY ALBEDO: NOT YET MODELLED`, and is a sphere of
+ * takes {@link PROVISIONAL_PHOTOMETRY}, labelled `BODY PHOTOMETRY: NOT YET MODELLED`, and is a sphere of
  * its mean radius, `bulk.radius_m`. Its pole is the body-fixed z axis in the body frame from R02's
  * `bodyFixedRotation`, `null` while plan 14 sends no rotation. A `contact` entry of R03's frame has
  * no body summary here and stays R02's mark (decisions-r06-r07, item 4); R07.T2.b replaces the
@@ -32,7 +32,7 @@ export interface BodyPhotometry {
 }
 
 /** The label a body without a photometric section carries (a phrase for the owner, R07.T16). */
-export type AppearanceLabel = "BODY ALBEDO: NOT YET MODELLED";
+export type AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLED";
 
 /** The provisional photometry's geometric albedo, every channel (Design note 5). */
 const PROVISIONAL_ALBEDO = 0.2;
@@ -83,6 +83,6 @@ export function appearanceFromWire(body: SystemBody, rotation: Rotation3 | null)
       radiusM === null || radiusM <= 0
         ? null
         : { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole },
-    labels: ["BODY ALBEDO: NOT YET MODELLED"],
+    labels: ["BODY PHOTOMETRY: NOT YET MODELLED"],
   };
 }

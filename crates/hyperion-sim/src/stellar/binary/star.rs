@@ -316,8 +316,12 @@ pub(crate) enum Member {
     /// A star below 0.1 M☉ on P06.T13's cooling fits, at age `age − offset`.
     Cooling { offset: f64, mass: Path },
     /// A star held at its last living state (plan 11, design note 16: a massive primary whose own
-    /// track would die before plan 06's death age waits for it).
-    Frozen { state: StarState },
+    /// track would die before plan 06's death age waits for it), with the core radius of the
+    /// structure it was held from (P11.T4.g: sse's rule, HPT section 6.3 after eq. 105, SSE/BSE `hrdiag`).
+    Frozen {
+        state: StarState,
+        core_radius: SolarRadii,
+    },
     /// A white dwarf, neutron star or black hole the binary made or feeds, formed at `birth`,
     /// whose white dwarf's cooling law starts at `origin` of its own clock.
     Remnant {
@@ -336,7 +340,7 @@ impl Member {
     pub(crate) fn state_at(&self, ctx: &Context, slot: usize, age: f64) -> StarState {
         match self {
             Self::Track { track, offset } => track.state_at(Years::new((age - offset).max(0.0))),
-            Self::Frozen { state } => *state,
+            Self::Frozen { state, .. } => *state,
             Self::Gone => nothing(age),
             Self::Shaped { mass, .. }
             | Self::MainSequence { mass, .. }
@@ -398,7 +402,7 @@ impl Member {
                     phase_end: f64::INFINITY,
                 })
             }
-            Self::Frozen { state } => Some(frozen_structure(*state)),
+            Self::Frozen { state, core_radius } => Some(frozen_structure(*state, *core_radius)),
             Self::Remnant {
                 phase,
                 birth,
@@ -447,7 +451,7 @@ impl Member {
             | Self::MainSequence { mass, .. }
             | Self::Cooling { mass, .. }
             | Self::Remnant { mass, .. } => mass.at(age),
-            Self::Frozen { state } => state.mass().value(),
+            Self::Frozen { state, .. } => state.mass().value(),
             Self::Gone => 0.0,
         }
     }
@@ -587,9 +591,11 @@ pub(crate) fn nothing(age: f64) -> StarState {
     })
 }
 
-/// The structure of a star held at `state`: no wind and no envelope to speak of.
+/// The structure of a star held at `state` with the core radius `core_radius` of the structure
+/// it was held from (P11.T4.g; HPT section 6.3, SSE/BSE `hrdiag`), held no larger than the star: no wind and no
+/// envelope to speak of.
 #[must_use]
-fn frozen_structure(state: StarState) -> Structure {
+fn frozen_structure(state: StarState, core_radius: SolarRadii) -> Structure {
     let state = StarState::new(StarStateParts {
         phase: state.phase(),
         age: state.age(),
@@ -602,7 +608,7 @@ fn frozen_structure(state: StarState) -> Structure {
     });
     Structure {
         state,
-        core_radius: SolarRadii::new(state.radius().value().min(0.1 * state.radius().value())),
+        core_radius: SolarRadii::new(core_radius.value().min(state.radius().value())),
         envelope: ConvectiveEnvelope {
             mass: 0.0,
             depth: 0.0,

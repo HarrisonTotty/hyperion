@@ -973,8 +973,9 @@ luminosity_matches_realised_cells` passes.
   companions and orbits from plan 11's laws, ages log-uniform within the bin), each read from
   `SystemStars::state_at(t).stars()` and, single, from each `StarModel` alone, on the fit's own
   statistical seed. `LuminosityTables::build` adds to each component bin and snapshot the
-  born-weighted sum over the age bins (the same `weight_of`) of the differences, linear in
-  \[Fe/H\] between nodes and over the component's three Gauss–Hermite nodes. Light and colour: each
+  born-weighted sum over the age bins (the same born-system weights) of the differences, linear in
+  \[Fe/H\] between nodes and over the component's three Gauss–Hermite nodes, in the bin's finish
+  step in `TablesPlan::assemble`, once its single-star sums hold every node. Light and colour: each
   1-mag bin's difference is spread over its 20 sub-bins in proportion to the single-star light there
   (evenly where that is zero), the differential light clamped at 0, the cumulative sums recomputed.
   Counts take only the increase: each edge holds the larger of the single and corrected counts, then
@@ -987,10 +988,15 @@ luminosity_matches_realised_cells` passes.
   interval, the realised light stays within the existing interval, and each layer's residual is
   recorded before and after. It does not block T8; it lands before T9.b's band gates and T17's
   goldens (no `GENERATOR_VERSION` bump while no band or census output is served or has goldens).
-  The job split: `LuminosityTables::plan(galaxy) → TablesPlan`, whose jobs are the track samples
-  per (\[Fe/H\] node, chunk of mass nodes) and the accumulation per component bin, put together
-  by `assemble` in index order; the sim spawns no threads. Test `parallel_build_equals_serial`: any
-  partition and order of the jobs (`order::assert_order_independent`) gives `build`'s bits; and
+  The job split: `LuminosityTables::plan(galaxy) → TablesPlan`, in stages, one metallicity at a
+  time (as built, 2026-10-04): each stage, an \[Fe/H\] node from the lowest, makes its track
+  samples per chunk of mass nodes (`sample_jobs`, `run_samples`, `track_samples`), then adds them
+  to each component bin that reads the node, one accumulation job per bin (`accumulate_jobs`,
+  `run_accumulate`), into the bin's running sums (`BinSums`, from `bin_sums`), which the caller
+  holds and which refuse a bin's nodes out of order; the stage's samples are then dropped.
+  `assemble` finishes each bin and puts the bins in index order; the sim spawns no threads. Test
+  `parallel_build_equals_serial`: any partition and order of the jobs, stages sampled ahead of
+  their turn and any threads (`order::assert_order_independent`) give `build`'s bits; and
   tables at +H read at t = 0 through `age_for` equal a build at t = 0 within 10⁻³ of every bin's
   light and count. Acceptance: `cargo test -p hyperion-sim sky::luminosity`, `just fit-check`,
   `just test-slow luminosity_matches_realised_cells`.
@@ -1422,8 +1428,11 @@ bench -- sky` runs above complete.
 
 No change to generated output and no bump. `generate_cell_where` is `generate_cell` filtered, and
 the goldens prove it; the luminosity tables, the envelope, the caps and the census only read. The
-sky's own output is a function of the generator version and of the committed colour and
-limb-darkening tables, so its goldens (T17) are regenerated whenever either moves. Not adopted:
+sky's own output is a function of the generator version and of the committed colour,
+limb-darkening and envelope (`sky_envelope`, T6.b) tables, so its goldens (T17) are regenerated
+whenever any of them moves. The envelope's move to a fitted table (2026-10-04) made it up to 1 mmag
+brighter, which moves the caps' rule bound and so the caps and the census's planned cells, with no
+bump: no golden pins them and nothing serves them yet (`decision-r06-tables.md`, A.5). Not adopted:
 drawing a cell's mass words in sorted order, which the brainstorm offers as a generator-version
 change to skip light candidates without opening their streams; the mass-first walk already skips
 their position and density, and the benchmark decides whether the rest is worth a bump (Risks). The
@@ -1980,8 +1989,8 @@ stars_per_system, dark_per_system, remnants_per_system}`, `LightColour` (flux-we
   Risks); the held state's own inconsistency is with a decision agent.
 - **The tables' build memory and the tests' cost (fix, 2026-10-04).** With T5's metallicity nodes
   and gradient bins, `build_with` held every metallicity's samples to the build's end, about
-  150 MB each (2,240 nodes at 32 samples a phase): 17 for the young thin disc's seven bins, some
-  30 for a full build. `doubling_the_samples_moves_no_bin_above_one_percent` peaked at 4.1 GB
+  150 MB each (2,240 nodes at 32 samples a phase): 17 for the young thin disc's seven bins, 22
+  for a full build. `doubling_the_samples_moves_no_bin_above_one_percent` peaked at 4.1 GB
   natively and ran out of wasm32's 4 GiB on wasip1 (CI-13), and most table tests ran 5–20 times
   longer than at CI-11. `build_with` now makes one metallicity's samples at a time, the lowest
   \[Fe/H\] that any bin adds next, adds them to every bin whose next node it is, and drops them.
@@ -1998,9 +2007,70 @@ stars_per_system, dark_per_system, remnants_per_system}`, `LightColour` (flux-we
   all seven bins at twice the samples guards the memory. The doubling test now takes 52 s and
   289 MiB natively (217 s and 4.1 GB before), and 61 s and 365 MiB on wasip1. At CI-11 it took
   28 s and 33 s, with one metallicity per component; the rest of the difference is the three
-  Gauss–Hermite nodes. T5.d's job split should keep this peak: each \[Fe/H\] node's samples job
-  adds its samples to the bins and drops them, rather than holding every node's samples for
-  per-bin jobs.
+  Gauss–Hermite nodes. T5.d's job split keeps this peak (next item).
+- **The job split in stages (T5.d merged with the memory fix, 2026-10-04).**
+  - **Before.** T5.d's split (062e32c) made every \[Fe/H\] node's samples, then built each
+    component bin from all of them, so it held every node's samples at once. A full build peaked
+    at 2.7 GB serially and 2.6 GB on 16 threads.
+  - **How it works now.** `TablesPlan` runs in stages, one metallicity at a time from the lowest
+    \[Fe/H\]. The Milky Way fixture has 22 stages and 53 bins.
+    - A stage's sample jobs are unchanged.
+    - Its accumulation jobs, one per bin that reads the node, add into that bin's running
+      `BinSums`. The caller holds those sums from `bin_sums` to `assemble`, and they panic if a
+      bin's nodes come out of order. After that the stage's samples can be dropped.
+    - `assemble` finishes each bin. T5.d's pair correction goes in that finish step, applied to
+      the bin's complete single-star sums.
+  - **Deviation from the T5.d sketch** (approved by the orchestrator the same day).
+    - `track_samples` takes one stage's chunks.
+    - `run_accumulate` adds to the caller's sums instead of returning a bin's tables.
+    - `BinTables` is gone.
+  - **Bits.** Three builds give the same fingerprint and the same `heap_bytes` at 7772faf, at
+    062e32c's integration head (d400869) and after the merge:
+
+    | Build                                                  | Fingerprint        | `heap_bytes` |
+    | ------------------------------------------------------ | ------------------ | ------------ |
+    | Full, at +H                                            | `36d76d03f1cc651a` | 68,775,072   |
+    | Young thin disc's seven bins, twice the samples, at +H | `f794503ac9529263` | 29,828,064   |
+    | Primaries only, every component, at −55,000 yr         | `0bdedce256b01507` | 68,775,072   |
+
+    Both versions' pool builds on 16 threads give the full build's fingerprint, and so does the
+    merge's pool build with lookahead.
+
+  - **Peak RSS, serial** (MiB, test profile, under shared load):
+
+    | Build             | 062e32c | 7772faf | Merge |
+    | ----------------- | ------- | ------- | ----- |
+    | Full              | 2,735   | 273     | 279   |
+    | Twice the samples | 3,346   | 304     | 295   |
+    | Primaries         | 2,708   | 249     | 238   |
+
+    The peaks are `getrusage`'s maximum RSS of the test process and its children, the figure
+    GNU `time -v` prints (it is not installed here). Each test below ran alone:
+    - natively, the doubling test peaked at 4,072 MiB and took 228 s at 062e32c's integration
+      head, against 304 MiB and 53 s after the merge;
+    - on wasip1, after the merge, the doubling test passed in 65 s at 363 MiB;
+    - `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit` passed in 120 s at 307 MiB.
+
+  - **The pool.** It holds:
+    - one stage's samples, shared by its threads: 151 MiB at 32 samples a phase;
+    - every bin's sums, about 65 MiB;
+    - per thread, a sample chunk of at most 64 nodes, about 4 MiB.
+
+    On 16 threads the staged pool took 23.2 s wall and 237 MiB. 062e32c's took 18.8 s and
+    2.6 GB. Within a stage only the bins that read its node accumulate (1–22 jobs), so
+    accumulation took 13.2 s of the staged pool's time, against 9.7 s for 062e32c's.
+    Sampling stage k + 1 while stage k accumulates holds two stages' samples and gives the same
+    bits: 18.8 s and 439 MiB.
+
+  - **T11.c follow-up.** The server's pool should schedule that one-stage lookahead. The sim
+    spawns no threads, so the schedule belongs to the caller.
+  - **The test.** `parallel_build_equals_serial` still pins the halo's serial build to the
+    pre-split fingerprint, `0x6ca2_bafb_4c81_c7b4` (fae1c11). Its parallel part now builds the
+    bulge and the long bar, which share two of their four stages. It samples every stage ahead of
+    its turn, runs each stage's jobs reversed on four threads, and checks the result against
+    their serial build.
+  - **Guards.** `run_accumulate` panics on a bin's nodes out of order and on another stage's
+    samples, and `track_samples` panics on another stage's chunk; each has a `should_panic` test.
 - **The A3 interim's Class I sources (T5).** `is_dark_in_v` treats every Class I protostar as dark;
   a few per cent of them, seen pole-on down an outflow cavity (A<sub>V</sub> about 1.5; Whitney et
   al. 2003a, ApJ 591, 1049, §2 and Fig. 3), would show in V. Plan 06's A3 decides.
@@ -2022,6 +2092,46 @@ ages)` as sketched; the envelope is one for every component (layer and component
   `early_v_rises_with_mass` was dropped (decided 2026-10-03; Design note 10's correction).
   `mass_floor` bisects on the primary's mass, monotone because the envelope is a running minimum
   and `max_star_mass` rises. Build: 11–22 s under load (provisional).
+- **T6.b's fitted envelope, as built (2026-10-04, `decision-r06-tables.md` B.1).** The
+  `hyperion-fit` task `sky_envelope` (class Fast, revision 0, since generator version 19) writes
+  `tables::sky_envelope`, 266 kB: `DARK` (`i32::MAX`, for +∞), `MASSES` (the 198 nodes of
+  `mass_nodes()`: 192 even in ln m plus the band edges and 0.1 M☉, after duplicates) and
+  `BRIGHTEST_MMAG: [[i32; 193]; 198]`, one node a line.
+  - **The sim side.** `BrightnessEnvelope::build(_galaxy)` keeps its signature and reads the
+    table. `build_with(fe_h, samples)` stays the generator, now `pub` and `#[doc(hidden)]`, as the
+    pieces the fit uses: `raw_node(m, fe_h, samples) -> [f64; 193]` (one node's own brightest per
+    bin), `BrightnessEnvelope::assemble(masses, raw)` (the spread, the running minimum and the
+    margin, in mass order), `mass_nodes()`, `rows()`, and `to_millimag` and `from_millimag`. The
+    fit builds the nodes on its pool, one a chunk, and assembles them in mass order. The output
+    is byte-identical on 1 and 16 threads: 13 s on one thread, about 1 s on 16.
+  - **Rounding.** `to_millimag` floors v × 1000, then lowers k while k ÷ 1000 > v, so every
+    stored value is 0–1 mmag brighter than the build and the table stays a bound.
+  - **Acceptance.** 9,240 tracks; 1,856 dark bins; brightest −12.850 mag.
+  - **Science check (2026-10-04).** The extremes bound this generator, not nature. The −12.85 at
+    150 M☉ and about −5.7 for old stars of at most 1 M☉ likely come from the tracks'
+    super-Eddington excursions after the main sequence and the η = 0 late giants. Both are 2–3 mag
+    brighter than observed steady stars. A refit is due when P06.T39's wind lands, and when
+    P15.T7 fits `tables::helium` (the envelope is built at ΔY = 0).
+  - **Loose but still a bound.** The envelope is about 2 mag loose for 0.1–0.19 M☉ at
+    3.5–28 Myr. Each long phase is cut into parts equal in linear age, so its first part carries
+    its young end's magnitude for some 15 Myr. That costs only skip efficiency. Cutting in log age
+    would tighten it.
+  - **Fingerprint.** The node count and ends, plus `raw_node` at 0.05, 0.1, 0.4, 1, 3, 25 and
+    100 M☉ at \[Fe/H\] −2.5 and 0 with 4 parts a phase: each node's brightest bin, its sum of
+    shining bins and their count. That is 60 tracks, which fit-check computes in every `just ci`.
+  - **Tests.** Lib:
+    - `the_fitted_table_is_on_the_mass_nodes_and_falls_with_mass`;
+    - `millimagnitudes_round_brighter`;
+    - `raw_nodes_are_order_independent` (`assert_order_independent`).
+
+    `sky::testing::milky_way_envelope` now copies the table and builds no galaxy. The slow
+    `envelope_bounds_dense_tracks` reads the table through `build`, and the new slow
+    `the_fitted_envelope_is_the_build_rounded_brighter` checks every bin against
+    `to_millimag(build_with(..))`. T16.b's `envelope_bounds_pair_states` is not built yet. It
+    will read the table through `build` too.
+
+  - **No `GENERATOR_VERSION` bump.** The envelope moves brighter by at most 1 mmag. No golden
+    and no served output reads it yet.
 - **The caps' extinction (decided 2026-10-03, `decision-r06-t7-caps.md`).** Design note 9 first
   dimmed every direction by the least extinction of 48 rays. Near the Sun that is the polar rays'
   extinction, and it gave C/D/E caps of 9,018 / 16,029 / 61,341 ly. Per-ray extinction in the mean
@@ -2069,3 +2179,94 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   at the emitted time, not the primary's brief (ask A1's interim would cost a full generation
   outside ±H), with n the generator's `MAX_COMPANIONS + 1` for a grid system (carve redraws can
   change its count; a test holds no generated grid system above it) and 1 for a forced single.
+- **Deviations in T8.b, as built.** `sky::census::cell` holds `SkyStar`, `LayerTally`,
+  `CensusTallies`, `Bound`, `flux_bound`, `cell_floor`, `census_record` and `census_cell`, with
+  `EYE_OFFSET_BOUND_MAG`, `GRID_STAR_BOUND`, `star_offset_bound` and `cell_offset_bound`.
+  - `EYE_OFFSET_BOUND_MAG` is 0.6 mag, above every row of the colour table, whose hottest give about
+    0.43; the table is bilinear in ρ, so no colour exceeds its rows.
+  - `census_cell` returns its `CensusTallies` rather than only filling `out`. `census_record`, with
+    its `Bound`, is public so that the oracle measures each record as the census does, with
+    `Bound::Ignored`.
+  - The flux bound is n × the envelope's flux at `max_star_mass(m₁)` and the record's age at the
+    emitted time, as accepted for T8.a, but **n is `GRID_STAR_BOUND` = `MAX_COMPANIONS` + 2 = 5 for
+    a grid system, not `MAX_COMPANIONS` + 1** (accepted 2026-10-04). Plan 11's draw caps a
+    hierarchy at four stars, but P11.T2.d's brown-dwarf companion comes on top as a fifth body,
+    which `state_at(t).stars()` lists. A test holds every generated system to five bodies and to
+    four stars of 0.08 M☉ or more. A forced single takes n = 1. Since the census lists stars, not
+    systems, n = 1 would already bound each star, and n only adds margin.
+  - A record with no density component (a feature member's, from T16.a) takes no bound and is
+    always generated.
+  - **Added: the stars' offsets from their barycentre.** Plan 11 keeps every apocentre inside half
+    the system's tidal radius, which is some light-years near the Sun, so a companion can be nearer
+    the observer than its system. The flux bound takes the distance to the system's apparent
+    position, from which each star's is measured, less `star_offset_bound`. That is
+    (`GRID_STAR_BOUND` − 1) orbits × `TIDAL_CUT_SHARE` × the tidal radius at 5 m₁ at the epoch
+    position, and 0 for a forced single.
+  - The cell floor takes the cell's least distance less the motion pad and `cell_offset_bound`. The
+    pad is solved with the light's age, pad = β (|t − epoch| + far + offset) ÷ (1 − β), since a
+    record can lie a pad outside its box. `cell_offset_bound` is the same bound at the band's top
+    mass. It reads the new `PotentialTables::tidal_radius_bound_within`: the floored tidal radius at
+    the least Ω² at the cell's farthest radius from the centre and at every grid point inside it,
+    less 1% for the interpolation. A test checks it against the tidal radius at dense points over
+    the fixture and 24 drawn galaxies.
+  - The eye's colour offset is taken at full scotopic adaptation (μ 30), as the eye's cut is at the
+    darkest texel.
+  - The census reads no luminosity table, so it has no call to `age_for`. The tests' tables are
+    built for no component at `REFERENCE_TIME`.
+  - Each star's state is indexed by its body index from `star_positions_at`'s rows.
+  - The envelope still takes the age at the emitted time and `max_star_mass(m₁) = m₁`. Pair-evolved
+    stragglers are T16.b's; none broke the bound in the sample.
+  - Tests (`cargo test -p hyperion-sim sky::census::cell`):
+    - a white-dwarf primary lists its bright companion and tallies the dwarf;
+    - a post-AGB primary of 2 M☉, at the end of its crossing beside a near-twin giant that outshines
+      it, takes the envelope bound, and at a cut between the two only the giant is listed;
+    - a centre member is tallied, not listed;
+    - the observer's own system is absent;
+    - a forced single takes the envelope's own bound, and a grid system one 2.5 log₁₀ 5 brighter;
+    - every star's light lies under its flux bound, and every star lies within its offset bound,
+      over 400 records at each of seven to nine places and layers (dense slow variants at
+      3,000–4,000);
+    - the census of 15 cells near the Sun (A–E, at 0, 1 and 3 cells out, eye asked, cut 7) equals,
+      bit for bit, every record of those cells measured with no skip;
+    - cells censused in reverse order with a one-entry noise cache equal a warm forward run;
+    - the tallies add.
+- **Deviations in T8.c, as built.** `sky::census::merge` holds `SkyCensus` (`empty`, which is its
+  `Default`, and the getters `listed`, `overflow` and `tallies`), `merge_census` and `sky_order`.
+  - `merge_census(parts, n_max)` takes each part as one job's `(Vec<SkyStar>, CensusTallies)`,
+    from any `IntoIterator`, not the sketch's `Vec<Vec<SkyStar>>`. `census_cell` returns its
+    tallies (T8.b), so the merge adds them, and the split and order tests cover the tallies too.
+    The sum starts from the first part's tallies, so `feature_members_absent` is true if any part
+    lacks the members (the default's true, with no part); T16.a's parts can clear it.
+  - `sky_order` is public, for the band (T9) and the encoder (T11) to share. It orders by V
+    through `total_cmp`, brightest first, then by `SystemId`, then by `StarIndex`. Ordering by V
+    instead of by a computed flux keeps the order exact. No two stars share a system and an index,
+    so the order is strict and the sort is unstable, in place. The merge asserts, in release
+    builds too, that every V is finite (a NaN's sign, which places it in the order, differs
+    between targets) and that no star is in two parts at the same V. The listed are shrunk to fit
+    after the cut.
+  - **`CensusTallies` now carries `accepted` and `listed`.** T8.b's `LayerTally::listed`, the stars
+    kept, is renamed `accepted`. The new `listed` counts, per layer, the stars `merge_census` lists
+    within `n_max`; it is zero in a cell's or a job's tallies, and a merge recounts it.
+    `feature_members_absent` is one flag for the census, not one per layer. `candidates` (records
+    past the mass skip) and `centre_members` are kept beyond the sketch. For T11's DTO: `cells` →
+    `cells`, `generated` → `candidates_opened`, `accepted` → `accepted`, `listed` → `listed`,
+    `without_photometry` → `without_photometry` (each `u32` count narrowed); the census's flag goes
+    into every layer's `feature_members_absent`; `centre_members` > 0 → `SkyGapDto::CentreMembers`;
+    `without_photometry` > 0 → `SkyGapDto::WhiteDwarfs`.
+  - **`SkyStar` gains `layer()`**, its record's layer, so that the per-layer listed count also
+    holds for T16.a's feature members, whose IDs name no layer.
+  - Tests (`cargo test -p hyperion-sim sky::census::merge`):
+    - ten cells at the Sun (A–E, the Sun's own cell and the next along x, cut 9): each cell's part,
+      censused through a shared 64-entry noise cache, is order independent
+      (`assert_order_independent`) and equals the part a job's own cache gives;
+    - five splits into jobs (whole, one cell each forwards and backwards, interleaved, and uneven
+      parts reversed with an empty one) give the same census at `n_max` 1, a third of the stars and
+      unbounded, and at each of those cuts the census lists the brightest and counts the listed per
+      layer;
+    - 45 synthetic stars with 39 ties in V: six round-robin deals (1, 2, 3, 7, 45 and 60 jobs, each
+      part reversed) and the reversed list give the same bits; ties go by system, then star; a cut
+      inside a tie keeps the lower;
+    - `n_max` keeps the brightest and counts the listed per layer, at nine cuts;
+    - listed plus overflow is the unbounded census at every `n_max` from 1 to 47;
+    - a census merged again recounts its listed; the feature-member flag; a star in two parts and
+      a NaN V are refused; the empty census.

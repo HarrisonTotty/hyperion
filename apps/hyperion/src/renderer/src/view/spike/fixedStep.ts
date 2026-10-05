@@ -84,6 +84,11 @@ export interface FixedStepOptions {
    * counted; none by default.
    */
   readonly deadlineMs?: number;
+  /**
+   * The wall time on `nowMs`'s clock after which the run stops whatever the bakes took, so that a
+   * process under an outer timeout always writes what it has; none by default.
+   */
+  readonly wallDeadlineMs?: number;
 }
 
 /** One frame of a run. */
@@ -156,11 +161,13 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
   const hash = new Fnv64();
   const steps = Math.round((options.toS - options.fromS) * options.rateHz);
   const deadline = options.deadlineMs ?? Infinity;
+  const wallDeadline = options.wallDeadlineMs ?? Infinity;
   const patchSizeM = finestPatchSizeM(planet);
   let bakeMs = 0;
   let truncated = false;
   for (let step = 0; step <= steps; step += 1) {
-    if (options.nowMs() - bakeMs > deadline) {
+    const nowMs = options.nowMs();
+    if (nowMs - bakeMs > deadline || nowMs > wallDeadline) {
       truncated = true;
       break;
     }

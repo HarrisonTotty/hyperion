@@ -47,8 +47,8 @@ import {
 import type { CameraPose } from "../../view/camera/pose";
 import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import {
-  controlEv100,
   exposureScale,
+  controlEv100,
   DEFAULT_EXPOSURE,
   type ExposureControl,
 } from "../../view/photometry/exposure";
@@ -74,6 +74,12 @@ import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import {
+  AutoExposure,
+  type ExposureReading,
+  VIEW_AUTO_PROGRAM,
+} from "../../view/post/autoExposure";
+import type { MeterMode } from "../../view/post/meter";
 import { BandLayer } from "../../view/sky/band";
 import { HostDiscLayer } from "../../view/sky/disc";
 import { CameraControls } from "./CameraControls";
@@ -81,6 +87,7 @@ import { litLabelsOf, photorealFrame } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import { ExposurePanel } from "./ExposurePanel";
+import { MeterControl } from "./MeterControl";
 import {
   cameraAnnunciation,
   serverSceneStanding,
@@ -187,6 +194,9 @@ interface ViewStageProps {
   readonly engineState: ViewEngineState;
   readonly exposure: ExposureControl;
   readonly onExposureChange: (exposure: ExposureControl) => void;
+  /** The operator's meter, held above the stage as the exposure is, so a new scene keeps it. */
+  readonly meter: MeterMode;
+  readonly onMeterChange: (meter: MeterMode) => void;
   readonly easedMoves: boolean;
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
@@ -209,6 +219,10 @@ interface LoopInputs {
   readonly sky: DrawnSky | null;
   /** The styles the adapter offers (R01's `styleAvailability`). */
   readonly availability: StyleAvailability;
+  /** The operator's meter (R07.T13.b's control). */
+  readonly meter: MeterMode;
+  /** Takes the exposure the view's `AutoExposure` moved to, into the display's state. */
+  readonly onExposureChange: (exposure: ExposureControl) => void;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -220,6 +234,23 @@ interface Published {
   readonly drawnStyle: RenderStyle;
   /** The photorealistic view's standing (`PhotorealRenderer.status`). */
   readonly photoreal: PhotorealStatus;
+  /** The applied exposure's reading, or `null` while no image is metered (R07.T13). */
+  readonly reading: ExposureReading | null;
+  /** The meter's own value, EV100, which `ENABLE` takes, or `null` while nothing is metered. */
+  readonly meteredEv100: number | null;
+}
+
+/**
+ * Whether the exposure's readout would change from `shown` to `next`: its automation level, or its
+ * EV100 at the readout's one decimal (R02's `exposureReading`); the control's identity changes at
+ * every step under `AUTO`.
+ */
+function exposureShownChanged(shown: ExposureControl, next: ExposureControl): boolean {
+  return (
+    shown.kind !== next.kind ||
+    (shown.kind === "manual" && next.kind === "manual" && shown.triple !== next.triple) ||
+    Math.round(controlEv100(shown) * 10) !== Math.round(controlEv100(next) * 10)
+  );
 }
 
 /** R06's layers the photorealistic frame draws through: the band and the host discs. */
@@ -276,6 +307,8 @@ function ViewStage({
   engineState,
   exposure,
   onExposureChange,
+  meter,
+  onMeterChange,
   easedMoves,
   onEasedMovesChange,
   stars,
@@ -292,6 +325,8 @@ function ViewStage({
     anchors: [],
     drawnStyle: initial.camera.style,
     photoreal: "idle",
+    reading: null,
+    meteredEv100: null,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
@@ -316,6 +351,8 @@ function ViewStage({
     stars: [],
     sky: null,
     availability: WIREFRAME_ONLY,
+    meter: "average",
+    onExposureChange,
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
@@ -354,8 +391,21 @@ function ViewStage({
       stars,
       sky: skyDrawn,
       availability,
+      meter,
+      onExposureChange,
     };
-  }, [exposure, selection, reducedMotion, size, canvas, stars, skyDrawn, availability]);
+  }, [
+    exposure,
+    selection,
+    reducedMotion,
+    size,
+    canvas,
+    stars,
+    skyDrawn,
+    availability,
+    meter,
+    onExposureChange,
+  ]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
   useLayoutEffect(() => {
@@ -442,6 +492,19 @@ function ViewStage({
         return null;
       }
     };
+    // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
+    // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
+    // applied to it when the display's control changes to one the controller did not publish.
+    const auto = new AutoExposure({
+      source: VIEW_ID,
+      program: VIEW_AUTO_PROGRAM,
+      control: inputsRef.current.exposure,
+      meter: inputsRef.current.meter,
+    });
+    // What the loop last read of the display's control, and what it last gave the display: an
+    // operator's command is a control it reads that it did not give.
+    let seenExposure = inputsRef.current.exposure;
+    let givenExposure = seenExposure;
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let sized: ViewSize | null = null;
@@ -460,6 +523,19 @@ function ViewStage({
         reducedMotion: inputs.reducedMotion,
       });
       runRef.current = run;
+      if (inputs.exposure !== seenExposure) {
+        seenExposure = inputs.exposure;
+        if (inputs.exposure !== givenExposure) {
+          auto.apply({ kind: "accepted", control: inputs.exposure });
+        }
+      }
+      if (inputs.meter !== auto.meter) {
+        auto.setMeter(inputs.meter);
+      }
+      // Last frame's histogram, if one arrived, under the exposure it was taken with; none while
+      // the view draws its wireframe, which then times the meter out.
+      const histogram = photoreal.takeHistogram();
+      const reading = auto.step(drawnStyle === "photorealistic" ? histogram : undefined, dtS);
       if (run.source.kind === "server" && current !== null) {
         current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
       }
@@ -477,7 +553,7 @@ function ViewStage({
         const scene = { ...run.scene, stars: inputs.stars };
         const list = buildWireframeDrawList(scene, camera, viewport, inputs.tokens, {
           lowSetting: false,
-          ev100: controlEv100(inputs.exposure),
+          ev100: reading.ev100,
           selection: inputs.selection,
           destination: null,
           remPx: inputs.size.remPx * ratio,
@@ -485,7 +561,7 @@ function ViewStage({
         });
         anchors = list.anchors;
         const cube = cubeFor(inputs.sky);
-        const exposed = exposureScale(controlEv100(inputs.exposure));
+        const exposed = exposureScale(reading.ev100);
         let drawn = false;
         if (run.camera.style === "photorealistic" && photoreal.status === "failed") {
           // Its pipelines could not be made: the view returns to the wireframe, and the control
@@ -515,6 +591,7 @@ function ViewStage({
                 discs: layers.discs,
                 cube: cube === null ? null : cubes.draw(cube, "hdr", exposed),
                 previousRegimes: regimes,
+                meter: auto.meter,
                 // The symbology over the image: the wireframe's marks, its sprites in the image.
                 overlay: {
                   ...renderer.frame({ ...list, sprites: [] }, camera, viewport),
@@ -568,7 +645,20 @@ function ViewStage({
       }
       if (nowMs - publishedMs >= READOUT_INTERVAL_MS) {
         publishedMs = nowMs;
-        setPublished({ run, anchors, drawnStyle, photoreal: photoreal.status });
+        // The control the controller moved to reaches the display's state at the readout rate,
+        // when its readout would change: its kind, or its EV100 to the readout's 0.1.
+        if (exposureShownChanged(givenExposure, auto.control)) {
+          givenExposure = auto.control;
+          inputs.onExposureChange(auto.control);
+        }
+        setPublished({
+          run,
+          anchors,
+          drawnStyle,
+          photoreal: photoreal.status,
+          reading: auto.meteredEv100 === null ? null : auto.reading(),
+          meteredEv100: auto.meteredEv100,
+        });
       }
       frame = requestAnimationFrame(tick);
     };
@@ -782,7 +872,14 @@ function ViewStage({
             }}
           />
         ) : null}
-        <ExposurePanel exposure={exposure} meteredEv100={null} onChange={onExposureChange} />
+        <ExposurePanel
+          exposure={exposure}
+          meteredEv100={shown.meteredEv100}
+          onChange={onExposureChange}
+        />
+        {shown.drawnStyle === "photorealistic" ? (
+          <MeterControl meter={meter} reading={shown.reading} onMeter={onMeterChange} />
+        ) : null}
       </div>
     </div>
   );
@@ -860,6 +957,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
   const { scene, sceneName, keptName, knownSystem, choose } = host;
   const engineState = useViewEngine(engineSource);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
+  const [meter, setMeter] = useState<MeterMode>("average");
   const [easedMoves, setEasedMoves] = useState(false);
   const universe = useUniverse().open?.id ?? null;
   const standing = serverSceneStanding(scene);
@@ -944,6 +1042,8 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
         engineState={engineState}
         exposure={exposure}
         onExposureChange={setExposure}
+        meter={meter}
+        onMeterChange={setMeter}
         easedMoves={easedMoves}
         onEasedMovesChange={setEasedMoves}
         stars={interim.field?.stars ?? NO_STARS}

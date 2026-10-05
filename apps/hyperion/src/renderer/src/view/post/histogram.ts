@@ -150,7 +150,7 @@ export function histogramWorkgroups(
 /** The engine calls the reader makes. */
 export type HistogramEngine = Pick<
   RenderEngine,
-  "createBuffer" | "writeBuffer" | "dispatch" | "readBuffer"
+  "createBuffer" | "writeBuffer" | "dispatch" | "readBuffer" | "releaseBuffer"
 >;
 
 /** The reads a {@link HistogramReader} keeps in flight at most. */
@@ -282,8 +282,18 @@ export class HistogramReader {
     this.#onHistogram({ bins: new Uint32Array(bytes), preExposure });
   }
 
-  /** Stops delivering; reads in flight settle unseen. */
+  /**
+   * Stops delivering and releases the ring's buffers; reads in flight settle unseen (each read
+   * copies into its own staging buffer, and the device destroys a released buffer only once its
+   * work is done).
+   */
   dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
     this.#disposed = true;
+    for (const slot of this.#slots) {
+      this.#engine.releaseBuffer(slot);
+    }
   }
 }

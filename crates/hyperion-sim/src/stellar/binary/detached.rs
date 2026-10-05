@@ -251,11 +251,10 @@ impl Engine {
                 return event;
             }
             self.accept(&next);
-            if let Some(stop) = stop {
-                return stop;
-            }
             // A star the binary carries whose core has grown into its whole mass has lost its
-            // envelope.
+            // envelope: it is stripped before any other stop on the same step (a death, the pin
+            // or a phase boundary), as BSE's `hrdiag` makes such a star a helium star or a white
+            // dwarf before `evolv2` acts on the step (HPT section 6; `hrdiag` as `evolv2` calls it; P11.T4.g).
             for (i, structure) in next_structures.iter().enumerate() {
                 if let (Member::Shaped { .. }, Some(st)) = (&self.members[i], structure)
                     && st.state.envelope_mass().value() <= 0.0
@@ -263,6 +262,9 @@ impl Engine {
                 {
                     return Stop::Stripped(i);
                 }
+            }
+            if let Some(stop) = stop {
+                return stop;
             }
             carried = Some((next, next_structures));
         }

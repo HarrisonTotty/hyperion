@@ -16,8 +16,8 @@ export type StyleRefusals = Readonly<Record<RenderStyle, string | null>>;
  * The refusal where the photorealistic view's pipelines could not be made: a fault of the
  * console's own graphics, shown in `--status-caution` while it lasts (drafted for the owner).
  */
-export const PHOTOREAL_NOT_MADE =
-  "GRAPHICS STYLE REFUSED: photorealistic style not made, relaunch to retry";
+export const PHOTOREAL_NOT_CREATED =
+  "GRAPHICS STYLE REFUSED: photorealistic style not created, relaunch to retry";
 
 /** The reason a state without a drawable view gives: the graphics' own annunciation. */
 const NO_VIEWS = "GRAPHICS NOT AVAILABLE";
@@ -26,7 +26,7 @@ const NO_VIEWS = "GRAPHICS NOT AVAILABLE";
  * The styles' refusals: the adapter's styles once it has answered (R01's `styleAvailability`), the
  * software adapter's refusal of the photorealistic style, `GRAPHICS ACQUIRING ADAPTER` before the
  * answer, the graphics' annunciation for both styles where no view can be drawn, and
- * {@link PHOTOREAL_NOT_MADE} where the photorealistic view failed to make its pipelines.
+ * {@link PHOTOREAL_NOT_CREATED} where the photorealistic view failed to make its pipelines.
  */
 export function styleRefusals(status: GraphicsStatus, photoreal: PhotorealStatus): StyleRefusals {
   const { condition } = status;
@@ -37,7 +37,7 @@ export function styleRefusals(status: GraphicsStatus, photoreal: PhotorealStatus
         wireframe: styleRefusal("wireframe", condition.styles),
         photorealistic:
           photoreal === "failed"
-            ? PHOTOREAL_NOT_MADE
+            ? PHOTOREAL_NOT_CREATED
             : styleRefusal("photorealistic", condition.styles),
       };
       break;

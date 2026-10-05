@@ -1,6 +1,6 @@
 /**
  * The disc regime's per-body record and the TypeScript twin of `shaders/bodyDisc.wgsl` (plan R07,
- * T8.a; Design notes 2, 6, 10 and 19).
+ * T8.a and T8.b; Design notes 2, 6, 10, 19 and 24).
  *
  * @remarks
  * A disc is one screen rectangle whose fragments intersect their rays with the body's spheroid
@@ -8,7 +8,9 @@
  * and shade each hit with the body's law: I/F = A f(α) [L · 2h ÷ (μ₀ + μ) + (1 − L) h], where h,
  * the horizon term (`sphereIrradianceFactor`), stands for the law's μ₀ and equals it wherever the
  * whole star is up; each star's light is cut by the eclipse term of up to two occluders and summed
- * over up to two stars. Every length is divided before it reaches `f32`: the centre is a unit
+ * over up to two stars. The law is its `DiscSurface`'s: one law, or under a class map each
+ * class's law weighted by the class's share at the hit and the uniform law by what is left
+ * (`discSurface.ts`). Every length is divided before it reaches `f32`: the centre is a unit
  * direction with a ÷ D, and every light and occluder is relative to the body's centre over a.
  * A pixel's n × n cells are {@link SMALL_DISC_SAMPLES} per axis on a disc under
  * {@link SMALL_DISC_PX}, so that its summed flux meets the point's at the 3 px switch; on a larger
@@ -21,11 +23,8 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import {
-  phaseFactorFromTable,
-  type PhaseFactorTable,
-  type PhotometricLaw,
-} from "../appearance/law";
+import type { ClassMapDiscSurface, UniformDiscSurface } from "../appearance/bodyAppearance";
+import { phaseFactorFromTable, type PhaseFactorTable, phaseFactorTableOf } from "../appearance/law";
 import { type ProjectionCamera, toViewAxes, type Viewport } from "../camera/projection";
 import type { AnnulusSet } from "../lighting/annuli";
 import { annulusVisibleFraction } from "../lighting/annuli";
@@ -33,7 +32,16 @@ import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import type { Rgb } from "../photometry/toneCurve";
 import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
 import { METER_CLASS, type MeterClass } from "../post/meter";
+import { type Rotation3, rotateToBody } from "../coords/rotation";
 import type { ScreenRect } from "../wireframe/submit";
+import {
+  type ClassMapTexels,
+  classWeightsAt,
+  discSurfaceLaws,
+  MAX_DISC_CLASSES,
+  surfaceShares,
+} from "./discSurface";
+import { oblateAlbedoScale } from "./oblate";
 
 /**
  * A sample is lit directly where a star's horizon and eclipse terms exceed this share of the
@@ -42,7 +50,7 @@ import type { ScreenRect } from "../wireframe/submit";
 export const LIT_IRRADIANCE = 1e-5;
 
 /** `vec4f` rows per disc in the shader's `discs` buffer. */
-export const DISC_ROWS = 24;
+export const DISC_ROWS = 46;
 
 /** The stars that light one disc at most: the brightest two (Design note 4's multiple systems). */
 export const MAX_DISC_LIGHTS = 2;
@@ -65,6 +73,9 @@ const CHANNELS = [0, 1, 2] as const;
 const FIRST_LIGHT_ROW = 6;
 const LIGHT_ROWS = 8;
 const FIRST_OCCLUDER_ROW = 22;
+const AXES_ROW = 24;
+const FIRST_CLASS_ROW = 26;
+const FIRST_CLASS_TABLE_ROW = FIRST_CLASS_ROW + MAX_DISC_CLASSES;
 
 /** One star lighting a disc, relative to the body's centre. */
 export interface DiscLight {
@@ -86,6 +97,15 @@ export interface DiscOccluder {
   readonly radius: number;
 }
 
+/** A class map oriented by its body's rotation, as a disc draws it. */
+export interface OrientedClassMap extends ClassMapDiscSurface {
+  /** The rotation from the body-fixed axes to the galactic axes. */
+  readonly rotation: Rotation3;
+}
+
+/** A disc's surface as it is drawn: one law, or a class map oriented on the body. */
+export type DrawnDiscSurface = UniformDiscSurface | OrientedClassMap;
+
 /** Everything one disc draw reads, before it is packed into `f32`. */
 export interface DiscRecord {
   /** The body drawn. */
@@ -102,14 +122,14 @@ export interface DiscRecord {
   /** Samples per axis in a wholly covered pixel and in a limb pixel. */
   readonly interiorSamples: number;
   readonly limbSamples: number;
-  readonly law: PhotometricLaw;
   /**
-   * The factor on the law's A that makes an oblate disc reach p equator-on at zero phase
-   * (`oblateAlbedoScale`); 1 for a sphere.
+   * What the disc shades with: one law, or a class map with a law per class (Design note 24).
+   * Each law's A takes the factor that makes an oblate disc reach p equator-on at zero phase
+   * (`oblateAlbedoScale` of its L), 1 for a sphere.
    */
-  readonly albedoScale: number;
-  /** The law's row of the frame's phase table. */
-  readonly tableRow: number;
+  readonly surface: DrawnDiscSurface;
+  /** The rows of the frame's phase table holding `discSurfaceLaws(surface)`, in its order. */
+  readonly tableRows: ReadonlyArray<number>;
   /** The exposure scale over π, so that each pixel holds pre-exposed luminance. */
   readonly exposureOverPi: number;
   readonly lights: ReadonlyArray<DiscLight>;
@@ -125,6 +145,46 @@ function stretchAlong(pole: Vec3, stretch: number, x: Vec3): Vec3 {
 /** The annuli in use, shared by every light of a frame: the first light's count. */
 function annulusCount(record: DiscRecord): number {
   return record.lights[0]?.annuli[0].flux.length ?? 0;
+}
+
+/** One of a record's laws as the shader holds it: A scaled per channel, L and its phase table. */
+interface ScaledLaw {
+  readonly a: Rgb;
+  readonly share: number;
+  readonly table: PhaseFactorTable;
+  readonly tableRow: number;
+}
+
+/**
+ * A record's laws in `discSurfaceLaws`' order, each A scaled for the figure.
+ *
+ * @throws Error if the surface has more than `MAX_DISC_CLASSES` classes, or a table row is missing.
+ */
+function scaledLaws(record: DiscRecord): ScaledLaw[] {
+  const laws = discSurfaceLaws(record.surface);
+  if (laws.length > MAX_DISC_CLASSES + 1) {
+    throw new Error(
+      `a disc shades with at most ${MAX_DISC_CLASSES} classes, got ${laws.length - 1}`,
+    );
+  }
+  return laws.map((law, m) => {
+    const tableRow = record.tableRows[m];
+    if (tableRow === undefined) {
+      throw new Error(`law ${m} of disc ${record.body} has no row of the phase table`);
+    }
+    const k = oblateAlbedoScale(law.lommelSeeligerShare, record.polarOverEquatorial);
+    return {
+      a: [law.a[0] * k, law.a[1] * k, law.a[2] * k],
+      share: law.lommelSeeligerShare,
+      table: phaseFactorTableOf(law),
+      tableRow,
+    };
+  });
+}
+
+/** The body-fixed x and y axes along the galactic axes: the rotation's first two columns. */
+function bodyAxesOf(rotation: Rotation3): readonly [Vec3, Vec3] {
+  return [rotateToBody(rotation, vec3(1, 0, 0)), rotateToBody(rotation, vec3(0, 1, 0))];
 }
 
 /** Packs the frame's discs as the shader's `array<vec4f>`, {@link DISC_ROWS} rows each. */
@@ -145,10 +205,20 @@ export function packDiscRecords(records: ReadonlyArray<DiscRecord>): Float32Arra
       Math.min(record.lights.length, MAX_DISC_LIGHTS),
       Math.min(record.occluders.length, MAX_DISC_OCCLUDERS),
     ]);
-    const k = record.albedoScale;
-    const [ar, ag, ab] = record.law.a;
-    put(4, [ar * k, ag * k, ab * k, record.law.lommelSeeligerShare]);
-    put(5, [record.tableRow, annulusCount(record), record.exposureOverPi, 0]);
+    const [uniform, ...classes] = scaledLaws(record);
+    if (uniform !== undefined) {
+      put(4, [...uniform.a, uniform.share]);
+    }
+    put(5, [uniform?.tableRow ?? 0, annulusCount(record), record.exposureOverPi, classes.length]);
+    if (record.surface.kind === "class-map") {
+      const [x, y] = bodyAxesOf(record.surface.rotation);
+      put(AXES_ROW, [x.x, x.y, x.z, 0]);
+      put(AXES_ROW + 1, [y.x, y.y, y.z, 0]);
+    }
+    classes.forEach((law, k) => {
+      put(FIRST_CLASS_ROW + k, [...law.a, law.share]);
+      out[base + FIRST_CLASS_TABLE_ROW * 4 + k] = law.tableRow;
+    });
     record.lights.slice(0, MAX_DISC_LIGHTS).forEach((light, j) => {
       const first = FIRST_LIGHT_ROW + j * LIGHT_ROWS;
       put(first, [light.direction.x, light.direction.y, light.direction.z, light.distance]);
@@ -173,6 +243,12 @@ export function packDiscRecords(records: ReadonlyArray<DiscRecord>): Float32Arra
   return out;
 }
 
+/** A class map as one camera sees it: its texels and the body-fixed axes in the view's axes. */
+interface ViewClassMap {
+  readonly texels: ClassMapTexels;
+  readonly axes: readonly [Vec3, Vec3, Vec3];
+}
+
 /** The record seen from one camera: everything in the view's axes. */
 interface ViewBody {
   readonly centre: Vec3;
@@ -182,19 +258,39 @@ interface ViewBody {
   readonly scaledCentre: Vec3;
   readonly lights: ReadonlyArray<{ readonly place: Vec3; readonly light: DiscLight }>;
   readonly occluders: ReadonlyArray<DiscOccluder>;
+  readonly laws: ReadonlyArray<ScaledLaw>;
+  /** `null` for a uniform surface. */
+  readonly classMap: ViewClassMap | null;
 }
 
-function viewBodyOf(record: DiscRecord, camera: ProjectionCamera): ViewBody {
+function viewBodyOf(
+  record: DiscRecord,
+  camera: ProjectionCamera,
+  texels: ClassMapTexels | null,
+): ViewBody {
   const toView = (v: Vec3): Vec3 => toViewAxes(v, camera.orientation);
   const centre = toView(record.direction);
   const pole = normalise(toView(record.pole));
   const stretch = 1 / record.polarOverEquatorial;
+  const laws = scaledLaws(record);
+  let classMap: ViewClassMap | null = null;
+  if (record.surface.kind === "class-map") {
+    if (texels === null || texels.classes !== record.surface.laws.length) {
+      throw new Error(`the twin of class-map disc ${record.body} needs its map's texels`);
+    }
+    const [bodyX, bodyY] = bodyAxesOf(record.surface.rotation);
+    const x = toView(bodyX);
+    const y = toView(bodyY);
+    classMap = { texels, axes: [x, y, cross(x, y)] };
+  }
   return {
     centre,
     pole,
     stretch,
     radius: record.radiusOverDistance,
     scaledCentre: stretchAlong(pole, stretch, centre),
+    laws,
+    classMap,
     lights: record.lights
       .slice(0, MAX_DISC_LIGHTS)
       .map((light) => ({ place: scale(toView(light.direction), light.distance), light })),
@@ -243,20 +339,29 @@ interface Shaded {
   readonly lit: boolean;
 }
 
-function shade(
-  body: ViewBody,
-  record: DiscRecord,
-  table: PhaseFactorTable,
-  q: Vec3,
-  ray: Vec3,
-): Shaded {
+/**
+ * The share of each of the body's laws at the point `q` (from the centre ÷ a): the uniform law's
+ * alone, or under a class map the shares of the texel the point's cube-sphere direction falls in.
+ * R05's spheroid point of the unit direction d is M d (`spheroidPoint`), so d is q stretched along
+ * the pole by a ÷ c, taken along the body-fixed axes.
+ */
+function sharesAt(body: ViewBody, q: Vec3): number[] {
+  if (body.classMap === null) {
+    return [1];
+  }
+  const d = normalise(stretchAlong(body.pole, body.stretch, q));
+  const [x, y, z] = body.classMap.axes;
+  return surfaceShares(classWeightsAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)]));
+}
+
+function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   const stretch2 = body.stretch * body.stretch;
   const normal = normalise(stretchAlong(body.pole, stretch2, q));
   const mu = -dot(normal, ray);
   if (mu <= 0) {
     return { radiance: [0, 0, 0], lit: false };
   }
-  const { law } = record;
+  const shares = sharesAt(body, q);
   const radiance: [number, number, number] = [0, 0, 0];
   let lit = false;
   for (const { place, light } of body.lights) {
@@ -272,13 +377,23 @@ function shade(
       continue;
     }
     const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
-    const share = law.lommelSeeligerShare;
     const starRadius = Math.asin(Math.min(1, light.radius / distance));
     // The Lommel–Seeliger term's μ₀ + μ, floored at the star's angular radius: past the geometric
     // terminator, in the soft band, an extended star's term stays bounded at the limb.
     const lsDenominator = Math.max(Math.max(mu0, 0) + mu, starRadius);
-    const discTerm = (share * 2 * horizon) / lsDenominator + (1 - share) * horizon;
-    const f = phaseFactorFromTable(table, alpha);
+    // Each law's reflectance I/F by its share: A f(α) [L · 2h ÷ (μ₀ + μ) + (1 − L) h].
+    const reflectance: [number, number, number] = [0, 0, 0];
+    body.laws.forEach((law, m) => {
+      const weight = shares[m] ?? 0;
+      if (!(weight > 0)) {
+        return;
+      }
+      const discTerm = (law.share * 2 * horizon) / lsDenominator + (1 - law.share) * horizon;
+      const f = phaseFactorFromTable(law.table, alpha);
+      for (const c of CHANNELS) {
+        reflectance[c] += weight * law.a[c] * f[c] * discTerm;
+      }
+    });
     let visible: [number, number, number] = [1, 1, 1];
     for (const occluder of body.occluders) {
       const toOccluder = sub(occluder.centre, q);
@@ -305,14 +420,7 @@ function shade(
     }
     for (const c of CHANNELS) {
       const v = Math.max(visible[c], 0);
-      radiance[c] +=
-        light.illuminance[c] *
-        record.exposureOverPi *
-        record.albedoScale *
-        law.a[c] *
-        f[c] *
-        discTerm *
-        v;
+      radiance[c] += light.illuminance[c] * record.exposureOverPi * reflectance[c] * v;
       lit ||= horizon > LIT_IRRADIANCE && v > LIT_IRRADIANCE;
     }
   }
@@ -424,15 +532,17 @@ interface CellSum {
  * {@link LIT_IRRADIANCE}), `unlitBody` where none is, `other` where they are mixed (at the
  * terminator) or no star lights the body.
  *
- * @param table - The law's phase table (`phaseFactorTableOf(record.law)`).
+ * @param classMap - The texels of the record's class map, which its surface holds only as a
+ *   texture; `null` for a uniform surface.
+ * @throws Error for a class-map record without its texels, or with another map's class count.
  */
 export function rasteriseDisc(
   record: DiscRecord,
-  table: PhaseFactorTable,
   camera: ProjectionCamera,
   viewport: Viewport,
+  classMap: ClassMapTexels | null = null,
 ): DiscPixel[] {
-  const body = viewBodyOf(record, camera);
+  const body = viewBodyOf(record, camera, classMap);
   const pixels: DiscPixel[] = [];
   const { rect } = record;
   const angleAt = (x: number, y: number): number =>
@@ -440,7 +550,7 @@ export function rasteriseDisc(
   const shadeAt = (x: number, y: number): Shaded | null => {
     const ray = viewRay(x, y, camera, viewport);
     const q = hitSpheroid(body, ray);
-    return q === null ? null : shade(body, record, table, q, ray);
+    return q === null ? null : shade(body, record, q, ray);
   };
   const cell = (px: number, py: number, n: number): CellSum => {
     const angle = angleAt(px, py);

@@ -25,6 +25,7 @@ pub mod kick_rank;
 pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
+pub mod sky_envelope;
 pub mod star_colour;
 pub mod stellar_fates_high;
 pub mod stellar_fates_low;
@@ -116,6 +117,12 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 0,
         since_generator_version: 15,
         provisional: true,
+    },
+    TableInfo {
+        name: "sky_envelope",
+        revision: 0,
+        since_generator_version: 19,
+        provisional: false,
     },
     TableInfo {
         name: "star_colour",

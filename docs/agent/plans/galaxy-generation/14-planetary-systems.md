@@ -6466,3 +6466,36 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     `the_photometry_section_by_kind_and_level`: `Ok` exactly where the bulk is, the `Bulk`
     level, p q ≤ 1 per band, and every generated airless-ice body and snowball within 5% of a
     ratio of 1.
+- **P14.T46.f and T47.d, as built (Phase J lane, 2026-10-04).** One commit: the wire, the pins
+  and the bump to `GENERATOR_VERSION` 20 (taken through the orchestrator).
+  - _The bump carries P11.T4.g_ (8f0891b, blessed at 19 "for the version 20 batch":
+    `stellar/binary_timelines`, 225 of 1,000 digests, and `stellar/held_bare_core_helium_star`), as
+    ruling 129.4's precedent has it, and the output T46.a–e and T47.a–c changed at 19 without
+    pinning it (the moment of inertia's locking times and the held law, the figure and the
+    photometry), which this commit pins for the first time. `golden_diff.py --base 8f0891b`: 83 goldens header only, the
+    15 `planetary/systems/*` goldens extended only, the two new goldens below, and in the server
+    `galaxy_parameters.golden` (the version's own value) and `scene_systems.golden`, whose six
+    answers gain the three sections and nothing else (checked by removing them: every other value
+    is unchanged). The early-AGB core-radius fix (P11.T4.g's amendments) is held out of 20 as
+    P11.T4.h (plan 11's Risks).
+  - _The wire._ The three fields follow `bulk` on both DTOs; the server sends them always, the
+    summary's being the record's. `BodyRotationDto` carries no W₀: W at the epoch is the law's.
+    `BodyPhotometryDto` carries no q, which the client takes from the template (R07.T4.b) and
+    `templates.golden` pins. The shared fixture (`packages/protocol/fixtures/planetary.json`)
+    gives the slice's Earth an `ok` section of each (illustrative values) in `system_bodies` and
+    `body_detail`, `not_resolved` ones in the mass-and-orbit and contact records, and the giant and
+    the populated system none, as an older server's.
+  - _`golden_systems_are_pinned`_ writes the three sections after every older line of a body, so
+    that the older lines keep their keys, with W at −H, the epoch and +H and each band's q.
+  - _`frame/body_rotations.golden`_ (`tests/body_rotations_golden.rs`): 131 laws of the three
+    golden systems at the epoch and three synthetic ones, each at the epoch, ±1 h, ±1 d and ±1 yr,
+    and at 1 s, 1 h, 1 d, 1 yr and 10 yr either side of a lock in the window. No golden system's
+    body locks within the window, so the synthetic laws carry the lock: synchronous 30 yr after
+    the epoch and 30 yr before it, and 3:2 at Mercury's eccentricity 30 yr after. One line per law
+    and per time, with Rust's shortest round-trip decimals, as `frame/body_frames.golden`. Test
+    (f)'s "reproduces `angle_at` bit for bit": the pinned W is `angle_at`, and its decimal reads
+    back to the same bits; W from the file's text alone by the closed forms agrees to 10⁻⁹ rad, the
+    twin's tolerance.
+  - _`photometry/templates.golden`_ (`tests/photometry_templates_golden.rs`): every template's Φ_c
+    at whole degrees 0–180° for L in {0, 0.5, 1} in B, V and R at its exponents, and q per band;
+    at the row's own L the q is the row's literal to 10⁻⁹.
