@@ -25,8 +25,8 @@ use hyperion_sim::id::Layer;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::caps::CAPPED_LAYERS;
 use hyperion_sim::sky::census::{
-    Bound, CensusTallies, NoSkyCellCache, SkyCensus, SkyContext, SkyQuery, SkyStar, census_cell,
-    census_plan, census_record, merge_census,
+    Bound, CellOffsets, CensusTallies, NoSkyCellCache, SkyCensus, SkyContext, SkyQuery, SkyStar,
+    census_cell, census_plan, census_record, merge_census,
 };
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::luminosity::LuminosityTables;
@@ -141,7 +141,9 @@ pub fn brute_force_parts_of(galaxy: &Galaxy, query: &SkyQuery, keys: &[CellKey])
         LuminosityTables::dark(galaxy),
         BrightnessEnvelope::build(galaxy),
     );
-    over_keys(&tables, &envelope, query, keys, &|ctx, key, query, out| {
+    let offsets = CellOffsets::build(galaxy);
+    let read = (&tables, &envelope, &offsets);
+    over_keys(read, query, keys, &|ctx, key, query, out| {
         oracle_cell(galaxy, ctx, key, query, out)
     })
 }
@@ -154,7 +156,9 @@ pub fn census_parts_of(galaxy: &Galaxy, query: &SkyQuery, keys: &[CellKey]) -> V
         LuminosityTables::dark(galaxy),
         BrightnessEnvelope::build(galaxy),
     );
-    over_keys(&tables, &envelope, query, keys, &|ctx, key, query, out| {
+    let offsets = CellOffsets::build(galaxy);
+    let read = (&tables, &envelope, &offsets);
+    over_keys(read, query, keys, &|ctx, key, query, out| {
         census_cell(galaxy, ctx, key, query, out)
     })
 }
@@ -207,7 +211,9 @@ fn over_cells(
         .expect("a valid forced cap");
     let tables = LuminosityTables::dark(galaxy);
     let envelope = BrightnessEnvelope::build(galaxy);
-    // A forced plan reads neither the tables nor the noise.
+    let offsets = CellOffsets::build(galaxy);
+    // A forced plan reads neither the tables nor the noise. Its cells are few enough to hold, so
+    // that the threads can take them one at a time.
     let plan = census_plan(
         galaxy,
         &tables,
@@ -215,14 +221,21 @@ fn over_cells(
         &forced,
         &mut NoiseCache::with_capacity(0),
     );
-    over_keys(&tables, &envelope, &forced, plan.cells(), each)
+    let keys: Vec<CellKey> = plan.cells().collect();
+    over_keys((&tables, &envelope, &offsets), &forced, &keys, each)
 }
+
+/// What every job of a census reads: the tables, the envelope and the cells' offset bounds.
+type Read<'a> = (
+    &'a LuminosityTables,
+    &'a BrightnessEnvelope,
+    &'a CellOffsets,
+);
 
 /// Runs `each` over the cells `keys` for `query`, on up to [`THREADS`] threads that take the
 /// cells in turn, each thread with its own context, and returns the parts in `keys`' order.
 fn over_keys(
-    tables: &LuminosityTables,
-    envelope: &BrightnessEnvelope,
+    (tables, envelope, offsets): Read<'_>,
     query: &SkyQuery,
     keys: &[CellKey],
     each: &CellJob<'_>,
@@ -232,6 +245,7 @@ fn over_keys(
         let mut ctx = SkyContext {
             tables,
             envelope,
+            offsets,
             noise: NoiseCache::with_capacity(NOISE_SLOTS),
             cells: &NoSkyCellCache,
             sources: &[],

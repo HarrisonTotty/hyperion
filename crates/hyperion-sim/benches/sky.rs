@@ -8,14 +8,22 @@
 //!
 //! The censuses run much as the server will run them (R06.T11): the plan on one thread (its caps,
 //! `layer_caps`, 768 realised profiles, which the server will split into pool jobs, so the printed
-//! wall time overstates its), then the cells in chunks on a pool of the machine's threads less
-//! one, each job with its own noise cache, then `merge_census`. Their time is the **CPU time** a
+//! wall time overstates its), then the plan's slabs (`CensusPlan::slabs`, an x slab of one layer's
+//! walk each, its cells streamed, R06.T8.f) as jobs on a pool of the machine's threads less one,
+//! each job with its own noise cache, then `merge_census`. Their time is the **CPU time** a
 //! census costs, the brainstorm's measure: the plan's time plus every job's, summed over the
 //! threads (wall time per job, which on a quiet machine is its CPU time). Each prints its tallies
-//! once, on its first census. The cut is the eye's near the Sun, V 7.95 with the eye asked (Crumey
+//! once, on its first census, with each layer's records past the floor, the systems generated and
+//! their share. The cut is the eye's near the Sun, V 7.95 with the eye asked (Crumey
 //! 2014's 7.4 at the Sun's darkest band texel, plus 0.45 for the colour offset and 0.1 of pad:
 //! R06.T7 and `decision-r06-t7-caps.md`), until R06.T9's `eye_cut` computes it. The nuclear disc
 //! takes it as a stand-in: its own eye cut will be shallower, so its figure is an upper bound.
+//!
+//! **Sampled** (R06.T8.f): with `HYPERION_SKY_BENCH_SAMPLE=k`, a census takes only the cells whose
+//! key's hash ([`sample_hash`], a fixed mixer of the layer and the cell's coordinates) is 0 modulo
+//! k, and prints its tallies and CPU time scaled by k, labelled an estimate: the plan's time and
+//! the walk of every slab's cells unscaled, the sampled cells' census times k. The time each
+//! iteration returns to criterion is that estimate. Unset, or 1, censuses every cell.
 //!
 //! The cell cache is the benches' own, built on `serve_from_entry` as the server's will be
 //! (R06.T11.b): least recently used out, bounded by `HYPERION_SKY_CACHE_MB` (default 64 MiB), each
@@ -25,15 +33,17 @@
 //! | Bench | Target | Figure |
 //! | ----- | ------ | ------ |
 //! | `sky/luminosity_tables` | ≤ 30 CPU-s (T17) | pending a quiet machine |
-//! | `sky/census_near_sun/cold` | 5–10 CPU-s, 6 × 10⁷ candidates (brainstorm) | ≥ 14,000 CPU-s |
-//! | `sky/census_near_sun/warm` | none | not yet run |
+//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17) | 1.8 × 10⁶ CPU-s, sampled |
+//! | `sky/census_near_sun/warm` | ≤ 25% of cold (T17) | not yet run |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //!
-//! The cold near-Sun figure is one run stopped unfinished after 20 minutes (2026-10-05, 15
-//! workers, RSS 1.6 GB, on a machine shared with other lanes): 14,750 CPU-s of the process, of
-//! which the tables' build is some 300. It misses the target by over a thousand times; R06's
-//! Risks give the likely causes. The warm and nuclear-disc benches are left for R06.T17 or the
-//! owner, on a quiet machine.
+//! The cold near-Sun figure is R06.T8.f's sampled run (2026-10-05, `HYPERION_SKY_BENCH_SAMPLE`
+//! 1,000, criterion's `--test`, 15 workers, load about 15, so provisional): 1.83 × 10⁶ CPU-s
+//! estimated, 125 s wall for the sample, over 1.08 × 10⁸ cells and some 4.0 × 10⁸ records past the
+//! floor, of which C generates 98.3%, D 99.9% and E 99.99%. Nearly all of it is generating
+//! systems. The census-cost ruling (`decision-r06-census-cost.md`) retires the brainstorm's 5–10
+//! CPU-s and orders the levers, of which R06.T8.g's bound star by star is the one that moves it.
+//! The warm and nuclear-disc benches are left for R06.T17 or the owner, on a quiet machine.
 //!
 //! The brainstorm's 400–800 CPU-s and 5 × 10⁹ candidates are the inner bulge's under the near-Sun
 //! caps held fixed; the nuclear disc's bench takes its own caps, which are far smaller.
@@ -58,8 +68,8 @@ use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap};
 use hyperion_sim::sky::census::{
-    CensusTallies, NoSkyCellCache, Served, SkyCellCache, SkyCensus, SkyContext, SkyQuery,
-    census_cell, census_plan, merge_census, serve_from_entry,
+    CellOffsets, CellSlab, CensusTallies, NoSkyCellCache, Served, SkyCellCache, SkyCensus,
+    SkyContext, SkyQuery, census_cell, census_plan, merge_census, serve_from_entry,
 };
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::luminosity::{BinSums, LuminosityTables};
@@ -81,9 +91,6 @@ const SUN_LY: [f64; 3] = [0.0, 26_000.0, 68.0];
 
 /// In the nuclear disc, ly: 150 ly from Sgr A* in the plane.
 const NUCLEAR_DISC_LY: [f64; 3] = [0.0, 150.0, 0.0];
-
-/// Cells a pool job takes at a time.
-const CHUNK_CELLS: usize = 256;
 
 /// Noise-cache slots per job: 1 MiB of the sightlines' lattice words.
 const NOISE_SLOTS: usize = 1 << 16;
@@ -145,11 +152,13 @@ fn on_pool<J: Sync, R: Send>(
     })
 }
 
-/// The fixture's galaxy, its full luminosity tables (built once, on the pool) and the envelope.
+/// The fixture's galaxy, its full luminosity tables (built once, on the pool), the envelope and
+/// the cells' offset bounds.
 struct Sky {
     galaxy: Galaxy,
     tables: LuminosityTables,
     envelope: BrightnessEnvelope,
+    offsets: CellOffsets,
 }
 
 fn sky() -> &'static Sky {
@@ -178,12 +187,48 @@ fn sky() -> &'static Sky {
                 .expect("an accumulation job does not panic")
         }));
         let envelope = BrightnessEnvelope::build(&galaxy);
+        let offsets = CellOffsets::build(&galaxy);
         Sky {
             galaxy,
             tables,
             envelope,
+            offsets,
         }
     })
+}
+
+/// The census benches' sample, `HYPERION_SKY_BENCH_SAMPLE` (1, every cell, when unset).
+fn sample() -> u64 {
+    match std::env::var("HYPERION_SKY_BENCH_SAMPLE") {
+        Err(VarError::NotPresent) => 1,
+        Err(VarError::NotUnicode(_)) => panic!("HYPERION_SKY_BENCH_SAMPLE is not Unicode"),
+        Ok(v) => v
+            .parse::<u64>()
+            .ok()
+            .filter(|&k| k > 0)
+            .unwrap_or_else(|| panic!("HYPERION_SKY_BENCH_SAMPLE={v} is not a positive count")),
+    }
+}
+
+/// One `SplitMix64` step from the state `word`: the golden gamma, then Stafford's Mix13 (Stafford
+/// 2011, "Better bit mixing"; Steele, Lea and Flood 2014's `mix64variant13`, doi:10.1145/2660193.
+/// 2660195, and JDK 8's `SplittableRandom.mix64`), as Vigna's 2015 `splitmix64.c` gives it: a fixed
+/// mixer of a word.
+fn mix(word: u64) -> u64 {
+    let mut z = word.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// The hash a sampled bench takes `key` by: [`mix`] of its layer, then of each of its origin's
+/// coordinates in turn, so that a sample is spread over the sky and the same on every run.
+fn sample_hash(key: CellKey) -> u64 {
+    key.origin_ly()
+        .iter()
+        .fold(mix(u64::from(key.layer().value())), |h, &c| {
+            mix(h ^ u64::from(c.cast_unsigned()))
+        })
 }
 
 fn eye_query(ly: [f64; 3]) -> SkyQuery {
@@ -200,21 +245,35 @@ struct Run {
     census: SkyCensus,
     /// Each capped layer's cap, ly.
     caps: Vec<LightYears>,
-    cells: usize,
+    /// The plan's cells, every one, sampled or not.
+    cells: u64,
+    /// The sample: one cell in this many is censused.
+    sample: u64,
     plan: Duration,
-    jobs: Duration,
+    /// The jobs' time walking their slabs' cells, the sampled cells' census aside.
+    walk: Duration,
+    /// The jobs' time censusing the sampled cells.
+    cell_census: Duration,
     wall: Duration,
 }
 
 impl Run {
-    /// The census's CPU time: the plan's and every job's.
+    /// The census's CPU time: the plan's and every job's, with the sampled cells' census scaled
+    /// by the sample, so an estimate when the census is sampled.
     fn cpu(&self) -> Duration {
-        self.plan + self.jobs
+        let scale = u32::try_from(self.sample).expect("a sample of under 2³² cells");
+        self.plan + self.walk + self.cell_census * scale
     }
 }
 
-/// The census of `query` through `cells`, as the server will run it.
-fn census(sky: &Sky, query: &SkyQuery, cells: &dyn SkyCellCache, workers: usize) -> Run {
+/// The census of `query` through `cells`, as the server will run it, taking one cell in `sample`.
+fn census(
+    sky: &Sky,
+    query: &SkyQuery,
+    cells: &dyn SkyCellCache,
+    workers: usize,
+    sample: u64,
+) -> Run {
     let began = Instant::now();
     let mut caps_noise = NoiseCache::with_capacity(NOISE_SLOTS);
     let plan = census_plan(
@@ -225,11 +284,12 @@ fn census(sky: &Sky, query: &SkyQuery, cells: &dyn SkyCellCache, workers: usize)
         &mut caps_noise,
     );
     let planned = began.elapsed();
-    let chunks: Vec<&[CellKey]> = plan.cells().chunks(CHUNK_CELLS).collect();
-    let (parts, jobs) = on_pool(&chunks, workers, &|keys: &&[CellKey]| {
+    let slabs: Vec<CellSlab> = plan.slabs().collect();
+    let (parts, jobs) = on_pool(&slabs, workers, &|slab: &CellSlab| {
         let mut ctx = SkyContext {
             tables: &sky.tables,
             envelope: &sky.envelope,
+            offsets: &sky.offsets,
             noise: NoiseCache::with_capacity(NOISE_SLOTS),
             cells,
             sources: &[],
@@ -237,18 +297,27 @@ fn census(sky: &Sky, query: &SkyQuery, cells: &dyn SkyCellCache, workers: usize)
         };
         let mut stars = Vec::new();
         let mut tallies = CensusTallies::default();
-        for &key in *keys {
+        let mut censusing = Duration::ZERO;
+        for key in slab.cells() {
+            if sample > 1 && !sample_hash(key).is_multiple_of(sample) {
+                continue;
+            }
+            let opened = Instant::now();
             tallies.add(&census_cell(&sky.galaxy, &mut ctx, key, query, &mut stars));
+            censusing += opened.elapsed();
         }
-        (stars, tallies)
+        ((stars, tallies), censusing)
     });
-    let census = merge_census(parts.into_iter().map(|(_, p)| p), query.n_max());
+    let cell_census: Duration = parts.iter().map(|(_, (_, c))| *c).sum();
+    let census = merge_census(parts.into_iter().map(|(_, (p, _))| p), query.n_max());
     Run {
         census,
         caps: plan.caps().iter().map(LayerCap::radius).collect(),
-        cells: plan.cells().len(),
+        cells: plan.cell_count(),
+        sample,
         plan: planned,
-        jobs,
+        walk: jobs.saturating_sub(cell_census),
+        cell_census,
         wall: began.elapsed(),
     }
 }
@@ -259,12 +328,20 @@ fn report_once(printed: &AtomicBool, name: &str, run: &Run, cache: Option<&Bench
         return;
     }
     let t = run.census.tallies();
+    let k = run.sample;
+    // A sampled census's counts and time, scaled by the sample: estimates, and labelled so.
+    let (what, scale) = if k > 1 {
+        (format!("ESTIMATE from 1 cell in {k}, scaled by {k}"), k)
+    } else {
+        ("every cell".to_owned(), 1)
+    };
     eprintln!(
-        "{name}: {} cells, plan {:.1} s, jobs {:.1} s, CPU {:.1} s, wall {:.1} s on {} workers; \
-         {} listed, {} overflow",
+        "{name} ({what}): {} cells in the plan, plan {:.1} s, walk {:.1} s, cell census {:.1} s \
+         sampled, CPU {:.1} s, wall {:.1} s on {} workers; {} listed, {} overflow (sampled)",
         run.cells,
         run.plan.as_secs_f64(),
-        run.jobs.as_secs_f64(),
+        run.walk.as_secs_f64(),
+        run.cell_census.as_secs_f64(),
         run.cpu().as_secs_f64(),
         run.wall.as_secs_f64(),
         workers(),
@@ -273,14 +350,23 @@ fn report_once(printed: &AtomicBool, name: &str, run: &Run, cache: Option<&Bench
     );
     for (cap, &layer) in run.caps.iter().zip(&CAPPED_LAYERS) {
         let l = t.layer(layer);
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a share of counts under 2⁵³, for printing"
+        )]
+        let share = if l.candidates() == 0 {
+            0.0
+        } else {
+            100.0 * l.generated() as f64 / l.candidates() as f64
+        };
         eprintln!(
-            "  {layer:?}: cap {:.0} ly; {} cells, {} candidates, {} generated, {} accepted, \
-             {} listed",
+            "  {layer:?}: cap {:.0} ly; {} cells, {} records past the floor, {} generated \
+             ({share:.2}% of the records), {} accepted, {} listed (sampled)",
             cap.value(),
-            l.cells(),
-            l.candidates(),
-            l.generated(),
-            l.accepted(),
+            l.cells() * scale,
+            l.candidates() * scale,
+            l.generated() * scale,
+            l.accepted() * scale,
             l.listed(),
         );
     }
@@ -451,6 +537,7 @@ fn census_near_sun(c: &mut Criterion) {
     // filtered run builds nothing it does not time.
     let query = eye_query(SUN_LY);
     let workers = workers();
+    let sample = sample();
     let mut group = c.benchmark_group("sky");
     group.sample_size(10);
     group.bench_function("census_near_sun/cold", |b| {
@@ -459,7 +546,7 @@ fn census_near_sun(c: &mut Criterion) {
             let mut cpu = Duration::ZERO;
             for _ in 0..iters {
                 let cache = BenchCellCache::new(&sky.galaxy);
-                let run = census(sky, black_box(&query), &cache, workers);
+                let run = census(sky, black_box(&query), &cache, workers, sample);
                 report_once(&PRINTED_COLD, "census_near_sun/cold", &run, Some(&cache));
                 cpu += run.cpu();
             }
@@ -472,14 +559,14 @@ fn census_near_sun(c: &mut Criterion) {
         // The warm cache is what one cold census of the same query leaves.
         let warm = warm.get_or_init(|| {
             let cache = BenchCellCache::new(&sky.galaxy);
-            let fill = census(sky, &query, &cache, workers);
+            let fill = census(sky, &query, &cache, workers, sample);
             report_once(&PRINTED_FILL, "census_near_sun/fill", &fill, Some(&cache));
             cache
         });
         b.iter_custom(|iters| {
             let mut cpu = Duration::ZERO;
             for _ in 0..iters {
-                let run = census(sky, black_box(&query), warm, workers);
+                let run = census(sky, black_box(&query), warm, workers, sample);
                 report_once(&PRINTED_WARM, "census_near_sun/warm", &run, Some(warm));
                 cpu += run.cpu();
             }
@@ -492,6 +579,7 @@ fn census_near_sun(c: &mut Criterion) {
 fn census_nuclear_disc(c: &mut Criterion) {
     let query = eye_query(NUCLEAR_DISC_LY);
     let workers = workers();
+    let sample = sample();
     let mut group = c.benchmark_group("sky");
     group.sample_size(10);
     group.bench_function("census_nuclear_disc", |b| {
@@ -499,7 +587,7 @@ fn census_nuclear_disc(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let mut cpu = Duration::ZERO;
             for _ in 0..iters {
-                let run = census(sky, black_box(&query), &NoSkyCellCache, workers);
+                let run = census(sky, black_box(&query), &NoSkyCellCache, workers, sample);
                 report_once(&PRINTED_NUCLEAR, "census_nuclear_disc", &run, None);
                 cpu += run.cpu();
             }

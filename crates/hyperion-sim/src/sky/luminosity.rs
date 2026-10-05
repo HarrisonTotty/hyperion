@@ -519,7 +519,7 @@ impl LuminosityTables {
     /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
     /// use hyperion_sim::galaxy::params::GalaxyParams;
     /// use hyperion_sim::id::Layer;
-    /// use hyperion_sim::sky::census::{NoSkyCellCache, SkyContext};
+    /// use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext};
     /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
     /// use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
     /// use hyperion_sim::time::Span;
@@ -533,9 +533,11 @@ impl LuminosityTables {
     /// // No star at all, so no light to give a colour.
     /// assert!(c.stars_per_system(Span::ZERO) <= 0.0);
     /// assert!(c.colour_fainter_than(Magnitudes::new(20.0), Span::ZERO).is_none());
+    /// let offsets = CellOffsets::build(&galaxy);
     /// let ctx = SkyContext {
     ///     tables: &dark,
     ///     envelope: &envelope,
+    ///     offsets: &offsets,
     ///     noise: NoiseCache::with_capacity(1 << 12),
     ///     cells: &NoSkyCellCache,
     ///     sources: &[],

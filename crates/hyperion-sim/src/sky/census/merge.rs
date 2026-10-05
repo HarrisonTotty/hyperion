@@ -88,7 +88,8 @@ pub fn sky_order(a: &SkyStar, b: &SkyStar) -> Ordering {
 /// use hyperion_sim::observe::Observer;
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::sky::census::{
-///     CensusTallies, NoSkyCellCache, SkyContext, SkyQuery, census_cell, census_plan, merge_census,
+///     CellOffsets, CensusTallies, NoSkyCellCache, SkyContext, SkyQuery, census_cell, census_plan,
+///     merge_census,
 /// };
 /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
 /// use hyperion_sim::sky::luminosity::LuminosityTables;
@@ -97,23 +98,26 @@ pub fn sky_order(a: &SkyStar, b: &SkyStar) -> Ordering {
 ///
 /// let galaxy = Galaxy::new(Seed::new(11));
 /// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let offsets = CellOffsets::build(&galaxy);
 /// let at = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
 /// let query = SkyQuery::builder(Observer::new(at, UniverseTime::EPOCH)?, Magnitudes::new(6.5))
 ///     .build()?;
 /// let mut noise = NoiseCache::with_capacity(1 << 16);
 /// let plan = census_plan(&galaxy, &tables, &envelope, &query, &mut noise);
-/// // A server runs its jobs on a pool, each with a context of its own; here they run in turn.
-/// let parts = plan.cells().chunks(64).map(|job| {
+/// // A server runs its jobs, the plan's slabs, on a pool, each with a context of its own; here
+/// // they run in turn.
+/// let parts = plan.slabs().map(|job| {
 ///     let mut ctx = SkyContext {
 ///         tables: &tables,
 ///         envelope: &envelope,
+///         offsets: &offsets,
 ///         noise: NoiseCache::with_capacity(1 << 16),
 ///         cells: &NoSkyCellCache,
 ///         sources: &[],
 ///         modifiers: &NoModifiers,
 ///     };
 ///     let (mut stars, mut tallies) = (Vec::new(), CensusTallies::default());
-///     for &key in job {
+///     for key in job.cells() {
 ///         tallies.add(&census_cell(&galaxy, &mut ctx, key, &query, &mut stars));
 ///     }
 ///     (stars, tallies)
@@ -183,7 +187,7 @@ mod tests {
     use crate::sky::census::cache::NoSkyCellCache;
     use crate::sky::census::cell::census_cell;
     use crate::sky::census::query::{MAX_N_MAX, SkyContext, SkyQuery};
-    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope};
+    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
     use crate::stellar::multiplicity::StarIndex;
     use crate::time::UniverseTime;
     use crate::units::Magnitudes;
@@ -205,6 +209,7 @@ mod tests {
         SkyContext {
             tables: milky_way_dark_tables(),
             envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
             noise: NoiseCache::with_capacity(noise),
             cells: &NoSkyCellCache,
             sources: &[],

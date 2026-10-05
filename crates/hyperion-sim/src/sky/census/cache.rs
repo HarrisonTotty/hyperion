@@ -181,7 +181,7 @@ mod tests {
     use crate::sky::census::cell::{CensusTallies, SkyStar, census_cell};
     use crate::sky::census::query::{SkyContext, SkyQuery};
     use crate::sky::eye::EyeObserver;
-    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope};
+    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
     use crate::time::UniverseTime;
     use crate::units::Magnitudes;
 
@@ -406,6 +406,7 @@ mod tests {
         SkyContext {
             tables: milky_way_dark_tables(),
             envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
             noise: NoiseCache::with_capacity(1 << 12),
             cells,
             sources: &[],

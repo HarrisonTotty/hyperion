@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 use crate::galaxy::features::centre::testing::milky_way_galaxy;
 
+use super::census::CellOffsets;
 use super::envelope::BrightnessEnvelope;
 use super::luminosity::LuminosityTables;
 
@@ -19,6 +20,29 @@ pub(crate) fn milky_way_tables() -> &'static LuminosityTables {
 pub(crate) fn milky_way_envelope() -> &'static BrightnessEnvelope {
     static ENVELOPE: OnceLock<BrightnessEnvelope> = OnceLock::new();
     ENVELOPE.get_or_init(BrightnessEnvelope::fitted)
+}
+
+/// The fixture's bounds on how far a cell's stars lie from their barycentres.
+pub(crate) fn milky_way_offsets() -> &'static CellOffsets {
+    static OFFSETS: OnceLock<CellOffsets> = OnceLock::new();
+    OFFSETS.get_or_init(|| CellOffsets::build(milky_way_galaxy()))
+}
+
+/// A fixed stream of uniform deviates in [0, 1), for the sky tests' random queries: `SplitMix64`
+/// from `seed` (Vigna 2015, `splitmix64.c`: the golden gamma, then Stafford's 2011 Mix13), its top
+/// 53 bits a deviate.
+pub(crate) fn uniforms(seed: u64) -> impl Iterator<Item = f64> {
+    let mut state = seed;
+    std::iter::repeat_with(move || {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        #[expect(clippy::cast_precision_loss, reason = "53 bits, exact in f64")]
+        let u = (z >> 11) as f64 / (1_u64 << 53) as f64;
+        u
+    })
 }
 
 /// Tables of the fixture built for no component, for tests that need a [`super::census::SkyContext`]

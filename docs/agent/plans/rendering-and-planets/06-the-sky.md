@@ -629,9 +629,14 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     companion outshines its Wolf–Rayet primary in V; Siess et al. 2000 for V rising with mass on
     the main sequence, Baraffe et al. 2015 to 1.4 M☉ only). A living primary can be fainter in V than a
     lighter companion: a post-AGB star, a stripped helium star and a TP-AGB star all can. So the
-    bound is the primary's own flux F₁ for a single star (exact), and n × F_env at
-    `max_star_mass(m₁)` for a multiple system (Design note 8; decided 2026-10-02, item 2), since
-    the census cannot tell before generation whether a pair has interacted. _Corrected
+    bound is per star, since each star is kept alone. Until R06.T8.g it is the envelope at
+    `max_star_mass(m₁)` (n × F_env before T8.f), and a forced single's at m₁ and its own age.
+    From T8.g each star takes its own mass, \[Fe/H\] and age relative to its lifetime in
+    `sky_phase_envelope`, from plan 11's `hierarchy_bound`, and each pair that may have interacted
+    takes plan 11's `pair_light_bound` (decided 2026-10-05, `decision-r06-census-cost.md`, under
+    decision item 2's trigger). From R06.T8.f the bound is first tested before the drift, at the
+    epoch position's distance less the cell's pad and offset and over the ages the light's travel
+    then allows, and a star already past the cut with no extinction takes no sightline. _Corrected
     2026-10-03:_ the plan's premise that V rises with mass along the early phases at a fixed age,
     which an n × F₁ bound for young multiples needed, is false in V (R06.T6.b measured falls of up
     to at least 0.38 mag on the pre-main sequence, e.g. 5–6 M☉ at 0.52 Myr and \[Fe/H\] −2, the
@@ -1106,6 +1111,58 @@ query, radius)`, `observer_near_sun` and `observer_in_nuclear_disc` (Test helper
   star and bit for bit on a 1,000 ly sphere near the Sun and a 200 ly sphere in the nuclear disc.
   Files: `crates/hyperion-sim/tests/{common/sky,sky_census}.rs`. Acceptance: `cargo test -p
 hyperion-sim --test sky_census`.
+- **R06.T8.f Census cost: the cheap exact steps (new; after T16.b, before T9.b).** Decided
+  2026-10-05 (`decision-r06-census-cost.md`). Each step leaves every listed star's bits unchanged.
+  `brute_force_sky` is the oracle.
+  1. **Each star is cut before its sightline.** A star whose M_V + DM(d) exceeds the cut plus its
+     own colour offset takes no `sightline`, since A_V ≥ 0. Today's sightlines cost 14,100 CPU-s
+     near the Sun.
+  2. **An O(1) cell floor.**
+     - `BrightnessEnvelope` keeps, per mass node, its brightest magnitude over every age bin. The
+       floor's question, ages 0 to `MAX_AGE_YEARS`, then reads one value a node, bit for bit the
+       same as the scan.
+     - `cell_offset_bound` reads a per-galaxy, per-layer table of `tidal_radius_bound_within` on
+       galactocentric distance nodes. The table gives the bound at the first node at or beyond the
+       cell's farthest corner, so it is never smaller than the exact one.
+     - Today `cell_floor` costs 40–51 µs a cell, 5,100 CPU-s near the Sun. Gate: at most 2 µs a
+       cell.
+  3. **The record's offset is its cell's** (`cell_offset_bound`, computed once per cell) and no
+     longer its own tidal radius. The floor and the bound may fall slightly; that moves tallies,
+     not stars.
+  4. **No n factor.** The bound is the brightest single star's, since each star is kept alone:
+     `flux_bound` drops its 2.5 log₁₀ n, and so does `cell_floor`. This is exact while the census
+     keeps stars one by one, as Design note 10 says it does. If it ever lists an unresolved
+     system's blended light, the bound returns to a flux sum over the system's stars.
+  5. **A bound before the drift.** Before `Drift::of_record`, the flux bound is tested at:
+     - the epoch position's distance, less the cell's pad and offset;
+     - the ages across the light-time interval that distance allows.
+
+     A record that fails skips the drift, `retarded` and generation.
+
+  6. **The plan streams its cells.** `CensusPlan` keeps the caps and each layer's sphere. Its cells
+     come from an iterator in canonical order, with a count, and jobs take them in chunks of the
+     walk's x-slabs. No `Vec<CellKey>` is held: near the Sun one would be 2.2 GB.
+  7. **The bench samples.** `HYPERION_SKY_BENCH_SAMPLE=k` censuses the cells whose key hash is 0
+     modulo k, using a fixed mixer of the layer and coordinates. It prints the tallies and CPU
+     scaled by k, labelled as an estimate. Every census bench also prints each layer's records,
+     generated and generated share.
+
+  Tests:
+  - `a_cells_census_equals_its_unskipped_records` and T8.e's identity tests, unchanged;
+  - over the stars of 10⁴ generated systems, the sightline cut never drops a star that the cut
+    would keep;
+  - the O(1) floor equals `mass_floor`'s scan bit for bit at 10⁴ random queries;
+  - the offset table is at least the exact bound at 10⁴ random cells;
+  - the pre-drift bound never rejects a record whose post-drift bound passes;
+  - streamed cells equal `plan_cells`' for the queries of T8.a's tests.
+
+  Files: `sky/census/{cell,query}.rs`, `sky/envelope.rs`, `benches/sky.rs`. Acceptance: `cargo
+test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --test sky_census`,
+  `just test-slow the_census_is_its_oracle_1000_ly_from_the_sun`, `just ci`. Record the sampled
+  near-Sun cold figure. About 1.64 × 10⁶ CPU-s is expected: T8.f saves some 20,000 now and matters
+  after T8.g. Added by the lane (decided 2026-10-05 with the task, from T16.b's open items): the
+  floor of a layer whose systems are all single, the brown dwarfs', reads each primary's own mass,
+  not 2 m₁, as its flux bound does. As built: Risks, "Deviations in T8.f, as built".
 
 Files: `sky/census/{mod,query,cell,merge,cache}.rs`. Bench: `sky/census_near_sun` (eye cut, cold
 and warm cache) and `sky/census_nuclear_disc` (eye cut, 150 ly from Sgr A*). The brainstorm's
@@ -2802,3 +2859,183 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   - **Not done here (ruled):** plan 11's public interaction test, which would let pairs that
     cannot interact keep n × F₁ at m₁ and their own age. It is the lever decision item 2 names
     for T17, handed to the cost ruling.
+- **Deviations in T8.f, as built (2026-10-05).** The cheap exact steps of
+  `decision-r06-census-cost.md`, and T16.b's open item on the brown dwarfs' floor. Every listed
+  and overflow star is unchanged, bit for bit. The identity tests, the oracle and their
+  assertions are unchanged.
+  - **The steps as built.**
+    - The sightline cut is taken under `Bound::Applied` only. The oracle (`Bound::Ignored`) still
+      takes every star's sightline. The star's V is still summed as (M_V + DM) + A_V. A_V is a sum
+      of non-negative dust columns, so the sum is never below M_V + DM.
+    - One addition to make that unconditional: the census holds a negative A_V at zero
+      (`star_extinction`), compared rather than clamped by `max`, so that a NaN still shows. The
+      science check found that a modifier cloud's column, a difference of two values of its
+      antiderivative, can round below zero far outside the cloud. That happens beyond some 100
+      cores, while clouds reach 10, but a nursery's reach can be many cores. Census and oracle
+      share the path. With no modifiers, as today, nothing changes. The rounding itself is plan
+      09's `plummer_column`, a note for its owner.
+    - `BrightnessEnvelope` keeps each node's brightest over every age bin (`brightest_ever`).
+      `mass_floor` reads it whenever its ages span every bin. The bisection is unchanged, and its
+      test at each step compares the first passing node's lower neighbour with the star mass:
+      the scan's answer, since the brightest never rises with mass. The constructor asserts that.
+      Other age ranges still take the scan.
+    - The offset table is a new type, `sky::census::CellOffsets`, built per galaxy (43 ms in the
+      debug build, 16 KB). `SkyContext` gains `offsets: &CellOffsets` beside the tables and the
+      envelope, and `cell_floor`'s signature becomes `(galaxy, ctx, key, query)`. Its nodes are
+      16 to the octave from 2⁻⁴ to 2¹⁷ ly, 337 of them. Each holds the running maximum of the
+      offset bound at `tidal_radius_bound_within` of the layer's 5 × band top. A cell reads the
+      first node at or beyond its farthest corner from the centre. `tidal_radius_bound_within`
+      bounds the tidal radius anywhere within its radius, so the value bounds every record's own
+      `star_offset_bound`. At 10⁴ random cells it is at least `cell_offset_bound` and at most
+      1.034 times it. The ruling's "so it is never smaller than the exact one" holds wherever the
+      circular frequency does not rise between the cell's corner and its node, since the exact
+      bound reads Ω² at the corner itself (science check). The census needs only the bound on each
+      record's offset, which holds without that condition. The plan's sentence stands as ruled,
+      and the code's docs state the condition.
+    - The table keeps the parameters of the galaxy it was built for, which fix its potential.
+      `CellOffsets::is_for` checks them, and the census asserts it in debug builds, since another
+      galaxy's table could be too small (determinism audit).
+    - The record's offset is the cell's, read once per cell with the pad and the least distance
+      (a private `CellReach`). `census_record`, called per record, finds its record's cell.
+    - No n factor in `flux_bound` or the floor. A forced single's bound was n = 1 already, so its
+      bits are unchanged.
+    - The bound before the drift (`passes_before_drift`) uses the cell's pad. That pad bounds the
+      record's displacement at the retardation's first guess too, from which the light's age is
+      taken. So the light's age lies within the pad of the epoch distance, and the apparent
+      distance is at least the epoch distance less the pad. The ages are widened by 1 year and the
+      distance shortened by 10⁻⁹ of itself, beyond the pad, for rounding. A multiple's ages run
+      from zero, as after the drift; a forced single's span the light-time interval. The pad
+      rests, as the range query's padding and the floors do, on every grid record moving slower
+      than its layer's `pad_speed`. Plan 08's draw holds speeds below the least of the escape
+      speed and 1,000 km/s, and layer E pads at 3,000 km/s. P08.T12.d's kicked remnants, up to
+      some 2,200 km/s, would break it outside layer E, as they would the range query's padding.
+    - The plan holds each layer's padded sphere, and `CensusPlan::cells()` streams the cells.
+      `cell_count()` counts them column by column (by walking, for a cone). The jobs are
+      `CensusPlan::slabs()`: a `CellSlab` for each x slab of a layer's walk, which streams its
+      own cells. `plan_cells` keeps the held list. The slabs need two functions in plan 03's
+      `galaxy/query/walk.rs`, outside T8.f's file list: `sphere_slabs` and
+      `cells_in_sphere_slab`. `cells_in_sphere` now runs on the same per-slab walk, its output
+      unchanged. The walk's tests check, for every sphere they walk, that the slabs in turn are
+      `cells_in_sphere`, and that the cells either side of the slabs hold nothing.
+    - The bench's jobs are the slabs. With `HYPERION_SKY_BENCH_SAMPLE=k`, each job censuses the
+      cells whose `sample_hash`, a SplitMix64 mix of the layer and the origin's coordinates, is 0
+      modulo k. The plan's time and the walk of every slab's cells are counted once. The sampled
+      cells' census is scaled by k, and that estimate is what each iteration returns.
+  - **Added: the brown dwarfs' floor** (the task's assignment, T16.b's open item). A layer whose
+    systems are all single, `envelope::always_single` (the brown dwarfs and rogue planets, after
+    `SystemKind::of_layer`), takes each primary's own mass in `mass_floor`
+    (`envelope::max_star_mass_in`). Its offset is zero: `cell_offset_bound` returns zero, and the
+    table holds none. A test holds every record to it: a record is a forced single exactly when
+    its layer is `always_single`. Within 150 ly at cut 11, the brown dwarfs' candidates fall from
+    5,102 to 76, against 1,073 before T16.b. None is generated either way.
+  - **Other changes.**
+    - `tests/common/sky.rs` collects the forced plan's cells into a vector, as before, so that the
+      oracle's threads take one cell at a time. It builds a `CellOffsets` for each context.
+    - `a_forced_single_takes_its_own_envelope_bound`'s grid half now asserts that the bound
+      equals the envelope at 2 m₁ from zero bit for bit, with no 2.5 log₁₀ 5.
+    - Design note 10 takes the ruling's replacement. It keeps a forced single's bound at m₁ and
+      its age, and adds a sentence on the bound before the drift and the sightline cut.
+    - Of the ruling's plan text only T8.f's is applied here, with Design note 10's. T16.b's, T9.b's
+      and T17's amendments, T8.g–i, T7.b, T11.d, Design notes 8 and 12, and the Risks and
+      Verification lines are left for the orchestrator.
+  - **The tests** (fast unless named slow):
+    - `the_floor_over_every_age_is_the_scan_bit_for_bit`: 10⁴ random queries, a seventh of them at
+      a node's own value. 1,165 of them bisect inside their band.
+    - `the_offset_table_is_at_least_the_exact_bound`: 10⁴ random cells from 1 ly to beyond the
+      cube's faces.
+    - `the_bound_before_the_drift_never_rejects_what_the_bound_after_it_passes`: some 13,000
+      record and observer pairs, in a galaxy built `with_full_potential` so that the records move.
+      The fixture's galaxy has no kinematic tables, so its drifts stand still. Observers stand at
+      the Sun at the epoch, 250 ly from it at +900 years, and 126 ly from it at −700 years.
+    - `the_sightline_cut_never_drops_a_star_the_cut_keeps`: the stars of 10⁴ generated systems of
+      every layer, near the Sun and in the bulge, with each star's A_V checked non-negative.
+    - `streamed_cells_are_plan_cells`: T8.a's three queries, with the count and each slab's
+      layer and x.
+    - `a_systems_heaviest_star_is_its_primary_where_every_system_is_single` and
+      `the_brown_dwarfs_floor_reads_each_primarys_own_mass`. The latter checks that a single
+      layer's floor inverts the envelope at m₁, and that some cut raises it above the floor at
+      2 m₁.
+    - Reviews: the determinism audit found nothing to fix (`golden_diff` reconciles nothing;
+      GENERATOR_VERSION 20 → 20). It suggested the table's galaxy check and the A_V guard, both
+      taken. The science check found no must-fix. Its three doc fixes are applied: the table's
+      condition, "under a microsecond a cell", and the SplitMix64 citation (Vigna 2015's
+      `splitmix64.c`, Stafford's Mix13). So are its notes on the first guess's light time and on
+      the speed premise.
+    - Gates (2026-10-05, every run capped): fmt; clippy native and wasm32-wasip1; `--lib`
+      `sky::` and `galaxy::query::walk`; `--test sky_census`, 6 of 6. Slow, by name, unlocked, in
+      the slow-test profile with `--test-threads 2`, at load 12–19, so provisional:
+      - `the_census_is_its_oracle_1000_ly_from_the_sun` passes in 797 s, and in 787 s on the
+        final code, after the reviews' changes. The census generates
+        1,406,413 of 1,411,018 systems, against T16.b's 1,411,002: C 1,092,670, D 238,967 and
+        E 74,776. It accepts C 21,210, D 7,760 and E 1,247 stars, as before.
+      - `the_census_is_its_oracle_for_the_dwarfs_near_the_sun` passes in 5.9 s (5.8 s). A takes
+        42,099 records past the floor, against 92,021, and generates 37,820 of 138,945, against
+        79,038.
+        B generates 108,000 of 110,151, against all of them, so B skips again. Its check stays
+        printed until T8.g restores it. A accepts 3 stars and B 36, as before.
+      - The fast 150 ly test generates 31,673 of 39,943 systems, against 31,675.
+  - **The cost, measured.** The sample is T16.b's: 648 fixed cells near the Sun, at cut 7.95
+    with the eye, censused by `census_cell` on one thread. Each figure is the least wall time of
+    three runs, in the debug build with the sim at opt-level 2. The stages were timed by
+    temporary instrumentation, never committed. The builds ran alternately, twice each, at load
+    about 15–20, so the times are provisional. Every layer's stars hash the same before and
+    after, bit for bit.
+
+    | Layer | Past the floor | Generated     | Sightlines  | ms a cell     | `cell_floor`, µs |
+    | ----- | -------------- | ------------- | ----------- | ------------- | ---------------- |
+    | A     | 48 → 37        | 45 → 37       | 54 → 3      | 0.059 → 0.012 | 42.2 → 0.51      |
+    | B     | 112 → 112      | 112 → 110     | 176 → 17    | 0.096 → 0.043 | 37.6 → 0.15      |
+    | BD    | 136 → 28       | 0 → 0         | 0 → 0       | 0.047 → 0.003 | 41.6 → 0.15      |
+    | C     | 1,247 → 1,247  | 1,235 → 1,229 | 1,558 → 203 | 6.67 → 6.26   | 37.6 → 0.16      |
+    | D     | 1,589 → 1,589  | 1,589 → 1,589 | 651 → 84    | 62.7 → 62.4   | 37.6 → 0.16      |
+    | E     | 2,977 → 2,977  | 2,977 → 2,977 | 437 → 85    | 251.2 → 250.5 | 37.8 → 0.16      |
+    | All   | 6,109 → 5,990  | 5,958 → 5,942 | 2,876 → 392 | 53.7 → 53.5   | 39.0 → 0.36      |
+
+    The stages, summed over the 648 cells, from the quietest run of each build (ms, with µs a
+    call):
+
+    | Stage                      | Before         | After          |
+    | -------------------------- | -------------- | -------------- |
+    | `cell_floor`               | 25.3 (39.0)    | 0.23 (0.36)    |
+    | of which the offset        | 24.2 (37.3)    | 0.06 (0.09)    |
+    | of which `mass_floor`      | 0.97 (1.50)    | 0.12 (0.18)    |
+    | `bright_subset`            | 10.0           | 9.75           |
+    | bound before the drift     | none           | 3.83 (0.64)    |
+    | `Drift::of_record`         | 0.54           | 0.61           |
+    | `retarded`                 | 2.99 (0.49)    | 2.90 (0.49)    |
+    | flux bound with its offset | 9.36 (1.56)    | 1.93 (0.33)    |
+    | `SystemStars::generate`    | 34,581 (5,804) | 34,643 (5,830) |
+    | `state_at`                 | 107            | 107            |
+    | positions and photometry   | 7.4            | 7.4            |
+    | `sightline`                | 91.6 (31.9)    | 3.37 (8.6)     |
+    - `cell_floor` meets its gate of 2 µs a cell, at 0.15–0.51 µs. A's 0.51 µs is its floor's
+      bisection, inside the band.
+    - The bound before the drift costs 0.64 µs a record, twice the bound after it, since its age
+      range reads more bins. On this sample it rejects all 28 of the brown dwarfs' records past
+      the floor, 18 of C's and one of B's. With the bound after the drift, a record now costs
+      0.97 µs of bounds, against 1.56: the offset is no longer a tidal radius a record.
+    - The sightlines fall by 86% and their time by 96%: only stars that the cut could keep take
+      one.
+    - The stages outside generation fall from 254 to 137 ms, by 46%. But generation is 99.3% of
+      the sample's time before and 99.6% after, so the whole moves by under 1%, inside the load's
+      noise. The ruling expected some 20,000 of 1.6 × 10⁶ CPU-s, 1.2%.
+
+  - **The sampled bench.** `HYPERION_SKY_BENCH_SAMPLE=1000`, `sky/census_near_sun/cold` once
+    (criterion's `--test`), under the heavy-test lock, which it held for 143 s. It ran on 15
+    workers at load about 15, so the figures are provisional. The caps are today's: C 8,193,
+    D 9,925 and E 21,369 ly. The plan holds 1.08 × 10⁸ cells and took 2.4 s, with
+    `layer_caps`, on one thread. Walking every slab's cells took 8.1 CPU-s. The sample's census
+    took 1,829 CPU-s, 125 s wall.
+
+    | Near the Sun, estimated | C          | D          | E          |
+    | ----------------------- | ---------- | ---------- | ---------- |
+    | Cells                   | 7.13 × 10⁷ | 1.61 × 10⁷ | 2.05 × 10⁷ |
+    | Records past the floor  | 1.99 × 10⁸ | 6.51 × 10⁷ | 1.34 × 10⁸ |
+    | Generated               | 98.26%     | 99.92%     | 99.99%     |
+
+    The cold estimate is 1.83 × 10⁶ CPU-s. The ruling's own runs gave 1.6–2.0 × 10⁶ before
+    T8.f at load 15–17, and it expected about 1.64 × 10⁶ after. This run, at a similar load, lies
+    within that spread: nearly all of it is generation, which T8.f does not touch. T8.g's bound
+    star by star is the step that moves it (its gate: at most 1% of the records past the floor
+    generated, and a cold census of at most 10,000 CPU-s). The plan no longer holds 2.2 GB of
+    cell keys.
