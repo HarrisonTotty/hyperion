@@ -9,31 +9,41 @@ import { layerBands, type StarFilter } from "./chartModel";
 
 const BANDS = layerBands(aCensus().layers);
 
-function renderControls(overrides: Partial<Parameters<typeof ChartControls>[0]> = {}) {
+type ControlsProps = Parameters<typeof ChartControls>[0];
+
+function renderControls(overrides: Partial<ControlsProps> = {}) {
   const onQueryRadius = vi.fn<(radiusLy: number) => void>();
   const onMinLayer = vi.fn<(layer: MassLayer) => void>();
   const onDriveRange = vi.fn<(rangeLy: number) => void>();
   const onTime = vi.fn<(timeYr: number) => void>();
   const onStarFilter = vi.fn<(filter: StarFilter) => void>();
-  render(
-    <ChartControls
-      radiusChoiceLy={null}
-      queryRadiusLy={50}
-      onQueryRadius={onQueryRadius}
-      minLayer="a"
-      onMinLayer={onMinLayer}
-      driveRangeLy={50}
-      onDriveRange={onDriveRange}
-      timeYr={0}
-      onTime={onTime}
-      bands={BANDS}
-      starFilter="all"
-      onStarFilter={onStarFilter}
-      heldBack={null}
-      {...overrides}
-    />,
-  );
-  return { onQueryRadius, onMinLayer, onDriveRange, onTime, onStarFilter };
+  const props: ControlsProps = {
+    radiusChoiceLy: null,
+    queryRadiusLy: 50,
+    onQueryRadius,
+    minLayer: "a",
+    onMinLayer,
+    driveRangeLy: 50,
+    onDriveRange,
+    timeYr: 0,
+    onTime,
+    bands: BANDS,
+    starFilter: "all",
+    onStarFilter,
+    heldBack: null,
+    ...overrides,
+  };
+  const { rerender } = render(<ChartControls {...props} />);
+  /** Renders the controls again with some props changed, as the display would. */
+  const update = (changes: Partial<ControlsProps>): void => {
+    rerender(<ChartControls {...props} {...changes} />);
+  };
+  return { onQueryRadius, onMinLayer, onDriveRange, onTime, onStarFilter, update };
+}
+
+/** A number field by its label: `DRIVE RANGE` or `CHART TIME`. */
+function numberField(name: "DRIVE RANGE" | "CHART TIME"): HTMLElement {
+  return screen.getByRole("textbox", { name });
 }
 
 function radius(): HTMLSelectElement {
@@ -169,6 +179,71 @@ describe("ChartControls", () => {
     expect(screen.getByText("CHART TIME INVALID: enter -1000 to 1000 yr")).toBeInTheDocument();
     expect(screen.getByLabelText("CHART TIME")).toHaveAttribute("aria-invalid", "true");
     expect(onTime).not.toHaveBeenCalled();
+  });
+
+  it("drops a refused drive range on Escape, showing the drive range again", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+    const field = numberField("DRIVE RANGE");
+    await user.clear(field);
+    await user.type(field, "900{Enter}");
+
+    await user.keyboard("{Escape}");
+    await user.tab();
+
+    expect(field).toHaveValue("50");
+    expect(field).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText("DRIVE RANGE INVALID: enter 0.01 to 500 ly")).toBeNull();
+    expect(onDriveRange).not.toHaveBeenCalled();
+  });
+
+  it("enters nothing for a chart time emptied and left, and refuses nothing", async () => {
+    const user = userEvent.setup();
+    const { onTime } = renderControls({ timeYr: 12.5 });
+    await user.clear(numberField("CHART TIME"));
+
+    await user.tab();
+
+    expect(numberField("CHART TIME")).toHaveValue("+12.50");
+    expect(numberField("CHART TIME")).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText("CHART TIME INVALID: enter -1000 to 1000 yr")).toBeNull();
+    expect(onTime).not.toHaveBeenCalled();
+  });
+
+  it("enters nothing for a drive range emptied with Enter", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+    await user.clear(numberField("DRIVE RANGE"));
+
+    await user.keyboard("{Enter}");
+
+    expect(numberField("DRIVE RANGE")).toHaveValue("50");
+    expect(numberField("DRIVE RANGE")).not.toHaveAttribute("aria-invalid");
+    expect(onDriveRange).not.toHaveBeenCalled();
+  });
+
+  it("enters nothing for a chart time of spaces only, and refuses nothing", async () => {
+    const user = userEvent.setup();
+    const { onTime } = renderControls({ timeYr: 12.5 });
+    await user.clear(numberField("CHART TIME"));
+
+    await user.type(numberField("CHART TIME"), "   {Enter}");
+
+    expect(numberField("CHART TIME")).toHaveValue("+12.50");
+    expect(numberField("CHART TIME")).not.toHaveAttribute("aria-invalid");
+    expect(onTime).not.toHaveBeenCalled();
+  });
+
+  it("drops a drive range emptied before the link's hold arrived when it is left", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange, update } = renderControls();
+    await user.clear(numberField("DRIVE RANGE"));
+    update({ heldBack: "NO CARRIER" });
+
+    await user.tab();
+
+    expect(numberField("DRIVE RANGE")).toHaveValue("50");
+    expect(onDriveRange).not.toHaveBeenCalled();
   });
 
   it("shows the chart time in universe time", () => {

@@ -26,3 +26,15 @@ export function isTextEntry(target: EventTarget | null): boolean {
     (target instanceof HTMLElement && target.isContentEditable)
   );
 }
+
+/**
+ * Whether a field's text is no entry at all: empty, or spaces only.
+ *
+ * @remarks
+ * The guide's data-entry rule (decision-r07-t13d): a field that enters its value with `Enter` or
+ * when it is left enters nothing for such text and never refuses it. As on `Escape`, it drops what
+ * was typed and any refusal and shows its value again.
+ */
+export function isEmptyEntry(text: string): boolean {
+  return text.trim() === "";
+}

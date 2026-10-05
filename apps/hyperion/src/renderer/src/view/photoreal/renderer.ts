@@ -11,8 +11,9 @@
  * chain over the light above the display's range, the tone-mapping pass with each host disc's glare
  * source, encoded and dithered in the pass (`encoding: "in-pass"`), and a second canvas pass that
  * loads it for the cased symbology (`colourLoad: "load"`, decisions-r06-r07 item 6). Each frame
- * takes the scene target's exposure histogram under the operator's meter (R07.T12), read back for
- * the view's `AutoExposure` ({@link PhotorealRenderer.takeHistogram}). Mesh bodies, R08's, R10's
+ * that carries a meter takes the scene target's exposure histogram under it (R07.T12), read back
+ * for the view's `AutoExposure` ({@link PhotorealRenderer.takeHistogram}); a frame of a view that
+ * meters nothing, an instrument's, takes none (R07.T19.c). Mesh bodies, R08's, R10's
  * and R11's passes join when they exist. Its resources are made asynchronously, the pipelines compiled
  * before the first frame, and again after a device loss; until then {@link
  * PhotorealRenderer.render} draws nothing and says so, and the view keeps its wireframe.
@@ -95,8 +96,11 @@ export interface PhotorealFrame {
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /** The symbology's canvas pass, drawn loading the tone-mapped image, or `null`. */
   readonly overlay: FrameSubmission | null;
-  /** The operator's meter, whose weights the frame's histogram takes (Design note 10). */
-  readonly meter: MeterMode;
+  /**
+   * The operator's meter, whose weights the frame's histogram takes (Design note 10), or `null` for
+   * a view that is not the exposure's source, whose frame takes no histogram (Design note 11).
+   */
+  readonly meter: MeterMode | null;
 }
 
 /** Where a {@link PhotorealRenderer} stands. */
@@ -387,13 +391,15 @@ export class PhotorealRenderer {
       postProcesses: [],
       colourLoad: "load",
     });
-    resources.histograms.measure({
-      hdrColour: resources.target.colour,
-      size: resources.size,
-      mode: frame.meter,
-      stride: frame.setting === "low" ? 2 : 1,
-      preExposure: frame.exposureScale,
-    });
+    if (frame.meter !== null) {
+      resources.histograms.measure({
+        hdrColour: resources.target.colour,
+        size: resources.size,
+        mode: frame.meter,
+        stride: frame.setting === "low" ? 2 : 1,
+        preExposure: frame.exposureScale,
+      });
+    }
     // The pre-exposure is this frame's own exposure, so the pass's exposure over it is 1.
     const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);
     resources.bloom.run(resources.target.colour, threshold);

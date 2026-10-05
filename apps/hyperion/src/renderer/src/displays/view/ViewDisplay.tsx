@@ -1,4 +1,4 @@
-import type { BodyIdHex, UniverseIdHex, UniverseTime } from "@hyperion/protocol";
+import type { UniverseIdHex, UniverseTime } from "@hyperion/protocol";
 import {
   type FocusEvent,
   type KeyboardEvent,
@@ -54,9 +54,8 @@ import {
   type GraphicsStatus,
   useGraphicsStatus,
 } from "../../view/engine/status";
-import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
+import type { RenderView } from "../../view/engine/types";
 import {
-  exposureScale,
   controlEv100,
   DEFAULT_EXPOSURE,
   type ExposureControl,
@@ -68,23 +67,14 @@ import {
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
 import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
-import type { BakedCube } from "../../view/sky/bake";
-import { skyCubeCacheOf } from "../../view/sky/cache";
-import { SkyCubeLayer } from "../../view/sky/cubeLayer";
-import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
-import { WireframeRenderer } from "../../view/wireframe/submit";
-import type { LitRegime } from "../../view/bodies/regime";
+import type { DrawAnchor } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
-import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
-import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
-import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type ExposureReading } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
-import { BandLayer } from "../../view/sky/band";
-import { HostDiscLayer } from "../../view/sky/disc";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
-import { litLabelsOf, photorealFrame } from "./photorealFrame";
+import { litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import { availabilityOf, type StyleRefusals, styleRefusals, withPermission } from "./styleRefusals";
 import { InstrumentControls } from "./InstrumentControls";
@@ -101,8 +91,8 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
-import { bakeInputOf, type DrawnSky, useViewSky } from "./useViewSky";
-import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
+import { type DrawnSky, useViewSky } from "./useViewSky";
+import type { QualitySetting } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -110,7 +100,7 @@ import {
   type ViewEngineState,
 } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
-import { skySprites } from "./viewFrameDrawer";
+import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
@@ -392,14 +382,32 @@ function exposureShownChanged(shown: ExposureControl, next: ExposureControl): bo
   );
 }
 
-/** R06's layers the photorealistic frame draws through: the band and the host discs. */
-interface SkyLayers {
-  readonly band: BandLayer;
-  readonly discs: HostDiscLayer;
-}
-
-function skyLayersOf(engine: RenderEngine): SkyLayers {
-  return { band: new BandLayer(engine), discs: new HostDiscLayer(engine) };
+/**
+ * Moves each mark's label with its mark, at the frame rate; its text changes at 4 Hz (RM1 m10). A
+ * label whose mark this frame did not draw is hidden until the next readout removes it.
+ *
+ * @param labels - The marks' labels by their target's key.
+ */
+function placeMarkLabels(
+  labels: ReadonlyMap<string, HTMLElement>,
+  anchors: ReadonlyArray<DrawAnchor>,
+  devicePixelRatio: number,
+): void {
+  const placed = new Set<string>();
+  for (const anchor of anchors) {
+    const key = targetKey(anchor.target);
+    const node = anchor.label === null ? undefined : labels.get(key);
+    if (node !== undefined) {
+      node.style.transform = markLabelTransform(anchor, devicePixelRatio);
+      node.style.visibility = "";
+      placed.add(key);
+    }
+  }
+  for (const [key, node] of labels) {
+    if (!placed.has(key)) {
+      node.style.visibility = "hidden";
+    }
+  }
 }
 
 /** A draw-list anchor as plan 05's `pick` reads it, its target's key its ID. */
@@ -641,10 +649,12 @@ function ViewStage({
       setViewRefused(true);
       return undefined;
     }
-    const renderer = new WireframeRenderer(engine);
-    // The photorealistic style (R07.T8.a): its frame, and R06's band and host-disc layers, made
-    // again after a device loss as every handle is.
-    const photoreal = new PhotorealRenderer(engine, VIEW_NAME);
+    // The view's frames, in either style, through the frame path every view draws by (R07.T19.c),
+    // made at the restore where the engine has no device as the stage mounts.
+    let drawer: ViewFrameDrawer | null = null;
+    const releaseDrawer = makeViewFrameDrawer(engine, view, VIEW_NAME, (made) => {
+      drawer = made;
+    });
     // Each of the primary's frames with every view's GPU time in it, and its internal scale from
     // its budget and resolution controller (R07.T19; decision-r07-t18, item 1).
     const primaryTimes = new PrimaryFrameTimes(engine.passTimesFrame);
@@ -658,52 +668,7 @@ function ViewStage({
     // Animation frames since the loop started, by which each view's rate is paced.
     let animationFrame = -1;
     let primaryMs: number | null = null;
-    let layers = skyLayersOf(engine);
-    let bandFor: DrawnSky | null = null;
-    let regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
     let drawnStyle: RenderStyle = "wireframe";
-    let frameFailed = false;
-    const unsubscribeLayers = engine.onRestored(() => {
-      layers = skyLayersOf(engine);
-      bandFor = null;
-      frameFailed = false;
-    });
-    // The sky's baked cube (R06.T13.g, T14): shared through the device's cache, baked once per sky
-    // and set of baked stars, drawn every frame; a new sky, asked as the parallax rule says,
-    // brings a new cube.
-    const cubes = new SkyCubeLayer(engine);
-    const cache = skyCubeCacheOf(engine);
-    // A sky whose bake failed is not baked again until another sky or a restore.
-    let failedFor: DrawnSky | null = null;
-    const unsubscribeRestored = engine.onRestored(() => {
-      failedFor = null;
-    });
-    const cubeFor = (sky: DrawnSky | null): BakedCube | null => {
-      if (sky === null || sky === failedFor) {
-        cache.release(VIEW_NAME);
-        return null;
-      }
-      try {
-        return cache.acquire(VIEW_NAME, {
-          stars: sky.model.stars,
-          baked: sky.selection.baked,
-          // Read at the bake: a restore may have brought a device without float32-blendable.
-          bakeInput: () =>
-            bakeInputOf(
-              sky,
-              engine.capabilities.float32Blendable
-                ? SETTINGS.high.sky.faceSizePx
-                : SETTINGS.low.sky.faceSizePx,
-            ),
-        });
-      } catch (error: unknown) {
-        // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
-        console.error("the sky's cube could not be baked:", error);
-        failedFor = sky;
-        cache.release(VIEW_NAME);
-        return null;
-      }
-    };
     // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
     // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
     // applied to it when the display's control changes to one the controller did not publish.
@@ -719,7 +684,6 @@ function ViewStage({
     let givenExposure = seenExposure;
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
-    let sized: ViewSize | null = null;
     let anchors: ReadonlyArray<DrawAnchor> = [];
     let frame = 0;
     const tick = (nowMs: number): void => {
@@ -764,115 +728,37 @@ function ViewStage({
       }
       // Last frame's histogram, if one arrived, under the exposure it was taken with; none while
       // the view draws its wireframe, which then times the meter out.
-      const histogram = photoreal.takeHistogram();
+      const histogram = drawer?.takeHistogram();
       const reading = auto.step(drawnStyle === "photorealistic" ? histogram : undefined, dtS);
       if (run.source.kind === "server" && current !== null) {
         current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
       }
-      if (inputs.size !== null && inputs.tokens !== null && inputs.size.widthPx > 0) {
-        const ratio = inputs.size.devicePixelRatio;
-        const viewport = {
-          widthPx: Math.max(1, Math.round(inputs.size.widthPx * ratio)),
-          heightPx: Math.max(1, Math.round(inputs.size.heightPx * ratio)),
-        };
-        if (sized?.widthPx !== viewport.widthPx || sized.heightPx !== viewport.heightPx) {
-          view.resize(viewport);
-          sized = viewport;
-        }
-        const camera = { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
-        const scene = { ...run.scene, stars: inputs.stars };
-        const list = buildWireframeDrawList(scene, camera, viewport, inputs.tokens, {
-          lowSetting: false,
-          ev100: reading.ev100,
-          selection: inputs.selection,
-          destination: null,
-          remPx: inputs.size.remPx * ratio,
-          skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
-        });
-        anchors = list.anchors;
-        const cube = cubeFor(inputs.sky);
-        const exposed = exposureScale(reading.ev100);
-        let drawn = false;
-        if (run.camera.style === "photorealistic" && photoreal.status === "failed") {
+      if (drawer !== null) {
+        if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
           // Its pipelines could not be made: the view returns to the wireframe, and the control
           // holds the style back with the reason.
           runRef.current = { ...run, camera: { ...run.camera, style: "wireframe" } };
-        } else if (run.camera.style === "photorealistic" && inputs.availability.photorealistic) {
-          try {
-            if (inputs.sky !== null && inputs.sky !== bandFor) {
-              layers.band.update(
-                inputs.sky.model.band,
-                inputs.sky.model.response.band.face_texels,
-                inputs.sky.bandIlluminanceLx,
-              );
-              bandFor = inputs.sky;
-            }
-            // The scene target at the render resolution times the budget's or controller's scale.
-            const internal = internalViewport(viewport, renderScale);
-            const plan = photoreal.render(
-              view,
-              photorealFrame({
-                run,
-                pose: camera.pose,
-                viewport: internal,
-                setting: "high",
-                exposureScale: exposed,
-                list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
-                sky: inputs.sky,
-                band: inputs.sky === null ? null : layers.band,
-                discs: layers.discs,
-                cube: cube === null ? null : cubes.draw(cube, "hdr", exposed),
-                previousRegimes: regimes,
-                meter: auto.meter,
-                // The symbology over the image: the wireframe's marks, its sprites in the image.
-                overlay: {
-                  ...renderer.frame({ ...list, sprites: [] }, camera, viewport),
-                  label: PHOTOREAL_PASS_LABELS.symbology,
-                },
-              }),
-            );
-            if (plan !== null) {
-              regimes = plan.regimes;
-              drawn = true;
-              frameFailed = false;
-            }
-          } catch (error: unknown) {
-            // A creation refused between a device loss and its restore: this frame draws the
-            // wireframe, and the next tries again; said once until a frame draws or a restore.
-            if (!frameFailed) {
-              console.error("the photorealistic frame could not be drawn:", error);
-              frameFailed = true;
-            }
-            drawn = false;
-          }
         }
-        // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
-        drawnStyle = drawn ? "photorealistic" : "wireframe";
-        if (!drawn) {
-          renderer.render(
-            view,
-            list,
-            camera,
-            viewport,
-            cube === null ? [] : [cubes.draw(cube, "display", exposed)],
-          );
-        }
-        // Each label follows its mark at the frame rate; its text changes at 4 Hz (RM1 m10). A
-        // label whose mark this frame did not draw is hidden until the next readout removes it.
-        const placed = new Set<string>();
-        for (const anchor of anchors) {
-          const key = targetKey(anchor.target);
-          const node = anchor.label === null ? undefined : labelsRef.current.get(key);
-          if (node !== undefined) {
-            node.style.transform = markLabelTransform(anchor, ratio);
-            node.style.visibility = "";
-            placed.add(key);
-          }
-        }
-        for (const [key, node] of labelsRef.current) {
-          if (!placed.has(key)) {
-            node.style.visibility = "hidden";
-          }
+        const drawn = drawer.draw({
+          run,
+          size: inputs.size,
+          tokens: inputs.tokens,
+          exposure: reading.control,
+          stars: inputs.stars,
+          sky: inputs.sky,
+          selection: inputs.selection,
+          style: primaryBudget.style,
+          // The scene target at the render resolution times the budget's or controller's scale.
+          renderScale,
+          availability: inputs.availability,
+          // The exposure's source: its frames take the histogram its meter reads (Design note 11).
+          meter: auto.meter,
+        });
+        if (drawn !== null && inputs.size !== null) {
+          anchors = drawn.anchors;
+          // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
+          drawnStyle = drawn.drawnStyle;
+          placeMarkLabels(labelsRef.current, anchors, inputs.size.devicePixelRatio);
         }
       }
       // The readouts change at 4 Hz, every view's in the same frame, so React renders them once.
@@ -901,7 +787,7 @@ function ViewStage({
           run,
           anchors,
           drawnStyle,
-          photoreal: photoreal.status,
+          photoreal: drawer?.photorealStatus ?? "idle",
           reading: auto.meteredEv100 === null ? null : auto.reading(),
           meteredEv100: auto.meteredEv100,
         });
@@ -913,14 +799,8 @@ function ViewStage({
       cancelAnimationFrame(frame);
       unsubscribeTimes();
       unsubscribeTimesRestored();
-      renderer.dispose();
-      photoreal.dispose();
-      layers.band.dispose();
-      unsubscribeLayers();
-      cache.release(VIEW_NAME);
-      cubes.dispose();
-      unsubscribeRestored();
-      view.dispose();
+      // The drawer disposes of the view with itself.
+      releaseDrawer();
     };
   }, [engineState, canvas]);
 

@@ -133,8 +133,8 @@ impl BrightnessEnvelope { pub fn build(galaxy: &Galaxy) -> Self;   // reads the 
         ages: (Years, Years)) -> Option<Magnitudes>;
     pub fn mass_floor(&self, layer: Layer, component: ComponentId, faintest: Magnitudes,
         ages: (Years, Years)) -> SolarMasses; }
-pub fn max_star_mass(primary_initial: SolarMasses) -> SolarMasses;  // m₁ now; min(2 m₁, 150) once
-                                                                    // plan 11 wires binaries
+pub fn max_star_mass(primary_initial: SolarMasses) -> SolarMasses;  // min(2 m₁, 150) since
+                                                                    // R06.T16.b (m₁ before)
 
 // sky::caps (Design note 9)
 pub struct LayerCap { /* layer, radius: LightYears, rule_bound: LightYears,
@@ -1784,6 +1784,11 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   system: here one of 36 listed B stars within 500 ly, and one of 21,210 listed C stars within
   1,000 ly.
 
+  **Closed by T16.b (2026-10-05).** The bound now reads the envelope at twice m₁ over ages from
+  zero. The two systems' bounds move from M<sub>V</sub> 3.78 and 2.70 to −7.78 and −7.95. Both
+  tests are back in the slow profile and pass unchanged, except the A/B test's check that B skips
+  some systems, which is now a printed figure (see "Deviations in T16.b, as built").
+
 - **The mass skip barely bites near the Sun (found in T8.d, 2026-10-04; ruled: no change now).**
   `cell_floor` reads the envelope over every age, 0 to `MAX_AGE_YEARS`, which allows a giant of a
   band's least mass. So near the Sun every C–E cell's floor is its band's lower edge out to
@@ -1831,8 +1836,10 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   term would cost more census than those stars are worth (decision-camera-eta.md).
 - **Binaries.** The flux bound and the envelope are exact for single-star systems today; once plan
   11 wires binary evolution in, R06.T16.b must land with it or the census can miss blue
-  stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the candidates above 0.5 M☉, the
-  research's estimate) is T17's to measure.
+  stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the
+  candidates above 0.5 M☉, the research's estimate) is T17's to measure. _T16.b landed
+  2026-10-05. Its cost is far above that estimate where B and C stars dominate, since 2 m₁ over
+  every age reaches the envelope's late giants ("Deviations in T16.b, as built")._
 - **The eye's cut** rests on Crumey's eq. 34 at the darkest pre-pass texel, clamped at a
   colour-corrected 10⁻⁵ cd m⁻² where Blackwell's data give no constraint (decided 2026-10-02; μ 25.6
   in starlight); a view darker than that is drawn to the clamp's limit, 7.99 at F = 1.4.
@@ -2597,7 +2604,7 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
       the four fast tests. `just test-slow the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`
       runs the nuclear disc's slow test. The two near the Sun fail until T16.b (Risks, "Merger
       products outshine the flux bound") and are excluded from the slow profile by name until then.
-      T17's list names all three.
+      T17's list names all three. _T16.b removed the exclusion; all three run by name._
     - `tests/common/mod.rs` declares `pub mod sky`, so every integration binary that includes
       `common` compiles the oracle. Each already carries `#[expect(dead_code)]`. Beside the named
       helpers, `sky.rs` exports `every_layer`, `float_bits`, `assert_same_stars`, `Part`, `THREADS`,
@@ -2645,3 +2652,153 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
       The warm and nuclear-disc benches are not run, and are left for T17 or the owner on a quiet
       machine. The orchestrator puts the census's cost to its own investigation (see "The
       census's cost" and "The mass skip barely bites near the Sun").
+- **Deviations in T16.b, as built (2026-10-05).** The bound for binaries, as Design notes 8 and
+  10 and decision item 2 set it, with one choice of the lane's and three test checks changed by
+  ruling.
+  - **The rule.** `max_star_mass(m₁)` is min(2 m₁, 150 M☉), the cap being `sse::MAX_INITIAL_MASS`.
+    Plan 11's engine runs only pairs of two stars (`run_pairs`), and no companion outweighs its
+    primary, so m₁ + m₂ ≤ 2 m₁. The engine builds no track above 150 M☉ (`track_mass`).
+    `flux_bound` reads the envelope at `max_star_mass(m₁)` over ages from zero to the system's
+    for a grid system (n = `GRID_STAR_BOUND`). It reads the primary's own mass and age for a
+    forced single (n = 1), which is never in a pair. `cell_floor`'s code is unchanged: it reads
+    the widened mass through `BrightnessEnvelope::mass_floor`, which already took every age.
+  - **The lane's choice: the floor takes 2 m₁ in every layer.** That includes the brown dwarfs,
+    whose systems are forced singles and need only m₁. Their floor is lower than needed: within
+    150 ly at cut 11, 5,102 candidates against 1,073 before. None is generated either way, since
+    their flux bound keeps m₁. A layer-aware mass in `mass_floor` would win that back, and is
+    left to the cost ruling.
+  - **The caps.** The rule bound reads `max_star_mass` of the band's top, so it moves, but no cap
+    moves at the fast test's two points: caps are count-limited.
+
+    | Layer | Rule bound near the Sun, before → after (ly) | Nuclear disc (ly) |
+    | ----- | -------------------------------------------- | ----------------- |
+    | A     | 105 → 17,595                                 | 20 → 573          |
+    | B     | 199 → 21,616                                 | 25 → 704          |
+    | C     | 28,404 → 50,603                              | 925 → 1,649       |
+    | D     | 58,854 → 67,698                              | 1,917 → 2,206     |
+    | E     | 120,000 → 120,000                            | 14,707 → 14,707   |
+    | BD    | 7 → 20                                       | 5 → 9             |
+
+    The caps are the same before and after: A 11, B 68, C 6,764, D 8,193 and E 21,369 ly near
+    the Sun, and in the nuclear disc A 13, B 17, C 116, D 205 and E 362 ly. `layer_caps`'s doc
+    table gives the nuclear disc's D as 204 ly. HEAD reads 205 too, so the table predates T16.b
+    (it was measured before the fitted envelope); T17 re-records it.
+
+  - **How loose the bound is.** At 2 m₁ over every age, a B or C primary's bound reaches the
+    envelope's late giants at η = 0 (about −5.7 for stars of at most 1 M☉, T6.b's science check),
+    less 2.5 log₁₀ 5. The two pinned systems' bounds go from M<sub>V</sub> 3.78 and 2.70 to −7.78
+    and −7.95, so a B or C record is almost never skipped inside any cap. Records past the mass
+    skip and then the flux bound, at HEAD and after, from T8.e's place near the Sun (cut 7.95,
+    eye), counted by a probe that mirrors `census_record`'s skip without generating (it gives
+    T8.e's own nuclear-disc counts exactly):
+
+    | Sphere      | Records   | Past the floor        | Past the bound      |
+    | ----------- | --------- | --------------------- | ------------------- |
+    | A, 300 ly   | 138,945   | 37,978 → 92,021       | 987 → 79,038        |
+    | B, 500 ly   | 110,151   | 74,887 → 110,151      | 20,562 → 110,151    |
+    | C, 1,000 ly | 1,097,274 | 1,092,043 → 1,097,274 | 951,125 → 1,097,259 |
+    | D, 1,000 ly | 238,967   | all → all             | all → all           |
+    | E, 1,000 ly | 74,777    | all → all             | 74,776 → 74,776     |
+
+  - **The cost, measured.** The sample is 648 fixed cells near the Sun. At each distance along x,
+    a 3 × 3 × 3 block of cells: A to 300 ly, B to 500, the brown dwarfs to 60, C to 6,000, D to
+    8,000 and E to 20,000. The query is cut 7.95 with the eye. `census_cell` runs on one thread,
+    and the figure is the least wall time of three runs. The builds ran alternately, twice each,
+    in the debug profile with the sim at opt-level 2, at load 4–12, so the times are provisional:
+
+    | Layer | Cells | Records | Past the floor | Generated     | ms a cell     |
+    | ----- | ----- | ------- | -------------- | ------------- | ------------- |
+    | A     | 108   | 62      | 35 → 48        | 17 → 45       | 0.055 → 0.065 |
+    | B     | 108   | 112     | 97 → 112       | 65 → 112      | 0.077 → 0.103 |
+    | BD    | 81    | 160     | 113 → 136      | 0 → 0         | 0.051 → 0.052 |
+    | C     | 135   | 1,247   | 1,217 → 1,247  | 1,065 → 1,235 | 6.60 → 6.68   |
+    | D     | 108   | 1,589   | 1,589 → 1,589  | 1,588 → 1,589 | 63.4 → 62.7   |
+    | E     | 108   | 2,977   | 2,977 → 2,977  | 2,977 → 2,977 | 251.7 → 251.4 |
+    | All   | 648   | 6,147   | 6,028 → 6,109  | 5,712 → 5,958 | 53.9 → 53.8   |
+
+    Near the Sun, T16.b barely moves the census's cost. D and E were generated whole already. The
+    C systems it newly generates are cheap ones, so C's cost a cell beyond 1,000 ly rises 2–3%.
+    The cost rises steeply only in A and B, in relative terms, and their caps are 11 and 68 ly. But
+    the floor and the bound now skip almost no B or C record, so the census's cost (T8.e's cold
+    bench, `decision-r06-census-cost.md`) cannot be cut by tightening its skips without a rule
+    that knows which pairs can interact.
+
+  - **Three checks changed by ruling** (orchestrator, 2026-10-05; `decision-r06-census-cost.md`
+    takes the figures). They are cost checks, not identities, and each site's comment names the
+    decision. No identity check and no tolerance moved.
+    - The fast `the_census_is_its_oracle_in_the_nuclear_disc` passes `Skips::Recorded` to
+      `agree`. It now prints that the census generates 49,534 of 49,534 systems: A and B within
+      1.5 ly skip none, where A skipped 1,122 of 21,450 before.
+    - In the slow A/B test, B's per-layer check is printed, not asserted. B now generates
+      110,151 of 110,151 systems, against 20,562 before. A's check holds: A generates 79,038 of
+      138,945, against 987 before.
+    - T8.b's `a_cells_census_equals_its_unskipped_records` keeps its `skipped > 0`. Its 15 cells
+      (A–E at 0, 1 and 3 cells from the Sun, cut 7) no longer skip anything ("30 listed,
+      0 skipped"), so it gains cells where skips remain. These are the brown dwarfs' at 0, 1
+      and 3 cells out (seven records, each skipped by a forced single's bound), and a 5 × 5 block
+      of A cells 288–320 ly along x. The block's records are skipped by the floor, and one
+      candidate by a multiple system's bound.
+  - **The tests.**
+    - The `[profile.slow]` `default-filter` and its comment are gone from `.config/nextest.toml`,
+      and "fails until R06.T16.b" is gone from both ignore reasons and from the module doc.
+      The three slow tests ran by name, unlocked and capped, in the slow-test profile with
+      `--test-threads 2` (2026-10-05, load 12–18, provisional), and each passed:
+      - `the_census_is_its_oracle_1000_ly_from_the_sun`, in 858 s. The census generates
+        1,411,002 of 1,411,018 systems: C 1,097,259 of 1,097,274, D all 238,967, E 74,776 of
+        74,777. It accepts C 21,210, D 7,760 and E 1,247 stars, the oracle's counts, with the
+        C merger.
+      - `the_census_is_its_oracle_for_the_dwarfs_near_the_sun`, in 9.5 s. The census generates
+        189,189 of 249,096 systems and accepts A 3 and B 36 stars, the B merger among them.
+      - `envelope_bounds_pair_states`, in 49 s.
+    - The pinned mergers are fast tests in `tests/sky_census.rs`. Each censuses its system's cell
+      beside its oracle (the new `census_parts_of` and `brute_force_parts_of` in
+      `tests/common/sky.rs`, for given cells) and checks four things:
+      - the two agree bit for bit;
+      - the merger product is listed, heavier than m₁ and at most `max_star_mass(m₁)`, its
+        companion `NoRemnant`;
+      - it is brighter than the bound at m₁ and its age, which would have skipped it for the
+        query;
+      - it lies within the widened bound.
+    - `the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them` takes T8.e's two
+      giants at the eye's cut. `a_main_sequence_merger_is_listed_as_its_oracle_lists_it` takes the
+      unevolved case the plan left to pin: `0x41feeca200000000`, C near the Sun, a 0.90 M☉
+      primary and its near twin merged into a 1.80 M☉ main-sequence star of M<sub>V</sub> 1.98
+      (bound at m₁ 2.35), V 5.87 from 191 ly. The query is a camera cut of 5.95 with no eye,
+      inside the window (5.87, 6.02) where the bound at m₁ skips it.
+    - That system is 267 Myr old, not "of an old cell" as the plan's test reads. Nor is it a blue
+      straggler in Sandage's sense, brighter than the turnoff, which lies near 3.4 M☉ at 267 Myr
+      (science check). It is a merger product above every single star of its primary's mass and
+      age. A search of
+      8,000 records in each of A, B and C, near the Sun, at (0, 8,000, 0) and in the bulge, found
+      it the only main-sequence star above its primary's mass brighter than the bound at m₁.
+      Mass gainers are rare (0–8 per 8,000 records), and in old cells the envelope at m₁ and the
+      system's age already holds the turnoff's giants, as Design note 8 expected.
+    - Unit tests: `max_star_mass_is_twice_the_primary_up_to_the_tracks_top`;
+      `the_mass_floor_admits_every_primary_whose_merger_could_pass` (the floor inverts the
+      envelope at `max_star_mass`, and some cut puts A's floor below where m₁ alone would);
+      `a_forced_single_takes_its_own_envelope_bound`, whose grid half now reads 2 m₁ from zero.
+    - The slow `envelope_bounds_pair_states` (`tests/sky_envelope.rs`): 1,000 multiple systems
+      of each stellar layer near the Sun and 1,000 in the bulge (10⁴), at the epoch and 900 years
+      before. Every pair-evolved star must be no brighter than the envelope at `max_star_mass`
+      over ages from zero, margin included and without the n factor.
+      - It finds no violation, and no star uses any of the 0.3 mag margin. The sample's closest
+        star is 2.12 mag fainter than the envelope before its margin (D in the bulge).
+      - Mass gainers are few: 12 star states above their primary's mass in the 10⁴ multiples,
+        and none beyond the bound at m₁. The engine ran a pair in 0–5 of each 1,000 multiples in
+        A and B, 323–408 in C, and 950–997 in D and E.
+      - The three pinned mergers are therefore checked too (`PINNED_MERGERS`). Each is beyond
+        the bound at m₁ at both times, and their closest is 0.31 mag fainter than the envelope
+        before its margin.
+  - **Science check (2026-10-05).** It found no must-fix. Its fixes are applied:
+    - "Shines as a younger star of its new mass" is true only of main-sequence mergers and
+      accretors (BSE eq. 80 and §2.6.6). A donor keeps its fractional age at a lower mass, so its
+      own track's age can pass the system's by up to some 40 times. An evolved accretor keeps its
+      track's luminosity. `flux_bound`'s doc now says so. Each is fainter than a single star of at
+      most 2 m₁ at an age within the system's, which `envelope_bounds_pair_states` checks
+      empirically.
+    - A main-sequence accretor above 150 M☉ is not held to the 150 M☉ track. Its closed forms are
+      extrapolated, and the top node bounds it through that track's later phases and the margin.
+    - If plan 11 ever evolves a merged pair with its third star, the ceiling becomes 3 m₁.
+  - **Not done here (ruled):** plan 11's public interaction test, which would let pairs that
+    cannot interact keep n × F₁ at m₁ and their own age. It is the lever decision item 2 names
+    for T17, handed to the cost ruling.

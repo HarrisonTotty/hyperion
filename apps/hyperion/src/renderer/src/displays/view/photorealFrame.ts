@@ -63,8 +63,8 @@ export interface PhotorealInputs {
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /** The symbology's canvas pass, or `null`. */
   readonly overlay: FrameSubmission | null;
-  /** The operator's meter. */
-  readonly meter: MeterMode;
+  /** The operator's meter where the view is the exposure's source, or `null` (no histogram). */
+  readonly meter: MeterMode | null;
 }
 
 /** A wireframe sprite as a record at infinity. */
