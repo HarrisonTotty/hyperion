@@ -8,10 +8,11 @@
  * own display times, so the path is the same every run while the frame rate is free (Design note
  * 19); at the script's end the run holds the last pose.
  *
- * Spike runs only record `performance.measure` spans: `terrain.select` about each selection (the
- * pass's `measureSelection`), `terrain.frame` about each frame's terrain work, and one
- * `spike.segment:<name>` span a segment once it ends. Each span is an entry the browser keeps,
- * measurement overhead the ordinary view never pays.
+ * Spike runs only record `performance.measure` spans: {@link FRAME_MEASURE} about each frame's
+ * whole callback, `terrain.select` about each selection (the pass's `measureSelection`),
+ * `terrain.frame` about each frame's terrain work, and one `spike.segment:<name>` span a segment
+ * once it ends. Each span is an entry the browser keeps, measurement overhead the ordinary view
+ * never pays, apart from the frame's own, which is cleared as soon as it is made.
  */
 
 import type { ColourTokens } from "../../spatial/paint";
@@ -84,6 +85,19 @@ const INSTRUMENT_FOV_X_RAD = (DEFAULT_FOV_DEG * Math.PI) / 180;
 
 /** The `performance.measure` name of one frame's terrain work. */
 export const TERRAIN_FRAME_MEASURE = "terrain.frame";
+
+/**
+ * The `performance.measure` name of one frame's whole callback (R05.T14.g,
+ * decision-r05-trace-windows-2.md): the span of {@link SpikeFrameSample.callbackMs}, between the
+ * same two `performance.now()` readings.
+ *
+ * @remarks
+ * The trace's split counts "our code" as the union of these spans, and the main process checks
+ * each window's spans against the report's `ourCodeMs`, frame by frame. The main process keeps its
+ * own copy of the literal (`reduceTrace.ts`), since the two tsconfig projects cannot share it; a
+ * test on each side pins it.
+ */
+export const FRAME_MEASURE = "spike.frame";
 
 /** The engine's names for the spike's three views. */
 export const SPIKE_VIEW_NAMES = {
@@ -212,7 +226,10 @@ export interface SpikeFrameSample {
    * `scriptTimeS` counts, on `performance.now()`'s clock (T14.d).
    */
   readonly scriptStartMs: number;
-  /** The frame callback's own time, ms. */
+  /**
+   * The frame callback's own time, ms: its {@link FRAME_MEASURE} span's duration, the same two
+   * `performance.now()` readings.
+   */
   readonly callbackMs: number;
   /** Passes submitted this frame: the terrain, the atmosphere, the display and two instruments. */
   readonly passesSubmitted: number;
@@ -511,11 +528,15 @@ export class SpikeRun {
       limited: selection.limited,
       annunciation: frame.annunciation,
     };
+    const ended = performance.now();
+    performance.measure(FRAME_MEASURE, { start: started, end: ended });
+    // The trace has the span; the page keeps no entry of it.
+    performance.clearMeasures(FRAME_MEASURE);
     this.#listeners.onFrame?.({
       scriptTimeS: tS,
       rafTimestampMs: input.nowMs,
       scriptStartMs: startMs,
-      callbackMs: performance.now() - started,
+      callbackMs: ended - started,
       // The terrain, the atmosphere's composite, the display and the two instruments.
       passesSubmitted: 5,
       patchesHard: selection.patches.size,

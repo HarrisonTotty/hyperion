@@ -14,6 +14,7 @@ import {
   registerSpikeHandlers,
   SPIKE_CHANNELS,
   type SpikeHandlerDeps,
+  SPIKE_GPU_CATEGORY,
   SPIKE_PROFILER_CATEGORY,
   SPIKE_TRACE_BUFFER_KB,
   SPIKE_TRACE_CATEGORIES,
@@ -232,25 +233,28 @@ function fakeTracing(): SpikeTracing & {
 }
 
 describe("the spike's trace", () => {
-  it("records Design note 18's categories without the CPU profiler, and only those", () => {
+  it("records a timed run's five categories, without gpu or the CPU profiler, and only those", () => {
     const config = spikeTraceConfig();
-    expect(config.included_categories).toEqual([...SPIKE_TRACE_CATEGORIES]);
-    expect(config.included_categories).not.toContain(SPIKE_PROFILER_CATEGORY);
-    expect(config.excluded_categories).toEqual(["*"]);
-    for (const category of [
+    expect(config.included_categories).toEqual([
       "devtools.timeline",
+      "disabled-by-default-devtools.timeline",
+      "disabled-by-default-devtools.timeline.frame",
       "disabled-by-default-v8.gc",
       "blink.user_timing",
-      "gpu",
-    ]) {
-      expect(SPIKE_TRACE_CATEGORIES).toContain(category);
-    }
+    ]);
+    expect(config.included_categories).toEqual([...SPIKE_TRACE_CATEGORIES]);
+    expect(config.excluded_categories).toEqual(["*"]);
   });
 
-  it("adds the CPU profiler in a profiled run, with the same 768 MiB until-full buffer", () => {
+  it("adds gpu and the CPU profiler in a profiled run, with the same 768 MiB until-full buffer", () => {
     const profiled = spikeTraceConfig({ profiled: true });
     expect(profiled.included_categories).toEqual([
       ...SPIKE_TRACE_CATEGORIES,
+      "gpu",
+      "disabled-by-default-v8.cpu_profiler",
+    ]);
+    expect([SPIKE_GPU_CATEGORY, SPIKE_PROFILER_CATEGORY]).toEqual([
+      "gpu",
       "disabled-by-default-v8.cpu_profiler",
     ]);
     for (const config of [spikeTraceConfig(), profiled]) {
@@ -261,13 +265,15 @@ describe("the spike's trace", () => {
   });
 
   it("calls a run profiled when the CPU profiler's category is recorded", () => {
-    expect(traceSettingsOf(spikeTraceConfig({ profiled: true }))).toEqual({
+    expect(traceSettingsOf(spikeTraceConfig({ profiled: true }), "json")).toEqual({
+      format: "json",
       profiled: true,
-      categories: [...SPIKE_TRACE_CATEGORIES, SPIKE_PROFILER_CATEGORY],
+      categories: [...SPIKE_TRACE_CATEGORIES, SPIKE_GPU_CATEGORY, SPIKE_PROFILER_CATEGORY],
       recordingMode: "record-until-full",
       bufferKb: 786_432,
     });
-    expect(traceSettingsOf({ included_categories: ["gpu"] })).toEqual({
+    expect(traceSettingsOf({ included_categories: ["gpu"] }, "perfetto-proto")).toEqual({
+      format: "perfetto-proto",
       profiled: false,
       categories: ["gpu"],
       recordingMode: "record-until-full",
@@ -275,11 +281,12 @@ describe("the spike's trace", () => {
     });
   });
 
-  it("exposes the settings it records every window with", async () => {
+  it("exposes the settings it records every window with, in contentTracing's JSON", async () => {
     const tracing = fakeTracing();
     const trace = new SpikeTrace(tracing, { profiled: true });
-    expect(trace.settings).toEqual(traceSettingsOf(spikeTraceConfig({ profiled: true })));
+    expect(trace.settings).toEqual(traceSettingsOf(spikeTraceConfig({ profiled: true }), "json"));
     expect(new SpikeTrace(tracing).settings.profiled).toBe(false);
+    expect(new SpikeTrace(tracing).settings.format).toBe("json");
     await trace.start();
     expect(tracing.startRecording).toHaveBeenCalledWith(spikeTraceConfig({ profiled: true }));
   });

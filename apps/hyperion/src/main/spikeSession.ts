@@ -60,7 +60,11 @@ export interface SpikeSessionDeps {
    * keeps on disk and removes.
    */
   readonly traceDir: string;
-  readonly reduce: (path: string) => Promise<TraceFigures>;
+  /**
+   * Reduces a window's file (`reduceTraceFile`), given the categories every window recorded
+   * (`trace.settings.categories`), which say which GPU-process slices it can hold.
+   */
+  readonly reduce: (path: string, categories: ReadonlyArray<string>) => Promise<TraceFigures>;
   readonly memory: { start(): void; stop(): Promise<ReadonlyArray<MemorySample>> };
   /** The results file's directory (`--out`, or `docs/measurements/descent-spike/`). */
   readonly outDir: string;
@@ -259,7 +263,9 @@ export class SpikeSession {
     let bytes: number | null = null;
     try {
       bytes = await this.#files.size(path);
-      const trace: Measured<TraceFigures> = measured(await this.#deps.reduce(path));
+      const trace: Measured<TraceFigures> = measured(
+        await this.#deps.reduce(path, this.#deps.trace.settings.categories),
+      );
       return { trace, bytes, bufferPercent };
     } catch (error: unknown) {
       const reason =
