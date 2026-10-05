@@ -2990,7 +2990,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     three limb-angle evaluations, and above 32 px the interior pixels within about 2 px of the limb
     are integrated the same way and classed by those points. The cost goes to T17's bench.
   - **Promotion** (`promoteOverlapping`) is not called: the frame has no depth-writing geometry
-    yet (no mesh bodies, terrain or lit hulls); T9 calls it with footprints.
+    yet (no mesh bodies, terrain or lit hulls); T9 calls it with footprints. _Called from T9's
+    `planLitBodies` (see "Deviations in T9, as built")._
   - **The atmosphere stubs' arguments.** The disc passes altitude 0, latitude 0 and sun azimuth 0
     to `atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`; R08.T9.b's caller supplies
     the geodetic latitude from the spheroid normal and the azimuth from local north.
@@ -3793,3 +3794,115 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `--accent` and replaced by the next key, also after a click that left the caret inside the
     value, at 1280 × 720 and 1920 × 1080; what a screen reader says when `Escape` restores and
     selects the value.
+- **Deviations in T9, as built (mesh bodies).**
+  - **Files.**
+    - `bodies/smoothMesh.ts`: `SMOOTH_MESH_TAU_PX`, `smoothMeshTauPx`, `MAX_SMOOTH_MESH_PATCHES`,
+      `SmoothPatch`, `SmoothMesh`, `poleAxes`, `smoothMeshOf`, `packSmoothMeshes`,
+      `rotationColumns`, `LimbDepths`, `DISC_LIMB_DEPTHS`, `limbDepths`, `limbDepthAt`, and the
+      `f64` twin's `smoothPatchVertices`, `MeshRaster` and `rasteriseSmoothMesh`.
+    - `shaders/smoothMesh.wgsl`, as `SMOOTH_MESH_MATERIAL` (`BODY MESHES`) in `draw.ts`,
+      registered in `WGSL_CATALOGUE`.
+    - Not named by the plan: `bodies/frameTwin.ts` (`compositeBodyFrame`, the twin of the
+      `bodies` and `discs` passes with each body's share of every pixel; `firstHitShares`, the
+      first-hit oracle); `view/scenes/occultationScene.ts` (the scripted occultation, not in the
+      `SCENE` selector); `smoke/meshBodies.ts`.
+    - `regime.ts` gains `sphereFootprint`: the circle through the corners of the clamped
+      `sphereScreenRect`, `null` for a sphere off the view or wholly behind the near plane, where
+      the rectangle is the whole view and would promote every disc.
+  - **The shaders split.**
+    - `bodyDisc.wgsl` is now a library, ending in `disc_pixel(position, edge_pass)`; the disc's
+      `Draw` and entry points are in `bodyDiscDraw.wgsl`, whose `Draw` gains `depths` (`vec4f`,
+      the rectangle's corner depths, 0 for a disc body). R08's and R10's shading edits still go
+      to `bodyDisc.wgsl`.
+    - R05's `terrain.wgsl` gives `SlotRecord` and the `FaceDifferences` arithmetic, unchanged, to
+      `terrain/shaders/patchVertex.wgsl`, which the terrain materials and the smooth figure both
+      compose (R05's Risks, T11.b as built). The terrain's programs are the same.
+  - **R05's geometry, over its public names** (R05 built `planetGeometry(figure, null)`, so no
+    stand-in): `selectPatches` on it (one geometry per figure's radii, so that selection's bounds
+    memo holds), `patchTerms(key, figure, 0)`, `writeSlotRecord`, `InstanceRecords`,
+    `patchMeshData`, `chordSagittaM`, and `terrainPass.ts`' `morphRangeM` and `effectiveTauPx`.
+    The zero-height morph target is written in `smoothMesh.wgsl` (R05's `morphOffset` reads
+    heights). Skirts hang 2 × `chordSagittaM` of the parent level plus 2⁻²⁰ of the origin's
+    distance (the science check: the gap is at most 1.94 × it, with a morphing coarser
+    neighbour). No worker.
+  - **Its own tolerance.** Selected at `SMOOTH_MESH_TAU_PX` = ¼ px at the view's corner on both
+    settings (`smoothMeshTauPx`: ¼ ÷ sec²θ at the centre pixel's scale, Snyder 1987's radial
+    scale of the gnomonic projection; 0.174 px at 1080p across 60°), not the terrain's τ, so that
+    the figure covers every pixel the spheroid covers wholly (its centre ½ px or more inside the
+    limb). At most 1,024 patches (`SmoothMesh.limited`, which no caller acts on); 50 patches,
+    the deepest at level 14, for a camera 2 m above an Earth at 1080p.
+  - **Axes about the pole.** The figure is built in `poleAxes(record.pole)`, not the body's
+    rotation: it is symmetric about the pole, so its patches need not turn with the body, and
+    selection does not change while it spins. R10, which hands over by patch with heights, builds
+    its own in the body-fixed rotation.
+  - **The figure gives coverage and depth; the light is the disc's** (the plan's "same shading
+    functions"). Each fragment draws its pixel as the disc's first draw does (`disc_pixel`, edge
+    pass 0), from the body's own disc record and the pixel's rays against the analytic spheroid,
+    where the spheroid covers the pixel wholly, and is discarded elsewhere, writing no depth. The
+    limb is the disc's second draw (`BodyStep` `limb`) at the body's place in the painter's
+    sequence, depth-tested and writing none, its rectangle's corners on the limb's polar plane
+    (`limbDepths`, the plane's reversed depth, affine on the view, unclamped so that the depth clip
+    removes what sees the plane behind the camera). So a promoted disc and its mesh draw the same
+    light, at every size from the 3.3 px switch up. A rasterised mesh shaded per vertex or facet
+    would alias its limb by up to ±10% of a 3 px body's flux and sit inside the limb by its sag.
+    A mesh body's time is split between `bodies` (its figure) and `discs` (its limb), not Design
+    note 8's one pass.
+    - A pixel both of the disc's draws take (a corner within `LIMB_OVERLAP_PX` of the limb) keeps
+      the figure's opaque light: the limb, on its plane, lies behind the figure there. On the GPU
+      that is within 0.122 of the texel tolerance of the disc's (a Saturn-like disc 64 px across).
+  - **Promotion and the frame.**
+    - `planLitBodies` calls `promoteOverlapping` with each body's `sphereFootprint` and the new
+      optional `BodyFrameOptions.depthWriters`; the new required `BodyFrameOptions.setting` goes
+      to selection. `BodyFramePlan` gains `meshes` (`MeshBodyPlan`: the record's index, the figure,
+      the limb's depths); its `order` is the order the steps follow, a mesh body in it as a disc
+      for its limb, while `painterOrder` still leaves meshes out.
+    - `PhotorealFrame` gains `depthWriters`. The view passes none: nothing in a view writes depth
+      yet (R10's terrain, lit craft), so the live client never promotes and draws as before. This
+      replaces T8.a part 2's "Promotion … is not called".
+    - The renderer submits `bodies` (loading the sky pass's colour and depth) between the sky and
+      `discs`, only on a frame with a mesh body. `LitBodyRenderer.meshDraws(plan)` is one
+      instanced draw a body (its `firstInstance` in its `Draw`); a plan's records are written once
+      for both calls, and again after a device loss.
+  - **Known limits.**
+    - A mesh body behind a host star shows over the star's disc: R06's disc lies at depth 0, which
+      the figure's depth hides (a disc body is ordered by the painter). It needs the body beyond a
+      star some pixels across, over depth-writing geometry. Putting R06's disc on its sphere's
+      polar plane, as the limb is, would fix it; that is R06's change (open below).
+    - Where two limbs cross a pixel, the limb's blend over what is beneath keeps T8.a's
+      coverage-over error: up to 0.115 of the pixel in the occultation.
+    - Each mesh body runs `selectPatches` every frame, and its fragments discard under a depth
+      write, which loses early-Z on many GPUs: both for T17's bench.
+  - **Tests.**
+    - `bodies/smoothMesh.test.ts`: the patches are R05's at h = 0 with origins on the datum; the
+      vertices are R05's `f32` arithmetic at h = 0 to `f32`'s step; the outline at most 0.004 px
+      inside the limb for an Earth 100 px across, 0.020 px for a Jupiter-like giant from 1.1
+      radii (refined to level 3), 0.003 px in a 120° view's corner, and never outside, against
+      ¼ px inside and ½ px outside; the twin's flux as a mesh against the disc's, mesh ÷ disc − 1
+      at most 2 × 10⁻¹⁶ at 3.3, 6, 40 and 64 px (a Saturn-like giant among them), with no hole;
+      the limb's depth on the plane for a Saturn-like giant and from 400 km up, where the horizon
+      lies 2,290 km off and two corners see the plane behind; the budget from 2 m up; the records.
+    - `view/scenes/occultationScene.test.ts`, the 24 scripted steps against a 16 × 16-ray oracle:
+      the planet a mesh throughout, the moon promoted at step 3 and never back; no pixel a pixel
+      or more from both limbs where the moon shows other than the oracle says; each body's share
+      of a pixel on one limb within 1/16 (worst 0.023), on both within 0.25 (worst 0.115); the
+      moon's visible area within 0.22 px²; the same light as the painter's frames with both
+      bodies discs, to 10⁻⁹.
+    - `draw.test.ts`, `renderer.test.ts` and `regime.test.ts`: promotion, records, limb order,
+      the draws, the records written once, the `bodies` pass, and the footprint.
+    - `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-05): every check
+      passes (462 each), R05's terrain frames among them after the split. The promoted Earth 20 px
+      across, the Saturn-like giant 64 px across and an Earth from 400 km draw the disc's texels
+      and classes (within 0.122 of the tolerance) and its flux to 0.0000%, the twin's colours
+      within 0.680 of it. Over the occultation every step is within 0.592 of the twin and 0.000 of
+      the painter's frames, with their classes, and no pixel more than half the moon's where no
+      oracle ray meets it.
+  - **By hand, for the owner** (open below): `just test-render --variant=default --captures=DIR`
+    writes `r07-t9-occultation-{mesh,disc}-NN-default.png`, ten steps of the occultation each at
+    512 × 384 through the photorealistic frame, as meshes and as discs. On SwiftShader
+    (2026-10-05) the two series are identical to the code at every step.
+  - **Open (for the orchestrator and the owner).**
+    - The by-hand occultation: the live `VIEW` never promotes, since nothing writes depth, so
+      `just client` cannot show the mesh path. Options: (a) the captures as the record; (b) a kept
+      occultation scene with a synthetic depth writer in `SCENE`, which adds a guide row; (c)
+      wait for R10's terrain or lit craft. Lean (a).
+    - A host disc in front of a mesh body: a stated limit, or R06's disc on its polar plane.

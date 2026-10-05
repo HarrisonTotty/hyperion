@@ -6,15 +6,17 @@
  * @remarks
  * Into the scene target, pre-exposed: R06's band, then its baked star cube (each at infinity,
  * additive, keeping the meter class), the star sprites through R06's `POINT SPRITES HDR` (stars,
- * and host discs under three pixels), then the painter's sequence of Design note 2: host discs
- * (R06's pass, meter class 0), disc bodies and point bodies, back to front by power. Then the bloom
+ * and host discs under three pixels), then the mesh bodies' figures, opaque with depth, as the
+ * `bodies` pass where the frame has any (T9), then the painter's sequence of Design note 2: host
+ * discs (R06's pass, meter class 0), disc bodies, mesh bodies' limbs and point bodies, back to
+ * front by power. Then the bloom
  * chain over the light above the display's range, the tone-mapping pass with each host disc's glare
  * source, encoded and dithered in the pass (`encoding: "in-pass"`), and a second canvas pass that
  * loads it for the cased symbology (`colourLoad: "load"`, decisions-r06-r07 item 6). Each frame
  * that carries a meter takes the scene target's exposure histogram under it (R07.T12), read back
  * for the view's `AutoExposure` ({@link PhotorealRenderer.takeHistogram}); a frame of a view that
- * meters nothing, an instrument's, takes none (R07.T19.c). Mesh bodies, R08's, R10's
- * and R11's passes join when they exist. Its resources are made asynchronously, the pipelines compiled
+ * meters nothing, an instrument's, takes none (R07.T19.c). R08's, R10's and R11's passes join
+ * when they exist. Its resources are made asynchronously, the pipelines compiled
  * before the first frame, and again after a device loss; until then {@link
  * PhotorealRenderer.render} draws nothing and says so, and the view keeps its wireframe.
  */
@@ -26,7 +28,7 @@ import {
   LitBodyRenderer,
   planLitBodies,
 } from "../bodies/draw";
-import type { LitRegime } from "../bodies/regime";
+import type { LitRegime, ScreenCircle } from "../bodies/regime";
 import {
   NEAR_PLANE_M,
   perspectiveReversedInfinite,
@@ -92,6 +94,11 @@ export interface PhotorealFrame {
   /** The lights at their stars' centres in this frame (`placeLights`). */
   readonly lights: ReadonlyArray<PlacedLight>;
   readonly bodies: ReadonlyArray<LitBodyInput>;
+  /**
+   * The footprints of the view's other geometry that writes depth (R10's terrain, lit craft), over
+   * which a disc is drawn as a mesh (Design note 2); none in a view today.
+   */
+  readonly depthWriters: ReadonlyArray<ScreenCircle>;
   /** Each body's regime on the previous frame, for the hysteresis. */
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /** The symbology's canvas pass, drawn loading the tone-mapped image, or `null`. */
@@ -371,6 +378,8 @@ export class PhotorealRenderer {
         exposureScale: frame.exposureScale,
         annuli: frame.setting === "low" ? DISC_ANNULI_LOW : DISC_ANNULI_HIGH,
         planetshine: frame.setting === "low" ? PLANETSHINE_SOURCES_LOW : PLANETSHINE_SOURCES_HIGH,
+        depthWriters: frame.depthWriters,
+        setting: frame.setting,
       },
       frame.previousRegimes,
     );
@@ -383,6 +392,18 @@ export class PhotorealRenderer {
       draws: [...frame.sky, ...(stars === null ? [] : [stars])],
       postProcesses: [],
     });
+    // The mesh bodies' figures, with depth, before the sequence; no pass where there are none.
+    const meshes = this.#bodies.meshDraws(plan);
+    if (meshes.length > 0) {
+      resources.target.render({
+        label: PHOTOREAL_PASS_LABELS.bodies,
+        viewRotation,
+        projection,
+        draws: meshes,
+        postProcesses: [],
+        colourLoad: "load",
+      });
+    }
     resources.target.render({
       label: PHOTOREAL_PASS_LABELS.discs,
       viewRotation,

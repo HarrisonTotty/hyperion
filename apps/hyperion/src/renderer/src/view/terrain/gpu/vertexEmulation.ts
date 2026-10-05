@@ -1,5 +1,5 @@
 /**
- * A TypeScript emulation of `terrain.wgsl`'s `FaceDifferences` vertex arithmetic (plan R05,
+ * A TypeScript emulation of `patchVertex.wgsl`'s `FaceDifferences` vertex arithmetic (plan R05,
  * R05.T11.b, Design note 4): the same `f32` operations in the same order, each rounded by
  * `Math.fround`, so that a test holds the shader's formula to T4.b's Rust `f32` reference through
  * `vertex_f32.golden`.
@@ -19,7 +19,7 @@ import type { Vec3 } from "../../../geometry/vec3";
 
 const f = Math.fround;
 
-/** A slot record's `f32` terms, as `terrain.wgsl`'s `SlotRecord` holds them (uniforms.ts). */
+/** A slot record's `f32` terms, as `patchVertex.wgsl`'s `SlotRecord` holds them (uniforms.ts). */
 export interface SlotTermsF32 {
   readonly axisA: Vec3;
   readonly axisE1: Vec3;

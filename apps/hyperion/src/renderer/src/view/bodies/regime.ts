@@ -14,8 +14,14 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
-import type { ProjectionCamera, Viewport } from "../camera/projection";
+import {
+  NEAR_PLANE_M,
+  type ProjectionCamera,
+  toViewAxes,
+  type Viewport,
+} from "../camera/projection";
 import { angularDiameterPx } from "../wireframe/bodies";
+import { sphereScreenRect } from "../wireframe/submit";
 
 /** How a lit body is drawn. */
 export type LitRegime = "point" | "disc" | "mesh";
@@ -79,6 +85,35 @@ export interface ScreenCircle {
   readonly xPx: number;
   readonly yPx: number;
   readonly radiusPx: number;
+}
+
+/**
+ * A sphere's footprint on a view: the circle about its screen rectangle (`sphereScreenRect`, its
+ * silhouette's bound with a margin, clamped to the view) through the rectangle's corners, or `null`
+ * where it is off the view or wholly behind the near plane (where `sphereScreenRect` gives the
+ * whole view). It bounds the silhouette, so that promotion may promote a disc that overlaps
+ * nothing, never miss one that does (T5 as built).
+ *
+ * @param centreM - The sphere's centre from the camera, m (`f64`).
+ */
+export function sphereFootprint(
+  centreM: Vec3,
+  radiusM: number,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): ScreenCircle | null {
+  if (-toViewAxes(centreM, camera.orientation).z + radiusM < NEAR_PLANE_M) {
+    return null;
+  }
+  const rect = sphereScreenRect(centreM, radiusM, camera, viewport);
+  if (rect === null) {
+    return null;
+  }
+  return {
+    xPx: (rect.leftPx + rect.rightPx) / 2,
+    yPx: (rect.topPx + rect.bottomPx) / 2,
+    radiusPx: Math.hypot(rect.rightPx - rect.leftPx, rect.bottomPx - rect.topPx) / 2,
+  };
 }
 
 /** Whether two footprints overlap. */

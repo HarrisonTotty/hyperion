@@ -3569,6 +3569,9 @@ medium, sizes, figure)`.
     instance origins' frame), `sunDirection` (body-fixed), `sunRadiance` (albedo ÷ π × the sun's
     illuminance per channel × the pre-exposure, which T11.c fills) and `atlas` (columns, tiles a
     layer, a tile's stored texels, samples a side).
+  - _Split by R07.T9 (2026-10-05)._ `SlotRecord` and the `FaceDifferences` arithmetic moved,
+    unchanged, from `terrain.wgsl` to `shaders/patchVertex.wgsl`, which each material composes
+    after `frame.wgsl` and which R07's smooth figure (`view/shaders/smoothMesh.wgsl`) shares.
   - _The morph_ is CDLOD's factor on the unmorphed vertex's distance from the camera over the
     instance's morph range (0 where the range is empty), computed on the GPU in `f32` from the
     instance origin plus the rotated own offset; shared vertices agree to the rounding of two

@@ -165,6 +165,8 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     glareSources: inputs.discs.glareSources(camera, viewport, run.camera.role),
     lights,
     bodies: litBodiesOf(scene, pose),
+    // Nothing in a view writes depth yet; R10's terrain and lit craft add their footprints.
+    depthWriters: [],
     previousRegimes: inputs.previousRegimes,
     overlay: inputs.overlay,
     meter: inputs.meter,

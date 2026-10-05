@@ -1,31 +1,26 @@
-// The disc regime of a lit body (plan R07, T8.a, T8.b and T11; Design notes 2, 6, 7, 10, 19 and
-// 24): one screen rectangle the CPU bounds, each fragment's rays intersected with the body's
-// spheroid and shaded by `body_brdf`'s law under the horizon, eclipse, ring-shadow and atmosphere
-// terms of `litBody.wgsl`, and by the planetshine of up to two lit neighbours. The law is the
-// disc's surface's (`DiscSurface`): one law, or under R10's class map each class's law by its
-// weight at the hit and the uniform law by what the weights leave. Composed after frame.wgsl and
-// litBody.wgsl. The TypeScript twin is `view/bodies/discShading.ts`.
+// The shading of a lit body's disc (plan R07, T8.a, T8.b, T9 and T11; Design notes 2, 6, 7, 10, 19
+// and 24): each pixel's rays intersected with the body's spheroid and shaded by `body_brdf`'s law
+// under the horizon, eclipse, ring-shadow and atmosphere terms of `litBody.wgsl`, and by the
+// planetshine of up to two lit neighbours. The law is the disc's surface's (`DiscSurface`): one law,
+// or under R10's class map each class's law by its weight at the hit and the uniform law by what
+// the weights leave. The TypeScript twin is `view/bodies/discShading.ts`.
+//
+// A library composed by concatenation after frame.wgsl and litBody.wgsl, with no entry point of its
+// own: its includer declares `draw` at `@group(1) @binding(0)`, a `Draw` whose `disc` is the body's
+// record in `discs`. Two includers draw it (`disc_pixel`):
+//   - bodyDiscDraw.wgsl, the disc regime: one screen rectangle the CPU bounds, in two draws the CPU
+//     orders together in the painter's sequence, `edgePass` 0 for the pixels the body covers
+//     wholly, opaque, writing the meter class in alpha (Design note 10), and `edgePass` 1 for the
+//     limb's partly covered pixels, premultiplied by their coverage over what is beneath, whose
+//     class they keep (every blend keeps the destination's alpha). No depth is written: the
+//     painter's order by power stands for it (Design note 2).
+//   - smoothMesh.wgsl, the mesh regime (T9): R05's patches of the spheroid at zero height, writing
+//     depth, which draw the wholly covered pixels as the disc's first draw does; the limb is the
+//     disc's second draw, at the limb's depth.
 //
 // Every length reaches the GPU already divided: the body's centre as a unit direction with its
 // radii over its distance D, and every light and occluder relative to the body's centre over its
 // equatorial radius a, so that no large number meets another in f32 (Design note 19).
-//
-// A disc is two draws of this source, which the CPU orders together in the painter's sequence:
-// `edgePass` 0 shades the pixels the body covers wholly, opaque, writing the meter class in alpha
-// (Design note 10); `edgePass` 1 the limb's partly covered pixels, premultiplied by their coverage
-// over what is beneath, whose class they keep (every blend keeps the destination's alpha). No depth
-// is written: the painter's order by power stands for it (Design note 2).
-
-struct Draw {
-  // Unused: each disc carries its own centre.
-  offsetFromCameraM : vec3f,
-  // The disc's index in `discs`.
-  disc : u32,
-  // 0 for the wholly covered pixels, 1 for the limb's.
-  edgePass : u32,
-}
-
-@group(1) @binding(0) var<uniform> draw : Draw;
 
 // DISC_ROWS rows per disc (`discShading.ts`' `packDiscRecords`), along the galactic axes:
 //   0  the screen rectangle, px (left, top, right, bottom);
@@ -394,20 +389,6 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   return out;
 }
 
-struct DiscVarying {
-  @builtin(position) position : vec4f,
-}
-
-@vertex
-fn vertexMain(@location(0) corner : vec3f) -> DiscVarying {
-  let rect = disc_row(0u);
-  let px = mix(rect.xy, rect.zw, corner.xy);
-  let ndc = vec2f(px.x / frame.viewport.x * 2.0 - 1.0, 1.0 - px.y / frame.viewport.y * 2.0);
-  var out : DiscVarying;
-  out.position = vec4f(ndc, 0.0, 1.0);
-  return out;
-}
-
 // A limb pixel's corners within this many pixels inside the limb still count as on it
 // (`LIMB_OVERLAP_PX`): a pixel at the threshold is drawn by both draws, never by neither.
 const LIMB_OVERLAP_PX : f32 = 1e-3;
@@ -542,13 +523,24 @@ fn pixel_sum(body : Body, centre_px : vec2f, n : u32) -> CellSum {
   return sum;
 }
 
-@fragment
-fn fragmentMain(v : DiscVarying) -> @location(0) vec4f {
+// A pixel as one of the disc's two draws leaves it, and whether that draw draws it.
+struct DiscPixel {
+  colour : vec4f,
+  drawn : bool,
+}
+
+// The pixel whose centre is `position` (the fragment's, px), as the first draw (`edge_pass` 0, the
+// pixels the body covers wholly, opaque with the meter class) or the second (1, the limb's,
+// premultiplied by their coverage) leaves it; not drawn where the draw has none of it.
+fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
+  var none : DiscPixel;
+  none.colour = vec4f(0.0);
+  none.drawn = false;
   let body = body_of();
   let counts = disc_row(3u);
-  let pixel = floor(v.position.xy);
+  let pixel = floor(position);
   if (dot(body.centre, view_ray(pixel + 0.5)) <= 0.0) {
-    discard;
+    return none;
   }
   let c00 = angle_at(body, pixel);
   let c10 = angle_at(body, pixel + vec2f(1.0, 0.0));
@@ -557,17 +549,19 @@ fn fragmentMain(v : DiscVarying) -> @location(0) vec4f {
   let gradient = length(vec2f(c10 + c11 - c00 - c01, c01 + c11 - c00 - c10) * 0.5);
   let centre = (c00 + c10 + c01 + c11) * 0.25;
   if (!(gradient > 0.0) || centre / gradient > OUTSIDE_PX) {
-    discard;
+    return none;
   }
   let corners = vec4f(c00, c10, c01, c11);
   // Convex: all four corners inside means the body covers the pixel wholly.
   let interior = all(corners < vec4f(0.0));
   let limb = !all(corners / gradient < vec4f(-LIMB_OVERLAP_PX));
-  if (draw.edgePass == 0u) {
+  var out : DiscPixel;
+  out.drawn = true;
+  if (edge_pass == 0u) {
     if (!interior) {
-      discard;
+      return none;
     }
-    let sum = pixel_sum(body, v.position.xy, u32(counts.x));
+    let sum = pixel_sum(body, position, u32(counts.x));
     let light = select(vec3f(0.0), sum.radiance / sum.coverage, sum.coverage > 0.0);
     // The pure-pixel class: lit where every shaded point is, unlit where none is, `other` where
     // they are mixed or no star lights the body.
@@ -579,15 +573,17 @@ fn fragmentMain(v : DiscVarying) -> @location(0) vec4f {
         meter = METER_UNLIT_BODY;
       }
     }
-    return vec4f(min(light, vec3f(HDR_MAX)), meter);
+    out.colour = vec4f(min(light, vec3f(HDR_MAX)), meter);
+    return out;
   }
   if (!limb) {
-    discard;
+    return none;
   }
-  let sum = pixel_sum(body, v.position.xy, u32(counts.y));
+  let sum = pixel_sum(body, position, u32(counts.y));
   if (sum.coverage <= 0.0) {
-    discard;
+    return none;
   }
   // Premultiplied by the coverage over what is beneath, whose class it keeps.
-  return vec4f(min(sum.radiance, vec3f(HDR_MAX)), min(sum.coverage, 1.0));
+  out.colour = vec4f(min(sum.radiance, vec3f(HDR_MAX)), min(sum.coverage, 1.0));
+  return out;
 }

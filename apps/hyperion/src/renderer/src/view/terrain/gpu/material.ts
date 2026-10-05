@@ -1,7 +1,7 @@
 /**
  * The terrain pass's materials (plan R05, R05.T11.b, Design notes 4 and 17): one per vertex path,
- * composed from `frame.wgsl`, `terrain.wgsl` and the path's own source, registered in
- * `WGSL_CATALOGUE`.
+ * composed from `frame.wgsl`, `patchVertex.wgsl` (the `FaceDifferences` arithmetic, which R07's
+ * smooth figure shares), `terrain.wgsl` and the path's own source, registered in `WGSL_CATALOGUE`.
  *
  * @remarks
  * The two paths differ only in how a vertex's offset from its patch origin is formed; the
@@ -13,6 +13,7 @@
 import type { StorageBufferSpec, WgslMaterialSpec } from "../../engine/types";
 import type { TerrainVertexPath } from "../../quality/qualitySetting";
 import frameWgsl from "../../shaders/frame.wgsl?raw";
+import patchVertexWgsl from "../shaders/patchVertex.wgsl?raw";
 import bakedOffsetsWgsl from "../shaders/terrainBakedOffsets.wgsl?raw";
 import faceDifferencesWgsl from "../shaders/terrainFaceDifferences.wgsl?raw";
 import terrainWgsl from "../shaders/terrain.wgsl?raw";
@@ -42,7 +43,7 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
 
 /** The terrain material of a vertex path. */
 export function terrainMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
-  const source = frameWgsl + terrainWgsl + PATH_SOURCES[path];
+  const source = frameWgsl + patchVertexWgsl + terrainWgsl + PATH_SOURCES[path];
   const storageBuffers: StorageBufferSpec[] = [
     { name: "heights", binding: TERRAIN_BINDINGS.heights },
     { name: "slots", binding: TERRAIN_BINDINGS.slots },
