@@ -257,10 +257,13 @@ export function startInstrumentRun(primary: ViewRun): ViewRun {
 /** The styles a view offers before its adapter has answered: the wireframe alone. */
 export const WIREFRAME_ONLY: StyleAvailability = { wireframe: true, photorealistic: false };
 
-/** A command's outcome: the run after it, or why it was refused. */
+/**
+ * A command's outcome: the run after it, or why it was refused: a preset that needs an own ship, or
+ * a rate step outside `FREE` (R07.T19.b).
+ */
 export type CommandResult =
   | { readonly kind: "done"; readonly run: ViewRun }
-  | { readonly kind: "refused"; readonly reason: "no_own_ship" };
+  | { readonly kind: "refused"; readonly reason: "no_own_ship" | "not_free" };
 
 function cut(run: ViewRun, to: CutDestination, options: CutOptions): CommandResult {
   const result = cutTo(run.camera, to, cameraSceneOf(run.scene), options);
@@ -271,6 +274,10 @@ function cut(run: ViewRun, to: CutDestination, options: CutOptions): CommandResu
 
 /**
  * The run after a camera command: a key's action or a control's (Design note 18's cuts).
+ *
+ * @remarks
+ * `PAGE UP` and `PAGE DOWN` step the free camera's rate only in `FREE`, as the flight keys move
+ * only the free camera, so that the rate never changes unseen (decision-r07-t19-layout, item 1b).
  *
  * @param availability - The styles the adapter offers (R01's `styleAvailability`); a refused
  *   style leaves the camera as it was (R07.T7's `withStyle`).
@@ -301,10 +308,13 @@ export function commandRun(
       };
       break;
     case "rate":
-      result = {
-        kind: "done",
-        run: { ...run, camera: changeFreeRate(run.camera, action.step, cameraScene) },
-      };
+      result =
+        run.camera.preset === "free"
+          ? {
+              kind: "done",
+              run: { ...run, camera: changeFreeRate(run.camera, action.step, cameraScene) },
+            }
+          : { kind: "refused", reason: "not_free" };
       break;
     case "style": {
       const style = action.style === "toggle" ? otherStyle(run.camera.style) : action.style;
@@ -412,8 +422,19 @@ export function exposureReading(exposure: ExposureControl): string {
 }
 
 /**
+ * A camera's preset as the label block reads it: `SEAT`, `CHASE`, or in `FREE` the free camera's
+ * rate after a middle dot, `FREE · RATE 1.00 km/s`, so that the rate is on show while the camera
+ * panel is folded (decision-r07-t19-layout, item 1b).
+ */
+export function cameraReading(camera: CameraState): string {
+  const name = PRESET_NAMES[camera.preset];
+  return camera.preset === "free" ? `${name} · ${freeRateReading(camera.free.rateStep)}` : name;
+}
+
+/**
  * The label block's lines (Design note 16): always the frame, the time with its time system, the
- * style, the camera preset, the field of view and the exposure with its level, and the star source;
+ * style, the camera preset ({@link cameraReading}), the field of view and the exposure with its
+ * level, and the star source;
  * the scene's name in a kept scene; `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull;
  * `ROTATION NOT YET MODELLED` while a body's rotation is not modelled.
  *
@@ -431,7 +452,7 @@ export function labelLines(
     { label: "FRAME", value: frameName(camera.pose.frame, scene) },
     stale ? { label: "TIME", value: time, stale: true } : { label: "TIME", value: time },
     { label: "STYLE", value: styleName(camera.style) },
-    { label: "CAMERA", value: PRESET_NAMES[camera.preset] },
+    { label: "CAMERA", value: cameraReading(camera) },
     { label: "FOV", value: `${String(camera.fovDeg)}°` },
     { label: "EXPOSURE", value: exposureReading(exposure) },
     {
@@ -447,6 +468,13 @@ export function labelLines(
 
 /** The statement of a view whose camera is off the hull: positions are as the ship sees them. */
 export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
+
+/**
+ * The statement the `PRIMARY` view's block carries while the `EASED CAMERA MOVES` setting is on
+ * and applied, not under reduced motion (decision-r07-t19-layout, item 1b): display-wide, so on
+ * the primary's block alone, and stated only while it is on, as `DECORATION ON` is.
+ */
+export const EASED_MOVES_STATEMENT = "EASED CAMERA MOVES";
 
 /**
  * The steady statements under the label block's lines, each while its condition holds.
@@ -572,9 +600,18 @@ function closureText(closureMPerS: number): string {
   return `${sign}${formatSignificant(Math.abs(closureMPerS))} m/s`;
 }
 
-/** A row's range as the list and the canvas labels both read it, `FROM CAMERA` with no own ship. */
+/**
+ * A row's range as the canvas labels and the list's accessible names read it, `FROM CAMERA` with
+ * no own ship; the list's rows show the bare range under its `RANGE FROM CAMERA` head
+ * (R07.T19.b).
+ */
 export function rangeText(row: MarkRow): string {
   return row.fromCamera ? `${row.range} FROM CAMERA` : row.range;
+}
+
+/** Whether a scene's ranges are from the camera: it has no own ship to measure from. */
+export function rangesFromCamera(scene: ViewScene): boolean {
+  return !scene.craft.some((craft) => craft.id === scene.ownShip);
 }
 
 /** A target's key, stable from frame to frame. */
@@ -595,6 +632,7 @@ export function markRows(
   const origins = sceneOrigins(scene);
   const pose = runPose(run);
   const own = scene.craft.find((c) => c.id === scene.ownShip);
+  const fromCamera = rangesFromCamera(scene);
   return cameraSceneOf(scene).targets.map((target) => {
     const position = targetPosition(target, origins);
     const rangeM =
@@ -629,7 +667,7 @@ export function markRows(
       kind: body === undefined ? "CRAFT" : BODY_KIND_NAMES[body.kind],
       range: `${distance.value} ${distance.unit}`,
       unit: distance.unit,
-      fromCamera: own === undefined,
+      fromCamera,
       closure,
     };
   });

@@ -132,6 +132,42 @@ provisional = true
 acceptance = "fitted over 126 clusters (17 left out for want of a distance; 363 known pulsars): γ = 0.632 (0.5–0.9; passes), A = 38.0 at 47 Tucanae's Γ (30–50; passes), completeness distance 4.8 kpc; the implied total over the catalogue 1539 (2,000–8,000; FAILS); the table keeps plan 09's scratch A 40, γ 0.7 and cap 40 until a ruling"
 
 [[table]]
+name = "sky_binary_light_c"
+path = "sky_binary_light_c.rs"
+task = "sky_binary_light_c"
+revision = 0
+inputs_sha256 = "20f3430ceff92ef66bf400a1a4d929041ffdfbab4be4426b113742e5ddbe3861"
+body_sha256 = "4dee3b4e7f2097bc743bdea6fd4265e06e63fd7f2ee6d86266e62738db01ad61"
+fingerprint = [-263.8384510945144, -284.3701662348926, -409.3117285820592, -262.53682559921776, -510.04064399257015, -11.0, -2907.1959556688653, 263.83845148603166, 12.0, -128.21299145446093, -134.24803423317942, -159.8412713404328, -130.2251336048842, -290.0825242003382, -31.0, -1578.009130153469, 128.21299852885915, 34.0, 0.00029533896239450445, 0.00030965396560360165, 0.0004776864784019119, 0.000277950726713122, 0.0005312902904746037, 16.0, 0.00765854587876923, 0.00029533896239450445, 18.0]
+since_generator_version = 20
+provisional = false
+acceptance = "130 cells × 200000 systems (26000000), 286739 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -4.5947e-1 to 1.1896e-1 L☉,V a system, its standard error at most 1.3180e-1"
+
+[[table]]
+name = "sky_binary_light_d"
+path = "sky_binary_light_d.rs"
+task = "sky_binary_light_d"
+revision = 0
+inputs_sha256 = "8992e1da34b0fa40cd339dfd38cf30dce5572fdc36265bf7f40445342dbd6033"
+body_sha256 = "95bcf8f96fc6db138b2099c11284856b6fe3bc9e3ef585adc2c9e7f5200fc8e0"
+fingerprint = [-114.47174946395725, -115.9504188190751, -84.82313612671568, -106.71365576186578, -418.85325886524663, -10.0, -1727.405827094146, 275.98814303147157, 13.0, -9365.577206018808, -10094.846394513854, -15121.965929181364, -9184.88412792101, -17185.754023107853, -16.0, -70782.05382749105, 9727.802720335352, 26.0, 0.0004238566453509814, 0.000440692639090153, 0.0007169574723154923, 0.0003870344014607504, 0.0007462901141235465, 47.0, 0.012291842715178462, 0.0004238566453509816, 47.0]
+since_generator_version = 20
+provisional = false
+acceptance = "130 cells × 20000 systems (2600000), 181418 changed by pair evolution; the 1-mag bins from absolute V -8 to 20 held; a cell's mean total light difference -3.8684e1 to 2.8041e-1 L☉,V a system, its standard error at most 6.4950e0"
+
+[[table]]
+name = "sky_binary_light_e"
+path = "sky_binary_light_e.rs"
+task = "sky_binary_light_e"
+revision = 0
+inputs_sha256 = "d227f8afab2265943ce7b6595f165e1ecaa0def617b9166b0937c6fd59694126"
+body_sha256 = "f4d2490189540b875b34b394acf0f1b104ac4407a6a490197c7de2ebff03a51d"
+fingerprint = [-58318.987587045915, -59298.45240632111, -47233.2786698564, -58724.3157747046, -181110.99331147992, -13.0, -298009.05495329306, 86617.88762005733, 19.0, -72857.201250147, -76184.71197392023, -88633.57809533337, -72591.75852961677, -177601.86102129138, -16.0, -391530.7725037494, 99762.505611362, 24.0, 0.00010821871796195272, 0.00011251726955493272, 0.00018305297165501934, 0.00009881729398997871, 0.00019054215679750104, 12.0, 0.0031383428208966294, 0.00010821871796195272, 12.0]
+since_generator_version = 20
+provisional = false
+acceptance = "130 cells × 20000 systems (2600000), 332332 changed by pair evolution; the 1-mag bins from absolute V -12 to 20 held; a cell's mean total light difference -7.1845e3 to 4.2664e2 L☉,V a system, its standard error at most 9.5250e2"
+
+[[table]]
 name = "sky_envelope"
 path = "sky_envelope.rs"
 task = "sky_envelope"

@@ -351,8 +351,9 @@ export interface AutoExposure {
 }
 export interface ExposureReading {
   readonly ev100: number;
-  /** R02's triple; under `AUTO` from Design note 11's program. R06's `cameraLimitV` reads it. */
-  readonly triple: ExposureTriple; // R02's `{ aperture, shutterS, iso }`
+  /** R02's triple: the view camera's program at every level, or `MAN`'s own (T13.c). R06's
+   *  `cameraLimitV` reads it (T13.e). */
+  readonly triple: ExposureTriple; // R02's `{ aperture, shutterS, iso, ndEv? }`
   readonly control: ExposureControl;
   readonly meter: MeterMode;
   readonly source: ViewId;
@@ -572,7 +573,8 @@ GlareSource[]` returns one `GlareSource` per disc, `excessLuminance` per channel
   _Not built at `ce7aeb3`_ (no `view/sky/`, `view/post/` or `sky` protocol module). Providers:
   `HostDiscDto` R06.T10 (filled by R06.T11.c; its radius and coefficient field names are fixed
   there, not yet in R06's text), `cameraLimitV` and `DEFAULT_VIEW_CAMERA` (N = 1.4, t = 1/30 s,
-  R06 Design note 18) R06.T13.a, `HostDiscLayer`, `glareSources`, `DEFAULT_EYE_OBSERVER` and the
+  R06 Design note 18, the N and t of whose Design note this plan's `VIEW_CAMERA` holds with the
+  camera's ranges, T13.c) R06.T13.a, `HostDiscLayer`, `glareSources`, `DEFAULT_EYE_OBSERVER` and the
   meter class R06.T13.e (`view/post/{meter,glare}.ts` if this plan's are absent). `angular_radius`
   is Rust only (`sky::disc`); the client computes asin(R ÷ d) itself (T3).
 - **R08:** `DiscReflectanceTable`, baked by R08's `bakeDiscReflectance(medium, appearance:
@@ -850,10 +852,17 @@ and `--port`.
     delete a small planet. Temporal smoothing is in EV and frame-rate-independent, after Unreal's
     documented structure: linear at 3 EV/s when the scene brightens and 1 EV/s when it darkens while
     |ΔEV| exceeds 1.5, exponential inside that band (the speeds from memory, to be settled by eye).
-    No dark adaptation of the eye is modelled. `MAN` takes R02's triple. Under `AUTO` the reading
-    also carries a triple, for R06's `cameraLimitV`, by a sensitivity-priority program: the aperture
-    and shutter stay at R06's `DEFAULT_VIEW_CAMERA` (N = 1.4, t = 1/30 s) and the sensitivity is
-    solved from R02's EV100 = log₂(N² ÷ t) − log₂(S ÷ 100). `INHIBITED` freezes the last value.
+    No dark adaptation of the eye is modelled. Every level reads one camera, the view camera
+    (decision-r07-exposure-camera; T13.c): R06's sensor behind a fixed f/1.4 lens, a shutter of
+    1/8,000 to 1/30 s, ISO 100 to 409,600 and a variable neutral-density filter (ND), its triple a
+    function of EV100 alone, EV100 = log₂(N² ÷ t) − log₂(S ÷ 100) + ND. From dark to bright it holds
+    1/30 s, the live frame, and sets S = 5,880 × 2^−EV100 from 409,600 (EV100 −6.12) to 100 (5.88),
+    R06 Design note 18's 12 stops of gain; then holds ISO 100 and sets t = 1.96 × 2^−EV100 to
+    1/8,000 s (13.94); then holds 1/8,000 s and sets ND = EV100 − 13.94 EV, 28.1 EV at `MAN`'s
+    top, 42. Darker than −6.12 the sensitivity runs on as a digital push, which brightens the
+    picture without adding signal and reads `409,600 ↑`. S never falls below base, where R06's
+    gain model does not hold. `MAN`'s entry takes the same triple; the reading carries it at every
+    level for R06's `cameraLimitV`. `INHIBITED` freezes the last value.
     Exposure adaptation is not motion, so `prefers-reduced-motion` leaves it alone. A wireframe
     instrument view takes the `ExposureReading` of the photorealistic view it accompanies and shows
     which.
@@ -1052,7 +1061,8 @@ Phase A builds the photorealistic style for one view, Phase B several views, Pha
 screen. T1 and T3 can start at once; T2.a follows T4.b (`lawFor`), and T2.b waits on plan 14's section. T4 and
 T6 can run beside T3. T5 needs T2.a and T4.a. T7 needs T3–T5. T8.a needs T6 and T7; T8.b, T9, T10
 and T11 follow T8.a. T12–T15 follow T7 and are independent of T8–T11, with T14.a before T13.a
-(T13 reads no veil but tests against T14.a's glare sources) and T13.a before T16. T16 follows T8.a
+(T13 reads no veil but tests against T14.a's glare sources) and T13.a before T16. T13.c, T13.d
+and T13.e follow T13.b in that order, before T16 (decision-r07-exposure-camera). T16 follows T8.a
 and T13.a; T17 closes Phase A. Phase B follows T7 and T13. Phase C waits on the sessions plan.
 TypeScript paths follow the rule at the head of Provides. Every task that adds or changes a shader
 registered in `WGSL_CATALOGUE`, or anything under `view/engine/`, runs `just test-render` in its
@@ -1400,6 +1410,50 @@ src/renderer/src/view/post`.
   with its automation level and the meter, keyboard operable. Tests (Vitest): each meter selectable by keyboard; the reading and
   its source view shown. By eye, recorded: a lit planet on black, a star entering frame, the
   cockpit turning to a planet, which settle the smoothing speeds. Acceptance: `pnpm test`.
+- **R07.T13.c One camera** (decision-r07-exposure-camera). R02's `exposure.ts` takes the program
+  from `post/autoExposure.ts` and widens it:
+  `ExposureProgram { aperture, frameShutterS, minShutterS, baseIso, maxIso, maxNdEv }`,
+  `VIEW_CAMERA` (f/1.4; 1/30 s and 1/8,000 s; ISO 100 and 409,600; 28.1 EV), and
+  `programTriple(program, ev100)`: 1/30 s with S = 100 × (N² ÷ t) × 2^−EV100 while S ≥ 100, beyond
+  `maxIso` included; then ISO 100 with t = N² × 2^−EV100 down to 1/8,000 s; then 1/8,000 s with
+  `ndEv` = EV100 − log₂(N² ÷ t_min). `ExposureTriple` gains `ndEv?` (EV; absent while clear), which
+  `ev100FromTriple` adds, `setManual` refuses when negative or not finite, and R06's
+  `cameraLimitParts` applies as a transmission 2^−ndEv; R06's `ViewCameraSensor` gains `maxIso`
+  (409,600), and the read-noise term takes S within [`baseIso`, `maxIso`], since below base the
+  analogue gain stays at base and above the top a push adds none. `DEFAULT_MAN_TRIPLE` becomes
+  `programTriple(VIEW_CAMERA, -1)`, f/1.4, 1/30 s, ISO 11,760 (EV100 −1 unchanged).
+  `VIEW_AUTO_PROGRAM` retires; `AutoExposure` takes `VIEW_CAMERA`. R02's `ExposurePanel` shows
+  `APERTURE`, `SHUTTER`, `ND` and `ISO` at every level from the shown control (`MAN`'s triple, else
+  the program's): `f/1.4`; s to three figures; `CLEAR` or `6.1 EV`; ISO whole; a member beyond the
+  camera's range pegged with the guide's off-scale `↑` (`ISO 409,600 ↑` below EV100 −6.12,
+  `ND 28.1 EV ↑` above 42). The guide's rows follow, drafted for the owner. Tests: the program's
+  EV100 round-trips to 10⁻¹² from −14 to 42 and is continuous at its joins, S ≥ 100 and t in range
+  throughout; 5,880 against K N² ÷ (t L̄); the limit at 60° and μ 24 is 10.06 up to EV100 1, 9.40 at
+  5.88, 2.56 at 15; an ND equals the same shortening of the shutter in the limit; the panel's rows
+  under `AUTO`, at the push and with the ND.
+  Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/photometry
+src/renderer/src/view/post src/renderer/src/view/sky src/renderer/src/displays/view`, the
+  console-ux skill's scripts, `just ci`.
+- **R07.T13.d The way back to `MAN`** (decision-r07-man-exposure, as amended by
+  decision-r07-exposure-camera): decision-r07-man-exposure's subtask text, with `setManualEv100`
+  setting `MAN` at `programTriple(VIEW_CAMERA, ev100)` in place of "the `MAN` camera's aperture and
+  ISO (the triple in force, else `DEFAULT_MAN_TRIPLE`'s), the shutter solved"; its tests:
+  `setManualEv100` round-trips `DEFAULT_MAN_TRIPLE` at −1 and gives the program's triple to 10⁻¹²
+  across the span, from `AUTO` at 9.6 f/1.4, 1.96 × 2^−9.6 s, ISO 100. The `MAN` field sits after
+  T13.c's four rows.
+- **R07.T13.e The sky's limit follows the camera** (decision-r07-exposure-camera). R06's
+  `viewSky.ts`: the request's `camera_limit_v` and the cull take the view camera's deepest triple
+  (f/1.4, 1/30 s, ISO 409,600: V 10.06 at 60°, 11.72 at 30°, 13.58 at 13° under μ 24) at every
+  level, so that no `AUTO` step or `MAN` entry asks, culls or bakes the sky again; the label's
+  `STARS V … mag CAM` takes the shown exposure's triple at every level (the guide's `CAM`: "from
+  its exposure"), at the readout's 4 Hz and 0.1 mag. Where that limit is 0.05 mag or more shallower
+  than the cull's (from EV100 3.5) a star at it reaches the tone curve 3.4–5.0 EV below AgX's floor
+  at 1080p and 60° (1.4–3.0 EV at 4K), so the deeper cull changes nothing visible. `useViewSky`'s
+  cull no longer depends on the exposure. Tests: the request's limit is the same under `MAN` and
+  `AUTO` at any EV100; the drawn sky keeps its identity across `AUTO` steps; the label at −1 and
+  15; a star at the label's limit below AgX's floor wherever that limit is shallower than the
+  cull's (1080p and 4K, 60°). Acceptance: `pnpm --filter hyperion exec vitest run
+src/renderer/src/view/sky src/renderer/src/displays/view`, `just ci`.
 
 #### R07.T14 Bloom as veiling glare
 
@@ -1439,7 +1493,8 @@ recorded: a Sun-like star in frame with a lit planet, hues holding in the highli
 
 `photoreal/overlay.ts` (Design notes 16–17): R02's draw list with casing on in the photorealistic
 style; rings and hulls as cased marks until R11; DOM readouts on `--surface-0` plates; the label
-block gains the meter, the style and `BODY PHOTOMETRY: NOT YET MODELLED`; hull edges cased over the
+block gains the style and `BODY PHOTOMETRY: NOT YET MODELLED` (its `METER` line is built by T19.b,
+decision-r07-t19-layout; T16 keeps its nomenclature rows); hull edges cased over the
 image, with the hull faces' occluder bias (`occluder.wgsl`, `slopeScale` 2 as built) raised to 3 so
 that the casing is covered (the UX decision, item 12; the sphere occluder's `SLOPE_SCALE` is 3
 already). Draft, for the owner, the nomenclature entries this plan adds beyond R02's nine items
@@ -1455,7 +1510,8 @@ that ends in the owner's sign-off. T16 also builds them:
 `METER_TIMEOUT_S` since the image was first drawn or the meter changed with no value held). R02's
 `InhibitReason` gains `"nothing_weighed"` with its meter. `ExposurePanel` and `MeterControl` take
 the cause beside the metered value; while it is `acquiring`, neither shows a meter status or
-`NO IMAGE TO METER`, and `ENABLE` is held back with `NOT AVAILABLE: not yet metered`. Tests: under
+`NO IMAGE TO METER`, and `ENABLE` is held back with `NOT AVAILABLE: not yet metered`; the `MAN`
+field (T13.d) is never held back, `acquiring` included. Tests: under
 `LIT` with no lit body, a drawn image reads `NO LIT SIDE`, never `NO IMAGE TO METER`, after 0.5 s
 and not before; a meter change clears it at once; `AUTO` resumes when a lit body is metered. Its
 other tests: every overlay mark over the image has a casing stroke; plates are present for every
@@ -1551,9 +1607,73 @@ leaves `CONTROLS` alone; the designators follow `CONTROLS`; hidden screenshots a
 1280×720 with both instruments open, nothing overlapping a reading or clipped. Acceptance: `pnpm
 test`, `just ci`.
 
+T19's paragraph above is R07.T19.a, built as R07.T19 (7e80d5d, guide draft 887fa4a); its layout
+and frame follow-ups are two subtasks (decision-r07-t19-layout).
+
+- **R07.T19.b `VIEW` at both sizes.** `ViewDisplay.tsx`, `styles.css`, `ViewLabelBlock.tsx`,
+  `InstrumentView.tsx`, `ViewMarkList.tsx`, `viewRun.ts` (decision-r07-t19-layout, items 1–3 and
+  5). Two layouts, chosen from the `.view` box's size alone and never from what it shows:
+  **full** where the box is at least 98.5rem wide (a 50.5rem stage, two slots' room beside the
+  primary's least label block, then 26rem and 20rem columns and their gaps) and as tall as
+  column A's tallest state with the list at two rows (about 52rem; the measured figure recorded),
+  which 1920×1080 at 100% is; **compact** otherwise, as 1280×720 and 1920×1080 at 125% and 150%
+  are. Full: column A, 26rem, holds `Instruments`, `Targets` (flex), `Camera` and `Style`; column
+  B, 20rem, `Exposure` and `Exposure meter`; focus runs through A before B. Compact: one 26rem
+  column in the same order, its panels at `0.5rem` block padding: `Instruments` folds to its
+  title row, a 2rem disclosure button, folded when the display mounts; `Targets` is always on
+  show, at least its head, one row and its position; under it one row of disclosure buttons,
+  `CAMERA`, `STYLE`, `EXPOSURE` and, while the meter panel would stand, `EXPOSURE METER` last;
+  then the one open panel. Exactly one of `INSTRUMENTS`, `CAMERA`, `STYLE`, `EXPOSURE` and
+  `EXPOSURE METER` is open, `CAMERA` by default; opening another folds the one open, folding it
+  opens `CAMERA` again, and focus in a panel that folds goes to its button. While its panel is
+  folded, `NO OWN SHIP: SEAT and CHASE need one`, `GRAPHICS STYLE REFUSED: …` and
+  `AUTO NOT AVAILABLE: NO IMAGE TO METER` stand under the row; the limit reasons fold with their
+  controls; single keys stay live. Every side panel takes `contain: inline-size`; the column never
+  scrolls, the list alone does. So that every setting a folded panel holds is on show: every
+  view's `CAMERA` value in `FREE` reads `FREE · RATE 1.00 km/s`, and `PAGE UP` and `PAGE DOWN`
+  step the rate only in `FREE`, as the flight keys move only the free camera; the primary's block
+  gains `METER AVG` (`LIT`, `DARK`) while the meter control stands, and the statement
+  `EASED CAMERA MOVES` while that setting is on and applied. Label lines break at `·` first, then
+  at a space, never inside a number with its sign, unit, band or prefix (`EV100 -1.0`, `60°`,
+  `1.00 km/s`), between a star limit and its kind (`V 9.5 mag CAM`), after `UT` or inside a clock
+  reading; `EV100 -1.0 MAN` stays whole where it fits; continuation lines hang under the value.
+  `INSTRUMENT 1` stands at the stage's top right and `INSTRUMENT 2` at its bottom right, each
+  inset `0.5rem`, so that neither moves when the other opens or closes; where the stage cannot
+  hold both corners `INSTRUMENT 2` stands directly under `INSTRUMENT 1`, never over it. An
+  instrument's block carries each photorealistic statement (`LIGHTING: …`, `BODY PHOTOMETRY: NOT
+  YET MODELLED`) that holds for its picture unless the primary's block shows the same line, its
+  statements running the slot's width under its label block and canvas. With no own ship the
+  list's `RANGE` head reads `RANGE FROM CAMERA` and its rows the bare range, each option's
+  accessible name keeping "from camera". T13.c–e and T16, which add to the exposure panels, each
+  re-take the compact capture with `EXPOSURE` and `EXPOSURE METER` open. Tests (Vitest): the
+  layout at each threshold; full's six panels in two columns in the ruled focus order; compact's
+  disclosures (one open, `CAMERA` by default and again on folding, `INSTRUMENTS` folding the open
+  panel, the meter's button only beside a drawn image, focus moving to the button), its tab order
+  that of full among the parts both show, and its standing lines; the rate keys refused outside
+  `FREE` and the rate on the label block in `FREE`; `METER` and `EASED CAMERA MOVES` on the
+  primary's block; an instrument's photorealistic statements beside a wireframe primary and not
+  beside a photorealistic one; the slots' anchors; the list's head; `.console__work`'s `scrollTop`
+  0 after Tab through every control. By hand, hidden and never on `:0`: captures at 1920×1080
+  (full), and at 1280×720 and 1920×1080 at 125% (compact), with both instruments open over a kept
+  scene and over `PHASE TEST` all photorealistic, and in compact with each of its five panels open
+  and with the camera's limit reasons standing; measured, the column's `scrollHeight` equal to
+  its `clientHeight`, no text truncated (`DESIG` included), no slot over a reading or the other
+  slot, and at 1920×1080 no value line broken but at `·`. Acceptance: `pnpm test`, `just ci`.
+- **R07.T19.c One frame path.** `viewFrameDrawer.ts`, `ViewDisplay.tsx` (decision-r07-t19-layout,
+  follow-ups): the primary draws through `ViewFrameDrawer` as the instruments do, with T8.a's
+  metering taken only by the exposure's source; a photorealistic instrument's renderer takes no
+  histogram, since nothing reads it (Design note 11). After T19.b, ordered by the orchestrator
+  against the shading lane's tasks that change the frame (T9, T10.a, T10, T13.e), and before T20,
+  whose figures it changes. Until it lands, a task that changes what the primary's frame draws
+  changes `ViewFrameDrawer` alike. Tests: against the fake engine, the primary and an instrument
+  with the same camera, style and size submit the same passes but the histogram's, and an
+  instrument submits no histogram; T8.a's metering tests pass unchanged. Acceptance: `pnpm test`,
+  `just test-render`, `just ci`.
+
 #### R07.T20 Several views, by hand
 
-With the real styles on the development machine (RTX 3080) and, by the owner, on the UHD 620, each
+After T19.b and T19.c (decision-r07-t19-layout), with the real styles on the development machine
+(RTX 3080) and, by the owner, on the UHD 620, each
 on a quiet machine: a full-window photorealistic view and two wireframe instruments, each the right
 way up, no GPU time in copies, a resize of one leaving the others' attachments alone, the frame time
 with instruments open against the low setting's 33 ms on the UHD 620 (brainstorm, Testing), and the
@@ -1737,10 +1857,23 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   see flare, so a realistic camera mode that meters it could be offered as an operator-selected
   meter (the research lean, 2026-09-29), not as a default and not with a cap, which would be an
   arbitrary number; it would need a guide entry for the owner. Not built.
-- **No way back to `MAN` (open, for the owner; observed in decision-r07-t8a-meter, not ruled).**
-  No control calls `setManual`, so `MAN` cannot be re-entered once it is left, and `INHIBIT` is
-  the operator's only hold. A `MAN` entry (the triple, or an EV100 set point, under the guide's
-  data-entry rules) is the owner's to decide; not built.
+- **The way back to `MAN` (ruled, decision-r07-man-exposure; T13.d).** `MAN` is entered by an
+  EV100 field in `ExposurePanel`, never a button, starting from the exposure as it stands, at the
+  view camera's triple for that EV100 (T13.c). Editable `APERTURE`, `SHUTTER`, `ND` and `ISO`
+  fields are not built; one that allowed a shutter beyond 1/30 s would have to raise the sky
+  request's limit with it.
+- **One camera (ruled, decision-r07-exposure-camera; T13.c, T13.e).** f/1.4, 1/8,000–1/30 s,
+  ISO 100–409,600 and a variable ND, on R06's sensor, at every level. Three idealisations remain:
+  the ND is continuous, where a real camera would step a filter wheel (an OD 5.0 solar filter, as
+  MER's Pancam and MSL's Mastcam carry) and let the shutter fill between, which moves neither the
+  image nor the limit; darker than EV100 −6.12 the picture is pushed beyond the sensor's top gain
+  (`ISO 409,600 ↑`) without the noise a push brings, the camera's cut standing in for it; and the
+  1/30 s frame is never smeared. A floor on `AUTO` at the camera's range, so that a dark sky is
+  left underexposed as a live camera leaves it, would change the image and eye views share the
+  controller: not built, the deep-space look judged in T13.b's by-eye checks. The cull takes the
+  camera's deepest limit and the label the exposure's own (T13.e), a departure from the
+  brainstorm's "each view thresholds its copy" only where the threshold would cut stars already
+  invisible.
 - **The law's thresholds** (Design note 5: 100 Pa and 30 kPa, raised from 10 kPa so that the
   simulated Mars, 11 kPa, reaches the Mars template; the cloud term suspended until plan 14's cloud
   fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
@@ -2027,10 +2160,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   metered value moves 0.01%, where in a 64 × 64 frame the disc's own 5% of the pixels, removed
   from the count, moved it 6%; Design note 11's "4–5 stops above the average" holds for a body
   covering about 3–6% of the metered pixels, and one under 0.64% reaches AgX's ceiling, as a
-  real averaging meter would. **For the owner** (science check): under `AUTO` the program's
-  sensitivity S = 5880 × 2^−EV100 at f/1.4 and 1/30 s spans ISO 0.18 (a sunlit planet, EV100 15) to 6 × 10⁶ (a dark sky, EV100 −10), far outside a real sensor; the lean is to record the
-  triple as nominal until R06's `cameraLimitV` models noise from S, then clamp S and let the
-  shutter take over.
+  real averaging meter would. **Ruled** (decision-r07-exposure-camera): one view camera for every
+  level, its sensitivity never below base: 1/30 s with ISO 409,600 to 100, then the shutter to
+  1/8,000 s, then an ND; darker than EV100 −6.12 a digital push read `409,600 ↑`. Built in T13.c;
+  the sky's limit reads it in T13.e.
 - **Deviations in T13.b, as built** (2026-10-02). `displays/view/MeterControl.tsx` (with
   `meterLabel`) shows `EV100 9.6 AUTO` through R02's `exposureReading`, `METER AVG`, the source
   view as `SOURCE VIEW`, and the meters `AVG`, `LIT` and `DARK` as pressed-state buttons in Design note 10's order (the guide has none yet; T16 drafts it),
@@ -2500,8 +2633,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     nothing reads (a cost for T20). Its canvas has no DOM mark labels (its list names the marks).
     Its statements are decision-r07-t19's list (`POSITIONS AS SEEN FROM SHIP`, `PHOTOREALISTIC:
     PREPARING`, its graphics fault); the scene's (its lighting, its bodies' labels, `ROTATION NOT
-    YET MODELLED`) stay the primary's, as the guide draft's "every line above but `SCENE`" leaves
-    open (for the owner). An instrument opened during a device loss makes its view at once and its
+    YET MODELLED`) stay the primary's, and T19.b gives an instrument the photorealistic
+    ones its primary's block does not show (decision-r07-t19-layout, item 5). An instrument opened
+    during a device loss makes its view at once and its
     renderers at the restore. A new scene remounts the stage, so it closes the instruments. VIEW
     draws no terrain yet, so no demand carries `streamPriority`; the plan that adds terrain to
     `VIEW` takes each view's R05 weight from it.
@@ -2520,23 +2654,125 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     288 px label block of twelve lines at line height 1.2, `STARS` over three, beside the 240 × 180
     px canvas), 233 px in `PHASE TEST`: two stand 33.25 rem, not the ruling's estimated 29.5 rem,
     since the label block, not the canvas, sets the height. On the stage nothing overlaps a reading
-    or is clipped, at either size, in any of the three states. **Pending the owner:** at 1280×720
+    or is clipped, at either size, in any of the three states. **Ruled in
+    decision-r07-t19-layout (items 2–3, built by T19.b):** at 1280×720
     with both open the primary's label block is 230 px wide, and `FRAME`, `TIME`, `EXPOSURE` (`EV100
     -1.0` and `MAN`) and `ROTATION NOT YET MODELLED` break at spaces too, against decision-r07-t19
     2f's "no line breaks except at `·`"; and the slots pack upward, so `INSTRUMENT 2` opened alone
     stands at the top until `INSTRUMENT 1` opens.
-  - **The side column (pending the owner).** It fits at 1920×1080 in the wireframe, both closed and
+  - **The side column (ruled in decision-r07-t19-layout, item 1; built by T19.b).** It fits at
+    1920×1080 in the wireframe, both closed and
     both open, after the column's gap went to 0.5 rem, its panels' block padding to 0.75 rem (the
     `Instruments` panel's to 0.5 rem), their titles' margin to 0.25 rem and the targets list's least
     height to two rows. It overflows at 1280×720, as it did before T19 (the `Exposure` panel already
     stood below the stage's foot; `Instruments` pushes `Style` down too), and at 1920×1080 in the
     photorealistic style once the meter panel shows, as it has since T8.a's metering. T19's by-hand
     check ("nothing … clipped") is therefore unmet in the side column at those sizes; a rule for a
-    short page (G 252–255's rearrangement) is needed.
-  - **The DOM list (for the owner).** An instrument's list is the side column's while `CONTROLS`
+    short page (G 252–255's rearrangement) is needed. T13.c's camera setting, four rows at every
+    level, makes the 1920 × 1080 wireframe overflow too (see "Deviations in T13.c, as built").
+  - **The DOM list (confirmed in decision-r07-t19-layout, item 4).** An instrument's list is the
+    side column's while `CONTROLS`
     points at it (decision-r07-t19, 2d), and focus alone does not move `CONTROLS`, so a focused
     instrument canvas shows the primary's list until a key or a press on it; whether that meets the
     brainstorm's "each view paired with its DOM list" is the owner's.
+- **`VIEW`'s layout, ruled (decision-r07-t19-layout).** T19.b builds the full and compact layouts,
+  the label breaks, the slots' fixed corners, the list's `RANGE FROM CAMERA` head and the label
+  block's additions; T19.c builds one frame path, with no histogram on an instrument. Stated
+  limits: in compact, the controls of a folded panel are one action away, its settings on the
+  label block; below a 1280×720 CSS-px window the compact column may clip at its foot; at 1280×720
+  the label lines also break at spaces, and two slots fit only while each holds at most one
+  statement, so that a line appearing in an open slot without room (the moment of
+  `LIGHTING: PENDING`) sets `INSTRUMENT 2` under `INSTRUMENT 1`, its foot past the stage's, until
+  it clears.
+- **Deviations in T19.b, as built** (2026-10-05).
+  - **Files.** Beyond the task's list: `displays/view/viewLayout.ts` (`ViewLayout`, `viewLayout`,
+    `FULL_MIN_WIDTH_REM` 98.5, `FULL_MIN_HEIGHT_REM` 55.25, `FoldPanel`, `DEFAULT_FOLD`,
+    `toggledFold`, `FOLD_BUTTONS`, `SideFolds`); `InstrumentsPanel.tsx` (optional `id`, `fold` and
+    `toggleRef`, its rows in a body under the `Instruments` disclosure); `CameraControls`,
+    `StyleControl`, `ExposurePanel` and `MeterControl` (optional `id` and `hidden`; `NO_OWN_SHIP`
+    and `AUTO_NOT_AVAILABLE` exported for the standing lines); `InstrumentControls` (`folds`);
+    `useInstruments.ts` (each slot's `panelRef` and `panelSize`); `viewRun.ts` (`cameraReading`,
+    `EASED_MOVES_STATEMENT`, `rangesFromCamera`, a `not_free` refusal on `CommandResult`);
+    `ViewMarkList`'s required `fromCamera`, which `view/spike/DescentSpike.tsx` passes too; and
+    `test/viewDisplayHarness.tsx` (`FULL_VIEW_PX`, `COMPACT_VIEW_PX`, `stubViewLayout`,
+    `resizeView`, `VIEW` inside a `.console__work--view`).
+  - **The full layout's least height is 55.25 rem**, not the ruling's estimated 52: column A's
+    tallest state measures 882 px at 1920 × 1080 (`Instruments` 204 with both closed, `Targets` 174
+    at two rows under the two-line `RANGE FROM CAMERA` head, `Camera` 339 with `NO OWN SHIP`, both
+    limit reasons and reduced motion, `Style` 99 plus a two-line refusal such as the software
+    adapter's, 141, and three gaps). 1920 × 1080 at 100% (a 57.5 rem box) is full. **Stated limit,
+    for the owner:** a window whose `.view` box is under 55.25 rem tall, such as a maximised
+    1920 × 1080 window under a title bar and a desktop panel (about 53.5 rem), takes the compact
+    layout. The layout is full before the box is measured, as the galaxy page's is.
+  - **Room for the designations.** VIEW's side panels take 0.75 rem inline padding (1.25 rem
+    before) and the list's columns stand 0.25 rem apart, so that `TEST PLANET 150°` (145 px at the
+    list's 1 rem) keeps its width beside `KIND` at 12ch and `RANGE` at 9ch. With no own ship
+    `FROM CAMERA` is the head's second line, under `RANGE` and running back under `KIND`'s empty
+    head, so the head grows by a line (19 px). The compact list's floor is 4.5 rem.
+  - **The disclosure row** is set at the guide's least letter spacing (0.1em), its chevrons
+    0.25 rem from their names, its buttons 0.25 rem apart and without end padding, so that the four
+    names stand on one line: 406 px of the 416 with `EXPOSURE METER` (at 0.15em and 0.75 rem it
+    wrapped). Its buttons carry the ship's disclosure mark (`DisclosureGlyph`), the open one's
+    pointing down; `CAMERA` pressed while open stays open. `STYLE` stands, as `EXPOSURE METER`
+    does, only while its panel would (a view can be drawn); a panel that goes gives its place to
+    `CAMERA`, and its focus to its own button or, where that went too, to `CAMERA`'s.
+  - **Focus.** The side column's focus events track the folding panel that holds the focus. It is
+    forgotten when the focus leaves the column for another control, or for nothing by the
+    operator's hand, so that a later switch to the compact layout opens `CAMERA`.
+  - **Standing lines.** The style's stands only for the `CONTROLS` view's fault
+    (`GRAPHICS STYLE REFUSED: …`); the software adapter's, `QUALITY LOW`'s and the graphics'
+    condition's refusals fold with the panel, as the ruling's list has it.
+  - **No scrolling.** `.console__work--view` and `.view__side` are `overflow: clip`, not
+    `hidden`, so that no focused control can scroll them; the column's clip margin, 0.25 rem,
+    keeps the focus rings at its edges.
+  - **Breaks.** The unbreakable runs are `white-space: nowrap` spans, found by one pattern: `UT`
+    with its first group, `V <m> mag EYE|CAM`, `EV100 <n>`, the clock `ddd/hh:mm:ss`, and a number
+    with a unit of a fixed list (`km/s`, `m/s`, `kyr`, `Myr`, `Gyr`, `yr`, `mag`, `AU`, `Gm`, `Mm`,
+    `km`, `m`, `ly`, `s`); a unit outside it is not held. Every reading is now set as inline-block
+    parts at the line's top, so that a part broken within itself keeps its label beside its first
+    line.
+  - **An instrument's statements.** All of them, `POSITIONS AS SEEN FROM SHIP` and
+    `PHOTOREALISTIC: PREPARING` too, run under its label block and canvas, outside `.view-label`
+    but in the canvas's description. `PHOTOREALISTIC: PREPARING` is the view's own and is never
+    dropped for the primary's. **For the owner:** the guide's Views bullet says the label block
+    carries them; "under its label block and canvas", the plan's words, could be added.
+  - **The label block's additions.** `METER` stands after `EXPOSURE`; `EASED CAMERA MOVES` after
+    `ROTATION NOT YET MODELLED`, before the photorealistic statements. `AVG`, `LIT` and `DARK` on
+    the label block wait for T16's nomenclature rows. The rate keys outside `FREE` are refused
+    without a word; the camera panel's rate reasons still name the step limits (the UX review's
+    suggestion of a reason for the preset is left: the ruling keeps the panel's `RATE` as built).
+  - **Tests.** jsdom lays nothing out: the slots' corners, the breaks, the fit, the clipping and
+    the work area's `scrollTop` are the captures'; the Vitest check of `scrollTop` guards only
+    against code that scrolls. The anchor test checks the slot's class and the reading order;
+    full's focus order is checked by document position and the shared tab order by Tab.
+  - **By hand, measured** (hidden: the app's window made offscreen by a capture hook, as its own
+    hidden spike and smoke runs are, never shown; `.git/rm23-scratch/r07-views/shots-t19b/`, run
+    2026-10-05 on the RTX 3080). Pages of 1920 × 1078, 1280 × 718, 1536 × 862 (1920 × 1080 at
+    125%) and 1279 × 719 (150%) CSS px; at each, both instruments over a kept scene and over
+    `PHASE TEST` all photorealistic, compact with each of its five panels open, and the camera's
+    worst (no own ship, `FOV` at its narrowest, the rate at its lowest, reduced motion, both
+    instruments closed). In every state the column's `scrollHeight` equals its `clientHeight` and
+    no control stands below its foot; no text is truncated (`DESIG` included); no slot overlaps a
+    reading or the other; `INSTRUMENT 2` stands at the stage's foot; Tab through every control
+    leaves the work area's and the column's `scrollTop` at 0. At 1920 × 1080 no value line breaks
+    but at `·`; at 1280 × 720 and 150% with both slots open the primary's `FRAME`, `TIME` and
+    `EXPOSURE` break at their spaces as ruled (`UT +0 yr` | `000/00:00:08`, `EV100 -1.0` | `MAN`).
+    The camera's worst at 1280 × 720 leaves `Targets` 139 px, its one-row floor and a few px.
+    T13.c's camera setting and T13.d's `MAN` field and `METERED` line (merged before the captures)
+    fit in full, where column B holds `Exposure` at its tallest, 400 px, and the columns keep 416
+    and 320 px under `INHIBITED · NO IMAGE TO METER`; and in compact at 125%.
+  - **Open, for the orchestrator (T13.d's panel in the compact layout).** The exposure panel stands
+    352 px wireframe at `INHIBITED · NO IMAGE TO METER` and 374 px with a refused entry's line. With
+    `EXPOSURE` open, measured: at 1280 × 720 with an own ship (`PRECISION TEST`) the first fits and
+    the second runs 17 px past the column's foot; with no own ship (`PHASE TEST`, which adds the
+    `NO OWN SHIP` standing line and the two-line list head) 40 and 62 px; at 150% 0 and 0 with an
+    own ship, 21 and 42 px without. Where it runs past, `INHIBIT` (and at 62 px `ENABLE`) stands
+    below the clip. The ruling budgeted the panel at about 290–300 px. Options, not built: the
+    camera setting as two rows of two in the 26 rem column (about 46 px); `ENABLE` and `INHIBIT`
+    side by side (about 32 px); the reading's parts kept whole, so that
+    `EV100 11.7 INHIBITED · NO IMAGE TO METER` breaks at its `·` (one line less where the second
+    part fits); and the compact column's gaps at 0.25 rem (12 px). Widening the column is not one:
+    the stage would fall under the 50.5 rem two slots need.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in
@@ -3089,3 +3325,214 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     0.8 µm, recalled from Bessell 2005, moderate confidence); the flipped azimuth is in Robinson
     et al. 2011's Fig. 2 caption, in §3.4. The typescript review's two points (the departure
     comment, one reason per test) are fixed.
+- **Deviations in T13.c, as built (one camera, decision-r07-exposure-camera).**
+  - **Files.** R02's `photometry/exposure.ts` takes `ExposureProgram`, `VIEW_CAMERA` and
+    `programTriple` from `post/autoExposure.ts`, whose `VIEW_AUTO_PROGRAM` and local program are
+    gone; `AutoExposureOptions.program` is R02's `ExposureProgram` and `ViewDisplay` passes
+    `VIEW_CAMERA`. One private check, `isValidTriple`, serves `ev100FromTriple` (`RangeError`) and
+    `setManual` (`invalid_triple`); R06's `cameraLimitParts` also throws on a negative or
+    non-finite ND. Provides lists none of the new names, since they live in R02's file.
+  - **The ND's densest is derived.** `maxNdEv` = 42 − log₂(1.4² × 8,000) = 28.0634 EV (OD 8.448),
+    the ruling's "28.06 EV, OD 8.45", shown `28.1`, so that the ND reaches it exactly at EV100 42,
+    `MAN`'s top, and pegs only above, as the ruling's readout says. The 42 is a private
+    `VIEW_ND_TOP_EV100` until T13.d's `MAN_EV100_MAX`, which may replace it.
+  - **`programTriple`** is written for any base ISO: t = N² × 100 ÷ (S_base × 2^EV100) and ND =
+    EV100 − (log₂(N² ÷ t_min) − log₂(S_base ÷ 100)), the ruling's forms at base 100. It reads
+    neither `maxIso` nor `maxNdEv`: the triple keeps the full pushed S and the full ND, so
+    `ev100FromTriple` returns the reading (to 1.8 × 10⁻¹⁵ from −14 to 42), and the pegs are the
+    panel's. `ndEv` is absent while the filter is clear, at the join itself included. It throws a
+    `RangeError` on a non-finite EV100, which no reading carries.
+  - **The ND against a shorter shutter.** The dark current builds over the whole shutter whatever
+    the ND, so an ND of x EV equals a shutter of t × 2^−x only at no dark current, which
+    `DEFAULT_VIEW_CAMERA` has; the 10⁻⁹ mag test runs there.
+  - **The limit through the program** at 60° and μ 24: 10.058 from EV100 −14 to −1, 10.056 at 1,
+    9.399 at 5.88, 6.317 at 10 and 2.555 at 15; the tests hold 9.40, 6.32 and 2.56 to the ±0.01
+    the ruling gives 10.06. The science check (2026-10-04) re-derived every figure from the code
+    and found no fault.
+  - **The panel.** The rows are R02's shared `.readout` grid, one member per row as in the ruling's
+    sample, in place of R02's wrapping row of `.field`s, at a 0.25 rem row gap; each value is at
+    least 9ch wide (`1.25E-4 s`, `409,600 ↑`, `28.1 EV ↑`). The `↑` is `aria-hidden`, followed by
+    a visually hidden "off scale high". The ND reads `CLEAR` while `ndEv` is absent, and its value
+    at one decimal while the filter is in, so from EV100 13.94 to about 13.99 it reads `0.0 EV`
+    (open, below). The ND test runs under `INHIBITED · OPERATOR` at 20; an added test pegs a `MAN`
+    triple's 30 EV at `28.1 EV ↑`.
+  - **The side column (open, for the orchestrator and the owner).** Measured in a hidden window
+    (never shown) at 1920 × 1080 over a kept scene, under the default `MAN`: the four rows stand
+    84 px plus an 8 px margin, where R02's single row of three stood about 26 px, so the side
+    column's content runs 62 px past its foot with both instruments closed (`ENABLE` 13 px and
+    `INHIBIT` 49 px below it, clipped) and 26 px with both open (`INHIBIT` clipped), where before it
+    fitted by about 4 px. Two pairs a row (`APERTURE`·`SHUTTER`, `ND`·`ISO`) would leave 18 px with
+    both closed and fit with both open, but widen the content-sized column from 387 to 441 px,
+    narrowing the stage. At 1280 × 720, and photorealistic at 1080p, the column already overflowed
+    (T19's entry above). Built as ruled; the short page's rule (T19's pending item) or a ruling on
+    the setting's form settles it.
+  - **Until T13.e**, `limitTriple` reads the new `DEFAULT_MAN_TRIPLE` under `AUTO`: the request and
+    the cull ask V 10.06 at 60° (it was 13.7, cut at `MAX_CUT_V`'s 11), and the label reads
+    `STARS V 10.1 mag CAM` at every `AUTO` exposure, not the exposure's own limit. No test pinned
+    the old figure. The panel's private `shownTriple` is T13.e's `shownTriple(control)` in waiting;
+    one shared helper in `exposure.ts` would keep the panel and the label from drifting.
+  - **Plan and guide text.** decision-r07-man-exposure's own plan edits had never been applied, so
+    this ruling's replacements went in against the text as it stood; its T16 insertion names T13.d.
+    T13.d's entry amends decision-r07-man-exposure's subtask text, which is in that decision file
+    only: T13.d's agent takes it from there. The ruling's `G` and `BS` are written out, and the
+    Consumes insertion sits inside the parenthesis so that the item keeps R06.T13.a as its
+    provider. R02's as-built lines (`02` 1411, 1664–1666) still say f/1, 2 s, ISO 100 and the
+    triple under `MAN` only, left as R02's history; the README's cross-plan row for
+    `ExposureReading.triple` (met by R07.T13.a) is the orchestrator's to update. In the guide, the
+    `APERTURE`, `SHUTTER`, `ND`, `ISO` row's "An exposure darker than ISO 409,600 can make reads"
+    is repaired to "Where the exposure is darker than ISO 409,600 can give, the setting reads"; the
+    row names T13.d's `MAN` field as the ruling words it; and the `EV100` row's draft tag adds
+    R07.T13.c beside R02.T2.f. All three are drafts for the owner.
+  - **Open (for a decision agent):** whether an ND under 0.05 EV (EV100 13.94 to about 13.99)
+    reads `CLEAR` or `0.0 EV`; the ruling's "`CLEAR`, or the attenuation in `EV` at one decimal"
+    allows both, and `0.0 EV` is built.
+- **Deviations in T13.d, as built (the way back to `MAN`, decision-r07-man-exposure as amended by
+  decision-r07-exposure-camera).**
+  - **Files.** R02's `photometry/exposure.ts` gains `MAN_EV100_MIN` (−14), `MAN_EV100_MAX` (42),
+    `setManualEv100` and the refusal `invalid_ev100`; T13.c's private `VIEW_ND_TOP_EV100` gives way
+    to `MAN_EV100_MAX`, `maxNdEv` unchanged (28.0634 EV). `ExposurePanel` gains a private
+    `ManualEntry`, the `MAN` field; `MeterControl` gains `meteredEv100: number | null`, which
+    `ViewDisplay` passes from `shown.meteredEv100`. Provides lists none of them, as in T13.c.
+  - **`setManualEv100(ev100)` takes no control.** The ruling's `(control, ev100)` needed the control
+    only for the superseded "keep the `MAN` camera's aperture and ISO": with one camera the triple
+    is `programTriple(VIEW_CAMERA, ev100)` from every level. So "accepted from every level" is
+    tested at the panel (`AUTO`, both inhibits and `MAN`), and the 9.6 test calls it with the EV100
+    alone.
+  - **Parsing is `CURSOR`'s.** Grouping commas are dropped, the sign may be `+`, `-` or `−`, and the
+    value is rounded to one decimal before the span is checked, so 42.04 enters as 42.0 and −14.05
+    as −14.0 (`Math.round` takes halves up). Text that is not a number is refused at the panel with
+    the same `invalid_ev100` words.
+  - **The field.** The fill is taken once, at focus (the ruling's "on focus"), and does not follow
+    `AUTO` while the field holds focus untyped. It is also written to the input in the focus
+    handler, so that its selection holds, and a press that focuses the field cancels its mouseup's
+    default, which would collapse the selection in Chromium (tested by the event's
+    `defaultPrevented`). A refused text stays, `aria-invalid`, until it is edited or `MAN`'s value
+    changes elsewhere (an entry, or `ENABLE` from `MAN`), as `CURSOR` keeps its draft. The field is
+    described by its unit, its hint, the consequence line and the refusal; its `—` is `--text-muted`
+    on `--surface-2` (6.04:1). Text selected in any `.form-field__input` is now `--accent` under
+    `--surface-0` (10.37:1), not the platform's highlight, since this field is the first to select
+    on focus.
+  - **`METERED`** stands after the meter's reading and before `SOURCE`, where the ruling names no
+    place, its value 11ch wide for `EV100 -13.6`.
+  - **The side column (adds to T13.c's open item, which R07.T19.b settles).** The consequence line
+    and the refusal take `contain: inline-size`, so that they never widen the content-sized column.
+    Measured in a hidden window (never shown) over a kept scene with both instruments closed, the
+    panel heights depending on the column's width only (the same at 1280 × 720):
+    - at the as-built 387 px column the exposure panel grows by 40 px under `MAN` (the field's 2rem
+      row and its margin), by 80 px at another level (the consequence line takes two lines) and by
+      22 px more with a refusal; the meter grows by 18 px with `METERED`;
+    - at 1920 × 1080 the column's content now runs 102 px past its foot under the default `MAN`
+      (62 px after T13.c);
+    - in T19.b's 26rem compact column the exposure panel stands 301 px under `MAN` in the wireframe,
+      315 px beside a drawn image at `AUTO`, 360 px trapped in the wireframe
+      (`INHIBITED · NO IMAGE TO METER`) and 382 px with a refusal there, at today's 0.75rem block
+      padding (T19.b's 0.5rem takes 8 px off), where decision-r07-t19-layout estimated 290–300 px;
+    - in T19.b's 20rem column B the hint wraps under the field (the row needs 281 px of the 277 px
+      there), so the field adds 58 px under `MAN` and 98 px at another level.
+  - **Guide.** The new rows' draft tags name R07.T13.d where the ruling, written before the rename,
+    said T13.c, and the `AUTO`, `MAN`, `INHIBITED` row's tag gains "and plan R07, R07.T13.d", as
+    T13.c tagged the `EV100` row. The `MAN` field row has no "keeps the `MAN` camera's aperture and
+    ISO" clause (decision-r07-exposure-camera): the `APERTURE`, `SHUTTER`, `ND`, `ISO` row's "takes
+    the same setting" says it. The "Exposure is an instrument" bullet's tail is reflowed. All are
+    drafts for the owner.
+  - **README.** The cross-plan row for `ExposureReading.triple` (T13.c's entry left it to the
+    orchestrator) now names `VIEW_CAMERA` and `programTriple` (T13.c) and T13.e.
+  - **Gate.** No `just ci` (the Day 2 protocol) and no `just test-render`: no shader, `view/engine/`
+    or `src/smoke/` file changed, and no rendered value.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, with no must-fix. Their
+    should-fix points are fixed but the three open below: tests of a refusal that `ENABLE` drops, of
+    `MAN` from the operator's inhibit and of the mouseup guard; `userEvent.setup()` before `render`;
+    the selection's colour, `METERED`'s width and the field's `.form-field` wrapper.
+  - **Open (for a decision agent):**
+    - a refused entry under `AUTO` or an inhibit is cleared only by entering a valid value, which
+      sets `MAN`, since emptying the field and leaving it is refused as not a number, as in
+      `CURSOR`; options: an empty field enters nothing and returns to `—`, `Escape` drops the draft,
+      both, or as built (built);
+    - `AUTO` is not bounded to −14.0 to 42.0, so beyond the span `Tab` then `Enter` is refused;
+      options: clamp the fill to the span, or keep the refusal (built);
+    - `INHIBIT` still states no consequence, the ruling's unruled aside, which the UX review raised
+      now that the `MAN` field carries its line.
+- **Deviations in T13.e, as built (the sky's limit follows the camera, decision-r07-exposure-camera
+  (c)).**
+  - **`shownTriple` is R02's.** `shownTriple(control)` lives in `photometry/exposure.ts` beside
+    `programTriple`, where the ruling put it in `viewSky.ts`, and `ExposurePanel` imports it in
+    place of its private copy, so that the panel's rows and the label's limit read one function.
+    R06's `viewSky.ts` gains `deepestTriple(program)`, the program's triple at
+    log₂(100 × N² ÷ (t_frame × S_max)), −6.1223 for `VIEW_CAMERA` (f/1.4, 1/30 s, ISO 409,600,
+    clear). `limitTriple` is gone, and so is `viewSky.ts`'s `ViewSkyInput.exposure`, since the
+    request no longer reads it; `useViewSky.ts`'s own `ViewSkyInput` keeps its `exposure`, for the
+    label.
+  - **Two functions for the two limits.** `viewSkyLimit(model, role, fovDeg)` gives the cull's
+    `ViewStarLimit` and `viewSkyLabelV(model, role, exposure, fovDeg)` the label's V, in place of
+    one `viewSkyLimit` returning both, so that the cull cannot be keyed on an exposure it does not
+    read; `ViewSkyLimit` is gone. In `useViewSky.ts`, `cullViewSky(model, role, fovDeg, widthPx)`
+    returns the `DrawnSky`, and `viewSkyLabel(model, role, exposure, fovDeg)` the `STARS` reading.
+  - **The label reads the display's control**, through `shownTriple`, not
+    `ExposureReading.triple`: the two are equal wherever a reading exists (`AutoExposure` builds
+    its triple from `VIEW_CAMERA` the same way), and a wireframe view, which has no reading, keeps
+    its label. So the Provides comment on `ExposureReading.triple` ("R06's `cameraLimitV` reads it
+    (T13.e)"), the Consumes item on it and the README's row for it hold through `shownTriple`. The
+    display's control reaches the hook at the readout's 4 Hz and only when its EV100 moves by 0.1,
+    so the label moves at that rate. It is computed in render, not memoised: a few operations for a
+    camera, and for an eye the deepest of a 64² band's 24,576 texels, which ran once per cull
+    before and now runs on each render of the hook.
+  - **Instruments.** R07.T19's `useSlotSky` follows: each slot culls at its camera's deepest limit
+    and labels at the primary's shown exposure. The slot loops' inputs are now keyed on each drawn
+    sky's identity rather than on the slot's `{ drawn, labelValue }`, so a new label does not remake
+    them.
+  - **Who asks a camera's limit.** The primary view's role is `eye`, so today only the instruments
+    are cameras, and they cull the primary's eye sky; no running view sends a `camera_limit_v` yet.
+    The hook's tests therefore drive `useViewSky` with an instrument's run directly.
+  - **Tests.** `viewSky.test.ts`: `deepestTriple`, and no exposure in `MAN`'s span reaching deeper;
+    the request at V 10.06 at 60° and cut at 11 at 30° and 13°; the cull at 10.06, 11.72 and 13.58;
+    the label at the default `MAN` (10.06) and at `AUTO` 15 (2.56), and one label for one EV100 at
+    `MAN` and both inhibits; the cull parting from the label by 0.05 mag or more at every tenth of
+    an EV100 from 3.5 to 42 and at none below; a Sun-coloured star at the label's limit, centred in
+    a pixel at the frame's centre, below 2^`AGX_MIN_EV` and drawn as `TONE_CURVE_BLACK`, at 1080p
+    and at 4K (60°); and the corner bound below. A new `useViewSky.test.tsx`: the first request at
+    V 10.06 under `MAN` −1, `MAN` 15 and `AUTO` −10, 0 and 15, each from a fresh view; once a sky
+    asked at `MAN` 15 is held, no second request through `AUTO` from EV100 −10 to 15 by tenths and
+    `MAN` −1, 15, −14 and 42; the drawn sky's identity across them; the label `V 10.1 mag CAM` at
+    `MAN` −1 and `V 2.6 mag CAM` at `AUTO` 15. Four of these fail at 8e11907 (the request under
+    `MAN` 15, the second request, the identity and the label); the request under `MAN` −1 and
+    `AUTO` passed there too, at the default triple. `InstrumentView.test.tsx`: an instrument over
+    the server scene's sky reads `STARS V 10.1 mag CAM` at the default `MAN` and `V 2.6 mag CAM`
+    after a `MAN` entry of 15, the primary's exposure reaching its label. Its `AUTO` path is the
+    same `viewSkyLabel` the hook's test drives under `AUTO`, since the fake meter's `AUTO` value
+    (about EV100 3.3 after `ENABLE`) is an artefact of its fixed histogram, and its cull's identity
+    is not observable through the fake engine. `InThreadSkyWorker` moves from
+    `ViewDisplay.test.tsx` to `test/skyFixtures.ts`, and `autoAt` and `manualAt` are a new
+    `test/exposureFixtures.ts`.
+  - **Off the frame's centre (science check, 2026-10-05).** The ruling's 3.4–5.0 and 1.4–3.0 EV
+    below AgX's floor are for a Sun-coloured star at the frame's centre, whose pixel has the largest
+    solid angle. At a 16:9 corner at 60° (cos³θ = 0.579) a star is 0.79 EV brighter. As a bound,
+    the bluest colour `starColour` gives (25,000 K) with the largest camera band term (A0V's
+    +0.14, decision-camera-eta), admitted at V = limit − 0.14, stands 0.28 EV above the floor at
+    4K and EV100 3.5 (0.24 EV with O5V's +0.11), inside AgX's toe: the sprite path gives at most
+    2.4 × 10⁻⁷ display-linear and the full-screen pass moves at most 2.5 × 10⁻⁶ from black, under
+    0.01 of an 8-bit sRGB code each, against the dither's ±1 code (tested). The science check's
+    "`spriteToneCurve` still gives 0" holds everywhere but that 4K corner bound. At 1080p every
+    case stays 1.7 EV or more below the floor. `viewSky.ts`'s header says so. `deepestTriple`'s
+    limit is the deepest of the program's triples while the program's top gain is the sensor's; a
+    `setManual` triple with a shutter beyond 1/30 s, which no console control sets, would label
+    deeper than the cull, the ruling's "full manual mode" case.
+  - **For the owner (from the plan-conformance review).** Away from the frame's centre at 4K, the
+    stars between the two limits are hidden by AgX's toe, not by lying below its floor: so the
+    deeper cull also departs, in that corner, from the brainstorm's "the camera's cut is an explicit
+    noise-floor model rather than left to tone mapping", beside the "each view thresholds its copy"
+    the ruling names. Built as ruled, since nothing visible changes; the alternative, culling at the
+    exposure's own limit or with a margin, is what the ruling turned down for its cost (a re-cull of
+    3 × 10⁵ stars and a re-bake at every exposure step).
+  - **The limits, before and after** (`DEFAULT_VIEW_CAMERA`, μ 24):
+    - before (T13.d, 8e11907), the request and the cull at `limitTriple`'s triple: under `AUTO`, an
+      inhibit and `MAN` −1, `DEFAULT_MAN_TRIPLE` (ISO 11,760), V 10.0578 at 60°, 11.7248 at 30° and
+      13.5817 at 13°, the request cut at 11 at 30° and 13°; under `MAN` 15, 2.555, 4.222 and 6.079,
+      request and cull alike. The label was the cull's, so it read `V 10.1 mag CAM` under `AUTO` at
+      every EV100, EV100 15 included, where the exposure's own limit is 2.6. Before T13.c, f/1, 2 s and ISO 100 gave V 13.7 at 60°,
+      the request cut at 11.
+    - after, the request and the cull at every level: V 10.0579 at 60°, 11.7249 at 30° and
+      13.5818 at 13°, the request cut at 11 at 30° and 13°. The label at the shown exposure, 60°:
+      10.1 at EV100 −1, 10.0 at 3.5, 9.4 at 5.88, 6.3 at 10, 2.6 at 15 and −1.2 at 20.
+  - **Gate.** No `just ci` (the Day 2 protocol). No `just test-render`: no shader, `view/engine/` or
+    `src/smoke/` file changed, and the smoke harness draws no culled sky, so no rendered output or
+    star count of the harness changes.

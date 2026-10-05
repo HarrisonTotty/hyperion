@@ -44,8 +44,11 @@
 //! The brown dwarfs' layer holds plan 13's objects of 0.0124–0.08 M☉, single, from the mass
 //! function's substellar branch, per object; the rogue planets' layer is dark.
 //!
-//! Every star is treated as single: binary evolution is not in the tables (decided 2026-10-02,
-//! item 3; the census lists blue stragglers itself, and R06.T5.c measures the difference).
+//! Every star is evolved alone, and pair evolution enters as a correction (R06.T5.d, decided
+//! 2026-10-03): [`super::binary_light`]'s fitted differences, pair-evolved less single-evolved,
+//! added to layers C, D and E's light, colour and counts per snapshot, the counts taking only the
+//! increase so that the caps stay conservative ([`LuminosityFunction::pair_light`]). A galaxy whose
+//! mass function is not the default takes none.
 //!
 //! Nothing here draws a random word or changes generated output: the tables only read.
 
@@ -72,6 +75,7 @@ use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
 use crate::units::{HeliumExcess, Magnitudes, SolarLuminositiesV, SolarMasses, Years};
 
+use super::binary_light::{self, Applied};
 use super::photometry::{absolute_v_of_state, colour_of_state};
 
 /// The brightest edge of the tables, M<sub>V</sub>: brighter than any star of the tracks (about
@@ -142,6 +146,8 @@ struct Snapshot {
     remnants: f64,
     /// The colour sums of the stars fainter than each bin edge, as `light_fainter` is laid out.
     colour_fainter: Vec<ColourSums>,
+    /// What the pair-evolved correction did (R06.T5.d); zero where none applies.
+    pair: Applied,
 }
 
 /// Sums over stars of their V light times, in order: `lux_per_v0` (the photopic light), the
@@ -223,6 +229,7 @@ impl Snapshot {
             beyond: bins.beyond_count,
             dark: bins.dark,
             remnants: bins.remnants,
+            pair: bins.pair,
         }
     }
 
@@ -345,6 +352,24 @@ impl LuminosityFunction {
     #[must_use]
     pub fn remnants_per_system(&self, emitted_ago: Span) -> f64 {
         self.read(emitted_ago, |s| s.remnants)
+    }
+
+    /// The change pair evolution makes to the V light per system, as the tables apply it
+    /// (R06.T5.d): the pair-evolved light less the single-star light, after the clamp that keeps
+    /// every bin's light at zero or more; negative where interaction removes light, and zero for a
+    /// layer or galaxy that takes no correction. [`total_light`](Self::total_light) less it is the
+    /// single-star light.
+    #[must_use]
+    pub fn pair_light(&self, emitted_ago: Span) -> SolarLuminositiesV {
+        SolarLuminositiesV::new(self.read(emitted_ago, |s| s.pair.light))
+    }
+
+    /// The standard error of the fitted change in V light per system, from the fit's sampling
+    /// (`hyperion-fit`'s `sky_binary_light_*` tasks): a systematic shared by every system the
+    /// function is read for.
+    #[must_use]
+    pub fn pair_light_sigma(&self, emitted_ago: Span) -> SolarLuminositiesV {
+        SolarLuminositiesV::new(self.read(emitted_ago, |s| s.pair.sigma))
     }
 
     #[must_use]
@@ -472,6 +497,55 @@ impl LuminosityTables {
     pub fn build(galaxy: &Galaxy) -> Self {
         let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
         Self::build_with(galaxy, REFERENCE_TIME, &all, BuildOptions::STANDARD)
+    }
+
+    /// Tables of `galaxy` that hold no star, built at [`REFERENCE_TIME`] without a track.
+    ///
+    /// Every component's functions are zero at every light age: no V light (0 L☉,V per system),
+    /// no star brighter than any M<sub>V</sub>, no colour. They are laid out as
+    /// [`build`](Self::build)'s are, but build no track, so they cost next to nothing. They suit
+    /// a caller that needs a [`SkyContext`](crate::sky::census::SkyContext) but reads no table: a
+    /// census with forced caps (R06.T8.e's oracle), whose skips read only the envelope and whose
+    /// stars their own states, lists with these what it lists with `build`'s.
+    ///
+    /// # Examples
+    ///
+    /// The context of a census whose caps are forced, which reads no table:
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+    /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::sky::census::{NoSkyCellCache, SkyContext};
+    /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+    /// use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
+    /// use hyperion_sim::time::Span;
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?;
+    /// let (dark, envelope) = (LuminosityTables::dark(&galaxy), BrightnessEnvelope::build(&galaxy));
+    /// assert_eq!(dark.time(), REFERENCE_TIME);
+    /// let thin = galaxy.fields().component_ids().next().ok_or("a component")?;
+    /// let c = dark.get(thin, Layer::C);
+    /// // No star at all, so no light to give a colour.
+    /// assert!(c.stars_per_system(Span::ZERO) <= 0.0);
+    /// assert!(c.colour_fainter_than(Magnitudes::new(20.0), Span::ZERO).is_none());
+    /// let ctx = SkyContext {
+    ///     tables: &dark,
+    ///     envelope: &envelope,
+    ///     noise: NoiseCache::with_capacity(1 << 12),
+    ///     cells: &NoSkyCellCache,
+    ///     sources: &[],
+    ///     modifiers: &NoModifiers,
+    /// };
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn dark(galaxy: &Galaxy) -> Self {
+        Self::build_with(galaxy, REFERENCE_TIME, &[], BuildOptions::STANDARD)
     }
 
     /// The light age at which these tables hold light that left its stars `emitted_ago` before
@@ -634,6 +708,18 @@ pub struct TablesPlan {
     layout: Vec<Option<(Vec<f64>, Vec<f64>)>>,
     /// The bins to accumulate, in the tables' order.
     bins: Vec<PlannedBin>,
+    /// Whether the pair-evolved correction applies: only under the default mass function, which
+    /// the fit drew from.
+    pair_evolution: PairEvolution,
+}
+
+/// Whether a build adds the pair-evolved correction (R06.T5.d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PairEvolution {
+    /// The fitted differences are added.
+    Corrected,
+    /// Every star is evolved alone: a galaxy of another mass function than the fit's.
+    Ignored,
 }
 
 /// One component bin of a [`TablesPlan`].
@@ -913,6 +999,11 @@ impl TablesPlan {
             job_nodes: job_nodes.max(1),
             layout,
             bins,
+            pair_evolution: if binary_light::applies_to(galaxy) {
+                PairEvolution::Corrected
+            } else {
+                PairEvolution::Ignored
+            },
         }
     }
 
@@ -1069,7 +1160,8 @@ impl TablesPlan {
             let first = functions.len() / LAYER_COUNT;
             if let Some((means, radial_means)) = planned {
                 for _ in means {
-                    let bin = sums.next().expect("the plan's bins match its layout");
+                    let mut bin = sums.next().expect("the plan's bins match its layout");
+                    self.correct_for_pairs(&mut bin);
                     functions.extend(bin.into_functions());
                 }
                 layout.push(ComponentBins {
@@ -1091,6 +1183,34 @@ impl TablesPlan {
             solar_radius: self.solar_radius,
             layout,
             functions,
+        }
+    }
+
+    /// Adds R06.T5.d's pair-evolved correction to a bin's finished single-star sums, at every
+    /// snapshot, one [`Bins`] a layer: `binary_light`'s fitted differences, weighted by the bin's
+    /// born systems in each fitted age bin then and by its metallicity nodes. It needs the bins'
+    /// whole single-star sums, so it is the first part of [`assemble`](Self::assemble)'s finish
+    /// step, once every node is in and before the cumulative sums are taken; applied once per bin,
+    /// it keeps the bits whatever order the stages ran in.
+    fn correct_for_pairs(&self, sums: &mut BinSums) {
+        if self.pair_evolution == PairEvolution::Ignored {
+            return;
+        }
+        let planned = &self.bins[sums.bin];
+        let shift_now = self.time.since_epoch().as_julian_years_f64();
+        for (&ago, bins) in EMITTED_AGO_YEARS.iter().zip(&mut sums.snapshots) {
+            let shift = shift_now - ago;
+            let weight_of = |lo: f64, hi: f64| {
+                planned.ages.born_cdf(Years::new(hi - shift))
+                    - planned.ages.born_cdf(Years::new(lo - shift))
+            };
+            for layer in binary_light::LAYERS {
+                if let Some(c) = binary_light::correction(layer, &weight_of, &planned.metallicities)
+                {
+                    let b = &mut bins[layer_index(layer)];
+                    b.pair = binary_light::apply(&c, &mut b.light, &mut b.count, &mut b.colour);
+                }
+            }
         }
     }
 
@@ -1329,6 +1449,7 @@ struct Bins {
     remnants: f64,
     colour: Vec<ColourSums>,
     beyond_colour: ColourSums,
+    pair: Applied,
 }
 
 impl Bins {
@@ -1343,6 +1464,7 @@ impl Bins {
             remnants: 0.0,
             colour: vec![[0.0; 4]; MAGNITUDE_BINS],
             beyond_colour: [0.0; 4],
+            pair: Applied::default(),
         }
     }
 
@@ -1371,7 +1493,7 @@ impl Bins {
 
 /// What a star shows in V over one part of its life.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Seen {
+pub(super) enum Seen {
     /// Its magnitude's bin, its light, L☉,V, and its colour per unit V light ([`ColourSums`]).
     Bin {
         bin: u16,
@@ -1388,7 +1510,7 @@ enum Seen {
 
 impl Seen {
     #[must_use]
-    fn of(state: &StarState) -> Self {
+    pub(super) fn of(state: &StarState) -> Self {
         if state.phase().is_remnant() {
             return Self::Remnant;
         }
@@ -1964,6 +2086,7 @@ mod tests {
                         .chain(&s.count_brighter)
                         .chain(s.colour_fainter.iter().flatten())
                         .chain([&s.beyond, &s.dark, &s.remnants])
+                        .chain([&s.pair.light, &s.pair.sigma, &s.pair.clamped])
                         .map(|&v| hyperion_testkit::float::bits(v)),
                 );
             }
@@ -2011,9 +2134,12 @@ mod tests {
             })
     }
 
-    /// [`fingerprint`] of the halo's coarse build in `parallel_build_equals_serial`, made by the
-    /// serial loop before the job split (fae1c11): neither the split nor its stages changed a bit.
-    const SERIAL_FINGERPRINT: u64 = 0x6ca2_bafb_4c81_c7b4;
+    /// [`fingerprint`] of the halo's coarse build in `parallel_build_equals_serial`. Before
+    /// R06.T5.d it was `0x6ca2_bafb_4c81_c7b4`, made by the serial loop before the job split
+    /// (fae1c11), so neither the split nor its stages changed a bit. T5.d moved it here twice over:
+    /// by the correction's values, and by [`bits`] hashing each snapshot's applied light, its error
+    /// and its clamped light. A refit of the `sky_binary_light_*` tables moves it again.
+    const SERIAL_FINGERPRINT: u64 = 0x8c44_443c_67ac_13bf;
 
     #[test]
     fn parallel_build_equals_serial() {
@@ -2292,6 +2418,155 @@ mod tests {
         );
     }
 
+    /// The cells that carry most of `planned`'s correction error at light age `now`, each layer's
+    /// part weighted by its share of `component`'s systems: where to raise the fit's systems.
+    fn error_cells(
+        plan: &TablesPlan,
+        planned: &PlannedBin,
+        now: Span,
+        galaxy: &Galaxy,
+        component: &Component,
+    ) -> String {
+        let shift = plan.time.since_epoch().as_julian_years_f64() - now.as_julian_years_f64();
+        let ages = &planned.ages;
+        let weight_of = |lo: f64, hi: f64| {
+            ages.born_cdf(Years::new(hi - shift)) - ages.born_cdf(Years::new(lo - shift))
+        };
+        let mut cells = Vec::new();
+        for layer in binary_light::LAYERS {
+            let share = galaxy
+                .shares()
+                .component_share(MassBand::from(layer), component);
+            for (cell, error) in
+                binary_light::cell_errors(layer, &weight_of, &planned.metallicities)
+            {
+                cells.push((share * error, layer, cell));
+            }
+        }
+        cells.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let total: f64 = cells.iter().map(|c| c.0).sum();
+        cells
+            .iter()
+            .take(4)
+            .map(|(error, layer, cell)| {
+                format!(
+                    "{layer:?} cell {cell} ([Fe/H] {}, age bin {}) {:.0}%",
+                    binary_light::FE_H_NODES[cell / binary_light::AGE_BINS],
+                    cell % binary_light::AGE_BINS,
+                    100.0 * error / total
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    #[test]
+    fn the_pair_correction_is_known_to_two_percent_and_clamps_under_half_a_percent() {
+        // At T5.c's two sites, for each layer, summed over the components there by their systems:
+        // the fit's born-weighted correction has a 1σ under 2% of the layer's light, and the
+        // clamp at zero keeps under 0.5% of it (decided 2026-10-03, `decision-r06-tables.md`).
+        // The fit's error is shared by every system a function is read for, so the components'
+        // errors add linearly. Then the component guard (decided 2026-10-04, "T5.d gate
+        // reading"): every component bin alone, as a site of that component, with its layers
+        // weighted by their shares of its systems and folded together, as a band texel sums them.
+        use crate::galaxy::fields::MAX_COMPONENTS;
+        let galaxy = milky_way_galaxy();
+        let tables = crate::sky::testing::milky_way_tables();
+        let now = tables.age_for(UniverseTime::EPOCH, Span::ZERO);
+        let mut densities = [0.0; MAX_COMPONENTS];
+        let mut failures = Vec::new();
+        for (site, at) in [
+            ("solar circle", PointLy::new(0.0, 26_000.0, 0.0)),
+            ("bulge", PointLy::new(0.0, 3_000.0, 0.0)),
+        ] {
+            galaxy.fields().densities(&at, &mut densities);
+            for layer in binary_light::LAYERS {
+                let band = MassBand::from(layer);
+                let (mut light, mut pair, mut sigma, mut clamped) = (0.0, 0.0, 0.0, 0.0);
+                for id in galaxy.fields().component_ids() {
+                    let component = galaxy.fields().component(id);
+                    let n =
+                        densities[id.index()] * galaxy.shares().component_share(band, component);
+                    let function = tables.get_at(id, layer, &at);
+                    let (own_light, own_pair, own_sigma, own_clamped) = (
+                        function.total_light(now).value(),
+                        function.pair_light(now).value(),
+                        function.pair_light_sigma(now).value(),
+                        function.read(now, |s| s.pair.clamped),
+                    );
+                    eprintln!(
+                        "{site} {:?} {layer:?}: {n:.3e} systems ly⁻³, light {own_light:.4e}, \
+                         pair {:+.2}% ± {:.2}%, clamped {:.3}%",
+                        component.population(),
+                        100.0 * own_pair / (own_light - own_pair),
+                        100.0 * own_sigma / own_light,
+                        100.0 * own_clamped / own_light
+                    );
+                    light += n * own_light;
+                    pair += n * own_pair;
+                    sigma += n * own_sigma;
+                    clamped += n * own_clamped;
+                }
+                eprintln!(
+                    "{site} {layer:?}: pair {:+.2}% ± {:.2}%, clamped {:.3}% of the light",
+                    100.0 * pair / (light - pair),
+                    100.0 * sigma / light,
+                    100.0 * clamped / light
+                );
+                if sigma >= 0.02 * light || clamped >= 0.005 * light {
+                    failures.push(format!(
+                        "{site} {layer:?}: σ {sigma} and clamped {clamped} of {light}"
+                    ));
+                }
+            }
+        }
+        let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
+        let plan = TablesPlan::new(
+            galaxy,
+            REFERENCE_TIME,
+            &all,
+            BuildOptions::STANDARD,
+            SAMPLE_JOB_NODES,
+        );
+        let mut planned = plan.bins.iter();
+        for id in all {
+            let component = galaxy.fields().component(id);
+            let bins = &tables.layout[id.index()];
+            for (bin, mean) in bins.means.iter().enumerate() {
+                let planned = planned.next().expect("one planned bin a table bin");
+                let (mut light, mut sigma, mut clamped) = (0.0, 0.0, 0.0);
+                for layer in Layer::ALL {
+                    if layer == Layer::RoguePlanet {
+                        continue;
+                    }
+                    let share = galaxy
+                        .shares()
+                        .component_share(MassBand::from(layer), component);
+                    let function =
+                        &tables.functions[(bins.first + bin) * LAYER_COUNT + layer_index(layer)];
+                    light += share * function.total_light(now).value();
+                    sigma += share * function.pair_light_sigma(now).value();
+                    clamped += share * function.read(now, |s| s.pair.clamped);
+                }
+                eprintln!(
+                    "{:?} [Fe/H] {mean:+.2}: 1σ {:.3}%, clamped {:.4}% of its light",
+                    component.population(),
+                    100.0 * sigma / light,
+                    100.0 * clamped / light
+                );
+                if sigma >= 0.02 * light || clamped >= 0.005 * light {
+                    failures.push(format!(
+                        "{:?} [Fe/H] {mean}: σ {sigma} and clamped {clamped} of {light}; its \
+                         error is in {}",
+                        component.population(),
+                        error_cells(&plan, planned, now, galaxy, component)
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
     #[test]
     fn the_light_of_m_dwarfs_is_redder_and_less_scotopic_than_that_of_b_stars() {
         let galaxy = milky_way_galaxy();
@@ -2358,6 +2633,7 @@ mod tests {
             .chain(&s.count_brighter)
             .chain(s.colour_fainter.iter().flatten())
             .chain(&[s.beyond, s.dark, s.remnants])
+            .chain(&[s.pair.light, s.pair.sigma, s.pair.clamped])
             .map(|&v| bits(v))
             .collect()
     }

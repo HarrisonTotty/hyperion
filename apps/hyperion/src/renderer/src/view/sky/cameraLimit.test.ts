@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { ExposureTriple } from "../photometry/exposure";
+import { type ExposureTriple, programTriple, VIEW_CAMERA } from "../photometry/exposure";
 import fixture from "../../../../../../../packages/protocol/fixtures/camera_eta_sun.json" with { type: "json" };
 import { cameraLimitParts, cameraLimitV, DEFAULT_VIEW_CAMERA } from "./cameraLimit";
+import { DARK_SKY_CD_M2 } from "./viewSky";
 
 /** A sky of surface brightness μ, mag arcsec⁻², as a luminance: B = 10^((12.58 − μ) ÷ 2.5). */
 function skyOf(mu: number): number {
@@ -89,5 +90,58 @@ describe("cameraLimitV", () => {
     expect(() =>
       cameraLimitV(DEFAULT_VIEW_CAMERA, { ...HIGH_GAIN, shutterS: 0 }, 60, 1e-4),
     ).toThrow(RangeError);
+    expect(() => cameraLimitV(DEFAULT_VIEW_CAMERA, { ...HIGH_GAIN, ndEv: -1 }, 60, 1e-4)).toThrow(
+      RangeError,
+    );
+  });
+
+  it("takes an ND of x EV as the same shutter shortened by 2^−x, to 1E-9 mag", () => {
+    for (const ndEv of [0.5, 6.1, 28]) {
+      const filtered = cameraLimitV(DEFAULT_VIEW_CAMERA, { ...HIGH_GAIN, ndEv }, 60, skyOf(22.4));
+      const shorter = cameraLimitV(
+        DEFAULT_VIEW_CAMERA,
+        { ...HIGH_GAIN, shutterS: HIGH_GAIN.shutterS * 2 ** -ndEv },
+        60,
+        skyOf(22.4),
+      );
+      expect(Math.abs(filtered - shorter)).toBeLessThan(1e-9);
+    }
+  });
+
+  it("holds the gain at base below ISO 100 and at the top beyond ISO 409,600", () => {
+    const at = (iso: number) => cameraLimitV(DEFAULT_VIEW_CAMERA, { ...HIGH_GAIN, iso }, 60, 0);
+    expect(at(50)).toBe(at(100));
+    expect(at(6e6)).toBe(at(409_600));
+  });
+});
+
+/** The limit at 60° in a dark sky (μ 24) at the view camera's triple for an EV100. */
+function limitAt(ev100: number): number {
+  return cameraLimitV(DEFAULT_VIEW_CAMERA, programTriple(VIEW_CAMERA, ev100), 60, DARK_SKY_CD_M2);
+}
+
+describe("the view camera's limit through its program", () => {
+  it("shares the sensor's base ISO and top gain", () => {
+    expect([VIEW_CAMERA.baseIso, VIEW_CAMERA.maxIso]).toEqual([
+      DEFAULT_VIEW_CAMERA.baseIso,
+      DEFAULT_VIEW_CAMERA.maxIso,
+    ]);
+  });
+
+  it("reaches V 10.06 at 60° at every EV100 up to 1, where high gain leaves only σ_pre", () => {
+    for (const ev100 of [-14, -10, -6.12, -1, 0, 1]) {
+      expect(Math.abs(limitAt(ev100) - 10.06)).toBeLessThan(0.01);
+    }
+  });
+
+  it("falls to V 9.40 at EV100 5.88, 6.32 at 10 and 2.56 at 15, R06's V 2.5–3.5", () => {
+    const cases: ReadonlyArray<readonly [number, number]> = [
+      [5.88, 9.4],
+      [10, 6.32],
+      [15, 2.56],
+    ];
+    for (const [ev100, expected] of cases) {
+      expect(Math.abs(limitAt(ev100) - expected)).toBeLessThan(0.01);
+    }
   });
 });

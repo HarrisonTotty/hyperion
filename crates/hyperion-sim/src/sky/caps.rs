@@ -424,19 +424,23 @@ fn count(
 /// `tables` are the galaxy's, read at the observer's time through
 /// [`LuminosityTables::age_for`]; `cache` is the caller's noise cache for the rays.
 ///
-/// Measured at cut 7.95 (the eye's near the Sun), version 19, against the brainstorm's version-14
-/// estimates (C 3,000, D 4,300 and E 10,000 ly near the Sun; a few hundred to about 1,000 in the
-/// nuclear disc), which the tests do not gate on (decided 2026-10-03), caps in ly (R06.T7, the
-/// slow test `caps_converge_in_rays`; T17 re-derives them):
+/// Measured at cut 7.95 (the eye's near the Sun), version 20, with R06.T5.d's pair-evolved
+/// correction (whose count excess raised C near the Sun from 6,764 ly and D from 8,193), against
+/// the brainstorm's version-14 estimates (C 3,000, D 4,300 and E 10,000 ly near the Sun; a few
+/// hundred to about 1,000 in the nuclear disc), which the tests do not pin (decided 2026-10-03 and
+/// 2026-10-04), caps in ly (R06.T7, the slow test `caps_converge_in_rays`; T17 re-derives them):
 ///
 /// | Point (ly) | A | B | C | D | E |
 /// | ---------- | - | - | - | - | - |
-/// | Near the Sun (0, 26,000, 68) | 11 | 68 | 6,764 | 8,193 | 21,369 |
-/// | Nuclear disc (0, 150, 0) | 13 | 17 | 116 | 204 | 362 |
-/// | Solar circle (26,000, 0, 68) | 11 | 68 | 6,764 | 7,444 | 19,416 |
-/// | Solar circle (−18,385, −18,385, 68) | 15 | 75 | 6,764 | 8,193 | 23,519 |
-/// | Inner disc (0, 8,000, 0) | 26 | 100 | 7,444 | 9,925 | 17,641 |
-/// | Above the Sun (0, 26,000, 2,000) | 1 | 62 | 8,193 | 10,924 | 46,010 |
+/// | Near the Sun (0, 26,000, 68) | 11 | 68 | 8,193 | 9,925 | 21,369 |
+/// | Nuclear disc (0, 150, 0) | 13 | 17 | 116 | 205 | 362 |
+/// | Solar circle (26,000, 0, 68) | 11 | 68 | 7,444 | 9,018 | 19,416 |
+/// | Solar circle (−18,385, −18,385, 68) | 15 | 75 | 8,193 | 9,925 | 23,519 |
+/// | Inner disc (0, 8,000, 0) | 26 | 100 | 8,193 | 12,023 | 17,641 |
+/// | Above the Sun (0, 26,000, 2,000) | 1 | 62 | 14,563 | 14,563 | 46,010 |
+///
+/// C's cap rests on rare bright phases of pair channels whose fitted rate rests on a few of the
+/// fit's systems (R06 Risks, "T5.d's pair-evolved light, as built").
 ///
 /// # Panics
 ///
@@ -611,11 +615,17 @@ mod tests {
         }
         assert!(radius(&sun, Layer::A) < 100.0);
         assert!(radius(&sun, Layer::B) < 100.0);
-        for (layer, brainstorm) in [
-            (Layer::C, 3_000.0),
-            (Layer::D, 4_300.0),
-            (Layer::E, 10_000.0),
-        ] {
+        // C's cap rests on rare bright phases of pair channels (R06.T5.d's count excess), which
+        // plan 11's fixes move, so it keeps only its floor; the rule's bound, asserted above, is
+        // its ceiling (decided 2026-10-04, "T5.d caps after the pair correction"). D and E keep
+        // the brainstorm's brackets.
+        let c = radius(&sun, Layer::C);
+        assert!(c >= 1_000.0, "C: {c} ly");
+        assert!(
+            radius(&nuclear, Layer::C) < c,
+            "C grows in the nuclear disc"
+        );
+        for (layer, brainstorm) in [(Layer::D, 4_300.0), (Layer::E, 10_000.0)] {
             let r = radius(&sun, layer);
             assert!(
                 (brainstorm / 3.0..=brainstorm * 3.0).contains(&r),

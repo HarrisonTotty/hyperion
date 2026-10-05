@@ -1,5 +1,6 @@
 import type { BodyIdHex, UniverseIdHex, UniverseTime } from "@hyperion/protocol";
 import {
+  type FocusEvent,
   type KeyboardEvent,
   memo,
   useCallback,
@@ -12,6 +13,7 @@ import {
   useState,
 } from "react";
 
+import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { BodyDistanceUnit } from "../../lib/format";
@@ -58,6 +60,7 @@ import {
   controlEv100,
   DEFAULT_EXPOSURE,
   type ExposureControl,
+  VIEW_CAMERA,
 } from "../../view/photometry/exposure";
 import {
   cameraKinematics,
@@ -76,15 +79,11 @@ import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/h
 import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
-import {
-  AutoExposure,
-  type ExposureReading,
-  VIEW_AUTO_PROGRAM,
-} from "../../view/post/autoExposure";
+import { AutoExposure, type ExposureReading } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
 import { BandLayer } from "../../view/sky/band";
 import { HostDiscLayer } from "../../view/sky/disc";
-import { CameraControls } from "./CameraControls";
+import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
 import { litLabelsOf, photorealFrame } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import { availabilityOf, type StyleRefusals, styleRefusals, withPermission } from "./styleRefusals";
@@ -93,8 +92,8 @@ import { InstrumentsPanel } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
 import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
 import { PRIMARY_NAME, PRIMARY_VIEW_ID, PRIMARY_VIEW_NAME } from "./viewNames";
-import { ExposurePanel } from "./ExposurePanel";
-import { MeterControl } from "./MeterControl";
+import { AUTO_NOT_AVAILABLE, ExposurePanel } from "./ExposurePanel";
+import { MeterControl, meterLabel } from "./MeterControl";
 import {
   cameraAnnunciation,
   serverSceneStanding,
@@ -118,7 +117,16 @@ import { styleName } from "../../view/photoreal/style";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
+  DEFAULT_FOLD,
+  FOLD_BUTTONS,
+  type FoldPanel,
+  type SideFolds,
+  toggledFold,
+  viewLayout,
+} from "./viewLayout";
+import {
   commandRun,
+  EASED_MOVES_STATEMENT,
   type LabelLine,
   photorealStatements,
   WIREFRAME_ONLY,
@@ -127,6 +135,7 @@ import {
   type MarkRow,
   markRows,
   PRESET_NAMES,
+  rangesFromCamera,
   runPose,
   SCENE_OPTIONS,
   type SceneOption,
@@ -170,22 +179,26 @@ const INSTRUMENT_INSET_REM = 0.5;
 const PRIMARY_LABEL_MIN_REM = 14;
 
 /**
- * Whether the stage has room for one more instrument slot below the `open` ones, beside the
+ * Whether the stage has room for one more instrument slot beside the `open` ones, beside the
  * primary's label block at its least width; `true` before the stage is laid out.
  *
- * @param column - The open slots' column as laid out, whose height a new slot is taken to match
- *   (a slot's label block, not its canvas, sets its height), or `null` before it is measured.
+ * @remarks
+ * The slots stand at the stage's top right and its foot (decision-r07-t19-layout, item 3), so the
+ * room is the stage's height less the open slots' and the insets about them; a new slot is taken
+ * to be as tall as those open (a slot's label block, not its canvas, sets its height).
+ *
+ * @param open - The open slots' panels as laid out, each `null` before it is measured.
  */
-function roomForSlot(stage: ElementSize | null, column: ElementSize | null, open: number): boolean {
+function roomForSlot(stage: ElementSize | null, open: ReadonlyArray<ElementSize | null>): boolean {
   if (stage === null || stage.remPx <= 0) {
     return true;
   }
   const inset = INSTRUMENT_INSET_REM * stage.remPx;
-  const usedPx = open === 0 || column === null ? 0 : column.heightPx + inset;
+  const defaultPx = INSTRUMENT_SLOT_REM.heightRem * stage.remPx;
+  const heightsPx = open.map((panel) => panel?.heightPx ?? defaultPx);
+  const usedPx = heightsPx.reduce((sum, heightPx) => sum + heightPx + inset, 0);
   const slotPx =
-    open === 0 || column === null
-      ? INSTRUMENT_SLOT_REM.heightRem * stage.remPx
-      : column.heightPx / open;
+    heightsPx.length === 0 ? defaultPx : (usedPx - inset * heightsPx.length) / heightsPx.length;
   const widthRem = stage.widthPx / stage.remPx;
   return (
     inset + usedPx + slotPx + inset <= stage.heightPx &&
@@ -211,6 +224,18 @@ const NO_STARS: ReadonlyArray<ViewStar> = [];
 
 /** The pointer's reach to a mark, rem: half the guide's 2 rem target, as plan 05's pick has it. */
 const PICK_REM = 1;
+
+/** The camera presets, every one of which a scene with an own ship offers. */
+const PRESET_COUNT = Object.keys(PRESET_NAMES).length;
+
+/** The folding panels, in the side column's order. */
+const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
+  "instruments",
+  "camera",
+  "style",
+  "exposure",
+  "meter",
+];
 
 /** The engine's standing while it is not ready: being made, until an adapter answers. */
 const ACQUIRING: { readonly text: string; readonly standing: StatusStanding } = {
@@ -449,8 +474,6 @@ function ViewStage({
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
   const { ref: stageRef, size } = useElementSize();
-  // The open instrument slots' column, by which the room for one more is reckoned (R07.T19).
-  const { ref: slotsRef, size: slotsSize } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
   const [viewRefused, setViewRefused] = useState(false);
@@ -686,7 +709,7 @@ function ViewStage({
     // applied to it when the display's control changes to one the controller did not publish.
     const auto = new AutoExposure({
       source: VIEW_ID,
-      program: VIEW_AUTO_PROGRAM,
+      program: VIEW_CAMERA,
       control: inputsRef.current.exposure,
       meter: inputsRef.current.meter,
     });
@@ -1036,7 +1059,7 @@ function ViewStage({
           annunciation === null || graphics.condition.kind === "acquiring"
           ? NOT_MADE
           : annunciation;
-  const openSlots = instruments.slots.filter((slot) => slot.open).length;
+  const openPanels = instruments.slots.flatMap((slot) => (slot.open ? [slot.panelSize] : []));
   // Closing the CONTROLS instrument returns CONTROLS to PRIMARY. Its canvas never holds the focus
   // then, since CLOSE takes it.
   const closeInstrument = (id: ViewId): void => {
@@ -1060,9 +1083,151 @@ function ViewStage({
   );
   const litLabels = litLabelsOf(shown.run.scene);
   const stale = server?.stale === true;
+  // The meter's control stands beside a drawn photorealistic image only, and the primary's block
+  // states the meter while it does (decision-r07-t19-layout, item 1b).
+  const meterStands = shown.drawnStyle === "photorealistic";
+  const primaryPhotoreal = photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels);
+  const primaryStatements = [
+    ...labelStatements(shown.run),
+    ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
+    ...primaryPhotoreal,
+  ];
+
+  // The layout, from the `.view` box's size alone (R07.T19.b; decision-r07-t19-layout, item 1).
+  const { ref: viewBoxRef, size: viewBox } = useElementSize();
+  const layout = viewLayout(viewBox);
+  const compact = layout === "compact";
+  // In the compact layout exactly one of the folding panels is open, CAMERA by default.
+  const [fold, setFold] = useState<FoldPanel>(DEFAULT_FOLD);
+  // The folding panel that holds the focus, as the side column's focus events tell it.
+  const [focusedFold, setFocusedFold] = useState<FoldPanel | null>(null);
+  const [foldLayout, setFoldLayout] = useState(layout);
+  // The panels that stand: the meter's beside a drawn photorealistic image, the style's once a view
+  // can be drawn. One that goes gives its place to CAMERA; on a switch to the compact layout, the
+  // panel holding the focus is the one open.
+  const stands = (panel: FoldPanel): boolean =>
+    panel === "meter" ? meterStands : panel !== "style" || engineLine === null;
+  const focusOpens =
+    foldLayout !== layout && layout === "compact" && focusedFold !== null && stands(focusedFold)
+      ? focusedFold
+      : null;
+  const opened: FoldPanel = focusOpens ?? (stands(fold) ? fold : DEFAULT_FOLD);
+  if (opened !== fold) {
+    setFold(opened);
+  }
+  if (foldLayout !== layout) {
+    setFoldLayout(layout);
+  }
+  const folded = (panel: FoldPanel): boolean => compact && opened !== panel;
+  const foldIds: Readonly<Record<FoldPanel, string>> = {
+    instruments: `${legendId}-instruments`,
+    camera: `${legendId}-camera`,
+    style: `${legendId}-style`,
+    exposure: `${legendId}-exposure`,
+    meter: `${legendId}-meter`,
+  };
+  const foldOf = (target: EventTarget | null): FoldPanel | null => {
+    const section = target instanceof Element ? target.closest("section") : null;
+    return FOLD_PANELS.find((panel) => section !== null && section.id === foldIds[panel]) ?? null;
+  };
+  const onSideFocus = (event: FocusEvent<HTMLDivElement>): void => {
+    setFocusedFold(foldOf(event.target));
+  };
+  const onSideBlur = (event: FocusEvent<HTMLDivElement>): void => {
+    // The focus left the column for another control, or for nothing by the operator's own hand (a
+    // press off any control, another window), not because its control was folded or went away.
+    const { relatedTarget, target, currentTarget } = event;
+    const leftForControl = relatedTarget instanceof Node && !currentTarget.contains(relatedTarget);
+    const leftForNothing =
+      relatedTarget === null && target.isConnected && target.closest("[hidden]") === null;
+    if (leftForControl || leftForNothing) {
+      setFocusedFold(null);
+    }
+  };
+  // The disclosure buttons, by their panel, to which the focus goes when its panel folds.
+  const foldButtonsRef = useRef(new Map<FoldPanel, HTMLButtonElement>());
+  const foldButtonRef =
+    (panel: FoldPanel) =>
+    (button: HTMLButtonElement | null): void => {
+      if (button === null) {
+        foldButtonsRef.current.delete(panel);
+      } else {
+        foldButtonsRef.current.set(panel, button);
+      }
+    };
+  // The focus inside a panel that folds goes to that panel's disclosure button, and a panel that
+  // goes away (the meter, on a style switch) gives its focus to CAMERA's.
+  useLayoutEffect(() => {
+    if (!compact || focusedFold === null || focusedFold === opened) {
+      return;
+    }
+    const active = document.activeElement;
+    const lost =
+      active === null ||
+      active === document.body ||
+      !active.isConnected ||
+      active.closest("[hidden]") !== null;
+    if (lost) {
+      const buttons = foldButtonsRef.current;
+      (buttons.get(focusedFold) ?? buttons.get(DEFAULT_FOLD))?.focus();
+    }
+  }, [compact, focusedFold, opened, foldButtonsRef]);
+
+  // The CONTROLS view's camera and style, which a folded panel's standing lines describe.
+  const controlledRun = controlledShown?.run ?? shown.run;
+  const controlledRefusals = operatedView?.refusals ?? refusals;
+  const controlledFaulted =
+    controlledShown === null
+      ? published.photoreal === "failed"
+      : controlledShown.photoreal === "failed";
+  // The first style's refusal, as the style control shows it.
+  const styleReason = controlledRefusals.wireframe ?? controlledRefusals.photorealistic;
+  const noOwnShip = offeredPresets(cameraSceneOf(controlledRun.scene)).length < PRESET_COUNT;
+  // The compact layout's row of disclosure buttons, and under it the faults and statuses of the
+  // panels folded (decision-r07-t19-layout, item 1b); the limit reasons fold with their controls.
+  const foldRow = compact ? (
+    <>
+      <div className="view-folds">
+        {FOLD_BUTTONS.filter(({ panel }) => stands(panel)).map(({ panel, label }) => (
+          <button
+            key={panel}
+            ref={foldButtonRef(panel)}
+            type="button"
+            className="control disclosure view-folds__button"
+            aria-expanded={opened === panel}
+            aria-controls={foldIds[panel]}
+            onClick={() => {
+              setFold(toggledFold(opened, panel));
+            }}
+          >
+            <DisclosureGlyph expanded={opened === panel} />
+            {label}
+          </button>
+        ))}
+      </div>
+      {folded("camera") && noOwnShip ? (
+        <p className="view-camera__reason view-folds__standing">{NO_OWN_SHIP}</p>
+      ) : null}
+      {folded("style") && controlledFaulted && styleReason !== null ? (
+        <p className="view-style__reason view-style__reason--fault view-folds__standing">
+          {styleReason}
+        </p>
+      ) : null}
+      {folded("exposure") && shown.meteredEv100 === null ? (
+        <p className="view-exposure__reason view-folds__standing">{AUTO_NOT_AVAILABLE}</p>
+      ) : null}
+    </>
+  ) : null;
+  const sideFolds: SideFolds = {
+    cameraId: foldIds.camera,
+    cameraHidden: folded("camera"),
+    styleId: foldIds.style,
+    styleHidden: folded("style"),
+    row: foldRow,
+  };
 
   return (
-    <div className="view">
+    <div className={`view view--${layout}`} ref={viewBoxRef}>
       <div className="view__main">
         {engineLine === null ? (
           <>
@@ -1090,18 +1255,18 @@ function ViewStage({
               />
               <ViewLabelBlock
                 id={`${legendId}-label`}
-                lines={withDrawnStyle(
-                  withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
-                  shown.drawnStyle,
+                lines={withMeterLine(
+                  withDrawnStyle(
+                    withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
+                    shown.drawnStyle,
+                  ),
+                  meterStands ? meter : null,
                 )}
-                statements={[
-                  ...labelStatements(shown.run),
-                  ...photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels),
-                ]}
+                statements={primaryStatements}
                 countLine={viewSky.labelValue === null ? countLine : null}
                 fault={fault}
               />
-              <div className="view-instruments" ref={slotsRef}>
+              <div className="view-instruments">
                 {instrumentViews.map(({ slot, budgetStyle, fault: slotFault }) =>
                   slot.open ? (
                     <InstrumentView
@@ -1112,6 +1277,7 @@ function ViewStage({
                       stale={stale}
                       lighting={lighting}
                       litLabels={litLabels}
+                      primaryPhotorealStatements={primaryPhotoreal}
                       fault={slotFault}
                       legendId={legendId}
                       onKeyDown={(event) => {
@@ -1147,104 +1313,147 @@ function ViewStage({
           </div>
         )}
       </div>
-      <div className="view__side">
-        <InstrumentsPanel
-          primary={{ id: VIEW_ID, name: PRIMARY_NAME }}
-          slots={instruments.slots.map((slot) => ({
-            id: slot.id,
-            name: slot.name,
-            open: slot.open,
-            // Room for one more slot below those open (a slot that is open stays open).
-            room: roomForSlot(size, slotsSize, openSlots),
-          }))}
-          operated={controlsView}
-          unavailable={engineLine !== null}
-          onOpen={(id) => {
-            const slot = instruments.slots.find((each) => each.id === id);
-            if (slot !== undefined) {
-              instruments.open(slot.slot);
+      <div className="view__side" onFocus={onSideFocus} onBlur={onSideBlur}>
+        <div className="view__column view__column--a">
+          <InstrumentsPanel
+            id={foldIds.instruments}
+            fold={
+              compact
+                ? {
+                    folded: folded("instruments"),
+                    onToggle: () => {
+                      setFold(toggledFold(opened, "instruments"));
+                    },
+                  }
+                : undefined
             }
-          }}
-          onClose={closeInstrument}
-          onOperate={setOperated}
-        />
-        {operatedView === null || controlledShown === null ? (
-          <>
-            <section className="panel view-targets" aria-labelledby={`${legendId}-targets`}>
-              <h2 className="panel__title" id={`${legendId}-targets`}>
-                Targets{stale ? <StaleMark /> : null}{" "}
-                <span className="panel__designator">{PRIMARY_NAME}</span>
-              </h2>
-              <ViewMarkList
-                rows={rows}
-                stale={stale}
-                selectedKey={selection === null ? null : targetKey(selection)}
-                onSelect={(row) => {
-                  setSelection(row.target);
-                }}
+            toggleRef={compact ? foldButtonRef("instruments") : undefined}
+            primary={{ id: VIEW_ID, name: PRIMARY_NAME }}
+            slots={instruments.slots.map((slot) => ({
+              id: slot.id,
+              name: slot.name,
+              open: slot.open,
+              // Room for one more slot beside those open (a slot that is open stays open).
+              room: roomForSlot(size, openPanels),
+            }))}
+            operated={controlsView}
+            unavailable={engineLine !== null}
+            onOpen={(id) => {
+              const slot = instruments.slots.find((each) => each.id === id);
+              if (slot !== undefined) {
+                instruments.open(slot.slot);
+              }
+            }}
+            onClose={closeInstrument}
+            onOperate={setOperated}
+          />
+          {operatedView === null || controlledShown === null ? (
+            <>
+              <section className="panel view-targets" aria-labelledby={`${legendId}-targets`}>
+                <h2 className="panel__title" id={`${legendId}-targets`}>
+                  Targets{stale ? <StaleMark /> : null}{" "}
+                  <span className="panel__designator">{PRIMARY_NAME}</span>
+                </h2>
+                <ViewMarkList
+                  rows={rows}
+                  fromCamera={rangesFromCamera(shown.run.scene)}
+                  stale={stale}
+                  selectedKey={selection === null ? null : targetKey(selection)}
+                  onSelect={(row) => {
+                    setSelection(row.target);
+                  }}
+                />
+              </section>
+              {foldRow}
+              <CameraControls
+                preset={shown.run.camera.preset}
+                offered={offeredPresets(cameraSceneOf(shown.run.scene))}
+                fovDeg={shown.run.camera.fovDeg}
+                rateStep={shown.run.camera.free.rateStep}
+                maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
+                easedMoves={easedMoves}
+                reducedMotion={reducedMotion}
+                onAction={command}
+                onEasedMovesChange={onEasedMovesChange}
+                designator={PRIMARY_NAME}
+                id={sideFolds.cameraId}
+                hidden={sideFolds.cameraHidden}
               />
-            </section>
-            <CameraControls
-              preset={shown.run.camera.preset}
-              offered={offeredPresets(cameraSceneOf(shown.run.scene))}
-              fovDeg={shown.run.camera.fovDeg}
-              rateStep={shown.run.camera.free.rateStep}
-              maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
+              {engineLine === null ? (
+                <StyleControl
+                  renderStyle={shown.run.camera.style}
+                  refusals={refusals}
+                  faulted={published.photoreal === "failed"}
+                  onStyle={(style) => {
+                    command({ kind: "style", style });
+                  }}
+                  designator={PRIMARY_NAME}
+                  id={sideFolds.styleId}
+                  hidden={sideFolds.styleHidden}
+                />
+              ) : null}
+            </>
+          ) : (
+            <InstrumentControls
+              key={operatedView.slot.id}
+              designator={operatedView.slot.name}
+              shown={controlledShown}
+              selection={operatedView.slot.selection}
+              stale={stale}
               easedMoves={easedMoves}
               reducedMotion={reducedMotion}
-              onAction={command}
+              refusals={operatedView.refusals}
+              faulted={controlledShown.photoreal === "failed"}
+              onAction={(action) => {
+                commandView(operatedView.slot.id, action);
+              }}
               onEasedMovesChange={onEasedMovesChange}
-              designator={PRIMARY_NAME}
+              onSelect={(target) => {
+                instruments.select(operatedView.slot.slot, target);
+              }}
+              folds={sideFolds}
             />
-            {engineLine === null ? (
-              <StyleControl
-                renderStyle={shown.run.camera.style}
-                refusals={refusals}
-                faulted={published.photoreal === "failed"}
-                onStyle={(style) => {
-                  command({ kind: "style", style });
-                }}
-                designator={PRIMARY_NAME}
-              />
-            ) : null}
-          </>
-        ) : (
-          <InstrumentControls
-            key={operatedView.slot.id}
-            designator={operatedView.slot.name}
-            shown={controlledShown}
-            selection={operatedView.slot.selection}
-            stale={stale}
-            easedMoves={easedMoves}
-            reducedMotion={reducedMotion}
-            refusals={operatedView.refusals}
-            faulted={controlledShown.photoreal === "failed"}
-            onAction={(action) => {
-              commandView(operatedView.slot.id, action);
-            }}
-            onEasedMovesChange={onEasedMovesChange}
-            onSelect={(target) => {
-              instruments.select(operatedView.slot.slot, target);
-            }}
-          />
-        )}
-        <ExposurePanel
-          exposure={exposure}
-          meteredEv100={shown.meteredEv100}
-          onChange={onExposureChange}
-          designator={PRIMARY_NAME}
-        />
-        {shown.drawnStyle === "photorealistic" ? (
-          <MeterControl
-            meter={meter}
-            reading={shown.reading}
-            onMeter={onMeterChange}
+          )}
+        </div>
+        <div className="view__column view__column--b">
+          <ExposurePanel
+            exposure={exposure}
+            meteredEv100={shown.meteredEv100}
+            onChange={onExposureChange}
             designator={PRIMARY_NAME}
+            id={foldIds.exposure}
+            hidden={folded("exposure")}
           />
-        ) : null}
+          {meterStands ? (
+            <MeterControl
+              meter={meter}
+              reading={shown.reading}
+              meteredEv100={shown.meteredEv100}
+              onMeter={onMeterChange}
+              designator={PRIMARY_NAME}
+              id={foldIds.meter}
+              hidden={folded("meter")}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );
+}
+
+/**
+ * The label block's lines with the operator's meter after the exposure, `METER AVG`, while the
+ * meter's control stands (`meter` not `null`; decision-r07-t19-layout, item 1b).
+ */
+function withMeterLine(
+  lines: ReadonlyArray<LabelLine>,
+  meter: MeterMode | null,
+): ReadonlyArray<LabelLine> {
+  return meter === null
+    ? lines
+    : lines.flatMap((line) =>
+        line.label === "EXPOSURE" ? [line, { label: "METER", value: meterLabel(meter) }] : [line],
+      );
 }
 
 /**

@@ -40,6 +40,12 @@ function closureName(closure: ClosureReading): string {
 /** Props of {@link ViewMarkList}. */
 export interface ViewMarkListProps {
   readonly rows: ReadonlyArray<MarkRow>;
+  /**
+   * Whether the ranges are from the camera, the scene having no own ship (`rangesFromCamera`):
+   * the range column's head then reads `RANGE FROM CAMERA` and its rows the bare range
+   * (R07.T19.b).
+   */
+  readonly fromCamera: boolean;
   /** The selected row's key, or `null`. */
   readonly selectedKey: string | null;
   /** Called with the row the operator selects. */
@@ -53,14 +59,23 @@ export interface ViewMarkListProps {
 
 /**
  * The view's list, the canvas's partner (plan R02, R02.T15.b; Design note 17): its bodies and craft,
- * each with its range, from the own ship or labelled `FROM CAMERA`, as a windowed `listbox` from
- * which the keyboard selects a mark, which moves the bracket reticle on the view.
+ * each with its range, from the own ship or from the camera, as a windowed `listbox` from which the
+ * keyboard selects a mark, which moves the bracket reticle on the view.
  *
  * @remarks
+ * With no own ship the range column's head reads `RANGE FROM CAMERA`, its second line under
+ * `RANGE`, and each row the bare range, so that the designations keep their width; each option's
+ * accessible name keeps `FROM CAMERA` (R07.T19.b, decision-r07-t19-layout).
  * Windowed as plan 05's lists are (its design note D17), though a kept scene's list is short. Stars
  * are not listed: they are not targets.
  */
-export function ViewMarkList({ rows, selectedKey, onSelect, stale = false }: ViewMarkListProps) {
+export function ViewMarkList({
+  rows,
+  fromCamera,
+  selectedKey,
+  onSelect,
+  stale = false,
+}: ViewMarkListProps) {
   const baseId = useId();
   const { ref: measureRef, metrics } = useScrollMetrics();
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -166,7 +181,10 @@ export function ViewMarkList({ rows, selectedKey, onSelect, stale = false }: Vie
       <div className="view-list__head">
         <span>DESIG</span>
         <span>KIND</span>
-        <span>RANGE</span>
+        <span className="view-list__range-head">RANGE</span>
+        {fromCamera ? (
+          <span className="view-list__range-head view-list__range-head--from">FROM CAMERA</span>
+        ) : null}
       </div>
       <div
         className="view-list__scroll"
@@ -216,7 +234,7 @@ export function ViewMarkList({ rows, selectedKey, onSelect, stale = false }: Vie
                 <span className="view-list__name">{row.name}</span>
                 <span className="view-list__kind">{row.kind}</span>
                 <span className="view-list__number">
-                  <span className={stale ? "stale" : undefined}>{rangeReading}</span>
+                  <span className={stale ? "stale" : undefined}>{row.range}</span>
                   {stale ? <StaleMark /> : null}
                 </span>
               </div>

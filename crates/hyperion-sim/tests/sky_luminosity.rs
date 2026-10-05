@@ -8,6 +8,12 @@
 //! draws and their reference metallicity. The ratios of realised to tabulated counts brighter than
 //! M<sub>V</sub> −3 and −5 are printed per layer and not gated (decided 2026-10-02, item 3): a ratio
 //! above 1.3 in a layer whose cap is set by its bright end is a finding for R06.T7.
+//!
+//! The tables carry R06.T5.d's pair-evolved correction in layers C, D and E. In those layers the
+//! tables' deficit of pair-evolved against single-star light (`LuminosityFunction::pair_light`)
+//! is held against the cells' own paired deficit, the same stars evolved each alone, within the
+//! cells' compound-Poisson interval and the fit's standard error together; each layer's residual
+//! against the tables without the correction is printed beside the one with it.
 
 #[expect(
     dead_code,
@@ -49,6 +55,8 @@ struct Realised {
     light: f64,
     light_squared: f64,
     single_light: f64,
+    /// The sum over systems of the square of each one's pair-evolved less single-star light.
+    deficit_squared: f64,
     brighter_3: u64,
     brighter_5: u64,
 }
@@ -86,15 +94,18 @@ fn realise_cell(galaxy: &Galaxy, key: CellKey) -> Realised {
                 out.brighter_5 += u64::from(v.value() < -5.0);
             }
         }
+        let mut single_light = 0.0;
         for model in stars.stars() {
             if let Some(v) = model
                 .state_at(UniverseTime::EPOCH)
                 .as_ref()
                 .and_then(absolute_v_of_state)
             {
-                out.single_light += light_of(v.value());
+                single_light += light_of(v.value());
             }
         }
+        out.single_light += single_light;
+        out.deficit_squared += (system_light - single_light) * (system_light - single_light);
         out.light += system_light;
         out.light_squared += system_light * system_light;
     }
@@ -122,9 +133,36 @@ fn realise(galaxy: &Galaxy, keys: &[CellKey]) -> Realised {
         light: a.light + b.light,
         light_squared: a.light_squared + b.light_squared,
         single_light: a.single_light + b.single_light,
+        deficit_squared: a.deficit_squared + b.deficit_squared,
         brighter_3: a.brighter_3 + b.brighter_3,
         brighter_5: a.brighter_5 + b.brighter_5,
     })
+}
+
+/// The block of `layer`'s cells centred on `at`: its keys, its low corner, ly, and its edge, ly.
+fn block(layer: Layer, at: [f64; 3]) -> (Vec<CellKey>, [i32; 3], u32) {
+    let size = i32::try_from(layer.cell_size_ly()).expect("cells are small");
+    let corner = at.map(|x: f64| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the sites are whole light-years inside the root cube"
+        )]
+        let x = x as i32;
+        x.div_euclid(size) - BLOCK_CELLS / 2
+    });
+    let mut keys = Vec::new();
+    for i in 0..BLOCK_CELLS {
+        for j in 0..BLOCK_CELLS {
+            for k in 0..BLOCK_CELLS {
+                keys.push(
+                    CellKey::new(layer, [corner[0] + i, corner[1] + j, corner[2] + k])
+                        .expect("the block lies in the root cube"),
+                );
+            }
+        }
+    }
+    let edge = u32::try_from(BLOCK_CELLS * size).expect("positive");
+    (keys, corner.map(|c| c * size), edge)
 }
 
 #[test]
@@ -150,37 +188,19 @@ fn luminosity_matches_realised_cells() {
     let mut failures = Vec::new();
     for (name, at) in sites {
         for layer in layers {
-            let size = i32::try_from(layer.cell_size_ly()).expect("cells are small");
-            let corner = at.map(|x: f64| {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "the sites are whole light-years inside the root cube"
-                )]
-                let x = x as i32;
-                x.div_euclid(size) - BLOCK_CELLS / 2
-            });
-            let mut keys = Vec::new();
-            for i in 0..BLOCK_CELLS {
-                for j in 0..BLOCK_CELLS {
-                    for k in 0..BLOCK_CELLS {
-                        keys.push(
-                            CellKey::new(layer, [corner[0] + i, corner[1] + j, corner[2] + k])
-                                .expect("the block lies in the root cube"),
-                        );
-                    }
-                }
-            }
-            let min_ly = corner.map(|c| c * size);
-            let edge = u32::try_from(BLOCK_CELLS * size).expect("positive");
+            let (keys, min_ly, edge) = block(layer, at);
             let integrals = reference_box_component_integrals(&galaxy, min_ly, edge, 4 * 6);
             let band = MassBand::from(layer);
             let (mut light, mut bright_3, mut bright_5, mut systems) = (0.0, 0.0, 0.0, 0.0);
+            let (mut pair, mut pair_sigma) = (0.0, 0.0);
             for id in galaxy.fields().component_ids() {
                 let component = galaxy.fields().component(id);
                 let n = integrals[id.index()] * galaxy.shares().component_share(band, component);
                 let table = tables.get_at(id, layer, &PointLy::new(at[0], at[1], at[2]));
                 systems += n;
                 light += n * table.total_light(now).value();
+                pair += n * table.pair_light(now).value();
+                pair_sigma += n * table.pair_light_sigma(now).value();
                 bright_3 += n * table.count_brighter_than(Magnitudes::new(-3.0), now);
                 bright_5 += n * table.count_brighter_than(Magnitudes::new(-5.0), now);
             }
@@ -200,13 +220,19 @@ fn luminosity_matches_realised_cells() {
                     poisson_two_sided_p(k, expected)
                 )
             };
+            // The single-star tables are the corrected ones less their correction.
+            let single = light - pair;
+            let residual = |tabulated: f64| 100.0 * (realised.light - tabulated) / tabulated;
             eprintln!(
                 "{name} {layer:?}: {} systems (expected {systems:.1}); light {:.4e} against \
-                 {light:.4e} (± {allowed:.3e}), {:.4e} as single stars; brighter than −3: {}; \
+                 {light:.4e} (± {allowed:.3e}), {:.4e} as single stars; residual {:+.1}% against \
+                 the single-star tables, {:+.1}% against the corrected; brighter than −3: {}; \
                  brighter than −5: {}",
                 realised.systems,
                 realised.light,
                 realised.single_light,
+                residual(single),
+                residual(light),
                 bright(realised.brighter_3, bright_3),
                 bright(realised.brighter_5, bright_5),
             );
@@ -214,6 +240,27 @@ fn luminosity_matches_realised_cells() {
                 failures.push(format!(
                     "{name} {layer:?}: {} against {light} ± {allowed}",
                     realised.light
+                ));
+            }
+            // The pair-evolved deficit: the cells' own, the same stars evolved each alone, against
+            // the tables' correction, within the cells' compound-Poisson interval and the fit's
+            // standard error (R06.T5.d).
+            let deficit = realised.single_light - realised.light;
+            let deficit_allowed = Z * math::hypot(realised.deficit_squared.sqrt(), pair_sigma);
+            eprintln!(
+                "{name} {layer:?}: pair-evolved deficit {deficit:.4e} ({:.1}% of the single-star \
+                 light) against the tables' {:.4e} ({:.1}%) ± {deficit_allowed:.3e}",
+                100.0 * deficit / realised.single_light,
+                -pair,
+                -100.0 * pair / single,
+            );
+            if matches!(layer, Layer::C | Layer::D | Layer::E)
+                && (deficit + pair).abs() > deficit_allowed
+            {
+                failures.push(format!(
+                    "{name} {layer:?}: the pair-evolved deficit {deficit} against the tables' {} \
+                     ± {deficit_allowed}",
+                    -pair
                 ));
             }
         }

@@ -2281,8 +2281,13 @@ The choices the plan left to measurement, made from T16's and T17's results and 
 figures that decided them: the vertex path for the high setting (Design note 4; the low setting
 keeps `FaceDifferences`), the high setting's normal scale (Design note 25), the descending
 thresholds and `FORCED_REGION_RESIDENCY_S` (Design note 9), the cache budgets (Design note 10, until
-R10), the worker counts (Design note 11) and, if T16 redesigned it, the low setting. The code's
-defaults change in one commit; the plan's Design notes gain "as built" lines.
+R10), the worker counts (Design note 11) and, if T16 redesigned it, the low setting. The selection
+bound is not among them: both settings select by the hard ε_n plus the sagitta
+(`decision-r05-high-bound.md`). The high setting's vertex path is also read against T13.a's
+effective tolerance. On the ridged planet, `FaceDifferences`' budget of 1,952 lowers τ′ from
+2.1–3.0 px to 1.0–2.3 px (probe, 2026-10-04). ⌊slots ÷ 2⌋ is confirmed or changed against the
+cache's eviction of coarse patches (Risks). The code's defaults change in one commit; the plan's
+Design notes gain "as built" lines.
 
 - Files: the constants' modules in `view/terrain/` and `view/atmosphere/`, this plan.
 - Tests: the existing tests, updated only where a default is asserted.
@@ -2429,7 +2434,37 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   selection over-refines and demand rises. Whether selection then takes a calibrated bound
   (R10's min(hard, 4σ)) is ruled (2026-10-02, decisions-r05.md item 6): R05 selects by the hard
   bound everywhere, gate runs included; R10.T4 applies min(hard, kσ) under the criterion recorded
-  there, from T6's and its own recorded figures.
+  there, from T6's and its own recorded figures. Re-ruled for both settings on the whole-descent
+  records (2026-10-04, `decision-r05-high-bound.md`): unchanged. With ridges off, the hard bound
+  never meets the budget (high at most 915 of 981, low 167 of 648), so the high setting draws
+  within τ with no label. With ridges on, min(hard, 4σ_n) is not a bound: at levels 4–8, p99.9
+  reaches 1.23 × 4σ_n and the patch maxima 1.87 × 4σ_n, and σ_n leaves out the included crests'
+  interpolation error, which ε_n carries at levels 9–12. The budgeted hard selection's τ′ of
+  2–3 px corresponds to about 0.4–1.0 px of measured error. So the high setting shows
+  `TERRAIN: DETAIL LIMITED` for most of the ridged coast, arc and approach: true of the stated
+  bound, and conservative of the picture.
+- **The budget and the morph.** A `limited` selection's leaves meet τ′ = τ × its refused split's
+  excess, not τ. Morph bands at the setting's τ therefore leave coarse–fine edges unmorphed:
+  T-junction steps under the skirts, and splits that appear without a morph. Ruled
+  (`decision-r05-high-bound.md`): selection returns the excess (`Selection.limitExcess`), and the
+  terrain pass sets its bands at τ × max(1, excess ÷ w). Until that lands, the ridged runs'
+  limited segments may show seams or pops of up to τ′ in bound terms. **Landed (2026-10-04):**
+  F1 and F2 (T7 and T11.c, as built). The bands now move with τ′ at each selection; T13.a's
+  record gives τ′'s steps between selections (F4, below).
+- **Coarse patches evicted under load.** In the approach (probe, 2.4 km, both ridge settings),
+  patches of levels 2–12 are evicted and re-baked within a second, while the descending contact's
+  finest-level region turns over 100–260 bakes a second under an ideal pool. A horizon patch that
+  returns is then a non-resident leaf, drawn by its parent at up to 6.8 px (ridges off) and about
+  45 px (on) of bound, for a frame or more. It is not a matter of the selection bound. The cause
+  and the fix are T8's, as built: see "T8, as built (lane B, with F3 of
+  `decision-r05-high-bound.md`, 2026-10-04)". The patches had not left the view. Selection had
+  culled them by their own baked ranges, so `retain` never touched them, and the cache now marks
+  them as used (`Selection.hiddenBaked`). T13.a's F4 record (2026-10-05) measures what is left
+  over the whole descent. Returns, drawn by a stand-in of level 12 or coarser, show on 8.5% of
+  the ridged high coast's frames (at about 2 px of bound) and 5.2% of its low pass's (up to
+  68 px). That is the cache's capacity, as T8 found, not thrash. The forced region's rate is also
+  an input to T18's descending thresholds (Design note 9): the record gives 81–85 bakes a second
+  over the ridged approach and 11–15 over the slowdown.
 - **The descending thresholds** (Design note 9) are provisional: 1 km and 30 s, and
   `FORCED_REGION_RESIDENCY_S` 30 s, until T16 measures how long a forced region takes to become
   resident and T18 sets them.
@@ -2998,7 +3033,8 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
         found.
 
       - This run flew the level coast, so its coast row is current. T13.a's two demand records
-        are `just descent-demand` runs and stay stale for the coast.
+        are `just descent-demand` runs and stay stale for the coast. Both were re-run on
+        2026-10-05 (F4, T13.a as built).
     - _Fixed here: an empty trace's zeros._
       - The trace held no events. The file as written still gave `frames.dropped` 0 and
         `mainThread.gc` `[]` as if measured.
@@ -4613,8 +4649,9 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     **Proposed correction, not the gate:** D_frustum = Σ_L 4 k_L tan(φ_x ÷ 2) v ÷ S_L +
     (3π k² ÷ ln 2) |ḣ| ÷ h above the cap and the vertical term zero below it. The whole-descent
     record has the per-segment figures. For T18 and T19.
-  - **Record: the whole descent under min(hard, 4σ_n)** (2026-10-03,
-    `docs/measurements/descent-spike/2026-10-03-demand-calibrated.{json,md}`, seed 7, 64 Hz,
+  - **Record: the whole descent under min(hard, 4σ_n)** (superseded by F4's record below;
+    2026-10-03, `docs/measurements/descent-spike/2026-10-03-demand-calibrated.{json,md}`, seed 7,
+    64 Hz,
     78,721 frames a cell, none truncated, load 13–43, timings provisional). The site is at
     −1,845.8 m (ridges off) and −1,644.6 m (on); the low pass is lifted 418.6 m (off) and 64.4 m
     (on) by its floors, and every stretch keeps its clearance (least margin 0.0 m). `limited` is
@@ -4648,7 +4685,121 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     demand falls well under D, as a cap must. The low fast pass's demand peaks at 357 a second
     (high, ridges off) and 374 (high, ridges on, 16 Hz) against D's 310 and 385. `selectPatches`
     p95 is 0.3–13.1 ms, over the 2 ms budget on high in every moving segment (provisional; four
-    processes at once).
+    processes at once). Ruled on this record (2026-10-04, `decision-r05-high-bound.md`): both
+    settings keep the hard ε_n plus the sagitta, and min(hard, 4σ_n) stays a recorded second pass
+    only. A probe of the ridged high cell (16 Hz, ideal pool) puts the budget's effective tolerance
+    τ′ (the largest ρ of a resident drawn leaf) at 2.1–3.0 px over the coast and the arc and
+    1.2–2.1 px in the approach, with 981 patches against about 4,300–11,700 unbudgeted over the
+    coast and arc. T6's ratios put that at 0.4–1.0 px of measured error, where min(hard, 4σ_n)
+    reaches about 1.9 px at levels 4–8. On the low setting, the ridged arc reaches τ′ 2.4–2.6 px
+    against τ = 2 px. The next record adds, per segment, τ′'s p50, p95 and maximum over limited
+    frames (`Selection.limitExcess`) and the share of frames with a stand-in at level 12 or
+    coarser. It re-runs the four hard cells after the coast fix. **Superseded** by F4's record
+    (below).
+  - **Record: F4's figures over the whole descent** (2026-10-05, F4 of
+    `decision-r05-high-bound.md`; `docs/measurements/descent-spike/2026-10-05-demand-hard.{json,md}`
+    and `2026-10-05-demand-calibrated.{json,md}`, record version 2, seed 7, no cell truncated).
+    - _What was run._ All eight cells were re-run in full, with the level coast, F1–F3 and
+      selection's perf (c). Ridges on, high ran at 16 Hz again. Each cell ran as its own process,
+      nice, at most four at once, without the heavy-test lock (CPU only). The high hard cells were
+      stopped twice, once to free the lock and once by a power-off, and rerun from the start
+      under caps of 2 h (selection) and 4 h (wall). The two new records supersede `2026-10-04-demand-hard` and
+      `2026-10-03-demand-calibrated`. Those are kept, with a banner that marks their coast and arc
+      rows stale, since the high-bound ruling was made on them.
+    - _The tooling_ (`fixedStep.ts`, `demandRecord.ts`, `scripts/descentDemand.mjs`).
+      - Each frame records:
+        - τ′ = τ × max(1, `limitExcess` ÷ w) (`effectiveTolerancePx`);
+        - the drawn stand-ins of level 12 or coarser (`coarseStandIns`);
+        - whether a stand-in covers a return, a patch the cache evicted earlier and selection
+          wants again;
+        - the largest ρ they draw: the stand-in's level's error at a covered patch's box
+          distance, in pixels of bound;
+        - the forced region's bakes.
+      - Each segment adds:
+        - τ′'s p50, p95 and maximum over the limited frames;
+        - |Δτ′| between consecutive selections where either is limited, its ratio, and the share
+          of steps beyond the morph bands' margin of 1.1 (`BAND_MARGIN`, held to the pass's
+          1 + `RESELECT_FRACTION`);
+        - the stand-in shares and their largest ρ;
+        - the forced bakes a second.
+      - Version 2 of the record carries each cell's caps, wall time and load, and notes.
+        `--merge` writes one record from the per-process ones, and `--note` adds a note.
+    - _Deviation: stand-ins counted from the draw set._ F3's acceptance read non-resident selected
+      leaves of level 12 or coarser. F4 asks for "a stand-in at level 12 or coarser". A stand-in
+      also draws the resident patches beneath it, since balance and forced splits are not gated,
+      and it covers level-13 leaves. Counting the draw set's stand-ins is the wider reading.
+    - _Not changed: the record's tolerance._ The record selects at the setting's τ, but the
+      terrain pass selects at τ ÷ 1.1 (`RESELECT_FRACTION`, T11.c). The record's patch counts
+      and demand are therefore somewhat below the pass's. For the orchestrator: aligning them
+      would move every pinned window hash.
+    - _τ′, hard bound, ridges on._ The probe's 2.1–3.0 px holds. With ridges off neither setting
+      is ever limited.
+
+      | Segment            | High (τ 1 px), p50 / p95 / max | Low (τ 2 px), p50 / p95 / max |
+      | ------------------ | ------------------------------ | ----------------------------- |
+      | orbit coast        | 2.07 / 2.11 / 2.11             | unlimited                     |
+      | descent arc        | 2.56 / 3.27 / 3.34             | 2.48 / 2.77 / 2.81            |
+      | approach and flare | 1.94 / 2.65 / 2.66             | 2.23 / 2.25 / 2.26            |
+      | later segments     | unlimited                      | unlimited                     |
+
+    - _Δτ′._ Small everywhere: p95 at most 0.01 px and maximum 0.04 px. Δτ′ ÷ τ′ is at most
+      0.019, so a vertex inside its band steps by about 0.1 in morph factor at most. No step
+      crosses the margin of 1.1. High's steps are 16 Hz ones, each spanning four 64 Hz steps.
+    - _Coarse stand-ins_ (share of frames, then in brackets the share for a return; then the
+      largest ρ for a return):
+      - High, ridges off: about 4–7% of frames from the coast to the low pass, mostly first bakes.
+        Returns are 0.2% in the approach (up to 16.4 px of bound) and 1.1% in the low pass
+        (29.5 px).
+      - High, ridges on (16 Hz): 44.8% (8.5%) in the coast, 41.7% (0.7%) in the arc, 20.1% (1.1%)
+        in the approach and 13.1% (5.2%) in the low pass. The returns reach 2.1, 3.1, 45.1 and
+        67.6 px.
+      - Low: at most 6.2% of frames, with returns at most 0.8%.
+      - F3's 2.4 km window stays clean. Over the whole descent returns remain, as T8 (as built)
+        found: the cache's capacity, not thrash.
+      - The largest ρ is in the slowdown: 287 px (high, ridges off) to 1,015 px (high, on), on
+        0.5–2.6% of frames, mostly first bakes. As the camera turns towards the nadir, the newly
+        seen ground and the forced region under the craft are drawn by a coarse ancestor until
+        the bakes descend, a level a frame. Those patches' bounds are inherited from that
+        ancestor and reach near the camera. Being in bound terms, these ρ overstate the drawn
+        error near the ground.
+    - _The forced region's bakes_ (a second, averaged over each segment's whole span):
+
+      | Segment            | High, off | Low, off | High, on | Low, on |
+      | ------------------ | --------: | -------: | -------: | ------: |
+      | approach and flare |       0.8 |      1.7 |     84.8 |    81.0 |
+      | slowdown           |      10.7 |     11.5 |     15.1 |    11.5 |
+
+      Every other segment bakes none. The ridged approach ends lower (369 m above its floor,
+      against 508 m with ridges off), so its contact descends for longer. The probe's 100–260 a
+      second was a 1 s window at 2.4 km. For T18's descending thresholds (Design note 9).
+
+    - _Demand ÷ D, hard bound_ (high then low). The coast and arc rows are now current. From the
+      approach on, F3 lowered the bakes by up to about 4% (high's low pass with ridges off: 357 to
+      348 a second). The exceptions are the ridged approaches, both limited: high's fell from 278
+      to 240 a second, low's from 139 to 125. D predicts every unbudgeted moving segment
+      within a factor of two on both settings but one. High's ridged slowdown is at 0.497, just
+      outside; it was 0.50 before as well.
+
+      | Segment            | Ridges off  | Ridges on   |
+      | ------------------ | ----------- | ----------- |
+      | orbit coast        | 0.66 / 0.68 | 0.13 / 0.59 |
+      | descent arc        | 0.61 / 0.81 | 0.11 / 0.49 |
+      | approach and flare | 0.56 / 0.79 | 0.60 / 1.62 |
+      | low fast pass      | 1.12 / 1.29 | 0.94 / 1.13 |
+      | slowdown           | 0.83 / 1.93 | 0.50 / 1.18 |
+
+      High's coast now selects 455 patches (maximum 482) with ridges off, at 8.7 a second
+      against D's 13.2. Its arc selects 662 (915), at 16.1 against 26.4.
+
+    - _min(hard, 4σ_n)._ `limited` is 0% everywhere, as before. Demand ÷ D, high then low: ridges
+      off, coast 2.07 / 6.71, arc 0.75 / 1.79, approach 0.74 / 1.77, low pass 0.72 / 1.71 and
+      slowdown 1.19 / 7.04; ridges on, 2.16 / 0 (D 0.0), 0.72 / 1.99, 2.41 / 18.67, 0.71 / 1.91
+      and 0.59 / 5.31.
+    - _`selectPatches` p95, hard bound_ (provisional, at loads of 4–34, four processes at once).
+      The figures of record are perf (c)'s A/B and the owner's quiet-machine runs.
+      - High, ridges off: coast 4.7 ms, arc 2.4, approach 8.3, low pass 8.1, slowdown 6.5.
+      - High, ridges on: 3.9, 5.2, 29.2, 4.6 and 1.7.
+      - Low: 1.7 ms at most in every segment.
   - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
     camera underground (the direction above), not selection: lane B's
     `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With
@@ -4714,6 +4865,13 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       - Their descent-arc rows were flown up to 1.05 km lower near the arc's start, so they may
         shift slightly.
       - From the approach on, they stand.
+      - **Re-run (2026-10-05, F4).** All eight cells were flown with the level coast, as
+        `2026-10-05-demand-hard.{json,md}` and `2026-10-05-demand-calibrated.{json,md}`, and the
+        hard record's coast caveat is gone. The coast and arc rows moved little. On high with
+        ridges off, the coast went from 454 to 455 patches and D from 13.3 to 13.2 a second, and
+        the arc's demand from 16.4 to 16.1 a second. The two old records are kept with a banner
+        that marks their coast and arc rows stale ("Record: F4's figures over the whole descent",
+        above).
     - _Left as it was._ The unlifted low fast pass is still `constant` and climbs 0.076 m/s
       (1.9 m) into the slowdown's blend, by the same mechanism. In both of seed 7's records the low
       pass is lifted, so it already flies level there. Making it `level` would move the flare and

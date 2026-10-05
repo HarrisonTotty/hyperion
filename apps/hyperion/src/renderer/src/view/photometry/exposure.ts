@@ -9,8 +9,8 @@
  */
 
 /**
- * A camera's aperture, shutter and sensitivity: the triple a `MAN` exposure is set from (R06's
- * `cameraLimitV` takes it).
+ * A camera's aperture, shutter, sensitivity and neutral-density filter: the view camera's setting
+ * at an exposure, or the triple a `MAN` exposure is set from (R06's `cameraLimitV` takes it).
  */
 export interface ExposureTriple {
   /** The f-number N, positive. */
@@ -19,6 +19,11 @@ export interface ExposureTriple {
   readonly shutterS: number;
   /** The sensitivity S, ISO, positive. */
   readonly iso: number;
+  /**
+   * The neutral-density filter's attenuation, EV, not negative; absent while the filter is clear
+   * (decision-r07-exposure-camera).
+   */
+  readonly ndEv?: number;
 }
 
 /**
@@ -47,22 +52,138 @@ export const SATURATION_CONSTANT = 78;
  */
 export const DEFAULT_MAN_EV100 = -1;
 
-/** A triple that gives {@link DEFAULT_MAN_EV100}: f/1, 2 s, ISO 100. */
-export const DEFAULT_MAN_TRIPLE: ExposureTriple = { aperture: 1, shutterS: 2, iso: 100 };
+/**
+ * The least `MAN` exposure the operator may enter, EV100: −14 (decision-r07-man-exposure).
+ *
+ * @remarks
+ * The foot of the brainstorm's scene span, the galactic band's faintest background at about
+ * 10⁻⁵ cd/m², metered at R02's EV100 = log₂(L̄ × 8) (−13.6), rounded outward.
+ */
+export const MAN_EV100_MIN = -14;
 
 /**
- * The exposure value at ISO 100 of a triple: EV100 = log₂(N² ÷ t) − log₂(S ÷ 100).
+ * The greatest `MAN` exposure the operator may enter, EV100: 42 (decision-r07-man-exposure).
  *
- * @throws RangeError if a member of the triple is not finite and positive.
+ * @remarks
+ * The top of the brainstorm's scene span, an O star's disc centre at about 3 × 10¹¹ cd/m², metered
+ * at log₂(L̄ × 8) (41.1), rounded outward. The view camera's ND is dense enough for it.
+ */
+export const MAN_EV100_MAX = 42;
+
+/**
+ * A view camera's exposure program: its fixed lens and its ranges, which set its triple as a
+ * function of EV100 alone, under `AUTO`, `INHIBITED` and `MAN` alike (decision-r07-exposure-camera).
+ */
+export interface ExposureProgram {
+  /** The fixed f-number N. */
+  readonly aperture: number;
+  /** The longest shutter, the live frame's, s. */
+  readonly frameShutterS: number;
+  /** The shortest shutter, s. */
+  readonly minShutterS: number;
+  /** The sensor's base sensitivity, ISO: the program never sets less. */
+  readonly baseIso: number;
+  /** The sensor's top gain, ISO; beyond it the sensitivity is a digital push. */
+  readonly maxIso: number;
+  /** The neutral-density filter's densest, EV. */
+  readonly maxNdEv: number;
+}
+
+/** The view camera's fixed f-number (R06 Design note 18's N). */
+const VIEW_APERTURE = 1.4;
+
+/** The view camera's shortest shutter, s: 1/8,000 s. */
+const VIEW_MIN_SHUTTER_S = 1 / 8_000;
+
+/**
+ * The view camera (decision-r07-exposure-camera): R06's sensor (`DEFAULT_VIEW_CAMERA`) behind a
+ * fixed f/1.4 lens, a shutter of 1/30 to 1/8,000 s, ISO 100 to 409,600 and a variable ND filter to
+ * 28.06 EV (optical density 8.45).
+ *
+ * @remarks
+ * f/1.4 and 1/30 s are R06 Design note 18's N and t, the live frame at 30 fps. 1/8,000 s is the
+ * shortest movie shutter of Sony's α7S III and FX6. ISO 409,600 is the high gain of Design note 18,
+ * 12 stops above base, the expanded top of the α7S III and the FX6. The ND's densest is what
+ * {@link MAN_EV100_MAX}, 42, needs at 1/8,000 s and ISO 100, so that no `MAN` exposure is beyond
+ * it; the FX6 carries a variable ND, and a camera imaging a star's disc an OD 5.0 solar filter, as
+ * MER's Pancam and MSL's Mastcam do.
+ */
+export const VIEW_CAMERA: ExposureProgram = {
+  aperture: VIEW_APERTURE,
+  frameShutterS: 1 / 30,
+  minShutterS: VIEW_MIN_SHUTTER_S,
+  baseIso: 100,
+  maxIso: 409_600,
+  maxNdEv: MAN_EV100_MAX - Math.log2((VIEW_APERTURE * VIEW_APERTURE) / VIEW_MIN_SHUTTER_S),
+};
+
+/**
+ * A camera's triple at an exposure under its program (decision-r07-exposure-camera): from dark to
+ * bright, gain at the frame's shutter, then the shutter at base sensitivity, then the ND filter.
+ *
+ * @remarks
+ * With EV100 = log₂(N² ÷ t) − log₂(S ÷ 100) + ND (ISO 2720, APEX): the frame's shutter with
+ * S = 100 × (N² ÷ t) × 2^−EV100 while S is at least the base, beyond the top gain included, where
+ * the picture is pushed digitally (darker than EV100 −6.12 for {@link VIEW_CAMERA}); then base
+ * sensitivity with t = N² × 100 ÷ (S_base × 2^EV100) down to the shortest shutter (to 13.94); then
+ * the shortest shutter with ND = EV100 − (log₂(N² ÷ t_min) − log₂(S_base ÷ 100)). At f/1.4 and
+ * 1/30 s the first is S = 5,880 × 2^−EV100, which is K N² ÷ (t L̄) at the metered L̄ = 2^EV100 ÷ 8.
+ * The sensitivity never falls below base, and the shutter never leaves its range; the ND is absent
+ * while the filter is clear. The triple's {@link ev100FromTriple} is `ev100`.
+ *
+ * @throws RangeError if `ev100` is not finite.
+ */
+export function programTriple(program: ExposureProgram, ev100: number): ExposureTriple {
+  if (!Number.isFinite(ev100)) {
+    throw new RangeError(`an exposure program needs a finite EV100, not ${ev100}`);
+  }
+  const { aperture, frameShutterS, minShutterS, baseIso } = program;
+  const squared = aperture * aperture;
+  const iso = 100 * (squared / frameShutterS) * 2 ** -ev100;
+  if (iso >= baseIso) {
+    return { aperture, shutterS: frameShutterS, iso };
+  }
+  const shutterS = ((squared * 100) / baseIso) * 2 ** -ev100;
+  if (shutterS >= minShutterS) {
+    return { aperture, shutterS, iso: baseIso };
+  }
+  const ndEv = ev100 - (Math.log2(squared / minShutterS) - Math.log2(baseIso / 100));
+  // At the join itself rounding can leave no attenuation: the filter is then clear, and absent.
+  return ndEv > 0
+    ? { aperture, shutterS: minShutterS, iso: baseIso, ndEv }
+    : { aperture, shutterS: minShutterS, iso: baseIso };
+}
+
+/**
+ * The view camera's triple at {@link DEFAULT_MAN_EV100}: f/1.4, 1/30 s, ISO 11,760
+ * (decision-r07-exposure-camera).
+ */
+export const DEFAULT_MAN_TRIPLE: ExposureTriple = programTriple(VIEW_CAMERA, DEFAULT_MAN_EV100);
+
+/** Whether a triple's members are finite and positive, and its ND, if any, finite and not negative. */
+function isValidTriple(triple: ExposureTriple): boolean {
+  const { aperture, shutterS, iso, ndEv } = triple;
+  return (
+    [aperture, shutterS, iso].every((value) => Number.isFinite(value) && value > 0) &&
+    (ndEv === undefined || (Number.isFinite(ndEv) && ndEv >= 0))
+  );
+}
+
+/**
+ * The exposure value at ISO 100 of a triple: EV100 = log₂(N² ÷ t) − log₂(S ÷ 100) + ND, the ND in
+ * EV.
+ *
+ * @throws RangeError if a member of the triple is not finite and positive, or its ND is negative
+ *   or not finite.
  */
 export function ev100FromTriple(triple: ExposureTriple): number {
-  const { aperture, shutterS, iso } = triple;
-  for (const value of [aperture, shutterS, iso]) {
-    if (!(Number.isFinite(value) && value > 0)) {
-      throw new RangeError("an exposure triple's members must be finite and positive");
-    }
+  if (!isValidTriple(triple)) {
+    throw new RangeError(
+      "an exposure triple's members must be finite and positive, and its ND finite and not negative",
+    );
   }
-  return Math.log2((aperture * aperture) / shutterS) - Math.log2(iso / 100);
+  const { aperture, shutterS, iso, ndEv } = triple;
+  return Math.log2((aperture * aperture) / shutterS) - Math.log2(iso / 100) + (ndEv ?? 0);
 }
 
 /**
@@ -96,11 +217,12 @@ export type InhibitReason = "operator" | "no_image_to_meter";
  * The exposure's automation level and value (Design note 11).
  *
  * @remarks
- * `manual` is set from a triple by the operator. `auto` follows the photorealistic view the view
- * accompanies (R07), holding its last metered value. `inhibited` means the automatic function is
- * prevented from acting: the exposure is held at its last metered value, with who inhibited it and
- * why. A system inhibit (the source closed or faulted) returns to `auto` by itself when the source
- * returns; an operator's does not.
+ * `manual` is set by the operator, from an EV100 entered, at the view camera's triple
+ * ({@link setManualEv100}), or from a triple ({@link setManual}). `auto` follows the photorealistic
+ * view the view accompanies (R07), holding its last metered value. `inhibited` means the automatic
+ * function is prevented from acting: the exposure is held at its last metered value, with who
+ * inhibited it and why. A system inhibit (the source closed or faulted) returns to `auto` by itself
+ * when the source returns; an operator's does not.
  */
 export type ExposureControl =
   | { readonly kind: "manual"; readonly triple: ExposureTriple }
@@ -115,7 +237,8 @@ export type ExposureCommandResult =
   | { readonly kind: "accepted"; readonly control: ExposureControl }
   | {
       readonly kind: "refused";
-      readonly reason: "no_image_to_meter" | "not_automatic" | "already_auto" | "invalid_triple";
+      readonly reason:
+        "no_image_to_meter" | "not_automatic" | "already_auto" | "invalid_triple" | "invalid_ev100";
     };
 
 /** The exposure value a control stands at, EV100. */
@@ -134,17 +257,49 @@ export function controlEv100(control: ExposureControl): number {
 }
 
 /**
+ * The view camera's setting at a control: `MAN`'s own triple, else {@link VIEW_CAMERA}'s at the
+ * control's EV100 (decision-r07-exposure-camera).
+ *
+ * @remarks
+ * The exposure panel's `APERTURE`, `SHUTTER`, `ND` and `ISO` rows show it (R07.T13.c), and the
+ * sky label's `STARS V … mag CAM` states the camera's limit at it (R07.T13.e), so that the two
+ * read one setting.
+ */
+export function shownTriple(control: ExposureControl): ExposureTriple {
+  return control.kind === "manual"
+    ? control.triple
+    : programTriple(VIEW_CAMERA, controlEv100(control));
+}
+
+/**
  * `MAN` at a triple, from any level, by the operator; refused where a member of the triple is not
- * finite and positive.
+ * finite and positive, or its ND is negative or not finite.
  */
 export function setManual(triple: ExposureTriple): ExposureCommandResult {
-  const valid = [triple.aperture, triple.shutterS, triple.iso].every(
-    (value) => Number.isFinite(value) && value > 0,
-  );
-  if (!valid) {
+  if (!isValidTriple(triple)) {
     return { kind: "refused", reason: "invalid_triple" };
   }
   return { kind: "accepted", control: { kind: "manual", triple } };
+}
+
+/**
+ * `MAN` at an exposure the operator enters, from any level (decision-r07-man-exposure): the view
+ * camera's triple at that EV100 (decision-r07-exposure-camera); refused with `invalid_ev100` where
+ * it is not finite or lies outside {@link MAN_EV100_MIN} to {@link MAN_EV100_MAX}.
+ *
+ * @remarks
+ * The level it is entered from does not change the triple: one camera serves every level, so the
+ * entry's setting is the one `AUTO` would show at that EV100. It is not smoothed and not pending,
+ * since the exposure is the view's own, a display control.
+ */
+export function setManualEv100(ev100: number): ExposureCommandResult {
+  if (!(Number.isFinite(ev100) && ev100 >= MAN_EV100_MIN && ev100 <= MAN_EV100_MAX)) {
+    return { kind: "refused", reason: "invalid_ev100" };
+  }
+  return {
+    kind: "accepted",
+    control: { kind: "manual", triple: programTriple(VIEW_CAMERA, ev100) },
+  };
 }
 
 /**

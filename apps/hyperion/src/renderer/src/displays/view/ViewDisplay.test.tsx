@@ -11,8 +11,7 @@ import type { FakeView } from "../../test/fakeRenderEngine";
 import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { skyPayload, skyResponse } from "../../test/skyFixtures";
-import { decodeSkyPayload, type SkyDecodeRequest } from "../../view/sky/decodePayload";
+import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
 import { FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import {
   anOpenedUniverse,
@@ -29,6 +28,7 @@ import {
   sliceSceneSystem,
 } from "../../test/sceneFixture";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { FULL_VIEW_PX, stubViewLayout } from "../../test/viewDisplayHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { rotate } from "../../view/camera/quaternion";
@@ -58,10 +58,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Lays the stage out at {@link WIDTH_PX} by {@link HEIGHT_PX}, in VIEW's full layout. */
 function stubLayout(): void {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-    DOMRect.fromRect({ x: 0, y: 0, width: WIDTH_PX, height: HEIGHT_PX }),
-  );
+  stubViewLayout({ widthPx: WIDTH_PX, heightPx: HEIGHT_PX }, () => FULL_VIEW_PX);
 }
 
 interface Setup {
@@ -405,6 +404,7 @@ describe("the VIEW display", () => {
     const rate = screen.getByRole("status", { name: "Free camera rate" });
     expect(rate).toHaveTextContent("RATE 1.00 km/s");
     await user.click(screen.getByRole("application"));
+    await user.keyboard("3");
     await user.keyboard("{PageUp}");
     advance(300);
     expect(rate).toHaveTextContent("RATE 3.16 km/s");
@@ -659,26 +659,6 @@ async function sceneArrives(
   });
 }
 
-/**
- * A stand-in for the sky's decode worker, constructed as `Worker` is: it decodes each payload on
- * this thread a microtask later.
- */
-class InThreadSkyWorker {
-  readonly #events = new EventTarget();
-
-  addEventListener(type: string, listener: (event: Event) => void): void {
-    this.#events.addEventListener(type, { handleEvent: listener });
-  }
-
-  postMessage(message: SkyDecodeRequest): void {
-    queueMicrotask(() => {
-      this.#events.dispatchEvent(new MessageEvent("message", { data: decodeSkyPayload(message) }));
-    });
-  }
-
-  terminate(): void {}
-}
-
 function labelBlock(): string {
   return screen.getByText("VIEW", { selector: "p" }).parentElement?.textContent ?? "";
 }
@@ -801,7 +781,12 @@ describe("the VIEW display's server scene", () => {
     view.advance(300);
     expect([
       screen.getByText("SCENE STALE: reopening the scene"),
-      screen.getByText(/^UT /).classList.contains("stale"),
+      // The time reading, its runs each in a span of its own (R07.T19.b).
+      screen
+        .getByText(
+          (_, element) => element?.tagName === "OUTPUT" && element.textContent.startsWith("UT "),
+        )
+        .classList.contains("stale"),
       screen.getByRole("heading", { name: "Targets stale PRIMARY" }),
       labelBlock().includes("PRECISION TEST"),
       screen
@@ -1005,5 +990,46 @@ describe("the VIEW display's AUTO exposure (R07.T8.a)", () => {
     await settle();
     advance(1000);
     expect(exposureReadout()).toMatch(/INHIBITED · OPERATOR$/);
+  });
+});
+
+describe("the VIEW display's way back to MAN (R07.T13.d)", () => {
+  it("sets MAN in the wireframe after the photorealistic style, and ENABLE takes AUTO once metered", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    await user.click(screen.getByRole("button", { name: "WIREFRAME" }));
+    // The wireframe draws no image to meter: the system inhibits AUTO once the meter times out.
+    advance(1000);
+    await settle();
+    advance(1000);
+    const trapped = exposureReadout();
+    await user.click(screen.getByRole("textbox", { name: "MAN" }));
+    await user.keyboard("8.6{Enter}");
+    advance(300);
+    const manual = exposureReadout();
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    expect([trapped, manual, exposureReadout()]).toEqual([
+      expect.stringMatching(/INHIBITED · NO IMAGE TO METER$/),
+      "EV100 8.6 MAN",
+      expect.stringMatching(/^EV100 -?\d+\.\d AUTO$/),
+    ]);
   });
 });

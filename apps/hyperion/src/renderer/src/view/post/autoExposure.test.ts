@@ -6,24 +6,17 @@ import {
   ev100FromTriple,
   exposureScale,
   inhibit,
+  programTriple,
   setAuto,
   type ExposureControl,
+  VIEW_CAMERA,
 } from "../photometry/exposure";
 import { AGX_MAX_EV } from "../photometry/toneCurve";
 import { glareSourceVeil, type GlareSource } from "./glare";
 import { binCentreLuminance, cpuHistogram, HISTOGRAM_BINS, type Histogram } from "./histogram";
-import {
-  AutoExposure,
-  meteredLuminance,
-  METER_TIMEOUT_S,
-  programTriple,
-  smoothEv,
-  type ExposureProgram,
-} from "./autoExposure";
+import { AutoExposure, meteredLuminance, METER_TIMEOUT_S, smoothEv } from "./autoExposure";
 import { METER_CLASS, type MeterMode } from "./meter";
 
-/** R06's `DEFAULT_VIEW_CAMERA`: N = 1.4, t = 1/30 s (R06 Design note 18). */
-const PROGRAM: ExposureProgram = { aperture: 1.4, shutterS: 1 / 30 };
 const SOURCE = viewId("main");
 const AUTO: ExposureControl = { kind: "auto", ev100: 0 };
 
@@ -60,7 +53,7 @@ function run(exposure: AutoExposure, h: Histogram, hz: number, seconds: number):
 }
 
 function controller(control: ExposureControl = AUTO, meter: MeterMode = "average"): AutoExposure {
-  return new AutoExposure({ source: SOURCE, program: PROGRAM, control, meter });
+  return new AutoExposure({ source: SOURCE, program: VIEW_CAMERA, control, meter });
 }
 
 describe("meteredLuminance", () => {
@@ -228,6 +221,15 @@ describe("the exposure", () => {
     expect(reading.source).toBe(SOURCE);
   });
 
+  it("gives the view camera's triple under AUTO and INHIBITED, the ND in at a sunlit planet", () => {
+    const exposure = controller({ kind: "auto", ev100: 15 });
+    expect(exposure.reading().triple).toEqual(programTriple(VIEW_CAMERA, 15));
+    expect(exposure.apply(inhibit(exposure.control))).toBe(true);
+    const held = exposure.reading();
+    expect(held.triple).toEqual(programTriple(VIEW_CAMERA, 15));
+    expect(Math.abs(ev100FromTriple(held.triple) - 15)).toBeLessThan(1e-12);
+  });
+
   it("reports no image to meter when histograms stop, and resumes when they return", () => {
     const exposure = controller();
     const h = histogram([[120, 10]]);
@@ -276,7 +278,7 @@ describe("the exposure", () => {
   });
 
   it("is accepted by R02's setAuto once it meters", () => {
-    const exposure = controller({ kind: "manual", triple: programTriple(PROGRAM, 3) });
+    const exposure = controller({ kind: "manual", triple: programTriple(VIEW_CAMERA, 3) });
     expect(exposure.apply(setAuto(exposure.meteredEv100))).toBe(false);
     exposure.step(histogram([[120, 10]]), 1 / 60);
     expect(exposure.apply(setAuto(exposure.meteredEv100))).toBe(true);
