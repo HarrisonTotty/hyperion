@@ -10,8 +10,9 @@ import { CameraControls } from "./CameraControls";
 import { StyleControl } from "./StyleControl";
 import type { StyleRefusals } from "./styleRefusals";
 import type { InstrumentShown } from "./useInstruments";
+import type { SideFolds } from "./viewLayout";
 import { ViewMarkList } from "./ViewMarkList";
-import { type MarkRow, markRows, targetKey, type ViewRun } from "./viewRun";
+import { type MarkRow, markRows, rangesFromCamera, targetKey, type ViewRun } from "./viewRun";
 
 /** Props of {@link InstrumentControls}. */
 export interface InstrumentControlsProps {
@@ -31,6 +32,8 @@ export interface InstrumentControlsProps {
   readonly onAction: (action: ViewKeyAction) => void;
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
   readonly onSelect: (target: CameraTarget) => void;
+  /** How the camera and style panels stand in the side column's layout. */
+  readonly folds: SideFolds;
 }
 
 /** The rows of the list, with the units they were last shown in kept for their hysteresis. */
@@ -63,6 +66,7 @@ export function InstrumentControls({
   onAction,
   onEasedMovesChange,
   onSelect,
+  folds,
 }: InstrumentControlsProps) {
   const titleId = useId();
   const { run } = shown;
@@ -83,6 +87,7 @@ export function InstrumentControls({
         </h2>
         <ViewMarkList
           rows={rows}
+          fromCamera={rangesFromCamera(run.scene)}
           stale={stale}
           selectedKey={selection === null ? null : targetKey(selection)}
           onSelect={(row) => {
@@ -90,6 +95,7 @@ export function InstrumentControls({
           }}
         />
       </section>
+      {folds.row}
       <CameraControls
         preset={run.camera.preset}
         offered={offeredPresets(cameraScene)}
@@ -101,6 +107,8 @@ export function InstrumentControls({
         onAction={onAction}
         onEasedMovesChange={onEasedMovesChange}
         designator={designator}
+        id={folds.cameraId}
+        hidden={folds.cameraHidden}
       />
       <StyleControl
         renderStyle={run.camera.style}
@@ -110,6 +118,8 @@ export function InstrumentControls({
           onAction({ kind: "style", style });
         }}
         designator={designator}
+        id={folds.styleId}
+        hidden={folds.styleHidden}
       />
     </>
   );

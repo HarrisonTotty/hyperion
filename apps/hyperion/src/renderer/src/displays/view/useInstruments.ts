@@ -96,6 +96,13 @@ export interface Instrument {
   /** Receive its canvas and its stage, which the display measures. */
   readonly canvasRef: (canvas: HTMLCanvasElement | null) => void;
   readonly stageRef: (stage: HTMLElement | null) => void;
+  /**
+   * Its slot's panel as laid out while it is open, or `null` (closed, or before it is measured),
+   * by which the room for one more slot is reckoned (R07.T19.b).
+   */
+  readonly panelSize: ElementSize | null;
+  /** Receives its slot's panel, which the display measures. */
+  readonly panelRef: (panel: HTMLElement | null) => void;
 }
 
 /** What the primary's loop gives the instruments each animation frame. */
@@ -313,6 +320,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const [canvasTwo, setCanvasTwo] = useState<HTMLCanvasElement | null>(null);
   const stageOne = useElementSize();
   const stageTwo = useElementSize();
+  const panelOne = useElementSize();
+  const panelTwo = useElementSize();
   const skyOne = useSlotSky(sky, exposure, stateOf(slots, 1), stageOne.size);
   const skyTwo = useSlotSky(sky, exposure, stateOf(slots, 2), stageTwo.size);
   const runs = useRef(new Map<InstrumentSlot, ViewRun>());
@@ -553,6 +562,9 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         canvas: slot === 1 ? canvasOne : canvasTwo,
         canvasRef: slot === 1 ? setCanvasOne : setCanvasTwo,
         stageRef: slot === 1 ? stageOne.ref : stageTwo.ref,
+        // A closed slot's panel keeps the size it last had: it takes no room.
+        panelSize: state.open ? (slot === 1 ? panelOne.size : panelTwo.size) : null,
+        panelRef: slot === 1 ? panelOne.ref : panelTwo.ref,
       };
     }),
     specs: INSTRUMENT_SLOTS.filter((slot) => stateOf(slots, slot).open).map((slot) => ({

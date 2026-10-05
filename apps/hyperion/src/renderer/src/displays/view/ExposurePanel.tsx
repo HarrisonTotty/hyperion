@@ -18,6 +18,10 @@ import { exposureReading } from "./viewRun";
 
 /** Props of {@link ExposurePanel}. */
 export interface ExposurePanelProps {
+  /** The panel's ID, by which a disclosure button controls it (R07.T19.b), or none. */
+  readonly id?: string | undefined;
+  /** Whether the panel is folded behind its disclosure button in the compact layout (R07.T19.b). */
+  readonly hidden?: boolean | undefined;
   /**
    * The view the panel acts on, its system designator on the title row (`PRIMARY`,
    * `INSTRUMENT 1`; R07.T19), or none.
@@ -40,6 +44,12 @@ const MAN_DECIMALS = 1;
 const MAN_SPAN = [MAN_EV100_MIN, MAN_EV100_MAX]
   .map((ev100) => formatNumber(ev100, MAN_DECIMALS))
   .join(" to ");
+
+/**
+ * The status while there is no image to meter; it stands under the compact layout's row while this
+ * panel is folded (R07.T19.b).
+ */
+export const AUTO_NOT_AVAILABLE = "AUTO NOT AVAILABLE: NO IMAGE TO METER";
 
 /** Why a command is held back or an entry refused, in the guide's `STATUS: clause` form. */
 const REFUSAL_WORDS: Readonly<
@@ -347,10 +357,12 @@ export function ExposurePanel({
   meteredEv100,
   onChange,
   designator,
+  id,
+  hidden,
 }: ExposurePanelProps) {
   const titleId = useId();
   return (
-    <section className="panel view-exposure" aria-labelledby={titleId}>
+    <section className="panel view-exposure" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
         Exposure
         {designator === undefined ? null : (
@@ -365,9 +377,7 @@ export function ExposurePanel({
       </p>
       <CameraSetting triple={shownTriple(exposure)} />
       <ManualEntry exposure={exposure} onChange={onChange} />
-      {meteredEv100 === null ? (
-        <p className="view-exposure__reason">AUTO NOT AVAILABLE: NO IMAGE TO METER</p>
-      ) : null}
+      {meteredEv100 === null ? <p className="view-exposure__reason">{AUTO_NOT_AVAILABLE}</p> : null}
       <div className="view-exposure__commands">
         <ExposureCommand
           label="ENABLE"

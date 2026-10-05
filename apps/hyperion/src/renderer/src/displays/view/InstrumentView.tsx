@@ -35,6 +35,11 @@ export interface InstrumentViewProps {
   /** The scene's lighting and the lit bodies' labels, the primary's, for a photorealistic frame. */
   readonly lighting: LightingState;
   readonly litLabels: ReadonlyArray<AppearanceLabel>;
+  /**
+   * The photorealistic style's statements the `PRIMARY` view's block shows, which the instrument
+   * does not repeat (decision-r07-t19-layout, item 5).
+   */
+  readonly primaryPhotorealStatements: ReadonlyArray<string>;
   /** A graphics fault standing for this view (its own `GRAPHICS VIEW REFUSED`), or `null`. */
   readonly fault: string | null;
   /** The ID of the text describing the canvases' keys. */
@@ -48,8 +53,8 @@ export interface InstrumentViewProps {
 
 /**
  * The lines of an instrument's label block (decision-r07-t19, item 2b): every line of the
- * primary's but `SCENE`, which the header's `TRAINING` banner states for the display, and the
- * exposure's `SOURCE`, the primary view, before `STARS`.
+ * primary's but `SCENE`, which the header's `TRAINING` banner states for the display, and `METER`,
+ * the primary's own (R07.T19.b), and the exposure's `SOURCE`, the primary view, before `STARS`.
  */
 const INSTRUMENT_LINES: ReadonlyArray<string> = [
   "FRAME",
@@ -96,10 +101,13 @@ function instrumentLines(
  * order, since a plate over so small a picture would hide most of it. It states the drawn style,
  * the camera and field of view, the primary's exposure with its `SOURCE`, since an instrument
  * meters no image of its own (Design note 11), and the stars of its own cull of the sky, at its
- * camera's limit; and, while they hold, `POSITIONS AS SEEN FROM SHIP`, `PHOTOREALISTIC: PREPARING`
- * and its graphics fault (decision-r07-t19, item 2b). The scene's own statements (its lighting, its
- * bodies' labels, `ROTATION NOT YET MODELLED`) are the primary's, which states them for every view.
- * Its list and its camera and style controls are the side column's while `CONTROLS` points at it.
+ * camera's limit; and its graphics fault (decision-r07-t19, item 2b). Its statements run the slot's
+ * width under its label block and canvas, while they hold: `POSITIONS AS SEEN FROM SHIP`,
+ * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
+ * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`) unless the primary's block shows the same
+ * line (decision-r07-t19-layout, item 5). `ROTATION NOT YET MODELLED`, about the scene's bodies, is
+ * the primary's alone. Its list and its camera and style controls are the side column's while
+ * `CONTROLS` points at it.
  */
 export function InstrumentView({
   instrument,
@@ -108,6 +116,7 @@ export function InstrumentView({
   stale,
   lighting,
   litLabels,
+  primaryPhotorealStatements,
   fault,
   legendId,
   onKeyDown,
@@ -117,9 +126,32 @@ export function InstrumentView({
 }: InstrumentViewProps) {
   const titleId = useId();
   const labelId = useId();
-  const { shown, name } = instrument;
+  const statementsId = useId();
+  const { shown, name, panelRef } = instrument;
   const drawn = shown?.drawnStyle ?? "wireframe";
   const run = shown?.run ?? null;
+  const statements =
+    run === null
+      ? []
+      : [
+          ...labelStatements(run).filter((statement) => statement === POSITIONS_FROM_SHIP),
+          // Its own preparing, and the photorealistic style's statements about its picture that
+          // the primary's block does not show already.
+          ...photorealStatements(
+            { ...run, camera: { ...run.camera, style: budgetStyle } },
+            lighting,
+            drawn,
+            litLabels,
+          ).filter(
+            (statement) =>
+              statement === PHOTOREAL_PREPARING || !primaryPhotorealStatements.includes(statement),
+          ),
+        ];
+  const describedBy = [
+    ...(run === null ? [] : [labelId]),
+    ...(statements.length === 0 ? [] : [statementsId]),
+    legendId,
+  ].join(" ");
   const pickAt = (xPx: number, yPx: number): void => {
     if (shown === null) {
       return;
@@ -143,6 +175,7 @@ export function InstrumentView({
   };
   return (
     <section
+      ref={panelRef}
       className={`panel view-instrument view-instrument--slot-${String(instrument.slot)}`}
       aria-labelledby={titleId}
     >
@@ -155,16 +188,7 @@ export function InstrumentView({
             <ViewLabelBlock
               id={labelId}
               lines={instrumentLines(labelLines(run, exposure, stale), drawn, instrument.skyLabel)}
-              statements={[
-                ...labelStatements(run).filter((statement) => statement === POSITIONS_FROM_SHIP),
-                // The view's own: the scene's lighting and its bodies' labels are the primary's.
-                ...photorealStatements(
-                  { ...run, camera: { ...run.camera, style: budgetStyle } },
-                  lighting,
-                  drawn,
-                  litLabels,
-                ).filter((statement) => statement === PHOTOREAL_PREPARING),
-              ]}
+              statements={[]}
               countLine={null}
               fault={fault}
             />
@@ -181,7 +205,7 @@ export function InstrumentView({
             accessibleName={`VIEW, ${styleName(drawn)}, ${name}${
               run === null ? "" : `, ${PRESET_NAMES[run.camera.preset]}`
             }`}
-            describedBy={run === null ? legendId : `${labelId} ${legendId}`}
+            describedBy={describedBy}
             onKeyDown={onKeyDown}
             onKeyUp={onKeyUp}
             onBlur={onBlur}
@@ -191,6 +215,15 @@ export function InstrumentView({
           </ViewCanvas>
         )}
       </div>
+      {statements.length === 0 ? null : (
+        <div className="view-instrument__statements" id={statementsId}>
+          {statements.map((statement) => (
+            <p className="view-label__statement" key={statement}>
+              {statement}
+            </p>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

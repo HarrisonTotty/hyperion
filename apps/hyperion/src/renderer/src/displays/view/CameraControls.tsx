@@ -7,6 +7,10 @@ import { freeRateReading, PRESET_NAMES } from "./viewRun";
 
 /** Props of {@link CameraControls}. */
 export interface CameraControlsProps {
+  /** The panel's ID, by which a disclosure button controls it (R07.T19.b), or none. */
+  readonly id?: string | undefined;
+  /** Whether the panel is folded behind its disclosure button in the compact layout (R07.T19.b). */
+  readonly hidden?: boolean | undefined;
   /**
    * The view the panel acts on, its system designator on the title row (`PRIMARY`,
    * `INSTRUMENT 1`; R07.T19), or none.
@@ -30,6 +34,12 @@ export interface CameraControlsProps {
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
 }
 
+/**
+ * Why `SEAT` and `CHASE` are held back where the scene has no own ship; it stands under the compact
+ * layout's row while this panel is folded (R07.T19.b).
+ */
+export const NO_OWN_SHIP = "NO OWN SHIP: SEAT and CHASE need one";
+
 /** The presets in their order, each with its single key (`keys.ts`' `VIEW_SINGLE_KEYS`). */
 const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: string }> = [
   { preset: "seat", key: "1" },
@@ -42,7 +52,7 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
  * previous and next target, the field of view a step narrower or wider with its reading, and the
  * `EASED CAMERA MOVES` setting, each a button reachable by keyboard and showing its key; the field
  * of view's buttons are held back at the ends of its steps, the free camera's rate
- * (stepped by `PAGE UP` and `PAGE DOWN` on the canvas) with a statement at either end of its steps,
+ * (stepped by `PAGE UP` and `PAGE DOWN` on the canvas, in `FREE` only) with a statement at either end of its steps,
  * and the setting says when reduced motion stops it applying.
  *
  * @remarks
@@ -60,6 +70,8 @@ export function CameraControls({
   onAction,
   onEasedMovesChange,
   designator,
+  id,
+  hidden,
 }: CameraControlsProps) {
   const titleId = useId();
   const noShipId = useId();
@@ -71,7 +83,7 @@ export function CameraControls({
   const fastest = rateStep >= maxRateStep;
   const anyHeldBack = PRESET_KEYS.some(({ preset: each }) => !offered.includes(each));
   return (
-    <section className="panel view-camera" aria-labelledby={titleId}>
+    <section className="panel view-camera" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
         Camera
         {designator === undefined ? null : (
@@ -106,7 +118,7 @@ export function CameraControls({
       </fieldset>
       {anyHeldBack ? (
         <p className="view-camera__reason" id={noShipId}>
-          NO OWN SHIP: SEAT and CHASE need one
+          {NO_OWN_SHIP}
         </p>
       ) : null}
       <fieldset className="preset-buttons" aria-label="Target">

@@ -1493,7 +1493,8 @@ recorded: a Sun-like star in frame with a lit planet, hues holding in the highli
 
 `photoreal/overlay.ts` (Design notes 16–17): R02's draw list with casing on in the photorealistic
 style; rings and hulls as cased marks until R11; DOM readouts on `--surface-0` plates; the label
-block gains the meter, the style and `BODY PHOTOMETRY: NOT YET MODELLED`; hull edges cased over the
+block gains the style and `BODY PHOTOMETRY: NOT YET MODELLED` (its `METER` line is built by T19.b,
+decision-r07-t19-layout; T16 keeps its nomenclature rows); hull edges cased over the
 image, with the hull faces' occluder bias (`occluder.wgsl`, `slopeScale` 2 as built) raised to 3 so
 that the casing is covered (the UX decision, item 12; the sphere occluder's `SLOPE_SCALE` is 3
 already). Draft, for the owner, the nomenclature entries this plan adds beyond R02's nine items
@@ -1606,9 +1607,73 @@ leaves `CONTROLS` alone; the designators follow `CONTROLS`; hidden screenshots a
 1280×720 with both instruments open, nothing overlapping a reading or clipped. Acceptance: `pnpm
 test`, `just ci`.
 
+T19's paragraph above is R07.T19.a, built as R07.T19 (7e80d5d, guide draft 887fa4a); its layout
+and frame follow-ups are two subtasks (decision-r07-t19-layout).
+
+- **R07.T19.b `VIEW` at both sizes.** `ViewDisplay.tsx`, `styles.css`, `ViewLabelBlock.tsx`,
+  `InstrumentView.tsx`, `ViewMarkList.tsx`, `viewRun.ts` (decision-r07-t19-layout, items 1–3 and
+  5). Two layouts, chosen from the `.view` box's size alone and never from what it shows:
+  **full** where the box is at least 98.5rem wide (a 50.5rem stage, two slots' room beside the
+  primary's least label block, then 26rem and 20rem columns and their gaps) and as tall as
+  column A's tallest state with the list at two rows (about 52rem; the measured figure recorded),
+  which 1920×1080 at 100% is; **compact** otherwise, as 1280×720 and 1920×1080 at 125% and 150%
+  are. Full: column A, 26rem, holds `Instruments`, `Targets` (flex), `Camera` and `Style`; column
+  B, 20rem, `Exposure` and `Exposure meter`; focus runs through A before B. Compact: one 26rem
+  column in the same order, its panels at `0.5rem` block padding: `Instruments` folds to its
+  title row, a 2rem disclosure button, folded when the display mounts; `Targets` is always on
+  show, at least its head, one row and its position; under it one row of disclosure buttons,
+  `CAMERA`, `STYLE`, `EXPOSURE` and, while the meter panel would stand, `EXPOSURE METER` last;
+  then the one open panel. Exactly one of `INSTRUMENTS`, `CAMERA`, `STYLE`, `EXPOSURE` and
+  `EXPOSURE METER` is open, `CAMERA` by default; opening another folds the one open, folding it
+  opens `CAMERA` again, and focus in a panel that folds goes to its button. While its panel is
+  folded, `NO OWN SHIP: SEAT and CHASE need one`, `GRAPHICS STYLE REFUSED: …` and
+  `AUTO NOT AVAILABLE: NO IMAGE TO METER` stand under the row; the limit reasons fold with their
+  controls; single keys stay live. Every side panel takes `contain: inline-size`; the column never
+  scrolls, the list alone does. So that every setting a folded panel holds is on show: every
+  view's `CAMERA` value in `FREE` reads `FREE · RATE 1.00 km/s`, and `PAGE UP` and `PAGE DOWN`
+  step the rate only in `FREE`, as the flight keys move only the free camera; the primary's block
+  gains `METER AVG` (`LIT`, `DARK`) while the meter control stands, and the statement
+  `EASED CAMERA MOVES` while that setting is on and applied. Label lines break at `·` first, then
+  at a space, never inside a number with its sign, unit, band or prefix (`EV100 -1.0`, `60°`,
+  `1.00 km/s`), between a star limit and its kind (`V 9.5 mag CAM`), after `UT` or inside a clock
+  reading; `EV100 -1.0 MAN` stays whole where it fits; continuation lines hang under the value.
+  `INSTRUMENT 1` stands at the stage's top right and `INSTRUMENT 2` at its bottom right, each
+  inset `0.5rem`, so that neither moves when the other opens or closes; where the stage cannot
+  hold both corners `INSTRUMENT 2` stands directly under `INSTRUMENT 1`, never over it. An
+  instrument's block carries each photorealistic statement (`LIGHTING: …`, `BODY PHOTOMETRY: NOT
+  YET MODELLED`) that holds for its picture unless the primary's block shows the same line, its
+  statements running the slot's width under its label block and canvas. With no own ship the
+  list's `RANGE` head reads `RANGE FROM CAMERA` and its rows the bare range, each option's
+  accessible name keeping "from camera". T13.c–e and T16, which add to the exposure panels, each
+  re-take the compact capture with `EXPOSURE` and `EXPOSURE METER` open. Tests (Vitest): the
+  layout at each threshold; full's six panels in two columns in the ruled focus order; compact's
+  disclosures (one open, `CAMERA` by default and again on folding, `INSTRUMENTS` folding the open
+  panel, the meter's button only beside a drawn image, focus moving to the button), its tab order
+  that of full among the parts both show, and its standing lines; the rate keys refused outside
+  `FREE` and the rate on the label block in `FREE`; `METER` and `EASED CAMERA MOVES` on the
+  primary's block; an instrument's photorealistic statements beside a wireframe primary and not
+  beside a photorealistic one; the slots' anchors; the list's head; `.console__work`'s `scrollTop`
+  0 after Tab through every control. By hand, hidden and never on `:0`: captures at 1920×1080
+  (full), and at 1280×720 and 1920×1080 at 125% (compact), with both instruments open over a kept
+  scene and over `PHASE TEST` all photorealistic, and in compact with each of its five panels open
+  and with the camera's limit reasons standing; measured, the column's `scrollHeight` equal to
+  its `clientHeight`, no text truncated (`DESIG` included), no slot over a reading or the other
+  slot, and at 1920×1080 no value line broken but at `·`. Acceptance: `pnpm test`, `just ci`.
+- **R07.T19.c One frame path.** `viewFrameDrawer.ts`, `ViewDisplay.tsx` (decision-r07-t19-layout,
+  follow-ups): the primary draws through `ViewFrameDrawer` as the instruments do, with T8.a's
+  metering taken only by the exposure's source; a photorealistic instrument's renderer takes no
+  histogram, since nothing reads it (Design note 11). After T19.b, ordered by the orchestrator
+  against the shading lane's tasks that change the frame (T9, T10.a, T10, T13.e), and before T20,
+  whose figures it changes. Until it lands, a task that changes what the primary's frame draws
+  changes `ViewFrameDrawer` alike. Tests: against the fake engine, the primary and an instrument
+  with the same camera, style and size submit the same passes but the histogram's, and an
+  instrument submits no histogram; T8.a's metering tests pass unchanged. Acceptance: `pnpm test`,
+  `just test-render`, `just ci`.
+
 #### R07.T20 Several views, by hand
 
-With the real styles on the development machine (RTX 3080) and, by the owner, on the UHD 620, each
+After T19.b and T19.c (decision-r07-t19-layout), with the real styles on the development machine
+(RTX 3080) and, by the owner, on the UHD 620, each
 on a quiet machine: a full-window photorealistic view and two wireframe instruments, each the right
 way up, no GPU time in copies, a resize of one leaving the others' attachments alone, the frame time
 with instruments open against the low setting's 33 ms on the UHD 620 (brainstorm, Testing), and the
@@ -2568,8 +2633,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     nothing reads (a cost for T20). Its canvas has no DOM mark labels (its list names the marks).
     Its statements are decision-r07-t19's list (`POSITIONS AS SEEN FROM SHIP`, `PHOTOREALISTIC:
     PREPARING`, its graphics fault); the scene's (its lighting, its bodies' labels, `ROTATION NOT
-    YET MODELLED`) stay the primary's, as the guide draft's "every line above but `SCENE`" leaves
-    open (for the owner). An instrument opened during a device loss makes its view at once and its
+    YET MODELLED`) stay the primary's, and T19.b gives an instrument the photorealistic
+    ones its primary's block does not show (decision-r07-t19-layout, item 5). An instrument opened
+    during a device loss makes its view at once and its
     renderers at the restore. A new scene remounts the stage, so it closes the instruments. VIEW
     draws no terrain yet, so no demand carries `streamPriority`; the plan that adds terrain to
     `VIEW` takes each view's R05 weight from it.
@@ -2588,12 +2654,14 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     288 px label block of twelve lines at line height 1.2, `STARS` over three, beside the 240 × 180
     px canvas), 233 px in `PHASE TEST`: two stand 33.25 rem, not the ruling's estimated 29.5 rem,
     since the label block, not the canvas, sets the height. On the stage nothing overlaps a reading
-    or is clipped, at either size, in any of the three states. **Pending the owner:** at 1280×720
+    or is clipped, at either size, in any of the three states. **Ruled in
+    decision-r07-t19-layout (items 2–3, built by T19.b):** at 1280×720
     with both open the primary's label block is 230 px wide, and `FRAME`, `TIME`, `EXPOSURE` (`EV100
     -1.0` and `MAN`) and `ROTATION NOT YET MODELLED` break at spaces too, against decision-r07-t19
     2f's "no line breaks except at `·`"; and the slots pack upward, so `INSTRUMENT 2` opened alone
     stands at the top until `INSTRUMENT 1` opens.
-  - **The side column (pending the owner).** It fits at 1920×1080 in the wireframe, both closed and
+  - **The side column (ruled in decision-r07-t19-layout, item 1; built by T19.b).** It fits at
+    1920×1080 in the wireframe, both closed and
     both open, after the column's gap went to 0.5 rem, its panels' block padding to 0.75 rem (the
     `Instruments` panel's to 0.5 rem), their titles' margin to 0.25 rem and the targets list's least
     height to two rows. It overflows at 1280×720, as it did before T19 (the `Exposure` panel already
@@ -2602,10 +2670,109 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     check ("nothing … clipped") is therefore unmet in the side column at those sizes; a rule for a
     short page (G 252–255's rearrangement) is needed. T13.c's camera setting, four rows at every
     level, makes the 1920 × 1080 wireframe overflow too (see "Deviations in T13.c, as built").
-  - **The DOM list (for the owner).** An instrument's list is the side column's while `CONTROLS`
+  - **The DOM list (confirmed in decision-r07-t19-layout, item 4).** An instrument's list is the
+    side column's while `CONTROLS`
     points at it (decision-r07-t19, 2d), and focus alone does not move `CONTROLS`, so a focused
     instrument canvas shows the primary's list until a key or a press on it; whether that meets the
     brainstorm's "each view paired with its DOM list" is the owner's.
+- **`VIEW`'s layout, ruled (decision-r07-t19-layout).** T19.b builds the full and compact layouts,
+  the label breaks, the slots' fixed corners, the list's `RANGE FROM CAMERA` head and the label
+  block's additions; T19.c builds one frame path, with no histogram on an instrument. Stated
+  limits: in compact, the controls of a folded panel are one action away, its settings on the
+  label block; below a 1280×720 CSS-px window the compact column may clip at its foot; at 1280×720
+  the label lines also break at spaces, and two slots fit only while each holds at most one
+  statement, so that a line appearing in an open slot without room (the moment of
+  `LIGHTING: PENDING`) sets `INSTRUMENT 2` under `INSTRUMENT 1`, its foot past the stage's, until
+  it clears.
+- **Deviations in T19.b, as built** (2026-10-05).
+  - **Files.** Beyond the task's list: `displays/view/viewLayout.ts` (`ViewLayout`, `viewLayout`,
+    `FULL_MIN_WIDTH_REM` 98.5, `FULL_MIN_HEIGHT_REM` 55.25, `FoldPanel`, `DEFAULT_FOLD`,
+    `toggledFold`, `FOLD_BUTTONS`, `SideFolds`); `InstrumentsPanel.tsx` (optional `id`, `fold` and
+    `toggleRef`, its rows in a body under the `Instruments` disclosure); `CameraControls`,
+    `StyleControl`, `ExposurePanel` and `MeterControl` (optional `id` and `hidden`; `NO_OWN_SHIP`
+    and `AUTO_NOT_AVAILABLE` exported for the standing lines); `InstrumentControls` (`folds`);
+    `useInstruments.ts` (each slot's `panelRef` and `panelSize`); `viewRun.ts` (`cameraReading`,
+    `EASED_MOVES_STATEMENT`, `rangesFromCamera`, a `not_free` refusal on `CommandResult`);
+    `ViewMarkList`'s required `fromCamera`, which `view/spike/DescentSpike.tsx` passes too; and
+    `test/viewDisplayHarness.tsx` (`FULL_VIEW_PX`, `COMPACT_VIEW_PX`, `stubViewLayout`,
+    `resizeView`, `VIEW` inside a `.console__work--view`).
+  - **The full layout's least height is 55.25 rem**, not the ruling's estimated 52: column A's
+    tallest state measures 882 px at 1920 × 1080 (`Instruments` 204 with both closed, `Targets` 174
+    at two rows under the two-line `RANGE FROM CAMERA` head, `Camera` 339 with `NO OWN SHIP`, both
+    limit reasons and reduced motion, `Style` 99 plus a two-line refusal such as the software
+    adapter's, 141, and three gaps). 1920 × 1080 at 100% (a 57.5 rem box) is full. **Stated limit,
+    for the owner:** a window whose `.view` box is under 55.25 rem tall, such as a maximised
+    1920 × 1080 window under a title bar and a desktop panel (about 53.5 rem), takes the compact
+    layout. The layout is full before the box is measured, as the galaxy page's is.
+  - **Room for the designations.** VIEW's side panels take 0.75 rem inline padding (1.25 rem
+    before) and the list's columns stand 0.25 rem apart, so that `TEST PLANET 150°` (145 px at the
+    list's 1 rem) keeps its width beside `KIND` at 12ch and `RANGE` at 9ch. With no own ship
+    `FROM CAMERA` is the head's second line, under `RANGE` and running back under `KIND`'s empty
+    head, so the head grows by a line (19 px). The compact list's floor is 4.5 rem.
+  - **The disclosure row** is set at the guide's least letter spacing (0.1em), its chevrons
+    0.25 rem from their names, its buttons 0.25 rem apart and without end padding, so that the four
+    names stand on one line: 406 px of the 416 with `EXPOSURE METER` (at 0.15em and 0.75 rem it
+    wrapped). Its buttons carry the ship's disclosure mark (`DisclosureGlyph`), the open one's
+    pointing down; `CAMERA` pressed while open stays open. `STYLE` stands, as `EXPOSURE METER`
+    does, only while its panel would (a view can be drawn); a panel that goes gives its place to
+    `CAMERA`, and its focus to its own button or, where that went too, to `CAMERA`'s.
+  - **Focus.** The side column's focus events track the folding panel that holds the focus. It is
+    forgotten when the focus leaves the column for another control, or for nothing by the
+    operator's hand, so that a later switch to the compact layout opens `CAMERA`.
+  - **Standing lines.** The style's stands only for the `CONTROLS` view's fault
+    (`GRAPHICS STYLE REFUSED: …`); the software adapter's, `QUALITY LOW`'s and the graphics'
+    condition's refusals fold with the panel, as the ruling's list has it.
+  - **No scrolling.** `.console__work--view` and `.view__side` are `overflow: clip`, not
+    `hidden`, so that no focused control can scroll them; the column's clip margin, 0.25 rem,
+    keeps the focus rings at its edges.
+  - **Breaks.** The unbreakable runs are `white-space: nowrap` spans, found by one pattern: `UT`
+    with its first group, `V <m> mag EYE|CAM`, `EV100 <n>`, the clock `ddd/hh:mm:ss`, and a number
+    with a unit of a fixed list (`km/s`, `m/s`, `kyr`, `Myr`, `Gyr`, `yr`, `mag`, `AU`, `Gm`, `Mm`,
+    `km`, `m`, `ly`, `s`); a unit outside it is not held. Every reading is now set as inline-block
+    parts at the line's top, so that a part broken within itself keeps its label beside its first
+    line.
+  - **An instrument's statements.** All of them, `POSITIONS AS SEEN FROM SHIP` and
+    `PHOTOREALISTIC: PREPARING` too, run under its label block and canvas, outside `.view-label`
+    but in the canvas's description. `PHOTOREALISTIC: PREPARING` is the view's own and is never
+    dropped for the primary's. **For the owner:** the guide's Views bullet says the label block
+    carries them; "under its label block and canvas", the plan's words, could be added.
+  - **The label block's additions.** `METER` stands after `EXPOSURE`; `EASED CAMERA MOVES` after
+    `ROTATION NOT YET MODELLED`, before the photorealistic statements. `AVG`, `LIT` and `DARK` on
+    the label block wait for T16's nomenclature rows. The rate keys outside `FREE` are refused
+    without a word; the camera panel's rate reasons still name the step limits (the UX review's
+    suggestion of a reason for the preset is left: the ruling keeps the panel's `RATE` as built).
+  - **Tests.** jsdom lays nothing out: the slots' corners, the breaks, the fit, the clipping and
+    the work area's `scrollTop` are the captures'; the Vitest check of `scrollTop` guards only
+    against code that scrolls. The anchor test checks the slot's class and the reading order;
+    full's focus order is checked by document position and the shared tab order by Tab.
+  - **By hand, measured** (hidden: the app's window made offscreen by a capture hook, as its own
+    hidden spike and smoke runs are, never shown; `.git/rm23-scratch/r07-views/shots-t19b/`, run
+    2026-10-05 on the RTX 3080). Pages of 1920 × 1078, 1280 × 718, 1536 × 862 (1920 × 1080 at
+    125%) and 1279 × 719 (150%) CSS px; at each, both instruments over a kept scene and over
+    `PHASE TEST` all photorealistic, compact with each of its five panels open, and the camera's
+    worst (no own ship, `FOV` at its narrowest, the rate at its lowest, reduced motion, both
+    instruments closed). In every state the column's `scrollHeight` equals its `clientHeight` and
+    no control stands below its foot; no text is truncated (`DESIG` included); no slot overlaps a
+    reading or the other; `INSTRUMENT 2` stands at the stage's foot; Tab through every control
+    leaves the work area's and the column's `scrollTop` at 0. At 1920 × 1080 no value line breaks
+    but at `·`; at 1280 × 720 and 150% with both slots open the primary's `FRAME`, `TIME` and
+    `EXPOSURE` break at their spaces as ruled (`UT +0 yr` | `000/00:00:08`, `EV100 -1.0` | `MAN`).
+    The camera's worst at 1280 × 720 leaves `Targets` 139 px, its one-row floor and a few px.
+    T13.c's camera setting and T13.d's `MAN` field and `METERED` line (merged before the captures)
+    fit in full, where column B holds `Exposure` at its tallest, 400 px, and the columns keep 416
+    and 320 px under `INHIBITED · NO IMAGE TO METER`; and in compact at 125%.
+  - **Open, for the orchestrator (T13.d's panel in the compact layout).** The exposure panel stands
+    352 px wireframe at `INHIBITED · NO IMAGE TO METER` and 374 px with a refused entry's line. With
+    `EXPOSURE` open, measured: at 1280 × 720 with an own ship (`PRECISION TEST`) the first fits and
+    the second runs 17 px past the column's foot; with no own ship (`PHASE TEST`, which adds the
+    `NO OWN SHIP` standing line and the two-line list head) 40 and 62 px; at 150% 0 and 0 with an
+    own ship, 21 and 42 px without. Where it runs past, `INHIBIT` (and at 62 px `ENABLE`) stands
+    below the clip. The ruling budgeted the panel at about 290–300 px. Options, not built: the
+    camera setting as two rows of two in the 26 rem column (about 46 px); `ENABLE` and `INHIBIT`
+    side by side (about 32 px); the reading's parts kept whole, so that
+    `EV100 11.7 INHIBITED · NO IMAGE TO METER` breaks at its `·` (one line less where the second
+    part fits); and the compact column's gaps at 0.25 rem (12 px). Widening the column is not one:
+    the stage would fall under the 50.5 rem two slots need.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in

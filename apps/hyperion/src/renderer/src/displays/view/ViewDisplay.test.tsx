@@ -29,6 +29,7 @@ import {
   sliceSceneSystem,
 } from "../../test/sceneFixture";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { FULL_VIEW_PX, stubViewLayout } from "../../test/viewDisplayHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { rotate } from "../../view/camera/quaternion";
@@ -58,10 +59,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Lays the stage out at {@link WIDTH_PX} by {@link HEIGHT_PX}, in VIEW's full layout. */
 function stubLayout(): void {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-    DOMRect.fromRect({ x: 0, y: 0, width: WIDTH_PX, height: HEIGHT_PX }),
-  );
+  stubViewLayout({ widthPx: WIDTH_PX, heightPx: HEIGHT_PX }, () => FULL_VIEW_PX);
 }
 
 interface Setup {
@@ -405,6 +405,7 @@ describe("the VIEW display", () => {
     const rate = screen.getByRole("status", { name: "Free camera rate" });
     expect(rate).toHaveTextContent("RATE 1.00 km/s");
     await user.click(screen.getByRole("application"));
+    await user.keyboard("3");
     await user.keyboard("{PageUp}");
     advance(300);
     expect(rate).toHaveTextContent("RATE 3.16 km/s");
@@ -801,7 +802,12 @@ describe("the VIEW display's server scene", () => {
     view.advance(300);
     expect([
       screen.getByText("SCENE STALE: reopening the scene"),
-      screen.getByText(/^UT /).classList.contains("stale"),
+      // The time reading, its runs each in a span of its own (R07.T19.b).
+      screen
+        .getByText(
+          (_, element) => element?.tagName === "OUTPUT" && element.textContent.startsWith("UT "),
+        )
+        .classList.contains("stale"),
       screen.getByRole("heading", { name: "Targets stale PRIMARY" }),
       labelBlock().includes("PRECISION TEST"),
       screen

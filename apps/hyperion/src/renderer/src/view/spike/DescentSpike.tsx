@@ -13,6 +13,7 @@ import {
   labelLines,
   labelStatements,
   markRows,
+  rangesFromCamera,
   PRESET_NAMES,
   type ViewRun,
 } from "../../displays/view/viewRun";
@@ -631,6 +632,7 @@ export function DescentSpike({
             <div id={listId} className="spike__list">
               <ViewMarkList
                 rows={runs === null ? [] : markRows(runs.main)}
+                fromCamera={runs !== null && rangesFromCamera(runs.main.scene)}
                 selectedKey={selectedKey}
                 onSelect={(row) => {
                   setSelectedKey(row.key);
