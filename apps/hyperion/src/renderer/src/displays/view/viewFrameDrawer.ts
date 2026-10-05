@@ -1,13 +1,16 @@
 /**
  * One view's frames on its canvas, in either style (plan R07, T19): the wireframe through R02's
  * renderer, or the photorealistic frame through R07's, with R06's sky, its band and host-disc
- * layers and its baked cube. An instrument view draws through it; `ViewDisplay`'s primary view
- * still draws in its own loop, which does the same and meters its image (R07.T8.a).
+ * layers and its baked cube. Every view of `VIEW` draws through it, the primary and each
+ * instrument alike (R07.T19.c), so that what one view's frame draws every view's does; only the
+ * exposure's source, the primary, gives a meter, and its frames alone take the histogram that its
+ * `AutoExposure` reads (R07.T8.a; Design note 11).
  *
  * @remarks
- * Every handle is made again after a device loss, as the primary's are: the photorealistic
- * renderer itself, R06's layers in `onRestored`, and the cube through the device's shared cache,
- * from which each view acquires the sky's cube under its own name, so that one sky is baked once.
+ * Every handle is made again after a device loss: the photorealistic renderer itself, R06's layers
+ * in `onRestored`, and the cube through the device's shared cache, from which each view acquires
+ * the sky's cube under its own name, so that one sky is baked once. A drawer asked for during a
+ * loss is made at the restore ({@link makeViewFrameDrawer}).
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -17,11 +20,14 @@ import type { LitRegime } from "../../view/bodies/regime";
 import type { CameraPose } from "../../view/camera/pose";
 import type { CameraTarget, RenderStyle } from "../../view/camera/state";
 import type { StyleAvailability } from "../../view/engine/platform";
+import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import { controlEv100, type ExposureControl, exposureScale } from "../../view/photometry/exposure";
 import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import type { Histogram } from "../../view/post/histogram";
+import type { MeterMode } from "../../view/post/meter";
 import { SETTINGS } from "../../view/quality/qualitySetting";
 import type { ViewScene, ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
@@ -48,7 +54,10 @@ export interface ViewFrameInputs {
   readonly size: ElementSize | null;
   /** The colour tokens, read from the canvas, or `null` while it is not connected. */
   readonly tokens: ColourTokens | null;
-  /** The exposure it draws at: the primary view's (Design note 11). */
+  /**
+   * The exposure it draws at: the primary's own, for the primary its `AutoExposure`'s applied
+   * control and for an instrument the display's control (Design note 11).
+   */
   readonly exposure: ExposureControl;
   /** The interim stars (R02.T16), drawn until the sky arrives. */
   readonly stars: ReadonlyArray<ViewStar>;
@@ -59,8 +68,14 @@ export interface ViewFrameInputs {
   readonly style: RenderStyle;
   /** Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`). */
   readonly renderScale: number;
-  /** The styles the adapter offers. */
+  /** The styles it may draw: the adapter's, and for the primary the budget's permission too. */
   readonly availability: StyleAvailability;
+  /**
+   * The operator's meter where the view is the exposure's source, whose photorealistic frames then
+   * take the histogram {@link ViewFrameDrawer.takeHistogram} hands over; `null` for a view that
+   * meters nothing, an instrument (Design note 11), whose frames take none.
+   */
+  readonly meter: MeterMode | null;
 }
 
 /** What a frame drew. */
@@ -143,6 +158,14 @@ export class ViewFrameDrawer {
   /** The photorealistic renderer's standing (`PhotorealRenderer.status`). */
   get photorealStatus(): PhotorealStatus {
     return this.#photoreal.status;
+  }
+
+  /**
+   * The latest histogram read back since the last call (`PhotorealRenderer.takeHistogram`), or
+   * `undefined` where none has arrived: always, for a view whose frames carry no meter.
+   */
+  takeHistogram(): Histogram | undefined {
+    return this.#photoreal.takeHistogram();
   }
 
   /** Draws one frame, or nothing (`null`) while the stage is not laid out. */
@@ -231,8 +254,7 @@ export class ViewFrameDrawer {
           discs: this.#discs,
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
           previousRegimes: this.#regimes,
-          // An instrument meters no image of its own; the primary exposes it (Design note 11).
-          meter: "average",
+          meter: inputs.meter,
           overlay: {
             ...this.#wireframe.frame({ ...list, sprites: [] }, camera, viewport),
             label: PHOTOREAL_PASS_LABELS.symbology,
@@ -294,4 +316,71 @@ export class ViewFrameDrawer {
     this.#cubes.dispose();
     this.#view.dispose();
   }
+}
+
+/**
+ * Makes `view`'s drawer, at once or, where the engine has no device (a loss), once its restore has
+ * told every listener, and hands it to `onMade`.
+ *
+ * @remarks
+ * A drawer made inside the restore's dispatch would subscribe its renderers' own listeners to that
+ * dispatch, which would then make their handles a second time and drop the first; so it is made in
+ * a microtask after it.
+ *
+ * @returns Its release: stops waiting for a restore, and disposes of the drawer with the view, or
+ *   of the view alone where no drawer was made.
+ * @throws Whatever the drawer's first making throws but `EngineUnavailable`, having disposed of
+ *   the view.
+ */
+export function makeViewFrameDrawer(
+  engine: RenderEngine,
+  view: RenderView,
+  name: string,
+  onMade: (drawer: ViewFrameDrawer) => void,
+): () => void {
+  let drawer: ViewFrameDrawer | null = null;
+  let released = false;
+  const make = (): void => {
+    try {
+      drawer = new ViewFrameDrawer(engine, view, name);
+    } catch (error: unknown) {
+      if (error instanceof EngineUnavailable) {
+        // Asked for during a loss: the view waits, and the drawer is made at the restore.
+        return;
+      }
+      throw error;
+    }
+    onMade(drawer);
+  };
+  try {
+    make();
+  } catch (error: unknown) {
+    // No release reaches the caller, so the view goes with the failure.
+    view.dispose();
+    throw error;
+  }
+  const unsubscribe = engine.onRestored(() => {
+    if (drawer !== null) {
+      return;
+    }
+    queueMicrotask(() => {
+      if (released || drawer !== null) {
+        return;
+      }
+      try {
+        make();
+      } catch (error: unknown) {
+        console.error(`view ${name}'s drawer could not be made after the restore:`, error);
+      }
+    });
+  });
+  return () => {
+    released = true;
+    unsubscribe();
+    if (drawer === null) {
+      view.dispose();
+    } else {
+      drawer.dispose();
+    }
+  };
 }

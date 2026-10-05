@@ -92,7 +92,8 @@ function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeRepo
   const rafIntervalsMs = scriptTimesS.map((_, i) => (i === 0 ? 0 : i % 100 === 0 ? 120 : 33.3));
   return {
     scriptStartMs: 1000,
-    traceWindows: [{ startedMs: 900, stopRequestedMs: 31_100 }],
+    traceWindows: [{ startedMs: 900, stopRequestedMs: 31_100, failure: null }],
+    traceGuardS: 1,
     warmupS: 10,
     segments: [
       { name: "orbit coast", startS: 0, endS: 20 },
@@ -165,8 +166,8 @@ function traceOf(settings: TraceSettings = UNPROFILED): Measured<TraceRecording>
 
 /** Two windows with a boundary at 15 s: the trace stopped there, and started again at 15.5 s. */
 const TWO_WINDOWS: DescentSpikeReport["traceWindows"] = [
-  { startedMs: at(-0.1), stopRequestedMs: at(15) },
-  { startedMs: at(15.5), stopRequestedMs: at(30.1) },
+  { startedMs: at(-0.1), stopRequestedMs: at(15), failure: null },
+  { startedMs: at(15.5), stopRequestedMs: at(30.1), failure: null },
 ];
 
 /**
@@ -775,6 +776,7 @@ describe("a results file of a windowed trace", () => {
     const traceWindows = Array.from({ length: 10 }, (_, k) => ({
       startedMs: at(k * 360 + (k === 0 ? -0.1 : 2)),
       stopRequestedMs: at((k + 1) * 360),
+      failure: null,
     }));
     const results = buildResults({
       run: runOf({ shown: false, displayHz: null }),
@@ -1354,9 +1356,9 @@ describe("the schema check", () => {
   it("refuses exclusions out of order or overlapping", () => {
     // Three windows: the second stops 0.5 s after it starts, inside the first boundary's guard.
     const traceWindows = [
-      { startedMs: at(-0.1), stopRequestedMs: at(15) },
-      { startedMs: at(15.5), stopRequestedMs: at(16) },
-      { startedMs: at(16.2), stopRequestedMs: at(30.1) },
+      { startedMs: at(-0.1), stopRequestedMs: at(15), failure: null },
+      { startedMs: at(15.5), stopRequestedMs: at(16), failure: null },
+      { startedMs: at(16.2), stopRequestedMs: at(30.1), failure: null },
     ];
     const overlapping = buildResults({
       run: runOf(),

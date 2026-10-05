@@ -12,6 +12,8 @@ import type { ViewId } from "../camera/state";
 import {
   controlEv100,
   ev100FromAverageLuminance,
+  MAN_EV100_MIN,
+  METER_CALIBRATION_K,
   onMetering,
   programTriple,
   type ExposureCommandResult,
@@ -71,6 +73,18 @@ export function meteredLuminance(h: Histogram, window: PercentileWindow = FULL_W
 }
 
 /**
+ * The least average a frame whose counted pixels all fall below the histogram's range is metered
+ * at, cd/m²: 2⁻¹⁷, so that `AUTO` goes no darker than EV100 −14 for it (decision-r07-t13d,
+ * R07.T13.a's follow-up).
+ *
+ * @remarks
+ * R02's {@link MAN_EV100_MIN}, −14, the foot of the brainstorm's scene span, taken back through
+ * R02's EV100 = log₂(L̄ × S ÷ K) with S = 100 and K = {@link METER_CALIBRATION_K}, 12.5, that is
+ * log₂(8 L̄): L̄ = 2⁻¹⁴ × 12.5 ÷ 100 = 2⁻¹⁷, exact in binary.
+ */
+export const EMPTY_FRAME_CD_M2 = (2 ** MAN_EV100_MIN * METER_CALIBRATION_K) / 100;
+
+/**
  * The average a controller meters from a histogram, cd/m², or `null` when no pixel counts.
  *
  * @remarks
@@ -79,6 +93,17 @@ export function meteredLuminance(h: Histogram, window: PercentileWindow = FULL_W
  * then steps darker, the next pre-exposure follows, and the frame comes into range. A mean of 0
  * would read as nothing to meter, and since the pre-exposure follows the held exposure the frame
  * would never come back into range.
+ *
+ * A frame of exact zeros never comes into range, so that floor alone would keep the metered value
+ * 10.74 EV below the applied one and `AUTO` would darken at 1 EV/s without end, past −100 (wider
+ * than the `MAN` field's 5ch fill) and toward an `f32` overflow of the pre-exposure below about
+ * −128. It is bounded below by {@link EMPTY_FRAME_CD_M2}, EV100 −14. The range's floor is the
+ * larger above an applied EV100 of −3.26 (log₂(2⁻³ ÷ 1.2)), so the exposure steps darker there as
+ * before, and below it such a frame aims at −14. At −14 every counted pixel above about
+ * 4.5 × 10⁻⁹ cd/m² (1.2 × 2⁻²⁸) is in range and meters by its light, below −14 included. Only a
+ * frame whose counted pixels stay below the range on the way to −14 is held there: from above,
+ * every counted pixel below 4.5 × 10⁻⁹ cd/m²; from below, every counted pixel below 2⁻¹⁴ ÷ the
+ * pre-exposure. Those pixels are drawn black, and pixels the meter does not weigh are drawn at −14.
  */
 export function meteredAverage(
   h: Histogram,
@@ -92,7 +117,9 @@ export function meteredAverage(
     return null;
   }
   const average = meteredLuminance(h, window);
-  return average > 0 ? average : 2 ** HISTOGRAM_MIN_LOG2 / h.preExposure;
+  return average > 0
+    ? average
+    : Math.max(2 ** HISTOGRAM_MIN_LOG2 / h.preExposure, EMPTY_FRAME_CD_M2);
 }
 
 /**

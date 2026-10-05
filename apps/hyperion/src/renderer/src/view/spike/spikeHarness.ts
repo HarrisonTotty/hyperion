@@ -20,6 +20,7 @@ import type { PassTimes } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { levelBoundM, type PlanetGeometry } from "../terrain/planet";
 import { type SelectionInput, selectPatches } from "../terrain/select";
+import { selectionTolerancePx } from "../terrain/selectionTolerance";
 import type { GpuCapture } from "./capture";
 import { SETTING_VIEWS } from "./demandRecord";
 import { boundedPlanet, type DemandView, levelRatio, perLevelDemand } from "./demand";
@@ -143,8 +144,13 @@ export interface RecordedDescent {
   readonly omittedSigmaM: ReadonlyArray<number>;
 }
 
-/** A segment's mean per-level D over its 1 Hz poses, at the height above the floor (T13.a). */
-function meanDemand(
+/**
+ * A segment's mean per-level D over its 1 Hz poses, at the height above the floor (T13.a), in
+ * `view`, whose τ is the one selection runs at.
+ *
+ * @returns Patches a second; 0 for a span with no whole second.
+ */
+export function meanDemand(
   planet: PlanetGeometry,
   profile: DescentProfile,
   span: { readonly startS: number; readonly endS: number },
@@ -164,6 +170,11 @@ function meanDemand(
  * Turns the spike run's listeners into T14.a's metrics: each frame with its engine frames and its
  * patch counts under both bounds, each patch event at its script time, the pass times and the
  * allocations, and the report at the end.
+ *
+ * @remarks
+ * D under both bounds, and each level's k, are taken at τ_sel, the tolerance the terrain pass
+ * selects at (`selectionTolerancePx`), so that D predicts the selection whose demand is measured
+ * (decision-r05-record-tau.md).
  */
 export class SpikeRecorder {
   readonly #metrics: SpikeMetrics;
@@ -190,10 +201,11 @@ export class SpikeRecorder {
     this.#calibrated = boundedPlanet(planet, "calibrated", omittedSigmaM);
     this.#resolves = gpu.resolves;
     this.#tally = gpu.tally;
-    const view = SETTING_VIEWS.find((v) => v.setting === setting)?.view;
-    if (view === undefined) {
+    const settingView = SETTING_VIEWS.find((v) => v.setting === setting)?.view;
+    if (settingView === undefined) {
       throw new Error(`no view for the ${setting} setting`);
     }
+    const view: DemandView = { ...settingView, tauPx: selectionTolerancePx(settingView.tauPx) };
     const spans = profile.segmentSpans();
     const predicted = new Map(
       spans.map((span) => [

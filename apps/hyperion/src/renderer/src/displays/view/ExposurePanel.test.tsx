@@ -303,3 +303,162 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
     ]).toEqual(["ISO", true, true, true]);
   });
 });
+
+describe("ExposurePanel's MAN field, its way out (R07.T13.d's follow-up)", () => {
+  it("drops a refused entry on Escape, taking the fill again, and then enters nothing on leaving", async () => {
+    const { user, field, onChange } = renderEntry({ kind: "auto", ev100: 9.6 });
+    await user.click(field);
+    await user.keyboard("abc");
+    await user.tab();
+    const refused = [field.value, field.getAttribute("aria-invalid")];
+    await user.click(field);
+    await user.keyboard("{Escape}");
+    expect([refused, field.value, [field.selectionStart, field.selectionEnd]]).toEqual([
+      ["abc", "true"],
+      "9.6",
+      [0, 3],
+    ]);
+    expect([field.getAttribute("aria-invalid"), screen.queryByText(REFUSAL)]).toEqual([null, null]);
+    expect(field).toHaveFocus();
+    await user.tab();
+    expect([field.value, onChange.mock.calls.length, reading()]).toEqual([
+      "—",
+      0,
+      "EV100 9.6 AUTO",
+    ]);
+  });
+
+  it("changes nothing on Escape with nothing typed", async () => {
+    const { user, field, onChange } = renderEntry({ kind: "auto", ev100: 9.6 });
+    await user.tab();
+    await user.keyboard("{Escape}");
+    expect([
+      field.value,
+      [field.selectionStart, field.selectionEnd],
+      field.getAttribute("aria-invalid"),
+      onChange.mock.calls.length,
+      reading(),
+    ]).toEqual(["9.6", [0, 3], null, 0, "EV100 9.6 AUTO"]);
+  });
+
+  it("drops a refused entry emptied and left, entering nothing", async () => {
+    const { user, field, onChange } = renderEntry({ kind: "auto", ev100: 9.6 });
+    await user.click(field);
+    await user.keyboard("99{Enter}");
+    const refused = field.getAttribute("aria-invalid");
+    await user.clear(field);
+    await user.tab();
+    expect([refused, field.value, field.getAttribute("aria-invalid")]).toEqual(["true", "—", null]);
+    expect([screen.queryByText(REFUSAL), onChange.mock.calls.length]).toEqual([null, 0]);
+  });
+
+  it("takes the fill again, selected, when the emptied field is entered", async () => {
+    const { user, field, onChange } = renderEntry({ kind: "auto", ev100: 9.6 });
+    await user.tab();
+    await user.keyboard("{Backspace}");
+    const emptied = field.value;
+    await user.keyboard("{Enter}");
+    expect([
+      emptied,
+      field.value,
+      [field.selectionStart, field.selectionEnd],
+      field.getAttribute("aria-invalid"),
+      onChange.mock.calls.length,
+    ]).toEqual(["", "9.6", [0, 3], null, 0]);
+  });
+
+  it("enters nothing for spaces only, and returns to — on leaving", async () => {
+    const { user, field, onChange } = renderEntry({ kind: "auto", ev100: 9.6 });
+    await user.click(field);
+    await user.keyboard("   ");
+    await user.tab();
+    expect([field.value, field.getAttribute("aria-invalid"), onChange.mock.calls.length]).toEqual([
+      "—",
+      null,
+      0,
+    ]);
+  });
+
+  it("keeps MAN's value when the field is emptied and left under MAN", async () => {
+    const { user, field, onChange } = renderEntry(DEFAULT_EXPOSURE);
+    await user.clear(field);
+    await user.tab();
+    expect([field.value, field.getAttribute("aria-invalid"), onChange.mock.calls.length]).toEqual([
+      "-1.0",
+      null,
+      0,
+    ]);
+  });
+
+  it("fills with the exposure beyond the span, refuses it there and drops it on leaving", async () => {
+    const { user, field, onChange } = renderEntry({ kind: "auto", ev100: -15.3 });
+    await user.tab();
+    const filled = field.value;
+    await user.keyboard("{Enter}");
+    expect([filled, field.value, field.getAttribute("aria-invalid"), reading()]).toEqual([
+      "-15.3",
+      "-15.3",
+      "true",
+      "EV100 -15.3 AUTO",
+    ]);
+    await user.tab();
+    expect([field.value, field.getAttribute("aria-invalid"), screen.queryByText(REFUSAL)]).toEqual([
+      "—",
+      null,
+      null,
+    ]);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("enters a fill at the span's foot, -14.04 shown and taken as -14.0", async () => {
+    const { user, field } = renderEntry({ kind: "auto", ev100: -14.04 });
+    await user.tab();
+    const filled = field.value;
+    await user.keyboard("{Enter}");
+    expect([filled, reading()]).toEqual(["-14.0", "EV100 -14.0 MAN"]);
+  });
+});
+
+const INHIBIT_CONSEQUENCE = "Then AUTO resumes only on ENABLE";
+
+/** Renders the panel at a control and returns its `INHIBIT` button. */
+function inhibitAt(exposure: ExposureControl, meteredEv100: number | null = 3): HTMLElement {
+  render(
+    <ExposurePanel exposure={exposure} meteredEv100={meteredEv100} onChange={() => undefined} />,
+  );
+  return screen.getByRole("button", { name: "INHIBIT" });
+}
+
+describe("ExposurePanel's INHIBIT consequence (R07.T13.d's follow-up)", () => {
+  it("states it beside INHIBIT under AUTO, as the offered button's description", () => {
+    const inhibit = inhibitAt({ kind: "auto", ev100: 9.6 });
+    expect(inhibit).not.toHaveAttribute("aria-disabled");
+    expect(inhibit).toHaveAccessibleDescription(INHIBIT_CONSEQUENCE);
+    expect(screen.getByText(INHIBIT_CONSEQUENCE)).toBeVisible();
+  });
+
+  it("states it under a system inhibit, which INHIBIT takes over", () => {
+    const inhibit = inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, null);
+    expect(inhibit).toHaveAccessibleDescription(INHIBIT_CONSEQUENCE);
+    expect(screen.getByText(INHIBIT_CONSEQUENCE)).toBeVisible();
+  });
+
+  it("states nothing under the operator's own inhibit, where INHIBIT changes nothing", () => {
+    const inhibit = inhibitAt({ kind: "inhibited", ev100: 4, reason: "operator" });
+    expect(inhibit).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(INHIBIT_CONSEQUENCE)).toBeNull();
+  });
+
+  it("gives way to the held-back reason alone under MAN", () => {
+    const inhibit = inhibitAt(DEFAULT_EXPOSURE);
+    expect(inhibit).toHaveAccessibleDescription("NOT AVAILABLE: the exposure is MAN");
+    expect(screen.queryByText(INHIBIT_CONSEQUENCE)).toBeNull();
+  });
+
+  it("leaves the MAN field's line as it reads", () => {
+    inhibitAt({ kind: "auto", ev100: 9.6 });
+    expect(screen.getByRole("textbox", { name: "MAN" })).toHaveAccessibleDescription(
+      `EV100 -14.0 to 42.0 ${CONSEQUENCE}`,
+    );
+  });
+});

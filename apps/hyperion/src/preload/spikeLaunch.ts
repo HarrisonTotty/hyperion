@@ -51,8 +51,19 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { setting, seed, smoke, out, workers, vertexPath, normals, ridged, dawnSafety, capture } =
-    value;
+  const {
+    setting,
+    seed,
+    smoke,
+    out,
+    workers,
+    vertexPath,
+    normals,
+    ridged,
+    dawnSafety,
+    capture,
+    traceProfile,
+  } = value;
   if (
     !oneOf(setting, ["high", "low"] as const) ||
     typeof seed !== "string" ||
@@ -67,7 +78,8 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     !(normals === null || oneOf(normals, ["double", "mesh"] as const)) ||
     !oneOf(ridged, ["on", "off"] as const) ||
     !oneOf(dawnSafety, ["on", "off"] as const) ||
-    !stringOrNull(capture)
+    !stringOrNull(capture) ||
+    !oneOf(traceProfile, ["on", "off"] as const)
   ) {
     return null;
   }
@@ -82,6 +94,7 @@ export function readSpikeLaunch(value: unknown): SpikeLaunch | null {
     ridged,
     dawnSafety,
     capture,
+    traceProfile,
   };
 }
 

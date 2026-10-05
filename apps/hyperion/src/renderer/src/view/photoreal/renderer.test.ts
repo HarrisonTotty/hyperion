@@ -254,6 +254,14 @@ describe("the photorealistic renderer's histogram", () => {
     renderer.dispose();
   });
 
+  it("is not taken on a frame that meters nothing, as an instrument's (R07.T19.c)", async () => {
+    const { engine, renderer } = await ready();
+    renderer.render(new RecordingView(), { ...frameWith([]), meter: null });
+    await settled();
+    expect([engine.dispatched.length, renderer.takeHistogram()]).toEqual([0, undefined]);
+    renderer.dispose();
+  });
+
   it("is handed over once read back, under the frame's pre-exposure", async () => {
     const { renderer } = await ready();
     renderer.render(new RecordingView(), frameWith([]));

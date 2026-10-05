@@ -1440,7 +1440,18 @@ src/renderer/src/view/post src/renderer/src/view/sky src/renderer/src/displays/v
   ISO (the triple in force, else `DEFAULT_MAN_TRIPLE`'s), the shutter solved"; its tests:
   `setManualEv100` round-trips `DEFAULT_MAN_TRIPLE` at −1 and gives the program's triple to 10⁻¹²
   across the span, from `AUTO` at 9.6 f/1.4, 1.96 × 2^−9.6 s, ISO 100. The `MAN` field sits after
-  T13.c's four rows.
+  T13.c's four rows. Its follow-up (decision-r07-t13d): every field that enters on `Enter` or when
+  left (the `MAN` field, `CURSOR`'s `X`, `Y`, `Z`, the chart's `DRIVE RANGE` and `CHART TIME`)
+  takes `Escape`, which drops what was typed and any refusal and shows its value again, the `MAN`
+  field's fill, selected, while it holds focus, and does the same for empty text, which is never
+  refused; the `MAN` field's fill stays the reading's digits outside the span, where its entry is
+  refused, and leaving the field drops a refused fill; `INHIBIT` states
+  `Then AUTO resumes only on ENABLE` beside the button, as its description, under `AUTO` and a
+  system inhibit, not under the operator's. Tests: `Escape` and empty text clear a refusal with no
+  command in each field kind; an emptied `MAN` field under `MAN` keeps its value; a fill at −15.3
+  is refused and dropped on leaving, and one at −14.04 enters −14.0; `INHIBIT`'s description at
+  each level. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view
+src/renderer/src/displays/galaxy`, the console-ux skill's scripts.
 - **R07.T13.e The sky's limit follows the camera** (decision-r07-exposure-camera). R06's
   `viewSky.ts`: the request's `camera_limit_v` and the cull take the view camera's deepest triple
   (f/1.4, 1/30 s, ISO 409,600: V 10.06 at 60°, 11.72 at 30°, 13.58 at 13° under μ 24) at every
@@ -1511,7 +1522,9 @@ that ends in the owner's sign-off. T16 also builds them:
 `InhibitReason` gains `"nothing_weighed"` with its meter. `ExposurePanel` and `MeterControl` take
 the cause beside the metered value; while it is `acquiring`, neither shows a meter status or
 `NO IMAGE TO METER`, and `ENABLE` is held back with `NOT AVAILABLE: not yet metered`; the `MAN`
-field (T13.d) is never held back, `acquiring` included. Tests: under
+field (T13.d) is never held back, `acquiring` included, and `INHIBIT` states
+`Then AUTO resumes only on ENABLE` under each new system inhibit as under `NO IMAGE TO METER`
+(decision-r07-t13d). Tests: under
 `LIT` with no lit body, a drawn image reads `NO LIT SIDE`, never `NO IMAGE TO METER`, after 0.5 s
 and not before; a meter change clears it at once; `AUTO` resumes when a lit body is metered. Its
 other tests: every overlay mark over the image has a casing stroke; plates are present for every
@@ -2181,8 +2194,12 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   histogram's range (bin 0, as after a cut from a sunlit planet to a dark sky) the range's floor
   2⁻¹⁴ ÷ the pre-exposure, an upper bound, so that the exposure steps darker and the frame comes
   into range; metering its mean of 0 as nothing to meter locked `AUTO` in a system inhibit it
-  could not leave (a test drives the cut and the recovery). A histogram with nothing the meter
-  weighs (`LIT` with no lit body) is treated as no histogram: `AUTO` holds until
+  could not leave (a test drives the cut and the recovery). A frame of exact zeros never comes
+  into range, so the floor is bounded below at EV100 −14, R02's `MAN_EV100_MIN`: max(2⁻¹⁴ ÷ the
+  pre-exposure, 2⁻¹⁷ cd/m²) (decision-r07-t13d; T13.a's follow-up), which leaves to its light every
+  frame with a counted pixel in range on its way to −14. A histogram with nothing the meter weighs
+  (`LIT` with no lit body) is
+  treated as no histogram: `AUTO` holds until
   `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
   definition of that status. T16 replaces it with the meter's own status, `NO LIT SIDE` and its
   twins (decision-r07-t8a-meter). Under `AUTO` `onMetering` receives the smoothed, applied EV100,
@@ -2584,8 +2601,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `Instruments` panel), `InstrumentControls.tsx` (an instrument's `Targets`, `Camera` and `Style`
     panels), `useInstruments.ts` (the slots' state, commands, skies and loop), `viewFrameDrawer.ts`
     (`ViewFrameDrawer`, an instrument's frame in either style with R06's layers and cube, and
-    `skySprites`, which the primary now imports) and `viewNames.ts` (`PRIMARY_VIEW_ID`,
-    `PRIMARY_NAME`, `INSTRUMENT_SLOTS`, `instrumentName`, `instrumentViewId`, `viewDisplayName`);
+    `skySprites`, which the primary now imports (until T19.c)) and `viewNames.ts`
+    (`PRIMARY_VIEW_ID`, `PRIMARY_NAME`, `INSTRUMENT_SLOTS`, `instrumentName`, `instrumentViewId`,
+    `viewDisplayName`);
     `view/budget/framePacing.ts` (`drawsInFrame`, `PrimaryFrameTimes`, `PENDING_PRIMARY_FRAMES`,
     `BudgetedScale`); `view/photoreal/internalScale.ts` (`internalViewport`, `spritesAtScale`);
     `test/viewDisplayHarness.tsx` (`timedEngineSource`, `renderViewDisplay`, `nominalStore`,
@@ -2604,7 +2622,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     wireframe list, R06's band, discs and cube, the photorealistic frame), so that the two lanes'
     edits to `ViewDisplay.tsx` merged apart. One path for both is a follow-up. The primary's draw
     reads the merged availability (the adapter's, then the budget's), which equals its budget's
-    `style`.
+    `style`. **Made one by T19.c** (see "Deviations in T19.c, as built").
   - **Pacing.** The primary's `requestAnimationFrame` loop counts animation frames and returns from
     those `drawsInFrame` refuses its `rateHz`; the instruments are drawn from inside the primary's
     frame (`InstrumentsFrame`) at their 30 Hz, in the same phase, and publish their readouts in the
@@ -2630,7 +2648,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     camera (`cullViewSky` at its role, its field of view and its canvas's width; R06 Design note
     20), so its `STARS` states its own limit and its cube is baked for its own selection. A
     photorealistic instrument passes `meter: "average"`, and its renderer still takes a histogram
-    nothing reads (a cost for T20). Its canvas has no DOM mark labels (its list names the marks).
+    nothing reads (a cost for T20; T19.c removes it). Its canvas has no DOM mark labels (its list
+    names the marks).
     Its statements are decision-r07-t19's list (`POSITIONS AS SEEN FROM SHIP`, `PHOTOREALISTIC:
     PREPARING`, its graphics fault); the scene's (its lighting, its bodies' labels, `ROTATION NOT
     YET MODELLED`) stay the primary's, and T19.b gives an instrument the photorealistic
@@ -2773,6 +2792,71 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `EV100 11.7 INHIBITED · NO IMAGE TO METER` breaks at its `·` (one line less where the second
     part fits); and the compact column's gaps at 0.25 rem (12 px). Widening the column is not one:
     the stage would fall under the 50.5 rem two slots need.
+- **Deviations in T19.c, as built** (2026-10-05).
+  - **Files.** `viewFrameDrawer.ts`: `ViewFrameInputs.meter` (`MeterMode | null`),
+    `ViewFrameDrawer.takeHistogram` and `makeViewFrameDrawer`, which makes a view's drawer at once
+    or, where the engine has no device, at its restore. `ViewDisplay.tsx`: the primary's loop
+    draws through a `ViewFrameDrawer` (`placeMarkLabels` moves the marks' labels, as before).
+    Beyond the task's list: `useInstruments.ts` (a slot's drawer through `makeViewFrameDrawer`,
+    `meter: null`); `view/photoreal/renderer.ts` (`PhotorealFrame.meter` is `MeterMode | null`, and
+    a frame with `null` dispatches no histogram) and `photorealFrame.ts` (its input); and
+    `test/viewDisplayHarness.tsx` (`Submission`, `submittedBy`, `TimedEngineSource.submissions`:
+    every canvas pass, target pass and dispatch, a dispatch numbered as no resolve).
+  - **What stays the primary's.** Its loop keeps what only the primary does: the pacing, the
+    `PrimaryFrameTimes` grouping, the `BudgetedScale` controller, its `AutoExposure` (it takes the
+    drawer's histogram, and the drawer draws at its applied control, `reading.control`), the
+    return to the wireframe when its pipelines fail, the DOM mark labels, the 4 Hz publish and the
+    instruments' frame. The drawer draws the budget's `style` for every view, as T19 says each view
+    does: the primary's with the merged availability (the adapter's, then the budget's), an
+    instrument's with its adapter's. An instrument still draws at the display's control, which
+    under `AUTO` follows the primary's applied value at 4 Hz and 0.1 EV.
+  - **No histogram on an instrument** per frame: its frames carry `meter: null`, so its renderer
+    dispatches none and reads none back. Design note 8's histogram is the exposure source's pass
+    alone: an instrument's photorealistic passes are the sky, the discs, bloom, the tone mapping and
+    the symbology. The renderer still makes its `HistogramReader` (three 1 KiB buffers) and
+    compiles the kernel while it is made, unused on an instrument; not making them would need a
+    renderer option, left since their cost is memory alone.
+  - **The primary during a device loss.** A stage mounted while the device is lost (a new scene)
+    made its renderers in the effect, which threw `EngineUnavailable`; through
+    `makeViewFrameDrawer` it now waits and draws from the restore, as an instrument opened then
+    does. The drawer is made in a microtask after the restore's dispatch, not inside it:
+    `onRestored`'s listeners run from a live set, so a drawer made inside would have its renderers'
+    new listeners told of the same restore, and each would make its handles a second time, dropping
+    the first (an instrument's did so since T19; plan-conformance review). A first making that
+    fails but for a loss disposes of the view before it throws, and a release before the restore
+    disposes of the view alone.
+  - **The rule** "until it lands, a task that changes what the primary's frame draws changes
+    `ViewFrameDrawer` alike" is retired: a change to the frame is made once, in `ViewFrameDrawer`
+    (or `photorealFrame` and R07's renderer), and reaches every view.
+  - **Tests.** `renderer.test.ts`: a frame with no meter dispatches no histogram and hands none
+    over. `viewFrameDrawer.test.ts` (new, against the counting engine): a drawer asked for during a
+    loss is made once after the restore, making each handle once (made inside the dispatch, it made
+    every buffer, material, mesh and texture twice), and one released before the restore is never
+    made and its view disposed of. `InstrumentView.test.tsx` (against the timed fake engine): the
+    primary and `INSTRUMENT 1` at `CHASE`, both photorealistic, on stages of one size, submit the
+    same passes in the same order with the same draws' materials but the primary's histogram (one
+    preset, field of view and pose; their roles, the primary's `eye` and an instrument's `camera`,
+    differ only in the passes' uniforms, the bloom kernel's weights and the glare terms); a
+    photorealistic instrument dispatches no histogram; a stage mounted during a loss draws once
+    restored, and one that goes before the restore disposes of its view. Each new test fails on the
+    code before T19.c (8433e20, the merge of 49f029d). T8.a's metering tests pass unchanged.
+  - **Cost per instrument frame, measured** (provisional: hidden, the app's window made offscreen by
+    a capture hook, never shown; on the RTX 3080 under shared load, load average 9–16; Chromium's
+    `--disable-dawn-features=timestamp_quantization`; a 1920 × 1078 page, `PHASE TEST`, all three
+    views photorealistic in `FREE`, the primary's target 1120 × 898 px and each instrument's
+    240 × 180; six alternating 8 s phases of one build, each instrument's meter `"average"`
+    (before) or `null` (after), through temporary counters that were never committed; each view's
+    GPU time the sum of the resolves its `draw` numbered, its CPU time `performance.now()` about its
+    `draw`, at 0.1 ms resolution, without the read-back's callback). Before: GPU 1.870–1.873 ms per
+    instrument frame, its histogram 0.0106–0.0108 ms; CPU 1.18–1.33 ms. After: GPU 1.866–1.886 ms,
+    no histogram; CPU 1.10–1.33 ms. The histogram's 0.011 ms lies under the phases' spread, and the
+    CPU's 0.05 ms or so under the load's. Of an instrument's 1.87 ms, the `discs` pass takes
+    1.74 ms (the primary's 2.44 ms over 23 times the pixels): a cost per draw, not per pixel, of
+    `PHASE TEST`'s bodies, for T20 and the shading lane. The primary, whose code path changed but
+    not its passes: GPU 2.77–2.81 ms per frame (its histogram 0.024 ms) against 2.66–2.80 ms for
+    the inline loop before, measured the same way; CPU 7.8–8.3 ms per draw against 7.1–10.9 ms,
+    within the load's spread. T20 measures on a quiet machine.
+  - **Gate.** No `just ci` (the Day 2 protocol). `just test-render`, since R07's renderer changed.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in
@@ -3443,15 +3527,23 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     should-fix points are fixed but the three open below: tests of a refusal that `ENABLE` drops, of
     `MAN` from the operator's inhibit and of the mouseup guard; `userEvent.setup()` before `render`;
     the selection's colour, `METERED`'s width and the field's `.form-field` wrapper.
-  - **Open (for a decision agent):**
-    - a refused entry under `AUTO` or an inhibit is cleared only by entering a valid value, which
-      sets `MAN`, since emptying the field and leaving it is refused as not a number, as in
-      `CURSOR`; options: an empty field enters nothing and returns to `—`, `Escape` drops the draft,
-      both, or as built (built);
-    - `AUTO` is not bounded to −14.0 to 42.0, so beyond the span `Tab` then `Enter` is refused;
-      options: clamp the fill to the span, or keep the refusal (built);
-    - `INHIBIT` still states no consequence, the ruling's unruled aside, which the UX review raised
-      now that the `MAN` field carries its line.
+  - **Ruled (decision-r07-t13d):**
+    - every field that enters on `Enter` or when left takes `Escape`, which drops a typed or
+      refused entry and shows its value again, and enters empty text as nothing (T13.d's
+      follow-up, which also changes `CURSOR`'s and the chart's fields, the guide's entry rule
+      being ship-wide); the refusal words are unchanged;
+    - the `MAN` field's fill stays the exposure as it stands outside the span and is refused there
+      as a typed value is, a refused fill dropped on leaving: a clamped fill would show a value the
+      exposure does not have and step the image unasked, and `INHIBIT` holds any value; a frame of
+      exact zeros, which drove `AUTO` without end, now meters no darker than EV100 −14 (T13.a's
+      follow-up), so the fill keeps its width;
+    - `INHIBIT` states `Then AUTO resumes only on ENABLE` beside the button under `AUTO` and a
+      system inhibit (the guide's consequence rule), on the button's row: no height in T19.b's
+      26rem column, at most about 10 px as built and in T19.b's 20rem column B (measured: none as
+      built, 12 px in column B; T13.d's follow-up's deviations);
+    - the entry and commanding bullets' new sentences are drafts for the owner, as the rows are,
+      and so is the entry bullet's "selected" (decision-r07-t19b-exposure-fit, item 6; T13.d's
+      second follow-up).
 - **Deviations in T13.e, as built (the sky's limit follows the camera, decision-r07-exposure-camera
   (c)).**
   - **`shownTriple` is R02's.** `shownTriple(control)` lives in `photometry/exposure.ts` beside
@@ -3536,3 +3628,168 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **Gate.** No `just ci` (the Day 2 protocol). No `just test-render`: no shader, `view/engine/` or
     `src/smoke/` file changed, and the smoke harness draws no culled sky, so no rendered output or
     star count of the harness changes.
+- **Deviations in T13.d's follow-up, as built (decision-r07-t13d, items 1–3).**
+  - **One empty-text test.** `lib/textEntry.ts` gains `isEmptyEntry(text)` (empty or spaces only),
+    which the `MAN` field, `CURSOR` and `NumberField` share, where the ruling has each check
+    `text.trim() === ""`, so that the ship-wide rule is written once.
+  - **The statement's class.** `styles.css` gains `.view-exposure__reason--consequence`
+    (`flex: 1 1 0` and `contain: inline-size`) beside the reason's class. A flex item under
+    `contain: inline-size` has no content width and would shrink to nothing, so `flex: 1 1 0` gives
+    it the row's room beside the button, where it wraps. The held-back reasons are unchanged (no
+    `contain`, as built). `ExposureCommand`'s `consequence` is typed `string | undefined`, so that
+    `ExposurePanel` can pass `undefined` under `exactOptionalPropertyTypes`.
+  - **The `MAN` field.** A refusal leaves the draft as it is: a typed text stays the draft, and a
+    refused fill, never made one, is marked only. Leaving the field with no draft clears the
+    refusal, since the only untyped refusal is a fill's. `Escape` and an empty `Enter` take the fill
+    again by the same path as focus, written to the input and selected.
+  - **`CURSOR`.** `Escape` drops its own field's draft only; a refusal in another field stands, and
+    so does `CENTRE CHART`'s hold for it. An emptied field keeps the precision of the coordinate it
+    shows.
+  - **The chart's fields.** `NumberField`'s empty check comes before the link's hold, so a field
+    emptied before the hold (`NO CARRIER`) arrives still returns to its value when left; `Escape`
+    drops a draft typed before the hold too. Neither sends anything. The ruling does not say.
+  - **Tests.** As ruled, with the `INHIBIT` description under `AUTO` and under `NO IMAGE TO METER`
+    as two tests, plus six: `Escape` leaves the focus in `CURSOR`'s field; `DRIVE RANGE` emptied
+    with `Enter` enters nothing; text of spaces only enters nothing in each field kind (three); and
+    a `DRIVE RANGE` emptied before the link's hold returns to its value when left. The `AUTO` test
+    also asserts that `INHIBIT` is not held back. Of the 22 new tests, seventeen fail at 49f029d.
+    The other five pin built behaviour: `Escape` with nothing typed, the fill at −14.04, the
+    operator's inhibit, `MAN`'s reason alone and the `MAN` field's line.
+  - **Measured, offscreen (never shown).** `.git/rm23-scratch/r07-shading/layout/run-t13d-fu.sh`
+    and `hook-t13d-fu.js` run the app with an offscreen window, as the views lane's T19.b hook
+    does, so no native window exists. T13.d's harness (`run-t13d.sh`) made its hidden window on
+    `:0`, which the ruling's acceptance rules out. At 1920 × 1080:
+    - as built, `INHIBIT`'s row stays 32 px with the statement on one line (18 px), under `AUTO`
+      (262.5 px beside the button, the column 394 px) and trapped in the wireframe (316.5 px, the
+      column 448 px); the panel stands 315 and 323 px, as at T13.d. The columns are T13.d's too,
+      set under `AUTO` by `ENABLE`'s held-back reason and when trapped by the panel's reading and
+      reasons (T13.d's open item), none of which has `contain`: the statement does not widen it;
+    - in T19.b's 26rem column the statement takes one line in 284.9 px, the row 32 px, and the
+      panel stands 315, 360 and 382 px (`AUTO`, trapped, trapped with a refusal), as at T13.d: no
+      added height;
+    - in T19.b's 20rem column B it takes two lines, the row 44 px, 12 px more (the panel 357 px
+      under `AUTO`, 408 px trapped), where the ruling estimated about 10 px. Of the 12 px, 8 are
+      the reason's 0.5rem bottom margin, which the row centres with the text;
+    - in the running app, `Escape` on a refused `abc` while trapped takes the fill, `6.5`,
+      selected and unrefused, and leaving then shows `—`. The offscreen page never has focus, so
+      the harness sends the leave's `focusout` itself.
+  - **Plan text.** The ruled Risks item says a frame of exact zeros "now meters no darker than
+    EV100 −14"; it read "is to meter … (T13.a's follow-up, not yet built)" until that follow-up
+    landed and restored the ruled words. The T13 entry's sentence on the floor (at "a test drives
+    the cut and the recovery") is the T13.a follow-up's, and is not added here.
+  - **Guide.** The `MAN` (field) row is now the nomenclature table's widest, so Prettier re-pads
+    the table: besides the separator and the two rows, 238 rows change in whitespace only. The two
+    bullets' new sentences and the two rows are drafts for the owner.
+  - **From the UX review (decision-r07-t19b-exposure-fit).**
+    - Ruled (item 5; built by T19.b's follow-up): the reason's 0.5rem bottom margin, which the
+      statement shares, sits it about 4 px above the button label's centre line, as it does the
+      held-back reasons beside `ENABLE` and `INHIBIT`; a note in a command row has none.
+    - Ruled (decision-r07-t19b-exposure-fit, item 6): `Escape` selects the restored value in every
+      such field. As built here, the `MAN` field selected its fill, so typing replaced it, but
+      `CURSOR`'s and the chart's fields left the caret after the restored value, so typing appended
+      to it. Built by T13.d's second follow-up.
+  - **For the owner (the ruling's unruled aside).** `INHIBIT` under `INHIBITED · OPERATOR` is now
+    the only level where it is offered with nothing beside it (accepted as a no-op). Whether it
+    should be held back with `NOT AVAILABLE: the exposure is INHIBITED` (about 300 px, which wraps
+    in the as-built column) is left as built.
+  - **Gate.** The acceptance command (920 tests), the app's vitest (4,832), `just check lint`,
+    Prettier and the console-ux skill's scripts. No `just test-render`, since no shader, `view/engine/` or
+    `src/smoke/` file changed, and no `just ci` (the Day 2 protocol).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, with no must-fix. Fixed:
+    tests of spaces-only text and of the hold's order, the chart tests' role queries, the panel's
+    summary sentence, `enter`'s redundant flag dropped, and this entry's wording. The UX review's
+    two points are open above.
+- **Deviations in T13.a's follow-up, as built (decision-r07-t13d, item 2's guard).**
+  - **As ruled.** `post/autoExposure.ts` gains `EMPTY_FRAME_CD_M2`, 2⁻¹⁷ cd/m², computed from
+    `MAN_EV100_MIN` and `METER_CALIBRATION_K` (2⁻¹⁴ × 12.5 ÷ 100, exact in binary). When the
+    metered mean is 0, `meteredAverage` returns max(2⁻¹⁴ ÷ the pre-exposure,
+    `EMPTY_FRAME_CD_M2`). Its remarks give the crossover, an applied EV100 of −3.26, and the
+    range's floor at −14, 4.5 × 10⁻⁹ cd/m².
+  - **Tests.** The ruling's three, the frame of zeros as one case per start, plus two:
+    - the constant, exactly 2⁻¹⁷ cd/m² and EV100 −14;
+    - `meteredAverage` itself: the range's floor at 9.6 and −3.2 (as built), the crossover, and
+      `EMPTY_FRAME_CD_M2` at −3.3 and −20;
+    - the frame of zeros runs the closed loop, each frame's pre-exposure taken from the applied
+      EV100 as `ViewDisplay` sets it. From 9.6 and from −20 it stays within 0.05 EV of −14 over the
+      120 s at 60 Hz that follow a 60 s settle, and from 9.6 it is never darker than −14. At
+      6f7c15c it ends at −170.4 from 9.6;
+    - the faint pixel is one at 10⁻⁸ cd/m² among 99 zeros, from 9.6. It comes into range near
+      −12.8, above the floor, and settles within 0.1 EV of log₂(8 × 10⁻¹⁰), −30.2. It passes
+      before and after the fix, pinning what the guard must keep;
+    - "recovers from a frame entirely below the histogram's range" is unchanged and passes.
+  - **Noted for the orchestrator: what the guard holds at −14.** It reads the metered mean, so it
+    takes any frame whose counted pixels (those the meter weighs) all lie under the histogram's
+    range, light or none. Such a frame is held at −14 when its counted pixels stay under the range
+    on the way there:
+    - from above, when every counted pixel is below 4.5 × 10⁻⁹ cd/m², the range's floor at −14.
+      Before, the range's floor stepped it darker until it came into range and metered by its
+      light: a uniform 4 × 10⁻⁹ cd/m² frame settled near −24.9, drawn at about 1 ÷ 9.6 of the
+      white point;
+    - from below −14, when every counted pixel is below 2⁻¹⁴ ÷ the pre-exposure,
+      1.2 × 2^(EV100 − 14) cd/m², since brightening lowers the pre-exposure. Before, a uniform
+      10⁻¹² cd/m² frame at −20 was walked down to −36.8; now it is brightened to −14;
+    - a counted pixel that comes into range on the way meters by its light, below −14 included
+      (the faint-pixel test).
+  - **What a held frame shows.** Its counted pixels' luminance lies 1.5 stops or more under AgX's
+    floor (2⁻¹²·⁴⁷), so they are drawn black. Pixels the meter does not weigh are drawn at −14:
+    the host's disc (class 0) under any meter, and the lit side and the stars under `DARK` when
+    the night side is exactly 0 (no planetshine). Before, the exposure ran on without end under
+    them, toward the `f32` overflow.
+  - **The ruled words overstated it (amended by the orchestrator, 2026-10-05).** The ruling's "the
+    image changes only for a frame whose every pixel is below 4.5 × 10⁻⁹ cd/m²" holds only with
+    "counted" added and with the case from below. Its "such a frame is black at either exposure"
+    holds for exact zeros alone, and only of the counted pixels. The T13 entry's ruled sentence,
+    inserted verbatim, overstated it in the same way: "which leaves every frame with light in it to
+    its light". It now reads "which leaves to its light every frame with a counted pixel in range
+    on its way to −14" (T13.d's second follow-up). The frames it holds at −14 are over 2,000 times
+    fainter than the brainstorm's darkest scene, 10⁻⁵ cd/m², and meter far darker than the view
+    camera's deepest setting, f/1.4, 1/30 s and ISO 409,600 at EV100 −6.12, beyond which the
+    exposure is a digital push. The exception is the frame with uncounted light, which the guard
+    now bounds.
+  - **Gate.** The acceptance command (85 tests), the app's vitest (4,837), `just check lint` and
+    Prettier. No `just test-render`: no shader, `view/engine/` or `src/smoke/` file changed, and
+    the guard changes only a frame with no counted pixel in the histogram's range below EV100
+    −3.26. No `just ci` (the Day 2 protocol).
+  - **Reviewed** by the TypeScript reviewer and the science-checker, with one must-fix: these
+    remarks and the note above said "reached from a brighter exposure" and "every pixel", where the
+    guard also holds a frame from below and reads only the counted pixels. Fixed, as are a unit in
+    a test's name, one case per start, the constant's own test, a comment's tolerance and "the
+    counted pixels' luminance" for AgX's per-channel floor. Every figure checked out.
+- **Deviations in T13.d's second follow-up, as built (decision-r07-t19b-exposure-fit, item 6).**
+  - **One helper.** `lib/textEntry.ts` gains `showSelected(input, text)`: it writes the value to
+    the input, then selects it, as the ruling asks ("as the `MAN` field's `takeFill` does"), so
+    that the selection survives the render that shows the same value. `CURSOR`'s fields,
+    `NumberField` and the `MAN` field's `takeFill` share it. The `MAN` field's behaviour and tests
+    are unchanged.
+  - **`CURSOR`.** `Escape` selects its field's coordinate whether or not anything was typed there.
+    `Enter` selects it when that field's own text was empty or spaces only; it still enters the
+    other fields' drafts, as built.
+  - **The chart's fields.** The same in `NumberField`, whose empty check comes before the link's
+    hold as built: an emptied field under `NO CARRIER` takes `Enter`, enters nothing and is
+    selected, and `Escape` selects while held back too. The ruling does not say.
+  - **Tests.** The ruling's three, as four tests (`X` refused then `Escape`, `Y` emptied then
+    `Enter`, and `DRIVE RANGE` both ways), plus four: `Escape` with nothing typed selects the
+    whole value wherever a click left the caret (`Z`, `CHART TIME`), and leaving after `Escape`
+    enters what was typed then, not the value with it appended (`Z` 3, where ca91a18 entered
+    12.03; `CHART TIME` 3, where `+12.503` entered 12.5). All eight fail at ca91a18.
+  - **Plan 05's pointer.** Besides the ruled ", selected", its heading names this ruling and both
+    of T13.d's follow-ups, so that it does not credit the selection to the first.
+  - **Plan text.** The T13 entry's ruled sentence on the meter's floor is amended, the
+    orchestrator's ruling on T13.a's follow-up's open point; that follow-up's deviations record it.
+  - **Gate.** The acceptance command (928 tests), the app's vitest (4,845), `just check lint`,
+    Prettier and the console-ux skill's scripts. No `just test-render`: no shader, `view/engine/`
+    or `src/smoke/` file changed. No `just ci` (the Day 2 protocol).
+  - **Reviewed** by the TypeScript and UX reviewers, with no must-fix or should-fix. The UX
+    review's one point is open below.
+  - **Open (for the orchestrator, from the UX review; the ruled words are built).** The guide's
+    bullet says a field "enters its value with `Enter` or when it is left", so its "and so does
+    entering it emptied" now also says that leaving an emptied field selects its value, where the
+    ruling leaves leaving unchanged. Nothing shows it, since the focus has gone, but the sentence
+    sets a requirement. The `MAN` (field) row and the fields' remarks keep the two apart. Options:
+    as ruled, or "…selected so that typing replaces it, and so does `Enter` on it emptied; left
+    emptied, it shows the value. Neither is refused." A draft for the owner either way.
+  - **By hand, for the owner** (a focused, visible window; jsdom gives only the selection's
+    offsets): `Escape` and an emptied `Enter` in each of the five fields, the value highlighted in
+    `--accent` and replaced by the next key, also after a click that left the caret inside the
+    value, at 1280 × 720 and 1920 × 1080; what a screen reader says when `Escape` restores and
+    selects the value.

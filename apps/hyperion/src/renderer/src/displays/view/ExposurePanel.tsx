@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from "react";
 
 import { formatNumber, formatSignificant } from "../../lib/format";
+import { isEmptyEntry, showSelected } from "../../lib/textEntry";
 import {
   controlEv100,
   type ExposureCommandResult,
@@ -90,19 +91,41 @@ function manualEntry(text: string): ExposureCommandResult {
   return ev100 === null ? NOT_A_NUMBER : setManualEv100(ev100);
 }
 
+/**
+ * The cost of leaving `AUTO` by the operator's act, which the `MAN` field's consequence and
+ * `INHIBIT`'s share, written once (decision-r07-t13d).
+ */
+const ENABLE_ONLY = "AUTO resumes only on ENABLE";
+
 /** What entering a value does, which the `MAN` field states while the exposure is not `MAN`. */
-const MAN_CONSEQUENCE = "Entering a value sets MAN: AUTO resumes only on ENABLE";
+const MAN_CONSEQUENCE = `Entering a value sets MAN: ${ENABLE_ONLY}`;
+
+/**
+ * What `INHIBIT` does, which it states beside its button under `AUTO` and under a system inhibit,
+ * which it takes over (decision-r07-t13d). "Then" makes it the press's sequel, not a held-back
+ * reason, whose place and look it takes.
+ */
+const INHIBIT_CONSEQUENCE = `Then ${ENABLE_ONLY}`;
 
 interface ExposureCommandProps {
   readonly label: string;
   readonly result: ExposureCommandResult;
+  /**
+   * The consequence the command states beside its button while it is accepted, in a held-back
+   * reason's place, or none.
+   */
+  readonly consequence?: string | undefined;
   readonly onChange: (exposure: ExposureControl) => void;
 }
 
-/** A command button, held back with its reason where the command would be refused. */
-function ExposureCommand({ label, result, onChange }: ExposureCommandProps) {
-  const reasonId = useId();
+/**
+ * A command button, held back with its reason where the command would be refused, or offered with
+ * its consequence, if it has one, in the reason's place; either describes the button.
+ */
+function ExposureCommand({ label, result, consequence, onChange }: ExposureCommandProps) {
+  const noteId = useId();
   const refused = result.kind === "refused";
+  const note = refused ? REFUSAL_WORDS[result.reason] : consequence;
   return (
     <div className="view-exposure__command">
       <button
@@ -110,7 +133,7 @@ function ExposureCommand({ label, result, onChange }: ExposureCommandProps) {
         className="control"
         // Held back rather than disabled, so that it keeps focus and can say why.
         aria-disabled={refused ? "true" : undefined}
-        aria-describedby={refused ? reasonId : undefined}
+        aria-describedby={note === undefined ? undefined : noteId}
         onClick={() => {
           if (result.kind === "accepted") {
             onChange(result.control);
@@ -119,11 +142,18 @@ function ExposureCommand({ label, result, onChange }: ExposureCommandProps) {
       >
         {label}
       </button>
-      {refused ? (
-        <span className="view-exposure__reason" id={reasonId}>
-          {REFUSAL_WORDS[result.reason]}
+      {note === undefined ? null : (
+        <span
+          className={
+            refused
+              ? "view-exposure__reason"
+              : "view-exposure__reason view-exposure__reason--consequence"
+          }
+          id={noteId}
+        >
+          {note}
         </span>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -206,6 +236,14 @@ interface ManualEntryProps {
  * exposure is not `MAN` the field states the consequence. A value that is not a number or lies
  * outside the span is refused, saying what is valid, and the exposure is unchanged. It is never
  * held back: a view with nothing to meter offers `MAN`.
+ *
+ * Its way out, every entry field's (decision-r07-t13d), enters nothing. `Escape` drops what was
+ * typed and any refusal and takes the fill again, selected. Empty text is no entry and is never
+ * refused: `Enter` on it takes the fill again, and leaving the field with it shows `MAN`'s value or
+ * `—`. A refused text that was typed is the operator's and stays, marked, until it is edited or
+ * dropped; a refused fill, the exposure as it stands beyond the span, where `AUTO` can run, is the
+ * console's, not a draft, and leaving the field drops it and its refusal. The fill is never clamped
+ * into the span, which would show a value the exposure does not have.
  */
 function ManualEntry({ exposure, onChange }: ManualEntryProps) {
   const fieldId = useId();
@@ -232,10 +270,30 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
     setRefused(false);
   }
 
+  // Drops what was typed and any refusal: the way out, which enters nothing.
+  const drop = (): void => {
+    setDraft(null);
+    setRefused(false);
+  };
+
+  // Takes the fill, the exposure as it stands, selected so that typing replaces it.
+  const takeFill = (input: HTMLInputElement): void => {
+    const text = formatNumber(controlEv100(exposure), MAN_DECIMALS);
+    setFill(text);
+    showSelected(input, text);
+  };
+
+  // Enters what the field shows, typed or the fill: `MAN` at its value, or its refusal; empty text
+  // is no entry.
   const enter = (text: string): void => {
+    if (isEmptyEntry(text)) {
+      drop();
+      return;
+    }
     const result = manualEntry(text);
     if (result.kind === "refused") {
-      setDraft(text);
+      // The draft stays as it is: a typed text is kept, and a refused fill is never made a draft,
+      // so that leaving the field drops it.
       setRefused(true);
       return;
     }
@@ -267,15 +325,12 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
           aria-invalid={refused ? "true" : undefined}
           aria-describedby={describedBy}
           onFocus={(event) => {
-            const input = event.currentTarget;
             if (draft === null) {
-              const text = formatNumber(controlEv100(exposure), MAN_DECIMALS);
-              setFill(text);
-              // Written to the input as well, so that the selection below holds: React leaves a
-              // value the input already holds, and its selection with it.
-              input.value = text;
+              takeFill(event.currentTarget);
+            } else {
+              // A refused text met again, selected so that typing replaces it.
+              event.currentTarget.select();
             }
-            input.select();
           }}
           onMouseDown={(event) => {
             pressFocusing.current =
@@ -293,15 +348,25 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
             setRefused(false);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter") {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              drop();
+              takeFill(event.currentTarget);
+            } else if (event.key === "Enter") {
               event.preventDefault();
               if (shown !== null) {
                 enter(shown);
+                if (isEmptyEntry(shown)) {
+                  takeFill(event.currentTarget);
+                }
               }
             }
           }}
           onBlur={() => {
-            if (draft !== null) {
+            if (draft === null) {
+              // Only a refused fill can stand untyped, and it is not the operator's to keep.
+              setRefused(false);
+            } else {
               enter(draft);
             }
             setFill(null);
@@ -340,7 +405,8 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
  * @remarks
  * Display controls: the exposure is the view's own, not the ship's, so a command acts at once. The
  * setting is `MAN`'s triple, else the view camera's program at the shown EV100, so it changes only
- * with the published control.
+ * with the published control. Under `AUTO` and a system inhibit `INHIBIT` states its consequence,
+ * `Then AUTO resumes only on ENABLE`, beside the button (R07.T13.d's follow-up).
  */
 export function ExposurePanel({
   exposure,
@@ -351,6 +417,10 @@ export function ExposurePanel({
   hidden,
 }: ExposurePanelProps) {
   const titleId = useId();
+  // `INHIBIT` shuts the automation down under `AUTO` and takes a system inhibit over, so it states
+  // its consequence there; under the operator's own inhibit it changes nothing (decision-r07-t13d).
+  const inhibitStates =
+    exposure.kind === "auto" || (exposure.kind === "inhibited" && exposure.reason !== "operator");
   return (
     <section className="panel view-exposure" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
@@ -374,7 +444,12 @@ export function ExposurePanel({
           result={enable(exposure, meteredEv100)}
           onChange={onChange}
         />
-        <ExposureCommand label="INHIBIT" result={inhibit(exposure)} onChange={onChange} />
+        <ExposureCommand
+          label="INHIBIT"
+          result={inhibit(exposure)}
+          consequence={inhibitStates ? INHIBIT_CONSEQUENCE : undefined}
+          onChange={onChange}
+        />
       </div>
     </section>
   );

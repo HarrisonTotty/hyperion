@@ -15,10 +15,10 @@ import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
 import { type Edge, EDGES, edgeNeighbour, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
 import type { PatchRequest, Selection, SelectionInput } from "./select";
+import { RESELECT_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import {
   effectiveTauPx,
   morphRangeM,
-  RESELECT_FRACTION,
   SELECT_MEASURE,
   type TerrainFrame,
   type TerrainFrameInput,
@@ -287,6 +287,18 @@ describe("the terrain pass", () => {
     expect(seen[0]?.[1]).toBe(first.selection);
     expect(seen[0]?.[0].maxPatches).toBe(pass.maxPatches);
   });
+
+  it.each(["high", "low"] as const)(
+    "selects the %s setting at τ ÷ (1 + RESELECT_FRACTION), the demand record's τ_sel",
+    async (setting) => {
+      const seen: SelectionInput[] = [];
+      const { pass } = await passOn(setting, { onSelect: (input) => seen.push(input) });
+      pass.frame(inputAt(northPole(1_000_000)));
+      const tauPx = seen[0]?.views[0]?.tauPx;
+      expect(tauPx).toBe(TERRAIN_SETTINGS[setting].tauPx / (1 + RESELECT_FRACTION));
+      expect(tauPx).toBe(selectionTolerancePx(TERRAIN_SETTINGS[setting].tauPx));
+    },
+  );
 
   it("tells of each patch it makes resident", async () => {
     const resident: string[] = [];
