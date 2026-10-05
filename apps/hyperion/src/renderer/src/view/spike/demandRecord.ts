@@ -19,6 +19,7 @@ import {
   patchKeyString,
 } from "../terrain/patchKey";
 import { levelBoundM, type PlanetGeometry, planetGeometry } from "../terrain/planet";
+import { RESELECT_FRACTION } from "../terrain/selectionTolerance";
 import { type SlotLayout, terrainSlotLayout } from "../terrain/slotLayout";
 import { type BoundRule, boundedPlanet, type DemandView } from "./demand";
 import {
@@ -48,8 +49,14 @@ export const DEMAND_RECORD_SCHEMA = "hyperion.descent-spike.demand";
  * Version 2 (decision-r05-high-bound.md, F4): each segment adds τ′ and its steps, the coarse
  * stand-ins and the forced region's bakes; each cell carries its process's caps, wall time and
  * load; the file carries notes, and no longer one rate, cap or load for every cell.
+ *
+ * Version 3 (decision-r05-record-tau.md): the cells select, and compute D, at the terrain pass's
+ * τ_sel = τ ÷ (1 + `RESELECT_FRACTION`), not at τ; each cell carries τ and τ_sel, and each segment
+ * adds the share of its limited frames whose τ′ exceeds τ, and the selection's time on the
+ * thread's CPU clock beside its wall-clock time (lane B's finding that wall-clock times under load
+ * measure the machine, 2026-10-05).
  */
-export const DEMAND_RECORD_VERSION = 2;
+export const DEMAND_RECORD_VERSION = 3;
 
 /** Whether the test planet's ridges are on. */
 export type RidgesSetting = "off" | "on";
@@ -72,7 +79,10 @@ function viewOf(
   return { setting, view, layout, maxPatches: Math.floor(layout.slotCount / 2) };
 }
 
-/** The two settings as the record runs them: high at 1080p and τ = 1 px, low at 720p and τ = 2 px; 60°. */
+/**
+ * The two settings as the record runs them: high at 1080p and τ = 1 px, low at 720p and τ = 2 px;
+ * 60°. Each view holds the setting's τ (Design note 7), from which the run takes τ_sel.
+ */
 export const SETTING_VIEWS: ReadonlyArray<SettingView> = [
   viewOf("high", { fovXRad: Math.PI / 3, widthPx: 1920, heightPx: 1080, tauPx: 1 }),
   viewOf("low", { fovXRad: Math.PI / 3, widthPx: 1280, heightPx: 720, tauPx: 2 }),
@@ -102,6 +112,12 @@ export interface DemandCell {
   readonly rule: BoundRule;
   readonly ridges: RidgesSetting;
   readonly setting: QualitySetting;
+  /**
+   * The setting's τ, and τ_sel, the tolerance the cell selected and computed D at, pixels
+   * (`selectionTolerancePx`).
+   */
+  readonly tauPx: number;
+  readonly selectionTauPx: number;
   /** The sampling rate, Hz, and the script span covered, s. */
   readonly rateHz: number;
   readonly coveredS: readonly [number, number];
@@ -136,7 +152,7 @@ export interface RecordedCell extends DemandCell {
   readonly loadAverage: ReadonlyArray<number>;
 }
 
-/** The record's file, `<date>-demand-<rules>.json` ({@link recordStem}), version 2. */
+/** The record's file, `<date>-demand-<rules>.json` ({@link recordStem}), version 3. */
 export interface DemandRecordFile {
   /**
    * {@link DEMAND_RECORD_SCHEMA} and {@link DEMAND_RECORD_VERSION} as written: a file read back
@@ -236,6 +252,8 @@ export interface CellOptions {
   readonly toS: number;
   readonly measureFromS: number;
   readonly nowMs: () => number;
+  /** The thread's CPU-time clock, ms (`FixedStepOptions.cpuNowMs`); none by default. */
+  readonly cpuNowMs?: () => number;
   /** The wall time, on `nowMs`'s clock, after which the run stops. */
   readonly deadlineMs: number;
   /** The wall time, bakes included, after which the run stops; none by default. */
@@ -262,6 +280,7 @@ export function runCell(options: CellOptions): DemandCell {
     layout: settingView.layout,
     rangeOf: source.rangeOf,
     nowMs: options.nowMs,
+    ...(options.cpuNowMs === undefined ? {} : { cpuNowMs: options.cpuNowMs }),
     deadlineMs: options.deadlineMs,
     ...(options.wallDeadlineMs === undefined ? {} : { wallDeadlineMs: options.wallDeadlineMs }),
   });
@@ -270,6 +289,8 @@ export function runCell(options: CellOptions): DemandCell {
     rule: options.rule,
     ridges: options.ridges,
     setting: settingView.setting,
+    tauPx: run.tauPx,
+    selectionTauPx: run.selectionTauPx,
     rateHz: options.rateHz,
     coveredS: [options.fromS, last],
     frames: run.frames.length,
@@ -442,13 +463,20 @@ export function demandSummary(
     `Seed ${RECORD_SEED}. Fixed-step runs of the scripted descent through \`selectPatches\` and a`,
     "simulated cache (R05.T13.a): patches selected, measured demand (first-time-selected keys a",
     "second), the per-level prediction D, the share of frames `limited`, and the selection time.",
-    "Timings are provisional unless the machine was quiet (Design note 27).",
+    "Timings are provisional unless the machine was quiet (Design note 27). The selection's wall-clock",
+    "times are upper bounds under load, since a nice process waiting for a core counts the wait; its",
+    "time on the thread's CPU clock (`process.threadCpuUsage`, user and system) is its own work.",
+    "",
+    `Selected at τ ÷ ${1 + RESELECT_FRACTION}, the terrain pass's τ_sel; D at the same tolerance; selected every`,
+    "frame, without the pass's cadence (decision-r05-record-tau.md). The pass's selection at a frame",
+    `is the record's at a pose at most ${RESELECT_FRACTION} × d_min earlier, which moves the demand in time, not in`,
+    "size. Of the `limited` frames, the first table gives the share whose τ′ exceeds the setting's",
+    "τ: at τ_sel, a limited frame may still draw within τ.",
     "",
     "The second table of each cell (decision-r05-high-bound.md, F4):",
     "",
-    "- τ′, the effective tolerance τ × max(1, `limitExcess` ÷ w) that every baked leaf meets, over",
-    "  the `limited` frames; the record's one view has w = 1. The record selects at the setting's τ;",
-    "  the terrain pass selects at τ ÷ 1.1.",
+    "- τ′, the effective tolerance τ_sel × max(1, `limitExcess` ÷ w) that every baked leaf meets,",
+    "  over the `limited` frames; the record's one view has w = 1.",
     "- Δτ′, its change from the selection before, over the steps where either is limited, and",
     "  Δτ′ ÷ τ′, the larger τ′ over the smaller, less 1. A vertex inside its morph band steps by",
     "  about 6 × Δτ′ ÷ τ′ in morph factor (R05.T11.c). A step belongs to its later frame's segment.",
@@ -465,15 +493,15 @@ export function demandSummary(
     lines.push(
       `## ${cell.setting}, ${cell.rule === "hard" ? "hard ε_n" : "min(hard, 4σ_n)"}, ridges ${cell.ridges}`,
       "",
-      `${cell.frames} frames at ${cell.rateHz} Hz over ${cell.coveredS[0].toFixed(1)}–${cell.coveredS[1].toFixed(1)} s${cell.truncated ? " (truncated at the wall-time cap)" : ""}; hash \`${cell.hash}\`.${cell.note === null ? "" : ` **${cell.note}.**`}`,
+      `${cell.frames} frames at ${cell.rateHz} Hz over ${cell.coveredS[0].toFixed(1)}–${cell.coveredS[1].toFixed(1)} s${cell.truncated ? " (truncated at the wall-time cap)" : ""}, selected at τ_sel ${cell.selectionTauPx.toFixed(4)} px (τ ${cell.tauPx} px); hash \`${cell.hash}\`.${cell.note === null ? "" : ` **${cell.note}.**`}`,
       "",
       `Site ${cell.terrain.siteHeightM.toFixed(1)} m; least margin above the stretches' floors and clearances ${cell.minFloorMarginM.toFixed(1)} m; lifts above the table: ${liftsText(cell.lifts)}.`,
       "",
-      "| Segment | Patches (mean, max) | Demand /s | D /s | Demand ÷ D | Limited | Height above floor (m) | Select p50 / p95 / max (ms) |",
-      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| Segment | Patches (mean, max) | Demand /s | D /s | Demand ÷ D | Limited | Of them, τ′ > τ | Height above floor (m) | Select wall p50 / p95 / max (ms) | Select CPU p50 / p95 / max (ms) |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
       ...cell.segments.map(
         (s) =>
-          `| ${s.segment} | ${s.meanPatches.toFixed(0)}, ${s.maxPatches} | ${s.demandPerS.toFixed(1)} | ${s.predictedPerS.toFixed(1)} | ${s.predictedPerS > 0 ? (s.demandPerS / s.predictedPerS).toFixed(2) : "—"} | ${(100 * s.limitedFraction).toFixed(0)}% | ${s.minHeightAboveFloorM.toFixed(0)}–${s.maxHeightAboveFloorM.toFixed(0)} | ${s.selectMsP50.toFixed(1)} / ${s.selectMsP95.toFixed(1)} / ${s.selectMsMax.toFixed(1)} |`,
+          `| ${s.segment} | ${s.meanPatches.toFixed(0)}, ${s.maxPatches} | ${s.demandPerS.toFixed(1)} | ${s.predictedPerS.toFixed(1)} | ${s.predictedPerS > 0 ? (s.demandPerS / s.predictedPerS).toFixed(2) : "—"} | ${(100 * s.limitedFraction).toFixed(0)}% | ${percent(s.limitedOverTauFraction)} | ${s.minHeightAboveFloorM.toFixed(0)}–${s.maxHeightAboveFloorM.toFixed(0)} | ${s.selectMsP50.toFixed(1)} / ${s.selectMsP95.toFixed(1)} / ${s.selectMsMax.toFixed(1)} | ${figures([s.selectCpuMsP50, s.selectCpuMsP95, s.selectCpuMsMax], 1)} |`,
       ),
       "",
       `| Segment | τ′ p50 / p95 / max (px) | Δτ′ p95 / max (px) | Δτ′ ÷ τ′ p95 / max | Steps over ${BAND_MARGIN} | Coarse stand-ins (returns) | Their largest ρ (returns) (px) | Forced bakes /s |`,

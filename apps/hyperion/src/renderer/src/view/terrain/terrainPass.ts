@@ -52,10 +52,8 @@ import {
   selectPatches,
   type ViewSelectionInput,
 } from "./select";
+import { RESELECT_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import type { BakedPatch, BakeSettings, TestPlanetRidges } from "./workers/messages";
-
-/** The fraction of the nearest selected patch's distance the camera may move between selections. */
-export const RESELECT_FRACTION = 0.1;
 
 /**
  * How far through a level's distance band the CDLOD morph to its parent begins (Design note 6): a
@@ -426,7 +424,7 @@ export class TerrainPass {
     this.#onResident?.(bake.key);
   }
 
-  /** The primary view as selection takes it: body-fixed, at τ ÷ (1 + m). */
+  /** The primary view as selection takes it: body-fixed, at τ_sel ({@link selectionTolerancePx}). */
   #selectionView(view: TerrainView): ViewSelectionInput {
     const qBody = quaternionFromRows(view.rotation.rows);
     return {
@@ -437,7 +435,7 @@ export class TerrainPass {
       fovXRad: view.fovXRad,
       viewport: view.viewport,
       weight: 1,
-      tauPx: this.#terrain.tauPx / (1 + RESELECT_FRACTION),
+      tauPx: selectionTolerancePx(this.#terrain.tauPx),
     };
   }
 
