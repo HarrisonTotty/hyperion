@@ -14,6 +14,8 @@ import {
   SKY_TEXEL_BYTES,
 } from "@hyperion/protocol";
 
+import { decodeSkyPayload, type SkyDecodeRequest } from "../view/sky/decodePayload";
+
 /** One star to lay out: its direction, distance in ly and V. */
 export interface FixtureStar {
   readonly direction: readonly [number, number, number];
@@ -104,4 +106,24 @@ export function decodedSky(
     throw new Error("the fixture payload did not decode");
   }
   return { stars: decodedStars.value, band: decodedBand.value };
+}
+
+/**
+ * A stand-in for the sky's decode worker, constructed as `Worker` is: it decodes each payload on
+ * this thread a microtask later.
+ */
+export class InThreadSkyWorker {
+  readonly #events = new EventTarget();
+
+  addEventListener(type: string, listener: (event: Event) => void): void {
+    this.#events.addEventListener(type, { handleEvent: listener });
+  }
+
+  postMessage(message: SkyDecodeRequest): void {
+    queueMicrotask(() => {
+      this.#events.dispatchEvent(new MessageEvent("message", { data: decodeSkyPayload(message) }));
+    });
+  }
+
+  terminate(): void {}
 }

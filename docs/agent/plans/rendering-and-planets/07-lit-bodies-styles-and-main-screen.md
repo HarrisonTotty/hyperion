@@ -3452,3 +3452,87 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       options: clamp the fill to the span, or keep the refusal (built);
     - `INHIBIT` still states no consequence, the ruling's unruled aside, which the UX review raised
       now that the `MAN` field carries its line.
+- **Deviations in T13.e, as built (the sky's limit follows the camera, decision-r07-exposure-camera
+  (c)).**
+  - **`shownTriple` is R02's.** `shownTriple(control)` lives in `photometry/exposure.ts` beside
+    `programTriple`, where the ruling put it in `viewSky.ts`, and `ExposurePanel` imports it in
+    place of its private copy, so that the panel's rows and the label's limit read one function.
+    R06's `viewSky.ts` gains `deepestTriple(program)`, the program's triple at
+    log₂(100 × N² ÷ (t_frame × S_max)), −6.1223 for `VIEW_CAMERA` (f/1.4, 1/30 s, ISO 409,600,
+    clear). `limitTriple` is gone, and so is `viewSky.ts`'s `ViewSkyInput.exposure`, since the
+    request no longer reads it; `useViewSky.ts`'s own `ViewSkyInput` keeps its `exposure`, for the
+    label.
+  - **Two functions for the two limits.** `viewSkyLimit(model, role, fovDeg)` gives the cull's
+    `ViewStarLimit` and `viewSkyLabelV(model, role, exposure, fovDeg)` the label's V, in place of
+    one `viewSkyLimit` returning both, so that the cull cannot be keyed on an exposure it does not
+    read; `ViewSkyLimit` is gone. In `useViewSky.ts`, `cullViewSky(model, role, fovDeg, widthPx)`
+    returns the `DrawnSky`, and `viewSkyLabel(model, role, exposure, fovDeg)` the `STARS` reading.
+  - **The label reads the display's control**, through `shownTriple`, not
+    `ExposureReading.triple`: the two are equal wherever a reading exists (`AutoExposure` builds
+    its triple from `VIEW_CAMERA` the same way), and a wireframe view, which has no reading, keeps
+    its label. So the Provides comment on `ExposureReading.triple` ("R06's `cameraLimitV` reads it
+    (T13.e)"), the Consumes item on it and the README's row for it hold through `shownTriple`. The
+    display's control reaches the hook at the readout's 4 Hz and only when its EV100 moves by 0.1,
+    so the label moves at that rate. It is computed in render, not memoised: a few operations for a
+    camera, and for an eye the deepest of a 64² band's 24,576 texels, which ran once per cull
+    before and now runs on each render of the hook.
+  - **Instruments.** R07.T19's `useSlotSky` follows: each slot culls at its camera's deepest limit
+    and labels at the primary's shown exposure. The slot loops' inputs are now keyed on each drawn
+    sky's identity rather than on the slot's `{ drawn, labelValue }`, so a new label does not remake
+    them.
+  - **Who asks a camera's limit.** The primary view's role is `eye`, so today only the instruments
+    are cameras, and they cull the primary's eye sky; no running view sends a `camera_limit_v` yet.
+    The hook's tests therefore drive `useViewSky` with an instrument's run directly.
+  - **Tests.** `viewSky.test.ts`: `deepestTriple`, and no exposure in `MAN`'s span reaching deeper;
+    the request at V 10.06 at 60° and cut at 11 at 30° and 13°; the cull at 10.06, 11.72 and 13.58;
+    the label at the default `MAN` (10.06) and at `AUTO` 15 (2.56), and one label for one EV100 at
+    `MAN` and both inhibits; the cull parting from the label by 0.05 mag or more at every tenth of
+    an EV100 from 3.5 to 42 and at none below; a Sun-coloured star at the label's limit, centred in
+    a pixel at the frame's centre, below 2^`AGX_MIN_EV` and drawn as `TONE_CURVE_BLACK`, at 1080p
+    and at 4K (60°); and the corner bound below. A new `useViewSky.test.tsx`: the first request at
+    V 10.06 under `MAN` −1, `MAN` 15 and `AUTO` −10, 0 and 15, each from a fresh view; once a sky
+    asked at `MAN` 15 is held, no second request through `AUTO` from EV100 −10 to 15 by tenths and
+    `MAN` −1, 15, −14 and 42; the drawn sky's identity across them; the label `V 10.1 mag CAM` at
+    `MAN` −1 and `V 2.6 mag CAM` at `AUTO` 15. Four of these fail at 8e11907 (the request under
+    `MAN` 15, the second request, the identity and the label); the request under `MAN` −1 and
+    `AUTO` passed there too, at the default triple. `InstrumentView.test.tsx`: an instrument over
+    the server scene's sky reads `STARS V 10.1 mag CAM` at the default `MAN` and `V 2.6 mag CAM`
+    after a `MAN` entry of 15, the primary's exposure reaching its label. Its `AUTO` path is the
+    same `viewSkyLabel` the hook's test drives under `AUTO`, since the fake meter's `AUTO` value
+    (about EV100 3.3 after `ENABLE`) is an artefact of its fixed histogram, and its cull's identity
+    is not observable through the fake engine. `InThreadSkyWorker` moves from
+    `ViewDisplay.test.tsx` to `test/skyFixtures.ts`, and `autoAt` and `manualAt` are a new
+    `test/exposureFixtures.ts`.
+  - **Off the frame's centre (science check, 2026-10-05).** The ruling's 3.4–5.0 and 1.4–3.0 EV
+    below AgX's floor are for a Sun-coloured star at the frame's centre, whose pixel has the largest
+    solid angle. At a 16:9 corner at 60° (cos³θ = 0.579) a star is 0.79 EV brighter. As a bound,
+    the bluest colour `starColour` gives (25,000 K) with the largest camera band term (A0V's
+    +0.14, decision-camera-eta), admitted at V = limit − 0.14, stands 0.28 EV above the floor at
+    4K and EV100 3.5 (0.24 EV with O5V's +0.11), inside AgX's toe: the sprite path gives at most
+    2.4 × 10⁻⁷ display-linear and the full-screen pass moves at most 2.5 × 10⁻⁶ from black, under
+    0.01 of an 8-bit sRGB code each, against the dither's ±1 code (tested). The science check's
+    "`spriteToneCurve` still gives 0" holds everywhere but that 4K corner bound. At 1080p every
+    case stays 1.7 EV or more below the floor. `viewSky.ts`'s header says so. `deepestTriple`'s
+    limit is the deepest of the program's triples while the program's top gain is the sensor's; a
+    `setManual` triple with a shutter beyond 1/30 s, which no console control sets, would label
+    deeper than the cull, the ruling's "full manual mode" case.
+  - **For the owner (from the plan-conformance review).** Away from the frame's centre at 4K, the
+    stars between the two limits are hidden by AgX's toe, not by lying below its floor: so the
+    deeper cull also departs, in that corner, from the brainstorm's "the camera's cut is an explicit
+    noise-floor model rather than left to tone mapping", beside the "each view thresholds its copy"
+    the ruling names. Built as ruled, since nothing visible changes; the alternative, culling at the
+    exposure's own limit or with a margin, is what the ruling turned down for its cost (a re-cull of
+    3 × 10⁵ stars and a re-bake at every exposure step).
+  - **The limits, before and after** (`DEFAULT_VIEW_CAMERA`, μ 24):
+    - before (T13.d, 8e11907), the request and the cull at `limitTriple`'s triple: under `AUTO`, an
+      inhibit and `MAN` −1, `DEFAULT_MAN_TRIPLE` (ISO 11,760), V 10.0578 at 60°, 11.7248 at 30° and
+      13.5817 at 13°, the request cut at 11 at 30° and 13°; under `MAN` 15, 2.555, 4.222 and 6.079,
+      request and cull alike. The label was the cull's, so it read `V 10.1 mag CAM` under `AUTO` at
+      every EV100, EV100 15 included, where the exposure's own limit is 2.6. Before T13.c, f/1, 2 s and ISO 100 gave V 13.7 at 60°,
+      the request cut at 11.
+    - after, the request and the cull at every level: V 10.0579 at 60°, 11.7249 at 30° and
+      13.5818 at 13°, the request cut at 11 at 30° and 13°. The label at the shown exposure, 60°:
+      10.1 at EV100 −1, 10.0 at 3.5, 9.4 at 5.88, 6.3 at 10, 2.6 at 15 and −1.2 at 20.
+  - **Gate.** No `just ci` (the Day 2 protocol). No `just test-render`: no shader, `view/engine/` or
+    `src/smoke/` file changed, and the smoke harness draws no culled sky, so no rendered output or
+    star count of the harness changes.

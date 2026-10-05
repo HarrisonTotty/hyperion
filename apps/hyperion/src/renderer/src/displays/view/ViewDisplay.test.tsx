@@ -11,8 +11,7 @@ import type { FakeView } from "../../test/fakeRenderEngine";
 import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { skyPayload, skyResponse } from "../../test/skyFixtures";
-import { decodeSkyPayload, type SkyDecodeRequest } from "../../view/sky/decodePayload";
+import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
 import { FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import {
   anOpenedUniverse,
@@ -658,26 +657,6 @@ async function sceneArrives(
     }
     await vi.advanceTimersByTimeAsync(0);
   });
-}
-
-/**
- * A stand-in for the sky's decode worker, constructed as `Worker` is: it decodes each payload on
- * this thread a microtask later.
- */
-class InThreadSkyWorker {
-  readonly #events = new EventTarget();
-
-  addEventListener(type: string, listener: (event: Event) => void): void {
-    this.#events.addEventListener(type, { handleEvent: listener });
-  }
-
-  postMessage(message: SkyDecodeRequest): void {
-    queueMicrotask(() => {
-      this.#events.dispatchEvent(new MessageEvent("message", { data: decodeSkyPayload(message) }));
-    });
-  }
-
-  terminate(): void {}
 }
 
 function labelBlock(): string {

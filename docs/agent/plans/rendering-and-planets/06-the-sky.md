@@ -1613,7 +1613,9 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   it asks the eye's limits and states their deepest; a camera view asks its noise-floor limit at
   a dark sky of μ 24 (`DARK_SKY_CD_M2`) until the band layer (T13.d) gives a texel's background,
   and at a manual exposure's triple or else R02's default `MAN` triple until R07 states the
-  metered triple. Until T13.g bakes the cube, the stars beyond the sprite budget are not drawn,
+  metered triple (R07.T13.e replaced `limitTriple`: the request and the cull take the view
+  camera's deepest triple at every exposure, `deepestTriple`, and the label the shown exposure's,
+  `viewSkyLabelV`). Until T13.g bakes the cube, the stars beyond the sprite budget are not drawn,
   and the high setting's N_max and sprite budget are used, the view not yet taking a quality
   setting. `useSky` makes its decoder only once a payload is in hand (and the effect still live),
   so that a request never answered starts no worker. A sky is drawn and labelled only for the
