@@ -1,4 +1,4 @@
-//! The velocity draw and the escape cut (plan 08, P08.T5).
+//! The velocity draw and the escape cut (plan 08, P08.T5), and the padding's premise (P08.T17).
 
 #[expect(
     dead_code,
@@ -18,7 +18,7 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{
     CellKey, NoCache, SystemOrigin, SystemRecord, generate_cell, resolve,
 };
-use hyperion_sim::galaxy::query::{PAD_SPEED, RangeQuery, epoch_velocity, range_query};
+use hyperion_sim::galaxy::query::{PAD_SPEED, RangeQuery, epoch_velocity, pad_speed, range_query};
 use hyperion_sim::galaxy::{Galaxy, PointLy};
 use hyperion_sim::id::Layer;
 use hyperion_sim::math;
@@ -242,7 +242,9 @@ fn axes(axes: EllipsoidAxes, p: &PointLy) -> [[f64; 3]; 3] {
 }
 
 /// P08.T5: no velocity reaches its padding speed, over 10⁶ systems of the cells about the centre,
-/// the central 100 ly included, where the escape speed passes 1,000 km/s.
+/// the central 100 ly included, where the escape speed passes 1,000 km/s. P08.T17: nor its own
+/// layer's pad speed, and every record passes `epoch_velocity`, whose debug assertion checks that
+/// too.
 #[test]
 #[ignore = "slow: draws the velocities of 10⁶ systems near the centre"]
 fn no_velocity_reaches_its_padding_speed() {
@@ -266,6 +268,14 @@ fn no_velocity_reaches_its_padding_speed() {
                             record.id()
                         );
                         assert!(speed < d.cut().value());
+                        let pad = pad_speed(record.layer()).value();
+                        assert!(
+                            speed < pad,
+                            "{speed} km/s for {:?} of layer {:?}, against its pad {pad} km/s",
+                            record.id(),
+                            record.layer()
+                        );
+                        assert_eq!(epoch_velocity(galaxy, record), d.velocity());
                         fastest = fastest.max(speed);
                         if d.attempts() == ESCAPE_CUT_ATTEMPTS {
                             capped += 1;
