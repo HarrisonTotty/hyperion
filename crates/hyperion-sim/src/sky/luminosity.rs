@@ -474,6 +474,55 @@ impl LuminosityTables {
         Self::build_with(galaxy, REFERENCE_TIME, &all, BuildOptions::STANDARD)
     }
 
+    /// Tables of `galaxy` that hold no star, built at [`REFERENCE_TIME`] without a track.
+    ///
+    /// Every component's functions are zero at every light age: no V light (0 L☉,V per system),
+    /// no star brighter than any M<sub>V</sub>, no colour. They are laid out as
+    /// [`build`](Self::build)'s are, but build no track, so they cost next to nothing. They suit
+    /// a caller that needs a [`SkyContext`](crate::sky::census::SkyContext) but reads no table: a
+    /// census with forced caps (R06.T8.e's oracle), whose skips read only the envelope and whose
+    /// stars their own states, lists with these what it lists with `build`'s.
+    ///
+    /// # Examples
+    ///
+    /// The context of a census whose caps are forced, which reads no table:
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+    /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::sky::census::{NoSkyCellCache, SkyContext};
+    /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+    /// use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
+    /// use hyperion_sim::time::Span;
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?;
+    /// let (dark, envelope) = (LuminosityTables::dark(&galaxy), BrightnessEnvelope::build(&galaxy));
+    /// assert_eq!(dark.time(), REFERENCE_TIME);
+    /// let thin = galaxy.fields().component_ids().next().ok_or("a component")?;
+    /// let c = dark.get(thin, Layer::C);
+    /// // No star at all, so no light to give a colour.
+    /// assert!(c.stars_per_system(Span::ZERO) <= 0.0);
+    /// assert!(c.colour_fainter_than(Magnitudes::new(20.0), Span::ZERO).is_none());
+    /// let ctx = SkyContext {
+    ///     tables: &dark,
+    ///     envelope: &envelope,
+    ///     noise: NoiseCache::with_capacity(1 << 12),
+    ///     cells: &NoSkyCellCache,
+    ///     sources: &[],
+    ///     modifiers: &NoModifiers,
+    /// };
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn dark(galaxy: &Galaxy) -> Self {
+        Self::build_with(galaxy, REFERENCE_TIME, &[], BuildOptions::STANDARD)
+    }
+
     /// The light age at which these tables hold light that left its stars `emitted_ago` before
     /// `t`: `emitted_ago` + (the tables' time − `t`), which every reader of a table passes as its
     /// `emitted_ago`. Within the clock window `t` is at or before the tables' time; a later `t`

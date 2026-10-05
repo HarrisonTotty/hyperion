@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use crate::galaxy::features::centre::testing::milky_way_galaxy;
 
 use super::envelope::BrightnessEnvelope;
-use super::luminosity::{BuildOptions, LuminosityTables, REFERENCE_TIME};
+use super::luminosity::LuminosityTables;
 
 /// The fixture's luminosity tables, at the reference time.
 pub(crate) fn milky_way_tables() -> &'static LuminosityTables {
@@ -25,12 +25,5 @@ pub(crate) fn milky_way_envelope() -> &'static BrightnessEnvelope {
 /// but read no table: the census's own skips read only the envelope.
 pub(crate) fn milky_way_dark_tables() -> &'static LuminosityTables {
     static TABLES: OnceLock<LuminosityTables> = OnceLock::new();
-    TABLES.get_or_init(|| {
-        LuminosityTables::build_with(
-            milky_way_galaxy(),
-            REFERENCE_TIME,
-            &[],
-            BuildOptions::STANDARD,
-        )
-    })
+    TABLES.get_or_init(|| LuminosityTables::dark(milky_way_galaxy()))
 }
