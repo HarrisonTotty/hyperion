@@ -313,7 +313,7 @@ pub fn replay_offscreen(
     let (device, queue) = device_for(&adapter, capture, &mut findings)?;
     let errors = collect_errors(&device);
     let mut replayer = Replayer::new(device.clone(), queue.clone(), capture.surfaces())?;
-    replayer.replay(capture, 0..capture.span_start(), &FrameTarget::Offscreen)?;
+    replayer.replay_setup(capture)?;
     let mut frames = Frames::default();
     for range in frame_ranges(capture) {
         replayer.replay(capture, range, &FrameTarget::Offscreen)?;

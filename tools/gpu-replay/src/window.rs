@@ -18,7 +18,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::capture::Capture;
-use crate::replay::{FrameTarget, Replayer};
+use crate::replay::{FrameTarget, Replayer, canvas_view_formats};
 use crate::results::{ReplayFigures, Setting};
 use crate::run::{
     Frames, RunReplayError, collect_errors, device_for, frame_ranges, main_surface, rows_of,
@@ -96,17 +96,28 @@ impl App<'_> {
                 main.format, config.format
             )),
         }
+        let view_formats = canvas_view_formats(config.format);
+        if view_formats.is_empty()
+            || adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::SURFACE_VIEW_FORMATS)
+        {
+            config.view_formats = view_formats;
+        } else {
+            self.findings.push(format!(
+                "the window's surface cannot take a view format besides {:?}, so passes drawing \
+                 to the canvas through its sRGB view fail validation",
+                config.format
+            ));
+        }
         config.usage = wgpu::TextureUsages::RENDER_ATTACHMENT
             | (capabilities.usages
                 & (wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC));
         surface.configure(&device, &config);
         let errors = collect_errors(&device);
         let mut replayer = Replayer::new(device.clone(), queue.clone(), self.capture.surfaces())?;
-        replayer.replay(
-            self.capture,
-            0..self.capture.span_start(),
-            &FrameTarget::Offscreen,
-        )?;
+        replayer.replay_setup(self.capture)?;
         let display_hz = window
             .current_monitor()
             .and_then(|monitor| monitor.refresh_rate_millihertz())

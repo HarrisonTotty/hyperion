@@ -25,8 +25,8 @@
       "reason": "multisampled"
     }
   ],
-  "spanStart": 6,
-  "frames": [6, 15],
+  "spanStart": 7,
+  "frames": [7, 19],
   "blobs": [
     {
       "offset": 0,
@@ -134,6 +134,16 @@
       ]
     },
     {
+      "target": 4,
+      "op": "createView",
+      "args": [
+        {
+          "label": "dropped before the span"
+        }
+      ],
+      "result": 14
+    },
+    {
       "target": 0,
       "op": "createCommandEncoder",
       "args": [
@@ -158,6 +168,17 @@
         }
       ],
       "result": 11
+    },
+    {
+      "target": 10,
+      "op": "createView",
+      "args": [
+        {
+          "label": "canvas sRGB",
+          "format": "bgra8unorm-srgb"
+        }
+      ],
+      "result": 15
     },
     {
       "target": 7,
@@ -204,6 +225,31 @@
     },
     {
       "target": 12,
+      "op": "end",
+      "args": []
+    },
+    {
+      "target": 7,
+      "op": "beginRenderPass",
+      "args": [
+        {
+          "label": "sRGB clear",
+          "colorAttachments": [
+            {
+              "view": {
+                "$ref": 15
+              },
+              "loadOp": "clear",
+              "storeOp": "store",
+              "clearValue": [0, 0, 0, 1]
+            }
+          ]
+        }
+      ],
+      "result": 16
+    },
+    {
+      "target": 16,
       "op": "end",
       "args": []
     },

@@ -76,6 +76,12 @@ interface Entry {
   hidden: boolean;
 }
 
+/** `patch`'s {@link ResidentPatch} fields alone, with its slot and key string. */
+function cachedPatch(patch: ResidentPatch, slot: number, keyString: string): CachedPatch {
+  const { key, generation, originM, heightRangeM, boundingRadiusM } = patch;
+  return { key, generation, originM, heightRangeM, boundingRadiusM, slot, keyString };
+}
+
 /** The leaves' maps per level, by {@link patchKeyIndex}. */
 function levelMaps<T>(): Map<number, T>[] {
   return Array.from({ length: MAX_LEVEL + 1 }, () => new Map<number, T>());
@@ -171,12 +177,18 @@ export class PatchCache implements HeightRangeLookup {
    * baked patches last among those used as recently, then the least recently used of those the
    * selection, its ancestors or the draw set pins; the deepest first among patches used as
    * recently. A forced or root patch is never evicted.
+   *
+   * @remarks
+   * Only the {@link ResidentPatch} fields are kept: the terrain pass hands over the worker's whole
+   * bake, whose heights, offsets and normals its slot already holds, and keeping them here would
+   * hold about 51 KB a patch in the renderer, about 66 MB with the low setting's 1,296 slots full
+   * (R05.T14.c's memory probe).
    */
   insert(patch: ResidentPatch): CacheInsert {
     const keyString = patchKeyString(patch.key);
     const present = this.entries.get(keyString);
     if (present !== undefined) {
-      present.patch = { ...patch, slot: present.patch.slot, keyString };
+      present.patch = cachedPatch(patch, present.patch.slot, keyString);
       present.lastUsed = this.tick;
       return { kind: "stored", slot: present.patch.slot, evicted: null };
     }
@@ -197,7 +209,7 @@ export class PatchCache implements HeightRangeLookup {
     }
     const forced = this.forcedKeys.has(keyString);
     const entry: Entry = {
-      patch: { ...patch, slot, keyString },
+      patch: cachedPatch(patch, slot, keyString),
       lastUsed: this.tick,
       forced,
       drawn: !forced && (this.selectedKeys.has(keyString) || this.demandedKeys.has(keyString)),

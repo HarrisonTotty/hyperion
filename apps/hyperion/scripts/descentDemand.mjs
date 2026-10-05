@@ -5,7 +5,8 @@
 // script does both and runs the TypeScript through Vite's module runner, as `placeShip.mjs` does.
 //
 //   node scripts/descentDemand.mjs [--rules hard,calibrated] [--ridges off,on] [--settings high,low]
-//     [--rate 64] [--cap-hours 2] [--wall-cap-hours <h>] [--out <dir>] [--write-fixture]
+//     [--rate 64] [--cap-hours 2] [--wall-cap-hours <h>] [--out <dir>] [--note <text>]...
+//     [--write-fixture] [--merge <a.json>,<b.json>,...]
 //
 // --write-fixture runs only the unit test's windows (ridges off, min(hard, 4σ_n), both settings)
 // and writes the ranges the test reads, `src/renderer/src/view/spike/fixtures/descentRanges.txt`,
@@ -13,6 +14,8 @@
 // time only, the bakes left out; `--wall-cap-hours` stops the whole run at that wall time, bakes
 // included, so that a run under an outer timeout always writes. A cell cut short says so in the
 // record, and the record is rewritten after every cell, so a killed run keeps the cells it ended.
+// Each --note is a line of the record's notes. --merge runs nothing: it writes one record into
+// --out from the records given, their cells in that order, as the cells run one process each.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +31,26 @@ function option(args, name, fallback) {
   return at >= 0 && at + 1 < args.length ? args[at + 1] : fallback;
 }
 
+/** Every value given to a repeatable option, in order. */
+function options(args, name) {
+  return args.flatMap((arg, at) =>
+    arg === `--${name}` && at + 1 < args.length ? [args[at + 1]] : [],
+  );
+}
+
+/** Writes a record's JSON and its Markdown summary into `out`, as `stem`. */
+function writeRecord(record, out, stem, file) {
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, `${stem}.json`), `${JSON.stringify(file, null, 2)}\n`);
+  writeFileSync(
+    join(out, `${stem}.md`),
+    record.demandSummary(file.cells, file.startedAt, file.notes),
+  );
+  return join(out, stem);
+}
+
+const loadAverage = () => readFileSync("/proc/loadavg", "utf8").split(" ").slice(0, 3).map(Number);
+
 const nowMs = () => performance.now();
 
 async function main(args) {
@@ -39,6 +62,17 @@ async function main(args) {
     join(app, "src/renderer/src/view/spike/demandRecord.ts"),
     { configFile: false, logLevel: "error" },
   );
+  const notes = options(args, "note");
+  const out = option(args, "out", join(repo, "docs/measurements/descent-spike"));
+  const merge = option(args, "merge", null);
+  if (merge !== null) {
+    const files = merge.split(",").map((path) => JSON.parse(readFileSync(path, "utf8")));
+    const merged = record.mergeRecords(files, notes);
+    const stem = record.recordStem(merged.startedAt, record.recordRules(merged));
+    const path = writeRecord(record, out, stem, merged);
+    process.stdout.write(`merged: ${path}.{json,md}\n`);
+    return 0;
+  }
   const ridgesOf = { off: surface.Ridges.Off, on: surface.Ridges.On };
   const sourceOf = (ridges) => {
     const r = ridgesOf[ridges];
@@ -111,29 +145,24 @@ async function main(args) {
   const settings = option(args, "settings", "high,low").split(",");
   const rateHz = Number(option(args, "rate", "64"));
   const capMs = Number(option(args, "cap-hours", "2")) * 3_600_000;
-  const out = option(args, "out", join(repo, "docs/measurements/descent-spike"));
   const startedAt = new Date().toISOString();
   const cellCount = rules.length * ridgesList.length * settings.length;
   const shareMs = capMs / cellCount;
-  const wallMs = Number(option(args, "wall-cap-hours", "Infinity")) * 3_600_000;
-  const wallDeadlineMs = nowMs() + wallMs;
+  const wallCapHours = Number(option(args, "wall-cap-hours", "Infinity"));
+  const wallDeadlineMs = nowMs() + wallCapHours * 3_600_000;
   const cells = [];
-  mkdirSync(out, { recursive: true });
-  const stem = `${startedAt.slice(0, 10)}-demand-${rules.join("+")}`;
+  const stem = record.recordStem(startedAt, rules);
+  let path = "";
   const write = () => {
-    const json = {
+    path = writeRecord(record, out, stem, {
       schema: record.DEMAND_RECORD_SCHEMA,
       version: record.DEMAND_RECORD_VERSION,
       startedAt,
       seed: String(record.RECORD_SEED),
       testPlanetVersion: surface.testPlanetVersion(),
-      rateHz,
-      capHours: capMs / 3_600_000,
-      loadAverage: readFileSync("/proc/loadavg", "utf8").split(" ").slice(0, 3).map(Number),
+      notes,
       cells,
-    };
-    writeFileSync(join(out, `${stem}.json`), `${JSON.stringify(json, null, 2)}\n`);
-    writeFileSync(join(out, `${stem}.md`), record.demandSummary(cells, startedAt));
+    });
   };
   for (const ridges of ridgesList) {
     // One memo a ridges value: the bakes are the same patches whatever the rule and setting.
@@ -155,16 +184,23 @@ async function main(args) {
           deadlineMs: cellStart + shareMs,
           wallDeadlineMs,
         });
-        cells.push(cell);
+        const wallS = (nowMs() - cellStart) / 1000;
+        cells.push({
+          ...cell,
+          capHours: shareMs / 3_600_000,
+          wallCapHours: Number.isFinite(wallCapHours) ? wallCapHours : null,
+          wallS,
+          loadAverage: loadAverage(),
+        });
         write();
         process.stdout.write(
-          `${rule} ridges ${ridges} ${settingView.setting}: ${cell.frames} frames${cell.truncated === true ? " (truncated)" : ""} in ${((nowMs() - cellStart) / 1000).toFixed(0)} s\n`,
+          `${rule} ridges ${ridges} ${settingView.setting}: ${cell.frames} frames${cell.truncated === true ? " (truncated)" : ""} in ${wallS.toFixed(0)} s\n`,
         );
       }
     }
   }
   write();
-  process.stdout.write(`record: ${join(out, stem)}.{json,md}\n`);
+  process.stdout.write(`record: ${path}.{json,md}\n`);
   return 0;
 }
 

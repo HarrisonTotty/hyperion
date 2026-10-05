@@ -51,7 +51,8 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     let capture = Capture::read(&fixture()).expect("the fixture is a capture");
     let figures = replay_offscreen(&capture, &fixture(), None).expect("the replay runs");
     assert!(!figures.presented());
-    // The module that is invalid on purpose is refused by wgpu as by naga, and nothing else is.
+    // The module that is invalid on purpose is refused by wgpu as by naga, and nothing else is:
+    // not the canvas's sRGB view, which the engine's configuration allows.
     assert_eq!(figures.errors().len(), 1, "{:?}", figures.errors());
     assert!(
         figures.errors()[0].contains("broken on purpose"),

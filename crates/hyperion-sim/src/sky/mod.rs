@@ -13,6 +13,8 @@
 //!   interims for protostars and white dwarfs.
 //! - [`luminosity`]: the cumulative luminosity function per component and layer, the light and
 //!   count of the stars a census does not list.
+//! - [`binary_light`]: what pair evolution changes in those functions' light and counts, the
+//!   fitted `sky_binary_light_*` tables and the sampling they are fitted from.
 //! - [`envelope`]: the brightest V any star of a mass can reach, which bounds a system before its
 //!   stars are generated.
 //! - [`caps`]: how far out the census looks in each layer.
@@ -20,8 +22,10 @@
 //!   per-cell cache.
 //!
 //! Everything here only reads the galaxy: nothing changes generated output, and nothing draws a
-//! random word.
+//! random word, except [`binary_light`]'s fit sampling, which generates systems of its own galaxy
+//! offline, as the census generates the galaxy's.
 
+pub mod binary_light;
 pub mod caps;
 pub mod census;
 pub mod colour;

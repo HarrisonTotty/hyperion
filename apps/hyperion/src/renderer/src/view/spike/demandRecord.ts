@@ -29,13 +29,27 @@ import {
   type TrackStretch,
   trackStretches,
 } from "./descentProfile";
-import { type FixedStepRun, runFixedStep, type SegmentFigures, segmentFigures } from "./fixedStep";
+import {
+  BAND_MARGIN,
+  COARSE_STAND_IN_LEVEL,
+  type FixedStepRun,
+  runFixedStep,
+  type SegmentFigures,
+  segmentFigures,
+} from "./fixedStep";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 /** The record's schema name. */
 export const DEMAND_RECORD_SCHEMA = "hyperion.descent-spike.demand";
-/** The record's schema version; bumped with any change to its shape. */
-export const DEMAND_RECORD_VERSION = 1;
+/**
+ * The record's schema version; bumped with any change to its shape.
+ *
+ * @remarks
+ * Version 2 (decision-r05-high-bound.md, F4): each segment adds τ′ and its steps, the coarse
+ * stand-ins and the forced region's bakes; each cell carries its process's caps, wall time and
+ * load; the file carries notes, and no longer one rate, cap or load for every cell.
+ */
+export const DEMAND_RECORD_VERSION = 2;
 
 /** Whether the test planet's ridges are on. */
 export type RidgesSetting = "off" | "on";
@@ -108,6 +122,80 @@ export interface DemandCell {
   readonly minFloorMarginM: number;
   readonly segments: ReadonlyArray<SegmentFigures>;
   readonly hash: string;
+}
+
+/** A cell as the record's file holds it: its figures, with its process's caps, wall time and load. */
+export interface RecordedCell extends DemandCell {
+  /** The cell's share of the selection-time cap, hours. */
+  readonly capHours: number;
+  /** Its process's wall-time cap, bakes included, hours; null for none. */
+  readonly wallCapHours: number | null;
+  /** How long the cell took, bakes included, s. */
+  readonly wallS: number;
+  /** The machine's 1, 5 and 15 min load averages as the cell ended. */
+  readonly loadAverage: ReadonlyArray<number>;
+}
+
+/** The record's file, `<date>-demand-<rules>.json` ({@link recordStem}), version 2. */
+export interface DemandRecordFile {
+  /**
+   * {@link DEMAND_RECORD_SCHEMA} and {@link DEMAND_RECORD_VERSION} as written: a file read back
+   * may hold an older version's, which {@link mergeRecords} refuses.
+   */
+  readonly schema: string;
+  readonly version: number;
+  /** When the first cell started, ISO 8601. */
+  readonly startedAt: string;
+  /** {@link RECORD_SEED}, in decimal. */
+  readonly seed: string;
+  /** The surface module's `testPlanetVersion()`. */
+  readonly testPlanetVersion: number;
+  /** How the cells were run, where a reader needs it beside the figures. */
+  readonly notes: ReadonlyArray<string>;
+  readonly cells: ReadonlyArray<RecordedCell>;
+}
+
+/**
+ * The record's file name without its extension, `<date>-demand-<rules>`: set once for a run from
+ * the rules it runs, so that a record rewritten after each cell keeps its name.
+ */
+export function recordStem(startedAt: string, rules: ReadonlyArray<BoundRule>): string {
+  return `${startedAt.slice(0, 10)}-demand-${[...new Set(rules)].join("+")}`;
+}
+
+/** The rules of a record's cells, in their order, for a merged record's {@link recordStem}. */
+export function recordRules(file: Pick<DemandRecordFile, "cells">): BoundRule[] {
+  return [...new Set(file.cells.map(({ rule }) => rule))];
+}
+
+/**
+ * One record from several, each written by its own process (the parallel cells of the hard
+ * record): their cells in the order given, the earliest start, and `notes`.
+ *
+ * @throws Error where a file is not this version's, or the files differ in seed or test planet.
+ */
+export function mergeRecords(
+  files: ReadonlyArray<DemandRecordFile>,
+  notes: ReadonlyArray<string>,
+): DemandRecordFile {
+  const [first] = files;
+  if (first === undefined) {
+    throw new Error("no record to merge");
+  }
+  for (const { schema, version, seed, testPlanetVersion } of files) {
+    if (schema !== DEMAND_RECORD_SCHEMA || version !== DEMAND_RECORD_VERSION) {
+      throw new Error(
+        `a record of ${schema} version ${version}, not ${DEMAND_RECORD_SCHEMA} version ${DEMAND_RECORD_VERSION}`,
+      );
+    }
+    if (seed !== first.seed || testPlanetVersion !== first.testPlanetVersion) {
+      throw new Error(
+        `records of seed ${seed} on test planet ${testPlanetVersion} and seed ${first.seed} on ${first.testPlanetVersion} do not merge`,
+      );
+    }
+  }
+  const startedAt = files.map((f) => f.startedAt).toSorted()[0] ?? first.startedAt;
+  return { ...first, startedAt, notes, cells: files.flatMap(({ cells }) => cells) };
 }
 
 /** How far the clearance ruling lifted one segment above Design note 19's table. */
@@ -314,15 +402,63 @@ function liftsText(lifts: ReadonlyArray<SegmentLift>): string {
         .join(", ");
 }
 
-/** The record's Markdown summary. */
-export function demandSummary(cells: ReadonlyArray<DemandCell>, startedAt: string): string {
+/** `values` to `digits` decimals, joined by " / ", or "—" where the first is null. */
+function figures(values: ReadonlyArray<number | null>, digits: number): string {
+  return values[0] === null || values[0] === undefined
+    ? "—"
+    : values.map((x) => (x === null ? "—" : x.toFixed(digits))).join(" / ");
+}
+
+/** A share as a percentage to one decimal, or "—" where null. */
+function percent(share: number | null): string {
+  return share === null ? "—" : `${(100 * share).toFixed(1)}%`;
+}
+
+/** A segment's row of the budget's table: τ′, its steps, the coarse stand-ins and forced bakes. */
+function budgetRow(s: SegmentFigures): string {
+  const cells = [
+    s.segment,
+    figures([s.tauPrimePxP50, s.tauPrimePxP95, s.tauPrimePxMax], 2),
+    figures([s.tauPrimeStepPxP95, s.tauPrimeStepPxMax], 2),
+    figures([s.tauPrimeStepRatioP95, s.tauPrimeStepRatioMax], 3),
+    percent(s.tauPrimeStepsOverMargin),
+    `${percent(s.coarseStandInFraction)} (${percent(s.coarseReturnFraction)})`,
+    `${figures([s.coarseStandInMaxRhoPx], 1)} (${figures([s.coarseReturnMaxRhoPx], 1)})`,
+    s.forcedDemandPerS.toFixed(1),
+  ];
+  return `| ${cells.join(" | ")} |`;
+}
+
+/** The record's Markdown summary, with `notes` on how its cells were run. */
+export function demandSummary(
+  cells: ReadonlyArray<DemandCell>,
+  startedAt: string,
+  notes: ReadonlyArray<string> = [],
+): string {
   const lines = [
     `# Descent demand record, ${startedAt.slice(0, 10)}`,
     "",
+    ...(notes.length === 0 ? [] : ["Notes:", "", ...notes.map((n) => `- ${n}`), ""]),
     `Seed ${RECORD_SEED}. Fixed-step runs of the scripted descent through \`selectPatches\` and a`,
     "simulated cache (R05.T13.a): patches selected, measured demand (first-time-selected keys a",
     "second), the per-level prediction D, the share of frames `limited`, and the selection time.",
     "Timings are provisional unless the machine was quiet (Design note 27).",
+    "",
+    "The second table of each cell (decision-r05-high-bound.md, F4):",
+    "",
+    "- τ′, the effective tolerance τ × max(1, `limitExcess` ÷ w) that every baked leaf meets, over",
+    "  the `limited` frames; the record's one view has w = 1. The record selects at the setting's τ;",
+    "  the terrain pass selects at τ ÷ 1.1.",
+    "- Δτ′, its change from the selection before, over the steps where either is limited, and",
+    "  Δτ′ ÷ τ′, the larger τ′ over the smaller, less 1. A vertex inside its morph band steps by",
+    "  about 6 × Δτ′ ÷ τ′ in morph factor (R05.T11.c). A step belongs to its later frame's segment.",
+    `- The share of those steps beyond the morph bands' margin of ${BAND_MARGIN}.`,
+    `- The share of frames drawing a stand-in of level ${COARSE_STAND_IN_LEVEL} or coarser in place of selected patches,`,
+    "  and in brackets one covering a return: a patch the cache held earlier and evicted, selected",
+    "  again. The rest are first bakes, which the ideal pool lands after the frame's draw. Then the",
+    "  largest ρ such a stand-in draws: its level's error at a covered patch's distance, pixels of",
+    "  bound.",
+    "- The forced region's patches baked a second.",
     "",
   ];
   for (const cell of cells) {
@@ -339,6 +475,10 @@ export function demandSummary(cells: ReadonlyArray<DemandCell>, startedAt: strin
         (s) =>
           `| ${s.segment} | ${s.meanPatches.toFixed(0)}, ${s.maxPatches} | ${s.demandPerS.toFixed(1)} | ${s.predictedPerS.toFixed(1)} | ${s.predictedPerS > 0 ? (s.demandPerS / s.predictedPerS).toFixed(2) : "—"} | ${(100 * s.limitedFraction).toFixed(0)}% | ${s.minHeightAboveFloorM.toFixed(0)}–${s.maxHeightAboveFloorM.toFixed(0)} | ${s.selectMsP50.toFixed(1)} / ${s.selectMsP95.toFixed(1)} / ${s.selectMsMax.toFixed(1)} |`,
       ),
+      "",
+      `| Segment | τ′ p50 / p95 / max (px) | Δτ′ p95 / max (px) | Δτ′ ÷ τ′ p95 / max | Steps over ${BAND_MARGIN} | Coarse stand-ins (returns) | Their largest ρ (returns) (px) | Forced bakes /s |`,
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      ...cell.segments.map(budgetRow),
       "",
     );
   }
