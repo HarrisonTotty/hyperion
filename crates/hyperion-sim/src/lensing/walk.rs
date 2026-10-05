@@ -18,7 +18,7 @@ use crate::galaxy::placement::{
 };
 use crate::galaxy::query::{
     LayerSet, MassFloor, PAD_SPEED, QuerySphere, SubstellarRequest, SystemHit, SystemSource,
-    UNBOUND_PAD_SPEED, cells_along_segment, pad_speed,
+    UNBOUND_PAD_SPEED, cells_along_segment, escape_cut_holds, pad_speed,
 };
 use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::math;
@@ -550,9 +550,10 @@ struct Candidate {
 /// between the epoch and its retarded time, which grows along the sightline: the tube is a cone,
 /// cut into 64 pieces each as wide as its far end needs. The speed is the local escape speed's
 /// bound over the piece's reach ([`LensWalkPlan`]), because plan 08 cuts every grid velocity
-/// below the escape speed at its epoch position, and layer E keeps
-/// [`UNBOUND_PAD_SPEED`] for the exempt classes plan 08 will place there. A galaxy built without
-/// its kinematic tables has no motion and needs no pad.
+/// below the escape speed at its epoch position in every layer where [`escape_cut_holds`] is
+/// true. The other layers, layer E for the exempt classes plan 08 will place there, keep their
+/// [`pad_speed`] (P08.T17). A galaxy built without its kinematic tables has no motion and needs
+/// no pad.
 ///
 /// The result does not depend on the cache or on the order of the sources: every candidate is
 /// taken once, by ID, and the events are sorted by peak and then by lens.
@@ -826,7 +827,9 @@ impl LensCandidateChunk {
 /// for what lies between the samples. It is a bound on the model's own escape speed at the
 /// table's resolution, which a slow test checks at 10⁵ random points; nothing under it is dropped
 /// between samples unless the escape speed rises by more than 2% within an eighth of an octave
-/// outward. Layer E keeps [`UNBOUND_PAD_SPEED`].
+/// outward. The escape speed bounds the layers where [`escape_cut_holds`] is true. The others,
+/// layer E today and layer D once plan 09 raises its pad (P09.T34.b), keep their [`pad_speed`]
+/// (P08.T17).
 ///
 /// **The prefilter** (ruling 143.3). Each system is tested first by its epoch position against the
 /// cone at its own distance, with its own speed bound; the survivors' velocities are drawn and
@@ -986,13 +989,7 @@ impl LensWalkPlan {
         let Some(envelope) = &self.envelope else {
             return 0.0;
         };
-        let speed = match layer {
-            Layer::E => pad_speed(layer).value(),
-            Layer::A | Layer::B | Layer::C | Layer::D | Layer::BrownDwarf | Layer::RoguePlanet => {
-                envelope.bound(radius_ly).min(pad_speed(layer).value())
-            }
-        };
-        MetresPerSecond::from(KilometresPerSecond::new(speed)).value() / SPEED_OF_LIGHT
+        MetresPerSecond::from(envelope.speed_bound(layer, radius_ly)).value() / SPEED_OF_LIGHT
     }
 
     /// `record` as a candidate, if its line passes within the kept reach during the span: the
@@ -1138,23 +1135,12 @@ fn grid_cells(
                     };
                     let pad = MetresPerSecond::from(pad_speed(layer)).value() / SPEED_OF_LIGHT;
                     let widest = tube_radius(geometry, query, mass, pad, near, far);
-                    let speed = match layer {
-                        Layer::E => pad_speed(layer).value(),
-                        Layer::A
-                        | Layer::B
-                        | Layer::C
-                        | Layer::D
-                        | Layer::BrownDwarf
-                        | Layer::RoguePlanet => {
-                            let from_centre = segment_distance_from_centre(
-                                &point_along(geometry, near),
-                                &point_along(geometry, far),
-                            );
-                            let inner = (from_centre - widest.value()).max(0.0);
-                            envelope.bound(inner).min(pad_speed(layer).value())
-                        }
-                    };
-                    let beta = MetresPerSecond::from(KilometresPerSecond::new(speed)).value()
+                    let from_centre = segment_distance_from_centre(
+                        &point_along(geometry, near),
+                        &point_along(geometry, far),
+                    );
+                    let inner = (from_centre - widest.value()).max(0.0);
+                    let beta = MetresPerSecond::from(envelope.speed_bound(layer, inner)).value()
                         / SPEED_OF_LIGHT;
                     tube_radius(geometry, query, mass, beta, near, far)
                 })
@@ -1272,6 +1258,23 @@ impl EscapeEnvelope {
             beyond[k] = beyond[k].max(beyond[k + 1]);
         }
         Some(Self { beyond })
+    }
+
+    /// The speed bound of a grid lens of `layer` whose epoch position is at least `radius_ly` from
+    /// the centre (P08.T17).
+    ///
+    /// Where [`escape_cut_holds`] is true for the layer, every grid record of it is drawn below the
+    /// escape speed at its epoch position, so the bound is the table's, at most the layer's
+    /// [`pad_speed`], which is then plan 03's. Elsewhere a record may outrun the escape speed, and
+    /// the bound is the layer's [`pad_speed`]. So when plan 09 raises layer D's pad
+    /// (P09.T34.b), layer D follows with no edit here.
+    #[must_use]
+    fn speed_bound(&self, layer: Layer, radius_ly: f64) -> KilometresPerSecond {
+        if escape_cut_holds(layer) {
+            KilometresPerSecond::new(self.bound(radius_ly).min(pad_speed(layer).value()))
+        } else {
+            pad_speed(layer)
+        }
     }
 
     /// The bound at spherical radius `radius_ly`, km/s: the table's value at the nearest radius
@@ -1603,6 +1606,7 @@ mod tests {
     use crate::galaxy::placement::{NoCache, generate_cell};
     use crate::galaxy::query::LayerCounts;
     use crate::observe::{Trajectory, light_time};
+    use hyperion_testkit::float::assert_same_bits;
 
     /// A galaxy without its kinematic tables: nothing on the grid moves, so the only motion is
     /// what a test places.
@@ -2231,6 +2235,49 @@ mod tests {
         }
         assert!(accepted >= 30, "{accepted} lenses found");
         assert!(rejected >= 300, "{rejected} candidates dropped");
+    }
+
+    /// Plan 08, P08.T17: the walk's speed bound, which both `LensWalkPlan::beta_at` and the cone's
+    /// pieces read, is the escape envelope's, at most plan 03's padding speed, in every layer
+    /// where the escape cut holds, and the layer's pad speed elsewhere. It is checked at five
+    /// radii: inside the table's first, where the envelope passes `PAD_SPEED`, at 100 ly, at the
+    /// Sun's and past the table's last.
+    #[test]
+    fn the_lens_speed_bound_follows_the_pad() {
+        // A table falling from 1,200 km/s at its first radius to 300 at its last, so that it
+        // passes plan 03's padding speed near the centre and lies well under it at the Sun.
+        let envelope = EscapeEnvelope {
+            beyond: (0..ENVELOPE_RADII)
+                .map(|k| 1_200.0 - 900.0 * f64::from(k) / f64::from(ENVELOPE_RADII - 1))
+                .collect(),
+        };
+        let radii = [0.01, 1.0, 100.0, 26_000.0, 300_000.0];
+        for layer in Layer::ALL {
+            for radius_ly in radii {
+                let bound = envelope.speed_bound(layer, radius_ly).value();
+                if escape_cut_holds(layer) {
+                    assert!(
+                        bound <= PAD_SPEED.value(),
+                        "{layer:?} at {radius_ly} ly: {bound} km/s"
+                    );
+                    assert_same_bits(bound, envelope.bound(radius_ly).min(PAD_SPEED.value()));
+                } else {
+                    assert_same_bits(bound, pad_speed(layer).value());
+                }
+            }
+        }
+        // The cases differ: at the Sun the envelope is far under plan 03's speed, at 1 ly it
+        // passes it and is capped at it, and layer E takes its own pad wherever it is.
+        let sun = envelope.speed_bound(Layer::C, 26_000.0).value();
+        assert!((400.0..500.0).contains(&sun), "{sun} km/s at the Sun");
+        assert_same_bits(
+            envelope.speed_bound(Layer::C, 1.0).value(),
+            PAD_SPEED.value(),
+        );
+        assert_same_bits(
+            envelope.speed_bound(Layer::E, 26_000.0).value(),
+            UNBOUND_PAD_SPEED.value(),
+        );
     }
 
     /// A Milky Way galaxy whose systems move: its full potential and kinematic tables, built once

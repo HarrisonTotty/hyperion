@@ -31,7 +31,8 @@ pub use census::decide_census;
 pub use expected::expected_counts;
 pub use mode::{QueryMode, range_query_observed};
 pub use motion::{
-    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, hit_at, pad_for, pad_speed, position_at,
+    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, pad_for, pad_speed,
+    position_at,
 };
 pub use request::{
     DEFAULT_CELL_BUDGET, DEFAULT_CENSUS_LIMIT, MassFloor, RangeQuery, RangeQueryBuilder,
