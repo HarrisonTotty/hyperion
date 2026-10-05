@@ -8,18 +8,22 @@ import { CentreEntry } from "./CentreEntry";
 
 interface HarnessProps {
   readonly onCentre: (centreLy: CentreLy) => void;
+  readonly onCursor: (cursorLy: CentreLy) => void;
   readonly heldBack?: string | null;
 }
 
 /** Holds the cursor as the display does, starting off the axis, beside a button to take focus. */
-function Harness({ onCentre, heldBack = null }: HarnessProps) {
+function Harness({ onCentre, onCursor, heldBack = null }: HarnessProps) {
   const [cursorLy, setCursorLy] = useState<CentreLy>([26_000, 0, 12]);
   return (
     <>
       <button type="button">ELSEWHERE</button>
       <CentreEntry
         cursorLy={cursorLy}
-        onCursor={setCursorLy}
+        onCursor={(next) => {
+          onCursor(next);
+          setCursorLy(next);
+        }}
         onCentre={onCentre}
         heldBack={heldBack}
       />
@@ -30,8 +34,9 @@ function Harness({ onCentre, heldBack = null }: HarnessProps) {
 function renderEntry(heldBack: string | null = null) {
   const user = userEvent.setup();
   const onCentre = vi.fn<(centreLy: CentreLy) => void>();
-  render(<Harness onCentre={onCentre} heldBack={heldBack} />);
-  return { user, onCentre };
+  const onCursor = vi.fn<(cursorLy: CentreLy) => void>();
+  render(<Harness onCentre={onCentre} onCursor={onCursor} heldBack={heldBack} />);
+  return { user, onCentre, onCursor };
 }
 
 function field(label: "X" | "Y" | "Z"): HTMLInputElement {
@@ -247,6 +252,59 @@ describe("CentreEntry", () => {
     expect(centre).toHaveAttribute("aria-disabled", "true");
     expect(centre).toHaveAccessibleDescription("X INVALID: enter -65,536 to 65,535.9999 ly");
     expect(onCentre).not.toHaveBeenCalled();
+  });
+
+  it("drops a refused coordinate on Escape, showing the cursor's and offering CENTRE CHART", async () => {
+    const { user, onCursor } = renderEntry();
+    await user.clear(field("X"));
+    await user.type(field("X"), "70000{Enter}");
+    const refused = field("X").getAttribute("aria-invalid");
+
+    await user.keyboard("{Escape}");
+    await user.tab();
+
+    expect([refused, field("X").value, field("X").getAttribute("aria-invalid")]).toEqual([
+      "true",
+      "26,000.0",
+      null,
+    ]);
+    expect(screen.queryByText(/INVALID/u)).toBeNull();
+    expect(screen.getByRole("button", { name: "C CENTRE CHART" })).not.toHaveAttribute(
+      "aria-disabled",
+    );
+    expect(onCursor).not.toHaveBeenCalled();
+  });
+
+  it("keeps Escape's focus in the field", async () => {
+    const { user } = renderEntry();
+    await user.clear(field("Z"));
+    await user.type(field("Z"), "north{Enter}");
+
+    await user.keyboard("{Escape}");
+
+    expect(field("Z")).toHaveFocus();
+    expect(field("Z")).toHaveValue("12.0");
+  });
+
+  it("enters nothing for a field emptied and left, and refuses nothing", async () => {
+    const { user, onCursor } = renderEntry();
+    await user.clear(field("Y"));
+
+    await user.tab();
+
+    expect([field("Y").value, field("Y").getAttribute("aria-invalid")]).toEqual(["0.0", null]);
+    expect(screen.queryByText(/INVALID/u)).toBeNull();
+    expect(onCursor).not.toHaveBeenCalled();
+  });
+
+  it("enters nothing for a field of spaces only, and refuses nothing", async () => {
+    const { user, onCursor } = renderEntry();
+    await user.clear(field("X"));
+
+    await user.type(field("X"), "   {Enter}");
+
+    expect([field("X").value, field("X").getAttribute("aria-invalid")]).toEqual(["26,000.0", null]);
+    expect(onCursor).not.toHaveBeenCalled();
   });
 
   it("announces the whole position as the cursor moves", async () => {
