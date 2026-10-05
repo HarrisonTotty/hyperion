@@ -18,6 +18,11 @@
  * It also records what decision-r05-high-bound.md's F4 asks of the record: the budget's effective
  * tolerance τ′ (`Selection.limitExcess`), the coarse stand-ins drawn, and the forced region's
  * bakes.
+ *
+ * It selects at the terrain pass's τ_sel = τ ÷ (1 + `RESELECT_FRACTION`) (`selectionTolerancePx`),
+ * and computes D at the same tolerance (decision-r05-record-tau.md). It selects every frame,
+ * without the pass's cadence: the pass's selection at a frame is the run's at a pose at most
+ * `RESELECT_FRACTION` × d_min earlier, which moves the demand in time, not in size.
  */
 
 import { vec3 } from "../../geometry/vec3";
@@ -40,6 +45,7 @@ import {
   selectPatches,
   type ViewSelectionInput,
 } from "../terrain/select";
+import { RESELECT_FRACTION, selectionTolerancePx } from "../terrain/selectionTolerance";
 import type { SlotLayout } from "../terrain/slotLayout";
 import { distanceToBoxFromM } from "../terrain/viewGeometry";
 import { type DemandView, perLevelDemand } from "./demand";
@@ -76,17 +82,17 @@ export const COARSE_STAND_IN_LEVEL = 12;
 
 /**
  * The margin the terrain pass's morph bands keep over the selection's tolerance, 1 +
- * `RESELECT_FRACTION` (`terrainPass.ts`, R05.T11.c's F2 as built): where τ′ changes between two
- * selections by more than this factor, a split can start partly morphed, or a merge's children have
- * been. A test holds it to the pass's constant, which this module cannot import (the pass loads the
- * engine).
+ * {@link RESELECT_FRACTION} (`terrainPass.ts`, R05.T11.c's F2 as built): where τ′ changes between
+ * two selections by more than this factor, a split can start partly morphed, or a merge's children
+ * have been.
  */
-export const BAND_MARGIN = 1.1;
+export const BAND_MARGIN = 1 + RESELECT_FRACTION;
 
 /**
- * A selection's effective tolerance for a view, pixels: τ × max(1, `limitExcess` ÷ w), which every
- * baked leaf the view sees meets (decision-r05-high-bound.md, F1 and F4; R05.T7 as built). It is τ
- * where the budget does not bind, `limitExcess` then being 0.
+ * A selection's effective tolerance for a view, pixels: the view's τ × max(1, `limitExcess` ÷ w),
+ * which every baked leaf the view sees meets (decision-r05-high-bound.md, F1 and F4; R05.T7 as
+ * built). It is the view's τ where the budget does not bind, `limitExcess` then being 0; for the
+ * run's view, which selects at τ_sel, that is τ_sel.
  */
 export function effectiveTolerancePx(
   selection: Pick<Selection, "limitExcess">,
@@ -194,6 +200,10 @@ export interface FixedStepOptions {
   /** The planet under the bound rule the run records (`boundedPlanet`). */
   readonly planet: PlanetGeometry;
   readonly setting: QualitySetting;
+  /**
+   * The setting's view, at the setting's τ: the run selects, and computes D, at its τ_sel
+   * ({@link selectionTolerancePx}).
+   */
   readonly view: DemandView & { readonly heightPx: number };
   /** Samples a second (64 in the plan). */
   readonly rateHz: number;
@@ -236,8 +246,8 @@ export interface FixedStepFrame {
   readonly demanded: number;
   readonly limited: boolean;
   /**
-   * The selection's effective tolerance τ′, pixels ({@link effectiveTolerancePx}): the view's τ
-   * where not `limited`.
+   * The selection's effective tolerance τ′ = τ_sel × max(1, `limitExcess` ÷ w), pixels
+   * ({@link effectiveTolerancePx}): τ_sel where not `limited`.
    */
   readonly tauPrimePx: number;
   /** Selected patches drawn by a resident ancestor, and those with none. */
@@ -255,7 +265,10 @@ export interface FixedStepFrame {
   /** Patches of a grounded body's forced region requested and baked this frame. */
   readonly forcedDemanded: number;
   readonly selectMs: number;
-  /** The per-level prediction at this frame, patches a second, at the height above the floor. */
+  /**
+   * The per-level prediction at this frame, patches a second, at the height above the floor and at
+   * τ_sel, the tolerance the frame selected at.
+   */
   readonly predictedPerS: number;
   /** The camera's height above the floor under it, metres (`DescentPose.heightAboveFloorM`). */
   readonly heightAboveFloorM: number;
@@ -263,6 +276,9 @@ export interface FixedStepFrame {
 
 /** A run's frames and its selection sequence's hash. */
 export interface FixedStepRun {
+  /** The setting's τ the run was given, and τ_sel, the tolerance it selected at, pixels. */
+  readonly tauPx: number;
+  readonly selectionTauPx: number;
   readonly frames: ReadonlyArray<FixedStepFrame>;
   /** FNV-1a (64-bit) over every frame's selected keys in their order, as 16 hex digits. */
   readonly hash: string;
@@ -313,6 +329,9 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
   const deadline = options.deadlineMs ?? Infinity;
   const wallDeadline = options.wallDeadlineMs ?? Infinity;
   const patchSizeM = finestPatchSizeM(planet);
+  // D predicts the selection it is set beside, so it takes the same tolerance.
+  const selectionTauPx = selectionTolerancePx(view.tauPx);
+  const demandView: DemandView = { ...view, tauPx: selectionTauPx };
   // Every patch evicted so far, to tell a return from a first bake.
   const evicted = new Set<string>();
   let bakeMs = 0;
@@ -331,7 +350,7 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
       fovXRad: view.fovXRad,
       viewport: { widthPx: view.widthPx, heightPx: view.heightPx },
       weight: 1,
-      tauPx: view.tauPx,
+      tauPx: selectionTauPx,
     };
     const input: SelectionInput = {
       planet,
@@ -390,12 +409,15 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
       coarseReturnRhoPx: coarse.returnRhoPx,
       forcedDemanded,
       selectMs,
-      predictedPerS: perLevelDemand(planet, { ...pose, altitudeM: pose.heightAboveFloorM }, view)
-        .perS,
+      predictedPerS: perLevelDemand(
+        planet,
+        { ...pose, altitudeM: pose.heightAboveFloorM },
+        demandView,
+      ).perS,
       heightAboveFloorM: pose.heightAboveFloorM,
     });
   }
-  return { frames, hash: hash.hex(), truncated };
+  return { tauPx: view.tauPx, selectionTauPx, frames, hash: hash.hex(), truncated };
 }
 
 /** A segment's figures over a run. */
@@ -411,6 +433,11 @@ export interface SegmentFigures {
   /** The mean per-level prediction over the segment's frames. */
   readonly predictedPerS: number;
   readonly limitedFraction: number;
+  /**
+   * The share of the `limited` frames whose τ′ exceeds the setting's τ; null where none is
+   * limited. Selecting at τ_sel, a limited frame may still draw within τ (decision-r05-record-tau.md).
+   */
+  readonly limitedOverTauFraction: number | null;
   /**
    * τ′ over the `limited` frames, pixels: the 50th and 95th percentiles (nearest rank) and the
    * largest; null where no frame is limited.
@@ -518,7 +545,8 @@ export function segmentFigures(run: FixedStepRun, rateHz: number): SegmentFigure
       frames.reduce((total, f) => total + pick(f), 0);
     const share = (holds: (f: FixedStepFrame) => boolean): number =>
       frames.filter(holds).length / frames.length;
-    const tauPrime = spread(frames.filter(({ limited }) => limited).map((f) => f.tauPrimePx));
+    const limitedTauPrimePx = frames.filter(({ limited }) => limited).map((f) => f.tauPrimePx);
+    const tauPrime = spread(limitedTauPrimePx);
     const stepPx = spread(steps.map(({ px }) => px));
     const stepRatio = spread(steps.map(({ factor }) => factor - 1));
     return {
@@ -530,6 +558,10 @@ export function segmentFigures(run: FixedStepRun, rateHz: number): SegmentFigure
       forcedDemandPerS: spanS > 0 ? sum((f) => f.forcedDemanded) / spanS : 0,
       predictedPerS: sum((f) => f.predictedPerS) / frames.length,
       limitedFraction: share(({ limited }) => limited),
+      limitedOverTauFraction:
+        limitedTauPrimePx.length === 0
+          ? null
+          : limitedTauPrimePx.filter((px) => px > run.tauPx).length / limitedTauPrimePx.length,
       tauPrimePxP50: tauPrime.p50,
       tauPrimePxP95: tauPrime.p95,
       tauPrimePxMax: tauPrime.max,

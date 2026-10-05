@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { goldenLevelTable } from "../../test/terrainFixtures";
+import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { levelHeightRangeM, planetGeometry } from "../terrain/planet";
+import { RESELECT_FRACTION } from "../terrain/selectionTolerance";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 import ridgesOffRanges from "./fixtures/descentRanges.txt?raw";
 import {
@@ -44,37 +46,41 @@ const SOURCE = {
  * `just descent-demand --write-fixture` printed them on 2026-10-03 (TEST_PLANET_VERSION 2, the
  * terrain cache of 5d90fab, the site's height read along the spheroid point's direction d, the
  * profile flown over the stretches' floors of decision-r05-descent-clearance.md), and on 2026-10-04
- * with the orbit coast flown level, which moved high's coast alone.
+ * with the orbit coast flown level, which moved high's coast alone. 2026-10-05: selected at
+ * τ ÷ 1.1 (decision-r05-record-tau.md); every window moved but high's vertical descent and hover,
+ * whose selections are the same at either tolerance. Before re-pinning, the 14 windows run at the
+ * setting's τ reproduced the hashes pinned before, and the fixture, byte for byte.
  */
 const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
-    "orbit coast": "c739aef5d81221ae",
-    "descent arc": "97e2ca6b8aee73b2",
-    "approach and flare": "dfd9239538b60509",
-    "low fast pass": "5af4f15ee2ca16cc",
-    slowdown: "349b772887d62f19",
+    "orbit coast": "df104b5501ce5e0b",
+    "descent arc": "a4180564c215ffe6",
+    "approach and flare": "f77246a34f435036",
+    "low fast pass": "fcc42d115d7da663",
+    slowdown: "64e24061df5b2400",
     "vertical descent": "7f86f5753748ba08",
     "hover and touchdown": "3815401074eed29e",
   },
   low: {
-    "orbit coast": "c9a36f3ba4350b99",
-    "descent arc": "5706a45e7208ead2",
-    "approach and flare": "b3481b07adaad58f",
-    "low fast pass": "0e3991c21a0c6b9f",
-    slowdown: "279852ec8d9689c5",
-    "vertical descent": "32c0390b8dfa7eae",
-    "hover and touchdown": "1e59c48692289e86",
+    "orbit coast": "3674ed69e62032f9",
+    "descent arc": "2c266fb1ea0c57d8",
+    "approach and flare": "7e583e2ae02512d0",
+    "low fast pass": "1f9f60c3def409b7",
+    slowdown: "03e68d9fca900571",
+    "vertical descent": "e2a6afd03bee7c06",
+    "hover and touchdown": "927a1d8e235bfa8e",
   },
 };
 
 /**
  * The windows where the measured demand lies within a factor of two of the per-level D. The
  * others miss, recorded as findings in the plan's Risks (T13.a, as built), never by a looser test.
+ * At τ ÷ 1.1 (2026-10-05) high's descent arc missed (0.49) and high's slowdown came within (0.61).
  */
 const WITHIN_TWO: ReadonlyArray<string> = [
-  "high/descent arc",
   "high/approach and flare",
   "high/low fast pass",
+  "high/slowdown",
   "low/approach and flare",
   "low/low fast pass",
   "low/slowdown",
@@ -142,6 +148,29 @@ describe("the measured demand", () => {
 });
 
 describe("the demand record", () => {
+  it.each(SETTING_VIEWS.map((settingView) => [settingView.setting, settingView] as const))(
+    "selects the %s setting at the terrain pass's τ ÷ (1 + RESELECT_FRACTION)",
+    (setting, settingView) => {
+      const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
+      const cell = runCell({
+        rule: "hard",
+        ridges: "off",
+        settingView,
+        source: { ...SOURCE, rangeOf: (key) => levelHeightRangeM(planet, key.level) },
+        rateHz: 4,
+        fromS: 10,
+        toS: 10.5,
+        measureFromS: 10,
+        nowMs: () => 0,
+        deadlineMs: Infinity,
+      });
+      expect([cell.tauPx, cell.selectionTauPx]).toEqual([
+        TERRAIN_SETTINGS[setting].tauPx,
+        TERRAIN_SETTINGS[setting].tauPx / (1 + RESELECT_FRACTION),
+      ]);
+    },
+  );
+
   it("labels the ridged planet's 4σ cells statistical, and no other", () => {
     const [high] = SETTING_VIEWS;
     if (high === undefined) {
@@ -194,7 +223,7 @@ function fileOf(startedAt: string, cells: RecordedCell[]): DemandRecordFile {
   };
 }
 
-describe("the record's file (version 2)", () => {
+describe("the record's file (version 3)", () => {
   const [high] = SETTING_VIEWS;
   /** A short orbit-coast cell of `rule`, under a budget of `maxPatches`, as the script records it. */
   const cellOf = (rule: "hard" | "calibrated", maxPatches: number): RecordedCell => {
@@ -294,6 +323,23 @@ describe("the record's file (version 2)", () => {
 
   it("lists the record's notes", () => {
     expect(demandSummary([], "2026-10-04T00:00:00Z", ["a note"])).toContain("- a note");
+  });
+
+  it("states the tolerance it selects at, the terrain pass's", () => {
+    expect(demandSummary([], "2026-10-05T00:00:00Z")).toContain(
+      "Selected at τ ÷ 1.1, the terrain pass's τ_sel; D at the same tolerance;",
+    );
+  });
+
+  it("summarises the share of limited frames whose τ′ exceeds τ", () => {
+    const limited = cellOf("hard", 40);
+    const [coast] = limited.segments;
+    const firstRow = demandSummary([limited], "2026-10-04T00:00:00Z")
+      .split("\n")
+      .find((line) => line.startsWith("| orbit coast"));
+    expect(firstRow).toContain(
+      `| ${(100 * (coast?.limitedFraction ?? NaN)).toFixed(0)}% | ${(100 * (coast?.limitedOverTauFraction ?? NaN)).toFixed(1)}% |`,
+    );
   });
 });
 

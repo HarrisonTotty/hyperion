@@ -24,10 +24,10 @@ import {
   type ViewSelectionInput,
 } from "../terrain/select";
 import { type SlotLayout, slotLayout } from "../terrain/slotLayout";
-import { RESELECT_FRACTION } from "../terrain/terrainPass";
+import { RESELECT_FRACTION, selectionTolerancePx } from "../terrain/selectionTolerance";
+import { perLevelDemand } from "./demand";
 import { SPIKE_CRAFT_RADIUS_M } from "./spikeScene";
 import {
-  BAND_MARGIN,
   coarseStandIns,
   craftContacts,
   effectiveTolerancePx,
@@ -40,6 +40,8 @@ import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 const PLANET = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
 const HIGH = SETTING_VIEWS[0];
+/** The high setting's τ_sel, as the terrain pass selects: τ ÷ (1 + RESELECT_FRACTION). */
+const HIGH_SELECTION_TAU_PX = (HIGH?.view.tauPx ?? NaN) / (1 + RESELECT_FRACTION);
 
 /** A cache layout of `slots` slots of 100 B each. */
 function tinyLayout(slots: number): SlotLayout {
@@ -172,18 +174,54 @@ describe("the budget's figures (decision-r05-high-bound.md, F4)", () => {
     expect(effectiveTolerancePx({ limitExcess: 0.2 }, { tauPx: 4, weight: 0.25 })).toBe(4);
   });
 
-  it("holds the bands' margin to the terrain pass's", () => {
-    expect(BAND_MARGIN).toBe(1 + RESELECT_FRACTION);
+  it("selects at the terrain pass's τ_sel, and says so beside the setting's τ", () => {
+    const run = orbitRun();
+    expect([run.tauPx, run.selectionTauPx]).toEqual([HIGH?.view.tauPx, HIGH_SELECTION_TAU_PX]);
   });
 
-  it("records τ′ above τ on the frames a binding budget limits, and τ on the others", () => {
+  it("records τ′ above τ_sel on the frames a binding budget limits, and τ_sel on the others", () => {
     const run = orbitRun({ maxPatches: 40, toS: 12, rateHz: 16 });
     const limited = run.frames.filter((f) => f.limited);
     expect(limited.length).toBeGreaterThan(0);
-    expect(limited.every((f) => f.tauPrimePx > 1)).toBe(true);
-    expect(run.frames.filter((f) => !f.limited).every((f) => f.tauPrimePx === 1)).toBe(true);
+    expect(limited.every((f) => f.tauPrimePx > HIGH_SELECTION_TAU_PX)).toBe(true);
+    expect(
+      run.frames.filter((f) => !f.limited).every((f) => f.tauPrimePx === HIGH_SELECTION_TAU_PX),
+    ).toBe(true);
     const unbudgeted = orbitRun({ maxPatches: undefined, toS: 12, rateHz: 16 });
-    expect(unbudgeted.frames.every((f) => !f.limited && f.tauPrimePx === 1)).toBe(true);
+    expect(
+      unbudgeted.frames.every((f) => !f.limited && f.tauPrimePx === HIGH_SELECTION_TAU_PX),
+    ).toBe(true);
+  });
+
+  it("selects the low setting at its τ_sel too, which its unlimited frames take as τ′", () => {
+    const low = SETTING_VIEWS[1];
+    if (low === undefined) {
+      throw new Error("no low setting");
+    }
+    const run = orbitRun({
+      setting: "low",
+      view: low.view,
+      maxPatches: low.maxPatches,
+      layout: low.layout,
+    });
+    expect(run.frames.map(({ limited, tauPrimePx }) => [limited, tauPrimePx])).toEqual(
+      run.frames.map(() => [false, low.view.tauPx / (1 + RESELECT_FRACTION)]),
+    );
+  });
+
+  it("predicts D at τ_sel, the tolerance the frame selected at", () => {
+    if (HIGH === undefined) {
+      throw new Error("no high setting");
+    }
+    const profile = recordProfile();
+    const view = { ...HIGH.view, tauPx: selectionTolerancePx(HIGH.view.tauPx) };
+    const run = orbitRun();
+    expect(run.frames.map(({ predictedPerS }) => predictedPerS)).toEqual(
+      run.frames.map(({ tS }) => {
+        const pose = profile.poseAt(tS);
+        return perLevelDemand(PLANET, { ...pose, altitudeM: pose.heightAboveFloorM }, view).perS;
+      }),
+    );
   });
 
   it("counts no stand-in on the first frame, whose unbaked roots have nothing to stand in", () => {
@@ -304,9 +342,14 @@ describe("the coarse stand-ins (decision-r05-high-bound.md, F4)", () => {
   });
 });
 
+/** A run of `frames` with the high setting's τ of 1 px. */
+function runOf(frames: FixedStepFrame[]): ReturnType<typeof runFixedStep> {
+  return { tauPx: 1, selectionTauPx: selectionTolerancePx(1), frames, hash: "", truncated: false };
+}
+
 /** One segment's figures over `frames` at 8 Hz. */
 function figuresOf(frames: FixedStepFrame[]): ReturnType<typeof segmentFigures>[number] {
-  const [figures] = segmentFigures({ frames, hash: "", truncated: false }, 8);
+  const [figures] = segmentFigures(runOf(frames), 8);
   if (figures === undefined) {
     throw new Error("no measured frame");
   }
@@ -375,7 +418,7 @@ describe("the budget's figures over a segment (decision-r05-high-bound.md, F4)",
       frameOf({ limited: true, tauPrimePx: 3 }),
       frameOf({ segment: "descent arc", limited: true, tauPrimePx: 2 }),
     ];
-    const [coast, arc] = segmentFigures({ frames, hash: "", truncated: false }, 8);
+    const [coast, arc] = segmentFigures(runOf(frames), 8);
     expect([coast?.tauPrimeStepPxMax, arc?.tauPrimeStepPxMax]).toEqual([null, 1]);
   });
 
@@ -386,7 +429,20 @@ describe("the budget's figures over a segment (decision-r05-high-bound.md, F4)",
       figures.tauPrimePxMax,
       figures.tauPrimeStepPxMax,
       figures.tauPrimeStepsOverMargin,
-    ]).toEqual([null, null, null, null]);
+      figures.limitedOverTauFraction,
+    ]).toEqual([null, null, null, null, null]);
+  });
+
+  it("takes the share of the limited frames whose τ′ exceeds the setting's τ", () => {
+    // Of three limited frames, one draws within τ = 1 px and two beyond it; the unlimited frame
+    // does not count.
+    const figures = figuresOf([
+      frameOf({ limited: true, tauPrimePx: 0.95 }),
+      frameOf({ limited: true, tauPrimePx: 1.2 }),
+      frameOf({}),
+      frameOf({ limited: true, tauPrimePx: 1.5 }),
+    ]);
+    expect(figures.limitedOverTauFraction).toBeCloseTo(2 / 3, 12);
   });
 
   it("leaves the stand-ins' largest ρ null where none is drawn", () => {
