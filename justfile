@@ -117,6 +117,35 @@ descent-spike *args:
     just build
     bash apps/hyperion/scripts/descentSpike.sh "$@"
 
+# The several-views check (R07.T20): builds the client and runs it with `--views-check`, which
+# opens VIEW on the kept PHASE TEST scene, drives it through its phases (a photorealistic primary
+# alone and with two wireframe instruments, a resize of the primary alone, a wireframe primary with
+# two wireframe instruments, with a photorealistic and a wireframe instrument, and alone) and
+# writes a results file and its summary into `docs/measurements/several-views/`. Options:
+# `--setting high|low` (VIEW's setting; the window 1920 × 1080 or 1280 × 720), `--hidden` (never
+# shown, offscreen), `--smoke` (short windows, hidden, written under `target/views-check/`) and
+# `--out <dir>`. A shown run asks once whether every view is the right way up. No server is needed.
+# By hand, on a quiet machine; not part of `ci`.
+# Run the several-views check, e.g. `just views-check` or `just views-check --setting low`.
+[positional-arguments]
+views-check *args: gen-surface
+    pnpm --filter hyperion build
+    bash apps/hyperion/scripts/viewsCheck.sh "$@"
+
+# R07.T21's child window on a second monitor: builds the client and runs the smoke harness's
+# child-window scene on the client's own graphics switches, the opener on the primary display and a
+# same-origin child window, a view of the opener's engine, on the second. It records the child's
+# pacing beside its display's period, both views' frame times and the release of the child's view
+# on its `pagehide`, as `<date>-<machine>-child-window.md` in `docs/measurements/several-views/`.
+# Options: `--seconds <n>` (the child's time, 60 by default), `--hidden` (an offscreen child on one
+# display, the harness's own proof, written under `target/views-check/`) and `--out <dir>`. With
+# one display it refuses (exit 2) before opening any window. Shown: by hand; not part of `ci`.
+# Run the child-window check on two displays, e.g. `just child-window-check --seconds 60`.
+[positional-arguments]
+child-window-check *args: gen-surface
+    pnpm --filter hyperion build
+    bash apps/hyperion/scripts/childWindowCheck.sh "$@"
+
 # Build the client and run the headless smoke harness on SwiftShader, once per capability path
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a

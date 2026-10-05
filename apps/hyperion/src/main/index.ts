@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { CommanderError } from "commander";
@@ -7,6 +8,7 @@ import {
   app,
   BrowserWindow,
   contentTracing,
+  dialog,
   ipcMain,
   type IpcMainInvokeEvent,
   screen,
@@ -14,10 +16,11 @@ import {
   shell,
 } from "electron";
 
-import type { SpikeLaunch } from "../preload/api";
+import type { SpikeLaunch, ViewsCheckLaunch } from "../preload/api";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
+import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
 import { type ClientArgs, parseClientArgs, serverUrlOf, userArgs } from "./cli";
 import { parseNvidiaSmi, readDrmMemory, readNvidiaSmi } from "./fdinfo";
 import {
@@ -33,6 +36,7 @@ import { describeMachine, MemorySampler, nodeMachineSources } from "./results";
 import { launchSwitches, registerSpikeHandlers, SpikeTrace, spikeTraceConfig } from "./spike";
 import { SpikeSession } from "./spikeSession";
 import { traceSettingsOf } from "./traceWindows";
+import { reduceWindowFile, registerViewsCheckHandlers, ViewsCheckSession } from "./viewsCheck";
 import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
@@ -70,19 +74,52 @@ interface SpikeWindow {
 const SPIKE_HIDDEN_ENV = "HYPERION_SPIKE_HIDDEN";
 
 /** The spike window's content size: Design note 21's 1080p for high and 720p for low. */
-function spikeSize(launch: SpikeLaunch): { readonly width: number; readonly height: number } {
+function spikeSize(launch: SpikeLaunch | ViewsCheckLaunch): {
+  readonly width: number;
+  readonly height: number;
+} {
   return launch.setting === "high" ? { width: 1920, height: 1080 } : { width: 1280, height: 720 };
+}
+
+/**
+ * The several-views check's window size (R07.T20): 1920 × 1080 or 1280 × 720 device pixels,
+ * whatever the display's scale, so that its canvases are R05 Design note 21's 1080p and 720p;
+ * a tiling window manager may still size it to its own tile, which the record reads at the end.
+ */
+function viewsCheckSize(
+  launch: ViewsCheckLaunch,
+  scaleFactor: number,
+): { readonly width: number; readonly height: number } {
+  const px = spikeSize(launch);
+  const scale = scaleFactor > 0 ? scaleFactor : 1;
+  return { width: Math.round(px.width / scale), height: Math.round(px.height / scale) };
+}
+
+/** The several-views check's window (R07.T20): shown unless hidden. */
+interface ViewsCheckWindowRun {
+  readonly launch: ViewsCheckLaunch;
+  /** A hidden run never shows its window and renders offscreen (`--smoke`, or the recipe's `--hidden`). */
+  readonly hidden: boolean;
 }
 
 function createWindow(
   serverUrl: string,
   graphics: GraphicsLaunch,
   spike: SpikeWindow | null,
+  check: ViewsCheckWindowRun | null = null,
 ): BrowserWindow {
-  const size = spike === null ? { width: 1600, height: 900 } : spikeSize(spike.launch);
+  const run = spike ?? check;
+  const size =
+    check !== null
+      ? // Offscreen rendering draws at a device-pixel ratio of 1, whatever the display's.
+        viewsCheckSize(check.launch, check.hidden ? 1 : screen.getPrimaryDisplay().scaleFactor)
+      : run === null
+        ? { width: 1600, height: 900 }
+        : spikeSize(run.launch);
   const window = new BrowserWindow({
     ...size,
-    useContentSize: spike !== null,
+    useContentSize: run !== null,
+    // The spike holds its size; the check's may meet a smaller display, and records what it got.
     minWidth: spike === null ? 1024 : size.width,
     minHeight: spike === null ? 640 : size.height,
     show: false,
@@ -99,14 +136,15 @@ function createWindow(
         serverUrlSwitch(serverUrl),
         ...graphicsArguments(graphics.launchMode, graphics.gpuTiming),
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
+        ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
       ],
       // A hidden spike run renders offscreen, as the smoke harness's does: a hidden window on a
       // hardware adapter draws nothing otherwise, and headless Ozone's GPU process exits there.
-      ...(spike?.hidden === true ? { offscreen: true, backgroundThrottling: false } : {}),
+      ...(run?.hidden === true ? { offscreen: true, backgroundThrottling: false } : {}),
     },
   });
 
-  if (spike?.hidden !== true) {
+  if (run?.hidden !== true) {
     window.once("ready-to-show", () => {
       window.show();
     });
@@ -281,6 +319,140 @@ function startSpikeSession(
   });
 }
 
+/** The variable by which `just views-check --hidden` keeps a full check's window hidden. */
+const VIEWS_CHECK_HIDDEN_ENV = "HYPERION_VIEWS_CHECK_HIDDEN";
+
+/** How long the person at a shown check has to answer before the run carries on unanswered. */
+const RIGHT_WAY_UP_TIMEOUT_MS = 180_000;
+
+/**
+ * Asks the person at a shown check whether every view is the right way up (R07.T20).
+ *
+ * @remarks
+ * Not modal, so that the views can be flown while it stands: the measured phases are over, and
+ * the scene's bodies lie on the horizon line, where only turning a camera shows a view upside down.
+ */
+async function askRightWayUp(): Promise<"yes" | "no" | null> {
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    title: "HYPERION views check",
+    message: "Is every view the right way up?",
+    detail:
+      "The measured phases are done. Three views are open: PRIMARY, photorealistic, filling the " +
+      "stage, and INSTRUMENT 1 and INSTRUMENT 2, wireframes at its right edge. Click each in turn " +
+      "and hold an arrow key a moment to turn its camera: as a camera turns up the bodies move " +
+      "down, and as it turns right they move left, in every view; nothing is upside down or " +
+      "mirrored. Then answer. Skip ends the run without an answer; a picture of each phase is " +
+      "saved under target/views-check/.",
+    buttons: ["Yes", "No", "Skip"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+    signal: AbortSignal.timeout(RIGHT_WAY_UP_TIMEOUT_MS),
+  });
+  return response === 0 ? "yes" : response === 1 ? "no" : null;
+}
+
+/**
+ * Wires a several-views check's handlers to its window (R07.T20): a trace window and a capture a
+ * phase, the question at a shown run, the console's pass-timer warnings and the GPU process's
+ * exits, and the results file, each call checked against the window's own page.
+ */
+function startViewsCheckSession(
+  window: BrowserWindow,
+  launch: ViewsCheckLaunch,
+  graphics: GraphicsLaunch,
+  switches: ReadonlyArray<ChromiumSwitch>,
+  hidden: boolean,
+): void {
+  const startedAt = new Date();
+  const stamp = startedAt.toISOString().replaceAll(/[-:]/g, "").slice(0, 15);
+  const repo = process.cwd();
+  const checkSession = new ViewsCheckSession({
+    launch,
+    describe: async () => ({
+      startedAt,
+      machine: await describeMachine(nodeMachineSources(() => app.getGPUInfo("basic"))),
+      versions: {
+        app: __APP_VERSION__,
+        electron: process.versions.electron,
+        chromium: process.versions.chrome,
+        node: process.versions.node,
+        v8: process.versions.v8,
+      },
+      platform: process.platform,
+      launchMode: graphics.launchMode,
+      setting: launch.setting,
+      smoke: launch.smoke,
+      switches: switches.map(({ name, value }) =>
+        value === undefined ? `--${name}` : `--${name}=${value}`,
+      ),
+      shown: !hidden,
+      displayHz: hidden ? null : screen.getDisplayMatching(window.getBounds()).displayFrequency,
+    }),
+    windowSize: () => {
+      const [widthDip = 0, heightDip = 0] = window.getContentSize();
+      return { widthDip, heightDip };
+    },
+    tracing: contentTracing,
+    tracePath: (phase) => join(app.getPath("userData"), `views-check-${phase}.json`),
+    reduce: reduceWindowFile,
+    removeFile: (path) => rm(path, { force: true }),
+    capturesDir: resolve(repo, "target/views-check", `captures-${stamp}`),
+    capture: async (path) => {
+      await mkdir(dirname(path), { recursive: true });
+      const image = await window.webContents.capturePage();
+      await writeFile(path, image.toPNG());
+    },
+    ask: hidden ? null : askRightWayUp,
+    outDir:
+      launch.out ??
+      resolve(repo, launch.smoke ? "target/views-check" : "docs/measurements/several-views"),
+    exit: (code) => {
+      app.exit(code);
+    },
+    log: (line) => {
+      process.stdout.write(`${line}\n`);
+    },
+  });
+  const page = pageUrl();
+  registerViewsCheckHandlers<IpcMainInvokeEvent>({
+    handle: (channel, listener) => {
+      ipcMain.handle(channel, listener);
+    },
+    isSender: (event) => isOwnPage(event.senderFrame, page, window.webContents.mainFrame),
+    session: checkSession,
+  });
+  window.webContents.on("console-message", (details) => {
+    checkSession.consoleMessage(details.message);
+  });
+  app.on("child-process-gone", (_event, details) => {
+    if (details.type === "GPU") {
+      checkSession.gpuProcessGone();
+    }
+  });
+  const watchdog = setTimeout(
+    () => {
+      process.stdout.write("views check: WATCHDOG the run did not end\n");
+      app.exit(3);
+    },
+    launch.smoke ? 240_000 : 20 * 60_000,
+  );
+  app.once("will-quit", () => {
+    clearTimeout(watchdog);
+  });
+  window.webContents.once("render-process-gone", (_event, details) => {
+    process.stdout.write(`views check: FAIL the renderer exited (${details.reason})\n`);
+    app.exit(1);
+  });
+  window.once("closed", () => {
+    if (!checkSession.ended) {
+      process.stdout.write("views check: FAIL the window was closed before the run ended\n");
+      app.exit(1);
+    }
+  });
+}
+
 /**
  * Sets up the GPU before `ready`: relaunches a Wayland session through XWayland, or puts the
  * launch's graphics switches on the command line.
@@ -290,6 +462,7 @@ function startSpikeSession(
  */
 function prepareGraphics(
   spike: SpikeLaunch | undefined,
+  viewsCheck: boolean,
 ):
   | { readonly graphics: GraphicsLaunch; readonly switches: ReadonlyArray<ChromiumSwitch> }
   | undefined {
@@ -305,9 +478,10 @@ function prepareGraphics(
   app.disableDomainBlockingFor3DAPIs();
   const mode = launchModeOf(process.platform, app.commandLine.hasSwitch(SAFE_MODE_SWITCH));
   // The timing toggle is one of the forced path's switches: nothing else lifts the quantization.
-  // A spike run always asks for it (T14.b's `launchSwitches`).
+  // A spike run always asks for it (T14.b's `launchSwitches`), and so does a views check (R07.T20).
   const gpuTiming =
-    mode === "vulkan" && (spike !== undefined || app.commandLine.hasSwitch(GPU_TIMING_SWITCH));
+    mode === "vulkan" &&
+    (spike !== undefined || viewsCheck || app.commandLine.hasSwitch(GPU_TIMING_SWITCH));
   const switches = launchSwitches(
     { platform: process.platform, mode, gpuTiming },
     spike === undefined ? undefined : { dawnSafety: spike.dawnSafety },
@@ -324,7 +498,7 @@ async function main(): Promise<void> {
   }
   const serverUrl = serverUrlOf(args);
   // Also before `ready`: Chromium reads its switches when the GPU process starts.
-  const prepared = prepareGraphics(args.spike);
+  const prepared = prepareGraphics(args.spike, args.viewsCheck !== undefined);
   if (prepared === undefined) {
     return;
   }
@@ -349,6 +523,13 @@ async function main(): Promise<void> {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";
     const window = createWindow(serverUrl, graphics, { launch: spike, hidden });
     startSpikeSession(window, spike, graphics, switches, hidden, nvidiaBaselineBytes);
+    return;
+  }
+  const viewsCheck = args.viewsCheck;
+  if (viewsCheck !== undefined) {
+    const hidden = viewsCheck.smoke || process.env[VIEWS_CHECK_HIDDEN_ENV] === "1";
+    const window = createWindow(serverUrl, graphics, null, { launch: viewsCheck, hidden });
+    startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
     return;
   }
   createWindow(serverUrl, graphics, null);

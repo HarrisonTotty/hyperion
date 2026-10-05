@@ -661,7 +661,8 @@ function judge(value: number, limit: number, tolerance: number): Verdict {
   return value - tolerance > limit ? "fail" : "marginal";
 }
 
-function row(
+/** A row of a criterion: its limit and value, judged; `not-measured` where either is missing. */
+export function row(
   id: string,
   criterion: string,
   limit: Measured<number>,
@@ -695,12 +696,15 @@ function row(
 }
 
 /** A limit that depends on T, or T's absence. */
-function ofPeriod(periodMs: Measured<number>, limit: (t: number) => number): Measured<number> {
+export function ofPeriod(
+  periodMs: Measured<number>,
+  limit: (t: number) => number,
+): Measured<number> {
   return periodMs.value === null ? missing(periodMs.reason) : measured(limit(periodMs.value));
 }
 
 /** The frame rows of Design note 21 for one set of intervals. */
-function frameRows(
+export function frameRows(
   stats: Measured<FrameStats>,
   periodMs: Measured<number>,
   setting: SpikeSetting,
@@ -751,7 +755,8 @@ function frameRows(
   ];
 }
 
-function overallOf(criteria: ReadonlyArray<Criterion>): Verdict {
+/** A criterion's overall verdict: `fail` over `not-measured` over `marginal` over `pass`. */
+export function overallOf(criteria: ReadonlyArray<Criterion>): Verdict {
   const verdicts = new Set(criteria.map(({ verdict }) => verdict));
   if (verdicts.has("fail")) {
     return "fail";

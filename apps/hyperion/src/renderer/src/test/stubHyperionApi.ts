@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-import type { GraphicsApi, HyperionApi, SpikeApi } from "../../../preload/api";
+import type { GraphicsApi, HyperionApi, SpikeApi, ViewsCheckApi } from "../../../preload/api";
 
 /** The server the stubbed preload reports the client was launched to link to. */
 export const TEST_SERVER_URL = "ws://127.0.0.1:7878/ws";
@@ -19,11 +19,14 @@ export const TEST_GRAPHICS: GraphicsApi = {
  * @param graphics - The launch's graphics set-up and its crash reports.
  * @param spike - The descent spike's functions, for a `--descent-spike` launch; none by default,
  *   as on an ordinary launch.
+ * @param viewsCheck - The several-views check's functions, for a `--views-check` launch; none by
+ *   default.
  */
 export function stubHyperionApi(
   serverUrl: string = TEST_SERVER_URL,
   graphics: GraphicsApi = TEST_GRAPHICS,
   spike?: SpikeApi,
+  viewsCheck?: ViewsCheckApi,
 ): void {
   const api: HyperionApi = {
     platform: "linux",
@@ -31,6 +34,7 @@ export function stubHyperionApi(
     graphics,
     versions: { electron: "44.4.3", chrome: "142.0.0.0", node: "22.21.1" },
     ...(spike === undefined ? {} : { spike }),
+    ...(viewsCheck === undefined ? {} : { viewsCheck }),
   };
   vi.stubGlobal("hyperion", api);
 }

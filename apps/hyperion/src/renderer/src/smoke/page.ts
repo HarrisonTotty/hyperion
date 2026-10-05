@@ -35,6 +35,7 @@ import { checkLitBody } from "./litBody";
 import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
 import { checkPhotoreal } from "./photoreal";
 import { checkBodies, checkClassMap, checkPhotorealFrame, checkSpriteDepth } from "./bodies";
+import { runChildWindow } from "./childWindow";
 import { runSoak } from "./soak";
 import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
@@ -300,7 +301,29 @@ async function soak(): Promise<Report> {
   };
 }
 
-void (soakSeconds > 0 ? soak() : run(variant, fixture))
+/** R07.T21's child window instead of the checks, for `seconds`. */
+const childSeconds = Number(parameters.get("child") ?? "0");
+
+/** Runs the child-window scene and reports its figures. */
+async function childWindow(): Promise<Report> {
+  const checks = new Checks();
+  const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", gpuTiming));
+  await runChildWindow(status, checks, childSeconds, {
+    frameName: parameters.get("childFrame") ?? "",
+    mainHz: Number(parameters.get("mainHz") ?? "0"),
+    childHz: Number(parameters.get("childHz") ?? "0"),
+    hidden: parameters.get("childHidden") === "1",
+  });
+  return {
+    variant: "child-window",
+    adapter: null,
+    capabilities: null,
+    checks: checks.list,
+    setupError: null,
+  };
+}
+
+void (soakSeconds > 0 ? soak() : childSeconds > 0 ? childWindow() : run(variant, fixture))
   .catch((error: unknown): Report => ({
     variant,
     adapter: null,

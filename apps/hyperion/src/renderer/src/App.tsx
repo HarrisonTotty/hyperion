@@ -9,6 +9,9 @@ import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
 import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
+import { ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { ViewsProbe } from "./displays/view/check/viewsProbe";
+import type { ViewEngineSource } from "./displays/view/useViewEngine";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
 import type { SystemPlace } from "./lib/scene/model";
@@ -17,6 +20,7 @@ import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
+import type { QualitySetting } from "./view/quality/qualitySetting";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -25,6 +29,11 @@ interface DisplayInputs {
   readonly serverUrl: string;
   readonly systemOpening: SystemOpening | null;
   readonly openSystem: (target: SystemTarget) => void;
+  /** `VIEW`'s engine and setting on a `--views-check` launch (R07.T20), else `null`. */
+  readonly checkedView: {
+    readonly engineSource: ViewEngineSource;
+    readonly setting: QualitySetting;
+  } | null;
 }
 
 function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
@@ -49,7 +58,12 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       content = <SystemDisplay opening={inputs.systemOpening} />;
       break;
     case "view":
-      content = <ViewDisplay />;
+      content = (
+        <ViewDisplay
+          engineSource={inputs.checkedView?.engineSource}
+          setting={inputs.checkedView?.setting}
+        />
+      );
       break;
   }
   return content;
@@ -90,7 +104,12 @@ export function App() {
   const connection = useServerConnection(serverUrl, __APP_VERSION__);
   useSurfaceModuleCheck(connection.serverGeneratorVersion);
   const link = useServerLinkValue(connection);
-  const [activeDisplay, setActiveDisplay] = useState<DisplayId>("link");
+  const viewsCheck = window.hyperion.viewsCheck;
+  // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20).
+  const [probe] = useState(() => (viewsCheck === undefined ? null : new ViewsProbe()));
+  const [activeDisplay, setActiveDisplay] = useState<DisplayId>(
+    viewsCheck === undefined ? "link" : "view",
+  );
   const [systemOpening, setSystemOpening] = useState<SystemOpening | null>(null);
   useDisplayKeys(DISPLAYS, setActiveDisplay);
   const openSystem = useCallback((target: SystemTarget): void => {
@@ -119,9 +138,16 @@ export function App() {
     serverUrl,
     systemOpening,
     openSystem,
+    checkedView:
+      viewsCheck === undefined || probe === null
+        ? null
+        : { engineSource: probe.source, setting: viewsCheck.launch.setting },
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
+      {viewsCheck === undefined || probe === null ? null : (
+        <ViewsCheckRunner api={viewsCheck} probe={probe} />
+      )}
       <ServerLinkContext value={link}>
         <UniverseProvider>
           <ViewSceneProvider active={activeDisplay === "view"} knownSystem={knownSystem}>

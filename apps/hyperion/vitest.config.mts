@@ -12,6 +12,7 @@ import pkg from "./package.json" with { type: "json" };
 // list it here, or name it `.test.tsx` if it carries JSX.
 const DOM_TESTS = [
   "src/**/*.test.tsx",
+  "src/renderer/src/displays/view/check/viewsProbe.test.ts",
   "src/renderer/src/lib/connection.test.ts",
   "src/renderer/src/spatial/paint.test.ts",
   "src/renderer/src/spatial/useThrottledValue.test.ts",
