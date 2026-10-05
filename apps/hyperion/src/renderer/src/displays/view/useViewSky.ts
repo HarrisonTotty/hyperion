@@ -9,7 +9,7 @@ import { useMemo } from "react";
 
 import { barycentreAt } from "../../lib/scene/place";
 import type { SystemPlace } from "../../lib/scene/model";
-import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/exposure";
+import type { ExposureControl } from "../../view/photometry/exposure";
 import { SETTINGS } from "../../view/quality/qualitySetting";
 import { cameraGalacticPosition } from "../../view/sky/camera";
 import type { BakeInput } from "../../view/sky/bake";
@@ -19,7 +19,7 @@ import { skyLabelValue } from "../../view/sky/label";
 import type { SkyCamera, SkyModel } from "../../view/sky/model";
 import { selectSkySprites, type SkySelection } from "../../view/sky/select";
 import { useSky } from "../../view/sky/useSky";
-import { viewSkyLimit, viewSkyRequest } from "../../view/sky/viewSky";
+import { viewSkyLabelV, viewSkyLimit, viewSkyRequest } from "../../view/sky/viewSky";
 import { runPose, type ViewRun } from "./viewRun";
 
 /** The sky as the drawing loop draws it: the model and which of its stars are sprites. */
@@ -70,32 +70,50 @@ export interface CulledViewSky {
 }
 
 /**
- * A view's own cull of a sky (R06 Design note 20): the stars fainter than its limit, for its role,
- * exposure and field of view, left to the band, the rest split between sprites and the bake at its
- * width. Views of one sky share its census and differ in their cull (R06.T14), so an instrument
- * culls the primary's sky for its own camera (R07.T19).
+ * A view's own cull of a sky (R06 Design note 20): the stars fainter than its limit, for its role
+ * and field of view, left to the band, the rest split between sprites and the bake at its width.
+ * Views of one sky share its census and differ in their cull (R06.T14), so an instrument culls the
+ * primary's sky for its own camera (R07.T19).
  *
- * @param exposure - A manual exposure's triple sets a camera's limit; any other control reads the
- *   default (a camera's limit reads only a manual triple).
+ * @remarks
+ * A camera's limit is the view camera's deepest at every exposure (R07.T13.e), so the cull, the
+ * selection and the bake never depend on the exposure.
  */
 export function cullViewSky(
   model: SkyModel,
   role: ViewRun["camera"]["role"],
-  exposure: ExposureControl,
   fovDeg: number,
   widthPx: number,
-): CulledViewSky {
-  const triple = exposure.kind === "manual" ? exposure : DEFAULT_EXPOSURE;
-  const { limit, labelV } = viewSkyLimit(model, role, triple, fovDeg);
-  const kept = cullSky(model.stars, limit, model.response.band.face_texels);
+): DrawnSky {
+  const kept = cullSky(
+    model.stars,
+    viewSkyLimit(model, role, fovDeg),
+    model.response.band.face_texels,
+  );
   const selection = selectSkySprites(model.stars, kept.kept, SETTINGS.high.sky.spriteBudget, {
     fovDeg,
     widthPx,
   });
-  return {
-    drawn: { model, selection, bandIlluminanceLx: kept.bandIlluminanceLx },
-    labelValue: skyLabelValue(labelV, role, model.response.not_modelled),
-  };
+  return { model, selection, bandIlluminanceLx: kept.bandIlluminanceLx };
+}
+
+/**
+ * A view's label block's `STARS` reading of a sky it holds: its role's limit, a camera's at the
+ * exposure shown (R07.T13.e), then what the sky leaves out.
+ *
+ * @param exposure - The control as the readout shows it (4 Hz, EV100 to 0.1).
+ */
+export function viewSkyLabel(
+  model: SkyModel,
+  role: ViewRun["camera"]["role"],
+  exposure: ExposureControl,
+  fovDeg: number,
+): string {
+  return skyLabelValue(
+    viewSkyLabelV(model, role, exposure, fovDeg),
+    role,
+    model.response.not_modelled,
+  );
 }
 
 /** What the view's sky is made from. */
@@ -106,6 +124,10 @@ export interface ViewSkyInput {
   readonly place: SystemPlace | null;
   /** The run as last published: its scene's time, its camera's pose, role and field of view. */
   readonly run: ViewRun;
+  /**
+   * The display's control as its readout shows it (4 Hz, EV100 to 0.1), at which a camera's label
+   * states its limit; the request and the cull do not read it (R07.T13.e).
+   */
   readonly exposure: ExposureControl;
   /** The view's width, device px, or `null` before it is measured. */
   readonly widthPx: number | null;
@@ -123,10 +145,7 @@ const DEFAULT_WIDTH_PX = 1_920;
  * camera moves its nearest baked star by a tenth of a pixel.
  */
 export function useViewSky(input: ViewSkyInput): ViewSky {
-  const { universe, place, run } = input;
-  // A camera's limit reads only a manual triple (`limitTriple`): under `AUTO` the control changes
-  // with every readout, and the sky must not be culled again for it (R07.T8.a's metering).
-  const exposure = input.exposure.kind === "manual" ? input.exposure : DEFAULT_EXPOSURE;
+  const { universe, place, run, exposure } = input;
   const settings = SETTINGS.high.sky;
   const widthPx = input.widthPx ?? DEFAULT_WIDTH_PX;
   const time = run.scene.time;
@@ -140,7 +159,6 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
           system: place.system,
           time,
           role: run.camera.role,
-          exposure,
           fovDeg: run.camera.fovDeg,
           nMax: settings.nMax,
         });
@@ -150,18 +168,19 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
   const { model, pending } = useSky(request, cameras);
   const role = run.camera.role;
   const fovDeg = run.camera.fovDeg;
-  // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's limit or its size changes, so
-  // that the drawn sky keeps its identity from one published run to the next and is baked once.
-  const culled = useMemo(
-    () => (model === null ? null : cullViewSky(model, role, exposure, fovDeg, widthPx)),
-    [model, role, exposure, fovDeg, widthPx],
+  // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's role, field of view or size
+  // changes, so that the drawn sky keeps its identity from one published run to the next and is
+  // baked once; the exposure moves only the label (R07.T13.e).
+  const drawn = useMemo(
+    () => (model === null ? null : cullViewSky(model, role, fovDeg, widthPx)),
+    [model, role, fovDeg, widthPx],
   );
   // A sky is this view's only for the system it was asked about, whose position is known.
   const ours =
-    culled !== null &&
+    drawn !== null &&
     request !== null &&
-    culled.drawn.model.request.exclude_system === request.exclude_system;
+    drawn.model.request.exclude_system === request.exclude_system;
   return ours
-    ? { drawn: culled.drawn, labelValue: culled.labelValue, pending }
+    ? { drawn, labelValue: viewSkyLabel(drawn.model, role, exposure, fovDeg), pending }
     : { drawn: null, labelValue: null, pending };
 }

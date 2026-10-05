@@ -10,8 +10,8 @@ import {
   inhibit,
   MAN_EV100_MAX,
   MAN_EV100_MIN,
-  programTriple,
   setManualEv100,
+  shownTriple,
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
 import { exposureReading } from "./viewRun";
@@ -116,16 +116,6 @@ function ExposureCommand({ label, result, onChange }: ExposureCommandProps) {
       ) : null}
     </div>
   );
-}
-
-/**
- * The camera's setting at the shown control: `MAN`'s own triple, else the view camera's at the
- * control's EV100 (decision-r07-exposure-camera).
- */
-function shownTriple(exposure: ExposureControl): ExposureTriple {
-  return exposure.kind === "manual"
-    ? exposure.triple
-    : programTriple(VIEW_CAMERA, controlEv100(exposure));
 }
 
 /** The guide's off-scale mark after a pegged value, `↑`, announced as "off scale high". */
