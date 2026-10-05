@@ -9,6 +9,10 @@ import { exposureReading } from "./viewRun";
 
 /** Props of {@link MeterControl}. */
 export interface MeterControlProps {
+  /** The panel's ID, by which a disclosure button controls it (R07.T19.b), or none. */
+  readonly id?: string | undefined;
+  /** Whether the panel is folded behind its disclosure button in the compact layout (R07.T19.b). */
+  readonly hidden?: boolean | undefined;
   /**
    * The view the panel acts on, its system designator on the title row (`PRIMARY`,
    * `INSTRUMENT 1`; R07.T19), or none.
@@ -70,6 +74,8 @@ export function MeterControl({
   meteredEv100,
   onMeter,
   designator,
+  id,
+  hidden,
 }: MeterControlProps) {
   const titleId = useId();
   const meteredId = useId();
@@ -80,7 +86,7 @@ export function MeterControl({
   const unfollowedEv100 =
     reading !== null && meterNotFollowed(reading.control) ? meteredEv100 : null;
   return (
-    <section className="panel view-meter" aria-labelledby={titleId}>
+    <section className="panel view-meter" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
         Exposure meter
         {designator === undefined ? null : (

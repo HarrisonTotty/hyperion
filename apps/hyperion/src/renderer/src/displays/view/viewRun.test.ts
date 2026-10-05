@@ -11,6 +11,7 @@ import { phaseScene } from "../../view/scenes/phaseScene";
 import type { SystemIdHex } from "@hyperion/protocol";
 
 import {
+  cameraReading,
   commandRun,
   followRun,
   photorealStatements,
@@ -19,6 +20,7 @@ import {
   labelLines,
   labelStatements,
   markRows,
+  rangesFromCamera,
   type ViewRun,
   startInstrumentRun,
   startRun,
@@ -114,6 +116,25 @@ describe("a view's run", () => {
     expect(freeRateReading(7)).toBe("RATE 3.16 km/s");
   });
 
+  it("steps the free camera's rate in FREE (R07.T19.b)", () => {
+    const free = done(
+      commandRun(startRun(precisionScene()), { kind: "preset", preset: "free" }, CUT),
+    );
+    const faster = done(commandRun(free, { kind: "rate", step: 1 }, CUT));
+    expect(faster.camera.free.rateStep).toBe(free.camera.free.rateStep + 1);
+  });
+
+  it("refuses PAGE UP and PAGE DOWN outside FREE, so that the rate never changes unseen", () => {
+    const run = startRun(precisionScene());
+    expect([
+      commandRun(run, { kind: "rate", step: 1 }, CUT),
+      commandRun(run, { kind: "rate", step: -1 }, CUT),
+    ]).toEqual([
+      { kind: "refused", reason: "not_free" },
+      { kind: "refused", reason: "not_free" },
+    ]);
+  });
+
   it("aims the camera at the next target", () => {
     const targeted = done(commandRun(startRun(precisionScene()), { kind: "target", step: 1 }, CUT));
     expect(targeted.camera.target).not.toBeNull();
@@ -133,6 +154,15 @@ describe("the label block", () => {
       "STARS",
       "SCENE",
     ]);
+  });
+
+  it("reads the camera's preset, and in FREE its rate after a middle dot (R07.T19.b)", () => {
+    const seat = startRun(precisionScene());
+    const free = done(commandRun(seat, { kind: "preset", preset: "free" }, CUT));
+    expect([
+      cameraReading(seat.camera),
+      labelLines(free, DEFAULT_EXPOSURE).find((line) => line.label === "CAMERA")?.value,
+    ]).toEqual(["SEAT", "FREE · RATE 1.00 km/s"]);
   });
 
   it("reads the exposure as EV100 -1.0 MAN and the field of view in degrees", () => {
@@ -322,7 +352,11 @@ describe("the list", () => {
         return { ...scene, ownShip: null };
       },
     };
-    expect(markRows(startRun(shipless)).every((row) => row.fromCamera)).toBe(true);
+    expect([
+      rangesFromCamera(startRun(shipless).scene),
+      markRows(startRun(shipless)).every((row) => row.fromCamera),
+      rangesFromCamera(startRun(kept).scene),
+    ]).toEqual([true, true, false]);
   });
 });
 
