@@ -10,6 +10,7 @@ import type {
   SpikePassSeries,
   SpikeSegmentSpan,
   SpikeStreamingSegment,
+  SpikeTraceWindow,
 } from "../preload/api";
 
 type Rec = Readonly<Record<string, unknown>>;
@@ -116,6 +117,26 @@ function streaming(value: unknown): SpikeStreamingSegment | null {
   };
 }
 
+/**
+ * The trace's windows, or `null` unless each is a start then a later stop request, every window
+ * after the one before it.
+ */
+function traceWindows(value: unknown): SpikeTraceWindow[] | null {
+  const windows = listOf(value, (item): SpikeTraceWindow | null => {
+    if (!isRecord(item)) {
+      return null;
+    }
+    const { startedMs, stopRequestedMs } = item;
+    return isFinite(startedMs) && isFinite(stopRequestedMs) && stopRequestedMs >= startedMs
+      ? { startedMs, stopRequestedMs }
+      : null;
+  });
+  const ordered = windows?.every(
+    (window, i) => i === 0 || window.startedMs >= (windows[i - 1]?.stopRequestedMs ?? Infinity),
+  );
+  return ordered === true ? windows : null;
+}
+
 function latePipeline(value: unknown): SpikeLatePipeline | null {
   if (!isRecord(value)) {
     return null;
@@ -131,7 +152,7 @@ function latePipeline(value: unknown): SpikeLatePipeline | null {
 
 /**
  * `value` as the renderer's report, or `null` if any part of it is missing or of the wrong type:
- * every series as long as the frames', every figure finite.
+ * every series as long as the frames', every figure finite, the trace's windows in order.
  */
 export function readDescentSpikeReport(value: unknown): DescentSpikeReport | null {
   if (!isRecord(value)) {
@@ -154,6 +175,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   const levels = listOf(value["levels"], level);
   const streamingList = listOf(value["streaming"], streaming);
   const late = listOf(value["latePipelines"], latePipeline);
+  const windows = traceWindows(value["traceWindows"]);
   const canvas = value["canvas"];
   const terrain = value["terrain"];
   const terrainOk =
@@ -161,8 +183,10 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     (isRecord(terrain) &&
       (terrain["vertexPath"] === "baked-offsets" || terrain["vertexPath"] === "face-differences") &&
       (terrain["normals"] === "double" || terrain["normals"] === "mesh"));
-  const { warmupS, timer, untimedPasses, uploadBytes, adapterPeakBytes } = value;
+  const { scriptStartMs, warmupS, timer, untimedPasses, uploadBytes, adapterPeakBytes } = value;
   if (
+    !isFinite(scriptStartMs) ||
+    windows === null ||
     passes === null ||
     segments === null ||
     levels === null ||
@@ -181,6 +205,8 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     return null;
   }
   return {
+    scriptStartMs,
+    traceWindows: windows,
     warmupS,
     segments,
     levels,

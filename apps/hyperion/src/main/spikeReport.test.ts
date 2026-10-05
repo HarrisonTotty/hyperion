@@ -27,6 +27,21 @@ describe("the spike report's check", () => {
     ],
     ["a streaming figure missing", (r) => ({ ...r, streaming: [{ segment: "a" }] })],
     ["a canvas of no size", (r) => ({ ...r, canvas: { widthPx: -1, heightPx: 1 } })],
+    ["no script start", (r) => ({ ...r, scriptStartMs: undefined })],
+    [
+      "a trace window stopped before it started",
+      (r) => ({ ...r, traceWindows: [{ startedMs: 10, stopRequestedMs: 5 }] }),
+    ],
+    [
+      "trace windows that overlap",
+      (r) => ({
+        ...r,
+        traceWindows: [
+          { startedMs: 0, stopRequestedMs: 100 },
+          { startedMs: 99, stopRequestedMs: 200 },
+        ],
+      }),
+    ],
   ])("refuses %s", (_, broken) => {
     expect(readDescentSpikeReport(broken(smallReport()))).toBeNull();
   });

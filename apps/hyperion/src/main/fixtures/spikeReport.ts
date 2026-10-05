@@ -1,8 +1,10 @@
 import type { DescentSpikeReport } from "../../preload/api";
 
-/** A small valid report: three frames, one pass, one segment. */
+/** A small valid report: three frames, one pass, one segment, one trace window. */
 export function smallReport(): DescentSpikeReport {
   return {
+    scriptStartMs: 1000,
+    traceWindows: [{ startedMs: 900, stopRequestedMs: 61_100 }],
     warmupS: 10,
     segments: [{ name: "orbit coast", startS: 0, endS: 60 }],
     levels: [{ level: 0, epsilonM: 9000, k: 4.1 }],

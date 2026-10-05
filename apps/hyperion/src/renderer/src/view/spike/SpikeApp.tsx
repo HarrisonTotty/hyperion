@@ -51,6 +51,7 @@ function makeHarness(spike: SpikeApi): Harness {
       );
       return { widthPx: main?.width ?? 0, heightPx: main?.height ?? 0 };
     },
+    nowMs: () => performance.now(),
     log: (message, error) => {
       console.error(`descent spike: ${message}`, error);
     },

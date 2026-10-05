@@ -179,10 +179,29 @@ export interface SpikeLatePipeline {
 }
 
 /**
+ * One window of the run's trace, in `performance.now()` ms (R05.T14.d): Chromium keeps one trace
+ * session at a time, so the trace is stopped and started again between windows, which never
+ * overlap (decision-r05-trace-windows.md).
+ */
+export interface SpikeTraceWindow {
+  /** When its start resolved. */
+  readonly startedMs: number;
+  /** When its stop was asked for. */
+  readonly stopRequestedMs: number;
+}
+
+/**
  * What the descent spike's renderer reports at the end of a run, for the results file (R05.T14.c);
  * T14.a gathers it.
  */
 export interface DescentSpikeReport {
+  /**
+   * Where script time 0 is in `performance.now()` ms: the run's first frame's
+   * `requestAnimationFrame` timestamp, from which `SpikeRun` counts script time (T14.d).
+   */
+  readonly scriptStartMs: number;
+  /** The trace's windows in order; the main process wrote one trace file for each. */
+  readonly traceWindows: ReadonlyArray<SpikeTraceWindow>;
   readonly warmupS: number;
   readonly segments: ReadonlyArray<SpikeSegmentSpan>;
   /** T6's level table: per level, the bound ε_n, m, and the ratio k_n. */
