@@ -6,13 +6,15 @@
  * Each template is a Solar System analogue's disc-integrated V phase curve, normalised to one at
  * opposition: Φ_t(α) = 10^(−0.4 [V(α) − V(0)]). The planets' curves are Mallama and Hilton,
  * "Computing apparent planetary magnitudes for The Astronomical Almanac", Astronomy and Computing
- * 25 (2018) 10, arXiv:1808.01973, eqs. 2–17, each inside the range that paper states for it; the
- * Moon's is Krisciunas and Schaefer, PASP 103 (1991) 1033, eq. 9, a fit to the table in Allen,
- * _Astrophysical Quantities_, 3rd ed. (1973), p. 143: V = −12.73 + 0.026 |α| + 4 × 10⁻⁹ α⁴, with no
- * opposition surge. A template is defined on [0, `validToRad`]; past it the law holds its phase
- * factor f (`law.ts`), never the template's polynomial, which is unconstrained by data there. Distance and the zeroth-order term drop out of Φ_t, so Mercury's corrected V(1, 0) of
- * −0.613 (that paper's §3.1, against the −0.694 of Mallama et al. 2017's Table A-1.2) changes no
- * template.
+ * 25 (2018) 10, arXiv:1808.01973, eqs. 2–17, each inside the range that paper states for it,
+ * except Earth's, which is Robinson, Planetary Science Journal 7 (2026) 12, arXiv:2507.22258, eq.
+ * 14 (decision-r07-earth-albedo, R07.T4.d). The Moon's is Krisciunas and Schaefer, PASP 103
+ * (1991) 1033, eq. 9, a fit to the table in Allen, _Astrophysical Quantities_, 3rd ed. (1973),
+ * p. 143: V = −12.73 + 0.026 |α| + 4 × 10⁻⁹ α⁴, with no opposition surge. A template is defined on
+ * [0, `validToRad`]; past it the law holds its phase factor f (`law.ts`), never the template's
+ * fit, which is unconstrained by data there. Distance and the zeroth-order term drop out of Φ_t,
+ * so Mercury's corrected V(1, 0) of −0.613 (that paper's §3.1, against the −0.694 of Mallama et
+ * al. 2017's Table A-1.2) changes no template.
  *
  * Three templates borrow a curve's shape and are flagged `provisional`. Airless ice and a snowball
  * take the Moon's curve at L = 1. No disc-integrated V polynomial of an icy satellite is published
@@ -116,9 +118,23 @@ function venusDimming(alphaDeg: number): number {
   return polynomial([236.05828 + 4.384, -2.81914, 8.39034e-3], alphaDeg);
 }
 
-/** Earth, eq. 5: Mallama et al. 2017's fit to Tinetti et al. 2006's "realistic clouds" case. */
+/** The asymmetry g of Earth's Henyey–Greenstein phase curve, Robinson 2026, eq. 14. */
+const EARTH_HG_ASYMMETRY = -0.33;
+
+/**
+ * Earth, Robinson 2026, eq. 14: a Henyey–Greenstein function at the scattering angle 180° − α,
+ * normalised at opposition, Δm = 3.75 log₁₀[(1 + g² + 2g cos α) ÷ (1 + g)²], g = −0.33.
+ *
+ * @remarks
+ * The fit to the curated visual curve (earthshine, DSCOVR/EPIC, EPOXI, Galileo and LCROSS over
+ * 5°–144°, reduced χ² 0.96), whose f = 0.23 is its geometric albedo. It replaces Mallama and
+ * Hilton 2018's eq. 5, a fit to Tinetti et al. 2006's model (§4.3 there; Robinson 2026, §6.1),
+ * whose Sun–observer azimuth is turned by 180° (Robinson et al. 2011, Astrobiology 11, 393, §3.4
+ * and Fig. 2).
+ */
 function earthDimming(alphaDeg: number): number {
-  return polynomial([0, -1.06e-3, 2.054e-4], alphaDeg);
+  const g = EARTH_HG_ASYMMETRY;
+  return 3.75 * Math.log10((1 + g * g + 2 * g * Math.cos(alphaDeg / DEG_PER_RAD)) / (1 + g) ** 2);
 }
 
 /** Mars, eq. 6 (α ≤ 50°), without the longitude and season terms L(λe) and L(Ls). */
@@ -163,6 +179,8 @@ function neptuneDimming(alphaDeg: number): number {
 }
 
 const MH2018 = "Mallama and Hilton 2018, Astronomy and Computing 25, 10";
+const ROBINSON2026 =
+  "Robinson 2026, PSJ 7, 12, eq. 14 (Henyey–Greenstein, g = −0.33, f = 0.23; data 5°–144°); to 144°; replaces Mallama and Hilton 2018's eq. 5, from Tinetti et al. 2006's model with the Sun–observer azimuth turned by 180° (Robinson et al. 2011, Astrobiology 11, 393, Fig. 2; Robinson 2026, §6.1)";
 const MOON_KS91 =
   "Krisciunas and Schaefer 1991, PASP 103, 1033, eq. 9 (a fit to Allen 1973, Astrophysical Quantities, 3rd ed., p. 143)";
 
@@ -171,20 +189,19 @@ const MOON_KS91 =
  *
  * @remarks
  * Ranges: Mercury to 169.5° (the observed 2.1°–169.5°, §4.1); Venus to 179° (eqs. 3–4); Earth to
- * 180° (eq. 5 fits Tinetti et al.'s modelled curve, which "appears to approach zero as α approaches
- * 180°", §4.3; Mallama et al. 2017's Table A-3.1 tabulates a steeper fit of the same curve, 2.07
- * mag at 90° against eq. 5's 1.57, and eq. 5, the almanac's, is taken);
- * Mars to 50° (eq. 6; eq. 7's average of Mercury and Earth beyond it is not used, as Design note 5
- * holds f past 50° instead); Jupiter to 130° (Mayorga et al.: untrustworthy beyond); Saturn's globe
- * to 150° (eq. 12); Uranus to 154°; Neptune to 133°; the Moon to 150° (Allen's table runs to 160°,
- * where the fit gives 6.78 mag against the table's 7.5).
+ * 144°, the end of Robinson 2026's data (the clamp at f = 4 acts from 139.0° and takes up to 29%
+ * off eq. 14 at 144°, inside the 38% spread of the weather there, his eq. 9); Mars to 50° (eq. 6;
+ * eq. 7's average of Mercury and Earth beyond it is not used, as Design note 5 holds f past 50°
+ * instead); Jupiter to 130° (Mayorga et al.: untrustworthy beyond); Saturn's globe to 150° (eq.
+ * 12); Uranus to 154°; Neptune to 133°; the Moon to 150° (Allen's table runs to 160°, where the
+ * fit gives 6.78 mag against the table's 7.5).
  */
 export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> = {
   moon: template(moonDimming, 150, 1, `${MOON_KS91}; to 150°`, false),
   mercury: template(mercuryDimming, 169.5, 1, `${MH2018}, eq. 2; to 169.5°`, false),
   mars: template(marsDimming, 50, 0.5, `${MH2018}, eq. 6; to 50°`, false),
   venus: template(venusDimming, 179, 0, `${MH2018}, eqs. 3–4; to 179°`, false),
-  earth: template(earthDimming, 180, 0, `${MH2018}, eq. 5 (Tinetti et al. 2006); to 180°`, false),
+  earth: template(earthDimming, 144, 0, ROBINSON2026, false),
   jupiter: template(jupiterDimming, 130, 0, `${MH2018}, eqs. 8–9; to 130°`, false),
   saturn: template(saturnDimming, 150, 0, `${MH2018}, eqs. 11–12, globe only; to 150°`, false),
   uranus: template(uranusDimming, 154, 0, `${MH2018}, eq. 15 at φ′ = 0; to 154°`, false),

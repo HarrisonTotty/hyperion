@@ -71,6 +71,30 @@ describe("PHASE_TEMPLATES", () => {
     expect(dimmingMag("moon", deg)).toBeCloseTo(mag, 3);
   });
 
+  // R07.T4.d: Robinson 2026's eq. 14, Δm = 3.75 log₁₀[(1 + g² + 2g cos α) ÷ (1 + g)²] at
+  // g = −0.33, evaluated by hand.
+  it.each([
+    [30, 0.29282],
+    [90, 1.47279],
+    [120, 1.89705],
+    [144, 2.11293],
+  ] as const)("dims Earth by Robinson 2026's eq. 14 at %i°: %f mag", (deg, mag) => {
+    expect(dimmingMag("earth", deg)).toBeCloseTo(mag, 4);
+  });
+
+  it("gives Earth Robinson 2026's range to 144°, L = 0 and a measured curve", () => {
+    const earth = PHASE_TEMPLATES.earth;
+    expect(earth.validToRad).toBeCloseTo(144 * RAD_PER_DEG, 15);
+    expect(earth.lommelSeeligerShare).toBe(0);
+    expect(earth.provisional).toBe(false);
+  });
+
+  it("cites Robinson 2026's eq. 14 for Earth, and Robinson et al. 2011 for dropping eq. 5", () => {
+    const { source } = PHASE_TEMPLATES.earth;
+    expect(source).toMatch(/^Robinson 2026, PSJ 7, 12, eq\. 14 /u);
+    expect(source).toContain("Robinson et al. 2011, Astrobiology 11, 393");
+  });
+
   it.each(["airless-ice", "snowball"] as const)("gives %s the Moon's curve at L = 1", (id) => {
     expect(PHASE_TEMPLATES[id].lommelSeeligerShare).toBe(1);
     expect(PHASE_TEMPLATES[id].validToRad).toBe(PHASE_TEMPLATES.moon.validToRad);
