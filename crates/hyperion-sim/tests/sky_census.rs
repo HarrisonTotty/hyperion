@@ -18,13 +18,17 @@
 //! The plan's 200 ly in the nuclear disc would generate 17.3 M systems for D and E alone, and the
 //! 10 ly over every layer accepted on 2026-10-03 would generate 1.9 M, since a cell there holds up
 //! to 124,000 (R06's Risks). Layers C and the brown dwarfs are compared near the Sun only. The slow
-//! A/B check is the one where identity needs the envelope to bound every M and K dwarf: there the
-//! census skips nearly all of them.
+//! A/B check is the one where identity needs the envelope to bound every M and K dwarf. There
+//! the census skipped nearly all of them until R06.T16.b. Its bound at twice the primary's mass
+//! over ages from zero now skips some 40% of A's and none of B's, and B's skips are printed rather
+//! than asserted (decision-r06-census-cost, 2026-10-05), as the nuclear disc's fast test's are.
 //!
-//! The two slow tests near the Sun fail until R06.T16.b: each sphere holds a merger product, a
-//! giant of up to twice its primary's mass, that the flux bound at the primary's mass skips (R06's
-//! Risks). The slow profile leaves them out by name (`.config/nextest.toml`) until T16.b widens
-//! the bound and they pass unchanged.
+//! Three merger products are pinned (R06.T16.b): the two first-giant-branch stars of K-dwarf
+//! primaries with M-dwarf companions, in systems 5–7 Gyr old, that T8.e's oracle found the census
+//! missing when its bound read the envelope at the primary's own mass and age, and one merger
+//! still on its main sequence, in a system 267 Myr old. Each is now listed by the census of its
+//! cell, which equals its oracle bit for bit; each lies beyond the bound at its primary's own mass
+//! and age, and within the bound at twice that mass over ages from zero.
 //!
 //! On wasm32-wasip1, which has no threads, the oracle runs on one: there the fast identity tests
 //! are slow tests (`just test-wasm-slow` runs them, a 32-bit check of the identity), and the slow
@@ -40,19 +44,30 @@ use std::num::NonZeroU32;
 use std::sync::OnceLock;
 
 use common::sky::{
-    NUCLEAR_DISC_LY, Part, SUN_LY, assert_same_stars, brute_force_parts, brute_force_sky,
-    census_parts, every_layer, observer_in_nuclear_disc, observer_near_sun,
+    NUCLEAR_DISC_LY, Part, SUN_LY, assert_same_stars, brute_force_parts, brute_force_parts_of,
+    brute_force_sky, census_parts, census_parts_of, every_layer, observer_in_nuclear_disc,
+    observer_near_sun,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
 use hyperion_sim::galaxy::{Galaxy, PointLy};
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::math;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::CAPPED_LAYERS;
-use hyperion_sim::sky::census::{CensusTallies, SkyQuery, merge_census};
+use hyperion_sim::sky::census::{
+    CensusTallies, EYE_OFFSET_BOUND_MAG, GRID_STAR_BOUND, SkyQuery, flux_bound, merge_census,
+    star_offset_bound,
+};
+use hyperion_sim::sky::envelope::{BrightnessEnvelope, max_star_mass};
 use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
+use hyperion_sim::sky::photometry::absolute_v_of_state;
+use hyperion_sim::stellar::Phase;
+use hyperion_sim::stellar::system::SystemStars;
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::{LightYears, Magnitudes};
 use hyperion_testkit::float;
@@ -86,10 +101,21 @@ fn tallies(parts: &[Part]) -> CensusTallies {
 /// The systems each capped layer generated, census then brute force.
 type Generated = Vec<(Layer, u64, u64)>;
 
+/// Whether [`agree`] asserts that the census skips some systems, or only prints how many it
+/// skipped. The skips are the census's cost, not its identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Skips {
+    /// The census must skip at least one system.
+    Asserted,
+    /// The share skipped is printed, a figure for R06.T17 and the census's cost ruling
+    /// (`decision-r06-census-cost.md`).
+    Recorded,
+}
+
 /// Asserts that the census of `query` with `radii` forced and its oracle agree star for star and
 /// bit for bit, at the query's `n_max` and at a third of the listed, and that the census lists
-/// stars and skips systems; returns each layer's generated systems.
-fn agree(what: &str, query: SkyQuery, radii: &[(Layer, LightYears)]) -> Generated {
+/// stars; and, as `skips` says, that it skips systems. Returns each layer's generated systems.
+fn agree(what: &str, query: SkyQuery, radii: &[(Layer, LightYears)], skips: Skips) -> Generated {
     let g = galaxy();
     let n_max = query.n_max();
     let census = census_parts(g, query.clone(), radii);
@@ -133,10 +159,13 @@ fn agree(what: &str, query: SkyQuery, radii: &[(Layer, LightYears)]) -> Generate
     let (skipping, every): (u64, u64) = generated
         .iter()
         .fold((0, 0), |(s, e), &(_, c, b)| (s + c, e + b));
-    assert!(
-        skipping < every,
-        "{what}: the census generates {skipping} of {every} systems, so skips none"
-    );
+    eprintln!("{what}: the census generates {skipping} of {every} systems");
+    if skips == Skips::Asserted {
+        assert!(
+            skipping < every,
+            "{what}: the census generates {skipping} of {every} systems, so skips none"
+        );
+    }
     generated
 }
 
@@ -146,6 +175,100 @@ fn within_ly(radii: &[(Layer, f64)]) -> Vec<(Layer, LightYears)> {
         .iter()
         .map(|&(layer, ly)| (layer, LightYears::new(ly)))
         .collect()
+}
+
+/// Censuses the cell of grid system `raw` for `query` beside its oracle and asserts that the two
+/// agree star for star and bit for bit, and that the system's listed star is a merger product in
+/// `phase`: heavier than its primary was born and no heavier than [`max_star_mass`] allows, its
+/// companion merged away, brighter than the bound at its primary's own mass and age (R06.T8.b's,
+/// under which the census would have skipped it for `query`), and within R06.T16.b's bound.
+fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
+    let g = galaxy();
+    let id = SystemId::from_raw(raw).expect("a system ID");
+    let what = format!("{id:?}");
+    let key = CellKey::of(id).expect("a grid system");
+    let (census, oracle) = (
+        census_parts_of(g, query, &[key]),
+        brute_force_parts_of(g, query, &[key]),
+    );
+    assert_same_stars(&census[0].0, &oracle[0].0, &what);
+    let star = census[0]
+        .0
+        .iter()
+        .find(|s| s.system() == id)
+        .unwrap_or_else(|| panic!("{what} is listed"));
+    let mut records = Vec::new();
+    generate_cell(g, key, &mut records);
+    let record = records.iter().find(|r| r.id() == id).expect("in its cell");
+    let state = SystemStars::generate(g, record)
+        .state_at(star.emitted())
+        .expect("born");
+    let merged = &state.stars()[usize::from(star.star().get())];
+    let m1 = record.primary_initial_mass();
+    assert_eq!(merged.phase(), phase, "{what}");
+    assert!(
+        merged.mass() > m1,
+        "{what}: {:?} from {m1:?}",
+        merged.mass()
+    );
+    assert!(merged.mass() <= max_star_mass(m1), "{what}");
+    assert!(
+        state.stars().iter().any(|s| s.phase() == Phase::NoRemnant),
+        "{what}: a merger leaves its companion no remnant"
+    );
+    let envelope = BrightnessEnvelope::build(g);
+    let age = record.age_at(star.emitted());
+    let at_m1 = envelope
+        .brightest(
+            record.layer(),
+            record.component().expect("a grid record"),
+            m1,
+            (age, age),
+        )
+        .expect("the primary shines")
+        .value()
+        - 2.5 * math::log10(f64::from(GRID_STAR_BOUND));
+    let m_v = absolute_v_of_state(merged).expect("it shines").value();
+    assert!(m_v < at_m1, "{what}: M_V {m_v} within {at_m1}");
+    // T8.b's census skipped a system whose bound could not pass the cut at its nearest.
+    let offset = if query.eye().is_some() {
+        EYE_OFFSET_BOUND_MAG
+    } else {
+        0.0
+    };
+    let nearest = star.distance().value() - star_offset_bound(g, record).value();
+    let faintest =
+        query.cut().value() + offset - 5.0 * math::log10(nearest / (10.0 * LIGHT_YEARS_PER_PARSEC));
+    assert!(
+        at_m1 > faintest,
+        "{what}: the bound at m₁, {at_m1}, passes {faintest}"
+    );
+    let bound = flux_bound(&envelope, record, star.emitted()).expect("a bound");
+    assert!(bound.value() <= m_v, "{what}: {} over {m_v}", bound.value());
+}
+
+/// T8.e's two merged giants near the Sun, which its oracle found the census missing (R06's Risks,
+/// "Merger products outshine the flux bound until T16.b"), listed at the eye's cut, 7.95: in B,
+/// a 1.19 M☉ giant of a 0.64 M☉ primary at V 7.53 from 354 ly; in C, a 1.23 M☉ giant of a
+/// 0.76 M☉ primary at V 7.44 from 620 ly.
+#[test]
+fn the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them() {
+    let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
+    for raw in [0x21fe_5648_7ff0_0001, 0x4204_6c99_ff00_000a] {
+        pinned_merger(raw, &query, Phase::FirstGiantBranch);
+    }
+}
+
+/// A merger on its main sequence near the Sun: a 0.90 M☉ primary and its near twin, merged into
+/// one 1.80 M☉ star of M<sub>V</sub> 1.98 in a system 267 Myr old, at V 5.87 from 191 ly. Its
+/// primary's own bound is M<sub>V</sub> 2.35, so a camera's cut of 5.95 lists it where T8.b's
+/// census skipped it.
+#[test]
+fn a_main_sequence_merger_is_listed_as_its_oracle_lists_it() {
+    let query = SkyQuery::builder(observer_near_sun(galaxy()), Magnitudes::new(5.95))
+        .build()
+        .expect("a valid query");
+    pinned_merger(0x41fe_eca2_0000_0000, &query, Phase::MainSequence);
 }
 
 #[test]
@@ -196,6 +319,7 @@ fn the_census_is_its_oracle_150_ly_from_the_sun() {
         "every layer within 150 ly of the Sun",
         query,
         &every_layer(LightYears::new(150.0)),
+        Skips::Asserted,
     );
 }
 
@@ -232,40 +356,44 @@ fn brute_force_sky_is_the_census_with_every_cap_forced() {
 )]
 fn the_census_is_its_oracle_in_the_nuclear_disc() {
     let query = eye_query(observer_in_nuclear_disc(galaxy()), Magnitudes::new(11.0));
+    // Recorded, not asserted (decision-r06-census-cost, 2026-10-05): since R06.T16.b's bound at
+    // twice the primary's mass over ages from zero, the census here skips none of A and B.
     agree(
         "A and B within 1.5 ly in the nuclear disc",
         query,
         &within_ly(&[(Layer::A, 1.5), (Layer::B, 1.5)]),
+        Skips::Recorded,
     );
 }
 
 #[cfg(not(target_family = "wasm"))]
 #[test]
-#[ignore = "slow: generates every system of A within 300 ly and B within 500 ly of the Sun; \
-            fails until R06.T16.b, a merger of B's (system 0x21fe56487ff00001, V 7.53) outshining \
-            the flux bound at m₁"]
+#[ignore = "slow: generates every system of A within 300 ly and B within 500 ly of the Sun"]
 fn the_census_is_its_oracle_for_the_dwarfs_near_the_sun() {
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
     let generated = agree(
         "A within 300 ly and B within 500 ly of the Sun",
         query,
         &within_ly(&[(Layer::A, 300.0), (Layer::B, 500.0)]),
+        Skips::Asserted,
     );
     for (layer, census, brute) in generated {
-        if matches!(layer, Layer::A | Layer::B) {
-            assert!(
+        match layer {
+            Layer::A => assert!(
                 census < brute,
                 "{layer:?}: the census generates {census} of {brute} systems"
-            );
+            ),
+            // Recorded, not asserted (decision-r06-census-cost, 2026-10-05): since R06.T16.b's
+            // bound at twice the primary's mass over ages from zero, B skips none here.
+            Layer::B => eprintln!("{layer:?}: the census generates {census} of {brute} systems"),
+            _ => {}
         }
     }
 }
 
 #[cfg(not(target_family = "wasm"))]
 #[test]
-#[ignore = "slow: generates every system of layers C to E within 1,000 ly of the Sun; fails \
-            until R06.T16.b, a merger of C's (system 0x42046c99ff00000a, V 7.44) outshining the \
-            flux bound at m₁"]
+#[ignore = "slow: generates every system of layers C to E within 1,000 ly of the Sun"]
 fn the_census_is_its_oracle_1000_ly_from_the_sun() {
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
     agree(
@@ -276,6 +404,7 @@ fn the_census_is_its_oracle_1000_ly_from_the_sun() {
             (Layer::D, 1_000.0),
             (Layer::E, 1_000.0),
         ]),
+        Skips::Asserted,
     );
 }
 
@@ -288,5 +417,6 @@ fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc() {
         "D and E within 20 ly in the nuclear disc",
         query,
         &within_ly(&[(Layer::D, 20.0), (Layer::E, 20.0)]),
+        Skips::Asserted,
     );
 }

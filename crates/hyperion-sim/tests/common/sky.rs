@@ -128,14 +128,52 @@ pub fn brute_force_parts(
     radii: &[(Layer, LightYears)],
 ) -> Vec<Part> {
     over_cells(galaxy, query, radii, &|ctx, key, query, out| {
-        let mut tally = CensusTallies::default();
-        let mut records: Vec<SystemRecord> = Vec::new();
-        generate_cell(galaxy, key, &mut records);
-        for record in &records {
-            census_record(galaxy, ctx, record, query, Bound::Ignored, &mut tally, out);
-        }
-        tally
+        oracle_cell(galaxy, ctx, key, query, out)
     })
+}
+
+/// The oracle's parts for the cells `keys` alone: every system of each generated whole and
+/// measured for `query` with no skip, one part per cell in `keys`' order. A cell's measure reads
+/// no cap, so `query`'s are not forced.
+#[must_use]
+pub fn brute_force_parts_of(galaxy: &Galaxy, query: &SkyQuery, keys: &[CellKey]) -> Vec<Part> {
+    let (tables, envelope) = (
+        LuminosityTables::dark(galaxy),
+        BrightnessEnvelope::build(galaxy),
+    );
+    over_keys(&tables, &envelope, query, keys, &|ctx, key, query, out| {
+        oracle_cell(galaxy, ctx, key, query, out)
+    })
+}
+
+/// The census's parts for the cells `keys` alone, skips and all: `census_cell` of each for
+/// `query`, one part per cell in `keys`' order.
+#[must_use]
+pub fn census_parts_of(galaxy: &Galaxy, query: &SkyQuery, keys: &[CellKey]) -> Vec<Part> {
+    let (tables, envelope) = (
+        LuminosityTables::dark(galaxy),
+        BrightnessEnvelope::build(galaxy),
+    );
+    over_keys(&tables, &envelope, query, keys, &|ctx, key, query, out| {
+        census_cell(galaxy, ctx, key, query, out)
+    })
+}
+
+/// Every record of `key`, generated whole and measured for `query` with no skip, into `out`.
+fn oracle_cell(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    key: CellKey,
+    query: &SkyQuery,
+    out: &mut Vec<SkyStar>,
+) -> CensusTallies {
+    let mut tally = CensusTallies::default();
+    let mut records: Vec<SystemRecord> = Vec::new();
+    generate_cell(galaxy, key, &mut records);
+    for record in &records {
+        census_record(galaxy, ctx, record, query, Bound::Ignored, &mut tally, out);
+    }
+    tally
 }
 
 /// The census's parts, skips and all, with each listed layer's cap forced to its radius and no
@@ -177,12 +215,23 @@ fn over_cells(
         &forced,
         &mut NoiseCache::with_capacity(0),
     );
-    let keys = plan.cells();
+    over_keys(&tables, &envelope, &forced, plan.cells(), each)
+}
+
+/// Runs `each` over the cells `keys` for `query`, on up to [`THREADS`] threads that take the
+/// cells in turn, each thread with its own context, and returns the parts in `keys`' order.
+fn over_keys(
+    tables: &LuminosityTables,
+    envelope: &BrightnessEnvelope,
+    query: &SkyQuery,
+    keys: &[CellKey],
+    each: &CellJob<'_>,
+) -> Vec<Part> {
     let next = AtomicUsize::new(0);
     let job = || {
         let mut ctx = SkyContext {
-            tables: &tables,
-            envelope: &envelope,
+            tables,
+            envelope,
             noise: NoiseCache::with_capacity(NOISE_SLOTS),
             cells: &NoSkyCellCache,
             sources: &[],
@@ -195,7 +244,7 @@ fn over_cells(
                 return done;
             };
             let mut stars = Vec::new();
-            let tallies = each(&mut ctx, key, &forced, &mut stars);
+            let tallies = each(&mut ctx, key, query, &mut stars);
             done.push((i, (stars, tallies)));
         }
     };
