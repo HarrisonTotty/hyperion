@@ -124,6 +124,14 @@ describe("the spike's run", () => {
     run.dispose();
   });
 
+  it("tells every frame where script time starts: its first frame's timestamp", async () => {
+    const { run, samples } = await made();
+    run.frame(input(5_000));
+    run.frame(input(5_000 + 400_000));
+    expect(samples.map(({ scriptStartMs }) => scriptStartMs)).toEqual([5_000, 5_000]);
+    run.dispose();
+  });
+
   it("tells each frame's sample: the script's time, the passes and the patches", async () => {
     const { run, samples, engine } = await made();
     const before = engine.inner.views.flatMap((view) => view.frames).length;

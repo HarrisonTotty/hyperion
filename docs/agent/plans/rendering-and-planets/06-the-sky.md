@@ -252,7 +252,7 @@ with additive blending into an `rgba32float` target (Consumes).
 
 ### Test helpers
 
-`crates/hyperion-sim/tests/common/sky.rs` (built in R06.T8.b): `brute_force_sky(galaxy, query,
+`crates/hyperion-sim/tests/common/sky.rs` (built in R06.T8.e): `brute_force_sky(galaxy, query,
 radius)` (every system of every cell of every layer within `radius` of the observer, padded as the
 range query pads, with no skip; the census it is compared with runs with every cap forced to
 `radius` through `SkyQuery::with_caps_forced`), `observer_near_sun(galaxy)`,
@@ -1387,16 +1387,30 @@ sky::census::features` and `just ci`.
   unchanged; (slow) `envelope_bounds_pair_states`: over ≥ 10⁴ realised multiple systems in old and
   young cells of each layer, every star of `SystemStars::state_at(t).stars()` is no brighter in V
   than the envelope at `max_star_mass(m₁)` with ages from zero, within the 0.3 mag margin.
-  Acceptance: `cargo test -p hyperion-sim --test sky_census`, `just test-slow
-envelope_bounds_pair_states` and `just ci`.
+  **Found by T8.e's oracle (2026-10-04):** two of T8.e's slow identity tests fail until this
+  subtask, each on a merger product the flux bound at m₁ skips (Risks, "Merger products outshine
+  the flux bound"). Those two systems, evolved merger products (an evolved blue straggler each, now
+  red giants), are the pinned mergers to use; an unevolved straggler is still to be pinned for the
+  main-sequence case. This subtask removes their exclusion from `.config/nextest.toml`'s
+  `[profile.slow]` `default-filter`, with its comment. It drops "fails until R06.T16.b" from the
+  two tests' ignore reasons, and the paragraph saying so from `tests/sky_census.rs`'s module doc.
+  It changes no assertion, and their identity checks then pass unchanged. Two of their checks are
+  not identities: that the census skips some systems, and, in the A/B test, that A and B each do.
+  With the bound widened to 2 m₁ over ages from zero, they could fail. If one does, that is a
+  finding on the widened bound's cost, to be reported, not an edit to make. Acceptance:
+  `cargo test -p hyperion-sim --test sky_census`, `just test-slow envelope_bounds_pair_states
+the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
+the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc` (with the exclusion removed) and `just
+ci`.
 
 ### R06.T17 Verification pass
 
 Run the slow tests and benches this plan creates (by name, not the whole slow suite or every bench,
 as the RM2/RM3 lanes' rules require: `just test-slow luminosity_matches_realised_cells
-envelope_bounds_dense_tracks envelope_bounds_pair_states caps_converge_in_rays`, `just bench --
-sky`) and record the figures
-in the doc comments that own them and in this plan: the caps (at the six points of
+envelope_bounds_dense_tracks envelope_bounds_pair_states caps_converge_in_rays
+the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
+the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, `just bench -- sky`) and record the
+figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
 "a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
 and post-AGB crossings, D post-AGB and bright giants through clear windows, E supergiants; handed
@@ -1747,6 +1761,48 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   single-player it shares the machine with a descent. If the inner bulge is too slow, the fallbacks
   are, in order: the sorted mass words above (a bump); a coarser cap rule for layers whose
   candidates dominate; caching the census by observer cell across sessions in memory.
+- **Merger products outshine the flux bound until T16.b (found by T8.e's oracle, 2026-10-04).**
+  The per-record flux bound reads the envelope at `max_star_mass(m₁)` = m₁ and the record's age.
+  But plan 11's pair evolution (P11.T11) can merge a pair into one star of up to 2 m₁, which then
+  evolves as the heavier star it has become. Two of T8.e's slow identity tests, near the Sun at
+  cut 7.95 with the eye, each miss one such star. The cell floors were at their bands' lower
+  edges, so the per-record bound skipped both:
+  - **B within 500 ly:** system `0x21fe56487ff00001`, cell B (−14, 1608, −2), m₁ 0.638 M☉. Its
+    pair merged into one 1.187 M☉ first-giant-branch star (the other `NoRemnant`) of M_V 2.17,
+    listed at V 7.53 from 354 ly. The flux bound was M_V 3.78.
+  - **C within 1,000 ly:** system `0x42046c99ff00000a`, cell C (17, 806, −4), m₁ 0.758 M☉. It
+    merged into a 1.229 M☉ first-giant-branch star of M_V 0.85, listed at V 7.44 from 620 ly. The
+    flux bound was M_V 2.70.
+
+  So the plan's expectation that T8.e's identity tests pass before T16.b did not hold. T8.b's
+  sample found no straggler above the bound, but a sphere of 10⁵–10⁶ systems holds some.
+  Decided by the orchestrator (2026-10-04): T8.e commits the two tests unchanged, ignored with a
+  reason naming T16.b, and excluded by name from the slow profile (`.config/nextest.toml`,
+  `[profile.slow]`'s `default-filter`). T16.b widens the bound, removes the exclusion, and both
+  pass unchanged. No tolerance moved. The fast identity tests, and the nuclear disc's slow one,
+  hold no such star and pass. Until T16.b, a census can miss a merged giant of an M, K or G dwarf
+  system: here one of 36 listed B stars within 500 ly, and one of 21,210 listed C stars within
+  1,000 ly.
+
+- **The mass skip barely bites near the Sun (found in T8.d, 2026-10-04; ruled: no change now).**
+  `cell_floor` reads the envelope over every age, 0 to `MAX_AGE_YEARS`, which allows a giant of a
+  band's least mass. So near the Sun every C–E cell's floor is its band's lower edge out to
+  hundreds of light-years (D and E to at least 800 ly, C to 200 ly, at cuts 6 to 9 with the eye),
+  and the floor rises only for A beyond about 100 ly, B beyond about 200 ly and C beyond about
+  400 ly. Inside that, a cell's bright subset is the whole cell, and each record is skipped only one
+  at a time, by its flux bound at its own age, after its drift and retarded time. T8.e's identity
+  tests show it: within 150 ly at cut 11, layers B to E generated every system. **Candidate
+  remedy:** the brainstorm's age skip (open question 13). A candidate's age word is independent of
+  the component picked, so it can be tested under every population component the cell can hold,
+  over the cell's light-time interval, before the density is evaluated: a candidate too faint at
+  each of its possible ages is skipped in the walk, as a light one is by the mass skip, rather than
+  after its record, drift and retarded time are built. Design note 8 declined this skip as
+  needing the component, a departure marked for the roadmap's corrections. The brainstorm's
+  reading needs no component, since it tests them all. Design note 8 also meant the floor's age
+  range to be the cell's components', but as built `cell_floor` takes every age. Whether the
+  departure stands is the owner's to rule. T17's warm-cache bench
+  (`sky/census_near_sun/warm`) measures the present floor against `HYPERION_SKY_CACHE_MB` = 64 and
+  decides whether the remedy is due.
 - **Extinction per candidate.** Each star that passes the skip takes one `sightline`. Plan 07's
   noise is log-normal with no floor, so no cheaper exact lower bound exists; in the nuclear disc,
   where the zero-extinction test passes almost everything, this may dominate. A per-direction
@@ -2318,10 +2374,11 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   1,000 ly and 200 ly radii, about 10⁷ systems generated whole over every layer, are infeasible;
   T8.e compares every layer at 150 ly near the Sun and 10 ly in the nuclear disc, and slowly the
   plan's radii for C–E near the Sun and D–E in the nuclear disc, with a slow A/B check at a radius
-  a slow test can afford, since identity there tests that the envelope bounds every M dwarf). A
-  cell is kept for a cone when its bounding ball, padded, meets the cone. `SkyContext` is a plain
-  bundle of borrows with public fields, the census's one accessor to the tables (so the tables
-  lane's change of their source touches nothing here). The cell cache's trait, `NoSkyCellCache` and
+  a slow test can afford, since identity there tests that the envelope bounds every M dwarf;
+  narrowed in the nuclear disc by T8.e's record). A cell is kept for a cone when its bounding
+  ball, padded, meets the cone. `SkyContext` is a plain bundle of borrows with public fields, the
+  census's one accessor to the tables (so the tables lane's change of their source touches nothing
+  here). The cell cache's trait, `NoSkyCellCache` and
   the monotone rule, `serve_from_entry` returning `Served::{Served, Rebuild}`, are built here
   because `SkyContext` holds a cache (T8.d adds the rest). Planned for T8.b, accepted 2026-10-03:
   the per-record flux bound is n × the envelope's flux at `max_star_mass(m₁)` and the record's age
@@ -2419,3 +2476,172 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
     - listed plus overflow is the unbounded census at every `n_max` from 1 to 47;
     - a census merged again recounts its listed; the feature-member flag; a star in two parts and
       a NaN V are refused; the empty census.
+- **Deviations in T8.d, as built.** T8.a built `SkyCellCache`, `NoSkyCellCache`, `Served` and
+  `serve_from_entry`. T8.d adds no public item.
+  - `serve_from_entry` serves only when `floor >= held`, so a NaN on either side rebuilds. T8.a's
+    `floor < held` refusal let a NaN through, and an entry built at a NaN floor holds no record.
+  - The trait's doc lists what an implementation that keeps entries owes, with an example (a
+    one-entry cache keyed by seed and cell):
+    - it serves only through `serve_from_entry`, and keeps a rebuilt cell at the floor it was
+      rebuilt for, never at a NaN floor;
+    - it keys entries by galaxy as well as by cell, as `CellCache` does;
+    - it is bounded in bytes, each entry weighing at least `cell_heap_bytes` of its records
+      (T11.b's `ByteLru` under `HYPERION_SKY_CACHE_MB`). Eviction is always safe.
+  - The sim holds no keeping cache. The tests' `KeepBright` (test builds only) is built on the rule,
+    as the server's will be: one galaxy's entries in a `BTreeMap` behind a `Mutex`, shared through
+    `&self`, least recently used first out. It builds a missing cell outside the lock and replaces
+    an entry only with one of a lower floor.
+    - **Its memory bound:** at most `max_entries` entries, together weighing at most `max_bytes`.
+      An entry weighs its records' capacity × `size_of::<SystemRecord>()`, plus its key and its
+      own struct; the map's nodes are not counted. An entry heavier than the whole bound is served
+      and not kept. The orchestrator required a stated, tested bound of any cache.
+    - T11.b's server cache should pass the same scenarios: looser then tighter, a planted entry,
+      and `assert_order_independent` through a shared cache that evicts.
+  - **Measured on the fixture (2026-10-04),** along x through the Sun at cuts 6 to 9 with the
+    eye: every D and E cell's floor is its band's lower edge out to 800 ly (the farthest probed),
+    and every C cell's out to 200 ly. `cell_floor` takes the envelope over ages 0 to
+    `MAX_AGE_YEARS`, which allows a giant of the band's least mass. So two queries' floors part
+    only in A from about 100 ly, in B from about 200 ly and in C from about 400 ly (by 3% of the
+    band's log width at cut 6), and there a C–E cell's bright subset is the whole cell. T11.b's
+    default of 64 MB and the warm-cache bench should be read with that in mind. The brainstorm's
+    skip by age, under every component the cell can hold, is not in the plan.
+  - Tests (`cargo test -p hyperion-sim sky::census::cache`; 40 s on 2 threads under load) run over
+    25 cells along x through the Sun (A–C at 0, ±100, ±200 and ±800 ly; D and E at 0 and 200 ly).
+    They use three queries: cut 9 with the eye, cut 6, and cut 6 from 200 ly along x. Each census
+    is compared with the `NoSkyCellCache` census, its stars by `PartialEq` and every float's bits:
+    - the rule serves at or above the floor, at a record's own mass too, and refuses below it and
+      on a NaN, leaving `out` untouched;
+    - a tighter query after a looser one is served from every entry and filters some; a looser
+      one after a tighter one rebuilds some, which then serve the tighter again; the move after
+      the tighter both rebuilds and filters; a query 900 years before the epoch reads the entries;
+    - a planted entry of another cell's records is never read below its floor (the cell is rebuilt
+      and replaces it), and is read at or above it; a NaN on either side rebuilds;
+    - the bound holds after every lookup: least recently used first out; five entries alone and a
+      third of the bytes alone each evict without changing a reply; an entry heavier than the
+      bound is not kept;
+    - each (query, cell) part is order independent (`assert_order_independent`) through one
+      shared 8-entry cache that evicts, rebuilds and filters;
+    - two threads censusing different queries through one cache get the uncached bits. This test
+      is left out on wasm32-wasip1, which has no threads.
+  - A by-hand check, not committed: with the rule made to serve every floor, four of the then
+    five tests failed.
+  - Two of T8.b's doc links in `cell.rs` are mended: the module doc's link to
+    `SkyCellCache::bright_subset`, and `star_offset_bound`'s link to the private
+    `offset_bound_at`.
+  - Not built: the benches `sky/census_near_sun` (cold and warm cache) and
+    `sky/census_nuclear_disc` of T8's shared paragraph, which no subtask names. Lean: T8.e builds
+    them, after its observers, with a bench-local cache on `serve_from_entry`, since `KeepBright`
+    is test-only.
+- **Deviations in T8.e, as built.** `crates/hyperion-sim/tests/common/sky.rs` and
+  `tests/sky_census.rs`, with one public addition to the sim and the benches T8's shared paragraph
+  names.
+  - **Added: `LuminosityTables::dark(galaxy)`** (orchestrator, 2026-10-04). The integration tests
+    cannot call the `pub(crate)` `build_with`, and a census with forced caps reads no table. It
+    returns tables for no component, built at `REFERENCE_TIME`, every function zero. It has a doc
+    example, and `the_dark_tables_hold_no_star_at_the_reference_time` checks it: every component
+    and layer, read by `get` and by `get_at` at both test places, at light ages 0 to 400,000 years
+    through `age_for`, holds no light, count, star, dark star, remnant or colour.
+    `sky/testing.rs`'s `milky_way_dark_tables()` now calls it.
+  - **The helpers:**
+    - `brute_force_sky(galaxy, query, radius)`, as the Test helpers name it. Beside it,
+      `brute_force_parts` and `census_parts` take `(galaxy, query, radii)` and return one
+      `(stars, tallies)` part per cell, so that a test merges them at two `n_max`.
+    - `observer_near_sun(galaxy)` stands at (0, 26,000, 68) ly, and
+      `observer_in_nuclear_disc(galaxy)` at (0, 150, 0) ly, both at the epoch. Each asserts that
+      its place fits the galaxy: the bar ends short of 26,000 ly, and the nuclear disc's scale
+      length is beyond 150 ly.
+    - Both sides open the cells of the census's own plan for the forced caps (`census_plan` after
+      `with_caps_forced_per_layer`, whose cells are `plan_cells`', which T8.a made public for the
+      brute force to share), so they differ only in the skips. The oracle measures every record of
+      `generate_cell` with `census_record(…, Bound::Ignored, …)`.
+    - Both read `LuminosityTables::dark` and the fitted envelope. They run the cells on up to
+      eight threads, or one on wasm32, and put the parts back in the plan's order.
+    - The queries are taken by value.
+  - **The identity tests' scope** (amending the accepted deviation of 2026-10-03). The systems in
+    the opened cells were counted on the fixture first:
+
+    | Test | Place        | Layers within                          | Cut (eye) | Systems          |
+    | ---- | ------------ | -------------------------------------- | --------- | ---------------- |
+    | fast | Sun          | every layer, 150 ly                    | 11        | 39,600           |
+    | fast | Sun          | every layer, 40 ly (`brute_force_sky`) | 11        | within the above |
+    | fast | nuclear disc | A and B, 1.5 ly                        | 11        | 49,534           |
+    | slow | Sun          | A 300 ly, B 500 ly                     | 7.95      | 246,600          |
+    | slow | Sun          | C, D and E, 1,000 ly                   | 7.95      | 1.40 M           |
+    | slow | nuclear disc | D and E, 20 ly                         | 7.95      | 0.88 M           |
+    - **The nuclear disc is narrower than accepted.** Every layer within 10 ly opens 1.9 M systems
+      there, since a D cell holds about 96,000 and an E cell about 124,000. D and E within the
+      plan's 200 ly would open 17.3 M, about 15,000 CPU-seconds for the oracle alone at the 0.9 ms
+      a system measured under load. So the fast test takes A and B within 1.5 ly, and the slow one
+      D and E within 20 ly. Each is the four cells of its layer that meet at the place, which lies
+      on the cell boundaries x = 0 and z = 0. Reported to the orchestrator with this record.
+    - Each test compares the listed and the overflow star for star, by `PartialEq` and by every
+      float's bits (the apparent position's offset in metres as held). It compares them at the
+      query's `n_max` and at a third of the listed, where the overflow is not empty. It compares
+      each layer's accepted and listed, and asserts that the census lists stars and skips systems.
+      The A/B check asserts both A and B skip some.
+    - The nuclear disc's slow test passes (2026-10-05, under load average 15–21): D generated
+      383,434 of 383,439 systems and E 494,726 of 494,729, listing 5,323 and 1,010 stars. It took
+      53 minutes on eight threads, about 14 ms a system per thread for each side. Its eight cells
+      are the unit of parallel work, so no more threads would shorten it. That is heavy for the
+      slow suite, and T17 should weigh it.
+    - Measured in the fast tests (2026-10-04, under load). Within 150 ly of the Sun, B to E
+      generated every system (T8.d's finding on the floors). A generated 10,767 of 18,469, and the
+      brown dwarfs none of 8,268 (1,073 candidates). In the nuclear disc, A generated 20,328 of
+      21,450 and B all 28,084. The three fast identity tests took 10 s on two test threads,
+      eight workers each.
+    - **Not compared in the nuclear disc: layers C and the brown dwarfs.** Near the Sun both are
+      compared within 150 ly. At the nuclear-disc place, their four cells alone hold some 280,000 C
+      systems (C under 8 ly) and 63,000 brown dwarfs (under 6 ly). That is left for a later rerun
+      of the oracle (T16.b or T17) rather than added to a lock-bound slow suite now.
+    - **The slow identity tests run by name.** `cargo test -p hyperion-sim --test sky_census` runs
+      the four fast tests. `just test-slow the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`
+      runs the nuclear disc's slow test. The two near the Sun fail until T16.b (Risks, "Merger
+      products outshine the flux bound") and are excluded from the slow profile by name until then.
+      T17's list names all three.
+    - `tests/common/mod.rs` declares `pub mod sky`, so every integration binary that includes
+      `common` compiles the oracle. Each already carries `#[expect(dead_code)]`. Beside the named
+      helpers, `sky.rs` exports `every_layer`, `float_bits`, `assert_same_stars`, `Part`, `THREADS`,
+      `SUN_LY` and `NUCLEAR_DISC_LY`.
+    - nextest reserves eight slots for each `sky_census` test (`threads-required`), since each runs
+      eight threads of its own.
+
+  - **On wasm32-wasip1,** which has no threads, the oracle runs on one thread. There the fast
+    identity tests at 150 ly and in the nuclear disc are ignored as slow, so `just test-wasm-slow`
+    runs them as a 32-bit check. The 40 ly test of `brute_force_sky` stays in the fast suite, and
+    the slow ones are compiled out, since they would take hours.
+  - **Built here: the benches** `sky/census_near_sun/cold`, `sky/census_near_sun/warm` and
+    `sky/census_nuclear_disc` (`benches/sky.rs`), which no subtask named (orchestrator, 2026-10-04).
+    - Each census runs much as the server will run it. The plan, with its caps, runs on one thread.
+      The server will split the caps' rays into pool jobs (T7's decision), so the printed wall time
+      overstates its own. Then chunks of 256 cells run on the machine's threads less one, each job
+      with its own noise cache, and `merge_census` joins them.
+    - The figure is CPU time: the plan's plus every job's, summed over the threads. The cut is
+      V 7.95 with the eye, the eye's cut near the Sun (7.4 + 0.45 + 0.1), until T9's `eye_cut`. The
+      nuclear disc takes it too. Its own eye cut will be shallower, so its figure is an upper bound.
+      The brainstorm's 400–800 CPU-s are the inner bulge's under the near-Sun caps held fixed, so
+      they are not a target like for like.
+    - The bench-local cell cache is built on `serve_from_entry`. It evicts the least recently used
+      first, and is bounded by `HYPERION_SKY_CACHE_MB` (default 64 MiB; a malformed value panics).
+      Its entries share their records, so a lookup filters them outside the lock.
+    - The cold census starts each iteration with an empty cache. The warm one reads the cache that
+      one census of the same query left.
+    - Each prints its first census's caps, cells, candidates, generated, accepted, listed and the
+      cache's counts.
+    - **Run once, provisionally (2026-10-05):** `sky/census_near_sun/cold`, one census in
+      criterion's `--test` mode under the heavy-test lock, was stopped unfinished after 20 minutes
+      on the orchestrator's word. By then it had taken **≥ 14,000 CPU-s** (14,750 CPU-s of the
+      process, of which the tables' build is some 300): 15 workers, cut 7.95 with the eye, RSS
+      1.6 GB, on a machine shared with other lanes. The brainstorm's target is 5–10 CPU-s and
+      some 6 × 10⁷ candidates on first arrival (open question 13), so it misses by over a thousand
+      times. No per-stage split was printed, since the run did not finish. The likely causes:
+      - the caps are about twice the brainstorm's (T7's record: C 6,764, D 8,193, E 21,369 ly
+        against 3,000, 4,300 and 10,000), about ten times the volume and the candidates;
+      - T8.d's floor finding: C–E floors are their bands' lower edges out to hundreds of
+        light-years, so every C–E record there is drifted and retarded before its flux bound
+        skips it;
+      - each generated system costs about 1 ms near the Sun, and up to 14 ms in the nuclear disc
+        (the identity tests' timings).
+
+      The warm and nuclear-disc benches are not run, and are left for T17 or the owner on a quiet
+      machine. The orchestrator puts the census's cost to its own investigation (see "The
+      census's cost" and "The mass skip barely bites near the Sun").

@@ -1,10 +1,11 @@
 //! One cell of the census: its bright systems, each star placed and measured at its retarded time
 //! (rendering plan R06, R06.T8.b; Design note 10).
 //!
-//! For each record the mass skip keeps ([`SkyCellCache::bright_subset`] above the cell's floor,
-//! [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; a member of the
-//! galactic centre, whose orbit is not built ([`TraceMotionError`]), is tallied and left out before
-//! anything else is built; the system is found at its retarded time ([`retarded`] on
+//! For each record the mass skip keeps
+//! ([`SkyCellCache::bright_subset`](super::cache::SkyCellCache::bright_subset) above the cell's
+//! floor, [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; a member of
+//! the galactic centre, whose orbit is not built ([`TraceMotionError`]), is tallied and left out
+//! before anything else is built; the system is found at its retarded time ([`retarded`] on
 //! [`Drift::of_record`]); its light is bounded by [`flux_bound`]; and only if the bound can pass the
 //! cut is the system generated ([`SystemStars::generate`]), each star read from the pair-evolved
 //! [`SystemStars::state_at`]'s stars at the emitted time, placed by [`star_positions_at`] about the
@@ -351,9 +352,10 @@ fn offset_bound_at(tidal_radius_ly: f64) -> f64 {
     f64::from(GRID_STAR_BOUND - 1) * TIDAL_CUT_SHARE * tidal_radius_ly
 }
 
-/// The farthest any star of `record`'s system can lie from its barycentre (see
-/// [`offset_bound_at`]), at the tidal radius of [`GRID_STAR_BOUND`] × m₁ at its epoch position (no
-/// companion outweighs its primary): zero for a forced single.
+/// The farthest any star of `record`'s system can lie from its barycentre, at the tidal radius of
+/// [`GRID_STAR_BOUND`] × m₁ at its epoch position (no companion outweighs its primary): the depth
+/// of the deepest hierarchy ([`GRID_STAR_BOUND`] − 1 orbits) times the tidal cut every apocentre
+/// lies inside ([`TIDAL_CUT_SHARE`]) times that radius, and zero for a forced single.
 #[must_use]
 pub fn star_offset_bound(galaxy: &Galaxy, record: &SystemRecord) -> LightYears {
     if star_bound(record) == 1 {

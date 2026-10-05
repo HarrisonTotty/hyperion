@@ -34,6 +34,8 @@ const MEMORY_INTERVAL_MS = 1000;
 export interface ControllerFrame {
   readonly scriptTimeS: number;
   readonly rafTimestampMs: number;
+  /** Script time 0's `requestAnimationFrame` timestamp, ms. */
+  readonly scriptStartMs: number;
   readonly callbackMs: number;
   readonly passesSubmitted: number;
   readonly patchesHard: number;
@@ -57,6 +59,8 @@ export interface SpikeControllerDeps {
   readonly capture: SpanCapture | null;
   /** The main view's canvas size, device pixels, for the report. */
   readonly canvas: () => DescentSpikeReport["canvas"];
+  /** `performance.now()`, ms: the clock the trace's window times are read on. */
+  readonly nowMs: () => number;
   readonly log: (message: string, error?: unknown) => void;
 }
 
@@ -87,6 +91,8 @@ export class SpikeController {
   #measuring: Promise<void> | null = null;
   #capture: CaptureSpan | null = null;
   #terrain: TerrainSettings | null = null;
+  /** When the trace's start resolved, ms; `null` until it has. */
+  #traceStartedMs: number | null = null;
 
   constructor(deps: SpikeControllerDeps) {
     this.#deps = deps;
@@ -131,10 +137,16 @@ export class SpikeController {
       const fromS = this.#launch.smoke ? SMOKE_S / 2 : (pass?.startS ?? 0) + 5;
       this.#capture = { fromS, started: null, framesLeft: CAPTURE_FRAMES, written: null };
     }
-    this.#measuring = this.#launch.smoke ? Promise.resolve() : this.#deps.spike.startTrace();
+    this.#measuring = this.#launch.smoke ? Promise.resolve() : this.#startTrace();
     this.#measuring.catch((error: unknown) => {
       this.fail("the trace did not start", error);
     });
+  }
+
+  /** Starts the trace: its one window (T14.d) runs from the start resolving to the stop's request. */
+  async #startTrace(): Promise<void> {
+    await this.#deps.spike.startTrace();
+    this.#traceStartedMs = this.#deps.nowMs();
   }
 
   /** A selection's inputs, counted again under min(hard, 4σ_n). */
@@ -162,7 +174,7 @@ export class SpikeController {
     }
     this.#captureFrame(sample.scriptTimeS);
     if (sample.scriptTimeS >= this.#durationS) {
-      void this.#finish(recorder);
+      void this.#finish(recorder, sample.scriptStartMs);
     }
   }
 
@@ -222,7 +234,7 @@ export class SpikeController {
     });
   }
 
-  async #finish(recorder: SpikeRecorder): Promise<void> {
+  async #finish(recorder: SpikeRecorder, scriptStartMs: number): Promise<void> {
     if (this.#ended) {
       return;
     }
@@ -245,10 +257,17 @@ export class SpikeController {
         );
         return;
       }
+      const startedMs = this.#traceStartedMs;
+      if (startedMs === null) {
+        throw new Error("the trace's start resolved without its time recorded");
+      }
+      const stopRequestedMs = this.#deps.nowMs();
       await spike.stopTrace();
       const terrain = this.#terrain;
       await spike.writeResults({
         ...recorder.report(this.#deps.canvas()),
+        scriptStartMs,
+        traceWindows: [{ startedMs, stopRequestedMs }],
         ...(terrain === null
           ? {}
           : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),

@@ -207,6 +207,11 @@ export type SpikePatchEvent = "requested" | "baked" | "resident";
 export interface SpikeFrameSample {
   readonly scriptTimeS: number;
   readonly rafTimestampMs: number;
+  /**
+   * The first frame's `requestAnimationFrame` timestamp, ms: script time 0, from which
+   * `scriptTimeS` counts, on `performance.now()`'s clock (T14.d).
+   */
+  readonly scriptStartMs: number;
   /** The frame callback's own time, ms. */
   readonly callbackMs: number;
   /** Passes submitted this frame: the terrain, the atmosphere, the display and two instruments. */
@@ -509,6 +514,7 @@ export class SpikeRun {
     this.#listeners.onFrame?.({
       scriptTimeS: tS,
       rafTimestampMs: input.nowMs,
+      scriptStartMs: startMs,
       callbackMs: performance.now() - started,
       // The terrain, the atmosphere's composite, the display and the two instruments.
       passesSubmitted: 5,
