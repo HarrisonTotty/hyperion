@@ -20,7 +20,15 @@ import {
   GraphicsStatusStore,
   initialGraphicsStatus,
 } from "../view/engine/status";
-import type { RenderTarget, RenderTargetSpec, RenderView, ViewSize } from "../view/engine/types";
+import type {
+  ComputeBindings,
+  ComputeHandle,
+  FrameSubmission,
+  RenderTarget,
+  RenderTargetSpec,
+  RenderView,
+  ViewSize,
+} from "../view/engine/types";
 import type { QualitySetting } from "../view/quality/qualitySetting";
 import { fakeFramesAndTimeouts } from "./fakeFramesAndTimeouts";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "./fakeGpu";
@@ -91,6 +99,27 @@ export interface RecordedTarget {
   readonly sizes: ViewSize[];
 }
 
+/**
+ * A submission the timed engine recorded: a canvas pass, a render target's pass or a dispatch,
+ * in the order made (R07.T19.c).
+ */
+export interface Submission {
+  /**
+   * What made it: the view's or the target's name, or a dispatch's first buffer's (the histogram's
+   * `<view> histogram <i>`).
+   */
+  readonly by: string;
+  /** The pass's label (`FrameSubmission.label`, or a dispatch's pass). */
+  readonly label: string;
+  /** Its draws' materials, in order; none for a dispatch. */
+  readonly materials: ReadonlyArray<string>;
+}
+
+/** A submission's view: the name `by` begins with, up to a `:` or a space. */
+export function submittedBy(submission: Submission): string {
+  return submission.by.split(/[: ]/)[0] ?? submission.by;
+}
+
 /** A submission the timed engine numbered as a resolve, by the view or target that made it. */
 interface Resolve {
   readonly frame: number;
@@ -103,6 +132,8 @@ export interface TimedEngineSource {
   readonly engines: FakeViewEngine[];
   /** The render targets made, first first. */
   readonly targets: RecordedTarget[];
+  /** Every submission, first first; a dispatch is recorded but numbered as no resolve. */
+  readonly submissions: ReadonlyArray<Submission>;
   /**
    * Reports the times of every resolve not yet reported, one pass each of `costMs(name)`, `name`
    * the view's or target's that submitted it, as R01's timer does once their reads settle.
@@ -114,11 +145,20 @@ export interface TimedEngineSource {
 export function timedEngineSource(): TimedEngineSource {
   const fake = fakeViewEngineSource();
   const targets: RecordedTarget[] = [];
+  const submissions: Submission[] = [];
   const pending: Resolve[] = [];
   const engines: FakeViewEngine[] = [];
+  const submitted = (by: string, frame: FrameSubmission): void => {
+    submissions.push({
+      by,
+      label: frame.label,
+      materials: frame.draws.map((draw) => draw.material.name),
+    });
+  };
   return {
     engines,
     targets,
+    submissions,
     deliver: (costMs) => {
       const engine = engines.at(-1);
       for (const { frame, name } of pending.splice(0)) {
@@ -150,6 +190,7 @@ export function timedEngineSource(): TimedEngineSource {
             const draw = view.render.bind(view);
             view.render = (frame) => {
               draw(frame);
+              submitted(name, frame);
               resolved(name);
             };
             return view;
@@ -166,9 +207,22 @@ export function timedEngineSource(): TimedEngineSource {
               },
               render: (frame): void => {
                 target.render(frame);
+                submitted(spec.name, frame);
                 resolved(spec.name);
               },
             };
+          },
+          dispatch: (
+            kernel: ComputeHandle,
+            bindings: ComputeBindings,
+            _workgroups: unknown,
+            pass?: string,
+          ): void => {
+            submissions.push({
+              by: Object.values(bindings.buffers)[0]?.name ?? kernel.name,
+              label: pass ?? "compute",
+              materials: [],
+            });
           },
         });
       },
