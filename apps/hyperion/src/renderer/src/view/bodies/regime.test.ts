@@ -1,9 +1,9 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
+import { add, cross, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
-import type { ProjectionCamera, Viewport } from "../camera/projection";
+import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { angularDiameterPx } from "../wireframe/bodies";
 import {
   type LitRegime,
@@ -13,6 +13,7 @@ import {
   POINT_BELOW_PX,
   promoteOverlapping,
   type ScreenCircle,
+  sphereFootprint,
 } from "./regime";
 
 const RAD_PER_DEG = Math.PI / 180;
@@ -181,5 +182,61 @@ describe("promoteOverlapping", () => {
       [SECOND, "point"],
     ]);
     expect(promoteOverlapping(regimes, footprints, []).get(SECOND)).toBe("point");
+  });
+});
+
+describe("a sphere's footprint (T9)", () => {
+  /** The projected points of a sphere's silhouette, the circle of tangency, from the camera. */
+  function silhouette(centreM: Vec3, radiusM: number): Array<{ xPx: number; yPx: number }> {
+    const d = Math.hypot(centreM.x, centreM.y, centreM.z);
+    const axis = normalise(centreM);
+    const u = normalise(cross(axis, vec3(0, 1, 0)));
+    const v = cross(axis, u);
+    const sinA = radiusM / d;
+    const cosA = Math.sqrt(1 - sinA * sinA);
+    const points: Array<{ xPx: number; yPx: number }> = [];
+    for (let i = 0; i < 64; i += 1) {
+      const t = (2 * Math.PI * i) / 64;
+      const point = add(
+        scale(axis, d * cosA * cosA),
+        add(scale(u, radiusM * cosA * Math.cos(t)), scale(v, radiusM * cosA * Math.sin(t))),
+      );
+      const p = project(point, CAMERA, HD);
+      points.push({ xPx: p.xPx, yPx: p.yPx });
+    }
+    return points;
+  }
+
+  it.each([
+    { name: "at the view's centre", centre: vec3(0, 0, -2e7) },
+    { name: "in a corner", centre: vec3(0.9e7, 0.44e7, -2e7) },
+  ])("holds the sphere's silhouette $name", ({ centre }) => {
+    // A sphere 5° across, wholly on the view, its centre 24° and 12° off the axis.
+    const footprint = sphereFootprint(centre, 1e6, CAMERA, HD);
+    const outside = silhouette(centre, 1e6).filter(
+      (p) =>
+        footprint === null ||
+        Math.hypot(p.xPx - footprint.xPx, p.yPx - footprint.yPx) > footprint.radiusPx,
+    );
+    expect(outside).toEqual([]);
+  });
+
+  it("holds the part on the view of a sphere the view's edge cuts", () => {
+    // 31° off the axis and 15° in radius: the view's edge, 30° off it, cuts it.
+    const centre = vec3(1.2e7, 0, -2e7);
+    const footprint = sphereFootprint(centre, 6.371e6, CAMERA, HD);
+    const onView = silhouette(centre, 6.371e6).filter((p) => p.xPx >= 0 && p.xPx <= HD.widthPx);
+    expect(onView.length).toBeGreaterThan(0);
+    expect(
+      onView.every(
+        (p) =>
+          footprint !== null &&
+          Math.hypot(p.xPx - footprint.xPx, p.yPx - footprint.yPx) <= footprint.radiusPx,
+      ),
+    ).toBe(true);
+  });
+
+  it("is null for a sphere behind the camera", () => {
+    expect(sphereFootprint(vec3(0, 0, 2e7), 6.371e6, CAMERA, HD)).toBeNull();
   });
 });

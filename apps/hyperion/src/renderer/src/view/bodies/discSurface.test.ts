@@ -56,6 +56,7 @@ const OPTIONS = {
   exposureScale: EXPOSURE,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
+  setting: "high" as const,
 };
 const RADIUS_M = 6.371e6;
 

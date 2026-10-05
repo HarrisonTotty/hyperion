@@ -137,6 +137,7 @@ async function drawDisc(
     exposureScale: extras.exposure ?? EXPOSURE,
     annuli: DISC_ANNULI_HIGH,
     planetshine: PLANETSHINE_SOURCES_HIGH,
+    setting: "high" as const,
   };
   // An occluder 3.844 × 10⁸ m towards the star and 3 × 10⁶ m aside, its shadow across the disc.
   const others: LitBodyInput[] =
@@ -656,6 +657,7 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
           photometry: PROVISIONAL_PHOTOMETRY,
         },
       ],
+      depthWriters: [],
       previousRegimes: new Map(),
       overlay: null,
       meter: "lit",
