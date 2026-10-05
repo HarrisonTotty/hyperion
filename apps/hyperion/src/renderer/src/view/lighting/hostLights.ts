@@ -12,8 +12,10 @@
  */
 import { type BodyIdHex, formatBodyId, type HostDiscDto } from "@hyperion/protocol";
 
-import type { Vec3 } from "../../geometry/vec3";
+import { norm, sub, type Vec3 } from "../../geometry/vec3";
+import type { Rgb } from "../photometry/toneCurve";
 import type { ViewScene } from "../scene/model";
+import { photopicIlluminance, shiningStars, starIlluminance } from "./illuminance";
 
 /** A host star that lights the scene: R06's disc, and the star's body in the scene. */
 export interface HostLight {
@@ -103,4 +105,40 @@ export function placeLights(
     const centreM = centreOf(light.body);
     return centreM === null ? [] : [{ disc: light.disc, centreM }];
   });
+}
+
+/** The stars that light one body at most: the brightest two (Design note 4's multiple systems). */
+export const MAX_BODY_LIGHTS = 2;
+
+/** One placed light as it reaches a point. */
+export interface LightAtPoint {
+  readonly host: PlacedLight;
+  /** From the point to the star's centre, m. */
+  readonly toStarM: Vec3;
+  /** Its illuminance face-on at the point, lx, per display channel (r, g, b). */
+  readonly illuminance: Rgb;
+}
+
+/**
+ * The stars that light a point: those past `STAR_CUT_RELATIVE`, the brightest `max` of them,
+ * brightest first (Design note 4).
+ *
+ * @param pointM - The point, m from the camera, in the frame of the lights' centres.
+ */
+export function lightsAt(
+  pointM: Vec3,
+  hosts: ReadonlyArray<PlacedLight>,
+  max: number,
+): LightAtPoint[] {
+  const all = hosts.map((host) => {
+    const toStarM = sub(host.centreM, pointM);
+    return { host, toStarM, illuminance: starIlluminance(host.disc, norm(toStarM)) };
+  });
+  const kept = shiningStars(all.map((light) => light.illuminance)).flatMap((index) => {
+    const light = all[index];
+    return light === undefined ? [] : [light];
+  });
+  return kept
+    .toSorted((a, b) => photopicIlluminance(b.illuminance) - photopicIlluminance(a.illuminance))
+    .slice(0, max);
 }

@@ -6,7 +6,7 @@ export interface ViewCanvasProps {
   readonly canvasRef: (canvas: HTMLCanvasElement | null) => void;
   /** Receives the stage, which the display measures. */
   readonly stageRef: (stage: HTMLElement | null) => void;
-  /** The canvas's accessible name: `VIEW, WIREFRAME, SEAT` (Design note 17). */
+  /** The canvas's accessible name: `VIEW, WIREFRAME, PRIMARY, SEAT` (Design note 17; R07.T19). */
   readonly accessibleName: string;
   /** The ID of the text describing the canvas's keys. */
   readonly describedBy: string;

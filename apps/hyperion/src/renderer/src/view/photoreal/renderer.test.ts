@@ -86,6 +86,41 @@ describe("the photorealistic renderer", () => {
     renderer.dispose();
   });
 
+  it("lights each body by planetshine from two neighbours on the high setting and one on the low", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    const frame = frameWith([]);
+    const [planet] = frame.bodies;
+    if (planet === undefined) {
+      throw new Error("no body");
+    }
+    // Two moons on the planet's night side, full from it and clear of its shadow.
+    const moonFigure = { equatorialRadiusM: 1.737e6, polarRadiusM: 1.737e6, pole: null };
+    const moons = [
+      {
+        ...planet,
+        id: "0200080020000000.0301",
+        centreM: vec3(-4e8, -3e7, -1e8),
+        figure: moonFigure,
+      },
+      {
+        ...planet,
+        id: "0200080020000000.0302",
+        centreM: vec3(-4e8, 5e7, -1e8),
+        figure: moonFigure,
+      },
+    ];
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const sources = (["high", "low"] as const).map((setting) => {
+      const plan = renderer.render(view, { ...frame, setting, bodies: [planet, ...moons] });
+      return plan?.discs.find((disc) => disc.body === planet.id)?.secondaries.length;
+    });
+    expect(sources).toEqual([2, 1]);
+    renderer.dispose();
+  });
+
   it("makes its resources again after a device restore, and draws after them", async () => {
     const engine = await countingRenderEngine();
     const view = new RecordingView();

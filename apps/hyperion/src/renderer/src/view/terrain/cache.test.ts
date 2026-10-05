@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
-import { selectionOf } from "../../test/terrainFixtures";
-import { DrawSetResolver, PatchCache, type ResidentPatch, resolveDrawSet } from "./cache";
+import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { goldenLevelTable, selectionOf, WGS84_FIGURE } from "../../test/terrainFixtures";
+import { lookAlong } from "../camera/quaternion";
+import {
+  type CacheInsert,
+  DrawSetResolver,
+  PatchCache,
+  type ResidentPatch,
+  resolveDrawSet,
+} from "./cache";
+import { vertexDir } from "./cube";
 import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
-import type { Selection } from "./select";
-import { slotLayout } from "./slotLayout";
+import { planetGeometry, surfacePoint } from "./planet";
+import { type Selection, selectPatches } from "./select";
+import { PATCH_VERTICES_PER_SIDE, slotLayout } from "./slotLayout";
+import type { BakedPatch } from "./workers/messages";
 
 /** A cache of `slots` slots of 100 B each. */
 function cacheOf(slots: number): PatchCache {
@@ -21,6 +31,18 @@ function resident(key: PatchKey, generation = 1): ResidentPatch {
     originM: vec3(0, 0, 0),
     heightRangeM: [0, 0],
     boundingRadiusM: 1,
+  };
+}
+
+/** A worker's bake of `key` as the terrain pass hands it over, arrays and all. */
+function bakeOf(key: PatchKey, generation = 1): BakedPatch {
+  return {
+    ...resident(key, generation),
+    heights: new Float32Array(PATCH_VERTICES_PER_SIDE ** 2 * 2),
+    offsets: null,
+    normals: new Float16Array(PATCH_VERTICES_PER_SIDE ** 2 * 2),
+    originHeightM: 0,
+    skirtDepthM: 1,
   };
 }
 
@@ -169,6 +191,22 @@ describe("the patch cache", () => {
     expect(forced.every((k) => cache.has(patchKeyString(k)))).toBe(true);
   });
 
+  it("pins a demanded ancestor from the moment it arrives, before the next retain", () => {
+    const cache = cacheOf(6);
+    const [BA, BB] = childKeys(B);
+    insertAll(cache, [A, B, C, D, BA, BB]);
+    // AA's children are selected and unbaked, so the selection demands AA, their parent.
+    const selection: Selection = {
+      ...selectionOf(childKeys(AA)),
+      demand: [{ key: AA, priority: 1, forced: false }],
+    };
+    frame(cache, selection);
+    // AA, then unpinned patches as recent as it and no deeper, which take the older ones' slots
+    // first and then each other's.
+    insertAll(cache, [AA, ...childKeys(C), childKeys(D)[0]]);
+    expect(cache.has(patchKeyString(AA))).toBe(true);
+  });
+
   it("refuses what cannot be stored and reports it after the frame's retain", () => {
     const cache = cacheOf(6);
     const forced = [A, B, C, D, AA, AB];
@@ -228,6 +266,27 @@ describe("the patch cache", () => {
     expect(cache.insert(resident(A, 2))).toEqual({ kind: "stored", slot, evicted: null });
     expect(cache.get(patchKeyString(A))?.generation).toBe(2);
     expect(cache.usedSlots).toBe(1);
+  });
+
+  it("keeps none of a bake's arrays, which its slot already holds", () => {
+    const cache = cacheOf(6);
+    cache.insert(bakeOf(A));
+    expect(cache.get(patchKeyString(A))).toStrictEqual({
+      ...resident(A),
+      slot: 0,
+      keyString: patchKeyString(A),
+    });
+  });
+
+  it("keeps none of a newer bake's arrays either", () => {
+    const cache = cacheOf(6);
+    cache.insert(bakeOf(A));
+    cache.insert(bakeOf(A, 2));
+    expect(cache.get(patchKeyString(A))).toStrictEqual({
+      ...resident(A, 2),
+      slot: 0,
+      keyString: patchKeyString(A),
+    });
   });
 
   it("gives a resident patch's baked height range, and none once it is gone", () => {
@@ -350,5 +409,231 @@ describe("the draw set", () => {
     const draw = resolveDrawSet(selectionOf([A, B]), cache);
     expect(draw.patches).toHaveLength(0);
     expect(draw.missing).toBe(2);
+  });
+});
+
+/** The `n`th patch `depth` levels under `key`, row by row. */
+function descendant(key: PatchKey, depth: number, n: number): PatchKey {
+  const side = 2 ** depth;
+  return {
+    face: key.face,
+    level: key.level + depth,
+    i: key.i * side + (n % side),
+    j: key.j * side + (Math.floor(n / side) % side),
+  };
+}
+
+function evictedBy(result: CacheInsert): string | null {
+  if (result.kind !== "stored") {
+    throw new Error("expected the patch to be stored");
+  }
+  return result.evicted;
+}
+
+describe("the patch cache under churn (the high-bound ruling's F3)", () => {
+  it("keeps the coarse ancestors of the drawn patches, and a baked patch hidden beside them, while the drawn patches churn", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [A, AA, AB]);
+    const evicted: string[] = [];
+    for (let f = 0; f < 40; f += 1) {
+      // Each frame draws four new patches six levels under AA, as a sliding forced region does,
+      // while AB beside them is baked and hidden (culled by its own baked range).
+      const fine = [0, 1, 2, 3].map((n) => descendant(AA, 6, 4 * f + n));
+      frame(cache, selectionOf(fine, [], [AB]));
+      for (const key of fine) {
+        const victim = evictedBy(cache.insert(resident(key)));
+        if (victim !== null) {
+          evicted.push(victim);
+        }
+      }
+    }
+    const kept = [A, AA, AB].map(patchKeyString);
+    expect(evicted.length).toBeGreaterThan(100);
+    expect(evicted.filter((k) => kept.includes(k))).toEqual([]);
+    expect(kept.every((k) => cache.has(k))).toBe(true);
+  });
+
+  it("evicts the hidden baked patches after every unpinned one and before the drawn ones", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A, AA, AB, AC, B, C]);
+    // AA is drawn and A is its ancestor; AB and AC are hidden; B and C are unpinned. D's children
+    // are selected, so each is pinned as it arrives.
+    frame(cache, selectionOf([AA, ...childKeys(D)], [], [AB, AC]));
+    const evictions = childKeys(D).map((k) => evictedBy(cache.insert(resident(k))));
+    expect(new Set(evictions.slice(0, 2))).toEqual(new Set([B, C].map(patchKeyString)));
+    expect(new Set(evictions.slice(2))).toEqual(new Set([AB, AC].map(patchKeyString)));
+    expect([A, AA].every((k) => cache.has(patchKeyString(k)))).toBe(true);
+  });
+
+  it("lets a patch age once the selection no longer finds it hidden", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A, AA, AB]);
+    frame(cache, selectionOf([AA], [], [AB]));
+    frame(cache, selectionOf([AA]));
+    insertAll(cache, [B, C, D]);
+    expect(evictedBy(cache.insert(resident(AC)))).toBe(patchKeyString(AB));
+  });
+
+  it("does not count the hidden baked patches as pins", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A, AA, AB, AC]);
+    frame(cache, selectionOf([AA], [], [AB, AC]));
+    // AA and its ancestor A.
+    expect(cache.pressure()).toEqual({ forced: 0, drawn: 2, exceeded: false });
+  });
+
+  it("never holds more slots than exist, nor a slot twice, whatever the selection hides", () => {
+    const cache = cacheOf(12);
+    // Levels 1 to 3 of face 0.
+    const pool: PatchKey[] = [];
+    for (const k of [A, B, C, D]) {
+      pool.push(k);
+      for (const c of childKeys(k)) {
+        pool.push(c, ...childKeys(c));
+      }
+    }
+    let seed = 12_345;
+    const next = (n: number): number => {
+      seed = (Math.imul(seed, 1_103_515_245) + 12_345) >>> 0;
+      return (seed >>> 8) % n;
+    };
+    const pick = (count: number): PatchKey[] =>
+      Array.from({ length: count }, () => pool[next(pool.length)] ?? A);
+    for (let f = 0; f < 300; f += 1) {
+      const selected = pick(3 + next(6));
+      const hidden = pick(next(16)).filter((k) => cache.has(patchKeyString(k)));
+      frame(cache, selectionOf(selected, [], hidden));
+      for (const key of selected) {
+        if (!cache.has(patchKeyString(key))) {
+          evictedBy(cache.insert(resident(key)));
+        }
+        expect(cache.usedSlots).toBeLessThanOrEqual(cache.slotCount);
+        expect(cache.heldBytes).toBe(cache.usedSlots * cache.layout.bytesPerSlot);
+      }
+      const slots = pool.flatMap((k) => {
+        const patch = cache.get(patchKeyString(k));
+        return patch === undefined ? [] : [patch.slot];
+      });
+      expect(new Set(slots).size).toBe(slots.length);
+      expect(slots.every((s) => s >= 0 && s < cache.slotCount)).toBe(true);
+    }
+  });
+
+  it("evicts the same patches in the same order whatever order they were stored in", () => {
+    const stored = [A, B, C, D, AA, AB, AC, AD];
+    const evictions = (order: readonly PatchKey[]): (string | null)[] => {
+      const cache = cacheOf(8);
+      insertAll(cache, order);
+      frame(cache, selectionOf([AA], [], [AB, C]));
+      return [...childKeys(B), ...childKeys(D)].map((k) => evictedBy(cache.insert(resident(k))));
+    };
+    const forwards = evictions(stored);
+    expect(forwards.every((k) => k !== null)).toBe(true);
+    expect(evictions(stored.toReversed())).toEqual(forwards);
+    expect(evictions([...stored.slice(4), ...stored.slice(0, 4)])).toEqual(forwards);
+  });
+});
+
+/** The test planet's geometry with ridges off, for runs of selection and the cache together. */
+const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
+
+/** A point `heightM` above the datum, `step` × 12 finest patches east of a site on face 0. */
+function alongTrack(step: number, heightM: number): Vec3 {
+  const key: PatchKey = { face: 0, level: 19, i: 300_001 + 12 * step, j: 200_003 };
+  const [x, y, z] = surfacePoint(WGS84_FIGURE, vertexDir(key, 32, 32), heightM);
+  return vec3(x, y, z);
+}
+
+/** What a run of {@link flyLow} saw. */
+interface LowRun {
+  /** Baked patches of level 12 or coarser stored again after being evicted. */
+  readonly coarseRebakes: number;
+  /** Frames drawing by a stand-in a patch of level 12 or coarser that had been resident. */
+  readonly coarseReturns: number;
+  /** Every eviction, in order. */
+  readonly evictions: ReadonlyArray<string>;
+  readonly bakes: number;
+}
+
+/**
+ * Flies a camera 1.5 km up, looking out to the horizon, 12 finest patches (about 210 m) a frame
+ * along a track, with a grounded contact beneath it, as the descent's approach does: an ideal pool
+ * bakes every request at once, on ground flat to ±50 m, so that a baked patch's range hides what
+ * its ancestor's range would not.
+ */
+function flyLow(slots: number, frames: number, warmFrames: number): LowRun {
+  const cache = cacheOf(slots);
+  const resolver = new DrawSetResolver(cache);
+  const everStored = new Set<string>();
+  const evictions: string[] = [];
+  let coarseRebakes = 0;
+  let coarseReturns = 0;
+  let bakes = 0;
+  const tiltRad = 1.45;
+  for (let f = 0; f < frames; f += 1) {
+    const positionM = alongTrack(f, 1_500);
+    const up = normalise(positionM);
+    const east = normalise(vec3(-up.y, up.x, 0));
+    const forward = vec3(
+      -up.x * Math.cos(tiltRad) + east.x * Math.sin(tiltRad),
+      -up.y * Math.cos(tiltRad) + east.y * Math.sin(tiltRad),
+      -up.z * Math.cos(tiltRad) + east.z * Math.sin(tiltRad),
+    );
+    const selection = selectPatches({
+      planet: PLANET,
+      views: [
+        {
+          camera: { positionM, orientation: lookAlong(forward, up) },
+          fovXRad: Math.PI / 3,
+          viewport: { widthPx: 960, heightPx: 540 },
+          weight: 1,
+          tauPx: 2,
+        },
+      ],
+      setting: "high",
+      grounded: [{ positionM: alongTrack(f, 0), radiusM: 10 }],
+      heightRanges: cache,
+    });
+    const measuring = f >= warmFrames;
+    if (measuring) {
+      const returns = [...selection.patches].some(
+        ([k, p]) => p.seen && p.key.level <= 12 && !cache.has(k) && everStored.has(k),
+      );
+      coarseReturns += returns ? 1 : 0;
+    }
+    cache.retain(selection, resolver.resolve(selection));
+    for (const request of selection.demand) {
+      const keyString = patchKeyString(request.key);
+      if (cache.has(keyString)) {
+        continue;
+      }
+      const victim = evictedBy(cache.insert({ ...resident(request.key), heightRangeM: [-50, 50] }));
+      bakes += 1;
+      if (victim !== null) {
+        evictions.push(victim);
+      }
+      if (measuring && request.key.level <= 12 && everStored.has(keyString)) {
+        coarseRebakes += 1;
+      }
+      everStored.add(keyString);
+    }
+  }
+  return { coarseRebakes, coarseReturns, evictions, bakes };
+}
+
+describe("selection and the cache over a low pass (the high-bound ruling's F3)", () => {
+  it("bakes no coarse patch twice, and draws none by a stand-in once it was resident", () => {
+    const run = flyLow(500, 48, 16);
+    // The cache is under pressure: it evicts thousands of patches over the run.
+    expect(run.evictions.length).toBeGreaterThan(1_000);
+    expect([run.coarseRebakes, run.coarseReturns]).toEqual([0, 0]);
+  });
+
+  it("evicts the same patches in the same order on a second run", () => {
+    const first = flyLow(500, 24, 0);
+    const second = flyLow(500, 24, 0);
+    expect(second.evictions.length).toBeGreaterThan(0);
+    expect(second.evictions).toEqual(first.evictions);
+    expect(second.bakes).toBe(first.bakes);
   });
 });

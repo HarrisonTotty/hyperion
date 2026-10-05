@@ -9,6 +9,9 @@ import pkg from "./package.json" with { type: "json" };
 // preload and page, beside the client's. Neither the client's main process nor its page imports it.
 export default defineConfig({
   main: {
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
+    },
     build: {
       rolldownOptions: {
         input: { index: resolve("src/main/index.ts"), smoke: resolve("src/smoke/main.ts") },

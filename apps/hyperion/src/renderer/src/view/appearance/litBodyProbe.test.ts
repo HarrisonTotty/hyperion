@@ -16,7 +16,9 @@ import {
   PROBE_CASE_BYTES,
   syntheticShare,
 } from "./litBodyProbe";
+import { vec3 } from "../../geometry/vec3";
 import { annulusEdges } from "../lighting/annuli";
+import { planetshineIrradiance } from "../lighting/planetshine";
 import { lawFor } from "./phase";
 
 const LAW = lawFor([0.17, 0.14, 0.1], [0.5, 0.48, 0.46], "mercury");
@@ -104,13 +106,37 @@ describe("the lighting probe's cases", () => {
       separationRad: 0.002,
     },
     { kind: "stubs" },
+    {
+      kind: "planetshine",
+      toSource: vec3(30, 0.5, 0),
+      sourceRadius: 1,
+      centreDistance: 30,
+      normal: vec3(0, 1, 0),
+      horizonRad: 0.05,
+    },
   ]);
   const u32 = new Uint32Array(cases);
   const f32 = new Float32Array(cases);
 
   it("packs each case in the kernel's 64 bytes, its kind first", () => {
-    expect(cases.byteLength).toBe(3 * LIGHTING_CASE_BYTES);
-    expect([u32[0], u32[16], u32[32]]).toEqual([1, 2, 3]);
+    expect(cases.byteLength).toBe(4 * LIGHTING_CASE_BYTES);
+    expect([u32[0], u32[16], u32[32], u32[48]]).toEqual([1, 2, 3, 4]);
+  });
+
+  it("packs a planetshine case's radius, distance and horizon, then its direction and normal", () => {
+    expect([f32[50], f32[51], f32[52]]).toEqual([1, 30, Math.fround(0.05)]);
+    expect(Array.from(f32.subarray(56, 59))).toEqual([30, 0.5, 0]);
+    expect(Array.from(f32.subarray(60, 63))).toEqual([0, 1, 0]);
+  });
+
+  it("expects planetshine's factor from its twin", () => {
+    const toSource = vec3(30, 0.5, 0);
+    const normal = vec3(Math.cos(1), Math.sin(1), 0);
+    const [value] = expectedLighting([
+      { kind: "planetshine", toSource, sourceRadius: 1, centreDistance: 30, normal, horizonRad: 0 },
+    ]);
+    const rounded = vec3(Math.fround(normal.x), Math.fround(normal.y), 0);
+    expect(value).toEqual([planetshineIrradiance(toSource, 1, 30, rounded, 0)]);
   });
 
   it("packs a horizon case's H, φ and horizon", () => {

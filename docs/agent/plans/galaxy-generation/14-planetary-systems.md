@@ -3148,11 +3148,18 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
   the V phase curve Φ_t = 10^(−0.4 (V(α) − V(0))) from Mallama and Hilton 2018 (Astronomy and
   Computing 25, 10, arXiv:1808.01973, eqs. 2–17; the globe-only forms for Saturn), its valid
   range, the analogue's geometric albedos in B, V and R (Johnson R) from Mallama, Krobusek and
-  Pavlov 2017 (Icarus 282, 19, Table 7: Mercury 0.105, 0.142, 0.172; Venus 0.658, 0.689, 0.708;
-  Earth 0.512, 0.434, 0.418; Mars 0.088, 0.170, 0.288; Jupiter 0.443, 0.538, 0.495; Saturn 0.339,
-  0.499, 0.568; Uranus 0.561, 0.488, 0.202; Neptune 0.562, 0.442, 0.181), the per-channel exponents
-  and the reference Bond albedo. Valid ranges as the paper states them: Mercury observed over
-  2.1–169.5°; Venus to 179° (two pieces, joined at 163.7°); Earth (Tinetti et al. 2006's "realistic clouds" case, fitted by Mallama et al. 2017 with a spline and given as Mallama and Hilton 2018's eq. 5; no range is stated, taken over 0–180°); Mars to 50° (eq. 6;
+  Pavlov 2017 (Icarus 282, 19, Table 7: Mercury 0.105, 0.142, 0.172; Venus 0.658, 0.689, 0.708; Mars
+  0.088, 0.170, 0.288; Jupiter 0.443, 0.538, 0.495; Saturn 0.339, 0.499, 0.568; Uranus 0.561, 0.488,
+  0.202; Neptune 0.562, 0.442, 0.181); Earth's from Robinson 2026 instead (PSJ 7, 12,
+  arXiv:2507.22258, §5 and eq. 14): 0.263, 0.215, 0.210, the eq. 14 fit's f = 0.23 in Model 07's
+  band ratios 0.277 : 0.226 : 0.221 (0.4–0.5, 0.5–0.6 and 0.6–0.7 µm, standing for Johnson's;
+  decision-r07-earth-albedo, P14.T47.e), the per-channel exponents and the reference Bond albedo.
+  Valid ranges as the paper states them: Mercury observed over 2.1–169.5°; Venus to 179° (two
+  pieces, joined at 163.7°); Earth Robinson 2026's eq. 14, the Henyey–Greenstein fit to the curated
+  visual phase curve (earthshine, DSCOVR/EPIC, EPOXI, Galileo and LCROSS over 5–144°, reduced χ²
+  0.96), Δm = 3.75 log₁₀[(1 + g² + 2g cos α) ÷ (1 + g)²] with g = −0.33, to 144°. Eq. 5 comes from
+  Tinetti et al. 2006's model, whose Sun–observer azimuth is turned by 180° (Robinson et al. 2011,
+  Astrobiology 11, 393); it is dropped (decision-r07-earth-albedo); Mars to 50° (eq. 6;
   eq. 7 to 120° is an average of Earth and Mercury, not data, and is not used, so the hold carries
   Mars past 50°, as R07 states); Jupiter to 130°; Saturn's globe to 150°; Uranus to 154°; Neptune
   to 133°. The Moon's curve is Krisciunas and Schaefer 1991 (PASP 103, 1033, eq. 9), V = −12.73 +
@@ -3211,17 +3218,23 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
      condensables (the open finding of the galaxy README, this plan's to build). R07's smooth
      fallback moves its middle anchor to match: L = 1 at 100 Pa, 0.5 at 30 kPa, 0 at 100 kPa.
 
-  Albedos: for every template p_c = p_c,analogue × A_Bond ÷ A_ref, then capped so that
-  p_c q_c ≤ 1, where the analogue's p is Table 7's (Ganymede's and Europa's above; the Moon's
-  p_V 0.12, NASA's fact sheet). A_ref (`reference_bond`) is the Bond albedo the generator gives the
-  analogue body: moon and mercury 0.11, mars and earth 0.306, venus 0.76, the four giants 0.34,
-  airless_ice 0.35, magma 0.11 (Mercury's curve). snowball takes Europa's measured 0.68, since the
-  generator would not class Europa as a snowball (decision-p14-phase-j, 9). Each row's source keeps
-  the analogue's measured Bond albedo (Mercury 0.088, Mars 0.250, Jupiter 0.343, Saturn 0.342,
-  Uranus 0.300, Neptune 0.290). So every Solar System analogue in its own state is drawn with
-  Table 7's p. The state table's departures from the measured Bond albedos (Mercury, Mars, the ice
-  giants, hot giants) are findings for P14.T13.c's owner, which affect temperatures only. The stated ratio is p_V q_V ÷ A_Bond. p is defined against π a c, √(a c) being Mallama et al. 2017's radius for Saturn (their "average disk radius 57,240 km including oblateness", √(a c) for a = 60,268 and
-  c = 54,364 km; the equator-on reading is this plan's), which the client's point regime uses with T46's figure.
+  Albedos: for every template p_c = p_c,analogue × A_Bond ÷ A_ref, then capped so that p_c q_c ≤ 1,
+  where the analogue's p is Table 7's (Earth's Robinson 2026's, below; Ganymede's and Europa's
+  above; the Moon's p_V 0.12, NASA's fact sheet). A_ref (`reference_bond`) is the Bond albedo the
+  generator gives the analogue body: moon and mercury 0.11, mars and earth 0.306, venus 0.76, the
+  four giants 0.34, airless_ice 0.35, magma 0.11 (Mercury's curve). snowball takes Europa's measured
+  0.68, since the generator would not class Europa as a snowball (decision-p14-phase-j, 9). Each
+  row's source keeps the analogue's measured Bond albedo (Mercury 0.088, Mars 0.250, Jupiter 0.343,
+  Saturn 0.342, Uranus 0.300, Neptune 0.290). So every Solar System analogue in its own state is
+  drawn with Table 7's p except Earth, which P14.T47.e moves to Robinson 2026's (P14.T47.a). Until
+  then its as-built row keeps Table 7's 0.512, 0.434 and 0.418, which came through
+  Tinetti et al. 2006's flipped model and which no client reads (R07.T2.b waits for P14.T47.e;
+  decision-r07-earth-albedo). The state table's departures from the measured Bond albedos (Mercury,
+  Mars, the ice giants, hot giants) are findings for P14.T13.c's owner, which affect temperatures
+  only. The stated ratio is p_V q_V ÷ A_Bond. p is defined against π a c, √(a c) being
+  Mallama et al. 2017's radius for Saturn (their "average disk radius 57,240 km including
+  oblateness", √(a c) for a = 60,268 and c = 54,364 km; the equator-on reading is this plan's),
+  which the client's point regime uses with T46's figure.
 
 - **P14.T47.c The section on the record.** `BodyRecord` gains `photometry` at `Bulk`; `Ok` for
   every planet, dwarf planet, moon and member whose bulk is `Ok`, `NotApplicable` for a ring (whose
@@ -3232,6 +3245,27 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
   q, which R07.T4.b's `lawFor` and `discIntegratedPhase` are tested against. Inside T46.f's
   protocol change and bump if T47.a–c are built by then; otherwise an additive change of its own
   and its own bump (new pinned output), coordinated through the orchestrator.
+- **P14.T47.e Earth after Robinson 2026** (decision-r07-earth-albedo, 2026-10-04).
+  `PhaseTemplate::Earth`'s dimming becomes eq. 14, Δm = 3.75 log₁₀[(1.1089 − 0.66 cos α) ÷
+  0.4489] (g = −0.33), through the crate's deterministic `math` functions. The row changes:
+  - `valid_to` 144°;
+  - `albedo` B 0.263, V 0.215, R 0.210;
+  - `phase_integral` the recomputed literal (1.3116; a test reproduces it from `phase_integral`
+    to 10⁻⁹);
+  - `exponents` 1;
+  - `reference_bond` stays 0.306;
+  - `source`: "Robinson 2026, PSJ 7, 12, eq. 14 (g = −0.33, f = 0.23), to 144°; p from §5's
+    band ratios at f; Bond albedo 0.306 (the temperate state; CERES 0.2915, Loeb et al. 2018)".
+
+  The tests change as T47's (a), (b) and the two checks state. The change moves
+  `photometry/templates.golden`'s `earth` block and the planetary-systems goldens' photometry lines
+  of temperate worlds at or above 30 kPa. `golden_diff.py` shows no other move. It is part of the
+  20 → 21 bump batched with P11.T4.h. If P11.T4.h is still blocked when this is ready, the
+  orchestrator may bump for it alone, and P11.T4.h takes 22. R07.T2.b, and any client test against
+  `templates.golden`, waits for it, and R07.T4.d's client `earth` must equal its `earth` block
+  (decision-r07-earth-albedo). Accept: `cargo test -p hyperion-sim planetary::derive::photometry`,
+  the golden tests at 21.
+
 - _Provides:_
 
   ```rust
@@ -3304,25 +3338,29 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
 - _Tests:_ (a) Φ_t(0) = 1 for every template; Φ_shape is 1 at 0; Lambert's q = 1.5 and
   Lommel–Seeliger's 16 (1 − ln 2) ÷ 3 ≈ 1.6366 at L = 0 and 1 to 10⁻⁹; q falls monotonically in s,
   and `exponent_for` inverts `phase_integral` to 10⁻⁹; Mercury's template gives q_V = 0.480 and
-  Earth's 1.311 to 0.5% (computed from eqs. 2 and 5; Mercury's against Mallama et al. 2002's
+  Earth's 1.312 to 0.5% (computed from eq. 2 and Robinson's eq. 14, the clamp acting on Earth from
+  139°; Mercury's against Mallama et al. 2002's
   0.478); every q is 0.4–1.7; inside a template's range and where the clamp does not act, Φ_c is Φ_t^s at L = 0, 0.5 and 1 to 10⁻¹² (as built: past the range the law holds f while Φ_shape moves with L, so q at another L than the row's differs, by 3 × 10⁻⁴ for the Moon's curve and 0.10 for Mars's; each row's q is at its own L). (b)
   On `derive::tests::solar_system()` (the Solar System table), Mars selects `mars` with L = 0.5,
   Earth `earth`, Venus `venus`, Mercury `mercury` and each giant its own template; each
   analogue's p follows p_analogue × A_Bond ÷ A_ref to 10⁻¹², so Mercury, Venus, Earth, Mars,
-  Jupiter, Saturn and Neptune of `solar_system()` reproduce Table 7's B, V and R to 10⁻¹², and
-  Uranus is drawn with Neptune's; a generated airless-ice body and a snowball each state a ratio
-  within 5% of 1 (0.43 × 0.80 ÷ 0.35 = 0.98 and 0.99); every analogue's stated ratio is asserted
-  and recorded, Mercury's (0.142 × 0.480 ÷ 0.11 = 0.62) and Earth's (0.434 × 1.311 ÷ 0.306 = 1.86)
-  among them; a gas giant at T_eq 300 K is `provisional`, one at 120 K is not; p_c q_c ≤ 1 for
+  Jupiter, Saturn and Neptune of `solar_system()` reproduce their rows' B, V and R to 10⁻¹² (Table
+  7's; Earth's Robinson 2026's), and Uranus is drawn with Neptune's; a generated airless-ice body
+  and a snowball each state a ratio within 5% of 1 (0.43 × 0.80 ÷ 0.35 = 0.98 and 0.99); every
+  analogue's stated ratio is asserted and recorded, Mercury's (0.142 × 0.480 ÷ 0.11 = 0.62) and
+  Earth's (0.215 × 1.312 ÷ 0.306 = 0.92) among them; a gas giant at T_eq 300 K is `provisional`, one
+  at 120 K is not; p_c q_c ≤ 1 for
   every sampled body;
   two calls agree bit for bit. (c) The section's states by kind and level. (d) A wire-form test per
   DTO and per section state; `golden_diff.py` reports extensions only.
-- _Two checks for the owner_ (R07.T1's): (i) airless rock's Bond albedo of 0.11 against the
-  Moon's p_V 0.12 and a Mercury-like q of 0.48 gives a spherical albedo in V of 0.06, a ratio of
-  about 0.5 (Lane and Irvine 1973, AJ 78, 267, to be read for the Moon's own q); (ii) Earth's p_V
-  0.434 with Tinetti et al.'s curve gives A_V = 0.57 against a Bond albedo of 0.294 (Stephens et
-  al. 2015) or the table's 0.306, a ratio near 1.9. Both are asserted as findings, not failures,
-  and the state table's albedos are the owner's to revisit (P14.T13.c).
+- _Two checks for the owner_ (R07.T1's): (i) airless rock's Bond albedo of 0.11 against the Moon's
+  p_V 0.12 and a Mercury-like q of 0.48 gives a spherical albedo in V of 0.06, a ratio of about 0.5
+  (Lane and Irvine 1973, AJ 78, 267, to be read for the Moon's own q); (ii) resolved by
+  decision-r07-earth-albedo (P14.T47.e). Robinson 2026's p_V 0.215 and q_V 1.312 give A_V 0.282.
+  Against them stand CERES's Bond albedo of 0.2915 (Loeb et al. 2018, J. Climate 31, 895, Table 5)
+  and earthshine's 0.297 ± 0.005 (Goode et al. 2001, GRL 28, 1671). Mallama et al. 2017's 0.434 came
+  through Tinetti et al. 2006's flipped model. Both are asserted as findings, not failures, and the
+  state table's albedos are the owner's to revisit (P14.T13.c).
 - _Files:_ `planetary/derive/{photometry, mod}.rs`, `planetary/moons/regular.rs`
   (`DerivedMoon::atmosphere`), `planetary/{record, system}.rs`; for T47.d the protocol, server,
   golden and generated files of T46.f.
@@ -6451,9 +6489,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - _`TemplateRow`._ `albedo` is `Bands`, not `Option<Bands>` (every row has one; one-band
     analogues are grey). The row also carries `lunar_lambert_share` and the A6 field
     `phase_integral`. The literals are q: Moon 0.626110, Mercury and magma 0.479802, Mars
-    1.084648, Venus 1.344240, Earth 1.310569, Jupiter 1.311719, Saturn 1.356623, Uranus
-    1.301738, Neptune 1.242006, airless ice 0.80 and snowball 1.01 (s 0.821537 and 0.667472),
-    which a test reproduces to 10⁻⁹. `BodyPhotometry::phase_integral` is `const`.
+    1.084648, Venus 1.344240, Earth 1.310569 (1.3116 from P14.T47.e), Jupiter 1.311719, Saturn
+    1.356623, Uranus 1.301738, Neptune 1.242006, airless ice 0.80 and snowball 1.01 (s 0.821537 and
+    0.667472), which a test reproduces to 10⁻⁹. `BodyPhotometry::phase_integral` is `const`.
   - _`PhotometryInputs`_ gains `equilibrium_temperature` for A8's hot-giant flag.
   - _The Bond albedo_ is the state's on the material of the record's composition
     (`SurfaceState::albedo`), not `DerivedBody::albedo`, so that a moon or an icy member whose

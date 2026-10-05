@@ -1,19 +1,27 @@
+import { join } from "node:path";
+
+import { format, resolveConfig } from "prettier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DescentSpikeReport } from "../preload/api";
-import type { TraceFigures } from "./reduceTrace";
+import { type TraceFigures, TraceReducer } from "./reduceTrace";
 import {
+  ADDED_FILE_LIMIT_BYTES,
   buildResults,
   type DescentResults,
   describeMachine,
+  EMPTY_TRACE_REASON,
+  formatAsPrettier,
   frameStats,
   type MachineDescription,
   measured,
   type MemorySample,
   MemorySampler,
+  memorySeries,
   type MemorySources,
   missing,
   nearestRank,
+  RESULTS_VERSION,
   type ResultsFiles,
   type RunDescription,
   sampleMemory,
@@ -187,6 +195,71 @@ function sample(tS: number, nvidiaDeviceBytes: number | null): MemorySample {
 }
 
 const MEMORY = [sample(0, 400 * MIB), sample(1, 700 * MIB), sample(2, 650 * MIB)];
+
+const NO_DRM = "no DRM client in the process's fdinfo (NVIDIA's driver writes none)";
+
+/**
+ * Samples whose renderer has not reported at the first two and the fifth, and whose DRM reading
+ * is missing for one reason at the first two and another at the fourth.
+ */
+function gappedMemory(): MemorySample[] {
+  const drm = (
+    i: number,
+  ): Pick<MemorySample, "drmResidentBytes" | "drmTotalBytes" | "drmReason"> =>
+    i < 2
+      ? { drmResidentBytes: null, drmTotalBytes: null, drmReason: "no GPU process" }
+      : i === 3
+        ? { drmResidentBytes: null, drmTotalBytes: null, drmReason: "fdinfo unreadable" }
+        : { drmResidentBytes: (100 + i) * MIB, drmTotalBytes: (120 + i) * MIB, drmReason: null };
+  return [0, 1, 2, 3, 4, 5].map((i) =>
+    Object.assign(sample(i + 0.2382, (400 + i) * MIB), drm(i), {
+      rendererPrivateBytes: i < 2 || i === 4 ? null : (300 + i) * MIB,
+    }),
+  );
+}
+
+/**
+ * A run of `count` samples at 1 Hz in the RTX 3080's layout (no DRM reading), whose readings wander
+ * as the T14.c hidden run's did, over as many digits.
+ */
+function longRun(count: number): MemorySample[] {
+  let state = 1;
+  // A Lehmer generator: the same readings every run.
+  const next = (): number => {
+    state = (state * 48_271) % 2_147_483_647;
+    return state / 2_147_483_647;
+  };
+  const kib = (base: number, spread: number): number => Math.round(base + spread * next()) * 1024;
+  return Array.from({ length: count }, (_, i) => ({
+    tS: i + 0.2 + 0.1 * next(),
+    appBytes: kib(700_000 + 900 * i, 50_000),
+    gpuProcessBytes: kib(240_000, 180_000),
+    tracingBytes: kib(43_000 + 470 * i, 20_000),
+    rendererPrivateBytes: kib(190_000 + 370 * i, 30_000),
+    drmResidentBytes: null,
+    drmReason: NO_DRM,
+    drmTotalBytes: null,
+    nvidiaDeviceBytes: (404 + Math.round(4 * next())) * MIB,
+    nvidiaGpuProcessBytes: (186 + Math.round(6 * next())) * MIB,
+  }));
+}
+
+/** A results file built from `memory`, as the writer writes it. */
+function fileOf(memory: ReadonlyArray<MemorySample>): string {
+  const results = buildResults({
+    run: runOf({ shown: false, displayHz: null }),
+    report: reportOf(),
+    trace: missing(EMPTY_TRACE_REASON),
+    memory,
+  });
+  return `${JSON.stringify(results, null, 2)}\n`;
+}
+
+/** The repository's Prettier, with its own configuration, on a results file. */
+async function prettier(text: string): Promise<string> {
+  const config = await resolveConfig(join(__dirname, "results.json"));
+  return format(text, { ...config, parser: "json" });
+}
 
 function memoryFiles(): ResultsFiles & { readonly written: Map<string, string> } {
   const written = new Map<string, string>();
@@ -444,6 +517,128 @@ describe("a results file", () => {
     expect(results.frames.source).toBe("raf");
     expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
   });
+
+  it("takes a trace with no timed event as no trace, not as zero drops and pauses", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      // What the reducer gives for a file with no events, as Chromium's crashed export left.
+      trace: measured(new TraceReducer().figures()),
+      memory: MEMORY,
+    });
+    const empty = missing(EMPTY_TRACE_REASON);
+    expect(results.run.trace).toEqual(empty);
+    expect(results.frames.presentation).toEqual(empty);
+    expect(results.frames.segments.map(({ presentation }) => presentation)).toEqual([empty, empty]);
+    expect(results.frames.dropped).toEqual(empty);
+    expect(results.gpu.gpuProcess).toEqual(empty);
+    expect(results.mainThread.split).toEqual(empty);
+    expect(results.mainThread.gc).toEqual(empty);
+    expect(results.frames.source).toBe("raf");
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+});
+
+describe("the memory series", () => {
+  it("holds the times in whole ms and each reading in whole KiB, with its peak in bytes", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: measured(traceOf()),
+      memory: gappedMemory(),
+    });
+    const { series } = results.memory;
+    expect(series.tMs).toEqual([238, 1238, 2238, 3238, 4238, 5238]);
+    expect(series.appKiB).toEqual(
+      measured({ samples: [800, 800, 800, 800, 800, 800].map((mib) => mib * 1024), gaps: [] }),
+    );
+    expect(series.nvidiaDeviceKiB.value?.samples).toEqual(
+      [400, 401, 402, 403, 404, 405].map((mib) => mib * 1024),
+    );
+    expect(results.memory.peakAppBytes).toEqual(measured(800 * MIB));
+    expect(results.memory.peakRendererPrivateBytes).toEqual(measured(305 * MIB));
+    expect(results.memory.peakDrmResidentBytes).toEqual(measured(105 * MIB));
+    expect(results.memory.peakNvidiaDeviceLessBaselineBytes).toEqual(measured((405 - 168) * MIB));
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("writes -1 at a gap's samples and nowhere else, one gap a reason and stretch", () => {
+    const series = memorySeries(gappedMemory());
+    expect(series.rendererPrivateKiB).toEqual(
+      measured({
+        samples: [-1, -1, 302 * 1024, 303 * 1024, -1, 305 * 1024],
+        gaps: [
+          { from: 0, to: 1, reason: "the renderer reported no memory" },
+          { from: 4, to: 4, reason: "the renderer reported no memory" },
+        ],
+      }),
+    );
+    expect(series.drmResidentKiB).toEqual(
+      measured({
+        samples: [-1, -1, 102 * 1024, -1, 104 * 1024, 105 * 1024],
+        gaps: [
+          { from: 0, to: 1, reason: "no GPU process" },
+          { from: 3, to: 3, reason: "fdinfo unreadable" },
+        ],
+      }),
+    );
+  });
+
+  it("writes a reading missing all run once, as null with its reason", () => {
+    const series = memorySeries(MEMORY);
+    expect(series.drmResidentKiB).toEqual(missing(NO_DRM));
+    expect(series.drmTotalKiB).toEqual(missing(NO_DRM));
+    expect(series.nvidiaGpuProcessKiB).toEqual(missing("nvidia-smi does not list the GPU process"));
+    const none = memorySeries([]);
+    expect(none.tMs).toEqual([]);
+    expect(none.appKiB).toEqual(missing("no memory sample"));
+  });
+
+  it("keeps a 3,600-sample run's file under 512,000 bytes once Prettier formats it", async () => {
+    const formatted = await prettier(fileOf(longRun(3600)));
+    expect(Buffer.byteLength(formatted, "utf8")).toBeLessThan(512_000);
+  });
+
+  it.each([
+    ["a long run's", () => longRun(600)],
+    ["a run with gaps'", gappedMemory],
+    ["a run with no sample's", () => []],
+  ])("measures %s formatted size as Prettier formats the file", async (_run, memory) => {
+    const text = fileOf(memory());
+    expect(formatAsPrettier(text)).toBe(await prettier(text));
+  });
+
+  it("writes a file over the limit in full and warns of its size", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const files = memoryFiles();
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: measured(traceOf()),
+      memory: longRun(8000),
+    });
+    const paths = await writeResults("/runs", results, files);
+    const text = files.written.get(paths.json) ?? "";
+    expect(text).toBe(`${JSON.stringify(results, null, 2)}\n`);
+    expect(results.memory.series.tMs).toHaveLength(8000);
+    const bytes = Buffer.byteLength(await prettier(text), "utf8");
+    expect(bytes).toBeGreaterThan(ADDED_FILE_LIMIT_BYTES);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining(`is ${bytes} B once formatted`),
+    );
+  });
+
+  it("does not warn of a file under the limit", async () => {
+    const warn = vi.spyOn(console, "warn");
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: measured(traceOf()),
+      memory: MEMORY,
+    });
+    await writeResults("/runs", results, memoryFiles());
+    expect(warn).not.toHaveBeenCalled();
+  });
 });
 
 describe("a native replay's results", () => {
@@ -466,6 +661,36 @@ describe("a native replay's results", () => {
   });
 });
 
+/** The gapped run's file with some of its series replaced. */
+function withSeries(overrides: Readonly<Record<string, unknown>>): unknown {
+  const results = buildResults({
+    run: runOf(),
+    report: reportOf(),
+    trace: measured(traceOf()),
+    memory: gappedMemory(),
+  });
+  return JSON.parse(
+    JSON.stringify({
+      ...results,
+      memory: { ...results.memory, series: { ...results.memory.series, ...overrides } },
+    }),
+  );
+}
+
+/** The gapped run's renderer gaps. */
+const RENDERER_GAPS = [
+  { from: 0, to: 1, reason: "the renderer reported no memory" },
+  { from: 4, to: 4, reason: "the renderer reported no memory" },
+];
+
+/** KiB in a MiB, for readings written in KiB. */
+const KIB_PER_MIB = 1024;
+
+/** A renderer column with other samples or gaps than the gapped run's. */
+function renderer(samples: ReadonlyArray<unknown>, gaps: ReadonlyArray<unknown> = RENDERER_GAPS) {
+  return measured({ samples, gaps });
+}
+
 describe("the schema check", () => {
   it("refuses a figure that is null without a reason", () => {
     const results = buildResults({
@@ -480,10 +705,233 @@ describe("the schema check", () => {
     expect(validateResults(broken)).toEqual(["uploads.bytes is null without a reason"]);
   });
 
+  it("refuses a figure read from the trace when there is no trace", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: missing("the trace was not recorded"),
+      memory: MEMORY,
+    });
+    const broken: unknown = JSON.parse(
+      JSON.stringify({
+        ...results,
+        frames: { ...results.frames, dropped: measured(0) },
+        mainThread: { ...results.mainThread, gc: measured([]) },
+      }),
+    );
+    expect(validateResults(broken)).toEqual([
+      "frames.dropped is measured without a trace (the trace was not recorded)",
+      "mainThread.gc is measured without a trace (the trace was not recorded)",
+    ]);
+  });
+
+  it("refuses a client run's presentation times when there is no trace", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: missing("the trace was not recorded"),
+      memory: MEMORY,
+    });
+    const [first, ...rest] = results.frames.segments;
+    if (first === undefined) {
+      throw new Error("the report has no segment");
+    }
+    const broken: unknown = JSON.parse(
+      JSON.stringify({
+        ...results,
+        frames: {
+          ...results.frames,
+          presentation: results.frames.raf,
+          segments: [{ ...first, presentation: first.raf }, ...rest],
+        },
+      }),
+    );
+    expect(validateResults(broken)).toEqual([
+      "frames.presentation is measured without a trace (the trace was not recorded)",
+      "frames.segments[0].presentation is measured without a trace (the trace was not recorded)",
+    ]);
+  });
+
+  it("accepts a native replay's own presentation times without a trace", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: missing("a native replay has no trace"),
+      memory: MEMORY,
+    });
+    const replay: DescentResults = {
+      ...results,
+      run: { ...results.run, launchMode: "native-replay" },
+      frames: { ...results.frames, source: "presentation", presentation: results.frames.raf },
+    };
+    expect(validateResults(JSON.parse(JSON.stringify(replay)))).toEqual([]);
+  });
+
   it("refuses another schema", () => {
     expect(validateResults({ schema: "x", version: 1 })).toContain(
       "schema is not hyperion.descent-spike.results",
     );
+  });
+
+  it("refuses version 1's memory samples", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: measured(traceOf()),
+      memory: MEMORY,
+    });
+    const { series: _series, ...peaks } = results.memory;
+    const v1: unknown = JSON.parse(
+      JSON.stringify({ ...results, version: 1, memory: { samples: MEMORY, ...peaks } }),
+    );
+    expect(validateResults(v1)).toEqual([
+      `version is not ${RESULTS_VERSION}`,
+      "memory.series is missing",
+    ]);
+  });
+
+  it.each<readonly [string, Readonly<Record<string, unknown>>, string]>([
+    [
+      "times that are not whole ms",
+      { tMs: [238.5, 1238, 2238, 3238, 4238, 5238] },
+      "memory.series.tMs is not a list of whole ms",
+    ],
+    [
+      "a column shorter than the times",
+      { rendererPrivateKiB: renderer([-1, -1, 302 * KIB_PER_MIB, 303 * KIB_PER_MIB, -1]) },
+      "memory.series.rendererPrivateKiB has 5 samples, not tMs's 6",
+    ],
+    [
+      "-1 outside a gap",
+      { rendererPrivateKiB: renderer([-1, -1, -1, 303 * KIB_PER_MIB, -1, 305 * KIB_PER_MIB]) },
+      "memory.series.rendererPrivateKiB.value.samples[2] is -1 outside a gap",
+    ],
+    [
+      "a reading within a gap",
+      {
+        rendererPrivateKiB: renderer([
+          -1,
+          301 * KIB_PER_MIB,
+          302 * KIB_PER_MIB,
+          303 * KIB_PER_MIB,
+          -1,
+          305 * KIB_PER_MIB,
+        ]),
+      },
+      "memory.series.rendererPrivateKiB.value.samples[1] is within a gap but not -1",
+    ],
+    [
+      "a reading that is not a whole number of KiB",
+      {
+        rendererPrivateKiB: renderer([
+          -1,
+          -1,
+          302 * KIB_PER_MIB + 0.5,
+          303 * KIB_PER_MIB,
+          -1,
+          305 * KIB_PER_MIB,
+        ]),
+      },
+      "memory.series.rendererPrivateKiB.value.samples[2] is not a whole number of KiB",
+    ],
+    [
+      "a gap past the last sample",
+      {
+        rendererPrivateKiB: renderer(
+          [-1, -1, 302 * KIB_PER_MIB, 303 * KIB_PER_MIB, -1, 305 * KIB_PER_MIB],
+          [{ from: 4, to: 6, reason: "the renderer reported no memory" }],
+        ),
+      },
+      "memory.series.rendererPrivateKiB.value.gaps[0] is not a stretch of samples with a reason, after the gap before it",
+    ],
+    [
+      "gaps out of order",
+      {
+        rendererPrivateKiB: renderer(
+          [-1, -1, 302 * KIB_PER_MIB, 303 * KIB_PER_MIB, -1, 305 * KIB_PER_MIB],
+          RENDERER_GAPS.toReversed(),
+        ),
+      },
+      "memory.series.rendererPrivateKiB.value.gaps[1] is not a stretch of samples with a reason, after the gap before it",
+    ],
+    [
+      "a gap without a reason",
+      {
+        rendererPrivateKiB: renderer(
+          [-1, -1, 302 * KIB_PER_MIB, 303 * KIB_PER_MIB, 304 * KIB_PER_MIB, 305 * KIB_PER_MIB],
+          [{ from: 0, to: 1, reason: "" }],
+        ),
+      },
+      "memory.series.rendererPrivateKiB.value.gaps[0] is not a stretch of samples with a reason, after the gap before it",
+    ],
+    [
+      "consecutive gaps of one reason left apart",
+      {
+        rendererPrivateKiB: renderer(
+          [-1, -1, 302 * KIB_PER_MIB, 303 * KIB_PER_MIB, -1, 305 * KIB_PER_MIB],
+          [
+            { from: 0, to: 0, reason: "the renderer reported no memory" },
+            { from: 1, to: 1, reason: "the renderer reported no memory" },
+            { from: 4, to: 4, reason: "the renderer reported no memory" },
+          ],
+        ),
+      },
+      "memory.series.rendererPrivateKiB.value.gaps[1] continues the gap before it for the same reason",
+    ],
+    [
+      "a column with no reading that is not null",
+      {
+        drmTotalKiB: measured({
+          samples: [-1, -1, -1, -1, -1, -1],
+          gaps: [{ from: 0, to: 5, reason: "no GPU process" }],
+        }),
+      },
+      "memory.series.drmTotalKiB has no reading: a reading missing all run is null with its reason",
+    ],
+    [
+      "a column null without a reason",
+      { gpuProcessKiB: { value: null, reason: "" } },
+      "memory.series.gpuProcessKiB is null without a reason",
+    ],
+    [
+      "a column that is neither null nor samples",
+      { gpuProcessKiB: measured([1, 2, 3, 4, 5, 6]) },
+      "memory.series.gpuProcessKiB is neither null nor samples with their gaps",
+    ],
+  ])("refuses %s in the memory series", (_case, overrides, problem) => {
+    expect(validateResults(withSeries(overrides))).toEqual([problem]);
+  });
+
+  it.each<readonly [string, string, unknown, string]>([
+    [
+      "a peak other than its column's maximum × 1024",
+      "peakAppBytes",
+      measured(800 * MIB + 1),
+      `memory.peakAppBytes is not appKiB's maximum × 1024 (${800 * MIB} B)`,
+    ],
+    [
+      "a peak of a column with no reading",
+      "peakDrmResidentBytes",
+      measured(0),
+      "memory.peakDrmResidentBytes is not null, but drmResidentKiB has no reading",
+    ],
+    [
+      "nvidia-smi's peak less its baseline above the device's maximum",
+      "peakNvidiaDeviceLessBaselineBytes",
+      measured(701 * MIB),
+      "memory.peakNvidiaDeviceLessBaselineBytes is above nvidiaDeviceKiB's maximum",
+    ],
+  ])("refuses %s", (_case, key, peak, problem) => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: measured(traceOf()),
+      memory: MEMORY,
+    });
+    const broken: unknown = JSON.parse(
+      JSON.stringify({ ...results, memory: { ...results.memory, [key]: peak } }),
+    );
+    expect(validateResults(broken)).toEqual([problem]);
   });
 
   it("refuses a file that is not an object", () => {

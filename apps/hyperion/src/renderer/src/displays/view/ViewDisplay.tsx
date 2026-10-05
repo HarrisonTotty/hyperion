@@ -25,6 +25,13 @@ import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { pick } from "../../spatial/pick";
 import { useThrottledValue } from "../../spatial/useThrottledValue";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
+import { BudgetedScale, drawsInFrame, PrimaryFrameTimes } from "../../view/budget/framePacing";
+import {
+  photorealisticAllowed,
+  type ViewBudget,
+  viewBudgets,
+  type ViewSpec,
+} from "../../view/budget/viewBudget";
 import {
   flightKey,
   flightKeyAction,
@@ -37,14 +44,14 @@ import {
   offeredPresets,
   type RenderStyle,
   type ViewId,
-  viewId,
 } from "../../view/camera/state";
 import {
+  type GpuTimer,
   type GraphicsAnnunciation,
   graphicsAnnunciation,
+  type GraphicsStatus,
   useGraphicsStatus,
 } from "../../view/engine/status";
-import type { CameraPose } from "../../view/camera/pose";
 import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import {
   exposureScale,
@@ -57,21 +64,16 @@ import {
   serverSceneAtFrame,
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
-import { cameraSceneOf, type ViewScene, type ViewStar } from "../../view/scene/model";
+import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
 import type { BakedCube } from "../../view/sky/bake";
 import { skyCubeCacheOf } from "../../view/sky/cache";
-import { cameraFromObserverM } from "../../view/sky/camera";
 import { SkyCubeLayer } from "../../view/sky/cubeLayer";
-import { skySpriteStars } from "../../view/sky/sprites";
-import {
-  buildWireframeDrawList,
-  type DrawAnchor,
-  type SpriteStar,
-} from "../../view/wireframe/drawList";
+import { buildWireframeDrawList, type DrawAnchor } from "../../view/wireframe/drawList";
 import { WireframeRenderer } from "../../view/wireframe/submit";
 import type { LitRegime } from "../../view/bodies/regime";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
+import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
 import {
@@ -85,7 +87,12 @@ import { HostDiscLayer } from "../../view/sky/disc";
 import { CameraControls } from "./CameraControls";
 import { litLabelsOf, photorealFrame } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
-import { availabilityOf, styleRefusals } from "./styleRefusals";
+import { availabilityOf, type StyleRefusals, styleRefusals, withPermission } from "./styleRefusals";
+import { InstrumentControls } from "./InstrumentControls";
+import { InstrumentsPanel } from "./InstrumentsPanel";
+import { InstrumentView } from "./InstrumentView";
+import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
+import { PRIMARY_NAME, PRIMARY_VIEW_ID, PRIMARY_VIEW_NAME } from "./viewNames";
 import { ExposurePanel } from "./ExposurePanel";
 import { MeterControl } from "./MeterControl";
 import {
@@ -96,7 +103,7 @@ import {
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { bakeInputOf, type DrawnSky, useViewSky } from "./useViewSky";
-import { SETTINGS } from "../../view/quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -104,6 +111,7 @@ import {
   type ViewEngineState,
 } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
+import { skySprites } from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
@@ -137,13 +145,66 @@ const READOUT_INTERVAL_MS = 250;
 const KEY_LEGEND = "W/S A/D R/F MOVE · ARROWS Q/E TURN · PAGE UP/DOWN RATE";
 
 /**
- * The name the stage's view is created with: the engine's name for it, and the one a
+ * The name the stage's primary view is created with: the engine's name for it, and the one a
  * `view-refused` fault carries, by which the plate shows that fault for this view alone.
  */
-const VIEW_NAME = "view";
+const VIEW_NAME = PRIMARY_VIEW_NAME;
 
-/** The view's identity in the scene's camera reports: one local view, the display's. */
-const VIEW_ID: ViewId = viewId(VIEW_NAME);
+/** The primary view's identity in the scene's camera reports and the budgets. */
+const VIEW_ID: ViewId = PRIMARY_VIEW_ID;
+
+/**
+ * An instrument slot's height and width on the stage before one is open, rem (decision-r07-t19,
+ * item 2a): its title and padding, and its 15 × 11.25 rem canvas beside a label block up to 18 rem
+ * wide, whose dozen lines (the stars' reading over three) set the height, 15.9 rem as measured.
+ */
+const INSTRUMENT_SLOT_REM = { heightRem: 16, widthRem: 35 } as const;
+
+/** The insets about and between the slots on the stage, rem. */
+const INSTRUMENT_INSET_REM = 0.5;
+
+/**
+ * The least width left to the primary's label block beside the slots, rem: the 230 px it had at
+ * 1280 × 720 with both open, which the ruling accepted.
+ */
+const PRIMARY_LABEL_MIN_REM = 14;
+
+/**
+ * Whether the stage has room for one more instrument slot below the `open` ones, beside the
+ * primary's label block at its least width; `true` before the stage is laid out.
+ *
+ * @param column - The open slots' column as laid out, whose height a new slot is taken to match
+ *   (a slot's label block, not its canvas, sets its height), or `null` before it is measured.
+ */
+function roomForSlot(stage: ElementSize | null, column: ElementSize | null, open: number): boolean {
+  if (stage === null || stage.remPx <= 0) {
+    return true;
+  }
+  const inset = INSTRUMENT_INSET_REM * stage.remPx;
+  const usedPx = open === 0 || column === null ? 0 : column.heightPx + inset;
+  const slotPx =
+    open === 0 || column === null
+      ? INSTRUMENT_SLOT_REM.heightRem * stage.remPx
+      : column.heightPx / open;
+  const widthRem = stage.widthPx / stage.remPx;
+  return (
+    inset + usedPx + slotPx + inset <= stage.heightPx &&
+    INSTRUMENT_SLOT_REM.widthRem + 3 * INSTRUMENT_INSET_REM + PRIMARY_LABEL_MIN_REM <= widthRem
+  );
+}
+
+/**
+ * A graphics fault to show on a view's plate: the standing fault, unless it is another view's
+ * refusal, which only that view's plate shows (decided 2026-10-02).
+ */
+function faultFor(
+  graphics: GraphicsStatus,
+  annunciation: GraphicsAnnunciation | null,
+  viewName: string,
+): string | null {
+  const otherView = graphics.fault?.kind === "view-refused" && graphics.fault.viewName !== viewName;
+  return annunciation?.standing === "fault" && !otherView ? annunciation.text : null;
+}
 
 /** No stars, one array for every frame without an answer. */
 const NO_STARS: ReadonlyArray<ViewStar> = [];
@@ -167,6 +228,11 @@ const NOT_MADE: GraphicsAnnunciation = {
 interface ViewDisplayProps {
   /** Where the engine comes from: R01's by default, a fake in a test. */
   readonly engineSource?: ViewEngineSource | undefined;
+  /**
+   * The quality setting the views are budgeted at (R07.T19): `high` by default, until the client
+   * offers `low` (R07.T17), which also draws the sky and the photorealistic frame at it.
+   */
+  readonly setting?: QualitySetting | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -204,6 +270,54 @@ interface ViewStageProps {
   readonly countLine: string | null;
   /** The open universe, about which the sky is asked (R06), or `null`. */
   readonly universe: UniverseIdHex | null;
+  /** The quality setting the views are budgeted at. */
+  readonly setting: QualitySetting;
+}
+
+/** What the drawing loop reads of the several views' budgets, kept current by an effect. */
+interface BudgetInputs {
+  /** Each view's budget (R07.T18's `viewBudgets`), the primary's and the open instruments'. */
+  readonly budgets: ReadonlyMap<ViewId, ViewBudget>;
+  /** The GPU timer's state: `absent` feeds the resolution controller the frame interval. */
+  readonly timer: GpuTimer;
+  /** Draws the instruments in a frame the primary draws. */
+  readonly instruments: (frame: InstrumentsFrame) => void;
+}
+
+/** An instrument view with its standing in the stage's budgets and graphics (R07.T19). */
+interface InstrumentViewState {
+  readonly slot: Instrument;
+  /** Why each style is held back for it: its adapter's, then (while open) the budget's. */
+  readonly refusals: StyleRefusals;
+  /** The styles it may switch to. */
+  readonly availability: StyleAvailability;
+  /** The style its budget draws. */
+  readonly budgetStyle: RenderStyle;
+  /** A graphics fault for its plate, or `null`. */
+  readonly fault: string | null;
+}
+
+/** What the view keys' listener reads of the stage, kept current by an effect. */
+interface KeyTargets {
+  /** Commands a view: the primary, or an open instrument. */
+  readonly commandView: (view: ViewId, action: ViewKeyAction) => void;
+  readonly primaryCanvas: HTMLCanvasElement | null;
+  /** Each instrument's canvas while mounted. */
+  readonly canvases: ReadonlyArray<{
+    readonly id: ViewId;
+    readonly canvas: HTMLCanvasElement | null;
+  }>;
+  /** The `CONTROLS` view, which a key pressed off a canvas acts on. */
+  readonly controlsView: ViewId;
+}
+
+/** A view's budget, which `viewBudgets` gives every view listed. */
+function budgetOf(budgets: ReadonlyMap<ViewId, ViewBudget>, id: ViewId): ViewBudget {
+  const budget = budgets.get(id);
+  if (budget === undefined) {
+    throw new Error(`the view ${id} has no budget`);
+  }
+  return budget;
 }
 
 /** What the drawing loop reads of the display, kept current by an effect. */
@@ -314,6 +428,7 @@ function ViewStage({
   stars,
   countLine,
   universe,
+  setting,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
@@ -333,9 +448,9 @@ function ViewStage({
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
-  const refusals = styleRefusals(graphics, published.photoreal);
-  const availability = availabilityOf(refusals);
   const { ref: stageRef, size } = useElementSize();
+  // The open instrument slots' column, by which the room for one more is reckoned (R07.T19).
+  const { ref: slotsRef, size: slotsSize } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
   const [viewRefused, setViewRefused] = useState(false);
@@ -364,6 +479,57 @@ function ViewStage({
     widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
   });
   const skyDrawn = viewSky.drawn;
+
+  // The instruments, and every view's budget on the setting (R07.T19).
+  const [operated, setOperated] = useState<ViewId>(VIEW_ID);
+  const primaryRun = useCallback((): ViewRun => runRef.current, []);
+  const instruments = useInstruments({
+    engineState,
+    primaryRun,
+    removeCamera: server?.removeCamera ?? null,
+    easedMoves,
+    reducedMotion,
+    sky: viewSky.drawn?.model ?? null,
+    exposure,
+  });
+  const specs: ReadonlyArray<ViewSpec> = [
+    { id: VIEW_ID, slot: "primary", style: published.run.camera.style },
+    ...instruments.specs,
+  ];
+  const budgets = viewBudgets(specs, setting);
+  const refusals = withPermission(
+    styleRefusals(graphics, published.photoreal),
+    photorealisticAllowed(specs, setting, VIEW_ID),
+  );
+  const availability = availabilityOf(refusals);
+  // Each instrument with its style refusals (its adapter's first, then the budget's), drawn style
+  // and graphics fault, worked out here once from the specs, the setting and the graphics. While no
+  // view can be drawn the instruments are held, as their canvases are not mounted.
+  const drawing = engineState.kind === "ready" && !viewRefused;
+  const instrumentViews: ReadonlyArray<InstrumentViewState> = instruments.slots.map((slot) => {
+    const adapter = styleRefusals(graphics, slot.shown?.photoreal ?? "idle");
+    // A closed instrument has no budget to ask, and nothing to switch.
+    const slotRefusals = slot.open
+      ? withPermission(adapter, photorealisticAllowed(specs, setting, slot.id))
+      : adapter;
+    return {
+      slot,
+      refusals: slotRefusals,
+      availability: availabilityOf(slotRefusals),
+      budgetStyle: budgets.get(slot.id)?.style ?? "wireframe",
+      fault: faultFor(graphics, annunciation, slot.id),
+    };
+  });
+  // The CONTROLS view: the side column's list and controls, and the single keys pressed off a
+  // canvas, act on it; an instrument closed meanwhile, or no view drawn, leaves PRIMARY there.
+  const operatedView = drawing
+    ? (instrumentViews.find(
+        ({ slot }) => slot.open && slot.id === operated && slot.shown !== null,
+      ) ?? null)
+    : null;
+  const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
+  const controlledShown = operatedView?.slot.shown ?? null;
+  const fault = faultFor(graphics, annunciation, VIEW_NAME);
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
@@ -412,6 +578,16 @@ function ViewStage({
     serverRef.current = server;
   }, [server]);
 
+  // The loop reads the budgets through a ref, current after every commit (R07.T19).
+  const budgetRef = useRef<BudgetInputs>({
+    budgets,
+    timer: graphics.timer,
+    instruments: instruments.frame,
+  });
+  useLayoutEffect(() => {
+    budgetRef.current = { budgets, timer: graphics.timer, instruments: instruments.frame };
+  }, [budgets, graphics.timer, instruments.frame]);
+
   // The view's camera is reported to the server's scene while the stage draws it (R03.T14).
   const removeCamera = server?.removeCamera ?? null;
   useEffect(() => {
@@ -446,6 +622,19 @@ function ViewStage({
     // The photorealistic style (R07.T8.a): its frame, and R06's band and host-disc layers, made
     // again after a device loss as every handle is.
     const photoreal = new PhotorealRenderer(engine, VIEW_NAME);
+    // Each of the primary's frames with every view's GPU time in it, and its internal scale from
+    // its budget and resolution controller (R07.T19; decision-r07-t18, item 1).
+    const primaryTimes = new PrimaryFrameTimes(engine.passTimesFrame);
+    const primaryScale = new BudgetedScale();
+    const unsubscribeTimes = engine.onPassTimes((times) => {
+      primaryTimes.passTimes(times);
+    });
+    const unsubscribeTimesRestored = engine.onRestored(() => {
+      primaryTimes.reset(engine.passTimesFrame);
+    });
+    // Animation frames since the loop started, by which each view's rate is paced.
+    let animationFrame = -1;
+    let primaryMs: number | null = null;
     let layers = skyLayersOf(engine);
     let bandFor: DrawnSky | null = null;
     let regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
@@ -511,6 +700,24 @@ function ViewStage({
     let anchors: ReadonlyArray<DrawAnchor> = [];
     let frame = 0;
     const tick = (nowMs: number): void => {
+      animationFrame += 1;
+      const paced = budgetRef.current;
+      const primaryBudget = budgetOf(paced.budgets, VIEW_ID);
+      // A 30 Hz primary draws on every second vsync, and its instruments only in its frames.
+      if (!drawsInFrame(animationFrame, primaryBudget.rateHz)) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      // The previous primary frame's resolves end here, every view's counted in; the frames whose
+      // passes have all resolved since the last are the controller's.
+      primaryTimes.startFrame(engine.passTimesFrame);
+      const gpuFramesMs = primaryTimes.take();
+      const renderScale = primaryScale.update(
+        primaryBudget,
+        paced.timer === "absent" ? undefined : gpuFramesMs,
+        primaryMs === null ? 0 : nowMs - primaryMs,
+      );
+      primaryMs = nowMs;
       const dtS = lastMs === null ? 0 : (nowMs - lastMs) / 1000;
       lastMs = nowMs;
       const inputs = inputsRef.current;
@@ -577,15 +784,17 @@ function ViewStage({
               );
               bandFor = inputs.sky;
             }
+            // The scene target at the render resolution times the budget's or controller's scale.
+            const internal = internalViewport(viewport, renderScale);
             const plan = photoreal.render(
               view,
               photorealFrame({
                 run,
                 pose: camera.pose,
-                viewport,
+                viewport: internal,
                 setting: "high",
                 exposureScale: exposed,
-                list,
+                list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
                 sky: inputs.sky,
                 band: inputs.sky === null ? null : layers.band,
                 discs: layers.discs,
@@ -643,7 +852,21 @@ function ViewStage({
           }
         }
       }
-      if (nowMs - publishedMs >= READOUT_INTERVAL_MS) {
+      // The readouts change at 4 Hz, every view's in the same frame, so React renders them once.
+      const publish = nowMs - publishedMs >= READOUT_INTERVAL_MS;
+      // The instruments in the primary's frame, so that their passes count in it.
+      paced.instruments({
+        nowMs,
+        frame: animationFrame,
+        publish,
+        primary: runRef.current,
+        budgets: paced.budgets,
+        exposure: inputs.exposure,
+        stars: inputs.stars,
+        reportCamera:
+          run.source.kind === "server" && current !== null ? current.reportCamera : null,
+      });
+      if (publish) {
         publishedMs = nowMs;
         // The control the controller moved to reaches the display's state at the readout rate,
         // when its readout would change: its kind, or its EV100 to the readout's 0.1.
@@ -665,6 +888,8 @@ function ViewStage({
     frame = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(frame);
+      unsubscribeTimes();
+      unsubscribeTimesRestored();
       renderer.dispose();
       photoreal.dispose();
       layers.band.dispose();
@@ -696,7 +921,35 @@ function ViewStage({
     [easedMoves, reducedMotion, availability],
   );
 
-  // The view's single keys act from anywhere on the display but a text field (keys.ts).
+  // Each view's command, through the styles its adapter and the budget allow it (R07.T19).
+  const commandInstrument = instruments.command;
+  const commandView = (view: ViewId, action: ViewKeyAction): void => {
+    const each = instrumentViews.find(({ slot }) => slot.id === view && slot.open);
+    if (each === undefined) {
+      command(action);
+      return;
+    }
+    commandInstrument(each.slot.slot, action, each.availability);
+  };
+  // The keys' listener reads the latest views and commands through a ref, current after every
+  // commit, so that it is added once.
+  const keysRef = useRef<KeyTargets>({
+    commandView,
+    primaryCanvas: canvas,
+    canvases: [],
+    controlsView,
+  });
+  useLayoutEffect(() => {
+    keysRef.current = {
+      commandView,
+      primaryCanvas: canvas,
+      canvases: instruments.slots.map((slot) => ({ id: slot.id, canvas: slot.canvas })),
+      controlsView,
+    };
+  });
+
+  // The view's single keys act from anywhere on the display but a text field (keys.ts): on the
+  // focused canvas's view, which becomes the CONTROLS view first, and else on the CONTROLS view.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       const action = viewKeyAction(event);
@@ -704,24 +957,35 @@ function ViewStage({
         return;
       }
       event.preventDefault();
-      command(action);
+      const keys = keysRef.current;
+      const onCanvas =
+        event.target !== null && event.target === keys.primaryCanvas
+          ? VIEW_ID
+          : (keys.canvases.find((each) => each.canvas !== null && each.canvas === event.target)
+              ?.id ?? null);
+      if (onCanvas !== null) {
+        setOperated(onCanvas);
+      }
+      keys.commandView(onCanvas ?? keys.controlsView, action);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [command]);
+  }, []);
 
   const onCanvasKeyDown = (event: KeyboardEvent<HTMLCanvasElement>): void => {
     const held = flightKey(event);
     if (held !== null) {
       event.preventDefault();
+      setOperated(VIEW_ID);
       heldRef.current.add(held);
       return;
     }
     const action = flightKeyAction(event);
     if (action !== null) {
       event.preventDefault();
+      setOperated(VIEW_ID);
       command(action);
     }
   };
@@ -752,6 +1016,8 @@ function ViewStage({
       PICK_REM * remPx * ratio,
     );
     const row = rows.find((each) => each.key === picked);
+    // A press on a canvas makes its view the CONTROLS view (decision-r07-t19, item 2d).
+    setOperated(VIEW_ID);
     if (row !== undefined) {
       setSelection(row.target);
     }
@@ -770,10 +1036,30 @@ function ViewStage({
           annunciation === null || graphics.condition.kind === "acquiring"
           ? NOT_MADE
           : annunciation;
-  // A refused view's fault is shown on its own view's plate alone (decided 2026-10-02).
-  const otherView =
-    graphics.fault?.kind === "view-refused" && graphics.fault.viewName !== VIEW_NAME;
-  const fault = annunciation?.standing === "fault" && !otherView ? annunciation.text : null;
+  const openSlots = instruments.slots.filter((slot) => slot.open).length;
+  // Closing the CONTROLS instrument returns CONTROLS to PRIMARY. Its canvas never holds the focus
+  // then, since CLOSE takes it.
+  const closeInstrument = (id: ViewId): void => {
+    const slot = instruments.slots.find((each) => each.id === id);
+    if (slot === undefined) {
+      return;
+    }
+    if (operated === id) {
+      setOperated(VIEW_ID);
+    }
+    instruments.close(slot.slot);
+  };
+
+  // The scene's lighting and lit bodies' labels, which every view's photorealistic statements read.
+  const lighting = lightingState(
+    hostLights(
+      shown.run.scene,
+      sceneHostDiscs(shown.run.scene, viewSky.drawn?.model.response.hosts ?? null),
+    ),
+    viewSky.pending,
+  );
+  const litLabels = litLabelsOf(shown.run.scene);
+  const stale = server?.stale === true;
 
   return (
     <div className="view">
@@ -783,8 +1069,13 @@ function ViewStage({
             <ViewCanvas
               canvasRef={setCanvas}
               stageRef={stageRef}
-              accessibleName={`VIEW, ${styleName(shown.drawnStyle)}, ${PRESET_NAMES[shown.run.camera.preset]}`}
-              describedBy={legendId}
+              accessibleName={[
+                "VIEW",
+                styleName(shown.drawnStyle),
+                PRIMARY_NAME,
+                PRESET_NAMES[shown.run.camera.preset],
+              ].join(", ")}
+              describedBy={`${legendId}-label ${legendId}`}
               onKeyDown={onCanvasKeyDown}
               onKeyUp={onCanvasKeyUp}
               onBlur={onCanvasBlur}
@@ -794,38 +1085,57 @@ function ViewStage({
                 anchors={shown.anchors}
                 devicePixelRatio={ratio}
                 rows={rows}
-                stale={server?.stale === true}
+                stale={stale}
                 labelRef={placeLabel}
               />
               <ViewLabelBlock
+                id={`${legendId}-label`}
                 lines={withDrawnStyle(
-                  withSkyLine(
-                    labelLines(shown.run, exposure, server?.stale === true),
-                    viewSky.labelValue,
-                  ),
+                  withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
                   shown.drawnStyle,
                 )}
                 statements={[
                   ...labelStatements(shown.run),
-                  ...photorealStatements(
-                    shown.run,
-                    lightingState(
-                      hostLights(
-                        shown.run.scene,
-                        sceneHostDiscs(
-                          shown.run.scene,
-                          viewSky.drawn?.model.response.hosts ?? null,
-                        ),
-                      ),
-                      viewSky.pending,
-                    ),
-                    shown.drawnStyle,
-                    litLabelsOf(shown.run.scene),
-                  ),
+                  ...photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels),
                 ]}
                 countLine={viewSky.labelValue === null ? countLine : null}
                 fault={fault}
               />
+              <div className="view-instruments" ref={slotsRef}>
+                {instrumentViews.map(({ slot, budgetStyle, fault: slotFault }) =>
+                  slot.open ? (
+                    <InstrumentView
+                      key={slot.id}
+                      instrument={slot}
+                      exposure={exposure}
+                      budgetStyle={budgetStyle}
+                      stale={stale}
+                      lighting={lighting}
+                      litLabels={litLabels}
+                      fault={slotFault}
+                      legendId={legendId}
+                      onKeyDown={(event) => {
+                        // A view key on its canvas makes it the CONTROLS view before it acts.
+                        if (instruments.keyDown(slot.slot, event)) {
+                          setOperated(slot.id);
+                        }
+                      }}
+                      onKeyUp={(event) => {
+                        instruments.keyUp(slot.slot, event);
+                      }}
+                      onBlur={() => {
+                        instruments.releaseKeys(slot.slot);
+                      }}
+                      onPick={(target) => {
+                        setOperated(slot.id);
+                        if (target !== null) {
+                          instruments.select(slot.slot, target);
+                        }
+                      }}
+                    />
+                  ) : null,
+                )}
+              </div>
             </ViewCanvas>
             <p className="view__keys" id={legendId}>
               {KEY_LEGEND}
@@ -838,66 +1148,103 @@ function ViewStage({
         )}
       </div>
       <div className="view__side">
-        <section className="panel view-targets" aria-labelledby={`${legendId}-targets`}>
-          <h2 className="panel__title" id={`${legendId}-targets`}>
-            Targets{server?.stale === true ? <StaleMark /> : null}
-          </h2>
-          <ViewMarkList
-            rows={rows}
-            stale={server?.stale === true}
-            selectedKey={selection === null ? null : targetKey(selection)}
-            onSelect={(row) => {
-              setSelection(row.target);
-            }}
-          />
-        </section>
-        <CameraControls
-          preset={shown.run.camera.preset}
-          offered={offeredPresets(cameraSceneOf(shown.run.scene))}
-          fovDeg={shown.run.camera.fovDeg}
-          rateStep={shown.run.camera.free.rateStep}
-          maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
-          easedMoves={easedMoves}
-          reducedMotion={reducedMotion}
-          onAction={command}
-          onEasedMovesChange={onEasedMovesChange}
+        <InstrumentsPanel
+          primary={{ id: VIEW_ID, name: PRIMARY_NAME }}
+          slots={instruments.slots.map((slot) => ({
+            id: slot.id,
+            name: slot.name,
+            open: slot.open,
+            // Room for one more slot below those open (a slot that is open stays open).
+            room: roomForSlot(size, slotsSize, openSlots),
+          }))}
+          operated={controlsView}
+          unavailable={engineLine !== null}
+          onOpen={(id) => {
+            const slot = instruments.slots.find((each) => each.id === id);
+            if (slot !== undefined) {
+              instruments.open(slot.slot);
+            }
+          }}
+          onClose={closeInstrument}
+          onOperate={setOperated}
         />
-        {engineLine === null ? (
-          <StyleControl
-            renderStyle={shown.run.camera.style}
-            refusals={refusals}
-            faulted={published.photoreal === "failed"}
-            onStyle={(style) => {
-              command({ kind: "style", style });
+        {operatedView === null || controlledShown === null ? (
+          <>
+            <section className="panel view-targets" aria-labelledby={`${legendId}-targets`}>
+              <h2 className="panel__title" id={`${legendId}-targets`}>
+                Targets{stale ? <StaleMark /> : null}{" "}
+                <span className="panel__designator">{PRIMARY_NAME}</span>
+              </h2>
+              <ViewMarkList
+                rows={rows}
+                stale={stale}
+                selectedKey={selection === null ? null : targetKey(selection)}
+                onSelect={(row) => {
+                  setSelection(row.target);
+                }}
+              />
+            </section>
+            <CameraControls
+              preset={shown.run.camera.preset}
+              offered={offeredPresets(cameraSceneOf(shown.run.scene))}
+              fovDeg={shown.run.camera.fovDeg}
+              rateStep={shown.run.camera.free.rateStep}
+              maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
+              easedMoves={easedMoves}
+              reducedMotion={reducedMotion}
+              onAction={command}
+              onEasedMovesChange={onEasedMovesChange}
+              designator={PRIMARY_NAME}
+            />
+            {engineLine === null ? (
+              <StyleControl
+                renderStyle={shown.run.camera.style}
+                refusals={refusals}
+                faulted={published.photoreal === "failed"}
+                onStyle={(style) => {
+                  command({ kind: "style", style });
+                }}
+                designator={PRIMARY_NAME}
+              />
+            ) : null}
+          </>
+        ) : (
+          <InstrumentControls
+            key={operatedView.slot.id}
+            designator={operatedView.slot.name}
+            shown={controlledShown}
+            selection={operatedView.slot.selection}
+            stale={stale}
+            easedMoves={easedMoves}
+            reducedMotion={reducedMotion}
+            refusals={operatedView.refusals}
+            faulted={controlledShown.photoreal === "failed"}
+            onAction={(action) => {
+              commandView(operatedView.slot.id, action);
+            }}
+            onEasedMovesChange={onEasedMovesChange}
+            onSelect={(target) => {
+              instruments.select(operatedView.slot.slot, target);
             }}
           />
-        ) : null}
+        )}
         <ExposurePanel
           exposure={exposure}
           meteredEv100={shown.meteredEv100}
           onChange={onExposureChange}
+          designator={PRIMARY_NAME}
         />
         {shown.drawnStyle === "photorealistic" ? (
-          <MeterControl meter={meter} reading={shown.reading} onMeter={onMeterChange} />
+          <MeterControl
+            meter={meter}
+            reading={shown.reading}
+            onMeter={onMeterChange}
+            designator={PRIMARY_NAME}
+          />
         ) : null}
       </div>
     </div>
   );
-}
-
-/**
- * The sky's sprites from the camera this frame: the selection's stars placed from the camera's
- * offset from the sky's observer, in `f64` (R06 Design note 20); `null` where the camera's
- * galactic position is not known.
- */
-function skySprites(
-  sky: DrawnSky,
-  pose: CameraPose,
-  scene: ViewScene,
-): ReadonlyArray<SpriteStar> | null {
-  const offset = cameraFromObserverM(pose, scene, sky.model.request.observer);
-  // A scene that has lost its system's position draws the interim stars, which say so.
-  return offset === null ? null : skySpriteStars(sky.model.stars, sky.selection.sprites, offset);
 }
 
 /**
@@ -948,7 +1295,7 @@ function interimAt(
   return input;
 }
 
-function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) {
+function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE, setting = "high" }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
   if (host === null) {
@@ -1049,6 +1396,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
         universe={universe}
+        setting={setting}
       />
     </div>
   );
@@ -1090,5 +1438,15 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE }: ViewDisplayProps) 
  * universe's range queries about the scene's system (R02.T16), with their count line, asked only
  * where the system's position is known; another craft's mark carries its range and closure rate,
  * and a body drawn as its symbol its designation, as DOM labels over the canvas.
+ *
+ * The `PRIMARY` view fills the stage, and the instrument views `INSTRUMENT 1` and `INSTRUMENT 2`
+ * open in fixed slots over its right edge (plan R07, T19; decision-r07-t19), each with its own
+ * camera, style and selection at the primary's exposure. The `Instruments` panel opens and closes
+ * them and holds `CONTROLS`, the view the `Targets`, `Camera` and `Style` panels and the single
+ * keys pressed off a canvas act on; a press or a view key on a canvas makes its view the one. Every
+ * view is budgeted on the quality setting (R07.T18's `viewBudgets`): paced at its rate, an
+ * instrument only in the primary's frames, a photorealistic view's style held back where the
+ * setting allows no more, and a photorealistic primary's scene target sized by the resolution
+ * controller while instruments are open, from every view's GPU time in the primary's frame.
  */
 export const ViewDisplay = memo(ViewPanels);

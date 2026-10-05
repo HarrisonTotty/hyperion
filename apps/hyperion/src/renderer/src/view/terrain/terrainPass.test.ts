@@ -9,14 +9,18 @@ import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
 import { terrainMaterialSpec } from "./gpu/material";
 import { terrainSlotLayout } from "./slotLayout";
+import type { DrawSet } from "./cache";
+import { vertexDir } from "./cube";
 import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
-import { patchKeyString } from "./patchKey";
-import { planetGeometry } from "./planet";
+import { type Edge, EDGES, edgeNeighbour, parentKey, patchKeyString } from "./patchKey";
+import { planetGeometry, surfacePoint } from "./planet";
 import type { PatchRequest, Selection, SelectionInput } from "./select";
 import {
+  effectiveTauPx,
   morphRangeM,
   RESELECT_FRACTION,
   SELECT_MEASURE,
+  type TerrainFrame,
   type TerrainFrameInput,
   type TerrainPassOptions,
   TerrainPass,
@@ -604,6 +608,166 @@ describe("the morph bands", () => {
     const [start, end] = morphRangeM(PLANET, PLANET.finestLevel, view);
     expect(end).toBeGreaterThan(0);
     expect(start).toBeCloseTo(0.7 * end, 9);
+  });
+});
+
+describe("the morph bands' tolerance", () => {
+  it.each([
+    { name: "τ with no budget binding", tauPx: 1, limitExcess: 0, weight: 1, want: 1 },
+    {
+      name: "τ in a secondary view with no budget binding",
+      tauPx: 4,
+      limitExcess: 0,
+      weight: 0.25,
+      want: 4,
+    },
+    {
+      name: "τ × the excess in the primary view",
+      tauPx: 1,
+      limitExcess: 2.5,
+      weight: 1,
+      want: 2.5,
+    },
+    {
+      name: "τ × the excess ÷ w in a secondary view",
+      tauPx: 4,
+      limitExcess: 1,
+      weight: 0.25,
+      want: 16,
+    },
+    {
+      name: "τ in the primary view where only a secondary wanted the refused split",
+      tauPx: 1,
+      limitExcess: 0.9,
+      weight: 1,
+      want: 1,
+    },
+  ])("is $name", ({ tauPx, limitExcess, weight, want }) => {
+    expect(effectiveTauPx(tauPx, limitExcess, weight)).toBe(want);
+  });
+});
+
+/**
+ * Frames at `view` until the demand is baked out, and returns the last frame. Selection descends
+ * as bakes land (R05.T7's streaming gate).
+ */
+function streamed(pass: TerrainPass, pool: () => FakePool, view: TerrainView): TerrainFrame {
+  let frame = pass.frame(inputAt(view));
+  for (let n = 1; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+    frame = pass.frame(inputAt(view, 16 * n));
+  }
+  return frame;
+}
+
+/** The morph band last written for each drawn patch, by key string, as the shader reads it. */
+function writtenBands(
+  engine: CountingRenderEngine,
+  drawSet: DrawSet,
+): Map<string, [number, number]> {
+  const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+  const f = new Float32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+  const bands = new Map<string, [number, number]>();
+  drawSet.patches.forEach((drawn, i) => {
+    bands.set(drawn.keyString, [f[i * 8 + 4] ?? Number.NaN, f[i * 8 + 5] ?? Number.NaN]);
+  });
+  return bands;
+}
+
+/** Each drawn patch's morph band in `view`, computed at `tauPx`, as `f32`. */
+function bandsAt(view: TerrainView, drawSet: DrawSet, tauPx: number): Map<string, number[]> {
+  const bands = new Map<string, number[]>();
+  for (const { keyString, patch } of drawSet.patches) {
+    const band = morphRangeM(PLANET, patch.key.level, {
+      camera: { positionM: view.cameraM, orientation: view.orientation },
+      fovXRad: view.fovXRad,
+      viewport: view.viewport,
+      weight: 1,
+      tauPx,
+    });
+    bands.set(
+      keyString,
+      band.map((m) => Math.fround(m)),
+    );
+  }
+  return bands;
+}
+
+/** The 65 vertices along `edge` of a patch's grid: column x = 0 or 64, or row y = 0 or 64. */
+function edgeVertices(edge: Edge): Array<readonly [number, number]> {
+  const fixed = edge === "UMin" || edge === "VMin" ? 0 : 64;
+  const column = edge === "UMin" || edge === "UMax";
+  return Array.from({ length: 65 }, (_, n): readonly [number, number] =>
+    column ? [fixed, n] : [n, fixed],
+  );
+}
+
+/** The shader's `morphFactor` with no contact: clamp((d − start) ÷ (end − start), 0, 1). */
+function morphFactor([start, end]: readonly [number, number], distanceM: number): number {
+  const span = end - start;
+  return span > 0 ? Math.min(Math.max((distanceM - start) / span, 0), 1) : 0;
+}
+
+describe("the morph bands under the patch budget", () => {
+  // As in the budget test above: the high setting wants several thousand patches here, beyond 981.
+  const limitedView = { ...tilted(1_500, 1.2), viewport: { widthPx: 1920, heightPx: 1080 } };
+
+  it("are at the setting's τ, bit for bit, while the budget does not bind", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const view = northPole(2_000_000);
+    const frame = streamed(pass, pool, view);
+    expect([frame.selection.limited, frame.selection.limitExcess]).toEqual([false, 0]);
+    expect(frame.drawSet.count).toBeGreaterThan(0);
+    expect(writtenBands(engine, frame.drawSet)).toEqual(
+      bandsAt(view, frame.drawSet, TERRAIN_SETTINGS.high.tauPx),
+    );
+  });
+
+  it("are at τ × max(1, the limit excess) while the budget binds", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const frame = streamed(pass, pool, limitedView);
+    expect(frame.selection.limited).toBe(true);
+    // Above 1, so that τ′ is not the setting's τ.
+    expect(frame.selection.limitExcess).toBeGreaterThan(1);
+    const tauPx = TERRAIN_SETTINGS.high.tauPx * frame.selection.limitExcess;
+    expect(writtenBands(engine, frame.drawSet)).toEqual(bandsAt(limitedView, frame.drawSet, tauPx));
+  });
+
+  it("keep every coarse–fine edge at morph 1 while the budget binds", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const frame = streamed(pass, pool, limitedView);
+    expect(frame.selection.limited).toBe(true);
+    // Past the bands' margin, so that bands at the setting's τ would leave edges unmorphed.
+    expect(frame.selection.limitExcess).toBeGreaterThan(1 + RESELECT_FRACTION);
+    // Nothing stands in, so every drawn patch is a selected leaf.
+    expect(frame.drawSet.standingIn).toBe(0);
+    const bands = writtenBands(engine, frame.drawSet);
+    const camera = limitedView.cameraM;
+    let edges = 0;
+    const unmorphed: string[] = [];
+    for (const { keyString, patch } of frame.drawSet.patches) {
+      const band = bands.get(keyString);
+      if (band === undefined) {
+        throw new Error(`no band was written for ${keyString}`);
+      }
+      for (const edge of EDGES) {
+        // A drawn patch a level coarser across the edge: the fine side's edge vertices lie on it.
+        const coarse = parentKey(edgeNeighbour(patch.key, edge));
+        if (coarse === null || !bands.has(patchKeyString(coarse))) {
+          continue;
+        }
+        edges += 1;
+        for (const [x, y] of edgeVertices(edge)) {
+          // The unmorphed vertex, at the fake pool's flat bake's height of 0.
+          const [px, py, pz] = surfacePoint(PLANET.figure, vertexDir(patch.key, x, y), 0);
+          const k = morphFactor(band, Math.hypot(px - camera.x, py - camera.y, pz - camera.z));
+          if (k !== 1) {
+            unmorphed.push(`${keyString} ${edge} (${x}, ${y}): ${k}`);
+          }
+        }
+      }
+    }
+    expect(edges).toBeGreaterThan(0);
+    expect(unmorphed).toEqual([]);
   });
 });
 

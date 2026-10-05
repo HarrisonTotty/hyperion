@@ -4,6 +4,7 @@ import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import type { Quaternion } from "../camera/pose";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong, multiply, quaternionFromAxisAngle } from "../camera/quaternion";
+import { seededRandom } from "../../test/seededRandom";
 import { goldenLevelTable, UNIT_BOUNDS, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { distanceToBoxM, type PatchBounds, patchBounds, relativeBounds } from "./bounds";
 import { aboveHorizon, frustumOf, horizonCone, inFrustum } from "./cull";
@@ -20,7 +21,7 @@ import {
   rootKey,
 } from "./patchKey";
 import type { GroundContact } from "./grounded";
-import { levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
+import { levelBoundM, levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
 import {
   type HeightRangeLookup,
   inheritedHeightRangeM,
@@ -343,6 +344,7 @@ function levelGaps(keys: readonly PatchKey[]): number {
     demand: [],
     limited: false,
     limitExcess: 0,
+    hiddenBaked: [],
   };
   let gaps = 0;
   for (const k of keys) {
@@ -399,6 +401,188 @@ describe("the restricted quadtree", () => {
       i: 3,
       j: 3,
     });
+  });
+});
+
+/**
+ * The leaf set's algorithm as it was before R05.T7 perf (c), its per-level maps by `patchKeyIndex`
+ * kept here as one map by key string and its neighbours found as keys: the oracle the
+ * tree-walking leaf set must match split for split.
+ */
+class ReferenceLeafSet {
+  private readonly nodes = new Map<
+    string,
+    { key: PatchKey; children: (PatchKey | null)[] | null }
+  >();
+  private journal: PatchKey[] | null = null;
+
+  addRoot(key: PatchKey): void {
+    this.nodes.set(patchKeyString(key), { key, children: null });
+  }
+
+  begin(): void {
+    this.journal = [];
+  }
+
+  commit(): void {
+    this.journal = null;
+  }
+
+  rollback(): void {
+    for (const key of (this.journal ?? []).toReversed()) {
+      const node = this.nodes.get(patchKeyString(key));
+      for (const child of node?.children ?? []) {
+        if (child !== null) {
+          this.nodes.delete(patchKeyString(child));
+        }
+      }
+      if (node !== undefined) {
+        node.children = null;
+      }
+    }
+    this.journal = null;
+  }
+
+  /** The leaves, depth first from face 0 in `childKeys`' order. */
+  leaves(): PatchKey[] {
+    const out: PatchKey[] = [];
+    const visit = (key: PatchKey): void => {
+      const node = this.nodes.get(patchKeyString(key));
+      if (node === undefined) {
+        return;
+      }
+      if (node.children === null) {
+        out.push(key);
+        return;
+      }
+      for (const child of node.children) {
+        if (child !== null) {
+          visit(child);
+        }
+      }
+    };
+    for (const face of FACES) {
+      visit(rootKey(face));
+    }
+    return out;
+  }
+
+  coarserLeaf(key: PatchKey): PatchKey | null {
+    for (let level = key.level - 1; level >= 0; level -= 1) {
+      const shift = 2 ** (key.level - level);
+      const up: PatchKey = {
+        face: key.face,
+        level,
+        i: Math.floor(key.i / shift),
+        j: Math.floor(key.j / shift),
+      };
+      const node = this.nodes.get(patchKeyString(up));
+      if (node !== undefined) {
+        return node.children === null ? up : null;
+      }
+    }
+    return null;
+  }
+
+  splitBalanced(key: PatchKey, keep: (child: PatchKey) => boolean): void {
+    const first = this.nodes.get(patchKeyString(key));
+    if (first === undefined || first.children !== null) {
+      return;
+    }
+    const work: PatchKey[] = [];
+    const split = (at: PatchKey): void => {
+      const node = this.nodes.get(patchKeyString(at));
+      if (node === undefined || node.children !== null) {
+        return;
+      }
+      node.children = childKeys(at).map((child) => (keep(child) ? child : null));
+      for (const child of node.children) {
+        if (child !== null) {
+          this.nodes.set(patchKeyString(child), { key: child, children: null });
+          work.push(child);
+        }
+      }
+      this.journal?.push(at);
+    };
+    split(key);
+    for (let leaf = work.pop(); leaf !== undefined; leaf = work.pop()) {
+      if (this.nodes.get(patchKeyString(leaf))?.children !== null) {
+        continue;
+      }
+      for (const n of levelNeighbours(leaf)) {
+        const coarse = this.coarserLeaf(n);
+        if (coarse !== null && coarse.level < leaf.level - 1) {
+          split(coarse);
+          work.push(leaf);
+          break;
+        }
+      }
+    }
+  }
+}
+
+/** Whether to keep a child: about one in seven is left out, as selection leaves out the unseen. */
+function keepsChild(k: PatchKey): boolean {
+  return (k.face + 3 * k.level + 7 * k.i + 11 * k.j) % 7 !== 3;
+}
+
+describe("the restricted quadtree, split by walking its trees", () => {
+  it("splits, balances and undoes as the map-based leaf set did, with children left out", () => {
+    const random = seededRandom(0x6c656166);
+    const last = 2 ** 9 - 1;
+    const edgeOr = (): number => {
+      const r = random();
+      return r < 0.25 ? 0 : r < 0.5 ? last : Math.floor(random() * (last + 1));
+    };
+    const differences: string[] = [];
+    let splits = 0;
+    let rollbacks = 0;
+    for (let trial = 0; trial < 16; trial += 1) {
+      const tree = new PatchLeafSet<PatchKey>();
+      const reference = new ReferenceLeafSet();
+      for (const face of FACES) {
+        tree.addRoot(rootKey(face), rootKey(face));
+        reference.addRoot(rootKey(face));
+      }
+      for (let n = 0; n < 12; n += 1) {
+        // A cell at level 9, most of them on a face's edge or at its corner.
+        const face = FACES[Math.floor(random() * 6)] ?? 0;
+        const target: PatchKey = { face, level: 9, i: edgeOr(), j: edgeOr() };
+        for (let leaf = tree.coarserLeaf(target); leaf !== null; leaf = tree.coarserLeaf(target)) {
+          tree.begin();
+          reference.begin();
+          tree.splitBalanced(leaf, (child) => (keepsChild(child) ? child : null));
+          reference.splitBalanced(leaf, keepsChild);
+          splits += 1;
+          const undo = random() < 0.15;
+          if (undo) {
+            tree.rollback();
+            reference.rollback();
+            rollbacks += 1;
+          } else {
+            tree.commit();
+            reference.commit();
+          }
+          const got = [...tree.values()].map(patchKeyString);
+          const want = reference.leaves().map(patchKeyString);
+          if (got.join() !== want.join() || tree.size !== want.length) {
+            differences.push(`trial ${trial}, split ${patchKeyString(leaf)}`);
+          }
+          if (
+            JSON.stringify(tree.coarserLeaf(target)) !==
+            JSON.stringify(reference.coarserLeaf(target))
+          ) {
+            differences.push(`trial ${trial}, leaf over ${patchKeyString(target)}`);
+          }
+          if (undo) {
+            break;
+          }
+        }
+      }
+    }
+    expect(differences).toEqual([]);
+    expect(splits).toBeGreaterThan(500);
+    expect(rollbacks).toBeGreaterThan(40);
   });
 });
 
@@ -814,5 +998,221 @@ describe("the budget's limit excess", () => {
 
   it.each(cases)("leaves the selection under the budget as recorded, with $name", (c) => {
     expect(selectionDigest(underBudget(c))).toBe(c.digests.budgeted);
+  });
+});
+
+/** The patches split above the selected ones: every ancestor of a selected patch. */
+function splitAbove(sel: Selection): Map<string, PatchKey> {
+  const split = new Map<string, PatchKey>();
+  for (const p of sel.patches.values()) {
+    for (let k = parentKey(p.key); k !== null; k = parentKey(k)) {
+      split.set(patchKeyString(k), k);
+    }
+  }
+  return split;
+}
+
+describe("the baked patches selection finds hidden (the high-bound ruling's F3)", () => {
+  const towardsHorizon = (): Selection =>
+    selectPatches({
+      planet: PLANET,
+      views: [view(LOW, lookingDown(LOW, 1.45))],
+      setting: "high",
+      grounded: [],
+      heightRanges: bakedToDepth(6),
+    });
+
+  it("lists only baked patches it neither selected nor split above a selected one", () => {
+    const sel = towardsHorizon();
+    const split = splitAbove(sel);
+    expect(sel.hiddenBaked.length).toBeGreaterThan(0);
+    for (const key of sel.hiddenBaked) {
+      const k = patchKeyString(key);
+      expect(key.level).toBeLessThanOrEqual(6);
+      expect(sel.patches.has(k)).toBe(false);
+      expect(split.has(k)).toBe(false);
+    }
+  });
+
+  it("lists every baked child of a split patch that it neither selected nor split", () => {
+    const sel = towardsHorizon();
+    const split = splitAbove(sel);
+    const hidden = new Set(sel.hiddenBaked.map(patchKeyString));
+    const missed: string[] = [];
+    for (const key of split.values()) {
+      for (const child of childKeys(key)) {
+        const c = patchKeyString(child);
+        if (child.level <= 6 && !sel.patches.has(c) && !split.has(c) && !hidden.has(c)) {
+          missed.push(c);
+        }
+      }
+    }
+    expect(missed).toEqual([]);
+  });
+
+  it("gives the same list, in the same order, for the same input", () => {
+    expect(towardsHorizon().hiddenBaked).toEqual(towardsHorizon().hiddenBaked);
+  });
+
+  it("lists nothing without baked ranges", () => {
+    expect(select([view(LOW, lookingDown(LOW, 1.45))]).hiddenBaked).toEqual([]);
+  });
+
+  it("finds bare the children a split left out and the splits with no leaf beneath", () => {
+    const root = rootKey(0);
+    const [c0, c1, c2, c3] = childKeys(root);
+    const tree = new PatchLeafSet<PatchKey>();
+    tree.addRoot(root, root);
+    tree.splitBalanced(root, (child) =>
+      patchKeyString(child) === patchKeyString(c0) ? child : null,
+    );
+    expect(tree.bareKeys()).toEqual([c1, c2, c3]);
+    tree.splitBalanced(c0, () => null);
+    expect(tree.bareKeys()).toEqual([...childKeys(c0), c0, c1, c2, c3, root]);
+  });
+});
+
+/** A number's exact decimal form, which round-trips its bits, with −0 told from 0. */
+function exact(x: number): string {
+  return Object.is(x, -0) ? "-0" : String(x);
+}
+
+/**
+ * Everything a selection returns, as lines: each patch in the map's order with its flags and every
+ * number of its bounds, each request in order with its priority, `limited` and `limitExcess`, then
+ * the hidden baked patches in order.
+ */
+function outputLines(sel: Selection): string[] {
+  const lines: string[] = [];
+  for (const [k, p] of sel.patches) {
+    const { box } = p.bounds;
+    const numbers = [
+      p.bounds.centre.x,
+      p.bounds.centre.y,
+      p.bounds.centre.z,
+      p.bounds.radiusM,
+      p.bounds.minHeightM,
+      p.bounds.maxHeightM,
+      box.centre.x,
+      box.centre.y,
+      box.centre.z,
+      ...box.axes.flatMap((a) => [a.x, a.y, a.z]),
+      ...box.halfExtentsM,
+    ];
+    lines.push(`${k} ${patchKeyString(p.key)} ${String(p.forced)} ${String(p.seen)}`);
+    lines.push(numbers.map(exact).join(" "));
+  }
+  for (const r of sel.demand) {
+    lines.push(`${patchKeyString(r.key)} ${exact(r.priority)} ${String(r.forced)}`);
+  }
+  lines.push(`${String(sel.limited)} ${exact(sel.limitExcess)}`);
+  lines.push(`hidden ${sel.hiddenBaked.map(patchKeyString).join(" ")}`);
+  return lines;
+}
+
+/** {@link outputLines}' count of patches and requests and FNV-1a 32-bit hash. */
+function outputDigest(sel: Selection): string {
+  return `${sel.patches.size} ${sel.demand.length} ${fnv(outputLines(sel))}`;
+}
+
+/** A lookup of baked ranges that the test bakes into as it goes, never evicting. */
+class GrowingBake implements HeightRangeLookup {
+  private readonly baked = new Map<string, readonly [number, number]>();
+
+  heightRangeM(key: PatchKey): readonly [number, number] | undefined {
+    return this.baked.get(patchKeyString(key));
+  }
+
+  /** Bakes `key` at ±(100 m + 2 ε_n), a stand-in for a bake's range within its level's. */
+  bake(key: PatchKey): void {
+    const half = 100 + 2 * levelBoundM(PLANET, key.level);
+    this.baked.set(patchKeyString(key), [-half, half]);
+  }
+}
+
+/** The frames of {@link approachDigest}'s flight. */
+const APPROACH_FRAMES = 48;
+
+/**
+ * The selection along an approach like the spike's (R05.T13.a's approach and flare): a glide over
+ * 60 km of ground track from 20 km down to 300 m above the site, falling ever more slowly, looking
+ * 20° below the horizon ahead, with a secondary view (weight 0.25, 4 px) looking 74° down, which sees
+ * the contact under the craft below 1 km, at a budget of 981, baking the first 128 requests a frame.
+ * The digest folds every frame's {@link outputLines}, so it pins the demand's order too, which
+ * decides what is baked next.
+ */
+function approachDigest(): string {
+  const ground = vec3(...surfacePoint(WGS84_FIGURE, vertexDir(SITE, 32, 32), 0));
+  const up = normalise(ground);
+  const east = normalise(vec3(-up.y, up.x, 0));
+  const along = (tiltRad: number): Vec3 =>
+    normalise(
+      vec3(
+        east.x * Math.cos(tiltRad) - up.x * Math.sin(tiltRad),
+        east.y * Math.cos(tiltRad) - up.y * Math.sin(tiltRad),
+        east.z * Math.cos(tiltRad) - up.z * Math.sin(tiltRad),
+      ),
+    );
+  const bake = new GrowingBake();
+  const lines: string[] = [];
+  for (let frame = 0; frame < APPROACH_FRAMES; frame += 1) {
+    const s = frame / (APPROACH_FRAMES - 1);
+    const heightM = 300 + 19_700 * (1 - s) ** 2;
+    const trackM = -60_000 * (1 - s) ** 1.5;
+    const camera = vec3(
+      ground.x + east.x * trackM + up.x * heightM,
+      ground.y + east.y * trackM + up.y * heightM,
+      ground.z + east.z * trackM + up.z * heightM,
+    );
+    const beneath = vec3(
+      ground.x + east.x * trackM,
+      ground.y + east.y * trackM,
+      ground.z + east.z * trackM,
+    );
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [
+        view(camera, lookAlong(along(0.35), up)),
+        view(camera, lookAlong(along(1.3), up), {
+          weight: 0.25,
+          tauPx: 4,
+          viewport: { widthPx: 960, heightPx: 540 },
+        }),
+      ],
+      setting: "high",
+      grounded: heightM < 1_000 ? [{ positionM: beneath, radiusM: 10 }] : [],
+      heightRanges: bake,
+      maxPatches: 981,
+    });
+    lines.push(`frame ${frame}`, ...outputLines(sel));
+    for (const request of sel.demand.slice(0, 128)) {
+      bake.bake(request.key);
+    }
+  }
+  return `${APPROACH_FRAMES} ${fnv(lines)}`;
+}
+
+describe("selection's output, bit for bit", () => {
+  // Recorded from selection before R05.T7 perf (c) (2026-10-04, with F3's `hiddenBaked`), with
+  // every number it returns: the work on selection's cost changes none of them. Re-record only when
+  // the output is meant to change.
+  const pose = view(LOW, lookingDown(LOW, 1.2));
+  it.each([
+    { label: "a budget of 981", budget: 981, digest: "981 3 d2f846a9" },
+    { label: "a budget of 1,952", budget: 1952, digest: "1952 3 cd0bdca9" },
+    { label: "no budget", budget: undefined, digest: "12731 1 36f86306" },
+  ])("is as recorded at the 1.5 km pose with $label", ({ budget, digest }) => {
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [pose],
+      setting: "high",
+      grounded: [],
+      ...(budget === undefined ? {} : { maxPatches: budget }),
+    });
+    expect(outputDigest(sel)).toBe(digest);
+  });
+
+  it("is as recorded frame by frame along an approach, its bakes following its demand", () => {
+    expect(approachDigest()).toBe("48 8a892427");
   });
 });

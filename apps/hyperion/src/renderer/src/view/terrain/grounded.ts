@@ -13,9 +13,10 @@
  */
 
 import { sub, dot } from "../../geometry/vec3";
-import { distanceToBoxM, type PatchBounds, relativeBounds } from "./bounds";
+import type { PatchBounds } from "./bounds";
 import { PATCH_QUADS, vertexSpacing } from "./cube";
 import type { BodyFixedVec3, PlanetGeometry } from "./planet";
+import { distanceToBoxFromM } from "./viewGeometry";
 
 /**
  * A grounded or descending body: a sphere about its position (Design note 9).
@@ -102,9 +103,17 @@ export function inForcedRegion(
   grounded: ReadonlyArray<GroundContact>,
   patchSizeM: number,
 ): boolean {
-  return grounded.some(
-    (g) => distanceToBoxM(relativeBounds(bounds, g.positionM)) <= forcedRadiusM(g, patchSizeM),
-  );
+  // A loop over `distanceToBoxFromM`, with nothing allocated: selection asks it of every patch.
+  for (let n = 0; n < grounded.length; n += 1) {
+    const g = grounded[n];
+    if (
+      g !== undefined &&
+      distanceToBoxFromM(bounds, g.positionM) <= forcedRadiusM(g, patchSizeM)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

@@ -1,13 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import { add, cross, dot, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
-import { aHostDisc, aLitBody, SUN_RADIUS_M } from "../../test/litFixtures";
+import {
+  aHostDisc,
+  aLitBody,
+  photometryFor,
+  planetPhotometry,
+  SUN_RADIUS_M,
+} from "../../test/litFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import { phaseFactorFromTable, phaseFactorTableOf } from "../appearance/law";
+import { brdf } from "../appearance/brdf";
 import { lawFor } from "../appearance/phase";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import {
+  litNeighbours,
+  PLANETSHINE_SOURCES_HIGH,
+  PLANETSHINE_SOURCES_LOW,
+  planetshineSources,
+} from "../lighting/planetshine";
 import { starIlluminance } from "../lighting/illuminance";
 import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import { oblateAlbedoScale } from "./oblate";
@@ -21,7 +34,14 @@ import {
   viewRay,
 } from "./discShading";
 import type { PlacedLight } from "../lighting/hostLights";
-import { hostAnnuli, LitBodyRenderer, type LitBodyInput, planLitBodies, pointFlux } from "./draw";
+import {
+  type BodyFrameOptions,
+  hostAnnuli,
+  LitBodyRenderer,
+  type LitBodyInput,
+  planLitBodies,
+  pointFlux,
+} from "./draw";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import type { DrawItem } from "../engine/types";
@@ -55,7 +75,13 @@ function scene(
   };
 }
 
-const OPTIONS = { camera: CAMERA, viewport: VIEWPORT, exposureScale: EXPOSURE, annuli: 4 };
+const OPTIONS = {
+  camera: CAMERA,
+  viewport: VIEWPORT,
+  exposureScale: EXPOSURE,
+  annuli: 4,
+  planetshine: PLANETSHINE_SOURCES_HIGH,
+};
 
 /**
  * The disc's flux at the camera per channel, lx: Σ L Ω over its pixels, as drawn, with `others`
@@ -65,8 +91,9 @@ function discFlux(
   body: LitBodyInput,
   hosts: ReadonlyArray<PlacedLight>,
   others: ReadonlyArray<LitBodyInput> = [],
+  options: BodyFrameOptions = OPTIONS,
 ): [number, number, number] {
-  const plan = planLitBodies([body, ...others], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+  const plan = planLitBodies([body, ...others], hosts, options, new Map([[body.id, "disc"]]));
   const record = plan.discs.find((each) => each.body === body.id);
   if (record === undefined) {
     throw new Error("the body was not drawn as a disc");
@@ -551,16 +578,208 @@ describe("an eclipse", () => {
   });
 
   it("leaves no light inside the umbra, and ignores an occluder beyond the star", () => {
+    // The starlight only: the occluder's planetshine is its own term. Exactly at new phase it gives
+    // about 10⁻²³ lx through the rounding of sin π (T11's own test bounds a neighbour at new
+    // phase), and full beyond the star some 10⁻¹⁰ of the sunlight.
+    const starlight = { ...OPTIONS, planetshine: 0 };
     const umbral: LitBodyInput = {
       ...earth,
       centreM: add(body.centreM, scale(towards, 3.844e8)),
     };
-    expect(discFlux(body, hosts, [umbral])[1]).toBe(0);
+    expect(discFlux(body, hosts, [umbral], starlight)[1]).toBe(0);
     const beyond: LitBodyInput = {
       ...earth,
       centreM: add(body.centreM, scale(towards, 2 * AU_M)),
     };
-    expect(discFlux(body, hosts, [beyond])[1]).toBeCloseTo(discFlux(body, hosts)[1], 12);
+    expect(discFlux(body, hosts, [beyond], starlight)[1]).toBeCloseTo(
+      discFlux(body, hosts, [], starlight)[1],
+      12,
+    );
+  });
+});
+
+describe("planetshine", () => {
+  const moonRadius = 1.7374e6;
+  const moonFigure = { equatorialRadiusM: moonRadius, polarRadiusM: moonRadius, pole: null };
+  /**
+   * A body `px` across at solar phase `phaseDeg`, and a neighbour `distanceM` from it on its
+   * anti-solar side, so that the neighbour is full from it and lights its night side.
+   */
+  function shineScene(
+    px: number,
+    phaseDeg: number,
+    neighbourRadiusM: number,
+    distanceM: number,
+    body: Partial<LitBodyInput> = {},
+  ): {
+    readonly body: LitBodyInput;
+    readonly neighbour: LitBodyInput;
+    readonly hosts: PlacedLight[];
+  } {
+    const radius = body.figure?.equatorialRadiusM ?? moonRadius;
+    const placed = scene(radius / Math.sin(px / 2 / PX_PER_RAD), phaseDeg, {
+      figure: moonFigure,
+      ...body,
+    });
+    const star = placed.hosts[0]?.centreM ?? vec3(0, 0, 0);
+    const towards = normalise(sub(star, placed.body.centreM));
+    const neighbour: LitBodyInput = {
+      id: "0200080020000000.0003",
+      centreM: add(placed.body.centreM, scale(towards, -distanceM)),
+      figure: {
+        equatorialRadiusM: neighbourRadiusM,
+        polarRadiusM: neighbourRadiusM,
+        pole: null,
+      },
+      photometry: planetPhotometry("Earth"),
+    };
+    return { ...placed, neighbour };
+  }
+
+  const lunar = photometryFor([0.12, 0.12, 0.12], [0.626, 0.626, 0.626], "moon");
+  const pairs = [
+    ["Earth from the Moon", 6.371e6, 3.844e8],
+    ["Jupiter from Io", 6.9911e7, 4.218e8],
+  ] as const;
+  for (const [pair, neighbourRadiusM, distanceM] of pairs) {
+    for (const [lawName, photometry] of [
+      ["the provisional Lambert law", PROVISIONAL_PHOTOMETRY],
+      ["a lunar law", lunar],
+    ] as const) {
+      it(`draws one flux on the disc and the point at the 3 px switch, to 1%, for ${pair} under ${lawName}`, () => {
+        let worst = 0;
+        for (const phaseDeg of [90, 150]) {
+          const { body, neighbour, hosts } = shineScene(3, phaseDeg, neighbourRadiusM, distanceM, {
+            photometry,
+          });
+          const secondaries = planetshineSources(
+            body,
+            litNeighbours([body, neighbour], hosts, DISC_ANNULI_HIGH),
+            2,
+          );
+          expect(secondaries).toHaveLength(1);
+          const disc = discFlux(body, hosts, [neighbour]);
+          const point = pointFlux(body, hosts, [], DISC_ANNULI_HIGH, secondaries);
+          for (const c of [0, 1, 2] as const) {
+            worst = Math.max(worst, Math.abs(disc[c] / point[c] - 1));
+          }
+        }
+        expect(worst).toBeLessThan(0.01);
+      });
+    }
+  }
+
+  it("lights the night side, which the meter keeps unlit", () => {
+    const { body, neighbour, hosts } = shineScene(40, 150, 6.371e6, 3.844e8);
+    const nightOf = (others: ReadonlyArray<LitBodyInput>) => {
+      const plan = planLitBodies([body, ...others], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+      const record = plan.discs.find((each) => each.body === body.id);
+      if (record === undefined) {
+        throw new Error("no disc");
+      }
+      return rasteriseDisc(record, CAMERA, VIEWPORT).filter(
+        (p) => p.draw === "interior" && p.meterClass === METER_CLASS.unlitBody,
+      );
+    };
+    const dark = nightOf([]);
+    const shone = nightOf([neighbour]);
+    expect(dark.length).toBeGreaterThan(100);
+    expect(dark.every((p) => p.rgb.every((v) => v === 0))).toBe(true);
+    // The same pixels stay unlit for the meter, and earthshine lights every one of them.
+    expect(shone.map((p) => [p.xPx, p.yPx])).toEqual(dark.map((p) => [p.xPx, p.yPx]));
+    expect(shone.every((p) => p.rgb.every((v) => v > 0))).toBe(true);
+  });
+
+  it("matches the law at a night-side point lit by the neighbour alone", () => {
+    // 40 px across at 150° under a lunar law: the pixel at the disc's centre sees only earthshine,
+    // near full Earth.
+    const { body, neighbour, hosts } = shineScene(40, 150, 6.371e6, 3.844e8, {
+      photometry: lunar,
+    });
+    const plan = planLitBodies([body, neighbour], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+    const record = plan.discs.find((each) => each.body === body.id);
+    const source = planetshineSources(
+      body,
+      litNeighbours([body, neighbour], hosts, DISC_ANNULI_HIGH),
+      2,
+    )[0];
+    if (record === undefined || source === undefined) {
+      throw new Error("no disc or no source");
+    }
+    const x = VIEWPORT.widthPx / 2;
+    const y = VIEWPORT.heightPx / 2;
+    const pixel = rasteriseDisc(record, CAMERA, VIEWPORT).find(
+      (p) => p.xPx === x && p.yPx === y && p.draw === "interior",
+    );
+    // The point the centre ray meets, its normal, and the law at it in f64.
+    const ray = viewRay(x + 0.5, y + 0.5, CAMERA, VIEWPORT);
+    const centre = body.centreM;
+    const along = dot(ray, centre);
+    const hit = scale(
+      ray,
+      along - Math.sqrt(along * along - dot(centre, centre) + moonRadius ** 2),
+    );
+    const normal = normalise(sub(hit, centre));
+    const toSource = sub(add(centre, scale(source.direction, source.distanceM)), hit);
+    const towards = normalise(toSource);
+    const mu0 = dot(normal, towards);
+    const mu = -dot(normal, ray);
+    const alpha = Math.acos(-dot(towards, ray));
+    const near = source.distanceM / norm(toSource);
+    // Earth wholly above the point's horizon, so its irradiance factor is μ₀.
+    expect(mu0).toBeGreaterThan(Math.sin(source.angularRadiusRad) * 2);
+    const reflectance = brdf(body.photometry.law, mu0, mu, alpha);
+    for (const c of [0, 1, 2] as const) {
+      const expected = source.illuminance[c] * near * near * (EXPOSURE / Math.PI) * reflectance[c];
+      expect(Math.abs((pixel?.rgb[c] ?? 0) / expected - 1)).toBeLessThan(1e-6);
+    }
+  });
+
+  it("takes two neighbours on the high setting and one on the low", () => {
+    const { body, neighbour, hosts } = shineScene(40, 150, 6.371e6, 3.844e8);
+    const second: LitBodyInput = {
+      ...neighbour,
+      id: "0200080020000000.0004",
+      centreM: add(neighbour.centreM, vec3(0, 2e8, 0)),
+    };
+    const third: LitBodyInput = {
+      ...neighbour,
+      id: "0200080020000000.0005",
+      centreM: add(neighbour.centreM, vec3(0, -4e8, 0)),
+    };
+    const count = (planetshine: number): number => {
+      const plan = planLitBodies(
+        [body, neighbour, second, third],
+        hosts,
+        { ...OPTIONS, planetshine },
+        new Map([[body.id, "disc"]]),
+      );
+      return plan.discs.find((each) => each.body === body.id)?.secondaries.length ?? -1;
+    };
+    expect(count(PLANETSHINE_SOURCES_HIGH)).toBe(2);
+    expect(count(PLANETSHINE_SOURCES_LOW)).toBe(1);
+  });
+
+  it("packs its sources after the classes, where the shader reads them", () => {
+    const { body, neighbour, hosts } = shineScene(40, 150, 6.371e6, 3.844e8);
+    const plan = planLitBodies([body, neighbour], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+    const record = plan.discs.find((each) => each.body === body.id);
+    const source = record?.secondaries[0];
+    if (record === undefined || source === undefined) {
+      throw new Error("no disc or no source");
+    }
+    expect(source.distance).toBeCloseTo(3.844e8 / moonRadius, 6);
+    expect(source.radius).toBeCloseTo(6.371e6 / moonRadius, 9);
+    const packed = packDiscRecords([record]);
+    expect(packed).toHaveLength(DISC_ROWS * 4);
+    const row = (i: number): number[] => Array.from(packed.subarray(4 * i, 4 * i + 4));
+    expect(row(46)).toEqual([1, 0, 0, 0]);
+    expect(row(47)).toEqual(
+      f32([source.direction.x, source.direction.y, source.direction.z, source.distance]),
+    );
+    expect(row(48)).toEqual(f32([...source.illuminance, source.radius]));
+    expect(row(49)).toEqual([0, 0, 0, 0]);
+    expect(row(50)).toEqual([0, 0, 0, 0]);
   });
 });
 

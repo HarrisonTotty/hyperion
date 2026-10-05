@@ -6,6 +6,11 @@ import type { StyleRefusals } from "./styleRefusals";
 
 /** Props of {@link StyleControl}. */
 export interface StyleControlProps {
+  /**
+   * The view the panel acts on, its system designator on the title row (`PRIMARY`,
+   * `INSTRUMENT 1`; R07.T19), or none.
+   */
+  readonly designator?: string | undefined;
   /** The view's style. */
   readonly renderStyle: RenderStyle;
   /** Why each style is held back, `null` where it is offered (`styleRefusals`). */
@@ -32,6 +37,7 @@ export function StyleControl({
   refusals: byStyle,
   faulted,
   onStyle,
+  designator,
 }: StyleControlProps) {
   const titleId = useId();
   const reasonId = useId();
@@ -41,6 +47,12 @@ export function StyleControl({
     <section className="panel view-style" aria-labelledby={titleId}>
       <h2 className="panel__title" id={titleId}>
         Style
+        {designator === undefined ? null : (
+          <>
+            {" "}
+            <span className="panel__designator">{designator}</span>
+          </>
+        )}
       </h2>
       <fieldset className="preset-buttons" aria-keyshortcuts={STYLE_TOGGLE_KEY}>
         <legend className="field__label">

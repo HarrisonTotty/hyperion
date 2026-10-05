@@ -16,11 +16,11 @@ const READING: ExposureReading = {
 };
 
 describe("MeterControl", () => {
-  it("shows the exposure with its level, the meter and the view it meters", () => {
+  it("shows the exposure with its level, the meter and the view it meters, by its name", () => {
     render(<MeterControl meter="average" reading={READING} onMeter={() => undefined} />);
     expect(screen.getByText("EV100 9.6 AUTO")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "METER" })).toHaveTextContent("AVG");
-    expect(screen.getByRole("status", { name: "SOURCE" })).toHaveTextContent("VIEW");
+    expect(screen.getByRole("status", { name: "SOURCE" })).toHaveTextContent("PRIMARY");
     expect(screen.getByRole("button", { name: "AVG" })).toHaveAttribute("aria-pressed", "true");
   });
 

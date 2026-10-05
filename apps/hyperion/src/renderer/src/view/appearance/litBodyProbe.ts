@@ -1,17 +1,20 @@
 /**
  * The lit-body shading's WGSL registered in the catalogue, and the probe that compares it with its
- * TypeScript twin (plan R07, T4.c and T6.c).
+ * TypeScript twin (plan R07, T4.c, T6.c and T11).
  *
  * @remarks
  * `shaders/litBody.wgsl` is a library of functions, not a material, so the catalogue holds it
  * inside a compute kernel that calls each function at pinned inputs and writes the results: the
  * smoke harness compiles it on SwiftShader with every other shader, and `smoke/litBody.ts`
  * dispatches it and compares the read-back results with `brdf` (T4.c) and with
- * `sphereIrradianceFactor`, `annulusVisibleFraction` and the stubs' values (T6.c). The kernel's
+ * `sphereIrradianceFactor`, `annulusVisibleFraction` and the stubs' values (T6.c), and with
+ * `planetshineIrradiance` (T11). The kernel's
  * results are a pure function of its inputs on one path, so its readback is `bit-exact`.
  */
 import type { KernelPair } from "../engine/kernels";
+import type { Vec3 } from "../../geometry/vec3";
 import { annulusEdges, annulusVisibleFraction } from "../lighting/annuli";
+import { planetshineIrradiance } from "../lighting/planetshine";
 import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import type { Rgb } from "../photometry/toneCurve";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
@@ -109,7 +112,7 @@ export function expectedBrdf(cases: ReadonlyArray<BrdfProbeCase>): Rgb[] {
   );
 }
 
-/** One pinned evaluation of the lighting terms or of the hooks' stubs (T6.c). */
+/** One pinned evaluation of the lighting terms or of the hooks' stubs (T6.c), or of planetshine's (T11). */
 export type LightingProbeCase =
   | {
       readonly kind: "sphere";
@@ -126,11 +129,21 @@ export type LightingProbeCase =
       readonly occluderRadiusRad: number;
       readonly separationRad: number;
     }
-  | { readonly kind: "stubs" };
+  | { readonly kind: "stubs" }
+  | {
+      readonly kind: "planetshine";
+      /** From the point to the source's centre, in the unit of the two lengths below. */
+      readonly toSource: Vec3;
+      readonly sourceRadius: number;
+      readonly centreDistance: number;
+      /** The point's unit normal. */
+      readonly normal: Vec3;
+      readonly horizonRad: number;
+    };
 
 /**
  * Bytes per case in the kernel's `LightingCase` array: four 16-byte rows, the eclipse case's
- * annuli in the last two.
+ * annuli in the last two, or planetshine's direction to the source and normal.
  */
 export const LIGHTING_CASE_BYTES = 64;
 
@@ -172,15 +185,26 @@ export function packLightingProbeCases(cases: ReadonlyArray<LightingProbeCase>):
       case "stubs":
         u32[base] = 3;
         break;
+      case "planetshine":
+        u32[base] = 4;
+        f32.set([probe.sourceRadius, probe.centreDistance, probe.horizonRad], base + 2);
+        f32.set([probe.toSource.x, probe.toSource.y, probe.toSource.z], base + 8);
+        f32.set([probe.normal.x, probe.normal.y, probe.normal.z], base + 12);
+        break;
     }
   });
   return bytes;
 }
 
+/** A vector rounded to `f32`, as the GPU reads it. */
+function froundVec3(v: Vec3): Vec3 {
+  return { x: Math.fround(v.x), y: Math.fround(v.y), z: Math.fround(v.z) };
+}
+
 /**
  * The reference's values for each lighting case, at its inputs rounded to `f32`: the horizon
- * factor, the eclipse term's visible fraction, or the stubs' 1, 1 and 0 (ring shadow, sun
- * transmittance and sky irradiance, each's first channel).
+ * factor, the eclipse term's visible fraction, the stubs' 1, 1 and 0 (ring shadow, sun
+ * transmittance and sky irradiance, each's first channel), or planetshine's irradiance factor.
  */
 export function expectedLighting(cases: ReadonlyArray<LightingProbeCase>): number[][] {
   return cases.map((probe) => {
@@ -207,6 +231,17 @@ export function expectedLighting(cases: ReadonlyArray<LightingProbeCase>): numbe
       case "stubs":
         values = [1, 1, 0];
         break;
+      case "planetshine":
+        values = [
+          planetshineIrradiance(
+            froundVec3(probe.toSource),
+            Math.fround(probe.sourceRadius),
+            Math.fround(probe.centreDistance),
+            froundVec3(probe.normal),
+            Math.fround(probe.horizonRad),
+          ),
+        ];
+        break;
     }
     return values;
   });
@@ -214,7 +249,8 @@ export function expectedLighting(cases: ReadonlyArray<LightingProbeCase>): numbe
 
 /**
  * The probe kernel: `body_brdf` at each BRDF case (r, g, b and 0 per result), and the lighting
- * terms or the stubs at each lighting case (up to three values per result).
+ * terms, the stubs or planetshine's irradiance at each lighting case (up to three values per
+ * result).
  */
 export const LIT_BODY_PROBE: KernelPair = {
   name: "R07 lit body twin",
@@ -261,6 +297,8 @@ fn run_lighting(index : u32) {
     value.x = ring_shadow_on_body(vec3f(1.0, 2.0, 3.0), vec3f(0.0, 0.0, 1.0)).x;
     value.y = atmosphere_sun_transmittance(1000.0, 0.5, 0.3, 1.2).x;
     value.z = atmosphere_sky_irradiance(1000.0, 0.5, 0.3).x;
+  } else if (c.kind == 4u) {
+    value.x = planetshine_irradiance(c.outer.xyz, c.p0, c.p1, c.flux.xyz, c.p2);
   }
   lighting_results[index] = value;
 }

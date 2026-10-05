@@ -360,6 +360,31 @@ describe("the engine's pass times", () => {
     expect(labels).toHaveLength(101);
     expect(labels.at(-1)).toBe("frame");
   });
+
+  it("number each resolve as it is submitted, as its times report it (R07.T19)", async () => {
+    const { engine } = await engineOn(["timestamp-query"]);
+    const times = vi.fn<(times: PassTimes) => void>();
+    engine.onPassTimes(times);
+    const before = engine.passTimesFrame;
+    renderEmptyFrame(engine, "first");
+    const afterFirst = engine.passTimesFrame;
+    renderEmptyFrame(engine, "second");
+    await vi.waitFor(() => {
+      expect(times).toHaveBeenCalledTimes(2);
+    });
+    expect([
+      before,
+      afterFirst,
+      engine.passTimesFrame,
+      times.mock.calls.map(([t]) => t.frame),
+    ]).toEqual([0, 1, 2, [1, 2]]);
+  });
+
+  it("stay at frame 0 without timestamp-query (R07.T19)", async () => {
+    const { engine } = await engineOn();
+    renderEmptyFrame(engine, "frame");
+    expect(engine.passTimesFrame).toBe(0);
+  });
 });
 
 /** Renders a frame with no draws into a small target, which resolves the pending pass times. */

@@ -1,0 +1,297 @@
+/**
+ * One view's frames on its canvas, in either style (plan R07, T19): the wireframe through R02's
+ * renderer, or the photorealistic frame through R07's, with R06's sky, its band and host-disc
+ * layers and its baked cube. An instrument view draws through it; `ViewDisplay`'s primary view
+ * still draws in its own loop, which does the same and meters its image (R07.T8.a).
+ *
+ * @remarks
+ * Every handle is made again after a device loss, as the primary's are: the photorealistic
+ * renderer itself, R06's layers in `onRestored`, and the cube through the device's shared cache,
+ * from which each view acquires the sky's cube under its own name, so that one sky is baked once.
+ */
+import type { BodyIdHex } from "@hyperion/protocol";
+
+import type { ElementSize } from "../../lib/useElementSize";
+import type { ColourTokens } from "../../spatial/paint";
+import type { LitRegime } from "../../view/bodies/regime";
+import type { CameraPose } from "../../view/camera/pose";
+import type { CameraTarget, RenderStyle } from "../../view/camera/state";
+import type { StyleAvailability } from "../../view/engine/platform";
+import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
+import { controlEv100, type ExposureControl, exposureScale } from "../../view/photometry/exposure";
+import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
+import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
+import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import { SETTINGS } from "../../view/quality/qualitySetting";
+import type { ViewScene, ViewStar } from "../../view/scene/model";
+import { BandLayer } from "../../view/sky/band";
+import type { BakedCube } from "../../view/sky/bake";
+import { skyCubeCacheOf } from "../../view/sky/cache";
+import { cameraFromObserverM } from "../../view/sky/camera";
+import { SkyCubeLayer } from "../../view/sky/cubeLayer";
+import { HostDiscLayer } from "../../view/sky/disc";
+import { skySpriteStars } from "../../view/sky/sprites";
+import {
+  buildWireframeDrawList,
+  type DrawAnchor,
+  type SpriteStar,
+} from "../../view/wireframe/drawList";
+import { WireframeRenderer } from "../../view/wireframe/submit";
+import { photorealFrame } from "./photorealFrame";
+import { bakeInputOf, type DrawnSky } from "./useViewSky";
+import { runPose, type ViewRun } from "./viewRun";
+
+/** What one frame of a view draws from. */
+export interface ViewFrameInputs {
+  readonly run: ViewRun;
+  /** The view's stage, as laid out, or `null` before it is. */
+  readonly size: ElementSize | null;
+  /** The colour tokens, read from the canvas, or `null` while it is not connected. */
+  readonly tokens: ColourTokens | null;
+  /** The exposure it draws at: the primary view's (Design note 11). */
+  readonly exposure: ExposureControl;
+  /** The interim stars (R02.T16), drawn until the sky arrives. */
+  readonly stars: ReadonlyArray<ViewStar>;
+  /** The sky (R06), or `null` before it arrives. */
+  readonly sky: DrawnSky | null;
+  readonly selection: CameraTarget | null;
+  /** The style its budget draws (`ViewBudget.style`). */
+  readonly style: RenderStyle;
+  /** Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`). */
+  readonly renderScale: number;
+  /** The styles the adapter offers. */
+  readonly availability: StyleAvailability;
+}
+
+/** What a frame drew. */
+export interface ViewFrameDrawn {
+  /** The marks where the frame drew them, device px. */
+  readonly anchors: ReadonlyArray<DrawAnchor>;
+  /** The style it was drawn in: the wireframe while the photorealistic pipelines compile. */
+  readonly drawnStyle: RenderStyle;
+}
+
+/**
+ * The sky's sprites from the camera this frame: the selection's stars placed from the camera's
+ * offset from the sky's observer, in `f64` (R06 Design note 20); `null` where the camera's
+ * galactic position is not known.
+ */
+export function skySprites(
+  sky: DrawnSky,
+  pose: CameraPose,
+  scene: ViewScene,
+): ReadonlyArray<SpriteStar> | null {
+  const offset = cameraFromObserverM(pose, scene, sky.model.request.observer);
+  // A scene that has lost its system's position draws the interim stars, which say so.
+  return offset === null ? null : skySpriteStars(sky.model.stars, sky.selection.sprites, offset);
+}
+
+/** A view's renderers on one engine, drawing into its canvas's view. */
+export class ViewFrameDrawer {
+  readonly #engine: RenderEngine;
+  readonly #view: RenderView;
+  readonly #name: string;
+  readonly #wireframe: WireframeRenderer;
+  readonly #photoreal: PhotorealRenderer;
+  readonly #cubes: SkyCubeLayer;
+  #band: BandLayer;
+  #discs: HostDiscLayer;
+  #bandFor: DrawnSky | null = null;
+  /** A sky whose bake failed is not baked again until another sky or a restore. */
+  #failedFor: DrawnSky | null = null;
+  #frameFailed = false;
+  #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+  #sized: ViewSize | null = null;
+  readonly #unsubscribe: () => void;
+
+  /**
+   * Draws into `view`, made by `engine` under `name`; disposes of it with itself.
+   *
+   * @throws `EngineUnavailable` while the engine has no device (a loss), having released what it
+   *   made before; the caller keeps the view and makes the drawer again at the restore.
+   */
+  constructor(engine: RenderEngine, view: RenderView, name: string) {
+    this.#engine = engine;
+    this.#view = view;
+    this.#name = name;
+    const made: Array<{ dispose(): void }> = [];
+    try {
+      this.#wireframe = new WireframeRenderer(engine);
+      made.push(this.#wireframe);
+      this.#photoreal = new PhotorealRenderer(engine, name);
+      made.push(this.#photoreal);
+      this.#cubes = new SkyCubeLayer(engine);
+      made.push(this.#cubes);
+      this.#band = new BandLayer(engine);
+      made.push(this.#band);
+      this.#discs = new HostDiscLayer(engine);
+    } catch (error: unknown) {
+      for (const each of made) {
+        each.dispose();
+      }
+      throw error;
+    }
+    this.#unsubscribe = engine.onRestored(() => {
+      this.#band = new BandLayer(engine);
+      this.#discs = new HostDiscLayer(engine);
+      this.#bandFor = null;
+      this.#failedFor = null;
+      this.#frameFailed = false;
+    });
+  }
+
+  /** The photorealistic renderer's standing (`PhotorealRenderer.status`). */
+  get photorealStatus(): PhotorealStatus {
+    return this.#photoreal.status;
+  }
+
+  /** Draws one frame, or nothing (`null`) while the stage is not laid out. */
+  draw(inputs: ViewFrameInputs): ViewFrameDrawn | null {
+    const { run, size, tokens } = inputs;
+    if (size === null || tokens === null || size.widthPx <= 0) {
+      return null;
+    }
+    const ratio = size.devicePixelRatio;
+    const viewport = {
+      widthPx: Math.max(1, Math.round(size.widthPx * ratio)),
+      heightPx: Math.max(1, Math.round(size.heightPx * ratio)),
+    };
+    if (this.#sized?.widthPx !== viewport.widthPx || this.#sized.heightPx !== viewport.heightPx) {
+      this.#view.resize(viewport);
+      this.#sized = viewport;
+    }
+    const camera = { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
+    const ev100 = controlEv100(inputs.exposure);
+    const list = buildWireframeDrawList(
+      { ...run.scene, stars: inputs.stars },
+      camera,
+      viewport,
+      tokens,
+      {
+        lowSetting: false,
+        ev100,
+        selection: inputs.selection,
+        destination: null,
+        remPx: size.remPx * ratio,
+        skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
+      },
+    );
+    const cube = this.#cubeFor(inputs.sky);
+    const exposed = exposureScale(ev100);
+    let drawn = false;
+    if (
+      inputs.style === "photorealistic" &&
+      inputs.availability.photorealistic &&
+      this.#photoreal.status !== "failed"
+    ) {
+      drawn = this.#drawPhotoreal(inputs, viewport, camera, list, cube, exposed);
+    }
+    if (!drawn) {
+      this.#wireframe.render(
+        this.#view,
+        list,
+        camera,
+        viewport,
+        cube === null ? [] : [this.#cubes.draw(cube, "display", exposed)],
+      );
+    }
+    return { anchors: list.anchors, drawnStyle: drawn ? "photorealistic" : "wireframe" };
+  }
+
+  #drawPhotoreal(
+    inputs: ViewFrameInputs,
+    viewport: ViewSize,
+    camera: { readonly pose: CameraPose; readonly fovXRad: number },
+    list: ReturnType<typeof buildWireframeDrawList>,
+    cube: BakedCube | null,
+    exposed: number,
+  ): boolean {
+    const { sky, run } = inputs;
+    try {
+      if (sky !== null && sky !== this.#bandFor) {
+        this.#band.update(
+          sky.model.band,
+          sky.model.response.band.face_texels,
+          sky.bandIlluminanceLx,
+        );
+        this.#bandFor = sky;
+      }
+      const internal = internalViewport(viewport, inputs.renderScale);
+      const plan = this.#photoreal.render(
+        this.#view,
+        photorealFrame({
+          run,
+          pose: camera.pose,
+          viewport: internal,
+          setting: "high",
+          exposureScale: exposed,
+          list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
+          sky,
+          band: sky === null ? null : this.#band,
+          discs: this.#discs,
+          cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
+          previousRegimes: this.#regimes,
+          // An instrument meters no image of its own; the primary exposes it (Design note 11).
+          meter: "average",
+          overlay: {
+            ...this.#wireframe.frame({ ...list, sprites: [] }, camera, viewport),
+            label: PHOTOREAL_PASS_LABELS.symbology,
+          },
+        }),
+      );
+      if (plan === null) {
+        return false;
+      }
+      this.#regimes = plan.regimes;
+      this.#frameFailed = false;
+      return true;
+    } catch (error: unknown) {
+      // A creation refused between a device loss and its restore: this frame draws the
+      // wireframe, and the next tries again; said once until a frame draws or a restore.
+      if (!this.#frameFailed) {
+        console.error(`the photorealistic frame of ${this.#name} could not be drawn:`, error);
+        this.#frameFailed = true;
+      }
+      return false;
+    }
+  }
+
+  #cubeFor(sky: DrawnSky | null): BakedCube | null {
+    const cache = skyCubeCacheOf(this.#engine);
+    if (sky === null || sky === this.#failedFor) {
+      cache.release(this.#name);
+      return null;
+    }
+    try {
+      return cache.acquire(this.#name, {
+        stars: sky.model.stars,
+        baked: sky.selection.baked,
+        // Read at the bake: a restore may have brought a device without float32-blendable.
+        bakeInput: () =>
+          bakeInputOf(
+            sky,
+            this.#engine.capabilities.float32Blendable
+              ? SETTINGS.high.sky.faceSizePx
+              : SETTINGS.low.sky.faceSizePx,
+          ),
+      });
+    } catch (error: unknown) {
+      // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
+      console.error("the sky's cube could not be baked:", error);
+      this.#failedFor = sky;
+      cache.release(this.#name);
+      return null;
+    }
+  }
+
+  /** Releases the renderers, the layers, the view's hold on the cube, and the view itself. */
+  dispose(): void {
+    this.#unsubscribe();
+    this.#wireframe.dispose();
+    this.#photoreal.dispose();
+    this.#band.dispose();
+    skyCubeCacheOf(this.#engine).release(this.#name);
+    this.#cubes.dispose();
+    this.#view.dispose();
+  }
+}

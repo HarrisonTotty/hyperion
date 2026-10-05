@@ -349,6 +349,11 @@ export class ResilientEngine implements RenderEngine {
     return this.#listen(this.#passTimeListeners, listener);
   }
 
+  /** The current engine's; 0 while there is none. */
+  get passTimesFrame(): number {
+    return this.#inner?.passTimesFrame ?? 0;
+  }
+
   onAllocation(listener: (event: AllocationEvent) => void): () => void {
     return this.#listen(this.#allocationListeners, listener);
   }

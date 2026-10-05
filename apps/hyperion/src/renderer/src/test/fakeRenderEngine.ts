@@ -14,6 +14,7 @@ import type {
   BufferHandle,
   CreateWebGpuEngine,
   FrameSubmission,
+  PassTimes,
   RenderEngine,
   RenderView,
   TextureHandle,
@@ -68,7 +69,11 @@ export class FakeRenderEngine implements RenderEngine {
   disposed = false;
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
+  readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
+  readonly #restoredListeners = new Set<() => void>();
   readonly #viewless: boolean;
+  /** The timer's latest resolve number: 0, as without the feature, unless a test moves it. */
+  passTimesFrame = 0;
   #lost: GraphicsFault | null = null;
 
   /**
@@ -117,11 +122,29 @@ export class FakeRenderEngine implements RenderEngine {
       this.#allocationListeners.delete(listener);
     };
   }
-  onPassTimes(): () => void {
-    return () => undefined;
+  onPassTimes(listener: (times: PassTimes) => void): () => void {
+    this.#passTimeListeners.add(listener);
+    return () => {
+      this.#passTimeListeners.delete(listener);
+    };
   }
-  onRestored(): () => void {
-    return () => undefined;
+  /** Reports a resolve's times, as the WebGPU engine does once their read settles. */
+  reportPassTimes(times: PassTimes): void {
+    for (const listener of this.#passTimeListeners) {
+      listener(times);
+    }
+  }
+  onRestored(listener: () => void): () => void {
+    this.#restoredListeners.add(listener);
+    return () => {
+      this.#restoredListeners.delete(listener);
+    };
+  }
+  /** Raises a restore, as the resilient engine does once it has rebuilt after a loss. */
+  raiseRestored(): void {
+    for (const listener of this.#restoredListeners) {
+      listener();
+    }
   }
   /** Releases its one fake allocation, {@link FAKE_ENGINE_MEMORY}, as the WebGPU engine does its own. */
   dispose(): void {

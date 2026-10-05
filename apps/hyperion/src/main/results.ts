@@ -39,14 +39,39 @@ import type { TraceFigures } from "./reduceTrace";
 
 /** The file's schema name and version, which T15.c's replayer writes too. */
 export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
-/** The schema's version; bumped with any change to the file's shape. */
-export const RESULTS_VERSION = 1;
+/**
+ * The schema's version; bumped with any change to the file's shape.
+ *
+ * @remarks
+ * Version 2 stores the memory series as columns of whole KiB (decision-r05-results-size.md); v1's
+ * object a sample made a 20-minute run's file larger than the repository accepts.
+ */
+export const RESULTS_VERSION = 2;
+
+/**
+ * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
+ * refuses a file whose size in KiB, rounded up, is over 500.
+ */
+export const ADDED_FILE_LIMIT_BYTES = 512_000;
+
+/** The line width Prettier formats the repository's files to (`.prettierrc.json`). */
+const PRETTIER_PRINT_WIDTH = 100;
 
 /** Dawn's timestamp quantum, 65,536 ns (`timestamp_quantization`, Design note 18), ms. */
 export const TIMESTAMP_QUANTUM_MS = 0.065_536;
 
 /** The `performance.measure` name prefix of a segment's span, `spike.segment:<name>` (T14.a). */
 export const SEGMENT_MEASURE_PREFIX = "spike.segment:";
+
+/**
+ * Why every figure read from a trace with no timed event is missing.
+ *
+ * @remarks
+ * Such a trace measured nothing: on 2026-10-04 Chromium's tracing service crashed while writing a
+ * 1.71 GB trace and left the file without events. Its frame drops and GC pauses are then missing,
+ * not zero.
+ */
+export const EMPTY_TRACE_REASON = "the trace has no timed event";
 
 /** A figure, or `null` with the reason it is missing. */
 export type Measured<T> =
@@ -146,7 +171,9 @@ export interface RunDescription {
   readonly startedAt: Date;
   readonly machine: MachineDescription;
   readonly versions: {
+    /** The app's own version, `package.json`'s. */
     readonly app: string;
+    /** Electron's version, which the app runs on. */
     readonly electron: string;
     readonly chromium: string;
     readonly node: string;
@@ -190,6 +217,145 @@ export interface MemorySample {
   readonly nvidiaDeviceBytes: number | null;
   /** `nvidia-smi`'s figure for the GPU process, bytes, where its process list has it. */
   readonly nvidiaGpuProcessBytes: number | null;
+}
+
+/** Consecutive samples at which a reading is missing for one reason. */
+export interface MemoryGap {
+  /** The first sample's index. */
+  readonly from: number;
+  /** The last sample's index, inclusive. */
+  readonly to: number;
+  readonly reason: string;
+}
+
+/** One reading over a run, a value a sample. */
+export interface MemoryColumn {
+  /** The reading at each sample, whole KiB, or -1 at a sample within one of the gaps. */
+  readonly samples: ReadonlyArray<number>;
+  /** Where the reading is missing, in sample order; consecutive samples of one reason are one gap. */
+  readonly gaps: ReadonlyArray<MemoryGap>;
+}
+
+/**
+ * The memory samples of a run as columns: the times, and one column a reading of
+ * {@link MemorySample}, in whole KiB.
+ *
+ * @remarks
+ * Every source reports KiB (Electron's metrics, the renderer's private memory, DRM fdinfo) or MiB
+ * (`nvidia-smi`), so the columns hold the readings exactly. A reading missing at every sample is
+ * its column's `null` and reason, written once. The form is plain, without delta encoding, so that
+ * the file reads by eye and with `jq` (decision-r05-results-size.md).
+ */
+export interface MemorySeries {
+  /** Each sample's time since the run started, whole ms. */
+  readonly tMs: ReadonlyArray<number>;
+  /** The working sets of every app process but the tracing service. */
+  readonly appKiB: Measured<MemoryColumn>;
+  /** The GPU process's working set. */
+  readonly gpuProcessKiB: Measured<MemoryColumn>;
+  /** Chromium's tracing service's working set: the measurement's own. */
+  readonly tracingKiB: Measured<MemoryColumn>;
+  /** The renderer's own private memory. */
+  readonly rendererPrivateKiB: Measured<MemoryColumn>;
+  /** The GPU process's DRM fdinfo, resident, summed over its clients. */
+  readonly drmResidentKiB: Measured<MemoryColumn>;
+  /** The GPU process's DRM fdinfo, total, summed over its clients. */
+  readonly drmTotalKiB: Measured<MemoryColumn>;
+  /** `nvidia-smi`'s device memory used. */
+  readonly nvidiaDeviceKiB: Measured<MemoryColumn>;
+  /** `nvidia-smi`'s figure for the GPU process. */
+  readonly nvidiaGpuProcessKiB: Measured<MemoryColumn>;
+}
+
+/** The series' reading columns. */
+type MemoryColumnName = Exclude<keyof MemorySeries, "tMs">;
+
+/** Why a series with no sample has no reading. */
+const NO_MEMORY_SAMPLE = "no memory sample";
+
+/**
+ * One reading's column.
+ *
+ * @param bytesOf - The reading at a sample, bytes, or `null` where it is missing.
+ * @param reasonOf - Why a sample has no reading.
+ * @returns The column, or `null` with every reason given when no sample has the reading.
+ */
+function memoryColumn(
+  memory: ReadonlyArray<MemorySample>,
+  bytesOf: (sample: MemorySample) => number | null,
+  reasonOf: (sample: MemorySample) => string,
+): Measured<MemoryColumn> {
+  if (memory.length === 0) {
+    return missing(NO_MEMORY_SAMPLE);
+  }
+  const samples: number[] = [];
+  const gaps: Array<{ from: number; to: number; reason: string }> = [];
+  memory.forEach((sample, i) => {
+    const bytes = bytesOf(sample);
+    if (bytes !== null) {
+      // Exact for every source, which reports KiB or MiB.
+      samples.push(Math.round(bytes / 1024));
+      return;
+    }
+    samples.push(-1);
+    const reason = reasonOf(sample);
+    const last = gaps.at(-1);
+    if (last !== undefined && last.to === i - 1 && last.reason === reason) {
+      last.to = i;
+    } else {
+      gaps.push({ from: i, to: i, reason });
+    }
+  });
+  if (samples.every((kib) => kib === -1)) {
+    return missing([...new Set(gaps.map(({ reason }) => reason))].join("; "));
+  }
+  return measured({ samples, gaps });
+}
+
+/**
+ * The results file's memory series, built from the sampler's readings.
+ *
+ * @remarks
+ * Times are rounded to the millisecond and readings to the KiB, which every source reports in.
+ */
+export function memorySeries(memory: ReadonlyArray<MemorySample>): MemorySeries {
+  const column = (
+    bytesOf: (sample: MemorySample) => number | null,
+    reason: string | ((sample: MemorySample) => string),
+  ): Measured<MemoryColumn> =>
+    memoryColumn(memory, bytesOf, typeof reason === "string" ? () => reason : reason);
+  return {
+    tMs: memory.map(({ tS }) => Math.round(tS * 1000)),
+    appKiB: column(({ appBytes }) => appBytes, NO_MEMORY_SAMPLE),
+    gpuProcessKiB: column(({ gpuProcessBytes }) => gpuProcessBytes, "no GPU process"),
+    tracingKiB: column(({ tracingBytes }) => tracingBytes, NO_MEMORY_SAMPLE),
+    rendererPrivateKiB: column(
+      ({ rendererPrivateBytes }) => rendererPrivateBytes,
+      "the renderer reported no memory",
+    ),
+    drmResidentKiB: column(
+      ({ drmResidentBytes }) => drmResidentBytes,
+      ({ drmReason }) => drmReason ?? "the DRM fdinfo gave no reading",
+    ),
+    drmTotalKiB: column(
+      ({ drmTotalBytes }) => drmTotalBytes,
+      ({ drmReason }) => drmReason ?? "not every DRM client gives a total",
+    ),
+    nvidiaDeviceKiB: column(({ nvidiaDeviceBytes }) => nvidiaDeviceBytes, "no nvidia-smi reading"),
+    nvidiaGpuProcessKiB: column(
+      ({ nvidiaGpuProcessBytes }) => nvidiaGpuProcessBytes,
+      "nvidia-smi does not list the GPU process",
+    ),
+  };
+}
+
+/** A column's peak, bytes, or its reason. */
+function columnPeakBytes(column: Measured<MemoryColumn>): Measured<number> {
+  if (column.value === null) {
+    return missing(column.reason);
+  }
+  const maxKiB = column.value.samples.reduce((max, kib) => Math.max(max, kib), -1);
+  return measured(maxKiB * 1024);
 }
 
 /** The tracing service's name in `app.getAppMetrics()`. */
@@ -441,7 +607,8 @@ export interface DescentResults {
   readonly uploads: { readonly bytes: number };
   readonly pipelines: { readonly late: DescentSpikeReport["latePipelines"] };
   readonly memory: {
-    readonly samples: ReadonlyArray<MemorySample>;
+    /** The 1 Hz samples. Each peak below is its column's maximum, in bytes. */
+    readonly series: MemorySeries;
     /** The headline GPU memory and where it is read from. */
     readonly gpuHeadline: Measured<{
       readonly bytes: number;
@@ -488,11 +655,6 @@ const LIMITS = {
 
 /** GPU memory above this on the high setting is a finding, not a failure (Design note 21). */
 const HIGH_MEMORY_FINDING_BYTES = 2e9;
-
-function peak(values: ReadonlyArray<number | null>, reason: string): Measured<number> {
-  const present = values.filter((value): value is number => value !== null);
-  return present.length === 0 ? missing(reason) : measured(Math.max(...present));
-}
 
 function judge(value: number, limit: number, tolerance: number): Verdict {
   if (value + tolerance <= limit) {
@@ -674,9 +836,19 @@ function statsOrMissing(
   return stats === null ? missing(reason) : measured(stats);
 }
 
-/** Builds a results file from a run's description, the renderer's report, the trace and memory. */
+/**
+ * Builds a results file from a run's description, the renderer's report, the trace and memory.
+ *
+ * @remarks
+ * A trace with no timed event is taken as no trace: every figure read from it is missing with
+ * {@link EMPTY_TRACE_REASON}.
+ */
 export function buildResults(input: ResultsInput): DescentResults {
-  const { run, report, trace, memory } = input;
+  const { run, report, memory } = input;
+  const trace: Measured<TraceFigures> =
+    input.trace.value !== null && input.trace.value.span === null
+      ? missing(EMPTY_TRACE_REASON)
+      : input.trace;
   const setting = run.setting;
   const vsyncMs = run.displayHz === null || run.displayHz <= 0 ? null : 1000 / run.displayHz;
   const periodMs: Measured<number> = !run.shown
@@ -785,25 +957,20 @@ export function buildResults(input: ResultsInput): DescentResults {
 
   const ourCodeP95Ms = p95Of(pick(frames.ourCodeMs, warm), "no frame after the warm-up");
 
-  const nvidiaLessBaseline = peak(
-    memory.map(({ nvidiaDeviceBytes }) =>
-      nvidiaDeviceBytes === null || run.nvidiaBaselineBytes === null
-        ? null
-        : nvidiaDeviceBytes - run.nvidiaBaselineBytes,
-    ),
+  const series = memorySeries(memory);
+  const nvidiaDevicePeakBytes = columnPeakBytes(series.nvidiaDeviceKiB);
+  const nvidiaLessBaseline: Measured<number> =
     run.nvidiaBaselineBytes === null
-      ? "no nvidia-smi baseline (not NVIDIA)"
-      : "no nvidia-smi sample",
-  );
-  const drmResident = peak(
-    memory.map(({ drmResidentBytes }) => drmResidentBytes),
-    memory.findLast(({ drmReason }) => drmReason !== null)?.drmReason ?? "no memory sample",
-  );
+      ? missing("no nvidia-smi baseline (not NVIDIA)")
+      : nvidiaDevicePeakBytes.value === null
+        ? missing(nvidiaDevicePeakBytes.reason)
+        : measured(nvidiaDevicePeakBytes.value - run.nvidiaBaselineBytes);
+  const drmResidentPeakBytes = columnPeakBytes(series.drmResidentKiB);
   const gpuHeadline: DescentResults["memory"]["gpuHeadline"] =
     nvidiaLessBaseline.value !== null
       ? measured({ bytes: nvidiaLessBaseline.value, source: "nvidia-smi" })
-      : drmResident.value !== null
-        ? measured({ bytes: drmResident.value, source: "drm-fdinfo" })
+      : drmResidentPeakBytes.value !== null
+        ? measured({ bytes: drmResidentPeakBytes.value, source: "drm-fdinfo" })
         : measured({ bytes: report.adapterPeakBytes, source: "adapter-tally" });
 
   const limits = LIMITS[setting];
@@ -871,11 +1038,12 @@ export function buildResults(input: ResultsInput): DescentResults {
   const overall = overallOf([...whole, ...segmentCriteria.flatMap(({ criteria }) => criteria)]);
 
   const scriptEndS = Math.max(0, ...report.segments.map(({ endS }) => endS));
+  // An empty trace was taken as none above; the span's own check only narrows its type.
   const traceFigure: DescentResults["run"]["trace"] =
     trace.value === null
       ? missing(trace.reason)
       : trace.value.span === null
-        ? missing("the trace has no timed event")
+        ? missing(EMPTY_TRACE_REASON)
         : measured({
             spanMs: (trace.value.span.lastUs - trace.value.span.firstUs) / 1000,
             truncated:
@@ -961,26 +1129,14 @@ export function buildResults(input: ResultsInput): DescentResults {
     uploads: { bytes: report.uploadBytes },
     pipelines: { late: report.latePipelines },
     memory: {
-      samples: memory,
+      series,
       gpuHeadline,
-      peakAppBytes: peak(
-        memory.map(({ appBytes }) => appBytes),
-        "no memory sample",
-      ),
-      peakTracingBytes: peak(
-        memory.map(({ tracingBytes }) => tracingBytes),
-        "no memory sample",
-      ),
-      peakRendererPrivateBytes: peak(
-        memory.map(({ rendererPrivateBytes }) => rendererPrivateBytes),
-        "the renderer reported no memory",
-      ),
-      peakDrmResidentBytes: drmResident,
+      peakAppBytes: columnPeakBytes(series.appKiB),
+      peakTracingBytes: columnPeakBytes(series.tracingKiB),
+      peakRendererPrivateBytes: columnPeakBytes(series.rendererPrivateKiB),
+      peakDrmResidentBytes: drmResidentPeakBytes,
       peakNvidiaDeviceLessBaselineBytes: nvidiaLessBaseline,
-      peakNvidiaGpuProcessBytes: peak(
-        memory.map(({ nvidiaGpuProcessBytes }) => nvidiaGpuProcessBytes),
-        "nvidia-smi does not list the GPU process",
-      ),
+      peakNvidiaGpuProcessBytes: columnPeakBytes(series.nvidiaGpuProcessKiB),
       adapterPeakBytes: report.adapterPeakBytes,
     },
     criteria: { whole, segments: segmentCriteria, overall },
@@ -1076,7 +1232,9 @@ const VERDICTS: ReadonlySet<string> = new Set(["pass", "fail", "marginal", "not-
  * Checks a parsed results file against its schema.
  *
  * @returns The problems found, empty for a valid file. Beyond the shape of each required part,
- * every figure must be present or `null` with a stated reason.
+ * every figure must be present or `null` with a stated reason, without a trace no figure read
+ * from the trace may be present, and the memory series must be whole: every column as long as the
+ * times, readings in whole KiB, -1 at its gaps' samples alone, and each peak its column's maximum.
  */
 export function validateResults(value: unknown): string[] {
   const problems: string[] = [];
@@ -1126,8 +1284,198 @@ export function validateResults(value: unknown): string[] {
   if (isRecord(criteria)) {
     checkCriteria(criteria, problems);
   }
+  const memory = value["memory"];
+  if (isRecord(memory)) {
+    checkMemory(memory, problems);
+  }
   checkFigures(value, "", problems);
-  return problems;
+  checkTraceFigures(value, problems);
+  // A whole-run null column without a reason is found by both checks.
+  return [...new Set(problems)];
+}
+
+/** Each column's peak among the memory figures, or `null` for a column without one. */
+const COLUMN_PEAKS: Readonly<Record<MemoryColumnName, keyof DescentResults["memory"] | null>> = {
+  appKiB: "peakAppBytes",
+  gpuProcessKiB: null,
+  tracingKiB: "peakTracingBytes",
+  rendererPrivateKiB: "peakRendererPrivateBytes",
+  drmResidentKiB: "peakDrmResidentBytes",
+  drmTotalKiB: null,
+  nvidiaDeviceKiB: "peakNvidiaDeviceLessBaselineBytes",
+  nvidiaGpuProcessKiB: "peakNvidiaGpuProcessBytes",
+};
+
+/** The one peak read less a baseline, which the file does not hold: at most its column's maximum. */
+const LESS_BASELINE_PEAK = "peakNvidiaDeviceLessBaselineBytes";
+
+function isWhole(value: unknown, min: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min;
+}
+
+/**
+ * The memory series: times in whole ms, columns as long as the times, readings in whole KiB, -1
+ * at a gap's samples and nowhere else, and each peak its column's maximum.
+ */
+function checkMemory(memory: Readonly<Record<string, unknown>>, problems: string[]): void {
+  const series = memory["series"];
+  if (!isRecord(series)) {
+    problems.push("memory.series is missing");
+    return;
+  }
+  const tMs = series["tMs"];
+  if (!Array.isArray(tMs) || !tMs.every((t: unknown) => isWhole(t, 0))) {
+    problems.push("memory.series.tMs is not a list of whole ms");
+    return;
+  }
+  for (const [name, peakName] of Object.entries(COLUMN_PEAKS)) {
+    const maxKiB = checkColumn(series[name], `memory.series.${name}`, tMs.length, problems);
+    if (maxKiB === undefined || peakName === null) {
+      continue;
+    }
+    const peak = memory[peakName];
+    const peakBytes = isRecord(peak) ? peak["value"] : undefined;
+    if (maxKiB === null) {
+      if (peakBytes !== null) {
+        problems.push(`memory.${peakName} is not null, but ${name} has no reading`);
+      }
+    } else if (peakName === LESS_BASELINE_PEAK) {
+      if (peakBytes !== null && (typeof peakBytes !== "number" || peakBytes > maxKiB * 1024)) {
+        problems.push(`memory.${peakName} is above ${name}'s maximum`);
+      }
+    } else if (peakBytes !== maxKiB * 1024) {
+      problems.push(`memory.${peakName} is not ${name}'s maximum × 1024 (${maxKiB * 1024} B)`);
+    }
+  }
+}
+
+/**
+ * One column of the memory series.
+ *
+ * @param count - The number of samples, `tMs`'s length.
+ * @returns The column's largest reading, KiB; `null` for a column with no reading all run;
+ * `undefined` when the column is malformed, its problem added to `problems`.
+ */
+function checkColumn(
+  column: unknown,
+  path: string,
+  count: number,
+  problems: string[],
+): number | null | undefined {
+  if (!isRecord(column)) {
+    problems.push(`${path} is missing`);
+    return undefined;
+  }
+  const value = column["value"];
+  if (value === null) {
+    const reason = column["reason"];
+    if (typeof reason !== "string" || reason.length === 0) {
+      problems.push(`${path} is null without a reason`);
+      return undefined;
+    }
+    return null;
+  }
+  const samples = isRecord(value) ? value["samples"] : undefined;
+  const gaps = isRecord(value) ? value["gaps"] : undefined;
+  if (!Array.isArray(samples) || !Array.isArray(gaps)) {
+    problems.push(`${path} is neither null nor samples with their gaps`);
+    return undefined;
+  }
+  if (samples.length !== count) {
+    problems.push(`${path} has ${samples.length} samples, not tMs's ${count}`);
+    return undefined;
+  }
+  const missingAt = new Set<number>();
+  let previous: { readonly to: number; readonly reason: string } | undefined;
+  for (const [i, gap] of gaps.entries()) {
+    const from: unknown = isRecord(gap) ? gap["from"] : undefined;
+    const to: unknown = isRecord(gap) ? gap["to"] : undefined;
+    const reason: unknown = isRecord(gap) ? gap["reason"] : undefined;
+    if (
+      !isWhole(from, previous === undefined ? 0 : previous.to + 1) ||
+      !isWhole(to, from) ||
+      to >= count ||
+      typeof reason !== "string" ||
+      reason.length === 0
+    ) {
+      problems.push(
+        `${path}.value.gaps[${i}] is not a stretch of samples with a reason, after the gap before it`,
+      );
+      return undefined;
+    }
+    if (previous !== undefined && from === previous.to + 1 && reason === previous.reason) {
+      problems.push(`${path}.value.gaps[${i}] continues the gap before it for the same reason`);
+      return undefined;
+    }
+    for (let sample = from; sample <= to; sample += 1) {
+      missingAt.add(sample);
+    }
+    previous = { to, reason };
+  }
+  let maxKiB = -1;
+  for (const [i, kib] of samples.entries()) {
+    const kibValue: unknown = kib;
+    if (missingAt.has(i) ? kibValue !== -1 : !isWhole(kibValue, 0)) {
+      problems.push(
+        missingAt.has(i)
+          ? `${path}.value.samples[${i}] is within a gap but not -1`
+          : kibValue === -1
+            ? `${path}.value.samples[${i}] is -1 outside a gap`
+            : `${path}.value.samples[${i}] is not a whole number of KiB`,
+      );
+      return undefined;
+    }
+    if (typeof kibValue === "number") {
+      maxKiB = Math.max(maxKiB, kibValue);
+    }
+  }
+  if (maxKiB === -1) {
+    problems.push(`${path} has no reading: a reading missing all run is null with its reason`);
+    return undefined;
+  }
+  return maxKiB;
+}
+
+/** The figures {@link buildResults} reads from the trace alone, by path. */
+const TRACE_FIGURE_PATHS: ReadonlyArray<ReadonlyArray<string>> = [
+  ["frames", "dropped"],
+  ["gpu", "gpuProcess"],
+  ["mainThread", "split"],
+  ["mainThread", "gc"],
+];
+
+function childAt(node: unknown, path: ReadonlyArray<string>): unknown {
+  return path.reduce<unknown>((child, key) => (isRecord(child) ? child[key] : undefined), node);
+}
+
+/**
+ * Without a trace (`run.trace` null), every figure read from the trace is null too, so that an
+ * empty trace's zeros cannot pass for measurements. A native replay times its presentations
+ * without a trace, so only its other trace figures are checked.
+ */
+function checkTraceFigures(value: Readonly<Record<string, unknown>>, problems: string[]): void {
+  const trace = childAt(value, ["run", "trace"]);
+  if (!isRecord(trace) || trace["value"] !== null) {
+    return;
+  }
+  const figures: Array<readonly [string, unknown]> = TRACE_FIGURE_PATHS.map((path) => [
+    path.join("."),
+    childAt(value, path),
+  ]);
+  if (childAt(value, ["run", "launchMode"]) !== "native-replay") {
+    figures.push(["frames.presentation", childAt(value, ["frames", "presentation"])]);
+    const segments = childAt(value, ["frames", "segments"]);
+    if (Array.isArray(segments)) {
+      segments.forEach((segment: unknown, i) => {
+        figures.push([`frames.segments[${i}].presentation`, childAt(segment, ["presentation"])]);
+      });
+    }
+  }
+  for (const [path, figure] of figures) {
+    if (isRecord(figure) && figure["value"] !== null && figure["value"] !== undefined) {
+      problems.push(`${path} is measured without a trace (${String(trace["reason"])})`);
+    }
+  }
 }
 
 function checkCriteria(criteria: Readonly<Record<string, unknown>>, problems: string[]): void {
@@ -1308,6 +1656,87 @@ export function summaryMarkdown(results: DescentResults): string {
   ].join("\n");
 }
 
+/** A JSON number's text, as `JSON.stringify` writes one. */
+const JSON_NUMBER = /^-?\d+(?:\.\d+)?(?:e[+-]\d+)?$/;
+
+/** A line holding one number, as an array's element or a property's value. */
+const NUMBER_LINE = /^(\s*(?:"(?:[^"\\]|\\.)*": )?-?\d+(?:\.\d+)?e)\+(\d+,?)$/;
+
+/**
+ * A results file's text as the repository's Prettier writes it at {@link PRETTIER_PRINT_WIDTH},
+ * from `JSON.stringify`'s indented form, which {@link writeResults} writes.
+ *
+ * @remarks
+ * What Prettier changes in that form, and no more: it keeps each object broken as the input breaks
+ * it, prints an array of numbers, strings, booleans or nulls on one line where it fits, and packs
+ * one that does not as many elements a line as fit when every element is a number (an array with
+ * a `null` stays one element a line). It drops an exponent's `+`. The writer uses this to warn of a
+ * file over {@link ADDED_FILE_LIMIT_BYTES}, since the client does not ship Prettier.
+ */
+export function formatAsPrettier(json: string): string {
+  const lines = json.split("\n").map((line) => line.replace(NUMBER_LINE, "$1$2"));
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    i += 1;
+    if (!line.endsWith("[")) {
+      out.push(line);
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    const elements: string[] = [];
+    let close: string | undefined;
+    for (let j = i; j < lines.length; j += 1) {
+      const element = lines[j] ?? "";
+      const trimmed = element.trimStart();
+      if (element.length - trimmed.length === indent && /^\],?$/.test(trimmed)) {
+        close = trimmed;
+        break;
+      }
+      if (trimmed.endsWith("{") || trimmed.endsWith("[")) {
+        break;
+      }
+      elements.push(trimmed.endsWith(",") ? trimmed.slice(0, -1) : trimmed);
+    }
+    if (close === undefined) {
+      // An array of objects or arrays: Prettier keeps it as it is.
+      out.push(line);
+      continue;
+    }
+    i += elements.length + 1;
+    const flat = `${line}${elements.join(", ")}${close}`;
+    if (flat.length <= PRETTIER_PRINT_WIDTH) {
+      out.push(flat);
+      continue;
+    }
+    const pad = " ".repeat(indent + 2);
+    if (!elements.every((element) => JSON_NUMBER.test(element))) {
+      out.push(
+        line,
+        ...elements.map((element, k) => `${pad}${element}${k < elements.length - 1 ? "," : ""}`),
+      );
+      out.push(`${" ".repeat(indent)}${close}`);
+      continue;
+    }
+    out.push(line);
+    let packed = "";
+    elements.forEach((element, k) => {
+      const item = k < elements.length - 1 ? `${element},` : element;
+      if (packed.length === 0) {
+        packed = `${pad}${item}`;
+      } else if (packed.length + 1 + item.length <= PRETTIER_PRINT_WIDTH) {
+        packed = `${packed} ${item}`;
+      } else {
+        out.push(packed);
+        packed = `${pad}${item}`;
+      }
+    });
+    out.push(packed, `${" ".repeat(indent)}${close}`);
+  }
+  return out.join("\n");
+}
+
 /** Runs of one day, machine and setting that {@link writeResults} numbers before it gives up. */
 const MAX_RUNS_A_DAY = 100;
 
@@ -1331,6 +1760,11 @@ const NODE_RESULTS_FILES: ResultsFiles = {
 /**
  * Writes a results file and its summary into `dir` as `<date>-<machine>-<setting>.json` and
  * `.md`, adding `-2`, `-3` and so on when a run of the same day, machine and setting is there.
+ *
+ * @remarks
+ * A file that Prettier would format to more than {@link ADDED_FILE_LIMIT_BYTES} is still written
+ * in full, with a warning that names its size: the series is never thinned or split
+ * (decision-r05-results-size.md). Such a run is a finding.
  *
  * @returns The paths written.
  * @throws Error if the results do not match their schema, naming each problem, or if the day's
@@ -1359,7 +1793,14 @@ export async function writeResults(
   }
   const json = join(dir, `${name}.json`);
   const markdown = join(dir, `${name}.md`);
-  await files.writeFile(json, `${JSON.stringify(results, null, 2)}\n`);
+  const text = `${JSON.stringify(results, null, 2)}\n`;
+  await files.writeFile(json, text);
   await files.writeFile(markdown, summaryMarkdown(results));
+  const formattedBytes = Buffer.byteLength(formatAsPrettier(text), "utf8");
+  if (formattedBytes > ADDED_FILE_LIMIT_BYTES) {
+    console.warn(
+      `descent spike: ${json} is ${formattedBytes} B once formatted, over the ${ADDED_FILE_LIMIT_BYTES} B the repository accepts for an added file; it is written in full`,
+    );
+  }
   return { json, markdown };
 }

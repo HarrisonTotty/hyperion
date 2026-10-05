@@ -1951,12 +1951,22 @@ sets R01's `gpuTiming` as `--hyperion-gpu-timing` does. This task may land befor
 headline GPU memory on NVIDIA, whose driver gives no per-client figure through fdinfo; and the
 results writer. The writer produces the file of Design note 18, with the machine, driver, Electron
 and Chromium versions, setting, seed, options, switches, load average, governor and every figure,
-including the per-level ε_n and k_n. It writes a Markdown summary beside the file.
+including the per-level ε_n and k_n. It writes a Markdown summary beside the file. The memory
+series is stored as columns (results schema version 2): the sample times in whole milliseconds
+and one array of whole KiB per reading, which is lossless, since every source reports KiB or MiB.
+A reading absent for the whole run is written once as null with its reason. A reading absent at
+some samples is written as -1 there, with the sample ranges and the reason beside its column.
+There is no delta encoding. Each results file stays under the repository's 500 KiB limit for
+added files (`check-added-large-files`), which this form meets for runs of up to about two hours.
+The file is never excluded from the hook, and the series is never thinned or moved to a side file
+(decided 2026-10-04 by a delegated decision).
 
 - Files: `apps/hyperion/src/main/fdinfo.ts`, `apps/hyperion/src/main/results.ts`, their tests,
   `docs/measurements/descent-spike/README.md`.
 - Tests: the fdinfo parser against recorded fixtures from i915 and amdgpu, summing distinct
-  client IDs; the results writer's output parses against its schema.
+  client IDs; the results writer's output parses against its schema; each peak equals its
+  column's maximum; a gap's samples hold -1 and no other sample does; a 3,600-sample run's file,
+  formatted by Prettier, is under 512,000 bytes.
 - Acceptance: `pnpm --filter hyperion exec vitest run src/main/fdinfo src/main/results`;
   `just descent-spike --setting low` on the development machine writes a results file with every
   figure present or null with a stated reason (on the RTX 3080 the fdinfo readings are null:
@@ -2752,9 +2762,295 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     (`drm-usage-stats.rst`; amdgpu in both its `drm-memory-*` and `drm-total-*` forms), since
     neither device is on the development machine; the NVIDIA fdinfo and `nvidia-smi.xml` were
     recorded there (RTX 3080, driver 615.71.09). The owner's UHD 620 runs (T16) read i915 for real.
-  - **Pending:** the hidden `just descent-spike --setting low` proof waits on T13.c (which waits on
-    T13.b) and is taken then; the visible run stays with the owner, its command in
-    `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7).
+  - **Result, 2026-10-04: the hidden low-setting run** (lane D,
+    `docs/measurements/descent-spike/2026-10-04-effect-low.md`).
+    - _The run._
+      - `bash target/laneD/smoke.sh --setting low --hidden`, the same as
+        `just descent-spike --setting low --hidden` with `TMPDIR` in the worktree. It ran on
+        af69a9e, whose level coast decision-r05-coast-speed.md cleared.
+      - The server was on port 7893 (`HYPERION_SPIKE_PORT`), off the default 7879 in case
+        another lane's smoke run started meanwhile. None did: no other spike process at 12:31,
+        12:36, 12:45 or 12:54.
+      - It exited 0 after 1,306 s (12:31:32 to 12:53:18 CDT) and sampled memory over 1,229 s.
+      - RTX 3080 (PCI 10de:2206), driver 615.71.09, Electron 44.4.3, Chromium 152.0.7977.130,
+        Linux `vulkan` mode, timer `full`, seed 7, ridges off, Dawn safety on, face differences,
+        mesh normals, hidden, canvas 806 × 431 px.
+      - **Timings provisional.** The load average was 10.4 at the start and about 19 at its
+        peak, with the machine shared by about ten agents. The file marks the run provisional,
+        and its overall verdict is `not-measured`.
+    - _The file._ `validateResults` passes. Every figure is present, or null with its reason:
+      - "no window shown": T, and the presentation figures whole and by segment;
+      - "no DRM client in the process's fdinfo (NVIDIA's driver writes none)": the DRM reading;
+      - "the trace has no timed event": the trace and every figure read from it (the finding
+        below).
+      - The rAF statistics' missed-frame and hitch counts are null inside their figure, since
+        they need T; their criterion rows carry "no window shown".
+    - _Figures._
+      - **Frames (rAF, after the warm-up):** 65,518 intervals; p50 16.70 ms, p95 33.30 ms,
+        p99 50.10 ms, max 133.3 ms. These are not read against T.
+      - **GPU time, 95th percentile:** terrain 0.57 ms (limit 14 ms, pass); atmosphere 3.73 ms
+        (limit 4 ms, pass at 93% of it; its view pass alone is 3.59 ms). The pass sum is
+        4.26 ms and our code's main-thread time 7.10 ms, neither read against T. No pass was
+        untimed, and no pipeline was created after the warm-up.
+      - **Memory:** the headline is 0.252 GB (`nvidia-smi` less its baseline; limit 1 GB,
+        pass). The GPU process alone held 192 MiB and the adapter's tally peaked at 75 MiB.
+        The app's processes peaked at 3.98 GB, with Chromium's tracing service at 1.71 GB apart.
+      - **Uploads:** 3.14 GB.
+      - **Streaming, patches a second, requested and baked against the hard bound's D:**
+
+        | Segment            | Requested | Baked |    D | `TERRAIN: STREAMING` (s) |
+        | ------------------ | --------: | ----: | ---: | -----------------------: |
+        | orbit coast        |       1.6 |   1.6 |  0.7 |                      1.1 |
+        | descent arc        |       0.8 |   0.8 |  2.1 |                     14.8 |
+        | approach and flare |      14.4 |  13.2 | 29.0 |                     35.7 |
+        | low fast pass      |      43.0 |  41.0 | 57.4 |                     22.7 |
+        | slowdown           |      48.5 |  40.6 | 34.8 |                     45.6 |
+        | vertical descent   |       0.0 |   0.0 | 21.4 |                      0.0 |
+        | hover              |       0.0 |   0.0 |  0.0 |                      0.0 |
+
+        Below the cap altitude the vertical descent selects nothing new, as T13.a's windows
+        found.
+
+      - This run flew the level coast, so its coast row is current. T13.a's two demand records
+        are `just descent-demand` runs and stay stale for the coast.
+    - _Fixed here: an empty trace's zeros._
+      - The trace held no events. The file as written still gave `frames.dropped` 0 and
+        `mainThread.gc` `[]` as if measured.
+      - `buildResults` now takes a trace with no timed event as no trace: every figure read from
+        it is null with `EMPTY_TRACE_REASON`.
+      - `validateResults` now refuses a trace figure present while `run.trace` is null. The
+        figures are the frames dropped, the GPU process, the main thread's split, its GC pauses
+        and the presentation figures. A native replay is exempt for its presentations, which it
+        times without a trace.
+      - Three tests fail on the old writer: the empty trace, the refused figures and a client
+        run's refused presentations. A fourth holds the native replay's exemption. Reviewed by
+        typescript-reviewer: no must-fix, and its should-fix (the presentation test) is applied.
+      - The run's results were regenerated by applying the rule to the saved file, since the raw
+        report is not kept. The rule changes only the four figures the trace alone gives, so the
+        result is what the fixed writer would have written. The summary shows none of them and
+        is byte-identical.
+    - _The JSON, committed in schema version 2._
+      - In version 1 it was 563 KB, over the repository's 500 KB limit on added files
+        (`check-added-large-files`). Its 1,228 memory samples took 477 KB.
+      - decision-r05-results-size.md (2026-10-04) rules results schema version 2, with the
+        memory series as columns of whole KiB (the deviation below). The committed
+        `2026-10-04-effect-low.json` is the corrected file converted to it, losslessly, with the
+        app's version corrected. Formatted, it is 109,109 B.
+      - The corrected v1 file stays uncommitted at `target/laneD/t14c/2026-10-04-effect-low.json`,
+        and formatted as `pretty.json`, the conversion's source. The file as written is beside it
+        as `.as-written.json`.
+    - _Findings._
+      - The tracing service crashed writing the trace (the Risks bullet below).
+      - The renderer's private memory grew roughly linearly, from 0.26 GB at 60 s to 1.57 GB at
+        the end (about 1.1 MB a second). Found since (2026-10-04, the Risks bullet below on the
+        renderer's memory): about 1.25 MB/s of it is the trace's own CPU-profiler category, and
+        up to about 66 MB was the patch cache keeping each bake's arrays, now fixed.
+      - `run.versions.app` recorded 44.4.3, Electron's own version, not the app's 0.1.0:
+        `app.getVersion()` finds no `package.json` beside `out/main/index.js`. Fixed with
+        schema version 2 (the deviation below).
+      - Chromium's basic GPU information gives no description, so the GPU appears in the file
+        as its PCI IDs.
+    - **Pending:** the visible run stays with the owner, its command in
+      `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7). Its presentation
+      figures need the trace's remedy first.
+  - Results schema version 2 (2026-10-04, delegated decision): v1's memory samples, an object
+    per second, made the T14.c hidden run's file 563,230 B, over the 500 KiB hook. Version 2
+    stores them as columns of whole KiB, which brings that run to about 105 kB and an hour's run
+    to about 257 kB. The T14.c file is a lossless conversion of the hidden run's output.
+    - _The form._ `memory.series` holds `tMs` and the columns `appKiB`, `gpuProcessKiB`,
+      `tracingKiB`, `rendererPrivateKiB`, `drmResidentKiB`, `drmTotalKiB`, `nvidiaDeviceKiB` and
+      `nvidiaGpuProcessKiB`. Each column is a figure like any other:
+      - present: `{ "value": { "samples": [...], "gaps": [...] }, "reason": null }`, with a gap
+        as `{ "from", "to", "reason" }`;
+      - missing all run: `{ "value": null, "reason": "..." }`. Where samples gave different
+        reasons, the column's reason lists each once, joined by "; ".
+    - _Built by_ `memorySeries` (`main/results.ts`). The in-memory `MemorySample` and the
+      sampler are unchanged. The peaks are their columns' maxima × 1024, which are exact, since
+      every source reports whole KiB. The peak less `nvidia-smi`'s baseline is the device
+      column's maximum less the baseline. The file does not hold the baseline, so
+      `validateResults` checks only that this peak is at most that maximum.
+    - _Checked by_ `validateResults`, which accepts version 2 only:
+      - times in whole ms;
+      - every column as long as the times;
+      - readings in whole KiB;
+      - -1 at a gap's samples and at no other;
+      - gaps in order, within the samples, each with a reason, and consecutive samples of one
+        reason in one gap;
+      - a column with no reading written as null, with a reason;
+      - each peak equal to its column's maximum × 1024, and null for a column with none.
+    - _The size warning._ The client does not ship Prettier, so `formatAsPrettier` reproduces
+      what Prettier changes in `JSON.stringify`'s indented form, which is what the writer writes:
+      - an array of primitives that fits goes on one line;
+      - an array of numbers that does not fit is packed to 100 columns;
+      - an exponent's `+` is dropped.
+
+      The tests hold its output byte-identical to Prettier 3.9.8's, with the repository's own
+      configuration, on three files: a long run, a run with gaps and a run with no samples.
+      `apps/hyperion` lists Prettier among its dev dependencies for them. `writeResults` warns with `console.warn`,
+      naming the formatted size, when it is over 512,000 B (`ADDED_FILE_LIMIT_BYTES`), and still
+      writes the whole file.
+
+    - _Sizes as built,_ formatted at a print width of 100:
+      - the T14.c file is 109,109 B, against the ruling's 105,329 B, since each column nests
+        its samples in `value`;
+      - the tests' 3,600-sample run is 250,626 B.
+    - _The replayer._ T15.c's replayer (`tools/gpu-replay/src/results.rs`) writes version 2 too,
+      approved by the orchestrator on 2026-10-04. Its series has no times, and every column is
+      null with "the native replay does not measure memory". Its unit test checks the series,
+      and its GPU test checks `RESULTS_VERSION`.
+    - _The app's version._ `run.versions.app` is now `__APP_VERSION__`, `package.json`'s
+      version, which the main process's build defines as the renderer's does
+      (`electron.vite.config.mts`, with a test in `main/appVersion.test.ts`).
+      `run.versions.electron` keeps Electron's. The client's `--version` had the same fault and
+      reads `__APP_VERSION__` too. In the T14.c file the app's version is
+      corrected to 0.1.0. The renderer bundle that run loaded, built at its start (12:31:31),
+      carries `__APP_VERSION__` as "0.1.0". The summary's versions line is regenerated, and
+      nothing else in the summary changed.
+    - _The conversion_ was a one-off script, not committed. It built the series with
+      `memorySeries` from the corrected file's samples, and checked the result against the
+      source:
+      - each of the 7,367 readings back from its column, exactly;
+      - each missing reading's reason;
+      - each time to within 0.5 ms.
+
+      It kept the peaks as they were. `validateResults` confirms that they equal the columns'
+      maxima × 1024. The only gap is the renderer's first sample, before the renderer reported.
+- **Finding: Chromium's tracing service crashes writing the whole descent's trace** (2026-10-04,
+  T14.c's hidden run; for T14 and T16, and the owner's visible T14.c and T17 runs).
+  - _What happened._
+    - When the trace stopped, the tracing service (`tracing.mojom.TracingService`, a utility
+      process) held 1.71 GB. That is under `SPIKE_TRACE_BUFFER_KB`'s 2 GiB, so the buffer had
+      not filled.
+    - It took a SIGTRAP in `posix_memalign` at 12:52:48 (`coredumpctl info 427995`). That is
+      Chromium's crash on a failed allocation. The machine had about 23 GB of memory available
+      at 12:45, so the system was not short of memory.
+    - The file it left held no events. The run itself ended normally and wrote its results.
+  - _What it cost._
+    - None of the trace's figures were measured: presentation times, the frames Chromium
+      dropped, the GPU process's time, the main thread's split and GC pauses.
+    - A visible run would lose its presentation intervals, the criterion's source, and fall
+      back to rAF timestamps.
+  - _Size._ The trace grew at about 1.4 MB a second. `SPIKE_TRACE_BUFFER_KB`'s comment assumed
+    1.1, measured on a small page. Where inside Chromium the allocation failed is not confirmed;
+    the JSON export of a buffer this size is the likeliest place.
+  - _Likely remedies, to choose before the visible runs:_
+    - fewer categories (`disabled-by-default-v8.cpu_profiler` and
+      `disabled-by-default-devtools.timeline.frame` are the likeliest bulk, not yet measured);
+    - a smaller buffer, which records until full and so truncates rather than crashes, if the
+      export's size is the cause;
+    - a shorter traced span (one trace a segment, or a window, each reduced as it ends).
+
+    A short hidden run that stops its trace at a few sizes would find the threshold.
+
+  - _Already fixed._ The results writer takes such an empty trace as none (T14.c's record
+    above).
+  - _Measured since_ (2026-10-04, the renderer's memory finding below):
+    - The CPU profiler is about a fifth of the trace. With the profiler's category alone, the
+      tracing service grew about 0.27 MB/s; with the other six categories, about 1.1 MB/s.
+    - Without the profiler, two full hidden descents (G and H) still lost their traces. At about
+      1.35 GB, each tracing service took a SIGTRAP at the stop (pids 619777 and 662220,
+      `coredumpctl`). Dropping that category alone is no remedy.
+- **Finding: the renderer's memory growth is the trace's CPU profiler, and the cache kept each
+  bake's arrays** (2026-10-04, T14.c's hidden run; for T14's trace remedy and T16).
+  - _The question._ In T14.c's hidden run, the renderer's private memory grew about 1.1 MB/s, to
+    1.57 GB, while the GPU's stayed at 0.252 GB. The growth did not follow the bakes. It was
+    1.08 MB/s through the descent arc, at 0.84 bakes/s, and −0.39 MB/s in the low fast pass, at
+    41 bakes/s.
+  - _The probe._
+    - The runs were hidden low-setting runs, seed 7, on the RTX 3080, with no other spike run
+      on the GPU. Each was capped at 200–300 s from the descent's start, unless marked full.
+    - A temporary probe in the main process (not committed) sampled every 5 s:
+      - the renderer's anonymous memory (`RssAnon`, the figure behind
+        `getProcessMemoryInfo().private`);
+      - each isolate's JS heap and ArrayBuffer backing stores, over the DevTools protocol
+        (`Runtime.getHeapUsage`, for the page and each height worker);
+      - the renderer's `/proc/<pid>/smaps` at 60 s and at the end, summed by mapping name.
+    - Between runs, only the trace's categories changed, and in F the worker count.
+  - _Rates from 60 s to the end, MB/s._ The isolates are the page and its height workers. "JS
+    heaps" and "ArrayBuffers" are summed over the isolates.
+
+    | Run | Trace                                         | Isolates |  Renderer | JS heaps | ArrayBuffers |
+    | --- | --------------------------------------------- | -------: | --------: | -------: | -----------: |
+    | A   | Design note 18's seven categories, as T14.c   |        4 |      1.30 |    0.016 |        0.022 |
+    | B   | none                                          |        4 |      0.07 |    0.020 |        0.036 |
+    | C   | all but `disabled-by-default-v8.cpu_profiler` |        4 |      0.04 |    0.007 |        0.042 |
+    | D   | the CPU profiler alone                        |        4 |      1.27 |    0.016 |        0.038 |
+    | E   | D's, stopped and restarted every 60 s         |        4 | 1.2, 0.07 |    0.019 |        0.052 |
+    | F   | D's, with `--workers 1`                       |        2 |      0.61 |    0.023 |        0.010 |
+
+    E's two renderer figures are its growth within one trace and across restarts (its troughs).
+
+  - _Cause 1: V8's CPU profiler, which is the measurement's own._
+    - The category starts V8's sampling profiler in every isolate of the renderer, so in the
+      page and in each height worker. Each isolate keeps its profile in native memory until the
+      trace stops.
+    - D's smaps put 198 MiB of its 217 MiB growth (60 s to 240 s) in PartitionAlloc, Chromium's
+      `malloc`. Only 11.5 MiB was in V8's sandbox, which holds the JS heaps and ArrayBuffers.
+    - It costs about 0.31 MB/s for each isolate (D against F). An idle worker costs as much as
+      the page, so the cost follows the worker count, not the descent's work.
+    - Stopping the trace frees it. In E, each restart dropped the renderer back to its baseline
+      (about 185–198 MiB), and its troughs rose at 0.07 MB/s, B's rate.
+  - _Cause 2: the patch cache kept each bake's arrays. Ours, now fixed._
+    - `PatchCache.insert` takes a `ResidentPatch`, but the terrain pass hands it the worker's
+      whole `BakedPatch`, and the entry was a spread of it. So every resident patch kept its
+      heights and normals in the renderer (50.7 KB a patch on the low layout), although its slot
+      already held them.
+    - This was bounded by the slots. In vitest, 4,000 such bakes into a low cache held 65.6 MB
+      of ArrayBuffers once its 1,296 slots were full, and stayed at that plateau. On high, about
+      1,960 slots of heights, offsets and double normals would hold about 396 MB, nearly the
+      cache's whole 400 MB budget again.
+    - `insert` now keeps only the resident fields (`cachedPatch`). The same drive holds about
+      0 MB. Two regression tests in `cache.test.ts` fail on the old code, one for each insert
+      path. typescript-reviewer found no must-fix or should-fix. Its wording note on `insert`'s
+      remarks is applied. The hidden smoke (`descentSpike.sh --hidden --smoke --setting low`)
+      passes on the fix.
+    - _Over a whole descent._ G (before the fix) and H (after) were full hidden runs on
+      `rendering-and-planets` with F3, tracing C's six categories:
+
+      | Figure                                     | G, before |   H, after |
+      | ------------------------------------------ | --------: | ---------: |
+      | Renderer `RssAnon`, peak                   |   349 MiB |    305 MiB |
+      | Renderer `RssAnon`, at the end             |   335 MiB |    255 MiB |
+      | Results file's renderer private peak       |   370 MiB |    305 MiB |
+      | The page's ArrayBuffers, peak              |    113 MB |      56 MB |
+      | The page's ArrayBuffers, mean from 1,000 s |     88 MB |      24 MB |
+      | Renderer growth, 60 s to the end           | 0.13 MB/s | 0.065 MB/s |
+
+      In G, the page's ArrayBuffers grew with the bakes (25 MB at 65 s, 103 MB by 1,147 s). In
+      H, they stayed at 18–23 MB, apart from one 56 MB sample at 1,207 s that the next GC
+      returned.
+  - _Ruled out, with the share each had._
+    - The recorder's per-frame series and the 1 Hz samples are in the page's JS heap. All the
+      JS heaps together grew 0.024 MB/s in H, about 30 MB over a descent.
+    - Worker messages and height-worker results are ArrayBuffers. With the cache's copies
+      gone, all the ArrayBuffers together grew 0.009 MB/s in H.
+    - The height workers' ArrayBuffers (their wasm memories and bake buffers) went from 45 MB
+      to between 52 and 62 MB, where they stayed from 850 s on.
+    - Uploads' staging is shared memory, which `private` does not count. The renderer's
+      `RssShmem` held at about 9 MiB throughout.
+    - Event listeners and the cache's eviction (F3) do not show: the growth followed neither
+      the bakes nor the cache.
+    - What is left after the fix and without the profiler is 0.065 MB/s, about 80 MB over a
+      descent: the JS heaps, the workers' ArrayBuffers, and about 0.03 MB/s of native memory.
+  - _What it costs on T16's laptop._
+    - The laptop runs two height workers by default (`defaultSpikeWorkers` for 8 threads), so
+      three isolates. That is about 0.93 MB/s, or about 1.15 GB by the descent's end, on top of
+      the renderer's own 0.3 GB.
+    - It sits in the system memory the UHD 620 shares, beside the tracing service's 1.3–1.7 GB.
+    - The criterion's memory row (DRM resident) does not count it. The results file's
+      renderer-private figure does.
+  - _Remedies for the profiler, to choose with the trace's remedy above (for the orchestrator
+    and the owner):_
+    - Windowed traces, the trace finding's third remedy. A stop frees the profile (E), so
+      windows of 120 s or less bound it at about 110 MB with three isolates. They bound the
+      tracing service too. One trace for each segment would not: the descent arc alone is
+      900 s.
+    - Drop the category. The renderer then grows at about 0.065 MB/s, and the results lose only
+      the main thread's engine split (`engineSelfMs` and `sampledMs`, Design note 18).
+    - Keep it, and read the renderer's figure as including it.
+
+    The lean is windowed traces, since the trace's crash needs them anyway.
+
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
     `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,
@@ -3042,12 +3338,50 @@ medium, sizes, figure)`.
 
   - _The morph bands_ (`morphRangeM`, `MORPH_START_FRACTION` 0.7, a hand value).
     - Level n's band runs from 0.7 of the way from d_n to d₍ₙ₋₁₎, ending at d₍ₙ₋₁₎, where d_k is
-      the distance at which `selectionErrorM(k)` subtends the setting's τ (not τ ÷ 1.1, so that a
-      coarse–fine edge stays at morph 1 between selections).
+      the distance at which `selectionErrorM(k)` subtends the setting's τ (raised under the
+      budget, below; not τ ÷ 1.1, so that a coarse–fine edge stays at morph 1 between selections).
     - Level 0 has none. The finest level's band is [0.7 d₍ₙ₋₁₎, d₍ₙ₋₁₎].
     - The bands are computed per level when selection runs. Stand-ins take their own level's.
-    - Where the budget leaves a coarse patch beside a finer one inside the parent's band, CDLOD's
-      crack-freedom does not hold, and the skirts cover the gap.
+    - When selection is `limited`, the bands are computed at τ × max(1, `limitExcess` ÷ w)
+      (`decision-r05-high-bound.md`), so that a coarse–fine edge stays at morph 1 under the budget
+      too. The skirts remain the guard against `f32` hairlines.
+      - _As built (F2, 2026-10-04)._ `effectiveTauPx(τ, limitExcess, w)`, with w = 1 for the
+        pass's one view. `limitExcess` is measured against the τ_sel = τ ÷ 1.1 that selection runs
+        at, so every drawn baked leaf has ρ ≤ τ′ = τ_sel × max(1, `limitExcess` ÷ w), the τ′ of T7
+        and of T13.a's record. The bands, at 1.1 τ′, keep the margin of 1.1 over the leaves that
+        they have at τ without a budget. `limitExcess` is 0 when the budget does not bind (T7, as
+        built), so the bands are then at exactly τ, bit-identical to before, with no test of
+        `limited`. Unbaked leaves are held by the streaming gate, as before.
+      - _Tests (`terrainPass.test.ts`)._ At 2,000 km, unbudgeted, the written bands equal
+        `morphRangeM` at τ bit for bit. At 1.5 km, 69° from straight down at 1080p, the budget
+        binds (981 patches, `limitExcess` about 1.65). There the bands equal `morphRangeM` at
+        τ × `limitExcess`, and every vertex of the 148 coarse–fine edges has morph factor 1, the
+        nearest at 1.107 × its band's end. With the bands at τ, all 9,620 of them are below 1,
+        many at 0.
+        - The vertices are the cube sphere's `f64` points at the fake bakes' height of 0, under the
+          shader's `morphFactor` without contacts on the written `f32` bands, not
+          `vertexEmulation.ts`'s positions: the fake bakes carry no offsets, and the margin is far
+          beyond `f32` rounding.
+        - Only the bands read the new tolerance, so the unchanged suite pins every other output.
+          `just test-render --captures` (both variants, every shot unlimited) gives 28 PNGs
+          byte-identical to a build with the bands at τ.
+      - _What remains._
+        - Every band moves when τ′ does, at each selection. A vertex inside its band then steps in
+          morph factor by about (k + start ÷ (end − start)) × Δτ′ ÷ τ′, about 6 × Δτ′ ÷ τ′ for a
+          level whose bound halves. Selection re-runs on every stored bake, so while streaming
+          under the budget τ′ can change almost every frame.
+        - Where τ′ falls between two selections by more than the margin of 1.1, which a camera
+          move of up to 10% also draws on, a patch the looser budget now splits can start partly
+          morphed. Where τ′ rises as much, a merged patch's children may have been partly morphed.
+          Either is a pop of up to about the larger τ′ in bound terms, as every split under the
+          budget was before F2.
+        - F4's record could add the change of τ′ between consecutive selections, which sets those
+          steps. The ruling's by-hand look at T17's ridged high run is where any of it would show.
+        - The coarse side of an edge is not F2's. Crack-freedom also needs the coarse leaf's shared
+          vertices unmorphed, and near a low camera a coarse patch can span more depth than its
+          band allows. Unbudgeted, at 1.5 km and 640 × 360, some reach morph factor 1 towards their
+          own parent, and the skirts cover the step. In the budgeted 1080p case above all are at 0,
+          the nearest at 0.983 × its coarse band's start.
   - _Contacts._ Only contacts whose held radius plus ramp reaches a drawn patch's bounding sphere
     are written. Each is written with T7.c's `heldRadiusM` and `morphRampM`. Both rules are 3-D, so a body above
     the ground is passed as the surface point beneath it (T13.b's to do). Selection also takes
@@ -3180,7 +3514,8 @@ medium, sizes, figure)`.
     `TIMESTAMP_QUERY` they are null with that reason. Presented, the main (largest) canvas is the
     window's surface with FIFO presentation, intervals are taken as `present` returns, and an
     outdated or lost surface is configured again, up to eight failures in a row. A replay's
-    results file follows `main/results.ts`'s schema (version 1), whose types gained
+    results file follows `main/results.ts`'s schema (version 1; version 2 since 2026-10-04, see
+    T14.c's deviations), whose types gained
     `frames.source: "gpu-completion"`, the optional `frames.gpuCompletion` and the launch mode
     `native-replay` (the backend is in `run.options.backend`); figures a native replay cannot have
     (trace, main thread, memory, rAF) are null with their reason. A GPU row counts only frames
@@ -3445,6 +3780,212 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     each case's budget, match those taken from selection before the field was added. They also
     guard the work on selection's cost (the ruling's item 4), and are re-recorded only when
     selection's output is meant to change.
+- **T8, as built (lane B, with F3 of `decision-r05-high-bound.md`, 2026-10-04): the cache keeps
+  the baked patches selection hides.**
+  - _The cause, not the ruling's guess._ The coarse patches that thrashed had not left the view.
+    Selection had reached them and culled them by their own baked ranges: a child a split left
+    out, or a split patch with nothing visible beneath it. Neither selected nor an ancestor of a
+    selected patch, such a patch was never touched by `retain`, so it aged from its bake and was
+    among the first evicted. Evicted, it took its ancestor's looser range (the patch-demand
+    ruling's 4a) and rose over the horizon. It was then selected and demanded again, and its
+    parent stood in for it and its siblings until the bake landed. Baked, it was hidden again.
+    The probe's 3 s warm-up from an empty cache put the cold start's hidden patches in phase, so
+    its one second was a burst (45–51); in a warm cache they cycle all through the approach (the
+    table below).
+  - _The fix._ `Selection.hiddenBaked` (`select.ts`, from `PatchLeafSet.bareKeys`) lists the
+    baked patches the traversal reached but left out, depth first from face 0. `PatchCache.retain`
+    marks them as used each frame they are hidden. They are not pinned and not counted in
+    `CachePressure.drawn`; among the unpinned patches used as recently, they go last. In Design
+    note 10's terms the rule is still least recently used among unpinned slots, with the hidden
+    patches counted as used and one more tie rule. Also, a patch the selection demanded is now
+    draw-pinned as it arrives, as selected and forced ones already were. Before, an ancestor
+    requested for its unbaked descendants stayed unpinned until the next retain, so once the
+    unpinned patches were used up, a later insert of the same frame could evict it. Otherwise
+    eviction is unchanged: deepest first among equals, forced patches and roots never. The
+    slots, `exceeded`, refusals and the memory bound are unchanged. T7's digests of the selected
+    keys and the demand still match: `hiddenBaked` adds an output and changes nothing selected.
+  - _Unpinned, not draw pins._ A version that pinned them like the draw set made one run worse:
+    608 coarse re-bakes against 39. That run is a scratch low pass like the test's, at 640 × 360
+    and τ = 1 px, tilted 1.5 rad, with 500 slots, which its pins and hidden patches overflow. There
+    the hidden patches pushed out the selection's own new leaves. Unpinned, that run is as before:
+    39 re-bakes and 25 frames of stand-ins either way.
+  - _The ruling's examples, not built._ Depth before recency among unpinned patches, measured
+    the same way over the high approach, cut the ridges-off coarse re-bakes to 52. But it raised
+    the level-14 evictions to 2,676 (off) and 6,880 (on), and the re-bakes of levels 13–18 within
+    1 s to 1,622 and 13,405. Bakes rose to 160 and 460 a second, and the ridged coarse re-bakes
+    to 4,848: freshly left fine patches went first and came straight back. Keeping levels ≤ L
+    resident does not fit either: the thrash reached level 12, where patches are not few.
+  - _Measured_ (CPU only; the ruling's probe loop of select, resolve, retain and bake every
+    request at once, an ideal pool, at 16 Hz with the hard bound and seed 7; the high setting's
+    981 patches and 1,962 slots unless noted). In the ruling's 2.4 km window
+    (`run2.mjs on|off high 1040`, 16 frames after a 3 s warm-up from empty):
+
+    | Before → after                                    | Ridges on      | Ridges off              |
+    | ------------------------------------------------- | -------------- | ----------------------- |
+    | Frames with a non-resident drawn leaf, level ≤ 12 | 12 → 0         | 6 → 1                   |
+    | Levels 2–12 evicted; re-baked                     | 51; 45 → 0; 0  | 19; 13 → 0; 0           |
+    | Level-14 evictions                                | 30 → 6         | 0 → 0                   |
+    | τ′ at the window's last frame                     | 11.4 px → 1.18 | 6.84 px → 1 (unlimited) |
+
+    The one frame left with ridges off is the first bake of a level-11 patch coming into view,
+    which had never been resident. Over the whole approach (960–1,080 s, 1,921 frames after a
+    20 s warm-up, with the frames counted over every seen selected leaf):
+
+    | Before → after                                          | High, on      | High, off     | Low, on       | Low, off    |
+    | ------------------------------------------------------- | ------------- | ------------- | ------------- | ----------- |
+    | Levels 2–12 re-baked within 1 s of eviction             | 2,168 → 0     | 545 → 0       | 714 → 0       | 26 → 0      |
+    | Frames drawing a once-resident level ≤ 12 by a stand-in | 967 → 7       | 387 → 5       | 527 → 6       | 34 → 0      |
+    | Its largest ρ, px of bound                              | 211 → 19      | 68 → 8.3      | 141 → 12.7    | 33 → none   |
+    | Level-14 evictions                                      | 2,406 → 2,178 | 2,187 → 2,166 | 1,077 → 1,070 | 352 → 357   |
+    | Bakes a second                                          | 278 → 239     | 127 → 122     | 138 → 119     | 23.3 → 23.0 |
+
+    The stand-ins left were of patches evicted 23–63 s before, out of the selection all that
+    time: the cache's capacity, not thrash. The first bakes of patches coming into view (61–126
+    frames a run) are unchanged. On low with ridges off, the level-14 evictions rose by 5 (1.4%),
+    outside the ruling's window: the hidden patches hold slots that fine patches used before.
+    Listing them costs about 0.1 ms of an 8.3 ms selection of 2,643 patches with 559 hidden
+    (vitest under load; provisional).
+
+  - _Headroom, for T18 and R10._ The hidden patches peaked at 530 (on) and 389 (off) of the high
+    setting's 1,962 slots, and at 354 and 197 of the low setting's 1,296. The draw pins peaked at
+    1,389 and 1,208 (high) and 929 and 250 (low), unchanged. Forced patches, draw pins and hidden
+    patches together peaked on a single frame at 1,922 and 1,537 (high) and 1,229 and 425 (low).
+    No run evicted a hidden patch or a draw pin, evicted a patch in the frame it was stored,
+    refused a bake or set `exceeded`. So ⌊slots ÷ 2⌋ holds against the coarse eviction in these
+    runs, but on the ridged high approach with only 40 slots to spare. The hidden patches are a
+    resident population that neither T18's ⌊slots ÷ 2⌋ nor R10's sizing rule counts, and R10's
+    layout of about 430 low slots was not measured.
+  - _The acceptance, as read._ F3 asks that "no steady-state frame has a non-resident drawn leaf
+    at level ≤ 12". It is read as no once-resident patch, evicted and drawn by a stand-in on its
+    return. With ridges off one frame remains, the first bake of a patch never resident. No
+    eviction rule can make such a patch resident: the ideal pool bakes after the frame's draw, so
+    every patch's first appearance is drawn by its parent for one frame (61–126 frames a run,
+    unchanged). `cache.test.ts`'s low pass counts once-resident patches for the same reason. Put
+    to the orchestrator with the commit, for the ruling's author.
+  - _How it was measured._ `run2.mjs` and `probe2.ts`, adapted from the ruling's scratch copies to
+    read this worktree, count every seen selected leaf a frame. `thrash.ts` and `run.mjs` run the
+    same loop over the whole approach, with the baked ranges memoised on disk. "Before" is the
+    same code with the selection's `hiddenBaked` and `demand` withheld from `retain`, which is
+    exactly the earlier rule. The depth-first variant replaces `PatchCache`'s victim choice in
+    the probe. Copies of the scripts and their results are in `.git/rm23-scratch/r05-t8-f3/`;
+    they run from a worktree's `target/f3-probe/`.
+  - _Tests._ `cache.test.ts`:
+    - a coarse ancestor of the drawn patches, and a hidden patch beside it, are kept while the
+      drawn patches churn;
+    - hidden patches go after every unpinned one and before the draw pins, age once no longer
+      hidden, and are not counted as pins;
+    - a demanded ancestor is pinned from the moment it arrives;
+    - under 300 frames of random selections and hidden sets, no slot is used twice or beyond the
+      count, and the bytes held follow the slots;
+    - the same patches are evicted whatever order they were stored in;
+    - a low pass of selection and the cache together (500 slots, an ideal pool, a sliding
+      contact) bakes no level ≤ 12 patch twice after a 16-frame warm-up, draws none by a
+      stand-in once it was resident, and evicts the same patches on a second run.
+
+    Without the fix, the churn test, the test of the hidden patches' place in the order, the
+    demanded-ancestor test and the low pass's re-bake test fail.
+    `select.test.ts`: `hiddenBaked` lists only baked patches neither selected nor above a
+    selected one, and every baked child of a split patch that is neither; the list is the same
+    for the same input and empty with no baked ranges; and `bareKeys` lists the children a split
+    left out and the splits with no leaf beneath.
+- **R05.T7 perf (c), as built (lane B, 2026-10-04): the per-node costs perf (b) left.** This is the
+  next step toward 4d's 2 ms p95 (decision-r05-high-bound.md, reason 4). Selection's output is
+  unchanged bit for bit:
+  - the selected keys and their order;
+  - every number of every bound;
+  - the demand with its priorities;
+  - `limited`, `limitExcess` and F3's `hiddenBaked`.
+
+  It is built on F3's `hiddenBaked` (the entry above), and `bareKeys` reads the new node layout.
+  - _The neighbour probe._ It builds no keys.
+    - `stepCellInto` (`patchKey.ts`) writes a folded cell into a reused `CellOut`. `stepCell`, and
+      so `edgeNeighbour` and `cornerNeighbours`, now call it.
+    - The balance asks of each neighbour only for the leaf over its grandparent cell. It walks up
+      the leaf's own ancestors to the first that holds that cell (across a face edge, it starts
+      from that face's root), then down. Where that ancestor is the leaf's own grandparent there
+      is none, since the grandparent is split.
+    - Away from a face's edge, three of the eight neighbours decide. They are (Δi, 0), (0, Δj) and
+      (Δi, Δj) for the leaf's outward steps, tried in the order the eight-neighbour scan meets
+      them. Each of the other five lies in the parent's own cell or in the parent cell of one of
+      those three, so it answers the same.
+  - _No `childKeys` tuple and no children array a split._
+    - `PatchLeafSet`'s nodes hold their parent and four child fields. The per-level maps by
+      `patchKeyIndex` are gone.
+    - A split still makes its four keys and its child nodes, one at a time, and `splitBalanced`
+      returns one `leaves` array.
+    - The journal and the balance's work lists are reused.
+    - `PatchLeafSet.leafValues()` (new) returns the leaves as an array, and `values()` yields
+      from it. Selection reads it once, for the output map and the demand.
+  - _`patchBounds` in scalars._
+    - It runs over preallocated scratch, in the same `f64` operations and order, and allocates
+      only the bounds it returns. Selection still passes a new bound its `[lowM, highM]` tuple.
+    - `Math.hypot` is called only where the squared length is not below 1 − 10⁻¹² of the largest.
+      That gives the same maximum for finite metres, and a NaN still comes out as NaN.
+    - A call takes about 7.2 µs, down from 24.6 µs (load 3, provisional).
+  - _Smaller costs._
+    - The output map's key strings are kept in the bounds memo, so they are neither rebuilt nor
+      rehashed.
+    - The per-level error, ε_n and height ranges are computed once a planet.
+    - `inForcedRegion` (`grounded.ts`) is now a loop over `distanceToBoxFromM` (`viewGeometry.ts`).
+      It builds no `relativeBounds` objects and no closure. It is still the rule's one definition,
+      and selection skips it when there are no contacts.
+    - The demand's walk no longer stops at an ancestor already requested. Such an ancestor is
+      always the top of its unbaked chain, so the walk ends there anyway and the targets are
+      unchanged.
+    - Hidden children get no traversal node.
+  - _Tests._
+    - `select.test.ts` adds whole-output digests (with `hiddenBaked`), recorded before this work.
+      The first set is at the 1.5 km pose, at budgets of 981 and 1,952 and with none.
+    - The second is a 48-frame approach: 20 km to 300 m, a secondary view and a contact below
+      1 km, at budget 981, baking 128 requests a frame from the demand. Its digest folds every
+      frame's output.
+    - `select.test.ts` also adds a randomized check against the leaf set's former algorithm, kept
+      as a string-keyed map. The check covers left-out children, face edges, cube corners and
+      rollbacks.
+    - `bounds.test.ts` holds `patchBounds` to its former vector form, bit for bit, over 1,350
+      patches (every face and level, the corners and edges included), 3 planets and 3 ranges.
+    - `patchKey.test.ts` holds `stepCellInto` to the former array form of `stepCell`.
+      `cube.test.ts`'s Rust golden still holds the fold itself.
+    - `viewGeometry.test.ts` holds `distanceToBoxFromM` to `distanceToBoxM` of `relativeBounds`.
+    - F1's and F3's tests and the spike's pinned sequences pass unchanged.
+  - _Measured (provisional, Design note 27)._ The harness is `bench.ts`, `ab.mjs` and `build.mjs`
+    in `.git/rm23-scratch/r05-b/perfc/`. Its figures are taken at the perf (b) pose: 1.5 km, ridges
+    off, 1920 × 1080, fov_h 60°, τ = 1 px, tilted 69°, warm, Node 26. Each is the median of ten
+    interleaved runs of the old code (F3 merged) and the new, at loads 5.5–10.7, governor
+    schedutil.
+
+    | Run                        | p50 before → after     | p95 before → after     |
+    | -------------------------- | ---------------------- | ---------------------- |
+    | Budget 981                 | 2.28 → 0.82 ms (0.36×) | 3.67 → 1.54 ms (0.42×) |
+    | Budget 1,952               | 4.39 → 1.46 ms (0.33×) | 6.92 → 2.33 ms (0.34×) |
+    | No budget (12,731 patches) | 35.0 → 13.4 ms (0.38×) | 41.0 → 16.3 ms (0.40×) |
+    | `bench.ts`'s flight        | 2.71 → 1.09 ms (0.40×) | 4.38 → 1.82 ms (0.42×) |
+
+    `bench.ts`'s flight runs at budget 981 with baked ranges: 640 frames at 64 Hz from 6 km to
+    300 m at 200 m/s, one view, 16 bakes a frame.
+
+    T13.a's fixed-step windows on high were also run: the fixture's bakes, ridges off, the
+    min(hard, 4σ_n) second pass, the real `PatchCache`. Each figure is the median of six
+    interleaved runs, at loads 8.6–12.0. They about halve:
+    - the approach and flare goes from 0.67 / 1.08 ms (p50 / p95) to 0.32 / 0.43 ms;
+    - the low fast pass goes from 0.68 / 0.99 ms to 0.31 / 0.41 ms.
+
+  - _Still open._ At the perf (b) pose under this load, the budget-981 p95 is below 2 ms. These are
+    pending for the owner's quiet machine (T14/T17):
+    - a `terrain.select` run;
+    - high's ruled hard-bound windows with ridges off, which reason 4 measured at 2.3–6.2 ms p95;
+    - the same windows ridged, at up to 13 ms (`just descent-demand`'s hard cells, with real
+      bakes).
+
+    The remaining costs of a selection are intrinsic or the interface's:
+    - each view's excess test, about 15% of a call;
+    - the output map and its records, about 8%;
+    - the bounds memo's lookups by a non-Smi `patchKeyIndex`, about 6%;
+    - the heap's comparisons, about 6%.
+
+    The cache's own `heightRangeM` lookup costs about as much as the memo's, so selection fed by
+    `PatchCache` pays it as well.
+
 - **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
   - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
     tests. The build adds:
@@ -3906,7 +4447,8 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     worker, and again after the review fixes (26 s at load 25–29). The `vitest` acceptance
     (`src/main/cli src/main/spike src/preload`) passes.
   - **Pending (separate tasks):** T14.c's hidden `just descent-spike --setting low --hidden`
-    results file, and the first real capture (`--capture <dir>`) with its offscreen
+    results file (taken 2026-10-04: T14.c's as-built record), and the first real capture
+    (`--capture <dir>`) with its offscreen
     `just replay <dir>`. By hand for the owner: the visible full descent
     (`just descent-spike --setting low`) and the presented replay (`just replay <dir> --present`).
 

@@ -401,6 +401,8 @@ export interface RenderEngine {
   readBuffer(buffer: BufferHandle, access?: "cpu" | "tolerance"): Promise<ArrayBuffer>;
   readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer>;
   onPassTimes(listener: (times: PassTimes) => void): () => void;
+  /** The latest resolve's `PassTimes.frame`; 0 before any; restarts at a restore (R07.T19). */
+  readonly passTimesFrame: number;
   /** Every creation, destruction and upload; R05's tally subscribes. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
   onFault(listener: (fault: GraphicsFault) => void): () => void;
@@ -2966,6 +2968,12 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   depth, for R07.T16's symbology) and `RenderTargetFormat` `"canvas-in-pass"`; opt-in, defaults
   unchanged. R07.T12 added no staging ring to the readback; its bench (R07.T17) decides. See R07's
   Risks.
+- **Extended by R07.T19** (decision-r07-t19, item 1): `RenderEngine.passTimesFrame`, the
+  timer's latest resolve number (0 before any, and on `ResilientEngine` while it has no engine;
+  from 0 again after a restore); a resolve dropped while every pair is in flight now takes its
+  number, so it reads as a gap; `TIMING_FRAMES_IN_FLIGHT` raised for R07's several views (to 135,
+  three frames of a photorealistic primary with two photorealistic instruments; see R07's Risks).
+  Append-only, in `types.ts`, `webgpu/timing.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.
 - **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged.
 - **Extended by R06** (append-only, approved 2026-10-03): `releaseBuffer`, `releaseTexture`, `createPackedCube`'s optional `name` and `createPointSplatAsync` (R06.T13.h); `writePackedCubeLevelFromBuffer`'s optional `face`, the buffer then holding that one face (R06.T13.g); `MemoryCategory` gains `sky-cube` and `sky-scratch`; `WGSL_CATALOGUE` takes a `point-splat` kind. Existing callers unchanged; recorded in R06's Risks.
 - **A `2d-array` binding takes a single-layer 2D texture** (R05.T11.a, approved by the orchestrator 2026-10-03): `drawing.ts`'s `viewDimensionBinds` lets a material declaring `viewDimension: "2d-array"` bind a 2D texture of one layer, viewed as a one-layer array, so that R05's layered normals atlas binds whatever its layer count; every other mismatch is refused as before (`engine.test.ts`). `platform.ts` gains `MAX_TEXTURE_ARRAY_LAYERS` (256, WebGPU's default, never raised). Additive.

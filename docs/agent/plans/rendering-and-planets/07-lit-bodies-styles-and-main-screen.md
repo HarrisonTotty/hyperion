@@ -165,15 +165,23 @@ export function occludersFor(
   bodies: ReadonlyArray<SceneFrameBody>,
 ): Occluder[]; // shadow-cone pre-test, f64
 export interface SecondarySource {
+  readonly body: BodyIdHex; // as built (T11): the neighbour
   readonly direction: Vec3;
   readonly angularRadiusRad: number;
+  readonly distanceM: number; // as built (T11)
+  readonly radiusM: number; // as built (T11)
   readonly illuminance: Rgb;
 }
+export function litNeighbours(
+  bodies: ReadonlyArray<ReflectingBody>,
+  hosts: ReadonlyArray<PlacedLight>,
+  annuli: number,
+): LitNeighbour[]; // as built (T11): each neighbour's starlight, once a frame
 export function planetshineSources(
-  body: SceneFrameBody,
-  lit: ReadonlyArray<SceneFrameBody>,
+  body: ReflectingBody,
+  lit: ReadonlyArray<LitNeighbour>,
   max: number,
-): SecondarySource[]; // Design note 7
+): SecondarySource[]; // Design note 7; as built (T11)
 ```
 
 `lighting/oracle.ts`: the `f64` oracles (dense annulus sums, brute-force sphere irradiance, the
@@ -185,7 +193,9 @@ disc integral of a law).
 export interface PhotometricLaw {
   // Design note 5
   readonly a: Rgb; // albedo scale per channel
-  readonly lommelSeeligerShare: number; // L, 0 (Lambert) to 1
+  // L(0), 0 (Lambert) to 1; R10.T10.b adds an optional L(α) curve in the phase row's alpha
+  // (decision-r07-t8b)
+  readonly lommelSeeligerShare: number;
   readonly template: PhaseTemplateId; // whose V curve f(α) is tabulated, clamped at 4
   readonly phaseExponent: Rgb; // s per channel in Φ_t(α)^s
 }
@@ -683,7 +693,10 @@ and `--port`.
    9, after Allen 1973, _Astrophysical Quantities_, 3rd ed., p. 143, for the Moon's curve; Squyres
    and Veverka 1981, Icarus 46, 137, and 1982, Icarus 52, and Buratti 1991, Icarus 92, 312, for
    Ganymede's q; Grundy et al. 2007, Science 318, 234, for Europa's; Buratti 1984, Icarus 59, 392,
-   for L at high albedo).
+   for L at high albedo; added by decision-r07-earth-albedo, 2026-10-04: Robinson 2026, PSJ 7, 12,
+   arXiv:2507.22258, §5 and eq. 14, for Earth's curve and p, replacing Mallama et al. 2017's Earth
+   row and Mallama and Hilton 2018's eq. 5, Tinetti et al. 2006's model, whose Sun–observer azimuth
+   is turned by 180° (Robinson et al. 2011, Astrobiology 11, 393)).
    Every measured phase integral in V lies between 0.48 (Mercury) and 1.36 (Saturn), below
    Lambert's 1.5 and Lommel–Seeliger's 1.64, so no law of fixed disc-integrated shape reaches p and
    q together; the law needs a free phase function. It is I/F = A · f(α) · [L · 2μ₀ ÷ (μ₀ + μ) +
@@ -718,10 +731,10 @@ and `--port`.
    disc-integrated flux is F = E★ p (R ÷ Δ)² Φ(α). The values come from plan 14 (R07.T1), which is
    asked for p in B, V and R, a phase template and s per channel, L, and the stated ratio p_V q_V ÷
    A_Bond, never p derived from the Bond albedo through a fixed q: the ratio is physical, about 1
-   for grey regolith, 0.69 for red Mars and about 2 for the giants, dark in the near infrared. The
-   template and s fix q; the ratio is carried as a check (`bondRatioCheck`), and a body whose q_V
-   from its law differs from the ratio's by more than 5% is a finding for plan 14's owner, not an
-   input the client reconciles. Until the
+   for grey regolith, 0.9 for Earth, 0.69 for red Mars and about 2 for the giants, dark in the near
+   infrared. The template and s fix q; the ratio is carried as a check (`bondRatioCheck`), and a
+   body whose q_V from its law differs from the ratio's by more than 5% is a finding for plan 14's
+   owner, not an input the client reconciles. Until the
    section is on the wire a body takes `PROVISIONAL_PHOTOMETRY`, a Lambert sphere of spherical
    albedo 0.3 (p = 0.2, q = 1.5, brighter at large phase than any real body), and the label block
    says `BODY PHOTOMETRY: NOT YET MODELLED` (a phrase for the owner, R07.T16).
@@ -750,13 +763,28 @@ and `--port`.
    2019's qpower2 is validated only below a radius ratio of 0.2 and is not used.
 7. **Planetshine is included** (researched 2026-09-29; figures computed from Design note 5's
    albedos). The brainstorm does not mention it; the realism ruling decides. It is the dominant
-   night-side light of every moon: earthshine on the Moon at full Earth is about 15 lx, 13 stops
-   below sunlight but 10³–10⁵ times the integrated starlight; Jupiter-shine on Io about 70 lx, 6
+   night-side light of every moon: earthshine on the Moon at full Earth is about 8 lx (7.7 lx with
+   the `earth` template, Robinson 2026's fit; 8.1 lx at his physical model's p;
+   decision-r07-earth-albedo), 14 stops below sunlight but some 3 × 10⁴ times the integrated
+   starlight (2.8 × 10⁻⁴ lx on a face-on element: Seares et al. 1925's 1,092 stars of V = 1.0 over
+   the sky, quoted by Roach and Megill 1961, ApJ 133, 228, ÷ 4); Jupiter-shine on Io about 70 lx, 6
    stops below. Each body is lit by at most two neighbours whose reflected illuminance
    E★ p (R ÷ Δ)² Φ(α) is largest (one on the low setting), each as a uniform sphere of its angular
-   radius through the same `sphere_irradiance`, never shadow-tested against third bodies. Its
-   stated errors are the lit crescent's offset from the neighbour's centre (up to 0.4 R, about 4°
-   for Jupiter seen from Io) and a finite-distance correction of order (R ÷ Δ)², about 3% at Io.
+   radius through the same `sphere_irradiance`, never shadow-tested against third bodies on its way
+   (the neighbour's own starlight is eclipsed: averaged over its lit disc as the body it lights sees
+   it, R07.T10.b; until then from its centre, of the bodies larger than it only, as T11 built it,
+   which leaves out a smaller body's shadow, up to 11% of earthshine in a central solar eclipse, and
+   fades a moon wider than the penumbra too fast, in 44 s rather than 254 s for Io). Its stated
+   errors (corrected by T11's science check, 2026-10-04, as is the starlight figure, first given as
+   10³–10⁵ times): the lit crescent's light centroid lies off the neighbour's centre, by 0.4 R at
+   60° of phase and 3π ÷ 16 ≈ 0.59 R at quarter phase for a Lambert sphere (5.7° for Jupiter seen
+   from Io), towards 0.9 R in a thin crescent (first given as "up to 0.4 R, about 4°"); and the
+   far-field E errs at first order in R ÷ Δ for a disc brighter at its centre: the exact illuminance
+   is 12% above it at full phase (76.8 lx against 68.7 lx in V) and 10% below it at quarter phase
+   for Jupiter seen from Io, and 1.2% above it for Earth seen from the Moon (first given as of order
+   (R ÷ Δ)², about 3% at Io). Beyond quarter phase the body sees less than the neighbour's
+   hemisphere, which hides the limb crescent: the exact is 34% below at 120°, 71% below at 150° and
+   nothing from 170.6° for Jupiter seen from Io, 10% below at 150° for Earth seen from the Moon.
 8. **The photorealistic style is a pass list over R02's scene and camera and a per-view HDR target
    that R07.T7 creates with R01's `createRenderTarget` in R02's `HDR_COLOUR_FORMAT` (R02 DN12: the
    wireframe has none; decisions-r06-r07, item 1).** In order:
@@ -1033,9 +1061,10 @@ acceptance, and gives each material and post-process a `displayName`.
 Waits on R05 and R06 (re-validated at `ce7aeb3`, neither built): T2.a on R05.T7.a (`BodyFigure`);
 T3 on R06.T10 (`HostDiscDto`'s field names); T5 on T2.a and R06.T10; T7 on R05.T7.b
 (`QualitySetting`); T8.a on T3, T7 and R06.T13.e (the host-disc pass it is ordered with); T9 on
-R05.T7.a–b, T8 and T11; T10 on T9 and R06.T13.e; T11 on T8.a; T14.b's injected sources on
-R06.T13.e's `glareSources` (synthetic sources in its tests until then); T17 on R05.T7.b; T18 on
-R05.T7.b; T19 on R05.T7.d. Free of both, and startable now: T1, T4.a–c, T6.a–c, T12, T13.a (the
+R05.T7.a–b, T8 and T11; T10 on T9 and R06.T13.e, except T10.b, on T6.b, T8.a and T11; T11 on T8.a;
+T14.b's injected sources on R06.T13.e's `glareSources` (synthetic sources in its tests until then);
+T17 on R05.T7.b; T18 on R05.T7.b; T19 on R05.T7.d. Free of both, and startable now: T1, T4.a–c,
+T6.a–c, T12, T13.a (the
 `AUTO` program's aperture and shutter a constructor argument, set from R06's `DEFAULT_VIEW_CAMERA`
 where the controller is made, in T13.b), T13.b, T14.a (the eye observer an argument), T15 and T16's
 guide draft. T2.b waits on plan 14 (T1). T20 and T21 are by hand for the owner. Every timing below that
@@ -1057,10 +1086,12 @@ analogue's p × A_Bond ÷ the generator's albedo for the analogue (Europa's meas
 Table 7 and the computed q to 0.5% and state each analogue's ratio. Add two checks for plan 14's
 owner: airless rock's Bond albedo of 0.11 against the Moon's p_V 0.12 and a Mercury-like q of 0.48,
 which give 0.06 (Lane and Irvine 1973 to be read); and Earth's p_V 0.434 with Tinetti's curve, which
-gives A_V 0.57 against a Bond albedo of 0.294. Draft beside it the flattening of Design note 19 (f,
-or equatorial and polar radii) with its per-class moment of inertia, which also replaces P14.T14.b's
-"I = 0.33–0.4 M R² by class" so that one moment of inertia serves locking and flattening, with the
-classes (rocky, Jupiter-like, Saturn-like, ice giant) defined by a criterion on plan 14's
+gives A_V 0.57 against a Bond albedo of 0.294. _Resolved 2026-10-04 (decision-r07-earth-albedo):_
+Earth takes Robinson 2026's curve and p (R07.T4.d, P14.T47.e), p_V q_V 0.282 against CERES's 0.2915.
+Draft beside it the flattening of Design note 19 (f, or equatorial and polar radii) with its
+per-class moment of inertia, which also replaces P14.T14.b's "I = 0.33–0.4 M R² by class" so that
+one moment of inertia serves locking and flattening, with the classes (rocky, Jupiter-like,
+Saturn-like, ice giant) defined by a criterion on plan 14's
 composition classes for its owner to set, and the six-planet check; and the spheroid as the
 reference figure that heights are measured from (Design note 19). Both subtasks are plan 14's to
 build; the edit ends in plan 14's owner accepting them. Draft them against plan 14 as built
@@ -1100,9 +1131,13 @@ owner (delegated decision pending)". Accepted with amendments 2026-10-02 (decisi
 - **R07.T2.b The section, once plan 14 has built it.** After plan 14's subtask lands and
   `just gen-protocol` has run, `lib/system/bodiesWire.ts` and `lib/system/model.ts` parse
   `photometry` and the figure as `SectionDto`s, and `fromWire.ts` maps them to `BodyPhotometry` with
-  `provenance: "modelled"`, `bondRatioCheck` and `BodyFigure`. Tests: fixtures in each section
+  `provenance: "modelled"`, `bondRatioCheck` and `BodyFigure`; and `view/scene/fromServer.ts` reads
+  P14.T46.f's rotation section into the scene body's `rotation` through `rotation3FromRows`
+  (decision-p14-phase-j), which orients R10's class maps. Tests: fixtures in each section
   state; a stated ratio that disagrees with the law's q_V by more than 5% is logged for plan 14's
-  owner. Acceptance: `pnpm test`, `just ci`.
+  owner. It waits for P14.T47.e and R07.T4.d, as does any client test against `templates.golden`:
+  before them every temperate world above 30 kPa would be drawn 1.9× too bright
+  (decision-r07-earth-albedo). Acceptance: `pnpm test`, `just ci`.
 
 #### R07.T3 Illuminance at a body
 
@@ -1140,6 +1175,29 @@ V-weighted sum is E_V; the direction error from neglecting the star-to-body ligh
   an RGB 1D texture, registered in `WGSL_CATALOGUE`. Tests: the TypeScript and WGSL functions agree
   at five pinned geometries to 10⁻⁵ relative in the smoke harness, one of them with a law built per
   texel from a synthetic A_N and L(α). Acceptance: `pnpm test`, `just test-render`.
+- **R07.T4.d Earth after Robinson 2026** (decision-r07-earth-albedo, 2026-10-04).
+  `appearance/templates.ts`' `earth` becomes Robinson 2026's eq. 14 (PSJ 7, 12,
+  arXiv:2507.22258): Δm(α) = 3.75 log₁₀[(1 + g² + 2g cos α) ÷ (1 + g)²], g = −0.33, to 144° (the
+  curated data's 5–144°), held beyond, L = 0, s = 1, not provisional. Its source string cites eq.
+  14, and Robinson et al. 2011 (Astrobiology 11, 393) for dropping eq. 5.
+  `SOLAR_SYSTEM_PHOTOMETRY`'s Earth row:
+  - p in B, V and R 0.263, 0.215 and 0.210: the fit's f = 0.23 in Model 07's band ratios
+    0.277 : 0.226 : 0.221, whose 0.4–0.5, 0.5–0.6 and 0.6–0.7 µm bands stand for Johnson's;
+  - B − V 0.43, V − R 0.52;
+  - V(1, 0) −3.23, with `templateV10Mag` the same;
+  - q_V 1.312.
+
+  `planetshine.test.ts` takes `planetPhotometry("Earth")` again. Tests:
+  - Φ_t(0) = 1, and q_V 1.3116 to 0.5% (the clamp acts from 139.0°; eq. 14 unclamped gives
+    1.350);
+  - the law's V equals eq. 14 at f = 0.23 to 0.5% from 0° to 135°, in place of eq. 5's "within
+    30%";
+  - the clamp-departure row recomputed;
+  - 0.23 q within 3% of Robinson's visual spherical albedo of 0.294.
+
+  It integrates with P14.T47.e, whose `templates.golden` the client's `earth` must equal.
+  R07.T2.b waits for both. Acceptance: `pnpm --filter hyperion exec vitest run
+src/renderer/src/view/appearance src/renderer/src/view/lighting`.
 
 #### R07.T5 Regimes, painter order and the appearance
 
@@ -1234,21 +1292,71 @@ By hand, recorded: the occultation. Acceptance: `just ci`, `just test-render`.
 
 #### R07.T10 Eclipses in the image
 
-`view/scenes/eclipseScene.ts`, the kept scene: a camera crossing a moon's shadow on a planet, a ship
-in a moon's penumbra looking at the star, and a planet passing behind its star. Tests: the shadow's
-umbra and penumbra on the planet from the oracle to a pixel; the flux on a probe point over the
-crossing against the oracle to the setting's error; the planet behind the star is covered by the
-star's disc. By hand, recorded: a partial eclipse seen from the penumbra, the star's disc partly
-covered by the moon's disc through the painter order. Acceptance: `just ci`, `just test-render`.
+- **R07.T10.a Retarded lighting geometry** (decision-r07-t8a, follow-up (a), whose interface and
+  tests it builds). Drawing keeps the apparent places. Lighting takes retarded geometric positions,
+  in the system frame and without aberration: the lit body at its drawn time t_B, each star,
+  occluder or planetshine neighbour X at t_B − |r_X − r_B| ÷ c, and a neighbour's own stars at its
+  own retarded time, translated to the body's drawn centre. It adds fields only, with no protocol
+  change, to `lib/scene/apparent.ts` (`emittedM`, `emittedVelocityMPerS`) and
+  `view/scene/{model,fromServer}.ts` (`RetardedCentre`, `ViewBody.retarded`), and creates
+  `lighting/retarded.ts` (`retardedFrom`, `lightingFrameOf`). It removes T8.a's known limit ("Light
+  positions") and T11's ("Neighbours at drawn centres") before T10.c's scene. Acceptance:
+  `pnpm test`.
+- **R07.T10.b A body's eclipse over its disc** (decision-r07-earth-albedo, 2026-10-04).
+  `lighting/discEclipse.ts`: `discEclipseVisible(star, body, occluders, towards, share, k)`,
+  per channel. It is the fraction of a body's reflected light towards a far point (the camera
+  for a point body, the lit body for a planetshine neighbour) that an eclipse leaves:
+  - V̄ = 1 − ∫ (1 − V) w dA ÷ ∫ w dA, over the body's disc projected along the star's
+    direction;
+  - V is `eclipseVisible` at the surface point there;
+  - w = [L · 2 ÷ (μ₀ + μ) + (1 − L)] μ for μ > 0, the lunar-Lambert term per unit projected
+    area; f(α) cancels;
+  - it is taken on the equivalent sphere √(a c).
+
+  The quadrature: V depends only on the distance ρ from the shadow axis in that plane; the
+  cone's spread over the body's depth, below R★ R ÷ d, is neglected. So the deficit is a
+  product quadrature in (ρ, θ) about the axis:
+  - ρ runs over the penumbra's overlap with the disc, split at |r_u|, |b − R| and the annulus
+    contacts, with one `eclipseVisible` per node and channel;
+  - θ runs over each circle's arc inside the disc;
+  - ∫ w dA is the closed form R² π [L + ⅔ (1 − L)] Φ_shape(α).
+
+  `pointFlux` and planetshine's neighbour use it for every occluder in `occludersFor`'s list,
+  and the "larger than the neighbour" filter goes. The neighbour's factor is per (neighbour,
+  lit body) pair. It is computed only where the list is non-empty, and the ranking's bound stays
+  uneclipsed. Tests:
+  - against a brute-force f64 surface integral (10⁶ points) to 10⁻³ absolute, over radius
+    ratios 0.02–30, separations across the penumbra, phases 0°, 60° and 120°, and L 0 and 1;
+  - a body wholly in the umbra gives exactly 0, and one clear of every penumbra exactly 1;
+  - Earth's light towards the Moon in a central solar eclipse is the oracle's 0.893 of clear
+    (uniform Sun, Lambert);
+  - a point Jupiter in Io's shadow transit keeps 99.9–100% of its clear flux (the measured
+    5.16 × 10⁻⁵ lx case, not 0);
+  - a point Io entering Jupiter's shadow fades from 1 to 0 over about 254 s (the centre: 44 s);
+  - at the 3 px switch during an Io-like ingress, the disc's summed pixel flux equals the
+    point's to 1%.
+
+  Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/lighting
+src/renderer/src/view/bodies`, `just test-render`.
+
+- **R07.T10.c The eclipse scene.** `view/scenes/eclipseScene.ts`, the kept scene: a camera crossing
+  a moon's shadow on a planet, a ship in a moon's penumbra looking at the star, and a planet passing
+  behind its star. Tests: the shadow's umbra and penumbra on the planet from the oracle to a pixel;
+  the flux on a probe point over the crossing against the oracle to the setting's error; the planet
+  behind the star is covered by the star's disc. By hand, recorded: a partial eclipse seen from the
+  penumbra, the star's disc partly covered by the moon's disc through the painter order. Acceptance:
+  `just ci`, `just test-render`.
 
 #### R07.T11 Planetshine
 
 `lighting/planetshine.ts` and its term in `litBody.wgsl` (Design note 7): `planetshineSources`
 returning direction, angular radius and illuminance per channel, through `sphere_irradiance`. Tests:
-earthshine on the Moon at full Earth 15.3 lx ± 20% (the spread of Earth's p); the full Moon on Earth
-0.32 lx from V = −12.74 to 5%; Jupiter-shine on Io at inferior conjunction about 70 lx ± 10%; a
-neighbour at new phase contributes about nothing; a body's sources are the two largest, one on the
-low setting. Acceptance: `pnpm test`, `just test-render`.
+earthshine on the Moon at full Earth 7.7 lx ± 15% (Robinson 2026's fit, f = 0.23 in Model 07's
+colours, as R07.T4.d's `earth` row; his physical model's 8.1 lx lies inside; the band covers
+p_V 0.23 ± 0.02 and the weather; decision-r07-earth-albedo); the full Moon on Earth 0.32 lx from
+V = −12.74 to 5%; Jupiter-shine on Io at inferior conjunction about 70 lx ± 10%; a neighbour at new
+phase contributes about nothing; a body's sources are the two largest, one on the low setting.
+Acceptance: `pnpm test`, `just test-render`.
 
 #### R07.T12 The exposure histogram
 
@@ -1388,34 +1496,60 @@ timestamps are unavailable. Acceptance: `pnpm test`.
 
 #### R07.T19 Instrument views in `VIEW`
 
-`displays/view/InstrumentView.tsx`, `ViewDisplay.tsx` (Design notes 14 and 15): two slots, each
-with its own camera, style and target, R01's `createView(canvas, name)`, R02's DOM list and label
-block, and the exposure reading of the primary view; and T18's budgets wired into `VIEW`
-(decision-r07-t18, item 1). `VIEW` builds a `ViewSpec` for the primary and for each open
-instrument in slot order, and takes `viewBudgets(views, setting)` again whenever a view opens or
-closes, a camera's style changes or the setting changes, the setting coming from one `VIEW` input
-(`high` until the client offers `low`). Each view draws its budget's `style`, its label block's
-`STYLE` naming the style drawn, and is paced at its `rateHz`: a 60 Hz view every animation frame,
-a 30 Hz view every second one, a 30 Hz primary on every second vsync as R05 Design note 21 paces
-the low setting, and an instrument only in frames the primary draws. Each view's terrain demand
-carries its `streamPriority` (R05). A photorealistic view's scene target is made at its render
-resolution times its scale: the budget's `renderScale`, or, while its `control` is set, the
-`scale` of a `ResolutionController` made from `control` when it first appears, `retarget`ed when
-its target changes (an instrument opened or closed, the setting changed) and dropped when
-`control` returns to `null`. The controller is updated once a primary frame: `gpuFramesMs` holds
-`gpuTimeMs` of every view's `PassTimes` submitted from one primary frame to the next, one entry
-for each primary frame once all its resolves are in (none on some updates), or is `undefined`
-while `GraphicsStatus.timer` is `absent`; `intervalMs` is the interval between the primary's
-frames. The style control and the key `4` ask `photorealisticAllowed` before a switch to the
-photorealistic style; a refusal holds the button back with its reason, the adapter's refusal
-(`styleRefusal`) first where both hold. Tests (Vitest): each view focusable and named; keyboard
+`displays/view/InstrumentView.tsx`, `ViewDisplay.tsx` (Design notes 14 and 15): two slots, each with
+its own camera, style and target, R01's `createView(canvas, name)`, R02's DOM list and label block,
+and the exposure reading of the primary view; and T18's budgets wired into `VIEW` (decision-r07-t18,
+item 1). `VIEW` builds a `ViewSpec` for the primary and for each open instrument in slot order, and
+takes `viewBudgets(views, setting)` again whenever a view opens or closes, a camera's style changes
+or the setting changes, the setting coming from one `VIEW` input (`high` until the client offers
+`low`). Each view draws its budget's `style`, its label block's `STYLE` naming the style drawn, and
+is paced at its `rateHz`: a 60 Hz view every animation frame, a 30 Hz view every second one, a 30 Hz
+primary on every second vsync as R05 Design note 21 paces the low setting, and an instrument only in
+frames the primary draws. Each view's terrain demand carries its `streamPriority` (R05). A
+photorealistic view's scene target is made at its render resolution times its scale: the budget's
+`renderScale`, or, while its `control` is set, the `scale` of a `ResolutionController` made from
+`control` when it first appears, `retarget`ed when its target changes (an instrument opened or
+closed, the setting changed) and dropped when `control` returns to `null`. The controller is updated
+once a primary frame: `gpuFramesMs` holds `gpuTimeMs` of every view's `PassTimes` submitted from one
+primary frame to the next, one entry for each primary frame once all its resolves are in (none on
+some updates), or is `undefined` while `GraphicsStatus.timer` is `absent`; `intervalMs` is the
+interval between the primary's frames. The style control and the key `4` ask `photorealisticAllowed`
+before a switch to the photorealistic style; a refusal holds the button back with its reason, the
+adapter's refusal (`styleRefusal`) first where both hold. The engine numbers its timing frames
+through R01's `RenderEngine.passTimesFrame`, added here (decision-r07-t19, item 1): the timer's
+latest resolve number, 0 before any and while `ResilientEngine` has no engine, restarting from 0 at
+a restore; a resolve dropped while every buffer is in flight still takes its number, and
+`TIMING_FRAMES_IN_FLIGHT` is raised to 64, or to three frames' resolves of a photorealistic primary
+with two instruments if more; tested in the engine's Vitest suite and run under `just test-render`.
+`VIEW` reads it at the start of each primary frame; the previous frame's group is the numbers since
+the previous read, an empty range giving no entry, a complete group the sum of its reports'
+`gpuTimeMs`, a group still incomplete when a later one completes discarded, and every pending group
+discarded at `onRestored`. Layout (decision-r07-t19, item 2): the slots `INSTRUMENT 1` above
+`INSTRUMENT 2` stand over the stage's right edge, inset `0.5rem`, each a panel holding its label
+block (`VIEW`, `FRAME`, `TIME`, `STYLE`, `CAMERA`, `FOV`, `EXPOSURE`, `SOURCE`, `STARS` and the
+view's statements; `SCENE` on the primary's only) beside a 4:3 canvas of `15rem × 11.25rem`; no slot
+covers the primary's label block or annunciations, which take the width left of the open slots, and
+a slot with no room has its `OPEN` held back. A side-column panel `Instruments`, first in the
+column, holds an `OPEN`/`CLOSE` pair for each slot (both `CLOSE` when the display mounts) and the
+selector `CONTROLS` (`PRIMARY`, `INSTRUMENT 1`, `INSTRUMENT 2`, a closed instrument's held back with
+`NOT AVAILABLE: INSTRUMENT 1 is not open`), which points the `Targets`, `Camera` and `Style` panels,
+each designated with that view, and the single keys pressed off a canvas; a pointer press on a
+canvas or a view key pressed on a focused canvas sets `CONTROLS` to that view first, and closing the
+controlled instrument returns it to `PRIMARY`. The exposure is the primary's alone: the `Exposure`
+and meter panels are designated `PRIMARY`, and an instrument shows the primary's reading with
+`SOURCE PRIMARY`, `MeterControl`'s source taking the same view names. Canvases are named `VIEW,
+<style drawn>, <slot name>, <preset>`. Tests (Vitest): each view focusable and named; keyboard
 reaches every camera control in every view; the style control of a second view is disabled on low
-with `NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, and the key `4` refused there;
-a wireframe instrument shows the source of its exposure; against a fake engine, opening an
-instrument beside a photorealistic primary gives it a controller whose scale sizes the scene
-target, closing the instruments returns it to the bounds' max, a 30 Hz view draws in every second
-frame, an instrument's pass times count in the primary's frame, and an absent timer feeds
-`undefined`. Acceptance: `pnpm test`, `just ci`.
+with `NOT AVAILABLE: QUALITY LOW allows one photorealistic view`, and the key `4` refused there; a
+wireframe instrument shows the source of its exposure; against a fake engine, opening an instrument
+beside a photorealistic primary gives it a controller whose scale sizes the scene target, closing
+the instruments returns it to the bounds' max, a 30 Hz view draws in every second frame, an
+instrument's pass times count in the primary's frame, and an absent timer feeds `undefined`;
+`passTimesFrame` grouping with a hole, a restore and an absent timer; Tab reaches each open
+instrument; a key on a focused instrument sets `CONTROLS` and acts on it, Tab past the canvases
+leaves `CONTROLS` alone; the designators follow `CONTROLS`; hidden screenshots at 1920×1080 and
+1280×720 with both instruments open, nothing overlapping a reading or clipped. Acceptance: `pnpm
+test`, `just ci`.
 
 #### R07.T20 Several views, by hand
 
@@ -1423,13 +1557,14 @@ With the real styles on the development machine (RTX 3080) and, by the owner, on
 on a quiet machine: a full-window photorealistic view and two wireframe instruments, each the right
 way up, no GPU time in copies, a resize of one leaving the others' attachments alone, the frame time
 with instruments open against the low setting's 33 ms on the UHD 620 (brainstorm, Testing), and the
-per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. On the UHD 620's
-low setting, also a wireframe primary with two wireframe instruments, and one with a
-photorealistic and a wireframe instrument, against R05 Design note 21's criteria at 60 Hz (T the
-display's measured vsync period). A miss of the first moves the low setting's wireframe primary to
-30 Hz as a `budget` field; a miss of the second alone puts the photorealistic instrument's scale
-under the controller, against the primary's period, rather than lowering the primary's rate
-(decision-r07-t18, items 4 and 5). Recorded in this plan. Acceptance: the record.
+per-canvas overhead that replaces `PER_CANVAS_OVERHEAD_MS`'s provisional 0.3 ms. The pass timer's
+drop warning never appears in these runs (decision-r07-t19, item 1). On the UHD 620's low setting,
+also a wireframe primary with two wireframe instruments, and one with a photorealistic and a
+wireframe instrument, against R05 Design note 21's criteria at 60 Hz (T the display's measured vsync
+period). A miss of the first moves the low setting's wireframe primary to 30 Hz as a `budget` field;
+a miss of the second alone puts the photorealistic instrument's scale under the controller, against
+the primary's period, rather than lowering the primary's rate (decision-r07-t18, items 4 and 5).
+Recorded in this plan. Acceptance: the record.
 
 #### R07.T21 A child window on a second monitor
 
@@ -1591,8 +1726,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
 - **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
   Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
   Venus's curve unlabelled; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
-  al. 2016 would settle Jupiter); and plan 14's airless-rock Bond albedo and Earth's albedo are
-  checks for its owner (T1).
+  al. 2016 would settle Jupiter); and plan 14's airless-rock Bond albedo is a check for its owner
+  (T1). Earth's albedo is resolved (decision-r07-earth-albedo). Its curve, Robinson 2026's eq. 14,
+  is cut by the clamp from 139°, up to 29% at 144°, inside that phase's 38% weather spread. It is
+  equal in every channel, since Robinson's per-band curves are not tabulated.
 - **The lens PSF** of camera views rests on recalled veiling-glare figures (low confidence); the
   eye's CIE function is solid. The glare threshold at AgX's top of range and the smoothing speeds
   are settled by eye (T13, T14).
@@ -1609,8 +1746,20 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   fraction depends on the condensables, the README's open finding; to be built in T5 and T1's
   draft) are judgement, of medium confidence, and the Mars template holds past about 50° of phase by the
   clamp; the smooth blend of Design note 5 replaces the steps if the population shows jumps.
+- **Constant L on resolved discs** (decision-r07-t8b). The L = 1 templates' resolved discs depart
+  from the Moon's measured L(α) (McEwen 1996, LPSC XXVII, 841) at large phase. At equal flux the
+  flux-weighted RMS difference is 0.13 stop at 30° and 0.25 stop at 90°, and the cusps are up to
+  1.5 stop too bright. q, p and the point's flux are unaffected. R10.T10.b adds the L(α) channel
+  and moves these templates to McEwen's curve.
 - **Planetshine's uniform-disc approximation** shifts its terminator on the receiver by the
-  neighbour's crescent offset, up to about 4° at Io; stated, not corrected.
+  neighbour's crescent offset, 5.7° at Io at quarter phase (0.59 R; T11's science check,
+  2026-10-04, first given as about 4°); stated, not corrected. Its far-field illuminance errs by
+  about 0.72 R ÷ Δ near full phase (at Io the exact is 12% above it at full phase, 10% below at
+  quarter), and past quarter phase by the limb crescent the body cannot see (at Io 34% below at
+  120°, 71% at 150°, all of it from 170.6°; 10% at 150° for Earth seen from the Moon). A
+  correction table in (α, sin ρ, L) would remove both; not built.
+- **The disc-averaged eclipse** (R07.T10.b, decision-r07-earth-albedo) is taken on the equivalent
+  sphere √(a c); an oblate body shaded by a larger one errs at the second order in f.
 - **Gas giants' cloud bands** are left by R11 to neither R08 nor itself, and R11 advises this plan;
   this plan draws a uniform,
   oblate giant and no plan generates bands. The roadmap's open item records a research lean that
@@ -1676,12 +1825,14 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   and completed by R10's own tasks in this plan's files, with the signatures unchanged: `body_brdf`
   with per-texel lunar-Lambert parameters (T4.c, completed by R10.T10.b); the disc sampling
   `classMap.ts` over surveyed texels through `DiscSurface`, with `lawFor(p, q, template)` elsewhere
-  (T8.b, completed by R10.T10.d); and `sphere_irradiance` with a per-sample local horizon whose
-  absence is the closed form (T6.a, completed by R10.T8.b). R11's ring shadow on the body is the
-  `ring_shadow_on_body` stub (T6.c). R12's stable `PassList` labels are `PHOTOREAL_PASS_LABELS`
-  (T7), and the resolution controller's bounds are the setting value
-  `ViewSettings.internalScaleBounds` (Design note 14, T17, T18). Not yet designed here: the
-  instrument panels' sizes in the cockpit layout, which R12 needs for its runs.
+  (T8.b, completed by R10.T10.d), which reads the map by a survey-masked bilinear reconstruction,
+  with the point integrating it (R10.T10.f) and the L(α) channel (R10.T10.b) (decision-r07-t8b); and
+  `sphere_irradiance` with a per-sample local horizon whose absence is the closed form (T6.a,
+  completed by R10.T8.b). R11's ring shadow on the body is the `ring_shadow_on_body` stub (T6.c).
+  R12's stable `PassList` labels are `PHOTOREAL_PASS_LABELS` (T7), and the resolution controller's
+  bounds are the setting value `ViewSettings.internalScaleBounds` (Design note 14, T17, T18). Not
+  yet designed here: the instrument panels' sizes in the cockpit layout, which R12 needs for its
+  runs.
 - **Re-validated at `ce7aeb3`** (2026-10-02, RM3; RM1 merged, R05 and R06 not built, `main`
   equal to the integration branch). Consumes swept against R01–R04 as built and their Risks: the
   "as built" notes in Consumes (R01's engine calls, `createView`'s name, per-call readback,
@@ -1732,9 +1883,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     Neptune's eq. 17 from opposition, in place of the flat eqs. 14 and 16 (which drops the
     paper's 0.021 and 0.015 mag steps at 3.1° and 1.9°); Mars is eq. 6 without L(λe) and L(Ls),
     held past 50° (eq. 7 unused, the coordinator's approval 2026-10-02); Saturn is its globe
-    (eqs. 11–12, joined at 6°), the rings being R11's; Earth runs to 180° (MH2018 §4.3: Tinetti's
-    curve approaches zero there), and Mallama et al. 2017's Table A-3.1 tabulates a steeper fit of
-    the same curve (2.07 mag at 90° against eq. 5's 1.57); eq. 5, the almanac's, is taken.
+    (eqs. 11–12, joined at 6°), the rings being R11's. Earth first ran eq. 5 to 180° (MH2018
+    §4.3: Tinetti's curve approaches zero there; Mallama et al. 2017's Table A-3.1 tabulates a
+    steeper fit of the same curve, 2.07 mag at 90° against eq. 5's 1.57); R07.T4.d replaced it
+    with Robinson 2026's eq. 14 to 144° (decision-r07-earth-albedo).
   - **Borrowed shapes (decision-phase-curves, 2026-10-02, after the phase-curve check's four
     mismatches with galaxy's classes):** airless ice and the snowball take the Moon's curve at L = 1,
     their q reached through s (Ganymede's 0.80 at s ≈ 0.82, ratio 0.98; Europa's 1.01 at s ≈ 0.67,
@@ -1750,9 +1902,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     p_V implies: Jupiter 69,134 km, Uranus 25,264, Neptune 24,552, Mars 3,386, Saturn the paper's
     57,240) and `template`; magnitude fields end in `Mag`; `SUN_JOHNSON_MAG` (Table 6) and
     `JohnsonBvr` are exported beside it. q_V is computed at s = 1 with the clamp and hold: Mercury
-    0.480, Venus 1.344, Earth 1.311, Mars 1.085, Jupiter 1.312, Saturn 1.357, Uranus 1.302,
-    Neptune 1.242 (reproduced independently by the science check). The table's tests live in
-    `appearance/solarSystemPhotometry.test.ts`, inside the acceptance filter.
+    0.480, Venus 1.344, Earth 1.312 (Robinson 2026's eq. 14, R07.T4.d; 1.311 on eq. 5), Mars
+    1.085, Jupiter 1.312, Saturn 1.357, Uranus 1.302, Neptune 1.242 (reproduced independently by
+    the science check). The table's tests live in `appearance/solarSystemPhotometry.test.ts`,
+    inside the acceptance filter. Earth's row is Robinson 2026's since R07.T4.d (see its
+    deviations).
   - **For T4.c.** WebGPU has no three-channel float format and `rgba32float` filters only with
     `float32-filterable`, so the shader reads the table as RGBA texels by two `textureLoad`s and
     interpolates itself; the table's 0.5° interpolation errs by up to 4 × 10⁻⁴ of a steep
@@ -1772,8 +1926,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     ahead of T6.a, with `discIntegral(reflectance, α, nodes = 200)` (Gauss–Legendre over
     photometric longitude and latitude, on any `Reflectance`), `Reflectance`, `gaussLegendre` and
     `GaussLegendreRule`.
-  - **The clamp's departure in q at s = 1**, exact f on both sides: Venus −0.317%, Earth −0.011%,
-    Uranus −0.008%, every other template 0.
+  - **The clamp's departure in q at s = 1**, exact f on both sides: Venus −0.317%, Earth −0.656%
+    (R07.T4.d's eq. 14, clamped from 139.0°; −0.011% on eq. 5), Uranus −0.008%, every other
+    template 0.
   - **q against L (the coordinator's correction of the ruling, 2026-10-02, from the Phase J lane;
     plan 14's T47 makes the same change).** q is independent of L only inside a template's range,
     where the clamp does not act; past it the law holds f while the shape still varies with L (the
@@ -1785,8 +1940,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   - **The planets' V** is checked as MH2018's zeroth-order term plus the law's dimming against the
     paper's equations written out in the test, for all eight planets, at 0.01 mag (tighter than
     the plan's 0.01–0.03 and 0.035, since the law reproduces its template up to the table, s and
-    the clamp); Earth also in flux within 30% at 10–150°. p is checked by T4.a against V(1, 0) and
-    the radius, not here.
+    the clamp); Earth in flux, within 30% at 10–150° against eq. 5 until R07.T4.d, then within
+    0.5% at 0–135° against Robinson 2026's eq. 14. p is checked by T4.a against V(1, 0) and the
+    radius, not here.
   - **The crescent.** The fixture gives q in V only, so Mercury's test splits q by ±5% (q_R 1.05
     q_V, q_B 0.95 q_V) on the fixture's p; B − V then grows by about 0.11 mag from opposition to
     100°, inside Design note 5's 0.1–0.2.
@@ -2285,6 +2441,102 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     T19 reads it from one input so that its tests give `low`, but no task built yet lets the
     running client choose `low`, which T17's and T20's UHD 620 runs need. T17 makes it selectable
     (the orchestrator's assignment, 2026-10-04; see "`VIEW`'s quality setting" above).
+- **Several views, stated limits (decision-r07-t19).** A photorealistic instrument is exposed by the
+  primary's reading, not metered from its own image (open). At 1280×720 two open instruments cover
+  most of the primary's image, the operator's choice. The spike's `ResolveCounter.runFrame` drifts
+  by one per dropped resolve now that a drop takes a number; the spike's own warning flags such
+  runs.
+- **Deviations in T19, as built** (2026-10-04).
+  - **Files.** `displays/view/InstrumentView.tsx` (a slot), `InstrumentsPanel.tsx` (the
+    `Instruments` panel), `InstrumentControls.tsx` (an instrument's `Targets`, `Camera` and `Style`
+    panels), `useInstruments.ts` (the slots' state, commands, skies and loop), `viewFrameDrawer.ts`
+    (`ViewFrameDrawer`, an instrument's frame in either style with R06's layers and cube, and
+    `skySprites`, which the primary now imports) and `viewNames.ts` (`PRIMARY_VIEW_ID`,
+    `PRIMARY_NAME`, `INSTRUMENT_SLOTS`, `instrumentName`, `instrumentViewId`, `viewDisplayName`);
+    `view/budget/framePacing.ts` (`drawsInFrame`, `PrimaryFrameTimes`, `PENDING_PRIMARY_FRAMES`,
+    `BudgetedScale`); `view/photoreal/internalScale.ts` (`internalViewport`, `spritesAtScale`);
+    `test/viewDisplayHarness.tsx` (`timedEngineSource`, `renderViewDisplay`, `nominalStore`,
+    `openUniverse`, `sceneArrives`). `viewRun.ts` gains `followRun`, `startInstrumentRun` and
+    `POSITIONS_FROM_SHIP`; `useViewSky.ts` `cullViewSky` (its cull, shared); `styleRefusals.ts`
+    `withPermission`; `ViewLabelBlock` an `id` and readings that break at their `·` first;
+    `CameraControls`, `StyleControl`, `ExposurePanel` and `MeterControl` an optional `designator`, a
+    span in the title, so their regions are named `Camera PRIMARY` and so on. R01:
+    `RenderEngine.passTimesFrame`, `PassTimer.frame`; the fakes' `passTimesFrame`, `reportPassTimes`
+    and `raiseRestored`.
+  - **The setting** is `ViewDisplay`'s prop `setting`, `high` by default, read by the budgets alone;
+    the sky and the photorealistic frame stay at `high` until T17 (accepted by the orchestrator as
+    the smallest reversible choice, 2026-10-04).
+  - **Two frame paths.** The primary keeps its own loop, which T8.a's metering shares; the
+    instruments draw through `ViewFrameDrawer`, whose frame code mirrors the primary's (the
+    wireframe list, R06's band, discs and cube, the photorealistic frame), so that the two lanes'
+    edits to `ViewDisplay.tsx` merged apart. One path for both is a follow-up. The primary's draw
+    reads the merged availability (the adapter's, then the budget's), which equals its budget's
+    `style`.
+  - **Pacing.** The primary's `requestAnimationFrame` loop counts animation frames and returns from
+    those `drawsInFrame` refuses its `rateHz`; the instruments are drawn from inside the primary's
+    frame (`InstrumentsFrame`) at their 30 Hz, in the same phase, and publish their readouts in the
+    primary's 4 Hz frame, so that React renders the stage once for all three.
+  - **The scene target.** `photorealFrame` takes the internal viewport, `internalViewport(viewport,
+    scale)` (the height at the width's factor), and the draw list's stars carried to it by
+    `spritesAtScale` (positions about the centre by k, light per point-spread weight by k²).
+    `PhotorealRenderer` is unchanged: its `#follow` resizes the target and the bloom chain, and
+    refits the bloom kernel at each new scale, about 35 ms (provisional; T20 records it). The render
+    resolution is the canvas's; the low setting's 720 rows are T17's. `BudgetedScale` also makes a
+    new controller should the bounds change (equal on both settings today).
+  - **Grouping.** `PrimaryFrameTimes.startFrame(engine.passTimesFrame)` at the start of each primary
+    frame; reports that arrive before their group ends are held until it does; at most
+    `PENDING_PRIMARY_FRAMES` (8) groups are awaited while no report arrives; a mark that goes back
+    starts over, as `onRestored` does.
+  - **`TIMING_FRAMES_IN_FLIGHT` is 135**: three frames of the heaviest the views allow, a
+    photorealistic primary with two photorealistic instruments, 45 resolves in the fake engine (15
+    each); with wireframe instruments 17, under 64 for three.
+  - **Instruments.** A run of R02's `camera` role following the primary's scene each frame
+    (`followRun`), opening at `CHASE` where there is an own ship, its camera reported to the
+    server's scene while open. Its exposure is the display's control, under `AUTO` the primary's
+    applied value as it reaches that state (4 Hz, 0.1 EV). Each culls the primary's sky for its own
+    camera (`cullViewSky` at its role, its field of view and its canvas's width; R06 Design note
+    20), so its `STARS` states its own limit and its cube is baked for its own selection. A
+    photorealistic instrument passes `meter: "average"`, and its renderer still takes a histogram
+    nothing reads (a cost for T20). Its canvas has no DOM mark labels (its list names the marks).
+    Its statements are decision-r07-t19's list (`POSITIONS AS SEEN FROM SHIP`, `PHOTOREALISTIC:
+    PREPARING`, its graphics fault); the scene's (its lighting, its bodies' labels, `ROTATION NOT
+    YET MODELLED`) stay the primary's, as the guide draft's "every line above but `SCENE`" leaves
+    open (for the owner). An instrument opened during a device loss makes its view at once and its
+    renderers at the restore. A new scene remounts the stage, so it closes the instruments. VIEW
+    draws no terrain yet, so no demand carries `streamPriority`; the plan that adds terrain to
+    `VIEW` takes each view's R05 weight from it.
+  - **The `Instruments` panel.** Legends floated beside their buttons, as the form choices do. A
+    reason is one line however many buttons it holds back (`NOT AVAILABLE: INSTRUMENT 1 and
+    INSTRUMENT 2 are not open` while both are closed, the ruling's wording for one), so that the
+    column keeps its height. While no view is drawn (the graphics' annunciation in the stage's
+    place) every `OPEN` is held back with `NOT AVAILABLE: no view can be drawn` and `CONTROLS` stays
+    `PRIMARY` (UX review). The room for one more slot is reckoned from the open slots' measured
+    column, a first slot at 16 rem, beside the primary's label block at a least 14 rem (UX review).
+    The focus return of the ruling's closing rule is not built: `CLOSE` takes the focus before the
+    slot closes, so the closed canvas never holds it.
+  - **Layout, as measured** (hidden window, never shown, Electron's `capturePage`, at 1920×1080 and
+    1280×720 CSS px; both instruments closed, both open over a kept scene, and all three
+    photorealistic in `PHASE TEST`). A slot is 555 px wide and 254 px tall over the kept scene (a
+    288 px label block of twelve lines at line height 1.2, `STARS` over three, beside the 240 × 180
+    px canvas), 233 px in `PHASE TEST`: two stand 33.25 rem, not the ruling's estimated 29.5 rem,
+    since the label block, not the canvas, sets the height. On the stage nothing overlaps a reading
+    or is clipped, at either size, in any of the three states. **Pending the owner:** at 1280×720
+    with both open the primary's label block is 230 px wide, and `FRAME`, `TIME`, `EXPOSURE` (`EV100
+    -1.0` and `MAN`) and `ROTATION NOT YET MODELLED` break at spaces too, against decision-r07-t19
+    2f's "no line breaks except at `·`"; and the slots pack upward, so `INSTRUMENT 2` opened alone
+    stands at the top until `INSTRUMENT 1` opens.
+  - **The side column (pending the owner).** It fits at 1920×1080 in the wireframe, both closed and
+    both open, after the column's gap went to 0.5 rem, its panels' block padding to 0.75 rem (the
+    `Instruments` panel's to 0.5 rem), their titles' margin to 0.25 rem and the targets list's least
+    height to two rows. It overflows at 1280×720, as it did before T19 (the `Exposure` panel already
+    stood below the stage's foot; `Instruments` pushes `Style` down too), and at 1920×1080 in the
+    photorealistic style once the meter panel shows, as it has since T8.a's metering. T19's by-hand
+    check ("nothing … clipped") is therefore unmet in the side column at those sizes; a rule for a
+    short page (G 252–255's rearrangement) is needed.
+  - **The DOM list (for the owner).** An instrument's list is the side column's while `CONTROLS`
+    points at it (decision-r07-t19, 2d), and focus alone does not move `CONTROLS`, so a focused
+    instrument canvas shows the primary's list until a key or a press on it; whether that meets the
+    brainstorm's "each view paired with its DOM list" is the owner's.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in
@@ -2570,7 +2822,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     pattern shows past the survey's own cells. On a large disc a coarse map's cells show as
     blocks. Filtering would need a one-texel gutter at the face edges, and would carry surveyed
     weight half a texel into unsurveyed ground. That choice is left to R10.T10.d and T10.e at the
-    hand-over.
+    hand-over. _Ruled 2026-10-04 (decision-r07-t8b):_ R10.T10.d replaces the nearest read with a
+    survey-masked bilinear one with face gutters.
   - **Where a hit falls.** R05's spheroid point of the unit direction d is M d (`spheroidPoint`),
     so d is the hit stretched along the pole by a ÷ c. It is read along the body-fixed axes of
     `LitBodyInput.rotation` (R02's `Rotation3`, body-fixed to galactic): x and y are packed, and z
@@ -2616,20 +2869,24 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     and the terrain agree at every phase only where L(α) equals that constant, which bears on
     R10.T10.e's 1/3-stop check at 30° and 90°. T8.b built Provides' shape, the smallest reversible
     choice. The lean is a per-law L(α) row beside f's in the phase table, read by the disc and the
-    terrain alike, added by R10.T10.d.
+    terrain alike, added by R10.T10.d. _Ruled 2026-10-04 (decision-r07-t8b):_ The L(α) curve goes in
+    the alpha channel of each law's own f row, built by R10.T10.b.
   - **The point keeps the photometry's law (for R10.T10.d and the owner).** At the 3 px switch, a
     patterned body's disc differs from its point by how far its visible hemisphere departs from the
     mean, up to the contrast of its faces.
     - Iapetus is an example. Its dark leading terrain is about a tenth as bright as its trailing
       terrain (Squyres and Sagan 1983, Nature 303, 782; Spencer and Denk 2010, Science 327, 432).
       Its faces seen whole differ about fivefold (mean geometric albedos 0.07 and 0.35; Morrison et
-      al. 1975, Icarus 24, 157).
+      al. 1975, Icarus 24, 157; to verify: the albedos are not in its abstract, decision-r07-t8b).
     - Against the mean of the two, the disc at the switch would be up to 1.7 times as bright as
       the point when it faces the trailing side, some 0.6 mag. Facing the leading side, it would be
       about a third as bright, some 1.2 mag fainter. These are estimates from those albedos, not
       measured in the renderer, and they assume the point's law has the map's mean albedo.
     - Integrating the map for the point (each frame, or tabulated by direction) is left to
       R10.T10.d or a follow-up.
+    - _Ruled 2026-10-04 (decision-r07-t8b):_ The point integrates the class map in a new R10.T10.f,
+      to T8.a's 1%. The Iapetus figures are about 1.4× and 0.28× against the area mean (calibrated
+      to Iapetus's V range of 10.2–11.9, from a secondary source: to verify).
   - **Tests** (`bodies/discSurface.test.ts`, on a synthetic two-class map with half its cells
     surveyed, i + j even, the pole tilted 55° and turned 30°):
     - At 40° of phase, each pixel of a 64 px, 10% oblate disc within 70% of its polar radius (one
@@ -2654,3 +2911,181 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       than 0.094 of it, so no sample lies near a texel boundary. The margin is `f32` shading at a
       limb sliver, not a texel flip. The one-class map's texels equal the uniform disc's exactly
       (0 at 20 and 40 px).
+- **Deviations in T11, as built (planetshine).**
+  - **Files and names.** The functions take `LitBodyInput`-shaped bodies and placed lights, not
+    `SceneFrameBody`, which carries no radius or photometry. `lighting/planetshine.ts` holds:
+    - `PLANETSHINE_SOURCES_HIGH` (2) and `PLANETSHINE_SOURCES_LOW` (1);
+    - `SecondarySource`, which gains `body` (the neighbour) and `distanceM`, so that each lit point
+      takes its own direction and inverse square;
+    - `ReflectingBody`;
+    - `LitNeighbour` and `litNeighbours(bodies, hosts, annuli)`, built once a frame: each
+      neighbour's starlight, its eclipse (below), its equivalent sphere and a bound;
+    - `planetshineSources(body, lit, max)`, where `lit` is the `LitNeighbour`s;
+    - `phaseMaximum(law)` and `planetshineIrradiance`, the TypeScript twin.
+    - `SecondarySource` also gains `radiusM`, so the disc record takes R directly.
+  - **Elsewhere.**
+    - `bodies/oblate.ts` gains `bodyReflection` (p Φ(α) for a sphere, the figure's integral for a
+      spheroid) and `figurePole`. The point and planetshine reflect through this one function, a
+      pure refactor of `pointFlux`.
+    - `lighting/hostLights.ts` gains `lightsAt`, `LightAtPoint` and `MAX_BODY_LIGHTS`, moved from
+      `draw.ts`' private `lightsOf`. `MAX_DISC_LIGHTS` is now its alias.
+    - `BodyFrameOptions` gains `planetshine`, the count. The renderer sets it from the setting.
+      `MAX_DISC_SECONDARIES` is `PLANETSHINE_SOURCES_HIGH`, so the disc cannot drop a source the
+      point keeps.
+    - `pointFlux(body, hosts, occluders, k, secondaries = [])` takes the body's sources as a fifth,
+      defaulted argument.
+    - `test/litFixtures.ts` gains `photometryFor(p, q, template)` (provenance `modelled`),
+      `planetPhotometry(name)` (a planet's p in B, V and R, its q_V in every channel) and
+      `MOON_GEOMETRIC_ALBEDO` (0.12).
+  - **The term in the shaders.**
+    - `litBody.wgsl` gains `planetshine_irradiance` (from the point to the source, the source's
+      radius, its distance from the centre, the normal, the horizon): `sphere_irradiance` at the
+      point's own H = d ÷ R, times (Δ ÷ d)².
+    - `litBody.wgsl` also gains `lit_disc_term(l, h, mu0, mu, source_radius)`, the lunar-Lambert
+      disc term under an extended source with the Lommel–Seeliger floor. The stars' inline
+      expression now calls it, with unchanged arithmetic.
+    - `bodyDisc.wgsl` gains `surface_reflectance`, shared by stars and planetshine, and a loop
+      over the sources.
+    - `DISC_ROWS` goes from 46 to 51. Row 46 holds the count, and rows 47–50 two sources (the
+      direction and distance ÷ a; the illuminance and radius ÷ a). `DiscRecord` gains
+      `secondaries` (`DiscSecondary`), and `MAX_DISC_SECONDARIES` is 2.
+  - **Model, as built.**
+    - Planetshine never sets a sample's `lit`, so a night side lit only by a neighbour keeps
+      `unlitBody` for `DARK`.
+    - It takes neither the eclipse term on its way nor R11's ring shadow. It does pass through
+      R08's `atmosphere_sun_transmittance` along its own direction: a stub of 1 today, for R08's
+      owner to keep or refuse.
+    - The point adds each source as a point source along its centre's direction. At the 3 px
+      switch the disc meets the point to 0.35% (Earth from the Moon, Lambert), 0.07% (the same,
+      lunar law), 0.10% (Jupiter from Io, Lambert) and 0.61% (the same, lunar law), at 90° and
+      150° of solar phase. The science check gives two terms:
+      - The point source against the extended one: −ρ²/4 at zero phase (−0.66% at Io), but the
+        true flux exceeds the point's by 1.9%, 10% and 103% at 120°, 150° and 170° at Io for a
+        Lambert receiver (0.9%, 4.6% and 44% for a lunar law).
+      - The receiver's own size, its lit hemisphere nearer the source: +3ε ÷ 4 at zero phase for
+        Lambert, ε = r ÷ Δ (0.34% for the Moon, 0.32% for Io).
+  - **The neighbour's starlight is eclipsed (a deviation; confirmed as an interim, replaced by
+    R07.T10.b, decision-r07-earth-albedo).** It takes the eclipse term from its centre, counting
+    only the bodies larger than the neighbour. This fixes two cases:
+    - In a total lunar eclipse, Design note 7 as first written left 0.31 lx of moonlight on
+      Earth's night side. The truth is about 10–50 µlx, light refracted by Earth's air, which no
+      plan draws yet (Hernitschek, Schmidt and Vollmer 2008, Applied Optics 47, H62, Table 2: 9.6
+      and 11.15 mag below full; 12–54 µlx from the abstract's −3.32 and −1.7 mag at
+      V = 0 = 2.54 µlx).
+    - It also fixes every full phase of a giant's moons seen from the giant.
+    - Its two errors, removed by R07.T10.b's disc-averaged eclipse:
+      - A smaller body's shadow is left out. From the neighbour's centre it would hide the whole
+        star where it hides a spot: about 0.1% of Jupiter-shine for Io's shadow, and up to 11% of
+        earthshine in a central solar eclipse (10.7% by brute force).
+      - Partial phases are taken at the neighbour's centre, so a moon wider than the planet's
+        penumbra fades too fast: in 44 s rather than 254 s for Io entering Jupiter's shadow. The
+        "larger than" test also never shadows a pair of equal moons in a mutual eclipse.
+    - The test of a moon in the umbra leaves no source.
+  - **Selection.**
+    - The candidates are ranked by the photopic light of their equivalent sphere, √(a c), with
+      ties broken by identifier, so the order of the inputs does not matter.
+    - A candidate whose bound (`phaseMaximum`, the law's largest p Φ over the 0.5° table, plus 1%)
+      cannot reach the `max`-th best so far is skipped. A test against brute force over 40 random
+      neighbours confirms the choice.
+    - A neighbour that reflects nothing is not a source.
+    - Only drawn bodies look for sources. The cost is about 2 ms a frame for 100 drawn bodies
+      under shared load: provisional, and for T17's bench.
+  - **Figures tested** (Sun-like disc, `sunLikeHostDisc`):
+    - Earthshine at full Earth is 7.668 lx at the fixture's p to three places, (r, g, b) 0.210,
+      0.215 and 0.263, and q 1.312; the ruling's 7.66 (7.664) is at the unrounded split, under the
+      same warm white of `sunLikeHostDisc` (T4.d's science check). It is the closed form
+      E★ p (R ÷ Δ)² to 10⁻⁹, inside the task's 7.7 lx ± 15%. T11 built it with a local copy of
+      decision-r07-earth-albedo's photometry; R07.T4.d moved the fixture's row to the same values
+      and pointed the test back at `planetPhotometry("Earth")`.
+    - The full Moon is 0.3140 lx against 0.3168 lx from V = −12.74 (−0.9%), with p_V 0.12 (NASA's
+      fact sheet, without the opposition surge; Krisciunas and Schaefer 1991, p. 1035). Earth is
+      left out as an occluder there, because at zero phase the Moon is in its shadow.
+    - Jupiter-shine on Io at inferior conjunction is 66.7 lx, in Io's own shadow transit, with
+      Jupiter 6.5% oblate. That is within 10⁻³ of the closed form over √(a c) and 6.16 stops below
+      the sunlight. The plan's 70 lx ± 10% is kept.
+    - A neighbour at new phase gives under 10⁻¹² of full.
+    - The `view/bodies` tests: a lunar disc's night-side pixel equals E (Δ ÷ d)² × exposure ÷ π ×
+      `brdf` to 10⁻⁶, and the night side keeps `unlitBody`.
+    - The renderer takes two sources on `high` and one on `low`.
+  - **Earth's albedo: resolved (decision-r07-earth-albedo).** Mallama et al. 2017's p_V of 0.434,
+    which the fixture and Design note 5's `earth` row used until R07.T4.d, is superseded by
+    measurement. Robinson
+    2026 (PSJ 7, 12, arXiv:2507.22258) gives a visual p of 0.242 (0.277, 0.226 and 0.221 in
+    0.1 µm bands) and q of 1.22. Mallama's 0.434 came from extrapolating EPOXI data through
+    Tinetti et al. 2006's model, whose Sun–observer azimuth is turned by 180°. The ruling takes
+    Robinson's eq. 14 fit, f = 0.23 in his band ratios, as the `earth` template. Earthshine at
+    full Earth is then 7.66 lx photopic, 8.06 lx at his physical model's p. T11 changed only its
+    own earthshine test. R07.T4.d moved the client's `earth` and the fixture's row; P14.T47.e
+    moves the generator's, in the 20 → 21 bump. The ruling's other plan text (Design note
+    5's sources and ratio, T1, T4.d, T10.b, the Risks line on Earth's albedo, and plan 14) is
+    applied by the docs pass of 2026-10-04.
+  - **Existing tests.** T8.a's umbra test now runs with planetshine off, since it tests the
+    starlight's eclipse term. Its occluder exactly at new phase gives about 4.5 × 10⁻²³ lx, from the
+    rounding of sin π, and the occluder beyond the star some 10⁻¹⁰ of the sunlight.
+  - **Smoke checks.** The probe's `LightingCase` gains kind 4: `planetshine_irradiance` against
+    its twin at four points (wholly up, cut by the horizon, at Earth-from-the-Moon scale in the
+    soft band, and behind a 3° horizon), to 2 × 10⁻⁴. `smoke/bodies.ts`' `checkPlanetshine` draws a
+    Moon 20 px across at 150°, pre-exposed at 0.05, its night side lit by a full Earth, against
+    the CPU rasteriser. `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-04):
+    every check passes (456, none failing), T8.a's and T8.b's figures unchanged. The four
+    planetshine factors are within 9.6 × 10⁻⁵ of their twins. The moon's 368 pixels are within
+    0.258 of T8.a's texel tolerance, and all 280 unlit ones hold earthshine with the rasteriser's
+    classes.
+  - **Neighbours at drawn centres.** Neighbours are placed at the scene's drawn centres, as lights
+    and occluders are (T8.a's known limit, "Light positions"). T10.a's retarded geometry must also
+    place each neighbour at t_B − |r_N − r_B| ÷ c, and the neighbour's stars at its own retarded
+    time.
+  - **For R10 and T9.** A lit point's planetshine is `planetshine_irradiance` with the horizon
+    argument (0 on the smooth figure) and `lit_disc_term`, over the `SecondarySource`s of its body.
+  - **Possible follow-up (not built).** A table in (α, sin ρ, L) would correct the far-field
+    illuminance's errors: first order in R ÷ Δ near full phase, and past quarter phase the hidden
+    limb crescent (at Io, 34% below at 120°, 71% below at 150°, nothing from 170.6°).
+  - **Found, for T10 (not fixed here) → R07.T10.b (decision-r07-earth-albedo).** A point body
+    takes its eclipse from its centre, so a point Jupiter goes fully black during Io's shadow
+    transit: `pointFlux` gives 0 against 5.16 × 10⁻⁵ lx clear, measured 2026-10-04. R07.T10.b's
+    disc-averaged eclipse, shared by `pointFlux` and planetshine's neighbour, fixes it.
+- **Deviations in T4.d, as built (Earth after Robinson 2026, decision-r07-earth-albedo).**
+  - **The template.** `templates.ts`' `earth` is eq. 14 in its magnitude form, with
+    `EARTH_HG_ASYMMETRY` = −0.33, to 144°, L = 0, not provisional. Its source string cites eq. 14
+    (g, f = 0.23, the data's 5°–144°) and Robinson et al. 2011 for dropping eq. 5.
+  - **The fixture's row.** p 0.263, 0.215 and 0.21; B − V 0.43 and V − R 0.52; V(1, 0) and
+    `templateV10Mag` −3.23; radius 6,371 km; q_V 1.312.
+    - The colours come from Model 07's unrounded band ratios and `SUN_JOHNSON_MAG`: 0.429 and
+      0.516. The rounded p give a V − R of 0.514.
+    - T4.a's checks of p_V against V(1, 0) and the radius (0.5%) and of the colours against the
+      band ratios (3%) pass for the new row unchanged.
+  - **Figures, computed by `phaseIntegral` and reproduced by a Python port.**
+    - q_V at s = 1, clamped and held, is 1.31157. The clamp acts from 139.006°. Eq. 14 alone over
+      0°–180° gives 1.3501.
+    - The clamp-departure test's reference holds f unclamped past 144° (q 1.3202), not eq. 14 to
+      180°, so Earth's row there is −0.656%.
+    - The law solved to the fixture's q_V 1.312 has s = 0.99961. Its V departs from eq. 14 by at
+      most 0.073% over 0°–135°, at 135°.
+    - 0.23 q = 0.302, 2.6% above Robinson's 0.294; p_V q_V = 0.282.
+  - **Tests.**
+    - `templates.test.ts`: eq. 14's dimming at 30°, 90°, 120° and 144° by hand to 10⁻⁴ mag, and
+      the range, L, the flag and the source.
+    - `phase.test.ts`:
+      - Φ_t(0) = 1 and q_V 1.3116 to 0.5%;
+      - the clamp from 139.0° (f under 4 at 138.9°, at 4 by 139.1°), and eq. 14 alone giving 1.350;
+      - 0.23 q within 3% of 0.294;
+      - the clamp-departure row at −0.656%;
+      - Earth's V against eq. 14 to 0.5% every 5° from 0° to 135°. Eq. 14 is written there in its
+        Henyey–Greenstein form, independently of the template's magnitude form. This replaces
+        eq. 5's 30%.
+    - `planetshine.test.ts`' earthshine test reads `planetPhotometry("Earth")` again: 7.668 lx,
+      unchanged.
+  - **The golden.** No client code or test reads `photometry/templates.golden`. Its `earth` block
+    stays on eq. 5 (q 1.3105694) until P14.T47.e's 20 → 21 bump, after which the two must agree.
+    R07.T2.b waits for both.
+  - **Other users of the `earth` key.** `discSurface.test.ts` and `smoke/bodies.ts` keep their own
+    "bright terrestrial" class law (p 0.5, 0.45 and 0.4; q 1.3), now on eq. 14. T11's 3 px switch
+    test with Earth from the Moon (`draw.test.ts`) and the ranking's bound now run on the new row.
+    All pass unchanged.
+  - **Reviewed.** The science check (2026-10-04) re-derived every figure above, eq. 14's form from
+    Robinson's eqs. 5 and 14, and the citations, read from arXiv:2507.22258v2 (eq. 14's number in
+    the typeset PSJ article not seen). Its wording notes are applied: Robinson's bands are 0.1 µm
+    wide and solar-weighted, and stand for Johnson's R only in part (Johnson's R reaches past
+    0.8 µm, recalled from Bessell 2005, moderate confidence); the flipped azimuth is in Robinson
+    et al. 2011's Fig. 2 caption, in §3.4. The typescript review's two points (the departure
+    comment, one reason per test) are fixed.

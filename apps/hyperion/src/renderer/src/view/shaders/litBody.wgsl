@@ -1,6 +1,7 @@
-// The shading of a lit body's surface (plan R07, Design notes 5, 6 and 24): the body BRDF, a
+// The shading of a lit body's surface (plan R07, Design notes 5, 6, 7 and 24): the body BRDF, a
 // lunar-Lambert disc term times a phase factor f read from a table, as reflectance I/F; the horizon
-// and eclipse terms of a lit point; and the hooks R08 and R11 fill, as stubs.
+// and eclipse terms of a lit point; planetshine's irradiance; and the hooks R08 and R11 fill, as
+// stubs.
 //
 // A library composed by concatenation: it declares no binding of its own. Its includer declares
 // `phase_factor_table : texture_2d<f32>` at the includer's own group and binding (an
@@ -14,10 +15,12 @@ const LIT_PI : f32 = 3.14159265358979;
 const PHASE_TABLE_SAMPLES : u32 = 361u;
 const PHASE_TABLE_STEP_RAD : f32 = 0.00872664625997165;
 
-// A lunar-Lambert law, which a caller may build per texel (R10): the albedo scale A per channel,
-// the Lommel–Seeliger share L, the exponents s per channel that its table row was made with, and
-// `table_row`, the row of `phase_factor_table` holding its f (one row per tabulated law: template,
-// L and s). The shader reads f from the row; s rides along for callers that rebuild rows.
+// A lunar-Lambert law: the albedo scale A per channel, the Lommel–Seeliger share L, the exponents
+// s per channel that its table row was made with, and `table_row`, the row of `phase_factor_table`
+// holding its f (one row per tabulated law: template, L and s). The shader reads f from the row; s
+// rides along for callers that rebuild rows. A texel of several classes (R10) reflects the weighted
+// sum of its classes' `body_brdf`, each class keeping its own LunarLambert, never one law built
+// from weighted parameters (decision-r07-t8b).
 struct LunarLambert {
   a : vec3f,
   l : f32,
@@ -80,6 +83,35 @@ fn sphere_irradiance(h : f32, phi : f32, horizon : f32) -> f32 {
   let direct = cos(eta) * h * h * howell_view_factor(h, tilted);
   let tangential = sin(eta) * sin(tilted) * disc_visible_fraction(h, tilted);
   return max(0.0, direct + tangential);
+}
+
+// `body_brdf`'s disc term under an extended source (a star, or a neighbour's planetshine): μ₀
+// replaced by the source's irradiance factor h, which equals μ₀ wherever the whole source is up and
+// lights the soft band past the terminator, and the Lommel–Seeliger term's μ₀ + μ floored at the
+// source's angular radius, so that it stays bounded at the limb in that band. The TypeScript twin
+// is `view/bodies/discShading.ts`' `surfaceReflectance`.
+fn lit_disc_term(l : f32, h : f32, mu0 : f32, mu : f32, source_radius : f32) -> f32 {
+  return l * 2.0 * h / max(max(mu0, 0.0) + mu, source_radius) + (1.0 - l) * h;
+}
+
+// Planetshine (Design note 7): the factor on a lit neighbour's illuminance face-on at the body's
+// centre that reaches a lit point. The neighbour is a uniform sphere through `sphere_irradiance`,
+// its face-on value carried from the centre to the point by the inverse square, and it is never
+// shadow-tested against a third body. `to_source` runs from the point to the neighbour's centre;
+// it, `source_radius` and `centre_distance` share one unit of length; `normal` is the point's unit
+// normal. The TypeScript twin is `view/lighting/planetshine.ts`' `planetshineIrradiance`.
+fn planetshine_irradiance(
+  to_source : vec3f,
+  source_radius : f32,
+  centre_distance : f32,
+  normal : vec3f,
+  horizon : f32,
+) -> f32 {
+  let distance = length(to_source);
+  let mu0 = dot(normal, to_source) / distance;
+  let near = centre_distance / distance;
+  return sphere_irradiance(distance / source_radius, acos(clamp(mu0, -1.0, 1.0)), horizon)
+    * near * near;
 }
 
 // The exact area of the overlap of circles of radii r and k whose centres are z apart.

@@ -259,9 +259,9 @@ describe("the VIEW display", () => {
     const { advance } = setup();
     await settle();
     advance(100);
-    expect(screen.getByRole("application", { name: "VIEW, WIREFRAME, SEAT" }).tagName).toBe(
-      "CANVAS",
-    );
+    expect(
+      screen.getByRole("application", { name: "VIEW, WIREFRAME, PRIMARY, SEAT" }).tagName,
+    ).toBe("CANVAS");
   });
 
   it("draws no text into its canvas", async () => {
@@ -276,7 +276,7 @@ describe("the VIEW display", () => {
     const { advance } = setup();
     await settle();
     advance(300);
-    const block = screen.getByText("VIEW").parentElement;
+    const block = screen.getByText("VIEW", { selector: "p" }).parentElement;
     expect(block === null ? "" : block.textContent).toMatch(
       /FRAME.*TIME.*UT .*STYLE.*WIREFRAME.*CAMERA.*SEAT.*FOV.*60°.*EXPOSURE.*EV100 -1\.0 MAN.*STARS.*RANGE QUERY.*SCENE.*PRECISION TEST/,
     );
@@ -470,7 +470,9 @@ describe("the VIEW display", () => {
     await user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
     await settle();
     advance(300);
-    expect(screen.getByText("VIEW").parentElement?.textContent).toMatch(/FRAME CHANGE TEST/);
+    expect(screen.getByText("VIEW", { selector: "p" }).parentElement?.textContent).toMatch(
+      /FRAME CHANGE TEST/,
+    );
   });
 
   it("keeps its engine across a change of scene, asking for no new adapter", async () => {
@@ -678,7 +680,7 @@ class InThreadSkyWorker {
 }
 
 function labelBlock(): string {
-  return screen.getByText("VIEW").parentElement?.textContent ?? "";
+  return screen.getByText("VIEW", { selector: "p" }).parentElement?.textContent ?? "";
 }
 
 describe("the VIEW display's server scene", () => {
@@ -800,7 +802,7 @@ describe("the VIEW display's server scene", () => {
     expect([
       screen.getByText("SCENE STALE: reopening the scene"),
       screen.getByText(/^UT /).classList.contains("stale"),
-      screen.getByRole("heading", { name: "Targets stale" }),
+      screen.getByRole("heading", { name: "Targets stale PRIMARY" }),
       labelBlock().includes("PRECISION TEST"),
       screen
         .getAllByRole("option")
@@ -872,7 +874,7 @@ describe("the VIEW display's style (R07.T8.a)", () => {
     const { advance } = setup();
     await settle();
     advance(100);
-    const panel = screen.getByRole("region", { name: "Style" });
+    const panel = screen.getByRole("region", { name: "Style PRIMARY" });
     expect([
       within(panel).getByRole("button", { name: "WIREFRAME" }).getAttribute("aria-pressed"),
       within(panel).getByRole("button", { name: "PHOTOREALISTIC" }).getAttribute("aria-disabled"),
@@ -959,7 +961,7 @@ describe("the VIEW display's exposure meter (R07.T8.a)", () => {
     const { user, advance } = setup({ store: await nominalStore() });
     await settle();
     advance(100);
-    expect(screen.queryByRole("region", { name: "Exposure meter" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Exposure meter PRIMARY" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
     advance(100);
     await user.keyboard("4");
@@ -967,8 +969,9 @@ describe("the VIEW display's exposure meter (R07.T8.a)", () => {
     await settle();
     advance(300);
     expect(
-      within(screen.getByRole("region", { name: "Exposure meter" })).getByText("NO IMAGE TO METER")
-        .tagName,
+      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByText(
+        "NO IMAGE TO METER",
+      ).tagName,
     ).toBe("P");
   });
 });
@@ -976,7 +979,7 @@ describe("the VIEW display's exposure meter (R07.T8.a)", () => {
 /** The exposure panel's reading. */
 function exposureReadout(): string {
   return (
-    within(screen.getByRole("region", { name: "Exposure" })).getAllByRole("status")[0]
+    within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getAllByRole("status")[0]
       ?.textContent ?? ""
   );
 }

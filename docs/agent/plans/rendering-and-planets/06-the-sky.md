@@ -973,8 +973,9 @@ luminosity_matches_realised_cells` passes.
   companions and orbits from plan 11's laws, ages log-uniform within the bin), each read from
   `SystemStars::state_at(t).stars()` and, single, from each `StarModel` alone, on the fit's own
   statistical seed. `LuminosityTables::build` adds to each component bin and snapshot the
-  born-weighted sum over the age bins (the same `weight_of`) of the differences, linear in
-  \[Fe/H\] between nodes and over the component's three Gauss–Hermite nodes. Light and colour: each
+  born-weighted sum over the age bins (the same born-system weights) of the differences, linear in
+  \[Fe/H\] between nodes and over the component's three Gauss–Hermite nodes, in the bin's finish
+  step in `TablesPlan::assemble`, once its single-star sums hold every node. Light and colour: each
   1-mag bin's difference is spread over its 20 sub-bins in proportion to the single-star light there
   (evenly where that is zero), the differential light clamped at 0, the cumulative sums recomputed.
   Counts take only the increase: each edge holds the larger of the single and corrected counts, then
@@ -987,10 +988,15 @@ luminosity_matches_realised_cells` passes.
   interval, the realised light stays within the existing interval, and each layer's residual is
   recorded before and after. It does not block T8; it lands before T9.b's band gates and T17's
   goldens (no `GENERATOR_VERSION` bump while no band or census output is served or has goldens).
-  The job split: `LuminosityTables::plan(galaxy) → TablesPlan`, whose jobs are the track samples
-  per (\[Fe/H\] node, chunk of mass nodes) and the accumulation per component bin, put together
-  by `assemble` in index order; the sim spawns no threads. Test `parallel_build_equals_serial`: any
-  partition and order of the jobs (`order::assert_order_independent`) gives `build`'s bits; and
+  The job split: `LuminosityTables::plan(galaxy) → TablesPlan`, in stages, one metallicity at a
+  time (as built, 2026-10-04): each stage, an \[Fe/H\] node from the lowest, makes its track
+  samples per chunk of mass nodes (`sample_jobs`, `run_samples`, `track_samples`), then adds them
+  to each component bin that reads the node, one accumulation job per bin (`accumulate_jobs`,
+  `run_accumulate`), into the bin's running sums (`BinSums`, from `bin_sums`), which the caller
+  holds and which refuse a bin's nodes out of order; the stage's samples are then dropped.
+  `assemble` finishes each bin and puts the bins in index order; the sim spawns no threads. Test
+  `parallel_build_equals_serial`: any partition and order of the jobs, stages sampled ahead of
+  their turn and any threads (`order::assert_order_independent`) give `build`'s bits; and
   tables at +H read at t = 0 through `age_for` equal a build at t = 0 within 10⁻³ of every bin's
   light and count. Acceptance: `cargo test -p hyperion-sim sky::luminosity`, `just fit-check`,
   `just test-slow luminosity_matches_realised_cells`.
@@ -1981,6 +1987,90 @@ stars_per_system, dark_per_system, remnants_per_system}`, `LightColour` (flux-we
   **Found by T5.c:** record 0x81fd865fd000000f overflowed the stack in plan 11's binary engine
   (common envelope and merger recursing on a held bare core), fixed as a P11.T11 fix (plan 11's
   Risks); the held state's own inconsistency is with a decision agent.
+- **The tables' build memory and the tests' cost (fix, 2026-10-04).** With T5's metallicity nodes
+  and gradient bins, `build_with` held every metallicity's samples to the build's end, about
+  150 MB each (2,240 nodes at 32 samples a phase): 17 for the young thin disc's seven bins, 22
+  for a full build. `doubling_the_samples_moves_no_bin_above_one_percent` peaked at 4.1 GB
+  natively and ran out of wasm32's 4 GiB on wasip1 (CI-13), and most table tests ran 5–20 times
+  longer than at CI-11. `build_with` now makes one metallicity's samples at a time, the lowest
+  \[Fe/H\] that any bin adds next, adds them to every bin whose next node it is, and drops them.
+  Each bin keeps its own snapshots' bins and adds its three nodes in their order, so the tables
+  are unchanged bit for bit: bit fingerprints of a full build at +H, a build at twice the samples
+  and a primaries-only build at −55,000 yr match the old code's. A build's peak is now one
+  metallicity's samples: 304 MiB across those three builds, against 4.2 GB. Each part's share
+  reads `born_cdf` once per end, not twice per part. That took a young thin-disc bin's
+  accumulation from 3.2–4.6 s to 1.8–1.9 s, and a full build from 136 s to 104 s (test profile,
+  under load). The unit tests that read only `get` build a gradient component's solar-circle bin
+  alone (`GradientBins::SolarCircle`, test-only), which is the full build's bin bit for bit: three
+  metallicities rather than 17. The slow test
+  `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit` pins that equality, and its build of
+  all seven bins at twice the samples guards the memory. The doubling test now takes 52 s and
+  289 MiB natively (217 s and 4.1 GB before), and 61 s and 365 MiB on wasip1. At CI-11 it took
+  28 s and 33 s, with one metallicity per component; the rest of the difference is the three
+  Gauss–Hermite nodes. T5.d's job split keeps this peak (next item).
+- **The job split in stages (T5.d merged with the memory fix, 2026-10-04).**
+  - **Before.** T5.d's split (062e32c) made every \[Fe/H\] node's samples, then built each
+    component bin from all of them, so it held every node's samples at once. A full build peaked
+    at 2.7 GB serially and 2.6 GB on 16 threads.
+  - **How it works now.** `TablesPlan` runs in stages, one metallicity at a time from the lowest
+    \[Fe/H\]. The Milky Way fixture has 22 stages and 53 bins.
+    - A stage's sample jobs are unchanged.
+    - Its accumulation jobs, one per bin that reads the node, add into that bin's running
+      `BinSums`. The caller holds those sums from `bin_sums` to `assemble`, and they panic if a
+      bin's nodes come out of order. After that the stage's samples can be dropped.
+    - `assemble` finishes each bin. T5.d's pair correction goes in that finish step, applied to
+      the bin's complete single-star sums.
+  - **Deviation from the T5.d sketch** (approved by the orchestrator the same day).
+    - `track_samples` takes one stage's chunks.
+    - `run_accumulate` adds to the caller's sums instead of returning a bin's tables.
+    - `BinTables` is gone.
+  - **Bits.** Three builds give the same fingerprint and the same `heap_bytes` at 7772faf, at
+    062e32c's integration head (d400869) and after the merge:
+
+    | Build                                                  | Fingerprint        | `heap_bytes` |
+    | ------------------------------------------------------ | ------------------ | ------------ |
+    | Full, at +H                                            | `36d76d03f1cc651a` | 68,775,072   |
+    | Young thin disc's seven bins, twice the samples, at +H | `f794503ac9529263` | 29,828,064   |
+    | Primaries only, every component, at −55,000 yr         | `0bdedce256b01507` | 68,775,072   |
+
+    Both versions' pool builds on 16 threads give the full build's fingerprint, and so does the
+    merge's pool build with lookahead.
+
+  - **Peak RSS, serial** (MiB, test profile, under shared load):
+
+    | Build             | 062e32c | 7772faf | Merge |
+    | ----------------- | ------- | ------- | ----- |
+    | Full              | 2,735   | 273     | 279   |
+    | Twice the samples | 3,346   | 304     | 295   |
+    | Primaries         | 2,708   | 249     | 238   |
+
+    The peaks are `getrusage`'s maximum RSS of the test process and its children, the figure
+    GNU `time -v` prints (it is not installed here). Each test below ran alone:
+    - natively, the doubling test peaked at 4,072 MiB and took 228 s at 062e32c's integration
+      head, against 304 MiB and 53 s after the merge;
+    - on wasip1, after the merge, the doubling test passed in 65 s at 363 MiB;
+    - `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit` passed in 120 s at 307 MiB.
+
+  - **The pool.** It holds:
+    - one stage's samples, shared by its threads: 151 MiB at 32 samples a phase;
+    - every bin's sums, about 65 MiB;
+    - per thread, a sample chunk of at most 64 nodes, about 4 MiB.
+
+    On 16 threads the staged pool took 23.2 s wall and 237 MiB. 062e32c's took 18.8 s and
+    2.6 GB. Within a stage only the bins that read its node accumulate (1–22 jobs), so
+    accumulation took 13.2 s of the staged pool's time, against 9.7 s for 062e32c's.
+    Sampling stage k + 1 while stage k accumulates holds two stages' samples and gives the same
+    bits: 18.8 s and 439 MiB.
+
+  - **T11.c follow-up.** The server's pool should schedule that one-stage lookahead. The sim
+    spawns no threads, so the schedule belongs to the caller.
+  - **The test.** `parallel_build_equals_serial` still pins the halo's serial build to the
+    pre-split fingerprint, `0x6ca2_bafb_4c81_c7b4` (fae1c11). Its parallel part now builds the
+    bulge and the long bar, which share two of their four stages. It samples every stage ahead of
+    its turn, runs each stage's jobs reversed on four threads, and checks the result against
+    their serial build.
+  - **Guards.** `run_accumulate` panics on a bin's nodes out of order and on another stage's
+    samples, and `track_samples` panics on another stage's chunk; each has a `should_panic` test.
 - **The A3 interim's Class I sources (T5).** `is_dark_in_v` treats every Class I protostar as dark;
   a few per cent of them, seen pole-on down an outflow cavity (A<sub>V</sub> about 1.5; Whitney et
   al. 2003a, ApJ 591, 1049, §2 and Fig. 3), would show in V. Plan 06's A3 decides.

@@ -20,17 +20,16 @@ import { type PatchBounds, patchBounds } from "./bounds";
 import { vertexSpacing } from "./cube";
 import { frustumOf, horizonCone } from "./cull";
 import {
+  type CellOut,
   childKeys,
-  cornerNeighbours,
-  EDGES,
-  edgeNeighbour,
+  type Face,
   FACES,
   MAX_LEVEL,
   type PatchKey,
-  ancestorIndex,
   patchKeyIndex,
   patchKeyString,
   rootKey,
+  stepCellInto,
 } from "./patchKey";
 import { finestPatchSizeM, type GroundContact, inForcedRegion } from "./grounded";
 import { compareRequests } from "./priority";
@@ -91,6 +90,18 @@ export interface Selection {
    * descent record.
    */
   readonly limitExcess: number;
+  /**
+   * The baked patches selection reached and found hidden, depth first from face 0: the children a
+   * split left out, which no view sees and no forced region reaches, and the split patches with
+   * nothing selected beneath them (R05.T8, the high-bound ruling's F3).
+   *
+   * @remarks
+   * Their own baked ranges may be what hides them, so the cache marks them as used, below the draw
+   * pins. Evicted, such a patch takes its ancestor's looser range, is selected again the next
+   * frame and is drawn by its parent, in place of its siblings, until it is baked again: the
+   * approach's coarse patches thrashed this way (decision-r05-high-bound.md, reason 3c).
+   */
+  readonly hiddenBaked: ReadonlyArray<PatchKey>;
 }
 
 /**
@@ -217,15 +228,16 @@ export interface BakedRange {
   readonly highM: number;
 }
 
-/** A node of the traversal: a patch and what the views make of it. */
+/**
+ * A node of the traversal: a patch some view sees, or in a forced region, which is selected whether
+ * or not a view sees it so that it is resident before contact (Design note 9), and what the views
+ * make of it. Patches neither is true of get no node.
+ */
 interface TraversalNode {
   readonly key: PatchKey;
   readonly bounds: PatchBounds;
-  /**
-   * Whether any view sees the patch, or it is in a forced region, which is selected whether or not
-   * a view sees it so that it is resident before contact (Design note 9).
-   */
-  readonly visible: boolean;
+  /** Its bounds' memo entry, which keeps its key string. */
+  readonly memo: BoundsMemoEntry;
   /** The views that see it, a bit a view in input order. */
   readonly seenBy: number;
   /** The views that see it and find ρ > τ: the views that want it split, a bit a view. */
@@ -244,36 +256,57 @@ interface TraversalNode {
   readonly parent: TraversalNode | null;
 }
 
-/** Bounds already computed, per planet and level, with the height range they were built for. */
-const boundsMemo = new WeakMap<
-  PlanetGeometry,
-  Map<
-    number,
-    {
-      readonly lowM: number;
-      readonly highM: number;
-      /** The baked range it was built from, `null` for the level's own. */
-      readonly baked: BakedRange | null;
-      readonly bounds: PatchBounds;
-    }
-  >[]
->();
+/** A patch's bounds already computed, with the height range they were built for. */
+interface BoundsMemoEntry {
+  readonly lowM: number;
+  readonly highM: number;
+  /** The baked range it was built from, `null` for the level's own. */
+  readonly baked: BakedRange | null;
+  readonly bounds: PatchBounds;
+  /**
+   * Its {@link patchKeyString}, once a selection has drawn it: kept, so that the output map's key
+   * is neither built nor hashed again (V8 keeps a string's hash with it).
+   */
+  keyString: string | null;
+}
+
+/** What selection reads of a planet on every call, computed once a planet (it is immutable). */
+interface PlanetTables {
+  /** {@link selectionErrorM} per level, metres. */
+  readonly errorM: ReadonlyArray<number>;
+  /** Per level: ε_n and the lowest and highest height, metres, from the level table. */
+  readonly levelBoundM: ReadonlyArray<number>;
+  readonly levelLowM: ReadonlyArray<number>;
+  readonly levelHighM: ReadonlyArray<number>;
+  /** Bounds already computed, a map a level by {@link patchKeyIndex}. */
+  readonly memo: ReadonlyArray<Map<number, BoundsMemoEntry>>;
+}
+
+const planetTables = new WeakMap<PlanetGeometry, PlanetTables>();
+
+/** The planet's tables, made on first use. */
+function tablesOf(planet: PlanetGeometry): PlanetTables {
+  let tables = planetTables.get(planet);
+  if (tables === undefined) {
+    const levels = { length: MAX_LEVEL + 1 };
+    tables = {
+      errorM: Array.from(levels, (_, level) => selectionErrorM(planet, level)),
+      levelBoundM: Array.from(levels, (_, level) => levelBoundM(planet, level)),
+      levelLowM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[0]),
+      levelHighM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[1]),
+      memo: Array.from(levels, () => new Map<number, BoundsMemoEntry>()),
+    };
+    planetTables.set(planet, tables);
+  }
+  return tables;
+}
 
 /** The most bounds kept a level per planet; past it the older half is dropped. */
 const BOUNDS_MEMO_LIMIT = 1 << 15;
 
-function boundsOf(
-  planet: PlanetGeometry,
-  key: PatchKey,
-  baked: BakedRange | null,
-  skirtMarginM: number,
-): PatchBounds {
-  let levels = boundsMemo.get(planet);
-  if (levels === undefined) {
-    levels = Array.from({ length: MAX_LEVEL + 1 }, () => new Map());
-    boundsMemo.set(planet, levels);
-  }
-  const memo = levels[key.level];
+/** The memo's entry for patch `key`'s bounds over its height range, made where it has none. */
+function boundsOf(t: Traversal, key: PatchKey, baked: BakedRange | null): BoundsMemoEntry {
+  const memo = t.memo[key.level];
   if (memo === undefined) {
     throw new Error(`level ${key.level} is not a quadtree level`);
   }
@@ -281,11 +314,26 @@ function boundsOf(
   const known = memo.get(index);
   // The range only when the memo cannot answer with the level's own (nothing baked above it).
   if (known !== undefined && baked === null && known.baked === null) {
-    return known.bounds;
+    return known;
   }
-  const range = inheritedHeightRangeM(planet, key, baked, skirtMarginM);
-  if (known !== undefined && known.lowM === range[0] && known.highM === range[1]) {
-    return known.bounds;
+  let lowM = t.levelLowM[key.level] ?? 0;
+  let highM = t.levelHighM[key.level] ?? 0;
+  if (baked !== null) {
+    const range = t.range;
+    inheritedRangeInto(
+      range,
+      lowM,
+      highM,
+      (t.levelBoundM[baked.level] ?? 0) + (t.levelBoundM[Math.max(0, key.level - 1)] ?? 0),
+      t.levelBoundM[key.level] ?? 0,
+      baked,
+      t.skirtMarginM,
+    );
+    lowM = range[0] ?? lowM;
+    highM = range[1] ?? highM;
+  }
+  if (known !== undefined && known.lowM === lowM && known.highM === highM) {
+    return known;
   }
   if (memo.size >= BOUNDS_MEMO_LIMIT) {
     // Maps keep insertion order: drop the older half, so a moving camera never pays a cold start.
@@ -298,20 +346,26 @@ function boundsOf(
       drop -= 1;
     }
   }
-  const bounds = patchBounds(planet, key, range);
-  memo.set(index, { lowM: range[0], highM: range[1], baked, bounds });
-  return bounds;
+  const entry: BoundsMemoEntry = {
+    lowM,
+    highM,
+    baked,
+    bounds: patchBounds(t.planet, key, [lowM, highM]),
+    keyString: known?.keyString ?? null,
+  };
+  memo.set(index, entry);
+  return entry;
 }
 
 /** One `f32` step's relative size: a baked height rounded to `f32` is within this of its value. */
 const F32_RELATIVE_STEP = 2 ** -23;
 
-/** One call's state. */
-interface Traversal {
+/** One call's state, with its planet's tables. */
+interface Traversal extends PlanetTables {
   readonly planet: PlanetGeometry;
   readonly views: ReadonlyArray<PreparedView>;
-  /** {@link selectionErrorM} per level, metres. */
-  readonly errorM: ReadonlyArray<number>;
+  /** Scratch for a height range, low then high, metres. */
+  readonly range: Float64Array;
   readonly grounded: ReadonlyArray<GroundContact>;
   readonly heightRanges: HeightRangeLookup | null;
   /** The bake's skirt margin, metres. */
@@ -338,23 +392,51 @@ export function inheritedHeightRangeM(
     return [levelLow, levelHigh];
   }
   const n = key.level;
-  const widen = levelBoundM(planet, baked.level) + levelBoundM(planet, Math.max(0, n - 1));
-  // The largest |h| the patch's own heights can reach, for the f32 steps: the bake's own
-  // `f32_step(largest_h)` in its skirt depth, and the rounding of the baked range.
-  const largest = Math.max(Math.abs(baked.lowM), Math.abs(baked.highM)) + widen;
-  const step = largest * F32_RELATIVE_STEP;
-  // The bake's skirt depth: ε_n, an f32 step of the largest height and the caller's margin.
-  const skirt = levelBoundM(planet, n) + step + skirtMarginM;
-  const low = baked.lowM - step - widen - skirt;
-  const high = baked.highM + step + widen;
-  return [Math.max(levelLow, low), Math.min(levelHigh, high)];
+  const range = new Float64Array(2);
+  inheritedRangeInto(
+    range,
+    levelLow,
+    levelHigh,
+    levelBoundM(planet, baked.level) + levelBoundM(planet, Math.max(0, n - 1)),
+    levelBoundM(planet, n),
+    baked,
+    skirtMarginM,
+  );
+  return [range[0] ?? levelLow, range[1] ?? levelHigh];
 }
 
-function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): TraversalNode {
+/**
+ * Writes {@link inheritedHeightRangeM}'s range for a baked ancestor into `out`, low then high,
+ * metres, from the level's range, the widening ε_m + ε_{n−1} and the level's own bound ε_n.
+ */
+function inheritedRangeInto(
+  out: Float64Array,
+  levelLowM: number,
+  levelHighM: number,
+  widenM: number,
+  ownBoundM: number,
+  baked: BakedRange,
+  skirtMarginM: number,
+): void {
+  // The largest |h| the patch's own heights can reach, for the f32 steps: the bake's own
+  // `f32_step(largest_h)` in its skirt depth, and the rounding of the baked range.
+  const largest = Math.max(Math.abs(baked.lowM), Math.abs(baked.highM)) + widenM;
+  const step = largest * F32_RELATIVE_STEP;
+  // The bake's skirt depth: ε_n, an f32 step of the largest height and the caller's margin.
+  const skirt = ownBoundM + step + skirtMarginM;
+  const low = baked.lowM - step - widenM - skirt;
+  const high = baked.highM + step + widenM;
+  out[0] = Math.max(levelLowM, low);
+  out[1] = Math.min(levelHighM, high);
+}
+
+/** The traversal node of patch `key`, or `null` where no view sees it and no forced region reaches it. */
+function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): TraversalNode | null {
   const own = t.heightRanges?.heightRangeM(key);
   const baked: BakedRange | null =
     own === undefined ? (parent?.baked ?? null) : { level: key.level, lowM: own[0], highM: own[1] };
-  const bounds = boundsOf(t.planet, key, baked, t.skirtMarginM);
+  const memo = boundsOf(t, key, baked);
+  const bounds = memo.bounds;
   const errorM = t.errorM[key.level] ?? 0;
   let seenBy = 0;
   let wantedBy = 0;
@@ -365,8 +447,9 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     if (v === undefined) {
       continue;
     }
-    const e = excessOf(v, bounds, errorM);
-    if (e === null) {
+    // Negative where the view cannot see the patch.
+    const e = viewExcess(v.geometry, bounds, errorM);
+    if (e < 0) {
       continue;
     }
     seenBy |= 1 << n;
@@ -376,11 +459,14 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     excess = Math.max(excess, e);
     weighted = Math.max(weighted, v.input.weight * e);
   }
-  const forced = inForcedRegion(bounds, t.grounded, t.patchSizeM);
-  const node: TraversalNode = {
+  const forced = t.grounded.length > 0 && inForcedRegion(bounds, t.grounded, t.patchSizeM);
+  if (seenBy === 0 && !forced) {
+    return null;
+  }
+  return {
     key,
     bounds,
-    visible: seenBy !== 0 || forced,
+    memo,
     seenBy,
     wantedBy,
     excess,
@@ -390,20 +476,10 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     resident: own !== undefined,
     parent,
   };
-  return node;
 }
 
 /** The most views selection takes at once: one bit each in a node's view masks. */
 export const MAX_SELECTION_VIEWS = 31;
-
-/**
- * A view's ρ ÷ τ for a patch of bounds `bounds` at error `errorM`, or `null` where the view cannot
- * see it.
- */
-function excessOf(v: PreparedView, bounds: PatchBounds, errorM: number): number | null {
-  const e = viewExcess(v.geometry, bounds, errorM);
-  return e < 0 ? null : e;
-}
 
 /**
  * A request's priority (Design note 24): the largest over the views that want it of
@@ -423,8 +499,9 @@ function requestPriority(t: Traversal, target: TraversalNode, standIn: Traversal
     if (v === undefined || (views & (1 << n)) === 0) {
       continue;
     }
-    const e = excessOf(v, standIn.bounds, errorM);
-    if (e !== null) {
+    // Negative where the view cannot see the patch.
+    const e = viewExcess(v.geometry, standIn.bounds, errorM);
+    if (!(e < 0)) {
       priority = Math.max(priority, v.input.weight * e);
     }
   }
@@ -447,7 +524,7 @@ function requestPriority(t: Traversal, target: TraversalNode, standIn: Traversal
  * the drawn error is never claimed to be smaller than it is. Forced regions are not gated.
  */
 function wantsRefining(t: Traversal, node: TraversalNode): boolean {
-  if (!node.visible || node.key.level >= t.planet.finestLevel) {
+  if (node.key.level >= t.planet.finestLevel) {
     return false;
   }
   if (node.forced) {
@@ -556,7 +633,8 @@ export function selectPatches(input: SelectionInput): Selection {
         v.viewport.widthPx / (2 * Math.tan(v.fovXRad / 2) * v.tauPx),
       ),
     })),
-    errorM: Array.from({ length: MAX_LEVEL + 1 }, (_, level) => selectionErrorM(planet, level)),
+    ...tablesOf(planet),
+    range: new Float64Array(2),
     grounded: input.grounded,
     heightRanges: input.heightRanges ?? null,
     skirtMarginM: input.skirtMarginM ?? 0,
@@ -571,13 +649,11 @@ export function selectPatches(input: SelectionInput): Selection {
       heap.push(node);
     }
   };
-  const childOf = (child: PatchKey, parent: TraversalNode): TraversalNode | null => {
-    const node = nodeOf(t, child, parent);
-    return node.visible ? node : null;
-  };
+  const childOf = (child: PatchKey, parent: TraversalNode): TraversalNode | null =>
+    nodeOf(t, child, parent);
   for (const face of FACES) {
     const root = nodeOf(t, rootKey(face), null);
-    if (root.visible) {
+    if (root !== null) {
       tree.addRoot(root.key, root);
       offer(root);
     }
@@ -601,16 +677,33 @@ export function selectPatches(input: SelectionInput): Selection {
       offer(leaf);
     }
   }
+  const leaves = tree.leafValues();
   const patches = new Map<string, SelectedPatch>();
-  for (const node of tree.values()) {
-    patches.set(patchKeyString(node.key), {
+  for (const node of leaves) {
+    node.memo.keyString ??= patchKeyString(node.key);
+    patches.set(node.memo.keyString, {
       key: node.key,
       bounds: node.bounds,
       forced: node.forced && node.key.level === planet.finestLevel,
       seen: node.seenBy !== 0,
     });
   }
-  return { patches, demand: demandOf(t, tree), limited, limitExcess };
+  return {
+    patches,
+    demand: demandOf(t, leaves),
+    limited,
+    limitExcess,
+    hiddenBaked: hiddenBakedOf(t, tree),
+  };
+}
+
+/** The baked patches among the tree's bare keys ({@link Selection.hiddenBaked}). */
+function hiddenBakedOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchKey[] {
+  const ranges = t.heightRanges;
+  if (ranges === null) {
+    return [];
+  }
+  return tree.bareKeys().filter((key) => ranges.heightRangeM(key) !== undefined);
 }
 
 /**
@@ -620,24 +713,18 @@ export function selectPatches(input: SelectionInput): Selection {
  * place, its parent; a forced patch is requested whatever its ancestors, and outranks everything.
  * Ordered forced first, then by priority, ties by `patchKeyString`.
  */
-function demandOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchRequest[] {
+function demandOf(t: Traversal, leaves: ReadonlyArray<TraversalNode>): PatchRequest[] {
   const requests = new Map<TraversalNode, PatchRequest>();
-  for (const leaf of tree.values()) {
+  for (const leaf of leaves) {
     if (leaf.resident) {
       continue;
     }
     const forced = leaf.forced && leaf.key.level === t.planet.finestLevel;
     let target: TraversalNode = leaf;
     if (!forced) {
-      // Up to the shallowest unbaked ancestor, by number; an ancestor already requested ends it.
-      for (let node = leaf.parent; node !== null; node = node.parent) {
-        if (node.resident) {
-          break;
-        }
+      // Up to the shallowest unbaked ancestor, by pointer: the top of the leaf's unbaked chain.
+      for (let node = leaf.parent; node !== null && !node.resident; node = node.parent) {
         target = node;
-        if (requests.has(node)) {
-          break;
-        }
       }
     }
     if (requests.has(target)) {
@@ -655,38 +742,47 @@ function demandOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchRequest
   return [...requests.values()].toSorted(compareRequests);
 }
 
-/** The patches of a key's level sharing an edge or a corner with it. */
-function neighbours(key: PatchKey): PatchKey[] {
-  const last = 2 ** key.level - 1;
-  if (key.i > 0 && key.j > 0 && key.i < last && key.j < last) {
-    // Away from the face's edges every neighbour is on the same face: no fold to compute.
-    const { face, level, i, j } = key;
-    return [
-      { face, level, i: i - 1, j },
-      { face, level, i: i + 1, j },
-      { face, level, i, j: j - 1 },
-      { face, level, i, j: j + 1 },
-      { face, level, i: i - 1, j: j - 1 },
-      { face, level, i: i + 1, j: j - 1 },
-      { face, level, i: i + 1, j: j + 1 },
-      { face, level, i: i - 1, j: j + 1 },
-    ];
-  }
-  const around = EDGES.map((e) => edgeNeighbour(key, e));
-  for (const corner of cornerNeighbours(key)) {
-    if (corner !== null) {
-      around.push(corner);
-    }
-  }
-  return around;
-}
+/** The steps (di, dj) to a cell's eight neighbours, in the order the balance tries them. */
+const NEIGHBOUR_DI: ReadonlyArray<number> = [-1, 1, 0, 0, -1, 1, 1, -1];
+const NEIGHBOUR_DJ: ReadonlyArray<number> = [0, 0, -1, 1, -1, -1, 1, 1];
 
 /** A node of {@link PatchLeafSet}'s trees: a leaf, or split into the children kept. */
 interface TreeNode<T> {
   readonly key: PatchKey;
   readonly value: T;
-  /** The four children in `childKeys`' order, `null` where left out; `null` for a leaf. */
-  children: (TreeNode<T> | null)[] | null;
+  /** The node it was split from, `null` for a root. */
+  readonly parent: TreeNode<T> | null;
+  /** Whether it is split; a leaf has no children. */
+  split: boolean;
+  /** Its children in `childKeys`' order, `null` where left out and in a leaf. */
+  child0: TreeNode<T> | null;
+  child1: TreeNode<T> | null;
+  child2: TreeNode<T> | null;
+  child3: TreeNode<T> | null;
+}
+
+function treeNode<T>(key: PatchKey, value: T, parent: TreeNode<T> | null): TreeNode<T> {
+  return {
+    key,
+    value,
+    parent,
+    split: false,
+    child0: null,
+    child1: null,
+    child2: null,
+    child3: null,
+  };
+}
+
+/** Child `n` of `node`, in `childKeys`' order: n = Δi + 2 Δj. */
+function childAt<T>(node: TreeNode<T>, n: number): TreeNode<T> | null {
+  if (n === 0) {
+    return node.child0;
+  }
+  if (n === 1) {
+    return node.child1;
+  }
+  return n === 2 ? node.child2 : node.child3;
 }
 
 /**
@@ -694,21 +790,24 @@ interface TreeNode<T> {
  * restricted quadtree as it is split, and able to undo a split and the balance it brought.
  *
  * @remarks
- * Held as trees of nodes from the six roots, with every node also in a map per level by
- * {@link patchKeyIndex}, so that finding the leaf over a neighbour's cell is usually one lookup at
- * the parent's level, with no key or string built. The leaves come out depth first from
- * face 0, in `childKeys`' order, which is deterministic. Exported for its tests.
+ * Held as trees of nodes from the six roots, each with its parent and its four children, so that
+ * the leaf over a neighbour's cell is found by walking up the leaf's own ancestors to the first
+ * holding the cell and down from there, a step or two, with no key, string or map lookup, and a
+ * split allocates only its children (R05.T7 perf (c)). The leaves come out depth first from face 0,
+ * in `childKeys`' order, which is deterministic. Exported for its tests.
  */
 export class PatchLeafSet<T> {
   private readonly roots: (TreeNode<T> | null)[] = [null, null, null, null, null, null];
-  /** Every node, leaf or split, per level by {@link patchKeyIndex}: one lookup finds a cell's node. */
-  private readonly byLevel: Map<number, TreeNode<T>>[] = Array.from(
-    { length: MAX_LEVEL + 1 },
-    () => new Map<number, TreeNode<T>>(),
-  );
-  private journal: TreeNode<T>[] | null = null;
+  /** The splits since {@link begin}, in order, while recording. */
+  private readonly journal: TreeNode<T>[] = [];
+  private recording = false;
   private count = 0;
   private readonly counts: (value: T) => boolean;
+  /** {@link splitBalanced}'s scratch: the new leaves to check, and every node it added. */
+  private readonly work: TreeNode<T>[] = [];
+  private readonly added: TreeNode<T>[] = [];
+  /** The neighbour cell {@link stepCellInto} writes. */
+  private readonly cell: CellOut = { face: 0, i: 0, j: 0 };
 
   /**
    * @param counts - Whether a leaf counts towards {@link PatchLeafSet.size}: every leaf by default;
@@ -732,9 +831,7 @@ export class PatchLeafSet<T> {
     if (key.level !== 0 || this.roots[key.face] !== null) {
       throw new Error(`patch ${patchKeyString(key)} is not a root to add`);
     }
-    const node: TreeNode<T> = { key, value, children: null };
-    this.roots[key.face] = node;
-    this.byLevel[0]?.set(patchKeyIndex(key), node);
+    this.roots[key.face] = treeNode(key, value, null);
     if (this.counts(value)) {
       this.count += 1;
     }
@@ -742,17 +839,31 @@ export class PatchLeafSet<T> {
 
   /** The node at `key`, or `null` where the trees do not reach it. */
   private find(key: PatchKey): TreeNode<T> | null {
-    return this.byLevel[key.level]?.get(patchKeyIndex(key)) ?? null;
+    let node = this.roots[key.face] ?? null;
+    while (node !== null && node.key.level < key.level) {
+      if (!node.split) {
+        return null;
+      }
+      const shift = key.level - node.key.level - 1;
+      node = childAt(node, ((key.i >> shift) & 1) | (((key.j >> shift) & 1) << 1));
+    }
+    return node;
   }
 
   /** Whether `key` is a leaf. */
   isLeaf(key: PatchKey): boolean {
     const node = this.find(key);
-    return node !== null && node.children === null;
+    return node !== null && !node.split;
   }
 
   /** The leaves' values, depth first from face 0. */
   *values(): IterableIterator<T> {
+    yield* this.leafValues();
+  }
+
+  /** The leaves' values, depth first from face 0, as an array. */
+  leafValues(): T[] {
+    const leaves: T[] = [];
     const stack: TreeNode<T>[] = [];
     for (let face = 5; face >= 0; face -= 1) {
       const root = this.roots[face];
@@ -761,77 +872,155 @@ export class PatchLeafSet<T> {
       }
     }
     for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-      if (node.children === null) {
-        yield node.value;
+      if (!node.split) {
+        leaves.push(node.value);
         continue;
       }
       for (let n = 3; n >= 0; n -= 1) {
-        const child = node.children[n];
-        if (child !== null && child !== undefined) {
+        const child = childAt(node, n);
+        if (child !== null) {
           stack.push(child);
         }
       }
     }
+    return leaves;
+  }
+
+  /**
+   * The keys the trees reach that hold no leaf, depth first from face 0: each child a split left
+   * out, and each split node with no leaf beneath it, after its children.
+   */
+  bareKeys(): PatchKey[] {
+    const bare: PatchKey[] = [];
+    for (const root of this.roots) {
+      if (root !== null) {
+        this.collectBare(root, bare);
+      }
+    }
+    return bare;
+  }
+
+  /** Adds the bare keys at and under `node` to `bare`; returns whether a leaf lies at or under it. */
+  private collectBare(node: TreeNode<T>, bare: PatchKey[]): boolean {
+    if (!node.split) {
+      return true;
+    }
+    let keys: readonly PatchKey[] | null = null;
+    let leaf = false;
+    for (let n = 0; n < 4; n += 1) {
+      const child = childAt(node, n);
+      if (child === null) {
+        keys ??= childKeys(node.key);
+        const key = keys[n];
+        if (key !== undefined) {
+          bare.push(key);
+        }
+      } else if (this.collectBare(child, bare)) {
+        leaf = true;
+      }
+    }
+    if (!leaf) {
+      bare.push(node.key);
+    }
+    return leaf;
   }
 
   /** Starts recording splits, so that {@link rollback} can undo them. */
   begin(): void {
-    this.journal = [];
+    if (this.journal.length > 0) {
+      this.journal.length = 0;
+    }
+    this.recording = true;
   }
 
   /** Keeps the splits since {@link begin}. */
   commit(): void {
-    this.journal = null;
+    if (this.journal.length > 0) {
+      this.journal.length = 0;
+    }
+    this.recording = false;
   }
 
   /** Undoes every split since {@link begin}, latest first. */
   rollback(): void {
-    const journal = this.journal ?? [];
+    const journal = this.journal;
     for (let n = journal.length - 1; n >= 0; n -= 1) {
       const node = journal[n];
-      if (node === undefined || node.children === null) {
+      if (node === undefined || !node.split) {
         continue;
       }
       // Undone latest first, so the children are leaves again here.
-      for (const child of node.children) {
-        if (child !== null) {
-          this.byLevel[child.key.level]?.delete(patchKeyIndex(child.key));
-          if (this.counts(child.value)) {
-            this.count -= 1;
-          }
+      for (let c = 0; c < 4; c += 1) {
+        const child = childAt(node, c);
+        if (child !== null && this.counts(child.value)) {
+          this.count -= 1;
         }
       }
-      node.children = null;
+      node.split = false;
+      node.child0 = null;
+      node.child1 = null;
+      node.child2 = null;
+      node.child3 = null;
       if (this.counts(node.value)) {
         this.count += 1;
       }
     }
-    this.journal = null;
+    this.commit();
   }
 
   private split(node: TreeNode<T>, makeChild: (child: PatchKey, parent: T) => T | null): void {
-    if (node.children !== null) {
+    if (node.split) {
       return;
+    }
+    const { face, level, i, j } = node.key;
+    if (level >= MAX_LEVEL) {
+      throw new Error(
+        `patch ${patchKeyString(node.key)} is at the deepest level and has no children`,
+      );
     }
     if (this.counts(node.value)) {
       this.count -= 1;
     }
-    const children: (TreeNode<T> | null)[] = [null, null, null, null];
-    const keys = childKeys(node.key);
+    // `childKeys`' keys, made one at a time.
+    const below = level + 1;
+    node.child0 = this.child(node, { face, level: below, i: 2 * i, j: 2 * j }, makeChild);
+    node.child1 = this.child(node, { face, level: below, i: 2 * i + 1, j: 2 * j }, makeChild);
+    node.child2 = this.child(node, { face, level: below, i: 2 * i, j: 2 * j + 1 }, makeChild);
+    node.child3 = this.child(node, { face, level: below, i: 2 * i + 1, j: 2 * j + 1 }, makeChild);
+    node.split = true;
+    if (this.recording) {
+      this.journal.push(node);
+    }
+  }
+
+  private child(
+    parent: TreeNode<T>,
+    key: PatchKey,
+    makeChild: (child: PatchKey, parent: T) => T | null,
+  ): TreeNode<T> | null {
+    const value = makeChild(key, parent.value);
+    if (value === null) {
+      return null;
+    }
+    if (this.counts(value)) {
+      this.count += 1;
+    }
+    return treeNode(key, value, parent);
+  }
+
+  /** Splits `node` and queues its children, as new leaves to check and as nodes added. */
+  private splitAndQueue(
+    node: TreeNode<T>,
+    makeChild: (child: PatchKey, parent: T) => T | null,
+  ): void {
+    this.split(node, makeChild);
     for (let n = 0; n < 4; n += 1) {
-      const child = keys[n];
-      const value = child === undefined ? null : makeChild(child, node.value);
-      if (child !== undefined && value !== null) {
-        const made: TreeNode<T> = { key: child, value, children: null };
-        children[n] = made;
-        this.byLevel[child.level]?.set(patchKeyIndex(child), made);
-        if (this.counts(value)) {
-          this.count += 1;
-        }
+      const child = childAt(node, n);
+      if (child !== null) {
+        this.added.push(child);
+        this.work.push(child);
       }
     }
-    node.children = children;
-    this.journal?.push(node);
   }
 
   /**
@@ -840,46 +1029,107 @@ export class PatchLeafSet<T> {
    * until the cut is a restricted quadtree again. Returns the leaves added.
    *
    * @param makeChild - The value of a child of the patch whose value is `parent`, or `null` to
-   *   leave it out (a patch no view sees).
+   *   leave it out (a patch no view sees). It must not change this set.
    */
   splitBalanced(key: PatchKey, makeChild: (child: PatchKey, parent: T) => T | null): T[] {
     const first = this.find(key);
-    if (first === null || first.children !== null) {
+    if (first === null || first.split) {
       return [];
     }
-    const work: TreeNode<T>[] = [];
-    const added: TreeNode<T>[] = [];
-    const splitAndQueue = (node: TreeNode<T>): void => {
-      this.split(node, makeChild);
-      for (const child of node.children ?? []) {
-        if (child !== null) {
-          added.push(child);
-          work.push(child);
-        }
-      }
-    };
-    splitAndQueue(first);
+    const work = this.work;
+    const added = this.added;
+    this.splitAndQueue(first, makeChild);
     for (let leaf = work.pop(); leaf !== undefined; leaf = work.pop()) {
-      if (leaf.children !== null) {
+      if (leaf.split) {
         continue;
       }
-      for (const n of neighbours(leaf.key)) {
-        const coarse = this.coarserLeafNode(n);
-        if (coarse !== null && coarse.key.level < leaf.key.level - 1) {
-          splitAndQueue(coarse);
-          // The split may still leave a leaf too coarse beside this one: look again.
-          work.push(leaf);
-          break;
-        }
+      const coarse = this.tooCoarseBeside(leaf);
+      if (coarse !== null) {
+        this.splitAndQueue(coarse, makeChild);
+        // The split may still leave a leaf too coarse beside this one: look again.
+        work.push(leaf);
       }
     }
     const leaves: T[] = [];
     for (const node of added) {
-      if (node.children === null) {
+      if (!node.split) {
         leaves.push(node.value);
       }
     }
+    if (added.length > 0) {
+      added.length = 0;
+    }
     return leaves;
+  }
+
+  /**
+   * The first leaf, over `leaf`'s edge and then corner neighbours in turn, that is two or more
+   * levels coarser than `leaf`, or `null` where none is.
+   *
+   * @remarks
+   * The leaf over a neighbour's cell at the parent's level decides it, and nothing is split during
+   * the scan, so a neighbour sharing that cell with an earlier one answers as that one did. Away
+   * from the face's edges the eight neighbours fall in the parent's own cell (which is split, so no
+   * leaf there is coarser) and three others, met first in the order (Δi, 0), (0, Δj), (Δi, Δj) for
+   * the leaf's outward steps Δi and Δj; those three alone are tried, in that order, and the answer
+   * is the eight-neighbour scan's.
+   */
+  private tooCoarseBeside(leaf: TreeNode<T>): TreeNode<T> | null {
+    const key = leaf.key;
+    const level = key.level;
+    if (level < 2) {
+      return null;
+    }
+    const last = 2 ** level - 1;
+    if (key.i > 0 && key.j > 0 && key.i < last && key.j < last) {
+      // The outward steps: towards i − 1 from an even column, i + 1 from an odd one, and so for j.
+      const di = (key.i & 1) === 0 ? -1 : 1;
+      const dj = (key.j & 1) === 0 ? -1 : 1;
+      return (
+        this.tooCoarseAt(leaf, key.face, key.i + di, key.j) ??
+        this.tooCoarseAt(leaf, key.face, key.i, key.j + dj) ??
+        this.tooCoarseAt(leaf, key.face, key.i + di, key.j + dj)
+      );
+    }
+    const cell = this.cell;
+    for (let n = 0; n < 8; n += 1) {
+      if (stepCellInto(cell, key, NEIGHBOUR_DI[n] ?? 0, NEIGHBOUR_DJ[n] ?? 0)) {
+        const coarse = this.tooCoarseAt(leaf, cell.face, cell.i, cell.j);
+        if (coarse !== null) {
+          return coarse;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The leaf over cell (`i`, `j`) of `face` at `leaf`'s level, `leaf`'s neighbour, where it is two
+   * or more levels coarser than `leaf`; otherwise `null`.
+   *
+   * @remarks
+   * Such a leaf holds the cell's grandparent cell, two levels up, so it is the leaf found going
+   * down to that cell: from the first of `leaf`'s ancestors holding it (on another face, that
+   * face's root). Where that ancestor is `leaf`'s own grandparent, which is split, there is none.
+   */
+  private tooCoarseAt(leaf: TreeNode<T>, face: Face, i: number, j: number): TreeNode<T> | null {
+    const level = leaf.key.level - 2;
+    const gi = i >> 2;
+    const gj = j >> 2;
+    let from: TreeNode<T> | null = null;
+    if (face === leaf.key.face) {
+      for (let node = leaf.parent?.parent ?? null; node !== null; node = node.parent) {
+        const shift = level - node.key.level;
+        if (node.key.i === gi >> shift && node.key.j === gj >> shift) {
+          if (shift === 0) {
+            return null;
+          }
+          from = node;
+          break;
+        }
+      }
+    }
+    return this.leafDown(from ?? this.roots[face] ?? null, level, gi, gj);
   }
 
   /**
@@ -887,18 +1137,32 @@ export class PatchLeafSet<T> {
    * the area is split further or not selected.
    */
   coarserLeaf(key: PatchKey): PatchKey | null {
-    return this.coarserLeafNode(key)?.key ?? null;
+    if (key.level === 0) {
+      return null;
+    }
+    const node = this.leafDown(this.roots[key.face] ?? null, key.level - 1, key.i >> 1, key.j >> 1);
+    return node?.key ?? null;
   }
 
-  private coarserLeafNode(key: PatchKey): TreeNode<T> | null {
-    // Up from the parent's level: usually the first lookup finds a node, and a split one or a leaf
-    // one level up is no violation; only a gap walks further.
-    for (let level = key.level - 1; level >= 0; level -= 1) {
-      const node = this.byLevel[level]?.get(ancestorIndex(key, level));
-      if (node !== undefined) {
-        return node.children === null ? node : null;
+  /**
+   * From `node`, which holds cell (`i`, `j`) of `level` or is `null`, down to the deepest node
+   * holding the cell, at `level` at most: that node if it is a leaf, `null` if it is split (the
+   * cell is split further, or its part was left out) or there is none.
+   */
+  private leafDown(
+    node: TreeNode<T> | null,
+    level: number,
+    i: number,
+    j: number,
+  ): TreeNode<T> | null {
+    let at = node;
+    while (at !== null && at.key.level < level) {
+      if (!at.split) {
+        return at;
       }
+      const shift = level - at.key.level - 1;
+      at = childAt(at, ((i >> shift) & 1) | (((j >> shift) & 1) << 1));
     }
-    return null;
+    return at === null || at.split ? null : at;
   }
 }
