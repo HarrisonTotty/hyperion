@@ -59,6 +59,12 @@ fn read(capture: &Path) -> anyhow::Result<Capture> {
         read.surfaces().len(),
         read.skipped().len()
     );
+    let setup = read.span_start().min(read.calls().len());
+    println!(
+        "the replay makes {} of the {setup} calls before the span, leaving out the views, bind \
+         groups and pipelines' bind-group layouts that nothing it replays uses",
+        read.setup_calls().len()
+    );
     print!("{}", validate_capture(&read).to_text());
     Ok(read)
 }

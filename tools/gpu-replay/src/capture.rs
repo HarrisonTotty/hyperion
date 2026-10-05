@@ -6,9 +6,10 @@
 //! for bytes, `{"$undefined": true}` for an absent argument) and the ID of what it returned. The
 //! log needs no schema per call: a replayer maps each method to its own API.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -21,6 +22,10 @@ pub const CAPTURE_VERSION: u32 = 1;
 pub const CAPTURE_JSON: &str = "capture.json";
 /// The blobs' file name in a capture's directory.
 pub const CAPTURE_DATA: &str = "capture.bin";
+/// The methods whose results a replay makes before the span only when something it replays
+/// uses them ([`Capture::setup_calls`]): what the engine makes many of and drops.
+pub const DROPPED_BEFORE_THE_SPAN: [&str; 3] =
+    ["createView", "createBindGroup", "getBindGroupLayout"];
 /// The device's ID in every capture.
 pub const DEVICE_ID: u64 = 0;
 /// The queue's ID in every capture.
@@ -109,6 +114,37 @@ pub struct Call {
     pub result: Option<u64>,
 }
 
+impl Call {
+    /// Pushes the IDs of the objects the call names: its target and every `$ref` in its
+    /// arguments.
+    fn named_objects(&self, out: &mut Vec<u64>) {
+        out.push(self.target);
+        for arg in &self.args {
+            push_refs(arg, out);
+        }
+    }
+}
+
+/// Pushes the ID of every `{"$ref": id}` in `value`.
+fn push_refs(value: &Value, out: &mut Vec<u64>) {
+    match value {
+        Value::Object(map) => {
+            if let Some(id) = map.get("$ref").and_then(Value::as_u64) {
+                out.push(id);
+            }
+            for item in map.values() {
+                push_refs(item, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                push_refs(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CaptureFile {
@@ -148,6 +184,8 @@ pub struct ShaderModule<'a> {
 pub struct Capture {
     file: CaptureFile,
     data: Vec<u8>,
+    /// [`Capture::setup_calls`], found once.
+    setup: OnceLock<Vec<usize>>,
 }
 
 impl Capture {
@@ -197,7 +235,11 @@ impl Capture {
                 }));
             }
         }
-        Ok(Self { file, data })
+        Ok(Self {
+            file,
+            data,
+            setup: OnceLock::new(),
+        })
     }
 
     /// Every call, in order.
@@ -273,6 +315,51 @@ impl Capture {
         self.file.blobs.len()
     }
 
+    /// The indices of the calls before the span that a replay makes: every one, less the
+    /// views, bind groups and pipelines' bind-group layouts ([`DROPPED_BEFORE_THE_SPAN`]) that
+    /// neither the span nor anything else kept uses, directly or through what it was made from.
+    ///
+    /// The log keeps every creation before the span, but the engine drops most of the views and
+    /// bind groups it makes (each frame's), which the browser frees. The first capture of the
+    /// descent, 1,085 s in, held 781,049 views, 180,260 bind groups and 180,239 read-back layouts
+    /// made before its span, of which it kept 303 calls in all; a replay that made them all could
+    /// submit nothing (R05.T15, 2026-10-04).
+    #[must_use]
+    pub fn setup_calls(&self) -> &[usize] {
+        self.setup.get_or_init(|| self.find_setup_calls())
+    }
+
+    fn find_setup_calls(&self) -> Vec<usize> {
+        let calls = &self.file.calls;
+        let (setup, span) = calls.split_at(self.file.span_start.min(calls.len()));
+        let droppable = |call: &Call| DROPPED_BEFORE_THE_SPAN.contains(&call.op.as_str());
+        let mut made: HashMap<u64, &Call> = HashMap::with_capacity(setup.len());
+        made.extend(setup.iter().filter_map(|call| Some((call.result?, call))));
+        let mut pending = Vec::new();
+        for call in span
+            .iter()
+            .chain(setup.iter().filter(|call| !droppable(call)))
+        {
+            call.named_objects(&mut pending);
+        }
+        let mut needed = HashSet::with_capacity(pending.len());
+        while let Some(id) = pending.pop() {
+            if needed.insert(id)
+                && let Some(call) = made.get(&id)
+            {
+                call.named_objects(&mut pending);
+            }
+        }
+        setup
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| {
+                !droppable(call) || call.result.is_some_and(|id| needed.contains(&id))
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
     /// Every WGSL module the capture made, in order.
     pub fn shader_modules(&self) -> impl Iterator<Item = ShaderModule<'_>> {
         self.file.calls.iter().filter_map(|call| {
@@ -330,6 +417,60 @@ mod tests {
                 length: 5
             })
         ));
+    }
+
+    /// A capture whose span starts at call `span_start` of `calls`, with one four-byte blob.
+    fn capture_of(calls: &str, span_start: usize) -> Capture {
+        let text = format!(
+            r#"{{"schema":"{CAPTURE_SCHEMA}","version":1,"adapter":{{}},"features":[],"limits":{{}},
+            "surfaces":[],"skipped":[],"spanStart":{span_start},"frames":[{span_start}],
+            "blobs":[{{"offset":0,"length":4}}],"calls":{calls}}}"#
+        );
+        Capture::parse(&text, vec![0; 4]).expect("a valid capture")
+    }
+
+    #[test]
+    fn the_setup_drops_the_views_and_bind_groups_nothing_uses() {
+        // Before the span: two buffers, a texture with three views, a pipeline whose layout is
+        // read back twice, a bind group over each of the first two views, writes and a
+        // destruction. The span uses the first bind group; a kept pipeline layout uses the
+        // first read-back layout and the third view is used by nothing.
+        let calls = r#"[
+            {"target":0,"op":"createBuffer","args":[{"size":16,"usage":72}],"result":3},
+            {"target":0,"op":"createBuffer","args":[{"size":16,"usage":72}],"result":4},
+            {"target":0,"op":"createTexture","args":[{"size":[4,4],"format":"rgba8unorm","usage":4}],"result":5},
+            {"target":5,"op":"createView","args":[{"label":"used"}],"result":6},
+            {"target":5,"op":"createView","args":[{"label":"dropped with its bind group"}],"result":7},
+            {"target":5,"op":"createView","args":[{"label":"never used"}],"result":15},
+            {"target":0,"op":"createComputePipeline","args":[{"layout":"auto","compute":{"module":{"$ref":2}}}],"result":12},
+            {"target":12,"op":"getBindGroupLayout","args":[0],"result":13},
+            {"target":12,"op":"getBindGroupLayout","args":[0],"result":14},
+            {"target":0,"op":"createPipelineLayout","args":[{"bindGroupLayouts":[{"$ref":13}]}],"result":16},
+            {"target":0,"op":"createBindGroup","args":[{"layout":{"$ref":14},"entries":[{"binding":0,"resource":{"$ref":6}},{"binding":1,"resource":{"buffer":{"$ref":3}}}]}],"result":8},
+            {"target":0,"op":"createBindGroup","args":[{"layout":{"$ref":14},"entries":[{"binding":0,"resource":{"$ref":7}},{"binding":1,"resource":{"buffer":{"$ref":4}}}]}],"result":9},
+            {"target":1,"op":"writeBuffer","args":[{"$ref":3},0,{"$blob":0,"$type":"Uint8Array"},0,4]},
+            {"target":1,"op":"writeBuffer","args":[{"$ref":4},0,{"$blob":0,"$type":"Uint8Array"},0,4]},
+            {"target":4,"op":"destroy","args":[]},
+            {"target":0,"op":"createCommandEncoder","args":[{}],"result":10},
+            {"target":10,"op":"beginComputePass","args":[{}],"result":11},
+            {"target":11,"op":"setBindGroup","args":[0,{"$ref":8}]}
+        ]"#;
+        let capture = capture_of(calls, 15);
+        assert_eq!(
+            capture.setup_calls(),
+            &[0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13, 14]
+        );
+    }
+
+    #[test]
+    fn calls_other_than_views_and_bind_groups_are_kept_when_unused() {
+        let calls = r#"[
+            {"target":0,"op":"createBuffer","args":[{"size":16,"usage":72}],"result":2},
+            {"target":0,"op":"createShaderModule","args":[{"code":"unused"}],"result":3},
+            {"target":1,"op":"writeBuffer","args":[{"$ref":2},0,{"$blob":0,"$type":"Uint8Array"},0,4]},
+            {"target":1,"op":"submit","args":[[]]}
+        ]"#;
+        assert_eq!(capture_of(calls, 3).setup_calls(), &[0, 1, 2]);
     }
 
     #[test]

@@ -3529,9 +3529,101 @@ medium, sizes, figure)`.
     `exclude = ["tools/*"]`, so neither `just lint` nor `just ci` checks the tool: its fmt, clippy
     (`-D warnings`) and tests are run by hand with that manifest. Canvas textures of past frames
     stay in the replay's object table for the run (a span is short).
-  - **Pending:** a capture of the real descent (T13.c's `--capture`), its offscreen replay on the
-    RTX 3080, and the presented replay, by hand for the owner:
-    `just replay <capture-dir> --present` (a visible window on `:0`).
+  - The capture of the real descent and its offscreen replay on the RTX 3080 are done (the record
+    below). **Pending:** the presented replay, by hand for the owner.
+- **T15's first capture of the descent and its offscreen replay** (2026-10-04 and 2026-10-05,
+  lane D, at `rendering-and-planets` c629b01, with the replayer's fix 7fd98eb).
+  - _The capture run._
+    - It was `descentSpike.sh --setting low --hidden --capture <dir>`, with
+      `HYPERION_SPIKE_PORT=7893`, under the heavy-test lock. It followed a `--smoke --capture`
+      check: a span from 5 s on the high setting, which replays too.
+    - No other spike or replay run overlapped it. The integration `just ci` in the primary
+      checkout did, with its `gpu-replay-check` from 21:19 to 21:23 CDT. The load average was 21 at
+      the start and rose to 165 at 21:27, in the descent arc. It had fallen to 5 by the span.
+      The timings are provisional.
+    - The run exited 0 after 1,280 s. The span is T13.c's: 120 frames from 1,085 s,
+      5 s into the low fast pass.
+    - `capture.json` is 172,679,574 B and `capture.bin` is 84,034,064 B. Neither is committed.
+      Both stay in the lane D worktree's `target/laneD/capture` for the presented replay.
+    - The capture holds 1,169,018 calls, 1,141,826 of them before the span. Its three canvases
+      are all rgba8unorm: one of 806 × 431 and two of 80 × 140. The snapshot skipped 38
+      resources: 34 pass-time read-back buffers and four depth textures. It lists no problems,
+      and naga accepts all 19 of its modules.
+  - _The run's own results:_ `2026-10-05-effect-low.json` (109,110 B once formatted) and its
+    `.md`, under the writer's UTC date. They are T14.c-style, but the capture's costs are in them,
+    so they are not T14.c's record.
+    - `validateResults` passes. Every figure is present or null with a reason:
+      - "no window shown" (nine);
+      - "the trace has no timed event" (five);
+      - NVIDIA's absent DRM fdinfo (three).
+    - The headline figures:
+      - terrain GPU p95 0.71 ms;
+      - atmosphere 3.57 ms (limit 4 ms);
+      - GPU memory 0.254 GB, from `nvidia-smi` less its baseline;
+      - rAF p50/p95/p99 16.70/16.80/50.00 ms;
+      - uploads 3.24 GB;
+      - no late pipelines.
+    - The trace came back empty again. The tracing service peaked at 1.76 GB (the tracing
+      finding above).
+    - What the capture itself costs:
+      - The low fast pass's longest frame is 1,949.9 ms: the span's snapshot and its write.
+      - The renderer's private memory rose about 1.7 MB a second, to 3.33 GB, against T14.c's
+        1.1. The trace's CPU profiler accounts for about 1.25 MB a second (the renderer-memory
+        finding above). The shim's log, which keeps every call from the start, is the likely
+        rest.
+    - The descent arc's longest frame is 5,883 ms, during the load peak. Its cause is not
+      separated.
+  - _Two replayer faults the capture found, fixed in 7fd98eb._
+    - _Freed objects._ The replay made every call before the span. Those include 781,049 views,
+      180,260 bind groups and 180,239 layouts read back from pipelines, which the engine had
+      dropped and the browser had freed. Every submit then failed ("submission index 15 … last
+      successful submission: 0").
+      - `Capture::setup_calls` now leaves out the views, bind groups and read-back layouts that
+        nothing replayed uses (`DROPPED_BEFORE_THE_SPAN`).
+      - It keeps 303 of the real capture's 1,141,826 calls.
+    - _The sRGB view._ The engine configures each canvas with its sRGB form as a view format
+      (`srgbViewFormat`), which the capture does not log. So the replay's offscreen canvases
+      refused the display pass's sRGB view:
+      - the smoke capture's replay had 1,071 validation errors;
+      - the `spike display` and `view:wireframe` submits failed every frame.
+
+      `canvas_view_formats` now gives that view format to the offscreen canvases, and to the
+      presented surface where the adapter has `SURFACE_VIEW_FORMATS`.
+
+    - _The fixture_ gained a view that nothing uses and a clear through the canvas's sRGB view.
+      Its GPU test fails without the view-format fix and passes with it.
+  - _The offscreen replay_, recorded as `2026-10-05-effect-low-replay.json` (8,822 B once
+    formatted).
+    - The command was `env -u DISPLAY -u WAYLAND_DISPLAY just replay target/laneD/capture`. It
+      ran under the heavy-test lock on the RTX 3080 (Vulkan), at a load average of 8.6. The GPU
+      was idle (P8, 210 MHz) before it.
+    - It reported no validation errors. Its two findings are features of the capture that the
+      replay does not map: `core-features-and-limits` and `float32-blendable`.
+    - `validateResults` passes. Every figure a native replay cannot have is null with its
+      reason: the trace, rAF, the main thread, the GPU process and memory.
+    - The figures:
+      - GPU-completion intervals p50/p95/p99/max 0.64/1.29/2.18/2.26 ms, over 118 intervals;
+      - terrain p95 0.085 ms;
+      - atmosphere 0.165 ms (the view's three canvases plus the composite);
+      - the pass sum's p95 0.271 ms;
+      - span uploads 8.06 MB;
+      - no untimed pass.
+    - _Not comparable with the client's figures yet._ The replay's pass times are a fraction of
+      the run's own (terrain 0.085 against 0.71 ms, atmosphere 0.165 against 3.57 ms). Three
+      causes are not separated:
+      - the client's percentiles cover the whole descent, the replay's only the span;
+      - the replay's 120 frames run back to back from an idle GPU, about 0.08 s of GPU work in
+        all, while the client's frames are paced by `requestAnimationFrame`;
+      - Dawn's robustness transforms (`--dawn-safety on`) and its barriers differ from wgpu's.
+
+      Matching the client's own timestamps over the same 120 frames would settle it. The
+      results file has no per-frame series for that.
+  - **Pending, by hand for the owner** (a visible window on `:0`): the presented replay, from
+    the primary checkout once this lane is merged:
+
+    ```sh
+    just replay /home/quantum/gh/hyperion/.claude/worktrees/agent-a41f8f84c6e445909/target/laneD/capture --present
+    ```
 - **Deviations in T9, as built (the annunciations, 2026-10-03).** `annunciation.ts` adds, beside
   `terrainAnnunciation`: `TerrainAnnunciation` (the two strings), `TerrainConditions` and
   `terrainConditions` (the frame's two conditions before the debounce), `coarserThan` (some
