@@ -10,13 +10,41 @@ import {
   recordProfile,
   SETTING_VIEWS,
 } from "./demandRecord";
+import { vec3 } from "../../geometry/vec3";
+import { selectionOf, UNIT_BOUNDS } from "../../test/terrainFixtures";
+import { IDENTITY_QUATERNION } from "../camera/quaternion";
+import type { PatchBounds } from "../terrain/bounds";
+import { DrawSetResolver, PatchCache } from "../terrain/cache";
 import { finestPatchSizeM } from "../terrain/grounded";
+import { childKeys, type PatchKey, patchKeyString, rootKey } from "../terrain/patchKey";
+import {
+  type Selection,
+  screenSpaceErrorPx,
+  selectionErrorM,
+  type ViewSelectionInput,
+} from "../terrain/select";
+import { type SlotLayout, slotLayout } from "../terrain/slotLayout";
+import { RESELECT_FRACTION } from "../terrain/terrainPass";
 import { SPIKE_CRAFT_RADIUS_M } from "./spikeScene";
-import { craftContacts, type FixedStepOptions, runFixedStep, segmentFigures } from "./fixedStep";
+import {
+  BAND_MARGIN,
+  coarseStandIns,
+  craftContacts,
+  effectiveTolerancePx,
+  type FixedStepFrame,
+  type FixedStepOptions,
+  runFixedStep,
+  segmentFigures,
+} from "./fixedStep";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 const PLANET = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
 const HIGH = SETTING_VIEWS[0];
+
+/** A cache layout of `slots` slots of 100 B each. */
+function tinyLayout(slots: number): SlotLayout {
+  return slotLayout([{ name: "heights", storage: "storage-buffer", bytes: 100 }], slots * 100);
+}
 
 /** A short orbit-coast run, cheap to select, with the level's own range for every bake. */
 function orbitRun(overrides: Partial<FixedStepOptions> = {}): ReturnType<typeof runFixedStep> {
@@ -105,6 +133,281 @@ describe("the fixed-step run", () => {
       measured.reduce((sum, f) => sum + f.demanded, 0) / (5 / 8),
       9,
     );
+  });
+});
+
+/** A measured frame of the orbit coast with the given budget figures. */
+function frameOf(overrides: Partial<FixedStepFrame>): FixedStepFrame {
+  return {
+    tS: 0,
+    warmup: false,
+    segment: "orbit coast",
+    patches: 10,
+    demanded: 0,
+    limited: false,
+    tauPrimePx: 1,
+    standingIn: 0,
+    missing: 0,
+    coarseStandIns: 0,
+    coarseReturns: 0,
+    coarseStandInRhoPx: 0,
+    coarseReturnRhoPx: 0,
+    forcedDemanded: 0,
+    selectMs: 0,
+    predictedPerS: 0,
+    heightAboveFloorM: 400_000,
+    ...overrides,
+  };
+}
+
+describe("the budget's figures (decision-r05-high-bound.md, F4)", () => {
+  it("takes τ′ as τ unlimited, and τ × max(1, limitExcess ÷ w) under the budget", () => {
+    expect(effectiveTolerancePx({ limitExcess: 0 }, { tauPx: 1, weight: 1 })).toBe(1);
+    expect(effectiveTolerancePx({ limitExcess: 2.5 }, { tauPx: 2, weight: 1 })).toBe(5);
+    // A secondary view's own excess is limitExcess ÷ w (R05.T7 as built).
+    expect(effectiveTolerancePx({ limitExcess: 0.9 }, { tauPx: 4, weight: 0.25 })).toBeCloseTo(
+      14.4,
+      12,
+    );
+    expect(effectiveTolerancePx({ limitExcess: 0.2 }, { tauPx: 4, weight: 0.25 })).toBe(4);
+  });
+
+  it("holds the bands' margin to the terrain pass's", () => {
+    expect(BAND_MARGIN).toBe(1 + RESELECT_FRACTION);
+  });
+
+  it("records τ′ above τ on the frames a binding budget limits, and τ on the others", () => {
+    const run = orbitRun({ maxPatches: 40, toS: 12, rateHz: 16 });
+    const limited = run.frames.filter((f) => f.limited);
+    expect(limited.length).toBeGreaterThan(0);
+    expect(limited.every((f) => f.tauPrimePx > 1)).toBe(true);
+    expect(run.frames.filter((f) => !f.limited).every((f) => f.tauPrimePx === 1)).toBe(true);
+    const unbudgeted = orbitRun({ maxPatches: undefined, toS: 12, rateHz: 16 });
+    expect(unbudgeted.frames.every((f) => !f.limited && f.tauPrimePx === 1)).toBe(true);
+  });
+
+  it("counts no stand-in on the first frame, whose unbaked roots have nothing to stand in", () => {
+    const [first] = orbitRun({ toS: 12, rateHz: 16 }).frames;
+    expect([first?.coarseStandIns, (first?.missing ?? 0) > 0]).toEqual([0, true]);
+  });
+
+  it("counts the roots standing in for their unbaked children on the second frame", () => {
+    const second = orbitRun({ toS: 12, rateHz: 16 }).frames[1];
+    expect(second?.coarseStandIns).toBeGreaterThan(0);
+    expect(second?.coarseStandInRhoPx).toBeGreaterThan(1);
+  });
+
+  it("counts no return while the cache holds everything it baked", () => {
+    const run = orbitRun({ toS: 12, rateHz: 16 });
+    expect(run.frames.every((f) => f.coarseReturns === 0 && f.coarseReturnRhoPx === 0)).toBe(true);
+  });
+
+  it("counts returns where a cache too small for the selection evicts coarse patches it needs", () => {
+    const run = orbitRun({ toS: 12, rateHz: 16, maxPatches: undefined, layout: tinyLayout(100) });
+    const returns = run.frames.reduce((sum, f) => sum + f.coarseReturns, 0);
+    const standIns = run.frames.reduce((sum, f) => sum + f.coarseStandIns, 0);
+    expect(returns).toBeGreaterThan(0);
+    expect(returns).toBeLessThanOrEqual(standIns);
+  });
+
+  it("bakes no forced patch in orbit, where the craft has no contact", () => {
+    expect(orbitRun({ toS: 12, rateHz: 16 }).frames.every((f) => f.forcedDemanded === 0)).toBe(
+      true,
+    );
+  });
+});
+
+/**
+ * A draw set over four faces: on face 0, a stands in for its four unbaked children, ab among them
+ * once evicted; on face 2, the root stands in for three unbaked children and covers the fourth,
+ * resident and evicted earlier; on face 3, a level-12 patch stands in for its child; on face 4, a
+ * level-13 patch for its child; face 1's root has no resident ancestor.
+ */
+function standInScene(): Parameters<typeof coarseStandIns> {
+  if (HIGH === undefined) {
+    throw new Error("no high setting");
+  }
+  const cache = new PatchCache(HIGH.layout);
+  const a = childKeys(rootKey(0))[0];
+  const faceTwo = childKeys(rootKey(2));
+  const twelve: PatchKey = { face: 3, level: 12, i: 0, j: 0 };
+  const thirteen: PatchKey = { face: 4, level: 13, i: 0, j: 0 };
+  for (const key of [rootKey(0), a, rootKey(2), faceTwo[0], twelve, thirteen]) {
+    cache.insert({
+      key,
+      generation: 0,
+      originM: vec3(0, 0, 0),
+      heightRangeM: [0, 0],
+      boundingRadiusM: 1,
+    });
+  }
+  const unitBoxes = selectionOf([
+    ...childKeys(a),
+    ...faceTwo,
+    rootKey(1),
+    { face: 3, level: 13, i: 0, j: 0 },
+    { face: 4, level: 14, i: 0, j: 0 },
+  ]);
+  // The resident patch the face-2 root covers lies nearest the camera.
+  const resident = patchKeyString(faceTwo[0]);
+  const selection: Selection = {
+    ...unitBoxes,
+    patches: new Map(
+      [...unitBoxes.patches].map(([keyString, patch]) => [
+        keyString,
+        keyString === resident ? { ...patch, bounds: NEAR_BOUNDS } : patch,
+      ]),
+    ),
+  };
+  const draw = new DrawSetResolver(cache).resolve(selection);
+  const evicted = new Set([childKeys(a)[1], faceTwo[0]].map(patchKeyString));
+  return [selection, draw, cache, evicted, PLANET, STAND_IN_VIEW];
+}
+
+/** A view 1 km above the fixture's unit box about the origin, so 999 m from such a patch's box. */
+const STAND_IN_VIEW: ViewSelectionInput = {
+  camera: { positionM: vec3(0, 0, 1_000), orientation: IDENTITY_QUATERNION },
+  fovXRad: Math.PI / 3,
+  viewport: { widthPx: 1_920, heightPx: 1_080 },
+  weight: 1,
+  tauPx: 1,
+};
+
+/** The fixture's unit box moved 900 m up, 99 m from {@link STAND_IN_VIEW}'s camera. */
+const NEAR_BOUNDS: PatchBounds = {
+  ...UNIT_BOUNDS,
+  centre: vec3(0, 0, 900),
+  box: { ...UNIT_BOUNDS.box, centre: vec3(0, 0, 900) },
+};
+
+/** The ρ a stand-in of `level` draws `distanceM` away, 999 m by default. */
+function standInRhoPx(level: number, distanceM = 999): number {
+  return screenSpaceErrorPx(selectionErrorM(PLANET, level), distanceM, STAND_IN_VIEW);
+}
+
+describe("the coarse stand-ins (decision-r05-high-bound.md, F4)", () => {
+  it("counts each drawn stand-in of level 12 or coarser, and none finer", () => {
+    expect(coarseStandIns(...standInScene()).count).toBe(3);
+  });
+
+  it("counts a stand-in for a return only where the covered patch is not resident", () => {
+    expect(coarseStandIns(...standInScene()).returns).toBe(1);
+  });
+
+  it("takes the largest ρ a stand-in draws over every patch it covers, a resident one included", () => {
+    // The root's error at the resident patch, 99 m away, the nearest it covers.
+    expect(coarseStandIns(...standInScene()).rhoPx).toBeCloseTo(standInRhoPx(0, 99), 9);
+  });
+
+  it("takes the returns' largest ρ from the stand-ins over them alone", () => {
+    expect(coarseStandIns(...standInScene()).returnRhoPx).toBeCloseTo(standInRhoPx(1), 9);
+  });
+});
+
+/** One segment's figures over `frames` at 8 Hz. */
+function figuresOf(frames: FixedStepFrame[]): ReturnType<typeof segmentFigures>[number] {
+  const [figures] = segmentFigures({ frames, hash: "", truncated: false }, 8);
+  if (figures === undefined) {
+    throw new Error("no measured frame");
+  }
+  return figures;
+}
+
+/**
+ * A warm-up frame limited at τ′ 5, then measured frames limited at 2.4 and 2, two unlimited (τ′ 1)
+ * and one limited at 1.05: steps 5 → 2.4 (from the warm-up, the largest), 2.4 → 2, 2 → 1 and
+ * 1 → 1.05, and none between the two unlimited frames.
+ */
+function limitedFrames(): FixedStepFrame[] {
+  return [
+    frameOf({ warmup: true, limited: true, tauPrimePx: 5 }),
+    frameOf({ limited: true, tauPrimePx: 2.4 }),
+    frameOf({ limited: true, tauPrimePx: 2 }),
+    frameOf({}),
+    frameOf({}),
+    frameOf({ limited: true, tauPrimePx: 1.05 }),
+  ];
+}
+
+/** Five frames, two drawing coarse stand-ins (one for a return) and baking forced patches. */
+function standInFrames(): FixedStepFrame[] {
+  return [
+    frameOf({}),
+    frameOf({ coarseStandIns: 1, coarseStandInRhoPx: 3.5, forcedDemanded: 2 }),
+    frameOf({}),
+    frameOf({
+      coarseStandIns: 2,
+      coarseReturns: 1,
+      coarseStandInRhoPx: 7,
+      coarseReturnRhoPx: 6,
+      forcedDemanded: 4,
+    }),
+    frameOf({}),
+  ];
+}
+
+describe("the budget's figures over a segment (decision-r05-high-bound.md, F4)", () => {
+  it("takes τ′'s percentiles over the limited frames alone", () => {
+    const figures = figuresOf(limitedFrames());
+    expect([figures.tauPrimePxP50, figures.tauPrimePxP95, figures.tauPrimePxMax]).toEqual([
+      2, 2.4, 2.4,
+    ]);
+  });
+
+  it("takes τ′'s steps where either side is limited, the warm-up's last frame included", () => {
+    const figures = figuresOf(limitedFrames());
+    // Steps of 2.6, 0.4, 1 and 0.05 px.
+    expect(figures.tauPrimeStepPxP95).toBeCloseTo(2.6, 12);
+    expect(figures.tauPrimeStepPxMax).toBeCloseTo(2.6, 12);
+  });
+
+  it("takes each step's ratio as the larger τ′ over the smaller, less 1", () => {
+    expect(figuresOf(limitedFrames()).tauPrimeStepRatioMax).toBeCloseTo(5 / 2.4 - 1, 12);
+  });
+
+  it("counts the steps beyond the bands' margin", () => {
+    // Factors 2.08, 1.2, 2 and 1.05 against 1.1.
+    expect(figuresOf(limitedFrames()).tauPrimeStepsOverMargin).toBeCloseTo(3 / 4, 12);
+  });
+
+  it("puts a step across a segment boundary in the later segment", () => {
+    const frames = [
+      frameOf({ limited: true, tauPrimePx: 3 }),
+      frameOf({ segment: "descent arc", limited: true, tauPrimePx: 2 }),
+    ];
+    const [coast, arc] = segmentFigures({ frames, hash: "", truncated: false }, 8);
+    expect([coast?.tauPrimeStepPxMax, arc?.tauPrimeStepPxMax]).toEqual([null, 1]);
+  });
+
+  it("leaves τ′ and its steps null where no frame is limited", () => {
+    const figures = figuresOf([frameOf({}), frameOf({})]);
+    expect([
+      figures.tauPrimePxP50,
+      figures.tauPrimePxMax,
+      figures.tauPrimeStepPxMax,
+      figures.tauPrimeStepsOverMargin,
+    ]).toEqual([null, null, null, null]);
+  });
+
+  it("leaves the stand-ins' largest ρ null where none is drawn", () => {
+    const figures = figuresOf([frameOf({}), frameOf({})]);
+    expect([figures.coarseStandInMaxRhoPx, figures.coarseReturnMaxRhoPx]).toEqual([null, null]);
+  });
+
+  it("takes the shares of frames drawing coarse stand-ins, and stand-ins for returns", () => {
+    const figures = figuresOf(standInFrames());
+    expect(figures.coarseStandInFraction).toBeCloseTo(2 / 5, 12);
+    expect(figures.coarseReturnFraction).toBeCloseTo(1 / 5, 12);
+  });
+
+  it("takes the largest ρ the coarse stand-ins draw, and those for returns", () => {
+    const figures = figuresOf(standInFrames());
+    expect([figures.coarseStandInMaxRhoPx, figures.coarseReturnMaxRhoPx]).toEqual([7, 6]);
+  });
+
+  it("takes the forced bakes a second over the segment's span", () => {
+    // Six forced bakes over five frames at 8 Hz.
+    expect(figuresOf(standInFrames()).forcedDemandPerS).toBeCloseTo(6 / (5 / 8), 12);
   });
 });
 

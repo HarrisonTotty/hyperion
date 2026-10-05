@@ -1,10 +1,17 @@
 # Descent demand record, 2026-10-04
 
+**Superseded** by [`2026-10-05-demand-hard.md`](2026-10-05-demand-hard.md) (record version 2,
+R05.T13.a's F4 of decision-r05-high-bound.md). This record is kept because the high-bound ruling
+was made on it. It was flown before the level orbit coast (af69a9e) and before the cache stopped
+evicting the baked patches selection hides (F3, cc96486):
+
+- every orbit-coast row is stale;
+- every descent-arc row is stale too, since the arc was flown up to 1.05 km lower near its start.
+
 Notes:
 
 - The four cells ran as four parallel processes (one core each, nice), each with its own selection-time cap (1.6 h) and wall-time cap (1.85 h, bakes included); a cell cut short says so.
 - Ridges on, high ran at 16 Hz, a sampling reduction: its demand a second compares with the others', its patch counts and selection times are per sampled frame.
-- The orbit coast still climbs about 18.37 m/s at seed 7 (the profile's re-fit before the descent arc's blend; an R05.T13.a fix is queued), so the coast's figures may shift slightly once it is fixed.
 
 Seed 7. Fixed-step runs of the scripted descent through `selectPatches` and a
 simulated cache (R05.T13.a): patches selected, measured demand (first-time-selected keys a
