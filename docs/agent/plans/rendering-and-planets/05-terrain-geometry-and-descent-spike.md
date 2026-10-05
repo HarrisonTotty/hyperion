@@ -2842,10 +2842,9 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     - _Findings._
       - The tracing service crashed writing the trace (the Risks bullet below).
       - The renderer's private memory grew roughly linearly, from 0.26 GB at 60 s to 1.57 GB at
-        the end (about 1.1 MB a second). The cause is not found. The renderer process includes
-        the height workers, and the measurement's own CPU-profiler category and raw per-frame
-        series are candidates. It needs a look before T16, whose UHD 620 shares the laptop's
-        system memory.
+        the end (about 1.1 MB a second). Found since (2026-10-04, the Risks bullet below on the
+        renderer's memory): about 1.25 MB/s of it is the trace's own CPU-profiler category, and
+        up to about 66 MB was the patch cache keeping each bake's arrays, now fixed.
       - `run.versions.app` recorded 44.4.3, Electron's own version, not the app's 0.1.0:
         `app.getVersion()` finds no `package.json` beside `out/main/index.js`. Fixed with
         schema version 2 (the deviation below).
@@ -2945,6 +2944,113 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
 
   - _Already fixed._ The results writer takes such an empty trace as none (T14.c's record
     above).
+  - _Measured since_ (2026-10-04, the renderer's memory finding below):
+    - The CPU profiler is about a fifth of the trace. With the profiler's category alone, the
+      tracing service grew about 0.27 MB/s; with the other six categories, about 1.1 MB/s.
+    - Without the profiler, two full hidden descents (G and H) still lost their traces. At about
+      1.35 GB, each tracing service took a SIGTRAP at the stop (pids 619777 and 662220,
+      `coredumpctl`). Dropping that category alone is no remedy.
+- **Finding: the renderer's memory growth is the trace's CPU profiler, and the cache kept each
+  bake's arrays** (2026-10-04, T14.c's hidden run; for T14's trace remedy and T16).
+  - _The question._ In T14.c's hidden run, the renderer's private memory grew about 1.1 MB/s, to
+    1.57 GB, while the GPU's stayed at 0.252 GB. The growth did not follow the bakes. It was
+    1.08 MB/s through the descent arc, at 0.84 bakes/s, and −0.39 MB/s in the low fast pass, at
+    41 bakes/s.
+  - _The probe._
+    - The runs were hidden low-setting runs, seed 7, on the RTX 3080, with no other spike run
+      on the GPU. Each was capped at 200–300 s from the descent's start, unless marked full.
+    - A temporary probe in the main process (not committed) sampled every 5 s:
+      - the renderer's anonymous memory (`RssAnon`, the figure behind
+        `getProcessMemoryInfo().private`);
+      - each isolate's JS heap and ArrayBuffer backing stores, over the DevTools protocol
+        (`Runtime.getHeapUsage`, for the page and each height worker);
+      - the renderer's `/proc/<pid>/smaps` at 60 s and at the end, summed by mapping name.
+    - Between runs, only the trace's categories changed, and in F the worker count.
+  - _Rates from 60 s to the end, MB/s._ The isolates are the page and its height workers. "JS
+    heaps" and "ArrayBuffers" are summed over the isolates.
+
+    | Run | Trace                                         | Isolates |  Renderer | JS heaps | ArrayBuffers |
+    | --- | --------------------------------------------- | -------: | --------: | -------: | -----------: |
+    | A   | Design note 18's seven categories, as T14.c   |        4 |      1.30 |    0.016 |        0.022 |
+    | B   | none                                          |        4 |      0.07 |    0.020 |        0.036 |
+    | C   | all but `disabled-by-default-v8.cpu_profiler` |        4 |      0.04 |    0.007 |        0.042 |
+    | D   | the CPU profiler alone                        |        4 |      1.27 |    0.016 |        0.038 |
+    | E   | D's, stopped and restarted every 60 s         |        4 | 1.2, 0.07 |    0.019 |        0.052 |
+    | F   | D's, with `--workers 1`                       |        2 |      0.61 |    0.023 |        0.010 |
+
+    E's two renderer figures are its growth within one trace and across restarts (its troughs).
+
+  - _Cause 1: V8's CPU profiler, which is the measurement's own._
+    - The category starts V8's sampling profiler in every isolate of the renderer, so in the
+      page and in each height worker. Each isolate keeps its profile in native memory until the
+      trace stops.
+    - D's smaps put 198 MiB of its 217 MiB growth (60 s to 240 s) in PartitionAlloc, Chromium's
+      `malloc`. Only 11.5 MiB was in V8's sandbox, which holds the JS heaps and ArrayBuffers.
+    - It costs about 0.31 MB/s for each isolate (D against F). An idle worker costs as much as
+      the page, so the cost follows the worker count, not the descent's work.
+    - Stopping the trace frees it. In E, each restart dropped the renderer back to its baseline
+      (about 185–198 MiB), and its troughs rose at 0.07 MB/s, B's rate.
+  - _Cause 2: the patch cache kept each bake's arrays. Ours, now fixed._
+    - `PatchCache.insert` takes a `ResidentPatch`, but the terrain pass hands it the worker's
+      whole `BakedPatch`, and the entry was a spread of it. So every resident patch kept its
+      heights and normals in the renderer (50.7 KB a patch on the low layout), although its slot
+      already held them.
+    - This was bounded by the slots. In vitest, 4,000 such bakes into a low cache held 65.6 MB
+      of ArrayBuffers once its 1,296 slots were full, and stayed at that plateau. On high, about
+      1,960 slots of heights, offsets and double normals would hold about 396 MB, nearly the
+      cache's whole 400 MB budget again.
+    - `insert` now keeps only the resident fields (`cachedPatch`). The same drive holds about
+      0 MB. Two regression tests in `cache.test.ts` fail on the old code, one for each insert
+      path. typescript-reviewer found no must-fix or should-fix. Its wording note on `insert`'s
+      remarks is applied. The hidden smoke (`descentSpike.sh --hidden --smoke --setting low`)
+      passes on the fix.
+    - _Over a whole descent._ G (before the fix) and H (after) were full hidden runs on
+      `rendering-and-planets` with F3, tracing C's six categories:
+
+      | Figure                                     | G, before |   H, after |
+      | ------------------------------------------ | --------: | ---------: |
+      | Renderer `RssAnon`, peak                   |   349 MiB |    305 MiB |
+      | Renderer `RssAnon`, at the end             |   335 MiB |    255 MiB |
+      | Results file's renderer private peak       |   370 MiB |    305 MiB |
+      | The page's ArrayBuffers, peak              |    113 MB |      56 MB |
+      | The page's ArrayBuffers, mean from 1,000 s |     88 MB |      24 MB |
+      | Renderer growth, 60 s to the end           | 0.13 MB/s | 0.065 MB/s |
+
+      In G, the page's ArrayBuffers grew with the bakes (25 MB at 65 s, 103 MB by 1,147 s). In
+      H, they stayed at 18–23 MB, apart from one 56 MB sample at 1,207 s that the next GC
+      returned.
+  - _Ruled out, with the share each had._
+    - The recorder's per-frame series and the 1 Hz samples are in the page's JS heap. All the
+      JS heaps together grew 0.024 MB/s in H, about 30 MB over a descent.
+    - Worker messages and height-worker results are ArrayBuffers. With the cache's copies
+      gone, all the ArrayBuffers together grew 0.009 MB/s in H.
+    - The height workers' ArrayBuffers (their wasm memories and bake buffers) went from 45 MB
+      to between 52 and 62 MB, where they stayed from 850 s on.
+    - Uploads' staging is shared memory, which `private` does not count. The renderer's
+      `RssShmem` held at about 9 MiB throughout.
+    - Event listeners and the cache's eviction (F3) do not show: the growth followed neither
+      the bakes nor the cache.
+    - What is left after the fix and without the profiler is 0.065 MB/s, about 80 MB over a
+      descent: the JS heaps, the workers' ArrayBuffers, and about 0.03 MB/s of native memory.
+  - _What it costs on T16's laptop._
+    - The laptop runs two height workers by default (`defaultSpikeWorkers` for 8 threads), so
+      three isolates. That is about 0.93 MB/s, or about 1.15 GB by the descent's end, on top of
+      the renderer's own 0.3 GB.
+    - It sits in the system memory the UHD 620 shares, beside the tracing service's 1.3–1.7 GB.
+    - The criterion's memory row (DRM resident) does not count it. The results file's
+      renderer-private figure does.
+  - _Remedies for the profiler, to choose with the trace's remedy above (for the orchestrator
+    and the owner):_
+    - Windowed traces, the trace finding's third remedy. A stop frees the profile (E), so
+      windows of 120 s or less bound it at about 110 MB with three isolates. They bound the
+      tracing service too. One trace for each segment would not: the descent arc alone is
+      900 s.
+    - Drop the category. The renderer then grows at about 0.065 MB/s, and the results lose only
+      the main thread's engine split (`engineSelfMs` and `sampledMs`, Design note 18).
+    - Keep it, and read the renderer's figure as including it.
+
+    The lean is windowed traces, since the trace's crash needs them anyway.
+
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
     `AtmosphereInputs`, `atmosphereInputs` and `HillaireAtmosphere`, as Provides sketches them,
