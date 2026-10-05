@@ -556,8 +556,11 @@ holds.
 7. **The cumulative luminosity function.** For each density component (which fixes the age
    distribution; a population's is the sum) and each layer: per system, the V light of stars fainter
    than M_V, and the number brighter, primaries and companions both, as a table in M_V from −12 to
-   +20 at 0.05 mag. It is the quadrature `mean_present_mass` does, over the same Gauss–Legendre
-   panels in ln m with the same companions (`CompanionMasses`), with the present mass replaced by
+   +20 at 0.05 mag. It is the quadrature `mean_present_mass` does, over Gauss–Legendre panels in ln m
+   whose edges are the mass function's, the fates' and the layers' breaks and, at each
+   metallicity node, the masses where that node's tracks end each living phase at each
+   component's age edges (R06.T5.e), at 4, 8 or 16 nodes by the panel's width, with the same
+   companions (`CompanionMasses`), with the present mass replaced by
    the V light, integrated over the age distribution against each track's own segments: each phase
    of a track at a mass node is sampled at 32 ages (and at its knots), so short bright phases — the
    post-AGB crossing, the blue loops — are weighted by their duration and not missed. Binary
@@ -1015,14 +1018,41 @@ luminosity_matches_realised_cells` passes.
   `just test-slow luminosity_matches_realised_cells`. As built (2026-10-04): three fit tasks, one a
   layer (`sky_binary_light_c`, `_d` and `_e`, each its own table under the 500 kB limit), and the
   two fit gates held per site and layer; the record is in Risks ("T5.d's pair-evolved light").
-- **R06.T5.e Fewer nodes** (decided 2026-10-03). Try, in order: Gauss–Legendre order scaled with
-  each mass panel's width (narrow panels between close breaks take fewer than 16 nodes); \[Fe/H\]
-  nodes rounded to 0.1 dex instead of 0.05; `SAMPLES_PER_PHASE` 16 instead of 32. Keep each change
-  that passes all three gates: every bin of every component, layer and snapshot within 1% of its
-  function's total light (light) and total stars (count) against the full build; the caps within
-  one radial node at the six points of `caps_converge_in_rays`; T5.b and T5.c pass. Target ≤ 30
-  CPU-s a build on a quiet machine. Acceptance: `cargo test -p hyperion-sim sky::luminosity
-sky::caps` and the gates' measurements recorded in Risks.
+- **R06.T5.e Panels and fewer nodes** (decided 2026-10-03; gates decided 2026-10-05,
+  `decision-r06-t5e-gate.md`; panels and cuts re-decided the same day,
+  `decision-r06-t5e-gate-2.md`). Each \[Fe/H\] node's stage takes its own mass panels: the
+  global breaks (the mass function's, the fates', the layers' band edges and their companion
+  kinks) and the masses at which that node's tracks (median draws) end each living phase, or
+  die, at each age edge of every component reading the node, found by a fixed scan and
+  bisection and independent of the components a build asks for. These replace the edges at the
+  fates' fitted lifetimes, which left an old population's giant branch inside panels: 16 nodes
+  a panel were off by about 1% in an old halo component's light and colour against 32, and 4
+  nodes by 6–8%. `BuildOptions::FULL` (test-only) is these panels at 16 nodes a panel, 32 parts
+  and 0.05 dex; the slow test `the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read`
+  holds it within 0.25% of 32 nodes a panel on every component bin's light and colour sums and
+  on every band ray below. `BuildOptions::STANDARD` takes a Gauss–Legendre order scaled with
+  each panel's width, 4 nodes on a panel at most a quarter of `MAX_PANEL_LN_MASS` wide, 8 on one
+  at most half and 16 on a wider one and 32 parts; neither 16 parts (layer A's cap at cut 11
+  moved one node in, leaving 1.6–2.5 expected stars beyond it under FULL) nor \[Fe/H\] at 0.1
+  dex (a bias of −0.6% in layer B's band light near the Sun) was kept. Slow test
+  `standard_nodes_match_the_full_build_where_the_tables_are_read` (lib), STANDARD against FULL
+  on the Milky Way fixture at `REFERENCE_TIME`, every snapshot: every component bin's light and
+  four colour sums, summed over its layers by their shares of its systems, within 1%; along
+  each of 768 Fibonacci rays at T17's four points, at cuts 7.95 and `MAX_CUT_V` (11.0), the
+  light fainter than the cut less the distance modulus out to 120,000 ly and its colour sums,
+  without extinction and through each ray's realised profile, within 1%, and at the Sun behind
+  a wall at 300, 1,000 and 3,000 ly within the larger of 1% and 1/(3√N) for a 64²-face texel's
+  N expected systems; every layer's cap at the six points of `caps_converge_in_rays`, at both
+  cuts, within one radial node, with FULL's expected count beyond STANDARD's caps under 1.5;
+  and the stars brighter than V 5 and 6.5 near the Sun within 1%. A second seed's component
+  bins were checked once. T5.a–T5.d's tests, `luminosity_matches_realised_cells` and
+  `caps_converge_in_rays` pass on STANDARD; `doubling_the_samples_moves_no_bin_above_one_percent`
+  measures FULL's phase sampling. No gate is loosened; the cost is recorded, and above 30 CPU-s
+  T17 proposes the disk cache. `galaxy::fates` and `mean_present_mass` are untouched.
+  Acceptance: `cargo test -p hyperion-sim sky::luminosity sky::caps`, `just test-slow
+the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read
+standard_nodes_match_the_full_build_where_the_tables_are_read luminosity_matches_realised_cells
+caps_converge_in_rays`, and the measurements recorded in Risks ("T5.e's panels and node cuts").
 
 Files: `sky/{luminosity,photometry,binary_light}.rs`, `tables/{sky_binary_light,sky_envelope}.rs`,
 `crates/hyperion-fit/src/tasks/{sky_binary_light,sky_envelope}.rs`,
@@ -1408,6 +1438,8 @@ ci`.
 Run the slow tests and benches this plan creates (by name, not the whole slow suite or every bench,
 as the RM2/RM3 lanes' rules require: `just test-slow luminosity_matches_realised_cells
 envelope_bounds_dense_tracks envelope_bounds_pair_states caps_converge_in_rays
+the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read
+standard_nodes_match_the_full_build_where_the_tables_are_read
 the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
 the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, `just bench -- sky`) and record the
 figures in the doc comments that own them and in this plan: the caps (at the six points of
@@ -1430,7 +1462,12 @@ measurements (open question 16) and record them. Record the tables' build in CPU
 heap and the cold first sky against the budget decided 2026-10-03 (`decision-r06-tables.md`): the
 per-galaxy tables at most 30 CPU-s on a quiet machine, and the cold first sky near the Sun at most
 10 s wall on the dev machine with the default workers; if either fails, propose the disk cache
-(keyed by `GalaxyKey` and a sim fingerprint) or deeper node cuts. Record T5.d's residuals and the
+(keyed by `GalaxyKey` and a sim fingerprint) or deeper node cuts. The build measured is
+`BuildOptions::STANDARD`'s, T5.e's panels and nodes (decided 2026-10-05,
+`decision-r06-t5e-gate-2.md`), whose own timing is provisional; deeper node cuts must pass
+T5.e's two slow tests. If the cold first sky fails, the stage chain's schedule (T11.c's
+lookahead and chunking; T5.e records each stage's nodes) is measured before any further cut.
+Record T5.d's residuals and the
 band's pair correction with its 1σ (from `LuminosityFunction::pair_light_sigma`) at the decision's
 three harness points ((0, 26,000, 68), (0, 8,000, 0) and (0, 3,000, 0)) and at a halo point, (0,
 26,000, 15,000) ly (decided 2026-10-04, "T5.d gate reading"); a 1σ over 2% of the band's light at
@@ -1468,7 +1505,11 @@ and `_e`, T5.d) tables, so its goldens (T17) are regenerated whenever any of the
 envelope's move to a fitted table (2026-10-04) made it up to 1 mmag brighter, which moves the caps'
 rule bound and so the caps and the census's planned cells, with no bump: no golden pins them and
 nothing serves them yet (`decision-r06-tables.md`, A.5). T5.d's correction (2026-10-04) moves the
-luminosity tables' light, colour and counts in layers C, D and E, with no bump for the same reason. Not adopted:
+luminosity tables' light, colour and counts in layers C, D and E, with no bump for the same reason.
+T5.e's panel edges and node rule (2026-10-05) move the tables' light, colour and counts, by
+about 1% in an old halo component's total light and colour toward the converged quadrature and
+by under 0.25% wherever else they are read, with no bump for the same reason; `galaxy::fates`
+and `mean_present_mass` are untouched, so no generated output moves. Not adopted:
 drawing a cell's mass words in sorted order, which the brainstorm offers as a generator-version
 change to skip light candidates without opening their streams; the mass-first walk already skips
 their position and density, and the benchmark decides whether the rest is worth a bump (Risks). The
@@ -2027,9 +2068,11 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   On cost: a full table build took 64–142 s on one thread and holds about 55 MiB. The envelope,
   which depends on no seed, is now a checked-in fit. The tables depend on the seed, so they are
   built once per galaxy (one reference time, +H, serves the whole ±1,000-year window) as parallel
-  pool jobs, with node counts cut in T5.e under a 1% gate. The first sky of a session waits on that
-  build: about 5–10 s on the dev machine, and longer on a 4-core laptop. T17 checks it against
-  30 CPU-s and a 10 s cold first sky, with a sim-fingerprinted disk cache as the fallback.
+  pool jobs, with T5.e's panels at the tracks' phase ends and its node counts under gates on
+  what the tables' readers integrate (1%; `decision-r06-t5e-gate.md`, `-2.md`). The first sky of
+  a session waits on that build: about 5–10 s on the dev machine, and longer on a 4-core laptop.
+  T17 checks it against 30 CPU-s and a 10 s cold first sky, with a sim-fingerprinted disk cache
+  as the fallback.
 - **Deviations in T5, as built.** `sky::luminosity` and `sky::photometry` as Design note 7 sets
   them out, with these differences. Each living phase of a node's track is cut at its segment
   ends, its knots and 32 equal parts, and each part is read at three-point Gauss–Legendre's nodes
@@ -2276,6 +2319,151 @@ FitLayer }`, in `crates/hyperion-fit/src/tasks/sky_binary_light.rs`), three stat
     negligible light, nothing for the caps. The young fingerprint cell marks the tables stale when
     plan 11 fixes it, and they are refitted then.
   - **No `GENERATOR_VERSION` bump.** Nothing served or golden reads the tables yet (A.5).
+- **T5.e's panels and node cuts (decided 2026-10-05, `decision-r06-t5e-gate.md` and `-2.md`).**
+  The plan's first gate (every 0.05-mag bin within 1% of its function's light against the full
+  build) failed every cut and the full build itself, but it measured the comb of light that
+  moving mass nodes shifts between neighbouring bins, which every reader's integral over
+  magnitude cancels: no reader takes a bin or one component's layer alone (the band, the limit
+  map and `eye_cut` sum density × light fainter than a limit over components and layers; the
+  caps sum one layer's counts over components and 768 rays; the census reads the tables only
+  through the caps; T5.b and T5.c sum over components; T5.d's guard reads a component bin over
+  its layers). The gates are what they integrate, at the eye's cut and at `MAX_CUT_V`. Those
+  gates then found a real error: T5's panels were cut at the fates' fitted lifetimes, not where
+  the tracks at each \[Fe/H\] node end their phases, so an old, sharp-edged population's giant
+  branch fell inside panels. Four nodes a panel put an old halo component's light 6–8% high and
+  the halo point's outward band 2.1% off; T5's own 16 were 1% off against 32 and converged
+  slowly (3.7, 1.2, 0.8% at 4, 8, 16 nodes). With edges at the tracks' phase ends at every age
+  edge, per \[Fe/H\] stage, the full build is held within 0.25% of 32 nodes a panel by a slow
+  test, and the cut is measured against it. The change moved T5's bits and an old halo
+  component's light by about 1%, the band by under 0.15% on any ray and no cap. 16 parts a
+  phase were not kept: equal parts in age undersample a young star's bright early contraction,
+  and layer A's cap at cut 11 moved one node in with 1.6–2.5 expected stars beyond it. \[Fe/H\]
+  at 0.1 dex was not kept: a bias (two of the seven thin-disc bins move their central node the
+  full 0.05 dex in every galaxy) of −0.64% in layer B's band light near the Sun. Both builds
+  round \[Fe/H\] nodes to 0.05 dex, which no gate sees: probably ≲ 0.3% of the band near the Sun.
+  A single function or bin of the cut tables is not good to 1% (up to about 11% and 6% under
+  T5's panels at 4 nodes; the as-built record gives the corrected figures); a new reader of one
+  alone re-gates against `BuildOptions::FULL`. Both slow tests re-run whenever where the light
+  lives moves: the tracks, the fates, the components' ages, the pair-light fits (P11's refits) or
+  the white dwarfs' light (A4).
+- **T5.e's panels and node cuts, as built (2026-10-05).** Measured on the Milky Way fixture at
+  `REFERENCE_TIME`, every snapshot; the logs are in the tables lane's scratch
+  (`.git/rm23-scratch/r06-tables2/t5e/t2-*.log`, `gate-*.log`).
+  - **Rung adopted: the first, the scaled order** (`MassNodes::Scaled`, 32 parts, 0.05 dex):
+    every gate passed on the corrected panels, so no later rung was needed. The 8-node floor was
+    measured as well and passed too, at twice the nodes; it is not kept. `BuildOptions::FULL` is
+    `{ MassNodes::Sixteen, SAMPLES_PER_PHASE }` (`FULL_SAMPLES_PER_PHASE` is gone), and the
+    test-only `MassNodes::ThirtyTwo` (`GL32_NODES`, `GL32_WEIGHTS`) is the reference check's.
+  - **The decided record's two figures, read against the runs.** "No cap" holds for the shipped
+    build: every STANDARD cap at the six points and both cuts is T5's. The full build's
+    nuclear-disc C cap at cut 7.95 moved one node out (116 → 127 ly), where the count beyond
+    116 ly sits at the threshold, 0.999 under T5's FULL and 1.000 under the corrected one, a move
+    of 0.1%. "About 1%" in an old halo component is its colour (0.92%, `lux·r`) and one layer's
+    function (0.97%); its light moved 0.24–0.63%. The decided text and the Generator version
+    sentence are kept as ruled.
+  - **Panels and the search.** Each stage's grid is the panels of the global breaks' 125 edges,
+    cut further at its phase-end masses: 138 to 188 panels a stage, 3,690 in all, every one
+    within a quarter of `MAX_PANEL_LN_MASS`, so 552 to 752 nodes a stage at the scaled order
+    (14,760 in all; T5's grid was 140 panels and 560 nodes at 4 a panel, shared by every stage)
+    and 2,208 to 3,008 at 16 (59,040). A stage offers 10 to 13 sample jobs (250 in all) at the
+    shipped nodes. The search (`phase_end_masses`) reads each end's age on tracks at 122 masses,
+    0.1 M☉ and the global panels' ends above it, built to twice the oldest age sampled, and
+    bisects every crossing ten times in ln m on tracks built 1% past the edge, then interpolates
+    the last bracket linearly in ln age. A stage has 2 to 9 age edges (the components reading
+    it, every bin of the full plan) and 16 to 73 solved ends: the end of the pre-main-sequence
+    (young edges), the main sequence, the Hertzsprung gap, the giant branch, core helium
+    burning, the early and pulsing AGB and the post-AGB crossing, and the death, the last two
+    at the same mass. Every solved end lies within 3.9 × 10⁻⁹ of its edge's age (a unit test
+    holds 10⁻⁶ at the halo's \[Fe/H\] −1.5). Its cost is 3.15 CPU-s for the 22 stages
+    (0.07–0.19 a stage), inside the plan's 4.7 CPU-s with the companions' cells. The search builds
+    tracks throughout; the SSE's analytic timescales the ruling allowed were not used. Labels are
+    the phase of each segment's midpoint state; the flash bridge reads as core helium burning, so
+    its end, 10⁴ years after the giant branch's tip (`FLASH_YEARS`), some 3 × 10⁻⁷ in ln m at the
+    halo's turnoff, is not cut separately. The plan is made serially, so a server calls
+    `LuminosityTables::plan` off its runtime; a pool could take the search as one job a stage if the
+    cold first sky needs it.
+  - **The companions' H(c) (a deviation in form).** It is integrated over the panels of the
+    global breaks alone, not over a stage's own, and held in one memo for the plan
+    (`CompanionsMemo`); for every c beyond a band's top it is read at the top, where H is flat,
+    bit for bit (`companions_below_is_flat_beyond_each_bands_top`). H reads only the mass
+    function and the companions, whose kinks are the global breaks and the mass ratios' cuts, so
+    the phase-end masses are no breaks of it. T5 integrated it over its grid's edges, the fates'
+    fitted lifetimes among them; a scratch path rebuilding T5's panels with the top-of-band read
+    reproduced T5's bits, so the read moves none.
+  - **Reference check** (corrected 32 nodes a panel against corrected FULL, gate 0.25%): G1
+    worst 0.0128% (the young thin disc's +0.25 bin, its `lux·r`); G2 worst ray 0.0067% (the
+    halo point, cut 7.95, no extinction), all-sky at most 0.0013%, at both cuts and in both
+    modes. Seed 1's G1 worst 0.0128%. The slow test passes (503 s at load, 543 MiB peak).
+  - **Corrected FULL against T5's FULL** (G1–G3): G1 moves the halo's bins by 0.24–0.63% in
+    light and up to 0.92% in colour (Halo −0.60, `lux·r`), every other bin by at most 0.12% in
+    light and 0.16% in colour (old thin disc −0.50); G2's worst ray moves 0.125% at the halo
+    point, at most 0.016% at the other three, all-sky at most 0.0074%; G3: one cap moves, the
+    nuclear disc's C at cut 7.95 (0, 150, 0), 116 → 127 ly (one node out), where the count
+    beyond 116 ly is 0.999 under T5's FULL and 1.000 under the corrected one; V 5 and 6.5 move
+    −0.004% and −0.005%. Recorded:
+    a bin's light up to 0.70% (old thin disc +0.50, B), a function's total 0.97% (Halo −0.60,
+    D). FULL's whole-build FNV moved from `e1ef2a3bbc1167ba` to `651d0083b629b70b`; a scratch
+    path rebuilding T5's panels reproduced `e1ef2a3bbc1167ba` bit for bit, so the refactor moved
+    nothing else.
+  - **STANDARD against FULL.** G1 worst 0.073% (old thin disc +0.50, `lux·r`); seed 1's
+    0.073% (55 bins, 35 stages). G2, all-sky and worst ray, by point at cut 7.95 then 11, each
+    without extinction and through the realised profile: near the Sun 0.0020/0.0024% and
+    0.0019/0.0020% all-sky, worst rays 0.0077/0.0108% and 0.0110/0.0112%; the inner disc
+    0.0026/0.0030% and 0.0051/0.0019%, worst 0.0079/0.0078% and 0.0174/0.0182%; the bulge point
+    0.0043/0.0039% and 0.0097/0.0076%, worst 0.0116/0.0118% and 0.0180/0.0181%; the halo point
+    0.0019/0.0027% and 0.0038/0.0032%, worst 0.0286/0.0334% and 0.0171/0.0215%. By layer near the
+    Sun, at most +0.011% (E, cut 7.95). Walls near the Sun, the ray nearest its tolerance, cut
+    7.95 then 11: 300 ly (N 7.1–8.5, tolerance 11.4–12.5%) 0.014% and 0.014%; 1,000 ly (N 164–359,
+    1.8–2.6%) 0.010% and 0.006%; 3,000 ly (N 1,163–14,681, 1%) 0.008% and 0.007%; recorded only,
+    30 ly (N under 0.01) 0.030% and 0.020%, 100 ly (N 0.3) 0.027% and 0.009%. G3: every cap at
+    the six points and both cuts equals FULL's but the nuclear disc's C at cut 7.95, one node in
+    (116 against 127 ly), where FULL counts 1.000 beyond it, the largest count beyond any
+    STANDARD cap; V 5 −0.018%, V 6.5 −0.004%. The slow test passes (340 s at load, 275 MiB).
+  - **Recorded, not gated** (STANDARD against FULL): the worst bin's light by layer A 3.1%, B
+    4.9% (old thin disc +0.50, M_V 7.65), C 2.2%, D 1.2%, E 1.1%; each edge's count A 0.81%,
+    B 3.2%, C 1.2%, D 0.25%, E 0.14%; the light fainter than an edge A 2.6%, B 2.9%, C 1.1%,
+    D 0.68%, E 0.64%; a function's total at most 0.20% (old thin disc +0.50, E), against 10.81%
+    (Halo −1.50, D) under T5's panels at 4 nodes, and the light fainter than an edge at most
+    2.9%, against 10.95%.
+  - **Timed serial builds** (quiet machine, load 0.6–1.8, under the heavy-test lock, release test
+    binary, 2026-10-05): STANDARD 31.3 and 31.7 CPU-s (plan 4.7 with the search's 3.15,
+    sampling 17.6–17.8, accumulation 8.9–9.0), wall 32.0–32.4 s, peak RSS 155 MiB, largest stage
+    set 57 MiB; FULL 116.3 CPU-s (9.5, 70.7, 35.8), wall 117.3 s, peak 335 MiB, stage set
+    228 MiB; T5's FULL earlier the same day, outside the lock, 79.9–80.7 CPU-s (at load 1.4 and
+    10.5), peak 255–274 MiB. STANDARD
+    is over the 30 CPU-s target by 1.3–1.7 CPU-s: recorded, not gated, and T17 proposes the disk
+    cache. The plan's search runs serially when the plan is made; a pool could take it as one
+    job a stage if the cold first sky needs it.
+  - **The other gates on STANDARD.** The release `sky::` lib suite passes (101 passed, 5
+    ignored, 135 s on two threads at load, 522 MiB peak). T5.d's site gates read as at ae1a494 to the
+    digit printed (the solar circle's C −2.07% ± 0.29%, D −10.16% ± 0.72%, E −21.21% ± 1.11%;
+    the bulge's −3.24% ± 0.29%, −9.70% ± 0.82%, −13.32% ± 0.55%; clamps at most 0.034%), and its
+    guard's worst 1σ is 1.168% (old thin disc −1.00) and worst clamp 0.31% (old thin disc −0.50),
+    against 1.17% and 0.32%. T5.c (`luminosity_matches_realised_cells`, 586 s) reads every layer's
+    residual as at ae1a494 to the 0.1% printed but the bulge's E against the corrected tables,
+    −4.4% against −4.5%. `caps_converge_in_rays` passes with every cap of `layer_caps`' doc table
+    unchanged; `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit` passes;
+    `cargo bench -p hyperion-sim --no-run` builds; `just fit-check` is 16 fresh, 0 failures.
+  - **The doubling test** keeps its per-bin form on FULL: its worst bin moves 0.51% of its
+    function's light and its worst edge 0.08% of its stars from 32 to 64 parts.
+  - **Pins.** `SERIAL_FINGERPRINT` (STANDARD's halo at 2 parts) is `0xe56b_4376_5fe8_1768`, and
+    `FULL_SERIAL_FINGERPRINT` (FULL's) `0xa022_ae9e_49f0_c996`, both asserted in
+    `parallel_build_equals_serial`; T5's build gave `0x8c44_443c_67ac_13bf`. A third pin beyond
+    the ruling's two, `PAIR_SERIAL_FINGERPRINT` (`0x9bc9_1279_f62c_9962`), is the bulge's and
+    the long bar's coarse build under STANDARD, asserted beside them: their stages read the thin
+    discs' young edges, so it pins the search's pre-main-sequence ends and the deaths of
+    intermediate-mass stars, which the halo's old edges never reach. `parallel_build_equals_serial`
+    and the subset test also pass on `wasm32-wasip1` under wasmtime 49.0.1.
+    STANDARD's whole-build FNV is `4a25321f0d9ff62d`, FULL's `651d0083b629b70b`.
+  - **Tests added.** `a_stages_grid_is_the_same_whatever_components_are_built` (the bulge alone
+    and with the long bar, bit for bit, and \[Fe/H\] 0's ages including the thin discs'; the
+    full plan is `a_solar_circle_build_is_the_full_builds_bin_bit_for_bit`'s),
+    `a_stages_panels_end_where_its_tracks_end_their_phases_at_the_age_edges` (every solved mass
+    of the halo's \[Fe/H\] −1.5 a panel edge of its grid, its end at the edge to 10⁻⁶, and the
+    main sequence's and the giant branch's ends where the track's own states change phase),
+    `companions_below_is_flat_beyond_each_bands_top`, and the two slow lib tests.
+  - **No `GENERATOR_VERSION` bump**, and `galaxy::fates` and `mean_present_mass` untouched: no
+    golden or served output reads the tables.
 - **The A3 interim's Class I sources (T5).** `is_dark_in_v` treats every Class I protostar as dark;
   a few per cent of them, seen pole-on down an outflow cavity (A<sub>V</sub> about 1.5; Whitney et
   al. 2003a, ApJ 591, 1049, §2 and Fig. 3), would show in V. Plan 06's A3 decides.
