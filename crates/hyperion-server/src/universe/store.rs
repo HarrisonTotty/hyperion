@@ -386,19 +386,18 @@ fn write_file_durably(dir: &Path, contents: &str) -> Result<(), WriteSaveError> 
     sync_directory(dir)
 }
 
-/// Makes the entries of `dir` durable.
-#[cfg(unix)]
+/// Makes the entries of `dir` durable on Unix, and does nothing elsewhere.
+///
+/// Other platforms cannot open a directory as a file to sync it, so there the rename is left to
+/// the file system's journal, which may write it after this returns.
 fn sync_directory(dir: &Path) -> Result<(), WriteSaveError> {
-    File::open(dir)
-        .and_then(|handle| handle.sync_all())
-        .map_err(io_error("sync directory", dir))
-}
-
-/// Makes the entries of `dir` durable. Other platforms cannot open a directory as a file; their
-/// file systems journal the rename.
-#[cfg(not(unix))]
-fn sync_directory(_dir: &Path) -> Result<(), WriteSaveError> {
-    Ok(())
+    if cfg!(unix) {
+        File::open(dir)
+            .and_then(|handle| handle.sync_all())
+            .map_err(io_error("sync directory", dir))
+    } else {
+        Ok(())
+    }
 }
 
 /// Removes what a failed write left in `dir`, and `dir` itself. Best effort: a failure is logged,
