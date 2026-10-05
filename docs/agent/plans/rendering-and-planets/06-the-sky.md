@@ -975,7 +975,8 @@ luminosity_matches_realised_cells` passes.
   fit-check), independent of the galaxy: for each cell (layer C, D or E; \[Fe/H\] −2, −1, −0.5, 0
   and +0.18; log-age bins of 0.2 dex across the layer's luminous ages up to 1.5 × 10¹⁰ yr) the mean
   per born system of the layer of (pair-evolved − single-evolved) V light, colour sums and star
-  count, in 1-mag M_V bins (only those the layer populates), from ≥ 2 × 10⁴ systems a cell drawn
+  count, in 1-mag M_V bins (only those the layer populates), from ≥ 2 × 10⁴ systems a cell (2 × 10⁵
+  in layer C, decided 2026-10-04) drawn
   by the generator's own laws (the primary from the default mass function within the band,
   companions and orbits from plan 11's laws, ages log-uniform within the bin), each read from
   `SystemStars::state_at(t).stars()` and, single, from each `StarModel` alone, on the fit's own
@@ -989,8 +990,13 @@ luminosity_matches_realised_cells` passes.
   made non-decreasing (superseding item 3's ratio scaling). The envelope and the rule's bound are
   untouched (T16.b). A non-default mass-function kind takes no correction (a deviation). Gates
   (`cargo test -p hyperion-sim sky::luminosity`, and `luminosity_matches_realised_cells`): the fit's
-  born-weighted correction has a 1σ under 2% of each layer's light at the fixture's solar-circle and
-  bulge components; the clamped light is under 0.5% of each layer's light; in T5.c the corrected
+  born-weighted correction has a 1σ under 2% of each layer's light, and the clamped light is under
+  0.5% of it, at T5.c's two sites, per layer, summed over the components there by their systems
+  (decided 2026-10-04, "T5.d gate reading"); and, as a component guard, for every component bin of
+  the fixture's build, its 1σ and its clamped light summed over C, D and E are under 2% and 0.5% of
+  the bin's light over all its layers, each layer weighted by its share of the component's systems
+  (a bin that fails takes more systems in the cells that carry its error, never a smaller
+  correction); in T5.c the corrected
   tables' pair-against-single deficit per layer matches the cells' paired deficit within its
   interval, the realised light stays within the existing interval, and each layer's residual is
   recorded before and after. It does not block T8; it lands before T9.b's band gates and T17's
@@ -1006,7 +1012,9 @@ luminosity_matches_realised_cells` passes.
   their turn and any threads (`order::assert_order_independent`) give `build`'s bits; and
   tables at +H read at t = 0 through `age_for` equal a build at t = 0 within 10⁻³ of every bin's
   light and count. Acceptance: `cargo test -p hyperion-sim sky::luminosity`, `just fit-check`,
-  `just test-slow luminosity_matches_realised_cells`.
+  `just test-slow luminosity_matches_realised_cells`. As built (2026-10-04): three fit tasks, one a
+  layer (`sky_binary_light_c`, `_d` and `_e`, each its own table under the 500 kB limit), and the
+  two fit gates held per site and layer; the record is in Risks ("T5.d's pair-evolved light").
 - **R06.T5.e Fewer nodes** (decided 2026-10-03). Try, in order: Gauss–Legendre order scaled with
   each mass panel's width (narrow panels between close breaks take fewer than 16 nodes); \[Fe/H\]
   nodes rounded to 0.1 dex instead of 0.05; `SAMPLES_PER_PHASE` 16 instead of 32. Keep each change
@@ -1047,8 +1055,11 @@ hyperion-sim sky::envelope`, `just fit-check`, and `just test-slow envelope_boun
 parameters, the current generator version (19), cut 7.95 (the eye's near the Sun, 7.4 + 0.45 +
 0.1), as decided 2026-10-03 (`decision-r06-t7-caps.md`): at the Sun (0, 26,000, 68) and in the
 nuclear disc (0, 150, 0), every cap at or inside its rule bound with 0 ≤ `expected_beyond` < 1;
-near the Sun A and B under 100 ly, and C, D and E each within a factor of **three** of 3,000, 4,300
-and 10,000 ly (a sanity bracket, not a confirmation of the brainstorm's version-14 figures); in
+near the Sun A and B under 100 ly, and D and E each within a factor of **three** of 4,300 and
+10,000 ly (a sanity bracket, not a confirmation of the brainstorm's version-14 figures), while C,
+whose cap rests on rare bright phases of pair channels since T5.d's count excess, keeps only its
+floor, at least 1,000 ly, with its rule bound as its ceiling (decided 2026-10-04, "T5.d caps after
+the pair correction"; no cap value is pinned); in
 the nuclear disc E under 1,500 ly, and each of C, D and E smaller than near the Sun; a ray's last
 profile node equals `sightline` (`Realised`, `Full`) to 10⁻¹². Slow test `caps_converge_in_rays`:
 at six points ((0, 26,000, 68), (0, 150, 0), (26,000, 0, 68), (−18,385, −18,385, 68), (0, 8,000, 0)
@@ -1406,9 +1417,11 @@ heap and the cold first sky against the budget decided 2026-10-03 (`decision-r06
 per-galaxy tables at most 30 CPU-s on a quiet machine, and the cold first sky near the Sun at most
 10 s wall on the dev machine with the default workers; if either fails, propose the disk cache
 (keyed by `GalaxyKey` and a sim fingerprint) or deeper node cuts. Record T5.d's residuals and the
-band's pair correction at the decision's three harness points ((0, 26,000, 68), (0, 8,000, 0) and
-(0, 3,000, 0)). The fits `sky_binary_light` and `sky_envelope` join the check list (`just
-fit-check`). Each timing is taken on a quiet machine, as the
+band's pair correction with its 1σ (from `LuminosityFunction::pair_light_sigma`) at the decision's
+three harness points ((0, 26,000, 68), (0, 8,000, 0) and (0, 3,000, 0)) and at a halo point, (0,
+26,000, 15,000) ly (decided 2026-10-04, "T5.d gate reading"); a 1σ over 2% of the band's light at
+any of the four is a finding. The fits `sky_binary_light_c`, `_d` and `_e` and `sky_envelope` join
+the check list (`just fit-check`). Each timing is taken on a quiet machine, as the
 roadmap's conventions require, or marked provisional. Acceptance: `just ci`, and the named `just test-slow` and `just
 bench -- sky` runs above complete.
 
@@ -1436,10 +1449,12 @@ bench -- sky` runs above complete.
 No change to generated output and no bump. `generate_cell_where` is `generate_cell` filtered, and
 the goldens prove it; the luminosity tables, the envelope, the caps and the census only read. The
 sky's own output is a function of the generator version and of the committed colour,
-limb-darkening and envelope (`sky_envelope`, T6.b) tables, so its goldens (T17) are regenerated
-whenever any of them moves. The envelope's move to a fitted table (2026-10-04) made it up to 1 mmag
-brighter, which moves the caps' rule bound and so the caps and the census's planned cells, with no
-bump: no golden pins them and nothing serves them yet (`decision-r06-tables.md`, A.5). Not adopted:
+limb-darkening, envelope (`sky_envelope`, T6.b) and pair-evolved light (`sky_binary_light_c`, `_d`
+and `_e`, T5.d) tables, so its goldens (T17) are regenerated whenever any of them moves. The
+envelope's move to a fitted table (2026-10-04) made it up to 1 mmag brighter, which moves the caps'
+rule bound and so the caps and the census's planned cells, with no bump: no golden pins them and
+nothing serves them yet (`decision-r06-tables.md`, A.5). T5.d's correction (2026-10-04) moves the
+luminosity tables' light, colour and counts in layers C, D and E, with no bump for the same reason. Not adopted:
 drawing a cell's mass words in sorted order, which the brainstorm offers as a generator-version
 change to skip light candidates without opening their streams; the mass-first walk already skips
 their position and density, and the benchmark decides whether the rest is worth a bump (Risks). The
@@ -1939,10 +1954,13 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   cannot panic; `veiling_luminance` refuses a negative angle; MES2's weight is a `PhotopicWeight`
   newtype (0–1), which `mesopic_weight` returns and `blackwell_equivalent_factor` takes.
 - **Binary light and the tables' cost (decided 2026-10-03, `decision-r06-tables.md`).**
-  R06.T5.c found pair-evolved light 9% and 21% below single-star light in the solar circle's
-  layers C and D, and 4%, 11% and 10% below it in the bulge's C, D and E. That is first-order,
-  against item 3's second-order estimate. Carried into the band's integral, the band would be 7–12%
-  (0.08–0.14 mag) too bright and redder. T5.d corrects the light with a fitted, galaxy-independent
+  R06.T5.c's sample found pair-evolved light 9% and 21% below single-star light in the solar
+  circle's layers C and D, and 4%, 11% and 10% below it in the bulge's C, D and E. That is
+  first-order, against item 3's second-order estimate. T5.d's fit (2.6 × 10⁶ systems a layer in D and E, 2.6 × 10⁷ in
+  C) puts it at 2.1%, 10.2% and 21.2% in the solar circle's C, D and E, and 3.2%, 9.7% and 13.3%
+  in the bulge's, so the uncorrected band near the Sun would be about 3–5% (0.03–0.06 mag) too
+  bright and redder (the gate reading's 2–4%, with C's raised sample), which T17 measures at its
+  points. T5.d corrects the light with a fitted, galaxy-independent
   table of pair-minus-single differences, by layer, age, \[Fe/H\] and 1-mag M_V bin. The counts the
   caps read take only the excess, and the envelope and the rule's bound are untouched (T16.b).
   Those tables are bounds, and a deficit cannot be allowed to loosen them. The fitted correction
@@ -2080,6 +2098,126 @@ stars_per_system, dark_per_system, remnants_per_system}`, `LightColour` (flux-we
     their serial build.
   - **Guards.** `run_accumulate` panics on a bin's nodes out of order and on another stage's
     samples, and `track_samples` panics on another stage's chunk; each has a `should_panic` test.
+- **T5.d's pair-evolved light, as built (2026-10-04/05, `decision-r06-tables.md` A, "T5.d gate
+  reading" and "T5.d caps after the pair correction").**
+  - **One task a layer (a deviation).** The ruling's one `sky_binary_light` task is three,
+    `sky_binary_light_c`, `_d` and `_e` (class Slow, revision 0, since generator version 20),
+    each writing `tables::sky_binary_light_<layer>` (193, 185 and 216 kB), as `stellar_fates_{low,
+mid,high}` are split: their some 68,000 values do not fit the 500 kB
+    `check-added-large-files` limit in one file. One struct (`SkyBinaryLightTask { layer:
+FitLayer }`, in `crates/hyperion-fit/src/tasks/sky_binary_light.rs`), three statics in
+    `REGISTRY`, three manifests and three `.smoke.toml`s (two systems a cell). The manifests
+    repeat the code's constants (the cell layout, the luminosity tables' bin edges and the task's
+    chunk of 250 systems), enforced by `expect_params`.
+  - **The table.** Per layer: `FIRST_BIN` (the first 1-mag bin held, counted from M_V −12);
+    `DELTA: [[[f64; 6]; W]; 130]`, per cell (\[Fe/H\] node, then age bin) and held bin, the mean
+    per born system of pair-evolved less single-evolved V light, the four colour sums and the star
+    count; and `LIGHT_SE: [f64; 130]`, each cell's standard error of its mean total-light
+    difference. Four significant digits. Held: C from M_V −7, D from −8 and E from −12, each to
+    +20. The cells' ages are 25 bins of 0.2 dex from 10⁵ to 10¹⁰ years and one to 1.5 × 10¹⁰,
+    the same for every layer: "the layer's luminous ages" are taken as every age from 10⁵ years
+    (younger stars are Class 0 protostars, dark in V; the protostar phase runs to 5 × 10⁵ years,
+    `PROTOSTAR_DURATION`), since a layer-E system's companions shine for gigayears after its
+    primary dies. Their modules carry `#[allow(clippy::approx_constant)]` in `tables/mod.rs`,
+    since the files are written whole.
+  - **The sampling** is the sim's (`sky::binary_light`, new): `fit_galaxy` (the Milky Way-like
+    parameters under the fit's own seed, `GALAXY_SEED` 0x5b1a_0005_0000_5eed), `fit_record`,
+    `system_difference`, `CellSums` and `cell_sums`, with the cell layout's constants and
+    `age_edge`. A cell's n-th system takes the candidate ID cell × 2²⁴ + n along +x from the
+    solar circle's cell row in the primary's band layer, `SystemOrigin::Grid` of component 0, the
+    point (0, 26,000, 0) ly, the primary from `quantile_in` within the band and the age
+    log-uniform in its bin on the R2 low-discrepancy sequence (`sample_point`: Roberts, M. 2018,
+    "The Unreasonable Effectiveness of Quasirandom Sequences", Extreme Learning, from ½, in exact
+    integer arithmetic at the middles of 2⁻⁵² steps, so no stream and no domain tag), the node's
+    composition with ΔY = 0 and `SystemStars::generate_with(.., MultiplicityContext::Free)`.
+    Pair-evolved stars are read from `state_at(EPOCH).stars()` and single ones from each
+    `stars()[i].state_at(EPOCH)`, binned by the tables' own `Seen::of` (now `pub(super)`). Systems
+    a cell: 2 × 10⁴ in D and E and 2 × 10⁵ in C, whose cap rests on rare bright pair phases
+    ("T5.d caps"). Pair evolution changed 1.10% (C), 6.98% (D) and 12.78% (E) of them. The fit
+    takes `raised_cells = [[cell, systems], …]` for a cell that carries a component bin's error
+    past the guard (`Sampling`); none is needed.
+  - **Cost, memory and determinism.** Chunks of 250 systems summed in index order on
+    `map_reduce_chunks`, so any thread count gives the same bytes; reruns of C and D reproduced
+    their bodies byte for byte, and the smoke run is the same on 1 and 3 threads. At version 20,
+    under loads of 25–45 (provisional): C 1,166 s on 8 threads (2.6 × 10⁷ systems), D 637 s on 8,
+    E 1,797 s on 14. The fit's RSS is about 17 MB; it builds no luminosity tables, so its cost does
+    not depend on the build's memory fix. With the correction the fixture's full serial build
+    peaks at 216 MiB (getrusage maxrss of the gate test alone, after the memory fix a934837), the
+    `sky::` suite on 2 threads at 559 MiB, and T5.c's slow test at 221 MiB.
+  - **Fingerprint.** Per layer, two cells where its primaries are giants, at solar and a tenth
+    solar \[Fe/H\] (C: age bins 21 and 24, 640 systems each; D: 16 and 17, 96; E: 11 and 12, 48),
+    and one young cell where the protostars are, age bin 2 at solar \[Fe/H\], 2,000 systems (the
+    caps ruling, so that fit-check sees plan 11's protostar fix): each of a bin's six summed
+    differences, the light difference times its bin's index (where the light lands), its
+    absolute value and the systems changed. About 1.5 s a layer in fit-check.
+  - **The build.** `TablesPlan::correct_for_pairs` is the first part of `assemble`'s finish step
+    for each bin, once its every metallicity stage is in: it adds the correction to the bin's
+    single-star `Bins` at each snapshot, before the cumulative sums. Each cell's coefficient is
+    the bin's born share in the cell's age bin then (the same `born_cdf`) times each
+    Gauss–Hermite node's weight, split linearly between the bracketing \[Fe/H\] nodes (held at −2
+    and +0.18), so two nodes on one cell count its error once. Light and colour are spread over
+    the 20 sub-bins by the single-star light (evenly where there is none); a sub-bin's light is
+    held at zero, with its colour sums then zero, and each colour sum is held at zero. Counts
+    spread the count difference by the single-star counts; each edge takes the larger of the
+    single and corrected cumulative counts, then a running maximum. Only under
+    `MassFunctionKind::default()`, which the fit drew from: a Kroupa galaxy takes none (the
+    ruling's deviation). Each snapshot keeps the applied light, its standard error and the clamped
+    light: `LuminosityFunction::{pair_light, pair_light_sigma}` are new, which T5.c reads and T17
+    records the band's correction and 1σ from. `parallel_build_equals_serial`'s pin moved from
+    `0x6ca2_bafb_4c81_c7b4` to `0x8c44_443c_67ac_13bf` (the correction, and `bits` hashing the
+    snapshots' pair fields).
+  - **Gates** (`the_pair_correction_is_known_to_two_percent_and_clamps_under_half_a_percent`).
+    Per site and layer ("T5.d gate reading"): the 1σ under 2% and the clamped light under 0.5% of
+    each layer's light at T5.c's two sites, summed over the components by their systems there (the
+    fit's error is shared, so it adds linearly). Measured (correction, 1σ, clamped): solar circle
+    C −2.07%, 0.29%, 0.000%; D −10.16%, 0.72%, 0.019%; E −21.21%, 1.11%, 0.008%; bulge C −3.24%,
+    0.29%, 0.000%; D −9.70%, 0.82%, 0.034%; E −13.32%, 0.55%, 0.019%. The component guard, every
+    one of the fixture's 53 component bins with its layers weighted by its systems and C, D and E
+    folded together: the largest 1σ is 1.17% (the old thin disc at \[Fe/H\] −1) and the largest
+    clamp 0.32% (the old thin disc at −0.5; the thick disc 0.29%, the halo at −0.6 0.17%), all
+    within 2% and 0.5%. At 2 × 10⁴ systems in C one bin had failed (the old thin disc at −0.5,
+    2.38%), 64% of its error from one C cell, which raising C cleared. A failing bin's message
+    names the cells that carry its error (`binary_light::cell_errors`, test-only). Read per
+    component and layer, old components' D and E reach a 1σ of 3–35% and clamps up to 22%, on a
+    few per cent of the sites' D and E light.
+  - **T5.c after the correction** (`luminosity_matches_realised_cells` passes, 772 s at load
+    25–30). Realised against tabulated light, single-star tables then corrected: solar circle C
+    −6.4% → −4.4%, D −28.6% → −20.4%, E +15.5% → +47.7%; bulge C −6.7% → −3.6%, D −9.6% →
+    +0.5%, E −17.6% → −4.5%; A, B and the brown dwarfs are not corrected (+2.9%, −2.4%, +5.6%;
+    −4.2%, +0.7%, −6.3%). The new gate holds the cells' paired deficit against the tables' within
+    Z √(Σ d² + σ²), with d each system's pair-evolved less single-star light and σ the fit's: solar
+    circle C 9.4% against 2.1%, D 21.0% against 10.3%, E −1.0% against 21.8%; bulge C 3.8%
+    against 3.3%, D 10.5% against 10.1%, E 10.2% against 13.8%, all within. The solar circle's E
+    rests on 7,089 systems whose light is a handful of bright stars (6 brighter than −3), and is
+    evidence of nothing either way.
+  - **Caps after the correction** (cut 7.95; `caps_near_the_sun_and_in_the_nuclear_disc`, whose C
+    bracket is now its 1,000 ly floor and its rule bound, as "T5.d caps" rules; D and E keep ×3).
+    Near the Sun C 6,764 → 8,193 ly, D 8,193 → 9,925, E 21,369 (unchanged); nuclear disc C 116, D
+    204 → 205, E 362. At 2 × 10⁴ systems C's cap had been 13,232 ly on one fit system (a giant
+    branch and helium-star core merger whose helium giant reaches M_V −6 to −7 for some 10⁵ yr).
+    **For T17:** C's cap is set by rare pair-channel phases whose fitted rate rests on few
+    systems: the table's net excess of stars brighter than the cut less the cap's modulus (M_V
+    −4.05) is some 3 stars of C's 2.6 × 10⁷ fit systems (D: 31 below −4.47; E: 286 below −6.13),
+    and C's cap moved by two radial nodes on them. T17 re-derives open question 19's C figure with
+    this; the six points of `caps_converge_in_rays` are recorded in `layer_caps`' doc comment.
+  - **Finding: the correction is smaller than the ruling's first estimate near the Sun.** The
+    ruling scaled T5.c's one sample, 9% and 21% in the solar circle's C and D; the fit gives 2.1%
+    and 10.2%. With the ruling's harness shares (all sky C 0.775, D 0.161, E 0.038) the
+    uncorrected band near the Sun is about 4% (0.04 mag) too bright over the whole sky, 5% in the
+    plane and 3% at high latitude, and D carries as much of it as C. T17 measures it at its four
+    points. These figures measure the generator against itself: the literature brackets them
+    (Li and Han 2008, ApJ 685, 225, about 11% less flux in 1–15 Gyr populations of 100% binaries;
+    Eldridge and Stanway 2009, MNRAS 400, 1019, fewer red supergiants), without a V deficit per
+    mass band to test them against.
+  - **Found: protostar mergers (a plan 11 bug, for its 20 → 21 batch).** A pair whose
+    pre-main-sequence radii overlap is merged at age 0 and shown, until the product reaches the
+    main sequence, as a 0.010 M☉ Substellar object (M_V 17.4) beside a NoRemnant: for example
+    the fit's D cell 80, index 144 (ID 0x6214596800000090), whose 0.755 and 0.425 M☉ stars read
+    that way at 10⁶ and 3 × 10⁷ yr and as a 1.18 M☉ merger product at 10⁹ yr. It puts differences
+    of about 10⁻³ L☉,V and +0.003 to +0.025 stars a system at M_V 17–19 in the young cells:
+    negligible light, nothing for the caps. The young fingerprint cell marks the tables stale when
+    plan 11 fixes it, and they are refitted then.
+  - **No `GENERATOR_VERSION` bump.** Nothing served or golden reads the tables yet (A.5).
 - **The A3 interim's Class I sources (T5).** `is_dark_in_v` treats every Class I protostar as dark;
   a few per cent of them, seen pole-on down an outflow cavity (A<sub>V</sub> about 1.5; Whitney et
   al. 2003a, ApJ 591, 1049, §2 and Fig. 3), would show in V. Plan 06's A3 decides.

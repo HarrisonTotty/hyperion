@@ -1,0 +1,21 @@
+# What pair evolution changes in layer D's luminosity tables (rendering plan R06, R06.T5.d; decided
+# 2026-10-03, decision-r06-tables.md): per cell of [Fe/H] node and log-age bin, the mean per born
+# system of the pair-evolved less single-evolved light, colour and count in 1-mag M_V bins, from
+# 20,000 systems a cell. The parameters besides systems_per_cell are constants of the code
+# (`hyperion_sim::sky::binary_light`, the luminosity tables' bin edges in `sky::luminosity`, and the
+# task's chunk, which orders each cell's sums), recorded here so that the inputs hash covers them;
+# the task refuses a manifest that disagrees with the code.
+task = "sky_binary_light_d"
+
+[params]
+systems_per_cell = 20_000
+fe_h_nodes = [-2.0, -1.0, -0.5, 0.0, 0.18]
+first_age_log10 = 5.0
+age_step_dex = 0.2
+age_bins = 26
+last_age_years = 1.5e10
+magnitude_bins = 32
+brightest_magnitude = -12.0
+magnitude_step = 0.05
+chunk = 250
+galaxy_seed = 0x5b1a_0005_0000_5eed

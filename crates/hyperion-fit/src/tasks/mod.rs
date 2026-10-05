@@ -13,6 +13,7 @@ pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
 pub mod pulsars;
+pub mod sky_binary_light;
 pub mod sky_envelope;
 pub mod star_colour;
 pub mod stellar_fates;

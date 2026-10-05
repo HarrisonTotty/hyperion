@@ -1,0 +1,15 @@
+# The smoke run of sky_binary_light_c: two systems a cell, a second or two.
+task = "sky_binary_light_c"
+
+[params]
+systems_per_cell = 2
+fe_h_nodes = [-2.0, -1.0, -0.5, 0.0, 0.18]
+first_age_log10 = 5.0
+age_step_dex = 0.2
+age_bins = 26
+last_age_years = 1.5e10
+magnitude_bins = 32
+brightest_magnitude = -12.0
+magnitude_step = 0.05
+chunk = 250
+galaxy_seed = 0x5b1a_0005_0000_5eed
