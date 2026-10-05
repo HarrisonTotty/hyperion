@@ -13,8 +13,10 @@ import {
   controlEv100,
   ev100FromAverageLuminance,
   onMetering,
+  programTriple,
   type ExposureCommandResult,
   type ExposureControl,
+  type ExposureProgram,
   type ExposureTriple,
 } from "../photometry/exposure";
 import {
@@ -142,26 +144,11 @@ export function smoothEv(currentEv: number, targetEv: number, dtS: number): numb
   return targetEv - sign * remaining;
 }
 
-/**
- * The `AUTO` program's fixed aperture and shutter, from R06's `DEFAULT_VIEW_CAMERA` (N = 1.4,
- * t = 1/30 s), passed in where the controller is made; the sensitivity is solved (Design note 11).
- */
-export interface ExposureProgram {
-  readonly aperture: number;
-  readonly shutterS: number;
-}
-
-/**
- * The `AUTO` program of a view: f/1.4 and 1/30 s, Design note 11's aperture and shutter (R06's
- * `DEFAULT_VIEW_CAMERA`'s), the sensitivity solved.
- */
-export const VIEW_AUTO_PROGRAM: ExposureProgram = { aperture: 1.4, shutterS: 1 / 30 };
-
 /** A view's exposure as R02's panel, R06's `cameraLimitV` and wireframe instrument views read it. */
 export interface ExposureReading {
   /** The applied EV100. */
   readonly ev100: number;
-  /** R02's triple; under `AUTO` and `INHIBITED` from the sensitivity-priority program. */
+  /** R02's triple: the view camera's program at every level, or `MAN`'s own (R07.T13.c). */
   readonly triple: ExposureTriple;
   readonly control: ExposureControl;
   readonly meter: MeterMode;
@@ -169,18 +156,10 @@ export interface ExposureReading {
   readonly source: ViewId;
 }
 
-/**
- * The triple of `ev100` under a sensitivity-priority program: N and t fixed, S = 100 × (N² ÷ t) ×
- * 2^−EV100, from R02's EV100 = log₂(N² ÷ t) − log₂(S ÷ 100).
- */
-export function programTriple(program: ExposureProgram, ev100: number): ExposureTriple {
-  const { aperture, shutterS } = program;
-  return { aperture, shutterS, iso: 100 * ((aperture * aperture) / shutterS) * 2 ** -ev100 };
-}
-
 /** What a controller starts from. */
 export interface AutoExposureOptions {
   readonly source: ViewId;
+  /** The view's camera, R02's `VIEW_CAMERA` where the controller is made, which sets the triple. */
   readonly program: ExposureProgram;
   readonly control: ExposureControl;
   readonly meter: MeterMode;

@@ -58,6 +58,7 @@ import {
   controlEv100,
   DEFAULT_EXPOSURE,
   type ExposureControl,
+  VIEW_CAMERA,
 } from "../../view/photometry/exposure";
 import {
   cameraKinematics,
@@ -76,11 +77,7 @@ import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/h
 import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
-import {
-  AutoExposure,
-  type ExposureReading,
-  VIEW_AUTO_PROGRAM,
-} from "../../view/post/autoExposure";
+import { AutoExposure, type ExposureReading } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
 import { BandLayer } from "../../view/sky/band";
 import { HostDiscLayer } from "../../view/sky/disc";
@@ -686,7 +683,7 @@ function ViewStage({
     // applied to it when the display's control changes to one the controller did not publish.
     const auto = new AutoExposure({
       source: VIEW_ID,
-      program: VIEW_AUTO_PROGRAM,
+      program: VIEW_CAMERA,
       control: inputsRef.current.exposure,
       meter: inputsRef.current.meter,
     });
@@ -1238,6 +1235,7 @@ function ViewStage({
           <MeterControl
             meter={meter}
             reading={shown.reading}
+            meteredEv100={shown.meteredEv100}
             onMeter={onMeterChange}
             designator={PRIMARY_NAME}
           />

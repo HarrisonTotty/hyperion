@@ -236,7 +236,8 @@ alpha: f64 }`, each array in the order B, V, R for the display's b, g, r.
 
 `SkyModel`, `useSky(requests, cameras)`, `eyeLimitAt(model, direction, fieldFactor)`,
 `cameraLimitV(sensor, exposure: ExposureTriple, fovDeg, backgroundCdM2)` with `DEFAULT_VIEW_CAMERA`,
-where `ExposureTriple` is R02's `{ aperture, shutterS, iso }` (the argument of `ev100FromTriple`),
+where `ExposureTriple` is R02's `{ aperture, shutterS, iso, ndEv? }` (the argument of
+`ev100FromTriple`; `ndEv` from R07.T13.c),
 `decodeSky` in `view/sky/decode.worker.ts` (off the main thread, as R03 asks), `bakeSkyCube(engine,
 stars, setting)`, `packRgb9e5` (TypeScript reference), `SkySprites`, `BandLayer`, `HostDiscLayer`
 with `glareSources(camera, viewport): GlareSource[]` (R07's type), `DEFAULT_EYE_OBSERVER` (`{
@@ -356,11 +357,13 @@ COPY_SRC`. `writePackedCubeLevelFromBuffer` reads six faces one after another, e
   - Materials' `additive` blend is colour (src-alpha, one) and alpha (zero, one), so a sky
     material writes alpha 1 and keeps the destination alpha, as R02's sprites do.
 
-- **R07:** `ExposureReading.triple` (`{ aperture, shutterS, iso }`, R07.T13.a), which `cameraLimitV`
-  reads once R07 meters; until then the manual triple of R02. R07's `METER_CLASS` (`hostDisc: 0`),
-  which the disc pass writes in the HDR target's alpha, with every translucent sky pass (sprites,
-  band) blending alpha as source zero, destination one so the class survives (R07's Design note 10),
-  which R01's `blend: "additive"` does (R01 Design note 21, R01.T8.i); and R07's
+- **R07:** R07's view camera (`VIEW_CAMERA`, `programTriple`, in R02's `exposure.ts`, R07.T13.c),
+  whose deepest triple the request and the cull take and whose triple at the shown exposure the
+  label's limit takes (R07.T13.e); `ExposureTriple` gains `ndEv`, applied as a transmission 2^−ndEv.
+  R07's `METER_CLASS` (`hostDisc: 0`), which the disc pass writes in the HDR target's alpha, with
+  every translucent sky pass (sprites, band) blending alpha as source zero, destination one so the
+  class survives (R07's Design note 10), which R01's `blend: "additive"` does (R01 Design note 21,
+  R01.T8.i); and R07's
   `GlareSource { direction; angularRadiusRad; excessLuminance: Rgb }` (cd/m² above 65,504), which
   `HostDiscLayer.glareSources` returns (R07's Design note 12). R06 lands before R07 and needs
   nothing of R07 at build time: where R07's `post/` module does not yet exist, R06.T13.e declares
@@ -743,8 +746,12 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     mag (medium confidence). A bright planet in frame takes the limit to about V 2.5–3.5 only when about 12 of 21
     stops come from gain, which raises read noise in electrons (σ_post S_base ÷ S) rather than
     cutting photons, and 9 from shutter and aperture (6.8 mag); 21 stops all from photons would give
-    about −5.9. The brainstorm's "about V 10" is the 60° figure to 0.1 mag; the plan's
-    figure is always stated with the field of view.
+    about −5.9. R07's view camera fixes the split (decision-r07-exposure-camera): f/1.4 throughout,
+    12 stops of gain at 1/30 s from ISO 409,600 to 100, then the shutter to 1/8,000 s and an ND
+    filter, which gives V 2.56 at 60° at EV100 15; darker than EV100 −6.12 the picture is pushed
+    digitally and the limit stays at the high-gain figure. The sensitivity never falls below base,
+    where the gain term would not hold. The brainstorm's "about V 10" is the 60° figure to 0.1 mag;
+    the plan's figure is always stated with the field of view.
 19. **Humphreys–Davidson, protostars and giants: the leans handed to plan 06** (researched
     2026-09-29, a physics ruling left to plan 06). The cause of the excess is in the code: under the
     default `WindRecipe::Modern` (`stellar/sse/wind.rs`) a star beyond the limit loses a constant
@@ -1741,8 +1748,10 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   question 16 leaves its parameters open, and the performance runs and the owner's sense of the
   main screen may move them. They are one table in `cameraLimit.ts`. The model is optimistic for
   old analogue cameras by about 2.5 mag (CAMS, Design note 18), and the split of a large exposure
-  change between gain and photons is R07's metering, which sets how far a bright planet takes the
-  limit (V 2.5–3.5 under Design note 18's split).
+  change between gain and photons is R07's view camera (decision-r07-exposure-camera): 12 stops of
+  gain, then shutter and ND, which takes the limit to V 2.56 at 60° for a sunlit planet at
+  EV100 15. A camera view's request asks the camera's deepest limit, V 10.06 at 60°, so it holds
+  fewer stars than under R02's old f/1, 2 s default (V 13.7, cut at `MAX_CUT_V`'s 11).
 - **The camera cut is in V.** The census and `camera_limit_v` cut in V, so a star redder than the
   Sun that only its camera band term lifts over a camera's limit is not listed (a late M dwarf up
   to 2–3 mag below the cut); its light is in the band. Padding the flux bound by the most negative

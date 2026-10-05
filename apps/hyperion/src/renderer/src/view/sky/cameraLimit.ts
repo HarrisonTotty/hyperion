@@ -7,8 +7,12 @@
  * detected when its peak pixel's signal S reaches k √(S + N_b), with S = f_pk Φ₀ A η t 10^(−0.4 V)
  * electrons and N_b the pixel's sky electrons plus dark current plus the read noise's variance,
  * σ_r² = σ_pre² + (σ_post S_base ÷ S_iso)², so that sensitivity acts as gain: it cuts the read
- * noise referred to the input, not the photons. The aperture is f ÷ N with f = (sensor width ÷ 2)
- * ÷ tan(fov ÷ 2), so the signal grows as f² as the view narrows. Φ₀ = 8.8 × 10⁹ photons s⁻¹ m⁻²
+ * noise referred to the input, not the photons. The gain is the sensitivity within [S_base, S_max]:
+ * below base the analogue gain stays at base, and beyond the top a digital push multiplies signal
+ * and noise alike (decision-r07-exposure-camera). The aperture is f ÷ N with f = (sensor width ÷ 2)
+ * ÷ tan(fov ÷ 2), so the signal grows as f² as the view narrows; an ND filter of x EV passes 2^−x
+ * of the light, star and sky alike, as a shutter of t × 2^−x would, while the dark current, which
+ * no filter cuts, builds over the whole t. Φ₀ = 8.8 × 10⁹ photons s⁻¹ m⁻²
  * for V = 0 in V (Bessell, Castelli and Plez 1998's zero point). η is the Sun's, η☉; a star's own is
  * η☉ × 10^(−0.4 c) with c its camera band term, so a star is in the view when V + c is brighter
  * than the limit. The defaults give V 9.85–10.1 at 60° over μ 22.4–24, 11.5–11.75 at 30° and
@@ -49,6 +53,9 @@ export interface ViewCameraSensor {
   readonly readNoisePostE: number;
   /** The base sensitivity, ISO, S_base. */
   readonly baseIso: number;
+  /** The top gain, ISO, S_max (Design note 18's high gain): beyond it a sensitivity is a digital
+   *  push, adding no gain. */
+  readonly maxIso: number;
   /** The dark current, e⁻ s⁻¹ per pixel. */
   readonly darkCurrentEPerS: number;
   /** The fraction of a star's electrons in its peak pixel, f_pk. */
@@ -66,7 +73,9 @@ export interface ViewCameraSensor {
  * `packages/protocol/fixtures/camera_eta_sun.json` pins on both sides; σ_pre = 1.2 e⁻ and 5 e⁻ in all at base ISO
  * 100, so σ_post = √(5² − 1.2²) = 4.854 e⁻; f_pk = 0.35; k = 3. Design note 18 names no
  * dark current, and it is taken as 0: at 1/30 s a dark current of 0.1 e⁻ s⁻¹ adds 0.003 e⁻, a
- * thousandth of the sky's 6 e⁻ a pixel at 60° (R06 Risks, "The camera model's defaults").
+ * thousandth of the sky's 6 e⁻ a pixel at 60° (R06 Risks, "The camera model's defaults"). The top
+ * gain is ISO 409,600, Design note 18's high gain 12 stops above base, the expanded top of Sony's
+ * α7S III and FX6 (decision-r07-exposure-camera), and R02's `VIEW_CAMERA` holds the same range.
  */
 export const DEFAULT_VIEW_CAMERA: ViewCameraSensor = {
   widthM: 0.036,
@@ -75,6 +84,7 @@ export const DEFAULT_VIEW_CAMERA: ViewCameraSensor = {
   readNoisePreE: 1.2,
   readNoisePostE: Math.sqrt(5 ** 2 - 1.2 ** 2),
   baseIso: 100,
+  maxIso: 409_600,
   darkCurrentEPerS: 0,
   peakFraction: 0.35,
   threshold: 3,
@@ -103,7 +113,8 @@ export interface CameraLimitParts {
  * @param fovDeg - The view's horizontal field of view, degrees, in (0, 180).
  * @param backgroundCdM2 - The sky's luminance behind the stars, cd/m², 0 or more (the band
  *   texel's).
- * @throws RangeError for a non-finite or non-positive input.
+ * @throws RangeError for a non-finite or non-positive input, or an ND that is negative or not
+ *   finite.
  */
 export function cameraLimitParts(
   sensor: ViewCameraSensor,
@@ -120,6 +131,10 @@ export function cameraLimitParts(
       throw new RangeError(`a camera limit needs a positive ${name}, not ${value}`);
     }
   }
+  const ndEv = exposure.ndEv ?? 0;
+  if (!(Number.isFinite(ndEv) && ndEv >= 0)) {
+    throw new RangeError(`a camera limit needs an ND of 0 EV or more, not ${ndEv}`);
+  }
   // A black background is physical: the sky adds nothing and read noise sets the limit.
   if (!(Number.isFinite(backgroundCdM2) && backgroundCdM2 >= 0)) {
     throw new RangeError(`a camera limit needs a background of 0 or more, not ${backgroundCdM2}`);
@@ -130,15 +145,16 @@ export function cameraLimitParts(
   const focalM = sensor.widthM / 2 / Math.tan(((fovDeg / 2) * Math.PI) / 180);
   const apertureM = focalM / exposure.aperture;
   const areaM2 = Math.PI * (apertureM / 2) ** 2;
-  const collected = areaM2 * sensor.etaSun * exposure.shutterS;
+  const collected = areaM2 * sensor.etaSun * exposure.shutterS * 2 ** -ndEv;
   const pixelArcsec = (sensor.widthM / sensor.widthPx / focalM) * ARCSEC_PER_RAD;
   const skyPhotonsPerArcsec2 =
     backgroundCdM2 > 0
       ? V0_PHOTON_FLUX_PER_S_M2 * 10 ** (-0.4 * surfaceBrightnessV(backgroundCdM2))
       : 0;
   const skyElectrons = skyPhotonsPerArcsec2 * pixelArcsec ** 2 * collected;
+  const gainIso = Math.min(Math.max(exposure.iso, sensor.baseIso), sensor.maxIso);
   const readNoiseE = Math.sqrt(
-    sensor.readNoisePreE ** 2 + ((sensor.readNoisePostE * sensor.baseIso) / exposure.iso) ** 2,
+    sensor.readNoisePreE ** 2 + ((sensor.readNoisePostE * sensor.baseIso) / gainIso) ** 2,
   );
   const floor = skyElectrons + sensor.darkCurrentEPerS * exposure.shutterS + readNoiseE ** 2;
   const k = sensor.threshold;
