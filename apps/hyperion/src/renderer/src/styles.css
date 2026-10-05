@@ -3344,17 +3344,19 @@ body {
   margin: 0 0 0.5rem;
 }
 
+/*
+ * The camera's setting (`.readout`): one member per row, its value right of its label, each value
+ * wide enough for the longest, `1.25E-4 s`, `409,600 ↑` and `28.1 EV ↑`, so that nothing beside it
+ * moves. Its rows stand 0.25rem apart, not `.readout`'s 0.5rem, to spare the side column's height,
+ * which is already short of room (plan R07, T19's side column, pending the owner).
+ */
 .view-exposure__triple {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 1rem;
+  gap: 0.25rem 1.5rem;
   margin: 0 0 0.5rem;
 }
 
 .view-exposure__triple dd {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  min-width: 9ch;
 }
 
 .view-exposure__commands {
