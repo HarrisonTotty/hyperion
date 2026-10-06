@@ -1178,14 +1178,14 @@ describe("mesh bodies (T9)", () => {
     expect(plan.steps.filter((step) => step.kind === "disc")).toHaveLength(1);
   });
 
-  it("draws no figure and no limb for a mesh body wholly off the view, and keeps its regime", () => {
+  it("neither promotes a body wholly off the view nor promotes through it the body clear of both (T19.e)", () => {
     const { bodies, hosts } = sceneOfThree();
     const planet = bodies[0];
     if (planet === undefined) {
       throw new Error("the scene has no planet");
     }
-    // Beside the camera, across its plane: its footprint is the whole view's, so the depth writer
-    // over the planet promotes it too (and, through it, the body clear of both).
+    // Beside the camera, across its plane, over the planet's writer: its footprint, which
+    // `sphereScreenRect` made the whole view's, is none since T19.e.
     const beside: LitBodyInput = {
       ...planet,
       id: "0200080020000000.0304",
@@ -1199,8 +1199,10 @@ describe("mesh bodies (T9)", () => {
       { ...OPTIONS, depthWriters: writer === null ? [] : [writer] },
       new Map(all.map((b) => [b.id, "disc" as const])),
     );
-    expect(plan.regimes.get(beside.id)).toBe("mesh");
-    expect(plan.meshes.map((m) => plan.discs[m.index]?.body)).not.toContain(beside.id);
+    expect([beside.id, CLEAR].map((id) => (id === undefined ? id : plan.regimes.get(id)))).toEqual([
+      "disc",
+      "disc",
+    ]);
   });
 
   it("promotes nothing without a depth writer", () => {

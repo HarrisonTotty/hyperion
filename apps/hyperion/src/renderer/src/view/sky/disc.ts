@@ -7,7 +7,8 @@
  * is three pixels or more is drawn analytically by `disc.wgsl` into the HDR scene target, writing
  * R07's meter class `hostDisc`; a smaller one is a point sprite of the same illuminance, π L̄ sin²ρ.
  * The disc lies on its limb's plane, so that a body nearer than the star hides it and a mesh body
- * beyond it is hidden (R07.T9's limb depth).
+ * beyond it is hidden (R07.T9's limb depth). It is drawn over its screen rectangle only, and not at
+ * all wholly off the view (R07.T19.e).
  * The light the target's 65,504 cannot hold is handed to R07's glare pass as one `GlareSource` per
  * disc, which in an eye view is kept for a disc up to 45° outside the frame (R07 Design note 12).
  * The discs are drawn only in the photorealistic style (decision record item 1).
@@ -15,7 +16,7 @@
 
 import { formatBodyId, type HostDiscDto } from "@hyperion/protocol";
 
-import { add, cross, dot, norm, normalise, sub, vec3, type Vec3 } from "../../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import type { CameraPose } from "../camera/pose";
 import {
   NEAR_PLANE_M,
@@ -40,6 +41,12 @@ import { sceneOrigins, type ViewScene } from "../scene/model";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import type { SpriteStar } from "../wireframe/drawList";
 import {
+  type ScreenRect,
+  sphereOutsideView,
+  sphereScreenRect,
+  WIREFRAME_MESHES,
+} from "../wireframe/submit";
+import {
   angularRadiusRad,
   discExcessLuminanceRgb,
   discIlluminanceRgbLx,
@@ -47,7 +54,7 @@ import {
 } from "./discFlux";
 import discWgsl from "./shaders/disc.wgsl?raw";
 
-/** The disc's full-screen draw into the HDR scene target, on the limb's plane. */
+/** The disc's draw into the HDR scene target: a quad over its rectangle, on the limb's plane. */
 export const DISC_MATERIAL: WgslMaterialSpec = {
   name: "sky:hostDisc",
   displayName: "STAR DISCS",
@@ -60,6 +67,7 @@ export const DISC_MATERIAL: WgslMaterialSpec = {
     { name: "limbAlpha", type: "vec4f" },
     { name: "exposure", type: "vec4f" },
     { name: "inverseLimbDistance", type: "f32" },
+    { name: "rect", type: "vec4f" },
   ],
   samplers: [],
   cullMode: "none",
@@ -104,14 +112,21 @@ export interface HostDiscRecord {
    * that holds the limb, R² ÷ d nearer than the star's centre.
    */
   readonly inverseLimbDistancePerM: number;
+  /** The view's pixels the draw covers: its quad, px (R07.T19.e). */
+  readonly rect: ScreenRect;
 }
 
 /**
  * A host's disc record at its placement.
  *
  * @param exposureScale - The frame's pre-exposure scale (R02's `exposureScale`).
+ * @param rect - The pixels the draw covers: {@link sphereScreenRect} of the star (R07.T19.e).
  */
-export function hostDiscRecord(placement: HostPlacement, exposureScale: number): HostDiscRecord {
+export function hostDiscRecord(
+  placement: HostPlacement,
+  exposureScale: number,
+  rect: ScreenRect,
+): HostDiscRecord {
   const { host, direction, distanceM } = placement;
   const r = host.radius_m;
   return {
@@ -124,6 +139,7 @@ export function hostDiscRecord(placement: HostPlacement, exposureScale: number):
     exposureScale,
     // d cos²ρ = (d² − R²) ÷ d, factored so that it keeps its digits near the star.
     inverseLimbDistancePerM: distanceM / ((distanceM - r) * (distanceM + r)),
+    rect,
   };
 }
 
@@ -138,8 +154,8 @@ export interface HostDiscPixel {
 }
 
 /**
- * The `f64` twin of `disc.wgsl`: the pixels a host disc's full-screen draw lights, those whose
- * centre's ray falls within the disc, each with its light and its limb plane's depth.
+ * The `f64` twin of `disc.wgsl`: the pixels of the record's rectangle that its draw lights, those
+ * whose centre's ray falls within the disc, each with its light and its limb plane's depth.
  */
 export function rasteriseHostDisc(
   record: HostDiscRecord,
@@ -148,10 +164,10 @@ export function rasteriseHostDisc(
 ): HostDiscPixel[] {
   const s = 1 / Math.tan(camera.fovXRad / 2);
   const aspect = viewport.widthPx / viewport.heightPx;
-  const { axis, sinRho } = record;
+  const { axis, sinRho, rect } = record;
   const pixels: HostDiscPixel[] = [];
-  for (let yPx = 0; yPx < viewport.heightPx; yPx += 1) {
-    for (let xPx = 0; xPx < viewport.widthPx; xPx += 1) {
+  for (let yPx = rect.topPx; yPx < rect.bottomPx; yPx += 1) {
+    for (let xPx = rect.leftPx; xPx < rect.rightPx; xPx += 1) {
       const ndcX = ((xPx + 0.5) / viewport.widthPx) * 2 - 1;
       const ndcY = 1 - ((yPx + 0.5) / viewport.heightPx) * 2;
       // The ray at view depth 1, whose dot with the axis carries the plane's depth, on the galactic
@@ -262,25 +278,30 @@ function centrePixelRad(camera: ProjectionCamera, viewport: Viewport): number {
 /** The host stars' discs on the GPU. */
 export class HostDiscLayer {
   readonly #material: MaterialHandle;
-  readonly #triangle: MeshHandle;
-  /** The last frame's hosts drawn as discs; those drawn as sprites cast no glare source. */
+  readonly #quad: MeshHandle;
+  /**
+   * The last frame's hosts drawn as discs, those off the view among them; those drawn as sprites
+   * cast no glare source.
+   */
   #discs: ReadonlyArray<HostPlacement> = [];
   #exposureScale = 1;
 
   constructor(engine: RenderEngine) {
     this.#material = engine.createMaterial(DISC_MATERIAL);
-    this.#triangle = engine.createMesh({
-      name: "sky disc triangle",
-      positions: new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]),
-      indices: null,
-      topology: "triangle-list",
-      attributes: {},
-    });
+    // R02's quad, (0, 0) to (1, 1) across the record's rectangle.
+    this.#quad = engine.createMesh({ ...WIREFRAME_MESHES.quad, name: "sky disc quad" });
   }
 
   /**
-   * The frame's discs: a draw for each disc of three pixels or more across, a sprite for each
-   * smaller one.
+   * The frame's discs: a draw for each disc of three pixels or more across that may light a pixel
+   * of the view, over its screen rectangle, and a sprite for each smaller one.
+   *
+   * @remarks
+   * A disc wholly beyond a side plane of the view widened by `OUTSIDE_VIEW_MARGIN_PX` has no draw
+   * ({@link sphereOutsideView}), and each other draw covers only {@link sphereScreenRect} of the
+   * star: the full-view draw lit no pixel elsewhere, each fragment rejecting itself (R07.T19.e). A
+   * disc off the view still casts its glare source ({@link HostDiscLayer.glareSources}), so that an
+   * eye view takes its glare from up to 45° outside it.
    *
    * @param exposureScale - The frame's pre-exposure scale (R02's `exposureScale`).
    */
@@ -308,18 +329,26 @@ export class HostDiscLayer {
         continue;
       }
       discs.push(placement);
-      const record = hostDiscRecord(placement, exposureScale);
+      const centreM = scale(axis, distanceM);
+      if (sphereOutsideView(centreM, host.radius_m, camera, viewport)) {
+        continue;
+      }
+      const rect = sphereScreenRect(centreM, host.radius_m, camera, viewport);
+      if (rect === null) {
+        continue;
+      }
+      const record = hostDiscRecord(placement, exposureScale, rect);
       draws.push({ star: host.star, item: this.#item(record), record });
     }
     this.#discs = discs;
     return { draws, sprites };
   }
 
-  /** A record's draw: the full-screen triangle on the limb's plane. */
+  /** A record's draw: the quad over its rectangle, on the limb's plane. */
   #item(record: HostDiscRecord): DrawItem {
-    const { axis, centralCdM2: central, limbC, limbAlpha } = record;
+    const { axis, centralCdM2: central, limbC, limbAlpha, rect } = record;
     return {
-      mesh: this.#triangle,
+      mesh: this.#quad,
       material: this.#material,
       offsetFromCameraM: new Float32Array(3),
       uniforms: {
@@ -329,6 +358,7 @@ export class HostDiscLayer {
         limbAlpha: new Float32Array([limbAlpha[0], limbAlpha[1], limbAlpha[2], 0]),
         exposure: new Float32Array([record.exposureScale, 0, 0, 0]),
         inverseLimbDistance: new Float32Array([record.inverseLimbDistancePerM]),
+        rect: new Float32Array([rect.leftPx, rect.topPx, rect.rightPx, rect.bottomPx]),
       },
       textures: {},
     };

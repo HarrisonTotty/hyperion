@@ -33,6 +33,7 @@ import {
   perspectiveReversedInfinite,
   type ProjectionCamera,
   project,
+  toViewAxes,
   type Viewport,
   viewRotation4,
 } from "../camera/projection";
@@ -307,6 +308,59 @@ export function sphereScreenRect(
   return rect.leftPx < rect.rightPx && rect.topPx < rect.bottomPx ? rect : null;
 }
 
+/**
+ * How far past each side of the view {@link sphereOutsideView} looks, px on the image plane.
+ *
+ * @remarks
+ * A disc draws a pixel only where its corners' mean limb angle is at most 0.75 times their gradient
+ * (`OUTSIDE_PX`, `bodyDisc.wgsl`). The gradient is at most √2 times the larger angle a pixel's side
+ * subtends there, so a drawn pixel lies within 1.06 of those angles of the limb. A ray through the
+ * view stands at least m cos(φ′ ÷ 2) of them off a side plane widened by m pixels to a field φ′ on
+ * that axis: 3.35 for 8 px on a 64 px side at 120°. An oblate body's scaled space may shrink the one
+ * angle and grow the other by a ÷ c each, 1.56 together at the record's cap of f = 0.2. So on sides
+ * of 64 px or more, up to 120° on each axis, 8 px clears the 1.06 three times over for a sphere and
+ * twice over at f = 0.2. A side whose field passes 120°, a tall view's height, is outside this
+ * bound; the disc's twin draws no pixel there either, with fields to 144° and f = 0.2
+ * (`regime.test.ts`).
+ *
+ * R06's host disc and the occluder sphere light or write a pixel only where the ray through the
+ * pixel's centre meets the sphere, and the outermost centres lie half a pixel inside each side, so
+ * they need no margin but for their shaders' `f32` (under 10⁻⁶ rad, a pixel at 4K across 10° being
+ * 4.5 × 10⁻⁵ rad). This one serves them with room to spare (`disc.test.ts`, `submit.test.ts`).
+ */
+export const OUTSIDE_VIEW_MARGIN_PX = 8;
+
+/**
+ * Whether a sphere stands wholly beyond one of a view's four side planes, each widened by
+ * {@link OUTSIDE_VIEW_MARGIN_PX}: no ray through the view then meets it or passes near enough its
+ * limb to draw a pixel, wherever it stands. It holds behind the camera and across the camera's
+ * plane, where {@link sphereScreenRect} gives the whole view.
+ *
+ * @remarks
+ * Nothing is drawn for such a sphere: no occluder sphere ({@link packWireframe}), no lit body's
+ * disc and no footprint for promotion (R07's `bodies/draw.ts` and `bodies/regime.ts`), and no host
+ * disc (R06's `sky/disc.ts`; R07.T19.e).
+ *
+ * @param centreM - The sphere's centre from the camera, m (`f64`).
+ */
+export function sphereOutsideView(
+  centreM: Vec3,
+  radiusM: number,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): boolean {
+  const view = toViewAxes(centreM, camera.orientation);
+  const tanHalf = Math.tan(camera.fovXRad / 2);
+  const marginTan = (OUTSIDE_VIEW_MARGIN_PX * 2 * tanHalf) / viewport.widthPx;
+  const tanX = tanHalf + marginTan;
+  const tanY = (tanHalf * viewport.heightPx) / viewport.widthPx + marginTan;
+  // The view looks down −z: inside the side planes |x| ≤ tanX (−z) and |y| ≤ tanY (−z). Each is the
+  // centre's signed distance beyond the plane of its pair on the centre's side, the larger.
+  const beyondSideM = (Math.abs(view.x) + tanX * view.z) / Math.hypot(1, tanX);
+  const beyondTopM = (Math.abs(view.y) + tanY * view.z) / Math.hypot(1, tanY);
+  return Math.max(beyondSideM, beyondTopM) > radiusM;
+}
+
 /** Where a batch's point lands, px: projected for a view batch, as given for a screen batch. */
 function screenPoint(
   batch: LineBatch,
@@ -377,7 +431,13 @@ export function packWireframe(
   const sphereRows: number[] = [];
   let sphereCount = 0;
   for (const sphere of list.occluderSpheres) {
-    const rect = sphereScreenRect(centreOf(sphere), sphere.radiusM, projection, viewport);
+    const centre = centreOf(sphere);
+    // Behind the camera or across its plane the rectangle is the whole view, each fragment
+    // rejecting itself (R07.T19.e).
+    if (sphereOutsideView(centre, sphere.radiusM, projection, viewport)) {
+      continue;
+    }
+    const rect = sphereScreenRect(centre, sphere.radiusM, projection, viewport);
     if (rect === null) {
       continue;
     }

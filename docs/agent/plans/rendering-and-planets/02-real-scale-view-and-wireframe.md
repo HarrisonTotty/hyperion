@@ -1938,3 +1938,11 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   `just place-ship` (R03.T6's note) places the stand-in so that the nose has a body ahead: by
   default at rest in the first planet's frame, 0.01 au behind it along its orbital velocity, which
   live put planet `/256` of FPF 1Z0P1Z D-35 at 1.50 Gm in the centre of the frame.
+- **Off-view occluder spheres, and the off-view test at R02's level (R07.T19.e, 2026-10-06; a
+  pointer from R07).** `packWireframe` now packs no occluder sphere wholly beyond a side plane of
+  the view widened by `OUTSIDE_VIEW_MARGIN_PX`, 8 px (`sphereOutsideView`), where
+  `sphereScreenRect` gave a sphere behind the camera or across its plane the whole view, each
+  fragment rejecting itself. The sphere writes depth only where a pixel centre's ray meets it, so
+  nothing it wrote is lost. `sphereOutsideView` and `OUTSIDE_VIEW_MARGIN_PX` moved from R07's
+  `bodies/regime.ts` into `wireframe/submit.ts`, beside `sphereScreenRect`, for R06's host discs
+  and R07's lit bodies as well. Recorded in R07's Risks, "Deviations in T19.e, as built".

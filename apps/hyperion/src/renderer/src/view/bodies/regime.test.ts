@@ -2,23 +2,22 @@ import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { add, cross, norm, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { centresJustBeyond, limbPastRightEdge } from "../../test/beyondView";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { angularDiameterPx } from "../wireframe/bodies";
-import { sphereScreenRect } from "../wireframe/submit";
+import { OUTSIDE_VIEW_MARGIN_PX, sphereOutsideView, sphereScreenRect } from "../wireframe/submit";
 import { type DiscRecord, rasteriseDisc } from "./discShading";
 import {
   type LitRegime,
   type LitSphere,
   litRegimes,
   GAS_GIANT_FULL_PASS_BOUNDARY_M,
-  OUTSIDE_VIEW_MARGIN_PX,
   POINT_BELOW_PX,
   promoteOverlapping,
   type ScreenCircle,
   sphereFootprint,
-  sphereOutsideView,
 } from "./regime";
 
 const RAD_PER_DEG = Math.PI / 180;
@@ -279,29 +278,15 @@ describe("a sphere wholly off the view (R07.T19's per-draw cost)", () => {
     };
   }
 
-  /**
-   * Centres just beyond each side plane widened by the margin, at `distanceM` along the plane:
-   * beside the view, level with its corner, across the camera's plane (90° off the axis) and
-   * behind the camera.
-   */
+  /** Centres just beyond each side plane widened by the margin, at `distanceM` along the plane. */
   function justBeyond(camera: ProjectionCamera, viewport: Viewport, distanceM: number): Vec3[] {
-    const tanHalf = Math.tan(camera.fovXRad / 2);
-    const marginTan = (OUTSIDE_VIEW_MARGIN_PX * 2 * tanHalf) / viewport.widthPx;
-    const tanX = tanHalf + marginTan;
-    const tanY = (tanHalf * viewport.heightPx) / viewport.widthPx + marginTan;
-    const sides = [
-      { out: vec3(1, 0, 0), along: vec3(0, 1, 0), tan: tanX, other: tanY },
-      { out: vec3(-1, 0, 0), along: vec3(0, 1, 0), tan: tanX, other: tanY },
-      { out: vec3(0, 1, 0), along: vec3(1, 0, 0), tan: tanY, other: tanX },
-      { out: vec3(0, -1, 0), along: vec3(1, 0, 0), tan: tanY, other: tanX },
-    ];
-    return sides.flatMap(({ out, along, tan, other }) => {
-      const normal = normalise(add(out, vec3(0, 0, tan)));
-      const inPlane = add(scale(out, tan), vec3(0, 0, -1));
-      return [inPlane, add(inPlane, scale(along, other)), along, scale(inPlane, -1)].map((p) =>
-        add(scale(normalise(p), distanceM), scale(normal, RADIUS_M * (1 + 1e-6))),
-      );
-    });
+    return centresJustBeyond(
+      camera.fovXRad,
+      viewport,
+      OUTSIDE_VIEW_MARGIN_PX,
+      distanceM,
+      RADIUS_M * (1 + 1e-6),
+    );
   }
 
   const FIGURES = [
@@ -348,14 +333,29 @@ describe("a sphere wholly off the view (R07.T19's per-draw cost)", () => {
 
   it("keeps a sphere whose limb is within the margin", () => {
     const camera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD_PER_DEG };
-    const tanHalf = Math.tan(camera.fovXRad / 2);
     // Its limb a pixel past the edge: off the view, but within the margin.
-    const pixelTan = (2 * tanHalf) / SMALL.widthPx;
-    const pastEdge = add(
-      scale(normalise(vec3(tanHalf + pixelTan, 0, -1)), 30 * RADIUS_M),
-      scale(normalise(vec3(1, 0, tanHalf + pixelTan)), RADIUS_M),
-    );
+    const pastEdge = limbPastRightEdge(camera.fovXRad, SMALL, 30 * RADIUS_M, RADIUS_M, 1);
     expect(sphereOutsideView(pastEdge, RADIUS_M, camera, SMALL)).toBe(false);
+  });
+
+  it("gives no footprint beside the view, level with a corner, across the camera's plane or behind it (T19.e)", () => {
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD_PER_DEG };
+    const centres = justBeyond(camera, HD, 30 * RADIUS_M);
+    expect(centres.map((c) => sphereFootprint(c, RADIUS_M, camera, HD))).toEqual(
+      centres.map(() => null),
+    );
+  });
+
+  it("keeps the footprint of a sphere the edge cuts (T19.e)", () => {
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD_PER_DEG };
+    const onEdge = scale(normalise(vec3(Math.tan(camera.fovXRad / 2), 0, -1)), 30 * RADIUS_M);
+    expect(sphereFootprint(onEdge, RADIUS_M, camera, HD)).not.toBeNull();
+  });
+
+  it("keeps the footprint of a sphere whose limb is a pixel past the edge (T19.e)", () => {
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD_PER_DEG };
+    const pastEdge = limbPastRightEdge(camera.fovXRad, HD, 30 * RADIUS_M, RADIUS_M, 1);
+    expect(sphereFootprint(pastEdge, RADIUS_M, camera, HD)).not.toBeNull();
   });
 
   it("holds behind the camera and across its plane, where the rectangle is the whole view", () => {

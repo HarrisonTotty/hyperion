@@ -5,6 +5,13 @@
 
 import type { HostDiscDto, SkyBand } from "@hyperion/protocol";
 
+import { normalise, vec3 } from "../geometry/vec3";
+import {
+  NEAR_PLANE_M,
+  perspectiveReversedInfinite,
+  viewRotation4,
+} from "../view/camera/projection";
+import { lookAlong, rotate } from "../view/camera/quaternion";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { AllocationEvent } from "../view/engine/memory";
 import type { RenderEngine } from "../view/engine/types";
@@ -19,7 +26,8 @@ import {
   releaseBakedCube,
 } from "../view/sky/bake";
 import { BandLayer } from "../view/sky/band";
-import { HostDiscLayer } from "../view/sky/disc";
+import { METER_CLASS } from "../view/post/meter";
+import { HostDiscLayer, rasteriseHostDisc } from "../view/sky/disc";
 import { packRgb9e5, unpackRgb9e5 } from "../view/sky/pack";
 import { SPLAT_POINT_FLOATS, splatCpu } from "../view/sky/splatCpu";
 import { type Checks, frameOf, halfTexels, show, texel } from "./harness";
@@ -152,7 +160,9 @@ export async function checkSkyDisc(engine: RenderEngine, checks: Checks): Promis
   target.render(frameOf("sky disc check", [...frame.draws.map((d) => d.item), bandDraw]));
   const texels = halfTexels(await engine.readTexture(target.colour));
   const centre = texel(texels, 64, 32, 32);
-  const corner = texel(texels, 64, 2, 2);
+  // Inside the disc's quad (x and y 21 to 43 since R07.T19.e), 13 px from the centre, outside the
+  // disc's 8.6 px: the shader's own discard, not the quad's edge, leaves it unlit.
+  const outside = texel(texels, 64, 22, 22);
   // The centre: μ ≈ 1, (1, 2, 3) × 1,000 pre-exposed, plus the band's 6 × 10⁻⁴.
   checks.check(
     "R06.T13.e the disc's centre is its central luminance, pre-exposed",
@@ -163,10 +173,10 @@ export async function checkSkyDisc(engine: RenderEngine, checks: Checks): Promis
   );
   checks.check(
     "R06.T13.e the disc's pixels carry the meter class hostDisc, kept under the band drawn over it",
-    centre[3] === 0 && corner[3] === 1,
-    `centre ${show(centre)}, corner ${show(corner)}`,
+    centre[3] === 0 && outside[3] === 1,
+    `centre ${show(centre)}, outside ${show(outside)}`,
   );
-  checks.check("R06.T13.e the disc lights nothing outside it", corner[0] < 1e-2, show(corner));
+  checks.check("R06.T13.e the disc lights nothing outside it", outside[0] < 1e-2, show(outside));
   const bright = discs.frame(
     [{ host: testHost([1e9, 1e9, 1e9]), direction: ahead, distanceM: 1 }],
     look,
@@ -187,6 +197,112 @@ export async function checkSkyDisc(engine: RenderEngine, checks: Checks): Promis
   );
   target.dispose();
   band.dispose();
+  await checkSkyDiscQuad(engine, discs, checks);
+}
+
+/** The disc quad check's view: 60° across 96 × 64, the camera turned. */
+const QUAD_VIEWPORT = { widthPx: 96, heightPx: 64 };
+const QUAD_CAMERA = {
+  orientation: lookAlong(normalise(vec3(0.3, -0.2, -1)), vec3(0, 1, 0)),
+  fovXRad: Math.PI / 3,
+};
+
+/** The agreement of a disc's texel with its twin: `rgba16float`'s rounding and `f32`'s shading. */
+const DISC_TEXEL_RELATIVE = 4e-3;
+
+/**
+ * R07.T19.e: a host disc drawn over its screen rectangle lights the texels its twin lights, with
+ * the twin's light, off the view's centre and cut by the view's edges.
+ */
+async function checkSkyDiscQuad(
+  engine: RenderEngine,
+  discs: HostDiscLayer,
+  checks: Checks,
+): Promise<void> {
+  const tanHalf = Math.tan(QUAD_CAMERA.fovXRad / 2);
+  const tanY = (tanHalf * QUAD_VIEWPORT.heightPx) / QUAD_VIEWPORT.widthPx;
+  // Directions in view axes, and distances, m, for the test host of radius sin 15° m.
+  const cases = [
+    { name: "cut by the right edge", view: vec3(tanHalf, 0.1, -1), distanceM: 2 },
+    { name: "over the top left corner", view: vec3(-tanHalf, tanY, -1), distanceM: 2 },
+    { name: "inside, off the centre", view: vec3(0.2, -0.15, -1), distanceM: 4 },
+  ];
+  const target = engine.createRenderTarget({
+    name: "sky disc quad check",
+    size: QUAD_VIEWPORT,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const results: string[] = [];
+  let pass = true;
+  try {
+    for (const { name, view, distanceM } of cases) {
+      const direction = rotate(QUAD_CAMERA.orientation, normalise(view));
+      const frame = discs.frame(
+        [{ host: testHost([1, 2, 3]), direction, distanceM }],
+        QUAD_CAMERA,
+        QUAD_VIEWPORT,
+        1_000,
+      );
+      const draw = frame.draws[0];
+      if (draw === undefined) {
+        throw new Error(`the disc quad check made no draw ${name}`);
+      }
+      target.render({
+        label: "sky disc quad check",
+        viewRotation: viewRotation4(QUAD_CAMERA.orientation),
+        projection: perspectiveReversedInfinite(
+          QUAD_CAMERA.fovXRad,
+          QUAD_VIEWPORT.widthPx / QUAD_VIEWPORT.heightPx,
+          NEAR_PLANE_M,
+        ),
+        draws: [draw.item],
+        postProcesses: [],
+      });
+      // Each case is read back before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const texels = halfTexels(await engine.readTexture(target.colour));
+      const twin = new Map(
+        rasteriseHostDisc(draw.record, QUAD_CAMERA, QUAD_VIEWPORT).map((p) => [
+          p.yPx * QUAD_VIEWPORT.widthPx + p.xPx,
+          p,
+        ]),
+      );
+      let lit = 0;
+      let mismatched = 0;
+      let worst = 0;
+      for (let index = 0; index < QUAD_VIEWPORT.widthPx * QUAD_VIEWPORT.heightPx; index += 1) {
+        const gpuLit = texels[index * 4 + 3] === METER_CLASS.hostDisc;
+        const pixel = twin.get(index);
+        lit += gpuLit ? 1 : 0;
+        mismatched += gpuLit === (pixel !== undefined) ? 0 : 1;
+        if (gpuLit && pixel !== undefined) {
+          for (const c of [0, 1, 2] as const) {
+            const gpu = texels[index * 4 + c] ?? Number.NaN;
+            const error = Math.abs(gpu - pixel.rgb[c]) / (DISC_TEXEL_RELATIVE * pixel.rgb[c]);
+            worst = Math.max(worst, Number.isFinite(error) ? error : Number.POSITIVE_INFINITY);
+          }
+        }
+      }
+      const { rect } = draw.record;
+      const bounded =
+        (rect.rightPx - rect.leftPx) * (rect.bottomPx - rect.topPx) <
+        QUAD_VIEWPORT.widthPx * QUAD_VIEWPORT.heightPx;
+      pass &&= lit > 20 && mismatched === 0 && worst <= 1 && bounded;
+      results.push(
+        `${name}: ${String(lit)} texels, ${String(mismatched)} not the twin's, colours within ${worst.toFixed(3)} of the tolerance, over (${String(rect.leftPx)}, ${String(rect.topPx)})–(${String(rect.rightPx)}, ${String(rect.bottomPx)})`,
+      );
+    }
+  } finally {
+    target.dispose();
+  }
+  checks.check(
+    "R07.T19.e a host disc drawn over its screen rectangle lights its twin's texels, off the centre and cut by the view's edges",
+    pass,
+    results.join("; "),
+  );
 }
 
 /** A seeded generator in [0, 1), the same sequence on every run. */

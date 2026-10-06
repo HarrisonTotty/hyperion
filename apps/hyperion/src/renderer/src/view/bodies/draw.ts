@@ -70,7 +70,7 @@ import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
 import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
 import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
-import { sphereScreenRect, WIREFRAME_MESHES } from "../wireframe/submit";
+import { sphereOutsideView, sphereScreenRect, WIREFRAME_MESHES } from "../wireframe/submit";
 import {
   type DiscLight,
   type DiscOccluder,
@@ -94,7 +94,6 @@ import {
   promoteOverlapping,
   type ScreenCircle,
   sphereFootprint,
-  sphereOutsideView,
 } from "./regime";
 import {
   DISC_LIMB_DEPTHS,

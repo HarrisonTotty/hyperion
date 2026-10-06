@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import fixture from "../../../../../../../packages/protocol/fixtures/eye_observer.json" with { type: "json" };
 import { cross, dot, norm, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { centresJustBeyond, limbPastRightEdge } from "../../test/beyondView";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aBody, aCameraPose, aViewScene, FIXTURE_SYSTEM } from "../../test/viewFixtures";
 import { viewRay } from "../bodies/discShading";
@@ -10,9 +11,11 @@ import { limbDepthAt, limbDepths } from "../bodies/smoothMesh";
 import { NEAR_PLANE_M, pixelSolidAngle, type Viewport } from "../camera/projection";
 import { quaternionFromAxisAngle, rotate } from "../camera/quaternion";
 import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
+import { OUTSIDE_VIEW_MARGIN_PX, type ScreenRect, sphereScreenRect } from "../wireframe/submit";
 import {
   DISC_MIN_DIAMETER_PX,
   HostDiscLayer,
+  type HostPlacement,
   hostDiscRecord,
   hostPlacements,
   rasteriseHostDisc,
@@ -70,6 +73,11 @@ function sunHost(meanCdM2 = 2e9): HostDiscDto {
 const LOOK = { orientation: { w: 1, x: 0, y: 0, z: 0 }, fovXRad: Math.PI / 3 };
 const VIEWPORT = { widthPx: 1_920, heightPx: 1_080 };
 
+/** The whole of a view: the pixels the full-view draw covered before R07.T19.e. */
+function wholeView(viewport: Viewport): ScreenRect {
+  return { leftPx: 0, topPx: 0, rightPx: viewport.widthPx, bottomPx: viewport.heightPx };
+}
+
 describe("the host discs", () => {
   it("make the Sun from 1 au 0.533° across", () => {
     const diameterDeg = (2 * angularRadiusRad(SUN_RADIUS_M, AU_M) * 180) / Math.PI;
@@ -82,8 +90,9 @@ describe("the host discs", () => {
     const rho = (1 * Math.PI) / 180;
     const exposureScale = 1e-6;
     const placement = { host, direction: vec3(0, 0, -1), distanceM: SUN_RADIUS_M / Math.sin(rho) };
+    const record = hostDiscRecord(placement, exposureScale, wholeView(VIEWPORT));
     let flux = 0;
-    for (const p of rasteriseHostDisc(hostDiscRecord(placement, exposureScale), LOOK, VIEWPORT)) {
+    for (const p of rasteriseHostDisc(record, LOOK, VIEWPORT)) {
       const ray = rotate(LOOK.orientation, viewRay(p.xPx + 0.5, p.yPx + 0.5, LOOK, VIEWPORT));
       flux += (p.rgb[1] / exposureScale) * pixelSolidAngle(ray, LOOK, VIEWPORT);
     }
@@ -93,14 +102,13 @@ describe("the host discs", () => {
 
   it("light each pixel by the law on the central luminance, as discLuminanceRgb gives it", () => {
     const host = sunHost();
+    const view: Viewport = { widthPx: 96, heightPx: 54 };
     const placement = { host, direction: vec3(0, 0, -1), distanceM: 30 * SUN_RADIUS_M };
     const sinRho = 1 / 30;
+    const lit = rasteriseHostDisc(hostDiscRecord(placement, 1e-6, wholeView(view)), LOOK, view);
     const worst = Math.max(
-      ...rasteriseHostDisc(hostDiscRecord(placement, 1e-6), LOOK, {
-        widthPx: 96,
-        heightPx: 54,
-      }).map((p) => {
-        const ray = viewRay(p.xPx + 0.5, p.yPx + 0.5, LOOK, { widthPx: 96, heightPx: 54 });
+      ...lit.map((p) => {
+        const ray = viewRay(p.xPx + 0.5, p.yPx + 0.5, LOOK, view);
         const q = norm(cross(ray, vec3(0, 0, -1))) / sinRho;
         const [, g] = discLuminanceRgb(host, Math.sqrt(1 - q * q));
         return Math.abs(p.rgb[1] / (g * 1e-6) - 1);
@@ -110,11 +118,9 @@ describe("the host discs", () => {
   });
 
   it("clamp a pixel pre-exposed above a half float's range at 65,504", () => {
+    const view: Viewport = { widthPx: 48, heightPx: 27 };
     const placement = { host: sunHost(), direction: vec3(0, 0, -1), distanceM: 30 * SUN_RADIUS_M };
-    const pixels = rasteriseHostDisc(hostDiscRecord(placement, 1), LOOK, {
-      widthPx: 48,
-      heightPx: 27,
-    });
+    const pixels = rasteriseHostDisc(hostDiscRecord(placement, 1, wholeView(view)), LOOK, view);
     expect(pixels.length).toBeGreaterThan(0);
     expect(pixels.every((p) => p.rgb.every((c) => c === HALF_FLOAT_MAX))).toBe(true);
   });
@@ -221,7 +227,7 @@ describe("a host disc's depth (the follow-up to R07.T9)", () => {
   const distanceM = 30 * SUN_RADIUS_M;
   const centreM = scale(rotate(TURNED.orientation, normalise(vec3(0.05, -0.04, -1))), distanceM);
   const placement = { host: sunHost(), direction: normalise(centreM), distanceM };
-  const pixels = rasteriseHostDisc(hostDiscRecord(placement, 1e-6), TURNED, VIEW);
+  const pixels = rasteriseHostDisc(hostDiscRecord(placement, 1e-6, wholeView(VIEW)), TURNED, VIEW);
 
   /** The reversed depth n ÷ w of the point `t` m along a pixel's unit ray. */
   function depthAt(xPx: number, yPx: number, t: (ray: Vec3) => number): number {
@@ -269,11 +275,139 @@ describe("a host disc's depth (the follow-up to R07.T9)", () => {
     expect(Math.abs(carried * distanceM * Math.cos(rho) ** 2 - 1)).toBeLessThan(1e-7);
   });
 
-  it("hands its twin the record it draws", async () => {
+  it("hands its twin the record it draws, over the star's screen rectangle", async () => {
     const layer = new HostDiscLayer(await countingRenderEngine());
     const [draw] = layer.frame([placement], TURNED, VIEW, 1e-6).draws;
-    expect(draw?.record).toEqual(hostDiscRecord(placement, 1e-6));
+    const rect = sphereScreenRect(
+      scale(placement.direction, distanceM),
+      SUN_RADIUS_M,
+      TURNED,
+      VIEW,
+    );
+    expect(rect).not.toBeNull();
+    expect(draw?.record).toEqual(rect === null ? null : hostDiscRecord(placement, 1e-6, rect));
   });
+});
+
+describe("a host disc off the view, and the rectangle it is drawn over (R07.T19.e)", () => {
+  // Small, so that the disc's twin tests every pixel quickly; the margin is in pixels. The tall
+  // view's height spans 144° at a 120° width.
+  const SMALL: Viewport = { widthPx: 72, heightPx: 40 };
+  const TALL: Viewport = { widthPx: 40, heightPx: 72 };
+  const cases = [SMALL, TALL].flatMap((viewport) =>
+    [10, 60, 120].flatMap((fovDeg) =>
+      [3, 300].map((distanceRadii) => ({
+        view: `${viewport.widthPx} × ${viewport.heightPx}`,
+        viewport,
+        fovDeg,
+        distanceRadii,
+      })),
+    ),
+  );
+
+  /** The host at `centreM` from the camera. */
+  function placedAt(centreM: Vec3): HostPlacement {
+    return { host: sunHost(), direction: normalise(centreM), distanceM: norm(centreM) };
+  }
+
+  /** Discs just beyond each widened side plane, `distanceRadii` of the Sun's radii away. */
+  function justBeyond(viewport: Viewport, fovDeg: number, distanceRadii: number) {
+    const camera = { orientation: LOOK.orientation, fovXRad: (fovDeg * Math.PI) / 180 };
+    const placements = centresJustBeyond(
+      camera.fovXRad,
+      viewport,
+      OUTSIDE_VIEW_MARGIN_PX,
+      distanceRadii * SUN_RADIUS_M,
+      SUN_RADIUS_M * (1 + 1e-6),
+    ).map(placedAt);
+    return { camera, placements };
+  }
+
+  it.each(cases)(
+    "lights no pixel there by its twin over the whole view: from $distanceRadii radii, $fovDeg° across $view",
+    ({ viewport, fovDeg, distanceRadii }) => {
+      const { camera, placements } = justBeyond(viewport, fovDeg, distanceRadii);
+      const lit = placements.flatMap((p) =>
+        rasteriseHostDisc(hostDiscRecord(p, 1, wholeView(viewport)), camera, viewport),
+      );
+      expect(lit).toEqual([]);
+    },
+  );
+
+  it.each(cases.filter(({ distanceRadii }) => distanceRadii === 3))(
+    "has no draw there, the star a disc 39° across: $fovDeg° across $view",
+    async ({ viewport, fovDeg }) => {
+      const { camera, placements } = justBeyond(viewport, fovDeg, 3);
+      const layer = new HostDiscLayer(await countingRenderEngine());
+      const frame = layer.frame(placements, camera, viewport, 1);
+      expect([frame.draws.length, frame.sprites.length]).toEqual([0, 0]);
+    },
+  );
+
+  it("keeps the draw of a disc the view's edge cuts", async () => {
+    const onEdge = placedAt(
+      scale(normalise(vec3(Math.tan(LOOK.fovXRad / 2), 0, -1)), 30 * SUN_RADIUS_M),
+    );
+    const layer = new HostDiscLayer(await countingRenderEngine());
+    expect(layer.frame([onEdge], LOOK, SMALL, 1).draws).toHaveLength(1);
+  });
+
+  it("keeps the draw of a disc whose limb is a pixel past the edge", async () => {
+    const pastEdge = placedAt(
+      limbPastRightEdge(LOOK.fovXRad, SMALL, 30 * SUN_RADIUS_M, SUN_RADIUS_M, 1),
+    );
+    const layer = new HostDiscLayer(await countingRenderEngine());
+    expect(layer.frame([pastEdge], LOOK, SMALL, 1).draws).toHaveLength(1);
+  });
+
+  it("keeps the glare source of a disc it does not draw, 30° past an eye view's top edge", async () => {
+    const layer = new HostDiscLayer(await countingRenderEngine());
+    const halfY = Math.atan(Math.tan(LOOK.fovXRad / 2) * (VIEWPORT.heightPx / VIEWPORT.widthPx));
+    const angle = halfY + Math.PI / 6;
+    const above = rotate(
+      { w: Math.cos(angle / 2), x: Math.sin(angle / 2), y: 0, z: 0 },
+      vec3(0, 0, -1),
+    );
+    layer.frame([{ host: sunHost(), direction: above, distanceM: AU_M }], LOOK, VIEWPORT, 1);
+    const sources = layer.glareSources(LOOK, VIEWPORT, "eye");
+    expect(sources.map((s) => dot(s.direction, above))).toEqual([expect.closeTo(1, 12)]);
+  });
+
+  // 60° across 160 × 90: discs 3.5 to 120 px across at the centre, on the right edge and over the
+  // top left corner, and one 130° across whose silhouette reaches behind the camera.
+  const VIEW: Viewport = { widthPx: 160, heightPx: 90 };
+  const pixelRad = (2 * Math.tan(LOOK.fovXRad / 2)) / VIEW.widthPx;
+  const sweep = [3.5, 8, 30, 120].flatMap((diameterPx) =>
+    [
+      { at: "the centre", xDeg: 0, yDeg: 0 },
+      { at: "the right edge", xDeg: 30, yDeg: 0 },
+      { at: "the top left corner", xDeg: -30, yDeg: 18 },
+    ].map(({ at, xDeg, yDeg }) => ({
+      name: `${String(diameterPx)} px at ${at}`,
+      rhoRad: (diameterPx / 2) * pixelRad,
+      xDeg,
+      yDeg,
+    })),
+  );
+  sweep.push({
+    name: "130° across, 40° off the axis",
+    rhoRad: (65 * Math.PI) / 180,
+    xDeg: 40,
+    yDeg: 0,
+  });
+
+  it.each(sweep)(
+    "lights over its rectangle every pixel its full-view draw lit: $name",
+    async ({ rhoRad, xDeg, yDeg }) => {
+      const towards = vec3(Math.tan((xDeg * Math.PI) / 180), Math.tan((yDeg * Math.PI) / 180), -1);
+      const placement = placedAt(scale(normalise(towards), SUN_RADIUS_M / Math.sin(rhoRad)));
+      const layer = new HostDiscLayer(await countingRenderEngine());
+      const [draw] = layer.frame([placement], LOOK, VIEW, 1e-6).draws;
+      const full = rasteriseHostDisc(hostDiscRecord(placement, 1e-6, wholeView(VIEW)), LOOK, VIEW);
+      expect(full.length).toBeGreaterThan(0);
+      expect(draw === undefined ? [] : rasteriseHostDisc(draw.record, LOOK, VIEW)).toEqual(full);
+    },
+  );
 });
 
 describe("hostPlacements", () => {

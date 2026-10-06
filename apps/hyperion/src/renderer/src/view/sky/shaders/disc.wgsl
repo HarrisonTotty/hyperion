@@ -1,7 +1,8 @@
-// A host star's limb-darkened disc (plan R06, Design note 16, T13.e): a full-screen draw on the
-// limb's plane that lights the pixels whose view ray falls within the disc's angular radius, by the
-// power-2 law I(μ) = I(1) (1 − c (1 − μ^α)) per channel, pre-exposed and clamped at a half
-// float's 65,504 (the energy above it goes to R07's glare pass), into the HDR scene target. It
+// A host star's limb-darkened disc (plan R06, Design note 16, T13.e): a quad over the disc's
+// screen rectangle (R07.T19.e) on the limb's plane, which lights the pixels whose view ray falls
+// within the disc's angular radius, by the power-2 law I(μ) = I(1) (1 − c (1 − μ^α)) per channel,
+// pre-exposed and clamped at a half float's 65,504 (the energy above it goes to R07's glare
+// pass), into the HDR scene target. It
 // writes R07's meter class `hostDisc`, 0, into the alpha, with no blend, so that the meter leaves
 // the disc out. Composed after frame.wgsl.
 
@@ -20,6 +21,8 @@ struct Draw {
   exposure: vec4f,
   // 1 ÷ (d cos²ρ), 1/m: the reciprocal of the camera's distance from the limb's plane.
   inverseLimbDistance: f32,
+  // The quad's rectangle, px: left, top, right, bottom (R02's `sphereScreenRect` of the star).
+  rect: vec4f,
 }
 
 @group(1) @binding(0) var<uniform> draw: Draw;
@@ -36,18 +39,21 @@ struct DiscVarying {
 }
 
 @vertex
-fn vertexMain(@location(0) position: vec3f) -> DiscVarying {
-  // A full-screen triangle given in clip space, its depth on the limb's plane, as R07.T9 puts a
-  // mesh body's limb: the camera's polar plane of the star's sphere, d cos²ρ along the axis. It
-  // holds the limb and lies inside the star along every ray that meets the disc, so that a body
-  // nearer than the star hides the disc and a mesh body beyond it is hidden. Along the view ray
-  // u = (x_ndc ÷ s, y_ndc ÷ (s a), −1) the plane lies at view depth d cos²ρ ÷ (u · axis), so its
-  // reversed depth n (u · axis) ÷ (d cos²ρ) is affine on the view and the corners carry it
-  // unclamped: where u · axis ≤ 0 the plane is behind the camera, and the depth clip removes that
-  // part, which holds no pixel of the disc.
+fn vertexMain(@location(0) corner: vec3f) -> DiscVarying {
+  // A quad over the rectangle that holds the disc's silhouette, outside which the full-view
+  // triangle it replaced lit no pixel (R07.T19.e).
+  let px = mix(draw.rect.xy, draw.rect.zw, corner.xy);
+  let ndc = vec2f(px.x / frame.viewport.x * 2.0 - 1.0, 1.0 - px.y / frame.viewport.y * 2.0);
+  // Its depth on the limb's plane, as R07.T9 puts a mesh body's limb: the camera's polar plane of
+  // the star's sphere, d cos²ρ along the axis. It holds the limb and lies inside the star along
+  // every ray that meets the disc, so that a body nearer than the star hides the disc and a mesh
+  // body beyond it is hidden. Along the view ray u = (x_ndc ÷ s, y_ndc ÷ (s a), −1) the plane lies
+  // at view depth d cos²ρ ÷ (u · axis), so its reversed depth n (u · axis) ÷ (d cos²ρ) is affine on
+  // the view and the corners carry it unclamped: where u · axis ≤ 0 the plane is behind the
+  // camera, and the depth clip removes that part, which holds no pixel of the disc.
   let ray = vec3f(
-    position.x / frame.clipProjection[0][0],
-    position.y / frame.clipProjection[1][1],
+    ndc.x / frame.clipProjection[0][0],
+    ndc.y / frame.clipProjection[1][1],
     -1.0,
   );
   let rotation = mat3x3f(
@@ -57,12 +63,8 @@ fn vertexMain(@location(0) position: vec3f) -> DiscVarying {
   );
   let towards = dot(transpose(rotation) * ray, draw.axis.xyz);
   var out: DiscVarying;
-  out.position = vec4f(
-    position.xy,
-    frame.clipProjection[3][2] * towards * draw.inverseLimbDistance,
-    1.0,
-  );
-  out.ndc = position.xy;
+  out.position = vec4f(ndc, frame.clipProjection[3][2] * towards * draw.inverseLimbDistance, 1.0);
+  out.ndc = ndc;
   return out;
 }
 

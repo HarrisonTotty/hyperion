@@ -24,7 +24,7 @@ import {
 import { PSF_QUAD_PX } from "../photometry/magnitude";
 import type { PhotorealFrame } from "../photoreal/renderer";
 import { METER_CLASS } from "../post/meter";
-import { HostDiscLayer, type HostDiscRecord, hostDiscRecord, hostPlacements } from "../sky/disc";
+import { HostDiscLayer, type HostDiscRecord, hostPlacements } from "../sky/disc";
 import type { WireframeDrawList } from "../wireframe/drawList";
 import {
   ECLIPSE_CAMERA_OFFSET_M,
@@ -556,11 +556,13 @@ describe("the bodies before and behind the star (T10.c)", () => {
       },
       new Map(),
     );
-    const [placement] = hostPlacements(eclipseSceneAt(sceneS), [DISC], pose);
-    if (placement === undefined) {
-      throw new Error("the eclipse scene places no star");
+    // The record the layer draws.
+    const layer = new HostDiscLayer(await countingRenderEngine());
+    const placements = hostPlacements(eclipseSceneAt(sceneS), [DISC], pose);
+    const record = layer.frame(placements, drawn.camera, ZOOMED, EXPOSURE).draws[0]?.record;
+    if (record === undefined) {
+      throw new Error("the eclipse scene draws no star's disc");
     }
-    const record = hostDiscRecord(placement, EXPOSURE);
     /** The pixels the giant keeps a share of, with the star's disc drawn as `star`. */
     const giantPixels = (star: HostDiscRecord): number =>
       [

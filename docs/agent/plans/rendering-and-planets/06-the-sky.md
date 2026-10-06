@@ -1806,7 +1806,9 @@ src/renderer/src/view/sky`.
   fixture both read). Files: `view/sky/{disc,discFlux,eye}.ts`, `view/post/{meter,glare}.ts` (if
   R07's are absent), `view/sky/shaders/disc.wgsl`. Acceptance: `pnpm --filter hyperion exec vitest
 run src/renderer/src/view/sky`, `just test-render`. _Since 2026-10-06 the disc lies on its limb's
-  plane rather than at infinity (Risks, "The host discs at their limb's depth")._
+  plane rather than at infinity, and since R07.T19.e it is a quad over its screen rectangle, with
+  none drawn wholly off the view (Risks, "The host discs at their limb's depth" and the entry
+  after it)._
 - **R06.T13.f The low setting and the label.** `SkySettings` as R05's `ViewSettings.sky`, with its
   high and low values in R05's `SETTINGS`: face size, sprite budget, N_max and re-bake cadence
   (Design note 22); the label block's sky line (Design note 23), to T15's draft; the two styles: the
@@ -2353,8 +2355,9 @@ star })` and the disc sits at that body's drawn centre; a host the scene lacks i
   `packages/protocol/fixtures/eye_observer.json`, which a Rust test in `sky/eye.rs` and the client's
   disc test both read. The harness's `checkSkyDisc` draws a disc and the band over it on a target
   of its own and checks the centre's luminance, the meter class kept under the band, the clamp,
-  and nothing lit outside. _Since 2026-10-06 the triangle lies on the disc's limb's plane, not at
-  infinity (the next entry)._
+  and nothing lit outside. _Since 2026-10-06 the draw lies on the disc's limb's plane, not at
+  infinity, and since R07.T19.e it is a quad over the disc's screen rectangle, with none drawn
+  wholly off the view (the next two entries)._
 - **The host discs at their limb's depth (2026-10-06; R07's shading lane, the follow-up to R07.T9
   queued before R10).** Recorded in full in R07's Risks, "The star's disc at its limb's depth".
   - **Why.** At depth 0 (infinity under reversed-Z), a mesh body beyond a star showed over the
@@ -2374,6 +2377,20 @@ star })` and the disc sits at that body's drawn centre; a host the scene lacks i
     light against the law, the flux and the clamp. A mesh giant behind the star in R07's eclipse
     scene, promoted by a synthetic depth writer, leaves no texel of its own, on the CPU twin and on
     the GPU (`smoke/eclipse.ts`).
+- **The host discs' draw bounded, and none off the view (R07.T19.e, 2026-10-06; recorded here for
+  R06's lanes, who are told of the change to their files through the orchestrator, as
+  decision-r07-small-disc-cost asks).** Recorded in full in R07's Risks, "Deviations in T19.e, as
+  built".
+  - `HostDiscLayer.frame` gives no draw to a disc wholly beyond a side plane of the view widened
+    by `OUTSIDE_VIEW_MARGIN_PX`, 8 px (R02's `sphereOutsideView`). It keeps the disc among those
+    whose glare sources it returns, so the eye's 45° reach is unchanged.
+  - Each other draw is a quad over `sphereScreenRect` of the star (the whole view where the
+    silhouette reaches behind the near plane), not a full-screen triangle. `DISC_MATERIAL` gains
+    the uniform `rect` (px), `HostDiscRecord` gains `rect`, `hostDiscRecord` takes it, and the
+    twin scans only it. `disc.wgsl`'s fragment stage is unchanged.
+  - The full-view triangle lit no pixel outside that rectangle, nor any pixel at all for a disc
+    off the view. Tested against the twin over the whole view, on a sweep of disc sizes and
+    places.
 - **Deviations in T13.g, as built (2026-10-03).** `view/sky/bake.ts` exports `bakeSkyCube(engine,
 input)` over `BakeInput { directions, illuminanceLx, faceSizePx, name }`, returning `BakedCube {
 cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `paddedRowTexels`,

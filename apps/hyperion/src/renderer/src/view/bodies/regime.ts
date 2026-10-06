@@ -21,7 +21,7 @@ import {
   type Viewport,
 } from "../camera/projection";
 import { angularDiameterPx } from "../wireframe/bodies";
-import { sphereScreenRect } from "../wireframe/submit";
+import { sphereOutsideView, sphereScreenRect } from "../wireframe/submit";
 
 /** How a lit body is drawn. */
 export type LitRegime = "point" | "disc" | "mesh";
@@ -94,6 +94,11 @@ export interface ScreenCircle {
  * whole view). It bounds the silhouette, so that promotion may promote a disc that overlaps
  * nothing, never miss one that does (T5 as built).
  *
+ * @remarks
+ * A sphere wholly beyond a side plane of the view ({@link sphereOutsideView}) has none, so that it
+ * is neither promoted nor promotes, though {@link sphereScreenRect} gives it the whole view behind
+ * the camera or across its plane (R07.T19.e).
+ *
  * @param centreM - The sphere's centre from the camera, m (`f64`).
  */
 export function sphereFootprint(
@@ -105,6 +110,9 @@ export function sphereFootprint(
   if (-toViewAxes(centreM, camera.orientation).z + radiusM < NEAR_PLANE_M) {
     return null;
   }
+  if (sphereOutsideView(centreM, radiusM, camera, viewport)) {
+    return null;
+  }
   const rect = sphereScreenRect(centreM, radiusM, camera, viewport);
   if (rect === null) {
     return null;
@@ -114,49 +122,6 @@ export function sphereFootprint(
     yPx: (rect.topPx + rect.bottomPx) / 2,
     radiusPx: Math.hypot(rect.rightPx - rect.leftPx, rect.bottomPx - rect.topPx) / 2,
   };
-}
-
-/**
- * How far past each side of the view {@link sphereOutsideView} looks, px on the image plane.
- *
- * @remarks
- * A disc draws a pixel only where its corners' mean limb angle is at most 0.75 times their gradient
- * (`OUTSIDE_PX`, `bodyDisc.wgsl`). The gradient is at most √2 times the larger angle a pixel's side
- * subtends there, so a drawn pixel lies within 1.06 of those angles of the limb. A ray through the
- * view stands at least m cos(φ′ ÷ 2) of them off a side plane widened by m pixels to a field φ′ on
- * that axis: 3.35 for 8 px on a 64 px side at 120°. An oblate body's scaled space may shrink the one
- * angle and grow the other by a ÷ c each, 1.56 together at the record's cap of f = 0.2. So on sides
- * of 64 px or more, up to 120° on each axis, 8 px clears the 1.06 three times over for a sphere and
- * twice over at f = 0.2. A side whose field passes 120°, a tall view's height, is outside this
- * bound; the disc's twin draws no pixel there either, with fields to 144° and f = 0.2
- * (`regime.test.ts`).
- */
-export const OUTSIDE_VIEW_MARGIN_PX = 8;
-
-/**
- * Whether a sphere stands wholly beyond one of a view's four side planes, each widened by
- * {@link OUTSIDE_VIEW_MARGIN_PX}: no ray through the view then meets it or passes near enough its
- * limb to draw a pixel, wherever it stands. It holds behind the camera and across the camera's
- * plane, where {@link sphereScreenRect} gives the whole view.
- *
- * @param centreM - The sphere's centre from the camera, m (`f64`).
- */
-export function sphereOutsideView(
-  centreM: Vec3,
-  radiusM: number,
-  camera: ProjectionCamera,
-  viewport: Viewport,
-): boolean {
-  const view = toViewAxes(centreM, camera.orientation);
-  const tanHalf = Math.tan(camera.fovXRad / 2);
-  const marginTan = (OUTSIDE_VIEW_MARGIN_PX * 2 * tanHalf) / viewport.widthPx;
-  const tanX = tanHalf + marginTan;
-  const tanY = (tanHalf * viewport.heightPx) / viewport.widthPx + marginTan;
-  // The view looks down −z: inside the side planes |x| ≤ tanX (−z) and |y| ≤ tanY (−z). Each is the
-  // centre's signed distance beyond the plane of its pair on the centre's side, the larger.
-  const beyondSideM = (Math.abs(view.x) + tanX * view.z) / Math.hypot(1, tanX);
-  const beyondTopM = (Math.abs(view.y) + tanY * view.z) / Math.hypot(1, tanY);
-  return Math.max(beyondSideM, beyondTopM) > radiusM;
 }
 
 /** Whether two footprints overlap. */

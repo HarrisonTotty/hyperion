@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { add, cross, norm, normalise, scale, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { centresJustBeyond, limbPastRightEdge } from "../../test/beyondView";
 import { aCameraPose, NO_TURN } from "../../test/viewFixtures";
 import type { BufferHandle, MaterialHandle, MeshHandle, WgslMaterialSpec } from "../engine/types";
 import {
   perspectiveReversedInfinite,
   project,
+  toViewAxes,
   type Viewport,
   viewRotation4,
 } from "../camera/projection";
@@ -15,6 +17,7 @@ import type { DrawCamera, LineBatch, WireframeDrawList } from "./drawList";
 import {
   linearColour,
   MATERIAL_BUFFER,
+  OUTSIDE_VIEW_MARGIN_PX,
   packWireframe,
   sphereScreenRect,
   WIREFRAME_MATERIALS,
@@ -291,6 +294,113 @@ describe("packWireframe", () => {
 
   it("packs nothing for an empty list", () => {
     expect(packWireframe(EMPTY, CAMERA, VIEWPORT).draws).toEqual([]);
+  });
+});
+
+/**
+ * A body's occluder sphere, as the draw list gives it (taken from the list's own type here, which
+ * leaves the `./drawList` import as it was).
+ */
+type OccluderSphere = WireframeDrawList["occluderSpheres"][number];
+
+/**
+ * How many pixels' depth `occluderSphere.wgsl` writes, in `f64`: those whose centre's ray meets
+ * the sphere ahead of a camera outside it.
+ */
+function writtenPixelCount(sphere: OccluderSphere, camera: DrawCamera, viewport: Viewport): number {
+  const c = sphere.centreF32;
+  const centre = toViewAxes(vec3(c[0] ?? 0, c[1] ?? 0, c[2] ?? 0), camera.pose.orientation);
+  const s = 1 / Math.tan(camera.fovXRad / 2);
+  const aspect = viewport.widthPx / viewport.heightPx;
+  let written = 0;
+  for (let y = 0; y < viewport.heightPx; y += 1) {
+    for (let x = 0; x < viewport.widthPx; x += 1) {
+      const ndcX = ((x + 0.5) / viewport.widthPx) * 2 - 1;
+      const ndcY = 1 - ((y + 0.5) / viewport.heightPx) * 2;
+      const ray = normalise(vec3(ndcX / s, ndcY / (s * aspect), -1));
+      const along = dot(centre, ray);
+      const perp = norm(sub(centre, scale(ray, along)));
+      const h2 = sphere.radiusM ** 2 - perp ** 2;
+      written += along > 0 && h2 >= 0 && sphere.altitudeM > 0 ? 1 : 0;
+    }
+  }
+  return written;
+}
+
+describe("an occluder sphere wholly off the view (R07.T19.e)", () => {
+  // Small, so that the twin tests every pixel quickly; the margin is in pixels. The tall view's
+  // height spans 144° at a 120° width.
+  const SMALL: Viewport = { widthPx: 72, heightPx: 40 };
+  const TALL: Viewport = { widthPx: 40, heightPx: 72 };
+  const RADIUS_M = 6.371e6;
+
+  /** A sphere at `centreM` from the camera, as the draw list gives it. */
+  function sphereAt(centreM: Vec3): OccluderSphere {
+    return {
+      id: "body",
+      centreF32: new Float32Array([centreM.x, centreM.y, centreM.z]),
+      radiusM: RADIUS_M,
+      altitudeM: norm(centreM) - RADIUS_M,
+    };
+  }
+
+  const cases = [SMALL, TALL].flatMap((viewport) =>
+    [10, 60, 120].flatMap((fovDeg) =>
+      [3, 300].map((distanceRadii) => ({
+        view: `${viewport.widthPx} × ${viewport.heightPx}`,
+        viewport,
+        fovDeg,
+        distanceRadii,
+      })),
+    ),
+  );
+
+  /** Spheres just beyond each widened side plane, `distanceRadii` radii away. */
+  function justBeyond(camera: DrawCamera, viewport: Viewport, distanceRadii: number) {
+    // A thousandth of a radius beyond, past the centre's rounding to f32.
+    return centresJustBeyond(
+      camera.fovXRad,
+      viewport,
+      OUTSIDE_VIEW_MARGIN_PX,
+      distanceRadii * RADIUS_M,
+      RADIUS_M * (1 + 1e-3),
+    ).map(sphereAt);
+  }
+
+  it.each(cases)(
+    "packs none beside, level with a corner, across or behind: $distanceRadii radii, $fovDeg° across $view",
+    ({ viewport, fovDeg, distanceRadii }) => {
+      const camera: DrawCamera = { pose: CAMERA.pose, fovXRad: (fovDeg * Math.PI) / 180 };
+      const spheres = justBeyond(camera, viewport, distanceRadii);
+      const packed = packWireframe({ ...EMPTY, occluderSpheres: spheres }, camera, viewport);
+      expect(packed.spheres.length).toBe(0);
+    },
+  );
+
+  it.each(cases)(
+    "writes no pixel there by its twin: $distanceRadii radii, $fovDeg° across $view",
+    ({ viewport, fovDeg, distanceRadii }) => {
+      const camera: DrawCamera = { pose: CAMERA.pose, fovXRad: (fovDeg * Math.PI) / 180 };
+      const written = justBeyond(camera, viewport, distanceRadii).reduce(
+        (sum, sphere) => sum + writtenPixelCount(sphere, camera, viewport),
+        0,
+      );
+      expect(written).toBe(0);
+    },
+  );
+
+  it("keeps a sphere the view's edge cuts", () => {
+    const onEdge = sphereAt(
+      scale(normalise(vec3(Math.tan(CAMERA.fovXRad / 2), 0, -1)), 30 * RADIUS_M),
+    );
+    const packed = packWireframe({ ...EMPTY, occluderSpheres: [onEdge] }, CAMERA, SMALL);
+    expect(packed.spheres.length).toBe(12);
+  });
+
+  it("keeps a sphere whose limb is a pixel past the edge", () => {
+    const pastEdge = sphereAt(limbPastRightEdge(CAMERA.fovXRad, SMALL, 30 * RADIUS_M, RADIUS_M, 1));
+    const packed = packWireframe({ ...EMPTY, occluderSpheres: [pastEdge] }, CAMERA, SMALL);
+    expect(packed.spheres.length).toBe(12);
   });
 });
 

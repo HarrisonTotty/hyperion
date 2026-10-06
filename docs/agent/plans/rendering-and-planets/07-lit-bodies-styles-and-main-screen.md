@@ -1847,6 +1847,32 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
   compact `EXPOSURE` captures E3 and E7 (the trapped wireframe under `INHIBIT`) pass
   decision-r07-t19b-exposure-fit's probe, `INHIBIT`'s row at most 36 px. Acceptance:
   `pnpm test`, the console-ux skill's scripts, `just ci`.
+- **R07.T19.e Nothing drawn for what is off the view** (decision-r07-small-disc-cost, item 5;
+  the open points of T19's off-view cut).
+  - **What it does.** It changes no texel. It removes full-view draws that only discard:
+    - R06's host disc (`view/sky/disc.ts`, `shaders/disc.wgsl`'s vertex stage):
+      - No draw for a host whose disc lies wholly beyond the view widened by
+        `OUTSIDE_VIEW_MARGIN_PX`. Its glare source is unchanged: the eye's 45° reach is its own.
+      - Each drawn host's triangle becomes a quad over `sphereScreenRect` of its apparent centre
+        and radius (the whole view where the silhouette reaches behind the near plane).
+    - R02's occluder spheres (`packWireframe`, `wireframe/submit.ts`): none packed for a sphere
+      wholly off the view.
+    - T9's `sphereFootprint` (`bodies/regime.ts`): none for a body wholly off the view, so it
+      promotes nothing.
+    - `sphereOutsideView` moves to `wireframe/submit.ts` beside `sphereScreenRect`, R02's level,
+      and `regime.ts` imports it.
+  - **Tests.**
+    - Each of the three gives no draw, record or footprint for a body or host beside, behind or
+      across the camera's plane, and keeps one the edge cuts or whose limb is a pixel past it.
+    - T19's mesh case, a body clear of both, no longer promotes.
+    - A host's quad covers every pixel its full-view draw lit, against the old path on a sweep of
+      disc sizes and positions.
+  - **Acceptance.** `pnpm test`; `just test-render` with every capture byte-identical to the base
+    run first; `just ci`.
+  - **Lanes.** Its files are disjoint from T8.c's and T8.d's, so either lane may build it. It
+    lands before T17. R06's lane is told of the change to its files.
+  - _As built (2026-10-06, the shading lane, after R06's limb-depth follow-up): see Risks,
+    "Deviations in T19.e, as built"._
 
 #### R07.T20 Several views, by hand
 
@@ -4815,8 +4841,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       the figure's depth hides (a disc body is ordered by the painter). It needs the body beyond a
       star some pixels across, over depth-writing geometry. Putting R06's disc on its sphere's
       polar plane, as the limb is, would fix it; that is R06's change (ruled below). _Resolved
-      2026-10-06: R06's disc now lies on that plane; see "The star's disc at its limb's depth",
-      the last entry._
+      2026-10-06: R06's disc now lies on that plane; see "The star's disc at its limb's depth"
+      below._
     - Where two limbs cross a pixel, the limb's blend over what is beneath keeps T8.a's
       coverage-over error: up to 0.115 of the pixel in the occultation.
     - Each mesh body runs `selectPatches` every frame, and its fragments discard under a depth
@@ -4859,7 +4885,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       infinite depth: a stated limit for RM3. No live view promotes a mesh until R10 brings depth
       writers, and a follow-up for R06 to draw star discs at their limb plane's depth is queued
       before R10. _Resolved 2026-10-06, before R10: the follow-up is built; see "The star's disc
-      at its limb's depth", the last entry._
+      at its limb's depth" below._
 - **Deviations in T10.a, as built (retarded lighting geometry, decision-r07-t8a, follow-up (a)).**
   - **Ruled: the local body is lit at its retarded time** (the orchestrator, 2026-10-05, under the
     owner's delegation, on the plan-conformance and science reviews). Decision-r07-t8a (a) gave
@@ -5224,7 +5250,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     limit, ruled a stated limit for RM3: as a mesh it would show over the star's disc. No view
     writes depth yet, so no body of the scene is promoted. _It now holds as a mesh too
     (2026-10-06): the star's disc lies on its limb's plane, tested with the giant promoted by a
-    synthetic depth writer; see "The star's disc at its limb's depth", the last entry._
+    synthetic depth writer; see "The star's disc at its limb's depth" below._
   - **`just test-render`** (SwiftShader, `default` and `no-subgroups`, 2026-10-06). Both exit 0,
     with 255 and 253 checks, none failing. That is T10.b's 249 and 247, plus T10.c's three
     checks, its captures' one, and R02.T14.c's two for `ECLIPSE TEST` in `SCENE_OPTIONS`.
@@ -5323,7 +5349,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       That body's two draws covered every pixel, each fragment rejecting itself. `PHASE TEST`'s
       full planet stands 90° off the axis.
     - `planLitBodies` now drops the disc record of a body wholly beyond a side plane widened by
-      `OUTSIDE_VIEW_MARGIN_PX`, 8 px (`sphereOutsideView`, `bodies/regime.ts`). Its regime is kept.
+      `OUTSIDE_VIEW_MARGIN_PX`, 8 px (`sphereOutsideView`, `bodies/regime.ts`; in
+      `wireframe/submit.ts` since T19.e). Its regime is kept.
     - The primary's `discs` pass falls from 2.80 to 2.26–2.28 million cycles (−19%: 1.42 to
       1.15 ms at 1,980 MHz). The instruments' is unchanged: there the whole-view draws cost
       nothing measurable. The cut grows where the GPU is bound by throughput rather than latency:
@@ -5331,6 +5358,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - Tested (`draw.test.ts`, `regime.test.ts`):
       - Such a body, beside or behind the camera, keeps its regime and has no record, as a disc
         and, promoted, as a mesh with no figure and no limb. Both tests fail before the change.
+        _Since T19.e such a body has no footprint and is never promoted, so the mesh case is now
+        T19.e's test that it is not; see "Deviations in T19.e, as built"._
       - Spheres just beyond each widened plane (beside the view, level with a corner, across the
         camera's plane, behind) leave no pixel the disc's twin (`rasteriseDisc`) would draw. The
         sweep takes 10°, 60° and 120° across a 72 × 40 and a 40 × 72 view (whose height spans
@@ -5380,17 +5409,21 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       each pass time (on Intel, `gt_cur_freq_mhz` under `/sys/class/drm/card0/`).
   - **Left open, not measured apart.**
     - R06's host disc is a full-view triangle for every host of 3 px or more, on the view or not.
+      _Built by T19.e: none off the view, and a quad over its rectangle on it._
     - R02's wireframe occluder spheres take the same whole-view rectangle behind the camera
-      (`packWireframe`).
+      (`packWireframe`). _Built by T19.e: none packed off the view._
     - `sphereFootprint` (T9) gives such a body the whole view's circle, so once a view writes
       depth a body off the view is promoted with the writer and promotes every disc in turn: the
       mesh test above promotes a body clear of both. Nothing changes on screen today, since no
-      view writes depth. Taking `sphereOutsideView` there too would end it, before R10.
+      view writes depth. Taking `sphereOutsideView` there too would end it, before R10. _Built by
+      T19.e: no footprint off the view._ See "Deviations in T19.e, as built", the last entry.
 - **The star's disc at its limb's depth** (2026-10-06; the shading lane: R06's follow-up to T9,
   queued before R10).
   - **What changed.** `disc.wgsl`'s vertex stage now puts R06's full-screen triangle on the
     camera's polar plane of the star's sphere, d cos²ρ along the axis, where T9 puts a mesh body's
-    limb. Before, it lay at depth 0, at infinity.
+    limb. Before, it lay at depth 0, at infinity. _Since T19.e the triangle is a quad over the
+    star's screen rectangle, and `hostDiscRecord` takes that rectangle; see "Deviations in T19.e,
+    as built"._
     - Its reversed depth is n (u · axis) ÷ (d cos²ρ) for the view ray u = (x_ndc ÷ s,
       y_ndc ÷ (s a), −1). That is affine on the view, so the triangle's corners carry it
       unclamped. The depth clip removes the part that sees the plane behind the camera, which
@@ -5435,3 +5468,103 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     about 2 (d − R), ahead. Within about 5 cm of the surface it is nearer than the near plane
     (0.1 m), and the depth clip removes the disc, which at depth 0 lit the forward hemisphere.
     `hostPlacements` places no host for a camera inside its star, and no view stands that close.
+- **Deviations in T19.e, as built** (2026-10-06; the shading lane, after R06's limb-depth
+  follow-up). Built as decision-r07-small-disc-cost rules it; no capture moved.
+  - **The off-view test at R02's level.** `sphereOutsideView` and `OUTSIDE_VIEW_MARGIN_PX` (8 px,
+    unchanged; the plan names only the function) moved from `bodies/regime.ts` into
+    `wireframe/submit.ts`, beside `sphereScreenRect`. `regime.ts` and `bodies/draw.ts` import
+    them.
+    - The margin's TSDoc adds why its 8 px serves the two draws that light or write a pixel only
+      where the ray through the pixel's centre meets the sphere: R06's host disc and R02's
+      occluder sphere. The outermost centres lie half a pixel inside each side, so those need no
+      margin but for their shaders' `f32`, under 10⁻⁶ rad, against 4.5 × 10⁻⁵ rad for a pixel at
+      4K across 10°.
+  - **R02's occluder spheres.** `packWireframe` packs none wholly off the view, which
+    `sphereScreenRect` gave the whole view behind the camera or across its plane. It is one
+    condition in the packing loop.
+  - **T9's footprint.** `sphereFootprint` gives none for a body wholly off the view, so it is
+    neither promoted nor promotes. `discRecordOf`'s own drop (T19) stays for R10's depth writers.
+  - **R06's host disc.**
+    - `HostDiscLayer.frame` gives a disc wholly off the view no draw. It keeps it among the discs
+      whose glare sources it returns, so the eye's 45° reach is unchanged, and T13.e's 30° and
+      50° glare test passes unchanged. A disc whose `sphereScreenRect` is empty has no draw
+      either: it lit no pixel.
+    - Each other draw is R02's quad (`WIREFRAME_MESHES.quad`, named `sky disc quad`) over
+      `sphereScreenRect` of the star's apparent centre and radius, the whole view where the
+      silhouette reaches behind the near plane. The rectangle is the uniform `rect` (px, a
+      `vec4f` after `inverseLimbDistance`) and `HostDiscRecord.rect`. `hostDiscRecord` takes it,
+      and the twin `rasteriseHostDisc` scans only it.
+    - `disc.wgsl`'s vertex stage maps each corner through the rectangle to NDC, as
+      `occluderSphere.wgsl` and `bodyDiscDraw.wgsl` do, and carries the limb plane's depth as
+      before. The fragment stage is unchanged.
+  - **"No texel changed" is measured, not guaranteed.** The fragment's NDC is now interpolated
+    from the quad's corners, not the triangle's (−1, −1), (3, −1) and (−1, 3). The two agree to
+    `f32`'s rounding, so another GPU could move a texel at the limb by a half float's step. On
+    SwiftShader every capture is byte-identical (below).
+  - **Files shared with T8.c.** The ruling calls T19.e's files disjoint from T8.c's, but moving
+    `sphereOutsideView` changes `bodies/draw.ts`' import, and T19's mesh case is in
+    `bodies/draw.test.ts`. Both are T8.c's files; expect a small merge there.
+  - **Tests**, as ruled.
+    - `disc.test.ts`:
+      - Discs just beyond each widened side plane (beside the view, level with a corner, across
+        the camera's plane and behind it), at 10°, 60° and 120° across a 72 × 40 and a 40 × 72
+        view, from 3 radii: no draw and no sprite.
+      - A disc the edge cuts keeps its draw, and so does one whose limb is a pixel past the edge.
+      - An eye view keeps the glare source of a disc 30° past its top edge.
+      - The twin over the whole view lights none of those discs' pixels, from 3 and 300 radii:
+        the margin, against the old path. Each disc's nearest point stands 10⁻⁶ of its radius
+        beyond the plane.
+      - The quad lights exactly the full-view draw's pixels over a sweep: discs 3.5, 8, 30 and
+        120 px across at the centre, on the right edge and over the top left corner, and one
+        130° across whose rectangle is the whole view (60° across 160 × 90).
+    - `submit.test.ts`: the same sweep of occluder spheres, from 3 and 300 radii, packs none, and
+      an `f64` twin of `occluderSphere.wgsl`'s ray test writes none of their pixels. Their nearest
+      points stand 10⁻³ of a radius beyond the plane, past their centres' rounding to `f32`
+      (128 m at 300 radii). A sphere the edge cuts is packed, and so is one whose limb is a pixel
+      past the edge. The test takes `OccluderSphere` from the list's type, leaving alone the
+      `./drawList` import line that R07.T16.d changes.
+    - `regime.test.ts`: no footprint for the sweep's spheres. Footprints for the sphere the edge
+      cuts and for the one whose limb is a pixel past the edge.
+    - `draw.test.ts`: T19's mesh case. Neither the body beside the camera nor the body clear of
+      both is promoted. Before, the body's whole-view footprint promoted both. T19's check of a
+      promoted mesh body off the view, with no figure and no limb, can no longer be set up.
+    - `test/beyondView.ts`: `centresJustBeyond` and `limbPastRightEdge`, also used by T19's sweep
+      in `regime.test.ts`. `eclipseScene.test.ts` takes the star's record from the layer.
+    - With the three conditions taken out, 20 tests fail: the packing sweep (12), the host
+      discs' sweep (6), the footprint test (1) and `draw.test.ts`' (1). The twins' sweeps check
+      the margin, not the cull, and pass either way.
+    - On the GPU, "R07.T19.e a host disc drawn over its screen rectangle lights its twin's
+      texels, off the centre and cut by the view's edges" (`smoke/sky.ts`): a turned camera,
+      60° across 96 × 64, a disc cut by the right edge, one over the top left corner and one off
+      the centre. Each disc's texels are its twin's, with the twin's light. That puts the
+      vertex stage's mapping through the rectangle under test, which a centred disc would not.
+    - R06's `checkSkyDisc` probed "nothing lit outside" at texel (2, 2), which is outside the
+      quad since T19.e. It now probes (22, 22), inside the quad and outside the disc, so the
+      shader's own discard is what it tests.
+  - **`just test-render`** (SwiftShader, `default` and `no-subgroups`, 2026-10-06). Both exit 0,
+    with 258 and 256 checks, none failing, and no uncaptured GPU error: R06's limb-depth
+    follow-up's 257 and 255 and the quad's new check.
+    - The quad's check: 262, 159 and 100 texels, none not the twin's, colours within 0.118 of the
+      tolerance.
+    - All 55 captures a variant are byte-identical to the merged base's (a620deb), to R06's
+      limb-depth follow-up's and to the other variant's.
+    - The first `no-subgroups` run failed only T8.a's histogram check, which times out under load
+      (load 10–13 then; recorded for T10.b). It passed alone on a rerun, with captures identical
+      to the first run's.
+  - **The cost saved, measured** (hidden, RTX 3080, the per-draw cost harness, 2026-10-06, load
+    11–15). `PHASE TEST` with all three views photorealistic: the primary at 1120 × 900 stands on
+    the half planet, the star 90° off its axis, so the merged base drew one full-view host
+    triangle there each frame; the instruments' Sun is a 2 px sprite. T19.e draws none.
+    - One such triangle costs about 9–11 thousand cycles in the `discs` pass (about 9 µs at the
+      run's 1,155–1,245 MHz, 5 µs at 1,980 MHz). A build of the base drawing it 64 times read
+      2.80–2.94 million cycles, against the base's 2.24 million.
+    - That is 0.4% of the primary's pass, inside the runs' ±1% spread: T19.e read 2.24–2.26
+      million cycles, the base 2.24. The instruments' passes are unchanged. A host disc on the
+      view saves the same on every frame now: its triangle discarded outside its rectangle too.
+    - The occluder spheres' cull in the wireframe pass is not resolved: the wireframe primary's
+      whole GPU time is 0.025–0.029 ms in every build.
+    - On the UHD 620, which is bound by throughput, the triangle's 0.9 million fragments at
+      1280 × 720 are an estimated 0.1–0.2 ms a frame at 1.1 GHz (not measured; T17's owner runs
+      settle it).
+    - Harness: `/home/quantum/gh/hyperion/.git/rm23-scratch/r07-shading/star-depth/cost/`
+      (`build-variants.sh`, logs, `cycles-sd1.txt`), with `cost-t19/`'s instrumentation.
